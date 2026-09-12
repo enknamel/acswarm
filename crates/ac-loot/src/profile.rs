@@ -502,8 +502,18 @@ pub struct Buy {
     /// family: "Peerless Healing Kit", not "Healing Kit", because the
     /// levels are different items at different prices.
     pub what: String,
-    /// How many to keep in the pack.
+    /// How many to carry when stocked up.
     pub keep: u32,
+    /// How few may be left before a trip to town is worth making.
+    ///
+    /// Without this every line is urgent the moment it is one short,
+    /// and a caster walks to town nine hundred tapers from empty.
+    /// Absent means a quarter of `keep`, which is the rule the older
+    /// `ammo_keep` and `tapers_keep` settings used and a fair reading of
+    /// "keep a thousand of these". Zero means "only when it runs out",
+    /// which is how a line that is merely nice to have is written.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restock_at: Option<u32>,
     /// A particular counter by name, or whichever sells it when None.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from: Option<String>,
@@ -514,6 +524,25 @@ pub struct Buy {
 
 fn yes() -> bool {
     true
+}
+
+impl Buy {
+    /// The count at or below which this line is worth a trip to town.
+    pub fn low_mark(&self) -> u32 {
+        self.restock_at.unwrap_or(self.keep / 4)
+    }
+}
+
+/// One line of the buy list, against what is carried.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Short<'a> {
+    pub want: &'a Buy,
+    /// How many are carried.
+    pub have: u32,
+    /// How many more to buy to be stocked up.
+    pub short: u32,
+    /// Low enough that it is worth going to town for on its own.
+    pub urgent: bool,
 }
 
 /// Where what is for sale goes.
@@ -674,13 +703,18 @@ impl Profile {
     ///
     /// `held` answers how many of a thing are in the pack, by the same
     /// name the counter lists it under.
-    pub fn shortfall(&self, held: impl Fn(&str) -> u32) -> Vec<(&Buy, u32)> {
+    pub fn shortfall(&self, held: impl Fn(&str) -> u32) -> Vec<Short<'_>> {
         self.buy
             .iter()
             .filter(|b| b.on && b.keep > 0 && !b.what.trim().is_empty())
             .filter_map(|b| {
                 let have = held(&b.what);
-                (have < b.keep).then(|| (b, b.keep - have))
+                (have < b.keep).then(|| Short {
+                    want: b,
+                    have,
+                    short: b.keep - have,
+                    urgent: have <= b.low_mark(),
+                })
             })
             .collect()
     }
@@ -809,12 +843,18 @@ impl Profile {
                 Buy {
                     what: "Prismatic Taper".into(),
                     keep: 1000,
+                    // A quarter left is the old rule and a fair one: a
+                    // caster with two hundred and fifty tapers is not
+                    // in trouble, and one with two hundred is.
+                    restock_at: Some(250),
                     from: None,
                     on: true,
                 },
                 Buy {
                     what: "Healing Kit".into(),
                     keep: 2,
+                    // Down to the last one is reason enough.
+                    restock_at: Some(1),
                     from: None,
                     on: true,
                 },
@@ -1176,18 +1216,21 @@ mod tests {
             Buy {
                 what: "Prismatic Taper".into(),
                 keep: 1000,
+                restock_at: None,
                 from: None,
                 on: true,
             },
             Buy {
                 what: "Peerless Healing Kit".into(),
                 keep: 5,
+                restock_at: None,
                 from: Some("Fletcher".into()),
                 on: true,
             },
             Buy {
                 what: "Acid Arrowhead".into(),
                 keep: 500,
+                restock_at: None,
                 from: None,
                 on: false,
             },
@@ -1199,8 +1242,107 @@ mod tests {
         };
         let short = p.shortfall(held);
         assert_eq!(short.len(), 1, "the kits are stocked, the heads are off");
-        assert_eq!(short[0].0.what, "Prismatic Taper");
-        assert_eq!(short[0].1, 600, "six hundred short of a thousand");
+        assert_eq!(short[0].want.what, "Prismatic Taper");
+        assert_eq!(short[0].short, 600, "six hundred short of a thousand");
+        assert_eq!(short[0].have, 400);
+    }
+
+    #[test]
+    fn the_suit_being_built_is_not_sold_for_pocket_change() {
+        // Plain armour off a drudge is trash and goes. The same piece
+        // with a cantrip on it is a piece of a suit somebody is
+        // building, and selling it for its face value is the most
+        // expensive mistake this whole profile can make -- which is why
+        // the cantrip rules sit above the one that sends things to the
+        // counter.
+        let p = Profile::starter();
+        let me = me(50, &[]);
+
+        let mut hauberk = item("Hauberk", item_type::ARMOR, 900);
+        hauberk.spells = vec!["Epic Life Magic Aptitude".into()];
+        // What is on a piece is not known until the server is asked, so
+        // the profile says so rather than guessing -- and a corpse that
+        // holds one is worth the identify it costs.
+        assert!(
+            matches!(
+                p.judge_test(&hauberk, &me, "Aldric", 0),
+                Verdict::NeedsId(_)
+            ),
+            "unappraised, the answer is 'ask'"
+        );
+        hauberk.appraised = true;
+        assert!(
+            matches!(
+                p.judge_test(&hauberk, &me, "Aldric", 0),
+                Verdict::Decided(LootAction::Keep, _)
+            ),
+            "and once asked, a spelled piece is kept"
+        );
+
+        let mut ring = item("Ring", item_type::JEWELRY, 400);
+        ring.spells = vec!["Legendary Endurance".into()];
+        ring.appraised = true;
+        assert!(matches!(
+            p.judge_test(&ring, &me, "Aldric", 0),
+            Verdict::Decided(LootAction::Keep, _)
+        ));
+
+        // And the plain cap still goes.
+        let mut cap = item("Leather Cap", item_type::ARMOR, 1_200);
+        cap.appraised = true;
+        assert!(
+            matches!(
+                p.judge_test(&cap, &me, "Aldric", 0),
+                Verdict::Decided(LootAction::Sell, _)
+            ),
+            "unspelled armour of no great worth is what pays for the trip"
+        );
+    }
+
+    #[test]
+    fn a_line_is_only_urgent_once_it_is_low() {
+        // Being one short is not a reason to walk to town. Without a
+        // low mark every line was urgent the moment it was not full,
+        // and a caster nine hundred tapers from empty went shopping.
+        let mut p = Profile::starter();
+        p.buy = vec![Buy {
+            what: "Prismatic Taper".into(),
+            keep: 1000,
+            restock_at: Some(250),
+            from: None,
+            on: true,
+        }];
+        let at = |have: u32| {
+            p.shortfall(|_| have)
+                .first()
+                .map(|s| s.urgent)
+                .expect("short of a thousand")
+        };
+        assert!(!at(999), "one short is not a reason to go");
+        assert!(!at(251));
+        assert!(at(250), "at the mark");
+        assert!(at(3), "and below it");
+    }
+
+    #[test]
+    fn a_line_with_no_mark_falls_back_to_a_quarter() {
+        // The rule the old `ammo_keep` and `tapers_keep` used, kept as
+        // the default so a line written without a number behaves the
+        // way those settings did.
+        let quarter = Buy {
+            what: "Arrow".into(),
+            keep: 250,
+            restock_at: None,
+            from: None,
+            on: true,
+        };
+        assert_eq!(quarter.low_mark(), 62);
+        // Zero is a real answer, not a missing one: only when it is out.
+        let last_resort = Buy {
+            restock_at: Some(0),
+            ..quarter.clone()
+        };
+        assert_eq!(last_resort.low_mark(), 0);
     }
 
     #[test]
@@ -1212,20 +1354,22 @@ mod tests {
             Buy {
                 what: "Blue Pea".into(),
                 keep: 500,
+                restock_at: None,
                 from: None,
                 on: true,
             },
             Buy {
                 what: "Acid Arrowhead".into(),
                 keep: 500,
+                restock_at: None,
                 from: Some("Thimrin Woodsetter".into()),
                 on: true,
             },
         ];
         let short = p.shortfall(|_| 0);
         assert_eq!(short.len(), 2);
-        assert_eq!(short[0].0.from, None, "whoever sells it");
-        assert_eq!(short[1].0.from.as_deref(), Some("Thimrin Woodsetter"));
+        assert_eq!(short[0].want.from, None, "whoever sells it");
+        assert_eq!(short[1].want.from.as_deref(), Some("Thimrin Woodsetter"));
     }
 
     #[test]

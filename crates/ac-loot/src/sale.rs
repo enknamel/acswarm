@@ -32,6 +32,13 @@ pub fn never_sell_because(item: &ItemStats) -> &'static str {
     }
 }
 
+/// The same, for something the character is actually carrying: a pack
+/// with anything in it is refused by the server, and would take its
+/// contents with it if it were not.
+pub fn never_sell_carried(item: &ItemStats, holds_anything: bool) -> bool {
+    never_sell(item) || (item.item_type & ac_world::item_type::CONTAINER != 0 && holds_anything)
+}
+
 /// Whether any of `list` appears in `name`, case-insensitively: the
 /// player's own word, written as they would write it.
 pub fn name_matches(name: &str, list: &[String]) -> bool {
@@ -116,6 +123,39 @@ mod tests {
     }
 
     #[test]
+    fn what_is_never_sold_is_never_sold() {
+        // Somebody's work, something being worn, and the server's own
+        // word. No rule and no profile gets past these.
+        let plain = item("Dagger", item_type::MELEE_WEAPON, 900);
+        assert!(!never_sell(&plain));
+
+        for (what, mut it) in [
+            ("tinkered", plain.clone()),
+            ("inscribed", plain.clone()),
+            ("equipped", plain.clone()),
+            ("unsellable", plain.clone()),
+            ("worthless", plain.clone()),
+        ] {
+            match what {
+                "tinkered" => it.tinks = 1,
+                "inscribed" => it.inscribed = true,
+                "equipped" => it.wielded = true,
+                "unsellable" => it.unsellable = true,
+                _ => it.value = 0,
+            }
+            assert!(never_sell(&it), "a {what} item");
+            assert!(!never_sell_because(&it).is_empty());
+        }
+
+        // A pack is only refused while it has something in it: the
+        // server will not take a full one, and it would carry its
+        // contents off with it if it did.
+        let sack = item("Sack", item_type::CONTAINER, 5);
+        assert!(never_sell_carried(&sack, true), "a full sack stays");
+        assert!(!never_sell_carried(&sack, false), "an empty one may go");
+    }
+
+    #[test]
     fn a_profile_cannot_sell_what_the_bars_forbid() {
         // Giving a character a loot profile used to switch off the bars:
         // the profile path never called `sellable`, so the focus guard,
@@ -153,6 +193,16 @@ mod tests {
                 sell_it_all
             ),
             "the player's own word beats the rules"
+        );
+
+        // A focus is equipment: it lives in a pack slot and halves the
+        // components of its school.
+        let mut focus = item("Foci of Strife", item_type::MISC, 0);
+        focus.wcid = 15271;
+        focus.value = 5_000;
+        assert!(
+            !offer_to_vendor(&focus, false, &burns, &[], false, None, sell_it_all),
+            "a focus is equipment, not stock"
         );
 
         let arrow = item("Arrowhead", item_type::MISSILE_WEAPON, 20);

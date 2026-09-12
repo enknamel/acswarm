@@ -41,8 +41,8 @@ use serde::{Deserialize, Serialize};
 
 use std::collections::BTreeMap;
 
-use crate::autoplay::{name_matches, Doing, LootAction};
-use crate::items::{ItemStats, Query};
+use crate::autoplay::{Doing, LootAction};
+use crate::items::ItemStats;
 use crate::logistics::{self, Stage, Supplies};
 use crate::Client;
 use ac_world::{equip, item_type, object_desc_flags};
@@ -428,7 +428,6 @@ pub struct State {
     /// bread, a quest token -- and no other counter will take it
     /// either. Remembered for the whole session, or the character
     /// offers the same loaf in every town.
-    unsellable: crate::did::Patience<u32>,
     /// No run is started before this: a vendor that could not be
     /// reached is not tried again at once.
     next_run: Option<Instant>,
@@ -837,47 +836,6 @@ pub fn buy_price(value: u32, sell_rate: f32, item_type: u32) -> u32 {
     ((value as f32 * sell_rate - 0.1).ceil().max(1.0)) as u32
 }
 
-/// The rules on what to part with.
-pub struct SellRules<'a> {
-    /// Searches an item must match one of.
-    pub sell: &'a [String],
-    /// Names never sold.
-    pub keep: &'a [String],
-    /// Whether the character could wield the item, when it is a
-    /// weapon: `None` when that is not known (not appraised), in which
-    /// case a weapon is kept.
-    pub can_wield: Option<bool>,
-    /// What the loot rules tagged items with when they were taken: a
-    /// `Sell` tag sells whatever the searches say, a `Salvage` tag keeps
-    /// the item for the salvager.
-    pub tags: &'a BTreeMap<u32, LootAction>,
-    /// The spell components this character actually casts with, by
-    /// weenie class.
-    ///
-    /// Not every spell component is a spell component to the character
-    /// holding it. A Pyreal Pea is one by item type and is worth fifty
-    /// thousand at a counter: peas are what a run to town is paid for.
-    /// A Prismatic Taper is one too and is what the character is going
-    /// to town to buy. The difference is not in the type; it is whether
-    /// this character's spells burn it.
-    pub burns: &'a [u32],
-}
-
-/// Gear worth keeping rather than selling: armour, clothing or jewelry
-/// that carries spells.
-///
-/// This is the difference between loot and stock. A Hauberk of Epic
-/// Life Mastery is not worth its handful of pyreals at a vendor, it is
-/// a piece of a suit that gets built over weeks, and a rule that sold
-/// every armour above a value threshold would feed exactly that piece
-/// to a shopkeeper. So gear with spells on it is never sold by a
-/// blanket rule. The loot rules can still tag one `Sell` by hand, and
-/// that tag wins.
-pub fn storage_worthy(stats: &ItemStats) -> bool {
-    let gear = item_type::ARMOR | item_type::CLOTHING | item_type::JEWELRY;
-    stats.item_type & gear != 0 && !stats.spells.is_empty()
-}
-
 /// Whether an item is loot to sell. `ammo` says whether it goes in the
 /// ammunition slot, which the stats do not carry.
 ///
@@ -895,14 +853,7 @@ pub fn storage_worthy(stats: &ItemStats) -> bool {
 /// character fights and lives in; and an item the server has flagged
 /// unsellable will be refused anyway, so offering it is a wasted round
 /// trip and, worse, a chance to get stuck on it.
-pub use ac_loot::sale::{never_sell, never_sell_because, offer_to_vendor};
-
-/// The same, for an item the character is actually carrying: a pack
-/// with anything in it is refused by the server and would take its
-/// contents with it if it were not.
-pub fn never_sell_carried(stats: &ItemStats, holds_anything: bool) -> bool {
-    never_sell(stats) || (stats.item_type & item_type::CONTAINER != 0 && holds_anything)
-}
+pub use ac_loot::sale::{never_sell, never_sell_because, never_sell_carried, offer_to_vendor};
 
 /// Which of two counters is worth walking to, better first.
 ///
@@ -931,64 +882,6 @@ pub(crate) struct SellPolicy {
     profile: Option<std::sync::Arc<crate::profile::Profile>>,
     wielder: crate::weapons::Wielder,
     me: String,
-}
-
-pub fn sellable(stats: &ItemStats, ammo: bool, rules: &SellRules) -> bool {
-    // Not sellable at all.
-    if never_sell(stats) || ammo {
-        return false;
-    }
-    // The player's own word, before anything else.
-    if name_matches(&stats.name, rules.keep) {
-        return false;
-    }
-    // What the loot rules decided when the item was taken. A `Sell` tag
-    // is a decision already made, so it beats every rule below.
-    match rules.tags.get(&stats.guid) {
-        Some(LootAction::Sell) => return true,
-        Some(LootAction::Salvage | LootAction::Keep | LootAction::Skip) => return false,
-        None => {}
-    }
-    // A Focus is equipment: it lives in a pack slot and halves the
-    // components of its school. Vendors will not take one anyway, but
-    // the point is not to walk to town meaning to sell it.
-    if crate::magic::is_focus(stats.wcid) {
-        return false;
-    }
-    // A spell component is kept when this character's spells burn it,
-    // and sold when they do not. See `SellRules::burns`.
-    if stats.item_type & item_type::SPELL_COMPONENTS != 0 && rules.burns.contains(&stats.wcid) {
-        return false;
-    }
-    // Things a vendor should never be handed: money, the packs
-    // themselves, what crafting is made of.
-    let keep_types = item_type::MONEY
-        | item_type::CONTAINER
-        | item_type::PROMISSORY_NOTE
-        | item_type::TINKERING_TOOL
-        | item_type::KEY
-        | item_type::MANA_STONE
-        | item_type::CRAFT_FLETCHING_BASE
-        | item_type::CRAFT_FLETCHING_INTERMEDIATE
-        | item_type::CRAFT_ALCHEMY_BASE
-        | item_type::CRAFT_ALCHEMY_INTERMEDIATE
-        | item_type::CRAFT_COOKING_BASE;
-    if stats.item_type & keep_types != 0 {
-        return false;
-    }
-    if storage_worthy(stats) {
-        return false;
-    }
-    let weapon = stats.item_type
-        & (item_type::MELEE_WEAPON | item_type::MISSILE_WEAPON | item_type::CASTER)
-        != 0;
-    if weapon && rules.can_wield != Some(false) {
-        return false;
-    }
-    rules.sell.iter().any(|f| {
-        let q = Query::parse(f);
-        !q.is_empty() && stats.matches(&q)
-    })
 }
 
 impl State {
@@ -1593,19 +1486,30 @@ impl Client {
         // of what is short. `grow_needs` used to re-implement that
         // filter, which is two statements of one rule and the way they
         // come to disagree.
-        let mut named: Vec<(String, u32, Option<String>)> = self
+        let mut named: Vec<(String, u32, Option<String>, bool)> = self
             .profiles
             .get(&self.autoplay.config.loot.profile)
             .map(|p| {
                 p.shortfall(|what| self.carried_named(what))
                     .into_iter()
-                    .map(|(b, _)| (b.what.clone(), b.keep, b.from.clone()))
+                    .map(|s| {
+                        (
+                            s.want.what.clone(),
+                            s.want.keep,
+                            s.want.from.clone(),
+                            s.urgent,
+                        )
+                    })
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
         // `keep_stocked` is what the buy list grew out of and is still
         // read, so nobody's settings go quiet.
-        named.extend(cfg.keep_stocked.iter().map(|(n, k)| (n.clone(), *k, None)));
+        named.extend(
+            cfg.keep_stocked
+                .iter()
+                .map(|(n, k)| (n.clone(), *k, None, true)),
+        );
         if self.autoplay.config.team.enabled {
             named.extend(
                 self.autoplay
@@ -1613,10 +1517,10 @@ impl Client {
                     .team
                     .keep_stocked
                     .iter()
-                    .map(|(n, k)| (n.clone(), *k, None)),
+                    .map(|(n, k)| (n.clone(), *k, None, true)),
             );
         }
-        for (name, least, from) in named {
+        for (name, least, from, urgent) in named {
             if name.trim().is_empty() || least == 0 {
                 continue;
             }
@@ -1634,7 +1538,9 @@ impl Client {
                     want: least - have,
                     have,
                     keep: least,
-                    urgent: true,
+                    // Being one short is not a reason to walk to town:
+                    // the line says how low it may get first.
+                    urgent,
                     buyable: true,
                     from,
                     kind: NeedKind::Named(name),
@@ -2132,11 +2038,8 @@ impl Client {
         // [`Client::offers_for_sale`]). It used to be a second one, and
         // the two disagreed.
         let policy = self.sell_policy(cfg);
-        let unsellable = &self.autoplay.growth.unsellable;
-        let now = Instant::now();
         self.world
             .inventory()
-            .filter(|o| !unsellable.held(&o.guid, now))
             .filter_map(|o| {
                 let stats = self.stats_of(o.guid)?;
                 let ammo = o.valid_locations & equip::MISSILE_AMMO != 0;
@@ -3375,16 +3278,6 @@ mod tests {
         assert!(skill_weight(44, Some(47), false) < 0.2);
     }
 
-    fn item(name: &str, item_type: u32, value: u32) -> ItemStats {
-        ItemStats {
-            name: name.into(),
-            item_type,
-            kind: crate::items::kind_name(item_type),
-            value,
-            ..Default::default()
-        }
-    }
-
     #[test]
     fn a_stack_worth_more_than_the_counter_allows_is_sold_in_pieces() {
         // A hundred Pyreal Peas: fifty thousand each and five million
@@ -3433,342 +3326,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_pea_is_sold_and_a_taper_is_kept() {
-        // Both are spell components by item type. One is worth fifty
-        // thousand at a counter and is what a run to town is paid for;
-        // the other is what the character is going to town to buy. The
-        // type does not tell them apart -- whether this character's
-        // spells burn it does.
-        const TAPER: u32 = 691;
-        const PEA: u32 = 8330;
-        let sell = vec!["value>0".to_string()];
-        let casts = [TAPER];
-        let rules = SellRules {
-            sell: &sell,
-            keep: &[],
-            can_wield: None,
-            tags: &BTreeMap::new(),
-            burns: &casts,
-        };
-
-        let mut pea = item("Pyreal Pea", item_type::SPELL_COMPONENTS, 50_000);
-        pea.wcid = PEA;
-        assert!(sellable(&pea, false, &rules), "peas pay for the trip");
-
-        let mut taper = item("Prismatic Taper", item_type::SPELL_COMPONENTS, 5);
-        taper.wcid = TAPER;
-        assert!(!sellable(&taper, false, &rules), "and tapers are why");
-
-        // A caster that does not use tapers -- an archer, say -- would
-        // sell them like any other loot.
-        let archer = SellRules {
-            sell: &sell,
-            keep: &[],
-            can_wield: None,
-            tags: &BTreeMap::new(),
-            burns: &[],
-        };
-        assert!(sellable(&taper, false, &archer));
-    }
-
-    #[test]
-    fn what_is_never_sold_is_never_sold() {
-        let cfg = Growth::default();
-        let sell_everything = vec!["value>0".to_string()];
-        let rules = SellRules {
-            sell: &sell_everything,
-            keep: &[],
-            can_wield: Some(false),
-            tags: &BTreeMap::new(),
-            burns: &[],
-        };
-        // A rule that says "sell anything" still does not sell these.
-        let plain = item("Copper Pea", item_type::MISC, 40);
-        assert!(sellable(&plain, false, &rules), "the control");
-
-        let mut tinkered = plain.clone();
-        tinkered.tinks = 1;
-        assert!(!sellable(&tinkered, false, &rules));
-        assert_eq!(never_sell_because(&tinkered), "it has been tinkered");
-
-        let mut inscribed = plain.clone();
-        inscribed.inscribed = true;
-        assert!(!sellable(&inscribed, false, &rules));
-        assert_eq!(never_sell_because(&inscribed), "it is inscribed");
-
-        let mut worn = plain.clone();
-        worn.wielded = true;
-        assert!(!sellable(&worn, false, &rules));
-        assert_eq!(never_sell_because(&worn), "it is equipped");
-
-        // The server's own word: offering one of these is a refusal
-        // waiting to happen, and a refusal is what gets a character
-        // stuck at a counter.
-        let mut refused = plain.clone();
-        refused.unsellable = true;
-        assert!(!sellable(&refused, false, &rules));
-        assert_eq!(never_sell_because(&refused), "no vendor will take it");
-
-        // And a tag put on by hand does not get past them either: the
-        // loot rules' "sell this" is a policy, and these are not.
-        let mut tags = BTreeMap::new();
-        tags.insert(tinkered.guid, LootAction::Sell);
-        let tagged = SellRules {
-            sell: &cfg.sell,
-            keep: &[],
-            can_wield: Some(false),
-            tags: &tags,
-            burns: &[],
-        };
-        assert!(!sellable(&tinkered, false, &tagged));
-
-        // A pack is only loot when it is empty. One with anything in
-        // it takes the character's belongings with it, and the server
-        // refuses it besides.
-        let sack = item("Sack", item_type::CONTAINER, 65);
-        assert!(never_sell_carried(&sack, true), "a full sack stays");
-        assert!(!never_sell_carried(&sack, false), "an empty one may go");
-        // The rule is about packs, not about everything carried.
-        assert!(!never_sell_carried(&plain, true));
-    }
-
-    #[test]
-    fn loot_is_sold_and_what_the_character_lives_on_is_kept() {
-        let cfg = Growth::default();
-        let keep = vec!["Healing Kit".to_string()];
-        let rules = SellRules {
-            sell: &cfg.sell,
-            keep: &keep,
-            can_wield: None,
-            tags: &BTreeMap::new(),
-            burns: &[],
-        };
-        assert!(sellable(
-            &item("Leather Cap", item_type::ARMOR, 120),
-            false,
-            &rules
-        ));
-        assert!(sellable(
-            &item("Ornate Ring", item_type::JEWELRY, 900),
-            false,
-            &rules
-        ));
-        assert!(sellable(
-            &item("Old Boot", item_type::MISC, 5),
-            false,
-            &rules
-        ));
-        // Money, packs, components, tools and ammunition stay.
-        assert!(!sellable(
-            &item("Pyreal", item_type::MONEY, 1),
-            false,
-            &rules
-        ));
-        assert!(!sellable(
-            &item("Sack", item_type::CONTAINER, 50),
-            false,
-            &rules
-        ));
-        assert!(!sellable(
-            &item("Lead Scarab", item_type::SPELL_COMPONENTS, 10),
-            false,
-            &rules
-        ));
-        assert!(!sellable(
-            &item("Ust", item_type::TINKERING_TOOL, 100),
-            false,
-            &rules
-        ));
-        // Food is what a run to town is paid for: peas and their like
-        // are picked up to be sold. Food worth keeping goes on the
-        // keep list by name, like the healing kits below.
-        assert!(sellable(&item("Peas", item_type::FOOD, 40), false, &rules));
-        assert!(!sellable(
-            &item("Arrow", item_type::MISSILE_WEAPON, 1),
-            true,
-            &rules
-        ));
-        assert!(!sellable(
-            &item("Bundle of Arrowheads", item_type::CRAFT_FLETCHING_BASE, 30),
-            false,
-            &rules
-        ));
-        // The stocked names, whatever their type.
-        assert!(!sellable(
-            &item("Handy Healing Kit", item_type::MISC, 400),
-            false,
-            &rules
-        ));
-        // Worthless things are not offered; worn things never.
-        assert!(!sellable(
-            &item("Pathwarden Token", item_type::MISC, 0),
-            false,
-            &rules
-        ));
-        let mut worn = item("Leather Cap", item_type::ARMOR, 120);
-        worn.wielded = true;
-        assert!(!sellable(&worn, false, &rules));
-    }
-
-    #[test]
-    fn the_suit_being_built_is_not_sold_for_pocket_change() {
-        let cfg = Growth::default();
-        let keep: Vec<String> = Vec::new();
-        let rules = SellRules {
-            sell: &cfg.sell,
-            keep: &keep,
-            can_wield: None,
-            tags: &BTreeMap::new(),
-            burns: &[],
-        };
-        // Plain armour off a drudge is trash and goes.
-        assert!(sellable(
-            &item("Leather Cap", item_type::ARMOR, 120),
-            false,
-            &rules
-        ));
-        // The same piece with spells on it is a piece of a suit.
-        let mut hauberk = item("Hauberk", item_type::ARMOR, 900);
-        hauberk.spells = vec!["Epic Life Magic Aptitude".into()];
-        assert!(storage_worthy(&hauberk));
-        assert!(!sellable(&hauberk, false, &rules));
-        let mut ring = item("Ring", item_type::JEWELRY, 400);
-        ring.spells = vec!["Epic Endurance".into(), "Epic Focus".into()];
-        assert!(!sellable(&ring, false, &rules));
-        // Value alone keeps a good drop out of a vendor's hands too.
-        assert!(!sellable(
-            &item("Olthoi Koujia", item_type::ARMOR, 9_000),
-            false,
-            &rules
-        ));
-    }
-
-    #[test]
-    fn what_the_loot_rules_tagged_beats_every_other_rule() {
-        let cfg = Growth::default();
-        let keep: Vec<String> = Vec::new();
-        let mut hauberk = item("Hauberk", item_type::ARMOR, 9_000);
-        hauberk.guid = 7;
-        hauberk.spells = vec!["Epic Life Magic Aptitude".into()];
-
-        // Tagged for sale by hand: it goes, storage rule or not.
-        let mut tags = BTreeMap::new();
-        tags.insert(7u32, LootAction::Sell);
-        let sell_it = SellRules {
-            sell: &cfg.sell,
-            keep: &keep,
-            can_wield: None,
-            tags: &tags,
-            burns: &[],
-        };
-        assert!(sellable(&hauberk, false, &sell_it));
-
-        // Tagged to keep or salvage: it stays, search or not.
-        for action in [LootAction::Keep, LootAction::Salvage, LootAction::Skip] {
-            let mut tags = BTreeMap::new();
-            tags.insert(7u32, action);
-            let rules = SellRules {
-                sell: &cfg.sell,
-                keep: &keep,
-                can_wield: None,
-                tags: &tags,
-                burns: &[],
-            };
-            let mut cap = item("Leather Cap", item_type::ARMOR, 120);
-            cap.guid = 7;
-            assert!(!sellable(&cap, false, &rules), "{action:?}");
-        }
-
-        // The player's own keep list beats even a Sell tag.
-        let keep = vec!["Hauberk".to_string()];
-        let mut tags = BTreeMap::new();
-        tags.insert(7u32, LootAction::Sell);
-        let kept = SellRules {
-            sell: &cfg.sell,
-            keep: &keep,
-            can_wield: None,
-            tags: &tags,
-            burns: &[],
-        };
-        assert!(!sellable(&hauberk, false, &kept));
-    }
-
-    #[test]
-    fn weapons_go_only_when_they_are_beyond_the_character() {
-        let cfg = Growth::default();
-        let keep: Vec<String> = Vec::new();
-        let sword = item("Broad Sword", item_type::MELEE_WEAPON, 800);
-        let unknown = SellRules {
-            sell: &cfg.sell,
-            keep: &keep,
-            can_wield: None,
-            tags: &BTreeMap::new(),
-            burns: &[],
-        };
-        let usable = SellRules {
-            sell: &cfg.sell,
-            keep: &keep,
-            can_wield: Some(true),
-            tags: &BTreeMap::new(),
-            burns: &[],
-        };
-        let beyond = SellRules {
-            sell: &cfg.sell,
-            keep: &keep,
-            can_wield: Some(false),
-            tags: &BTreeMap::new(),
-            burns: &[],
-        };
-        assert!(!sellable(&sword, false, &unknown), "not appraised: kept");
-        assert!(!sellable(&sword, false, &usable));
-        assert!(sellable(&sword, false, &beyond));
-        let wand = item("Wand", item_type::CASTER, 300);
-        assert!(!sellable(&wand, false, &usable));
-        assert!(sellable(&wand, false, &beyond));
-        // A search list without weapons keeps them regardless.
-        let armour_only = vec!["type:armor".to_string()];
-        let rules = SellRules {
-            sell: &armour_only,
-            keep: &keep,
-            can_wield: Some(false),
-            tags: &BTreeMap::new(),
-            burns: &[],
-        };
-        assert!(!sellable(&sword, false, &rules));
-    }
-
-    #[test]
-    fn loot_tags_decide_selling() {
-        let cfg = Growth::default();
-        let keep: Vec<String> = Vec::new();
-        let cheap = item("Trinket", item_type::JEWELRY, 5);
-        let mut tags = BTreeMap::new();
-        tags.insert(cheap.guid, LootAction::Sell);
-        let rules = SellRules {
-            sell: &cfg.sell,
-            keep: &keep,
-            can_wield: None,
-            tags: &tags,
-            burns: &[],
-        };
-        assert!(sellable(&cheap, false, &rules), "a Sell tag sells");
-        let rich = item("Ornate Ring", item_type::JEWELRY, 900);
-        let mut tags = BTreeMap::new();
-        tags.insert(rich.guid, LootAction::Salvage);
-        let rules = SellRules {
-            sell: &cfg.sell,
-            keep: &keep,
-            can_wield: None,
-            tags: &tags,
-            burns: &[],
-        };
-        assert!(
-            !sellable(&rich, false, &rules),
-            "a Salvage tag keeps it for the salvager"
-        );
-    }
-
     fn need(kind: NeedKind, want: u32) -> Need {
         Need {
             name: "x".into(),
@@ -3809,25 +3366,6 @@ mod tests {
         assert_eq!(a_few(&["Myrrh"]), "Myrrh");
         assert_eq!(a_few(&["a", "b", "c", "d"]), "a, b, c, d");
         assert_eq!(a_few(&["a", "b", "c", "d", "e"]), "a, b, c, d and 1 more");
-    }
-
-    #[test]
-    fn a_focus_is_equipment_and_never_sold() {
-        let sell = vec!["type:gem".to_string()];
-        let rules = SellRules {
-            sell: &sell,
-            keep: &[],
-            can_wield: None,
-            tags: &BTreeMap::new(),
-            burns: &[],
-        };
-        let mut focus = item("Foci of Strife", item_type::GEM, 500);
-        focus.wcid = 15271;
-        assert!(!sellable(&focus, false, &rules));
-        // The rule is the weenie, not the name: a keepsake called after
-        // one is still just a keepsake.
-        focus.wcid = 999;
-        assert!(sellable(&focus, false, &rules));
     }
 
     fn ware(wcid: u32, name: &str, value: u32) -> ac_world::shops::Ware {

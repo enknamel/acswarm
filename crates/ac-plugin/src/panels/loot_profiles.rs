@@ -981,7 +981,7 @@ fn shopping(ui: &mut egui::Ui, p: &mut Profile) {
     );
     let mut drop = None;
     egui::Grid::new("loot_profiles.buy")
-        .num_columns(4)
+        .num_columns(5)
         .spacing([6.0, 2.0])
         .show(ui, |ui| {
             for (i, b) in p.buy.iter_mut().enumerate() {
@@ -1003,7 +1003,18 @@ fn shopping(ui: &mut egui::Ui, p: &mut Profile) {
                         .speed(1.0)
                         .range(0..=100_000),
                 )
-                .on_hover_text("How many to keep in the pack");
+                .on_hover_text("How many to carry when stocked up");
+                let mut low = b.low_mark();
+                if ui
+                    .add(egui::DragValue::new(&mut low).speed(1.0).range(0..=100_000))
+                    .on_hover_text(
+                        "Go back to town when this few are left. Being one short is \
+                         not a reason to walk to town.",
+                    )
+                    .changed()
+                {
+                    b.restock_at = Some(low);
+                }
                 let mut from = b.from.clone().unwrap_or_default();
                 let r = ui.add(
                     egui::TextEdit::singleline(&mut from)

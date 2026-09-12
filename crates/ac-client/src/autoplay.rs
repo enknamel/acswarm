@@ -365,10 +365,6 @@ pub struct Loot {
     /// character would quietly stop reading its profile.
     #[serde(default = "starter")]
     pub profile: String,
-    /// The profile that decides what goes to a vendor. Empty falls back
-    /// to the older `growth.sell` searches.
-    #[serde(default)]
-    pub vendor_profile: String,
     /// Finish what you kill: while a body the character made is still
     /// unlooted and within reach, another fight waits.
     ///
@@ -429,7 +425,6 @@ impl Default for Loot {
             // nobody has configured still reads its rules from data
             // rather than from a list in the code.
             profile: "Starter".into(),
-            vendor_profile: String::new(),
             after_every_fight: true,
             carry_up_to: carry_up_to(),
         }
