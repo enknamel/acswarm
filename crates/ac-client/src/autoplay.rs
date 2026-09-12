@@ -1157,7 +1157,7 @@ impl Autoplay {
     /// take it, a salvage refused. Not a new decision: the thing is
     /// still meant for what it was meant for.
     pub fn tag_failed(&mut self, guid: u32, why: impl Into<String>) {
-        self.ledger.failed(guid, why);
+        self.ledger.failed(guid, why, crate::holdings::unix_now());
     }
 
     /// What each item was taken for, by guid.
@@ -2619,7 +2619,7 @@ impl Client {
         let mut items: Vec<(u32, String)> = self
             .autoplay
             .ledger
-            .for_salvage()
+            .for_salvage(crate::holdings::unix_now())
             .into_iter()
             .filter_map(|g| self.world.objects.get(&g))
             .filter(|o| o.wielder != me && self.world.is_carried(o.guid))

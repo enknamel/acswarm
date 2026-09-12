@@ -57,8 +57,37 @@ pub struct Took {
     /// new decision, which is why it does not overwrite one: an item
     /// that cannot be salvaged today is still an item meant for
     /// salvage.
+    ///
+    /// And it is a wait, not a grudge. Nothing is given up on for good
+    /// (`docs/agent.md`): a session runs for days, the salvager who
+    /// would not take it logs back in, the counter that would not have
+    /// it is not the next counter. So it carries the hour it happened
+    /// and stops counting after [`TRY_AGAIN_AFTER`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub failed: Option<String>,
+    pub failed: Option<Failed>,
+}
+
+/// What went wrong, and when, so that it stops mattering.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Failed {
+    pub why: String,
+    /// Unix seconds. Unix rather than an `Instant` because it outlives
+    /// the process that wrote it.
+    pub at: u64,
+}
+
+/// How long a failure is held against an item.
+///
+/// Long enough that a character does not spend an afternoon offering
+/// the same ring to the same counter, short enough that a run tomorrow
+/// tries again.
+pub const TRY_AGAIN_AFTER: u64 = 60 * 60;
+
+impl Failed {
+    /// Whether this is still worth holding against the item.
+    pub fn holds(&self, now: u64) -> bool {
+        now.saturating_sub(self.at) < TRY_AGAIN_AFTER
+    }
 }
 
 /// Whether this item is one the ledger remembers.
@@ -118,15 +147,19 @@ impl Ledger {
 
     /// Note that what was decided could not be done. The decision
     /// stands; only the record of the attempt is added.
-    pub fn failed(&mut self, guid: u32, why: impl Into<String>) {
+    pub fn failed(&mut self, guid: u32, why: impl Into<String>, now: u64) {
         if let Some(t) = self.took.get_mut(&guid) {
-            t.failed = Some(why.into());
+            t.failed = Some(Failed {
+                why: why.into(),
+                at: now,
+            });
             self.dirty = true;
         }
     }
 
-    pub fn why_failed(&self, guid: u32) -> Option<&str> {
-        self.took.get(&guid)?.failed.as_deref()
+    pub fn why_failed(&self, guid: u32, now: u64) -> Option<&str> {
+        let f = self.took.get(&guid)?.failed.as_ref()?;
+        f.holds(now).then_some(f.why.as_str())
     }
 
     /// Forget the things no longer held.
@@ -151,25 +184,23 @@ impl Ledger {
         self.dirty
     }
 
-    /// Everything written down as meant for a counter.
-    pub fn for_sale(&self) -> Vec<u32> {
-        self.with(LootAction::Sell)
+    /// Everything written down as meant for a counter and not lately
+    /// refused by one.
+    pub fn for_sale(&self, now: u64) -> Vec<u32> {
+        self.with(LootAction::Sell, now)
     }
 
-    /// Everything written down as meant for the salvage bag, and not
-    /// yet refused.
-    pub fn for_salvage(&self) -> Vec<u32> {
-        self.took
-            .iter()
-            .filter(|(_, t)| t.action == LootAction::Salvage && t.failed.is_none())
-            .map(|(g, _)| *g)
-            .collect()
+    /// Everything written down as meant for the salvage bag and not
+    /// lately refused.
+    pub fn for_salvage(&self, now: u64) -> Vec<u32> {
+        self.with(LootAction::Salvage, now)
     }
 
-    fn with(&self, action: LootAction) -> Vec<u32> {
+    fn with(&self, action: LootAction, now: u64) -> Vec<u32> {
         self.took
             .iter()
-            .filter(|(_, t)| t.action == action && t.failed.is_none())
+            .filter(|(_, t)| t.action == action)
+            .filter(|(_, t)| !t.failed.as_ref().is_some_and(|f| f.holds(now)))
             .map(|(g, _)| *g)
             .collect()
     }
@@ -260,7 +291,7 @@ mod tests {
         let ring = thing(1, 500, "Ornate Ring");
         l.remember(&ring, LootAction::Keep);
         assert_eq!(l.of(&ring), Some(LootAction::Keep));
-        assert!(l.for_sale().is_empty(), "a keeper is never for sale");
+        assert!(l.for_sale(0).is_empty(), "a keeper is never for sale");
     }
 
     #[test]
@@ -303,11 +334,17 @@ mod tests {
         // is still meant for the counter, and the next counter may.
         let mut l = Ledger::new();
         let ring = thing(1, 500, "Ornate Ring");
+        let now = 1_000_000;
         l.remember(&ring, LootAction::Sell);
-        l.failed(1, "no vendor will take it");
+        l.failed(1, "no vendor will take it", now);
         assert_eq!(l.of(&ring), Some(LootAction::Sell), "still meant to go");
-        assert!(l.for_sale().is_empty(), "but not offered again today");
-        assert_eq!(l.why_failed(1), Some("no vendor will take it"));
+        assert!(l.for_sale(now).is_empty(), "but not offered again now");
+        assert_eq!(l.why_failed(1, now), Some("no vendor will take it"));
+        // A wait, not a grudge: the counter that would not have it is
+        // not the next counter, and a session runs for days.
+        let later = now + TRY_AGAIN_AFTER + 1;
+        assert_eq!(l.for_sale(later), vec![1], "tried again later");
+        assert_eq!(l.why_failed(1, later), None);
     }
 
     #[test]
@@ -315,8 +352,8 @@ mod tests {
         let mut l = Ledger::new();
         let plate = thing(3, 700, "Platemail Greaves");
         l.remember(&plate, LootAction::Salvage);
-        assert_eq!(l.for_salvage(), vec![3]);
-        assert!(l.for_sale().is_empty(), "salvage is not for sale");
+        assert_eq!(l.for_salvage(0), vec![3]);
+        assert!(l.for_sale(0).is_empty(), "salvage is not for sale");
     }
 
     #[test]
@@ -330,7 +367,7 @@ mod tests {
             back.of(&thing(1, 500, "Ornate Ring")),
             Some(LootAction::Keep)
         );
-        assert_eq!(back.for_sale(), vec![2]);
+        assert_eq!(back.for_sale(0), vec![2]);
     }
 
     #[test]
