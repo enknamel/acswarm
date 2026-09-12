@@ -35,7 +35,9 @@ use super::{caption, title, title_bar, window, Source};
 use crate::{egui, Client, Ctx, Plugin, Settings};
 use ac_client::autoplay::LootAction;
 use ac_client::items::{NumKey, Op, Term, Tier};
-use ac_client::profile::{self, Ask, Library, Mine, Profile, PropKind, Rule, TextOp, Verdict};
+use ac_client::profile::{
+    self, Ask, Buy, Library, Mine, Profile, PropKind, Rule, SellTo, TextOp, Verdict,
+};
 use ac_client::weapons::Wielder;
 use ac_world::properties;
 use ac_world::stats::{sac, sac_name, skill_name, SKILL_NAMES};
@@ -967,6 +969,107 @@ fn shelf(ui: &mut egui::Ui, v: &ProfilesView, editor: &mut Editor, a: &mut Actio
 }
 
 /// The rules of the profile open, in the order they are read.
+/// What to keep stocked, and where it all goes.
+///
+/// Two things that are not rules and cannot be written as ones: a rule
+/// is a question about an item in hand, and there is no item in hand
+/// when the question is "have I enough tapers" or "where do I sell".
+fn shopping(ui: &mut egui::Ui, p: &mut Profile) {
+    caption(
+        ui,
+        "keep stocked: what the character buys -- and so never sells",
+    );
+    let mut drop = None;
+    egui::Grid::new("loot_profiles.buy")
+        .num_columns(4)
+        .spacing([6.0, 2.0])
+        .show(ui, |ui| {
+            for (i, b) in p.buy.iter_mut().enumerate() {
+                ui.checkbox(&mut b.on, "")
+                    .on_hover_text("Off without being deleted");
+                ui.add(
+                    egui::TextEdit::singleline(&mut b.what)
+                        .id_salt(("loot_profiles.buy.what", i))
+                        .hint_text("Prismatic Taper")
+                        .desired_width(170.0),
+                )
+                .on_hover_text(
+                    "The name the counter lists it under. Be specific: healing \
+                     kits have levels and arrowheads have elements, and each \
+                     level is a different item at a different price.",
+                );
+                ui.add(
+                    egui::DragValue::new(&mut b.keep)
+                        .speed(1.0)
+                        .range(0..=100_000),
+                )
+                .on_hover_text("How many to keep in the pack");
+                let mut from = b.from.clone().unwrap_or_default();
+                let r = ui.add(
+                    egui::TextEdit::singleline(&mut from)
+                        .id_salt(("loot_profiles.buy.from", i))
+                        .hint_text("any counter")
+                        .desired_width(140.0),
+                );
+                if r.changed() {
+                    b.from = (!from.trim().is_empty()).then(|| from.trim().to_string());
+                }
+                r.on_hover_text("A particular counter by name, or blank for whichever sells it");
+                if ui.add(egui::Button::new("x").small()).clicked() {
+                    drop = Some(i);
+                }
+                ui.end_row();
+            }
+        });
+    if let Some(i) = drop {
+        p.buy.remove(i);
+    }
+    if ui
+        .add(egui::Button::new("Add a want").small())
+        .on_hover_text("Another thing to keep stocked")
+        .clicked()
+    {
+        p.buy.push(Buy {
+            keep: 1,
+            on: true,
+            ..Default::default()
+        });
+    }
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        caption(ui, "sell at");
+        let best = matches!(p.sell_to, SellTo::Best);
+        if ui
+            .selectable_label(best, "the best rate in reach")
+            .on_hover_text(
+                "What a counter pays is its own rate on an item's worth, and \
+                 the spread is nearly half. Around Cragstone the scriveners \
+                 pay 0.5 and the Arcanum Broker pays 0.95.",
+            )
+            .clicked()
+        {
+            p.sell_to = SellTo::Best;
+        }
+        let named = !best;
+        if ui
+            .selectable_label(named, "this counter")
+            .on_hover_text("Always this one, wherever it is")
+            .clicked()
+            && best
+        {
+            p.sell_to = SellTo::Named(String::new());
+        }
+        if let SellTo::Named(name) = &mut p.sell_to {
+            ui.add(
+                egui::TextEdit::singleline(name)
+                    .id_salt("loot_profiles.sell_to")
+                    .hint_text("Arcanum Broker")
+                    .desired_width(150.0),
+            );
+        }
+    });
+}
+
 fn rules(ui: &mut egui::Ui, p: &mut Profile, editor: &mut Editor) {
     let mut drop = None;
     let mut moved = None;
@@ -1174,6 +1277,8 @@ pub fn draw(egui: &egui::Context, v: &ProfilesView, editor: &mut Editor) -> Acti
                     });
                     editor.open_rule = Some(p.rules.len() - 1);
                 }
+                ui.separator();
+                shopping(ui, p);
                 ui.separator();
                 ui.horizontal(|ui| {
                     caption(ui, "what would this do?");

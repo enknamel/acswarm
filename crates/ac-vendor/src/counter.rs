@@ -49,6 +49,17 @@ pub struct Keep {
     pub equipped: bool,
     pub retained: bool,
     pub unsellable: bool,
+    /// The character's own: what it was picked up to keep, what it
+    /// keeps stocked, a component its own spells burn, the focus that
+    /// halves them.
+    ///
+    /// The five above are the server's refusals and somebody's work.
+    /// This one is policy, and it was missing entirely: the sale list a
+    /// counter is offered was every carried item less those five, so a
+    /// mage with a full thousand tapers had them sold -- the only
+    /// component guard here spared a want it was *short* of, which a
+    /// stocked one is not.
+    pub mine: bool,
 }
 
 impl Keep {
@@ -64,6 +75,8 @@ impl Keep {
             Some("it is retained")
         } else if self.unsellable {
             Some("the server marks it unsellable")
+        } else if self.mine {
+            Some("the character lives on it")
         } else {
             None
         }

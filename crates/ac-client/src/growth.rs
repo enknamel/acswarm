@@ -907,11 +907,18 @@ pub fn offer_to_vendor(
     ammo: bool,
     burns: &[u32],
     keep: &[String],
+    stocked: bool,
     tagged: Option<LootAction>,
     judge: impl FnOnce() -> bool,
 ) -> bool {
     let forbidden = never_sell(stats)
         || ammo
+        // A thing the character goes to town to buy is not a thing the
+        // character goes to town to sell. Membership of the profile's
+        // buy list says so on its own, which is one rule in place of
+        // the four guards that used to try to say it and the profile
+        // path that heard none of them.
+        || stocked
         || crate::magic::is_focus(stats.wcid)
         || (stats.item_type & item_type::SPELL_COMPONENTS != 0 && burns.contains(&stats.wcid))
         || name_matches(&stats.name, keep);
@@ -1577,7 +1584,22 @@ impl Client {
     /// What the character is short of.
     fn grow_needs(&self, cfg: &Growth) -> Vec<Need> {
         let mut needs = Vec::new();
-        let mut named: Vec<(String, u32)> = cfg.keep_stocked.clone();
+        // The profile's buy list first: it is where a player says what
+        // to keep stocked now, and it is the same list that makes those
+        // things unsellable. `keep_stocked` is what it grew out of and
+        // is still read, so nobody's settings go quiet.
+        let mut named: Vec<(String, u32)> = self
+            .profiles
+            .get(&self.autoplay.config.loot.profile)
+            .map(|p| {
+                p.buy
+                    .iter()
+                    .filter(|b| b.on && b.keep > 0)
+                    .map(|b| (b.what.clone(), b.keep))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        named.extend(cfg.keep_stocked.iter().cloned());
         if self.autoplay.config.team.enabled {
             named.extend(self.autoplay.config.team.keep_stocked.iter().cloned());
         }
@@ -2004,7 +2026,7 @@ impl Client {
 
     /// Every name that is never sold: the player's own list, whatever
     /// is kept stocked, and whatever the loot rules always keep.
-    fn keep_names(&self, cfg: &Growth) -> Vec<String> {
+    pub(crate) fn keep_names(&self, cfg: &Growth) -> Vec<String> {
         let mut keep: Vec<String> = cfg.keep.clone();
         keep.extend(cfg.keep_stocked.iter().map(|(n, _)| n.clone()));
         keep.extend(
@@ -2106,6 +2128,7 @@ impl Client {
                     ammo,
                     &burns,
                     &keep,
+                    vendor.as_ref().is_some_and(|p| p.stocks(&stats.name)),
                     tags.get(&o.guid).copied(),
                     || match &vendor {
                         Some(p) => matches!(
@@ -3397,14 +3420,14 @@ mod tests {
         let mut taper = item("Prismatic Taper", item_type::SPELL_COMPONENTS, 5);
         taper.wcid = TAPER;
         assert!(
-            !offer_to_vendor(&taper, false, &burns, &[], None, sell_it_all),
+            !offer_to_vendor(&taper, false, &burns, &[], false, None, sell_it_all),
             "the components its own spells burn are never offered"
         );
 
         let mut pea = item("Pyreal Pea", item_type::SPELL_COMPONENTS, 50_000);
         pea.wcid = 8330;
         assert!(
-            offer_to_vendor(&pea, false, &burns, &[], None, sell_it_all),
+            offer_to_vendor(&pea, false, &burns, &[], false, None, sell_it_all),
             "a component it does not burn still pays for the trip"
         );
 
@@ -3415,6 +3438,7 @@ mod tests {
                 false,
                 &burns,
                 &["ornate ring".to_string()],
+                false,
                 None,
                 sell_it_all
             ),
@@ -3423,8 +3447,29 @@ mod tests {
 
         let arrow = item("Arrowhead", item_type::MISSILE_WEAPON, 20);
         assert!(
-            !offer_to_vendor(&arrow, true, &burns, &[], None, sell_it_all),
+            !offer_to_vendor(&arrow, true, &burns, &[], false, None, sell_it_all),
             "ammunition is not loot"
+        );
+    }
+
+    #[test]
+    fn nothing_on_the_shopping_list_is_ever_offered() {
+        // The one line that replaces four guards. A player who writes
+        // "sell anything worth under a thousand" has not said "sell my
+        // Peas", and a Blue Pea is 3,125 pyreals to replace.
+        let mut pea = item("Blue Pea", item_type::SPELL_COMPONENTS, 3_125);
+        pea.wcid = 8346;
+        assert!(
+            !offer_to_vendor(&pea, false, &[], &[], true, None, || true),
+            "on the buy list, so never sold"
+        );
+        assert!(
+            !offer_to_vendor(&pea, false, &[], &[], true, Some(LootAction::Sell), || true),
+            "not even when something tagged it to sell"
+        );
+        assert!(
+            offer_to_vendor(&pea, false, &[], &[], false, None, || true),
+            "off the list, it is vendor trash like any other"
         );
     }
 
@@ -3438,17 +3483,25 @@ mod tests {
 
         for kept in [LootAction::Keep, LootAction::Salvage, LootAction::Skip] {
             assert!(
-                !offer_to_vendor(&ring, false, &[], &[], Some(kept), sell_it_all),
+                !offer_to_vendor(&ring, false, &[], &[], false, Some(kept), sell_it_all),
                 "taken to {}, so not sold",
                 kept.label()
             );
         }
         assert!(
-            offer_to_vendor(&ring, false, &[], &[], Some(LootAction::Sell), || false),
+            offer_to_vendor(
+                &ring,
+                false,
+                &[],
+                &[],
+                false,
+                Some(LootAction::Sell),
+                || false
+            ),
             "taken to sell, so sold, whatever the rules say now"
         );
         assert!(
-            offer_to_vendor(&ring, false, &[], &[], None, sell_it_all),
+            offer_to_vendor(&ring, false, &[], &[], false, None, sell_it_all),
             "nothing decided: the rules answer"
         );
     }

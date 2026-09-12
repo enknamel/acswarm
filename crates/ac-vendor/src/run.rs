@@ -601,6 +601,36 @@ mod tests {
     }
 
     #[test]
+    fn the_things_the_character_lives_on_are_not_stock() {
+        // The counter used to be handed every carried item less the
+        // server's own five refusals. The only component guard here
+        // spares a want it is *short* of -- so a mage with its full
+        // thousand tapers had them sold, and its Peas, and the focus,
+        // and the healing kits it bought an hour before. What the loot
+        // policy keeps back is a sixth refusal now, decided before the
+        // snapshot is built.
+        let now = Instant::now();
+        let mut tapers = item(4, "Prismatic Taper", 5_000, 1000, 1000);
+        tapers.keep.mine = true;
+        let mut run = Run::new();
+        let next = run.step(&snap(vec![tapers]), now);
+        assert_ne!(
+            next.act,
+            Some(Act::Sell { items: vec![4] }),
+            "sold the tapers: {}",
+            next.saying
+        );
+        assert_eq!(
+            Keep {
+                mine: true,
+                ..Default::default()
+            }
+            .why(),
+            Some("the character lives on it")
+        );
+    }
+
+    #[test]
     fn what_must_never_be_sold_is_never_offered() {
         let now = Instant::now();
         for (what, mut keep) in [
@@ -609,12 +639,14 @@ mod tests {
             ("equipped", Keep::default()),
             ("retained", Keep::default()),
             ("unsellable", Keep::default()),
+            ("mine", Keep::default()),
         ] {
             match what {
                 "tinkered" => keep.tinkered = true,
                 "inscribed" => keep.inscribed = true,
                 "equipped" => keep.equipped = true,
                 "retained" => keep.retained = true,
+                "mine" => keep.mine = true,
                 _ => keep.unsellable = true,
             }
             let mut it = item(3, "Sword", 50_000, 1, 1);

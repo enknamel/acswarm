@@ -25,7 +25,15 @@ impl Client {
     pub fn vendor_snapshot(&self, cfg: &Growth) -> Snapshot {
         let stats = self.item_stats();
         let (carried, capacity) = self.burden();
-        let items = stats.iter().map(|s| self.describe_for_sale(s)).collect();
+        // What the loot policy allows to go. Without this the counter
+        // is offered every carried item less the server's own five
+        // refusals -- the Peas, the focus, the arrows and the healing
+        // kits the character bought an hour ago along with them.
+        let mine = self.not_for_sale(cfg, &stats);
+        let items = stats
+            .iter()
+            .map(|s| self.describe_for_sale(s, mine.contains(&s.guid)))
+            .collect();
         let mut notes: BTreeMap<u32, u32> = BTreeMap::new();
         for o in self.world.inventory() {
             if o.item_type & ac_world::item_type::PROMISSORY_NOTE != 0 {
@@ -50,12 +58,55 @@ impl Client {
         }
     }
 
+    /// The carried things the loot policy will not let go: what was
+    /// picked up to keep or to salvage, what the profile keeps stocked,
+    /// the components this character's own spells burn, the focus that
+    /// halves them, and anything the player named by hand.
+    ///
+    /// This is the same judgement the forecast makes before setting off
+    /// (`growth::offer_to_vendor`); it was only ever applied there, and
+    /// the counter in front of the character was handed everything.
+    fn not_for_sale(&self, cfg: &Growth, stats: &[ItemStats]) -> std::collections::BTreeSet<u32> {
+        let burns = self.burns(cfg);
+        let keep = self.keep_names(cfg);
+        let profile = self.profiles.get(&self.autoplay.config.loot.profile);
+        let wielder = self.wielder();
+        let me = self.world.stats.name.clone();
+        stats
+            .iter()
+            .filter(|s| {
+                let ammo = s.valid_locations & ac_world::equip::MISSILE_AMMO != 0;
+                let stocked = profile.as_ref().is_some_and(|p| p.stocks(&s.name));
+                !crate::growth::offer_to_vendor(
+                    s,
+                    ammo,
+                    &burns,
+                    &keep,
+                    stocked,
+                    self.autoplay.ledger.of(s),
+                    || {
+                        profile.as_ref().is_some_and(|p| {
+                            matches!(
+                                p.judge(s, self.appraisals.get(&s.guid), &wielder, &me, 0),
+                                crate::profile::Verdict::Decided(
+                                    crate::autoplay::LootAction::Sell,
+                                    _
+                                )
+                            )
+                        })
+                    },
+                )
+            })
+            .map(|s| s.guid)
+            .collect()
+    }
+
     /// One carried thing, and the reasons it may not be sold.
     ///
     /// The five refusals are settled and no profile may override them:
     /// tinkered or inscribed is somebody's work, equipped is being
     /// worn, and the last two are the server's own word.
-    fn describe_for_sale(&self, s: &ItemStats) -> Item {
+    fn describe_for_sale(&self, s: &ItemStats, mine: bool) -> Item {
         let holds_anything = self
             .world
             .objects
@@ -77,6 +128,7 @@ impl Client {
                 inscribed: s.inscribed,
                 equipped: s.wielded,
                 retained: false,
+                mine,
                 unsellable: s.unsellable
                     || s.value == 0
                     || (s.item_type & ac_world::item_type::CONTAINER != 0 && holds_anything),
