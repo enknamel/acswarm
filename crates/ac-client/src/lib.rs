@@ -16,6 +16,10 @@ pub mod explore;
 // `ac-agent`. Re-exported under its old names so that nothing which
 // says `crate::did` or `crate::pack` has to care where it went.
 pub use ac_agent::{did, pack, weenie_errors};
+// The judgements about carried items live in ac-loot now (the search
+// language, what to wield, how a character fights); the client keeps
+// the network side of them.
+pub use ac_loot::weapons::Stance;
 // Getting somewhere is its own system now (`ac-nav`), with the world
 // behind a trait so that a route can be argued about without one.
 pub use ac_nav::steering as route;
@@ -1942,25 +1946,6 @@ impl Client {
         self.session
             .send_action(action::GET_AND_WIELD_ITEM, &w.finish());
         true
-    }
-}
-
-/// How a character fights, which is not a setting but a consequence of
-/// what it is holding.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Stance {
-    Melee,
-    Missile,
-    Magic,
-}
-
-impl Stance {
-    pub fn label(self) -> &'static str {
-        match self {
-            Stance::Melee => "melee",
-            Stance::Missile => "missile",
-            Stance::Magic => "magic",
-        }
     }
 }
 

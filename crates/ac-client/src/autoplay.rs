@@ -37,6 +37,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::items::Query;
 use crate::{Client, Stance};
+// The rule vocabulary lives in ac-loot; this file still speaks it.
+pub use ac_loot::profile::LootAction;
 
 /// How long to wait for a corpse to open before asking again, when it
 /// is right under our feet. A corpse further off is given time for the
@@ -300,50 +302,6 @@ impl Style {
     }
 
     pub const ALL: [Style; 4] = [Style::Auto, Style::Melee, Style::Missile, Style::Magic];
-}
-
-/// What to do with an item a loot rule matches.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum LootAction {
-    /// Take it and keep it.
-    #[default]
-    Keep,
-    /// Take it and salvage it (or carry it to whoever salvages).
-    Salvage,
-    /// Take it to sell on the next run to town.
-    Sell,
-    /// Leave it on the corpse.
-    Skip,
-}
-
-impl LootAction {
-    pub const ALL: [LootAction; 4] = [
-        LootAction::Keep,
-        LootAction::Salvage,
-        LootAction::Sell,
-        LootAction::Skip,
-    ];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            LootAction::Keep => "keep",
-            LootAction::Salvage => "salvage",
-            LootAction::Sell => "sell",
-            LootAction::Skip => "skip",
-        }
-    }
-
-    /// The action a word names ("keep", "salvage", "sell", "skip").
-    pub fn parse(word: &str) -> Option<LootAction> {
-        let w = word.trim().to_lowercase();
-        LootAction::ALL.into_iter().find(|a| a.label() == w)
-    }
-
-    /// Whether an item the rule matches is picked up at all.
-    pub fn takes(self) -> bool {
-        self != LootAction::Skip
-    }
 }
 
 /// One loot rule: a search in the inventory's language and what to do
