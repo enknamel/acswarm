@@ -863,14 +863,31 @@ pub fn judge_loot(
     }
 }
 
-/// Whether an item that turned up in the pack (given, bought, made)
-/// should be tagged, and with what: the rules' salvage and sell
-/// verdicts, since keep and skip mean nothing for something already
-/// carried. A salvage bag is only tagged when a rule names it.
-pub fn arrival_tag(stats: &crate::items::ItemStats, l: &Loot) -> Option<LootAction> {
-    match loot_action(stats, l) {
-        a @ (LootAction::Salvage | LootAction::Sell) => Some(a),
-        _ => None,
+/// What to write down about something that turned up in the pack
+/// (given, bought, made) rather than off a corpse.
+///
+/// The same judgement as a corpse item's, and by the same profile: a
+/// bundle of arrowheads is a bundle of arrowheads whether it came off a
+/// drudge or over a counter, and it used to be judged by two different
+/// sets of rules depending on which. `Keep` is written down too, where
+/// this once answered only Salvage or Sell -- "the character means to
+/// keep this" is exactly what the vendor side needs to hear, and
+/// silence let it be sold.
+pub fn arrival_tag(
+    stats: &crate::items::ItemStats,
+    id: Option<&ac_net::messages::Appraisal>,
+    l: &Loot,
+    library: &crate::profile::Library,
+    me: &crate::weapons::Wielder,
+    my_name: &str,
+    held: u32,
+) -> Option<LootAction> {
+    match judge_loot(stats, id, l, library, me, my_name, held) {
+        crate::profile::Verdict::Decided(LootAction::Skip, _) => None,
+        crate::profile::Verdict::Decided(a, _) => Some(a),
+        // Not judgeable yet, or nothing claimed it: nothing to write
+        // down, and the pack keeps it either way.
+        crate::profile::Verdict::NeedsId(_) | crate::profile::Verdict::None => None,
     }
 }
 
@@ -1810,7 +1827,10 @@ impl Client {
         };
         let wielder = self.wielder();
         let who = self.world.stats.name.clone();
-        let lying = items
+        // What has already been spoken for off this body counts towards
+        // a cap (see `ac_loot::Claimed`).
+        let mut claimed = ac_loot::corpse::Claimed::default();
+        let lying: Vec<ac_loot::Lying> = items
             .iter()
             .filter_map(|g| {
                 let stats = self.stats_of(*g)?;
@@ -1819,9 +1839,11 @@ impl Client {
                 if self.refused_lately(stats.wcid, now) {
                     return None;
                 }
-                let held = self.already_carried(stats.wcid);
+                let held = self.already_carried(stats.wcid) + claimed.of(stats.wcid);
                 let verdict = if mine {
-                    ac_loot::Verdict::Take
+                    // Our own body: everything on it is ours, and what
+                    // it is for is what the profile would have said.
+                    ac_loot::Verdict::Take(LootAction::Keep)
                 } else {
                     match judge_loot(
                         &stats,
@@ -1832,7 +1854,9 @@ impl Client {
                         &who,
                         held,
                     ) {
-                        Judged::Decided(action, _) if action.takes() => ac_loot::Verdict::Take,
+                        Judged::Decided(action, _) if action.takes() => {
+                            ac_loot::Verdict::Take(action)
+                        }
                         Judged::Decided(_, _) => ac_loot::Verdict::Leave,
                         // Only worth asking about when asking is allowed
                         // and might answer.
@@ -1840,6 +1864,9 @@ impl Client {
                         Judged::NeedsId(_) | Judged::None => ac_loot::Verdict::Leave,
                     }
                 };
+                if matches!(verdict, ac_loot::Verdict::Take(_)) {
+                    claimed.take(stats.wcid, stats.stack.max(1));
+                }
                 Some(ac_loot::Lying {
                     guid: *g,
                     name: stats.name.clone(),
@@ -1858,28 +1885,6 @@ impl Client {
             carry_room: self.carry_room(),
             may_ask: cfg.appraise,
             asking: self.appraise_inflight.iter().map(|(g, _)| *g).collect(),
-        }
-    }
-
-    fn loot_verdict(&self, stats: &crate::items::ItemStats, cfg: &Loot) -> LootAction {
-        use crate::profile::Verdict;
-        let me = self.wielder();
-        let name = self.world.stats.name.clone();
-        let held = self.already_carried(stats.wcid);
-        match judge_loot(
-            stats,
-            self.appraisals.get(&stats.guid),
-            cfg,
-            &self.profiles,
-            &me,
-            &name,
-            held,
-        ) {
-            Verdict::Decided(action, _) => action,
-            // Still cannot say, because the server was never asked (the
-            // appraising is switched off, or it would not answer). A
-            // rule that cannot be judged has not claimed anything.
-            Verdict::NeedsId(_) | Verdict::None => LootAction::Skip,
         }
     }
 
@@ -2087,11 +2092,13 @@ impl Client {
                     return true;
                 }
                 Some(ac_loot::Act::Take(g)) => {
-                    if let Some(stats) = self.stats_of(g) {
-                        let action = self.loot_verdict(&stats, &cfg);
-                        if action.takes() {
-                            self.autoplay.tag(&stats, action);
-                        }
+                    // What it is being taken for was settled when the
+                    // lid came up; it is not asked again here, because
+                    // asking again is how the two answers came to
+                    // differ.
+                    let took = at.items.iter().find(|i| i.guid == g).and_then(|i| i.took());
+                    if let (Some(action), Some(stats)) = (took, self.stats_of(g)) {
+                        self.autoplay.tag(&stats, action);
                     }
                     self.take(g);
                     self.autoplay.say(Doing::Looting, next.saying);
@@ -2547,6 +2554,8 @@ impl Client {
     /// salvage a teammate handed over, mostly. The first pass only
     /// notes what is carried.
     fn autoplay_tag_arrivals(&mut self, now: Instant, cfg: &Loot) {
+        let wielder = self.wielder();
+        let who = self.world.stats.name.clone();
         let carried: Vec<u32> = self
             .world
             .inventory()
@@ -2582,7 +2591,16 @@ impl Client {
                 self.autoplay.pending_tags.push((g, since));
                 continue;
             }
-            if let Some(action) = arrival_tag(&stats, cfg) {
+            let held = self.already_carried(stats.wcid);
+            if let Some(action) = arrival_tag(
+                &stats,
+                self.appraisals.get(&g),
+                cfg,
+                &self.profiles,
+                &wielder,
+                &who,
+                held,
+            ) {
                 tracing::info!(
                     "autoplay: {} arrived, tagged {}",
                     stats.name,
@@ -4822,15 +4840,29 @@ mod tests {
         l.never.clear();
         l.always = vec!["gold".into()];
         assert_eq!(loot_action(&one, &l), LootAction::Keep);
-        // What arrives in the pack is only tagged for salvage or sale.
+        // What arrives in the pack is judged by the same rules as what
+        // is lying on a corpse, and by the same profile: a bundle of
+        // arrowheads is a bundle of arrowheads whether it came off a
+        // drudge or over a counter.
         l.always.clear();
-        assert_eq!(arrival_tag(&one, &l), Some(LootAction::Salvage));
-        assert_eq!(arrival_tag(&two, &l), None);
-        assert_eq!(arrival_tag(&item("Rusty Nail", 3, 0), &l), None);
+        let shelf = crate::profile::Library::default();
+        let me = crate::weapons::Wielder::default();
+        let tag = |s: &crate::items::ItemStats, l: &Loot| {
+            arrival_tag(s, None, l, &shelf, &me, "Aldric", 0)
+        };
+        assert_eq!(tag(&one, &l), Some(LootAction::Salvage));
         assert_eq!(
-            arrival_tag(&item("Platemail", 100, 240), &l),
+            tag(&item("Platemail", 100, 240), &l),
             Some(LootAction::Sell)
         );
+        // Nothing claimed it, so there is nothing to write down.
+        assert_eq!(tag(&item("Rusty Nail", 3, 0), &l), None);
+        // A keeper is written down now, where this used to answer only
+        // salvage or sale. Silence is what let the vendor side sell
+        // something the character meant to keep.
+        l.always = vec!["gold".into()];
+        assert_eq!(tag(&two, &l), Some(LootAction::Keep));
+        l.always.clear();
         assert_eq!(LootAction::parse("Salvage"), Some(LootAction::Salvage));
         assert_eq!(LootAction::parse("burn"), None);
         assert!(l.needs_appraisal());

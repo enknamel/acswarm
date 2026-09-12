@@ -182,6 +182,7 @@ impl Run {
 mod tests {
     use super::*;
     use crate::corpse::Lying;
+    use crate::profile::LootAction;
 
     fn thing(guid: u32, name: &str, verdict: Verdict) -> Lying {
         Lying {
@@ -209,7 +210,7 @@ mod tests {
     #[test]
     fn it_walks_to_the_body_and_opens_it_before_anything_else() {
         let mut run = Run::new();
-        let mut at = body(vec![thing(1, "Dagger", Verdict::Take)]);
+        let mut at = body(vec![thing(1, "Dagger", Verdict::Take(LootAction::Keep))]);
         at.away = 8.0;
         assert_eq!(run.step(&at, Instant::now()).act, Some(Act::Approach));
         at.away = 1.0;
@@ -225,8 +226,8 @@ mod tests {
         // round trip at all.
         let mut run = Run::new();
         let at = body(vec![
-            thing(1, "Dagger", Verdict::Take),
-            thing(2, "Pyreal", Verdict::Take),
+            thing(1, "Dagger", Verdict::Take(LootAction::Keep)),
+            thing(2, "Pyreal", Verdict::Take(LootAction::Keep)),
             thing(3, "Odd Ring", Verdict::MustAsk),
             thing(4, "Odd Gem", Verdict::MustAsk),
         ]);
@@ -240,7 +241,7 @@ mod tests {
     fn a_corpse_it_can_judge_alone_is_never_asked_about() {
         let mut run = Run::new();
         let at = body(vec![
-            thing(1, "Dagger", Verdict::Take),
+            thing(1, "Dagger", Verdict::Take(LootAction::Keep)),
             thing(2, "Rock", Verdict::Leave),
         ]);
         assert_eq!(run.step(&at, Instant::now()).act, Some(Act::Take(1)));
@@ -254,12 +255,12 @@ mod tests {
         let now = Instant::now();
         let mut run = Run::new();
         let at = body(vec![
-            thing(1, "Dagger", Verdict::Take),
-            thing(2, "Shield", Verdict::Take),
+            thing(1, "Dagger", Verdict::Take(LootAction::Keep)),
+            thing(2, "Shield", Verdict::Take(LootAction::Keep)),
         ]);
         assert_eq!(run.step(&at, now).act, Some(Act::Take(1)));
         // It came out: the same instant, the next one goes.
-        let at = body(vec![thing(2, "Shield", Verdict::Take)]);
+        let at = body(vec![thing(2, "Shield", Verdict::Take(LootAction::Keep))]);
         assert_eq!(run.step(&at, now).act, Some(Act::Take(2)));
     }
 
@@ -268,8 +269,8 @@ mod tests {
         let now = Instant::now();
         let mut run = Run::new();
         let at = body(vec![
-            thing(1, "Stuck Thing", Verdict::Take),
-            thing(2, "Dagger", Verdict::Take),
+            thing(1, "Stuck Thing", Verdict::Take(LootAction::Keep)),
+            thing(2, "Dagger", Verdict::Take(LootAction::Keep)),
         ]);
         assert_eq!(run.step(&at, now).act, Some(Act::Take(1)));
         // Still there a moment later: not asked again immediately.
@@ -285,7 +286,7 @@ mod tests {
         // without telling the server, so it stayed open and the next
         // could not be opened.
         let mut run = Run::new();
-        let mut at = body(vec![thing(1, "Dagger", Verdict::Take)]);
+        let mut at = body(vec![thing(1, "Dagger", Verdict::Take(LootAction::Keep))]);
         at.slots_free = 0;
         let next = run.step(&at, Instant::now());
         assert_eq!(next.act, Some(Act::Close), "{}", next.saying);
@@ -294,7 +295,7 @@ mod tests {
     #[test]
     fn too_laden_also_closes_it() {
         let mut run = Run::new();
-        let mut at = body(vec![thing(1, "Dagger", Verdict::Take)]);
+        let mut at = body(vec![thing(1, "Dagger", Verdict::Take(LootAction::Keep))]);
         at.carry_room = 0;
         assert_eq!(run.step(&at, Instant::now()).act, Some(Act::Close));
     }
@@ -303,9 +304,12 @@ mod tests {
     fn something_heavier_than_it_can_carry_is_left_and_the_rest_taken() {
         let now = Instant::now();
         let mut run = Run::new();
-        let mut heavy = thing(1, "Anvil", Verdict::Take);
+        let mut heavy = thing(1, "Anvil", Verdict::Take(LootAction::Keep));
         heavy.burden = 9_000;
-        let at = body(vec![heavy, thing(2, "Dagger", Verdict::Take)]);
+        let at = body(vec![
+            heavy,
+            thing(2, "Dagger", Verdict::Take(LootAction::Keep)),
+        ]);
         let mut at = at;
         at.carry_room = 100;
         // The anvil is refused, and the dagger still goes in the pack.
@@ -329,7 +333,11 @@ mod tests {
         // never Refused.
         let now = Instant::now();
         let mut run = Run::new();
-        let at = body(vec![thing(1, "Stuck Thing", Verdict::Take)]);
+        let at = body(vec![thing(
+            1,
+            "Stuck Thing",
+            Verdict::Take(LootAction::Keep),
+        )]);
         run.step(&at, now);
         let next = run.step(&at, now + KEEP_AT_IT + Duration::from_secs(1));
         assert_eq!(next.act, Some(Act::Close));
@@ -349,9 +357,9 @@ mod tests {
         let now = Instant::now();
         let mut run = Run::new();
         let at = body(vec![
-            thing(1, "First", Verdict::Take),
-            thing(2, "Second", Verdict::Take),
-            thing(3, "Third", Verdict::Take),
+            thing(1, "First", Verdict::Take(LootAction::Keep)),
+            thing(2, "Second", Verdict::Take(LootAction::Keep)),
+            thing(3, "Third", Verdict::Take(LootAction::Keep)),
         ]);
         assert_eq!(run.step(&at, now).act, Some(Act::Take(1)));
         // Nothing has left the corpse, so nothing else is asked for,
@@ -361,8 +369,8 @@ mod tests {
         }
         // Only when the first is gone does the next go out.
         let at = body(vec![
-            thing(2, "Second", Verdict::Take),
-            thing(3, "Third", Verdict::Take),
+            thing(2, "Second", Verdict::Take(LootAction::Keep)),
+            thing(3, "Third", Verdict::Take(LootAction::Keep)),
         ]);
         assert_eq!(run.step(&at, now).act, Some(Act::Take(2)));
     }
