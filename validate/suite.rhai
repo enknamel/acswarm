@@ -234,16 +234,36 @@ fn command(name, args) {
         if rules.len() > 0 { says = rules[0].name + " -> " + rules[0].action; }
         want("a_rule_added_is_live_at_once", loot_action(g) == "sell",
              "guid=" + g + " says \"" + loot_action(g) + "\", rule: " + says);
-        // A stack is written down like anything else now. Tag it, then
-        // take the rule away: with no rule left to claim it, a "sell"
-        // answer can only be coming from the ledger, which is the whole
-        // point of writing stacks down.
+        // A stack is written down like anything else now, where the
+        // ledger used to skip it because split and merge churn its id.
         let wrote = loot_tag(g);
+        want("a_stack_is_written_down", wrote == "sell",
+             "wrote \"" + wrote + "\" against a stack of tapers");
+        // Now change the rules under the decision. Nothing re-tags
+        // this by hand: editing the profile is what has to reach back,
+        // because an answer written down under the old rules answers a
+        // question nobody is asking any more.
         loot_rules_clear();
-        want("a_stack_is_remembered_not_rejudged",
-             wrote == "sell" && loot_action(g) == "sell",
-             "wrote \"" + wrote + "\", with no rules left it still says \""
-             + loot_action(g) + "\"");
+        loot_rule_add("taper", "keep");
+        return true;
+    }
+    if name == "v_loot_rejudge" {
+        let g = board_get("loot_guid");
+        want("editing_the_profile_re_judges_what_is_carried",
+             loot_action(g) == "keep",
+             "was written down as \"sell\", the rule now says keep, the "
+             + "ledger says \"" + loot_action(g) + "\"");
+        // And taking the rule away altogether leaves no decision at
+        // all -- which is not a decision to be rid of it.
+        loot_rules_clear();
+        return true;
+    }
+    if name == "v_loot_forgotten" {
+        let g = board_get("loot_guid");
+        want("a_deleted_rule_leaves_no_decision_behind",
+             loot_action(g) == "",
+             "with the rule gone the ledger says \"" + loot_action(g) + "\"");
+        loot_rule_add("taper", "sell");
         return true;
     }
     // The record has to reach a search across every character, so a pile

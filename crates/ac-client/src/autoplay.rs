@@ -117,6 +117,14 @@ const GIVE_REACH: f32 = 2.0;
 /// How long an item that arrived in the pack waits for its appraisal
 /// before the rules judge it as it is.
 const TAG_TIMEOUT: Duration = Duration::from_secs(15);
+/// How often the pack is judged afresh while a re-judge is waiting on
+/// appraisals.
+///
+/// The answers cannot change faster than the server sends them, so
+/// there is nothing to be had from asking every frame -- and a hundred
+/// and fifty items judged sixty times a second for the fifteen seconds
+/// an appraisal may take is real work for no answer.
+const RETAG_EVERY: Duration = Duration::from_millis(250);
 /// The Salvaging skill.
 const SALVAGING: u32 = 40;
 /// How often the buffs are gone through to see what is due.
@@ -782,6 +790,32 @@ pub fn judge_loot(
     }
 }
 
+/// Each carried thing paired with how many of its kind come at or
+/// before it, oldest first.
+///
+/// `carried` is `(guid, wcid, stack)`. The server hands out rising ids,
+/// so sorting by guid is the order the character came by the things in,
+/// and the running count is what a rule with a `keep_up_to` on it was
+/// answered with when they arrived one at a time.
+///
+/// The whole point is not to hand every item the pack's total. A rule
+/// that keeps up to two rings, asked about three rings and told three
+/// times that three are carried, claims none of them -- and a profile
+/// edit would turn a set of keepers into a set of vendor trash in one
+/// pass.
+fn in_arrival_order(carried: &mut [(u32, u32, u32)]) -> Vec<(u32, u32)> {
+    carried.sort_unstable();
+    let mut seen_of: std::collections::BTreeMap<u32, u32> = std::collections::BTreeMap::new();
+    carried
+        .iter()
+        .map(|(guid, wcid, stack)| {
+            let n = seen_of.entry(*wcid).or_insert(0);
+            *n += stack;
+            (*guid, *n)
+        })
+        .collect()
+}
+
 /// What to write down about something that turned up in the pack
 /// (given, bought, made) rather than off a corpse.
 ///
@@ -988,6 +1022,19 @@ pub struct Autoplay {
     /// Arrivals waiting for their appraisal before the rules judge
     /// them, and since when.
     pending_tags: Vec<(u32, Instant)>,
+    /// The rules the ledger's decisions were made under: the profile
+    /// by identity (the shelf replaces the whole thing on every edit)
+    /// and a hash of the two name lists beside it. `None` before the
+    /// first look.
+    judged_under: Option<(Option<std::sync::Arc<crate::profile::Profile>>, u64)>,
+    /// A re-judge of the whole pack is under way, since when.
+    ///
+    /// It is not one pass: an item a rule cannot judge until it is
+    /// appraised has to wait for the server, so the pass runs again
+    /// until nothing is waiting or it gives up ([`TAG_TIMEOUT`]).
+    retagging: Option<Instant>,
+    /// When the next of those passes is due ([`RETAG_EVERY`]).
+    retag_due: Option<Instant>,
     /// The salvage batch sent, and when; refused batches and hand-offs
     /// are counted per item so a stubborn one is given up on.
     salvaging: Option<(Vec<u32>, Instant)>,
@@ -1739,6 +1786,167 @@ impl Client {
             crate::profile::Verdict::Decided(a, _) => Some(a),
             crate::profile::Verdict::NeedsId(_) | crate::profile::Verdict::None => None,
         }
+    }
+
+    /// Notice the rules changing and re-judge what is already carried.
+    ///
+    /// A decision stands for as long as the rules that made it do. It
+    /// has to: a character that judged its pack afresh every time it
+    /// looked would sell the ring it kept the moment the pack filled,
+    /// which is the whole reason the ledger exists. But the *rules*
+    /// changing is the one thing that should reach back. The player has
+    /// just said what their things are worth, and a decision written
+    /// down under the old rules is an answer to a question nobody is
+    /// asking any more.
+    ///
+    /// Runs whatever else the character is doing, autoplay off
+    /// included: the ledger is what the Items window reads, and it
+    /// should not be telling somebody their mule is holding things for
+    /// a rule they deleted.
+    pub(crate) fn tick_retag(&mut self, now: Instant) {
+        let profile = self.profiles.get(&self.autoplay.config.loot.profile);
+        let names = self.name_lists_fingerprint();
+        // The cheap half, run every frame: has the shelf handed out a
+        // different profile, or have the name lists been typed in? The
+        // shelf replaces the whole profile on every edit, so identity
+        // answers it without reading a rule.
+        let untouched = match &self.autoplay.judged_under {
+            Some((was, hash)) => {
+                *hash == names
+                    && match (was, &profile) {
+                        (None, None) => true,
+                        (Some(a), Some(b)) => std::sync::Arc::ptr_eq(a, b),
+                        _ => false,
+                    }
+            }
+            None => false,
+        };
+        if !untouched {
+            // A character that has not entered the world yet has no
+            // pack to judge and no name to file a ledger under. Leave
+            // the rules unrecorded so this runs again once it has.
+            if self.world.stats.name.trim().is_empty() {
+                return;
+            }
+            let rules = self.rules_fingerprint(profile.as_deref(), names);
+            self.autoplay.judged_under = Some((profile, names));
+            // Something was handed out, but were the rules themselves
+            // any different? Typing in a profile's note replaces it
+            // without changing a single answer, and neither does
+            // opening a client that has been shut since the last edit.
+            //
+            // This is also what keeps a decision from being re-made on
+            // every login. Judging the pack afresh each time is the one
+            // thing the ledger exists to prevent: a rule that keeps up
+            // to a number reads the pack it is in, and a pack that has
+            // since filled turns yesterday's keepers into today's
+            // vendor trash.
+            if self.autoplay.ledger.rules() == Some(rules) {
+                return;
+            }
+            self.autoplay.ledger.judged_under(rules);
+            self.autoplay.retagging = Some(now);
+            self.autoplay.retag_due = Some(now);
+        }
+        let Some(since) = self.autoplay.retagging else {
+            return;
+        };
+        if self.autoplay.retag_due.is_some_and(|due| now < due) {
+            return;
+        }
+        self.autoplay.retag_due = Some(now + RETAG_EVERY);
+        if self.retag_pack(now.duration_since(since) >= TAG_TIMEOUT) {
+            self.autoplay.retagging = None;
+            self.autoplay.retag_due = None;
+        }
+    }
+
+    /// The player's two name lists, as one number.
+    fn name_lists_fingerprint(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        self.autoplay.config.loot.always.hash(&mut h);
+        self.autoplay.config.loot.never.hash(&mut h);
+        h.finish()
+    }
+
+    /// Everything that decides an item, as one number: the profile's
+    /// rules and the name lists that are read before them. A character
+    /// reading no profile still has a fingerprint, so being given one
+    /// counts as a change.
+    fn rules_fingerprint(&self, profile: Option<&crate::profile::Profile>, names: u64) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        profile.map(|p| p.fingerprint()).hash(&mut h);
+        names.hash(&mut h);
+        h.finish()
+    }
+
+    /// Judge everything carried against the rules as they stand now and
+    /// write the answers down. True when nothing is left waiting on an
+    /// appraisal, so the caller can stop.
+    ///
+    /// `settle` says to take the answer as it is rather than go on
+    /// waiting for the server.
+    ///
+    /// Items are gone through oldest first and each is told how many of
+    /// its kind come at or before it, rather than how many are carried
+    /// altogether. That is what a rule with a `keep_up_to` on it was
+    /// answered with when the things arrived one at a time, and telling
+    /// all three rings that three rings are carried would put every one
+    /// of them over a cap of two -- turning a set of keepers into a set
+    /// of vendor trash in one pass.
+    fn retag_pack(&mut self, settle: bool) -> bool {
+        let cfg = self.autoplay.config.loot.clone();
+        let wielder = self.wielder();
+        let who = self.world.stats.name.clone();
+        let mut carried: Vec<(u32, u32, u32)> = self
+            .world
+            .inventory()
+            .chain(self.world.wielded())
+            .map(|o| (o.guid, o.weenie_class_id, o.stack_size.max(1)))
+            .collect();
+        let mut waiting = Vec::new();
+        for (guid, held) in in_arrival_order(&mut carried) {
+            let Some(stats) = self.stats_of(guid) else {
+                continue;
+            };
+            match judge_loot(
+                &stats,
+                self.appraisals.get(&guid),
+                &cfg,
+                &self.profiles,
+                &wielder,
+                &who,
+                held,
+            ) {
+                crate::profile::Verdict::Decided(LootAction::Skip, _)
+                | crate::profile::Verdict::None => {
+                    // Nothing claims it any more. That is not a decision
+                    // to be rid of it -- it is no decision at all, and
+                    // an item with no entry is never sold.
+                    self.autoplay.ledger.forget(guid);
+                }
+                crate::profile::Verdict::Decided(action, _) => {
+                    if self.autoplay.ledger.of(&stats) != Some(action) {
+                        self.autoplay.tag(&stats, action);
+                    }
+                }
+                // A rule wants it but cannot say so until the server has
+                // identified it. Yesterday's answer stands in the
+                // meantime rather than being thrown away over a question
+                // that has not been answered.
+                crate::profile::Verdict::NeedsId(_) if !settle && !stats.appraised => {
+                    waiting.push(guid);
+                }
+                crate::profile::Verdict::NeedsId(_) => {}
+            }
+        }
+        if waiting.is_empty() {
+            return true;
+        }
+        self.appraise_many(waiting);
+        false
     }
 
     /// Judge a carried item by this character's profile and write down
@@ -4948,6 +5156,29 @@ mod tests {
         assert_eq!(best_salvager(std::iter::empty()), None);
         // Someone not yet in the world (guid 0) cannot be handed anything.
         assert_eq!(best_salvager([mate("Nobody", 0, 999, true)].iter()), None);
+    }
+
+    #[test]
+    fn a_re_judged_pack_counts_each_kind_as_it_goes() {
+        // Three rings and two piles of tapers, in the order they were
+        // come by. Each ring is told it is the first, second, third of
+        // its kind -- not that three are carried -- so a rule that
+        // keeps up to two still claims two of them.
+        let mut carried = vec![
+            (30, 500, 1),   // third ring
+            (10, 500, 1),   // first ring
+            (25, 691, 300), // second pile of tapers
+            (20, 500, 1),   // second ring
+            (15, 691, 120), // first pile of tapers
+        ];
+        assert_eq!(
+            in_arrival_order(&mut carried),
+            vec![(10, 1), (15, 120), (20, 2), (25, 420), (30, 3)]
+        );
+        // A stack counts for what it holds, not for one.
+        let mut one = vec![(7, 691, 4059)];
+        assert_eq!(in_arrival_order(&mut one), vec![(7, 4059)]);
+        assert!(in_arrival_order(&mut []).is_empty());
     }
 
     #[test]

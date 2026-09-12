@@ -137,6 +137,14 @@ pub struct Ledger {
     /// right, because nothing has compared against it yet.
     #[serde(skip)]
     version: u64,
+    /// A fingerprint of the rules these decisions were made under.
+    ///
+    /// Written out with them, so that a profile edited while the client
+    /// was off is noticed when it comes back. `None` in a file from
+    /// before this was recorded, which reads as "unknown" and is left
+    /// alone rather than re-judged on a guess.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    rules: Option<u64>,
     /// A file was there and would not be read.
     ///
     /// This is not the same as having nothing written down, and the
@@ -164,6 +172,20 @@ impl Ledger {
     /// A number that changes whenever any decision here does.
     pub fn version(&self) -> u64 {
         self.version
+    }
+
+    /// The fingerprint of the rules these decisions were made under, or
+    /// `None` when it was never recorded.
+    pub fn rules(&self) -> Option<u64> {
+        self.rules
+    }
+
+    /// Record which rules the decisions now standing were made under.
+    pub fn judged_under(&mut self, rules: u64) {
+        if self.rules != Some(rules) {
+            self.rules = Some(rules);
+            self.changed();
+        }
     }
 
     /// Write down what an item was taken for.
@@ -415,6 +437,33 @@ mod tests {
         l.remember(&thing(1, 500, "Ornate Ring"), LootAction::Sell);
         let sword = thing(1, 999, "Shou-jen Sword");
         assert_eq!(l.of(&sword), None);
+    }
+
+    #[test]
+    fn the_rules_a_decision_was_made_under_are_written_down_with_it() {
+        let mut l = Ledger::new();
+        // Unknown, not "no rules": a file from before this was recorded
+        // must not read as though it were judged under nothing.
+        assert_eq!(l.rules(), None);
+        l.judged_under(42);
+        assert_eq!(l.rules(), Some(42));
+        assert!(l.unsaved(), "it goes to the disk with the decisions");
+        // Recording the same rules again changes nothing.
+        let was = l.version();
+        l.judged_under(42);
+        assert_eq!(l.version(), was);
+        l.judged_under(43);
+        assert_ne!(l.version(), was);
+        // And it survives the trip through the file.
+        let text = serde_json::to_string(&l).unwrap();
+        let back: Ledger = serde_json::from_str(&text).unwrap();
+        assert_eq!(back.rules(), Some(43));
+        // A file written before the field existed still reads.
+        let old: Ledger =
+            serde_json::from_str(r#"{"took":{"1":{"action":"sell","wcid":9,"name":"Nail"}}}"#)
+                .unwrap();
+        assert_eq!(old.rules(), None);
+        assert_eq!(old.len(), 1);
     }
 
     #[test]

@@ -915,6 +915,9 @@ impl Client {
         self.tick_store();
         self.tick_appraise();
         self.tick_autoplay(now);
+        // The rules may have changed under the decisions already made.
+        // Before the ledger is written out, not after.
+        self.tick_retag(now);
         // What each item was taken for, written out when it changes.
         // Not on the way out: the thing this is defending against is a
         // client that does not get a way out.

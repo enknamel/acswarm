@@ -666,6 +666,31 @@ impl Profile {
         Verdict::None
     }
 
+    /// A number that changes when the rules do, and does not when only
+    /// the note or the name does.
+    ///
+    /// What this is for is noticing that the answers already written
+    /// down were reached under different rules -- including rules
+    /// edited while the client was not running, which is why it has to
+    /// be a fact about the content and not a counter in memory.
+    ///
+    /// Taken off the serialised rules rather than off a derived `Hash`,
+    /// because a rule holds floats and those do not implement it. It is
+    /// worked out when the rules change, never per frame.
+    pub fn fingerprint(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        serde_json::to_string(&self.rules)
+            .unwrap_or_default()
+            .hash(&mut h);
+        // The buy list is a rule too: what a character stocks is never
+        // offered to a counter (`ac_loot::sale::offer_to_vendor`).
+        serde_json::to_string(&self.buy)
+            .unwrap_or_default()
+            .hash(&mut h);
+        h.finish()
+    }
+
     /// Whether any rule could ever ask for an appraisal. A profile that
     /// cannot decides every corpse without a single round trip.
     pub fn needs_id(&self) -> bool {
@@ -1027,6 +1052,46 @@ mod tests {
             all,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn a_fingerprint_moves_with_the_rules_and_not_with_the_prose() {
+        let mut p = Profile {
+            name: "test".into(),
+            note: "a note".into(),
+            rules: vec![rule(
+                "peas",
+                LootAction::Sell,
+                vec![Ask::Item(Term::Word("pea".into()))],
+            )],
+            ..Default::default()
+        };
+        let was = p.fingerprint();
+        // Renaming it and writing prose about it changes no answer.
+        p.note = "a much longer note about what this profile is for".into();
+        p.name = "renamed".into();
+        assert_eq!(p.fingerprint(), was);
+        // Switching a rule off does.
+        p.rules[0].on = false;
+        assert_ne!(p.fingerprint(), was);
+        p.rules[0].on = true;
+        assert_eq!(p.fingerprint(), was);
+        // So does what the rule asks, what it does, and its cap.
+        p.rules[0].action = LootAction::Keep;
+        assert_ne!(p.fingerprint(), was);
+        p.rules[0].action = LootAction::Sell;
+        p.rules[0].keep_up_to = Some(3);
+        assert_ne!(p.fingerprint(), was);
+        p.rules[0].keep_up_to = None;
+        assert_eq!(p.fingerprint(), was);
+        // The buy list is a rule too: what a character stocks is never
+        // offered to a counter.
+        p.buy.push(Buy {
+            what: "Prismatic Taper".into(),
+            keep: 1000,
+            ..Default::default()
+        });
+        assert_ne!(p.fingerprint(), was);
     }
 
     #[test]

@@ -36,4 +36,10 @@
 /v_loot_check
 /nop
 /nop
+/v_loot_rejudge
+/nop
+/nop
+/v_loot_forgotten
+/nop
+/nop
 /v_loot_search
