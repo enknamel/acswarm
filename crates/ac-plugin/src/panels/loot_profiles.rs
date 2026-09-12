@@ -1312,6 +1312,7 @@ impl LootProfiles {
                     ..Default::default()
                 },
             ],
+            ..Default::default()
         };
         LootProfiles {
             source: Source::Demo(ProfilesView {

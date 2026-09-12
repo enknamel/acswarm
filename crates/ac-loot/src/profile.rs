@@ -374,6 +374,12 @@ pub fn needs_id(key: NumKey) -> bool {
 pub struct Rule {
     /// What the rule is for, in the player's words.
     pub name: String,
+    /// A heading to file it under in the editor -- "keep", "vendor
+    /// trash", "salvage", whatever the player likes. It means nothing
+    /// to the rules; it is there so that a profile of forty rules can
+    /// be read.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub group: String,
     /// Turned off without being deleted.
     pub on: bool,
     /// What happens to an item this rule claims.
@@ -388,6 +394,7 @@ impl Default for Rule {
     fn default() -> Self {
         Rule {
             name: String::new(),
+            group: String::new(),
             on: true,
             action: LootAction::Keep,
             all: Vec::new(),
@@ -479,6 +486,53 @@ pub enum Verdict {
     None,
 }
 
+/// One thing to keep in the pack, and where to get it.
+///
+/// This is not a rule and cannot be written as one: a rule is a
+/// question about an item in hand, and there is no item in hand when
+/// the question is "have I enough tapers". It is a floor on stock,
+/// where [`Rule::keep_up_to`] is a ceiling on taking.
+///
+/// A character needs several of these and they do not all come from one
+/// counter: components from an archmage, healing kits by level, arrow
+/// heads by level *and* element.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Buy {
+    /// The thing, by the name a counter lists it under. Specific, not a
+    /// family: "Peerless Healing Kit", not "Healing Kit", because the
+    /// levels are different items at different prices.
+    pub what: String,
+    /// How many to keep in the pack.
+    pub keep: u32,
+    /// A particular counter by name, or whichever sells it when None.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
+    /// Turned off without being deleted.
+    #[serde(default = "yes")]
+    pub on: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+/// Where what is for sale goes.
+///
+/// One counter, because that is how the game is played: everything is
+/// sold at the best rate the character can reach, which for most of a
+/// character's life is the broker outside Cragstone. Buying is a list
+/// because a character needs several shelves; selling is not.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SellTo {
+    /// The best rate within reach: what a counter pays is
+    /// `value * buy_rate`, and the spread between the worst and the
+    /// best is nearly half.
+    #[default]
+    Best,
+    /// This one, by name, wherever it is.
+    Named(String),
+}
+
 /// A named, shareable set of rules.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -489,6 +543,16 @@ pub struct Profile {
     pub note: String,
     /// In order. The first rule that claims an item decides it.
     pub rules: Vec<Rule>,
+    /// What to keep stocked. Membership of this list is itself a rule
+    /// no other rule may override: a thing the character buys is a
+    /// thing the character uses, and it is never offered to a counter.
+    /// That one line is what stops a broad "sell the cheap stuff" rule
+    /// walking a mage's Peas to the shops.
+    #[serde(default)]
+    pub buy: Vec<Buy>,
+    /// Where what is for sale goes.
+    #[serde(default)]
+    pub sell_to: SellTo,
 }
 
 impl Profile {
@@ -576,6 +640,37 @@ impl Profile {
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         std::fs::write(&path, text)?;
         Ok(path)
+    }
+}
+
+impl Profile {
+    /// Whether this is something the character keeps stocked, and so
+    /// never sells.
+    ///
+    /// Membership of the buy list is itself the rule, and no rule in
+    /// the list above may override it. A player who writes "sell
+    /// anything worth under a thousand" has not said "sell my Peas",
+    /// and the client should not hear it that way.
+    pub fn stocks(&self, name: &str) -> bool {
+        self.buy
+            .iter()
+            .filter(|b| b.on && !b.what.trim().is_empty())
+            .any(|b| contains_fold(name, b.what.trim()))
+    }
+
+    /// What is short, against what is carried: the shopping list.
+    ///
+    /// `held` answers how many of a thing are in the pack, by the same
+    /// name the counter lists it under.
+    pub fn shortfall(&self, held: impl Fn(&str) -> u32) -> Vec<(&Buy, u32)> {
+        self.buy
+            .iter()
+            .filter(|b| b.on && b.keep > 0 && !b.what.trim().is_empty())
+            .filter_map(|b| {
+                let have = held(&b.what);
+                (have < b.keep).then(|| (b, b.keep - have))
+            })
+            .collect()
     }
 }
 
@@ -689,6 +784,30 @@ impl Profile {
                     ..Default::default()
                 },
             ],
+            // What a character of any kind runs out of. A caster's
+            // components are scaled from the taper because that is what
+            // a cast actually burns; an archer's arrowheads and a
+            // healer's kits are named outright because their levels and
+            // elements are different items at different prices.
+            //
+            // Everything on this list is a thing the character uses, so
+            // nothing on it is ever offered to a counter -- which is the
+            // whole of the guard that used to be four separate ones.
+            buy: vec![
+                Buy {
+                    what: "Prismatic Taper".into(),
+                    keep: 1000,
+                    from: None,
+                    on: true,
+                },
+                Buy {
+                    what: "Healing Kit".into(),
+                    keep: 2,
+                    from: None,
+                    on: true,
+                },
+            ],
+            sell_to: SellTo::Best,
         }
     }
 }
@@ -817,6 +936,7 @@ mod tests {
                     vec![Ask::Item(Term::Kind("gem".into()))],
                 ),
             ],
+            ..Default::default()
         };
         let me = me(50, &[]);
         let dear = item("Ruby", item_type::GEM, 9_000);
@@ -853,6 +973,7 @@ mod tests {
                     }),
                 ],
             )],
+            ..Default::default()
         };
         let key = item("Broken Marble Key", item_type::KEY, 0);
         let picker = me(100, &[(skill::LOCKPICK, 300, sac::TRAINED)]);
@@ -877,6 +998,7 @@ mod tests {
                     Ask::Item(Term::Tier(Tier::Major)),
                 ],
             )],
+            ..Default::default()
         };
         let me = me(50, &[]);
         // Not armour: judged and dismissed without asking the server,
@@ -911,6 +1033,7 @@ mod tests {
                 all: vec![Ask::Item(Term::Word("healing kit".into()))],
                 ..Default::default()
             }],
+            ..Default::default()
         };
         let me = me(50, &[]);
         let kit = item("Healing Kit", item_type::MISC, 100);
@@ -942,6 +1065,7 @@ mod tests {
                     value: 1.0,
                 }],
             )],
+            ..Default::default()
         };
         let me = me(50, &[]);
         let mut plate = item("Platemail Hauberk", item_type::ARMOR, 4_000);
@@ -986,6 +1110,7 @@ mod tests {
                     value: "^Legendary ".into(),
                 }],
             )],
+            ..Default::default()
         };
         let me = me(50, &[]);
         let mut ring = item("Gold Ring", item_type::JEWELRY, 3_000);
@@ -1014,6 +1139,101 @@ mod tests {
         assert!(!TextOp::Like.holds("anything", "("));
         assert!(pattern_error("(").is_some());
         assert!(pattern_error("^Legendary ").is_none());
+    }
+
+    #[test]
+    fn what_the_character_buys_it_never_sells() {
+        // A rule that says "sell anything cheap" and a buy list that
+        // says "keep a thousand tapers" are not in conflict: the buy
+        // list wins, because a thing you go to town to buy is not a
+        // thing you go to town to sell. This one line replaces a guard
+        // that used to live in four places and was missing from the
+        // profile path in all of them.
+        let p = Profile::starter();
+        assert!(p.stocks("Prismatic Taper"));
+        assert!(p.stocks("Healing Kit"), "by the name the counter uses");
+        assert!(p.stocks("Lesser Healing Kit"), "and its levels");
+        assert!(!p.stocks("Pyreal Pea"), "a component it does not stock");
+        assert!(!p.stocks("Ornate Ring"));
+    }
+
+    #[test]
+    fn the_shopping_list_is_what_is_short() {
+        let mut p = Profile::starter();
+        p.buy = vec![
+            Buy {
+                what: "Prismatic Taper".into(),
+                keep: 1000,
+                from: None,
+                on: true,
+            },
+            Buy {
+                what: "Peerless Healing Kit".into(),
+                keep: 5,
+                from: Some("Fletcher".into()),
+                on: true,
+            },
+            Buy {
+                what: "Acid Arrowhead".into(),
+                keep: 500,
+                from: None,
+                on: false,
+            },
+        ];
+        let held = |what: &str| match what {
+            "Prismatic Taper" => 400,
+            "Peerless Healing Kit" => 5,
+            _ => 0,
+        };
+        let short = p.shortfall(held);
+        assert_eq!(short.len(), 1, "the kits are stocked, the heads are off");
+        assert_eq!(short[0].0.what, "Prismatic Taper");
+        assert_eq!(short[0].1, 600, "six hundred short of a thousand");
+    }
+
+    #[test]
+    fn a_want_can_name_its_own_counter() {
+        // Components from an archmage, kits from a healer, arrowheads
+        // from a bowyer: one character, three shelves.
+        let mut p = Profile::starter();
+        p.buy = vec![
+            Buy {
+                what: "Blue Pea".into(),
+                keep: 500,
+                from: None,
+                on: true,
+            },
+            Buy {
+                what: "Acid Arrowhead".into(),
+                keep: 500,
+                from: Some("Thimrin Woodsetter".into()),
+                on: true,
+            },
+        ];
+        let short = p.shortfall(|_| 0);
+        assert_eq!(short.len(), 2);
+        assert_eq!(short[0].0.from, None, "whoever sells it");
+        assert_eq!(short[1].0.from.as_deref(), Some("Thimrin Woodsetter"));
+    }
+
+    #[test]
+    fn selling_goes_to_one_counter_and_by_default_the_best_paying() {
+        let p = Profile::starter();
+        assert_eq!(p.sell_to, SellTo::Best);
+        let mut mine = p.clone();
+        mine.sell_to = SellTo::Named("Arcanum Broker".into());
+        assert_eq!(mine.sell_to, SellTo::Named("Arcanum Broker".into()));
+    }
+
+    #[test]
+    fn an_older_profile_file_still_reads() {
+        // Files written before there was a buy list or a counter must
+        // still load, and get the empty list and the default counter.
+        let text = r#"{"name":"Old","note":"","rules":[]}"#;
+        let p: Profile = serde_json::from_str(text).unwrap();
+        assert_eq!(p.name, "Old");
+        assert!(p.buy.is_empty());
+        assert_eq!(p.sell_to, SellTo::Best);
     }
 
     #[test]
@@ -1106,6 +1326,7 @@ mod tests {
                     ],
                 ),
             ],
+            ..Default::default()
         };
         let me = me(50, &[]);
         let corpse = [
@@ -1143,6 +1364,7 @@ mod tests {
             name: "notes".into(),
             note: "first".into(),
             rules: Vec::new(),
+            ..Default::default()
         };
         library.put(profile.clone()).expect("saved");
         assert_eq!(Profile::load(&dir, "notes").expect("on disk").note, "first");
@@ -1185,6 +1407,7 @@ mod tests {
                 LootAction::Sell,
                 vec![Ask::Item(Term::Word("pea".into()))],
             )],
+            ..Default::default()
         };
         library.put(profile.clone()).expect("saved");
 
@@ -1238,6 +1461,7 @@ mod tests {
                 LootAction::Sell,
                 vec![Ask::Item(Term::Word("pea".into()))],
             )],
+            ..Default::default()
         };
         let path = profile.save(&dir).expect("saved");
         assert!(path.exists());
