@@ -1864,7 +1864,9 @@ impl Client {
                         Judged::NeedsId(_) | Judged::None => ac_loot::Verdict::Leave,
                     }
                 };
-                let _ = &mut claimed; // MUTATION: cap accumulation removed
+                if matches!(verdict, ac_loot::Verdict::Take(_)) {
+                    claimed.take(stats.wcid, stats.stack.max(1));
+                }
                 Some(ac_loot::Lying {
                     guid: *g,
                     name: stats.name.clone(),

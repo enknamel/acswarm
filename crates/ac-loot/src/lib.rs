@@ -27,6 +27,7 @@ pub mod items;
 pub mod ledger;
 pub mod profile;
 pub mod run;
+pub mod sale;
 pub mod weapons;
 
 pub use corpse::{Lying, Open, Verdict, REACH};
@@ -34,4 +35,5 @@ pub use items::{ItemStats, NumKey, Op, Query, Term, Tier};
 pub use ledger::{Ledger, Took};
 pub use profile::{Library, LootAction, Profile, Rule, Verdict as RuleVerdict};
 pub use run::{Act, Next, Run};
+pub use sale::offer_to_vendor;
 pub use weapons::{Stance, Wielder};

@@ -89,7 +89,6 @@ dependencies = [
  "ac-agent",
  "ac-net",
  "ac-world",
- "glam 0.30.10",
  "regex",
  "serde",
  "serde_json",
@@ -163,8 +162,6 @@ name = "ac-vendor"
 version = "0.0.3"
 dependencies = [
  "ac-agent",
- "ac-loot",
- "ac-world",
 ]
 
 [[package]]
