@@ -7,3 +7,6 @@ data-dir
 # whatever profile the character happens to read.
 profiles/*
 !profiles/Validate.json
+
+# A run writes each character's loot ledger here.
+taken/

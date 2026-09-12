@@ -959,6 +959,11 @@ impl Api for CtxApi<'_, '_> {
                 m.insert("online".into(), h.online.into());
                 m.insert("place".into(), h.place.clone().into());
                 m.insert("taken_at".into(), Dynamic::from_int(h.taken_at as i64));
+                m.insert(
+                    "took".into(),
+                    h.took
+                        .map_or(Dynamic::UNIT, |a| a.label().to_string().into()),
+                );
                 m.insert("stats".into(), Dynamic::from_map(item_map(&h.stats)));
                 Dynamic::from_map(m)
             })
@@ -1026,6 +1031,16 @@ impl Api for CtxApi<'_, '_> {
         let c = self.client();
         c.stats_of(guid)
             .and_then(|s| c.loot_action(&s))
+            .map(|a| a.label().to_string())
+            .unwrap_or_default()
+    }
+
+    fn loot_tag(&mut self, guid: i64) -> String {
+        let Ok(guid) = u32::try_from(guid) else {
+            return String::new();
+        };
+        self.client()
+            .tag_loot(guid)
             .map(|a| a.label().to_string())
             .unwrap_or_default()
     }

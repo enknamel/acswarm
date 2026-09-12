@@ -34,3 +34,6 @@
 /v_loot_none
 /nop
 /v_loot_check
+/nop
+/nop
+/v_loot_search

@@ -1718,10 +1718,11 @@ impl Client {
     /// What is to be done with an item: what it was taken for if that
     /// was written down, else what the profile makes of it now.
     ///
-    /// The ledger alone is not the answer. It deliberately remembers
-    /// nothing about stackables -- their ids churn as stacks split and
-    /// merge -- so a ledger-only reading calls a stack of tapers
-    /// "nothing decided", which reads as "skip".
+    /// The ledger alone is not the answer. It only knows what was
+    /// decided about things the character has held since; something
+    /// bought, traded or split off a stack a moment ago carries no
+    /// entry yet, and a ledger-only reading would call that "nothing
+    /// decided", which reads as "skip".
     pub fn loot_action(&self, stats: &crate::items::ItemStats) -> Option<LootAction> {
         if let Some(a) = self.autoplay.ledger.of(stats) {
             return Some(a);
@@ -1738,6 +1739,28 @@ impl Client {
             crate::profile::Verdict::Decided(a, _) => Some(a),
             crate::profile::Verdict::NeedsId(_) | crate::profile::Verdict::None => None,
         }
+    }
+
+    /// Judge a carried item by this character's profile and write down
+    /// what it is for, the way the arrival pass does for something that
+    /// turns up in the pack ([`arrival_tag`]).
+    ///
+    /// `None` when nothing claimed it, and then nothing is written:
+    /// silence is not a decision to leave it, and an item with no entry
+    /// is judged afresh next time.
+    pub fn tag_loot(&mut self, guid: u32) -> Option<LootAction> {
+        let stats = self.stats_of(guid)?;
+        let action = arrival_tag(
+            &stats,
+            self.appraisals.get(&guid),
+            &self.autoplay.config.loot.clone(),
+            &self.profiles,
+            &self.wielder(),
+            &self.world.stats.name.clone(),
+            self.already_carried(stats.wcid),
+        )?;
+        self.autoplay.tag(&stats, action);
+        Some(action)
     }
 
     fn corpse_now(&mut self, guid: u32, items: &[u32], cfg: &Loot, now: Instant) -> ac_loot::Open {

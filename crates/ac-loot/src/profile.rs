@@ -78,6 +78,39 @@ impl LootAction {
     pub fn takes(self) -> bool {
         self != LootAction::Skip
     }
+
+    /// How cautious this action is: the higher, the less it gives away.
+    ///
+    /// Keeping is always recoverable -- a thing still in the pack can
+    /// be sold tomorrow -- where selling and salvaging are not. So when
+    /// two decisions have to become one and there is no better reason
+    /// to prefer either, the cautious one wins.
+    fn caution(self) -> u8 {
+        match self {
+            LootAction::Keep => 3,
+            LootAction::Salvage => 2,
+            LootAction::Sell => 1,
+            // Nothing is held under a skip -- it was never taken -- so
+            // it loses to anything that was.
+            LootAction::Skip => 0,
+        }
+    }
+
+    /// The more cautious of two decisions.
+    ///
+    /// This is for the one case where two decisions end up describing
+    /// one item: two stacks of the same thing poured together. The
+    /// halves may honestly have been taken for different reasons -- a
+    /// rule with a `keep_up_to` cap says keep up to the cap and the
+    /// next rule says sell the rest -- and the merged stack can only
+    /// have one answer.
+    pub fn safer_of(self, other: LootAction) -> LootAction {
+        if other.caution() > self.caution() {
+            other
+        } else {
+            self
+        }
+    }
 }
 
 /// Something a rule asks about the character holding it.

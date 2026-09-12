@@ -188,9 +188,11 @@ pub trait Api {
     /// The same search over every character's last known inventory,
     /// this process's sessions and (over the bus) every other's, online
     /// or not: each hit is the `item_stats` map under `stats`, plus
-    /// `account`, `character`, `online` and `place` ("worn", "pack" or
-    /// a side pack's name). Numbers only match items that were appraised
-    /// when their snapshot was taken.
+    /// `account`, `character`, `online`, `place` ("worn", "pack" or a
+    /// side pack's name) and `took` -- what the holder picked it up for
+    /// ("keep", "salvage", "sell") or `()` when nothing claimed it.
+    /// Numbers only match items that were appraised when their snapshot
+    /// was taken.
     fn find_items_everywhere(&mut self, query: &str) -> Array;
     /// The loot profile this character reads, by name.
     fn loot_profile(&mut self) -> String;
@@ -218,6 +220,16 @@ pub trait Api {
     /// tagged when taken, else what the rules say now ("keep",
     /// "salvage", "sell", "skip"); "" for an unknown guid.
     fn loot_action(&mut self, guid: i64) -> String;
+    /// Judge a carried item by this character's loot profile and write
+    /// down what it is for, the way autoplay does when something turns
+    /// up in the pack. Answers the word it wrote ("keep", "salvage",
+    /// "sell") or "" when no rule claimed it, in which case nothing is
+    /// written: silence is not a decision to leave it.
+    ///
+    /// The note survives a relog and a crash, and travels with the
+    /// character's snapshot, so `find_items_everywhere` can say what a
+    /// mule is carrying something *for*.
+    fn loot_tag(&mut self, guid: i64) -> String;
     /// Who salvages for the team, this character included: a map
     /// `{ name, guid, me }`, or unit when nobody carries an Ust.
     fn salvager(&mut self) -> Dynamic;
@@ -546,6 +558,7 @@ pub fn register(engine: &mut Engine) {
     });
     engine.register_fn("loot_rules_clear", || with_api(|a| a.loot_rules_clear()));
     engine.register_fn("loot_action", |g: i64| with_api(|a| a.loot_action(g)));
+    engine.register_fn("loot_tag", |g: i64| with_api(|a| a.loot_tag(g)));
     engine.register_fn("salvager", || with_api(|a| a.salvager()));
     engine.register_fn("appraise_all", || with_api(|a| a.appraise_all()));
     engine.register_fn("unappraised", || with_api(|a| a.unappraised()));

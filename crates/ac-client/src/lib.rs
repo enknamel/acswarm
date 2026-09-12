@@ -2702,6 +2702,9 @@ impl Client {
             amount,
             a.name
         );
+        // Settle what the surviving stack was taken for before the two
+        // become one, while both entries are still there to read.
+        self.autoplay.ledger.merged(from, to);
         let mut w = ac_net::wire::Writer::new();
         w.u32(from).u32(to).i32(amount as i32);
         self.session

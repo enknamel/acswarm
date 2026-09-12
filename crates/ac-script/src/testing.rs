@@ -338,6 +338,10 @@ impl Api for Recorder {
         self.record(format!("loot_action {guid}"));
         "keep".into()
     }
+    fn loot_tag(&mut self, guid: i64) -> String {
+        self.record(format!("loot_tag {guid}"));
+        "keep".into()
+    }
     fn salvager(&mut self) -> Dynamic {
         Dynamic::UNIT
     }

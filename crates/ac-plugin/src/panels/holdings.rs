@@ -31,6 +31,7 @@ use std::time::{Duration, Instant};
 
 use super::{caption, title_bar, window, Source};
 use crate::{egui, Ctx, Event, Plugin, Settings};
+use ac_client::autoplay::LootAction;
 use ac_client::holdings::{
     self, unix_now, CharacterHoldings, Hit, HoldingRecord, HoldingsStore, BUS_PREFIX, REQUEST_TOPIC,
 };
@@ -58,17 +59,20 @@ pub enum Column {
     Item,
     Place,
     Value,
+    /// What the holder picked it up for.
+    For,
     Spells,
     Updated,
 }
 
 impl Column {
-    pub const ALL: [Column; 7] = [
+    pub const ALL: [Column; 8] = [
         Column::Character,
         Column::Account,
         Column::Item,
         Column::Place,
         Column::Value,
+        Column::For,
         Column::Spells,
         Column::Updated,
     ];
@@ -80,6 +84,7 @@ impl Column {
             Column::Item => "Item",
             Column::Place => "Where",
             Column::Value => "Value",
+            Column::For => "For",
             Column::Spells => "Spells",
             Column::Updated => "Updated",
         }
@@ -93,7 +98,8 @@ impl Column {
             Column::Item => 220.0,
             Column::Place => 90.0,
             Column::Value => 64.0,
-            Column::Spells => 260.0,
+            Column::For => 56.0,
+            Column::Spells => 220.0,
             Column::Updated => 80.0,
         }
     }
@@ -106,6 +112,14 @@ impl Column {
             Column::Item => lower(&a.stats.name).cmp(&lower(&b.stats.name)),
             Column::Place => lower(&a.place).cmp(&lower(&b.place)),
             Column::Value => a.stats.value.cmp(&b.stats.value),
+            // Decided before undecided, so a sort by this column
+            // gathers the answers at the top rather than sorting the
+            // blanks there because a blank sorts first.
+            Column::For => a
+                .took
+                .is_none()
+                .cmp(&b.took.is_none())
+                .then_with(|| took_word(a.took).cmp(took_word(b.took))),
             Column::Spells => {
                 lower(&a.stats.spells.join(", ")).cmp(&lower(&b.stats.spells.join(", ")))
             }
@@ -348,6 +362,16 @@ fn row(ui: &mut egui::Ui, v: &HoldingsView, hit: &Hit, selected: bool, a: &mut A
     .clicked();
     clicked |= cell(
         ui,
+        Column::For.width(),
+        egui::RichText::new(took_word(hit.took)).small(),
+        match hit.took {
+            Some(_) => "what this was picked up for",
+            None => "nothing claimed this: it will be judged afresh",
+        },
+    )
+    .clicked();
+    clicked |= cell(
+        ui,
         Column::Spells.width(),
         egui::RichText::new(&spells).small(),
         &spells,
@@ -364,6 +388,13 @@ fn row(ui: &mut egui::Ui, v: &HoldingsView, hit: &Hit, selected: bool, a: &mut A
     if clicked {
         a.select = Some((hit.account.clone(), hit.character.clone(), hit.stats.guid));
     }
+}
+
+/// What an item was picked up for, in a word. Blank when nothing
+/// claimed it -- which is not the same as "skip", and must not read
+/// like it.
+fn took_word(took: Option<LootAction>) -> &'static str {
+    took.map_or("", |a| a.label())
 }
 
 /// The selected item in full, under the table.
@@ -586,6 +617,15 @@ impl Holdings {
             s.guid = guid;
             HoldingRecord::from(&s)
         };
+        // What the holder wrote the thing down as. A stack carries one
+        // like anything else, which is the whole reason the column is
+        // worth a look: four thousand tapers are no use to read about
+        // unless you can see they are being kept.
+        let taken = |guid: u32, stats: ItemStats, took: LootAction| {
+            let mut r = record(guid, stats);
+            r.took = Some(took);
+            r
+        };
         let mut store = HoldingsStore::new();
         store.put(CharacterHoldings {
             server: DEMO_SERVER.into(),
@@ -614,7 +654,7 @@ impl Holdings {
                         ..Default::default()
                     },
                 ),
-                record(
+                taken(
                     0x8000_0002,
                     ItemStats {
                         name: "Prismatic Taper".into(),
@@ -625,6 +665,7 @@ impl Holdings {
                         burden: 120,
                         ..Default::default()
                     },
+                    LootAction::Keep,
                 ),
                 record(
                     0x8000_0003,
@@ -657,7 +698,7 @@ impl Holdings {
                         ..Default::default()
                     },
                 ),
-                record(
+                taken(
                     0x8000_0012,
                     ItemStats {
                         name: "Gold Ring".into(),
@@ -674,6 +715,7 @@ impl Holdings {
                         ],
                         ..Default::default()
                     },
+                    LootAction::Keep,
                 ),
             ],
         });
@@ -1005,6 +1047,40 @@ mod tests {
             Source::Demo(s) => s,
             Source::Live => unreachable!(),
         }
+    }
+
+    #[test]
+    fn what_a_thing_is_held_for_is_shown_and_sorted_on() {
+        let store = demo_store();
+        // A stack carries a decision like anything else: this is what
+        // the ledger used to leave out, so the window could say a
+        // character holds a hundred and twenty tapers but not why.
+        let mut st = State {
+            search: "taper".into(),
+            ..Default::default()
+        };
+        let v = view(&store, DEMO_SERVER, &st, true, 0.0);
+        assert_eq!(v.rows.len(), 1);
+        assert_eq!(v.rows[0].stats.stack, 120);
+        assert_eq!(took_word(v.rows[0].took), "keep");
+        // Nothing claimed the wand, and that must not read as "skip":
+        // one means no rule wanted it, the other means leave it behind.
+        st.search = "wand".into();
+        let v = view(&store, DEMO_SERVER, &st, true, 0.0);
+        assert_eq!(took_word(v.rows[0].took), "");
+        assert_eq!(v.rows[0].took, None);
+        // Sorting by the column gathers the decided ones together.
+        st.search.clear();
+        st.sort = Column::For;
+        st.descending = false;
+        let v = view(&store, DEMO_SERVER, &st, true, 0.0);
+        let words: Vec<&str> = v.rows.iter().map(|r| took_word(r.took)).collect();
+        let decided = words.iter().filter(|w| !w.is_empty()).count();
+        assert_eq!(decided, 2, "{words:?}");
+        assert!(
+            words[..decided].iter().all(|w| !w.is_empty()),
+            "the answers come first: {words:?}"
+        );
     }
 
     #[test]

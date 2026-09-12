@@ -19,15 +19,20 @@
 //!   or immediately after a restart out of the sequence gaps. So an
 //!   entry is kept only while the thing is still held ([`forget_gone`])
 //!   and only applies to an item of the same kind ([`Ledger::of`]).
-//! * **Stacks split and merge.** Splitting a stack makes a *new* object
-//!   with a new id, and merging destroys one. So stackables are not
-//!   remembered at all: what to do with a taper is settled by its kind,
-//!   which is the same answer every time, and asking the rules afresh
-//!   costs nothing.
+//! * **Stacks split and merge.** Splitting a stack makes a *new*
+//!   object with a new id, and merging destroys one. A split half
+//!   therefore arrives with no entry and is judged afresh, which is
+//!   right; a merge is the one case where two entries have to become
+//!   one, and [`Ledger::merged`] settles it before the stacks are
+//!   poured together.
 //!
-//! What is left is unique items -- a piece of armour, a weapon, a jewel
-//! -- which is exactly the set whose decision is about *that* item and
-//! cannot be recovered from its kind.
+//! Stackables were once left out of here for that reason -- a taper is
+//! settled by being a taper, so nothing was lost by asking again. What
+//! that cost was the *record*: a search across every character's packs
+//! could say a character holds four thousand tapers but not what they
+//! are for, which is most of the reason to keep a ledger anybody can
+//! read (`ac_client::holdings`). So everything held is written down
+//! now, and the churn is handled where it happens rather than avoided.
 //!
 //! # Which way it fails
 //!
@@ -115,14 +120,6 @@ impl Failed {
     }
 }
 
-/// Whether this item is one the ledger remembers.
-///
-/// Stackables are not: their ids churn as stacks split and merge, and
-/// their kind settles them anyway.
-pub fn remembered(item: &ItemStats) -> bool {
-    item.max_stack <= 1
-}
-
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Ledger {
     #[serde(default)]
@@ -130,6 +127,16 @@ pub struct Ledger {
     /// Changed since it was last written. Not part of the file.
     #[serde(skip)]
     dirty: bool,
+    /// Bumped on every change, so a reader that has to notice one can
+    /// do it by comparing a number rather than by walking the entries.
+    ///
+    /// What needs this is the holdings snapshot: what a thing is *for*
+    /// travels with it, so a decision changing has to make the snapshot
+    /// stale exactly as moving the thing would. Not part of the file --
+    /// a ledger read back from disk starts again at zero, which is
+    /// right, because nothing has compared against it yet.
+    #[serde(skip)]
+    version: u64,
     /// A file was there and would not be read.
     ///
     /// This is not the same as having nothing written down, and the
@@ -147,14 +154,21 @@ impl Ledger {
         Ledger::default()
     }
 
-    /// Write down what an item was taken for.
-    ///
-    /// Stackables are ignored: see [`remembered`].
-    pub fn remember(&mut self, item: &ItemStats, action: LootAction) {
-        if !remembered(item) {
-            return;
-        }
+    /// Something changed: it needs writing out, and anyone watching
+    /// needs to notice.
+    fn changed(&mut self) {
         self.dirty = true;
+        self.version = self.version.wrapping_add(1);
+    }
+
+    /// A number that changes whenever any decision here does.
+    pub fn version(&self) -> u64 {
+        self.version
+    }
+
+    /// Write down what an item was taken for.
+    pub fn remember(&mut self, item: &ItemStats, action: LootAction) {
+        self.changed();
         self.took.insert(
             item.guid,
             Took {
@@ -188,7 +202,7 @@ impl Ledger {
                 why: why.into(),
                 at: now,
             });
-            self.dirty = true;
+            self.changed();
         }
     }
 
@@ -210,12 +224,42 @@ impl Ledger {
         let before = self.took.len();
         self.took.retain(|guid, _| held.contains(guid));
         let gone = before - self.took.len();
-        self.dirty |= gone > 0;
+        if gone > 0 {
+            self.changed();
+        }
         gone
     }
 
     pub fn forget(&mut self, guid: u32) {
-        self.dirty |= self.took.remove(&guid).is_some();
+        if self.took.remove(&guid).is_some() {
+            self.changed();
+        }
+    }
+
+    /// Two stacks are about to be poured together: settle what the one
+    /// that survives was taken for.
+    ///
+    /// The halves can honestly disagree -- a rule that keeps up to a
+    /// cap and a later rule that sells the rest will tag two stacks of
+    /// the same thing differently -- and only one answer survives the
+    /// merge. The cautious one wins ([`LootAction::safer_of`]), because
+    /// a stack still in the pack can be sold tomorrow and a sold one
+    /// cannot be got back.
+    ///
+    /// Called before the merge goes out, while both entries still
+    /// exist; the source's entry is left for [`Ledger::forget_gone`] to
+    /// clear when the server confirms the object is gone.
+    pub fn merged(&mut self, from: u32, to: u32) {
+        let Some(source) = self.took.get(&from).map(|t| t.action) else {
+            return;
+        };
+        if let Some(target) = self.took.get_mut(&to) {
+            let settled = target.action.safer_of(source);
+            if settled != target.action {
+                target.action = settled;
+                self.changed();
+            }
+        }
     }
 
     /// Whether it has changed since it was last written out.
@@ -374,14 +418,58 @@ mod tests {
     }
 
     #[test]
-    fn stacks_are_not_remembered_at_all() {
-        // Splitting a stack makes a new object and merging destroys
-        // one, so an id means nothing here. A taper is settled by being
-        // a taper.
+    fn a_stack_is_written_down_like_anything_else() {
+        // What a stack is for is worth recording even though its kind
+        // would settle it again: a search across every character's
+        // packs shows it, and that is most of the point of a ledger
+        // anyone can read.
         let mut l = Ledger::new();
         l.remember(&pile(7, 691, "Prismatic Taper"), LootAction::Keep);
-        assert!(l.is_empty(), "nothing written down");
-        assert_eq!(l.of(&pile(7, 691, "Prismatic Taper")), None);
+        assert_eq!(
+            l.of(&pile(7, 691, "Prismatic Taper")),
+            Some(LootAction::Keep)
+        );
+        // And a recycled id is caught here exactly as it is for a ring.
+        assert_eq!(l.of(&pile(7, 999, "Lead Scarab")), None);
+    }
+
+    #[test]
+    fn pouring_two_stacks_together_keeps_the_cautious_answer() {
+        // A rule that keeps up to a cap and a later rule that sells the
+        // rest tag two stacks of the same thing differently. Only one
+        // answer survives the merge, and it is the one that does not
+        // give anything away.
+        let mut l = Ledger::new();
+        l.remember(&pile(1, 691, "Prismatic Taper"), LootAction::Sell);
+        l.remember(&pile(2, 691, "Prismatic Taper"), LootAction::Keep);
+        // Either way round, and whichever stack survives.
+        l.merged(2, 1);
+        assert_eq!(
+            l.of(&pile(1, 691, "Prismatic Taper")),
+            Some(LootAction::Keep)
+        );
+        let mut l = Ledger::new();
+        l.remember(&pile(1, 691, "Prismatic Taper"), LootAction::Keep);
+        l.remember(&pile(2, 691, "Prismatic Taper"), LootAction::Sell);
+        l.merged(2, 1);
+        assert_eq!(
+            l.of(&pile(1, 691, "Prismatic Taper")),
+            Some(LootAction::Keep)
+        );
+        // Salvage outranks sale, and an unknown source changes nothing.
+        let mut l = Ledger::new();
+        l.remember(&pile(1, 691, "Prismatic Taper"), LootAction::Sell);
+        l.remember(&pile(2, 691, "Prismatic Taper"), LootAction::Salvage);
+        l.merged(2, 1);
+        assert_eq!(
+            l.of(&pile(1, 691, "Prismatic Taper")),
+            Some(LootAction::Salvage)
+        );
+        l.merged(99, 1);
+        assert_eq!(
+            l.of(&pile(1, 691, "Prismatic Taper")),
+            Some(LootAction::Salvage)
+        );
     }
 
     #[test]

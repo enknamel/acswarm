@@ -434,6 +434,10 @@ pub struct Hit {
     /// "worn", "pack", or a side pack's name.
     pub place: String,
     pub stats: ItemStats,
+    /// What the holder wrote down that this was picked up for
+    /// (`HoldingRecord::took`). `None` for anything no rule claimed, or
+    /// bought or traded before a rule could.
+    pub took: Option<ac_loot::LootAction>,
 }
 
 /// A file-system safe form of a name: letters, digits and a few marks
@@ -689,6 +693,7 @@ impl HoldingsStore {
                         taken_at: h.taken_at,
                         place: h.place_of(item),
                         stats,
+                        took: item.took,
                     });
                 }
             }
@@ -734,8 +739,11 @@ impl Client {
     }
 
     /// A number that changes when the inventory does: an item added,
-    /// removed, moved, wielded, stacked or appraised. Cheap to take every
-    /// frame; the publisher snapshots when it moves.
+    /// removed, moved, wielded, stacked or appraised -- or when what
+    /// one of them is *for* changes, since that travels with the
+    /// snapshot too and a reader of it would otherwise go on seeing the
+    /// old answer. Cheap to take every frame; the publisher snapshots
+    /// when it moves.
     pub fn holdings_fingerprint(&self) -> u64 {
         use std::hash::{Hash, Hasher};
         let mut items: Vec<(u32, u32, u32, u32, bool)> = self
@@ -755,6 +763,7 @@ impl Client {
         items.sort_unstable();
         let mut h = std::collections::hash_map::DefaultHasher::new();
         items.hash(&mut h);
+        self.autoplay.ledger.version().hash(&mut h);
         h.finish()
     }
 
@@ -1013,6 +1022,40 @@ mod tests {
             HoldingsStore::path_for(Path::new("/c"), "A.Server", "Acc", "Ch/ar"),
             PathBuf::from("/c/a.server/acc/Ch_ar.json")
         );
+    }
+
+    #[test]
+    fn a_search_says_what_each_hit_is_held_for() {
+        // The record has carried this all along; the search dropped it
+        // on the floor, so no window could show it.
+        let mut store = HoldingsStore::new();
+        let mut taper = HoldingRecord::from(&ItemStats {
+            guid: 0x8000_0021,
+            name: "Prismatic Taper".into(),
+            wcid: 691,
+            kind: "comps",
+            stack: 4059,
+            max_stack: 5000,
+            ..Default::default()
+        });
+        taper.took = Some(ac_loot::LootAction::Keep);
+        store.put(CharacterHoldings {
+            server: "one.example".into(),
+            account: "accone".into(),
+            character: "Alice".into(),
+            guid: 0x5000_0001,
+            taken_at: unix_now(),
+            online: true,
+            items: vec![taper, HoldingRecord::from(&sword())],
+        });
+        let hits = store.search("one.example", &Query::parse("taper"), unix_now());
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].stats.stack, 4059);
+        assert_eq!(hits[0].took, Some(ac_loot::LootAction::Keep));
+        // The sword was never written down, which is not a decision to
+        // leave it: it is no decision at all.
+        let hits = store.search("one.example", &Query::parse("sword"), unix_now());
+        assert_eq!(hits[0].took, None);
     }
 
     #[test]

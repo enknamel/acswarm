@@ -234,6 +234,36 @@ fn command(name, args) {
         if rules.len() > 0 { says = rules[0].name + " -> " + rules[0].action; }
         want("a_rule_added_is_live_at_once", loot_action(g) == "sell",
              "guid=" + g + " says \"" + loot_action(g) + "\", rule: " + says);
+        // A stack is written down like anything else now. Tag it, then
+        // take the rule away: with no rule left to claim it, a "sell"
+        // answer can only be coming from the ledger, which is the whole
+        // point of writing stacks down.
+        let wrote = loot_tag(g);
+        loot_rules_clear();
+        want("a_stack_is_remembered_not_rejudged",
+             wrote == "sell" && loot_action(g) == "sell",
+             "wrote \"" + wrote + "\", with no rules left it still says \""
+             + loot_action(g) + "\"");
+        return true;
+    }
+    // The record has to reach a search across every character, so a pile
+    // can be read for what it is for and not just how big it is. A tick
+    // later: the snapshot is republished when the ledger moves, and the
+    // publishing is not instant.
+    if name == "v_loot_search" {
+        let found = 0;
+        let carried = 0;
+        let says_for = "";
+        for hit in find_items_everywhere("taper") {
+            if hit.character == me().name {
+                found += 1;
+                carried += hit.stats.stack;
+                if type_of(hit.took) != "()" { says_for = hit.took; }
+            }
+        }
+        want("a_search_says_what_a_stack_is_for", found > 0 && says_for == "sell",
+             found + " taper stack(s), " + carried + " carried, for: \""
+             + says_for + "\"");
         loot_rules_clear();
         // Hand the character back what it was reading. Best effort: on
         // a fresh shelf that profile may not exist, and the suite's job
