@@ -884,6 +884,47 @@ pub fn never_sell_because(stats: &ItemStats) -> &'static str {
     }
 }
 
+/// Whether something in the pack goes over the counter.
+///
+/// The bars come first and nothing gets past them: what is equipped,
+/// tinkered, inscribed or worth nothing, ammunition, the focus that
+/// halves a school's components, a component this character's own
+/// spells burn, and anything the player named by hand.
+///
+/// Those bars used to live inside [`sellable`], which the profile path
+/// does not call -- so giving a character a loot profile quietly
+/// switched off the focus guard, the keep list and the component guard,
+/// and a profile with a broad "sell the cheap stuff" rule would take the
+/// Peas out of a mage's pack. Peas are bought, not looted.
+///
+/// Then `tagged`: what was decided when the item was picked up. That
+/// decision stands. Deciding again at the counter is how a thing taken
+/// to keep gets sold on the next run to town. `judge` is asked only for
+/// what carries no decision -- bought, traded, or in the pack from
+/// before there was a profile.
+pub fn offer_to_vendor(
+    stats: &ItemStats,
+    ammo: bool,
+    burns: &[u32],
+    keep: &[String],
+    tagged: Option<LootAction>,
+    judge: impl FnOnce() -> bool,
+) -> bool {
+    let forbidden = never_sell(stats)
+        || ammo
+        || crate::magic::is_focus(stats.wcid)
+        || (stats.item_type & item_type::SPELL_COMPONENTS != 0 && burns.contains(&stats.wcid))
+        || name_matches(&stats.name, keep);
+    if forbidden {
+        return false;
+    }
+    match tagged {
+        Some(LootAction::Sell) => true,
+        Some(_) => false,
+        None => judge(),
+    }
+}
+
 pub fn sellable(stats: &ItemStats, ammo: bool, rules: &SellRules) -> bool {
     // Not sellable at all.
     if never_sell(stats) || ammo {
@@ -2046,25 +2087,20 @@ impl Client {
                 if never_sell_carried(&stats, holds_anything) {
                     return None;
                 }
-                let sells = match &vendor {
-                    Some(p) => {
-                        // A profile does not get past the things that
-                        // never go over a counter (see `never_sell`).
-                        !never_sell(&stats)
-                            && !ammo
-                            && matches!(
-                                p.judge(
-                                    &stats,
-                                    self.appraisals.get(&o.guid),
-                                    &wielder,
-                                    &my_name,
-                                    0
-                                ),
-                                crate::profile::Verdict::Decided(LootAction::Sell, _)
-                            )
-                    }
-                    None => sellable(&stats, ammo, &rules_for(&stats)),
-                };
+                let sells = offer_to_vendor(
+                    &stats,
+                    ammo,
+                    &burns,
+                    &keep,
+                    tags.get(&o.guid).copied(),
+                    || match &vendor {
+                        Some(p) => matches!(
+                            p.judge(&stats, self.appraisals.get(&o.guid), &wielder, &my_name, 0),
+                            crate::profile::Verdict::Decided(LootAction::Sell, _)
+                        ),
+                        None => sellable(&stats, ammo, &rules_for(&stats)),
+                    },
+                );
                 sells.then_some(Salable {
                     guid: o.guid,
                     item_type: o.item_type,
@@ -3307,6 +3343,77 @@ mod tests {
         assert!(
             !chaff.taken_by(item_type::MISC, 100, 0),
             "ten is under the floor"
+        );
+    }
+
+    #[test]
+    fn a_profile_cannot_sell_what_the_bars_forbid() {
+        // Giving a character a loot profile used to switch off the bars:
+        // the profile path never called `sellable`, so the focus guard,
+        // the player's keep list and the guard on the components its own
+        // spells burn all went with it. A profile whose rules say "sell
+        // everything" is the test, because that is the rule a player
+        // writes and then wonders where their Peas went.
+        const TAPER: u32 = 691;
+        let burns = [TAPER];
+        let sell_it_all = || true;
+
+        let mut taper = item("Prismatic Taper", item_type::SPELL_COMPONENTS, 5);
+        taper.wcid = TAPER;
+        assert!(
+            !offer_to_vendor(&taper, false, &burns, &[], None, sell_it_all),
+            "the components its own spells burn are never offered"
+        );
+
+        let mut pea = item("Pyreal Pea", item_type::SPELL_COMPONENTS, 50_000);
+        pea.wcid = 8330;
+        assert!(
+            offer_to_vendor(&pea, false, &burns, &[], None, sell_it_all),
+            "a component it does not burn still pays for the trip"
+        );
+
+        let named = item("Ornate Ring", item_type::JEWELRY, 900);
+        assert!(
+            !offer_to_vendor(
+                &named,
+                false,
+                &burns,
+                &["ornate ring".to_string()],
+                None,
+                sell_it_all
+            ),
+            "the player's own word beats the rules"
+        );
+
+        let arrow = item("Arrowhead", item_type::MISSILE_WEAPON, 20);
+        assert!(
+            !offer_to_vendor(&arrow, true, &burns, &[], None, sell_it_all),
+            "ammunition is not loot"
+        );
+    }
+
+    #[test]
+    fn what_was_picked_up_to_keep_is_never_sold_later() {
+        // The decision is made once, when the item is taken. Asking
+        // again at the counter is how a thing taken to keep gets sold on
+        // the next run to town -- and the profile path did ask again.
+        let ring = item("Ornate Ring", item_type::JEWELRY, 900);
+        let sell_it_all = || true;
+
+        for kept in [LootAction::Keep, LootAction::Salvage, LootAction::Skip] {
+            assert!(
+                !offer_to_vendor(&ring, false, &[], &[], Some(kept), sell_it_all),
+                "taken to {}, so not sold",
+                kept.label()
+            );
+        }
+        assert!(
+            offer_to_vendor(&ring, false, &[], &[], Some(LootAction::Sell), || false),
+            "taken to sell, so sold, whatever the rules say now"
+        );
+        assert!(
+            offer_to_vendor(&ring, false, &[], &[], None, sell_it_all),
+            "nothing decided: the rules answer"
         );
     }
 
