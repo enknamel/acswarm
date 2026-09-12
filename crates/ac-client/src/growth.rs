@@ -466,7 +466,26 @@ struct Need {
     /// against the character's supplies, or a caster is out of stock
     /// for ever and the party restocks for ever.
     buyable: bool,
+    /// The counter the player named for this line, if they named one.
+    ///
+    /// A want that says where it comes from is filled there and nowhere
+    /// else: fletching supplies come in levels and elements that one
+    /// bowyer carries and the next does not, and healing kits come in
+    /// levels. Without this the field was editable, saved to the
+    /// profile and read by nothing.
+    from: Option<String>,
     kind: NeedKind,
+}
+
+impl Need {
+    /// Whether this counter is one this line may be bought at. A line
+    /// that names none is bought wherever it is sold.
+    fn may_buy_at(&self, shop: &str) -> bool {
+        match &self.from {
+            None => true,
+            Some(want) => shop.eq_ignore_ascii_case(want.trim()),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -714,6 +733,14 @@ fn forecast(
         ..Default::default()
     };
     for (need, needle) in wants {
+        // A line that names its counter is only filled there. To every
+        // other shop it reads as a line they do not carry, which is the
+        // truth as far as this character is concerned, and the ranking
+        // then sends it to the one that does.
+        if !need.may_buy_at(&shop.name) {
+            f.missing.push(need.name.clone());
+            continue;
+        }
         match shop_ware(shop, need, needle) {
             Some(w) => {
                 let unit = shop.charges_for(w).max(1);
@@ -1562,22 +1589,34 @@ impl Client {
         // to keep stocked now, and it is the same list that makes those
         // things unsellable. `keep_stocked` is what it grew out of and
         // is still read, so nobody's settings go quiet.
-        let mut named: Vec<(String, u32)> = self
+        // The profile's buy list, through the profile's own reckoning
+        // of what is short. `grow_needs` used to re-implement that
+        // filter, which is two statements of one rule and the way they
+        // come to disagree.
+        let mut named: Vec<(String, u32, Option<String>)> = self
             .profiles
             .get(&self.autoplay.config.loot.profile)
             .map(|p| {
-                p.buy
-                    .iter()
-                    .filter(|b| b.on && b.keep > 0)
-                    .map(|b| (b.what.clone(), b.keep))
+                p.shortfall(|what| self.carried_named(what))
+                    .into_iter()
+                    .map(|(b, _)| (b.what.clone(), b.keep, b.from.clone()))
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
-        named.extend(cfg.keep_stocked.iter().cloned());
+        // `keep_stocked` is what the buy list grew out of and is still
+        // read, so nobody's settings go quiet.
+        named.extend(cfg.keep_stocked.iter().map(|(n, k)| (n.clone(), *k, None)));
         if self.autoplay.config.team.enabled {
-            named.extend(self.autoplay.config.team.keep_stocked.iter().cloned());
+            named.extend(
+                self.autoplay
+                    .config
+                    .team
+                    .keep_stocked
+                    .iter()
+                    .map(|(n, k)| (n.clone(), *k, None)),
+            );
         }
-        for (name, least) in named {
+        for (name, least, from) in named {
             if name.trim().is_empty() || least == 0 {
                 continue;
             }
@@ -1597,6 +1636,7 @@ impl Client {
                     keep: least,
                     urgent: true,
                     buyable: true,
+                    from,
                     kind: NeedKind::Named(name),
                 });
             }
@@ -1610,6 +1650,7 @@ impl Client {
                     keep: cfg.ammo_keep,
                     urgent: have < cfg.ammo_keep / 4 && !self.can_craft_ammo(kind),
                     buyable: true,
+                    from: None,
                     kind: NeedKind::Ammo(kind),
                 });
             }
@@ -1671,6 +1712,7 @@ impl Client {
                                 keep,
                                 urgent: have < keep / 4 && buyable,
                                 buyable,
+                                from: None,
                                 kind: NeedKind::Component(wcid),
                             });
                         }
@@ -3720,8 +3762,30 @@ mod tests {
             keep: want,
             urgent: true,
             buyable: true,
+            from: None,
             kind,
         }
+    }
+
+    #[test]
+    fn a_want_that_names_its_counter_is_only_filled_there() {
+        // Fletching supplies come in levels and elements that one bowyer
+        // carries and the next does not, so a player who says where a
+        // line comes from means it. The field was editable and saved and
+        // read by nothing, so every counter that name-matched would do.
+        let mut named = need(NeedKind::Named("Acid Arrowhead".into()), 500);
+        named.from = Some("Thimrin Woodsetter".into());
+        assert!(named.may_buy_at("Thimrin Woodsetter"));
+        assert!(
+            named.may_buy_at("thimrin woodsetter"),
+            "however it is typed"
+        );
+        assert!(!named.may_buy_at("Scildith Dyrson the Bowyer"));
+
+        // A line that names nobody is bought wherever it is sold, which
+        // is every line a character has unless it says otherwise.
+        let anywhere = need(NeedKind::Component(691), 1000);
+        assert!(anywhere.may_buy_at("Anyone At All"));
     }
 
     #[test]
