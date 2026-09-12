@@ -34,7 +34,8 @@ Three things that grew separately.
 
 **A flattened behaviour tree.** `Client::tick_autoplay` is a fixed
 priority chain -- dodge, survive, recover, academy, buff, vitals, loot,
-follow, team, salvage, fight, buff again, follow again, tidy, grow --
+follow, team, salvage, fight, buff again, follow again, tidy, explore,
+grow --
 where each step returns whether it claimed the tick. That is exactly a
 behaviour tree's root selector, written out by hand. It works, and the
 order is genuinely load-bearing, but the order is control flow rather
@@ -227,6 +228,31 @@ worth making.
   what a counter stocks and what the character can pay and lift; it
   does not know that the counter is up a flight of stairs the
   navigation graph has no path to.
+
+## What the server will and will not tell a character
+
+Two things that cost a day each to find, because neither looks like a
+bug from inside the client.
+
+**A dungeon is described a room at a time.** The server sends the
+creatures standing in the cell the character is in and in the cells
+that one can see, and nothing else. Holtburg Dungeon holds fifty-eight
+creatures across seventy-four rooms; the room its portal drops you in
+holds two monster generators, which are server-side and are described
+to nobody. So a character that arrives and waits sees an empty dungeon
+and reports one. The cure is `crate::explore`: walk the rooms, one
+doorway at a time, aiming a couple of paces *past* each threshold --
+stop on the threshold and the server goes on describing the room
+behind.
+
+**The world you leave stays in the object table.** ACE holds an object
+that has dropped out of sight for twenty-five seconds before it sends
+the delete, so for those seconds a character that has stepped through a
+portal still has the town it left, and picks a creature thirty
+kilometres behind it to go and fight. `World::arrived_in` forgets
+anything out of sight when the landblock changes -- by distance, not by
+landblock, because outdoor landblocks are seen across their borders and
+walking into the next one must not throw away the corpse just made.
 
 ## Rules that hold whatever the structure
 

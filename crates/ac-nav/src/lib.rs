@@ -22,6 +22,7 @@
 //! with a few rectangles: every navigation fault found the hard way in
 //! a live dungeon is a unit test in this crate now.
 
+pub mod explore;
 pub mod means;
 pub mod steering;
 

@@ -401,6 +401,13 @@ pub const STEPS: &[Step] = &[
         run: claimed!(Client::autoplay_tidy),
     },
     Step {
+        name: "explore",
+        layer: Layer::Goal,
+        why: "a dungeon is described a room at a time, so a character that waits at the entrance waits in the one room that is empty; walk it before deciding the ground is dead",
+        worth: by_place,
+        run: claimed!(Client::autoplay_explore),
+    },
+    Step {
         name: "grow",
         layer: Layer::Goal,
         why: "with nothing else to do: spend experience, find monsters, run to town",

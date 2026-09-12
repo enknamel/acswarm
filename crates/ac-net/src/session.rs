@@ -277,6 +277,7 @@ impl Session {
     pub fn send_action(&mut self, action: u32, body: &[u8]) {
         let seq = self.action_seq;
         self.action_seq += 1;
+        tracing::trace!(target: "wire", "-> action {action:#06x} seq {seq}");
         self.send_message(queue::WEENIE, messages::game_action(seq, action, body));
     }
 

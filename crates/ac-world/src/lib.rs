@@ -424,6 +424,12 @@ pub fn map_coord_str(p: &object::Position) -> String {
     }
 }
 
+/// How far away an object can be and still be something we can see.
+/// ACE loads adjacent outdoor landblocks out to 96 m and no object is
+/// ever described to a client from further off; past three times that,
+/// it is a leftover from somewhere we no longer are.
+pub const OUT_OF_SIGHT: f32 = 300.0;
+
 #[derive(Debug, Default)]
 pub struct World {
     pub objects: HashMap<u32, WorldObject>,
@@ -437,6 +443,9 @@ pub struct World {
     /// resync to where it says we are (see the UpdatePosition handler).
     player_echo: Option<Position>,
     desync_streak: u8,
+    /// The landblock the server last placed us in: a change means we
+    /// left a world behind (see `arrived_in`).
+    player_landblock: Option<u16>,
     /// Bumped whenever the set of drawable objects or a position changes.
     pub generation: u64,
     /// The player's character sheet.
@@ -656,8 +665,17 @@ impl World {
                         pk_status: previous.as_ref().map(|o| o.pk_status).unwrap_or(0),
                         mana: previous.as_ref().and_then(|o| o.mana),
                     };
+                    let placed = obj.position;
                     self.objects.insert(obj.guid, obj);
                     self.generation += 1;
+                    // Our own description carries where we are: the first
+                    // one tells `arrived_in` which world we started in, so
+                    // that the next move out of it is seen as a move.
+                    if is_player {
+                        if let Some(p) = placed {
+                            self.arrived_in(p.cell);
+                        }
+                    }
                     Applied::Created
                 }
                 Err(e) => {
@@ -669,8 +687,12 @@ impl World {
                 if body.len() >= 4 {
                     let guid = u32::from_le_bytes(body[..4].try_into().unwrap());
                     self.player_guid = Some(guid);
-                    if let Some(o) = self.objects.get_mut(&guid) {
+                    let placed = self.objects.get_mut(&guid).map(|o| {
                         o.is_player = true;
+                        o.position
+                    });
+                    if let Some(Some(p)) = placed {
+                        self.arrived_in(p.cell);
                     }
                     self.generation += 1;
                     Applied::PlayerSet
@@ -681,7 +703,7 @@ impl World {
             opcode::UPDATE_POSITION => match object::UpdatePosition::parse(body) {
                 Ok(up) => {
                     let is_player = self.player_guid == Some(up.guid);
-                    if let Some(o) = self.objects.get_mut(&up.guid) {
+                    let applied = if let Some(o) = self.objects.get_mut(&up.guid) {
                         if is_player {
                             // Our own positions come back as echoes, a
                             // quarter of a second old: at a run that is
@@ -747,7 +769,11 @@ impl World {
                         }
                     } else {
                         Applied::Ignored
+                    };
+                    if matches!(applied, Applied::PlayerMoved) {
+                        self.arrived_in(up.position.cell);
                     }
+                    applied
                 }
                 Err(e) => {
                     tracing::warn!("UpdatePosition: {e}");
@@ -1629,6 +1655,51 @@ impl World {
     }
 
     /// Objects that have a world position and a model.
+    /// The server placed us in `cell`. Crossing into another landblock
+    /// means the world we came from is gone, but the server does not say
+    /// so at once: ACE holds an object that has dropped out of sight for
+    /// twenty-five seconds before it sends the delete. For those seconds
+    /// a character that has just stepped through a portal still has the
+    /// town it left in its object table, and would pick a creature
+    /// thirty kilometres behind it to go and fight. The real client
+    /// empties the scene on entering portal space; forget anything that
+    /// far off ourselves.
+    ///
+    /// Distance, not landblock, decides it: outdoor landblocks are
+    /// visible across their borders, so walking from one into the next
+    /// must not throw away the corpse just made a few paces back.
+    fn arrived_in(&mut self, cell: u32) {
+        let block = (cell >> 16) as u16;
+        let was = self.player_landblock.replace(block);
+        // Nothing to forget on our first placement, or standing still.
+        if was.is_none() || was == Some(block) {
+            return;
+        }
+        let Some(here) = self.player().and_then(|o| o.world_pos()) else {
+            return;
+        };
+        let mine = self.player_guid;
+        let before = self.objects.len();
+        self.objects.retain(|guid, o| {
+            if Some(*guid) == mine || o.parent.is_some() {
+                return true;
+            }
+            match o.world_pos() {
+                Some(p) => (p - here).length() <= OUT_OF_SIGHT,
+                // Carried, or never placed: not ours to judge by distance.
+                None => true,
+            }
+        });
+        let gone = before - self.objects.len();
+        if gone > 0 {
+            tracing::info!(
+                "left landblock {:#06x}: forgot {gone} object(s) out of sight",
+                was.unwrap()
+            );
+            self.generation += 1;
+        }
+    }
+
     pub fn drawable(&self) -> impl Iterator<Item = &WorldObject> {
         self.objects
             .values()
@@ -2232,6 +2303,105 @@ mod tests {
         // Short bodies fail rather than panic.
         assert_eq!(world.apply(&[0x4E, 0xF7, 0, 0, 1, 2]), Applied::Failed);
         assert_eq!(world.apply(&[0x9E, 0x01, 0, 0, 5, 0]), Applied::Failed);
+    }
+
+    #[test]
+    fn a_portal_forgets_the_world_left_behind() {
+        // Through a portal: the town we came from is still in the object
+        // table because ACE holds its deletes for twenty-five seconds.
+        // Anything that far off is gone the moment we land, but what we
+        // carry stays, and so does anything still within sight.
+        let here = Position::new_flat(0xA9B4_0019, Vec3::new(10.0, 10.0, 0.0));
+        let mut world = World {
+            player_guid: Some(ME),
+            ..Default::default()
+        };
+        let placed = |guid: u32, name: &str, at: Option<Position>, held: bool| WorldObject {
+            guid,
+            name: name.into(),
+            position: at,
+            parent: if held { Some(ME) } else { None },
+            ..Default::default()
+        };
+        world
+            .objects
+            .insert(ME, placed(ME, "+Caius", Some(here), false));
+        // A townsman beside us, and a body a few paces away.
+        world
+            .objects
+            .insert(2, placed(2, "Town Crier", Some(here), false));
+        world.objects.insert(
+            3,
+            placed(
+                3,
+                "Corpse",
+                Some(Position::new_flat(0xA9B4_0019, Vec3::new(30.0, 10.0, 0.0))),
+                false,
+            ),
+        );
+        // A taper in our pack: carried, so never judged by distance.
+        world
+            .objects
+            .insert(4, placed(4, "Prismatic Taper", None, true));
+        world.player_landblock = Some(0xA9B4);
+
+        // Standing still in the same landblock changes nothing.
+        world.arrived_in(0xA9B4_0019);
+        assert_eq!(world.objects.len(), 4, "no move, nothing forgotten");
+
+        // Now the portal drops us in the dungeon, and the player's own
+        // position moves with us.
+        let there = Position::new_flat(0x01F6_0289, Vec3::new(96.7, -10.0, 0.0));
+        world.objects.get_mut(&ME).unwrap().position = Some(there);
+        world.arrived_in(there.cell);
+
+        assert!(world.objects.contains_key(&ME), "we are still here");
+        assert!(
+            world.objects.contains_key(&4),
+            "what we carry comes with us"
+        );
+        assert!(
+            !world.objects.contains_key(&2),
+            "the town crier is behind us"
+        );
+        assert!(!world.objects.contains_key(&3), "and so is the body");
+    }
+
+    #[test]
+    fn walking_into_the_next_landblock_keeps_what_is_still_in_sight() {
+        // Outdoor landblocks are seen across their borders: stepping over
+        // the line must not throw away the corpse just made.
+        let here = Position::new_flat(0xA9B4_0019, Vec3::new(190.0, 10.0, 0.0));
+        let mut world = World {
+            player_guid: Some(ME),
+            player_landblock: Some(0xA9B4),
+            ..Default::default()
+        };
+        world.objects.insert(
+            ME,
+            WorldObject {
+                guid: ME,
+                position: Some(here),
+                ..Default::default()
+            },
+        );
+        world.objects.insert(
+            2,
+            WorldObject {
+                guid: 2,
+                name: "Corpse".into(),
+                position: Some(Position::new_flat(0xA9B4_0019, Vec3::new(180.0, 10.0, 0.0))),
+                ..Default::default()
+            },
+        );
+        // One step over the boundary into the next landblock east.
+        let next = Position::new_flat(0xA9B5_0019, Vec3::new(2.0, 10.0, 0.0));
+        world.objects.get_mut(&ME).unwrap().position = Some(next);
+        world.arrived_in(next.cell);
+        assert!(
+            world.objects.contains_key(&2),
+            "the body is ten metres back"
+        );
     }
 
     #[test]

@@ -11,6 +11,7 @@ pub mod creation;
 pub mod daytime;
 pub mod dodge;
 pub mod emotes;
+pub mod explore;
 // The vocabulary every system speaks now lives below this crate, in
 // `ac-agent`. Re-exported under its old names so that nothing which
 // says `crate::did` or `crate::pack` has to care where it went.
@@ -497,6 +498,33 @@ impl Client {
                     self.events.push(self::Event::Terminated(why));
                 }
                 Event::Message(msg) => {
+                    // Every message the server sends, named, for when the
+                    // question is "did it tell us at all?".  Off unless
+                    // RUST_LOG asks for it: `wire=trace`.
+                    if tracing::enabled!(target: "wire", tracing::Level::TRACE) {
+                        if let Some((op, body)) = messages::split(&msg) {
+                            let what = messages::opcode::name(op)
+                                .map(|n| n.to_string())
+                                .unwrap_or_else(|| format!("{op:#06x}"));
+                            if op == opcode::GAME_EVENT {
+                                let ev = body
+                                    .get(4..8)
+                                    .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+                                    .unwrap_or(0);
+                                let sub = messages::event::name(ev)
+                                    .map(|n| n.to_string())
+                                    .unwrap_or_else(|| format!("{ev:#06x}"));
+                                tracing::trace!(target: "wire", "<- GameEvent/{sub} ({} bytes)", msg.len());
+                            } else if op == opcode::SERVER_MESSAGE {
+                                let text = ac_net::messages::ChatLine::parse_server_message(body)
+                                    .map(|l| l.text)
+                                    .unwrap_or_default();
+                                tracing::trace!(target: "wire", "<- ServerMessage {text:?}");
+                            } else {
+                                tracing::trace!(target: "wire", "<- {what} ({} bytes)", msg.len());
+                            }
+                        }
+                    }
                     match self.world.apply(&msg) {
                         ac_world::Applied::PlayerSet => {
                             // The server ignores our positions until we say we landed.

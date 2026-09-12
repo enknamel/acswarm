@@ -974,6 +974,18 @@ impl Doing {
 pub struct Autoplay {
     pub config: Config,
     pub doing: Doing,
+    /// Rooms of the dungeon we are in that have been stood in, and the
+    /// one being walked to with the threshold aimed at (see
+    /// `crate::explore`). Cleared when the dungeon has been walked, so
+    /// that it is walked again rather than left.
+    pub rooms_seen: std::collections::HashSet<u32>,
+    /// Rooms that would not let us in: walked round, not through, until
+    /// the dungeon is walked and everything is given another chance.
+    pub rooms_shut: std::collections::HashSet<u32>,
+    /// The room we set out from, the one we are walking into, and
+    /// the point past its threshold we are aiming at.
+    pub room_bound: Option<(u32, u32, glam::Vec3)>,
+    pub room_since: Option<Instant>,
     /// A line for the panel: "fighting Drudge Skulker".
     pub status: String,
     /// `Event::Autoplay`s not yet handed out: one per change of `doing`
