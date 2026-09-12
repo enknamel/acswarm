@@ -1,4 +1,9 @@
 # Where this machine keeps the DATs, and what a run leaves behind.
 data-dir
-profiles/
 *.log
+
+# A run seeds and edits profiles here. The suite's own scratch profile
+# is committed, because the checks switch to it rather than write to
+# whatever profile the character happens to read.
+profiles/*
+!profiles/Validate.json

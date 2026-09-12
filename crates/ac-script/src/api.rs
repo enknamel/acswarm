@@ -192,6 +192,12 @@ pub trait Api {
     /// a side pack's name). Numbers only match items that were appraised
     /// when their snapshot was taken.
     fn find_items_everywhere(&mut self, query: &str) -> Array;
+    /// The loot profile this character reads, by name.
+    fn loot_profile(&mut self) -> String;
+    /// Read a different loot profile from now on. False when nothing on
+    /// the shelf answers to that name -- this picks one that exists, it
+    /// does not make one.
+    fn set_loot_profile(&mut self, name: &str) -> bool;
     /// This character's loot profile's rules in order, as maps
     /// `{ name, action, on, says }` -- the action one of "keep",
     /// "salvage", "sell", "skip", `on` whether the rule is switched on,
@@ -304,6 +310,12 @@ pub trait Api {
     fn close_container(&mut self);
     fn buy(&mut self, name: &str) -> bool;
     fn sell(&mut self, name: &str) -> bool;
+    /// The open counter's shelf as the shopping rules see it: maps with
+    /// `wcid`, `name`, `price` (what it costs here, the server's own
+    /// flat rate for a trade note), `stock` (how many it has, `()` when
+    /// the shelf never empties) and `burden`. Empty with no counter
+    /// open.
+    fn vendor_stock(&mut self) -> Array;
     fn combat(&mut self, on: bool);
     /// Jump with power 0..=1 (1 = a fully charged jump); stamina caps it.
     fn jump(&mut self, power: f64);
@@ -522,6 +534,11 @@ pub fn register(engine: &mut Engine) {
     engine.register_fn("find_items", |q: &str| with_api(|a| a.find_items(q)));
     engine.register_fn("find_items_everywhere", |q: &str| {
         with_api(|a| a.find_items_everywhere(q))
+    });
+    engine.register_fn("vendor_stock", || with_api(|a| a.vendor_stock()));
+    engine.register_fn("loot_profile", || with_api(|a| a.loot_profile()));
+    engine.register_fn("set_loot_profile", |name: &str| {
+        with_api(|a| a.set_loot_profile(name))
     });
     engine.register_fn("loot_rules", || with_api(|a| a.loot_rules()));
     engine.register_fn("loot_rule_add", |q: &str, act: &str| {

@@ -1,0 +1,7 @@
+{
+  "name": "Validate",
+  "note": "The acceptance suite's scratch profile. It is cleared and written to on every run, so nothing that matters lives here -- the character switches to it for the loot checks and hands itself back its own afterwards.",
+  "rules": [],
+  "buy": [],
+  "sell_to": "Best"
+}

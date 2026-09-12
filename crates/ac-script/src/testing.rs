@@ -56,6 +56,11 @@ pub struct Recorder {
     /// What `find_items_everywhere()` answers: maps of `account`,
     /// `character`, `online`, `place` and `stats`.
     pub holdings: Array,
+    /// The loot profile this character reads, what `loot_profile()`
+    /// answers and `set_loot_profile` changes.
+    pub loot_profile: String,
+    /// The open counter's shelf, what `vendor_stock()` answers.
+    pub vendor_stock: Array,
     /// The loot profile's rules as `(name, action)`, what
     /// `loot_rules()` answers and `loot_rule_add` /
     /// `loot_rules_clear` edit. A rule added by search is named after
@@ -285,6 +290,21 @@ impl Api for Recorder {
     fn find_items_everywhere(&mut self, query: &str) -> Array {
         self.record(format!("find_items_everywhere {query}"));
         self.holdings.clone()
+    }
+    fn vendor_stock(&mut self) -> Array {
+        self.record("vendor_stock");
+        self.vendor_stock.clone()
+    }
+    fn loot_profile(&mut self) -> String {
+        self.loot_profile.clone()
+    }
+    fn set_loot_profile(&mut self, name: &str) -> bool {
+        self.record(format!("set_loot_profile {name}"));
+        if name.trim().is_empty() {
+            return false;
+        }
+        self.loot_profile = name.to_string();
+        true
     }
     fn loot_rules(&mut self) -> Array {
         self.loot_rules

@@ -965,6 +965,19 @@ impl Api for CtxApi<'_, '_> {
             .collect()
     }
 
+    fn loot_profile(&mut self) -> String {
+        self.client().autoplay.config.loot.profile.clone()
+    }
+
+    fn set_loot_profile(&mut self, name: &str) -> bool {
+        let c = self.client();
+        if c.profiles.get(name).is_none() {
+            return false;
+        }
+        c.autoplay.config.loot.profile = name.to_string();
+        true
+    }
+
     fn loot_rules(&mut self) -> Array {
         let c = self.client();
         let Some(p) = c.profiles.get(&c.autoplay.config.loot.profile) else {
@@ -1467,6 +1480,30 @@ impl Api for CtxApi<'_, '_> {
             }
             None => false,
         }
+    }
+
+    fn vendor_stock(&mut self) -> Array {
+        let c = self.client();
+        // Read through the same snapshot the shopping rules are handed,
+        // so a script sees the shelf they act on rather than a second
+        // reading of the wire that could drift from it.
+        let cfg = c.autoplay.config.growth.clone();
+        let Some(counter) = c.vendor_snapshot(&cfg).counter else {
+            return Array::new();
+        };
+        counter
+            .wares
+            .iter()
+            .map(|w| {
+                let mut m = Map::new();
+                m.insert("wcid".into(), int(w.wcid));
+                m.insert("name".into(), w.name.clone().into());
+                m.insert("price".into(), int(w.price));
+                m.insert("stock".into(), w.stock.map_or(Dynamic::UNIT, int));
+                m.insert("burden".into(), int(w.burden));
+                Dynamic::from_map(m)
+            })
+            .collect()
     }
 
     fn combat(&mut self, on: bool) {

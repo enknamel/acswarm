@@ -159,5 +159,92 @@ fn command(name, args) {
         return true;
     }
 
+    // ---- the counter's shelf, priced the way the server prices it --
+    //
+    // Cindrue is the Holtburg archmage: she marks everything up by 1.35
+    // and she stocks trade notes, which the server charges a flat 1.15
+    // for whatever a counter's own rate is. Reading her shelf catches
+    // both a shop priced by the wrong rule and a shelf whose
+    // never-empties marker is not recognised.
+    if name == "v_shop_do" {
+        say("@teleloc 0xA9B4011B 152.3 132.5 69");
+        return true;
+    }
+    if name == "v_shop_open" {
+        let guid = 0;
+        for o in objects() {
+            if o.name.contains("Cindrue") { guid = o.guid; }
+        }
+        if guid != 0 { use_guid(guid); }
+        want("vendor_in_view", guid != 0, "Archmage Cindrue guid=" + guid);
+        return true;
+    }
+    if name == "v_shop_check" {
+        let shelf = vendor_stock();
+        let unlimited = 0;
+        let cheapest = 999999;
+        let note = 0;
+        for w in shelf {
+            if type_of(w.stock) == "()" { unlimited += 1; }
+            if w.price < cheapest { cheapest = w.price; }
+            if w.name == "Trade Note (100)" { note = w.price; }
+        }
+        want("shelf_is_read", shelf.len() > 0, "lines=" + shelf.len());
+        // An unlimited shelf arrives as -1 masked into 24 bits. Reading
+        // it as a count of sixteen million was the old fault.
+        want("shelf_never_empties", shelf.len() > 0 && unlimited == shelf.len(),
+             "unlimited " + unlimited + " of " + shelf.len());
+        want("prices_are_at_least_one", cheapest >= 1, "cheapest=" + cheapest);
+        // 100 at this counter's 1.35 would be 135; the server says 115.
+        want("a_note_is_priced_by_the_server", note == 115,
+             "Trade Note (100) costs " + note + ", not 135");
+        return true;
+    }
+
+    // ---- the loot profile is the only thing that judges an item ----
+    //
+    // The rule language that used to sit beside it in the autoplay
+    // config is gone, so a character with nothing on the shelf to read
+    // should take nothing, and a rule added to its profile should
+    // decide at once -- the shelf is shared and live, not copied.
+    if name == "v_loot_do" {
+        let taper = 0;
+        for it in inventory() { if it.name.contains("Taper") { taper = it.guid; } }
+        board_set("loot_guid", taper);
+        // Never on the character's own profile: the shelf is shared and
+        // an edit is live for everybody at once, so the suite works on
+        // one of its own and hands the character back what it read.
+        board_set("loot_profile", loot_profile());
+        want("a_scratch_profile_can_be_read", set_loot_profile("Validate"),
+             "was " + board_get("loot_profile") + ", now " + loot_profile());
+        loot_rules_clear();
+        return true;
+    }
+    if name == "v_loot_none" {
+        let g = board_get("loot_guid");
+        want("no_rules_decide_nothing", g != () && g != 0 && loot_action(g) == "",
+             "guid=" + g + " says \"" + loot_action(g) + "\"");
+        loot_rule_add("taper", "sell");
+        return true;
+    }
+    if name == "v_loot_check" {
+        let g = board_get("loot_guid");
+        let rules = loot_rules();
+        let says = "";
+        if rules.len() > 0 { says = rules[0].name + " -> " + rules[0].action; }
+        want("a_rule_added_is_live_at_once", loot_action(g) == "sell",
+             "guid=" + g + " says \"" + loot_action(g) + "\", rule: " + says);
+        loot_rules_clear();
+        // Hand the character back what it was reading. Best effort: on
+        // a fresh shelf that profile may not exist, and the suite's job
+        // is not to invent one.
+        let was = board_get("loot_profile");
+        set_loot_profile(was);
+        want("switching_profiles_reads_back", loot_profile() == was
+             || loot_profile() == "Validate",
+             "asked for " + was + ", reading " + loot_profile());
+        return true;
+    }
+
     false
 }

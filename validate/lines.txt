@@ -21,3 +21,16 @@
 /nop
 /nop
 /v_walk_check
+/v_shop_do
+/nop
+/nop
+/v_shop_open
+/nop
+/nop
+/nop
+/v_shop_check
+/v_loot_do
+/nop
+/v_loot_none
+/nop
+/v_loot_check
