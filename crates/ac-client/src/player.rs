@@ -17,7 +17,7 @@ use ac_scene::collision::{Capsule, Vertical, GRAVITY};
 use ac_scene::nav::{self, Ground, NavGraph};
 use ac_scene::scenery::TerrainSampler;
 use ac_scene::Assets;
-use glam::{Quat, Vec3};
+use glam::{Quat, Vec2, Vec3};
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Input {
@@ -85,6 +85,16 @@ struct Block {
 /// call it running at one.
 const WEDGED_STEPS: u32 = 10;
 
+/// How many frames to stop pushing before trying the same way again.
+/// A second or so: long enough that a character against a wall is not
+/// grinding at it, short enough that a door opening is noticed.
+const WEDGED_REST: u32 = 20;
+
+/// How far the asked-for direction has to turn for the wall we were
+/// leaning on to be someone else's problem: the cosine of about thirty
+/// degrees.
+const WEDGE_TURN: f32 = 0.87;
+
 /// Blocks further than this many landblocks from the character (in
 /// either axis) are let go of: they are still in the process cache for
 /// whoever is there, and come back at the cost of one lookup.
@@ -123,6 +133,14 @@ pub struct Player {
     /// How many steps running the character has spent leaning on
     /// something without moving (see the walk below).
     wedged_for: u32,
+    /// The way it was pushing when it wedged, and how many frames are
+    /// left of not pushing that way again.
+    wedged_dir: Vec3,
+    wedged_rest: u32,
+    /// The furthest this frame may carry the character along the
+    /// ground: the distance to whatever it is walking to. Cleared by
+    /// whoever is not steering it. See the walk.
+    pub step_cap: Option<f32>,
     /// Terrain types that are open sea, read from the region on first
     /// use (see `sea_types`).
     sea_types: Option<Vec<bool>>,
@@ -367,6 +385,9 @@ impl Player {
             n_parts: 0,
             capsule: Capsule::default(),
             wedged_for: 0,
+            wedged_dir: Vec3::ZERO,
+            wedged_rest: 0,
+            step_cap: None,
             sea_types: None,
             vz: 0.0,
             airborne: false,
@@ -1058,16 +1079,23 @@ impl Player {
         // hillside; the graph only finds nodes near the height asked,
         // so such a goal is dropped onto the ground under it.
         //
-        // Only such a goal. A goal that names an indoor cell was not
-        // guessed from a grid -- it is where something actually stands
-        // -- and its height is the whole of the answer. Dropping that
-        // one asked the graph for the ground floor and got a route to
-        // the ground floor, and the character walked in, stood under
-        // the vendor on the storey above, and stopped: a Holtburg
-        // storey is three metres and the rule fired at two.
-        let goal_outdoors = to_cell & 0xFFFF < 0x100;
-        let to = match (b.dungeon, goal_outdoors, terrain(to.x, to.y)) {
-            (false, true, Some(z)) if (z - to.z).abs() > 2.0 => Vec3::new(to.x, to.y, z),
+        // Only such a goal. A goal inside a building was not guessed
+        // from a grid -- it is where something actually stands -- and
+        // its height is the whole of the answer. Dropping that one asks
+        // the graph for the ground floor and gets a route to the ground
+        // floor: the character walks in, stands under the vendor on the
+        // storey above, and stops.
+        //
+        // Whether it is inside is a question for the geometry, not for
+        // the caller. The caller's `to_cell` is a *landblock* whenever
+        // the goal came through `Follow`, and a landblock's low word is
+        // zero, which reads here as "outdoors" -- which is how a walk to
+        // Asenala, who keeps a shop on the upper floor of a house in
+        // Holtburg, was quietly rewritten as a walk to the patch of
+        // ground three metres beneath her.
+        let indoors = to_cell & 0xFFFF >= 0x100 || collision.in_known_cell(to);
+        let to = match (b.dungeon, indoors, terrain(to.x, to.y)) {
+            (false, false, Some(z)) if (z - to.z).abs() > 2.0 => Vec3::new(to.x, to.y, z),
             _ => to,
         };
         let path = nav.find_path(&ground, from, to);
@@ -1160,10 +1188,33 @@ impl Player {
         //
         // It resets the moment real ground is covered, so a slow squeeze
         // past a crate is untouched; only a genuine wall holds it.
+        //
+        // And it lets go again, which it did not use to. The line that
+        // cleared the count sits below, in the walk; returning here
+        // skipped it, so nothing ever moved and nothing ever cleared,
+        // and a character that leaned on one doorframe on its way
+        // upstairs was frozen for the rest of the session -- for that
+        // errand and every errand after it.
+        //
+        // Two ways out, and both of them have to be here rather than in
+        // the ten places that set a goal. Asked to go somewhere else,
+        // it is not leaning on anything any more and is free at once.
+        // Asked the same way again, it rests a moment and then tries
+        // again, because the world moves: the door opens, whatever it
+        // was leaning on walks away.
         if steering && self.wedged_for >= WEDGED_STEPS {
-            self.ground_velocity = Vec3::ZERO;
-            self.moving = false;
-            return false;
+            let asked = dir.normalize_or_zero();
+            if asked.dot(self.wedged_dir) < WEDGE_TURN {
+                self.wedged_for = 0;
+                self.wedged_rest = 0;
+            } else if self.wedged_rest > 0 {
+                self.wedged_rest -= 1;
+                self.ground_velocity = Vec3::ZERO;
+                self.moving = false;
+                return false;
+            } else {
+                self.wedged_for = 0;
+            }
         }
         if !self.airborne {
             self.ground_velocity = if steering {
@@ -1209,7 +1260,26 @@ impl Player {
         } else {
             self.ground_velocity
         };
-        let target = old + vel * dt;
+        // Never run past what we are running to.
+        //
+        // A frame is not always a frame: building a chunk of the
+        // navigation graph takes a couple of hundred milliseconds, and
+        // the walk that follows it is charged the whole of that time at
+        // running speed. That carried a character three metres in one
+        // step -- past the waypoint, out the far side, and turned round
+        // by the next frame to come back. At the foot of a staircase it
+        // reads as a character crossing and re-crossing the bottom step
+        // for ever without ever climbing it.
+        let mut step = vel * dt;
+        if let Some(cap) = self.step_cap.filter(|c| *c > 0.0) {
+            let flat = Vec2::new(step.x, step.y);
+            if flat.length() > cap {
+                let scale = cap / flat.length();
+                step.x *= scale;
+                step.y *= scale;
+            }
+        }
+        let target = old + step;
         // Static geometry of the block we're moving into and the one we're
         // leaving, at a boundary.
         let mut blocks = vec![block_of(target)];
@@ -1268,6 +1338,12 @@ impl Player {
                 // meant the next report was always about the one still
                 // missed. Nothing reaches the wall except through here.
                 self.wedged_for += 1;
+                if self.wedged_for == WEDGED_STEPS {
+                    // Remember which way we were pushing, and how long
+                    // to leave it before pushing that way again.
+                    self.wedged_dir = self.ground_velocity.normalize_or_zero();
+                    self.wedged_rest = WEDGED_REST;
+                }
             } else if self.ground_velocity.length_squared() > 1e-6 {
                 self.wedged_for = 0;
             }

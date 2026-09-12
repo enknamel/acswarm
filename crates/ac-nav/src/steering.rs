@@ -8,6 +8,9 @@ use glam::Vec3;
 
 /// A waypoint counts as reached within this distance (metres, flat).
 pub const ARRIVE: f32 = 0.7;
+/// Height between a waypoint and the character that means another
+/// floor rather than a step or a doorsill.
+const A_STOREY: f32 = 2.0;
 /// Standing this close to a waypoint, it is passed whatever lies beyond.
 const ON_THE_SPOT: f32 = 0.25;
 /// Re-plan when the goal has moved this far from the planned one.
@@ -61,7 +64,12 @@ impl Route {
         while self.next + 1 < self.waypoints.len() {
             let w = self.waypoints[self.next];
             let d = glam::Vec2::new(w.x - me.x, w.y - me.y).length();
-            if d > ARRIVE {
+            // Height counts. A waypoint at the top of a staircase is a
+            // pace away on the map and a storey away in fact: judged on
+            // the flat it is "reached" from the floor below, the route
+            // is thrown away a waypoint at a time, and the character is
+            // left aiming at a point above its own head.
+            if d > ARRIVE || (w.z - me.z).abs() > A_STOREY {
                 break;
             }
             if d > ON_THE_SPOT && !clear(me, self.waypoints[self.next + 1]) {
@@ -481,6 +489,72 @@ pub fn clip_to_block(me: Vec3, goal: Vec3, block: u32) -> Option<Vec3> {
     // the goal itself is.
     let ahead = (edge - me).dot(dir);
     (ahead > 1.0).then_some(edge)
+}
+
+#[cfg(test)]
+mod route_tests {
+    use super::*;
+
+    fn at(x: f32, y: f32, z: f32) -> Vec3 {
+        Vec3::new(x, y, z)
+    }
+
+    /// Up a staircase: two paces along the floor, then three waypoints
+    /// climbing, then the vendor on the landing.
+    fn stairs() -> Route {
+        Route::new(
+            at(0.0, 6.0, 3.0),
+            vec![
+                at(0.0, 1.0, 0.0),
+                at(0.0, 2.0, 0.3),
+                at(0.0, 3.0, 1.3),
+                at(0.0, 4.0, 2.5),
+                at(0.0, 6.0, 3.0),
+            ],
+            Instant::now(),
+        )
+    }
+
+    #[test]
+    fn a_waypoint_a_storey_above_is_not_reached_from_below() {
+        // Standing at the foot of the stairs, directly under the
+        // landing. Judged on the flat every waypoint above is "here",
+        // and the route would be thrown away in one go.
+        let mut r = stairs();
+        let aim = r.target(at(0.0, 6.0, 0.0), |_, _| true);
+        assert_eq!(aim, at(0.0, 1.0, 0.0), "the first step, not the landing");
+        assert_eq!(r.next, 0, "nothing was counted as reached");
+    }
+
+    #[test]
+    fn waypoints_on_our_own_floor_are_passed_as_before() {
+        let mut r = stairs();
+        // Standing on the first waypoint, on its floor: it is behind us
+        // now and the next one is what we are walking to.
+        let aim = r.target(at(0.0, 1.0, 0.0), |_, _| true);
+        assert_eq!(aim, at(0.0, 2.0, 0.3), "moved on to the next");
+    }
+
+    #[test]
+    fn climbing_advances_one_step_at_a_time() {
+        let mut r = stairs();
+        let mut me = at(0.0, 0.0, 0.0);
+        let mut seen = Vec::new();
+        for _ in 0..5 {
+            let aim = r.target(me, |_, _| true);
+            seen.push(aim);
+            me = aim;
+        }
+        assert_eq!(
+            seen.last().copied(),
+            Some(at(0.0, 6.0, 3.0)),
+            "ends on the landing"
+        );
+        assert!(
+            seen.contains(&at(0.0, 3.0, 1.3)),
+            "and went up the stairs to get there: {seen:?}"
+        );
+    }
 }
 
 #[cfg(test)]

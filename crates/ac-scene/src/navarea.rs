@@ -324,8 +324,16 @@ impl Area {
     /// `p` with its height taken from the terrain under it, outdoors,
     /// when the height given is far from it. Indoors, and where there
     /// is no terrain, the height given stands.
+    ///
+    /// Inside a building the height given is the whole of the answer,
+    /// and the cells say where that is. Asking the caller instead is
+    /// what sent a character to Asenala, who keeps a shop on the upper
+    /// floor of a house in Holtburg: the flag that means "believe this
+    /// height" was computed from a landblock id, whose low word is
+    /// always zero and so always read as outdoors, and the walk was
+    /// quietly grounded to the patch of floor three metres below her.
     pub fn grounded(&self, p: Vec3) -> Vec3 {
-        if self.dungeon {
+        if self.dungeon || self.collision.in_known_cell(p) {
             return p;
         }
         match self.terrain_at(p.x, p.y) {

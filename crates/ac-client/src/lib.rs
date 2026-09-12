@@ -118,6 +118,20 @@ pub struct Follow {
     pub stop: f32,
 }
 
+/// How far above or below a goal still counts as standing at it.
+///
+/// A goal is a point on a floor, and arriving was judged on the flat:
+/// how far away it was on the map, height ignored. Sent to Asenala, who
+/// keeps a shop on the upper floor of a house in Holtburg, a character
+/// walked a hundred and forty metres, stopped six millimetres from her
+/// on the map and three metres below her on the ground floor, and stood
+/// there. It had arrived, by the only test it had.
+///
+/// A doorsill, a slope or a step puts a pace of height between two
+/// places on the same floor, so the tolerance has to allow that; a
+/// storey is three metres and must not pass.
+const SAME_FLOOR: f32 = 2.0;
+
 #[derive(Debug, Clone)]
 pub struct Config {
     /// `host` or `host:port` of the login (primary) port.
@@ -1028,6 +1042,9 @@ impl Client {
                     travelling
                 );
                 if let Some((g, stop, goal_cell)) = goal {
+                    // Whoever is steering says how far this frame may
+                    // carry us; by default nothing does.
+                    pl.step_cap = None;
                     let d = g - pl.world_position();
                     let flat = glam::Vec2::new(d.x, d.y);
                     if !manual && pl.noclip {
@@ -1045,7 +1062,7 @@ impl Client {
                         } else {
                             0.0
                         };
-                    } else if !manual && flat.length() > stop {
+                    } else if !manual && (flat.length() > stop || d.z.abs() > SAME_FLOOR) {
                         // Straight at the goal while nothing is in the
                         // way; through the waypoints of a route otherwise.
                         let mut standing = Standing {
@@ -1054,6 +1071,11 @@ impl Client {
                             wide: &mut self.pathfinder,
                         };
                         let aim = self.steering.steer(&mut standing, g, goal_cell, now);
+                        tracing::trace!(
+                            target: "steer",
+                            "at {:?} goal {g:?} aim {aim:?}",
+                            standing.player.world_position()
+                        );
                         // No way there at all: the line is blocked and
                         // no route was found. Standing still is the
                         // whole of the answer.
@@ -1075,6 +1097,7 @@ impl Client {
                                 if flat.length() > 1e-3 {
                                     pl.heading = (-flat.x).atan2(flat.y);
                                 }
+                                pl.step_cap = Some(flat.length());
                                 input.forward = 1.0;
                                 input.run = true;
                             }

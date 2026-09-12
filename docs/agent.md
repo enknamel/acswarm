@@ -254,6 +254,46 @@ anything out of sight when the landblock changes -- by distance, not by
 landblock, because outdoor landblocks are seen across their borders and
 walking into the next one must not throw away the corpse just made.
 
+## Getting there is four questions, and height is in all of them
+
+A character sent to Asenala, who keeps a shop on the upper floor of a
+house in Holtburg, walked a hundred and forty metres, stopped six
+millimetres from her on the map and three metres below her on the
+ground floor, and stood there for good. Five separate things had to be
+right before it could climb the stairs, and four of them were the same
+mistake: a place is a point in three dimensions, and every one of these
+was judging it on the flat.
+
+- **Is the goal's height to be believed?** Both planners grounded a
+  goal onto the terrain under it unless told otherwise, and what told
+  them was a cell id that the steering fills in with a *landblock* --
+  whose low word is zero, which reads as "outdoors". Neither the
+  block's graph nor the neighbourhood planner ever saw the real
+  height. They ask the geometry now (`CollisionWorld::in_known_cell`),
+  which is not something a caller can get wrong.
+- **Have we arrived?** `flat.length() > stop`. Standing under someone
+  is not standing with them: arrival counts height now, to within a
+  doorsill.
+- **Have we reached this waypoint?** The same again, one level down,
+  and worse: a waypoint at the top of a staircase is a pace away on the
+  map, so the route was thrown away a waypoint at a time and the
+  character left aiming at a point above its own head.
+- **How far may one frame carry us?** Building a chunk of the
+  navigation graph takes a couple of hundred milliseconds and the walk
+  that follows is charged the whole of it at running speed -- three
+  metres in one step, past the waypoint and out the far side, turned
+  round by the next frame. At the foot of a staircase that reads as a
+  character crossing and re-crossing the bottom step for ever. A frame
+  may not carry us past what we are walking to.
+
+And one that was not about height at all: **a wedge has to let go**.
+The rule that stops a character leaning on a wall returned before the
+line that cleared its own counter, so the first doorframe a character
+brushed froze it for the rest of the session -- for that errand and
+every errand after it. It now clears the moment the character is asked
+to go somewhere else, and otherwise rests a second and tries again,
+because doors open and whatever was leaned on walks away.
+
 ## Rules that hold whatever the structure
 
 These are settled and are not up for redesign by a later stage.
