@@ -3727,27 +3727,28 @@ impl Client {
     /// Note what this character is running short of, so the others can
     /// hand it over.
     pub(crate) fn autoplay_stock(&mut self) {
-        let team = self.autoplay.config.team.clone();
-        if !team.enabled {
+        if !self.autoplay.config.team.enabled {
             self.autoplay.wants.clear();
             return;
         }
-        let mut wants = Vec::new();
-        for (name, least) in &team.keep_stocked {
-            if name.trim().is_empty() {
-                continue;
-            }
-            let have: u32 = self
-                .world
-                .inventory()
-                .filter(|o| o.name.to_lowercase().contains(&name.to_lowercase()))
-                .map(|o| o.stack_size.max(1))
-                .sum();
-            if have < *least {
-                wants.push(name.clone());
-            }
-        }
-        self.autoplay.wants = wants;
+        // What this character is short of, from the same buy list that
+        // decides what it shops for and what it will not sell. It used
+        // to be a second list on the team settings, tested by hand here
+        // with the same arithmetic the profile already does.
+        //
+        // This is what a teammate reads before handing anything over
+        // (`Mate::wants`), so a character with nothing on its buy list
+        // asks for nothing -- which is right, and is also why the list
+        // matters more than it looks.
+        let profile = self.profiles.get(&self.autoplay.config.loot.profile);
+        self.autoplay.wants = profile
+            .map(|p| {
+                p.shortfall(|what| self.carried_named(what))
+                    .into_iter()
+                    .map(|s| s.want.what.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
     }
 
     /// A fellowship invitation from anyone is accepted while on a team:

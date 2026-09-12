@@ -147,22 +147,10 @@ pub struct Growth {
     pub idle_before_move: f32,
     /// Walk to a vendor when the pack is full or supplies are short.
     pub town_runs: bool,
-    /// Keep at least this many of each, by name, buying them in town
-    /// ("Healing Kit", 2).
-    pub keep_stocked: Vec<(String, u32)>,
     /// How much ammunition to carry for a bow or crossbow. A run to
     /// town is made when a quarter of this is left and none can be
     /// made from what is carried.
     pub ammo_keep: u32,
-    /// How many Prismatic Tapers to carry, for a character that casts.
-    /// Everything else in its formulas is scaled to this by how fast it
-    /// burns (see [`Client::component_targets`]), because a taper is
-    /// what a caster actually runs out of: with foci a cast burns about
-    /// 0.4 of a taper and 0.003 of a scarab, so one number for both is
-    /// wrong in both directions. A run is made when any is down to a
-    /// quarter.
-    #[serde(alias = "comps_keep")]
-    pub tapers_keep: u32,
     /// Quest flags this character has earned, for the counters that
     /// ask for one (the Rossu Morta and Whispering Blade chapter
     /// houses, the Academy stores, and so on -- see
@@ -174,11 +162,6 @@ pub struct Growth {
     /// than a walk to a door that will not open. Society membership is
     /// not listed here: the character carries that itself.
     pub gates_open: Vec<String>,
-    /// Sell what matches any of these searches (the inventory's
-    /// language: `type:armor`, `value<50`).
-    pub sell: Vec<String>,
-    /// Never sell these, by name, whatever the searches say.
-    pub keep: Vec<String>,
 }
 
 impl Default for Growth {
@@ -191,29 +174,8 @@ impl Default for Growth {
             tactic: ac_world::hunting::Tactic::default(),
             idle_before_move: 60.0,
             town_runs: true,
-            keep_stocked: vec![("Healing Kit".into(), 2)],
             ammo_keep: 250,
-            tapers_keep: 1000,
             gates_open: Vec::new(),
-            // Vendor trash only. Gear worth keeping is left alone:
-            // spelled armour and jewelry never match (see
-            // `storage_worthy`), and what is left is capped by value so
-            // that a good drop is carried home rather than sold for
-            // pocket change. Peas and their like are what a run to town
-            // is actually paid for with.
-            sell: vec![
-                "type:junk".into(),
-                "type:misc".into(),
-                "type:gem".into(),
-                "type:food".into(),
-                "type:armor value<2500".into(),
-                "type:clothing value<2500".into(),
-                "type:jewelry value<2500".into(),
-                "type:weapon value<2500".into(),
-                "type:missile value<2500".into(),
-                "type:caster value<2500".into(),
-            ],
-            keep: Vec::new(),
         }
     }
 }
@@ -1466,7 +1428,7 @@ impl Client {
 
     /// How many of a named thing are carried (name contains, as the
     /// team's `keep_stocked` counts).
-    fn carried_named(&self, name: &str) -> u32 {
+    pub(crate) fn carried_named(&self, name: &str) -> u32 {
         let want = name.trim().to_lowercase();
         self.world
             .inventory()
@@ -1486,7 +1448,7 @@ impl Client {
         // of what is short. `grow_needs` used to re-implement that
         // filter, which is two statements of one rule and the way they
         // come to disagree.
-        let mut named: Vec<(String, u32, Option<String>, bool)> = self
+        let named: Vec<(String, u32, Option<String>, bool)> = self
             .profiles
             .get(&self.autoplay.config.loot.profile)
             .map(|p| {
@@ -1503,23 +1465,6 @@ impl Client {
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
-        // `keep_stocked` is what the buy list grew out of and is still
-        // read, so nobody's settings go quiet.
-        named.extend(
-            cfg.keep_stocked
-                .iter()
-                .map(|(n, k)| (n.clone(), *k, None, true)),
-        );
-        if self.autoplay.config.team.enabled {
-            named.extend(
-                self.autoplay
-                    .config
-                    .team
-                    .keep_stocked
-                    .iter()
-                    .map(|(n, k)| (n.clone(), *k, None, true)),
-            );
-        }
         for (name, least, from, urgent) in named {
             if name.trim().is_empty() || least == 0 {
                 continue;
@@ -1563,7 +1508,14 @@ impl Client {
         }
         // Components: for a character with spells and a wand. Those it
         // carries, and those its buffs ask for that it has run out of.
-        if cfg.tapers_keep > 0 && !self.world.stats.spells.is_empty() {
+        // How many tapers to carry, from the buy list. Everything else
+        // a caster burns is scaled to it (see `component_targets`),
+        // which is why one number buys forty kinds of thing.
+        let tapers = self
+            .profiles
+            .get(&self.autoplay.config.loot.profile)
+            .map_or(0, |p| p.stocked_count("Prismatic Taper"));
+        if tapers > 0 && !self.world.stats.spells.is_empty() {
             let has_wand = self.wielded_caster().is_some()
                 || self
                     .world
@@ -1571,7 +1523,7 @@ impl Client {
                     .any(|o| o.item_type & item_type::CASTER != 0);
             if has_wand {
                 if let Ok(mapper) = self.assets.spell_component_ids() {
-                    let targets = self.component_targets(cfg.tapers_keep);
+                    let targets = self.component_targets(tapers);
                     // Every component the spells this character casts
                     // will burn, and every one it happens to carry.
                     //
@@ -1591,7 +1543,7 @@ impl Client {
                             continue;
                         };
                         // What this one burns at, not what a taper does.
-                        let keep = targets.get(&id).copied().unwrap_or(cfg.tapers_keep);
+                        let keep = targets.get(&id).copied().unwrap_or(tapers);
                         let c = carried.iter().find(|c| c.component_id == id);
                         let have = c.map_or(0, |c| c.count);
                         let buyable = ac_world::shops::sold_anywhere(wcid);
@@ -1945,19 +1897,12 @@ impl Client {
 
     /// Every name that is never sold: the player's own list, whatever
     /// is kept stocked, and whatever the loot rules always keep.
-    pub(crate) fn keep_names(&self, cfg: &Growth) -> Vec<String> {
-        let mut keep: Vec<String> = cfg.keep.clone();
-        keep.extend(cfg.keep_stocked.iter().map(|(n, _)| n.clone()));
-        keep.extend(
-            self.autoplay
-                .config
-                .team
-                .keep_stocked
-                .iter()
-                .map(|(n, _)| n.clone()),
-        );
-        keep.extend(self.autoplay.config.loot.always.iter().cloned());
-        keep
+    pub(crate) fn keep_names(&self) -> Vec<String> {
+        // The player's own word, and nothing else: what the character
+        // keeps stocked is barred from sale by the buy list itself
+        // (`Profile::stocks`, passed separately), which used to be said
+        // here a second time.
+        self.autoplay.config.loot.always.clone()
     }
 
     /// The pack items to sell to the open vendor, which takes only some
@@ -1981,7 +1926,7 @@ impl Client {
     pub(crate) fn sell_policy(&self, cfg: &Growth) -> SellPolicy {
         SellPolicy {
             burns: self.burns(cfg),
-            keep: self.keep_names(cfg),
+            keep: self.keep_names(),
             profile: self.profiles.get(&self.autoplay.config.loot.profile),
             wielder: self.wielder(),
             me: self.world.stats.name.clone(),
@@ -2335,11 +2280,17 @@ impl Client {
     /// The spell components this character's spells burn, by weenie
     /// class: what it goes to town to buy, as against what it goes to
     /// town to sell.
-    pub fn burns(&self, cfg: &Growth) -> Vec<u32> {
+    pub fn burns(&self, _cfg: &Growth) -> Vec<u32> {
         let Ok(mapper) = self.assets.spell_component_ids() else {
             return Vec::new();
         };
-        self.component_targets(cfg.tapers_keep)
+        // Which components, not how many: this is the guard that stops
+        // a caster selling what its own spells burn, and it must not be
+        // switchable off by editing a shopping list. Any positive scale
+        // gives the same set of keys, so it is given one of its own
+        // rather than the number of tapers the player happens to keep.
+        const ENOUGH_TO_NAME_THEM: u32 = 1_000;
+        self.component_targets(ENOUGH_TO_NAME_THEM)
             .keys()
             .filter_map(|id| mapper.component_wcid(*id))
             .collect()

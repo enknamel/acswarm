@@ -699,6 +699,16 @@ impl Profile {
             .any(|b| contains_fold(name, b.what.trim()))
     }
 
+    /// How many of a thing the buy list says to carry, 0 when it does
+    /// not mention it.
+    pub fn stocked_count(&self, what: &str) -> u32 {
+        self.buy
+            .iter()
+            .filter(|b| b.on)
+            .find(|b| contains_fold(what, b.what.trim()))
+            .map_or(0, |b| b.keep)
+    }
+
     /// What is short, against what is carried: the shopping list.
     ///
     /// `held` answers how many of a thing are in the pack, by the same
