@@ -202,14 +202,23 @@ pub struct HoldingsView {
 }
 
 /// Build the view from a store.
-pub fn view(store: &HoldingsStore, st: &State, on_bus: bool, refresh_in: f32) -> HoldingsView {
+/// `server` is the world the looking character is logged in to, and
+/// nothing from another world is shown: there is no way to move an item
+/// between worlds, so a row from one would be a fact nobody can act on.
+pub fn view(
+    store: &HoldingsStore,
+    server: &str,
+    st: &State,
+    on_bus: bool,
+    refresh_in: f32,
+) -> HoldingsView {
     let now = unix_now();
     let q = Query::parse(&st.search);
-    let mut rows = store.search(&q, now);
+    let mut rows = store.search(server, &q, now);
     sort_hits(&mut rows, st.sort, st.descending);
-    let (characters, items, unappraised) = store.counts();
+    let (characters, items, unappraised) = store.counts(server);
     let online_unappraised = store
-        .iter()
+        .on_server(server)
         .filter(|h| h.online_at(now))
         .map(|h| h.unappraised())
         .sum();
@@ -511,10 +520,14 @@ pub fn draw(egui: &egui::Context, v: &HoldingsView, st: &mut State) -> Actions {
 }
 
 /// What a session last published.
+/// The world the demo characters live on.
+const DEMO_SERVER: &str = "demo";
+
 #[derive(Debug, Clone)]
 struct Published {
     fingerprint: u64,
     at: Instant,
+    server: String,
     account: String,
     character: String,
 }
@@ -534,7 +547,7 @@ pub struct Holdings {
     /// Per session: what it last said.
     published: BTreeMap<usize, Published>,
     /// Characters whose session ended, to be said offline next tick.
-    pending_offline: Vec<(String, String)>,
+    pending_offline: Vec<(String, String, String)>,
     /// Every session that last published before this publishes again
     /// (Refresh, or an appraisal request).
     force_at: Option<Instant>,
@@ -575,6 +588,7 @@ impl Holdings {
         };
         let mut store = HoldingsStore::new();
         store.put(CharacterHoldings {
+            server: DEMO_SERVER.into(),
             account: "fleetbot1".into(),
             character: "Fleetbot One".into(),
             guid: 0x5000_0001,
@@ -626,6 +640,7 @@ impl Holdings {
             ],
         });
         store.put(CharacterHoldings {
+            server: DEMO_SERVER.into(),
             account: "fleetbot1".into(),
             character: "Fleetbot Two".into(),
             guid: 0x5000_0002,
@@ -663,6 +678,7 @@ impl Holdings {
             ],
         });
         store.put(CharacterHoldings {
+            server: DEMO_SERVER.into(),
             account: "academy".into(),
             character: "Academy Bot One".into(),
             guid: 0x5000_0003,
@@ -732,8 +748,8 @@ impl Holdings {
     }
 
     /// Say a character has gone offline: its last snapshot, marked so.
-    fn say_offline(cx: &mut Ctx, account: &str, character: &str) {
-        let h = holdings::store().set_offline(account, character);
+    fn say_offline(cx: &mut Ctx, server: &str, account: &str, character: &str) {
+        let h = holdings::store().set_offline(server, account, character);
         if let Some(h) = h {
             Self::publish(cx, h);
         }
@@ -776,8 +792,8 @@ impl Holdings {
                 }
             }
         }
-        for (account, character) in std::mem::take(&mut self.pending_offline) {
-            Self::say_offline(cx, &account, &character);
+        for (server, account, character) in std::mem::take(&mut self.pending_offline) {
+            Self::say_offline(cx, &server, &account, &character);
         }
         // Appraisal requests, from this process's window or another's.
         let asked: Vec<serde_json::Value> = cx
@@ -831,6 +847,7 @@ impl Holdings {
             return;
         }
         let fingerprint = client.holdings_fingerprint();
+        let server = client.config.host.clone();
         let account = client.config.account.clone();
         let character = client.world.stats.name.clone();
         let due = match self.published.get(&i) {
@@ -851,9 +868,12 @@ impl Holdings {
         };
         // A relog as someone else: the one before has gone.
         if let Some(p) = self.published.get(&i) {
-            if p.character != character || p.account != account {
-                self.pending_offline
-                    .push((p.account.clone(), p.character.clone()));
+            if p.character != character || p.account != account || p.server != server {
+                self.pending_offline.push((
+                    p.server.clone(),
+                    p.account.clone(),
+                    p.character.clone(),
+                ));
             }
         }
         self.published.insert(
@@ -861,6 +881,7 @@ impl Holdings {
             Published {
                 fingerprint,
                 at: now,
+                server,
                 account,
                 character,
             },
@@ -891,7 +912,7 @@ impl Plugin for Holdings {
     fn session_removed(&mut self, index: usize) {
         if let Some(p) = self.published.get(&index) {
             self.pending_offline
-                .push((p.account.clone(), p.character.clone()));
+                .push((p.server.clone(), p.account.clone(), p.character.clone()));
         }
         crate::shift_removed(&mut self.published, index);
     }
@@ -902,7 +923,8 @@ impl Plugin for Holdings {
         }
         if matches!(ev, Event::Terminated(_) | Event::Refused(_)) {
             if let Some(p) = self.published.remove(&cx.index) {
-                self.pending_offline.push((p.account, p.character));
+                self.pending_offline
+                    .push((p.server, p.account, p.character));
             }
         }
     }
@@ -926,11 +948,17 @@ impl Plugin for Holdings {
         }
         let refresh_in = self.refresh_in(cx.now);
         let on_bus = cx.board.bus_name().is_some();
+        // The world the character at this window is logged in to: the
+        // only one whose items it can do anything with.
+        let here = cx
+            .try_client()
+            .map(|c| c.config.host.clone())
+            .unwrap_or_default();
         let v = match &self.source {
-            Source::Demo(store) => view(store, &self.state, true, refresh_in),
+            Source::Demo(store) => view(store, DEMO_SERVER, &self.state, true, refresh_in),
             Source::Live => {
                 let store = holdings::store();
-                view(&store, &self.state, on_bus, refresh_in)
+                view(&store, &here, &self.state, on_bus, refresh_in)
             }
         };
         let a = draw(egui, &v, &mut self.state);
@@ -983,7 +1011,7 @@ mod tests {
     fn the_view_searches_sorts_and_counts() {
         let store = demo_store();
         let mut st = State::default();
-        let v = view(&store, &st, true, 0.0);
+        let v = view(&store, DEMO_SERVER, &st, true, 0.0);
         assert_eq!((v.characters, v.items, v.unappraised), (3, 6, 3));
         assert_eq!(v.online_unappraised, 2);
         assert_eq!(v.rows.len(), 6);
@@ -993,7 +1021,7 @@ mod tests {
         assert_eq!(v.rows[0].stats.name, "Chainmail Hauberk");
         // An epic on a ring, wherever it is: the offline character's pack.
         st.search = "slot:ring epics>=2".into();
-        let v = view(&store, &st, true, 0.0);
+        let v = view(&store, DEMO_SERVER, &st, true, 0.0);
         assert!(v.needs_appraisal);
         assert_eq!(v.rows.len(), 1);
         assert_eq!(v.rows[0].character, "Fleetbot Two");
@@ -1003,7 +1031,7 @@ mod tests {
         st.search = "wielded".into();
         st.sort = Column::Value;
         st.descending = true;
-        let v = view(&store, &st, true, 0.0);
+        let v = view(&store, DEMO_SERVER, &st, true, 0.0);
         let names: Vec<&str> = v.rows.iter().map(|r| r.stats.name.as_str()).collect();
         assert_eq!(names, ["Chainmail Hauberk", "Fine Sword"]);
         assert_eq!(v.rows[0].place, "worn");
@@ -1012,7 +1040,7 @@ mod tests {
         st.search.clear();
         st.sort = Column::Updated;
         st.descending = false;
-        let v = view(&store, &st, true, 0.0);
+        let v = view(&store, DEMO_SERVER, &st, true, 0.0);
         assert!(v.rows[..3].iter().all(|r| r.online));
         assert_eq!(
             v.rows[3].character, "Academy Bot One",
@@ -1020,7 +1048,7 @@ mod tests {
         );
         // A broken line is reported, not crashed on.
         st.search = "(sword".into();
-        let v = view(&store, &st, true, 0.0);
+        let v = view(&store, DEMO_SERVER, &st, true, 0.0);
         assert!(v.problem.is_some());
     }
 
@@ -1032,6 +1060,7 @@ mod tests {
         let now = unix_now();
         // A file left by an earlier run: an offline character.
         let filed = CharacterHoldings {
+            server: "one.example".into(),
             account: "old".into(),
             character: "Filed One".into(),
             guid: 1,
@@ -1048,6 +1077,7 @@ mod tests {
         host.register(Box::new(Holdings::with_dir(dir.clone())));
         // A value another process set, as the bus would deliver it.
         let heard = CharacterHoldings {
+            server: "one.example".into(),
             account: "Remote".into(),
             character: "Heard One".into(),
             guid: 2,
@@ -1070,14 +1100,23 @@ mod tests {
         host.end_frame();
         host.frame(Vec::new(), 0, &[], 0.05, Instant::now());
         let store = holdings::store();
-        assert!(store.get("old", "Filed One").is_some(), "the file was read");
+        assert!(
+            store.get("one.example", "old", "Filed One").is_some(),
+            "the file was read"
+        );
         let h = store
-            .get("remote", "Heard One")
+            .get("one.example", "remote", "Heard One")
             .expect("the bus value was merged");
         assert!(h.online_at(now));
-        let hits = store.search(&Query::parse("epic"), now);
+        let hits = store.search("one.example", &Query::parse("epic"), now);
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].character, "Heard One");
+        assert!(
+            store
+                .search("another.example", &Query::parse("epic"), now)
+                .is_empty(),
+            "another world's items are no use: nothing moves between them"
+        );
         assert_eq!(store.dir(), Some(dir.as_path()));
         drop(store);
         let _ = std::fs::remove_dir_all(&dir);

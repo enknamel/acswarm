@@ -7,9 +7,17 @@
 //! [`HoldingsStore`] ([`store`]); the plugin that drives this
 //! (`ac_plugin::panels::holdings`) also publishes it on the bus as a
 //! `set` under [`bus_key`] so every other process gets it, and writes it
-//! to `<cache dir>/holdings/<account>/<character>.json` so a character
-//! that is not logged in stays searchable. A store merges what it hears
-//! by `taken_at`: the newer snapshot wins.
+//! to `<cache dir>/holdings/<server>/<account>/<character>.json` so a
+//! character that is not logged in stays searchable. A store merges what
+//! it hears by `taken_at`: the newer snapshot wins.
+//!
+//! A character is named by **server, account and character**, all three.
+//! The account alone is not enough -- the same account holds characters
+//! on more than one world, and two worlds can hold the same name -- and
+//! searching across worlds would be answering a question nobody can act
+//! on, because there is no way to move an item between them. So every
+//! search and every view is scoped to the world the asking character is
+//! logged in to (see [`HoldingsStore::on_server`]).
 //!
 //! An item in a snapshot is a [`HoldingRecord`], the owned, serialisable
 //! twin of [`ItemStats`]; [`HoldingRecord::to_stats`] turns it back so
@@ -37,15 +45,35 @@ pub const REQUEST_TOPIC: &str = "holdings.request";
 /// a process that died without saying goodbye fades out.
 pub const ONLINE_FOR: u64 = 90;
 
-/// The bus key of one character's snapshot: `holdings.<account>/<character>`.
-pub fn bus_key(account: &str, character: &str) -> String {
-    format!("{BUS_PREFIX}{}/{character}", account.to_ascii_lowercase())
+/// The bus key of one character's snapshot:
+/// `holdings.<server>/<account>/<character>`.
+pub fn bus_key(server: &str, account: &str, character: &str) -> String {
+    format!(
+        "{BUS_PREFIX}{}/{}/{character}",
+        safe_name(&server.to_ascii_lowercase()),
+        account.to_ascii_lowercase()
+    )
 }
 
-/// The account and character a bus key names, if it is one of ours.
-pub fn parse_bus_key(key: &str) -> Option<(&str, &str)> {
-    key.strip_prefix(BUS_PREFIX)?.split_once('/')
+/// The server, account and character a bus key names, if it is one of
+/// ours. A key from before worlds were told apart has two parts, and is
+/// read as a character on no particular world -- which no scoped search
+/// will match, and which its own session replaces on its next login.
+pub fn parse_bus_key(key: &str) -> Option<(&str, &str, &str)> {
+    let rest = key.strip_prefix(BUS_PREFIX)?;
+    let mut parts = rest.split('/');
+    let a = parts.next()?;
+    let b = parts.next()?;
+    match parts.next() {
+        Some(character) => Some((a, b, character)),
+        None => Some(("", a, b)),
+    }
 }
+
+/// What names one character for good: the world, the account and the
+/// name. Two of the three is not enough -- one account plays several
+/// worlds, and two worlds can hold the same name.
+pub type Key = (String, String, String);
 
 fn is_zero_u32(v: &u32) -> bool {
     *v == 0
@@ -152,6 +180,15 @@ pub struct HoldingRecord {
     pub bonded: bool,
     #[serde(skip_serializing_if = "is_false")]
     pub attuned: bool,
+    /// What this was picked up for, when the character that holds it
+    /// wrote it down (`ac_loot::Ledger`). Absent for anything bought,
+    /// traded, or in the pack from before there was a profile.
+    ///
+    /// It travels with the snapshot so the Items window can answer
+    /// "what is my mule carrying, and what is it carrying it *for*"
+    /// without that character being logged in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub took: Option<ac_loot::LootAction>,
 }
 
 /// Every word [`kind_name`] can answer with, so a stored kind maps back
@@ -252,6 +289,7 @@ impl From<&ItemStats> for HoldingRecord {
             tinks: s.tinks,
             bonded: s.bonded,
             attuned: s.attuned,
+            took: None,
         }
     }
 }
@@ -316,6 +354,10 @@ impl HoldingRecord {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CharacterHoldings {
+    /// The world it is on: `Config::host`. Empty in a file written
+    /// before worlds were told apart.
+    #[serde(default)]
+    pub server: String,
     pub account: String,
     pub character: String,
     /// The character's guid, 0 when unknown.
@@ -338,12 +380,21 @@ pub fn unix_now() -> u64 {
 
 impl CharacterHoldings {
     /// The store's key: the account in lower case, the character as is.
-    pub fn key(&self) -> (String, String) {
-        (self.account.to_ascii_lowercase(), self.character.clone())
+    pub fn key(&self) -> Key {
+        (
+            self.server.to_ascii_lowercase(),
+            self.account.to_ascii_lowercase(),
+            self.character.clone(),
+        )
     }
 
     pub fn bus_key(&self) -> String {
-        bus_key(&self.account, &self.character)
+        bus_key(&self.server, &self.account, &self.character)
+    }
+
+    /// Whether this character is on `server`, case-insensitively.
+    pub fn on(&self, server: &str) -> bool {
+        self.server.eq_ignore_ascii_case(server)
     }
 
     /// Online as of `now` (unix seconds): said so, and said so recently
@@ -375,6 +426,7 @@ impl CharacterHoldings {
 /// One search result: who holds the item, and the item.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Hit {
+    pub server: String,
     pub account: String,
     pub character: String,
     pub online: bool,
@@ -409,7 +461,7 @@ pub fn safe_name(name: &str) -> String {
 /// Every snapshot known to this process, by (account, character).
 #[derive(Debug, Default)]
 pub struct HoldingsStore {
-    chars: BTreeMap<(String, String), CharacterHoldings>,
+    chars: BTreeMap<Key, CharacterHoldings>,
     /// Where snapshots are written; `None` keeps them in memory only.
     dir: Option<PathBuf>,
 }
@@ -448,45 +500,78 @@ impl HoldingsStore {
     }
 
     /// Merge every snapshot file under `dir`; returns how many were read.
+    /// Read every snapshot under `dir` into a store.
+    ///
+    /// Files live at `<server>/<account>/<character>.json`. Files from
+    /// before worlds were told apart are two deep instead of three;
+    /// they are read, so nothing disappears, but they carry no world
+    /// and so match no scoped search. Each is replaced by its own
+    /// session on its next login, which is why this is not worth a
+    /// migration.
     pub fn load_dir(&mut self, dir: &Path) -> usize {
         let mut n = 0;
-        let Ok(accounts) = std::fs::read_dir(dir) else {
+        let mut orphans = 0;
+        let mut read = |store: &mut Self, path: &Path| {
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                return;
+            }
+            match std::fs::read_to_string(path)
+                .map_err(|e| e.to_string())
+                .and_then(|t| {
+                    serde_json::from_str::<CharacterHoldings>(&t).map_err(|e| e.to_string())
+                }) {
+                Ok(h) => {
+                    if h.server.is_empty() {
+                        orphans += 1;
+                    }
+                    store.merge(h);
+                    n += 1;
+                }
+                Err(e) => tracing::warn!("holdings: cannot read {}: {e}", path.display()),
+            }
+        };
+        let Ok(top) = std::fs::read_dir(dir) else {
             return 0;
         };
-        for account in accounts.flatten() {
-            let Ok(files) = std::fs::read_dir(account.path()) else {
+        for entry in top.flatten() {
+            let Ok(mid) = std::fs::read_dir(entry.path()) else {
                 continue;
             };
-            for f in files.flatten() {
-                let path = f.path();
-                if path.extension().and_then(|e| e.to_str()) != Some("json") {
-                    continue;
-                }
-                match std::fs::read_to_string(&path)
-                    .map_err(|e| e.to_string())
-                    .and_then(|t| {
-                        serde_json::from_str::<CharacterHoldings>(&t).map_err(|e| e.to_string())
-                    }) {
-                    Ok(h) => {
-                        self.merge(h);
-                        n += 1;
+            for m in mid.flatten() {
+                let path = m.path();
+                if path.is_dir() {
+                    // <server>/<account>/<character>.json
+                    if let Ok(files) = std::fs::read_dir(&path) {
+                        for f in files.flatten() {
+                            read(self, &f.path());
+                        }
                     }
-                    Err(e) => tracing::warn!("holdings: cannot read {}: {e}", path.display()),
+                } else {
+                    // <account>/<character>.json, from before worlds
+                    // were told apart.
+                    read(self, &path);
                 }
             }
+        }
+        if orphans > 0 {
+            tracing::info!(
+                "holdings: {orphans} snapshot(s) name no world; each is replaced on its \
+                 character's next login"
+            );
         }
         n
     }
 
     /// The file a character's snapshot lives in under `dir`.
-    pub fn path_for(dir: &Path, account: &str, character: &str) -> PathBuf {
-        dir.join(safe_name(&account.to_ascii_lowercase()))
+    pub fn path_for(dir: &Path, server: &str, account: &str, character: &str) -> PathBuf {
+        dir.join(safe_name(&server.to_ascii_lowercase()))
+            .join(safe_name(&account.to_ascii_lowercase()))
             .join(format!("{}.json", safe_name(character)))
     }
 
     /// Write one snapshot under `dir`.
     pub fn save_to(dir: &Path, h: &CharacterHoldings) -> std::io::Result<PathBuf> {
-        let path = Self::path_for(dir, &h.account, &h.character);
+        let path = Self::path_for(dir, &h.server, &h.account, &h.character);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -536,16 +621,26 @@ impl HoldingsStore {
         }
     }
 
-    pub fn get(&self, account: &str, character: &str) -> Option<&CharacterHoldings> {
-        self.chars
-            .get(&(account.to_ascii_lowercase(), character.to_string()))
+    pub fn get(&self, server: &str, account: &str, character: &str) -> Option<&CharacterHoldings> {
+        self.chars.get(&(
+            server.to_ascii_lowercase(),
+            account.to_ascii_lowercase(),
+            character.to_string(),
+        ))
     }
 
     /// Mark a character offline as of now; the snapshot as it is now.
-    pub fn set_offline(&mut self, account: &str, character: &str) -> Option<CharacterHoldings> {
-        let h = self
-            .chars
-            .get_mut(&(account.to_ascii_lowercase(), character.to_string()))?;
+    pub fn set_offline(
+        &mut self,
+        server: &str,
+        account: &str,
+        character: &str,
+    ) -> Option<CharacterHoldings> {
+        let h = self.chars.get_mut(&(
+            server.to_ascii_lowercase(),
+            account.to_ascii_lowercase(),
+            character.to_string(),
+        ))?;
         h.online = false;
         h.taken_at = h.taken_at.max(unix_now());
         Some(h.clone())
@@ -564,22 +659,30 @@ impl HoldingsStore {
     }
 
     /// Characters, items and unappraised items over the whole store.
-    pub fn counts(&self) -> (usize, usize, usize) {
-        let items = self.chars.values().map(|h| h.items.len()).sum();
-        let unappraised = self.chars.values().map(|h| h.unappraised()).sum();
-        (self.chars.len(), items, unappraised)
+    /// Characters, items and unappraised items on one world.
+    pub fn counts(&self, server: &str) -> (usize, usize, usize) {
+        let items = self.on_server(server).map(|h| h.items.len()).sum();
+        let unappraised = self.on_server(server).map(|h| h.unappraised()).sum();
+        (self.on_server(server).count(), items, unappraised)
     }
 
-    /// Every item of every character that matches `q`, characters in
-    /// key order, `now` being unix seconds for the online flag.
-    pub fn search(&self, q: &Query, now: u64) -> Vec<Hit> {
+    /// Every character known on one world. Nothing from another world: there is no way to move an
+    /// item between them, so an answer from one would be a fact nobody
+    /// can act on.
+    pub fn on_server<'a>(&'a self, server: &'a str) -> impl Iterator<Item = &'a CharacterHoldings> {
+        self.chars.values().filter(move |h| h.on(server))
+    }
+
+    /// What matches `q` among the characters on `server`.
+    pub fn search(&self, server: &str, q: &Query, now: u64) -> Vec<Hit> {
         let mut out = Vec::new();
-        for h in self.chars.values() {
+        for h in self.on_server(server) {
             let online = h.online_at(now);
             for item in &h.items {
                 let stats = item.to_stats();
                 if stats.matches(q) {
                     out.push(Hit {
+                        server: h.server.clone(),
                         account: h.account.clone(),
                         character: h.character.clone(),
                         online,
@@ -612,12 +715,21 @@ impl Client {
             return None;
         }
         Some(CharacterHoldings {
+            server: self.config.host.clone(),
             account: self.config.account.clone(),
             character,
             guid: self.world.player_guid.unwrap_or(0),
             taken_at: unix_now(),
             online,
-            items: self.item_stats().iter().map(HoldingRecord::from).collect(),
+            items: self
+                .item_stats()
+                .iter()
+                .map(|s| {
+                    let mut r = HoldingRecord::from(s);
+                    r.took = self.autoplay.ledger.of(s);
+                    r
+                })
+                .collect(),
         })
     }
 
@@ -646,11 +758,15 @@ impl Client {
         h.finish()
     }
 
-    /// Search every character's items known to this process (see
-    /// [`store`]) with a search line in the inventory's language.
+    /// Search the items of every character on **this** world known to
+    /// this process (see [`store`]), with a search line in the
+    /// inventory's language.
+    ///
+    /// This world and no other: there is no way to move an item between
+    /// worlds, so a hit on another one is a fact nobody can act on.
     pub fn holdings_search(&self, query: &str) -> Vec<Hit> {
         let q = Query::parse(query);
-        store().search(&q, unix_now())
+        store().search(&self.config.host, &q, unix_now())
     }
 }
 
@@ -752,14 +868,85 @@ mod tests {
     }
 
     #[test]
+    fn one_world_at_a_time() {
+        // Three parts name a character, because one account plays
+        // several worlds and two worlds can hold the same name. And
+        // nothing crosses: there is no way to move an item between
+        // worlds, so a hit from another one is a fact nobody can act on.
+        let now = unix_now();
+        let here = CharacterHoldings {
+            server: "play.coldeve.ac".into(),
+            account: "acc".into(),
+            character: "Blargerton".into(),
+            guid: 1,
+            taken_at: now,
+            online: false,
+            items: vec![HoldingRecord {
+                guid: 10,
+                name: "Diamond Scarab".into(),
+                ..Default::default()
+            }],
+        };
+        // The same account, the same character name, another world.
+        let there = CharacterHoldings {
+            server: "127.0.0.1".into(),
+            items: vec![HoldingRecord {
+                guid: 11,
+                name: "Diamond Scarab".into(),
+                ..Default::default()
+            }],
+            ..here.clone()
+        };
+        let mut store = HoldingsStore::new();
+        store.put(here.clone());
+        store.put(there.clone());
+        assert_eq!(store.len(), 2, "the same name on two worlds is two");
+
+        let q = Query::parse("scarab");
+        assert_eq!(store.search("play.coldeve.ac", &q, now).len(), 1);
+        assert_eq!(store.search("127.0.0.1", &q, now).len(), 1);
+        assert_eq!(store.counts("play.coldeve.ac"), (1, 1, 1));
+        assert!(
+            store.search("nowhere.example", &q, now).is_empty(),
+            "a world with nobody on it holds nothing"
+        );
+        assert!(
+            store.get("play.coldeve.ac", "acc", "Blargerton").is_some(),
+            "found by all three"
+        );
+    }
+
+    #[test]
+    fn what_a_character_carries_it_for_travels_with_the_snapshot() {
+        // So the Items window can answer "what is the mule carrying, and
+        // what is it carrying it for" without logging the mule in.
+        let mut r = HoldingRecord::from(&sword());
+        assert_eq!(r.took, None, "nothing decided");
+        r.took = Some(ac_loot::LootAction::Sell);
+        let text = serde_json::to_string(&r).unwrap();
+        assert!(text.contains("\"took\":\"sell\""), "{text}");
+        let back: HoldingRecord = serde_json::from_str(&text).unwrap();
+        assert_eq!(back.took, Some(ac_loot::LootAction::Sell));
+        // A record written before there were dispositions still reads.
+        let old: HoldingRecord = serde_json::from_str(r#"{"guid":5,"name":"Apple"}"#).unwrap();
+        assert_eq!(old.took, None);
+    }
+
+    #[test]
     fn keys_and_names() {
         assert_eq!(
-            bus_key("FleetBot1", "Fleetbot One"),
-            "holdings.fleetbot1/Fleetbot One"
+            bus_key("Play.Coldeve.AC", "FleetBot1", "Fleetbot One"),
+            "holdings.play.coldeve.ac/fleetbot1/Fleetbot One"
         );
         assert_eq!(
+            parse_bus_key("holdings.play.coldeve.ac/fleetbot1/Fleetbot One"),
+            Some(("play.coldeve.ac", "fleetbot1", "Fleetbot One"))
+        );
+        // A key from before worlds were told apart names no world, and
+        // so matches no scoped search.
+        assert_eq!(
             parse_bus_key("holdings.fleetbot1/Fleetbot One"),
-            Some(("fleetbot1", "Fleetbot One"))
+            Some(("", "fleetbot1", "Fleetbot One"))
         );
         assert_eq!(parse_bus_key("autoplay.mate"), None);
         assert_eq!(safe_name("+Fletch"), "+Fletch");
@@ -767,8 +954,8 @@ mod tests {
         assert_eq!(safe_name("../x/y"), "_x_y");
         assert_eq!(safe_name("  .. "), "_");
         assert_eq!(
-            HoldingsStore::path_for(Path::new("/c"), "Acc", "Ch/ar"),
-            PathBuf::from("/c/acc/Ch_ar.json")
+            HoldingsStore::path_for(Path::new("/c"), "A.Server", "Acc", "Ch/ar"),
+            PathBuf::from("/c/a.server/acc/Ch_ar.json")
         );
     }
 
@@ -777,6 +964,7 @@ mod tests {
         let dir = temp_dir("store");
         let now = unix_now();
         let alice = CharacterHoldings {
+            server: "one.example".into(),
             account: "AccOne".into(),
             character: "Alice".into(),
             guid: 0x5000_0001,
@@ -796,6 +984,7 @@ mod tests {
             ],
         };
         let bob = CharacterHoldings {
+            server: "one.example".into(),
             account: "acctwo".into(),
             character: "Bob".into(),
             guid: 0x5000_0002,
@@ -805,32 +994,44 @@ mod tests {
         };
         HoldingsStore::save_to(&dir, &alice).unwrap();
         HoldingsStore::save_to(&dir, &bob).unwrap();
-        assert!(dir.join("accone").join("Alice.json").is_file());
+        assert!(dir
+            .join("one.example")
+            .join("accone")
+            .join("Alice.json")
+            .is_file());
 
         let store = HoldingsStore::load_all(&dir);
         assert_eq!(store.len(), 2);
         assert_eq!(store.dir(), Some(dir.as_path()));
-        assert_eq!(store.counts(), (2, 4, 3));
+        assert_eq!(store.counts("one.example"), (2, 4, 3));
         // Bob's word is old: not online any more, whatever it says.
-        assert!(store.get("ACCONE", "Alice").unwrap().online_at(now));
-        assert!(!store.get("acctwo", "Bob").unwrap().online_at(now));
+        assert!(store
+            .get("one.example", "ACCONE", "Alice")
+            .unwrap()
+            .online_at(now));
+        assert!(!store
+            .get("one.example", "acctwo", "Bob")
+            .unwrap()
+            .online_at(now));
 
-        let hits = store.search(&Query::parse("tunic"), now);
+        let hits = store.search("one.example", &Query::parse("tunic"), now);
         assert_eq!(hits.len(), 2);
         let places: Vec<(&str, &str)> = hits
             .iter()
             .map(|h| (h.character.as_str(), h.place.as_str()))
             .collect();
         assert_eq!(places, [("Alice", "Pack"), ("Bob", "pack")]);
-        let hits = store.search(&Query::parse("spell:epic wielded"), now);
+        let hits = store.search("one.example", &Query::parse("spell:epic wielded"), now);
         assert_eq!(hits.len(), 1);
         assert_eq!(
             (hits[0].account.as_str(), hits[0].place.as_str()),
             ("AccOne", "worn")
         );
         assert!(hits[0].online);
-        assert!(store.search(&Query::parse("dmg>20"), now).is_empty());
-        assert_eq!(store.search(&Query::parse(""), now).len(), 4);
+        assert!(store
+            .search("one.example", &Query::parse("dmg>20"), now)
+            .is_empty());
+        assert_eq!(store.search("one.example", &Query::parse(""), now).len(), 4);
 
         // Merging: the newer snapshot wins, an older one is dropped.
         let mut store = store;
@@ -838,20 +1039,41 @@ mod tests {
         older.taken_at = now - 5;
         older.items.clear();
         assert!(!store.merge(older));
-        assert_eq!(store.get("accone", "Alice").unwrap().items.len(), 3);
+        assert_eq!(
+            store
+                .get("one.example", "accone", "Alice")
+                .unwrap()
+                .items
+                .len(),
+            3
+        );
         let mut newer = alice.clone();
         newer.taken_at = now + 5;
         newer.items.truncate(1);
         assert!(store.merge_value(&serde_json::to_value(&newer).unwrap()));
-        assert_eq!(store.get("accone", "Alice").unwrap().items.len(), 1);
+        assert_eq!(
+            store
+                .get("one.example", "accone", "Alice")
+                .unwrap()
+                .items
+                .len(),
+            1
+        );
         assert!(!store.merge_value(&serde_json::json!("nonsense")));
         // Offline keeps the items and the file follows.
-        let off = store.set_offline("accone", "Alice").unwrap();
+        let off = store.set_offline("one.example", "accone", "Alice").unwrap();
         assert!(!off.online);
         store.save(&off).unwrap();
         let again = HoldingsStore::load_all(&dir);
-        assert!(!again.get("accone", "Alice").unwrap().online);
-        assert_eq!(again.get("accone", "Alice").unwrap().items.len(), 1);
+        assert!(!again.get("one.example", "accone", "Alice").unwrap().online);
+        assert_eq!(
+            again
+                .get("one.example", "accone", "Alice")
+                .unwrap()
+                .items
+                .len(),
+            1
+        );
         let _ = std::fs::remove_dir_all(&dir);
         // A missing directory is an empty store.
         assert!(HoldingsStore::load_all(&dir).is_empty());
