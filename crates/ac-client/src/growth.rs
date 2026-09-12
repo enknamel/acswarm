@@ -912,6 +912,25 @@ pub fn never_sell_because(stats: &ItemStats) -> &'static str {
 /// to keep gets sold on the next run to town. `judge` is asked only for
 /// what carries no decision -- bought, traded, or in the pack from
 /// before there was a profile.
+/// Which of two counters is worth walking to, better first.
+///
+/// The whole order in one stop beats part of it, then more of the order
+/// beats less, then what the counter *pays* -- which used not to be
+/// asked at all. What a shop gives for an item is `value * buy_rate`
+/// and the spread is nearly half: around Cragstone the Scriveners
+/// eighty metres off pay 0.5 and the Arcanum Broker three hundred
+/// metres further on pays 0.95, and ranking on distance alone walked
+/// past the broker every time. Distance settles what is left.
+fn better_counter(a: (&Forecast, f32), b: (&Forecast, f32)) -> std::cmp::Ordering {
+    let (fa, near_a) = a;
+    let (fb, near_b) = b;
+    fb.covers_it()
+        .cmp(&fa.covers_it())
+        .then_with(|| fb.stocks.len().cmp(&fa.stocks.len()))
+        .then_with(|| fb.takings.cmp(&fa.takings))
+        .then_with(|| near_a.total_cmp(&near_b))
+}
+
 /// What the sale decision needs, gathered once (see
 /// [`Client::sell_policy`]).
 pub(crate) struct SellPolicy {
@@ -2023,23 +2042,20 @@ impl Client {
     /// whether or not a vendor is open. What the party hands its
     /// quartermaster before it leaves.
     pub fn loot_for_sale(&self, cfg: &Growth) -> Vec<u32> {
-        let wielder = self.wielder();
-        let keep = self.keep_names(cfg);
-        let tags = self.autoplay.tags().clone();
-        let burns = self.burns(cfg);
+        // The same judgement a counter is handed. This was a third one:
+        // it asked `sellable`, which knows nothing of the buy list and
+        // has no rule for a character with no profile -- so the
+        // quartermaster was handed exactly the two things the rest of
+        // this was written to hold back, and sold them on the party's
+        // behalf.
+        let policy = self.sell_policy(cfg);
         self.world
             .inventory()
             .filter_map(|o| {
                 let stats = self.stats_of(o.guid)?;
                 let ammo = o.valid_locations & equip::MISSILE_AMMO != 0;
-                let rules = SellRules {
-                    sell: &cfg.sell,
-                    keep: &keep,
-                    can_wield: stats.appraised.then(|| wielder.can_wield(&stats)),
-                    tags: &tags,
-                    burns: &burns,
-                };
-                sellable(&stats, ammo, &rules).then_some(o.guid)
+                self.offers_for_sale(&policy, &stats, ammo)
+                    .then_some(o.guid)
             })
             .collect()
     }
@@ -2118,18 +2134,13 @@ impl Client {
         )
     }
 
-    /// The counter the loot profile names for selling, if it names one.
-    ///
-    /// `SellTo::Best` is not a name: it means "work it out", which the
-    /// ranking below does.
+    /// The counter the loot profile names for selling, if it names
+    /// one. The policy is [`Profile::sell_to_named`]; this is the
+    /// lookup.
     fn sell_to_named(&self) -> Option<String> {
         let loot = &self.autoplay.config.loot;
         let p = self.profiles.get(&loot.profile)?;
-        match &p.sell_to {
-            ac_loot::profile::SellTo::Best => None,
-            ac_loot::profile::SellTo::Named(n) if n.trim().is_empty() => None,
-            ac_loot::profile::SellTo::Named(n) => Some(n.trim().to_string()),
-        }
+        p.sell_to_named().map(str::to_string)
     }
 
     /// Everything in the pack the selling rules allow to go, before any
@@ -2356,9 +2367,14 @@ impl Client {
         // for finding one when nobody has.
         let named = self.sell_to_named();
         if let Some(want) = named.as_deref() {
+            // Named, but not exempt. `allowed` is what remembers the
+            // counters this run has already emptied its pack at and the
+            // ones lately found to be no use; without it a run spent
+            // every one of its stops walking back to the same counter,
+            // because the name matches just as well the second time.
             if let Some(found) = ac_world::shops::all()
                 .iter()
-                .filter(|s| s.open_to(society, &quests))
+                .filter(|s| s.open_to(society, &quests) && allowed(s.xy()))
                 .find(|s| s.name.eq_ignore_ascii_case(want))
             {
                 let f = forecast(found, &wants, purse, &salables);
@@ -2374,20 +2390,7 @@ impl Client {
                 .filter(|(_, f)| f.worth_going())
                 .min_by(|(a, fa), (b, fb)| {
                     // The whole order in one stop beats part of it, then
-                    // more of the order beats less.
-                    //
-                    // Then what the counter pays, which used not to be
-                    // asked at all. What a shop gives for an item is
-                    // `value * buy_rate` and the spread is nearly half:
-                    // around Cragstone the Scriveners eighty metres off
-                    // pay 0.5 and the Arcanum Broker three hundred
-                    // metres further on pays 0.95. Ranking on distance
-                    // alone walked past the broker every time.
-                    fb.covers_it()
-                        .cmp(&fa.covers_it())
-                        .then_with(|| fb.stocks.len().cmp(&fa.stocks.len()))
-                        .then_with(|| fb.takings.cmp(&fa.takings))
-                        .then_with(|| reach(a.xy()).total_cmp(&reach(b.xy())))
+                    better_counter((fa, reach(a.xy())), (fb, reach(b.xy())))
                 })
                 .map(|(s, f)| (s.name.clone(), s.xy(), f));
             if best.is_some() {
@@ -3990,35 +3993,46 @@ mod tests {
     }
 
     #[test]
-    fn the_counter_that_pays_best_wins_a_tie() {
+    fn the_counter_that_pays_best_wins_when_neither_has_the_order() {
         // Around Cragstone the Scriveners are eighty metres away and pay
         // half; the Arcanum Broker is three hundred metres further on
         // and pays 0.95. Neither stocks what a hunting character came to
-        // buy, so the order is a tie and the old ranking fell through to
-        // distance -- which walked past the broker every time and cost
-        // nearly half of every sale.
-        let loot = vec![Salable {
-            guid: 1,
-            item_type: item_type::JEWELRY,
-            value: 1_000,
-            stack: 1,
-        }];
-        let paying = |name: &str, rate: f32| ac_world::shops::Shop {
-            buys: item_type::JEWELRY,
-            min_value: 0,
-            buy_rate: rate,
-            ..shop(name, Vec::new())
+        // buy, so the order is a tie -- and the old ranking fell through
+        // to distance, walked past the broker every time, and took half
+        // price on every sale.
+        let look = |takings: u32, stocks: usize| Forecast {
+            takings,
+            stocks: vec!["something".into(); stocks],
+            ..Default::default()
         };
-        let near = paying("Scrivener", 0.5);
-        let far = paying("Arcanum Broker", 0.95);
-
-        let a = forecast(&near, &[], 0, &loot);
-        let b = forecast(&far, &[], 0, &loot);
-        assert_eq!(a.takings, 500);
-        assert_eq!(b.takings, 950);
-        assert!(
-            b.takings > a.takings,
+        let near = look(500, 0);
+        let far = look(950, 0);
+        assert_eq!(
+            better_counter((&far, 380.0), (&near, 80.0)),
+            std::cmp::Ordering::Less,
             "the broker is worth the extra three hundred metres"
+        );
+
+        // But only when the order is a tie: a counter that has what the
+        // character came for still beats a richer one that does not.
+        let stocked_but_poor = look(0, 2);
+        assert_eq!(
+            better_counter((&stocked_but_poor, 380.0), (&far, 80.0)),
+            std::cmp::Ordering::Less,
+            "what it came to buy comes first"
+        );
+    }
+
+    #[test]
+    fn distance_only_settles_what_pay_and_stock_leave_even() {
+        let same = Forecast {
+            takings: 100,
+            ..Default::default()
+        };
+        assert_eq!(
+            better_counter((&same, 50.0), (&same, 900.0)),
+            std::cmp::Ordering::Less,
+            "all else equal, the nearer one"
         );
     }
 

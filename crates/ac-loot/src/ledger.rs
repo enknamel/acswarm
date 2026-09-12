@@ -68,12 +68,37 @@ pub struct Took {
 }
 
 /// What went wrong, and when, so that it stops mattering.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Failed {
     pub why: String,
     /// Unix seconds. Unix rather than an `Instant` because it outlives
     /// the process that wrote it.
     pub at: u64,
+}
+
+impl<'de> Deserialize<'de> for Failed {
+    /// Reads what is on disk today and what was on disk before a
+    /// failure carried the hour it happened.
+    ///
+    /// The first shape of this field was a bare string. A file holding
+    /// one must still read: failing to parse the ledger loses every
+    /// decision the character has made, and the next run to town judges
+    /// the whole pack afresh -- which is the heirloom sale this is all
+    /// here to prevent.
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Either {
+            Now { why: String, at: u64 },
+            Before(String),
+        }
+        Ok(match Either::deserialize(d)? {
+            Either::Now { why, at } => Failed { why, at },
+            // No hour, so it is taken as long past: forgiving, which is
+            // the right way round for a thing that is only a wait.
+            Either::Before(why) => Failed { why, at: 0 },
+        })
+    }
 }
 
 /// How long a failure is held against an item.
@@ -105,6 +130,16 @@ pub struct Ledger {
     /// Changed since it was last written. Not part of the file.
     #[serde(skip)]
     dirty: bool,
+    /// A file was there and would not be read.
+    ///
+    /// This is not the same as having nothing written down, and the
+    /// difference decides whether anything may be sold. An empty ledger
+    /// says "no decisions", every item falls through to the rules, and
+    /// a profile with a broad sell rule sells the keepers -- so a
+    /// ledger that *lost* its decisions must not be mistaken for one
+    /// that never had any.
+    #[serde(skip)]
+    unreadable: bool,
 }
 
 impl Ledger {
@@ -236,13 +271,39 @@ impl Ledger {
             .join(format!("{}.json", tidy(character)))
     }
 
-    /// Read one back. A ledger that will not read is an empty one,
-    /// which sells nothing -- see the note at the top of this file.
+    /// Read one back.
+    ///
+    /// No file is an empty ledger: a character that has never written
+    /// anything down has nothing to lose. A file that will not read is
+    /// something else, and says so ([`Ledger::trusted`]), because its
+    /// decisions are gone rather than absent.
     pub fn load(path: &Path) -> Ledger {
-        std::fs::read_to_string(path)
-            .ok()
-            .and_then(|t| serde_json::from_str(&t).ok())
-            .unwrap_or_default()
+        let Ok(text) = std::fs::read_to_string(path) else {
+            return Ledger::default();
+        };
+        match serde_json::from_str::<Ledger>(&text) {
+            Ok(l) => l,
+            Err(e) => {
+                tracing::error!(
+                    path = %path.display(),
+                    "the loot ledger will not read ({e}); nothing will be sold until it is \
+                     sorted out, because what this character meant to keep is in there"
+                );
+                Ledger {
+                    unreadable: true,
+                    ..Default::default()
+                }
+            }
+        }
+    }
+
+    /// Whether what it says can be acted on.
+    ///
+    /// False when a file was there and would not read. Nothing is sold
+    /// while this is false: the cost of waiting is a full pack, and the
+    /// cost of guessing is somebody's armour.
+    pub fn trusted(&self) -> bool {
+        !self.unreadable
     }
 
     /// Write it out. Called when it changes rather than when the client
@@ -258,7 +319,10 @@ impl Ledger {
     /// Write it out if anything has changed, and note that it is
     /// written. Called every tick; costs a bool most of the time.
     pub fn save_if_changed(&mut self, path: &Path) {
-        if !self.dirty {
+        // Never write over a file that would not read: it is the only
+        // copy of what this character meant to keep, and a person can
+        // still repair it.
+        if !self.dirty || self.unreadable {
             return;
         }
         self.dirty = false;
@@ -360,18 +424,107 @@ mod tests {
         assert!(l.for_sale(0).is_empty(), "salvage is not for sale");
     }
 
+    fn temp_dir(what: &str) -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("acswarm-ledger-{what}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir
+    }
+
     #[test]
-    fn it_survives_being_written_out_and_read_back() {
+    fn a_ledger_is_read_back_from_the_file_it_was_written_to() {
+        // The restart itself, not a round trip through a string in
+        // memory: `save`, `load` and the path between them are what make
+        // a decision survive a crash, and nothing ran them.
+        let dir = temp_dir("restart");
+        let path = Ledger::path_of(&dir, "play.coldeve.ac", "+Blargerton");
         let mut l = Ledger::new();
         l.remember(&thing(1, 500, "Ornate Ring"), LootAction::Keep);
         l.remember(&thing(2, 501, "Jewel"), LootAction::Sell);
-        let text = serde_json::to_string(&l).unwrap();
-        let back: Ledger = serde_json::from_str(&text).unwrap();
+        assert!(l.unsaved(), "there is something to write");
+        l.save_if_changed(&path);
+        assert!(!l.unsaved(), "and it has been written");
+        assert!(path.is_file(), "at {}", path.display());
+
+        let back = Ledger::load(&path);
+        assert!(back.trusted());
         assert_eq!(
             back.of(&thing(1, 500, "Ornate Ring")),
-            Some(LootAction::Keep)
+            Some(LootAction::Keep),
+            "the keeper is still a keeper after a restart"
         );
         assert_eq!(back.for_sale(0), vec![2]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_ledger_written_before_failures_carried_an_hour_still_reads() {
+        // The first shape of `failed` was a bare string. A character
+        // running since then has one on disk, and a file that will not
+        // parse loses every decision it holds.
+        let text = r#"{"took":{"1":{"action":"salvage","wcid":700,"name":"Greaves","failed":"could not be salvaged"}}}"#;
+        let l: Ledger = serde_json::from_str(text).expect("the old shape still reads");
+        let greaves = thing(1, 700, "Greaves");
+        assert_eq!(l.of(&greaves), Some(LootAction::Salvage));
+        // With no hour in it, it is taken as long past rather than as
+        // having just happened -- against a real clock, which is the
+        // only one this is ever asked with.
+        let now = 1_700_000_000;
+        assert_eq!(l.for_salvage(now), vec![1], "not held against it");
+    }
+
+    #[test]
+    fn a_ledger_that_will_not_read_sells_nothing_rather_than_guessing() {
+        // An empty ledger and a lost one are not the same thing. Empty
+        // means "nothing decided", every item falls through to the
+        // rules, and a profile with a broad sell rule sells the keepers.
+        // Lost has to say so.
+        let dir = temp_dir("broken");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("nonsense.json");
+        std::fs::write(&path, "{ this is not json").unwrap();
+
+        let mut l = Ledger::load(&path);
+        assert!(!l.trusted(), "it knows its decisions are gone");
+        assert!(
+            Ledger::load(&dir.join("never-written.json")).trusted(),
+            "no file at all is an honest empty one"
+        );
+
+        // And it does not write over the only copy, which a person may
+        // still be able to repair.
+        l.remember(&thing(1, 500, "Ornate Ring"), LootAction::Keep);
+        l.save_if_changed(&path);
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "{ this is not json",
+            "the unreadable file is left alone"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_ledger_belongs_to_one_character_on_one_world() {
+        let dir = std::path::Path::new("/c");
+        let a = Ledger::path_of(dir, "play.coldeve.ac", "Blargerton");
+        assert_ne!(
+            a,
+            Ledger::path_of(dir, "127.0.0.1", "Blargerton"),
+            "two worlds"
+        );
+        assert_ne!(
+            a,
+            Ledger::path_of(dir, "play.coldeve.ac", "Bryn"),
+            "two characters"
+        );
+        // A name is a file name, not a path: one that climbed out would
+        // put one character's decisions where another reads them.
+        let climber = Ledger::path_of(dir, "play.coldeve.ac", "../Bryn");
+        assert!(
+            climber.starts_with("/c/taken/play_coldeve_ac"),
+            "{}",
+            climber.display()
+        );
     }
 
     #[test]

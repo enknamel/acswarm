@@ -644,6 +644,18 @@ impl Profile {
 }
 
 impl Profile {
+    /// The counter this profile names for selling, if it names one.
+    ///
+    /// `Best` is not a name: it means "work it out", and so does a name
+    /// with nothing in it, which is what an editor leaves behind when
+    /// somebody picks "this counter" and then changes their mind.
+    pub fn sell_to_named(&self) -> Option<&str> {
+        match &self.sell_to {
+            SellTo::Best => None,
+            SellTo::Named(n) => Some(n.trim()).filter(|n| !n.is_empty()),
+        }
+    }
+
     /// Whether this is something the character keeps stocked, and so
     /// never sells.
     ///
@@ -1218,11 +1230,18 @@ mod tests {
 
     #[test]
     fn selling_goes_to_one_counter_and_by_default_the_best_paying() {
-        let p = Profile::starter();
+        let mut p = Profile::starter();
         assert_eq!(p.sell_to, SellTo::Best);
-        let mut mine = p.clone();
-        mine.sell_to = SellTo::Named("Arcanum Broker".into());
-        assert_eq!(mine.sell_to, SellTo::Named("Arcanum Broker".into()));
+        assert_eq!(p.sell_to_named(), None, "work it out");
+
+        p.sell_to = SellTo::Named("  Arcanum Broker  ".into());
+        assert_eq!(p.sell_to_named(), Some("Arcanum Broker"), "trimmed");
+
+        // What an editor leaves behind when somebody picks "this
+        // counter" and then changes their mind: a name with nothing in
+        // it means the same as not having named one.
+        p.sell_to = SellTo::Named("   ".into());
+        assert_eq!(p.sell_to_named(), None);
     }
 
     #[test]

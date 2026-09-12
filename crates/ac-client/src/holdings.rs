@@ -868,6 +868,62 @@ mod tests {
     }
 
     #[test]
+    fn a_snapshot_written_before_worlds_were_told_apart_is_still_read() {
+        // Those files are two deep, not three. Nothing must vanish from
+        // the folder when the layout changes -- but they name no world,
+        // so they match no scoped search, and each is replaced by its
+        // own session on that character's next login.
+        let dir = temp_dir("legacy");
+        let now = unix_now();
+        std::fs::create_dir_all(dir.join("accone")).unwrap();
+        let old = CharacterHoldings {
+            server: String::new(),
+            account: "accone".into(),
+            character: "Alice".into(),
+            guid: 1,
+            taken_at: now,
+            online: false,
+            items: vec![HoldingRecord {
+                guid: 10,
+                name: "Old Dagger".into(),
+                ..Default::default()
+            }],
+        };
+        std::fs::write(
+            dir.join("accone").join("Alice.json"),
+            serde_json::to_string(&old).unwrap(),
+        )
+        .unwrap();
+
+        // And one written since, three deep, beside it.
+        let now_shape = CharacterHoldings {
+            server: "one.example".into(),
+            character: "Bob".into(),
+            items: vec![HoldingRecord {
+                guid: 11,
+                name: "New Dagger".into(),
+                ..Default::default()
+            }],
+            ..old.clone()
+        };
+        HoldingsStore::save_to(&dir, &now_shape).unwrap();
+
+        let mut store = HoldingsStore::new();
+        assert_eq!(store.load_dir(&dir), 2, "both shapes were read");
+        assert!(
+            store.get("", "accone", "Alice").is_some(),
+            "the old one is not lost"
+        );
+        assert!(store.get("one.example", "accone", "Bob").is_some());
+
+        let q = Query::parse("dagger");
+        let hits = store.search("one.example", &q, now);
+        assert_eq!(hits.len(), 1, "only the one that names this world");
+        assert_eq!(hits[0].character, "Bob");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn one_world_at_a_time() {
         // Three parts name a character, because one account plays
         // several worlds and two worlds can hold the same name. And
