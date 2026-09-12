@@ -877,8 +877,6 @@ pub fn never_sell_carried(stats: &ItemStats, holds_anything: bool) -> bool {
     never_sell(stats) || (stats.item_type & item_type::CONTAINER != 0 && holds_anything)
 }
 
-/// Why an item is one of those, for the log.
-
 /// Which of two counters is worth walking to, better first.
 ///
 /// The whole order in one stop beats part of it, then more of the order
