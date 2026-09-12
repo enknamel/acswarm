@@ -103,9 +103,19 @@ const WALK_TIMEOUT: Duration = Duration::from_secs(4 * 60);
 /// After a journey that could not be planned, the next place is not
 /// tried for this long.
 const RETRY_AFTER: Duration = Duration::from_secs(30);
-/// The next vendor of a run must be within this of the first: the same
-/// town, not the next one.
-const SAME_TOWN: f32 = 300.0;
+/// How near a counter must stand to a *way out* -- a gem's exit, a
+/// recall's landing, the character's own feet -- to be worth stopping
+/// at on a run.
+///
+/// This used to be measured from the first counter of the run, which
+/// meant one town and no further. But a run is not a walk around a
+/// town: a mid-level character uses a Town Network gem, takes the
+/// portal it summons, sells at the broker outside Cragstone, uses an
+/// Archmage gem, takes that portal, restocks its components there, and
+/// recalls back to where it was hunting. Every one of those counters is
+/// a long way from the last one and a few paces from a way out, which
+/// is the distance that actually costs anything.
+const NEAR_A_WAY_OUT: f32 = 300.0;
 /// The vendors' unlimited-stock marker.
 const UNLIMITED_STACK: u32 = 0x00FF_FFFF;
 
@@ -3210,18 +3220,25 @@ impl Client {
         let still_full = self.pack_full();
         let wanting = needs.iter().any(|n| n.urgent) || still_full;
         if wanting && run.stops < STOPS_PER_RUN {
-            // The next counter in the same town is chosen by what is
-            // still on the list, not by which is closest -- and only
-            // when there is reason to think it can help. A full pack is
-            // reason enough on its own: that stop is to empty it.
-            if let Some((vendor, at, look)) = self.pick_vendor(
-                cfg,
-                &needs,
-                &[(run.town, "in town".to_string())],
-                Some(SAME_TOWN),
-                &run.visited,
-                now,
-            ) {
+            // The next counter is chosen by what is still on the list,
+            // not by what is closest -- and only when there is reason to
+            // think it can help. A full pack is reason enough on its
+            // own: that stop is to empty it.
+            //
+            // It is looked for from every way out the character has, the
+            // same as the first stop was, and not from the town this one
+            // is standing in. A gem in the pack makes a counter on the
+            // other side of the world two actions away, and judging the
+            // second stop by how far it is from the first is what kept a
+            // run inside one town.
+            let me = self.player.as_ref().map(|p| p.world_position());
+            let ways = match me {
+                Some(p) => self.ways_out(Vec2::new(p.x, p.y)),
+                None => vec![(run.town, "in town".to_string())],
+            };
+            if let Some((vendor, at, look)) =
+                self.pick_vendor(cfg, &needs, &ways, Some(NEAR_A_WAY_OUT), &run.visited, now)
+            {
                 if (still_full || look.worth_going()) && self.grow_travel(at, now) {
                     let what = if still_full {
                         "the rest of the loot"
