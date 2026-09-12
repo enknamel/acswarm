@@ -2344,18 +2344,33 @@ impl Client {
         // for finding one when nobody has.
         let named = self.sell_to_named();
         if let Some(want) = named.as_deref() {
-            // Named, but not exempt. `allowed` is what remembers the
-            // counters this run has already emptied its pack at and the
-            // ones lately found to be no use; without it a run spent
-            // every one of its stops walking back to the same counter,
-            // because the name matches just as well the second time.
+            // Named, but not exempt, and not the answer to every
+            // question.
+            //
+            // `allowed` is what remembers the counters this run has
+            // already emptied its pack at and the ones lately found to
+            // be no use; without it a run spent every one of its stops
+            // walking back to the same counter, because the name matches
+            // just as well the second time.
+            //
+            // And it is only taken when the trip to it is worth making.
+            // This is where a character goes to *sell*; returning it
+            // whatever the forecast said made it the answer for buying
+            // too, and the ring search -- the thing that finds an
+            // archmage -- never ran. A mage out of tapers, with coin in
+            // its purse and nothing in its pack worth selling, was sent
+            // to a counter that stocks no components, told the trip was
+            // not worth making, and sent there again on every run after.
+            // It never bought tapers again.
             if let Some(found) = ac_world::shops::all()
                 .iter()
                 .filter(|s| s.open_to(society, &quests) && allowed(s.xy()))
                 .find(|s| s.name.eq_ignore_ascii_case(want))
             {
                 let f = forecast(found, &wants, purse, &salables);
-                return Some((found.name.clone(), found.xy(), f));
+                if f.worth_going() {
+                    return Some((found.name.clone(), found.xy(), f));
+                }
             }
         }
         for ring in vendor_rings(within) {

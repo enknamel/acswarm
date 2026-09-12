@@ -1840,20 +1840,27 @@ impl Client {
                     return None;
                 }
                 let held = self.already_carried(stats.wcid) + claimed.of(stats.wcid);
+                // Judged once, here, whoever the body belongs to.
+                let judged = judge_loot(
+                    &stats,
+                    self.appraisals.get(g),
+                    cfg,
+                    &self.profiles,
+                    &wielder,
+                    &who,
+                    held,
+                );
                 let verdict = if mine {
-                    // Our own body: everything on it is ours, and what
-                    // it is for is what the profile would have said.
-                    ac_loot::Verdict::Take(LootAction::Keep)
+                    // Our own body: everything on it comes back, but
+                    // what each thing is for is still what the rules
+                    // said (see `ac_loot::corpse::recovered`).
+                    let took = match judged {
+                        Judged::Decided(action, _) => Some(action),
+                        Judged::NeedsId(_) | Judged::None => None,
+                    };
+                    ac_loot::Verdict::Take(ac_loot::corpse::recovered(took))
                 } else {
-                    match judge_loot(
-                        &stats,
-                        self.appraisals.get(g),
-                        cfg,
-                        &self.profiles,
-                        &wielder,
-                        &who,
-                        held,
-                    ) {
+                    match judged {
                         Judged::Decided(action, _) if action.takes() => {
                             ac_loot::Verdict::Take(action)
                         }

@@ -71,6 +71,24 @@ pub struct Open {
 /// How near the character must be before a corpse will open for it.
 pub const REACH: f32 = 2.5;
 
+/// What something taken off your own corpse is for.
+///
+/// Everything on it comes back -- it is all yours, and the wand and the
+/// components are what the character needs to fight again -- but what
+/// each thing is *for* is still the profile's answer. Answering "keep"
+/// for the lot writes a Keep over every decision the character had
+/// already made: twenty things meant for a counter and three for the
+/// salvage bag come home unsellable and unsalvageable, and the pack
+/// fills with loot it can no longer get rid of.
+pub fn recovered(judged: Option<crate::profile::LootAction>) -> crate::profile::LootAction {
+    match judged {
+        Some(a) if a.takes() => a,
+        // Nothing claimed it, or the rules said leave it -- which is not
+        // an answer that applies to your own belongings.
+        _ => crate::profile::LootAction::Keep,
+    }
+}
+
 /// How many of each kind have been claimed off this body so far.
 ///
 /// A cap ("keep at most two healing kits") counts what the character
@@ -129,6 +147,21 @@ mod tests {
             burden: 10,
             verdict,
         }
+    }
+
+    #[test]
+    fn your_own_corpse_gives_back_what_each_thing_was_already_for() {
+        // Everything on it comes back. What it is for is what it was
+        // for: the ring meant for a counter is still meant for one, and
+        // writing Keep over the lot is how a recovered pack becomes
+        // unsellable for good.
+        assert_eq!(recovered(Some(LootAction::Sell)), LootAction::Sell);
+        assert_eq!(recovered(Some(LootAction::Salvage)), LootAction::Salvage);
+        assert_eq!(recovered(Some(LootAction::Keep)), LootAction::Keep);
+        // "Leave it" is not an answer about your own belongings, and
+        // neither is silence.
+        assert_eq!(recovered(Some(LootAction::Skip)), LootAction::Keep);
+        assert_eq!(recovered(None), LootAction::Keep);
     }
 
     #[test]
