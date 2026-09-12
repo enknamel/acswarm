@@ -20,13 +20,18 @@
 //! 6. **Top up buffs**: in a quiet moment, recast anything that has
 //!    run out or will soon.
 //!
-//! Loot is judged by ordered [`LootRule`]s in the inventory's own search
-//! language (`crate::items::Query`): `value>500` keep, `slot:ring
-//! epics>=2` keep, `ws<6 -epics>0` salvage. The first rule that matches
-//! decides ([`loot_action`]); items are appraised first when a rule
-//! needs numbers. Everything a rule keeps, salvages or sells is picked
-//! up, and its guid tagged with the action (`Autoplay::loot_action`) for
-//! the salvage pass, the UI and scripts.
+//! Loot is judged by the character's loot profile and nothing else
+//! (`crate::profile`): the first rule that claims an item decides it,
+//! and items are appraised first when a rule needs numbers
+//! ([`judge_loot`]). A character whose profile is missing takes
+//! nothing, which is the right way round for a client with no rules to
+//! read. The two name lists here -- `Loot::always` and `Loot::never` --
+//! are the player's own word and are read before any rule.
+//!
+//! Everything a rule keeps, salvages or sells is picked up, and what it
+//! was taken for is written down against its guid (`Autoplay::tag`,
+//! `crate::profile::Ledger`) for the salvage pass, the run to town, the
+//! UI and scripts.
 //!
 //! Nothing here talks to the UI: the panel edits a [`Config`] and reads
 //! [`Autoplay::status`].
@@ -35,7 +40,6 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
-use crate::items::Query;
 use crate::{Client, Stance};
 // The rule vocabulary lives in ac-loot; this file still speaks it.
 pub use ac_loot::profile::LootAction;
@@ -304,39 +308,11 @@ impl Style {
     pub const ALL: [Style; 4] = [Style::Auto, Style::Melee, Style::Missile, Style::Magic];
 }
 
-/// One loot rule: a search in the inventory's language and what to do
-/// with an item it matches. Rules are tried in order and the first
-/// match decides.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct LootRule {
-    pub query: String,
-    pub action: LootAction,
-}
-
-impl LootRule {
-    pub fn new(query: impl Into<String>, action: LootAction) -> Self {
-        LootRule {
-            query: query.into(),
-            action,
-        }
-    }
-}
-
 /// What loot is worth taking, and what to do with it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Loot {
     pub enabled: bool,
-    /// The rules, first match wins (see [`loot_action`]). Missing from
-    /// an old config, whose `filters` become keep rules.
-    #[serde(default)]
-    pub rules: Vec<LootRule>,
-    /// The old flat list: searches whose matches were taken. Read for
-    /// compatibility, folded into `rules` by [`Loot::rules`] and
-    /// [`Loot::migrate`], never written again.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub filters: Vec<String>,
     /// Always take these, whatever the rules say (by name).
     pub always: Vec<String>,
     /// Never take these (by name), even when a rule matches.
@@ -355,8 +331,10 @@ pub struct Loot {
     #[serde(default = "yes")]
     pub tidy_pack: bool,
     /// The loot profile this character reads, by name (see
-    /// `crate::profile`). Empty falls back to `rules` below, which is
-    /// what a character had before profiles existed.
+    /// `crate::profile`). A name nothing on the shelf answers to means
+    /// nothing is taken at all: the profile is where a player says what
+    /// their things are worth, and a client with nothing to read should
+    /// take nothing rather than guess.
     ///
     /// Defaulted by name rather than by `Default::default`, because a
     /// settings file that mentions `loot` at all and leaves this out
@@ -413,8 +391,6 @@ impl Default for Loot {
     fn default() -> Self {
         Loot {
             enabled: true,
-            rules: vec![LootRule::new("value>250", LootAction::Keep)],
-            filters: Vec::new(),
             always: vec!["Pyreal".into()],
             never: Vec::new(),
             appraise: true,
@@ -428,37 +404,6 @@ impl Default for Loot {
             after_every_fight: true,
             carry_up_to: carry_up_to(),
         }
-    }
-}
-
-impl Loot {
-    /// The rules in force: `rules`, then any old `filters` as keep rules
-    /// (blank and repeated ones dropped).
-    pub fn rules(&self) -> Vec<LootRule> {
-        let mut out = self.rules.clone();
-        for f in &self.filters {
-            let f = f.trim();
-            if f.is_empty() || out.iter().any(|r| r.query.trim() == f) {
-                continue;
-            }
-            out.push(LootRule::new(f, LootAction::Keep));
-        }
-        out
-    }
-
-    /// Fold the old `filters` into `rules` for good.
-    pub fn migrate(&mut self) {
-        if !self.filters.is_empty() {
-            self.rules = self.rules();
-            self.filters.clear();
-        }
-    }
-
-    /// Whether any rule needs the items appraised first.
-    pub fn needs_appraisal(&self) -> bool {
-        self.rules()
-            .iter()
-            .any(|r| Query::parse(&r.query).needs_appraisal())
     }
 }
 
@@ -805,30 +750,6 @@ pub fn choose_recipe(
         })
 }
 
-pub fn wanted_loot(stats: &crate::items::ItemStats, l: &Loot) -> bool {
-    loot_action(stats, l).takes()
-}
-
-/// What the rules say to do with an item: `never` names are skipped,
-/// `always` names kept, then the first rule whose search matches
-/// decides; nothing matching is skipped. A blank rule matches nothing.
-pub fn loot_action(stats: &crate::items::ItemStats, l: &Loot) -> LootAction {
-    if name_matches(&stats.name, &l.never) {
-        return LootAction::Skip;
-    }
-    if name_matches(&stats.name, &l.always) {
-        return LootAction::Keep;
-    }
-    l.rules()
-        .iter()
-        .find(|r| {
-            let q = Query::parse(&r.query);
-            !q.is_empty() && stats.matches(&q)
-        })
-        .map(|r| r.action)
-        .unwrap_or(LootAction::Skip)
-}
-
 /// What the loot rules make of an item, and whether they can say yet.
 ///
 /// The profile named in the config decides when there is one; a
@@ -852,9 +773,12 @@ pub fn judge_loot(
     if name_matches(&stats.name, &l.always) {
         return Verdict::Decided(LootAction::Keep, "always take these".into());
     }
+    // No profile, nothing decided. The profile is where a player says
+    // what their things are worth, and a client with nothing to read
+    // should take nothing rather than guess.
     match library.get(&l.profile) {
         Some(p) => p.judge(stats, id, me, my_name, held),
-        None => Verdict::Decided(loot_action(stats, l), "the loot rules".into()),
+        None => Verdict::None,
     }
 }
 
@@ -1130,14 +1054,6 @@ impl Autoplay {
     /// fighter's counterpart to `Client::attack_target`.
     pub fn casting_at(&self) -> Option<u32> {
         self.casting_at
-    }
-
-    /// What is to be done with an item: what it was taken for if that
-    /// was written down, else what the rules say of it now.
-    pub fn loot_action(&self, stats: &crate::items::ItemStats) -> LootAction {
-        self.ledger
-            .of(stats)
-            .unwrap_or_else(|| loot_action(stats, &self.config.loot))
     }
 
     /// Write down what an item was taken for (the loot pass, a script,
@@ -1799,6 +1715,31 @@ impl Client {
     /// character's own body -- and arrives in `ac-loot` as a verdict
     /// already reached. What that crate decides is the *order*: what to
     /// ask about, what to take, when to stop, and when to shut it.
+    /// What is to be done with an item: what it was taken for if that
+    /// was written down, else what the profile makes of it now.
+    ///
+    /// The ledger alone is not the answer. It deliberately remembers
+    /// nothing about stackables -- their ids churn as stacks split and
+    /// merge -- so a ledger-only reading calls a stack of tapers
+    /// "nothing decided", which reads as "skip".
+    pub fn loot_action(&self, stats: &crate::items::ItemStats) -> Option<LootAction> {
+        if let Some(a) = self.autoplay.ledger.of(stats) {
+            return Some(a);
+        }
+        match judge_loot(
+            stats,
+            self.appraisals.get(&stats.guid),
+            &self.autoplay.config.loot,
+            &self.profiles,
+            &self.wielder(),
+            &self.world.stats.name,
+            self.already_carried(stats.wcid),
+        ) {
+            crate::profile::Verdict::Decided(a, _) => Some(a),
+            crate::profile::Verdict::NeedsId(_) | crate::profile::Verdict::None => None,
+        }
+    }
+
     fn corpse_now(&mut self, guid: u32, items: &[u32], cfg: &Loot, now: Instant) -> ac_loot::Open {
         use crate::profile::Verdict as Judged;
         let away = match (
@@ -2582,7 +2523,13 @@ impl Client {
                 ap.pending_tags.push((*g, now));
             }
         }
-        let needs = cfg.appraise && cfg.needs_appraisal();
+        // Whether an identify is worth asking for: the profile says,
+        // since it is the only thing that judges anything now.
+        let needs = cfg.appraise
+            && self
+                .profiles
+                .get(&cfg.profile)
+                .is_some_and(|p| p.needs_id());
         let pending = std::mem::take(&mut self.autoplay.pending_tags);
         for (g, since) in pending {
             let Some(stats) = self.stats_of(g) else {
@@ -4782,130 +4729,177 @@ mod tests {
         }
     }
 
-    #[test]
-    fn loot_rules_use_the_search_language() {
-        let mut l = Loot::default();
-        // The default: anything over 250 pyreals, and pyreals themselves.
-        assert!(wanted_loot(&item("Ornate Ring", 900, 0), &l));
-        assert!(!wanted_loot(&item("Rusty Nail", 3, 0), &l));
-        assert!(wanted_loot(&item("Pyreal", 12, 0), &l));
-        // A stat rule.
-        l.rules = vec![LootRule::new("type:armor al>=200", LootAction::Keep)];
-        assert!(wanted_loot(&item("Platemail", 100, 240), &l));
-        assert!(!wanted_loot(&item("Platemail", 100, 120), &l));
-        // Never wins over always and the rules.
-        l.never = vec!["platemail".into()];
-        assert!(!wanted_loot(&item("Platemail", 100, 240), &l));
-        // A blank rule matches nothing.
-        l.rules = vec![LootRule::new("", LootAction::Keep)];
-        l.never = Vec::new();
-        assert!(!wanted_loot(&item("Ornate Ring", 900, 0), &l));
-        assert!(wanted_loot(&item("Pyreal", 12, 0), &l), "always still wins");
+    /// A shelf holding one profile of `rules`, in a directory of its
+    /// own so that two tests never read each other's files.
+    fn shelf(named: &str, rules: Vec<crate::profile::Rule>) -> crate::profile::Library {
+        let dir = std::env::temp_dir().join(format!("acswarm-{named}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let library = crate::profile::Library::default();
+        library.open(&dir);
+        library
+            .put(crate::profile::Profile {
+                name: "test".into(),
+                rules,
+                ..Default::default()
+            })
+            .expect("saved");
+        library
+    }
+
+    /// A rule that claims what `line` matches, in the inventory's own
+    /// search language.
+    fn asks(name: &str, line: &str, action: LootAction) -> crate::profile::Rule {
+        crate::profile::Rule {
+            name: name.into(),
+            action,
+            all: vec![crate::profile::Ask::Search(line.into())],
+            ..Default::default()
+        }
+    }
+
+    fn judged(
+        stats: &ItemStats,
+        l: &Loot,
+        library: &crate::profile::Library,
+    ) -> crate::profile::Verdict {
+        judge_loot(
+            stats,
+            None,
+            l,
+            library,
+            &crate::weapons::Wielder::default(),
+            "Aldric",
+            0,
+        )
     }
 
     #[test]
-    fn the_first_matching_rule_decides() {
-        let mut l = Loot {
-            rules: vec![
-                LootRule::new("slot:ring epics>=2", LootAction::Keep),
-                LootRule::new("ring", LootAction::Salvage),
-                LootRule::new("value>250", LootAction::Keep),
-                LootRule::new("armor", LootAction::Sell),
+    fn the_players_own_word_comes_before_the_profile() {
+        use crate::profile::Verdict;
+        let library = shelf(
+            "own-word",
+            vec![
+                asks("keepers", "value>250", LootAction::Keep),
+                asks("trash", "rusty", LootAction::Sell),
             ],
-            ..Default::default()
-        };
-        let ring = |spells: &[&str]| ItemStats {
-            name: "Gold Ring".into(),
-            kind: "jewelry",
-            valid_locations: crate::items::slot::FINGER,
-            appraised: true,
-            value: 900,
-            material: "Gold",
-            workmanship: 5.0,
-            spells: spells.iter().map(|s| s.to_string()).collect(),
-            ..Default::default()
-        };
-        let two = ring(&["Epic Strength", "Epic Focus"]);
-        let one = ring(&["Epic Strength"]);
-        assert_eq!(loot_action(&two, &l), LootAction::Keep);
-        // The salvage rule comes before the value rule.
-        assert_eq!(loot_action(&one, &l), LootAction::Salvage);
-        assert!(wanted_loot(&one, &l), "salvage is still picked up");
-        assert_eq!(
-            loot_action(&item("Platemail", 100, 240), &l),
-            LootAction::Sell
         );
-        assert_eq!(loot_action(&item("Rusty Nail", 3, 0), &l), LootAction::Skip);
-        assert!(!LootAction::Skip.takes());
-        // Never and always still cut across the rules.
-        l.never = vec!["gold".into()];
-        assert_eq!(loot_action(&two, &l), LootAction::Skip);
-        l.never.clear();
-        l.always = vec!["gold".into()];
-        assert_eq!(loot_action(&one, &l), LootAction::Keep);
-        // What arrives in the pack is judged by the same rules as what
-        // is lying on a corpse, and by the same profile: a bundle of
-        // arrowheads is a bundle of arrowheads whether it came off a
-        // drudge or over a counter.
-        l.always.clear();
-        let shelf = crate::profile::Library::default();
-        let me = crate::weapons::Wielder::default();
-        let tag = |s: &crate::items::ItemStats, l: &Loot| {
-            arrival_tag(s, None, l, &shelf, &me, "Aldric", 0)
+        let mut l = Loot {
+            profile: "test".into(),
+            always: Vec::new(),
+            never: Vec::new(),
+            ..Default::default()
         };
-        assert_eq!(tag(&one, &l), Some(LootAction::Salvage));
+        let ring = item("Ornate Ring", 900, 0);
+        let nail = item("Rusty Nail", 3, 0);
+        assert_eq!(
+            judged(&ring, &l, &library),
+            Verdict::Decided(LootAction::Keep, "keepers".into())
+        );
+        assert_eq!(
+            judged(&nail, &l, &library),
+            Verdict::Decided(LootAction::Sell, "trash".into())
+        );
+
+        // Never wins over a rule that would have kept it.
+        l.never = vec!["ornate".into()];
+        assert_eq!(
+            judged(&ring, &l, &library),
+            Verdict::Decided(LootAction::Skip, "never take these".into())
+        );
+        // Always wins over a rule that would have sold it, and loses to
+        // never, which is read first.
+        l.never.clear();
+        l.always = vec!["rusty".into()];
+        assert_eq!(
+            judged(&nail, &l, &library),
+            Verdict::Decided(LootAction::Keep, "always take these".into())
+        );
+        l.never = vec!["rusty".into()];
+        assert_eq!(
+            judged(&nail, &l, &library),
+            Verdict::Decided(LootAction::Skip, "never take these".into())
+        );
+        let _ = std::fs::remove_dir_all(library.dir());
+    }
+
+    #[test]
+    fn nothing_is_decided_without_a_profile() {
+        use crate::profile::Verdict;
+        let library = shelf(
+            "no-profile",
+            vec![asks("keepers", "value>250", LootAction::Keep)],
+        );
+        // A character reading a profile that is not on the shelf takes
+        // nothing: a client with no rules to read should not guess.
+        let l = Loot {
+            profile: "missing".into(),
+            always: Vec::new(),
+            never: Vec::new(),
+            ..Default::default()
+        };
+        let ring = item("Ornate Ring", 900, 0);
+        assert_eq!(judged(&ring, &l, &library), Verdict::None);
+        // The name lists still cut across, because they are the
+        // player's own word and not a rule at all.
+        let l = Loot {
+            always: vec!["ornate".into()],
+            ..l
+        };
+        assert_eq!(
+            judged(&ring, &l, &library),
+            Verdict::Decided(LootAction::Keep, "always take these".into())
+        );
+        let _ = std::fs::remove_dir_all(library.dir());
+    }
+
+    #[test]
+    fn what_arrives_in_the_pack_is_judged_like_what_lies_on_a_corpse() {
+        // A bundle of arrowheads is a bundle of arrowheads whether it
+        // came off a drudge or over a counter.
+        let library = shelf(
+            "arrival",
+            vec![
+                asks("keepers", "value>250", LootAction::Keep),
+                asks("plate", "type:armor al>=200", LootAction::Sell),
+            ],
+        );
+        let mut l = Loot {
+            profile: "test".into(),
+            always: Vec::new(),
+            never: Vec::new(),
+            ..Default::default()
+        };
+        let me = crate::weapons::Wielder::default();
+        let tag = |s: &ItemStats, l: &Loot| arrival_tag(s, None, l, &library, &me, "Aldric", 0);
+        assert_eq!(
+            tag(&item("Ornate Ring", 900, 0), &l),
+            Some(LootAction::Keep)
+        );
         assert_eq!(
             tag(&item("Platemail", 100, 240), &l),
             Some(LootAction::Sell)
         );
-        // Nothing claimed it, so there is nothing to write down.
+        // Nothing claimed it, so there is nothing to write down...
         assert_eq!(tag(&item("Rusty Nail", 3, 0), &l), None);
-        // A keeper is written down now, where this used to answer only
-        // salvage or sale. Silence is what let the vendor side sell
-        // something the character meant to keep.
-        l.always = vec!["gold".into()];
-        assert_eq!(tag(&two, &l), Some(LootAction::Keep));
-        l.always.clear();
+        // ...and neither has a skip, which is a decision to leave it.
+        l.never = vec!["ornate".into()];
+        assert_eq!(tag(&item("Ornate Ring", 900, 0), &l), None);
+        // An item that cannot be judged until it is appraised is not
+        // written down either: the answer is not in yet.
+        l.never.clear();
+        let unread = ItemStats {
+            appraised: false,
+            ..item("Platemail", 100, 240)
+        };
+        assert!(matches!(
+            judged(&unread, &l, &library),
+            crate::profile::Verdict::NeedsId(_)
+        ));
+        assert_eq!(tag(&unread, &l), None);
         assert_eq!(LootAction::parse("Salvage"), Some(LootAction::Salvage));
         assert_eq!(LootAction::parse("burn"), None);
-        assert!(l.needs_appraisal());
-        l.rules = vec![LootRule::new("value>250", LootAction::Keep)];
-        assert!(!l.needs_appraisal());
-    }
-
-    #[test]
-    fn old_filters_become_keep_rules() {
-        let old = r#"{"enabled":true,"filters":["value>500","type:armor al>=200"],"always":["Pyreal"],"never":[],"appraise":true}"#;
-        let mut l: Loot = serde_json::from_str(old).unwrap();
-        assert!(l.rules.is_empty());
-        assert_eq!(
-            l.rules(),
-            vec![
-                LootRule::new("value>500", LootAction::Keep),
-                LootRule::new("type:armor al>=200", LootAction::Keep),
-            ]
-        );
-        // The old list is in force before anything is migrated.
-        assert!(wanted_loot(&item("Ornate Ring", 900, 0), &l));
-        assert!(!wanted_loot(&item("Ornate Ring", 300, 0), &l));
-        assert!(l.salvage && l.hand_off, "new switches take their defaults");
-        l.migrate();
-        assert!(l.filters.is_empty());
-        assert_eq!(l.rules.len(), 2);
-        // Written back, the filters are gone and the rules stay.
-        let text = serde_json::to_string(&l).unwrap();
-        assert!(!text.contains("filters"));
-        assert!(text.contains(r#""action":"keep""#));
-        let back: Loot = serde_json::from_str(&text).unwrap();
-        assert_eq!(back, l);
-        // A rule mentioned both ways is one rule.
-        let both =
-            r#"{"rules":[{"query":"value>500","action":"salvage"}],"filters":["value>500"," "]}"#;
-        let l: Loot = serde_json::from_str(both).unwrap();
-        assert_eq!(
-            l.rules(),
-            vec![LootRule::new("value>500", LootAction::Salvage)]
-        );
+        assert!(!LootAction::Skip.takes());
+        let _ = std::fs::remove_dir_all(library.dir());
     }
 
     #[test]
@@ -4934,13 +4928,11 @@ mod tests {
     }
 
     #[test]
-    fn tags_answer_before_the_rules_do() {
+    fn what_an_item_was_taken_for_is_written_down() {
         let mut ap = Autoplay::default();
-        ap.config.loot.rules = vec![LootRule::new("value>250", LootAction::Keep)];
         let ring = item("Ornate Ring", 900, 0);
-        assert_eq!(ap.loot_action(&ring), LootAction::Keep);
+        assert_eq!(ap.tags().get(&ring.guid), None);
         ap.tag(&ring, LootAction::Salvage);
-        assert_eq!(ap.loot_action(&ring), LootAction::Salvage);
         assert_eq!(ap.tags().get(&ring.guid), Some(&LootAction::Salvage));
         assert_eq!(Doing::Salvaging.label(), "salvaging");
     }

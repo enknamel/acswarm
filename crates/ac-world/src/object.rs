@@ -525,6 +525,12 @@ impl WeenieDesc {
     }
 }
 
+/// A shelf that never empties. The server sends -1 for one, and the
+/// count is unpacked out of the low 24 bits of a word, so what arrives
+/// is this rather than `u32::MAX` -- which is why nobody should test
+/// for it by hand (see [`VendorItem::in_stock`]).
+pub const UNLIMITED_STACK: u32 = 0x00FF_FFFF;
+
 /// ApproachVendor (game event 0x0062): a vendor's terms and stock.
 #[derive(Debug, Clone, PartialEq)]
 pub struct VendorItem {
@@ -532,6 +538,14 @@ pub struct VendorItem {
     pub guid: u32,
     pub stack: u32,
     pub desc: WeenieDesc,
+}
+
+impl VendorItem {
+    /// How many the counter has, or `None` when its shelf never
+    /// empties. Most of a vendor's stock is the latter.
+    pub fn in_stock(&self) -> Option<u32> {
+        (self.stack != UNLIMITED_STACK).then_some(self.stack)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

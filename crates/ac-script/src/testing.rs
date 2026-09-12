@@ -56,8 +56,10 @@ pub struct Recorder {
     /// What `find_items_everywhere()` answers: maps of `account`,
     /// `character`, `online`, `place` and `stats`.
     pub holdings: Array,
-    /// The loot rules as `(query, action)`, what `loot_rules()` answers
-    /// and `loot_rule_add` / `loot_rules_clear` edit.
+    /// The loot profile's rules as `(name, action)`, what
+    /// `loot_rules()` answers and `loot_rule_add` /
+    /// `loot_rules_clear` edit. A rule added by search is named after
+    /// it, which is what the real bridge does.
     pub loot_rules: Vec<(String, String)>,
 }
 
@@ -287,10 +289,12 @@ impl Api for Recorder {
     fn loot_rules(&mut self) -> Array {
         self.loot_rules
             .iter()
-            .map(|(q, a)| {
+            .map(|(name, a)| {
                 let mut m = Map::new();
-                m.insert("query".into(), q.clone().into());
+                m.insert("name".into(), name.clone().into());
                 m.insert("action".into(), a.clone().into());
+                m.insert("on".into(), true.into());
+                m.insert("says".into(), name.clone().into());
                 Dynamic::from_map(m)
             })
             .collect()
@@ -769,7 +773,7 @@ mod tests {
                     log("added " + loot_rule_add("ws<6 -epics>0", "salvage"));
                     log("bad action " + loot_rule_add("value>250", "burn"));
                     log("bad query " + loot_rule_add("(value>250", "keep"));
-                    for r in loot_rules() { log(r.query + " -> " + r.action); }
+                    for r in loot_rules() { log(r.name + " -> " + r.action); }
                     log("item 7: " + loot_action(7));
                     log("salvager: " + type_of(salvager()));
                     for hit in find_items_everywhere("slot:ring epics>=2") {

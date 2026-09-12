@@ -93,21 +93,6 @@ pub struct State {
     pub descending: bool,
 }
 
-/// Vendor stock with this "-1" stack size never runs out.
-pub const UNLIMITED_STACK: u32 = 0x00FF_FFFF;
-
-/// What the vendor charges for an item of `value` at its `sell_rate`
-/// (ACE's SellPrice: the rate the vendor sells at), at least 1 pyreal.
-pub fn buy_price(value: u32, sell_rate: f32) -> u32 {
-    ((value as f32 * sell_rate - 0.1).ceil().max(1.0)) as u32
-}
-
-/// What the vendor pays for one of our items at its `buy_rate`, at least
-/// 1 pyreal.
-pub fn sell_price(value: u32, buy_rate: f32) -> u32 {
-    ((value as f32 * buy_rate + 0.1).floor().max(1.0)) as u32
-}
-
 /// The open vendor, if any. Only pack items with a value that are not
 /// money are offered for sale.
 pub fn view(c: &Client) -> Option<VendorView> {
@@ -126,9 +111,9 @@ pub fn view(c: &Client) -> Option<VendorView> {
             .map(|it| TradeItem {
                 guid: it.guid,
                 name: it.desc.name.clone(),
-                price: buy_price(it.desc.value, v.sell_rate),
+                price: ac_world::shops::charge(it.desc.value, v.sell_rate, it.desc.item_type),
                 icon: it.desc.icon_id,
-                unlimited: it.stack == UNLIMITED_STACK,
+                unlimited: it.in_stock().is_none(),
                 stats: stats_of(it.guid),
             })
             .collect(),
@@ -139,7 +124,7 @@ pub fn view(c: &Client) -> Option<VendorView> {
             .map(|o| TradeItem {
                 guid: o.guid,
                 name: o.name.clone(),
-                price: sell_price(o.value, v.buy_rate),
+                price: ac_world::shops::payment(o.value, v.buy_rate),
                 icon: o.icon_id,
                 unlimited: false,
                 stats: stats_of(o.guid),
@@ -447,17 +432,5 @@ mod tests {
         let idx = shown(&v.stock, &f, 0, false);
         assert_eq!(idx.len(), 1);
         assert_eq!(v.stock[idx[0]].name, "Leather Cap");
-    }
-
-    #[test]
-    fn prices_round_the_way_ace_does() {
-        // Vendors sell at a markup, rounded up, never below one pyreal.
-        assert_eq!(buy_price(10, 1.0), 10);
-        assert_eq!(buy_price(10, 1.25), 13);
-        assert_eq!(buy_price(0, 1.5), 1);
-        // And buy at a discount, rounded down, never below one pyreal.
-        assert_eq!(sell_price(10, 0.5), 5);
-        assert_eq!(sell_price(7, 0.5), 3);
-        assert_eq!(sell_price(1, 0.1), 1);
     }
 }

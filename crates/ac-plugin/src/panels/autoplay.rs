@@ -28,8 +28,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::{caption, title, title_bar, window, Source};
 use crate::{egui, Client, Ctx, Plugin, Settings};
-use ac_client::autoplay::{Buffs, Config, Fight, Loot, LootAction, LootRule, Role, Style, Survive};
-use ac_client::items::{ItemStats, Query};
+use ac_client::autoplay::{Buffs, Config, Fight, Loot, Role, Style, Survive};
 use ac_client::logistics::Plan;
 
 /// What the panel draws: the rules, what the character is doing, and how
@@ -41,66 +40,11 @@ pub struct AutoplayView {
     pub doing: String,
     /// `autoplay.status`: "fighting Drudge Skulker".
     pub status: String,
-    /// One count per loot rule, in the same order.
-    pub counts: Vec<usize>,
     /// Who salvages for the team ("" when nobody carries an Ust).
     pub salvager: String,
     /// Where the character stands, so a ground search can put the
     /// nearest first.
     pub at: glam::Vec2,
-}
-
-/// How many of `items` each search matches. A blank or meaningless
-/// search matches nothing, the way the engine treats it.
-pub fn filter_counts(filters: &[String], items: &[ItemStats]) -> Vec<usize> {
-    filters
-        .iter()
-        .map(|f| {
-            let q = Query::parse(f);
-            if q.is_empty() {
-                return 0;
-            }
-            items.iter().filter(|s| s.matches(&q)).count()
-        })
-        .collect()
-}
-
-/// The same for the loot rules, by their searches.
-pub fn rule_counts(rules: &[LootRule], items: &[ItemStats]) -> Vec<usize> {
-    let queries: Vec<String> = rules.iter().map(|r| r.query.clone()).collect();
-    filter_counts(&queries, items)
-}
-
-/// Move rule `i` one step up or down. True when it moved.
-pub fn move_rule(rules: &mut [LootRule], i: usize, up: bool) -> bool {
-    let j = if up {
-        let Some(j) = i.checked_sub(1) else {
-            return false;
-        };
-        j
-    } else {
-        i + 1
-    };
-    if i >= rules.len() || j >= rules.len() {
-        return false;
-    }
-    rules.swap(i, j);
-    true
-}
-
-/// Add a rule unless its search is blank or already there. True when
-/// it was added.
-pub fn add_rule(rules: &mut Vec<LootRule>, query: &str, action: LootAction) -> bool {
-    let query = query.trim();
-    if query.is_empty()
-        || rules
-            .iter()
-            .any(|r| r.query.trim().eq_ignore_ascii_case(query))
-    {
-        return false;
-    }
-    rules.push(LootRule::new(query, action));
-    true
 }
 
 /// The line under the checkbox: what it is doing and the engine's own
@@ -204,140 +148,6 @@ fn string_list(
                 drafts.get(key).clear();
             }
         }
-    });
-}
-
-/// The action dropdown of a rule row.
-fn action_box(ui: &mut egui::Ui, salt: &str, action: &mut LootAction) {
-    egui::ComboBox::from_id_salt(salt)
-        .selected_text(action.label())
-        .width(72.0)
-        .show_ui(ui, |ui| {
-            for a in LootAction::ALL {
-                ui.selectable_value(action, a, a.label())
-                    .on_hover_text(match a {
-                        LootAction::Keep => "take it and keep it",
-                        LootAction::Salvage => "take it for the team's best salvager to salvage",
-                        LootAction::Sell => "take it to sell in town",
-                        LootAction::Skip => "leave it on the corpse",
-                    });
-            }
-        });
-}
-
-/// The loot rules: a row per rule with `x`, up and down, the search,
-/// its action and how many carried items it matches; a line at the
-/// bottom to add one; and the search language under a fold.
-fn rule_list(
-    ui: &mut egui::Ui,
-    key: &str,
-    rules: &mut Vec<LootRule>,
-    drafts: &mut Drafts,
-    counts: &[usize],
-) {
-    let mut drop = None;
-    let mut moved = None;
-    let n = rules.len();
-    for (i, rule) in rules.iter_mut().enumerate() {
-        let problem = Query::check(&rule.query).err();
-        ui.horizontal(|ui| {
-            if ui.add(egui::Button::new("x").small()).clicked() {
-                drop = Some(i);
-            }
-            if ui
-                .add_enabled(i > 0, egui::Button::new("^").small())
-                .on_hover_text("Try this rule earlier")
-                .clicked()
-            {
-                moved = Some((i, true));
-            }
-            if ui
-                .add_enabled(i + 1 < n, egui::Button::new("v").small())
-                .on_hover_text("Try this rule later")
-                .clicked()
-            {
-                moved = Some((i, false));
-            }
-            let mut edit = egui::TextEdit::singleline(&mut rule.query)
-                .id_salt(format!("{key}.{i}"))
-                .desired_width(118.0);
-            if problem.is_some() {
-                edit = edit.text_color(egui::Color32::from_rgb(230, 120, 110));
-            }
-            let resp = ui.add(edit);
-            if let Some(p) = &problem {
-                resp.on_hover_text(p);
-            }
-            action_box(ui, &format!("{key}.{i}.action"), &mut rule.action);
-            if let Some(n) = counts.get(i) {
-                let colour = if *n > 0 {
-                    egui::Color32::from_rgb(140, 200, 140)
-                } else {
-                    egui::Color32::from_gray(150)
-                };
-                ui.label(egui::RichText::new(format!("{n}")).small().color(colour))
-                    .on_hover_text("Items carried right now that this search matches");
-            }
-        });
-        if let Some(p) = problem {
-            ui.label(
-                egui::RichText::new(p)
-                    .small()
-                    .color(egui::Color32::from_rgb(230, 120, 110)),
-            );
-        }
-    }
-    if let Some(i) = drop {
-        rules.remove(i);
-    }
-    if let Some((i, up)) = moved {
-        move_rule(rules, i, up);
-    }
-    ui.horizontal(|ui| {
-        let draft = drafts.get(key).clone();
-        let mut text = draft;
-        let entered = ui
-            .add(
-                egui::TextEdit::singleline(&mut text)
-                    .id_salt(format!("{key}.new"))
-                    .hint_text("slot:ring epics>=2")
-                    .desired_width(150.0),
-            )
-            .lost_focus()
-            && ui.input(|i| i.key_pressed(egui::Key::Enter));
-        *drafts.get(key) = text.clone();
-        let action_key = format!("{key}.action");
-        let mut action = LootAction::parse(drafts.get(&action_key)).unwrap_or_default();
-        action_box(ui, &format!("{key}.new.action"), &mut action);
-        *drafts.get(&action_key) = action.label().to_string();
-        if (ui.add(egui::Button::new("add").small()).clicked() || entered)
-            && add_rule(rules, &text, action)
-        {
-            drafts.get(key).clear();
-        }
-    });
-    if let Some(p) = Query::check(drafts.get(key)).err() {
-        ui.label(
-            egui::RichText::new(p)
-                .small()
-                .color(egui::Color32::from_rgb(230, 120, 110)),
-        );
-    }
-    ui.collapsing(egui::RichText::new("search language").small(), |ui| {
-        egui::Grid::new(format!("{key}.help"))
-            .num_columns(2)
-            .spacing([8.0, 2.0])
-            .show(ui, |ui| {
-                for (what, means) in ac_client::items::HELP {
-                    ui.label(egui::RichText::new(*what).small().monospace());
-                    ui.add(egui::Label::new(egui::RichText::new(*means).small()).wrap());
-                    ui.end_row();
-                }
-            });
-        caption(
-            ui,
-            "first matching rule wins; \"always\" and \"never\" names come first",
-        );
     });
 }
 
@@ -578,9 +388,11 @@ pub fn draw(egui: &egui::Context, v: &AutoplayView, x: f32, drafts: &mut Drafts)
                     ui.checkbox(&mut cfg.loot.appraise, "appraise first")
                         .on_hover_text("Ask the server for the numbers before deciding");
                 });
-                caption(ui, "rules, in order: search, then what to do with a match");
-                cfg.loot.migrate();
-                rule_list(ui, "autoplay.rules", &mut cfg.loot.rules, drafts, &v.counts);
+                caption(
+                    ui,
+                    "what to take and what to do with it is the loot profile, in \
+                     the Loot profiles window",
+                );
                 ui.horizontal(|ui| {
                     ui.checkbox(&mut cfg.loot.salvage, "salvage")
                         .on_hover_text("Salvage tagged items when this character is the team's best salvager");
@@ -907,16 +719,12 @@ pub fn draw(egui: &egui::Context, v: &AutoplayView, x: f32, drafts: &mut Drafts)
     (cfg != v.config).then_some(cfg)
 }
 
-/// The rules, what the character is doing, and how many carried items
-/// each loot search matches. The counts are worked out once here, not
-/// per row.
+/// The settings and what the character is doing. What it takes and what
+/// it does with it is the loot profile's business now, and has its own
+/// window.
 pub fn view(c: &Client) -> AutoplayView {
-    let carried = c.item_stats();
-    let mut config = c.autoplay.config.clone();
-    config.loot.migrate();
     AutoplayView {
-        counts: rule_counts(&config.loot.rules, &carried),
-        config,
+        config: c.autoplay.config.clone(),
         doing: c.autoplay.doing.label().to_string(),
         status: c.autoplay.status.clone(),
         salvager: c.best_salvager().map(|(n, _)| n).unwrap_or_default(),
@@ -976,11 +784,6 @@ impl Autoplay {
                 ..Default::default()
             },
             loot: Loot {
-                rules: vec![
-                    LootRule::new("slot:ring epics>=2", LootAction::Keep),
-                    LootRule::new("value>250", LootAction::Keep),
-                    LootRule::new("ws<6 -epics>0", LootAction::Salvage),
-                ],
                 always: vec!["Pyreal".into()],
                 never: vec!["Rusty".into()],
                 ..Default::default()
@@ -989,13 +792,11 @@ impl Autoplay {
             academy: Default::default(),
         };
         // What the three searches would take out of the demo pack.
-        let counts = vec![0, 3, 1];
         Autoplay {
             source: Source::Demo(AutoplayView {
                 config: config.clone(),
                 doing: "fighting".into(),
                 status: "fighting Drudge Skulker".into(),
-                counts,
                 salvager: "Brannoc".into(),
                 at: glam::Vec2::ZERO,
             }),
@@ -1016,10 +817,7 @@ impl Plugin for Autoplay {
         if let Some(v) = settings.get("autoplay.show") {
             self.show = v;
         }
-        if let Some(mut c) = settings.get::<Config>("autoplay.config") {
-            // A file from before the loot rules: its filters become
-            // keep rules.
-            c.loot.migrate();
+        if let Some(c) = settings.get::<Config>("autoplay.config") {
             self.saved = c;
         }
     }
@@ -1124,17 +922,6 @@ mod tests {
         }
     }
 
-    fn item(name: &str, value: u32, armor: u32) -> ItemStats {
-        ItemStats {
-            name: name.into(),
-            value,
-            armor_level: armor,
-            appraised: true,
-            kind: if armor > 0 { "armor" } else { "misc" },
-            ..Default::default()
-        }
-    }
-
     #[test]
     fn entries_are_added_once_and_dropped_by_row() {
         let mut list = Vec::new();
@@ -1159,59 +946,6 @@ mod tests {
     }
 
     #[test]
-    fn filters_count_what_they_would_take() {
-        let carried = vec![
-            item("Ornate Ring", 900, 0),
-            item("Silver Chain", 400, 0),
-            item("Platemail Girth", 100, 240),
-            item("Rusty Nail", 3, 0),
-        ];
-        let filters = vec![
-            "value>250".to_string(),
-            "type:armor al>=200".to_string(),
-            "value>100000".to_string(),
-            // A blank search takes nothing, so it counts nothing.
-            "  ".to_string(),
-        ];
-        assert_eq!(filter_counts(&filters, &carried), vec![2, 1, 0, 0]);
-        assert!(filter_counts(&[], &carried).is_empty());
-        assert_eq!(filter_counts(&filters, &[]), vec![0, 0, 0, 0]);
-    }
-
-    #[test]
-    fn rules_are_added_moved_and_counted() {
-        let mut rules = vec![LootRule::new("value>250", LootAction::Keep)];
-        assert!(add_rule(&mut rules, " ws<6 ", LootAction::Salvage));
-        assert!(
-            !add_rule(&mut rules, "WS<6", LootAction::Keep),
-            "already there"
-        );
-        assert!(!add_rule(&mut rules, "  ", LootAction::Keep));
-        assert_eq!(rules.len(), 2);
-        assert_eq!(rules[1].action, LootAction::Salvage);
-        assert!(move_rule(&mut rules, 1, true));
-        assert_eq!(rules[0].query, "ws<6");
-        assert!(!move_rule(&mut rules, 0, true), "already first");
-        assert!(!move_rule(&mut rules, 1, false), "already last");
-        assert!(!move_rule(&mut rules, 5, true));
-        let carried = vec![item("Ornate Ring", 900, 0), item("Rusty Nail", 3, 0)];
-        assert_eq!(rule_counts(&rules, &carried), vec![0, 1]);
-        // A settings file from before the rules still loads.
-        let mut settings = Settings::new();
-        settings.set(
-            "autoplay.config",
-            serde_json::json!({"loot": {"filters": ["value>500"], "always": ["Pyreal"]}}),
-        );
-        let mut p = Autoplay::default();
-        p.load(&settings);
-        assert!(p.saved.loot.filters.is_empty());
-        assert_eq!(
-            p.saved.loot.rules,
-            vec![LootRule::new("value>500", LootAction::Keep)]
-        );
-    }
-
-    #[test]
     fn the_status_line_falls_back_to_the_label() {
         assert_eq!(
             status_line("fighting", "fighting Drudge Skulker"),
@@ -1232,8 +966,6 @@ mod tests {
         assert!(v.config.enabled);
         assert_eq!(v.status, "fighting Drudge Skulker");
         assert_eq!(v.doing, "fighting");
-        // A count for every rule, so the rows line up.
-        assert_eq!(v.counts.len(), v.config.loot.rules.len());
         assert_eq!(v.salvager, "Brannoc");
         assert!(!v.config.buffs.spells.is_empty());
     }

@@ -296,6 +296,22 @@ impl CtxApi<'_, '_> {
     }
 }
 
+/// Change the profile a character reads and put it back on the shelf,
+/// so every session sees the edit at once. False when the character has
+/// no profile to change, or when the shelf would not take it back.
+fn edit_profile(
+    c: &mut ac_client::Client,
+    change: impl FnOnce(&mut ac_client::profile::Profile),
+) -> bool {
+    let name = c.autoplay.config.loot.profile.clone();
+    let Some(p) = c.profiles.get(&name) else {
+        return false;
+    };
+    let mut edited = (*p).clone();
+    change(&mut edited);
+    c.profiles.put(edited).is_ok()
+}
+
 impl Api for CtxApi<'_, '_> {
     fn me(&mut self) -> Map {
         let index = self.cx.index;
@@ -950,40 +966,44 @@ impl Api for CtxApi<'_, '_> {
     }
 
     fn loot_rules(&mut self) -> Array {
-        self.client()
-            .autoplay
-            .config
-            .loot
-            .rules()
+        let c = self.client();
+        let Some(p) = c.profiles.get(&c.autoplay.config.loot.profile) else {
+            return Array::new();
+        };
+        p.rules
             .iter()
             .map(|r| {
                 let mut m = Map::new();
-                m.insert("query".into(), r.query.clone().into());
+                m.insert("name".into(), r.name.clone().into());
                 m.insert("action".into(), r.action.label().to_string().into());
+                m.insert("on".into(), r.on.into());
+                m.insert("says".into(), r.tell().into());
                 Dynamic::from_map(m)
             })
             .collect()
     }
 
     fn loot_rule_add(&mut self, query: &str, action: &str) -> bool {
-        use ac_client::autoplay::{LootAction, LootRule};
         use ac_client::items::Query;
+        use ac_client::profile::{Ask, LootAction, Rule};
         let Some(action) = LootAction::parse(action) else {
             return false;
         };
         if query.trim().is_empty() || Query::check(query).is_err() {
             return false;
         }
-        let loot = &mut self.client().autoplay.config.loot;
-        loot.migrate();
-        loot.rules.push(LootRule::new(query.trim(), action));
-        true
+        edit_profile(self.client(), |p| {
+            p.rules.push(Rule {
+                name: query.trim().to_string(),
+                action,
+                all: vec![Ask::Search(query.trim().to_string())],
+                ..Default::default()
+            });
+        })
     }
 
     fn loot_rules_clear(&mut self) {
-        let loot = &mut self.client().autoplay.config.loot;
-        loot.rules.clear();
-        loot.filters.clear();
+        edit_profile(self.client(), |p| p.rules.clear());
     }
 
     fn loot_action(&mut self, guid: i64) -> String {
@@ -992,7 +1012,8 @@ impl Api for CtxApi<'_, '_> {
         };
         let c = self.client();
         c.stats_of(guid)
-            .map(|s| c.autoplay.loot_action(&s).label().to_string())
+            .and_then(|s| c.loot_action(&s))
+            .map(|a| a.label().to_string())
             .unwrap_or_default()
     }
 

@@ -265,10 +265,13 @@ pub enum AskKind {
     Prop,
     TextProp,
     Spell,
+    /// A whole search line, for the `or` and `not` that a list of
+    /// conditions cannot say.
+    Search,
 }
 
 impl AskKind {
-    pub const ALL: [AskKind; 14] = [
+    pub const ALL: [AskKind; 15] = [
         AskKind::Name,
         AskKind::Kind,
         AskKind::Material,
@@ -283,6 +286,7 @@ impl AskKind {
         AskKind::Prop,
         AskKind::TextProp,
         AskKind::Spell,
+        AskKind::Search,
     ];
 
     pub fn label(self) -> &'static str {
@@ -301,6 +305,7 @@ impl AskKind {
             AskKind::Prop => "any property",
             AskKind::TextProp => "text property",
             AskKind::Spell => "a spell matching",
+            AskKind::Search => "a search line",
         }
     }
 
@@ -322,6 +327,10 @@ impl AskKind {
                 "Any of the server's text properties, such as the set it belongs to"
             }
             AskKind::Spell => "Any spell on it whose name answers this, patterns included",
+            AskKind::Search => {
+                "A search in the inventory's own language, for the `or` and `not` \
+                 a list of conditions cannot say"
+            }
         }
     }
 
@@ -338,6 +347,7 @@ impl AskKind {
             Ask::Item(Term::Wielded) => AskKind::Wielded,
             Ask::Item(Term::Unappraised) => AskKind::Unappraised,
             Ask::Item(Term::Num(..)) => AskKind::Number,
+            Ask::Search(_) => AskKind::Search,
             Ask::Me(_) => AskKind::Me,
             Ask::Prop { .. } => AskKind::Prop,
             Ask::Text { .. } => AskKind::TextProp,
@@ -375,6 +385,7 @@ impl AskKind {
                 op: TextOp::Has,
                 value: String::new(),
             },
+            AskKind::Search => Ask::Search(String::new()),
             AskKind::Spell => Ask::Spell {
                 op: TextOp::Like,
                 value: String::new(),
@@ -711,6 +722,14 @@ fn ask_row(ui: &mut egui::Ui, salt: &str, ask: &mut Ask, editor: &mut Editor) {
         }
         match ask {
             Ask::Item(term) => term_fields(ui, salt, term),
+            Ask::Search(line) => {
+                ui.add(
+                    egui::TextEdit::singleline(line)
+                        .id_salt(format!("{salt}.search"))
+                        .hint_text("type:armor value<2500")
+                        .desired_width(220.0),
+                );
+            }
             Ask::Me(mine) => mine_fields(ui, salt, mine),
             Ask::Prop {
                 kind,

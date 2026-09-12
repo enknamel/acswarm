@@ -30,7 +30,7 @@
 //! most items without asking the server anything, which is the whole
 //! reason players tune profiles this way.
 
-use crate::items::{ItemStats, NumKey, Op, Term};
+use crate::items::{ItemStats, NumKey, Op, Query, Term};
 use crate::weapons::Wielder;
 use ac_net::messages::Appraisal;
 use serde::{Deserialize, Serialize};
@@ -215,6 +215,15 @@ pub fn pattern_error(pattern: &str) -> Option<String> {
 pub enum Ask {
     /// About the item: every term the search language understands.
     Item(Term),
+    /// A whole search line, in the same language the inventory window
+    /// uses: `type:armor value<2500`, `(ring or bracelet) not minors>0`.
+    ///
+    /// The typed conditions above are what an editor can draw and
+    /// reason about, and are the ones to prefer. This is for a rule
+    /// written as a line of text -- by a script, or by someone who
+    /// already knows the language -- and for the `or` and `not` that
+    /// a list of conditions, being an `and`, cannot say.
+    Search(String),
     /// About the character reading the profile.
     Me(Mine),
     /// About any property the server sent when it identified the item,
@@ -317,6 +326,7 @@ impl Ask {
             // Everything the server sends on an identify needs the
             // identify, by definition.
             Ask::Prop { .. } | Ask::Text { .. } | Ask::Spell { .. } => return true,
+            Ask::Search(line) => return Query::parse(line).needs_appraisal(),
             Ask::Item(t) => t,
         };
         match term {
@@ -335,6 +345,7 @@ impl Ask {
     pub fn tell(&self) -> String {
         match self {
             Ask::Item(t) => term_words(t),
+            Ask::Search(line) => format!("it matches {line:?}"),
             Ask::Me(m) => m.tell(),
             Ask::Prop {
                 kind,
@@ -440,6 +451,10 @@ impl Rule {
 fn holds(ask: &Ask, item: &ItemStats, id: Option<&Appraisal>, me: &Wielder, name: &str) -> bool {
     match ask {
         Ask::Item(t) => item.matches_term(t),
+        Ask::Search(line) => {
+            let q = Query::parse(line);
+            !q.is_empty() && item.matches(&q)
+        }
         Ask::Me(m) => m.holds(me, name),
         Ask::Prop {
             kind,

@@ -116,8 +116,6 @@ const RETRY_AFTER: Duration = Duration::from_secs(30);
 /// a long way from the last one and a few paces from a way out, which
 /// is the distance that actually costs anything.
 const NEAR_A_WAY_OUT: f32 = 300.0;
-/// The vendors' unlimited-stock marker.
-const UNLIMITED_STACK: u32 = 0x00FF_FFFF;
 
 /// A distance for a status line, in steps of fifty metres, so the line
 /// changes (and is logged) now and then rather than every frame.
@@ -468,24 +466,6 @@ fn nearest_way(ways: &[(Vec2, String)], at: Vec2) -> (Vec2, f32, String) {
         .unwrap_or((at, 0.0, "here".to_string()))
 }
 
-/// What a vendor's stock line is, for matching against needs.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Stock {
-    pub guid: u32,
-    pub name: String,
-    pub wcid: u32,
-    /// `ac_world::item_type` bits: what tells a trade note from the
-    /// rest of the shelf.
-    pub item_type: u32,
-    /// What one costs at this vendor.
-    pub price: u32,
-    /// How many it has; `None` for unlimited.
-    pub stack: Option<u32>,
-    /// What one of them weighs. A purse is not the only thing a trip
-    /// runs out of.
-    pub burden: u32,
-}
-
 /// A few names, and how many more there are. A caster short of every
 /// component in the book has thirty-one of them, and a line of the log
 /// is not the place to read all thirty-one.
@@ -784,18 +764,6 @@ fn vendor_rings(within: Option<f32>) -> Vec<f32> {
     let mut out: Vec<f32> = VENDOR_RINGS.iter().copied().filter(|r| *r < cap).collect();
     out.push(cap);
     out
-}
-
-/// What a vendor charges for one of something worth `value`.
-///
-/// A trade note is the exception: the server ignores the shop's own
-/// rate for those and charges a flat 1.15 times face value, so a shop
-/// that marks everything else up by 1.7 still sells notes at 1.15.
-pub fn buy_price(value: u32, sell_rate: f32, item_type: u32) -> u32 {
-    if item_type & item_type::PROMISSORY_NOTE != 0 {
-        return ac_world::shops::note_price(value);
-    }
-    ((value as f32 * sell_rate - 0.1).ceil().max(1.0)) as u32
 }
 
 /// Whether an item is loot to sell. `ammo` says whether it goes in the
@@ -2006,120 +1974,6 @@ impl Client {
                     value: o.value,
                     stack: o.stack_size.max(1),
                 })
-            })
-            .collect()
-    }
-
-    /// Everything the counter in front of the character will do, as
-    /// one plan: what to sell, what to cash, what to buy and what to
-    /// carry home as notes.
-    ///
-    /// The pieces were all here already and were used one at a time, in
-    /// an order written out by hand at each call site. Gathering them
-    /// makes the order one thing, and makes it the same order whether
-    /// the trip is being made or merely weighed up (see
-    /// `crate::errand`).
-    pub fn errand(&self, cfg: &Growth) -> crate::errand::Plan {
-        use crate::errand::{ForSale, Means, Note, Wanted};
-        let (carrying, capacity) = self.burden();
-        let means = Means {
-            coin: self.purse(),
-            notes: self
-                .world
-                .inventory()
-                .filter(|o| o.item_type & item_type::PROMISSORY_NOTE != 0)
-                .map(|o| o.value.saturating_mul(o.stack_size.max(1)))
-                .sum(),
-            room: capacity.saturating_mul(3).saturating_sub(carrying),
-            slots: self.free_space(),
-        };
-        let vendor = self.world.open_vendor.as_ref();
-        let sale: Vec<ForSale> = self
-            .sale_list(cfg)
-            .into_iter()
-            .filter_map(|guid| {
-                let o = self.world.objects.get(&guid)?;
-                let stack = o.stack_size.max(1);
-                // `value` is already the whole stack's worth, so the
-                // payment is that times the rate -- not that times the
-                // stack a second time, which valued a hundred peas at
-                // five hundred million.
-                let pays = vendor
-                    .map(|v| (o.value as f32 * v.buy_rate).round() as u32)
-                    .unwrap_or(0);
-                Some(ForSale {
-                    guid,
-                    pays,
-                    weighs: o.burden.saturating_mul(stack),
-                })
-            })
-            .collect();
-        let notes: Vec<Note> = self
-            .world
-            .inventory()
-            .filter(|o| o.item_type & item_type::PROMISSORY_NOTE != 0)
-            .map(|o| Note {
-                guid: o.guid,
-                face: o.value.saturating_mul(o.stack_size.max(1)),
-            })
-            .collect();
-        let shelf = self.stock();
-        let wanted: Vec<Wanted> = self
-            .grow_needs(cfg)
-            .into_iter()
-            .filter(|n| n.want > 0 && n.buyable)
-            .filter_map(|need| {
-                let line = shelf
-                    .iter()
-                    .filter(|s| match &need.kind {
-                        NeedKind::Named(t) => contains_fold(&s.name, &t.to_lowercase()),
-                        NeedKind::Ammo(kind) => ammo_stock(&s.name, *kind),
-                        NeedKind::Component(wcid) => s.wcid == *wcid,
-                    })
-                    .filter(|s| s.price > 0)
-                    .min_by_key(|s| s.price)?;
-                Some(Wanted {
-                    line: line.guid,
-                    name: need.name.clone(),
-                    want: need.want,
-                    each: line.price,
-                    weighs: line.burden,
-                    stock: line.stack,
-                })
-            })
-            .collect();
-        // The Mayoi note, if this counter makes one. Only that one: no
-        // smaller note is worth making, since every note costs fifteen
-        // per cent of its face whatever it carries.
-        let note_face = shelf
-            .iter()
-            .filter(|s| s.wcid == ac_world::shops::MMD && s.price > 0)
-            .find_map(|s| ac_world::shops::note_face(s.wcid));
-        crate::errand::plan(
-            means,
-            &sale,
-            &notes,
-            &wanted,
-            self.autoplay.config.team.restock.float,
-            note_face,
-        )
-    }
-
-    /// The open vendor's stock, priced.
-    fn stock(&self) -> Vec<Stock> {
-        let Some(v) = self.world.open_vendor.as_ref() else {
-            return Vec::new();
-        };
-        v.items
-            .iter()
-            .map(|it| Stock {
-                guid: it.guid,
-                name: it.desc.name.clone(),
-                wcid: it.desc.weenie_class_id,
-                item_type: it.desc.item_type,
-                price: buy_price(it.desc.value, v.sell_rate, it.desc.item_type),
-                stack: (it.stack < UNLIMITED_STACK).then_some(it.stack),
-                burden: it.desc.burden,
             })
             .collect()
     }
@@ -3567,12 +3421,6 @@ mod tests {
         assert!(!ammo_stock("Arrow", ammo_type::BOLT));
         assert!(ammo_stock("Quarrel", ammo_type::BOLT));
         assert!(ammo_stock("Atlatl Dart", ammo_type::ATLATL));
-        assert_eq!(buy_price(100, 1.0, 0), 100);
-        assert_eq!(buy_price(0, 1.0, 1), 1);
-        // A shop that marks everything up by 1.7 still sells notes at
-        // the server's flat 1.15.
-        assert_eq!(buy_price(100, 1.7, 0), 170);
-        assert_eq!(buy_price(100, 1.7, item_type::PROMISSORY_NOTE), 115);
     }
 
     #[test]

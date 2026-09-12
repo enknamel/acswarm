@@ -135,12 +135,12 @@ impl Shop {
         if self.max_value > 0 && value > self.max_value {
             return None;
         }
-        Some((value as f32 * self.buy_rate).round() as u32)
+        Some(payment(value, self.buy_rate))
     }
 
     /// What it charges for one of `ware`.
     pub fn charges_for(&self, ware: &Ware) -> u32 {
-        (ware.value as f32 * self.sell_rate).round().max(1.0) as u32
+        charge(ware.value, self.sell_rate, ware.item_type)
     }
 
     /// Whether a character carrying these society bits and these quest
@@ -280,6 +280,35 @@ pub fn placements(wcid: u32) -> usize {
 /// hundred of them.
 pub fn sold_anywhere(wcid: u32) -> bool {
     placements(wcid) > 0
+}
+
+/// What a counter charges for one of something worth `value`, at its
+/// `sell_rate`, of kind `item_type` (`crate::item_type` bits).
+///
+/// Never below one pyreal -- a counter does not give anything away --
+/// and the fraction is taken off before rounding up, so a rate that
+/// lands exactly on a whole pyreal is not pushed to the next one.
+///
+/// A trade note is the exception: the server ignores the shop's own
+/// rate for those and charges [`NOTE_MARKUP`] times face, so a shop
+/// that marks everything else up by 1.7 still sells notes at 1.15.
+/// This is the only place that knows it, so no caller can price a
+/// counter's shelf one way and the note on it another.
+pub fn charge(value: u32, sell_rate: f32, item_type: u32) -> u32 {
+    if item_type & crate::item_type::PROMISSORY_NOTE != 0 {
+        return note_price(value);
+    }
+    ((value as f32 * sell_rate - 0.1).ceil().max(1.0)) as u32
+}
+
+/// What a counter pays for one of something worth `value`, at its
+/// `buy_rate`. Rounded down -- the counter keeps the fraction -- and
+/// never below one pyreal.
+///
+/// A note is not an exception here: a counter pays face value for one,
+/// which is why turning a purse into notes and back loses the markup.
+pub fn payment(value: u32, buy_rate: f32) -> u32 {
+    ((value as f32 * buy_rate + 0.1).floor().max(1.0)) as u32
 }
 
 /// What a vendor charges for a trade note, as a multiple of its face
@@ -738,5 +767,31 @@ mod tests {
                 "{purse}: kept only {kept}"
             );
         }
+    }
+    #[test]
+    fn a_counter_charges_up_and_pays_down() {
+        // Vendors sell at a markup, rounded up, never below one pyreal.
+        assert_eq!(charge(100, 1.0, 0), 100);
+        assert_eq!(charge(10, 1.25, 0), 13);
+        assert_eq!(charge(0, 1.0, 0), 1);
+        assert_eq!(charge(100, 1.7, 0), 170);
+        // And buy at a discount, rounded down, never below one pyreal.
+        assert_eq!(payment(10, 0.5), 5);
+        assert_eq!(payment(7, 0.5), 3);
+        assert_eq!(payment(1, 0.1), 1);
+    }
+
+    #[test]
+    fn a_note_is_priced_by_the_server_and_not_by_the_shop() {
+        // A shop that marks everything else up by 1.7 still sells
+        // notes at the server's flat 1.15...
+        assert_eq!(charge(100, 1.7, crate::item_type::PROMISSORY_NOTE), 115);
+        assert_eq!(charge(100, 1.0, crate::item_type::PROMISSORY_NOTE), 115);
+        assert_eq!(
+            charge(250_000, 1.7, crate::item_type::PROMISSORY_NOTE),
+            note_price(250_000)
+        );
+        // ...and pays back face, which is where the markup goes.
+        assert_eq!(payment(100, 1.0), 100);
     }
 }

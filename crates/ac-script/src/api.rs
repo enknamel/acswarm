@@ -192,15 +192,21 @@ pub trait Api {
     /// a side pack's name). Numbers only match items that were appraised
     /// when their snapshot was taken.
     fn find_items_everywhere(&mut self, query: &str) -> Array;
-    /// The autoplay loot rules in order, as maps `{ query, action }`
-    /// (action one of "keep", "salvage", "sell", "skip"); the first rule
-    /// whose search matches an item decides what is done with it.
+    /// This character's loot profile's rules in order, as maps
+    /// `{ name, action, on, says }` -- the action one of "keep",
+    /// "salvage", "sell", "skip", `on` whether the rule is switched on,
+    /// and `says` the rule's conditions in words. The first rule that
+    /// claims an item decides what is done with it. Empty when the
+    /// character reads no profile.
     fn loot_rules(&mut self) -> Array;
-    /// Add a loot rule at the end: a search in the `find_items` language
-    /// and an action word. False when the action is unknown or the
-    /// search does not parse cleanly.
+    /// Add a rule at the end of this character's loot profile: a search
+    /// in the `find_items` language and an action word. The edit is live
+    /// for every character reading that profile at once. False when the
+    /// action is unknown, the search does not parse cleanly, or the
+    /// character has no profile to edit.
     fn loot_rule_add(&mut self, query: &str, action: &str) -> bool;
-    /// Drop every loot rule (the always / never names stay).
+    /// Drop every rule from this character's loot profile (the always /
+    /// never names, the buy list and the counter to sell at stay).
     fn loot_rules_clear(&mut self);
     /// What autoplay will do with an item by guid: its tag if it was
     /// tagged when taken, else what the rules say now ("keep",

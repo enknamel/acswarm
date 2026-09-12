@@ -145,12 +145,11 @@ impl Client {
                     wcid: w.desc.weenie_class_id,
                     name: w.desc.name.clone(),
                     // What it costs here, not what it is worth: a
-                    // counter sells above an item's own value.
-                    price: (w.desc.value as f32 * v.sell_rate).ceil() as u32,
-                    // A stack of -1 on the wire is a shelf that never
-                    // empties, which arrives here as a very large
-                    // number rather than as a count.
-                    stock: (w.stack != u32::MAX && w.stack != 0).then_some(w.stack),
+                    // counter sells above an item's own value, and a
+                    // trade note at the server's own rate rather than
+                    // this counter's (`ac_world::shops::charge`).
+                    price: ac_world::shops::charge(w.desc.value, v.sell_rate, w.desc.item_type),
+                    stock: w.in_stock().filter(|n| *n > 0),
                     burden: w.desc.burden,
                 })
                 .collect(),
