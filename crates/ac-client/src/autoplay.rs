@@ -1039,7 +1039,10 @@ pub struct Autoplay {
     /// What the rules said about each carried item taken as loot (or
     /// found in the pack afterwards), by guid: the salvage pass, the UI
     /// and scripts read it.
-    tags: std::collections::BTreeMap<u32, LootAction>,
+    /// What each item was picked up for, remembered across restarts
+    /// (see `ac_loot::ledger`). The decision is made once, when the
+    /// thing is taken, and this is where it is kept.
+    pub ledger: ac_loot::Ledger,
     /// Carried items already looked at by the salvage pass, so an item
     /// is judged once, when it arrives. Empty until the first pass,
     /// which takes what is carried then as the baseline (nothing owned
@@ -1117,25 +1120,32 @@ impl Autoplay {
         self.casting_at
     }
 
-    /// What is to be done with an item: its tag if it was tagged when
-    /// taken (or when it arrived), else what the rules say of it now.
+    /// What is to be done with an item: what it was taken for if that
+    /// was written down, else what the rules say of it now.
     pub fn loot_action(&self, stats: &crate::items::ItemStats) -> LootAction {
-        self.tags
-            .get(&stats.guid)
-            .copied()
+        self.ledger
+            .of(stats)
             .unwrap_or_else(|| loot_action(stats, &self.config.loot))
     }
 
-    /// Tag an item by hand (a script, the inventory panel): what the
-    /// salvage pass does with it from now on.
-    pub fn tag(&mut self, guid: u32, action: LootAction) {
-        self.tags.insert(guid, action);
-        self.seen.insert(guid);
+    /// Write down what an item was taken for (the loot pass, a script,
+    /// the inventory panel): what the salvage and vendor passes do with
+    /// it from now on.
+    pub fn tag(&mut self, stats: &crate::items::ItemStats, action: LootAction) {
+        self.ledger.remember(stats, action);
+        self.seen.insert(stats.guid);
     }
 
-    /// Every tag, by guid.
-    pub fn tags(&self) -> &std::collections::BTreeMap<u32, LootAction> {
-        &self.tags
+    /// What was decided could not be done -- a counter that would not
+    /// take it, a salvage refused. Not a new decision: the thing is
+    /// still meant for what it was meant for.
+    pub fn tag_failed(&mut self, guid: u32, why: impl Into<String>) {
+        self.ledger.failed(guid, why);
+    }
+
+    /// What each item was taken for, by guid.
+    pub fn tags(&self) -> std::collections::BTreeMap<u32, LootAction> {
+        self.ledger.actions()
     }
 
     /// Let go of whatever is being fought: the spells' target and the
@@ -2080,7 +2090,7 @@ impl Client {
                     if let Some(stats) = self.stats_of(g) {
                         let action = self.loot_verdict(&stats, &cfg);
                         if action.takes() {
-                            self.autoplay.tag(g, action);
+                            self.autoplay.tag(&stats, action);
                         }
                     }
                     self.take(g);
@@ -2550,11 +2560,14 @@ impl Client {
             return;
         }
         ap.seen.retain(|g| carried.contains(g));
-        ap.tags.retain(|g, _| carried.contains(g));
+        // An entry lives only as long as the thing does: this is what
+        // stops a recycled id ever being mistaken for the item it used
+        // to name (see `ac_loot::ledger`).
+        ap.ledger.forget_gone(&carried);
         ap.refused.retain(|g, _| carried.contains(g));
         ap.pending_tags.retain(|(g, _)| carried.contains(g));
         for g in &carried {
-            if ap.seen.insert(*g) && !ap.tags.contains_key(g) {
+            if ap.seen.insert(*g) && ap.ledger.by_guid(*g).is_none() {
                 ap.pending_tags.push((*g, now));
             }
         }
@@ -2575,7 +2588,7 @@ impl Client {
                     stats.name,
                     action.label()
                 );
-                self.autoplay.tags.insert(g, action);
+                self.autoplay.tag(&stats, action);
             }
         }
     }
@@ -2587,10 +2600,10 @@ impl Client {
         let me = self.world.player_guid;
         let mut items: Vec<(u32, String)> = self
             .autoplay
-            .tags
-            .iter()
-            .filter(|(_, a)| **a == LootAction::Salvage)
-            .filter_map(|(g, _)| self.world.objects.get(g))
+            .ledger
+            .for_salvage()
+            .into_iter()
+            .filter_map(|g| self.world.objects.get(&g))
             .filter(|o| o.wielder != me && self.world.is_carried(o.guid))
             .filter(|o| {
                 let bag = o.name.starts_with("Salvaged ");
@@ -2646,9 +2659,15 @@ impl Client {
                     *n += 1;
                     if *n >= SALVAGE_TRIES {
                         let name = self.world.objects.get(&g).map(|o| o.name.clone());
-                        self.autoplay.tags.insert(g, LootAction::Keep);
+                        // A refusal is not a new decision. Rewriting it
+                        // to Keep made the thing eligible for nothing
+                        // while it went on holding a slot.
+                        self.autoplay.tag_failed(g, "could not be salvaged");
                         self.autoplay.note(
-                            format!("could not salvage {}, keeping it", name.unwrap_or_default()),
+                            format!(
+                                "could not salvage {}, setting it aside",
+                                name.unwrap_or_default()
+                            ),
                             now,
                         );
                     }
@@ -2671,9 +2690,10 @@ impl Client {
                         .get(&item)
                         .map(|o| o.name.clone())
                         .unwrap_or_default();
-                    self.autoplay.tags.insert(item, LootAction::Keep);
                     self.autoplay
-                        .note(format!("{name} was not taken, keeping it"), now);
+                        .tag_failed(item, "the salvager would not take it");
+                    self.autoplay
+                        .note(format!("{name} was not taken, setting it aside"), now);
                 }
             }
         }
@@ -4884,7 +4904,7 @@ mod tests {
         ap.config.loot.rules = vec![LootRule::new("value>250", LootAction::Keep)];
         let ring = item("Ornate Ring", 900, 0);
         assert_eq!(ap.loot_action(&ring), LootAction::Keep);
-        ap.tag(ring.guid, LootAction::Salvage);
+        ap.tag(&ring, LootAction::Salvage);
         assert_eq!(ap.loot_action(&ring), LootAction::Salvage);
         assert_eq!(ap.tags().get(&ring.guid), Some(&LootAction::Salvage));
         assert_eq!(Doing::Salvaging.label(), "salvaging");

@@ -2035,6 +2035,20 @@ impl Client {
             .collect()
     }
 
+    /// The counter the loot profile names for selling, if it names one.
+    ///
+    /// `SellTo::Best` is not a name: it means "work it out", which the
+    /// ranking below does.
+    fn sell_to_named(&self) -> Option<String> {
+        let loot = &self.autoplay.config.loot;
+        let p = self.profiles.get(&loot.profile)?;
+        match &p.sell_to {
+            ac_loot::profile::SellTo::Best => None,
+            ac_loot::profile::SellTo::Named(n) if n.trim().is_empty() => None,
+            ac_loot::profile::SellTo::Named(n) => Some(n.trim().to_string()),
+        }
+    }
+
     /// Everything in the pack the selling rules allow to go, before any
     /// one counter's tastes are applied to it.
     ///
@@ -2288,6 +2302,20 @@ impl Client {
         // five kilometres to a counter with one more line on the shelf,
         // so the search widens in rings and takes the best shop in the
         // first ring that has anything.
+        // The counter the profile names, when it names one. A player
+        // who has said where to sell has said it; the rings below are
+        // for finding one when nobody has.
+        let named = self.sell_to_named();
+        if let Some(want) = named.as_deref() {
+            if let Some(found) = ac_world::shops::all()
+                .iter()
+                .filter(|s| s.open_to(society, &quests))
+                .find(|s| s.name.eq_ignore_ascii_case(want))
+            {
+                let f = forecast(found, &wants, purse, &salables);
+                return Some((found.name.clone(), found.xy(), f));
+            }
+        }
         for ring in vendor_rings(within) {
             let best = ac_world::shops::all()
                 .iter()
@@ -2296,12 +2324,20 @@ impl Client {
                 .map(|s| (s, forecast(s, &wants, purse, &salables)))
                 .filter(|(_, f)| f.worth_going())
                 .min_by(|(a, fa), (b, fb)| {
-                    // The whole order in one stop beats part of it, more
-                    // of the order beats less, and the nearer counter
-                    // settles a tie.
+                    // The whole order in one stop beats part of it, then
+                    // more of the order beats less.
+                    //
+                    // Then what the counter pays, which used not to be
+                    // asked at all. What a shop gives for an item is
+                    // `value * buy_rate` and the spread is nearly half:
+                    // around Cragstone the Scriveners eighty metres off
+                    // pay 0.5 and the Arcanum Broker three hundred
+                    // metres further on pays 0.95. Ranking on distance
+                    // alone walked past the broker every time.
                     fb.covers_it()
                         .cmp(&fa.covers_it())
                         .then_with(|| fb.stocks.len().cmp(&fa.stocks.len()))
+                        .then_with(|| fb.takings.cmp(&fa.takings))
                         .then_with(|| reach(a.xy()).total_cmp(&reach(b.xy())))
                 })
                 .map(|(s, f)| (s.name.clone(), s.xy(), f));
@@ -3852,6 +3888,39 @@ mod tests {
         assert!(!contains_fold("Lead Scarab", "taper"));
         assert!(!contains_fold("Tap", "taper"));
         assert!(!contains_fold("anything", ""));
+    }
+
+    #[test]
+    fn the_counter_that_pays_best_wins_a_tie() {
+        // Around Cragstone the Scriveners are eighty metres away and pay
+        // half; the Arcanum Broker is three hundred metres further on
+        // and pays 0.95. Neither stocks what a hunting character came to
+        // buy, so the order is a tie and the old ranking fell through to
+        // distance -- which walked past the broker every time and cost
+        // nearly half of every sale.
+        let loot = vec![Salable {
+            guid: 1,
+            item_type: item_type::JEWELRY,
+            value: 1_000,
+            stack: 1,
+        }];
+        let paying = |name: &str, rate: f32| ac_world::shops::Shop {
+            buys: item_type::JEWELRY,
+            min_value: 0,
+            buy_rate: rate,
+            ..shop(name, Vec::new())
+        };
+        let near = paying("Scrivener", 0.5);
+        let far = paying("Arcanum Broker", 0.95);
+
+        let a = forecast(&near, &[], 0, &loot);
+        let b = forecast(&far, &[], 0, &loot);
+        assert_eq!(a.takings, 500);
+        assert_eq!(b.takings, 950);
+        assert!(
+            b.takings > a.takings,
+            "the broker is worth the extra three hundred metres"
+        );
     }
 
     #[test]

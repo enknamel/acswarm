@@ -73,6 +73,9 @@ pub fn remembered(item: &ItemStats) -> bool {
 pub struct Ledger {
     #[serde(default)]
     took: BTreeMap<u32, Took>,
+    /// Changed since it was last written. Not part of the file.
+    #[serde(skip)]
+    dirty: bool,
 }
 
 impl Ledger {
@@ -87,6 +90,7 @@ impl Ledger {
         if !remembered(item) {
             return;
         }
+        self.dirty = true;
         self.took.insert(
             item.guid,
             Took {
@@ -117,6 +121,7 @@ impl Ledger {
     pub fn failed(&mut self, guid: u32, why: impl Into<String>) {
         if let Some(t) = self.took.get_mut(&guid) {
             t.failed = Some(why.into());
+            self.dirty = true;
         }
     }
 
@@ -132,11 +137,18 @@ impl Ledger {
     pub fn forget_gone(&mut self, held: &[u32]) -> usize {
         let before = self.took.len();
         self.took.retain(|guid, _| held.contains(guid));
-        before - self.took.len()
+        let gone = before - self.took.len();
+        self.dirty |= gone > 0;
+        gone
     }
 
     pub fn forget(&mut self, guid: u32) {
-        self.took.remove(&guid);
+        self.dirty |= self.took.remove(&guid).is_some();
+    }
+
+    /// Whether it has changed since it was last written out.
+    pub fn unsaved(&self) -> bool {
+        self.dirty
     }
 
     /// Everything written down as meant for a counter.
@@ -160,6 +172,11 @@ impl Ledger {
             .filter(|(_, t)| t.action == action && t.failed.is_none())
             .map(|(g, _)| *g)
             .collect()
+    }
+
+    /// Every decision, by id, in the shape the older readers expect.
+    pub fn actions(&self) -> BTreeMap<u32, LootAction> {
+        self.took.iter().map(|(g, t)| (*g, t.action)).collect()
     }
 
     pub fn len(&self) -> usize {
@@ -201,6 +218,18 @@ impl Ledger {
         }
         let text = serde_json::to_string_pretty(self).unwrap_or_default();
         std::fs::write(path, text)
+    }
+
+    /// Write it out if anything has changed, and note that it is
+    /// written. Called every tick; costs a bool most of the time.
+    pub fn save_if_changed(&mut self, path: &Path) {
+        if !self.dirty {
+            return;
+        }
+        self.dirty = false;
+        if let Err(e) = self.save(path) {
+            tracing::warn!(path = %path.display(), "cannot write the loot ledger: {e}");
+        }
     }
 }
 
