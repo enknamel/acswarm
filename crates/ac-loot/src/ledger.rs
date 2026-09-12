@@ -38,7 +38,7 @@
 use crate::items::ItemStats;
 use crate::profile::LootAction;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 /// What one item was taken for, and enough about it to know it again.
@@ -167,7 +167,11 @@ impl Ledger {
     /// This is what keeps a recycled id from ever mattering: an entry
     /// only survives while its item does, so there is nothing left to
     /// misapply when the id is handed to something new.
+    ///
+    /// Runs every tick on every session, so it walks the pack once into
+    /// a set rather than searching it once per entry.
     pub fn forget_gone(&mut self, held: &[u32]) -> usize {
+        let held: BTreeSet<u32> = held.iter().copied().collect();
         let before = self.took.len();
         self.took.retain(|guid, _| held.contains(guid));
         let gone = before - self.took.len();
