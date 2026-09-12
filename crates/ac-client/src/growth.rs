@@ -902,6 +902,16 @@ pub fn never_sell_because(stats: &ItemStats) -> &'static str {
 /// to keep gets sold on the next run to town. `judge` is asked only for
 /// what carries no decision -- bought, traded, or in the pack from
 /// before there was a profile.
+/// What the sale decision needs, gathered once (see
+/// [`Client::sell_policy`]).
+pub(crate) struct SellPolicy {
+    burns: Vec<u32>,
+    keep: Vec<String>,
+    profile: Option<std::sync::Arc<crate::profile::Profile>>,
+    wielder: crate::weapons::Wielder,
+    me: String,
+}
+
 pub fn offer_to_vendor(
     stats: &ItemStats,
     ammo: bool,
@@ -2057,6 +2067,47 @@ impl Client {
             .collect()
     }
 
+    /// Everything the sale decision needs, worked out once for a whole
+    /// pack rather than per item.
+    pub(crate) fn sell_policy(&self, cfg: &Growth) -> SellPolicy {
+        SellPolicy {
+            burns: self.burns(cfg),
+            keep: self.keep_names(cfg),
+            profile: self.profiles.get(&self.autoplay.config.loot.profile),
+            wielder: self.wielder(),
+            me: self.world.stats.name.clone(),
+        }
+    }
+
+    /// Whether this carried thing goes over a counter.
+    ///
+    /// One answer, asked both by the forecast before the character sets
+    /// off and by the snapshot the counter in front of it is handed.
+    /// They were two, and they disagreed: the snapshot's had no
+    /// fallback for a character with no profile, so the forecast said
+    /// the trip was worth making and then nothing was offered.
+    pub(crate) fn offers_for_sale(&self, p: &SellPolicy, s: &ItemStats, ammo: bool) -> bool {
+        offer_to_vendor(
+            s,
+            ammo,
+            &p.burns,
+            &p.keep,
+            p.profile.as_ref().is_some_and(|x| x.stocks(&s.name)),
+            self.autoplay.ledger.of(s),
+            // The profile is the source of truth. A character nobody
+            // has given one to sells nothing, which is the right way for
+            // this to be empty-handed: the alternative is a client
+            // deciding on its own what somebody's things are worth.
+            || match &p.profile {
+                Some(pr) => matches!(
+                    pr.judge(s, self.appraisals.get(&s.guid), &p.wielder, &p.me, 0),
+                    crate::profile::Verdict::Decided(LootAction::Sell, _)
+                ),
+                None => false,
+            },
+        )
+    }
+
     /// The counter the loot profile names for selling, if it names one.
     ///
     /// `SellTo::Best` is not a name: it means "work it out", which the
@@ -2079,31 +2130,10 @@ impl Client {
     /// has not walked to yet, which is how a trip is judged before it is
     /// started.
     fn salables(&self, cfg: &Growth) -> Vec<Salable> {
-        let wielder = self.wielder();
-        let keep = self.keep_names(cfg);
-        let tags = self.autoplay.tags().clone();
-        let burns = self.burns(cfg);
-        let rules_for = |stats: &ItemStats| SellRules {
-            sell: &cfg.sell,
-            keep: &keep,
-            can_wield: stats.appraised.then(|| wielder.can_wield(stats)),
-            tags: &tags,
-            burns: &burns,
-        };
-        // What goes to a counter is a profile's decision, not a list of
-        // searches buried in the code.
-        //
-        // The vendor profile when there is one, and the loot profile
-        // when there is not: a rule that says "take this to sell" has
-        // already said where it goes, and saying it twice is how the
-        // two drift apart. The old searches are the last resort, for a
-        // character nobody has given a profile at all.
-        let loot = &self.autoplay.config.loot;
-        let vendor = self
-            .profiles
-            .get(&loot.vendor_profile)
-            .or_else(|| self.profiles.get(&loot.profile));
-        let my_name = self.world.stats.name.clone();
+        // The same judgement the counter is handed (see
+        // [`Client::offers_for_sale`]). It used to be a second one, and
+        // the two disagreed.
+        let policy = self.sell_policy(cfg);
         let unsellable = &self.autoplay.growth.unsellable;
         let now = Instant::now();
         self.world
@@ -2123,21 +2153,7 @@ impl Client {
                 if never_sell_carried(&stats, holds_anything) {
                     return None;
                 }
-                let sells = offer_to_vendor(
-                    &stats,
-                    ammo,
-                    &burns,
-                    &keep,
-                    vendor.as_ref().is_some_and(|p| p.stocks(&stats.name)),
-                    tags.get(&o.guid).copied(),
-                    || match &vendor {
-                        Some(p) => matches!(
-                            p.judge(&stats, self.appraisals.get(&o.guid), &wielder, &my_name, 0),
-                            crate::profile::Verdict::Decided(LootAction::Sell, _)
-                        ),
-                        None => sellable(&stats, ammo, &rules_for(&stats)),
-                    },
-                );
+                let sells = self.offers_for_sale(&policy, &stats, ammo);
                 sells.then_some(Salable {
                     guid: o.guid,
                     item_type: o.item_type,
@@ -3449,6 +3465,19 @@ mod tests {
         assert!(
             !offer_to_vendor(&arrow, true, &burns, &[], false, None, sell_it_all),
             "ammunition is not loot"
+        );
+    }
+
+    #[test]
+    fn a_character_with_no_profile_sells_nothing() {
+        // The profile is the source of truth, so the right way to be
+        // empty-handed is to be empty-handed. The alternative is a
+        // client deciding on its own what somebody's things are worth,
+        // which is how a mage's Peas got sold.
+        let junk = item("Pyreal Pea", item_type::SPELL_COMPONENTS, 3_125);
+        assert!(
+            !offer_to_vendor(&junk, false, &[], &[], false, None, || false),
+            "nothing decided and nobody to ask: it stays in the pack"
         );
     }
 

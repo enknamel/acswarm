@@ -67,35 +67,12 @@ impl Client {
     /// (`growth::offer_to_vendor`); it was only ever applied there, and
     /// the counter in front of the character was handed everything.
     fn not_for_sale(&self, cfg: &Growth, stats: &[ItemStats]) -> std::collections::BTreeSet<u32> {
-        let burns = self.burns(cfg);
-        let keep = self.keep_names(cfg);
-        let profile = self.profiles.get(&self.autoplay.config.loot.profile);
-        let wielder = self.wielder();
-        let me = self.world.stats.name.clone();
+        let policy = self.sell_policy(cfg);
         stats
             .iter()
             .filter(|s| {
                 let ammo = s.valid_locations & ac_world::equip::MISSILE_AMMO != 0;
-                let stocked = profile.as_ref().is_some_and(|p| p.stocks(&s.name));
-                !crate::growth::offer_to_vendor(
-                    s,
-                    ammo,
-                    &burns,
-                    &keep,
-                    stocked,
-                    self.autoplay.ledger.of(s),
-                    || {
-                        profile.as_ref().is_some_and(|p| {
-                            matches!(
-                                p.judge(s, self.appraisals.get(&s.guid), &wielder, &me, 0),
-                                crate::profile::Verdict::Decided(
-                                    crate::autoplay::LootAction::Sell,
-                                    _
-                                )
-                            )
-                        })
-                    },
-                )
+                !self.offers_for_sale(&policy, s, ammo)
             })
             .map(|s| s.guid)
             .collect()
