@@ -216,6 +216,15 @@ pub struct Client {
     /// refusal from a request still in flight and so asks for ever.
     /// Keyed by the guid the refusal names.
     pub move_refused: std::collections::HashMap<u32, (u32, Instant)>,
+    /// The server's last `UseDone`: its error, and the tick it came in on.
+    /// A use of something the server no longer has is answered with that
+    /// and nothing more (see `autoplay::answered_with_nothing`).
+    pub(crate) use_done: Option<(u32, Instant)>,
+    /// The tick the server last put something in words: a transient
+    /// string or a weenie error. "You do not yet have the right to loot"
+    /// is one, and it is what tells a corpse that is locked from one that
+    /// is not there.
+    pub(crate) told: Option<Instant>,
     /// Route steering toward `move_to` when the straight line to it is
     /// blocked (see `route`).
     pub steering: route::Steering,
@@ -420,6 +429,8 @@ impl Client {
             move_to_since: Instant::now(),
             held_run: false,
             move_refused: std::collections::HashMap::new(),
+            use_done: None,
+            told: None,
             steering: route::Steering::new(Instant::now()),
             pathfinder,
             travel: Default::default(),
@@ -885,6 +896,16 @@ impl Client {
                         }
                         opcode::GAME_EVENT => {
                             if let Some((_, _, ev, rest)) = messages::split_game_event(body) {
+                                // Words about a request, stamped with this
+                                // tick (see `told`).
+                                if matches!(
+                                    ev,
+                                    messages::event::TRANSIENT_STRING
+                                        | messages::event::WEENIE_ERROR
+                                        | messages::event::WEENIE_ERROR_WITH_STRING
+                                ) {
+                                    self.told = Some(now);
+                                }
                                 if ev == 0x00A0 && rest.len() >= 8 {
                                     let item =
                                         u32::from_le_bytes([rest[0], rest[1], rest[2], rest[3]]);
@@ -912,6 +933,7 @@ impl Client {
                                     let err =
                                         u32::from_le_bytes([rest[0], rest[1], rest[2], rest[3]]);
                                     tracing::debug!("use done, error {err:#x}");
+                                    self.use_done = Some((err, now));
                                     // The server has finished with what
                                     // it was asked to do -- a cast, a
                                     // use, a counter opening. That is

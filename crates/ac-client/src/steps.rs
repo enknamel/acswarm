@@ -181,23 +181,43 @@ fn fight_worth(engaged: bool, owes_a_body: bool, nearest: f32) -> f32 {
 }
 
 fn worth_looting(client: &Client, now: Instant) -> f32 {
+    use crate::autoplay::CORPSE_LIFE;
+    let waiting = client
+        .world
+        .objects
+        .values()
+        .filter(|o| o.object_desc_flags & ac_world::object_desc_flags::CORPSE != 0)
+        // A body the looting has finished with, or set aside for now, is
+        // not one it will go to. A finished body still holding what the
+        // rules did not want lies on the floor until it rots, and counting
+        // those, and the ones set aside, could rank looting above the next
+        // fight with nothing for it to do.
+        .filter(|o| client.autoplay.corpse_waiting(o.guid, now))
+        .map(|o| {
+            // A corpse we never saw appear is taken as fresh, which is
+            // what the looting step assumes too.
+            let seen = client
+                .autoplay
+                .corpse_seen
+                .iter()
+                .find(|(g, _)| *g == o.guid)
+                .map(|(_, t)| *t)
+                .unwrap_or(now);
+            CORPSE_LIFE.saturating_sub(now.duration_since(seen))
+        });
+    worth_of_bodies(waiting)
+}
+
+/// What looting is worth with bodies waiting that each have `left` of
+/// their lives: nothing with none, and otherwise more the older the
+/// oldest is and the more of them there are.
+fn worth_of_bodies(left: impl Iterator<Item = std::time::Duration>) -> f32 {
     use crate::autoplay::{CORPSE_LIFE, CORPSE_URGENT};
     let mut best: Option<std::time::Duration> = None;
-    for o in client.world.objects.values() {
-        if o.object_desc_flags & ac_world::object_desc_flags::CORPSE == 0 {
-            continue;
-        }
-        // A corpse we never saw appear is taken as fresh, which is what
-        // the looting step assumes too.
-        let seen = client
-            .autoplay
-            .corpse_seen
-            .iter()
-            .find(|(g, _)| *g == o.guid)
-            .map(|(_, t)| *t)
-            .unwrap_or(now);
-        let left = CORPSE_LIFE.saturating_sub(now.duration_since(seen));
-        best = Some(best.map_or(left, |b: std::time::Duration| b.min(left)));
+    let mut waiting = 0usize;
+    for l in left {
+        best = Some(best.map_or(l, |b| b.min(l)));
+        waiting += 1;
     }
     let Some(left) = best else {
         // No body: do not even ask the looting step, which is the one
@@ -220,13 +240,7 @@ fn worth_looting(client: &Client, now: Instant) -> f32 {
     // behaviour worth having and was impossible to say when the order
     // was fixed.
     let aged = 1.0 - left.as_secs_f32() / CORPSE_LIFE.as_secs_f32();
-    let waiting = client
-        .world
-        .objects
-        .values()
-        .filter(|o| o.object_desc_flags & ac_world::object_desc_flags::CORPSE != 0)
-        .count()
-        .min(WAITING_COUNTS) as f32;
+    let waiting = waiting.min(WAITING_COUNTS) as f32;
     LOOT_AT_REST + aged * AGE_IS_WORTH + waiting * EACH_BODY_IS_WORTH
 }
 
@@ -731,5 +745,34 @@ mod tests {
     fn a_fight_in_reach_still_beats_a_resting_body() {
         // Nothing stops to loot with something swinging at it.
         assert_eq!(fight_worth(false, false, 1.0), UNDECIDED);
+    }
+
+    #[test]
+    fn a_body_emptied_or_set_aside_does_not_make_looting_worth_more() {
+        // Every body on the floor counted as one waiting to be looted:
+        // those the looting had finished with, those set aside, and the
+        // ones the server had let go that Blargerton kept in the Holtburg
+        // Dungeon.
+        use crate::autoplay::{Autoplay, CORPSE_LIFE};
+        use crate::did::Did;
+        let now = Instant::now();
+        let mut ap = Autoplay::default();
+        let (emptied, locked, fresh) = (0x8000_5001, 0x8000_5002, 0x8000_5003);
+        ap.looted.push(emptied);
+        ap.shelved
+            .note(locked, &Did::blocked("it will not open yet"), now);
+        let waiting: Vec<u32> = [emptied, locked, fresh]
+            .into_iter()
+            .filter(|g| ap.corpse_waiting(*g, now))
+            .collect();
+        assert_eq!(waiting, vec![fresh]);
+        // So the floor is worth one fresh body, not three.
+        let one = worth_of_bodies([CORPSE_LIFE].into_iter());
+        assert_eq!(one, LOOT_AT_REST + EACH_BODY_IS_WORTH);
+        assert!(one < worth_of_bodies([CORPSE_LIFE; 3].into_iter()));
+        // Nothing waiting is worth nothing.
+        assert_eq!(worth_of_bodies(std::iter::empty()), 0.0);
+        // The one set aside waits again once its wait is up.
+        assert!(ap.corpse_waiting(locked, now + std::time::Duration::from_secs(60)));
     }
 }

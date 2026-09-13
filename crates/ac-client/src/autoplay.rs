@@ -84,6 +84,37 @@ const LOOT_WALK: f32 = 2.5;
 fn loot_wait(away: f32) -> Duration {
     LOOT_TIMEOUT + Duration::from_secs_f32((away.max(0.0) / LOOT_WALK).min(30.0))
 }
+
+/// Whether an ask to open a corpse `away` metres off, sent on the tick
+/// `asked`, came back the way the server answers for a thing it does not
+/// have: a `UseDone` with no error (`done`), and not a word (`told`) since.
+///
+/// Blargerton, in the Holtburg Dungeon: ACE lets an object go once it
+/// has been out of the character's sight for twenty-five seconds, and a
+/// body that rots after that sends its delete only to the players who
+/// still know it. The client kept such bodies for the session. It walked
+/// back to one, asked, set it aside, came back to ask again, and held the
+/// next fight for it meanwhile. A corpse that is there and within reach
+/// opens, or says why it will not ("You do not yet have the right to
+/// loot"); only one that is not there says nothing at all. From further
+/// off the server walks the character over first, and a walk it cannot
+/// finish ends just as quietly.
+///
+/// A quiet answer can also be an earlier ask's walk cut short by this
+/// one, so one is not enough: every ask at a body has to come back so
+/// (see `Autoplay::nothing_came_back`). Answers are stamped with the tick
+/// they came in on and the ask with the tick it went out on, so an
+/// answer that came in on that same tick was to an earlier ask.
+fn answered_with_nothing(
+    away: f32,
+    asked: Instant,
+    done: Option<(u32, Instant)>,
+    told: Option<Instant>,
+) -> bool {
+    away <= CORPSE_REACH
+        && done.is_some_and(|(err, at)| err == 0 && at > asked)
+        && told.is_none_or(|at| at <= asked)
+}
 /// Least time between two casts of the same buff.
 const BUFF_EVERY: Duration = Duration::from_millis(1500);
 /// A target that takes no damage for this long is let go.
@@ -1208,6 +1239,10 @@ pub struct Autoplay {
     /// (the server walks us to it, so a far one is slower), and how
     /// many times we have asked.
     corpse: Option<(u32, Instant, Duration, u32)>,
+    /// How many of the asks to open that corpse came back with nothing
+    /// at all (see [`answered_with_nothing`]). Kept across asking again,
+    /// and started afresh with each corpse taken up.
+    quiet_answers: u32,
     /// Which step claimed this tick, for the log and the panel.
     pub(crate) step: Option<&'static str>,
     /// The last "stood aside" said, so the same one is not said twice.
@@ -1365,6 +1400,20 @@ impl Autoplay {
     fn take_up_corpse(&mut self, guid: u32, now: Instant, allow: Duration) {
         self.loot_run = ac_loot::Run::new();
         self.corpse = Some((guid, now, allow, 0));
+        self.quiet_answers = 0;
+    }
+
+    /// The ask to open the corpse in hand has had its wait and it has not
+    /// opened: note whether that ask came back with nothing (`quiet`, see
+    /// [`answered_with_nothing`]), and say whether every ask at this body
+    /// so far has.
+    fn nothing_came_back(&mut self, quiet: bool) -> bool {
+        let Some((_, _, _, tries)) = self.corpse else {
+            return false;
+        };
+        self.quiet_answers += u32::from(quiet);
+        // One ask to start with, and one more for each try.
+        self.quiet_answers > tries
     }
 
     /// Put down the corpse in hand, however it ended: emptied, given up
@@ -1397,11 +1446,18 @@ impl Autoplay {
         self.let_go_of_corpse();
     }
 
+    /// Whether the corpse `guid` is still waiting to be emptied: not
+    /// emptied already, and not set aside for now. What looting is worth
+    /// counts only these (see `crate::steps`).
+    pub(crate) fn corpse_waiting(&self, guid: u32, now: Instant) -> bool {
+        !self.looted.contains(&guid) && !self.shelved.held(&guid, now)
+    }
+
     /// Whether the corpse `guid`, lying at `at`, is still this
-    /// character's to empty from where it stands (`me`). That means not
-    /// emptied, not set aside for now, and its own (see
-    /// [`corpse_is_ours`]). The looting chooses among these and the next
-    /// fight waits on these, so the two cannot come to disagree.
+    /// character's to empty from where it stands (`me`). That means
+    /// waiting to be emptied (see [`Autoplay::corpse_waiting`]), and its
+    /// own (see [`corpse_is_ours`]). The looting chooses among these and
+    /// the next fight waits on these, so the two cannot come to disagree.
     pub(crate) fn corpse_owed(
         &self,
         guid: u32,
@@ -1409,8 +1465,7 @@ impl Autoplay {
         me: glam::Vec3,
         now: Instant,
     ) -> bool {
-        !self.looted.contains(&guid)
-            && !self.shelved.held(&guid, now)
+        self.corpse_waiting(guid, now)
             && corpse_is_ours(me, at, self.config.fight.radius, &self.kill_spots)
     }
 
@@ -2503,6 +2558,18 @@ impl Client {
                 return true;
             }
             if !opened && now.duration_since(since) > allow {
+                // How this ask came back, from where the character stands
+                // now: nothing walks it while nothing comes back.
+                let me = self.player.as_ref().map(|p| p.world_position());
+                let away = self
+                    .world
+                    .objects
+                    .get(&guid)
+                    .and_then(|o| o.world_pos())
+                    .zip(me)
+                    .map_or(f32::INFINITY, |(at, me)| at.distance(me));
+                let quiet = answered_with_nothing(away, since, self.use_done, self.told);
+                let nothing_there = self.autoplay.nothing_came_back(quiet);
                 self.autoplay.let_go_of_corpse();
                 self.stop_walking_to_loot();
                 // Opening a corpse asks the server to walk us to it,
@@ -2516,6 +2583,25 @@ impl Client {
                     self.interact(guid);
                     self.autoplay.corpse = Some((guid, now, allow, tries + 1));
                     return true;
+                }
+                // Every ask, from within reach, came back with nothing: the
+                // server has no such body. It let it go while the
+                // character was out of sight and never said so (see
+                // [`answered_with_nothing`]). Setting it aside only brought
+                // the character back to ask again, and held the next fight
+                // for it meanwhile, so it is forgotten the way its delete
+                // would have had it. One the server still has but cannot
+                // walk the character to answers the same way, and is no
+                // more to be had; should the server describe it again, it
+                // is back.
+                if nothing_there {
+                    tracing::info!(
+                        "autoplay: corpse {guid:#010x} is not there any more; forgetting it"
+                    );
+                    self.forget_kill_spot(guid);
+                    self.world.forget(guid);
+                    self.autoplay.corpse_seen.retain(|(g, _)| *g != guid);
+                    return false;
                 }
                 // Not "done with": set aside. A corpse belongs to
                 // whoever killed it until it has rotted a while, so one
@@ -6174,6 +6260,88 @@ mod tests {
         ap.corpse_shut(emptied, &Did::Done, t0);
         assert!(ap.looted.contains(&emptied));
         assert!(!ap.shelved.held(&emptied, t0));
+    }
+
+    #[test]
+    fn an_ask_at_a_corpse_the_server_let_go_comes_back_with_nothing() {
+        // Blargerton walked back to bodies ACE had let go while he was out
+        // of sight of them, and asked at them for the rest of the session.
+        let asked = Instant::now();
+        let ms = Duration::from_millis;
+        let (underfoot, done) = (CORPSE_REACH / 2.0, Some((0, asked + ms(80))));
+        // Not there: done, no error, and not a word.
+        assert!(answered_with_nothing(underfoot, asked, done, None));
+        // A word from before the ask was about something else.
+        assert!(answered_with_nothing(underfoot, asked, done, Some(asked)));
+        // Locked to whoever killed it, or open to someone else: the server
+        // says so before it is done.
+        assert!(!answered_with_nothing(
+            underfoot,
+            asked,
+            done,
+            Some(asked + ms(40))
+        ));
+        // Too busy is a refusal, not an absence.
+        assert!(!answered_with_nothing(
+            underfoot,
+            asked,
+            Some((0x1D, asked + ms(80))),
+            None
+        ));
+        // No answer yet, or only one that came in on the tick the ask went
+        // out, which was to an earlier ask.
+        assert!(!answered_with_nothing(underfoot, asked, None, None));
+        assert!(!answered_with_nothing(
+            underfoot,
+            asked,
+            Some((0, asked)),
+            None
+        ));
+        // From across the room the server walks the character over first,
+        // and a walk it cannot finish ends just as quietly.
+        assert!(!answered_with_nothing(
+            CORPSE_REACH * 4.0,
+            asked,
+            done,
+            None
+        ));
+    }
+
+    #[test]
+    fn a_corpse_is_taken_for_gone_only_when_every_ask_at_it_came_back_with_nothing() {
+        let t0 = Instant::now();
+        let mut ap = Autoplay::default();
+        // What `autoplay_loot` does as each ask's wait runs out: note how
+        // it came back, then ask again until the tries are used up. What
+        // is said after the last ask decides what becomes of the body.
+        let ask_until_given_up = |ap: &mut Autoplay, guid: u32, quiet: &[bool]| {
+            ap.take_up_corpse(guid, t0, LOOT_TIMEOUT);
+            let mut gone = false;
+            for (tries, q) in (0..).zip(quiet) {
+                gone = ap.nothing_came_back(*q);
+                ap.let_go_of_corpse();
+                if tries < LOOT_TRIES {
+                    ap.corpse = Some((guid, t0, LOOT_TIMEOUT, tries + 1));
+                }
+            }
+            gone
+        };
+        let every = [true; LOOT_TRIES as usize + 1];
+        assert!(
+            ask_until_given_up(&mut ap, 0x8000_4001, &every),
+            "a body that is not there is set aside to be asked at again"
+        );
+        // One ask that said something, or had no answer at all, and the
+        // body is only set aside, as before. Nor does the last body's
+        // count run on into this one.
+        let mut once = every;
+        once[0] = false;
+        assert!(
+            !ask_until_given_up(&mut ap, 0x8000_4002, &once),
+            "a body that answered once is forgotten"
+        );
+        // Nothing in hand, nothing to say.
+        assert!(!ap.nothing_came_back(true));
     }
 
     #[test]
