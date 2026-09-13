@@ -352,6 +352,7 @@ impl Client {
         };
         let prefs = self.travel.prefs.in_dungeon(underground);
         tracing::info!("travel: planning to {goal:?} from {cell:#010x}, underground {underground}");
+        let cell = planning_cell(cell, me, underground);
         // Portal gems in the pack are ways to get somewhere too, and
         // unlike a recall they need no skill or components: carrying one
         // is the whole requirement.
@@ -608,7 +609,18 @@ impl Client {
         // indoors matters as much as the character being indoors.
         let target_indoors = mouth_cell.is_some_and(|c| c & 0xFFFF >= 0x100);
         let same_block = self.travel.step_block == Some(pl_cell & 0xFFFF_0000);
-        if indoors || (target_indoors && same_block) {
+        // Underground (a dungeon, the Town Network hub) there is no
+        // terrain to route over, and inside a building the landblock's
+        // own graph steers to anything in the same block. A building on
+        // the way somewhere else is walked out of and routed over the
+        // terrain like any other start.
+        let underground = indoors && {
+            let assets = self.assets.clone();
+            self.player
+                .as_mut()
+                .is_some_and(|pl| pl.in_dungeon(&assets))
+        };
+        if (indoors && (underground || same_block)) || (target_indoors && same_block) {
             tracing::info!("travel: step {} ({label}) inside", self.travel.step);
             self.travel.route = Some(vec![me, target]);
             self.travel.next = 1;
@@ -1450,6 +1462,22 @@ impl Client {
     }
 }
 
+/// The cell a journey is planned from, for a character in `cell` at world
+/// position `at`.
+///
+/// To the planner an indoor cell is a place left only by portal -- right
+/// for the Town Network hub and a dungeon, wrong for a building on the
+/// surface, whose door can simply be walked out of. From upstairs beside
+/// the Holtburg Archmage that sent a trip to a dungeon three hundred
+/// metres away through two portals and the hub. A building is planned
+/// from the outdoor cell under the character; underground keeps its own.
+fn planning_cell(cell: u32, at: Vec3, underground: bool) -> u32 {
+    if underground || cell & 0xFFFF < 0x100 {
+        return cell;
+    }
+    ac_world::outdoor_cell(cell, at - ac_world::landblock_origin(cell))
+}
+
 /// The height the mouth of the portal called `name` at `mouth` stands at,
 /// from the portal data. Steps carry only where a mouth is on the map and
 /// the cell it is in; a walk to one in a building has to aim at its floor.
@@ -1575,6 +1603,34 @@ fn gem_next(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_building_is_planned_from_the_ground_outside_it() {
+        let upstairs = 0xA9B4_011B;
+        let local = Vec3::new(152.3, 132.5, 69.0);
+        let at = ac_world::landblock_origin(upstairs) + local;
+        let cell = planning_cell(upstairs, at, false);
+        assert_eq!(cell, ac_world::outdoor_cell(upstairs, local));
+        assert!(cell & 0xFFFF < 0x100, "{cell:#x}");
+        // Underground, or already outdoors, the cell stands.
+        assert_eq!(planning_cell(upstairs, at, true), upstairs);
+        assert_eq!(planning_cell(0xA9B4_002E, at, false), 0xA9B4_002E);
+    }
+
+    #[test]
+    fn the_dungeon_by_holtburg_is_a_walk_from_the_archmage() {
+        let upstairs = 0xA9B4_011B;
+        let at = ac_world::landblock_origin(upstairs) + Vec3::new(152.3, 132.5, 69.0);
+        let dungeon =
+            (ac_world::landblock_origin(0xA8B5_0000) + Vec3::new(126.6, 173.4, 0.0)).truncate();
+        let walks = |cell| {
+            trip::plan_with(at.truncate(), cell, dungeon, 0, &[], &[], Prefs::quick())
+                .is_some_and(|t| t.portals() == 0)
+        };
+        // Planned from the shop's own cell, the door was not a way out.
+        assert!(!walks(upstairs));
+        assert!(walks(planning_cell(upstairs, at, false)));
+    }
 
     #[test]
     fn a_portal_in_a_hall_is_aimed_at_on_its_own_floor() {
