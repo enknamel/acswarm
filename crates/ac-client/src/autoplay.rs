@@ -2193,7 +2193,17 @@ impl Client {
                     self.autoplay.say(Doing::Looting, next.saying);
                     return true;
                 }
-                Some(ac_loot::Act::Close) | None => {
+                // Nothing to do yet: the rules are waiting on appraisals.
+                // The corpse stays open and in hand. Reading this as done
+                // closed a corpse the moment its items went off to be
+                // appraised, marked it looted, and sent the character to the
+                // next body -- which closed the first on the server and left
+                // both, and everything worth taking on them, behind.
+                None => {
+                    self.autoplay.say(Doing::Looting, next.saying);
+                    return true;
+                }
+                Some(ac_loot::Act::Close) => {
                     let taken = self.autoplay.loot_run.taken;
                     self.close_container();
                     self.autoplay.looted.push(guid);

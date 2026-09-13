@@ -240,6 +240,23 @@ mod tests {
     }
 
     #[test]
+    fn waiting_on_an_appraisal_is_not_the_end_of_the_corpse() {
+        // Nothing to do yet is said without an act, and never as a
+        // close. The client once read "no act" as "done": it closed a
+        // corpse the moment its items went off to be appraised, marked
+        // it looted, and left four thousand pyreals of essence on it.
+        let mut run = Run::new();
+        let mut at = body(vec![
+            thing(1, "Rock", Verdict::Leave),
+            thing(3, "Frost Wisp Essence", Verdict::MustAsk),
+        ]);
+        at.asking = vec![3];
+        let next = run.step(&at, Instant::now());
+        assert_eq!(next.act, None, "{}", next.saying);
+        assert!(matches!(next.did, Did::Waiting(_)), "{:?}", next.did);
+    }
+
+    #[test]
     fn a_corpse_it_can_judge_alone_is_never_asked_about() {
         let mut run = Run::new();
         let at = body(vec![

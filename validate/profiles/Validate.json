@@ -3,5 +3,17 @@
   "note": "The acceptance suite's scratch profile. It is cleared and written to on every run, so nothing that matters lives here -- the character switches to it for the loot checks and hands itself back its own afterwards.",
   "rules": [],
   "buy": [],
-  "sell_to": "Best"
+  "sell_to": "Best",
+  "looting": {
+    "always": [
+      "Pyreal"
+    ],
+    "never": [],
+    "appraise": true,
+    "after_every_fight": true,
+    "salvage": true,
+    "hand_off": true,
+    "tidy_pack": true,
+    "carry_up_to": 1.5
+  }
 }
