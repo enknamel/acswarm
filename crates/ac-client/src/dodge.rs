@@ -53,6 +53,7 @@ use std::time::{Duration, Instant};
 
 use glam::{Vec2, Vec3};
 
+use crate::aim::{self, Shot};
 use crate::autoplay::Doing;
 use crate::Client;
 
@@ -116,7 +117,16 @@ pub struct State {
     /// `Client::autoplay_approach`), whose `follow` goal is ours to
     /// clear.
     pub approaching: Option<u32>,
+    /// How fast this character's own spells have been seen to fly, by
+    /// spell: an arc's height depends on it (see `crate::aim`).
+    pub shot_speeds: HashMap<u32, f32>,
+    /// The attack spell last cast, when, and the missiles already in the
+    /// air then, until its own projectile is seen.
+    pub fired: Option<(u32, Instant, Vec<u32>)>,
 }
+
+/// A projectile leaving this long after a cast is not taken for it.
+const FIRED_WITHIN: Duration = Duration::from_secs(5);
 
 // ---- Reach: how far our own attacks go ---------------------------------
 //
@@ -197,23 +207,140 @@ impl Client {
                     .map_or(0, |s| s.init_level + s.ranks as u32);
                 spell_range(sp.base_range_constant, sp.base_range_mod, skill)
             }
-            How::Missile => {
-                let speed = self
-                    .wielded_missile_weapon()
-                    .and_then(|g| self.appraisals.get(&g))
-                    .and_then(|a| a.float(MAXIMUM_VELOCITY))
-                    .map_or(DEFAULT_MAX_VELOCITY, |v| v as f32);
-                missile_range(speed)
-            }
+            How::Missile => missile_range(self.launcher_speed()),
             How::Melee => STICKY_REACH,
         }
     }
 
-    /// Close on `target` until it is within [`WITHIN`] of `range`,
-    /// walking after it like a leader. True while still too far, when
-    /// the attack has to wait; false once in reach (or with nowhere to
-    /// go), the walk called off.
-    pub(crate) fn autoplay_approach(&mut self, target: u32, name: &str, range: f32) -> bool {
+    /// The wielded launcher's launch speed, the default when it has not
+    /// been appraised.
+    fn launcher_speed(&self) -> f32 {
+        self.wielded_missile_weapon()
+            .and_then(|g| self.appraisals.get(&g))
+            .and_then(|a| a.float(MAXIMUM_VELOCITY))
+            .map_or(DEFAULT_MAX_VELOCITY, |v| v as f32)
+    }
+
+    /// How the attack `how` flies (see `crate::aim`). A spell is an arc
+    /// when the table says its projectile does not track and it is named
+    /// one; every other spell, and a swing's line, flies straight.
+    pub fn shot_for(&self, how: How) -> Shot {
+        match how {
+            How::Missile => Shot::Missile {
+                speed: self.launcher_speed(),
+            },
+            How::Spell(id) => {
+                let table = self.assets.spell_table().ok();
+                let arc = table.as_ref().and_then(|t| t.get(id)).is_some_and(|sp| {
+                    sp.bitfield & ac_formats::spell_table::flags::NON_TRACKING_PROJECTILE != 0
+                        && sp.name.split_whitespace().any(|w| w == "Arc")
+                });
+                if arc {
+                    Shot::Arc {
+                        speed: self
+                            .dodge
+                            .shot_speeds
+                            .get(&id)
+                            .copied()
+                            .unwrap_or(aim::ARC_SPEED),
+                    }
+                } else {
+                    Shot::Bolt
+                }
+            }
+            How::Melee => Shot::Bolt,
+        }
+    }
+
+    /// The shape of object `guid` standing at `feet`: its Setup's height
+    /// and radius at its scale, a person's when that is not known.
+    fn body_of(&self, guid: u32, feet: Vec3) -> aim::Body {
+        let (height, radius) = self
+            .world
+            .objects
+            .get(&guid)
+            .and_then(|o| {
+                let s = self.assets.setup(o.setup_id).ok()?;
+                Some((s.height * o.scale, s.radius * o.scale))
+            })
+            .unwrap_or((0.0, 0.0));
+        aim::Body::new(feet, height, radius)
+    }
+
+    /// Whether the attack `how`, thrown from where this character stands,
+    /// gets to `target` without striking a wall or the ground on the way
+    /// (see `crate::aim`). With nothing to go on it is taken to.
+    pub(crate) fn shot_clears(&mut self, target: u32, how: How) -> bool {
+        let Some(me) = self.player.as_ref().map(|p| p.world_position()) else {
+            return true;
+        };
+        let Some(at) = self.world.objects.get(&target).and_then(|o| o.world_pos()) else {
+            return true;
+        };
+        let mine = self.world.player().map_or(0, |o| o.guid);
+        let (from, to) = (self.body_of(mine, me), self.body_of(target, at));
+        let Some(path) = aim::flight(self.shot_for(how), from, to) else {
+            return false;
+        };
+        let assets = self.assets.clone();
+        self.player
+            .as_mut()
+            .is_none_or(|pl| pl.flies_clear(&assets, &path))
+    }
+
+    /// An attack spell has just been cast: its projectile, when it
+    /// leaves, tells how fast that spell flies.
+    pub(crate) fn note_fired(&mut self, spell: u32, now: Instant) {
+        let before = self
+            .world
+            .objects
+            .values()
+            .filter(|o| o.is_missile())
+            .map(|o| o.guid)
+            .collect();
+        self.dodge.fired = Some((spell, now, before));
+    }
+
+    /// Read the speed of the spell last cast off the projectile that has
+    /// just left this character: new since the cast, beside us, and
+    /// moving away. The spell table does not say how fast a spell flies,
+    /// and an arc's height depends on it.
+    fn learn_shot_speeds(&mut self, now: Instant) {
+        let Some((spell, at, before)) = self.dodge.fired.clone() else {
+            return;
+        };
+        if now.duration_since(at) > FIRED_WITHIN {
+            self.dodge.fired = None;
+            return;
+        }
+        let Some(me) = self.player.as_ref().map(|p| p.world_position()) else {
+            return;
+        };
+        let speed = self
+            .world
+            .objects
+            .values()
+            .filter(|o| o.is_missile() && o.parent.is_none() && !before.contains(&o.guid))
+            .find_map(|o| {
+                let p = o.world_pos()?;
+                let flat = o.velocity.truncate();
+                (p.distance(me) <= CASTER_WITHIN
+                    && flat.length() > 0.5
+                    && flat.dot((p - me).truncate()) > 0.0)
+                    .then(|| flat.length())
+            });
+        if let Some(speed) = speed {
+            tracing::debug!("aim: spell {spell} flies at {speed:.1} m/s");
+            self.dodge.shot_speeds.insert(spell, speed);
+            self.dodge.fired = None;
+        }
+    }
+
+    /// Close on `target` until it is within [`WITHIN`] of the reach of
+    /// `how` and the shot is clear, walking after it like a leader. True
+    /// while still too far, when the attack has to wait; false once in
+    /// reach (or with nowhere to go), the walk called off.
+    pub(crate) fn autoplay_approach(&mut self, target: u32, name: &str, how: How) -> bool {
         let Some(me) = self.player.as_ref().map(|p| p.world_position()) else {
             return false;
         };
@@ -222,14 +349,16 @@ impl Client {
             return false;
         };
         // Nearer than its reach, when nothing landed from further off.
+        let range = self.attack_range(how);
         let range = self
             .autoplay
             .closing_on(target)
             .map_or(range, |cap| range.min(cap));
-        // Within reach is not enough: a spell or an arrow also needs a
-        // clear line to the target. Behind a wall, walk round (the
-        // steering finds the way) until it is in sight and in reach.
-        let seen = self.can_see_at(at);
+        // Within reach is not enough: the spell or the arrow has to get
+        // there, and one that would strike a wall or the ground on the
+        // way is not thrown (see `crate::aim`). Walk round (the steering
+        // finds the way) until the shot is clear and in reach.
+        let seen = self.shot_clears(target, how);
         let stop = if seen { range * WITHIN } else { NO_SIGHT_STOP };
         if at.distance(me) <= stop && seen {
             self.stop_approaching();
@@ -243,7 +372,7 @@ impl Client {
                 );
             } else {
                 tracing::info!(
-                    "range: no line of sight to {name} ({:.1} m off): moving",
+                    "range: no clear shot at {name} ({:.1} m off): moving",
                     at.distance(me)
                 );
             }
@@ -395,6 +524,7 @@ impl Client {
                 self.stop_approaching();
             }
         }
+        self.learn_shot_speeds(now);
         if !self.autoplay.config.survive.dodge {
             return false;
         }

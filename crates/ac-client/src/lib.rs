@@ -4,6 +4,7 @@
 
 pub mod academy;
 pub mod advance;
+pub mod aim;
 pub mod augmentations;
 pub mod autoplay;
 pub mod buffs;
@@ -1535,17 +1536,32 @@ impl Client {
                         Err(e) => Err(e),
                     }
                 }
-                Some((_, _, event::VICTIM_NOTIFICATION | event::KILLER_NOTIFICATION, rest)) => {
-                    match ac_net::wire::Reader::new(rest).string16() {
-                        Ok(t) => Ok(ChatLine {
+                Some((
+                    _,
+                    _,
+                    kind @ (event::VICTIM_NOTIFICATION | event::KILLER_NOTIFICATION),
+                    rest,
+                )) => match ac_net::wire::Reader::new(rest).string16() {
+                    Ok(t) => {
+                        // Our kill, however it was made: a spell's killing
+                        // blow comes with no attacker notice, only this, and
+                        // its body is owed all the same.
+                        if kind == event::KILLER_NOTIFICATION {
+                            let now = Instant::now();
+                            self.autoplay.last_kill = Some(now);
+                            if let Some(at) = self.killed_in(&t) {
+                                self.autoplay.kill_spots.push((at, now));
+                            }
+                        }
+                        Ok(ChatLine {
                             text: t,
                             sender: String::new(),
                             sender_id: 0,
                             kind: 0,
-                        }),
-                        Err(e) => Err(e),
+                        })
                     }
-                }
+                    Err(e) => Err(e),
+                },
                 Some((_, _, event::TRANSIENT_STRING, rest)) => {
                     match ac_net::wire::Reader::new(rest).string16() {
                         Ok(t) => Ok(ChatLine {

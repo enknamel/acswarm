@@ -962,6 +962,43 @@ impl Player {
         })
     }
 
+    /// Whether a projectile flying `path` (world points in order, as
+    /// `crate::aim::flight` gives them) gets to its end without striking
+    /// static geometry or going into the ground on the way.
+    pub fn flies_clear(&mut self, assets: &Assets, path: &[Vec3]) -> bool {
+        let mut blocks: Vec<u32> = path.iter().map(|p| block_of(*p)).collect();
+        blocks.push(self.landblock());
+        blocks.sort_unstable();
+        blocks.dedup();
+        let worlds: Vec<Rc<BlockCollision>> = blocks
+            .iter()
+            .filter_map(|&b| self.collision(assets, b))
+            .collect();
+        let this = &*self;
+        crate::aim::clears(
+            path,
+            |a, b| worlds.iter().any(|c| c.world.segment_hit(a, b).is_some()),
+            |x, y| this.terrain_height(x, y),
+        )
+    }
+
+    /// The height of the open ground at a world `(x, y)`, from a
+    /// landblock already loaded; `None` in a dungeon, which has none,
+    /// or off the blocks this character has seen.
+    fn terrain_height(&self, x: f32, y: f32) -> Option<f32> {
+        let block = block_of(Vec3::new(x, y, 0.0));
+        let b = self.blocks.get(&block)?;
+        if b.dungeon {
+            return None;
+        }
+        let origin = ac_world::landblock_origin(block);
+        TerrainSampler::new(&b.lb, &self.height_table).height_at(Vec3::new(
+            x - origin.x,
+            y - origin.y,
+            0.0,
+        ))
+    }
+
     /// Whether the straight walk from `from` to `to` is blocked: static
     /// geometry of landblock `block` (or of the blocks under either end)
     /// crosses the chest-height line, or the capsule cannot walk it. The

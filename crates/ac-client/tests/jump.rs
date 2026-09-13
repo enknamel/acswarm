@@ -332,3 +332,28 @@ fn a_wall_hides_what_is_behind_it() {
     assert!(pl.sees(&assets, me, me + Vec3::new(0.0, 2.0, 0.0)));
     assert!(!pl.sees(&assets, me, me + Vec3::new(0.0, -10.0, 0.0)));
 }
+
+#[test]
+fn a_bolt_through_the_wall_does_not_get_there() {
+    use ac_client::aim::{flight, Body, Shot};
+    let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
+        return;
+    };
+    let assets = Assets::open(std::path::Path::new(&dir)).unwrap();
+    // The Holtburg meeting hall again, by its south wall.
+    let cell = 0x0125_010F;
+    let start = Vec3::new(25.5, -44.5, 0.0);
+    let mut pl = Player::new(&assets, cell, start, Quat::IDENTITY);
+    pl.set_motion_table(&assets, 0x0200_0001, 0x0900_0001);
+    for _ in 0..30 {
+        pl.update(&assets, &Input::default(), 1.0 / 30.0);
+    }
+    let me = pl.world_position();
+    let body = |feet| Body::new(feet, 1.8, 0.4);
+    let across_the_room =
+        flight(Shot::Bolt, body(me), body(me + Vec3::new(0.0, 3.0, 0.0))).unwrap();
+    assert!(pl.flies_clear(&assets, &across_the_room));
+    let through_the_wall =
+        flight(Shot::Bolt, body(me), body(me + Vec3::new(0.0, -10.0, 0.0))).unwrap();
+    assert!(!pl.flies_clear(&assets, &through_the_wall));
+}

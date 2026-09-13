@@ -105,6 +105,19 @@ fn near_a_kill(at: glam::Vec3, spots: &[(glam::Vec3, Instant)]) -> bool {
         .any(|(k, _)| k.truncate().distance(at.truncate()) <= KILL_SPOT)
 }
 
+/// Whether a corpse `away` metres off, lying at `at`, is this character's
+/// to empty: close by, or where one of its kills fell within the fight
+/// radius. The next fight waits on exactly the corpses the looting takes:
+/// waiting on one it will not take is waiting for good.
+fn corpse_is_ours(
+    away: f32,
+    at: glam::Vec3,
+    fight_radius: f32,
+    spots: &[(glam::Vec3, Instant)],
+) -> bool {
+    away <= LOOT_NEAR || (away <= fight_radius && near_a_kill(at, spots))
+}
+
 /// How near to fight from after nothing has landed from `distance`: half
 /// as far, never nearer than [`MIN_STAND_OFF`]. `None` when already that
 /// close, and there is nowhere nearer worth trying.
@@ -450,9 +463,8 @@ const GIVE_EVERY: Duration = Duration::from_millis(700);
 /// How often a stack is poured into another. The server takes one merge
 /// at a time and answers in its own time.
 pub(crate) const MERGE_EVERY: Duration = Duration::from_millis(600);
-/// How near a body has to be to count as one the character made and
-/// should finish with before starting another fight.
-const CORPSE_IS_MINE: f32 = 25.0;
+/// A corpse this close is looted, wherever it came from.
+const LOOT_NEAR: f32 = 20.0;
 /// How long after a killing blow its corpse is taken to be on the way.
 /// The server makes the body a moment after the creature dies.
 const CORPSE_APPEARS: Duration = Duration::from_secs(3);
@@ -2269,7 +2281,14 @@ impl Client {
         // breaking off is not decided here any more -- the worth of
         // looting says that, and it rises as bodies age and pile up
         // (see `crate::steps`).
-        let pressed = self.autoplay.casting_at().is_some();
+        // Only a cast at something still alive: the fight forgets a dead
+        // target when it next runs, and while it waits for this very
+        // body it does not run.
+        let pressed = self
+            .autoplay
+            .casting_at()
+            .and_then(|g| self.world.objects.get(&g))
+            .is_some_and(|o| o.health.unwrap_or(1.0) > 0.0);
         let me = self.player.as_ref().map(|p| p.world_position());
         let Some(me) = me else { return false };
         let looted = self.autoplay.looted.clone();
@@ -2297,40 +2316,6 @@ impl Client {
             .retain(|(g, t)| now.duration_since(*t) < CORPSE_LIFE * 2 && !looted.contains(g));
         let seen_at: std::collections::BTreeMap<u32, Instant> =
             self.autoplay.corpse_seen.iter().copied().collect();
-        // Names of the players about, ours excepted: anyone in view and
-        // everyone on the team.
-        let my_name = self.world.stats.name.to_lowercase();
-        let mut players: Vec<String> = self
-            .world
-            .objects
-            .values()
-            .filter(|o| o.is_player)
-            .map(|o| o.name.to_lowercase())
-            .chain(
-                self.autoplay
-                    .team
-                    .mates
-                    .iter()
-                    .map(|m| m.name.to_lowercase()),
-            )
-            .filter(|n| !n.is_empty() && *n != my_name)
-            .collect();
-        players.sort();
-        players.dedup();
-        // A corpse is a creature's when its name is a creature's; a
-        // corpse of anyone else, whether or not we can see them, is a
-        // player's, and a player's corpse is theirs.
-        let someone_elses = |corpse: &str| {
-            let lower = corpse.to_lowercase();
-            let Some(who) = lower.strip_prefix("corpse of ") else {
-                return false;
-            };
-            if who == my_name {
-                return false;
-            }
-            players.iter().any(|p| p == who)
-                || ac_world::elements::creature(corpse.get(10..).unwrap_or("")).is_none()
-        };
         let corpse = self
             .world
             .objects
@@ -2342,14 +2327,17 @@ impl Client {
             // own is emptied for everything on it (see below): the wand
             // and the components are on it, and a character without
             // them cannot fight or heal.
-            .filter(|o| !someone_elses(&o.name))
+            .filter(|o| !self.corpse_is_someone_elses(&o.name))
             .filter_map(|o| {
                 let p = o.world_pos()?;
                 let d = p.distance(me);
                 // Close by, or where one of this character's kills fell --
                 // which a caster makes from well past twenty metres.
-                let ours = d <= fight_radius && near_a_kill(p, &kill_spots);
-                (d <= 20.0 || ours).then_some((d, o.guid, o.name.clone()))
+                corpse_is_ours(d, p, fight_radius, &kill_spots).then_some((
+                    d,
+                    o.guid,
+                    o.name.clone(),
+                ))
             })
             .map(|(d, guid, name)| {
                 let seen = seen_at.get(&guid).copied().unwrap_or(now);
@@ -3211,13 +3199,38 @@ impl Client {
             // One that would not open is set aside for a while, and
             // waiting on it would stop the fighting altogether.
             .filter(|o| !self.autoplay.shelved.held(&o.guid, now))
+            .filter(|o| !self.corpse_is_someone_elses(&o.name))
             .filter_map(|o| o.world_pos())
             .any(|at| {
-                let away = at.distance(me);
-                away <= CORPSE_IS_MINE
-                    || (away <= self.autoplay.config.fight.radius
-                        && near_a_kill(at, &self.autoplay.kill_spots))
+                corpse_is_ours(
+                    at.distance(me),
+                    at,
+                    self.autoplay.config.fight.radius,
+                    &self.autoplay.kill_spots,
+                )
             })
+    }
+
+    /// Whether the corpse named `corpse` is another player's, and theirs:
+    /// named for anyone but this character who is a player in view or on
+    /// the team, or for no creature there is.
+    fn corpse_is_someone_elses(&self, corpse: &str) -> bool {
+        let lower = corpse.to_lowercase();
+        let Some(who) = lower.strip_prefix("corpse of ") else {
+            return false;
+        };
+        if who == self.world.stats.name.to_lowercase() {
+            return false;
+        }
+        let a_player = self
+            .world
+            .objects
+            .values()
+            .filter(|o| o.is_player)
+            .map(|o| o.name.as_str())
+            .chain(self.autoplay.team.mates.iter().map(|m| m.name.as_str()))
+            .any(|n| n.to_lowercase() == who);
+        a_player || ac_world::elements::creature(corpse.get(10..).unwrap_or("")).is_none()
     }
 
     /// Something has hit the character in the last few seconds.
@@ -3348,11 +3361,8 @@ impl Client {
                     }
                     self.remember_journey();
                     self.arm_for(guid, stance, &cfg);
-                    if missile {
-                        let range = self.attack_range(crate::dodge::How::Missile);
-                        if self.autoplay_approach(guid, &name, range) {
-                            return true;
-                        }
+                    if missile && self.autoplay_approach(guid, &name, crate::dodge::How::Missile) {
+                        return true;
                     }
                     self.enter_combat();
                     self.attack(guid);
@@ -3401,11 +3411,8 @@ impl Client {
         // A bow refused for range shoots nothing: close in first (see
         // `crate::dodge`). A swing from too far the server walks us
         // in for.
-        if missile {
-            let range = self.attack_range(crate::dodge::How::Missile);
-            if self.autoplay_approach(guid, &name, range) {
-                return true;
-            }
+        if missile && self.autoplay_approach(guid, &name, crate::dodge::How::Missile) {
+            return true;
         }
         self.enter_combat();
         self.attack(guid);
@@ -3536,14 +3543,15 @@ impl Client {
                 .find(|(id, _)| *id == spell)
                 .map(|(_, n)| n.clone())
                 .unwrap_or_default();
-            // From too far off the server refuses the cast outright:
-            // close in first (see `crate::dodge`).
-            let range = self.attack_range(crate::dodge::How::Spell(spell));
-            if self.autoplay_approach(guid, &name, range) {
+            // From too far off the server refuses the cast outright, and
+            // from behind a wall or a rise the bolt strikes that instead:
+            // close in first (see `crate::dodge`, `crate::aim`).
+            if self.autoplay_approach(guid, &name, crate::dodge::How::Spell(spell)) {
                 return true;
             }
             self.cast(spell);
             self.autoplay.cast_sent = Some(now);
+            self.note_fired(spell, now);
             let element = ac_world::elements::spell_element(spell)
                 .map(|e| e.name())
                 .unwrap_or("");
@@ -3860,8 +3868,10 @@ impl Client {
     /// Nothing is landing on `guid` from where a ranged attacker stands:
     /// fight it from nearer. True when a nearer stand-off was set.
     ///
-    /// Something the sight check lets through can still stop a spell --
-    /// the ground rising between, a fence, a tree -- and a caster that
+    /// The flight is worked out before a shot is thrown (see `crate::aim`),
+    /// but only through the world that stands still: another creature in
+    /// the way, a door, a target on the move can still take it -- and a
+    /// caster that
     /// went on casting from the same spot for twenty seconds, spending
     /// components, and then gave up, never tried a step closer. Only a
     /// swing or a shot is left alone: a melee attacker is walked in by
@@ -3915,6 +3925,34 @@ impl Client {
         })
     }
 
+    /// Where the creature a kill message names was standing: the one
+    /// being fought when the message names it, else the nearest creature
+    /// it names, the longest name that fits first (a "Mite Scion" is not
+    /// a "Mite").
+    pub(crate) fn killed_in(&self, text: &str) -> Option<glam::Vec3> {
+        let me = self.player.as_ref()?.world_position();
+        let named = |name: &str| !name.is_empty() && text.contains(name);
+        let fought = [self.attack_target, self.autoplay.casting_at]
+            .into_iter()
+            .flatten()
+            .filter_map(|g| self.world.objects.get(&g))
+            .find(|o| named(&o.name))
+            .and_then(|o| o.world_pos());
+        fought.or_else(|| {
+            self.world
+                .objects
+                .values()
+                .filter(|o| o.item_type & ac_world::item_type::CREATURE != 0)
+                .filter(|o| named(&o.name))
+                .filter_map(|o| Some((o.name.len(), o.world_pos()?)))
+                .max_by(|a, b| {
+                    a.0.cmp(&b.0)
+                        .then(b.1.distance(me).total_cmp(&a.1.distance(me)))
+                })
+                .map(|(_, at)| at)
+        })
+    }
+
     /// A corpse is done with: the kill spot it lay at is too.
     fn forget_kill_spot(&mut self, corpse: u32) {
         if let Some(at) = self.world.objects.get(&corpse).and_then(|o| o.world_pos()) {
@@ -3962,10 +4000,15 @@ impl Client {
         // The nearest one we can actually hit: one behind a wall is
         // taken only when nothing is in sight, and then the fight rules
         // walk round to it.
+        let how = if self.missile {
+            crate::dodge::How::Missile
+        } else {
+            crate::dodge::How::Melee
+        };
         candidates
             .into_iter()
             .map(|(guid, at)| {
-                let seen = self.can_see_at(at);
+                let seen = self.shot_clears(guid, how);
                 ((!seen) as u8, at.distance(me), guid)
             })
             .min_by(|a, b| a.0.cmp(&b.0).then(a.1.total_cmp(&b.1)))
@@ -3979,19 +4022,6 @@ impl Client {
             return None;
         }
         self.autoplay.team.leader_mate().filter(|m| m.leads)
-    }
-
-    /// Whether a spell or arrow from here would reach something standing
-    /// at `at` without hitting a wall first (see `Player::sees`).
-    pub(crate) fn can_see_at(&mut self, at: glam::Vec3) -> bool {
-        let assets = self.assets.clone();
-        match self.player.as_mut() {
-            Some(pl) => {
-                let me = pl.world_position();
-                pl.sees(&assets, me, at)
-            }
-            None => true,
-        }
     }
 
     /// Note what this character is running short of, so the others can
@@ -5235,6 +5265,22 @@ mod tests {
         // Somebody else's, a street away.
         assert!(!near_a_kill(glam::Vec3::new(120.0, 100.0, 50.0), &spots));
         assert!(!near_a_kill(glam::Vec3::new(100.0, 100.0, 50.0), &[]));
+    }
+
+    #[test]
+    fn the_fight_waits_only_on_bodies_the_looting_takes() {
+        let now = Instant::now();
+        let off = glam::Vec3::new(22.0, 0.0, 0.0);
+        // Close by: looted, and waited on.
+        assert!(corpse_is_ours(5.0, glam::Vec3::ZERO, 40.0, &[]));
+        // Twenty-two metres off where nothing of ours fell: neither. It
+        // used to be waited on out to twenty-five and looted only to
+        // twenty, and the character stood between the two for good.
+        assert!(!corpse_is_ours(22.0, off, 40.0, &[]));
+        // Where a kill of ours fell: both.
+        assert!(corpse_is_ours(22.0, off, 40.0, &[(off, now)]));
+        // But not past the fight radius.
+        assert!(!corpse_is_ours(22.0, off, 20.0, &[(off, now)]));
     }
 
     #[test]
