@@ -227,6 +227,11 @@ pub struct Supplies {
     pub level: f32,
     /// It cannot pick anything else up.
     pub pack_full: bool,
+    /// It carries as much loot as it means to (see
+    /// `Client::carry_room`). Slots stay free while the weight creeps
+    /// up, so a party that only counted slots and supplies hunted on
+    /// with a member who could take nothing more off a corpse.
+    pub laden: bool,
     /// It has been to the vendors it needed and is ready to go back.
     pub stocked: bool,
     /// What its remaining shopping will cost, in pyreals.
@@ -255,7 +260,7 @@ pub struct Supplies {
 impl Supplies {
     /// Whether this character alone is reason enough to go shopping.
     fn wants_town(&self, cfg: &Restock) -> bool {
-        self.pack_full || self.level < cfg.go_at
+        self.pack_full || self.laden || self.level < cfg.go_at
     }
 
     /// Whether the party need wait for it any longer.
@@ -303,6 +308,8 @@ fn start_trip(mates: &[Supplies], cfg: &Restock) -> Option<Switch> {
         .map(|m| {
             if m.pack_full {
                 format!("{}'s pack is full", m.name)
+            } else if m.laden {
+                format!("{} is carrying as much as it means to", m.name)
             } else {
                 format!("{} is down to {:.0}% supplies", m.name, m.level * 100.0)
             }
@@ -613,6 +620,20 @@ mod tests {
         let s = decide(GroupMode::Hunting, &[m], &cfg, 0).expect("a switch");
         assert_eq!(s.mode, SHOPPING);
         assert!(s.because.contains("pack is full"), "{}", s.because);
+    }
+
+    #[test]
+    fn a_member_carrying_all_the_loot_it_means_to_takes_the_party_to_town() {
+        // Weight fills before slots do. Counting only slots and supplies,
+        // a party hunted on with a member who could take nothing more
+        // off a corpse and had free slots to show for it.
+        let cfg = Restock::default();
+        let mut party = [mate("Aldric", 1.0), mate("Bryn", 1.0)];
+        assert_eq!(decide(GroupMode::Hunting, &party, &cfg, 0), None);
+        party[1].laden = true;
+        let s = decide(GroupMode::Hunting, &party, &cfg, 0).expect("a switch");
+        assert_eq!(s.mode, SHOPPING);
+        assert!(s.because.contains("Bryn is carrying"), "{}", s.because);
     }
 
     #[test]

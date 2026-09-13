@@ -670,7 +670,9 @@ pub fn draw(egui: &egui::Context, v: &AutoplayView, x: f32, drafts: &mut Drafts)
                 .on_hover_text(
                     "The whole party stops hunting and goes together. Off, each \
                      character runs to town on its own when it is short, which \
-                     leaves the rest a man down mid-fight. Needs the team rules on.",
+                     leaves the rest a man down mid-fight. Needs the team rules on, \
+                     and somebody else on the team: a character on its own goes \
+                     when it is short, full or laden either way.",
                 );
                 ui.horizontal(|ui| {
                     ui.label("how");

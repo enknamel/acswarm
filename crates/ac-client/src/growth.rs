@@ -581,6 +581,19 @@ fn loot_room(carried: u32, loot: u32, capacity: u32, carry_up_to: f32) -> u32 {
     }
 }
 
+/// Whether the party's mode decides when this character goes to town,
+/// rather than its own pack and supplies. `mates` is how many others are
+/// on the team as it was last heard.
+///
+/// Restocking together needs somebody to restock with. Blargerton had the
+/// team rules on, restocking together on, and nobody else on the team: a
+/// party of one only ever decided to go for supplies or a pack with no
+/// slot, never for weight, so he hunted on carrying all he meant to and
+/// left everything else on the bodies.
+fn restocks_as_a_party(team: &crate::autoplay::Team, mates: usize) -> bool {
+    team.enabled && team.restock.together && mates > 0
+}
+
 /// Something in the pack the rules allow to be sold, before any one
 /// counter's tastes are applied to it.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1674,13 +1687,14 @@ impl Client {
     /// Every session runs this on the same roster and reaches the same
     /// answer, so there is nothing to agree on: the party changes mode
     /// together without a message being sent about it. A character
-    /// playing alone, or one whose team rules are off, is always
-    /// hunting -- its own supplies still send it to town, by the older
-    /// rule that fires on an urgent shortfall.
+    /// playing alone -- nobody else on the team, whatever its settings
+    /// say -- or one whose team rules are off, is always hunting: its
+    /// own pack and supplies send it to town, by the older rule (see
+    /// [`restocks_as_a_party`]).
     fn grow_mode(&mut self, now: Instant, cfg: &Growth) -> crate::logistics::GroupMode {
         use crate::logistics::{decide, GroupMode};
         let team = &self.autoplay.config.team;
-        if !team.enabled || !team.restock.together {
+        if !restocks_as_a_party(team, self.autoplay.team.mates.len()) {
             self.autoplay.growth.mode = GroupMode::Hunting;
             return GroupMode::Hunting;
         }
@@ -1795,6 +1809,7 @@ impl Client {
                 .unwrap_or_default(),
             level,
             pack_full: self.pack_full(),
+            laden: self.laden(cfg),
             // Ready to go back: stocked up, and not still mid-errand.
             stocked: level >= policy.full_at && self.autoplay.growth.run.is_none(),
             handed_over: self.autoplay.growth.handed_over,
@@ -2529,6 +2544,16 @@ impl Client {
         loot_room(now, self.loot_burden(cfg), capacity, up_to)
     }
 
+    /// Carrying as much loot as it means to: time to go and sell.
+    ///
+    /// Not before its strength is known. With no capacity there is no
+    /// room either, and a party told a member was laden the moment it
+    /// logged in would turn round for town before a fight.
+    pub fn laden(&self, cfg: &Growth) -> bool {
+        let (_, capacity) = self.burden();
+        capacity > 0 && self.carry_room(cfg) == 0
+    }
+
     /// Which society this character belongs to, as `Faction1Bits`: 1
     /// the Celestial Hand, 2 the Eldrytch Web, 4 the Radiant Blood, 0
     /// none. The server sends it with the rest of the character's
@@ -2681,16 +2706,19 @@ impl Client {
         // limit: a counter cannot lighten that, and counting it sent a
         // character whose own gear filled the limit off to sell with
         // nothing to sell.
-        let laden = self.carry_room(cfg) == 0;
+        let laden = self.laden(cfg);
         let needs = self.needs_now(now, cfg);
         // On a team that restocks together, the party's mode decides:
         // one character does not walk off to a vendor while the rest
         // are fighting, and none of them stays behind when the party
         // has agreed to go. Alone, the older rule stands -- something
-        // urgent, or a pack with no room left.
+        // urgent, a pack with no room left, or as much loot as it means
+        // to carry. Alone includes a character set to restock together
+        // with nobody else on the team, which is how Blargerton never
+        // went to sell.
         let party_mode = self.autoplay.growth.mode;
         let together =
-            self.autoplay.config.team.enabled && self.autoplay.config.team.restock.together;
+            restocks_as_a_party(&self.autoplay.config.team, self.autoplay.team.mates.len());
         let urgent: Vec<&Need> = needs.iter().filter(|n| n.urgent).collect();
         let reason = if together {
             match party_mode.stage() {
@@ -3330,6 +3358,37 @@ mod tests {
         assert_eq!(loot_room(0, 0, 9_000, f32::NAN), 0);
         // A count of loot ahead of the server's total: all of it is loot.
         assert_eq!(loot_room(1_000, 1_500, 9_000, 1.5), 13_500 - 1_000);
+    }
+
+    #[test]
+    fn a_character_with_nobody_to_restock_with_goes_to_town_on_its_own() {
+        // Blargerton: team rules on, restocking together on, no party.
+        // The party's mode decided his trips, a party of one never left
+        // for weight, and he hunted on laden with every body left full.
+        let team = crate::autoplay::Team {
+            enabled: true,
+            restock: crate::logistics::Restock {
+                together: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!(!restocks_as_a_party(&team, 0), "alone is alone");
+        assert!(restocks_as_a_party(&team, 1));
+        // Either setting off, it is alone whoever else is about.
+        let apart = crate::autoplay::Team {
+            restock: crate::logistics::Restock {
+                together: false,
+                ..Default::default()
+            },
+            ..team.clone()
+        };
+        assert!(!restocks_as_a_party(&apart, 3));
+        let off = crate::autoplay::Team {
+            enabled: false,
+            ..team
+        };
+        assert!(!restocks_as_a_party(&off, 3));
     }
 
     #[test]
