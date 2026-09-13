@@ -126,6 +126,10 @@ pub struct Travel {
     /// The cell the step is aimed at, so an indoor target is recognised
     /// even when the character stands outdoors in the same landblock.
     step_cell: Option<u32>,
+    /// The height the step is aimed at, when the data says: a portal's
+    /// mouth stands on its own floor, which is not always the floor the
+    /// character is on or the ground under it.
+    step_z: Option<f32>,
     step_since: Option<Instant>,
     /// Closest the character has come to the step's target: the step is
     /// only "going nowhere" when this stops improving.
@@ -524,6 +528,7 @@ impl Client {
             self.travel.step_best = f32::INFINITY;
             self.travel.step_target = None;
             self.travel.step_cell = None;
+            self.travel.step_z = None;
             self.travel.step_block = None;
             self.travel.route = None;
             self.travel.recall_since = Some(Instant::now());
@@ -554,6 +559,7 @@ impl Client {
             self.travel.step_best = f32::INFINITY;
             self.travel.step_target = None;
             self.travel.step_cell = None;
+            self.travel.step_z = None;
             self.travel.step_block = None;
             self.travel.route = None;
             self.travel.restart_waypoint();
@@ -586,6 +592,10 @@ impl Client {
         self.travel.step_best = f32::INFINITY;
         self.travel.step_target = Some(target);
         self.travel.step_cell = mouth_cell;
+        self.travel.step_z = match &step {
+            Step::Portal { name, mouth, .. } => portal_mouth_height(name, *mouth),
+            _ => None,
+        };
         self.travel.step_block = Some(match mouth_cell {
             Some(c) => c & 0xFFFF_0000,
             None => WorldGrid::block_of(target),
@@ -676,6 +686,7 @@ impl Client {
         self.travel.replans = 0;
         self.travel.step_since = None;
         self.travel.step_cell = None;
+        self.travel.step_z = None;
         self.travel.step_target = None;
         self.travel.step_best = f32::INFINITY;
         self.travel.route = None;
@@ -1223,7 +1234,21 @@ impl Client {
         if (indoors || target_indoors) && self.travel.step_block == Some(block) {
             let target = *self.travel.route.as_ref()?.last()?;
             if me.distance(target) > ARRIVE {
-                return Some((Vec3::new(target.x, target.y, me3.z), LEG_STOP, block));
+                // At the height of what is aimed at when that is known --
+                // a portal's mouth in a hall up a hill -- and in its own
+                // cell, so the steering takes the height as the answer
+                // rather than dropping it to the ground. Aimed at the
+                // character's own floor instead, from the Archmage's
+                // first floor at 69 to the Holtburg Meeting Hall Portal at
+                // 96, the planner found nothing there and the character
+                // walked into the wall for half a minute.
+                let z = self.travel.step_z.unwrap_or(me3.z);
+                let cell = self
+                    .travel
+                    .step_cell
+                    .filter(|c| c & 0xFFFF >= 0x100)
+                    .unwrap_or(block);
+                return Some((Vec3::new(target.x, target.y, z), LEG_STOP, cell));
             }
             // At the target. A walk is done; a portal's mouth is waited
             // at below, like outdoors: jumped into, and given up on when
@@ -1329,17 +1354,19 @@ impl Client {
                         self.jump(1.0);
                     }
                     let mouth = waypoint(&self.travel, n - 1)?;
+                    // On its own floor and in its own cell when the data
+                    // says: a mouth indoors is not on the ground under it.
                     let z = self
                         .travel
-                        .grid
-                        .as_ref()
-                        .map(|g| g.height_at(mouth))
+                        .step_z
+                        .or_else(|| self.travel.grid.as_ref().map(|g| g.height_at(mouth)))
                         .unwrap_or(me.extend(0.0).z);
-                    return Some((
-                        Vec3::new(mouth.x, mouth.y, z),
-                        0.0,
-                        WorldGrid::block_of(mouth),
-                    ));
+                    let cell = self
+                        .travel
+                        .step_cell
+                        .filter(|c| c & 0xFFFF >= 0x100)
+                        .unwrap_or_else(|| WorldGrid::block_of(mouth));
+                    return Some((Vec3::new(mouth.x, mouth.y, z), 0.0, cell));
                 }
                 if !self.travel_next_step() {
                     return None;
@@ -1421,6 +1448,16 @@ impl Client {
             ));
         }
     }
+}
+
+/// The height the mouth of the portal called `name` at `mouth` stands at,
+/// from the portal data. Steps carry only where a mouth is on the map and
+/// the cell it is in; a walk to one in a building has to aim at its floor.
+fn portal_mouth_height(name: &str, mouth: Vec2) -> Option<f32> {
+    ac_world::portals::near(mouth, 3.0)
+        .into_iter()
+        .find(|p| p.name == name)
+        .map(|p| p.from.z)
 }
 
 /// Where the next leg from `me` toward `wp` ends: at most [`LEG`] away,
@@ -1538,6 +1575,21 @@ fn gem_next(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_portal_in_a_hall_is_aimed_at_on_its_own_floor() {
+        let hall = ac_world::portals::named("Holtburg Meeting Hall Portal")
+            .into_iter()
+            .find(|p| p.from_cell == 0xA9B4_017A)
+            .expect("the Holtburg meeting hall portal is in the data");
+        let z = portal_mouth_height(&hall.name, hall.from_xy()).expect("a height");
+        assert!((z - 96.0).abs() < 0.01, "{z}");
+        // Another portal's name at the same spot says nothing.
+        assert_eq!(
+            portal_mouth_height("Portal to Nowhere", hall.from_xy()),
+            None
+        );
+    }
 
     #[test]
     fn a_gem_is_used_facing_the_nearest_open_ground() {
