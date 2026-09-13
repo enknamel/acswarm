@@ -3905,7 +3905,7 @@ impl Client {
                         .objects
                         .get(&guid)
                         .map(|o| o.name.clone())
-                        .unwrap_or_default();
+                        .unwrap_or_else(|| format!("{guid:#010x}"));
                     self.autoplay
                         .note(format!("giving up on {name}: no damage in a while"), now);
                     self.autoplay

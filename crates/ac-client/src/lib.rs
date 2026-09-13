@@ -1317,6 +1317,7 @@ impl Client {
                         rotation: pl.rotation(),
                     });
                 }
+                self.world.walked();
             }
             // A server walk let go short of what it was walking to: the
             // use it was for is walked the rest of the way (see `visit`).

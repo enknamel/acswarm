@@ -71,6 +71,12 @@ const CARRIED_OFF: f32 = 60.0;
 /// gets there -- a walk to the Holtburg Dungeon's portal found nothing and
 /// stopped beside it, while a visit begun beside it went straight through.
 const ARRIVAL_WAIT: Duration = Duration::from_secs(5);
+/// A portal a visit has used is given this long to carry the character
+/// off: a visit to it begun again in that time is the same visit, still
+/// going. Beside a portal a visit is over in the frame it uses it, and a
+/// caller asking every frame until the character is gone used the
+/// Holtburg Dungeon's portal four times before the first use took.
+const PORTAL_TAKES: Duration = Duration::from_secs(5);
 
 /// Somewhere to go, and whom to use once there.
 #[derive(Clone, Debug)]
@@ -191,6 +197,9 @@ pub struct Visits {
     /// the portal gone through), for a caller who started it just now:
     /// beside a portal, the first frame is the whole visit.
     pub(crate) finished: bool,
+    /// The portal a visit last used, by name, and when: see
+    /// [`PORTAL_TAKES`].
+    pub(crate) portal_used: Option<(String, Instant)>,
 }
 
 impl Visits {
@@ -264,6 +273,12 @@ fn waits_for_them(since: Instant, now: Instant) -> bool {
     now.duration_since(since) < ARRIVAL_WAIT
 }
 
+/// Whether the portal called `name` was used by a visit so lately (see
+/// `used`) that it may still be about to carry the character off.
+fn still_taking(used: Option<&(String, Instant)>, name: &str, now: Instant) -> bool {
+    used.is_some_and(|(portal, at)| portal == name && now.duration_since(*at) < PORTAL_TAKES)
+}
+
 /// Whether the character was carried off between the frame it stood at
 /// `last` and this one at `me`: a jump no walk makes.
 pub fn carried_off(last: Option<Vec3>, me: Vec3) -> bool {
@@ -317,6 +332,10 @@ impl Client {
             tracing::warn!("visit: the character is not in the world");
             return false;
         }
+        let now = Instant::now();
+        if v.through && still_taking(self.visits.portal_used.as_ref(), &v.label, now) {
+            return true;
+        }
         self.drop_visit("another visit");
         tracing::info!(
             "visit: going to {} at {:?} in {:#010x}",
@@ -326,7 +345,7 @@ impl Client {
         );
         self.visits.current = Some(v);
         self.visits.finished = false;
-        self.tick_visit(Instant::now());
+        self.tick_visit(now);
         // Still under way, or already there.
         self.visits.current.is_some() || self.visits.finished
     }
@@ -475,6 +494,9 @@ impl Client {
         }
         tracing::info!("visit: at {}; using {guid:#010x}", v.label);
         self.interact(guid);
+        if v.through {
+            self.visits.portal_used = Some((v.label.clone(), Instant::now()));
+        }
         // This use was the visit's: should the server's walk for it run
         // out too, it is not carried on again.
         self.visits.last_use = None;
@@ -600,6 +622,20 @@ mod tests {
         assert!(waits_for_them(t0, t0 + s(4)));
         // Long enough: nobody of that name is coming.
         assert!(!waits_for_them(t0, t0 + s(6)));
+    }
+
+    #[test]
+    fn a_portal_just_used_is_left_to_take_the_character() {
+        let t0 = Instant::now();
+        let s = Duration::from_secs;
+        let used = ("Holtburg Dungeon".to_string(), t0);
+        // Asked again in the frames after the use: the same visit.
+        assert!(still_taking(Some(&used), "Holtburg Dungeon", t0));
+        assert!(still_taking(Some(&used), "Holtburg Dungeon", t0 + s(4)));
+        // Another portal, nothing used, or long enough that the use failed.
+        assert!(!still_taking(Some(&used), "Holtburg Town", t0 + s(1)));
+        assert!(!still_taking(None, "Holtburg Dungeon", t0));
+        assert!(!still_taking(Some(&used), "Holtburg Dungeon", t0 + s(6)));
     }
 
     #[test]

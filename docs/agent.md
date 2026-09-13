@@ -249,10 +249,20 @@ behind.
 that has dropped out of sight for twenty-five seconds before it sends
 the delete, so for those seconds a character that has stepped through a
 portal still has the town it left, and picks a creature thirty
-kilometres behind it to go and fight. `World::arrived_in` forgets
+kilometres behind it to go and fight. `World::arrived_in` sets aside
 anything out of sight when the landblock changes -- by distance, not by
 landblock, because outdoor landblocks are seen across their borders and
 walking into the next one must not throw away the corpse just made.
+
+Set aside, not forgotten. A teleport does not clear what ACE thinks the
+client knows: an object out of sight waits in a queue for its delete,
+and one back in sight before the twenty-five seconds are up leaves the
+queue and is never described again. A character killed just inside the
+Holtburg Dungeon rose at the lifestone next door inside that time, and
+the portal it had thrown away never came back; it stood beside the
+mouth for good. What is set aside returns when the character comes
+within sight of it or the server speaks of it, and goes for good when
+the server deletes it.
 
 ## Getting there is four questions, and height is in all of them
 

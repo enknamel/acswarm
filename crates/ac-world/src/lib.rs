@@ -454,6 +454,13 @@ pub struct World {
     /// The landblock the server last placed us in: a change means we
     /// left a world behind (see `arrived_in`).
     player_landblock: Option<u16>,
+    /// What was set aside on leaving a world behind (see `arrived_in`),
+    /// until the server deletes it or we are back within sight of it. ACE
+    /// never describes an object again while it thinks we know it, and it
+    /// goes on thinking so when we come back inside twenty-five seconds:
+    /// thrown away, the Holtburg Dungeon's portal was gone for good after
+    /// a character who died just inside rose at the lifestone next door.
+    left_behind: HashMap<u32, WorldObject>,
     /// Bumped whenever the set of drawable objects or a position changes.
     pub generation: u64,
     /// The player's character sheet.
@@ -552,6 +559,18 @@ impl World {
         self.objects.get_mut(&self.player_guid?)
     }
 
+    /// The client has moved us itself, on foot. The server's echoes of our
+    /// own walk are not taken (see UPDATE_POSITION), so a landblock crossed
+    /// walking is only seen here -- and without it nothing set aside ever
+    /// came back into sight: a character teleported out of the Holtburg
+    /// Dungeon to three hundred and one metres from its portal walked back
+    /// to the mouth and found no portal there.
+    pub fn walked(&mut self) {
+        if let Some(cell) = self.player().and_then(|o| o.position).map(|p| p.cell) {
+            self.arrived_in(cell);
+        }
+    }
+
     /// Items the player carries: the main pack's contents and everything
     /// inside carried side packs (an item's `container` then names the
     /// pack, whose own `container` is the player).
@@ -607,7 +626,10 @@ impl World {
             opcode::OBJECT_CREATE | opcode::UPDATE_OBJECT => match ObjectCreate::parse(body) {
                 Ok(oc) => {
                     let is_player = self.player_guid == Some(oc.guid);
-                    let previous = self.objects.remove(&oc.guid);
+                    let previous = self
+                        .objects
+                        .remove(&oc.guid)
+                        .or_else(|| self.left_behind.remove(&oc.guid));
                     if oc.object_desc_flags & object_desc_flags::PLAYER != 0 {
                         tracing::debug!(
                             "player object {} ({:#010x}): position {:?} setup {:#010x} no_draw {} parent {:?}",
@@ -713,6 +735,7 @@ impl World {
             }
             opcode::UPDATE_POSITION => match object::UpdatePosition::parse(body) {
                 Ok(up) => {
+                    self.bring_back(up.guid);
                     let is_player = self.player_guid == Some(up.guid);
                     let applied = if let Some(o) = self.objects.get_mut(&up.guid) {
                         if is_player {
@@ -798,6 +821,7 @@ impl World {
                 let mut r = Reader::new(body);
                 match (r.u32(), r.u32()) {
                     (Ok(guid), Ok(state)) => {
+                        self.bring_back(guid);
                         let Some(o) = self.objects.get_mut(&guid) else {
                             return Applied::Ignored;
                         };
@@ -818,6 +842,7 @@ impl World {
             }
             opcode::MOVEMENT_EVENT => match MovementEvent::parse(body) {
                 Ok(ev) => {
+                    self.bring_back(ev.guid);
                     let Some(o) = self.objects.get_mut(&ev.guid) else {
                         return Applied::Ignored;
                     };
@@ -862,6 +887,9 @@ impl World {
                 // the pack; the server sends no DeleteObject for it.
                 if body.len() >= 4 {
                     let guid = u32::from_le_bytes(body[..4].try_into().unwrap());
+                    // The server letting go of something set aside: now
+                    // it is gone.
+                    self.left_behind.remove(&guid);
                     if self.objects.remove(&guid).is_some() {
                         self.generation += 1;
                         return Applied::Deleted;
@@ -1665,7 +1693,6 @@ impl World {
         moved
     }
 
-    /// Objects that have a world position and a model.
     /// The server placed us in `cell`. Crossing into another landblock
     /// means the world we came from is gone, but the server does not say
     /// so at once: ACE holds an object that has dropped out of sight for
@@ -1673,8 +1700,14 @@ impl World {
     /// a character that has just stepped through a portal still has the
     /// town it left in its object table, and would pick a creature
     /// thirty kilometres behind it to go and fight. The real client
-    /// empties the scene on entering portal space; forget anything that
-    /// far off ourselves.
+    /// empties the scene on entering portal space; anything that far off
+    /// is set aside here.
+    ///
+    /// Set aside, not forgotten: back within sight inside those
+    /// twenty-five seconds and the server never let it go, so it never
+    /// describes it again (see `left_behind`). Whatever was set aside is
+    /// brought back on coming within sight of it, or when the server
+    /// speaks of it, and dropped when the server deletes it.
     ///
     /// Distance, not landblock, decides it: outdoor landblocks are
     /// visible across their borders, so walking from one into the next
@@ -1690,27 +1723,48 @@ impl World {
             return;
         };
         let mine = self.player_guid;
-        let before = self.objects.len();
-        self.objects.retain(|guid, o| {
-            if Some(*guid) == mine || o.parent.is_some() {
-                return true;
+        // Carried, or never placed, is not judged by distance.
+        let far = |o: &WorldObject| o.world_pos().map(|p| (p - here).length() > OUT_OF_SIGHT);
+        let back: Vec<u32> = self
+            .left_behind
+            .iter()
+            .filter(|(_, o)| far(o) == Some(false))
+            .map(|(guid, _)| *guid)
+            .collect();
+        for guid in &back {
+            self.bring_back(*guid);
+        }
+        let aside: Vec<u32> = self
+            .objects
+            .iter()
+            .filter(|(guid, o)| Some(**guid) != mine && o.parent.is_none() && far(o) == Some(true))
+            .map(|(guid, _)| *guid)
+            .collect();
+        for guid in &aside {
+            if let Some(o) = self.objects.remove(guid) {
+                self.left_behind.insert(*guid, o);
             }
-            match o.world_pos() {
-                Some(p) => (p - here).length() <= OUT_OF_SIGHT,
-                // Carried, or never placed: not ours to judge by distance.
-                None => true,
-            }
-        });
-        let gone = before - self.objects.len();
-        if gone > 0 {
+        }
+        if !aside.is_empty() || !back.is_empty() {
             tracing::info!(
-                "left landblock {:#06x}: forgot {gone} object(s) out of sight",
-                was.unwrap()
+                "left landblock {:#06x}: set aside {} object(s) out of sight, brought back {}",
+                was.unwrap(),
+                aside.len(),
+                back.len()
             );
             self.generation += 1;
         }
     }
 
+    /// Something set aside (see `arrived_in`) is in the world again.
+    fn bring_back(&mut self, guid: u32) {
+        if let Some(o) = self.left_behind.remove(&guid) {
+            self.objects.insert(guid, o);
+            self.generation += 1;
+        }
+    }
+
+    /// Objects that have a world position and a model.
     pub fn drawable(&self) -> impl Iterator<Item = &WorldObject> {
         self.objects
             .values()
@@ -2376,6 +2430,105 @@ mod tests {
             "the town crier is behind us"
         );
         assert!(!world.objects.contains_key(&3), "and so is the body");
+        // Set aside, not thrown away: the server may not have let them go.
+        assert!(world.left_behind.contains_key(&2) && world.left_behind.contains_key(&3));
+    }
+
+    #[test]
+    fn what_was_set_aside_comes_back_unless_the_server_let_it_go() {
+        // Into the Holtburg Dungeon through its portal, killed just inside
+        // and up at the lifestone next door within twenty-five seconds:
+        // ACE never let the portal go, so it never describes it again.
+        let mouth = Position::new_flat(0xA8B5_0030, Vec3::new(126.6, 173.4, 28.0));
+        let mut world = World {
+            player_guid: Some(ME),
+            player_landblock: Some(0xA8B5),
+            ..Default::default()
+        };
+        let thing = |guid: u32, name: &str, at: Position| WorldObject {
+            guid,
+            name: name.into(),
+            position: Some(at),
+            ..Default::default()
+        };
+        world.objects.insert(ME, thing(ME, "+Verity", mouth));
+        world.objects.insert(2, thing(2, "Holtburg Dungeon", mouth));
+        let beside = Position::new_flat(0xA8B5_0030, Vec3::new(130.0, 170.0, 28.0));
+        world.objects.insert(3, thing(3, "Drudge Skulker", beside));
+        let go = |world: &mut World, to: Position| {
+            world.objects.get_mut(&ME).unwrap().position = Some(to);
+            world.arrived_in(to.cell);
+        };
+
+        go(
+            &mut world,
+            Position::new_flat(0x01F6_0289, Vec3::new(96.7, -10.0, 0.0)),
+        );
+        assert!(!world.objects.contains_key(&2) && !world.objects.contains_key(&3));
+
+        // The skulker is let go while we are away: its delete comes.
+        let mut delete = opcode::OBJECT_DELETE.to_le_bytes().to_vec();
+        delete.extend(3u32.to_le_bytes());
+        delete.extend(0u16.to_le_bytes());
+        world.apply(&delete);
+
+        // Up at the lifestone, still too far off to see the portal.
+        go(
+            &mut world,
+            Position::new_flat(0xA9B4_0019, Vec3::new(84.0, 7.1, 94.0)),
+        );
+        assert!(!world.objects.contains_key(&2), "388 m off");
+        // Over the hill into the next landblock and within sight of it:
+        // the portal is back, and the skulker the server let go is not.
+        go(
+            &mut world,
+            Position::new_flat(0xA8B4_003D, Vec3::new(174.6, 114.0, 61.7)),
+        );
+        assert_eq!(
+            world.objects.get(&2).map(|o| o.name.as_str()),
+            Some("Holtburg Dungeon")
+        );
+        assert!(!world.objects.contains_key(&3));
+        assert!(world.left_behind.is_empty());
+    }
+
+    #[test]
+    fn walking_back_within_sight_brings_back_what_was_set_aside() {
+        // Teleported out of the dungeon to just past sight of its portal,
+        // then walking back to it: the crossing is the client's own.
+        let mouth = Position::new_flat(0xA8B5_0030, Vec3::new(126.6, 173.4, 28.0));
+        let landed = Position::new_flat(0xA9B4_002E, Vec3::new(125.0, 132.0, 67.0));
+        let mut world = World {
+            player_guid: Some(ME),
+            player_landblock: Some(0xA9B4),
+            ..Default::default()
+        };
+        world.objects.insert(
+            ME,
+            WorldObject {
+                guid: ME,
+                position: Some(landed),
+                ..Default::default()
+            },
+        );
+        world.left_behind.insert(
+            2,
+            WorldObject {
+                guid: 2,
+                name: "Holtburg Dungeon".into(),
+                position: Some(mouth),
+                ..Default::default()
+            },
+        );
+        // Steps within the landblock: still out of sight.
+        world.walked();
+        assert!(!world.objects.contains_key(&2), "301 m off");
+        // Over the border into the landblock beside the portal's.
+        let over = Position::new_flat(0xA9B5_0019, Vec3::new(81.9, 5.1, 47.0));
+        world.player_mut().unwrap().position = Some(over);
+        world.walked();
+        assert!(world.objects.contains_key(&2), "224 m off: in sight again");
+        assert!(world.left_behind.is_empty());
     }
 
     #[test]

@@ -103,16 +103,19 @@ impl Client {
             return false;
         }
         let me = pl.world_position();
-        // Outside the hunting area there is nothing here to look for:
-        // keeping to the area takes the character back to it.
-        if self
-            .autoplay
-            .config
-            .fight
-            .area
-            .as_ref()
-            .is_some_and(|a| !a.contains(me, cell, true))
-        {
+        // Outside the hunting area's dungeon there is nothing here to look
+        // for: keeping to the area takes the character back to it. Inside
+        // it, a room that is not one of the area's own is walked through
+        // on the way to one that is -- bailing out there put the character
+        // back in the room it had just left, and round again.
+        let elsewhere = match self.autoplay.config.fight.area.as_ref().map(|a| &a.shape) {
+            None => false,
+            Some(crate::hunt::Shape::Dungeon { landblock, .. }) => {
+                cell & 0xFFFF_0000 != landblock & 0xFFFF_0000
+            }
+            Some(crate::hunt::Shape::Outline { .. }) => true,
+        };
+        if elsewhere {
             return false;
         }
         let Ok(scene) = ac_scene::landblock::load(&assets, cell & 0xFFFF_0000) else {

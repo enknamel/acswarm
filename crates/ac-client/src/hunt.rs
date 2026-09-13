@@ -264,18 +264,15 @@ impl Client {
                     .say(Doing::Traveling, format!("back to {}", area.name));
                 true
             }
-            Shape::Dungeon { landblock, rooms } => {
+            Shape::Dungeon { landblock, .. } => {
                 if underground && cell & 0xFFFF_0000 == landblock & 0xFFFF_0000 {
-                    // In the dungeon, outside the rooms picked.
-                    let Some(at) = self.nearest_room(*landblock, rooms, me) else {
-                        return false;
-                    };
-                    if !self.head_for(at, BACK_IN, &area.name).acting() {
-                        return false;
-                    }
-                    self.autoplay
-                        .say(Doing::Traveling, format!("back to {}", area.name));
-                    return true;
+                    // In the dungeon, outside the rooms picked: the explorer
+                    // takes it from here, through these rooms to the picked
+                    // ones and never to the others. Walking back to the
+                    // nearest picked room as well pulled the character out
+                    // of each doorway the explorer took it through, and the
+                    // two held it on the threshold for two minutes.
+                    return false;
                 }
                 let Some(portal) = entrance(*landblock, me.truncate()) else {
                     self.autoplay
@@ -294,26 +291,6 @@ impl Client {
                 true
             }
         }
-    }
-
-    /// The middle of the floor of the room among `rooms` nearest `me`, in
-    /// the dungeon of `landblock`.
-    fn nearest_room(&self, landblock: u32, rooms: &[u32], me: Vec3) -> Option<Vec3> {
-        let coll = self.assets.block_collision(landblock).ok()?;
-        rooms
-            .iter()
-            .filter_map(|room| {
-                let floor: Vec<Vec3> = coll
-                    .world
-                    .tris
-                    .iter()
-                    .filter(|t| t.cell == *room && t.normal.z.abs() > 0.7)
-                    .map(|t| (t.a + t.b + t.c) / 3.0)
-                    .collect();
-                (!floor.is_empty())
-                    .then(|| floor.iter().copied().sum::<Vec3>() / floor.len() as f32)
-            })
-            .min_by(|a, b| a.distance(me).total_cmp(&b.distance(me)))
     }
 }
 
