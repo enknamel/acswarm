@@ -1491,6 +1491,20 @@ impl Autoplay {
             .note(guid, &crate::did::Did::blocked("cannot reach it"), now);
     }
 
+    /// Forget the corpses set aside that are no longer there (`there`
+    /// says which are).
+    ///
+    /// Only those. A wait that is up is kept, so a corpse that says no
+    /// again waits twice as long. Waits used to be tidied away as they
+    /// ran out, which is the moment the corpse is chosen again, so every
+    /// refusal set a fresh thirty seconds: a body locked to its killer,
+    /// behind a wall or holding only what was too heavy was walked back
+    /// to every half minute until it rotted, and the fight broke off for
+    /// it each time.
+    pub(crate) fn forget_corpses_gone(&mut self, there: impl Fn(u32) -> bool) {
+        self.shelved.retain(|g| there(*g));
+    }
+
     /// Let go of whatever is being fought: the spells' target and the
     /// engagement (the fleet view's "regroup" and "stop"; the caller
     /// clears `Client::attack_target` itself).
@@ -2745,9 +2759,12 @@ impl Client {
         self.autoplay
             .kill_spots
             .retain(|(_, t)| now.duration_since(*t) < CORPSE_LIFE);
-        // A corpse set aside for being locked is tried again once its
-        // wait is up; waits that have run out stop being remembered.
-        self.autoplay.shelved.tidy(now);
+        // A corpse set aside is tried again once its wait is up, and its
+        // wait is remembered until the corpse is gone (see
+        // `Autoplay::forget_corpses_gone`).
+        let objects = &self.world.objects;
+        self.autoplay
+            .forget_corpses_gone(|g| objects.contains_key(&g));
         // Note when each corpse turned up, so the ones running out can
         // be emptied first. Forgotten once emptied, so the list stays
         // the size of what is on the ground.
@@ -6273,6 +6290,35 @@ mod tests {
         ap.corpse_shut(emptied, &Did::Done, t0);
         assert!(ap.looted.contains(&emptied));
         assert!(!ap.shelved.held(&emptied, t0));
+    }
+
+    #[test]
+    fn a_corpse_that_says_no_again_waits_twice_as_long() {
+        // The looting tidied away each lapsed wait before choosing a
+        // corpse, and a corpse is chosen again exactly when its wait is
+        // up. So every refusal was the first: thirty seconds, never more,
+        // and the character went back every half minute until it rotted.
+        use crate::did::Did;
+        let t0 = Instant::now();
+        let s = Duration::from_secs;
+        let mut ap = Autoplay::default();
+        let (locked, rotted) = (0x8000_2101, 0x8000_2102);
+        let no = Did::blocked("it will not open yet");
+        ap.shelved.note(locked, &no, t0);
+        ap.shelved.note(rotted, &no, t0);
+        // Half a minute on, what `autoplay_loot` does before it chooses:
+        // one body still lies there and the other has gone.
+        let again = t0 + s(31);
+        ap.forget_corpses_gone(|g| g == locked);
+        assert_eq!(ap.shelved.len(), 1, "the rotted body is still remembered");
+        assert!(ap.corpse_waiting(locked, again), "never tried again");
+        // Chosen, and it says no again: a minute this time.
+        ap.shelved.note(locked, &no, again);
+        assert!(
+            ap.shelved.held(&locked, again + s(59)),
+            "back after thirty seconds again"
+        );
+        assert!(!ap.shelved.held(&locked, again + s(60)));
     }
 
     #[test]
