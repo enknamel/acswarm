@@ -483,6 +483,11 @@ impl Rule {
 
 fn holds(ask: &Ask, item: &ItemStats, id: Option<&Appraisal>, me: &Wielder, name: &str) -> bool {
     match ask {
+        // A name condition is a whole word. Matched as any part of one,
+        // Starter's "peas to sell" found the pea in "Spear", and every
+        // spear was taken to sell. A search line keeps matching part of a
+        // word, as the inventory's search does.
+        Ask::Item(Term::Word(w)) => item.has_word(w),
         Ask::Item(t) => item.matches_term(t),
         Ask::Search(line) => {
             let q = Query::parse(line);
@@ -1048,7 +1053,7 @@ pub fn tidy_name(name: &str) -> String {
 /// A term in words, for the editor.
 fn term_words(t: &Term) -> String {
     match t {
-        Term::Word(w) => format!("name has \"{w}\""),
+        Term::Word(w) => format!("name has the word \"{w}\""),
         Term::Spell(s) => format!("a spell like \"{s}\""),
         Term::Kind(k) => format!("is {k}"),
         Term::Material(m) => format!("made of {m}"),
@@ -1626,6 +1631,8 @@ mod tests {
         // the rule that says so comes before the one that keeps
         // components, because peas are what the trip is paid for.
         assert!(sells("Pyreal Pea", item_type::SPELL_COMPONENTS, 50_000));
+        // "pea" is a word of its own: a Spear is not one.
+        assert!(!sells("Spear", item_type::MELEE_WEAPON, 40));
         assert!(sells("Ruby", item_type::GEM, 9_000));
         // Junk is dismissed without the server being asked about it,
         // and the rule that dismisses it comes before every rule that
