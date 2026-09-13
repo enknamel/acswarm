@@ -762,17 +762,6 @@ impl Client {
         self.travel.restart_waypoint();
     }
 
-    /// A portal gem step is under way: the gem is being made ready, used,
-    /// or its portal waited on. Buffs stand aside for it, since the server
-    /// turns a use away while a spell is being cast.
-    pub(crate) fn travel_gem_pending(&self) -> bool {
-        self.travel
-            .trip
-            .as_ref()
-            .and_then(|t| t.steps.get(self.travel.step))
-            .is_some_and(|s| matches!(s, Step::Gem { .. }))
-    }
-
     /// The portal the current step is aimed at: its name and its mouth.
     fn travel_portal(&self) -> Option<(String, Vec2)> {
         match self.travel.trip.as_ref()?.steps.get(self.travel.step)? {

@@ -8,9 +8,9 @@
 //!
 //! 1. **Stay alive**: below a fraction of health, use a healing kit or
 //!    cast a healing spell; below a lower fraction, break off the fight.
-//! 2. **Urgent buffs**: one about to run out goes back up, fight or no
-//!    fight. Fighting with spells, the buffs take turns with the attack
-//!    spells rather than crowding them out (`buff_yields_to_attack`).
+//! 2. **Urgent buffs**: one about to run out goes back up before
+//!    anything but healing -- a fight, a corpse, a journey. A lapsed buff
+//!    can kill a character outright; a fight or a corpse can wait a cast.
 //! 3. **Loot**: a corpse of something we killed is opened, the items
 //!    the rules say to take are taken, and it is closed again.
 //! 4. **Salvage**: items the rules tagged for salvage are salvaged by
@@ -855,16 +855,13 @@ pub struct Autoplay {
     pub announced: Vec<crate::Event>,
     last_heal: Option<Instant>,
     last_attack: Option<Instant>,
-    /// When a spell of any kind last went out (attacks, debuffs and
-    /// buffs alike, since the server takes them one at a time), and
-    /// what the attack spells are being thrown at: a spell keeps no
-    /// `attack_target` of its own the way a swing does, so the engine
-    /// remembers what it is working on.
-    last_cast: Option<Instant>,
     /// When a cast, or a sale or purchase at a counter, was sent and the
     /// server has not yet said it is done. Cleared by its answer
     /// (`UseDone`), which is what paces the next one.
     pub(crate) cast_sent: Option<Instant>,
+    /// What the attack spells are being thrown at: a spell keeps no
+    /// `attack_target` of its own the way a swing does, so the engine
+    /// remembers what it is working on.
     casting_at: Option<u32>,
     /// The target the weapon in hand was chosen for, so it is chosen
     /// once a fight and not once a frame.
@@ -1089,31 +1086,6 @@ impl Autoplay {
             Some(t) => now.duration_since(t) < CAST_LOST,
             None => false,
         }
-    }
-
-    /// Whether an urgent buff should stand aside for the attack this
-    /// moment. In a fight with spells, buffs and attacks take turns:
-    /// after a buff goes out, the next cast slot belongs to the attack,
-    /// and the buffs resume once it has been used, or has gone unused
-    /// for a whole slot (nothing castable, say). Without this a long
-    /// list of buffs coming due at once had the character "fighting"
-    /// something for twenty seconds without throwing a thing at it.
-    /// Outside a spell fight there is no attack cast to wait for.
-    fn buff_yields_to_attack(&self, now: Instant) -> bool {
-        if self.casting_at.is_none() {
-            return false;
-        }
-        if self.cast_in_flight(now) {
-            return true;
-        }
-        let buff_was_last = match (self.last_buff, self.last_cast) {
-            (Some(b), Some(c)) => b >= c,
-            _ => false,
-        };
-        buff_was_last
-            && self
-                .last_buff
-                .is_some_and(|t| now.duration_since(t) < CAST_LOST)
     }
 
     /// Something worth knowing that is not what the character is doing:
@@ -2137,6 +2109,13 @@ impl Client {
                 self.autoplay.last_take = None;
                 return false;
             }
+            if !opened && now.duration_since(since) > allow && self.autoplay.cast_in_flight(now) {
+                // A spell went out meanwhile, and the use was most likely
+                // turned away as too busy: that is not the corpse refusing.
+                // Wait for the cast, and do not count it as a try.
+                self.autoplay.corpse = Some((guid, now, allow, tries));
+                return true;
+            }
             if !opened && now.duration_since(since) > allow {
                 self.autoplay.corpse = None;
                 self.stop_walking_to_loot();
@@ -2365,6 +2344,11 @@ impl Client {
                 }
                 return true;
             }
+        }
+        // Not while a spell is on its way: the server turns the use away
+        // as too busy.
+        if self.autoplay.cast_in_flight(now) {
+            return true;
         }
         self.stop_walking_to_loot();
         // Opening a corpse is "using something", which ends a journey.
@@ -3496,7 +3480,6 @@ impl Client {
                 return true;
             }
             self.cast(spell);
-            self.autoplay.last_cast = Some(now);
             self.autoplay.cast_sent = Some(now);
             let element = ac_world::elements::spell_element(spell)
                 .map(|e| e.name())
@@ -3620,7 +3603,6 @@ impl Client {
                 }
                 self.select(Some(guid));
                 self.cast(spell);
-                self.autoplay.last_cast = Some(now);
                 self.autoplay.cast_sent = Some(now);
                 let what = if stage == 0 {
                     "vulnerability"
@@ -3706,7 +3688,6 @@ impl Client {
         self.cast(spell);
         self.autoplay.vulned.push(guid);
         self.autoplay.last_vuln = Some(now);
-        self.autoplay.last_cast = Some(now);
         self.autoplay.cast_sent = Some(now);
         let said = format!(
             "making {name} vulnerable to {} (level {level})",
@@ -4557,23 +4538,11 @@ impl Client {
         if !urgent && self.traveling() {
             return false;
         }
-        // A portal gem waiting to be used goes first, urgent or not. The
-        // server turns a use away while a spell is being cast and keeps
-        // the gem, so a character putting a dozen buffs back after a
-        // login had every use of its gem refused and gave up on it.
-        if self.travel_gem_pending() {
-            return false;
-        }
         if self
             .autoplay
             .last_buff
             .is_some_and(|t| now.duration_since(t) < BUFF_EVERY)
         {
-            return false;
-        }
-        // Fighting with spells, the buffs take turns with the attack
-        // rather than starving it (see `buff_yields_to_attack`).
-        if urgent && self.autoplay.buff_yields_to_attack(now) {
             return false;
         }
         if urgent
@@ -4675,7 +4644,6 @@ impl Client {
         // A buff is a cast like any other as far as the pacing goes:
         // an attack thrown over it would be dropped.
         self.autoplay.last_buff = Some(now);
-        self.autoplay.last_cast = Some(now);
         self.autoplay.cast_sent = Some(now);
         true
     }
