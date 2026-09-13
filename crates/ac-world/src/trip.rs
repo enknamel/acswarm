@@ -412,6 +412,7 @@ pub fn plan_with_recalls(
         from,
         from_cell,
         goal,
+        0,
         level,
         quests_done,
         avoid,
@@ -425,11 +426,20 @@ pub fn plan_with_recalls(
 /// gem is a hop from the start to where it lands, like a recall, and
 /// like a recall a journey can go on from there. It costs the same as a
 /// recall to use and is spent when it is.
+///
+/// `goal_cell` is the cell the goal lies in when that is known and
+/// matters -- somewhere in a dungeon -- and 0 for a place given by its
+/// position alone. A dungeon's rooms reach outside the square of its
+/// landblock, so a position alone can name the block next door: a corpse
+/// in the Holtburg Dungeon's armoredillo rooms read as landblock 0x01F5,
+/// the walk from the dungeon's portal to it was no walk at all, and there
+/// was no way back to it.
 #[allow(clippy::too_many_arguments)]
 pub fn plan_with_recalls_and_gems(
     from: Vec2,
     from_cell: u32,
     goal: Vec2,
+    goal_cell: u32,
     level: u32,
     quests_done: &[String],
     avoid: &[Vec2],
@@ -441,7 +451,14 @@ pub fn plan_with_recalls_and_gems(
     // Straight there, when that is a believable walk and there is no
     // spell that might be quicker.
     if recalls.is_empty()
-        && can_walk_from(from, from_cell, goal, 0, prefs.walk_reach, prefs.in_dungeon)
+        && can_walk_from(
+            from,
+            from_cell,
+            goal,
+            goal_cell,
+            prefs.walk_reach,
+            prefs.in_dungeon,
+        )
     {
         return Some(Trip {
             steps: vec![Step::Walk(goal)],
@@ -493,7 +510,7 @@ pub fn plan_with_recalls_and_gems(
         // by a portal has been walked to from wherever that portal
         // came out.
         let stuck = prefs.in_dungeon && node.at == from && node.cell == from_cell;
-        if can_walk_from(node.at, node.cell, goal, 0, prefs.walk_reach, stuck) {
+        if can_walk_from(node.at, node.cell, goal, goal_cell, prefs.walk_reach, stuck) {
             let total = q.cost + walk_seconds(node.at, goal);
             if best.map(|(b, _)| total < b).unwrap_or(true) {
                 best = Some((total, q.idx));
@@ -922,6 +939,7 @@ mod tests {
             far,
             0xA9B4_0019,
             goal,
+            0,
             275,
             &[],
             &[],
@@ -957,6 +975,7 @@ mod tests {
             here,
             0x0904_0008,
             goal,
+            0,
             275,
             &[],
             &[],
@@ -990,6 +1009,7 @@ mod tests {
                 far,
                 0xA9B4_0019,
                 goal,
+                0,
                 275,
                 &[],
                 &[],

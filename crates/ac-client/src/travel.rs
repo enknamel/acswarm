@@ -177,6 +177,8 @@ pub struct Travel {
     pub(crate) last_tie: Option<u32>,
     /// Where the journey is bound, to replan around a refusal.
     goal: Option<Vec2>,
+    /// The cell it is bound for, when known (see `plan_trip_in`).
+    goal_cell: u32,
     /// World xy waypoints of the step being walked, start and goal
     /// included.
     route: Option<Vec<Vec2>>,
@@ -317,10 +319,31 @@ impl Client {
         self.plan_trip(goal)
     }
 
+    /// [`travel_to`](Self::travel_to) a goal in a known cell: see
+    /// [`plan_trip_in`](Self::plan_trip_in).
+    pub fn travel_to_in(&mut self, goal: Vec2, cell: u32) -> bool {
+        self.drop_visit("travelling somewhere else");
+        self.plan_trip_in(goal, cell)
+    }
+
     /// [`travel_to`](Self::travel_to) from inside: planning the way again
     /// after a refusal, or a visit setting off, neither of which is a new
     /// destination as far as a visit is concerned.
     pub(crate) fn plan_trip(&mut self, goal: Vec2) -> bool {
+        // Planning the same journey again keeps the cell it was bound for.
+        let cell = if self.travel.goal.is_some_and(|g| g.distance(goal) <= 1.0) {
+            self.travel.goal_cell
+        } else {
+            0
+        };
+        self.plan_trip_in(goal, cell)
+    }
+
+    /// [`plan_trip`](Self::plan_trip) to a goal in a known cell (see
+    /// `trip::plan_with_recalls_and_gems`): somewhere in a dungeon, whose
+    /// position alone can name the landblock next door. 0 is a place
+    /// known by its position only.
+    pub(crate) fn plan_trip_in(&mut self, goal: Vec2, goal_cell: u32) -> bool {
         let Some(pl) = self.player.as_ref() else {
             tracing::warn!("travel: the character is not in the world");
             return false;
@@ -382,6 +405,7 @@ impl Client {
                 Vec2::new(me.x, me.y),
                 cell,
                 goal,
+                goal_cell,
                 level,
                 &[],
                 &refused,
@@ -478,6 +502,7 @@ impl Client {
         self.travel.portal_from = None;
         self.travel.portal_since = None;
         self.travel.goal = Some(goal);
+        self.travel.goal_cell = goal_cell;
         self.travel.restart_waypoint();
         self.travel_start_step()
     }
@@ -1630,6 +1655,29 @@ mod tests {
         // Planned from the shop's own cell, the door was not a way out.
         assert!(!walks(upstairs));
         assert!(walks(planning_cell(upstairs, at, false)));
+    }
+
+    #[test]
+    fn a_corpse_in_the_holtburg_dungeon_is_reached_through_its_portal() {
+        // Died in the armoredillo rooms, up again at the Holtburg
+        // lifestone: the way back is the dungeon's portal.
+        let lifestone = ac_world::landblock_origin(0xA9B4_0019) + Vec3::new(84.0, 7.1, 94.0);
+        let corpse = Vec2::new(210.0, 47185.0);
+        // Its position alone reads as the landblock next door (the rooms
+        // reach below the dungeon's square); its cell says where it is.
+        let trip = trip::plan_with_recalls_and_gems(
+            lifestone.truncate(),
+            0xA9B4_0019,
+            corpse,
+            0x01F6_0215,
+            5,
+            &[],
+            &[],
+            &[],
+            &[],
+            Prefs::quick(),
+        );
+        assert!(trip.as_ref().is_some_and(|t| t.portals() == 1), "{trip:?}");
     }
 
     #[test]

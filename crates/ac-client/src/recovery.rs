@@ -61,6 +61,9 @@ const WIELD_EVERY: Duration = Duration::from_millis(1000);
 const MAX_REPLANS: u32 = 4;
 /// Dying this many times over one corpse means it is not worth it.
 const MAX_DEATHS: u32 = 2;
+/// The server's word that nothing was dropped counts for a death within
+/// this long of it.
+const RETAINED_FOR: Duration = Duration::from_secs(30);
 
 /// Where the recovery has got to.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -105,6 +108,10 @@ pub struct View {
     /// Where the character stands (world xy) and its landblock.
     pub xy: Vec2,
     pub landblock: u32,
+    /// The cell, when it is a dungeon's: a corpse down there is gone back
+    /// for by its cell as well as its position (see
+    /// `Client::travel_to_in`).
+    pub dungeon_cell: Option<u32>,
     /// Our own corpse in view: its guid and how far off it is.
     pub corpse: Option<(u32, f32)>,
     /// A journey is under way.
@@ -156,6 +163,8 @@ pub struct Recovery {
     /// Where the character died (world xy) and in which landblock.
     pub death_xy: Option<Vec2>,
     pub death_block: u32,
+    /// The cell of a death in a dungeon (see [`View::dungeon_cell`]).
+    pub death_cell: Option<u32>,
     /// The corpse being gone back for, once seen.
     pub corpse: Option<u32>,
     /// What was in the hands at death.
@@ -182,6 +191,8 @@ pub struct Recovery {
     last_wield: Option<Instant>,
     /// Corpse abandoned: the walk back finishes without it.
     abandoned: bool,
+    /// When the server said nothing was dropped (see [`Recovery::heard`]).
+    retained_at: Option<Instant>,
 }
 
 impl Default for Recovery {
@@ -191,6 +202,7 @@ impl Default for Recovery {
             since: Instant::now(),
             death_xy: None,
             death_block: 0,
+            death_cell: None,
             corpse: None,
             wielded: Vec::new(),
             trip: None,
@@ -204,6 +216,7 @@ impl Default for Recovery {
             last_open: None,
             last_wield: None,
             abandoned: false,
+            retained_at: None,
         }
     }
 }
@@ -232,6 +245,23 @@ impl Recovery {
         self.abandoned = true;
     }
 
+    /// A line from the server. "You have retained all your items. You do
+    /// not need to recover your corpse!" means just that: nothing lies on
+    /// the corpse, so there is nothing to buff up for or walk back to. A
+    /// character that kept everything used to stand at its lifestone
+    /// putting buffs back for two minutes, then set off for a corpse with
+    /// nothing on it.
+    pub fn heard(&mut self, text: &str, now: Instant) {
+        if text.contains("You do not need to recover your corpse") {
+            self.retained_at = Some(now);
+        }
+    }
+
+    fn retained(&self, now: Instant) -> bool {
+        self.retained_at
+            .is_some_and(|t| now.duration_since(t) < RETAINED_FOR)
+    }
+
     /// Note a death: where, with what in hand, bound where, fighting
     /// what. A death in the middle of a recovery keeps the first
     /// corpse's place only when the new one fell on the same spot,
@@ -245,6 +275,7 @@ impl Recovery {
         // across both.
         self.death_xy = Some(v.xy);
         self.death_block = v.landblock;
+        self.death_cell = v.dungeon_cell;
         for g in &v.wielded {
             if !self.wielded.contains(g) {
                 self.wielded.push(*g);
@@ -257,6 +288,14 @@ impl Recovery {
         }
         if v.fighting.is_some() {
             self.killer = v.fighting.clone();
+        }
+        // The server's word comes just after the death it is about; one
+        // from before this death was about an earlier one.
+        if self
+            .retained_at
+            .is_some_and(|t| v.now.duration_since(t) > Duration::from_secs(5))
+        {
+            self.retained_at = None;
         }
         self.corpse = None;
         self.alive_since = None;
@@ -290,6 +329,12 @@ impl Recovery {
         if v.dead && self.phase != Phase::Dead {
             self.note_death(v);
             return Action::Wait;
+        }
+        if matches!(self.phase, Phase::Landed | Phase::Rebuff | Phase::Returning)
+            && self.retained(now)
+        {
+            tracing::info!("recovery: nothing was dropped; no corpse to go back for");
+            return self.finish(now);
         }
         match self.phase {
             Phase::None => Action::Nothing,
@@ -501,7 +546,7 @@ impl Client {
             .map(|(_, g, d)| (g, d))
     }
 
-    fn recovery_view(&self, now: Instant) -> Option<View> {
+    fn recovery_view(&self, now: Instant, underground: bool) -> Option<View> {
         let pl = self.player.as_ref()?;
         let p = pl.world_position();
         let xy = Vec2::new(p.x, p.y);
@@ -532,6 +577,7 @@ impl Client {
             dead: self.is_dead(),
             xy,
             landblock: pl.cell >> 16,
+            dungeon_cell: underground.then_some(pl.cell),
             corpse: self.own_corpse(xy, rec.death_xy),
             traveling: self.traveling(),
             open: self.world.open_container.as_ref().map(|c| c.0),
@@ -547,7 +593,8 @@ impl Client {
     /// The death recovery rule: true while it has the character, so the
     /// rest of the rules wait. Runs right after "stay alive".
     pub fn autoplay_recover(&mut self, now: Instant) -> bool {
-        let Some(view) = self.recovery_view(now) else {
+        let underground = self.underground();
+        let Some(view) = self.recovery_view(now, underground) else {
             return false;
         };
         let was = self.autoplay.recovery.phase;
@@ -558,7 +605,12 @@ impl Client {
             // carried on from the lifestone would walk to the wrong
             // place. It is remembered in `trip` for afterwards.
             self.cancel_travel();
+            // The fight is over too. A spell target left behind reads as
+            // still fighting: the buffs were never put back (the buff rule
+            // waits out a fight) and the walk back waited out the cap, and
+            // two minutes later a creature a dungeon away was given up on.
             self.attack_target = None;
+            self.autoplay.drop_target();
             self.autoplay.resume_trip = None;
             let spot = self.autoplay.recovery.death_xy.unwrap_or_default();
             tracing::info!(
@@ -604,7 +656,11 @@ impl Client {
                 if self.combat {
                     self.toggle_combat();
                 }
-                if !self.travel_to(spot) {
+                let way = match self.autoplay.recovery.death_cell {
+                    Some(cell) => self.travel_to_in(spot, cell),
+                    None => self.travel_to(spot),
+                };
+                if !way {
                     tracing::info!("recovery: no way back to the death spot");
                     self.autoplay.recovery.no_way();
                 }
@@ -716,6 +772,7 @@ mod tests {
             dead: false,
             xy: Vec2::new(1000.0, 1000.0),
             landblock: 0xA9B4,
+            dungeon_cell: None,
             corpse: None,
             traveling: false,
             open: None,
@@ -855,6 +912,53 @@ mod tests {
                 trip: Some(Vec2::new(5000.0, 5000.0))
             }
         );
+    }
+
+    #[test]
+    fn a_death_in_a_dungeon_keeps_its_cell() {
+        let t0 = Instant::now();
+        // Killed in the Holtburg Dungeon's armoredillo rooms.
+        let mut r = Recovery::default();
+        let mut v = view(t0);
+        v.dead = true;
+        v.dungeon_cell = Some(0x01F6_0215);
+        r.step(&v);
+        assert_eq!(r.death_cell, Some(0x01F6_0215));
+        // Killed out in the open: the position is enough.
+        let mut r = Recovery::default();
+        let mut v = view(t0);
+        v.dead = true;
+        r.step(&v);
+        assert_eq!(r.death_cell, None);
+    }
+
+    #[test]
+    fn nothing_dropped_means_no_walk_back() {
+        let t0 = Instant::now();
+        let kept = "You have retained all your items. You do not need to recover your corpse!";
+        let resume = Action::Finish {
+            trip: Some(Vec2::new(5000.0, 5000.0)),
+        };
+        // The server's word a moment after the death: done on landing.
+        let mut r = Recovery::default();
+        let v = die_and_land(&mut r, t0);
+        r.heard(kept, after(t0, 2.0));
+        assert_eq!(r.step(&v), resume);
+        // Any other line changes nothing.
+        let mut r = Recovery::default();
+        let v = die_and_land(&mut r, t0);
+        r.heard("Drudge Slinker splits you apart!", after(t0, 2.0));
+        assert_eq!(r.step(&v), Action::Buff);
+        // Heard while buffing: off the recovery then.
+        let mut v = v;
+        v.now = after(t0, 20.0);
+        r.heard(kept, after(t0, 19.0));
+        assert_eq!(r.step(&v), resume);
+        // Said about a death a minute before, not this one.
+        let mut r = Recovery::default();
+        r.heard(kept, t0);
+        let v = die_and_land(&mut r, after(t0, 60.0));
+        assert_eq!(r.step(&v), Action::Buff);
     }
 
     #[test]

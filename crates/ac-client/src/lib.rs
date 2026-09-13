@@ -836,6 +836,13 @@ impl Client {
                             }
                         }
                         opcode::PLAYER_TELEPORT => {
+                            // A walk the server was making for us (to the portal
+                            // just used) ends with the teleport. Left standing,
+                            // the client kept out of the server's way for the
+                            // rest of its twelve seconds, and the first walk in
+                            // the new place -- into the dungeon's next room --
+                            // went nowhere and was written off.
+                            self.move_to = None;
                             // After a server teleport, take the new position and
                             // tell the server we landed.
                             if let (Some(pl), Some(p)) = (
@@ -1667,6 +1674,11 @@ impl Client {
             .hear(&line.sender, &line.text, Instant::now());
         // A resist or an evasion: the shot got there.
         self.hear_arrival(&line.text);
+        // The server's own word on a death (never a player's): nothing
+        // dropped, nothing to go back for.
+        if line.sender.is_empty() {
+            self.autoplay.recovery.heard(&line.text, Instant::now());
+        }
         let text = match (op, line.sender.is_empty()) {
             _ if line.kind == ac_net::messages::turbine::KIND => {
                 let room = ac_net::messages::turbine::name(line.sender_id);
