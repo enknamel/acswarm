@@ -20,6 +20,17 @@ pub use ac_agent::{did, pack, weenie_errors};
 // language, what to wield, how a character fights); the client keeps
 // the network side of them.
 pub use ac_loot::weapons::Stance;
+
+/// The server's word for a request it refused because the character was
+/// already doing something (WeenieError `YoureTooBusy`).
+const YOURE_TOO_BUSY: u32 = 0x001D;
+
+/// Whether a `UseDone` answer frees the cast slot: every answer does but a
+/// busy refusal, which says the character is still in the middle of
+/// something that will end with an answer of its own.
+fn frees_the_cast_slot(err: u32) -> bool {
+    err != YOURE_TOO_BUSY
+}
 pub mod logoff;
 pub use logoff::{log_off_all, LOG_OFF_WAIT};
 // Getting somewhere is its own system now (`ac-nav`), with the world
@@ -893,7 +904,19 @@ impl Client {
                                     // clock cannot be both that quick
                                     // and slow enough to never have a
                                     // spell dropped for arriving early.
-                                    self.autoplay.cast_sent = None;
+                                    // Not a busy refusal, though. The server
+                                    // turns a cast away as too busy while the
+                                    // one before is still going up, and says
+                                    // so at once; taking that for the earlier
+                                    // cast finishing had a caster throw the
+                                    // same spell every 150 ms while a buff was
+                                    // still being cast. Whatever made the
+                                    // character busy -- a cast, a kit, a use --
+                                    // ends with an answer of its own, and that
+                                    // is what frees the slot.
+                                    if frees_the_cast_slot(err) {
+                                        self.autoplay.cast_sent = None;
+                                    }
                                     // Only a refusal ends the walk.
                                     //
                                     // The server answers a use of
@@ -3725,5 +3748,19 @@ mod salvage_tests {
             salvage_text(&parsed),
             "You obtain 2 Steel (workmanship 3.00) using your Weapon Tinkering skill."
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_busy_refusal_does_not_free_the_cast_slot() {
+        // Finished, or refused for any other reason: the next may go.
+        assert!(frees_the_cast_slot(0));
+        assert!(frees_the_cast_slot(0x0402)); // a fizzle
+                                              // Too busy: whatever went before is still going on.
+        assert!(!frees_the_cast_slot(YOURE_TOO_BUSY));
     }
 }
