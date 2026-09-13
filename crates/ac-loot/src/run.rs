@@ -14,6 +14,11 @@ pub const TAKE_AGAIN: Duration = Duration::from_millis(400);
 /// belongs to whoever killed it for a while, so one that will not give
 /// up its contents now may well later.
 pub const KEEP_AT_IT: Duration = Duration::from_secs(45);
+/// How long an item asked for may lie there before it is taken to be
+/// not coming. The client sends a lost take again after four seconds, so
+/// this is two asks and a little over, not one slow answer -- and by
+/// then nothing asked for is still in the air.
+pub const NOT_COMING: Duration = Duration::from_secs(10);
 
 /// The one thing the rules want done next.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -73,8 +78,12 @@ impl Next {
 pub struct Run {
     /// The corpse this run is emptying.
     corpse: Option<u32>,
-    /// The item last asked for, and when.
-    asked: Option<(u32, Instant)>,
+    /// The item last asked for: which, when it was first asked for, and
+    /// when last.
+    asked: Option<(u32, Instant, Instant)>,
+    /// What was stepped over on this body because it would not come
+    /// out: turned down, or asked for and not moved in [`NOT_COMING`].
+    passed: Vec<u32>,
     /// When this corpse was first stood over.
     began: Option<Instant>,
     /// How many things have been taken.
@@ -177,24 +186,57 @@ impl Run {
         // is a bug with a name: the server moves one thing at a time
         // and answers a second with "Source item not found", so an item
         // that has been asked for and has not moved yet must be waited
-        // on, never stepped over. Only what will not come at all --
-        // heavier than the character can carry -- is skipped.
+        // on, never stepped over. Only what will not come at all is
+        // skipped: heavier than the character can carry, turned down by
+        // the server, or asked for and still lying there after
+        // [`NOT_COMING`], by when nothing asked for is in the air.
+        //
+        // A take turned down used to be asked for again every four
+        // hundred milliseconds -- a hundred times over for "You are too
+        // encumbered to carry that!" -- and nothing listed after it was
+        // ever taken before the corpse was given up on with all of it
+        // still there.
+        if let Some((guid, first, _)) = self.asked {
+            let lying = at.items.iter().any(|i| i.guid == guid);
+            if lying && (at.refused.contains(&guid) || now.duration_since(first) > NOT_COMING) {
+                self.passed.push(guid);
+                // Asked for, never taken.
+                self.taken = self.taken.saturating_sub(1);
+                self.asked = None;
+            }
+        }
+        let given_up = |guid: u32| self.passed.contains(&guid) || at.refused.contains(&guid);
         let next = at
             .wanted()
-            .find(|i| i.burden <= at.carry_room)
+            .find(|i| i.burden <= at.carry_room && !given_up(i.guid))
             .map(|i| (i.guid, i.name.clone()));
         if let Some((guid, name)) = next {
-            match self.asked {
+            let first = match self.asked {
                 // Asked for and still lying there: wait for it.
-                Some((last, when)) if last == guid => {
+                Some((last, first, when)) if last == guid => {
                     if now.duration_since(when) < TAKE_AGAIN {
                         return Next::wait("it has not come out yet");
                     }
+                    first
                 }
-                _ => self.taken += 1,
-            }
-            self.asked = Some((guid, now));
+                _ => {
+                    self.taken += 1;
+                    now
+                }
+            };
+            self.asked = Some((guid, first, now));
             return Next::act(Act::Take(guid), format!("taking {name}"));
+        }
+
+        // Everything else is out, and something it wanted would not
+        // come. Set aside, not emptied: a quest's wait lifts, a unique
+        // can be sold, and the body keeps for a while.
+        if let Some(stuck) = at.wanted().find(|i| given_up(i.guid)) {
+            return Next {
+                act: Some(Act::Close),
+                did: Did::Blocked(Because::ours("it would not give something up")),
+                saying: format!("{} would not come off {}", stuck.name, at.name),
+            };
         }
 
         // Everything that fitted has been taken, and something it wanted
@@ -280,6 +322,7 @@ mod tests {
             carry_room: 10_000,
             may_ask: true,
             asking: Vec::new(),
+            refused: Vec::new(),
             arriving: Vec::new(),
         }
     }
@@ -372,6 +415,55 @@ mod tests {
         // After the wait, asked again.
         let later = now + TAKE_AGAIN + Duration::from_millis(1);
         assert_eq!(run.step(&at, later).act, Some(Act::Take(1)));
+        // Still lying there long after it was first asked for: not
+        // coming. It is stepped over and the dagger taken instead.
+        let long_after = now + NOT_COMING + Duration::from_millis(1);
+        let next = run.step(&at, long_after);
+        assert_eq!(next.act, Some(Act::Take(2)), "{}", next.saying);
+        assert_eq!(run.taken, 1, "the stuck thing was never taken");
+        // With the dagger out, the corpse is set aside for the stuck
+        // thing, not written off.
+        let at = body(vec![thing(
+            1,
+            "Stuck Thing",
+            Verdict::Take(LootAction::Keep),
+        )]);
+        let next = run.step(&at, long_after);
+        assert_eq!(next.act, Some(Act::Close), "{}", next.saying);
+        assert!(matches!(next.did, Did::Blocked(_)), "{:?}", next.did);
+    }
+
+    #[test]
+    fn a_take_the_server_turns_down_is_stepped_over_and_the_rest_taken() {
+        // "You are too encumbered to carry that!", a drop that can only be
+        // had so often, a unique already carried: the server names the
+        // item and it stays put. Asked for again every four hundred
+        // milliseconds, it held up everything listed after it until the
+        // corpse was given up on with all of it still there.
+        let now = Instant::now();
+        let mut run = Run::new();
+        let mut at = body(vec![
+            thing(1, "Quest Gem", Verdict::Take(LootAction::Keep)),
+            thing(2, "Pyreal", Verdict::Take(LootAction::Keep)),
+        ]);
+        assert_eq!(run.step(&at, now).act, Some(Act::Take(1)));
+        at.refused = vec![1];
+        // Turned down: the coin goes out at once, and the gem is not
+        // asked for again however long the rules are consulted.
+        let next = run.step(&at, now);
+        assert_eq!(next.act, Some(Act::Take(2)), "{}", next.saying);
+        let at = Open {
+            items: vec![thing(1, "Quest Gem", Verdict::Take(LootAction::Keep))],
+            ..at
+        };
+        for ms in [0, 500, 1_000, 5_000] {
+            let next = run.step(&at, now + Duration::from_millis(ms));
+            assert_ne!(next.act, Some(Act::Take(1)), "asked for again at {ms} ms");
+            assert_eq!(next.act, Some(Act::Close), "{}", next.saying);
+            // Set aside, not emptied: a quest's wait lifts.
+            assert!(matches!(next.did, Did::Blocked(_)), "{:?}", next.did);
+        }
+        assert_eq!(run.taken, 1, "only the coin was taken");
     }
 
     #[test]

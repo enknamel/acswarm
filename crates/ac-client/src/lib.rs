@@ -924,9 +924,18 @@ impl Client {
                                     // its way, so it asked again every
                                     // few hundred milliseconds for as
                                     // long as the session lasted.
-                                    self.move_refused.insert(item, (err, Instant::now()));
-                                    if self.loot_inflight.map(|(g, _)| g) == Some(item) {
-                                        self.loot_inflight = None;
+                                    // A quest's refusal of a drop names no
+                                    // item; it is about the take in flight
+                                    // (see `autoplay::refused_item`).
+                                    let inflight = self.loot_inflight.map(|(g, _)| g);
+                                    if let Some(item) =
+                                        crate::autoplay::refused_item(item, err, inflight)
+                                    {
+                                        self.move_refused.insert(item, (err, Instant::now()));
+                                        if inflight == Some(item) {
+                                            self.loot_inflight = None;
+                                        }
+                                        self.loot_refused(item, err);
                                     }
                                 } else if ev == ac_net::messages::event::USE_DONE && rest.len() >= 4
                                 {

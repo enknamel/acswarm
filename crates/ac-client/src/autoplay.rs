@@ -85,6 +85,28 @@ fn loot_wait(away: f32) -> Duration {
     LOOT_TIMEOUT + Duration::from_secs_f32((away.max(0.0) / LOOT_WALK).min(30.0))
 }
 
+/// Whether a refusal's code is one that gates a drop that can only be had
+/// so often: YouHaveSolvedThisQuestTooRecently or TooManyTimes.
+pub(crate) fn only_so_often(code: u32) -> bool {
+    matches!(code, 0x043E | 0x043F)
+}
+
+/// Which item an inventory refusal (`InventoryServerSaveFailed`, `item`
+/// and `err` as it came) is about, given the take in flight (`inflight`).
+///
+/// Usually the one it names. ACE turns a drop that can only be had so
+/// often down naming no item at all, with only the quest's reason
+/// (`QuestManager.HandleSolveError`). Read as a refusal of nothing, the
+/// take was never known to be refused and was asked for again until the
+/// corpse was given up on.
+pub(crate) fn refused_item(item: u32, err: u32, inflight: Option<u32>) -> Option<u32> {
+    match item {
+        0 if only_so_often(err) => inflight,
+        0 => None,
+        item => Some(item),
+    }
+}
+
 /// Whether an ask to open a corpse `away` metres off, sent on the tick
 /// `asked`, came back the way the server answers for a thing it does not
 /// have: a `UseDone` with no error (`done`), and not a word (`told`) since.
@@ -1330,12 +1352,6 @@ pub struct Autoplay {
     /// that last improved. See `Client::reaching_too_long`.
     reaching: Option<(glam::Vec3, f32, Instant)>,
     pub(crate) last_merge: Option<Instant>,
-    /// Items decided on but not yet taken from the open corpse, and
-    /// when the last one was asked for. The server takes one at a time.
-    take_queue: Vec<u32>,
-    /// The item last asked for and when, so the next goes out the
-    /// moment this one moves rather than on a clock.
-    last_take: Option<(u32, Instant)>,
     /// Emptying the corpse in front of us, as `ac-loot` sees it: what
     /// has been asked for, what will not come, how many have been
     /// taken. Started afresh for each body.
@@ -1345,11 +1361,6 @@ pub struct Autoplay {
     /// something or nothing, and a count tells a character with nothing
     /// worth taking from one that does not loot.
     pub loot_tally: ac_loot::Tally,
-    /// Items asked for and not moved. The server can refuse -- a full
-    /// pack, a chest that will not give the thing up -- and it refuses
-    /// in chat, not in a reply we can wait on, so the only way to hear
-    /// "no" is to notice the item has not moved.
-    take_tries: crate::did::Patience<u32>,
     /// When each corpse was first seen, so the ones about to rot can be
     /// emptied first. A corpse we never saw appear is taken as fresh.
     pub(crate) corpse_seen: Vec<(u32, Instant)>,
@@ -1437,9 +1448,6 @@ impl Autoplay {
     fn let_go_of_corpse(&mut self) {
         self.corpse = None;
         self.appraising = false;
-        self.take_queue.clear();
-        self.take_tries.clear();
-        self.last_take = None;
         self.fresh_loot_run();
     }
 
@@ -2336,11 +2344,14 @@ impl Client {
         Some(action)
     }
 
+    /// The corpse `guid` holding `items`, asked to open at `asked`, and
+    /// the character standing over it, as the loot rules see them.
     fn corpse_now(
         &mut self,
         guid: u32,
         items: &[u32],
         profile: &crate::profile::Profile,
+        asked: Instant,
         now: Instant,
     ) -> ac_loot::Open {
         use crate::profile::Verdict as Judged;
@@ -2437,6 +2448,18 @@ impl Client {
             carry_room: self.carry_room(&self.autoplay.config.growth),
             may_ask: profile.looting.appraise,
             asking: self.appraise_inflight.iter().map(|(g, _)| *g).collect(),
+            // What the server has turned down since the corpse was asked
+            // to open (see `ac_loot::Open::refused`). One turned down
+            // before is not held against this opening.
+            refused: items
+                .iter()
+                .filter(|g| {
+                    self.move_refused
+                        .get(g)
+                        .is_some_and(|(_, when)| *when >= asked)
+                })
+                .copied()
+                .collect(),
             arriving,
         }
     }
@@ -2469,19 +2492,18 @@ impl Client {
     /// the one on this corpse: the next corpse's copy would be refused
     /// for the same reason, and asking again is a round trip spent to
     /// be told no twice.
-    pub(crate) fn loot_refused(&mut self, code: u32) {
-        // YouHaveSolvedThisQuestTooRecently / TooManyTimes: what gates
-        // the drops that can only be had so often.
-        // YouHaveSolvedThisQuestTooRecently / TooManyTimes: what gates
-        // the drops that can only be had so often. Both are waits --
-        // the first will certainly lift, and a solve cap can be raised
-        // -- so neither is a `Refused`, which would mean never.
-        if !matches!(code, 0x043E | 0x043F) {
+    ///
+    /// `guid` is the item turned down, as the refusal named it or as the
+    /// take in flight (see [`refused_item`]). This used to look up the
+    /// front of a take queue that nothing filled any more, so no kind was
+    /// ever remembered.
+    pub(crate) fn loot_refused(&mut self, guid: u32, code: u32) {
+        // Both are waits -- the first will certainly lift, and a solve
+        // cap can be raised -- so neither is a `Refused`, which would
+        // mean never.
+        if !only_so_often(code) {
             return;
         }
-        let Some(&guid) = self.autoplay.take_queue.first() else {
-            return;
-        };
         let Some(o) = self.world.objects.get(&guid) else {
             return;
         };
@@ -2499,7 +2521,6 @@ impl Client {
             );
             tracing::info!("autoplay: {name} cannot be had yet; leaving its kind for a while");
         }
-        self.autoplay.take_queue.retain(|g| *g != guid);
     }
 
     /// Whether this kind of thing is still inside the wait a refusal
@@ -2659,7 +2680,7 @@ impl Client {
             // standing over it and answers with one thing to do. The
             // judging stays here, where the profile and the character's
             // own skills are (see `corpse_now`).
-            let at = self.corpse_now(guid, &items, &profile, now);
+            let at = self.corpse_now(guid, &items, &profile, since, now);
             let next = self.autoplay.loot_run.step(&at, now);
             match next.act {
                 Some(ac_loot::Act::Approach) | Some(ac_loot::Act::Open) => {
@@ -5645,6 +5666,25 @@ impl Client {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_quests_refusal_that_names_no_item_is_about_the_take_in_flight() {
+        // ACE turns a drop that can only be had so often down naming item
+        // 0, with only "You have solved this quest too recently". Read as
+        // a refusal of nothing, the take was asked for again until the
+        // corpse was given up on, and the kind was never remembered.
+        let (gem, dagger) = (0x8000_7001, 0x8000_7002);
+        assert_eq!(refused_item(0, 0x043E, Some(gem)), Some(gem));
+        assert_eq!(refused_item(0, 0x043F, Some(gem)), Some(gem));
+        // With nothing in flight there is nothing to pin it on.
+        assert_eq!(refused_item(0, 0x043E, None), None);
+        // A refusal naming no item for any other reason is not a take's.
+        assert_eq!(refused_item(0, 0, Some(gem)), None);
+        // One that names its item is about that item, whatever is flying.
+        assert_eq!(refused_item(dagger, 0, Some(gem)), Some(dagger));
+        assert!(only_so_often(0x043E) && only_so_often(0x043F));
+        assert!(!only_so_often(0));
+    }
 
     #[test]
     fn a_daily_limit_is_a_wait_and_not_a_grudge() {

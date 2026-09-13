@@ -72,6 +72,11 @@ pub struct Open {
     pub may_ask: bool,
     /// An identify is already out for these.
     pub asking: Vec<u32>,
+    /// Takes the server has turned down since the corpse was asked to
+    /// open. It answers a take it will not make -- too encumbered by its
+    /// own reckoning, a drop that can only be had so often, a unique
+    /// already carried -- by naming the item, and the item stays put.
+    pub refused: Vec<u32>,
     /// Listed on the corpse but not yet described. The server sends
     /// what a corpse holds as a list first and describes each thing a
     /// moment later, so in between the body looks emptier than it is.
