@@ -650,6 +650,11 @@ mod tests {
             Some(Destination::Landmark(l)) => assert_eq!(l.cell, 0xA9B4_011B),
             other => panic!("{other:?}"),
         }
+        // A portal by its whole name: gone to and through.
+        match destination("Holtburg Dungeon", from) {
+            Some(Destination::Portal(p)) => assert_eq!(p.name, "Holtburg Dungeon"),
+            other => panic!("{other:?}"),
+        }
         assert!(matches!(
             destination("arwic", from),
             Some(Destination::Place(_))

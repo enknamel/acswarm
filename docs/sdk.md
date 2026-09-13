@@ -263,8 +263,9 @@ The verbs to know: `use_by_name` / `interact(guid)` (double-click),
 `say`, `take(guid)` / `close_container`, `buy` / `sell`, `give`,
 `use_on(item, target)`, `travel_to(goal)` (or `visit_landmark`, which
 goes to a shopkeeper or NPC where they really stand, upstairs included,
-and uses them on arriving; Rhai's `travel_to("Archmage Cindrue")` does
-the same), `set_noclip` (refused, with
+and uses them on arriving, and `visit_portal`, which goes to a portal and
+through it; Rhai's `travel_to("Archmage Cindrue")` and
+`travel_to("Holtburg Dungeon")` do the same), `set_noclip` (refused, with
 false, unless the movement rules allow flying here -- see
 `docs/game/mechanics.md`), `jump`. Read
 `docs/plugins.md` ("Protocol facts") before writing a loop: actions are

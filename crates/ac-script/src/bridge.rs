@@ -1585,6 +1585,7 @@ impl Api for CtxApi<'_, '_> {
         match crate::api::destination(destination, from) {
             Some(Destination::Landmark(l)) => self.client().visit_landmark(l),
             Some(Destination::Place(goal)) => self.client().travel_to(goal),
+            Some(Destination::Portal(p)) => self.client().visit_portal(p),
             None => {
                 self.cx
                     .log(format!("travel_to: unknown destination '{destination}'").as_str());

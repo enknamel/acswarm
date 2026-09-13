@@ -371,14 +371,16 @@ pub enum Destination {
     Landmark(&'static ac_world::landmarks::Landmark),
     /// A world xy: a town, map coordinates or a position.
     Place(glam::Vec2),
+    /// A portal: gone to and through.
+    Portal(&'static ac_world::portals::Portal),
 }
 
 /// What a destination typed into a script names, from `from` (world
 /// xy, for the nearest of several landmarks sharing a name).
 ///
 /// A landmark by its whole name comes first, then everything
-/// `travel_to` always took (a town, map coordinates, a position), and
-/// only then part of a landmark's name. The order keeps towns towns: a
+/// `travel_to` always took (a town, map coordinates, a position), then a
+/// portal by its whole name, and only then part of a landmark's name. The order keeps towns towns: a
 /// part of a name would find the Holtburg Town Crier before Holtburg.
 pub fn destination(s: &str, from: glam::Vec2) -> Option<Destination> {
     if let Some(l) = ac_world::landmarks::named(s, from) {
@@ -386,6 +388,20 @@ pub fn destination(s: &str, from: glam::Vec2) -> Option<Destination> {
     }
     if let Some(xy) = ac_world::towns::parse_destination(s) {
         return Some(Destination::Place(xy));
+    }
+    // A portal by its whole name (the nearest of that name that works and
+    // stands outdoors, as the map lists them): gone to and through.
+    let name = s.trim();
+    if let Some(p) = ac_world::portals::named(name)
+        .into_iter()
+        .filter(|p| p.works() && p.mouth_outdoors() && p.name.eq_ignore_ascii_case(name))
+        .min_by(|a, b| {
+            a.from_xy()
+                .distance(from)
+                .total_cmp(&b.from_xy().distance(from))
+        })
+    {
+        return Some(Destination::Portal(p));
     }
     if s.trim().len() < 3 {
         return None;

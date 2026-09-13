@@ -184,6 +184,10 @@ pub struct Elsewhere {
     /// shopkeeper upstairs is the ground floor inside her door, and
     /// travel stopped there, three metres under her.
     pub landmark: Option<&'static Landmark>,
+    /// The portal it is the mouth of, when it is one. A click goes to it
+    /// and through it: picking a portal to travel to is picking it to be
+    /// taken, and stopping three metres short of it was going nowhere.
+    pub portal: Option<&'static ac_world::portals::Portal>,
 }
 
 impl Elsewhere {
@@ -193,6 +197,7 @@ impl Elsewhere {
             at,
             away: 0.0,
             landmark: None,
+            portal: None,
         }
     }
 }
@@ -271,10 +276,10 @@ fn portal_search(needle: &str, me: Vec2) -> Vec<Elsewhere> {
             continue;
         }
         seen.push(&p.name);
-        out.push(Elsewhere::place(
-            format!("{} (portal)", p.name),
-            p.from_xy(),
-        ));
+        out.push(Elsewhere {
+            portal: Some(p),
+            ..Elsewhere::place(format!("{} (portal)", p.name), p.from_xy())
+        });
         if out.len() >= 20 {
             break;
         }
@@ -426,6 +431,8 @@ pub struct Actions {
     pub travel_to: Option<Vec2>,
     /// Go to a landmark (and speak to whoever keeps it).
     pub visit: Option<&'static Landmark>,
+    /// Go to a portal and through it.
+    pub visit_portal: Option<&'static ac_world::portals::Portal>,
     pub travel_to_place: Option<String>,
     pub cancel_travel: bool,
 }
@@ -751,9 +758,10 @@ pub fn draw(
                                 // An npc row may be a statue or a marker:
                                 // only who is found there is spoken to.
                                 use ac_world::landmarks::Kind as Landmarks;
-                                let click = match e.landmark.map(|l| l.kind) {
-                                    Some(Landmarks::Vendor) => "click to go and talk",
-                                    Some(Landmarks::Npc) => {
+                                let click = match (e.portal, e.landmark.map(|l| l.kind)) {
+                                    (Some(_), _) => "click to go through it",
+                                    (_, Some(Landmarks::Vendor)) => "click to go and talk",
+                                    (_, Some(Landmarks::Npc)) => {
                                         "click to go, and talk if someone is there"
                                     }
                                     _ => "click to travel",
@@ -769,9 +777,10 @@ pub fn draw(
                                     )
                                     .on_hover_text(format!("{}  ({click})", coords_of(e.at)));
                                 if row.clicked() {
-                                    match e.landmark {
-                                        Some(l) => actions.visit = Some(l),
-                                        None => actions.travel_to = Some(e.at),
+                                    match (e.portal, e.landmark) {
+                                        (Some(p), _) => actions.visit_portal = Some(p),
+                                        (None, Some(l)) => actions.visit = Some(l),
+                                        (None, None) => actions.travel_to = Some(e.at),
                                     }
                                 }
                             }
@@ -1051,6 +1060,13 @@ impl Plugin for Map {
                     lines.push(format!("going to {}", l.name));
                 } else {
                     lines.push(format!("no way to {}", l.name));
+                }
+            }
+            if let Some(p) = actions.visit_portal {
+                if c.visit_portal(p) {
+                    lines.push(format!("going through {}", p.name));
+                } else {
+                    lines.push(format!("no way to {}", p.name));
                 }
             }
             if let Some(name) = actions.travel_to_place {

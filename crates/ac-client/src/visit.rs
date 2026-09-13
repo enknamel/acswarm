@@ -33,6 +33,7 @@ use std::time::{Duration, Instant};
 
 use ac_world::landmarks::Landmark;
 use ac_world::object::MoveTarget;
+use ac_world::portals::Portal;
 use ac_world::WorldObject;
 use glam::Vec3;
 
@@ -62,6 +63,14 @@ const NAMED_NEAR: f32 = 20.0;
 /// A server walk that times out is carried on only for a use this
 /// recent: an older one was something else.
 const USE_REMEMBERED: Duration = Duration::from_secs(20);
+/// Moved this far between two frames: carried off, not walked.
+const CARRIED_OFF: f32 = 60.0;
+/// Arrived and nobody of that name in view: wait this long for them to be
+/// sent before saying so. The server sends the things of a spot as the
+/// character comes up to it, and a long walk arrives in the very frame it
+/// gets there -- a walk to the Holtburg Dungeon's portal found nothing and
+/// stopped beside it, while a visit begun beside it went straight through.
+const ARRIVAL_WAIT: Duration = Duration::from_secs(5);
 
 /// Somewhere to go, and whom to use once there.
 #[derive(Clone, Debug)]
@@ -77,10 +86,19 @@ pub struct Visit {
     pub person: Option<String>,
     /// Whom to use, once seen (or from the start, for a double-click).
     pub guid: Option<u32>,
-    /// The player used it by hand, so it is used on arriving whatever it
-    /// is. A visit to a gazetteer row speaks only to someone: see
-    /// [`someone_to_talk_to`].
+    /// The player used it by hand, or picked a portal to go to, so it is
+    /// used on arriving whatever it is. A visit to a gazetteer row speaks
+    /// only to someone: see [`someone_to_talk_to`].
     by_hand: bool,
+    /// Going through a portal: the visit is over once the character has
+    /// been carried off, which walking into the mouth usually does before
+    /// the use is ever sent.
+    through: bool,
+    /// Where the character stood last frame, to see that happen.
+    last_at: Option<Vec3>,
+    /// When the character got there, while waiting for whoever it is for
+    /// to be sent (see [`ARRIVAL_WAIT`]).
+    arrived_at: Option<Instant>,
     /// A journey has been set off on, so a far goal and no journey
     /// means the journey ended short of it.
     journeyed: bool,
@@ -105,6 +123,22 @@ impl Visit {
         )
     }
 
+    /// Going to a portal and through it: its mouth's real spot and cell,
+    /// and a use of it on arriving. A portal picked to travel to is picked
+    /// to be taken.
+    pub fn portal(p: &Portal) -> Visit {
+        let mut v = Visit::new(
+            p.name.clone(),
+            p.from,
+            p.from_cell,
+            Some(p.name.clone()),
+            None,
+        );
+        v.by_hand = true;
+        v.through = true;
+        v
+    }
+
     fn new(
         label: String,
         goal: Vec3,
@@ -119,6 +153,9 @@ impl Visit {
             person,
             guid,
             by_hand: false,
+            through: false,
+            last_at: None,
+            arrived_at: None,
             journeyed: false,
             walking: None,
             best: f32::INFINITY,
@@ -150,6 +187,10 @@ pub struct Visits {
     /// server has not yet answered, and when: what a server walk that runs
     /// out was walking to.
     pub(crate) last_use: Option<(u32, Instant)>,
+    /// The last visit ended by getting there (whoever it was for used, or
+    /// the portal gone through), for a caller who started it just now:
+    /// beside a portal, the first frame is the whole visit.
+    pub(crate) finished: bool,
 }
 
 impl Visits {
@@ -217,6 +258,18 @@ pub fn arrived(me: Vec3, goal: Vec3) -> bool {
     (me.z - goal.z).abs() <= SAME_FLOOR && me.distance(goal) <= REACH
 }
 
+/// Whether a visit that arrived at `since` still waits for whoever it is
+/// for to be sent (see [`ARRIVAL_WAIT`]).
+fn waits_for_them(since: Instant, now: Instant) -> bool {
+    now.duration_since(since) < ARRIVAL_WAIT
+}
+
+/// Whether the character was carried off between the frame it stood at
+/// `last` and this one at `me`: a jump no walk makes.
+pub fn carried_off(last: Option<Vec3>, me: Vec3) -> bool {
+    last.is_some_and(|l| l.distance(me) > CARRIED_OFF)
+}
+
 /// Whether a server walk to `guid` that has run out was walking for a
 /// use sent by hand and not yet answered.
 ///
@@ -248,6 +301,12 @@ impl Client {
         self.start_visit(Visit::landmark(l))
     }
 
+    /// Go to a portal and through it: a journey when it is far, a walk to
+    /// its mouth, and a use of it on arriving. False when there is no way.
+    pub fn visit_portal(&mut self, p: &Portal) -> bool {
+        self.start_visit(Visit::portal(p))
+    }
+
     /// What a visit is going to, while one is being made.
     pub fn visiting(&self) -> Option<&str> {
         self.visits.current.as_ref().map(|v| v.label.as_str())
@@ -266,8 +325,10 @@ impl Client {
             v.cell
         );
         self.visits.current = Some(v);
+        self.visits.finished = false;
         self.tick_visit(Instant::now());
-        self.visits.current.is_some()
+        // Still under way, or already there.
+        self.visits.current.is_some() || self.visits.finished
     }
 
     /// Stop the visit being made, if there is one, and the walk it asked
@@ -302,6 +363,16 @@ impl Client {
             self.visits.current = Some(v);
             return;
         };
+        // Through the portal: its mouth took the character on the way in.
+        // Not while a journey is under way, whose own portals carry the
+        // character off on the way there.
+        if v.through && !self.traveling() && carried_off(v.last_at, me) {
+            tracing::info!("visit: through {}", v.label);
+            self.visits.finished = true;
+            self.let_go_of(&v);
+            return;
+        }
+        v.last_at = Some(me);
         // Once in sight, where they really stand beats the gazetteer.
         if let Some((guid, at, cell)) = self.visit_person(&v) {
             if v.guid != Some(guid) {
@@ -357,6 +428,16 @@ impl Client {
                 }
             }
             Next::Arrived => {
+                // Standing where they should be with nobody of that name
+                // sent yet: stop walking and give the server a moment.
+                if v.person.is_some()
+                    && v.guid.is_none()
+                    && waits_for_them(*v.arrived_at.get_or_insert(now), now)
+                {
+                    self.let_go_of(&v);
+                    self.visits.current = Some(v);
+                    return;
+                }
                 self.finish_visit(v);
                 return;
             }
@@ -366,6 +447,7 @@ impl Client {
 
     /// On their floor and close: stop, and use them.
     fn finish_visit(&mut self, v: Visit) {
+        self.visits.finished = true;
         self.let_go_of(&v);
         if self.traveling() {
             self.end_trip();
@@ -491,6 +573,43 @@ mod tests {
             ..cindrue()
         };
         assert_eq!(Visit::landmark(&stone).person, None);
+    }
+
+    #[test]
+    fn a_portal_visit_goes_to_its_mouth_and_takes_it() {
+        let p = ac_world::portals::named("Holtburg Dungeon")
+            .into_iter()
+            .find(|p| p.name == "Holtburg Dungeon" && p.mouth_outdoors())
+            .expect("the Holtburg Dungeon portal is in the data");
+        let v = Visit::portal(p);
+        assert_eq!(v.goal, p.from);
+        assert_eq!(v.cell, p.from_cell);
+        // Found by name on arriving, and used whatever it is.
+        assert_eq!(v.person.as_deref(), Some("Holtburg Dungeon"));
+        assert!(v.by_hand && v.through);
+        // A landmark is not gone through.
+        assert!(!Visit::landmark(&cindrue()).through);
+    }
+
+    #[test]
+    fn arriving_before_they_are_sent_waits_a_moment() {
+        let t0 = Instant::now();
+        let s = Duration::from_secs;
+        // Just got there: the portal may not have been sent yet.
+        assert!(waits_for_them(t0, t0));
+        assert!(waits_for_them(t0, t0 + s(4)));
+        // Long enough: nobody of that name is coming.
+        assert!(!waits_for_them(t0, t0 + s(6)));
+    }
+
+    #[test]
+    fn being_carried_off_is_a_jump_no_walk_makes() {
+        let here = Vec3::new(32380.0, 34923.0, 28.0);
+        assert!(!carried_off(None, here));
+        // A frame's stride, even a fast one.
+        assert!(!carried_off(Some(here), here + Vec3::new(2.5, 0.0, 0.0)));
+        // Into a dungeon: another landblock and far below.
+        assert!(carried_off(Some(here), Vec3::new(200.0, 47000.0, -10.0)));
     }
 
     #[test]
