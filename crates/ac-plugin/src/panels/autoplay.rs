@@ -49,6 +49,9 @@ pub struct AutoplayView {
     pub profiles: Vec<String>,
     /// The hunting areas drawn on the map, to hunt in one.
     pub hunt_areas: Vec<ac_client::hunt::HuntArea>,
+    /// `autoplay.loot_tally.line()`: "this session: 14 corpse(s) opened,
+    /// 22 thing(s) taken".
+    pub looting: String,
 }
 
 /// The line under the checkbox: what it is doing and the engine's own
@@ -463,6 +466,12 @@ pub fn draw(egui: &egui::Context, v: &AutoplayView, x: f32, drafts: &mut Drafts)
                             .to_string()
                     },
                 );
+                // A count, so a character with nothing worth taking can be
+                // told from one that is not looting: Blargerton's log said
+                // "emptied" either way.
+                if !v.looting.is_empty() {
+                    caption(ui, v.looting.clone());
+                }
                 caption(
                     ui,
                     if v.salvager.is_empty() {
@@ -670,7 +679,9 @@ pub fn draw(egui: &egui::Context, v: &AutoplayView, x: f32, drafts: &mut Drafts)
                 .on_hover_text(
                     "The whole party stops hunting and goes together. Off, each \
                      character runs to town on its own when it is short, which \
-                     leaves the rest a man down mid-fight. Needs the team rules on.",
+                     leaves the rest a man down mid-fight. Needs the team rules on, \
+                     and somebody else on the team: a character on its own goes \
+                     when it is short, full or laden either way.",
                 );
                 ui.horizontal(|ui| {
                     ui.label("how");
@@ -760,6 +771,7 @@ pub fn view(c: &Client) -> AutoplayView {
         salvager: c.best_salvager().map(|(n, _)| n).unwrap_or_default(),
         profiles: c.profiles.names(),
         hunt_areas: Vec::new(),
+        looting: c.autoplay.loot_tally.line(),
         at: c
             .player
             .as_ref()
@@ -836,6 +848,7 @@ impl Autoplay {
                         rooms: Vec::new(),
                     },
                 }],
+                looting: "this session: 14 corpse(s) opened, 22 thing(s) taken".into(),
                 at: glam::Vec2::ZERO,
             }),
             show: true,

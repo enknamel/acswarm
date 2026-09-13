@@ -493,6 +493,42 @@ impl ItemStats {
             Term::Num(key, op, v) => self.number(*key).is_some_and(|x| op.test(x, *v)),
         }
     }
+
+    /// Whether the item has `w` as a word of its own -- in its name,
+    /// material, kind or a spell, or as a slot word it fits -- rather than
+    /// inside a longer word (see [`word_in`]). What a profile's "item
+    /// name" condition asks. A search line still takes any part of a
+    /// word, as a search box should: "plate" is how Platemail is found.
+    pub fn has_word(&self, w: &str) -> bool {
+        word_in(&self.name, w)
+            || word_in(self.material, w)
+            || word_in(self.kind, w)
+            || self.spells.iter().any(|s| word_in(s, w))
+            || slot_mask(&w.trim().to_lowercase()).is_some_and(|m| self.fits_slot(m))
+    }
+}
+
+/// Whether `needle` stands in `hay` as a word or words of its own, case
+/// aside: "pea" is in "Hyssop Pea" and "Lead Pea" but not in "Spear" or
+/// "Pearl". A word ends wherever its letters and digits do, so a phrase
+/// ("healing kit") is found as it is written and "Pea," still has its
+/// pea. A blank needle asks nothing, and is in everything.
+pub fn word_in(hay: &str, needle: &str) -> bool {
+    let needle = needle.trim().to_lowercase();
+    if needle.is_empty() {
+        return true;
+    }
+    let hay = hay.to_lowercase();
+    let wordy = |c: Option<char>| c.is_some_and(char::is_alphanumeric);
+    // Only an end of the needle that is part of a word needs a break
+    // beside it.
+    let open = wordy(needle.chars().next());
+    let close = wordy(needle.chars().next_back());
+    hay.char_indices().any(|(at, _)| {
+        hay[at..].starts_with(&needle)
+            && !(open && wordy(hay[..at].chars().next_back()))
+            && !(close && wordy(hay[at + needle.len()..].chars().next()))
+    })
 }
 
 /// A cantrip's tier, read off the front of its name ("Epic Strength",
@@ -740,6 +776,9 @@ impl Op {
 pub enum Term {
     /// Matches the name, material, kind, a spell name or a slot word. A
     /// quoted phrase (`"epic life magic"`) is one word, spaces and all.
+    /// In a search line any part of a word will do; as a profile's own
+    /// "item name" condition it must be a whole word (see
+    /// [`ItemStats::has_word`]).
     Word(String),
     /// `spell:blood`
     Spell(String),
@@ -1507,6 +1546,37 @@ mod tests {
         assert!(!tunic().matches(&Query::parse("dmg>0")));
         assert!(!unknown().matches(&Query::parse("dmg>0")));
         assert!(unknown().matches(&Query::parse("unappraised value<100")));
+    }
+
+    #[test]
+    fn a_word_of_its_own_is_not_found_inside_a_longer_one() {
+        // Starter's "peas to sell" asked for "pea", and a Spear has one
+        // in the middle: every spear was taken to sell as a pea.
+        assert!(!word_in("Spear", "pea"));
+        assert!(!word_in("Pearl", "pea"));
+        assert!(word_in("Pea", "pea"));
+        assert!(word_in("Hyssop Pea", "pea"));
+        assert!(word_in("Lead Pea", "Pea"), "case aside");
+        assert!(word_in("Pea, Lead", "pea"), "a comma ends a word");
+        // A phrase is found as it is written.
+        assert!(word_in("Plentiful Healing Kit", "healing kit"));
+        assert!(!word_in("Plentiful Healing Kit", "ealing ki"));
+        // The item's other fields are words too.
+        let spear = ItemStats {
+            name: "Spear".into(),
+            ..sword()
+        };
+        assert!(!spear.has_word("pea"));
+        assert!(spear.has_word("spear"));
+        assert!(spear.has_word("iron"), "its material");
+        assert!(spear.has_word("blood drinker"), "one of its spells");
+        let pea = ItemStats {
+            name: "Hyssop Pea".into(),
+            ..unknown()
+        };
+        assert!(pea.has_word("pea"));
+        // A search line still finds part of a word.
+        assert!(spear.matches(&Query::parse("pea")));
     }
 
     #[test]

@@ -63,13 +63,24 @@ pub struct Open {
     /// somewhere to put the coin before it takes anything, so a pack
     /// looted to its last slot cannot be sold out of at all.
     pub keep_free: u32,
-    /// How much more the character means to carry (see
-    /// `growth::carry_room`): zero when it has had enough.
+    /// How much more loot the character means to carry (see
+    /// `growth::carry_room`): zero when it has had enough. What it
+    /// wears, wields and keeps is not measured against the loot limit,
+    /// only against twice its capacity and the server's wall.
     pub carry_room: u32,
     /// Asking the server to identify things is allowed.
     pub may_ask: bool,
     /// An identify is already out for these.
     pub asking: Vec<u32>,
+    /// Takes the server has turned down since the corpse was asked to
+    /// open. It answers a take it will not make -- too encumbered by its
+    /// own reckoning, a drop that can only be had so often, a unique
+    /// already carried -- by naming the item, and the item stays put.
+    pub refused: Vec<u32>,
+    /// Listed on the corpse but not yet described. The server sends
+    /// what a corpse holds as a list first and describes each thing a
+    /// moment later, so in between the body looks emptier than it is.
+    pub arriving: Vec<u32>,
 }
 
 /// How near the character must be before a corpse will open for it.

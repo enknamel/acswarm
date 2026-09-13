@@ -311,7 +311,7 @@ impl AskKind {
 
     pub fn help(self) -> &'static str {
         match self {
-            AskKind::Name => "The item's name holds this word",
+            AskKind::Name => "The item's name has this as a whole word: \"pea\" is not in Spear",
             AskKind::Kind => "What the item is: armour, a gem, a weapon",
             AskKind::Material => "What it is made of",
             AskKind::Slot => "Where it is worn or held",
@@ -644,7 +644,13 @@ fn mine_fields(ui: &mut egui::Ui, salt: &str, mine: &mut Mine) {
 /// The fields a question about the item needs.
 fn term_fields(ui: &mut egui::Ui, salt: &str, term: &mut Term) {
     match term {
-        Term::Word(w) => text_field(ui, &format!("{salt}.word"), w, "part of the name", 180.0),
+        Term::Word(w) => text_field(
+            ui,
+            &format!("{salt}.word"),
+            w,
+            "a word of the name, e.g. pea",
+            180.0,
+        ),
         Term::Material(m) => text_field(ui, &format!("{salt}.mat"), m, "e.g. iron", 150.0),
         Term::Skill(s) => text_field(ui, &format!("{salt}.skill"), s, "e.g. sword", 150.0),
         Term::Spell(s) => text_field(ui, &format!("{salt}.spell"), s, "e.g. blood drinker", 180.0),
@@ -1034,8 +1040,10 @@ fn looting(ui: &mut egui::Ui, p: &mut Profile, drafts: &mut super::autoplay::Dra
                 .suffix(" x capacity"),
         )
         .on_hover_text(
-            "How laden to get before going to sell. At 1 a character is \
-             comfortable, at 2 slowed, at 3 the server stops it picking anything up.",
+            "How much loot to carry before going to sell. What is worn, wielded or \
+             kept (foci, components, supplies) does not count. Loot still never takes \
+             the whole load past 2 x capacity, where defense is gone, unless this is \
+             set higher; the server stops a character picking anything up at 3 x.",
         );
     });
     caption(ui, "always take");

@@ -282,6 +282,19 @@ impl<K: Ord + Clone> Patience<K> {
         self.held.clear();
     }
 
+    /// Keep only the ones `keep` still wants remembered, however their
+    /// waits stand.
+    ///
+    /// For a table whose things go away by themselves -- a corpse rots
+    /// -- and whose lapsed waits must be kept, so that the next refusal
+    /// doubles the wait rather than starting it again. [`Self::tidy`]
+    /// forgets a wait the moment it is up, and that is the very moment
+    /// the thing is tried again: a corpse that kept saying no was asked
+    /// every thirty seconds for as long as it lay there.
+    pub fn retain(&mut self, mut keep: impl FnMut(&K) -> bool) {
+        self.held.retain(|k, _| keep(k));
+    }
+
     /// Drop what is no longer worth remembering: waits that have run
     /// out and are not permanent. Keeps the table the size of what is
     /// actually being held off.
@@ -408,6 +421,34 @@ mod tests {
         // waiting on has changed.
         p.forget(&7);
         assert!(p.is_empty());
+    }
+
+    #[test]
+    fn a_lapsed_wait_that_is_kept_doubles_where_a_tidied_one_starts_again() {
+        // A corpse set aside is tried again when its wait is up. Tidied
+        // at that moment, the next refusal was the first all over again,
+        // and the corpse was asked at every thirty seconds until it
+        // rotted.
+        let t0 = Instant::now();
+        let no = Did::blocked("it will not open yet");
+        let again = t0 + BLOCKED_AGAIN;
+
+        let mut tidied: Patience<u32> = Patience::new();
+        tidied.note(1, &no, t0);
+        tidied.tidy(again);
+        tidied.note(1, &no, again);
+        assert!(!tidied.held(&1, again + BLOCKED_AGAIN), "it doubled");
+
+        let mut kept: Patience<u32> = Patience::new();
+        kept.note(1, &no, t0);
+        kept.note(2, &no, t0);
+        // Only the one still there is remembered, lapsed wait and all.
+        kept.retain(|k| *k == 1);
+        assert_eq!(kept.len(), 1);
+        assert!(!kept.held(&1, again), "a lapsed wait is still a wait");
+        kept.note(1, &no, again);
+        assert!(kept.held(&1, again + BLOCKED_AGAIN), "it did not double");
+        assert!(!kept.held(&1, again + BLOCKED_AGAIN * 2));
     }
 
     #[test]

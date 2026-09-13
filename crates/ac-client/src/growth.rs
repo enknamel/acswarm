@@ -526,6 +526,90 @@ fn contains_fold(haystack: &str, needle: &str) -> bool {
         .any(|w| w.iter().zip(n).all(|(a, b)| a.eq_ignore_ascii_case(b)))
 }
 
+/// Twice its capacity is as much as burden can take from a character.
+/// The server scales Melee and Missile Defense, and what the Run skill
+/// adds to its speed, by two less its burden in multiples of capacity:
+/// all of them at one, half at one and a half, none at all at two.
+const DEFENSELESS_AT: f32 = 2.0;
+
+/// How much more loot a character will take on before it has had
+/// enough. `carried` is everything, gear and all; `loot` is the part of
+/// it a counter would take.
+///
+/// Three things stop it, and the room is what the nearest of them
+/// leaves:
+///
+/// * the working limit, `carry_up_to` times its capacity, measured on
+///   the loot alone;
+/// * twice its capacity, measured on everything, where it has no
+///   defense left (or the working limit's own multiple, when the
+///   player has set it higher than that);
+/// * the server's wall at three times, measured on everything, past
+///   which it hands over nothing at all.
+///
+/// The limit counts only loot because nothing else can be sold off. It
+/// used to count everything, and that stopped Blargerton looting
+/// altogether: Strength 60 gives a capacity of 9000 and a limit of
+/// 13500 at one and a half times, and he carried 13866, nearly all of
+/// it things he keeps -- his plate alone is 6540, then four foci and a
+/// stack of Prismatic Tapers. No room at all, so every corpse he opened
+/// was shut again at once and marked looted, and he took nothing; the
+/// town run read the same zero as laden and could send him to sell with
+/// nothing to sell. Leaving out only what he wore was not enough: at a
+/// limit of 0.8 the foci and the tapers alone filled it.
+///
+/// Leaving what it keeps out of the limit is also what let a character
+/// in plate hunt on past twice its capacity, with no defense, before it
+/// was laden -- hence the second line. That line gives way when what
+/// the character keeps weighs that much on its own: loot cannot slow it
+/// any further, and a line no sale can bring it back under would leave
+/// every corpse untouched again. The wall never gives way.
+fn loot_room(carried: u32, loot: u32, capacity: u32, carry_up_to: f32) -> u32 {
+    let up_to = carry_up_to.max(0.0);
+    // The server's figure is the one to trust: a count of loot that has
+    // got ahead of it is all loot, and nothing is kept.
+    let loot = loot.min(carried);
+    let kept = carried - loot;
+    let limit = (capacity as f32 * up_to) as u32;
+    let line = (capacity as f32 * up_to.max(DEFENSELESS_AT)) as u32;
+    let wall = capacity.saturating_mul(3);
+    let room = limit.saturating_sub(loot).min(wall.saturating_sub(carried));
+    if kept < line {
+        room.min(line.saturating_sub(carried))
+    } else {
+        room
+    }
+}
+
+/// Whether a character with `room` for more loot has had enough and
+/// should go and sell: no room at all, or less than the lightest thing
+/// the looting left on a body for its weight (`left`) -- as long as
+/// selling what it carries would make room for that thing (`sold` is the
+/// room it would have then).
+///
+/// Room used to have to be exactly nothing, and it almost never is. The
+/// loot rules take only what fits, so the room settles a little above
+/// nothing and below whatever is still lying there: a character forty
+/// short of a mace shut every body with one on it as too laden, hunted
+/// on, and never went to sell. A thing no sale could make room for is no
+/// reason to go.
+fn had_enough(room: u32, left: Option<u32>, sold: u32) -> bool {
+    room == 0 || left.is_some_and(|burden| room < burden && burden <= sold)
+}
+
+/// Whether the party's mode decides when this character goes to town,
+/// rather than its own pack and supplies. `mates` is how many others are
+/// on the team as it was last heard.
+///
+/// Restocking together needs somebody to restock with. Blargerton had the
+/// team rules on, restocking together on, and nobody else on the team: a
+/// party of one only ever decided to go for supplies or a pack with no
+/// slot, never for weight, so he hunted on carrying all he meant to and
+/// left everything else on the bodies.
+fn restocks_as_a_party(team: &crate::autoplay::Team, mates: usize) -> bool {
+    team.enabled && team.restock.together && mates > 0
+}
+
 /// Something in the pack the rules allow to be sold, before any one
 /// counter's tastes are applied to it.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1619,13 +1703,14 @@ impl Client {
     /// Every session runs this on the same roster and reaches the same
     /// answer, so there is nothing to agree on: the party changes mode
     /// together without a message being sent about it. A character
-    /// playing alone, or one whose team rules are off, is always
-    /// hunting -- its own supplies still send it to town, by the older
-    /// rule that fires on an urgent shortfall.
+    /// playing alone -- nobody else on the team, whatever its settings
+    /// say -- or one whose team rules are off, is always hunting: its
+    /// own pack and supplies send it to town, by the older rule (see
+    /// [`restocks_as_a_party`]).
     fn grow_mode(&mut self, now: Instant, cfg: &Growth) -> crate::logistics::GroupMode {
         use crate::logistics::{decide, GroupMode};
         let team = &self.autoplay.config.team;
-        if !team.enabled || !team.restock.together {
+        if !restocks_as_a_party(team, self.autoplay.team.mates.len()) {
             self.autoplay.growth.mode = GroupMode::Hunting;
             return GroupMode::Hunting;
         }
@@ -1701,6 +1786,22 @@ impl Client {
         self.free_space() <= self.autoplay.config.team.restock.keep_slots
     }
 
+    /// What the character has room for, as a corpse waiting on it sees
+    /// it (see `Autoplay::corpse_waiting`).
+    pub(crate) fn room_for_loot(&self) -> crate::autoplay::Room {
+        crate::autoplay::Room {
+            pack_low: self.pack_low_on_room(),
+            // Weighed only while a body is waiting on it: what the loot
+            // weighs is judged item by item, and this is asked on every
+            // tick a corpse lies about.
+            carry: if self.autoplay.left_for_weight.is_empty() {
+                u32::MAX
+            } else {
+                self.carry_room(&self.autoplay.config.growth)
+            },
+        }
+    }
+
     /// What the character can spend. Coin and trade notes both: a note
     /// is money in a lighter form, and a vendor takes either.
     pub fn spendable(&self) -> u32 {
@@ -1740,6 +1841,7 @@ impl Client {
                 .unwrap_or_default(),
             level,
             pack_full: self.pack_full(),
+            laden: self.laden(cfg),
             // Ready to go back: stocked up, and not still mid-errand.
             stocked: level >= policy.full_at && self.autoplay.growth.run.is_none(),
             handed_over: self.autoplay.growth.handed_over,
@@ -2013,35 +2115,56 @@ impl Client {
     /// has not walked to yet, which is how a trip is judged before it is
     /// started.
     fn salables(&self, cfg: &Growth) -> Vec<Salable> {
+        self.for_sale(cfg)
+            .into_iter()
+            .map(|o| Salable {
+                guid: o.guid,
+                item_type: o.item_type,
+                value: o.value,
+                stack: o.stack_size.max(1),
+            })
+            .collect()
+    }
+
+    /// The carried things a counter would be offered, as they lie in the
+    /// pack: what the selling rules let go, less what no counter takes.
+    fn for_sale(&self, cfg: &Growth) -> Vec<&ac_world::WorldObject> {
         // The same judgement the counter is handed (see
         // [`Client::offers_for_sale`]). It used to be a second one, and
         // the two disagreed.
         let policy = self.sell_policy(cfg);
+        // A pack with things in it is not loot to be sold; the server
+        // refuses it, and it holds the character's belongings. Which
+        // packs hold anything is worked out once, not once per item:
+        // this is asked on every turn spent over a corpse (see
+        // [`Self::loot_burden`]).
+        let holders: std::collections::BTreeSet<u32> = self
+            .world
+            .objects
+            .values()
+            .filter_map(|o| o.container)
+            .collect();
         self.world
             .inventory()
-            .filter_map(|o| {
-                let stats = self.stats_of(o.guid)?;
+            .filter(|o| {
+                let Some(stats) = self.stats_of(o.guid) else {
+                    return false;
+                };
                 let ammo = o.valid_locations & equip::MISSILE_AMMO != 0;
-                // A pack with things in it is not loot to be sold; the
-                // server refuses it, and it holds the character's
-                // belongings.
-                let holds_anything = self
-                    .world
-                    .objects
-                    .values()
-                    .any(|it| it.container == Some(o.guid));
-                if never_sell_carried(&stats, holds_anything) {
-                    return None;
-                }
-                let sells = self.offers_for_sale(&policy, &stats, ammo);
-                sells.then_some(Salable {
-                    guid: o.guid,
-                    item_type: o.item_type,
-                    value: o.value,
-                    stack: o.stack_size.max(1),
-                })
+                !never_sell_carried(&stats, holders.contains(&o.guid))
+                    && self.offers_for_sale(&policy, &stats, ammo)
             })
             .collect()
+    }
+
+    /// What the loot being carried weighs: everything a counter would be
+    /// offered. A stack's burden is the whole stack's already, and a
+    /// pack with anything in it is never offered, so nothing is counted
+    /// twice.
+    fn loot_burden(&self, cfg: &Growth) -> u32 {
+        self.for_sale(cfg)
+            .iter()
+            .fold(0u32, |sum, o| sum.saturating_add(o.burden))
     }
 
     /// The best vendor to make for, given every way the character has
@@ -2381,8 +2504,9 @@ impl Client {
     /// more per rank of the carrying-capacity augmentation; the server
     /// refuses to hand over anything that would take the character past
     /// three times that. The comfortable place to work is well under
-    /// it: a character at twice its capacity is slow and a character at
-    /// three times it cannot pick up what it kills.
+    /// it: a character at twice its capacity is slow and has no Melee or
+    /// Missile Defense left, and a character at three times it cannot
+    /// pick up what it kills.
     pub fn burden(&self) -> (u32, u32) {
         const ENCUMBRANCE_VAL: u32 = 5;
         const CARRY_AUGMENTATION: u32 = 230;
@@ -2424,26 +2548,62 @@ impl Client {
         capacity.saturating_mul(3).saturating_sub(now)
     }
 
-    /// How much more the character will take on before it stops
-    /// hunting and goes to sell: the loot profile's `carry_up_to` times
-    /// its capacity,
-    /// less what it carries. Zero means it has had enough.
+    /// How much more loot the character will take on before it stops
+    /// hunting and goes to sell. Zero means it has had enough.
+    ///
+    /// The loot profile's `carry_up_to` is measured on the loot alone:
+    /// what the selling rules would hand a counter. What the character
+    /// wears and wields, and what the rules keep -- foci, the components
+    /// its spells burn, what it keeps stocked, what it took to keep or
+    /// to salvage -- is left out, because no trip to town takes it off.
+    /// Counted, a character in heavy plate had no room before it picked
+    /// up a thing, and left every corpse untouched. Everything still
+    /// counts towards twice its capacity, where it has no defense left,
+    /// and towards the server's wall at three times (`loot_room` has the
+    /// arithmetic and the whole story).
     ///
     /// This is the working limit, not the server's. [`burden_room`] is
     /// the wall -- what the server will still accept -- and a character
     /// that hunts up to the wall cannot loot, cannot merge stacks and
     /// can barely walk.
-    pub fn carry_room(&self) -> u32 {
+    pub fn carry_room(&self, cfg: &Growth) -> u32 {
         let (now, capacity) = self.burden();
         let up_to = self
             .loot_profile()
             .map_or(crate::profile::Looting::default().carry_up_to, |p| {
                 p.looting.carry_up_to
-            })
-            .max(0.0);
-        let limit = (capacity as f32 * up_to) as u32;
-        // Never claim more room than the server would actually allow.
-        limit.min(capacity.saturating_mul(3)).saturating_sub(now)
+            });
+        loot_room(now, self.loot_burden(cfg), capacity, up_to)
+    }
+
+    /// Carrying as much loot as it means to: time to go and sell.
+    ///
+    /// Not before its strength is known. With no capacity there is no
+    /// room either, and a party told a member was laden the moment it
+    /// logged in would turn round for town before a fight.
+    ///
+    /// Having had enough is not only having no room at all: it is having
+    /// less room than the lightest thing the looting last left on a body
+    /// still lying about (see [`had_enough`]).
+    pub fn laden(&self, cfg: &Growth) -> bool {
+        let (carried, capacity) = self.burden();
+        if capacity == 0 {
+            return false;
+        }
+        let up_to = self
+            .loot_profile()
+            .map_or(crate::profile::Looting::default().carry_up_to, |p| {
+                p.looting.carry_up_to
+            });
+        let loot = self.loot_burden(cfg).min(carried);
+        let room = loot_room(carried, loot, capacity, up_to);
+        // Sold down to what it keeps: the room a trip to town would give.
+        let sold = loot_room(carried - loot, 0, capacity, up_to);
+        let objects = &self.world.objects;
+        let left = self
+            .autoplay
+            .lightest_left_for_weight(|g| objects.contains_key(&g));
+        had_enough(room, left, sold)
     }
 
     /// Which society this character belongs to, as `Faction1Bits`: 1
@@ -2590,16 +2750,27 @@ impl Client {
         // grows too heavy to lift anything, tidy anything, or move at
         // any speed. It is as good a reason to go and sell as a pack
         // with no slots left.
-        let laden = self.carry_room() == 0;
+        //
+        // Laden means the loot has filled the working limit, or has taken
+        // the character to twice its capacity, or the server's wall
+        // leaves no room for any more -- not merely that the character
+        // is heavy. What it wears and keeps does not count towards the
+        // limit: a counter cannot lighten that, and counting it sent a
+        // character whose own gear filled the limit off to sell with
+        // nothing to sell.
+        let laden = self.laden(cfg);
         let needs = self.needs_now(now, cfg);
         // On a team that restocks together, the party's mode decides:
         // one character does not walk off to a vendor while the rest
         // are fighting, and none of them stays behind when the party
         // has agreed to go. Alone, the older rule stands -- something
-        // urgent, or a pack with no room left.
+        // urgent, a pack with no room left, or as much loot as it means
+        // to carry. Alone includes a character set to restock together
+        // with nobody else on the team, which is how Blargerton never
+        // went to sell.
         let party_mode = self.autoplay.growth.mode;
         let together =
-            self.autoplay.config.team.enabled && self.autoplay.config.team.restock.together;
+            restocks_as_a_party(&self.autoplay.config.team, self.autoplay.team.mates.len());
         let urgent: Vec<&Need> = needs.iter().filter(|n| n.urgent).collect();
         let reason = if together {
             match party_mode.stage() {
@@ -3120,6 +3291,175 @@ mod tests {
             cost,
             weight,
         }
+    }
+
+    #[test]
+    fn blargerton_has_room_to_loot_with_everything_he_keeps_on_him() {
+        // Strength 60: capacity 9000, a limit of 13500 at 1.5, twice his
+        // capacity at 18000 and the wall at 27000. He carried 13866 and
+        // had taken nothing, so all of it was his own: plate 6540, four
+        // foci 1600, a stack of tapers 1374, then weapons and the rest.
+        let (carried, capacity) = (13_866, 9_000);
+        // Counting all of it as loot left him nothing: the fault.
+        assert_eq!(loot_room(carried, carried, capacity, 1.5), 0);
+        // None of it is loot. He takes on loot until he reaches twice
+        // his capacity, which comes before the limit does.
+        assert_eq!(loot_room(carried, 0, capacity, 1.5), 18_000 - 13_866);
+    }
+
+    #[test]
+    fn kept_things_in_the_pack_do_not_fill_a_low_limit() {
+        // Leaving out only what he wore still counted his foci, tapers
+        // and weapons as loot: 7326 of it, over a limit of 7200 at 0.8,
+        // and no room again.
+        let (carried, worn, capacity) = (13_866, 6_540, 9_000);
+        assert_eq!(loot_room(carried, carried - worn, capacity, 0.8), 0);
+        // Measured on what a counter would take, there is room at every
+        // setting the slider allows.
+        for up_to in [0.5, 0.8, 1.0, 1.5, 2.0, 2.9] {
+            assert!(loot_room(carried, 0, capacity, up_to) > 0, "at {up_to}");
+        }
+        // A lighter character at a low setting is stopped by the limit
+        // itself: 4500 of loot at 0.5, whatever it keeps.
+        assert_eq!(loot_room(3_000, 0, 9_000, 0.5), 4_500);
+        assert_eq!(loot_room(3_000 + 4_500, 4_500, 9_000, 0.5), 0);
+    }
+
+    #[test]
+    fn loot_does_not_take_a_character_in_plate_past_twice_its_capacity() {
+        // Plate 6540 and 11460 of loot is 18000, twice his capacity, and
+        // no Melee or Missile Defense left. The limit alone would have
+        // let him take 2040 more and fight on to 20040.
+        assert_eq!(loot_room(18_000, 11_460, 9_000, 1.5), 0);
+        // A thousand short of it, a thousand is all the room there is.
+        assert_eq!(loot_room(17_000, 10_460, 9_000, 1.5), 1_000);
+        // A player who asks for more than twice gets it: at 2.5 the line
+        // is the limit's own, 22500.
+        assert_eq!(loot_room(6_540, 0, 9_000, 2.5), 22_500 - 6_540);
+        assert_eq!(loot_room(22_500, 15_960, 9_000, 2.5), 0);
+    }
+
+    #[test]
+    fn what_is_kept_past_twice_capacity_leaves_the_limit_and_the_wall() {
+        // What it keeps is at twice its capacity on its own: loot cannot
+        // slow it further and no sale gets it back under the line, so
+        // the line gives way rather than leave every corpse untouched.
+        assert_eq!(loot_room(18_000, 0, 9_000, 1.5), 9_000);
+        assert_eq!(loot_room(20_000, 0, 9_000, 1.5), 7_000);
+        assert_eq!(loot_room(20_000 + 5_000, 5_000, 9_000, 1.5), 2_000);
+        // At a low setting the limit still stops it first.
+        assert_eq!(loot_room(18_000, 0, 9_000, 0.5), 4_500);
+        assert_eq!(loot_room(18_000 + 4_500, 4_500, 9_000, 0.5), 0);
+    }
+
+    #[test]
+    fn the_servers_wall_still_caps_the_room() {
+        // A limit set by hand past three times: the limit and the line
+        // both allow more than the server will hand over.
+        assert_eq!(loot_room(20_000, 8_000, 9_000, 3.5), 27_000 - 20_000);
+        // At the wall there is no room, however light the loot.
+        assert_eq!(loot_room(27_000, 7_000, 9_000, 1.5), 0);
+        assert_eq!(loot_room(30_000, 0, 9_000, 1.5), 0);
+    }
+
+    #[test]
+    fn the_room_never_passes_a_line_and_a_sale_always_makes_some() {
+        let capacity = 9_000u32;
+        let wall = 27_000u32;
+        for up_to in [0.5f32, 0.8, 1.0, 1.5, 2.0, 2.5, 2.9] {
+            let limit = (capacity as f32 * up_to) as u32;
+            let line = (capacity as f32 * up_to.max(2.0)) as u32;
+            for kept in (0..=30_000u32).step_by(250) {
+                for loot in (0..=30_000u32).step_by(250) {
+                    let carried = kept + loot;
+                    let room = loot_room(carried, loot, capacity, up_to);
+                    let at = format!("up to {up_to}, kept {kept}, loot {loot}: room {room}");
+                    if room == 0 {
+                        continue;
+                    }
+                    // Never past the limit on loot, nor the wall on
+                    // everything.
+                    assert!(loot + room <= limit, "limit: {at}");
+                    assert!(carried + room <= wall, "wall: {at}");
+                    // Never past twice capacity while what it keeps is
+                    // under it.
+                    if kept < line {
+                        assert!(carried + room <= line, "line: {at}");
+                    }
+                }
+                // Sold down to what it keeps, it has room again -- unless
+                // that is already at the wall, which no sale can help.
+                let sold = loot_room(kept, 0, capacity, up_to);
+                assert_eq!(
+                    sold == 0,
+                    kept >= wall,
+                    "sold down: up to {up_to}, kept {kept}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn no_capacity_or_no_limit_is_no_room() {
+        // Strength not heard yet: capacity 0, so nothing is claimed.
+        assert_eq!(loot_room(0, 0, 0, 1.5), 0);
+        assert_eq!(loot_room(500, 0, 0, 1.5), 0);
+        // A limit of nothing, less, or not a number is nothing.
+        assert_eq!(loot_room(0, 0, 9_000, 0.0), 0);
+        assert_eq!(loot_room(0, 0, 9_000, -1.0), 0);
+        assert_eq!(loot_room(0, 0, 9_000, f32::NAN), 0);
+        // A count of loot ahead of the server's total: all of it is loot.
+        assert_eq!(loot_room(1_000, 1_500, 9_000, 1.5), 13_500 - 1_000);
+    }
+
+    #[test]
+    fn a_character_with_room_for_nothing_it_wants_goes_to_sell() {
+        // Laden needed no room at all. The loot rules take only what fits,
+        // so the room settled a little above nothing: forty short of a
+        // mace, every body with one on it was shut as too laden, and the
+        // character hunted on and never went to sell.
+        let sold = 18_000 - 13_866;
+        assert!(!had_enough(40, None, sold), "nothing left behind yet");
+        assert!(had_enough(40, Some(300), sold), "forty short of a mace");
+        // Room for it again -- tapers burnt, or a sale -- and it is not.
+        assert!(!had_enough(300, Some(300), sold));
+        assert!(!had_enough(sold, Some(300), sold));
+        // No room at all is enough, as it always was.
+        assert!(had_enough(0, None, sold));
+        // A thing no sale could make room for is no reason to go: an anvil
+        // heavier than the room left with every bit of loot sold.
+        assert!(!had_enough(40, Some(9_000), sold));
+    }
+
+    #[test]
+    fn a_character_with_nobody_to_restock_with_goes_to_town_on_its_own() {
+        // Blargerton: team rules on, restocking together on, no party.
+        // The party's mode decided his trips, a party of one never left
+        // for weight, and he hunted on laden with every body left full.
+        let team = crate::autoplay::Team {
+            enabled: true,
+            restock: crate::logistics::Restock {
+                together: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!(!restocks_as_a_party(&team, 0), "alone is alone");
+        assert!(restocks_as_a_party(&team, 1));
+        // Either setting off, it is alone whoever else is about.
+        let apart = crate::autoplay::Team {
+            restock: crate::logistics::Restock {
+                together: false,
+                ..Default::default()
+            },
+            ..team.clone()
+        };
+        assert!(!restocks_as_a_party(&apart, 3));
+        let off = crate::autoplay::Team {
+            enabled: false,
+            ..team
+        };
+        assert!(!restocks_as_a_party(&off, 3));
     }
 
     #[test]

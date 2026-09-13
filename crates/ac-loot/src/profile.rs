@@ -483,6 +483,11 @@ impl Rule {
 
 fn holds(ask: &Ask, item: &ItemStats, id: Option<&Appraisal>, me: &Wielder, name: &str) -> bool {
     match ask {
+        // A name condition is a whole word. Matched as any part of one,
+        // Starter's "peas to sell" found the pea in "Spear", and every
+        // spear was taken to sell. A search line keeps matching part of a
+        // word, as the inventory's search does.
+        Ask::Item(Term::Word(w)) => item.has_word(w),
         Ask::Item(t) => item.matches_term(t),
         Ask::Search(line) => {
             let q = Query::parse(line);
@@ -640,11 +645,27 @@ pub struct Looting {
     /// Pour loose stacks of the same thing together, so that slots are
     /// not wasted on the change left by buying and looting.
     pub tidy_pack: bool,
-    /// How laden to get while hunting, in multiples of carrying
-    /// capacity (150 x Strength). At one a character is comfortable, at
-    /// two it is slowed, at three the server stops it picking anything
-    /// up -- and hunting up to that wall leaves it unable to loot, pour
-    /// stacks together or move. So it stops well short and goes to sell.
+    /// How much loot to take on while hunting before going to sell, in
+    /// multiples of carrying capacity (150 x Strength). At one a
+    /// character is comfortable, at two it is slow and has no Melee or
+    /// Missile Defense left, at three the server stops it picking
+    /// anything up -- and hunting up to that wall leaves it unable to
+    /// loot, pour stacks together or move. So it stops well short and
+    /// goes to sell.
+    ///
+    /// Only loot counts towards it: what the selling rules would hand a
+    /// counter. What the character wears and wields, and what the rules
+    /// keep -- foci, components, what it keeps stocked, what it took to
+    /// keep or to salvage -- does not, because no trip to town takes it
+    /// off. Counted, a character carrying 13866 against a limit of
+    /// 13500, nearly all of it its own plate, foci and tapers, had no
+    /// room from the start and took nothing from any corpse.
+    ///
+    /// So a character in heavy gear carries this much loot on top of
+    /// it, and a second line keeps it well short all the same: loot
+    /// never takes the whole load past twice capacity, unless this is
+    /// set higher than two or what the character keeps weighs that much
+    /// on its own. The server's wall at three times counts everything.
     pub carry_up_to: f32,
 }
 
@@ -1032,7 +1053,7 @@ pub fn tidy_name(name: &str) -> String {
 /// A term in words, for the editor.
 fn term_words(t: &Term) -> String {
     match t {
-        Term::Word(w) => format!("name has \"{w}\""),
+        Term::Word(w) => format!("name has the word \"{w}\""),
         Term::Spell(s) => format!("a spell like \"{s}\""),
         Term::Kind(k) => format!("is {k}"),
         Term::Material(m) => format!("made of {m}"),
@@ -1610,6 +1631,8 @@ mod tests {
         // the rule that says so comes before the one that keeps
         // components, because peas are what the trip is paid for.
         assert!(sells("Pyreal Pea", item_type::SPELL_COMPONENTS, 50_000));
+        // "pea" is a word of its own: a Spear is not one.
+        assert!(!sells("Spear", item_type::MELEE_WEAPON, 40));
         assert!(sells("Ruby", item_type::GEM, 9_000));
         // Junk is dismissed without the server being asked about it,
         // and the rule that dismisses it comes before every rule that

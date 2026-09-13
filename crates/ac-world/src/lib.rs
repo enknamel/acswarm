@@ -937,11 +937,7 @@ impl World {
                 // the pack; the server sends no DeleteObject for it.
                 if body.len() >= 4 {
                     let guid = u32::from_le_bytes(body[..4].try_into().unwrap());
-                    // The server letting go of something set aside: now
-                    // it is gone.
-                    self.left_behind.remove(&guid);
-                    if self.objects.remove(&guid).is_some() {
-                        self.generation += 1;
+                    if self.forget(guid) {
                         return Applied::Deleted;
                     }
                 }
@@ -1814,6 +1810,28 @@ impl World {
         }
     }
 
+    /// `guid` is gone, and whether it was in the world at all. What the
+    /// server's delete does, and what the client does for itself with a
+    /// thing the server let go without a word: a corpse that rotted while
+    /// the character was out of sight of it (see `ac-client`'s looting).
+    /// Not a way to set things aside; those come back (see `arrived_in`).
+    pub fn forget(&mut self, guid: u32) -> bool {
+        // The server letting go of something set aside: now it is gone.
+        self.left_behind.remove(&guid);
+        // Gone from the corpse or chest that is open, too. Autoplay waits
+        // for everything a corpse lists to be described before judging
+        // it, and a guid left on the list after its delete would hold the
+        // corpse there until it was given up on and written off.
+        if let Some((_, items)) = &mut self.open_container {
+            items.retain(|g| *g != guid);
+        }
+        if self.objects.remove(&guid).is_some() {
+            self.generation += 1;
+            return true;
+        }
+        false
+    }
+
     /// Objects that have a world position and a model.
     pub fn drawable(&self) -> impl Iterator<Item = &WorldObject> {
         self.objects
@@ -2630,6 +2648,73 @@ mod tests {
             Some("Holtburg Dungeon")
         );
         assert!(!world.objects.contains_key(&3));
+        assert!(world.left_behind.is_empty());
+    }
+
+    #[test]
+    fn a_deleted_thing_is_taken_off_the_open_corpse() {
+        // Autoplay waits for everything an open corpse lists to be
+        // described, so a guid kept on the list after its delete would
+        // hold the corpse until it was given up on and written off.
+        let corpse = 0x8000_0100;
+        let mut world = World {
+            player_guid: Some(ME),
+            open_container: Some((corpse, vec![1, 2, 3])),
+            ..Default::default()
+        };
+        world.objects.insert(
+            2,
+            WorldObject {
+                guid: 2,
+                container: Some(corpse),
+                ..Default::default()
+            },
+        );
+        // One that was described, and one deleted before it ever was.
+        for guid in [2u32, 3] {
+            let mut delete = opcode::OBJECT_DELETE.to_le_bytes().to_vec();
+            delete.extend(guid.to_le_bytes());
+            delete.extend(0u16.to_le_bytes());
+            world.apply(&delete);
+        }
+        assert_eq!(world.open_container, Some((corpse, vec![1])));
+    }
+
+    #[test]
+    fn a_thing_forgotten_is_gone_as_its_delete_would_have_it() {
+        // Blargerton in the Holtburg Dungeon: ACE let bodies go while he
+        // was out of sight of them and never sent their deletes, so the
+        // client forgets them itself.
+        let corpse = 0x8000_0200;
+        let mut world = World {
+            player_guid: Some(ME),
+            ..Default::default()
+        };
+        world.objects.insert(
+            corpse,
+            WorldObject {
+                guid: corpse,
+                name: "Corpse of Drudge Skulker".into(),
+                ..Default::default()
+            },
+        );
+        let before = world.generation;
+        assert!(world.forget(corpse));
+        assert!(!world.objects.contains_key(&corpse));
+        assert!(world.generation > before, "the scene was not told");
+        // Forgetting what is not there changes nothing.
+        let after = world.generation;
+        assert!(!world.forget(corpse));
+        assert_eq!(world.generation, after);
+        // Something set aside is forgotten too, and never comes back.
+        world.left_behind.insert(
+            9,
+            WorldObject {
+                guid: 9,
+                ..Default::default()
+            },
+        );
+        assert!(!world.forget(9), "it was not in the world");
         assert!(world.left_behind.is_empty());
     }
 
