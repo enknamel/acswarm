@@ -488,12 +488,12 @@ pub fn run(cli: crate::Cli) -> Result<()> {
         }
     }
 
-    let now = Instant::now();
-    for s in &mut sessions {
-        if !s.ended {
-            s.client.disconnect(now);
-        }
-    }
+    let mut clients: Vec<&mut ac_client::Client> = sessions
+        .iter_mut()
+        .filter(|s| !s.ended)
+        .map(|s| &mut s.client)
+        .collect();
+    ac_client::log_off_all(&mut clients, ac_client::LOG_OFF_WAIT);
     Ok(())
 }
 

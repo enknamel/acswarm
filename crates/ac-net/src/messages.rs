@@ -263,6 +263,15 @@ pub fn enter_world_request() -> Vec<u8> {
         .finish()
 }
 
+/// Message body for CharacterLogOff (0xF653): opcode only. The game's own
+/// logout, as against the connection simply going away.
+pub fn log_off() -> Vec<u8> {
+    Writer::new()
+        .u32(opcode::CHARACTER_LOG_OFF)
+        .clone()
+        .finish()
+}
+
 /// Message body for CharacterEnterWorld (0xF657).
 pub fn enter_world(character_id: u32, account: &str) -> Vec<u8> {
     let mut w = Writer::new();

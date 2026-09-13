@@ -20,6 +20,8 @@ pub use ac_agent::{did, pack, weenie_errors};
 // language, what to wield, how a character fights); the client keeps
 // the network side of them.
 pub use ac_loot::weapons::Stance;
+pub mod logoff;
+pub use logoff::{log_off_all, LOG_OFF_WAIT};
 // Getting somewhere is its own system now (`ac-nav`), with the world
 // behind a trait so that a route can be argued about without one.
 pub use ac_nav::steering as route;
@@ -223,6 +225,10 @@ pub struct Client {
     /// Whether this character's loot ledger has been read back yet. It
     /// cannot be until the server has said who the character is.
     ledger_loaded: bool,
+    /// When the character was asked to log off, and whether the server
+    /// has said it has (see [`Client::log_off`]).
+    log_off_sent: Option<Instant>,
+    logged_off: bool,
     /// Refuse to cast when components of the current formula are missing
     /// (`CastCheck::MissingComponents`). Off by default: the server
     /// decides whether components are required (`require_spell_comps`),
@@ -404,6 +410,8 @@ impl Client {
             known_spells: Default::default(),
             autoplay: Default::default(),
             ledger_loaded: false,
+            log_off_sent: None,
+            logged_off: false,
             require_components: false,
             attack_target: None,
             attack_pending: false,
@@ -451,6 +459,37 @@ impl Client {
         self.quitting = true;
         self.session.disconnect(now);
         self.flush_outgoing();
+    }
+
+    /// Ask the server to log the character off: the game's own logout,
+    /// with its save and its animation, rather than the connection simply
+    /// going away. Nothing is sent from character select, or twice.
+    /// Autoplay stops, so nothing is set in motion during the logout.
+    ///
+    /// Disconnect afterwards, once [`Client::logged_off`] says so (see
+    /// `crate::logoff`): the server acts on a disconnect the moment the
+    /// packet arrives and on this only when its world thread gets to it,
+    /// so the two sent together can see the logout skipped.
+    pub fn log_off(&mut self, now: Instant) {
+        if self.log_off_sent.is_some()
+            || self.world.player_guid.is_none()
+            || self.ending().is_some()
+        {
+            return;
+        }
+        self.quitting = true;
+        self.autoplay.config.enabled = false;
+        self.session
+            .send_message(ac_net::messages::queue::UI, ac_net::messages::log_off());
+        self.log_off_sent = Some(now);
+        self.flush_outgoing();
+    }
+
+    /// Nothing left to wait for before disconnecting: the server has
+    /// logged the character off, it was never asked to (it was at
+    /// character select), or the session has already ended.
+    pub fn logged_off(&self) -> bool {
+        self.logged_off || self.log_off_sent.is_none() || self.ending().is_some()
     }
 
     /// Why this session ended, or `None` while it is still alive.
@@ -797,6 +836,7 @@ impl Client {
                         }
                         opcode::CHARACTER_LOG_OFF => {
                             tracing::info!("server logged the character off");
+                            self.logged_off = true;
                         }
                         opcode::CHARACTER_ERROR | opcode::ACCOUNT_BOOT => {
                             let code = body

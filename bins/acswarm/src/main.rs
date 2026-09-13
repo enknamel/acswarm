@@ -575,6 +575,9 @@ struct App {
     /// The menu's Quit: the next frame saves the settings, disconnects
     /// and leaves the event loop.
     quit_requested: bool,
+    /// Closing: every character was asked to log off, and the window stays
+    /// up until the server says each has, or this deadline passes.
+    closing: Option<Instant>,
     /// Something was drawn as particles last frame, so an empty list
     /// this frame still has to be uploaded to clear it.
     drew_particles: bool,
@@ -885,6 +888,37 @@ impl App {
         }
     }
 
+    /// Save the settings and log every character off. The frames run on,
+    /// so the sessions keep talking to the server, until
+    /// [`App::finish_closing`] says they are done.
+    fn begin_closing(&mut self) {
+        if self.closing.is_some() {
+            return;
+        }
+        self.plugins.save_settings();
+        let now = Instant::now();
+        for net in &mut self.nets {
+            net.client.log_off(now);
+        }
+        self.closing = Some(now + ac_client::LOG_OFF_WAIT);
+    }
+
+    /// True once closing can finish -- every character logged off, or the
+    /// wait for it over -- having disconnected them all.
+    fn finish_closing(&mut self) -> bool {
+        let Some(deadline) = self.closing else {
+            return false;
+        };
+        let now = Instant::now();
+        if now < deadline && !self.nets.iter().all(|n| n.client.logged_off()) {
+            return false;
+        }
+        for net in &mut self.nets {
+            net.client.disconnect(now);
+        }
+        true
+    }
+
     /// Disconnect session `i` and drop it; the sessions after it move
     /// down one and every plugin hears `session_removed`. The window
     /// keeps showing the same session when it was not the one dropped,
@@ -894,7 +928,11 @@ impl App {
             return;
         }
         let mut net = self.nets.remove(i);
-        net.client.disconnect(Instant::now());
+        // Logged off first, as far as a session about to be dropped can
+        // be: there is no frame left to wait for the server in.
+        let now = Instant::now();
+        net.client.log_off(now);
+        net.client.disconnect(now);
         let account = net.client.config.account.clone();
         drop(net);
         self.plugins.session_removed(i);
@@ -2077,6 +2115,10 @@ impl ApplicationHandler for App {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        if self.finish_closing() {
+            event_loop.exit();
+            return;
+        }
         if self.cli.fps == 0 {
             return;
         }
@@ -2122,19 +2164,12 @@ impl ApplicationHandler for App {
             .map(|u| u.wants_keyboard())
             .unwrap_or(false);
         match event {
-            WindowEvent::CloseRequested => {
-                self.plugins.save_settings();
-                if let Some(net) = self.nets.get_mut(self.active) {
-                    net.client.disconnect(Instant::now());
-                }
-                event_loop.exit()
-            }
+            // Closing the window and the menu's Quit both log every
+            // character off first; `about_to_wait` leaves once they have.
+            WindowEvent::CloseRequested => self.begin_closing(),
             WindowEvent::RedrawRequested if self.quit_requested => {
-                self.plugins.save_settings();
-                for net in &mut self.nets {
-                    net.client.disconnect(Instant::now());
-                }
-                event_loop.exit()
+                self.quit_requested = false;
+                self.begin_closing();
             }
             WindowEvent::Resized(size) => {
                 if let Some(g) = &mut self.gpu {
@@ -2515,6 +2550,7 @@ fn main() -> Result<()> {
             show_route: true,
             drew_particles: false,
             quit_requested: false,
+            closing: None,
             started: Instant::now(),
             audio: None,
             lobby: Default::default(),
@@ -3083,9 +3119,9 @@ fn main() -> Result<()> {
             println!("{report}");
         }
         app.plugins.save_settings();
-        if let Some(net) = app.nets.get_mut(app.active) {
-            net.client.disconnect(Instant::now());
-        }
+        let mut clients: Vec<&mut ac_client::Client> =
+            app.nets.iter_mut().map(|n| &mut n.client).collect();
+        ac_client::log_off_all(&mut clients, ac_client::LOG_OFF_WAIT);
         return Ok(());
     }
     let event_loop = EventLoop::new()?;
@@ -3128,6 +3164,7 @@ fn main() -> Result<()> {
         show_route: true,
         drew_particles: false,
         quit_requested: false,
+        closing: None,
         started: Instant::now(),
         audio: None,
         lobby: Default::default(),
