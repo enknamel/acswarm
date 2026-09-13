@@ -19,6 +19,11 @@ pub const KEEP_AT_IT: Duration = Duration::from_secs(45);
 /// this is two asks and a little over, not one slow answer -- and by
 /// then nothing asked for is still in the air.
 pub const NOT_COMING: Duration = Duration::from_secs(10);
+/// A gap this long between two turns at a corpse means something else
+/// had the character meanwhile -- a fight that came to it -- and that
+/// time is not counted against the corpse. The rules are consulted many
+/// times a second while they have the character.
+pub const BROKEN_OFF: Duration = Duration::from_secs(3);
 
 /// The one thing the rules want done next.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -84,8 +89,11 @@ pub struct Run {
     /// What was stepped over on this body because it would not come
     /// out: turned down, or asked for and not moved in [`NOT_COMING`].
     passed: Vec<u32>,
-    /// When this corpse was first stood over.
+    /// When this corpse was first stood over, moved on by any time the
+    /// character spent on something else (see [`BROKEN_OFF`]).
     began: Option<Instant>,
+    /// When the rules were last consulted about it.
+    last: Option<Instant>,
     /// How many things have been taken.
     pub taken: u32,
     /// Whether the corpse opened for it. A body walked to and let go
@@ -111,7 +119,20 @@ impl Run {
                 ..Run::default()
             };
         }
-        let began = *self.began.get_or_insert(now);
+        // The clock counts the time spent at this corpse, not the time
+        // since it was begun. A pack of Drudges arriving mid-corpse has
+        // the character for as long as the fight lasts, the corpse stays
+        // open on the server all the while, and counting that time had
+        // the body given up on the moment the pack was dead.
+        let began = match (self.began, self.last) {
+            (Some(began), Some(last)) if now.duration_since(last) > BROKEN_OFF => {
+                began + now.duration_since(last)
+            }
+            (Some(began), _) => began,
+            (None, _) => now,
+        };
+        self.began = Some(began);
+        self.last = Some(now);
 
         if at.away > REACH {
             return Next::act(Act::Approach, format!("going to {}", at.name));
@@ -617,12 +638,13 @@ mod tests {
         // never Refused.
         let now = Instant::now();
         let mut run = Run::new();
-        let at = body(vec![thing(
-            1,
-            "Stuck Thing",
-            Verdict::Take(LootAction::Keep),
-        )]);
-        run.step(&at, now);
+        // Waiting on an appraisal that never lands.
+        let mut at = body(vec![thing(1, "Odd Ring", Verdict::MustAsk)]);
+        at.asking = vec![1];
+        for s in 0..=KEEP_AT_IT.as_secs() {
+            let next = run.step(&at, now + Duration::from_secs(s));
+            assert_eq!(next.act, None, "gave up at {s} s: {}", next.saying);
+        }
         let next = run.step(&at, now + KEEP_AT_IT + Duration::from_secs(1));
         assert_eq!(next.act, Some(Act::Close));
         assert!(
@@ -630,6 +652,41 @@ mod tests {
             "written off for good: {:?}",
             next.did
         );
+    }
+
+    #[test]
+    fn a_fight_while_a_corpse_is_open_does_not_count_against_it() {
+        // Blargerton opens a body and a pack of Drudges arrives. The fight
+        // has him for a minute, the corpse stays open on the server, and
+        // once the pack was dead the minute counted: the body was given up
+        // on at once with its loot still on it.
+        let now = Instant::now();
+        let s = Duration::from_secs;
+        let mut run = Run::new();
+        let mut at = body(vec![thing(1, "Odd Ring", Verdict::MustAsk)]);
+        at.asking = vec![1];
+        // Ten seconds at it.
+        for t in 0..=10 {
+            assert_eq!(run.step(&at, now + s(t)).act, None);
+        }
+        // A minute fighting, then back at it: still well inside its time.
+        let back = now + s(70);
+        for t in 0..30 {
+            let next = run.step(&at, back + s(t));
+            assert_eq!(next.act, None, "gave up {t} s after the fight");
+        }
+        // The time spent at it does run out in the end.
+        let mut closed = None;
+        for t in 30..40 {
+            let next = run.step(&at, back + s(t));
+            if next.act.is_some() {
+                closed = Some((t, next));
+                break;
+            }
+        }
+        let (t, next) = closed.expect("never gave up");
+        assert!(t >= 35, "gave up after only {} s at it", 10 + t);
+        assert!(matches!(next.did, Did::Blocked(_)), "{:?}", next.did);
     }
 
     #[test]
@@ -658,7 +715,9 @@ mod tests {
         let mut run = Run::new();
         let mut stuck = body(Vec::new());
         stuck.arriving = vec![3];
-        run.step(&stuck, now);
+        for s in 0..=KEEP_AT_IT.as_secs() {
+            assert_eq!(run.step(&stuck, now + Duration::from_secs(s)).act, None);
+        }
         let next = run.step(&stuck, now + KEEP_AT_IT + Duration::from_secs(1));
         assert_eq!(next.act, Some(Act::Close));
         assert!(matches!(next.did, Did::Blocked(_)), "{:?}", next.did);
@@ -681,7 +740,16 @@ mod tests {
         let next = run.step(&second, later);
         assert_eq!(next.act, Some(Act::Take(2)), "{}", next.saying);
         assert_eq!(run.taken, 1, "the count is for this body alone");
-        // Its own clock runs from there, and does give up in the end.
+        // Its own clock runs from there, and does give up in the end. The
+        // shield came out; what is left waits on an appraisal that never
+        // lands.
+        let mut second = body(vec![thing(3, "Odd Ring", Verdict::MustAsk)]);
+        second.guid = 901;
+        second.asking = vec![3];
+        for s in 0..=KEEP_AT_IT.as_secs() {
+            let next = run.step(&second, later + Duration::from_secs(s));
+            assert_eq!(next.act, None, "gave up at {s} s: {}", next.saying);
+        }
         let next = run.step(&second, later + KEEP_AT_IT + Duration::from_secs(1));
         assert_eq!(next.act, Some(Act::Close));
         assert!(matches!(next.did, Did::Blocked(_)), "{:?}", next.did);

@@ -66,12 +66,6 @@ const REACH_PROGRESS: f32 = 1.0;
 /// Walking towards something for this long without getting closer is
 /// not walking towards it any more.
 const REACH_GIVE_UP: Duration = Duration::from_secs(20);
-/// How long a corpse may stay open before the character gives up on
-/// it. Emptying one takes a second or two; anything past this is an
-/// item the server will not hand over, and standing there asking for
-/// it again every four hundred milliseconds is how a character spends
-/// an afternoon over one drudge.
-const LOOT_GIVE_UP: Duration = Duration::from_secs(45);
 /// A pessimistic walking speed for pricing that walk, metres a second:
 /// the way round a dungeon corner is longer than the line to it.
 const LOOT_WALK: f32 = 2.5;
@@ -2589,15 +2583,13 @@ impl Client {
                 .open_container
                 .as_ref()
                 .is_some_and(|(g, _)| *g == guid);
-            if opened && now.duration_since(since) > LOOT_GIVE_UP {
-                tracing::info!("autoplay: giving up on corpse {guid:#010x}; it will not empty");
-                self.close_container();
-                self.forget_kill_spot(guid);
-                self.autoplay.looted.push(guid);
-                self.autoplay.let_go_of_corpse();
-                self.stop_walking_to_loot();
-                return false;
-            }
+            // How long to keep at an open corpse is the loot rules' to say
+            // (`ac_loot::run::KEEP_AT_IT`), counting only the time spent
+            // at it, and they set a body that will not empty aside. This
+            // used to give up first, forty-five seconds after the open was
+            // asked for -- a Drudge pack fought off in between counted
+            // too -- and wrote the body off for good with its loot still
+            // on it, so the rules' own close could never be reached.
             if !opened && now.duration_since(since) > allow && self.autoplay.cast_in_flight(now) {
                 // A spell went out meanwhile, and the use was most likely
                 // turned away as too busy: that is not the corpse refusing.
@@ -2724,7 +2716,7 @@ impl Client {
                 }
                 // Nothing to do yet: the rules are waiting on appraisals,
                 // or on the things the corpse lists to be described. The
-                // corpse stays open and in hand, and `LOOT_GIVE_UP` above
+                // corpse stays open and in hand, and the rules' own clock
                 // is still the limit. Reading this as done
                 // closed a corpse the moment its items went off to be
                 // appraised, marked it looted, and sent the character to the
@@ -6289,9 +6281,9 @@ mod tests {
         ap.take_up_corpse(first, t0, LOOT_TIMEOUT);
         let next = ap.loot_run.step(&corpse_at_hand(first, 1), t0);
         assert_eq!(next.act, Some(ac_loot::Act::Take(1)), "{}", next.saying);
-        // What the give-up path in `autoplay_loot` does with it.
-        let gave_up = t0 + LOOT_GIVE_UP + Duration::from_secs(1);
-        ap.looted.push(first);
+        // Let go of some way other than a shut by the rules: given up on
+        // as it once was, or asked again when it would not open.
+        let gave_up = t0 + ac_loot::run::KEEP_AT_IT + Duration::from_secs(1);
         ap.let_go_of_corpse();
         assert_eq!(ap.corpse, None);
         // The next corpse is chosen, and opens a moment later.
