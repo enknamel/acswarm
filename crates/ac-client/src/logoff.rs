@@ -13,11 +13,16 @@ use std::time::{Duration, Instant};
 
 use crate::Client;
 
-/// How long to wait for the server to finish logging characters off
-/// before disconnecting anyway. Its logout saves and plays an animation;
-/// a few seconds is plenty, and a client that will not close is worse
-/// than one that closes a moment early.
-pub const LOG_OFF_WAIT: Duration = Duration::from_secs(3);
+/// The longest to wait for the server to finish logging characters off
+/// before disconnecting anyway.
+///
+/// ACE plays the log-out animation and only then takes the character out
+/// of the world and says so, a few seconds in all; three seconds turned
+/// out to be just short of that. This is a ceiling, not a delay: the
+/// client leaves the moment every character is confirmed gone, and a
+/// client that will not close is worse than one that closes a moment
+/// early.
+pub const LOG_OFF_WAIT: Duration = Duration::from_secs(10);
 
 /// Log every character off, keep their sessions ticking until the server
 /// has finished with each or `wait` is up, then disconnect them all. For
