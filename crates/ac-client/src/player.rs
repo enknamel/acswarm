@@ -1582,6 +1582,30 @@ impl Player {
         }
     }
 
+    /// Tell the server, now, that the character has stopped, with the
+    /// run key as it is held (`running`): ahead of a use of something
+    /// out of reach, which the server walks us to and cancels on any
+    /// MoveToState that arrives meanwhile. Stopping a walk to use a
+    /// corpse used to report the stop on the next tick, just after the
+    /// use, and the use was dropped without a word. Once said here, the
+    /// next report has nothing new to say.
+    pub fn report_stopped(&mut self, session: &mut Session, running: bool) {
+        let still = RawMotion {
+            running,
+            ..RawMotion::default()
+        };
+        if self.last_motion == still {
+            return;
+        }
+        tracing::debug!("-> MoveToState stopped, ahead of a use");
+        session.send_action(
+            action::MOVE_TO_STATE,
+            &messages::move_to_state(&still, &self.wire(), 1, true),
+        );
+        self.last_motion = still;
+        self.last_auto = Instant::now();
+    }
+
     /// Send MoveToState when the input state changes and AutonomousPosition
     /// four times a second while moving.
     /// Report motion to the server. `quiet` suppresses MoveToState while

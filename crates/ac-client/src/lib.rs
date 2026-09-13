@@ -204,6 +204,9 @@ pub struct Client {
     /// reports us idle again.
     pub move_to: Option<ac_world::object::MoveTarget>,
     pub move_to_since: Instant,
+    /// Whether the run key was held on the last tick: what a stop
+    /// reported ahead of a use says, so the next report agrees with it.
+    held_run: bool,
     /// The server refusing to move, merge or split an item. It answers
     /// InventoryServerSaveFailed with the item's guid and, where it has
     /// one, a reason; without reading that, a step cannot tell a
@@ -410,6 +413,7 @@ impl Client {
             scene_block: None,
             move_to: None,
             move_to_since: Instant::now(),
+            held_run: false,
             move_refused: std::collections::HashMap::new(),
             steering: route::Steering::new(Instant::now()),
             pathfinder,
@@ -1084,6 +1088,7 @@ impl Client {
     }
 
     fn tick_player(&mut self, input: player::Input, dt: f32, now: Instant) -> PlayerFrame {
+        self.held_run = input.run;
         // The user taking the controls ends an overland trip.
         let manual = input.forward != 0.0 || input.strafe != 0.0;
         if manual && self.traveling() {
@@ -1756,6 +1761,14 @@ impl Client {
                 .send_action(action::PUT_ITEM_IN_CONTAINER, &w.finish());
         } else {
             tracing::info!("use {name} ({guid:#010x})");
+            // Stopped first, on the wire: a stop reported after the use
+            // cancels the walk the server starts for it, and the use with
+            // it (ACE `GameActionMoveToState`).
+            if in_the_world {
+                if let Some(pl) = self.player.as_mut() {
+                    pl.report_stopped(&mut self.session, self.held_run);
+                }
+            }
             self.session.send_action(action::USE, &guid.to_le_bytes());
         }
     }
