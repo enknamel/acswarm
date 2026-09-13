@@ -23,6 +23,12 @@
 //!   travels there. A lifestone, a shop or a person is gone to where it
 //!   really stands, upstairs if that is where, and a person is spoken to
 //!   on arriving (see `ac_client::visit`).
+//! * "spawns" marks what spawns where (`ac_world::spawns`): on the world
+//!   map each hunting ground with its levels, on the local map each cell
+//!   with generators, and in a dungeon each room of the storey shown.
+//!   Marks are coloured by how hard the hardest creature there is for the
+//!   character (grey, green, orange, red) and hovering one lists what it
+//!   makes, with levels.
 //! * On the world map a double-click asks for a route there and the
 //!   character walks it (see `ac_client::Client::travel_to`); a place
 //!   name typed into "travel to" does the same by the gazetteer. The
@@ -157,6 +163,8 @@ pub struct MapView {
     pub dungeon: bool,
     pub me: Vec2,
     pub me_z: f32,
+    /// The character's level, to colour what spawns by how hard it is.
+    pub level: u32,
     /// Radians, 0 = north, counter-clockwise.
     pub heading: f32,
     pub coords: String,
@@ -354,6 +362,7 @@ pub fn view(c: &Client) -> Option<MapView> {
         dungeon,
         me,
         me_z,
+        level: c.world.stats.level.max(0) as u32,
         heading,
         coords,
         objects,
@@ -455,6 +464,8 @@ pub struct State {
     /// How many landblocks either side of the character the local map
     /// covers: 0 is the one they stand in, 3 the forty-nine around them.
     pub local_radius: u32,
+    /// Mark what spawns where (see `ac_world::spawns`).
+    pub show_spawns: bool,
     /// World xy at the centre of the view when not following.
     #[serde(skip)]
     pub pan: Vec2,
@@ -472,6 +483,7 @@ impl Default for State {
             zoom_world: 1.0,
             zoom_local: 1.0,
             local_radius: 3,
+            show_spawns: true,
             pan: Vec2::ZERO,
             place: String::new(),
         }
@@ -604,6 +616,19 @@ fn draw_map(
             painter.circle_stroke(sp, 8.0, egui::Stroke::new(1.5, egui::Color32::WHITE));
         }
     }
+    // What spawns where, under the character.
+    if st.show_spawns {
+        draw_spawns(
+            &painter,
+            rect,
+            center,
+            s,
+            v,
+            st,
+            world_tab,
+            resp.hover_pos(),
+        );
+    }
     // The character: a triangle pointing along the heading.
     let me = to_screen(rect, center, s, v.me);
     let fwd = egui::vec2(-v.heading.sin(), -v.heading.cos());
@@ -625,6 +650,181 @@ fn draw_map(
         }
     }
     hover
+}
+
+/// How hard a creature of some level is for the character.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Danger {
+    /// Ten levels or more below: not worth the time.
+    Trivial,
+    /// About the character's own level.
+    Fair,
+    /// Up to fifteen above.
+    Hard,
+    /// Further above than that.
+    Deadly,
+}
+
+impl Danger {
+    fn color(self) -> egui::Color32 {
+        match self {
+            Danger::Trivial => egui::Color32::from_gray(150),
+            Danger::Fair => egui::Color32::from_rgb(110, 210, 110),
+            Danger::Hard => egui::Color32::from_rgb(240, 170, 60),
+            Danger::Deadly => egui::Color32::from_rgb(230, 70, 60),
+        }
+    }
+}
+
+/// How hard something of `level` is for a character of level `me` (0
+/// when not known, which calls everything fair).
+pub fn danger(level: u32, me: u32) -> Danger {
+    if me == 0 {
+        Danger::Fair
+    } else if level + 10 <= me {
+        Danger::Trivial
+    } else if level <= me + 5 {
+        Danger::Fair
+    } else if level <= me + 15 {
+        Danger::Hard
+    } else {
+        Danger::Deadly
+    }
+}
+
+/// The landblocks `radius` either side of `block` (`xxyy0000`), inside
+/// the world.
+pub fn blocks_around(block: u32, radius: u32) -> Vec<u32> {
+    let (bx, by) = ((block >> 24) as i64, ((block >> 16) & 0xFF) as i64);
+    let r = radius as i64;
+    let mut out = Vec::new();
+    for x in (bx - r)..=(bx + r) {
+        for y in (by - r)..=(by + r) {
+            if (0..=255).contains(&x) && (0..=255).contains(&y) {
+                out.push(((x as u32) << 24) | ((y as u32) << 16));
+            }
+        }
+    }
+    out
+}
+
+/// The dungeon storey the local map shows for a character standing at
+/// height `z`: a band six metres tall.
+fn storey_band(z: f32) -> i32 {
+    (z / 6.0).floor() as i32
+}
+
+/// The heights a storey band's picture takes in: a little below its
+/// floor, and up to the ceiling of the room above.
+fn storey_range(band: i32) -> (f32, f32) {
+    (band as f32 * 6.0 - 3.0, band as f32 * 6.0 + 9.0)
+}
+
+/// Mark what spawns where.
+///
+/// On the world map every hunting ground (`ac_world::hunting`) gets a mark
+/// with its levels. On the local map every cell with generators does --
+/// an outdoor cell of the blocks shown, a room of the dungeon on the
+/// storey shown (`ac_world::spawns`). Marks are coloured by how hard the
+/// hardest of what spawns there is for the character, and the one under
+/// the pointer lists what it makes.
+#[allow(clippy::too_many_arguments)]
+fn draw_spawns(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    center: Vec2,
+    s: f32,
+    v: &MapView,
+    st: &State,
+    world_tab: bool,
+    pointer: Option<egui::Pos2>,
+) {
+    let mut marks: Vec<(egui::Pos2, u32, Vec<String>)> = Vec::new();
+    if world_tab {
+        for g in ac_world::hunting::all() {
+            let sp = to_screen(rect, center, s, g.at);
+            if rect.contains(sp) {
+                marks.push((
+                    sp,
+                    g.max_level,
+                    vec![
+                        format!("mostly {} (level {})", g.name, g.level),
+                        format!("levels {} to {}", g.min_level, g.max_level),
+                    ],
+                ));
+            }
+        }
+    } else {
+        let radius = if v.dungeon { 0 } else { st.local_radius };
+        let (low, high) = storey_range(storey_band(v.me_z));
+        for block in blocks_around(v.block, radius) {
+            for place in ac_world::spawns::by_cell(ac_world::spawns::in_block(block)) {
+                if v.dungeon && !(low..=high).contains(&place.at.z) {
+                    continue;
+                }
+                let sp = to_screen(rect, center, s, place.at.truncate());
+                if !rect.contains(sp) {
+                    continue;
+                }
+                let mut lines: Vec<String> = place
+                    .spawns
+                    .iter()
+                    .map(|c| match c.count {
+                        1 => format!("{} (level {})", c.name, c.level),
+                        n => format!("{} (level {}) x{n}", c.name, c.level),
+                    })
+                    .collect();
+                lines.sort();
+                lines.dedup();
+                marks.push((sp, place.levels().1, lines));
+            }
+        }
+    }
+    for (sp, level, _) in &marks {
+        let r = 4.0;
+        painter.add(egui::Shape::convex_polygon(
+            vec![
+                *sp + egui::vec2(0.0, -r),
+                *sp + egui::vec2(r, 0.0),
+                *sp + egui::vec2(0.0, r),
+                *sp + egui::vec2(-r, 0.0),
+            ],
+            danger(*level, v.level).color(),
+            egui::Stroke::new(1.0, egui::Color32::BLACK),
+        ));
+    }
+    // The mark under the pointer says what it makes.
+    let Some(p) = pointer else {
+        return;
+    };
+    let Some((sp, _, lines)) = marks
+        .iter()
+        .filter(|(sp, _, _)| sp.distance(p) <= 7.0)
+        .min_by(|a, b| a.0.distance(p).total_cmp(&b.0.distance(p)))
+    else {
+        return;
+    };
+    let font = egui::FontId::proportional(12.0);
+    let galleys: Vec<_> = lines
+        .iter()
+        .map(|l| painter.layout_no_wrap(l.clone(), font.clone(), egui::Color32::WHITE))
+        .collect();
+    let w = galleys.iter().map(|g| g.size().x).fold(0.0, f32::max);
+    let h: f32 = galleys.iter().map(|g| g.size().y).sum();
+    let mut at = *sp + egui::vec2(10.0, -h - 6.0);
+    at.x = at.x.min(rect.right() - w - 8.0).max(rect.left() + 4.0);
+    at.y = at.y.max(rect.top() + 4.0);
+    painter.rect_filled(
+        egui::Rect::from_min_size(at - egui::vec2(4.0, 3.0), egui::vec2(w + 8.0, h + 6.0)),
+        3.0,
+        egui::Color32::from_black_alpha(220),
+    );
+    let mut y = at.y;
+    for g in galleys {
+        let line = g.size().y;
+        painter.galley(egui::pos2(at.x, y), g, egui::Color32::WHITE);
+        y += line;
+    }
 }
 
 /// Draw the panel.
@@ -656,6 +856,10 @@ pub fn draw(
                 if v.dungeon { "Dungeon" } else { "Local" },
             );
             ui.checkbox(&mut st.follow, "follow");
+            ui.checkbox(&mut st.show_spawns, "spawns").on_hover_text(
+                "Mark what spawns where, coloured by how hard it is for this \
+                 character; hover a mark to see what it makes",
+            );
             if st.tab == Tab::Local && !v.dungeon {
                 caption(ui, "area");
                 egui::ComboBox::from_id_salt("local_radius")
@@ -856,6 +1060,7 @@ impl Map {
                 dungeon: false,
                 me,
                 me_z: 94.0,
+                level: 20,
                 heading: 0.6,
                 coords: "42.1N, 33.6E".into(),
                 objects: vec![
@@ -928,11 +1133,7 @@ impl Map {
     /// of work, which is not something to do on the frame the map is
     /// opened. The old picture stays up until the new one is ready.
     fn ensure_local(&mut self, c: &Client, v: &MapView, radius: u32) {
-        let band = if v.dungeon {
-            (v.me_z / 6.0).floor() as i32
-        } else {
-            0
-        };
+        let band = if v.dungeon { storey_band(v.me_z) } else { 0 };
         // A dungeon is a landblock to itself, so it is never widened.
         let radius = if v.dungeon { 0 } else { radius };
         let want = (v.block, band, radius);
@@ -942,9 +1143,7 @@ impl Map {
         {
             return;
         }
-        let z_range = v
-            .dungeon
-            .then_some((band as f32 * 6.0 - 3.0, band as f32 * 6.0 + 9.0));
+        let z_range = v.dungeon.then(|| storey_range(band));
         let dir = c.assets.data_dir.clone();
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
@@ -1094,6 +1293,47 @@ impl Plugin for Map {
             return true;
         }
         false
+    }
+}
+
+#[cfg(test)]
+mod spawn_tests {
+    use super::*;
+
+    #[test]
+    fn marks_are_coloured_by_how_hard_it_is_for_the_character() {
+        assert_eq!(danger(5, 30), Danger::Trivial);
+        assert_eq!(danger(20, 30), Danger::Trivial);
+        assert_eq!(danger(21, 30), Danger::Fair);
+        assert_eq!(danger(35, 30), Danger::Fair);
+        assert_eq!(danger(42, 30), Danger::Hard);
+        assert_eq!(danger(60, 30), Danger::Deadly);
+        // Nobody logged in yet: nothing to judge by.
+        assert_eq!(danger(200, 0), Danger::Fair);
+    }
+
+    #[test]
+    fn the_blocks_around_stay_inside_the_world() {
+        assert_eq!(blocks_around(0xA9B4_0000, 0), vec![0xA9B4_0000]);
+        let nine = blocks_around(0xA9B4_0000, 1);
+        assert_eq!(nine.len(), 9);
+        assert!(nine.contains(&0xA8B5_0000));
+        // At the corner of the world only the blocks that exist.
+        assert_eq!(blocks_around(0x0000_0000, 1).len(), 4);
+    }
+
+    #[test]
+    fn a_dungeon_marks_the_rooms_of_the_storey_shown() {
+        // Standing at -18 (the Holtburg Dungeon's Lich room), the storey
+        // shown takes in that floor and not the one six metres below.
+        let (low, high) = storey_range(storey_band(-18.0));
+        assert!((low..=high).contains(&-18.0));
+        assert!(!(low..=high).contains(&-24.5));
+        // And the table has marks to put there.
+        let rooms = ac_world::spawns::by_cell(ac_world::spawns::in_block(0x01F6_0000));
+        assert!(rooms
+            .iter()
+            .any(|p| (low..=high).contains(&p.at.z) && p.spawns.iter().any(|s| s.name == "Lich")));
     }
 }
 

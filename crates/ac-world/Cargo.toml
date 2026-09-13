@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 ac-formats = { path = "../ac-formats" }
 ac-net = { path = "../ac-net" }
+flate2 = "1"
 glam = "0.30"
 serde.workspace = true
 thiserror.workspace = true

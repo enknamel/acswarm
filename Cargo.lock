@@ -170,6 +170,7 @@ version = "0.0.3"
 dependencies = [
  "ac-formats",
  "ac-net",
+ "flate2",
  "glam 0.30.10",
  "serde",
  "thiserror 2.0.20",

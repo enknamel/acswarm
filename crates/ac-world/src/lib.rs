@@ -60,6 +60,7 @@ pub mod pack_slot {
 
 pub mod shops;
 pub mod social;
+pub mod spawns;
 pub mod stats;
 pub mod towns;
 pub mod trip;
