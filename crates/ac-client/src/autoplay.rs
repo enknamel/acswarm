@@ -2933,6 +2933,12 @@ impl Client {
         // Stand over it first (see [`CORPSE_REACH`]).
         if away > CORPSE_REACH {
             if let Some(at) = self.world.objects.get(&guid).and_then(|o| o.world_pos()) {
+                // The walk ends any journey under way, and it is a detour
+                // the character comes back from: a town run picks its walk
+                // to the counter up again once the body is dealt with (see
+                // `Client::journey_broken_off`). +Verity's run did not, and
+                // gave up 224 m short of Shopkeeper Renald the Elder.
+                self.interrupt_travel("walking to a corpse");
                 // Well inside the radius rather than on its edge: the
                 // last metre of a walk wanders, and stopping on the
                 // line means stepping back off it again.
@@ -4906,6 +4912,15 @@ impl Client {
     pub(crate) fn autoplay_follow(&mut self, now: Instant, urgent: bool) -> bool {
         let team = self.autoplay.config.team.clone();
         if !team.enabled || !team.follow || team.lead || self.autoplay.team.leader {
+            return false;
+        }
+        // Not while on a town run of its own. A party that restocks with
+        // everyone going shops each for itself, and a follower pulled back
+        // to its leader had its walk to its own counter ended each time it
+        // closed to the following distance. The journey under way is the
+        // run's, not one after the leader.
+        if self.autoplay.growth.town_run_under_way() {
+            self.autoplay.follow_trip = None;
             return false;
         }
         let Some(leader) = self

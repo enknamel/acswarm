@@ -265,19 +265,18 @@ impl Client {
     ///
     /// Asking for movement this way ends any visit being made
     /// (`visit`): whoever asks has taken the character somewhere else.
+    ///
+    /// A walk near at hand ends the journey under way too, but it does not
+    /// break the journey off: following a leader, exploring, going back to
+    /// the hunting area are somewhere else to be, not a detour to come back
+    /// from. What does come back (a corpse, a fight, a use) says so with
+    /// [`interrupt_travel`](Self::interrupt_travel). Counting every walk as
+    /// a break-off had a follower on a party's town run pulled back to its
+    /// leader, its walk to the counter planned again, and pulled back
+    /// again, each time it closed to the following distance.
     pub fn head_for(&mut self, goal: glam::Vec3, stop: f32, why: &str) -> crate::did::Did {
         self.drop_visit(why);
-        // A walk near at hand ends the journey under way, and whatever was
-        // making that journey has to know it was not the journey's own end.
-        // +Verity set off to sell, walked to a fresh corpse a second later,
-        // and the town run read the ended journey as a walk that could not
-        // get there: it gave up 224 m from the counter and stood waiting.
-        let on_a_journey = self.traveling();
-        let did = self.head_toward(goal, stop, why);
-        if on_a_journey && !self.traveling() {
-            self.travel.broken_off = true;
-        }
-        did
+        self.head_toward(goal, stop, why)
     }
 
     /// [`head_for`](Self::head_for) for a visit's own last stretch: the

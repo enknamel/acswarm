@@ -299,6 +299,9 @@ struct Run {
     reason: String,
     /// The vendors already called on this run, by position.
     visited: Vec<Vec2>,
+    /// When the walk to this counter was last planned again after
+    /// something broke it off (see [`on_the_way`]).
+    walked_on: Option<Instant>,
 }
 
 /// The running state of the growth rules.
@@ -646,23 +649,33 @@ enum OnTheWay {
     Short,
 }
 
+/// How soon after planning the walk to the counter again a run may plan
+/// it once more (see [`on_the_way`]).
+const WALK_ON_EVERY: Duration = Duration::from_secs(5);
+
 /// What a run `away` metres from its counter does with no journey under
 /// way. `broken_off` says the last journey was ended by something else
-/// the character went to do (see `Client::journey_broken_off`), and
-/// `busy` that it is still doing it. How long the walk may take is the
-/// run's own clock, and is asked before this.
+/// the character went to do (see `Client::journey_broken_off`), `busy`
+/// that it is still doing it, and `lately` that the run planned its walk
+/// again less than [`WALK_ON_EVERY`] ago. How long the walk may take is
+/// the run's own clock, and is asked before this.
 ///
 /// Any journey not under way used to be one that could not get there.
 /// +Verity set off to sell, a corpse took her a second later -- walking
 /// to one ends a journey -- and the run gave up 224 m short, marked the
 /// counter no use and sold nothing. A walk that ended by itself short of
 /// the counter is still one that cannot get there.
-fn on_the_way(away: f32, broken_off: bool, busy: bool) -> OnTheWay {
+///
+/// Planning the walk is a route search, and something that ends the walk
+/// as soon as it is planned would have it planned every tick or two until
+/// the run's clock ran out: a follower pulled back to its leader was, each
+/// time it closed to the following distance. So it waits a moment first.
+fn on_the_way(away: f32, broken_off: bool, busy: bool, lately: bool) -> OnTheWay {
     if away <= VENDOR_REACH {
         OnTheWay::There
     } else if !broken_off {
         OnTheWay::Short
-    } else if busy {
+    } else if busy || lately {
         OnTheWay::Wait
     } else {
         OnTheWay::WalkOn
@@ -992,6 +1005,12 @@ impl State {
         self.bound = None;
         self.bound_since = None;
         self.after_out = None;
+    }
+
+    /// Whether a run to town is under way, from setting off to the last
+    /// counter.
+    pub(crate) fn town_run_under_way(&self) -> bool {
+        self.run.is_some()
     }
 }
 
@@ -2943,6 +2962,7 @@ impl Client {
             sold: 0,
             reason: reason.clone(),
             visited: vec![at],
+            walked_on: None,
         });
         self.autoplay.say(
             Doing::Shopping,
@@ -3021,7 +3041,10 @@ impl Client {
                 // again rather than taking it for a walk that could not.
                 let away = run.at.distance(me);
                 let busy = self.attack_target.is_some() || self.autoplay.casting_at().is_some();
-                match on_the_way(away, self.journey_broken_off(), busy) {
+                let lately = run
+                    .walked_on
+                    .is_some_and(|t| now.duration_since(t) < WALK_ON_EVERY);
+                match on_the_way(away, self.journey_broken_off(), busy, lately) {
                     OnTheWay::There => {}
                     OnTheWay::Wait => {
                         self.autoplay.growth.run = Some(run);
@@ -3042,6 +3065,7 @@ impl Client {
                             format!("on the way to {} again ({away:.0} m)", run.vendor),
                             now,
                         );
+                        run.walked_on = Some(now);
                         self.autoplay.growth.run = Some(run);
                         return true;
                     }
@@ -3292,6 +3316,7 @@ impl Client {
                         sold: run.sold,
                         reason: run.reason,
                         visited,
+                        walked_on: None,
                     });
                     return true;
                 }
@@ -3547,17 +3572,152 @@ mod tests {
         // Renald the Elder 250 m away. A second later the looting walked
         // her to a fresh corpse, which ends a journey, and the run found no
         // journey under way 224 m short: "could not get to", sold nothing.
-        assert_eq!(on_the_way(224.0, true, false), OnTheWay::WalkOn);
+        assert_eq!(on_the_way(224.0, true, false, false), OnTheWay::WalkOn);
         // Not while what broke it off still has her: a fight on the way.
-        assert_eq!(on_the_way(224.0, true, true), OnTheWay::Wait);
+        assert_eq!(on_the_way(224.0, true, true, false), OnTheWay::Wait);
         // A journey that ended by itself short of the counter -- it gave
         // up, or arrived somewhere else -- still could not get there.
-        assert_eq!(on_the_way(224.0, false, false), OnTheWay::Short);
-        assert_eq!(on_the_way(224.0, false, true), OnTheWay::Short);
+        assert_eq!(on_the_way(224.0, false, false, false), OnTheWay::Short);
+        assert_eq!(on_the_way(224.0, false, true, false), OnTheWay::Short);
         // Near enough, she goes up to the counter however it ended.
         for (broken_off, busy) in [(false, false), (true, false), (true, true)] {
-            assert_eq!(on_the_way(VENDOR_REACH, broken_off, busy), OnTheWay::There);
+            assert_eq!(
+                on_the_way(VENDOR_REACH, broken_off, busy, false),
+                OnTheWay::There
+            );
         }
+    }
+
+    #[test]
+    fn a_walk_broken_off_again_as_soon_as_it_is_planned_waits_before_the_next_plan() {
+        // Something that ends the walk to the counter the moment it is
+        // planned -- a follower pulled back to its leader each time it
+        // closed to the following distance -- had it planned again every
+        // tick or two for the run's four minutes, a route search each time.
+        assert_eq!(on_the_way(224.0, true, false, true), OnTheWay::Wait);
+        // Once the moment is up it is planned again.
+        assert_eq!(on_the_way(224.0, true, false, false), OnTheWay::WalkOn);
+        // Neither giving up nor going up to the counter waits on it.
+        assert_eq!(on_the_way(224.0, false, false, true), OnTheWay::Short);
+        assert_eq!(on_the_way(VENDOR_REACH, true, false, true), OnTheWay::There);
+    }
+
+    /// Offline session over the real archives: nothing calls `tick`, so
+    /// no packet is ever sent.
+    fn offline_client(assets: std::rc::Rc<ac_scene::Assets>) -> Client {
+        Client::connect(
+            crate::Config {
+                host: "127.0.0.1:1".into(),
+                account: "acreborn".into(),
+                password: "x".into(),
+                character: None,
+                auto_enter: true,
+            },
+            assets,
+        )
+        .unwrap()
+    }
+
+    /// A character standing in `cell` at `local`, offline, when the
+    /// archives are there to be read.
+    fn standing_at(cell: u32, local: glam::Vec3) -> Option<Client> {
+        let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
+            eprintln!("AC_DATA_DIR unset; skipping");
+            return None;
+        };
+        let assets = std::rc::Rc::new(ac_scene::Assets::open(dir).unwrap());
+        let mut c = offline_client(assets.clone());
+        let mut pl = crate::player::Player::new(&assets, cell, local, glam::Quat::IDENTITY);
+        pl.set_motion_table(&assets, 0x0200_0001, 0x0900_0001);
+        c.player = Some(pl);
+        Some(c)
+    }
+
+    /// A run on its way to a counter at `at`, set off at `now`.
+    fn run_to(at: Vec2, now: Instant) -> Run {
+        Run {
+            vendor: "Shopkeeper Renald the Elder".into(),
+            at,
+            phase: Phase::Going,
+            since: now,
+            last_sell: None,
+            town: at,
+            stops: 1,
+            sold: 0,
+            reason: "carrying as much as it means to".into(),
+            visited: vec![at],
+            walked_on: None,
+        }
+    }
+
+    #[test]
+    fn a_follower_on_its_own_town_run_is_not_pulled_back_to_its_leader() {
+        // A party restocking with everyone going: each follower makes its
+        // own run while the leader goes on leading. Following ranks above
+        // the run, so each time the follower closed to its following
+        // distance the walk after the leader ended the run's journey, the
+        // run planned it again, and the walk after the leader ended it
+        // again, for the run's four minutes.
+        let holtburg = 0xA9B4_0019;
+        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
+            return;
+        };
+        let me = c.player.as_ref().unwrap().world_position();
+        let team = &mut c.autoplay.config.team;
+        team.enabled = true;
+        team.follow = true;
+        team.lead = false;
+        team.follow_distance = 4.0;
+        let leader_off = |metres: f32| crate::autoplay::Mate {
+            name: "Leader".into(),
+            leader: true,
+            leads: true,
+            world: me + glam::Vec3::new(metres, 0.0, 0.0),
+            cell: holtburg,
+            ..Default::default()
+        };
+        let cfg = c.autoplay.config.growth.clone();
+        let now = Instant::now();
+        let counter = Vec2::new(me.x + 250.0, me.y);
+        assert!(c.grow_travel(counter, now), "no way to the counter");
+        c.autoplay.growth.run = Some(run_to(counter, now));
+
+        // The leader walks off and stops, and walks off again: the
+        // follower keeps to its own walk.
+        for (tick, metres) in [12.0, 3.0, 12.0, 3.0, 30.0, 3.0].into_iter().enumerate() {
+            c.autoplay.team.mates = vec![leader_off(metres)];
+            assert!(!c.autoplay_follow(now, true), "caught up at tick {tick}");
+            assert!(!c.autoplay_follow(now, false), "followed at tick {tick}");
+            assert!(
+                c.traveling(),
+                "its walk to the counter ended at tick {tick}"
+            );
+            assert!(c.grow_run_step(now, &cfg));
+            assert!(c.traveling());
+        }
+
+        // A corpse on the way does break the walk off, and the run walks
+        // on once it is dealt with. Broken off again straight away, the run
+        // waits a moment before planning it once more.
+        c.interrupt_travel("walking to a corpse");
+        assert!(c.journey_broken_off());
+        assert!(c.grow_run_step(now, &cfg));
+        assert!(c.traveling(), "the run did not walk on after a corpse");
+        c.interrupt_travel("walking to a corpse");
+        let soon = now + Duration::from_secs(1);
+        assert!(c.grow_run_step(soon, &cfg));
+        assert!(!c.traveling(), "planned again straight away");
+        assert!(c.grow_run_step(now + WALK_ON_EVERY, &cfg));
+        assert!(c.traveling());
+
+        // With no run of its own the leader is followed. The walk after it
+        // ends the journey without breaking it off: nothing is to pick that
+        // journey up again.
+        c.autoplay.growth.run = None;
+        c.autoplay.team.mates = vec![leader_off(12.0)];
+        assert!(c.autoplay_follow(now, false));
+        assert!(!c.traveling());
+        assert!(!c.journey_broken_off());
     }
 
     #[test]
