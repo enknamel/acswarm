@@ -208,6 +208,16 @@ impl Run {
                 saying: format!("too laden to take the rest of {}", at.name),
             };
         }
+        // Done either way, but said apart. Every body Blargerton shut read
+        // "emptied", the ones the profile turned everything down on as much
+        // as the ones he cleared, so nobody watching could tell "took
+        // nothing" from "did not loot".
+        if self.taken == 0 {
+            return Next::done(match at.items.len() {
+                0 => format!("nothing on {}", at.name),
+                n => format!("nothing worth taking on {} ({n} item(s))", at.name),
+            });
+        }
         Next::done(format!("emptied {}", at.name))
     }
 }
@@ -432,6 +442,49 @@ mod tests {
         let next = run.step(&at, Instant::now());
         assert_eq!(next.act, Some(Act::Close));
         assert_eq!(next.did, Did::Done);
+    }
+
+    #[test]
+    fn a_corpse_with_nothing_worth_taking_says_so_rather_than_emptied() {
+        // Blargerton's log said "emptied" for every body he shut, and so
+        // could not tell a profile that turned everything down from a
+        // character that never looted at all.
+        let mut run = Run::new();
+        let at = body(vec![
+            thing(1, "Rock", Verdict::Leave),
+            thing(2, "Old Bone", Verdict::Leave),
+        ]);
+        let next = run.step(&at, Instant::now());
+        assert_eq!(next.act, Some(Act::Close));
+        assert_eq!(
+            next.did,
+            Did::Done,
+            "still done with: nothing on it is wanted"
+        );
+        assert_eq!(
+            next.saying,
+            "nothing worth taking on Corpse of a Drudge (2 item(s))"
+        );
+        // A body with nothing on it at all says that instead.
+        let next = Run::new().step(&body(Vec::new()), Instant::now());
+        assert_eq!(next.did, Did::Done);
+        assert_eq!(next.saying, "nothing on Corpse of a Drudge");
+    }
+
+    #[test]
+    fn a_corpse_something_was_taken_from_is_emptied() {
+        let now = Instant::now();
+        let mut run = Run::new();
+        let at = body(vec![
+            thing(1, "Dagger", Verdict::Take(LootAction::Keep)),
+            thing(2, "Rock", Verdict::Leave),
+        ]);
+        assert_eq!(run.step(&at, now).act, Some(Act::Take(1)));
+        // The dagger came out; the rock is all that is left.
+        let at = body(vec![thing(2, "Rock", Verdict::Leave)]);
+        let next = run.step(&at, now);
+        assert_eq!(next.did, Did::Done);
+        assert_eq!(next.saying, "emptied Corpse of a Drudge");
     }
 
     #[test]
