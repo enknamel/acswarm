@@ -1460,11 +1460,16 @@ impl Client {
                 }
                 Some((_, _, event::ATTACKER_NOTIFICATION, rest)) => {
                     // Our killing blow: its body is owed from now, before
-                    // the corpse appears (see `Client::owes_a_corpse`).
-                    if ac_net::messages::AttackNotice::parse_attacker(rest)
-                        .is_ok_and(|n| n.percent >= 0.999)
-                    {
-                        self.autoplay.last_kill = Some(Instant::now());
+                    // the corpse appears, and wherever it fell (see
+                    // `Client::owes_a_corpse`).
+                    if let Ok(n) = ac_net::messages::AttackNotice::parse_attacker(rest) {
+                        if n.percent >= 0.999 {
+                            let now = Instant::now();
+                            self.autoplay.last_kill = Some(now);
+                            if let Some(at) = self.killed_at(&n.name) {
+                                self.autoplay.kill_spots.push((at, now));
+                            }
+                        }
                     }
                     match ac_net::messages::AttackNotice::parse_attacker(rest) {
                         Ok(n) => Ok(ChatLine {

@@ -221,6 +221,11 @@ impl Client {
             self.stop_approaching();
             return false;
         };
+        // Nearer than its reach, when nothing landed from further off.
+        let range = self
+            .autoplay
+            .closing_on(target)
+            .map_or(range, |cap| range.min(cap));
         // Within reach is not enough: a spell or an arrow also needs a
         // clear line to the target. Behind a wall, walk round (the
         // steering finds the way) until it is in sight and in reach.

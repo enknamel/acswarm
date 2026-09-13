@@ -90,6 +90,27 @@ const BUFF_EVERY: Duration = Duration::from_millis(1500);
 const STALL_AFTER: Duration = Duration::from_secs(20);
 /// And left alone for this long afterwards.
 const GIVE_UP_FOR: Duration = Duration::from_secs(90);
+/// Casting or shooting this long from one spot with nothing landing:
+/// the spot is no good, and the character closes in rather than going on.
+const CLOSE_IN_AFTER: Duration = Duration::from_secs(8);
+/// Nearer than this, closing in again achieves nothing: give up instead.
+const MIN_STAND_OFF: f32 = 6.0;
+/// A corpse within this of where a kill fell is that kill's body.
+const KILL_SPOT: f32 = 6.0;
+
+/// Whether a corpse at `at` lies where one of the character's kills fell.
+fn near_a_kill(at: glam::Vec3, spots: &[(glam::Vec3, Instant)]) -> bool {
+    spots
+        .iter()
+        .any(|(k, _)| k.truncate().distance(at.truncate()) <= KILL_SPOT)
+}
+
+/// How near to fight from after nothing has landed from `distance`: half
+/// as far, never nearer than [`MIN_STAND_OFF`]. `None` when already that
+/// close, and there is nowhere nearer worth trying.
+fn closer_stand_off(distance: f32) -> Option<f32> {
+    (distance > MIN_STAND_OFF + 1.0).then(|| (distance * 0.5).max(MIN_STAND_OFF))
+}
 /// A change of weapon is asked for at most this often.
 const REWIELD_EVERY: Duration = Duration::from_millis(1000);
 /// Ammunition is made at most this often: a use takes a moment and
@@ -904,6 +925,10 @@ pub struct Autoplay {
     /// last seen to drop: a target that takes no damage for a while is
     /// out of reach, and is let go.
     engaged: Option<(u32, Instant, f32)>,
+    /// A target not being hurt from where the character stands, and how
+    /// near to fight it from now: a spell or an arrow the sight check
+    /// lets through and something on the way stops.
+    closing: Option<(u32, f32)>,
     /// Targets let go, and when, so they are left alone for a while.
     given_up: Vec<(u32, Instant)>,
     /// When ammunition was last made.
@@ -929,6 +954,11 @@ pub struct Autoplay {
     /// two later: in that gap the next target used to be picked, and a
     /// busy spot never gave the loot a turn.
     pub(crate) last_kill: Option<Instant>,
+    /// Where the character's kills fell, and when. A corpse that turns
+    /// up at one is the character's to loot however far off, within the
+    /// fight radius: a caster kills from forty metres, and looking only
+    /// close by left every body it made at range on the ground.
+    pub(crate) kill_spots: Vec<(glam::Vec3, Instant)>,
     /// When something last hit the character. A fight that has come to
     /// it is fought first, body owed or not.
     pub(crate) last_hit_us: Option<Instant>,
@@ -1067,6 +1097,13 @@ impl Autoplay {
     pub fn drop_target(&mut self) {
         self.casting_at = None;
         self.engaged = None;
+        self.closing = None;
+    }
+
+    /// How near to fight `guid` from, when it has not been hurt from
+    /// further off (see `Client::stalled_on`).
+    pub(crate) fn closing_on(&self, guid: u32) -> Option<f32> {
+        self.closing.filter(|(g, _)| *g == guid).map(|(_, cap)| cap)
     }
 
     /// A spell of any kind went out less than a cast ago, so another
@@ -2100,6 +2137,7 @@ impl Client {
             if opened && now.duration_since(since) > LOOT_GIVE_UP {
                 tracing::info!("autoplay: giving up on corpse {guid:#010x}; it will not empty");
                 self.close_container();
+                self.forget_kill_spot(guid);
                 self.autoplay.looted.push(guid);
                 self.autoplay.corpse = None;
                 self.stop_walking_to_loot();
@@ -2206,6 +2244,7 @@ impl Client {
                 Some(ac_loot::Act::Close) => {
                     let taken = self.autoplay.loot_run.taken;
                     self.close_container();
+                    self.forget_kill_spot(guid);
                     self.autoplay.looted.push(guid);
                     self.autoplay.corpse = None;
                     self.stop_walking_to_loot();
@@ -2234,6 +2273,12 @@ impl Client {
         let me = self.player.as_ref().map(|p| p.world_position());
         let Some(me) = me else { return false };
         let looted = self.autoplay.looted.clone();
+        // Kills go stale with the bodies they leave.
+        self.autoplay
+            .kill_spots
+            .retain(|(_, t)| now.duration_since(*t) < CORPSE_LIFE);
+        let kill_spots = self.autoplay.kill_spots.clone();
+        let fight_radius = self.autoplay.config.fight.radius;
         // A corpse set aside for being locked is tried again once its
         // wait is up; waits that have run out stop being remembered.
         self.autoplay.shelved.tidy(now);
@@ -2301,7 +2346,10 @@ impl Client {
             .filter_map(|o| {
                 let p = o.world_pos()?;
                 let d = p.distance(me);
-                (d <= 20.0).then_some((d, o.guid, o.name.clone()))
+                // Close by, or where one of this character's kills fell --
+                // which a caster makes from well past twenty metres.
+                let ours = d <= fight_radius && near_a_kill(p, &kill_spots);
+                (d <= 20.0 || ours).then_some((d, o.guid, o.name.clone()))
             })
             .map(|(d, guid, name)| {
                 let seen = seen_at.get(&guid).copied().unwrap_or(now);
@@ -3164,7 +3212,12 @@ impl Client {
             // waiting on it would stop the fighting altogether.
             .filter(|o| !self.autoplay.shelved.held(&o.guid, now))
             .filter_map(|o| o.world_pos())
-            .any(|at| at.distance(me) <= CORPSE_IS_MINE)
+            .any(|at| {
+                let away = at.distance(me);
+                away <= CORPSE_IS_MINE
+                    || (away <= self.autoplay.config.fight.radius
+                        && near_a_kill(at, &self.autoplay.kill_spots))
+            })
     }
 
     /// Something has hit the character in the last few seconds.
@@ -3770,6 +3823,10 @@ impl Client {
                 if health < last - 0.001 {
                     self.autoplay.engaged = Some((guid, now, health));
                     false
+                } else if now.duration_since(since) > CLOSE_IN_AFTER && self.close_in_on(guid) {
+                    // A new spot to fight from gets its own chance.
+                    self.autoplay.engaged = Some((guid, now, health));
+                    false
                 } else if now.duration_since(since) > STALL_AFTER {
                     let name = self
                         .world
@@ -3784,6 +3841,7 @@ impl Client {
                         .retain(|(_, t)| now.duration_since(*t) < GIVE_UP_FOR);
                     self.autoplay.given_up.push((guid, now));
                     self.autoplay.engaged = None;
+                    self.autoplay.closing = None;
                     self.attack_target = None;
                     self.autoplay.casting_at = None;
                     true
@@ -3793,8 +3851,76 @@ impl Client {
             }
             _ => {
                 self.autoplay.engaged = Some((guid, now, health));
+                self.autoplay.closing = self.autoplay.closing.filter(|(g, _)| *g == guid);
                 false
             }
+        }
+    }
+
+    /// Nothing is landing on `guid` from where a ranged attacker stands:
+    /// fight it from nearer. True when a nearer stand-off was set.
+    ///
+    /// Something the sight check lets through can still stop a spell --
+    /// the ground rising between, a fence, a tree -- and a caster that
+    /// went on casting from the same spot for twenty seconds, spending
+    /// components, and then gave up, never tried a step closer. Only a
+    /// swing or a shot is left alone: a melee attacker is walked in by
+    /// the server already.
+    fn close_in_on(&mut self, guid: u32) -> bool {
+        let ranged = self.autoplay.casting_at == Some(guid) || self.missile;
+        if !ranged {
+            return false;
+        }
+        let (Some(me), Some(at)) = (
+            self.player.as_ref().map(|p| p.world_position()),
+            self.world.objects.get(&guid).and_then(|o| o.world_pos()),
+        ) else {
+            return false;
+        };
+        let away = at.distance(me);
+        let Some(cap) = closer_stand_off(away) else {
+            return false;
+        };
+        let name = self
+            .world
+            .objects
+            .get(&guid)
+            .map(|o| o.name.clone())
+            .unwrap_or_default();
+        self.autoplay.note(
+            format!("nothing landing on {name} from {away:.0} m; closing to {cap:.0} m"),
+            Instant::now(),
+        );
+        self.autoplay.closing = Some((guid, cap));
+        true
+    }
+
+    /// Where the creature just killed was standing: the one being fought
+    /// when it has that name, else the nearest creature by that name.
+    pub(crate) fn killed_at(&self, name: &str) -> Option<glam::Vec3> {
+        let me = self.player.as_ref()?.world_position();
+        let fought = [self.attack_target, self.autoplay.casting_at]
+            .into_iter()
+            .flatten()
+            .filter_map(|g| self.world.objects.get(&g))
+            .find(|o| o.name == name)
+            .and_then(|o| o.world_pos());
+        fought.or_else(|| {
+            self.world
+                .objects
+                .values()
+                .filter(|o| o.name == name && o.item_type & ac_world::item_type::CREATURE != 0)
+                .filter_map(|o| o.world_pos())
+                .min_by(|a, b| a.distance(me).total_cmp(&b.distance(me)))
+        })
+    }
+
+    /// A corpse is done with: the kill spot it lay at is too.
+    fn forget_kill_spot(&mut self, corpse: u32) {
+        if let Some(at) = self.world.objects.get(&corpse).and_then(|o| o.world_pos()) {
+            self.autoplay
+                .kill_spots
+                .retain(|(k, _)| k.truncate().distance(at.truncate()) > KILL_SPOT);
         }
     }
 
@@ -5098,6 +5224,28 @@ mod tests {
         assert_eq!(best_salvager(std::iter::empty()), None);
         // Someone not yet in the world (guid 0) cannot be handed anything.
         assert_eq!(best_salvager([mate("Nobody", 0, 999, true)].iter()), None);
+    }
+
+    #[test]
+    fn a_body_where_a_kill_fell_is_ours_however_far() {
+        let now = Instant::now();
+        let spots = vec![(glam::Vec3::new(100.0, 100.0, 50.0), now)];
+        // Where it fell, give or take the drift of dying.
+        assert!(near_a_kill(glam::Vec3::new(103.0, 98.0, 51.0), &spots));
+        // Somebody else's, a street away.
+        assert!(!near_a_kill(glam::Vec3::new(120.0, 100.0, 50.0), &spots));
+        assert!(!near_a_kill(glam::Vec3::new(100.0, 100.0, 50.0), &[]));
+    }
+
+    #[test]
+    fn a_ranged_attacker_closes_in_before_it_gives_up() {
+        // Nothing landing from forty metres: try from twenty, then ten,
+        // then as near as is worth being -- and only then give up.
+        assert_eq!(closer_stand_off(40.0), Some(20.0));
+        assert_eq!(closer_stand_off(20.0), Some(10.0));
+        assert_eq!(closer_stand_off(10.0), Some(MIN_STAND_OFF));
+        assert_eq!(closer_stand_off(MIN_STAND_OFF), None);
+        assert_eq!(closer_stand_off(MIN_STAND_OFF + 0.5), None);
     }
 
     #[test]
