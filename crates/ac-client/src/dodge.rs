@@ -252,6 +252,16 @@ impl Client {
         }
     }
 
+    /// Whether spell `id` is thrown as a projectile (see [`aim::flies`]);
+    /// one the table does not have is taken to be.
+    pub fn spell_flies(&self, id: u32) -> bool {
+        self.assets
+            .spell_table()
+            .ok()
+            .and_then(|t| t.get(id).map(|sp| aim::flies(sp.meta_spell_type)))
+            .unwrap_or(true)
+    }
+
     /// The shape of object `guid` standing at `feet`: its Setup's height
     /// and radius at its scale, a person's when that is not known.
     fn body_of(&self, guid: u32, feet: Vec3) -> aim::Body {

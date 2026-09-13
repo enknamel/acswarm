@@ -63,6 +63,17 @@ pub const UNKNOWN_HEIGHT: f32 = 1.8;
 /// Radius taken for something whose shape is not known.
 pub const UNKNOWN_RADIUS: f32 = 0.4;
 
+/// Whether a spell of `meta_spell_type` is thrown as a projectile, and
+/// so can strike something on the way and miss (ACE `Spell.IsProjectile`).
+/// Every other spell lands, or is resisted, where it is cast.
+pub fn flies(meta_spell_type: u32) -> bool {
+    use ac_formats::spell_table::spell_type::*;
+    matches!(
+        meta_spell_type,
+        PROJECTILE | LIFE_PROJECTILE | ENCHANTMENT_PROJECTILE
+    )
+}
+
 /// The kinds of flight.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Shot {
@@ -302,6 +313,15 @@ mod tests {
         assert!(!clears(&bolt, wall, flat));
         let arc = flight(Shot::Arc { speed: 10.0 }, from, to).unwrap();
         assert!(clears(&arc, wall, flat));
+    }
+
+    #[test]
+    fn only_a_projectile_spell_flies() {
+        // Flame Bolt, Martyr's Hecatomb: thrown.
+        assert!(flies(2) && flies(10) && flies(15));
+        // Imperil Other (enchantment), Harm Other (boost), Drain Health
+        // Other (transfer): cast where the target stands.
+        assert!(!flies(1) && !flies(3) && !flies(4));
     }
 
     #[test]

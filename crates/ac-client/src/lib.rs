@@ -1634,6 +1634,8 @@ impl Client {
         self.autoplay
             .academy
             .hear(&line.sender, &line.text, Instant::now());
+        // A resist or an evasion: the shot got there.
+        self.hear_arrival(&line.text);
         let text = match (op, line.sender.is_empty()) {
             _ if line.kind == ac_net::messages::turbine::KIND => {
                 let room = ac_net::messages::turbine::name(line.sender_id);

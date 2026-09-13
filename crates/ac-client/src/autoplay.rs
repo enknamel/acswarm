@@ -118,6 +118,22 @@ fn corpse_is_ours(
     away <= LOOT_NEAR || (away <= fight_radius && near_a_kill(at, spots))
 }
 
+/// The creature a line says was reached and not hurt: "X resists your
+/// spell" (ACE `TryResistSpell`, projectile or not) or "X evades your
+/// attack.". Either way the shot got there.
+fn arrived_unharmed(text: &str) -> Option<&str> {
+    text.strip_suffix(" resists your spell")
+        .or_else(|| text.strip_suffix(" evades your attack."))
+}
+
+/// Whether nothing has got to a target for long enough to try from
+/// nearer: no damage since `hurt`, and no resist or evasion since then
+/// either.
+fn nothing_arrived(hurt: Instant, unharmed: Option<Instant>, now: Instant) -> bool {
+    let last = unharmed.map_or(hurt, |t| t.max(hurt));
+    now.duration_since(last) > CLOSE_IN_AFTER
+}
+
 /// How near to fight from after nothing has landed from `distance`: half
 /// as far, never nearer than [`MIN_STAND_OFF`]. `None` when already that
 /// close, and there is nowhere nearer worth trying.
@@ -937,6 +953,13 @@ pub struct Autoplay {
     /// last seen to drop: a target that takes no damage for a while is
     /// out of reach, and is let go.
     engaged: Option<(u32, Instant, f32)>,
+    /// The target something last got to without hurting it -- a spell
+    /// resisted, an arrow evaded -- and when. It arrived: the spot it was
+    /// thrown from is not what is wrong.
+    pub(crate) arrived: Option<(u32, Instant)>,
+    /// The attack spell last cast, to tell whether what is being thrown
+    /// can miss at all: only a projectile can.
+    pub(crate) attack_spell: Option<u32>,
     /// A target not being hurt from where the character stands, and how
     /// near to fight it from now: a spell or an arrow the sight check
     /// lets through and something on the way stops.
@@ -3552,6 +3575,7 @@ impl Client {
             self.cast(spell);
             self.autoplay.cast_sent = Some(now);
             self.note_fired(spell, now);
+            self.autoplay.attack_spell = Some(spell);
             let element = ac_world::elements::spell_element(spell)
                 .map(|e| e.name())
                 .unwrap_or("");
@@ -3831,7 +3855,15 @@ impl Client {
                 if health < last - 0.001 {
                     self.autoplay.engaged = Some((guid, now, health));
                     false
-                } else if now.duration_since(since) > CLOSE_IN_AFTER && self.close_in_on(guid) {
+                } else if nothing_arrived(
+                    since,
+                    self.autoplay
+                        .arrived
+                        .filter(|(g, _)| *g == guid)
+                        .map(|(_, t)| t),
+                    now,
+                ) && self.close_in_on(guid)
+                {
                     // A new spot to fight from gets its own chance.
                     self.autoplay.engaged = Some((guid, now, health));
                     false
@@ -3871,14 +3903,22 @@ impl Client {
     /// The flight is worked out before a shot is thrown (see `crate::aim`),
     /// but only through the world that stands still: another creature in
     /// the way, a door, a target on the move can still take it -- and a
-    /// caster that
-    /// went on casting from the same spot for twenty seconds, spending
-    /// components, and then gave up, never tried a step closer. Only a
-    /// swing or a shot is left alone: a melee attacker is walked in by
-    /// the server already.
+    /// caster that went on casting from the same spot for twenty seconds,
+    /// spending components, and then gave up, never tried a step closer.
+    ///
+    /// Only something thrown can miss this way: a projectile spell or an
+    /// arrow. Any other spell lands or is resisted where it is cast, and a
+    /// resist or an evasion got there all the same (see
+    /// [`arrived_unharmed`]). A melee attacker is walked in by the server
+    /// already.
     fn close_in_on(&mut self, guid: u32) -> bool {
-        let ranged = self.autoplay.casting_at == Some(guid) || self.missile;
-        if !ranged {
+        let thrown = self.missile
+            || (self.autoplay.casting_at == Some(guid)
+                && self
+                    .autoplay
+                    .attack_spell
+                    .is_some_and(|s| self.spell_flies(s)));
+        if !thrown {
             return false;
         }
         let (Some(me), Some(at)) = (
@@ -3923,6 +3963,21 @@ impl Client {
                 .filter_map(|o| o.world_pos())
                 .min_by(|a, b| a.distance(me).total_cmp(&b.distance(me)))
         })
+    }
+
+    /// A line saying a shot got to something and did not hurt it (see
+    /// [`arrived_unharmed`]): noted against the target it names.
+    pub(crate) fn hear_arrival(&mut self, text: &str) {
+        let Some(name) = arrived_unharmed(text) else {
+            return;
+        };
+        let target = [self.autoplay.casting_at, self.attack_target]
+            .into_iter()
+            .flatten()
+            .find(|g| self.world.objects.get(g).is_some_and(|o| o.name == name));
+        if let Some(g) = target {
+            self.autoplay.arrived = Some((g, Instant::now()));
+        }
     }
 
     /// Where the creature a kill message names was standing: the one
@@ -5265,6 +5320,33 @@ mod tests {
         // Somebody else's, a street away.
         assert!(!near_a_kill(glam::Vec3::new(120.0, 100.0, 50.0), &spots));
         assert!(!near_a_kill(glam::Vec3::new(100.0, 100.0, 50.0), &[]));
+    }
+
+    #[test]
+    fn a_resist_or_an_evasion_got_there() {
+        assert_eq!(
+            arrived_unharmed("Drudge Skulker resists your spell"),
+            Some("Drudge Skulker")
+        );
+        assert_eq!(
+            arrived_unharmed("Mite Scion evades your attack."),
+            Some("Mite Scion")
+        );
+        // Ours, not theirs.
+        assert_eq!(
+            arrived_unharmed("You resist the spell cast by Drudge Skulker"),
+            None
+        );
+        let now = Instant::now();
+        let long_ago = now.checked_sub(CLOSE_IN_AFTER * 2).unwrap();
+        // No damage and nothing else for a while: nothing is getting there.
+        assert!(nothing_arrived(long_ago, None, now));
+        // Resisted just now: it got there.
+        assert!(!nothing_arrived(long_ago, Some(now), now));
+        // Hurt just now.
+        assert!(!nothing_arrived(now, None, now));
+        // A resist from before the last hurt does not stretch it.
+        assert!(!nothing_arrived(now, Some(long_ago), now));
     }
 
     #[test]
