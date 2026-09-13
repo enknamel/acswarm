@@ -2,7 +2,7 @@
 
 use std::time::{Duration, Instant};
 
-use ac_agent::did::{Because, Did, Patience};
+use ac_agent::did::{Because, Did};
 
 use crate::corpse::{Open, Verdict, REACH};
 
@@ -75,8 +75,6 @@ pub struct Run {
     corpse: Option<u32>,
     /// The item last asked for, and when.
     asked: Option<(u32, Instant)>,
-    /// Items that will not come out.
-    stuck: Patience<u32>,
     /// When this corpse was first stood over.
     began: Option<Instant>,
     /// How many things have been taken.
@@ -117,9 +115,10 @@ impl Run {
         if at.slots_free <= at.keep_free {
             return Next::done("pack full, leaving the loot");
         }
-        if at.carry_room == 0 {
-            return Next::done("carrying as much as it means to, leaving the loot");
-        }
+        // Carrying as much as it means to is not a reason to leave the
+        // corpse unopened: only what will not fit stays. Shutting it
+        // then and there left Blargerton's coin lying on every body he
+        // killed, and wrote each one off as looted besides.
 
         // Long enough. A corpse that will not give up its contents is
         // set aside, not written off.
@@ -131,9 +130,16 @@ impl Run {
             };
         }
 
-        // What cannot be judged without asking. Asked for in one go.
+        // What cannot be judged without asking. Asked for in one go --
+        // but not what could not be carried whatever it turned out to
+        // be, or a laden character spends a round trip on every item of
+        // every body only to leave it there.
         if at.may_ask {
-            let ask: Vec<u32> = at.unjudged().map(|i| i.guid).collect();
+            let ask: Vec<u32> = at
+                .unjudged()
+                .filter(|i| i.burden <= at.carry_room)
+                .map(|i| i.guid)
+                .collect();
             if !ask.is_empty() {
                 let n = ask.len();
                 return Next::act(Act::Ask(ask), format!("looking over {n} item(s)"));
@@ -154,9 +160,9 @@ impl Run {
         // the item leaving, which is what takes it off this list, so
         // when the front has changed the last one is done and the next
         // goes at once.
-        // The first thing worth taking that has not been set aside.
+        // The first thing worth taking that fits.
         //
-        // Set aside is not the same as waiting, and conflating the two
+        // Skipped is not the same as waiting, and conflating the two
         // is a bug with a name: the server moves one thing at a time
         // and answers a second with "Source item not found", so an item
         // that has been asked for and has not moved yet must be waited
@@ -164,17 +170,9 @@ impl Run {
         // heavier than the character can carry -- is skipped.
         let next = at
             .wanted()
-            .find(|i| !self.stuck.held(&i.guid, now))
-            .map(|i| (i.guid, i.name.clone(), i.burden));
-        if let Some((guid, name, burden)) = next {
-            if burden > at.carry_room {
-                self.stuck.note(
-                    guid,
-                    &Did::Blocked(Because::ours("too heavy to carry")),
-                    now,
-                );
-                return Next::wait("that one is heavier than it can carry");
-            }
+            .find(|i| i.burden <= at.carry_room)
+            .map(|i| (i.guid, i.name.clone()));
+        if let Some((guid, name)) = next {
             match self.asked {
                 // Asked for and still lying there: wait for it.
                 Some((last, when)) if last == guid => {
@@ -188,6 +186,21 @@ impl Run {
             return Next::act(Act::Take(guid), format!("taking {name}"));
         }
 
+        // Everything that fitted has been taken, and something it wanted
+        // -- or might have, had it been light enough to ask about -- is
+        // still lying there for its weight. Set aside, not emptied: once
+        // the pack has been sold down it will fit, and the body keeps.
+        let left_for_weight = at
+            .items
+            .iter()
+            .any(|i| i.verdict != Verdict::Leave && i.burden > at.carry_room);
+        if left_for_weight {
+            return Next {
+                act: Some(Act::Close),
+                did: Did::Blocked(Because::ours("too laden to take the rest")),
+                saying: format!("too laden to take the rest of {}", at.name),
+            };
+        }
         Next::done(format!("emptied {}", at.name))
     }
 }
@@ -337,11 +350,35 @@ mod tests {
     }
 
     #[test]
-    fn too_laden_also_closes_it() {
+    fn a_character_carrying_all_it_means_to_still_takes_the_coin() {
+        // Blargerton, laden: every corpse was shut before anything on it
+        // was looked at, so even pyreals, which weigh nothing, stayed on
+        // the body.
         let mut run = Run::new();
-        let mut at = body(vec![thing(1, "Dagger", Verdict::Take(LootAction::Keep))]);
+        let mut coin = thing(1, "Pyreal", Verdict::Take(LootAction::Keep));
+        coin.burden = 0;
+        let mut at = body(vec![coin]);
         at.carry_room = 0;
-        assert_eq!(run.step(&at, Instant::now()).act, Some(Act::Close));
+        let next = run.step(&at, Instant::now());
+        assert_eq!(next.act, Some(Act::Take(1)), "{}", next.saying);
+    }
+
+    #[test]
+    fn a_character_too_laden_for_what_is_left_sets_the_corpse_aside() {
+        // Nothing on it fits, so it is shut -- but not written off: sold
+        // down, the character has room for it, and the body keeps.
+        let mut run = Run::new();
+        let mut mace = thing(1, "Mace", Verdict::Take(LootAction::Sell));
+        mace.burden = 50;
+        let mut at = body(vec![mace]);
+        at.carry_room = 0;
+        let next = run.step(&at, Instant::now());
+        assert_eq!(next.act, Some(Act::Close), "{}", next.saying);
+        assert!(
+            matches!(next.did, Did::Blocked(_)),
+            "written off as emptied: {:?}",
+            next.did
+        );
     }
 
     #[test]
@@ -350,15 +387,34 @@ mod tests {
         let mut run = Run::new();
         let mut heavy = thing(1, "Anvil", Verdict::Take(LootAction::Keep));
         heavy.burden = 9_000;
-        let at = body(vec![
-            heavy,
+        let mut at = body(vec![
+            heavy.clone(),
             thing(2, "Dagger", Verdict::Take(LootAction::Keep)),
         ]);
-        let mut at = at;
         at.carry_room = 100;
-        // The anvil is refused, and the dagger still goes in the pack.
-        assert_eq!(run.step(&at, now).act, None);
+        // The anvil is stepped over, and the dagger goes in the pack.
         assert_eq!(run.step(&at, now).act, Some(Act::Take(2)));
+        // With the dagger out, the anvil is all there is: the corpse is
+        // set aside for it rather than written off.
+        at.items = vec![heavy];
+        let next = run.step(&at, now);
+        assert_eq!(next.act, Some(Act::Close));
+        assert!(matches!(next.did, Did::Blocked(_)), "{:?}", next.did);
+    }
+
+    #[test]
+    fn what_could_not_be_carried_whatever_it_is_is_not_asked_about() {
+        // An identify is a round trip. Spending one on a thing that will
+        // be left for its weight whatever the answer is waste.
+        let mut run = Run::new();
+        let mut heavy = thing(1, "Odd Statue", Verdict::MustAsk);
+        heavy.burden = 5_000;
+        let mut at = body(vec![heavy, thing(2, "Odd Ring", Verdict::MustAsk)]);
+        at.carry_room = 100;
+        match run.step(&at, Instant::now()).act {
+            Some(Act::Ask(ids)) => assert_eq!(ids, vec![2]),
+            other => panic!("expected an ask for the ring alone, got {other:?}"),
+        }
     }
 
     #[test]
