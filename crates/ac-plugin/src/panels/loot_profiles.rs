@@ -1034,8 +1034,9 @@ fn looting(ui: &mut egui::Ui, p: &mut Profile, drafts: &mut super::autoplay::Dra
                 .suffix(" x capacity"),
         )
         .on_hover_text(
-            "How laden to get before going to sell. At 1 a character is \
-             comfortable, at 2 slowed, at 3 the server stops it picking anything up.",
+            "How much loot to carry before going to sell. What is worn and wielded \
+             does not count, but the server still stops a character picking anything \
+             up at 3 x capacity, gear and all.",
         );
     });
     caption(ui, "always take");

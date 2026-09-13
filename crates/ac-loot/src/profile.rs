@@ -645,6 +645,13 @@ pub struct Looting {
     /// two it is slowed, at three the server stops it picking anything
     /// up -- and hunting up to that wall leaves it unable to loot, pour
     /// stacks together or move. So it stops well short and goes to sell.
+    ///
+    /// What the character wears and wields does not count towards it.
+    /// This is a limit on loot, and a counter cannot lighten armour the
+    /// character keeps on: counted, a character carrying 13866 against
+    /// a limit of 13500, most of it its own gear, had no room from the
+    /// start and took nothing from any corpse. The server's wall at
+    /// three times still counts everything.
     pub carry_up_to: f32,
 }
 

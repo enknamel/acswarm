@@ -526,6 +526,29 @@ fn contains_fold(haystack: &str, needle: &str) -> bool {
         .any(|w| w.iter().zip(n).all(|(a, b)| a.eq_ignore_ascii_case(b)))
 }
 
+/// How much more a character will take on before it has had enough:
+/// `carry_up_to` times its capacity, less what it carries beyond what
+/// it wears and wields, and never more than the server's wall leaves.
+///
+/// The working limit is about loot -- how much the character picks up
+/// before it goes to sell -- so the gear on it is left out. It used to
+/// count, and that stopped Blargerton looting altogether: Strength 60
+/// gives a capacity of 9000 and a limit of 13500 at one and a half
+/// times, and he carried 13866, most of it gear he keeps (his plate
+/// alone is 6540). No room at all, so every corpse he opened was shut
+/// again at once and marked looted, and he took nothing. Selling could
+/// not lift it either: the weight was gear he keeps.
+///
+/// The wall counts everything, gear and all: the server refuses
+/// whatever would take the character past three times its capacity,
+/// whatever the loot limit says.
+fn loot_room(carried: u32, equipped: u32, capacity: u32, carry_up_to: f32) -> u32 {
+    let limit = (capacity as f32 * carry_up_to.max(0.0)) as u32;
+    let loot = carried.saturating_sub(equipped);
+    let wall = capacity.saturating_mul(3).saturating_sub(carried);
+    limit.saturating_sub(loot).min(wall)
+}
+
 /// Something in the pack the rules allow to be sold, before any one
 /// counter's tastes are applied to it.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -2424,26 +2447,33 @@ impl Client {
         capacity.saturating_mul(3).saturating_sub(now)
     }
 
-    /// How much more the character will take on before it stops
+    /// How much more loot the character will take on before it stops
     /// hunting and goes to sell: the loot profile's `carry_up_to` times
-    /// its capacity,
-    /// less what it carries. Zero means it has had enough.
+    /// its capacity, less what it carries beyond what it wears and
+    /// wields. Zero means it has had enough.
+    ///
+    /// The gear on it does not count, because selling cannot take it
+    /// off: counted, a character in heavy plate had no room before it
+    /// picked up a thing, and left every corpse untouched (`loot_room`
+    /// tells that story).
     ///
     /// This is the working limit, not the server's. [`burden_room`] is
     /// the wall -- what the server will still accept -- and a character
     /// that hunts up to the wall cannot loot, cannot merge stacks and
-    /// can barely walk.
+    /// can barely walk. The wall counts everything, so this never claims
+    /// more room than it leaves.
     pub fn carry_room(&self) -> u32 {
         let (now, capacity) = self.burden();
+        let equipped = self
+            .world
+            .wielded()
+            .fold(0u32, |sum, o| sum.saturating_add(o.burden));
         let up_to = self
             .loot_profile()
             .map_or(crate::profile::Looting::default().carry_up_to, |p| {
                 p.looting.carry_up_to
-            })
-            .max(0.0);
-        let limit = (capacity as f32 * up_to) as u32;
-        // Never claim more room than the server would actually allow.
-        limit.min(capacity.saturating_mul(3)).saturating_sub(now)
+            });
+        loot_room(now, equipped, capacity, up_to)
     }
 
     /// Which society this character belongs to, as `Faction1Bits`: 1
@@ -2590,6 +2620,13 @@ impl Client {
         // grows too heavy to lift anything, tidy anything, or move at
         // any speed. It is as good a reason to go and sell as a pack
         // with no slots left.
+        //
+        // Laden means the loot has filled the working limit, or the
+        // server's wall leaves no room for any more -- not that the
+        // character is heavy. Its armour does not count: a counter
+        // cannot lighten that, and counting it would send a character
+        // whose gear alone reached the limit off to sell with nothing to
+        // sell.
         let laden = self.carry_room() == 0;
         let needs = self.needs_now(now, cfg);
         // On a team that restocks together, the party's mode decides:
@@ -3120,6 +3157,54 @@ mod tests {
             cost,
             weight,
         }
+    }
+
+    #[test]
+    fn blargertons_own_gear_does_not_leave_him_without_room_to_loot() {
+        // Strength 60: capacity 9000, a limit of 13500 at 1.5 and a wall
+        // at 27000. He carried 13866, the plate on him 6540 of it.
+        let (carried, plate, capacity) = (13_866, 6_540, 9_000);
+        // Counting the plate as loot left him nothing: the fault.
+        assert_eq!(loot_room(carried, 0, capacity, 1.5), 0);
+        // Left out, the rest of the 13500 is his to fill.
+        assert_eq!(
+            loot_room(carried, plate, capacity, 1.5),
+            13_500 - (13_866 - 6_540)
+        );
+    }
+
+    #[test]
+    fn the_servers_wall_still_caps_the_room() {
+        // Gear alone at 12000, loot 8000: the limit at 2.9 would allow
+        // 18100 more, but the server's wall leaves only 7000.
+        assert_eq!(loot_room(20_000, 12_000, 9_000, 2.9), 27_000 - 20_000);
+        // At the wall there is no room, however light the loot.
+        assert_eq!(loot_room(27_000, 20_000, 9_000, 1.5), 0);
+        assert_eq!(loot_room(30_000, 30_000, 9_000, 1.5), 0);
+    }
+
+    #[test]
+    fn gear_alone_over_the_old_limit_still_leaves_room_to_loot() {
+        // Worn gear heavier than the limit, and nothing else carried:
+        // the old sum said laden before a single pickup.
+        assert_eq!(loot_room(9_500, 0, 9_000, 1.0), 0);
+        assert_eq!(loot_room(9_500, 9_500, 9_000, 1.0), 9_000);
+        // At the default the wall is what stops it, not the limit.
+        assert_eq!(loot_room(14_000, 14_000, 9_000, 1.5), 13_000);
+        // And once the loot on top has filled the limit, it is laden.
+        assert_eq!(loot_room(9_500 + 9_000, 9_500, 9_000, 1.0), 0);
+        // A worn figure ahead of the server's total takes nothing off.
+        assert_eq!(loot_room(1_000, 1_500, 9_000, 1.5), 13_500);
+    }
+
+    #[test]
+    fn no_capacity_or_no_limit_is_no_room() {
+        // Strength not heard yet: capacity 0, so nothing is claimed.
+        assert_eq!(loot_room(0, 0, 0, 1.5), 0);
+        assert_eq!(loot_room(500, 500, 0, 1.5), 0);
+        // A limit of nothing, or less, is nothing.
+        assert_eq!(loot_room(0, 0, 9_000, 0.0), 0);
+        assert_eq!(loot_room(0, 0, 9_000, -1.0), 0);
     }
 
     #[test]
