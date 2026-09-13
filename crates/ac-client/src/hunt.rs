@@ -226,6 +226,14 @@ impl Client {
         if !self.autoplay.config.fight.enabled {
             return false;
         }
+        // Nor on a run to town, which leaves the area on purpose. At the
+        // counter, or between journeys once a corpse or a fight on the way
+        // has ended one, a walk back to the area would take the character
+        // off its run, and the run's own step, ranked below this one, would
+        // never see it again.
+        if self.autoplay.growth.town_run_under_way() {
+            return false;
+        }
         // Never in the middle of a fight: something hitting the character
         // is fought where it stands, and so is what it has taken on.
         if self.under_attack()

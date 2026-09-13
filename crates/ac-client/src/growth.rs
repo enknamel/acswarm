@@ -3721,6 +3721,53 @@ mod tests {
     }
 
     #[test]
+    fn a_town_run_between_journeys_is_not_taken_exploring_or_back_to_the_area() {
+        // Underground, a corpse on the way ends the run's journey, and
+        // exploring ranks above the run: a room chosen then kept the tick
+        // for good, so the run never planned its walk again and its clock
+        // was never read. Keeping to a hunting area ranks above the run as
+        // well, and would have walked the character back to it.
+        let renald = Vec2::new(32_587.2, 34_578.3);
+        let now = Instant::now();
+
+        // Where the Holtburg Dungeon's portal drops a character.
+        let Some(mut c) = standing_at(0x01F6_0289, glam::Vec3::new(96.7, -10.0, 0.0)) else {
+            return;
+        };
+        c.autoplay.growth.run = Some(run_to(renald, now));
+        assert!(!c.traveling());
+        assert!(!c.autoplay_explore(now), "went exploring on a run to town");
+        assert!(c.follow.is_none());
+        // With no run, the same dungeon is explored.
+        c.autoplay.growth.run = None;
+        assert!(c.autoplay_explore(now));
+
+        // Outdoors by the Holtburg lifestone, a field to hunt 40 m off.
+        let Some(mut c) = standing_at(0xA9B4_0019, glam::Vec3::new(84.0, 7.1, 94.0)) else {
+            return;
+        };
+        let me = c.player.as_ref().unwrap().world_position();
+        let (x, y) = (me.x + 40.0, me.y);
+        let fight = &mut c.autoplay.config.fight;
+        fight.enabled = true;
+        fight.area = Some(crate::hunt::HuntArea {
+            name: "the field".into(),
+            shape: crate::hunt::Shape::Outline {
+                points: vec![[x, y], [x + 30.0, y], [x + 30.0, y + 30.0], [x, y + 30.0]],
+            },
+        });
+        c.autoplay.growth.run = Some(run_to(renald, now));
+        assert!(
+            !c.autoplay_keep_to_area(now),
+            "walked back to the area on a run to town"
+        );
+        assert!(c.follow.is_none());
+        // With no run, outside the field, it goes back to it.
+        c.autoplay.growth.run = None;
+        assert!(c.autoplay_keep_to_area(now));
+    }
+
+    #[test]
     fn a_run_that_could_not_get_there_is_tried_again_once_its_wait_is_up() {
         // A run that really cannot reach its counter comes home with
         // nothing, so it is futile, and the counter is left alone for a
