@@ -230,6 +230,34 @@ Casting rules (ACE `Player_Magic`, matching retail):
   end), VictimNotification / KillerNotification (0x01AC/0x01AD),
   UpdateHealth (0x01C0 for the selected target's health fraction).
 
+### Summoning
+
+* A skill, not a school: the character uses an **essence** carried in the
+  pack (ACE `PetDevice`, Use 0x0036), and the creature it names appears in
+  front of them, named "<owner>'s <creature>" and carrying the owner's
+  guid in its description (WeenieHeaderFlag2 `PetOwner`). It fights the
+  nearest enemy until one of them dies or its **lifespan (~45 s)** runs
+  out, and is melee only. Summoned creatures neither attack nor can be
+  attacked by other players.
+* One at a time: while a combat creature is out, another summon is refused
+  ("... is already active"). Placement can fail against a wall or slope.
+* An essence holds **50 uses** (Structure) and starts a **cooldown of about
+  45 s** when used (its CooldownId and CooldownDuration are in the item's
+  description). An Encapsulated Spirit refills it to 50.
+* Requirements are checked against the **buffed** skill (ACE compares the
+  current value): the essence's required Summoning level (appraisal
+  UseRequiresSkillLevel 367 or ItemSkillLevelLimit 115; the "(50)" in a
+  loot essence's name). Golems (bludgeoning) need 15 mud, 30 sandstone, 50
+  copper, 80 oak, 100 gold, 125 coral, 150 iron.
+* From level 50 a character chooses a mastery at the Arwic statues, which
+  unlocks the elemental creatures (acid, fire, frost, lightning) of that
+  mastery only: Naturalist (grievvers, moars, phyntos wasps), Necromancer
+  (skeletons, spectres, zombies), Primalist (elementals, K'nath, wisps).
+  An essence of another mastery is refused. Level 200 creatures carry
+  their element in a stronger word (caustic, arctic, galvanic, volcanic...).
+* Autoplay: `crate::summoning` (fight setting "summon a creature to
+  fight"); the fight rules never pick a creature with a `pet_owner`.
+
 ## 3. Character advancement
 
 * **Attributes**: Strength, Endurance, Coordination, Quickness, Focus,

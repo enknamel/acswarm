@@ -340,6 +340,14 @@ pub fn draw(egui: &egui::Context, v: &AutoplayView, x: f32, drafts: &mut Drafts)
                         "Swap to the carried weapon whose element the target \
                          takes most damage from, rending and criticals counted",
                     );
+                ui.checkbox(&mut cfg.fight.summon, "summon a creature to fight")
+                    .on_hover_text(
+                        "Use a summoning essence carried when a fight starts, \
+                         and again whenever the last creature is gone and the \
+                         essence is ready: the element the target is weakest \
+                         to, at the highest level the buffed Summoning skill \
+                         allows",
+                    );
                 ui.horizontal(|ui| {
                     ui.add(
                         egui::DragValue::new(&mut cfg.fight.vuln_above_health)

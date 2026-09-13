@@ -55,6 +55,7 @@ pub mod reconnect;
 pub mod recovery;
 pub mod shopping;
 pub mod steps;
+pub mod summoning;
 pub mod travel;
 pub mod weapons;
 

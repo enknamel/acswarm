@@ -307,6 +307,13 @@ pub struct WorldObject {
     pub pk_status: u32,
     /// Mana fraction of an item, once asked (QueryItemManaResponse).
     pub mana: Option<f32>,
+    /// The player a summoned creature belongs to, 0 for anything else.
+    /// Nobody's summon is anybody's to fight.
+    pub pet_owner: u32,
+    /// The shared cooldown the item starts when used, and its length in
+    /// seconds, 0 unless sent (a summoning essence carries both).
+    pub cooldown_id: u32,
+    pub cooldown_duration: f64,
 }
 
 impl WorldObject {
@@ -664,6 +671,9 @@ impl World {
                         locked: previous.as_ref().and_then(|o| o.locked),
                         pk_status: previous.as_ref().map(|o| o.pk_status).unwrap_or(0),
                         mana: previous.as_ref().and_then(|o| o.mana),
+                        pet_owner: oc.pet_owner,
+                        cooldown_id: oc.cooldown_id,
+                        cooldown_duration: oc.cooldown_duration,
                     };
                     let placed = obj.position;
                     self.objects.insert(obj.guid, obj);

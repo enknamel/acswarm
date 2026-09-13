@@ -1612,6 +1612,9 @@ mod tests {
             burden: 60,
             items_capacity: 0,
             containers_capacity: 0,
+            cooldown_id: 0,
+            cooldown_duration: 0.0,
+            pet_owner: 0,
         };
         let s = ItemStats::of_desc(0x100, &d);
         assert_eq!(s.guid, 0x100);

@@ -318,6 +318,9 @@ pub struct Fight {
     /// Make more ammunition when out, from a bundle of heads and a
     /// bundle of shafts carried, if Fletching is up to it.
     pub craft_ammo: bool,
+    /// Summon a creature from an essence carried to fight beside the
+    /// character (see `crate::summoning`).
+    pub summon: bool,
 }
 
 impl Default for Fight {
@@ -329,6 +332,7 @@ impl Default for Fight {
             pick_weapon: true,
             vuln_above_health: crate::weapons::LONG_FIGHT_HEALTH,
             craft_ammo: true,
+            summon: true,
             only: Vec::new(),
             avoid: Vec::new(),
             radius: 25.0,
@@ -953,6 +957,8 @@ pub struct Autoplay {
     /// last seen to drop: a target that takes no damage for a while is
     /// out of reach, and is let go.
     engaged: Option<(u32, Instant, f32)>,
+    /// The summoning rules' own state (see `crate::summoning`).
+    pub summoning: crate::summoning::State,
     /// The first shot thrown at a target since anything last got to it,
     /// and when: damage, a resist or an evasion clears it. The time spent
     /// walking to a clear shot, with nothing thrown, is not a miss.
@@ -3409,6 +3415,8 @@ impl Client {
                     && o.object_desc_flags & ac_world::object_desc_flags::PLAYER == 0
                     && o.health.unwrap_or(1.0) > 0.0
                     && !o.is_player
+                    // A summoned creature is its owner's, ours or anyone's.
+                    && o.pet_owner == 0
             })
             .filter(|o| wanted_target(&o.name, &cfg))
             // With the vitae high, the hard ones and the killer wait.
@@ -4058,6 +4066,8 @@ impl Client {
                     && o.object_desc_flags & ac_world::object_desc_flags::PLAYER == 0
                     && o.health.unwrap_or(1.0) > 0.0
                     && !o.is_player
+                    // A summoned creature is its owner's, ours or anyone's.
+                    && o.pet_owner == 0
             })
             .filter(|o| wanted_target(&o.name, cfg))
             // With the vitae high, the hard ones and the killer wait.

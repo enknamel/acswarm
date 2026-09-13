@@ -353,6 +353,13 @@ pub const STEPS: &[Step] = &[
         run: claimed!(Client::autoplay_salvage),
     },
     Step {
+        name: "summon",
+        layer: Layer::Goal,
+        worth: worth_fighting,
+        why: "a summoned creature fights beside the character: called as a fight begins, and again whenever the last one is gone and an essence is ready",
+        run: claimed!(Client::autoplay_summon),
+    },
+    Step {
         name: "fight",
         layer: Layer::Goal,
         worth: worth_fighting,
@@ -555,6 +562,7 @@ mod tests {
         // until after it.
         assert!(at("urgent buffs") < at("fight"));
         assert!(at("fight") < at("buffs"));
+        assert!(at("summon") < at("fight"), "the creature joins the fight");
 
         // A corpse rots and a shop does not.
         assert!(at("loot") < at("grow"), "loot before shopping");

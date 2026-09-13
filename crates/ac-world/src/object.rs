@@ -201,6 +201,12 @@ pub struct ObjectCreate {
     pub valid_locations: u32,
     pub wielded_location: u32,
     pub no_draw: bool,
+    /// The shared cooldown the item starts when used, and how long it
+    /// lasts in seconds (a summoning essence's), 0 unless sent.
+    pub cooldown_id: u32,
+    pub cooldown_duration: f64,
+    /// The player a summoned creature belongs to, 0 for anything else.
+    pub pet_owner: u32,
 }
 
 /// The ObjDesc block: palette, texture and part swaps that dress a model.
@@ -315,6 +321,12 @@ pub struct WeenieDesc {
     /// pack and how many packs hang from it), 0 unless sent.
     pub items_capacity: u32,
     pub containers_capacity: u32,
+    /// The shared cooldown the item starts when used and its length in
+    /// seconds, 0 unless sent.
+    pub cooldown_id: u32,
+    pub cooldown_duration: f64,
+    /// The player a summoned creature belongs to, 0 for anything else.
+    pub pet_owner: u32,
 }
 
 impl WeenieDesc {
@@ -481,15 +493,21 @@ impl WeenieDesc {
         } else {
             0
         };
-        if weenie_flags2 & F2_COOLDOWN != 0 {
-            r.u32()?;
-        }
-        if weenie_flags2 & F2_COOLDOWN_DURATION != 0 {
-            r.f64()?;
-        }
-        if weenie_flags2 & F2_PET_OWNER != 0 {
-            r.u32()?;
-        }
+        let cooldown_id = if weenie_flags2 & F2_COOLDOWN != 0 {
+            r.u32()?
+        } else {
+            0
+        };
+        let cooldown_duration = if weenie_flags2 & F2_COOLDOWN_DURATION != 0 {
+            r.f64()?
+        } else {
+            0.0
+        };
+        let pet_owner = if weenie_flags2 & F2_PET_OWNER != 0 {
+            r.u32()?
+        } else {
+            0
+        };
         // The server pads the description to a dword (ACE WriteWeenieDesc
         // ends with Align); vendor stock lists pack them back to back.
         r.align4()?;
@@ -521,6 +539,9 @@ impl WeenieDesc {
             burden,
             items_capacity,
             containers_capacity,
+            cooldown_id,
+            cooldown_duration,
+            pet_owner,
         })
     }
 }
@@ -733,6 +754,9 @@ impl ObjectCreate {
             burden,
             items_capacity,
             containers_capacity,
+            cooldown_id,
+            cooldown_duration,
+            pet_owner,
         } = WeenieDesc::parse(&mut r)?;
         Ok(ObjectCreate {
             guid,
@@ -780,6 +804,9 @@ impl ObjectCreate {
             containers_capacity,
             valid_locations,
             wielded_location,
+            cooldown_id,
+            cooldown_duration,
+            pet_owner,
             no_draw: physics_state & (PHYSICS_STATE_NO_DRAW | PHYSICS_STATE_HIDDEN) != 0,
         })
     }

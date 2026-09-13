@@ -117,6 +117,7 @@ pub mod skill {
     pub const FLETCHING: u32 = 37;
     pub const SALVAGING: u32 = 40;
     pub const MISSILE_WEAPONS: u32 = 47;
+    pub const SUMMONING: u32 = 54;
 }
 
 pub mod sac {
