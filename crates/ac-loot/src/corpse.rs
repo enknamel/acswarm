@@ -72,6 +72,10 @@ pub struct Open {
     pub may_ask: bool,
     /// An identify is already out for these.
     pub asking: Vec<u32>,
+    /// Listed on the corpse but not yet described. The server sends
+    /// what a corpse holds as a list first and describes each thing a
+    /// moment later, so in between the body looks emptier than it is.
+    pub arriving: Vec<u32>,
 }
 
 /// How near the character must be before a corpse will open for it.

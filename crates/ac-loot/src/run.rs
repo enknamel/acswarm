@@ -130,6 +130,13 @@ impl Run {
             };
         }
 
+        // Not all here yet. Judged between the list and the things on
+        // it, a body with loot on it read as empty: Blargerton shut it,
+        // wrote it off as looted, and its items arrived a frame later.
+        if !at.arriving.is_empty() {
+            return Next::wait(&format!("opening {}", at.name));
+        }
+
         // What cannot be judged without asking. Asked for in one go --
         // but not what could not be carried whatever it turned out to
         // be, or a laden character spends a round trip on every item of
@@ -232,6 +239,7 @@ mod tests {
             carry_room: 10_000,
             may_ask: true,
             asking: Vec::new(),
+            arriving: Vec::new(),
         }
     }
 
@@ -446,6 +454,38 @@ mod tests {
             "written off for good: {:?}",
             next.did
         );
+    }
+
+    #[test]
+    fn a_corpse_is_not_judged_until_everything_on_it_has_arrived() {
+        // ACE sends a corpse's list and then, on a later pass, the
+        // things on it. A frame in between saw an empty body: shut,
+        // written off as looted, and the loot arrived a frame too late.
+        let now = Instant::now();
+        let mut run = Run::new();
+        let mut at = body(Vec::new());
+        at.arriving = vec![1, 2];
+        let next = run.step(&at, now);
+        assert_eq!(next.act, None, "{}", next.saying);
+        assert!(matches!(next.did, Did::Waiting(_)), "{:?}", next.did);
+        // One has come and the other has not: still nothing is judged.
+        at.items = vec![thing(1, "Pyreal", Verdict::Take(LootAction::Keep))];
+        at.arriving = vec![2];
+        assert_eq!(run.step(&at, now).act, None);
+        // All here: emptied as usual.
+        at.items
+            .push(thing(2, "Dagger", Verdict::Take(LootAction::Keep)));
+        at.arriving.clear();
+        assert_eq!(run.step(&at, now).act, Some(Act::Take(1)));
+        // A body whose things never come is set aside in the end, not
+        // written off.
+        let mut run = Run::new();
+        let mut stuck = body(Vec::new());
+        stuck.arriving = vec![3];
+        run.step(&stuck, now);
+        let next = run.step(&stuck, now + KEEP_AT_IT + Duration::from_secs(1));
+        assert_eq!(next.act, Some(Act::Close));
+        assert!(matches!(next.did, Did::Blocked(_)), "{:?}", next.did);
     }
 
     #[test]

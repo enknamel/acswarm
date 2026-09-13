@@ -890,6 +890,14 @@ impl World {
                     // The server letting go of something set aside: now
                     // it is gone.
                     self.left_behind.remove(&guid);
+                    // Gone from the corpse or chest that is open, too.
+                    // Autoplay waits for everything a corpse lists to be
+                    // described before judging it, and a guid left on the
+                    // list after its delete would hold the corpse there
+                    // until it was given up on and written off.
+                    if let Some((_, items)) = &mut self.open_container {
+                        items.retain(|g| *g != guid);
+                    }
                     if self.objects.remove(&guid).is_some() {
                         self.generation += 1;
                         return Applied::Deleted;
@@ -2490,6 +2498,35 @@ mod tests {
         );
         assert!(!world.objects.contains_key(&3));
         assert!(world.left_behind.is_empty());
+    }
+
+    #[test]
+    fn a_deleted_thing_is_taken_off_the_open_corpse() {
+        // Autoplay waits for everything an open corpse lists to be
+        // described, so a guid kept on the list after its delete would
+        // hold the corpse until it was given up on and written off.
+        let corpse = 0x8000_0100;
+        let mut world = World {
+            player_guid: Some(ME),
+            open_container: Some((corpse, vec![1, 2, 3])),
+            ..Default::default()
+        };
+        world.objects.insert(
+            2,
+            WorldObject {
+                guid: 2,
+                container: Some(corpse),
+                ..Default::default()
+            },
+        );
+        // One that was described, and one deleted before it ever was.
+        for guid in [2u32, 3] {
+            let mut delete = opcode::OBJECT_DELETE.to_le_bytes().to_vec();
+            delete.extend(guid.to_le_bytes());
+            delete.extend(0u16.to_le_bytes());
+            world.apply(&delete);
+        }
+        assert_eq!(world.open_container, Some((corpse, vec![1])));
     }
 
     #[test]

@@ -2052,10 +2052,17 @@ impl Client {
         // What has already been spoken for off this body counts towards
         // a cap (see `ac_loot::Claimed`).
         let mut claimed = ac_loot::corpse::Claimed::default();
+        // Listed but not described yet: the server sends the items a
+        // pass after the list. Dropped silently, they made a full body
+        // read as empty (see `ac_loot::Open::arriving`).
+        let mut arriving = Vec::new();
         let lying: Vec<ac_loot::Lying> = items
             .iter()
             .filter_map(|g| {
-                let stats = self.stats_of(*g)?;
+                let Some(stats) = self.stats_of(*g) else {
+                    arriving.push(*g);
+                    return None;
+                };
                 // A kind the server has lately said cannot be had yet
                 // is left alone for a while (see `loot_refused`).
                 if self.refused_lately(stats.wcid, now) {
@@ -2114,6 +2121,7 @@ impl Client {
             carry_room: self.carry_room(&self.autoplay.config.growth),
             may_ask: profile.looting.appraise,
             asking: self.appraise_inflight.iter().map(|(g, _)| *g).collect(),
+            arriving,
         }
     }
 
@@ -2346,8 +2354,10 @@ impl Client {
                     self.autoplay.say(Doing::Looting, next.saying);
                     return true;
                 }
-                // Nothing to do yet: the rules are waiting on appraisals.
-                // The corpse stays open and in hand. Reading this as done
+                // Nothing to do yet: the rules are waiting on appraisals,
+                // or on the things the corpse lists to be described. The
+                // corpse stays open and in hand, and `LOOT_GIVE_UP` above
+                // is still the limit. Reading this as done
                 // closed a corpse the moment its items went off to be
                 // appraised, marked it looted, and sent the character to the
                 // next body -- which closed the first on the server and left
