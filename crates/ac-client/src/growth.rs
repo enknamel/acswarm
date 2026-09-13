@@ -581,6 +581,22 @@ fn loot_room(carried: u32, loot: u32, capacity: u32, carry_up_to: f32) -> u32 {
     }
 }
 
+/// Whether a character with `room` for more loot has had enough and
+/// should go and sell: no room at all, or less than the lightest thing
+/// the looting left on a body for its weight (`left`) -- as long as
+/// selling what it carries would make room for that thing (`sold` is the
+/// room it would have then).
+///
+/// Room used to have to be exactly nothing, and it almost never is. The
+/// loot rules take only what fits, so the room settles a little above
+/// nothing and below whatever is still lying there: a character forty
+/// short of a mace shut every body with one on it as too laden, hunted
+/// on, and never went to sell. A thing no sale could make room for is no
+/// reason to go.
+fn had_enough(room: u32, left: Option<u32>, sold: u32) -> bool {
+    room == 0 || left.is_some_and(|burden| room < burden && burden <= sold)
+}
+
 /// Whether the party's mode decides when this character goes to town,
 /// rather than its own pack and supplies. `mates` is how many others are
 /// on the team as it was last heard.
@@ -1775,6 +1791,14 @@ impl Client {
     pub(crate) fn room_for_loot(&self) -> crate::autoplay::Room {
         crate::autoplay::Room {
             pack_low: self.pack_low_on_room(),
+            // Weighed only while a body is waiting on it: what the loot
+            // weighs is judged item by item, and this is asked on every
+            // tick a corpse lies about.
+            carry: if self.autoplay.left_for_weight.is_empty() {
+                u32::MAX
+            } else {
+                self.carry_room(&self.autoplay.config.growth)
+            },
         }
     }
 
@@ -2557,9 +2581,29 @@ impl Client {
     /// Not before its strength is known. With no capacity there is no
     /// room either, and a party told a member was laden the moment it
     /// logged in would turn round for town before a fight.
+    ///
+    /// Having had enough is not only having no room at all: it is having
+    /// less room than the lightest thing the looting last left on a body
+    /// still lying about (see [`had_enough`]).
     pub fn laden(&self, cfg: &Growth) -> bool {
-        let (_, capacity) = self.burden();
-        capacity > 0 && self.carry_room(cfg) == 0
+        let (carried, capacity) = self.burden();
+        if capacity == 0 {
+            return false;
+        }
+        let up_to = self
+            .loot_profile()
+            .map_or(crate::profile::Looting::default().carry_up_to, |p| {
+                p.looting.carry_up_to
+            });
+        let loot = self.loot_burden(cfg).min(carried);
+        let room = loot_room(carried, loot, capacity, up_to);
+        // Sold down to what it keeps: the room a trip to town would give.
+        let sold = loot_room(carried - loot, 0, capacity, up_to);
+        let objects = &self.world.objects;
+        let left = self
+            .autoplay
+            .lightest_left_for_weight(|g| objects.contains_key(&g));
+        had_enough(room, left, sold)
     }
 
     /// Which society this character belongs to, as `Faction1Bits`: 1
@@ -3366,6 +3410,25 @@ mod tests {
         assert_eq!(loot_room(0, 0, 9_000, f32::NAN), 0);
         // A count of loot ahead of the server's total: all of it is loot.
         assert_eq!(loot_room(1_000, 1_500, 9_000, 1.5), 13_500 - 1_000);
+    }
+
+    #[test]
+    fn a_character_with_room_for_nothing_it_wants_goes_to_sell() {
+        // Laden needed no room at all. The loot rules take only what fits,
+        // so the room settled a little above nothing: forty short of a
+        // mace, every body with one on it was shut as too laden, and the
+        // character hunted on and never went to sell.
+        let sold = 18_000 - 13_866;
+        assert!(!had_enough(40, None, sold), "nothing left behind yet");
+        assert!(had_enough(40, Some(300), sold), "forty short of a mace");
+        // Room for it again -- tapers burnt, or a sale -- and it is not.
+        assert!(!had_enough(300, Some(300), sold));
+        assert!(!had_enough(sold, Some(300), sold));
+        // No room at all is enough, as it always was.
+        assert!(had_enough(0, None, sold));
+        // A thing no sale could make room for is no reason to go: an anvil
+        // heavier than the room left with every bit of loot sold.
+        assert!(!had_enough(40, Some(9_000), sold));
     }
 
     #[test]

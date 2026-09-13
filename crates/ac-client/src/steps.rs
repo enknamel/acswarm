@@ -779,7 +779,10 @@ mod tests {
         assert!(ap.corpse_waiting(locked, later, room));
         // And none waits on a pack with no room to take anything, so the
         // looting is worth nothing and the town run is not held up.
-        let full = Room { pack_low: true };
+        let full = Room {
+            pack_low: true,
+            ..room
+        };
         assert!(!ap.corpse_waiting(fresh, now, full));
     }
 }

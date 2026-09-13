@@ -107,12 +107,17 @@ pub(crate) fn refused_item(item: u32, err: u32, inflight: Option<u32>) -> Option
 pub(crate) struct Room {
     /// The pack is down to the slots kept for a counter's money.
     pub(crate) pack_low: bool,
+    /// How much more loot it means to carry (see `Client::carry_room`).
+    pub(crate) carry: u32,
 }
 
 impl Room {
     /// Room for anything.
     #[cfg(test)]
-    pub(crate) const PLENTY: Room = Room { pack_low: false };
+    pub(crate) const PLENTY: Room = Room {
+        pack_low: false,
+        carry: u32::MAX,
+    };
 }
 
 /// Whether an ask to open a corpse `away` metres off, sent on the tick
@@ -1300,6 +1305,12 @@ pub struct Autoplay {
     /// that killed it until it has rotted a while, so this is a
     /// "later", not a "never", and the wait grows if it keeps saying no.
     pub(crate) shelved: crate::did::Patience<u32>,
+    /// Corpses set aside for want of room to carry what is left on them,
+    /// and what the lightest of that weighs. Such a body waits on room,
+    /// not on a clock. Set aside for half a minute instead, a laden
+    /// character went back to each one as its wait ran out, opened it,
+    /// took nothing, and held the next fight for it every time.
+    pub(crate) left_for_weight: std::collections::BTreeMap<u32, u32>,
     /// Weenie classes the server has refused to hand over because they
     /// can only be had so often. See `Client::loot_refused`.
     pub(crate) refused_kinds: crate::did::Patience<u32>,
@@ -1464,13 +1475,31 @@ impl Autoplay {
     /// that would not give up its contents is set aside and tried again
     /// later, as the rules meant: marking every shut corpse looted wrote
     /// those off for good, with their loot still on them.
-    fn corpse_shut(&mut self, guid: u32, did: &crate::did::Did, now: Instant) {
-        if matches!(did, crate::did::Did::Done) {
-            if !self.looted.contains(&guid) {
-                self.looted.push(guid);
+    ///
+    /// One shut for want of room to carry the rest (`left_for_weight`, the
+    /// lightest thing left on it) waits on room rather than on a clock
+    /// (see `Autoplay::left_for_weight`).
+    fn corpse_shut(
+        &mut self,
+        guid: u32,
+        did: &crate::did::Did,
+        left_for_weight: Option<u32>,
+        now: Instant,
+    ) {
+        match (did, left_for_weight) {
+            (crate::did::Did::Done, _) => {
+                self.left_for_weight.remove(&guid);
+                if !self.looted.contains(&guid) {
+                    self.looted.push(guid);
+                }
             }
-        } else {
-            self.shelved.note(guid, did, now);
+            (_, Some(burden)) => {
+                self.left_for_weight.insert(guid, burden);
+            }
+            (_, None) => {
+                self.left_for_weight.remove(&guid);
+                self.shelved.note(guid, did, now);
+            }
         }
         self.let_go_of_corpse();
     }
@@ -1484,8 +1513,17 @@ impl Autoplay {
     /// corpse, so no corpse waits on it: a character with such a pack
     /// walked to every body in reach, shut each on the spot as done with
     /// -- writing it off -- and held up the town run that makes room.
+    ///
+    /// Nor does a body left for its weight wait on a character still
+    /// without room for what is left on it.
     pub(crate) fn corpse_waiting(&self, guid: u32, now: Instant, room: Room) -> bool {
-        !room.pack_low && !self.looted.contains(&guid) && !self.shelved.held(&guid, now)
+        !room.pack_low
+            && !self.looted.contains(&guid)
+            && !self.shelved.held(&guid, now)
+            && self
+                .left_for_weight
+                .get(&guid)
+                .is_none_or(|burden| room.carry >= *burden)
     }
 
     /// Whether the corpse `guid`, lying at `at`, is still this
@@ -1526,6 +1564,17 @@ impl Autoplay {
     /// it each time.
     pub(crate) fn forget_corpses_gone(&mut self, there: impl Fn(u32) -> bool) {
         self.shelved.retain(|g| there(*g));
+        self.left_for_weight.retain(|g, _| there(*g));
+    }
+
+    /// What the lightest thing left for its weight on a body still lying
+    /// about weighs (`there` says which bodies are), if anything was.
+    pub(crate) fn lightest_left_for_weight(&self, there: impl Fn(u32) -> bool) -> Option<u32> {
+        self.left_for_weight
+            .iter()
+            .filter(|(g, _)| there(**g))
+            .map(|(_, burden)| *burden)
+            .min()
     }
 
     /// Let go of whatever is being fought: the spells' target and the
@@ -2758,7 +2807,8 @@ impl Client {
                             "autoplay: corpse {guid:#010x} set aside; trying again later"
                         );
                     }
-                    self.autoplay.corpse_shut(guid, &next.did, now);
+                    self.autoplay
+                        .corpse_shut(guid, &next.did, next.left_for_weight, now);
                     self.stop_walking_to_loot();
                     self.autoplay.say(Doing::Looting, next.saying);
                     return true;
@@ -6337,6 +6387,7 @@ mod tests {
         ap.corpse_shut(
             stubborn,
             &Did::blocked("it will not give up its contents"),
+            None,
             t0,
         );
         assert_eq!(ap.corpse, None, "still in hand");
@@ -6349,7 +6400,7 @@ mod tests {
         // One the rules emptied is done with.
         let emptied = 0x8000_2002;
         ap.take_up_corpse(emptied, t0, LOOT_TIMEOUT);
-        ap.corpse_shut(emptied, &Did::Done, t0);
+        ap.corpse_shut(emptied, &Did::Done, None, t0);
         assert!(ap.looted.contains(&emptied));
         assert!(!ap.shelved.held(&emptied, t0));
     }
@@ -6364,7 +6415,10 @@ mod tests {
         let mut ap = Autoplay::default();
         let (me, at) = (glam::Vec3::ZERO, glam::Vec3::new(5.0, 0.0, 0.0));
         let body = 0x8000_8001;
-        let full = Room { pack_low: true };
+        let full = Room {
+            pack_low: true,
+            ..Room::PLENTY
+        };
         // No room, so no body is owed: none is walked to, and the fight is
         // not held for one.
         assert!(ap.corpse_owed(body, at, me, t0, Room::PLENTY));
@@ -6376,7 +6430,7 @@ mod tests {
         open.keep_free = 3;
         let next = ap.loot_run.step(&open, t0);
         assert_eq!(next.act, Some(ac_loot::Act::Close), "{}", next.saying);
-        ap.corpse_shut(body, &next.did, t0);
+        ap.corpse_shut(body, &next.did, next.left_for_weight, t0);
         assert!(!ap.looted.contains(&body), "written off for good");
         // Sold down a few minutes later, it is owed again.
         let sold = t0 + Duration::from_secs(4 * 60);
@@ -6419,6 +6473,55 @@ mod tests {
     }
 
     #[test]
+    fn a_body_left_for_its_weight_waits_on_room_not_on_a_clock() {
+        // Laden, a character shut every body with something heavy on it as
+        // too laden and set it aside for half a minute. As each wait ran
+        // out it went back, opened the body, took nothing and shut it
+        // again, holding the next fight for it every time, for as long as
+        // the body lay there.
+        use crate::did::Did;
+        let t0 = Instant::now();
+        let s = Duration::from_secs;
+        let mut ap = Autoplay::default();
+        let (me, at) = (glam::Vec3::ZERO, glam::Vec3::new(5.0, 0.0, 0.0));
+        let (body, rotted) = (0x8000_9001, 0x8000_9002);
+        let mut open = corpse_at_hand(body, 1);
+        open.items[0].burden = 300;
+        open.carry_room = 40;
+        ap.take_up_corpse(body, t0, LOOT_TIMEOUT);
+        let next = ap.loot_run.step(&open, t0);
+        assert_eq!(next.act, Some(ac_loot::Act::Close), "{}", next.saying);
+        ap.corpse_shut(body, &next.did, next.left_for_weight, t0);
+        assert!(!ap.looted.contains(&body), "written off for good");
+        // Still forty short: not owed, however long it has waited.
+        let laden = Room {
+            carry: 40,
+            ..Room::PLENTY
+        };
+        assert!(!ap.corpse_owed(body, at, me, t0 + s(31), laden));
+        assert!(!ap.corpse_owed(body, at, me, t0 + s(4 * 60), laden));
+        // It is what the character weighs its room against to count itself
+        // laden, but only while the body is still lying there.
+        ap.left_for_weight.insert(rotted, 20);
+        assert_eq!(ap.lightest_left_for_weight(|g| g == body), Some(300));
+        // Sold down: owed again at once.
+        let sold = Room {
+            carry: 4_000,
+            ..Room::PLENTY
+        };
+        assert!(
+            ap.corpse_owed(body, at, me, t0 + s(4 * 60), sold),
+            "never gone back to"
+        );
+        // Emptied then, it is done with, and waits on nothing.
+        ap.corpse_shut(body, &Did::Done, None, t0 + s(4 * 60));
+        assert_eq!(ap.lightest_left_for_weight(|g| g == body), None);
+        // A body that has rotted is forgotten.
+        ap.forget_corpses_gone(|g| g == body);
+        assert!(ap.left_for_weight.is_empty());
+    }
+
+    #[test]
     fn every_body_opened_is_counted_for_the_panel_however_it_was_let_go() {
         // Blargerton's log said "emptied" whether he took something or
         // nothing. The panel's count tells the two apart, and a body given
@@ -6439,7 +6542,7 @@ mod tests {
         bare.items[0].verdict = ac_loot::Verdict::Leave;
         let next = ap.loot_run.step(&bare, t0);
         assert_eq!(next.did, Did::Done, "{}", next.saying);
-        ap.corpse_shut(second, &next.did, t0);
+        ap.corpse_shut(second, &next.did, next.left_for_weight, t0);
         // Walked to and never opened, then the next body taken up.
         let third = 0x8000_3003;
         ap.take_up_corpse(third, t0, LOOT_TIMEOUT);

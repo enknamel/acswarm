@@ -50,6 +50,11 @@ pub struct Next {
     pub act: Option<Act>,
     pub did: Did,
     pub saying: String,
+    /// When the corpse is shut for want of room to carry the rest: what
+    /// the lightest thing left on it weighs. Room for that is what the
+    /// body is waiting on, and until the character has it, going back
+    /// to the body takes nothing.
+    pub left_for_weight: Option<u32>,
 }
 
 impl Next {
@@ -58,6 +63,7 @@ impl Next {
             act: Some(act),
             did: Did::Acting,
             saying: saying.into(),
+            left_for_weight: None,
         }
     }
 
@@ -66,6 +72,7 @@ impl Next {
             act: Some(Act::Close),
             did: Did::Done,
             saying: saying.into(),
+            left_for_weight: None,
         }
     }
 
@@ -74,6 +81,17 @@ impl Next {
             act: None,
             did: Did::waiting(why.to_string()),
             saying: why.to_string(),
+            left_for_weight: None,
+        }
+    }
+
+    /// Shut the corpse and set it aside, not written off.
+    fn set_aside(because: &str, saying: impl Into<String>) -> Next {
+        Next {
+            act: Some(Act::Close),
+            did: Did::Blocked(Because::ours(because)),
+            saying: saying.into(),
+            left_for_weight: None,
         }
     }
 }
@@ -150,11 +168,10 @@ impl Run {
         // sale. "No room" stops short of the last slot: the few kept free
         // are where a counter puts the money.
         if at.slots_free <= at.keep_free {
-            return Next {
-                act: Some(Act::Close),
-                did: Did::Blocked(Because::ours("the pack is full")),
-                saying: format!("pack full, leaving {} for now", at.name),
-            };
+            return Next::set_aside(
+                "the pack is full",
+                format!("pack full, leaving {} for now", at.name),
+            );
         }
         // Carrying as much as it means to is not a reason to leave the
         // corpse unopened: only what will not fit stays. Shutting it
@@ -164,11 +181,10 @@ impl Run {
         // Long enough. A corpse that will not give up its contents is
         // set aside, not written off.
         if now.duration_since(began) > KEEP_AT_IT {
-            return Next {
-                act: Some(Act::Close),
-                did: Did::Blocked(Because::ours("it will not give up its contents")),
-                saying: format!("leaving {} for now", at.name),
-            };
+            return Next::set_aside(
+                "it will not give up its contents",
+                format!("leaving {} for now", at.name),
+            );
         }
 
         // Not all here yet. Judged between the list and the things on
@@ -260,26 +276,32 @@ impl Run {
         // come. Set aside, not emptied: a quest's wait lifts, a unique
         // can be sold, and the body keeps for a while.
         if let Some(stuck) = at.wanted().find(|i| given_up(i.guid)) {
-            return Next {
-                act: Some(Act::Close),
-                did: Did::Blocked(Because::ours("it would not give something up")),
-                saying: format!("{} would not come off {}", stuck.name, at.name),
-            };
+            return Next::set_aside(
+                "it would not give something up",
+                format!("{} would not come off {}", stuck.name, at.name),
+            );
         }
 
         // Everything that fitted has been taken, and something it wanted
         // -- or might have, had it been light enough to ask about -- is
         // still lying there for its weight. Set aside, not emptied: once
         // the pack has been sold down it will fit, and the body keeps.
+        // What the lightest of it weighs goes with the close: going back
+        // before there is room for that takes nothing, and a character
+        // with less room than that has had enough and goes to sell.
         let left_for_weight = at
             .items
             .iter()
-            .any(|i| i.verdict != Verdict::Leave && i.burden > at.carry_room);
-        if left_for_weight {
+            .filter(|i| i.verdict != Verdict::Leave && i.burden > at.carry_room)
+            .map(|i| i.burden)
+            .min();
+        if let Some(lightest) = left_for_weight {
             return Next {
-                act: Some(Act::Close),
-                did: Did::Blocked(Because::ours("too laden to take the rest")),
-                saying: format!("too laden to take the rest of {}", at.name),
+                left_for_weight: Some(lightest),
+                ..Next::set_aside(
+                    "too laden to take the rest",
+                    format!("too laden to take the rest of {}", at.name),
+                )
             };
         }
         // Done either way, but said apart. Every body Blargerton shut read
@@ -547,8 +569,10 @@ mod tests {
         let mut run = Run::new();
         let mut mace = thing(1, "Mace", Verdict::Take(LootAction::Sell));
         mace.burden = 50;
-        let mut at = body(vec![mace]);
-        at.carry_room = 0;
+        let mut shield = thing(2, "Tower Shield", Verdict::MustAsk);
+        shield.burden = 300;
+        let mut at = body(vec![shield, mace]);
+        at.carry_room = 40;
         let next = run.step(&at, Instant::now());
         assert_eq!(next.act, Some(Act::Close), "{}", next.saying);
         assert!(
@@ -556,6 +580,15 @@ mod tests {
             "written off as emptied: {:?}",
             next.did
         );
+        // And it says what the lightest of it weighs. Forty short of the
+        // mace, the character went back to the body every half minute to
+        // take nothing, and never counted itself laden.
+        assert_eq!(next.left_for_weight, Some(50));
+        // A body shut for any other reason is waiting on no weight.
+        let mut run = Run::new();
+        at.carry_room = 10_000;
+        at.slots_free = 0;
+        assert_eq!(run.step(&at, Instant::now()).left_for_weight, None);
     }
 
     #[test]
