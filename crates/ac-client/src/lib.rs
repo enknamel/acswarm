@@ -143,6 +143,34 @@ fn attack_ended_walk(walk: Option<ac_world::object::MoveTarget>, attacked: Optio
         (Some(ac_world::object::MoveTarget::Object(g)), Some(a)) if g == a
     )
 }
+
+/// Whether an answer from the server about the things in `about` is the
+/// answer to the server walk `walk`: a refusal or a UseDone for what the
+/// walk is for. A refused inventory action is about the item it names
+/// and whatever holds it; a UseDone is about `used`, what the last use
+/// was sent for. ACE walks to a portal's place rather than to the
+/// portal, so a walk to a place is for `used` too.
+///
+/// A charge at `attacked` is never answered this way: AttackDone or a
+/// motion ends it (see [`attack_ended_walk`]). Any answer at all used to
+/// do. +Verity's in-fight buffing asked for her wand every second and a
+/// half and was refused every time, and each refusal counted as the
+/// answer to whichever charge was under way: once within a metre of the
+/// creature she took the controls back, ran off towards her own goal
+/// and was told "You charged too far".
+fn answers_walk(
+    walk: Option<ac_world::object::MoveTarget>,
+    about: &[u32],
+    used: Option<u32>,
+    attacked: Option<u32>,
+) -> bool {
+    let walked_for = match walk {
+        Some(ac_world::object::MoveTarget::Object(g)) => Some(g),
+        Some(ac_world::object::MoveTarget::Position { .. }) => used,
+        None => None,
+    };
+    walked_for.is_some_and(|g| Some(g) != attacked && about.contains(&g))
+}
 pub mod logoff;
 pub use logoff::{log_off_all, LOG_OFF_WAIT};
 // Getting somewhere is its own system now (`ac-nav`), with the world
@@ -318,9 +346,14 @@ pub struct Client {
     /// reports us idle again.
     pub move_to: Option<ac_world::object::MoveTarget>,
     pub move_to_since: Instant,
-    /// The server has answered something (UseDone, a refused pickup)
-    /// since it sent the walk under way (see [`server_walk_over`]).
+    /// The server has answered what the walk under way is for (a UseDone,
+    /// a refused pickup) since it sent the walk (see [`server_walk_over`]
+    /// and [`answers_walk`]).
     move_to_answered: bool,
+    /// What the last use or pickup of something in the world was sent
+    /// for, until a cast is sent: what a UseDone can be the answer to
+    /// (see [`answers_walk`]).
+    last_used: Option<u32>,
     /// Whether the run key was held on the last tick: what a stop
     /// reported ahead of a use says, so the next report agrees with it.
     held_run: bool,
@@ -546,6 +579,7 @@ impl Client {
             move_to: None,
             move_to_since: Instant::now(),
             move_to_answered: false,
+            last_used: None,
             held_run: false,
             move_refused: std::collections::HashMap::new(),
             use_done: None,
@@ -1047,9 +1081,26 @@ impl Client {
                                     // item; it is about the take in flight
                                     // (see `autoplay::refused_item`).
                                     let inflight = self.loot_inflight.map(|(g, _)| g);
-                                    if let Some(item) =
-                                        crate::autoplay::refused_item(item, err, inflight)
-                                    {
+                                    let refused =
+                                        crate::autoplay::refused_item(item, err, inflight);
+                                    // What the refusal is about: the item,
+                                    // and whatever holds it (a take from a
+                                    // corpse walks to the corpse).
+                                    let about: Vec<u32> = [Some(item), refused]
+                                        .into_iter()
+                                        .flatten()
+                                        .flat_map(|g| {
+                                            [
+                                                Some(g),
+                                                self.world
+                                                    .objects
+                                                    .get(&g)
+                                                    .and_then(|o| o.container),
+                                            ]
+                                        })
+                                        .flatten()
+                                        .collect();
+                                    if let Some(item) = refused {
                                         self.move_refused.insert(item, (err, Instant::now()));
                                         if inflight == Some(item) {
                                             self.loot_inflight = None;
@@ -1059,7 +1110,15 @@ impl Client {
                                     // A pickup the server walked us to
                                     // for, refused: an answer like a
                                     // UseDone (see `server_walk_over`).
-                                    if self.move_to.is_some() {
+                                    // Only that pickup's, though: a wield
+                                    // refused mid-charge is no answer to
+                                    // the charge.
+                                    if answers_walk(
+                                        self.move_to,
+                                        &about,
+                                        self.last_used,
+                                        self.attacked,
+                                    ) {
                                         self.move_to_answered = true;
                                     }
                                 } else if ev == ac_net::messages::event::USE_DONE && rest.len() >= 4
@@ -1095,7 +1154,11 @@ impl Client {
                                     // is not carried on when the walk for
                                     // it runs out (see `visit`).
                                     self.visits.answered();
-                                    // Only a refusal ends the walk.
+                                    // Only a refusal ends the walk, and
+                                    // only a refusal of what the walk is
+                                    // for: a cast turned away as too busy
+                                    // mid-charge is no reason to take the
+                                    // controls back (see `answers_walk`).
                                     //
                                     // The server answers a use of
                                     // something out of reach by telling
@@ -1110,13 +1173,19 @@ impl Client {
                                     // from a merchant, saying it was
                                     // walking to it. Arriving is what
                                     // ends the walk.
-                                    if err != 0 {
+                                    let for_the_walk = answers_walk(
+                                        self.move_to,
+                                        self.last_used.as_slice(),
+                                        self.last_used,
+                                        self.attacked,
+                                    );
+                                    if for_the_walk && err != 0 {
                                         self.move_to = None;
                                     }
                                     // Once there, though, the answer is
                                     // the last word on the walk (see
                                     // `server_walk_over`).
-                                    if self.move_to.is_some() {
+                                    if for_the_walk && self.move_to.is_some() {
                                         self.move_to_answered = true;
                                     }
                                 } else if ev == ac_net::messages::event::SET_TURBINE_CHAT_CHANNELS
@@ -1981,6 +2050,7 @@ impl Client {
             // "use selected" key (`use_object`) reads or activates it in
             // place instead.
             tracing::info!("pick up {name} ({guid:#010x})");
+            self.last_used = Some(guid);
             w.u32(guid).u32(me.unwrap_or(0)).u32(0);
             self.session
                 .send_action(action::PUT_ITEM_IN_CONTAINER, &w.finish());
@@ -1999,6 +2069,7 @@ impl Client {
                 // What a server walk that runs out was walking to.
                 self.visits.used(guid, Instant::now());
             }
+            self.last_used = Some(guid);
             self.session.send_action(action::USE, &guid.to_le_bytes());
         }
     }
@@ -2051,6 +2122,8 @@ impl Client {
         } else {
             None
         };
+        // The next UseDone is the cast's, not the answer to a use.
+        self.last_used = None;
         match target {
             Some(t) => {
                 tracing::info!("cast {name} ({spell}) on {t:#010x}");
@@ -2557,6 +2630,7 @@ impl Client {
             return false;
         };
         tracing::info!("use {} ({guid:#010x}) in place", o.name);
+        self.last_used = Some(guid);
         self.session
             .send_action(ac_net::messages::action::USE, &guid.to_le_bytes());
         true
@@ -2578,6 +2652,7 @@ impl Client {
             return false;
         }
         tracing::info!("pick up {} ({guid:#010x})", o.name);
+        self.last_used = Some(guid);
         let mut w = ac_net::wire::Writer::new();
         w.u32(guid).u32(me).u32(0);
         self.session
@@ -3549,6 +3624,7 @@ impl Client {
             .map(|t| t.name.clone())
             .unwrap_or_default();
         tracing::info!("use {what} ({item:#010x}) on {who} ({target:#010x})");
+        self.last_used = Some(target);
         let mut w = ac_net::wire::Writer::new();
         w.u32(item).u32(target);
         self.session
@@ -4146,9 +4222,11 @@ mod tests {
             )
         }
 
-        /// What the client does with a UseDone (or a refused pickup).
-        fn answer(&mut self) {
-            if self.walk.is_some() {
+        /// What the client does with a UseDone or a refused inventory
+        /// action about `about`: `used` is what the last use was sent
+        /// for, and `attacked` what the last attack went at.
+        fn answer(&mut self, about: &[u32], used: Option<u32>, attacked: Option<u32>) {
+            if answers_walk(self.walk, about, used, attacked) {
                 self.answered = true;
             }
         }
@@ -4198,7 +4276,7 @@ mod tests {
         let under = glam::Vec3::new(39.4, -18.2, -3.0);
 
         // An answer before any walk is not an answer to one.
-        w.answer();
+        w.answer(&[CORPSE], Some(CORPSE), None);
         assert!(!w.answered);
         assert!(matches!(
             w.hear(&walk_to_corpse(), t0),
@@ -4212,7 +4290,7 @@ mod tests {
 
         // Answered on the way (a double-click sent again has the first one
         // answered): letting go here stopped the character a stride in.
-        w.answer();
+        w.answer(&[CORPSE], Some(CORPSE), None);
         assert!(!server_walk_over(w.walk, goal, far, w.answered));
         // Nor under its floor.
         assert!(!server_walk_over(w.walk, goal, under, w.answered));
@@ -4261,5 +4339,71 @@ mod tests {
         assert!(!attack_ended_walk(Some(place), Some(DRUDGE)));
         assert!(!attack_ended_walk(w.walk, None));
         assert!(!attack_ended_walk(None, Some(DRUDGE)));
+    }
+
+    #[test]
+    fn a_refused_wield_mid_charge_does_not_end_the_charge() {
+        // +Verity (run18) charged a Drudge Slave while her buffing asked
+        // for the Training Wand every second and a half and was refused
+        // each time. Each refusal was taken for the charge's answer: a
+        // metre from the drudge she took the controls back, ran for her
+        // own goal, and was told "You charged too far".
+        use ac_world::object::MoveTarget;
+        const WAND: u32 = 0x8000_00C3;
+        const PYREAL: u32 = 0x8000_3421;
+        const PORTAL: u32 = 0x7000_0101;
+        let t0 = Instant::now();
+        let mut w = Walking::new(t0);
+        let drudge = glam::Vec3::new(80.0, -36.0, 0.0);
+        let there = glam::Vec3::new(79.6, -36.2, 0.0);
+        assert!(matches!(
+            w.hear(&charge_at_drudge(), t0),
+            ServerWalk::Began(_)
+        ));
+
+        // The wand refused: about the wand, and the pack it is in.
+        w.answer(&[WAND, ME], Some(CORPSE), Some(DRUDGE));
+        // A cast's UseDone: the cast cleared what was used.
+        w.answer(&[], None, Some(DRUDGE));
+        // Nor the answer to a use of the last corpse.
+        w.answer(&[CORPSE], Some(CORPSE), Some(DRUDGE));
+        // Nor anything about the creature itself: AttackDone or a motion
+        // ends a charge.
+        w.answer(&[DRUDGE], Some(DRUDGE), Some(DRUDGE));
+        assert!(!w.answered);
+        assert!(!server_walk_over(
+            w.walk,
+            Some((drudge, 1.0)),
+            there,
+            w.answered
+        ));
+        assert!(attack_ended_walk(w.walk, Some(DRUDGE)));
+
+        // What a walk for a use does take as its answer: the corpse's own
+        // UseDone, with a fight going on or not.
+        let to_corpse = Some(MoveTarget::Object(CORPSE));
+        assert!(answers_walk(
+            to_corpse,
+            &[CORPSE],
+            Some(CORPSE),
+            Some(DRUDGE)
+        ));
+        // A take from it refused, which names the item the corpse holds.
+        assert!(answers_walk(to_corpse, &[PYREAL, CORPSE], None, None));
+        // A loose item walked to for a pickup, refused.
+        let to_pyreal = Some(MoveTarget::Object(PYREAL));
+        assert!(answers_walk(to_pyreal, &[PYREAL], Some(PYREAL), None));
+        // Not the wand refused on the way there.
+        assert!(!answers_walk(to_corpse, &[WAND, ME], Some(CORPSE), None));
+        // ACE walks to a portal's place: the use sent is what it is for.
+        let to_portal = Some(MoveTarget::Position {
+            cell: 0x01F6_027B,
+            local: glam::Vec3::new(80.0, -36.0, 0.0),
+        });
+        assert!(answers_walk(to_portal, &[PORTAL], Some(PORTAL), None));
+        assert!(!answers_walk(to_portal, &[WAND, ME], Some(PORTAL), None));
+        assert!(!answers_walk(to_portal, &[], None, None));
+        // No walk, nothing to answer.
+        assert!(!answers_walk(None, &[CORPSE], Some(CORPSE), None));
     }
 }
