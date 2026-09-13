@@ -133,6 +133,124 @@ fn corpse_is_ours(
     close || (me.distance(at) <= fight_radius && near_a_kill(at, spots))
 }
 
+/// How long the next fight waits on an answer about whose kill a far
+/// corpse was. An appraisal comes back in well under a second; one not
+/// back in this long is not coming.
+const WHOSE_WAIT: Duration = Duration::from_secs(3);
+/// A summoned creature last seen out this long ago may still have left
+/// bodies about: it can die, or its time run out, with its last kill
+/// still falling, and the character comes within reach of bodies it made
+/// at the edge of the fight radius.
+const PET_KILLS_FOR: Duration = Duration::from_secs(60);
+
+/// Whether a corpse's description (`long_desc`) names this character
+/// (`me`), or a creature it summoned, as its killer.
+///
+/// The server tells a player of a kill only when the player landed the
+/// last blow. Blargerton's Mud Golem fought beside him in the Holtburg
+/// Dungeon, and the bodies it finished told him nothing: no kill spot was
+/// noted, so every one past twenty metres was passed by and the next
+/// fight went ahead. The corpse is still his to open, and says so:
+/// "Killed by Blargerton." when he did the most damage, "Killed by
+/// Blargerton's Mud Golem." when his creature did. The server leaves off
+/// a leading '+', and adds to the line when a rare was found on the body.
+fn killed_by_us(long_desc: &str, me: &str) -> bool {
+    let me = me.trim_start_matches('+');
+    let Some(by) = long_desc.strip_prefix("Killed by ") else {
+        return false;
+    };
+    let by = by.trim_start_matches('+');
+    let named = by
+        .get(..me.len())
+        .is_some_and(|n| !me.is_empty() && n.eq_ignore_ascii_case(me));
+    if !named {
+        return false;
+    }
+    let rest = &by[me.len()..];
+    rest.starts_with('.') || rest.starts_with("'s ")
+}
+
+/// Whether a corpse lying at `at` is worth asking about, to learn whose
+/// kill it was: within the fight radius, and not already this
+/// character's by lying close by or where one of its kills fell (see
+/// [`corpse_is_ours`]).
+fn whose_to_ask(
+    me: glam::Vec3,
+    at: glam::Vec3,
+    fight_radius: f32,
+    spots: &[(glam::Vec3, Instant)],
+) -> bool {
+    me.distance(at) <= fight_radius && !corpse_is_ours(me, at, fight_radius, spots)
+}
+
+/// Far corpses asked about while a creature this character summoned was
+/// about, to learn whose kill each was (see [`killed_by_us`]).
+#[derive(Debug, Default)]
+pub(crate) struct Whose {
+    /// Each corpse asked about, when, and whether the answer is in.
+    asked: Vec<(u32, Instant, bool)>,
+    /// When a creature of this character's was last seen out.
+    pet_seen: Option<Instant>,
+}
+
+impl Whose {
+    /// A creature of this character's is out.
+    fn pet_out(&mut self, now: Instant) {
+        self.pet_seen = Some(now);
+    }
+
+    /// One of its creatures has been out lately enough to have left
+    /// bodies about.
+    fn pet_lately(&self, now: Instant) -> bool {
+        self.pet_seen
+            .is_some_and(|t| now.duration_since(t) < PET_KILLS_FOR)
+    }
+
+    /// Whether `guid` has been asked about. Each corpse is asked about
+    /// once: the answer does not change.
+    fn has_asked(&self, guid: u32) -> bool {
+        self.asked.iter().any(|(g, _, _)| *g == guid)
+    }
+
+    /// `guid` has been asked about, just now.
+    fn ask(&mut self, guid: u32, now: Instant) {
+        if !self.has_asked(guid) {
+            self.asked.push((guid, now, false));
+        }
+    }
+
+    /// The corpses asked about whose answer is not in.
+    fn out(&self) -> impl Iterator<Item = u32> + '_ {
+        self.asked
+            .iter()
+            .filter(|(_, _, done)| !done)
+            .map(|(g, _, _)| *g)
+    }
+
+    /// The answer about `guid` is in.
+    fn answered(&mut self, guid: u32) {
+        for (g, _, done) in &mut self.asked {
+            if *g == guid {
+                *done = true;
+            }
+        }
+    }
+
+    /// An answer is on its way and has not been long about it. The next
+    /// fight waits for it: it was picked in the moment before the answer
+    /// came, past the body the creature had just made.
+    fn waiting(&self, now: Instant) -> bool {
+        self.asked
+            .iter()
+            .any(|(_, t, done)| !done && now.duration_since(*t) < WHOSE_WAIT)
+    }
+
+    /// Forget the corpses no longer there.
+    fn tidy(&mut self, there: impl Fn(u32) -> bool) {
+        self.asked.retain(|(g, _, _)| there(*g));
+    }
+}
+
 /// A walk to a corpse on which the steering has found no way there for
 /// this long is given up. Not at the first word of it: the steering
 /// can say so for a moment before it has planned again for a new goal,
@@ -1106,6 +1224,10 @@ pub struct Autoplay {
     /// fight radius: a caster kills from forty metres, and looking only
     /// close by left every body it made at range on the ground.
     pub(crate) kill_spots: Vec<(glam::Vec3, Instant)>,
+    /// Far corpses asked about to learn whose kill each was, while a
+    /// creature this character summoned is about: its kills send no
+    /// word (see `Client::autoplay_claim_pet_kills`).
+    pub(crate) whose: Whose,
     /// When something last hit the character. A fight that has come to
     /// it is fought first, body owed or not.
     pub(crate) last_hit_us: Option<Instant>,
@@ -3439,10 +3561,15 @@ impl Client {
         {
             return true;
         }
+        let now = Instant::now();
+        // A far body is being asked about, and may be one its creature
+        // killed (see `Client::autoplay_claim_pet_kills`).
+        if self.autoplay.whose.waiting(now) {
+            return true;
+        }
         let Some(me) = self.player.as_ref().map(|p| p.world_position()) else {
             return false;
         };
-        let now = Instant::now();
         self.world
             .objects
             .values()
@@ -4298,6 +4425,87 @@ impl Client {
                 .kill_spots
                 .retain(|(k, _)| k.truncate().distance(at.truncate()) > KILL_SPOT);
         }
+    }
+
+    /// Claim the bodies a creature this character summoned killed.
+    ///
+    /// The server tells a player of a kill only when the player landed
+    /// the last blow, so a body its creature finished had no kill spot
+    /// and, past twenty metres, was passed by (see [`killed_by_us`]).
+    /// While one of its creatures is about, each far corpse within the
+    /// fight radius is appraised once, and one whose description names
+    /// the character or its creature is claimed as its own kill, where it
+    /// lies.
+    pub(crate) fn autoplay_claim_pet_kills(&mut self, now: Instant) {
+        let Some(me_guid) = self.world.player_guid else {
+            return;
+        };
+        if self.world.objects.values().any(|o| o.pet_owner == me_guid) {
+            self.autoplay.whose.pet_out(now);
+        }
+        let objects = &self.world.objects;
+        self.autoplay.whose.tidy(|g| objects.contains_key(&g));
+        // The answers that are in, whether or not a creature is still out.
+        let me_name = &self.world.stats.name;
+        let answers: Vec<(u32, bool)> = self
+            .autoplay
+            .whose
+            .out()
+            .filter_map(|g| {
+                let desc = self
+                    .appraisals
+                    .get(&g)?
+                    .string(ac_net::messages::Appraisal::STRING_LONG_DESC);
+                Some((g, desc.is_some_and(|d| killed_by_us(d, me_name))))
+            })
+            .collect();
+        for (guid, ours) in answers {
+            self.autoplay.whose.answered(guid);
+            let Some((at, corpse)) = self
+                .world
+                .objects
+                .get(&guid)
+                .filter(|_| ours)
+                .and_then(|o| Some((o.world_pos()?, o.name.clone())))
+            else {
+                continue;
+            };
+            tracing::info!("autoplay: {corpse} ({guid:#010x}) was a kill of ours; looting it");
+            self.autoplay.kill_spots.push((at, now));
+            self.autoplay.last_kill = Some(now);
+        }
+        // A character that does not loot owes no body, and one with no
+        // creature about has had every kill of its own told to it.
+        if !self.autoplay.whose.pet_lately(now) || self.loot_profile().is_none() {
+            return;
+        }
+        let Some(me) = self.player.as_ref().map(|p| p.world_position()) else {
+            return;
+        };
+        let radius = self.autoplay.config.fight.radius;
+        let ask: Vec<u32> = self
+            .world
+            .objects
+            .values()
+            .filter(|o| o.object_desc_flags & ac_world::object_desc_flags::CORPSE != 0)
+            .filter(|o| !self.autoplay.whose.has_asked(o.guid))
+            .filter(|o| {
+                !self.autoplay.looted.contains(&o.guid) && !self.autoplay.shelved.held(&o.guid, now)
+            })
+            .filter(|o| {
+                o.world_pos()
+                    .is_some_and(|at| whose_to_ask(me, at, radius, &self.autoplay.kill_spots))
+            })
+            .filter(|o| !self.corpse_is_someone_elses(&o.name))
+            .map(|o| o.guid)
+            .collect();
+        if ask.is_empty() {
+            return;
+        }
+        for &g in &ask {
+            self.autoplay.whose.ask(g, now);
+        }
+        self.appraise_many(ask);
     }
 
     /// The nearest creature the name rules allow, within the radius.
@@ -5667,6 +5875,100 @@ mod tests {
         assert!(corpse_is_ours(me, off, 40.0, &[(off, now)]));
         // But not past the fight radius.
         assert!(!corpse_is_ours(me, off, 20.0, &[(off, now)]));
+
+        // Thirty metres off, where the summoned creature landed the last
+        // blow: no kill notice came, so no kill spot, and it is not ours
+        // as it lies. It is asked about instead.
+        let pets = glam::Vec3::new(30.0, 0.0, 0.0);
+        assert!(!corpse_is_ours(me, pets, 60.0, &[]));
+        assert!(whose_to_ask(me, pets, 60.0, &[]));
+        // Its description names the creature, so it is claimed where it
+        // lies: looted, and waited on, and not asked about again.
+        assert!(killed_by_us(
+            "Killed by Blargerton's Mud Golem.",
+            "Blargerton"
+        ));
+        let claimed = [(pets, now)];
+        assert!(corpse_is_ours(me, pets, 60.0, &claimed));
+        assert!(!whose_to_ask(me, pets, 60.0, &claimed));
+        // One close by needs no asking, and one past the fight radius is
+        // not asked about.
+        assert!(!whose_to_ask(me, glam::Vec3::new(5.0, 0.0, 0.0), 60.0, &[]));
+        assert!(!whose_to_ask(
+            me,
+            glam::Vec3::new(70.0, 0.0, 0.0),
+            60.0,
+            &[]
+        ));
+    }
+
+    #[test]
+    fn a_corpse_is_ours_when_it_names_this_character_or_its_creature_as_the_killer() {
+        assert!(killed_by_us("Killed by Blargerton.", "Blargerton"));
+        assert!(killed_by_us(
+            "Killed by Blargerton's Mud Golem.",
+            "Blargerton"
+        ));
+        // The server leaves off a leading '+'; a line that kept it still
+        // counts.
+        assert!(killed_by_us("Killed by Fletch.", "+Fletch"));
+        assert!(killed_by_us("Killed by Fletch's Mud Golem.", "+Fletch"));
+        assert!(killed_by_us("Killed by +Fletch.", "+Fletch"));
+        // A rare found on the body adds to the line.
+        assert!(killed_by_us(
+            "Killed by Blargerton. This corpse generated a rare item!",
+            "Blargerton"
+        ));
+        // A name that only starts like ours is someone else.
+        assert!(!killed_by_us("Killed by Blargertonia.", "Blargerton"));
+        // Another player, or another player's creature, is not us.
+        assert!(!killed_by_us("Killed by Grimble.", "Blargerton"));
+        assert!(!killed_by_us(
+            "Killed by Grimble's Mud Golem.",
+            "Blargerton"
+        ));
+        assert!(!killed_by_us("Killed by misadventure.", "Blargerton"));
+        // Nothing to go on is not ours.
+        assert!(!killed_by_us("", "Blargerton"));
+        assert!(!killed_by_us("Killed by .", ""));
+    }
+
+    #[test]
+    fn a_far_corpse_is_asked_about_once_and_the_fight_waits_on_the_answer_briefly() {
+        let t0 = Instant::now();
+        let s = Duration::from_secs;
+        let mut whose = Whose::default();
+        // No creature seen out: nothing left bodies about.
+        assert!(!whose.pet_lately(t0));
+        whose.pet_out(t0);
+        assert!(whose.pet_lately(t0 + s(30)));
+        assert!(!whose.pet_lately(t0 + PET_KILLS_FOR));
+
+        // Asked about: the fight waits a moment for the answer.
+        assert!(!whose.waiting(t0));
+        whose.ask(0x8000_0001, t0);
+        assert!(whose.has_asked(0x8000_0001));
+        assert!(whose.waiting(t0 + s(1)));
+        // Asking again changes nothing, and does not restart the wait.
+        whose.ask(0x8000_0001, t0 + s(2));
+        assert_eq!(whose.out().collect::<Vec<_>>(), vec![0x8000_0001]);
+        // An answer that never comes does not hold the fight for good.
+        assert!(!whose.waiting(t0 + WHOSE_WAIT));
+
+        // Once the answer is in, nothing is waited on or out, and the
+        // corpse is still not asked about again.
+        whose.ask(0x8000_0002, t0 + s(4));
+        assert!(whose.waiting(t0 + s(5)));
+        whose.answered(0x8000_0002);
+        whose.answered(0x8000_0001);
+        assert!(!whose.waiting(t0 + s(5)));
+        assert_eq!(whose.out().count(), 0);
+        assert!(whose.has_asked(0x8000_0002));
+
+        // A corpse gone from view is forgotten.
+        whose.tidy(|g| g == 0x8000_0002);
+        assert!(!whose.has_asked(0x8000_0001));
+        assert!(whose.has_asked(0x8000_0002));
     }
 
     #[test]

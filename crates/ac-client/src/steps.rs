@@ -466,6 +466,10 @@ pub const HOUSEKEEPING: &[Housekeeping] = &[
         name: "restock from the pack",
         run: |c, _| c.autoplay_stock(),
     },
+    Housekeeping {
+        name: "claim the summoned creature's kills",
+        run: Client::autoplay_claim_pet_kills,
+    },
 ];
 
 /// The reflexes, in their fixed order.
