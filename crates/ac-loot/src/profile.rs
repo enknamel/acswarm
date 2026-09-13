@@ -610,6 +610,59 @@ pub enum SellTo {
     Named(String),
 }
 
+/// How a character goes about looting, beside what it takes.
+///
+/// These were switches on each character's autoplay settings, beside
+/// the name of the profile it read, so "how does this character loot"
+/// was answered in two windows. They travel with the rules now.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Looting {
+    /// Always take these, whatever the rules say (by name). Read before
+    /// any rule, and beaten only by `never`.
+    pub always: Vec<String>,
+    /// Never take these (by name), even when a rule matches.
+    pub never: Vec<String>,
+    /// Ask the server about a corpse's items before deciding, so that
+    /// rules on damage, armour and spells can be judged.
+    pub appraise: bool,
+    /// Finish what you kill: while a body the character made is still
+    /// unlooted nearby, another fight waits -- unless something is
+    /// hitting it. Off, a body only outranks the next fight once it is
+    /// old enough to be in danger of rotting.
+    pub after_every_fight: bool,
+    /// Salvage what the rules tagged, when this character is the team's
+    /// best salvager.
+    pub salvage: bool,
+    /// Carry what the rules tagged to the team's best salvager, when
+    /// that is someone else.
+    pub hand_off: bool,
+    /// Pour loose stacks of the same thing together, so that slots are
+    /// not wasted on the change left by buying and looting.
+    pub tidy_pack: bool,
+    /// How laden to get while hunting, in multiples of carrying
+    /// capacity (150 x Strength). At one a character is comfortable, at
+    /// two it is slowed, at three the server stops it picking anything
+    /// up -- and hunting up to that wall leaves it unable to loot, pour
+    /// stacks together or move. So it stops well short and goes to sell.
+    pub carry_up_to: f32,
+}
+
+impl Default for Looting {
+    fn default() -> Self {
+        Looting {
+            always: vec!["Pyreal".into()],
+            never: Vec::new(),
+            appraise: true,
+            after_every_fight: true,
+            salvage: true,
+            hand_off: true,
+            tidy_pack: true,
+            carry_up_to: 1.5,
+        }
+    }
+}
+
 /// A named, shareable set of rules.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -630,6 +683,9 @@ pub struct Profile {
     /// Where what is for sale goes.
     #[serde(default)]
     pub sell_to: SellTo,
+    /// How the character loots, beside what it takes.
+    #[serde(default)]
+    pub looting: Looting,
 }
 
 impl Profile {
@@ -688,6 +744,9 @@ impl Profile {
         serde_json::to_string(&self.buy)
             .unwrap_or_default()
             .hash(&mut h);
+        // Always and never are read before any rule, so they decide
+        // items as surely as the rules do.
+        (&self.looting.always, &self.looting.never).hash(&mut h);
         h.finish()
     }
 
@@ -943,6 +1002,7 @@ impl Profile {
                 },
             ],
             sell_to: SellTo::Best,
+            looting: Looting::default(),
         }
     }
 }

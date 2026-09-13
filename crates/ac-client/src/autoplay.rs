@@ -316,33 +316,16 @@ impl Style {
     pub const ALL: [Style; 4] = [Style::Auto, Style::Melee, Style::Missile, Style::Magic];
 }
 
-/// What loot is worth taking, and what to do with it.
+/// Which loot profile this character reads.
+///
+/// Everything about looting -- what to take, what to do with it, when a
+/// body outranks the next fight, whether to salvage -- is the profile's
+/// (`crate::profile::Looting`). A character without one does not loot.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Loot {
-    pub enabled: bool,
-    /// Always take these, whatever the rules say (by name).
-    pub always: Vec<String>,
-    /// Never take these (by name), even when a rule matches.
-    pub never: Vec<String>,
-    /// Ask the server about the corpse's items before deciding, so that
-    /// rules on damage, armour and spells can be judged.
-    pub appraise: bool,
-    /// Salvage what the rules tagged, when this character is the team's
-    /// best salvager.
-    pub salvage: bool,
-    /// Carry what the rules tagged to the team's best salvager, when
-    /// that is someone else.
-    pub hand_off: bool,
-    /// Pour loose stacks of the same thing together, so that slots are
-    /// not wasted on the change left by buying and looting.
-    #[serde(default = "yes")]
-    pub tidy_pack: bool,
-    /// The loot profile this character reads, by name (see
-    /// `crate::profile`). A name nothing on the shelf answers to means
-    /// nothing is taken at all: the profile is where a player says what
-    /// their things are worth, and a client with nothing to read should
-    /// take nothing rather than guess.
+    /// The profile's name. None, or a name nothing on the shelf answers
+    /// to, means nothing is looted at all.
     ///
     /// Defaulted by name rather than by `Default::default`, because a
     /// settings file that mentions `loot` at all and leaves this out
@@ -351,42 +334,6 @@ pub struct Loot {
     /// character would quietly stop reading its profile.
     #[serde(default = "starter")]
     pub profile: String,
-    /// Finish what you kill: while a body the character made is still
-    /// unlooted and within reach, another fight waits.
-    ///
-    /// Off, a body only outranks the next fight once it has aged
-    /// enough to be in danger of rotting, which in a busy place means
-    /// the floor fills up and the oldest are lost. On, nothing is left
-    /// behind at all -- slower, and everything gets picked up.
-    #[serde(default = "yes")]
-    pub after_every_fight: bool,
-    /// How laden a character is willing to get while hunting, in
-    /// multiples of its carrying capacity (150 x Strength).
-    ///
-    /// The game's own landmarks: at one capacity a character is
-    /// comfortable, at two it is slowed, and at three the server stops
-    /// letting it pick anything up. Stopping only at that last one is
-    /// how a level twelve character came to be carrying twenty four
-    /// thousand of a twenty four thousand three hundred ceiling, with
-    /// seventeen units to spare -- unable to loot, barely able to
-    /// move, and unable to put two stacks together, because the server
-    /// weighs a merge as though the source were being lifted afresh.
-    ///
-    /// So the rules stop well before the wall and go and sell instead.
-    #[serde(default = "carry_up_to")]
-    pub carry_up_to: f32,
-}
-
-/// Serde's default for a switch that is on unless it was turned off.
-fn yes() -> bool {
-    true
-}
-
-/// Laden, but a long way from the wall: half again the comfortable
-/// load, which leaves room under the server's ceiling for any stack a
-/// character is likely to be carrying to still be poured into another.
-fn carry_up_to() -> f32 {
-    1.5
 }
 
 /// The profile the shelf seeds itself with, which is what a character
@@ -397,21 +344,7 @@ fn starter() -> String {
 
 impl Default for Loot {
     fn default() -> Self {
-        Loot {
-            enabled: true,
-            always: vec!["Pyreal".into()],
-            never: Vec::new(),
-            appraise: true,
-            salvage: true,
-            hand_off: true,
-            tidy_pack: true,
-            // The profile the shelf seeds itself with, so a character
-            // nobody has configured still reads its rules from data
-            // rather than from a list in the code.
-            profile: "Starter".into(),
-            after_every_fight: true,
-            carry_up_to: carry_up_to(),
-        }
+        Loot { profile: starter() }
     }
 }
 
@@ -766,34 +699,30 @@ pub fn choose_recipe(
 
 /// What the loot rules make of an item, and whether they can say yet.
 ///
-/// The profile named in the config decides when there is one; a
-/// character with no profile falls back to the searches it had before
-/// profiles existed, which never ask for an appraisal they have not
-/// already been given.
+/// The character's loot profile decides; with none, nothing is taken.
 pub fn judge_loot(
     stats: &crate::items::ItemStats,
     id: Option<&ac_net::messages::Appraisal>,
-    l: &Loot,
-    library: &crate::profile::Library,
+    profile: Option<&crate::profile::Profile>,
     me: &crate::weapons::Wielder,
     my_name: &str,
     held: u32,
 ) -> crate::profile::Verdict {
     use crate::profile::Verdict;
-    // The player's own word comes first, whatever any rule says.
-    if name_matches(&stats.name, &l.never) {
-        return Verdict::Decided(LootAction::Skip, "never take these".into());
-    }
-    if name_matches(&stats.name, &l.always) {
-        return Verdict::Decided(LootAction::Keep, "always take these".into());
-    }
     // No profile, nothing decided. The profile is where a player says
     // what their things are worth, and a client with nothing to read
     // should take nothing rather than guess.
-    match library.get(&l.profile) {
-        Some(p) => p.judge(stats, id, me, my_name, held),
-        None => Verdict::None,
+    let Some(p) = profile else {
+        return Verdict::None;
+    };
+    // The player's own word comes first, whatever any rule says.
+    if name_matches(&stats.name, &p.looting.never) {
+        return Verdict::Decided(LootAction::Skip, "never take these".into());
     }
+    if name_matches(&stats.name, &p.looting.always) {
+        return Verdict::Decided(LootAction::Keep, "always take these".into());
+    }
+    p.judge(stats, id, me, my_name, held)
 }
 
 /// Each carried thing paired with how many of its kind come at or
@@ -835,13 +764,12 @@ fn in_arrival_order(carried: &mut [(u32, u32, u32)]) -> Vec<(u32, u32)> {
 pub fn arrival_tag(
     stats: &crate::items::ItemStats,
     id: Option<&ac_net::messages::Appraisal>,
-    l: &Loot,
-    library: &crate::profile::Library,
+    profile: Option<&crate::profile::Profile>,
     me: &crate::weapons::Wielder,
     my_name: &str,
     held: u32,
 ) -> Option<LootAction> {
-    match judge_loot(stats, id, l, library, me, my_name, held) {
+    match judge_loot(stats, id, profile, me, my_name, held) {
         crate::profile::Verdict::Decided(LootAction::Skip, _) => None,
         crate::profile::Verdict::Decided(a, _) => Some(a),
         // Not judgeable yet, or nothing claimed it: nothing to write
@@ -1036,11 +964,10 @@ pub struct Autoplay {
     /// Arrivals waiting for their appraisal before the rules judge
     /// them, and since when.
     pending_tags: Vec<(u32, Instant)>,
-    /// The rules the ledger's decisions were made under: the profile
-    /// by identity (the shelf replaces the whole thing on every edit)
-    /// and a hash of the two name lists beside it. `None` before the
-    /// first look.
-    judged_under: Option<(Option<std::sync::Arc<crate::profile::Profile>>, u64)>,
+    /// The profile the ledger's decisions were made under, by identity
+    /// (the shelf replaces the whole thing on every edit). `None` before
+    /// the first look; `Some(None)` for a character with no profile.
+    judged_under: Option<Option<std::sync::Arc<crate::profile::Profile>>>,
     /// A re-judge of the whole pack is under way, since when.
     ///
     /// It is not one pass: an item a rule cannot judge until it is
@@ -1620,7 +1547,8 @@ impl Client {
     /// runs before the rules that decide the pack is full, so that a
     /// pack full of change does not send the character to town.
     pub(crate) fn autoplay_tidy(&mut self, now: Instant) -> bool {
-        if !self.autoplay.config.loot.tidy_pack {
+        // With no profile the pack is still tidied: it is not looting.
+        if !self.loot_profile().is_none_or(|p| p.looting.tidy_pack) {
             return false;
         }
         // Not with a counter open. A run to town holds a list of what
@@ -1791,8 +1719,7 @@ impl Client {
         match judge_loot(
             stats,
             self.appraisals.get(&stats.guid),
-            &self.autoplay.config.loot,
-            &self.profiles,
+            self.loot_profile().as_deref(),
             &self.wielder(),
             &self.world.stats.name,
             self.already_carried(stats.wcid),
@@ -1800,6 +1727,12 @@ impl Client {
             crate::profile::Verdict::Decided(a, _) => Some(a),
             crate::profile::Verdict::NeedsId(_) | crate::profile::Verdict::None => None,
         }
+    }
+
+    /// The loot profile this character reads, if the shelf has it. None
+    /// means it does not loot.
+    pub fn loot_profile(&self) -> Option<std::sync::Arc<crate::profile::Profile>> {
+        self.profiles.get(&self.autoplay.config.loot.profile)
     }
 
     /// Notice the rules changing and re-judge what is already carried.
@@ -1818,21 +1751,17 @@ impl Client {
     /// should not be telling somebody their mule is holding things for
     /// a rule they deleted.
     pub(crate) fn tick_retag(&mut self, now: Instant) {
-        let profile = self.profiles.get(&self.autoplay.config.loot.profile);
-        let names = self.name_lists_fingerprint();
+        let profile = self.loot_profile();
         // The cheap half, run every frame: has the shelf handed out a
-        // different profile, or have the name lists been typed in? The
-        // shelf replaces the whole profile on every edit, so identity
-        // answers it without reading a rule.
+        // different profile? It replaces the whole profile on every edit,
+        // name lists and all, so identity answers it without reading a
+        // rule.
         let untouched = match &self.autoplay.judged_under {
-            Some((was, hash)) => {
-                *hash == names
-                    && match (was, &profile) {
-                        (None, None) => true,
-                        (Some(a), Some(b)) => std::sync::Arc::ptr_eq(a, b),
-                        _ => false,
-                    }
-            }
+            Some(was) => match (was, &profile) {
+                (None, None) => true,
+                (Some(a), Some(b)) => std::sync::Arc::ptr_eq(a, b),
+                _ => false,
+            },
             None => false,
         };
         if !untouched {
@@ -1842,8 +1771,8 @@ impl Client {
             if self.world.stats.name.trim().is_empty() {
                 return;
             }
-            let rules = self.rules_fingerprint(profile.as_deref(), names);
-            self.autoplay.judged_under = Some((profile, names));
+            let rules = self.rules_fingerprint(profile.as_deref());
+            self.autoplay.judged_under = Some(profile);
             // Something was handed out, but were the rules themselves
             // any different? Typing in a profile's note replaces it
             // without changing a single answer, and neither does
@@ -1875,24 +1804,13 @@ impl Client {
         }
     }
 
-    /// The player's two name lists, as one number.
-    fn name_lists_fingerprint(&self) -> u64 {
-        use std::hash::{Hash, Hasher};
-        let mut h = std::collections::hash_map::DefaultHasher::new();
-        self.autoplay.config.loot.always.hash(&mut h);
-        self.autoplay.config.loot.never.hash(&mut h);
-        h.finish()
-    }
-
-    /// Everything that decides an item, as one number: the profile's
-    /// rules and the name lists that are read before them. A character
-    /// reading no profile still has a fingerprint, so being given one
-    /// counts as a change.
-    fn rules_fingerprint(&self, profile: Option<&crate::profile::Profile>, names: u64) -> u64 {
+    /// Everything that decides an item, as one number (see
+    /// `Profile::fingerprint`). A character reading no profile still has
+    /// a fingerprint, so being given one counts as a change.
+    fn rules_fingerprint(&self, profile: Option<&crate::profile::Profile>) -> u64 {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
         profile.map(|p| p.fingerprint()).hash(&mut h);
-        names.hash(&mut h);
         h.finish()
     }
 
@@ -1911,7 +1829,7 @@ impl Client {
     /// of them over a cap of two -- turning a set of keepers into a set
     /// of vendor trash in one pass.
     fn retag_pack(&mut self, settle: bool) -> bool {
-        let cfg = self.autoplay.config.loot.clone();
+        let profile = self.loot_profile();
         let wielder = self.wielder();
         let who = self.world.stats.name.clone();
         let mut carried: Vec<(u32, u32, u32)> = self
@@ -1928,8 +1846,7 @@ impl Client {
             match judge_loot(
                 &stats,
                 self.appraisals.get(&guid),
-                &cfg,
-                &self.profiles,
+                profile.as_deref(),
                 &wielder,
                 &who,
                 held,
@@ -1975,8 +1892,7 @@ impl Client {
         let action = arrival_tag(
             &stats,
             self.appraisals.get(&guid),
-            &self.autoplay.config.loot.clone(),
-            &self.profiles,
+            self.loot_profile().as_deref(),
             &self.wielder(),
             &self.world.stats.name.clone(),
             self.already_carried(stats.wcid),
@@ -1985,7 +1901,13 @@ impl Client {
         Some(action)
     }
 
-    fn corpse_now(&mut self, guid: u32, items: &[u32], cfg: &Loot, now: Instant) -> ac_loot::Open {
+    fn corpse_now(
+        &mut self,
+        guid: u32,
+        items: &[u32],
+        profile: &crate::profile::Profile,
+        now: Instant,
+    ) -> ac_loot::Open {
         use crate::profile::Verdict as Judged;
         let away = match (
             self.player.as_ref().map(|p| p.world_position()),
@@ -2025,8 +1947,7 @@ impl Client {
                 let judged = judge_loot(
                     &stats,
                     self.appraisals.get(g),
-                    cfg,
-                    &self.profiles,
+                    Some(profile),
                     &wielder,
                     &who,
                     held,
@@ -2048,7 +1969,7 @@ impl Client {
                         Judged::Decided(_, _) => ac_loot::Verdict::Leave,
                         // Only worth asking about when asking is allowed
                         // and might answer.
-                        Judged::NeedsId(_) if cfg.appraise => ac_loot::Verdict::MustAsk,
+                        Judged::NeedsId(_) if profile.looting.appraise => ac_loot::Verdict::MustAsk,
                         Judged::NeedsId(_) | Judged::None => ac_loot::Verdict::Leave,
                     }
                 };
@@ -2072,7 +1993,7 @@ impl Client {
             slots_free: self.free_space(),
             keep_free: self.autoplay.config.team.restock.keep_slots,
             carry_room: self.carry_room(),
-            may_ask: cfg.appraise,
+            may_ask: profile.looting.appraise,
             asking: self.appraise_inflight.iter().map(|(g, _)| *g).collect(),
         }
     }
@@ -2187,9 +2108,10 @@ impl Client {
     /// Open the corpse of something we killed and take what is worth
     /// taking. True while looting.
     pub(crate) fn autoplay_loot(&mut self, now: Instant) -> bool {
-        if !self.autoplay.config.loot.enabled {
+        // No profile, no looting: it is what says what to take.
+        let Some(profile) = self.loot_profile() else {
             return false;
-        }
+        };
         // Already at one: wait for its contents, then empty it.
         if let Some((guid, since, allow, tries)) = self.autoplay.corpse {
             // The clock is on the opening, not on the emptying. Once
@@ -2254,14 +2176,13 @@ impl Client {
             if open_guid != guid {
                 return true;
             }
-            let cfg = self.autoplay.config.loot.clone();
             // What to ask about, what to take, in what order and when
             // to stop is decided in `ac-loot`, which knows nothing of
             // sockets or packs: it is handed the body and the character
             // standing over it and answers with one thing to do. The
             // judging stays here, where the profile and the character's
             // own skills are (see `corpse_now`).
-            let at = self.corpse_now(guid, &items, &cfg, now);
+            let at = self.corpse_now(guid, &items, &profile, now);
             let next = self.autoplay.loot_run.step(&at, now);
             match next.act {
                 Some(ac_loot::Act::Approach) | Some(ac_loot::Act::Open) => {
@@ -2742,7 +2663,8 @@ impl Client {
     /// what the rules would salvage or sell (see [`arrival_tag`]): the
     /// salvage a teammate handed over, mostly. The first pass only
     /// notes what is carried.
-    fn autoplay_tag_arrivals(&mut self, now: Instant, cfg: &Loot) {
+    fn autoplay_tag_arrivals(&mut self, now: Instant) {
+        let profile = self.loot_profile();
         let wielder = self.wielder();
         let who = self.world.stats.name.clone();
         let carried: Vec<u32> = self
@@ -2771,11 +2693,9 @@ impl Client {
         }
         // Whether an identify is worth asking for: the profile says,
         // since it is the only thing that judges anything now.
-        let needs = cfg.appraise
-            && self
-                .profiles
-                .get(&cfg.profile)
-                .is_some_and(|p| p.needs_id());
+        let needs = profile
+            .as_ref()
+            .is_some_and(|p| p.looting.appraise && p.needs_id());
         let pending = std::mem::take(&mut self.autoplay.pending_tags);
         for (g, since) in pending {
             let Some(stats) = self.stats_of(g) else {
@@ -2790,8 +2710,7 @@ impl Client {
             if let Some(action) = arrival_tag(
                 &stats,
                 self.appraisals.get(&g),
-                cfg,
-                &self.profiles,
+                profile.as_deref(),
                 &wielder,
                 &who,
                 held,
@@ -2841,12 +2760,15 @@ impl Client {
     /// Salvage what the rules tagged, or carry it to whoever salvages
     /// for the team. Runs between fights. True while busy with it.
     pub(crate) fn autoplay_salvage(&mut self, now: Instant) -> bool {
-        let cfg = self.autoplay.config.loot.clone();
         if self.world.player_guid.is_none() {
             return false;
         }
-        self.autoplay_tag_arrivals(now, &cfg);
-        if !cfg.enabled || self.attack_target.is_some() || self.autoplay.corpse.is_some() {
+        self.autoplay_tag_arrivals(now);
+        let Some(profile) = self.loot_profile() else {
+            return false;
+        };
+        let cfg = profile.looting.clone();
+        if self.attack_target.is_some() || self.autoplay.corpse.is_some() {
             return false;
         }
         // A batch on its way: wait for the items to go, and count a
@@ -3260,11 +3182,13 @@ impl Client {
 
     /// The next fight waits for the body the last one left: every body
     /// is to be emptied first, one is owed, and nothing is hitting the
-    /// character meanwhile. With looting off nothing is ever owed, or
-    /// the fighting would stop for good.
+    /// character meanwhile. A character that does not loot owes nothing,
+    /// or the fighting would stop for good.
     pub fn waits_for_a_corpse(&self) -> bool {
-        let loot = &self.autoplay.config.loot;
-        loot.enabled && loot.after_every_fight && self.owes_a_corpse() && !self.under_attack()
+        self.loot_profile()
+            .is_some_and(|p| p.looting.after_every_fight)
+            && self.owes_a_corpse()
+            && !self.under_attack()
     }
 
     pub fn pack_full(&self) -> bool {
@@ -5048,18 +4972,26 @@ mod tests {
 
     fn judged(
         stats: &ItemStats,
-        l: &Loot,
         library: &crate::profile::Library,
+        profile: &str,
     ) -> crate::profile::Verdict {
         judge_loot(
             stats,
             None,
-            l,
-            library,
+            library.get(profile).as_deref(),
             &crate::weapons::Wielder::default(),
             "Aldric",
             0,
         )
+    }
+
+    /// Set the name lists on the test profile. They are the profile's
+    /// now, so they change for everyone reading it.
+    fn name_lists(library: &crate::profile::Library, always: &[&str], never: &[&str]) {
+        let mut p = (*library.get("test").expect("the test profile")).clone();
+        p.looting.always = always.iter().map(|s| s.to_string()).collect();
+        p.looting.never = never.iter().map(|s| s.to_string()).collect();
+        library.put(p).expect("put");
     }
 
     #[test]
@@ -5072,40 +5004,33 @@ mod tests {
                 asks("trash", "rusty", LootAction::Sell),
             ],
         );
-        let mut l = Loot {
-            profile: "test".into(),
-            always: Vec::new(),
-            never: Vec::new(),
-            ..Default::default()
-        };
+        name_lists(&library, &[], &[]);
         let ring = item("Ornate Ring", 900, 0);
         let nail = item("Rusty Nail", 3, 0);
         assert_eq!(
-            judged(&ring, &l, &library),
+            judged(&ring, &library, "test"),
             Verdict::Decided(LootAction::Keep, "keepers".into())
         );
         assert_eq!(
-            judged(&nail, &l, &library),
+            judged(&nail, &library, "test"),
             Verdict::Decided(LootAction::Sell, "trash".into())
         );
-
         // Never wins over a rule that would have kept it.
-        l.never = vec!["ornate".into()];
+        name_lists(&library, &[], &["ornate"]);
         assert_eq!(
-            judged(&ring, &l, &library),
+            judged(&ring, &library, "test"),
             Verdict::Decided(LootAction::Skip, "never take these".into())
         );
         // Always wins over a rule that would have sold it, and loses to
         // never, which is read first.
-        l.never.clear();
-        l.always = vec!["rusty".into()];
+        name_lists(&library, &["rusty"], &[]);
         assert_eq!(
-            judged(&nail, &l, &library),
+            judged(&nail, &library, "test"),
             Verdict::Decided(LootAction::Keep, "always take these".into())
         );
-        l.never = vec!["rusty".into()];
+        name_lists(&library, &["rusty"], &["rusty"]);
         assert_eq!(
-            judged(&nail, &l, &library),
+            judged(&nail, &library, "test"),
             Verdict::Decided(LootAction::Skip, "never take these".into())
         );
         let _ = std::fs::remove_dir_all(library.dir());
@@ -5118,24 +5043,15 @@ mod tests {
             "no-profile",
             vec![asks("keepers", "value>250", LootAction::Keep)],
         );
-        // A character reading a profile that is not on the shelf takes
-        // nothing: a client with no rules to read should not guess.
-        let l = Loot {
-            profile: "missing".into(),
-            always: Vec::new(),
-            never: Vec::new(),
-            ..Default::default()
-        };
+        name_lists(&library, &["ornate"], &[]);
         let ring = item("Ornate Ring", 900, 0);
-        assert_eq!(judged(&ring, &l, &library), Verdict::None);
-        // The name lists still cut across, because they are the
-        // player's own word and not a rule at all.
-        let l = Loot {
-            always: vec!["ornate".into()],
-            ..l
-        };
+        // A character reading no profile, or one not on the shelf, takes
+        // nothing -- the name lists included, since they are the
+        // profile's and not the character's.
+        assert_eq!(judged(&ring, &library, ""), Verdict::None);
+        assert_eq!(judged(&ring, &library, "missing"), Verdict::None);
         assert_eq!(
-            judged(&ring, &l, &library),
+            judged(&ring, &library, "test"),
             Verdict::Decided(LootAction::Keep, "always take these".into())
         );
         let _ = std::fs::remove_dir_all(library.dir());
@@ -5152,39 +5068,29 @@ mod tests {
                 asks("plate", "type:armor al>=200", LootAction::Sell),
             ],
         );
-        let mut l = Loot {
-            profile: "test".into(),
-            always: Vec::new(),
-            never: Vec::new(),
-            ..Default::default()
-        };
+        name_lists(&library, &[], &[]);
         let me = crate::weapons::Wielder::default();
-        let tag = |s: &ItemStats, l: &Loot| arrival_tag(s, None, l, &library, &me, "Aldric", 0);
-        assert_eq!(
-            tag(&item("Ornate Ring", 900, 0), &l),
-            Some(LootAction::Keep)
-        );
-        assert_eq!(
-            tag(&item("Platemail", 100, 240), &l),
-            Some(LootAction::Sell)
-        );
+        let tag =
+            |s: &ItemStats| arrival_tag(s, None, library.get("test").as_deref(), &me, "Aldric", 0);
+        assert_eq!(tag(&item("Ornate Ring", 900, 0)), Some(LootAction::Keep));
+        assert_eq!(tag(&item("Platemail", 100, 240)), Some(LootAction::Sell));
         // Nothing claimed it, so there is nothing to write down...
-        assert_eq!(tag(&item("Rusty Nail", 3, 0), &l), None);
+        assert_eq!(tag(&item("Rusty Nail", 3, 0)), None);
         // ...and neither has a skip, which is a decision to leave it.
-        l.never = vec!["ornate".into()];
-        assert_eq!(tag(&item("Ornate Ring", 900, 0), &l), None);
+        name_lists(&library, &[], &["ornate"]);
+        assert_eq!(tag(&item("Ornate Ring", 900, 0)), None);
         // An item that cannot be judged until it is appraised is not
         // written down either: the answer is not in yet.
-        l.never.clear();
+        name_lists(&library, &[], &[]);
         let unread = ItemStats {
             appraised: false,
             ..item("Platemail", 100, 240)
         };
         assert!(matches!(
-            judged(&unread, &l, &library),
+            judged(&unread, &library, "test"),
             crate::profile::Verdict::NeedsId(_)
         ));
-        assert_eq!(tag(&unread, &l), None);
+        assert_eq!(tag(&unread), None);
         assert_eq!(LootAction::parse("Salvage"), Some(LootAction::Salvage));
         assert_eq!(LootAction::parse("burn"), None);
         assert!(!LootAction::Skip.takes());

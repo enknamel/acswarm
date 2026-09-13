@@ -1905,7 +1905,9 @@ impl Client {
         // keeps stocked is barred from sale by the buy list itself
         // (`Profile::stocks`, passed separately), which used to be said
         // here a second time.
-        self.autoplay.config.loot.always.clone()
+        self.loot_profile()
+            .map(|p| p.looting.always.clone())
+            .unwrap_or_default()
     }
 
     /// The pack items to sell to the open vendor, which takes only some
@@ -2394,7 +2396,8 @@ impl Client {
     }
 
     /// How much more the character will take on before it stops
-    /// hunting and goes to sell: `loot.carry_up_to` times its capacity,
+    /// hunting and goes to sell: the loot profile's `carry_up_to` times
+    /// its capacity,
     /// less what it carries. Zero means it has had enough.
     ///
     /// This is the working limit, not the server's. [`burden_room`] is
@@ -2403,7 +2406,12 @@ impl Client {
     /// can barely walk.
     pub fn carry_room(&self) -> u32 {
         let (now, capacity) = self.burden();
-        let up_to = self.autoplay.config.loot.carry_up_to.max(0.0);
+        let up_to = self
+            .loot_profile()
+            .map_or(crate::profile::Looting::default().carry_up_to, |p| {
+                p.looting.carry_up_to
+            })
+            .max(0.0);
         let limit = (capacity as f32 * up_to) as u32;
         // Never claim more room than the server would actually allow.
         limit.min(capacity.saturating_mul(3)).saturating_sub(now)

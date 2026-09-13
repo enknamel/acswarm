@@ -411,6 +411,8 @@ pub struct Editor {
     pub status: String,
     /// Search lines inside the pickers, by the widget's salt.
     searches: BTreeMap<String, String>,
+    /// Names being typed into the always / never lists.
+    drafts: super::autoplay::Drafts,
 }
 
 impl Editor {
@@ -993,6 +995,69 @@ fn shelf(ui: &mut egui::Ui, v: &ProfilesView, editor: &mut Editor, a: &mut Actio
 /// Two things that are not rules and cannot be written as ones: a rule
 /// is a question about an item in hand, and there is no item in hand
 /// when the question is "have I enough tapers" or "where do I sell".
+/// How the character loots, beside what it takes: the name lists read
+/// before any rule, and the switches that used to sit on each
+/// character's autoplay settings.
+fn looting(ui: &mut egui::Ui, p: &mut Profile, drafts: &mut super::autoplay::Drafts) {
+    let key = format!("loot_profiles.{}", p.name);
+    let l = &mut p.looting;
+    caption(ui, "how it loots");
+    ui.horizontal(|ui| {
+        ui.checkbox(&mut l.appraise, "appraise first")
+            .on_hover_text("Ask the server for the numbers before deciding");
+        ui.checkbox(
+            &mut l.after_every_fight,
+            "empty every body before the next fight",
+        )
+        .on_hover_text(
+            "Finish what it kills. While a body it made is still unlooted \
+                 nearby, another fight waits -- unless something is hitting it.",
+        );
+    });
+    ui.horizontal(|ui| {
+        ui.checkbox(&mut l.salvage, "salvage")
+            .on_hover_text("Salvage tagged items when this character is the team's best salvager");
+        ui.checkbox(&mut l.hand_off, "hand off").on_hover_text(
+            "Carry tagged items to the team's best salvager (highest Salvaging with an Ust)",
+        );
+        ui.checkbox(&mut l.tidy_pack, "pour stacks together")
+            .on_hover_text(
+                "Stacks of the same thing are poured together as they turn up, so \
+             slots are not wasted on change",
+            );
+    });
+    ui.horizontal(|ui| {
+        ui.label("carry up to");
+        ui.add(
+            egui::Slider::new(&mut l.carry_up_to, 0.5..=2.9)
+                .fixed_decimals(1)
+                .suffix(" x capacity"),
+        )
+        .on_hover_text(
+            "How laden to get before going to sell. At 1 a character is \
+             comfortable, at 2 slowed, at 3 the server stops it picking anything up.",
+        );
+    });
+    caption(ui, "always take");
+    super::autoplay::string_list(
+        ui,
+        &format!("{key}.always"),
+        &mut l.always,
+        drafts,
+        "name contains, e.g. Pyreal",
+        None,
+    );
+    caption(ui, "never take");
+    super::autoplay::string_list(
+        ui,
+        &format!("{key}.never"),
+        &mut l.never,
+        drafts,
+        "name contains, e.g. Rusty",
+        None,
+    );
+}
+
 fn shopping(ui: &mut egui::Ui, p: &mut Profile) {
     caption(
         ui,
@@ -1309,6 +1374,8 @@ pub fn draw(egui: &egui::Context, v: &ProfilesView, editor: &mut Editor) -> Acti
                 }
                 ui.separator();
                 shopping(ui, p);
+                ui.separator();
+                looting(ui, p, &mut editor.drafts);
                 ui.separator();
                 ui.horizontal(|ui| {
                     caption(ui, "what would this do?");

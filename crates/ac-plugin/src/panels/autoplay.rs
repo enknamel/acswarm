@@ -45,6 +45,8 @@ pub struct AutoplayView {
     /// Where the character stands, so a ground search can put the
     /// nearest first.
     pub at: glam::Vec2,
+    /// The loot profiles on the shelf, for the picker.
+    pub profiles: Vec<String>,
 }
 
 /// The line under the checkbox: what it is doing and the engine's own
@@ -96,7 +98,7 @@ impl Drafts {
 /// One editable list of strings: a row per entry with an `x` to drop it,
 /// and a line at the bottom to add one. `counts` (the loot searches) puts
 /// the number of matching carried items beside each row.
-fn string_list(
+pub(super) fn string_list(
     ui: &mut egui::Ui,
     key: &str,
     list: &mut Vec<String>,
@@ -384,37 +386,38 @@ pub fn draw(egui: &egui::Context, v: &AutoplayView, x: f32, drafts: &mut Drafts)
 
                 title(ui, "Loot");
                 ui.horizontal(|ui| {
-                    ui.checkbox(&mut cfg.loot.enabled, "empty corpses");
-                    ui.checkbox(&mut cfg.loot.appraise, "appraise first")
-                        .on_hover_text("Ask the server for the numbers before deciding");
+                    ui.label("profile");
+                    let chosen = if cfg.loot.profile.trim().is_empty() {
+                        "none".to_string()
+                    } else {
+                        cfg.loot.profile.clone()
+                    };
+                    egui::ComboBox::from_id_salt("autoplay.loot_profile")
+                        .selected_text(chosen)
+                        .width(180.0)
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut cfg.loot.profile, String::new(), "none")
+                                .on_hover_text("Leave corpses alone");
+                            for name in &v.profiles {
+                                ui.selectable_value(&mut cfg.loot.profile, name.clone(), name);
+                            }
+                        });
                 });
+                let on_shelf = v.profiles.contains(&cfg.loot.profile);
                 caption(
                     ui,
-                    "what to take and what to do with it is the loot profile, in \
-                     the Loot profiles window",
+                    if cfg.loot.profile.trim().is_empty() {
+                        "no profile: corpses are left alone".to_string()
+                    } else if !on_shelf {
+                        format!(
+                            "no profile called {} on the shelf: corpses are left alone",
+                            cfg.loot.profile
+                        )
+                    } else {
+                        "what it takes, and how, is edited in the Loot profiles window"
+                            .to_string()
+                    },
                 );
-                ui.horizontal(|ui| {
-                    ui.checkbox(&mut cfg.loot.salvage, "salvage")
-                        .on_hover_text("Salvage tagged items when this character is the team's best salvager");
-                    ui.checkbox(&mut cfg.loot.hand_off, "hand off")
-                        .on_hover_text("Carry tagged items to the team's best salvager (highest Salvaging with an Ust)");
-                });
-                ui.checkbox(&mut cfg.loot.after_every_fight, "empty every body before the next fight")
-                    .on_hover_text(
-                        "Finish what you kill. While a body it made is still \
-                         unlooted nearby, another fight waits. Off, a body only \
-                         outranks the next fight once it is old enough to be in \
-                         danger of rotting -- which in a busy place means the floor \
-                         fills up and the oldest are lost.",
-                    );
-                ui.checkbox(&mut cfg.loot.tidy_pack, "pour loose stacks together")
-                    .on_hover_text(
-                        "Buy five scarabs and they arrive in their own slot beside \
-                         the fifteen already carried; loot four arrows and they land \
-                         beside the two hundred in the pack. Slots are the scarce \
-                         thing, so stacks of the same thing are poured together as \
-                         they turn up.",
-                    );
                 caption(
                     ui,
                     if v.salvager.is_empty() {
@@ -422,24 +425,6 @@ pub fn draw(egui: &egui::Context, v: &AutoplayView, x: f32, drafts: &mut Drafts)
                     } else {
                         format!("salvager: {}", v.salvager)
                     },
-                );
-                caption(ui, "always take");
-                string_list(
-                    ui,
-                    "autoplay.always",
-                    &mut cfg.loot.always,
-                    drafts,
-                    "name contains, e.g. Pyreal",
-                    None,
-                );
-                caption(ui, "never take");
-                string_list(
-                    ui,
-                    "autoplay.never",
-                    &mut cfg.loot.never,
-                    drafts,
-                    "name contains, e.g. Rusty",
-                    None,
                 );
                 ui.add_space(6.0);
 
@@ -728,6 +713,7 @@ pub fn view(c: &Client) -> AutoplayView {
         doing: c.autoplay.doing.label().to_string(),
         status: c.autoplay.status.clone(),
         salvager: c.best_salvager().map(|(n, _)| n).unwrap_or_default(),
+        profiles: c.profiles.names(),
         at: c
             .player
             .as_ref()
@@ -784,9 +770,7 @@ impl Autoplay {
                 ..Default::default()
             },
             loot: Loot {
-                always: vec!["Pyreal".into()],
-                never: vec!["Rusty".into()],
-                ..Default::default()
+                profile: "Starter".into(),
             },
             growth: Default::default(),
             academy: Default::default(),
@@ -798,6 +782,7 @@ impl Autoplay {
                 doing: "fighting".into(),
                 status: "fighting Drudge Skulker".into(),
                 salvager: "Brannoc".into(),
+                profiles: vec!["Starter".into(), "Mule".into()],
                 at: glam::Vec2::ZERO,
             }),
             show: true,
@@ -1034,28 +1019,30 @@ mod tests {
     }
 
     #[test]
-    fn pouring_stacks_together_can_be_turned_off() {
-        // On out of the box: a pack that fills with change is nobody's
-        // idea of a feature.
-        assert!(Config::default().loot.tidy_pack);
+    fn the_loot_profile_chosen_is_remembered() {
+        // Out of the box a character reads the profile the shelf starts with.
+        assert_eq!(Config::default().loot.profile, "Starter");
         let mut p = Autoplay::default();
-        p.saved.loot.tidy_pack = false;
+        p.saved.loot.profile = "Mule".into();
         let mut settings = Settings::new();
         p.save(&mut settings);
         let mut back = Autoplay::default();
         back.load(&settings);
-        assert!(!back.saved.loot.tidy_pack);
-        // And the rest of the loot rules are untouched.
-        assert!(back.saved.loot.enabled);
-        assert!(back.saved.loot.salvage);
+        assert_eq!(back.saved.loot.profile, "Mule");
     }
 
     #[test]
-    fn a_rules_file_written_before_tidying_existed_turns_it_on() {
-        // The switch has to default on when it is missing, or every
-        // existing player quietly loses it.
-        let old: Loot = serde_json::from_str(r#"{"enabled":true,"rules":[],"always":[],"never":[],"appraise":true,"salvage":true,"hand_off":true}"#).unwrap();
-        assert!(old.tidy_pack);
+    fn a_settings_file_from_before_the_profile_held_the_loot_still_loads() {
+        // The switches that moved into the profile are ignored, not an
+        // error: refusing the file would throw away every other autoplay
+        // setting with them.
+        let old: Loot = serde_json::from_str(
+            r#"{"enabled":true,"always":["Pyreal"],"never":[],"appraise":true,"salvage":true,"hand_off":true,"tidy_pack":false,"after_every_fight":true,"carry_up_to":1.5,"profile":""}"#,
+        )
+        .unwrap();
+        assert_eq!(old.profile, "");
+        let missing: Loot = serde_json::from_str(r#"{"enabled":true}"#).unwrap();
+        assert_eq!(missing.profile, "Starter");
     }
 
     #[test]
