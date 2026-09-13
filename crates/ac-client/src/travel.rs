@@ -622,18 +622,6 @@ impl Client {
             Step::Portal { name, mouth, .. } => portal_mouth_height(name, *mouth),
             _ => None,
         };
-        self.travel.step_block = Some(match mouth_cell {
-            Some(c) => c & 0xFFFF_0000,
-            None => WorldGrid::block_of(target),
-        });
-        // Inside a landblock -- the character in it, or the target in one
-        // of its interior cells -- the terrain grid says nothing. Aim
-        // straight at the target and let the landblock's own navigation
-        // graph steer. A dungeon's exit portal stands in an interior cell
-        // of the block the character walks out into, so the target being
-        // indoors matters as much as the character being indoors.
-        let target_indoors = mouth_cell.is_some_and(|c| c & 0xFFFF >= 0x100);
-        let same_block = self.travel.step_block == Some(pl_cell & 0xFFFF_0000);
         // Underground (a dungeon, the Town Network hub) there is no
         // terrain to route over, and inside a building the landblock's
         // own graph steers to anything in the same block. A building on
@@ -645,6 +633,20 @@ impl Client {
                 .as_mut()
                 .is_some_and(|pl| pl.in_dungeon(&assets))
         };
+        // A walk underground ends in the dungeon the character stands
+        // in, whichever block its end reads as on the map.
+        self.travel.step_block = Some(match mouth_cell {
+            Some(c) => c & 0xFFFF_0000,
+            None => steering_block(target, pl_cell, underground),
+        });
+        // Inside a landblock -- the character in it, or the target in one
+        // of its interior cells -- the terrain grid says nothing. Aim
+        // straight at the target and let the landblock's own navigation
+        // graph steer. A dungeon's exit portal stands in an interior cell
+        // of the block the character walks out into, so the target being
+        // indoors matters as much as the character being indoors.
+        let target_indoors = mouth_cell.is_some_and(|c| c & 0xFFFF >= 0x100);
+        let same_block = self.travel.step_block == Some(pl_cell & 0xFFFF_0000);
         if (indoors && (underground || same_block)) || (target_indoors && same_block) {
             tracing::info!("travel: step {} ({label}) inside", self.travel.step);
             self.travel.route = Some(vec![me, target]);
@@ -1324,6 +1326,15 @@ impl Client {
             }
         }
         self.travel.last_seen = Some(me);
+        // Underground, a leg is in the dungeon's own block and on the
+        // character's own floor, whatever the map says (see
+        // `steering_block`).
+        let underground = indoors && {
+            let assets = self.assets.clone();
+            self.player
+                .as_mut()
+                .is_some_and(|pl| pl.in_dungeon(&assets))
+        };
         loop {
             let n = self.travel.route.as_ref()?.len();
             let waypoint = |t: &Travel, i: usize| t.route.as_ref().map(|r| r[i]);
@@ -1393,16 +1404,14 @@ impl Client {
                     let mouth = waypoint(&self.travel, n - 1)?;
                     // On its own floor and in its own cell when the data
                     // says: a mouth indoors is not on the ground under it.
-                    let z = self
-                        .travel
-                        .step_z
-                        .or_else(|| self.travel.grid.as_ref().map(|g| g.height_at(mouth)))
-                        .unwrap_or(me.extend(0.0).z);
+                    let z = self.travel.step_z.unwrap_or_else(|| {
+                        leg_height(self.travel.grid.as_deref(), mouth, me3, underground)
+                    });
                     let cell = self
                         .travel
                         .step_cell
                         .filter(|c| c & 0xFFFF >= 0x100)
-                        .unwrap_or_else(|| WorldGrid::block_of(mouth));
+                        .unwrap_or_else(|| steering_block(mouth, block, underground));
                     return Some((Vec3::new(mouth.x, mouth.y, z), 0.0, cell));
                 }
                 if !self.travel_next_step() {
@@ -1472,16 +1481,11 @@ impl Client {
                     l
                 }
             };
-            let z = self
-                .travel
-                .grid
-                .as_ref()
-                .map(|g| g.height_at(leg))
-                .unwrap_or(0.0);
+            let z = leg_height(self.travel.grid.as_deref(), leg, me3, underground);
             return Some((
                 Vec3::new(leg.x, leg.y, z),
                 LEG_STOP,
-                WorldGrid::block_of(leg),
+                steering_block(leg, block, underground),
             ));
         }
     }
@@ -1501,6 +1505,38 @@ fn planning_cell(cell: u32, at: Vec3, underground: bool) -> u32 {
         return cell;
     }
     ac_world::outdoor_cell(cell, at - ac_world::landblock_origin(cell))
+}
+
+/// The landblock the steering is told a leg ending at `at` lies in, for
+/// a character standing in `cell`.
+///
+/// On the surface a position names its landblock. Underground it need
+/// not: a dungeon's rooms reach outside its landblock's square -- the
+/// Holtburg Dungeon's lie at negative local y -- and there a position
+/// names the block next door. Told that a corpse in those rooms lay in
+/// 0x01F5, the steering had no graph to plan the way through them on,
+/// ran at the walls of the room the dungeon's portal drops you in, and
+/// recovery gave up sixty metres from the corpse. Only a portal leaves a
+/// dungeon, so every walk in one ends in the block the character stands
+/// in.
+fn steering_block(at: Vec2, cell: u32, underground: bool) -> u32 {
+    if underground {
+        cell & 0xFFFF_0000
+    } else {
+        WorldGrid::block_of(at)
+    }
+}
+
+/// The height a leg ending at `at` is aimed at, for a character at `me`:
+/// the ground there by the world grid, or underground the character's own
+/// floor -- the grid knows only the surface, and off the side of a
+/// dungeon's square only the surface of the block next door.
+fn leg_height(grid: Option<&WorldGrid>, at: Vec2, me: Vec3, underground: bool) -> f32 {
+    match grid {
+        _ if underground => me.z,
+        Some(g) => g.height_at(at),
+        None => 0.0,
+    }
 }
 
 /// The height the mouth of the portal called `name` at `mouth` stands at,
@@ -1678,6 +1714,138 @@ mod tests {
             Prefs::quick(),
         );
         assert!(trip.as_ref().is_some_and(|t| t.portals() == 1), "{trip:?}");
+    }
+
+    #[test]
+    fn a_walk_underground_is_steered_in_the_dungeon_it_is_in() {
+        // The room the Holtburg Dungeon's portal drops you in, and a
+        // corpse in its rooms: both below the dungeon's square, where a
+        // position alone reads as the block next door.
+        let arrival = 0x01F6_0285;
+        let corpse = Vec2::new(220.832_12, 47_190.047);
+        assert_eq!(WorldGrid::block_of(corpse), 0x01F5_0000);
+        assert_eq!(steering_block(corpse, arrival, true), 0x01F6_0000);
+        let me = Vec3::new(285.6, 47_217.1, -6.0);
+        assert_eq!(leg_height(None, corpse, me, true), -6.0);
+        // On the surface -- outdoors, or in a building on the way out --
+        // the leg's own position names its block, as it always has.
+        let holtburg = ac_world::landblock_origin(0xA9B4_0000).truncate();
+        let next_door = holtburg + Vec2::new(250.0, 100.0);
+        assert_eq!(steering_block(next_door, 0xA9B4_0019, false), 0xAAB4_0000);
+        assert_eq!(steering_block(next_door, 0xA9B4_011B, false), 0xAAB4_0000);
+        assert_eq!(leg_height(None, next_door, me, false), 0.0);
+    }
+
+    /// Offline session over the real archives: nothing calls `tick`, so
+    /// no packet is ever sent.
+    fn offline_client(assets: Rc<ac_scene::Assets>) -> Client {
+        Client::connect(
+            crate::Config {
+                host: "127.0.0.1:1".into(),
+                account: "acreborn".into(),
+                password: "x".into(),
+                character: None,
+                auto_enter: true,
+            },
+            assets,
+        )
+        .unwrap()
+    }
+
+    /// Walk the journey the client is on for up to `seconds` of game
+    /// time, frame by frame the way `tick_player` does: the journey's leg,
+    /// the steering toward it, the player's own physics. Stops when the
+    /// journey ends.
+    fn walk_the_journey(c: &mut Client, seconds: f32) {
+        use crate::player::Input;
+        let dt = 1.0 / 20.0;
+        let t0 = Instant::now();
+        for frame in 0..(seconds / dt) as u32 {
+            let now = t0 + Duration::from_secs_f32(frame as f32 * dt);
+            let goal = c.travel_goal(now);
+            if goal.is_none() && !c.traveling() {
+                return;
+            }
+            let pl = c.player.as_mut().unwrap();
+            let mut input = Input::default();
+            pl.step_cap = None;
+            match goal {
+                Some((g, stop, cell)) => {
+                    let d = g - pl.world_position();
+                    if Vec2::new(d.x, d.y).length() > stop {
+                        let mut standing = crate::Standing {
+                            player: pl,
+                            assets: &c.assets,
+                            wide: &mut c.pathfinder,
+                        };
+                        if let ac_nav::Aim::Go(at) = c.steering.steer(&mut standing, g, cell, now) {
+                            let d = at - pl.world_position();
+                            let flat = Vec2::new(d.x, d.y);
+                            if flat.length() > 1e-3 {
+                                pl.heading = (-flat.x).atan2(flat.y);
+                            }
+                            pl.step_cap = Some(flat.length());
+                            input.forward = 1.0;
+                            input.run = true;
+                        }
+                    }
+                }
+                None => c.steering.reset(),
+            }
+            pl.update(&c.assets, &input, dt);
+        }
+    }
+
+    #[test]
+    fn a_corpse_in_the_holtburg_dungeon_is_walked_to_from_its_portal() {
+        let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
+            eprintln!("AC_DATA_DIR unset; skipping");
+            return;
+        };
+        let assets = Rc::new(ac_scene::Assets::open(dir).unwrap());
+        let rooms = assets.block_collision(0x01F6_0000).unwrap();
+        let mut c = offline_client(assets.clone());
+        // Both corpses recovery walked at from the arrival rooms, on the
+        // local server, and never reached.
+        for corpse in [
+            Vec2::new(220.832_12, 47_190.047),
+            Vec2::new(239.048_95, 47_221.76),
+        ] {
+            let (floor, cell) = rooms
+                .world
+                .floor_at(corpse.extend(10.0), 10.0, 60.0)
+                .expect("the corpse lies on a floor of the dungeon");
+            eprintln!("corpse {corpse:?}: floor {floor:.1} in {cell:#010x}");
+            // Where the Holtburg Dungeon's portal drops a character.
+            let mut pl = crate::player::Player::new(
+                &assets,
+                0x01F6_0289,
+                Vec3::new(96.7, -10.0, 0.0),
+                glam::Quat::IDENTITY,
+            );
+            pl.set_motion_table(&assets, 0x0200_0001, 0x0900_0001);
+            c.player = Some(pl);
+            c.steering.reset();
+            assert!(c.plan_trip_in(corpse, cell), "no way to {corpse:?}");
+            assert_eq!(
+                c.travel_trip().map(|t| t.steps.clone()),
+                Some(vec![Step::Walk(corpse)])
+            );
+            walk_the_journey(&mut c, 180.0);
+            let pl = c.player.as_ref().unwrap();
+            let at = pl.world_position();
+            let origin = ac_world::landblock_origin(pl.cell);
+            assert!(
+                at.truncate().distance(corpse) <= 2.0 * ARRIVE,
+                "stopped at {:?} in {:#010x}, {:.0} m from the corpse at {corpse:?} \
+                 (still travelling {})",
+                at - origin,
+                pl.cell,
+                at.truncate().distance(corpse),
+                c.traveling()
+            );
+            c.end_trip();
+        }
     }
 
     #[test]
