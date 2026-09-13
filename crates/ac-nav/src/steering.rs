@@ -96,13 +96,13 @@ impl Route {
 /// What the steering needs of the world, and of the character standing
 /// in it.
 ///
-/// Six questions, no more. Behind them in the client sit the physics,
+/// Seven questions, no more. Behind them in the client sit the physics,
 /// the landblock's triangles and a planner on its own thread; behind
 /// them in a test sit a few rectangles. That is the whole point: every
 /// navigation fault found the hard way in a live dungeon -- a goal with
 /// no path and no node to start from, a straight line walked into a
-/// wall, a dungeon treated as somewhere you can stroll out of -- is a
-/// unit test here now.
+/// wall, a dungeon treated as somewhere you can stroll out of, a ledge
+/// walked off into the void under the rooms -- is a unit test here now.
 pub trait Ground {
     /// Where the character is.
     fn at(&self) -> Vec3;
@@ -113,6 +113,19 @@ pub trait Ground {
     fn block(&self) -> u32;
     /// Whether anything stands between these two points.
     fn line_blocked(&mut self, block: u32, from: Vec3, to: Vec3) -> bool;
+    /// Whether the straight walk between these two points runs off an
+    /// edge with nothing under it before anything solid stops it, or
+    /// keeps a floor all the way and ends a storey under (or over) where
+    /// `to` stands. A ledge with a floor below is no drop: the walk goes
+    /// over it, comes down, and is judged on from there.
+    ///
+    /// Not the same question as `line_blocked`, which says yes to all of
+    /// these. A wall is safe to lean on, and so is a ledge over a floor:
+    /// the character steps off it and lands. The edge of everything is
+    /// not -- past it there is nothing to land on -- and nor is a goal a
+    /// storey up that the walk only gets underneath, to push there for
+    /// ever.
+    fn line_drops(&mut self, block: u32, from: Vec3, to: Vec3) -> bool;
     /// A walkable route within one landblock, or `None` when the graph
     /// knows of none.
     fn find_path(&mut self, block: u32, from: Vec3, to: Vec3, goal_cell: u32) -> Option<Vec<Vec3>>;
@@ -400,6 +413,27 @@ impl Steering {
                         self.no_way = true;
                         return Aim::NoWay;
                     }
+                    // What is in the way may be the edge of a floor
+                    // rather than a wall, and a character leaning on an
+                    // edge goes over it. Over a floor that is fine, and
+                    // often the only way down there is: the graph knows
+                    // none from a ledge, or from an upper storey, that
+                    // stepping off reaches. Over nothing -- the void
+                    // outside a dungeon's rooms -- it is not.
+                    //
+                    // So the line is walked first, over any ledge it
+                    // meets. A wall anywhere on it stops the walk and
+                    // the old lean stands; an edge with nothing under it
+                    // is refused, and so is a goal standing a storey over
+                    // the floor the walk keeps to, which leaning only
+                    // gets under.
+                    if ground.line_drops(block, me, goal) {
+                        tracing::debug!(
+                            "route: no path to {goal:?}, and straight there runs off an edge over nothing"
+                        );
+                        self.no_way = true;
+                        return Aim::NoWay;
+                    }
                     tracing::debug!("route: no path to {goal:?}, going straight");
                     self.no_way = false;
                     return Aim::Go(goal);
@@ -412,6 +446,12 @@ impl Steering {
                 self.route = Some(r);
                 Aim::Go(aim)
             }
+            // Refused at the last look, and not looked at again yet: the
+            // refusal stands until the next one. Heading for the goal in
+            // between is walking, a frame after deciding not to, at the
+            // edge or the wall that was the reason -- for as long as it
+            // takes to look again.
+            None if self.no_way => Aim::NoWay,
             None => Aim::Go(goal),
         }
     }
@@ -571,6 +611,8 @@ mod tests {
         block: u32,
         /// The straight line is blocked.
         blocked: bool,
+        /// The straight line runs off an edge.
+        drops: bool,
         /// What the landblock's graph answers with.
         path: Option<Vec<Vec3>>,
         /// What the neighbourhood planner answers with.
@@ -590,6 +632,9 @@ mod tests {
         }
         fn line_blocked(&mut self, _block: u32, _from: Vec3, _to: Vec3) -> bool {
             self.blocked
+        }
+        fn line_drops(&mut self, _block: u32, _from: Vec3, _to: Vec3) -> bool {
+            self.drops
         }
         fn find_path(
             &mut self,
@@ -762,5 +807,100 @@ mod tests {
             st.steer(&mut g, near_by, 0x01F6_0290, Instant::now()),
             Aim::Go(_)
         ));
+    }
+
+    /// Up on a ledge in the Holtburg dungeon with nothing leading down
+    /// from it, and a goal off its edge. Whether the way there runs off
+    /// into nothing is the fake's to say.
+    fn on_a_ledge(drops: bool) -> (Fake, Vec3) {
+        let g = Fake {
+            at: Vec3::new(225.0, 47_166.0, 7.2),
+            cell: 0x01F6_0291,
+            block: 0x01F6_0000,
+            blocked: true,
+            drops,
+            path: None,
+            ..Default::default()
+        };
+        (g, Vec3::new(218.0, 47_159.0, 0.0))
+    }
+
+    #[test]
+    fn no_route_and_an_edge_over_nothing_is_refused_rather_than_walked_off() {
+        // Leaning on what is in the way is for walls, and for ledges
+        // with a floor under them. Here the way runs off an edge over
+        // nothing, and leaning on that is walking on into the void.
+        let mut st = Steering::new(Instant::now());
+        let (mut g, goal) = on_a_ledge(true);
+        assert_eq!(
+            st.steer(&mut g, goal, 0x01F6_0000, Instant::now()),
+            Aim::NoWay
+        );
+        assert!(st.no_way(), "the caller must be able to ask");
+    }
+
+    #[test]
+    fn a_wall_or_a_ledge_over_a_floor_is_still_leaned_on() {
+        // The same place, the same blocked line and no route, but what
+        // stops the walk is solid, or the ledge has a floor under it:
+        // leaning is the old answer and still the right one.
+        let mut st = Steering::new(Instant::now());
+        let (mut g, goal) = on_a_ledge(false);
+        assert_eq!(
+            st.steer(&mut g, goal, 0x01F6_0000, Instant::now()),
+            Aim::Go(goal)
+        );
+        assert!(!st.no_way());
+    }
+
+    #[test]
+    fn stairs_down_to_the_goal_are_walked_not_refused() {
+        // Down the stair corridor 0x01F6029F -> 0x01F602A3 -> 0x01F6028E,
+        // a storey and more from top to foot, but a step at a time: a
+        // staircase is not a drop.
+        let top = Vec3::new(276.0, 47_152.0, 6.0);
+        let foot = Vec3::new(296.0, 47_152.0, -5.9);
+        let mut g = Fake {
+            at: top,
+            cell: 0x01F6_029F,
+            block: 0x01F6_0000,
+            ..Default::default()
+        };
+        let mut st = Steering::new(Instant::now());
+        assert_eq!(
+            st.steer(&mut g, foot, 0x01F6_0000, Instant::now()),
+            Aim::Go(foot),
+            "a clear flight is walked straight"
+        );
+        // The graph coarser than the stairs and finding nothing: leaned
+        // on like any level floor.
+        g.blocked = true;
+        st.reset();
+        assert_eq!(
+            st.steer(&mut g, foot, 0x01F6_0000, Instant::now()),
+            Aim::Go(foot)
+        );
+        assert!(!st.no_way());
+    }
+
+    #[test]
+    fn a_refusal_stands_until_the_next_look() {
+        // Between one look and the next the steering answers from what
+        // it last decided. A refusal that lasted one frame had the
+        // character walking at the edge for the two seconds after it.
+        let start = Instant::now();
+        let mut st = Steering::new(start);
+        let (mut g, goal) = on_a_ledge(true);
+        assert_eq!(st.steer(&mut g, goal, 0x01F6_0000, start), Aim::NoWay);
+        let soon = start + Duration::from_millis(100);
+        assert_eq!(
+            st.steer(&mut g, goal, 0x01F6_0000, soon),
+            Aim::NoWay,
+            "walked at the edge between looks"
+        );
+        // Looked at again once it is time, and the way is judged afresh.
+        g.drops = false;
+        let later = start + REPLAN_AFTER + Duration::from_millis(100);
+        assert_eq!(st.steer(&mut g, goal, 0x01F6_0000, later), Aim::Go(goal));
     }
 }

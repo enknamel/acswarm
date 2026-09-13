@@ -191,6 +191,25 @@ pub struct Player {
     /// panel to say so. Cleared when the rules change or flying is
     /// allowed again.
     noclip_refused: bool,
+    /// The last floor stood on and how the fall since is going (see
+    /// [`Footing`]).
+    footing: Footing,
+    /// Where the last [`Player::update`] left the character. Anything
+    /// that moves it in between -- a teleport, the server putting it
+    /// back, the lifestone after a death -- shows as a difference, and
+    /// where it was put is where it stands from then on.
+    settled: (u32, Vec3),
+    /// A jump is being previewed: the flight is not real, and nothing
+    /// that happens in it is worth a line in the log.
+    previewing: bool,
+    /// The server has not been told where the character is since
+    /// something no walk reports put it there: a landing, or a fall
+    /// given up and the character put back on its feet. The next report
+    /// sends the position, moving or not.
+    owe_position: bool,
+    /// The position the last report carried, until the client passes it
+    /// to the world (see [`take_sent`](Self::take_sent)).
+    sent: Option<(u32, Vec3)>,
 }
 
 /// How fast a flying character climbs, as a fraction of its run speed.
@@ -201,6 +220,58 @@ const CLIMB_RATE: f32 = 0.6;
 /// more after a jump, a z-position hack (unless its Jump skill is 1000)
 /// and puts it back where it was; this stays under that.
 pub const MAX_JUMP_HEIGHT: f32 = 9.5;
+
+/// How far below itself a character stepping off an interior ledge
+/// looks for a floor to fall to (the walk stays put when there is none
+/// within it), and so the deepest fall anywhere there is no ground: one
+/// that has gone further than this without landing has missed whatever
+/// it was falling to.
+const FALL_SEARCH: f32 = 200.0;
+
+/// How long a character may be in the air with nothing at all below it
+/// before it counts as lost: the whole flight of the highest jump there
+/// is ([`MAX_JUMP_HEIGHT`], up and back down, `2 * sqrt(2h / g)`, a
+/// little under 2.8 s). A leap across a gap spends no longer over it
+/// than that. A character that has drifted off the edge of a dungeon's
+/// rooms spends the rest of time there, and the server, which takes its
+/// word for where it is, follows it tens of kilometres down.
+const OVER_NOTHING: f32 = 2.8;
+
+/// The longest step the walk takes in one go: a longer frame is walked a
+/// step this long at a time.
+///
+/// A step looks for its floor where it ends, within a step up or down of
+/// where it began, and up a ramp what it finds turns on how long the step
+/// is. The stairs out of the Holtburg dungeon's 0x01F6028E rise six
+/// tenths of a metre in a metre, so a step of a metre ended with the
+/// stairs over the feet: no floor within reach, the storey under the
+/// stairs found instead, and the character fell through them and on past
+/// the end of that storey for ever. A headless client ticks ten or twenty
+/// times a second, a frame that builds a piece of the navigation graph
+/// takes longer, and at a run those were steps of one to four metres.
+///
+/// Half a metre is what the navigation graph samples its own walks at,
+/// so a walk it passed is walked the way it was checked.
+const STRIDE: f32 = 0.5;
+
+/// The most steps one frame is cut into: enough for the longest frame
+/// the headless client allows, a quarter of a second, at the fastest
+/// boosted run there is.
+const MAX_STRIDES: usize = 64;
+
+/// The last floor a character stood on, and how its fall since is
+/// going: enough to tell a fall that will land from one that never will,
+/// and to put the character back on its feet when it will not.
+#[derive(Debug, Clone, Copy)]
+struct Footing {
+    /// Where it last stood: the cell, and the position in its landblock.
+    cell: u32,
+    local: Vec3,
+    /// The highest it has been (world z) since it left the ground.
+    top: f32,
+    /// Seconds spent in the air, this fall, with no floor anywhere below.
+    over_nothing: f32,
+}
 
 /// The server's run rate for a Run skill (ACE `MovementSystem.GetRunRate`
 /// with no burden): 1 at nothing, about 2.4 at 200, and 4.5 from 800 up.
@@ -405,6 +476,16 @@ impl Player {
             pending_commands: Vec::new(),
             jump_charge: None,
             max_jump_power: 1.0,
+            footing: Footing {
+                cell,
+                local,
+                top: (ac_world::landblock_origin(cell) + local).z,
+                over_nothing: 0.0,
+            },
+            settled: (cell, local),
+            previewing: false,
+            owe_position: false,
+            sent: None,
         }
     }
 
@@ -623,10 +704,14 @@ impl Player {
             self.last_jump,
             self.jump_charge,
             self.charge_pinned,
+            self.footing,
+            self.settled,
+            self.owe_position,
         );
         let power = power.clamp(0.0, 1.0);
         let mut path = Vec::new();
         let mut landed = false;
+        self.previewing = true;
         if self.jump(power) {
             // Frames of a thirtieth: fine enough for a smooth arc, and a
             // ten-second cap so a fall off the world ends.
@@ -641,6 +726,7 @@ impl Player {
                 }
             }
         }
+        self.previewing = false;
         (
             self.cell,
             self.local,
@@ -653,6 +739,9 @@ impl Player {
             self.last_jump,
             self.jump_charge,
             self.charge_pinned,
+            self.footing,
+            self.settled,
+            self.owe_position,
         ) = saved;
         let landing = path.last().copied()?;
         Some(JumpPreview {
@@ -1025,6 +1114,38 @@ impl Player {
     /// over landblock `block`'s geometry (see `nav::Ground::walkable`);
     /// `None` when the block has no collision.
     fn walkable(&mut self, assets: &Assets, block: u32, from: Vec3, to: Vec3) -> Option<bool> {
+        self.on_ground(assets, block, |ground, cap| {
+            ground.walkable(from, to, cap).0
+        })
+    }
+
+    /// Whether the straight walk from `from` to `to` over landblock
+    /// `block`'s geometry runs off an edge with nothing under it before
+    /// anything solid stops it, or ends under a `to` standing a storey up
+    /// (see `nav::Ground::drops_along`). A floor within the depth a fall
+    /// is looked for ([`FALL_SEARCH`]) is where the walk comes down, and
+    /// it goes on from there. The steering asks this before it leans on
+    /// whatever is in the way: leaning on a wall gets nowhere, leaning
+    /// over a ledge lands on the floor below it, and leaning over the
+    /// edge of everything walks on into the void. False when the block
+    /// has no collision: there is nothing known to fall from.
+    pub fn line_drops(&mut self, assets: &Assets, block: u32, from: Vec3, to: Vec3) -> bool {
+        self.on_ground(assets, block, |ground, cap| {
+            ground.drops_along(from, to, cap, FALL_SEARCH)
+        })
+        .unwrap_or(false)
+    }
+
+    /// Ask `f` about landblock `block`'s ground as the walking code sees
+    /// it -- its collision, and outside a dungeon its terrain and sea --
+    /// for this character's capsule; `None` when the block has no
+    /// collision.
+    fn on_ground<R>(
+        &mut self,
+        assets: &Assets,
+        block: u32,
+        f: impl FnOnce(&Ground<'_>, &Capsule) -> R,
+    ) -> Option<R> {
         let block = block & 0xFFFF_0000;
         self.collision(assets, block)?;
         let cap = self.capsule;
@@ -1043,13 +1164,13 @@ impl Player {
             sea: (!b.dungeon).then_some(&sea),
             no_go: None,
             outdoors_only: false,
-            doorways: &b
+            doorways: b
                 .collision
                 .as_ref()
-                .map(|c| c.doorways.clone())
-                .unwrap_or_default(),
+                .map(|c| c.doorways.as_slice())
+                .unwrap_or(&[]),
         };
-        Some(ground.walkable(from, to, &cap).0)
+        Some(f(&ground, &cap))
     }
 
     /// A walkable route from `from` to `to` (world positions, both in
@@ -1202,17 +1323,97 @@ impl Player {
 
     /// Apply one frame of input. Returns true if the position changed.
     pub fn update(&mut self, assets: &Assets, input: &Input, dt: f32) -> bool {
-        let speed = if input.run {
+        // Put somewhere since the last frame by something other than
+        // the walk: a teleport, the server putting us back, a lifestone.
+        // Those set the cell and position straight, whatever the
+        // character was doing, and a fall carried across one is not the
+        // same fall -- measured from the old place, a portal from a
+        // hilltop down into a dungeon is two hundred metres of falling
+        // before the first frame, and the way back is somewhere the
+        // server no longer has us. Where it was put is where it stands.
+        if (self.cell, self.local) != self.settled {
+            self.stand_here();
+        }
+        // A step at a time, none longer than a stride (see `STRIDE`),
+        // each with its share of the frame and of the step cap: the frame
+        // covers what it would have in one, and no more.
+        let asked = input.forward != 0.0 || input.strafe != 0.0;
+        let pace = if asked { self.pace(input) } else { 0.0 };
+        let drift = if self.airborne {
+            Vec2::new(self.air_velocity.x, self.air_velocity.y).length()
+        } else {
+            0.0
+        };
+        let mut reach = pace.max(drift) * dt;
+        if let Some(cap) = self.step_cap.filter(|c| *c > 0.0) {
+            reach = reach.min(cap);
+        }
+        let strides = ((reach / STRIDE).ceil() as usize).clamp(1, MAX_STRIDES);
+        let share = 1.0 / strides as f32;
+        let cap = self.step_cap;
+        let mut moved = false;
+        for _ in 0..strides {
+            self.step_cap = cap.map(|c| c * share);
+            moved |= self.step(assets, input, dt * share);
+        }
+        self.step_cap = cap;
+        // Whether the frame moved the character, not whether its last
+        // step did: a fall that lands part-way through a frame and stands
+        // still for the rest of it has moved all the same.
+        self.moving = moved;
+        self.settled = (self.cell, self.local);
+        moved
+    }
+
+    /// How fast the input asks the character to go on its feet.
+    fn pace(&self, input: &Input) -> f32 {
+        if input.run {
             self.run_speed * self.run_rate * self.limits.clamp_speed_boost(self.speed_boost)
         } else {
             self.walk_speed
+        }
+    }
+
+    /// A floor over the feet at `at`, higher than a step and lower than
+    /// the head: ground rising faster than the step that got here could
+    /// climb, with the feet inside it. That is something solid in the
+    /// way, not an edge, and whatever lies under it is not the floor.
+    fn floor_over_feet(&mut self, assets: &Assets, blocks: &[u32], at: Vec3) -> bool {
+        let cap = self.capsule;
+        blocks.iter().any(|&blk| {
+            self.collision(assets, blk)
+                .and_then(|c| c.floor_at(at, cap.height, 0.0))
+                .is_some_and(|(z, _)| z > at.z + cap.step_up)
+        })
+    }
+
+    /// Remember where the character is as the floor it last stood on,
+    /// and start any fall from here afresh.
+    fn stand_here(&mut self) {
+        self.footing = Footing {
+            cell: self.cell,
+            local: self.local,
+            top: self.world_position().z,
+            over_nothing: 0.0,
         };
+    }
+
+    /// One step of [`update`](Self::update): the whole of a short frame,
+    /// or a stride of a long one.
+    fn step(&mut self, assets: &Assets, input: &Input, dt: f32) -> bool {
+        let speed = self.pace(input);
         let fwd = self.forward();
         let right = fwd.cross(Vec3::Z).normalize_or(Vec3::X);
         let dir = fwd * input.forward + right * input.strafe;
         let steering = dir.length_squared() >= 1e-6;
         if self.noclip {
             return self.fly(assets, input, dir, speed, dt);
+        }
+        if !self.airborne {
+            // On its feet: this is the place to come back to, should
+            // whatever it steps off from here turn out to have no
+            // bottom.
+            self.stand_here();
         }
         // Leaning on something and getting nowhere: stop leaning.
         //
@@ -1357,6 +1558,18 @@ impl Player {
                         }
                     }
                 }
+            }
+            // No floor within a step where the step ends, and one over the
+            // feet: the ground rises faster than this step could climb.
+            // That is solid, and pushed against like a wall. Taken for an
+            // edge, the floor looked for below it was the storey under
+            // the stairs, and the character fell through them.
+            if !blocked
+                && floor.is_none()
+                && indoors
+                && self.floor_over_feet(assets, &blocks, world)
+            {
+                blocked = true;
             }
             if blocked {
                 world = old;
@@ -1536,6 +1749,9 @@ impl Player {
             if let Some((p, cell)) = landed {
                 world = p;
                 self.airborne = false;
+                // Where it came down is news to the server, which has the
+                // last report from the air.
+                self.owe_position = true;
                 self.vz = 0.0;
                 // Landing on untagged geometry in a dungeon keeps our cell.
                 let cell = if cell == 0 && dungeon {
@@ -1556,11 +1772,88 @@ impl Player {
                 } else {
                     self.place(world, 0);
                 }
+                if self.fall_is_lost(assets, &blocks, world, dungeon, dt) {
+                    self.back_to_footing(world);
+                }
             }
         }
         self.moving = true;
         self.dirty = true;
         true
+    }
+
+    /// Whether a character still in the air at `world` after this frame
+    /// is never going to land: it has been over nothing at all for
+    /// longer than any leap ([`OVER_NOTHING`]), or it has fallen further
+    /// than any floor it could have been falling to ([`FALL_SEARCH`]).
+    ///
+    /// Terrain is the exception. Anywhere but a dungeon the ground is
+    /// under everything, and the landing above catches a fall on it
+    /// however far it is -- a leap off a cliff, or a flyer letting go a
+    /// kilometre up -- so a fall there is always going somewhere.
+    fn fall_is_lost(
+        &mut self,
+        assets: &Assets,
+        blocks: &[u32],
+        world: Vec3,
+        dungeon: bool,
+        dt: f32,
+    ) -> bool {
+        self.footing.top = self.footing.top.max(world.z);
+        if !dungeon && self.terrain_at(assets, world).is_some() {
+            self.footing.over_nothing = 0.0;
+            return false;
+        }
+        let reach = self.capsule.step_up;
+        let floor_below = blocks.iter().any(|&blk| {
+            self.collision(assets, blk)
+                .is_some_and(|c| c.floor_at(world, reach, FALL_SEARCH).is_some())
+        });
+        if floor_below {
+            self.footing.over_nothing = 0.0;
+        } else {
+            self.footing.over_nothing += dt;
+        }
+        self.footing.over_nothing > OVER_NOTHING || self.footing.top - world.z > FALL_SEARCH
+    }
+
+    /// Give up a fall that will never land (see
+    /// [`fall_is_lost`](Self::fall_is_lost)): back on the floor the
+    /// character last stood on, standing still.
+    ///
+    /// Said once, at info, with where the fall had got to and where it
+    /// came back to. This is the last guard, not the fix -- whatever
+    /// walked it off the edge is the fault -- and the line is what finds
+    /// the place again.
+    fn back_to_footing(&mut self, fell_to: Vec3) {
+        let Footing {
+            cell, local, top, ..
+        } = self.footing;
+        if !self.previewing {
+            let back = ac_world::landblock_origin(cell) + local;
+            tracing::info!(
+                "fall: nothing to land on at {:.1} {:.1} {:.1} in {:#010x}, {:.0} m down: back where it last stood, {:.1} {:.1} {:.1} in {cell:#010x}",
+                fell_to.x,
+                fell_to.y,
+                fell_to.z,
+                self.cell,
+                top - fell_to.z,
+                back.x,
+                back.y,
+                back.z
+            );
+        }
+        self.cell = cell;
+        self.local = local;
+        self.airborne = false;
+        self.vz = 0.0;
+        self.air_velocity = Vec3::ZERO;
+        self.ground_velocity = Vec3::ZERO;
+        self.stand_here();
+        // Put back with no step of its own, and usually standing still:
+        // nothing that waits for movement would ever tell the server,
+        // which goes on holding the character tens of metres down.
+        self.owe_position = true;
     }
 
     pub fn turn(&mut self, d_yaw: f32) {
@@ -1600,14 +1893,37 @@ impl Player {
         tracing::debug!("-> MoveToState stopped, ahead of a use");
         session.send_action(
             action::MOVE_TO_STATE,
-            &messages::move_to_state(&still, &self.wire(), 1, true),
+            &messages::move_to_state(&still, &self.wire(), 1, !self.airborne),
         );
+        self.sent_position();
         self.last_motion = still;
         self.last_auto = Instant::now();
     }
 
+    /// Whether the server is owed the character's position: something
+    /// put it where it is that no walk reports, and no report has gone
+    /// since. The next [`report`](Self::report) pays it.
+    pub fn owes_position(&self) -> bool {
+        self.owe_position
+    }
+
+    /// The position the last report carried, once. The client hands it
+    /// to the world, which keeps a few to know the server's echo of them
+    /// for ours (see `ac_world::World::player_reported`).
+    pub fn take_sent(&mut self) -> Option<(u32, Vec3)> {
+        self.sent.take()
+    }
+
+    /// A report carrying the position has gone.
+    fn sent_position(&mut self) {
+        self.owe_position = false;
+        self.sent = Some((self.cell, self.local));
+    }
+
     /// Send MoveToState when the input state changes and AutonomousPosition
-    /// four times a second while moving.
+    /// four times a second while moving, and on the next call whatever
+    /// the character is doing when the position is owed (see
+    /// [`owes_position`](Self::owes_position)).
     /// Report motion to the server. `quiet` suppresses MoveToState while
     /// the server itself is walking us somewhere: ACE cancels its move-to
     /// chain on any MoveToState it receives.
@@ -1638,21 +1954,30 @@ impl Player {
                 self.cell,
                 self.local
             );
+            // Contact is whether the feet are on something. The server
+            // keeps the last position reported with contact as where the
+            // character last stood, and judges a climb from there: a fall
+            // reported as standing made every point of it ground, and the
+            // floor it was put back on a climb of fifty metres.
             session.send_action(
                 action::MOVE_TO_STATE,
-                &messages::move_to_state(&m, &self.wire(), 1, true),
+                &messages::move_to_state(&m, &self.wire(), 1, !self.airborne),
             );
+            self.sent_position();
             self.last_motion = RawMotion {
                 commands: Vec::new(),
                 ..m
             };
             self.last_auto = now;
-        } else if self.moving && now - self.last_auto >= Duration::from_millis(250) {
+        } else if self.owe_position
+            || (self.moving && now - self.last_auto >= Duration::from_millis(250))
+        {
             tracing::debug!("-> AutonomousPosition {:#010x} {:?}", self.cell, self.local);
             session.send_action(
                 action::AUTONOMOUS_POSITION,
-                &messages::autonomous_position(&self.wire(), 1, true),
+                &messages::autonomous_position(&self.wire(), 1, !self.airborne),
             );
+            self.sent_position();
             self.last_auto = now;
         }
     }

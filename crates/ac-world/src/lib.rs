@@ -363,7 +363,8 @@ pub fn landblock_origin(cell: u32) -> Vec3 {
 /// `true` means take it (resync to where the server has us), `false`
 /// means keep our own prediction. `gap` is how far the server's position
 /// is from ours; `server_step` is how far the server's own position moved
-/// since its last echo; `moved_by_server` is a teleport or forced move.
+/// since its last echo; `moved_by_server` is a teleport or forced move;
+/// `our_report` says the echo is a position we reported ourselves lately.
 /// `streak` counts consecutive echoes that looked like a refused move.
 ///
 /// A normal echo lags a few metres behind a running character but keeps
@@ -372,8 +373,18 @@ pub fn landblock_origin(cell: u32) -> Vec3 {
 /// somewhere else: it stops advancing while a real gap remains. That
 /// holds whether we are still running or standing still being hit, so
 /// after a few echoes confirm it we snap back to the server.
-fn reconcile(gap: f32, server_step: f32, moved_by_server: bool, streak: &mut u8) -> bool {
-    /// A gap this big is wrong however it arose; snap at once.
+fn reconcile(
+    gap: f32,
+    server_step: f32,
+    moved_by_server: bool,
+    our_report: bool,
+    streak: &mut u8,
+) -> bool {
+    /// A gap this big is wrong however it arose; snap at once. Unless the
+    /// echo is a report of our own: then it is only late, and we have been
+    /// put somewhere since. A server that has truly stopped taking our
+    /// positions still shows as one below, holding still while a gap
+    /// remains.
     const FAR: f32 = 40.0;
     /// Past this the server is plainly not where we are. It is small on
     /// purpose: walking into a wall the server will not let us through
@@ -386,7 +397,7 @@ fn reconcile(gap: f32, server_step: f32, moved_by_server: bool, streak: &mut u8)
     /// is not mistaken for a refusal.
     const CONFIRM: u8 = 3;
 
-    if moved_by_server || gap > FAR {
+    if moved_by_server || (gap > FAR && !our_report) {
         *streak = 0;
         return true;
     }
@@ -404,6 +415,26 @@ fn reconcile(gap: f32, server_step: f32, moved_by_server: bool, streak: &mut u8)
     }
     *streak = 0;
     false
+}
+
+/// How many of our own reports are kept to know their echoes by: three
+/// seconds of walking, many round trips.
+const OWN_REPORTS: usize = 12;
+
+/// An echo this near a report of ours, in the same cell, is that report.
+const SAME_REPORT: f32 = 0.05;
+
+impl World {
+    /// We reported this position for ourselves (cell and
+    /// landblock-local): the server's echo of it, whenever it comes, is
+    /// ours and not a move of the server's (see the UpdatePosition
+    /// handler).
+    pub fn player_reported(&mut self, cell: u32, local: glam::Vec3) {
+        if self.player_reports.len() == OWN_REPORTS {
+            self.player_reports.pop_front();
+        }
+        self.player_reports.push_back((cell, local));
+    }
 }
 
 /// The map coordinates the game shows (42.1N, 33.6E): world position
@@ -451,6 +482,13 @@ pub struct World {
     /// resync to where it says we are (see the UpdatePosition handler).
     player_echo: Option<Position>,
     desync_streak: u8,
+    /// The last few positions we reported for ourselves (cell and
+    /// landblock-local), newest last. The server answers each report with
+    /// an echo of it a round trip later, and one that arrives after the
+    /// character has been put somewhere else -- brought back from a fall
+    /// with nothing under it -- is far from where it now stands and is
+    /// still no move of the server's.
+    player_reports: std::collections::VecDeque<(u32, glam::Vec3)>,
     /// The landblock the server last placed us in: a change means we
     /// left a world behind (see `arrived_in`).
     player_landblock: Option<u16>,
@@ -771,11 +809,23 @@ impl World {
                                 .player_echo
                                 .map(|e| (landblock_origin(e.cell) + e.local - server_pos).length())
                                 .unwrap_or(f32::INFINITY);
+                            // One of our own reports coming back is no move
+                            // of the server's, however far the character has
+                            // been put from it since. Taken for one, the
+                            // echo of a report from a fall stood a character
+                            // that had just been brought back from it in the
+                            // air where the fall had got to, on nothing, for
+                            // good.
+                            let ours = self.player_reports.iter().any(|&(cell, local)| {
+                                cell == up.position.cell
+                                    && local.distance(up.position.local) < SAME_REPORT
+                            });
                             self.player_echo = Some(up.position);
                             if !reconcile(
                                 gap,
                                 server_step,
                                 moved_by_server,
+                                ours,
                                 &mut self.desync_streak,
                             ) {
                                 return Applied::Ignored;
@@ -1897,7 +1947,7 @@ mod tests {
         // so we never snap and movement stays smooth.
         let mut streak = 0u8;
         for _ in 0..20 {
-            assert!(!reconcile(5.0, 4.0, false, &mut streak));
+            assert!(!reconcile(5.0, 4.0, false, false, &mut streak));
             assert_eq!(streak, 0);
         }
     }
@@ -1908,7 +1958,7 @@ mod tests {
         // see, so we never snap.
         let mut streak = 0u8;
         for _ in 0..10 {
-            assert!(!reconcile(0.5, 0.0, false, &mut streak));
+            assert!(!reconcile(0.5, 0.0, false, false, &mut streak));
             assert_eq!(streak, 0);
         }
     }
@@ -1918,10 +1968,10 @@ mod tests {
         // Stranded and then stopped (being hit where the server thinks we
         // are): nothing moves, but the gap is real and must still resync.
         let mut streak = 0u8;
-        assert!(!reconcile(7.0, 0.0, false, &mut streak));
-        assert!(!reconcile(7.0, 0.0, false, &mut streak));
+        assert!(!reconcile(7.0, 0.0, false, false, &mut streak));
+        assert!(!reconcile(7.0, 0.0, false, false, &mut streak));
         assert!(
-            reconcile(7.0, 0.0, false, &mut streak),
+            reconcile(7.0, 0.0, false, false, &mut streak),
             "a standing desync still resyncs"
         );
     }
@@ -1931,10 +1981,10 @@ mod tests {
         // A wall the server will not let us through: it holds still a few
         // metres away while we keep going. Three echoes confirm it.
         let mut streak = 0u8;
-        assert!(!reconcile(4.0, 0.1, false, &mut streak));
-        assert!(!reconcile(6.0, 0.1, false, &mut streak));
+        assert!(!reconcile(4.0, 0.1, false, false, &mut streak));
+        assert!(!reconcile(6.0, 0.1, false, false, &mut streak));
         assert!(
-            reconcile(9.0, 0.1, false, &mut streak),
+            reconcile(9.0, 0.1, false, false, &mut streak),
             "third echo resyncs"
         );
         assert_eq!(streak, 0, "streak clears after the snap");
@@ -1944,9 +1994,9 @@ mod tests {
     fn a_single_late_packet_is_not_mistaken_for_a_desync() {
         // One echo looks stuck, then the server catches up: no snap.
         let mut streak = 0u8;
-        assert!(!reconcile(18.0, 0.5, false, &mut streak));
+        assert!(!reconcile(18.0, 0.5, false, false, &mut streak));
         assert_eq!(streak, 1);
-        assert!(!reconcile(4.0, 14.0, false, &mut streak));
+        assert!(!reconcile(4.0, 14.0, false, false, &mut streak));
         assert_eq!(streak, 0);
     }
 
@@ -1954,14 +2004,105 @@ mod tests {
     fn a_teleport_or_a_huge_gap_snaps_at_once() {
         let mut streak = 0u8;
         assert!(
-            reconcile(3.0, 3.0, true, &mut streak),
+            reconcile(3.0, 3.0, true, false, &mut streak),
             "server teleport is taken"
         );
         let mut streak = 0u8;
         assert!(
-            reconcile(80.0, 0.0, false, &mut streak),
+            reconcile(80.0, 0.0, false, false, &mut streak),
             "a huge gap snaps at once"
         );
+    }
+
+    #[test]
+    fn a_huge_gap_to_a_report_of_our_own_is_only_a_late_echo() {
+        let mut streak = 0u8;
+        assert!(
+            !reconcile(50.0, 7.0, false, true, &mut streak),
+            "a late echo of our own report taken for a move"
+        );
+        // A server that has stopped taking our positions still shows as
+        // one, holding still at the last of them while the gap stays.
+        let mut streak = 0u8;
+        assert!(!reconcile(50.0, 0.0, false, true, &mut streak));
+        assert!(!reconcile(50.0, 0.0, false, true, &mut streak));
+        assert!(
+            reconcile(50.0, 0.0, false, true, &mut streak),
+            "a stuck server is followed all the same"
+        );
+        let mut streak = 0u8;
+        assert!(
+            reconcile(50.0, 7.0, true, true, &mut streak),
+            "the server moving us is taken whatever it says"
+        );
+    }
+
+    /// An UpdatePosition for us: the cell and landblock-local position,
+    /// facing north, with the teleport and forced-position sequences.
+    fn position_update(cell: u32, local: glam::Vec3, teleport: u16, force: u16) -> Vec<u8> {
+        let mut w = Writer::new();
+        w.u32(opcode::UPDATE_POSITION)
+            .u32(ME)
+            .u32(0)
+            .u32(cell)
+            .f32(local.x)
+            .f32(local.y)
+            .f32(local.z)
+            .f32(1.0)
+            .f32(0.0)
+            .f32(0.0)
+            .f32(0.0)
+            .u16(0)
+            .u16(0)
+            .u16(teleport)
+            .u16(force);
+        w.finish()
+    }
+
+    #[test]
+    fn an_echo_of_our_own_report_is_no_move_however_far_we_have_been_put_since() {
+        // Brought back to the floor of a room in the Holtburg dungeon from
+        // a fall with nothing under it, after reporting the way down.
+        const CELL: u32 = 0x01F6_022C;
+        let floor = glam::Vec3::new(31.5, -73.5, 0.0);
+        let fell_to = glam::Vec3::new(30.0, -110.0, -35.0);
+        let mut world = World {
+            player_guid: Some(ME),
+            ..Default::default()
+        };
+        world.objects.insert(
+            ME,
+            WorldObject {
+                guid: ME,
+                position: Some(Position {
+                    cell: CELL,
+                    local: floor,
+                    rotation: glam::Quat::IDENTITY,
+                }),
+                ..Default::default()
+            },
+        );
+        // The first word from the server places us; it has moved us
+        // itself no more since.
+        world.apply(&position_update(CELL, floor, 1, 1));
+        world.player_reported(CELL, fell_to);
+        // The echo of the report from the air, a round trip late.
+        assert!(
+            matches!(
+                world.apply(&position_update(CELL, fell_to, 1, 1)),
+                Applied::Ignored
+            ),
+            "stood back in the air where the fall had got to"
+        );
+        let at = world.player().and_then(|o| o.position).map(|p| p.local);
+        assert_eq!(at, Some(floor));
+        // Somewhere as far off that we never reported is still wrong
+        // enough to go to at once.
+        let elsewhere = glam::Vec3::new(30.0, -110.0, -80.0);
+        assert!(matches!(
+            world.apply(&position_update(CELL, elsewhere, 1, 1)),
+            Applied::PlayerMoved
+        ));
     }
 
     /// A whole GameEvent message: opcode, our guid, sequence, event, body.

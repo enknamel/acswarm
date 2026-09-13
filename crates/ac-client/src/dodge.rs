@@ -352,7 +352,7 @@ impl Client {
     /// while still too far, when the attack has to wait; false once in
     /// reach (or with nowhere to go), the walk called off.
     pub(crate) fn autoplay_approach(&mut self, target: u32, name: &str, how: How) -> bool {
-        let Some(me) = self.player.as_ref().map(|p| p.world_position()) else {
+        let Some((me, cell)) = self.player.as_ref().map(|p| (p.world_position(), p.cell)) else {
             return false;
         };
         let Some(at) = self.world.objects.get(&target).and_then(|o| o.world_pos()) else {
@@ -376,15 +376,23 @@ impl Client {
             return false;
         }
         if self.dodge.approaching != Some(target) {
+            // Where we stand as well as how far off it is: a walk that
+            // goes wrong from here can then be put on the map.
             if seen {
                 tracing::info!(
-                    "range: {name} is {:.1} m off, reach {range:.1} m: closing to {stop:.1} m",
-                    at.distance(me)
+                    "range: {name} is {:.1} m off, reach {range:.1} m: closing to {stop:.1} m, from {:.1} {:.1} {:.1} in {cell:#010x}",
+                    at.distance(me),
+                    me.x,
+                    me.y,
+                    me.z
                 );
             } else {
                 tracing::info!(
-                    "range: no clear shot at {name} ({:.1} m off): moving",
-                    at.distance(me)
+                    "range: no clear shot at {name} ({:.1} m off) from {:.1} {:.1} {:.1} in {cell:#010x}: moving",
+                    at.distance(me),
+                    me.x,
+                    me.y,
+                    me.z
                 );
             }
             self.interrupt_travel("closing on a target");

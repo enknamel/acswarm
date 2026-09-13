@@ -198,6 +198,101 @@ impl Ground<'_> {
         }
         (forward, backward)
     }
+
+    /// Whether the straight walk from `a` to `b` (feet positions) runs
+    /// off an edge with nothing under it before anything solid stops it,
+    /// or keeps a floor all the way and ends under (or over) a `b` that
+    /// stands a storey away, at the foot of an edge it never crosses.
+    ///
+    /// The walk is sampled every [`SUBSTEP`] as in
+    /// [`walkable`](Self::walkable), and followed the way the walking
+    /// code would follow it. Something solid first -- the capsule does
+    /// not fit, the chest ray is blocked, or the ground rises over the
+    /// feet faster than a step climbs -- and the walk ends there: a
+    /// character leaning on it stays on its own side, and what lies
+    /// beyond does not matter. No floor within a step, and the walk goes
+    /// over the edge: down onto the highest floor within `depth` under
+    /// it, as `Player::update` falls to one, and on from there. Only an
+    /// edge with nothing under it within `depth` is a drop.
+    ///
+    /// A ledge over a floor is not refused. Stepping off is how a
+    /// character upstairs in a house comes down when the graph finds no
+    /// way, and how one stranded on a ledge in a dungeon gets back to
+    /// the room it looks over; refusing it left both standing there. The
+    /// edge of everything is another matter: past it the walking code
+    /// has nothing to come down on and carries the character on through
+    /// the void at the height it left.
+    pub fn drops_along(&self, a: Vec3, b: Vec3, cap: &Capsule, depth: f32) -> bool {
+        let d = b - a;
+        let len = flat(d).length();
+        let steps = (len / SUBSTEP).ceil().max(1.0) as usize;
+        let mut prev = a;
+        for i in 1..=steps {
+            let t = i as f32 / steps as f32;
+            let at = Vec3::new(a.x + d.x * t, a.y + d.y * t, prev.z);
+            // The wall before the floor. Under a wall there is often no
+            // floor at all, only the sealed gap between two rooms, and
+            // nobody walking into the wall ever gets there to fall.
+            if !self.fits(at, cap) || !line_clear(self.collision, prev, at) {
+                return false;
+            }
+            // Where nothing may stand is no edge: a walk leaning on it
+            // goes round, not down.
+            if self.no_go.is_some_and(|f| f(at.x, at.y)) {
+                continue;
+            }
+            let z = match self.surface_at(at, cap) {
+                Some((z, _)) => z,
+                // Ground over the feet: a slope steeper than a step, a
+                // ledge too tall. Solid, like a wall -- and the storey
+                // that is likely under it is no floor of this walk's.
+                None if self.rises_over(at, cap) => return false,
+                None => match self.landing_under(at, cap, depth) {
+                    Some(z) => z,
+                    None => return true,
+                },
+            };
+            prev = Vec3::new(at.x, at.y, z);
+        }
+        // Along a floor all the way, but whose? Something standing on
+        // the top of a vault rib is reached, on the flat, by walking in
+        // underneath it: no edge is crossed on the way, and it is eight
+        // metres up all the same. Only a `b` with a floor of its own
+        // under it is judged so. One with none is not standing anywhere
+        // -- a point off the overland grid, floating over a hillside --
+        // and the walk to the ground under it is the walk wanted.
+        match self.surface_at(b, cap) {
+            Some((z, _)) => z - prev.z > cap.step_up || prev.z - z > cap.step_down,
+            None => false,
+        }
+    }
+
+    /// Ground over the feet at `at`: a floor, or outdoors the terrain,
+    /// higher than a step and (for a floor) lower than the head.
+    fn rises_over(&self, at: Vec3, cap: &Capsule) -> bool {
+        let over = at.z + cap.step_up;
+        self.collision
+            .floor_at(at, cap.height, 0.0)
+            .is_some_and(|(z, _)| z > over)
+            || self.terrain_under(at.x, at.y).is_some_and(|t| t > over)
+    }
+
+    /// Where a character going over an edge at `at` comes down: the
+    /// highest floor, or outdoors the ground, from a step over its feet
+    /// to `depth` under them. `None` when there is nothing.
+    fn landing_under(&self, at: Vec3, cap: &Capsule, depth: f32) -> Option<f32> {
+        let floor = self
+            .collision
+            .floor_at(at, cap.step_up, depth)
+            .map(|(z, _)| z);
+        let ground = self
+            .terrain_under(at.x, at.y)
+            .filter(|&t| t <= at.z + cap.step_up && t >= at.z - depth);
+        match (floor, ground) {
+            (Some(f), Some(g)) => Some(f.max(g)),
+            (f, g) => f.or(g),
+        }
+    }
 }
 
 /// A straight walk from `a` to `b` has a clear ray at chest height:
@@ -1033,5 +1128,100 @@ mod tests {
             g.find_path(&ground, flat_a, top).is_none(),
             "climbed the cliff"
         );
+    }
+
+    /// Inside, with nothing but `w` to stand on.
+    fn inside(w: &CollisionWorld) -> Ground<'_> {
+        Ground {
+            collision: w,
+            terrain: None,
+            sea: None,
+            no_go: None,
+            outdoors_only: false,
+            doorways: &[],
+        }
+    }
+
+    /// An upper floor three metres up from x = 0 to 4, and under it and
+    /// on past its edge, when `below`, the floor of the room.
+    fn a_ledge(below: bool) -> CollisionWorld {
+        let mut w = CollisionWorld::default();
+        floor(&mut w, 0.0, 4.0, -2.0, 2.0, 3.0, 1);
+        if below {
+            floor(&mut w, 0.0, 12.0, -2.0, 2.0, 0.0, 2);
+        }
+        w
+    }
+
+    /// The deepest a fall is looked for, as the walking code looks.
+    const FALL: f32 = 200.0;
+
+    #[test]
+    fn a_walk_off_a_ledge_onto_the_floor_below_is_no_drop() {
+        let w = a_ledge(true);
+        let ground = inside(&w);
+        let cap = Capsule::default();
+        let (from, to) = (Vec3::new(1.0, 0.0, 3.0), Vec3::new(9.0, 0.0, 0.0));
+        assert!(
+            !ground.walkable(from, to, &cap).0,
+            "a three-metre drop walked"
+        );
+        assert!(!ground.drops_along(from, to, &cap, FALL));
+    }
+
+    #[test]
+    fn a_walk_off_an_edge_with_nothing_under_it_is_a_drop() {
+        let cap = Capsule::default();
+        let (from, to) = (Vec3::new(1.0, 0.0, 3.0), Vec3::new(9.0, 0.0, 3.0));
+        let w = a_ledge(false);
+        assert!(inside(&w).drops_along(from, to, &cap, FALL));
+        // A floor further down than a fall is looked for is no floor to
+        // come down on.
+        let mut deep = a_ledge(false);
+        floor(&mut deep, 0.0, 12.0, -2.0, 2.0, -250.0, 2);
+        assert!(inside(&deep).drops_along(from, to, &cap, FALL));
+    }
+
+    #[test]
+    fn a_ledge_too_tall_for_a_step_is_solid_not_an_edge_over_the_storey_below() {
+        // A floor to x = 2, then a platform a metre up with no face to
+        // its edge -- only its top, which the walls never count -- and
+        // under it all, the storey twelve metres down.
+        let mut w = CollisionWorld::default();
+        floor(&mut w, 0.0, 2.0, -2.0, 2.0, 0.0, 1);
+        floor(&mut w, 2.0, 6.0, -2.0, 2.0, 1.0, 1);
+        floor(&mut w, 0.0, 12.0, -2.0, 2.0, -12.0, 2);
+        let ground = inside(&w);
+        let cap = Capsule::default();
+        // Nothing holds the capsule back where the platform is over its
+        // feet: only the height does.
+        assert!(ground.fits_here(Vec3::new(2.5, 0.0, 0.0), &cap));
+        assert!(!ground.drops_along(
+            Vec3::new(0.5, 0.0, 0.0),
+            Vec3::new(5.0, 0.0, 1.0),
+            &cap,
+            FALL
+        ));
+    }
+
+    #[test]
+    fn a_hillside_too_steep_to_climb_is_not_an_edge() {
+        let w = CollisionWorld::default();
+        let terrain = |x: f32, _y: f32| Some(if x < 10.0 { 0.0 } else { (x - 10.0) * 2.0 });
+        let ground = Ground {
+            collision: &w,
+            terrain: Some(&terrain),
+            sea: None,
+            no_go: None,
+            outdoors_only: false,
+            doorways: &[],
+        };
+        let cap = Capsule::default();
+        assert!(!ground.drops_along(
+            Vec3::new(8.0, 0.0, 0.0),
+            Vec3::new(14.0, 0.0, 8.0),
+            &cap,
+            FALL
+        ));
     }
 }

@@ -1314,6 +1314,12 @@ impl Client {
                 ran_out = self.move_to.take();
             }
             pl.report(&mut self.session, &input, now, quiet);
+            // What went out, for the world to know the server's echo of
+            // it by when it comes back after the character has been put
+            // somewhere else.
+            if let Some((cell, local)) = pl.take_sent() {
+                self.world.player_reported(cell, local);
+            }
             let dirty = pl.dirty;
             if pl.dirty {
                 pl.dirty = false;
@@ -1805,6 +1811,9 @@ impl Client {
             if in_the_world {
                 if let Some(pl) = self.player.as_mut() {
                     pl.report_stopped(&mut self.session, self.held_run);
+                    if let Some((cell, local)) = pl.take_sent() {
+                        self.world.player_reported(cell, local);
+                    }
                 }
                 // What a server walk that runs out was walking to.
                 self.visits.used(guid, Instant::now());
@@ -3727,7 +3736,7 @@ fn chat_handles(op: u32, ev: u32) -> bool {
 /// The client answering what the steering asks of the world.
 ///
 /// The steering itself is in `ac-nav` and knows nothing of packets,
-/// physics or landblocks; this is the half that does. Six questions,
+/// physics or landblocks; this is the half that does. Seven questions,
 /// which in a test are answered with a few rectangles and here with
 /// the character's own collision and the planner on its thread.
 pub struct Standing<'a> {
@@ -3751,6 +3760,10 @@ impl ac_nav::Ground for Standing<'_> {
 
     fn line_blocked(&mut self, block: u32, from: glam::Vec3, to: glam::Vec3) -> bool {
         self.player.line_blocked(self.assets, block, from, to)
+    }
+
+    fn line_drops(&mut self, block: u32, from: glam::Vec3, to: glam::Vec3) -> bool {
+        self.player.line_drops(self.assets, block, from, to)
     }
 
     fn find_path(
