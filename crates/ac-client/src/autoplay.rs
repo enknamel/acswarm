@@ -126,12 +126,12 @@ fn arrived_unharmed(text: &str) -> Option<&str> {
         .or_else(|| text.strip_suffix(" evades your attack."))
 }
 
-/// Whether nothing has got to a target for long enough to try from
-/// nearer: no damage since `hurt`, and no resist or evasion since then
-/// either.
-fn nothing_arrived(hurt: Instant, unharmed: Option<Instant>, now: Instant) -> bool {
-    let last = unharmed.map_or(hurt, |t| t.max(hurt));
-    now.duration_since(last) > CLOSE_IN_AFTER
+/// Whether what has been thrown at a target has had long enough to get
+/// there and has not: the first shot since anything last arrived went
+/// out at `thrown`, more than [`CLOSE_IN_AFTER`] ago. Nothing thrown is
+/// nothing missed.
+fn nothing_arrived(thrown: Option<Instant>, now: Instant) -> bool {
+    thrown.is_some_and(|t| now.duration_since(t) > CLOSE_IN_AFTER)
 }
 
 /// How near to fight from after nothing has landed from `distance`: half
@@ -953,10 +953,10 @@ pub struct Autoplay {
     /// last seen to drop: a target that takes no damage for a while is
     /// out of reach, and is let go.
     engaged: Option<(u32, Instant, f32)>,
-    /// The target something last got to without hurting it -- a spell
-    /// resisted, an arrow evaded -- and when. It arrived: the spot it was
-    /// thrown from is not what is wrong.
-    pub(crate) arrived: Option<(u32, Instant)>,
+    /// The first shot thrown at a target since anything last got to it,
+    /// and when: damage, a resist or an evasion clears it. The time spent
+    /// walking to a clear shot, with nothing thrown, is not a miss.
+    pub(crate) thrown: Option<(u32, Instant)>,
     /// The attack spell last cast, to tell whether what is being thrown
     /// can miss at all: only a projectile can.
     pub(crate) attack_spell: Option<u32>,
@@ -3390,6 +3390,9 @@ impl Client {
                     self.enter_combat();
                     self.attack(guid);
                     self.autoplay.last_attack = Some(now);
+                    if missile {
+                        self.throw_at(guid, now);
+                    }
                     self.autoplay
                         .say(Doing::Fighting, format!("joining on {name}"));
                     return true;
@@ -3440,6 +3443,9 @@ impl Client {
         self.enter_combat();
         self.attack(guid);
         self.autoplay.last_attack = Some(now);
+        if missile {
+            self.throw_at(guid, now);
+        }
         self.autoplay.say(
             Doing::Fighting,
             if missile {
@@ -3576,6 +3582,7 @@ impl Client {
             self.autoplay.cast_sent = Some(now);
             self.note_fired(spell, now);
             self.autoplay.attack_spell = Some(spell);
+            self.throw_at(guid, now);
             let element = ac_world::elements::spell_element(spell)
                 .map(|e| e.name())
                 .unwrap_or("");
@@ -3854,11 +3861,11 @@ impl Client {
             Some((g, since, last)) if g == guid => {
                 if health < last - 0.001 {
                     self.autoplay.engaged = Some((guid, now, health));
+                    self.autoplay.thrown = None;
                     false
                 } else if nothing_arrived(
-                    since,
                     self.autoplay
-                        .arrived
+                        .thrown
                         .filter(|(g, _)| *g == guid)
                         .map(|(_, t)| t),
                     now,
@@ -3866,6 +3873,7 @@ impl Client {
                 {
                     // A new spot to fight from gets its own chance.
                     self.autoplay.engaged = Some((guid, now, health));
+                    self.autoplay.thrown = None;
                     false
                 } else if now.duration_since(since) > STALL_AFTER {
                     let name = self
@@ -3976,7 +3984,15 @@ impl Client {
             .flatten()
             .find(|g| self.world.objects.get(g).is_some_and(|o| o.name == name));
         if let Some(g) = target {
-            self.autoplay.arrived = Some((g, Instant::now()));
+            self.autoplay.thrown = self.autoplay.thrown.filter(|(t, _)| *t != g);
+        }
+    }
+
+    /// A shot has gone out at `guid`: the clock on it getting there
+    /// starts now, unless one is already running for that target.
+    fn throw_at(&mut self, guid: u32, now: Instant) {
+        if self.autoplay.thrown.is_none_or(|(g, _)| g != guid) {
+            self.autoplay.thrown = Some((guid, now));
         }
     }
 
@@ -5339,14 +5355,12 @@ mod tests {
         );
         let now = Instant::now();
         let long_ago = now.checked_sub(CLOSE_IN_AFTER * 2).unwrap();
-        // No damage and nothing else for a while: nothing is getting there.
-        assert!(nothing_arrived(long_ago, None, now));
-        // Resisted just now: it got there.
-        assert!(!nothing_arrived(long_ago, Some(now), now));
-        // Hurt just now.
-        assert!(!nothing_arrived(now, None, now));
-        // A resist from before the last hurt does not stretch it.
-        assert!(!nothing_arrived(now, Some(long_ago), now));
+        // Thrown a while ago, and nothing has got there since.
+        assert!(nothing_arrived(Some(long_ago), now));
+        // Only just thrown: still on its way.
+        assert!(!nothing_arrived(Some(now), now));
+        // Nothing thrown yet -- still walking to a clear shot -- is no miss.
+        assert!(!nothing_arrived(None, now));
     }
 
     #[test]

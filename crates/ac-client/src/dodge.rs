@@ -340,8 +340,9 @@ impl Client {
                     .then(|| flat.length())
             });
         if let Some(speed) = speed {
-            tracing::debug!("aim: spell {spell} flies at {speed:.1} m/s");
-            self.dodge.shot_speeds.insert(spell, speed);
+            if self.dodge.shot_speeds.insert(spell, speed).is_none() {
+                tracing::info!("aim: spell {spell} flies at {speed:.1} m/s");
+            }
             self.dodge.fired = None;
         }
     }
