@@ -29,6 +29,12 @@
 //!   Marks are coloured by how hard the hardest creature there is for the
 //!   character (grey, green, orange, red) and hovering one lists what it
 //!   makes, with levels.
+//! * "draw area" draws a hunting area (`ac_client::hunt`): outdoors click
+//!   its corners on the map (a right-click takes the last away); in a
+//!   dungeon click the rooms to hunt, or pick none for the whole dungeon.
+//!   Name it and save it. Saved areas are listed and drawn -- outlines on
+//!   the map, rooms shaded on the dungeon's floor plan -- and kept under
+//!   `hunt.areas`.
 //! * On the world map a double-click asks for a route there and the
 //!   character walks it (see `ac_client::Client::travel_to`); a place
 //!   name typed into "travel to" does the same by the gazetteer. The
@@ -452,6 +458,9 @@ pub struct Actions {
     pub save_area: Option<HuntArea>,
     /// Forget the saved hunting area at this index.
     pub delete_area: Option<usize>,
+    /// While drawing in a dungeon: add or take away the room under this
+    /// world xy, on the storey shown.
+    pub pick_room: Option<Vec2>,
 }
 
 /// A hunting area being drawn: its name so far, and the corners clicked
@@ -460,6 +469,8 @@ pub struct Actions {
 pub struct Drawing {
     pub name: String,
     pub corners: Vec<Vec2>,
+    /// In a dungeon, the rooms picked on its map; none is all of it.
+    pub rooms: Vec<u32>,
 }
 
 impl Drawing {
@@ -469,7 +480,7 @@ impl Drawing {
         let shape = if v.dungeon {
             Shape::Dungeon {
                 landblock: v.block,
-                rooms: Vec::new(),
+                rooms: self.rooms.clone(),
             }
         } else {
             Shape::Outline {
@@ -567,6 +578,7 @@ fn draw_map(
     world_tab: bool,
     areas: &[HuntArea],
     drawing: &mut Option<Drawing>,
+    room_tris: &[([Vec2; 3], egui::Color32)],
     actions: &mut Actions,
 ) -> Option<Vec2> {
     let resp = ui.allocate_rect(rect, egui::Sense::click_and_drag());
@@ -687,6 +699,16 @@ fn draw_map(
     ));
     // Pointer: coordinates, and a double-click on the world map travels.
     let hover = resp.hover_pos().map(|p| to_world(rect, center, s, p));
+    // Dungeon rooms in a hunting area, on the storey shown: the ones being
+    // picked, and the ones of saved areas.
+    for (tri, colour) in room_tris {
+        let pts: Vec<egui::Pos2> = tri.iter().map(|p| to_screen(rect, center, s, *p)).collect();
+        painter.add(egui::Shape::convex_polygon(
+            pts,
+            colour.gamma_multiply(0.35),
+            egui::Stroke::NONE,
+        ));
+    }
     // Hunting areas: every saved outline, named, and the one being drawn.
     let outline = |points: &[Vec2]| -> Vec<egui::Pos2> {
         points
@@ -722,7 +744,8 @@ fn draw_map(
             painter.circle_filled(*p, 3.5, DRAWING);
         }
         // Outdoors a click puts a corner down and a right-click takes the
-        // last one away. In a dungeon the area is the dungeon.
+        // last one away. In a dungeon a click adds the room under it, or
+        // takes it away again.
         if !v.dungeon {
             if resp.clicked() {
                 if let Some(p) = resp.interact_pointer_pos() {
@@ -732,6 +755,8 @@ fn draw_map(
             if resp.secondary_clicked() {
                 d.corners.pop();
             }
+        } else if resp.clicked() {
+            actions.pick_room = hover;
         }
     } else if world_tab && resp.double_clicked() {
         if let Some(w) = hover {
@@ -807,6 +832,35 @@ fn storey_band(z: f32) -> i32 {
 /// floor, and up to the ceiling of the room above.
 fn storey_range(band: i32) -> (f32, f32) {
     (band as f32 * 6.0 - 3.0, band as f32 * 6.0 + 9.0)
+}
+
+/// The dungeon room whose floor is under world `xy` on the storey spanning
+/// `(low, high)`: the highest floor from the top of the storey down.
+pub fn room_at(
+    world: &ac_scene::collision::CollisionWorld,
+    xy: Vec2,
+    (low, high): (f32, f32),
+) -> Option<u32> {
+    world
+        .floor_at(glam::Vec3::new(xy.x, xy.y, high), 0.0, high - low)
+        .map(|(_, cell)| cell)
+        .filter(|cell| cell & 0xFFFF >= 0x100)
+}
+
+/// The floor triangles of `rooms` on the storey spanning `(low, high)`, in
+/// world xy, to shade them on the dungeon map.
+pub fn room_floors(
+    world: &ac_scene::collision::CollisionWorld,
+    rooms: &[u32],
+    (low, high): (f32, f32),
+) -> Vec<[Vec2; 3]> {
+    world
+        .tris
+        .iter()
+        .filter(|t| rooms.contains(&t.cell) && t.normal.z.abs() > 0.7)
+        .filter(|t| (low..=high).contains(&((t.a.z + t.b.z + t.c.z) / 3.0)))
+        .map(|t| [t.a.truncate(), t.b.truncate(), t.c.truncate()])
+        .collect()
 }
 
 /// Mark what spawns where.
@@ -917,6 +971,7 @@ fn draw_spawns(
 }
 
 /// Draw the panel.
+#[allow(clippy::too_many_arguments)]
 pub fn draw(
     egui: &egui::Context,
     v: &MapView,
@@ -925,6 +980,7 @@ pub fn draw(
     local: Option<&MapTexture>,
     areas: &[HuntArea],
     drawing: &mut Option<Drawing>,
+    room_tris: &[([Vec2; 3], egui::Color32)],
 ) -> Actions {
     let mut actions = Actions::default();
     let vp = egui.viewport_rect();
@@ -1015,6 +1071,7 @@ pub fn draw(
                 world_tab,
                 areas,
                 drawing,
+                room_tris,
                 &mut actions,
             );
             ui.vertical(|ui| {
@@ -1111,7 +1168,18 @@ pub fn draw(
                             .desired_width(220.0),
                     );
                     if v.dungeon {
-                        caption(ui, "the whole of this dungeon");
+                        caption(
+                            ui,
+                            match d.rooms.len() {
+                                0 => "the whole of this dungeon: click rooms on the map \
+                                      to hunt only those"
+                                    .to_string(),
+                                n => format!(
+                                    "{n} rooms: click a room to add it or take it away \
+                                     (rooms on other storeys stay picked)"
+                                ),
+                            },
+                        );
                     } else {
                         caption(
                             ui,
@@ -1182,7 +1250,15 @@ pub struct Map {
     /// Saved hunting areas (`hunt.areas`), and the one being drawn.
     areas: Vec<HuntArea>,
     drawing: Option<Drawing>,
+    /// The shaded floors of dungeon rooms in hunting areas, for (block,
+    /// storey band, rooms being picked, rooms of saved areas).
+    room_cache: Option<RoomCache>,
 }
+
+type RoomCache = (
+    (u32, i32, Vec<u32>, Vec<u32>),
+    Vec<([Vec2; 3], egui::Color32)>,
+);
 
 impl Default for Map {
     fn default() -> Self {
@@ -1198,6 +1274,7 @@ impl Default for Map {
             local_failed: None,
             areas: Vec::new(),
             drawing: None,
+            room_cache: None,
         }
     }
 }
@@ -1254,6 +1331,7 @@ impl Map {
             local_failed: None,
             areas: Vec::new(),
             drawing: None,
+            room_cache: None,
         }
     }
 
@@ -1327,6 +1405,54 @@ impl Map {
         self.local_rx = Some(rx);
     }
 
+    /// The floors to shade in the dungeon shown: rooms being picked in
+    /// the drawing colour, rooms of saved areas for this dungeon in the
+    /// area colour. Worked out again only when the dungeon, the storey or
+    /// the rooms change.
+    fn room_shading(&mut self, c: &Client, v: &MapView) -> Vec<([Vec2; 3], egui::Color32)> {
+        if !v.dungeon {
+            return Vec::new();
+        }
+        let band = storey_band(v.me_z);
+        let picking = self
+            .drawing
+            .as_ref()
+            .map(|d| d.rooms.clone())
+            .unwrap_or_default();
+        let saved: Vec<u32> = self
+            .areas
+            .iter()
+            .filter_map(|a| match &a.shape {
+                Shape::Dungeon { landblock, rooms } if *landblock == v.block => Some(rooms),
+                _ => None,
+            })
+            .flatten()
+            .copied()
+            .collect();
+        let key = (v.block, band, picking.clone(), saved.clone());
+        if let Some((k, tris)) = &self.room_cache {
+            if *k == key {
+                return tris.clone();
+            }
+        }
+        let mut tris = Vec::new();
+        if let Ok(coll) = c.assets.block_collision(v.block) {
+            let range = storey_range(band);
+            tris.extend(
+                room_floors(&coll.world, &saved, range)
+                    .into_iter()
+                    .map(|t| (t, AREA)),
+            );
+            tris.extend(
+                room_floors(&coll.world, &picking, range)
+                    .into_iter()
+                    .map(|t| (t, DRAWING)),
+            );
+        }
+        self.room_cache = Some((key, tris.clone()));
+        tris
+    }
+
     fn poll_local(&mut self, egui: &egui::Context) {
         let Some(rx) = &self.local_rx else { return };
         match rx.try_recv() {
@@ -1397,6 +1523,10 @@ impl Plugin for Map {
         }
         let mut v = v;
         v.elsewhere = world_search(&self.state.search, v.me);
+        let room_tris = match (&self.source, cx.try_client()) {
+            (Source::Live, Some(c)) => self.room_shading(c, &v),
+            _ => Vec::new(),
+        };
         let actions = draw(
             egui,
             &v,
@@ -1405,7 +1535,30 @@ impl Plugin for Map {
             self.local.as_ref().map(|(_, t)| t),
             &self.areas,
             &mut self.drawing,
+            &room_tris,
         );
+        // A click on a room of the dungeon being drawn adds it, or takes it
+        // away again.
+        if let (Some(xy), true) = (actions.pick_room, v.dungeon) {
+            if let (Source::Live, Some(c), Some(d)) =
+                (&self.source, cx.try_client(), self.drawing.as_mut())
+            {
+                let range = storey_range(storey_band(v.me_z));
+                let room = c
+                    .assets
+                    .block_collision(v.block)
+                    .ok()
+                    .and_then(|coll| room_at(&coll.world, xy, range));
+                if let Some(cell) = room {
+                    match d.rooms.iter().position(|r| *r == cell) {
+                        Some(i) => {
+                            d.rooms.remove(i);
+                        }
+                        None => d.rooms.push(cell),
+                    }
+                }
+            }
+        }
         let mut lines = Vec::new();
         if actions.start_drawing {
             self.drawing = Some(Drawing::default());
@@ -1524,6 +1677,77 @@ mod spawn_tests {
         assert!(rooms
             .iter()
             .any(|p| (low..=high).contains(&p.at.z) && p.spawns.iter().any(|s| s.name == "Lich")));
+    }
+}
+
+#[cfg(test)]
+mod room_tests {
+    use super::*;
+
+    fn in_dungeon() -> MapView {
+        MapView {
+            block: 0x01F6_0000,
+            dungeon: true,
+            me: Vec2::ZERO,
+            me_z: -18.0,
+            level: 10,
+            heading: 0.0,
+            coords: String::new(),
+            objects: Vec::new(),
+            route: Vec::new(),
+            travel: None,
+            places: Vec::new(),
+            elsewhere: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_dungeon_drawn_is_the_rooms_picked_or_all_of_it() {
+        let v = in_dungeon();
+        let mut d = Drawing {
+            name: " Liches ".into(),
+            ..Drawing::default()
+        };
+        assert_eq!(
+            d.area(&v).shape,
+            Shape::Dungeon {
+                landblock: 0x01F6_0000,
+                rooms: Vec::new()
+            }
+        );
+        d.rooms = vec![0x01F6_012F];
+        let a = d.area(&v);
+        assert_eq!(a.name, "Liches");
+        assert_eq!(
+            a.shape,
+            Shape::Dungeon {
+                landblock: 0x01F6_0000,
+                rooms: vec![0x01F6_012F]
+            }
+        );
+        assert!(a.usable());
+    }
+
+    #[test]
+    fn a_click_on_the_lich_room_picks_it_and_it_has_a_floor_to_shade() {
+        let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
+            return;
+        };
+        let assets = ac_scene::Assets::open(std::path::Path::new(&dir)).unwrap();
+        let coll = assets.block_collision(0x01F6_0000).unwrap();
+        // Where the spawn table puts the Lich's generator.
+        let lich = ac_world::landblock_origin(0x01F6_012F) + glam::Vec3::new(106.7, -207.8, -18.0);
+        let range = storey_range(storey_band(lich.z));
+        assert_eq!(
+            room_at(&coll.world, lich.truncate(), range),
+            Some(0x01F6_012F)
+        );
+        assert!(!room_floors(&coll.world, &[0x01F6_012F], range).is_empty());
+        // Outside the dungeon's rooms there is nothing to pick.
+        assert_eq!(
+            room_at(&coll.world, lich.truncate() + Vec2::new(5000.0, 0.0), range),
+            None
+        );
     }
 }
 
