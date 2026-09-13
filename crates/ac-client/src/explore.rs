@@ -103,6 +103,18 @@ impl Client {
             return false;
         }
         let me = pl.world_position();
+        // Outside the hunting area there is nothing here to look for:
+        // keeping to the area takes the character back to it.
+        if self
+            .autoplay
+            .config
+            .fight
+            .area
+            .as_ref()
+            .is_some_and(|a| !a.contains(me, cell, true))
+        {
+            return false;
+        }
         let Ok(scene) = ac_scene::landblock::load(&assets, cell & 0xFFFF_0000) else {
             return false;
         };
@@ -147,10 +159,27 @@ impl Client {
         }
 
         let rooms = Rooms(&scene.cells);
+        // With a hunting area of chosen rooms, the others are walked
+        // through but never gone to: counted as seen already.
+        let outside_area: std::collections::HashSet<u32> =
+            match self.autoplay.config.fight.area.as_ref().map(|a| &a.shape) {
+                Some(crate::hunt::Shape::Dungeon { rooms: picked, .. }) if !picked.is_empty() => {
+                    scene
+                        .cells
+                        .iter()
+                        .map(|c| c.cell_id)
+                        .filter(|id| !picked.contains(id))
+                        .collect()
+                }
+                _ => Default::default(),
+            };
+        let seen = |s: &std::collections::HashSet<u32>| -> std::collections::HashSet<u32> {
+            s.union(&outside_area).copied().collect()
+        };
         let mut next = next_step(
             cell,
             &rooms,
-            &self.autoplay.rooms_seen,
+            &seen(&self.autoplay.rooms_seen),
             &self.autoplay.rooms_shut,
         );
         if next.is_none() {
@@ -163,7 +192,7 @@ impl Client {
             next = next_step(
                 cell,
                 &rooms,
-                &self.autoplay.rooms_seen,
+                &seen(&self.autoplay.rooms_seen),
                 &self.autoplay.rooms_shut,
             );
         }

@@ -47,6 +47,8 @@ pub struct AutoplayView {
     pub at: glam::Vec2,
     /// The loot profiles on the shelf, for the picker.
     pub profiles: Vec<String>,
+    /// The hunting areas drawn on the map, to hunt in one.
+    pub hunt_areas: Vec<ac_client::hunt::HuntArea>,
 }
 
 /// The line under the checkbox: what it is doing and the engine's own
@@ -330,6 +332,41 @@ pub fn draw(egui: &egui::Context, v: &AutoplayView, x: f32, drafts: &mut Drafts)
                         .text("radius"),
                 )
                 .on_hover_text("How far to look for something to attack");
+                ui.horizontal(|ui| {
+                    ui.label("hunt in");
+                    let current = cfg
+                        .fight
+                        .area
+                        .as_ref()
+                        .map_or_else(|| "anywhere".to_string(), |a| a.name.clone());
+                    egui::ComboBox::from_id_salt("autoplay.area")
+                        .selected_text(current)
+                        .width(180.0)
+                        .show_ui(ui, |ui| {
+                            if ui
+                                .selectable_label(cfg.fight.area.is_none(), "anywhere")
+                                .clicked()
+                            {
+                                cfg.fight.area = None;
+                            }
+                            for a in &v.hunt_areas {
+                                let on = cfg.fight.area.as_ref().is_some_and(|c| c.name == a.name);
+                                if ui
+                                    .selectable_label(on, &a.name)
+                                    .on_hover_text(a.describe())
+                                    .clicked()
+                                {
+                                    cfg.fight.area = Some(a.clone());
+                                }
+                            }
+                        });
+                })
+                .response
+                .on_hover_text(
+                    "Hunt only inside a hunting area drawn on the map: fight what \
+                     stands in it (and whatever hits the character), let what \
+                     leaves it go, and go back to it",
+                );
                 ui.checkbox(&mut cfg.fight.craft_ammo, "make ammunition when out")
                     .on_hover_text(
                         "From a bundle of heads and a bundle of shafts carried, \
@@ -722,6 +759,7 @@ pub fn view(c: &Client) -> AutoplayView {
         status: c.autoplay.status.clone(),
         salvager: c.best_salvager().map(|(n, _)| n).unwrap_or_default(),
         profiles: c.profiles.names(),
+        hunt_areas: Vec::new(),
         at: c
             .player
             .as_ref()
@@ -791,6 +829,13 @@ impl Autoplay {
                 status: "fighting Drudge Skulker".into(),
                 salvager: "Brannoc".into(),
                 profiles: vec!["Starter".into(), "Mule".into()],
+                hunt_areas: vec![ac_client::hunt::HuntArea {
+                    name: "Holtburg Dungeon".into(),
+                    shape: ac_client::hunt::Shape::Dungeon {
+                        landblock: 0x01F6_0000,
+                        rooms: Vec::new(),
+                    },
+                }],
                 at: glam::Vec2::ZERO,
             }),
             show: true,
@@ -863,7 +908,26 @@ impl Plugin for Autoplay {
             Source::Demo(d) => Some(d.clone()),
             Source::Live => cx.try_client().map(|c| view(c)),
         };
-        let Some(v) = v else { return };
+        let Some(mut v) = v else { return };
+        // The hunting areas drawn on the map, as the map last wrote them.
+        v.hunt_areas = cx
+            .settings
+            .get::<Vec<ac_client::hunt::HuntArea>>("hunt.areas")
+            .unwrap_or_default();
+        // An area hunted in and since redrawn is hunted as it is now.
+        let fresh = self.saved.fight.area.as_ref().and_then(|chosen| {
+            v.hunt_areas
+                .iter()
+                .find(|a| a.name == chosen.name && *a != chosen)
+                .cloned()
+        });
+        if let (Some(fresh), Source::Live) = (fresh, &self.source) {
+            self.saved.fight.area = Some(fresh.clone());
+            v.config.fight.area = Some(fresh.clone());
+            if let Some(c) = cx.try_client() {
+                c.autoplay.config.fight.area = Some(fresh);
+            }
+        }
         // Sits beside the other left-column panels when they are open.
         let open = |key: &str| cx.board.get(key).and_then(|v| v.as_bool()).unwrap_or(false);
         let mut x = 8.0;

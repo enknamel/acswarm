@@ -12,8 +12,20 @@
 //! Areas are saved by the map panel and used by whatever hunts in them;
 //! this is the shape and the one question asked of it: is this inside?
 
+use std::time::Instant;
+
 use glam::{Vec2, Vec3};
 use serde::{Deserialize, Serialize};
+
+use crate::autoplay::Doing;
+use crate::Client;
+
+/// Something hitting the character is fought if it stands this near,
+/// wherever that is: an area says where to look for fights, not which
+/// ones to lose.
+pub const DEFEND_REACH: f32 = 30.0;
+/// Walking back into an outline stops this close to the way in.
+const BACK_IN: f32 = 3.0;
 
 /// A named place to hunt.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -104,9 +116,246 @@ pub fn inside(p: Vec2, corners: &[Vec2]) -> bool {
     inside
 }
 
+/// The corners of an outline area, `None` for a dungeon.
+pub fn corners(area: &HuntArea) -> Option<Vec<Vec2>> {
+    match &area.shape {
+        Shape::Outline { points } => Some(points.iter().map(|p| Vec2::from(*p)).collect()),
+        Shape::Dungeon { .. } => None,
+    }
+}
+
+/// Where to walk to get inside an outline: its middle when that is inside
+/// it, and otherwise somewhere that is (an L or a crescent can have its
+/// middle outside).
+pub fn way_in(corners: &[Vec2]) -> Vec2 {
+    let n = corners.len().max(1) as f32;
+    let middle = corners.iter().copied().sum::<Vec2>() / n;
+    if inside(middle, corners) {
+        return middle;
+    }
+    // Between each corner and the middle, the first point found inside.
+    corners
+        .iter()
+        .flat_map(|c| [0.25f32, 0.5, 0.75].map(|t| c.lerp(middle, t)))
+        .find(|p| inside(*p, corners))
+        .unwrap_or(middle)
+}
+
+/// The `n`th place to walk to while looking about an outline for
+/// something to fight: towards each corner in turn, well inside it.
+pub fn patrol_point(corners: &[Vec2], n: u32) -> Vec2 {
+    let middle = way_in(corners);
+    if corners.is_empty() {
+        return middle;
+    }
+    let toward = corners[n as usize % corners.len()];
+    [0.7f32, 0.5, 0.3]
+        .into_iter()
+        .map(|t| middle.lerp(toward, t))
+        .find(|p| inside(*p, corners))
+        .unwrap_or(middle)
+}
+
+/// The portal into the dungeon of `landblock` nearest `from`: one that
+/// works, stands out in the open, and comes out in that dungeon.
+pub fn entrance(landblock: u32, from: Vec2) -> Option<&'static ac_world::portals::Portal> {
+    ac_world::portals::all()
+        .iter()
+        .filter(|p| p.works() && p.mouth_outdoors())
+        .filter(|p| p.to_cell & 0xFFFF_0000 == landblock & 0xFFFF_0000)
+        .min_by(|a, b| {
+            a.from_xy()
+                .distance(from)
+                .total_cmp(&b.from_xy().distance(from))
+        })
+}
+
+impl Client {
+    /// Whether the character stands in a dungeon (a building on the
+    /// surface is not one).
+    pub(crate) fn underground(&mut self) -> bool {
+        let assets = self.assets.clone();
+        self.player
+            .as_mut()
+            .is_some_and(|pl| pl.is_indoors() && pl.in_dungeon(&assets))
+    }
+
+    /// Whether `o` may be fought under the hunting area: it stands inside
+    /// the area, or it is what has just hit the character and is near.
+    /// With no area, anything may.
+    pub(crate) fn area_allows(&self, o: &ac_world::WorldObject, underground: bool) -> bool {
+        let Some(area) = &self.autoplay.config.fight.area else {
+            return true;
+        };
+        let Some(p) = o.position else {
+            return false;
+        };
+        let at = ac_world::landblock_origin(p.cell) + p.local;
+        if area.contains(at, p.cell, underground) {
+            return true;
+        }
+        let near = self
+            .player
+            .as_ref()
+            .is_some_and(|pl| pl.world_position().distance(at) <= DEFEND_REACH);
+        near && self.under_attack()
+            && self
+                .autoplay
+                .hit_by
+                .as_ref()
+                .is_some_and(|(name, _)| *name == o.name)
+    }
+
+    /// Whether the object `guid` may still be fought under the area (see
+    /// [`Client::area_allows`]); something no longer known may not.
+    pub(crate) fn area_allows_guid(&self, guid: u32, underground: bool) -> bool {
+        self.world
+            .objects
+            .get(&guid)
+            .is_some_and(|o| self.area_allows(o, underground))
+    }
+
+    /// Keep to the hunting area: outside it, and not in a fight or on the
+    /// way somewhere already, go back. Into an outline on foot; to a
+    /// dungeon through the portal into it; within the dungeon, to the
+    /// nearest room picked. True while it does.
+    pub(crate) fn autoplay_keep_to_area(&mut self, now: Instant) -> bool {
+        let Some(area) = self.autoplay.config.fight.area.clone() else {
+            return false;
+        };
+        if !self.autoplay.config.fight.enabled {
+            return false;
+        }
+        // Never in the middle of a fight: something hitting the character
+        // is fought where it stands, and so is what it has taken on.
+        if self.under_attack()
+            || self.attack_target.is_some()
+            || self.autoplay.casting_at().is_some()
+        {
+            return false;
+        }
+        let Some((me, cell)) = self.player.as_ref().map(|p| (p.world_position(), p.cell)) else {
+            return false;
+        };
+        let underground = self.underground();
+        if area.contains(me, cell, underground) {
+            return false;
+        }
+        // Already on the way: travel and visits see it through.
+        if self.traveling() || self.visiting().is_some() {
+            return true;
+        }
+        match &area.shape {
+            Shape::Outline { points } => {
+                let corners: Vec<Vec2> = points.iter().map(|p| Vec2::from(*p)).collect();
+                if corners.len() < LEAST_CORNERS {
+                    return false;
+                }
+                let goal = way_in(&corners);
+                if !self
+                    .head_for(goal.extend(me.z), BACK_IN, &area.name)
+                    .acting()
+                {
+                    self.autoplay
+                        .note(format!("no way back to {} from here", area.name), now);
+                    return false;
+                }
+                self.autoplay
+                    .say(Doing::Traveling, format!("back to {}", area.name));
+                true
+            }
+            Shape::Dungeon { landblock, rooms } => {
+                if underground && cell & 0xFFFF_0000 == landblock & 0xFFFF_0000 {
+                    // In the dungeon, outside the rooms picked.
+                    let Some(at) = self.nearest_room(*landblock, rooms, me) else {
+                        return false;
+                    };
+                    if !self.head_for(at, BACK_IN, &area.name).acting() {
+                        return false;
+                    }
+                    self.autoplay
+                        .say(Doing::Traveling, format!("back to {}", area.name));
+                    return true;
+                }
+                let Some(portal) = entrance(*landblock, me.truncate()) else {
+                    self.autoplay
+                        .note(format!("no portal into {} is known", area.name), now);
+                    return false;
+                };
+                if !self.visit_portal(portal) {
+                    self.autoplay
+                        .note(format!("no way to the portal into {}", area.name), now);
+                    return false;
+                }
+                self.autoplay.say(
+                    Doing::Traveling,
+                    format!("on the way into {} ({})", area.name, portal.name),
+                );
+                true
+            }
+        }
+    }
+
+    /// The middle of the floor of the room among `rooms` nearest `me`, in
+    /// the dungeon of `landblock`.
+    fn nearest_room(&self, landblock: u32, rooms: &[u32], me: Vec3) -> Option<Vec3> {
+        let coll = self.assets.block_collision(landblock).ok()?;
+        rooms
+            .iter()
+            .filter_map(|room| {
+                let floor: Vec<Vec3> = coll
+                    .world
+                    .tris
+                    .iter()
+                    .filter(|t| t.cell == *room && t.normal.z.abs() > 0.7)
+                    .map(|t| (t.a + t.b + t.c) / 3.0)
+                    .collect();
+                (!floor.is_empty())
+                    .then(|| floor.iter().copied().sum::<Vec3>() / floor.len() as f32)
+            })
+            .min_by(|a, b| a.distance(me).total_cmp(&b.distance(me)))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_way_into_an_outline_is_inside_it() {
+        let square = [
+            Vec2::new(0.0, 0.0),
+            Vec2::new(10.0, 0.0),
+            Vec2::new(10.0, 10.0),
+            Vec2::new(0.0, 10.0),
+        ];
+        assert_eq!(way_in(&square), Vec2::new(5.0, 5.0));
+        // A thin crescent-like L whose middle falls outside it.
+        let l = [
+            Vec2::new(0.0, 0.0),
+            Vec2::new(100.0, 0.0),
+            Vec2::new(100.0, 10.0),
+            Vec2::new(10.0, 10.0),
+            Vec2::new(10.0, 100.0),
+            Vec2::new(0.0, 100.0),
+        ];
+        assert!(inside(way_in(&l), &l), "{}", way_in(&l));
+        // Patrolling keeps inside, whichever corner it heads for.
+        for n in 0..12 {
+            assert!(inside(patrol_point(&l, n), &l), "{n}");
+            assert!(inside(patrol_point(&square, n), &square), "{n}");
+        }
+    }
+
+    #[test]
+    fn the_holtburg_dungeon_is_entered_by_its_portal() {
+        let from = Vec2::new(32600.0, 34690.0);
+        let p = entrance(0x01F6_0000, from).expect("a portal leads into the Holtburg Dungeon");
+        assert_eq!(p.name, "Holtburg Dungeon");
+        assert_eq!(p.to_cell & 0xFFFF_0000, 0x01F6_0000);
+        // A landblock nothing leads into.
+        assert!(entrance(0xFE00_0000, from).is_none());
+    }
 
     fn outline(points: &[[f32; 2]]) -> HuntArea {
         HuntArea {

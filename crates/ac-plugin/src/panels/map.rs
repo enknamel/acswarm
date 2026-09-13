@@ -1582,6 +1582,11 @@ impl Plugin for Map {
                 lines.push(format!("hunting area {} forgotten", gone.name));
             }
         }
+        // Written at once, not only when the host saves: the autoplay
+        // panel offers these to hunt in, and reads them from here.
+        if actions.save_area.is_some() || actions.delete_area.is_some() {
+            cx.settings.set("hunt.areas", &self.areas);
+        }
         if let (Source::Live, Some(c)) = (&self.source, cx.try_client()) {
             if let Some(g) = actions.select {
                 c.select(Some(g));

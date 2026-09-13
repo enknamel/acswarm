@@ -1523,20 +1523,23 @@ impl Client {
                     // Something hit us: that fight comes before any loot.
                     self.autoplay.last_hit_us = Some(Instant::now());
                     match ac_net::messages::AttackNotice::parse_defender(rest) {
-                        Ok(n) => Ok(ChatLine {
-                            text: format!(
-                                "{} {} you for {} points.",
-                                n.name,
-                                if n.critical {
-                                    "critically hits"
-                                } else {
-                                    "hits"
-                                },
-                                n.damage
-                            ),
-                            sender: String::new(),
-                            sender_id: 0,
-                            kind: 6,
+                        Ok(n) => Ok({
+                            self.autoplay.hit_by = Some((n.name.clone(), Instant::now()));
+                            ChatLine {
+                                text: format!(
+                                    "{} {} you for {} points.",
+                                    n.name,
+                                    if n.critical {
+                                        "critically hits"
+                                    } else {
+                                        "hits"
+                                    },
+                                    n.damage
+                                ),
+                                sender: String::new(),
+                                sender_id: 0,
+                                kind: 6,
+                            }
                         }),
                         Err(e) => Err(e),
                     }

@@ -1249,6 +1249,29 @@ impl Client {
         if self.autoplay.growth.next_hunt.is_some_and(|t| now < t) {
             return false;
         }
+        // A hunting area is where the hunting is: no other ground is gone
+        // to. An outline is walked about, corner by corner, well inside
+        // it; a dungeon is the explorer's to walk.
+        if let Some(area) = self.autoplay.config.fight.area.clone() {
+            let Some(corners) = crate::hunt::corners(&area) else {
+                return false;
+            };
+            if corners.len() < crate::hunt::LEAST_CORNERS {
+                return false;
+            }
+            let n = self.autoplay.growth.roams;
+            self.autoplay.growth.roams = n.wrapping_add(1);
+            self.autoplay.growth.idle_since = Some(now);
+            let goal = crate::hunt::patrol_point(&corners, n);
+            if self.travel_to(goal) {
+                self.autoplay.say(
+                    Doing::Traveling,
+                    format!("nothing in sight; looking about {}", area.name),
+                );
+                return true;
+            }
+            return false;
+        }
         // What to do on a ground with nothing in sight depends on the
         // ground. A few spawn hard enough that standing still is never
         // idle and walking away only leaves the fight; most need

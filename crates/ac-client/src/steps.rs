@@ -367,6 +367,13 @@ pub const STEPS: &[Step] = &[
         run: claimed!(Client::autoplay_fight),
     },
     Step {
+        name: "keep to the area",
+        layer: Layer::Goal,
+        worth: by_place,
+        why: "a hunting area is where the fights are to be had: outside it, with nothing to fight, go back",
+        run: claimed!(Client::autoplay_keep_to_area),
+    },
+    Step {
         name: "buffs",
         layer: Layer::Goal,
         why: "the buffs that were not urgent, once the fighting is done",
@@ -563,6 +570,12 @@ mod tests {
         assert!(at("urgent buffs") < at("fight"));
         assert!(at("fight") < at("buffs"));
         assert!(at("summon") < at("fight"), "the creature joins the fight");
+        assert!(
+            at("fight") < at("keep to the area"),
+            "defend first, then go back"
+        );
+        assert!(at("keep to the area") < at("explore"));
+        assert!(at("keep to the area") < at("grow"));
 
         // A corpse rots and a shop does not.
         assert!(at("loot") < at("grow"), "loot before shopping");

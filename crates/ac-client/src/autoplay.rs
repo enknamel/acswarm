@@ -321,6 +321,10 @@ pub struct Fight {
     /// Summon a creature from an essence carried to fight beside the
     /// character (see `crate::summoning`).
     pub summon: bool,
+    /// Hunt only here (see `crate::hunt`): fight what stands inside it,
+    /// let what leaves it go, and come back to it. `None` hunts wherever
+    /// the character is.
+    pub area: Option<crate::hunt::HuntArea>,
 }
 
 impl Default for Fight {
@@ -333,6 +337,7 @@ impl Default for Fight {
             vuln_above_health: crate::weapons::LONG_FIGHT_HEALTH,
             craft_ammo: true,
             summon: true,
+            area: None,
             only: Vec::new(),
             avoid: Vec::new(),
             radius: 25.0,
@@ -959,6 +964,9 @@ pub struct Autoplay {
     engaged: Option<(u32, Instant, f32)>,
     /// The summoning rules' own state (see `crate::summoning`).
     pub summoning: crate::summoning::State,
+    /// Who last hit the character, and when: fought wherever it stands,
+    /// hunting area or not.
+    pub(crate) hit_by: Option<(String, Instant)>,
     /// The first shot thrown at a target since anything last got to it,
     /// and when: damage, a resist or an evasion clears it. The time spent
     /// walking to a clear shot, with nothing thrown, is not a miss.
@@ -3328,13 +3336,16 @@ impl Client {
             // from, or left behind in the Academy, stayed its target
             // for ever while it planned a journey to the other side of
             // the world to swing at it.
+            // Or gone out of the hunting area, and not hitting us: let it go.
+            let underground = self.underground();
             let gone = self
                 .world
                 .objects
                 .get(&t)
                 .and_then(|o| o.world_pos())
                 .zip(self.player.as_ref().map(|p| p.world_position()))
-                .is_some_and(|(at, me)| at.distance(me) > crate::travel::WALKABLE);
+                .is_some_and(|(at, me)| at.distance(me) > crate::travel::WALKABLE)
+                || !self.area_allows_guid(t, underground);
             if gone {
                 self.attack_target = None;
                 self.autoplay.casting_at = None;
@@ -3405,6 +3416,7 @@ impl Client {
                 }
             }
         }
+        let underground = self.underground();
         let target = self
             .world
             .objects
@@ -3417,6 +3429,8 @@ impl Client {
                     && !o.is_player
                     // A summoned creature is its owner's, ours or anyone's.
                     && o.pet_owner == 0
+                    // Inside the hunting area, or hitting the character.
+                    && self.area_allows(o, underground)
             })
             .filter(|o| wanted_target(&o.name, &cfg))
             // With the vitae high, the hard ones and the killer wait.
@@ -3494,8 +3508,10 @@ impl Client {
                 return false;
             }
         }
+        // Out of the hunting area, and not hitting us, it is let go.
+        let underground = self.underground();
         let target = match self.autoplay.casting_at {
-            Some(g) if alive(self, g) => Some(g),
+            Some(g) if alive(self, g) && self.area_allows_guid(g, underground) => Some(g),
             _ => {
                 self.autoplay.casting_at = None;
                 if self.waits_for_a_corpse() {
@@ -4043,6 +4059,7 @@ impl Client {
 
     /// The nearest creature the name rules allow, within the radius.
     fn pick_target(&mut self, cfg: &Fight) -> Option<u32> {
+        let underground = self.underground();
         let me = self.player.as_ref()?.world_position();
         let now = Instant::now();
         // A follower fights beside its leader, not wherever a monster
@@ -4068,6 +4085,8 @@ impl Client {
                     && !o.is_player
                     // A summoned creature is its owner's, ours or anyone's.
                     && o.pet_owner == 0
+                    // Inside the hunting area, or hitting the character.
+                    && self.area_allows(o, underground)
             })
             .filter(|o| wanted_target(&o.name, cfg))
             // With the vitae high, the hard ones and the killer wait.
