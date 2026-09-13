@@ -1338,6 +1338,16 @@ impl Client {
     /// Keep mana and stamina up the way a caster does: stamina poured
     /// into mana when mana runs low, Revitalize when stamina does. True
     /// when a spell went out.
+    /// Cast `spell` and hold the next cast until the server answers for
+    /// this one (see `Autoplay::cast_in_flight`). Every cast autoplay sends
+    /// goes through here or sets the same clock itself: the heal once did
+    /// neither, and a character at 16% health sent Heal Self every frame,
+    /// forty times in under two seconds, until the first one went up.
+    pub(crate) fn cast_paced(&mut self, spell: u32, now: Instant) {
+        self.cast(spell);
+        self.autoplay.cast_sent = Some(now);
+    }
+
     pub(crate) fn autoplay_vitals(&mut self, now: Instant) -> bool {
         use ac_world::vitals::vital;
         let cfg = self.autoplay.config.survive.clone();
@@ -1359,7 +1369,7 @@ impl Client {
         if stamina < cfg.stamina_below {
             if let Some(spell) = self.best_boost(vital::STAMINA) {
                 if matches!(self.can_cast(spell), crate::magic::CastCheck::Ok) {
-                    self.cast(spell);
+                    self.cast_paced(spell, now);
                     self.autoplay.last_vital = Some(now);
                     self.autoplay.say(
                         Doing::Buffing,
@@ -1372,7 +1382,7 @@ impl Client {
         if mana < cfg.mana_below && stamina >= cfg.stamina_below.max(0.5) {
             if let Some(spell) = self.best_transfer(vital::STAMINA, vital::MANA) {
                 if matches!(self.can_cast(spell), crate::magic::CastCheck::Ok) {
-                    self.cast(spell);
+                    self.cast_paced(spell, now);
                     self.autoplay.last_vital = Some(now);
                     self.autoplay.say(
                         Doing::Buffing,
@@ -1697,6 +1707,8 @@ impl Client {
                 let me = self.world.player_guid.unwrap_or(0);
                 self.remember_journey();
                 self.use_on(kit, me);
+                // A kit is answered like a cast, and waited on like one.
+                self.autoplay.cast_sent = Some(now);
                 self.autoplay.last_heal = Some(now);
                 self.autoplay
                     .say(Doing::Healing, format!("healing at {:.0}%", health * 100.0));
@@ -1723,7 +1735,7 @@ impl Client {
                     .unwrap_or(check)
             };
             if matches!(check, crate::magic::CastCheck::Ok) {
-                self.cast(spell);
+                self.cast_paced(spell, now);
                 self.autoplay.last_heal = Some(now);
                 self.autoplay
                     .say(Doing::Healing, format!("healing at {:.0}%", health * 100.0));
