@@ -245,10 +245,13 @@ Casting rules (ACE `Player_Magic`, matching retail):
   45 s** when used (its CooldownId and CooldownDuration are in the item's
   description). An Encapsulated Spirit refills it to 50.
 * Requirements are checked against the **buffed** skill (ACE compares the
-  current value): the essence's required Summoning level (appraisal
-  UseRequiresSkillLevel 367 or ItemSkillLevelLimit 115; the "(50)" in a
-  loot essence's name). Golems (bludgeoning) need 15 mud, 30 sandstone, 50
-  copper, 80 oak, 100 gold, 125 coral, 150 iron.
+  current value): the essence's required Summoning skill (appraisal
+  UseRequiresSkillLevel 367, or ItemSkillLevelLimit 115). The number in a
+  loot essence's name is the creature's level, **not** the skill: in the
+  world database (50) needs 310 (two of them 320), (80) 370, (100) 400,
+  (125) 430, (150) 475, (180) 530, and the essences named with no number
+  570. Golems (bludgeoning): mud 50, sandstone 220, copper 310, oak 370,
+  gold 400, coral 430, iron 475.
 * From level 50 a character chooses a mastery at the Arwic statues, which
   unlocks the elemental creatures (acid, fire, frost, lightning) of that
   mastery only: Naturalist (grievvers, moars, phyntos wasps), Necromancer

@@ -11,10 +11,10 @@
 //!
 //! Which essence:
 //!
-//! - one the character can use: its required Summoning level (the
-//!   appraisal's, or the "(50)" in its name, or the golem it summons) no
-//!   more than the Summoning skill **as buffed** -- the server checks the
-//!   current value, buffs included;
+//! - one the character can use: the Summoning skill it needs (the
+//!   appraisal's, or until that comes the ladder its name stands on -- a
+//!   "(50)" essence needs 310, not 50) no more than the Summoning skill
+//!   **as buffed** -- the server checks the current value, buffs included;
 //! - of the element the target takes most damage from, when that is
 //!   known -- an Acid Moar for a creature weak to acid -- and otherwise
 //!   any;
@@ -86,24 +86,41 @@ pub fn is_essence(name: &str, max_structure: u32) -> bool {
     max_structure > 0 && bare.ends_with(" Essence")
 }
 
-/// The level in an essence's name: "Fire Grievver Essence (50)" is 50.
-pub fn level_in_name(name: &str) -> Option<u32> {
-    let (_, tail) = name.rsplit_once(" (")?;
-    tail.strip_suffix(')')?.parse().ok()
-}
-
-/// The Summoning level a golem essence needs: golems carry no level in
-/// their names, and they come in a fixed ladder of materials.
-pub fn golem_level(name: &str) -> Option<u32> {
-    const GOLEMS: [(&str, u32); 7] = [
-        ("Mud", 15),
-        ("Sandstone", 30),
-        ("Copper", 50),
-        ("Oak", 80),
-        ("Gold", 100),
-        ("Coral", 125),
-        ("Iron", 150),
+/// The Summoning skill an essence needs, from its name: for until the
+/// server's own figure (the appraisal's `UseRequiresSkillLevel`) comes.
+///
+/// The number in the name is the creature's level, not the skill: every
+/// "(50)" essence asks for 310 (two of them 320), and a Mud Golem, with no
+/// number at all, for 50. Taking the creature's level for the skill had a
+/// character with 200 Summoning reaching for essences that need 310 and
+/// being turned away each time. The ladder is the world database's
+/// (`UseRequiresSkillLevel` on every summoning essence). An essence named
+/// with neither a number on the ladder nor a golem ("Acid Maiden
+/// Essence", which needs 570) waits for its appraisal.
+pub fn required_skill(name: &str) -> Option<u32> {
+    const TIERS: [(u32, u32); 6] = [
+        (50, 310),
+        (80, 370),
+        (100, 400),
+        (125, 430),
+        (150, 475),
+        (180, 530),
     ];
+    const GOLEMS: [(&str, u32); 7] = [
+        ("Mud", 50),
+        ("Sandstone", 220),
+        ("Copper", 310),
+        ("Oak", 370),
+        ("Gold", 400),
+        ("Coral", 430),
+        ("Iron", 475),
+    ];
+    if let Some(tier) = tier_in_name(name) {
+        return TIERS
+            .iter()
+            .find(|(t, _)| *t == tier)
+            .map(|&(_, skill)| skill);
+    }
     let lower = name.to_lowercase();
     if !lower.contains("golem") {
         return None;
@@ -111,7 +128,14 @@ pub fn golem_level(name: &str) -> Option<u32> {
     GOLEMS
         .iter()
         .find(|(m, _)| lower.starts_with(&m.to_lowercase()))
-        .map(|&(_, l)| l)
+        .map(|&(_, skill)| skill)
+}
+
+/// The creature's level in an essence's name: "Fire Grievver Essence
+/// (50)" is 50.
+fn tier_in_name(name: &str) -> Option<u32> {
+    let (_, tail) = name.rsplit_once(" (")?;
+    tail.strip_suffix(')')?.parse().ok()
 }
 
 /// The element of the damage an essence's creature does, from its name:
@@ -221,19 +245,20 @@ impl Client {
             .inventory()
             .filter(|o| is_essence(&o.name, o.max_structure))
             .map(|o| {
-                let level = self
-                    .appraisals
-                    .get(&o.guid)
+                // The server's own figure once appraised, and until then the
+                // name's (see `required_skill`). Every essence is appraised:
+                // the name's figure is right for all but a few.
+                let appraisal = self.appraisals.get(&o.guid);
+                if appraisal.is_none() {
+                    unknown.push(o.guid);
+                }
+                let level = appraisal
                     .and_then(|a| {
                         a.int(USE_REQUIRES_SKILL_LEVEL)
                             .or(a.int(ITEM_SKILL_LEVEL_LIMIT))
                     })
                     .map(|l| l.max(0) as u32)
-                    .or_else(|| level_in_name(&o.name))
-                    .or_else(|| golem_level(&o.name));
-                if level.is_none() {
-                    unknown.push(o.guid);
-                }
+                    .or_else(|| required_skill(&o.name));
                 let key = if o.cooldown_id != 0 {
                     o.cooldown_id
                 } else {
@@ -342,12 +367,15 @@ mod tests {
     }
 
     #[test]
-    fn the_level_is_in_the_name_or_the_golem() {
-        assert_eq!(level_in_name("Fire Grievver Essence (50)"), Some(50));
-        assert_eq!(level_in_name("Mud Golem Essence"), None);
-        assert_eq!(golem_level("Mud Golem Essence"), Some(15));
-        assert_eq!(golem_level("Sandstone Golem Essence"), Some(30));
-        assert_eq!(golem_level("Fire Grievver Essence (50)"), None);
+    fn the_skill_an_essence_needs_is_not_the_number_in_its_name() {
+        assert_eq!(required_skill("Fire Grievver Essence (50)"), Some(310));
+        assert_eq!(required_skill("Acid Wisp Essence (180)"), Some(530));
+        assert_eq!(required_skill("Mud Golem Essence"), Some(50));
+        assert_eq!(required_skill("Sandstone Golem Essence"), Some(220));
+        assert_eq!(required_skill("Iron Golem Essence"), Some(475));
+        // Neither a golem nor a number on the ladder: the appraisal says.
+        assert_eq!(required_skill("Acid Maiden Essence"), None);
+        assert_eq!(required_skill("Volcanic Moar Essence (200)"), None);
     }
 
     #[test]
@@ -381,20 +409,21 @@ mod tests {
     #[test]
     fn the_targets_weakness_first_then_the_highest_level() {
         let carried = [
-            essence(1, Element::Bludgeon, 30),
-            essence(2, Element::Acid, 50),
-            essence(3, Element::Acid, 80),
-            essence(4, Element::Fire, 100),
-            essence(5, Element::Acid, 150),
+            essence(1, Element::Bludgeon, 50),
+            essence(2, Element::Acid, 310),
+            essence(3, Element::Acid, 370),
+            essence(4, Element::Fire, 400),
+            essence(5, Element::Acid, 475),
         ];
         let weak_to_acid = |e| if e == Element::Acid { 1.5 } else { 1.0 };
-        // Skill 100: the acid 80, not the fire 100 or the acid 150.
-        assert_eq!(choose(&carried, 100, weak_to_acid), Some(3));
-        // Nothing known about the target: the highest level allowed.
-        assert_eq!(choose(&carried, 100, |_| 1.0), Some(4));
-        // Too little skill for anything but the golem.
-        assert_eq!(choose(&carried, 40, weak_to_acid), Some(1));
-        assert_eq!(choose(&carried, 10, weak_to_acid), None);
+        // Skill 400: the acid (80) at 370, not the fire (100) at 400 or the
+        // acid (150) at 475.
+        assert_eq!(choose(&carried, 400, weak_to_acid), Some(3));
+        // Nothing known about the target: the highest allowed.
+        assert_eq!(choose(&carried, 400, |_| 1.0), Some(4));
+        // Too little skill for anything but the Mud Golem.
+        assert_eq!(choose(&carried, 200, weak_to_acid), Some(1));
+        assert_eq!(choose(&carried, 40, weak_to_acid), None);
     }
 
     #[test]
@@ -407,7 +436,7 @@ mod tests {
             level: None,
             ready: true,
         };
-        let fallback = essence(3, Element::Bludgeon, 15);
+        let fallback = essence(3, Element::Bludgeon, 50);
         assert_eq!(choose(&[cooling, unknown, fallback], 200, |_| 1.0), Some(3));
     }
 }
