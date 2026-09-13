@@ -1034,9 +1034,10 @@ fn looting(ui: &mut egui::Ui, p: &mut Profile, drafts: &mut super::autoplay::Dra
                 .suffix(" x capacity"),
         )
         .on_hover_text(
-            "How much loot to carry before going to sell. What is worn and wielded \
-             does not count, but the server still stops a character picking anything \
-             up at 3 x capacity, gear and all.",
+            "How much loot to carry before going to sell. What is worn, wielded or \
+             kept (foci, components, supplies) does not count. Loot still never takes \
+             the whole load past 2 x capacity, where defense is gone, unless this is \
+             set higher; the server stops a character picking anything up at 3 x.",
         );
     });
     caption(ui, "always take");

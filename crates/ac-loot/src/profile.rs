@@ -640,18 +640,27 @@ pub struct Looting {
     /// Pour loose stacks of the same thing together, so that slots are
     /// not wasted on the change left by buying and looting.
     pub tidy_pack: bool,
-    /// How laden to get while hunting, in multiples of carrying
-    /// capacity (150 x Strength). At one a character is comfortable, at
-    /// two it is slowed, at three the server stops it picking anything
-    /// up -- and hunting up to that wall leaves it unable to loot, pour
-    /// stacks together or move. So it stops well short and goes to sell.
+    /// How much loot to take on while hunting before going to sell, in
+    /// multiples of carrying capacity (150 x Strength). At one a
+    /// character is comfortable, at two it is slow and has no Melee or
+    /// Missile Defense left, at three the server stops it picking
+    /// anything up -- and hunting up to that wall leaves it unable to
+    /// loot, pour stacks together or move. So it stops well short and
+    /// goes to sell.
     ///
-    /// What the character wears and wields does not count towards it.
-    /// This is a limit on loot, and a counter cannot lighten armour the
-    /// character keeps on: counted, a character carrying 13866 against
-    /// a limit of 13500, most of it its own gear, had no room from the
-    /// start and took nothing from any corpse. The server's wall at
-    /// three times still counts everything.
+    /// Only loot counts towards it: what the selling rules would hand a
+    /// counter. What the character wears and wields, and what the rules
+    /// keep -- foci, components, what it keeps stocked, what it took to
+    /// keep or to salvage -- does not, because no trip to town takes it
+    /// off. Counted, a character carrying 13866 against a limit of
+    /// 13500, nearly all of it its own plate, foci and tapers, had no
+    /// room from the start and took nothing from any corpse.
+    ///
+    /// So a character in heavy gear carries this much loot on top of
+    /// it, and a second line keeps it well short all the same: loot
+    /// never takes the whole load past twice capacity, unless this is
+    /// set higher than two or what the character keeps weighs that much
+    /// on its own. The server's wall at three times counts everything.
     pub carry_up_to: f32,
 }
 

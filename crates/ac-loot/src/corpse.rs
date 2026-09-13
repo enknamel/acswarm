@@ -64,9 +64,9 @@ pub struct Open {
     /// looted to its last slot cannot be sold out of at all.
     pub keep_free: u32,
     /// How much more loot the character means to carry (see
-    /// `growth::carry_room`): zero when it has had enough. What it wears
-    /// and wields is not counted against this, only against the server's
-    /// wall.
+    /// `growth::carry_room`): zero when it has had enough. What it
+    /// wears, wields and keeps is not measured against the loot limit,
+    /// only against twice its capacity and the server's wall.
     pub carry_room: u32,
     /// Asking the server to identify things is allowed.
     pub may_ask: bool,

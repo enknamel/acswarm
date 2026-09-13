@@ -2074,7 +2074,7 @@ impl Client {
             items: lying,
             slots_free: self.free_space(),
             keep_free: self.autoplay.config.team.restock.keep_slots,
-            carry_room: self.carry_room(),
+            carry_room: self.carry_room(&self.autoplay.config.growth),
             may_ask: profile.looting.appraise,
             asking: self.appraise_inflight.iter().map(|(g, _)| *g).collect(),
         }
