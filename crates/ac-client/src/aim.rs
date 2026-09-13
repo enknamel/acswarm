@@ -47,8 +47,9 @@ pub const MISSILE_AIM: f32 = 0.5;
 /// weenie, and the DAT spell table carries no projectile class.
 pub const PROJECTILE_RADIUS: f32 = 0.15;
 /// An arc's ground speed until one of this character's own has been
-/// seen to fly (see `Client::learn_shot_speeds`).
-pub const ARC_SPEED: f32 = 15.0;
+/// seen to fly (see `Client::learn_shot_speeds`): Flame, Frost, Acid and
+/// Blade Arc III were all seen at 40 m/s on Coldeve.
+pub const ARC_SPEED: f32 = 40.0;
 /// The server's gravity for arcs and arrows, metres a second squared,
 /// downward.
 pub const FALL: f32 = 9.8;
