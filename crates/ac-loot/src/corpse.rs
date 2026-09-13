@@ -59,6 +59,10 @@ pub struct Open {
     pub items: Vec<Lying>,
     /// Slots left in the pack.
     pub slots_free: u32,
+    /// Slots to leave empty however much is lying here. A counter needs
+    /// somewhere to put the coin before it takes anything, so a pack
+    /// looted to its last slot cannot be sold out of at all.
+    pub keep_free: u32,
     /// How much more the character means to carry (see
     /// `growth::carry_room`): zero when it has had enough.
     pub carry_room: u32,

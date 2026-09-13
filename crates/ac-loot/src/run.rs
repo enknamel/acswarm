@@ -97,10 +97,11 @@ impl Run {
             return Next::act(Act::Open, format!("opening {}", at.name));
         }
 
-        // Nothing can be carried: leave it rather than stand here
-        // asking. The body keeps for a while and will still be here
-        // when the pack is not full.
-        if at.slots_free == 0 {
+        // No room to spare: leave it rather than stand here asking. The
+        // body keeps for a while and will still be here once the pack has
+        // been sold down. "No room" stops short of the last slot: the few
+        // kept free are where a counter puts the money.
+        if at.slots_free <= at.keep_free {
             return Next::done("pack full, leaving the loot");
         }
         if at.carry_room == 0 {
@@ -201,6 +202,7 @@ mod tests {
             open: true,
             items,
             slots_free: 20,
+            keep_free: 0,
             carry_room: 10_000,
             may_ask: true,
             asking: Vec::new(),
@@ -290,6 +292,18 @@ mod tests {
         at.slots_free = 0;
         let next = run.step(&at, Instant::now());
         assert_eq!(next.act, Some(Act::Close), "{}", next.saying);
+    }
+
+    #[test]
+    fn the_slots_kept_for_the_money_are_not_looted_into() {
+        // Filling the last slots is how a run arrived at the counter with
+        // nowhere for the coin to go: every sale was turned away.
+        let mut at = body(vec![thing(1, "Dagger", Verdict::Take(LootAction::Keep))]);
+        at.keep_free = 3;
+        at.slots_free = 3;
+        assert_eq!(Run::new().step(&at, Instant::now()).act, Some(Act::Close));
+        at.slots_free = 4;
+        assert_ne!(Run::new().step(&at, Instant::now()).act, Some(Act::Close));
     }
 
     #[test]

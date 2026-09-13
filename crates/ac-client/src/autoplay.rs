@@ -2056,6 +2056,7 @@ impl Client {
             open: true,
             items: lying,
             slots_free: self.free_space(),
+            keep_free: self.autoplay.config.team.restock.keep_slots,
             carry_room: self.carry_room(),
             may_ask: cfg.appraise,
             asking: self.appraise_inflight.iter().map(|(g, _)| *g).collect(),
@@ -4580,6 +4581,13 @@ impl Client {
         // back would never leave town. What is about to run out still
         // goes back up on the way.
         if !urgent && self.traveling() {
+            return false;
+        }
+        // A portal gem waiting to be used goes first, urgent or not. The
+        // server turns a use away while a spell is being cast and keeps
+        // the gem, so a character putting a dozen buffs back after a
+        // login had every use of its gem refused and gave up on it.
+        if self.travel_gem_pending() {
             return false;
         }
         if self

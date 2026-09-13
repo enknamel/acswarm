@@ -103,6 +103,10 @@ pub struct Run {
     wont_merge: Patience<(u32, u32)>,
     /// How many things have been sold this trip.
     pub sold: u32,
+    /// There was something to sell and no free slot for what it would
+    /// fetch. Nothing at the counter changes that, so selling stands aside
+    /// and the visit ends saying why.
+    no_room: bool,
 }
 
 impl Run {
@@ -190,6 +194,13 @@ impl Run {
             self.phase = Phase::Done;
         }
 
+        if self.no_room && self.sold == 0 {
+            return Next {
+                act: Some(Act::Close),
+                did: Did::blocked("no free slot for the money"),
+                saying: format!("no room in the pack for what {} would pay", counter.name),
+            };
+        }
         Next {
             act: Some(Act::Close),
             did: Did::Done,
@@ -342,23 +353,29 @@ impl Run {
         }
 
         let mut items: Vec<u32> = Vec::new();
-        let mut takings = snap.coin;
-        let before = coin_slots(snap.coin);
+        let mut pay = 0u32;
+        let mut anything = false;
         for it in offer {
-            let after = takings.saturating_add(it.value);
-            // What the pack looks like once this one is gone and its
-            // money is in: one slot back for the item, and however many
-            // the coin has grown into.
-            let freed = items.len() as u32 + 1;
-            let cost = coin_slots(after).saturating_sub(before);
-            let left = snap.slots_free.saturating_add(freed).saturating_sub(cost);
-            if left < snap.rules.keep_slots && !items.is_empty() {
+            anything = true;
+            let after = pay.saturating_add(it.value);
+            // The server finds room for the whole payment before the goods
+            // leave the pack, and counts it in new stacks of coin: room left
+            // in a pile already carried does not count, and nor does the
+            // slot the item being sold is about to free. Assuming both was
+            // how a full pack offered the same cap to a counter thirteen
+            // times and sold nothing.
+            if coin_slots(after) > snap.slots_free {
                 break;
             }
             items.push(it.guid);
-            takings = after;
+            pay = after;
         }
         if items.is_empty() {
+            // Goods to sell and no room for the money is not something the
+            // counter can fix: selling stands aside, so what can still be
+            // done here -- cashing notes, buying -- gets its turn, and the
+            // visit ends saying why nothing sold.
+            self.no_room |= anything;
             return None;
         }
         self.offered.extend(items.iter().copied());
@@ -571,6 +588,32 @@ mod tests {
         assert!(
             matches!(&next.act, Some(Act::Sell { .. })),
             "expected selling, got {:?} -- {}",
+            next.act,
+            next.saying
+        );
+    }
+
+    #[test]
+    fn a_sale_needs_room_for_its_money_before_the_goods_leave() {
+        // The server counts the payment in new stacks of coin and looks
+        // for room before it takes anything: with no slot free nothing
+        // sells, and the run says so rather than asking again.
+        let mut s = snap(vec![item(3, "Dagger", 500, 1, 1)]);
+        s.slots_free = 0;
+        let next = Run::new().step(&s, Instant::now());
+        assert_eq!(next.act, Some(Act::Close), "{}", next.saying);
+        assert!(matches!(next.did, Did::Blocked(_)), "{:?}", next.did);
+        // One free slot takes one stack of coin's worth of goods at a
+        // time, and the slots those goods will free do not count yet.
+        let mut s = snap(vec![
+            item(3, "Dagger", 13_000, 1, 1),
+            item(4, "Sword", 13_000, 1, 1),
+        ]);
+        s.slots_free = 1;
+        let next = Run::new().step(&s, Instant::now());
+        assert!(
+            matches!(&next.act, Some(Act::Sell { items }) if items.len() == 1),
+            "{:?} -- {}",
             next.act,
             next.saying
         );

@@ -1664,6 +1664,14 @@ impl Client {
         capacity.saturating_sub(used)
     }
 
+    /// The pack is down to the slots kept free for a counter's money
+    /// (`restock.keep_slots`): time to sell, while a sale can still be
+    /// paid for. The server finds room for the coin before it takes the
+    /// goods, so a pack with no slot at all cannot be sold out of.
+    pub fn pack_low_on_room(&self) -> bool {
+        self.free_space() <= self.autoplay.config.team.restock.keep_slots
+    }
+
     /// What the character can spend. Coin and trade notes both: a note
     /// is money in a lighter form, and a vendor takes either.
     pub fn spendable(&self) -> u32 {
@@ -2527,7 +2535,19 @@ impl Client {
         if self.autoplay.growth.next_run.is_some_and(|t| now < t) {
             return self.held_back("waiting to try a vendor again");
         }
-        let full = self.pack_full();
+        // Low on room, not out of it: a run that waited for the last slot
+        // arrived with nowhere for the money to go.
+        let full = self.pack_low_on_room();
+        if self.free_space() == 0 {
+            // No counter anywhere can pay out into a pack with no slot, and
+            // buying needs one too: walking to one achieves nothing.
+            self.autoplay.note(
+                "no free slot in the pack: a counter has nowhere to put the money, \
+                 so a slot has to be freed before anything can be sold",
+                now,
+            );
+            return self.held_back("no free slot for a counter's money");
+        }
         // A pack runs out of room two ways, and weight is the one that
         // creeps up unnoticed: slots stay free while the character
         // grows too heavy to lift anything, tidy anything, or move at
@@ -2939,8 +2959,9 @@ impl Client {
             );
         }
         let needs = self.grow_needs(cfg);
-        let still_full = self.pack_full();
-        let wanting = needs.iter().any(|n| n.urgent) || still_full;
+        let still_full = self.pack_low_on_room();
+        // With no slot at all the next counter could not pay out either.
+        let wanting = self.free_space() > 0 && (needs.iter().any(|n| n.urgent) || still_full);
         if wanting && run.stops < STOPS_PER_RUN {
             // The next counter is chosen by what is still on the list,
             // not by what is closest -- and only when there is reason to

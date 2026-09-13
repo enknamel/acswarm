@@ -762,6 +762,17 @@ impl Client {
         self.travel.restart_waypoint();
     }
 
+    /// A portal gem step is under way: the gem is being made ready, used,
+    /// or its portal waited on. Buffs stand aside for it, since the server
+    /// turns a use away while a spell is being cast.
+    pub(crate) fn travel_gem_pending(&self) -> bool {
+        self.travel
+            .trip
+            .as_ref()
+            .and_then(|t| t.steps.get(self.travel.step))
+            .is_some_and(|s| matches!(s, Step::Gem { .. }))
+    }
+
     /// The portal the current step is aimed at: its name and its mouth.
     fn travel_portal(&self) -> Option<(String, Vec2)> {
         match self.travel.trip.as_ref()?.steps.get(self.travel.step)? {
@@ -829,6 +840,7 @@ impl Client {
             self.travel.summoned_uses,
         ) {
             GemNext::Wait => {}
+            GemNext::UseGem if self.autoplay.cast_in_flight(now) => {}
             GemNext::UseGem => {
                 tracing::info!("travel: {name} was not taken; using it again");
                 self.travel.gem_uses += 1;
@@ -896,6 +908,11 @@ impl Client {
                 }
                 Some(_) => {}
             }
+        }
+        if self.autoplay.cast_in_flight(now) {
+            // A spell is still on its way, and the use would be turned
+            // away with the gem kept: wait for the slot.
+            return None;
         }
         tracing::info!("travel: using {name}");
         self.travel.gem_spot = None;
@@ -1125,6 +1142,44 @@ impl Client {
                 return self.travel_gem_wait(guid, &name, summons, now);
             }
         }
+        // Coming no closer to this step's target for a long while: plan
+        // again from where the character actually stands. This comes
+        // before the indoor walk below, which hands back its leg and
+        // returns: after it, a character standing still inside a hall
+        // was never noticed and walked at a portal for four minutes.
+        if let Some(target) = self.travel.step_target {
+            let d = me.distance(target);
+            if d < self.travel.step_best - STEP_PROGRESS {
+                self.travel.step_best = d;
+                self.travel.step_since = Some(now);
+            }
+        }
+        if self
+            .travel
+            .step_since
+            .is_some_and(|t| now.duration_since(t) > STEP_GIVE_UP)
+        {
+            if let Some(goal) = self.travel.goal {
+                tracing::warn!(
+                    "travel: step {} is going nowhere; planning again",
+                    self.travel.step
+                );
+                // A portal that could not be got near is left out of the
+                // new plan, or the plan would be the same one again.
+                if let Some((name, mouth)) = self.travel_portal() {
+                    tracing::warn!(
+                        "travel: could not get to the portal {name:?}; going another way"
+                    );
+                    self.travel.refused.push(mouth);
+                    self.cancel_travel_keeping_refusals();
+                }
+                self.travel.step_since = Some(now);
+                self.travel_to(goal);
+            }
+            // The new plan starts next frame: planning again from inside
+            // this call could go round for ever.
+            return None;
+        }
         // Indoors (the Town Network hub, a dungeon) the world grid says
         // nothing and a landblock's cells can lie outside its own square,
         // so the leg is aimed straight at the target in the character's
@@ -1148,33 +1203,6 @@ impl Client {
             if self.travel.portal_from.is_none() && !self.travel_next_step() {
                 return None;
             }
-        }
-        // Coming no closer to this step's target for a long while: plan
-        // again from where the character actually stands. No portal is
-        // held against us; the plan is simply out of date.
-        if let Some(target) = self.travel.step_target {
-            let d = me.distance(target);
-            if d < self.travel.step_best - STEP_PROGRESS {
-                self.travel.step_best = d;
-                self.travel.step_since = Some(now);
-            }
-        }
-        if self
-            .travel
-            .step_since
-            .is_some_and(|t| now.duration_since(t) > STEP_GIVE_UP)
-        {
-            if let Some(goal) = self.travel.goal {
-                tracing::warn!(
-                    "travel: step {} is going nowhere; planning again",
-                    self.travel.step
-                );
-                self.travel.step_since = Some(now);
-                self.travel_to(goal);
-            }
-            // The new plan starts next frame: planning again from inside
-            // this call could go round for ever.
-            return None;
         }
         // A portal takes whoever touches it, so the character can be
         // carried off mid-walk by one the journey never meant to use.
