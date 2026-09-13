@@ -176,6 +176,18 @@ pub fn to_place(world: Vec2, radius: f32) -> Vec<&'static Portal> {
     v
 }
 
+/// The portals out of an enclosed place: those whose mouth stands in
+/// `block`'s landblock, that work, and that come out under the sky.
+///
+/// This is what a character in a hub or a dungeon can reach without a
+/// recall. It cannot walk out -- an indoor cell is only walkable to the
+/// rest of its own landblock -- so these are the onward ways there are.
+pub fn out_of(block: u32) -> impl Iterator<Item = &'static Portal> {
+    all().iter().filter(move |p| {
+        p.from_cell & 0xFFFF_0000 == block & 0xFFFF_0000 && p.works() && p.exit_outdoors()
+    })
+}
+
 /// The portals whose name contains `needle`, case-insensitively.
 pub fn named(needle: &str) -> Vec<&'static Portal> {
     let needle = needle.to_lowercase();
@@ -223,6 +235,24 @@ mod tests {
         );
         assert!(named("Portal to Town Network")[0].works());
         assert!(named("no such portal anywhere").is_empty());
+    }
+
+    #[test]
+    fn the_town_network_hub_leads_out_to_the_towns() {
+        // A Town Network gem lands in the hub, indoors. What makes it
+        // worth carrying is where the hub's own portals go.
+        let hub = named("Portal to Town Network")[0].to_cell;
+        assert!(hub & 0xFFFF >= 0x100, "the hub is indoors");
+        let out: Vec<&Portal> = out_of(hub).collect();
+        assert!(out.len() >= 30, "{} ways out of the hub", out.len());
+        assert!(out.iter().all(|p| p.works() && p.exit_outdoors()));
+        let cragstone = out
+            .iter()
+            .find(|p| p.name == "Portal to Cragstone")
+            .expect("the hub leads to Cragstone");
+        assert_eq!(cragstone.to_cell & 0xFFFF_0000, 0xBB9F_0000);
+        // Any cell of the block will do: the question is the landblock.
+        assert_eq!(out_of(hub & 0xFFFF_0000).count(), out.len());
     }
 
     fn ac_world_holtburg() -> Vec2 {

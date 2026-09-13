@@ -288,7 +288,9 @@ struct Run {
     /// When the phase began.
     since: Instant,
     last_sell: Option<Instant>,
-    /// Where the run started, to keep its later stops in the same town.
+    /// Where the run started. Later stops are looked for from every way
+    /// out the character has; this is only the fallback for when its
+    /// own position is not known.
     town: Vec2,
     stops: u32,
     /// How many items were sold at all the stops so far.
@@ -455,6 +457,31 @@ enum NeedKind {
     Ammo(u32),
     /// A spell component, by the weenie class of the item.
     Component(u32),
+}
+
+/// Where each carried gem can put the character, as ways out.
+///
+/// A gem that lands outdoors lands where it lands. One that lands
+/// indoors -- the Town Network gem comes out in the hub -- is worth more
+/// than its landing: nothing is sold in a hub and nobody can walk out of
+/// one, but every portal standing in it is a few steps away and each of
+/// those comes out somewhere. Judging the gem by the hub alone kept the
+/// broker outside Cragstone off every run, gem in the pack or not.
+///
+/// The landing still counts too: a gem that comes out inside a building
+/// leaves the rest of its landblock a walk away.
+fn gem_ways(gems: &[ac_world::trip::Gem]) -> Vec<(Vec2, String)> {
+    let mut out = Vec::new();
+    for g in gems {
+        out.push((g.exit, g.name.clone()));
+        if g.exit_cell & 0xFFFF < 0x100 {
+            continue;
+        }
+        for p in ac_world::portals::out_of(g.exit_cell) {
+            out.push((p.to_xy(), format!("{}, then {}", g.name, p.name)));
+        }
+    }
+    out
 }
 
 /// Which way out leaves the character nearest `at`, how far that is,
@@ -2287,9 +2314,7 @@ impl Client {
         // A gem needs no skill and no components: carrying one is the
         // whole requirement, which often makes it the cheapest way out
         // a character has.
-        for g in self.carried_gems() {
-            out.push((g.exit, g.name.clone()));
-        }
+        out.extend(gem_ways(&self.carried_gems()));
         // And the dungeon's own door. Every portal's mouth and its
         // landing are known, so a character underground can say which
         // dungeon it is in and where the way out comes up -- and be
@@ -2298,13 +2323,7 @@ impl Client {
         if self.autoplay.growth.in_dungeon {
             if let Some(pl) = self.player.as_ref() {
                 let block = pl.cell & 0xFFFF_0000;
-                for p in ac_world::portals::all() {
-                    if p.from_cell & 0xFFFF_0000 != block || !p.works() {
-                        continue;
-                    }
-                    if !p.exit_outdoors() {
-                        continue;
-                    }
+                for p in ac_world::portals::out_of(block) {
                     out.push((p.to_xy(), format!("{} (the way out)", p.name)));
                 }
             }
@@ -3043,6 +3062,48 @@ mod tests {
             cost,
             weight,
         }
+    }
+
+    #[test]
+    fn a_gem_into_the_hub_puts_the_towns_within_reach() {
+        let gem = |g: &ac_world::gems::Gem| ac_world::trip::Gem {
+            guid: 1,
+            name: g.name.clone(),
+            exit: g.xy(),
+            exit_cell: g.cell,
+            summons: true,
+        };
+        let named = |n: &str| {
+            ac_world::gems::all()
+                .iter()
+                .find(|g| g.name == n)
+                .unwrap_or_else(|| panic!("no {n}"))
+        };
+        // A gem that lands outdoors is its landing and nothing more.
+        let farms = named("Cragstone Farms Portal Gem");
+        assert_eq!(gem_ways(&[gem(farms)]).len(), 1);
+
+        // The Town Network gem comes out in the hub, indoors...
+        let network = named("Town Network Portal Gem");
+        assert!(network.cell & 0xFFFF >= 0x100, "the hub is indoors");
+        let ways = gem_ways(&[gem(network)]);
+        assert!(ways.len() > 30, "{} ways", ways.len());
+        // ...and the counter a mid-level character sells at, the
+        // Arcanum Broker outside Cragstone, is a short walk from where
+        // one of the hub's portals comes out.
+        let broker = ac_world::shops::all()
+            .iter()
+            .find(|s| s.name == "Arcanum Broker" && s.cell & 0xFFFF_0000 == 0xBB9F_0000)
+            .expect("the broker outside Cragstone");
+        let (far, via) = ways
+            .iter()
+            .map(|(w, n)| (broker.xy().distance(*w), n.as_str()))
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+            .unwrap();
+        assert!(far <= NEAR_A_WAY_OUT, "{far} m from {via}");
+        assert_eq!(via, "Town Network Portal Gem, then Portal to Cragstone");
+        // Judged by the hub alone it was out of reach: the fault.
+        assert!(broker.xy().distance(network.xy()) > NEAR_A_WAY_OUT);
     }
 
     #[test]

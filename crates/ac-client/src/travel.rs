@@ -52,6 +52,41 @@ const RECALL_SETTLE: Duration = Duration::from_millis(800);
 /// the journey is planned again without that spell.
 pub const RECALL_GIVE_UP: Duration = Duration::from_secs(15);
 const RECALL_TRIES: u32 = 2;
+/// A gem still in the pack this long after it was used was not taken:
+/// the server refuses a use while the character is busy -- mid-cast,
+/// say -- and leaves the gem where it was. It is used again.
+const GEM_RETRY: Duration = Duration::from_secs(3);
+/// How many times a gem is used before the journey goes another way.
+const GEM_TRIES: u32 = 4;
+/// A gem that was taken but has put no portal in front of the character,
+/// or carried it nowhere, in this long is given up on. The summon is a
+/// cast of a couple of seconds; a portal that has not appeared well after
+/// that is one the server could not find room for.
+const GEM_GIVE_UP: Duration = Duration::from_secs(8);
+/// A summoned portal is used again this long after a use that did not
+/// carry the character off.
+const SUMMONED_USE_EVERY: Duration = Duration::from_secs(3);
+/// How many times a summoned portal is used before it is given up on.
+const SUMMONED_TRIES: u32 = 4;
+/// How far off the portal a gem summoned may stand. ACE puts it three
+/// metres in front of whoever used the gem.
+const SUMMONED_REACH: f32 = 8.0;
+/// Where the summoned portal stands: this far in front of the character.
+const SUMMON_DISTANCE: f32 = 3.0;
+/// How far ahead must be free of walls for the portal to fit: out to
+/// where it stands and past it by its own width.
+const SUMMON_CLEARANCE: f32 = 4.5;
+/// The ground where the portal stands may be this much above or below
+/// the character's feet.
+const SUMMON_STEP: f32 = 1.5;
+/// Nothing that stands in the world -- a creature, another portal, a
+/// lifestone -- may be this close to where the portal would go.
+const SUMMON_ROOM: f32 = 2.0;
+/// The step taken to face open ground before using a gem.
+const FACE_STEP: f32 = 1.5;
+/// A step to face open ground that has not been finished in this long is
+/// finished where the character stands.
+const FACE_GIVE_UP: Duration = Duration::from_secs(4);
 /// A step that has come no closer to its target in this long is planned
 /// again from where the character stands.
 pub const STEP_GIVE_UP: Duration = Duration::from_secs(30);
@@ -120,6 +155,19 @@ pub struct Travel {
     /// The character was in peace mode before the cast: drop back to it
     /// once the recall has landed.
     recall_leave_combat: bool,
+    /// When the gem step's gem was last used, and how many times.
+    gem_used: Option<Instant>,
+    gem_uses: u32,
+    /// The spot walked to so that the gem is used facing open ground, and
+    /// when that walk began.
+    gem_spot: Option<(Vec2, Instant)>,
+    /// When the portal that gem summoned was last used, and how many
+    /// times.
+    summoned_used: Option<Instant>,
+    summoned_uses: u32,
+    /// Gems that did not take us anywhere *on this journey*: left out of
+    /// the next plan, like `refused_recalls`.
+    refused_gems: Vec<u32>,
     /// The last tie spell cast (Lifestone Tie, a Portal Tie), so the
     /// "successfully linked" that follows is filed under its position.
     pub(crate) last_tie: Option<u32>,
@@ -256,6 +304,7 @@ impl Client {
         if self.travel.goal.is_none_or(|g| g.distance(goal) > 1.0) {
             self.travel.refused.clear();
             self.travel.refused_recalls.clear();
+            self.travel.refused_gems.clear();
             self.travel.replans = 0;
         }
         let level = self.world.stats.level.max(1) as u32;
@@ -277,7 +326,11 @@ impl Client {
         // Portal gems in the pack are ways to get somewhere too, and
         // unlike a recall they need no skill or components: carrying one
         // is the whole requirement.
-        let gems: Vec<trip::Gem> = self.carried_gems();
+        let gems: Vec<trip::Gem> = self
+            .carried_gems()
+            .into_iter()
+            .filter(|g| !self.travel.refused_gems.contains(&g.guid))
+            .collect();
         let recalls: Vec<trip::Recall> = if prefs.use_recalls {
             let out = self.travel.refused_recalls.clone();
             self.castable_recalls()
@@ -456,14 +509,8 @@ impl Client {
         // in front of the character, which the next step walks into;
         // the rare kind carries them off itself. Either way the step is
         // done once they are somewhere else, the same as a recall.
-        if let Step::Gem {
-            name,
-            guid,
-            summons,
-            ..
-        } = &step
-        {
-            let (name, guid, summons) = (name.clone(), *guid, *summons);
+        if let Step::Gem { name, summons, .. } = &step {
+            let (name, summons) = (name.clone(), *summons);
             tracing::info!(
                 "travel: step {} ({name:?}, {})",
                 self.travel.step,
@@ -483,7 +530,14 @@ impl Client {
             self.travel.step_block = None;
             self.travel.route = None;
             self.travel.restart_waypoint();
-            self.interact(guid);
+            // Not used yet: a summoned portal needs room to stand in,
+            // and a gem used where there is none is spent for nothing.
+            // The step finds the room first (see `travel_gem_wait`).
+            self.travel.gem_used = None;
+            self.travel.gem_uses = 0;
+            self.travel.gem_spot = None;
+            self.travel.summoned_used = None;
+            self.travel.summoned_uses = 0;
             return true;
         }
         let (target, label, mouth_cell) = match &step {
@@ -696,8 +750,14 @@ impl Client {
         self.travel.portal_since = None;
         self.travel.recall_since = None;
         self.travel.recall_casts = 0;
+        self.travel.gem_used = None;
+        self.travel.gem_uses = 0;
+        self.travel.gem_spot = None;
+        self.travel.summoned_used = None;
+        self.travel.summoned_uses = 0;
         self.travel.refused.clear();
         self.travel.refused_recalls.clear();
+        self.travel.refused_gems.clear();
         self.travel.goal = None;
         self.travel.restart_waypoint();
     }
@@ -737,6 +797,181 @@ impl Client {
         }
     }
 
+    /// A gem step, a frame at a time: find room for the portal the gem
+    /// summons, use the gem, use it again when the server did not take
+    /// it, use the portal it put in front of the character, and go
+    /// another way when none of that works. The one walk it asks for is a
+    /// short step to face open ground, returned as the leg to walk.
+    fn travel_gem_wait(
+        &mut self,
+        guid: u32,
+        name: &str,
+        summons: bool,
+        now: Instant,
+    ) -> Option<(Vec3, f32, u32)> {
+        if self.travel.gem_used.is_none() {
+            return self.travel_gem_first_use(guid, name, summons, now);
+        }
+        let since_use = now.duration_since(self.travel.gem_used.unwrap_or(now));
+        let portal = if summons {
+            self.summoned_portal()
+        } else {
+            None
+        };
+        let since_portal = self.travel.summoned_used.map(|t| now.duration_since(t));
+        match gem_next(
+            self.world.is_carried(guid),
+            summons,
+            since_use,
+            self.travel.gem_uses,
+            portal,
+            since_portal,
+            self.travel.summoned_uses,
+        ) {
+            GemNext::Wait => {}
+            GemNext::UseGem => {
+                tracing::info!("travel: {name} was not taken; using it again");
+                self.travel.gem_uses += 1;
+                self.travel.gem_used = Some(now);
+                self.interact(guid);
+            }
+            GemNext::UsePortal(portal) => {
+                tracing::info!("travel: using the portal {name} summoned");
+                self.travel.summoned_uses += 1;
+                self.travel.summoned_used = Some(now);
+                // Sent straight to the server. Using something in the
+                // world through `interact` stops the journey first, so
+                // it does not walk us away afterwards -- and this use
+                // *is* the journey.
+                self.session
+                    .send_action(ac_net::messages::action::USE, &portal.to_le_bytes());
+            }
+            GemNext::GiveUp => self.travel_gem_refused(guid, name, "did not take us anywhere"),
+        }
+        None
+    }
+
+    /// Before a gem is used: face somewhere the portal will fit, then use
+    /// it. A summoned portal stands a few paces in front of the character
+    /// and the server puts it nowhere at all when there is no room --
+    /// having taken the gem anyway.
+    fn travel_gem_first_use(
+        &mut self,
+        guid: u32,
+        name: &str,
+        summons: bool,
+        now: Instant,
+    ) -> Option<(Vec3, f32, u32)> {
+        let (me3, block, forward) = {
+            let pl = self.player.as_ref()?;
+            (
+                pl.world_position(),
+                pl.cell & 0xFFFF_0000,
+                pl.forward().truncate(),
+            )
+        };
+        let me = me3.truncate();
+        let walked_there = match self.travel.gem_spot {
+            Some((spot, since)) => {
+                me.distance(spot) <= ARRIVE.min(1.0) || now.duration_since(since) > FACE_GIVE_UP
+            }
+            None => false,
+        };
+        if summons && !walked_there {
+            if let Some((spot, _)) = self.travel.gem_spot {
+                return Some((Vec3::new(spot.x, spot.y, me3.z), 0.3, block));
+            }
+            match clear_heading(forward.normalize_or(Vec2::Y), |dir| {
+                self.room_to_summon(dir)
+            }) {
+                None => {
+                    self.travel_gem_refused(guid, name, "has no room to summon its portal here");
+                    return None;
+                }
+                Some(dir) if dir.dot(forward.normalize_or(Vec2::Y)) < 0.99 => {
+                    let spot = me + dir * FACE_STEP;
+                    tracing::info!("travel: stepping to open ground to use {name}");
+                    self.travel.gem_spot = Some((spot, now));
+                    return Some((Vec3::new(spot.x, spot.y, me3.z), 0.3, block));
+                }
+                Some(_) => {}
+            }
+        }
+        tracing::info!("travel: using {name}");
+        self.travel.gem_spot = None;
+        self.travel.gem_used = Some(now);
+        self.travel.gem_uses = 1;
+        self.interact(guid);
+        None
+    }
+
+    /// Whether a portal summoned facing `dir` would have room: no wall
+    /// between the character and past where it stands, ground there near
+    /// the height of the character's feet, and nothing standing on it.
+    fn room_to_summon(&mut self, dir: Vec2) -> bool {
+        let assets = self.assets.clone();
+        let Some(pl) = self.player.as_mut() else {
+            return false;
+        };
+        let feet = pl.world_position();
+        let chest = feet + Vec3::Z;
+        let ahead = chest + dir.extend(0.0) * SUMMON_CLEARANCE;
+        if pl.first_wall(&assets, chest, ahead).is_some() {
+            return false;
+        }
+        let spot = feet.truncate() + dir * SUMMON_DISTANCE;
+        let level = pl
+            .ground_height(&assets, spot.x, spot.y, feet.z)
+            .is_some_and(|h| (h - feet.z).abs() <= SUMMON_STEP);
+        if !level {
+            return false;
+        }
+        use ac_world::item_type::{CREATURE, LIFESTONE, PORTAL};
+        let me = self.world.player_guid;
+        !self.world.objects.values().any(|o| {
+            Some(o.guid) != me
+                && o.container.is_none()
+                && o.wielder.is_none()
+                && o.item_type & (CREATURE | PORTAL | LIFESTONE) != 0
+                && o.position.is_some_and(|p| {
+                    (ac_world::landblock_origin(p.cell) + p.local)
+                        .truncate()
+                        .distance(spot)
+                        < SUMMON_ROOM
+                })
+        })
+    }
+
+    /// A gem that will not do its part on this journey: leave it out and
+    /// plan the rest of the way without it.
+    fn travel_gem_refused(&mut self, guid: u32, name: &str, why: &str) {
+        tracing::warn!("travel: {name} {why}; going another way");
+        self.travel.refused_gems.push(guid);
+        let goal = self.travel.goal;
+        self.cancel_travel_keeping_refusals();
+        if let Some(goal) = goal {
+            self.travel_to(goal);
+        }
+    }
+
+    /// The portal a gem has just put in front of the character: the
+    /// nearest portal in the world within [`SUMMONED_REACH`].
+    fn summoned_portal(&self) -> Option<u32> {
+        let me = self.player.as_ref()?.world_position().truncate();
+        self.world
+            .objects
+            .values()
+            .filter(|o| o.item_type & ac_world::item_type::PORTAL != 0)
+            .filter_map(|o| {
+                let p = o.position?;
+                let at = (ac_world::landblock_origin(p.cell) + p.local).truncate();
+                let away = at.distance(me);
+                (away <= SUMMONED_REACH).then_some((o.guid, away))
+            })
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(guid, _)| guid)
+    }
+
     /// The recall being cast fizzled: cast again as soon as the
     /// character has settled rather than wait out the whole timeout.
     pub(crate) fn travel_recall_fizzled(&mut self) {
@@ -754,10 +989,12 @@ impl Client {
     fn cancel_travel_keeping_refusals(&mut self) {
         let refused = std::mem::take(&mut self.travel.refused);
         let refused_recalls = std::mem::take(&mut self.travel.refused_recalls);
+        let refused_gems = std::mem::take(&mut self.travel.refused_gems);
         let goal = self.travel.goal;
         self.cancel_travel();
         self.travel.refused = refused;
         self.travel.refused_recalls = refused_recalls;
+        self.travel.refused_gems = refused_gems;
         self.travel.goal = goal;
     }
 
@@ -876,6 +1113,16 @@ impl Client {
                 // Nothing to walk to: the move-to is left idle so the
                 // character stands still for the cast.
                 return None;
+            } else if let Some(Step::Gem {
+                guid,
+                name,
+                summons,
+                ..
+            }) = step
+            {
+                // Finding room for the portal, using the gem, and seeing
+                // that it works. A step to open ground is the only walk.
+                return self.travel_gem_wait(guid, &name, summons, now);
             }
         }
         // Indoors (the Town Network hub, a dungeon) the world grid says
@@ -1154,9 +1401,162 @@ pub fn leg_end(me: Vec2, wp: Vec2) -> Vec2 {
     }
 }
 
+/// The way to face to use a gem: the way the character already faces
+/// when that is clear, else the nearest clear heading to it, turning a
+/// twelfth of the circle at a time either side. `None` when nowhere is.
+fn clear_heading(forward: Vec2, mut clear: impl FnMut(Vec2) -> bool) -> Option<Vec2> {
+    const STEPS: i32 = 6;
+    let turn = std::f32::consts::PI / STEPS as f32;
+    let mut tried = vec![0];
+    for k in 1..STEPS {
+        tried.push(k);
+        tried.push(-k);
+    }
+    tried.push(STEPS);
+    tried
+        .into_iter()
+        .map(|k| Vec2::from_angle(turn * k as f32).rotate(forward))
+        .find(|d| clear(*d))
+}
+
+/// What a gem step does next, standing where the gem was used.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GemNext {
+    /// Nothing yet: stand still.
+    Wait,
+    /// The server did not take the gem: use it again.
+    UseGem,
+    /// Use this portal, the one the gem summoned. A summoned portal is
+    /// used, not walked into.
+    UsePortal(u32),
+    /// It is not working: go another way.
+    GiveUp,
+}
+
+/// Decide it from what can be seen: whether the gem is still carried,
+/// whether it is the kind that summons a portal, how long since it was
+/// last used and how often, and the summoned portal if one is in reach,
+/// with how long since that was last used and how often.
+///
+/// The server takes a gem only when a use gets through, so a gem still
+/// in the pack is the plain sign of a refusal -- which a busy character
+/// gets, and which says so in no other way the journey can see.
+fn gem_next(
+    carried: bool,
+    summons: bool,
+    since_use: Duration,
+    uses: u32,
+    portal: Option<u32>,
+    since_portal: Option<Duration>,
+    portal_uses: u32,
+) -> GemNext {
+    if carried {
+        return if since_use < GEM_RETRY {
+            GemNext::Wait
+        } else if uses < GEM_TRIES {
+            GemNext::UseGem
+        } else {
+            GemNext::GiveUp
+        };
+    }
+    let waited_out = if since_use < GEM_GIVE_UP {
+        GemNext::Wait
+    } else {
+        GemNext::GiveUp
+    };
+    // The rare gem that carries the character off itself: the arrival
+    // ends the step, and there is nothing to use.
+    if !summons {
+        return waited_out;
+    }
+    match portal {
+        None => waited_out,
+        Some(_) if since_portal.is_some_and(|d| d < SUMMONED_USE_EVERY) => GemNext::Wait,
+        Some(_) if portal_uses >= SUMMONED_TRIES => GemNext::GiveUp,
+        Some(guid) => GemNext::UsePortal(guid),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_gem_is_used_facing_the_nearest_open_ground() {
+        let north = Vec2::Y;
+        // Room straight ahead: that way, no turning.
+        assert_eq!(clear_heading(north, |_| true), Some(north));
+        // A wall ahead and to the right: the nearest clear heading, just
+        // to the left, not the far side of the circle.
+        let d = clear_heading(north, |d| d.x < -0.4).unwrap();
+        assert!(d.x < -0.4 && d.y > 0.8, "{d:?}");
+        // Boxed in: nowhere, so the gem is not spent.
+        assert_eq!(clear_heading(north, |_| false), None);
+        // Only straight behind is clear: still found.
+        let back = clear_heading(north, |d| d.y < -0.99).unwrap();
+        assert!(back.y < -0.99, "{back:?}");
+        // Every heading is tried exactly once.
+        let mut n = 0;
+        clear_heading(north, |_| {
+            n += 1;
+            false
+        });
+        assert_eq!(n, 12);
+    }
+
+    #[test]
+    fn a_gem_is_used_again_until_the_server_takes_it() {
+        let s = Duration::from_secs;
+        // Just used: give the server a moment to take it.
+        assert_eq!(gem_next(true, true, s(1), 1, None, None, 0), GemNext::Wait);
+        // Still in the pack a while later: refused, most likely because
+        // the character was mid-cast. Use it again.
+        assert_eq!(
+            gem_next(true, true, s(4), 1, None, None, 0),
+            GemNext::UseGem
+        );
+        // Refused every time: go another way rather than stand here.
+        assert_eq!(
+            gem_next(true, true, s(4), GEM_TRIES, None, None, 0),
+            GemNext::GiveUp
+        );
+    }
+
+    #[test]
+    fn a_summoned_portal_is_used_not_walked_into() {
+        let s = Duration::from_secs;
+        // Taken, and the portal is up: use it.
+        assert_eq!(
+            gem_next(false, true, s(1), 1, Some(7), None, 0),
+            GemNext::UsePortal(7)
+        );
+        // Just used: give the server time to carry us off.
+        assert_eq!(
+            gem_next(false, true, s(2), 1, Some(7), Some(s(1)), 1),
+            GemNext::Wait
+        );
+        // Still here after that: use it again, and in the end give up.
+        assert_eq!(
+            gem_next(false, true, s(9), 1, Some(7), Some(s(4)), 1),
+            GemNext::UsePortal(7)
+        );
+        assert_eq!(
+            gem_next(false, true, s(20), 1, Some(7), Some(s(4)), SUMMONED_TRIES),
+            GemNext::GiveUp
+        );
+        // Taken, but nothing has appeared yet: wait, and not for ever.
+        assert_eq!(gem_next(false, true, s(2), 1, None, None, 0), GemNext::Wait);
+        assert_eq!(
+            gem_next(false, true, GEM_GIVE_UP, 1, None, None, 0),
+            GemNext::GiveUp
+        );
+        // A gem that carries the character off itself has nothing to
+        // use, whatever portal happens to be standing nearby.
+        assert_eq!(
+            gem_next(false, false, s(2), 1, Some(7), None, 0),
+            GemNext::Wait
+        );
+    }
 
     #[test]
     fn legs_are_short_and_stay_in_the_block() {

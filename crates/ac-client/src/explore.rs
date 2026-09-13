@@ -83,6 +83,15 @@ impl Client {
     /// into a room we have not been in. Claims the tick while it has
     /// somewhere to go.
     pub fn autoplay_explore(&mut self, now: Instant) -> bool {
+        // A journey that passes through somewhere enclosed -- the Town
+        // Network hub reads as a dungeon, and so does a dungeon crossed
+        // on the way out -- is not an invitation to explore it. Walking
+        // to the next room hands the steering a nearby goal, and a
+        // nearby goal ends the journey outright: that is how a run to
+        // town came through the hub and never left it.
+        if self.traveling() {
+            return false;
+        }
         let assets = self.assets.clone();
         let Some(pl) = self.player.as_mut() else {
             return false;
