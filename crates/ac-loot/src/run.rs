@@ -79,6 +79,9 @@ pub struct Run {
     began: Option<Instant>,
     /// How many things have been taken.
     pub taken: u32,
+    /// Whether the corpse opened for it. A body walked to and let go
+    /// before it did has not.
+    pub opened: bool,
 }
 
 impl Run {
@@ -107,6 +110,7 @@ impl Run {
         if !at.open {
             return Next::act(Act::Open, format!("opening {}", at.name));
         }
+        self.opened = true;
 
         // No room to spare: leave it rather than stand here asking. The
         // body keeps for a while and will still be here once the pack has
@@ -219,6 +223,33 @@ impl Run {
             });
         }
         Next::done(format!("emptied {}", at.name))
+    }
+}
+
+/// Every body opened and every thing taken over many runs, for the
+/// panel. Blargerton's log said "emptied" whether he took something or
+/// nothing; the count says which.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Tally {
+    /// Corpses that opened.
+    pub opened: u32,
+    /// Things taken off them.
+    pub taken: u32,
+}
+
+impl Tally {
+    /// Count a run that is over, however its corpse was let go.
+    pub fn count(&mut self, run: &Run) {
+        self.opened += u32::from(run.opened);
+        self.taken += run.taken;
+    }
+
+    /// The panel's line.
+    pub fn line(&self) -> String {
+        format!(
+            "this session: {} corpse(s) opened, {} thing(s) taken",
+            self.opened, self.taken
+        )
     }
 }
 
@@ -589,5 +620,41 @@ mod tests {
             thing(3, "Third", Verdict::Take(LootAction::Keep)),
         ]);
         assert_eq!(run.step(&at, now).act, Some(Act::Take(2)));
+    }
+
+    #[test]
+    fn the_tally_counts_bodies_that_opened_and_things_taken_off_them() {
+        // "emptied" in the log could not tell a character that took
+        // nothing from one that never looted. The count can.
+        let now = Instant::now();
+        let mut tally = Tally::default();
+        // Walked to and let go before it opened: no body counted.
+        let mut run = Run::new();
+        let mut far = body(vec![thing(1, "Dagger", Verdict::Take(LootAction::Keep))]);
+        far.away = 8.0;
+        run.step(&far, now);
+        tally.count(&run);
+        assert_eq!(tally, Tally::default());
+        // A dagger taken off one.
+        let mut run = Run::new();
+        let dagger = body(vec![thing(1, "Dagger", Verdict::Take(LootAction::Keep))]);
+        assert_eq!(run.step(&dagger, now).act, Some(Act::Take(1)));
+        run.step(&body(Vec::new()), now);
+        tally.count(&run);
+        // Nothing worth taking on another.
+        let mut run = Run::new();
+        run.step(&body(vec![thing(2, "Rock", Verdict::Leave)]), now);
+        tally.count(&run);
+        assert_eq!(
+            tally,
+            Tally {
+                opened: 2,
+                taken: 1
+            }
+        );
+        assert_eq!(
+            tally.line(),
+            "this session: 2 corpse(s) opened, 1 thing(s) taken"
+        );
     }
 }

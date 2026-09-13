@@ -1340,6 +1340,11 @@ pub struct Autoplay {
     /// has been asked for, what will not come, how many have been
     /// taken. Started afresh for each body.
     loot_run: ac_loot::Run,
+    /// Every body opened and thing taken since the client started, for
+    /// the panel. Blargerton's log said "emptied" whether he took
+    /// something or nothing, and a count tells a character with nothing
+    /// worth taking from one that does not loot.
+    pub loot_tally: ac_loot::Tally,
     /// Items asked for and not moved. The server can refuse -- a full
     /// pack, a chest that will not give the thing up -- and it refuses
     /// in chat, not in a reply we can wait on, so the only way to hear
@@ -1398,9 +1403,17 @@ impl Autoplay {
     /// Start on a corpse: asked to open just now, with `allow` for it
     /// to do so. The loot rules start afresh with it.
     fn take_up_corpse(&mut self, guid: u32, now: Instant, allow: Duration) {
-        self.loot_run = ac_loot::Run::new();
+        self.fresh_loot_run();
         self.corpse = Some((guid, now, allow, 0));
         self.quiet_answers = 0;
+    }
+
+    /// Start the loot rules afresh, first counting what the body before
+    /// came to. Every run ends here however its corpse was let go, so
+    /// each body opened and each thing taken is counted once.
+    fn fresh_loot_run(&mut self) {
+        let run = std::mem::take(&mut self.loot_run);
+        self.loot_tally.count(&run);
     }
 
     /// The ask to open the corpse in hand has had its wait and it has not
@@ -1427,7 +1440,7 @@ impl Autoplay {
         self.take_queue.clear();
         self.take_tries.clear();
         self.last_take = None;
-        self.loot_run = ac_loot::Run::new();
+        self.fresh_loot_run();
     }
 
     /// What becomes of a corpse the loot rules have shut, by what they
@@ -6260,6 +6273,44 @@ mod tests {
         ap.corpse_shut(emptied, &Did::Done, t0);
         assert!(ap.looted.contains(&emptied));
         assert!(!ap.shelved.held(&emptied, t0));
+    }
+
+    #[test]
+    fn every_body_opened_is_counted_for_the_panel_however_it_was_let_go() {
+        // Blargerton's log said "emptied" whether he took something or
+        // nothing. The panel's count tells the two apart, and a body given
+        // up on still counts for what came off it.
+        use crate::did::Did;
+        let t0 = Instant::now();
+        let mut ap = Autoplay::default();
+        // Opened, the dagger asked for, then given up on.
+        let first = 0x8000_3001;
+        ap.take_up_corpse(first, t0, LOOT_TIMEOUT);
+        let next = ap.loot_run.step(&corpse_at_hand(first, 1), t0);
+        assert_eq!(next.act, Some(ac_loot::Act::Take(1)), "{}", next.saying);
+        ap.let_go_of_corpse();
+        // Shut by the rules with nothing worth taking on it.
+        let second = 0x8000_3002;
+        ap.take_up_corpse(second, t0, LOOT_TIMEOUT);
+        let mut bare = corpse_at_hand(second, 2);
+        bare.items[0].verdict = ac_loot::Verdict::Leave;
+        let next = ap.loot_run.step(&bare, t0);
+        assert_eq!(next.did, Did::Done, "{}", next.saying);
+        ap.corpse_shut(second, &next.did, t0);
+        // Walked to and never opened, then the next body taken up.
+        let third = 0x8000_3003;
+        ap.take_up_corpse(third, t0, LOOT_TIMEOUT);
+        let mut unopened = corpse_at_hand(third, 3);
+        unopened.open = false;
+        ap.loot_run.step(&unopened, t0);
+        ap.take_up_corpse(0x8000_3004, t0, LOOT_TIMEOUT);
+        assert_eq!(
+            ap.loot_tally,
+            ac_loot::Tally {
+                opened: 2,
+                taken: 1
+            }
+        );
     }
 
     #[test]
