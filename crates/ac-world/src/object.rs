@@ -905,7 +905,12 @@ pub struct MovementEvent {
     pub turn_speed: f32,
     /// One-shot motions (emotes, attacks): (command, sequence, speed).
     pub commands: Vec<(u16, u16, f32)>,
+    /// Where the server is walking the object (MoveToObject,
+    /// MoveToPosition). Only a walk has one.
     pub target: Option<MoveTarget>,
+    /// What a TurnToObject turns the object to face. A turn is no walk
+    /// and leaves `target` empty.
+    pub turn_to: Option<u32>,
     pub run_rate: f32,
     pub desired_heading: Option<f32>,
 }
@@ -938,6 +943,7 @@ impl MovementEvent {
             turn_speed: 1.0,
             commands: Vec::new(),
             target: None,
+            turn_to: None,
             run_rate: 1.0,
             desired_heading: None,
         };
@@ -1011,10 +1017,17 @@ impl MovementEvent {
                 ev.forward = motion_cmd::RUN_FORWARD;
             }
             8 => {
+                // TurnToObject: turning on the spot to face something. ACE
+                // sends it for a use of something already in reach, and
+                // says nothing more when the turn is done. It is no walk,
+                // so it leaves `target` empty. Read as a walk to the corpse
+                // just used, it kept the client standing aside for the
+                // server for twelve seconds, and the walk to the next
+                // corpse went nowhere.
                 let target = r.u32()?;
                 let _heading_of_target = r.f32()?;
                 ev.desired_heading = Some(turn_params(&mut r)?);
-                ev.target = Some(MoveTarget::Object(target));
+                ev.turn_to = Some(target);
             }
             9 => {
                 ev.desired_heading = Some(turn_params(&mut r)?);

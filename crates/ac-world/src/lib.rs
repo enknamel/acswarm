@@ -918,6 +918,8 @@ impl World {
                     }
                     self.generation += 1;
                     if Some(ev.guid) == self.player_guid {
+                        // A turn to face something is a motion, not a
+                        // walk (see `MovementEvent::turn_to`).
                         if ev.target.is_some() {
                             Applied::PlayerMoveTo
                         } else {
@@ -2121,6 +2123,83 @@ mod tests {
             world.apply(&position_update(CELL, elsewhere, 1, 1)),
             Applied::PlayerMoved
         ));
+    }
+
+    /// A whole MovementEvent message for `guid`: the header as ACE writes
+    /// it (sequences, autonomy, padding, movement type, flags, stance),
+    /// then the movement's own fields in `rest`.
+    fn movement_event(guid: u32, movement_type: u8, rest: &[u8]) -> Vec<u8> {
+        let mut w = Writer::new();
+        w.u32(opcode::MOVEMENT_EVENT)
+            .u32(guid)
+            .u16(1)
+            .u16(2)
+            .u16(3)
+            .u8(0)
+            .align4()
+            .u8(movement_type)
+            .u8(0)
+            .u16(0x3D)
+            .bytes(rest);
+        w.finish()
+    }
+
+    #[test]
+    fn a_turn_to_face_something_is_no_walk_to_it() {
+        // A corpse used from within reach: ACE turns the character to face
+        // it (TurnToObject) and says nothing more when the turn is done.
+        // Read as a walk to the corpse, it kept the client standing aside
+        // for twelve seconds, and the walk to the next corpse went nowhere.
+        const CELL: u32 = 0x01F6_022F;
+        const CORPSE: u32 = 0x8000_1809;
+        let mut turn = Writer::new();
+        turn.u32(CORPSE).f32(0.0).u32(0).f32(1.0).f32(90.0);
+        let turn = movement_event(ME, 8, &turn.finish());
+        let ev = MovementEvent::parse(&turn[4..]).unwrap();
+        assert_eq!(ev.target, None, "a turn is no walk");
+        assert_eq!(ev.turn_to, Some(CORPSE));
+        assert_eq!(ev.desired_heading, Some(90.0));
+
+        let mut world = World {
+            player_guid: Some(ME),
+            ..Default::default()
+        };
+        world.objects.insert(
+            ME,
+            WorldObject {
+                guid: ME,
+                position: Some(Position::new_flat(CELL, Vec3::new(33.0, -18.0, 0.0))),
+                ..Default::default()
+            },
+        );
+        assert_eq!(world.apply(&turn), Applied::PlayerMotion);
+        let me = world.player().unwrap();
+        assert_eq!(me.target, None);
+        // It still turns the character to the heading it gives.
+        assert_eq!(me.position.unwrap().rotation, heading_quat(90.0));
+
+        // The same use from out of reach is a walk (MoveToObject).
+        let mut walk = Writer::new();
+        walk.u32(CORPSE)
+            .u32(CELL)
+            .f32(40.0)
+            .f32(-18.0)
+            .f32(0.0)
+            .u32(0)
+            .f32(0.6)
+            .f32(0.0)
+            .f32(f32::MAX)
+            .f32(1.0)
+            .f32(15.0)
+            .f32(0.0)
+            .f32(1.5);
+        let walk = movement_event(ME, 6, &walk.finish());
+        assert_eq!(world.apply(&walk), Applied::PlayerMoveTo);
+        assert_eq!(
+            world.player().unwrap().target,
+            Some(MoveTarget::Object(CORPSE))
+        );
+        assert_eq!(MovementEvent::parse(&walk[4..]).unwrap().turn_to, None);
     }
 
     /// A whole GameEvent message: opcode, our guid, sequence, event, body.

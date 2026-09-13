@@ -32,6 +32,117 @@ const YOURE_TOO_BUSY: u32 = 0x001D;
 fn frees_the_cast_slot(err: u32) -> bool {
     err != YOURE_TOO_BUSY
 }
+
+/// How long the client stands aside for a walk the server is making for
+/// it before it takes the controls back (see [`standing_aside`]).
+const SERVER_WALK_FOR: Duration = Duration::from_secs(12);
+
+/// What a movement event for our own character did to the server walk
+/// the client is carrying out.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ServerWalk {
+    /// A walk began where none was under way.
+    Began(ac_world::object::MoveTarget),
+    /// The walk under way is over.
+    Ended,
+    /// A walk under way goes on, or none was under way and none began.
+    Unchanged,
+}
+
+/// Carry a movement event for our own character over to the server walk
+/// (`walk`, under way since `since`, `answered` once the server has
+/// answered what it was for). `target` is where the event walks us; a
+/// plain motion or a turn has none. A walk sent anew has had no answer
+/// yet.
+///
+/// Only a walk is stood aside for. A turn to face something in reach
+/// used to count as a walk to it, and nothing the server sends ends a
+/// turn: after emptying a corpse the character stood beside it for
+/// twelve seconds, its walk to the next corpse overruled by a walk that
+/// was never coming.
+fn heard_server_walk(
+    walk: &mut Option<ac_world::object::MoveTarget>,
+    since: &mut Instant,
+    answered: &mut bool,
+    target: Option<ac_world::object::MoveTarget>,
+    now: Instant,
+) -> ServerWalk {
+    match (walk.is_some(), target) {
+        (false, Some(t)) => {
+            *walk = Some(t);
+            *since = now;
+            *answered = false;
+            ServerWalk::Began(t)
+        }
+        (true, Some(t)) => {
+            *walk = Some(t);
+            *answered = false;
+            ServerWalk::Unchanged
+        }
+        (true, None) => {
+            *walk = None;
+            ServerWalk::Ended
+        }
+        (false, None) => ServerWalk::Unchanged,
+    }
+}
+
+/// Whether the client stands aside for a server walk at `now`: it sends
+/// no MoveToState of its own, which ACE takes for calling the walk off
+/// (and the use it is for), until the walk ends or has gone on for
+/// [`SERVER_WALK_FOR`].
+fn standing_aside(
+    walk: Option<ac_world::object::MoveTarget>,
+    since: Instant,
+    now: Instant,
+) -> bool {
+    walk.is_some() && now.saturating_duration_since(since) < SERVER_WALK_FOR
+}
+
+/// Whether a character at `me` has reached a goal at `at`: within `stop`
+/// of it on the flat, and on its floor. Where the steering stops.
+fn reached(me: glam::Vec3, at: glam::Vec3, stop: f32) -> bool {
+    let d = at - me;
+    glam::Vec2::new(d.x, d.y).length() <= stop && d.z.abs() <= SAME_FLOOR
+}
+
+/// Whether a server walk (`walk`) is over though the server will say no
+/// more about it: the server has answered what it was for (`answered`),
+/// and the character stands at the walk's `goal` (a place and how close
+/// is there), or has no goal to walk to because what it walked to is out
+/// of view.
+///
+/// ACE ends a walk for a use on its own side. Arriving runs the use and
+/// it sends the answer, but no motion, so the client stood aside for the
+/// rest of its twelve seconds, and whatever came next (the next corpse,
+/// the walk home) went nowhere. The answer alone is not enough: a
+/// double-click sent again while walking has the first one answered
+/// then, and letting go on that stopped the character a stride into
+/// every walk. Standing there is what makes an answer the last word:
+/// the server has seen the character in reach, or never will.
+fn server_walk_over(
+    walk: Option<ac_world::object::MoveTarget>,
+    goal: Option<(glam::Vec3, f32)>,
+    me: glam::Vec3,
+    answered: bool,
+) -> bool {
+    walk.is_some() && answered && goal.is_none_or(|(at, stop)| reached(me, at, stop))
+}
+
+/// Whether an AttackDone ends the server walk `walk`: it was a walk to
+/// `attacked`, the creature the last attack was sent at.
+///
+/// A charge the server gives up on ("You charged too far", the target
+/// gone) is answered with a weenie error and AttackDone, and no motion.
+/// Left standing, the walk kept the character still for twelve seconds
+/// where the charge stopped, fighting nothing, while the creature went
+/// on hitting it.
+fn attack_ended_walk(walk: Option<ac_world::object::MoveTarget>, attacked: Option<u32>) -> bool {
+    matches!(
+        (walk, attacked),
+        (Some(ac_world::object::MoveTarget::Object(g)), Some(a)) if g == a
+    )
+}
 pub mod logoff;
 pub use logoff::{log_off_all, LOG_OFF_WAIT};
 // Getting somewhere is its own system now (`ac-nav`), with the world
@@ -207,6 +318,9 @@ pub struct Client {
     /// reports us idle again.
     pub move_to: Option<ac_world::object::MoveTarget>,
     pub move_to_since: Instant,
+    /// The server has answered something (UseDone, a refused pickup)
+    /// since it sent the walk under way (see [`server_walk_over`]).
+    move_to_answered: bool,
     /// Whether the run key was held on the last tick: what a stop
     /// reported ahead of a use says, so the next report agrees with it.
     held_run: bool,
@@ -267,6 +381,10 @@ pub struct Client {
     pub attack_target: Option<u32>,
     /// An attack was sent and AttackDone has not come back yet.
     pub attack_pending: bool,
+    /// The creature the last attack was sent at, kept after the target
+    /// is let go: the AttackDone that answers it ends a charge at it (see
+    /// [`attack_ended_walk`]).
+    attacked: Option<u32>,
     pub last_attack: Instant,
     pub attack_backoff: Duration,
     /// Name of the last creature we attacked (its corpse is what we loot).
@@ -427,6 +545,7 @@ impl Client {
             scene_block: None,
             move_to: None,
             move_to_since: Instant::now(),
+            move_to_answered: false,
             held_run: false,
             move_refused: std::collections::HashMap::new(),
             use_done: None,
@@ -448,6 +567,7 @@ impl Client {
             require_components: false,
             attack_target: None,
             attack_pending: false,
+            attacked: None,
             last_attack: Instant::now(),
             attack_backoff: Duration::from_millis(300),
             last_target_name: String::new(),
@@ -694,28 +814,27 @@ impl Client {
                             // walking us (or echoed our own state).
                             let stance = self.world.player().map(|o| o.motion.style);
                             let target = self.world.player_mut().and_then(|o| o.target.take());
-                            match target {
-                                Some(t) => {
-                                    if self.move_to.is_none() {
-                                        tracing::debug!("server move-to {t:?}");
-                                        self.move_to_since = Instant::now();
-                                    }
-                                    self.move_to = Some(t);
-                                }
-                                None => {
-                                    if self.move_to.take().is_some() {
-                                        tracing::debug!("server move-to finished");
-                                        // Take the server's idea of where we ended up.
-                                        if let (Some(pl), Some(p)) = (
-                                            self.player.as_mut(),
-                                            self.world.player().and_then(|o| o.position),
-                                        ) {
-                                            pl.cell = p.cell;
-                                            pl.local = p.local;
-                                            pl.dirty = true;
-                                        }
+                            match heard_server_walk(
+                                &mut self.move_to,
+                                &mut self.move_to_since,
+                                &mut self.move_to_answered,
+                                target,
+                                Instant::now(),
+                            ) {
+                                ServerWalk::Began(t) => tracing::debug!("server move-to {t:?}"),
+                                ServerWalk::Ended => {
+                                    tracing::debug!("server move-to finished");
+                                    // Take the server's idea of where we ended up.
+                                    if let (Some(pl), Some(p)) = (
+                                        self.player.as_mut(),
+                                        self.world.player().and_then(|o| o.position),
+                                    ) {
+                                        pl.cell = p.cell;
+                                        pl.local = p.local;
+                                        pl.dirty = true;
                                     }
                                 }
+                                ServerWalk::Unchanged => {}
                             }
                             // Our stance follows the server (combat mode changes).
                             if let (Some(st), Some(pl)) = (stance, self.player.as_mut()) {
@@ -937,6 +1056,12 @@ impl Client {
                                         }
                                         self.loot_refused(item, err);
                                     }
+                                    // A pickup the server walked us to
+                                    // for, refused: an answer like a
+                                    // UseDone (see `server_walk_over`).
+                                    if self.move_to.is_some() {
+                                        self.move_to_answered = true;
+                                    }
                                 } else if ev == ac_net::messages::event::USE_DONE && rest.len() >= 4
                                 {
                                     let err =
@@ -987,6 +1112,12 @@ impl Client {
                                     // ends the walk.
                                     if err != 0 {
                                         self.move_to = None;
+                                    }
+                                    // Once there, though, the answer is
+                                    // the last word on the walk (see
+                                    // `server_walk_over`).
+                                    if self.move_to.is_some() {
+                                        self.move_to_answered = true;
                                     }
                                 } else if ev == ac_net::messages::event::SET_TURBINE_CHAT_CHANNELS
                                     && rest.len() >= 4
@@ -1226,6 +1357,19 @@ impl Client {
                     self.move_to,
                     travelling
                 );
+                // A server walk the server has answered for, walked all
+                // the way, is over: nothing more is coming to end it.
+                if dodging.is_none()
+                    && server_walk_over(
+                        self.move_to,
+                        goal.map(|(at, stop, _)| (at, stop)),
+                        pl.world_position(),
+                        self.move_to_answered,
+                    )
+                {
+                    tracing::debug!("server move-to over: there, and answered");
+                    self.move_to = None;
+                }
                 if let Some((g, stop, goal_cell)) = goal {
                     // Whoever is steering says how far this frame may
                     // carry us; by default nothing does.
@@ -1247,7 +1391,7 @@ impl Client {
                         } else {
                             0.0
                         };
-                    } else if !manual && (flat.length() > stop || d.z.abs() > SAME_FLOOR) {
+                    } else if !manual && !reached(pl.world_position(), g, stop) {
                         // Straight at the goal while nothing is in the
                         // way; through the waypoints of a route otherwise.
                         let mut standing = Standing {
@@ -1337,8 +1481,7 @@ impl Client {
             if pose.is_some() {
                 pl.dirty = true;
             }
-            let quiet =
-                self.move_to.is_some() && self.move_to_since.elapsed() < Duration::from_secs(12);
+            let quiet = standing_aside(self.move_to, self.move_to_since, now);
             let mut ran_out = None;
             if !quiet && self.move_to.is_some() {
                 tracing::debug!("server move-to timed out");
@@ -1528,6 +1671,10 @@ impl Client {
                         // just means the swing sequence ended.
                         tracing::debug!("attack done ({err:#x})");
                         self.attack_backoff = Duration::from_millis(300);
+                        if attack_ended_walk(self.move_to, self.attacked) {
+                            tracing::debug!("server move-to over: the attack it was for is done");
+                            self.move_to = None;
+                        }
                     }
                     return;
                 }
@@ -1976,6 +2123,7 @@ impl Client {
         self.session.send_action(opcode, &w.finish());
         self.attack_target = Some(guid);
         self.attack_pending = true;
+        self.attacked = Some(guid);
         self.last_attack = Instant::now();
         self.select(Some(guid));
         self.query_health(guid);
@@ -3885,5 +4033,233 @@ mod tests {
         assert!(frees_the_cast_slot(0x0402)); // a fizzle
                                               // Too busy: whatever went before is still going on.
         assert!(!frees_the_cast_slot(YOURE_TOO_BUSY));
+    }
+
+    const ME: u32 = 0x5000_0001;
+    const CORPSE: u32 = 0x8000_1809;
+
+    /// A MovementEvent for our own character as ACE writes it: sequences,
+    /// autonomy, padding, movement type, flags, stance, then `rest`.
+    fn our_movement(movement_type: u8, rest: &[u8]) -> Vec<u8> {
+        let mut w = ac_net::wire::Writer::new();
+        w.u32(ac_net::messages::opcode::MOVEMENT_EVENT)
+            .u32(ME)
+            .u16(1)
+            .u16(2)
+            .u16(3)
+            .u8(0)
+            .align4()
+            .u8(movement_type)
+            .u8(0)
+            .u16(0x3D)
+            .bytes(rest);
+        w.finish()
+    }
+
+    /// TurnToObject: face the corpse.
+    fn turn_to_corpse() -> Vec<u8> {
+        let mut w = ac_net::wire::Writer::new();
+        w.u32(CORPSE).f32(0.0).u32(0).f32(1.0).f32(90.0);
+        our_movement(8, &w.finish())
+    }
+
+    /// MoveToObject: walk to the corpse.
+    fn walk_to_corpse() -> Vec<u8> {
+        let mut w = ac_net::wire::Writer::new();
+        w.u32(CORPSE)
+            .u32(0x01F6_022F)
+            .f32(40.0)
+            .f32(-18.0)
+            .f32(0.0)
+            .u32(0)
+            .f32(0.6)
+            .f32(0.0)
+            .f32(f32::MAX)
+            .f32(1.0)
+            .f32(15.0)
+            .f32(0.0)
+            .f32(1.5);
+        our_movement(6, &w.finish())
+    }
+
+    /// MoveToObject as ACE sends it for a melee charge: the drudge, and
+    /// the charge's own parameters (CanCharge, FailWalk, UseFinalHeading,
+    /// Sticky, MoveAway; given up past fifteen metres).
+    fn charge_at_drudge() -> Vec<u8> {
+        let mut w = ac_net::wire::Writer::new();
+        w.u32(DRUDGE)
+            .u32(0x01F6_027B)
+            .f32(80.0)
+            .f32(-36.0)
+            .f32(0.0)
+            .u32(0x1F0)
+            .f32(0.6)
+            .f32(0.0)
+            .f32(15.0)
+            .f32(1.5)
+            .f32(1.0)
+            .f32(0.0)
+            .f32(1.5);
+        our_movement(6, &w.finish())
+    }
+
+    const DRUDGE: u32 = 0x8000_30F2;
+
+    /// The client's side of a server walk, as `Client` keeps it.
+    struct Walking {
+        world: ac_world::World,
+        walk: Option<ac_world::object::MoveTarget>,
+        since: Instant,
+        answered: bool,
+    }
+
+    impl Walking {
+        fn new(t0: Instant) -> Self {
+            let mut world = ac_world::World::default();
+            world.player_guid = Some(ME);
+            world.objects.insert(
+                ME,
+                ac_world::WorldObject {
+                    guid: ME,
+                    ..Default::default()
+                },
+            );
+            Walking {
+                world,
+                walk: None,
+                since: t0,
+                answered: false,
+            }
+        }
+
+        /// What the client does with a movement event for us: the world
+        /// takes it, and the walk it names (if any) goes to the server walk.
+        fn hear(&mut self, msg: &[u8], now: Instant) -> ServerWalk {
+            self.world.apply(msg);
+            let target = self.world.player_mut().and_then(|o| o.target.take());
+            heard_server_walk(
+                &mut self.walk,
+                &mut self.since,
+                &mut self.answered,
+                target,
+                now,
+            )
+        }
+
+        /// What the client does with a UseDone (or a refused pickup).
+        fn answer(&mut self) {
+            if self.walk.is_some() {
+                self.answered = true;
+            }
+        }
+    }
+
+    #[test]
+    fn a_turn_to_face_what_was_used_is_no_server_walk() {
+        // Blargerton emptied a corpse in reach, then stood beside it for
+        // twelve seconds instead of walking to the next: the turn the use
+        // began with was taken for a server walk to the corpse, and the
+        // client stood aside for it.
+        let t0 = Instant::now();
+        let soon = t0 + Duration::from_millis(500);
+        let mut w = Walking::new(t0);
+
+        // A use in reach: the turn gives nothing to stand aside for.
+        assert_eq!(w.hear(&turn_to_corpse(), t0), ServerWalk::Unchanged);
+        assert_eq!(w.walk, None);
+        assert!(!standing_aside(w.walk, w.since, soon));
+
+        // A use out of reach: the server walks us, and the client stands
+        // aside until the walk ends or has gone on too long.
+        assert_eq!(
+            w.hear(&walk_to_corpse(), t0),
+            ServerWalk::Began(ac_world::object::MoveTarget::Object(CORPSE))
+        );
+        assert!(standing_aside(w.walk, w.since, soon));
+        assert!(!standing_aside(w.walk, w.since, t0 + SERVER_WALK_FOR));
+
+        // A turn while the server walks us: ACE calls the walk off to turn.
+        assert_eq!(w.hear(&turn_to_corpse(), soon), ServerWalk::Ended);
+        assert_eq!(w.walk, None);
+        assert!(!standing_aside(w.walk, w.since, soon));
+    }
+
+    #[test]
+    fn a_walk_for_a_use_is_over_once_there_and_answered() {
+        // ACE runs a use on arriving and answers it, and sends no motion:
+        // the client stood aside for the rest of its twelve seconds, and
+        // the walk to whatever came next went nowhere.
+        let t0 = Instant::now();
+        let mut w = Walking::new(t0);
+        let corpse = glam::Vec3::new(40.0, -18.0, 0.0);
+        let goal = Some((corpse, 1.0));
+        let far = glam::Vec3::new(33.0, -18.0, 0.0);
+        let there = glam::Vec3::new(39.4, -18.2, 0.0);
+        let under = glam::Vec3::new(39.4, -18.2, -3.0);
+
+        // An answer before any walk is not an answer to one.
+        w.answer();
+        assert!(!w.answered);
+        assert!(matches!(
+            w.hear(&walk_to_corpse(), t0),
+            ServerWalk::Began(_)
+        ));
+        assert!(!w.answered);
+
+        // There, but not answered: the use has not run, and a movement of
+        // our own now would call it off.
+        assert!(!server_walk_over(w.walk, goal, there, w.answered));
+
+        // Answered on the way (a double-click sent again has the first one
+        // answered): letting go here stopped the character a stride in.
+        w.answer();
+        assert!(!server_walk_over(w.walk, goal, far, w.answered));
+        // Nor under its floor.
+        assert!(!server_walk_over(w.walk, goal, under, w.answered));
+
+        // There and answered: over, whichever came first.
+        assert!(server_walk_over(w.walk, goal, there, w.answered));
+        // Gone from view, there is nowhere left to walk to.
+        assert!(server_walk_over(w.walk, None, far, w.answered));
+
+        // The walk sent again has had no answer yet.
+        assert_eq!(w.hear(&walk_to_corpse(), t0), ServerWalk::Unchanged);
+        assert!(!server_walk_over(w.walk, goal, there, w.answered));
+
+        // No walk, nothing to be over.
+        assert!(!server_walk_over(None, goal, there, true));
+        // Where the steering stops is where a walk is there.
+        assert!(reached(there, corpse, 1.0));
+        assert!(!reached(far, corpse, 1.0));
+        assert!(!reached(under, corpse, 1.0));
+    }
+
+    #[test]
+    fn an_attack_done_ends_a_charge_at_what_was_attacked() {
+        // A charge ACE gave up on ("You charged too far") is answered with
+        // AttackDone and no motion: the character stood where it stopped,
+        // fighting nothing, for twelve seconds.
+        use ac_world::object::MoveTarget;
+        let t0 = Instant::now();
+        let mut w = Walking::new(t0);
+        assert_eq!(
+            w.hear(&charge_at_drudge(), t0),
+            ServerWalk::Began(MoveTarget::Object(DRUDGE))
+        );
+        assert!(attack_ended_walk(w.walk, Some(DRUDGE)));
+
+        // A walk for anything else is not the attack's to end: a corpse
+        // being walked to, a place, or no attack at all.
+        assert!(!attack_ended_walk(
+            Some(MoveTarget::Object(CORPSE)),
+            Some(DRUDGE)
+        ));
+        let place = MoveTarget::Position {
+            cell: 0x01F6_027B,
+            local: glam::Vec3::new(80.0, -36.0, 0.0),
+        };
+        assert!(!attack_ended_walk(Some(place), Some(DRUDGE)));
+        assert!(!attack_ended_walk(w.walk, None));
+        assert!(!attack_ended_walk(None, Some(DRUDGE)));
     }
 }
