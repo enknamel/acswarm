@@ -1770,6 +1770,14 @@ impl Client {
         self.free_space() <= self.autoplay.config.team.restock.keep_slots
     }
 
+    /// What the character has room for, as a corpse waiting on it sees
+    /// it (see `Autoplay::corpse_waiting`).
+    pub(crate) fn room_for_loot(&self) -> crate::autoplay::Room {
+        crate::autoplay::Room {
+            pack_low: self.pack_low_on_room(),
+        }
+    }
+
     /// What the character can spend. Coin and trade notes both: a note
     /// is money in a lighter form, and a vendor takes either.
     pub fn spendable(&self) -> u32 {

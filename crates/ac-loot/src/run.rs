@@ -144,10 +144,17 @@ impl Run {
 
         // No room to spare: leave it rather than stand here asking. The
         // body keeps for a while and will still be here once the pack has
-        // been sold down. "No room" stops short of the last slot: the few
-        // kept free are where a counter puts the money.
+        // been sold down, so it is set aside, not emptied. Shut as done
+        // with, every body reached with a low pack was written off with
+        // its coin and gems still on it, and never gone back to after the
+        // sale. "No room" stops short of the last slot: the few kept free
+        // are where a counter puts the money.
         if at.slots_free <= at.keep_free {
-            return Next::done("pack full, leaving the loot");
+            return Next {
+                act: Some(Act::Close),
+                did: Did::Blocked(Because::ours("the pack is full")),
+                saying: format!("pack full, leaving {} for now", at.name),
+            };
         }
         // Carrying as much as it means to is not a reason to leave the
         // corpse unopened: only what will not fit stays. Shutting it
@@ -497,6 +504,14 @@ mod tests {
         at.slots_free = 0;
         let next = run.step(&at, Instant::now());
         assert_eq!(next.act, Some(Act::Close), "{}", next.saying);
+        // Set aside, not emptied. Shut as done with, every body reached
+        // with a low pack was written off with its coin still on it, and
+        // never gone back to once the pack had been sold down.
+        assert!(
+            matches!(next.did, Did::Blocked(_)),
+            "written off for good: {:?}",
+            next.did
+        );
     }
 
     #[test]

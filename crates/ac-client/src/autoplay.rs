@@ -101,6 +101,20 @@ pub(crate) fn refused_item(item: u32, err: u32, inflight: Option<u32>) -> Option
     }
 }
 
+/// What the character has room for, as a corpse waiting on it sees it
+/// (see `Client::room_for_loot`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Room {
+    /// The pack is down to the slots kept for a counter's money.
+    pub(crate) pack_low: bool,
+}
+
+impl Room {
+    /// Room for anything.
+    #[cfg(test)]
+    pub(crate) const PLENTY: Room = Room { pack_low: false };
+}
+
 /// Whether an ask to open a corpse `away` metres off, sent on the tick
 /// `asked`, came back the way the server answers for a thing it does not
 /// have: a `UseDone` with no error (`done`), and not a word (`told`) since.
@@ -1464,8 +1478,14 @@ impl Autoplay {
     /// Whether the corpse `guid` is still waiting to be emptied: not
     /// emptied already, and not set aside for now. What looting is worth
     /// counts only these (see `crate::steps`).
-    pub(crate) fn corpse_waiting(&self, guid: u32, now: Instant) -> bool {
-        !self.looted.contains(&guid) && !self.shelved.held(&guid, now)
+    ///
+    /// And only while the character has `room` for what is on it. A pack
+    /// down to the slots kept for a counter's money takes nothing off a
+    /// corpse, so no corpse waits on it: a character with such a pack
+    /// walked to every body in reach, shut each on the spot as done with
+    /// -- writing it off -- and held up the town run that makes room.
+    pub(crate) fn corpse_waiting(&self, guid: u32, now: Instant, room: Room) -> bool {
+        !room.pack_low && !self.looted.contains(&guid) && !self.shelved.held(&guid, now)
     }
 
     /// Whether the corpse `guid`, lying at `at`, is still this
@@ -1479,8 +1499,9 @@ impl Autoplay {
         at: glam::Vec3,
         me: glam::Vec3,
         now: Instant,
+        room: Room,
     ) -> bool {
-        self.corpse_waiting(guid, now)
+        self.corpse_waiting(guid, now, room)
             && corpse_is_ours(me, at, self.config.fight.radius, &self.kill_spots)
     }
 
@@ -2793,18 +2814,19 @@ impl Client {
             .retain(|(g, t)| now.duration_since(*t) < CORPSE_LIFE * 2 && !looted.contains(g));
         let seen_at: std::collections::BTreeMap<u32, Instant> =
             self.autoplay.corpse_seen.iter().copied().collect();
+        let room = self.room_for_loot();
         let corpse = self
             .world
             .objects
             .values()
             .filter(|o| o.object_desc_flags & ac_world::object_desc_flags::CORPSE != 0)
-            // Not emptied, not set aside, and close by on this floor or
-            // where one of this character's kills fell -- which a caster
-            // makes from well past twenty metres.
+            // Not emptied, not set aside, something there is room for, and
+            // close by on this floor or where one of this character's kills
+            // fell -- which a caster makes from well past twenty metres.
             .filter_map(|o| {
                 let p = o.world_pos()?;
                 self.autoplay
-                    .corpse_owed(o.guid, p, me, now)
+                    .corpse_owed(o.guid, p, me, now, room)
                     .then(|| (p.distance(me), o))
             })
             // Another player's corpse is theirs: a teammate's gear taken
@@ -3682,6 +3704,13 @@ impl Client {
     /// it would stop the fighting altogether. This is about the one at
     /// its feet that it just made.
     pub fn owes_a_corpse(&self) -> bool {
+        // No room to take anything: no body is owed, not even the one on
+        // its way, and the fight is not held for it (see
+        // `Autoplay::corpse_waiting`).
+        let room = self.room_for_loot();
+        if room.pack_low {
+            return false;
+        }
         // Just killed something: its body is on the way.
         if self
             .autoplay
@@ -3708,7 +3737,7 @@ impl Client {
             // fighting altogether.
             .filter(|o| {
                 o.world_pos()
-                    .is_some_and(|at| self.autoplay.corpse_owed(o.guid, at, me, now))
+                    .is_some_and(|at| self.autoplay.corpse_owed(o.guid, at, me, now, room))
             })
             .any(|o| !self.corpse_is_someone_elses(&o.name))
     }
@@ -6195,12 +6224,13 @@ mod tests {
         // fight waits on it meanwhile.
         let mut ap = Autoplay::default();
         let (me, at) = (glam::Vec3::ZERO, glam::Vec3::new(12.0, 0.0, 0.0));
-        assert!(ap.corpse_owed(guid, at, me, gave_up));
+        let room = Room::PLENTY;
+        assert!(ap.corpse_owed(guid, at, me, gave_up, room));
         ap.set_aside_out_of_reach(guid, gave_up);
         assert!(!ap.looted.contains(&guid), "written off for good");
-        assert!(!ap.corpse_owed(guid, at, me, gave_up), "still owed");
+        assert!(!ap.corpse_owed(guid, at, me, gave_up, room), "still owed");
         assert!(
-            ap.corpse_owed(guid, at, me, gave_up + s(60)),
+            ap.corpse_owed(guid, at, me, gave_up + s(60), room),
             "never tried again"
         );
     }
@@ -6325,6 +6355,38 @@ mod tests {
     }
 
     #[test]
+    fn a_body_reached_with_a_full_pack_is_set_aside_and_owed_again_after_the_sale() {
+        // A pack down to the slots kept for a counter's money: every body
+        // in reach was walked to, shut on the spot as done with -- so
+        // written off -- and the town run waited behind them. After the
+        // sale none of them was gone back to, with minutes left on them.
+        let t0 = Instant::now();
+        let mut ap = Autoplay::default();
+        let (me, at) = (glam::Vec3::ZERO, glam::Vec3::new(5.0, 0.0, 0.0));
+        let body = 0x8000_8001;
+        let full = Room { pack_low: true };
+        // No room, so no body is owed: none is walked to, and the fight is
+        // not held for one.
+        assert!(ap.corpse_owed(body, at, me, t0, Room::PLENTY));
+        assert!(!ap.corpse_owed(body, at, me, t0, full), "owed with no room");
+        // One already open when the pack filled is shut and set aside.
+        ap.take_up_corpse(body, t0, LOOT_TIMEOUT);
+        let mut open = corpse_at_hand(body, 1);
+        open.slots_free = 3;
+        open.keep_free = 3;
+        let next = ap.loot_run.step(&open, t0);
+        assert_eq!(next.act, Some(ac_loot::Act::Close), "{}", next.saying);
+        ap.corpse_shut(body, &next.did, t0);
+        assert!(!ap.looted.contains(&body), "written off for good");
+        // Sold down a few minutes later, it is owed again.
+        let sold = t0 + Duration::from_secs(4 * 60);
+        assert!(
+            ap.corpse_owed(body, at, me, sold, Room::PLENTY),
+            "never gone back to"
+        );
+    }
+
+    #[test]
     fn a_corpse_that_says_no_again_waits_twice_as_long() {
         // The looting tidied away each lapsed wait before choosing a
         // corpse, and a corpse is chosen again exactly when its wait is
@@ -6343,7 +6405,10 @@ mod tests {
         let again = t0 + s(31);
         ap.forget_corpses_gone(|g| g == locked);
         assert_eq!(ap.shelved.len(), 1, "the rotted body is still remembered");
-        assert!(ap.corpse_waiting(locked, again), "never tried again");
+        assert!(
+            ap.corpse_waiting(locked, again, Room::PLENTY),
+            "never tried again"
+        );
         // Chosen, and it says no again: a minute this time.
         ap.shelved.note(locked, &no, again);
         assert!(
