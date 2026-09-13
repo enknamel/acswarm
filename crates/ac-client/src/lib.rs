@@ -3304,6 +3304,10 @@ impl Client {
         tracing::info!("buy {amount} x {guid:#010x} from {vendor:#010x}");
         self.session
             .send_action(action::BUY, &trade(vendor, &[(guid, amount as i32)]));
+        // The counter answers with `UseDone`; until it does, what was handed
+        // over is still in the pack, and reading that as a refusal is how a
+        // run left a counter before its sale landed.
+        self.autoplay.cast_sent = Some(Instant::now());
     }
 
     /// Sell several pack items (each its whole stack) to the open
@@ -3330,6 +3334,10 @@ impl Client {
         }
         tracing::info!("sell {} item(s) to {vendor:#010x}", lot.len());
         self.session.send_action(action::SELL, &trade(vendor, &lot));
+        // The counter answers with `UseDone`; until it does, what was handed
+        // over is still in the pack, and reading that as a refusal is how a
+        // run left a counter before its sale landed.
+        self.autoplay.cast_sent = Some(Instant::now());
     }
 
     /// Sell a pack item (its whole stack) to the open vendor.
@@ -3347,6 +3355,10 @@ impl Client {
         tracing::info!("sell {guid:#010x} to {vendor:#010x}");
         self.session
             .send_action(action::SELL, &trade(vendor, &[(guid, amount)]));
+        // The counter answers with `UseDone`; until it does, what was handed
+        // over is still in the pack, and reading that as a refusal is how a
+        // run left a counter before its sale landed.
+        self.autoplay.cast_sent = Some(Instant::now());
     }
 
     pub fn close_vendor(&mut self) {

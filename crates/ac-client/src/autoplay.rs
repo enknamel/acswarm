@@ -927,9 +927,9 @@ pub struct Autoplay {
     /// `attack_target` of its own the way a swing does, so the engine
     /// remembers what it is working on.
     last_cast: Option<Instant>,
-    /// When a cast was sent and the server has not yet said it is done.
-    /// Cleared by its answer (`UseDone`), which is what paces the next
-    /// one.
+    /// When a cast, or a sale or purchase at a counter, was sent and the
+    /// server has not yet said it is done. Cleared by its answer
+    /// (`UseDone`), which is what paces the next one.
     pub(crate) cast_sent: Option<Instant>,
     casting_at: Option<u32>,
     /// The target the weapon in hand was chosen for, so it is chosen
