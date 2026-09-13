@@ -610,6 +610,65 @@ fn restocks_as_a_party(team: &crate::autoplay::Team, mates: usize) -> bool {
     team.enabled && team.restock.together && mates > 0
 }
 
+/// Whether a character carrying `carried` is past the point where the
+/// server hands it anything at all: three times its `capacity`, and
+/// weight has nothing to do with it there. A Pyreal weighs nothing, and
+/// +Verity at 36462 of a 7500 capacity walked off her way to town for
+/// one, was told "You are too encumbered to carry that!", and went back
+/// for it twice more. With no capacity known yet nothing is past it.
+fn past_the_wall(carried: u32, capacity: u32) -> bool {
+    capacity > 0 && carried > capacity.saturating_mul(3)
+}
+
+/// How long after one run the next waits: `party_restocking` when the
+/// party has agreed to shop, `futile` when the last run bought and sold
+/// nothing -- which a run that never reached its counter always has.
+fn wait_between_runs(party_restocking: bool, futile: bool) -> Duration {
+    if !party_restocking {
+        RUN_EVERY
+    } else if futile {
+        FUTILE_RUN_WAIT
+    } else {
+        Duration::ZERO
+    }
+}
+
+/// What a run on its way to a counter does with no journey under way.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OnTheWay {
+    /// Near enough to go up to the counter.
+    There,
+    /// Something else broke the journey off and still has the character.
+    Wait,
+    /// Something else broke the journey off and is done: set off again.
+    WalkOn,
+    /// The journey ended by itself short of the counter.
+    Short,
+}
+
+/// What a run `away` metres from its counter does with no journey under
+/// way. `broken_off` says the last journey was ended by something else
+/// the character went to do (see `Client::journey_broken_off`), and
+/// `busy` that it is still doing it. How long the walk may take is the
+/// run's own clock, and is asked before this.
+///
+/// Any journey not under way used to be one that could not get there.
+/// +Verity set off to sell, a corpse took her a second later -- walking
+/// to one ends a journey -- and the run gave up 224 m short, marked the
+/// counter no use and sold nothing. A walk that ended by itself short of
+/// the counter is still one that cannot get there.
+fn on_the_way(away: f32, broken_off: bool, busy: bool) -> OnTheWay {
+    if away <= VENDOR_REACH {
+        OnTheWay::There
+    } else if !broken_off {
+        OnTheWay::Short
+    } else if busy {
+        OnTheWay::Wait
+    } else {
+        OnTheWay::WalkOn
+    }
+}
+
 /// Something in the pack the rules allow to be sold, before any one
 /// counter's tastes are applied to it.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1789,8 +1848,10 @@ impl Client {
     /// What the character has room for, as a corpse waiting on it sees
     /// it (see `Autoplay::corpse_waiting`).
     pub(crate) fn room_for_loot(&self) -> crate::autoplay::Room {
+        let (carried, capacity) = self.burden();
         crate::autoplay::Room {
             pack_low: self.pack_low_on_room(),
+            past_the_wall: past_the_wall(carried, capacity),
             // Weighed only while a body is waiting on it: what the loot
             // weighs is judged item by item, and this is asked on every
             // tick a corpse lies about.
@@ -2711,15 +2772,7 @@ impl Client {
         // the last trip came back with nothing. Without that a party
         // that cannot buy what it needs walks between counters for ever.
         let party_restocking = !self.autoplay.growth.mode.hunting();
-        let wait = if party_restocking {
-            if self.autoplay.growth.run_was_futile {
-                FUTILE_RUN_WAIT
-            } else {
-                Duration::ZERO
-            }
-        } else {
-            RUN_EVERY
-        };
+        let wait = wait_between_runs(party_restocking, self.autoplay.growth.run_was_futile);
         if let Some(t) = self
             .autoplay
             .growth
@@ -2963,16 +3016,42 @@ impl Client {
                     self.autoplay.growth.run = Some(run);
                     return true;
                 }
-                if run.at.distance(me) > VENDOR_REACH {
-                    self.autoplay.note(
-                        format!(
-                            "could not get to {} ({:.0} m short)",
-                            run.vendor,
-                            run.at.distance(me)
-                        ),
-                        now,
-                    );
-                    return self.grow_run_next(run, now, cfg, true);
+                // A corpse, a fight or a dodge on the way ends the journey
+                // without it having got anywhere, and the run picks it up
+                // again rather than taking it for a walk that could not.
+                let away = run.at.distance(me);
+                let busy = self.attack_target.is_some() || self.autoplay.casting_at().is_some();
+                match on_the_way(away, self.journey_broken_off(), busy) {
+                    OnTheWay::There => {}
+                    OnTheWay::Wait => {
+                        self.autoplay.growth.run = Some(run);
+                        return true;
+                    }
+                    OnTheWay::WalkOn => {
+                        if !self.grow_travel(run.at, now) {
+                            self.autoplay.note(
+                                format!(
+                                    "no way on to {} from here ({away:.0} m short)",
+                                    run.vendor
+                                ),
+                                now,
+                            );
+                            return self.grow_run_next(run, now, cfg, true);
+                        }
+                        self.autoplay.note(
+                            format!("on the way to {} again ({away:.0} m)", run.vendor),
+                            now,
+                        );
+                        self.autoplay.growth.run = Some(run);
+                        return true;
+                    }
+                    OnTheWay::Short => {
+                        self.autoplay.note(
+                            format!("could not get to {} ({away:.0} m short)", run.vendor),
+                            now,
+                        );
+                        return self.grow_run_next(run, now, cfg, true);
+                    }
                 }
                 match self.vendor_object(&run.vendor, run.at) {
                     Some(guid) => {
@@ -3460,6 +3539,64 @@ mod tests {
             ..team
         };
         assert!(!restocks_as_a_party(&off, 3));
+    }
+
+    #[test]
+    fn a_walk_to_a_counter_broken_off_by_a_corpse_is_walked_on() {
+        // +Verity, carrying as much as she meant to, set off for Shopkeeper
+        // Renald the Elder 250 m away. A second later the looting walked
+        // her to a fresh corpse, which ends a journey, and the run found no
+        // journey under way 224 m short: "could not get to", sold nothing.
+        assert_eq!(on_the_way(224.0, true, false), OnTheWay::WalkOn);
+        // Not while what broke it off still has her: a fight on the way.
+        assert_eq!(on_the_way(224.0, true, true), OnTheWay::Wait);
+        // A journey that ended by itself short of the counter -- it gave
+        // up, or arrived somewhere else -- still could not get there.
+        assert_eq!(on_the_way(224.0, false, false), OnTheWay::Short);
+        assert_eq!(on_the_way(224.0, false, true), OnTheWay::Short);
+        // Near enough, she goes up to the counter however it ended.
+        for (broken_off, busy) in [(false, false), (true, false), (true, true)] {
+            assert_eq!(on_the_way(VENDOR_REACH, broken_off, busy), OnTheWay::There);
+        }
+    }
+
+    #[test]
+    fn a_run_that_could_not_get_there_is_tried_again_once_its_wait_is_up() {
+        // A run that really cannot reach its counter comes home with
+        // nothing, so it is futile, and the counter is left alone for a
+        // while. Neither is for good: the next run is due once the wait
+        // between runs is up, and the counter can be chosen again by then.
+        let t0 = Instant::now();
+        let renald = spot(Vec2::new(32_587.2, 34_578.3));
+        let mut skip = crate::did::Patience::new();
+        skip.note(
+            renald,
+            &crate::did::Did::blocked("that counter was no use"),
+            t0,
+        );
+        for party_restocking in [false, true] {
+            let wait = wait_between_runs(party_restocking, true);
+            assert!(wait > Duration::ZERO, "straight back to the same counter");
+            assert!(wait <= RUN_EVERY);
+            assert!(
+                !skip.held(&renald, t0 + wait),
+                "the counter is still skipped when the next run is due"
+            );
+        }
+        // A party that did buy or sell something may go again at once.
+        assert_eq!(wait_between_runs(true, false), Duration::ZERO);
+    }
+
+    #[test]
+    fn past_the_servers_wall_not_even_a_coin_comes_off() {
+        // +Verity: 36462 carried, 7500 capacity. The server hands nothing
+        // to a character past three times its capacity, whatever it weighs.
+        assert!(past_the_wall(36_462, 7_500));
+        // At the wall a coin still fits, and under it so do light things.
+        assert!(!past_the_wall(22_500, 7_500));
+        assert!(!past_the_wall(13_866, 9_000));
+        // Strength not heard yet is no reason to leave every body alone.
+        assert!(!past_the_wall(13_866, 0));
     }
 
     #[test]

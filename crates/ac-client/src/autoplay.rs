@@ -107,6 +107,9 @@ pub(crate) fn refused_item(item: u32, err: u32, inflight: Option<u32>) -> Option
 pub(crate) struct Room {
     /// The pack is down to the slots kept for a counter's money.
     pub(crate) pack_low: bool,
+    /// Carrying more than three times its capacity: the server hands it
+    /// nothing at all, not even a coin.
+    pub(crate) past_the_wall: bool,
     /// How much more loot it means to carry (see `Client::carry_room`).
     pub(crate) carry: u32,
 }
@@ -116,6 +119,7 @@ impl Room {
     #[cfg(test)]
     pub(crate) const PLENTY: Room = Room {
         pack_low: false,
+        past_the_wall: false,
         carry: u32::MAX,
     };
 }
@@ -1516,8 +1520,16 @@ impl Autoplay {
     ///
     /// Nor does a body left for its weight wait on a character still
     /// without room for what is left on it.
+    ///
+    /// Nor does any body wait on a character past the server's wall, which
+    /// takes nothing from one. +Verity, at nearly five times her capacity,
+    /// broke off her walk to town for a Pyreal the server would not hand
+    /// her, and went back for it twice more. Short of the wall a body still
+    /// waits however laden the character is: coins weigh nothing, and the
+    /// loot rules take the light things that fit.
     pub(crate) fn corpse_waiting(&self, guid: u32, now: Instant, room: Room) -> bool {
         !room.pack_low
+            && !room.past_the_wall
             && !self.looted.contains(&guid)
             && !self.shelved.held(&guid, now)
             && self
@@ -6403,6 +6415,32 @@ mod tests {
         ap.corpse_shut(emptied, &Did::Done, None, t0);
         assert!(ap.looted.contains(&emptied));
         assert!(!ap.shelved.held(&emptied, t0));
+    }
+
+    #[test]
+    fn no_body_waits_on_a_character_the_server_will_hand_nothing() {
+        // +Verity, 36462 carried of a 7500 capacity, on her way to sell:
+        // the looting walked her to a corpse for a Pyreal, the server said
+        // "You are too encumbered to carry that!", and the walk to town
+        // was lost. Past the wall no body is owed, so none is walked to.
+        let t0 = Instant::now();
+        let ap = Autoplay::default();
+        let (me, at) = (glam::Vec3::ZERO, glam::Vec3::new(5.0, 0.0, 0.0));
+        let body = 0x8000_9001;
+        let walled = Room {
+            past_the_wall: true,
+            ..Room::PLENTY
+        };
+        assert!(ap.corpse_owed(body, at, me, t0, Room::PLENTY));
+        assert!(!ap.corpse_waiting(body, t0, walled));
+        assert!(!ap.corpse_owed(body, at, me, t0, walled));
+        // Short of it, a character with no room left for loot still goes
+        // to a body: coins weigh nothing, and light things may fit.
+        let laden = Room {
+            carry: 0,
+            ..Room::PLENTY
+        };
+        assert!(ap.corpse_owed(body, at, me, t0, laden));
     }
 
     #[test]
