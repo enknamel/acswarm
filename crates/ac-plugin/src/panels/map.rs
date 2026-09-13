@@ -20,7 +20,9 @@
 //!   answer is given per name, because fifty-three lines reading
 //!   "Portal to Town Network" are no answer at all. They appear under
 //!   "elsewhere in the world" with how far away they are, and a click
-//!   travels there.
+//!   travels there. A lifestone, a shop or a person is gone to where it
+//!   really stands, upstairs if that is where, and a person is spoken to
+//!   on arriving (see `ac_client::visit`).
 //! * On the world map a double-click asks for a route there and the
 //!   character walks it (see `ac_client::Client::travel_to`); a place
 //!   name typed into "travel to" does the same by the gazetteer. The
@@ -40,6 +42,7 @@
 use super::{caption, has_sheet, title_bar, window, Source};
 use crate::{egui, Client, Ctx, Plugin, Settings};
 use ac_scene::mapimage::MapImage;
+use ac_world::landmarks::Landmark;
 use glam::Vec2;
 use std::sync::mpsc::Receiver;
 
@@ -163,10 +166,35 @@ pub struct MapView {
     pub travel: Option<(usize, usize)>,
     /// Town names and world positions for the world map.
     pub places: Vec<(&'static str, Vec2)>,
-    /// What the search found elsewhere in the world: (label, position,
-    /// metres away). Towns, lifestones, shops and standing NPCs from
-    /// `ac_world::landmarks` and the gazetteer, nearest first.
-    pub elsewhere: Vec<(String, Vec2, f32)>,
+    /// What the search found elsewhere in the world. Towns, lifestones,
+    /// shops and standing NPCs from `ac_world::landmarks` and the
+    /// gazetteer, nearest first.
+    pub elsewhere: Vec<Elsewhere>,
+}
+
+/// One thing the search found elsewhere in the world.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Elsewhere {
+    pub label: String,
+    pub at: Vec2,
+    /// Metres away.
+    pub away: f32,
+    /// The landmark it is, when it is one. A click goes to its real
+    /// spot, height and all, rather than to `at`: a flat position for a
+    /// shopkeeper upstairs is the ground floor inside her door, and
+    /// travel stopped there, three metres under her.
+    pub landmark: Option<&'static Landmark>,
+}
+
+impl Elsewhere {
+    fn place(label: String, at: Vec2) -> Elsewhere {
+        Elsewhere {
+            label,
+            at,
+            away: 0.0,
+            landmark: None,
+        }
+    }
 }
 
 /// The towns, landmarks and portals matching `search`, nearest to `me`
@@ -183,15 +211,15 @@ pub struct MapView {
 /// dungeon is not somewhere to walk to from here, and the data is
 /// mostly such portals. The ruined ones say so themselves and are left
 /// out.
-pub fn world_search(search: &str, me: Vec2) -> Vec<(String, Vec2, f32)> {
+pub fn world_search(search: &str, me: Vec2) -> Vec<Elsewhere> {
     let needle = search.trim().to_lowercase();
     if needle.len() < 3 {
         return Vec::new();
     }
-    let mut out: Vec<(String, Vec2, f32)> = ac_world::towns::PLACES
+    let mut out: Vec<Elsewhere> = ac_world::towns::PLACES
         .iter()
         .filter(|p| p.name.to_lowercase().contains(&needle))
-        .map(|p| (format!("{} (town)", p.name), p.world_xy(), 0.0))
+        .map(|p| Elsewhere::place(format!("{} (town)", p.name), p.world_xy()))
         .collect();
     // One per name here too. The gazetteer holds five hundred and
     // twenty-two Wailing Statues and a hundred and sixty-two Statues;
@@ -203,16 +231,19 @@ pub fn world_search(search: &str, me: Vec2) -> Vec<(String, Vec2, f32)> {
             continue;
         }
         seen.push(l.name.clone());
-        out.push((format!("{} ({})", l.name, l.kind.label()), l.xy(), 0.0));
+        out.push(Elsewhere {
+            landmark: Some(l),
+            ..Elsewhere::place(format!("{} ({})", l.name, l.kind.label()), l.xy())
+        });
         if seen.len() >= 40 {
             break;
         }
     }
     out.extend(portal_search(&needle, me));
     for e in &mut out {
-        e.2 = e.1.distance(me);
+        e.away = e.at.distance(me);
     }
-    out.sort_by(|a, b| a.2.total_cmp(&b.2));
+    out.sort_by(|a, b| a.away.total_cmp(&b.away));
     out.truncate(20);
     out
 }
@@ -223,7 +254,7 @@ pub fn world_search(search: &str, me: Vec2) -> Vec<(String, Vec2, f32)> {
 /// One per name matters: fifty-three portals are called "Portal to Town
 /// Network" and a list of fifty-three identical lines is a list of
 /// none. The nearest of each is the one worth walking to anyway.
-fn portal_search(needle: &str, me: Vec2) -> Vec<(String, Vec2, f32)> {
+fn portal_search(needle: &str, me: Vec2) -> Vec<Elsewhere> {
     let mut found: Vec<&ac_world::portals::Portal> = ac_world::portals::named(needle)
         .into_iter()
         .filter(|p| p.works() && p.mouth_outdoors())
@@ -240,7 +271,10 @@ fn portal_search(needle: &str, me: Vec2) -> Vec<(String, Vec2, f32)> {
             continue;
         }
         seen.push(&p.name);
-        out.push((format!("{} (portal)", p.name), p.from_xy(), 0.0));
+        out.push(Elsewhere::place(
+            format!("{} (portal)", p.name),
+            p.from_xy(),
+        ));
         if out.len() >= 20 {
             break;
         }
@@ -319,7 +353,9 @@ pub fn view(c: &Client) -> Option<MapView> {
         coords,
         objects,
         route: c.travel_route().map(|r| r.to_vec()).unwrap_or_default(),
-        travel: c.travel_progress(),
+        // A visit walking its last stretch has no journey to show, and
+        // still wants a Cancel.
+        travel: c.travel_progress().or_else(|| c.visiting().map(|_| (1, 1))),
         places: ac_world::towns::PLACES
             .iter()
             .map(|p| (p.name, p.world_xy()))
@@ -388,6 +424,8 @@ pub struct Actions {
     pub select: Option<u32>,
     pub activate: Option<u32>,
     pub travel_to: Option<Vec2>,
+    /// Go to a landmark (and speak to whoever keeps it).
+    pub visit: Option<&'static Landmark>,
     pub travel_to_place: Option<String>,
     pub cancel_travel: bool,
 }
@@ -703,11 +741,22 @@ pub fn draw(
                         .id_salt("map_elsewhere")
                         .max_height(120.0)
                         .show(ui, |ui| {
-                            for (label, at, away) in &v.elsewhere {
-                                let text = if *away >= 1000.0 {
+                            for e in &v.elsewhere {
+                                let (label, away) = (&e.label, e.away);
+                                let text = if away >= 1000.0 {
                                     format!("{label}  {:.1} km", away / 1000.0)
                                 } else {
                                     format!("{label}  {away:.0} m")
+                                };
+                                // An npc row may be a statue or a marker:
+                                // only who is found there is spoken to.
+                                use ac_world::landmarks::Kind as Landmarks;
+                                let click = match e.landmark.map(|l| l.kind) {
+                                    Some(Landmarks::Vendor) => "click to go and talk",
+                                    Some(Landmarks::Npc) => {
+                                        "click to go, and talk if someone is there"
+                                    }
+                                    _ => "click to travel",
                                 };
                                 let row = ui
                                     .add(
@@ -718,12 +767,12 @@ pub fn draw(
                                         .sense(egui::Sense::click())
                                         .selectable(false),
                                     )
-                                    .on_hover_text(format!(
-                                        "{}  (click to travel)",
-                                        coords_of(*at)
-                                    ));
+                                    .on_hover_text(format!("{}  ({click})", coords_of(e.at)));
                                 if row.clicked() {
-                                    actions.travel_to = Some(*at);
+                                    match e.landmark {
+                                        Some(l) => actions.visit = Some(l),
+                                        None => actions.travel_to = Some(e.at),
+                                    }
                                 }
                             }
                         });
@@ -811,16 +860,14 @@ impl Map {
                 travel: Some((1, 3)),
                 places: vec![("Holtburg", me + Vec2::new(-10.0, 20.0))],
                 elsewhere: vec![
-                    (
-                        "Arwic (town)".into(),
-                        me + Vec2::new(5600.0, -2000.0),
-                        5950.0,
-                    ),
-                    (
-                        "Aun Ralirea (npc)".into(),
-                        me + Vec2::new(300.0, 40.0),
-                        302.0,
-                    ),
+                    Elsewhere {
+                        away: 5950.0,
+                        ..Elsewhere::place("Arwic (town)".into(), me + Vec2::new(5600.0, -2000.0))
+                    },
+                    Elsewhere {
+                        away: 302.0,
+                        ..Elsewhere::place("Aun Ralirea (npc)".into(), me + Vec2::new(300.0, 40.0))
+                    },
                 ],
             }),
             show: true,
@@ -999,6 +1046,13 @@ impl Plugin for Map {
                     lines.push(format!("no route to {}", coords_of(w)));
                 }
             }
+            if let Some(l) = actions.visit {
+                if c.visit_landmark(l) {
+                    lines.push(format!("going to {}", l.name));
+                } else {
+                    lines.push(format!("no way to {}", l.name));
+                }
+            }
             if let Some(name) = actions.travel_to_place {
                 match c.travel_to_place(&name) {
                     Ok(()) => lines.push(format!("travelling to {name}")),
@@ -1047,7 +1101,7 @@ mod search_tests {
         // most of the world before portals were in it.
         let found = world_search("halls of metos", holtburg());
         assert!(
-            found.iter().any(|(label, _, _)| label.contains("(portal)")),
+            found.iter().any(|e| e.label.contains("(portal)")),
             "{found:?}"
         );
     }
@@ -1057,7 +1111,7 @@ mod search_tests {
         let found = world_search("town network", holtburg());
         let n = found
             .iter()
-            .filter(|(l, _, _)| l.starts_with("Portal to Town Network"))
+            .filter(|e| e.label.starts_with("Portal to Town Network"))
             .count();
         assert_eq!(n, 1, "{found:?}");
     }
@@ -1068,7 +1122,7 @@ mod search_tests {
         // one of them stands underground.
         let found = world_search("surface", holtburg());
         assert!(
-            !found.iter().any(|(l, _, _)| l.starts_with("Surface")),
+            !found.iter().any(|e| e.label.starts_with("Surface")),
             "{found:?}"
         );
     }
@@ -1076,10 +1130,7 @@ mod search_tests {
     #[test]
     fn towns_and_the_people_in_them_are_still_found() {
         let town = world_search("holtburg", holtburg());
-        assert!(
-            town.iter().any(|(l, _, _)| l.contains("(town)")),
-            "{town:?}"
-        );
+        assert!(town.iter().any(|e| e.label.contains("(town)")), "{town:?}");
         // The gazetteer's named folk and shopkeepers were already
         // searchable and must stay so.
         let folk = world_search("ulgrim", holtburg());
@@ -1092,7 +1143,7 @@ mod search_tests {
         let found = world_search("wailing statue", holtburg());
         let n = found
             .iter()
-            .filter(|(l, _, _)| l.starts_with("Wailing Statue"))
+            .filter(|e| e.label.starts_with("Wailing Statue"))
             .count();
         assert_eq!(n, 1, "{found:?}");
     }
@@ -1102,8 +1153,30 @@ mod search_tests {
         let from = holtburg();
         let found = world_search("portal", from);
         for pair in found.windows(2) {
-            assert!(pair[0].2 <= pair[1].2, "{found:?}");
+            assert!(pair[0].away <= pair[1].away, "{found:?}");
         }
+    }
+
+    #[test]
+    fn a_shopkeeper_upstairs_is_gone_to_with_her_floor() {
+        // The row the player clicked for the Holtburg Archmage. Its flat
+        // position led to the ground floor inside her door; the landmark
+        // behind it knows her cell and her height.
+        let found = world_search("archmage cindrue", holtburg());
+        let row = found
+            .iter()
+            .find(|e| e.label.starts_with("Archmage Cindrue"))
+            .expect("she is found");
+        let l = row.landmark.expect("a landmark row carries its landmark");
+        assert_eq!(l.cell, 0xA9B4_011B);
+        assert!((l.at.z - 69.0).abs() < 0.5, "{:?}", l.at);
+        assert_eq!(l.kind, ac_world::landmarks::Kind::Vendor);
+        // Towns and portals have no landmark: a click travels to them.
+        let town = world_search("holtburg", holtburg());
+        assert!(town
+            .iter()
+            .filter(|e| e.label.contains("(town)"))
+            .all(|e| e.landmark.is_none()));
     }
 }
 

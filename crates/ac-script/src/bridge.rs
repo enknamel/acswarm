@@ -1575,16 +1575,27 @@ impl Api for CtxApi<'_, '_> {
     }
 
     fn travel_to(&mut self, destination: &str) -> bool {
-        let Some(goal) = ac_world::towns::parse_destination(destination) else {
-            self.cx
-                .log(format!("travel_to: unknown destination '{destination}'").as_str());
-            return false;
-        };
-        self.client().travel_to(goal)
+        use crate::api::Destination;
+        let from = self
+            .client()
+            .player
+            .as_ref()
+            .map(|p| p.world_position().truncate())
+            .unwrap_or_default();
+        match crate::api::destination(destination, from) {
+            Some(Destination::Landmark(l)) => self.client().visit_landmark(l),
+            Some(Destination::Place(goal)) => self.client().travel_to(goal),
+            None => {
+                self.cx
+                    .log(format!("travel_to: unknown destination '{destination}'").as_str());
+                false
+            }
+        }
     }
 
     fn traveling(&mut self) -> bool {
-        self.client().traveling()
+        let c = self.client();
+        c.traveling() || c.visiting().is_some()
     }
 
     fn cancel_travel(&mut self) {

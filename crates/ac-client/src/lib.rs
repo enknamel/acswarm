@@ -57,6 +57,7 @@ pub mod shopping;
 pub mod steps;
 pub mod summoning;
 pub mod travel;
+pub mod visit;
 pub mod weapons;
 
 use std::time::{Duration, Instant};
@@ -222,6 +223,8 @@ pub struct Client {
     pub pathfinder: pathfinder::Pathfinder,
     /// The overland route being walked, if any (see `travel`).
     pub travel: travel::Travel,
+    /// Going to see someone, and the last use sent by hand (see `visit`).
+    pub visits: visit::Visits,
     /// Melee combat mode is on.
     pub combat: bool,
     /// Magic combat mode is on.
@@ -419,6 +422,7 @@ impl Client {
             steering: route::Steering::new(Instant::now()),
             pathfinder,
             travel: Default::default(),
+            visits: Default::default(),
             combat: false,
             magic: false,
             missile: false,
@@ -923,6 +927,10 @@ impl Client {
                                     if frees_the_cast_slot(err) {
                                         self.autoplay.cast_sent = None;
                                     }
+                                    // A use by hand that has been answered
+                                    // is not carried on when the walk for
+                                    // it runs out (see `visit`).
+                                    self.visits.answered();
                                     // Only a refusal ends the walk.
                                     //
                                     // The server answers a use of
@@ -1092,9 +1100,15 @@ impl Client {
         self.held_run = input.run;
         // The user taking the controls ends an overland trip.
         let manual = input.forward != 0.0 || input.strafe != 0.0;
-        if manual && self.traveling() {
+        if manual && (self.traveling() || self.visiting().is_some()) {
             tracing::info!("travel: cancelled, the user took over");
             self.cancel_travel();
+        }
+        // A visit: the journey there, the walk up to the person, the use.
+        // Before the journey's leg is read, so a visit that takes over
+        // from its journey walks this frame.
+        if !manual {
+            self.tick_visit(now);
         }
         // The next leg of the overland route, if one is being walked.
         let travel_goal = self.travel_goal(now);
@@ -1286,9 +1300,10 @@ impl Client {
             }
             let quiet =
                 self.move_to.is_some() && self.move_to_since.elapsed() < Duration::from_secs(12);
+            let mut ran_out = None;
             if !quiet && self.move_to.is_some() {
                 tracing::debug!("server move-to timed out");
-                self.move_to = None;
+                ran_out = self.move_to.take();
             }
             pl.report(&mut self.session, &input, now, quiet);
             let dirty = pl.dirty;
@@ -1301,6 +1316,11 @@ impl Client {
                         rotation: pl.rotation(),
                     });
                 }
+            }
+            // A server walk let go short of what it was walking to: the
+            // use it was for is walked the rest of the way (see `visit`).
+            if ran_out.is_some() {
+                self.server_walk_ran_out(ran_out, now);
             }
             return PlayerFrame { dirty, pose };
         }
@@ -1769,6 +1789,8 @@ impl Client {
                 if let Some(pl) = self.player.as_mut() {
                     pl.report_stopped(&mut self.session, self.held_run);
                 }
+                // What a server walk that runs out was walking to.
+                self.visits.used(guid, Instant::now());
             }
             self.session.send_action(action::USE, &guid.to_le_bytes());
         }

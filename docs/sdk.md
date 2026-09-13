@@ -261,7 +261,10 @@ impl Plugin for Hunter {
 The verbs to know: `use_by_name` / `interact(guid)` (double-click),
 `pick_up`, `attack(guid)`, `toggle_combat`, `cast(spell)` / `cast_at`,
 `say`, `take(guid)` / `close_container`, `buy` / `sell`, `give`,
-`use_on(item, target)`, `travel_to(goal)`, `set_noclip` (refused, with
+`use_on(item, target)`, `travel_to(goal)` (or `visit_landmark`, which
+goes to a shopkeeper or NPC where they really stand, upstairs included,
+and uses them on arriving; Rhai's `travel_to("Archmage Cindrue")` does
+the same), `set_noclip` (refused, with
 false, unless the movement rules allow flying here -- see
 `docs/game/mechanics.md`), `jump`. Read
 `docs/plugins.md` ("Protocol facts") before writing a loop: actions are

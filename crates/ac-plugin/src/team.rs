@@ -183,7 +183,7 @@ impl Request {
                 client.autoplay.drop_target();
                 client.attack_target = None;
                 client.follow = None;
-                if client.traveling() {
+                if client.traveling() || client.visiting().is_some() {
                     client.cancel_travel();
                 }
             }

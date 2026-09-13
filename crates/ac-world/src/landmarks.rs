@@ -26,6 +26,14 @@ impl Kind {
         }
     }
 
+    /// Whether someone to talk to may stand there. A shopkeeper does. An
+    /// npc row often is someone, but as often a Wailing Statue, an
+    /// Exploration Marker or a generator, so whether to speak is decided
+    /// by what is found there. A lifestone is only somewhere to go.
+    pub fn may_be_someone(self) -> bool {
+        matches!(self, Kind::Vendor | Kind::Npc)
+    }
+
     fn parse(s: &str) -> Option<Kind> {
         Some(match s {
             "lifestone" => Kind::Lifestone,
@@ -119,6 +127,22 @@ pub fn search(needle: &str, from: Option<Vec2>) -> Vec<&'static Landmark> {
     v
 }
 
+/// The landmark called exactly `name` (case-insensitively), the one
+/// nearest `from` when several share it.
+///
+/// Exact, unlike [`search`]: a script that says "Holtburg" means the
+/// town, and a part of a name would find the Holtburg Town Crier first.
+pub fn named(name: &str, from: Vec2) -> Option<&'static Landmark> {
+    let want = name.trim().to_lowercase();
+    if want.is_empty() {
+        return None;
+    }
+    all()
+        .iter()
+        .filter(|l| l.name.to_lowercase() == want)
+        .min_by(|a, b| a.xy().distance(from).total_cmp(&b.xy().distance(from)))
+}
+
 /// The lifestone nearest `world`.
 pub fn nearest_lifestone(world: Vec2) -> Option<&'static Landmark> {
     all()
@@ -153,6 +177,23 @@ mod tests {
         assert!(!smiths.is_empty(), "no blacksmith anywhere");
         assert!(search("", None).is_empty());
         assert_eq!(Kind::Vendor.label(), "vendor");
+    }
+
+    #[test]
+    fn a_person_upstairs_keeps_her_cell_and_her_height() {
+        // Archmage Cindrue keeps a shop on the upper floor of a house in
+        // Holtburg. Travelling to her flat position stopped three metres
+        // under her, on the ground floor inside the door.
+        let holtburg = crate::towns::find("Holtburg").unwrap().world_xy();
+        let l = named("archmage cindrue", holtburg).expect("Archmage Cindrue is a landmark");
+        assert_eq!(l.name, "Archmage Cindrue");
+        assert_eq!(l.cell, 0xA9B4_011B);
+        assert!(!l.outdoors());
+        assert!(l.kind.may_be_someone());
+        assert!((l.at.z - 69.0).abs() < 0.5, "{:?}", l.at);
+        // Only the whole name: a part of one is not an exact match.
+        assert!(named("Archmage Cind", holtburg).is_none());
+        assert!(!Kind::Lifestone.may_be_someone());
     }
 
     #[test]

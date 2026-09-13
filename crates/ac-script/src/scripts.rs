@@ -642,6 +642,23 @@ mod tests {
             assert!(scripts.command(0, "go", "Atlantis"));
         }
         assert_eq!(rec.calls, ["[0] travel_to arwic", "[0] cancel_travel"]);
+        // A landmark by its whole name is a destination too (a visit),
+        // and neither a town nor coordinates are taken for one.
+        use crate::api::{destination, Destination};
+        let from = glam::Vec2::ZERO;
+        match destination("Archmage Cindrue", from) {
+            Some(Destination::Landmark(l)) => assert_eq!(l.cell, 0xA9B4_011B),
+            other => panic!("{other:?}"),
+        }
+        assert!(matches!(
+            destination("arwic", from),
+            Some(Destination::Place(_))
+        ));
+        assert!(matches!(
+            destination("42.1N, 33.6E", from),
+            Some(Destination::Place(_))
+        ));
+        assert_eq!(destination("Atlantis", from), None);
         assert_eq!(
             rec.logs[1..],
             [

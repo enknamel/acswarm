@@ -491,7 +491,7 @@ impl Api for Recorder {
     }
     fn travel_to(&mut self, destination: &str) -> bool {
         self.record(format!("travel_to {destination}"));
-        self.traveling = ac_world::towns::parse_destination(destination).is_some();
+        self.traveling = crate::api::destination(destination, glam::Vec2::ZERO).is_some();
         self.traveling
     }
     fn traveling(&mut self) -> bool {

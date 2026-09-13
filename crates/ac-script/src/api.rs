@@ -350,15 +350,49 @@ pub trait Api {
     fn switch(&mut self, i: i64);
     /// Plan an overland route to a destination and walk it: a place name
     /// ("Arwic", by prefix or part), map coordinates ("42.1N, 33.6E") or a
-    /// world position ("x,y"). False when the destination is unknown, the
-    /// character is not outdoors, or no route exists.
+    /// world position ("x,y"). A landmark's whole name ("Archmage
+    /// Cindrue") goes to where it really stands, up the stairs if need
+    /// be, and speaks to whoever keeps it (see [`destination`]). False
+    /// when the destination is unknown or no route exists.
     fn travel_to(&mut self, destination: &str) -> bool;
-    /// Whether an overland route is being walked.
+    /// Whether an overland route is being walked, or a visit to a
+    /// landmark made.
     fn traveling(&mut self) -> bool;
     fn cancel_travel(&mut self);
     /// A gazetteer place as a map `{ name, ns, ew, x, y }` (map
     /// coordinates and world xy) or unit when unknown.
     fn place(&mut self, name: &str) -> Dynamic;
+}
+
+/// Where a script's `travel_to` goes.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Destination {
+    /// A landmark: its real spot, and a word with whoever keeps it.
+    Landmark(&'static ac_world::landmarks::Landmark),
+    /// A world xy: a town, map coordinates or a position.
+    Place(glam::Vec2),
+}
+
+/// What a destination typed into a script names, from `from` (world
+/// xy, for the nearest of several landmarks sharing a name).
+///
+/// A landmark by its whole name comes first, then everything
+/// `travel_to` always took (a town, map coordinates, a position), and
+/// only then part of a landmark's name. The order keeps towns towns: a
+/// part of a name would find the Holtburg Town Crier before Holtburg.
+pub fn destination(s: &str, from: glam::Vec2) -> Option<Destination> {
+    if let Some(l) = ac_world::landmarks::named(s, from) {
+        return Some(Destination::Landmark(l));
+    }
+    if let Some(xy) = ac_world::towns::parse_destination(s) {
+        return Some(Destination::Place(xy));
+    }
+    if s.trim().len() < 3 {
+        return None;
+    }
+    ac_world::landmarks::search(s, Some(from))
+        .first()
+        .map(|l| Destination::Landmark(l))
 }
 
 /// A gazetteer place as the script sees it (see `Api::place`).

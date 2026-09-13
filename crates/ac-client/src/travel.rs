@@ -231,11 +231,6 @@ impl Client {
         Some((self.travel.grid.clone()?, self.travel.region.clone()?))
     }
 
-    /// Plan a journey from where the character stands to `goal` (world
-    /// xy) and start it. Portals are used when they are quicker than
-    /// walking, and so are the recall spells the character can cast
-    /// right now (`castable_recalls`) unless the journey's `Prefs` say
-    /// `use_recalls: false`. False when nothing reaches the goal.
     /// Go there. The one way anything asks for movement.
     ///
     /// Everything that wants a character to be somewhere else says so
@@ -256,7 +251,22 @@ impl Client {
     /// refuses rather than leans on. Beyond one -- or out of a dungeon,
     /// where the feet lead nowhere at all -- it is a journey, planned
     /// with whatever the character can cast or carry.
+    ///
+    /// Asking for movement this way ends any visit being made
+    /// (`visit`): whoever asks has taken the character somewhere else.
     pub fn head_for(&mut self, goal: glam::Vec3, stop: f32, why: &str) -> crate::did::Did {
+        self.drop_visit(why);
+        self.head_toward(goal, stop, why)
+    }
+
+    /// [`head_for`](Self::head_for) for a visit's own last stretch: the
+    /// same walk or journey, without ending the visit that asked for it.
+    pub(crate) fn head_toward(
+        &mut self,
+        goal: glam::Vec3,
+        stop: f32,
+        why: &str,
+    ) -> crate::did::Did {
         use crate::did::Did;
         let Some(pl) = self.player.as_ref() else {
             return Did::waiting("not in the world yet");
@@ -275,7 +285,7 @@ impl Client {
         // past `WALKABLE` and goes to the planner anyway.
         if away <= WALKABLE {
             if self.traveling() {
-                self.cancel_travel();
+                self.end_trip();
             }
             self.follow = Some(crate::Follow { target: goal, stop });
             return Did::Acting;
@@ -284,14 +294,29 @@ impl Client {
         if self.traveling() {
             return Did::Acting;
         }
-        if self.travel_to(Vec2::new(goal.x, goal.y)) {
+        if self.plan_trip(Vec2::new(goal.x, goal.y)) {
             return Did::Acting;
         }
         tracing::info!("travel: no way to {why} from here");
         Did::blocked("no way there from here")
     }
 
+    /// Plan a journey from where the character stands to `goal` (world
+    /// xy) and start it. Portals are used when they are quicker than
+    /// walking, and so are the recall spells the character can cast
+    /// right now (`castable_recalls`) unless the journey's `Prefs` say
+    /// `use_recalls: false`. False when nothing reaches the goal.
+    ///
+    /// A journey asked for from outside ends any visit being made.
     pub fn travel_to(&mut self, goal: Vec2) -> bool {
+        self.drop_visit("travelling somewhere else");
+        self.plan_trip(goal)
+    }
+
+    /// [`travel_to`](Self::travel_to) from inside: planning the way again
+    /// after a refusal, or a visit setting off, neither of which is a new
+    /// destination as far as a visit is concerned.
+    pub(crate) fn plan_trip(&mut self, goal: Vec2) -> bool {
         let Some(pl) = self.player.as_ref() else {
             tracing::warn!("travel: the character is not in the world");
             return false;
@@ -472,7 +497,9 @@ impl Client {
         };
         let Some(step) = t.steps.get(self.travel.step).cloned() else {
             tracing::info!("travel: arrived");
-            self.cancel_travel();
+            // The journey's own end, not the player's: a visit it was
+            // made for carries on from here.
+            self.end_trip();
             return false;
         };
         let Some(pl) = self.player.as_ref() else {
@@ -631,13 +658,13 @@ impl Client {
                     self.travel.refused.push(mouth);
                     let goal = self.travel.goal;
                     self.cancel_travel_keeping_refusals();
-                    return goal.is_some_and(|g| self.travel_to(g));
+                    return goal.is_some_and(|g| self.plan_trip(g));
                 }
                 tracing::warn!(
                     "travel: step {} ({label}): no route to {target:?}, giving up",
                     self.travel.step
                 );
-                self.cancel_travel();
+                self.end_trip();
                 false
             }
         }
@@ -708,10 +735,14 @@ impl Client {
     /// world instead: talking to a vendor, opening a chest, attacking.
     /// The server walks the character to whatever they are using, and a
     /// trip that carried on afterwards would walk them away again.
+    ///
+    /// A visit ends the same way, walking or not: the player is doing
+    /// something else. A visit's own use takes the visit out first.
     pub(crate) fn interrupt_travel(&mut self, what: &str) {
+        self.drop_visit(what);
         if self.traveling() {
             tracing::info!("travel: stopped, {what}");
-            self.cancel_travel();
+            self.end_trip();
         }
     }
 
@@ -729,7 +760,8 @@ impl Client {
     /// that keeps pulling against the player is worse than one that
     /// does nothing.
     pub fn stop_moving_by_itself(&mut self) {
-        let was_busy = self.travel.trip.is_some() || self.follow.is_some();
+        let was_busy =
+            self.travel.trip.is_some() || self.follow.is_some() || self.visits.current.is_some();
         self.cancel_travel();
         if self.follow.take().is_some() {
             self.steering.reset();
@@ -740,7 +772,16 @@ impl Client {
         }
     }
 
+    /// Stop the journey, and the visit it may be part of: the player
+    /// pressed Cancel, a script said so, or something else took over.
     pub fn cancel_travel(&mut self) {
+        self.drop_visit("travel cancelled");
+        self.end_trip();
+    }
+
+    /// End the journey and nothing else: it arrived, it gave up, or it is
+    /// about to be planned again. A visit it was made for carries on.
+    pub(crate) fn end_trip(&mut self) {
         if self.travel.trip.take().is_some() {
             tracing::info!("travel: cancelled");
         }
@@ -793,7 +834,7 @@ impl Client {
         let goal = self.travel.goal;
         self.cancel_travel_keeping_refusals();
         if let Some(goal) = goal {
-            self.travel_to(goal);
+            self.plan_trip(goal);
         }
     }
 
@@ -956,7 +997,7 @@ impl Client {
         let goal = self.travel.goal;
         self.cancel_travel_keeping_refusals();
         if let Some(goal) = goal {
-            self.travel_to(goal);
+            self.plan_trip(goal);
         }
     }
 
@@ -997,7 +1038,7 @@ impl Client {
         let refused_recalls = std::mem::take(&mut self.travel.refused_recalls);
         let refused_gems = std::mem::take(&mut self.travel.refused_gems);
         let goal = self.travel.goal;
-        self.cancel_travel();
+        self.end_trip();
         self.travel.refused = refused;
         self.travel.refused_recalls = refused_recalls;
         self.travel.refused_gems = refused_gems;
@@ -1163,7 +1204,7 @@ impl Client {
                     self.cancel_travel_keeping_refusals();
                 }
                 self.travel.step_since = Some(now);
-                self.travel_to(goal);
+                self.plan_trip(goal);
             }
             // The new plan starts next frame: planning again from inside
             // this call could go round for ever.
@@ -1213,7 +1254,7 @@ impl Client {
                 // the plan from here takes the new position as it is.
                 if let Some(goal) = self.travel.goal {
                     tracing::info!("travel: carried off to {me:?}; planning again from here");
-                    self.travel_to(goal);
+                    self.plan_trip(goal);
                 }
                 // Whatever the new plan is, it starts next frame: planning
                 // again from inside this call could go round for ever.
@@ -1266,7 +1307,7 @@ impl Client {
                         let goal = self.travel.goal;
                         self.cancel_travel_keeping_refusals();
                         if let Some(goal) = goal {
-                            self.travel_to(goal);
+                            self.plan_trip(goal);
                         }
                         // Next frame walks the new plan: replanning and
                         // carrying on inside one call risks going round.
@@ -1332,7 +1373,7 @@ impl Client {
                         if next + 1 >= n && me.distance(wp) > 2.0 * ARRIVE {
                             if self.travel.replans >= REPLANS {
                                 tracing::warn!("travel: cannot reach {wp:?} from here; giving up");
-                                self.cancel_travel();
+                                self.end_trip();
                                 return None;
                             }
                             tracing::warn!(
@@ -1340,7 +1381,7 @@ impl Client {
                             );
                             let replans = self.travel.replans + 1;
                             if let Some(goal) = self.travel.goal {
-                                self.travel_to(goal);
+                                self.plan_trip(goal);
                             }
                             self.travel.replans = replans;
                             return None;
