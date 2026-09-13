@@ -499,6 +499,12 @@ pub(crate) const MERGE_EVERY: Duration = Duration::from_millis(600);
 /// How near a body has to be to count as one the character made and
 /// should finish with before starting another fight.
 const CORPSE_IS_MINE: f32 = 25.0;
+/// How long after a killing blow its corpse is taken to be on the way.
+/// The server makes the body a moment after the creature dies.
+const CORPSE_APPEARS: Duration = Duration::from_secs(3);
+/// Hit this recently, the character is in a fight whether or not it
+/// chose one.
+const UNDER_ATTACK: Duration = Duration::from_secs(4);
 
 /// How long a monster's corpse lasts before it rots away. ACE gives an
 /// unlooted corpse no timer at all until its first heartbeat, when it
@@ -993,6 +999,14 @@ pub struct Autoplay {
     aside_said: Option<String>,
     /// Corpses already emptied.
     pub(crate) looted: Vec<u32>,
+    /// When the character last landed a killing blow. Its body is owed
+    /// from that moment, not from when the corpse turns up a second or
+    /// two later: in that gap the next target used to be picked, and a
+    /// busy spot never gave the loot a turn.
+    pub(crate) last_kill: Option<Instant>,
+    /// When something last hit the character. A fight that has come to
+    /// it is fought first, body owed or not.
+    pub(crate) last_hit_us: Option<Instant>,
     /// Corpses that would not open. A corpse is locked to the group
     /// that killed it until it has rotted a while, so this is a
     /// "later", not a "never", and the wait grows if it keeps saying no.
@@ -3213,16 +3227,44 @@ impl Client {
     /// it would stop the fighting altogether. This is about the one at
     /// its feet that it just made.
     pub fn owes_a_corpse(&self) -> bool {
+        // Just killed something: its body is on the way.
+        if self
+            .autoplay
+            .last_kill
+            .is_some_and(|t| t.elapsed() < CORPSE_APPEARS)
+        {
+            return true;
+        }
         let Some(me) = self.player.as_ref().map(|p| p.world_position()) else {
             return false;
         };
+        let now = Instant::now();
         self.world
             .objects
             .values()
             .filter(|o| o.object_desc_flags & ac_world::object_desc_flags::CORPSE != 0)
             .filter(|o| !self.autoplay.looted.contains(&o.guid))
+            // One that would not open is set aside for a while, and
+            // waiting on it would stop the fighting altogether.
+            .filter(|o| !self.autoplay.shelved.held(&o.guid, now))
             .filter_map(|o| o.world_pos())
             .any(|at| at.distance(me) <= CORPSE_IS_MINE)
+    }
+
+    /// Something has hit the character in the last few seconds.
+    pub fn under_attack(&self) -> bool {
+        self.autoplay
+            .last_hit_us
+            .is_some_and(|t| t.elapsed() < UNDER_ATTACK)
+    }
+
+    /// The next fight waits for the body the last one left: every body
+    /// is to be emptied first, one is owed, and nothing is hitting the
+    /// character meanwhile. With looting off nothing is ever owed, or
+    /// the fighting would stop for good.
+    pub fn waits_for_a_corpse(&self) -> bool {
+        let loot = &self.autoplay.config.loot;
+        loot.enabled && loot.after_every_fight && self.owes_a_corpse() && !self.under_attack()
     }
 
     pub fn pack_full(&self) -> bool {
@@ -3300,6 +3342,10 @@ impl Client {
                     return true;
                 }
             }
+        }
+        // Finish what it killed before setting off after the next one.
+        if self.waits_for_a_corpse() {
+            return false;
         }
         if self
             .autoplay
@@ -3437,7 +3483,11 @@ impl Client {
             Some(g) if alive(self, g) => Some(g),
             _ => {
                 self.autoplay.casting_at = None;
-                self.pick_target(cfg)
+                if self.waits_for_a_corpse() {
+                    None
+                } else {
+                    self.pick_target(cfg)
+                }
             }
         };
         let Some(guid) = target else {

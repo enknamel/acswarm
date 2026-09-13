@@ -139,9 +139,14 @@ fn worth_fighting(client: &Client, _now: Instant) -> f32 {
     if engaged {
         return UNDECIDED;
     }
+    // Something is hitting the character: that fight has come to it,
+    // and it is fought before anything is picked up.
+    if client.under_attack() {
+        return UNDECIDED;
+    }
     // Told to finish what it kills: while one of its own bodies is
-    // still unlooted, another fight can wait.
-    if client.autoplay.config.loot.after_every_fight && client.owes_a_corpse() {
+    // still unlooted -- or about to appear -- another fight can wait.
+    if client.waits_for_a_corpse() {
         return fight_worth(false, true, 0.0);
     }
     let nearest = client

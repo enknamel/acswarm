@@ -1396,6 +1396,13 @@ impl Client {
                     return;
                 }
                 Some((_, _, event::ATTACKER_NOTIFICATION, rest)) => {
+                    // Our killing blow: its body is owed from now, before
+                    // the corpse appears (see `Client::owes_a_corpse`).
+                    if ac_net::messages::AttackNotice::parse_attacker(rest)
+                        .is_ok_and(|n| n.percent >= 0.999)
+                    {
+                        self.autoplay.last_kill = Some(Instant::now());
+                    }
                     match ac_net::messages::AttackNotice::parse_attacker(rest) {
                         Ok(n) => Ok(ChatLine {
                             text: format!(
@@ -1417,6 +1424,8 @@ impl Client {
                     }
                 }
                 Some((_, _, event::DEFENDER_NOTIFICATION, rest)) => {
+                    // Something hit us: that fight comes before any loot.
+                    self.autoplay.last_hit_us = Some(Instant::now());
                     match ac_net::messages::AttackNotice::parse_defender(rest) {
                         Ok(n) => Ok(ChatLine {
                             text: format!(
