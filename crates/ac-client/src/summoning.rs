@@ -22,9 +22,10 @@
 //!
 //! Past level 50 a character picks a summoning mastery, and an essence
 //! of another mastery is refused. The client is not told which mastery
-//! the character has, so an essence that summons nothing is tried again
-//! after its cooldown and set aside for a while after a few failures,
-//! whatever the reason was.
+//! the character has. An essence the server turns away outright -- of
+//! another mastery, or needing more skill than there is -- is set aside
+//! at once; one that summons nothing for no reason given is tried again
+//! after its cooldown and set aside for a while after a few failures.
 //!
 //! A summoned creature arrives named for its owner and carrying the
 //! owner's guid (`WorldObject::pet_owner`): the fight rules never pick
@@ -190,7 +191,66 @@ pub fn choose(essences: &[Essence], skill: u32, takes: impl Fn(Element) -> f32) 
         .map(|(_, _, g)| g)
 }
 
+/// Why the server would not summon with an essence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Refusal {
+    /// Not for this character: of another mastery ("You must be a
+    /// Primalist to use the Acid Wisp Essence (50)") or needing more skill
+    /// than it has ("Your Summoning is too low to use item magic").
+    NotForUs,
+    /// A creature is still out ("Verity's Mud Golem is already active"):
+    /// nothing wrong with the essence, and its cooldown was not started.
+    OneIsOut,
+}
+
+/// Whether a line from the server is a summon turned away, and why.
+pub fn refusal(text: &str) -> Option<Refusal> {
+    if (text.starts_with("You must be a ") && text.contains(" to use the "))
+        || text == "Your Summoning is too low to use item magic"
+    {
+        return Some(Refusal::NotForUs);
+    }
+    text.ends_with(" is already active")
+        .then_some(Refusal::OneIsOut)
+}
+
 impl Client {
+    /// A line from the server just after an essence was used. One turned
+    /// away for good is set aside at once: waiting for it to bring nothing
+    /// three times was three cooldowns, over two minutes of fighting with
+    /// no creature, before an essence of the wrong mastery gave way to one
+    /// the character could use.
+    pub(crate) fn hear_summoning(&mut self, text: &str, now: Instant) {
+        let Some((guid, at)) = self.autoplay.summoning.pending else {
+            return;
+        };
+        if now.duration_since(at) > APPEARS_WITHIN {
+            return;
+        }
+        match refusal(text) {
+            Some(Refusal::NotForUs) => {
+                self.autoplay.summoning.pending = None;
+                self.autoplay
+                    .summoning
+                    .failed
+                    .insert(guid, (FAILS_BEFORE_SET_ASIDE, now));
+                tracing::info!("summon: essence {guid:#010x} turned away ({text}); set aside");
+            }
+            Some(Refusal::OneIsOut) => {
+                self.autoplay.summoning.pending = None;
+                let key = self.world.objects.get(&guid).map_or(guid, |o| {
+                    if o.cooldown_id != 0 {
+                        o.cooldown_id
+                    } else {
+                        o.guid
+                    }
+                });
+                self.autoplay.summoning.used.remove(&key);
+            }
+            None => {}
+        }
+    }
+
     /// Summon a creature to fight beside the character, when a fight is
     /// on, none of its creatures is out, and an essence is ready. True
     /// while it does.
@@ -395,6 +455,23 @@ mod tests {
             Some(Element::Acid)
         );
         assert_eq!(element_of("Mud Golem Essence"), Some(Element::Bludgeon));
+    }
+
+    #[test]
+    fn a_summon_turned_away_is_told_from_one_that_must_wait() {
+        assert_eq!(
+            refusal("You must be a Primalist to use the Acid Wisp Essence (50)"),
+            Some(Refusal::NotForUs)
+        );
+        assert_eq!(
+            refusal("Your Summoning is too low to use item magic"),
+            Some(Refusal::NotForUs)
+        );
+        assert_eq!(
+            refusal("Verity's Mud Golem is already active"),
+            Some(Refusal::OneIsOut)
+        );
+        assert_eq!(refusal("You gore Drudge Skulker for 24 points"), None);
     }
 
     fn essence(guid: u32, element: Element, level: u32) -> Essence {

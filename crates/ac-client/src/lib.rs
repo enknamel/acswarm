@@ -1684,6 +1684,9 @@ impl Client {
         // dropped, nothing to go back for.
         if line.sender.is_empty() {
             self.autoplay.recovery.heard(&line.text, Instant::now());
+            // And on a summon: an essence turned away for good is set
+            // aside at once (see `summoning`).
+            self.hear_summoning(&line.text, Instant::now());
         }
         let text = match (op, line.sender.is_empty()) {
             _ if line.kind == ac_net::messages::turbine::KIND => {
