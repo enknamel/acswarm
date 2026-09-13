@@ -43,6 +43,7 @@ pub use ac_vendor::errand;
 
 pub mod growth;
 pub mod holdings;
+pub mod hunt;
 pub mod items;
 pub mod logistics;
 pub mod magic;

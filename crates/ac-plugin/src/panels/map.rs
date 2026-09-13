@@ -47,6 +47,7 @@
 
 use super::{caption, has_sheet, title_bar, window, Source};
 use crate::{egui, Client, Ctx, Plugin, Settings};
+use ac_client::hunt::{HuntArea, Shape};
 use ac_scene::mapimage::MapImage;
 use ac_world::landmarks::Landmark;
 use glam::Vec2;
@@ -444,7 +445,47 @@ pub struct Actions {
     pub visit_portal: Option<&'static ac_world::portals::Portal>,
     pub travel_to_place: Option<String>,
     pub cancel_travel: bool,
+    /// Start drawing a hunting area, or give up on the one being drawn.
+    pub start_drawing: bool,
+    pub stop_drawing: bool,
+    /// Keep this hunting area (replacing one of the same name).
+    pub save_area: Option<HuntArea>,
+    /// Forget the saved hunting area at this index.
+    pub delete_area: Option<usize>,
 }
+
+/// A hunting area being drawn: its name so far, and the corners clicked
+/// on the map (world xy). In a dungeon it is the dungeon.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Drawing {
+    pub name: String,
+    pub corners: Vec<Vec2>,
+}
+
+impl Drawing {
+    /// The area as drawn, for a map showing `v`: the outline clicked, or,
+    /// in a dungeon, the whole of it.
+    pub fn area(&self, v: &MapView) -> HuntArea {
+        let shape = if v.dungeon {
+            Shape::Dungeon {
+                landblock: v.block,
+                rooms: Vec::new(),
+            }
+        } else {
+            Shape::Outline {
+                points: self.corners.iter().map(|c| c.to_array()).collect(),
+            }
+        };
+        HuntArea {
+            name: self.name.trim().to_string(),
+            shape,
+        }
+    }
+}
+
+/// The colour hunting areas are drawn in, and the one being drawn.
+const AREA: egui::Color32 = egui::Color32::from_rgb(255, 190, 70);
+const DRAWING: egui::Color32 = egui::Color32::from_rgb(90, 220, 255);
 
 /// The panel's own state. The pan is not kept across restarts: the map
 /// opens on the character.
@@ -524,6 +565,8 @@ fn draw_map(
     st: &mut State,
     shown: &[usize],
     world_tab: bool,
+    areas: &[HuntArea],
+    drawing: &mut Option<Drawing>,
     actions: &mut Actions,
 ) -> Option<Vec2> {
     let resp = ui.allocate_rect(rect, egui::Sense::click_and_drag());
@@ -644,7 +687,53 @@ fn draw_map(
     ));
     // Pointer: coordinates, and a double-click on the world map travels.
     let hover = resp.hover_pos().map(|p| to_world(rect, center, s, p));
-    if world_tab && resp.double_clicked() {
+    // Hunting areas: every saved outline, named, and the one being drawn.
+    let outline = |points: &[Vec2]| -> Vec<egui::Pos2> {
+        points
+            .iter()
+            .map(|p| to_screen(rect, center, s, *p))
+            .collect()
+    };
+    for a in areas {
+        if let Shape::Outline { points } = &a.shape {
+            let corners: Vec<Vec2> = points.iter().map(|p| Vec2::from(*p)).collect();
+            let pts = outline(&corners);
+            if let Some(first) = pts.first().copied() {
+                painter.add(egui::Shape::closed_line(pts, egui::Stroke::new(2.0, AREA)));
+                painter.text(
+                    first + egui::vec2(4.0, -4.0),
+                    egui::Align2::LEFT_BOTTOM,
+                    &a.name,
+                    egui::FontId::proportional(12.0),
+                    AREA,
+                );
+            }
+        }
+    }
+    if let Some(d) = drawing.as_mut() {
+        let pts = outline(&d.corners);
+        let stroke = egui::Stroke::new(2.0, DRAWING);
+        if pts.len() >= 3 {
+            painter.add(egui::Shape::closed_line(pts.clone(), stroke));
+        } else if pts.len() == 2 {
+            painter.add(egui::Shape::line(pts.clone(), stroke));
+        }
+        for p in &pts {
+            painter.circle_filled(*p, 3.5, DRAWING);
+        }
+        // Outdoors a click puts a corner down and a right-click takes the
+        // last one away. In a dungeon the area is the dungeon.
+        if !v.dungeon {
+            if resp.clicked() {
+                if let Some(p) = resp.interact_pointer_pos() {
+                    d.corners.push(to_world(rect, center, s, p));
+                }
+            }
+            if resp.secondary_clicked() {
+                d.corners.pop();
+            }
+        }
+    } else if world_tab && resp.double_clicked() {
         if let Some(w) = hover {
             actions.travel_to = Some(w);
         }
@@ -834,6 +923,8 @@ pub fn draw(
     st: &mut State,
     world: Option<&MapTexture>,
     local: Option<&MapTexture>,
+    areas: &[HuntArea],
+    drawing: &mut Option<Drawing>,
 ) -> Actions {
     let mut actions = Actions::default();
     let vp = egui.viewport_rect();
@@ -860,6 +951,17 @@ pub fn draw(
                 "Mark what spawns where, coloured by how hard it is for this \
                  character; hover a mark to see what it makes",
             );
+            if drawing.is_none()
+                && ui
+                    .small_button("draw area")
+                    .on_hover_text(
+                        "Draw a hunting area: click its corners on the map, or \
+                         in a dungeon take the whole dungeon, and name it",
+                    )
+                    .clicked()
+            {
+                actions.start_drawing = true;
+            }
             if st.tab == Tab::Local && !v.dungeon {
                 caption(ui, "area");
                 egui::ComboBox::from_id_salt("local_radius")
@@ -903,7 +1005,18 @@ pub fn draw(
             let shown = shown(&v.objects, &st.search, st.kind);
             let world_tab = st.tab == Tab::World;
             let tex = if world_tab { world } else { local };
-            let hover = draw_map(ui, map_rect, tex, v, st, &shown, world_tab, &mut actions);
+            let hover = draw_map(
+                ui,
+                map_rect,
+                tex,
+                v,
+                st,
+                &shown,
+                world_tab,
+                areas,
+                drawing,
+                &mut actions,
+            );
             ui.vertical(|ui| {
                 ui.set_width(230.0);
                 ui.add(
@@ -990,6 +1103,48 @@ pub fn draw(
                             }
                         });
                 }
+                if let Some(d) = drawing.as_mut() {
+                    caption(ui, "new hunting area");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut d.name)
+                            .hint_text("name it")
+                            .desired_width(220.0),
+                    );
+                    if v.dungeon {
+                        caption(ui, "the whole of this dungeon");
+                    } else {
+                        caption(
+                            ui,
+                            format!(
+                                "{} corners: click the map to add one, \
+                                 right-click takes the last away",
+                                d.corners.len()
+                            ),
+                        );
+                    }
+                    let area = d.area(v);
+                    ui.horizontal(|ui| {
+                        let ready = !area.name.is_empty() && area.usable();
+                        if ui.add_enabled(ready, egui::Button::new("Save")).clicked() {
+                            actions.save_area = Some(area.clone());
+                        }
+                        if ui.button("Cancel").clicked() {
+                            actions.stop_drawing = true;
+                        }
+                    });
+                }
+                if !areas.is_empty() {
+                    caption(ui, "hunting areas");
+                    for (i, a) in areas.iter().enumerate() {
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new(&a.name).color(AREA))
+                                .on_hover_text(a.describe());
+                            if ui.small_button("x").on_hover_text("forget it").clicked() {
+                                actions.delete_area = Some(i);
+                            }
+                        });
+                    }
+                }
                 if let Some(w) = hover {
                     caption(ui, format!("pointer: {}", coords_of(w)));
                 }
@@ -1024,6 +1179,9 @@ pub struct Map {
     local_want: Option<(u32, i32, u32)>,
     local_rx: Option<Receiver<Result<MapImage, String>>>,
     local_failed: Option<u32>,
+    /// Saved hunting areas (`hunt.areas`), and the one being drawn.
+    areas: Vec<HuntArea>,
+    drawing: Option<Drawing>,
 }
 
 impl Default for Map {
@@ -1038,6 +1196,8 @@ impl Default for Map {
             local_want: None,
             local_rx: None,
             local_failed: None,
+            areas: Vec::new(),
+            drawing: None,
         }
     }
 }
@@ -1092,6 +1252,8 @@ impl Map {
             local_want: None,
             local_rx: None,
             local_failed: None,
+            areas: Vec::new(),
+            drawing: None,
         }
     }
 
@@ -1202,11 +1364,15 @@ impl Plugin for Map {
         if let Some(v) = settings.get::<State>("map.state") {
             self.state = v;
         }
+        if let Some(v) = settings.get::<Vec<HuntArea>>("hunt.areas") {
+            self.areas = v;
+        }
     }
 
     fn save(&self, settings: &mut Settings) {
         settings.set("map.show", self.show);
         settings.set("map.state", &self.state);
+        settings.set("hunt.areas", &self.areas);
     }
 
     fn ui(&mut self, cx: &mut Ctx, egui: &egui::Context) {
@@ -1237,8 +1403,32 @@ impl Plugin for Map {
             &mut self.state,
             self.world.as_ref(),
             self.local.as_ref().map(|(_, t)| t),
+            &self.areas,
+            &mut self.drawing,
         );
         let mut lines = Vec::new();
+        if actions.start_drawing {
+            self.drawing = Some(Drawing::default());
+        }
+        if actions.stop_drawing {
+            self.drawing = None;
+        }
+        if let Some(area) = actions.save_area.clone() {
+            lines.push(format!(
+                "hunting area {} saved ({})",
+                area.name,
+                area.describe()
+            ));
+            self.areas.retain(|a| a.name != area.name);
+            self.areas.push(area);
+            self.drawing = None;
+        }
+        if let Some(i) = actions.delete_area {
+            if i < self.areas.len() {
+                let gone = self.areas.remove(i);
+                lines.push(format!("hunting area {} forgotten", gone.name));
+            }
+        }
         if let (Source::Live, Some(c)) = (&self.source, cx.try_client()) {
             if let Some(g) = actions.select {
                 c.select(Some(g));
