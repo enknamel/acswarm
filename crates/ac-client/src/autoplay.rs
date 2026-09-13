@@ -1152,6 +1152,43 @@ impl Autoplay {
         self.ledger.actions()
     }
 
+    /// Start on a corpse: asked to open just now, with `allow` for it
+    /// to do so. The loot rules start afresh with it.
+    fn take_up_corpse(&mut self, guid: u32, now: Instant, allow: Duration) {
+        self.loot_run = ac_loot::Run::new();
+        self.corpse = Some((guid, now, allow, 0));
+    }
+
+    /// Put down the corpse in hand, however it ended: emptied, given up
+    /// on, not opening, or out of reach. Everything about emptying it
+    /// goes with it. The loot rules' clock once outlived a corpse let go
+    /// any way but a shut, and the next body, opened more than
+    /// forty-five seconds after the first, was shut on its first step.
+    fn let_go_of_corpse(&mut self) {
+        self.corpse = None;
+        self.appraising = false;
+        self.take_queue.clear();
+        self.take_tries.clear();
+        self.last_take = None;
+        self.loot_run = ac_loot::Run::new();
+    }
+
+    /// What becomes of a corpse the loot rules have shut, by what they
+    /// said about it. Only one they finished with is done with. One
+    /// that would not give up its contents is set aside and tried again
+    /// later, as the rules meant: marking every shut corpse looted wrote
+    /// those off for good, with their loot still on them.
+    fn corpse_shut(&mut self, guid: u32, did: &crate::did::Did, now: Instant) {
+        if matches!(did, crate::did::Did::Done) {
+            if !self.looted.contains(&guid) {
+                self.looted.push(guid);
+            }
+        } else {
+            self.shelved.note(guid, did, now);
+        }
+        self.let_go_of_corpse();
+    }
+
     /// Let go of whatever is being fought: the spells' target and the
     /// engagement (the fleet view's "regroup" and "stop"; the caller
     /// clears `Client::attack_target` itself).
@@ -2212,12 +2249,8 @@ impl Client {
                 self.close_container();
                 self.forget_kill_spot(guid);
                 self.autoplay.looted.push(guid);
-                self.autoplay.corpse = None;
+                self.autoplay.let_go_of_corpse();
                 self.stop_walking_to_loot();
-                self.autoplay.appraising = false;
-                self.autoplay.take_queue.clear();
-                self.autoplay.take_tries.clear();
-                self.autoplay.last_take = None;
                 return false;
             }
             if !opened && now.duration_since(since) > allow && self.autoplay.cast_in_flight(now) {
@@ -2228,9 +2261,8 @@ impl Client {
                 return true;
             }
             if !opened && now.duration_since(since) > allow {
-                self.autoplay.corpse = None;
+                self.autoplay.let_go_of_corpse();
                 self.stop_walking_to_loot();
-                self.autoplay.appraising = false;
                 // Opening a corpse asks the server to walk us to it,
                 // and indoors that walk goes round corners. Giving up
                 // once and never asking again left loot on the floor,
@@ -2276,9 +2308,19 @@ impl Client {
             let next = self.autoplay.loot_run.step(&at, now);
             match next.act {
                 Some(ac_loot::Act::Approach) | Some(ac_loot::Act::Open) => {
-                    // The walking and the opening are done above; being
-                    // asked for them here means the corpse moved out of
-                    // reach, which the next turn will see.
+                    // The walking and the opening are done below, when a
+                    // corpse is chosen; being asked for them here means
+                    // the character is out of reach of a corpse it has
+                    // open. Nothing here walks, so waiting did nothing
+                    // but run out the give-up clock and write the body
+                    // off. It is shut and put down, not written off or
+                    // set aside, so the next turn walks back to it and
+                    // opens it again.
+                    tracing::info!("autoplay: corpse {guid:#010x} is out of reach; going back");
+                    self.close_container();
+                    self.autoplay.let_go_of_corpse();
+                    self.stop_walking_to_loot();
+                    self.autoplay.say(Doing::Looting, next.saying);
                     return true;
                 }
                 Some(ac_loot::Act::Ask(ids)) => {
@@ -2315,15 +2357,18 @@ impl Client {
                     return true;
                 }
                 Some(ac_loot::Act::Close) => {
-                    let taken = self.autoplay.loot_run.taken;
                     self.close_container();
-                    self.forget_kill_spot(guid);
-                    self.autoplay.looted.push(guid);
-                    self.autoplay.corpse = None;
+                    // A body set aside is still this character's to come
+                    // back to, however far off it fell.
+                    if matches!(next.did, crate::did::Did::Done) {
+                        self.forget_kill_spot(guid);
+                    } else {
+                        tracing::info!(
+                            "autoplay: corpse {guid:#010x} set aside; trying again later"
+                        );
+                    }
+                    self.autoplay.corpse_shut(guid, &next.did, now);
                     self.stop_walking_to_loot();
-                    self.autoplay.appraising = false;
-                    self.autoplay.loot_run = ac_loot::Run::new();
-                    let _ = taken;
                     self.autoplay.say(Doing::Looting, next.saying);
                     return true;
                 }
@@ -2461,7 +2506,7 @@ impl Client {
         // Opening a corpse is "using something", which ends a journey.
         self.remember_journey();
         self.interact(guid);
-        self.autoplay.corpse = Some((guid, now, loot_wait(away), 0));
+        self.autoplay.take_up_corpse(guid, now, loot_wait(away));
         self.autoplay.say(Doing::Looting, format!("looting {name}"));
         true
     }
@@ -5520,6 +5565,81 @@ mod tests {
         ap.tag(&ring, LootAction::Salvage);
         assert_eq!(ap.tags().get(&ring.guid), Some(&LootAction::Salvage));
         assert_eq!(Doing::Salvaging.label(), "salvaging");
+    }
+
+    /// A corpse open at the character's feet, as the loot rules see it,
+    /// with one thing on it worth taking.
+    fn corpse_at_hand(guid: u32, item: u32) -> ac_loot::Open {
+        ac_loot::Open {
+            guid,
+            name: "Corpse of a Drudge Skulker".into(),
+            open: true,
+            items: vec![ac_loot::Lying {
+                guid: item,
+                name: "Dagger".into(),
+                burden: 10,
+                verdict: ac_loot::Verdict::Take(LootAction::Keep),
+            }],
+            slots_free: 20,
+            carry_room: 10_000,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn the_corpse_opened_after_one_was_given_up_on_is_not_written_off_on_its_first_step() {
+        // Blargerton: a corpse that would not empty was given up on after
+        // forty-five seconds, and the loot rules' clock went on running
+        // from it. The next body he opened was shut on its first step
+        // for having taken too long, and marked looted with everything
+        // still on it.
+        let t0 = Instant::now();
+        let mut ap = Autoplay::default();
+        let (first, second) = (0x8000_1001, 0x8000_1002);
+        ap.take_up_corpse(first, t0, LOOT_TIMEOUT);
+        let next = ap.loot_run.step(&corpse_at_hand(first, 1), t0);
+        assert_eq!(next.act, Some(ac_loot::Act::Take(1)), "{}", next.saying);
+        // What the give-up path in `autoplay_loot` does with it.
+        let gave_up = t0 + LOOT_GIVE_UP + Duration::from_secs(1);
+        ap.looted.push(first);
+        ap.let_go_of_corpse();
+        assert_eq!(ap.corpse, None);
+        // The next corpse is chosen, and opens a moment later.
+        ap.take_up_corpse(second, gave_up, LOOT_TIMEOUT);
+        let opened = gave_up + Duration::from_secs(1);
+        let next = ap.loot_run.step(&corpse_at_hand(second, 2), opened);
+        assert_eq!(next.act, Some(ac_loot::Act::Take(2)), "{}", next.saying);
+        assert!(!ap.looted.contains(&second), "written off unlooted");
+    }
+
+    #[test]
+    fn a_corpse_the_rules_set_aside_is_shelved_and_not_written_off() {
+        // The rules shut a corpse that will not give up its contents as
+        // Blocked -- "later" -- and the client marked every shut corpse
+        // looted, which is "never".
+        use crate::did::Did;
+        let t0 = Instant::now();
+        let mut ap = Autoplay::default();
+        let stubborn = 0x8000_2001;
+        ap.take_up_corpse(stubborn, t0, LOOT_TIMEOUT);
+        ap.corpse_shut(
+            stubborn,
+            &Did::blocked("it will not give up its contents"),
+            t0,
+        );
+        assert_eq!(ap.corpse, None, "still in hand");
+        assert!(!ap.looted.contains(&stubborn), "written off for good");
+        assert!(ap.shelved.held(&stubborn, t0), "not left alone for now");
+        assert!(
+            !ap.shelved.held(&stubborn, t0 + Duration::from_secs(60)),
+            "never tried again"
+        );
+        // One the rules emptied is done with.
+        let emptied = 0x8000_2002;
+        ap.take_up_corpse(emptied, t0, LOOT_TIMEOUT);
+        ap.corpse_shut(emptied, &Did::Done, t0);
+        assert!(ap.looted.contains(&emptied));
+        assert!(!ap.shelved.held(&emptied, t0));
     }
 
     #[test]

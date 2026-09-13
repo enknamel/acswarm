@@ -71,6 +71,8 @@ impl Next {
 /// Emptying one corpse.
 #[derive(Debug, Default)]
 pub struct Run {
+    /// The corpse this run is emptying.
+    corpse: Option<u32>,
     /// The item last asked for, and when.
     asked: Option<(u32, Instant)>,
     /// Items that will not come out.
@@ -88,6 +90,17 @@ impl Run {
 
     /// The next thing to do with this corpse, or why there is nothing.
     pub fn step(&mut self, at: &Open, now: Instant) -> Next {
+        // A run is for one body, and a different body starts afresh.
+        // The clock used to be reset only when a corpse was shut here,
+        // so after one was let go any other way, the next one opened
+        // more than forty-five seconds later was already "too long" on
+        // its first step: shut at once, left full, and written off.
+        if self.corpse != Some(at.guid) {
+            *self = Run {
+                corpse: Some(at.guid),
+                ..Run::default()
+            };
+        }
         let began = *self.began.get_or_insert(now);
 
         if at.away > REACH {
@@ -377,6 +390,29 @@ mod tests {
             "written off for good: {:?}",
             next.did
         );
+    }
+
+    #[test]
+    fn the_next_corpse_gets_its_own_forty_five_seconds() {
+        // The clock was kept from the first body stood over. A corpse let
+        // go without being shut here -- given up on, or asked again when
+        // it would not open -- left it running, and the next corpse
+        // opened a minute later was shut on its first step and written
+        // off with everything still on it.
+        let now = Instant::now();
+        let mut run = Run::new();
+        let first = body(vec![thing(1, "Dagger", Verdict::Take(LootAction::Keep))]);
+        assert_eq!(run.step(&first, now).act, Some(Act::Take(1)));
+        let mut second = body(vec![thing(2, "Shield", Verdict::Take(LootAction::Keep))]);
+        second.guid = 901;
+        let later = now + KEEP_AT_IT + Duration::from_secs(1);
+        let next = run.step(&second, later);
+        assert_eq!(next.act, Some(Act::Take(2)), "{}", next.saying);
+        assert_eq!(run.taken, 1, "the count is for this body alone");
+        // Its own clock runs from there, and does give up in the end.
+        let next = run.step(&second, later + KEEP_AT_IT + Duration::from_secs(1));
+        assert_eq!(next.act, Some(Act::Close));
+        assert!(matches!(next.did, Did::Blocked(_)), "{:?}", next.did);
     }
 
     #[test]
