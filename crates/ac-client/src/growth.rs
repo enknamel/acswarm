@@ -889,7 +889,13 @@ impl Client {
         // A party that has stopped to restock does not wander off to a
         // new hunting ground in the middle of it, and nor does one that
         // has given up and stopped in town.
-        if cfg.hunt_grounds
+        //
+        // A hunting area the player chose is walked about whether or not
+        // the character is left to find grounds of its own: with that
+        // off, a character that had cleared the Holtburg field it was
+        // given stood in the middle of it for good.
+        let roams_an_area = self.autoplay.config.fight.area.is_some();
+        if (cfg.hunt_grounds || roams_an_area)
             && mode.hunting()
             && !self.autoplay.growth.stopped_in_town
             && self.grow_hunt(now, &cfg)

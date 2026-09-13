@@ -88,6 +88,9 @@ fn loot_wait(away: f32) -> Duration {
 const BUFF_EVERY: Duration = Duration::from_millis(1500);
 /// A target that takes no damage for this long is let go.
 const STALL_AFTER: Duration = Duration::from_secs(20);
+/// Walking up to a target is working on it while each stretch brings the
+/// character this much nearer than it has been (see [`came_nearer`]).
+const APPROACH_PROGRESS: f32 = 1.0;
 /// And left alone for this long afterwards.
 const GIVE_UP_FOR: Duration = Duration::from_secs(90);
 /// Casting or shooting this long from one spot with nothing landing:
@@ -132,6 +135,13 @@ fn arrived_unharmed(text: &str) -> Option<&str> {
 /// nothing missed.
 fn nothing_arrived(thrown: Option<Instant>, now: Instant) -> bool {
     thrown.is_some_and(|t| now.duration_since(t) > CLOSE_IN_AFTER)
+}
+
+/// Whether the walk up to `guid`, now `distance` off, has come nearer
+/// than the nearest yet (`best`, for whichever target it was) by
+/// [`APPROACH_PROGRESS`].
+fn came_nearer(best: Option<(u32, f32)>, guid: u32, distance: f32) -> bool {
+    best.is_none_or(|(g, d)| g != guid || distance < d - APPROACH_PROGRESS)
 }
 
 /// How near to fight from after nothing has landed from `distance`: half
@@ -962,6 +972,8 @@ pub struct Autoplay {
     /// last seen to drop: a target that takes no damage for a while is
     /// out of reach, and is let go.
     engaged: Option<(u32, Instant, f32)>,
+    /// The nearest the walk up to the engaged target has come to it.
+    approach_best: Option<(u32, f32)>,
     /// The summoning rules' own state (see `crate::summoning`).
     pub summoning: crate::summoning::State,
     /// Who last hit the character, and when: fought wherever it stands,
@@ -3887,6 +3899,13 @@ impl Client {
                     self.autoplay.engaged = Some((guid, now, health));
                     self.autoplay.thrown = None;
                     false
+                } else if self.dodge.approaching == Some(guid) && self.walking_nearer(guid) {
+                    // Walking up to it, and getting nearer: not stalled.
+                    // The clock ran through the walk, and a target across a
+                    // few of a dungeon's rooms was given up before the first
+                    // spell went at it.
+                    self.autoplay.engaged = Some((guid, now, health));
+                    false
                 } else if nothing_arrived(
                     self.autoplay
                         .thrown
@@ -3924,9 +3943,27 @@ impl Client {
             _ => {
                 self.autoplay.engaged = Some((guid, now, health));
                 self.autoplay.closing = self.autoplay.closing.filter(|(g, _)| *g == guid);
+                self.autoplay.approach_best = None;
                 false
             }
         }
+    }
+
+    /// Whether the walk up to `guid` has brought the character nearer to
+    /// it than it has been in this fight (see [`came_nearer`]).
+    fn walking_nearer(&mut self, guid: u32) -> bool {
+        let Some(me) = self.player.as_ref().map(|p| p.world_position()) else {
+            return false;
+        };
+        let Some(at) = self.world.objects.get(&guid).and_then(|o| o.world_pos()) else {
+            return false;
+        };
+        let distance = me.distance(at);
+        if !came_nearer(self.autoplay.approach_best, guid, distance) {
+            return false;
+        }
+        self.autoplay.approach_best = Some((guid, distance));
+        true
     }
 
     /// Nothing is landing on `guid` from where a ranged attacker stands:
@@ -4009,6 +4046,15 @@ impl Client {
             .find(|g| self.world.objects.get(g).is_some_and(|o| o.name == name));
         if let Some(g) = target {
             self.autoplay.thrown = self.autoplay.thrown.filter(|(t, _)| *t != g);
+            // Resisted or evaded, it still got there: the target is in
+            // reach and being worked on, whatever its health says. Counting
+            // only damage gave a creature that resisted a run of spells up
+            // as out of reach.
+            if let Some((engaged, _, health)) = self.autoplay.engaged {
+                if engaged == g {
+                    self.autoplay.engaged = Some((g, Instant::now(), health));
+                }
+            }
         }
     }
 
@@ -5390,6 +5436,18 @@ mod tests {
         assert!(!nothing_arrived(Some(now), now));
         // Nothing thrown yet -- still walking to a clear shot -- is no miss.
         assert!(!nothing_arrived(None, now));
+    }
+
+    #[test]
+    fn walking_up_to_a_target_is_working_on_it_while_it_gets_nearer() {
+        // The first stretch of the walk, and a new target, both count.
+        assert!(came_nearer(None, 7, 40.0));
+        assert!(came_nearer(Some((8, 5.0)), 7, 40.0));
+        // Nearer by a pace and more: still closing.
+        assert!(came_nearer(Some((7, 40.0)), 7, 38.5));
+        // Shuffling on the spot, or backing off round a wall, is not.
+        assert!(!came_nearer(Some((7, 40.0)), 7, 39.5));
+        assert!(!came_nearer(Some((7, 40.0)), 7, 45.0));
     }
 
     #[test]
