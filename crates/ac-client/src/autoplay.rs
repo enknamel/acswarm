@@ -4864,11 +4864,20 @@ impl Client {
     ///
     /// Its own kill and nobody else's: the server tells the last damager
     /// alone (ACE `Creature_Death.GetDeathMessage`), so `last_kill` is
-    /// never a mate's. And only until a body has turned up, because from
-    /// then on the bodies on the floor are the answer and they are read
-    /// first -- a mate's claim among them. Held for the whole three
-    /// seconds regardless, nine characters killing in one huddle each
-    /// held the next fight for a body somebody else was already opening.
+    /// never a mate's. And only until its own body has turned up,
+    /// because from then on the bodies on the floor are the answer and
+    /// they are read first -- a mate's claim among them. Held for the
+    /// whole three seconds regardless, nine characters killing in one
+    /// huddle each held the next fight for a body somebody else was
+    /// already opening.
+    ///
+    /// Its own body, and not simply the next body to be noted: in a
+    /// huddle a mate's corpse comes into view within those three seconds
+    /// constantly, and each one ended the hold early and sent the
+    /// character off after the next fight leaving the body it had just
+    /// made to be scored on its own. A kill of this character's leaves a
+    /// kill spot at the same instant as `last_kill`, so the body that
+    /// ends the hold is one lying at one of those.
     fn own_body_still_falling(&self, now: Instant) -> bool {
         let Some(blow) = self.autoplay.last_kill else {
             return false;
@@ -4876,11 +4885,18 @@ impl Client {
         if now.saturating_duration_since(blow) >= CORPSE_APPEARS {
             return false;
         }
+        let ours = |guid: u32| {
+            self.world
+                .objects
+                .get(&guid)
+                .and_then(|o| o.world_pos())
+                .is_some_and(|at| near_a_kill(at, &self.autoplay.kill_spots))
+        };
         !self
             .autoplay
             .corpse_seen
             .iter()
-            .any(|(_, seen)| *seen >= blow)
+            .any(|(guid, seen)| *seen >= blow && ours(*guid))
     }
 
     /// Whether the corpse named `corpse` is another player's, and theirs:
@@ -8223,22 +8239,49 @@ mod tests {
         };
         let s = Duration::from_secs;
         let t0 = Instant::now();
+        let spot = glam::Vec3::new(40.0, 40.0, 10.0);
+        let body = |guid: u32, at: glam::Vec3| ac_world::WorldObject {
+            guid,
+            name: "Corpse of Drudge Slave".into(),
+            object_desc_flags: ac_world::object_desc_flags::CORPSE,
+            position: Some(ac_world::object::Position::new_flat(0, at)),
+            ..Default::default()
+        };
         assert!(!c.owes_a_corpse(), "owed a body with no kill behind it");
 
         // Its own killing blow: the body is owed while it is still
         // falling, and no longer.
         c.autoplay.last_kill = Some(t0);
+        c.autoplay.kill_spots = vec![(spot, t0)];
         assert!(c.own_body_still_falling(t0));
         assert!(c.own_body_still_falling(t0 + CORPSE_APPEARS - s(1)));
         assert!(!c.own_body_still_falling(t0 + CORPSE_APPEARS));
 
         // A body noted before the blow is some other kill's and says
-        // nothing about this one.
-        c.autoplay.corpse_seen = vec![(0x8000_0001, t0 - s(1))];
+        // nothing about this one, wherever it lies.
+        let (early, elsewhere, ours) = (0x8000_0001, 0x8000_0002, 0x8000_0003);
+        c.world.objects.insert(early, body(early, spot));
+        c.autoplay.corpse_seen = vec![(early, t0 - s(1))];
         assert!(c.own_body_still_falling(t0));
-        // One that has landed since ends the wait: from here the bodies
-        // on the floor are the answer, a mate's claim among them.
-        c.autoplay.corpse_seen.push((0x8000_0002, t0));
+
+        // Nor does a body that landed since the blow somewhere this
+        // character killed nothing. Ending the hold on any corpse at
+        // all, a huddle of nine had one come into view every couple of
+        // seconds, and each one sent a character off after the next
+        // fight leaving the body it had just made behind.
+        let away = spot + glam::Vec3::new(KILL_SPOT * 2.0, 0.0, 0.0);
+        c.world.objects.insert(elsewhere, body(elsewhere, away));
+        c.autoplay.corpse_seen.push((elsewhere, t0));
+        assert!(
+            c.own_body_still_falling(t0),
+            "let go of its own body for somebody else's"
+        );
+
+        // Its own, landing where its kill fell, ends the wait: from here
+        // the bodies on the floor are the answer, a mate's claim among
+        // them.
+        c.world.objects.insert(ours, body(ours, spot));
+        c.autoplay.corpse_seen.push((ours, t0));
         assert!(!c.own_body_still_falling(t0));
         assert!(!c.owes_a_corpse());
     }
