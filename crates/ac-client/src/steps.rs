@@ -491,7 +491,7 @@ impl Housekeeping {
 pub const HOUSEKEEPING: &[Housekeeping] = &[
     Housekeeping {
         name: "take up a weapon",
-        run: |c, _| c.autoplay_pending_wield(),
+        run: Client::autoplay_pending_wield,
     },
     Housekeeping {
         name: "shield",

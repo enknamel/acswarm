@@ -560,6 +560,32 @@ fn change_of_hands_waits(have: Stance, want: Stance, mid_attack: bool) -> bool {
     have != want && mid_attack
 }
 
+/// How near to running out a buff must be, in seconds, before this pass
+/// will put it back.
+///
+/// The quiet pass tops up anything within the wide `top_up_within`. The
+/// urgent one runs as a reflex, ahead of loot and ahead of the fight,
+/// and puts back whatever is under `never_below` -- but it ignored
+/// `out_of_combat_only` outright, which is the player saying the buff
+/// pass must keep its hands off mid-fight. A buff with a minute still
+/// on it was enough to put the sword away and reach for a wand in the
+/// middle of a swing.
+///
+/// Engaged, with that setting on, only a buff that has actually lapsed
+/// is worth the weapon: nought seconds left, which is what a buff that
+/// is not up at all reads as. The rest wait for the fight to end. Nine
+/// invulnerable characters only lost throughput to this; a mortal one
+/// stands there with empty hands.
+fn buff_within(cfg: &Buffs, urgent: bool, fighting: bool) -> f32 {
+    if !urgent {
+        return cfg.top_up_within;
+    }
+    if fighting && cfg.out_of_combat_only {
+        return 0.0;
+    }
+    cfg.never_below
+}
+
 /// A change of weapon is asked for at most this often.
 const REWIELD_EVERY: Duration = Duration::from_millis(1000);
 /// How long an item the server refused to wield is left alone the first
@@ -567,6 +593,16 @@ const REWIELD_EVERY: Duration = Duration::from_millis(1000);
 /// on purpose: most refusals are about what else is in the hands, and
 /// that changes within a few seconds.
 const WIELD_AGAIN: Duration = Duration::from_secs(3);
+/// How long a wield already asked for is given to be answered before it
+/// is worth asking again.
+///
+/// The client thinks at 8 Hz and the server's word takes a few hundred
+/// milliseconds to come back, so without this the same weapon goes out
+/// two or three times over and every ask after the first is refused --
+/// for the first one having worked. Nine characters sent 81 wields in
+/// ten minutes and were refused 71 of them, every refusal reading "You
+/// must remove your Slashing Sceptre to wield Slashing Sceptre".
+const WIELD_ANSWERS_IN: Duration = Duration::from_millis(1500);
 /// How long a weapon swap is given to land before the character gives
 /// up waiting and fights with whatever is in its hands. A put and a
 /// wield are a tick or two; anything longer means the swap is stuck.
@@ -692,7 +728,10 @@ pub struct Buffs {
     /// must never be allowed to run out: the protections going down in
     /// the middle of a fight is how a character dies.
     pub never_below: f32,
-    /// Only top up out of combat (the urgent recasts happen regardless).
+    /// Only top up out of combat. A buff that has actually run out
+    /// still goes back up mid-fight; one with time left on it waits for
+    /// the fight to end rather than costing the character its weapon
+    /// for a tick (see [`buff_within`]).
     pub out_of_combat_only: bool,
     /// Keep this fraction of mana back from buffing, for healing and
     /// fighting. A character that spends its last point on Quickness
@@ -1426,6 +1465,7 @@ pub fn cast_problem(check: &crate::magic::CastCheck) -> String {
         CastCheck::Ok => "fine".into(),
         CastCheck::NotKnown => "not known".into(),
         CastCheck::NoCaster => "no wand wielded".into(),
+        CastCheck::NoTarget => "the target is gone".into(),
         CastCheck::MissingComponents(m) => format!("short of {} components", m.len()),
         CastCheck::NotEnoughMana { need, have } => format!("mana {have}/{need}"),
         CastCheck::TooHard { power, skill } => format!("power {power} over skill {skill}"),
@@ -1725,9 +1765,11 @@ pub struct Autoplay {
     pub(crate) last_rewield: Option<Instant>,
     /// A weapon to wield as soon as the hands are empty.
     pub(crate) pending_wield: Option<u32>,
-    /// The last item the server was asked to put in the hands, so that
-    /// a refusal can be told from an answer to something else.
-    pub(crate) wield_asked: Option<u32>,
+    /// The last item the server was asked to put in the hands and when,
+    /// so that a refusal can be told from an answer to something else,
+    /// and so the same ask is not sent again while the first is still
+    /// in flight (see [`Autoplay::wield_in_flight`]).
+    pub(crate) wield_asked: Option<(u32, Instant)>,
     /// Weapons the server has refused to wield, and for how long to
     /// leave each one alone (see `Client::hold_off_wield`).
     pub(crate) wield_refused: crate::did::Patience<u32>,
@@ -2268,6 +2310,18 @@ impl Autoplay {
         }
     }
 
+    /// Whether this item was asked for a moment ago and the server's
+    /// word could still be on its way (see [`WIELD_ANSWERS_IN`]).
+    ///
+    /// Asking twice for one weapon is not a wasted message but a
+    /// harmful one: the second ask is refused because the first worked,
+    /// and the refusal backs the item off for three seconds and then
+    /// six and then twelve (see `Client::hold_off_wield`).
+    pub(crate) fn wield_in_flight(&self, guid: u32, now: Instant) -> bool {
+        self.wield_asked
+            .is_some_and(|(g, t)| g == guid && now.duration_since(t) < WIELD_ANSWERS_IN)
+    }
+
     /// Every guid some other errand is holding on to across ticks.
     ///
     /// Each of these is a thing another part of the rules has written
@@ -2492,19 +2546,26 @@ impl Client {
         Some(format!("{name} {}", cast_problem(&self.can_cast(spell))))
     }
 
+    /// Cast `spell` and hold the next cast until the server answers for
+    /// this one (see [`Autoplay::cast_in_flight`]). Every cast autoplay
+    /// sends goes through here or sets the same clock itself: the heal
+    /// once did neither, and a character at 16% health sent Heal Self
+    /// every frame, forty times in under two seconds, until the first
+    /// one went up.
+    ///
+    /// A cast the client declines to send earns no wait. Nothing is
+    /// coming back to end one, so the whole six-second backstop would be
+    /// spent standing still -- and now that the takes and the wields
+    /// wait on this clock too, standing still over a corpse.
+    pub(crate) fn cast_paced(&mut self, spell: u32, now: Instant) {
+        if matches!(self.try_cast(spell), crate::magic::CastCheck::Ok) {
+            self.autoplay.cast_sent = Some(now);
+        }
+    }
+
     /// Keep mana and stamina up the way a caster does: stamina poured
     /// into mana when mana runs low, Revitalize when stamina does. True
     /// when a spell went out.
-    /// Cast `spell` and hold the next cast until the server answers for
-    /// this one (see `Autoplay::cast_in_flight`). Every cast autoplay sends
-    /// goes through here or sets the same clock itself: the heal once did
-    /// neither, and a character at 16% health sent Heal Self every frame,
-    /// forty times in under two seconds, until the first one went up.
-    pub(crate) fn cast_paced(&mut self, spell: u32, now: Instant) {
-        self.cast(spell);
-        self.autoplay.cast_sent = Some(now);
-    }
-
     pub(crate) fn autoplay_vitals(&mut self, now: Instant) -> bool {
         use ac_world::vitals::vital;
         let cfg = self.autoplay.config.survive.clone();
@@ -3374,8 +3435,8 @@ impl Client {
     /// This is also where a wield that did land forgets whatever wait a
     /// refusal earned it: the hands have changed, so whatever the server
     /// was objecting to has gone.
-    pub(crate) fn autoplay_pending_wield(&mut self) {
-        if let Some(g) = self.autoplay.wield_asked {
+    pub(crate) fn autoplay_pending_wield(&mut self, now: Instant) {
+        if let Some((g, _)) = self.autoplay.wield_asked {
             let me = self.world.player_guid;
             if self.world.objects.get(&g).is_some_and(|o| o.wielder == me) {
                 self.autoplay.wield_refused.forget(&g);
@@ -3398,11 +3459,12 @@ impl Client {
                     || (offhand_matters && o.valid_locations & ac_world::equip::SHIELD != 0)
             });
             if !hands_full {
-                // Inside the wait a refusal earned it, the errand keeps
-                // rather than being dropped: giving up here would leave
-                // the weapon in the pack and the character bare-handed
-                // with nothing left to ask again.
-                if self.world.is_carried(g) && self.wield_held_off(g) {
+                // Inside the wait a refusal earned it, or with the
+                // server busy swinging, the errand keeps rather than
+                // being dropped: giving up here would leave the weapon
+                // in the pack and the character bare-handed with
+                // nothing left to ask again.
+                if self.world.is_carried(g) && self.wield_must_wait(g, now) {
                     return;
                 }
                 self.autoplay.pending_wield = None;
@@ -3958,10 +4020,12 @@ impl Client {
         // When the swap started, so the fight waits for the hands to
         // settle rather than swinging into the moment they are empty.
         self.autoplay.last_rewield = Some(Instant::now());
-        if sent {
+        // A wield that could not go out this tick -- the item is inside
+        // a refusal's wait, or the server has us mid-swing -- becomes an
+        // errand rather than being forgotten, so the weapon is taken up
+        // on the first free tick instead of being left in the pack.
+        if sent || !self.wield_guid(pick.guid) {
             self.autoplay.pending_wield = Some(pick.guid);
-        } else {
-            self.wield_guid(pick.guid);
         }
     }
 
@@ -4010,12 +4074,6 @@ impl Client {
             self.autoplay.wanted_shield = None;
             return;
         }
-        // Inside the wait a refusal earned it the errand keeps: asking
-        // now sends nothing, and clearing it would leave the shield in
-        // the pack with nothing left to ask again.
-        if self.wield_held_off(shield) {
-            return;
-        }
         // Not with a swing out. ACE shuffles the stance on every
         // successful equip, a shield included (TryShuffleStance ->
         // HandleActionChangeCombatMode), and a combat-mode change
@@ -4023,6 +4081,13 @@ impl Client {
         // the gap after the swing is answered.
         if self.mid_attack() {
             self.wait_for_the_swing();
+            return;
+        }
+        // Inside the wait a refusal earned it, or with the server busy
+        // with a spell, the errand keeps: asking now sends nothing, and
+        // clearing it would leave the shield in the pack with nothing
+        // left to ask again.
+        if self.wield_must_wait(shield, now) {
             return;
         }
         // Only with a one-handed melee weapon actually in hand: the
@@ -5220,8 +5285,7 @@ impl Client {
             if self.autoplay_approach(guid, &name, crate::dodge::How::Spell(spell)) {
                 return true;
             }
-            self.cast(spell);
-            self.autoplay.cast_sent = Some(now);
+            self.cast_paced(spell, now);
             self.note_fired(spell, now);
             self.autoplay.attack_spell = Some(spell);
             self.throw_at(guid, now);
@@ -5361,8 +5425,7 @@ impl Client {
                     return true;
                 }
                 self.select(Some(guid));
-                self.cast(spell);
-                self.autoplay.cast_sent = Some(now);
+                self.cast_paced(spell, now);
                 let what = if stage == 0 {
                     "vulnerability"
                 } else {
@@ -5444,10 +5507,9 @@ impl Client {
             self.autoplay.vulned.push(guid);
             return false;
         };
-        self.cast(spell);
+        self.cast_paced(spell, now);
         self.autoplay.vulned.push(guid);
         self.autoplay.last_vuln = Some(now);
-        self.autoplay.cast_sent = Some(now);
         let said = format!(
             "making {name} vulnerable to {} (level {level})",
             element.name()
@@ -6677,11 +6739,7 @@ impl Client {
             return false;
         }
         self.autoplay.buffs_checked = Some(now);
-        let within = if urgent {
-            cfg.never_below
-        } else {
-            cfg.top_up_within
-        };
+        let within = buff_within(&cfg, urgent, fighting);
         // Find what is due before touching the hands: the urgent pass
         // runs every tick and must cost nothing when nothing is due.
         let Some((spell, target, category, name, lasts)) = self.due_buff(within, now) else {
@@ -6866,10 +6924,11 @@ impl Client {
             self.autoplay.put_down = None;
             return;
         }
-        // Inside the wait a refusal earned it the errand keeps, the way
-        // a pending wield's does: dropping it here would leave the
-        // weapon in the pack and the character fighting with the wand.
-        if self.wield_held_off(weapon) {
+        // Inside the wait a refusal earned it, or with the server busy,
+        // the errand keeps, the way a pending wield's does: dropping it
+        // here would leave the weapon in the pack and the character
+        // fighting with the wand.
+        if self.wield_must_wait(weapon, Instant::now()) {
             return;
         }
         self.autoplay.put_down = None;
@@ -8895,6 +8954,187 @@ mod tests {
         // them: a bool left out would otherwise read as off.
         let before: Config = serde_json::from_str(r#"{"fight":{"radius":30.0}}"#).unwrap();
         assert!(before.fight.skip_critters);
+    }
+
+    /// A character with a mace in hand and a wand in the pack, and
+    /// nothing the server is waiting on: no swing out, no spell in the
+    /// air.
+    fn hands_free() -> Option<Client> {
+        let (mut c, _) = mid_fight()?;
+        c.attack_target = None;
+        c.attack_pending = false;
+        c.autoplay.cast_sent = None;
+        assert!(!c.server_busy(Instant::now()), "nothing owed to the server");
+        Some(c)
+    }
+
+    #[test]
+    fn the_weapon_already_in_the_hand_is_not_asked_for_again() {
+        // All 71 "You must remove your X to wield Y" lines of a
+        // ten-minute run had X and Y the same item: the client asking
+        // the server to wield what it was already holding.
+        let Some(mut c) = hands_free() else {
+            return;
+        };
+        const MACE: u32 = 0x8000_0101;
+        assert!(c.wield_guid(MACE), "the mace is in hand, so the ask stands");
+        assert_eq!(c.autoplay.wield_asked, None, "and nothing was sent");
+    }
+
+    #[test]
+    fn one_wield_goes_out_once_however_often_it_is_asked_for() {
+        let Some(mut c) = hands_free() else {
+            return;
+        };
+        const WAND: u32 = 0x8000_0102;
+        assert!(c.wield_guid(WAND), "the wand is asked for");
+        let first = c.autoplay.wield_asked;
+        assert!(matches!(first, Some((WAND, _))));
+        // The client thinks at 8 Hz and the answer takes a few hundred
+        // milliseconds. Three ticks of asking used to be three sends,
+        // and the server refused the last two for the first having
+        // worked.
+        assert!(c.wield_guid(WAND), "the ask already stands");
+        assert!(c.wield_guid(WAND));
+        assert_eq!(c.autoplay.wield_asked, first, "nothing else was sent");
+        // A wield the server never answers at all is asked for again.
+        c.autoplay.wield_asked = Some((WAND, Instant::now() - WIELD_ANSWERS_IN));
+        assert!(c.wield_guid(WAND));
+        assert_ne!(c.autoplay.wield_asked, first, "asked again once stale");
+    }
+
+    #[test]
+    fn a_refused_wield_that_worked_forgets_the_wait_rather_than_doubling_it() {
+        let Some(mut c) = hands_free() else {
+            return;
+        };
+        const WAND: u32 = 0x8000_0102;
+        let now = Instant::now();
+        // The wand was asked for twice and taken up once. The second
+        // ask comes back refused, and the world already shows the wand
+        // in hand.
+        a_weapon(&mut c, WAND, ac_world::item_type::CASTER, "Wand", true);
+        c.autoplay.wield_asked = Some((WAND, now));
+        c.wield_refused(WAND, now);
+        assert!(
+            !c.wield_held_off(WAND),
+            "the wield worked; there is nothing to wait for"
+        );
+        assert_eq!(c.autoplay.wield_asked, None, "and the ask is answered");
+
+        // A refusal for something still in the pack is a real refusal
+        // and still earns its wait.
+        a_weapon(&mut c, WAND, ac_world::item_type::CASTER, "Wand", false);
+        c.autoplay.wield_asked = Some((WAND, now));
+        c.wield_refused(WAND, now);
+        assert!(c.wield_held_off(WAND), "left alone for a while");
+    }
+
+    #[test]
+    fn nothing_is_sent_to_move_an_item_while_the_server_has_us_busy() {
+        // ACE refuses every inventory move made while the character is
+        // busy and spends two messages saying so -- YoureTooBusy and an
+        // InventoryServerSaveFailed with nothing in it. Nine characters
+        // bought 89 of those pairs in ten minutes.
+        let Some(mut c) = hands_free() else {
+            return;
+        };
+        const WAND: u32 = 0x8000_0102;
+        const LOOT: u32 = 0x8000_0105;
+        let now = Instant::now();
+        c.attack_pending = true;
+        c.last_attack = now;
+        assert!(c.server_busy(now));
+
+        assert!(!c.wield_guid(WAND), "the wand waits for a free tick");
+        assert_eq!(c.autoplay.wield_asked, None, "nothing sent mid-swing");
+
+        c.loot_queue.push_back(LOOT);
+        c.tick_loot(now);
+        assert!(c.loot_inflight.is_none(), "the take waits too");
+        assert_eq!(
+            c.loot_queue.front(),
+            Some(&LOOT),
+            "and keeps its place in the queue"
+        );
+
+        // The swing lands, and both go out.
+        c.attack_pending = false;
+        assert!(c.wield_guid(WAND));
+        c.tick_loot(now);
+        assert_eq!(c.loot_inflight.map(|(g, _)| g), Some(LOOT));
+        assert!(c.loot_queue.is_empty());
+    }
+
+    #[test]
+    fn no_spell_is_sent_at_a_creature_that_has_already_died() {
+        // 36 "Target not acquired" in a run, every one a cast at a
+        // creature that had died since the tick that chose it: ACE looks
+        // the target up before the windup and answers TargetNotAcquired.
+        // The swing has always made this test; the cast never did.
+        let Some((mut c, wand)) = mid_fight() else {
+            return;
+        };
+        const MACE: u32 = 0x8000_0101;
+        const CREATURE: u32 = 0x8000_0103;
+        // Incantation of Lightning Vulnerability Other, one of the
+        // softening spells the run cast.
+        const VULNERABILITY: u32 = 4483;
+        a_weapon(
+            &mut c,
+            MACE,
+            ac_world::item_type::MELEE_WEAPON,
+            "Mace",
+            false,
+        );
+        a_weapon(&mut c, wand, ac_world::item_type::CASTER, "Wand", true);
+        c.select(Some(CREATURE));
+        assert_eq!(
+            c.try_cast(VULNERABILITY),
+            crate::magic::CastCheck::Ok,
+            "it is alive and in view"
+        );
+        // Dead: the server replaces the creature with a corpse of
+        // another guid, so its own simply goes.
+        c.world.objects.remove(&CREATURE);
+        assert_eq!(c.try_cast(VULNERABILITY), crate::magic::CastCheck::NoTarget);
+        // And a cast that never went out earns no wait for an answer.
+        // Refused, the server used to answer TargetNotAcquired with a
+        // UseDone, which ended the wait; declined here, nothing comes
+        // back at all, and the whole backstop would be spent standing
+        // over a corpse the character was not allowed to take from.
+        c.autoplay.cast_sent = None;
+        c.cast_paced(VULNERABILITY, Instant::now());
+        assert_eq!(c.autoplay.cast_sent, None, "nothing to wait for");
+        assert!(!c.server_busy(Instant::now()));
+    }
+
+    #[test]
+    fn an_urgent_buff_with_time_left_waits_for_the_fight_to_end() {
+        // The urgent pass runs as a reflex, ahead of loot and ahead of
+        // the fight, and ignored `out_of_combat_only` outright: a buff
+        // with a minute still on it was enough to put the sword away
+        // mid-swing. Under god mode that cost throughput; for a mortal
+        // character it is a fight fought bare-handed.
+        let mut cfg = Buffs {
+            never_below: 60.0,
+            top_up_within: 300.0,
+            out_of_combat_only: true,
+            ..Buffs::default()
+        };
+        assert_eq!(buff_within(&cfg, true, true), 0.0, "only what has lapsed");
+        // A buff that is not up at all reads as nought seconds left, so
+        // it still goes back up in the middle of a fight. That is what
+        // "never below" is for.
+        assert!(0.0 <= buff_within(&cfg, true, true));
+        // Out of the fight the urgent pass is unchanged, and so is the
+        // quiet one either way.
+        assert_eq!(buff_within(&cfg, true, false), 60.0);
+        assert_eq!(buff_within(&cfg, false, true), 300.0);
+        // And a player who has not asked for the restraint keeps the
+        // old behaviour: buffs go back up mid-fight.
+        cfg.out_of_combat_only = false;
+        assert_eq!(buff_within(&cfg, true, true), 60.0);
     }
 }
 #[cfg(test)]
