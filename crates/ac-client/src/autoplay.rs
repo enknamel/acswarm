@@ -1103,10 +1103,27 @@ fn still_holding_at(away: f32) -> bool {
 }
 
 /// How long a mate's claim on a body is believed (see
-/// [`TeamView::working`]). A claimant that stalled, died or was dragged
-/// into a fight must not hold a body for the whole five minutes it lies
+/// [`TeamView::working`]). A claimant that stalled or was dragged into
+/// a fight must not hold a body for the whole five minutes it lies
 /// there.
-const CLAIM_STALE: Duration = Duration::from_secs(20);
+///
+/// Longer than the loot rules keep at one body (`ac_loot::run::KEEP_AT_IT`,
+/// forty-five seconds), and by enough to cover a walk back to one that
+/// drifted out of reach. At twenty seconds a character working a body
+/// full of loot lost its claim while the body was still open on the
+/// server, and the other eight converged on a container the server had
+/// already handed out and were refused one by one.
+const CLAIM_STALE: Duration = Duration::from_secs(75);
+
+/// Two claims made within this of each other are the same moment.
+///
+/// Each session ages its own claim on its own clock and hears the
+/// others' up to a board round late (`ac_plugin::team::SAY_EVERY`, half
+/// a second), so nothing finer can be told apart and two sessions asked
+/// which of them claimed a body first would both answer "I did". Inside
+/// this window the lower player guid settles it instead, which is an
+/// answer both of them reach (see [`TeamView::outranks_our_claim`]).
+const SAME_MOMENT: Duration = Duration::from_millis(1500);
 
 /// How long a newly fallen body is settled by the tie-break rather than
 /// by the claims (see [`TeamView::opens_first`]).
@@ -1390,12 +1407,41 @@ impl TeamView {
     /// hunting alone.
     ///
     /// A claim goes stale ([`CLAIM_STALE`]): one that never did would
-    /// let a claimant that stalled or died lock a body for its whole
-    /// life.
+    /// let a claimant that stalled lock a body for its whole life. One
+    /// that has died is dropped at once rather than waited out: its
+    /// client keeps saying what it was working, and the same board row
+    /// that says so already says its health is nothing.
     pub fn working(&self, guid: u32) -> bool {
         self.mates
             .iter()
-            .any(|m| m.looting == Some(guid) && m.looting_for < CLAIM_STALE)
+            .any(|m| m.health > 0.0 && m.looting == Some(guid) && m.looting_for < CLAIM_STALE)
+    }
+
+    /// Whether one of the others has a better claim on `guid` than this
+    /// character's own, which has stood for `ours`; `me` is this
+    /// character's player guid.
+    ///
+    /// Better is older. Two claims made within a board round of each
+    /// other are the same moment -- each session ages its own claim on
+    /// its own clock and hears the others' a board round late, so
+    /// nothing finer than that can be told apart -- and there the lower
+    /// player guid wins, which is an answer both sides reach.
+    ///
+    /// Without this a body two characters chose in the same tick was
+    /// opened by neither: each heard the other's claim half a second
+    /// later, each read it as "someone else has it", and each stood
+    /// off, while the walk both had started went on being published as
+    /// a claim until every claim in it aged out at once.
+    pub fn outranks_our_claim(&self, guid: u32, ours: Duration, me: u32) -> bool {
+        self.mates.iter().any(|m| {
+            m.health > 0.0
+                && m.looting == Some(guid)
+                && m.looting_for < CLAIM_STALE
+                && match m.looting_for.checked_sub(ours) {
+                    Some(older) if older > SAME_MOMENT => true,
+                    _ => ours.saturating_sub(m.looting_for) <= SAME_MOMENT && m.guid < me,
+                }
+        })
     }
 
     /// Which character opens the body at `at` first, `me` being this
@@ -1409,8 +1455,18 @@ impl TeamView {
     /// guid is such an answer: all of them work it out of the same
     /// roster, so there is nothing to negotiate and nothing to vote on,
     /// which is how the leader is settled too (`ac_plugin::team`).
-    pub fn opens_first(&self, at: glam::Vec3, me: u32) -> u32 {
-        self.mates
+    ///
+    /// That only holds while every session judges the same candidates,
+    /// so this character (`mine`, where it stands) passes the same reach
+    /// test as the others. A body is owed to a character out to the
+    /// fight radius when one of its own kills fell there, which is
+    /// further than [`LOOT_NEAR`]: without the test on ourselves, a
+    /// caster twenty-two metres off called a body its own while every
+    /// mate's roster had it too far away to count, and two of them
+    /// opened it in the same second.
+    pub fn opens_first(&self, at: glam::Vec3, me: u32, mine: glam::Vec3) -> u32 {
+        let over_it = self
+            .mates
             .iter()
             // Only the ones that would open it: playing on their own,
             // alive, in the world, standing over it, and not already at
@@ -1418,9 +1474,10 @@ impl TeamView {
             .filter(|m| m.autoplay && m.health > 0.0 && m.guid != 0 && m.looting.is_none())
             .filter(|m| corpse_within_reach(m.world, at))
             .map(|m| m.guid)
-            .chain(std::iter::once(me))
-            .min()
-            .unwrap_or(me)
+            .chain(corpse_within_reach(mine, at).then_some(me));
+        // Standing off from a body nobody is over would leave it lying:
+        // with nobody in reach it is ours to walk to.
+        over_it.min().unwrap_or(me)
     }
 
     /// The mate nearest `me` that is short of something we could hand
@@ -2229,9 +2286,32 @@ impl Autoplay {
     /// A character alone answers yes to everything it is owed: with
     /// nobody on the board there is nothing to divide, and a body its
     /// pet killed is still its own.
-    pub(crate) fn ours_to_open(&self, guid: u32, at: glam::Vec3, me: u32, now: Instant) -> bool {
+    ///
+    /// `mine` is where this character stands, which the tie-break needs
+    /// to judge it by the same rule as the others.
+    pub(crate) fn ours_to_open(
+        &self,
+        guid: u32,
+        at: glam::Vec3,
+        me: u32,
+        mine: glam::Vec3,
+        now: Instant,
+    ) -> bool {
         if self.team.mates.is_empty() {
             return true;
+        }
+        // Already committed to this body -- holding it, or walking to
+        // it. A standing claim wins a tie rather than losing it: asking
+        // only whether somebody claims the body made two characters
+        // that chose it in the same tick both stand off, each for the
+        // other, and neither ever opened it. Yield only to a claim that
+        // outranks ours.
+        if let Some(ours) = self
+            .corpse_claim(now)
+            .filter(|(g, _)| *g == guid)
+            .map(|(_, held)| held)
+        {
+            return !self.team.outranks_our_claim(guid, ours, me);
         }
         if self.team.working(guid) {
             return false;
@@ -2239,7 +2319,8 @@ impl Autoplay {
         // Newly fallen, so nobody's claim can have reached the board
         // yet: the tie-break says whose it is until it has.
         let seen = self.corpse_first_seen(guid, now);
-        now.saturating_duration_since(seen) >= CLAIM_SETTLE || self.team.opens_first(at, me) == me
+        now.saturating_duration_since(seen) >= CLAIM_SETTLE
+            || self.team.opens_first(at, me, mine) == me
     }
 
     /// Set aside a corpse the character cannot walk to. It is left
@@ -3802,6 +3883,12 @@ impl Client {
                     .then_with(|| a.1.total_cmp(&b.1))
             });
         let Some((left, away, guid, name)) = corpse else {
+            // Nothing left to go to, so any walk that was going to one
+            // is over. Left standing, that walk went on being said as a
+            // claim on a body this character had just given up on, and
+            // it kept the looting's own worth up (see `crate::steps`)
+            // for a body it would never open.
+            self.stop_walking_to_loot();
             return false;
         };
         // Never mid-cast, unless the body will not be there when the
@@ -4753,7 +4840,7 @@ impl Client {
         };
         let my_guid = self.world.player_guid.unwrap_or(0);
         self.autoplay.corpse_owed(o.guid, at, me, now, room)
-            && self.autoplay.ours_to_open(o.guid, at, my_guid, now)
+            && self.autoplay.ours_to_open(o.guid, at, my_guid, me, now)
             && !self.corpse_is_someone_elses(&o.name)
     }
 
@@ -7412,6 +7499,33 @@ mod tests {
         Some(c)
     }
 
+    /// The same character, standing somewhere, for the rules that read
+    /// a position.
+    fn standing_in_the_field(level: i32, cell: u32, local: glam::Vec3) -> Option<Client> {
+        let mut c = character_of_level(level)?;
+        let assets = c.assets.clone();
+        let mut pl = crate::player::Player::new(&assets, cell, local, glam::Quat::IDENTITY);
+        pl.set_motion_table(&assets, 0x0200_0001, 0x0900_0001);
+        c.player = Some(pl);
+        Some(c)
+    }
+
+    /// A shelf of its own holding one starter profile, so the looting
+    /// has rules to carry out without touching the one every session
+    /// shares.
+    fn a_loot_profile(c: &mut Client, name: &str) {
+        let dir = std::env::temp_dir().join("acswarm-test-loot-profiles");
+        std::fs::create_dir_all(&dir).ok();
+        let shelf = std::sync::Arc::new(crate::profile::Library::default());
+        shelf.open(&dir);
+        let mut p = crate::profile::Profile::starter();
+        p.name = name.into();
+        shelf.put(p).ok();
+        c.profiles = shelf;
+        c.autoplay.config.loot.profile = name.into();
+        assert!(c.loot_profile().is_some(), "no rules to loot by");
+    }
+
     /// A creature of `wcid` standing in view, and a copy of it to ask
     /// the fight rules about.
     fn in_view(c: &mut Client, guid: u32, wcid: u32, name: &str) -> ac_world::WorldObject {
@@ -8244,8 +8358,8 @@ mod tests {
         let now = t0 + CLAIM_SETTLE;
 
         // Alone on the board, nothing changes: both are ours.
-        assert!(ap.ours_to_open(a, here, me, now));
-        assert!(ap.ours_to_open(b, there, me, now));
+        assert!(ap.ours_to_open(a, here, me, here, now));
+        assert!(ap.ours_to_open(b, there, me, here, now));
 
         // One mate is at the first body, another at nothing.
         ap.team.mates = vec![
@@ -8253,17 +8367,20 @@ mod tests {
             looter(3, here, None, Duration::ZERO),
         ];
         assert!(
-            !ap.ours_to_open(a, here, me, now),
+            !ap.ours_to_open(a, here, me, here, now),
             "raced a mate for a body"
         );
-        assert!(ap.ours_to_open(b, there, me, now), "left a free body lying");
+        assert!(
+            ap.ours_to_open(b, there, me, here, now),
+            "left a free body lying"
+        );
 
-        // A claim goes stale. A mate that stalled, died or was dragged
-        // into a fight over a body must not hold it for the five
-        // minutes it lies there.
+        // A claim goes stale. A mate that stalled or was dragged into a
+        // fight over a body must not hold it for the five minutes it
+        // lies there.
         ap.team.mates = vec![looter(2, here, Some(a), CLAIM_STALE)];
         assert!(
-            ap.ours_to_open(a, here, me, now),
+            ap.ours_to_open(a, here, me, here, now),
             "a stale claim still held"
         );
         ap.team.mates = vec![looter(
@@ -8272,7 +8389,112 @@ mod tests {
             Some(a),
             CLAIM_STALE - Duration::from_millis(1),
         )];
-        assert!(!ap.ours_to_open(a, here, me, now));
+        assert!(!ap.ours_to_open(a, here, me, here, now));
+
+        // A mate that died over the body it had open goes on saying so:
+        // its client is still running. The same board row says its
+        // health is nothing, and that is read rather than waited out.
+        ap.team.mates = vec![Mate {
+            health: 0.0,
+            ..looter(2, here, Some(a), Duration::ZERO)
+        }];
+        assert!(
+            ap.ours_to_open(a, here, me, here, now),
+            "a dead mate held a body for the rest of the claim's life"
+        );
+    }
+
+    #[test]
+    fn a_body_this_character_has_already_claimed_is_not_given_up_for_a_mates() {
+        // Two characters that choose one body in the same tick each
+        // hear the other's claim half a second later. Asking only
+        // "does somebody claim it" made both stand off, each for the
+        // other, and the walk each had started was never let go of --
+        // so the claim kept going out, the body was opened by nobody,
+        // and eight characters stood over it until every claim aged out
+        // at once. A standing claim wins the tie instead of losing it.
+        let t0 = Instant::now();
+        let body = 0x8000_0001;
+        let at = glam::Vec3::ZERO;
+        let (me, lower, higher) = (0x5000_0005, 0x5000_0001, 0x5000_0009);
+        let mut ap = Autoplay {
+            corpse_seen: vec![(body, t0)],
+            ..Default::default()
+        };
+        ap.take_up_corpse(body, t0, LOOT_TIMEOUT);
+        let now = t0 + CLAIM_SETTLE;
+
+        // A mate that reached for it in the same moment and has the
+        // higher guid gives way to us.
+        ap.team.mates = vec![looter(higher, at, Some(body), CLAIM_SETTLE)];
+        assert!(
+            ap.ours_to_open(body, at, me, at, now),
+            "gave up a body we were already holding"
+        );
+
+        // The lower guid in the same moment has it, and we let go.
+        ap.team.mates = vec![looter(lower, at, Some(body), CLAIM_SETTLE)];
+        assert!(!ap.ours_to_open(body, at, me, at, now));
+
+        // Plainly older than ours, whatever the guid: theirs.
+        ap.team.mates = vec![looter(
+            higher,
+            at,
+            Some(body),
+            CLAIM_SETTLE + SAME_MOMENT * 2,
+        )];
+        assert!(!ap.ours_to_open(body, at, me, at, now));
+
+        // Plainly younger than ours, whatever the guid: ours.
+        let later = t0 + SAME_MOMENT * 3;
+        ap.team.mates = vec![looter(lower, at, Some(body), Duration::ZERO)];
+        assert!(ap.ours_to_open(body, at, me, at, later));
+    }
+
+    #[test]
+    fn a_walk_to_a_body_this_character_has_given_up_on_is_let_go_of() {
+        // The one way out of the looting that did not stop the walk. A
+        // character that chose a body, set off for it, and then heard a
+        // better claim on it walked on -- and the walk is itself a claim
+        // (see `Autoplay::corpse_claim`), so it went on telling the
+        // others the body was taken, and went on holding the looting's
+        // own worth up, for a body it would never open.
+        let holtburg = 0xA9B4_0019;
+        let at = glam::Vec3::new(84.0, 84.0, 10.0);
+        let Some(mut c) = standing_in_the_field(20, holtburg, at) else {
+            return;
+        };
+        a_loot_profile(&mut c, "walk test");
+        let me = c.player.as_ref().unwrap().world_position();
+        let now = Instant::now();
+        let body = 0x8000_0001;
+        c.world.objects.insert(
+            body,
+            ac_world::WorldObject {
+                guid: body,
+                name: "Corpse of Drudge Slave".into(),
+                object_desc_flags: ac_world::object_desc_flags::CORPSE,
+                position: Some(ac_world::object::Position::new_flat(
+                    holtburg,
+                    me + glam::Vec3::new(7.0, 0.0, 0.0) - ac_world::landblock_origin(holtburg),
+                )),
+                ..Default::default()
+            },
+        );
+        c.autoplay.corpse_seen = vec![(body, now)];
+        // Walking to it, seven metres off, and a mate says it claimed
+        // the same body well before we did.
+        c.autoplay.walking_to = Some(CorpseWalk::new(body, 7.0, now));
+        c.autoplay.team.mates = vec![looter(
+            0x5000_0002,
+            me,
+            Some(body),
+            SAME_MOMENT + Duration::from_secs(5),
+        )];
+
+        assert!(!c.autoplay_loot(now), "went to a body that is not ours");
+        assert_eq!(c.autoplay.walking_to.map(|w| w.guid), None, "still walking");
+        assert_eq!(c.autoplay.corpse_claim(now), None, "still claiming it");
     }
 
     #[test]
@@ -8301,16 +8523,20 @@ mod tests {
                 },
                 ..Default::default()
             };
-            assert_eq!(ap.team.opens_first(at, me), first, "disagreed about who");
             assert_eq!(
-                ap.ours_to_open(body, at, me, t0),
+                ap.team.opens_first(at, me, at),
+                first,
+                "disagreed about who"
+            );
+            assert_eq!(
+                ap.ours_to_open(body, at, me, at, t0),
                 me == first,
                 "{me:#010x} did not stand off"
             );
             // Once the board has had time to catch up the claims are
             // the truth, and whoever has not been told otherwise goes
             // ahead.
-            assert!(ap.ours_to_open(body, at, me, t0 + CLAIM_SETTLE));
+            assert!(ap.ours_to_open(body, at, me, at, t0 + CLAIM_SETTLE));
         }
 
         // Only the ones that would open it count. A mate played by
@@ -8333,7 +8559,39 @@ mod tests {
             ],
             leader: false,
         };
-        assert_eq!(view.opens_first(at, mine), mine);
+        assert_eq!(view.opens_first(at, mine, at), mine);
+
+        // And this character is judged by the same rule as the rest. A
+        // body is owed to a caster out to the fight radius where one of
+        // its kills fell, which is further than a mate has to stand to
+        // count: with no reach test on ourselves, the caster called the
+        // body its own while every mate's roster ruled the caster out,
+        // and the two of them opened it in the same second.
+        let over_it = looter(first, at, None, Duration::ZERO);
+        assert_eq!(
+            view_of(vec![over_it.clone()]).opens_first(at, mine, field_away),
+            first,
+            "claimed a body from across the field"
+        );
+        assert_eq!(
+            view_of(vec![over_it]).opens_first(at, mine, at),
+            first,
+            "standing over it, the lower guid still opens first"
+        );
+        // Nobody within reach at all: it is ours to walk to.
+        assert_eq!(
+            view_of(vec![looter(first, field_away, None, Duration::ZERO)])
+                .opens_first(at, mine, field_away),
+            mine,
+            "left a body nobody was near"
+        );
+    }
+
+    fn view_of(mates: Vec<Mate>) -> TeamView {
+        TeamView {
+            mates,
+            leader: false,
+        }
     }
 
     #[test]

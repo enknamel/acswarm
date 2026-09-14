@@ -423,6 +423,7 @@ mod tests {
         let theirs = Mate {
             looting: Some(body),
             looting_for: Duration::from_secs(2),
+            health: 1.0,
             ..mate("Brynna", 2)
         };
         // Over the bus it goes as JSON, and it has to come back whole.
@@ -432,12 +433,30 @@ mod tests {
         assert_eq!(heard.looting_for, theirs.looting_for);
 
         let mut r = Roster::default();
-        r.hear("other", 0, heard, now);
+        r.hear("other", 0, heard.clone(), now);
         assert!(r.view_for(&me).working(body));
         assert!(!r.view_for(&me).working(0x8000_0002), "claimed every body");
         // Gone quiet: gone, and the body is anyone's again.
         r.forget_quiet(now + FORGET_AFTER + Duration::from_secs(1));
         assert!(!r.view_for(&me).working(body));
+
+        // Dead over the body it had open: its client goes on saying so,
+        // and the same row says its health is nothing. That is read
+        // rather than waited out.
+        let mut r = Roster::default();
+        r.hear(
+            "other",
+            0,
+            Mate {
+                health: 0.0,
+                ..heard
+            },
+            now,
+        );
+        assert!(
+            !r.view_for(&me).working(body),
+            "a dead claimant held a body"
+        );
     }
 
     #[test]
