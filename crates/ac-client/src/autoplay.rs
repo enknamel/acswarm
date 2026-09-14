@@ -484,8 +484,34 @@ fn came_nearer(best: Option<(u32, f32)>, guid: u32, distance: f32) -> bool {
 fn closer_stand_off(distance: f32) -> Option<f32> {
     (distance > MIN_STAND_OFF + 1.0).then(|| (distance * 0.5).max(MIN_STAND_OFF))
 }
+/// Whether a change of hands must wait for the swing in flight.
+///
+/// True only when both hold: the hands do not already give the stance
+/// wanted, so something would have to be wielded or put away; and a
+/// swing or a charge is out unanswered. ACE turns every combat-mode
+/// change into a cancelled attack, and putting the weapon in hand away
+/// to reach for a wand is one -- so a buff pass that wants a wand waits
+/// for the swing to land rather than taking the charge down with it. A
+/// pass that already holds a wand changes nothing and casts at once.
+///
+/// The wait costs a second of a buff's life. +Verity's cost her the
+/// fight: she reached for her wand every second and a half for a minute,
+/// and the Drudge Servant she was charging was never once reached.
+fn change_of_hands_waits(have: Stance, want: Stance, mid_attack: bool) -> bool {
+    have != want && mid_attack
+}
+
 /// A change of weapon is asked for at most this often.
 const REWIELD_EVERY: Duration = Duration::from_millis(1000);
+/// How long an item the server refused to wield is left alone the first
+/// time. It doubles with every refusal after that. Short to begin with
+/// on purpose: most refusals are about what else is in the hands, and
+/// that changes within a few seconds.
+const WIELD_AGAIN: Duration = Duration::from_secs(3);
+/// How long a weapon swap is given to land before the character gives
+/// up waiting and fights with whatever is in its hands. A put and a
+/// wield are a tick or two; anything longer means the swap is stuck.
+const SWAP_SETTLES: Duration = Duration::from_millis(1500);
 /// Ammunition is made at most this often: a use takes a moment and
 /// the bundles need to answer.
 const CRAFT_EVERY: Duration = Duration::from_secs(4);
@@ -1438,7 +1464,13 @@ pub struct Autoplay {
     /// When the hands were last asked to change weapon.
     last_rewield: Option<Instant>,
     /// A weapon to wield as soon as the hands are empty.
-    pending_wield: Option<u32>,
+    pub(crate) pending_wield: Option<u32>,
+    /// The last item the server was asked to put in the hands, so that
+    /// a refusal can be told from an answer to something else.
+    pub(crate) wield_asked: Option<u32>,
+    /// Weapons the server has refused to wield, and for how long to
+    /// leave each one alone (see `Client::hold_off_wield`).
+    pub(crate) wield_refused: crate::did::Patience<u32>,
     /// A journey put down for a fight, to be picked up again after it.
     pub(crate) resume_trip: Option<glam::Vec2>,
     /// The target being worked on, since when, and its health when
@@ -2893,7 +2925,18 @@ impl Client {
     /// A weapon waiting for empty hands is taken up as soon as they
     /// are: a bow cannot be drawn with a shield up, and a two-handed
     /// weapon needs both. Runs every tick and never claims one.
+    ///
+    /// This is also where a wield that did land forgets whatever wait a
+    /// refusal earned it: the hands have changed, so whatever the server
+    /// was objecting to has gone.
     pub(crate) fn autoplay_pending_wield(&mut self) {
+        if let Some(g) = self.autoplay.wield_asked {
+            let me = self.world.player_guid;
+            if self.world.objects.get(&g).is_some_and(|o| o.wielder == me) {
+                self.autoplay.wield_refused.forget(&g);
+                self.autoplay.wield_asked = None;
+            }
+        }
         if let Some(g) = self.autoplay.pending_wield {
             // A shield in the off hand counts as a full hand for a
             // weapon that cannot be held with one.
@@ -2910,6 +2953,13 @@ impl Client {
                     || (offhand_matters && o.valid_locations & ac_world::equip::SHIELD != 0)
             });
             if !hands_full {
+                // Inside the wait a refusal earned it, the errand keeps
+                // rather than being dropped: giving up here would leave
+                // the weapon in the pack and the character bare-handed
+                // with nothing left to ask again.
+                if self.world.is_carried(g) && self.wield_held_off(g) {
+                    return;
+                }
                 self.autoplay.pending_wield = None;
                 if self.world.is_carried(g) {
                     self.wield_guid(g);
@@ -2918,6 +2968,37 @@ impl Client {
                 self.autoplay.pending_wield = None;
             }
         }
+    }
+
+    /// Leave an item the server has just refused to wield alone for a
+    /// while, and say so once rather than every pass.
+    ///
+    /// A refused wield carries no error code worth reading -- ACE sends
+    /// InventoryServerSaveFailed with WeenieError.None -- so there is
+    /// nothing to act on and nothing to do but wait. The wait doubles
+    /// each time, so an item the server will never wield in this state
+    /// costs a handful of messages rather than one every buff pass:
+    /// +Verity asked for her Training Wand a hundred and fifty times in
+    /// a minute, because a shield in her off hand made the wield
+    /// impossible and the refusal said nothing about it.
+    pub(crate) fn hold_off_wield(&mut self, item: u32, now: Instant) {
+        self.autoplay.wield_asked = None;
+        self.autoplay.wield_refused.hold(item, WIELD_AGAIN, now);
+        let name = self
+            .world
+            .objects
+            .get(&item)
+            .map(|o| o.name.clone())
+            .unwrap_or_else(|| format!("{item:#010x}"));
+        let waited = self
+            .autoplay
+            .wield_refused
+            .waited(&item)
+            .unwrap_or(WIELD_AGAIN);
+        tracing::info!(
+            "the server will not wield {name}; leaving it for {} s",
+            waited.as_secs().max(1)
+        );
     }
 
     /// Open the corpse of something we killed and take what is worth
@@ -3288,7 +3369,12 @@ impl Client {
             Style::Missile => Stance::Missile,
             Style::Magic => Stance::Magic,
         };
-        if self.combat_stance() != want {
+        // Not with a swing out: changing weapon cancels it, so the
+        // stance the hands give now is the honest answer until the
+        // attack has been answered (see `change_of_hands_waits`).
+        if change_of_hands_waits(self.combat_stance(), want, self.mid_attack()) {
+            self.wait_for_the_swing();
+        } else if self.combat_stance() != want {
             // Wielding takes a moment; until the server confirms it, the
             // hands still say what they said. Asked once a second, not
             // once a tick: the server answers each ask, and refuses the
@@ -3319,6 +3405,15 @@ impl Client {
             return;
         }
         if self.autoplay.armed_for == Some(target) {
+            return;
+        }
+        // Not with a swing or a charge out: putting the weapon in hand
+        // away cancels it (see `Client::mid_attack`). The choice keeps,
+        // and is made in the gap after the attack is answered -- a
+        // fraction of a second with the wrong weapon beats a charge that
+        // never lands.
+        if self.mid_attack() {
+            self.wait_for_the_swing();
             return;
         }
         self.autoplay.armed_for = Some(target);
@@ -3417,6 +3512,9 @@ impl Client {
                 sent |= self.put_in_container(shield, me);
             }
         }
+        // When the swap started, so the fight waits for the hands to
+        // settle rather than swinging into the moment they are empty.
+        self.autoplay.last_rewield = Some(Instant::now());
         if sent {
             self.autoplay.pending_wield = Some(pick.guid);
         } else {
@@ -3424,8 +3522,32 @@ impl Client {
         }
     }
 
+    /// Whether a wand, orb or staff is carried at all, in hand or in
+    /// the pack. Not the same question as whether one can be taken up
+    /// right now, which is a wait rather than a want.
+    pub(crate) fn carries_a_caster(&self) -> bool {
+        self.world.objects.values().any(|o| {
+            self.world.is_carried(o.guid) && o.item_type & ac_world::item_type::CASTER != 0
+        })
+    }
+
+    /// Whether a weapon swap asked for a moment ago has yet to land.
+    ///
+    /// Between the put and the wield the hands are empty, and a swing
+    /// sent into that gap is a punch: +Verity put her Flaming Takuba
+    /// away for a wand and attacked a Spikey Armoredillo bare-handed in
+    /// the same tick. Bounded by [`SWAP_SETTLES`] so a swap the server
+    /// never finishes cannot stop the character fighting.
+    pub(crate) fn hands_changing(&self, now: Instant) -> bool {
+        self.autoplay.pending_wield.is_some()
+            && self
+                .autoplay
+                .last_rewield
+                .is_some_and(|t| now.duration_since(t) < SWAP_SETTLES)
+    }
+
     /// The shield on the off hand, if any.
-    fn wielded_shield(&self) -> Option<u32> {
+    pub(crate) fn wielded_shield(&self) -> Option<u32> {
         self.world
             .wielded()
             .find(|o| o.valid_locations & ac_world::equip::SHIELD != 0)
@@ -4298,6 +4420,11 @@ impl Client {
                     }
                     self.remember_journey();
                     self.arm_for(guid, stance, &cfg);
+                    if self.hands_changing(now) {
+                        self.autoplay
+                            .say(Doing::Fighting, format!("changing weapon for {name}"));
+                        return true;
+                    }
                     if missile && self.autoplay_approach(guid, &name, crate::dodge::How::Missile) {
                         return true;
                     }
@@ -4355,6 +4482,13 @@ impl Client {
         }
         self.remember_journey();
         self.arm_for(guid, stance, &cfg);
+        // The hands are empty between the put and the wield, and a swing
+        // sent into that gap is a punch (see `hands_changing`).
+        if self.hands_changing(now) {
+            self.autoplay
+                .say(Doing::Fighting, format!("changing weapon for {name}"));
+            return true;
+        }
         // A bow refused for range shoots nothing: close in first (see
         // `crate::dodge`). A swing from too far the server walks us
         // in for.
@@ -4621,6 +4755,13 @@ impl Client {
         match spell {
             Some(spell) => {
                 if self.combat_stance() != Stance::Magic {
+                    // Not with a swing out: putting the weapon away to
+                    // reach for a wand cancels it. The softening keeps;
+                    // hit the thing meanwhile.
+                    if self.mid_attack() {
+                        self.wait_for_the_swing();
+                        return false;
+                    }
                     // A wand for the casting; the arming code sorts the
                     // hands out again when the fight proper begins.
                     self.wield_for(Stance::Magic);
@@ -5844,6 +5985,17 @@ impl Client {
         {
             return false;
         }
+        // A buff is never worth a cancelled swing: it goes back up in
+        // the gap between two of them instead (see
+        // `change_of_hands_waits`).
+        if change_of_hands_waits(self.combat_stance(), Stance::Magic, self.mid_attack()) {
+            self.wait_for_the_swing();
+            self.autoplay.note(
+                "waiting for the swing to land before reaching for a wand",
+                now,
+            );
+            return false;
+        }
         self.autoplay.buffs_checked = Some(now);
         let within = if urgent {
             cfg.never_below
@@ -5888,8 +6040,17 @@ impl Client {
                 })
                 .map(|o| o.guid);
             if !self.wield_for(Stance::Magic) {
-                self.autoplay
-                    .say(Doing::Buffing, format!("no wand to cast {name} with"));
+                // A wand that is carried but held off after a refusal is
+                // a wait, not a want: saying "no wand" for it sent an
+                // earlier reader looking through the pack for one.
+                self.autoplay.say(
+                    Doing::Buffing,
+                    if self.carries_a_caster() {
+                        format!("waiting to take a wand up to cast {name}")
+                    } else {
+                        format!("no wand to cast {name} with")
+                    },
+                );
                 return false;
             }
             if fighting && self.autoplay.put_down.is_none() {
@@ -6260,6 +6421,66 @@ mod tests {
         // is a different answer entirely.
         kinds.note(1, &Did::refused("no vendor will take it"), t0);
         assert!(kinds.held(&1, t0 + Duration::from_secs(24 * 60 * 60)));
+    }
+
+    #[test]
+    fn a_buff_pass_that_wants_a_wand_waits_rather_than_disarming_mid_charge() {
+        use crate::Stance;
+        // +Verity's buffing reached for her Training Wand every second
+        // and a half while she was charging a Drudge Servant, and every
+        // reach put her mace away and cancelled the charge with it.
+        assert!(change_of_hands_waits(Stance::Melee, Stance::Magic, true));
+        assert!(change_of_hands_waits(Stance::Missile, Stance::Magic, true));
+
+        // Answered, the gap between two swings is hers: the wand goes in
+        // then, and nothing is cancelled.
+        assert!(!change_of_hands_waits(Stance::Melee, Stance::Magic, false));
+
+        // A pass that already holds a wand changes nothing, so there is
+        // nothing to wait for and the buff goes up mid-fight as before.
+        assert!(!change_of_hands_waits(Stance::Magic, Stance::Magic, true));
+
+        // The rule is about hands, not about wands: a character told to
+        // fight with a bow waits for the swing just the same.
+        assert!(change_of_hands_waits(Stance::Melee, Stance::Missile, true));
+    }
+
+    #[test]
+    fn a_refused_wield_is_left_alone_for_longer_every_time() {
+        use crate::did::Patience;
+        // ACE refuses a wield it will not make with no error code at all
+        // -- a caster cannot go in while a shield is up, and it says so
+        // with WeenieError.None -- so there is nothing to read and
+        // nothing to do but wait. +Verity asked 150 times in a minute.
+        const WAND: u32 = 0x8000_00C3;
+        let t0 = Instant::now();
+        let mut held: Patience<u32> = Patience::new();
+
+        held.hold(WAND, WIELD_AGAIN, t0);
+        assert!(held.held(&WAND, t0), "not asked for again at once");
+        assert!(
+            held.held(&WAND, t0 + WIELD_AGAIN - Duration::from_millis(1)),
+            "nor a moment before the wait is up"
+        );
+        assert!(
+            !held.held(&WAND, t0 + WIELD_AGAIN),
+            "asked again once the wait is up"
+        );
+
+        // Refused again: the wait doubles, so an item the server will
+        // never wield in this state costs a handful of asks rather than
+        // one every buff pass.
+        let second = t0 + WIELD_AGAIN;
+        held.hold(WAND, WIELD_AGAIN, second);
+        assert_eq!(held.waited(&WAND), Some(WIELD_AGAIN * 2));
+        assert!(held.held(&WAND, second + WIELD_AGAIN));
+        assert!(!held.held(&WAND, second + WIELD_AGAIN * 2));
+
+        // A wield that lands forgets the wait: the hands have changed,
+        // so whatever the server was objecting to has gone.
+        held.forget(&WAND);
+        assert!(!held.held(&WAND, second));
+        assert_eq!(held.waited(&WAND), None);
     }
 
     use super::*;

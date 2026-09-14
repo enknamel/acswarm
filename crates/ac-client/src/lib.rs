@@ -144,6 +144,26 @@ fn attack_ended_walk(walk: Option<ac_world::object::MoveTarget>, attacked: Optio
     )
 }
 
+/// The longest an unanswered attack keeps the character's hands to
+/// itself. ACE answers every swing with AttackDone, so this only
+/// matters when the answer goes missing: one lost message must not
+/// leave the hands untouchable for the rest of the session.
+const ATTACK_ANSWERED_WITHIN: Duration = Duration::from_secs(10);
+
+/// Whether a swing or a charge is out and still unanswered, so that the
+/// character's hands and its combat mode must be left alone.
+///
+/// ACE turns every combat-mode change into HandleActionCancelAttack,
+/// which cancels the walk the charge is riding on and answers with
+/// AttackDone -- and wielding a weapon of another kind is a combat-mode
+/// change. +Verity's in-fight buffing reached for her wand every second
+/// and a half, and every reach put her mace away and took the charge
+/// down with it: a minute of "Action cancelled" and almost nothing
+/// landed on the Drudge Servant that was hitting her throughout.
+fn attack_unanswered(pending: bool, sent: Instant, now: Instant) -> bool {
+    pending && now.duration_since(sent) < ATTACK_ANSWERED_WITHIN
+}
+
 /// Whether an answer from the server about the things in `about` is the
 /// answer to the server walk `walk`: a refusal or a UseDone for what the
 /// walk is for. A refused inventory action is about the item it names
@@ -434,6 +454,13 @@ pub struct Client {
     attacked: Option<u32>,
     pub last_attack: Instant,
     pub attack_backoff: Duration,
+    /// Something in the rules wants the character's hands -- a weapon
+    /// swapped, a wand taken up -- and is waiting for the attack in
+    /// flight to be answered. It books the tick after that answer, so
+    /// that the change gets its turn: the client swings again the moment
+    /// AttackDone arrives, and without the booking the wait never ends
+    /// (see [`Client::mid_attack`]).
+    wants_the_hands: bool,
     /// Name of the last creature we attacked (its corpse is what we loot).
     pub last_target_name: String,
     pub sound_tables:
@@ -618,6 +645,7 @@ impl Client {
             attacked: None,
             last_attack: Instant::now(),
             attack_backoff: Duration::from_millis(300),
+            wants_the_hands: false,
             last_target_name: String::new(),
             sound_tables: Default::default(),
             waves: Default::default(),
@@ -1120,6 +1148,9 @@ impl Client {
                                             self.loot_inflight = None;
                                         }
                                         self.loot_refused(item, err);
+                                    }
+                                    if self.autoplay.wield_asked == Some(item) {
+                                        self.hold_off_wield(item, now);
                                     }
                                     let for_a_pour = answers_a_pour(
                                         self.autoplay.pour.as_ref().map(|(p, _)| p),
@@ -2276,6 +2307,14 @@ impl Client {
             && self.move_to.is_none()
             && self.last_attack.elapsed() > self.attack_backoff
         {
+            // A change of hands has been waiting for this attack to be
+            // answered, and this is the gap between two swings it was
+            // waiting for (see [`Client::wait_for_the_swing`]). It has
+            // this tick; the next swing goes out on the one after. One
+            // tick only, so nothing can hold the character's sword arm.
+            if std::mem::take(&mut self.wants_the_hands) {
+                return;
+            }
             self.attack(target);
         }
     }
@@ -2383,6 +2422,8 @@ impl Client {
     }
 
     /// Wield a carried item by guid, in whatever slot it goes in.
+    /// Nothing is sent for an item the server has lately refused to
+    /// wield (see [`Client::wield_held_off`]).
     pub fn wield_guid(&mut self, guid: u32) -> bool {
         use ac_net::messages::action;
         let Some(locations) = self
@@ -2394,11 +2435,26 @@ impl Client {
         else {
             return false;
         };
+        if self.wield_held_off(guid) {
+            return false;
+        }
         let mut w = ac_net::wire::Writer::new();
         w.u32(guid).u32(locations);
         self.session
             .send_action(action::GET_AND_WIELD_ITEM, &w.finish());
+        self.autoplay.wield_asked = Some(guid);
         true
+    }
+
+    /// Whether this item is inside the wait a refused wield earned it.
+    ///
+    /// The server refuses a wield it will not make with no error code
+    /// at all, so there is nothing to read in the refusal and nothing to
+    /// do but wait and try again later. Without this the buff pass asked
+    /// for +Verity's Training Wand a hundred and fifty times in a
+    /// minute, and was refused every one of them.
+    pub fn wield_held_off(&self, guid: u32) -> bool {
+        self.autoplay.wield_refused.held(&guid, Instant::now())
     }
 
     /// The arrows, bolts or quarrels wielded, if any. A bow shoots
@@ -2440,6 +2496,30 @@ impl Client {
 }
 
 impl Client {
+    /// Whether a swing or a charge is out and unanswered (see
+    /// [`attack_unanswered`]). While one is, the rules leave the
+    /// character's hands and its combat mode alone: every one of those
+    /// changes cancels the attack in flight.
+    ///
+    /// The few changes worth a cancelled attack say so themselves --
+    /// dropping to peace to loot a body, fleeing, coming back from a
+    /// death -- and they do not ask.
+    pub fn mid_attack(&self) -> bool {
+        attack_unanswered(self.attack_pending, self.last_attack, Instant::now())
+    }
+
+    /// Book the gap after the swing in flight for whatever wanted the
+    /// character's hands and found them busy.
+    ///
+    /// Without this the wait would never end: the client swings again
+    /// the moment AttackDone arrives, so the rules would find an attack
+    /// in flight every time they looked. Booked, the next swing is held
+    /// back one tick and the change goes in between two of them, which
+    /// is where the server wanted it all along.
+    pub fn wait_for_the_swing(&mut self) {
+        self.wants_the_hands = true;
+    }
+
     /// The way this character fights right now, which is decided by
     /// what is in its hands and by nothing else: a wand, orb or staff
     /// means magic, a bow, crossbow or thrown weapon means missile, and
@@ -2492,12 +2572,6 @@ impl Client {
         if self.combat_stance() == want {
             return false;
         }
-        // The server will not put a bow in the hands that hold a wand:
-        // whatever weapon is held goes back in the pack first, and the
-        // new one is wielded on a later tick once it is there.
-        if self.put_weapons_away() {
-            return true;
-        }
         let mask = match want {
             Stance::Magic => item_type::CASTER,
             Stance::Missile => item_type::MISSILE_WEAPON,
@@ -2519,11 +2593,37 @@ impl Client {
         else {
             return false;
         };
+        if self.wield_held_off(guid) {
+            return false;
+        }
+        // The server will not put a bow in the hands that hold a wand:
+        // whatever weapon is held goes back in the pack first, and the
+        // new one is wielded on a later tick once it is there.
+        let mut sent = self.put_weapons_away();
+        // Nor will it put a wand in the hand of a character whose off
+        // hand holds a shield -- it refuses the wield outright, with no
+        // error to read. The shield comes off with the weapon, the way
+        // the arming code already does it.
+        let free_offhand = self
+            .stats_of(guid)
+            .is_some_and(|i| crate::weapons::needs_free_offhand(&i));
+        if free_offhand {
+            if let (Some(me), Some(shield)) = (self.world.player_guid, self.wielded_shield()) {
+                sent |= self.put_in_container(shield, me);
+            }
+        }
+        if sent {
+            // Taken up by the housekeeping the moment the hands are
+            // empty, rather than whenever the caller next happens to ask.
+            self.autoplay.pending_wield = Some(guid);
+            return true;
+        }
         tracing::info!("wielding {name} to fight {}", want.label());
         let mut w = ac_net::wire::Writer::new();
         w.u32(guid).u32(locations);
         self.session
             .send_action(action::GET_AND_WIELD_ITEM, &w.finish());
+        self.autoplay.wield_asked = Some(guid);
         true
     }
 
@@ -2806,6 +2906,12 @@ impl Client {
             .map(|c| c.name.clone())
             .unwrap_or_else(|| "pack".into());
         tracing::info!("put {name} ({item:#010x}) in {target} ({container:#010x})");
+        // Whatever the server says about this item now is about the put,
+        // not about some earlier ask to wield it: a refused put must not
+        // be counted against the wield (see `Client::hold_off_wield`).
+        if self.autoplay.wield_asked == Some(item) {
+            self.autoplay.wield_asked = None;
+        }
         let mut w = ac_net::wire::Writer::new();
         w.u32(item).u32(container).u32(0);
         self.session
@@ -4373,6 +4479,38 @@ mod tests {
         assert!(!attack_ended_walk(Some(place), Some(DRUDGE)));
         assert!(!attack_ended_walk(w.walk, None));
         assert!(!attack_ended_walk(None, Some(DRUDGE)));
+    }
+
+    #[test]
+    fn nothing_is_wielded_while_an_attack_is_unanswered() {
+        // Every "Action cancelled" in run18 and run20 follows a change of
+        // the character's own hands within a fraction of a second: the
+        // buff pass reaching for a wand, the arming taking the mace back,
+        // peace mode for a corpse. ACE turns each into a cancelled attack.
+        let sent = Instant::now();
+        assert!(attack_unanswered(true, sent, sent));
+        assert!(attack_unanswered(
+            true,
+            sent,
+            sent + Duration::from_millis(1500)
+        ));
+
+        // Answered: the gap between two swings, and the hands are the
+        // character's own again.
+        assert!(!attack_unanswered(
+            false,
+            sent,
+            sent + Duration::from_millis(1500)
+        ));
+
+        // An answer that never came does not hold the hands for the
+        // session: one lost AttackDone must not leave a character unable
+        // to change weapon for as long as it stays logged in.
+        assert!(!attack_unanswered(
+            true,
+            sent,
+            sent + ATTACK_ANSWERED_WITHIN
+        ));
     }
 
     #[test]
