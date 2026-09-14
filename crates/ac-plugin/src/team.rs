@@ -5,7 +5,10 @@
 //! of, heal whoever is worst hurt, bring everyone into one fellowship.
 //! Those rules read a [`TeamView`], and until now nothing filled it in.
 //! The word each session gives about itself carries its Salvaging and
-//! whether it has an Ust, so everyone agrees on who salvages.
+//! whether it has an Ust, so everyone agrees on who salvages. It carries
+//! the skills its loot rules ask about and the bodies it emptied, with
+//! the others it found nothing left on each for, so a body one of them
+//! finished is not opened again by the rest.
 //!
 //! This plugin does. Every session with the team rules on says who it
 //! is and what it is doing, a few times a second, on the blackboard:
@@ -70,7 +73,9 @@ impl Roster {
     /// The team as one session sees it: everyone else on the roster,
     /// and whether this session's character leads. The leader is the
     /// character that asked to lead (the one played by hand), or else
-    /// the one whose name sorts first, this one included.
+    /// the one whose name sorts first, this one included. What the
+    /// session said about itself goes with it, so that the turns at a
+    /// newly fallen body read it as the others read it.
     pub fn view_for(&self, me: &Mate) -> TeamView {
         let mut mates: Vec<Mate> = self
             .heard
@@ -83,7 +88,11 @@ impl Roster {
         for m in &mut mates {
             m.leader = first.as_deref() == Some(m.name.as_str());
         }
-        TeamView { mates, leader }
+        TeamView {
+            mates,
+            leader,
+            me: Some(me.clone()),
+        }
     }
 
     /// Everyone heard, with where each spoke from (process, session).
@@ -221,7 +230,9 @@ impl Request {
 #[derive(Default)]
 pub struct Team {
     roster: Roster,
-    last_said: BTreeMap<usize, Instant>,
+    /// When each session last said its piece on the board, and what it
+    /// said.
+    last_said: BTreeMap<usize, (Instant, Mate)>,
 }
 
 /// A vital (0 health, 1 stamina, 2 mana) as a fraction of its maximum,
@@ -303,7 +314,33 @@ pub fn describe(client: &ac_client::Client, session: usize) -> Option<Mate> {
         supplies: client.supplies(&client.autoplay.config.growth),
         ground: client.hunting_ground(),
         on_its_way: client.on_its_way(),
+        skills: client.skills_its_rules_ask_about(),
+        shut: client.autoplay.shuts_to_say(Instant::now()),
+        opened_first: client.autoplay.opened_first(Instant::now()),
+        opens_bodies: client.opens_bodies(),
     })
+}
+
+impl Team {
+    /// Whether session `session`, describing itself as `me` at `now`, is
+    /// due to say so on the board (every [`SAY_EVERY`]). When it is, `me`
+    /// is what it last said from then on.
+    fn say(&mut self, session: usize, me: &Mate, now: Instant) -> bool {
+        let due = self
+            .last_said
+            .get(&session)
+            .is_none_or(|(t, _)| now.duration_since(*t) >= SAY_EVERY);
+        if due {
+            self.last_said.insert(session, (now, me.clone()));
+        }
+        due
+    }
+
+    /// What session `session` last said about itself on the board: what
+    /// the others read it by.
+    fn said(&self, session: usize) -> Option<&Mate> {
+        self.last_said.get(&session).map(|(_, said)| said)
+    }
 }
 
 impl Plugin for Team {
@@ -370,18 +407,23 @@ impl Plugin for Team {
         let Some(me) = describe(client, session) else {
             return;
         };
-        // Hand the rules what the others said.
-        let view = self.roster.view_for(&me);
+        let due = self.say(session, &me, now);
+        // Hand the rules what the others said, and what this session last
+        // said about itself: the others read it by that, up to a board
+        // round old, so the turns at a newly fallen body read it by that
+        // too (see `Autoplay::ours_to_open`).
+        let mut view = self.roster.view_for(&me);
+        view.me = self.said(session).cloned();
         if client.autoplay.team != view {
             client.autoplay.team = view;
+            // A body one of them emptied and found nothing left on for
+            // this character is not opened again. Taken in for good the
+            // moment it is heard: the row it came on goes once its mate
+            // has been quiet a while.
+            client.take_in_shuts();
         }
         // And say our piece, a few times a second.
-        let due = self
-            .last_said
-            .get(&session)
-            .is_none_or(|t| now.duration_since(*t) >= SAY_EVERY);
         if due {
-            self.last_said.insert(session, now);
             if let Ok(value) = serde_json::to_value(&me) {
                 cx.post(MATE_TOPIC, value);
             }
@@ -458,6 +500,107 @@ mod tests {
             !r.view_for(&me).working(body),
             "a dead claimant held a body"
         );
+    }
+
+    #[test]
+    fn a_row_from_an_older_build_reads_with_no_skills_and_no_shuts() {
+        // A process still on an older build says nothing about the skills
+        // its loot rules ask about or the bodies it emptied. Its row still
+        // reads: it asks about no skill, and has emptied nothing for
+        // anyone.
+        let old = serde_json::json!({"name": "Brannoc", "guid": 5, "health": 1.0});
+        let heard: Mate = serde_json::from_value(old).expect("an older row still reads");
+        assert!(heard.skills.is_empty() && heard.shut.is_empty());
+        // Nor is it dealt bodies or left things on them, not having said
+        // that it opens any.
+        assert!(!heard.opens_bodies);
+
+        // And what a newer one says comes through the roster whole.
+        let said = Mate {
+            skills: vec![(23, 280, 300, 2)],
+            shut: vec![ac_client::autoplay::Shut {
+                body: 0x8000_0001,
+                n: 4,
+                done_for: vec![1],
+                stand_by: vec![3],
+                left_for: vec![5],
+            }],
+            opens_bodies: true,
+            ..mate("Brynna", 2)
+        };
+        let json = serde_json::to_value(&said).expect("a mate is JSON");
+        let mut r = Roster::default();
+        r.hear(
+            "other",
+            0,
+            serde_json::from_value(json).expect("and comes back"),
+            Instant::now(),
+        );
+        let v = r.view_for(&mate("Reborn", 1));
+        assert_eq!(v.mates[0].skills, said.skills);
+        assert_eq!(v.mates[0].shut, said.shut);
+        assert!(v.mates[0].opens_bodies);
+    }
+
+    #[test]
+    fn a_session_reads_itself_by_what_it_last_said_not_by_this_frame() {
+        // The others read a session off the row it last put on the board,
+        // up to half a second old. Read off this frame instead, a session
+        // that had just shut a body dealt the next to someone else while
+        // the rest dealt it to that session, and nobody opened it.
+        let t0 = Instant::now();
+        let mut team = Team::default();
+        let first = Mate {
+            opened_first: 2,
+            ..mate("Reborn", 1)
+        };
+        let later = Mate {
+            opened_first: 3,
+            looting: Some(0x8000_0001),
+            ..mate("Reborn", 1)
+        };
+        assert!(team.say(0, &first, t0), "said nothing at first");
+        assert!(!team.say(0, &later, t0 + Duration::from_millis(100)));
+        assert_eq!(
+            team.said(0),
+            Some(&first),
+            "read itself ahead of what the others had heard"
+        );
+        assert!(team.say(0, &later, t0 + SAY_EVERY));
+        assert_eq!(team.said(0), Some(&later));
+        // Each session by its own word.
+        assert_eq!(team.said(1), None);
+    }
+
+    #[test]
+    fn a_session_takes_its_turn_by_what_it_said_about_itself() {
+        // The turns at a newly fallen body read every mate off its row,
+        // and a session reads itself off the same word, so that all of
+        // them deal the body to the same one.
+        let me = Mate {
+            opened_first: 3,
+            target: Some(0x77),
+            ..mate("Reborn", 1)
+        };
+        let theirs = Mate {
+            opened_first: 2,
+            ..mate("Brynna", 2)
+        };
+        let json = serde_json::to_value(&theirs).expect("a mate is JSON");
+        let mut r = Roster::default();
+        r.hear(
+            "other",
+            0,
+            serde_json::from_value(json).expect("and comes back"),
+            Instant::now(),
+        );
+        let v = r.view_for(&me);
+        assert_eq!(v.me.as_ref(), Some(&me));
+        assert_eq!(v.mates[0].opened_first, 2);
+        // A row from an older build has had no turns.
+        let old = serde_json::json!({"name": "Brannoc", "guid": 5, "health": 1.0});
+        let heard: Mate = serde_json::from_value(old).expect("an older row still reads");
+        assert_eq!(heard.opened_first, 0);
     }
 
     #[test]

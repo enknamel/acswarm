@@ -307,11 +307,56 @@ it has open or is walking to, and the others leave that one alone and
 take another. A claim is only believed for twenty seconds, so a
 character that stalled or died over a body does not hold it for the
 five minutes it lies there. A body that has only just fallen is not
-claimed by anyone yet: for its first second the lowest player guid
-standing over it opens it and the rest stand off, which every session
-works out of the same roster without asking anyone. A character alone,
-or with the team rules off, sees none of this and takes every body it
-is owed.
+claimed by anyone yet, so for its first second the party takes turns,
+a body a turn: of those standing over it that are free (not fighting,
+not at another body) with room in their packs, the one that has opened
+the fewest bodies first in the last two minutes opens it, ties dealt by
+a fixed mix of the body's guid and theirs, and the rest stand off (the
+log says "Corpse of X is Bryn03's turn"). Every session works that out
+of the same roster without asking anyone. It is best effort: a turn
+nobody takes in that second is anyone's after it, so no body is left
+lying. A character alone, or with the team rules off, sees none of this
+and takes every body it is owed.
+
+**Who gets what off a body.** The party reads one loot profile. A thing
+a rule that asks about a skill would take (`my Lockpick >= 250`, `my
+Salvaging is trained`) is for the fellow that has the most of that skill
+as it stands, buffs counted, ties to the name that sorts first; a rule
+that names more than one skill goes by the first it names. Everyone has
+Salvaging, so a thing a rule would salvage goes the same way to the
+team's salvager (below), while the salvager salvages. A thing two rules
+would take goes by the first of them in the profile. Whoever opens the
+body takes the rest and leaves that thing on it.
+
+Only a fellow that could come for it is left anything: one playing on
+its own, alive, within reach, with loot rules, and with a pack its
+looting still takes from (not laden, not down to the slots kept for a
+sale). Nothing goes back to one that has shut the body already, or was
+told it was done with it. A salvager with no loot profile is never left
+salvage: whoever opens the body takes it, and the hand-off carries it
+over as it always has.
+
+The character that shuts a body as emptied says on the board, for every
+body, what it is for each fellow that could come for it, judged with
+the skills each says about itself (ACE opens a body to everyone once it
+has been shut):
+
+- *done for* the fellows that would take nothing still on it: they
+  write it off for good;
+- *left for* the fellows things on it were left for;
+- *standing by* the fellows that would take only what was left for
+  another. They, and the one that shut it if it would take that thing
+  too, leave the body alone while one it was left for could still come,
+  for at most a minute. When that fellow shuts the body, its word is the
+  one that counts; when it dies, leaves reach, fills its pack or does not
+  come in time, the body is theirs to open again, and nothing on it is
+  left for that fellow again.
+
+So nothing is lost to a fellow that never comes: the best at a skill is
+asked first, and the rest take what it does not. The log says "shut
+Corpse of X, took 3; done for A; left for B; C standing by", and the
+ones standing by say whose word they took. Going back for what was left
+is no turn.
 
 **Whose kill it is.** A monster's body belongs to whoever killed it for
 its first two minutes, and the only thing that opens it to the rest of
