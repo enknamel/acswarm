@@ -629,6 +629,16 @@ const UNFOCUSED_FPS: u32 = 10;
 /// How often meshes and materials nothing references are dropped.
 const PRUNE_EVERY: Duration = Duration::from_secs(30);
 
+/// Whether this tick uploads its particles. A hidden window uploads
+/// nothing: nobody sees them, and each upload is buffers wgpu holds until
+/// a frame submits. Otherwise there is something to draw, or last tick's
+/// particles are still on the GPU and an empty list clears them. `drew`
+/// is not touched while hidden, so the first tick shown again replaces or
+/// clears what was up when the window was hidden.
+fn particle_upload_due(occluded: bool, has_quads: bool, drew: bool) -> bool {
+    !occluded && (has_quads || drew)
+}
+
 /// The character model drawn beside the creation screen: the look it was
 /// built for, its appearance, and the turntable angle.
 struct Preview {
@@ -1846,18 +1856,26 @@ impl App {
             }
         }
         {
-            self.fx.sync_objects(&net.client.assets, &net.client.world);
-            if !self.fx.is_empty() {
-                self.fx.update(&net.client.assets, self.frame_dt);
-            }
-            let mut quads = self.fx.quads();
-            if self.show_route {
-                let now = self.started.elapsed().as_secs_f32();
-                quads.extend(route_marks::quads(&mut net.client, now));
-            }
-            // The jump being charged, if any: where it lands.
-            quads.extend(route_marks::jump_quads(&mut net.client));
-            if !quads.is_empty() || self.drew_particles {
+            // Particles are only ever drawn, so a hidden window neither
+            // runs nor uploads them: the effects pick up where they left
+            // off when it is shown again.
+            let quads = if self.render.occluded {
+                Vec::new()
+            } else {
+                self.fx.sync_objects(&net.client.assets, &net.client.world);
+                if !self.fx.is_empty() {
+                    self.fx.update(&net.client.assets, self.frame_dt);
+                }
+                let mut quads = self.fx.quads();
+                if self.show_route {
+                    let now = self.started.elapsed().as_secs_f32();
+                    quads.extend(route_marks::quads(&mut net.client, now));
+                }
+                // The jump being charged, if any: where it lands.
+                quads.extend(route_marks::jump_quads(&mut net.client));
+                quads
+            };
+            if particle_upload_due(self.render.occluded, !quads.is_empty(), self.drew_particles) {
                 self.drew_particles = !quads.is_empty();
                 let assets = net.client.assets.clone();
                 let palettes = &self.palettes;
@@ -2119,9 +2137,11 @@ impl ApplicationHandler for App {
             event_loop.exit();
             return;
         }
-        if self.cli.fps == 0 {
-            return;
-        }
+        // Ask for the next frame once it is due. An uncapped window never
+        // moves `next_frame` on, so it is always due (asking twice before
+        // a frame is one ask). With --fps 0 an unfocused or hidden window
+        // is still capped at UNFOCUSED_FPS, and only this asks for its
+        // frames: without it, it stopped ticking until the next event.
         if Instant::now() >= self.next_frame {
             if let Some(w) = &self.window {
                 w.request_redraw();
@@ -2185,6 +2205,12 @@ impl ApplicationHandler for App {
             WindowEvent::Occluded(occluded) => {
                 self.render.occluded = occluded;
                 self.render.last_view = None;
+                // Shown again: draw now. The last frame was paced as a
+                // hidden one, and until the next is drawn the window shows
+                // whatever it presented before it was hidden.
+                if !occluded {
+                    self.next_frame = Instant::now();
+                }
             }
             WindowEvent::KeyboardInput { event, .. } => {
                 if let PhysicalKey::Code(code) = event.physical_key {
@@ -2399,8 +2425,8 @@ impl ApplicationHandler for App {
                     let view = (vp, (w, h));
                     let unchanged =
                         self.render.last_view == Some(view) && !g.is_dirty() && !overlay_changed;
-                    if self.render.occluded || unchanged {
-                        self.render.perf.idle_frames += 1;
+                    let presented = if self.render.occluded || unchanged {
+                        false
                     } else {
                         let cpu_ms = now.elapsed().as_secs_f32() * 1e3;
                         let mut ui = self.ui.as_mut();
@@ -2413,12 +2439,33 @@ impl ApplicationHandler for App {
                                     ui.paint(d, q, e, v);
                                 }
                             };
-                        if let Err(e) = g.render(vp, Vec3::new(0.4, 0.3, 1.0), Some(&mut paint)) {
-                            tracing::error!("render: {e:#}");
+                        let presented =
+                            match g.render(vp, Vec3::new(0.4, 0.3, 1.0), Some(&mut paint)) {
+                                Ok(presented) => presented,
+                                Err(e) => {
+                                    tracing::error!("render: {e:#}");
+                                    false
+                                }
+                            };
+                        // Only a presented frame is on screen: one the
+                        // surface refused is tried again next frame, or
+                        // the window would keep an old image.
+                        if presented {
+                            self.render.last_view = Some(view);
+                            // Perf keeps every frame's times for the exit
+                            // report, which only --perf prints.
+                            if self.cli.perf {
+                                let ms = now.elapsed().as_secs_f32() * 1e3;
+                                self.render.perf.frame(ms, cpu_ms, overlay_ms, g.stats());
+                            }
                         }
-                        self.render.last_view = Some(view);
-                        let ms = now.elapsed().as_secs_f32() * 1e3;
-                        self.render.perf.frame(ms, cpu_ms, overlay_ms, g.stats());
+                        presented
+                    };
+                    // Nothing submitted what the tick uploaded; this does
+                    // (see `Gpu::idle_frame`).
+                    if !presented {
+                        self.render.perf.idle_frames += 1;
+                        g.idle_frame();
                     }
                     self.gpu = Some(g);
                 }
@@ -3223,5 +3270,23 @@ mod tests {
         assert_eq!(c.sex.as_deref(), Some("f"));
         assert!(parse_fleet_start("bob:pw").is_err());
         assert!(parse_fleet_start("bob::Bob").is_err());
+    }
+
+    #[test]
+    fn particles_upload_only_while_shown() {
+        for has_quads in [false, true] {
+            for drew in [false, true] {
+                assert!(
+                    !particle_upload_due(true, has_quads, drew),
+                    "hidden: quads {has_quads}, drew {drew}"
+                );
+            }
+        }
+        assert!(particle_upload_due(false, true, false));
+        assert!(particle_upload_due(false, true, true));
+        // The last batches are still up: an empty list clears them.
+        assert!(particle_upload_due(false, false, true));
+        // Nothing then, nothing now.
+        assert!(!particle_upload_due(false, false, false));
     }
 }

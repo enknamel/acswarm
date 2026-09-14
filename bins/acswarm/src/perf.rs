@@ -33,7 +33,9 @@ pub struct Perf {
 }
 
 impl Perf {
-    /// Record a rendered frame.
+    /// Record a rendered frame. Every frame's times are kept for the
+    /// percentiles, so record only with --perf: a window left open for
+    /// days would otherwise grow them without end.
     pub fn frame(&mut self, frame_ms: f32, cpu_ms: f32, overlay_ms: f32, stats: FrameStats) {
         self.frame_ms.push(frame_ms);
         self.cpu_ms.push(cpu_ms);

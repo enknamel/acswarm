@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use bytemuck::{Pod, Zeroable};
@@ -389,6 +389,9 @@ pub struct Gpu {
     stats: FrameStats,
     /// Persistent offscreen target for `render_offscreen`.
     offscreen: Option<wgpu::TextureView>,
+    /// When this last submitted to the queue: `idle_frame` submits only
+    /// once nothing has for `IDLE_FLUSH_EVERY`.
+    last_submit: std::cell::Cell<Instant>,
 }
 
 /// One submesh uploaded in model space with its material.
@@ -427,6 +430,13 @@ const MODEL_SIZE: u64 = 80;
 /// instances drawn this frame).
 const MAX_INSTANCES: u64 = 8192;
 
+/// How often a run of frames that draw nothing submits. Every submit
+/// commits a Metal command buffer, even with nothing in it, and an
+/// uncapped window with a still scene runs undrawn frames as fast as it
+/// can. Half a hidden window's 100 ms tick, so a hidden window still
+/// submits every tick however its frames jitter.
+const IDLE_FLUSH_EVERY: Duration = Duration::from_millis(50);
+
 impl Gpu {
     pub fn new(window: Arc<Window>) -> Result<Self> {
         let size = window.inner_size();
@@ -438,14 +448,40 @@ impl Gpu {
         Self::create(None, width, height)
     }
 
-    /// Push pending uploads to the GPU and free dropped resources. A
-    /// window does this every frame by presenting; headless sessions must
-    /// call it themselves, or every buffer created since the last submit
-    /// (particles are re-uploaded each tick) stays alive with its staging
-    /// copy until the final screenshot.
+    /// Push pending uploads to the GPU and free dropped resources. wgpu
+    /// holds every upload, its staging copy and every buffer dropped since
+    /// until the next queue submit, and particles are re-uploaded each
+    /// tick. Only a drawn frame submits: headless sessions must call this
+    /// themselves, or all of it stays alive until the final screenshot.
     pub fn flush(&self) {
+        self.flush_at(Instant::now());
+    }
+
+    fn flush_at(&self, now: Instant) {
         self.queue.submit(std::iter::empty());
         let _ = self.device.poll(wgpu::PollType::Poll);
+        self.last_submit.set(now);
+    }
+
+    /// End a window frame that was not presented: the window is hidden,
+    /// nothing on it changed, or the surface gave no frame to draw on.
+    /// Every such frame must call this. A hidden window still ticks, and
+    /// landblocks, meshes, egui textures and particles still upload;
+    /// without a submit wgpu held them all, and the first frame drawn on
+    /// selecting the window again submitted and freed the whole time
+    /// hidden at once, a long freeze. It submits only once nothing has for
+    /// `IDLE_FLUSH_EVERY`, which bounds what is held to that long.
+    pub fn idle_frame(&self) {
+        self.idle_frame_at(Instant::now());
+    }
+
+    /// `idle_frame` as if at `now`; returns whether it submitted.
+    fn idle_frame_at(&self, now: Instant) -> bool {
+        let due = now.saturating_duration_since(self.last_submit.get()) >= IDLE_FLUSH_EVERY;
+        if due {
+            self.flush_at(now);
+        }
+        due
     }
 
     fn create(window: Option<Arc<Window>>, width: u32, height: u32) -> Result<Self> {
@@ -871,6 +907,7 @@ impl Gpu {
             max_texture: u32::MAX,
             stats: FrameStats::default(),
             offscreen: None,
+            last_submit: std::cell::Cell::new(Instant::now()),
         })
     }
 
@@ -1451,19 +1488,27 @@ impl Gpu {
         out
     }
 
+    /// Draw a frame to the window and present it. Returns whether one was
+    /// presented. The surface can give no frame to draw on: wgpu asks
+    /// macOS whether the window is visible at every frame, which can
+    /// disagree with the last `Occluded` winit sent, and a drawable can
+    /// time out. Nothing is then drawn or submitted, so the caller ends
+    /// the frame with `idle_frame` like any other it did not draw.
     pub fn render(
         &mut self,
         view_proj: Mat4,
         light_dir: Vec3,
         ui: Option<UiPaint<'_>>,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         let surface = self.surface.as_ref().context("no surface")?;
         let frame = match surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(t) => t,
             wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
-            _ => {
-                surface.configure(&self.device, &self.config);
-                return Ok(());
+            status => {
+                if reconfigure_after(&status) {
+                    surface.configure(&self.device, &self.config);
+                }
+                return Ok(false);
             }
         };
         let view = frame.texture.create_view(&Default::default());
@@ -1474,7 +1519,7 @@ impl Gpu {
             self.queue.submit([enc.finish()]);
         }
         self.queue.present(frame);
-        Ok(())
+        Ok(true)
     }
 
     /// Render one frame offscreen and write it as a PNG.
@@ -1802,6 +1847,7 @@ impl Gpu {
             }
         }
         self.queue.submit([encoder.finish()]);
+        self.last_submit.set(Instant::now());
         stats.encode_ms = t0.elapsed().as_secs_f32() * 1e3;
         self.stats = stats;
         self.dirty = false;
@@ -1913,5 +1959,147 @@ fn resample(img: &Rgba, width: u32, height: u32) -> Rgba {
         width,
         height,
         pixels,
+    }
+}
+
+/// Whether a surface that gave no frame must be configured again: it is
+/// outdated, lost or failed validation. A hidden window or a drawable
+/// that timed out only skips the frame, as wgpu advises: configuring
+/// waits for all GPU work to finish, and a window macOS calls hidden
+/// would do that every tick.
+fn reconfigure_after(status: &wgpu::CurrentSurfaceTexture) -> bool {
+    use wgpu::CurrentSurfaceTexture as S;
+    matches!(status, S::Outdated | S::Lost | S::Validation)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `groups` sprite groups of `n` particles each.
+    fn draws(groups: u32, n: usize) -> Vec<ParticleDraw> {
+        (0..groups)
+            .map(|k| ParticleDraw {
+                material: MaterialKey::Solid(0xFF00_0000 | k),
+                additive: false,
+                instances: vec![ParticleInstance::new([0.0; 3], [1.0; 2], [1.0; 4], 0, 0.0); n],
+            })
+            .collect()
+    }
+
+    /// Buffers the backend holds right now. Only counted with wgpu's
+    /// `counters` feature, which the dev-dependencies turn on.
+    fn live_buffers(gpu: &Gpu) -> isize {
+        gpu.device().get_internal_counters().hal.buffers.read()
+    }
+
+    /// Wait for the GPU to finish what was submitted, and free it. This
+    /// submits nothing, so uploads still waiting for a submit stay held.
+    fn wait(gpu: &Gpu) {
+        let _ = gpu.device().poll(wgpu::PollType::wait_indefinitely());
+    }
+
+    /// Submit, wait for the GPU, and submit again so what it finished is
+    /// freed.
+    fn settle(gpu: &Gpu) {
+        gpu.flush();
+        wait(gpu);
+        gpu.flush();
+    }
+
+    /// A hidden window ticks at 10 fps and draws nothing, so a minute
+    /// hidden in town is 600 ticks of particle uploads with no frame to
+    /// submit them. Undrawn frames must not let wgpu hold those.
+    #[test]
+    fn skipped_frames_do_not_hold_particle_uploads() {
+        let mut gpu = match Gpu::headless(64, 64) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("no GPU ({e:#}); skipping");
+                return;
+            }
+        };
+        const TICKS: usize = 600;
+        const GROUPS: u32 = 5;
+        const PARTICLES: usize = 100;
+        gpu.set_particles(draws(GROUPS, PARTICLES), |_| None);
+        settle(&gpu);
+
+        // What a hidden window did before `idle_frame`: upload, never
+        // submit.
+        let base = live_buffers(&gpu);
+        for _ in 0..TICKS {
+            gpu.set_particles(draws(GROUPS, PARTICLES), |_| None);
+        }
+        wait(&gpu);
+        let backlog = live_buffers(&gpu) - base;
+        let t = Instant::now();
+        settle(&gpu);
+        let release_ms = t.elapsed().as_secs_f64() * 1e3;
+
+        // A hidden window's frames, a tick (100 ms) apart: every one
+        // submits.
+        let start = Instant::now() + IDLE_FLUSH_EVERY;
+        let base = live_buffers(&gpu);
+        for i in 0..TICKS {
+            gpu.set_particles(draws(GROUPS, PARTICLES), |_| None);
+            let now = start + Duration::from_millis(100) * i as u32;
+            assert!(gpu.idle_frame_at(now), "hidden tick {i} did not submit");
+        }
+        // This loop outruns the GPU where a window ticks every 100 ms, so
+        // let it finish first: only what no submit reached is counted.
+        wait(&gpu);
+        let held = live_buffers(&gpu) - base;
+        eprintln!(
+            "{TICKS} ticks of {GROUPS} groups x {PARTICLES}: {backlog} buffers held with no \
+             submit (freed in {release_ms:.1} ms), {held} with idle_frame"
+        );
+        // At least a buffer a group a tick, or the counters are not
+        // counting and `held` proves nothing.
+        assert!(
+            backlog >= (TICKS * GROUPS as usize) as isize,
+            "the backlog should be counted: {backlog}"
+        );
+        assert!(held <= 40, "{held} buffers held across {TICKS} idle frames");
+    }
+
+    /// Each submit commits a Metal command buffer even with nothing in
+    /// it, and an uncapped window with a still scene runs undrawn frames
+    /// as fast as it can: they submit only every `IDLE_FLUSH_EVERY`, and
+    /// a drawn frame's submit counts.
+    #[test]
+    fn idle_frames_submit_at_most_every_50_ms() {
+        let mut gpu = match Gpu::headless(64, 64) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("no GPU ({e:#}); skipping");
+                return;
+            }
+        };
+        gpu.render_offscreen(Mat4::IDENTITY, Vec3::Z, None)
+            .expect("offscreen frame");
+        let drawn = gpu.last_submit.get();
+        assert!(
+            !gpu.idle_frame_at(drawn + Duration::from_millis(49)),
+            "just drawn"
+        );
+        assert!(gpu.idle_frame_at(drawn + IDLE_FLUSH_EVERY), "due");
+
+        // A second of undrawn frames 1 ms apart.
+        let start = drawn + IDLE_FLUSH_EVERY * 2;
+        let submits = (0..1000u32)
+            .filter(|&i| gpu.idle_frame_at(start + Duration::from_millis(1) * i))
+            .count();
+        assert_eq!(submits, 20, "one submit every 50 ms of 1,000 frames");
+    }
+
+    #[test]
+    fn a_hidden_or_timed_out_surface_is_not_configured_again() {
+        use wgpu::CurrentSurfaceTexture as S;
+        assert!(!reconfigure_after(&S::Occluded));
+        assert!(!reconfigure_after(&S::Timeout));
+        assert!(reconfigure_after(&S::Outdated));
+        assert!(reconfigure_after(&S::Lost));
+        assert!(reconfigure_after(&S::Validation));
     }
 }
