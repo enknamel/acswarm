@@ -133,6 +133,12 @@ pub struct Track {
 /// damage the moment either side is a non-PK, and the fellowship a
 /// character hunts with is nine non-PKs shooting past each other.
 ///
+/// Free is the exception, and it runs the other way: ACE short-circuits
+/// to "allowed" the moment *either* side is Free
+/// (`Player_Combat.CheckPKStatusVsTarget`, which returns no error at
+/// all for it), so a Free player's spell lands on an ordinary character
+/// for full damage. Either side carrying that bit is a threat.
+///
 /// Read the other way round when there is any doubt. The caster is a
 /// guess (see [`Client::fired_by`]), and the two PK statuses the server
 /// keeps are finer than these bits -- a PK and a PK Lite cannot touch
@@ -143,8 +149,10 @@ pub fn can_hurt_us(caster: u32, mine: u32) -> bool {
     if caster & flags::PLAYER == 0 {
         return true;
     }
-    let pk =
-        |f: u32| f & (flags::PLAYER_KILLER | flags::FREE_PK_STATUS | flags::PK_LITE_STATUS) != 0;
+    if (caster | mine) & flags::FREE_PK_STATUS != 0 {
+        return true;
+    }
+    let pk = |f: u32| f & (flags::PLAYER_KILLER | flags::PK_LITE_STATUS) != 0;
     pk(caster) && pk(mine)
 }
 
@@ -1179,6 +1187,19 @@ mod tests {
         assert!(!can_hurt_us(
             flags::PLAYER,
             flags::PLAYER | flags::PLAYER_KILLER
+        ));
+        // Free runs the other way: ACE short-circuits to "allowed" the
+        // moment either side is Free, so a Free player's spell lands on
+        // an ordinary character for full damage. Read as one more PK bit
+        // that both sides had to carry, the one projectile that can kill
+        // us was the one demoted to a courtesy.
+        assert!(can_hurt_us(
+            flags::PLAYER | flags::FREE_PK_STATUS,
+            flags::PLAYER
+        ));
+        assert!(can_hurt_us(
+            flags::PLAYER,
+            flags::PLAYER | flags::FREE_PK_STATUS
         ));
     }
 
