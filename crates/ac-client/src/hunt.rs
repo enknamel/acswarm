@@ -181,8 +181,8 @@ impl Client {
     }
 
     /// Whether `o` may be fought under the hunting area: it stands inside
-    /// the area, or it is what has just hit the character and is near.
-    /// With no area, anything may.
+    /// the area, or it is what has just swung at the character and is
+    /// near. With no area, anything may.
     pub(crate) fn area_allows(&self, o: &ac_world::WorldObject, underground: bool) -> bool {
         let Some(area) = &self.autoplay.config.fight.area else {
             return true;

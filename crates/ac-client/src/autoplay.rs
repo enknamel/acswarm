@@ -522,6 +522,50 @@ fn arrived_unharmed(text: &str) -> Option<&str> {
         .or_else(|| text.strip_suffix(" evades your attack."))
 }
 
+/// Who a line says has just cast a spell at this character to hurt it: a
+/// war spell that landed ("Drudge Shaman blasts you for 12 points with
+/// Flame Bolt I."), a drain ("Drudge Shaman casts Harm Other I and drains
+/// 9 points of your health."), a vital taken ("You lose 20 points of mana
+/// due to Drudge Shaman casting Mana to Health Other I on you"), or a
+/// spell resisted ("You resist the spell cast by Drudge Shaman").
+///
+/// ACE tells a character it was hit by a swing with a notification, and
+/// by a spell with nothing but one of these lines (`SpellProjectile`,
+/// `WorldObject_Magic`). A caster working on the character from twenty
+/// metres never closes in to swing, so without these it never counted as
+/// attacking it at all.
+///
+/// "X cast Y on you" is left out on purpose: a fellow's buff reads the
+/// same as a monster's curse, and a buff is not a fight.
+fn spell_attacker(text: &str) -> Option<&str> {
+    if let Some(who) = text.strip_prefix("You resist the spell cast by ") {
+        return Some(who);
+    }
+    if let Some(rest) = text.strip_prefix("You lose ") {
+        let (_, by) = rest.split_once(" due to ")?;
+        let (who, _) = by.strip_suffix(" on you")?.split_once(" casting ")?;
+        return Some(who);
+    }
+    // A bolt that landed can come with any of these in front of it.
+    let mut line = text;
+    while let Some(rest) = ["Critical hit! ", "Overpower! ", "Sneak Attack! "]
+        .into_iter()
+        .find_map(|p| line.strip_prefix(p))
+    {
+        line = rest;
+    }
+    if let Some((before, after)) = line.split_once(" you for ") {
+        // The verb is one word, and says how hard: "blasts", "singes".
+        return after
+            .contains(" points with ")
+            .then(|| before.rsplit_once(' ').map(|(who, _)| who))
+            .flatten()
+            .filter(|who| !who.is_empty());
+    }
+    let (who, rest) = line.split_once(" casts ")?;
+    (rest.contains(" and drains ") && rest.contains(" points of your ")).then_some(who)
+}
+
 /// Whether what has been thrown at a target has had long enough to get
 /// there and has not: the first shot since anything last arrived went
 /// out at `thrown`, more than [`CLOSE_IN_AFTER`] ago. Nothing thrown is
@@ -794,6 +838,15 @@ pub struct Fight {
     /// otherwise turn it off.
     #[serde(default = "yes")]
     pub skip_critters: bool,
+    /// Walk past what stands about while the character is on its way
+    /// somewhere it decided to go: out to a hunting ground, back from
+    /// town, round the counters. Getting there is the errand; the
+    /// fighting is what the ground at the far end is for. Never a
+    /// reason not to hit back.
+    ///
+    /// Defaulted by name for the same reason as `skip_critters`.
+    #[serde(default = "yes")]
+    pub walk_past_on_the_way: bool,
     /// Farthest creature to pick, metres.
     pub radius: f32,
     /// Make more ammunition when out, from a bundle of heads and a
@@ -822,6 +875,7 @@ impl Default for Fight {
             only: Vec::new(),
             avoid: Vec::new(),
             skip_critters: true,
+            walk_past_on_the_way: true,
             radius: 25.0,
         }
     }
@@ -1054,8 +1108,8 @@ const LOOT_NEAR: f32 = 20.0;
 /// How long after a killing blow its corpse is taken to be on the way.
 /// The server makes the body a moment after the creature dies.
 const CORPSE_APPEARS: Duration = Duration::from_secs(3);
-/// Hit this recently, the character is in a fight whether or not it
-/// chose one.
+/// Swung at this recently, the character is in a fight whether or not
+/// it chose one.
 const UNDER_ATTACK: Duration = Duration::from_secs(4);
 
 /// How long a monster's corpse lasts before it rots away. ACE gives an
@@ -1243,6 +1297,12 @@ pub struct Mate {
     /// and what it is called. What the party goes back to together
     /// after a trip to town.
     pub ground: Option<(u32, glam::Vec2, String)>,
+    /// It is on its way somewhere, or keeping up with a leader that is
+    /// (see `Client::on_its_way`). A party on the road walks past what its
+    /// leader walks past and stops for what any of it on the road is
+    /// fighting, so it neither scatters to fight nor walks off and leaves
+    /// one of its own behind.
+    pub on_its_way: bool,
 }
 
 /// Health left below which there is no time to be careful: the biggest
@@ -1853,8 +1913,10 @@ pub struct Autoplay {
     approach_best: Option<(u32, f32)>,
     /// The summoning rules' own state (see `crate::summoning`).
     pub summoning: crate::summoning::State,
-    /// Who last hit the character, and when: fought wherever it stands,
-    /// hunting area or not.
+    /// Who last attacked the character, and when -- a blow landed or one
+    /// evaded, since a creature that misses is attacking all the same,
+    /// or a spell cast at it, landed or resisted. Fought wherever it
+    /// stands, hunting area or not.
     pub(crate) hit_by: Option<(String, Instant)>,
     /// The first shot thrown at a target since anything last got to it,
     /// and when: damage, a resist or an evasion clears it. The time spent
@@ -1905,8 +1967,9 @@ pub struct Autoplay {
     /// creature this character summoned is about: its kills send no
     /// word (see `Client::autoplay_claim_pet_kills`).
     pub(crate) whose: Whose,
-    /// When something last hit the character. A fight that has come to
-    /// it is fought first, body owed or not.
+    /// When something last attacked the character, whether or not the
+    /// blow or the spell landed. A fight that has come to it is fought
+    /// first, body owed or not.
     pub(crate) last_hit_us: Option<Instant>,
     /// Corpses that would not open, and how long to leave each. A
     /// corpse is locked to the group that killed it until it has rotted
@@ -4921,18 +4984,29 @@ impl Client {
         a_player || ac_world::elements::creature(corpse.get(10..).unwrap_or("")).is_none()
     }
 
-    /// Something has hit the character in the last few seconds.
+    /// Something has attacked the character in the last few seconds --
+    /// landed a blow, swung and missed, or cast a spell at it. A creature
+    /// that keeps missing is in a fight with this character just as much
+    /// as one that hits, and so is one that stands off and casts; the
+    /// server says so each time.
     pub fn under_attack(&self) -> bool {
         self.autoplay
             .last_hit_us
             .is_some_and(|t| t.elapsed() < UNDER_ATTACK)
     }
 
-    /// Whether what has just hit the character is called `name`. The
-    /// server names the attacker in the line it sends, so this is all
-    /// there is to go on, and it is enough: it is what says a creature
-    /// outside the hunting area, or one otherwise walked past, is a
-    /// fight the character is already in.
+    /// Whether what has just attacked the character is called `name`.
+    /// The server names the attacker in what it sends, hit, miss or
+    /// spell, so this is all there is to go on, and it is enough: it is
+    /// what says a creature outside the hunting area, or one otherwise
+    /// walked past, is a fight the character is already in.
+    ///
+    /// A creature's move target being this character is not asked here.
+    /// It says something is walking at us, which our own pets, a fellow
+    /// and a wandering townsfolk all do, and it carries no time, so it
+    /// could not say when the fight began. The two notifications and the
+    /// spell lines (see [`spell_attacker`]) say outright that an attack
+    /// was aimed at this character, and when.
     pub(crate) fn hit_lately_by(&self, name: &str) -> bool {
         self.under_attack()
             && self
@@ -4969,9 +5043,9 @@ impl Client {
     ///
     /// Three things always outrank the rule, because in each of them
     /// the fight is already happening or was asked for: the creature is
-    /// hitting the character, a creature this one summoned has taken it
-    /// on, or the player named it in "only these", which is a player
-    /// saying outright what to hunt.
+    /// swinging at the character, hit or miss, a creature this one
+    /// summoned has taken it on, or the player named it in "only these",
+    /// which is a player saying outright what to hunt.
     ///
     /// The table is asked first and the three are only consulted for
     /// something the table would have the character walk past. This runs
@@ -5003,6 +5077,87 @@ impl Client {
             || self.a_pet_is_on(o.guid))
     }
 
+    /// Whether `o` is a creature to walk past because the character is
+    /// on its way somewhere (see [`Self::on_its_way`]).
+    ///
+    /// Going somewhere is an errand of its own. The fighting is what the
+    /// ground at the far end is for, and a character that stops for
+    /// every drudge between here and there arrives an hour late or not
+    /// at all. It answers what the character is *doing*, which is why it
+    /// is a rule of its own rather than another clause in
+    /// [`Self::a_critter`]: that one answers what a creature *is*, and
+    /// the same Drudge is worth fighting once the walk is over.
+    ///
+    /// Two things outrank it, and in both the fight is already happening:
+    /// the creature is attacking the character, with a swing or a spell,
+    /// or one of the party on the road with it is fighting it (see
+    /// [`Self::a_mate_on_the_road_is_on`]). The road does not get to decide
+    /// either. Nothing has to be undone at the end of the road: the rule
+    /// ends with the walk, and the character is fighting again the tick it
+    /// arrives.
+    ///
+    /// `a_critter`'s other overrides are not this rule's. A name in
+    /// "only these" says which kind to hunt, not where: every creature the
+    /// pickers could choose already matches it, so as an override it
+    /// switched the walking past off for anyone who kept the list, and a
+    /// Drudge hunter stopped for every Drudge on the road to the Drudge
+    /// ground. And a summoned creature picks its own fights. ACE's combat
+    /// pet goes for the nearest monster it can see, whether or not that one
+    /// is doing anything, so taking its target for a fight already on had
+    /// the character stop for each creature its pet went for in turn --
+    /// the very walk this rule is for.
+    ///
+    /// A creature standing in the character's path is not carved out,
+    /// and that is a decision rather than an oversight. Nothing this
+    /// client walks with can be stopped by one: its own physics collides
+    /// with the landblock's static geometry and with nothing else, which
+    /// is why a character walks straight through a closed door, and the
+    /// steering plans its way round that same geometry. A creature is an
+    /// object like the door is. And anything that could get in the way
+    /// and matter is aggressive, which means it attacks -- the first
+    /// override, and the character turns and fights it. If some ground
+    /// proves otherwise, the walk's own four-minute timeout
+    /// (`growth::WALK_TIMEOUT`) still ends it and another ground is
+    /// chosen.
+    pub(crate) fn passing_by(&self, o: &ac_world::WorldObject, cfg: &Fight) -> bool {
+        if !cfg.walk_past_on_the_way || !self.on_its_way() {
+            return false;
+        }
+        !(self.hit_lately_by(&o.name) || self.a_mate_on_the_road_is_on(o.guid))
+    }
+
+    /// Whether one of the party, on its way as well, is fighting `guid`.
+    ///
+    /// A character on the road takes on nothing but what attacks it, so
+    /// this is a fight that came to one of its own. Without it the leader
+    /// walked on while a follower turned to fight, and the follower was
+    /// fetched after it and turned again, alone, each time it closed. A
+    /// mate that is not on the road -- hunting back at the ground while
+    /// this one goes to town -- is no reason to turn round.
+    fn a_mate_on_the_road_is_on(&self, guid: u32) -> bool {
+        self.autoplay
+            .team
+            .mates
+            .iter()
+            .any(|m| m.on_its_way && m.target == Some(guid))
+    }
+
+    /// Whether to go on at `guid` with the rest of the team: it is alive,
+    /// and not one this character is walking past on its way somewhere
+    /// (see [`Self::passing_by`]).
+    ///
+    /// Focus fire and the debuffer take the team's target off the board
+    /// rather than choosing through [`Self::would_fight`], so they ask
+    /// this instead. Without it a character setting off for town turned
+    /// round for whatever the party back at the ground was hitting, from
+    /// as far off as it could see it.
+    pub(crate) fn joins_the_team_on(&self, guid: u32, cfg: &Fight) -> bool {
+        self.world
+            .objects
+            .get(&guid)
+            .is_some_and(|o| o.health.unwrap_or(1.0) > 0.0 && !self.passing_by(o, cfg))
+    }
+
     /// Whether `o` is something this character would take on: a live
     /// creature, nobody's summoned pet and no player, inside the hunting
     /// area, of a kind it hunts, not a critter beneath it, not one the
@@ -5032,6 +5187,9 @@ impl Client {
             && wanted_target(&o.name, cfg)
             // A Rabbit the character has outgrown is walked past.
             && !self.a_critter(o, cfg)
+            // And so is whatever stands about while it is on its way
+            // somewhere: the trip is the errand, not the road.
+            && !self.passing_by(o, cfg)
             // With the vitae high, the hard ones and the killer wait.
             && !self.shy_of(o)
             // And one there is no getting to is not a fight on offer.
@@ -5193,39 +5351,38 @@ impl Client {
         }
         let me = self.player.as_ref().map(|p| p.world_position());
         let Some(me) = me else { return false };
-        // Hunting together: hit what the team is hitting.
+        // Hunting together: hit what the team is hitting, unless it is
+        // something this character is walking past on its way somewhere.
         let team = &self.autoplay.config.team;
         if team.enabled && team.focus_fire && !self.autoplay.team.leader {
-            if let Some((guid, name)) = self.autoplay.team.target() {
-                let alive = self
-                    .world
-                    .objects
-                    .get(&guid)
-                    .is_some_and(|o| o.health.unwrap_or(1.0) > 0.0);
-                if alive {
-                    if self.autoplay_plan_hard(guid, &name, now) {
-                        return true;
-                    }
-                    self.remember_journey();
-                    self.arm_for(guid, stance, &cfg);
-                    if self.hands_changing(now) {
-                        self.autoplay
-                            .say(Doing::Fighting, format!("changing weapon for {name}"));
-                        return true;
-                    }
-                    if missile && self.autoplay_approach(guid, &name, crate::dodge::How::Missile) {
-                        return true;
-                    }
-                    self.enter_combat();
-                    self.attack(guid);
-                    self.autoplay.last_attack = Some(now);
-                    if missile {
-                        self.throw_at(guid, now);
-                    }
-                    self.autoplay
-                        .say(Doing::Fighting, format!("joining on {name}"));
+            let joined = self
+                .autoplay
+                .team
+                .target()
+                .filter(|(guid, _)| self.joins_the_team_on(*guid, &cfg));
+            if let Some((guid, name)) = joined {
+                if self.autoplay_plan_hard(guid, &name, now) {
                     return true;
                 }
+                self.remember_journey();
+                self.arm_for(guid, stance, &cfg);
+                if self.hands_changing(now) {
+                    self.autoplay
+                        .say(Doing::Fighting, format!("changing weapon for {name}"));
+                    return true;
+                }
+                if missile && self.autoplay_approach(guid, &name, crate::dodge::How::Missile) {
+                    return true;
+                }
+                self.enter_combat();
+                self.attack(guid);
+                self.autoplay.last_attack = Some(now);
+                if missile {
+                    self.throw_at(guid, now);
+                }
+                self.autoplay
+                    .say(Doing::Fighting, format!("joining on {name}"));
+                return true;
             }
         }
         let underground = self.underground();
@@ -5849,6 +6006,18 @@ impl Client {
         if self.autoplay.corpse_refused(text, &name, self.told, now) {
             self.stop_walking_to_loot();
         }
+    }
+
+    /// A line saying something cast a spell at this character to hurt it
+    /// (see [`spell_attacker`]), kept in the same two fields a swing sets.
+    /// Every "but fight back when it attacks you" carve-out reads those,
+    /// and a caster attacks as surely as a creature that swings.
+    pub(crate) fn hear_spell_attack(&mut self, text: &str, now: Instant) {
+        let Some(who) = spell_attacker(text) else {
+            return;
+        };
+        self.autoplay.last_hit_us = Some(now);
+        self.autoplay.hit_by = Some((who.to_string(), now));
     }
 
     /// A line saying a shot got to something and did not hurt it (see
@@ -6771,12 +6940,10 @@ impl Client {
                     .map(|t| (t, self.last_target_name.clone()))
             });
             if let Some((guid, name)) = target {
-                let alive = self
-                    .world
-                    .objects
-                    .get(&guid)
-                    .is_some_and(|o| o.health.unwrap_or(1.0) > 0.0);
-                if alive && !self.autoplay.debuffed.contains(&guid) {
+                // Not one it is walking past on its way somewhere, any more
+                // than the fight would be (see `joins_the_team_on`).
+                let fight = &self.autoplay.config.fight;
+                if self.joins_the_team_on(guid, fight) && !self.autoplay.debuffed.contains(&guid) {
                     for spell_name in &team.debuffs {
                         let Some(spell) = self.spell_by_name(spell_name) else {
                             continue;
@@ -7638,6 +7805,166 @@ mod tests {
         };
         assert!(!c.a_critter(&rabbit, &all));
         assert!(!c.a_critter(&other, &all));
+    }
+
+    /// The GameEvent behind "You evade <name>'s attack.": the server's
+    /// word that `name` swung at the character and missed.
+    fn evaded(guid: u32, name: &str) -> Vec<u8> {
+        let mut w = ac_net::wire::Writer::new();
+        w.u32(guid)
+            .u32(0)
+            .u32(ac_net::messages::event::EVASION_DEFENDER_NOTIFICATION)
+            .string16(name);
+        w.finish()
+    }
+
+    #[test]
+    fn an_evaded_swing_counts_as_being_attacked() {
+        let Some(mut c) = character_of_level(20) else {
+            return;
+        };
+        assert!(!c.under_attack(), "nothing has happened yet");
+        c.chat_message(
+            ac_net::messages::opcode::GAME_EVENT,
+            &evaded(0x8000_0001, "Drudge Skulker"),
+        );
+        assert!(c.under_attack(), "a miss is an attack all the same");
+        assert_eq!(
+            c.autoplay.hit_by.as_ref().map(|(who, _)| who.as_str()),
+            Some("Drudge Skulker"),
+            "and the server named who swung"
+        );
+        assert!(c.hit_lately_by("Drudge Skulker"));
+        assert!(!c.hit_lately_by("Drudge Robber"), "the one standing by");
+    }
+
+    #[test]
+    fn a_spell_cast_at_the_character_names_its_caster() {
+        // The lines ACE sends the target of a spell, and nothing else is
+        // sent: SpellProjectile's damage and drain, WorldObject_Magic's
+        // drain, transfer and resist.
+        for (line, who) in [
+            (
+                "Drudge Shaman blasts you for 12 points with Flame Bolt I.",
+                "Drudge Shaman",
+            ),
+            (
+                "Critical hit! Sneak Attack! Drudge Shaman scorches you for 40 points \
+                 with Flame Bolt II.",
+                "Drudge Shaman",
+            ),
+            (
+                "Overpower! Mite hits you for 3 points with Acid Stream I. Your \
+                 augmentation allows you to avoid a critical hit!",
+                "Mite",
+            ),
+            (
+                "Drudge Shaman casts Harm Other I and drains 9 points of your health.",
+                "Drudge Shaman",
+            ),
+            (
+                "You lose 20 points of mana due to Drudge Shaman casting Mana to \
+                 Health Other I on you",
+                "Drudge Shaman",
+            ),
+            (
+                "You resist the spell cast by Drudge Shaman",
+                "Drudge Shaman",
+            ),
+        ] {
+            assert_eq!(spell_attacker(line), Some(who), "{line}");
+        }
+        // The character's own spells, and a fellow's help, are no attack.
+        for line in [
+            "You blast Drudge Shaman for 12 points with Flame Bolt I.",
+            "Drudge Shaman resists your spell",
+            "With Harm Other I you drain 9 points of health from Drudge Shaman.",
+            "Aldric casts Heal Other I and restores 30 points of your health.",
+            "Aldric cast Strength Other I on you",
+            "You gain 20 points of health due to Aldric casting Stamina to Health \
+             Other I on you",
+            "You lose 50 points of stamina due to casting Stamina to Mana Other I \
+             on Aldric",
+            "Drudge Skulker hits you for 5 points.",
+        ] {
+            assert_eq!(spell_attacker(line), None, "{line}");
+        }
+    }
+
+    /// A line of system chat as the server sends it (ServerMessage 0xF7E0):
+    /// the text, and its ChatMessageType, Magic here.
+    fn magic_line(text: &str) -> Vec<u8> {
+        let mut w = ac_net::wire::Writer::new();
+        w.string16(text).u32(7);
+        w.finish()
+    }
+
+    #[test]
+    fn a_caster_that_only_casts_is_attacking_the_character() {
+        // A shaman turns and casts from its spell range and never closes
+        // in to swing, so neither notification a swing brings ever came:
+        // `under_attack` stayed false while it worked the character over,
+        // and every "but fight back when it attacks you" carve-out walked
+        // on past it.
+        let Some(mut c) = character_of_level(20) else {
+            return;
+        };
+        let op = ac_net::messages::opcode::SERVER_MESSAGE;
+        assert!(!c.under_attack(), "nothing has happened yet");
+        c.chat_message(
+            op,
+            &magic_line("Drudge Shaman blasts you for 12 points with Flame Bolt I."),
+        );
+        assert!(c.under_attack(), "a bolt that landed is an attack");
+        assert!(c.hit_lately_by("Drudge Shaman"));
+        assert!(!c.hit_lately_by("Drudge Skulker"), "the one standing by");
+
+        // Resisted, it was still cast at the character.
+        c.autoplay.last_hit_us = None;
+        c.autoplay.hit_by = None;
+        c.chat_message(
+            op,
+            &magic_line("You resist the spell cast by Drudge Shaman"),
+        );
+        assert!(c.hit_lately_by("Drudge Shaman"));
+
+        // A fellow's heal is not.
+        c.autoplay.last_hit_us = None;
+        c.autoplay.hit_by = None;
+        c.chat_message(
+            op,
+            &magic_line("Aldric casts Heal Other I and restores 30 points of your health."),
+        );
+        assert!(!c.under_attack());
+    }
+
+    #[test]
+    fn a_critter_that_swings_and_misses_is_fought_rather_than_walked_past() {
+        let Some(mut c) = character_of_level(20) else {
+            return;
+        };
+        let cfg = Fight::default();
+        let rabbit = in_view(&mut c, 0x8000_0001, 2567, "Brown Rabbit");
+        let other = in_view(&mut c, 0x8000_0002, 2566, "Black Rabbit");
+        assert!(
+            c.a_critter(&rabbit, &cfg),
+            "outgrown, and it has done nothing"
+        );
+
+        // It swings and misses, over and over: the character never takes
+        // a point of damage, so nothing but this says it is in a fight.
+        c.chat_message(
+            ac_net::messages::opcode::GAME_EVENT,
+            &evaded(rabbit.guid, "Brown Rabbit"),
+        );
+        assert!(
+            !c.a_critter(&rabbit, &cfg),
+            "it is swinging at the character"
+        );
+        assert!(
+            c.a_critter(&other, &cfg),
+            "which says nothing about its neighbour"
+        );
     }
 
     /// An appraisal of `guid` saying it is `level`.
@@ -9291,9 +9618,11 @@ mod tests {
         assert_eq!(old.survive.heal_below, 0.45);
         assert!(old.survive.use_kits);
         // And one written before critters were walked past walks past
-        // them: a bool left out would otherwise read as off.
+        // them: a bool left out would otherwise read as off. The same
+        // goes for walking past what stands on the road.
         let before: Config = serde_json::from_str(r#"{"fight":{"radius":30.0}}"#).unwrap();
         assert!(before.fight.skip_critters);
+        assert!(before.fight.walk_past_on_the_way);
     }
 
     /// A character with a mace in hand and a wand in the pack, and

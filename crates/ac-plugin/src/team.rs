@@ -302,6 +302,7 @@ pub fn describe(client: &ac_client::Client, session: usize) -> Option<Mate> {
         has_ust: client.salvage_tool().is_some(),
         supplies: client.supplies(&client.autoplay.config.growth),
         ground: client.hunting_ground(),
+        on_its_way: client.on_its_way(),
     })
 }
 

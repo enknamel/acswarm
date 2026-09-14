@@ -1194,6 +1194,9 @@ impl Client {
         fight.radius = HUNT_RADIUS;
         fight.pick_weapon = false;
         fight.style = style;
+        // The creature the task names is the task: never one to walk past,
+        // whatever else the character has on.
+        fight.walk_past_on_the_way = false;
         if self.autoplay_fight_as(now, &fight) {
             return;
         }
