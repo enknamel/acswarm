@@ -307,11 +307,32 @@ it has open or is walking to, and the others leave that one alone and
 take another. A claim is only believed for twenty seconds, so a
 character that stalled or died over a body does not hold it for the
 five minutes it lies there. A body that has only just fallen is not
-claimed by anyone yet: for its first second the lowest player guid
-standing over it opens it and the rest stand off, which every session
-works out of the same roster without asking anyone. A character alone,
-or with the team rules off, sees none of this and takes every body it
-is owed.
+claimed by anyone yet, so for its first second the party takes turns,
+a body a turn: of those standing over it that are free (not fighting,
+not at another body) with room in their packs, the one that has opened
+the fewest bodies first in the last two minutes opens it, ties dealt by
+a fixed mix of the body's guid and theirs, and the rest stand off (the
+log says "Corpse of X is Bryn03's turn"). Every session works that out
+of the same roster without asking anyone. It is best effort: a turn
+nobody takes in that second is anyone's after it, so no body is left
+lying. A character alone, or with the team rules off, sees none of this
+and takes every body it is owed.
+
+**Who gets what off a body.** The party reads one loot profile. The
+character that shuts a body as emptied judges what is left on it for
+each fellow, with the skills each says about itself, and says on the
+board whom it found nothing left for; those do not open it again (ACE
+opens a body to everyone once it has been shut). A thing a rule that
+asks about a skill would take (`my Lockpick >= 250`, `my Salvaging is
+trained`) is for the fellow within reach, with room, that has the most
+of that skill as it stands, buffs counted, ties to the name that sorts
+first: whoever opens the body takes the rest and leaves that thing for
+it, and the shut says whom it is left for. Everyone has Salvaging, so a
+thing a rule would salvage goes the same way to the team's salvager
+(below), while the salvager salvages. A thing two rules would take goes
+by the first of them in the profile. A fellow dead, gone from the board
+or out of reach is never waited on, and nothing goes back to one that
+has shut the body already. Going back for what was left is no turn.
 
 **Whose kill it is.** A monster's body belongs to whoever killed it for
 its first two minutes, and the only thing that opens it to the rest of

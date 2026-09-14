@@ -1213,6 +1213,18 @@ const SHUT_SAID_FOR: Duration = Duration::from_secs(20);
 /// character in a party of nine shuts one a minute or so.
 const SHUTS_SAID: usize = 16;
 
+/// How long a body opened first counts as a turn at the bodies (see
+/// [`TeamView::opens_first`]). Long enough to hold a round of turns in a
+/// party of nine killing eight a minute; short enough that one just come
+/// to the ground, with no turns yet, is not dealt every body until it has
+/// caught up with the rest.
+const DEAL_WINDOW: Duration = Duration::from_secs(120);
+/// How many shuts heard of are remembered (see [`Autoplay::has_shut`]),
+/// the oldest bodies forgotten first. The bodies are forgotten as they go
+/// (see [`Autoplay::forget_corpses_gone`]); this only bounds a character
+/// that never looks.
+const SHUT_BY_KEPT: usize = 512;
+
 /// How far from its leader a follower keeping `keep` metres may stray
 /// before following comes before everything else.
 pub fn follow_break(keep: f32) -> f32 {
@@ -1326,9 +1338,73 @@ pub struct Mate {
     /// [`Autoplay::shuts_to_say`]). A fellow named there does not open
     /// that body again (see [`Autoplay::take_in_shuts`]).
     pub shut: Vec<(u32, Vec<u32>)>,
+    /// How many bodies it opened first lately, within [`DEAL_WINDOW`]:
+    /// its turns at the bodies (see [`TeamView::opens_first`]). Going back
+    /// for what one of the others shut first and left for it is no turn.
+    pub opened_first: u16,
+}
+
+/// A character as the turns at a newly fallen body read it (see
+/// [`TeamView::opens_first`]): each mate from its row on the board, and
+/// this character from the same word about itself, so that every session
+/// reaches the same answer.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Turn {
+    pub guid: u32,
+    pub world: glam::Vec3,
+    /// It is at another body, or on its way to one.
+    pub looting: bool,
+    /// It is fighting something.
+    pub fighting: bool,
+    /// Its pack is neither full nor laden (see `logistics::Supplies`).
+    pub room: bool,
+    /// How many bodies it opened first lately ([`Mate::opened_first`]).
+    pub opened: u16,
+}
+
+/// Where the character `who` comes in the deal for the body `body`, among
+/// characters that have had as many turns lately (see
+/// [`TeamView::opens_first`]).
+///
+/// Every session works the same number out of the same two guids, so the
+/// order is agreed without a word said; and it is a different order for
+/// every body, so bodies falling together go to different characters. The
+/// mix is written out by hand (splitmix64's finish) rather than taken from
+/// a std hasher, which may change from build to build and is seeded afresh
+/// in every process.
+pub fn deal(body: u32, who: u32) -> u64 {
+    let mut z = ((u64::from(body) << 32) | u64::from(who)).wrapping_add(0x9E37_79B9_7F4A_7C15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
 }
 
 impl Mate {
+    /// The mate as the turns at a newly fallen body read it; `None` for
+    /// one that would not open a body at all: played by hand, dead, or not
+    /// in the world yet.
+    pub fn turn(&self) -> Option<Turn> {
+        (self.autoplay && self.health > 0.0 && self.guid != 0).then(|| Turn {
+            guid: self.guid,
+            world: self.world,
+            looting: self.looting.is_some(),
+            fighting: self.target.is_some(),
+            room: !self.supplies.pack_full && !self.supplies.laden,
+            opened: self.opened_first,
+        })
+    }
+
+    /// Whether the mate could come for something left for it on a body at
+    /// `at` (see [`called_to`]): it would open a body at all, it stands
+    /// within reach of this one, and it has room to carry what is left.
+    /// One at another body or fighting still could, once it is done. One
+    /// dead or across the field could not, and nothing is left waiting on
+    /// it; nor on one gone from the board, which is not asked about at all.
+    pub fn could_come_for(&self, at: glam::Vec3) -> bool {
+        self.turn()
+            .is_some_and(|t| t.room && corpse_within_reach(t.world, at))
+    }
+
     /// The mate as a loot rule sees the character reading it: its level
     /// and the skills it said its rules ask about. A rule asks nothing
     /// else of the character but its name (see `ac_loot::profile::Mine`).
@@ -1467,6 +1543,147 @@ pub fn best_salvager<'a>(mates: impl Iterator<Item = &'a Mate>) -> Option<(Strin
                 .then_with(|| b.name.cmp(&a.name))
         })
         .map(|m| (m.name.clone(), m.guid))
+}
+
+/// What means a thing on a body for one of a party in particular, rather
+/// than for whoever has the body open (see [`called_to`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Calling {
+    /// The rule that takes it asks about this skill: it is for the highest
+    /// of that skill, buffs counted, as the rule itself reads it.
+    Skill(u32),
+    /// The rules would salvage it: it is for whoever salvages for the team
+    /// (see [`best_salvager`]). Everyone has Salvaging, so a salvage rule
+    /// asks about it without saying so.
+    Salvage,
+}
+
+/// One rule's claim on a thing for one character (see [`claim_on`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Claim {
+    /// Where the claim is read in the profile: 0 for the always list,
+    /// which is read before any rule, and each rule's place after that.
+    pub order: usize,
+    /// What means what it claims for one of the party in particular, if
+    /// anything does.
+    pub calling: Option<Calling>,
+}
+
+/// The claim the loot rules make on a thing for the character `me`, called
+/// `name` and already carrying `held` of it: `None` when they would not
+/// take it, or cannot say until it is appraised.
+///
+/// Read as [`judge_loot`] reads it, the player's never and always lists
+/// first. What those lists take is nobody's in particular, nor is what a
+/// rule takes that asks nothing of the character. A salvage rule calls for
+/// the salvager while the salvager salvages (`Looting::salvage`); any other
+/// rule that asks about a skill calls for the best at the first it names.
+pub fn claim_on(
+    stats: &crate::items::ItemStats,
+    id: Option<&ac_net::messages::Appraisal>,
+    profile: &crate::profile::Profile,
+    me: &crate::weapons::Wielder,
+    name: &str,
+    held: u32,
+) -> Option<Claim> {
+    if name_matches(&stats.name, &profile.looting.never) {
+        return None;
+    }
+    if name_matches(&stats.name, &profile.looting.always) {
+        return Some(Claim {
+            order: 0,
+            calling: None,
+        });
+    }
+    let (at, rule) = profile.decided_by(stats, id, me, name, held)?;
+    if !rule.action.takes() {
+        return None;
+    }
+    let calling = if rule.action == LootAction::Salvage && profile.looting.salvage {
+        Some(Calling::Salvage)
+    } else {
+        rule.skill_asked().map(Calling::Skill)
+    };
+    Some(Claim {
+        order: at + 1,
+        calling,
+    })
+}
+
+/// One of a party a thing on a body could be for, as the loot rules read
+/// it: its player guid, its name, its sheet, and how many of the thing it
+/// carries (not known of a mate, which is taken to carry none).
+#[derive(Clone, Copy, Debug)]
+pub struct Taker<'a> {
+    pub guid: u32,
+    pub name: &'a str,
+    pub sheet: &'a crate::weapons::Wielder,
+    pub held: u32,
+}
+
+/// A fellow a thing on a body could be meant for, as its row says it:
+/// player guid, name and sheet (see `Client::callable_to`).
+type Fellow = (u32, String, crate::weapons::Wielder);
+
+/// This character (`me`) and the `fellows` a thing could be meant for
+/// instead, as [`called_to`] reads them.
+fn takers_with<'a>(me: Taker<'a>, fellows: &'a [Fellow]) -> Vec<Taker<'a>> {
+    std::iter::once(me)
+        .chain(fellows.iter().map(|(guid, name, sheet)| Taker {
+            guid: *guid,
+            name,
+            sheet,
+            held: 0,
+        }))
+        .collect()
+}
+
+/// Which of `takers` a thing on a body is meant for, when the rules mean
+/// it for one of the party in particular: `None` when they do not, and
+/// then whoever has the body open takes it or leaves it by its own reading.
+///
+/// "If an item has a skill requirement in the loot settings, it should go
+/// to whoever has the highest skill." Each taker's reading of the thing is
+/// one rule's claim (see [`claim_on`]), and the first claim in the
+/// profile's order that calls for someone decides, the way a character's
+/// own first matching rule decides for it. It is for one of the takers
+/// that same rule claims it for:
+/// - a skill: the highest of that skill, buffs counted, which is what the
+///   rule reads; ties to the name that sorts first, as the salvager's are
+///   broken (see [`best_salvager`]);
+/// - salvage: `salvager`, the team's, when it is one of them. When it is
+///   not (out of reach, say), the thing is nobody's in particular, and the
+///   hand-off carries it to the salvager afterwards as it always has.
+pub fn called_to(
+    stats: &crate::items::ItemStats,
+    id: Option<&ac_net::messages::Appraisal>,
+    profile: &crate::profile::Profile,
+    takers: &[Taker],
+    salvager: Option<u32>,
+) -> Option<u32> {
+    let claims: Vec<(&Taker, Claim)> = takers
+        .iter()
+        .filter_map(|t| Some((t, claim_on(stats, id, profile, t.sheet, t.name, t.held)?)))
+        .collect();
+    let (first, calling) = claims
+        .iter()
+        .filter_map(|(_, c)| Some((c.order, c.calling?)))
+        .min_by_key(|(order, _)| *order)?;
+    let mut claimed_for = claims
+        .iter()
+        .filter(|(_, c)| c.order == first)
+        .map(|(t, _)| *t);
+    match calling {
+        Calling::Salvage => salvager.filter(|g| claimed_for.any(|t| t.guid == *g)),
+        Calling::Skill(skill) => claimed_for
+            .max_by(|a, b| {
+                a.sheet
+                    .skill(skill)
+                    .cmp(&b.sheet.skill(skill))
+                    .then_with(|| b.name.cmp(a.name))
+            })
+            .map(|t| t.guid),
+    }
 }
 
 /// Of `me`'s skills, the ones in `asked`: what a character puts on its
@@ -1624,6 +1841,12 @@ pub struct TeamView {
     pub mates: Vec<Mate>,
     /// Whether this character is the one picking targets.
     pub leader: bool,
+    /// What this character said about itself as the view was made (see
+    /// `ac_plugin::team::describe`): what the others read it by, and so
+    /// what the turns at a newly fallen body read it by too (see
+    /// [`Autoplay::ours_to_open`]). `None` in a view nobody said anything
+    /// into.
+    pub me: Option<Mate>,
 }
 
 impl TeamView {
@@ -1701,40 +1924,49 @@ impl TeamView {
         })
     }
 
-    /// Which character opens the body at `at` first, `me` being this
-    /// one's player guid: the lowest guid of those standing over it and
-    /// not already holding another body.
+    /// Whose turn it is to open the body `guid`, lying at `at`, `me` being
+    /// this character as the others read it: the player guid of one of
+    /// those standing over it.
     ///
     /// This is only for the moment before a claim can have reached the
     /// board -- the word goes out every half second and a body is
     /// chosen within a tick of falling -- and in that moment the fleet
-    /// needs an answer every session reaches on its own. The lowest
-    /// guid is such an answer: all of them work it out of the same
-    /// roster, so there is nothing to negotiate and nothing to vote on,
-    /// which is how the leader is settled too (`ac_plugin::team`).
+    /// needs an answer every session reaches on its own. All of them work
+    /// this one out of the same roster, so there is nothing to negotiate
+    /// and nothing to vote on, which is how the leader is settled too
+    /// (`ac_plugin::team`).
+    ///
+    /// Turns go round, a body a turn: the one that has opened the fewest
+    /// bodies first lately ([`Mate::opened_first`]), and among those the
+    /// first in the deal for this body ([`deal`]), so bodies falling
+    /// together go to different characters. It used to be the lowest
+    /// guid, which opened every body that fell while it stood over one
+    /// and carried the whole party's loot.
+    ///
+    /// Best effort. Only one free to open it is dealt a turn: playing on
+    /// its own, alive, in the world, standing over it, not at another body,
+    /// not fighting, and with room in its pack. With nobody free in reach
+    /// it is ours to walk to, as it is everyone's, since standing off from
+    /// a body nobody will open leaves it lying. And the turn only holds
+    /// for the first second ([`CLAIM_SETTLE`]): one dealt a body that does
+    /// not claim it by then loses it to whoever is free first.
     ///
     /// That only holds while every session judges the same candidates,
-    /// so this character (`mine`, where it stands) passes the same reach
-    /// test as the others. A body is owed to a character out to the
-    /// fight radius when one of its own kills fell there, which is
-    /// further than [`LOOT_NEAR`]: without the test on ourselves, a
-    /// caster twenty-two metres off called a body its own while every
-    /// mate's roster had it too far away to count, and two of them
-    /// opened it in the same second.
-    pub fn opens_first(&self, at: glam::Vec3, me: u32, mine: glam::Vec3) -> u32 {
-        let over_it = self
-            .mates
+    /// so this character passes the same tests as the others, reach among
+    /// them. A body is owed to a character out to the fight radius when
+    /// one of its own kills fell there, which is further than
+    /// [`LOOT_NEAR`]: without the test on ourselves, a caster twenty-two
+    /// metres off called a body its own while every mate's roster had it
+    /// too far away to count, and two of them opened it in the same second.
+    pub fn opens_first(&self, guid: u32, at: glam::Vec3, me: Turn) -> u32 {
+        self.mates
             .iter()
-            // Only the ones that would open it: playing on their own,
-            // alive, in the world, standing over it, and not already at
-            // another body.
-            .filter(|m| m.autoplay && m.health > 0.0 && m.guid != 0 && m.looting.is_none())
-            .filter(|m| corpse_within_reach(m.world, at))
-            .map(|m| m.guid)
-            .chain(corpse_within_reach(mine, at).then_some(me));
-        // Standing off from a body nobody is over would leave it lying:
-        // with nobody in reach it is ours to walk to.
-        over_it.min().unwrap_or(me)
+            .filter_map(Mate::turn)
+            .chain(std::iter::once(me))
+            .filter(|t| !t.looting && !t.fighting && t.room)
+            .filter(|t| corpse_within_reach(t.world, at))
+            .min_by_key(|t| (t.opened, deal(guid, t.guid)))
+            .map_or(me.guid, |t| t.guid)
     }
 
     /// The others a body this character empties is judged for as it is
@@ -2154,6 +2386,15 @@ pub struct Autoplay {
     /// was emptied for, and when: said on the board so that they do not
     /// open it again (see [`Autoplay::shuts_to_say`]).
     shut_lately: Vec<(u32, Vec<u32>, Instant)>,
+    /// When this character shut, as emptied, each body it opened first --
+    /// one none of the others had said they shut -- lately: its turns at
+    /// the bodies (see [`Autoplay::opened_first`]).
+    first_opens: Vec<Instant>,
+    /// Which of the others have said they shut which body, as `(body,
+    /// player guid)` (see [`Autoplay::take_in_shuts`]). A body one of them
+    /// shut first is no turn of this character's, and nothing on it is
+    /// meant for one that has shut it already (see `Client::callable_to`).
+    shut_by: std::collections::BTreeSet<(u32, u32)>,
     /// When the character last landed a killing blow. Its body is owed
     /// from that moment, not from when the corpse turns up a second or
     /// two later: in that gap the next target used to be picked, and a
@@ -2463,6 +2704,18 @@ impl Autoplay {
                 if !self.looted.contains(&guid) {
                     self.looted.push(guid);
                 }
+                // A turn at the bodies, unless one of the others shut it
+                // first: then it was left for this one, not dealt to it.
+                if self
+                    .shut_by
+                    .range((guid, 0)..=(guid, u32::MAX))
+                    .next()
+                    .is_none()
+                {
+                    self.first_opens
+                        .retain(|t| now.saturating_duration_since(*t) < DEAL_WINDOW);
+                    self.first_opens.push(now);
+                }
                 self.say_shut(guid, done_for, now);
             }
             (_, Some(burden)) => {
@@ -2524,6 +2777,10 @@ impl Autoplay {
         let mut heard: Vec<(u32, String)> = Vec::new();
         for m in &self.team.mates {
             for (corpse, done_for) in &m.shut {
+                // Whoever shut it, whomever for: a body one of the others
+                // opened first is no turn of this one's, and nothing on it
+                // is meant for one that has shut it already.
+                self.shut_by.insert((*corpse, m.guid));
                 if done_for.contains(&me)
                     && !self.looted.contains(corpse)
                     && !heard.iter().any(|(g, _)| g == corpse)
@@ -2531,6 +2788,10 @@ impl Autoplay {
                     heard.push((*corpse, m.name.clone()));
                 }
             }
+        }
+        while self.shut_by.len() > SHUT_BY_KEPT {
+            // The server hands out rising ids: the lowest body is oldest.
+            self.shut_by.pop_first();
         }
         for (corpse, _) in &heard {
             // As its own emptying would: nothing waits on room for it.
@@ -2621,8 +2882,8 @@ impl Autoplay {
     /// nobody on the board there is nothing to divide, and a body its
     /// pet killed is still its own.
     ///
-    /// `mine` is where this character stands, which the tie-break needs
-    /// to judge it by the same rule as the others.
+    /// `mine` is where this character stands, which the turns need to
+    /// judge it by the same rule as the others.
     pub(crate) fn ours_to_open(
         &self,
         guid: u32,
@@ -2651,10 +2912,73 @@ impl Autoplay {
             return false;
         }
         // Newly fallen, so nobody's claim can have reached the board
-        // yet: the tie-break says whose it is until it has.
+        // yet: the turns say whose it is until it has.
         let seen = self.corpse_first_seen(guid, now);
         now.saturating_duration_since(seen) >= CLAIM_SETTLE
-            || self.team.opens_first(at, me, mine) == me
+            || self.team.opens_first(guid, at, self.my_turn(me, mine, now)) == me
+    }
+
+    /// This character as the turns at a newly fallen body read it (see
+    /// [`TeamView::opens_first`]), `me` being its player guid and `mine`
+    /// where it stands: fighting, and with room or not, as it last said
+    /// about itself, which is what the others read; at another body, and
+    /// how many turns it has had, as it is now.
+    fn my_turn(&self, me: u32, mine: glam::Vec3, now: Instant) -> Turn {
+        let said = self.team.me.as_ref();
+        Turn {
+            guid: me,
+            world: mine,
+            looting: self.corpse_claim(now).is_some(),
+            fighting: said.is_some_and(|m| m.target.is_some()),
+            room: said.is_none_or(|m| !m.supplies.pack_full && !m.supplies.laden),
+            opened: self.opened_first(now),
+        }
+    }
+
+    /// The name of the one of the others whose turn the body `guid`, lying
+    /// at `at`, is, when that turn is what keeps this character (`me`,
+    /// standing at `mine`) off it (see [`Autoplay::ours_to_open`]).
+    pub(crate) fn whose_turn(
+        &self,
+        guid: u32,
+        at: glam::Vec3,
+        me: u32,
+        mine: glam::Vec3,
+        now: Instant,
+    ) -> Option<&str> {
+        let settled =
+            now.saturating_duration_since(self.corpse_first_seen(guid, now)) >= CLAIM_SETTLE;
+        if settled
+            || self.team.mates.is_empty()
+            || self.corpse_claim(now).is_some_and(|(g, _)| g == guid)
+            || self.team.working(guid)
+        {
+            return None;
+        }
+        let dealt = self.team.opens_first(guid, at, self.my_turn(me, mine, now));
+        self.team
+            .mates
+            .iter()
+            .find(|m| m.guid == dealt)
+            .map(|m| m.name.as_str())
+    }
+
+    /// How many bodies this character opened first lately, within
+    /// [`DEAL_WINDOW`]: its turns, as it says them on the board (see
+    /// [`Mate::opened_first`]).
+    pub fn opened_first(&self, now: Instant) -> u16 {
+        let lately = self
+            .first_opens
+            .iter()
+            .filter(|t| now.saturating_duration_since(**t) < DEAL_WINDOW)
+            .count();
+        u16::try_from(lately).unwrap_or(u16::MAX)
+    }
+
+    /// Whether the mate `who` has said it shut the body `corpse` (see
+    /// [`Autoplay::take_in_shuts`]).
+    pub(crate) fn has_shut(&self, corpse: u32, who: u32) -> bool {
+        self.shut_by.contains(&(corpse, who))
     }
 
     /// Set aside a corpse the character cannot walk to. It is left
@@ -2679,6 +3003,7 @@ impl Autoplay {
     pub(crate) fn forget_corpses_gone(&mut self, there: impl Fn(u32) -> bool) {
         self.shelved.retain(|g| there(*g));
         self.left_for_weight.retain(|g, _| there(*g));
+        self.shut_by.retain(|(body, _)| there(*body));
     }
 
     /// What the lightest thing left for its weight on a body still lying
@@ -3646,6 +3971,20 @@ impl Client {
         };
         let wielder = self.wielder();
         let who = self.world.stats.name.clone();
+        let my_guid = self.world.player_guid.unwrap_or(0);
+        // The fellows a thing here may be meant for instead of this
+        // character (see `called_to`): nobody off its own body, or under
+        // rules that mean nothing for anyone in particular.
+        let fellows = if mine || !profile.sends_to_the_best() {
+            Vec::new()
+        } else {
+            self.callable_to(guid)
+        };
+        let salvager = if fellows.is_empty() {
+            None
+        } else {
+            self.best_salvager().map(|(_, g)| g)
+        };
         // What has already been spoken for off this body counts towards
         // a cap (see `ac_loot::Claimed`).
         let mut claimed = ac_loot::corpse::Claimed::default();
@@ -3687,7 +4026,32 @@ impl Client {
                 } else {
                     match judged {
                         Judged::Decided(action, _) if action.takes() => {
-                            ac_loot::Verdict::Take(action)
+                            // Meant for a fellow better at what the rule
+                            // asks: left for that one, and the shut says
+                            // so (see `Client::shut_for`).
+                            let meant_for = if fellows.is_empty() {
+                                None
+                            } else {
+                                let me = Taker {
+                                    guid: my_guid,
+                                    name: &who,
+                                    sheet: &wielder,
+                                    held,
+                                };
+                                let takers = takers_with(me, &fellows);
+                                called_to(
+                                    &stats,
+                                    self.appraisals.get(g),
+                                    profile,
+                                    &takers,
+                                    salvager,
+                                )
+                            };
+                            if meant_for.is_some_and(|to| to != my_guid) {
+                                ac_loot::Verdict::Leave
+                            } else {
+                                ac_loot::Verdict::Take(action)
+                            }
                         }
                         Judged::Decided(_, _) => ac_loot::Verdict::Leave,
                         // Only worth asking about when asking is allowed
@@ -4136,7 +4500,7 @@ impl Client {
                     // still on it, so before the lid goes down, and only
                     // for a body finished with (see `Autoplay::corpse_shut`).
                     let (done_for, left_for) = if done {
-                        self.shut_for(&items, &profile)
+                        self.shut_for(guid, &items, &profile)
                     } else {
                         Default::default()
                     };
@@ -4259,6 +4623,12 @@ impl Client {
             // it kept the looting's own worth up (see `crate::steps`)
             // for a body it would never open.
             self.stop_walking_to_loot();
+            // A body stood off from only because it is one of the others'
+            // turn says so: one character opens it while the rest stand
+            // by, and without a word that reads as a hang.
+            if let Some((corpse, who)) = self.turn_of_another(me, now, room) {
+                self.autoplay.note(format!("{corpse} is {who}'s turn"), now);
+            }
             return false;
         };
         // Never mid-cast, unless the body will not be there when the
@@ -4672,33 +5042,144 @@ impl Client {
         skills_asked_of(&self.wielder(), &asked)
     }
 
-    /// Which of the others a body this character is shutting as emptied
-    /// is done for, and which it is left for, each as `(player guid,
-    /// name)`: judged on what is still on it (`items`) by this character's
-    /// rules, which the party shares, read with what each fellow said
-    /// about itself (see [`nothing_left_for`]).
-    fn shut_for(&self, items: &[u32], profile: &crate::profile::Profile) -> (Named, Named) {
+    /// The fellowship's members by player guid, while this character is
+    /// one of them.
+    fn fellows(&self) -> Option<Vec<u32>> {
         let me = self.world.player_guid.unwrap_or(0);
-        let fellows: Option<Vec<u32>> = self
-            .world
+        self.world
             .fellowship
             .as_ref()
             .map(|f| f.members.iter().map(|m| m.guid).collect::<Vec<u32>>())
-            .filter(|f| f.contains(&me));
+            .filter(|f| f.contains(&me))
+    }
+
+    /// The fellows a thing on the body `corpse` could be meant for instead
+    /// of this character (see [`called_to`]), each as its row says it:
+    /// those a shut is judged for (see [`TeamView::judged_at_a_shut`]) that
+    /// could come for it (see [`Mate::could_come_for`]), less any that has
+    /// shut this body already, which nothing is sent back to. Nobody for a
+    /// body with no place in the world to measure from.
+    fn callable_to(&self, corpse: u32) -> Vec<Fellow> {
+        let Some(at) = self.world.objects.get(&corpse).and_then(|o| o.world_pos()) else {
+            return Vec::new();
+        };
+        let fellows = self.fellows();
+        self.autoplay
+            .team
+            .judged_at_a_shut(fellows.as_deref())
+            .filter(|m| m.could_come_for(at) && !self.autoplay.has_shut(corpse, m.guid))
+            .map(|m| (m.guid, m.name.clone(), m.wielder()))
+            .collect()
+    }
+
+    /// Whom each of the things `lying` on the body `corpse` is meant for,
+    /// when the rules mean it for one of the party in particular (see
+    /// [`called_to`]): this character, or a fellow that could come for it.
+    fn meant_for(
+        &self,
+        corpse: u32,
+        lying: &[Option<(
+            crate::items::ItemStats,
+            Option<&ac_net::messages::Appraisal>,
+        )>],
+        profile: &crate::profile::Profile,
+    ) -> Vec<Option<u32>> {
+        let fellows = if profile.sends_to_the_best() {
+            self.callable_to(corpse)
+        } else {
+            Vec::new()
+        };
+        if fellows.is_empty() {
+            return vec![None; lying.len()];
+        }
+        let sheet = self.wielder();
+        let salvager = self.best_salvager().map(|(_, g)| g);
+        lying
+            .iter()
+            .map(|thing| {
+                let (stats, id) = thing.as_ref()?;
+                let me = Taker {
+                    guid: self.world.player_guid.unwrap_or(0),
+                    name: &self.world.stats.name,
+                    sheet: &sheet,
+                    held: self.already_carried(stats.wcid),
+                };
+                called_to(stats, *id, profile, &takers_with(me, &fellows), salvager)
+            })
+            .collect()
+    }
+
+    /// Which of the others a body this character is shutting as emptied
+    /// is done for, and which it is left for, each as `(player guid,
+    /// name)`: judged on what is still on the body `corpse` (`items`) by
+    /// this character's rules, which the party shares, read with what each
+    /// fellow said about itself (see [`nothing_left_for`]).
+    ///
+    /// A thing the rules mean for one fellow in particular (see
+    /// [`called_to`]) is left for that one and for none of the rest.
+    /// Anything else is left for each that would take it, as is a thing
+    /// meant for this character that is still lying here.
+    fn shut_for(
+        &self,
+        corpse: u32,
+        items: &[u32],
+        profile: &crate::profile::Profile,
+    ) -> (Named, Named) {
+        let me = self.world.player_guid.unwrap_or(0);
+        let fellows = self.fellows();
         let lying: Vec<_> = items
             .iter()
             .map(|g| self.stats_of(*g).map(|s| (s, self.appraisals.get(g))))
             .collect();
+        let meant_for: Vec<Option<u32>> = self
+            .meant_for(corpse, &lying, profile)
+            .into_iter()
+            .map(|to| to.filter(|g| *g != me))
+            .collect();
+        let anyones: Vec<_> = lying
+            .iter()
+            .zip(&meant_for)
+            .filter(|(_, to)| to.is_none())
+            .map(|(thing, _)| thing.clone())
+            .collect();
         let (mut done_for, mut left_for) = (Vec::new(), Vec::new());
         for m in self.autoplay.team.judged_at_a_shut(fellows.as_deref()) {
             let whose = (m.guid, m.name.clone());
-            if nothing_left_for(&lying, profile, &m.wielder(), &m.name) {
+            if !meant_for.contains(&Some(m.guid))
+                && nothing_left_for(&anyones, profile, &m.wielder(), &m.name)
+            {
                 done_for.push(whose);
             } else {
                 left_for.push(whose);
             }
         }
         (done_for, left_for)
+    }
+
+    /// A body this character is standing off from only because it is one
+    /// of the others' turn at it, by name, and whose turn (see
+    /// [`Autoplay::whose_turn`]).
+    fn turn_of_another(
+        &self,
+        me: glam::Vec3,
+        now: Instant,
+        room: Room,
+    ) -> Option<(String, String)> {
+        let my_guid = self.world.player_guid.unwrap_or(0);
+        self.world
+            .objects
+            .values()
+            .filter(|o| o.object_desc_flags & ac_world::object_desc_flags::CORPSE != 0)
+            .find_map(|o| {
+                let at = o.world_pos()?;
+                if !self.autoplay.corpse_owed(o.guid, at, me, now, room)
+                    || self.corpse_is_someone_elses(&o.name)
+                {
+                    return None;
+                }
+                let who = self.autoplay.whose_turn(o.guid, at, my_guid, me, now)?;
+                Some((o.name.clone(), who.to_string()))
+            })
     }
 
     /// Take in the bodies the others said they emptied for this
@@ -9550,36 +10031,50 @@ mod tests {
         assert_eq!(c.autoplay.corpse_claim(now), None, "still claiming it");
     }
 
+    /// A character as the turns read it: standing at `at`, free, with
+    /// room, having opened `opened` bodies first lately.
+    fn turn_at(guid: u32, at: glam::Vec3, opened: u16) -> Turn {
+        Turn {
+            guid,
+            world: at,
+            looting: false,
+            fighting: false,
+            room: true,
+            opened,
+        }
+    }
+
     #[test]
-    fn the_lowest_guid_opens_a_body_that_has_only_just_fallen() {
+    fn every_session_deals_a_newly_fallen_body_to_the_same_character() {
         // A claim is said every half second and a body is chosen within
         // a tick of falling, so for that first moment there is no claim
         // to read and the nine have to agree without one. Every session
-        // works the same answer out of the same roster: the lowest
-        // player guid opens it, the rest stand off.
+        // works the same answer out of the same roster, and the rest
+        // stand off.
         let t0 = Instant::now();
         let body = 0x8000_0001;
         let at = glam::Vec3::ZERO;
         let fleet: Vec<u32> = (0..9).map(|i| 0x5000_0010 + i).collect();
-        let first = fleet[0];
-        for &me in &fleet {
-            let mates = fleet
+        let others = |me: u32| -> Vec<Mate> {
+            fleet
                 .iter()
                 .filter(|g| **g != me)
                 .map(|g| looter(*g, at, None, Duration::ZERO))
-                .collect();
+                .collect()
+        };
+        // Not the lowest guid, which used to open every body it stood
+        // over: the deal for this body.
+        let first = 0x5000_0012;
+        for &me in &fleet {
             let ap = Autoplay {
                 corpse_seen: vec![(body, t0)],
-                team: TeamView {
-                    mates,
-                    leader: false,
-                },
+                team: view_of(others(me)),
                 ..Default::default()
             };
             assert_eq!(
-                ap.team.opens_first(at, me, at),
+                ap.team.opens_first(body, at, turn_at(me, at, 0)),
                 first,
-                "disagreed about who"
+                "disagreed about whose turn"
             );
             assert_eq!(
                 ap.ours_to_open(body, at, me, at, t0),
@@ -9592,59 +10087,201 @@ mod tests {
             assert!(ap.ours_to_open(body, at, me, at, t0 + CLAIM_SETTLE));
         }
 
-        // Only the ones that would open it count. A mate played by
-        // hand, a dead one, one already at another body and one across
-        // the field all leave it to us, whatever their guid.
+        // Only the ones free to open it count. A mate played by hand, a
+        // dead one, one not in the world, one already at another body,
+        // one fighting, one with a full pack, one laden and one across
+        // the field all leave it to us, whatever the deal.
         let mine = fleet[8];
         let field_away = glam::Vec3::new(LOOT_NEAR + 5.0, 0.0, 0.0);
-        let view = TeamView {
-            mates: vec![
-                Mate {
-                    autoplay: false,
-                    ..looter(first, at, None, Duration::ZERO)
-                },
-                Mate {
-                    health: 0.0,
-                    ..looter(first + 1, at, None, Duration::ZERO)
-                },
-                looter(first + 2, at, Some(0x8000_0002), Duration::ZERO),
-                looter(first + 3, field_away, None, Duration::ZERO),
-            ],
-            leader: false,
+        let packed = |pack_full, laden| crate::logistics::Supplies {
+            pack_full,
+            laden,
+            ..Default::default()
         };
-        assert_eq!(view.opens_first(at, mine, at), mine);
+        let view = view_of(vec![
+            Mate {
+                autoplay: false,
+                ..looter(fleet[0], at, None, Duration::ZERO)
+            },
+            Mate {
+                health: 0.0,
+                ..looter(fleet[1], at, None, Duration::ZERO)
+            },
+            looter(0, at, None, Duration::ZERO),
+            looter(fleet[2], at, Some(0x8000_0002), Duration::ZERO),
+            Mate {
+                target: Some(0x7000_0001),
+                ..looter(fleet[3], at, None, Duration::ZERO)
+            },
+            Mate {
+                supplies: packed(true, false),
+                ..looter(fleet[4], at, None, Duration::ZERO)
+            },
+            Mate {
+                supplies: packed(false, true),
+                ..looter(fleet[5], at, None, Duration::ZERO)
+            },
+            looter(fleet[6], field_away, None, Duration::ZERO),
+        ]);
+        assert_eq!(view.opens_first(body, at, turn_at(mine, at, 0)), mine);
 
-        // And this character is judged by the same rule as the rest. A
+        // And this character is judged by the same tests as the rest. A
         // body is owed to a caster out to the fight radius where one of
         // its kills fell, which is further than a mate has to stand to
         // count: with no reach test on ourselves, the caster called the
         // body its own while every mate's roster ruled the caster out,
         // and the two of them opened it in the same second.
-        let over_it = looter(first, at, None, Duration::ZERO);
+        let over_it = view_of(vec![looter(fleet[0], at, None, Duration::ZERO)]);
         assert_eq!(
-            view_of(vec![over_it.clone()]).opens_first(at, mine, field_away),
-            first,
+            over_it.opens_first(body, at, turn_at(mine, field_away, 0)),
+            fleet[0],
             "claimed a body from across the field"
         );
-        assert_eq!(
-            view_of(vec![over_it]).opens_first(at, mine, at),
-            first,
-            "standing over it, the lower guid still opens first"
-        );
+        // Nor is this one dealt a turn while it is at another body, or
+        // with no room for what is on this one.
+        for busy in [
+            Turn {
+                looting: true,
+                ..turn_at(mine, at, 0)
+            },
+            Turn {
+                room: false,
+                ..turn_at(mine, at, 0)
+            },
+        ] {
+            assert_eq!(over_it.opens_first(body, at, busy), fleet[0]);
+        }
         // Nobody within reach at all: it is ours to walk to.
         assert_eq!(
-            view_of(vec![looter(first, field_away, None, Duration::ZERO)])
-                .opens_first(at, mine, field_away),
+            view_of(vec![looter(fleet[0], field_away, None, Duration::ZERO)]).opens_first(
+                body,
+                at,
+                turn_at(mine, field_away, 0)
+            ),
             mine,
             "left a body nobody was near"
         );
     }
 
-    fn view_of(mates: Vec<Mate>) -> TeamView {
-        TeamView {
-            mates,
-            leader: false,
+    #[test]
+    fn the_turns_go_round_body_by_body() {
+        // Three characters over one spot, all free. Whoever opens a body
+        // first says so on its row, and the next body goes to one that
+        // has had fewer turns.
+        let at = glam::Vec3::ZERO;
+        let party = [0x5000_0021u32, 0x5000_0022, 0x5000_0023];
+        let mut opened = [0u16; 3];
+        let mut who_opened = Vec::new();
+        for n in 0..6u32 {
+            let body = 0x8000_0100 + n;
+            // Each session works it out for itself, from what the others
+            // said about their turns.
+            let dealt: Vec<u32> = (0..3)
+                .map(|i| {
+                    let mates = (0..3)
+                        .filter(|j| *j != i)
+                        .map(|j| Mate {
+                            opened_first: opened[j],
+                            ..looter(party[j], at, None, Duration::ZERO)
+                        })
+                        .collect();
+                    view_of(mates).opens_first(body, at, turn_at(party[i], at, opened[i]))
+                })
+                .collect();
+            assert!(dealt.iter().all(|g| *g == dealt[0]), "{n}: {dealt:x?}");
+            let i = party.iter().position(|g| *g == dealt[0]).unwrap();
+            opened[i] += 1;
+            who_opened.push(i);
         }
+        // Each of the three once in every round of three bodies.
+        for round in who_opened.chunks(3) {
+            let mut round = round.to_vec();
+            round.sort_unstable();
+            assert_eq!(round, vec![0, 1, 2], "{who_opened:?}");
+        }
+    }
+
+    #[test]
+    fn bodies_falling_together_go_to_different_characters() {
+        // Nine bodies in one tick, before anyone's turn is on the board:
+        // the lowest guid used to be dealt every one of them.
+        let at = glam::Vec3::ZERO;
+        let fleet: Vec<u32> = (0..9).map(|i| 0x5000_0010 + i).collect();
+        let view = view_of(
+            fleet[1..]
+                .iter()
+                .map(|g| looter(*g, at, None, Duration::ZERO))
+                .collect(),
+        );
+        let dealt: Vec<u32> = (1..=9)
+            .map(|n| view.opens_first(0x8000_0000 + n, at, turn_at(fleet[0], at, 0)))
+            .collect();
+        let mut to = dealt.clone();
+        to.sort_unstable();
+        to.dedup();
+        assert_eq!(to.len(), 7, "{dealt:x?}");
+        for g in &to {
+            assert!(dealt.iter().filter(|d| *d == g).count() <= 2);
+        }
+    }
+
+    #[test]
+    fn the_dealing_mix_gives_the_same_numbers_everywhere() {
+        // Worked out by hand from splitmix64's finish: no build, process
+        // or platform may deal a body differently.
+        assert_eq!(deal(0, 0), 0xe220_a839_7b1d_cdaf);
+        assert_eq!(deal(0x8000_0001, 0x5000_0010), 0xfe12_cdc0_9d21_d7ba);
+        assert_eq!(deal(0x8000_0001, 0x5000_0011), 0xd972_5b91_3475_6d9c);
+        assert_eq!(deal(0x8000_198f, 0x5000_0001), 0x2ac7_ac48_90d6_3ca3);
+    }
+
+    #[test]
+    fn a_busy_fellows_turn_passes_on_and_the_body_is_still_opened() {
+        // Best effort: a character fighting when a body falls loses its
+        // turn to one that is free, and a turn nobody takes never leaves
+        // the body lying.
+        let t0 = Instant::now();
+        let (body, at, foe) = (0x8000_0001, glam::Vec3::ZERO, 0x7000_0001);
+        let party = [0x5000_0031u32, 0x5000_0032, 0x5000_0033];
+        let session = |me: u32, fighting: &[u32]| {
+            let row = |g: u32| Mate {
+                target: fighting.contains(&g).then_some(foe),
+                ..looter(g, at, None, Duration::ZERO)
+            };
+            let mut ap = Autoplay {
+                corpse_seen: vec![(body, t0)],
+                team: view_of(
+                    party
+                        .iter()
+                        .filter(|g| **g != me)
+                        .map(|g| row(*g))
+                        .collect(),
+                ),
+                ..Default::default()
+            };
+            // Each reads itself off what it said about itself.
+            ap.team.me = Some(row(me));
+            ap
+        };
+        let opening = |fighting: &[u32], now: Instant| -> Vec<u32> {
+            party
+                .iter()
+                .copied()
+                .filter(|me| session(*me, fighting).ours_to_open(body, at, *me, at, now))
+                .collect()
+        };
+        // All free: one of them has the turn.
+        let dealt = opening(&[], t0);
+        assert_eq!(dealt.len(), 1, "{dealt:x?}");
+        // That one fighting: another, free, has it instead.
+        let passed = opening(&dealt, t0);
+        assert_eq!(passed.len(), 1, "{passed:x?}");
+        assert_ne!(passed, dealt, "the turn waited on one fighting");
+        // After the first second the body is anyone's who is free, the
+        // one that was fighting too once it is done.
+        assert_eq!(opening(&dealt, t0 + CLAIM_SETTLE), party.to_vec());
+        // Everyone fighting: nobody stands off for anybody.
+        assert_eq!(opening(&party, t0), party.to_vec());
     }
 
     /// One profile for a whole party: a broken key for whoever can mend
@@ -9855,7 +10492,7 @@ mod tests {
         );
         let (picker, mage) = (picking(2, 300), picking(3, 5));
         c.autoplay.team.mates = vec![picker.clone(), mage.clone()];
-        let (done_for, left_for) = c.shut_for(&[key], &profile);
+        let (done_for, left_for) = c.shut_for(body, &[key], &profile);
         assert_eq!(done_for, vec![(3, "Bryn03".to_string())]);
         assert_eq!(left_for, vec![(2, "Bryn02".to_string())]);
 
@@ -9900,7 +10537,7 @@ mod tests {
             ..Default::default()
         });
         assert_eq!(
-            c.shut_for(&[key], &profile),
+            c.shut_for(body, &[key], &profile),
             (vec![(3, "Bryn03".to_string())], vec![])
         );
     }
@@ -10092,7 +10729,7 @@ mod tests {
             return;
         };
         assert_eq!(
-            c.shut_for(&[0x8000_0002], &a_party_profile()),
+            c.shut_for(body, &[0x8000_0002], &a_party_profile()),
             (vec![], vec![])
         );
     }
@@ -10113,6 +10750,370 @@ mod tests {
         // Back on the team, the same word is taken in.
         ap.config.team.enabled = true;
         assert_eq!(ap.take_in_shuts(me), vec![(body, "Bryn01".to_string())]);
+    }
+
+    fn view_of(mates: Vec<Mate>) -> TeamView {
+        TeamView {
+            mates,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_body_opened_first_is_a_turn_and_one_left_for_this_character_is_not() {
+        use crate::did::Did;
+        let t0 = Instant::now();
+        let me = 2;
+        let mut ap = Autoplay::default();
+        ap.config.team.enabled = true;
+        assert_eq!(ap.opened_first(t0), 0);
+        ap.corpse_shut(0x8000_0001, &Did::Done, None, Vec::new(), t0);
+        assert_eq!(ap.opened_first(t0), 1);
+        // One of the others shut this one first and left it for us: going
+        // back for what it left is no turn.
+        let passed_on = 0x8000_0002;
+        ap.team.mates = vec![Mate {
+            shut: vec![(passed_on, vec![3])],
+            ..looter(1, glam::Vec3::ZERO, None, Duration::ZERO)
+        }];
+        assert!(
+            ap.take_in_shuts(me).is_empty(),
+            "left for us, not done for us"
+        );
+        assert!(ap.has_shut(passed_on, 1));
+        ap.corpse_shut(passed_on, &Did::Done, None, Vec::new(), t0);
+        assert_eq!(ap.opened_first(t0), 1);
+        // Nor is a body set aside.
+        ap.corpse_shut(
+            0x8000_0003,
+            &Did::blocked("it would not give something up"),
+            None,
+            Vec::new(),
+            t0,
+        );
+        assert_eq!(ap.opened_first(t0), 1);
+        // Turns are counted lately, not for ever.
+        assert_eq!(ap.opened_first(t0 + DEAL_WINDOW), 0);
+        // And what was heard goes with the body.
+        ap.forget_corpses_gone(|g| g != passed_on);
+        assert!(!ap.has_shut(passed_on, 1));
+    }
+
+    #[test]
+    fn a_thing_a_skill_rule_takes_is_for_the_highest_of_that_skill_as_it_stands() {
+        // "If an item has a skill requirement in the loot settings, it
+        // should go to whoever has the highest skill."
+        use ac_world::stats::{sac, skill};
+        let sheet = |base: u32, now: u32| crate::weapons::Wielder {
+            level: 50,
+            skills: vec![(skill::LOCKPICK, base, now, sac::TRAINED)],
+            ..Default::default()
+        };
+        let profile = a_party_profile();
+        let key = item("Broken Marble Key", 0, 0);
+        let (mine, steady, buffed, sapped) = (
+            sheet(300, 300),
+            sheet(320, 320),
+            sheet(280, 360),
+            sheet(400, 200),
+        );
+        let taker = |guid, name, sheet| Taker {
+            guid,
+            name,
+            sheet,
+            held: 0,
+        };
+        let takers = [
+            taker(1, "Bryn01", &mine),
+            taker(2, "Bryn02", &steady),
+            taker(3, "Bryn03", &buffed),
+            taker(4, "Bryn04", &sapped),
+        ];
+        // Buffs counted, as the rule counts them: the highest as it
+        // stands. The highest before buffs is drained below what the rule
+        // asks, and the rule does not take the key for it at all.
+        assert_eq!(called_to(&key, None, &profile, &takers, None), Some(3));
+        // Two as high: the name that sorts first, in every session.
+        let twin = sheet(360, 360);
+        let tied = [takers[2], taker(5, "Aldric", &twin)];
+        assert_eq!(called_to(&key, None, &profile, &tied, None), Some(5));
+        // Alone, it is this character's, as it always was.
+        assert_eq!(called_to(&key, None, &profile, &takers[..1], None), Some(1));
+        // What no rule asking about a skill takes is nobody's in particular.
+        let kits = item("Healing Kit", 50, 0);
+        assert_eq!(called_to(&kits, None, &profile, &takers, Some(2)), None);
+
+        // Salvage is for whoever salvages for the team.
+        let mut salvaging = profile.clone();
+        salvaging.rules.push(asks(
+            "platemail to salvage",
+            "platemail",
+            LootAction::Salvage,
+        ));
+        let plate = item("Platemail", 100, 240);
+        assert_eq!(
+            called_to(&plate, None, &salvaging, &takers, Some(2)),
+            Some(2)
+        );
+        // When it is not one of those that could take it -- out of reach,
+        // or nobody carries an Ust -- it is not waited on: the thing is
+        // nobody's in particular, and the hand-off takes it there later.
+        assert_eq!(called_to(&plate, None, &salvaging, &takers, Some(9)), None);
+        assert_eq!(called_to(&plate, None, &salvaging, &takers, None), None);
+
+        // A key two rules would take goes by the first of them in the
+        // profile, as each character reads its rules: the lockpick rule,
+        // though for the one it does not hold for the salvage rule further
+        // down would take it.
+        salvaging
+            .rules
+            .push(asks("keys to salvage", "broken", LootAction::Salvage));
+        assert_eq!(called_to(&key, None, &salvaging, &takers, Some(4)), Some(3));
+        // And a rule ahead of both that takes it for anyone makes it
+        // nobody's in particular.
+        salvaging
+            .rules
+            .insert(0, asks("every key", "key", LootAction::Keep));
+        assert_eq!(called_to(&key, None, &salvaging, &takers, Some(4)), None);
+    }
+
+    #[test]
+    fn nobody_is_sent_anything_when_no_rule_asks_about_a_skill_and_nobody_salvages() {
+        let mut profile = crate::profile::Profile {
+            name: "plain".into(),
+            rules: vec![
+                asks("gems", "diamond", LootAction::Sell),
+                asks("platemail to salvage", "platemail", LootAction::Salvage),
+                asks("kits", "healing kit", LootAction::Keep),
+            ],
+            ..Default::default()
+        };
+        profile.looting.salvage = false;
+        assert!(!profile.sends_to_the_best());
+        let weak = crate::weapons::Wielder::default();
+        let strong = crate::weapons::Wielder {
+            level: 200,
+            skills: vec![(ac_world::stats::skill::SALVAGING, 400, 450, 3)],
+            ..Default::default()
+        };
+        let takers = [
+            Taker {
+                guid: 1,
+                name: "Bryn01",
+                sheet: &weak,
+                held: 0,
+            },
+            Taker {
+                guid: 2,
+                name: "Bryn02",
+                sheet: &strong,
+                held: 0,
+            },
+        ];
+        for thing in [
+            item("Diamond", 5000, 0),
+            item("Platemail", 100, 240),
+            item("Healing Kit", 50, 0),
+        ] {
+            assert_eq!(
+                called_to(&thing, None, &profile, &takers, Some(2)),
+                None,
+                "{}",
+                thing.name
+            );
+        }
+        // Nor under the starter, while its salvager does not salvage.
+        let mut starter = crate::profile::Profile::starter();
+        starter.looting.salvage = false;
+        assert!(!starter.sends_to_the_best());
+    }
+
+    #[test]
+    fn a_mate_dead_or_missing_from_the_board_is_never_waited_on() {
+        let t0 = Instant::now();
+        let (body, at) = (0x8000_0001, glam::Vec3::ZERO);
+        let alive = looter(2, at, None, Duration::ZERO);
+        assert!(alive.could_come_for(at));
+        // At another body or fighting, it comes once it is done.
+        assert!(Mate {
+            looting: Some(0x8000_0002),
+            target: Some(0x7000_0001),
+            ..alive.clone()
+        }
+        .could_come_for(at));
+        for gone in [
+            Mate {
+                health: 0.0,
+                ..alive.clone()
+            },
+            Mate {
+                autoplay: false,
+                ..alive.clone()
+            },
+            Mate {
+                guid: 0,
+                ..alive.clone()
+            },
+        ] {
+            assert_eq!(gone.turn(), None);
+            assert!(!gone.could_come_for(at));
+        }
+        // Nor one across the field, or with no room for what is left.
+        assert!(!Mate {
+            world: glam::Vec3::new(LOOT_NEAR + 5.0, 0.0, 0.0),
+            ..alive.clone()
+        }
+        .could_come_for(at));
+        for (pack_full, laden) in [(true, false), (false, true)] {
+            let full = Mate {
+                supplies: crate::logistics::Supplies {
+                    pack_full,
+                    laden,
+                    ..Default::default()
+                },
+                ..alive.clone()
+            };
+            assert!(!full.could_come_for(at));
+        }
+
+        // Nor is a body's turn dealt to one dead, or to one gone quiet and
+        // off the board: either way the body is this character's.
+        let me = 3;
+        let mut ap = Autoplay {
+            corpse_seen: vec![(body, t0)],
+            first_opens: vec![t0; 3],
+            team: view_of(vec![looter(1, at, None, Duration::ZERO)]),
+            ..Default::default()
+        };
+        assert!(!ap.ours_to_open(body, at, me, at, t0), "had more turns");
+        // And standing off it, this character says whose turn it is.
+        assert_eq!(ap.whose_turn(body, at, me, at, t0), Some("Bryn01"));
+        assert_eq!(ap.whose_turn(body, at, me, at, t0 + CLAIM_SETTLE), None);
+        ap.team.mates[0].health = 0.0;
+        assert!(
+            ap.ours_to_open(body, at, me, at, t0),
+            "waited on a dead mate's turn"
+        );
+        assert_eq!(ap.whose_turn(body, at, me, at, t0), None);
+        ap.team.mates.clear();
+        assert!(ap.ours_to_open(body, at, me, at, t0));
+    }
+
+    #[test]
+    fn the_salvage_on_an_open_body_is_left_for_the_salvager_standing_by() {
+        use crate::logistics::Supplies;
+        let holtburg = 0xA9B4_0019;
+        let Some(mut c) = standing_in_the_field(20, holtburg, glam::Vec3::new(84.0, 84.0, 10.0))
+        else {
+            return;
+        };
+        let me = c.player.as_ref().unwrap().world_position();
+        let t0 = Instant::now();
+        let (body, plate, gem) = (0x8000_5001, 0x8000_5002, 0x8000_5003);
+        c.world.objects.insert(
+            body,
+            ac_world::WorldObject {
+                guid: body,
+                name: "Corpse of Drudge Slave".into(),
+                object_desc_flags: ac_world::object_desc_flags::CORPSE,
+                position: Some(ac_world::object::Position::new_flat(
+                    holtburg,
+                    me + glam::Vec3::new(2.0, 0.0, 0.0) - ac_world::landblock_origin(holtburg),
+                )),
+                ..Default::default()
+            },
+        );
+        for (guid, name) in [(plate, "Platemail"), (gem, "Diamond")] {
+            c.world.objects.insert(
+                guid,
+                ac_world::WorldObject {
+                    guid,
+                    name: name.into(),
+                    container: Some(body),
+                    ..Default::default()
+                },
+            );
+        }
+        let mut profile = crate::profile::Profile {
+            name: "party".into(),
+            rules: vec![
+                asks("platemail to salvage", "platemail", LootAction::Salvage),
+                asks("gems", "diamond", LootAction::Sell),
+            ],
+            ..Default::default()
+        };
+        // Bryn02 salvages for the party and stands by; Bryn03 does not
+        // salvage. This character carries no Ust.
+        let salvager = Mate {
+            has_ust: true,
+            salvaging: 300,
+            ..looter(2, me, None, Duration::ZERO)
+        };
+        let other = looter(3, me, None, Duration::ZERO);
+        c.autoplay.team.mates = vec![salvager.clone(), other.clone()];
+        let verdicts = |c: &mut Client, profile: &crate::profile::Profile| {
+            let open = c.corpse_now(body, &[plate, gem], profile, t0, t0);
+            let of = |g| open.items.iter().find(|i| i.guid == g).map(|i| i.verdict);
+            (of(plate), of(gem))
+        };
+        let take = |a| Some(ac_loot::Verdict::Take(a));
+        assert_eq!(
+            verdicts(&mut c, &profile),
+            (Some(ac_loot::Verdict::Leave), take(LootAction::Sell)),
+            "took the salvager's salvage, or left the rest"
+        );
+        // Shut with the platemail on it: left for the salvager alone.
+        assert_eq!(
+            c.shut_for(body, &[plate], &profile),
+            (
+                vec![(3, "Bryn03".to_string())],
+                vec![(2, "Bryn02".to_string())]
+            )
+        );
+
+        // Never waited on: dead, off the board, with no room, or having
+        // shut this body already. Each time it is taken as ever.
+        let salvage = (take(LootAction::Salvage), take(LootAction::Sell));
+        c.autoplay.team.mates = vec![
+            Mate {
+                health: 0.0,
+                ..salvager.clone()
+            },
+            other.clone(),
+        ];
+        assert_eq!(verdicts(&mut c, &profile), salvage, "dead");
+        c.autoplay.team.mates = vec![other.clone()];
+        assert_eq!(verdicts(&mut c, &profile), salvage, "off the board");
+        c.autoplay.team.mates = vec![
+            Mate {
+                supplies: Supplies {
+                    laden: true,
+                    ..Default::default()
+                },
+                ..salvager.clone()
+            },
+            other.clone(),
+        ];
+        assert_eq!(verdicts(&mut c, &profile), salvage, "laden");
+        c.autoplay.config.team.enabled = true;
+        c.autoplay.team.mates = vec![
+            Mate {
+                shut: vec![(body, vec![3])],
+                ..salvager.clone()
+            },
+            other.clone(),
+        ];
+        c.autoplay.take_in_shuts(0x5000_0001);
+        assert_eq!(verdicts(&mut c, &profile), salvage, "shut it already");
+
+        // Rules that mean nothing for anyone in particular, and alone.
+        c.autoplay.team.mates = vec![salvager, other];
+        c.autoplay.shut_by.clear();
+        profile.looting.salvage = false;
+        assert_eq!(verdicts(&mut c, &profile), salvage, "nobody salvages");
+        profile.looting.salvage = true;
+        c.autoplay.team.mates.clear();
+        assert_eq!(verdicts(&mut c, &profile), salvage, "alone");
     }
 
     #[test]

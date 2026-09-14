@@ -73,7 +73,9 @@ impl Roster {
     /// The team as one session sees it: everyone else on the roster,
     /// and whether this session's character leads. The leader is the
     /// character that asked to lead (the one played by hand), or else
-    /// the one whose name sorts first, this one included.
+    /// the one whose name sorts first, this one included. What the
+    /// session said about itself goes with it, so that the turns at a
+    /// newly fallen body read it as the others read it.
     pub fn view_for(&self, me: &Mate) -> TeamView {
         let mut mates: Vec<Mate> = self
             .heard
@@ -86,7 +88,11 @@ impl Roster {
         for m in &mut mates {
             m.leader = first.as_deref() == Some(m.name.as_str());
         }
-        TeamView { mates, leader }
+        TeamView {
+            mates,
+            leader,
+            me: Some(me.clone()),
+        }
     }
 
     /// Everyone heard, with where each spoke from (process, session).
@@ -308,6 +314,7 @@ pub fn describe(client: &ac_client::Client, session: usize) -> Option<Mate> {
         on_its_way: client.on_its_way(),
         skills: client.skills_its_rules_ask_about(),
         shut: client.autoplay.shuts_to_say(Instant::now()),
+        opened_first: client.autoplay.opened_first(Instant::now()),
     })
 }
 
@@ -497,6 +504,37 @@ mod tests {
         let v = r.view_for(&mate("Reborn", 1));
         assert_eq!(v.mates[0].skills, said.skills);
         assert_eq!(v.mates[0].shut, said.shut);
+    }
+
+    #[test]
+    fn a_session_takes_its_turn_by_what_it_said_about_itself() {
+        // The turns at a newly fallen body read every mate off its row,
+        // and a session reads itself off the same word, so that all of
+        // them deal the body to the same one.
+        let me = Mate {
+            opened_first: 3,
+            target: Some(0x77),
+            ..mate("Reborn", 1)
+        };
+        let theirs = Mate {
+            opened_first: 2,
+            ..mate("Brynna", 2)
+        };
+        let json = serde_json::to_value(&theirs).expect("a mate is JSON");
+        let mut r = Roster::default();
+        r.hear(
+            "other",
+            0,
+            serde_json::from_value(json).expect("and comes back"),
+            Instant::now(),
+        );
+        let v = r.view_for(&me);
+        assert_eq!(v.me.as_ref(), Some(&me));
+        assert_eq!(v.mates[0].opened_first, 2);
+        // A row from an older build has had no turns.
+        let old = serde_json::json!({"name": "Brannoc", "guid": 5, "health": 1.0});
+        let heard: Mate = serde_json::from_value(old).expect("an older row still reads");
+        assert_eq!(heard.opened_first, 0);
     }
 
     #[test]

@@ -453,6 +453,19 @@ impl Rule {
         self.all.iter().any(Ask::needs_id)
     }
 
+    /// The first skill a condition of this rule asks of the character
+    /// reading it (`Mine::Skill`, `Mine::Trained`), if any does.
+    ///
+    /// A party reads one profile, so a rule that asks about a skill says
+    /// which of the party what it takes is for: whoever has the most of
+    /// that skill.
+    pub fn skill_asked(&self) -> Option<u32> {
+        self.all.iter().find_map(|a| match a {
+            Ask::Me(Mine::Skill { skill, .. } | Mine::Trained { skill, .. }) => Some(*skill),
+            _ => None,
+        })
+    }
+
     /// Whether every condition that can be judged without an appraisal
     /// holds. A rule that fails one of those is out whatever the
     /// server would say, which is what saves the round trip.
@@ -726,7 +739,43 @@ impl Profile {
         name: &str,
         held: u32,
     ) -> Verdict {
-        for rule in self.rules.iter().filter(|r| r.on) {
+        match self.reading(item, id, me, name, held) {
+            Some((_, rule, false)) => Verdict::Decided(rule.action, rule.name.clone()),
+            Some((_, rule, true)) => Verdict::NeedsId(rule.name.clone()),
+            None => Verdict::None,
+        }
+    }
+
+    /// The rule that decides `item` for this character, with where it
+    /// stands among the rules, read the way [`Profile::judge`] reads
+    /// them. `None` when no rule claims it, and when the first rule that
+    /// might has to wait for the item to be appraised.
+    pub fn decided_by(
+        &self,
+        item: &ItemStats,
+        id: Option<&Appraisal>,
+        me: &Wielder,
+        name: &str,
+        held: u32,
+    ) -> Option<(usize, &Rule)> {
+        match self.reading(item, id, me, name, held) {
+            Some((at, rule, false)) => Some((at, rule)),
+            Some((_, _, true)) | None => None,
+        }
+    }
+
+    /// The first rule that claims `item` for this character, where it
+    /// stands among the rules, and whether it has to wait for an
+    /// appraisal before it can say.
+    fn reading(
+        &self,
+        item: &ItemStats,
+        id: Option<&Appraisal>,
+        me: &Wielder,
+        name: &str,
+        held: u32,
+    ) -> Option<(usize, &Rule, bool)> {
+        for (at, rule) in self.rules.iter().enumerate().filter(|(_, r)| r.on) {
             if rule.keep_up_to.is_some_and(|cap| held >= cap) {
                 continue;
             }
@@ -734,13 +783,13 @@ impl Profile {
                 continue;
             }
             if rule.needs_id() && !item.appraised {
-                return Verdict::NeedsId(rule.name.clone());
+                return Some((at, rule, true));
             }
             if rule.holds(item, id, me, name) {
-                return Verdict::Decided(rule.action, rule.name.clone());
+                return Some((at, rule, false));
             }
         }
-        Verdict::None
+        None
     }
 
     /// A number that changes when the rules do, and does not when only
@@ -799,6 +848,21 @@ impl Profile {
         asked.sort_unstable();
         asked.dedup();
         asked
+    }
+
+    /// Whether anything these rules take is meant for one of a party in
+    /// particular rather than for whoever opens the body: a rule switched
+    /// on that takes what it claims and asks about a skill, or, while the
+    /// salvager salvages ([`Looting::salvage`]), one that salvages. Every
+    /// character has Salvaging, so a salvage rule asks it without saying.
+    pub fn sends_to_the_best(&self) -> bool {
+        self.rules
+            .iter()
+            .filter(|r| r.on && r.action.takes())
+            .any(|r| {
+                r.skill_asked().is_some()
+                    || (self.looting.salvage && r.action == LootAction::Salvage)
+            })
     }
 
     /// Where a profile of this name lives.
@@ -1323,6 +1387,131 @@ mod tests {
         // The starter asks nothing of the character, so a party reading
         // it says nothing more about itself than it did.
         assert!(Profile::starter().skills_asked().is_empty());
+    }
+
+    #[test]
+    fn a_rule_that_asks_about_a_skill_or_salvages_sends_what_it_takes_to_the_best() {
+        let lockpick = Ask::Me(Mine::Skill {
+            skill: skill::LOCKPICK,
+            op: Op::Ge,
+            level: 250,
+        });
+        let keys = rule(
+            "keys",
+            LootAction::Keep,
+            vec![Ask::Search("broken".into()), lockpick.clone()],
+        );
+        assert_eq!(keys.skill_asked(), Some(skill::LOCKPICK));
+        // The first skill named is the one it asks about.
+        let both = rule(
+            "both",
+            LootAction::Keep,
+            vec![
+                Ask::Me(Mine::Level {
+                    op: Op::Ge,
+                    level: 10,
+                }),
+                Ask::Me(Mine::Trained {
+                    skill: skill::SALVAGING,
+                    at_least: sac::TRAINED,
+                }),
+                lockpick.clone(),
+            ],
+        );
+        assert_eq!(both.skill_asked(), Some(skill::SALVAGING));
+        assert_eq!(
+            rule("peas", LootAction::Keep, vec![Ask::Search("pea".into())]).skill_asked(),
+            None
+        );
+
+        let salvage = rule(
+            "salvage",
+            LootAction::Salvage,
+            vec![Ask::Search("platemail".into())],
+        );
+        let sell = rule("sell", LootAction::Sell, vec![Ask::Search("gem".into())]);
+        let group = |rules: Vec<Rule>, salvaging: bool| {
+            let mut p = Profile {
+                name: "group".into(),
+                rules,
+                ..Default::default()
+            };
+            p.looting.salvage = salvaging;
+            p
+        };
+        // Nothing asked of anyone, and nobody salvaging: nothing is meant
+        // for anyone in particular.
+        assert!(!group(vec![sell.clone(), salvage.clone()], false).sends_to_the_best());
+        // A salvage rule, while the salvager salvages.
+        assert!(group(vec![sell.clone(), salvage.clone()], true).sends_to_the_best());
+        // A skill asked about.
+        assert!(group(vec![sell.clone(), keys.clone()], false).sends_to_the_best());
+        // But not by a rule switched off, or one that leaves what it claims.
+        let mut off = keys.clone();
+        off.on = false;
+        let mut skip = keys;
+        skip.action = LootAction::Skip;
+        assert!(!group(vec![sell, off, skip], false).sends_to_the_best());
+        // The starter salvages, and its salvager salvages.
+        assert!(Profile::starter().sends_to_the_best());
+    }
+
+    #[test]
+    fn the_rule_that_decides_an_item_is_the_one_the_verdict_names() {
+        let mut capped = rule("kits", LootAction::Keep, vec![Ask::Search("kit".into())]);
+        capped.keep_up_to = Some(4);
+        let mut off = rule("off", LootAction::Keep, vec![Ask::Search("kit".into())]);
+        off.on = false;
+        let profile = Profile {
+            name: "order".into(),
+            rules: vec![
+                off,
+                capped,
+                rule(
+                    "sell kits",
+                    LootAction::Sell,
+                    vec![Ask::Search("kit".into())],
+                ),
+                rule(
+                    "armour",
+                    LootAction::Keep,
+                    vec![Ask::Prop {
+                        kind: PropKind::Int,
+                        id: 28,
+                        op: Op::Ge,
+                        value: 200.0,
+                    }],
+                ),
+            ],
+            ..Default::default()
+        };
+        let me = Wielder::default();
+        let kit = ItemStats {
+            name: "Healing Kit".into(),
+            appraised: true,
+            ..Default::default()
+        };
+        // Where it stands counts the rules switched off.
+        let (at, by) = profile.decided_by(&kit, None, &me, "Bryn", 0).unwrap();
+        assert_eq!((at, by.name.as_str()), (1, "kits"));
+        assert_eq!(
+            profile.judge(&kit, None, &me, "Bryn", 0),
+            Verdict::Decided(LootAction::Keep, "kits".into())
+        );
+        // Past the cap the next rule decides.
+        let (at, by) = profile.decided_by(&kit, None, &me, "Bryn", 4).unwrap();
+        assert_eq!((at, by.name.as_str()), (2, "sell kits"));
+        // One that has to be appraised first decides nothing yet.
+        let plate = ItemStats {
+            name: "Platemail".into(),
+            appraised: false,
+            ..Default::default()
+        };
+        assert_eq!(
+            profile.judge(&plate, None, &me, "Bryn", 0),
+            Verdict::NeedsId("armour".into())
+        );
+        assert_eq!(profile.decided_by(&plate, None, &me, "Bryn", 0), None);
     }
 
     #[test]
