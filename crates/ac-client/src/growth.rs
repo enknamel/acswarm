@@ -398,6 +398,9 @@ pub struct State {
     /// The ground being travelled to, and since when.
     bound: Option<(u32, Vec2, String)>,
     bound_since: Option<Instant>,
+    /// When the walk to that ground was last planned again after
+    /// something else broke it off (see [`on_the_way`]).
+    bound_walked_on: Option<Instant>,
     /// The ground the character hunts on, once it has arrived.
     pub hunting_at: Option<u32>,
     /// Grounds not to go to for a while, and since when.
@@ -696,25 +699,28 @@ enum OnTheWay {
 /// it once more (see [`on_the_way`]).
 const WALK_ON_EVERY: Duration = Duration::from_secs(5);
 
-/// What a run `away` metres from its counter does with no journey under
-/// way. `broken_off` says the last journey was ended by something else
-/// the character went to do (see `Client::journey_broken_off`), `busy`
-/// that it is still doing it, and `lately` that the run planned its walk
-/// again less than [`WALK_ON_EVERY`] ago. How long the walk may take is
-/// the run's own clock, and is asked before this.
+/// What a walk to a counter or to a hunting ground does with no journey
+/// under way. `there` says it is near enough already, `broken_off` that
+/// the last journey was ended by something else the character went to do
+/// (see `Client::journey_broken_off`), `busy` that it is still doing it,
+/// and `lately` that the walk was planned again less than
+/// [`WALK_ON_EVERY`] ago. How long the walk may take is the errand's own
+/// clock, and is asked before this.
 ///
 /// Any journey not under way used to be one that could not get there.
 /// +Verity set off to sell, a corpse took her a second later -- walking
 /// to one ends a journey -- and the run gave up 224 m short, marked the
 /// counter no use and sold nothing. A walk that ended by itself short of
-/// the counter is still one that cannot get there.
+/// the counter is still one that cannot get there. The walk to a hunting
+/// ground did the same, and worse: it put the ground on the skip list and
+/// set off for another.
 ///
 /// Planning the walk is a route search, and something that ends the walk
 /// as soon as it is planned would have it planned every tick or two until
 /// the run's clock ran out: a follower pulled back to its leader was, each
 /// time it closed to the following distance. So it waits a moment first.
-fn on_the_way(away: f32, broken_off: bool, busy: bool, lately: bool) -> OnTheWay {
-    if away <= VENDOR_REACH {
+fn on_the_way(there: bool, broken_off: bool, busy: bool, lately: bool) -> OnTheWay {
+    if there {
         OnTheWay::There
     } else if !broken_off {
         OnTheWay::Short
@@ -1495,9 +1501,50 @@ impl Client {
                 );
                 return true;
             }
+            // A corpse or a fight on the road ends the walk without it
+            // having got anywhere. That is a walk to take up again once the
+            // character is free, as the run takes up its walk to the
+            // counter, and not one that could not get there: read that way,
+            // every body looted on the road put the ground on the skip list
+            // and sent the character off to another. A walk that took too
+            // long was cancelled above, which is not breaking it off.
+            //
+            // Busy is a target still alive. `attack_target` can go on naming
+            // a creature for a moment after it dies (see
+            // `steps::worth_fighting`), and a body is no reason to wait.
+            let away = at.distance(me);
+            let there = here == lb || away <= GROUND_REACH;
+            let busy = [self.attack_target, self.autoplay.casting_at()]
+                .into_iter()
+                .flatten()
+                .any(|g| {
+                    self.world
+                        .objects
+                        .get(&g)
+                        .is_some_and(|o| o.health.unwrap_or(1.0) > 0.0)
+                });
+            let lately = self
+                .autoplay
+                .growth
+                .bound_walked_on
+                .is_some_and(|t| now.duration_since(t) < WALK_ON_EVERY);
+            match on_the_way(there, self.journey_broken_off(), busy, lately) {
+                OnTheWay::Wait => return true,
+                OnTheWay::WalkOn => {
+                    if self.grow_travel(at, now) {
+                        self.autoplay.growth.bound_walked_on = Some(now);
+                        self.autoplay.note(
+                            format!("on the way to the {name} ground again ({away:.0} m)"),
+                            now,
+                        );
+                        return true;
+                    }
+                }
+                OnTheWay::There | OnTheWay::Short => {}
+            }
             let st = &mut self.autoplay.growth;
             st.bound = None;
-            if here == lb || at.distance(me) <= GROUND_REACH {
+            if there {
                 st.hunting_at = Some(lb);
                 st.quiet_since = None;
                 st.roams = 0;
@@ -3303,7 +3350,12 @@ impl Client {
                 let lately = run
                     .walked_on
                     .is_some_and(|t| now.duration_since(t) < WALK_ON_EVERY);
-                match on_the_way(away, self.journey_broken_off(), busy, lately) {
+                match on_the_way(
+                    away <= VENDOR_REACH,
+                    self.journey_broken_off(),
+                    busy,
+                    lately,
+                ) {
                     OnTheWay::There => {}
                     OnTheWay::Wait => {
                         self.autoplay.growth.run = Some(run);
@@ -3825,23 +3877,37 @@ mod tests {
         assert!(!restocks_as_a_party(&off, 3));
     }
 
+    /// Whether a run standing `away` metres from its counter is there.
+    fn there(away: f32) -> bool {
+        away <= VENDOR_REACH
+    }
+
     #[test]
     fn a_walk_to_a_counter_broken_off_by_a_corpse_is_walked_on() {
         // +Verity, carrying as much as she meant to, set off for Shopkeeper
         // Renald the Elder 250 m away. A second later the looting walked
         // her to a fresh corpse, which ends a journey, and the run found no
         // journey under way 224 m short: "could not get to", sold nothing.
-        assert_eq!(on_the_way(224.0, true, false, false), OnTheWay::WalkOn);
+        assert_eq!(
+            on_the_way(there(224.0), true, false, false),
+            OnTheWay::WalkOn
+        );
         // Not while what broke it off still has her: a fight on the way.
-        assert_eq!(on_the_way(224.0, true, true, false), OnTheWay::Wait);
+        assert_eq!(on_the_way(there(224.0), true, true, false), OnTheWay::Wait);
         // A journey that ended by itself short of the counter -- it gave
         // up, or arrived somewhere else -- still could not get there.
-        assert_eq!(on_the_way(224.0, false, false, false), OnTheWay::Short);
-        assert_eq!(on_the_way(224.0, false, true, false), OnTheWay::Short);
+        assert_eq!(
+            on_the_way(there(224.0), false, false, false),
+            OnTheWay::Short
+        );
+        assert_eq!(
+            on_the_way(there(224.0), false, true, false),
+            OnTheWay::Short
+        );
         // Near enough, she goes up to the counter however it ended.
         for (broken_off, busy) in [(false, false), (true, false), (true, true)] {
             assert_eq!(
-                on_the_way(VENDOR_REACH, broken_off, busy, false),
+                on_the_way(there(VENDOR_REACH), broken_off, busy, false),
                 OnTheWay::There
             );
         }
@@ -3853,12 +3919,21 @@ mod tests {
         // planned -- a follower pulled back to its leader each time it
         // closed to the following distance -- had it planned again every
         // tick or two for the run's four minutes, a route search each time.
-        assert_eq!(on_the_way(224.0, true, false, true), OnTheWay::Wait);
+        assert_eq!(on_the_way(there(224.0), true, false, true), OnTheWay::Wait);
         // Once the moment is up it is planned again.
-        assert_eq!(on_the_way(224.0, true, false, false), OnTheWay::WalkOn);
+        assert_eq!(
+            on_the_way(there(224.0), true, false, false),
+            OnTheWay::WalkOn
+        );
         // Neither giving up nor going up to the counter waits on it.
-        assert_eq!(on_the_way(224.0, false, false, true), OnTheWay::Short);
-        assert_eq!(on_the_way(VENDOR_REACH, true, false, true), OnTheWay::There);
+        assert_eq!(
+            on_the_way(there(224.0), false, false, true),
+            OnTheWay::Short
+        );
+        assert_eq!(
+            on_the_way(there(VENDOR_REACH), true, false, true),
+            OnTheWay::There
+        );
     }
 
     /// Offline session over the real archives: nothing calls `tick`, so
@@ -4879,6 +4954,50 @@ mod tests {
         c.autoplay.team.mates.clear();
         c.autoplay.team.leader = true;
         assert!(c.grow_hunt(now, &cfg), "the leader stayed put");
+    }
+
+    #[test]
+    fn a_walk_to_a_ground_broken_off_by_a_corpse_is_walked_on() {
+        // A body on the road -- a fellow's kill, shared -- took the
+        // character off its walk to the ground, and walking to a corpse
+        // ends a journey. Once the body was looted the hunting step found
+        // no journey under way, took that for a walk that could not get
+        // there, put the ground on the skip list and set off for another.
+        let holtburg = 0xA9B4_0019;
+        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
+            return;
+        };
+        c.world.stats.level = 20;
+        c.world.player_guid = Some(0x5000_0001);
+        let me = c.player.as_ref().unwrap().world_position();
+        let now = Instant::now();
+        let cfg = Growth::default();
+        let at = Vec2::new(me.x + 250.0, me.y);
+        let lb = (((at.x / 192.0) as u32) << 8) | (at.y / 192.0) as u32;
+        assert!(c.grow_travel(at, now), "no way to the ground");
+        c.autoplay.growth.bound = Some((lb, at, "Drudge".into()));
+        c.autoplay.growth.bound_since = Some(now);
+
+        c.interrupt_travel("walking to a corpse");
+        assert!(c.grow_hunt(now, &cfg), "gave the walk up after a corpse");
+        assert!(c.traveling(), "and did not walk on");
+        assert!(c.autoplay.growth.bound.is_some());
+        assert!(c.autoplay.growth.skip.is_empty(), "the ground was skipped");
+
+        // Broken off again as soon as it is planned, it waits a moment
+        // before planning the walk once more.
+        c.interrupt_travel("walking to a corpse");
+        assert!(c.grow_hunt(now + Duration::from_secs(1), &cfg));
+        assert!(!c.traveling(), "planned again straight away");
+        assert!(c.grow_hunt(now + WALK_ON_EVERY, &cfg));
+        assert!(c.traveling());
+
+        // A walk that ended by itself short of the ground still could not
+        // get there.
+        c.cancel_travel();
+        assert!(!c.grow_hunt(now + WALK_ON_EVERY, &cfg));
+        assert_eq!(c.autoplay.growth.bound, None);
+        assert!(c.autoplay.growth.skip.iter().any(|(g, _)| *g == lb));
     }
 
     /// A Revenant called `name` standing `metres` east of the character:
