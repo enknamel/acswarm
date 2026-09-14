@@ -680,9 +680,9 @@ pub struct Fight {
     /// Never attack creatures whose name contains one of these.
     pub avoid: Vec<String>,
     /// Walk past a creature the server will not let start a fight when
-    /// it is also far below the character: a Rabbit, a Chicken, a
-    /// Sparring Golem (see [`beneath_fighting`]). Never a reason not to
-    /// hit back.
+    /// one swing would end it and the character has outgrown it: a
+    /// Rabbit, a Chicken, a Bunny (see [`beneath_fighting`]). Never a
+    /// reason not to hit back.
     ///
     /// Defaulted by name, because serde fills a missing field from its
     /// type and a settings file written before this existed would
@@ -1222,26 +1222,56 @@ pub fn wanted_target(name: &str, f: &Fight) -> bool {
     f.only.iter().all(|w| w.trim().is_empty()) || name_matches(name, &f.only)
 }
 
+/// The most health a creature can have and still be a critter. A Black
+/// Rabbit has five, a Chicken three, a Bunny three; the smallest thing
+/// in a hunting field that is really a monster -- a Gnawer Shrethlet --
+/// has eight, a Gnawer Shreth fifteen, a Drudge Skulker forty-two. One
+/// swing ends anything under this line, and there is nothing in it for
+/// a character that can swing.
+const CRITTER_HEALTH: u32 = 5;
+
 /// Whether a creature is beneath fighting: the server will not let it
-/// start a fight, and the character has long since outgrown it. A Cow,
-/// a Rabbit, a Chicken.
+/// start a fight, it dies to a single swing, and the character has long
+/// since outgrown it. A Rabbit, a Chicken, a Bunny.
 ///
 /// Passive on its own is not the answer. A Revenant stands there until
 /// it is hit, and so do Cursed Bones and a Silver Tusker: half of what
 /// a hunting ground is for waits to be provoked, and those are worth
-/// sixty levels or more. What tells them apart is the level. "Far
-/// below" is deliberately hard -- twice the creature's level and over,
-/// so a level 4 Rabbit stops being worth a swing at level 8 while a
-/// level 61 Revenant is fought by anyone who will ever meet one.
+/// sixty levels or more.
 ///
-/// A creature with no level recorded is fought: nothing is walked past
-/// on a guess.
-pub fn beneath_fighting(tolerance: u32, level: Option<u32>, mine: i32) -> bool {
+/// Nor is passive and far below by level, which is what this asked at
+/// first and what emptied the fields it was meant to tidy. ACE gives
+/// the newbie-field spawns Retaliate so they do not come at a new
+/// player -- generators 2007 and 5150 around Holtburg put out nothing
+/// but Drudge Skulkers, Gnawer Shreths, Mites and Mosswarts, every one
+/// of them passive and level 8 -- so twice the level left a level 16
+/// character with nothing in reach to attack anywhere in Holtburg, and
+/// no reason to walk anywhere either. The level is a poor separator in
+/// any case: a Black Rabbit is level 4 and a Gnawer Shrethlet level 2.
+///
+/// What does separate them is how much they can take, and that is the
+/// figure this leans on for anything that will fight back.
+///
+/// The one flag that stands on its own is "never attacks anything":
+/// that is not a creature with a health bar, it is scenery with one --
+/// an Egg, a Totem, a Pillar, a Reinforced Door -- and hitting it is a
+/// chore, not a fight, however much health it has.
+///
+/// A creature with no level recorded is fought, and so is one with no
+/// health recorded that could fight back: nothing is walked past on a
+/// guess.
+pub fn beneath_fighting(tolerance: u32, health: u32, level: Option<u32>, mine: i32) -> bool {
+    use ac_world::elements::tolerance as flag;
     let Some(level) = level else {
         return false;
     };
-    tolerance & ac_world::elements::tolerance::PASSIVE != 0
-        && i64::from(level) * 2 <= i64::from(mine)
+    if tolerance & flag::PASSIVE == 0 || i64::from(level) * 2 > i64::from(mine) {
+        return false;
+    }
+    if tolerance & flag::NO_ATTACK != 0 {
+        return true;
+    }
+    health > 0 && health <= CRITTER_HEALTH
 }
 
 /// Whether an item is worth taking.
@@ -4284,12 +4314,13 @@ impl Client {
     /// hitting the character, a creature this one summoned has taken it
     /// on, or the player named it in "only these", which is a player
     /// saying outright what to hunt.
+    ///
+    /// The table is asked first and the three are only consulted for
+    /// something the table would have the character walk past. This runs
+    /// for every creature in view every tick -- `worth_fighting` weighs
+    /// with it -- and one of the three walks the whole object map.
     pub(crate) fn a_critter(&self, o: &ac_world::WorldObject, cfg: &Fight) -> bool {
-        if !cfg.skip_critters
-            || name_matches(&o.name, &cfg.only)
-            || self.hit_lately_by(&o.name)
-            || self.a_pet_is_on(o.guid)
-        {
+        if !cfg.skip_critters {
             return false;
         }
         let Some(kind) = ac_world::elements::known(o.weenie_class_id, &o.name) else {
@@ -4306,7 +4337,12 @@ impl Client {
             .and_then(|a| a.int(CREATURE_LEVEL))
             .and_then(|l| u32::try_from(l).ok())
             .or(kind.level);
-        beneath_fighting(kind.tolerance, level, self.world.stats.level)
+        if !beneath_fighting(kind.tolerance, kind.health, level, self.world.stats.level) {
+            return false;
+        }
+        !(name_matches(&o.name, &cfg.only)
+            || self.hit_lately_by(&o.name)
+            || self.a_pet_is_on(o.guid))
     }
 
     /// Whether a creature this character summoned is already walking at
@@ -6547,21 +6583,23 @@ mod tests {
     }
 
     #[test]
-    fn a_creature_is_beneath_fighting_only_when_it_is_both() {
+    fn a_creature_is_beneath_fighting_only_when_it_is_all_three() {
         use ac_world::elements::tolerance;
-        // A level 4 Rabbit: fought at 8, walked past from 8 up.
-        assert!(!beneath_fighting(tolerance::RETALIATE, Some(4), 5));
-        assert!(!beneath_fighting(tolerance::RETALIATE, Some(4), 7));
-        assert!(beneath_fighting(tolerance::RETALIATE, Some(4), 8));
-        assert!(beneath_fighting(tolerance::RETALIATE, Some(4), 20));
+        // A level 4 Rabbit with its five health: fought at 7, walked
+        // past from 8 up.
+        assert!(!beneath_fighting(tolerance::RETALIATE, 5, Some(4), 5));
+        assert!(!beneath_fighting(tolerance::RETALIATE, 5, Some(4), 7));
+        assert!(beneath_fighting(tolerance::RETALIATE, 5, Some(4), 8));
+        assert!(beneath_fighting(tolerance::RETALIATE, 5, Some(4), 20));
         // A level 61 Revenant is passive and nobody outgrows it: 122
         // is past the level a character can reach.
-        assert!(!beneath_fighting(tolerance::RETALIATE, Some(61), 100));
-        assert!(!beneath_fighting(tolerance::RETALIATE, Some(61), 121));
+        assert!(!beneath_fighting(tolerance::RETALIATE, 200, Some(61), 100));
+        assert!(!beneath_fighting(tolerance::RETALIATE, 200, Some(61), 121));
         // Something that attacks on sight is fought however small.
-        assert!(!beneath_fighting(0, Some(1), 275));
-        // And nothing is walked past on a guess.
-        assert!(!beneath_fighting(tolerance::RETALIATE, None, 275));
+        assert!(!beneath_fighting(0, 3, Some(1), 275));
+        // And nothing is walked past on a guess: no level, no health.
+        assert!(!beneath_fighting(tolerance::RETALIATE, 5, None, 275));
+        assert!(!beneath_fighting(tolerance::RETALIATE, 0, Some(4), 275));
         // Every flag that means it leaves a passer-by alone counts.
         for flag in [
             tolerance::NO_ATTACK,
@@ -6570,13 +6608,61 @@ mod tests {
             tolerance::RETALIATE,
             tolerance::MONSTER,
         ] {
-            assert!(beneath_fighting(flag, Some(4), 20), "{flag}");
+            assert!(beneath_fighting(flag, 5, Some(4), 20), "{flag}");
         }
+        // Something that cannot fight back at all is scenery with a
+        // health bar, and hitting it is a chore whatever it can take: a
+        // Portal Pillar has two thousand health and never swings.
+        assert!(beneath_fighting(tolerance::NO_ATTACK, 2001, Some(4), 50));
+        // The rest of the flags do fight back once hit, so what they
+        // can take is what decides: a Drudge Skulker's forty-two is a
+        // fight, a Rabbit's five is not.
+        assert!(!beneath_fighting(tolerance::RETALIATE, 42, Some(8), 50));
         // The ones that do not: "only fight back at whoever started it"
         // still starts fights with everyone else.
-        assert!(!beneath_fighting(32, Some(4), 20));
+        assert!(!beneath_fighting(32, 5, Some(4), 20));
         // A character with no level yet fights everything.
-        assert!(!beneath_fighting(tolerance::RETALIATE, Some(4), 0));
+        assert!(!beneath_fighting(tolerance::RETALIATE, 5, Some(4), 0));
+    }
+
+    #[test]
+    fn the_holtburg_fields_are_still_a_hunting_ground_at_any_level() {
+        use ac_world::elements::creature_by_id;
+        // Every creature the two encounter generators around Holtburg
+        // put out (2007 newbietownaluviangen, 5150 harmlessaluviangen),
+        // by weenie. ACE gives the first eight Retaliate so they do not
+        // come at a new player, and they are all level 8: by level
+        // alone a level 16 character had nothing left to attack
+        // anywhere in Holtburg.
+        let field = [
+            19257, // Drudge Skulker
+            19258, // Drudge Slinker
+            19263, // Gnawer Shreth
+            19261, // Creeper Mosswart
+            19262, // Young Mosswart
+            19256, // Young Banderling
+            19260, // Mite Snippet
+            19259, // Mite Scion
+        ];
+        for wcid in field {
+            let c = creature_by_id(wcid).expect("in the table");
+            for mine in [16, 20, 50, 275] {
+                assert!(
+                    !beneath_fighting(c.tolerance, c.health, c.level, mine),
+                    "{} is what the fields are for, at level {mine}",
+                    c.name
+                );
+            }
+        }
+        // The two that really are critters are still walked past.
+        for wcid in [2566, 24937] {
+            let c = creature_by_id(wcid).expect("in the table");
+            assert!(
+                beneath_fighting(c.tolerance, c.health, c.level, 20),
+                "{} is worth nothing to a level 20 character",
+                c.name
+            );
+        }
     }
 
     /// Offline session over the real archives: nothing calls `tick`, so

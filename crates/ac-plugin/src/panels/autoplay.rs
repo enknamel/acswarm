@@ -368,8 +368,9 @@ pub fn draw(egui: &egui::Context, v: &AutoplayView, x: f32, drafts: &mut Drafts)
                 ui.checkbox(&mut cfg.fight.skip_critters, "walk past critters")
                     .on_hover_text(
                         "Leave alone a creature that will not attack unless it is \
-                         attacked and is far below the character -- a Cow, a \
-                         Rabbit, a Chicken. Anything hitting the character, \
+                         attacked, dies to a single swing, and is far below the \
+                         character -- a Rabbit, a Chicken, a Bunny. Anything \
+                         hitting the character, \
                          anything a summoned creature has taken on, and anything \
                          named in \"only these\" is still fought.",
                     );
