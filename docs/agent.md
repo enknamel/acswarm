@@ -56,7 +56,13 @@ minutes, because exploring claimed every tick and always had another
 room to walk to. A rank is one message, and the server takes it with no
 busy check, no animation and no movement -- it checks the stat and the
 pool, spends, and answers -- so it runs as housekeeping too, in the
-middle of a walk or a fight, still paced to one rank at a time.
+middle of a walk or a fight, still paced to one rank at a time. A rank
+that raises a maximum (Health, Stamina, Mana, or Endurance and Self,
+which they are built from) waits for the fight to be over. The fight
+under way is fought with what is left, which that rank leaves where it
+was, and the fraction left drops with it: a character with a large pool
+bought Health between swings until it healed, mid-fight, health it had
+never lost.
 
 Watching the ground runs before even the reflexes, for the same reason
 and one more. The clocks it keeps -- how long a spot has had nothing on

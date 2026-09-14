@@ -13,7 +13,9 @@
 //!    those skills are built from next, then the rest. Each candidate
 //!    rank is priced from the XpTable and weighed by how much it matters,
 //!    and the best value is bought; one rank at a time, no more often
-//!    than the server can answer, in the middle of a walk or a fight.
+//!    than the server can answer, in the middle of a walk or a fight --
+//!    except a rank that raises a maximum, which waits for the fight to
+//!    be over.
 //! 2. **Go where the monsters are.** When nothing has been worth fighting
 //!    for a while, a hunting ground that suits the character's level is
 //!    picked from `ac_world::hunting` (the nearest, leaving out the one
@@ -234,6 +236,20 @@ pub fn choose_raise(offers: &[Offer], xp: i64) -> Option<Raise> {
                 .then(a.cost.cmp(&b.cost))
         })
         .map(|o| o.raise)
+}
+
+/// Whether a rank raises the maximum of a vital: Health, Stamina or Mana
+/// itself, or Endurance or Self, which the maximums are built from.
+///
+/// Such a rank leaves what is left of the vital where it was (ACE spends
+/// the experience on the ranks and never touches the current value), so
+/// the fraction left drops with every one. That fraction is what the
+/// heal, Revitalize and mana rules read, and what the team reads to
+/// heal a mate.
+fn raises_a_maximum(raise: Raise) -> bool {
+    const ENDURANCE: usize = 1;
+    const SELF: usize = 5;
+    matches!(raise, Raise::Vital(_) | Raise::Attribute(ENDURANCE | SELF))
 }
 
 /// How much a skill matters to a character fighting with `weapon_skill`
@@ -1320,7 +1336,9 @@ impl Client {
     /// or a cast under way. Strength, Quickness and Run can change the run
     /// rate, which ACE sends out again only for a character already
     /// moving and only with `runrate_add_hooks`, off by default -- and
-    /// that is a speed, not an action.
+    /// that is a speed, not an action. The server does not mind a rank
+    /// that raises a maximum either, but the client's own heal lines do,
+    /// and that rank waits (see [`raises_a_maximum`]).
     pub(crate) fn autoplay_spend_xp(&mut self, now: Instant) {
         if self.autoplay.config.growth.auto_xp {
             self.grow_spend_xp(now);
@@ -1375,10 +1393,21 @@ impl Client {
             .iter()
             .map(|(r, _)| *r)
             .collect();
+        // A rank that raises a maximum waits for the fight to be over.
+        // The fight under way is fought with what is left, which the rank
+        // does not raise, and the fraction left drops as surely as it
+        // would for a blow: a character with a large pool bought Health
+        // between swings until it healed, mid-fight, health it had never
+        // lost. Skills and the other attributes count at once, and go on
+        // being bought. A pool with only a maximum to buy is noted as
+        // having nothing, which the kill that ends the fight undoes by
+        // moving the pool.
+        let fighting = self.in_a_fight();
         let offers: Vec<Offer> = self
             .raise_offers()
             .into_iter()
             .filter(|o| !sulking.contains(&o.raise))
+            .filter(|o| !(fighting && raises_a_maximum(o.raise)))
             .collect();
         let Some(pick) = choose_raise(&offers, xp) else {
             self.autoplay.growth.nothing_at = Some((xp, now));
@@ -4296,6 +4325,93 @@ mod tests {
         // Once the sulk is over, it is the best buy again.
         assert!(c.grow_spend_xp(sulked + SULK_FOR + Duration::from_secs(5)));
         assert_eq!(c.autoplay.growth.last_pick, Some(refused));
+    }
+
+    /// Up to `ranks` ranks, a `RAISE_EVERY` apart from `from`, the server
+    /// selling each one: the pool pays for it and the rank goes up.
+    fn buy_ranks(c: &mut Client, from: Instant, ranks: u32) -> Vec<Raise> {
+        let mut bought = Vec::new();
+        for n in 0..ranks {
+            if !c.grow_spend_xp(from + RAISE_EVERY * n) {
+                continue;
+            }
+            let pick = c.autoplay.growth.last_pick.expect("a rank was picked");
+            let cost = match pick {
+                Raise::Skill(id) => c.skill_raise_cost(id),
+                Raise::Attribute(i) => c.attribute_raise_cost(i),
+                Raise::Vital(i) => c.vital_raise_cost(i),
+            }
+            .xp()
+            .expect("a rank on offer has a price");
+            let stats = &mut c.world.stats;
+            stats.available_xp -= i64::from(cost);
+            match pick {
+                Raise::Skill(id) => {
+                    let s = stats
+                        .skills
+                        .iter_mut()
+                        .find(|s| s.id == id)
+                        .expect("on the sheet");
+                    s.ranks += 1;
+                    s.xp += cost;
+                }
+                Raise::Attribute(i) => {
+                    stats.attributes[i].ranks += 1;
+                    stats.attributes[i].xp += cost;
+                }
+                Raise::Vital(i) => {
+                    stats.vitals[i].ranks += 1;
+                    stats.vitals[i].xp += cost;
+                }
+            }
+            bought.push(pick);
+        }
+        bought
+    }
+
+    #[test]
+    fn a_rank_that_raises_a_maximum_waits_for_the_fight_to_be_over() {
+        // A character with a large pool bought Health between swings. Its
+        // maximum rose and what was left of it did not, until the fraction
+        // left fell under the heal line and it healed, mid-fight, health
+        // it had never lost.
+        let pool = 100_000_000_000;
+        let (Some(mut calm), Some(mut fighting)) = (
+            with_experience_to_spend(pool),
+            with_experience_to_spend(pool),
+        ) else {
+            return;
+        };
+        let start = Instant::now();
+        // With nothing to fight, the maximums are among the best buys.
+        let bought = buy_ranks(&mut calm, start, 20);
+        assert!(
+            bought.iter().copied().any(raises_a_maximum),
+            "no maximum is worth buying here, so this proves nothing: {bought:?}"
+        );
+
+        let foe = standing_by(&mut fighting, 0x8000_0301, "Revenant", 3.0).guid;
+        fighting.attack_target = Some(foe);
+        let bought = buy_ranks(&mut fighting, start, 20);
+        assert_eq!(
+            bought.len(),
+            20,
+            "spending stopped for the fight: {bought:?}"
+        );
+        assert!(
+            !bought.iter().copied().any(raises_a_maximum),
+            "a maximum was raised mid-fight: {bought:?}"
+        );
+
+        // The Revenant is dead, and the maximums are bought again.
+        fighting
+            .world
+            .objects
+            .get_mut(&foe)
+            .expect("the Revenant")
+            .health = Some(0.0);
+        let bought = buy_ranks(&mut fighting, start + RAISE_EVERY * 20, 20);
+        assert!(bought.iter().copied().any(raises_a_maximum), "{bought:?}");
     }
 
     #[test]
