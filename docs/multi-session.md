@@ -334,10 +334,17 @@ shows it). Between fights, the salvager salvages what it carries tagged
 `salvage`; everyone else walks to the salvager when it is within 30 m
 and not fighting and hands its tagged items over, one every few
 seconds. The receiver runs the rules again on what arrives, so a handed
-item that matches a salvage rule is salvaged on the next pass. Salvage
-bags are never salvaged again and only handed on when a rule names
-them. An item refused three times (the server would not take it, or
-would not salvage it) is kept instead, and the log says so.
+item that matches a salvage rule is salvaged on the next pass.
+Everything below workmanship 9 goes in one salvage; the 9s and the 10s
+each go in a salvage of their own, the next as soon as the last is
+done, because the server gives a bag the average workmanship of
+everything of its material salvaged with it, and a 10 salvaged beside a
+6 makes a bag of 8. Salvage bags are never salvaged again and only
+handed on when a rule names them. A salvage that comes to nothing (ACE
+skips a Retained item without a word) is tried again once the grades
+not yet tried have gone. An item refused three times (the server would
+not take it, or would not salvage it) is kept instead, and the log says
+so.
 
 The server only lets one player give another an item when the receiver
 has "Let other players give you items" on (ACE `AllowGive`); the team

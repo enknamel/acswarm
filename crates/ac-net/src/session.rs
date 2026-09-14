@@ -273,6 +273,13 @@ impl Session {
         self.pending_msgs.push((queue, msg));
     }
 
+    /// How many GameActions have been queued this session. A test that
+    /// must know nothing went out asks this rather than the rule's own
+    /// bookkeeping, which is the thing under test.
+    pub fn actions_sent(&self) -> u32 {
+        self.action_seq - 1
+    }
+
     /// Queue a GameAction (0xF7B1) with the next action sequence.
     pub fn send_action(&mut self, action: u32, body: &[u8]) {
         let seq = self.action_seq;

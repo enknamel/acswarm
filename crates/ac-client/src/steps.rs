@@ -25,7 +25,8 @@
 //!
 //! [`Housekeeping`] is neither: a handful of things that run every tick
 //! and never claim it -- a weapon into an empty hand, a quiver
-//! restocked, loose stacks poured together.
+//! restocked, loose stacks poured together, a rank bought with the
+//! experience earned.
 
 use crate::did::Did;
 use crate::Client;
@@ -471,7 +472,7 @@ pub const STEPS: &[Step] = &[
     Step {
         name: "grow",
         layer: Layer::Goal,
-        why: "with nothing else to do: spend experience, find monsters, run to town",
+        why: "with nothing else to do: find monsters, run to town; experience is spent as housekeeping, since this is reached only on a tick nothing else wants",
         worth: by_place,
         run: claimed!(Client::autoplay_grow),
     },
@@ -521,6 +522,15 @@ pub const HOUSEKEEPING: &[Housekeeping] = &[
         // idle, and the pack filled with part stacks while tidying
         // waited its turn.
         run: Client::autoplay_tidy,
+    },
+    Housekeeping {
+        name: "spend experience",
+        // A rank is one message the server takes on the spot, fight or
+        // no fight. It was the first thing the last goal did, and the
+        // last goal is only reached when nothing else wants the tick:
+        // exploring always had another room to walk to, and a character
+        // given a hundred billion experience spent none of it.
+        run: Client::autoplay_spend_xp,
     },
 ];
 
@@ -661,6 +671,25 @@ mod tests {
         );
         let at = |name: &str| STEPS.iter().position(|s| s.name == name).expect(name);
         assert!(at("tidy") < at("grow"), "and it keeps its old place");
+    }
+
+    #[test]
+    fn experience_is_spent_as_housekeeping_and_never_claims_a_tick() {
+        // A rank is one message the server takes on the spot. As the
+        // first thing the last goal did, it waited for a tick nothing
+        // else wanted, and exploring always wanted it: a character given
+        // a hundred billion experience spent none of it.
+        assert!(
+            HOUSEKEEPING.iter().any(|h| h.name == "spend experience"),
+            "spending experience is housekeeping now"
+        );
+        let grow = named("grow").expect("growing is still a goal");
+        assert!(
+            !grow
+                .why
+                .starts_with("with nothing else to do: spend experience"),
+            "and the goal no longer claims to spend it"
+        );
     }
 
     #[test]

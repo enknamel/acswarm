@@ -393,7 +393,7 @@ impl Client {
 
     /// Whether a fight is on: something alive being attacked within the
     /// fight radius, or something hitting the character.
-    fn in_a_fight(&self) -> bool {
+    pub(crate) fn in_a_fight(&self) -> bool {
         if self.under_attack() {
             return true;
         }

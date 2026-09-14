@@ -3247,15 +3247,16 @@ impl Client {
             return false;
         };
         let me = self.world.player_guid;
+        // Side packs count: the server looks for each item in them too
+        // (ACE `GetInventoryItem`). Leaving them out sent nothing for a
+        // batch that was all in a side pack, and the autoplay, which
+        // salvages one workmanship grade at a time, was stuck on it.
         let items: Vec<u32> = items
             .iter()
             .copied()
             .filter(|g| {
-                self.world
-                    .objects
-                    .get(g)
-                    .map(|o| o.container == me || o.wielder == me)
-                    .unwrap_or(false)
+                self.world.is_carried(*g)
+                    || self.world.objects.get(g).is_some_and(|o| o.wielder == me)
             })
             .collect();
         if items.is_empty() {
