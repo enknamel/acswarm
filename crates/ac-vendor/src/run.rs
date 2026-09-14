@@ -122,6 +122,36 @@ impl Run {
         self.offered.len()
     }
 
+    /// The act could not be carried out on the character's side -- the
+    /// stacks would not pour, the stack would not cut. That is an answer
+    /// as much as the counter's no, and is remembered the same way, so
+    /// the same thing is not asked for again every turn until the trip
+    /// is over. Nothing was handed over, so nothing is waited on.
+    pub fn refused(&mut self, act: &Act, now: Instant) {
+        match act {
+            Act::Merge { from, to, .. } => {
+                self.wont_merge.note(
+                    (*from, *to),
+                    &Did::refused("the stacks would not pour"),
+                    now,
+                );
+            }
+            Act::Split { guid, .. } => {
+                self.refused
+                    .note(*guid, &Did::refused("the stack would not cut"), now);
+            }
+            // Approaching, opening, selling, buying and cashing are
+            // asked of the world afresh from every snapshot: what could
+            // not be done is not in the next one.
+            Act::Approach { .. }
+            | Act::Open { .. }
+            | Act::Sell { .. }
+            | Act::Buy { .. }
+            | Act::Cash { .. }
+            | Act::Close => {}
+        }
+    }
+
     /// The next thing to do, or why there is nothing.
     pub fn step(&mut self, snap: &Snapshot, now: Instant) -> Next {
         let Some(counter) = snap.counter.as_ref() else {
@@ -568,6 +598,41 @@ mod tests {
                 amount: 37
             })
         );
+    }
+
+    #[test]
+    fn an_act_refused_on_this_side_is_not_asked_for_again() {
+        // A pour or a cut the character's own side would not send --
+        // the stacks would not pour, the stack would not cut -- used to
+        // be asked for again every turn, since the rules only ever
+        // heard the counter's answers. Told of the refusal, they move
+        // on to the next thing, as they do when the counter says no.
+        let now = Instant::now();
+        let mut run = Run::new();
+        let mut a = item(1, "Taper", 100, 37, 1000);
+        let mut b = item(2, "Taper", 100, 41, 1000);
+        a.wcid = 20631;
+        b.wcid = 20631;
+        let s = snap(vec![a, b, item(3, "Dagger", 500, 1, 1)]);
+        let pour = run.step(&s, now).act.expect("nothing asked for");
+        assert!(matches!(pour, Act::Merge { .. }));
+        run.refused(&pour, now);
+        let next = run.step(&s, now).act;
+        assert!(
+            matches!(next, Some(Act::Sell { .. })),
+            "asked for the refused pour again: {next:?}"
+        );
+
+        // A stack worth more than the counter will look at is cut down
+        // first; refused, the stack is left be and the visit goes on.
+        let mut run = Run::new();
+        let mut s = snap(vec![item(4, "Pyreal Motes", 2_000, 10, 100)]);
+        s.counter.as_mut().unwrap().max_value = 500;
+        let cut = run.step(&s, now).act.expect("nothing asked for");
+        assert_eq!(cut, Act::Split { guid: 4, amount: 2 });
+        run.refused(&cut, now);
+        let next = run.step(&s, now).act;
+        assert_eq!(next, Some(Act::Close), "asked for the refused cut again");
     }
 
     #[test]

@@ -23,7 +23,16 @@
 //! With autoplay on and running town runs, the run is autoplay's to
 //! step: the panel shows it, Run starts one when there is none, and
 //! Step stands down, since autoplay would take the next act before the
-//! hold could.
+//! hold could. A run the panel was driving and has left held -- a Step
+//! that has had its act, the panel closed on one -- is autoplay's
+//! again after a moment, so the character is not stood at a counter
+//! for good by a button nobody is pressing.
+//!
+//! Each session drives its own run: the host ticks the panel once a
+//! frame for every session, and the button pressed on the one being
+//! looked at is not a button pressed on the rest.
+
+use std::collections::BTreeMap;
 
 use ac_client::growth::{Driver, Turn};
 use ac_vendor::{Act, Snapshot};
@@ -127,12 +136,22 @@ fn buttons(live: bool, driver: Option<Driver>, autoplay_drives: bool, drive: Dri
     }
 }
 
-#[derive(Default)]
-pub struct Vendoring {
-    show: bool,
+/// How one session's run is being driven from here, and what the
+/// last press on it came to.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct Hand {
     drive: Drive,
     /// Why the last press came to nothing, for the panel.
     word: String,
+}
+
+#[derive(Default)]
+pub struct Vendoring {
+    show: bool,
+    /// One hand per session, by index: the host ticks every session
+    /// through this one panel, and one drive for all of them let any
+    /// session without a run hold the one that had.
+    hands: BTreeMap<usize, Hand>,
     /// A made-up trip, for the layout gallery and for looking at the
     /// panel without a server.
     demo: Option<VendorView>,
@@ -145,8 +164,7 @@ impl Vendoring {
     pub fn demo() -> Self {
         Vendoring {
             show: false,
-            drive: Drive::Held,
-            word: String::new(),
+            hands: BTreeMap::new(),
             demo: Some(VendorView {
                 counter: Some("Rakk the Peddler".into()),
                 away: 1.2,
@@ -172,6 +190,16 @@ impl Vendoring {
                 ],
             }),
         }
+    }
+
+    /// Session `index`'s hand, made as needed.
+    fn hand(&mut self, index: usize) -> &mut Hand {
+        self.hands.entry(index).or_default()
+    }
+
+    /// How session `index`'s run is being driven.
+    fn drive(&self, index: usize) -> Drive {
+        self.hands.get(&index).map(|h| h.drive).unwrap_or_default()
     }
 }
 
@@ -268,25 +296,35 @@ impl Plugin for Vendoring {
         settings.set("vendoring.show", self.show);
     }
 
-    /// The driving, once a frame whether or not the window is showing:
-    /// a run set going and then hidden goes on.
+    /// The sessions above the one dropped move down, each with its
+    /// hand.
+    fn session_removed(&mut self, index: usize) {
+        crate::shift_removed(&mut self.hands, index);
+    }
+
+    /// The driving, once a frame per session, whether or not the window
+    /// is showing: a run set going and then hidden goes on. Only this
+    /// session's drive is read and written: the tick for a session
+    /// with no run of its own is no word on the others'.
     fn tick(&mut self, cx: &mut Ctx) {
-        if self.demo.is_some() || self.drive == Drive::Held {
+        let index = cx.index;
+        let drive = self.drive(index);
+        if self.demo.is_some() || drive == Drive::Held {
             return;
         }
         let now = cx.now;
         let Some(c) = cx.try_client() else {
-            self.drive = Drive::Held;
+            self.hand(index).drive = Drive::Held;
             return;
         };
         // Autoplay stepping the same run would send the next act before
         // Step could hold, or send it twice: this side stands down.
         if c.town_run_driver() != Some(Driver::Hand) {
-            self.drive = Drive::Held;
+            self.hand(index).drive = Drive::Held;
             return;
         }
         let turn = c.town_run_step_by_hand(now);
-        self.drive = after_turn(self.drive, turn);
+        self.hand(index).drive = after_turn(drive, turn);
     }
 
     fn ui(&mut self, cx: &mut Ctx, egui: &egui::Context) {
@@ -298,12 +336,14 @@ impl Plugin for Vendoring {
             return;
         }
         let now = cx.now;
+        let index = cx.index;
         let v = match &self.demo {
             Some(d) => Some(d.clone()),
             None => cx.try_client().and_then(|c| view(c, now)),
         };
         let Some(v) = v else { return };
-        let can = buttons(self.demo.is_none(), v.driver, v.autoplay_drives, self.drive);
+        let hand = self.hand(index).clone();
+        let can = buttons(self.demo.is_none(), v.driver, v.autoplay_drives, hand.drive);
         let mut step = false;
         let mut go = false;
         let mut halt = false;
@@ -376,7 +416,7 @@ impl Plugin for Vendoring {
                     {
                         halt = true;
                     }
-                    match (v.driver, self.drive) {
+                    match (v.driver, hand.drive) {
                         (Some(Driver::Autoplay), _) => {
                             ui.label("autoplay is driving");
                         }
@@ -395,38 +435,40 @@ impl Plugin for Vendoring {
                         (None, _) => {}
                     }
                 });
-                if !self.word.is_empty() {
-                    ui.label(&self.word);
+                if !hand.word.is_empty() {
+                    ui.label(&hand.word);
                 }
             });
         if step || go || halt {
-            self.word.clear();
-        }
-        if let Some(c) = cx.try_client() {
-            if halt {
-                c.town_run_stop(now);
-                self.drive = Drive::Held;
-            }
-            // Setting off is the run's first act, so a Step with no run
-            // starts one and holds there; with one it carries the run
-            // on to its next act.
-            if step || go {
-                let had_run = v.driver.is_some();
-                match c.town_run_by_hand(now) {
-                    Ok(()) => {
-                        if c.town_run_driver() == Some(Driver::Hand) {
-                            self.drive = if go {
-                                Drive::Running
-                            } else if had_run {
-                                Drive::Once
-                            } else {
-                                Drive::Held
-                            };
+            let mut hand = hand;
+            hand.word.clear();
+            if let Some(c) = cx.try_client() {
+                if halt {
+                    c.town_run_stop(now);
+                    hand.drive = Drive::Held;
+                }
+                // Setting off is the run's first act, so a Step with no
+                // run starts one and holds there; with one it carries
+                // the run on to its next act.
+                if step || go {
+                    let had_run = v.driver.is_some();
+                    match c.town_run_by_hand(now) {
+                        Ok(()) => {
+                            if c.town_run_driver() == Some(Driver::Hand) {
+                                hand.drive = if go {
+                                    Drive::Running
+                                } else if had_run {
+                                    Drive::Once
+                                } else {
+                                    Drive::Held
+                                };
+                            }
                         }
+                        Err(why) => hand.word = why,
                     }
-                    Err(why) => self.word = why,
                 }
             }
+            *self.hand(index) = hand;
         }
         if super::closed("vendoring") {
             self.show = false;
@@ -453,6 +495,27 @@ mod tests {
         assert_eq!(after_turn(Drive::Running, Turn::Over), Drive::Held);
         // Held stays held, whatever the run did for somebody else.
         assert_eq!(after_turn(Drive::Held, Turn::Acted), Drive::Held);
+    }
+
+    #[test]
+    fn each_session_has_a_hand_of_its_own_and_they_move_down_with_the_sessions() {
+        // One drive for the whole panel let the tick for any session
+        // without a run hold the run another session was driving:
+        // with two sessions open, Run lived one frame and Step never
+        // got past its first wait.
+        let mut p = Vendoring::default();
+        assert_eq!(p.drive(0), Drive::Held);
+        p.hand(0).drive = Drive::Running;
+        p.hand(2).drive = Drive::Once;
+        p.hand(2).word = "busy fighting".into();
+        assert_eq!(p.drive(1), Drive::Held, "session 1 took session 0's drive");
+        assert_eq!(p.drive(0), Drive::Running);
+        // Session 1 goes: session 2's hand is session 1's now.
+        p.session_removed(1);
+        assert_eq!(p.drive(0), Drive::Running);
+        assert_eq!(p.drive(1), Drive::Once);
+        assert_eq!(p.hand(1).word, "busy fighting");
+        assert_eq!(p.drive(2), Drive::Held);
     }
 
     #[test]

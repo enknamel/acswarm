@@ -3860,8 +3860,19 @@ impl Client {
                 self.autoplay_fellowship(now);
             }
         }
+        // A window a run stopped waiting for is closed when it comes,
+        // autoplay on or off (see `Client::autoplay_close_unwanted_window`).
+        self.autoplay_close_unwanted_window(now);
         if !self.autoplay.config.enabled || self.world.player_guid.is_none() {
-            if !self.autoplay.status.is_empty() && !self.autoplay.config.enabled {
+            // The status goes with autoplay -- unless the vendoring
+            // panel is running a town run with autoplay off, whose turns
+            // say what they are doing. Cleared here, every turn's line
+            // was new again: a log line, an event and a bus post a
+            // frame for the length of the walk.
+            if !self.autoplay.status.is_empty()
+                && !self.autoplay.config.enabled
+                && !self.autoplay.growth.run_by_hand()
+            {
                 self.autoplay.doing = Doing::Idle;
                 self.autoplay.status.clear();
             }
