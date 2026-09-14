@@ -794,6 +794,15 @@ pub struct Fight {
     /// otherwise turn it off.
     #[serde(default = "yes")]
     pub skip_critters: bool,
+    /// Walk past what stands about while the character is on its way
+    /// somewhere it decided to go: out to a hunting ground, back from
+    /// town, round the counters. Getting there is the errand; the
+    /// fighting is what the ground at the far end is for. Never a
+    /// reason not to hit back.
+    ///
+    /// Defaulted by name for the same reason as `skip_critters`.
+    #[serde(default = "yes")]
+    pub walk_past_on_the_way: bool,
     /// Farthest creature to pick, metres.
     pub radius: f32,
     /// Make more ammunition when out, from a bundle of heads and a
@@ -822,6 +831,7 @@ impl Default for Fight {
             only: Vec::new(),
             avoid: Vec::new(),
             skip_critters: true,
+            walk_past_on_the_way: true,
             radius: 25.0,
         }
     }
@@ -5014,6 +5024,49 @@ impl Client {
             || self.a_pet_is_on(o.guid))
     }
 
+    /// Whether `o` is a creature to walk past because the character is
+    /// on its way somewhere (see [`crate::growth::State::on_its_way`]).
+    ///
+    /// Going somewhere is an errand of its own. The fighting is what the
+    /// ground at the far end is for, and a character that stops for
+    /// every drudge between here and there arrives an hour late or not
+    /// at all. It answers what the character is *doing*, which is why it
+    /// is a rule of its own rather than another clause in
+    /// [`Self::a_critter`]: that one answers what a creature *is*, and
+    /// the same Drudge is worth fighting once the walk is over.
+    ///
+    /// The same three things outrank it as outrank `a_critter`, for the
+    /// same reason: in each of them the fight is already happening or
+    /// was asked for. Nothing has to be undone at the end of the road
+    /// either -- the hunting ground drops `bound` as it arrives and the
+    /// town run drops `run` at the last counter, and the character is
+    /// fighting again on the next tick.
+    ///
+    /// A creature standing in the character's path is not carved out,
+    /// and that is a decision rather than an oversight. Nothing this
+    /// client walks with can be stopped by one: its own physics collides
+    /// with the landblock's static geometry and with nothing else, which
+    /// is why a character walks straight through a closed door, and the
+    /// steering plans its way round that same geometry. A creature is an
+    /// object like the door is. And anything that could get in the way
+    /// and matter is aggressive, which means it swings -- the second
+    /// override, and the character turns and fights it. If some ground
+    /// proves otherwise, the walk's own four-minute timeout
+    /// (`growth::WALK_TIMEOUT`) still ends it and another ground is
+    /// chosen.
+    ///
+    /// The cheap questions come first: this is asked of every creature
+    /// in view every tick, and the last of the three walks the whole
+    /// object map.
+    pub(crate) fn passing_by(&self, o: &ac_world::WorldObject, cfg: &Fight) -> bool {
+        if !cfg.walk_past_on_the_way || !self.autoplay.growth.on_its_way() {
+            return false;
+        }
+        !(name_matches(&o.name, &cfg.only)
+            || self.hit_lately_by(&o.name)
+            || self.a_pet_is_on(o.guid))
+    }
+
     /// Whether `o` is something this character would take on: a live
     /// creature, nobody's summoned pet and no player, inside the hunting
     /// area, of a kind it hunts, not a critter beneath it, not one the
@@ -5043,6 +5096,9 @@ impl Client {
             && wanted_target(&o.name, cfg)
             // A Rabbit the character has outgrown is walked past.
             && !self.a_critter(o, cfg)
+            // And so is whatever stands about while it is on its way
+            // somewhere: the trip is the errand, not the road.
+            && !self.passing_by(o, cfg)
             // With the vitae high, the hard ones and the killer wait.
             && !self.shy_of(o)
             // And one there is no getting to is not a fight on offer.
@@ -9362,9 +9418,11 @@ mod tests {
         assert_eq!(old.survive.heal_below, 0.45);
         assert!(old.survive.use_kits);
         // And one written before critters were walked past walks past
-        // them: a bool left out would otherwise read as off.
+        // them: a bool left out would otherwise read as off. The same
+        // goes for walking past what stands on the road.
         let before: Config = serde_json::from_str(r#"{"fight":{"radius":30.0}}"#).unwrap();
         assert!(before.fight.skip_critters);
+        assert!(before.fight.walk_past_on_the_way);
     }
 
     /// A character with a mace in hand and a wand in the pack, and

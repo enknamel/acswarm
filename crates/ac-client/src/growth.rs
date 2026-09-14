@@ -1055,6 +1055,25 @@ impl State {
     pub(crate) fn town_run_under_way(&self) -> bool {
         self.run.is_some()
     }
+
+    /// Whether the character is on its way somewhere it decided to go:
+    /// out to a hunting ground, back to one from town, or round the
+    /// counters.
+    ///
+    /// Not [`Client::traveling`], which says a journey is under way and
+    /// nothing at all about why. The patrol and the roam
+    /// ([`Client::grow_hunt`]) travel too, and what they travel about is the
+    /// hunting ground the character came for -- so a rule that read
+    /// `traveling` would have a character stand in its own hunting
+    /// ground refusing to fight. Both of them set off and return before
+    /// `bound` is ever set, which is what makes these two the answer.
+    ///
+    /// A journey put down for a moment is still this journey: a corpse
+    /// on the road ends the trip and `bound` outlives it, because the
+    /// errand is not over until the character arrives or gives up.
+    pub(crate) fn on_its_way(&self) -> bool {
+        self.bound.is_some() || self.run.is_some()
+    }
 }
 
 impl Client {
@@ -4860,6 +4879,154 @@ mod tests {
         c.autoplay.team.mates.clear();
         c.autoplay.team.leader = true;
         assert!(c.grow_hunt(now, &cfg), "the leader stayed put");
+    }
+
+    /// A Revenant called `name` standing `metres` east of the character:
+    /// a real fight at level 20, not a critter walked past for its own
+    /// sake.
+    fn standing_by(c: &mut Client, guid: u32, name: &str, metres: f32) -> ac_world::WorldObject {
+        let pl = c.player.as_ref().unwrap();
+        let (cell, me) = (pl.cell, pl.world_position());
+        let o = ac_world::WorldObject {
+            guid,
+            weenie_class_id: 8592,
+            name: name.into(),
+            item_type: ac_world::item_type::CREATURE,
+            object_desc_flags: ac_world::object_desc_flags::ATTACKABLE,
+            health: Some(1.0),
+            position: Some(ac_world::object::Position::new_flat(
+                cell,
+                me + glam::Vec3::new(metres, 0.0, 0.0) - ac_world::landblock_origin(cell),
+            )),
+            ..Default::default()
+        };
+        c.world.objects.insert(guid, o.clone());
+        o
+    }
+
+    #[test]
+    fn what_stands_on_the_road_is_walked_past_and_what_swings_at_us_is_not() {
+        // "Traveling to the hunting ground shouldn't have much fighting,
+        // more ignoring the monsters on the way so you can get to the
+        // hunting ground" -- the player, and the reason for the rule.
+        let holtburg = 0xA9B4_0019;
+        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
+            return;
+        };
+        c.world.stats.level = 20;
+        c.world.player_guid = Some(0x5000_0001);
+        let now = Instant::now();
+        let fight = c.autoplay.config.fight.clone();
+        let it = standing_by(&mut c, 0x8000_0001, "Revenant", 5.0);
+
+        // Standing on its ground with nowhere to be: a fight.
+        assert!(!c.passing_by(&it, &fight));
+        assert!(c.would_fight(&it, &fight, false, now));
+
+        // Bound for a hunting ground: walked past, and the fight rules
+        // have nothing to pick.
+        let ground = (0xA9B2, Vec2::new(32_580.0, 34_570.0), "Drudge".to_string());
+        c.autoplay.growth.bound = Some(ground.clone());
+        assert!(c.passing_by(&it, &fight));
+        assert!(!c.would_fight(&it, &fight, false, now));
+
+        // Unless it swings: the road does not get to decide that.
+        c.autoplay.last_hit_us = Some(now);
+        c.autoplay.hit_by = Some(("Revenant".into(), now));
+        assert!(!c.passing_by(&it, &fight));
+        assert!(c.would_fight(&it, &fight, false, now));
+        // Which says nothing about the one standing next to it.
+        let other = standing_by(&mut c, 0x8000_0002, "Drudge Skulker", 6.0);
+        assert!(c.passing_by(&other, &fight));
+        c.autoplay.last_hit_us = None;
+        c.autoplay.hit_by = None;
+
+        // Named outright, it is what the player asked to hunt.
+        let only = crate::autoplay::Fight {
+            only: vec!["revenant".into()],
+            ..fight.clone()
+        };
+        assert!(!c.passing_by(&it, &only));
+
+        // A creature of ours already on it: its fight, and ours to end.
+        c.world.objects.insert(
+            0x8000_0003,
+            ac_world::WorldObject {
+                guid: 0x8000_0003,
+                name: "Fire Elemental".into(),
+                item_type: ac_world::item_type::CREATURE,
+                pet_owner: 0x5000_0001,
+                target: Some(ac_world::object::MoveTarget::Object(it.guid)),
+                ..Default::default()
+            },
+        );
+        assert!(!c.passing_by(&it, &fight));
+        assert!(c.passing_by(&other, &fight), "the one it is not on");
+        c.world.objects.remove(&0x8000_0003);
+
+        // With the setting off, everything on the road is fought again.
+        let all = crate::autoplay::Fight {
+            walk_past_on_the_way: false,
+            ..fight.clone()
+        };
+        assert!(!c.passing_by(&it, &all));
+        assert!(c.would_fight(&it, &all, false, now));
+
+        // A town run is the same errand: the counters are the point of
+        // it, not whatever stands between here and them.
+        c.autoplay.growth.bound = None;
+        assert!(!c.passing_by(&it, &fight), "nowhere to be again");
+        c.autoplay.growth.run = Some(run_to(Vec2::new(32_500.0, 34_500.0), now));
+        assert!(c.passing_by(&it, &fight));
+
+        // And the moment the errand ends, so does the walking past.
+        c.autoplay.growth.run = None;
+        assert!(!c.passing_by(&it, &fight));
+        assert!(c.would_fight(&it, &fight, false, now));
+    }
+
+    #[test]
+    fn walking_the_hunting_ground_is_not_being_on_the_way_to_it() {
+        // The trap this rule had to be kept out of. A patrol of the
+        // hunting area, and the roam around a ground, both travel --
+        // `traveling()` is true for a character doing the very thing it
+        // came here for. Keyed on that, a character would have stood in
+        // its own hunting ground refusing to fight. Both paths set off
+        // and return before `bound` is ever set, and that is the whole
+        // of the difference.
+        let holtburg = 0xA9B4_0019;
+        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
+            return;
+        };
+        c.world.stats.level = 20;
+        c.world.player_guid = Some(0x5000_0001);
+        let me = c.player.as_ref().unwrap().world_position();
+        let now = Instant::now();
+        let cfg = Growth::default();
+        c.autoplay.config.fight.area = Some(crate::hunt::HuntArea {
+            name: "test".into(),
+            shape: crate::hunt::Shape::Outline {
+                points: vec![
+                    [me.x - 40.0, me.y - 5.0],
+                    [me.x + 40.0, me.y - 5.0],
+                    [me.x + 40.0, me.y + 60.0],
+                    [me.x - 40.0, me.y + 60.0],
+                ],
+            },
+        });
+        let fight = c.autoplay.config.fight.clone();
+        let it = standing_by(&mut c, 0x8000_0001, "Revenant", 5.0);
+
+        // Quiet long enough to walk the area, and it walks it.
+        c.autoplay.growth.quiet_since = Some(now - Duration::from_secs(600));
+        assert!(c.grow_hunt(now, &cfg), "the patrol stayed put");
+        assert!(c.traveling(), "the patrol is a journey like any other");
+        assert_eq!(c.autoplay.growth.bound, None, "the patrol is not an errand");
+        assert!(!c.autoplay.growth.on_its_way());
+
+        // So the creature it walked up to is still a fight.
+        assert!(!c.passing_by(&it, &fight));
+        assert!(c.would_fight(&it, &fight, false, now));
     }
 
     #[test]
