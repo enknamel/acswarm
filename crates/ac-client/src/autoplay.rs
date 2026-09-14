@@ -2740,6 +2740,15 @@ impl Client {
             }
             return;
         }
+        // The clocks read off the ground are wound before anything can
+        // claim the tick. The four reflexes below return without
+        // reaching the housekeeping, so a character that healed, dodged
+        // or died wound neither of them for as long as that went on:
+        // it came back from a death with a quiet clock from before the
+        // death still running, and bodies that fell while it was busy
+        // stayed for ever newly fallen (see
+        // [`Client::autoplay_watch_the_ground`]).
+        self.autoplay_watch_the_ground(now);
         // A spell on its way to us is stepped out of before anything
         // else, healing included (see `crate::dodge`).
         if self.autoplay_dodge(now) {
@@ -3748,7 +3757,6 @@ impl Client {
             .is_some_and(|o| o.health.unwrap_or(1.0) > 0.0);
         let me = self.player.as_ref().map(|p| p.world_position());
         let Some(me) = me else { return false };
-        let looted = self.autoplay.looted.clone();
         // Kills go stale with the bodies they leave.
         self.autoplay
             .kill_spots
@@ -3759,19 +3767,11 @@ impl Client {
         let objects = &self.world.objects;
         self.autoplay
             .forget_corpses_gone(|g| objects.contains_key(&g));
-        // Note when each corpse turned up, so the ones running out can
-        // be emptied first. Forgotten once emptied, so the list stays
-        // the size of what is on the ground.
-        for o in self.world.objects.values() {
-            if o.object_desc_flags & ac_world::object_desc_flags::CORPSE != 0
-                && !self.autoplay.corpse_seen.iter().any(|(g, _)| *g == o.guid)
-            {
-                self.autoplay.corpse_seen.push((o.guid, now));
-            }
-        }
-        self.autoplay
-            .corpse_seen
-            .retain(|(g, t)| now.duration_since(*t) < CORPSE_LIFE * 2 && !looted.contains(g));
+        // When each corpse turned up, so the ones running out can be
+        // emptied first. Noted by the housekeeping rather than here (see
+        // [`Client::autoplay_watch_the_ground`]): a body this character
+        // is standing off from never reaches this step, and a body it
+        // never noted is for ever newly fallen.
         let seen_at: std::collections::BTreeMap<u32, Instant> =
             self.autoplay.corpse_seen.iter().copied().collect();
         let room = self.room_for_loot();

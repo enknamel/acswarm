@@ -41,7 +41,7 @@ use serde::{Deserialize, Serialize};
 
 use std::collections::BTreeMap;
 
-use crate::autoplay::{Doing, LootAction};
+use crate::autoplay::{Doing, LootAction, CORPSE_LIFE};
 use crate::items::ItemStats;
 use crate::logistics::{self, Stage, Supplies};
 use crate::Client;
@@ -1396,24 +1396,51 @@ impl Client {
             .and_then(|m| m.ground.clone())
     }
 
-    /// Keep the clock that says this spot has gone quiet: started when
-    /// there is nothing here the character would fight, stopped the
-    /// moment something is (see [`Client::a_fight_in_sight`]).
+    /// Keep the two clocks that are read off the ground rather than off
+    /// what the character is doing: how long this spot has been quiet,
+    /// and when each body lying on it first came into sight.
     ///
-    /// It reads the world rather than the status line, and it is
-    /// housekeeping rather than part of the hunting step, for the same
-    /// two reasons. Read off the status line it measured how busy the
-    /// character was instead of how quiet the ground was: re-asking a
-    /// corpse that would not open counted as having something to do and
-    /// put the clock back to nothing, so nine characters queueing at one
-    /// body restarted it every couple of seconds and it never reached
-    /// its minute once in ten. And the hunting step is the last goal in
-    /// the table, so a character with a body to open or a walk to finish
-    /// never reaches it -- a clock only wound there stands still exactly
-    /// when it is most needed.
+    /// The quiet clock starts when there is nothing here the character
+    /// would fight and stops the moment something is (see
+    /// [`Client::a_fight_in_sight`]). It reads the world rather than
+    /// the status line: read off the status line it measured how busy
+    /// the character was instead of how quiet the ground was, so
+    /// re-asking a corpse that would not open counted as having
+    /// something to do and put the clock back to nothing, and nine
+    /// characters queueing at one body restarted it every couple of
+    /// seconds and it never reached its minute once in ten.
+    ///
+    /// Both clocks are wound here, before anything can claim the tick,
+    /// for the same reason: the steps that read them are not reached on
+    /// every tick, and a clock only wound where it is read stands still
+    /// exactly when it is most needed. The hunting step is the last goal
+    /// in the table, so a character with a body to open never reaches
+    /// it. Worse, the bodies used to be noted inside the looting: a
+    /// character the claim tie-break told to stand off scores that body
+    /// nothing, so its loot goal is never run, so it never notes the
+    /// body, so the body stays for ever "newly fallen" and the tie-break
+    /// governs for the whole five minutes it lies there. One mate that
+    /// could not loot -- a full pack, no profile, looting turned off --
+    /// then locked every body within twenty metres of it away from the
+    /// other eight for good.
     pub(crate) fn autoplay_watch_the_ground(&mut self, now: Instant) {
         let quiet = !self.a_fight_in_sight(now);
-        let st = &mut self.autoplay.growth;
+        let fresh: Vec<u32> = self
+            .world
+            .objects
+            .values()
+            .filter(|o| o.object_desc_flags & object_desc_flags::CORPSE != 0)
+            .map(|o| o.guid)
+            .filter(|g| !self.autoplay.corpse_seen.iter().any(|(seen, _)| seen == g))
+            .collect();
+        let st = &mut self.autoplay;
+        st.corpse_seen.extend(fresh.into_iter().map(|g| (g, now)));
+        // Forgotten once emptied, so the list stays the size of what is
+        // on the ground.
+        let looted = &st.looted;
+        st.corpse_seen
+            .retain(|(g, t)| now.duration_since(*t) < CORPSE_LIFE * 2 && !looted.contains(g));
+        let st = &mut st.growth;
         if quiet {
             st.quiet_since.get_or_insert(now);
         } else {
@@ -4672,6 +4699,56 @@ mod tests {
         c.world.objects.get_mut(&guid).unwrap().health = Some(0.0);
         c.autoplay_watch_the_ground(now + s(7));
         assert_eq!(c.autoplay.growth.quiet_since, Some(now + s(7)));
+    }
+
+    #[test]
+    fn a_body_is_noted_when_it_appears_and_not_when_the_looting_gets_round_to_it() {
+        // The bodies used to be noted inside the looting. A character
+        // the claim tie-break tells to stand off scores that body
+        // nothing, so its loot goal is never run, so it never notes the
+        // body -- and a body it never noted is for ever "newly fallen",
+        // which is exactly when the tie-break governs. One mate that
+        // could not loot locked every body near it away from the other
+        // eight for good.
+        let holtburg = 0xA9B4_0019;
+        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 84.0, 94.0)) else {
+            return;
+        };
+        let me = c.player.as_ref().unwrap().world_position();
+        let s = Duration::from_secs;
+        let now = Instant::now();
+        let body = 0x8000_0001;
+        c.world.objects.insert(
+            body,
+            ac_world::WorldObject {
+                guid: body,
+                name: "Corpse of Drudge Slave".into(),
+                object_desc_flags: object_desc_flags::CORPSE,
+                position: Some(ac_world::object::Position::new_flat(
+                    holtburg,
+                    me - ac_world::landblock_origin(holtburg),
+                )),
+                ..Default::default()
+            },
+        );
+        // No loot profile, so nothing this character does will ever
+        // reach past the first line of the looting step.
+        c.autoplay.config.loot.profile = String::new();
+        c.autoplay_watch_the_ground(now);
+        assert_eq!(
+            c.autoplay.corpse_seen,
+            vec![(body, now)],
+            "a body nobody looted was never noted"
+        );
+        // Noted once, not restamped every tick: the age is what the
+        // tie-break and the rotting order both read.
+        c.autoplay_watch_the_ground(now + s(5));
+        assert_eq!(c.autoplay.corpse_seen, vec![(body, now)]);
+        // Forgotten once emptied, so the list stays the size of what is
+        // on the ground.
+        c.autoplay.looted.push(body);
+        c.autoplay_watch_the_ground(now + s(6));
+        assert!(c.autoplay.corpse_seen.is_empty());
     }
 
     #[test]

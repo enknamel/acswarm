@@ -48,14 +48,21 @@ never won one -- a character that fights, loots and walks all afternoon
 has no quiet tick to give it -- and the pack filled up with part stacks
 while tidying waited its turn.
 
-Watching the ground is housekeeping for the same reason. How long a spot
-has had nothing on it is read off the world every tick, not off what the
-character happens to be doing: the hunting step that acts on it is the
-last goal in the table, so a character with a body to open never reaches
-it, and a clock only wound there stands still exactly when it is most
-needed. Nine characters queueing at one corpse restarted it every couple
-of seconds and never once walked the two hundred metres they had been
-given.
+Watching the ground runs before even the reflexes, for the same reason
+and one more. The clocks it keeps -- how long a spot has had nothing on
+it, and when each body on it first came into sight -- are read off the
+world every tick, not off what the character happens to be doing: the
+hunting step that acts on the first is the last goal in the table, so a
+character with a body to open never reaches it, and the second used to
+be wound inside the looting, which a character standing off from a body
+never runs at all. A clock only wound where it is read stands still
+exactly when it is most needed. Nine characters queueing at one corpse
+restarted the quiet clock every couple of seconds and never once walked
+the two hundred metres they had been given; and a body nobody had noted
+stayed for ever "newly fallen", so the claim tie-break over it never
+expired. Housekeeping alone was not enough for either: a tick claimed by
+a dodge, a heal, a death or the Academy returns before the housekeeping
+table is reached.
 
 A reflex is paid for by every tick it claims, so a reflex has to be
 worth the tick. Dodging sits second in the chain, ahead of the healing,

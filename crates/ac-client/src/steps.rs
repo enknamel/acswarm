@@ -510,15 +510,6 @@ pub const HOUSEKEEPING: &[Housekeeping] = &[
         run: Client::autoplay_claim_pet_kills,
     },
     Housekeeping {
-        name: "watch the ground",
-        // How long a spot has had nothing on it is read off the world,
-        // and it has to be read every tick: the hunting step that acts
-        // on it is the last goal in the table, so a character with a
-        // body to open never reaches it, and a clock only wound there
-        // stands still exactly when it is most needed.
-        run: Client::autoplay_watch_the_ground,
-    },
-    Housekeeping {
         name: "tidy the pack",
         // A pour of one carried stack into another is made on the spot:
         // no walk, no animation, nothing the server calls being busy.
