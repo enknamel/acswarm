@@ -2009,6 +2009,10 @@ impl Client {
             // someone is in it or it is not ours yet, and the answer is
             // a different wait (see `autoplay::corpse_refused`).
             self.hear_corpse_refusal(&line.text, Instant::now());
+            // And on a spell cast at the character: a caster attacks with
+            // no notification, only this line (see
+            // `autoplay::spell_attacker`).
+            self.hear_spell_attack(&line.text, Instant::now());
         }
         let text = match (op, line.sender.is_empty()) {
             _ if line.kind == ac_net::messages::turbine::KIND => {

@@ -522,6 +522,50 @@ fn arrived_unharmed(text: &str) -> Option<&str> {
         .or_else(|| text.strip_suffix(" evades your attack."))
 }
 
+/// Who a line says has just cast a spell at this character to hurt it: a
+/// war spell that landed ("Drudge Shaman blasts you for 12 points with
+/// Flame Bolt I."), a drain ("Drudge Shaman casts Harm Other I and drains
+/// 9 points of your health."), a vital taken ("You lose 20 points of mana
+/// due to Drudge Shaman casting Mana to Health Other I on you"), or a
+/// spell resisted ("You resist the spell cast by Drudge Shaman").
+///
+/// ACE tells a character it was hit by a swing with a notification, and
+/// by a spell with nothing but one of these lines (`SpellProjectile`,
+/// `WorldObject_Magic`). A caster working on the character from twenty
+/// metres never closes in to swing, so without these it never counted as
+/// attacking it at all.
+///
+/// "X cast Y on you" is left out on purpose: a fellow's buff reads the
+/// same as a monster's curse, and a buff is not a fight.
+fn spell_attacker(text: &str) -> Option<&str> {
+    if let Some(who) = text.strip_prefix("You resist the spell cast by ") {
+        return Some(who);
+    }
+    if let Some(rest) = text.strip_prefix("You lose ") {
+        let (_, by) = rest.split_once(" due to ")?;
+        let (who, _) = by.strip_suffix(" on you")?.split_once(" casting ")?;
+        return Some(who);
+    }
+    // A bolt that landed can come with any of these in front of it.
+    let mut line = text;
+    while let Some(rest) = ["Critical hit! ", "Overpower! ", "Sneak Attack! "]
+        .into_iter()
+        .find_map(|p| line.strip_prefix(p))
+    {
+        line = rest;
+    }
+    if let Some((before, after)) = line.split_once(" you for ") {
+        // The verb is one word, and says how hard: "blasts", "singes".
+        return after
+            .contains(" points with ")
+            .then(|| before.rsplit_once(' ').map(|(who, _)| who))
+            .flatten()
+            .filter(|who| !who.is_empty());
+    }
+    let (who, rest) = line.split_once(" casts ")?;
+    (rest.contains(" and drains ") && rest.contains(" points of your ")).then_some(who)
+}
+
 /// Whether what has been thrown at a target has had long enough to get
 /// there and has not: the first shot since anything last arrived went
 /// out at `thrown`, more than [`CLOSE_IN_AFTER`] ago. Nothing thrown is
@@ -1863,9 +1907,10 @@ pub struct Autoplay {
     approach_best: Option<(u32, f32)>,
     /// The summoning rules' own state (see `crate::summoning`).
     pub summoning: crate::summoning::State,
-    /// Who last swung at the character, and when -- a blow landed or one
-    /// evaded, since a creature that misses is attacking all the same.
-    /// Fought wherever it stands, hunting area or not.
+    /// Who last attacked the character, and when -- a blow landed or one
+    /// evaded, since a creature that misses is attacking all the same,
+    /// or a spell cast at it, landed or resisted. Fought wherever it
+    /// stands, hunting area or not.
     pub(crate) hit_by: Option<(String, Instant)>,
     /// The first shot thrown at a target since anything last got to it,
     /// and when: damage, a resist or an evasion clears it. The time spent
@@ -1916,9 +1961,9 @@ pub struct Autoplay {
     /// creature this character summoned is about: its kills send no
     /// word (see `Client::autoplay_claim_pet_kills`).
     pub(crate) whose: Whose,
-    /// When something last swung at the character, whether or not the
-    /// blow landed. A fight that has come to it is fought first, body
-    /// owed or not.
+    /// When something last attacked the character, whether or not the
+    /// blow or the spell landed. A fight that has come to it is fought
+    /// first, body owed or not.
     pub(crate) last_hit_us: Option<Instant>,
     /// Corpses that would not open, and how long to leave each. A
     /// corpse is locked to the group that killed it until it has rotted
@@ -4934,26 +4979,28 @@ impl Client {
     }
 
     /// Something has attacked the character in the last few seconds --
-    /// landed a blow, or swung and missed. A creature that keeps missing
-    /// is in a fight with this character just as much as one that hits,
-    /// and the server says so either way.
+    /// landed a blow, swung and missed, or cast a spell at it. A creature
+    /// that keeps missing is in a fight with this character just as much
+    /// as one that hits, and so is one that stands off and casts; the
+    /// server says so each time.
     pub fn under_attack(&self) -> bool {
         self.autoplay
             .last_hit_us
             .is_some_and(|t| t.elapsed() < UNDER_ATTACK)
     }
 
-    /// Whether what has just swung at the character is called `name`.
-    /// The server names the attacker in the line it sends, hit or miss,
-    /// so this is all there is to go on, and it is enough: it is what
-    /// says a creature outside the hunting area, or one otherwise walked
-    /// past, is a fight the character is already in.
+    /// Whether what has just attacked the character is called `name`.
+    /// The server names the attacker in what it sends, hit, miss or
+    /// spell, so this is all there is to go on, and it is enough: it is
+    /// what says a creature outside the hunting area, or one otherwise
+    /// walked past, is a fight the character is already in.
     ///
     /// A creature's move target being this character is not asked here.
     /// It says something is walking at us, which our own pets, a fellow
     /// and a wandering townsfolk all do, and it carries no time, so it
-    /// could not say when the fight began. The two notifications say
-    /// outright that a blow was aimed at this character, and when.
+    /// could not say when the fight began. The two notifications and the
+    /// spell lines (see [`spell_attacker`]) say outright that an attack
+    /// was aimed at this character, and when.
     pub(crate) fn hit_lately_by(&self, name: &str) -> bool {
         self.under_attack()
             && self
@@ -5916,6 +5963,18 @@ impl Client {
         if self.autoplay.corpse_refused(text, &name, self.told, now) {
             self.stop_walking_to_loot();
         }
+    }
+
+    /// A line saying something cast a spell at this character to hurt it
+    /// (see [`spell_attacker`]), kept in the same two fields a swing sets.
+    /// Every "but fight back when it attacks you" carve-out reads those,
+    /// and a caster attacks as surely as a creature that swings.
+    pub(crate) fn hear_spell_attack(&mut self, text: &str, now: Instant) {
+        let Some(who) = spell_attacker(text) else {
+            return;
+        };
+        self.autoplay.last_hit_us = Some(now);
+        self.autoplay.hit_by = Some((who.to_string(), now));
     }
 
     /// A line saying a shot got to something and did not hurt it (see
@@ -7736,6 +7795,106 @@ mod tests {
         );
         assert!(c.hit_lately_by("Drudge Skulker"));
         assert!(!c.hit_lately_by("Drudge Robber"), "the one standing by");
+    }
+
+    #[test]
+    fn a_spell_cast_at_the_character_names_its_caster() {
+        // The lines ACE sends the target of a spell, and nothing else is
+        // sent: SpellProjectile's damage and drain, WorldObject_Magic's
+        // drain, transfer and resist.
+        for (line, who) in [
+            (
+                "Drudge Shaman blasts you for 12 points with Flame Bolt I.",
+                "Drudge Shaman",
+            ),
+            (
+                "Critical hit! Sneak Attack! Drudge Shaman scorches you for 40 points \
+                 with Flame Bolt II.",
+                "Drudge Shaman",
+            ),
+            (
+                "Overpower! Mite hits you for 3 points with Acid Stream I. Your \
+                 augmentation allows you to avoid a critical hit!",
+                "Mite",
+            ),
+            (
+                "Drudge Shaman casts Harm Other I and drains 9 points of your health.",
+                "Drudge Shaman",
+            ),
+            (
+                "You lose 20 points of mana due to Drudge Shaman casting Mana to \
+                 Health Other I on you",
+                "Drudge Shaman",
+            ),
+            (
+                "You resist the spell cast by Drudge Shaman",
+                "Drudge Shaman",
+            ),
+        ] {
+            assert_eq!(spell_attacker(line), Some(who), "{line}");
+        }
+        // The character's own spells, and a fellow's help, are no attack.
+        for line in [
+            "You blast Drudge Shaman for 12 points with Flame Bolt I.",
+            "Drudge Shaman resists your spell",
+            "With Harm Other I you drain 9 points of health from Drudge Shaman.",
+            "Aldric casts Heal Other I and restores 30 points of your health.",
+            "Aldric cast Strength Other I on you",
+            "You gain 20 points of health due to Aldric casting Stamina to Health \
+             Other I on you",
+            "You lose 50 points of stamina due to casting Stamina to Mana Other I \
+             on Aldric",
+            "Drudge Skulker hits you for 5 points.",
+        ] {
+            assert_eq!(spell_attacker(line), None, "{line}");
+        }
+    }
+
+    /// A line of system chat as the server sends it (ServerMessage 0xF7E0):
+    /// the text, and its ChatMessageType, Magic here.
+    fn magic_line(text: &str) -> Vec<u8> {
+        let mut w = ac_net::wire::Writer::new();
+        w.string16(text).u32(7);
+        w.finish()
+    }
+
+    #[test]
+    fn a_caster_that_only_casts_is_attacking_the_character() {
+        // A shaman turns and casts from its spell range and never closes
+        // in to swing, so neither notification a swing brings ever came:
+        // `under_attack` stayed false while it worked the character over,
+        // and every "but fight back when it attacks you" carve-out walked
+        // on past it.
+        let Some(mut c) = character_of_level(20) else {
+            return;
+        };
+        let op = ac_net::messages::opcode::SERVER_MESSAGE;
+        assert!(!c.under_attack(), "nothing has happened yet");
+        c.chat_message(
+            op,
+            &magic_line("Drudge Shaman blasts you for 12 points with Flame Bolt I."),
+        );
+        assert!(c.under_attack(), "a bolt that landed is an attack");
+        assert!(c.hit_lately_by("Drudge Shaman"));
+        assert!(!c.hit_lately_by("Drudge Skulker"), "the one standing by");
+
+        // Resisted, it was still cast at the character.
+        c.autoplay.last_hit_us = None;
+        c.autoplay.hit_by = None;
+        c.chat_message(
+            op,
+            &magic_line("You resist the spell cast by Drudge Shaman"),
+        );
+        assert!(c.hit_lately_by("Drudge Shaman"));
+
+        // A fellow's heal is not.
+        c.autoplay.last_hit_us = None;
+        c.autoplay.hit_by = None;
+        c.chat_message(
+            op,
+            &magic_line("Aldric casts Heal Other I and restores 30 points of your health."),
+        );
+        assert!(!c.under_attack());
     }
 
     #[test]
