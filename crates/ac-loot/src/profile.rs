@@ -777,6 +777,30 @@ impl Profile {
         self.rules.iter().filter(|r| r.on).any(Rule::needs_id)
     }
 
+    /// The skills the rules switched on ask of the character reading
+    /// them (`Mine::Skill`, `Mine::Trained`), by id, each once and in
+    /// order.
+    ///
+    /// A party reads one profile, and what a rule lets one of them take
+    /// turns on nothing about it but these, its name and its level. So
+    /// these are what a character says about itself for another to judge
+    /// a body on its behalf.
+    pub fn skills_asked(&self) -> Vec<u32> {
+        let mut asked: Vec<u32> = self
+            .rules
+            .iter()
+            .filter(|r| r.on)
+            .flat_map(|r| &r.all)
+            .filter_map(|a| match a {
+                Ask::Me(Mine::Skill { skill, .. } | Mine::Trained { skill, .. }) => Some(*skill),
+                _ => None,
+            })
+            .collect();
+        asked.sort_unstable();
+        asked.dedup();
+        asked
+    }
+
     /// Where a profile of this name lives.
     pub fn path_of(dir: &Path, name: &str) -> PathBuf {
         dir.join(format!("{}.json", tidy_name(name)))
@@ -1239,6 +1263,66 @@ mod tests {
             Verdict::Decided(LootAction::Keep, "broken keys, if I can mend them".into())
         );
         assert_eq!(profile.judge_test(&key, &mage, "Aldric", 0), Verdict::None);
+    }
+
+    #[test]
+    fn only_the_skills_a_rule_asks_of_me_are_named() {
+        // What a character says about itself for the others to judge a
+        // body by: the skills a rule turns on, and no more.
+        let lockpick = |level| {
+            Ask::Me(Mine::Skill {
+                skill: skill::LOCKPICK,
+                op: Op::Ge,
+                level,
+            })
+        };
+        let mut switched_off = rule(
+            "kits, if I can heal",
+            LootAction::Keep,
+            vec![Ask::Me(Mine::Skill {
+                skill: skill::HEALING,
+                op: Op::Ge,
+                level: 100,
+            })],
+        );
+        switched_off.on = false;
+        let profile = Profile {
+            name: "group".into(),
+            rules: vec![
+                rule("keys", LootAction::Keep, vec![lockpick(250)]),
+                rule(
+                    "salvage, if I salvage",
+                    LootAction::Salvage,
+                    vec![Ask::Me(Mine::Trained {
+                        skill: skill::SALVAGING,
+                        at_least: sac::TRAINED,
+                    })],
+                ),
+                // Asked twice, named once.
+                rule("more keys", LootAction::Keep, vec![lockpick(300)]),
+                // Who it is and how far on are not skills.
+                rule(
+                    "mine",
+                    LootAction::Keep,
+                    vec![
+                        Ask::Me(Mine::Name("Bryn".into())),
+                        Ask::Me(Mine::Level {
+                            op: Op::Ge,
+                            level: 10,
+                        }),
+                    ],
+                ),
+                switched_off,
+            ],
+            ..Default::default()
+        };
+        assert_eq!(
+            profile.skills_asked(),
+            vec![skill::LOCKPICK, skill::SALVAGING]
+        );
+        // The starter asks nothing of the character, so a party reading
+        // it says nothing more about itself than it did.
+        assert!(Profile::starter().skills_asked().is_empty());
     }
 
     #[test]

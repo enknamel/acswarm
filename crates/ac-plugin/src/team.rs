@@ -5,7 +5,10 @@
 //! of, heal whoever is worst hurt, bring everyone into one fellowship.
 //! Those rules read a [`TeamView`], and until now nothing filled it in.
 //! The word each session gives about itself carries its Salvaging and
-//! whether it has an Ust, so everyone agrees on who salvages.
+//! whether it has an Ust, so everyone agrees on who salvages. It carries
+//! the skills its loot rules ask about and the bodies it emptied, with
+//! the others it found nothing left on each for, so a body one of them
+//! finished is not opened again by the rest.
 //!
 //! This plugin does. Every session with the team rules on says who it
 //! is and what it is doing, a few times a second, on the blackboard:
@@ -303,6 +306,8 @@ pub fn describe(client: &ac_client::Client, session: usize) -> Option<Mate> {
         supplies: client.supplies(&client.autoplay.config.growth),
         ground: client.hunting_ground(),
         on_its_way: client.on_its_way(),
+        skills: client.skills_its_rules_ask_about(),
+        shut: client.autoplay.shuts_to_say(Instant::now()),
     })
 }
 
@@ -374,6 +379,11 @@ impl Plugin for Team {
         let view = self.roster.view_for(&me);
         if client.autoplay.team != view {
             client.autoplay.team = view;
+            // A body one of them emptied and found nothing left on for
+            // this character is not opened again. Taken in for good the
+            // moment it is heard: the row it came on goes once its mate
+            // has been quiet a while.
+            client.take_in_shuts();
         }
         // And say our piece, a few times a second.
         let due = self
@@ -458,6 +468,35 @@ mod tests {
             !r.view_for(&me).working(body),
             "a dead claimant held a body"
         );
+    }
+
+    #[test]
+    fn a_row_from_an_older_build_reads_with_no_skills_and_no_shuts() {
+        // A process still on an older build says nothing about the skills
+        // its loot rules ask about or the bodies it emptied. Its row still
+        // reads: it asks about no skill, and has emptied nothing for
+        // anyone.
+        let old = serde_json::json!({"name": "Brannoc", "guid": 5, "health": 1.0});
+        let heard: Mate = serde_json::from_value(old).expect("an older row still reads");
+        assert!(heard.skills.is_empty() && heard.shut.is_empty());
+
+        // And what a newer one says comes through the roster whole.
+        let said = Mate {
+            skills: vec![(23, 280, 300, 2)],
+            shut: vec![(0x8000_0001, vec![1, 3])],
+            ..mate("Brynna", 2)
+        };
+        let json = serde_json::to_value(&said).expect("a mate is JSON");
+        let mut r = Roster::default();
+        r.hear(
+            "other",
+            0,
+            serde_json::from_value(json).expect("and comes back"),
+            Instant::now(),
+        );
+        let v = r.view_for(&mate("Reborn", 1));
+        assert_eq!(v.mates[0].skills, said.skills);
+        assert_eq!(v.mates[0].shut, said.shut);
     }
 
     #[test]
