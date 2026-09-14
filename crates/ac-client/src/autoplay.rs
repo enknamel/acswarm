@@ -1057,19 +1057,25 @@ const UNDER_ATTACK: Duration = Duration::from_secs(4);
 /// (`WorldObject_Decay`), so this is the whole window there is.
 pub(crate) const CORPSE_LIFE: Duration = Duration::from_secs(300);
 
-/// How old a monster's body has to be before anyone may loot it. ACE
-/// opens one to everyone once what is left of its life is under the
-/// half life (`Corpse.HasPermission`, `HalfLife` 180 s), which on a body
-/// given the default five minutes is two minutes after it fell. A body
-/// we never saw appear is taken as fresh, so this is the longest we ever
-/// wait rather than the shortest.
-const CORPSE_SHARED_AFTER: Duration = Duration::from_secs(120);
-
 /// How long to leave a body someone else has open. Long enough that the
 /// two of us are not asking over each other, short enough to have it the
 /// moment they are done: emptying one takes a few seconds. It doubles
 /// from there like any other wait.
 const CORPSE_IN_USE_AGAIN: Duration = Duration::from_secs(3);
+
+/// How long to leave a body the server says is not ours yet.
+///
+/// Half decay is the slowest way a body opens up, not the usual one:
+/// ACE marks a corpse looted the moment anyone closes it, and a looted
+/// corpse is everyone's (`Corpse.Close` sets `IsLooted`, which
+/// `Corpse.HasPermission` answers on before it ever looks at the clock).
+/// So the ordinary course -- the killer opens it, empties it, closes it
+/// -- makes a body public within seconds of the refusal, and writing it
+/// off until it had half rotted left its loot on the floor for two
+/// minutes. Short, and doubling like any other wait, so a body that
+/// really is locked to its killer is asked about a handful of times
+/// rather than every half minute.
+const CORPSE_NOT_OURS_AGAIN: Duration = Duration::from_secs(5);
 
 /// How close to rotting a corpse has to be before it is worth breaking
 /// off for. Inside this there is no second chance.
@@ -2132,24 +2138,10 @@ impl Autoplay {
         }
         match why {
             CorpseRefusal::InUse => self.shelved.hold(guid, CORPSE_IN_USE_AGAIN, now),
-            CorpseRefusal::NotYetOurs => {
-                // Until it has half rotted and becomes everyone's.
-                let age = now.saturating_duration_since(self.corpse_first_seen(guid, now));
-                match CORPSE_SHARED_AFTER
-                    .checked_sub(age)
-                    .filter(|left| !left.is_zero())
-                {
-                    Some(left) => self.shelved.hold(guid, left, now),
-                    // Old enough to be everyone's and still refused, so
-                    // it is not the half life keeping us out: back off
-                    // the way anything blocked does.
-                    None => self.shelved.note(
-                        guid,
-                        &crate::did::Did::blocked("it is not ours to loot"),
-                        now,
-                    ),
-                }
-            }
+            // Not ours yet; it becomes everyone's the moment whoever
+            // has it closes it, which is usually within seconds (see
+            // [`CORPSE_NOT_OURS_AGAIN`]). A short wait, doubling.
+            CorpseRefusal::NotYetOurs => self.shelved.hold(guid, CORPSE_NOT_OURS_AGAIN, now),
             // Nobody but the killer will ever open it. Left for good
             // rather than waited on: it still lies there, and every wait
             // that runs out is another walk back to it.
@@ -8854,19 +8846,40 @@ mod tests {
         ));
         assert!(!ap.shelved.held(&held, answered + CORPSE_IN_USE_AGAIN));
 
-        // The killer's for now: left until it has half rotted, counted
-        // from when it was first seen.
+        // The killer's for now: a short wait, because a corpse becomes
+        // everyone's the moment whoever has it closes it and not only
+        // when it half rots.
         ap.take_up_corpse(locked, t0, LOOT_TIMEOUT);
         assert!(ap.corpse_refused(&not_ours, name, Some(answered), answered));
         assert_eq!(ap.corpse, None);
+        assert_eq!(ap.shelved.waited(&locked), Some(CORPSE_NOT_OURS_AGAIN));
+        assert!(ap.shelved.held(
+            &locked,
+            answered + CORPSE_NOT_OURS_AGAIN - Duration::from_millis(1)
+        ));
+        assert!(!ap.shelved.held(&locked, answered + CORPSE_NOT_OURS_AGAIN));
+
+        // A body refused twice, in two different sets of words, waits
+        // longer the second time -- and the wait it is given is a wait
+        // and not a deadline. Handing the shelf an exact "come back in
+        // 117 seconds" doubled the three seconds already on the body
+        // instead: six, then twelve, then twenty-four, five more asks
+        // and five more refusals before it reached the wait that was
+        // meant the first time.
+        let both = 0x8000_1224;
+        ap.corpse_seen.push((both, t0));
+        ap.take_up_corpse(both, t0, LOOT_TIMEOUT);
+        assert!(ap.corpse_refused(&in_use, name, Some(answered), answered));
+        assert_eq!(ap.shelved.waited(&both), Some(CORPSE_IN_USE_AGAIN));
+        let again = answered + CORPSE_IN_USE_AGAIN;
+        ap.take_up_corpse(both, again, LOOT_TIMEOUT);
+        let told = again + Duration::from_millis(360);
+        assert!(ap.corpse_refused(&not_ours, name, Some(told), told));
         assert_eq!(
-            ap.shelved.waited(&locked),
-            Some(CORPSE_SHARED_AFTER - Duration::from_millis(360))
+            ap.shelved.waited(&both),
+            Some(CORPSE_IN_USE_AGAIN * 2),
+            "a doubling wait, not a deadline the shelf then doubled"
         );
-        assert!(ap
-            .shelved
-            .held(&locked, t0 + CORPSE_SHARED_AFTER - Duration::from_millis(1)));
-        assert!(!ap.shelved.held(&locked, t0 + CORPSE_SHARED_AFTER));
 
         // The killer's for good: not waited on at all.
         ap.take_up_corpse(rare, t0, LOOT_TIMEOUT);

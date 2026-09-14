@@ -572,9 +572,13 @@ list instead of entering). Headless: `acclient --create NAME` and `acbot
 * **A monster's corpse** lasts five minutes (ACE's default TimeToRot,
   started at its first heartbeat) and belongs to whoever landed the
   killing blow. It opens to everyone else once it has half rotted --
-  under the 180 s HalfLife, so two minutes after it fell -- or as soon
-  as the killer has looted it, or at once to a fellowship with loot
-  sharing on. Until then an open is answered with a transient string,
+  under the 180 s HalfLife, so two minutes after it fell -- or, long
+  before that, the moment anyone who could open it closes it again:
+  `Corpse.Close` sets IsLooted unconditionally and `HasPermission`
+  answers on IsLooted before it ever reads the clock, so the killer
+  opening a body and closing it makes it everyone's within seconds. Or
+  at once to a fellowship with loot sharing on. Until then an open is
+  answered with a transient string,
   "You do not yet have the right to loot the {name}."; a body that made
   a rare, or one from a player killer's death, is never shared and says
   "You may not loot the {name} because ...". A container the server has
