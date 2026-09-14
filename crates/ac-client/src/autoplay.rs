@@ -5072,7 +5072,7 @@ impl Client {
     }
 
     /// Whether `o` is a creature to walk past because the character is
-    /// on its way somewhere (see [`crate::growth::State::on_its_way`]).
+    /// on its way somewhere (see [`Self::on_its_way`]).
     ///
     /// Going somewhere is an errand of its own. The fighting is what the
     /// ground at the far end is for, and a character that stops for
@@ -5085,9 +5085,8 @@ impl Client {
     /// The same three things outrank it as outrank `a_critter`, for the
     /// same reason: in each of them the fight is already happening or
     /// was asked for. Nothing has to be undone at the end of the road
-    /// either -- the hunting ground drops `bound` as it arrives and the
-    /// town run drops `run` at the last counter, and the character is
-    /// fighting again on the next tick.
+    /// either: the rule ends with the walk, and the character is fighting
+    /// again the tick it arrives.
     ///
     /// A creature standing in the character's path is not carved out,
     /// and that is a decision rather than an oversight. Nothing this
@@ -5106,7 +5105,7 @@ impl Client {
     /// in view every tick, and the last of the three walks the whole
     /// object map.
     pub(crate) fn passing_by(&self, o: &ac_world::WorldObject, cfg: &Fight) -> bool {
-        if !cfg.walk_past_on_the_way || !self.autoplay.growth.on_its_way() {
+        if !cfg.walk_past_on_the_way || !self.on_its_way() {
             return false;
         }
         !(name_matches(&o.name, &cfg.only)

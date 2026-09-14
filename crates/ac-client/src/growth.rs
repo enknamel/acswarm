@@ -1062,27 +1062,64 @@ impl State {
         self.run.is_some()
     }
 
-    /// Whether the character is on its way somewhere it decided to go:
-    /// out to a hunting ground, back to one from town, or round the
-    /// counters.
-    ///
-    /// Not [`Client::traveling`], which says a journey is under way and
-    /// nothing at all about why. The patrol and the roam
-    /// ([`Client::grow_hunt`]) travel too, and what they travel about is the
-    /// hunting ground the character came for -- so a rule that read
-    /// `traveling` would have a character stand in its own hunting
-    /// ground refusing to fight. Both of them set off and return before
-    /// `bound` is ever set, which is what makes these two the answer.
-    ///
-    /// A journey put down for a moment is still this journey: a corpse
-    /// on the road ends the trip and `bound` outlives it, because the
-    /// errand is not over until the character arrives or gives up.
-    pub(crate) fn on_its_way(&self) -> bool {
+    /// Whether the growth rules have somewhere to be: a hunting ground to
+    /// reach (`bound`) or counters to go round (`run`). That says why the
+    /// character would be travelling, and nothing about whether it still
+    /// is (see [`Client::on_its_way`]).
+    fn has_an_errand(&self) -> bool {
         self.bound.is_some() || self.run.is_some()
+    }
+
+    /// Let go of an errand whose setting has been turned off: a run with
+    /// town runs off, a walk to a ground with grounds off and no hunting
+    /// area. Nothing carries either on once its rule is no longer called,
+    /// so left set it said an errand was under way for the rest of the
+    /// session -- the character walked past what stood on its own ground
+    /// on every patrol, and a run held open kept a follower from its
+    /// leader.
+    fn drop_what_is_turned_off(&mut self, town_runs: bool, grounds: bool) {
+        if !town_runs && self.run.take().is_some() {
+            self.needs.clear();
+        }
+        if !grounds {
+            self.bound = None;
+            self.bound_since = None;
+        }
     }
 }
 
 impl Client {
+    /// Whether the character is on its way somewhere it decided to go:
+    /// out to a hunting ground, back to one from town, or to a counter.
+    ///
+    /// Two halves, and it takes both.
+    ///
+    /// Why it is walking comes from the growth rules' errands, not from
+    /// [`Client::traveling`], which says a journey is under way and nothing
+    /// about why. The patrol and the roam ([`Client::grow_hunt`]) travel
+    /// too, about the very ground the character came for, so a rule that
+    /// read `traveling` alone would have a character stand in its own
+    /// hunting ground refusing to fight. Both set off and return before
+    /// `bound` is ever set.
+    ///
+    /// That it is still walking comes from the journey, because the errand
+    /// outlives the walk. `bound` is let go only when the hunting step next
+    /// looks, and that is the last goal in the table: a body at the
+    /// character's feet keeps it from running, and a party restocking does
+    /// not call it at all. Read off `bound` alone, a leader home from town
+    /// stood on its ground walking past everything until the slowest of the
+    /// party had shopped, and one arriving beside a body looted it before
+    /// the monster standing over it. `run` spans the counters as well,
+    /// where there is no road. A walk broken off by a corpse or a fight is
+    /// still the walk, since its errand takes it up again (see
+    /// [`Client::journey_broken_off`]), and so is stepping out of a shop
+    /// before it.
+    pub(crate) fn on_its_way(&self) -> bool {
+        let st = &self.autoplay.growth;
+        st.has_an_errand()
+            && (self.traveling() || self.journey_broken_off() || st.after_out.is_some())
+    }
+
     /// The growth rules: spend experience, find monsters, run to town.
     /// Run once a frame when nothing more pressing claimed it; true
     /// when it did something.
@@ -1107,6 +1144,12 @@ impl Client {
             .as_mut()
             .map(|pl| pl.is_indoors() && pl.in_dungeon(&assets))
             .unwrap_or(false);
+        // An errand whose setting was turned off part-way is carried on by
+        // nothing below, so it is let go here.
+        let roams_an_area = self.autoplay.config.fight.area.is_some();
+        self.autoplay
+            .growth
+            .drop_what_is_turned_off(cfg.town_runs, cfg.hunt_grounds || roams_an_area);
         let mode = self.grow_mode(now, &cfg);
         // A rank is one message and takes no time: it goes out even in
         // the middle of a walk to town.
@@ -1124,7 +1167,6 @@ impl Client {
         // the character is left to find grounds of its own: with that
         // off, a character that had cleared the Holtburg field it was
         // given stood in the middle of it for good.
-        let roams_an_area = self.autoplay.config.fight.area.is_some();
         if (cfg.hunt_grounds || roams_an_area)
             && mode.hunting()
             && !self.autoplay.growth.stopped_in_town
@@ -5034,6 +5076,7 @@ mod tests {
         };
         c.world.stats.level = 20;
         c.world.player_guid = Some(0x5000_0001);
+        let me = c.player.as_ref().unwrap().world_position();
         let now = Instant::now();
         let fight = c.autoplay.config.fight.clone();
         let it = standing_by(&mut c, 0x8000_0001, "Revenant", 5.0);
@@ -5042,9 +5085,10 @@ mod tests {
         assert!(!c.passing_by(&it, &fight));
         assert!(c.would_fight(&it, &fight, false, now));
 
-        // Bound for a hunting ground: walked past, and the fight rules
-        // have nothing to pick.
+        // Bound for a hunting ground and walking there: walked past, and
+        // the fight rules have nothing to pick.
         let ground = (0xA9B2, Vec2::new(32_580.0, 34_570.0), "Drudge".to_string());
+        assert!(c.grow_travel(Vec2::new(me.x + 250.0, me.y), now));
         c.autoplay.growth.bound = Some(ground.clone());
         assert!(c.passing_by(&it, &fight));
         assert!(!c.would_fight(&it, &fight, false, now));
@@ -5105,6 +5149,79 @@ mod tests {
     }
 
     #[test]
+    fn an_errand_is_on_its_way_only_while_its_walk_is() {
+        // The errand outlives its walk. `bound` is let go only when the
+        // hunting step next looks, and a party restocking does not call
+        // it: a leader home from town stood on its own ground walking past
+        // everything that had not swung at it until the slowest of the
+        // party had shopped. And a body at its feet kept the grow step
+        // from running at all, so the body beat the monster beside it.
+        let holtburg = 0xA9B4_0019;
+        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
+            return;
+        };
+        c.world.stats.level = 20;
+        c.world.player_guid = Some(0x5000_0001);
+        let me = c.player.as_ref().unwrap().world_position();
+        let now = Instant::now();
+        let fight = c.autoplay.config.fight.clone();
+        let it = standing_by(&mut c, 0x8000_0001, "Revenant", 5.0);
+        let at = Vec2::new(me.x + 250.0, me.y);
+        let lb = (((at.x / 192.0) as u32) << 8) | (at.y / 192.0) as u32;
+
+        // Bound, and walking there.
+        assert!(c.grow_travel(at, now), "no way to the ground");
+        c.autoplay.growth.bound = Some((lb, at, "Drudge".into()));
+        assert!(c.on_its_way());
+        assert!(!c.would_fight(&it, &fight, false, now));
+
+        // A body on the road breaks the walk off, and it is still the walk.
+        c.interrupt_travel("walking to a corpse");
+        assert!(c.on_its_way(), "a walk broken off is still the walk");
+        assert!(!c.would_fight(&it, &fight, false, now));
+
+        // Arrived: fighting again that tick, whatever `bound` still says.
+        assert!(c.grow_travel(at, now));
+        c.end_trip();
+        assert!(c.autoplay.growth.bound.is_some(), "not noticed yet");
+        assert!(!c.on_its_way(), "arrived, and still walking past");
+        assert!(c.would_fight(&it, &fight, false, now));
+
+        // Cancelled -- the player took the keys -- is no walk either.
+        assert!(c.grow_travel(at, now));
+        c.cancel_travel();
+        assert!(!c.on_its_way());
+
+        // Stepping out of a shop first is the start of the walk.
+        c.autoplay.growth.after_out = Some(at);
+        assert!(c.on_its_way());
+    }
+
+    #[test]
+    fn an_errand_whose_setting_is_turned_off_is_let_go() {
+        // Nothing carries a run on with town runs turned off, nor a walk
+        // to a ground with grounds off, so neither was ever let go. The
+        // errand read as under way for the rest of the session.
+        let holtburg = 0xA9B4_0019;
+        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
+            return;
+        };
+        c.world.stats.level = 20;
+        c.world.player_guid = Some(0x5000_0001);
+        let now = Instant::now();
+        let to = Vec2::new(32_500.0, 34_500.0);
+        let growth = &mut c.autoplay.config.growth;
+        growth.auto_xp = false;
+        growth.town_runs = false;
+        growth.hunt_grounds = false;
+        c.autoplay.growth.run = Some(run_to(to, now));
+        c.autoplay.growth.bound = Some((0xA9B2, to, "Drudge".into()));
+        c.autoplay_grow(now);
+        assert!(!c.autoplay.growth.town_run_under_way(), "the run was kept");
+        assert_eq!(c.autoplay.growth.bound, None, "the walk was kept");
+    }
+
+    #[test]
     fn walking_the_hunting_ground_is_not_being_on_the_way_to_it() {
         // The trap this rule had to be kept out of. A patrol of the
         // hunting area, and the roam around a ground, both travel --
@@ -5141,7 +5258,7 @@ mod tests {
         assert!(c.grow_hunt(now, &cfg), "the patrol stayed put");
         assert!(c.traveling(), "the patrol is a journey like any other");
         assert_eq!(c.autoplay.growth.bound, None, "the patrol is not an errand");
-        assert!(!c.autoplay.growth.on_its_way());
+        assert!(!c.on_its_way());
 
         // So the creature it walked up to is still a fight.
         assert!(!c.passing_by(&it, &fight));
