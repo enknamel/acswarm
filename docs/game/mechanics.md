@@ -706,7 +706,13 @@ list instead of entering). Headless: `acclient --create NAME` and `acbot
   best trained tinkering skill, whichever yields more (tinkering skills
   are capped at the workmanship). The item's material and workmanship
   travel in the WeenieDesc (flags 0x80000000 and 0x1000000), so the
-  client knows what is salvageable without appraising.
+  client knows what is salvageable without appraising. The bags are
+  made afresh for each salvage: everything of one material salvaged
+  together shares a bag and its averaged workmanship, a bag already
+  carried is never added to, and skill changes only how many units come
+  out, never their workmanship. So a workmanship 9 or 10 item belongs
+  only in a salvage of its own workmanship; acswarm's autoplay salvages
+  everything below 9 together, then the 9s, then the 10s, a batch each.
 * **Giving between players**: GiveObjectRequest 0x00CD hands a carried
   item (or part of a stack) to a player in use range. ACE refuses it
   unless the receiver's `CharacterOptions1.AllowGive` ("Let other
