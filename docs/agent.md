@@ -59,13 +59,19 @@ pool, spends, and answers -- so it runs as housekeeping too, in the
 middle of a walk or a fight, still paced to one message at a time. A
 message can carry many ranks of one stat: a large pool goes out as the
 ranks buying one at a time would have given each stat, a message a stat,
-so it is spread as before and spent in seconds rather than days. A rank
-that raises a maximum (Health, Stamina, Mana, or Endurance and Self,
-which they are built from) waits for the fight to be over. The fight
-under way is fought with what is left, which that rank leaves where it
-was, and the fraction left drops with it: a character with a large pool
-bought Health between swings until it healed, mid-fight, health it had
-never lost.
+so it is spread as before and spent in seconds rather than days. The
+best buy is bought or saved for, never passed over for a cheaper rank
+that happens to fit: the kills after a large pool went only to the
+cheapest skills, and the ones a character fights with stopped growing.
+A rank that raises a maximum (Health, Stamina, Mana, or Endurance and
+Self, which they are built from) waits for the fight to be over, and its
+share of the pool waits with it. The fight under way is fought with what
+is left, which that rank leaves where it was, and the fraction left
+drops with it: a character with a large pool bought Health between
+swings until it healed, mid-fight, health it had never lost. A raise the
+server has not answered keeps its share too, and is given up on only
+once it has had time to arrive: a server that answers late, or a round
+of nine headless characters that takes seconds, is not a refusal.
 
 Watching the ground runs before even the reflexes, for the same reason
 and one more. The clocks it keeps -- how long a spot has had nothing on
