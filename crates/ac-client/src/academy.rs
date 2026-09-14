@@ -1107,7 +1107,7 @@ impl Client {
             if now.duration_since(since) > LOOT_TIMEOUT {
                 tracing::info!("academy: corpse {guid:#010x} did not open");
                 self.autoplay.academy_corpse = None;
-                self.autoplay.looted.push(guid);
+                self.autoplay.looted.push(guid, now);
             } else {
                 match self.world.open_container.clone() {
                     Some((open, items)) if open == guid => {
@@ -1128,7 +1128,7 @@ impl Client {
                             .collect();
                         if waiting.is_empty() {
                             self.close_container();
-                            self.autoplay.looted.push(guid);
+                            self.autoplay.looted.push(guid, now);
                             self.autoplay.academy_corpse = None;
                             self.autoplay
                                 .say(Doing::Training, format!("{progress}: emptied a corpse"));

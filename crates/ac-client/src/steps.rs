@@ -862,7 +862,7 @@ mod tests {
         let now = Instant::now();
         let mut ap = Autoplay::default();
         let (emptied, locked, fresh) = (0x8000_5001, 0x8000_5002, 0x8000_5003);
-        ap.looted.push(emptied);
+        ap.looted.push(emptied, now);
         ap.shelved
             .note(locked, &Did::blocked("it will not open yet"), now);
         let room = Room::PLENTY;

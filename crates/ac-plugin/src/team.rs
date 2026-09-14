@@ -230,7 +230,9 @@ impl Request {
 #[derive(Default)]
 pub struct Team {
     roster: Roster,
-    last_said: BTreeMap<usize, Instant>,
+    /// When each session last said its piece on the board, and what it
+    /// said.
+    last_said: BTreeMap<usize, (Instant, Mate)>,
 }
 
 /// A vital (0 health, 1 stamina, 2 mana) as a fraction of its maximum,
@@ -315,7 +317,30 @@ pub fn describe(client: &ac_client::Client, session: usize) -> Option<Mate> {
         skills: client.skills_its_rules_ask_about(),
         shut: client.autoplay.shuts_to_say(Instant::now()),
         opened_first: client.autoplay.opened_first(Instant::now()),
+        opens_bodies: client.opens_bodies(),
     })
+}
+
+impl Team {
+    /// Whether session `session`, describing itself as `me` at `now`, is
+    /// due to say so on the board (every [`SAY_EVERY`]). When it is, `me`
+    /// is what it last said from then on.
+    fn say(&mut self, session: usize, me: &Mate, now: Instant) -> bool {
+        let due = self
+            .last_said
+            .get(&session)
+            .is_none_or(|(t, _)| now.duration_since(*t) >= SAY_EVERY);
+        if due {
+            self.last_said.insert(session, (now, me.clone()));
+        }
+        due
+    }
+
+    /// What session `session` last said about itself on the board: what
+    /// the others read it by.
+    fn said(&self, session: usize) -> Option<&Mate> {
+        self.last_said.get(&session).map(|(_, said)| said)
+    }
 }
 
 impl Plugin for Team {
@@ -382,8 +407,13 @@ impl Plugin for Team {
         let Some(me) = describe(client, session) else {
             return;
         };
-        // Hand the rules what the others said.
-        let view = self.roster.view_for(&me);
+        let due = self.say(session, &me, now);
+        // Hand the rules what the others said, and what this session last
+        // said about itself: the others read it by that, up to a board
+        // round old, so the turns at a newly fallen body read it by that
+        // too (see `Autoplay::ours_to_open`).
+        let mut view = self.roster.view_for(&me);
+        view.me = self.said(session).cloned();
         if client.autoplay.team != view {
             client.autoplay.team = view;
             // A body one of them emptied and found nothing left on for
@@ -393,12 +423,7 @@ impl Plugin for Team {
             client.take_in_shuts();
         }
         // And say our piece, a few times a second.
-        let due = self
-            .last_said
-            .get(&session)
-            .is_none_or(|t| now.duration_since(*t) >= SAY_EVERY);
         if due {
-            self.last_said.insert(session, now);
             if let Ok(value) = serde_json::to_value(&me) {
                 cx.post(MATE_TOPIC, value);
             }
@@ -486,11 +511,21 @@ mod tests {
         let old = serde_json::json!({"name": "Brannoc", "guid": 5, "health": 1.0});
         let heard: Mate = serde_json::from_value(old).expect("an older row still reads");
         assert!(heard.skills.is_empty() && heard.shut.is_empty());
+        // Nor is it dealt bodies or left things on them, not having said
+        // that it opens any.
+        assert!(!heard.opens_bodies);
 
         // And what a newer one says comes through the roster whole.
         let said = Mate {
             skills: vec![(23, 280, 300, 2)],
-            shut: vec![(0x8000_0001, vec![1, 3])],
+            shut: vec![ac_client::autoplay::Shut {
+                body: 0x8000_0001,
+                n: 4,
+                done_for: vec![1],
+                stand_by: vec![3],
+                left_for: vec![5],
+            }],
+            opens_bodies: true,
             ..mate("Brynna", 2)
         };
         let json = serde_json::to_value(&said).expect("a mate is JSON");
@@ -504,6 +539,37 @@ mod tests {
         let v = r.view_for(&mate("Reborn", 1));
         assert_eq!(v.mates[0].skills, said.skills);
         assert_eq!(v.mates[0].shut, said.shut);
+        assert!(v.mates[0].opens_bodies);
+    }
+
+    #[test]
+    fn a_session_reads_itself_by_what_it_last_said_not_by_this_frame() {
+        // The others read a session off the row it last put on the board,
+        // up to half a second old. Read off this frame instead, a session
+        // that had just shut a body dealt the next to someone else while
+        // the rest dealt it to that session, and nobody opened it.
+        let t0 = Instant::now();
+        let mut team = Team::default();
+        let first = Mate {
+            opened_first: 2,
+            ..mate("Reborn", 1)
+        };
+        let later = Mate {
+            opened_first: 3,
+            looting: Some(0x8000_0001),
+            ..mate("Reborn", 1)
+        };
+        assert!(team.say(0, &first, t0), "said nothing at first");
+        assert!(!team.say(0, &later, t0 + Duration::from_millis(100)));
+        assert_eq!(
+            team.said(0),
+            Some(&first),
+            "read itself ahead of what the others had heard"
+        );
+        assert!(team.say(0, &later, t0 + SAY_EVERY));
+        assert_eq!(team.said(0), Some(&later));
+        // Each session by its own word.
+        assert_eq!(team.said(1), None);
     }
 
     #[test]

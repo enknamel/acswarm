@@ -6045,7 +6045,7 @@ mod tests {
         assert_eq!(c.autoplay.corpse_seen, vec![(body, now)]);
         // Forgotten once emptied, so the list stays the size of what is
         // on the ground.
-        c.autoplay.looted.push(body);
+        c.autoplay.looted.push(body, now + s(5));
         c.autoplay_watch_the_ground(now + s(6));
         assert!(c.autoplay.corpse_seen.is_empty());
     }

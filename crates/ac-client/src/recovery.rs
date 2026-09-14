@@ -694,9 +694,7 @@ impl Client {
                 }
                 self.close_container();
                 // The loot rule need not open it again.
-                if !self.autoplay.looted.contains(&guid) {
-                    self.autoplay.looted.push(guid);
-                }
+                self.autoplay.looted.push(guid, std::time::Instant::now());
                 self.autoplay.say(
                     Doing::Recovering,
                     format!("took {took} item(s) back from the corpse"),
