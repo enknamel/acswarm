@@ -375,7 +375,10 @@ impl Ui {
                 self.renderer.update_texture(device, queue, *id, delta);
             }
         }
-        self.free = full.textures_delta.free.iter().copied().collect();
+        // Textures are freed only by `paint`, and egui names each one once,
+        // so keep the ones a pass that was not painted (a hidden window)
+        // asked to free. Until they are, the overlay wants a repaint.
+        self.free.extend(full.textures_delta.free.iter().copied());
         full.textures_delta.clear();
         let n_shapes = full.shapes.len();
         // Shapes compare by value (galleys included), which is cheap
@@ -523,5 +526,67 @@ mod tests {
         assert_eq!(ui.outgoing, vec!["hello there".to_string()]);
         assert!(ui.input.is_empty());
         assert!(!ui.chat_focus);
+    }
+
+    /// egui names a dropped texture for freeing once, on the pass after
+    /// it goes, and only `paint` frees it. A hidden window runs passes it
+    /// does not paint; the texture must still go on the next paint.
+    #[test]
+    fn textures_freed_while_unpainted_are_freed_on_next_paint() {
+        let gpu = match crate::gpu::Gpu::headless(320, 240) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("no GPU ({e:#}); skipping");
+                return;
+            }
+        };
+        let (device, queue) = (gpu.device(), gpu.queue());
+        let mut ui = Ui::new(device, gpu.format(), None, 320, 240);
+        let target = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("overlay"),
+            size: wgpu::Extent3d {
+                width: 320,
+                height: 240,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: gpu.format(),
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let view = target.create_view(&Default::default());
+        let paint = |ui: &mut Ui| {
+            let mut enc = device.create_command_encoder(&Default::default());
+            ui.paint(device, queue, &mut enc, &view);
+            queue.submit([enc.finish()]);
+        };
+        let mut handle = None;
+        ui.begin(
+            None,
+            &mut |ctx| {
+                handle.get_or_insert_with(|| {
+                    let image = egui::ColorImage::filled([4, 4], egui::Color32::RED);
+                    ctx.load_texture("swatch", image, egui::TextureOptions::default())
+                });
+            },
+            device,
+            queue,
+            320,
+            240,
+        );
+        paint(&mut ui);
+        let id = handle.as_ref().expect("loaded").id();
+        assert!(ui.renderer.texture(&id).is_some(), "uploaded");
+        drop(handle.take());
+        let unpainted = |ui: &mut Ui| ui.begin(None, &mut |_| {}, device, queue, 320, 240);
+        unpainted(&mut ui); // names the texture to free
+        unpainted(&mut ui); // names nothing
+        paint(&mut ui);
+        assert!(
+            ui.renderer.texture(&id).is_none(),
+            "freed on the next paint"
+        );
     }
 }

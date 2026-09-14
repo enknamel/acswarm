@@ -31,5 +31,10 @@ egui-winit = { version = "0.36", default-features = false, features = ["links"] 
 image = { version = "0.25", default-features = false, features = ["png"] }
 libc = "0.2"
 
+[dev-dependencies]
+# Live hal buffer counts, for the tests that check wgpu is not holding
+# uploads (they read 0 without it).
+wgpu = { version = "30", features = ["counters"] }
+
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 rfd = "0.15"

@@ -438,14 +438,24 @@ impl Gpu {
         Self::create(None, width, height)
     }
 
-    /// Push pending uploads to the GPU and free dropped resources. A
-    /// window does this every frame by presenting; headless sessions must
-    /// call it themselves, or every buffer created since the last submit
-    /// (particles are re-uploaded each tick) stays alive with its staging
-    /// copy until the final screenshot.
+    /// Push pending uploads to the GPU and free dropped resources. wgpu
+    /// holds every upload, its staging copy and every buffer dropped since
+    /// until the next queue submit, and particles are re-uploaded each
+    /// tick. Only a drawn frame submits: headless sessions must call this
+    /// themselves, or all of it stays alive until the final screenshot.
     pub fn flush(&self) {
         self.queue.submit(std::iter::empty());
         let _ = self.device.poll(wgpu::PollType::Poll);
+    }
+
+    /// End a window frame that was not drawn: the window is hidden, or
+    /// nothing on it changed. Every frame not presented must call this.
+    /// A hidden window still ticks, and landblocks, meshes, egui textures
+    /// and particles still upload; without a submit wgpu held them all,
+    /// and the first frame drawn on selecting the window again submitted
+    /// and freed the whole time hidden at once, a long freeze.
+    pub fn idle_frame(&self) {
+        self.flush()
     }
 
     fn create(window: Option<Arc<Window>>, width: u32, height: u32) -> Result<Self> {
@@ -1913,5 +1923,93 @@ fn resample(img: &Rgba, width: u32, height: u32) -> Rgba {
         width,
         height,
         pixels,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `groups` sprite groups of `n` particles each.
+    fn draws(groups: u32, n: usize) -> Vec<ParticleDraw> {
+        (0..groups)
+            .map(|k| ParticleDraw {
+                material: MaterialKey::Solid(0xFF00_0000 | k),
+                additive: false,
+                instances: vec![ParticleInstance::new([0.0; 3], [1.0; 2], [1.0; 4], 0, 0.0); n],
+            })
+            .collect()
+    }
+
+    /// Buffers the backend holds right now. Only counted with wgpu's
+    /// `counters` feature, which the dev-dependencies turn on.
+    fn live_buffers(gpu: &Gpu) -> isize {
+        gpu.device().get_internal_counters().hal.buffers.read()
+    }
+
+    /// Wait for the GPU to finish what was submitted, and free it. This
+    /// submits nothing, so uploads still waiting for a submit stay held.
+    fn wait(gpu: &Gpu) {
+        let _ = gpu.device().poll(wgpu::PollType::wait_indefinitely());
+    }
+
+    /// Submit, wait for the GPU, and submit again so what it finished is
+    /// freed.
+    fn settle(gpu: &Gpu) {
+        gpu.flush();
+        wait(gpu);
+        gpu.flush();
+    }
+
+    /// A hidden window ticks at 10 fps and draws nothing, so a minute
+    /// hidden in town is 600 ticks of particle uploads with no frame to
+    /// submit them. Undrawn frames must not let wgpu hold those.
+    #[test]
+    fn skipped_frames_do_not_hold_particle_uploads() {
+        let mut gpu = match Gpu::headless(64, 64) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("no GPU ({e:#}); skipping");
+                return;
+            }
+        };
+        const TICKS: usize = 600;
+        const GROUPS: u32 = 5;
+        const PARTICLES: usize = 100;
+        gpu.set_particles(draws(GROUPS, PARTICLES), |_| None);
+        settle(&gpu);
+
+        // What a hidden window did before `idle_frame`: upload, never
+        // submit.
+        let base = live_buffers(&gpu);
+        for _ in 0..TICKS {
+            gpu.set_particles(draws(GROUPS, PARTICLES), |_| None);
+        }
+        wait(&gpu);
+        let backlog = live_buffers(&gpu) - base;
+        let t = Instant::now();
+        settle(&gpu);
+        let release_ms = t.elapsed().as_secs_f64() * 1e3;
+
+        let base = live_buffers(&gpu);
+        for _ in 0..TICKS {
+            gpu.set_particles(draws(GROUPS, PARTICLES), |_| None);
+            gpu.idle_frame();
+        }
+        // This loop outruns the GPU where a window ticks every 100 ms, so
+        // let it finish first: only what no submit reached is counted.
+        wait(&gpu);
+        let held = live_buffers(&gpu) - base;
+        eprintln!(
+            "{TICKS} ticks of {GROUPS} groups x {PARTICLES}: {backlog} buffers held with no \
+             submit (freed in {release_ms:.1} ms), {held} with idle_frame"
+        );
+        // At least a buffer a group a tick, or the counters are not
+        // counting and `held` proves nothing.
+        assert!(
+            backlog >= (TICKS * GROUPS as usize) as isize,
+            "the backlog should be counted: {backlog}"
+        );
+        assert!(held <= 40, "{held} buffers held across {TICKS} idle frames");
     }
 }
