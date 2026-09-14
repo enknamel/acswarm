@@ -4599,7 +4599,15 @@ impl Client {
 
     /// See that the bow has something to shoot: the ammunition chosen
     /// for the target if it is still carried, else whatever fits. True
-    /// when something is wielded or was already.
+    /// when there is something to shoot -- in the slot, or on its way
+    /// into it.
+    ///
+    /// Not "did a wield go out this tick": the one caller reads a false
+    /// as "no ammunition" and goes off to fletch some (see
+    /// [`Client::autoplay_craft_ammo`]). A wield held back because the
+    /// server is busy is a tick's wait, not an empty quiver, and reading
+    /// it as one dropped an archer with a full quiver into peace stance
+    /// to make arrows it was already carrying.
     fn ready_ammo(&mut self) -> bool {
         if self.wielded_ammo().is_some() {
             // The chosen kind, if it is not the one in the slot.
@@ -4612,7 +4620,13 @@ impl Client {
         }
         if let Some(want) = self.autoplay.wanted_ammo {
             if self.world.is_carried(want) {
-                return self.wield_guid(want);
+                // Sent, or waiting on a busy tick: either way there is
+                // something to shoot and nothing to make. Only a stack
+                // the server keeps refusing to wield is an answer of
+                // "not this kind", and then another stack is tried.
+                if self.wield_guid(want) || !self.wield_held_off(want) {
+                    return true;
+                }
             }
         }
         self.wield_ammo()
@@ -9303,22 +9317,22 @@ mod tests {
 
     #[test]
     fn nothing_is_sent_to_move_an_item_while_the_server_has_us_busy() {
-        // ACE refuses every inventory move made while the character is
-        // busy and spends two messages saying so -- YoureTooBusy and an
+        // ACE refuses a take made while the character is busy and spends
+        // two messages saying so -- YoureTooBusy and an
         // InventoryServerSaveFailed with nothing in it. Nine characters
-        // bought 89 of those pairs in ten minutes.
+        // bought 89 of those pairs in ten minutes, taking from a body
+        // with a spell in the air.
         let Some(mut c) = hands_free() else {
             return;
         };
         const WAND: u32 = 0x8000_0102;
         const LOOT: u32 = 0x8000_0105;
         let now = Instant::now();
-        c.attack_pending = true;
-        c.last_attack = now;
+        c.autoplay.cast_sent = Some(now);
         assert!(c.server_busy(now));
 
         assert!(!c.wield_guid(WAND), "the wand waits for a free tick");
-        assert_eq!(c.autoplay.wield_asked, None, "nothing sent mid-swing");
+        assert_eq!(c.autoplay.wield_asked, None, "nothing sent mid-cast");
 
         c.loot_queue.push_back(LOOT);
         c.tick_loot(now);
@@ -9329,12 +9343,69 @@ mod tests {
             "and keeps its place in the queue"
         );
 
-        // The swing lands, and both go out.
+        // A swing in the air is a different matter. ACE sets no IsBusy
+        // for one -- nothing in its melee or missile path does, and the
+        // wield handler does not read it at all -- so the take goes out.
+        // The wield still waits, because a wield mid-swing lands and
+        // cancels the swing doing it.
+        c.autoplay.cast_sent = None;
+        c.attack_pending = true;
+        c.last_attack = now;
+        assert!(!c.server_busy(now), "a swing is not the server being busy");
+        assert!(c.wield_must_wait(WAND, now), "not worth a cancelled swing");
+        assert!(!c.wield_guid(WAND));
+        c.tick_loot(now);
+        assert_eq!(
+            c.loot_inflight.map(|(g, _)| g),
+            Some(LOOT),
+            "the take was held back for a rule the server does not have"
+        );
+        assert!(c.loot_queue.is_empty());
+
+        // The swing lands, and the wand goes out too.
         c.attack_pending = false;
         assert!(c.wield_guid(WAND));
-        c.tick_loot(now);
-        assert_eq!(c.loot_inflight.map(|(g, _)| g), Some(LOOT));
-        assert!(c.loot_queue.is_empty());
+    }
+
+    #[test]
+    fn a_busy_tick_is_not_an_empty_quiver() {
+        // The one caller of `ready_ammo` reads a false as "no
+        // ammunition" and goes off to fletch some, dropping out of
+        // combat stance to do it. With the busy test on every wield, a
+        // shot still unanswered or a spell in the air made every tick a
+        // false one, and an archer with a full pack was sent to make
+        // arrows it was already carrying.
+        let Some(mut c) = character_of_level(20) else {
+            return;
+        };
+        const ARROWS: u32 = 0x8000_0201;
+        let me = c.world.player_guid;
+        c.world.objects.insert(
+            ARROWS,
+            ac_world::WorldObject {
+                guid: ARROWS,
+                name: "Arrow".into(),
+                stack_size: 100,
+                valid_locations: ac_world::equip::MISSILE_AMMO,
+                container: me,
+                ..Default::default()
+            },
+        );
+        c.autoplay.wanted_ammo = Some(ARROWS);
+        assert!(c.wielded_ammo().is_none(), "the slot is empty");
+
+        // A spell in the air: the wield waits, and the quiver is still
+        // not empty.
+        let now = Instant::now();
+        c.autoplay.cast_sent = Some(now);
+        assert!(c.server_busy(now));
+        assert!(c.ready_ammo(), "a busy tick read as an empty quiver");
+        assert_eq!(c.autoplay.wield_asked, None, "nothing sent mid-cast");
+
+        // The spell lands and the arrows go into the slot.
+        c.autoplay.cast_sent = None;
+        assert!(c.ready_ammo());
+        assert_eq!(c.autoplay.wield_asked.map(|(g, _)| g), Some(ARROWS));
     }
 
     #[test]

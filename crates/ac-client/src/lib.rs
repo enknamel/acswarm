@@ -2554,28 +2554,42 @@ impl Client {
         }
     }
 
-    /// Whether the server has the character busy, so that anything sent
-    /// now to move an item would be thrown away.
+    /// Whether the server has the character busy, so that a take sent
+    /// now would be thrown away.
     ///
-    /// ACE refuses every take, wield and put made while `IsBusy` is set
-    /// and answers with YoureTooBusy plus a wasted
-    /// InventoryServerSaveFailed (`Player_Inventory.cs`,
-    /// `DoHandleActionPutItemInContainer`). A swing in the air sets it,
-    /// and so does anything the server owes us a UseDone for -- a spell
-    /// being wound up, a counter's sale. The corpse walk has always
-    /// broken the fight off before it opens anything for this reason;
-    /// the takes and the wields did not ask, and nine characters bought
-    /// eighty-nine "You're too busy" pairs in ten minutes by it.
+    /// ACE refuses a take made while `IsBusy` is set and answers with
+    /// YoureTooBusy plus a wasted InventoryServerSaveFailed
+    /// (`Player_Inventory.cs`, `HandleActionPutItemInContainer_Verify`).
+    /// What sets `IsBusy` is what the server owes us a UseDone for: a
+    /// spell being wound up (`MagicState.OnCastStart`), a recipe, a
+    /// counter's sale. Nine characters bought eighty-nine "You're too
+    /// busy" pairs in ten minutes taking from a body with a spell in the
+    /// air.
+    ///
+    /// A swing is not one of them, whatever this used to say: nothing in
+    /// ACE's melee or missile path sets `IsBusy`, and the wield handler
+    /// does not read it at all -- the check in
+    /// `HandleActionGetAndWieldItem` is commented out. The reason not to
+    /// change hands mid-swing is a different one and is stated where it
+    /// belongs (see [`Client::wield_must_wait`]).
     pub fn server_busy(&self, now: Instant) -> bool {
-        attack_unanswered(self.attack_pending, self.last_attack, now)
-            || self.autoplay.cast_in_flight(now)
+        self.autoplay.cast_in_flight(now)
     }
 
-    /// Whether a wield of `guid` sent now would be thrown away: the item
-    /// is inside the wait a refusal earned it, or the server has the
-    /// character busy. Either way the errand keeps and goes out later.
+    /// Whether a wield of `guid` sent now would be wasted: the item is
+    /// inside the wait a refusal earned it, the server has the character
+    /// busy, or there is a swing in the air. Either way the errand keeps
+    /// and goes out later.
+    ///
+    /// The swing is not the server refusing anything -- it would make
+    /// the wield, and cancel the attack doing it (see
+    /// `autoplay::change_of_hands_waits`). A weapon is not worth a cancelled
+    /// swing when the gap between two of them is a few hundred
+    /// milliseconds away.
     pub fn wield_must_wait(&self, guid: u32, now: Instant) -> bool {
-        self.wield_held_off(guid) || self.server_busy(now)
+        self.wield_held_off(guid)
+            || self.server_busy(now)
+            || attack_unanswered(self.attack_pending, self.last_attack, now)
     }
 
     /// Whether this item is inside the wait a refused wield earned it.
