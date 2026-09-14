@@ -211,6 +211,60 @@ fn answered_with_nothing(
         && done.is_some_and(|(err, at)| err == 0 && at > asked)
         && told.is_none_or(|at| at <= asked)
 }
+
+/// Why the server would not open a body.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CorpseRefusal {
+    /// Someone has it open this moment. The server hands a container to
+    /// one viewer at a time and turns the rest away outright
+    /// (`Container.InUseMessage`); that viewer is usually done with it
+    /// in a moment.
+    InUse,
+    /// It is the killer's for now (`Corpse.Open`). A monster's body
+    /// opens to everyone once it is half rotted.
+    NotYetOurs,
+    /// It is the killer's for good: a body that made a rare, or a
+    /// player killer's doing. Neither is ever shared, however long it
+    /// lies there.
+    NeverOurs,
+}
+
+/// Which body the server's words named, and why it would not open it.
+///
+/// Matched on the English because that is all there is to match on:
+/// every one of these arrives as a transient string, which carries no
+/// error code. They are what ACE answers an open with and nothing else,
+/// so a line that reads this way was an answer to an open -- of a
+/// container, at least. That it was *our* body's open is for the caller
+/// to say (see [`Autoplay::corpse_refused`]); the in-use words are sent
+/// for any container, a chest as readily as a corpse.
+fn corpse_refusal(text: &str) -> Option<(&str, CorpseRefusal)> {
+    // "The Corpse of Hellion is already in use by someone else!" -- or
+    // by a name, on a server that tells you whose (`container_opener_name`).
+    if let Some((name, _who)) = text
+        .strip_prefix("The ")
+        .and_then(|s| s.strip_suffix('!'))
+        .and_then(|s| s.split_once(" is already in use by "))
+    {
+        return Some((name, CorpseRefusal::InUse));
+    }
+    // "You do not yet have the right to loot the Corpse of Hellion."
+    if let Some(name) = text.strip_prefix("You do not yet have the right to loot the ") {
+        return Some((
+            name.strip_suffix('.').unwrap_or(name),
+            CorpseRefusal::NotYetOurs,
+        ));
+    }
+    // "You may not loot the Corpse of Hellion because ..." -- the body
+    // made a rare, or the death was a player killer's doing.
+    if let Some((name, _why)) = text
+        .strip_prefix("You may not loot the ")
+        .and_then(|s| s.split_once(" because "))
+    {
+        return Some((name, CorpseRefusal::NeverOurs));
+    }
+    None
+}
 /// Least time between two casts of the same buff.
 const BUFF_EVERY: Duration = Duration::from_millis(1500);
 /// A target that takes no damage for this long is let go.
@@ -894,6 +948,20 @@ const UNDER_ATTACK: Duration = Duration::from_secs(4);
 /// takes the default of five minutes and counts down from there
 /// (`WorldObject_Decay`), so this is the whole window there is.
 pub(crate) const CORPSE_LIFE: Duration = Duration::from_secs(300);
+
+/// How old a monster's body has to be before anyone may loot it. ACE
+/// opens one to everyone once what is left of its life is under the
+/// half life (`Corpse.HasPermission`, `HalfLife` 180 s), which on a body
+/// given the default five minutes is two minutes after it fell. A body
+/// we never saw appear is taken as fresh, so this is the longest we ever
+/// wait rather than the shortest.
+const CORPSE_SHARED_AFTER: Duration = Duration::from_secs(120);
+
+/// How long to leave a body someone else has open. Long enough that the
+/// two of us are not asking over each other, short enough to have it the
+/// moment they are done: emptying one takes a few seconds. It doubles
+/// from there like any other wait.
+const CORPSE_IN_USE_AGAIN: Duration = Duration::from_secs(3);
 
 /// How close to rotting a corpse has to be before it is worth breaking
 /// off for. Inside this there is no second chance.
@@ -1659,9 +1727,11 @@ pub struct Autoplay {
     /// When something last hit the character. A fight that has come to
     /// it is fought first, body owed or not.
     pub(crate) last_hit_us: Option<Instant>,
-    /// Corpses that would not open. A corpse is locked to the group
-    /// that killed it until it has rotted a while, so this is a
-    /// "later", not a "never", and the wait grows if it keeps saying no.
+    /// Corpses that would not open, and how long to leave each. A
+    /// corpse is locked to the group that killed it until it has rotted
+    /// a while, so this is usually a "later", not a "never", and the
+    /// wait grows if it keeps saying no. How long a "later" is, when the
+    /// server said why, is [`Autoplay::corpse_refused`]'s to say.
     pub(crate) shelved: crate::did::Patience<u32>,
     /// Corpses set aside for want of room to carry what is left on them,
     /// and what the lightest of that weighs. Such a body waits on room,
@@ -1838,6 +1908,81 @@ impl Autoplay {
         self.corpse = None;
         self.appraising = false;
         self.fresh_loot_run();
+    }
+
+    /// Words from the server in answer to the ask to open the body in
+    /// hand, `in_hand` being that body's name as the world has it: let
+    /// the body go and leave it alone for as long as the words are
+    /// worth. True if the words were about it.
+    ///
+    /// The server says why it will not open a body, and the client used
+    /// to throw the words away and wait out [`loot_wait`] instead, then
+    /// ask again three more times and be refused in the same words. Nine
+    /// characters hunting one spot sent nine hundred and thirty such
+    /// asks against a thousand refusals that had already arrived, each
+    /// about a third of a second after the ask.
+    ///
+    /// Guarded as tightly as a quiet answer is (see
+    /// [`answered_with_nothing`]): only words the server stamped after
+    /// this ask went out -- `told` is when it last put anything in words
+    /// -- and only words naming the body in hand. Words about a chest,
+    /// or about a body one of the others is working, change nothing.
+    pub(crate) fn corpse_refused(
+        &mut self,
+        text: &str,
+        in_hand: &str,
+        told: Option<Instant>,
+        now: Instant,
+    ) -> bool {
+        let Some((guid, asked, ..)) = self.corpse else {
+            return false;
+        };
+        let Some((named, why)) = corpse_refusal(text) else {
+            return false;
+        };
+        if named != in_hand || told.is_none_or(|at| at <= asked) {
+            return false;
+        }
+        match why {
+            CorpseRefusal::InUse => self.shelved.hold(guid, CORPSE_IN_USE_AGAIN, now),
+            CorpseRefusal::NotYetOurs => {
+                // Until it has half rotted and becomes everyone's.
+                let age = now.saturating_duration_since(self.corpse_first_seen(guid, now));
+                match CORPSE_SHARED_AFTER
+                    .checked_sub(age)
+                    .filter(|left| !left.is_zero())
+                {
+                    Some(left) => self.shelved.hold(guid, left, now),
+                    // Old enough to be everyone's and still refused, so
+                    // it is not the half life keeping us out: back off
+                    // the way anything blocked does.
+                    None => self.shelved.note(
+                        guid,
+                        &crate::did::Did::blocked("it is not ours to loot"),
+                        now,
+                    ),
+                }
+            }
+            // Nobody but the killer will ever open it. Left for good
+            // rather than waited on: it still lies there, and every wait
+            // that runs out is another walk back to it.
+            CorpseRefusal::NeverOurs => self.shelved.note(
+                guid,
+                &crate::did::Did::refused("it is the killer's alone"),
+                now,
+            ),
+        }
+        match (why, self.shelved.waited(&guid)) {
+            (CorpseRefusal::NeverOurs, _) | (_, None) => {
+                tracing::info!("autoplay: {in_hand} ({guid:#010x}): {text} -- leaving it");
+            }
+            (_, Some(wait)) => tracing::info!(
+                "autoplay: {in_hand} ({guid:#010x}): {text} -- trying again in {} s",
+                wait.as_secs().max(1)
+            ),
+        }
+        self.let_go_of_corpse();
+        true
     }
 
     /// What becomes of a corpse the loot rules have shut, by what they
@@ -5332,6 +5477,24 @@ impl Client {
         })
     }
 
+    /// A line from the server while a body is waiting to open. One
+    /// refusing that body is acted on at once rather than waited out
+    /// (see [`Autoplay::corpse_refused`]), and the walk to it, if there
+    /// was one, ends with it.
+    pub(crate) fn hear_corpse_refusal(&mut self, text: &str, now: Instant) {
+        let Some((guid, ..)) = self.autoplay.corpse else {
+            return;
+        };
+        // What the server calls it. Without the name there is no telling
+        // this body's refusal from another's, so nothing is done.
+        let Some(name) = self.world.objects.get(&guid).map(|o| o.name.clone()) else {
+            return;
+        };
+        if self.autoplay.corpse_refused(text, &name, self.told, now) {
+            self.stop_walking_to_loot();
+        }
+    }
+
     /// A line saying a shot got to something and did not hurt it (see
     /// [`arrived_unharmed`]): noted against the target it names.
     pub(crate) fn hear_arrival(&mut self, text: &str) {
@@ -8029,6 +8192,136 @@ mod tests {
         ap.corpse_shut(emptied, &Did::Done, None, t0);
         assert!(ap.looted.contains(&emptied));
         assert!(!ap.shelved.held(&emptied, t0));
+    }
+
+    #[test]
+    fn the_server_names_the_body_it_will_not_open() {
+        assert_eq!(
+            corpse_refusal("The Corpse of Hellion is already in use by someone else!"),
+            Some(("Corpse of Hellion", CorpseRefusal::InUse))
+        );
+        // A server that tells you whose (`container_opener_name`).
+        assert_eq!(
+            corpse_refusal("The Chest is already in use by +Brynna!"),
+            Some(("Chest", CorpseRefusal::InUse))
+        );
+        assert_eq!(
+            corpse_refusal("You do not yet have the right to loot the Corpse of Hellion."),
+            Some(("Corpse of Hellion", CorpseRefusal::NotYetOurs))
+        );
+        assert_eq!(
+            corpse_refusal(
+                "You may not loot the Corpse of Hellion because the Corpse of Hellion \
+                 has generated a rare item."
+            ),
+            Some(("Corpse of Hellion", CorpseRefusal::NeverOurs))
+        );
+        assert_eq!(
+            corpse_refusal(
+                "You may not loot the Corpse of Biaka because the death was caused by \
+                 a player killer."
+            ),
+            Some(("Corpse of Biaka", CorpseRefusal::NeverOurs))
+        );
+        // Everything else the server says while a body waits to open.
+        assert_eq!(corpse_refusal("You're too busy"), None);
+        assert_eq!(corpse_refusal("The Corpse of Hellion is open"), None);
+        assert_eq!(corpse_refusal("You do not have permission to loot"), None);
+    }
+
+    #[test]
+    fn the_words_a_body_is_refused_in_say_how_long_to_leave_it() {
+        // 1,044 refusals arrived in that run, a third of a second after
+        // the ask, and every one of them was thrown away: the take-up
+        // ended on a clock instead, and asked again three times more.
+        let t0 = Instant::now();
+        let name = "Corpse of Hellion";
+        let answered = t0 + Duration::from_millis(360);
+        let in_use = format!("The {name} is already in use by someone else!");
+        let not_ours = format!("You do not yet have the right to loot the {name}.");
+        let (held, locked, rare) = (0x8000_1221, 0x8000_1222, 0x8000_1223);
+        let mut ap = Autoplay {
+            corpse_seen: vec![(held, t0), (locked, t0), (rare, t0)],
+            ..Default::default()
+        };
+
+        // Someone is inside it: let it go and have it the moment they
+        // are done, not in the half minute anything blocked waits.
+        ap.take_up_corpse(held, t0, LOOT_TIMEOUT);
+        assert!(ap.corpse_refused(&in_use, name, Some(answered), answered));
+        assert_eq!(ap.corpse, None, "still holding a body it cannot open");
+        assert_eq!(ap.shelved.waited(&held), Some(CORPSE_IN_USE_AGAIN));
+        assert!(ap.shelved.held(
+            &held,
+            answered + CORPSE_IN_USE_AGAIN - Duration::from_millis(1)
+        ));
+        assert!(!ap.shelved.held(&held, answered + CORPSE_IN_USE_AGAIN));
+
+        // The killer's for now: left until it has half rotted, counted
+        // from when it was first seen.
+        ap.take_up_corpse(locked, t0, LOOT_TIMEOUT);
+        assert!(ap.corpse_refused(&not_ours, name, Some(answered), answered));
+        assert_eq!(ap.corpse, None);
+        assert_eq!(
+            ap.shelved.waited(&locked),
+            Some(CORPSE_SHARED_AFTER - Duration::from_millis(360))
+        );
+        assert!(ap
+            .shelved
+            .held(&locked, t0 + CORPSE_SHARED_AFTER - Duration::from_millis(1)));
+        assert!(!ap.shelved.held(&locked, t0 + CORPSE_SHARED_AFTER));
+
+        // The killer's for good: not waited on at all.
+        ap.take_up_corpse(rare, t0, LOOT_TIMEOUT);
+        let words =
+            format!("You may not loot the {name} because the {name} has generated a rare item.");
+        assert!(ap.corpse_refused(&words, name, Some(answered), answered));
+        assert!(ap.shelved.held(&rare, t0 + CORPSE_LIFE));
+    }
+
+    #[test]
+    fn a_refusal_about_another_body_leaves_the_one_in_hand_alone() {
+        let t0 = Instant::now();
+        let body = 0x8000_1221;
+        let asked = t0 + Duration::from_secs(1);
+        let answered = asked + Duration::from_millis(360);
+        let mut ap = Autoplay {
+            corpse_seen: vec![(body, t0)],
+            ..Default::default()
+        };
+        ap.take_up_corpse(body, asked, LOOT_TIMEOUT);
+
+        // Nine characters stand in one huddle and the server answers all
+        // of them: words about a body this character is not working
+        // change nothing.
+        assert!(!ap.corpse_refused(
+            "The Corpse of Drudge Slave is already in use by someone else!",
+            "Corpse of Hellion",
+            Some(answered),
+            answered,
+        ));
+        // Nor do words about something that is not a refusal.
+        assert!(!ap.corpse_refused(
+            "You're too busy",
+            "Corpse of Hellion",
+            Some(answered),
+            answered
+        ));
+        // Nor an answer that came in before this ask went out: it was
+        // the ask before it that was refused.
+        let words = "You do not yet have the right to loot the Corpse of Hellion.";
+        assert!(!ap.corpse_refused(words, "Corpse of Hellion", Some(asked), answered));
+        assert!(!ap.corpse_refused(words, "Corpse of Hellion", None, answered));
+        assert_eq!(
+            ap.corpse.map(|c| c.0),
+            Some(body),
+            "let a body go for nothing"
+        );
+        assert!(ap.shelved.is_empty(), "set a body aside for nothing");
+
+        // The same words, stamped after the ask, are this body's.
+        assert!(ap.corpse_refused(words, "Corpse of Hellion", Some(answered), answered));
+        assert_eq!(ap.corpse, None);
     }
 
     #[test]

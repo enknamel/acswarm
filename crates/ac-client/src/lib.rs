@@ -415,7 +415,10 @@ pub struct Client {
     /// The tick the server last put something in words: a transient
     /// string or a weenie error. "You do not yet have the right to loot"
     /// is one, and it is what tells a corpse that is locked from one that
-    /// is not there.
+    /// is not there. The words themselves are read where they say what to
+    /// do (see `autoplay::corpse_refused`); this says which ask they
+    /// answered, since a tick's words cannot be an answer to that same
+    /// tick's ask.
     pub(crate) told: Option<Instant>,
     /// Route steering toward `move_to` when the straight line to it is
     /// blocked (see `route`).
@@ -1994,6 +1997,10 @@ impl Client {
             // And on a summon: an essence turned away for good is set
             // aside at once (see `summoning`).
             self.hear_summoning(&line.text, Instant::now());
+            // And on a body that will not open: the server says whether
+            // someone is in it or it is not ours yet, and the answer is
+            // a different wait (see `autoplay::corpse_refused`).
+            self.hear_corpse_refusal(&line.text, Instant::now());
         }
         let text = match (op, line.sender.is_empty()) {
             _ if line.kind == ac_net::messages::turbine::KIND => {

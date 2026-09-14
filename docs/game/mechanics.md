@@ -562,6 +562,19 @@ list instead of entering). Headless: `acclient --create NAME` and `acbot
   Recall / Summon.
 * Player Killer status (red) allows attacking other PKs and makes corpses
   lootable; PK Lite (pink) is PvP without death penalties.
+* **A monster's corpse** lasts five minutes (ACE's default TimeToRot,
+  started at its first heartbeat) and belongs to whoever landed the
+  killing blow. It opens to everyone else once it has half rotted --
+  under the 180 s HalfLife, so two minutes after it fell -- or as soon
+  as the killer has looted it, or at once to a fellowship with loot
+  sharing on. Until then an open is answered with a transient string,
+  "You do not yet have the right to loot the {name}."; a body that made
+  a rare, or one from a player killer's death, is never shared and says
+  "You may not loot the {name} because ...". A container the server has
+  already given to one viewer refuses every other with "The {name} is
+  already in use by someone else!" -- one viewer at a time, no queue.
+  These are the server's whole answer to an open: there is no error code
+  with them.
 
 ## 5. Inventory, items, burden
 
