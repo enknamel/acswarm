@@ -922,6 +922,75 @@ pub struct Team {
 /// the fight comes first. Following is the follower's job.
 const FOLLOW_BREAK: f32 = 10.0;
 
+/// The character options a teammate keeps on, by the name the option
+/// table knows them by (see `crate::options`). Every one of them is
+/// something the server checks before it will let the party work as
+/// one; the reasons are with the code that turns them on.
+const TEAM_OPTIONS: [&str; 4] = [
+    "accept fellowship",
+    "automatically accept fellowship",
+    "let other players give you items",
+    "share fellowship loot",
+];
+
+/// The shortest gap between two fellowship invitations. Nine characters
+/// arriving together are nine invitations, and they used to go out one
+/// every five seconds -- forty-one seconds before the last one was in,
+/// which is the very stretch in which nobody may loot anyone else's
+/// kill. ACE has no rate limit on recruiting that I can find: the only
+/// refusal is against a busy member (`Entity/Fellowship.cs`,
+/// `fellow_busy_no_recruit`). That is read from the source and not
+/// tested against a live server, so a small gap is kept rather than
+/// firing nine invitations into one frame.
+const RECRUIT_FLOOR: Duration = Duration::from_millis(500);
+
+/// How long the leader waits for the server to answer a founding
+/// before asking for one again. The answer is the fellowship itself,
+/// arriving as a full update; until it comes there is nothing to say
+/// whether the ask was heard, and asking twice would be two
+/// fellowships.
+const FOUNDING_WAIT: Duration = Duration::from_secs(5);
+
+/// How far off a mate may stand and still be asked in, metres. The
+/// server sets no distance on recruiting; this is about asking the ones
+/// that are here rather than one still walking in from the last town.
+const RECRUIT_RANGE: f32 = 25.0;
+
+/// How long one invitee waits before being asked again. Nothing comes
+/// back from an invitation that was turned down for a busy member, and
+/// the news that one was accepted comes the long way round -- the mate
+/// tells the board it is in a fellowship -- so a wait is the only way
+/// to tell "not yet" from "never". It is the invitee that waits, not
+/// the leader: the others are asked meanwhile.
+const RECRUIT_AGAIN: Duration = Duration::from_secs(5);
+
+/// Who to ask into the fellowship next, out of the mates standing by:
+/// the nearest one that has not been asked in the last
+/// [`RECRUIT_AGAIN`]. `None` when there is nobody to ask, or when the
+/// last invitation went out inside [`RECRUIT_FLOOR`].
+///
+/// `waiting` is (guid, metres away), `asked` is when each invitee was
+/// last sent an invitation.
+fn next_invitee(
+    waiting: &[(u32, f32)],
+    asked: &[(u32, Instant)],
+    last_sent: Option<Instant>,
+    now: Instant,
+) -> Option<u32> {
+    if last_sent.is_some_and(|t| now.duration_since(t) < RECRUIT_FLOOR) {
+        return None;
+    }
+    waiting
+        .iter()
+        .filter(|(guid, _)| {
+            !asked
+                .iter()
+                .any(|(g, t)| g == guid && now.duration_since(*t) < RECRUIT_AGAIN)
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(guid, _)| *guid)
+}
+
 /// How often one character hands something to another. The server
 /// takes one give at a time and answers in its own time.
 const GIVE_EVERY: Duration = Duration::from_millis(700);
@@ -1823,7 +1892,26 @@ pub struct Autoplay {
     /// When each corpse was first seen, so the ones about to rot can be
     /// emptied first. A corpse we never saw appear is taken as fresh.
     pub(crate) corpse_seen: Vec<(u32, Instant)>,
+    /// When the last fellowship invitation went out, whoever it was to
+    /// (see [`RECRUIT_FLOOR`]).
     last_recruit: Option<Instant>,
+    /// When each mate was last asked into the fellowship, so that one
+    /// that has not answered waits its turn while the others are asked
+    /// (see [`RECRUIT_AGAIN`]).
+    recruited: Vec<(u32, Instant)>,
+    /// When this character asked for the fellowship it leads to be
+    /// founded. It asks only once loot sharing has taken, so a
+    /// fellowship it founded is the one fellowship it can vouch for:
+    /// ACE reads the leader's "share fellowship loot" option once, in
+    /// the `Fellowship` constructor, nothing re-reads it, and nothing
+    /// on the wire says afterwards whether a fellowship shares loot.
+    /// It is kept as a time because the server answers a founding with
+    /// a fellowship, in its own time, and one ask is enough until then
+    /// (see [`FOUNDING_WAIT`]).
+    founded: Option<Instant>,
+    /// Whether the leader has already said that the fellowship it is in
+    /// may not share loot, so it says it once rather than every note.
+    said_not_sharing: bool,
     /// Where the journey after a far-off leader was bound, to plan
     /// again once it has moved on.
     follow_trip: Option<glam::Vec2>,
@@ -5752,11 +5840,18 @@ impl Client {
         // and lets the others give it items: that is how salvage reaches
         // whoever salvages, and the server refuses a gift to anyone with
         // the option off (ACE `CharacterOptions1.AllowGive`).
-        for name in [
-            "accept fellowship",
-            "automatically accept fellowship",
-            "let other players give you items",
-        ] {
+        //
+        // Loot sharing is the fourth, and it is the leader's option that
+        // counts: ACE takes it off whoever founds the fellowship, once,
+        // in the `Fellowship` constructor, and `Corpse.HasPermission`
+        // lets a fellow open a fresh body through that clause alone.
+        // With it off, nine characters hunting together told each other
+        // "You do not yet have the right to loot" 278 times in ten
+        // minutes -- only the killer could open its own kill, for the
+        // first two minutes of the body's life. Every teammate keeps it
+        // on, not just the one leading today, because the fellowship's
+        // leader changes with whoever is about.
+        for name in TEAM_OPTIONS {
             if let Some(o) = crate::options::option_by_name(name) {
                 if !self.option_enabled(o) {
                     self.set_option(o, true);
@@ -5775,8 +5870,17 @@ impl Client {
         }
     }
 
-    /// The leader brings the others into a fellowship, one invitation
-    /// every few seconds. True when one went out.
+    /// Whether this character's own options say it shares fellowship
+    /// loot. It is the founder's answer to this, at the moment it
+    /// founds, that decides whether the fellowship shares loot at all
+    /// (ACE `Entity/Fellowship.cs`, the constructor).
+    fn shares_fellowship_loot(&self) -> bool {
+        crate::options::option_by_name("share fellowship loot")
+            .is_some_and(|o| self.option_enabled(o))
+    }
+
+    /// The leader founds the fellowship and brings the others into it,
+    /// one invitation at a time. True when one went out.
     fn autoplay_fellowship(&mut self, now: Instant) -> bool {
         let team = self.autoplay.config.team.clone();
         if !team.enabled || !team.fellowship || !self.autoplay.team.leader {
@@ -5785,31 +5889,106 @@ impl Client {
         let Some(me) = self.player.as_ref().map(|p| p.world_position()) else {
             return false;
         };
-        if self
-            .autoplay
-            .last_recruit
-            .is_some_and(|t| now.duration_since(t) <= Duration::from_secs(5))
-        {
-            return false;
-        }
-        let mates: Vec<(u32, String)> = self
+        // Whoever is already in, first-hand: the server tells the leader
+        // who has joined before the mate gets round to telling the board.
+        let joined: Vec<u32> = self
+            .world
+            .fellowship
+            .as_ref()
+            .map(|f| f.members.iter().map(|m| m.guid).collect())
+            .unwrap_or_default();
+        let waiting: Vec<(u32, f32)> = self
             .autoplay
             .team
             .mates
             .iter()
-            .filter(|m| !m.in_fellowship && m.guid != 0 && m.world.distance(me) < 25.0)
-            .map(|m| (m.guid, m.name.clone()))
+            .filter(|m| !m.in_fellowship && m.guid != 0 && !joined.contains(&m.guid))
+            .map(|m| (m.guid, m.world.distance(me)))
+            .filter(|(_, away)| *away < RECRUIT_RANGE)
             .collect();
-        let Some((guid, name)) = mates.first().cloned() else {
-            return false;
-        };
         if self.world.fellowship.is_none() {
+            // A founding already asked for and not yet answered: the
+            // server makes the fellowship and tells us about it in its
+            // own time, and two foundings would be two fellowships.
+            if self
+                .autoplay
+                .founded
+                .is_some_and(|t| now.duration_since(t) < FOUNDING_WAIT)
+            {
+                return false;
+            }
+            // Nothing came back, or the fellowship we made has gone:
+            // either way there is none to vouch for now.
+            self.autoplay.founded = None;
+            self.autoplay.said_not_sharing = false;
+            if waiting.is_empty() {
+                return false;
+            }
+            // Nothing re-reads the option once the fellowship exists, so
+            // a fellowship founded a moment too early shares no loot for
+            // as long as it lives. The option and the founding go out on
+            // the one ordered queue of actions and the server works
+            // through them in that order, so all this has to wait for is
+            // our own asking, which `autoplay_accept_invites` does at the
+            // top of the same tick.
+            if !self.shares_fellowship_loot() {
+                self.autoplay.note(
+                    "waiting for loot sharing before founding the fellowship",
+                    now,
+                );
+                return false;
+            }
+            if self
+                .autoplay
+                .last_recruit
+                .is_some_and(|t| now.duration_since(t) < RECRUIT_FLOOR)
+            {
+                return false;
+            }
             let fname = team.fellowship_name.clone();
             self.fellowship_create(&fname, true);
-        } else {
-            self.fellowship_recruit(guid);
+            self.autoplay.founded = Some(now);
+            self.autoplay.last_recruit = Some(now);
+            self.autoplay
+                .say(Doing::Helping, format!("starting the fellowship {fname}"));
+            return true;
         }
+        // A fellowship we did not found ourselves is left alone, and
+        // said so once. Nothing on the wire says whether one shares
+        // loot -- the full update writes the same 0x10 for every fellow
+        // whatever the fellowship does -- so disbanding it would be
+        // throwing away a working party on a guess, and the guess would
+        // be wrong for every fellowship a person made by hand.
+        if self.autoplay.founded.is_none() && !self.autoplay.said_not_sharing {
+            self.autoplay.said_not_sharing = true;
+            self.autoplay.note(
+                "this fellowship was not founded by me: it may not share loot, \
+                 and only disbanding it would tell",
+                now,
+            );
+        }
+        let Some(guid) = next_invitee(
+            &waiting,
+            &self.autoplay.recruited,
+            self.autoplay.last_recruit,
+            now,
+        ) else {
+            return false;
+        };
+        self.fellowship_recruit(guid);
         self.autoplay.last_recruit = Some(now);
+        self.autoplay
+            .recruited
+            .retain(|(g, t)| *g != guid && now.duration_since(*t) < RECRUIT_AGAIN);
+        self.autoplay.recruited.push((guid, now));
+        let name = self
+            .autoplay
+            .team
+            .mates
+            .iter()
+            .find(|m| m.guid == guid)
+            .map(|m| m.name.clone())
+            .unwrap_or_else(|| format!("{guid:#010x}"));
         self.autoplay.say(
             Doing::Helping,
             format!("bringing {name} into the fellowship"),
@@ -8841,5 +9020,110 @@ mod loot_timing_tests {
             CORPSE_URGENT >= Duration::from_secs(30),
             "no time to get there"
         );
+    }
+}
+
+#[cfg(test)]
+mod fellowship_tests {
+    use super::{next_invitee, RECRUIT_AGAIN, RECRUIT_FLOOR, TEAM_OPTIONS};
+    use std::time::Instant;
+
+    #[test]
+    fn every_option_a_teammate_keeps_on_is_one_the_table_knows() {
+        // The options are named in words and looked up by those words,
+        // so a name that no longer matches the table is an option that
+        // is silently never set -- which is how nine characters hunted
+        // for ten minutes without loot sharing.
+        for name in TEAM_OPTIONS {
+            assert!(
+                crate::options::option_by_name(name).is_some(),
+                "no option called {name:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn loot_sharing_is_the_option_ace_reads_off_the_founder() {
+        // ACE takes `CharacterOption.ShareFellowshipLoot` (0x11, bit
+        // 0x0010_0000 of the first word) off the leader in the
+        // `Fellowship` constructor, and `Corpse.HasPermission` lets a
+        // fellow open a fresh body through that clause alone.
+        let o = crate::options::option_by_name("share fellowship loot").expect("no such option");
+        assert_eq!(o.id, 0x11);
+        assert_eq!(o.bit, 0x0010_0000);
+        assert!(!o.inverted, "the bit means share, not ignore");
+    }
+
+    #[test]
+    fn the_others_are_asked_while_one_invitee_waits() {
+        // The bug: one timer for the whole party, so nine characters
+        // took forty-one seconds to join, at five seconds apart. Each
+        // tick now asks somebody who has not been asked yet.
+        let start = Instant::now();
+        let waiting = [(0x1001, 3.0), (0x1002, 5.0), (0x1003, 9.0)];
+        let first = next_invitee(&waiting, &[], None, start).expect("nobody asked");
+        assert_eq!(first, 0x1001, "the nearest is asked first");
+        let asked = [(first, start)];
+        let then = start + RECRUIT_FLOOR;
+        assert_eq!(
+            next_invitee(&waiting, &asked, Some(start), then),
+            Some(0x1002)
+        );
+    }
+
+    #[test]
+    fn two_invitations_do_not_leave_in_the_same_breath() {
+        // No rate limit on recruiting was found in ACE, but that is
+        // read from the source and untested against a live server, so
+        // the invitations keep a small gap.
+        let start = Instant::now();
+        let waiting = [(0x1001, 3.0), (0x1002, 5.0)];
+        assert_eq!(next_invitee(&waiting, &[], Some(start), start), None);
+        let soon = start + RECRUIT_FLOOR / 2;
+        assert_eq!(next_invitee(&waiting, &[], Some(start), soon), None);
+        assert!(next_invitee(&waiting, &[], Some(start), start + RECRUIT_FLOOR).is_some());
+    }
+
+    #[test]
+    fn an_invitee_that_never_came_is_asked_again_later() {
+        // A member the server thought busy is refused with nothing the
+        // client can act on, so the only way to tell "not yet" from
+        // "never" is to ask again once the others have been asked.
+        let start = Instant::now();
+        let waiting = [(0x1001, 3.0)];
+        let asked = [(0x1001, start)];
+        let soon = start + RECRUIT_AGAIN / 2;
+        assert_eq!(next_invitee(&waiting, &asked, Some(start), soon), None);
+        let later = start + RECRUIT_AGAIN;
+        assert_eq!(
+            next_invitee(&waiting, &asked, Some(start), later),
+            Some(0x1001)
+        );
+    }
+
+    #[test]
+    fn nine_are_all_asked_inside_ten_seconds() {
+        // What the party is judged on: everyone in the fellowship soon
+        // after they arrive, rather than the last one joining after the
+        // first two minutes of every body's life have gone by.
+        let start = Instant::now();
+        let waiting: Vec<(u32, f32)> = (0..9).map(|i| (0x1000 + i, i as f32)).collect();
+        let mut asked: Vec<(u32, Instant)> = Vec::new();
+        let mut last = None;
+        let mut now = start;
+        while asked.len() < waiting.len() {
+            match next_invitee(&waiting, &asked, last, now) {
+                Some(guid) => {
+                    asked.push((guid, now));
+                    last = Some(now);
+                }
+                None => now += RECRUIT_FLOOR / 4,
+            }
+            assert!(
+                now.duration_since(start) < std::time::Duration::from_secs(10),
+                "only {} of nine asked in ten seconds",
+                asked.len()
+            );
+        }
     }
 }

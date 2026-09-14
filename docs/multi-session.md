@@ -244,7 +244,10 @@ default; both in the Autoplay panel's Team section, or
 - drops a fight once you are more than 40 m away;
 - accepts your fellowship invitations, which your client sends even
   with autoplay off (the leader's fellowship housekeeping runs whenever
-  the team is on).
+  the team is on). The invitations go to a different character each
+  time, half a second apart, so a party of nine is gathered in a few
+  seconds rather than in nine five-second turns; only a character that
+  did not answer waits (five seconds) before being asked again.
 
 `scripts/examples/follow.rhai` sets a follower up with one `/follow`.
 Every process has to be on the bus (`--bus`) for the sessions to hear
@@ -309,6 +312,19 @@ standing over it opens it and the rest stand off, which every session
 works out of the same roster without asking anyone. A character alone,
 or with the team rules off, sees none of this and takes every body it
 is owed.
+
+**Whose kill it is.** A monster's body belongs to whoever killed it for
+its first two minutes, and the only thing that opens it to the rest of
+the party is the fellowship's loot sharing. The server reads "Share
+fellowship loot" off the character that *founds* the fellowship, once,
+when it is founded (ACE `Entity/Fellowship.cs`), and never looks again:
+a fellowship founded with the option off shares no loot for as long as
+it lives, however the options are set afterwards. So every teammate
+keeps the option on, and the leader will not found the fellowship until
+its own copy reads on. A fellowship the leader did not found itself is
+left as it is, with a line in the log: nothing on the wire says whether
+one shares loot, so the only cure is to disband it and let the team
+make its own.
 
 **Who salvages.** Every session on the team says its Salvaging skill
 (buffs counted) and whether it carries an Ust, and everyone reaches the
