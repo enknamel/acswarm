@@ -16,6 +16,8 @@
 //!   reason can be told apart by its number rather than by its English.
 //! - [`pack`] -- the arithmetic of a pack full of stacks: which two to
 //!   pour together, and what it is worth.
+//! - [`room`] -- where the room is, pack by pack, and how a thing lying
+//!   loose is to be taken into it.
 //!
 //! Nothing here talks to a server, draws anything, or knows what a
 //! character is doing. It is all plain data and arithmetic, which is
@@ -23,4 +25,5 @@
 
 pub mod did;
 pub mod pack;
+pub mod room;
 pub mod weenie_errors;

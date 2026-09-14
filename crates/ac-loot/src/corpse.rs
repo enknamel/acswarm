@@ -34,6 +34,11 @@ pub struct Lying {
     pub burden: u32,
     /// What the profile made of it.
     pub verdict: Verdict,
+    /// It can be taken without a slot: coin or a component the whole
+    /// of which fits onto a stack already carried, poured straight
+    /// from the body (see `ac_agent::room::how_to_take`). Such a thing
+    /// is taken off a body a full pack would otherwise be shut on.
+    pub needs_no_slot: bool,
 }
 
 impl Lying {
@@ -57,7 +62,10 @@ pub struct Open {
     /// The window is open and its contents are known.
     pub open: bool,
     pub items: Vec<Lying>,
-    /// Slots left in the pack.
+    /// Slots one take can use: the most room any one pack has (see
+    /// `ac_agent::room::Packs::for_a_take`). Not the sum over the
+    /// packs: a take goes into one pack, and the sum read as room
+    /// while every take was refused.
     pub slots_free: u32,
     /// Slots to leave empty however much is lying here. A counter needs
     /// somewhere to put the coin before it takes anything, so a pack
@@ -161,6 +169,7 @@ mod tests {
             name: format!("thing {guid}"),
             burden: 10,
             verdict,
+            needs_no_slot: false,
         }
     }
 

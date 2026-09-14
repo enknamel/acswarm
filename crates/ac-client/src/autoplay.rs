@@ -4390,6 +4390,21 @@ impl Client {
         // pass after the list. Dropped silently, they made a full body
         // read as empty (see `ac_loot::Open::arriving`).
         let mut arriving = Vec::new();
+        // Where a take can go, as the rules must see it: a thing that
+        // pours onto a carried pile needs no slot. Judged here from the
+        // same room the take is sent from (`Client::how_to_take`), so
+        // the two cannot disagree. The stacks carried are copied by
+        // name, and only when something on the body could pour.
+        let packs = self.packs();
+        let carried = if items
+            .iter()
+            .filter_map(|g| self.world.objects.get(g))
+            .any(|o| Self::loose(o).pours)
+        {
+            self.pack_stacks()
+        } else {
+            Vec::new()
+        };
         let lying: Vec<ac_loot::Lying> = items
             .iter()
             .filter_map(|g| {
@@ -4397,6 +4412,14 @@ impl Client {
                     arriving.push(*g);
                     return None;
                 };
+                let needs_no_slot = self.world.objects.get(g).is_some_and(|o| {
+                    let loose = Self::loose(o);
+                    loose.pours
+                        && matches!(
+                            crate::room::how_to_take(&loose, &carried, &packs),
+                            Some(crate::room::Take::Merge { .. })
+                        )
+                });
                 // A kind the server has lately said cannot be had yet
                 // is left alone for a while (see `loot_refused`).
                 if self.refused_lately(stats.wcid, now) {
@@ -4466,6 +4489,7 @@ impl Client {
                     name: stats.name.clone(),
                     burden: stats.burden,
                     verdict,
+                    needs_no_slot,
                 })
             })
             .collect();
@@ -6077,39 +6101,233 @@ impl Client {
         self.use_on(source, target)
     }
 
-    /// Item slots the character has, and how many are in use.
+    /// The room in the packs, pack by pack: the main pack and each side
+    /// pack with its own slots and its own count (see `room::Packs`).
     ///
-    /// Side packs count. A pack brings its own item slots with it, and
-    /// the server fills them by itself once the main pack is full, so
-    /// judging fullness by the main pack alone declares a character out
-    /// of room while it is carrying six empty bags.
+    /// Counted apart because the server keeps them apart. A take names
+    /// the pack it goes into and is refused when that one is full,
+    /// however empty the sacks beside it; only what the server creates
+    /// itself -- a counter's payout, a purchase -- spills from the main
+    /// pack into the side packs. Added into one sum, nine characters
+    /// whose main packs had filled offered every body for looting and
+    /// were refused seven thousand takes.
     ///
-    /// Pack slots are a separate count and are left out of both
-    /// numbers: a pack, and each of the five Foci, sits in one of those
-    /// (see `ac_world::pack_slot`).
-    pub fn item_slots(&self) -> (u32, u32) {
-        let mine = self
+    /// Pack slots are a separate count and are left out: a pack, and
+    /// each of the five Foci, sits in one of those in the main pack
+    /// (see `ac_world::pack_slot`). What the server has said is full
+    /// stays full until something leaves it (`packs_said_full`).
+    pub(crate) fn packs(&self) -> crate::room::Packs {
+        let me = self.world.player_guid;
+        let capacity = self
             .world
             .player()
             .map(|p| p.items_capacity)
             .filter(|c| *c > 0)
             .unwrap_or(102);
-        let me = self.world.player_guid;
-        let mut capacity = mine;
-        let mut used = 0;
-        for o in self.world.inventory() {
-            let is_pack = o.item_type & ac_world::item_type::CONTAINER != 0;
-            if ac_world::pack_slot::used_by(o.weenie_class_id, is_pack) {
-                // A pack in a pack slot: its own slots are added, and it
-                // does not spend one of the character's own.
-                if o.container == me {
-                    capacity = capacity.saturating_add(o.items_capacity);
-                    continue;
-                }
+        let mut packs = crate::room::Packs {
+            main: crate::room::Pack {
+                guid: me.unwrap_or(0),
+                capacity,
+                used: 0,
+                said_full: false,
+            },
+            side: Vec::new(),
+        };
+        let in_a_pack_slot = |o: &ac_world::WorldObject| {
+            o.container == me
+                && ac_world::pack_slot::used_by(
+                    o.weenie_class_id,
+                    o.item_type & ac_world::item_type::CONTAINER != 0,
+                )
+        };
+        // The side packs first, so what is in them has somewhere to be
+        // counted; by guid, so the choice among equals does not wander
+        // between frames.
+        for o in self.world.main_pack() {
+            if in_a_pack_slot(o) && o.item_type & ac_world::item_type::CONTAINER != 0 {
+                packs.side.push(crate::room::Pack {
+                    guid: o.guid,
+                    capacity: o.items_capacity,
+                    used: 0,
+                    said_full: false,
+                });
             }
-            used += 1;
         }
-        (used, capacity)
+        packs.side.sort_by_key(|p| p.guid);
+        for o in self.world.inventory() {
+            if in_a_pack_slot(o) {
+                continue;
+            }
+            if o.container == me {
+                packs.main.used += 1;
+            } else if let Some(p) = packs.side.iter_mut().find(|p| Some(p.guid) == o.container) {
+                p.used += 1;
+            }
+        }
+        for p in std::iter::once(&mut packs.main).chain(packs.side.iter_mut()) {
+            p.said_full = self
+                .packs_said_full
+                .get(&p.guid)
+                .is_some_and(|held| crate::room::still_full(*held, p.used));
+        }
+        packs
+    }
+
+    /// The thing `guid`, lying loose, as the choice of how to take it
+    /// sees it (see `room::Loose`).
+    fn loose(o: &ac_world::WorldObject) -> crate::room::Loose {
+        crate::room::Loose {
+            wcid: o.weenie_class_id,
+            count: o.stack_size.max(1),
+            // Coin and spell components: what the server never caps or
+            // makes unique, so a pour that skips a take's checks skips
+            // nothing that matters.
+            pours: o.max_stack_size > 1
+                && o.item_type
+                    & (ac_world::item_type::MONEY | ac_world::item_type::SPELL_COMPONENTS)
+                    != 0,
+            is_pack: o.item_type & ac_world::item_type::CONTAINER != 0,
+        }
+    }
+
+    /// How the loose thing `guid` is to be taken -- into which pack, or
+    /// poured onto which carried stack -- or `None` when it is unknown
+    /// or there is nowhere for it (see `room::how_to_take`).
+    pub(crate) fn how_to_take(&self, guid: u32) -> Option<crate::room::Take> {
+        let o = self.world.objects.get(&guid)?;
+        let item = Self::loose(o);
+        // Every stack carried is copied by name; only a thing that can
+        // pour needs them.
+        let carried = if item.pours {
+            self.pack_stacks()
+        } else {
+            Vec::new()
+        };
+        crate::room::how_to_take(&item, &carried, &self.packs())
+    }
+
+    /// The server has said "Unable to put {item} into container" (see
+    /// `room::unable_to_put`). About the take in flight, when it names
+    /// that take's item: the refusal that goes with it says nothing
+    /// more, and has usually been read already -- a tick reads its
+    /// chat after its events -- so the refusal is judged again now.
+    pub(crate) fn hear_put_refusal(&mut self, text: &str) {
+        let Some(name) = crate::room::unable_to_put(text) else {
+            return;
+        };
+        let Some(sent) = self.loot_sent.as_mut() else {
+            return;
+        };
+        if self
+            .world
+            .objects
+            .get(&sent.item)
+            .is_some_and(|o| o.name == name)
+        {
+            sent.said_full = true;
+            self.judge_take_refusal();
+        }
+    }
+
+    /// The server has turned down the take `item` with `err`. Kept with
+    /// the take and judged (see [`Client::judge_take_refusal`]): the
+    /// words that say why, when there are any, are still to come.
+    ///
+    /// A pour off the body is not read this way: a pour is refused for
+    /// weight or for a full stack, never for a slot, and its answer is
+    /// read where it was sent (see `Client::tick_loot`).
+    pub(crate) fn take_refused(&mut self, item: u32, err: u32) {
+        if self.loot_merge.is_some() {
+            return;
+        }
+        let Some(sent) = self.loot_sent.as_mut().filter(|s| s.item == item) else {
+            return;
+        };
+        sent.refused = Some(err);
+        self.judge_take_refusal();
+    }
+
+    /// Read a refused take as the pack it named being full when the
+    /// server said so, or said nothing at all (see
+    /// `room::refused_for_room`): that pack is full until something
+    /// leaves it, and the take goes once more into another pack with
+    /// room. There is no third try, and a body nothing on it can go into
+    /// is set aside for room by the loot rules rather than opened again
+    /// -- reopened, it was refused the same take thirty times over.
+    fn judge_take_refusal(&mut self) {
+        let Some(sent) = self.loot_sent.clone() else {
+            return;
+        };
+        let Some(err) = sent.refused else {
+            return;
+        };
+        let item = sent.item;
+        // A pack goes in a pack slot, and a pack slot refused says
+        // nothing about the item slots.
+        let is_pack = self
+            .world
+            .objects
+            .get(&item)
+            .is_some_and(|o| o.item_type & ac_world::item_type::CONTAINER != 0);
+        let told_since_sent = self.told.is_some_and(|t| t >= sent.at);
+        if is_pack || !crate::room::refused_for_room(sent.said_full, err, told_since_sent) {
+            return;
+        }
+        // Judged: whatever else is said of it is not read twice.
+        self.loot_sent = None;
+        let held = self
+            .packs()
+            .all()
+            .find(|p| p.guid == sent.into)
+            .map(|p| p.used)
+            .unwrap_or(0);
+        self.packs_said_full.insert(sent.into, held);
+        let pack = self.pack_name(sent.into);
+        if sent.retried {
+            tracing::info!("the server says {pack} is full too ({held} items); leaving the rest");
+            return;
+        }
+        match self
+            .packs()
+            .container_for_a_take()
+            .filter(|c| *c != sent.into)
+        {
+            Some(other) => {
+                let name = self
+                    .world
+                    .objects
+                    .get(&item)
+                    .map(|o| o.name.clone())
+                    .unwrap_or_else(|| format!("{item:#010x}"));
+                tracing::info!(
+                    "the server says {pack} is full ({held} items); taking {name} into {} instead",
+                    self.pack_name(other)
+                );
+                // The refusal was the pack's, not the item's: left in
+                // place, the rules would pass the item over.
+                self.move_refused.remove(&item);
+                self.loot_queue.push_front(item);
+                self.loot_retry = Some(item);
+            }
+            None => {
+                tracing::info!(
+                    "the server says {pack} is full ({held} items), and no pack has room"
+                );
+            }
+        }
+    }
+
+    /// What to call the pack `guid` in the log: the main pack, or the
+    /// side pack's own name.
+    fn pack_name(&self, guid: u32) -> String {
+        if Some(guid) == self.world.player_guid {
+            return "the main pack".into();
+        }
+        self.world
+            .objects
+            .get(&guid)
+            .map(|o| o.name.clone())
+            .unwrap_or_else(|| format!("{guid:#010x}"))
     }
 
     /// There is no room for another item.
@@ -6292,9 +6510,9 @@ impl Client {
             && !self.under_attack()
     }
 
+    /// No pack has a slot for a take.
     pub fn pack_full(&self) -> bool {
-        let (used, capacity) = self.item_slots();
-        used >= capacity
+        self.packs().for_a_take() == 0
     }
 
     /// What is known about the kind of creature `guid` is.
@@ -12256,6 +12474,7 @@ mod tests {
                 name: "Dagger".into(),
                 burden: 10,
                 verdict: ac_loot::Verdict::Take(LootAction::Keep),
+                needs_no_slot: false,
             }],
             slots_free: 20,
             carry_room: 10_000,
@@ -12909,6 +13128,396 @@ mod tests {
         // The swing lands, and the wand goes out too.
         c.attack_pending = false;
         assert!(c.wield_guid(WAND));
+    }
+
+    /// A Sack hanging from the main pack, with `capacity` slots.
+    const SACK: u32 = 0x8000_0300;
+    /// A body at the character's feet.
+    const BODY: u32 = 0x8000_0400;
+
+    /// A character whose main pack has `main_slots` slots, `main_used`
+    /// of them taken by daggers, and a Sack of `sack_slots` slots with
+    /// `sack_used` daggers in it.
+    fn with_packs(
+        main_slots: u32,
+        main_used: u32,
+        sack_slots: u32,
+        sack_used: u32,
+    ) -> Option<Client> {
+        let mut c = character_of_level(20)?;
+        let me = c.world.player_guid.unwrap();
+        c.world.objects.insert(
+            me,
+            ac_world::WorldObject {
+                guid: me,
+                name: "Verity".into(),
+                is_player: true,
+                items_capacity: main_slots,
+                ..Default::default()
+            },
+        );
+        c.world.objects.insert(
+            SACK,
+            ac_world::WorldObject {
+                guid: SACK,
+                name: "Sack".into(),
+                weenie_class_id: 166,
+                item_type: ac_world::item_type::CONTAINER,
+                items_capacity: sack_slots,
+                container: Some(me),
+                ..Default::default()
+            },
+        );
+        let mut next = 0x8000_0500;
+        for (holder, n) in [(me, main_used), (SACK, sack_used)] {
+            for _ in 0..n {
+                c.world.objects.insert(
+                    next,
+                    ac_world::WorldObject {
+                        guid: next,
+                        name: "Dagger".into(),
+                        container: Some(holder),
+                        ..Default::default()
+                    },
+                );
+                next += 1;
+            }
+        }
+        c.world.objects.insert(
+            BODY,
+            ac_world::WorldObject {
+                guid: BODY,
+                name: "Corpse of a Drudge Skulker".into(),
+                object_desc_flags: ac_world::object_desc_flags::CORPSE,
+                ..Default::default()
+            },
+        );
+        // No slots kept back for a counter's money: these are about the
+        // packs being full, not low.
+        c.autoplay.config.team.restock.keep_slots = 0;
+        assert!(!c.server_busy(Instant::now()));
+        Some(c)
+    }
+
+    /// A thing of `wcid` lying on the body, `count` to the stack.
+    fn on_the_body(c: &mut Client, guid: u32, name: &str, wcid: u32, kind: u32, count: u32) {
+        c.world.objects.insert(
+            guid,
+            ac_world::WorldObject {
+                guid,
+                name: name.into(),
+                weenie_class_id: wcid,
+                item_type: kind,
+                stack_size: count,
+                max_stack_size: if count > 1 { 25_000 } else { 1 },
+                container: Some(BODY),
+                ..Default::default()
+            },
+        );
+        match &mut c.world.open_container {
+            Some((body, items)) if *body == BODY => items.push(guid),
+            _ => c.world.open_container = Some((BODY, vec![guid])),
+        }
+    }
+
+    #[test]
+    fn free_space_is_what_one_take_can_use_and_not_the_sum_over_the_packs() {
+        // Main pack 2 of 4, Sack 19 of 24: seventeen free in all, and
+        // five for any one take.
+        let Some(c) = with_packs(4, 2, 24, 19) else {
+            return;
+        };
+        let me = c.world.player_guid.unwrap();
+        assert_eq!(c.free_space(), 5);
+        assert_eq!(c.room_anywhere(), 7);
+        assert!(!c.pack_full());
+        let packs = c.packs();
+        assert_eq!((packs.main.capacity, packs.main.used), (4, 2));
+        assert_eq!(packs.side.len(), 1);
+        assert_eq!((packs.side[0].guid, packs.side[0].used), (SACK, 19));
+        // The Sack sits in a pack slot, not an item slot.
+        assert_eq!(packs.container_for_a_take(), Some(me));
+        // Every pack down to its last slot: room for one take, however
+        // many packs there are.
+        let Some(mut c) = with_packs(4, 3, 24, 23) else {
+            return;
+        };
+        assert_eq!(c.free_space(), 1);
+        assert_eq!(c.room_anywhere(), 2);
+        // A character with an empty main pack reads as it always did.
+        c.world
+            .objects
+            .retain(|_, o| o.name != "Dagger" && o.guid != SACK);
+        assert_eq!(c.free_space(), 4);
+        assert_eq!(c.room_anywhere(), 4);
+    }
+
+    #[test]
+    fn a_take_with_the_main_pack_full_goes_into_the_sack_with_room() {
+        // Nine characters at 102/102 with a Sack at 7 of 24 aimed every
+        // take at the main pack and were refused seven thousand times.
+        let Some(mut c) = with_packs(2, 2, 24, 7) else {
+            return;
+        };
+        let me = c.world.player_guid.unwrap();
+        const DAGGER: u32 = 0x8000_0401;
+        on_the_body(&mut c, DAGGER, "Dagger", 21, 0, 1);
+        assert_eq!(c.free_space(), 17);
+        assert_eq!(c.how_to_take(DAGGER), Some(crate::room::Take::Put(SACK)));
+        let now = Instant::now();
+        c.take(DAGGER);
+        c.tick_loot(now);
+        let sent = c.loot_sent.clone().expect("a take went out");
+        assert_eq!((sent.item, sent.into, sent.retried), (DAGGER, SACK, false));
+        assert!(c.loot_merge.is_none(), "a put, not a pour");
+        // Landed in the Sack: ours, though not in our own container.
+        c.world.objects.get_mut(&DAGGER).unwrap().container = Some(SACK);
+        c.tick_loot(now + Duration::from_millis(100));
+        assert!(c.loot_inflight.is_none(), "the take is over");
+        assert!(c.loot_sent.is_none());
+        // With a slot in the main pack, that comes first, as ever.
+        c.world.objects.get_mut(&me).unwrap().items_capacity = 4;
+        assert_eq!(c.how_to_take(DAGGER), Some(crate::room::Take::Put(me)));
+    }
+
+    #[test]
+    fn with_every_pack_full_the_body_is_set_aside_once_and_not_reopened() {
+        let Some(mut c) = with_packs(2, 2, 3, 3) else {
+            return;
+        };
+        const DAGGER: u32 = 0x8000_0401;
+        on_the_body(&mut c, DAGGER, "Dagger", 21, 0, 1);
+        let t0 = Instant::now();
+        assert_eq!(c.free_space(), 0);
+        let room = c.room_for_loot();
+        assert!(room.pack_low, "no pack has a slot");
+        // The body at its feet is not waited on, and the rules shut one
+        // already open as full, setting it aside rather than writing
+        // it off.
+        assert!(!c.autoplay.corpse_waiting(BODY, t0, room));
+        let profile = crate::profile::Profile {
+            rules: vec![asks("daggers", "dagger", LootAction::Sell)],
+            ..Default::default()
+        };
+        c.autoplay.take_up_corpse(BODY, t0, LOOT_TIMEOUT);
+        let open = c.corpse_now(BODY, &[DAGGER], &profile, t0, t0);
+        assert_eq!(open.slots_free, 0);
+        let next = c.autoplay.loot_run.step(&open, t0);
+        assert_eq!(next.act, Some(ac_loot::Act::Close), "{}", next.saying);
+        assert!(matches!(&next.did, crate::did::Did::Blocked(b) if b.what == "the pack is full"));
+        c.autoplay.corpse_shut(
+            BODY,
+            &next.did,
+            next.left_for_weight,
+            ShutFor::default(),
+            t0,
+        );
+        assert!(!c.autoplay.looted.contains(&BODY), "written off for good");
+        // Set aside for room: with none, it is not gone back to however
+        // long it lies there.
+        let later = t0 + Duration::from_secs(10 * 60);
+        assert!(!c.autoplay.corpse_waiting(BODY, later, c.room_for_loot()));
+        // Room appears -- a dagger sold -- and it waits again.
+        c.world.objects.remove(&0x8000_0500);
+        let room = c.room_for_loot();
+        assert!(!room.pack_low);
+        assert!(c.autoplay.corpse_waiting(BODY, later, room));
+    }
+
+    #[test]
+    fn the_servers_word_that_a_pack_is_full_sends_the_take_elsewhere_and_then_gives_up() {
+        // The count said the main pack had two slots; the server said
+        // "Unable to put Dagger into container". Believed, the next try
+        // names the Sack; refused there too, the body is left for room.
+        let Some(mut c) = with_packs(4, 2, 24, 23) else {
+            return;
+        };
+        let me = c.world.player_guid.unwrap();
+        const DAGGER: u32 = 0x8000_0401;
+        on_the_body(&mut c, DAGGER, "Dagger", 21, 0, 1);
+        let t0 = Instant::now();
+        c.take(DAGGER);
+        c.tick_loot(t0);
+        assert_eq!(c.loot_sent.as_ref().map(|s| s.into), Some(me));
+        // In the order a tick reads them: the InventoryServerSaveFailed
+        // with no reason in it first, with the words noted as said but
+        // not yet read; then the words themselves, from the chat.
+        let answered = t0 + Duration::from_millis(50);
+        c.told = Some(answered);
+        c.move_refused.insert(DAGGER, (0, answered));
+        c.loot_inflight = None;
+        c.take_refused(DAGGER, 0);
+        assert!(
+            c.packs_said_full.is_empty(),
+            "something was said, and not read yet"
+        );
+        // Words about some other take are not about this one.
+        c.hear_put_refusal("Unable to put Pyreal into container");
+        assert!(c.packs_said_full.is_empty());
+        c.hear_put_refusal("Unable to put Dagger into container");
+        assert_eq!(
+            c.packs_said_full.get(&me),
+            Some(&2),
+            "full at two, whatever the count said"
+        );
+        assert!(c.loot_sent.is_none(), "judged, and not read twice");
+        assert_eq!(c.free_space(), 1, "the Sack's slot is all there is");
+        assert_eq!(c.packs().container_for_a_take(), Some(SACK));
+        assert_eq!(c.loot_queue.front(), Some(&DAGGER), "sent once more");
+        assert_eq!(c.loot_retry, Some(DAGGER));
+        assert!(
+            !c.move_refused.contains_key(&DAGGER),
+            "the refusal was the pack's, not the item's"
+        );
+        c.tick_loot(answered + Duration::from_millis(10));
+        let sent = c.loot_sent.clone().expect("the second try");
+        assert_eq!((sent.into, sent.retried), (SACK, true));
+        // Refused there as well, this time without a word: the last
+        // thing said was before the take went out.
+        let again = sent.at + Duration::from_millis(50);
+        c.move_refused.insert(DAGGER, (0, again));
+        c.loot_inflight = None;
+        c.take_refused(DAGGER, 0);
+        assert_eq!(c.packs_said_full.get(&SACK), Some(&23));
+        assert_eq!(c.free_space(), 0);
+        assert!(c.loot_queue.is_empty(), "no third try");
+        assert!(
+            c.move_refused.contains_key(&DAGGER),
+            "the rules read the refusal"
+        );
+        assert!(c.room_for_loot().pack_low, "the body is set aside for room");
+        // Something leaves the main pack, and the server's word on it
+        // lapses: the count is believed again until the server says
+        // otherwise.
+        c.world.objects.remove(&0x8000_0500);
+        assert_eq!(c.free_space(), 3);
+        assert_eq!(c.packs().container_for_a_take(), Some(me));
+        assert!(
+            !c.room_for_loot().pack_low,
+            "room appeared; bodies wait again"
+        );
+    }
+
+    #[test]
+    fn a_refusal_with_a_reason_or_other_words_is_not_read_as_a_full_pack() {
+        let Some(mut c) = with_packs(4, 2, 24, 7) else {
+            return;
+        };
+        let me = c.world.player_guid.unwrap();
+        const DAGGER: u32 = 0x8000_0401;
+        on_the_body(&mut c, DAGGER, "Dagger", 21, 0, 1);
+        let t0 = Instant::now();
+        c.take(DAGGER);
+        c.tick_loot(t0);
+        // "You are too encumbered to carry that!" and the usual
+        // reasonless refusal after it.
+        let answered = t0 + Duration::from_millis(50);
+        c.told = Some(answered);
+        c.move_refused.insert(DAGGER, (0, answered));
+        c.loot_inflight = None;
+        c.take_refused(DAGGER, 0);
+        assert!(c.packs_said_full.is_empty(), "the pack was not the reason");
+        assert!(c.loot_queue.is_empty(), "and it is not asked for again");
+        assert!(c.move_refused.contains_key(&DAGGER));
+        // A quest's cap, with its code.
+        c.take(DAGGER);
+        c.tick_loot(answered);
+        c.loot_inflight = None;
+        c.take_refused(DAGGER, 0x043E);
+        assert!(c.packs_said_full.is_empty());
+        assert_eq!(c.free_space(), 17);
+        assert_eq!(c.packs().container_for_a_take(), Some(me));
+    }
+
+    #[test]
+    fn coin_off_a_body_is_poured_onto_the_pile_carried_rather_than_given_a_slot() {
+        // The main pack full but for the pyreals in it: the body's
+        // coin joins the pile, spending no slot, and the rules take it
+        // off a body they would otherwise shut as full.
+        let Some(mut c) = with_packs(2, 1, 0, 0) else {
+            return;
+        };
+        c.world.objects.remove(&SACK);
+        let me = c.world.player_guid.unwrap();
+        const PILE: u32 = 0x8000_0600;
+        const COIN: u32 = 0x8000_0401;
+        c.world.objects.insert(
+            PILE,
+            ac_world::WorldObject {
+                guid: PILE,
+                name: "Pyreal".into(),
+                weenie_class_id: 273,
+                item_type: ac_world::item_type::MONEY,
+                stack_size: 100,
+                max_stack_size: 25_000,
+                container: Some(me),
+                ..Default::default()
+            },
+        );
+        on_the_body(&mut c, COIN, "Pyreal", 273, ac_world::item_type::MONEY, 50);
+        assert_eq!(c.free_space(), 0, "the pile took the last slot");
+        assert_eq!(
+            c.how_to_take(COIN),
+            Some(crate::room::Take::Merge {
+                to: PILE,
+                amount: 50
+            })
+        );
+        // The rules see it needs no slot and ask for it.
+        let t0 = Instant::now();
+        let profile = crate::profile::Profile {
+            rules: vec![asks("coin", "pyreal", LootAction::Keep)],
+            ..Default::default()
+        };
+        c.autoplay.take_up_corpse(BODY, t0, LOOT_TIMEOUT);
+        let open = c.corpse_now(BODY, &[COIN], &profile, t0, t0);
+        assert_eq!(open.slots_free, 0);
+        assert!(open.items[0].needs_no_slot);
+        let next = c.autoplay.loot_run.step(&open, t0);
+        assert_eq!(next.act, Some(ac_loot::Act::Take(COIN)), "{}", next.saying);
+        // The take is a pour off the body, read like a tidying pour.
+        c.take(COIN);
+        c.tick_loot(t0);
+        let pour = c.loot_merge.clone().expect("a pour went out");
+        assert_eq!(
+            (pour.merge.from, pour.merge.to, pour.merge.amount),
+            (COIN, PILE, 50)
+        );
+        assert_eq!(pour.to_before, 100);
+        assert_eq!(c.loot_sent.as_ref().map(|s| s.into), Some(PILE));
+        // The source goes first; that is no answer yet.
+        c.world.objects.remove(&COIN);
+        c.tick_loot(t0 + Duration::from_millis(100));
+        assert!(c.loot_inflight.is_some(), "the pile has not grown");
+        // The pile grows: landed.
+        c.world.objects.get_mut(&PILE).unwrap().stack_size = 150;
+        c.tick_loot(t0 + Duration::from_millis(200));
+        assert!(c.loot_inflight.is_none());
+        assert!(c.loot_merge.is_none());
+        // A pour the server turns down -- too heavy, by its reckoning --
+        // is over, and the refusal is left for the rules to read: it is
+        // not a pack being full, so nothing is marked.
+        on_the_body(&mut c, COIN, "Pyreal", 273, ac_world::item_type::MONEY, 50);
+        let t1 = t0 + Duration::from_secs(1);
+        c.take(COIN);
+        c.tick_loot(t1);
+        assert!(c.loot_merge.is_some());
+        c.move_refused
+            .insert(COIN, (0, t1 + Duration::from_millis(50)));
+        c.take_refused(COIN, 0);
+        assert!(
+            c.packs_said_full.is_empty(),
+            "a pour refused says nothing of the packs"
+        );
+        c.tick_loot(t1 + Duration::from_millis(100));
+        assert!(c.loot_inflight.is_none(), "the pour is over");
+        assert!(c.move_refused.contains_key(&COIN));
+        // A stack too big for the pile is put in a slot, when there is
+        // one, and is not a thing that needs no slot.
+        c.world.objects.get_mut(&COIN).unwrap().stack_size = 25_000;
+        assert_eq!(c.how_to_take(COIN), None, "no slot, and no pile it fits");
+        let open = c.corpse_now(BODY, &[COIN], &profile, t0, t1);
+        assert!(!open.items[0].needs_no_slot);
     }
 
     #[test]
