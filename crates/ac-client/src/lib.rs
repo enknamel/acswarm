@@ -2315,6 +2315,16 @@ impl Client {
             if std::mem::take(&mut self.wants_the_hands) {
                 return;
             }
+            // And a swap already under way holds the swing until it
+            // lands: between the put and the wield the hands are empty,
+            // and a swing sent into that gap is a punch. The picker
+            // asks this before it joins a fight; the fight it is
+            // already in comes back through here, so it asks too.
+            // Bounded by SWAP_SETTLES, so a swap that never lands
+            // cannot stop the character fighting.
+            if self.hands_changing(Instant::now()) {
+                return;
+            }
             self.attack(target);
         }
     }
@@ -2612,6 +2622,13 @@ impl Client {
                 sent |= self.put_in_container(shield, me);
             }
         }
+        // When the swap started, so the fight waits for the hands to
+        // settle rather than swinging into the moment they are empty
+        // (see `Client::hands_changing`). The arming code stamps this
+        // for its own swaps; without it here, every swap the buff pass
+        // and the softening start was invisible to the fight, which is
+        // how +Verity came to punch a Spikey Armoredillo.
+        self.autoplay.last_rewield = Some(Instant::now());
         if sent {
             // Taken up by the housekeeping the moment the hands are
             // empty, rather than whenever the caller next happens to ask.

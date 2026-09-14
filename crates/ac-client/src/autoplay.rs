@@ -1496,7 +1496,7 @@ pub struct Autoplay {
     /// The shield to put on once a one-handed weapon is in hand.
     wanted_shield: Option<u32>,
     /// When the hands were last asked to change weapon.
-    last_rewield: Option<Instant>,
+    pub(crate) last_rewield: Option<Instant>,
     /// A weapon to wield as soon as the hands are empty.
     pub(crate) pending_wield: Option<u32>,
     /// The last item the server was asked to put in the hands, so that
@@ -3601,6 +3601,21 @@ impl Client {
             self.autoplay.wanted_shield = None;
             return;
         }
+        // Inside the wait a refusal earned it the errand keeps: asking
+        // now sends nothing, and clearing it would leave the shield in
+        // the pack with nothing left to ask again.
+        if self.wield_held_off(shield) {
+            return;
+        }
+        // Not with a swing out. ACE shuffles the stance on every
+        // successful equip, a shield included (TryShuffleStance ->
+        // HandleActionChangeCombatMode), and a combat-mode change
+        // cancels the attack in flight. The shield keeps; it goes on in
+        // the gap after the swing is answered.
+        if self.mid_attack() {
+            self.wait_for_the_swing();
+            return;
+        }
         // Only with a one-handed melee weapon actually in hand: the
         // weapon may still be on its way, or have turned out to be
         // something a shield cannot go with.
@@ -4412,6 +4427,19 @@ impl Client {
             if let Some(o) = self.world.objects.get(&t).filter(|_| !gone) {
                 if o.health.unwrap_or(1.0) > 0.0 {
                     let name = o.name.clone();
+                    // A weapon choice put off for a swing in the air, or
+                    // waiting on an appraisal, is made here. Nothing else
+                    // asks again once the fight is joined, so what the
+                    // buff pass left in the character's hands was what it
+                    // fought the whole creature with.
+                    if self.autoplay.armed_for != Some(t) {
+                        self.arm_for(t, stance, &cfg);
+                        if self.hands_changing(now) {
+                            self.autoplay
+                                .say(Doing::Fighting, format!("changing weapon for {name}"));
+                            return true;
+                        }
+                    }
                     self.autoplay
                         .say(Doing::Fighting, format!("fighting {name}"));
                     // A bow with an empty ammunition slot shoots
@@ -4804,7 +4832,15 @@ impl Client {
                     }
                     // A wand for the casting; the arming code sorts the
                     // hands out again when the fight proper begins.
-                    self.wield_for(Stance::Magic);
+                    if !self.wield_for(Stance::Magic) {
+                        // No caster to be had -- none carried, or the
+                        // server keeps refusing the one there is. Held
+                        // fire every tick this went on for ever and the
+                        // target was never hit. Mark it and fight it as
+                        // it is.
+                        advance(self);
+                        return false;
+                    }
                     return true;
                 }
                 self.select(Some(guid));
@@ -6216,14 +6252,33 @@ impl Client {
         if self.due_buff(never_below, Instant::now()).is_some() {
             return;
         }
-        self.autoplay.put_down = None;
-        if self
+        if !self
             .world
             .objects
             .get(&weapon)
             .is_some_and(|o| o.container == self.world.player_guid)
         {
-            tracing::info!("autoplay: taking the weapon up again after buffing");
+            // Sold, given away, or in hand already: no errand left.
+            self.autoplay.put_down = None;
+            return;
+        }
+        // Inside the wait a refusal earned it the errand keeps, the way
+        // a pending wield's does: dropping it here would leave the
+        // weapon in the pack and the character fighting with the wand.
+        if self.wield_held_off(weapon) {
+            return;
+        }
+        self.autoplay.put_down = None;
+        tracing::info!("autoplay: taking the weapon up again after buffing");
+        // The wand is still in the hand, and ACE will not put a sword
+        // in a hand that holds a caster -- CheckWeaponCollision refuses
+        // it outright, with no error to read. So the wand goes back in
+        // the pack and the housekeeping takes the weapon up once the
+        // hands are empty, the same two steps the arming uses.
+        if self.put_weapons_away() {
+            self.autoplay.last_rewield = Some(Instant::now());
+            self.autoplay.pending_wield = Some(weapon);
+        } else {
             self.wield_guid(weapon);
         }
     }
@@ -6812,6 +6867,266 @@ mod tests {
         assert!(c.a_critter(&stronger, &cfg), "on the name alone, a Rabbit");
         appraised_at(&mut c, stronger.guid, 40);
         assert!(!c.a_critter(&stronger, &cfg), "not at forty it is not");
+    }
+
+    /// A weapon in the character's hand, or in its pack.
+    fn a_weapon(c: &mut Client, guid: u32, kind: u32, name: &str, in_hand: bool) {
+        let me = c.world.player_guid;
+        let locations = if kind == ac_world::item_type::CASTER {
+            ac_world::equip::HELD
+        } else {
+            ac_world::equip::MELEE_WEAPON
+        };
+        c.world.objects.insert(
+            guid,
+            ac_world::WorldObject {
+                guid,
+                name: name.into(),
+                item_type: kind,
+                value: 100,
+                valid_locations: locations,
+                container: if in_hand { None } else { me },
+                wielder: if in_hand { me } else { None },
+                ..Default::default()
+            },
+        );
+    }
+
+    /// A character with a mace in hand, a wand in the pack, and a
+    /// creature it is swinging at.
+    fn mid_fight() -> Option<(Client, u32)> {
+        const MACE: u32 = 0x8000_0101;
+        const WAND: u32 = 0x8000_0102;
+        const CREATURE: u32 = 0x8000_0103;
+        let mut c = character_of_level(20)?;
+        a_weapon(
+            &mut c,
+            MACE,
+            ac_world::item_type::MELEE_WEAPON,
+            "Mace",
+            true,
+        );
+        a_weapon(
+            &mut c,
+            WAND,
+            ac_world::item_type::CASTER,
+            "Training Wand",
+            false,
+        );
+        in_view(&mut c, CREATURE, 19257, "Drudge Skulker");
+        c.combat = true;
+        c.attack_target = Some(CREATURE);
+        c.last_attack = Instant::now() - Duration::from_secs(5);
+        Some((c, WAND))
+    }
+
+    #[test]
+    fn the_swing_waits_for_a_swap_the_buff_pass_started() {
+        let Some((mut c, wand)) = mid_fight() else {
+            return;
+        };
+        // The in-fight buffing reaches for the wand. The mace goes back
+        // in the pack and the wand waits on empty hands.
+        assert!(c.wield_for(Stance::Magic), "the swap went out");
+        assert_eq!(c.autoplay.pending_wield, Some(wand));
+        // Which the fight can now see. Before this, only the arming
+        // code stamped the swap clock, so a swap the buff pass or the
+        // softening started was invisible and the next swing went out
+        // into the empty hands: +Verity put her Flaming Takuba away for
+        // a wand and punched a Spikey Armoredillo.
+        assert!(c.hands_changing(Instant::now()), "the swap is under way");
+        // The hands still say melee -- the server has not answered the
+        // put yet -- so nothing but this holds the swing back.
+        assert_eq!(c.combat_stance(), Stance::Melee);
+        c.tick_combat();
+        assert!(!c.attack_pending, "no swing into the empty hands");
+        // And the wait is bounded: a swap the server never finishes
+        // cannot stop the character fighting.
+        c.autoplay.last_rewield = Some(Instant::now() - SWAP_SETTLES);
+        c.tick_combat();
+        assert!(c.attack_pending, "swinging again once the swap is stale");
+    }
+
+    #[test]
+    fn the_weapon_comes_back_out_of_the_pack_after_a_buff() {
+        let Some((mut c, wand)) = mid_fight() else {
+            return;
+        };
+        const MACE: u32 = 0x8000_0101;
+        // The buff pass put the mace down and took the wand up.
+        a_weapon(
+            &mut c,
+            MACE,
+            ac_world::item_type::MELEE_WEAPON,
+            "Mace",
+            false,
+        );
+        a_weapon(
+            &mut c,
+            wand,
+            ac_world::item_type::CASTER,
+            "Training Wand",
+            true,
+        );
+        c.autoplay.put_down = Some(MACE);
+        c.autoplay_rearm();
+        // ACE will not put a mace in a hand that holds a caster -- it
+        // refuses the wield outright, with no error to read -- so the
+        // wand goes back in the pack first and the mace waits on empty
+        // hands. Asking straight out was refused every single time.
+        assert_eq!(c.autoplay.pending_wield, Some(MACE));
+        assert_eq!(c.autoplay.wield_asked, None, "nothing was asked for yet");
+        assert_eq!(c.autoplay.put_down, None, "the errand passed on");
+    }
+
+    #[test]
+    fn an_errand_the_server_is_refusing_is_kept_rather_than_dropped() {
+        let Some((mut c, _)) = mid_fight() else {
+            return;
+        };
+        const MACE: u32 = 0x8000_0101;
+        const SHIELD: u32 = 0x8000_0104;
+        let me = c.world.player_guid;
+        a_weapon(
+            &mut c,
+            MACE,
+            ac_world::item_type::MELEE_WEAPON,
+            "Mace",
+            false,
+        );
+        c.autoplay.put_down = Some(MACE);
+        c.hold_off_wield(MACE, Instant::now());
+        c.autoplay_rearm();
+        // Asking now sends nothing, so clearing the errand would leave
+        // the mace in the pack with nothing left to ask again.
+        assert_eq!(c.autoplay.put_down, Some(MACE), "still owed the weapon");
+        assert_eq!(c.autoplay.pending_wield, None);
+
+        // The shield keeps its errand the same way.
+        c.world.objects.insert(
+            SHIELD,
+            ac_world::WorldObject {
+                guid: SHIELD,
+                name: "Buckler".into(),
+                valid_locations: ac_world::equip::SHIELD,
+                container: me,
+                ..Default::default()
+            },
+        );
+        c.autoplay.wanted_shield = Some(SHIELD);
+        c.hold_off_wield(SHIELD, Instant::now());
+        c.autoplay_shield(Instant::now());
+        assert_eq!(c.autoplay.wanted_shield, Some(SHIELD), "still owed it");
+    }
+
+    #[test]
+    fn the_shield_goes_on_between_swings_and_not_during_one() {
+        let Some((mut c, _)) = mid_fight() else {
+            return;
+        };
+        const SHIELD: u32 = 0x8000_0104;
+        let me = c.world.player_guid;
+        c.world.objects.insert(
+            SHIELD,
+            ac_world::WorldObject {
+                guid: SHIELD,
+                name: "Buckler".into(),
+                valid_locations: ac_world::equip::SHIELD,
+                container: me,
+                ..Default::default()
+            },
+        );
+        c.autoplay.wanted_shield = Some(SHIELD);
+        // A swing is in the air. ACE shuffles the stance on every
+        // successful equip, a shield included, and a combat-mode change
+        // cancels the attack -- so the shield waits for the gap.
+        c.attack_pending = true;
+        c.last_attack = Instant::now();
+        assert!(c.mid_attack());
+        c.autoplay_shield(Instant::now());
+        assert_eq!(c.autoplay.wanted_shield, Some(SHIELD), "still to go on");
+        assert_eq!(c.autoplay.wield_asked, None, "nothing sent mid-swing");
+        assert!(c.wants_the_hands, "the gap after the swing is booked");
+    }
+
+    #[test]
+    fn a_weapon_choice_put_off_for_a_swing_is_made_once_the_fight_is_joined() {
+        let Some((mut c, _)) = mid_fight() else {
+            return;
+        };
+        let cfg = Fight::default();
+        // The choice was put off: a swing was in the air when the target
+        // was picked, so `arm_for` booked the gap and returned without
+        // recording what it had armed for. The attack went out anyway --
+        // the target that owned the swing had left the area or been
+        // given up on, which clears `attack_target` and leaves
+        // `attack_pending` set.
+        assert_eq!(c.autoplay.armed_for, None);
+        assert!(c.appraise_queue.is_empty());
+        // Nothing in the air now, and the fight is joined.
+        assert!(!c.mid_attack());
+        assert!(c.autoplay_fight_as(Instant::now(), &cfg), "fighting");
+        // Only this branch runs from here on: the picker is never
+        // reached again while the target is alive. Without it the
+        // character fought the whole creature with whatever the buff
+        // pass had left in its hands, and a bow with no arrows chosen.
+        assert!(
+            !c.appraise_queue.is_empty(),
+            "the weapons are being weighed for the choice"
+        );
+    }
+
+    #[test]
+    fn a_softening_with_no_wand_to_be_had_lets_the_fight_go_ahead() {
+        let Some((mut c, wand)) = mid_fight() else {
+            return;
+        };
+        const CREATURE: u32 = 0x8000_0103;
+        // A Drudge Skulker is weakest to cold, fire and electricity
+        // alike; whichever it picks, the character knows the
+        // vulnerability for it.
+        for element in [
+            ac_world::elements::Element::Cold,
+            ac_world::elements::Element::Fire,
+            ac_world::elements::Element::Electric,
+        ] {
+            for id in ac_world::elements::vulnerabilities(element) {
+                c.world.stats.spells.push(id);
+            }
+        }
+        assert_eq!(c.combat_stance(), Stance::Melee);
+        assert!(!c.mid_attack());
+        // With a wand to be had, the softening takes the tick to reach
+        // for one. This is the setup working, and what makes the second
+        // half mean anything.
+        assert!(
+            c.autoplay_soften(CREATURE, "Drudge Skulker", Instant::now()),
+            "reaching for the wand"
+        );
+        assert_eq!(c.autoplay.pending_wield, Some(wand));
+
+        // Now the server is refusing that wand. Nothing can be sent, so
+        // the softening gives the tick back rather than holding fire on
+        // the target for ever: every expiry of the wait earned one more
+        // refusal and doubled the next, up towards four hours.
+        let Some((mut c, wand)) = mid_fight() else {
+            return;
+        };
+        for element in [
+            ac_world::elements::Element::Cold,
+            ac_world::elements::Element::Fire,
+            ac_world::elements::Element::Electric,
+        ] {
+            for id in ac_world::elements::vulnerabilities(element) {
+                c.world.stats.spells.push(id);
+            }
+        }
+        c.hold_off_wield(wand, Instant::now());
+        assert!(
+            !c.autoplay_soften(CREATURE, "Drudge Skulker", Instant::now()),
+            "the fight may go ahead unsoftened"
+        );
+        assert_eq!(c.autoplay.pending_wield, None, "nothing was sent");
     }
 
     fn item(name: &str, value: u32, armor: u32) -> ItemStats {
