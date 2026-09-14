@@ -361,6 +361,14 @@ pub fn draw(egui: &egui::Context, v: &AutoplayView, x: f32, drafts: &mut Drafts)
                      stands in it (and whatever hits the character), let what \
                      leaves it go, and go back to it",
                 );
+                ui.checkbox(&mut cfg.fight.skip_critters, "walk past critters")
+                    .on_hover_text(
+                        "Leave alone a creature that will not attack unless it is \
+                         attacked and is far below the character -- a Cow, a \
+                         Rabbit, a Chicken. Anything hitting the character, \
+                         anything a summoned creature has taken on, and anything \
+                         named in \"only these\" is still fought.",
+                    );
                 ui.checkbox(&mut cfg.fight.craft_ammo, "make ammunition when out")
                     .on_hover_text(
                         "From a bundle of heads and a bundle of shafts carried, \

@@ -198,12 +198,7 @@ impl Client {
             .player
             .as_ref()
             .is_some_and(|pl| pl.world_position().distance(at) <= DEFEND_REACH);
-        near && self.under_attack()
-            && self
-                .autoplay
-                .hit_by
-                .as_ref()
-                .is_some_and(|(name, _)| *name == o.name)
+        near && self.hit_lately_by(&o.name)
     }
 
     /// Whether the object `guid` may still be fought under the area (see

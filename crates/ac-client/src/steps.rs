@@ -158,12 +158,16 @@ fn worth_fighting(client: &Client, _now: Instant) -> f32 {
     if client.waits_for_a_corpse() {
         return fight_worth(false, true, 0.0);
     }
+    // A critter at the character's feet is no fight in reach: the fight
+    // rules will walk past it, and reading it as one held the loot back.
+    let fight = &client.autoplay.config.fight;
     let nearest = client
         .world
         .objects
         .values()
         .filter(|o| o.item_type & ac_world::item_type::CREATURE != 0)
         .filter(|o| o.health.unwrap_or(0.0) > 0.0)
+        .filter(|o| !client.a_critter(o, fight))
         .filter_map(|o| o.world_pos())
         .map(|at| at.distance(me))
         .fold(f32::MAX, f32::min);

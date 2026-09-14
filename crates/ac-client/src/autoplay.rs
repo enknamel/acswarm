@@ -227,6 +227,9 @@ const CLOSE_IN_AFTER: Duration = Duration::from_secs(8);
 const MIN_STAND_OFF: f32 = 6.0;
 /// A corpse within this of where a kill fell is that kill's body.
 const KILL_SPOT: f32 = 6.0;
+/// Appraisal int: a creature's level (ACE `Level`), for the creatures
+/// the table has no level for.
+const CREATURE_LEVEL: u32 = 25;
 
 /// Whether a corpse at `at` lies where one of the character's kills fell.
 fn near_a_kill(at: glam::Vec3, spots: &[(glam::Vec3, Instant)]) -> bool {
@@ -650,6 +653,16 @@ pub struct Fight {
     pub only: Vec<String>,
     /// Never attack creatures whose name contains one of these.
     pub avoid: Vec<String>,
+    /// Walk past a creature the server will not let start a fight when
+    /// it is also far below the character: a Rabbit, a Chicken, a
+    /// Sparring Golem (see [`beneath_fighting`]). Never a reason not to
+    /// hit back.
+    ///
+    /// Defaulted by name, because serde fills a missing field from its
+    /// type and a settings file written before this existed would
+    /// otherwise turn it off.
+    #[serde(default = "yes")]
+    pub skip_critters: bool,
     /// Farthest creature to pick, metres.
     pub radius: f32,
     /// Make more ammunition when out, from a bundle of heads and a
@@ -677,9 +690,15 @@ impl Default for Fight {
             area: None,
             only: Vec::new(),
             avoid: Vec::new(),
+            skip_critters: true,
             radius: 25.0,
         }
     }
+}
+
+/// What a bool setting defaults to when a settings file leaves it out.
+fn yes() -> bool {
+    true
 }
 
 /// Which weapon the character should be holding.
@@ -1171,6 +1190,28 @@ pub fn wanted_target(name: &str, f: &Fight) -> bool {
         return false;
     }
     f.only.iter().all(|w| w.trim().is_empty()) || name_matches(name, &f.only)
+}
+
+/// Whether a creature is beneath fighting: the server will not let it
+/// start a fight, and the character has long since outgrown it. A Cow,
+/// a Rabbit, a Chicken.
+///
+/// Passive on its own is not the answer. A Revenant stands there until
+/// it is hit, and so do Cursed Bones and a Silver Tusker: half of what
+/// a hunting ground is for waits to be provoked, and those are worth
+/// sixty levels or more. What tells them apart is the level. "Far
+/// below" is deliberately hard -- twice the creature's level and over,
+/// so a level 4 Rabbit stops being worth a swing at level 8 while a
+/// level 61 Revenant is fought by anyone who will ever meet one.
+///
+/// A creature with no level recorded is fought: nothing is walked past
+/// on a guess.
+pub fn beneath_fighting(tolerance: u32, level: Option<u32>, mine: i32) -> bool {
+    let Some(level) = level else {
+        return false;
+    };
+    tolerance & ac_world::elements::tolerance::PASSIVE != 0
+        && i64::from(level) * 2 <= i64::from(mine)
 }
 
 /// Whether an item is worth taking.
@@ -4073,6 +4114,20 @@ impl Client {
             .is_some_and(|t| t.elapsed() < UNDER_ATTACK)
     }
 
+    /// Whether what has just hit the character is called `name`. The
+    /// server names the attacker in the line it sends, so this is all
+    /// there is to go on, and it is enough: it is what says a creature
+    /// outside the hunting area, or one otherwise walked past, is a
+    /// fight the character is already in.
+    pub(crate) fn hit_lately_by(&self, name: &str) -> bool {
+        self.under_attack()
+            && self
+                .autoplay
+                .hit_by
+                .as_ref()
+                .is_some_and(|(who, _)| who == name)
+    }
+
     /// The next fight waits for the body the last one left: every body
     /// is to be emptied first, one is owed, and nothing is hitting the
     /// character meanwhile. A character that does not loot owes nothing,
@@ -4093,6 +4148,52 @@ impl Client {
     fn creature_known(&self, guid: u32) -> Option<&'static ac_world::elements::Creature> {
         let o = self.world.objects.get(&guid)?;
         ac_world::elements::known(o.weenie_class_id, &o.name)
+    }
+
+    /// Whether `o` is a critter to walk past rather than fight (see
+    /// [`beneath_fighting`]).
+    ///
+    /// Three things always outrank the rule, because in each of them
+    /// the fight is already happening or was asked for: the creature is
+    /// hitting the character, a creature this one summoned has taken it
+    /// on, or the player named it in "only these", which is a player
+    /// saying outright what to hunt.
+    pub(crate) fn a_critter(&self, o: &ac_world::WorldObject, cfg: &Fight) -> bool {
+        if !cfg.skip_critters
+            || name_matches(&o.name, &cfg.only)
+            || self.hit_lately_by(&o.name)
+            || self.a_pet_is_on(o.guid)
+        {
+            return false;
+        }
+        let Some(kind) = ac_world::elements::known(o.weenie_class_id, &o.name) else {
+            return false;
+        };
+        // A level read off this very creature beats the table's, which
+        // is a weenie's -- and may be a weenie found by name rather than
+        // by id, so a stronger version of a familiar thing. Not every
+        // weenie carries one either, so the appraisal is often the only
+        // level there is.
+        let level = self
+            .appraisals
+            .get(&o.guid)
+            .and_then(|a| a.int(CREATURE_LEVEL))
+            .and_then(|l| u32::try_from(l).ok())
+            .or(kind.level);
+        beneath_fighting(kind.tolerance, level, self.world.stats.level)
+    }
+
+    /// Whether a creature this character summoned is already walking at
+    /// `guid`: its fight, and the character's to finish.
+    fn a_pet_is_on(&self, guid: u32) -> bool {
+        let Some(me) = self.world.player_guid else {
+            return false;
+        };
+        let on = Some(ac_world::object::MoveTarget::Object(guid));
+        self.world
+            .objects
+            .values()
+            .any(|o| o.pet_owner == me && o.target == on)
     }
 
     /// How this character is fighting right now: what its hands give.
@@ -4229,6 +4330,8 @@ impl Client {
                     && self.area_allows(o, underground)
             })
             .filter(|o| wanted_target(&o.name, &cfg))
+            // A Rabbit the character has outgrown is walked past.
+            .filter(|o| !self.a_critter(o, &cfg))
             // With the vitae high, the hard ones and the killer wait.
             .filter(|o| !self.shy_of(o))
             .filter(|o| {
@@ -5000,6 +5103,8 @@ impl Client {
                     && self.area_allows(o, underground)
             })
             .filter(|o| wanted_target(&o.name, cfg))
+            // A Rabbit the character has outgrown is walked past.
+            .filter(|o| !self.a_critter(o, cfg))
             // With the vitae high, the hard ones and the killer wait.
             .filter(|o| !self.shy_of(o))
             .filter_map(|o| {
@@ -6216,6 +6321,188 @@ mod tests {
         assert!(!wanted_target("Olthoi Grub", &f));
     }
 
+    #[test]
+    fn a_creature_is_beneath_fighting_only_when_it_is_both() {
+        use ac_world::elements::tolerance;
+        // A level 4 Rabbit: fought at 8, walked past from 8 up.
+        assert!(!beneath_fighting(tolerance::RETALIATE, Some(4), 5));
+        assert!(!beneath_fighting(tolerance::RETALIATE, Some(4), 7));
+        assert!(beneath_fighting(tolerance::RETALIATE, Some(4), 8));
+        assert!(beneath_fighting(tolerance::RETALIATE, Some(4), 20));
+        // A level 61 Revenant is passive and nobody outgrows it: 122
+        // is past the level a character can reach.
+        assert!(!beneath_fighting(tolerance::RETALIATE, Some(61), 100));
+        assert!(!beneath_fighting(tolerance::RETALIATE, Some(61), 121));
+        // Something that attacks on sight is fought however small.
+        assert!(!beneath_fighting(0, Some(1), 275));
+        // And nothing is walked past on a guess.
+        assert!(!beneath_fighting(tolerance::RETALIATE, None, 275));
+        // Every flag that means it leaves a passer-by alone counts.
+        for flag in [
+            tolerance::NO_ATTACK,
+            tolerance::APPRAISE,
+            tolerance::PROVOKE,
+            tolerance::RETALIATE,
+            tolerance::MONSTER,
+        ] {
+            assert!(beneath_fighting(flag, Some(4), 20), "{flag}");
+        }
+        // The ones that do not: "only fight back at whoever started it"
+        // still starts fights with everyone else.
+        assert!(!beneath_fighting(32, Some(4), 20));
+        // A character with no level yet fights everything.
+        assert!(!beneath_fighting(tolerance::RETALIATE, Some(4), 0));
+    }
+
+    /// Offline session over the real archives: nothing calls `tick`, so
+    /// no packet is ever sent.
+    fn offline_client(assets: std::rc::Rc<ac_scene::Assets>) -> Client {
+        Client::connect(
+            crate::Config {
+                host: "127.0.0.1:1".into(),
+                account: "acreborn".into(),
+                password: "x".into(),
+                character: None,
+                auto_enter: true,
+            },
+            assets,
+        )
+        .unwrap()
+    }
+
+    /// A character of `level` with nothing around it yet.
+    fn character_of_level(level: i32) -> Option<Client> {
+        let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
+            eprintln!("AC_DATA_DIR unset; skipping");
+            return None;
+        };
+        let assets = std::rc::Rc::new(ac_scene::Assets::open(dir).unwrap());
+        let mut c = offline_client(assets);
+        c.world.player_guid = Some(0x5000_0001);
+        c.world.stats.level = level;
+        Some(c)
+    }
+
+    /// A creature of `wcid` standing in view, and a copy of it to ask
+    /// the fight rules about.
+    fn in_view(c: &mut Client, guid: u32, wcid: u32, name: &str) -> ac_world::WorldObject {
+        let o = ac_world::WorldObject {
+            guid,
+            weenie_class_id: wcid,
+            name: name.into(),
+            item_type: ac_world::item_type::CREATURE,
+            health: Some(1.0),
+            ..Default::default()
+        };
+        c.world.objects.insert(guid, o.clone());
+        o
+    }
+
+    #[test]
+    fn a_rabbit_is_walked_past_once_it_is_outgrown_and_a_revenant_never_is() {
+        // Brown Rabbit 2567 (passive, level 4), Revenant 8592 (passive,
+        // level 61), Chicken 35499 (attacks on sight, level 8).
+        let Some(mut c) = character_of_level(20) else {
+            return;
+        };
+        let cfg = Fight::default();
+        let rabbit = in_view(&mut c, 0x8000_0001, 2567, "Brown Rabbit");
+        let revenant = in_view(&mut c, 0x8000_0002, 8592, "Revenant");
+        let chicken = in_view(&mut c, 0x8000_0003, 35499, "Chicken");
+        assert!(c.a_critter(&rabbit, &cfg));
+        assert!(!c.a_critter(&revenant, &cfg), "worth sixty levels");
+        assert!(!c.a_critter(&chicken, &cfg), "this one starts fights");
+
+        // A character the Rabbit is still worth something to fights it.
+        c.world.stats.level = 5;
+        assert!(!c.a_critter(&rabbit, &cfg));
+        assert!(!c.a_critter(&revenant, &cfg));
+
+        // Back at 20, and hitting back is never refused.
+        c.world.stats.level = 20;
+        assert!(c.a_critter(&rabbit, &cfg));
+        c.autoplay.last_hit_us = Some(Instant::now());
+        c.autoplay.hit_by = Some(("Brown Rabbit".into(), Instant::now()));
+        assert!(!c.a_critter(&rabbit, &cfg), "it is hitting the character");
+        // Which says nothing about the one next to it.
+        let other = in_view(&mut c, 0x8000_0004, 2566, "Black Rabbit");
+        assert!(c.a_critter(&other, &cfg));
+        c.autoplay.last_hit_us = None;
+        c.autoplay.hit_by = None;
+
+        // Named outright, it is what the player asked to hunt.
+        let only = Fight {
+            only: vec!["rabbit".into()],
+            ..Fight::default()
+        };
+        assert!(!c.a_critter(&rabbit, &only));
+
+        // A creature of ours already on it: its fight, and ours to end.
+        c.world.objects.insert(
+            0x8000_0005,
+            ac_world::WorldObject {
+                guid: 0x8000_0005,
+                name: "Fire Elemental".into(),
+                item_type: ac_world::item_type::CREATURE,
+                health: Some(1.0),
+                pet_owner: 0x5000_0001,
+                target: Some(ac_world::object::MoveTarget::Object(rabbit.guid)),
+                ..Default::default()
+            },
+        );
+        assert!(!c.a_critter(&rabbit, &cfg));
+        assert!(c.a_critter(&other, &cfg), "the one it is not on");
+        c.world.objects.remove(&0x8000_0005);
+
+        // With the setting off, everything is fought.
+        let all = Fight {
+            skip_critters: false,
+            ..Fight::default()
+        };
+        assert!(!c.a_critter(&rabbit, &all));
+        assert!(!c.a_critter(&other, &all));
+    }
+
+    /// An appraisal of `guid` saying it is `level`.
+    fn appraised_at(c: &mut Client, guid: u32, level: i32) {
+        c.appraisals.insert(
+            guid,
+            ac_net::messages::Appraisal {
+                guid,
+                success: true,
+                ints: vec![(CREATURE_LEVEL, level)],
+                ..Default::default()
+            },
+        );
+    }
+
+    #[test]
+    fn a_level_read_off_the_creature_itself_stands_in_for_the_tables() {
+        let Some(mut c) = character_of_level(50) else {
+            return;
+        };
+        let cfg = Fight::default();
+        // A Portal Pillar (32522) never attacks anything and the table
+        // has no level for it. Nothing is walked past on a guess, so it
+        // is fought until an appraisal says what it is worth.
+        let pillar = in_view(&mut c, 0x8000_0011, 32522, "Portal Pillar");
+        assert_eq!(
+            ac_world::elements::creature_by_id(32522).and_then(|k| k.level),
+            None
+        );
+        assert!(!c.a_critter(&pillar, &cfg));
+        appraised_at(&mut c, pillar.guid, 4);
+        assert!(c.a_critter(&pillar, &cfg));
+
+        // A creature whose weenie is not in the table at all is known
+        // only by the end of its name, and that row is some other
+        // weenie: a Brown Rabbit is level 4, and this is not one.
+        let stronger = in_view(&mut c, 0x8000_0012, 0x00FF_FFFF, "Weakened Brown Rabbit");
+        assert!(c.a_critter(&stronger, &cfg), "on the name alone, a Rabbit");
+        appraised_at(&mut c, stronger.guid, 40);
+        assert!(!c.a_critter(&stronger, &cfg), "not at forty it is not");
+    }
+
     fn item(name: &str, value: u32, armor: u32) -> ItemStats {
         ItemStats {
             name: name.into(),
@@ -7065,6 +7352,10 @@ mod tests {
                 .unwrap();
         assert_eq!(old.survive.heal_below, 0.45);
         assert!(old.survive.use_kits);
+        // And one written before critters were walked past walks past
+        // them: a bool left out would otherwise read as off.
+        let before: Config = serde_json::from_str(r#"{"fight":{"radius":30.0}}"#).unwrap();
+        assert!(before.fight.skip_critters);
     }
 }
 #[cfg(test)]

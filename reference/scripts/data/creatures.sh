@@ -16,6 +16,11 @@
 # is kept beside it: it is what the rules are written in, and it catches
 # a creature whose weenie is not in this copy of the data.
 #
+# Two more columns come from the same weenies, for deciding whether a
+# creature is worth fighting at all rather than what to hit it with:
+# tolerance (PropertyInt 67), the flags saying when the server lets it
+# attack, and level (PropertyInt 25), what it is worth killing.
+#
 # Usage: reference/scripts/data/creatures.sh > crates/ac-world/data/creatures.csv
 set -e
 
@@ -27,7 +32,9 @@ SQL='select w.class_Id, s.value, coalesce(max(h.current_Level), 0),
   max(case when f.type=67 then round(f.value,3) end),
   max(case when f.type=69 then round(f.value,3) end),
   max(case when f.type=70 then round(f.value,3) end),
-  max(case when f.type=166 then round(f.value,3) end)
+  max(case when f.type=166 then round(f.value,3) end),
+  max(case when i.type=67 then i.value end),
+  max(case when i.type=25 then i.value end)
 from weenie w
 join weenie_properties_string s
   on s.object_Id = w.class_Id and s.type = 1
@@ -35,6 +42,8 @@ join weenie_properties_float f
   on f.object_Id = w.class_Id and f.type in (64,65,66,67,68,69,70,166)
 left join weenie_properties_attribute_2nd h
   on h.object_Id = w.class_Id and h.type = 1
+left join weenie_properties_int i
+  on i.object_Id = w.class_Id and i.type in (25,67)
 where w.type = 10 and s.value <> ""
 group by w.class_Id, s.value
 having count(case when f.type in (64,65,66,67,68,69,70) then 1 end) > 0;'
@@ -42,10 +51,15 @@ having count(case when f.type in (64,65,66,67,68,69,70) then 1 end) > 0;'
 cat <<'HEADER'
 # What each kind of creature takes from each element: a damage
 # multiplier, higher meaning it is hurt more. 0 is immune.
-# wcid,name,health,slash,pierce,bludgeon,cold,fire,acid,electric,nether
+# wcid,name,health,slash,pierce,bludgeon,cold,fire,acid,electric,nether,
+# tolerance,level
 # health is how much it has at full, 0 when not recorded: what tells a
 # thing worth spending a vulnerability on from one that dies first.
 # An empty column means the creature has no figure for that element.
+# tolerance is the server's flags for when it will attack; empty means
+# it attacks whatever comes near. level is what it is worth killing,
+# empty when it has none. Between them they tell a Rabbit from a
+# Revenant, both of which stand there until they are hit.
 # Regenerate with reference/scripts/data/creatures.sh (reads the ACE
 # world database, the community's reconstruction of retail's server
 # data; the client has no copy of its own).
@@ -54,10 +68,10 @@ HEADER
 docker exec ace-db sh -c \
   "mysql -uroot -p\"\$MYSQL_ROOT_PASSWORD\" -N --batch ace_world -e '$SQL'" \
   2>/dev/null |
-  awk -F'\t' 'NF == 11 {
+  awk -F'\t' 'NF == 13 {
     gsub(/,/, ";", $2)
-    for (i = 4; i <= 11; i++) if ($i == "NULL") $i = ""
-    printf "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n",
-      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+    for (i = 4; i <= 13; i++) if ($i == "NULL") $i = ""
+    printf "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n",
+      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
   }' |
   LC_ALL=C sort -t, -k1,1n

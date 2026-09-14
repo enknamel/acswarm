@@ -604,6 +604,8 @@ mod tests {
             wcid: 0,
             name: "Firefly".into(),
             health: 500,
+            tolerance: 0,
+            level: None,
             takes: [
                 Some(0.6),
                 Some(1.0),
@@ -786,6 +788,8 @@ mod tests {
             wcid: 0,
             name: "Tough".into(),
             health: 5000,
+            tolerance: 0,
+            level: None,
             takes: [Some(1.0); 8],
         };
         assert!(score(&crit, Some(&tough), &able()) > score(&plain, Some(&tough), &able()));
@@ -980,6 +984,8 @@ mod tests {
             wcid: 0,
             name: "Tough".into(),
             health: 5000,
+            tolerance: 0,
+            level: None,
             // Weakest to fire.
             takes: [
                 Some(0.5),
