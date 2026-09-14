@@ -1621,6 +1621,15 @@ impl Client {
             // of a quiet spell, it does not get to go somewhere else.
             return false;
         }
+        // Everything below picks a ground of its own, which is the
+        // leader's to do. A follower has just skipped the roam for the
+        // same reason, and falling through to here from that made the
+        // scattering the roam's guard was added to stop: the follower
+        // left for a landblock of its own the first time its ground went
+        // quiet, instead of staying with the party.
+        if !goes_looking {
+            return false;
+        }
         let Some(g) = ac_world::hunting::nearest_for(level as u32, cfg.level_margin, me, &skip)
         else {
             self.autoplay.note(
@@ -4726,6 +4735,54 @@ mod tests {
         c.autoplay.team.leader = true;
         assert!(c.grow_hunt(now, &cfg), "the leader stayed put");
         assert!(c.traveling());
+    }
+
+    #[test]
+    fn a_follower_with_no_hunting_area_does_not_go_looking_for_a_ground_of_its_own() {
+        // The guard that keeps a follower from walking an area of its
+        // own covered the roam as well, but not the tail below it: a
+        // party with no area configured had its followers fail the roam
+        // on the first quiet minute and fall straight through to picking
+        // a landblock and travelling to it -- which is the scattering
+        // the guard was added to stop, only sooner than before.
+        let holtburg = 0xA9B4_0019;
+        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
+            return;
+        };
+        let me = c.player.as_ref().unwrap().world_position();
+        let now = Instant::now();
+        let cfg = Growth::default();
+        c.world.stats.level = 20;
+        let team = &mut c.autoplay.config.team;
+        team.enabled = true;
+        team.follow = true;
+        team.lead = false;
+        // A leader with no ground of its own to take, so nothing below
+        // the roam can be following anybody.
+        c.autoplay.team.mates = vec![crate::autoplay::Mate {
+            name: "Leader".into(),
+            leader: true,
+            leads: true,
+            world: me,
+            cell: holtburg,
+            ..Default::default()
+        }];
+        // Standing on the ground it is hunting, quiet long enough to
+        // move on, and past its roams so the roam itself is refused.
+        c.autoplay.growth.hunting_at = Some(holtburg >> 16);
+        c.autoplay.growth.roams = ROAMS;
+        c.autoplay.growth.quiet_since = Some(now - Duration::from_secs(600));
+        assert!(!c.grow_hunt(now, &cfg), "a follower went hunting alone");
+        assert!(!c.traveling());
+        assert_eq!(
+            c.autoplay.growth.bound, None,
+            "bound for a ground of its own"
+        );
+
+        // The one leading still moves the party on.
+        c.autoplay.team.mates.clear();
+        c.autoplay.team.leader = true;
+        assert!(c.grow_hunt(now, &cfg), "the leader stayed put");
     }
 
     #[test]
