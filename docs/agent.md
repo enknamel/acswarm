@@ -48,6 +48,15 @@ never won one -- a character that fights, loots and walks all afternoon
 has no quiet tick to give it -- and the pack filled up with part stacks
 while tidying waited its turn.
 
+Watching the ground is housekeeping for the same reason. How long a spot
+has had nothing on it is read off the world every tick, not off what the
+character happens to be doing: the hunting step that acts on it is the
+last goal in the table, so a character with a body to open never reaches
+it, and a clock only wound there stands still exactly when it is most
+needed. Nine characters queueing at one corpse restarted it every couple
+of seconds and never once walked the two hundred metres they had been
+given.
+
 **A group state machine.** `logistics` is a proper FSM over
 `Hunting | Restocking{Shopping, HandOver, Away, HandOut}`, computed by
 every session from the shared roster. This part is right and is not

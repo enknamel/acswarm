@@ -1960,7 +1960,7 @@ impl Autoplay {
 
     /// Start on a corpse: asked to open just now, with `allow` for it
     /// to do so. The loot rules start afresh with it.
-    fn take_up_corpse(&mut self, guid: u32, now: Instant, allow: Duration) {
+    pub(crate) fn take_up_corpse(&mut self, guid: u32, now: Instant, allow: Duration) {
         self.fresh_loot_run();
         self.corpse = Some((guid, now, allow, 0));
         self.quiet_answers = 0;
@@ -3713,31 +3713,18 @@ impl Client {
         let seen_at: std::collections::BTreeMap<u32, Instant> =
             self.autoplay.corpse_seen.iter().copied().collect();
         let room = self.room_for_loot();
-        let my_guid = self.world.player_guid.unwrap_or(0);
         let corpse = self
             .world
             .objects
             .values()
-            .filter(|o| o.object_desc_flags & ac_world::object_desc_flags::CORPSE != 0)
-            // Not emptied, not set aside, something there is room for, and
-            // close by on this floor or where one of this character's kills
-            // fell -- which a caster makes from well past twenty metres.
-            // And not one of the others' to open: nine characters that
-            // rank the bodies by the same rule choose the same one, and
-            // the server gives it to one of them (see
-            // [`Autoplay::ours_to_open`]).
-            .filter_map(|o| {
-                let p = o.world_pos()?;
-                (self.autoplay.corpse_owed(o.guid, p, me, now, room)
-                    && self.autoplay.ours_to_open(o.guid, p, my_guid, now))
-                .then(|| (p.distance(me), o))
-            })
-            // Another player's corpse is theirs: a teammate's gear taken
-            // off their body is not loot, whatever the filters say. Our
-            // own is emptied for everything on it (see below): the wand
-            // and the components are on it, and a character without
-            // them cannot fight or heal.
-            .filter(|(_, o)| !self.corpse_is_someone_elses(&o.name))
+            // Not emptied, not set aside, something there is room for,
+            // close by on this floor or where one of this character's
+            // kills fell, not one of the others' to open, and not another
+            // player's remains. The one rule every part of this asks, so
+            // what the looting goes to and what the next fight waits on
+            // cannot come apart (see [`Client::corpse_for_us`]).
+            .filter(|o| self.corpse_for_us(o, me, now, room))
+            .filter_map(|o| Some((o.world_pos()?.distance(me), o)))
             .map(|(d, o)| (d, o.guid, o.name.clone()))
             .map(|(d, guid, name)| {
                 let seen = seen_at.get(&guid).copied().unwrap_or(now);
@@ -4647,40 +4634,88 @@ impl Client {
         if room.pack_low {
             return false;
         }
-        // Just killed something: its body is on the way.
-        if self
-            .autoplay
-            .last_kill
-            .is_some_and(|t| t.elapsed() < CORPSE_APPEARS)
-        {
-            return true;
-        }
         let now = Instant::now();
         // A far body is being asked about, and may be one its creature
         // killed (see `Client::autoplay_claim_pet_kills`).
         if self.autoplay.whose.waiting(now) {
             return true;
         }
-        let Some(me) = self.player.as_ref().map(|p| p.world_position()) else {
+        // A body on the floor that this character will go to. One it
+        // will not -- set aside, out of reach, a mate's to open -- is not
+        // waited on: waiting on a body it is never going to open would
+        // stop the fighting altogether (see [`Client::corpse_for_us`]).
+        let on_the_floor = self
+            .player
+            .as_ref()
+            .map(|p| p.world_position())
+            .is_some_and(|me| {
+                self.world
+                    .objects
+                    .values()
+                    .any(|o| self.corpse_for_us(o, me, now, room))
+            });
+        // Otherwise the only thing owed is a body of its own still on
+        // its way.
+        on_the_floor || self.own_body_still_falling(now)
+    }
+
+    /// Whether the body `o` is one this character would walk to and
+    /// empty from where it stands (`me`): a corpse, waiting and its own
+    /// ([`Autoplay::corpse_owed`]), not a mate's to open
+    /// ([`Autoplay::ours_to_open`]), and not another player's remains.
+    ///
+    /// Every question about the bodies on the floor asks this one: which
+    /// the looting goes to, which the next fight waits on, and what
+    /// looting is worth against the next fight. They did not, and so
+    /// came to disagree: what looting was worth counted every body
+    /// waiting, ownership and all, so eight bodies another character had
+    /// locked lifted this one's loot score past the fight it was in the
+    /// middle of, with nothing for the looting to actually do when it
+    /// won the tick. Nine characters spent 53% of a run standing over
+    /// bodies and 13% fighting.
+    pub(crate) fn corpse_for_us(
+        &self,
+        o: &ac_world::WorldObject,
+        me: glam::Vec3,
+        now: Instant,
+        room: Room,
+    ) -> bool {
+        if o.object_desc_flags & ac_world::object_desc_flags::CORPSE == 0 {
+            return false;
+        }
+        let Some(at) = o.world_pos() else {
             return false;
         };
         let my_guid = self.world.player_guid.unwrap_or(0);
-        self.world
-            .objects
-            .values()
-            .filter(|o| o.object_desc_flags & ac_world::object_desc_flags::CORPSE != 0)
-            // One that would not open, or cannot be walked to, is set
-            // aside for a while, and waiting on it would stop the
-            // fighting altogether. So is one a mate has claimed: the
-            // looting will not choose it, and the fight must not be held
-            // for a body this character is never going to open.
-            .filter(|o| {
-                o.world_pos().is_some_and(|at| {
-                    self.autoplay.corpse_owed(o.guid, at, me, now, room)
-                        && self.autoplay.ours_to_open(o.guid, at, my_guid, now)
-                })
-            })
-            .any(|o| !self.corpse_is_someone_elses(&o.name))
+        self.autoplay.corpse_owed(o.guid, at, me, now, room)
+            && self.autoplay.ours_to_open(o.guid, at, my_guid, now)
+            && !self.corpse_is_someone_elses(&o.name)
+    }
+
+    /// Whether this character's own last killing blow has yet to leave a
+    /// body: the server makes one a moment after the creature dies (see
+    /// [`CORPSE_APPEARS`]), and the next fight waits that moment out
+    /// rather than walking off from a body about to appear.
+    ///
+    /// Its own kill and nobody else's: the server tells the last damager
+    /// alone (ACE `Creature_Death.GetDeathMessage`), so `last_kill` is
+    /// never a mate's. And only until a body has turned up, because from
+    /// then on the bodies on the floor are the answer and they are read
+    /// first -- a mate's claim among them. Held for the whole three
+    /// seconds regardless, nine characters killing in one huddle each
+    /// held the next fight for a body somebody else was already opening.
+    fn own_body_still_falling(&self, now: Instant) -> bool {
+        let Some(blow) = self.autoplay.last_kill else {
+            return false;
+        };
+        if now.saturating_duration_since(blow) >= CORPSE_APPEARS {
+            return false;
+        }
+        !self
+            .autoplay
+            .corpse_seen
+            .iter()
+            .any(|(_, seen)| *seen >= blow)
     }
 
     /// Whether the corpse named `corpse` is another player's, and theirs:
@@ -4785,6 +4820,83 @@ impl Client {
         !(name_matches(&o.name, &cfg.only)
             || self.hit_lately_by(&o.name)
             || self.a_pet_is_on(o.guid))
+    }
+
+    /// Whether `o` is something this character would take on: a live
+    /// creature, nobody's summoned pet and no player, inside the hunting
+    /// area, of a kind it hunts, not a critter beneath it, not one the
+    /// vitae has it keeping clear of, and not one it has given up
+    /// reaching. Where it stands is the caller's business.
+    ///
+    /// Asked by the fight when it picks a target, and by the clock that
+    /// says the ground has gone quiet (see
+    /// [`Client::a_fight_in_sight`]), so the two agree about what
+    /// counts as something to fight.
+    pub(crate) fn would_fight(
+        &self,
+        o: &ac_world::WorldObject,
+        cfg: &Fight,
+        underground: bool,
+        now: Instant,
+    ) -> bool {
+        o.item_type & ac_world::item_type::CREATURE != 0
+            && o.object_desc_flags & ac_world::object_desc_flags::ATTACKABLE != 0
+            && o.object_desc_flags & ac_world::object_desc_flags::PLAYER == 0
+            && o.health.unwrap_or(1.0) > 0.0
+            && !o.is_player
+            // A summoned creature is its owner's, ours or anyone's.
+            && o.pet_owner == 0
+            // Inside the hunting area, or hitting the character.
+            && self.area_allows(o, underground)
+            && wanted_target(&o.name, cfg)
+            // A Rabbit the character has outgrown is walked past.
+            && !self.a_critter(o, cfg)
+            // With the vitae high, the hard ones and the killer wait.
+            && !self.shy_of(o)
+            // And one there is no getting to is not a fight on offer.
+            && !self
+                .autoplay
+                .given_up
+                .iter()
+                .any(|(g, t)| *g == o.guid && now.duration_since(*t) < GIVE_UP_FOR)
+    }
+
+    /// Whether there is a fight to be had where the character stands:
+    /// something it would take on within its fight radius, or one it has
+    /// already joined.
+    ///
+    /// This is what says a spot has gone quiet, and it reads the world
+    /// rather than the status line (see
+    /// `Client::autoplay_watch_the_ground`).
+    pub(crate) fn a_fight_in_sight(&mut self, now: Instant) -> bool {
+        // Not in the world yet: nothing to say about the ground, and
+        // nothing that should start a clock running on it.
+        let Some(me) = self.player.as_ref().map(|p| p.world_position()) else {
+            return true;
+        };
+        // A fight already joined counts wherever it has led. A creature
+        // chased past the radius is still a fight, and walking off to
+        // look for one in the middle of it is not looking for a fight.
+        let joined = self
+            .attack_target
+            .or_else(|| self.autoplay.casting_at())
+            .and_then(|g| self.world.objects.get(&g))
+            .is_some_and(|o| o.health.unwrap_or(0.0) > 0.0);
+        if joined {
+            return true;
+        }
+        // Every session pays for this on every tick, so the cheap
+        // question -- is it near enough -- is asked first.
+        let underground = self.underground();
+        let cfg = &self.autoplay.config.fight;
+        self.world
+            .objects
+            .values()
+            .filter(|o| {
+                o.world_pos()
+                    .is_some_and(|at| at.distance(me) <= cfg.radius)
+            })
+            .any(|o| self.would_fight(o, cfg, underground, now))
     }
 
     /// Whether a creature this character summoned is already walking at
@@ -4940,29 +5052,7 @@ impl Client {
             .world
             .objects
             .values()
-            .filter(|o| {
-                o.item_type & ac_world::item_type::CREATURE != 0
-                    && o.object_desc_flags & ac_world::object_desc_flags::ATTACKABLE != 0
-                    && o.object_desc_flags & ac_world::object_desc_flags::PLAYER == 0
-                    && o.health.unwrap_or(1.0) > 0.0
-                    && !o.is_player
-                    // A summoned creature is its owner's, ours or anyone's.
-                    && o.pet_owner == 0
-                    // Inside the hunting area, or hitting the character.
-                    && self.area_allows(o, underground)
-            })
-            .filter(|o| wanted_target(&o.name, &cfg))
-            // A Rabbit the character has outgrown is walked past.
-            .filter(|o| !self.a_critter(o, &cfg))
-            // With the vitae high, the hard ones and the killer wait.
-            .filter(|o| !self.shy_of(o))
-            .filter(|o| {
-                !self
-                    .autoplay
-                    .given_up
-                    .iter()
-                    .any(|(g, t)| *g == o.guid && now.duration_since(*t) < GIVE_UP_FOR)
-            })
+            .filter(|o| self.would_fight(o, &cfg, underground, now))
             .filter_map(|o| {
                 let p = o.world_pos()?;
                 let d = p.distance(me);
@@ -5746,29 +5836,7 @@ impl Client {
             .world
             .objects
             .values()
-            .filter(|o| {
-                !self
-                    .autoplay
-                    .given_up
-                    .iter()
-                    .any(|(g, t)| *g == o.guid && now.duration_since(*t) < GIVE_UP_FOR)
-            })
-            .filter(|o| {
-                o.item_type & ac_world::item_type::CREATURE != 0
-                    && o.object_desc_flags & ac_world::object_desc_flags::ATTACKABLE != 0
-                    && o.object_desc_flags & ac_world::object_desc_flags::PLAYER == 0
-                    && o.health.unwrap_or(1.0) > 0.0
-                    && !o.is_player
-                    // A summoned creature is its owner's, ours or anyone's.
-                    && o.pet_owner == 0
-                    // Inside the hunting area, or hitting the character.
-                    && self.area_allows(o, underground)
-            })
-            .filter(|o| wanted_target(&o.name, cfg))
-            // A Rabbit the character has outgrown is walked past.
-            .filter(|o| !self.a_critter(o, cfg))
-            // With the vitae high, the hard ones and the killer wait.
-            .filter(|o| !self.shy_of(o))
+            .filter(|o| self.would_fight(o, cfg, underground, now))
             .filter_map(|o| {
                 let at = o.world_pos()?;
                 let near_leader = leader_at.is_none_or(|l| at.distance(l) <= fight_radius);
@@ -7949,6 +8017,39 @@ mod tests {
             60.0,
             &[]
         ));
+    }
+
+    #[test]
+    fn the_moment_held_open_for_a_falling_body_ends_when_one_lands() {
+        // The next fight is held for three seconds after a killing blow,
+        // because the body comes a moment after the creature dies. Held
+        // for the whole three regardless of what landed, nine characters
+        // killing in one huddle each spent it standing over a body one
+        // of the others was already opening: fighting was 13% of that
+        // run and opening a corpse 53%.
+        let Some(mut c) = character_of_level(20) else {
+            return;
+        };
+        let s = Duration::from_secs;
+        let t0 = Instant::now();
+        assert!(!c.owes_a_corpse(), "owed a body with no kill behind it");
+
+        // Its own killing blow: the body is owed while it is still
+        // falling, and no longer.
+        c.autoplay.last_kill = Some(t0);
+        assert!(c.own_body_still_falling(t0));
+        assert!(c.own_body_still_falling(t0 + CORPSE_APPEARS - s(1)));
+        assert!(!c.own_body_still_falling(t0 + CORPSE_APPEARS));
+
+        // A body noted before the blow is some other kill's and says
+        // nothing about this one.
+        c.autoplay.corpse_seen = vec![(0x8000_0001, t0 - s(1))];
+        assert!(c.own_body_still_falling(t0));
+        // One that has landed since ends the wait: from here the bodies
+        // on the floor are the answer, a mate's claim among them.
+        c.autoplay.corpse_seen.push((0x8000_0002, t0));
+        assert!(!c.own_body_still_falling(t0));
+        assert!(!c.owes_a_corpse());
     }
 
     #[test]

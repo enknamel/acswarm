@@ -196,17 +196,25 @@ fn fight_worth(engaged: bool, owes_a_body: bool, nearest: f32) -> f32 {
 fn worth_looting(client: &Client, now: Instant) -> f32 {
     use crate::autoplay::CORPSE_LIFE;
     let room = client.room_for_loot();
+    let Some(me) = client.player.as_ref().map(|p| p.world_position()) else {
+        return 0.0;
+    };
+    // The body in hand, or the one being walked to: whatever the board
+    // says about it now, this character has it open on the server or is
+    // most of the way there, and only the looting closes it. Scoring it
+    // out would stop the looting on a held body and leave it open.
+    let in_hand = client.autoplay.corpse_claim(now).map(|(guid, _)| guid);
     let waiting = client
         .world
         .objects
         .values()
-        .filter(|o| o.object_desc_flags & ac_world::object_desc_flags::CORPSE != 0)
-        // A body the looting has finished with, or set aside for now, is
-        // not one it will go to. A finished body still holding what the
-        // rules did not want lies on the floor until it rots, and counting
-        // those, and the ones set aside, could rank looting above the next
-        // fight with nothing for it to do. Nor is one there is no room for.
-        .filter(|o| client.autoplay.corpse_waiting(o.guid, now, room))
+        // Exactly the bodies the looting would go to (see
+        // [`Client::corpse_for_us`]). A body the looting has finished
+        // with, set aside, out of reach, or claimed by a teammate is not
+        // one it will go to, and counting those ranked looting above the
+        // next fight with nothing for it to do: nine characters stopped
+        // fighting for a floor of bodies that were all somebody else's.
+        .filter(|o| in_hand == Some(o.guid) || client.corpse_for_us(o, me, now, room))
         .map(|o| {
             // A corpse we never saw appear is taken as fresh, which is
             // what the looting step assumes too.
@@ -500,6 +508,15 @@ pub const HOUSEKEEPING: &[Housekeeping] = &[
     Housekeeping {
         name: "claim the summoned creature's kills",
         run: Client::autoplay_claim_pet_kills,
+    },
+    Housekeeping {
+        name: "watch the ground",
+        // How long a spot has had nothing on it is read off the world,
+        // and it has to be read every tick: the hunting step that acts
+        // on it is the last goal in the table, so a character with a
+        // body to open never reaches it, and a clock only wound there
+        // stands still exactly when it is most needed.
+        run: Client::autoplay_watch_the_ground,
     },
     Housekeeping {
         name: "tidy the pack",
@@ -847,5 +864,133 @@ mod tests {
             ..room
         };
         assert!(!ap.corpse_waiting(fresh, now, full));
+    }
+
+    /// A character standing in `cell` at `local`, offline, when the
+    /// archives are there to be read.
+    fn standing_at(cell: u32, local: glam::Vec3) -> Option<Client> {
+        let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
+            eprintln!("AC_DATA_DIR unset; skipping");
+            return None;
+        };
+        let assets = std::rc::Rc::new(ac_scene::Assets::open(dir).unwrap());
+        let mut c = Client::connect(
+            crate::Config {
+                host: "127.0.0.1:1".into(),
+                account: "acreborn".into(),
+                password: "x".into(),
+                character: None,
+                auto_enter: true,
+            },
+            assets.clone(),
+        )
+        .unwrap();
+        let mut pl = crate::player::Player::new(&assets, cell, local, glam::Quat::IDENTITY);
+        pl.set_motion_table(&assets, 0x0200_0001, 0x0900_0001);
+        c.player = Some(pl);
+        c.world.player_guid = Some(0x5000_0009);
+        Some(c)
+    }
+
+    #[test]
+    fn looting_is_worth_only_the_bodies_this_character_would_go_to() {
+        // The two predicates disagreed: what looting was worth counted
+        // every body waiting, ownership and all, while the looting step
+        // and the fight both counted only the ones this character was
+        // owed. Eight bodies another character had locked lifted the
+        // loot score past the fight in hand, and the looting then won
+        // the tick with nothing to go to. Nine characters spent 53% of
+        // a run standing over bodies and 13% fighting.
+        let holtburg = 0xA9B4_0019;
+        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 84.0, 94.0)) else {
+            return;
+        };
+        let me = c.player.as_ref().unwrap().world_position();
+        let now = Instant::now();
+        let body = |guid: u32, at: glam::Vec3| ac_world::WorldObject {
+            guid,
+            name: "Corpse of Drudge Slave".into(),
+            object_desc_flags: ac_world::object_desc_flags::CORPSE,
+            position: Some(ac_world::object::Position::new_flat(
+                holtburg,
+                at - ac_world::landblock_origin(holtburg),
+            )),
+            ..Default::default()
+        };
+        // One at the character's feet, and five more: three beside it
+        // that teammates have claimed, and two lying out of reach.
+        let mine = 0x8000_0001;
+        c.world.objects.insert(mine, body(mine, me));
+        let claimed: Vec<u32> = (2..5).map(|i| 0x8000_0000 + i).collect();
+        for (n, &guid) in claimed.iter().enumerate() {
+            let at = me + glam::Vec3::new(n as f32 + 1.0, 0.0, 0.0);
+            c.world.objects.insert(guid, body(guid, at));
+            c.autoplay.team.mates.push(crate::autoplay::Mate {
+                guid: 0x5000_0001 + n as u32,
+                name: format!("Mate {n}"),
+                autoplay: true,
+                health: 1.0,
+                world: at,
+                looting: Some(guid),
+                looting_for: std::time::Duration::ZERO,
+                ..Default::default()
+            });
+        }
+        for i in 5..7u32 {
+            let guid = 0x8000_0000 + i;
+            let far = me + glam::Vec3::new(0.0, 60.0, 0.0);
+            c.world.objects.insert(guid, body(guid, far));
+        }
+        // All six are waiting to be emptied; only one is this
+        // character's to go to.
+        let room = c.room_for_loot();
+        assert_eq!(
+            c.world
+                .objects
+                .values()
+                .filter(|o| c.autoplay.corpse_waiting(o.guid, now, room))
+                .count(),
+            6
+        );
+        assert_eq!(
+            c.world
+                .objects
+                .values()
+                .filter(|o| c.corpse_for_us(o, me, now, room))
+                .map(|o| o.guid)
+                .collect::<Vec<_>>(),
+            vec![mine]
+        );
+        // So the score is one body's, which is under the fight's.
+        let one = worth_of_bodies([crate::autoplay::CORPSE_LIFE].into_iter());
+        assert_eq!(worth_looting(&c, now), one);
+        let fight = STEPS
+            .iter()
+            .position(|s| s.name == "fight")
+            .map(|p| (STEPS.len() - p) as f32 * BY_PLACE)
+            .expect("the fight is in the table");
+        assert!(
+            worth_looting(&c, now) < fight,
+            "a body somebody else is opening outranked the fight"
+        );
+
+        // The body in hand is the looting's whatever the board says: a
+        // teammate that claimed it too must not leave this character
+        // holding one open on the server with no step left to close it.
+        c.autoplay.team.mates.push(crate::autoplay::Mate {
+            guid: 0x5000_0008,
+            name: "Racer".into(),
+            autoplay: true,
+            health: 1.0,
+            world: me,
+            looting: Some(mine),
+            looting_for: std::time::Duration::ZERO,
+            ..Default::default()
+        });
+        assert!(!c.corpse_for_us(&body(mine, me), me, now, room));
+        assert_eq!(worth_looting(&c, now), 0.0, "nothing to go to");
+        c.autoplay
+            .take_up_corpse(mine, now, std::time::Duration::from_secs(10));
+        assert_eq!(worth_looting(&c, now), one, "let go of a body in hand");
     }
 }
