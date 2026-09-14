@@ -1878,12 +1878,22 @@ impl Client {
                     }
                 }
                 Some((_, _, event::EVASION_DEFENDER_NOTIFICATION, rest)) => {
+                    // A swing that missed is still a swing: the creature
+                    // has picked this fight as surely as one that landed
+                    // a blow, and every "but fight back when it attacks
+                    // you" carve-out reads these two fields. Counting
+                    // only hits let a critter stand there missing while
+                    // the character walked past it.
+                    self.autoplay.last_hit_us = Some(Instant::now());
                     match ac_net::wire::Reader::new(rest).string16() {
-                        Ok(n) => Ok(ChatLine {
-                            text: format!("You evade {n}'s attack."),
-                            sender: String::new(),
-                            sender_id: 0,
-                            kind: 6,
+                        Ok(n) => Ok({
+                            self.autoplay.hit_by = Some((n.clone(), Instant::now()));
+                            ChatLine {
+                                text: format!("You evade {n}'s attack."),
+                                sender: String::new(),
+                                sender_id: 0,
+                                kind: 6,
+                            }
                         }),
                         Err(e) => Err(e),
                     }

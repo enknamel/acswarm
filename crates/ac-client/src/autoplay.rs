@@ -1054,8 +1054,8 @@ const LOOT_NEAR: f32 = 20.0;
 /// How long after a killing blow its corpse is taken to be on the way.
 /// The server makes the body a moment after the creature dies.
 const CORPSE_APPEARS: Duration = Duration::from_secs(3);
-/// Hit this recently, the character is in a fight whether or not it
-/// chose one.
+/// Swung at this recently, the character is in a fight whether or not
+/// it chose one.
 const UNDER_ATTACK: Duration = Duration::from_secs(4);
 
 /// How long a monster's corpse lasts before it rots away. ACE gives an
@@ -1853,8 +1853,9 @@ pub struct Autoplay {
     approach_best: Option<(u32, f32)>,
     /// The summoning rules' own state (see `crate::summoning`).
     pub summoning: crate::summoning::State,
-    /// Who last hit the character, and when: fought wherever it stands,
-    /// hunting area or not.
+    /// Who last swung at the character, and when -- a blow landed or one
+    /// evaded, since a creature that misses is attacking all the same.
+    /// Fought wherever it stands, hunting area or not.
     pub(crate) hit_by: Option<(String, Instant)>,
     /// The first shot thrown at a target since anything last got to it,
     /// and when: damage, a resist or an evasion clears it. The time spent
@@ -1905,8 +1906,9 @@ pub struct Autoplay {
     /// creature this character summoned is about: its kills send no
     /// word (see `Client::autoplay_claim_pet_kills`).
     pub(crate) whose: Whose,
-    /// When something last hit the character. A fight that has come to
-    /// it is fought first, body owed or not.
+    /// When something last swung at the character, whether or not the
+    /// blow landed. A fight that has come to it is fought first, body
+    /// owed or not.
     pub(crate) last_hit_us: Option<Instant>,
     /// Corpses that would not open, and how long to leave each. A
     /// corpse is locked to the group that killed it until it has rotted
@@ -4921,18 +4923,27 @@ impl Client {
         a_player || ac_world::elements::creature(corpse.get(10..).unwrap_or("")).is_none()
     }
 
-    /// Something has hit the character in the last few seconds.
+    /// Something has attacked the character in the last few seconds --
+    /// landed a blow, or swung and missed. A creature that keeps missing
+    /// is in a fight with this character just as much as one that hits,
+    /// and the server says so either way.
     pub fn under_attack(&self) -> bool {
         self.autoplay
             .last_hit_us
             .is_some_and(|t| t.elapsed() < UNDER_ATTACK)
     }
 
-    /// Whether what has just hit the character is called `name`. The
-    /// server names the attacker in the line it sends, so this is all
-    /// there is to go on, and it is enough: it is what says a creature
-    /// outside the hunting area, or one otherwise walked past, is a
-    /// fight the character is already in.
+    /// Whether what has just swung at the character is called `name`.
+    /// The server names the attacker in the line it sends, hit or miss,
+    /// so this is all there is to go on, and it is enough: it is what
+    /// says a creature outside the hunting area, or one otherwise walked
+    /// past, is a fight the character is already in.
+    ///
+    /// A creature's move target being this character is not asked here.
+    /// It says something is walking at us, which our own pets, a fellow
+    /// and a wandering townsfolk all do, and it carries no time, so it
+    /// could not say when the fight began. The two notifications say
+    /// outright that a blow was aimed at this character, and when.
     pub(crate) fn hit_lately_by(&self, name: &str) -> bool {
         self.under_attack()
             && self
@@ -4969,9 +4980,9 @@ impl Client {
     ///
     /// Three things always outrank the rule, because in each of them
     /// the fight is already happening or was asked for: the creature is
-    /// hitting the character, a creature this one summoned has taken it
-    /// on, or the player named it in "only these", which is a player
-    /// saying outright what to hunt.
+    /// swinging at the character, hit or miss, a creature this one
+    /// summoned has taken it on, or the player named it in "only these",
+    /// which is a player saying outright what to hunt.
     ///
     /// The table is asked first and the three are only consulted for
     /// something the table would have the character walk past. This runs
@@ -7638,6 +7649,66 @@ mod tests {
         };
         assert!(!c.a_critter(&rabbit, &all));
         assert!(!c.a_critter(&other, &all));
+    }
+
+    /// The GameEvent behind "You evade <name>'s attack.": the server's
+    /// word that `name` swung at the character and missed.
+    fn evaded(guid: u32, name: &str) -> Vec<u8> {
+        let mut w = ac_net::wire::Writer::new();
+        w.u32(guid)
+            .u32(0)
+            .u32(ac_net::messages::event::EVASION_DEFENDER_NOTIFICATION)
+            .string16(name);
+        w.finish()
+    }
+
+    #[test]
+    fn an_evaded_swing_counts_as_being_attacked() {
+        let Some(mut c) = character_of_level(20) else {
+            return;
+        };
+        assert!(!c.under_attack(), "nothing has happened yet");
+        c.chat_message(
+            ac_net::messages::opcode::GAME_EVENT,
+            &evaded(0x8000_0001, "Drudge Skulker"),
+        );
+        assert!(c.under_attack(), "a miss is an attack all the same");
+        assert_eq!(
+            c.autoplay.hit_by.as_ref().map(|(who, _)| who.as_str()),
+            Some("Drudge Skulker"),
+            "and the server named who swung"
+        );
+        assert!(c.hit_lately_by("Drudge Skulker"));
+        assert!(!c.hit_lately_by("Drudge Robber"), "the one standing by");
+    }
+
+    #[test]
+    fn a_critter_that_swings_and_misses_is_fought_rather_than_walked_past() {
+        let Some(mut c) = character_of_level(20) else {
+            return;
+        };
+        let cfg = Fight::default();
+        let rabbit = in_view(&mut c, 0x8000_0001, 2567, "Brown Rabbit");
+        let other = in_view(&mut c, 0x8000_0002, 2566, "Black Rabbit");
+        assert!(
+            c.a_critter(&rabbit, &cfg),
+            "outgrown, and it has done nothing"
+        );
+
+        // It swings and misses, over and over: the character never takes
+        // a point of damage, so nothing but this says it is in a fight.
+        c.chat_message(
+            ac_net::messages::opcode::GAME_EVENT,
+            &evaded(rabbit.guid, "Brown Rabbit"),
+        );
+        assert!(
+            !c.a_critter(&rabbit, &cfg),
+            "it is swinging at the character"
+        );
+        assert!(
+            c.a_critter(&other, &cfg),
+            "which says nothing about its neighbour"
+        );
     }
 
     /// An appraisal of `guid` saying it is `level`.
