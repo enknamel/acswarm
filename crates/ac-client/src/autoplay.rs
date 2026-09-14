@@ -5082,11 +5082,22 @@ impl Client {
     /// [`Self::a_critter`]: that one answers what a creature *is*, and
     /// the same Drudge is worth fighting once the walk is over.
     ///
-    /// The same three things outrank it as outrank `a_critter`, for the
-    /// same reason: in each of them the fight is already happening or
-    /// was asked for. Nothing has to be undone at the end of the road
-    /// either: the rule ends with the walk, and the character is fighting
-    /// again the tick it arrives.
+    /// One thing outranks it: the creature is attacking the character,
+    /// with a swing or a spell. That fight is already happening, and the
+    /// road does not get to decide it. Nothing has to be undone at the end
+    /// of the road either: the rule ends with the walk, and the character
+    /// is fighting again the tick it arrives.
+    ///
+    /// `a_critter`'s other two overrides are not this rule's. A name in
+    /// "only these" says which kind to hunt, not where: every creature the
+    /// pickers could choose already matches it, so as an override it
+    /// switched the walking past off for anyone who kept the list, and a
+    /// Drudge hunter stopped for every Drudge on the road to the Drudge
+    /// ground. And a summoned creature picks its own fights. ACE's combat
+    /// pet goes for the nearest monster it can see, whether or not that one
+    /// is doing anything, so taking its target for a fight already on had
+    /// the character stop for each creature its pet went for in turn --
+    /// the very walk this rule is for.
     ///
     /// A creature standing in the character's path is not carved out,
     /// and that is a decision rather than an oversight. Nothing this
@@ -5095,22 +5106,16 @@ impl Client {
     /// is why a character walks straight through a closed door, and the
     /// steering plans its way round that same geometry. A creature is an
     /// object like the door is. And anything that could get in the way
-    /// and matter is aggressive, which means it swings -- the second
-    /// override, and the character turns and fights it. If some ground
-    /// proves otherwise, the walk's own four-minute timeout
+    /// and matter is aggressive, which means it attacks -- the override,
+    /// and the character turns and fights it. If some ground proves
+    /// otherwise, the walk's own four-minute timeout
     /// (`growth::WALK_TIMEOUT`) still ends it and another ground is
     /// chosen.
-    ///
-    /// The cheap questions come first: this is asked of every creature
-    /// in view every tick, and the last of the three walks the whole
-    /// object map.
     pub(crate) fn passing_by(&self, o: &ac_world::WorldObject, cfg: &Fight) -> bool {
         if !cfg.walk_past_on_the_way || !self.on_its_way() {
             return false;
         }
-        !(name_matches(&o.name, &cfg.only)
-            || self.hit_lately_by(&o.name)
-            || self.a_pet_is_on(o.guid))
+        !self.hit_lately_by(&o.name)
     }
 
     /// Whether `o` is something this character would take on: a live

@@ -5104,14 +5104,20 @@ mod tests {
         c.autoplay.last_hit_us = None;
         c.autoplay.hit_by = None;
 
-        // Named outright, it is what the player asked to hunt.
+        // Named in "only these", it is still the road. The list says which
+        // kind to hunt at the far end, and every creature the fight could
+        // pick already matches it, so as an override it switched the rule
+        // off for anyone who kept one.
         let only = crate::autoplay::Fight {
             only: vec!["revenant".into()],
             ..fight.clone()
         };
-        assert!(!c.passing_by(&it, &only));
+        assert!(c.passing_by(&it, &only));
+        assert!(!c.would_fight(&it, &only, false, now));
 
-        // A creature of ours already on it: its fight, and ours to end.
+        // A creature of ours on it is no reason to stop either. A summoned
+        // creature picks its own fights, the nearest monster it can see,
+        // and following its lead stopped the character for each in turn.
         c.world.objects.insert(
             0x8000_0003,
             ac_world::WorldObject {
@@ -5123,8 +5129,8 @@ mod tests {
                 ..Default::default()
             },
         );
-        assert!(!c.passing_by(&it, &fight));
-        assert!(c.passing_by(&other, &fight), "the one it is not on");
+        assert!(c.passing_by(&it, &fight), "its pet went for it");
+        assert!(!c.would_fight(&it, &fight, false, now));
         c.world.objects.remove(&0x8000_0003);
 
         // With the setting off, everything on the road is fought again.

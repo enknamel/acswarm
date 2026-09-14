@@ -377,11 +377,10 @@ pub fn draw(egui: &egui::Context, v: &AutoplayView, x: f32, drafts: &mut Drafts)
                 ui.checkbox(&mut cfg.fight.walk_past_on_the_way, "walk past on the way")
                     .on_hover_text(
                         "While the character is on its way somewhere -- out to a \
-                         hunting ground, back from town, round the counters -- \
-                         leave what stands about on the road alone and get there. \
-                         Anything hitting the character, anything a summoned \
-                         creature has taken on, and anything named in \"only \
-                         these\" is still fought.",
+                         hunting ground, back from town, to a counter -- leave \
+                         what stands about on the road alone and get there. \
+                         Anything attacking the character, with a swing or a \
+                         spell, is still fought.",
                     );
                 ui.checkbox(&mut cfg.fight.craft_ammo, "make ammunition when out")
                     .on_hover_text(
