@@ -101,12 +101,72 @@ pub(crate) fn refused_item(item: u32, err: u32, inflight: Option<u32>) -> Option
     }
 }
 
+/// Everything that can stand between the pack and a tidier pack, as
+/// `Client::autoplay_tidy` finds it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct TidyGate {
+    /// The loot profile says this character does not tidy.
+    pub(crate) tidy_pack_off: bool,
+    /// A vendor's window is open.
+    pub(crate) counter_open: bool,
+    /// Loading or unloading the party's quartermaster.
+    pub(crate) quartermaster: bool,
+    /// Two bundles are waiting to be made into ammunition.
+    pub(crate) crafting: bool,
+    /// Something was handed to a teammate a moment ago.
+    pub(crate) gave_lately: bool,
+    /// A take is queued or on its way from a corpse.
+    pub(crate) take_in_air: bool,
+}
+
+/// Why the pack is being left alone, or `None` to go ahead.
+///
+/// Beyond the profile's own say-so, every one of these is a moment when
+/// something else is counting on a guid staying where it is. A merge
+/// makes one stack vanish into another, and whatever was holding it --
+/// a sale list, the money counted out for a runner, a take the server
+/// has not answered -- is then waiting on something that does not exist.
+fn why_not_tidy(g: TidyGate) -> Option<&'static str> {
+    if g.tidy_pack_off {
+        // Nothing stops a player tidying by hand; this is only the
+        // rules keeping their hands off a pack they were told to.
+        Some("this profile leaves the pack as it is")
+    } else if g.counter_open {
+        // A run to town holds what it has sent the vendor by guid, and
+        // a merge makes one of those vanish mid-sale. Whatever was
+        // bought is tidied the moment the window closes.
+        Some("a counter is open")
+    } else if g.quartermaster {
+        // Money counted out for the runner is a stack of its own, and
+        // tidying poured it straight back into the pile it came from:
+        // count out, merge back, count out again, a hundred and twenty
+        // six times in one watched run.
+        Some("the quartermaster is being loaded or unloaded")
+    } else if g.crafting {
+        // The heads and the shafts are about to be used on each other.
+        Some("ammunition is being made")
+    } else if g.gave_lately {
+        // A hand-over is a split and a give, and the server is still
+        // working through it.
+        Some("something was just handed to a teammate")
+    } else if g.take_in_air {
+        // The thing coming off the corpse may be the very stack a pour
+        // would empty, and the server answers one at a time.
+        Some("a take is queued or in the air")
+    } else {
+        None
+    }
+}
+
 /// What the character has room for, as a corpse waiting on it sees it
 /// (see `Client::room_for_loot`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Room {
     /// The pack is down to the slots kept for a counter's money.
     pub(crate) pack_low: bool,
+    /// Carrying more than three times its capacity: the server hands it
+    /// nothing at all, not even a coin.
+    pub(crate) past_the_wall: bool,
     /// How much more loot it means to carry (see `Client::carry_room`).
     pub(crate) carry: u32,
 }
@@ -116,6 +176,7 @@ impl Room {
     #[cfg(test)]
     pub(crate) const PLENTY: Room = Room {
         pack_low: false,
+        past_the_wall: false,
         carry: u32::MAX,
     };
 }
@@ -166,6 +227,9 @@ const CLOSE_IN_AFTER: Duration = Duration::from_secs(8);
 const MIN_STAND_OFF: f32 = 6.0;
 /// A corpse within this of where a kill fell is that kill's body.
 const KILL_SPOT: f32 = 6.0;
+/// Appraisal int: a creature's level (ACE `Level`), for the creatures
+/// the table has no level for.
+const CREATURE_LEVEL: u32 = 25;
 
 /// Whether a corpse at `at` lies where one of the character's kills fell.
 fn near_a_kill(at: glam::Vec3, spots: &[(glam::Vec3, Instant)]) -> bool {
@@ -420,8 +484,34 @@ fn came_nearer(best: Option<(u32, f32)>, guid: u32, distance: f32) -> bool {
 fn closer_stand_off(distance: f32) -> Option<f32> {
     (distance > MIN_STAND_OFF + 1.0).then(|| (distance * 0.5).max(MIN_STAND_OFF))
 }
+/// Whether a change of hands must wait for the swing in flight.
+///
+/// True only when both hold: the hands do not already give the stance
+/// wanted, so something would have to be wielded or put away; and a
+/// swing or a charge is out unanswered. ACE turns every combat-mode
+/// change into a cancelled attack, and putting the weapon in hand away
+/// to reach for a wand is one -- so a buff pass that wants a wand waits
+/// for the swing to land rather than taking the charge down with it. A
+/// pass that already holds a wand changes nothing and casts at once.
+///
+/// The wait costs a second of a buff's life. +Verity's cost her the
+/// fight: she reached for her wand every second and a half for a minute,
+/// and the Drudge Servant she was charging was never once reached.
+fn change_of_hands_waits(have: Stance, want: Stance, mid_attack: bool) -> bool {
+    have != want && mid_attack
+}
+
 /// A change of weapon is asked for at most this often.
 const REWIELD_EVERY: Duration = Duration::from_millis(1000);
+/// How long an item the server refused to wield is left alone the first
+/// time. It doubles with every refusal after that. Short to begin with
+/// on purpose: most refusals are about what else is in the hands, and
+/// that changes within a few seconds.
+const WIELD_AGAIN: Duration = Duration::from_secs(3);
+/// How long a weapon swap is given to land before the character gives
+/// up waiting and fights with whatever is in its hands. A put and a
+/// wield are a tick or two; anything longer means the swap is stuck.
+const SWAP_SETTLES: Duration = Duration::from_millis(1500);
 /// Ammunition is made at most this often: a use takes a moment and
 /// the bundles need to answer.
 const CRAFT_EVERY: Duration = Duration::from_secs(4);
@@ -475,9 +565,6 @@ pub struct Survive {
     /// Stop fighting below this fraction (0 to keep fighting).
     /// Use a carried healing kit.
     pub use_kits: bool,
-    /// Cast this spell to heal (by name, "Heal Self"); empty to use the
-    /// strongest health boost known instead, whatever it is called.
-    pub heal_spell: String,
     /// Keep mana up by pouring stamina into it, and stamina up with
     /// Revitalize, the way a caster does: the transfer gives more mana
     /// than the Revitalize costs, so the round is a gain.
@@ -508,7 +595,6 @@ impl Default for Survive {
         Survive {
             heal_below: 0.6,
             use_kits: true,
-            heal_spell: String::new(),
             manage_mana: true,
             mana_below: 0.4,
             stamina_below: 0.3,
@@ -593,6 +679,16 @@ pub struct Fight {
     pub only: Vec<String>,
     /// Never attack creatures whose name contains one of these.
     pub avoid: Vec<String>,
+    /// Walk past a creature the server will not let start a fight when
+    /// one swing would end it and the character has outgrown it: a
+    /// Rabbit, a Chicken, a Bunny (see [`beneath_fighting`]). Never a
+    /// reason not to hit back.
+    ///
+    /// Defaulted by name, because serde fills a missing field from its
+    /// type and a settings file written before this existed would
+    /// otherwise turn it off.
+    #[serde(default = "yes")]
+    pub skip_critters: bool,
     /// Farthest creature to pick, metres.
     pub radius: f32,
     /// Make more ammunition when out, from a bundle of heads and a
@@ -620,9 +716,15 @@ impl Default for Fight {
             area: None,
             only: Vec::new(),
             avoid: Vec::new(),
+            skip_critters: true,
             radius: 25.0,
         }
     }
+}
+
+/// What a bool setting defaults to when a settings file leaves it out.
+fn yes() -> bool {
+    true
 }
 
 /// Which weapon the character should be holding.
@@ -768,6 +870,11 @@ const GIVE_EVERY: Duration = Duration::from_millis(700);
 /// How often a stack is poured into another. The server takes one merge
 /// at a time and answers in its own time.
 pub(crate) const MERGE_EVERY: Duration = Duration::from_millis(600);
+/// How long the tidying leaves the pack alone once weight is the only
+/// thing standing between it and a tighter pack. Nothing the character
+/// can do about that comes quickly: it has to sell, or hand something
+/// over, and looking every tick only burns the time.
+const TIDY_LADEN_WAIT: Duration = Duration::from_secs(30);
 /// A corpse this close is looted, wherever it came from.
 const LOOT_NEAR: f32 = 20.0;
 /// How long after a killing blow its corpse is taken to be on the way.
@@ -889,13 +996,117 @@ pub struct Mate {
     pub ground: Option<(u32, glam::Vec2, String)>,
 }
 
-/// The larger of a health boost and a stamina transfer, as
-/// `(spell, points restored)`. Either may be missing; a tie goes to the
-/// boost, which does not spend a bar the character may need to run.
-fn bigger_heal(boost: Option<(u32, u32)>, transfer: Option<(u32, u32)>) -> Option<(u32, u32)> {
-    match (boost, transfer) {
-        (Some(b), Some(t)) => Some(if t.1 > b.1 { t } else { b }),
-        (b, t) => b.or(t),
+/// Health left below which there is no time to be careful: the biggest
+/// heal goes out at once, whatever it costs and whatever it drains.
+const CRITICAL_HEALTH: f32 = 0.25;
+/// A heal picked to cover a known wound has to be likely to land. Half
+/// is where the school's skill equals the spell's power; under that the
+/// mana is as likely to be thrown away as spent.
+const RELIABLE_CAST: f32 = 0.5;
+
+/// One self heal the character could cast this moment, weighed for what
+/// it would give *this* character.
+///
+/// A boost restores the same however hurt it is; a transfer's gain is a
+/// share of the bar it draws from, so the same Stamina to Health is
+/// worth two hundred points on a full bar and nothing on an empty one.
+/// The chooser cannot know that from the spell alone, so it is worked
+/// out before it gets here.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SelfHeal {
+    pub spell: u32,
+    /// Health points it would restore, now.
+    pub gain: u32,
+    /// What the cast costs in mana.
+    pub mana: u32,
+    /// How likely it is to land rather than fizzle.
+    pub chance: f32,
+    /// For a transfer, the vital it draws on and the fraction of that
+    /// bar left afterwards. `None` for a boost, which draws on nothing.
+    pub leaves: Option<(u32, f32)>,
+}
+
+impl SelfHeal {
+    /// Health this cast is worth on average: what it gives, times how
+    /// often it lands.
+    fn worth(&self) -> f32 {
+        self.gain as f32 * self.chance
+    }
+}
+
+/// Which of the heals that can be cast right now to cast, for a
+/// character `missing` health points with `health` of its bar left.
+///
+/// A scratch should not be healed with the biggest spell in the book:
+/// the mana that goes into it is the mana the next real wound needs.
+/// So the cheapest heal that covers what is actually missing wins, and
+/// only when nothing covers it -- or there is no time left to be
+/// careful -- does the biggest go out.
+fn choose_heal(heals: &[SelfHeal], missing: u32, health: f32, cfg: &Survive) -> Option<u32> {
+    use ac_world::vitals::vital;
+    // Dying beats saving a bar: at a quarter of the bar the next hit is
+    // the last one, so the most health one cast can give goes out --
+    // out of everything castable, floors and all. The floors below are
+    // what the stamina and the mana were being kept for, and a dead
+    // character has no later to keep them for.
+    if health <= CRITICAL_HEALTH {
+        let everything: Vec<&SelfHeal> = heals.iter().collect();
+        return biggest_heal(&everything).map(|h| h.spell);
+    }
+    // A transfer that empties the bar it draws on is a trade, not a
+    // heal: it buys health with the mana the next heal needs or the
+    // stamina that carries the fight. Left out of the reckoning while
+    // anything else will do, and only put back when nothing else will.
+    let floor = |v: u32| match v {
+        vital::STAMINA => cfg.stamina_below,
+        vital::MANA => cfg.mana_below,
+        _ => 0.0,
+    };
+    let sparing: Vec<&SelfHeal> = heals
+        .iter()
+        .filter(|h| h.leaves.is_none_or(|(v, left)| left >= floor(v)))
+        .collect();
+    let pool: Vec<&SelfHeal> = if sparing.is_empty() {
+        heals.iter().collect()
+    } else {
+        sparing
+    };
+    pool.iter()
+        .copied()
+        .filter(|h| h.chance >= RELIABLE_CAST && h.worth() >= missing as f32)
+        // Cheapest in mana, then the smallest of the ones that cover:
+        // the rest of the heal is spilt on a full bar.
+        .min_by_key(|h| (h.mana, h.gain, h.spell))
+        .or_else(|| biggest_heal(&pool))
+        .map(|h| h.spell)
+}
+
+/// The most health there is to be had from a single cast; ties to the
+/// cheaper spell.
+fn biggest_heal<'a>(pool: &[&'a SelfHeal]) -> Option<&'a SelfHeal> {
+    pool.iter().copied().max_by(|a, b| {
+        a.worth()
+            .total_cmp(&b.worth())
+            .then(b.mana.cmp(&a.mana))
+            .then(b.spell.cmp(&a.spell))
+    })
+}
+
+/// Whether a spell puts health back: a health boost (Harm Self is a
+/// boost below zero and is not one) or a transfer into health.
+fn restores_health(spell: u32) -> bool {
+    use ac_world::vitals::vital;
+    ac_world::vitals::boost(spell).is_some_and(|b| b.vital == vital::HEALTH && b.restores())
+        || ac_world::vitals::transfer(spell).is_some_and(|t| t.to == vital::HEALTH)
+}
+
+/// Where a vital's current and maximum sit on the stats block: health
+/// 0, stamina 1, mana 2.
+fn vital_slot(vital: u32) -> usize {
+    match vital {
+        ac_world::vitals::vital::STAMINA => 1,
+        ac_world::vitals::vital::MANA => 2,
+        _ => 0,
     }
 }
 
@@ -1009,6 +1220,58 @@ pub fn wanted_target(name: &str, f: &Fight) -> bool {
         return false;
     }
     f.only.iter().all(|w| w.trim().is_empty()) || name_matches(name, &f.only)
+}
+
+/// The most health a creature can have and still be a critter. A Black
+/// Rabbit has five, a Chicken three, a Bunny three; the smallest thing
+/// in a hunting field that is really a monster -- a Gnawer Shrethlet --
+/// has eight, a Gnawer Shreth fifteen, a Drudge Skulker forty-two. One
+/// swing ends anything under this line, and there is nothing in it for
+/// a character that can swing.
+const CRITTER_HEALTH: u32 = 5;
+
+/// Whether a creature is beneath fighting: the server will not let it
+/// start a fight, it dies to a single swing, and the character has long
+/// since outgrown it. A Rabbit, a Chicken, a Bunny.
+///
+/// Passive on its own is not the answer. A Revenant stands there until
+/// it is hit, and so do Cursed Bones and a Silver Tusker: half of what
+/// a hunting ground is for waits to be provoked, and those are worth
+/// sixty levels or more.
+///
+/// Nor is passive and far below by level, which is what this asked at
+/// first and what emptied the fields it was meant to tidy. ACE gives
+/// the newbie-field spawns Retaliate so they do not come at a new
+/// player -- generators 2007 and 5150 around Holtburg put out nothing
+/// but Drudge Skulkers, Gnawer Shreths, Mites and Mosswarts, every one
+/// of them passive and level 8 -- so twice the level left a level 16
+/// character with nothing in reach to attack anywhere in Holtburg, and
+/// no reason to walk anywhere either. The level is a poor separator in
+/// any case: a Black Rabbit is level 4 and a Gnawer Shrethlet level 2.
+///
+/// What does separate them is how much they can take, and that is the
+/// figure this leans on for anything that will fight back.
+///
+/// The one flag that stands on its own is "never attacks anything":
+/// that is not a creature with a health bar, it is scenery with one --
+/// an Egg, a Totem, a Pillar, a Reinforced Door -- and hitting it is a
+/// chore, not a fight, however much health it has.
+///
+/// A creature with no level recorded is fought, and so is one with no
+/// health recorded that could fight back: nothing is walked past on a
+/// guess.
+pub fn beneath_fighting(tolerance: u32, health: u32, level: Option<u32>, mine: i32) -> bool {
+    use ac_world::elements::tolerance as flag;
+    let Some(level) = level else {
+        return false;
+    };
+    if tolerance & flag::PASSIVE == 0 || i64::from(level) * 2 > i64::from(mine) {
+        return false;
+    }
+    if tolerance & flag::NO_ATTACK != 0 {
+        return true;
+    }
+    health > 0 && health <= CRITTER_HEALTH
 }
 
 /// Whether an item is worth taking.
@@ -1233,9 +1496,15 @@ pub struct Autoplay {
     /// The shield to put on once a one-handed weapon is in hand.
     wanted_shield: Option<u32>,
     /// When the hands were last asked to change weapon.
-    last_rewield: Option<Instant>,
+    pub(crate) last_rewield: Option<Instant>,
     /// A weapon to wield as soon as the hands are empty.
-    pending_wield: Option<u32>,
+    pub(crate) pending_wield: Option<u32>,
+    /// The last item the server was asked to put in the hands, so that
+    /// a refusal can be told from an answer to something else.
+    pub(crate) wield_asked: Option<u32>,
+    /// Weapons the server has refused to wield, and for how long to
+    /// leave each one alone (see `Client::hold_off_wield`).
+    pub(crate) wield_refused: crate::did::Patience<u32>,
     /// A journey put down for a fight, to be picked up again after it.
     pub(crate) resume_trip: Option<glam::Vec2>,
     /// The target being worked on, since when, and its health when
@@ -1371,6 +1640,18 @@ pub struct Autoplay {
     /// that last improved. See `Client::reaching_too_long`.
     reaching: Option<(glam::Vec3, f32, Instant)>,
     pub(crate) last_merge: Option<Instant>,
+    /// The pour asked for and not yet answered, and when it went out.
+    /// Until the server has said, the counts the next pour would be
+    /// chosen from are the ones from before this one (see
+    /// `crate::pack::pour_answer`).
+    pub(crate) pour: Option<(crate::pack::PourSent, Instant)>,
+    /// When the pack was last looked over for a pour. Working out what
+    /// is worth pouring copies every stack's name, and the answer
+    /// cannot change faster than the server answers.
+    pub(crate) tidy_looked: Option<Instant>,
+    /// Tidying left alone until then, because weight is all that stands
+    /// in its way ([`TIDY_LADEN_WAIT`]).
+    pub(crate) tidy_laden_until: Option<Instant>,
     /// Emptying the corpse in front of us, as `ac-loot` sees it: what
     /// has been asked for, what will not come, how many have been
     /// taken. Started afresh for each body.
@@ -1516,8 +1797,16 @@ impl Autoplay {
     ///
     /// Nor does a body left for its weight wait on a character still
     /// without room for what is left on it.
+    ///
+    /// Nor does any body wait on a character past the server's wall, which
+    /// takes nothing from one. +Verity, at nearly five times her capacity,
+    /// broke off her walk to town for a Pyreal the server would not hand
+    /// her, and went back for it twice more. Short of the wall a body still
+    /// waits however laden the character is: coins weigh nothing, and the
+    /// loot rules take the light things that fit.
     pub(crate) fn corpse_waiting(&self, guid: u32, now: Instant, room: Room) -> bool {
         !room.pack_low
+            && !room.past_the_wall
             && !self.looted.contains(&guid)
             && !self.shelved.held(&guid, now)
             && self
@@ -1609,6 +1898,31 @@ impl Autoplay {
             Some(t) => now.duration_since(t) < CAST_LOST,
             None => false,
         }
+    }
+
+    /// Every guid some other errand is holding on to across ticks.
+    ///
+    /// Each of these is a thing another part of the rules has written
+    /// down and will come back to: a weapon to wield once the hands are
+    /// free, the arrows chosen for this target, the two bundles waiting
+    /// to be made into ammunition, the stack counted out for a teammate.
+    /// Pouring one of those into another stack makes its guid vanish
+    /// under the errand, which then waits on something that no longer
+    /// exists. The money one was watched: counted out, poured straight
+    /// back, counted out again.
+    pub(crate) fn held_by_an_errand(&self) -> [Option<u32>; 6] {
+        let (craft_from, craft_to) = match self.crafting {
+            Some((from, to, _)) => (Some(from), Some(to)),
+            None => (None, None),
+        };
+        [
+            self.pending_wield,
+            self.wanted_ammo,
+            self.put_down,
+            craft_from,
+            craft_to,
+            self.handing.map(|(item, _)| item),
+        ]
     }
 
     /// Something worth knowing that is not what the character is doing:
@@ -1727,37 +2041,87 @@ impl Client {
             .map(|t| t.spell)
     }
 
-    /// The biggest heal the character can land right now, and how much
-    /// health it would restore.
+    /// Every self heal the character could cast this moment, each
+    /// weighed for what it would give it now (see [`SelfHeal`]).
     ///
-    /// A mage has two ways out of an emergency and they are not the
-    /// same size. Heal Self restores a fixed number of points however
-    /// hurt it is; Stamina to Health takes half the stamina bar, which
-    /// on a character with a full bar is far more, and is why a caster
-    /// in trouble reaches for it rather than a kit. Which is larger
-    /// depends on the moment, so both are worked out and the larger
-    /// wins. A transfer from a bar that is nearly empty scores near
-    /// nothing and loses on its own merits, so no floor is needed.
-    fn best_emergency_heal(&self) -> Option<(u32, u32)> {
+    /// A mage has more ways out of an emergency than Heal Self, and
+    /// they are not the same size. Heal Self restores a fixed number of
+    /// points however hurt it is; Stamina to Health takes half the
+    /// stamina bar, which on a character with a full bar is far more,
+    /// and is why a caster in trouble reaches for it rather than a kit.
+    /// Which is worth more depends on the moment, so all of them are
+    /// worked out and [`choose_heal`] picks between them.
+    fn self_heals(&self) -> Vec<SelfHeal> {
         use ac_world::vitals::vital;
+        let mut out: Vec<SelfHeal> = ac_world::vitals::boosts_of(vital::HEALTH)
+            .into_iter()
+            .filter_map(|b| self.self_heal(b.spell, ((b.low + b.high) / 2).max(0) as u32, None))
+            .collect();
+        // Both transfers into health, not only the stamina one: a mage
+        // out of stamina with mana to spare has Mana to Health, and a
+        // character that never looked at it stood there and died.
+        for from in [vital::STAMINA, vital::MANA] {
+            let have = self.world.stats.vitals[vital_slot(from)].current;
+            for t in ac_world::vitals::transfers_between(from, vital::HEALTH) {
+                if let Some(h) = self.self_heal(t.spell, t.gain(have), Some((from, t.drain(have))))
+                {
+                    out.push(h);
+                }
+            }
+        }
+        out
+    }
+
+    /// One heal, if the character knows it, can aim it at itself, can
+    /// cast it this moment and would get anything out of it. `draws` is
+    /// the vital a transfer takes from and how many points it takes.
+    fn self_heal(&self, spell: u32, gain: u32, draws: Option<(u32, u32)>) -> Option<SelfHeal> {
+        use ac_world::vitals::vital;
+        if gain == 0 || !self.world.stats.spells.contains(&spell) {
+            return None;
+        }
+        let sp = self.spell(spell)?;
+        if !sp.is_self_targeted() || !matches!(self.can_cast(spell), crate::magic::CastCheck::Ok) {
+            return None;
+        }
+        let mana = self.mana_cost(&sp);
+        let leaves = draws.map(|(v, taken)| {
+            let slot = vital_slot(v);
+            let have = self.world.stats.vitals[slot].current;
+            let max = self.world.stats.vital_max_current(slot).max(1);
+            // Mana to Health is paid for out of the bar it drains, so
+            // the cast's own cost comes off as well; a reckoning that
+            // left it out called a transfer safe that ends with nothing
+            // to cast the next heal with.
+            let taken = taken + if v == vital::MANA { mana } else { 0 };
+            (v, have.saturating_sub(taken) as f32 / max as f32)
+        });
+        Some(SelfHeal {
+            spell,
+            gain,
+            mana,
+            chance: self.cast_chance(spell),
+            leaves,
+        })
+    }
+
+    /// Why not one heal in the book can be cast, in a few words for the
+    /// log. The easiest one known answers it best: the strongest
+    /// usually complains only that its own components have run out,
+    /// which says nothing about the rest of the book.
+    fn why_no_heal(&self) -> Option<String> {
         let table = self.assets.spell_table().ok()?;
-        let usable = |spell: u32| {
-            self.world.stats.spells.contains(&spell)
-                && table.get(spell).is_some_and(|s| s.is_self_targeted())
-                && matches!(self.can_cast(spell), crate::magic::CastCheck::Ok)
-        };
-        let boost = ac_world::vitals::boosts_of(vital::HEALTH)
-            .into_iter()
-            .filter(|b| usable(b.spell))
-            .map(|b| (b.spell, ((b.low + b.high) / 2).max(0) as u32))
-            .max_by_key(|(_, gain)| *gain);
-        let stamina = self.world.stats.vitals[1].current;
-        let transfer = ac_world::vitals::transfers_between(vital::STAMINA, vital::HEALTH)
-            .into_iter()
-            .filter(|t| usable(t.spell))
-            .map(|t| (t.spell, t.gain(stamina)))
-            .max_by_key(|(_, gain)| *gain);
-        bigger_heal(boost, transfer)
+        let (spell, name) = self
+            .world
+            .stats
+            .spells
+            .iter()
+            .filter(|id| restores_health(**id))
+            .filter_map(|id| table.get(*id).map(|s| (*id, s)))
+            .filter(|(_, s)| s.is_self_targeted())
+            .min_by_key(|(_, s)| s.power)
+            .map(|(id, s)| (id, s.name.clone()))?;
+        Some(format!("{name} {}", cast_problem(&self.can_cast(spell))))
     }
 
     /// Keep mana and stamina up the way a caster does: stamina poured
@@ -1818,21 +2182,6 @@ impl Client {
             }
         }
         false
-    }
-
-    /// The lowest-power known spell whose name matches, for reporting
-    /// why a whole family is out of reach.
-    fn easiest_of_family(&self, name: &str) -> Option<u32> {
-        let want = name.trim().to_lowercase();
-        let table = self.assets.spell_table().ok()?;
-        self.world
-            .stats
-            .spells
-            .iter()
-            .filter_map(|id| table.get(*id).map(|s| (*id, s)))
-            .filter(|(_, s)| s.name.to_lowercase().starts_with(&want))
-            .min_by_key(|(_, s)| s.power)
-            .map(|(id, _)| id)
     }
 
     /// Seconds left on the enchantment of a spell family, if any is up.
@@ -2045,56 +2394,75 @@ impl Client {
             .collect()
     }
 
-    /// Pour loose stacks together. True when a merge went out.
+    /// Pour loose stacks together, a pour at a time.
     ///
     /// Slots are the scarce thing, not weight, and nothing warns a
-    /// player that a purchase landed beside a pile of the same. This
-    /// runs before the rules that decide the pack is full, so that a
-    /// pack full of change does not send the character to town.
-    pub(crate) fn autoplay_tidy(&mut self, now: Instant) -> bool {
-        // With no profile the pack is still tidied: it is not looting.
-        if !self.loot_profile().is_none_or(|p| p.looting.tidy_pack) {
-            return false;
+    /// player that a purchase landed beside a pile of the same, or that
+    /// the peas taken off four corpses are sitting in four stacks. This
+    /// is housekeeping rather than a goal because it must not have to
+    /// win a tick to happen: a character that fights, loots and walks
+    /// all afternoon never has a quiet one, and tidying that waits for
+    /// one never runs. It costs nothing to let it go first -- the server
+    /// makes a pack-to-pack merge on the spot, with no walk, no animation
+    /// and no busy check, so a pour cannot get in the way of a take, a
+    /// cast or a walk.
+    pub(crate) fn autoplay_tidy(&mut self, now: Instant) {
+        // Read the last pour's answer before any gate. A counter opened
+        // or a fight started in the meantime is no reason to go on
+        // believing a pour is still in the air.
+        match self.settle_pour(now) {
+            Some(crate::did::Did::Waiting(_)) => return,
+            Some(did) => self.aside("tidy the pack", &did, now),
+            None => {}
         }
-        // Not with a counter open. A run to town holds a list of what
-        // it has sent the vendor, by guid, and a merge makes one of
-        // those guids vanish mid-sale. Whatever was bought is tidied
-        // the moment the window closes, which is soon enough.
-        if self.world.open_vendor.is_some() {
-            return false;
+        let gate = TidyGate {
+            // With no profile the pack is still tidied: it is not looting.
+            tidy_pack_off: !self.loot_profile().is_none_or(|p| p.looting.tidy_pack),
+            counter_open: self.world.open_vendor.is_some(),
+            quartermaster: matches!(
+                self.autoplay.growth.mode.stage(),
+                Some(crate::logistics::Stage::HandOver | crate::logistics::Stage::HandOut)
+            ),
+            crafting: self.autoplay.crafting.is_some(),
+            gave_lately: self
+                .autoplay
+                .last_give
+                .is_some_and(|t| now.duration_since(t) < GIVE_EVERY),
+            take_in_air: self.loot_inflight.is_some() || !self.loot_queue.is_empty(),
+        };
+        if let Some(why) = why_not_tidy(gate) {
+            tracing::trace!("not tidying the pack: {why}");
+            return;
         }
-        // Nor in the middle of loading or unloading the quartermaster.
-        // Money counted out for the runner is a stack of its own, and
-        // tidying poured it straight back into the pile it came from --
-        // count out, merge back, count out again, a hundred and twenty
-        // six times in one watched run.
-        if matches!(
-            self.autoplay.growth.mode.stage(),
-            Some(crate::logistics::Stage::HandOver | crate::logistics::Stage::HandOut)
-        ) {
-            return false;
+        if self.autoplay.tidy_laden_until.is_some_and(|t| now < t) {
+            return;
         }
+        // Deciding what to pour copies the name of every stack carried,
+        // and no answer can change faster than the server gives one.
         if self
             .autoplay
-            .last_merge
+            .tidy_looked
             .is_some_and(|t| now.duration_since(t) < MERGE_EVERY)
         {
-            return false;
+            return;
         }
-        let Some(m) = crate::pack::next_merge(&self.pack_stacks()) else {
-            return false;
-        };
-        if !self.merge_stacks(m.from, m.to, Some(m.amount)) {
-            // The server would refuse it; do not ask again at once.
-            self.autoplay.last_merge = Some(now);
-            return false;
+        self.autoplay.tidy_looked = Some(now);
+        match self.pour_next(now) {
+            // A note, not a `say`: this is not what the character is
+            // doing. Said as a status it would flicker against the
+            // fighting or looting that is.
+            Ok(m) => self.autoplay.note(
+                format!("putting {} {} with the rest", m.amount, m.name),
+                now,
+            ),
+            Err(crate::growth::Unpoured::Laden) => {
+                self.autoplay.tidy_laden_until = Some(now + TIDY_LADEN_WAIT);
+                let did = crate::did::Did::blocked("too laden to put stacks together");
+                self.aside("tidy the pack", &did, now);
+            }
+            Err(crate::growth::Unpoured::Turned(did)) => self.aside("tidy the pack", &did, now),
+            Err(crate::growth::Unpoured::Tight | crate::growth::Unpoured::Wait(_)) => {}
         }
-        self.autoplay.last_merge = Some(now);
-        self.autoplay.say(
-            Doing::Tidying,
-            format!("putting {} {} with the rest", m.amount, m.name),
-        );
-        true
     }
 
     /// Heal, and break off a losing fight. True when it acted.
@@ -2140,42 +2508,27 @@ impl Client {
                 return true;
             }
         }
-        let heal = if cfg.heal_spell.trim().is_empty() {
-            self.best_emergency_heal().map(|(spell, _)| spell)
-        } else {
-            self.spell_by_name(&cfg.heal_spell)
-        };
-        if let Some(spell) = heal {
-            let check = self.can_cast(spell);
-            // When no level can be cast the name resolves to the
-            // strongest, whose reason ("short of components") is not
-            // the one that matters; the easiest level says why even
-            // that is out of reach.
-            let check = if matches!(check, crate::magic::CastCheck::Ok) || cfg.heal_spell.is_empty()
-            {
-                check
-            } else {
-                self.easiest_of_family(&cfg.heal_spell)
-                    .map(|id| self.can_cast(id))
-                    .unwrap_or(check)
-            };
-            if matches!(check, crate::magic::CastCheck::Ok) {
-                self.cast_paced(spell, now);
-                self.autoplay.last_heal = Some(now);
-                self.autoplay
-                    .say(Doing::Healing, format!("healing at {:.0}%", health * 100.0));
-                return true;
-            }
-            // Hurt and unable to heal is worth saying out loud.
-            let why = cast_problem(&check);
-            self.autoplay.note(
-                format!(
-                    "cannot heal at {:.0}%: {} {why}",
-                    health * 100.0,
-                    cfg.heal_spell
-                ),
-                now,
-            );
+        // Which heal is the right one is not a setting: it is this
+        // moment's answer, and it changes with every point of damage.
+        // A scratch takes the cheapest spell that covers it; a wound
+        // that will kill takes the biggest in the book (see
+        // [`choose_heal`]).
+        let missing = self
+            .world
+            .stats
+            .vital_max_current(0)
+            .saturating_sub(self.world.stats.vitals[0].current);
+        if let Some(spell) = choose_heal(&self.self_heals(), missing, health, &cfg) {
+            self.cast_paced(spell, now);
+            self.autoplay.last_heal = Some(now);
+            self.autoplay
+                .say(Doing::Healing, format!("healing at {:.0}%", health * 100.0));
+            return true;
+        }
+        // Hurt and unable to heal is worth saying out loud.
+        if let Some(why) = self.why_no_heal() {
+            self.autoplay
+                .note(format!("cannot heal at {:.0}%: {why}", health * 100.0), now);
         }
         false
     }
@@ -2606,7 +2959,18 @@ impl Client {
     /// A weapon waiting for empty hands is taken up as soon as they
     /// are: a bow cannot be drawn with a shield up, and a two-handed
     /// weapon needs both. Runs every tick and never claims one.
+    ///
+    /// This is also where a wield that did land forgets whatever wait a
+    /// refusal earned it: the hands have changed, so whatever the server
+    /// was objecting to has gone.
     pub(crate) fn autoplay_pending_wield(&mut self) {
+        if let Some(g) = self.autoplay.wield_asked {
+            let me = self.world.player_guid;
+            if self.world.objects.get(&g).is_some_and(|o| o.wielder == me) {
+                self.autoplay.wield_refused.forget(&g);
+                self.autoplay.wield_asked = None;
+            }
+        }
         if let Some(g) = self.autoplay.pending_wield {
             // A shield in the off hand counts as a full hand for a
             // weapon that cannot be held with one.
@@ -2623,6 +2987,13 @@ impl Client {
                     || (offhand_matters && o.valid_locations & ac_world::equip::SHIELD != 0)
             });
             if !hands_full {
+                // Inside the wait a refusal earned it, the errand keeps
+                // rather than being dropped: giving up here would leave
+                // the weapon in the pack and the character bare-handed
+                // with nothing left to ask again.
+                if self.world.is_carried(g) && self.wield_held_off(g) {
+                    return;
+                }
                 self.autoplay.pending_wield = None;
                 if self.world.is_carried(g) {
                     self.wield_guid(g);
@@ -2631,6 +3002,37 @@ impl Client {
                 self.autoplay.pending_wield = None;
             }
         }
+    }
+
+    /// Leave an item the server has just refused to wield alone for a
+    /// while, and say so once rather than every pass.
+    ///
+    /// A refused wield carries no error code worth reading -- ACE sends
+    /// InventoryServerSaveFailed with WeenieError.None -- so there is
+    /// nothing to act on and nothing to do but wait. The wait doubles
+    /// each time, so an item the server will never wield in this state
+    /// costs a handful of messages rather than one every buff pass:
+    /// +Verity asked for her Training Wand a hundred and fifty times in
+    /// a minute, because a shield in her off hand made the wield
+    /// impossible and the refusal said nothing about it.
+    pub(crate) fn hold_off_wield(&mut self, item: u32, now: Instant) {
+        self.autoplay.wield_asked = None;
+        self.autoplay.wield_refused.hold(item, WIELD_AGAIN, now);
+        let name = self
+            .world
+            .objects
+            .get(&item)
+            .map(|o| o.name.clone())
+            .unwrap_or_else(|| format!("{item:#010x}"));
+        let waited = self
+            .autoplay
+            .wield_refused
+            .waited(&item)
+            .unwrap_or(WIELD_AGAIN);
+        tracing::info!(
+            "the server will not wield {name}; leaving it for {} s",
+            waited.as_secs().max(1)
+        );
     }
 
     /// Open the corpse of something we killed and take what is worth
@@ -2921,6 +3323,12 @@ impl Client {
         // Stand over it first (see [`CORPSE_REACH`]).
         if away > CORPSE_REACH {
             if let Some(at) = self.world.objects.get(&guid).and_then(|o| o.world_pos()) {
+                // The walk ends any journey under way, and it is a detour
+                // the character comes back from: a town run picks its walk
+                // to the counter up again once the body is dealt with (see
+                // `Client::journey_broken_off`). +Verity's run did not, and
+                // gave up 224 m short of Shopkeeper Renald the Elder.
+                self.interrupt_travel("walking to a corpse");
                 // Well inside the radius rather than on its edge: the
                 // last metre of a walk wanders, and stopping on the
                 // line means stepping back off it again.
@@ -2995,7 +3403,12 @@ impl Client {
             Style::Missile => Stance::Missile,
             Style::Magic => Stance::Magic,
         };
-        if self.combat_stance() != want {
+        // Not with a swing out: changing weapon cancels it, so the
+        // stance the hands give now is the honest answer until the
+        // attack has been answered (see `change_of_hands_waits`).
+        if change_of_hands_waits(self.combat_stance(), want, self.mid_attack()) {
+            self.wait_for_the_swing();
+        } else if self.combat_stance() != want {
             // Wielding takes a moment; until the server confirms it, the
             // hands still say what they said. Asked once a second, not
             // once a tick: the server answers each ask, and refuses the
@@ -3026,6 +3439,15 @@ impl Client {
             return;
         }
         if self.autoplay.armed_for == Some(target) {
+            return;
+        }
+        // Not with a swing or a charge out: putting the weapon in hand
+        // away cancels it (see `Client::mid_attack`). The choice keeps,
+        // and is made in the gap after the attack is answered -- a
+        // fraction of a second with the wrong weapon beats a charge that
+        // never lands.
+        if self.mid_attack() {
+            self.wait_for_the_swing();
             return;
         }
         self.autoplay.armed_for = Some(target);
@@ -3124,6 +3546,9 @@ impl Client {
                 sent |= self.put_in_container(shield, me);
             }
         }
+        // When the swap started, so the fight waits for the hands to
+        // settle rather than swinging into the moment they are empty.
+        self.autoplay.last_rewield = Some(Instant::now());
         if sent {
             self.autoplay.pending_wield = Some(pick.guid);
         } else {
@@ -3131,8 +3556,32 @@ impl Client {
         }
     }
 
+    /// Whether a wand, orb or staff is carried at all, in hand or in
+    /// the pack. Not the same question as whether one can be taken up
+    /// right now, which is a wait rather than a want.
+    pub(crate) fn carries_a_caster(&self) -> bool {
+        self.world.objects.values().any(|o| {
+            self.world.is_carried(o.guid) && o.item_type & ac_world::item_type::CASTER != 0
+        })
+    }
+
+    /// Whether a weapon swap asked for a moment ago has yet to land.
+    ///
+    /// Between the put and the wield the hands are empty, and a swing
+    /// sent into that gap is a punch: +Verity put her Flaming Takuba
+    /// away for a wand and attacked a Spikey Armoredillo bare-handed in
+    /// the same tick. Bounded by [`SWAP_SETTLES`] so a swap the server
+    /// never finishes cannot stop the character fighting.
+    pub(crate) fn hands_changing(&self, now: Instant) -> bool {
+        self.autoplay.pending_wield.is_some()
+            && self
+                .autoplay
+                .last_rewield
+                .is_some_and(|t| now.duration_since(t) < SWAP_SETTLES)
+    }
+
     /// The shield on the off hand, if any.
-    fn wielded_shield(&self) -> Option<u32> {
+    pub(crate) fn wielded_shield(&self) -> Option<u32> {
         self.world
             .wielded()
             .find(|o| o.valid_locations & ac_world::equip::SHIELD != 0)
@@ -3150,6 +3599,21 @@ impl Client {
         }
         if !self.world.is_carried(shield) || self.wielded_shield().is_some() {
             self.autoplay.wanted_shield = None;
+            return;
+        }
+        // Inside the wait a refusal earned it the errand keeps: asking
+        // now sends nothing, and clearing it would leave the shield in
+        // the pack with nothing left to ask again.
+        if self.wield_held_off(shield) {
+            return;
+        }
+        // Not with a swing out. ACE shuffles the stance on every
+        // successful equip, a shield included (TryShuffleStance ->
+        // HandleActionChangeCombatMode), and a combat-mode change
+        // cancels the attack in flight. The shield keeps; it goes on in
+        // the gap after the swing is answered.
+        if self.mid_attack() {
+            self.wait_for_the_swing();
             return;
         }
         // Only with a one-handed melee weapon actually in hand: the
@@ -3821,6 +4285,20 @@ impl Client {
             .is_some_and(|t| t.elapsed() < UNDER_ATTACK)
     }
 
+    /// Whether what has just hit the character is called `name`. The
+    /// server names the attacker in the line it sends, so this is all
+    /// there is to go on, and it is enough: it is what says a creature
+    /// outside the hunting area, or one otherwise walked past, is a
+    /// fight the character is already in.
+    pub(crate) fn hit_lately_by(&self, name: &str) -> bool {
+        self.under_attack()
+            && self
+                .autoplay
+                .hit_by
+                .as_ref()
+                .is_some_and(|(who, _)| who == name)
+    }
+
     /// The next fight waits for the body the last one left: every body
     /// is to be emptied first, one is owed, and nothing is hitting the
     /// character meanwhile. A character that does not loot owes nothing,
@@ -3841,6 +4319,58 @@ impl Client {
     fn creature_known(&self, guid: u32) -> Option<&'static ac_world::elements::Creature> {
         let o = self.world.objects.get(&guid)?;
         ac_world::elements::known(o.weenie_class_id, &o.name)
+    }
+
+    /// Whether `o` is a critter to walk past rather than fight (see
+    /// [`beneath_fighting`]).
+    ///
+    /// Three things always outrank the rule, because in each of them
+    /// the fight is already happening or was asked for: the creature is
+    /// hitting the character, a creature this one summoned has taken it
+    /// on, or the player named it in "only these", which is a player
+    /// saying outright what to hunt.
+    ///
+    /// The table is asked first and the three are only consulted for
+    /// something the table would have the character walk past. This runs
+    /// for every creature in view every tick -- `worth_fighting` weighs
+    /// with it -- and one of the three walks the whole object map.
+    pub(crate) fn a_critter(&self, o: &ac_world::WorldObject, cfg: &Fight) -> bool {
+        if !cfg.skip_critters {
+            return false;
+        }
+        let Some(kind) = ac_world::elements::known(o.weenie_class_id, &o.name) else {
+            return false;
+        };
+        // A level read off this very creature beats the table's, which
+        // is a weenie's -- and may be a weenie found by name rather than
+        // by id, so a stronger version of a familiar thing. Not every
+        // weenie carries one either, so the appraisal is often the only
+        // level there is.
+        let level = self
+            .appraisals
+            .get(&o.guid)
+            .and_then(|a| a.int(CREATURE_LEVEL))
+            .and_then(|l| u32::try_from(l).ok())
+            .or(kind.level);
+        if !beneath_fighting(kind.tolerance, kind.health, level, self.world.stats.level) {
+            return false;
+        }
+        !(name_matches(&o.name, &cfg.only)
+            || self.hit_lately_by(&o.name)
+            || self.a_pet_is_on(o.guid))
+    }
+
+    /// Whether a creature this character summoned is already walking at
+    /// `guid`: its fight, and the character's to finish.
+    fn a_pet_is_on(&self, guid: u32) -> bool {
+        let Some(me) = self.world.player_guid else {
+            return false;
+        };
+        let on = Some(ac_world::object::MoveTarget::Object(guid));
+        self.world
+            .objects
+            .values()
+            .any(|o| o.pet_owner == me && o.target == on)
     }
 
     /// How this character is fighting right now: what its hands give.
@@ -3897,6 +4427,19 @@ impl Client {
             if let Some(o) = self.world.objects.get(&t).filter(|_| !gone) {
                 if o.health.unwrap_or(1.0) > 0.0 {
                     let name = o.name.clone();
+                    // A weapon choice put off for a swing in the air, or
+                    // waiting on an appraisal, is made here. Nothing else
+                    // asks again once the fight is joined, so what the
+                    // buff pass left in the character's hands was what it
+                    // fought the whole creature with.
+                    if self.autoplay.armed_for != Some(t) {
+                        self.arm_for(t, stance, &cfg);
+                        if self.hands_changing(now) {
+                            self.autoplay
+                                .say(Doing::Fighting, format!("changing weapon for {name}"));
+                            return true;
+                        }
+                    }
                     self.autoplay
                         .say(Doing::Fighting, format!("fighting {name}"));
                     // A bow with an empty ammunition slot shoots
@@ -3945,6 +4488,11 @@ impl Client {
                     }
                     self.remember_journey();
                     self.arm_for(guid, stance, &cfg);
+                    if self.hands_changing(now) {
+                        self.autoplay
+                            .say(Doing::Fighting, format!("changing weapon for {name}"));
+                        return true;
+                    }
                     if missile && self.autoplay_approach(guid, &name, crate::dodge::How::Missile) {
                         return true;
                     }
@@ -3977,6 +4525,8 @@ impl Client {
                     && self.area_allows(o, underground)
             })
             .filter(|o| wanted_target(&o.name, &cfg))
+            // A Rabbit the character has outgrown is walked past.
+            .filter(|o| !self.a_critter(o, &cfg))
             // With the vitae high, the hard ones and the killer wait.
             .filter(|o| !self.shy_of(o))
             .filter(|o| {
@@ -4000,6 +4550,13 @@ impl Client {
         }
         self.remember_journey();
         self.arm_for(guid, stance, &cfg);
+        // The hands are empty between the put and the wield, and a swing
+        // sent into that gap is a punch (see `hands_changing`).
+        if self.hands_changing(now) {
+            self.autoplay
+                .say(Doing::Fighting, format!("changing weapon for {name}"));
+            return true;
+        }
         // A bow refused for range shoots nothing: close in first (see
         // `crate::dodge`). A swing from too far the server walks us
         // in for.
@@ -4266,9 +4823,24 @@ impl Client {
         match spell {
             Some(spell) => {
                 if self.combat_stance() != Stance::Magic {
+                    // Not with a swing out: putting the weapon away to
+                    // reach for a wand cancels it. The softening keeps;
+                    // hit the thing meanwhile.
+                    if self.mid_attack() {
+                        self.wait_for_the_swing();
+                        return false;
+                    }
                     // A wand for the casting; the arming code sorts the
                     // hands out again when the fight proper begins.
-                    self.wield_for(Stance::Magic);
+                    if !self.wield_for(Stance::Magic) {
+                        // No caster to be had -- none carried, or the
+                        // server keeps refusing the one there is. Held
+                        // fire every tick this went on for ever and the
+                        // target was never hit. Mark it and fight it as
+                        // it is.
+                        advance(self);
+                        return false;
+                    }
                     return true;
                 }
                 self.select(Some(guid));
@@ -4748,6 +5320,8 @@ impl Client {
                     && self.area_allows(o, underground)
             })
             .filter(|o| wanted_target(&o.name, cfg))
+            // A Rabbit the character has outgrown is walked past.
+            .filter(|o| !self.a_critter(o, cfg))
             // With the vitae high, the hard ones and the killer wait.
             .filter(|o| !self.shy_of(o))
             .filter_map(|o| {
@@ -4894,6 +5468,15 @@ impl Client {
     pub(crate) fn autoplay_follow(&mut self, now: Instant, urgent: bool) -> bool {
         let team = self.autoplay.config.team.clone();
         if !team.enabled || !team.follow || team.lead || self.autoplay.team.leader {
+            return false;
+        }
+        // Not while on a town run of its own. A party that restocks with
+        // everyone going shops each for itself, and a follower pulled back
+        // to its leader had its walk to its own counter ended each time it
+        // closed to the following distance. The journey under way is the
+        // run's, not one after the leader.
+        if self.autoplay.growth.town_run_under_way() {
+            self.autoplay.follow_trip = None;
             return false;
         }
         let Some(leader) = self
@@ -5478,6 +6061,17 @@ impl Client {
         {
             return false;
         }
+        // A buff is never worth a cancelled swing: it goes back up in
+        // the gap between two of them instead (see
+        // `change_of_hands_waits`).
+        if change_of_hands_waits(self.combat_stance(), Stance::Magic, self.mid_attack()) {
+            self.wait_for_the_swing();
+            self.autoplay.note(
+                "waiting for the swing to land before reaching for a wand",
+                now,
+            );
+            return false;
+        }
         self.autoplay.buffs_checked = Some(now);
         let within = if urgent {
             cfg.never_below
@@ -5522,8 +6116,17 @@ impl Client {
                 })
                 .map(|o| o.guid);
             if !self.wield_for(Stance::Magic) {
-                self.autoplay
-                    .say(Doing::Buffing, format!("no wand to cast {name} with"));
+                // A wand that is carried but held off after a refusal is
+                // a wait, not a want: saying "no wand" for it sent an
+                // earlier reader looking through the pack for one.
+                self.autoplay.say(
+                    Doing::Buffing,
+                    if self.carries_a_caster() {
+                        format!("waiting to take a wand up to cast {name}")
+                    } else {
+                        format!("no wand to cast {name} with")
+                    },
+                );
                 return false;
             }
             if fighting && self.autoplay.put_down.is_none() {
@@ -5649,14 +6252,33 @@ impl Client {
         if self.due_buff(never_below, Instant::now()).is_some() {
             return;
         }
-        self.autoplay.put_down = None;
-        if self
+        if !self
             .world
             .objects
             .get(&weapon)
             .is_some_and(|o| o.container == self.world.player_guid)
         {
-            tracing::info!("autoplay: taking the weapon up again after buffing");
+            // Sold, given away, or in hand already: no errand left.
+            self.autoplay.put_down = None;
+            return;
+        }
+        // Inside the wait a refusal earned it the errand keeps, the way
+        // a pending wield's does: dropping it here would leave the
+        // weapon in the pack and the character fighting with the wand.
+        if self.wield_held_off(weapon) {
+            return;
+        }
+        self.autoplay.put_down = None;
+        tracing::info!("autoplay: taking the weapon up again after buffing");
+        // The wand is still in the hand, and ACE will not put a sword
+        // in a hand that holds a caster -- CheckWeaponCollision refuses
+        // it outright, with no error to read. So the wand goes back in
+        // the pack and the housekeeping takes the weapon up once the
+        // hands are empty, the same two steps the arming uses.
+        if self.put_weapons_away() {
+            self.autoplay.last_rewield = Some(Instant::now());
+            self.autoplay.pending_wield = Some(weapon);
+        } else {
             self.wield_guid(weapon);
         }
     }
@@ -5758,6 +6380,118 @@ mod tests {
     }
 
     #[test]
+    fn a_pour_refused_while_a_take_is_in_the_air_is_not_the_takes_refusal() {
+        // The tidying pours in the gaps between takes, so both can be
+        // out at once. A refusal that names a stack in the pack is
+        // about that stack, and the take goes on waiting for its own
+        // answer rather than being written off.
+        let (in_the_pack, on_the_corpse) = (0x8000_7001, 0x8000_7002);
+        assert_eq!(
+            refused_item(in_the_pack, 0, Some(on_the_corpse)),
+            Some(in_the_pack)
+        );
+    }
+
+    #[test]
+    fn a_profile_with_tidy_pack_off_is_never_tidied() {
+        assert_eq!(
+            why_not_tidy(TidyGate {
+                tidy_pack_off: true,
+                ..TidyGate::default()
+            }),
+            Some("this profile leaves the pack as it is")
+        );
+    }
+
+    #[test]
+    fn nothing_is_poured_with_a_counter_open() {
+        // A sale holds what it has sent the vendor by guid, and a pour
+        // makes one of those vanish out from under it.
+        assert_eq!(
+            why_not_tidy(TidyGate {
+                counter_open: true,
+                ..TidyGate::default()
+            }),
+            Some("a counter is open")
+        );
+    }
+
+    #[test]
+    fn nor_while_the_quartermaster_is_loaded_or_unloaded() {
+        // Money counted out into its own stack was poured straight back
+        // into the pile it came from, a hundred and twenty six times.
+        assert_eq!(
+            why_not_tidy(TidyGate {
+                quartermaster: true,
+                ..TidyGate::default()
+            }),
+            Some("the quartermaster is being loaded or unloaded")
+        );
+    }
+
+    #[test]
+    fn nor_while_ammunition_is_being_made() {
+        assert_eq!(
+            why_not_tidy(TidyGate {
+                crafting: true,
+                ..TidyGate::default()
+            }),
+            Some("ammunition is being made")
+        );
+    }
+
+    #[test]
+    fn nor_just_after_a_hand_over_to_a_teammate() {
+        assert_eq!(
+            why_not_tidy(TidyGate {
+                gave_lately: true,
+                ..TidyGate::default()
+            }),
+            Some("something was just handed to a teammate")
+        );
+    }
+
+    #[test]
+    fn nor_while_a_take_is_queued_or_in_the_air() {
+        assert_eq!(
+            why_not_tidy(TidyGate {
+                take_in_air: true,
+                ..TidyGate::default()
+            }),
+            Some("a take is queued or in the air")
+        );
+    }
+
+    #[test]
+    fn with_nothing_in_the_way_the_pack_is_tidied() {
+        assert_eq!(why_not_tidy(TidyGate::default()), None);
+        // The first reason that applies is the one given.
+        assert_eq!(
+            why_not_tidy(TidyGate {
+                counter_open: true,
+                take_in_air: true,
+                ..TidyGate::default()
+            }),
+            Some("a counter is open")
+        );
+    }
+
+    #[test]
+    fn every_errand_holding_a_stack_is_offered_up() {
+        // Whatever another part of the rules is holding across ticks
+        // must not be poured away under it.
+        let mut ap = Autoplay::default();
+        assert_eq!(ap.held_by_an_errand().iter().flatten().count(), 0);
+        ap.pending_wield = Some(1);
+        ap.wanted_ammo = Some(2);
+        ap.put_down = Some(3);
+        ap.crafting = Some((4, 5, Instant::now()));
+        ap.handing = Some((6, Instant::now()));
+        let held: Vec<u32> = ap.held_by_an_errand().iter().flatten().copied().collect();
+        assert_eq!(held, vec![1, 2, 3, 4, 5, 6]);
+    }
+
+    #[test]
     fn a_daily_limit_is_a_wait_and_not_a_grudge() {
         use crate::did::{Because, Did, Patience};
         let t0 = Instant::now();
@@ -5782,6 +6516,66 @@ mod tests {
         // is a different answer entirely.
         kinds.note(1, &Did::refused("no vendor will take it"), t0);
         assert!(kinds.held(&1, t0 + Duration::from_secs(24 * 60 * 60)));
+    }
+
+    #[test]
+    fn a_buff_pass_that_wants_a_wand_waits_rather_than_disarming_mid_charge() {
+        use crate::Stance;
+        // +Verity's buffing reached for her Training Wand every second
+        // and a half while she was charging a Drudge Servant, and every
+        // reach put her mace away and cancelled the charge with it.
+        assert!(change_of_hands_waits(Stance::Melee, Stance::Magic, true));
+        assert!(change_of_hands_waits(Stance::Missile, Stance::Magic, true));
+
+        // Answered, the gap between two swings is hers: the wand goes in
+        // then, and nothing is cancelled.
+        assert!(!change_of_hands_waits(Stance::Melee, Stance::Magic, false));
+
+        // A pass that already holds a wand changes nothing, so there is
+        // nothing to wait for and the buff goes up mid-fight as before.
+        assert!(!change_of_hands_waits(Stance::Magic, Stance::Magic, true));
+
+        // The rule is about hands, not about wands: a character told to
+        // fight with a bow waits for the swing just the same.
+        assert!(change_of_hands_waits(Stance::Melee, Stance::Missile, true));
+    }
+
+    #[test]
+    fn a_refused_wield_is_left_alone_for_longer_every_time() {
+        use crate::did::Patience;
+        // ACE refuses a wield it will not make with no error code at all
+        // -- a caster cannot go in while a shield is up, and it says so
+        // with WeenieError.None -- so there is nothing to read and
+        // nothing to do but wait. +Verity asked 150 times in a minute.
+        const WAND: u32 = 0x8000_00C3;
+        let t0 = Instant::now();
+        let mut held: Patience<u32> = Patience::new();
+
+        held.hold(WAND, WIELD_AGAIN, t0);
+        assert!(held.held(&WAND, t0), "not asked for again at once");
+        assert!(
+            held.held(&WAND, t0 + WIELD_AGAIN - Duration::from_millis(1)),
+            "nor a moment before the wait is up"
+        );
+        assert!(
+            !held.held(&WAND, t0 + WIELD_AGAIN),
+            "asked again once the wait is up"
+        );
+
+        // Refused again: the wait doubles, so an item the server will
+        // never wield in this state costs a handful of asks rather than
+        // one every buff pass.
+        let second = t0 + WIELD_AGAIN;
+        held.hold(WAND, WIELD_AGAIN, second);
+        assert_eq!(held.waited(&WAND), Some(WIELD_AGAIN * 2));
+        assert!(held.held(&WAND, second + WIELD_AGAIN));
+        assert!(!held.held(&WAND, second + WIELD_AGAIN * 2));
+
+        // A wield that lands forgets the wait: the hands have changed,
+        // so whatever the server was objecting to has gone.
+        held.forget(&WAND);
+        assert!(!held.held(&WAND, second));
+        assert_eq!(held.waited(&WAND), None);
     }
 
     use super::*;
@@ -5841,6 +6635,498 @@ mod tests {
         // Avoid wins over only.
         f.only = vec!["olthoi".into()];
         assert!(!wanted_target("Olthoi Grub", &f));
+    }
+
+    #[test]
+    fn a_creature_is_beneath_fighting_only_when_it_is_all_three() {
+        use ac_world::elements::tolerance;
+        // A level 4 Rabbit with its five health: fought at 7, walked
+        // past from 8 up.
+        assert!(!beneath_fighting(tolerance::RETALIATE, 5, Some(4), 5));
+        assert!(!beneath_fighting(tolerance::RETALIATE, 5, Some(4), 7));
+        assert!(beneath_fighting(tolerance::RETALIATE, 5, Some(4), 8));
+        assert!(beneath_fighting(tolerance::RETALIATE, 5, Some(4), 20));
+        // A level 61 Revenant is passive and nobody outgrows it: 122
+        // is past the level a character can reach.
+        assert!(!beneath_fighting(tolerance::RETALIATE, 200, Some(61), 100));
+        assert!(!beneath_fighting(tolerance::RETALIATE, 200, Some(61), 121));
+        // Something that attacks on sight is fought however small.
+        assert!(!beneath_fighting(0, 3, Some(1), 275));
+        // And nothing is walked past on a guess: no level, no health.
+        assert!(!beneath_fighting(tolerance::RETALIATE, 5, None, 275));
+        assert!(!beneath_fighting(tolerance::RETALIATE, 0, Some(4), 275));
+        // Every flag that means it leaves a passer-by alone counts.
+        for flag in [
+            tolerance::NO_ATTACK,
+            tolerance::APPRAISE,
+            tolerance::PROVOKE,
+            tolerance::RETALIATE,
+            tolerance::MONSTER,
+        ] {
+            assert!(beneath_fighting(flag, 5, Some(4), 20), "{flag}");
+        }
+        // Something that cannot fight back at all is scenery with a
+        // health bar, and hitting it is a chore whatever it can take: a
+        // Portal Pillar has two thousand health and never swings.
+        assert!(beneath_fighting(tolerance::NO_ATTACK, 2001, Some(4), 50));
+        // The rest of the flags do fight back once hit, so what they
+        // can take is what decides: a Drudge Skulker's forty-two is a
+        // fight, a Rabbit's five is not.
+        assert!(!beneath_fighting(tolerance::RETALIATE, 42, Some(8), 50));
+        // The ones that do not: "only fight back at whoever started it"
+        // still starts fights with everyone else.
+        assert!(!beneath_fighting(32, 5, Some(4), 20));
+        // A character with no level yet fights everything.
+        assert!(!beneath_fighting(tolerance::RETALIATE, 5, Some(4), 0));
+    }
+
+    #[test]
+    fn the_holtburg_fields_are_still_a_hunting_ground_at_any_level() {
+        use ac_world::elements::creature_by_id;
+        // Every creature the two encounter generators around Holtburg
+        // put out (2007 newbietownaluviangen, 5150 harmlessaluviangen),
+        // by weenie. ACE gives the first eight Retaliate so they do not
+        // come at a new player, and they are all level 8: by level
+        // alone a level 16 character had nothing left to attack
+        // anywhere in Holtburg.
+        let field = [
+            19257, // Drudge Skulker
+            19258, // Drudge Slinker
+            19263, // Gnawer Shreth
+            19261, // Creeper Mosswart
+            19262, // Young Mosswart
+            19256, // Young Banderling
+            19260, // Mite Snippet
+            19259, // Mite Scion
+        ];
+        for wcid in field {
+            let c = creature_by_id(wcid).expect("in the table");
+            for mine in [16, 20, 50, 275] {
+                assert!(
+                    !beneath_fighting(c.tolerance, c.health, c.level, mine),
+                    "{} is what the fields are for, at level {mine}",
+                    c.name
+                );
+            }
+        }
+        // The two that really are critters are still walked past.
+        for wcid in [2566, 24937] {
+            let c = creature_by_id(wcid).expect("in the table");
+            assert!(
+                beneath_fighting(c.tolerance, c.health, c.level, 20),
+                "{} is worth nothing to a level 20 character",
+                c.name
+            );
+        }
+    }
+
+    /// Offline session over the real archives: nothing calls `tick`, so
+    /// no packet is ever sent.
+    fn offline_client(assets: std::rc::Rc<ac_scene::Assets>) -> Client {
+        Client::connect(
+            crate::Config {
+                host: "127.0.0.1:1".into(),
+                account: "acreborn".into(),
+                password: "x".into(),
+                character: None,
+                auto_enter: true,
+            },
+            assets,
+        )
+        .unwrap()
+    }
+
+    /// A character of `level` with nothing around it yet.
+    fn character_of_level(level: i32) -> Option<Client> {
+        let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
+            eprintln!("AC_DATA_DIR unset; skipping");
+            return None;
+        };
+        let assets = std::rc::Rc::new(ac_scene::Assets::open(dir).unwrap());
+        let mut c = offline_client(assets);
+        c.world.player_guid = Some(0x5000_0001);
+        c.world.stats.level = level;
+        Some(c)
+    }
+
+    /// A creature of `wcid` standing in view, and a copy of it to ask
+    /// the fight rules about.
+    fn in_view(c: &mut Client, guid: u32, wcid: u32, name: &str) -> ac_world::WorldObject {
+        let o = ac_world::WorldObject {
+            guid,
+            weenie_class_id: wcid,
+            name: name.into(),
+            item_type: ac_world::item_type::CREATURE,
+            health: Some(1.0),
+            ..Default::default()
+        };
+        c.world.objects.insert(guid, o.clone());
+        o
+    }
+
+    #[test]
+    fn a_rabbit_is_walked_past_once_it_is_outgrown_and_a_revenant_never_is() {
+        // Brown Rabbit 2567 (passive, level 4), Revenant 8592 (passive,
+        // level 61), Chicken 35499 (attacks on sight, level 8).
+        let Some(mut c) = character_of_level(20) else {
+            return;
+        };
+        let cfg = Fight::default();
+        let rabbit = in_view(&mut c, 0x8000_0001, 2567, "Brown Rabbit");
+        let revenant = in_view(&mut c, 0x8000_0002, 8592, "Revenant");
+        let chicken = in_view(&mut c, 0x8000_0003, 35499, "Chicken");
+        assert!(c.a_critter(&rabbit, &cfg));
+        assert!(!c.a_critter(&revenant, &cfg), "worth sixty levels");
+        assert!(!c.a_critter(&chicken, &cfg), "this one starts fights");
+
+        // A character the Rabbit is still worth something to fights it.
+        c.world.stats.level = 5;
+        assert!(!c.a_critter(&rabbit, &cfg));
+        assert!(!c.a_critter(&revenant, &cfg));
+
+        // Back at 20, and hitting back is never refused.
+        c.world.stats.level = 20;
+        assert!(c.a_critter(&rabbit, &cfg));
+        c.autoplay.last_hit_us = Some(Instant::now());
+        c.autoplay.hit_by = Some(("Brown Rabbit".into(), Instant::now()));
+        assert!(!c.a_critter(&rabbit, &cfg), "it is hitting the character");
+        // Which says nothing about the one next to it.
+        let other = in_view(&mut c, 0x8000_0004, 2566, "Black Rabbit");
+        assert!(c.a_critter(&other, &cfg));
+        c.autoplay.last_hit_us = None;
+        c.autoplay.hit_by = None;
+
+        // Named outright, it is what the player asked to hunt.
+        let only = Fight {
+            only: vec!["rabbit".into()],
+            ..Fight::default()
+        };
+        assert!(!c.a_critter(&rabbit, &only));
+
+        // A creature of ours already on it: its fight, and ours to end.
+        c.world.objects.insert(
+            0x8000_0005,
+            ac_world::WorldObject {
+                guid: 0x8000_0005,
+                name: "Fire Elemental".into(),
+                item_type: ac_world::item_type::CREATURE,
+                health: Some(1.0),
+                pet_owner: 0x5000_0001,
+                target: Some(ac_world::object::MoveTarget::Object(rabbit.guid)),
+                ..Default::default()
+            },
+        );
+        assert!(!c.a_critter(&rabbit, &cfg));
+        assert!(c.a_critter(&other, &cfg), "the one it is not on");
+        c.world.objects.remove(&0x8000_0005);
+
+        // With the setting off, everything is fought.
+        let all = Fight {
+            skip_critters: false,
+            ..Fight::default()
+        };
+        assert!(!c.a_critter(&rabbit, &all));
+        assert!(!c.a_critter(&other, &all));
+    }
+
+    /// An appraisal of `guid` saying it is `level`.
+    fn appraised_at(c: &mut Client, guid: u32, level: i32) {
+        c.appraisals.insert(
+            guid,
+            ac_net::messages::Appraisal {
+                guid,
+                success: true,
+                ints: vec![(CREATURE_LEVEL, level)],
+                ..Default::default()
+            },
+        );
+    }
+
+    #[test]
+    fn a_level_read_off_the_creature_itself_stands_in_for_the_tables() {
+        let Some(mut c) = character_of_level(50) else {
+            return;
+        };
+        let cfg = Fight::default();
+        // A Portal Pillar (32522) never attacks anything and the table
+        // has no level for it. Nothing is walked past on a guess, so it
+        // is fought until an appraisal says what it is worth.
+        let pillar = in_view(&mut c, 0x8000_0011, 32522, "Portal Pillar");
+        assert_eq!(
+            ac_world::elements::creature_by_id(32522).and_then(|k| k.level),
+            None
+        );
+        assert!(!c.a_critter(&pillar, &cfg));
+        appraised_at(&mut c, pillar.guid, 4);
+        assert!(c.a_critter(&pillar, &cfg));
+
+        // A creature whose weenie is not in the table at all is known
+        // only by the end of its name, and that row is some other
+        // weenie: a Brown Rabbit is level 4, and this is not one.
+        let stronger = in_view(&mut c, 0x8000_0012, 0x00FF_FFFF, "Weakened Brown Rabbit");
+        assert!(c.a_critter(&stronger, &cfg), "on the name alone, a Rabbit");
+        appraised_at(&mut c, stronger.guid, 40);
+        assert!(!c.a_critter(&stronger, &cfg), "not at forty it is not");
+    }
+
+    /// A weapon in the character's hand, or in its pack.
+    fn a_weapon(c: &mut Client, guid: u32, kind: u32, name: &str, in_hand: bool) {
+        let me = c.world.player_guid;
+        let locations = if kind == ac_world::item_type::CASTER {
+            ac_world::equip::HELD
+        } else {
+            ac_world::equip::MELEE_WEAPON
+        };
+        c.world.objects.insert(
+            guid,
+            ac_world::WorldObject {
+                guid,
+                name: name.into(),
+                item_type: kind,
+                value: 100,
+                valid_locations: locations,
+                container: if in_hand { None } else { me },
+                wielder: if in_hand { me } else { None },
+                ..Default::default()
+            },
+        );
+    }
+
+    /// A character with a mace in hand, a wand in the pack, and a
+    /// creature it is swinging at.
+    fn mid_fight() -> Option<(Client, u32)> {
+        const MACE: u32 = 0x8000_0101;
+        const WAND: u32 = 0x8000_0102;
+        const CREATURE: u32 = 0x8000_0103;
+        let mut c = character_of_level(20)?;
+        a_weapon(
+            &mut c,
+            MACE,
+            ac_world::item_type::MELEE_WEAPON,
+            "Mace",
+            true,
+        );
+        a_weapon(
+            &mut c,
+            WAND,
+            ac_world::item_type::CASTER,
+            "Training Wand",
+            false,
+        );
+        in_view(&mut c, CREATURE, 19257, "Drudge Skulker");
+        c.combat = true;
+        c.attack_target = Some(CREATURE);
+        c.last_attack = Instant::now() - Duration::from_secs(5);
+        Some((c, WAND))
+    }
+
+    #[test]
+    fn the_swing_waits_for_a_swap_the_buff_pass_started() {
+        let Some((mut c, wand)) = mid_fight() else {
+            return;
+        };
+        // The in-fight buffing reaches for the wand. The mace goes back
+        // in the pack and the wand waits on empty hands.
+        assert!(c.wield_for(Stance::Magic), "the swap went out");
+        assert_eq!(c.autoplay.pending_wield, Some(wand));
+        // Which the fight can now see. Before this, only the arming
+        // code stamped the swap clock, so a swap the buff pass or the
+        // softening started was invisible and the next swing went out
+        // into the empty hands: +Verity put her Flaming Takuba away for
+        // a wand and punched a Spikey Armoredillo.
+        assert!(c.hands_changing(Instant::now()), "the swap is under way");
+        // The hands still say melee -- the server has not answered the
+        // put yet -- so nothing but this holds the swing back.
+        assert_eq!(c.combat_stance(), Stance::Melee);
+        c.tick_combat();
+        assert!(!c.attack_pending, "no swing into the empty hands");
+        // And the wait is bounded: a swap the server never finishes
+        // cannot stop the character fighting.
+        c.autoplay.last_rewield = Some(Instant::now() - SWAP_SETTLES);
+        c.tick_combat();
+        assert!(c.attack_pending, "swinging again once the swap is stale");
+    }
+
+    #[test]
+    fn the_weapon_comes_back_out_of_the_pack_after_a_buff() {
+        let Some((mut c, wand)) = mid_fight() else {
+            return;
+        };
+        const MACE: u32 = 0x8000_0101;
+        // The buff pass put the mace down and took the wand up.
+        a_weapon(
+            &mut c,
+            MACE,
+            ac_world::item_type::MELEE_WEAPON,
+            "Mace",
+            false,
+        );
+        a_weapon(
+            &mut c,
+            wand,
+            ac_world::item_type::CASTER,
+            "Training Wand",
+            true,
+        );
+        c.autoplay.put_down = Some(MACE);
+        c.autoplay_rearm();
+        // ACE will not put a mace in a hand that holds a caster -- it
+        // refuses the wield outright, with no error to read -- so the
+        // wand goes back in the pack first and the mace waits on empty
+        // hands. Asking straight out was refused every single time.
+        assert_eq!(c.autoplay.pending_wield, Some(MACE));
+        assert_eq!(c.autoplay.wield_asked, None, "nothing was asked for yet");
+        assert_eq!(c.autoplay.put_down, None, "the errand passed on");
+    }
+
+    #[test]
+    fn an_errand_the_server_is_refusing_is_kept_rather_than_dropped() {
+        let Some((mut c, _)) = mid_fight() else {
+            return;
+        };
+        const MACE: u32 = 0x8000_0101;
+        const SHIELD: u32 = 0x8000_0104;
+        let me = c.world.player_guid;
+        a_weapon(
+            &mut c,
+            MACE,
+            ac_world::item_type::MELEE_WEAPON,
+            "Mace",
+            false,
+        );
+        c.autoplay.put_down = Some(MACE);
+        c.hold_off_wield(MACE, Instant::now());
+        c.autoplay_rearm();
+        // Asking now sends nothing, so clearing the errand would leave
+        // the mace in the pack with nothing left to ask again.
+        assert_eq!(c.autoplay.put_down, Some(MACE), "still owed the weapon");
+        assert_eq!(c.autoplay.pending_wield, None);
+
+        // The shield keeps its errand the same way.
+        c.world.objects.insert(
+            SHIELD,
+            ac_world::WorldObject {
+                guid: SHIELD,
+                name: "Buckler".into(),
+                valid_locations: ac_world::equip::SHIELD,
+                container: me,
+                ..Default::default()
+            },
+        );
+        c.autoplay.wanted_shield = Some(SHIELD);
+        c.hold_off_wield(SHIELD, Instant::now());
+        c.autoplay_shield(Instant::now());
+        assert_eq!(c.autoplay.wanted_shield, Some(SHIELD), "still owed it");
+    }
+
+    #[test]
+    fn the_shield_goes_on_between_swings_and_not_during_one() {
+        let Some((mut c, _)) = mid_fight() else {
+            return;
+        };
+        const SHIELD: u32 = 0x8000_0104;
+        let me = c.world.player_guid;
+        c.world.objects.insert(
+            SHIELD,
+            ac_world::WorldObject {
+                guid: SHIELD,
+                name: "Buckler".into(),
+                valid_locations: ac_world::equip::SHIELD,
+                container: me,
+                ..Default::default()
+            },
+        );
+        c.autoplay.wanted_shield = Some(SHIELD);
+        // A swing is in the air. ACE shuffles the stance on every
+        // successful equip, a shield included, and a combat-mode change
+        // cancels the attack -- so the shield waits for the gap.
+        c.attack_pending = true;
+        c.last_attack = Instant::now();
+        assert!(c.mid_attack());
+        c.autoplay_shield(Instant::now());
+        assert_eq!(c.autoplay.wanted_shield, Some(SHIELD), "still to go on");
+        assert_eq!(c.autoplay.wield_asked, None, "nothing sent mid-swing");
+        assert!(c.wants_the_hands, "the gap after the swing is booked");
+    }
+
+    #[test]
+    fn a_weapon_choice_put_off_for_a_swing_is_made_once_the_fight_is_joined() {
+        let Some((mut c, _)) = mid_fight() else {
+            return;
+        };
+        let cfg = Fight::default();
+        // The choice was put off: a swing was in the air when the target
+        // was picked, so `arm_for` booked the gap and returned without
+        // recording what it had armed for. The attack went out anyway --
+        // the target that owned the swing had left the area or been
+        // given up on, which clears `attack_target` and leaves
+        // `attack_pending` set.
+        assert_eq!(c.autoplay.armed_for, None);
+        assert!(c.appraise_queue.is_empty());
+        // Nothing in the air now, and the fight is joined.
+        assert!(!c.mid_attack());
+        assert!(c.autoplay_fight_as(Instant::now(), &cfg), "fighting");
+        // Only this branch runs from here on: the picker is never
+        // reached again while the target is alive. Without it the
+        // character fought the whole creature with whatever the buff
+        // pass had left in its hands, and a bow with no arrows chosen.
+        assert!(
+            !c.appraise_queue.is_empty(),
+            "the weapons are being weighed for the choice"
+        );
+    }
+
+    #[test]
+    fn a_softening_with_no_wand_to_be_had_lets_the_fight_go_ahead() {
+        let Some((mut c, wand)) = mid_fight() else {
+            return;
+        };
+        const CREATURE: u32 = 0x8000_0103;
+        // A Drudge Skulker is weakest to cold, fire and electricity
+        // alike; whichever it picks, the character knows the
+        // vulnerability for it.
+        for element in [
+            ac_world::elements::Element::Cold,
+            ac_world::elements::Element::Fire,
+            ac_world::elements::Element::Electric,
+        ] {
+            for id in ac_world::elements::vulnerabilities(element) {
+                c.world.stats.spells.push(id);
+            }
+        }
+        assert_eq!(c.combat_stance(), Stance::Melee);
+        assert!(!c.mid_attack());
+        // With a wand to be had, the softening takes the tick to reach
+        // for one. This is the setup working, and what makes the second
+        // half mean anything.
+        assert!(
+            c.autoplay_soften(CREATURE, "Drudge Skulker", Instant::now()),
+            "reaching for the wand"
+        );
+        assert_eq!(c.autoplay.pending_wield, Some(wand));
+
+        // Now the server is refusing that wand. Nothing can be sent, so
+        // the softening gives the tick back rather than holding fire on
+        // the target for ever: every expiry of the wait earned one more
+        // refusal and doubled the next, up towards four hours.
+        let Some((mut c, wand)) = mid_fight() else {
+            return;
+        };
+        for element in [
+            ac_world::elements::Element::Cold,
+            ac_world::elements::Element::Fire,
+            ac_world::elements::Element::Electric,
+        ] {
+            for id in ac_world::elements::vulnerabilities(element) {
+                c.world.stats.spells.push(id);
+            }
+        }
+        c.hold_off_wield(wand, Instant::now());
+        assert!(
+            !c.autoplay_soften(CREATURE, "Drudge Skulker", Instant::now()),
+            "the fight may go ahead unsoftened"
+        );
+        assert_eq!(c.autoplay.pending_wield, None, "nothing was sent");
     }
 
     fn item(name: &str, value: u32, armor: u32) -> ItemStats {
@@ -6406,6 +7692,32 @@ mod tests {
     }
 
     #[test]
+    fn no_body_waits_on_a_character_the_server_will_hand_nothing() {
+        // +Verity, 36462 carried of a 7500 capacity, on her way to sell:
+        // the looting walked her to a corpse for a Pyreal, the server said
+        // "You are too encumbered to carry that!", and the walk to town
+        // was lost. Past the wall no body is owed, so none is walked to.
+        let t0 = Instant::now();
+        let ap = Autoplay::default();
+        let (me, at) = (glam::Vec3::ZERO, glam::Vec3::new(5.0, 0.0, 0.0));
+        let body = 0x8000_9001;
+        let walled = Room {
+            past_the_wall: true,
+            ..Room::PLENTY
+        };
+        assert!(ap.corpse_owed(body, at, me, t0, Room::PLENTY));
+        assert!(!ap.corpse_waiting(body, t0, walled));
+        assert!(!ap.corpse_owed(body, at, me, t0, walled));
+        // Short of it, a character with no room left for loot still goes
+        // to a body: coins weigh nothing, and light things may fit.
+        let laden = Room {
+            carry: 0,
+            ..Room::PLENTY
+        };
+        assert!(ap.corpse_owed(body, at, me, t0, laden));
+    }
+
+    #[test]
     fn a_body_reached_with_a_full_pack_is_set_aside_and_owed_again_after_the_sale() {
         // A pack down to the slots kept for a counter's money: every body
         // in reach was walked to, shut on the spot as done with -- so
@@ -6657,32 +7969,163 @@ mod tests {
         assert!(partial.enabled);
         assert_eq!(partial.survive.heal_below, Survive::default().heal_below);
         assert_eq!(Doing::Fighting.label(), "fighting");
+        // A settings file written when the heal spell was still a
+        // setting keeps loading, rest and all: the heal is chosen by
+        // the rules now, and a name left in the file is no reason to
+        // throw a player's whole configuration away.
+        let old: Config =
+            serde_json::from_str(r#"{"survive":{"heal_spell":"Heal Self VI","heal_below":0.45}}"#)
+                .unwrap();
+        assert_eq!(old.survive.heal_below, 0.45);
+        assert!(old.survive.use_kits);
+        // And one written before critters were walked past walks past
+        // them: a bool left out would otherwise read as off.
+        let before: Config = serde_json::from_str(r#"{"fight":{"radius":30.0}}"#).unwrap();
+        assert!(before.fight.skip_critters);
     }
 }
 #[cfg(test)]
 mod heal_choice_tests {
-    use super::bigger_heal;
+    use super::{choose_heal, restores_health, SelfHeal, Survive, CRITICAL_HEALTH};
     use ac_world::vitals::{transfers_between, vital, Transfer};
 
-    #[test]
-    fn the_bigger_heal_wins() {
-        // Heal Self restores a fixed amount; the transfer takes half a
-        // bar. On a full stamina bar the transfer is much the larger.
-        assert_eq!(bigger_heal(Some((1, 100)), Some((2, 260))), Some((2, 260)));
-        // Nearly out of stamina, it is worth almost nothing and loses.
-        assert_eq!(bigger_heal(Some((1, 100)), Some((2, 12))), Some((1, 100)));
+    /// A Heal Self: a fixed number of points, drawing on nothing, and
+    /// well enough learnt to land nine casts in ten.
+    fn heal(spell: u32, gain: u32, mana: u32) -> SelfHeal {
+        SelfHeal {
+            spell,
+            gain,
+            mana,
+            chance: 0.9,
+            leaves: None,
+        }
+    }
+
+    /// A transfer into health: what it gives has already been worked
+    /// out against the bar it draws on, and `left` is the fraction of
+    /// that bar the cast would leave behind.
+    fn transfer(spell: u32, gain: u32, mana: u32, from: u32, left: f32) -> SelfHeal {
+        SelfHeal {
+            spell,
+            gain,
+            mana,
+            chance: 0.9,
+            leaves: Some((from, left)),
+        }
+    }
+
+    /// Heal Self I through VI: every level costs more and gives more.
+    fn every_level() -> Vec<SelfHeal> {
+        vec![
+            heal(1, 25, 10),
+            heal(2, 50, 20),
+            heal(3, 80, 30),
+            heal(4, 110, 40),
+            heal(5, 160, 55),
+            heal(6, 220, 75),
+        ]
     }
 
     #[test]
-    fn a_tie_goes_to_the_spell_that_costs_no_stamina() {
-        assert_eq!(bigger_heal(Some((1, 100)), Some((2, 100))), Some((1, 100)));
+    fn a_scratch_is_not_healed_with_the_biggest_spell_in_the_book() {
+        let cfg = Survive::default();
+        // Twenty points off a full bar: the cheapest level that covers
+        // it, not the two hundred and twenty point heal and its mana.
+        assert_eq!(choose_heal(&every_level(), 20, 0.9, &cfg), Some(1));
+        // A serious wound walks up the book, and stops at the first
+        // level that covers it rather than going to the top.
+        assert_eq!(choose_heal(&every_level(), 90, 0.5, &cfg), Some(4));
     }
 
     #[test]
-    fn either_may_be_missing() {
-        assert_eq!(bigger_heal(Some((1, 40)), None), Some((1, 40)));
-        assert_eq!(bigger_heal(None, Some((2, 40))), Some((2, 40)));
-        assert_eq!(bigger_heal(None, None), None);
+    fn a_wound_nothing_covers_takes_the_biggest_there_is() {
+        let cfg = Survive::default();
+        // Three hundred missing and nothing in the book reaches it:
+        // the most health one cast can give goes out.
+        assert_eq!(choose_heal(&every_level(), 300, 0.4, &cfg), Some(6));
+    }
+
+    #[test]
+    fn a_character_about_to_die_reaches_for_the_biggest_at_once() {
+        let cfg = Survive::default();
+        // A quarter of the bar left. Even a wound the cheapest heal
+        // would cover gets the biggest: there may not be a second cast.
+        let health = CRITICAL_HEALTH - 0.05;
+        assert_eq!(choose_heal(&every_level(), 20, health, &cfg), Some(6));
+    }
+
+    #[test]
+    fn a_heal_that_usually_fizzles_is_not_what_a_wound_is_covered_with() {
+        let cfg = Survive::default();
+        // The big heal is barely learnt and lands three casts in ten.
+        let mut shaky = heal(6, 220, 75);
+        shaky.chance = 0.3;
+        let book = vec![heal(1, 25, 10), shaky];
+        assert_eq!(choose_heal(&book, 20, 0.9, &cfg), Some(1));
+        // Unless nothing else comes close, and a third of a big heal
+        // is still the best there is.
+        assert_eq!(choose_heal(&book, 200, 0.4, &cfg), Some(6));
+    }
+
+    #[test]
+    fn a_transfer_is_not_drained_out_of_a_bar_the_character_needs() {
+        let cfg = Survive::default();
+        // The transfer is bigger and cheaper, but it would leave
+        // stamina at a tenth, under the floor the player set, and a
+        // Heal Self covers the wound on its own.
+        let book = vec![
+            heal(1161, 90, 30),
+            transfer(1669, 300, 25, vital::STAMINA, 0.1),
+        ];
+        assert_eq!(choose_heal(&book, 80, 0.5, &cfg), Some(1161));
+        // Mana is guarded the same way: a Mana to Health that would
+        // leave nothing to cast with is passed over.
+        let book = vec![
+            heal(1161, 90, 30),
+            transfer(1295, 300, 25, vital::MANA, 0.2),
+        ];
+        assert_eq!(choose_heal(&book, 80, 0.5, &cfg), Some(1161));
+        // Left with room to spare, it is taken like anything else.
+        let book = vec![transfer(1669, 120, 25, vital::STAMINA, 0.45)];
+        assert_eq!(choose_heal(&book, 100, 0.5, &cfg), Some(1669));
+    }
+
+    #[test]
+    fn a_character_whose_only_heal_is_a_transfer_still_casts_it() {
+        let cfg = Survive::default();
+        // Nothing else to reach for: better a bar spent than a
+        // character dead, floor or no floor.
+        let book = vec![transfer(1669, 300, 25, vital::STAMINA, 0.05)];
+        assert_eq!(choose_heal(&book, 200, 0.5, &cfg), Some(1669));
+    }
+
+    #[test]
+    fn a_dying_character_spends_the_bar_it_was_keeping() {
+        let cfg = Survive::default();
+        // Eight hundredths of health left and three hundred points
+        // missing. The book holds a Heal Self that covers eighty of it
+        // and a transfer that covers all of it but would leave stamina
+        // at a seventh, under the floor. The floor is what the stamina
+        // was being kept for, and there is no next fight to keep it
+        // for: the transfer goes out.
+        let book = vec![
+            heal(3, 80, 30),
+            transfer(1669, 300, 25, vital::STAMINA, 0.15),
+        ];
+        assert_eq!(choose_heal(&book, 300, 0.08, &cfg), Some(1669));
+        // Mana is lifted the same way.
+        let book = vec![heal(3, 80, 30), transfer(1295, 300, 25, vital::MANA, 0.15)];
+        assert_eq!(choose_heal(&book, 300, 0.08, &cfg), Some(1295));
+        // Above the line the floor still holds: a wound the Heal Self
+        // covers is healed with it and the bar is left alone.
+        assert_eq!(choose_heal(&book, 80, 0.5, &cfg), Some(3));
+    }
+
+    #[test]
+    fn a_character_with_nothing_to_cast_heals_with_nothing() {
+        // Out of mana, out of components, or no heal ever learnt: the
+        // castable list comes back empty and there is no choice to make.
+        assert_eq!(choose_heal(&[], 200, 0.2, &Survive::default()), None);
     }
 
     #[test]
@@ -6694,6 +8137,19 @@ mod heal_choice_tests {
         // any fixed heal.
         let best = found.iter().map(|t| t.gain(700)).max().unwrap_or(0);
         assert!(best > 200, "the top transfer only returned {best}");
+        // Half the bar goes whatever comes out the other side.
+        let top = found.iter().max_by_key(|t| t.gain(700)).expect("one");
+        assert_eq!(top.drain(700), 350);
+        // Mana to Health is a heal too, and Harm Self is not.
+        assert!(!transfers_between(vital::MANA, vital::HEALTH).is_empty());
+        assert!(restores_health(1161), "Heal Self VI");
+        assert!(restores_health(1669), "Stamina to Health Self VI");
+        assert!(restores_health(1295), "Mana to Health Self VI");
+        assert!(!restores_health(8), "Harm Self I");
+        assert!(
+            !restores_health(1182),
+            "Revitalize Self VI restores stamina"
+        );
     }
 }
 #[cfg(test)]

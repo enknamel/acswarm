@@ -143,6 +143,79 @@ fn attack_ended_walk(walk: Option<ac_world::object::MoveTarget>, attacked: Optio
         (Some(ac_world::object::MoveTarget::Object(g)), Some(a)) if g == a
     )
 }
+
+/// The longest an unanswered attack keeps the character's hands to
+/// itself. ACE answers every swing with AttackDone, so this only
+/// matters when the answer goes missing: one lost message must not
+/// leave the hands untouchable for the rest of the session.
+const ATTACK_ANSWERED_WITHIN: Duration = Duration::from_secs(10);
+
+/// Whether a swing or a charge is out and still unanswered, so that the
+/// character's hands and its combat mode must be left alone.
+///
+/// ACE turns every combat-mode change into HandleActionCancelAttack,
+/// which cancels the walk the charge is riding on and answers with
+/// AttackDone -- and wielding a weapon of another kind is a combat-mode
+/// change. +Verity's in-fight buffing reached for her wand every second
+/// and a half, and every reach put her mace away and took the charge
+/// down with it: a minute of "Action cancelled" and almost nothing
+/// landed on the Drudge Servant that was hitting her throughout.
+fn attack_unanswered(pending: bool, sent: Instant, now: Instant) -> bool {
+    pending && now.duration_since(sent) < ATTACK_ANSWERED_WITHIN
+}
+
+/// Whether an answer from the server about the things in `about` is the
+/// answer to the server walk `walk`: a refusal or a UseDone for what the
+/// walk is for. A refused inventory action is about the item it names
+/// and whatever holds it; a UseDone is about `used`, what the last use
+/// was sent for. ACE walks to a portal's place rather than to the
+/// portal, so a walk to a place is for `used` too.
+///
+/// A charge at `attacked` is never answered this way: AttackDone or a
+/// motion ends it (see [`attack_ended_walk`]). Any answer at all used to
+/// do. +Verity's in-fight buffing asked for her wand every second and a
+/// half and was refused every time, and each refusal counted as the
+/// answer to whichever charge was under way: once within a metre of the
+/// creature she took the controls back, ran off towards her own goal
+/// and was told "You charged too far".
+fn answers_walk(
+    walk: Option<ac_world::object::MoveTarget>,
+    about: &[u32],
+    used: Option<u32>,
+    attacked: Option<u32>,
+) -> bool {
+    let walked_for = match walk {
+        Some(ac_world::object::MoveTarget::Object(g)) => Some(g),
+        Some(ac_world::object::MoveTarget::Position { .. }) => used,
+        None => None,
+    };
+    walked_for.is_some_and(|g| Some(g) != attacked && about.contains(&g))
+}
+
+/// Whether a refused inventory action naming `item` is the answer to
+/// the pour the tidying has out, rather than an answer to anything else.
+///
+/// A pour is two stacks already in the pack, so its refusal is never
+/// about a walk: a walk is for something out in the world. It has to be
+/// said, though, because a looted stack keeps the guid it was fetched
+/// under -- so the refusal of a pour of that stack looks exactly like
+/// the refusal of the pickup the character is still walking for, and
+/// taking the controls back on it stopped the walk a stride in (see
+/// [`answers_walk`]).
+///
+/// Only while the pour is still in the air. The settler is housekeeping
+/// and housekeeping does not run with autoplay off, or while the
+/// character is dodging, dying or in the Academy -- so a pour sent a
+/// moment before any of those stays recorded for as long as the
+/// character stands there, and without this it went on claiming every
+/// refusal those two guids were ever named in. [`pack::POUR_LOST`] is
+/// the same wall the settler gives up at.
+fn answers_a_pour(pour: Option<&(pack::PourSent, Instant)>, item: u32, now: Instant) -> bool {
+    pour.is_some_and(|(p, at)| {
+        now.saturating_duration_since(*at) < pack::POUR_LOST
+            && (p.merge.from == item || p.merge.to == item)
+    })
+}
 pub mod logoff;
 pub use logoff::{log_off_all, LOG_OFF_WAIT};
 // Getting somewhere is its own system now (`ac-nav`), with the world
@@ -318,9 +391,14 @@ pub struct Client {
     /// reports us idle again.
     pub move_to: Option<ac_world::object::MoveTarget>,
     pub move_to_since: Instant,
-    /// The server has answered something (UseDone, a refused pickup)
-    /// since it sent the walk under way (see [`server_walk_over`]).
+    /// The server has answered what the walk under way is for (a UseDone,
+    /// a refused pickup) since it sent the walk (see [`server_walk_over`]
+    /// and [`answers_walk`]).
     move_to_answered: bool,
+    /// What the last use or pickup of something in the world was sent
+    /// for, until a cast is sent: what a UseDone can be the answer to
+    /// (see [`answers_walk`]).
+    last_used: Option<u32>,
     /// Whether the run key was held on the last tick: what a stop
     /// reported ahead of a use says, so the next report agrees with it.
     held_run: bool,
@@ -387,6 +465,13 @@ pub struct Client {
     attacked: Option<u32>,
     pub last_attack: Instant,
     pub attack_backoff: Duration,
+    /// Something in the rules wants the character's hands -- a weapon
+    /// swapped, a wand taken up -- and is waiting for the attack in
+    /// flight to be answered. It books the tick after that answer, so
+    /// that the change gets its turn: the client swings again the moment
+    /// AttackDone arrives, and without the booking the wait never ends
+    /// (see [`Client::mid_attack`]).
+    wants_the_hands: bool,
     /// Name of the last creature we attacked (its corpse is what we loot).
     pub last_target_name: String,
     pub sound_tables:
@@ -546,6 +631,7 @@ impl Client {
             move_to: None,
             move_to_since: Instant::now(),
             move_to_answered: false,
+            last_used: None,
             held_run: false,
             move_refused: std::collections::HashMap::new(),
             use_done: None,
@@ -570,6 +656,7 @@ impl Client {
             attacked: None,
             last_attack: Instant::now(),
             attack_backoff: Duration::from_millis(300),
+            wants_the_hands: false,
             last_target_name: String::new(),
             sound_tables: Default::default(),
             waves: Default::default(),
@@ -1047,19 +1134,51 @@ impl Client {
                                     // item; it is about the take in flight
                                     // (see `autoplay::refused_item`).
                                     let inflight = self.loot_inflight.map(|(g, _)| g);
-                                    if let Some(item) =
-                                        crate::autoplay::refused_item(item, err, inflight)
-                                    {
+                                    let refused =
+                                        crate::autoplay::refused_item(item, err, inflight);
+                                    // What the refusal is about: the item,
+                                    // and whatever holds it (a take from a
+                                    // corpse walks to the corpse).
+                                    let about: Vec<u32> = [Some(item), refused]
+                                        .into_iter()
+                                        .flatten()
+                                        .flat_map(|g| {
+                                            [
+                                                Some(g),
+                                                self.world
+                                                    .objects
+                                                    .get(&g)
+                                                    .and_then(|o| o.container),
+                                            ]
+                                        })
+                                        .flatten()
+                                        .collect();
+                                    if let Some(item) = refused {
                                         self.move_refused.insert(item, (err, Instant::now()));
                                         if inflight == Some(item) {
                                             self.loot_inflight = None;
                                         }
                                         self.loot_refused(item, err);
                                     }
+                                    if self.autoplay.wield_asked == Some(item) {
+                                        self.hold_off_wield(item, now);
+                                    }
+                                    let for_a_pour =
+                                        answers_a_pour(self.autoplay.pour.as_ref(), item, now);
                                     // A pickup the server walked us to
                                     // for, refused: an answer like a
                                     // UseDone (see `server_walk_over`).
-                                    if self.move_to.is_some() {
+                                    // Only that pickup's, though: a wield
+                                    // refused mid-charge is no answer to
+                                    // the charge.
+                                    if !for_a_pour
+                                        && answers_walk(
+                                            self.move_to,
+                                            &about,
+                                            self.last_used,
+                                            self.attacked,
+                                        )
+                                    {
                                         self.move_to_answered = true;
                                     }
                                 } else if ev == ac_net::messages::event::USE_DONE && rest.len() >= 4
@@ -1095,7 +1214,11 @@ impl Client {
                                     // is not carried on when the walk for
                                     // it runs out (see `visit`).
                                     self.visits.answered();
-                                    // Only a refusal ends the walk.
+                                    // Only a refusal ends the walk, and
+                                    // only a refusal of what the walk is
+                                    // for: a cast turned away as too busy
+                                    // mid-charge is no reason to take the
+                                    // controls back (see `answers_walk`).
                                     //
                                     // The server answers a use of
                                     // something out of reach by telling
@@ -1110,13 +1233,19 @@ impl Client {
                                     // from a merchant, saying it was
                                     // walking to it. Arriving is what
                                     // ends the walk.
-                                    if err != 0 {
+                                    let for_the_walk = answers_walk(
+                                        self.move_to,
+                                        self.last_used.as_slice(),
+                                        self.last_used,
+                                        self.attacked,
+                                    );
+                                    if for_the_walk && err != 0 {
                                         self.move_to = None;
                                     }
                                     // Once there, though, the answer is
                                     // the last word on the walk (see
                                     // `server_walk_over`).
-                                    if self.move_to.is_some() {
+                                    if for_the_walk && self.move_to.is_some() {
                                         self.move_to_answered = true;
                                     }
                                 } else if ev == ac_net::messages::event::SET_TURBINE_CHAT_CHANNELS
@@ -1981,6 +2110,7 @@ impl Client {
             // "use selected" key (`use_object`) reads or activates it in
             // place instead.
             tracing::info!("pick up {name} ({guid:#010x})");
+            self.last_used = Some(guid);
             w.u32(guid).u32(me.unwrap_or(0)).u32(0);
             self.session
                 .send_action(action::PUT_ITEM_IN_CONTAINER, &w.finish());
@@ -1999,6 +2129,7 @@ impl Client {
                 // What a server walk that runs out was walking to.
                 self.visits.used(guid, Instant::now());
             }
+            self.last_used = Some(guid);
             self.session.send_action(action::USE, &guid.to_le_bytes());
         }
     }
@@ -2051,6 +2182,8 @@ impl Client {
         } else {
             None
         };
+        // The next UseDone is the cast's, not the answer to a use.
+        self.last_used = None;
         match target {
             Some(t) => {
                 tracing::info!("cast {name} ({spell}) on {t:#010x}");
@@ -2183,6 +2316,24 @@ impl Client {
             && self.move_to.is_none()
             && self.last_attack.elapsed() > self.attack_backoff
         {
+            // A change of hands has been waiting for this attack to be
+            // answered, and this is the gap between two swings it was
+            // waiting for (see [`Client::wait_for_the_swing`]). It has
+            // this tick; the next swing goes out on the one after. One
+            // tick only, so nothing can hold the character's sword arm.
+            if std::mem::take(&mut self.wants_the_hands) {
+                return;
+            }
+            // And a swap already under way holds the swing until it
+            // lands: between the put and the wield the hands are empty,
+            // and a swing sent into that gap is a punch. The picker
+            // asks this before it joins a fight; the fight it is
+            // already in comes back through here, so it asks too.
+            // Bounded by SWAP_SETTLES, so a swap that never lands
+            // cannot stop the character fighting.
+            if self.hands_changing(Instant::now()) {
+                return;
+            }
             self.attack(target);
         }
     }
@@ -2290,6 +2441,8 @@ impl Client {
     }
 
     /// Wield a carried item by guid, in whatever slot it goes in.
+    /// Nothing is sent for an item the server has lately refused to
+    /// wield (see [`Client::wield_held_off`]).
     pub fn wield_guid(&mut self, guid: u32) -> bool {
         use ac_net::messages::action;
         let Some(locations) = self
@@ -2301,11 +2454,26 @@ impl Client {
         else {
             return false;
         };
+        if self.wield_held_off(guid) {
+            return false;
+        }
         let mut w = ac_net::wire::Writer::new();
         w.u32(guid).u32(locations);
         self.session
             .send_action(action::GET_AND_WIELD_ITEM, &w.finish());
+        self.autoplay.wield_asked = Some(guid);
         true
+    }
+
+    /// Whether this item is inside the wait a refused wield earned it.
+    ///
+    /// The server refuses a wield it will not make with no error code
+    /// at all, so there is nothing to read in the refusal and nothing to
+    /// do but wait and try again later. Without this the buff pass asked
+    /// for +Verity's Training Wand a hundred and fifty times in a
+    /// minute, and was refused every one of them.
+    pub fn wield_held_off(&self, guid: u32) -> bool {
+        self.autoplay.wield_refused.held(&guid, Instant::now())
     }
 
     /// The arrows, bolts or quarrels wielded, if any. A bow shoots
@@ -2347,6 +2515,30 @@ impl Client {
 }
 
 impl Client {
+    /// Whether a swing or a charge is out and unanswered (see
+    /// [`attack_unanswered`]). While one is, the rules leave the
+    /// character's hands and its combat mode alone: every one of those
+    /// changes cancels the attack in flight.
+    ///
+    /// The few changes worth a cancelled attack say so themselves --
+    /// dropping to peace to loot a body, fleeing, coming back from a
+    /// death -- and they do not ask.
+    pub fn mid_attack(&self) -> bool {
+        attack_unanswered(self.attack_pending, self.last_attack, Instant::now())
+    }
+
+    /// Book the gap after the swing in flight for whatever wanted the
+    /// character's hands and found them busy.
+    ///
+    /// Without this the wait would never end: the client swings again
+    /// the moment AttackDone arrives, so the rules would find an attack
+    /// in flight every time they looked. Booked, the next swing is held
+    /// back one tick and the change goes in between two of them, which
+    /// is where the server wanted it all along.
+    pub fn wait_for_the_swing(&mut self) {
+        self.wants_the_hands = true;
+    }
+
     /// The way this character fights right now, which is decided by
     /// what is in its hands and by nothing else: a wand, orb or staff
     /// means magic, a bow, crossbow or thrown weapon means missile, and
@@ -2399,12 +2591,6 @@ impl Client {
         if self.combat_stance() == want {
             return false;
         }
-        // The server will not put a bow in the hands that hold a wand:
-        // whatever weapon is held goes back in the pack first, and the
-        // new one is wielded on a later tick once it is there.
-        if self.put_weapons_away() {
-            return true;
-        }
         let mask = match want {
             Stance::Magic => item_type::CASTER,
             Stance::Missile => item_type::MISSILE_WEAPON,
@@ -2426,11 +2612,44 @@ impl Client {
         else {
             return false;
         };
+        if self.wield_held_off(guid) {
+            return false;
+        }
+        // The server will not put a bow in the hands that hold a wand:
+        // whatever weapon is held goes back in the pack first, and the
+        // new one is wielded on a later tick once it is there.
+        let mut sent = self.put_weapons_away();
+        // Nor will it put a wand in the hand of a character whose off
+        // hand holds a shield -- it refuses the wield outright, with no
+        // error to read. The shield comes off with the weapon, the way
+        // the arming code already does it.
+        let free_offhand = self
+            .stats_of(guid)
+            .is_some_and(|i| crate::weapons::needs_free_offhand(&i));
+        if free_offhand {
+            if let (Some(me), Some(shield)) = (self.world.player_guid, self.wielded_shield()) {
+                sent |= self.put_in_container(shield, me);
+            }
+        }
+        // When the swap started, so the fight waits for the hands to
+        // settle rather than swinging into the moment they are empty
+        // (see `Client::hands_changing`). The arming code stamps this
+        // for its own swaps; without it here, every swap the buff pass
+        // and the softening start was invisible to the fight, which is
+        // how +Verity came to punch a Spikey Armoredillo.
+        self.autoplay.last_rewield = Some(Instant::now());
+        if sent {
+            // Taken up by the housekeeping the moment the hands are
+            // empty, rather than whenever the caller next happens to ask.
+            self.autoplay.pending_wield = Some(guid);
+            return true;
+        }
         tracing::info!("wielding {name} to fight {}", want.label());
         let mut w = ac_net::wire::Writer::new();
         w.u32(guid).u32(locations);
         self.session
             .send_action(action::GET_AND_WIELD_ITEM, &w.finish());
+        self.autoplay.wield_asked = Some(guid);
         true
     }
 
@@ -2557,6 +2776,7 @@ impl Client {
             return false;
         };
         tracing::info!("use {} ({guid:#010x}) in place", o.name);
+        self.last_used = Some(guid);
         self.session
             .send_action(ac_net::messages::action::USE, &guid.to_le_bytes());
         true
@@ -2578,6 +2798,7 @@ impl Client {
             return false;
         }
         tracing::info!("pick up {} ({guid:#010x})", o.name);
+        self.last_used = Some(guid);
         let mut w = ac_net::wire::Writer::new();
         w.u32(guid).u32(me).u32(0);
         self.session
@@ -2711,6 +2932,12 @@ impl Client {
             .map(|c| c.name.clone())
             .unwrap_or_else(|| "pack".into());
         tracing::info!("put {name} ({item:#010x}) in {target} ({container:#010x})");
+        // Whatever the server says about this item now is about the put,
+        // not about some earlier ask to wield it: a refused put must not
+        // be counted against the wield (see `Client::hold_off_wield`).
+        if self.autoplay.wield_asked == Some(item) {
+            self.autoplay.wield_asked = None;
+        }
         let mut w = ac_net::wire::Writer::new();
         w.u32(item).u32(container).u32(0);
         self.session
@@ -3011,11 +3238,28 @@ impl Client {
         true
     }
 
-    /// Merge a carried stack into another of the same kind
-    /// (StackableMerge 0x0054: from, to, amount; the whole source when
-    /// `amount` is None). The server caps at the target's maximum stack
-    /// and leaves the rest in the source.
+    /// Merge a carried stack into another of the same kind, and settle
+    /// what the surviving stack was taken for.
+    ///
+    /// This is the way in for anything that asks for a merge and does
+    /// not follow it up: a panel's drag, a script, the shopping. The
+    /// rules' own tidying sends it with [`Self::send_merge`] and settles
+    /// the ledger when the server says the pour landed, since a refused
+    /// pour settles nothing.
     pub fn merge_stacks(&mut self, from: u32, to: u32, amount: Option<u32>) -> bool {
+        if !self.send_merge(from, to, amount) {
+            return false;
+        }
+        // While both entries are still there to read: the source's goes
+        // when the thing itself does.
+        self.autoplay.ledger.merged(from, to);
+        true
+    }
+
+    /// The merge itself (StackableMerge 0x0054: from, to, amount; the
+    /// whole source when `amount` is None). The server caps at the
+    /// target's maximum stack and leaves the rest in the source.
+    pub(crate) fn send_merge(&mut self, from: u32, to: u32, amount: Option<u32>) -> bool {
         use ac_net::messages::action;
         let me = self.world.player_guid;
         let (Some(a), Some(b)) = (self.world.objects.get(&from), self.world.objects.get(&to))
@@ -3044,9 +3288,6 @@ impl Client {
             amount,
             a.name
         );
-        // Settle what the surviving stack was taken for before the two
-        // become one, while both entries are still there to read.
-        self.autoplay.ledger.merged(from, to);
         let mut w = ac_net::wire::Writer::new();
         w.u32(from).u32(to).i32(amount as i32);
         self.session
@@ -3549,6 +3790,7 @@ impl Client {
             .map(|t| t.name.clone())
             .unwrap_or_default();
         tracing::info!("use {what} ({item:#010x}) on {who} ({target:#010x})");
+        self.last_used = Some(target);
         let mut w = ac_net::wire::Writer::new();
         w.u32(item).u32(target);
         self.session
@@ -4146,9 +4388,11 @@ mod tests {
             )
         }
 
-        /// What the client does with a UseDone (or a refused pickup).
-        fn answer(&mut self) {
-            if self.walk.is_some() {
+        /// What the client does with a UseDone or a refused inventory
+        /// action about `about`: `used` is what the last use was sent
+        /// for, and `attacked` what the last attack went at.
+        fn answer(&mut self, about: &[u32], used: Option<u32>, attacked: Option<u32>) {
+            if answers_walk(self.walk, about, used, attacked) {
                 self.answered = true;
             }
         }
@@ -4198,7 +4442,7 @@ mod tests {
         let under = glam::Vec3::new(39.4, -18.2, -3.0);
 
         // An answer before any walk is not an answer to one.
-        w.answer();
+        w.answer(&[CORPSE], Some(CORPSE), None);
         assert!(!w.answered);
         assert!(matches!(
             w.hear(&walk_to_corpse(), t0),
@@ -4212,7 +4456,7 @@ mod tests {
 
         // Answered on the way (a double-click sent again has the first one
         // answered): letting go here stopped the character a stride in.
-        w.answer();
+        w.answer(&[CORPSE], Some(CORPSE), None);
         assert!(!server_walk_over(w.walk, goal, far, w.answered));
         // Nor under its floor.
         assert!(!server_walk_over(w.walk, goal, under, w.answered));
@@ -4261,5 +4505,154 @@ mod tests {
         assert!(!attack_ended_walk(Some(place), Some(DRUDGE)));
         assert!(!attack_ended_walk(w.walk, None));
         assert!(!attack_ended_walk(None, Some(DRUDGE)));
+    }
+
+    #[test]
+    fn nothing_is_wielded_while_an_attack_is_unanswered() {
+        // Every "Action cancelled" in run18 and run20 follows a change of
+        // the character's own hands within a fraction of a second: the
+        // buff pass reaching for a wand, the arming taking the mace back,
+        // peace mode for a corpse. ACE turns each into a cancelled attack.
+        let sent = Instant::now();
+        assert!(attack_unanswered(true, sent, sent));
+        assert!(attack_unanswered(
+            true,
+            sent,
+            sent + Duration::from_millis(1500)
+        ));
+
+        // Answered: the gap between two swings, and the hands are the
+        // character's own again.
+        assert!(!attack_unanswered(
+            false,
+            sent,
+            sent + Duration::from_millis(1500)
+        ));
+
+        // An answer that never came does not hold the hands for the
+        // session: one lost AttackDone must not leave a character unable
+        // to change weapon for as long as it stays logged in.
+        assert!(!attack_unanswered(
+            true,
+            sent,
+            sent + ATTACK_ANSWERED_WITHIN
+        ));
+    }
+
+    #[test]
+    fn a_refused_wield_mid_charge_does_not_end_the_charge() {
+        // +Verity (run18) charged a Drudge Slave while her buffing asked
+        // for the Training Wand every second and a half and was refused
+        // each time. Each refusal was taken for the charge's answer: a
+        // metre from the drudge she took the controls back, ran for her
+        // own goal, and was told "You charged too far".
+        use ac_world::object::MoveTarget;
+        const WAND: u32 = 0x8000_00C3;
+        const PYREAL: u32 = 0x8000_3421;
+        const PORTAL: u32 = 0x7000_0101;
+        let t0 = Instant::now();
+        let mut w = Walking::new(t0);
+        let drudge = glam::Vec3::new(80.0, -36.0, 0.0);
+        let there = glam::Vec3::new(79.6, -36.2, 0.0);
+        assert!(matches!(
+            w.hear(&charge_at_drudge(), t0),
+            ServerWalk::Began(_)
+        ));
+
+        // The wand refused: about the wand, and the pack it is in.
+        w.answer(&[WAND, ME], Some(CORPSE), Some(DRUDGE));
+        // A cast's UseDone: the cast cleared what was used.
+        w.answer(&[], None, Some(DRUDGE));
+        // Nor the answer to a use of the last corpse.
+        w.answer(&[CORPSE], Some(CORPSE), Some(DRUDGE));
+        // Nor anything about the creature itself: AttackDone or a motion
+        // ends a charge.
+        w.answer(&[DRUDGE], Some(DRUDGE), Some(DRUDGE));
+        assert!(!w.answered);
+        assert!(!server_walk_over(
+            w.walk,
+            Some((drudge, 1.0)),
+            there,
+            w.answered
+        ));
+        assert!(attack_ended_walk(w.walk, Some(DRUDGE)));
+
+        // What a walk for a use does take as its answer: the corpse's own
+        // UseDone, with a fight going on or not.
+        let to_corpse = Some(MoveTarget::Object(CORPSE));
+        assert!(answers_walk(
+            to_corpse,
+            &[CORPSE],
+            Some(CORPSE),
+            Some(DRUDGE)
+        ));
+        // A take from it refused, which names the item the corpse holds.
+        assert!(answers_walk(to_corpse, &[PYREAL, CORPSE], None, None));
+        // A loose item walked to for a pickup, refused.
+        let to_pyreal = Some(MoveTarget::Object(PYREAL));
+        assert!(answers_walk(to_pyreal, &[PYREAL], Some(PYREAL), None));
+        // Not the wand refused on the way there.
+        assert!(!answers_walk(to_corpse, &[WAND, ME], Some(CORPSE), None));
+        // ACE walks to a portal's place: the use sent is what it is for.
+        let to_portal = Some(MoveTarget::Position {
+            cell: 0x01F6_027B,
+            local: glam::Vec3::new(80.0, -36.0, 0.0),
+        });
+        assert!(answers_walk(to_portal, &[PORTAL], Some(PORTAL), None));
+        assert!(!answers_walk(to_portal, &[WAND, ME], Some(PORTAL), None));
+        assert!(!answers_walk(to_portal, &[], None, None));
+        // No walk, nothing to answer.
+        assert!(!answers_walk(None, &[CORPSE], Some(CORPSE), None));
+    }
+
+    #[test]
+    fn a_pour_refused_on_the_way_is_no_answer_to_the_walk() {
+        // The tidying pours in the gaps between takes, so a refusal can
+        // land in the middle of a walk the server is doing. It is about
+        // two stacks in the pack and nothing else -- but a looted stack
+        // keeps the guid it was fetched under, so the refusal of a pour
+        // of that very stack reads exactly like the refusal of the
+        // pickup still being walked for.
+        use ac_world::object::MoveTarget;
+        const PYREAL: u32 = 0x8000_3421;
+        const MORE_PYREALS: u32 = 0x8000_3422;
+        let pour = pack::PourSent {
+            merge: pack::Merge {
+                from: PYREAL,
+                to: MORE_PYREALS,
+                amount: 5,
+                name: "Pyreal".into(),
+                frees_a_slot: true,
+            },
+            to_before: 40,
+        };
+        let sent = Instant::now();
+        let air = (pour, sent);
+        assert!(answers_a_pour(Some(&air), PYREAL, sent), "the source");
+        assert!(
+            answers_a_pour(Some(&air), MORE_PYREALS, sent),
+            "or the target"
+        );
+        // Anything else is the walk's business, as it always was.
+        assert!(!answers_a_pour(Some(&air), CORPSE, sent));
+        assert!(!answers_a_pour(None, PYREAL, sent));
+        // A pour nobody ever settled -- autoplay switched off a moment
+        // after it went out, so the housekeeping that settles it never
+        // ran again -- stops claiming refusals at the same wall the
+        // settler gives up at. Without this it went on swallowing the
+        // answers to server walks for those two stacks for as long as
+        // the character stood there.
+        let later = sent + pack::POUR_LOST;
+        assert!(!answers_a_pour(Some(&air), PYREAL, later));
+        assert!(!answers_a_pour(Some(&air), MORE_PYREALS, later));
+        assert!(answers_a_pour(
+            Some(&air),
+            PYREAL,
+            sent + pack::POUR_LOST - std::time::Duration::from_millis(1)
+        ));
+        // Without the guard, the walk to fetch the stack would take its
+        // own loot's pour refusal for the pickup's answer.
+        let to_pyreal = Some(MoveTarget::Object(PYREAL));
+        assert!(answers_walk(to_pyreal, &[PYREAL, ME], None, None));
     }
 }

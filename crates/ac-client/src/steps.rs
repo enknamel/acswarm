@@ -24,7 +24,8 @@
 //!   be made to exactly them.
 //!
 //! [`Housekeeping`] is neither: a handful of things that run every tick
-//! and never claim it.
+//! and never claim it -- a weapon into an empty hand, a quiver
+//! restocked, loose stacks poured together.
 
 use crate::did::Did;
 use crate::Client;
@@ -98,6 +99,14 @@ fn by_place(_: &Client, _: Instant) -> f32 {
     UNDECIDED
 }
 
+/// The scorer for a row that is no longer a goal: worth nothing, so it
+/// is never weighed and never run. The row stays where it is because
+/// every other goal's worth is its place in this table, and taking a
+/// row out moves all of them.
+fn not_weighed(_: &Client, _: Instant) -> f32 {
+    0.0
+}
+
 /// What looting is worth: nothing at all when there is no body, its
 /// usual place while the body will keep, and more than the next fight
 /// once it will not.
@@ -149,12 +158,16 @@ fn worth_fighting(client: &Client, _now: Instant) -> f32 {
     if client.waits_for_a_corpse() {
         return fight_worth(false, true, 0.0);
     }
+    // A critter at the character's feet is no fight in reach: the fight
+    // rules will walk past it, and reading it as one held the loot back.
+    let fight = &client.autoplay.config.fight;
     let nearest = client
         .world
         .objects
         .values()
         .filter(|o| o.item_type & ac_world::item_type::CREATURE != 0)
         .filter(|o| o.health.unwrap_or(0.0) > 0.0)
+        .filter(|o| !client.a_critter(o, fight))
         .filter_map(|o| o.world_pos())
         .map(|at| at.distance(me))
         .fold(f32::MAX, f32::min);
@@ -430,9 +443,12 @@ pub const STEPS: &[Step] = &[
     Step {
         name: "tidy",
         layer: Layer::Goal,
-        why: "before anything decides the pack is full: a pack full of change does not need emptying in town",
-        worth: by_place,
-        run: claimed!(Client::autoplay_tidy),
+        why: "holds tidy's old place so no goal's worth moves; the pack is tidied every tick as housekeeping, which needs no tick of its own",
+        // Never weighed, so never run: every other goal's worth is its
+        // place in this table, and taking the row out would move six of
+        // them against the fixed scores that some goals do give.
+        worth: not_weighed,
+        run: |_, _| Did::Done,
     },
     Step {
         name: "explore",
@@ -484,6 +500,16 @@ pub const HOUSEKEEPING: &[Housekeeping] = &[
     Housekeeping {
         name: "claim the summoned creature's kills",
         run: Client::autoplay_claim_pet_kills,
+    },
+    Housekeeping {
+        name: "tidy the pack",
+        // A pour of one carried stack into another is made on the spot:
+        // no walk, no animation, nothing the server calls being busy.
+        // So it costs no tick, and as a goal it never got one -- a
+        // character that fights, loots and walks all afternoon is never
+        // idle, and the pack filled with part stacks while tidying
+        // waited its turn.
+        run: Client::autoplay_tidy,
     },
 ];
 
@@ -605,6 +631,43 @@ mod tests {
 
         // And the last word is the one that finds something to do.
         assert_eq!(STEPS.last().map(|s| s.name), Some("grow"));
+    }
+
+    #[test]
+    fn the_pack_is_tidied_as_housekeeping_and_never_claims_a_tick() {
+        // Pouring one carried stack into another is made by the server
+        // on the spot, so it costs no tick -- and as a goal it never
+        // won one, because a character that fights, loots and walks has
+        // no quiet tick to give it.
+        assert!(
+            HOUSEKEEPING.iter().any(|h| h.name == "tidy the pack"),
+            "tidying is housekeeping now"
+        );
+        let tidy = named("tidy").expect("the row is still there");
+        assert!(
+            std::ptr::fn_addr_eq(tidy.worth, not_weighed as fn(&Client, Instant) -> f32),
+            "the row is a placeholder, not a goal"
+        );
+        let at = |name: &str| STEPS.iter().position(|s| s.name == name).expect(name);
+        assert!(at("tidy") < at("grow"), "and it keeps its old place");
+    }
+
+    #[test]
+    fn every_goal_keeps_the_worth_it_had_when_tidying_moved() {
+        // The reason the row stays: every goal with no opinion is worth
+        // its place in this table, and six of them are weighed against
+        // fixed scores. Taking a row out shifts all of them.
+        let base = |name: &str| {
+            let place = STEPS.iter().position(|s| s.name == name).expect(name);
+            (STEPS.len() - place) as f32 * BY_PLACE
+        };
+        assert_eq!(STEPS.len(), 19);
+        assert_eq!(base("fight"), 80.0);
+        assert_eq!(base("summon"), 90.0);
+        assert_eq!(base("keep to the area"), 70.0);
+        assert_eq!(base("buffs"), 60.0);
+        assert_eq!(base("follow"), 50.0);
+        assert_eq!(base("resume the journey"), 40.0);
     }
 
     #[test]

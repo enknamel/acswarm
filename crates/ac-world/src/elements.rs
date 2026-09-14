@@ -29,6 +29,11 @@
 //! Between the two, [`best_spell`] answers the question that matters
 //! while fighting: of the spells I am willing to throw, which one hurts
 //! this thing most?
+//!
+//! The same table also carries two figures about whether a creature is
+//! worth fighting at all: its [`tolerance`], the server's flags for when
+//! it will attack, and its level. A Rabbit and a Revenant both stand
+//! there until they are hit; only the level tells them apart.
 
 use std::sync::OnceLock;
 
@@ -151,9 +156,46 @@ pub struct Creature {
     /// hurt more; 0 means immune. `None` where the creature has no
     /// figure for that element at all.
     pub takes: [Option<f32>; 8],
+    /// When the server lets this creature attack: the [`tolerance`]
+    /// flags. 0, the common case, is something that attacks whatever
+    /// walks past.
+    pub tolerance: u32,
+    /// What killing it is worth, `None` when it has no level at all.
+    pub level: Option<u32>,
+}
+
+/// The flags in a creature's tolerance, which say when the server lets
+/// it attack. A creature with any of these set never starts a fight
+/// with the character: it stands there until it is hit.
+///
+/// The names and values are the server's own. Bits 4, 16 and 32 exist
+/// too (unused, unused, and "only fight back at the first attacker"),
+/// and none of them stops a creature coming at the character, so they
+/// are not here.
+pub mod tolerance {
+    /// Never attacks anything.
+    pub const NO_ATTACK: u32 = 1;
+    /// Attacks once appraised or attacked.
+    pub const APPRAISE: u32 = 2;
+    /// Attacks once provoked.
+    pub const PROVOKE: u32 = 8;
+    /// Only fights back.
+    pub const RETALIATE: u32 = 64;
+    /// Only ever attacks other monsters, never a player.
+    pub const MONSTER: u32 = 128;
+
+    /// Every flag that means the creature leaves the character alone.
+    pub const PASSIVE: u32 = NO_ATTACK | APPRAISE | PROVOKE | RETALIATE | MONSTER;
 }
 
 impl Creature {
+    /// Whether this creature leaves a passer-by alone: a Rabbit, a
+    /// Chicken, a Sparring Golem. A Revenant is passive too, so this on
+    /// its own is not a reason to walk past something.
+    pub fn passive(&self) -> bool {
+        self.tolerance & tolerance::PASSIVE != 0
+    }
+
     /// How much damage this creature takes from `element`, or 1.0 when
     /// nothing is recorded (the neutral figure the game itself uses).
     pub fn takes_from(&self, element: Element) -> f32 {
@@ -190,11 +232,19 @@ fn parse_creatures(text: &str) -> Vec<Creature> {
         for slot in takes.iter_mut() {
             *slot = f.next().and_then(|v| v.trim().parse::<f32>().ok());
         }
+        // Both appended after the eight elements, so a row written
+        // before they existed still reads: no tolerance is a creature
+        // that attacks whatever comes near, and no level is one whose
+        // level nothing here knows.
+        let tolerance = f.next().and_then(|v| v.trim().parse::<u32>().ok());
+        let level = f.next().and_then(|v| v.trim().parse::<u32>().ok());
         out.push(Creature {
             wcid,
             name: name.replace(';', ","),
             health,
             takes,
+            tolerance: tolerance.unwrap_or(0),
+            level,
         });
     }
     out.sort_by_key(|c| c.wcid);
@@ -401,6 +451,37 @@ mod tests {
             Some(73)
         );
         assert_eq!(best_spell(196, "Ice Golem", &[]), None);
+    }
+
+    #[test]
+    fn what_will_not_start_a_fight_is_known_per_weenie() {
+        // Two Chickens, and only one of them waits to be hit: the
+        // tolerance is the weenie's, never the name's.
+        let quiet = creature_by_id(24937).expect("Chicken 24937");
+        assert_eq!(quiet.tolerance, tolerance::RETALIATE);
+        assert_eq!(quiet.level, Some(4));
+        assert!(quiet.passive());
+        let cross = creature_by_id(35499).expect("Chicken 35499");
+        assert_eq!(cross.tolerance, 0);
+        assert_eq!(cross.level, Some(8));
+        assert!(!cross.passive(), "tolerance 0 attacks whatever comes near");
+        // A Rabbit is the same shape as a Chicken, and so is a Revenant
+        // at sixty levels more: passive is not on its own an answer.
+        let rabbit = creature_by_id(2567).expect("Brown Rabbit");
+        assert!(rabbit.passive() && rabbit.level == Some(4));
+        let revenant = creature_by_id(8592).expect("Revenant");
+        assert!(revenant.passive() && revenant.level == Some(61));
+        // Appraise and Monster count as passive too.
+        let tusker = creature_by_id(8544).expect("Silver Tusker");
+        assert_eq!(tusker.tolerance, tolerance::APPRAISE);
+        assert!(tusker.passive() && tusker.level == Some(120));
+        let shadow = creature_by_id(72836).expect("Panumbris Shadow");
+        assert_eq!(shadow.tolerance, tolerance::MONSTER);
+        assert!(shadow.passive() && shadow.level == Some(240));
+        // And the columns did not disturb the ones before them.
+        let ice = creature_by_id(196).expect("Ice Golem");
+        assert_eq!(ice.health, 95);
+        assert_eq!(ice.takes_from(Element::Cold), 0.0);
     }
 
     #[test]

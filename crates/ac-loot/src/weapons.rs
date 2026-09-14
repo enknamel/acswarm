@@ -464,6 +464,18 @@ fn reason(item: &ItemStats, target: Option<&Creature>) -> String {
     if long_fight && item.imbued & imbue::CRIPPLING_BLOW != 0 {
         parts.push("crippling blow".into());
     }
+    if parts.is_empty() {
+        // A plain wand deals no element of its own, and a weapon nobody
+        // has looked at has none to read: the pick rests on the
+        // character's skill with it and on nothing else. Said as "()"
+        // in the log, that read like a bug in the choosing rather than
+        // a weapon with nothing to say for itself.
+        return if item.appraised {
+            "no element of its own".into()
+        } else {
+            "not looked at yet".into()
+        };
+    }
     parts.join(", ")
 }
 
@@ -604,6 +616,8 @@ mod tests {
             wcid: 0,
             name: "Firefly".into(),
             health: 500,
+            tolerance: 0,
+            level: None,
             takes: [
                 Some(0.6),
                 Some(1.0),
@@ -786,6 +800,8 @@ mod tests {
             wcid: 0,
             name: "Tough".into(),
             health: 5000,
+            tolerance: 0,
+            level: None,
             takes: [Some(1.0); 8],
         };
         assert!(score(&crit, Some(&tough), &able()) > score(&plain, Some(&tough), &able()));
@@ -918,6 +934,27 @@ mod tests {
     }
 
     #[test]
+    fn a_weapon_with_no_element_still_says_why_it_was_picked() {
+        use ac_world::item_type::CASTER;
+        // "autoplay: wielding Training Wand against Sandy Armoredillo ()"
+        // -- a plain wand deals no element of its own, so there was
+        // nothing to weigh and nothing to say, and the empty brackets
+        // read like a bug in the choosing rather than a plain weapon.
+        let mut wand = weapon(CASTER, 0, 0, 0, 0);
+        wand.name = "Training Wand".into();
+        assert_eq!(reason(&wand, None), "no element of its own");
+
+        // One nobody has appraised has none to read yet, which is a
+        // different thing and worth saying differently.
+        wand.appraised = false;
+        assert_eq!(reason(&wand, None), "not looked at yet");
+
+        // A weapon that does have something to say still says it.
+        let fire = weapon(CASTER, 0, 0, Element::Fire as u32, 0);
+        assert_eq!(reason(&fire, None), "fire");
+    }
+
+    #[test]
     fn a_bow_is_judged_with_its_arrows_and_only_arrows_that_fit() {
         use ac_world::fletching::{ammo_type, combat_use};
         use ac_world::item_type::MISSILE_WEAPON;
@@ -980,6 +1017,8 @@ mod tests {
             wcid: 0,
             name: "Tough".into(),
             health: 5000,
+            tolerance: 0,
+            level: None,
             // Weakest to fire.
             takes: [
                 Some(0.5),

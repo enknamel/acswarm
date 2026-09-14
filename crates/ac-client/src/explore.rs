@@ -89,7 +89,13 @@ impl Client {
         // to the next room hands the steering a nearby goal, and a
         // nearby goal ends the journey outright: that is how a run to
         // town came through the hub and never left it.
-        if self.traveling() {
+        //
+        // Nor is a run to town between journeys an invitation. A corpse on
+        // the way ends the run's journey, and a room chosen then would keep
+        // the tick from the run's own step for good, round every room and
+        // back again: its walk never planned again, its clock never read,
+        // and the character exploring and filling up and never selling.
+        if self.traveling() || self.autoplay.growth.town_run_under_way() {
             return false;
         }
         let assets = self.assets.clone();

@@ -196,6 +196,11 @@ pub struct Travel {
     /// Times the end of a step could not be reached and the journey was
     /// planned again from where the character stood.
     replans: u32,
+    /// The last journey was broken off by something else the character
+    /// went to do -- a corpse to open, a fight, a dodge -- rather than
+    /// arriving, giving up or being cancelled. Cleared when the next one
+    /// sets off (see [`Client::journey_broken_off`]).
+    broken_off: bool,
 }
 
 impl Travel {
@@ -260,6 +265,15 @@ impl Client {
     ///
     /// Asking for movement this way ends any visit being made
     /// (`visit`): whoever asks has taken the character somewhere else.
+    ///
+    /// A walk near at hand ends the journey under way too, but it does not
+    /// break the journey off: following a leader, exploring, going back to
+    /// the hunting area are somewhere else to be, not a detour to come back
+    /// from. What does come back (a corpse, a fight, a use) says so with
+    /// [`interrupt_travel`](Self::interrupt_travel). Counting every walk as
+    /// a break-off had a follower on a party's town run pulled back to its
+    /// leader, its walk to the counter planned again, and pulled back
+    /// again, each time it closed to the following distance.
     pub fn head_for(&mut self, goal: glam::Vec3, stop: f32, why: &str) -> crate::did::Did {
         self.drop_visit(why);
         self.head_toward(goal, stop, why)
@@ -497,6 +511,7 @@ impl Client {
             t0.elapsed()
         );
         self.travel.trip = Some(trip);
+        self.travel.broken_off = false;
         self.travel.step = 0;
         self.travel.route = None;
         self.travel.portal_from = None;
@@ -793,7 +808,18 @@ impl Client {
         if self.traveling() {
             tracing::info!("travel: stopped, {what}");
             self.end_trip();
+            self.travel.broken_off = true;
         }
+    }
+
+    /// Whether the character is between journeys because the last one was
+    /// broken off by something else it went to do: using something, a
+    /// fight, a walk to a corpse. Such a journey was never going to end
+    /// by itself, and whatever set it off can plan it again once the
+    /// character is free. One that arrived, gave up or was cancelled
+    /// answers no.
+    pub(crate) fn journey_broken_off(&self) -> bool {
+        !self.traveling() && self.travel.broken_off
     }
 
     /// Where the journey is going, while one is under way.
@@ -827,6 +853,8 @@ impl Client {
     pub fn cancel_travel(&mut self) {
         self.drop_visit("travel cancelled");
         self.end_trip();
+        // Cancelled is meant: nothing picks this journey up again.
+        self.travel.broken_off = false;
     }
 
     /// End the journey and nothing else: it arrived, it gave up, or it is

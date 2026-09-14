@@ -34,12 +34,19 @@ Three things that grew separately.
 
 **A flattened behaviour tree.** `Client::tick_autoplay` is a fixed
 priority chain -- dodge, survive, recover, academy, buff, vitals, loot,
-follow, team, salvage, fight, buff again, follow again, tidy, explore,
+follow, team, salvage, fight, buff again, follow again, explore,
 grow --
 where each step returns whether it claimed the tick. That is exactly a
 behaviour tree's root selector, written out by hand. It works, and the
 order is genuinely load-bearing, but the order is control flow rather
 than data: nothing can read it, show it, or reason about it.
+
+Tidying the pack is not in the chain. Pouring one carried stack into
+another is made by the server on the spot, with no walk and no
+animation, so it costs no tick and runs as housekeeping. As a step it
+never won one -- a character that fights, loots and walks all afternoon
+has no quiet tick to give it -- and the pack filled up with part stacks
+while tidying waited its turn.
 
 **A group state machine.** `logistics` is a proper FSM over
 `Hunting | Restocking{Shopping, HandOver, Away, HandOut}`, computed by

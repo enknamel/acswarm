@@ -198,12 +198,7 @@ impl Client {
             .player
             .as_ref()
             .is_some_and(|pl| pl.world_position().distance(at) <= DEFEND_REACH);
-        near && self.under_attack()
-            && self
-                .autoplay
-                .hit_by
-                .as_ref()
-                .is_some_and(|(name, _)| *name == o.name)
+        near && self.hit_lately_by(&o.name)
     }
 
     /// Whether the object `guid` may still be fought under the area (see
@@ -224,6 +219,14 @@ impl Client {
             return false;
         };
         if !self.autoplay.config.fight.enabled {
+            return false;
+        }
+        // Nor on a run to town, which leaves the area on purpose. At the
+        // counter, or between journeys once a corpse or a fight on the way
+        // has ended one, a walk back to the area would take the character
+        // off its run, and the run's own step, ranked below this one, would
+        // never see it again.
+        if self.autoplay.growth.town_run_under_way() {
             return false;
         }
         // Never in the middle of a fight: something hitting the character

@@ -299,6 +299,9 @@ struct Run {
     reason: String,
     /// The vendors already called on this run, by position.
     visited: Vec<Vec2>,
+    /// When the walk to this counter was last planned again after
+    /// something broke it off (see [`on_the_way`]).
+    walked_on: Option<Instant>,
 }
 
 /// The running state of the growth rules.
@@ -404,6 +407,27 @@ pub struct State {
     /// What the character was short of when the run began, for the
     /// stops after the first.
     needs: Vec<Need>,
+}
+
+/// Why no stack was poured into another (see `Client::pour_next`).
+///
+/// Four answers rather than one, because the callers do different
+/// things with them: a town run stays where it is while a pour is in
+/// the air, and walks on to the counter when the pack is tight or the
+/// character too laden; the housekeeping says the laden one out loud
+/// once and then leaves the pack alone for a while.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum Unpoured {
+    /// The pack is as tight as it goes.
+    Tight,
+    /// There is something to pour and no room to be handed it. The
+    /// server weighs a pour as though the source were being picked up
+    /// for the first time.
+    Laden,
+    /// The last pour has not been answered yet.
+    Wait(crate::did::Did),
+    /// This pour was turned down, by the server or by our own rules.
+    Turned(crate::did::Did),
 }
 
 /// Something the character is short of.
@@ -608,6 +632,75 @@ fn had_enough(room: u32, left: Option<u32>, sold: u32) -> bool {
 /// left everything else on the bodies.
 fn restocks_as_a_party(team: &crate::autoplay::Team, mates: usize) -> bool {
     team.enabled && team.restock.together && mates > 0
+}
+
+/// Whether a character carrying `carried` is past the point where the
+/// server hands it anything at all: three times its `capacity`, and
+/// weight has nothing to do with it there. A Pyreal weighs nothing, and
+/// +Verity at 36462 of a 7500 capacity walked off her way to town for
+/// one, was told "You are too encumbered to carry that!", and went back
+/// for it twice more. With no capacity known yet nothing is past it.
+fn past_the_wall(carried: u32, capacity: u32) -> bool {
+    capacity > 0 && carried > capacity.saturating_mul(3)
+}
+
+/// How long after one run the next waits: `party_restocking` when the
+/// party has agreed to shop, `futile` when the last run bought and sold
+/// nothing -- which a run that never reached its counter always has.
+fn wait_between_runs(party_restocking: bool, futile: bool) -> Duration {
+    if !party_restocking {
+        RUN_EVERY
+    } else if futile {
+        FUTILE_RUN_WAIT
+    } else {
+        Duration::ZERO
+    }
+}
+
+/// What a run on its way to a counter does with no journey under way.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OnTheWay {
+    /// Near enough to go up to the counter.
+    There,
+    /// Something else broke the journey off and still has the character.
+    Wait,
+    /// Something else broke the journey off and is done: set off again.
+    WalkOn,
+    /// The journey ended by itself short of the counter.
+    Short,
+}
+
+/// How soon after planning the walk to the counter again a run may plan
+/// it once more (see [`on_the_way`]).
+const WALK_ON_EVERY: Duration = Duration::from_secs(5);
+
+/// What a run `away` metres from its counter does with no journey under
+/// way. `broken_off` says the last journey was ended by something else
+/// the character went to do (see `Client::journey_broken_off`), `busy`
+/// that it is still doing it, and `lately` that the run planned its walk
+/// again less than [`WALK_ON_EVERY`] ago. How long the walk may take is
+/// the run's own clock, and is asked before this.
+///
+/// Any journey not under way used to be one that could not get there.
+/// +Verity set off to sell, a corpse took her a second later -- walking
+/// to one ends a journey -- and the run gave up 224 m short, marked the
+/// counter no use and sold nothing. A walk that ended by itself short of
+/// the counter is still one that cannot get there.
+///
+/// Planning the walk is a route search, and something that ends the walk
+/// as soon as it is planned would have it planned every tick or two until
+/// the run's clock ran out: a follower pulled back to its leader was, each
+/// time it closed to the following distance. So it waits a moment first.
+fn on_the_way(away: f32, broken_off: bool, busy: bool, lately: bool) -> OnTheWay {
+    if away <= VENDOR_REACH {
+        OnTheWay::There
+    } else if !broken_off {
+        OnTheWay::Short
+    } else if busy || lately {
+        OnTheWay::Wait
+    } else {
+        OnTheWay::WalkOn
+    }
 }
 
 /// Something in the pack the rules allow to be sold, before any one
@@ -933,6 +1026,12 @@ impl State {
         self.bound = None;
         self.bound_since = None;
         self.after_out = None;
+    }
+
+    /// Whether a run to town is under way, from setting off to the last
+    /// counter.
+    pub(crate) fn town_run_under_way(&self) -> bool {
+        self.run.is_some()
     }
 }
 
@@ -1789,8 +1888,10 @@ impl Client {
     /// What the character has room for, as a corpse waiting on it sees
     /// it (see `Autoplay::corpse_waiting`).
     pub(crate) fn room_for_loot(&self) -> crate::autoplay::Room {
+        let (carried, capacity) = self.burden();
         crate::autoplay::Room {
             pack_low: self.pack_low_on_room(),
+            past_the_wall: past_the_wall(carried, capacity),
             // Weighed only while a body is waiting on it: what the loot
             // weighs is judged item by item, and this is asked on every
             // tick a corpse lies about.
@@ -2339,6 +2440,159 @@ impl Client {
             .collect()
     }
 
+    /// Read the server's answer to the pour in the air, if there is one.
+    ///
+    /// `None` means there is nothing to wait for: no pour was sent, or
+    /// the one sent is over. `Some(Waiting)` means it is still out
+    /// there and the counts a new choice would be made from are stale.
+    /// Anything else is what the server said about it.
+    pub(crate) fn settle_pour(&mut self, now: Instant) -> Option<crate::did::Did> {
+        use crate::did::{Because, Did};
+        let (sent, at) = self.autoplay.pour.clone()?;
+        let (from, to) = (sent.merge.from, sent.merge.to);
+        let target_now = self.world.objects.get(&to).map(|o| o.stack_size.max(1));
+        let refusal = crate::pack::refusal_of(
+            at,
+            self.move_refused.get(&from).copied(),
+            self.move_refused.get(&to).copied(),
+        );
+        let waited = now.saturating_duration_since(at);
+        match crate::pack::pour_answer(&sent, target_now, refusal, waited) {
+            crate::pack::PourAnswer::InAir => {
+                Some(Did::waiting("the last pour has not landed yet"))
+            }
+            crate::pack::PourAnswer::Landed => {
+                // What the surviving stack was taken for is settled
+                // here rather than when the pour was sent: a refused
+                // pour used to raise the target's tag anyway, so a
+                // stack meant for a counter quietly became one to keep
+                // and was never sold.
+                self.autoplay.ledger.merged(from, to);
+                self.autoplay
+                    .growth
+                    .wont_merge
+                    .note((from, to), &Did::Done, now);
+                self.autoplay.pour = None;
+                tracing::debug!(
+                    "pour landed: {} {} into {to:#010x}",
+                    sent.merge.amount,
+                    sent.merge.name
+                );
+                None
+            }
+            crate::pack::PourAnswer::Refused(code) => {
+                // Spent: the refusal was about this pour, and leaving
+                // it behind would answer the next one too.
+                for g in [from, to] {
+                    if self
+                        .move_refused
+                        .get(&g)
+                        .is_some_and(|(_, when)| *when >= at)
+                    {
+                        self.move_refused.remove(&g);
+                    }
+                }
+                let did = Did::Blocked(match code {
+                    0 => Because::ours("the server would not put those two together"),
+                    code => Because::server(code),
+                });
+                self.autoplay.growth.wont_merge.note((from, to), &did, now);
+                self.autoplay.pour = None;
+                Some(did)
+            }
+            crate::pack::PourAnswer::Lost => {
+                // No word at all. Not a refusal -- the pair is left a
+                // moment and offered again -- but the pack has to be
+                // read afresh before anything else is asked for.
+                self.autoplay.growth.wont_merge.note(
+                    (from, to),
+                    &Did::waiting("no word on the pour"),
+                    now,
+                );
+                self.autoplay.pour = None;
+                None
+            }
+        }
+    }
+
+    /// Choose the next pour, send it, and remember it until the server
+    /// answers ([`Unpoured`] says why one was not sent).
+    ///
+    /// One at a time, because the server answers in its own time and
+    /// the counts a second choice would be made from are the ones from
+    /// before the first. What a pour must not touch is settled here: a
+    /// pair the server has turned down, a stack another errand is
+    /// holding, and weight the server will not hand the character.
+    pub(crate) fn pour_next(&mut self, now: Instant) -> Result<crate::pack::Merge, Unpoured> {
+        use crate::did::Did;
+        // Nothing is chosen over counts the server has not settled.
+        if let Some(did) = self.settle_pour(now) {
+            return Err(match did {
+                Did::Waiting(_) => Unpoured::Wait(did),
+                did => Unpoured::Turned(did),
+            });
+        }
+        let may_carry = self.burden_room();
+        let stacks = self.pack_stacks();
+        let errands = self.autoplay.held_by_an_errand();
+        // A pair the server has turned down waits its turn out, and a
+        // stack another errand is holding is left where it is. Without
+        // the first, one stubborn pair was the only answer ever given
+        // and nothing else in the pack was ever poured.
+        let skip = |from: u32, to: u32| {
+            self.autoplay.growth.wont_merge.held(&(from, to), now)
+                || errands.iter().flatten().any(|g| *g == from || *g == to)
+        };
+        let Some(m) = crate::pack::next_merge_unless(&stacks, may_carry, skip) else {
+            // Nothing to pour -- or nothing light enough. The two are
+            // worth telling apart: one is a tidy pack, the other is a
+            // character that must sell something first. Asked with the
+            // same skips, so a pack whose only pours are held is not
+            // called too laden.
+            return Err(
+                if crate::pack::next_merge_unless(&stacks, u32::MAX, skip).is_some() {
+                    Unpoured::Laden
+                } else {
+                    Unpoured::Tight
+                },
+            );
+        };
+        if self
+            .autoplay
+            .last_merge
+            .is_some_and(|t| now.duration_since(t) < crate::autoplay::MERGE_EVERY)
+        {
+            return Err(Unpoured::Wait(Did::waiting(
+                "the last pour has not landed yet",
+            )));
+        }
+        let to_before = self
+            .world
+            .objects
+            .get(&m.to)
+            .map(|o| o.stack_size.max(1))
+            .unwrap_or(0);
+        self.autoplay.last_merge = Some(now);
+        if !self.send_merge(m.from, m.to, Some(m.amount)) {
+            // Our own rules turned it down: not both carried, not the
+            // same weenie, or the target does not stack at all.
+            let did = Did::refused("those two will never join");
+            self.autoplay
+                .growth
+                .wont_merge
+                .note((m.from, m.to), &did, now);
+            return Err(Unpoured::Turned(did));
+        }
+        self.autoplay.pour = Some((
+            crate::pack::PourSent {
+                merge: m.clone(),
+                to_before,
+            },
+            now,
+        ));
+        Ok(m)
+    }
+
     /// Pour one loose stack into another, and say what came of it.
     ///
     /// `Did::Done` means the pack is as tight as it goes. `Blocked`
@@ -2348,58 +2602,24 @@ impl Client {
     /// refused a move that changes its burden by nothing at all. The
     /// refusal carries no message and no code, which is how a tidier
     /// that could not read it spent whole afternoons asking.
+    ///
+    /// This is the town run's way in, where tidying is the step and is
+    /// worth a status line of its own. Everywhere else the pack is
+    /// tidied as housekeeping (`Client::autoplay_tidy`).
     pub(crate) fn compress(&mut self, now: Instant) -> crate::did::Did {
         use crate::did::{Because, Did};
-        let may_carry = self.burden_room();
-        let stacks = self.pack_stacks();
-        let held = |from: u32, to: u32| self.autoplay.growth.wont_merge.held(&(from, to), now);
-        let Some(m) = crate::pack::next_merge_unless(&stacks, may_carry, held) else {
-            // Nothing to pour -- or nothing light enough. The two are
-            // worth telling apart: one is a tidy pack, the other is a
-            // character that must sell something first.
-            return if crate::pack::next_merge(&stacks).is_some() {
-                Did::Blocked(Because::ours("too laden to put stacks together"))
-            } else {
-                Did::Done
-            };
-        };
-        // What the server made of the last ask. It answers a pour it
-        // will not make with the source's guid and, half the time, no
-        // reason whatever.
-        if let Some((code, _)) = self.move_refused.remove(&m.from) {
-            let did = Did::Blocked(match code {
-                0 => Because::ours("the server would not put those two together"),
-                code => Because::server(code),
-            });
-            self.autoplay
-                .growth
-                .wont_merge
-                .note((m.from, m.to), &did, now);
-            return did;
+        match self.pour_next(now) {
+            Ok(m) => {
+                self.autoplay.say(
+                    Doing::Tidying,
+                    format!("putting {} {} with the rest", m.amount, m.name),
+                );
+                Did::Acting
+            }
+            Err(Unpoured::Tight) => Did::Done,
+            Err(Unpoured::Laden) => Did::Blocked(Because::ours("too laden to put stacks together")),
+            Err(Unpoured::Wait(did) | Unpoured::Turned(did)) => did,
         }
-        if self
-            .autoplay
-            .last_merge
-            .is_some_and(|t| now.duration_since(t) < crate::autoplay::MERGE_EVERY)
-        {
-            return Did::waiting("the last pour has not landed yet");
-        }
-        self.autoplay.last_merge = Some(now);
-        if !self.merge_stacks(m.from, m.to, Some(m.amount)) {
-            // Our own rules turned it down: not both carried, not the
-            // same weenie, or the target does not stack at all.
-            let did = Did::refused("those two will never join");
-            self.autoplay
-                .growth
-                .wont_merge
-                .note((m.from, m.to), &did, now);
-            return did;
-        }
-        self.autoplay.say(
-            Doing::Tidying,
-            format!("putting {} {} with the rest", m.amount, m.name),
-        );
-        Did::Acting
     }
 
     /// Something was handed to the counter and it has not answered
@@ -2711,15 +2931,7 @@ impl Client {
         // the last trip came back with nothing. Without that a party
         // that cannot buy what it needs walks between counters for ever.
         let party_restocking = !self.autoplay.growth.mode.hunting();
-        let wait = if party_restocking {
-            if self.autoplay.growth.run_was_futile {
-                FUTILE_RUN_WAIT
-            } else {
-                Duration::ZERO
-            }
-        } else {
-            RUN_EVERY
-        };
+        let wait = wait_between_runs(party_restocking, self.autoplay.growth.run_was_futile);
         if let Some(t) = self
             .autoplay
             .growth
@@ -2890,6 +3102,7 @@ impl Client {
             sold: 0,
             reason: reason.clone(),
             visited: vec![at],
+            walked_on: None,
         });
         self.autoplay.say(
             Doing::Shopping,
@@ -2963,16 +3176,46 @@ impl Client {
                     self.autoplay.growth.run = Some(run);
                     return true;
                 }
-                if run.at.distance(me) > VENDOR_REACH {
-                    self.autoplay.note(
-                        format!(
-                            "could not get to {} ({:.0} m short)",
-                            run.vendor,
-                            run.at.distance(me)
-                        ),
-                        now,
-                    );
-                    return self.grow_run_next(run, now, cfg, true);
+                // A corpse, a fight or a dodge on the way ends the journey
+                // without it having got anywhere, and the run picks it up
+                // again rather than taking it for a walk that could not.
+                let away = run.at.distance(me);
+                let busy = self.attack_target.is_some() || self.autoplay.casting_at().is_some();
+                let lately = run
+                    .walked_on
+                    .is_some_and(|t| now.duration_since(t) < WALK_ON_EVERY);
+                match on_the_way(away, self.journey_broken_off(), busy, lately) {
+                    OnTheWay::There => {}
+                    OnTheWay::Wait => {
+                        self.autoplay.growth.run = Some(run);
+                        return true;
+                    }
+                    OnTheWay::WalkOn => {
+                        if !self.grow_travel(run.at, now) {
+                            self.autoplay.note(
+                                format!(
+                                    "no way on to {} from here ({away:.0} m short)",
+                                    run.vendor
+                                ),
+                                now,
+                            );
+                            return self.grow_run_next(run, now, cfg, true);
+                        }
+                        self.autoplay.note(
+                            format!("on the way to {} again ({away:.0} m)", run.vendor),
+                            now,
+                        );
+                        run.walked_on = Some(now);
+                        self.autoplay.growth.run = Some(run);
+                        return true;
+                    }
+                    OnTheWay::Short => {
+                        self.autoplay.note(
+                            format!("could not get to {} ({away:.0} m short)", run.vendor),
+                            now,
+                        );
+                        return self.grow_run_next(run, now, cfg, true);
+                    }
                 }
                 match self.vendor_object(&run.vendor, run.at) {
                     Some(guid) => {
@@ -3213,6 +3456,7 @@ impl Client {
                         sold: run.sold,
                         reason: run.reason,
                         visited,
+                        walked_on: None,
                     });
                     return true;
                 }
@@ -3460,6 +3704,246 @@ mod tests {
             ..team
         };
         assert!(!restocks_as_a_party(&off, 3));
+    }
+
+    #[test]
+    fn a_walk_to_a_counter_broken_off_by_a_corpse_is_walked_on() {
+        // +Verity, carrying as much as she meant to, set off for Shopkeeper
+        // Renald the Elder 250 m away. A second later the looting walked
+        // her to a fresh corpse, which ends a journey, and the run found no
+        // journey under way 224 m short: "could not get to", sold nothing.
+        assert_eq!(on_the_way(224.0, true, false, false), OnTheWay::WalkOn);
+        // Not while what broke it off still has her: a fight on the way.
+        assert_eq!(on_the_way(224.0, true, true, false), OnTheWay::Wait);
+        // A journey that ended by itself short of the counter -- it gave
+        // up, or arrived somewhere else -- still could not get there.
+        assert_eq!(on_the_way(224.0, false, false, false), OnTheWay::Short);
+        assert_eq!(on_the_way(224.0, false, true, false), OnTheWay::Short);
+        // Near enough, she goes up to the counter however it ended.
+        for (broken_off, busy) in [(false, false), (true, false), (true, true)] {
+            assert_eq!(
+                on_the_way(VENDOR_REACH, broken_off, busy, false),
+                OnTheWay::There
+            );
+        }
+    }
+
+    #[test]
+    fn a_walk_broken_off_again_as_soon_as_it_is_planned_waits_before_the_next_plan() {
+        // Something that ends the walk to the counter the moment it is
+        // planned -- a follower pulled back to its leader each time it
+        // closed to the following distance -- had it planned again every
+        // tick or two for the run's four minutes, a route search each time.
+        assert_eq!(on_the_way(224.0, true, false, true), OnTheWay::Wait);
+        // Once the moment is up it is planned again.
+        assert_eq!(on_the_way(224.0, true, false, false), OnTheWay::WalkOn);
+        // Neither giving up nor going up to the counter waits on it.
+        assert_eq!(on_the_way(224.0, false, false, true), OnTheWay::Short);
+        assert_eq!(on_the_way(VENDOR_REACH, true, false, true), OnTheWay::There);
+    }
+
+    /// Offline session over the real archives: nothing calls `tick`, so
+    /// no packet is ever sent.
+    fn offline_client(assets: std::rc::Rc<ac_scene::Assets>) -> Client {
+        Client::connect(
+            crate::Config {
+                host: "127.0.0.1:1".into(),
+                account: "acreborn".into(),
+                password: "x".into(),
+                character: None,
+                auto_enter: true,
+            },
+            assets,
+        )
+        .unwrap()
+    }
+
+    /// A character standing in `cell` at `local`, offline, when the
+    /// archives are there to be read.
+    fn standing_at(cell: u32, local: glam::Vec3) -> Option<Client> {
+        let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
+            eprintln!("AC_DATA_DIR unset; skipping");
+            return None;
+        };
+        let assets = std::rc::Rc::new(ac_scene::Assets::open(dir).unwrap());
+        let mut c = offline_client(assets.clone());
+        let mut pl = crate::player::Player::new(&assets, cell, local, glam::Quat::IDENTITY);
+        pl.set_motion_table(&assets, 0x0200_0001, 0x0900_0001);
+        c.player = Some(pl);
+        Some(c)
+    }
+
+    /// A run on its way to a counter at `at`, set off at `now`.
+    fn run_to(at: Vec2, now: Instant) -> Run {
+        Run {
+            vendor: "Shopkeeper Renald the Elder".into(),
+            at,
+            phase: Phase::Going,
+            since: now,
+            last_sell: None,
+            town: at,
+            stops: 1,
+            sold: 0,
+            reason: "carrying as much as it means to".into(),
+            visited: vec![at],
+            walked_on: None,
+        }
+    }
+
+    #[test]
+    fn a_follower_on_its_own_town_run_is_not_pulled_back_to_its_leader() {
+        // A party restocking with everyone going: each follower makes its
+        // own run while the leader goes on leading. Following ranks above
+        // the run, so each time the follower closed to its following
+        // distance the walk after the leader ended the run's journey, the
+        // run planned it again, and the walk after the leader ended it
+        // again, for the run's four minutes.
+        let holtburg = 0xA9B4_0019;
+        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
+            return;
+        };
+        let me = c.player.as_ref().unwrap().world_position();
+        let team = &mut c.autoplay.config.team;
+        team.enabled = true;
+        team.follow = true;
+        team.lead = false;
+        team.follow_distance = 4.0;
+        let leader_off = |metres: f32| crate::autoplay::Mate {
+            name: "Leader".into(),
+            leader: true,
+            leads: true,
+            world: me + glam::Vec3::new(metres, 0.0, 0.0),
+            cell: holtburg,
+            ..Default::default()
+        };
+        let cfg = c.autoplay.config.growth.clone();
+        let now = Instant::now();
+        let counter = Vec2::new(me.x + 250.0, me.y);
+        assert!(c.grow_travel(counter, now), "no way to the counter");
+        c.autoplay.growth.run = Some(run_to(counter, now));
+
+        // The leader walks off and stops, and walks off again: the
+        // follower keeps to its own walk.
+        for (tick, metres) in [12.0, 3.0, 12.0, 3.0, 30.0, 3.0].into_iter().enumerate() {
+            c.autoplay.team.mates = vec![leader_off(metres)];
+            assert!(!c.autoplay_follow(now, true), "caught up at tick {tick}");
+            assert!(!c.autoplay_follow(now, false), "followed at tick {tick}");
+            assert!(
+                c.traveling(),
+                "its walk to the counter ended at tick {tick}"
+            );
+            assert!(c.grow_run_step(now, &cfg));
+            assert!(c.traveling());
+        }
+
+        // A corpse on the way does break the walk off, and the run walks
+        // on once it is dealt with. Broken off again straight away, the run
+        // waits a moment before planning it once more.
+        c.interrupt_travel("walking to a corpse");
+        assert!(c.journey_broken_off());
+        assert!(c.grow_run_step(now, &cfg));
+        assert!(c.traveling(), "the run did not walk on after a corpse");
+        c.interrupt_travel("walking to a corpse");
+        let soon = now + Duration::from_secs(1);
+        assert!(c.grow_run_step(soon, &cfg));
+        assert!(!c.traveling(), "planned again straight away");
+        assert!(c.grow_run_step(now + WALK_ON_EVERY, &cfg));
+        assert!(c.traveling());
+
+        // With no run of its own the leader is followed. The walk after it
+        // ends the journey without breaking it off: nothing is to pick that
+        // journey up again.
+        c.autoplay.growth.run = None;
+        c.autoplay.team.mates = vec![leader_off(12.0)];
+        assert!(c.autoplay_follow(now, false));
+        assert!(!c.traveling());
+        assert!(!c.journey_broken_off());
+    }
+
+    #[test]
+    fn a_town_run_between_journeys_is_not_taken_exploring_or_back_to_the_area() {
+        // Underground, a corpse on the way ends the run's journey, and
+        // exploring ranks above the run: a room chosen then kept the tick
+        // for good, so the run never planned its walk again and its clock
+        // was never read. Keeping to a hunting area ranks above the run as
+        // well, and would have walked the character back to it.
+        let renald = Vec2::new(32_587.2, 34_578.3);
+        let now = Instant::now();
+
+        // Where the Holtburg Dungeon's portal drops a character.
+        let Some(mut c) = standing_at(0x01F6_0289, glam::Vec3::new(96.7, -10.0, 0.0)) else {
+            return;
+        };
+        c.autoplay.growth.run = Some(run_to(renald, now));
+        assert!(!c.traveling());
+        assert!(!c.autoplay_explore(now), "went exploring on a run to town");
+        assert!(c.follow.is_none());
+        // With no run, the same dungeon is explored.
+        c.autoplay.growth.run = None;
+        assert!(c.autoplay_explore(now));
+
+        // Outdoors by the Holtburg lifestone, a field to hunt 40 m off.
+        let Some(mut c) = standing_at(0xA9B4_0019, glam::Vec3::new(84.0, 7.1, 94.0)) else {
+            return;
+        };
+        let me = c.player.as_ref().unwrap().world_position();
+        let (x, y) = (me.x + 40.0, me.y);
+        let fight = &mut c.autoplay.config.fight;
+        fight.enabled = true;
+        fight.area = Some(crate::hunt::HuntArea {
+            name: "the field".into(),
+            shape: crate::hunt::Shape::Outline {
+                points: vec![[x, y], [x + 30.0, y], [x + 30.0, y + 30.0], [x, y + 30.0]],
+            },
+        });
+        c.autoplay.growth.run = Some(run_to(renald, now));
+        assert!(
+            !c.autoplay_keep_to_area(now),
+            "walked back to the area on a run to town"
+        );
+        assert!(c.follow.is_none());
+        // With no run, outside the field, it goes back to it.
+        c.autoplay.growth.run = None;
+        assert!(c.autoplay_keep_to_area(now));
+    }
+
+    #[test]
+    fn a_run_that_could_not_get_there_is_tried_again_once_its_wait_is_up() {
+        // A run that really cannot reach its counter comes home with
+        // nothing, so it is futile, and the counter is left alone for a
+        // while. Neither is for good: the next run is due once the wait
+        // between runs is up, and the counter can be chosen again by then.
+        let t0 = Instant::now();
+        let renald = spot(Vec2::new(32_587.2, 34_578.3));
+        let mut skip = crate::did::Patience::new();
+        skip.note(
+            renald,
+            &crate::did::Did::blocked("that counter was no use"),
+            t0,
+        );
+        for party_restocking in [false, true] {
+            let wait = wait_between_runs(party_restocking, true);
+            assert!(wait > Duration::ZERO, "straight back to the same counter");
+            assert!(wait <= RUN_EVERY);
+            assert!(
+                !skip.held(&renald, t0 + wait),
+                "the counter is still skipped when the next run is due"
+            );
+        }
+        // A party that did buy or sell something may go again at once.
+        assert_eq!(wait_between_runs(true, false), Duration::ZERO);
+    }
+
+    #[test]
+    fn past_the_servers_wall_not_even_a_coin_comes_off() {
+        // +Verity: 36462 carried, 7500 capacity. The server hands nothing
+        // to a character past three times its capacity, whatever it weighs.
+        assert!(past_the_wall(36_462, 7_500));
+        // At the wall a coin still fits, and under it so do light things.
+        assert!(!past_the_wall(22_500, 7_500));
+        assert!(!past_the_wall(13_866, 9_000));
+        // Strength not heard yet is no reason to leave every body alone.
+        assert!(!past_the_wall(13_866, 0));
     }
 
     #[test]
@@ -3880,6 +4364,181 @@ mod tests {
         assert!(!ammo_stock("Arrow", ammo_type::BOLT));
         assert!(ammo_stock("Quarrel", ammo_type::BOLT));
         assert!(ammo_stock("Atlatl Dart", ammo_type::ATLATL));
+    }
+
+    /// The character whose pack these tests are about.
+    const TIDIER: u32 = 0x5000_0001;
+
+    /// A character carrying `stacks` of `(guid, wcid, count, max)`,
+    /// offline, when the archives are there to be read.
+    fn carrying(stacks: &[(u32, u32, u32, u32)]) -> Option<Client> {
+        let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
+            eprintln!("AC_DATA_DIR unset; skipping");
+            return None;
+        };
+        let assets = std::rc::Rc::new(ac_scene::Assets::open(dir).unwrap());
+        let mut c = offline_client(assets);
+        c.world.player_guid = Some(TIDIER);
+        for &(guid, wcid, count, max) in stacks {
+            c.world.objects.insert(
+                guid,
+                ac_world::WorldObject {
+                    guid,
+                    weenie_class_id: wcid,
+                    name: format!("thing {wcid}"),
+                    stack_size: count,
+                    max_stack_size: max,
+                    container: Some(TIDIER),
+                    parent: Some(TIDIER),
+                    ..Default::default()
+                },
+            );
+        }
+        Some(c)
+    }
+
+    /// The server's answer to a whole pour: the source forgotten, the
+    /// target's new size.
+    fn poured(c: &mut Client, from: u32, to: u32, now: u32) {
+        c.world.objects.remove(&from);
+        if let Some(o) = c.world.objects.get_mut(&to) {
+            o.stack_size = now;
+        }
+    }
+
+    #[test]
+    fn lead_peas_taken_in_two_stacks_are_poured_together_without_a_tick_of_their_own() {
+        // The report: peas looted off one corpse after another sit in
+        // stacks of their own. Nothing here waits for a quiet moment --
+        // there is a fight on -- because the server makes a pack-to-pack
+        // merge on the spot.
+        let Some(mut c) = carrying(&[(1, 8329, 40, 100), (2, 8329, 5, 100)]) else {
+            return;
+        };
+        c.attack_target = Some(0x8000_30F2);
+        let t0 = Instant::now();
+        c.autoplay_tidy(t0);
+        let sent = c.autoplay.pour.clone().expect("a pour went out").0;
+        assert_eq!(
+            (sent.merge.from, sent.merge.to, sent.merge.amount),
+            (2, 1, 5)
+        );
+        assert_eq!(sent.to_before, 40);
+        // Nothing else is asked for while the server has not answered:
+        // the counts a second choice would be made from are stale.
+        c.autoplay_tidy(t0 + Duration::from_millis(100));
+        assert_eq!(
+            c.autoplay.pour.as_ref().map(|(p, _)| p.merge.clone()),
+            Some(sent.merge.clone())
+        );
+        // The answer, read off the target's new size.
+        poured(&mut c, 2, 1, 45);
+        c.autoplay_tidy(t0 + Duration::from_millis(700));
+        assert!(c.autoplay.pour.is_none(), "the pour landed");
+    }
+
+    #[test]
+    fn a_pair_the_server_turns_down_does_not_stop_the_rest_being_tidied() {
+        // One stubborn pair used to be the only answer ever offered, so
+        // it was asked for every 600 ms and nothing else in the pack was
+        // ever poured together.
+        let Some(mut c) = carrying(&[
+            (1, 273, 5000, 25000),
+            (2, 273, 900, 25000),
+            (3, 8329, 40, 100),
+            (4, 8329, 5, 100),
+        ]) else {
+            return;
+        };
+        let t0 = Instant::now();
+        c.autoplay_tidy(t0);
+        let first = c.autoplay.pour.clone().expect("a pour went out").0.merge;
+        assert_eq!((first.from, first.to), (2, 1));
+        // InventoryServerSaveFailed naming the source, with no reason
+        // at all, which is half of them.
+        c.move_refused
+            .insert(2, (0, t0 + Duration::from_millis(50)));
+        c.autoplay_tidy(t0 + Duration::from_millis(700));
+        assert!(
+            !c.move_refused.contains_key(&2),
+            "the refusal was this pour's and is spent"
+        );
+        let next = c.autoplay.pour.clone().expect("the next pair").0.merge;
+        assert_eq!((next.from, next.to), (4, 3), "the peas go in instead");
+    }
+
+    #[test]
+    fn a_refusal_naming_the_target_is_read_as_this_pours_answer() {
+        // A stack that is stuck, or being traded, is refused under the
+        // target's guid. Read only under the source's, these were never
+        // seen at all and the same pair was offered every 600 ms.
+        let Some(mut c) = carrying(&[(1, 8329, 40, 100), (2, 8329, 5, 100)]) else {
+            return;
+        };
+        let t0 = Instant::now();
+        c.autoplay_tidy(t0);
+        c.move_refused
+            .insert(1, (0x29, t0 + Duration::from_millis(50)));
+        c.autoplay_tidy(t0 + Duration::from_millis(700));
+        assert!(c.autoplay.pour.is_none(), "the pour is over");
+        assert!(!c.move_refused.contains_key(&1));
+        // And the pair is left alone for a while rather than asked again.
+        assert!(c
+            .autoplay
+            .growth
+            .wont_merge
+            .held(&(2, 1), t0 + Duration::from_millis(800)));
+    }
+
+    #[test]
+    fn what_a_stack_was_taken_for_is_settled_when_the_pour_lands_and_not_before() {
+        use ac_loot::LootAction;
+        let stats = |guid: u32| crate::items::ItemStats {
+            guid,
+            wcid: 8329,
+            name: "Lead Pea".into(),
+            ..Default::default()
+        };
+        // The big stack is meant for a counter, the small one is kept:
+        // pouring the kept one in makes the survivor a keeper too.
+        let Some(mut c) = carrying(&[(1, 8329, 40, 100), (2, 8329, 5, 100)]) else {
+            return;
+        };
+        c.autoplay.ledger.remember(&stats(1), LootAction::Sell);
+        c.autoplay.ledger.remember(&stats(2), LootAction::Keep);
+        let t0 = Instant::now();
+        c.autoplay_tidy(t0);
+        c.move_refused
+            .insert(2, (0, t0 + Duration::from_millis(50)));
+        c.autoplay_tidy(t0 + Duration::from_millis(700));
+        assert_eq!(
+            c.autoplay.ledger.by_guid(1),
+            Some(LootAction::Sell),
+            "a pour that never happened settles nothing"
+        );
+        // The same pour, landed: now the survivor is a keeper.
+        let Some(mut c) = carrying(&[(1, 8329, 40, 100), (2, 8329, 5, 100)]) else {
+            return;
+        };
+        c.autoplay.ledger.remember(&stats(1), LootAction::Sell);
+        c.autoplay.ledger.remember(&stats(2), LootAction::Keep);
+        c.autoplay_tidy(t0);
+        poured(&mut c, 2, 1, 45);
+        c.autoplay_tidy(t0 + Duration::from_millis(700));
+        assert_eq!(c.autoplay.ledger.by_guid(1), Some(LootAction::Keep));
+    }
+
+    #[test]
+    fn a_pour_with_no_word_at_all_is_given_up_on_and_the_pack_read_afresh() {
+        let Some(mut c) = carrying(&[(1, 8329, 40, 100), (2, 8329, 5, 100)]) else {
+            return;
+        };
+        let t0 = Instant::now();
+        c.autoplay_tidy(t0);
+        assert!(c.autoplay.pour.is_some());
+        // Nothing comes back: no refusal, no new counts.
+        c.autoplay_tidy(t0 + crate::pack::POUR_LOST);
+        assert!(c.autoplay.pour.is_none(), "given up as lost");
     }
 
     #[test]

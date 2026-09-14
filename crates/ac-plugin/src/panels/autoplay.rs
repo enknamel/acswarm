@@ -206,44 +206,39 @@ pub fn draw(egui: &egui::Context, v: &AutoplayView, x: f32, drafts: &mut Drafts)
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 title(ui, "Stay alive");
+                // The character's three bars together, in the order it
+                // reads them off its own vitals; what acts on them
+                // below. Split up, the reader had to hunt for the level
+                // that goes with the switch they were looking at.
                 percent(
                     ui,
-                    "heal below",
+                    "health below",
                     &mut cfg.survive.heal_below,
                     "Heal when health falls below this much of its maximum",
-                );
-                ui.checkbox(&mut cfg.survive.use_kits, "use healing kits")
-                    .on_hover_text("Spend a carried healing kit before casting");
-                ui.horizontal(|ui| {
-                    caption(ui, "heal spell");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut cfg.survive.heal_spell)
-                            .id_salt("autoplay.heal_spell")
-                            .hint_text("strongest heal known")
-                            .desired_width(180.0),
-                    )
-                    .on_hover_text(
-                        "A spell from the spellbook, by name; blank for the strongest \
-                         health boost known, whatever it is called",
-                    );
-                });
-                ui.checkbox(&mut cfg.survive.manage_mana, "keep mana up from stamina")
-                    .on_hover_text(
-                        "Pour stamina into mana when mana runs low and Revitalize \
-                         when stamina does, with the strongest spells known",
-                    );
-                percent(
-                    ui,
-                    "mana below",
-                    &mut cfg.survive.mana_below,
-                    "Pour stamina into mana when mana is under this",
                 );
                 percent(
                     ui,
                     "stamina below",
                     &mut cfg.survive.stamina_below,
-                    "Revitalize when stamina is under this",
+                    "Revitalize when stamina is under this, and do not drain it \
+                     past this for a Stamina to Health unless death is the \
+                     other choice",
                 );
+                percent(
+                    ui,
+                    "mana below",
+                    &mut cfg.survive.mana_below,
+                    "Pour stamina into mana when mana is under this, and do not \
+                     drain it past this for a Mana to Health unless death is \
+                     the other choice",
+                );
+                ui.checkbox(&mut cfg.survive.use_kits, "use healing kits")
+                    .on_hover_text("Spend a carried healing kit before casting");
+                ui.checkbox(&mut cfg.survive.manage_mana, "keep mana up from stamina")
+                    .on_hover_text(
+                        "Pour stamina into mana when mana runs low and Revitalize \
+                         when stamina does, with the strongest spells known",
+                    );
                 ui.add_space(6.0);
 
                 title(ui, "Buffs");
@@ -370,6 +365,15 @@ pub fn draw(egui: &egui::Context, v: &AutoplayView, x: f32, drafts: &mut Drafts)
                      stands in it (and whatever hits the character), let what \
                      leaves it go, and go back to it",
                 );
+                ui.checkbox(&mut cfg.fight.skip_critters, "walk past critters")
+                    .on_hover_text(
+                        "Leave alone a creature that will not attack unless it is \
+                         attacked, dies to a single swing, and is far below the \
+                         character -- a Rabbit, a Chicken, a Bunny. Anything \
+                         hitting the character, \
+                         anything a summoned creature has taken on, and anything \
+                         named in \"only these\" is still fought.",
+                    );
                 ui.checkbox(&mut cfg.fight.craft_ammo, "make ammunition when out")
                     .on_hover_text(
                         "From a bundle of heads and a bundle of shafts carried, \
