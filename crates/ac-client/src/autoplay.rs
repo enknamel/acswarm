@@ -666,7 +666,9 @@ const STANCE_CHANGE: Duration = Duration::from_millis(1000);
 const FLETCHING: u32 = 37;
 /// The same note is not logged again within this.
 const NOTE_EVERY: Duration = Duration::from_secs(5);
-/// Least time between two salvage batches, and between two hand-offs.
+/// Least time between two hand-offs, and between two salvage batches
+/// when the first has not been seen to go: a batch whose items have
+/// left the pack is followed by the next at once.
 const SALVAGE_EVERY: Duration = Duration::from_secs(3);
 /// How long a salvage batch or a hand-off is given to take effect (the
 /// items leaving the pack) before it counts as refused.
@@ -1463,27 +1465,37 @@ impl SalvageGrade {
     }
 }
 
-/// One salvage's worth out of `items` (guid and workmanship, in the
-/// order they are to go), and the grade they share: every 10 when there
-/// is one, else every 9, else the rest. `None` with nothing to salvage.
+/// One salvage's worth out of `items` (guid, workmanship, and how many
+/// times a salvage of it has come to nothing, in the order they are to
+/// go), and the grade they share. `None` with nothing to salvage.
 ///
-/// The best go first, so that ordinary loot turning up between batches
-/// never keeps them waiting; each grade is a batch, and so a turn, of
-/// its own.
+/// What has come to nothing least goes first, and of that every 10 when
+/// there is one, else every 9, else the rest. The best go first, so that
+/// ordinary loot turning up between batches never keeps them waiting;
+/// each grade is a batch, and so a turn, of its own.
+///
+/// The refusals come before the grade because ACE skips some items
+/// without a word -- a Retained one, say. Chosen as the best grade every
+/// time, a 10 like that went out alone again after each timeout, and the
+/// 9s and everything below waited behind three of them, where a single
+/// salvage of everything used to take the rest at once.
 fn next_salvage_batch(
-    items: impl IntoIterator<Item = (u32, f32)>,
+    items: impl IntoIterator<Item = (u32, f32, u8)>,
 ) -> Option<(SalvageGrade, Vec<u32>)> {
-    let graded: Vec<(u32, SalvageGrade)> = items
+    use std::cmp::Reverse;
+    let turns: Vec<(u32, (Reverse<u8>, SalvageGrade))> = items
         .into_iter()
-        .map(|(guid, workmanship)| (guid, SalvageGrade::of(workmanship)))
+        .map(|(guid, workmanship, refused)| {
+            (guid, (Reverse(refused), SalvageGrade::of(workmanship)))
+        })
         .collect();
-    let best = graded.iter().map(|(_, grade)| *grade).max()?;
-    let batch = graded
+    let first = turns.iter().map(|(_, turn)| *turn).max()?;
+    let batch = turns
         .into_iter()
-        .filter(|(_, grade)| *grade == best)
+        .filter(|(_, turn)| *turn == first)
         .map(|(guid, _)| guid)
         .collect();
-    Some((best, batch))
+    Some((first.1, batch))
 }
 
 /// The team as the host last saw it.
@@ -4517,6 +4529,7 @@ impl Client {
         }
         // A batch on its way: wait for the items to go, and count a
         // refusal against each when they do not.
+        let mut answered = false;
         if let Some((items, since)) = self.autoplay.salvaging.clone() {
             let left: Vec<u32> = items
                 .iter()
@@ -4525,6 +4538,7 @@ impl Client {
                 .collect();
             if left.is_empty() {
                 self.autoplay.salvaging = None;
+                answered = true;
                 self.autoplay.say(
                     Doing::Salvaging,
                     format!("salvaged {} item(s)", items.len()),
@@ -4583,10 +4597,15 @@ impl Client {
             }
             return false;
         };
-        let rate_ok = self
-            .autoplay
-            .last_salvage
-            .is_none_or(|t| now.duration_since(t) >= SALVAGE_EVERY);
+        // A batch the server has just salvaged is answered, and the next
+        // grade goes at once. Sitting out the gap after it returned the
+        // tick to the goals below, the fight among them, and the grades
+        // still to come waited out a whole fight and its looting.
+        let rate_ok = answered
+            || self
+                .autoplay
+                .last_salvage
+                .is_none_or(|t| now.duration_since(t) >= SALVAGE_EVERY);
         if Some(guid) == self.world.player_guid {
             if !cfg.salvage {
                 return false;
@@ -4603,7 +4622,9 @@ impl Client {
             // A 9 or a 10 goes only with its own grade, and the rest wait
             // their turn. What teammates handed over is batched the same
             // way: it was tagged when it arrived, like anything looted.
-            let Some((grade, guids)) = next_salvage_batch(items.iter().map(|(g, _, w)| (*g, *w)))
+            let refused = |g: &u32| self.autoplay.refused.get(g).copied().unwrap_or(0);
+            let Some((grade, guids)) =
+                next_salvage_batch(items.iter().map(|(g, _, w)| (*g, *w, refused(g))))
             else {
                 return false;
             };
@@ -8523,16 +8544,52 @@ mod tests {
         assert_eq!(best_salvager([mate("Nobody", 0, 999, true)].iter()), None);
     }
 
+    /// `items` (guid and workmanship), none of them refused yet.
+    fn never_refused(items: &[(u32, f32)]) -> Vec<(u32, f32, u8)> {
+        items.iter().map(|(g, w)| (*g, *w, 0)).collect()
+    }
+
     /// Every salvage sent for `items` (guid and workmanship), the server
     /// taking each batch before the next is chosen.
     fn salvages(items: &[(u32, f32)]) -> Vec<Vec<u32>> {
         let mut left = items.to_vec();
         let mut sent = Vec::new();
-        while let Some((_, batch)) = next_salvage_batch(left.iter().copied()) {
+        while let Some((_, batch)) = next_salvage_batch(never_refused(&left)) {
             left.retain(|(g, _)| !batch.contains(g));
             sent.push(batch);
         }
         sent
+    }
+
+    #[test]
+    fn a_salvage_that_came_to_nothing_waits_behind_the_grades_not_yet_tried() {
+        // ACE skips a Retained item without a word. Chosen as the best
+        // grade every time, a 10 like that went out alone after each
+        // timeout, and everything below it waited behind all three.
+        let (ten, nine, six, five) = (1, 2, 3, 4);
+        assert_eq!(
+            next_salvage_batch([(ten, 10.0, 1), (nine, 9.0, 0), (six, 6.0, 0)]),
+            Some((SalvageGrade::Nine, vec![nine]))
+        );
+        assert_eq!(
+            next_salvage_batch([(ten, 10.0, 1), (six, 6.0, 0)]),
+            Some((SalvageGrade::Common, vec![six]))
+        );
+        // Once the rest are gone it is asked for again, still on its own.
+        assert_eq!(
+            next_salvage_batch([(ten, 10.0, 1)]),
+            Some((SalvageGrade::Ten, vec![ten]))
+        );
+        // Refused alike, the grades still keep apart.
+        assert_eq!(
+            next_salvage_batch([(six, 6.0, 1), (ten, 10.0, 1), (five, 5.0, 1)]),
+            Some((SalvageGrade::Ten, vec![ten]))
+        );
+        // And the one refused least goes first.
+        assert_eq!(
+            next_salvage_batch([(six, 6.0, 2), (five, 5.0, 1)]),
+            Some((SalvageGrade::Common, vec![five]))
+        );
     }
 
     #[test]
@@ -8550,7 +8607,7 @@ mod tests {
     fn nines_and_tens_never_share_a_salvage() {
         let items = [(1, 9.0), (2, 10.0), (3, 6.0), (4, 9.0), (5, 10.0), (6, 3.0)];
         assert_eq!(
-            next_salvage_batch(items),
+            next_salvage_batch(never_refused(&items)),
             Some((SalvageGrade::Ten, vec![2, 5]))
         );
         // The best first, each grade alone, in the order they were given.
@@ -8561,7 +8618,7 @@ mod tests {
     fn everything_below_nine_goes_in_one_salvage() {
         let items = [(1, 1.0), (2, 8.0), (3, 5.0), (4, 8.0)];
         assert_eq!(
-            next_salvage_batch(items),
+            next_salvage_batch(never_refused(&items)),
             Some((SalvageGrade::Common, vec![1, 2, 3, 4]))
         );
         assert_eq!(salvages(&items), vec![vec![1, 2, 3, 4]]);
@@ -8577,16 +8634,11 @@ mod tests {
         assert_eq!(salvages(&[(1, 9.0), (2, 9.0)]), vec![vec![1, 2]]);
     }
 
-    #[test]
-    fn what_the_team_hands_the_salvager_is_salvaged_a_grade_at_a_time() {
-        // Teammates hand salvage over one item at a time, and the
-        // salvager salvages it along with its own: that is where a 10
-        // one teammate carried would meet another's 6.
-        let Some(mut c) = character_of_level(20) else {
-            return;
-        };
-        a_loot_profile(&mut c, "salvage test");
-        let me = c.world.player_guid;
+    /// A level 20 character that salvages for itself: an Ust in the pack,
+    /// and a loot profile of its own called `profile`.
+    fn a_salvager(profile: &str) -> Option<Client> {
+        let mut c = character_of_level(20)?;
+        a_loot_profile(&mut c, profile);
         let ust = 0x8000_0100;
         c.world.objects.insert(
             ust,
@@ -8594,10 +8646,44 @@ mod tests {
                 guid: ust,
                 weenie_class_id: ac_world::material::UST_WCID,
                 name: "Ust".into(),
-                container: me,
+                container: c.world.player_guid,
                 ..Default::default()
             },
         );
+        Some(c)
+    }
+
+    /// An Iron mace of `workmanship` in `container`, tagged for salvage.
+    fn a_mace_to_salvage(c: &mut Client, guid: u32, workmanship: f32, container: Option<u32>) {
+        c.world.objects.insert(
+            guid,
+            ac_world::WorldObject {
+                guid,
+                name: "Iron Mace".into(),
+                material: 0x3D,
+                workmanship,
+                container,
+                ..Default::default()
+            },
+        );
+        let stats = c.stats_of(guid).expect("carried");
+        c.autoplay.tag(&stats, LootAction::Salvage);
+    }
+
+    /// The salvage the salvager is waiting on.
+    fn salvage_on_its_way(c: &Client) -> Option<Vec<u32>> {
+        c.autoplay.salvaging.as_ref().map(|(g, _)| g.clone())
+    }
+
+    #[test]
+    fn what_the_team_hands_the_salvager_is_salvaged_a_grade_at_a_time() {
+        // Teammates hand salvage over one item at a time, and the
+        // salvager salvages it along with its own: that is where a 10
+        // one teammate carried would meet another's 6.
+        let Some(mut c) = a_salvager("salvage test") else {
+            return;
+        };
+        let me = c.world.player_guid;
         // The 9 is in a side pack: the server finds it there, and so
         // must the salvage.
         let pack = 0x8000_0110;
@@ -8614,33 +8700,66 @@ mod tests {
         for (guid, workmanship, container) in
             [(ten, 10.0, me), (six, 6.0, me), (nine, 9.0, Some(pack))]
         {
-            c.world.objects.insert(
-                guid,
-                ac_world::WorldObject {
-                    guid,
-                    name: "Iron Mace".into(),
-                    material: 0x3D,
-                    workmanship,
-                    container,
-                    ..Default::default()
-                },
-            );
-            let stats = c.stats_of(guid).expect("carried");
-            c.autoplay.tag(&stats, LootAction::Salvage);
+            a_mace_to_salvage(&mut c, guid, workmanship, container);
         }
-        let sent = |c: &Client| c.autoplay.salvaging.as_ref().map(|(g, _)| g.clone());
         let mut now = Instant::now();
-        for batch in [ten, nine, six] {
-            assert!(c.autoplay_salvage(now), "salvaging");
-            assert_eq!(sent(&c), Some(vec![batch]));
-            // The server takes it; the next grade waits for its turn.
-            c.world.objects.remove(&batch);
-            assert!(!c.autoplay_salvage(now), "went again at once");
-            assert_eq!(sent(&c), None);
-            now += SALVAGE_EVERY;
+        assert!(c.autoplay_salvage(now), "salvaging");
+        assert_eq!(salvage_on_its_way(&c), Some(vec![ten]));
+        for (done, next) in [(ten, nine), (nine, six)] {
+            now += Duration::from_millis(100);
+            assert!(c.autoplay_salvage(now), "not waited on");
+            assert_eq!(salvage_on_its_way(&c), Some(vec![done]));
+            // The server takes it, and the next grade goes at once. Sitting
+            // out the gap gave the tick to the fight, and the grades still
+            // to come waited a whole fight for their turn.
+            c.world.objects.remove(&done);
+            now += Duration::from_millis(100);
+            assert!(c.autoplay_salvage(now), "the next grade waited");
+            assert_eq!(salvage_on_its_way(&c), Some(vec![next]));
         }
+        c.world.objects.remove(&six);
+        now += Duration::from_millis(100);
         assert!(!c.autoplay_salvage(now), "nothing left to salvage");
-        assert_eq!(sent(&c), None);
+        assert_eq!(salvage_on_its_way(&c), None);
+    }
+
+    #[test]
+    fn a_ten_the_server_skips_holds_up_none_of_the_grades_below_it() {
+        // ACE skips a Retained item without a word, and its salvage times
+        // out. Chosen again as the best grade, the 10 went out alone after
+        // every timeout, and the 9 and the 6 waited behind all three.
+        let Some(mut c) = a_salvager("salvage skipped") else {
+            return;
+        };
+        let me = c.world.player_guid;
+        let (ten, nine, six) = (0x8000_0121, 0x8000_0122, 0x8000_0123);
+        for (guid, workmanship) in [(ten, 10.0), (nine, 9.0), (six, 6.0)] {
+            a_mace_to_salvage(&mut c, guid, workmanship, me);
+        }
+        let mut now = Instant::now();
+        assert!(c.autoplay_salvage(now));
+        assert_eq!(salvage_on_its_way(&c), Some(vec![ten]));
+        // Nothing comes of it.
+        now += SALVAGE_TIMEOUT;
+        assert!(c.autoplay_salvage(now));
+        assert_eq!(
+            salvage_on_its_way(&c),
+            Some(vec![nine]),
+            "the 10 went again before the grades not yet tried"
+        );
+        for (done, next) in [(nine, six), (six, ten)] {
+            c.world.objects.remove(&done);
+            now += Duration::from_millis(100);
+            assert!(c.autoplay_salvage(now));
+            assert_eq!(salvage_on_its_way(&c), Some(vec![next]));
+        }
+        // Still on its own, until the third try sets it aside.
+        now += SALVAGE_TIMEOUT;
+        assert!(c.autoplay_salvage(now));
+        assert_eq!(salvage_on_its_way(&c), Some(vec![ten]));
+        now += SALVAGE_TIMEOUT;
+        assert!(!c.autoplay_salvage(now), "tried {SALVAGE_TRIES} times");
+        assert_eq!(salvage_on_its_way(&c), None);
     }
 
     #[test]
