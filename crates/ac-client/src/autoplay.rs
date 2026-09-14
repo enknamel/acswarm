@@ -1791,8 +1791,6 @@ pub enum Doing {
     Following,
     /// Dead, or coming back from it (see `crate::recovery`).
     Recovering,
-    /// Spending experience (see `crate::growth`).
-    Growing,
     /// On the way to a hunting ground.
     Traveling,
     /// On a run to town.
@@ -1819,7 +1817,6 @@ impl Doing {
             Doing::Helping => "helping the team",
             Doing::Following => "following the leader",
             Doing::Recovering => "recovering from death",
-            Doing::Growing => "spending experience",
             Doing::Traveling => "travelling",
             Doing::Shopping => "in town",
             Doing::Dodging => "dodging",

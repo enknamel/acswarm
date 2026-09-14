@@ -3,8 +3,9 @@
 //! there is always something worth fighting, a pack to put the loot in,
 //! and a character that grows with the experience it earns.
 //!
-//! Three rules, run when nothing more pressing is going on (see
-//! [`Client::autoplay_grow`]):
+//! Three rules. The first runs every tick as housekeeping (see
+//! [`Client::autoplay_spend_xp`]); the other two when nothing more
+//! pressing is going on (see [`Client::autoplay_grow`]):
 //!
 //! 1. **Spend experience.** The unassigned pool is spent a rank at a
 //!    time, the way a player would: the skills it fights with first (the
@@ -12,7 +13,7 @@
 //!    those skills are built from next, then the rest. Each candidate
 //!    rank is priced from the XpTable and weighed by how much it matters,
 //!    and the best value is bought; one rank at a time, no more often
-//!    than the server can answer.
+//!    than the server can answer, in the middle of a walk or a fight.
 //! 2. **Go where the monsters are.** When nothing has been worth fighting
 //!    for a while, a hunting ground that suits the character's level is
 //!    picked from `ac_world::hunting` (the nearest, leaving out the one
@@ -1160,11 +1161,9 @@ impl Client {
             .growth
             .drop_what_is_turned_off(cfg.town_runs, cfg.hunt_grounds || roams_an_area);
         let mode = self.grow_mode(now, &cfg);
-        // A rank is one message and takes no time: it goes out even in
-        // the middle of a walk to town.
-        if cfg.auto_xp && self.grow_spend_xp(now, &cfg) {
-            return true;
-        }
+        // Experience is not spent here but as housekeeping (see
+        // [`Client::autoplay_spend_xp`]): this is the last goal, and a
+        // rank that waited for it waited for good.
         if cfg.town_runs && self.grow_town_run(now, &cfg) {
             return true;
         }
@@ -1300,8 +1299,36 @@ impl Client {
         offers
     }
 
+    /// Spend experience, as housekeeping: on every tick, whatever else
+    /// the character is doing.
+    ///
+    /// This used to be the first of the growth rules, and those are the
+    /// last goal in the table, run only on a tick nothing else claims.
+    /// Something always did. A character granted a hundred billion
+    /// experience on the local server spent none of it in three minutes,
+    /// because exploring had another room to walk to on every one of
+    /// those ticks. A rank needs no tick of its own: it is one message,
+    /// and the pacing keeps it to one at a time -- no more often than
+    /// [`RAISE_EVERY`], nothing more until the server has answered or
+    /// [`RAISE_SETTLE`] has passed, and a rank it would not sell left
+    /// alone for [`SULK_FOR`].
+    ///
+    /// Nor does it wait for a fight to end. ACE takes a raise with no
+    /// busy check, no animation and no movement: it checks the stat, the
+    /// pool and the rank's ceiling, spends, and answers with the new
+    /// record, a sound and a line of chat. None of that touches an attack
+    /// or a cast under way. Strength, Quickness and Run can change the run
+    /// rate, which ACE sends out again only for a character already
+    /// moving and only with `runrate_add_hooks`, off by default -- and
+    /// that is a speed, not an action.
+    pub(crate) fn autoplay_spend_xp(&mut self, now: Instant) {
+        if self.autoplay.config.growth.auto_xp {
+            self.grow_spend_xp(now);
+        }
+    }
+
     /// Buy one rank if one is worth buying. True when one was.
-    fn grow_spend_xp(&mut self, now: Instant, _cfg: &Growth) -> bool {
+    fn grow_spend_xp(&mut self, now: Instant) -> bool {
         let xp = self.world.stats.available_xp;
         if xp <= 0 || self.world.stats.level <= 0 {
             return false;
@@ -1380,13 +1407,12 @@ impl Client {
         st.raise_pending = Some((xp, now));
         st.last_pick = Some(pick);
         st.nothing_at = None;
-        // A note, not a status: a rank bought on the way to town must
-        // not flip the status line back and forth with the walk.
+        // A note, not a status. This is housekeeping, and the status line
+        // belongs to whatever claims the tick: said here, a character with
+        // nothing else to do would go from "waiting" to "spending
+        // experience" and back again with every rank.
         self.autoplay
             .note(format!("raising {what} ({xp} xp to spend)"), now);
-        if matches!(self.autoplay.doing, Doing::Idle) {
-            self.autoplay.say(Doing::Growing, "spending experience");
-        }
         true
     }
 
@@ -4150,6 +4176,126 @@ mod tests {
         // With no run, outside the field, it goes back to it.
         c.autoplay.growth.run = None;
         assert!(c.autoplay_keep_to_area(now));
+    }
+
+    /// A level 10 character playing on its own where the Holtburg
+    /// Dungeon's portal drops it -- a dungeon, so exploring always has a
+    /// room to walk to -- with `xp` to spend and nothing spent yet.
+    fn with_experience_to_spend(xp: i64) -> Option<Client> {
+        let mut c = standing_at(0x01F6_0289, glam::Vec3::new(96.7, -10.0, 0.0))?;
+        c.world.player_guid = Some(0x5000_0001);
+        c.world.stats.level = 10;
+        c.world.stats.available_xp = xp;
+        c.autoplay.config.enabled = true;
+        Some(c)
+    }
+
+    #[test]
+    fn experience_is_spent_while_exploring_claims_every_tick() {
+        // On the local server a character granted a hundred billion
+        // experience spent none of it in three minutes. Spending was part
+        // of the last goal, and exploring claimed every tick before it.
+        let Some(mut c) = with_experience_to_spend(1_000_000) else {
+            return;
+        };
+        let start = Instant::now();
+        let mut raised: Vec<Instant> = Vec::new();
+        let mut t = start;
+        while t < start + RAISE_EVERY * 5 {
+            c.tick_autoplay(t);
+            assert_eq!(
+                c.autoplay.step,
+                Some("explore"),
+                "exploring did not claim the tick at {:?}",
+                t - start
+            );
+            if let Some(at) = c.autoplay.growth.last_raise {
+                if !raised.contains(&at) {
+                    raised.push(at);
+                    // The server takes it, and the pool moves.
+                    c.world.stats.available_xp -= 1;
+                }
+            }
+            t += Duration::from_millis(100);
+        }
+        assert!(
+            raised.first().is_some_and(|at| *at - start <= RAISE_EVERY),
+            "nothing was raised within {RAISE_EVERY:?}"
+        );
+        // And it goes on, a rank at a time.
+        assert!(raised.len() >= 4, "only {} ranks", raised.len());
+        assert!(
+            raised.windows(2).all(|w| w[1] - w[0] >= RAISE_EVERY),
+            "ranks closer together than {RAISE_EVERY:?}"
+        );
+    }
+
+    #[test]
+    fn nothing_is_sent_with_auto_xp_off_or_nothing_to_spend() {
+        let Some(mut c) = with_experience_to_spend(1_000_000) else {
+            return;
+        };
+        let start = Instant::now();
+        let at = |s: u64| start + Duration::from_secs(s);
+
+        c.autoplay.config.growth.auto_xp = false;
+        for s in 0..30 {
+            c.autoplay_spend_xp(at(s));
+        }
+        assert_eq!(c.session.actions_sent(), 0, "spent with auto_xp off");
+
+        // On, with an empty pool, or one short of the cheapest rank.
+        c.autoplay.config.growth.auto_xp = true;
+        for (s, pool) in [0, -5, 1].into_iter().enumerate() {
+            c.world.stats.available_xp = pool;
+            c.autoplay_spend_xp(at(30 + s as u64));
+        }
+        assert_eq!(c.session.actions_sent(), 0, "spent with nothing to spend");
+
+        // With something in the pool, a rank goes out.
+        c.world.stats.available_xp = 1_000_000;
+        c.autoplay_spend_xp(at(40));
+        assert_eq!(c.session.actions_sent(), 1);
+    }
+
+    #[test]
+    fn a_rank_the_server_refuses_is_not_asked_for_again_while_it_sulks() {
+        let Some(mut c) = with_experience_to_spend(1_000_000) else {
+            return;
+        };
+        let start = Instant::now();
+        assert!(c.grow_spend_xp(start));
+        let refused = c.autoplay.growth.last_pick.expect("a rank was picked");
+
+        // The pool does not move. Nothing more is asked for until the
+        // server has had time to answer.
+        assert!(!c.grow_spend_xp(start + RAISE_SETTLE / 2));
+        assert_eq!(c.session.actions_sent(), 1);
+
+        // Then the rank is taken as refused, and the next best is bought
+        // instead for as long as the refusal holds.
+        let sulked = start + RAISE_SETTLE;
+        let mut t = sulked;
+        let mut bought = 0;
+        while t < sulked + SULK_FOR {
+            if c.grow_spend_xp(t) {
+                let pick = c.autoplay.growth.last_pick.expect("a rank was picked");
+                assert_ne!(
+                    pick,
+                    refused,
+                    "asked again {:?} after it was refused",
+                    t - start
+                );
+                bought += 1;
+                c.world.stats.available_xp -= 1;
+            }
+            t += Duration::from_secs(5);
+        }
+        assert!(bought > 0, "nothing else was bought");
+
+        // Once the sulk is over, it is the best buy again.
+        assert!(c.grow_spend_xp(sulked + SULK_FOR + Duration::from_secs(5)));
+        assert_eq!(c.autoplay.growth.last_pick, Some(refused));
     }
 
     #[test]

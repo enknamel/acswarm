@@ -48,6 +48,16 @@ never won one -- a character that fights, loots and walks all afternoon
 has no quiet tick to give it -- and the pack filled up with part stacks
 while tidying waited its turn.
 
+Spending experience moved out for the same reason. It was the first
+thing the grow step did, and grow is the last goal: reached only when
+nothing else wants the tick. Something always did. A character granted a
+hundred billion experience on the local server spent none of it in three
+minutes, because exploring claimed every tick and always had another
+room to walk to. A rank is one message, and the server takes it with no
+busy check, no animation and no movement -- it checks the stat and the
+pool, spends, and answers -- so it runs as housekeeping too, in the
+middle of a walk or a fight, still paced to one rank at a time.
+
 Watching the ground runs before even the reflexes, for the same reason
 and one more. The clocks it keeps -- how long a spot has had nothing on
 it, and when each body on it first came into sight -- are read off the
