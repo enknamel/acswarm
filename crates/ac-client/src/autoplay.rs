@@ -536,9 +536,6 @@ pub struct Survive {
     /// Stop fighting below this fraction (0 to keep fighting).
     /// Use a carried healing kit.
     pub use_kits: bool,
-    /// Cast this spell to heal (by name, "Heal Self"); empty to use the
-    /// strongest health boost known instead, whatever it is called.
-    pub heal_spell: String,
     /// Keep mana up by pouring stamina into it, and stamina up with
     /// Revitalize, the way a caster does: the transfer gives more mana
     /// than the Revitalize costs, so the round is a gain.
@@ -569,7 +566,6 @@ impl Default for Survive {
         Survive {
             heal_below: 0.6,
             use_kits: true,
-            heal_spell: String::new(),
             manage_mana: true,
             mana_below: 0.4,
             stamina_below: 0.3,
@@ -955,13 +951,113 @@ pub struct Mate {
     pub ground: Option<(u32, glam::Vec2, String)>,
 }
 
-/// The larger of a health boost and a stamina transfer, as
-/// `(spell, points restored)`. Either may be missing; a tie goes to the
-/// boost, which does not spend a bar the character may need to run.
-fn bigger_heal(boost: Option<(u32, u32)>, transfer: Option<(u32, u32)>) -> Option<(u32, u32)> {
-    match (boost, transfer) {
-        (Some(b), Some(t)) => Some(if t.1 > b.1 { t } else { b }),
-        (b, t) => b.or(t),
+/// Health left below which there is no time to be careful: the biggest
+/// heal goes out at once, whatever it costs and whatever it drains.
+const CRITICAL_HEALTH: f32 = 0.25;
+/// A heal picked to cover a known wound has to be likely to land. Half
+/// is where the school's skill equals the spell's power; under that the
+/// mana is as likely to be thrown away as spent.
+const RELIABLE_CAST: f32 = 0.5;
+
+/// One self heal the character could cast this moment, weighed for what
+/// it would give *this* character.
+///
+/// A boost restores the same however hurt it is; a transfer's gain is a
+/// share of the bar it draws from, so the same Stamina to Health is
+/// worth two hundred points on a full bar and nothing on an empty one.
+/// The chooser cannot know that from the spell alone, so it is worked
+/// out before it gets here.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SelfHeal {
+    pub spell: u32,
+    /// Health points it would restore, now.
+    pub gain: u32,
+    /// What the cast costs in mana.
+    pub mana: u32,
+    /// How likely it is to land rather than fizzle.
+    pub chance: f32,
+    /// For a transfer, the vital it draws on and the fraction of that
+    /// bar left afterwards. `None` for a boost, which draws on nothing.
+    pub leaves: Option<(u32, f32)>,
+}
+
+impl SelfHeal {
+    /// Health this cast is worth on average: what it gives, times how
+    /// often it lands.
+    fn worth(&self) -> f32 {
+        self.gain as f32 * self.chance
+    }
+}
+
+/// Which of the heals that can be cast right now to cast, for a
+/// character `missing` health points with `health` of its bar left.
+///
+/// A scratch should not be healed with the biggest spell in the book:
+/// the mana that goes into it is the mana the next real wound needs.
+/// So the cheapest heal that covers what is actually missing wins, and
+/// only when nothing covers it -- or there is no time left to be
+/// careful -- does the biggest go out.
+fn choose_heal(heals: &[SelfHeal], missing: u32, health: f32, cfg: &Survive) -> Option<u32> {
+    use ac_world::vitals::vital;
+    // A transfer that empties the bar it draws on is a trade, not a
+    // heal: it buys health with the mana the next heal needs or the
+    // stamina that carries the fight. Left out of the reckoning while
+    // anything else will do, and only put back when nothing else will.
+    let floor = |v: u32| match v {
+        vital::STAMINA => cfg.stamina_below,
+        vital::MANA => cfg.mana_below,
+        _ => 0.0,
+    };
+    let sparing: Vec<&SelfHeal> = heals
+        .iter()
+        .filter(|h| h.leaves.is_none_or(|(v, left)| left >= floor(v)))
+        .collect();
+    let pool: Vec<&SelfHeal> = if sparing.is_empty() {
+        heals.iter().collect()
+    } else {
+        sparing
+    };
+    // Dying beats saving mana: at a quarter of the bar the next hit is
+    // the last one, so the most health one cast can give goes out.
+    if health <= CRITICAL_HEALTH {
+        return biggest_heal(&pool).map(|h| h.spell);
+    }
+    pool.iter()
+        .copied()
+        .filter(|h| h.chance >= RELIABLE_CAST && h.worth() >= missing as f32)
+        // Cheapest in mana, then the smallest of the ones that cover:
+        // the rest of the heal is spilt on a full bar.
+        .min_by_key(|h| (h.mana, h.gain, h.spell))
+        .or_else(|| biggest_heal(&pool))
+        .map(|h| h.spell)
+}
+
+/// The most health there is to be had from a single cast; ties to the
+/// cheaper spell.
+fn biggest_heal<'a>(pool: &[&'a SelfHeal]) -> Option<&'a SelfHeal> {
+    pool.iter().copied().max_by(|a, b| {
+        a.worth()
+            .total_cmp(&b.worth())
+            .then(b.mana.cmp(&a.mana))
+            .then(b.spell.cmp(&a.spell))
+    })
+}
+
+/// Whether a spell puts health back: a health boost (Harm Self is a
+/// boost below zero and is not one) or a transfer into health.
+fn restores_health(spell: u32) -> bool {
+    use ac_world::vitals::vital;
+    ac_world::vitals::boost(spell).is_some_and(|b| b.vital == vital::HEALTH && b.restores())
+        || ac_world::vitals::transfer(spell).is_some_and(|t| t.to == vital::HEALTH)
+}
+
+/// Where a vital's current and maximum sit on the stats block: health
+/// 0, stamina 1, mana 2.
+fn vital_slot(vital: u32) -> usize {
+    match vital {
+        ac_world::vitals::vital::STAMINA => 1,
+        ac_world::vitals::vital::MANA => 2,
+        _ => 0,
     }
 }
 
@@ -1838,37 +1934,87 @@ impl Client {
             .map(|t| t.spell)
     }
 
-    /// The biggest heal the character can land right now, and how much
-    /// health it would restore.
+    /// Every self heal the character could cast this moment, each
+    /// weighed for what it would give it now (see [`SelfHeal`]).
     ///
-    /// A mage has two ways out of an emergency and they are not the
-    /// same size. Heal Self restores a fixed number of points however
-    /// hurt it is; Stamina to Health takes half the stamina bar, which
-    /// on a character with a full bar is far more, and is why a caster
-    /// in trouble reaches for it rather than a kit. Which is larger
-    /// depends on the moment, so both are worked out and the larger
-    /// wins. A transfer from a bar that is nearly empty scores near
-    /// nothing and loses on its own merits, so no floor is needed.
-    fn best_emergency_heal(&self) -> Option<(u32, u32)> {
+    /// A mage has more ways out of an emergency than Heal Self, and
+    /// they are not the same size. Heal Self restores a fixed number of
+    /// points however hurt it is; Stamina to Health takes half the
+    /// stamina bar, which on a character with a full bar is far more,
+    /// and is why a caster in trouble reaches for it rather than a kit.
+    /// Which is worth more depends on the moment, so all of them are
+    /// worked out and [`choose_heal`] picks between them.
+    fn self_heals(&self) -> Vec<SelfHeal> {
         use ac_world::vitals::vital;
+        let mut out: Vec<SelfHeal> = ac_world::vitals::boosts_of(vital::HEALTH)
+            .into_iter()
+            .filter_map(|b| self.self_heal(b.spell, ((b.low + b.high) / 2).max(0) as u32, None))
+            .collect();
+        // Both transfers into health, not only the stamina one: a mage
+        // out of stamina with mana to spare has Mana to Health, and a
+        // character that never looked at it stood there and died.
+        for from in [vital::STAMINA, vital::MANA] {
+            let have = self.world.stats.vitals[vital_slot(from)].current;
+            for t in ac_world::vitals::transfers_between(from, vital::HEALTH) {
+                if let Some(h) = self.self_heal(t.spell, t.gain(have), Some((from, t.drain(have))))
+                {
+                    out.push(h);
+                }
+            }
+        }
+        out
+    }
+
+    /// One heal, if the character knows it, can aim it at itself, can
+    /// cast it this moment and would get anything out of it. `draws` is
+    /// the vital a transfer takes from and how many points it takes.
+    fn self_heal(&self, spell: u32, gain: u32, draws: Option<(u32, u32)>) -> Option<SelfHeal> {
+        use ac_world::vitals::vital;
+        if gain == 0 || !self.world.stats.spells.contains(&spell) {
+            return None;
+        }
+        let sp = self.spell(spell)?;
+        if !sp.is_self_targeted() || !matches!(self.can_cast(spell), crate::magic::CastCheck::Ok) {
+            return None;
+        }
+        let mana = self.mana_cost(&sp);
+        let leaves = draws.map(|(v, taken)| {
+            let slot = vital_slot(v);
+            let have = self.world.stats.vitals[slot].current;
+            let max = self.world.stats.vital_max_current(slot).max(1);
+            // Mana to Health is paid for out of the bar it drains, so
+            // the cast's own cost comes off as well; a reckoning that
+            // left it out called a transfer safe that ends with nothing
+            // to cast the next heal with.
+            let taken = taken + if v == vital::MANA { mana } else { 0 };
+            (v, have.saturating_sub(taken) as f32 / max as f32)
+        });
+        Some(SelfHeal {
+            spell,
+            gain,
+            mana,
+            chance: self.cast_chance(spell),
+            leaves,
+        })
+    }
+
+    /// Why not one heal in the book can be cast, in a few words for the
+    /// log. The easiest one known answers it best: the strongest
+    /// usually complains only that its own components have run out,
+    /// which says nothing about the rest of the book.
+    fn why_no_heal(&self) -> Option<String> {
         let table = self.assets.spell_table().ok()?;
-        let usable = |spell: u32| {
-            self.world.stats.spells.contains(&spell)
-                && table.get(spell).is_some_and(|s| s.is_self_targeted())
-                && matches!(self.can_cast(spell), crate::magic::CastCheck::Ok)
-        };
-        let boost = ac_world::vitals::boosts_of(vital::HEALTH)
-            .into_iter()
-            .filter(|b| usable(b.spell))
-            .map(|b| (b.spell, ((b.low + b.high) / 2).max(0) as u32))
-            .max_by_key(|(_, gain)| *gain);
-        let stamina = self.world.stats.vitals[1].current;
-        let transfer = ac_world::vitals::transfers_between(vital::STAMINA, vital::HEALTH)
-            .into_iter()
-            .filter(|t| usable(t.spell))
-            .map(|t| (t.spell, t.gain(stamina)))
-            .max_by_key(|(_, gain)| *gain);
-        bigger_heal(boost, transfer)
+        let (spell, name) = self
+            .world
+            .stats
+            .spells
+            .iter()
+            .filter(|id| restores_health(**id))
+            .filter_map(|id| table.get(*id).map(|s| (*id, s)))
+            .filter(|(_, s)| s.is_self_targeted())
+            .min_by_key(|(_, s)| s.power)
+            .map(|(id, s)| (id, s.name.clone()))?;
+        Some(format!("{name} {}", cast_problem(&self.can_cast(spell))))
     }
 
     /// Keep mana and stamina up the way a caster does: stamina poured
@@ -1929,21 +2075,6 @@ impl Client {
             }
         }
         false
-    }
-
-    /// The lowest-power known spell whose name matches, for reporting
-    /// why a whole family is out of reach.
-    fn easiest_of_family(&self, name: &str) -> Option<u32> {
-        let want = name.trim().to_lowercase();
-        let table = self.assets.spell_table().ok()?;
-        self.world
-            .stats
-            .spells
-            .iter()
-            .filter_map(|id| table.get(*id).map(|s| (*id, s)))
-            .filter(|(_, s)| s.name.to_lowercase().starts_with(&want))
-            .min_by_key(|(_, s)| s.power)
-            .map(|(id, _)| id)
     }
 
     /// Seconds left on the enchantment of a spell family, if any is up.
@@ -2270,42 +2401,27 @@ impl Client {
                 return true;
             }
         }
-        let heal = if cfg.heal_spell.trim().is_empty() {
-            self.best_emergency_heal().map(|(spell, _)| spell)
-        } else {
-            self.spell_by_name(&cfg.heal_spell)
-        };
-        if let Some(spell) = heal {
-            let check = self.can_cast(spell);
-            // When no level can be cast the name resolves to the
-            // strongest, whose reason ("short of components") is not
-            // the one that matters; the easiest level says why even
-            // that is out of reach.
-            let check = if matches!(check, crate::magic::CastCheck::Ok) || cfg.heal_spell.is_empty()
-            {
-                check
-            } else {
-                self.easiest_of_family(&cfg.heal_spell)
-                    .map(|id| self.can_cast(id))
-                    .unwrap_or(check)
-            };
-            if matches!(check, crate::magic::CastCheck::Ok) {
-                self.cast_paced(spell, now);
-                self.autoplay.last_heal = Some(now);
-                self.autoplay
-                    .say(Doing::Healing, format!("healing at {:.0}%", health * 100.0));
-                return true;
-            }
-            // Hurt and unable to heal is worth saying out loud.
-            let why = cast_problem(&check);
-            self.autoplay.note(
-                format!(
-                    "cannot heal at {:.0}%: {} {why}",
-                    health * 100.0,
-                    cfg.heal_spell
-                ),
-                now,
-            );
+        // Which heal is the right one is not a setting: it is this
+        // moment's answer, and it changes with every point of damage.
+        // A scratch takes the cheapest spell that covers it; a wound
+        // that will kill takes the biggest in the book (see
+        // [`choose_heal`]).
+        let missing = self
+            .world
+            .stats
+            .vital_max_current(0)
+            .saturating_sub(self.world.stats.vitals[0].current);
+        if let Some(spell) = choose_heal(&self.self_heals(), missing, health, &cfg) {
+            self.cast_paced(spell, now);
+            self.autoplay.last_heal = Some(now);
+            self.autoplay
+                .say(Doing::Healing, format!("healing at {:.0}%", health * 100.0));
+            return true;
+        }
+        // Hurt and unable to heal is worth saying out loud.
+        if let Some(why) = self.why_no_heal() {
+            self.autoplay
+                .note(format!("cannot heal at {:.0}%: {why}", health * 100.0), now);
         }
         false
     }
@@ -6940,32 +7056,137 @@ mod tests {
         assert!(partial.enabled);
         assert_eq!(partial.survive.heal_below, Survive::default().heal_below);
         assert_eq!(Doing::Fighting.label(), "fighting");
+        // A settings file written when the heal spell was still a
+        // setting keeps loading, rest and all: the heal is chosen by
+        // the rules now, and a name left in the file is no reason to
+        // throw a player's whole configuration away.
+        let old: Config =
+            serde_json::from_str(r#"{"survive":{"heal_spell":"Heal Self VI","heal_below":0.45}}"#)
+                .unwrap();
+        assert_eq!(old.survive.heal_below, 0.45);
+        assert!(old.survive.use_kits);
     }
 }
 #[cfg(test)]
 mod heal_choice_tests {
-    use super::bigger_heal;
+    use super::{choose_heal, restores_health, SelfHeal, Survive, CRITICAL_HEALTH};
     use ac_world::vitals::{transfers_between, vital, Transfer};
 
-    #[test]
-    fn the_bigger_heal_wins() {
-        // Heal Self restores a fixed amount; the transfer takes half a
-        // bar. On a full stamina bar the transfer is much the larger.
-        assert_eq!(bigger_heal(Some((1, 100)), Some((2, 260))), Some((2, 260)));
-        // Nearly out of stamina, it is worth almost nothing and loses.
-        assert_eq!(bigger_heal(Some((1, 100)), Some((2, 12))), Some((1, 100)));
+    /// A Heal Self: a fixed number of points, drawing on nothing, and
+    /// well enough learnt to land nine casts in ten.
+    fn heal(spell: u32, gain: u32, mana: u32) -> SelfHeal {
+        SelfHeal {
+            spell,
+            gain,
+            mana,
+            chance: 0.9,
+            leaves: None,
+        }
+    }
+
+    /// A transfer into health: what it gives has already been worked
+    /// out against the bar it draws on, and `left` is the fraction of
+    /// that bar the cast would leave behind.
+    fn transfer(spell: u32, gain: u32, mana: u32, from: u32, left: f32) -> SelfHeal {
+        SelfHeal {
+            spell,
+            gain,
+            mana,
+            chance: 0.9,
+            leaves: Some((from, left)),
+        }
+    }
+
+    /// Heal Self I through VI: every level costs more and gives more.
+    fn every_level() -> Vec<SelfHeal> {
+        vec![
+            heal(1, 25, 10),
+            heal(2, 50, 20),
+            heal(3, 80, 30),
+            heal(4, 110, 40),
+            heal(5, 160, 55),
+            heal(6, 220, 75),
+        ]
     }
 
     #[test]
-    fn a_tie_goes_to_the_spell_that_costs_no_stamina() {
-        assert_eq!(bigger_heal(Some((1, 100)), Some((2, 100))), Some((1, 100)));
+    fn a_scratch_is_not_healed_with_the_biggest_spell_in_the_book() {
+        let cfg = Survive::default();
+        // Twenty points off a full bar: the cheapest level that covers
+        // it, not the two hundred and twenty point heal and its mana.
+        assert_eq!(choose_heal(&every_level(), 20, 0.9, &cfg), Some(1));
+        // A serious wound walks up the book, and stops at the first
+        // level that covers it rather than going to the top.
+        assert_eq!(choose_heal(&every_level(), 90, 0.5, &cfg), Some(4));
     }
 
     #[test]
-    fn either_may_be_missing() {
-        assert_eq!(bigger_heal(Some((1, 40)), None), Some((1, 40)));
-        assert_eq!(bigger_heal(None, Some((2, 40))), Some((2, 40)));
-        assert_eq!(bigger_heal(None, None), None);
+    fn a_wound_nothing_covers_takes_the_biggest_there_is() {
+        let cfg = Survive::default();
+        // Three hundred missing and nothing in the book reaches it:
+        // the most health one cast can give goes out.
+        assert_eq!(choose_heal(&every_level(), 300, 0.4, &cfg), Some(6));
+    }
+
+    #[test]
+    fn a_character_about_to_die_reaches_for_the_biggest_at_once() {
+        let cfg = Survive::default();
+        // A quarter of the bar left. Even a wound the cheapest heal
+        // would cover gets the biggest: there may not be a second cast.
+        let health = CRITICAL_HEALTH - 0.05;
+        assert_eq!(choose_heal(&every_level(), 20, health, &cfg), Some(6));
+    }
+
+    #[test]
+    fn a_heal_that_usually_fizzles_is_not_what_a_wound_is_covered_with() {
+        let cfg = Survive::default();
+        // The big heal is barely learnt and lands three casts in ten.
+        let mut shaky = heal(6, 220, 75);
+        shaky.chance = 0.3;
+        let book = vec![heal(1, 25, 10), shaky];
+        assert_eq!(choose_heal(&book, 20, 0.9, &cfg), Some(1));
+        // Unless nothing else comes close, and a third of a big heal
+        // is still the best there is.
+        assert_eq!(choose_heal(&book, 200, 0.4, &cfg), Some(6));
+    }
+
+    #[test]
+    fn a_transfer_is_not_drained_out_of_a_bar_the_character_needs() {
+        let cfg = Survive::default();
+        // The transfer is bigger and cheaper, but it would leave
+        // stamina at a tenth, under the floor the player set, and a
+        // Heal Self covers the wound on its own.
+        let book = vec![
+            heal(1161, 90, 30),
+            transfer(1669, 300, 25, vital::STAMINA, 0.1),
+        ];
+        assert_eq!(choose_heal(&book, 80, 0.5, &cfg), Some(1161));
+        // Mana is guarded the same way: a Mana to Health that would
+        // leave nothing to cast with is passed over.
+        let book = vec![
+            heal(1161, 90, 30),
+            transfer(1295, 300, 25, vital::MANA, 0.2),
+        ];
+        assert_eq!(choose_heal(&book, 80, 0.5, &cfg), Some(1161));
+        // Left with room to spare, it is taken like anything else.
+        let book = vec![transfer(1669, 120, 25, vital::STAMINA, 0.45)];
+        assert_eq!(choose_heal(&book, 100, 0.5, &cfg), Some(1669));
+    }
+
+    #[test]
+    fn a_character_whose_only_heal_is_a_transfer_still_casts_it() {
+        let cfg = Survive::default();
+        // Nothing else to reach for: better a bar spent than a
+        // character dead, floor or no floor.
+        let book = vec![transfer(1669, 300, 25, vital::STAMINA, 0.05)];
+        assert_eq!(choose_heal(&book, 200, 0.5, &cfg), Some(1669));
+    }
+
+    #[test]
+    fn a_character_with_nothing_to_cast_heals_with_nothing() {
+        // Out of mana, out of components, or no heal ever learnt: the
+        // castable list comes back empty and there is no choice to make.
+        assert_eq!(choose_heal(&[], 200, 0.2, &Survive::default()), None);
     }
 
     #[test]
@@ -6977,6 +7198,19 @@ mod heal_choice_tests {
         // any fixed heal.
         let best = found.iter().map(|t| t.gain(700)).max().unwrap_or(0);
         assert!(best > 200, "the top transfer only returned {best}");
+        // Half the bar goes whatever comes out the other side.
+        let top = found.iter().max_by_key(|t| t.gain(700)).expect("one");
+        assert_eq!(top.drain(700), 350);
+        // Mana to Health is a heal too, and Harm Self is not.
+        assert!(!transfers_between(vital::MANA, vital::HEALTH).is_empty());
+        assert!(restores_health(1161), "Heal Self VI");
+        assert!(restores_health(1669), "Stamina to Health Self VI");
+        assert!(restores_health(1295), "Mana to Health Self VI");
+        assert!(!restores_health(8), "Harm Self I");
+        assert!(
+            !restores_health(1182),
+            "Revitalize Self VI restores stamina"
+        );
     }
 }
 #[cfg(test)]

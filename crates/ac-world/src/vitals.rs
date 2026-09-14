@@ -65,11 +65,23 @@ pub struct Transfer {
 impl Transfer {
     /// What `to` gains for `have` points of `from`.
     pub fn gain(&self, have: u32) -> u32 {
+        (self.drained(have) * (1.0 - self.loss)).max(0.0).round() as u32
+    }
+
+    /// What `from` loses for `have` points in its bar. The gain is not
+    /// the answer: the loss is taken off on the way across, and the top
+    /// transfers give back more than they took.
+    pub fn drain(&self, have: u32) -> u32 {
+        self.drained(have).round() as u32
+    }
+
+    /// Points taken out of `from`, before the loss on the way over.
+    fn drained(&self, have: u32) -> f32 {
         let mut drained = have as f32 * self.proportion;
         if self.cap > 0 {
             drained = drained.min(self.cap as f32);
         }
-        (drained * (1.0 - self.loss)).max(0.0).round() as u32
+        drained.max(0.0)
     }
 }
 
@@ -164,9 +176,11 @@ mod tests {
         let t = transfer(1681).expect("in the table");
         assert_eq!((t.from, t.to), (vital::STAMINA, vital::MANA));
         assert_eq!(t.gain(100), 75);
+        assert_eq!(t.drain(100), 50, "half the bar, whatever lands");
         // Level I is capped and loses a tenth.
         let t1 = transfer(1676).expect("in the table");
         assert_eq!(t1.gain(200), 45, "50 drained, less a tenth");
+        assert_eq!(t1.drain(200), 50, "the cap, not half of 200");
         // Revitalize Self VI restores 80 to 160 stamina; a heal restores health.
         let r = boost(1182).expect("Revitalize Self VI");
         assert_eq!((r.vital, r.low, r.high), (vital::STAMINA, 80, 160));
