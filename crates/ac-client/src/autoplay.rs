@@ -1044,6 +1044,15 @@ impl SelfHeal {
 /// careful -- does the biggest go out.
 fn choose_heal(heals: &[SelfHeal], missing: u32, health: f32, cfg: &Survive) -> Option<u32> {
     use ac_world::vitals::vital;
+    // Dying beats saving a bar: at a quarter of the bar the next hit is
+    // the last one, so the most health one cast can give goes out --
+    // out of everything castable, floors and all. The floors below are
+    // what the stamina and the mana were being kept for, and a dead
+    // character has no later to keep them for.
+    if health <= CRITICAL_HEALTH {
+        let everything: Vec<&SelfHeal> = heals.iter().collect();
+        return biggest_heal(&everything).map(|h| h.spell);
+    }
     // A transfer that empties the bar it draws on is a trade, not a
     // heal: it buys health with the mana the next heal needs or the
     // stamina that carries the fight. Left out of the reckoning while
@@ -1062,11 +1071,6 @@ fn choose_heal(heals: &[SelfHeal], missing: u32, health: f32, cfg: &Survive) -> 
     } else {
         sparing
     };
-    // Dying beats saving mana: at a quarter of the bar the next hit is
-    // the last one, so the most health one cast can give goes out.
-    if health <= CRITICAL_HEALTH {
-        return biggest_heal(&pool).map(|h| h.spell);
-    }
     pool.iter()
         .copied()
         .filter(|h| h.chance >= RELIABLE_CAST && h.worth() >= missing as f32)
@@ -7692,6 +7696,28 @@ mod heal_choice_tests {
         // character dead, floor or no floor.
         let book = vec![transfer(1669, 300, 25, vital::STAMINA, 0.05)];
         assert_eq!(choose_heal(&book, 200, 0.5, &cfg), Some(1669));
+    }
+
+    #[test]
+    fn a_dying_character_spends_the_bar_it_was_keeping() {
+        let cfg = Survive::default();
+        // Eight hundredths of health left and three hundred points
+        // missing. The book holds a Heal Self that covers eighty of it
+        // and a transfer that covers all of it but would leave stamina
+        // at a seventh, under the floor. The floor is what the stamina
+        // was being kept for, and there is no next fight to keep it
+        // for: the transfer goes out.
+        let book = vec![
+            heal(3, 80, 30),
+            transfer(1669, 300, 25, vital::STAMINA, 0.15),
+        ];
+        assert_eq!(choose_heal(&book, 300, 0.08, &cfg), Some(1669));
+        // Mana is lifted the same way.
+        let book = vec![heal(3, 80, 30), transfer(1295, 300, 25, vital::MANA, 0.15)];
+        assert_eq!(choose_heal(&book, 300, 0.08, &cfg), Some(1295));
+        // Above the line the floor still holds: a wound the Heal Self
+        // covers is healed with it and the bar is left alone.
+        assert_eq!(choose_heal(&book, 80, 0.5, &cfg), Some(3));
     }
 
     #[test]

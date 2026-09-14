@@ -220,13 +220,17 @@ pub fn draw(egui: &egui::Context, v: &AutoplayView, x: f32, drafts: &mut Drafts)
                     ui,
                     "stamina below",
                     &mut cfg.survive.stamina_below,
-                    "Revitalize when stamina is under this",
+                    "Revitalize when stamina is under this, and do not drain it \
+                     past this for a Stamina to Health unless death is the \
+                     other choice",
                 );
                 percent(
                     ui,
                     "mana below",
                     &mut cfg.survive.mana_below,
-                    "Pour stamina into mana when mana is under this",
+                    "Pour stamina into mana when mana is under this, and do not \
+                     drain it past this for a Mana to Health unless death is \
+                     the other choice",
                 );
                 ui.checkbox(&mut cfg.survive.use_kits, "use healing kits")
                     .on_hover_text("Spend a carried healing kit before casting");
