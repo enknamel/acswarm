@@ -268,9 +268,12 @@ impl Ledger {
     /// a stack still in the pack can be sold tomorrow and a sold one
     /// cannot be got back.
     ///
-    /// Called before the merge goes out, while both entries still
-    /// exist; the source's entry is left for [`Ledger::forget_gone`] to
-    /// clear when the server confirms the object is gone.
+    /// Called once the pour has landed, while both entries still exist
+    /// -- the source's is left for [`Ledger::forget_gone`] to clear when
+    /// the server confirms the object is gone. Called when the merge
+    /// went out instead, a pour the server refused still settled the
+    /// target: a stack meant for a counter became one to keep, and was
+    /// never sold.
     pub fn merged(&mut self, from: u32, to: u32) {
         let Some(source) = self.took.get(&from).map(|t| t.action) else {
             return;

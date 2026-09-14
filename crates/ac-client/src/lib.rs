@@ -171,6 +171,20 @@ fn answers_walk(
     };
     walked_for.is_some_and(|g| Some(g) != attacked && about.contains(&g))
 }
+
+/// Whether a refused inventory action naming `item` is the answer to
+/// the pour the tidying has out, rather than an answer to anything else.
+///
+/// A pour is two stacks already in the pack, so its refusal is never
+/// about a walk: a walk is for something out in the world. It has to be
+/// said, though, because a looted stack keeps the guid it was fetched
+/// under -- so the refusal of a pour of that stack looks exactly like
+/// the refusal of the pickup the character is still walking for, and
+/// taking the controls back on it stopped the walk a stride in (see
+/// [`answers_walk`]).
+fn answers_a_pour(pour: Option<&pack::PourSent>, item: u32) -> bool {
+    pour.is_some_and(|p| p.merge.from == item || p.merge.to == item)
+}
 pub mod logoff;
 pub use logoff::{log_off_all, LOG_OFF_WAIT};
 // Getting somewhere is its own system now (`ac-nav`), with the world
@@ -1107,18 +1121,24 @@ impl Client {
                                         }
                                         self.loot_refused(item, err);
                                     }
+                                    let for_a_pour = answers_a_pour(
+                                        self.autoplay.pour.as_ref().map(|(p, _)| p),
+                                        item,
+                                    );
                                     // A pickup the server walked us to
                                     // for, refused: an answer like a
                                     // UseDone (see `server_walk_over`).
                                     // Only that pickup's, though: a wield
                                     // refused mid-charge is no answer to
                                     // the charge.
-                                    if answers_walk(
-                                        self.move_to,
-                                        &about,
-                                        self.last_used,
-                                        self.attacked,
-                                    ) {
+                                    if !for_a_pour
+                                        && answers_walk(
+                                            self.move_to,
+                                            &about,
+                                            self.last_used,
+                                            self.attacked,
+                                        )
+                                    {
                                         self.move_to_answered = true;
                                     }
                                 } else if ev == ac_net::messages::event::USE_DONE && rest.len() >= 4
@@ -3086,11 +3106,28 @@ impl Client {
         true
     }
 
-    /// Merge a carried stack into another of the same kind
-    /// (StackableMerge 0x0054: from, to, amount; the whole source when
-    /// `amount` is None). The server caps at the target's maximum stack
-    /// and leaves the rest in the source.
+    /// Merge a carried stack into another of the same kind, and settle
+    /// what the surviving stack was taken for.
+    ///
+    /// This is the way in for anything that asks for a merge and does
+    /// not follow it up: a panel's drag, a script, the shopping. The
+    /// rules' own tidying sends it with [`Self::send_merge`] and settles
+    /// the ledger when the server says the pour landed, since a refused
+    /// pour settles nothing.
     pub fn merge_stacks(&mut self, from: u32, to: u32, amount: Option<u32>) -> bool {
+        if !self.send_merge(from, to, amount) {
+            return false;
+        }
+        // While both entries are still there to read: the source's goes
+        // when the thing itself does.
+        self.autoplay.ledger.merged(from, to);
+        true
+    }
+
+    /// The merge itself (StackableMerge 0x0054: from, to, amount; the
+    /// whole source when `amount` is None). The server caps at the
+    /// target's maximum stack and leaves the rest in the source.
+    pub(crate) fn send_merge(&mut self, from: u32, to: u32, amount: Option<u32>) -> bool {
         use ac_net::messages::action;
         let me = self.world.player_guid;
         let (Some(a), Some(b)) = (self.world.objects.get(&from), self.world.objects.get(&to))
@@ -3119,9 +3156,6 @@ impl Client {
             amount,
             a.name
         );
-        // Settle what the surviving stack was taken for before the two
-        // become one, while both entries are still there to read.
-        self.autoplay.ledger.merged(from, to);
         let mut w = ac_net::wire::Writer::new();
         w.u32(from).u32(to).i32(amount as i32);
         self.session
@@ -4405,5 +4439,37 @@ mod tests {
         assert!(!answers_walk(to_portal, &[], None, None));
         // No walk, nothing to answer.
         assert!(!answers_walk(None, &[CORPSE], Some(CORPSE), None));
+    }
+
+    #[test]
+    fn a_pour_refused_on_the_way_is_no_answer_to_the_walk() {
+        // The tidying pours in the gaps between takes, so a refusal can
+        // land in the middle of a walk the server is doing. It is about
+        // two stacks in the pack and nothing else -- but a looted stack
+        // keeps the guid it was fetched under, so the refusal of a pour
+        // of that very stack reads exactly like the refusal of the
+        // pickup still being walked for.
+        use ac_world::object::MoveTarget;
+        const PYREAL: u32 = 0x8000_3421;
+        const MORE_PYREALS: u32 = 0x8000_3422;
+        let pour = pack::PourSent {
+            merge: pack::Merge {
+                from: PYREAL,
+                to: MORE_PYREALS,
+                amount: 5,
+                name: "Pyreal".into(),
+                frees_a_slot: true,
+            },
+            to_before: 40,
+        };
+        assert!(answers_a_pour(Some(&pour), PYREAL), "the source");
+        assert!(answers_a_pour(Some(&pour), MORE_PYREALS), "or the target");
+        // Anything else is the walk's business, as it always was.
+        assert!(!answers_a_pour(Some(&pour), CORPSE));
+        assert!(!answers_a_pour(None, PYREAL));
+        // Without the guard, the walk to fetch the stack would take its
+        // own loot's pour refusal for the pickup's answer.
+        let to_pyreal = Some(MoveTarget::Object(PYREAL));
+        assert!(answers_walk(to_pyreal, &[PYREAL, ME], None, None));
     }
 }

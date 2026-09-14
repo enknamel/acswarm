@@ -409,6 +409,27 @@ pub struct State {
     needs: Vec<Need>,
 }
 
+/// Why no stack was poured into another (see `Client::pour_next`).
+///
+/// Four answers rather than one, because the callers do different
+/// things with them: a town run stays where it is while a pour is in
+/// the air, and walks on to the counter when the pack is tight or the
+/// character too laden; the housekeeping says the laden one out loud
+/// once and then leaves the pack alone for a while.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum Unpoured {
+    /// The pack is as tight as it goes.
+    Tight,
+    /// There is something to pour and no room to be handed it. The
+    /// server weighs a pour as though the source were being picked up
+    /// for the first time.
+    Laden,
+    /// The last pour has not been answered yet.
+    Wait(crate::did::Did),
+    /// This pour was turned down, by the server or by our own rules.
+    Turned(crate::did::Did),
+}
+
 /// Something the character is short of.
 #[derive(Clone, Debug, PartialEq)]
 struct Need {
@@ -2419,6 +2440,159 @@ impl Client {
             .collect()
     }
 
+    /// Read the server's answer to the pour in the air, if there is one.
+    ///
+    /// `None` means there is nothing to wait for: no pour was sent, or
+    /// the one sent is over. `Some(Waiting)` means it is still out
+    /// there and the counts a new choice would be made from are stale.
+    /// Anything else is what the server said about it.
+    pub(crate) fn settle_pour(&mut self, now: Instant) -> Option<crate::did::Did> {
+        use crate::did::{Because, Did};
+        let (sent, at) = self.autoplay.pour.clone()?;
+        let (from, to) = (sent.merge.from, sent.merge.to);
+        let target_now = self.world.objects.get(&to).map(|o| o.stack_size.max(1));
+        let refusal = crate::pack::refusal_of(
+            at,
+            self.move_refused.get(&from).copied(),
+            self.move_refused.get(&to).copied(),
+        );
+        let waited = now.saturating_duration_since(at);
+        match crate::pack::pour_answer(&sent, target_now, refusal, waited) {
+            crate::pack::PourAnswer::InAir => {
+                Some(Did::waiting("the last pour has not landed yet"))
+            }
+            crate::pack::PourAnswer::Landed => {
+                // What the surviving stack was taken for is settled
+                // here rather than when the pour was sent: a refused
+                // pour used to raise the target's tag anyway, so a
+                // stack meant for a counter quietly became one to keep
+                // and was never sold.
+                self.autoplay.ledger.merged(from, to);
+                self.autoplay
+                    .growth
+                    .wont_merge
+                    .note((from, to), &Did::Done, now);
+                self.autoplay.pour = None;
+                tracing::debug!(
+                    "pour landed: {} {} into {to:#010x}",
+                    sent.merge.amount,
+                    sent.merge.name
+                );
+                None
+            }
+            crate::pack::PourAnswer::Refused(code) => {
+                // Spent: the refusal was about this pour, and leaving
+                // it behind would answer the next one too.
+                for g in [from, to] {
+                    if self
+                        .move_refused
+                        .get(&g)
+                        .is_some_and(|(_, when)| *when >= at)
+                    {
+                        self.move_refused.remove(&g);
+                    }
+                }
+                let did = Did::Blocked(match code {
+                    0 => Because::ours("the server would not put those two together"),
+                    code => Because::server(code),
+                });
+                self.autoplay.growth.wont_merge.note((from, to), &did, now);
+                self.autoplay.pour = None;
+                Some(did)
+            }
+            crate::pack::PourAnswer::Lost => {
+                // No word at all. Not a refusal -- the pair is left a
+                // moment and offered again -- but the pack has to be
+                // read afresh before anything else is asked for.
+                self.autoplay.growth.wont_merge.note(
+                    (from, to),
+                    &Did::waiting("no word on the pour"),
+                    now,
+                );
+                self.autoplay.pour = None;
+                None
+            }
+        }
+    }
+
+    /// Choose the next pour, send it, and remember it until the server
+    /// answers ([`Unpoured`] says why one was not sent).
+    ///
+    /// One at a time, because the server answers in its own time and
+    /// the counts a second choice would be made from are the ones from
+    /// before the first. What a pour must not touch is settled here: a
+    /// pair the server has turned down, a stack another errand is
+    /// holding, and weight the server will not hand the character.
+    pub(crate) fn pour_next(&mut self, now: Instant) -> Result<crate::pack::Merge, Unpoured> {
+        use crate::did::Did;
+        // Nothing is chosen over counts the server has not settled.
+        if let Some(did) = self.settle_pour(now) {
+            return Err(match did {
+                Did::Waiting(_) => Unpoured::Wait(did),
+                did => Unpoured::Turned(did),
+            });
+        }
+        let may_carry = self.burden_room();
+        let stacks = self.pack_stacks();
+        let errands = self.autoplay.held_by_an_errand();
+        // A pair the server has turned down waits its turn out, and a
+        // stack another errand is holding is left where it is. Without
+        // the first, one stubborn pair was the only answer ever given
+        // and nothing else in the pack was ever poured.
+        let skip = |from: u32, to: u32| {
+            self.autoplay.growth.wont_merge.held(&(from, to), now)
+                || errands.iter().flatten().any(|g| *g == from || *g == to)
+        };
+        let Some(m) = crate::pack::next_merge_unless(&stacks, may_carry, skip) else {
+            // Nothing to pour -- or nothing light enough. The two are
+            // worth telling apart: one is a tidy pack, the other is a
+            // character that must sell something first. Asked with the
+            // same skips, so a pack whose only pours are held is not
+            // called too laden.
+            return Err(
+                if crate::pack::next_merge_unless(&stacks, u32::MAX, skip).is_some() {
+                    Unpoured::Laden
+                } else {
+                    Unpoured::Tight
+                },
+            );
+        };
+        if self
+            .autoplay
+            .last_merge
+            .is_some_and(|t| now.duration_since(t) < crate::autoplay::MERGE_EVERY)
+        {
+            return Err(Unpoured::Wait(Did::waiting(
+                "the last pour has not landed yet",
+            )));
+        }
+        let to_before = self
+            .world
+            .objects
+            .get(&m.to)
+            .map(|o| o.stack_size.max(1))
+            .unwrap_or(0);
+        self.autoplay.last_merge = Some(now);
+        if !self.send_merge(m.from, m.to, Some(m.amount)) {
+            // Our own rules turned it down: not both carried, not the
+            // same weenie, or the target does not stack at all.
+            let did = Did::refused("those two will never join");
+            self.autoplay
+                .growth
+                .wont_merge
+                .note((m.from, m.to), &did, now);
+            return Err(Unpoured::Turned(did));
+        }
+        self.autoplay.pour = Some((
+            crate::pack::PourSent {
+                merge: m.clone(),
+                to_before,
+            },
+            now,
+        ));
+        Ok(m)
+    }
+
     /// Pour one loose stack into another, and say what came of it.
     ///
     /// `Did::Done` means the pack is as tight as it goes. `Blocked`
@@ -2428,58 +2602,24 @@ impl Client {
     /// refused a move that changes its burden by nothing at all. The
     /// refusal carries no message and no code, which is how a tidier
     /// that could not read it spent whole afternoons asking.
+    ///
+    /// This is the town run's way in, where tidying is the step and is
+    /// worth a status line of its own. Everywhere else the pack is
+    /// tidied as housekeeping (`Client::autoplay_tidy`).
     pub(crate) fn compress(&mut self, now: Instant) -> crate::did::Did {
         use crate::did::{Because, Did};
-        let may_carry = self.burden_room();
-        let stacks = self.pack_stacks();
-        let held = |from: u32, to: u32| self.autoplay.growth.wont_merge.held(&(from, to), now);
-        let Some(m) = crate::pack::next_merge_unless(&stacks, may_carry, held) else {
-            // Nothing to pour -- or nothing light enough. The two are
-            // worth telling apart: one is a tidy pack, the other is a
-            // character that must sell something first.
-            return if crate::pack::next_merge(&stacks).is_some() {
-                Did::Blocked(Because::ours("too laden to put stacks together"))
-            } else {
-                Did::Done
-            };
-        };
-        // What the server made of the last ask. It answers a pour it
-        // will not make with the source's guid and, half the time, no
-        // reason whatever.
-        if let Some((code, _)) = self.move_refused.remove(&m.from) {
-            let did = Did::Blocked(match code {
-                0 => Because::ours("the server would not put those two together"),
-                code => Because::server(code),
-            });
-            self.autoplay
-                .growth
-                .wont_merge
-                .note((m.from, m.to), &did, now);
-            return did;
+        match self.pour_next(now) {
+            Ok(m) => {
+                self.autoplay.say(
+                    Doing::Tidying,
+                    format!("putting {} {} with the rest", m.amount, m.name),
+                );
+                Did::Acting
+            }
+            Err(Unpoured::Tight) => Did::Done,
+            Err(Unpoured::Laden) => Did::Blocked(Because::ours("too laden to put stacks together")),
+            Err(Unpoured::Wait(did) | Unpoured::Turned(did)) => did,
         }
-        if self
-            .autoplay
-            .last_merge
-            .is_some_and(|t| now.duration_since(t) < crate::autoplay::MERGE_EVERY)
-        {
-            return Did::waiting("the last pour has not landed yet");
-        }
-        self.autoplay.last_merge = Some(now);
-        if !self.merge_stacks(m.from, m.to, Some(m.amount)) {
-            // Our own rules turned it down: not both carried, not the
-            // same weenie, or the target does not stack at all.
-            let did = Did::refused("those two will never join");
-            self.autoplay
-                .growth
-                .wont_merge
-                .note((m.from, m.to), &did, now);
-            return did;
-        }
-        self.autoplay.say(
-            Doing::Tidying,
-            format!("putting {} {} with the rest", m.amount, m.name),
-        );
-        Did::Acting
     }
 
     /// Something was handed to the counter and it has not answered
@@ -4224,6 +4364,181 @@ mod tests {
         assert!(!ammo_stock("Arrow", ammo_type::BOLT));
         assert!(ammo_stock("Quarrel", ammo_type::BOLT));
         assert!(ammo_stock("Atlatl Dart", ammo_type::ATLATL));
+    }
+
+    /// The character whose pack these tests are about.
+    const TIDIER: u32 = 0x5000_0001;
+
+    /// A character carrying `stacks` of `(guid, wcid, count, max)`,
+    /// offline, when the archives are there to be read.
+    fn carrying(stacks: &[(u32, u32, u32, u32)]) -> Option<Client> {
+        let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
+            eprintln!("AC_DATA_DIR unset; skipping");
+            return None;
+        };
+        let assets = std::rc::Rc::new(ac_scene::Assets::open(dir).unwrap());
+        let mut c = offline_client(assets);
+        c.world.player_guid = Some(TIDIER);
+        for &(guid, wcid, count, max) in stacks {
+            c.world.objects.insert(
+                guid,
+                ac_world::WorldObject {
+                    guid,
+                    weenie_class_id: wcid,
+                    name: format!("thing {wcid}"),
+                    stack_size: count,
+                    max_stack_size: max,
+                    container: Some(TIDIER),
+                    parent: Some(TIDIER),
+                    ..Default::default()
+                },
+            );
+        }
+        Some(c)
+    }
+
+    /// The server's answer to a whole pour: the source forgotten, the
+    /// target's new size.
+    fn poured(c: &mut Client, from: u32, to: u32, now: u32) {
+        c.world.objects.remove(&from);
+        if let Some(o) = c.world.objects.get_mut(&to) {
+            o.stack_size = now;
+        }
+    }
+
+    #[test]
+    fn lead_peas_taken_in_two_stacks_are_poured_together_without_a_tick_of_their_own() {
+        // The report: peas looted off one corpse after another sit in
+        // stacks of their own. Nothing here waits for a quiet moment --
+        // there is a fight on -- because the server makes a pack-to-pack
+        // merge on the spot.
+        let Some(mut c) = carrying(&[(1, 8329, 40, 100), (2, 8329, 5, 100)]) else {
+            return;
+        };
+        c.attack_target = Some(0x8000_30F2);
+        let t0 = Instant::now();
+        c.autoplay_tidy(t0);
+        let sent = c.autoplay.pour.clone().expect("a pour went out").0;
+        assert_eq!(
+            (sent.merge.from, sent.merge.to, sent.merge.amount),
+            (2, 1, 5)
+        );
+        assert_eq!(sent.to_before, 40);
+        // Nothing else is asked for while the server has not answered:
+        // the counts a second choice would be made from are stale.
+        c.autoplay_tidy(t0 + Duration::from_millis(100));
+        assert_eq!(
+            c.autoplay.pour.as_ref().map(|(p, _)| p.merge.clone()),
+            Some(sent.merge.clone())
+        );
+        // The answer, read off the target's new size.
+        poured(&mut c, 2, 1, 45);
+        c.autoplay_tidy(t0 + Duration::from_millis(700));
+        assert!(c.autoplay.pour.is_none(), "the pour landed");
+    }
+
+    #[test]
+    fn a_pair_the_server_turns_down_does_not_stop_the_rest_being_tidied() {
+        // One stubborn pair used to be the only answer ever offered, so
+        // it was asked for every 600 ms and nothing else in the pack was
+        // ever poured together.
+        let Some(mut c) = carrying(&[
+            (1, 273, 5000, 25000),
+            (2, 273, 900, 25000),
+            (3, 8329, 40, 100),
+            (4, 8329, 5, 100),
+        ]) else {
+            return;
+        };
+        let t0 = Instant::now();
+        c.autoplay_tidy(t0);
+        let first = c.autoplay.pour.clone().expect("a pour went out").0.merge;
+        assert_eq!((first.from, first.to), (2, 1));
+        // InventoryServerSaveFailed naming the source, with no reason
+        // at all, which is half of them.
+        c.move_refused
+            .insert(2, (0, t0 + Duration::from_millis(50)));
+        c.autoplay_tidy(t0 + Duration::from_millis(700));
+        assert!(
+            !c.move_refused.contains_key(&2),
+            "the refusal was this pour's and is spent"
+        );
+        let next = c.autoplay.pour.clone().expect("the next pair").0.merge;
+        assert_eq!((next.from, next.to), (4, 3), "the peas go in instead");
+    }
+
+    #[test]
+    fn a_refusal_naming_the_target_is_read_as_this_pours_answer() {
+        // A stack that is stuck, or being traded, is refused under the
+        // target's guid. Read only under the source's, these were never
+        // seen at all and the same pair was offered every 600 ms.
+        let Some(mut c) = carrying(&[(1, 8329, 40, 100), (2, 8329, 5, 100)]) else {
+            return;
+        };
+        let t0 = Instant::now();
+        c.autoplay_tidy(t0);
+        c.move_refused
+            .insert(1, (0x29, t0 + Duration::from_millis(50)));
+        c.autoplay_tidy(t0 + Duration::from_millis(700));
+        assert!(c.autoplay.pour.is_none(), "the pour is over");
+        assert!(!c.move_refused.contains_key(&1));
+        // And the pair is left alone for a while rather than asked again.
+        assert!(c
+            .autoplay
+            .growth
+            .wont_merge
+            .held(&(2, 1), t0 + Duration::from_millis(800)));
+    }
+
+    #[test]
+    fn what_a_stack_was_taken_for_is_settled_when_the_pour_lands_and_not_before() {
+        use ac_loot::LootAction;
+        let stats = |guid: u32| crate::items::ItemStats {
+            guid,
+            wcid: 8329,
+            name: "Lead Pea".into(),
+            ..Default::default()
+        };
+        // The big stack is meant for a counter, the small one is kept:
+        // pouring the kept one in makes the survivor a keeper too.
+        let Some(mut c) = carrying(&[(1, 8329, 40, 100), (2, 8329, 5, 100)]) else {
+            return;
+        };
+        c.autoplay.ledger.remember(&stats(1), LootAction::Sell);
+        c.autoplay.ledger.remember(&stats(2), LootAction::Keep);
+        let t0 = Instant::now();
+        c.autoplay_tidy(t0);
+        c.move_refused
+            .insert(2, (0, t0 + Duration::from_millis(50)));
+        c.autoplay_tidy(t0 + Duration::from_millis(700));
+        assert_eq!(
+            c.autoplay.ledger.by_guid(1),
+            Some(LootAction::Sell),
+            "a pour that never happened settles nothing"
+        );
+        // The same pour, landed: now the survivor is a keeper.
+        let Some(mut c) = carrying(&[(1, 8329, 40, 100), (2, 8329, 5, 100)]) else {
+            return;
+        };
+        c.autoplay.ledger.remember(&stats(1), LootAction::Sell);
+        c.autoplay.ledger.remember(&stats(2), LootAction::Keep);
+        c.autoplay_tidy(t0);
+        poured(&mut c, 2, 1, 45);
+        c.autoplay_tidy(t0 + Duration::from_millis(700));
+        assert_eq!(c.autoplay.ledger.by_guid(1), Some(LootAction::Keep));
+    }
+
+    #[test]
+    fn a_pour_with_no_word_at_all_is_given_up_on_and_the_pack_read_afresh() {
+        let Some(mut c) = carrying(&[(1, 8329, 40, 100), (2, 8329, 5, 100)]) else {
+            return;
+        };
+        let t0 = Instant::now();
+        c.autoplay_tidy(t0);
+        assert!(c.autoplay.pour.is_some());
+        // Nothing comes back: no refusal, no new counts.
+        c.autoplay_tidy(t0 + crate::pack::POUR_LOST);
+        assert!(c.autoplay.pour.is_none(), "given up as lost");
     }
 
     #[test]

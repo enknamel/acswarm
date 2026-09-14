@@ -101,6 +101,63 @@ pub(crate) fn refused_item(item: u32, err: u32, inflight: Option<u32>) -> Option
     }
 }
 
+/// Everything that can stand between the pack and a tidier pack, as
+/// `Client::autoplay_tidy` finds it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct TidyGate {
+    /// The loot profile says this character does not tidy.
+    pub(crate) tidy_pack_off: bool,
+    /// A vendor's window is open.
+    pub(crate) counter_open: bool,
+    /// Loading or unloading the party's quartermaster.
+    pub(crate) quartermaster: bool,
+    /// Two bundles are waiting to be made into ammunition.
+    pub(crate) crafting: bool,
+    /// Something was handed to a teammate a moment ago.
+    pub(crate) gave_lately: bool,
+    /// A take is queued or on its way from a corpse.
+    pub(crate) take_in_air: bool,
+}
+
+/// Why the pack is being left alone, or `None` to go ahead.
+///
+/// Beyond the profile's own say-so, every one of these is a moment when
+/// something else is counting on a guid staying where it is. A merge
+/// makes one stack vanish into another, and whatever was holding it --
+/// a sale list, the money counted out for a runner, a take the server
+/// has not answered -- is then waiting on something that does not exist.
+fn why_not_tidy(g: TidyGate) -> Option<&'static str> {
+    if g.tidy_pack_off {
+        // Nothing stops a player tidying by hand; this is only the
+        // rules keeping their hands off a pack they were told to.
+        Some("this profile leaves the pack as it is")
+    } else if g.counter_open {
+        // A run to town holds what it has sent the vendor by guid, and
+        // a merge makes one of those vanish mid-sale. Whatever was
+        // bought is tidied the moment the window closes.
+        Some("a counter is open")
+    } else if g.quartermaster {
+        // Money counted out for the runner is a stack of its own, and
+        // tidying poured it straight back into the pile it came from:
+        // count out, merge back, count out again, a hundred and twenty
+        // six times in one watched run.
+        Some("the quartermaster is being loaded or unloaded")
+    } else if g.crafting {
+        // The heads and the shafts are about to be used on each other.
+        Some("ammunition is being made")
+    } else if g.gave_lately {
+        // A hand-over is a split and a give, and the server is still
+        // working through it.
+        Some("something was just handed to a teammate")
+    } else if g.take_in_air {
+        // The thing coming off the corpse may be the very stack a pour
+        // would empty, and the server answers one at a time.
+        Some("a take is queued or in the air")
+    } else {
+        None
+    }
+}
+
 /// What the character has room for, as a corpse waiting on it sees it
 /// (see `Client::room_for_loot`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -772,6 +829,11 @@ const GIVE_EVERY: Duration = Duration::from_millis(700);
 /// How often a stack is poured into another. The server takes one merge
 /// at a time and answers in its own time.
 pub(crate) const MERGE_EVERY: Duration = Duration::from_millis(600);
+/// How long the tidying leaves the pack alone once weight is the only
+/// thing standing between it and a tighter pack. Nothing the character
+/// can do about that comes quickly: it has to sell, or hand something
+/// over, and looking every tick only burns the time.
+const TIDY_LADEN_WAIT: Duration = Duration::from_secs(30);
 /// A corpse this close is looted, wherever it came from.
 const LOOT_NEAR: f32 = 20.0;
 /// How long after a killing blow its corpse is taken to be on the way.
@@ -1375,6 +1437,18 @@ pub struct Autoplay {
     /// that last improved. See `Client::reaching_too_long`.
     reaching: Option<(glam::Vec3, f32, Instant)>,
     pub(crate) last_merge: Option<Instant>,
+    /// The pour asked for and not yet answered, and when it went out.
+    /// Until the server has said, the counts the next pour would be
+    /// chosen from are the ones from before this one (see
+    /// `crate::pack::pour_answer`).
+    pub(crate) pour: Option<(crate::pack::PourSent, Instant)>,
+    /// When the pack was last looked over for a pour. Working out what
+    /// is worth pouring copies every stack's name, and the answer
+    /// cannot change faster than the server answers.
+    pub(crate) tidy_looked: Option<Instant>,
+    /// Tidying left alone until then, because weight is all that stands
+    /// in its way ([`TIDY_LADEN_WAIT`]).
+    pub(crate) tidy_laden_until: Option<Instant>,
     /// Emptying the corpse in front of us, as `ac-loot` sees it: what
     /// has been asked for, what will not come, how many have been
     /// taken. Started afresh for each body.
@@ -1621,6 +1695,31 @@ impl Autoplay {
             Some(t) => now.duration_since(t) < CAST_LOST,
             None => false,
         }
+    }
+
+    /// Every guid some other errand is holding on to across ticks.
+    ///
+    /// Each of these is a thing another part of the rules has written
+    /// down and will come back to: a weapon to wield once the hands are
+    /// free, the arrows chosen for this target, the two bundles waiting
+    /// to be made into ammunition, the stack counted out for a teammate.
+    /// Pouring one of those into another stack makes its guid vanish
+    /// under the errand, which then waits on something that no longer
+    /// exists. The money one was watched: counted out, poured straight
+    /// back, counted out again.
+    pub(crate) fn held_by_an_errand(&self) -> [Option<u32>; 6] {
+        let (craft_from, craft_to) = match self.crafting {
+            Some((from, to, _)) => (Some(from), Some(to)),
+            None => (None, None),
+        };
+        [
+            self.pending_wield,
+            self.wanted_ammo,
+            self.put_down,
+            craft_from,
+            craft_to,
+            self.handing.map(|(item, _)| item),
+        ]
     }
 
     /// Something worth knowing that is not what the character is doing:
@@ -2057,56 +2156,75 @@ impl Client {
             .collect()
     }
 
-    /// Pour loose stacks together. True when a merge went out.
+    /// Pour loose stacks together, a pour at a time.
     ///
     /// Slots are the scarce thing, not weight, and nothing warns a
-    /// player that a purchase landed beside a pile of the same. This
-    /// runs before the rules that decide the pack is full, so that a
-    /// pack full of change does not send the character to town.
-    pub(crate) fn autoplay_tidy(&mut self, now: Instant) -> bool {
-        // With no profile the pack is still tidied: it is not looting.
-        if !self.loot_profile().is_none_or(|p| p.looting.tidy_pack) {
-            return false;
+    /// player that a purchase landed beside a pile of the same, or that
+    /// the peas taken off four corpses are sitting in four stacks. This
+    /// is housekeeping rather than a goal because it must not have to
+    /// win a tick to happen: a character that fights, loots and walks
+    /// all afternoon never has a quiet one, and tidying that waits for
+    /// one never runs. It costs nothing to let it go first -- the server
+    /// makes a pack-to-pack merge on the spot, with no walk, no animation
+    /// and no busy check, so a pour cannot get in the way of a take, a
+    /// cast or a walk.
+    pub(crate) fn autoplay_tidy(&mut self, now: Instant) {
+        // Read the last pour's answer before any gate. A counter opened
+        // or a fight started in the meantime is no reason to go on
+        // believing a pour is still in the air.
+        match self.settle_pour(now) {
+            Some(crate::did::Did::Waiting(_)) => return,
+            Some(did) => self.aside("tidy the pack", &did, now),
+            None => {}
         }
-        // Not with a counter open. A run to town holds a list of what
-        // it has sent the vendor, by guid, and a merge makes one of
-        // those guids vanish mid-sale. Whatever was bought is tidied
-        // the moment the window closes, which is soon enough.
-        if self.world.open_vendor.is_some() {
-            return false;
+        let gate = TidyGate {
+            // With no profile the pack is still tidied: it is not looting.
+            tidy_pack_off: !self.loot_profile().is_none_or(|p| p.looting.tidy_pack),
+            counter_open: self.world.open_vendor.is_some(),
+            quartermaster: matches!(
+                self.autoplay.growth.mode.stage(),
+                Some(crate::logistics::Stage::HandOver | crate::logistics::Stage::HandOut)
+            ),
+            crafting: self.autoplay.crafting.is_some(),
+            gave_lately: self
+                .autoplay
+                .last_give
+                .is_some_and(|t| now.duration_since(t) < GIVE_EVERY),
+            take_in_air: self.loot_inflight.is_some() || !self.loot_queue.is_empty(),
+        };
+        if let Some(why) = why_not_tidy(gate) {
+            tracing::trace!("not tidying the pack: {why}");
+            return;
         }
-        // Nor in the middle of loading or unloading the quartermaster.
-        // Money counted out for the runner is a stack of its own, and
-        // tidying poured it straight back into the pile it came from --
-        // count out, merge back, count out again, a hundred and twenty
-        // six times in one watched run.
-        if matches!(
-            self.autoplay.growth.mode.stage(),
-            Some(crate::logistics::Stage::HandOver | crate::logistics::Stage::HandOut)
-        ) {
-            return false;
+        if self.autoplay.tidy_laden_until.is_some_and(|t| now < t) {
+            return;
         }
+        // Deciding what to pour copies the name of every stack carried,
+        // and no answer can change faster than the server gives one.
         if self
             .autoplay
-            .last_merge
+            .tidy_looked
             .is_some_and(|t| now.duration_since(t) < MERGE_EVERY)
         {
-            return false;
+            return;
         }
-        let Some(m) = crate::pack::next_merge(&self.pack_stacks()) else {
-            return false;
-        };
-        if !self.merge_stacks(m.from, m.to, Some(m.amount)) {
-            // The server would refuse it; do not ask again at once.
-            self.autoplay.last_merge = Some(now);
-            return false;
+        self.autoplay.tidy_looked = Some(now);
+        match self.pour_next(now) {
+            // A note, not a `say`: this is not what the character is
+            // doing. Said as a status it would flicker against the
+            // fighting or looting that is.
+            Ok(m) => self.autoplay.note(
+                format!("putting {} {} with the rest", m.amount, m.name),
+                now,
+            ),
+            Err(crate::growth::Unpoured::Laden) => {
+                self.autoplay.tidy_laden_until = Some(now + TIDY_LADEN_WAIT);
+                let did = crate::did::Did::blocked("too laden to put stacks together");
+                self.aside("tidy the pack", &did, now);
+            }
+            Err(crate::growth::Unpoured::Turned(did)) => self.aside("tidy the pack", &did, now),
+            Err(crate::growth::Unpoured::Tight | crate::growth::Unpoured::Wait(_)) => {}
         }
-        self.autoplay.last_merge = Some(now);
-        self.autoplay.say(
-            Doing::Tidying,
-            format!("putting {} {} with the rest", m.amount, m.name),
-        );
-        true
     }
 
     /// Heal, and break off a losing fight. True when it acted.
@@ -5782,6 +5900,118 @@ mod tests {
         assert_eq!(refused_item(dagger, 0, Some(gem)), Some(dagger));
         assert!(only_so_often(0x043E) && only_so_often(0x043F));
         assert!(!only_so_often(0));
+    }
+
+    #[test]
+    fn a_pour_refused_while_a_take_is_in_the_air_is_not_the_takes_refusal() {
+        // The tidying pours in the gaps between takes, so both can be
+        // out at once. A refusal that names a stack in the pack is
+        // about that stack, and the take goes on waiting for its own
+        // answer rather than being written off.
+        let (in_the_pack, on_the_corpse) = (0x8000_7001, 0x8000_7002);
+        assert_eq!(
+            refused_item(in_the_pack, 0, Some(on_the_corpse)),
+            Some(in_the_pack)
+        );
+    }
+
+    #[test]
+    fn a_profile_with_tidy_pack_off_is_never_tidied() {
+        assert_eq!(
+            why_not_tidy(TidyGate {
+                tidy_pack_off: true,
+                ..TidyGate::default()
+            }),
+            Some("this profile leaves the pack as it is")
+        );
+    }
+
+    #[test]
+    fn nothing_is_poured_with_a_counter_open() {
+        // A sale holds what it has sent the vendor by guid, and a pour
+        // makes one of those vanish out from under it.
+        assert_eq!(
+            why_not_tidy(TidyGate {
+                counter_open: true,
+                ..TidyGate::default()
+            }),
+            Some("a counter is open")
+        );
+    }
+
+    #[test]
+    fn nor_while_the_quartermaster_is_loaded_or_unloaded() {
+        // Money counted out into its own stack was poured straight back
+        // into the pile it came from, a hundred and twenty six times.
+        assert_eq!(
+            why_not_tidy(TidyGate {
+                quartermaster: true,
+                ..TidyGate::default()
+            }),
+            Some("the quartermaster is being loaded or unloaded")
+        );
+    }
+
+    #[test]
+    fn nor_while_ammunition_is_being_made() {
+        assert_eq!(
+            why_not_tidy(TidyGate {
+                crafting: true,
+                ..TidyGate::default()
+            }),
+            Some("ammunition is being made")
+        );
+    }
+
+    #[test]
+    fn nor_just_after_a_hand_over_to_a_teammate() {
+        assert_eq!(
+            why_not_tidy(TidyGate {
+                gave_lately: true,
+                ..TidyGate::default()
+            }),
+            Some("something was just handed to a teammate")
+        );
+    }
+
+    #[test]
+    fn nor_while_a_take_is_queued_or_in_the_air() {
+        assert_eq!(
+            why_not_tidy(TidyGate {
+                take_in_air: true,
+                ..TidyGate::default()
+            }),
+            Some("a take is queued or in the air")
+        );
+    }
+
+    #[test]
+    fn with_nothing_in_the_way_the_pack_is_tidied() {
+        assert_eq!(why_not_tidy(TidyGate::default()), None);
+        // The first reason that applies is the one given.
+        assert_eq!(
+            why_not_tidy(TidyGate {
+                counter_open: true,
+                take_in_air: true,
+                ..TidyGate::default()
+            }),
+            Some("a counter is open")
+        );
+    }
+
+    #[test]
+    fn every_errand_holding_a_stack_is_offered_up() {
+        // Whatever another part of the rules is holding across ticks
+        // must not be poured away under it.
+        let mut ap = Autoplay::default();
+        assert_eq!(ap.held_by_an_errand().iter().flatten().count(), 0);
+        ap.pending_wield = Some(1);
+        ap.wanted_ammo = Some(2);
+        ap.put_down = Some(3);
+        ap.crafting = Some((4, 5, Instant::now()));
+        ap.handing = Some((6, Instant::now()));
+        let held: Vec<u32> = ap.held_by_an_errand().iter().flatten().copied().collect();
+        assert_eq!(held, vec![1, 2, 3, 4, 5, 6]);
     }
 
     #[test]
