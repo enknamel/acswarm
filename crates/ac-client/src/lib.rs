@@ -202,8 +202,19 @@ fn answers_walk(
 /// the refusal of the pickup the character is still walking for, and
 /// taking the controls back on it stopped the walk a stride in (see
 /// [`answers_walk`]).
-fn answers_a_pour(pour: Option<&pack::PourSent>, item: u32) -> bool {
-    pour.is_some_and(|p| p.merge.from == item || p.merge.to == item)
+///
+/// Only while the pour is still in the air. The settler is housekeeping
+/// and housekeeping does not run with autoplay off, or while the
+/// character is dodging, dying or in the Academy -- so a pour sent a
+/// moment before any of those stays recorded for as long as the
+/// character stands there, and without this it went on claiming every
+/// refusal those two guids were ever named in. [`pack::POUR_LOST`] is
+/// the same wall the settler gives up at.
+fn answers_a_pour(pour: Option<&(pack::PourSent, Instant)>, item: u32, now: Instant) -> bool {
+    pour.is_some_and(|(p, at)| {
+        now.saturating_duration_since(*at) < pack::POUR_LOST
+            && (p.merge.from == item || p.merge.to == item)
+    })
 }
 pub mod logoff;
 pub use logoff::{log_off_all, LOG_OFF_WAIT};
@@ -1152,10 +1163,8 @@ impl Client {
                                     if self.autoplay.wield_asked == Some(item) {
                                         self.hold_off_wield(item, now);
                                     }
-                                    let for_a_pour = answers_a_pour(
-                                        self.autoplay.pour.as_ref().map(|(p, _)| p),
-                                        item,
-                                    );
+                                    let for_a_pour =
+                                        answers_a_pour(self.autoplay.pour.as_ref(), item, now);
                                     // A pickup the server walked us to
                                     // for, refused: an answer like a
                                     // UseDone (see `server_walk_over`).
@@ -4617,11 +4626,30 @@ mod tests {
             },
             to_before: 40,
         };
-        assert!(answers_a_pour(Some(&pour), PYREAL), "the source");
-        assert!(answers_a_pour(Some(&pour), MORE_PYREALS), "or the target");
+        let sent = Instant::now();
+        let air = (pour, sent);
+        assert!(answers_a_pour(Some(&air), PYREAL, sent), "the source");
+        assert!(
+            answers_a_pour(Some(&air), MORE_PYREALS, sent),
+            "or the target"
+        );
         // Anything else is the walk's business, as it always was.
-        assert!(!answers_a_pour(Some(&pour), CORPSE));
-        assert!(!answers_a_pour(None, PYREAL));
+        assert!(!answers_a_pour(Some(&air), CORPSE, sent));
+        assert!(!answers_a_pour(None, PYREAL, sent));
+        // A pour nobody ever settled -- autoplay switched off a moment
+        // after it went out, so the housekeeping that settles it never
+        // ran again -- stops claiming refusals at the same wall the
+        // settler gives up at. Without this it went on swallowing the
+        // answers to server walks for those two stacks for as long as
+        // the character stood there.
+        let later = sent + pack::POUR_LOST;
+        assert!(!answers_a_pour(Some(&air), PYREAL, later));
+        assert!(!answers_a_pour(Some(&air), MORE_PYREALS, later));
+        assert!(answers_a_pour(
+            Some(&air),
+            PYREAL,
+            sent + pack::POUR_LOST - std::time::Duration::from_millis(1)
+        ));
         // Without the guard, the walk to fetch the stack would take its
         // own loot's pour refusal for the pickup's answer.
         let to_pyreal = Some(MoveTarget::Object(PYREAL));
