@@ -2205,6 +2205,12 @@ impl ApplicationHandler for App {
             WindowEvent::Occluded(occluded) => {
                 self.render.occluded = occluded;
                 self.render.last_view = None;
+                // Shown again: draw now. The last frame was paced as a
+                // hidden one, and until the next is drawn the window shows
+                // whatever it presented before it was hidden.
+                if !occluded {
+                    self.next_frame = Instant::now();
+                }
             }
             WindowEvent::KeyboardInput { event, .. } => {
                 if let PhysicalKey::Code(code) = event.physical_key {
@@ -2414,15 +2420,13 @@ impl ApplicationHandler for App {
                     // Draw only when something can look different: the
                     // world or camera changed, the overlay wants a
                     // repaint, or the window is new. A hidden window
-                    // draws nothing at all, but it still submits what
-                    // the tick uploaded (see `Gpu::idle_frame`).
+                    // draws nothing at all.
                     let overlay_changed = self.ui.as_ref().is_some_and(|u| u.repaint_wanted());
                     let view = (vp, (w, h));
                     let unchanged =
                         self.render.last_view == Some(view) && !g.is_dirty() && !overlay_changed;
-                    if self.render.occluded || unchanged {
-                        self.render.perf.idle_frames += 1;
-                        g.idle_frame();
+                    let presented = if self.render.occluded || unchanged {
+                        false
                     } else {
                         let cpu_ms = now.elapsed().as_secs_f32() * 1e3;
                         let mut ui = self.ui.as_mut();
@@ -2435,16 +2439,33 @@ impl ApplicationHandler for App {
                                     ui.paint(d, q, e, v);
                                 }
                             };
-                        if let Err(e) = g.render(vp, Vec3::new(0.4, 0.3, 1.0), Some(&mut paint)) {
-                            tracing::error!("render: {e:#}");
+                        let presented =
+                            match g.render(vp, Vec3::new(0.4, 0.3, 1.0), Some(&mut paint)) {
+                                Ok(presented) => presented,
+                                Err(e) => {
+                                    tracing::error!("render: {e:#}");
+                                    false
+                                }
+                            };
+                        // Only a presented frame is on screen: one the
+                        // surface refused is tried again next frame, or
+                        // the window would keep an old image.
+                        if presented {
+                            self.render.last_view = Some(view);
+                            // Perf keeps every frame's times for the exit
+                            // report, which only --perf prints.
+                            if self.cli.perf {
+                                let ms = now.elapsed().as_secs_f32() * 1e3;
+                                self.render.perf.frame(ms, cpu_ms, overlay_ms, g.stats());
+                            }
                         }
-                        self.render.last_view = Some(view);
-                        // Perf keeps every frame's times for the exit
-                        // report, which only --perf prints.
-                        if self.cli.perf {
-                            let ms = now.elapsed().as_secs_f32() * 1e3;
-                            self.render.perf.frame(ms, cpu_ms, overlay_ms, g.stats());
-                        }
+                        presented
+                    };
+                    // Nothing submitted what the tick uploaded; this does
+                    // (see `Gpu::idle_frame`).
+                    if !presented {
+                        self.render.perf.idle_frames += 1;
+                        g.idle_frame();
                     }
                     self.gpu = Some(g);
                 }
