@@ -528,6 +528,115 @@ struct Run {
     walked_on: Option<Instant>,
 }
 
+/// What one turn of a run to town came to.
+///
+/// Autoplay only asks whether the run goes on. The vendoring panel's
+/// Step asks more: it carries the run on until one act has gone out
+/// and then holds, so a trip can be read a line at a time. An act is
+/// something sent to the world -- a walk begun or planned again, a
+/// counter used, the pack put up for appraisal, a pour, an armful, a
+/// purchase -- or a walk on to the next counter. Waiting on the walk,
+/// on the window, on the appraisals, on the counter's answer to the
+/// last thing it was handed, and moving from one phase to the next
+/// without sending anything, are not: a Step that lands on a wait
+/// waits it out, and takes the act that follows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Turn {
+    /// Something went out.
+    Acted,
+    /// Nothing did; the world has not answered yet.
+    Waited,
+    /// The run is over.
+    Over,
+}
+
+impl Turn {
+    /// True while the run goes on, which is all autoplay's tick asks.
+    pub fn goes_on(self) -> bool {
+        self != Turn::Over
+    }
+
+    /// What leaving a counter came to: a walk to the next one begun, or
+    /// the run over (see [`Client::grow_run_next`]).
+    fn after_stop(goes_on: bool) -> Turn {
+        if goes_on {
+            Turn::Acted
+        } else {
+            Turn::Over
+        }
+    }
+}
+
+/// Who steps the run to town in progress.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Driver {
+    /// Autoplay's own tick, at its own pace.
+    Autoplay,
+    /// The vendoring panel, one act or one frame at a time.
+    Hand,
+}
+
+/// Who steps a run to town: the panel when it asked for the run, or
+/// when autoplay is not running town runs and so would never step it
+/// (a run left over from autoplay being switched off part-way); autoplay
+/// otherwise.
+fn driver(by_hand: bool, autoplay_drives: bool) -> Driver {
+    if by_hand || !autoplay_drives {
+        Driver::Hand
+    } else {
+        Driver::Autoplay
+    }
+}
+
+/// How long the panel can leave a run before it counts as having let
+/// go of it. The panel steps a run it is driving every frame, so a
+/// second without a step is a run held on purpose -- a Step that has
+/// had its act, or a panel closed on one.
+const HAND_HOLD: Duration = Duration::from_secs(1);
+
+/// Whether the panel has let go of the run it was driving: nothing has
+/// stepped it for [`HAND_HOLD`]. A run left like that with autoplay
+/// running town runs is autoplay's again, and with them off it stands
+/// where it is and the status line says why. Without this a Step
+/// pressed once and the panel closed stood the character at the counter
+/// for good, autoplay claiming every tick for a run nothing was
+/// stepping, with nothing on the status line to say so.
+fn hand_has_let_go(stepped: Option<Instant>, now: Instant) -> bool {
+    stepped.is_none_or(|t| now.saturating_duration_since(t) >= HAND_HOLD)
+}
+
+/// Whether a window opened for `vendor` is one a run stopped waiting
+/// for: it was asked for at `asked` by a run that ended before it came,
+/// and it has come within the time the run would have waited. Later
+/// than that it is more likely the player's own doing, and is left be.
+fn window_is_unwanted(unwanted: Option<(u32, Instant)>, vendor: u32, now: Instant) -> bool {
+    unwanted.is_some_and(|(guid, asked)| {
+        guid == vendor && now.saturating_duration_since(asked) <= VENDOR_OPEN_TIMEOUT
+    })
+}
+
+/// A run to town as the vendoring panel shows it: read, not moved on.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TownRunView {
+    pub vendor: String,
+    /// Why the run was made.
+    pub reason: String,
+    /// Which counter of the run this is, counting from one.
+    pub stop: u32,
+    pub phase: String,
+    /// What the shopping rules would do next, once selling: asked of
+    /// a copy of the rules, so the run itself does not move.
+    pub next: Option<ac_vendor::Act>,
+    /// How the run puts what it is doing or waiting on, whatever the
+    /// phase.
+    pub saying: String,
+    /// Sold on the whole run, this counter included.
+    pub sold: u32,
+    /// Handed over at this counter and not yet answered for.
+    pub waiting: usize,
+    pub driver: Driver,
+}
+
 /// The running state of the growth rules.
 #[derive(Default)]
 pub struct State {
@@ -609,6 +718,23 @@ pub struct State {
     /// Grounds not to go to for a while, and since when.
     skip: Vec<(u32, Instant)>,
     run: Option<Run>,
+    /// The run in progress was asked for from the vendoring panel and
+    /// is stepped from there, not by autoplay's tick (see
+    /// [`Client::town_run_by_hand`]). Autoplay still counts it as the
+    /// character being busy, and does not let it go for town runs being
+    /// off: the panel is the one thing that runs the shopping with the
+    /// rest of autoplay off. Left held for a while with autoplay
+    /// running town runs, it is autoplay's again (see
+    /// [`hand_has_let_go`]).
+    by_hand: bool,
+    /// When the panel last stepped the run.
+    hand_stepped: Option<Instant>,
+    /// A counter asked to open its window by a run that then ended
+    /// before it did, and when. The window is closed if it comes within
+    /// the time the run would have waited for it: opened after the run
+    /// it was for, it would stand between the tidying and every pour,
+    /// and the panel would show a counter open with nobody at it.
+    window_unwanted: Option<(u32, Instant)>,
     last_run: Option<Instant>,
     /// Counters not to walk to for a while, keyed by where they stand
     /// rounded to the metre. A counter that could not be reached, or
@@ -1265,6 +1391,11 @@ impl State {
         self.run.is_some()
     }
 
+    /// Whether the run under way is the vendoring panel's to step.
+    pub(crate) fn run_by_hand(&self) -> bool {
+        self.by_hand && self.run.is_some()
+    }
+
     /// Whether the growth rules have somewhere to be: a hunting ground to
     /// reach (`bound`) or counters to go round (`run`). That says why the
     /// character would be travelling, and nothing about whether it still
@@ -1281,7 +1412,10 @@ impl State {
     /// on every patrol, and a run held open kept a follower from its
     /// leader.
     fn drop_what_is_turned_off(&mut self, town_runs: bool, grounds: bool) {
-        if !town_runs && self.run.take().is_some() {
+        // A run the panel is driving is not autoplay's to let go: town
+        // runs being off is exactly when the panel is the thing running
+        // one.
+        if !town_runs && !self.by_hand && self.run.take().is_some() {
             self.needs.clear();
         }
         if !grounds {
@@ -1363,6 +1497,34 @@ impl Client {
             .growth
             .drop_what_is_turned_off(cfg.town_runs, cfg.hunt_grounds || roams_an_area);
         let mode = self.grow_mode(now, &cfg);
+        // A run the vendoring panel is driving is the panel's to step,
+        // and has the tick whether or not town runs are on: the
+        // character is on a run, and nothing below -- the hunting, with
+        // its patrols and roams -- walks it off the counter in the
+        // middle of one. Held for a while with town runs on, it is
+        // autoplay's again and stepped below; with them off, the panel
+        // is the one thing running it, and the status line says so.
+        if self.autoplay.growth.run_by_hand() {
+            if !hand_has_let_go(self.autoplay.growth.hand_stepped, now) {
+                return true;
+            }
+            if !cfg.town_runs {
+                let vendor = self.autoplay.growth.run.as_ref().map(|r| r.vendor.clone());
+                self.autoplay.say(
+                    Doing::Shopping,
+                    format!(
+                        "the run to {} is held by the vendoring panel",
+                        vendor.unwrap_or_default()
+                    ),
+                );
+                return true;
+            }
+            self.autoplay.growth.by_hand = false;
+            self.autoplay.note(
+                "the vendoring panel let go of its run: autoplay takes it on",
+                now,
+            );
+        }
         // Experience is not spent here but as housekeeping (see
         // [`Client::autoplay_spend_xp`]): this is the last goal, and a
         // rank that waited for it waited for good.
@@ -3369,7 +3531,9 @@ impl Client {
     /// while a run is in progress.
     fn grow_town_run(&mut self, now: Instant, cfg: &Growth) -> bool {
         if self.autoplay.growth.run.is_some() {
-            return self.grow_run_step(now, cfg);
+            // A run the panel is driving never gets here: it keeps the
+            // tick in [`Client::autoplay_grow`] without being stepped.
+            return self.grow_run_step(now, cfg).goes_on();
         }
         // Stopped in town for want of money: it stays put. Something
         // has to change from outside -- coin or goods handed over, a
@@ -3520,8 +3684,39 @@ impl Client {
                 .collect();
             format!("short of {}", a_few(&short))
         };
+        // Know before setting off whether the trip can achieve anything.
+        // A counter with nothing the character needs, or nothing it can
+        // pay for, is a walk to town and back for its own sake -- and
+        // repeated, it is the party pacing between vendors for ever.
+        //
+        // Two reasons override it. A full pack is its own errand: that
+        // trip is to empty it, not to buy. And a character with nothing
+        // to spend and nothing to sell goes anyway, because town is
+        // where it stops: see [`Self::stranded`].
+        let go_anyway = full || self.stranded(&needs, cfg);
+        match self.start_town_run(now, cfg, needs, reason, go_anyway) {
+            Ok(()) => true,
+            Err(why) => self.held_back(why),
+        }
+    }
+
+    /// Set off for a counter: choose one, plan the walk and open the
+    /// run. `go_anyway` takes the trip whether or not the forecast says
+    /// it is worth making. The throttles -- how long since the last
+    /// run, whether anything is urgent, whether the party agrees --
+    /// are the caller's: autoplay's tick applies them
+    /// ([`Self::grow_town_run`]) and the vendoring panel does not
+    /// ([`Self::town_run_by_hand`]).
+    fn start_town_run(
+        &mut self,
+        now: Instant,
+        cfg: &Growth,
+        needs: Vec<Need>,
+        reason: String,
+        go_anyway: bool,
+    ) -> Result<(), String> {
         let Some(me) = self.player.as_ref().map(|p| p.world_position()) else {
-            return self.held_back("not placed in the world yet");
+            return Err("not placed in the world yet".into());
         };
         let me = Vec2::new(me.x, me.y);
         // Underground, "nearest" is measured from where the character
@@ -3537,7 +3732,7 @@ impl Client {
         let Some((vendor, at, look)) = self.pick_vendor(cfg, &needs, &ways, None, &[], now) else {
             self.autoplay.note("no vendor to run to", now);
             self.autoplay.growth.last_run = Some(now);
-            return false;
+            return Err("no vendor to run to".into());
         };
         // Why this counter and not another, in the log. The choice is a
         // ring search outwards from `from`, taking the best shop in the
@@ -3552,27 +3747,16 @@ impl Client {
             ),
             now,
         );
-        // Know before setting off whether the trip can achieve anything.
-        // A counter with nothing the character needs, or nothing it can
-        // pay for, is a walk to town and back for its own sake -- and
-        // repeated, it is the party pacing between vendors for ever.
-        //
-        // Two reasons override it. A full pack is its own errand: that
-        // trip is to empty it, not to buy. And a character with nothing
-        // to spend and nothing to sell goes anyway, because town is
-        // where it stops: see [`Self::stranded`].
-        if !full && !look.worth_going() && !self.stranded(&needs, cfg) {
-            self.autoplay.note(
-                format!("not worth a trip to {vendor}: {}", look.tell()),
-                now,
-            );
+        if !go_anyway && !look.worth_going() {
+            let why = format!("not worth a trip to {vendor}: {}", look.tell());
+            self.autoplay.note(why.clone(), now);
             let st = &mut self.autoplay.growth;
             st.last_run = Some(now);
             // Nothing to buy and nothing to sell is exactly what a
             // futile run comes home with, and the party reads it the
             // same way: this one is broke, carry on without it.
             st.run_was_futile = true;
-            return false;
+            return Err(why);
         }
         if !self.grow_travel(at, now) {
             // Not the next one straight away: a character somewhere no
@@ -3585,12 +3769,14 @@ impl Client {
                 now,
             );
             st.next_run = Some(now + RETRY_AFTER);
-            self.autoplay
-                .note(format!("no way to {vendor} from here"), now);
-            return false;
+            let why = format!("no way to {vendor} from here");
+            self.autoplay.note(why.clone(), now);
+            return Err(why);
         }
         let st = &mut self.autoplay.growth;
         st.needs = needs;
+        st.by_hand = false;
+        st.window_unwanted = None;
         st.run = Some(Run {
             vendor: vendor.clone(),
             at,
@@ -3612,7 +3798,251 @@ impl Client {
                 look.tell()
             ),
         );
-        true
+        Ok(())
+    }
+
+    /// Whether autoplay's tick is the thing that steps runs to town:
+    /// autoplay on, with town runs on. When it is not, the vendoring
+    /// panel is (see [`Driver`]).
+    pub fn autoplay_drives_town_runs(&self) -> bool {
+        self.autoplay.config.enabled && self.autoplay.config.growth.town_runs
+    }
+
+    /// Who steps the run to town in progress, if there is one.
+    pub fn town_run_driver(&self) -> Option<Driver> {
+        let st = &self.autoplay.growth;
+        st.run.as_ref()?;
+        Some(driver(st.by_hand, self.autoplay_drives_town_runs()))
+    }
+
+    /// Start a run to town now, from the vendoring panel: the same run
+    /// autoplay makes -- the counter chosen the same way, the walk, the
+    /// window, the appraisals, the selling and buying -- without
+    /// autoplay's throttles, since the player asked for it. At a counter
+    /// the player has already opened, the run is made there: that is
+    /// the counter the panel has been showing the selling at, and
+    /// walking off to another was the one case the old panel got right
+    /// going wrong. Fine when a run is already under way: that run is
+    /// the one the panel then shows, whoever is driving it, and a second
+    /// is not started.
+    ///
+    /// Who steps it afterwards depends on whether autoplay runs town
+    /// runs. When it does, the run is handed to it and goes at its
+    /// pace; when it does not -- autoplay off, or town runs off -- the
+    /// panel steps it ([`Self::town_run_step_by_hand`]) and autoplay
+    /// keeps its hands off.
+    pub fn town_run_by_hand(&mut self, now: Instant) -> Result<(), String> {
+        if self.autoplay.growth.run.is_some() {
+            // A run nobody else will step is the panel's now, and the
+            // panel is about to step it.
+            if self.town_run_driver() == Some(Driver::Hand) {
+                self.autoplay.growth.by_hand = true;
+                self.autoplay.growth.hand_stepped = Some(now);
+            }
+            return Ok(());
+        }
+        if self.attack_target.is_some() || self.autoplay.casting_at().is_some() {
+            return Err("busy fighting".into());
+        }
+        // The same refusal autoplay makes before a run: no counter can
+        // pay into a pack with no slot, and buying needs one too, so
+        // the trip would sell nothing and count as futile afterwards.
+        if self.free_space() == 0 {
+            return Err("no free slot for a counter's money".into());
+        }
+        // Whatever journey was under way, the run plans its own; and a
+        // ground autoplay was bound for is let go, or autoplay would
+        // hold the character to it over the run.
+        if self.traveling() {
+            self.cancel_travel();
+        }
+        self.autoplay.growth.bound = None;
+        self.autoplay.growth.bound_since = None;
+        let cfg = self.autoplay.config.growth.clone();
+        let needs = self.needs_now(now, &cfg);
+        let reason = "asked for from the panel".to_string();
+        match self.open_counter_at_hand() {
+            Some((guid, vendor, at)) => {
+                // Opening with the window already open goes straight
+                // to the appraising, as autoplay's own run does when
+                // the window comes.
+                let st = &mut self.autoplay.growth;
+                st.needs = needs;
+                st.window_unwanted = None;
+                st.run = Some(Run {
+                    vendor: vendor.clone(),
+                    at,
+                    phase: Phase::Opening { guid, tries: 1 },
+                    since: now,
+                    last_sell: None,
+                    town: at,
+                    stops: 1,
+                    sold: 0,
+                    reason: reason.clone(),
+                    visited: vec![at],
+                    walked_on: None,
+                });
+                self.autoplay
+                    .say(Doing::Shopping, format!("{reason}: at {vendor}"));
+            }
+            None => self.start_town_run(now, &cfg, needs, reason, true)?,
+        }
+        let by_hand = !self.autoplay_drives_town_runs();
+        self.autoplay.growth.by_hand = by_hand;
+        self.autoplay.growth.hand_stepped = by_hand.then_some(now);
+        Ok(())
+    }
+
+    /// The counter whose window the player has open, when the
+    /// character is still near enough to trade at it: its guid, its
+    /// name and where it stands. A window left open from across the
+    /// town is not a counter at hand.
+    fn open_counter_at_hand(&self) -> Option<(u32, String, Vec2)> {
+        let guid = self.world.open_vendor.as_ref()?.vendor;
+        let me = self.player.as_ref()?.world_position();
+        let o = self.world.objects.get(&guid)?;
+        let p = o.world_pos()?;
+        let at = Vec2::new(p.x, p.y);
+        (at.distance(Vec2::new(me.x, me.y)) <= VENDOR_REACH).then(|| (guid, o.name.clone(), at))
+    }
+
+    /// One turn of the run in progress, from the vendoring panel: the
+    /// same turn autoplay's tick takes, with the same waits -- on the
+    /// walk, the window, the appraisals, and the counter's answer to the
+    /// last thing it was handed. Call it once a frame; the panel's Step
+    /// calls it until a turn comes to an act and then holds (see
+    /// [`Turn`]).
+    ///
+    /// The run is the panel's from here on, whoever started it.
+    pub fn town_run_step_by_hand(&mut self, now: Instant) -> Turn {
+        if self.autoplay.growth.run.is_none() {
+            return Turn::Over;
+        }
+        self.autoplay.growth.by_hand = true;
+        self.autoplay.growth.hand_stepped = Some(now);
+        let cfg = self.autoplay.config.growth.clone();
+        self.grow_run_step(now, &cfg)
+    }
+
+    /// End the run to town in progress and leave the character as it
+    /// stands: the counter closed, the walk ended, nothing left waiting
+    /// for a next turn. Autoplay waits its usual while before starting
+    /// another, as after any run.
+    pub fn town_run_stop(&mut self, now: Instant) {
+        let st = &mut self.autoplay.growth;
+        let Some(run) = st.run.take() else {
+            return;
+        };
+        st.by_hand = false;
+        st.needs.clear();
+        st.after_out = None;
+        st.shop = ac_vendor::Run::new();
+        st.last_run = Some(now);
+        self.window_no_longer_wanted(&run);
+        if self.world.open_vendor.is_some() {
+            self.close_vendor();
+        }
+        self.cancel_travel();
+        // The last few metres to a counter are a walk after it, not a
+        // journey (see `do_vendor_act`).
+        if self.follow.take().is_some() {
+            self.steering.reset();
+        }
+        self.autoplay
+            .note(format!("the run to {} was stopped", run.vendor), now);
+    }
+
+    /// The run is over while its counter was still being asked for its
+    /// window. A window that comes now is nobody's: remember which, so
+    /// that it is closed when it does (see [`window_is_unwanted`]).
+    fn window_no_longer_wanted(&mut self, run: &Run) {
+        if let Phase::Opening { guid, .. } = run.phase {
+            if self.world.open_vendor.is_none() {
+                self.autoplay.growth.window_unwanted = Some((guid, run.since));
+            }
+        }
+    }
+
+    /// Close a counter's window that opened for a run already over.
+    /// Once a frame, whether or not autoplay is on: Stop from the panel
+    /// is the usual way a run ends mid-opening, and that is with
+    /// autoplay off.
+    pub(crate) fn autoplay_close_unwanted_window(&mut self, now: Instant) {
+        let unwanted = self.autoplay.growth.window_unwanted;
+        let Some((_, asked)) = unwanted else {
+            return;
+        };
+        let open = self.world.open_vendor.as_ref().map(|v| v.vendor);
+        match open {
+            Some(vendor) if window_is_unwanted(unwanted, vendor, now) => {
+                self.autoplay.growth.window_unwanted = None;
+                self.close_vendor();
+                self.autoplay.note(
+                    "closed a counter's window that opened after the run to it ended",
+                    now,
+                );
+            }
+            // Not coming: whatever opens from now on is the player's.
+            _ if now.saturating_duration_since(asked) > VENDOR_OPEN_TIMEOUT => {
+                self.autoplay.growth.window_unwanted = None;
+            }
+            _ => {}
+        }
+    }
+
+    /// The run to town in progress as the vendoring panel shows it,
+    /// read without moving it on: the phase, and what would happen
+    /// next. Once selling, the next act is asked of a copy of the
+    /// shopping rules, so that asking does not hand anything over.
+    pub fn town_run_view(&self, now: Instant) -> Option<TownRunView> {
+        let st = &self.autoplay.growth;
+        let run = st.run.as_ref()?;
+        let me = self
+            .player
+            .as_ref()
+            .map(|p| p.world_position())
+            .map(|p| Vec2::new(p.x, p.y));
+        let (phase, next, saying) = match &run.phase {
+            Phase::Going => {
+                let away = me.map(|me| format!(" ({})", about(run.at.distance(me))));
+                (
+                    "Going",
+                    None,
+                    format!("going to {}{}", run.vendor, away.unwrap_or_default()),
+                )
+            }
+            Phase::Opening { tries, .. } => (
+                "Opening",
+                None,
+                format!(
+                    "waiting for {} to open its window (try {tries})",
+                    run.vendor
+                ),
+            ),
+            Phase::Appraising => (
+                "Appraising",
+                None,
+                "looking over the pack, then putting stacks together".to_string(),
+            ),
+            Phase::Selling { .. } => {
+                let cfg = &self.autoplay.config.growth;
+                let snap = self.vendor_snapshot(cfg);
+                let mut asking = st.shop.clone();
+                let peek = asking.step(&snap, now);
+                ("Selling", peek.act, peek.saying)
+            }
+        };
+        Some(TownRunView {
+            vendor: run.vendor.clone(),
+            reason: run.reason.clone(),
+            stop: run.stops,
+            phase: phase.to_string(),
+            next,
+            saying,
+            sold: run.sold + st.shop.sold,
+            waiting: st.shop.waiting_on(),
+            driver: driver(st.by_hand, self.autoplay_drives_town_runs()),
+        })
     }
 
     /// The vendor object nearest `at`, by name when one matches.
@@ -3642,14 +4072,15 @@ impl Client {
             .map(|(_, _, g)| *g)
     }
 
-    /// One step of the run in progress.
-    fn grow_run_step(&mut self, now: Instant, cfg: &Growth) -> bool {
+    /// One turn of the run in progress: what it came to, for the panel's
+    /// Step; whether it goes on, for autoplay (see [`Turn`]).
+    fn grow_run_step(&mut self, now: Instant, cfg: &Growth) -> Turn {
         let Some(mut run) = self.autoplay.growth.run.take() else {
-            return false;
+            return Turn::Over;
         };
         let Some(me) = self.player.as_ref().map(|p| p.world_position()) else {
             self.autoplay.growth.run = Some(run);
-            return true;
+            return Turn::Waited;
         };
         let me = Vec2::new(me.x, me.y);
         let elapsed = now.duration_since(run.since);
@@ -3661,7 +4092,7 @@ impl Client {
                         now,
                     );
                     self.cancel_travel();
-                    return self.grow_run_next(run, now, cfg, true);
+                    return Turn::after_stop(self.grow_run_next(run, now, cfg, true));
                 }
                 if self.traveling() || self.grow_travel_on() {
                     self.autoplay.say(
@@ -3674,7 +4105,7 @@ impl Client {
                         ),
                     );
                     self.autoplay.growth.run = Some(run);
-                    return true;
+                    return Turn::Waited;
                 }
                 // A corpse, a fight or a dodge on the way ends the journey
                 // without it having got anywhere, and the run picks it up
@@ -3693,7 +4124,7 @@ impl Client {
                     OnTheWay::There => {}
                     OnTheWay::Wait => {
                         self.autoplay.growth.run = Some(run);
-                        return true;
+                        return Turn::Waited;
                     }
                     OnTheWay::WalkOn => {
                         if !self.grow_travel(run.at, now) {
@@ -3704,7 +4135,7 @@ impl Client {
                                 ),
                                 now,
                             );
-                            return self.grow_run_next(run, now, cfg, true);
+                            return Turn::after_stop(self.grow_run_next(run, now, cfg, true));
                         }
                         self.autoplay.note(
                             format!("on the way to {} again ({away:.0} m)", run.vendor),
@@ -3712,14 +4143,14 @@ impl Client {
                         );
                         run.walked_on = Some(now);
                         self.autoplay.growth.run = Some(run);
-                        return true;
+                        return Turn::Acted;
                     }
                     OnTheWay::Short => {
                         self.autoplay.note(
                             format!("could not get to {} ({away:.0} m short)", run.vendor),
                             now,
                         );
-                        return self.grow_run_next(run, now, cfg, true);
+                        return Turn::after_stop(self.grow_run_next(run, now, cfg, true));
                     }
                 }
                 match self.vendor_object(&run.vendor, run.at) {
@@ -3740,7 +4171,7 @@ impl Client {
                                 self.autoplay
                                     .say(Doing::Shopping, format!("walking up to {}", run.vendor));
                                 self.autoplay.growth.run = Some(run);
-                                return true;
+                                return Turn::Acted;
                             }
                         }
                         if self.follow.take().is_some() {
@@ -3752,14 +4183,14 @@ impl Client {
                         self.autoplay
                             .say(Doing::Shopping, format!("talking to {}", run.vendor));
                         self.autoplay.growth.run = Some(run);
-                        true
+                        Turn::Acted
                     }
                     None => {
                         self.autoplay.note(
                             format!("{} is not here (indoors, or gone)", run.vendor),
                             now,
                         );
-                        self.grow_run_next(run, now, cfg, true)
+                        Turn::after_stop(self.grow_run_next(run, now, cfg, true))
                     }
                 }
             }
@@ -3788,7 +4219,7 @@ impl Client {
                         format!("at {}; looking over {n} item(s)", run.vendor),
                     );
                     self.autoplay.growth.run = Some(run);
-                    return true;
+                    return Turn::Acted;
                 }
                 if elapsed > VENDOR_OPEN_TIMEOUT {
                     if tries < 2 {
@@ -3799,14 +4230,14 @@ impl Client {
                         };
                         run.since = now;
                         self.autoplay.growth.run = Some(run);
-                        return true;
+                        return Turn::Acted;
                     }
                     self.autoplay
                         .note(format!("{} would not trade", run.vendor), now);
-                    return self.grow_run_next(run, now, cfg, true);
+                    return Turn::after_stop(self.grow_run_next(run, now, cfg, true));
                 }
                 self.autoplay.growth.run = Some(run);
-                true
+                Turn::Waited
             }
             Phase::Appraising => {
                 let waiting = self
@@ -3816,7 +4247,7 @@ impl Client {
                     .any(|o| !self.appraisals.contains_key(&o.guid));
                 if waiting && elapsed < SETTLE * 2 {
                     self.autoplay.growth.run = Some(run);
-                    return true;
+                    return Turn::Waited;
                 }
                 // Compress the pack before selling any of it.
                 //
@@ -3833,22 +4264,35 @@ impl Client {
                 // means the pack is as tight as it goes; blocked means
                 // it cannot be tightened until something is sold, and
                 // selling is the next thing either way.
-                if matches!(
-                    self.compress(now),
-                    crate::did::Did::Acting | crate::did::Did::Waiting(_)
-                ) {
-                    self.autoplay.growth.run = Some(run);
-                    return true;
+                match self.compress(now) {
+                    crate::did::Did::Acting => {
+                        self.autoplay.growth.run = Some(run);
+                        return Turn::Acted;
+                    }
+                    crate::did::Did::Waiting(_) => {
+                        self.autoplay.growth.run = Some(run);
+                        return Turn::Waited;
+                    }
+                    _ => {}
                 }
                 let n = self.sale_list(cfg).len();
                 run.phase = Phase::Selling { sent: Vec::new() };
                 run.since = now;
+                // The shopping rules start this counter fresh. They
+                // remember what was offered, what was refused and how
+                // far the trip got, and none of that is this counter's:
+                // a trip they had already finished -- or one that never
+                // found a window and finished itself for that -- would
+                // close this counter at once, without selling a thing.
+                self.autoplay.growth.shop = ac_vendor::Run::new();
                 self.autoplay.say(
                     Doing::Shopping,
                     format!("selling {n} item(s) to {}", run.vendor),
                 );
                 self.autoplay.growth.run = Some(run);
-                true
+                // Nothing went out: the first thing the rules ask for
+                // is the next turn's.
+                Turn::Waited
             }
             Phase::Selling { .. } => {
                 // The shopping itself is decided in `ac-vendor`, which
@@ -3868,31 +4312,39 @@ impl Client {
                 // sells a stack it has already merged away.
                 if self.vendor_busy(now) {
                     self.autoplay.growth.run = Some(run);
-                    return true;
+                    return Turn::Waited;
                 }
                 let snap = self.vendor_snapshot(cfg);
                 let next = self.autoplay.growth.shop.step(&snap, now);
                 self.autoplay.growth.last_saying = next.saying.clone();
                 match next.act {
                     Some(ac_vendor::Act::Close) | None => {
-                        run.sold = self.autoplay.growth.shop.sold;
+                        // Added to, not set: the run's count is for all
+                        // its counters, and the rules count one at a
+                        // time.
+                        run.sold += self.autoplay.growth.shop.sold;
                         self.close_vendor();
                         self.autoplay.growth.shop = ac_vendor::Run::new();
-                        self.grow_run_next(run, now, cfg, false)
+                        Turn::after_stop(self.grow_run_next(run, now, cfg, false))
                     }
                     Some(act) => {
                         // A refusal on this side is an answer too: the
                         // rules are told, so that they stop asking
-                        // rather than spend the afternoon on it.
+                        // rather than spend the afternoon on it. Nothing
+                        // went out, so the turn is a wait, not an act,
+                        // and a Step goes on to what the rules ask next.
                         if !self.do_vendor_act(&act, &next.saying) {
                             self.autoplay
                                 .note(format!("could not {}: {act:?}", next.saying), now);
+                            self.autoplay.growth.shop.refused(&act, now);
+                            self.autoplay.growth.run = Some(run);
+                            return Turn::Waited;
                         }
                         run.last_sell = Some(now);
                         run.since = now;
                         run.phase = Phase::Selling { sent: Vec::new() };
                         self.autoplay.growth.run = Some(run);
-                        true
+                        Turn::Acted
                     }
                 }
             }
@@ -3904,6 +4356,7 @@ impl Client {
     /// vendor was no use and is to be avoided for a while. True while
     /// the run goes on.
     fn grow_run_next(&mut self, run: Run, now: Instant, cfg: &Growth, failed: bool) -> bool {
+        self.window_no_longer_wanted(&run);
         if self.world.open_vendor.is_some() {
             self.close_vendor();
         }
@@ -3988,10 +4441,19 @@ impl Client {
         st.run = None;
         st.needs.clear();
         st.skip_vendors.tidy(now);
+        let by_hand = std::mem::take(&mut st.by_hand);
         let sold = run.sold;
         let full = if still_full { ", pack still full" } else { "" };
         self.autoplay
             .note(format!("town run done: sold {sold} item(s){full}"), now);
+        // A run the panel asked for ends where the last counter was.
+        // Whoever is watching it asked to see the shopping, not the
+        // walk back to a hunting ground; and giving up in town is a
+        // judgement about the hunting, which is autoplay's to make when
+        // it is the one hunting.
+        if by_hand {
+            return false;
+        }
         // The one thing worth giving up over, and this is what giving
         // up looks like: stay in town. Walking back to the hunting
         // ground without the supplies to work it would only mean
@@ -4360,7 +4822,7 @@ mod tests {
                 c.traveling(),
                 "its walk to the counter ended at tick {tick}"
             );
-            assert!(c.grow_run_step(now, &cfg));
+            assert!(c.grow_run_step(now, &cfg).goes_on());
             assert!(c.traveling());
         }
 
@@ -4369,13 +4831,13 @@ mod tests {
         // waits a moment before planning it once more.
         c.interrupt_travel("walking to a corpse");
         assert!(c.journey_broken_off());
-        assert!(c.grow_run_step(now, &cfg));
+        assert!(c.grow_run_step(now, &cfg).goes_on());
         assert!(c.traveling(), "the run did not walk on after a corpse");
         c.interrupt_travel("walking to a corpse");
         let soon = now + Duration::from_secs(1);
-        assert!(c.grow_run_step(soon, &cfg));
+        assert!(c.grow_run_step(soon, &cfg).goes_on());
         assert!(!c.traveling(), "planned again straight away");
-        assert!(c.grow_run_step(now + WALK_ON_EVERY, &cfg));
+        assert!(c.grow_run_step(now + WALK_ON_EVERY, &cfg).goes_on());
         assert!(c.traveling());
 
         // With no run of its own the leader is followed. The walk after it
@@ -6460,6 +6922,450 @@ mod tests {
         c.autoplay_grow(now);
         assert!(!c.autoplay.growth.town_run_under_way(), "the run was kept");
         assert_eq!(c.autoplay.growth.bound, None, "the walk was kept");
+    }
+
+    #[test]
+    fn a_run_asked_for_from_the_panel_chooses_a_counter_and_sets_off() {
+        // The panel's Step and Run once put the shopping rules straight
+        // to the character where it stood. With no window open the
+        // rules answered "no counter" and called the trip done, so the
+        // buttons did nothing -- and having called it done, went on
+        // doing nothing once a window was opened. Now they start the
+        // run autoplay would start: a counter is chosen and the walk
+        // to it begins, with autoplay off and none of its throttles.
+        let holtburg = 0xA9B4_0019;
+        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
+            return;
+        };
+        c.world.stats.level = 20;
+        c.world.player_guid = Some(0x5000_0001);
+        let now = Instant::now();
+        assert!(!c.autoplay.config.enabled);
+        assert_eq!(c.town_run_driver(), None);
+        c.town_run_by_hand(now).expect("no run was started");
+        assert_eq!(c.town_run_driver(), Some(Driver::Hand));
+        assert!(c.traveling(), "chose a counter and did not set off");
+        let v = c.town_run_view(now).expect("no run to show");
+        assert_eq!(v.phase, "Going");
+        assert_eq!(v.driver, Driver::Hand);
+        assert_eq!(v.next, None, "nothing is decided on the walk");
+        // The walk is a wait, and a Step waits it out.
+        assert_eq!(c.town_run_step_by_hand(now), Turn::Waited);
+        assert!(c.traveling());
+        // Pressed again, the run under way is the one shown; a second
+        // is not started.
+        c.town_run_by_hand(now).unwrap();
+        assert_eq!(c.town_run_view(now).unwrap().vendor, v.vendor);
+        assert_eq!(c.autoplay.growth.run.as_ref().unwrap().since, now);
+
+        // Autoplay turned on meanwhile leaves the run to the panel --
+        // it neither steps it nor, with town runs off, lets it go --
+        // but counts the character as busy with it.
+        c.autoplay.config.enabled = true;
+        c.autoplay.config.growth.town_runs = false;
+        assert_eq!(c.town_run_driver(), Some(Driver::Hand));
+        c.autoplay_grow(now);
+        assert!(
+            c.autoplay.growth.town_run_under_way(),
+            "let go for town runs being off"
+        );
+        c.autoplay.config.growth.town_runs = true;
+        assert!(c.autoplay_grow(now), "the run did not keep the tick");
+        assert_eq!(c.town_run_driver(), Some(Driver::Hand));
+        assert!(c.traveling(), "autoplay stepped the panel's run");
+
+        // Stop leaves the character as it stands: no run, no walk,
+        // nothing to walk up to, no window.
+        c.town_run_stop(now);
+        assert_eq!(c.town_run_driver(), None);
+        assert!(!c.traveling());
+        assert!(c.follow.is_none());
+        assert!(c.world.open_vendor.is_none());
+        assert_eq!(c.autoplay.growth.shop.phase, ac_vendor::Phase::Walking);
+        // And autoplay, now running town runs, does not set straight
+        // off on one of its own.
+        assert!(!c.autoplay_grow(now), "autoplay started a run at once");
+        assert_eq!(c.town_run_driver(), None);
+    }
+
+    #[test]
+    fn a_run_started_under_autoplay_is_autoplays_to_step() {
+        // With autoplay on and running town runs, Run from the panel
+        // starts the run now, and autoplay's tick takes it from there:
+        // the panel shows it and does not step it too.
+        let holtburg = 0xA9B4_0019;
+        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
+            return;
+        };
+        c.world.stats.level = 20;
+        c.world.player_guid = Some(0x5000_0001);
+        c.autoplay.config.enabled = true;
+        let now = Instant::now();
+        c.town_run_by_hand(now).expect("no run was started");
+        assert_eq!(c.town_run_driver(), Some(Driver::Autoplay));
+        assert!(c.autoplay_grow(now));
+        assert!(c.traveling());
+        // Until the panel steps it itself, which makes it the panel's.
+        assert_eq!(c.town_run_step_by_hand(now), Turn::Waited);
+        assert_eq!(c.town_run_driver(), Some(Driver::Hand));
+    }
+
+    #[test]
+    fn the_shopping_rules_start_every_counter_fresh() {
+        // The rules remember what a trip offered, what was refused and
+        // whether it is done, and were made afresh only when a trip
+        // closed its counter. Asked once with no window open they call
+        // the trip done, and a run dropped part-way leaves them where
+        // they were; either way the next counter opened was closed at
+        // once, with nothing sold. Now they are started fresh as each
+        // counter's selling begins.
+        let holtburg = 0xA9B4_0019;
+        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
+            return;
+        };
+        c.world.player_guid = Some(0x5000_0001);
+        let me = c.player.as_ref().unwrap().world_position();
+        let now = Instant::now();
+        let cfg = c.autoplay.config.growth.clone();
+        // Done, and with a count from some earlier counter.
+        let snap = c.vendor_snapshot(&cfg);
+        c.autoplay.growth.shop.step(&snap, now);
+        assert_eq!(c.autoplay.growth.shop.phase, ac_vendor::Phase::Done);
+        c.autoplay.growth.shop.sold = 7;
+
+        // A run at the counter with the pack looked over. Nothing goes
+        // out on the way from there to selling, so a Step goes on
+        // through it to the first act of the selling.
+        let mut run = run_to(Vec2::new(me.x, me.y), now);
+        run.phase = Phase::Appraising;
+        run.since = now - SETTLE * 3;
+        c.autoplay.growth.run = Some(run);
+        assert_eq!(c.grow_run_step(now, &cfg), Turn::Waited);
+        assert!(matches!(
+            c.autoplay.growth.run.as_ref().unwrap().phase,
+            Phase::Selling { .. }
+        ));
+        assert_eq!(
+            c.autoplay.growth.shop.phase,
+            ac_vendor::Phase::Walking,
+            "the rules were not started fresh"
+        );
+        assert_eq!(c.autoplay.growth.shop.sold, 0);
+        assert_eq!(c.town_run_view(now).unwrap().sold, 0);
+
+        // Waiting for a window is a wait; asking again after the
+        // counter's time is up is an act.
+        let mut run = run_to(Vec2::new(me.x, me.y), now);
+        run.phase = Phase::Opening {
+            guid: 0x8000_0001,
+            tries: 1,
+        };
+        c.autoplay.growth.run = Some(run);
+        assert_eq!(c.grow_run_step(now, &cfg), Turn::Waited);
+        assert_eq!(c.town_run_view(now).unwrap().phase, "Opening");
+        let later = now + VENDOR_OPEN_TIMEOUT + Duration::from_secs(1);
+        assert_eq!(c.grow_run_step(later, &cfg), Turn::Acted);
+        assert!(matches!(
+            c.autoplay.growth.run.as_ref().unwrap().phase,
+            Phase::Opening { tries: 2, .. }
+        ));
+    }
+
+    /// A vendor's window as the server sends it, with nothing on the
+    /// shelf.
+    fn window_of(vendor: u32) -> ac_world::object::ApproachVendor {
+        ac_world::object::ApproachVendor {
+            vendor,
+            item_types: 0,
+            min_value: 0,
+            max_value: 0,
+            magical: false,
+            buy_rate: 1.0,
+            sell_rate: 1.0,
+            alt_currency: 0,
+            alt_amount: 0,
+            alt_name: String::new(),
+            items: Vec::new(),
+        }
+    }
+
+    /// A vendor standing `off` from the character, in view.
+    fn vendor_beside(c: &mut Client, guid: u32, name: &str, off: glam::Vec3) {
+        let holtburg = 0xA9B4_0019;
+        let me = c.player.as_ref().unwrap().world_position();
+        c.world.objects.insert(
+            guid,
+            ac_world::WorldObject {
+                guid,
+                name: name.into(),
+                item_type: ac_world::item_type::CREATURE,
+                object_desc_flags: object_desc_flags::VENDOR,
+                position: Some(ac_world::object::Position::new_flat(
+                    holtburg,
+                    me + off - ac_world::landblock_origin(holtburg),
+                )),
+                ..Default::default()
+            },
+        );
+    }
+
+    #[test]
+    fn a_hand_run_left_held_is_autoplays_again_once_it_runs_town_runs() {
+        // Step once with autoplay off, close the panel, turn autoplay
+        // on: the run was the panel's for good, autoplay claimed every
+        // tick for it and stepped nothing, and the character stood on
+        // the road with a blank status line. A run nothing has stepped
+        // for a moment is autoplay's to carry on, when it runs town
+        // runs.
+        let holtburg = 0xA9B4_0019;
+        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
+            return;
+        };
+        c.world.stats.level = 20;
+        c.world.player_guid = Some(0x5000_0001);
+        let now = Instant::now();
+        c.town_run_by_hand(now).expect("no run was started");
+        assert_eq!(c.town_run_driver(), Some(Driver::Hand));
+        c.autoplay.config.enabled = true;
+        c.autoplay.config.growth.town_runs = true;
+        // Just pressed: still the panel's, and not stepped by autoplay.
+        assert!(c.autoplay_grow(now));
+        assert_eq!(c.town_run_driver(), Some(Driver::Hand));
+        // Left alone: autoplay's, and stepped on.
+        let later = now + HAND_HOLD;
+        assert!(c.autoplay_grow(later));
+        assert_eq!(c.town_run_driver(), Some(Driver::Autoplay));
+        assert!(c.autoplay.growth.town_run_under_way());
+        assert!(c.traveling());
+        // The panel stepping it again takes it back, for as long as it
+        // keeps stepping.
+        assert_eq!(c.town_run_step_by_hand(later), Turn::Waited);
+        assert_eq!(c.town_run_driver(), Some(Driver::Hand));
+        assert!(c.autoplay_grow(later));
+        assert_eq!(c.town_run_driver(), Some(Driver::Hand));
+    }
+
+    #[test]
+    fn a_hand_run_with_town_runs_off_keeps_the_hunting_off_the_counter() {
+        // Autoplay on with town runs off is the panel's to drive, and
+        // the run is kept for it -- but with town runs off the run was
+        // never looked at by autoplay's tick, so nothing claimed the
+        // tick for it and the hunting, finding nothing in sight, walked
+        // the character off the open window to look about the ground.
+        let holtburg = 0xA9B4_0019;
+        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
+            return;
+        };
+        c.world.stats.level = 20;
+        c.world.player_guid = Some(0x5000_0001);
+        let me = c.player.as_ref().unwrap().world_position();
+        let now = Instant::now();
+        c.autoplay.config.enabled = true;
+        c.autoplay.config.growth.town_runs = false;
+        c.autoplay.config.growth.hunt_grounds = true;
+        c.autoplay.config.growth.tactic = ac_world::hunting::Tactic::Patrol;
+        // On its hunting ground, quiet long enough to move on.
+        c.autoplay.growth.hunting_at = Some(holtburg >> 16);
+        c.autoplay.growth.quiet_since = Some(now - Duration::from_secs(600));
+        // At the counter, waiting on its window, held by the panel.
+        let mut run = run_to(Vec2::new(me.x, me.y), now);
+        run.phase = Phase::Opening {
+            guid: 0x8000_0001,
+            tries: 1,
+        };
+        c.autoplay.growth.run = Some(run);
+        c.autoplay.growth.by_hand = true;
+        assert!(c.autoplay_grow(now), "the run did not keep the tick");
+        assert!(!c.traveling(), "the hunting walked off the counter");
+        assert_eq!(c.autoplay.growth.bound, None);
+        assert!(c.autoplay.growth.town_run_under_way());
+        assert!(
+            c.autoplay.status.contains("held by the vendoring panel"),
+            "nothing said why the character stands still: {:?}",
+            c.autoplay.status
+        );
+        // Without the run the same tick goes looking about the ground,
+        // which is what the run was keeping it from.
+        c.autoplay.growth.by_hand = false;
+        assert!(c.autoplay_grow(now));
+        assert!(
+            !c.autoplay.growth.town_run_under_way(),
+            "kept with town runs off"
+        );
+        assert!(c.traveling(), "the hunting did not move");
+    }
+
+    #[test]
+    fn run_pressed_at_a_counter_the_player_opened_sells_there() {
+        // The panel shows what the rules would do at a window the
+        // player opened by hand; Run then chose a counter of its own
+        // and walked away from the one it had just been showing. At an
+        // open window within reach the run is made there, and its
+        // first turn is the appraising.
+        let holtburg = 0xA9B4_0019;
+        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
+            return;
+        };
+        c.world.stats.level = 20;
+        c.world.player_guid = Some(0x5000_0001);
+        let now = Instant::now();
+        let rakk = 0x8000_0002;
+        vendor_beside(
+            &mut c,
+            rakk,
+            "Rakk the Peddler",
+            glam::Vec3::new(1.0, 0.0, 0.0),
+        );
+        c.world.open_vendor = Some(window_of(rakk));
+        c.town_run_by_hand(now).expect("no run was started");
+        let v = c.town_run_view(now).expect("no run to show");
+        assert_eq!(v.vendor, "Rakk the Peddler");
+        assert_eq!(v.phase, "Opening");
+        assert!(!c.traveling(), "walked off to another counter");
+        assert_eq!(c.town_run_step_by_hand(now), Turn::Acted);
+        assert_eq!(c.town_run_view(now).unwrap().phase, "Appraising");
+        assert!(c.world.open_vendor.is_some(), "the window was closed");
+
+        // A window left open from across the town is not a counter at
+        // hand: the run chooses one and sets off, as it always did.
+        c.town_run_stop(now);
+        vendor_beside(
+            &mut c,
+            rakk,
+            "Rakk the Peddler",
+            glam::Vec3::new(60.0, 0.0, 0.0),
+        );
+        c.world.open_vendor = Some(window_of(rakk));
+        c.town_run_by_hand(now).expect("no run was started");
+        assert_eq!(c.town_run_view(now).unwrap().phase, "Going");
+        assert!(c.traveling());
+    }
+
+    #[test]
+    fn a_hand_run_is_refused_with_no_slot_for_the_money() {
+        // Autoplay's own refusal lived only in its tick, so the panel's
+        // Run walked a pack with no free slot to town, sold nothing
+        // there, and came home futile -- which held autoplay's next run
+        // back for the longer while.
+        let holtburg = 0xA9B4_0019;
+        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
+            return;
+        };
+        c.world.stats.level = 20;
+        let me = 0x5000_0001;
+        c.world.player_guid = Some(me);
+        c.world.objects.insert(
+            me,
+            ac_world::WorldObject {
+                guid: me,
+                name: "Verity".into(),
+                is_player: true,
+                items_capacity: 1,
+                ..Default::default()
+            },
+        );
+        c.world.objects.insert(
+            0x8000_0003,
+            ac_world::WorldObject {
+                guid: 0x8000_0003,
+                name: "Dagger".into(),
+                value: 50,
+                container: Some(me),
+                ..Default::default()
+            },
+        );
+        assert_eq!(c.free_space(), 0);
+        let now = Instant::now();
+        assert_eq!(
+            c.town_run_by_hand(now),
+            Err("no free slot for a counter's money".into())
+        );
+        assert_eq!(c.town_run_driver(), None);
+        assert!(!c.traveling());
+    }
+
+    #[test]
+    fn a_window_that_opens_after_the_run_stopped_is_closed() {
+        // Stop pressed while the counter was being asked for its window
+        // left the window to arrive afterwards, and nothing closed it:
+        // the tidying refused every pour for "a counter is open" and
+        // the panel showed a counter open with nobody at it.
+        let holtburg = 0xA9B4_0019;
+        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
+            return;
+        };
+        c.world.player_guid = Some(0x5000_0001);
+        let me = c.player.as_ref().unwrap().world_position();
+        let now = Instant::now();
+        let rakk = 0x8000_0002;
+        let asking = |c: &mut Client| {
+            let mut run = run_to(Vec2::new(me.x, me.y), now);
+            run.phase = Phase::Opening {
+                guid: rakk,
+                tries: 1,
+            };
+            c.autoplay.growth.run = Some(run);
+        };
+        asking(&mut c);
+        c.town_run_stop(now);
+        assert!(c.world.open_vendor.is_none());
+        // The window comes a moment later, and goes.
+        c.world.open_vendor = Some(window_of(rakk));
+        c.autoplay_close_unwanted_window(now + Duration::from_secs(1));
+        assert!(c.world.open_vendor.is_none(), "the window was left open");
+        // Another counter's window is not the one that was asked for.
+        asking(&mut c);
+        c.town_run_stop(now);
+        c.world.open_vendor = Some(window_of(0x8000_0009));
+        c.autoplay_close_unwanted_window(now + Duration::from_secs(1));
+        assert!(
+            c.world.open_vendor.is_some(),
+            "somebody else's window was closed"
+        );
+        c.world.open_vendor = None;
+        // Long after the run would have given up on it, a window for
+        // that counter is the player's own doing.
+        asking(&mut c);
+        c.town_run_stop(now);
+        let late = now + VENDOR_OPEN_TIMEOUT + Duration::from_secs(1);
+        c.autoplay_close_unwanted_window(late);
+        c.world.open_vendor = Some(window_of(rakk));
+        c.autoplay_close_unwanted_window(late);
+        assert!(
+            c.world.open_vendor.is_some(),
+            "the player's window was closed"
+        );
+    }
+
+    #[test]
+    fn a_hand_runs_status_stays_with_autoplay_off() {
+        // With autoplay off its tick cleared the status every frame,
+        // and the run's next turn said it again: a log line, an event
+        // and a bus post a frame for the length of the walk. The run
+        // the panel is driving keeps its line.
+        let holtburg = 0xA9B4_0019;
+        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
+            return;
+        };
+        c.world.player_guid = Some(0x5000_0001);
+        let me = c.player.as_ref().unwrap().world_position();
+        let now = Instant::now();
+        c.autoplay.config.enabled = false;
+        c.autoplay.growth.run = Some(run_to(Vec2::new(me.x, me.y), now));
+        c.autoplay.growth.by_hand = true;
+        c.autoplay.say(Doing::Shopping, "going to the counter");
+        let said = c.autoplay.announced.len();
+        c.tick_autoplay(now);
+        assert_eq!(
+            c.autoplay.status, "going to the counter",
+            "the status was cleared"
+        );
+        c.autoplay.say(Doing::Shopping, "going to the counter");
+        assert_eq!(c.autoplay.announced.len(), said, "said again");
+        // A run nobody is driving does not keep autoplay's line up.
+        c.autoplay.growth.by_hand = false;
+        c.tick_autoplay(now);
+        assert!(c.autoplay.status.is_empty());
     }
 
     #[test]
