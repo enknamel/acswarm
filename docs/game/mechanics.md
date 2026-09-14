@@ -163,6 +163,13 @@ Casting rules (ACE `Player_Magic`, matching retail):
   on creatures, beneficial spells not on monsters, harmful spells on other
   players only under PK rules; the range is the spell's base range
   constant plus range mod × skill.
+* A projectile in flight is destroyed by whatever it collides with
+  *before* the server asks whether the damage is allowed:
+  `SpellProjectile.OnCollideObject` calls `ProjectileImpact()` and only
+  then `CheckPKStatusVsTarget`, which refuses the moment either side is a
+  non-PK. So a fellow who walks into the line takes nothing and the
+  caster loses the spell anyway — a fellowship standing in a huddle
+  shoots down its own bolts.
 
 ### Enchantments (buffs and debuffs)
 
@@ -562,6 +569,23 @@ list instead of entering). Headless: `acclient --create NAME` and `acbot
   Recall / Summon.
 * Player Killer status (red) allows attacking other PKs and makes corpses
   lootable; PK Lite (pink) is PvP without death penalties.
+* **A monster's corpse** lasts five minutes (ACE's default TimeToRot,
+  started at its first heartbeat) and belongs to whoever landed the
+  killing blow. It opens to everyone else once it has half rotted --
+  under the 180 s HalfLife, so two minutes after it fell -- or, long
+  before that, the moment anyone who could open it closes it again:
+  `Corpse.Close` sets IsLooted unconditionally and `HasPermission`
+  answers on IsLooted before it ever reads the clock, so the killer
+  opening a body and closing it makes it everyone's within seconds. Or
+  at once to a fellowship with loot sharing on. Until then an open is
+  answered with a transient string,
+  "You do not yet have the right to loot the {name}."; a body that made
+  a rare, or one from a player killer's death, is never shared and says
+  "You may not loot the {name} because ...". A container the server has
+  already given to one viewer refuses every other with "The {name} is
+  already in use by someone else!" -- one viewer at a time, no queue.
+  These are the server's whole answer to an open: there is no error code
+  with them.
 
 ## 5. Inventory, items, burden
 

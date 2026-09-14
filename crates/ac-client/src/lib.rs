@@ -415,7 +415,10 @@ pub struct Client {
     /// The tick the server last put something in words: a transient
     /// string or a weenie error. "You do not yet have the right to loot"
     /// is one, and it is what tells a corpse that is locked from one that
-    /// is not there.
+    /// is not there. The words themselves are read where they say what to
+    /// do (see `autoplay::corpse_refused`); this says which ask they
+    /// answered, since a tick's words cannot be an answer to that same
+    /// tick's ask.
     pub(crate) told: Option<Instant>,
     /// Route steering toward `move_to` when the straight line to it is
     /// blocked (see `route`).
@@ -1160,9 +1163,7 @@ impl Client {
                                         }
                                         self.loot_refused(item, err);
                                     }
-                                    if self.autoplay.wield_asked == Some(item) {
-                                        self.hold_off_wield(item, now);
-                                    }
+                                    self.wield_refused(item, now);
                                     let for_a_pour =
                                         answers_a_pour(self.autoplay.pour.as_ref(), item, now);
                                     // A pickup the server walked us to
@@ -1287,7 +1288,7 @@ impl Client {
             self.chat_message(op, &body);
         }
         self.tick_combat();
-        self.tick_loot();
+        self.tick_loot(now);
         self.tick_store();
         self.tick_appraise();
         self.tick_autoplay(now);
@@ -1994,6 +1995,10 @@ impl Client {
             // And on a summon: an essence turned away for good is set
             // aside at once (see `summoning`).
             self.hear_summoning(&line.text, Instant::now());
+            // And on a body that will not open: the server says whether
+            // someone is in it or it is not ours yet, and the answer is
+            // a different wait (see `autoplay::corpse_refused`).
+            self.hear_corpse_refusal(&line.text, Instant::now());
         }
         let text = match (op, line.sender.is_empty()) {
             _ if line.kind == ac_net::messages::turbine::KIND => {
@@ -2162,10 +2167,6 @@ impl Client {
             }
             other => tracing::info!("casting {spell} although {other:?}"),
         }
-        // A caster is wielded (can_cast said so), so entering combat is
-        // entering magic mode; there is no separate choice to make.
-        self.enter_combat();
-        self.note_cast(spell);
         let table = self.assets.spell_table().ok();
         let entry = table.as_ref().and_then(|t| t.get(spell));
         let name = entry
@@ -2182,6 +2183,28 @@ impl Client {
         } else {
             None
         };
+        // The selection can go stale between the tick that made it and
+        // this one: the creature dies and is replaced by a corpse of
+        // another guid. ACE looks the target up before it starts the
+        // windup and answers TargetNotAcquired when it is not there
+        // (`Player_Magic.cs`, `HandleActionCastTargetedSpell`), so the
+        // cast is a wasted message and a wasted UseDone. The swing makes
+        // exactly this test before it goes out; the cast never did, and
+        // spent 36 of them in one run. Ourselves we never doubt: a self
+        // cast is aimed at a character the server has in front of it by
+        // definition, and asking the world about our own object would
+        // only find new ways to refuse a buff.
+        let gone = target
+            .filter(|t| Some(*t) != self.world.player_guid)
+            .is_some_and(|t| !self.target_still_there(t));
+        if gone {
+            tracing::debug!("not casting {name}: the target is gone");
+            return CastCheck::NoTarget;
+        }
+        // A caster is wielded (can_cast said so), so entering combat is
+        // entering magic mode; there is no separate choice to make.
+        self.enter_combat();
+        self.note_cast(spell);
         // The next UseDone is the cast's, not the answer to a use.
         self.last_used = None;
         match target {
@@ -2285,16 +2308,23 @@ impl Client {
             .send_action(ac_net::messages::action::CANCEL_ATTACK, &[]);
     }
 
+    /// Whether something we mean to act on is still there to act on: in
+    /// view, and not a creature that has died. A dead creature does not
+    /// linger under its own guid -- the server replaces it with a corpse
+    /// of another -- so the guid simply goes, and anything still aimed
+    /// at it is refused.
+    pub fn target_still_there(&self, guid: u32) -> bool {
+        self.world
+            .objects
+            .get(&guid)
+            .is_some_and(|o| o.health.is_none_or(|h| h > 0.0))
+    }
+
     pub fn tick_combat(&mut self) {
         let Some(target) = self.attack_target else {
             return;
         };
-        let alive = self
-            .world
-            .objects
-            .get(&target)
-            .map(|o| o.health.is_none_or(|h| h > 0.0))
-            .unwrap_or(false);
+        let alive = self.target_still_there(target);
         // Dead: the server drops us to peace mode and refuses attacks
         // until we stand at the lifestone.
         let dead = !self.world.stats.name.is_empty() && self.world.stats.vitals[0].current == 0;
@@ -2440,11 +2470,37 @@ impl Client {
         }
     }
 
-    /// Wield a carried item by guid, in whatever slot it goes in.
-    /// Nothing is sent for an item the server has lately refused to
-    /// wield (see [`Client::wield_held_off`]).
+    /// Wield a carried item by guid, in whatever slot it goes in. True
+    /// when the item is in hand or on its way there.
+    ///
+    /// Nothing is sent for an item already wielded, nor for one asked
+    /// for so recently that the answer may still be in flight (see
+    /// [`Autoplay::wield_in_flight`]) -- both of those the server
+    /// answers with "You must remove your Slashing Sceptre to wield
+    /// Slashing Sceptre" and a refusal that then backs the weapon off.
+    /// Nothing is sent either while the item is inside a refusal's wait
+    /// or while the server has us busy (see [`Client::wield_must_wait`]),
+    /// and those two return false: the caller keeps the errand and asks
+    /// again on a free tick.
     pub fn wield_guid(&mut self, guid: u32) -> bool {
         use ac_net::messages::action;
+        let now = Instant::now();
+        let me = self.world.player_guid;
+        // Already in hand. Asking again is not a wasted message but a
+        // harmful one: the refusal it earns backs the weapon off for
+        // three seconds, then six, then twelve, and takes the wand the
+        // buff pass needs with it.
+        if self
+            .world
+            .objects
+            .get(&guid)
+            .is_some_and(|o| o.wielder == me)
+        {
+            return true;
+        }
+        if self.autoplay.wield_in_flight(guid, now) {
+            return true;
+        }
         let Some(locations) = self
             .world
             .objects
@@ -2454,15 +2510,86 @@ impl Client {
         else {
             return false;
         };
-        if self.wield_held_off(guid) {
+        if self.wield_must_wait(guid, now) {
             return false;
         }
         let mut w = ac_net::wire::Writer::new();
         w.u32(guid).u32(locations);
         self.session
             .send_action(action::GET_AND_WIELD_ITEM, &w.finish());
-        self.autoplay.wield_asked = Some(guid);
+        self.autoplay.wield_asked = Some((guid, now));
         true
+    }
+
+    /// The server has refused to move `item`. When that is the answer to
+    /// a wield we asked for, decide what the refusal is worth.
+    ///
+    /// A refusal for something now in our own hands is the answer to an
+    /// ask the server had already granted: the client asked twice before
+    /// the first answer came back, and the second ask was refused for
+    /// the first one having worked ("You must remove your Slashing
+    /// Sceptre to wield Slashing Sceptre"). Backing the weapon off for
+    /// that is worse than useless. [`Client::hold_off_wield`] clears
+    /// `wield_asked`, and with it the check in
+    /// [`Client::autoplay_pending_wield`] that would have forgotten the
+    /// wait once the item was seen wielded -- so the wait only ever
+    /// doubles, and the wand the buff pass needs is never taken up
+    /// again. Nine characters went a whole run without casting Prodigal
+    /// Strength once, behind a back-off against a wield that had worked.
+    pub(crate) fn wield_refused(&mut self, item: u32, now: Instant) {
+        if !self.autoplay.wield_asked.is_some_and(|(g, _)| g == item) {
+            return;
+        }
+        let me = self.world.player_guid;
+        if self
+            .world
+            .objects
+            .get(&item)
+            .is_some_and(|o| o.wielder == me)
+        {
+            self.autoplay.wield_asked = None;
+            self.autoplay.wield_refused.forget(&item);
+        } else {
+            self.hold_off_wield(item, now);
+        }
+    }
+
+    /// Whether the server has the character busy, so that a take sent
+    /// now would be thrown away.
+    ///
+    /// ACE refuses a take made while `IsBusy` is set and answers with
+    /// YoureTooBusy plus a wasted InventoryServerSaveFailed
+    /// (`Player_Inventory.cs`, `HandleActionPutItemInContainer_Verify`).
+    /// What sets `IsBusy` is what the server owes us a UseDone for: a
+    /// spell being wound up (`MagicState.OnCastStart`), a recipe, a
+    /// counter's sale. Nine characters bought eighty-nine "You're too
+    /// busy" pairs in ten minutes taking from a body with a spell in the
+    /// air.
+    ///
+    /// A swing is not one of them, whatever this used to say: nothing in
+    /// ACE's melee or missile path sets `IsBusy`, and the wield handler
+    /// does not read it at all -- the check in
+    /// `HandleActionGetAndWieldItem` is commented out. The reason not to
+    /// change hands mid-swing is a different one and is stated where it
+    /// belongs (see [`Client::wield_must_wait`]).
+    pub fn server_busy(&self, now: Instant) -> bool {
+        self.autoplay.cast_in_flight(now)
+    }
+
+    /// Whether a wield of `guid` sent now would be wasted: the item is
+    /// inside the wait a refusal earned it, the server has the character
+    /// busy, or there is a swing in the air. Either way the errand keeps
+    /// and goes out later.
+    ///
+    /// The swing is not the server refusing anything -- it would make
+    /// the wield, and cancel the attack doing it (see
+    /// `autoplay::change_of_hands_waits`). A weapon is not worth a cancelled
+    /// swing when the gap between two of them is a few hundred
+    /// milliseconds away.
+    pub fn wield_must_wait(&self, guid: u32, now: Instant) -> bool {
+        self.wield_held_off(guid)
+            || self.server_busy(now)
+            || attack_unanswered(self.attack_pending, self.last_attack, now)
     }
 
     /// Whether this item is inside the wait a refused wield earned it.
@@ -2612,7 +2739,17 @@ impl Client {
         else {
             return false;
         };
-        if self.wield_held_off(guid) {
+        let now = Instant::now();
+        // The same weapon, asked for a tick or two ago and not answered
+        // yet. The swap is under way; asking again only buys "You must
+        // remove your Slashing Sceptre to wield Slashing Sceptre" and a
+        // back-off against a wield that had in fact worked -- which is
+        // how nine characters went ten minutes without casting Prodigal
+        // Strength once.
+        if self.autoplay.wield_in_flight(guid, now) {
+            return true;
+        }
+        if self.wield_must_wait(guid, now) {
             return false;
         }
         // The server will not put a bow in the hands that hold a wand:
@@ -2637,7 +2774,7 @@ impl Client {
         // for its own swaps; without it here, every swap the buff pass
         // and the softening start was invisible to the fight, which is
         // how +Verity came to punch a Spikey Armoredillo.
-        self.autoplay.last_rewield = Some(Instant::now());
+        self.autoplay.last_rewield = Some(now);
         if sent {
             // Taken up by the housekeeping the moment the hands are
             // empty, rather than whenever the caller next happens to ask.
@@ -2649,7 +2786,7 @@ impl Client {
         w.u32(guid).u32(locations);
         self.session
             .send_action(action::GET_AND_WIELD_ITEM, &w.finish());
-        self.autoplay.wield_asked = Some(guid);
+        self.autoplay.wield_asked = Some((guid, now));
         true
     }
 
@@ -2855,7 +2992,7 @@ impl Client {
         );
     }
 
-    pub fn tick_loot(&mut self) {
+    pub fn tick_loot(&mut self, now: Instant) {
         use ac_net::messages::action;
         let me = self.world.player_guid.unwrap_or(0);
         // The in-flight pickup is done once the item is ours, gone, or stale.
@@ -2869,7 +3006,11 @@ impl Client {
                 self.loot_inflight = None;
             }
         }
-        if self.loot_inflight.is_none() {
+        // Not while the server has us busy: it refuses the take outright
+        // and spends two messages saying so (see [`Client::server_busy`]).
+        // The item stays at the head of the queue and goes out on the
+        // first free tick, which costs a frame and never a pickup.
+        if self.loot_inflight.is_none() && !self.server_busy(now) {
             if let Some(guid) = self.loot_queue.pop_front() {
                 let name = self
                     .world
@@ -2935,7 +3076,7 @@ impl Client {
         // Whatever the server says about this item now is about the put,
         // not about some earlier ask to wield it: a refused put must not
         // be counted against the wield (see `Client::hold_off_wield`).
-        if self.autoplay.wield_asked == Some(item) {
+        if self.autoplay.wield_asked.is_some_and(|(g, _)| g == item) {
             self.autoplay.wield_asked = None;
         }
         let mut w = ac_net::wire::Writer::new();

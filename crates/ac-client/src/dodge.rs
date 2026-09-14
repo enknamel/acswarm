@@ -38,7 +38,24 @@
 //! was doing (casting, swinging) resumes after.
 //!
 //! Our own projectiles start beside us and fly away, so they never
-//! come toward us and are never dodged.
+//! come toward us and are never dodged. A fellow's are another matter:
+//! nine characters standing a metre apart and shooting the same
+//! creature put bolts across each other all afternoon, and a fifth of
+//! one run's dodges were for a teammate's spell.
+//!
+//! Those are demoted rather than dropped, because neither half of the
+//! obvious reading is true. A fellow's bolt cannot hurt us -- ACE
+//! refuses the damage in `Player.CheckPKStatusVsTarget`, where a
+//! non-PK on either side ends it -- but it is not harmless: the
+//! collision is resolved first (`SpellProjectile.OnCollideObject` calls
+//! `ProjectileImpact` before it asks about PK), so standing in a
+//! fellow's line destroys his spell and nobody is any better off.
+//! Stepping aside genuinely saves it. What is wrong is the price: a
+//! dodge takes the legs and the tick with them, ahead of the healing
+//! and everything else, and nothing that cannot hurt us is worth an
+//! interrupted cast or a broken swing. So [`can_hurt_us`] is read at
+//! intake and a fellow's bolt is stepped out of the way of only when
+//! the moment is going spare (see [`Client::free_to_step_aside`]).
 //!
 //! A projectile is dodged whether or not it could reach us: the wire
 //! names its weenie, not its spell, and the DAT spell table carries no
@@ -96,8 +113,47 @@ pub struct Track {
     pub gravity: f32,
     /// When it appeared.
     pub seen: Instant,
+    /// Who it looks to have come from (see [`Client::fired_by`]): a
+    /// guess from where it appeared, not the wire's word.
+    pub from: Option<u32>,
+    /// Whether it could hurt this character if it landed (see
+    /// [`can_hurt_us`]), read once when it appeared. A fellow's spell
+    /// cannot, and is worth a great deal less of the character's time.
+    pub can_hurt: bool,
     /// A sidestep was taken for it: one is enough.
     pub dodged: bool,
+}
+
+/// Whether a projectile from a creature whose description flags are
+/// `caster` can hurt a character whose flags are `mine` (both
+/// `ac_world::object_desc_flags`).
+///
+/// A monster's can. Another player's cannot, unless both sides are
+/// player killers: ACE's `Player.CheckPKStatusVsTarget` refuses the
+/// damage the moment either side is a non-PK, and the fellowship a
+/// character hunts with is nine non-PKs shooting past each other.
+///
+/// Free is the exception, and it runs the other way: ACE short-circuits
+/// to "allowed" the moment *either* side is Free
+/// (`Player_Combat.CheckPKStatusVsTarget`, which returns no error at
+/// all for it), so a Free player's spell lands on an ordinary character
+/// for full damage. Either side carrying that bit is a threat.
+///
+/// Read the other way round when there is any doubt. The caster is a
+/// guess (see [`Client::fired_by`]), and the two PK statuses the server
+/// keeps are finer than these bits -- a PK and a PK Lite cannot touch
+/// each other either -- so anything that looks at all like a threat is
+/// taken for one and dodged as it always was.
+pub fn can_hurt_us(caster: u32, mine: u32) -> bool {
+    use ac_world::object_desc_flags as flags;
+    if caster & flags::PLAYER == 0 {
+        return true;
+    }
+    if (caster | mine) & flags::FREE_PK_STATUS != 0 {
+        return true;
+    }
+    let pk = |f: u32| f & (flags::PLAYER_KILLER | flags::PK_LITE_STATUS) != 0;
+    pk(caster) && pk(mine)
 }
 
 impl Track {
@@ -123,6 +179,12 @@ pub struct State {
     /// The attack spell last cast, when, and the missiles already in the
     /// air then, until its own projectile is seen.
     pub fired: Option<(u32, Instant, Vec<u32>)>,
+    /// The sidestep in hand is a courtesy to a fellow rather than a
+    /// dodge: it saves his spell and nothing of ours, so it is given up
+    /// the moment there is something better to do (see
+    /// [`Client::free_to_step_aside`]). Read only while `dodge_to` is
+    /// set, and written afresh with every step.
+    pub courtesy: bool,
 }
 
 /// A projectile leaving this long after a cast is not taken for it.
@@ -560,49 +622,86 @@ impl Client {
         self.dodge
             .tracks
             .retain(|g, _| world.objects.get(g).is_some_and(|o| !o.no_draw));
-        for o in self.world.objects.values() {
-            if !o.is_missile() || o.no_draw || o.parent.is_some() {
-                continue;
-            }
-            if o.velocity.length_squared() < 0.25 {
-                continue;
-            }
-            let Some(origin) = o.world_pos() else {
+        // Who fired it is worked out here, once, while the projectile
+        // is still sitting at its caster's feet: a moment later the
+        // caster has moved and the huddle around it has changed, and
+        // the answer decides how much of the character's time the
+        // thing is worth.
+        let fresh: Vec<u32> = self
+            .world
+            .objects
+            .values()
+            .filter(|o| o.is_missile() && !o.no_draw && o.parent.is_none())
+            .filter(|o| o.velocity.length_squared() >= 0.25)
+            .filter(|o| !self.dodge.tracks.contains_key(&o.guid))
+            .map(|o| o.guid)
+            .collect();
+        for guid in fresh {
+            let Some((origin, velocity, falls, name, wcid, state)) =
+                self.world.objects.get(&guid).and_then(|o| {
+                    Some((
+                        o.world_pos()?,
+                        o.velocity,
+                        o.physics_state & ac_world::object::PHYSICS_STATE_GRAVITY != 0,
+                        o.name.clone(),
+                        o.weenie_class_id,
+                        o.physics_state,
+                    ))
+                })
+            else {
                 continue;
             };
-            self.dodge.tracks.entry(o.guid).or_insert_with(|| {
-                let falls = o.physics_state & ac_world::object::PHYSICS_STATE_GRAVITY != 0;
-                tracing::info!(
-                    "dodge: projectile {} ({}, {:#010x}) at {:.1} {:.1} {:.1} moving {:.1} {:.1} {:.1} ({:.1} m/s{}), state {:#x}, {:.1} m off",
-                    o.name,
-                    o.weenie_class_id,
-                    o.guid,
-                    origin.x,
-                    origin.y,
-                    origin.z,
-                    o.velocity.x,
-                    o.velocity.y,
-                    o.velocity.z,
-                    o.velocity.length(),
-                    if falls { ", falling" } else { "" },
-                    o.physics_state,
-                    origin.distance(me),
-                );
+            let from = self.fired_by(origin);
+            let can_hurt = self.can_be_hurt_by(from);
+            let whose = from
+                .and_then(|g| self.world.objects.get(&g))
+                .map(|o| format!(", from {}", o.name))
+                .unwrap_or_default();
+            tracing::info!(
+                "dodge: projectile {name} ({wcid}, {guid:#010x}) at {:.1} {:.1} {:.1} moving {:.1} {:.1} {:.1} ({:.1} m/s{}), state {state:#x}, {:.1} m off{whose}{}",
+                origin.x,
+                origin.y,
+                origin.z,
+                velocity.x,
+                velocity.y,
+                velocity.z,
+                velocity.length(),
+                if falls { ", falling" } else { "" },
+                origin.distance(me),
+                if can_hurt { "" } else { " (cannot hurt us)" },
+            );
+            self.dodge.tracks.insert(
+                guid,
                 Track {
                     origin,
-                    velocity: o.velocity,
+                    velocity,
                     gravity: if falls { GRAVITY } else { 0.0 },
                     seen: now,
+                    from,
+                    can_hurt,
                     dodged: false,
-                }
-            });
+                },
+            );
         }
-        // A sidestep under way is kept up unless its end is itself in
-        // a projectile's path.
+        // A sidestep under way is kept up, barring two things.
         if let Some((goal, _)) = self.dodge_to {
+            // It was only a courtesy to a fellow and the moment it was
+            // taken in has stopped being spare: a heal that has come
+            // due, or a cast gone out, must not wait out somebody
+            // else's bolt.
+            if self.dodge.courtesy && !self.free_to_step_aside(now) {
+                self.dodge_to = None;
+                self.dodge.courtesy = false;
+                return false;
+            }
+            // Or its end is itself in the path of something that can
+            // hurt us. Only of something that can: starting again
+            // because a fellow's bolt crosses the spot would be the
+            // same mistake one level down.
             let in_the_way = self.dodge.tracks.values().any(|t| {
-                threat(t.at(now), t.velocity, t.gravity, goal, MISS_BY)
-                    .is_some_and(|eta| eta <= HORIZON)
+                t.can_hurt
+                    && threat(t.at(now), t.velocity, t.gravity, goal, MISS_BY)
+                        .is_some_and(|eta| eta <= HORIZON)
             });
             if !in_the_way {
                 return true;
@@ -612,18 +711,16 @@ impl Client {
         if self.dodge.tracks.is_empty() {
             return false;
         }
-        // The soonest projectile on its way to us.
-        let mut soonest: Option<(u32, f32)> = None;
-        for (g, t) in &self.dodge.tracks {
-            if t.dodged {
-                continue;
-            }
-            if let Some(eta) = threat(t.at(now), t.velocity, t.gravity, me, MISS_BY) {
-                if eta <= HORIZON && soonest.is_none_or(|(_, s)| eta < s) {
-                    soonest = Some((*g, eta));
-                }
-            }
-        }
+        // The soonest projectile on its way to us that can hurt us --
+        // and only failing that, and only with a moment to spare, the
+        // soonest of a fellow's. A spell that would land on us always
+        // outranks one that would merely die on us, however much
+        // sooner the fellow's arrives.
+        let soonest = self.soonest(now, me, true).or_else(|| {
+            self.free_to_step_aside(now)
+                .then(|| self.soonest(now, me, false))
+                .flatten()
+        });
         let Some((guid, eta)) = soonest else {
             return false;
         };
@@ -634,23 +731,10 @@ impl Client {
             .get(&guid)
             .map(|o| o.name.clone())
             .unwrap_or_else(|| "a spell".into());
-        let me_guid = self.world.player_guid;
-        let caster = self
-            .world
-            .objects
-            .values()
-            .filter(|o| {
-                Some(o.guid) != me_guid
-                    && o.item_type & ac_world::item_type::CREATURE != 0
-                    && o.parent.is_none()
-            })
-            .filter_map(|o| {
-                o.world_pos()
-                    .map(|p| (p.distance(track.origin), o.name.clone()))
-            })
-            .filter(|(d, _)| *d <= CASTER_WITHIN)
-            .min_by(|a, b| a.0.total_cmp(&b.0))
-            .map(|(_, n)| n);
+        let caster = track
+            .from
+            .and_then(|g| self.world.objects.get(&g))
+            .map(|o| o.name.clone());
         // Room to either side, measured with the walker's own collision
         // half a metre at a time.
         let (left, right) = sides(track.velocity);
@@ -701,16 +785,98 @@ impl Client {
             return false;
         };
         tracing::info!(
-            "dodge: {name}{from} arrives in {eta:.2} s, lean {lean:.2}, room {room_left:.1} left {room_right:.1} right{}, stepping to {:.1} {:.1}",
+            "dodge: {name}{from}{} arrives in {eta:.2} s, lean {lean:.2}, room {room_left:.1} left {room_right:.1} right{}, stepping to {:.1} {:.1}",
+            if track.can_hurt { "" } else { ", which cannot hurt us," },
             if blind { " (blind: the walk test failed both ways)" } else { "" },
             goal.x,
             goal.y
         );
         self.dodge_to = Some((goal, now + LASTS));
+        self.dodge.courtesy = !track.can_hurt;
         self.steering.reset();
-        self.autoplay
-            .say(Doing::Dodging, format!("dodging {name}{from}"));
+        // Said differently for a fellow's spell, so that a run's log
+        // tells a reflex that kept the character alive from a courtesy
+        // that only saved a teammate's cast.
+        let doing = match (track.can_hurt, caster.as_ref()) {
+            (true, _) => format!("dodging {name}{from}"),
+            (false, Some(c)) => format!("stepping out of {c}'s way"),
+            (false, None) => format!("stepping out of the way of {name}"),
+        };
+        self.autoplay.say(Doing::Dodging, doing);
         true
+    }
+
+    /// The soonest tracked projectile on its way to `me` within
+    /// [`HORIZON`], among those that `can_hurt` us or (false) among
+    /// those that cannot.
+    fn soonest(&self, now: Instant, me: Vec3, can_hurt: bool) -> Option<(u32, f32)> {
+        let mut best: Option<(u32, f32)> = None;
+        for (g, t) in &self.dodge.tracks {
+            if t.dodged || t.can_hurt != can_hurt {
+                continue;
+            }
+            if let Some(eta) = threat(t.at(now), t.velocity, t.gravity, me, MISS_BY) {
+                if eta <= HORIZON && best.is_none_or(|(_, s)| eta < s) {
+                    best = Some((*g, eta));
+                }
+            }
+        }
+        best
+    }
+
+    /// Whether there is a moment going spare for a projectile that
+    /// cannot hurt this character.
+    ///
+    /// A dodge takes the legs for [`LASTS`] and claims the tick, ahead
+    /// of the healing and of everything else the character might do. A
+    /// spell about to land on it is worth that. A fellow's, which can
+    /// only ever cost him his own spell, is worth the step and nothing
+    /// more -- so it waits for a tick with no cast in the air, no swing
+    /// unanswered and no wound waiting on a heal, and otherwise is left
+    /// to land.
+    fn free_to_step_aside(&self, now: Instant) -> bool {
+        !self.autoplay.cast_in_flight(now)
+            && !self.mid_attack()
+            && self.health_fraction() >= self.autoplay.config.survive.heal_below
+    }
+
+    /// The creature that seems to have fired a projectile that appeared
+    /// at `origin`: the nearest one within [`CASTER_WITHIN`], this
+    /// character excepted.
+    ///
+    /// A guess, and named as one. Nothing on the wire says who cast a
+    /// spell; what is known is that a projectile is made at its
+    /// caster's feet, so the creature standing closest to where it
+    /// appeared nearly always fired it. In a huddle of nine characters
+    /// a metre apart it can name the fellow beside the one who did.
+    /// Good enough to decide what a projectile is worth of the
+    /// character's time; not good enough to decide whether to dodge it
+    /// at all.
+    fn fired_by(&self, origin: Vec3) -> Option<u32> {
+        let me = self.world.player_guid;
+        self.world
+            .objects
+            .values()
+            .filter(|o| {
+                Some(o.guid) != me
+                    && o.item_type & ac_world::item_type::CREATURE != 0
+                    && o.parent.is_none()
+            })
+            .filter_map(|o| o.world_pos().map(|p| (p.distance(origin), o.guid)))
+            .filter(|(d, _)| *d <= CASTER_WITHIN)
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+            .map(|(_, g)| g)
+    }
+
+    /// Whether a projectile fired by `caster` could hurt this character
+    /// (see [`can_hurt_us`]). One whose caster is not known is taken for
+    /// a threat: the guess is the doubtful part, not the rule.
+    fn can_be_hurt_by(&self, caster: Option<u32>) -> bool {
+        let Some(caster) = caster.and_then(|g| self.world.objects.get(&g)) else {
+            return true;
+        };
+        let mine = self.world.player().map_or(0, |o| o.object_desc_flags);
+        can_hurt_us(caster.object_desc_flags, mine)
     }
 }
 
@@ -779,6 +945,8 @@ mod tests {
             velocity: v,
             gravity: GRAVITY,
             seen,
+            from: None,
+            can_hurt: true,
             dodged: false,
         };
         let mid = track.at(seen + Duration::from_millis(500));
@@ -899,6 +1067,8 @@ mod tests {
             velocity: Vec3::new(10.0, 0.0, 0.0),
             gravity: 0.0,
             seen,
+            from: None,
+            can_hurt: true,
             dodged: false,
         };
         let p = t.at(seen + Duration::from_millis(500));
@@ -992,5 +1162,256 @@ mod tests {
         assert!((l + r).length() < 1e-6);
         assert_eq!(l.z, 0.0);
         assert!((l.length() - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_monsters_spell_can_hurt_us_and_a_fellows_cannot() {
+        use ac_world::object_desc_flags as flags;
+        // Nothing flagged a player is a monster, and a monster's spell
+        // always lands.
+        assert!(can_hurt_us(0, 0));
+        assert!(can_hurt_us(flags::ATTACKABLE, flags::PLAYER));
+        // Two ordinary players: ACE refuses the damage either way
+        // round, so the bolt only dies on us.
+        assert!(!can_hurt_us(flags::PLAYER, flags::PLAYER));
+        // A player killer's does land -- on another player killer.
+        assert!(can_hurt_us(
+            flags::PLAYER | flags::PLAYER_KILLER,
+            flags::PLAYER | flags::PLAYER_KILLER
+        ));
+        // But not on someone who is not one, whichever side is which.
+        assert!(!can_hurt_us(
+            flags::PLAYER | flags::PLAYER_KILLER,
+            flags::PLAYER
+        ));
+        assert!(!can_hurt_us(
+            flags::PLAYER,
+            flags::PLAYER | flags::PLAYER_KILLER
+        ));
+        // Free runs the other way: ACE short-circuits to "allowed" the
+        // moment either side is Free, so a Free player's spell lands on
+        // an ordinary character for full damage. Read as one more PK bit
+        // that both sides had to carry, the one projectile that can kill
+        // us was the one demoted to a courtesy.
+        assert!(can_hurt_us(
+            flags::PLAYER | flags::FREE_PK_STATUS,
+            flags::PLAYER
+        ));
+        assert!(can_hurt_us(
+            flags::PLAYER,
+            flags::PLAYER | flags::FREE_PK_STATUS
+        ));
+    }
+
+    /// The Holtburg field these tests stand in.
+    const HOLTBURG: u32 = 0xA9B4_0019;
+    /// This character's own guid in the world model.
+    const ME_GUID: u32 = 0x5000_0009;
+
+    /// A creature standing at `at`, described by `flags`.
+    fn creature(guid: u32, name: &str, flags: u32, at: Vec3) -> ac_world::WorldObject {
+        ac_world::WorldObject {
+            guid,
+            name: name.into(),
+            item_type: ac_world::item_type::CREATURE,
+            object_desc_flags: flags,
+            health: Some(1.0),
+            position: Some(ac_world::object::Position::new_flat(
+                HOLTBURG,
+                at - ac_world::landblock_origin(HOLTBURG),
+            )),
+            scale: 1.0,
+            ..Default::default()
+        }
+    }
+
+    /// A bolt made at `from`'s chest and flying at `at`'s, the way the
+    /// server aims one.
+    fn bolt(guid: u32, from: Vec3, at: Vec3, speed: f32) -> ac_world::WorldObject {
+        let origin = from + Vec3::new(0.0, 0.0, CHEST);
+        let target = at + Vec3::new(0.0, 0.0, CHEST);
+        ac_world::WorldObject {
+            guid,
+            name: "Lightning Bolt V".into(),
+            physics_state: ac_world::object::PHYSICS_STATE_MISSILE,
+            velocity: (target - origin).normalize() * speed,
+            position: Some(ac_world::object::Position::new_flat(
+                HOLTBURG,
+                origin - ac_world::landblock_origin(HOLTBURG),
+            )),
+            scale: 1.0,
+            ..Default::default()
+        }
+    }
+
+    /// A character standing in the Holtburg field, offline, when the
+    /// archives are there to be read. The room to either side is
+    /// measured with the walker's own collision, so this wants the
+    /// real landscape.
+    fn in_the_field() -> Option<Client> {
+        let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
+            eprintln!("AC_DATA_DIR unset; skipping");
+            return None;
+        };
+        let assets = std::rc::Rc::new(ac_scene::Assets::open(dir).unwrap());
+        let mut c = Client::connect(
+            crate::Config {
+                host: "127.0.0.1:1".into(),
+                account: "acreborn".into(),
+                password: "x".into(),
+                character: None,
+                auto_enter: true,
+            },
+            assets.clone(),
+        )
+        .unwrap();
+        let local = Vec3::new(84.0, 84.0, 94.0);
+        let mut pl = crate::player::Player::new(&assets, HOLTBURG, local, glam::Quat::IDENTITY);
+        pl.set_motion_table(&assets, 0x0200_0001, 0x0900_0001);
+        let me = pl.world_position();
+        c.player = Some(pl);
+        c.world.player_guid = Some(ME_GUID);
+        // The character's own object: the PK rule reads its flags.
+        c.world.objects.insert(
+            ME_GUID,
+            creature(
+                ME_GUID,
+                "Blargerton",
+                ac_world::object_desc_flags::PLAYER,
+                me,
+            ),
+        );
+        Some(c)
+    }
+
+    #[test]
+    fn a_fellows_bolt_is_known_at_intake_and_never_takes_the_tick_from_a_cast() {
+        let Some(mut c) = in_the_field() else {
+            return;
+        };
+        let me = c.player.as_ref().unwrap().world_position();
+        let now = Instant::now();
+        // A fellow twelve metres off, shooting through where we stand
+        // at whatever we are both fighting.
+        let (fellow, shot) = (0x5000_0001, 0x8000_0001);
+        let stands = me + Vec3::new(0.0, -12.0, 0.0);
+        c.world.objects.insert(
+            fellow,
+            creature(
+                fellow,
+                "+Brynnu",
+                ac_world::object_desc_flags::PLAYER,
+                stands,
+            ),
+        );
+        c.world.objects.insert(shot, bolt(shot, stands, me, 15.0));
+
+        // A cast of our own in the air: the bolt is taken up, read for
+        // a fellow's, and left to land. It cannot hurt us, and no spell
+        // that cannot hurt us is worth a cancelled cast.
+        c.autoplay.cast_sent = Some(now);
+        assert!(
+            !c.autoplay_dodge(now),
+            "a fellow's bolt interrupted our own cast"
+        );
+        let track = c.dodge.tracks[&shot];
+        assert_eq!(track.from, Some(fellow), "the caster guess");
+        assert!(!track.can_hurt);
+        assert_eq!(c.dodge_to, None);
+
+        // The cast answered for, the same bolt is worth the step: it
+        // dies on us otherwise, and the fellow has spent his mana for
+        // nothing.
+        c.autoplay.cast_sent = None;
+        assert!(c.autoplay_dodge(now), "a spare moment is worth the step");
+        assert!(c.dodge_to.is_some());
+        assert!(c.dodge.courtesy, "the step was a courtesy, not a dodge");
+
+        // And it is given back the moment the moment stops being spare:
+        // a step for somebody else's spell must not hold the legs while
+        // a heal comes due.
+        c.autoplay.cast_sent = Some(now);
+        assert!(!c.autoplay_dodge(now), "the courtesy outstayed its moment");
+        assert_eq!(c.dodge_to, None);
+    }
+
+    #[test]
+    fn a_monsters_bolt_is_dodged_whatever_else_is_in_hand() {
+        // The reflex as it was. In the run this change came from it
+        // fired 543 times and nothing landed on anyone, and for a
+        // character that can be hurt it is what keeps him alive.
+        let Some(mut c) = in_the_field() else {
+            return;
+        };
+        let me = c.player.as_ref().unwrap().world_position();
+        let now = Instant::now();
+        let (shaman, shot) = (0x6000_0001, 0x8000_0002);
+        let stands = me + Vec3::new(0.0, -12.0, 0.0);
+        c.world.objects.insert(
+            shaman,
+            creature(
+                shaman,
+                "Drudge Shaman",
+                ac_world::object_desc_flags::ATTACKABLE,
+                stands,
+            ),
+        );
+        c.world.objects.insert(shot, bolt(shot, stands, me, 15.0));
+        // Mid-cast and mid-swing both.
+        c.autoplay.cast_sent = Some(now);
+        c.attack_pending = true;
+        c.last_attack = now;
+        assert!(
+            c.autoplay_dodge(now),
+            "a spell about to land was not dodged"
+        );
+        assert!(c.dodge.tracks[&shot].can_hurt);
+        assert!(c.dodge_to.is_some());
+    }
+
+    #[test]
+    fn a_spell_that_would_land_outranks_a_fellows_that_arrives_sooner() {
+        let Some(mut c) = in_the_field() else {
+            return;
+        };
+        let me = c.player.as_ref().unwrap().world_position();
+        let now = Instant::now();
+        // The fellow is nearer, so his bolt gets here first; the
+        // shaman's is the one that matters.
+        let (fellow, friendly) = (0x5000_0001, 0x8000_0001);
+        let beside = me + Vec3::new(0.0, -4.0, 0.0);
+        c.world.objects.insert(
+            fellow,
+            creature(
+                fellow,
+                "+Brynnu",
+                ac_world::object_desc_flags::PLAYER,
+                beside,
+            ),
+        );
+        c.world
+            .objects
+            .insert(friendly, bolt(friendly, beside, me, 15.0));
+        let (shaman, harmful) = (0x6000_0001, 0x8000_0002);
+        let across = me + Vec3::new(12.0, 0.0, 0.0);
+        c.world.objects.insert(
+            shaman,
+            creature(
+                shaman,
+                "Drudge Shaman",
+                ac_world::object_desc_flags::ATTACKABLE,
+                across,
+            ),
+        );
+        c.world
+            .objects
+            .insert(harmful, bolt(harmful, across, me, 15.0));
+        // Nothing else in hand, so both are eligible.
+        assert!(c.autoplay_dodge(now));
+        assert!(
+            c.dodge.tracks[&harmful].dodged,
+            "the step was taken for the fellow's bolt"
+        );
+        assert!(!c.dodge.tracks[&friendly].dodged);
     }
 }

@@ -211,6 +211,60 @@ fn answered_with_nothing(
         && done.is_some_and(|(err, at)| err == 0 && at > asked)
         && told.is_none_or(|at| at <= asked)
 }
+
+/// Why the server would not open a body.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CorpseRefusal {
+    /// Someone has it open this moment. The server hands a container to
+    /// one viewer at a time and turns the rest away outright
+    /// (`Container.InUseMessage`); that viewer is usually done with it
+    /// in a moment.
+    InUse,
+    /// It is the killer's for now (`Corpse.Open`). A monster's body
+    /// opens to everyone once it is half rotted.
+    NotYetOurs,
+    /// It is the killer's for good: a body that made a rare, or a
+    /// player killer's doing. Neither is ever shared, however long it
+    /// lies there.
+    NeverOurs,
+}
+
+/// Which body the server's words named, and why it would not open it.
+///
+/// Matched on the English because that is all there is to match on:
+/// every one of these arrives as a transient string, which carries no
+/// error code. They are what ACE answers an open with and nothing else,
+/// so a line that reads this way was an answer to an open -- of a
+/// container, at least. That it was *our* body's open is for the caller
+/// to say (see [`Autoplay::corpse_refused`]); the in-use words are sent
+/// for any container, a chest as readily as a corpse.
+fn corpse_refusal(text: &str) -> Option<(&str, CorpseRefusal)> {
+    // "The Corpse of Hellion is already in use by someone else!" -- or
+    // by a name, on a server that tells you whose (`container_opener_name`).
+    if let Some((name, _who)) = text
+        .strip_prefix("The ")
+        .and_then(|s| s.strip_suffix('!'))
+        .and_then(|s| s.split_once(" is already in use by "))
+    {
+        return Some((name, CorpseRefusal::InUse));
+    }
+    // "You do not yet have the right to loot the Corpse of Hellion."
+    if let Some(name) = text.strip_prefix("You do not yet have the right to loot the ") {
+        return Some((
+            name.strip_suffix('.').unwrap_or(name),
+            CorpseRefusal::NotYetOurs,
+        ));
+    }
+    // "You may not loot the Corpse of Hellion because ..." -- the body
+    // made a rare, or the death was a player killer's doing.
+    if let Some((name, _why)) = text
+        .strip_prefix("You may not loot the ")
+        .and_then(|s| s.split_once(" because "))
+    {
+        return Some((name, CorpseRefusal::NeverOurs));
+    }
+    None
+}
 /// Least time between two casts of the same buff.
 const BUFF_EVERY: Duration = Duration::from_millis(1500);
 /// A target that takes no damage for this long is let go.
@@ -258,9 +312,14 @@ fn corpse_is_ours(
     fight_radius: f32,
     spots: &[(glam::Vec3, Instant)],
 ) -> bool {
-    let close =
-        me.truncate().distance(at.truncate()) <= LOOT_NEAR && (me.z - at.z).abs() <= SAME_FLOOR;
-    close || (me.distance(at) <= fight_radius && near_a_kill(at, spots))
+    corpse_within_reach(me, at) || (me.distance(at) <= fight_radius && near_a_kill(at, spots))
+}
+
+/// Whether a body at `at` lies close enough to `me` to be emptied from
+/// where it stands: near on the map and on the same floor. See
+/// [`corpse_is_ours`], where the two measures are explained.
+fn corpse_within_reach(me: glam::Vec3, at: glam::Vec3) -> bool {
+    me.truncate().distance(at.truncate()) <= LOOT_NEAR && (me.z - at.z).abs() <= SAME_FLOOR
 }
 
 /// How long the next fight waits on an answer about whose kill a far
@@ -501,6 +560,37 @@ fn change_of_hands_waits(have: Stance, want: Stance, mid_attack: bool) -> bool {
     have != want && mid_attack
 }
 
+/// How near to running out a buff must be, in seconds, before this pass
+/// will put it back.
+///
+/// The quiet pass tops up anything within the wide `top_up_within`. The
+/// urgent one runs as a reflex, ahead of loot and ahead of the fight,
+/// and puts back whatever is under `never_below` -- but it ignored
+/// `out_of_combat_only` outright, which is the player saying the buff
+/// pass must keep its hands off mid-fight. A buff with a minute still
+/// on it was enough to put the sword away and reach for a wand in the
+/// middle of a swing.
+///
+/// What that setting is protecting is the weapon, so that is what this
+/// asks about. With a wand already in hand (`wand_in_hand`) a recast
+/// costs a cast and nothing else, and `never_below` holds as it always
+/// did: a protection going down in the middle of a fight is how a
+/// character dies, and waiting for the buff to lapse before putting it
+/// back is exactly the window `never_below` exists to close. It is only
+/// when the recast would cost the character its weapon that an engaged
+/// character with the setting on waits for a buff to actually lapse --
+/// nought seconds left, which is what a buff that is not up at all
+/// reads as -- and the rest wait for the fight to end.
+fn buff_within(cfg: &Buffs, urgent: bool, fighting: bool, wand_in_hand: bool) -> f32 {
+    if !urgent {
+        return cfg.top_up_within;
+    }
+    if fighting && cfg.out_of_combat_only && !wand_in_hand {
+        return 0.0;
+    }
+    cfg.never_below
+}
+
 /// A change of weapon is asked for at most this often.
 const REWIELD_EVERY: Duration = Duration::from_millis(1000);
 /// How long an item the server refused to wield is left alone the first
@@ -508,6 +598,16 @@ const REWIELD_EVERY: Duration = Duration::from_millis(1000);
 /// on purpose: most refusals are about what else is in the hands, and
 /// that changes within a few seconds.
 const WIELD_AGAIN: Duration = Duration::from_secs(3);
+/// How long a wield already asked for is given to be answered before it
+/// is worth asking again.
+///
+/// The client thinks at 8 Hz and the server's word takes a few hundred
+/// milliseconds to come back, so without this the same weapon goes out
+/// two or three times over and every ask after the first is refused --
+/// for the first one having worked. Nine characters sent 81 wields in
+/// ten minutes and were refused 71 of them, every refusal reading "You
+/// must remove your Slashing Sceptre to wield Slashing Sceptre".
+const WIELD_ANSWERS_IN: Duration = Duration::from_millis(1500);
 /// How long a weapon swap is given to land before the character gives
 /// up waiting and fights with whatever is in its hands. A put and a
 /// wield are a tick or two; anything longer means the swap is stuck.
@@ -633,7 +733,12 @@ pub struct Buffs {
     /// must never be allowed to run out: the protections going down in
     /// the middle of a fight is how a character dies.
     pub never_below: f32,
-    /// Only top up out of combat (the urgent recasts happen regardless).
+    /// Only top up out of combat. This is about the weapon: with a wand
+    /// already in hand `never_below` holds mid-fight as it always did,
+    /// and otherwise a buff that has actually run out still goes back
+    /// up while one with time left on it waits for the fight to end
+    /// rather than costing the character its weapon for a tick (see
+    /// [`buff_within`]).
     pub out_of_combat_only: bool,
     /// Keep this fraction of mana back from buffing, for healing and
     /// fighting. A character that spends its last point on Quickness
@@ -863,6 +968,75 @@ pub struct Team {
 /// the fight comes first. Following is the follower's job.
 const FOLLOW_BREAK: f32 = 10.0;
 
+/// The character options a teammate keeps on, by the name the option
+/// table knows them by (see `crate::options`). Every one of them is
+/// something the server checks before it will let the party work as
+/// one; the reasons are with the code that turns them on.
+const TEAM_OPTIONS: [&str; 4] = [
+    "accept fellowship",
+    "automatically accept fellowship",
+    "let other players give you items",
+    "share fellowship loot",
+];
+
+/// The shortest gap between two fellowship invitations. Nine characters
+/// arriving together are nine invitations, and they used to go out one
+/// every five seconds -- forty-one seconds before the last one was in,
+/// which is the very stretch in which nobody may loot anyone else's
+/// kill. ACE has no rate limit on recruiting that I can find: the only
+/// refusal is against a busy member (`Entity/Fellowship.cs`,
+/// `fellow_busy_no_recruit`). That is read from the source and not
+/// tested against a live server, so a small gap is kept rather than
+/// firing nine invitations into one frame.
+const RECRUIT_FLOOR: Duration = Duration::from_millis(500);
+
+/// How long the leader waits for the server to answer a founding
+/// before asking for one again. The answer is the fellowship itself,
+/// arriving as a full update; until it comes there is nothing to say
+/// whether the ask was heard, and asking twice would be two
+/// fellowships.
+const FOUNDING_WAIT: Duration = Duration::from_secs(5);
+
+/// How far off a mate may stand and still be asked in, metres. The
+/// server sets no distance on recruiting; this is about asking the ones
+/// that are here rather than one still walking in from the last town.
+const RECRUIT_RANGE: f32 = 25.0;
+
+/// How long one invitee waits before being asked again. Nothing comes
+/// back from an invitation that was turned down for a busy member, and
+/// the news that one was accepted comes the long way round -- the mate
+/// tells the board it is in a fellowship -- so a wait is the only way
+/// to tell "not yet" from "never". It is the invitee that waits, not
+/// the leader: the others are asked meanwhile.
+const RECRUIT_AGAIN: Duration = Duration::from_secs(5);
+
+/// Who to ask into the fellowship next, out of the mates standing by:
+/// the nearest one that has not been asked in the last
+/// [`RECRUIT_AGAIN`]. `None` when there is nobody to ask, or when the
+/// last invitation went out inside [`RECRUIT_FLOOR`].
+///
+/// `waiting` is (guid, metres away), `asked` is when each invitee was
+/// last sent an invitation.
+fn next_invitee(
+    waiting: &[(u32, f32)],
+    asked: &[(u32, Instant)],
+    last_sent: Option<Instant>,
+    now: Instant,
+) -> Option<u32> {
+    if last_sent.is_some_and(|t| now.duration_since(t) < RECRUIT_FLOOR) {
+        return None;
+    }
+    waiting
+        .iter()
+        .filter(|(guid, _)| {
+            !asked
+                .iter()
+                .any(|(g, t)| g == guid && now.duration_since(*t) < RECRUIT_AGAIN)
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(guid, _)| *guid)
+}
+
 /// How often one character hands something to another. The server
 /// takes one give at a time and answers in its own time.
 const GIVE_EVERY: Duration = Duration::from_millis(700);
@@ -890,6 +1064,26 @@ const UNDER_ATTACK: Duration = Duration::from_secs(4);
 /// (`WorldObject_Decay`), so this is the whole window there is.
 pub(crate) const CORPSE_LIFE: Duration = Duration::from_secs(300);
 
+/// How long to leave a body someone else has open. Long enough that the
+/// two of us are not asking over each other, short enough to have it the
+/// moment they are done: emptying one takes a few seconds. It doubles
+/// from there like any other wait.
+const CORPSE_IN_USE_AGAIN: Duration = Duration::from_secs(3);
+
+/// How long to leave a body the server says is not ours yet.
+///
+/// Half decay is the slowest way a body opens up, not the usual one:
+/// ACE marks a corpse looted the moment anyone closes it, and a looted
+/// corpse is everyone's (`Corpse.Close` sets `IsLooted`, which
+/// `Corpse.HasPermission` answers on before it ever looks at the clock).
+/// So the ordinary course -- the killer opens it, empties it, closes it
+/// -- makes a body public within seconds of the refusal, and writing it
+/// off until it had half rotted left its loot on the floor for two
+/// minutes. Short, and doubling like any other wait, so a body that
+/// really is locked to its killer is asked about a handful of times
+/// rather than every half minute.
+const CORPSE_NOT_OURS_AGAIN: Duration = Duration::from_secs(5);
+
 /// How close to rotting a corpse has to be before it is worth breaking
 /// off for. Inside this there is no second chance.
 pub(crate) const CORPSE_URGENT: Duration = Duration::from_secs(75);
@@ -903,6 +1097,54 @@ pub(crate) const CORPSE_URGENT: Duration = Duration::from_secs(75);
 /// be. Two and a half metres is inside the use radius of everything
 /// that leaves a body.
 const CORPSE_REACH: f32 = 2.5;
+
+/// How far a character may drift from a body it already has open and
+/// still walk back to it holding it (see `Client::autoplay_loot`).
+///
+/// Generous, because the drift is not the character's doing: a dodge, a
+/// knock-back or a fight that came to it moves it several metres in a
+/// frame, and the body is still well inside the twenty the looting calls
+/// its own ([`LOOT_NEAR`]). Further off than this it has really gone,
+/// and the body is shut and walked back to like any other.
+const HOLD_ON_WITHIN: f32 = CORPSE_REACH * 4.0;
+
+/// Whether a character `away` metres from the body it has open walks
+/// back to it still holding it, rather than shutting it and starting
+/// again (see [`HOLD_ON_WITHIN`]).
+fn still_holding_at(away: f32) -> bool {
+    away <= HOLD_ON_WITHIN
+}
+
+/// How long a mate's claim on a body is believed (see
+/// [`TeamView::working`]). A claimant that stalled or was dragged into
+/// a fight must not hold a body for the whole five minutes it lies
+/// there.
+///
+/// Longer than the loot rules keep at one body (`ac_loot::run::KEEP_AT_IT`,
+/// forty-five seconds), and by enough to cover a walk back to one that
+/// drifted out of reach. At twenty seconds a character working a body
+/// full of loot lost its claim while the body was still open on the
+/// server, and the other eight converged on a container the server had
+/// already handed out and were refused one by one.
+const CLAIM_STALE: Duration = Duration::from_secs(75);
+
+/// Two claims made within this of each other are the same moment.
+///
+/// Each session ages its own claim on its own clock and hears the
+/// others' up to a board round late (`ac_plugin::team::SAY_EVERY`, half
+/// a second), so nothing finer can be told apart and two sessions asked
+/// which of them claimed a body first would both answer "I did". Inside
+/// this window the lower player guid settles it instead, which is an
+/// answer both of them reach (see [`TeamView::outranks_our_claim`]).
+const SAME_MOMENT: Duration = Duration::from_millis(1500);
+
+/// How long a newly fallen body is settled by the tie-break rather than
+/// by the claims (see [`TeamView::opens_first`]).
+///
+/// A claim is said every half second (`ac_plugin::team::SAY_EVERY`) and
+/// heard a frame later; a body is chosen within a tick of falling. A
+/// second covers the round trip, and after it the claims are the truth.
+const CLAIM_SETTLE: Duration = Duration::from_secs(1);
 
 /// How far from its leader a follower keeping `keep` metres may stray
 /// before following comes before everything else.
@@ -956,6 +1198,13 @@ pub struct Mate {
     pub wants: Vec<String>,
     /// Targets it has already debuffed.
     pub debuffed: Vec<u32>,
+    /// The body it has open or is walking to, and how long it has been
+    /// at that one: its claim on it. The others leave a claimed body
+    /// alone (see [`TeamView::working`]). The age travels with the
+    /// claim because it is the claimant's own clock that says whether
+    /// the claim is still good, not the clock of whoever reads it.
+    pub looting: Option<u32>,
+    pub looting_for: Duration,
     /// True for the one that picks the targets.
     pub leader: bool,
     /// Its Life Magic as it stands, buffs counted: what decides who
@@ -1158,6 +1407,92 @@ impl TeamView {
         self.mates.iter().any(|m| m.debuffed.contains(&target))
     }
 
+    /// Whether one of the others has the body `guid` open or is on its
+    /// way to it.
+    ///
+    /// The server hands a container to one viewer and refuses everyone
+    /// else outright (ACE `Container.CheckUseRequirements`), so a body
+    /// two characters want is a body one of them empties and the other
+    /// asks about until it rots. Nine characters standing on one tile
+    /// see the same bodies and rank them by the same rule, so without
+    /// this they all open the same one: a nine-character run opened 41
+    /// bodies 1,386 times, against 2.75 times each for one character
+    /// hunting alone.
+    ///
+    /// A claim goes stale ([`CLAIM_STALE`]): one that never did would
+    /// let a claimant that stalled lock a body for its whole life. One
+    /// that has died is dropped at once rather than waited out: its
+    /// client keeps saying what it was working, and the same board row
+    /// that says so already says its health is nothing.
+    pub fn working(&self, guid: u32) -> bool {
+        self.mates
+            .iter()
+            .any(|m| m.health > 0.0 && m.looting == Some(guid) && m.looting_for < CLAIM_STALE)
+    }
+
+    /// Whether one of the others has a better claim on `guid` than this
+    /// character's own, which has stood for `ours`; `me` is this
+    /// character's player guid.
+    ///
+    /// Better is older. Two claims made within a board round of each
+    /// other are the same moment -- each session ages its own claim on
+    /// its own clock and hears the others' a board round late, so
+    /// nothing finer than that can be told apart -- and there the lower
+    /// player guid wins, which is an answer both sides reach.
+    ///
+    /// Without this a body two characters chose in the same tick was
+    /// opened by neither: each heard the other's claim half a second
+    /// later, each read it as "someone else has it", and each stood
+    /// off, while the walk both had started went on being published as
+    /// a claim until every claim in it aged out at once.
+    pub fn outranks_our_claim(&self, guid: u32, ours: Duration, me: u32) -> bool {
+        self.mates.iter().any(|m| {
+            m.health > 0.0
+                && m.looting == Some(guid)
+                && m.looting_for < CLAIM_STALE
+                && match m.looting_for.checked_sub(ours) {
+                    Some(older) if older > SAME_MOMENT => true,
+                    _ => ours.saturating_sub(m.looting_for) <= SAME_MOMENT && m.guid < me,
+                }
+        })
+    }
+
+    /// Which character opens the body at `at` first, `me` being this
+    /// one's player guid: the lowest guid of those standing over it and
+    /// not already holding another body.
+    ///
+    /// This is only for the moment before a claim can have reached the
+    /// board -- the word goes out every half second and a body is
+    /// chosen within a tick of falling -- and in that moment the fleet
+    /// needs an answer every session reaches on its own. The lowest
+    /// guid is such an answer: all of them work it out of the same
+    /// roster, so there is nothing to negotiate and nothing to vote on,
+    /// which is how the leader is settled too (`ac_plugin::team`).
+    ///
+    /// That only holds while every session judges the same candidates,
+    /// so this character (`mine`, where it stands) passes the same reach
+    /// test as the others. A body is owed to a character out to the
+    /// fight radius when one of its own kills fell there, which is
+    /// further than [`LOOT_NEAR`]: without the test on ourselves, a
+    /// caster twenty-two metres off called a body its own while every
+    /// mate's roster had it too far away to count, and two of them
+    /// opened it in the same second.
+    pub fn opens_first(&self, at: glam::Vec3, me: u32, mine: glam::Vec3) -> u32 {
+        let over_it = self
+            .mates
+            .iter()
+            // Only the ones that would open it: playing on their own,
+            // alive, in the world, standing over it, and not already at
+            // another body.
+            .filter(|m| m.autoplay && m.health > 0.0 && m.guid != 0 && m.looting.is_none())
+            .filter(|m| corpse_within_reach(m.world, at))
+            .map(|m| m.guid)
+            .chain(corpse_within_reach(mine, at).then_some(me));
+        // Standing off from a body nobody is over would leave it lying:
+        // with nobody in reach it is ours to walk to.
+        over_it.min().unwrap_or(me)
+    }
+
     /// The mate nearest `me` that is short of something we could hand
     /// over, within `radius` metres.
     pub fn wanting(&self, me: glam::Vec3, radius: f32) -> Option<&Mate> {
@@ -1200,6 +1535,7 @@ pub fn cast_problem(check: &crate::magic::CastCheck) -> String {
         CastCheck::Ok => "fine".into(),
         CastCheck::NotKnown => "not known".into(),
         CastCheck::NoCaster => "no wand wielded".into(),
+        CastCheck::NoTarget => "the target is gone".into(),
         CastCheck::MissingComponents(m) => format!("short of {} components", m.len()),
         CastCheck::NotEnoughMana { need, have } => format!("mana {have}/{need}"),
         CastCheck::TooHard { power, skill } => format!("power {power} over skill {skill}"),
@@ -1499,9 +1835,11 @@ pub struct Autoplay {
     pub(crate) last_rewield: Option<Instant>,
     /// A weapon to wield as soon as the hands are empty.
     pub(crate) pending_wield: Option<u32>,
-    /// The last item the server was asked to put in the hands, so that
-    /// a refusal can be told from an answer to something else.
-    pub(crate) wield_asked: Option<u32>,
+    /// The last item the server was asked to put in the hands and when,
+    /// so that a refusal can be told from an answer to something else,
+    /// and so the same ask is not sent again while the first is still
+    /// in flight (see [`Autoplay::wield_in_flight`]).
+    pub(crate) wield_asked: Option<(u32, Instant)>,
     /// Weapons the server has refused to wield, and for how long to
     /// leave each one alone (see `Client::hold_off_wield`).
     pub(crate) wield_refused: crate::did::Patience<u32>,
@@ -1570,9 +1908,11 @@ pub struct Autoplay {
     /// When something last hit the character. A fight that has come to
     /// it is fought first, body owed or not.
     pub(crate) last_hit_us: Option<Instant>,
-    /// Corpses that would not open. A corpse is locked to the group
-    /// that killed it until it has rotted a while, so this is a
-    /// "later", not a "never", and the wait grows if it keeps saying no.
+    /// Corpses that would not open, and how long to leave each. A
+    /// corpse is locked to the group that killed it until it has rotted
+    /// a while, so this is usually a "later", not a "never", and the
+    /// wait grows if it keeps saying no. How long a "later" is, when the
+    /// server said why, is [`Autoplay::corpse_refused`]'s to say.
     pub(crate) shelved: crate::did::Patience<u32>,
     /// Corpses set aside for want of room to carry what is left on them,
     /// and what the lightest of that weighs. Such a body waits on room,
@@ -1664,7 +2004,26 @@ pub struct Autoplay {
     /// When each corpse was first seen, so the ones about to rot can be
     /// emptied first. A corpse we never saw appear is taken as fresh.
     pub(crate) corpse_seen: Vec<(u32, Instant)>,
+    /// When the last fellowship invitation went out, whoever it was to
+    /// (see [`RECRUIT_FLOOR`]).
     last_recruit: Option<Instant>,
+    /// When each mate was last asked into the fellowship, so that one
+    /// that has not answered waits its turn while the others are asked
+    /// (see [`RECRUIT_AGAIN`]).
+    recruited: Vec<(u32, Instant)>,
+    /// When this character asked for the fellowship it leads to be
+    /// founded. It asks only once loot sharing has taken, so a
+    /// fellowship it founded is the one fellowship it can vouch for:
+    /// ACE reads the leader's "share fellowship loot" option once, in
+    /// the `Fellowship` constructor, nothing re-reads it, and nothing
+    /// on the wire says afterwards whether a fellowship shares loot.
+    /// It is kept as a time because the server answers a founding with
+    /// a fellowship, in its own time, and one ask is enough until then
+    /// (see [`FOUNDING_WAIT`]).
+    founded: Option<Instant>,
+    /// Whether the leader has already said that the fellowship it is in
+    /// may not share loot, so it says it once rather than every note.
+    said_not_sharing: bool,
     /// Where the journey after a far-off leader was bound, to plan
     /// again once it has moved on.
     follow_trip: Option<glam::Vec2>,
@@ -1713,7 +2072,7 @@ impl Autoplay {
 
     /// Start on a corpse: asked to open just now, with `allow` for it
     /// to do so. The loot rules start afresh with it.
-    fn take_up_corpse(&mut self, guid: u32, now: Instant, allow: Duration) {
+    pub(crate) fn take_up_corpse(&mut self, guid: u32, now: Instant, allow: Duration) {
         self.fresh_loot_run();
         self.corpse = Some((guid, now, allow, 0));
         self.quiet_answers = 0;
@@ -1749,6 +2108,67 @@ impl Autoplay {
         self.corpse = None;
         self.appraising = false;
         self.fresh_loot_run();
+    }
+
+    /// Words from the server in answer to the ask to open the body in
+    /// hand, `in_hand` being that body's name as the world has it: let
+    /// the body go and leave it alone for as long as the words are
+    /// worth. True if the words were about it.
+    ///
+    /// The server says why it will not open a body, and the client used
+    /// to throw the words away and wait out [`loot_wait`] instead, then
+    /// ask again three more times and be refused in the same words. Nine
+    /// characters hunting one spot sent nine hundred and thirty such
+    /// asks against a thousand refusals that had already arrived, each
+    /// about a third of a second after the ask.
+    ///
+    /// Guarded as tightly as a quiet answer is (see
+    /// [`answered_with_nothing`]): only words the server stamped after
+    /// this ask went out -- `told` is when it last put anything in words
+    /// -- and only words naming the body in hand. Words about a chest,
+    /// or about a body one of the others is working, change nothing.
+    pub(crate) fn corpse_refused(
+        &mut self,
+        text: &str,
+        in_hand: &str,
+        told: Option<Instant>,
+        now: Instant,
+    ) -> bool {
+        let Some((guid, asked, ..)) = self.corpse else {
+            return false;
+        };
+        let Some((named, why)) = corpse_refusal(text) else {
+            return false;
+        };
+        if named != in_hand || told.is_none_or(|at| at <= asked) {
+            return false;
+        }
+        match why {
+            CorpseRefusal::InUse => self.shelved.hold(guid, CORPSE_IN_USE_AGAIN, now),
+            // Not ours yet; it becomes everyone's the moment whoever
+            // has it closes it, which is usually within seconds (see
+            // [`CORPSE_NOT_OURS_AGAIN`]). A short wait, doubling.
+            CorpseRefusal::NotYetOurs => self.shelved.hold(guid, CORPSE_NOT_OURS_AGAIN, now),
+            // Nobody but the killer will ever open it. Left for good
+            // rather than waited on: it still lies there, and every wait
+            // that runs out is another walk back to it.
+            CorpseRefusal::NeverOurs => self.shelved.note(
+                guid,
+                &crate::did::Did::refused("it is the killer's alone"),
+                now,
+            ),
+        }
+        match (why, self.shelved.waited(&guid)) {
+            (CorpseRefusal::NeverOurs, _) | (_, None) => {
+                tracing::info!("autoplay: {in_hand} ({guid:#010x}): {text} -- leaving it");
+            }
+            (_, Some(wait)) => tracing::info!(
+                "autoplay: {in_hand} ({guid:#010x}): {text} -- trying again in {} s",
+                wait.as_secs().max(1)
+            ),
+        }
+        self.let_go_of_corpse();
+        true
     }
 
     /// What becomes of a corpse the loot rules have shut, by what they
@@ -1832,6 +2252,76 @@ impl Autoplay {
             && corpse_is_ours(me, at, self.config.fight.radius, &self.kill_spots)
     }
 
+    /// The body this character is working and how long it has been at
+    /// it: the one it has open, else the one it is walking to. This is
+    /// what it tells the others so they leave that body alone (see
+    /// [`TeamView::working`]).
+    ///
+    /// The walk counts, not just the open. Nine characters that all
+    /// walk to one body and race at the far end of the walk have wasted
+    /// the walk as well as the open.
+    pub fn corpse_claim(&self, now: Instant) -> Option<(u32, Duration)> {
+        self.corpse
+            .map(|(guid, since, ..)| (guid, since))
+            .or_else(|| self.walking_to.map(|w| (w.guid, w.started)))
+            .map(|(guid, since)| (guid, now.saturating_duration_since(since)))
+    }
+
+    /// When the body `guid` first came into sight, or `now` for one
+    /// never noted (see [`Autoplay::corpse_seen`]).
+    fn corpse_first_seen(&self, guid: u32, now: Instant) -> Instant {
+        self.corpse_seen
+            .iter()
+            .find(|(g, _)| *g == guid)
+            .map_or(now, |(_, t)| *t)
+    }
+
+    /// Whether the body `guid`, lying at `at`, is this character's to
+    /// open or one of the others' -- `me` being this character's player
+    /// guid. Asked of every body the character is owed, by the looting
+    /// and by what holds the next fight alike, so the two cannot come
+    /// to disagree (see [`Autoplay::corpse_owed`]).
+    ///
+    /// A character alone answers yes to everything it is owed: with
+    /// nobody on the board there is nothing to divide, and a body its
+    /// pet killed is still its own.
+    ///
+    /// `mine` is where this character stands, which the tie-break needs
+    /// to judge it by the same rule as the others.
+    pub(crate) fn ours_to_open(
+        &self,
+        guid: u32,
+        at: glam::Vec3,
+        me: u32,
+        mine: glam::Vec3,
+        now: Instant,
+    ) -> bool {
+        if self.team.mates.is_empty() {
+            return true;
+        }
+        // Already committed to this body -- holding it, or walking to
+        // it. A standing claim wins a tie rather than losing it: asking
+        // only whether somebody claims the body made two characters
+        // that chose it in the same tick both stand off, each for the
+        // other, and neither ever opened it. Yield only to a claim that
+        // outranks ours.
+        if let Some(ours) = self
+            .corpse_claim(now)
+            .filter(|(g, _)| *g == guid)
+            .map(|(_, held)| held)
+        {
+            return !self.team.outranks_our_claim(guid, ours, me);
+        }
+        if self.team.working(guid) {
+            return false;
+        }
+        // Newly fallen, so nobody's claim can have reached the board
+        // yet: the tie-break says whose it is until it has.
+        let seen = self.corpse_first_seen(guid, now);
+        now.saturating_duration_since(seen) >= CLAIM_SETTLE
+            || self.team.opens_first(at, me, mine) == me
+    }
+
     /// Set aside a corpse the character cannot walk to. It is left
     /// alone for as long as anything blocked is, so the looting and the
     /// next fight both pass it by for that long. It is not written off:
@@ -1898,6 +2388,18 @@ impl Autoplay {
             Some(t) => now.duration_since(t) < CAST_LOST,
             None => false,
         }
+    }
+
+    /// Whether this item was asked for a moment ago and the server's
+    /// word could still be on its way (see [`WIELD_ANSWERS_IN`]).
+    ///
+    /// Asking twice for one weapon is not a wasted message but a
+    /// harmful one: the second ask is refused because the first worked,
+    /// and the refusal backs the item off for three seconds and then
+    /// six and then twelve (see `Client::hold_off_wield`).
+    pub(crate) fn wield_in_flight(&self, guid: u32, now: Instant) -> bool {
+        self.wield_asked
+            .is_some_and(|(g, t)| g == guid && now.duration_since(t) < WIELD_ANSWERS_IN)
     }
 
     /// Every guid some other errand is holding on to across ticks.
@@ -2124,19 +2626,26 @@ impl Client {
         Some(format!("{name} {}", cast_problem(&self.can_cast(spell))))
     }
 
+    /// Cast `spell` and hold the next cast until the server answers for
+    /// this one (see [`Autoplay::cast_in_flight`]). Every cast autoplay
+    /// sends goes through here or sets the same clock itself: the heal
+    /// once did neither, and a character at 16% health sent Heal Self
+    /// every frame, forty times in under two seconds, until the first
+    /// one went up.
+    ///
+    /// A cast the client declines to send earns no wait. Nothing is
+    /// coming back to end one, so the whole six-second backstop would be
+    /// spent standing still -- and now that the takes and the wields
+    /// wait on this clock too, standing still over a corpse.
+    pub(crate) fn cast_paced(&mut self, spell: u32, now: Instant) {
+        if matches!(self.try_cast(spell), crate::magic::CastCheck::Ok) {
+            self.autoplay.cast_sent = Some(now);
+        }
+    }
+
     /// Keep mana and stamina up the way a caster does: stamina poured
     /// into mana when mana runs low, Revitalize when stamina does. True
     /// when a spell went out.
-    /// Cast `spell` and hold the next cast until the server answers for
-    /// this one (see `Autoplay::cast_in_flight`). Every cast autoplay sends
-    /// goes through here or sets the same clock itself: the heal once did
-    /// neither, and a character at 16% health sent Heal Self every frame,
-    /// forty times in under two seconds, until the first one went up.
-    pub(crate) fn cast_paced(&mut self, spell: u32, now: Instant) {
-        self.cast(spell);
-        self.autoplay.cast_sent = Some(now);
-    }
-
     pub(crate) fn autoplay_vitals(&mut self, now: Instant) -> bool {
         use ac_world::vitals::vital;
         let cfg = self.autoplay.config.survive.clone();
@@ -2311,6 +2820,15 @@ impl Client {
             }
             return;
         }
+        // The clocks read off the ground are wound before anything can
+        // claim the tick. The four reflexes below return without
+        // reaching the housekeeping, so a character that healed, dodged
+        // or died wound neither of them for as long as that went on:
+        // it came back from a death with a quiet clock from before the
+        // death still running, and bodies that fell while it was busy
+        // stayed for ever newly fallen (see
+        // [`Client::autoplay_watch_the_ground`]).
+        self.autoplay_watch_the_ground(now);
         // A spell on its way to us is stepped out of before anything
         // else, healing included (see `crate::dodge`).
         if self.autoplay_dodge(now) {
@@ -2956,6 +3474,49 @@ impl Client {
         }
     }
 
+    /// Press on with a walk to the corpse `guid`, called `name`, lying
+    /// at `spot` and `away` metres off. True while the walk is getting
+    /// somewhere; false once it cannot arrive -- what becomes of the
+    /// body then is for the caller to say, because a body being walked
+    /// to and a body already in hand end differently.
+    fn walk_to_corpse(
+        &mut self,
+        guid: u32,
+        name: &str,
+        spot: glam::Vec3,
+        away: f32,
+        now: Instant,
+    ) -> bool {
+        // The walk ends any journey under way, and it is a detour the
+        // character comes back from: a town run picks its walk to the
+        // counter up again once the body is dealt with (see
+        // `Client::journey_broken_off`). +Verity's run did not, and
+        // gave up 224 m short of Shopkeeper Renald the Elder.
+        self.interrupt_travel("walking to a corpse");
+        // Well inside the radius rather than on its edge: the last
+        // metre of a walk wanders, and stopping on the line means
+        // stepping back off it again.
+        let did = self.head_for(spot, CORPSE_REACH / 2.0, "the corpse");
+        // Said once for the walk, not once a frame: the distance
+        // changes every tick and the log is not a tape measure.
+        if self.autoplay.walking_to.map(|w| w.guid) != Some(guid) {
+            self.autoplay.walking_to = Some(CorpseWalk::new(guid, away, now));
+            self.autoplay.say(
+                Doing::Looting,
+                format!("walking to {name} ({} m)", away.round()),
+            );
+        }
+        // A route being followed is a way there, whatever the steering
+        // said before it had one.
+        let no_way = self.steering.no_way() && self.steering.route.is_none();
+        did.fine()
+            && self
+                .autoplay
+                .walking_to
+                .as_mut()
+                .is_some_and(|w| w.goes_on(away, no_way, now))
+    }
+
     /// A weapon waiting for empty hands is taken up as soon as they
     /// are: a bow cannot be drawn with a shield up, and a two-handed
     /// weapon needs both. Runs every tick and never claims one.
@@ -2963,8 +3524,8 @@ impl Client {
     /// This is also where a wield that did land forgets whatever wait a
     /// refusal earned it: the hands have changed, so whatever the server
     /// was objecting to has gone.
-    pub(crate) fn autoplay_pending_wield(&mut self) {
-        if let Some(g) = self.autoplay.wield_asked {
+    pub(crate) fn autoplay_pending_wield(&mut self, now: Instant) {
+        if let Some((g, _)) = self.autoplay.wield_asked {
             let me = self.world.player_guid;
             if self.world.objects.get(&g).is_some_and(|o| o.wielder == me) {
                 self.autoplay.wield_refused.forget(&g);
@@ -2987,11 +3548,12 @@ impl Client {
                     || (offhand_matters && o.valid_locations & ac_world::equip::SHIELD != 0)
             });
             if !hands_full {
-                // Inside the wait a refusal earned it, the errand keeps
-                // rather than being dropped: giving up here would leave
-                // the weapon in the pack and the character bare-handed
-                // with nothing left to ask again.
-                if self.world.is_carried(g) && self.wield_held_off(g) {
+                // Inside the wait a refusal earned it, or with the
+                // server busy swinging, the errand keeps rather than
+                // being dropped: giving up here would leave the weapon
+                // in the pack and the character bare-handed with
+                // nothing left to ask again.
+                if self.world.is_carried(g) && self.wield_must_wait(g, now) {
                     return;
                 }
                 self.autoplay.pending_wield = None;
@@ -3146,17 +3708,52 @@ impl Client {
             // own skills are (see `corpse_now`).
             let at = self.corpse_now(guid, &items, &profile, since, now);
             let next = self.autoplay.loot_run.step(&at, now);
+            // Any walk back to this body is over the moment the rules
+            // stop asking for one (see the branch below).
+            if !matches!(
+                next.act,
+                Some(ac_loot::Act::Approach) | Some(ac_loot::Act::Open)
+            ) {
+                self.stop_walking_to_loot();
+            }
             match next.act {
                 Some(ac_loot::Act::Approach) | Some(ac_loot::Act::Open) => {
-                    // The walking and the opening are done below, when a
-                    // corpse is chosen; being asked for them here means
-                    // the character is out of reach of a corpse it has
-                    // open. Nothing here walks, so waiting did nothing
-                    // but run out the give-up clock and write the body
-                    // off. It is shut and put down, not written off or
-                    // set aside, so the next turn walks back to it and
-                    // opens it again.
-                    tracing::info!("autoplay: corpse {guid:#010x} is out of reach; going back");
+                    // Out of reach of a body it is holding: the
+                    // character drifted while it worked, or a fight came
+                    // to it and moved it.
+                    //
+                    // The body is still open on the server, whatever the
+                    // distance. ACE shuts a container when its viewer
+                    // stops viewing it, when that viewer uses another,
+                    // or on the container's own reset -- and a corpse
+                    // has no reset interval. Shutting it here therefore
+                    // gave a body the character was already holding back
+                    // to everyone else standing over it, and the walk
+                    // back had to win it again: fifty times in one
+                    // nine-character run.
+                    //
+                    // So walk back still holding it, and put it down
+                    // only once the character has really gone
+                    // ([`HOLD_ON_WITHIN`]) or the walk cannot arrive.
+                    let spot = self.world.objects.get(&guid).and_then(|o| o.world_pos());
+                    let setting_off = self.autoplay.walking_to.map(|w| w.guid) != Some(guid);
+                    let going_back = still_holding_at(at.away)
+                        && spot.is_some_and(|spot| {
+                            self.walk_to_corpse(guid, &at.name, spot, at.away, now)
+                        });
+                    if going_back {
+                        if setting_off {
+                            tracing::info!(
+                                "autoplay: corpse {guid:#010x} is {} m off; walking back to it \
+                                 without shutting it",
+                                at.away.round()
+                            );
+                        }
+                        return true;
+                    }
+                    tracing::info!(
+                        "autoplay: corpse {guid:#010x} is out of reach for good; letting it go"
+                    );
                     self.close_container();
                     self.autoplay.let_go_of_corpse();
                     self.stop_walking_to_loot();
@@ -3240,7 +3837,6 @@ impl Client {
             .is_some_and(|o| o.health.unwrap_or(1.0) > 0.0);
         let me = self.player.as_ref().map(|p| p.world_position());
         let Some(me) = me else { return false };
-        let looted = self.autoplay.looted.clone();
         // Kills go stale with the bodies they leave.
         self.autoplay
             .kill_spots
@@ -3251,19 +3847,11 @@ impl Client {
         let objects = &self.world.objects;
         self.autoplay
             .forget_corpses_gone(|g| objects.contains_key(&g));
-        // Note when each corpse turned up, so the ones running out can
-        // be emptied first. Forgotten once emptied, so the list stays
-        // the size of what is on the ground.
-        for o in self.world.objects.values() {
-            if o.object_desc_flags & ac_world::object_desc_flags::CORPSE != 0
-                && !self.autoplay.corpse_seen.iter().any(|(g, _)| *g == o.guid)
-            {
-                self.autoplay.corpse_seen.push((o.guid, now));
-            }
-        }
-        self.autoplay
-            .corpse_seen
-            .retain(|(g, t)| now.duration_since(*t) < CORPSE_LIFE * 2 && !looted.contains(g));
+        // When each corpse turned up, so the ones running out can be
+        // emptied first. Noted by the housekeeping rather than here (see
+        // [`Client::autoplay_watch_the_ground`]): a body this character
+        // is standing off from never reaches this step, and a body it
+        // never noted is for ever newly fallen.
         let seen_at: std::collections::BTreeMap<u32, Instant> =
             self.autoplay.corpse_seen.iter().copied().collect();
         let room = self.room_for_loot();
@@ -3271,22 +3859,14 @@ impl Client {
             .world
             .objects
             .values()
-            .filter(|o| o.object_desc_flags & ac_world::object_desc_flags::CORPSE != 0)
-            // Not emptied, not set aside, something there is room for, and
-            // close by on this floor or where one of this character's kills
-            // fell -- which a caster makes from well past twenty metres.
-            .filter_map(|o| {
-                let p = o.world_pos()?;
-                self.autoplay
-                    .corpse_owed(o.guid, p, me, now, room)
-                    .then(|| (p.distance(me), o))
-            })
-            // Another player's corpse is theirs: a teammate's gear taken
-            // off their body is not loot, whatever the filters say. Our
-            // own is emptied for everything on it (see below): the wand
-            // and the components are on it, and a character without
-            // them cannot fight or heal.
-            .filter(|(_, o)| !self.corpse_is_someone_elses(&o.name))
+            // Not emptied, not set aside, something there is room for,
+            // close by on this floor or where one of this character's
+            // kills fell, not one of the others' to open, and not another
+            // player's remains. The one rule every part of this asks, so
+            // what the looting goes to and what the next fight waits on
+            // cannot come apart (see [`Client::corpse_for_us`]).
+            .filter(|o| self.corpse_for_us(o, me, now, room))
+            .filter_map(|o| Some((o.world_pos()?.distance(me), o)))
             .map(|(d, o)| (d, o.guid, o.name.clone()))
             .map(|(d, guid, name)| {
                 let seen = seen_at.get(&guid).copied().unwrap_or(now);
@@ -3302,6 +3882,12 @@ impl Client {
                     .then_with(|| a.1.total_cmp(&b.1))
             });
         let Some((left, away, guid, name)) = corpse else {
+            // Nothing left to go to, so any walk that was going to one
+            // is over. Left standing, that walk went on being said as a
+            // claim on a body this character had just given up on, and
+            // it kept the looting's own worth up (see `crate::steps`)
+            // for a body it would never open.
+            self.stop_walking_to_loot();
             return false;
         };
         // Never mid-cast, unless the body will not be there when the
@@ -3323,36 +3909,7 @@ impl Client {
         // Stand over it first (see [`CORPSE_REACH`]).
         if away > CORPSE_REACH {
             if let Some(at) = self.world.objects.get(&guid).and_then(|o| o.world_pos()) {
-                // The walk ends any journey under way, and it is a detour
-                // the character comes back from: a town run picks its walk
-                // to the counter up again once the body is dealt with (see
-                // `Client::journey_broken_off`). +Verity's run did not, and
-                // gave up 224 m short of Shopkeeper Renald the Elder.
-                self.interrupt_travel("walking to a corpse");
-                // Well inside the radius rather than on its edge: the
-                // last metre of a walk wanders, and stopping on the
-                // line means stepping back off it again.
-                let did = self.head_for(at, CORPSE_REACH / 2.0, "the corpse");
-                // Said once for the walk, not once a frame: the
-                // distance changes every tick and the log is not a
-                // tape measure.
-                if self.autoplay.walking_to.map(|w| w.guid) != Some(guid) {
-                    self.autoplay.walking_to = Some(CorpseWalk::new(guid, away, now));
-                    self.autoplay.say(
-                        Doing::Looting,
-                        format!("walking to {name} ({} m)", away.round()),
-                    );
-                }
-                // A route being followed is a way there, whatever the
-                // steering said before it had one.
-                let no_way = self.steering.no_way() && self.steering.route.is_none();
-                let goes_on = did.fine()
-                    && self
-                        .autoplay
-                        .walking_to
-                        .as_mut()
-                        .is_some_and(|w| w.goes_on(away, no_way, now));
-                if !goes_on {
+                if !self.walk_to_corpse(guid, &name, at, away, now) {
                     // Through a floor or behind a wall, the walk never
                     // ends by itself, and it held the looting and the
                     // next fight until the body rotted. Set it aside and
@@ -3549,10 +4106,12 @@ impl Client {
         // When the swap started, so the fight waits for the hands to
         // settle rather than swinging into the moment they are empty.
         self.autoplay.last_rewield = Some(Instant::now());
-        if sent {
+        // A wield that could not go out this tick -- the item is inside
+        // a refusal's wait, or the server has us mid-swing -- becomes an
+        // errand rather than being forgotten, so the weapon is taken up
+        // on the first free tick instead of being left in the pack.
+        if sent || !self.wield_guid(pick.guid) {
             self.autoplay.pending_wield = Some(pick.guid);
-        } else {
-            self.wield_guid(pick.guid);
         }
     }
 
@@ -3601,12 +4160,6 @@ impl Client {
             self.autoplay.wanted_shield = None;
             return;
         }
-        // Inside the wait a refusal earned it the errand keeps: asking
-        // now sends nothing, and clearing it would leave the shield in
-        // the pack with nothing left to ask again.
-        if self.wield_held_off(shield) {
-            return;
-        }
         // Not with a swing out. ACE shuffles the stance on every
         // successful equip, a shield included (TryShuffleStance ->
         // HandleActionChangeCombatMode), and a combat-mode change
@@ -3614,6 +4167,13 @@ impl Client {
         // the gap after the swing is answered.
         if self.mid_attack() {
             self.wait_for_the_swing();
+            return;
+        }
+        // Inside the wait a refusal earned it, or with the server busy
+        // with a spell, the errand keeps: asking now sends nothing, and
+        // clearing it would leave the shield in the pack with nothing
+        // left to ask again.
+        if self.wield_must_wait(shield, now) {
             return;
         }
         // Only with a one-handed melee weapon actually in hand: the
@@ -4046,7 +4606,15 @@ impl Client {
 
     /// See that the bow has something to shoot: the ammunition chosen
     /// for the target if it is still carried, else whatever fits. True
-    /// when something is wielded or was already.
+    /// when there is something to shoot -- in the slot, or on its way
+    /// into it.
+    ///
+    /// Not "did a wield go out this tick": the one caller reads a false
+    /// as "no ammunition" and goes off to fletch some (see
+    /// [`Client::autoplay_craft_ammo`]). A wield held back because the
+    /// server is busy is a tick's wait, not an empty quiver, and reading
+    /// it as one dropped an archer with a full quiver into peace stance
+    /// to make arrows it was already carrying.
     fn ready_ammo(&mut self) -> bool {
         if self.wielded_ammo().is_some() {
             // The chosen kind, if it is not the one in the slot.
@@ -4059,7 +4627,13 @@ impl Client {
         }
         if let Some(want) = self.autoplay.wanted_ammo {
             if self.world.is_carried(want) {
-                return self.wield_guid(want);
+                // Sent, or waiting on a busy tick: either way there is
+                // something to shoot and nothing to make. Only a stack
+                // the server keeps refusing to wield is an answer of
+                // "not this kind", and then another stack is tried.
+                if self.wield_guid(want) || !self.wield_held_off(want) {
+                    return true;
+                }
             }
         }
         self.wield_ammo()
@@ -4225,35 +4799,104 @@ impl Client {
         if room.pack_low {
             return false;
         }
-        // Just killed something: its body is on the way.
-        if self
-            .autoplay
-            .last_kill
-            .is_some_and(|t| t.elapsed() < CORPSE_APPEARS)
-        {
-            return true;
-        }
         let now = Instant::now();
         // A far body is being asked about, and may be one its creature
         // killed (see `Client::autoplay_claim_pet_kills`).
         if self.autoplay.whose.waiting(now) {
             return true;
         }
-        let Some(me) = self.player.as_ref().map(|p| p.world_position()) else {
+        // A body on the floor that this character will go to. One it
+        // will not -- set aside, out of reach, a mate's to open -- is not
+        // waited on: waiting on a body it is never going to open would
+        // stop the fighting altogether (see [`Client::corpse_for_us`]).
+        let on_the_floor = self
+            .player
+            .as_ref()
+            .map(|p| p.world_position())
+            .is_some_and(|me| {
+                self.world
+                    .objects
+                    .values()
+                    .any(|o| self.corpse_for_us(o, me, now, room))
+            });
+        // Otherwise the only thing owed is a body of its own still on
+        // its way.
+        on_the_floor || self.own_body_still_falling(now)
+    }
+
+    /// Whether the body `o` is one this character would walk to and
+    /// empty from where it stands (`me`): a corpse, waiting and its own
+    /// ([`Autoplay::corpse_owed`]), not a mate's to open
+    /// ([`Autoplay::ours_to_open`]), and not another player's remains.
+    ///
+    /// Every question about the bodies on the floor asks this one: which
+    /// the looting goes to, which the next fight waits on, and what
+    /// looting is worth against the next fight. They did not, and so
+    /// came to disagree: what looting was worth counted every body
+    /// waiting, ownership and all, so eight bodies another character had
+    /// locked lifted this one's loot score past the fight it was in the
+    /// middle of, with nothing for the looting to actually do when it
+    /// won the tick. Nine characters spent 53% of a run standing over
+    /// bodies and 13% fighting.
+    pub(crate) fn corpse_for_us(
+        &self,
+        o: &ac_world::WorldObject,
+        me: glam::Vec3,
+        now: Instant,
+        room: Room,
+    ) -> bool {
+        if o.object_desc_flags & ac_world::object_desc_flags::CORPSE == 0 {
+            return false;
+        }
+        let Some(at) = o.world_pos() else {
             return false;
         };
-        self.world
-            .objects
-            .values()
-            .filter(|o| o.object_desc_flags & ac_world::object_desc_flags::CORPSE != 0)
-            // One that would not open, or cannot be walked to, is set
-            // aside for a while, and waiting on it would stop the
-            // fighting altogether.
-            .filter(|o| {
-                o.world_pos()
-                    .is_some_and(|at| self.autoplay.corpse_owed(o.guid, at, me, now, room))
-            })
-            .any(|o| !self.corpse_is_someone_elses(&o.name))
+        let my_guid = self.world.player_guid.unwrap_or(0);
+        self.autoplay.corpse_owed(o.guid, at, me, now, room)
+            && self.autoplay.ours_to_open(o.guid, at, my_guid, me, now)
+            && !self.corpse_is_someone_elses(&o.name)
+    }
+
+    /// Whether this character's own last killing blow has yet to leave a
+    /// body: the server makes one a moment after the creature dies (see
+    /// [`CORPSE_APPEARS`]), and the next fight waits that moment out
+    /// rather than walking off from a body about to appear.
+    ///
+    /// Its own kill and nobody else's: the server tells the last damager
+    /// alone (ACE `Creature_Death.GetDeathMessage`), so `last_kill` is
+    /// never a mate's. And only until its own body has turned up,
+    /// because from then on the bodies on the floor are the answer and
+    /// they are read first -- a mate's claim among them. Held for the
+    /// whole three seconds regardless, nine characters killing in one
+    /// huddle each held the next fight for a body somebody else was
+    /// already opening.
+    ///
+    /// Its own body, and not simply the next body to be noted: in a
+    /// huddle a mate's corpse comes into view within those three seconds
+    /// constantly, and each one ended the hold early and sent the
+    /// character off after the next fight leaving the body it had just
+    /// made to be scored on its own. A kill of this character's leaves a
+    /// kill spot at the same instant as `last_kill`, so the body that
+    /// ends the hold is one lying at one of those.
+    fn own_body_still_falling(&self, now: Instant) -> bool {
+        let Some(blow) = self.autoplay.last_kill else {
+            return false;
+        };
+        if now.saturating_duration_since(blow) >= CORPSE_APPEARS {
+            return false;
+        }
+        let ours = |guid: u32| {
+            self.world
+                .objects
+                .get(&guid)
+                .and_then(|o| o.world_pos())
+                .is_some_and(|at| near_a_kill(at, &self.autoplay.kill_spots))
+        };
+        !self
+            .autoplay
+            .corpse_seen
+            .iter()
+            .any(|(guid, seen)| *seen >= blow && ours(*guid))
     }
 
     /// Whether the corpse named `corpse` is another player's, and theirs:
@@ -4358,6 +5001,83 @@ impl Client {
         !(name_matches(&o.name, &cfg.only)
             || self.hit_lately_by(&o.name)
             || self.a_pet_is_on(o.guid))
+    }
+
+    /// Whether `o` is something this character would take on: a live
+    /// creature, nobody's summoned pet and no player, inside the hunting
+    /// area, of a kind it hunts, not a critter beneath it, not one the
+    /// vitae has it keeping clear of, and not one it has given up
+    /// reaching. Where it stands is the caller's business.
+    ///
+    /// Asked by the fight when it picks a target, and by the clock that
+    /// says the ground has gone quiet (see
+    /// [`Client::a_fight_in_sight`]), so the two agree about what
+    /// counts as something to fight.
+    pub(crate) fn would_fight(
+        &self,
+        o: &ac_world::WorldObject,
+        cfg: &Fight,
+        underground: bool,
+        now: Instant,
+    ) -> bool {
+        o.item_type & ac_world::item_type::CREATURE != 0
+            && o.object_desc_flags & ac_world::object_desc_flags::ATTACKABLE != 0
+            && o.object_desc_flags & ac_world::object_desc_flags::PLAYER == 0
+            && o.health.unwrap_or(1.0) > 0.0
+            && !o.is_player
+            // A summoned creature is its owner's, ours or anyone's.
+            && o.pet_owner == 0
+            // Inside the hunting area, or hitting the character.
+            && self.area_allows(o, underground)
+            && wanted_target(&o.name, cfg)
+            // A Rabbit the character has outgrown is walked past.
+            && !self.a_critter(o, cfg)
+            // With the vitae high, the hard ones and the killer wait.
+            && !self.shy_of(o)
+            // And one there is no getting to is not a fight on offer.
+            && !self
+                .autoplay
+                .given_up
+                .iter()
+                .any(|(g, t)| *g == o.guid && now.duration_since(*t) < GIVE_UP_FOR)
+    }
+
+    /// Whether there is a fight to be had where the character stands:
+    /// something it would take on within its fight radius, or one it has
+    /// already joined.
+    ///
+    /// This is what says a spot has gone quiet, and it reads the world
+    /// rather than the status line (see
+    /// `Client::autoplay_watch_the_ground`).
+    pub(crate) fn a_fight_in_sight(&mut self, now: Instant) -> bool {
+        // Not in the world yet: nothing to say about the ground, and
+        // nothing that should start a clock running on it.
+        let Some(me) = self.player.as_ref().map(|p| p.world_position()) else {
+            return true;
+        };
+        // A fight already joined counts wherever it has led. A creature
+        // chased past the radius is still a fight, and walking off to
+        // look for one in the middle of it is not looking for a fight.
+        let joined = self
+            .attack_target
+            .or_else(|| self.autoplay.casting_at())
+            .and_then(|g| self.world.objects.get(&g))
+            .is_some_and(|o| o.health.unwrap_or(0.0) > 0.0);
+        if joined {
+            return true;
+        }
+        // Every session pays for this on every tick, so the cheap
+        // question -- is it near enough -- is asked first.
+        let underground = self.underground();
+        let cfg = &self.autoplay.config.fight;
+        self.world
+            .objects
+            .values()
+            .filter(|o| {
+                o.world_pos()
+                    .is_some_and(|at| at.distance(me) <= cfg.radius)
+            })
+            .any(|o| self.would_fight(o, cfg, underground, now))
     }
 
     /// Whether a creature this character summoned is already walking at
@@ -4513,29 +5233,7 @@ impl Client {
             .world
             .objects
             .values()
-            .filter(|o| {
-                o.item_type & ac_world::item_type::CREATURE != 0
-                    && o.object_desc_flags & ac_world::object_desc_flags::ATTACKABLE != 0
-                    && o.object_desc_flags & ac_world::object_desc_flags::PLAYER == 0
-                    && o.health.unwrap_or(1.0) > 0.0
-                    && !o.is_player
-                    // A summoned creature is its owner's, ours or anyone's.
-                    && o.pet_owner == 0
-                    // Inside the hunting area, or hitting the character.
-                    && self.area_allows(o, underground)
-            })
-            .filter(|o| wanted_target(&o.name, &cfg))
-            // A Rabbit the character has outgrown is walked past.
-            .filter(|o| !self.a_critter(o, &cfg))
-            // With the vitae high, the hard ones and the killer wait.
-            .filter(|o| !self.shy_of(o))
-            .filter(|o| {
-                !self
-                    .autoplay
-                    .given_up
-                    .iter()
-                    .any(|(g, t)| *g == o.guid && now.duration_since(*t) < GIVE_UP_FOR)
-            })
+            .filter(|o| self.would_fight(o, &cfg, underground, now))
             .filter_map(|o| {
                 let p = o.world_pos()?;
                 let d = p.distance(me);
@@ -4703,8 +5401,7 @@ impl Client {
             if self.autoplay_approach(guid, &name, crate::dodge::How::Spell(spell)) {
                 return true;
             }
-            self.cast(spell);
-            self.autoplay.cast_sent = Some(now);
+            self.cast_paced(spell, now);
             self.note_fired(spell, now);
             self.autoplay.attack_spell = Some(spell);
             self.throw_at(guid, now);
@@ -4844,8 +5541,7 @@ impl Client {
                     return true;
                 }
                 self.select(Some(guid));
-                self.cast(spell);
-                self.autoplay.cast_sent = Some(now);
+                self.cast_paced(spell, now);
                 let what = if stage == 0 {
                     "vulnerability"
                 } else {
@@ -4927,10 +5623,9 @@ impl Client {
             self.autoplay.vulned.push(guid);
             return false;
         };
-        self.cast(spell);
+        self.cast_paced(spell, now);
         self.autoplay.vulned.push(guid);
         self.autoplay.last_vuln = Some(now);
-        self.autoplay.cast_sent = Some(now);
         let said = format!(
             "making {name} vulnerable to {} (level {level})",
             element.name()
@@ -5138,6 +5833,24 @@ impl Client {
         })
     }
 
+    /// A line from the server while a body is waiting to open. One
+    /// refusing that body is acted on at once rather than waited out
+    /// (see [`Autoplay::corpse_refused`]), and the walk to it, if there
+    /// was one, ends with it.
+    pub(crate) fn hear_corpse_refusal(&mut self, text: &str, now: Instant) {
+        let Some((guid, ..)) = self.autoplay.corpse else {
+            return;
+        };
+        // What the server calls it. Without the name there is no telling
+        // this body's refusal from another's, so nothing is done.
+        let Some(name) = self.world.objects.get(&guid).map(|o| o.name.clone()) else {
+            return;
+        };
+        if self.autoplay.corpse_refused(text, &name, self.told, now) {
+            self.stop_walking_to_loot();
+        }
+    }
+
     /// A line saying a shot got to something and did not hurt it (see
     /// [`arrived_unharmed`]): noted against the target it names.
     pub(crate) fn hear_arrival(&mut self, text: &str) {
@@ -5301,29 +6014,7 @@ impl Client {
             .world
             .objects
             .values()
-            .filter(|o| {
-                !self
-                    .autoplay
-                    .given_up
-                    .iter()
-                    .any(|(g, t)| *g == o.guid && now.duration_since(*t) < GIVE_UP_FOR)
-            })
-            .filter(|o| {
-                o.item_type & ac_world::item_type::CREATURE != 0
-                    && o.object_desc_flags & ac_world::object_desc_flags::ATTACKABLE != 0
-                    && o.object_desc_flags & ac_world::object_desc_flags::PLAYER == 0
-                    && o.health.unwrap_or(1.0) > 0.0
-                    && !o.is_player
-                    // A summoned creature is its owner's, ours or anyone's.
-                    && o.pet_owner == 0
-                    // Inside the hunting area, or hitting the character.
-                    && self.area_allows(o, underground)
-            })
-            .filter(|o| wanted_target(&o.name, cfg))
-            // A Rabbit the character has outgrown is walked past.
-            .filter(|o| !self.a_critter(o, cfg))
-            // With the vitae high, the hard ones and the killer wait.
-            .filter(|o| !self.shy_of(o))
+            .filter(|o| self.would_fight(o, cfg, underground, now))
             .filter_map(|o| {
                 let at = o.world_pos()?;
                 let near_leader = leader_at.is_none_or(|l| at.distance(l) <= fight_radius);
@@ -5395,11 +6086,18 @@ impl Client {
         // and lets the others give it items: that is how salvage reaches
         // whoever salvages, and the server refuses a gift to anyone with
         // the option off (ACE `CharacterOptions1.AllowGive`).
-        for name in [
-            "accept fellowship",
-            "automatically accept fellowship",
-            "let other players give you items",
-        ] {
+        //
+        // Loot sharing is the fourth, and it is the leader's option that
+        // counts: ACE takes it off whoever founds the fellowship, once,
+        // in the `Fellowship` constructor, and `Corpse.HasPermission`
+        // lets a fellow open a fresh body through that clause alone.
+        // With it off, nine characters hunting together told each other
+        // "You do not yet have the right to loot" 278 times in ten
+        // minutes -- only the killer could open its own kill, for the
+        // first two minutes of the body's life. Every teammate keeps it
+        // on, not just the one leading today, because the fellowship's
+        // leader changes with whoever is about.
+        for name in TEAM_OPTIONS {
             if let Some(o) = crate::options::option_by_name(name) {
                 if !self.option_enabled(o) {
                     self.set_option(o, true);
@@ -5418,8 +6116,17 @@ impl Client {
         }
     }
 
-    /// The leader brings the others into a fellowship, one invitation
-    /// every few seconds. True when one went out.
+    /// Whether this character's own options say it shares fellowship
+    /// loot. It is the founder's answer to this, at the moment it
+    /// founds, that decides whether the fellowship shares loot at all
+    /// (ACE `Entity/Fellowship.cs`, the constructor).
+    fn shares_fellowship_loot(&self) -> bool {
+        crate::options::option_by_name("share fellowship loot")
+            .is_some_and(|o| self.option_enabled(o))
+    }
+
+    /// The leader founds the fellowship and brings the others into it,
+    /// one invitation at a time. True when one went out.
     fn autoplay_fellowship(&mut self, now: Instant) -> bool {
         let team = self.autoplay.config.team.clone();
         if !team.enabled || !team.fellowship || !self.autoplay.team.leader {
@@ -5428,31 +6135,106 @@ impl Client {
         let Some(me) = self.player.as_ref().map(|p| p.world_position()) else {
             return false;
         };
-        if self
-            .autoplay
-            .last_recruit
-            .is_some_and(|t| now.duration_since(t) <= Duration::from_secs(5))
-        {
-            return false;
-        }
-        let mates: Vec<(u32, String)> = self
+        // Whoever is already in, first-hand: the server tells the leader
+        // who has joined before the mate gets round to telling the board.
+        let joined: Vec<u32> = self
+            .world
+            .fellowship
+            .as_ref()
+            .map(|f| f.members.iter().map(|m| m.guid).collect())
+            .unwrap_or_default();
+        let waiting: Vec<(u32, f32)> = self
             .autoplay
             .team
             .mates
             .iter()
-            .filter(|m| !m.in_fellowship && m.guid != 0 && m.world.distance(me) < 25.0)
-            .map(|m| (m.guid, m.name.clone()))
+            .filter(|m| !m.in_fellowship && m.guid != 0 && !joined.contains(&m.guid))
+            .map(|m| (m.guid, m.world.distance(me)))
+            .filter(|(_, away)| *away < RECRUIT_RANGE)
             .collect();
-        let Some((guid, name)) = mates.first().cloned() else {
-            return false;
-        };
         if self.world.fellowship.is_none() {
+            // A founding already asked for and not yet answered: the
+            // server makes the fellowship and tells us about it in its
+            // own time, and two foundings would be two fellowships.
+            if self
+                .autoplay
+                .founded
+                .is_some_and(|t| now.duration_since(t) < FOUNDING_WAIT)
+            {
+                return false;
+            }
+            // Nothing came back, or the fellowship we made has gone:
+            // either way there is none to vouch for now.
+            self.autoplay.founded = None;
+            self.autoplay.said_not_sharing = false;
+            if waiting.is_empty() {
+                return false;
+            }
+            // Nothing re-reads the option once the fellowship exists, so
+            // a fellowship founded a moment too early shares no loot for
+            // as long as it lives. The option and the founding go out on
+            // the one ordered queue of actions and the server works
+            // through them in that order, so all this has to wait for is
+            // our own asking, which `autoplay_accept_invites` does at the
+            // top of the same tick.
+            if !self.shares_fellowship_loot() {
+                self.autoplay.note(
+                    "waiting for loot sharing before founding the fellowship",
+                    now,
+                );
+                return false;
+            }
+            if self
+                .autoplay
+                .last_recruit
+                .is_some_and(|t| now.duration_since(t) < RECRUIT_FLOOR)
+            {
+                return false;
+            }
             let fname = team.fellowship_name.clone();
             self.fellowship_create(&fname, true);
-        } else {
-            self.fellowship_recruit(guid);
+            self.autoplay.founded = Some(now);
+            self.autoplay.last_recruit = Some(now);
+            self.autoplay
+                .say(Doing::Helping, format!("starting the fellowship {fname}"));
+            return true;
         }
+        // A fellowship we did not found ourselves is left alone, and
+        // said so once. Nothing on the wire says whether one shares
+        // loot -- the full update writes the same 0x10 for every fellow
+        // whatever the fellowship does -- so disbanding it would be
+        // throwing away a working party on a guess, and the guess would
+        // be wrong for every fellowship a person made by hand.
+        if self.autoplay.founded.is_none() && !self.autoplay.said_not_sharing {
+            self.autoplay.said_not_sharing = true;
+            self.autoplay.note(
+                "this fellowship was not founded by me: it may not share loot, \
+                 and only disbanding it would tell",
+                now,
+            );
+        }
+        let Some(guid) = next_invitee(
+            &waiting,
+            &self.autoplay.recruited,
+            self.autoplay.last_recruit,
+            now,
+        ) else {
+            return false;
+        };
+        self.fellowship_recruit(guid);
         self.autoplay.last_recruit = Some(now);
+        self.autoplay
+            .recruited
+            .retain(|(g, t)| *g != guid && now.duration_since(*t) < RECRUIT_AGAIN);
+        self.autoplay.recruited.push((guid, now));
+        let name = self
+            .autoplay
+            .team
+            .mates
+            .iter()
+            .find(|m| m.guid == guid)
+            .map(|m| m.name.clone())
+            .unwrap_or_else(|| format!("{guid:#010x}"));
         self.autoplay.say(
             Doing::Helping,
             format!("bringing {name} into the fellowship"),
@@ -6073,11 +6855,12 @@ impl Client {
             return false;
         }
         self.autoplay.buffs_checked = Some(now);
-        let within = if urgent {
-            cfg.never_below
-        } else {
-            cfg.top_up_within
-        };
+        let within = buff_within(
+            &cfg,
+            urgent,
+            fighting,
+            self.combat_stance() == Stance::Magic,
+        );
         // Find what is due before touching the hands: the urgent pass
         // runs every tick and must cost nothing when nothing is due.
         let Some((spell, target, category, name, lasts)) = self.due_buff(within, now) else {
@@ -6262,10 +7045,11 @@ impl Client {
             self.autoplay.put_down = None;
             return;
         }
-        // Inside the wait a refusal earned it the errand keeps, the way
-        // a pending wield's does: dropping it here would leave the
-        // weapon in the pack and the character fighting with the wand.
-        if self.wield_held_off(weapon) {
+        // Inside the wait a refusal earned it, or with the server busy,
+        // the errand keeps, the way a pending wield's does: dropping it
+        // here would leave the weapon in the pack and the character
+        // fighting with the wand.
+        if self.wield_must_wait(weapon, Instant::now()) {
             return;
         }
         self.autoplay.put_down = None;
@@ -6747,6 +7531,33 @@ mod tests {
         c.world.player_guid = Some(0x5000_0001);
         c.world.stats.level = level;
         Some(c)
+    }
+
+    /// The same character, standing somewhere, for the rules that read
+    /// a position.
+    fn standing_in_the_field(level: i32, cell: u32, local: glam::Vec3) -> Option<Client> {
+        let mut c = character_of_level(level)?;
+        let assets = c.assets.clone();
+        let mut pl = crate::player::Player::new(&assets, cell, local, glam::Quat::IDENTITY);
+        pl.set_motion_table(&assets, 0x0200_0001, 0x0900_0001);
+        c.player = Some(pl);
+        Some(c)
+    }
+
+    /// A shelf of its own holding one starter profile, so the looting
+    /// has rules to carry out without touching the one every session
+    /// shares.
+    fn a_loot_profile(c: &mut Client, name: &str) {
+        let dir = std::env::temp_dir().join("acswarm-test-loot-profiles");
+        std::fs::create_dir_all(&dir).ok();
+        let shelf = std::sync::Arc::new(crate::profile::Library::default());
+        shelf.open(&dir);
+        let mut p = crate::profile::Profile::starter();
+        p.name = name.into();
+        shelf.put(p).ok();
+        c.profiles = shelf;
+        c.autoplay.config.loot.profile = name.into();
+        assert!(c.loot_profile().is_some(), "no rules to loot by");
     }
 
     /// A creature of `wcid` standing in view, and a copy of it to ask
@@ -7416,6 +8227,66 @@ mod tests {
     }
 
     #[test]
+    fn the_moment_held_open_for_a_falling_body_ends_when_one_lands() {
+        // The next fight is held for three seconds after a killing blow,
+        // because the body comes a moment after the creature dies. Held
+        // for the whole three regardless of what landed, nine characters
+        // killing in one huddle each spent it standing over a body one
+        // of the others was already opening: fighting was 13% of that
+        // run and opening a corpse 53%.
+        let Some(mut c) = character_of_level(20) else {
+            return;
+        };
+        let s = Duration::from_secs;
+        let t0 = Instant::now();
+        let spot = glam::Vec3::new(40.0, 40.0, 10.0);
+        let body = |guid: u32, at: glam::Vec3| ac_world::WorldObject {
+            guid,
+            name: "Corpse of Drudge Slave".into(),
+            object_desc_flags: ac_world::object_desc_flags::CORPSE,
+            position: Some(ac_world::object::Position::new_flat(0, at)),
+            ..Default::default()
+        };
+        assert!(!c.owes_a_corpse(), "owed a body with no kill behind it");
+
+        // Its own killing blow: the body is owed while it is still
+        // falling, and no longer.
+        c.autoplay.last_kill = Some(t0);
+        c.autoplay.kill_spots = vec![(spot, t0)];
+        assert!(c.own_body_still_falling(t0));
+        assert!(c.own_body_still_falling(t0 + CORPSE_APPEARS - s(1)));
+        assert!(!c.own_body_still_falling(t0 + CORPSE_APPEARS));
+
+        // A body noted before the blow is some other kill's and says
+        // nothing about this one, wherever it lies.
+        let (early, elsewhere, ours) = (0x8000_0001, 0x8000_0002, 0x8000_0003);
+        c.world.objects.insert(early, body(early, spot));
+        c.autoplay.corpse_seen = vec![(early, t0 - s(1))];
+        assert!(c.own_body_still_falling(t0));
+
+        // Nor does a body that landed since the blow somewhere this
+        // character killed nothing. Ending the hold on any corpse at
+        // all, a huddle of nine had one come into view every couple of
+        // seconds, and each one sent a character off after the next
+        // fight leaving the body it had just made behind.
+        let away = spot + glam::Vec3::new(KILL_SPOT * 2.0, 0.0, 0.0);
+        c.world.objects.insert(elsewhere, body(elsewhere, away));
+        c.autoplay.corpse_seen.push((elsewhere, t0));
+        assert!(
+            c.own_body_still_falling(t0),
+            "let go of its own body for somebody else's"
+        );
+
+        // Its own, landing where its kill fell, ends the wait: from here
+        // the bodies on the floor are the answer, a mate's claim among
+        // them.
+        c.world.objects.insert(ours, body(ours, spot));
+        c.autoplay.corpse_seen.push((ours, t0));
+        assert!(!c.own_body_still_falling(t0));
+        assert!(!c.owes_a_corpse());
+    }
+
+    #[test]
     fn a_corpse_is_ours_when_it_names_this_character_or_its_creature_as_the_killer() {
         assert!(killed_by_us("Killed by Blargerton.", "Blargerton"));
         assert!(killed_by_us(
@@ -7511,6 +8382,296 @@ mod tests {
         // Where a kill of its own fell it is still its own: whether it
         // can be walked to is for the walk to find out.
         assert!(corpse_is_ours(me, below, 60.0, &[(below, now)]));
+    }
+
+    /// One of the others, standing at `at`, with `looting` in hand for
+    /// `held`.
+    fn looter(guid: u32, at: glam::Vec3, looting: Option<u32>, held: Duration) -> Mate {
+        Mate {
+            name: format!("Bryn{guid:02}"),
+            guid,
+            world: at,
+            health: 1.0,
+            autoplay: true,
+            looting,
+            looting_for: held,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_body_one_of_the_others_has_is_left_to_them() {
+        // Nine characters in one huddle rank the bodies by the same
+        // rule and so choose the same one: 1,386 opens for 41 bodies in
+        // one run, because the server hands a container to one viewer
+        // and refuses everyone else. Whoever has a body says so, and
+        // the rest take another.
+        let t0 = Instant::now();
+        let (a, b) = (0x8000_0001, 0x8000_0002);
+        let (here, there) = (glam::Vec3::ZERO, glam::Vec3::new(4.0, 0.0, 0.0));
+        let me = 0x5000_0001;
+        // Both fell a while back, so the tie-break has had its moment
+        // and the claims are what speak.
+        let mut ap = Autoplay {
+            corpse_seen: vec![(a, t0), (b, t0)],
+            ..Default::default()
+        };
+        let now = t0 + CLAIM_SETTLE;
+
+        // Alone on the board, nothing changes: both are ours.
+        assert!(ap.ours_to_open(a, here, me, here, now));
+        assert!(ap.ours_to_open(b, there, me, here, now));
+
+        // One mate is at the first body, another at nothing.
+        ap.team.mates = vec![
+            looter(2, here, Some(a), Duration::ZERO),
+            looter(3, here, None, Duration::ZERO),
+        ];
+        assert!(
+            !ap.ours_to_open(a, here, me, here, now),
+            "raced a mate for a body"
+        );
+        assert!(
+            ap.ours_to_open(b, there, me, here, now),
+            "left a free body lying"
+        );
+
+        // A claim goes stale. A mate that stalled or was dragged into a
+        // fight over a body must not hold it for the five minutes it
+        // lies there.
+        ap.team.mates = vec![looter(2, here, Some(a), CLAIM_STALE)];
+        assert!(
+            ap.ours_to_open(a, here, me, here, now),
+            "a stale claim still held"
+        );
+        ap.team.mates = vec![looter(
+            2,
+            here,
+            Some(a),
+            CLAIM_STALE - Duration::from_millis(1),
+        )];
+        assert!(!ap.ours_to_open(a, here, me, here, now));
+
+        // A mate that died over the body it had open goes on saying so:
+        // its client is still running. The same board row says its
+        // health is nothing, and that is read rather than waited out.
+        ap.team.mates = vec![Mate {
+            health: 0.0,
+            ..looter(2, here, Some(a), Duration::ZERO)
+        }];
+        assert!(
+            ap.ours_to_open(a, here, me, here, now),
+            "a dead mate held a body for the rest of the claim's life"
+        );
+    }
+
+    #[test]
+    fn a_body_this_character_has_already_claimed_is_not_given_up_for_a_mates() {
+        // Two characters that choose one body in the same tick each
+        // hear the other's claim half a second later. Asking only
+        // "does somebody claim it" made both stand off, each for the
+        // other, and the walk each had started was never let go of --
+        // so the claim kept going out, the body was opened by nobody,
+        // and eight characters stood over it until every claim aged out
+        // at once. A standing claim wins the tie instead of losing it.
+        let t0 = Instant::now();
+        let body = 0x8000_0001;
+        let at = glam::Vec3::ZERO;
+        let (me, lower, higher) = (0x5000_0005, 0x5000_0001, 0x5000_0009);
+        let mut ap = Autoplay {
+            corpse_seen: vec![(body, t0)],
+            ..Default::default()
+        };
+        ap.take_up_corpse(body, t0, LOOT_TIMEOUT);
+        let now = t0 + CLAIM_SETTLE;
+
+        // A mate that reached for it in the same moment and has the
+        // higher guid gives way to us.
+        ap.team.mates = vec![looter(higher, at, Some(body), CLAIM_SETTLE)];
+        assert!(
+            ap.ours_to_open(body, at, me, at, now),
+            "gave up a body we were already holding"
+        );
+
+        // The lower guid in the same moment has it, and we let go.
+        ap.team.mates = vec![looter(lower, at, Some(body), CLAIM_SETTLE)];
+        assert!(!ap.ours_to_open(body, at, me, at, now));
+
+        // Plainly older than ours, whatever the guid: theirs.
+        ap.team.mates = vec![looter(
+            higher,
+            at,
+            Some(body),
+            CLAIM_SETTLE + SAME_MOMENT * 2,
+        )];
+        assert!(!ap.ours_to_open(body, at, me, at, now));
+
+        // Plainly younger than ours, whatever the guid: ours.
+        let later = t0 + SAME_MOMENT * 3;
+        ap.team.mates = vec![looter(lower, at, Some(body), Duration::ZERO)];
+        assert!(ap.ours_to_open(body, at, me, at, later));
+    }
+
+    #[test]
+    fn a_walk_to_a_body_this_character_has_given_up_on_is_let_go_of() {
+        // The one way out of the looting that did not stop the walk. A
+        // character that chose a body, set off for it, and then heard a
+        // better claim on it walked on -- and the walk is itself a claim
+        // (see `Autoplay::corpse_claim`), so it went on telling the
+        // others the body was taken, and went on holding the looting's
+        // own worth up, for a body it would never open.
+        let holtburg = 0xA9B4_0019;
+        let at = glam::Vec3::new(84.0, 84.0, 10.0);
+        let Some(mut c) = standing_in_the_field(20, holtburg, at) else {
+            return;
+        };
+        a_loot_profile(&mut c, "walk test");
+        let me = c.player.as_ref().unwrap().world_position();
+        let now = Instant::now();
+        let body = 0x8000_0001;
+        c.world.objects.insert(
+            body,
+            ac_world::WorldObject {
+                guid: body,
+                name: "Corpse of Drudge Slave".into(),
+                object_desc_flags: ac_world::object_desc_flags::CORPSE,
+                position: Some(ac_world::object::Position::new_flat(
+                    holtburg,
+                    me + glam::Vec3::new(7.0, 0.0, 0.0) - ac_world::landblock_origin(holtburg),
+                )),
+                ..Default::default()
+            },
+        );
+        c.autoplay.corpse_seen = vec![(body, now)];
+        // Walking to it, seven metres off, and a mate says it claimed
+        // the same body well before we did.
+        c.autoplay.walking_to = Some(CorpseWalk::new(body, 7.0, now));
+        c.autoplay.team.mates = vec![looter(
+            0x5000_0002,
+            me,
+            Some(body),
+            SAME_MOMENT + Duration::from_secs(5),
+        )];
+
+        assert!(!c.autoplay_loot(now), "went to a body that is not ours");
+        assert_eq!(c.autoplay.walking_to.map(|w| w.guid), None, "still walking");
+        assert_eq!(c.autoplay.corpse_claim(now), None, "still claiming it");
+    }
+
+    #[test]
+    fn the_lowest_guid_opens_a_body_that_has_only_just_fallen() {
+        // A claim is said every half second and a body is chosen within
+        // a tick of falling, so for that first moment there is no claim
+        // to read and the nine have to agree without one. Every session
+        // works the same answer out of the same roster: the lowest
+        // player guid opens it, the rest stand off.
+        let t0 = Instant::now();
+        let body = 0x8000_0001;
+        let at = glam::Vec3::ZERO;
+        let fleet: Vec<u32> = (0..9).map(|i| 0x5000_0010 + i).collect();
+        let first = fleet[0];
+        for &me in &fleet {
+            let mates = fleet
+                .iter()
+                .filter(|g| **g != me)
+                .map(|g| looter(*g, at, None, Duration::ZERO))
+                .collect();
+            let ap = Autoplay {
+                corpse_seen: vec![(body, t0)],
+                team: TeamView {
+                    mates,
+                    leader: false,
+                },
+                ..Default::default()
+            };
+            assert_eq!(
+                ap.team.opens_first(at, me, at),
+                first,
+                "disagreed about who"
+            );
+            assert_eq!(
+                ap.ours_to_open(body, at, me, at, t0),
+                me == first,
+                "{me:#010x} did not stand off"
+            );
+            // Once the board has had time to catch up the claims are
+            // the truth, and whoever has not been told otherwise goes
+            // ahead.
+            assert!(ap.ours_to_open(body, at, me, at, t0 + CLAIM_SETTLE));
+        }
+
+        // Only the ones that would open it count. A mate played by
+        // hand, a dead one, one already at another body and one across
+        // the field all leave it to us, whatever their guid.
+        let mine = fleet[8];
+        let field_away = glam::Vec3::new(LOOT_NEAR + 5.0, 0.0, 0.0);
+        let view = TeamView {
+            mates: vec![
+                Mate {
+                    autoplay: false,
+                    ..looter(first, at, None, Duration::ZERO)
+                },
+                Mate {
+                    health: 0.0,
+                    ..looter(first + 1, at, None, Duration::ZERO)
+                },
+                looter(first + 2, at, Some(0x8000_0002), Duration::ZERO),
+                looter(first + 3, field_away, None, Duration::ZERO),
+            ],
+            leader: false,
+        };
+        assert_eq!(view.opens_first(at, mine, at), mine);
+
+        // And this character is judged by the same rule as the rest. A
+        // body is owed to a caster out to the fight radius where one of
+        // its kills fell, which is further than a mate has to stand to
+        // count: with no reach test on ourselves, the caster called the
+        // body its own while every mate's roster ruled the caster out,
+        // and the two of them opened it in the same second.
+        let over_it = looter(first, at, None, Duration::ZERO);
+        assert_eq!(
+            view_of(vec![over_it.clone()]).opens_first(at, mine, field_away),
+            first,
+            "claimed a body from across the field"
+        );
+        assert_eq!(
+            view_of(vec![over_it]).opens_first(at, mine, at),
+            first,
+            "standing over it, the lower guid still opens first"
+        );
+        // Nobody within reach at all: it is ours to walk to.
+        assert_eq!(
+            view_of(vec![looter(first, field_away, None, Duration::ZERO)])
+                .opens_first(at, mine, field_away),
+            mine,
+            "left a body nobody was near"
+        );
+    }
+
+    fn view_of(mates: Vec<Mate>) -> TeamView {
+        TeamView {
+            mates,
+            leader: false,
+        }
+    }
+
+    #[test]
+    fn a_body_a_step_or_two_off_is_walked_back_to_and_not_let_go_of() {
+        // The server does not mind the distance: a corpse has no reset
+        // interval, so it stays open until its viewer shuts it. Shutting
+        // one the character was already holding handed it back to the
+        // other eight and the walk back had to win it again -- fifty
+        // times in one run.
+        //
+        // A dodge or a knock-back moves a character several metres in a
+        // frame, and that is the drift this covers.
+        assert!(still_holding_at(CORPSE_REACH + 0.5), "no room to drift");
+        assert!(still_holding_at(HOLD_ON_WITHIN));
+        // Really gone: shut it and walk back to it like any other body.
+        assert!(!still_holding_at(HOLD_ON_WITHIN + 0.5));
+        // Never as far as the twenty metres the looting calls its own,
+        // or a body held would be one nothing else could ever have.
+        assert!(!still_holding_at(LOOT_NEAR));
     }
 
     #[test]
@@ -7689,6 +8850,157 @@ mod tests {
         ap.corpse_shut(emptied, &Did::Done, None, t0);
         assert!(ap.looted.contains(&emptied));
         assert!(!ap.shelved.held(&emptied, t0));
+    }
+
+    #[test]
+    fn the_server_names_the_body_it_will_not_open() {
+        assert_eq!(
+            corpse_refusal("The Corpse of Hellion is already in use by someone else!"),
+            Some(("Corpse of Hellion", CorpseRefusal::InUse))
+        );
+        // A server that tells you whose (`container_opener_name`).
+        assert_eq!(
+            corpse_refusal("The Chest is already in use by +Brynna!"),
+            Some(("Chest", CorpseRefusal::InUse))
+        );
+        assert_eq!(
+            corpse_refusal("You do not yet have the right to loot the Corpse of Hellion."),
+            Some(("Corpse of Hellion", CorpseRefusal::NotYetOurs))
+        );
+        assert_eq!(
+            corpse_refusal(
+                "You may not loot the Corpse of Hellion because the Corpse of Hellion \
+                 has generated a rare item."
+            ),
+            Some(("Corpse of Hellion", CorpseRefusal::NeverOurs))
+        );
+        assert_eq!(
+            corpse_refusal(
+                "You may not loot the Corpse of Biaka because the death was caused by \
+                 a player killer."
+            ),
+            Some(("Corpse of Biaka", CorpseRefusal::NeverOurs))
+        );
+        // Everything else the server says while a body waits to open.
+        assert_eq!(corpse_refusal("You're too busy"), None);
+        assert_eq!(corpse_refusal("The Corpse of Hellion is open"), None);
+        assert_eq!(corpse_refusal("You do not have permission to loot"), None);
+    }
+
+    #[test]
+    fn the_words_a_body_is_refused_in_say_how_long_to_leave_it() {
+        // 1,044 refusals arrived in that run, a third of a second after
+        // the ask, and every one of them was thrown away: the take-up
+        // ended on a clock instead, and asked again three times more.
+        let t0 = Instant::now();
+        let name = "Corpse of Hellion";
+        let answered = t0 + Duration::from_millis(360);
+        let in_use = format!("The {name} is already in use by someone else!");
+        let not_ours = format!("You do not yet have the right to loot the {name}.");
+        let (held, locked, rare) = (0x8000_1221, 0x8000_1222, 0x8000_1223);
+        let mut ap = Autoplay {
+            corpse_seen: vec![(held, t0), (locked, t0), (rare, t0)],
+            ..Default::default()
+        };
+
+        // Someone is inside it: let it go and have it the moment they
+        // are done, not in the half minute anything blocked waits.
+        ap.take_up_corpse(held, t0, LOOT_TIMEOUT);
+        assert!(ap.corpse_refused(&in_use, name, Some(answered), answered));
+        assert_eq!(ap.corpse, None, "still holding a body it cannot open");
+        assert_eq!(ap.shelved.waited(&held), Some(CORPSE_IN_USE_AGAIN));
+        assert!(ap.shelved.held(
+            &held,
+            answered + CORPSE_IN_USE_AGAIN - Duration::from_millis(1)
+        ));
+        assert!(!ap.shelved.held(&held, answered + CORPSE_IN_USE_AGAIN));
+
+        // The killer's for now: a short wait, because a corpse becomes
+        // everyone's the moment whoever has it closes it and not only
+        // when it half rots.
+        ap.take_up_corpse(locked, t0, LOOT_TIMEOUT);
+        assert!(ap.corpse_refused(&not_ours, name, Some(answered), answered));
+        assert_eq!(ap.corpse, None);
+        assert_eq!(ap.shelved.waited(&locked), Some(CORPSE_NOT_OURS_AGAIN));
+        assert!(ap.shelved.held(
+            &locked,
+            answered + CORPSE_NOT_OURS_AGAIN - Duration::from_millis(1)
+        ));
+        assert!(!ap.shelved.held(&locked, answered + CORPSE_NOT_OURS_AGAIN));
+
+        // A body refused twice, in two different sets of words, waits
+        // longer the second time -- and the wait it is given is a wait
+        // and not a deadline. Handing the shelf an exact "come back in
+        // 117 seconds" doubled the three seconds already on the body
+        // instead: six, then twelve, then twenty-four, five more asks
+        // and five more refusals before it reached the wait that was
+        // meant the first time.
+        let both = 0x8000_1224;
+        ap.corpse_seen.push((both, t0));
+        ap.take_up_corpse(both, t0, LOOT_TIMEOUT);
+        assert!(ap.corpse_refused(&in_use, name, Some(answered), answered));
+        assert_eq!(ap.shelved.waited(&both), Some(CORPSE_IN_USE_AGAIN));
+        let again = answered + CORPSE_IN_USE_AGAIN;
+        ap.take_up_corpse(both, again, LOOT_TIMEOUT);
+        let told = again + Duration::from_millis(360);
+        assert!(ap.corpse_refused(&not_ours, name, Some(told), told));
+        assert_eq!(
+            ap.shelved.waited(&both),
+            Some(CORPSE_IN_USE_AGAIN * 2),
+            "a doubling wait, not a deadline the shelf then doubled"
+        );
+
+        // The killer's for good: not waited on at all.
+        ap.take_up_corpse(rare, t0, LOOT_TIMEOUT);
+        let words =
+            format!("You may not loot the {name} because the {name} has generated a rare item.");
+        assert!(ap.corpse_refused(&words, name, Some(answered), answered));
+        assert!(ap.shelved.held(&rare, t0 + CORPSE_LIFE));
+    }
+
+    #[test]
+    fn a_refusal_about_another_body_leaves_the_one_in_hand_alone() {
+        let t0 = Instant::now();
+        let body = 0x8000_1221;
+        let asked = t0 + Duration::from_secs(1);
+        let answered = asked + Duration::from_millis(360);
+        let mut ap = Autoplay {
+            corpse_seen: vec![(body, t0)],
+            ..Default::default()
+        };
+        ap.take_up_corpse(body, asked, LOOT_TIMEOUT);
+
+        // Nine characters stand in one huddle and the server answers all
+        // of them: words about a body this character is not working
+        // change nothing.
+        assert!(!ap.corpse_refused(
+            "The Corpse of Drudge Slave is already in use by someone else!",
+            "Corpse of Hellion",
+            Some(answered),
+            answered,
+        ));
+        // Nor do words about something that is not a refusal.
+        assert!(!ap.corpse_refused(
+            "You're too busy",
+            "Corpse of Hellion",
+            Some(answered),
+            answered
+        ));
+        // Nor an answer that came in before this ask went out: it was
+        // the ask before it that was refused.
+        let words = "You do not yet have the right to loot the Corpse of Hellion.";
+        assert!(!ap.corpse_refused(words, "Corpse of Hellion", Some(asked), answered));
+        assert!(!ap.corpse_refused(words, "Corpse of Hellion", None, answered));
+        assert_eq!(
+            ap.corpse.map(|c| c.0),
+            Some(body),
+            "let a body go for nothing"
+        );
+        assert!(ap.shelved.is_empty(), "set a body aside for nothing");
+
+        // The same words, stamped after the ask, are this body's.
+        assert!(ap.corpse_refused(words, "Corpse of Hellion", Some(answered), answered));
+        assert_eq!(ap.corpse, None);
     }
 
     #[test]
@@ -7983,6 +9295,258 @@ mod tests {
         let before: Config = serde_json::from_str(r#"{"fight":{"radius":30.0}}"#).unwrap();
         assert!(before.fight.skip_critters);
     }
+
+    /// A character with a mace in hand and a wand in the pack, and
+    /// nothing the server is waiting on: no swing out, no spell in the
+    /// air.
+    fn hands_free() -> Option<Client> {
+        let (mut c, _) = mid_fight()?;
+        c.attack_target = None;
+        c.attack_pending = false;
+        c.autoplay.cast_sent = None;
+        assert!(!c.server_busy(Instant::now()), "nothing owed to the server");
+        Some(c)
+    }
+
+    #[test]
+    fn the_weapon_already_in_the_hand_is_not_asked_for_again() {
+        // All 71 "You must remove your X to wield Y" lines of a
+        // ten-minute run had X and Y the same item: the client asking
+        // the server to wield what it was already holding.
+        let Some(mut c) = hands_free() else {
+            return;
+        };
+        const MACE: u32 = 0x8000_0101;
+        assert!(c.wield_guid(MACE), "the mace is in hand, so the ask stands");
+        assert_eq!(c.autoplay.wield_asked, None, "and nothing was sent");
+    }
+
+    #[test]
+    fn one_wield_goes_out_once_however_often_it_is_asked_for() {
+        let Some(mut c) = hands_free() else {
+            return;
+        };
+        const WAND: u32 = 0x8000_0102;
+        assert!(c.wield_guid(WAND), "the wand is asked for");
+        let first = c.autoplay.wield_asked;
+        assert!(matches!(first, Some((WAND, _))));
+        // The client thinks at 8 Hz and the answer takes a few hundred
+        // milliseconds. Three ticks of asking used to be three sends,
+        // and the server refused the last two for the first having
+        // worked.
+        assert!(c.wield_guid(WAND), "the ask already stands");
+        assert!(c.wield_guid(WAND));
+        assert_eq!(c.autoplay.wield_asked, first, "nothing else was sent");
+        // A wield the server never answers at all is asked for again.
+        c.autoplay.wield_asked = Some((WAND, Instant::now() - WIELD_ANSWERS_IN));
+        assert!(c.wield_guid(WAND));
+        assert_ne!(c.autoplay.wield_asked, first, "asked again once stale");
+    }
+
+    #[test]
+    fn a_refused_wield_that_worked_forgets_the_wait_rather_than_doubling_it() {
+        let Some(mut c) = hands_free() else {
+            return;
+        };
+        const WAND: u32 = 0x8000_0102;
+        let now = Instant::now();
+        // The wand was asked for twice and taken up once. The second
+        // ask comes back refused, and the world already shows the wand
+        // in hand.
+        a_weapon(&mut c, WAND, ac_world::item_type::CASTER, "Wand", true);
+        c.autoplay.wield_asked = Some((WAND, now));
+        c.wield_refused(WAND, now);
+        assert!(
+            !c.wield_held_off(WAND),
+            "the wield worked; there is nothing to wait for"
+        );
+        assert_eq!(c.autoplay.wield_asked, None, "and the ask is answered");
+
+        // A refusal for something still in the pack is a real refusal
+        // and still earns its wait.
+        a_weapon(&mut c, WAND, ac_world::item_type::CASTER, "Wand", false);
+        c.autoplay.wield_asked = Some((WAND, now));
+        c.wield_refused(WAND, now);
+        assert!(c.wield_held_off(WAND), "left alone for a while");
+    }
+
+    #[test]
+    fn nothing_is_sent_to_move_an_item_while_the_server_has_us_busy() {
+        // ACE refuses a take made while the character is busy and spends
+        // two messages saying so -- YoureTooBusy and an
+        // InventoryServerSaveFailed with nothing in it. Nine characters
+        // bought 89 of those pairs in ten minutes, taking from a body
+        // with a spell in the air.
+        let Some(mut c) = hands_free() else {
+            return;
+        };
+        const WAND: u32 = 0x8000_0102;
+        const LOOT: u32 = 0x8000_0105;
+        let now = Instant::now();
+        c.autoplay.cast_sent = Some(now);
+        assert!(c.server_busy(now));
+
+        assert!(!c.wield_guid(WAND), "the wand waits for a free tick");
+        assert_eq!(c.autoplay.wield_asked, None, "nothing sent mid-cast");
+
+        c.loot_queue.push_back(LOOT);
+        c.tick_loot(now);
+        assert!(c.loot_inflight.is_none(), "the take waits too");
+        assert_eq!(
+            c.loot_queue.front(),
+            Some(&LOOT),
+            "and keeps its place in the queue"
+        );
+
+        // A swing in the air is a different matter. ACE sets no IsBusy
+        // for one -- nothing in its melee or missile path does, and the
+        // wield handler does not read it at all -- so the take goes out.
+        // The wield still waits, because a wield mid-swing lands and
+        // cancels the swing doing it.
+        c.autoplay.cast_sent = None;
+        c.attack_pending = true;
+        c.last_attack = now;
+        assert!(!c.server_busy(now), "a swing is not the server being busy");
+        assert!(c.wield_must_wait(WAND, now), "not worth a cancelled swing");
+        assert!(!c.wield_guid(WAND));
+        c.tick_loot(now);
+        assert_eq!(
+            c.loot_inflight.map(|(g, _)| g),
+            Some(LOOT),
+            "the take was held back for a rule the server does not have"
+        );
+        assert!(c.loot_queue.is_empty());
+
+        // The swing lands, and the wand goes out too.
+        c.attack_pending = false;
+        assert!(c.wield_guid(WAND));
+    }
+
+    #[test]
+    fn a_busy_tick_is_not_an_empty_quiver() {
+        // The one caller of `ready_ammo` reads a false as "no
+        // ammunition" and goes off to fletch some, dropping out of
+        // combat stance to do it. With the busy test on every wield, a
+        // shot still unanswered or a spell in the air made every tick a
+        // false one, and an archer with a full pack was sent to make
+        // arrows it was already carrying.
+        let Some(mut c) = character_of_level(20) else {
+            return;
+        };
+        const ARROWS: u32 = 0x8000_0201;
+        let me = c.world.player_guid;
+        c.world.objects.insert(
+            ARROWS,
+            ac_world::WorldObject {
+                guid: ARROWS,
+                name: "Arrow".into(),
+                stack_size: 100,
+                valid_locations: ac_world::equip::MISSILE_AMMO,
+                container: me,
+                ..Default::default()
+            },
+        );
+        c.autoplay.wanted_ammo = Some(ARROWS);
+        assert!(c.wielded_ammo().is_none(), "the slot is empty");
+
+        // A spell in the air: the wield waits, and the quiver is still
+        // not empty.
+        let now = Instant::now();
+        c.autoplay.cast_sent = Some(now);
+        assert!(c.server_busy(now));
+        assert!(c.ready_ammo(), "a busy tick read as an empty quiver");
+        assert_eq!(c.autoplay.wield_asked, None, "nothing sent mid-cast");
+
+        // The spell lands and the arrows go into the slot.
+        c.autoplay.cast_sent = None;
+        assert!(c.ready_ammo());
+        assert_eq!(c.autoplay.wield_asked.map(|(g, _)| g), Some(ARROWS));
+    }
+
+    #[test]
+    fn no_spell_is_sent_at_a_creature_that_has_already_died() {
+        // 36 "Target not acquired" in a run, every one a cast at a
+        // creature that had died since the tick that chose it: ACE looks
+        // the target up before the windup and answers TargetNotAcquired.
+        // The swing has always made this test; the cast never did.
+        let Some((mut c, wand)) = mid_fight() else {
+            return;
+        };
+        const MACE: u32 = 0x8000_0101;
+        const CREATURE: u32 = 0x8000_0103;
+        // Incantation of Lightning Vulnerability Other, one of the
+        // softening spells the run cast.
+        const VULNERABILITY: u32 = 4483;
+        a_weapon(
+            &mut c,
+            MACE,
+            ac_world::item_type::MELEE_WEAPON,
+            "Mace",
+            false,
+        );
+        a_weapon(&mut c, wand, ac_world::item_type::CASTER, "Wand", true);
+        c.select(Some(CREATURE));
+        assert_eq!(
+            c.try_cast(VULNERABILITY),
+            crate::magic::CastCheck::Ok,
+            "it is alive and in view"
+        );
+        // Dead: the server replaces the creature with a corpse of
+        // another guid, so its own simply goes.
+        c.world.objects.remove(&CREATURE);
+        assert_eq!(c.try_cast(VULNERABILITY), crate::magic::CastCheck::NoTarget);
+        // And a cast that never went out earns no wait for an answer.
+        // Refused, the server used to answer TargetNotAcquired with a
+        // UseDone, which ended the wait; declined here, nothing comes
+        // back at all, and the whole backstop would be spent standing
+        // over a corpse the character was not allowed to take from.
+        c.autoplay.cast_sent = None;
+        c.cast_paced(VULNERABILITY, Instant::now());
+        assert_eq!(c.autoplay.cast_sent, None, "nothing to wait for");
+        assert!(!c.server_busy(Instant::now()));
+    }
+
+    #[test]
+    fn an_urgent_buff_waits_for_the_fight_only_when_it_costs_the_weapon() {
+        // The urgent pass runs as a reflex, ahead of loot and ahead of
+        // the fight, and ignored `out_of_combat_only` outright: a buff
+        // with a minute still on it was enough to put the sword away
+        // mid-swing. Under god mode that cost throughput; for a mortal
+        // character it is a fight fought bare-handed.
+        let (sword, wand) = (false, true);
+        let mut cfg = Buffs {
+            never_below: 60.0,
+            top_up_within: 300.0,
+            out_of_combat_only: true,
+            ..Buffs::default()
+        };
+        assert_eq!(
+            buff_within(&cfg, true, true, sword),
+            0.0,
+            "only what has lapsed"
+        );
+        // A buff that is not up at all reads as nought seconds left, so
+        // it still goes back up in the middle of a fight. That is what
+        // "never below" is for.
+        assert!(0.0 <= buff_within(&cfg, true, true, sword));
+        // With a wand already in hand the recast costs a cast and
+        // nothing else, so `never_below` holds. Answering nought here
+        // meant a mortal caster's protections were put back only after
+        // they had lapsed -- the very window the setting names.
+        assert_eq!(
+            buff_within(&cfg, true, true, wand),
+            60.0,
+            "a free recast was still made to wait for the fight"
+        );
+        // Out of the fight the urgent pass is unchanged, and so is the
+        // quiet one either way.
+        assert_eq!(buff_within(&cfg, true, false, sword), 60.0);
+        assert_eq!(buff_within(&cfg, false, true, sword), 300.0);
+        // And a player who has not asked for the restraint keeps the
+        // old behaviour: buffs go back up mid-fight.
+        cfg.out_of_combat_only = false;
+        assert_eq!(buff_within(&cfg, true, true, sword), 60.0);
+    }
 }
 #[cfg(test)]
 mod heal_choice_tests {
@@ -8208,5 +9772,110 @@ mod loot_timing_tests {
             CORPSE_URGENT >= Duration::from_secs(30),
             "no time to get there"
         );
+    }
+}
+
+#[cfg(test)]
+mod fellowship_tests {
+    use super::{next_invitee, RECRUIT_AGAIN, RECRUIT_FLOOR, TEAM_OPTIONS};
+    use std::time::Instant;
+
+    #[test]
+    fn every_option_a_teammate_keeps_on_is_one_the_table_knows() {
+        // The options are named in words and looked up by those words,
+        // so a name that no longer matches the table is an option that
+        // is silently never set -- which is how nine characters hunted
+        // for ten minutes without loot sharing.
+        for name in TEAM_OPTIONS {
+            assert!(
+                crate::options::option_by_name(name).is_some(),
+                "no option called {name:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn loot_sharing_is_the_option_ace_reads_off_the_founder() {
+        // ACE takes `CharacterOption.ShareFellowshipLoot` (0x11, bit
+        // 0x0010_0000 of the first word) off the leader in the
+        // `Fellowship` constructor, and `Corpse.HasPermission` lets a
+        // fellow open a fresh body through that clause alone.
+        let o = crate::options::option_by_name("share fellowship loot").expect("no such option");
+        assert_eq!(o.id, 0x11);
+        assert_eq!(o.bit, 0x0010_0000);
+        assert!(!o.inverted, "the bit means share, not ignore");
+    }
+
+    #[test]
+    fn the_others_are_asked_while_one_invitee_waits() {
+        // The bug: one timer for the whole party, so nine characters
+        // took forty-one seconds to join, at five seconds apart. Each
+        // tick now asks somebody who has not been asked yet.
+        let start = Instant::now();
+        let waiting = [(0x1001, 3.0), (0x1002, 5.0), (0x1003, 9.0)];
+        let first = next_invitee(&waiting, &[], None, start).expect("nobody asked");
+        assert_eq!(first, 0x1001, "the nearest is asked first");
+        let asked = [(first, start)];
+        let then = start + RECRUIT_FLOOR;
+        assert_eq!(
+            next_invitee(&waiting, &asked, Some(start), then),
+            Some(0x1002)
+        );
+    }
+
+    #[test]
+    fn two_invitations_do_not_leave_in_the_same_breath() {
+        // No rate limit on recruiting was found in ACE, but that is
+        // read from the source and untested against a live server, so
+        // the invitations keep a small gap.
+        let start = Instant::now();
+        let waiting = [(0x1001, 3.0), (0x1002, 5.0)];
+        assert_eq!(next_invitee(&waiting, &[], Some(start), start), None);
+        let soon = start + RECRUIT_FLOOR / 2;
+        assert_eq!(next_invitee(&waiting, &[], Some(start), soon), None);
+        assert!(next_invitee(&waiting, &[], Some(start), start + RECRUIT_FLOOR).is_some());
+    }
+
+    #[test]
+    fn an_invitee_that_never_came_is_asked_again_later() {
+        // A member the server thought busy is refused with nothing the
+        // client can act on, so the only way to tell "not yet" from
+        // "never" is to ask again once the others have been asked.
+        let start = Instant::now();
+        let waiting = [(0x1001, 3.0)];
+        let asked = [(0x1001, start)];
+        let soon = start + RECRUIT_AGAIN / 2;
+        assert_eq!(next_invitee(&waiting, &asked, Some(start), soon), None);
+        let later = start + RECRUIT_AGAIN;
+        assert_eq!(
+            next_invitee(&waiting, &asked, Some(start), later),
+            Some(0x1001)
+        );
+    }
+
+    #[test]
+    fn nine_are_all_asked_inside_ten_seconds() {
+        // What the party is judged on: everyone in the fellowship soon
+        // after they arrive, rather than the last one joining after the
+        // first two minutes of every body's life have gone by.
+        let start = Instant::now();
+        let waiting: Vec<(u32, f32)> = (0..9).map(|i| (0x1000 + i, i as f32)).collect();
+        let mut asked: Vec<(u32, Instant)> = Vec::new();
+        let mut last = None;
+        let mut now = start;
+        while asked.len() < waiting.len() {
+            match next_invitee(&waiting, &asked, last, now) {
+                Some(guid) => {
+                    asked.push((guid, now));
+                    last = Some(now);
+                }
+                None => now += RECRUIT_FLOOR / 4,
+            }
+            assert!(
+                now.duration_since(start) < std::time::Duration::from_secs(10),
+                "only {} of nine asked in ten seconds",
+                asked.len()
+            );
+        }
     }
 }

@@ -52,6 +52,11 @@ pub enum CastCheck {
     NotKnown,
     /// No magic caster (wand, orb, staff...) is wielded.
     NoCaster,
+    /// The thing the spell was aimed at is no longer there: a creature
+    /// that died between the tick that chose it and this one. Only
+    /// [`Client::try_cast`] gives this answer; [`Client::can_cast`] asks
+    /// nothing about the target.
+    NoTarget,
     /// Components of the current formula missing from the packs:
     /// (component id, how many short).
     MissingComponents(Vec<(u32, u32)>),

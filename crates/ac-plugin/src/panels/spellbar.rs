@@ -151,6 +151,7 @@ pub fn blocked_reason(check: &CastCheck, comps: Option<&SpellComponentTable>) ->
         CastCheck::Ok => return None,
         CastCheck::NotKnown => "not in the spellbook".to_string(),
         CastCheck::NoCaster => "no magic caster wielded".to_string(),
+        CastCheck::NoTarget => "the target is gone".to_string(),
         CastCheck::MissingComponents(list) => {
             let names: Vec<String> = list
                 .iter()

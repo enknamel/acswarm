@@ -48,6 +48,35 @@ never won one -- a character that fights, loots and walks all afternoon
 has no quiet tick to give it -- and the pack filled up with part stacks
 while tidying waited its turn.
 
+Watching the ground runs before even the reflexes, for the same reason
+and one more. The clocks it keeps -- how long a spot has had nothing on
+it, and when each body on it first came into sight -- are read off the
+world every tick, not off what the character happens to be doing: the
+hunting step that acts on the first is the last goal in the table, so a
+character with a body to open never reaches it, and the second used to
+be wound inside the looting, which a character standing off from a body
+never runs at all. A clock only wound where it is read stands still
+exactly when it is most needed. Nine characters queueing at one corpse
+restarted the quiet clock every couple of seconds and never once walked
+the two hundred metres they had been given; and a body nobody had noted
+stayed for ever "newly fallen", so the claim tie-break over it never
+expired. Housekeeping alone was not enough for either: a tick claimed by
+a dodge, a heal, a death or the Academy returns before the housekeeping
+table is reached.
+
+A reflex is paid for by every tick it claims, so a reflex has to be
+worth the tick. Dodging sits second in the chain, ahead of the healing,
+because a spell already in the air cannot be argued with -- and it took
+up every projectile in view without asking whose it was. Nine
+characters shooting the same creature from a metre apart aimed a fifth
+of one run's dodges at each other, and each of those held the legs for
+six hundred milliseconds and claimed the tick for a bolt that could not
+have hurt anybody. The place in the chain was right; what was missing
+was the price. A projectile that cannot hurt the character is still
+worth stepping out of the way of -- the server destroys it on us and
+the fellow loses his spell -- but only when the moment is going spare
+(`dodge`).
+
 **A group state machine.** `logistics` is a proper FSM over
 `Hunting | Restocking{Shopping, HandOver, Away, HandOut}`, computed by
 every session from the shared roster. This part is right and is not
