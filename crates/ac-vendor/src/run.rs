@@ -92,7 +92,10 @@ impl Next {
 /// It holds only what cannot be seen in a snapshot: which phase the
 /// trip is in, what has been handed over and not yet answered for, and
 /// what has been refused and should not be asked about again yet.
-#[derive(Debug, Default)]
+///
+/// It clones, so that a panel can ask a copy what the trip would do
+/// next without moving the trip itself on.
+#[derive(Clone, Debug, Default)]
 pub struct Run {
     pub phase: Phase,
     /// Handed to the counter and not yet gone from the pack.
