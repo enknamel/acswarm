@@ -163,6 +163,13 @@ Casting rules (ACE `Player_Magic`, matching retail):
   on creatures, beneficial spells not on monsters, harmful spells on other
   players only under PK rules; the range is the spell's base range
   constant plus range mod × skill.
+* A projectile in flight is destroyed by whatever it collides with
+  *before* the server asks whether the damage is allowed:
+  `SpellProjectile.OnCollideObject` calls `ProjectileImpact()` and only
+  then `CheckPKStatusVsTarget`, which refuses the moment either side is a
+  non-PK. So a fellow who walks into the line takes nothing and the
+  caster loses the spell anyway — a fellowship standing in a huddle
+  shoots down its own bolts.
 
 ### Enchantments (buffs and debuffs)
 

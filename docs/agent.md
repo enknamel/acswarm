@@ -57,6 +57,19 @@ needed. Nine characters queueing at one corpse restarted it every couple
 of seconds and never once walked the two hundred metres they had been
 given.
 
+A reflex is paid for by every tick it claims, so a reflex has to be
+worth the tick. Dodging sits second in the chain, ahead of the healing,
+because a spell already in the air cannot be argued with -- and it took
+up every projectile in view without asking whose it was. Nine
+characters shooting the same creature from a metre apart aimed a fifth
+of one run's dodges at each other, and each of those held the legs for
+six hundred milliseconds and claimed the tick for a bolt that could not
+have hurt anybody. The place in the chain was right; what was missing
+was the price. A projectile that cannot hurt the character is still
+worth stepping out of the way of -- the server destroys it on us and
+the fellow loses his spell -- but only when the moment is going spare
+(`dodge`).
+
 **A group state machine.** `logistics` is a proper FSM over
 `Hunting | Restocking{Shopping, HandOver, Away, HandOut}`, computed by
 every session from the shared roster. This part is right and is not
