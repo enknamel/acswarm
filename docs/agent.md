@@ -53,10 +53,13 @@ thing the grow step did, and grow is the last goal: reached only when
 nothing else wants the tick. Something always did. A character granted a
 hundred billion experience on the local server spent none of it in three
 minutes, because exploring claimed every tick and always had another
-room to walk to. A rank is one message, and the server takes it with no
+room to walk to. A raise is one message, and the server takes it with no
 busy check, no animation and no movement -- it checks the stat and the
 pool, spends, and answers -- so it runs as housekeeping too, in the
-middle of a walk or a fight, still paced to one rank at a time. A rank
+middle of a walk or a fight, still paced to one message at a time. A
+message can carry many ranks of one stat: a large pool goes out as the
+ranks buying one at a time would have given each stat, a message a stat,
+so it is spread as before and spent in seconds rather than days. A rank
 that raises a maximum (Health, Stamina, Mana, or Endurance and Self,
 which they are built from) waits for the fight to be over. The fight
 under way is fought with what is left, which that rank leaves where it
