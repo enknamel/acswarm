@@ -1114,10 +1114,19 @@ impl Client {
     /// still the walk, since its errand takes it up again (see
     /// [`Client::journey_broken_off`]), and so is stepping out of a shop
     /// before it.
-    pub(crate) fn on_its_way(&self) -> bool {
+    ///
+    /// A follower is on its leader's way. It keeps up through the follow
+    /// step, which sets no errand of its own, so read off its own errands
+    /// alone it stopped to fight what its leader walked past, fell behind,
+    /// was fetched back and turned to fight again, and the party came apart
+    /// on the road. Each character says on the board whether it is on its
+    /// way (`Mate::on_its_way`), which is also how the party stops together
+    /// for what attacks any of it (see [`Client::passing_by`]).
+    pub fn on_its_way(&self) -> bool {
         let st = &self.autoplay.growth;
-        st.has_an_errand()
-            && (self.traveling() || self.journey_broken_off() || st.after_out.is_some())
+        let walking = st.has_an_errand()
+            && (self.traveling() || self.journey_broken_off() || st.after_out.is_some());
+        walking || self.followed_leader().is_some_and(|m| m.on_its_way)
     }
 
     /// The growth rules: spend experience, find monsters, run to town.
@@ -5201,6 +5210,78 @@ mod tests {
         // Stepping out of a shop first is the start of the walk.
         c.autoplay.growth.after_out = Some(at);
         assert!(c.on_its_way());
+    }
+
+    #[test]
+    fn a_party_on_the_road_walks_past_together_and_stops_together() {
+        // The leader, bound for a new ground, walked past a Drudge. Its
+        // followers keep up through the follow step, which sets no errand,
+        // so they stopped and fought it; the leader walked on, they were
+        // fetched after it and turned on the Drudge again each time they
+        // closed, and the leader never helped.
+        let holtburg = 0xA9B4_0019;
+        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
+            return;
+        };
+        c.world.stats.level = 20;
+        c.world.player_guid = Some(0x5000_0001);
+        let me = c.player.as_ref().unwrap().world_position();
+        let now = Instant::now();
+        let fight = c.autoplay.config.fight.clone();
+        let drudge = standing_by(&mut c, 0x8000_0001, "Drudge Skulker", 5.0);
+        let other = standing_by(&mut c, 0x8000_0002, "Drudge Slinker", 6.0);
+        let team = &mut c.autoplay.config.team;
+        team.enabled = true;
+        team.follow = true;
+        team.lead = false;
+        let leader = |on_its_way: bool, target: Option<u32>| crate::autoplay::Mate {
+            name: "Leader".into(),
+            leader: true,
+            leads: true,
+            world: me,
+            cell: holtburg,
+            on_its_way,
+            target,
+            ..Default::default()
+        };
+
+        // A leader going nowhere: its follower fights what is about.
+        c.autoplay.team.mates = vec![leader(false, None)];
+        assert!(!c.on_its_way());
+        assert!(c.would_fight(&drudge, &fight, false, now));
+
+        // A leader on its way: so is the follower keeping up with it.
+        c.autoplay.team.mates = vec![leader(true, None)];
+        assert!(c.on_its_way(), "a follower is on its leader's way");
+        assert!(!c.would_fight(&drudge, &fight, false, now));
+        assert!(!c.joins_the_team_on(drudge.guid, &fight));
+
+        // Something attacks the leader on the road and it turns to fight:
+        // the follower turns with it and joins on it, but not on the one
+        // standing by.
+        c.autoplay.team.mates = vec![leader(true, Some(drudge.guid))];
+        assert!(c.would_fight(&drudge, &fight, false, now));
+        assert!(c.joins_the_team_on(drudge.guid, &fight));
+        assert!(!c.would_fight(&other, &fight, false, now));
+        assert!(!c.joins_the_team_on(other.guid, &fight));
+
+        // On a run of its own while the party back at the ground fights:
+        // that fight is not the road's, and neither focus fire nor the
+        // debuffer turns the character round for it.
+        c.autoplay.config.team.follow = false;
+        let counter = Vec2::new(me.x + 250.0, me.y);
+        assert!(c.grow_travel(counter, now));
+        c.autoplay.growth.run = Some(run_to(counter, now));
+        c.autoplay.team.mates = vec![leader(false, Some(drudge.guid))];
+        assert!(c.on_its_way());
+        assert!(
+            !c.joins_the_team_on(drudge.guid, &fight),
+            "turned back for the party"
+        );
+        // Until the Drudge attacks the character itself.
+        c.autoplay.last_hit_us = Some(Instant::now());
+        c.autoplay.hit_by = Some(("Drudge Skulker".into(), Instant::now()));
+        assert!(c.joins_the_team_on(drudge.guid, &fight));
     }
 
     #[test]

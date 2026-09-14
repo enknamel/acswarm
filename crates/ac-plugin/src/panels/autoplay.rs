@@ -380,7 +380,9 @@ pub fn draw(egui: &egui::Context, v: &AutoplayView, x: f32, drafts: &mut Drafts)
                          hunting ground, back from town, to a counter -- leave \
                          what stands about on the road alone and get there. \
                          Anything attacking the character, with a swing or a \
-                         spell, is still fought.",
+                         spell, is still fought, and so is anything the party on \
+                         the road with it is fighting. A follower walks past what \
+                         its leader walks past.",
                     );
                 ui.checkbox(&mut cfg.fight.craft_ammo, "make ammunition when out")
                     .on_hover_text(

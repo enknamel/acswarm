@@ -1297,6 +1297,12 @@ pub struct Mate {
     /// and what it is called. What the party goes back to together
     /// after a trip to town.
     pub ground: Option<(u32, glam::Vec2, String)>,
+    /// It is on its way somewhere, or keeping up with a leader that is
+    /// (see `Client::on_its_way`). A party on the road walks past what its
+    /// leader walks past and stops for what any of it on the road is
+    /// fighting, so it neither scatters to fight nor walks off and leaves
+    /// one of its own behind.
+    pub on_its_way: bool,
 }
 
 /// Health left below which there is no time to be careful: the biggest
@@ -5082,13 +5088,15 @@ impl Client {
     /// [`Self::a_critter`]: that one answers what a creature *is*, and
     /// the same Drudge is worth fighting once the walk is over.
     ///
-    /// One thing outranks it: the creature is attacking the character,
-    /// with a swing or a spell. That fight is already happening, and the
-    /// road does not get to decide it. Nothing has to be undone at the end
-    /// of the road either: the rule ends with the walk, and the character
-    /// is fighting again the tick it arrives.
+    /// Two things outrank it, and in both the fight is already happening:
+    /// the creature is attacking the character, with a swing or a spell,
+    /// or one of the party on the road with it is fighting it (see
+    /// [`Self::a_mate_on_the_road_is_on`]). The road does not get to decide
+    /// either. Nothing has to be undone at the end of the road: the rule
+    /// ends with the walk, and the character is fighting again the tick it
+    /// arrives.
     ///
-    /// `a_critter`'s other two overrides are not this rule's. A name in
+    /// `a_critter`'s other overrides are not this rule's. A name in
     /// "only these" says which kind to hunt, not where: every creature the
     /// pickers could choose already matches it, so as an override it
     /// switched the walking past off for anyone who kept the list, and a
@@ -5106,16 +5114,48 @@ impl Client {
     /// is why a character walks straight through a closed door, and the
     /// steering plans its way round that same geometry. A creature is an
     /// object like the door is. And anything that could get in the way
-    /// and matter is aggressive, which means it attacks -- the override,
-    /// and the character turns and fights it. If some ground proves
-    /// otherwise, the walk's own four-minute timeout
+    /// and matter is aggressive, which means it attacks -- the first
+    /// override, and the character turns and fights it. If some ground
+    /// proves otherwise, the walk's own four-minute timeout
     /// (`growth::WALK_TIMEOUT`) still ends it and another ground is
     /// chosen.
     pub(crate) fn passing_by(&self, o: &ac_world::WorldObject, cfg: &Fight) -> bool {
         if !cfg.walk_past_on_the_way || !self.on_its_way() {
             return false;
         }
-        !self.hit_lately_by(&o.name)
+        !(self.hit_lately_by(&o.name) || self.a_mate_on_the_road_is_on(o.guid))
+    }
+
+    /// Whether one of the party, on its way as well, is fighting `guid`.
+    ///
+    /// A character on the road takes on nothing but what attacks it, so
+    /// this is a fight that came to one of its own. Without it the leader
+    /// walked on while a follower turned to fight, and the follower was
+    /// fetched after it and turned again, alone, each time it closed. A
+    /// mate that is not on the road -- hunting back at the ground while
+    /// this one goes to town -- is no reason to turn round.
+    fn a_mate_on_the_road_is_on(&self, guid: u32) -> bool {
+        self.autoplay
+            .team
+            .mates
+            .iter()
+            .any(|m| m.on_its_way && m.target == Some(guid))
+    }
+
+    /// Whether to go on at `guid` with the rest of the team: it is alive,
+    /// and not one this character is walking past on its way somewhere
+    /// (see [`Self::passing_by`]).
+    ///
+    /// Focus fire and the debuffer take the team's target off the board
+    /// rather than choosing through [`Self::would_fight`], so they ask
+    /// this instead. Without it a character setting off for town turned
+    /// round for whatever the party back at the ground was hitting, from
+    /// as far off as it could see it.
+    pub(crate) fn joins_the_team_on(&self, guid: u32, cfg: &Fight) -> bool {
+        self.world
+            .objects
+            .get(&guid)
+            .is_some_and(|o| o.health.unwrap_or(1.0) > 0.0 && !self.passing_by(o, cfg))
     }
 
     /// Whether `o` is something this character would take on: a live
@@ -5311,39 +5351,38 @@ impl Client {
         }
         let me = self.player.as_ref().map(|p| p.world_position());
         let Some(me) = me else { return false };
-        // Hunting together: hit what the team is hitting.
+        // Hunting together: hit what the team is hitting, unless it is
+        // something this character is walking past on its way somewhere.
         let team = &self.autoplay.config.team;
         if team.enabled && team.focus_fire && !self.autoplay.team.leader {
-            if let Some((guid, name)) = self.autoplay.team.target() {
-                let alive = self
-                    .world
-                    .objects
-                    .get(&guid)
-                    .is_some_and(|o| o.health.unwrap_or(1.0) > 0.0);
-                if alive {
-                    if self.autoplay_plan_hard(guid, &name, now) {
-                        return true;
-                    }
-                    self.remember_journey();
-                    self.arm_for(guid, stance, &cfg);
-                    if self.hands_changing(now) {
-                        self.autoplay
-                            .say(Doing::Fighting, format!("changing weapon for {name}"));
-                        return true;
-                    }
-                    if missile && self.autoplay_approach(guid, &name, crate::dodge::How::Missile) {
-                        return true;
-                    }
-                    self.enter_combat();
-                    self.attack(guid);
-                    self.autoplay.last_attack = Some(now);
-                    if missile {
-                        self.throw_at(guid, now);
-                    }
-                    self.autoplay
-                        .say(Doing::Fighting, format!("joining on {name}"));
+            let joined = self
+                .autoplay
+                .team
+                .target()
+                .filter(|(guid, _)| self.joins_the_team_on(*guid, &cfg));
+            if let Some((guid, name)) = joined {
+                if self.autoplay_plan_hard(guid, &name, now) {
                     return true;
                 }
+                self.remember_journey();
+                self.arm_for(guid, stance, &cfg);
+                if self.hands_changing(now) {
+                    self.autoplay
+                        .say(Doing::Fighting, format!("changing weapon for {name}"));
+                    return true;
+                }
+                if missile && self.autoplay_approach(guid, &name, crate::dodge::How::Missile) {
+                    return true;
+                }
+                self.enter_combat();
+                self.attack(guid);
+                self.autoplay.last_attack = Some(now);
+                if missile {
+                    self.throw_at(guid, now);
+                }
+                self.autoplay
+                    .say(Doing::Fighting, format!("joining on {name}"));
+                return true;
             }
         }
         let underground = self.underground();
@@ -6901,12 +6940,10 @@ impl Client {
                     .map(|t| (t, self.last_target_name.clone()))
             });
             if let Some((guid, name)) = target {
-                let alive = self
-                    .world
-                    .objects
-                    .get(&guid)
-                    .is_some_and(|o| o.health.unwrap_or(1.0) > 0.0);
-                if alive && !self.autoplay.debuffed.contains(&guid) {
+                // Not one it is walking past on its way somewhere, any more
+                // than the fight would be (see `joins_the_team_on`).
+                let fight = &self.autoplay.config.fight;
+                if self.joins_the_team_on(guid, fight) && !self.autoplay.debuffed.contains(&guid) {
                     for spell_name in &team.debuffs {
                         let Some(spell) = self.spell_by_name(spell_name) else {
                             continue;
