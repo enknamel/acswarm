@@ -258,9 +258,14 @@ fn corpse_is_ours(
     fight_radius: f32,
     spots: &[(glam::Vec3, Instant)],
 ) -> bool {
-    let close =
-        me.truncate().distance(at.truncate()) <= LOOT_NEAR && (me.z - at.z).abs() <= SAME_FLOOR;
-    close || (me.distance(at) <= fight_radius && near_a_kill(at, spots))
+    corpse_within_reach(me, at) || (me.distance(at) <= fight_radius && near_a_kill(at, spots))
+}
+
+/// Whether a body at `at` lies close enough to `me` to be emptied from
+/// where it stands: near on the map and on the same floor. See
+/// [`corpse_is_ours`], where the two measures are explained.
+fn corpse_within_reach(me: glam::Vec3, at: glam::Vec3) -> bool {
+    me.truncate().distance(at.truncate()) <= LOOT_NEAR && (me.z - at.z).abs() <= SAME_FLOOR
 }
 
 /// How long the next fight waits on an answer about whose kill a far
@@ -904,6 +909,37 @@ pub(crate) const CORPSE_URGENT: Duration = Duration::from_secs(75);
 /// that leaves a body.
 const CORPSE_REACH: f32 = 2.5;
 
+/// How far a character may drift from a body it already has open and
+/// still walk back to it holding it (see `Client::autoplay_loot`).
+///
+/// Generous, because the drift is not the character's doing: a dodge, a
+/// knock-back or a fight that came to it moves it several metres in a
+/// frame, and the body is still well inside the twenty the looting calls
+/// its own ([`LOOT_NEAR`]). Further off than this it has really gone,
+/// and the body is shut and walked back to like any other.
+const HOLD_ON_WITHIN: f32 = CORPSE_REACH * 4.0;
+
+/// Whether a character `away` metres from the body it has open walks
+/// back to it still holding it, rather than shutting it and starting
+/// again (see [`HOLD_ON_WITHIN`]).
+fn still_holding_at(away: f32) -> bool {
+    away <= HOLD_ON_WITHIN
+}
+
+/// How long a mate's claim on a body is believed (see
+/// [`TeamView::working`]). A claimant that stalled, died or was dragged
+/// into a fight must not hold a body for the whole five minutes it lies
+/// there.
+const CLAIM_STALE: Duration = Duration::from_secs(20);
+
+/// How long a newly fallen body is settled by the tie-break rather than
+/// by the claims (see [`TeamView::opens_first`]).
+///
+/// A claim is said every half second (`ac_plugin::team::SAY_EVERY`) and
+/// heard a frame later; a body is chosen within a tick of falling. A
+/// second covers the round trip, and after it the claims are the truth.
+const CLAIM_SETTLE: Duration = Duration::from_secs(1);
+
 /// How far from its leader a follower keeping `keep` metres may stray
 /// before following comes before everything else.
 pub fn follow_break(keep: f32) -> f32 {
@@ -956,6 +992,13 @@ pub struct Mate {
     pub wants: Vec<String>,
     /// Targets it has already debuffed.
     pub debuffed: Vec<u32>,
+    /// The body it has open or is walking to, and how long it has been
+    /// at that one: its claim on it. The others leave a claimed body
+    /// alone (see [`TeamView::working`]). The age travels with the
+    /// claim because it is the claimant's own clock that says whether
+    /// the claim is still good, not the clock of whoever reads it.
+    pub looting: Option<u32>,
+    pub looting_for: Duration,
     /// True for the one that picks the targets.
     pub leader: bool,
     /// Its Life Magic as it stands, buffs counted: what decides who
@@ -1156,6 +1199,52 @@ impl TeamView {
     /// Whether anyone has already landed the debuffs on `target`.
     pub fn debuffed(&self, target: u32) -> bool {
         self.mates.iter().any(|m| m.debuffed.contains(&target))
+    }
+
+    /// Whether one of the others has the body `guid` open or is on its
+    /// way to it.
+    ///
+    /// The server hands a container to one viewer and refuses everyone
+    /// else outright (ACE `Container.CheckUseRequirements`), so a body
+    /// two characters want is a body one of them empties and the other
+    /// asks about until it rots. Nine characters standing on one tile
+    /// see the same bodies and rank them by the same rule, so without
+    /// this they all open the same one: a nine-character run opened 41
+    /// bodies 1,386 times, against 2.75 times each for one character
+    /// hunting alone.
+    ///
+    /// A claim goes stale ([`CLAIM_STALE`]): one that never did would
+    /// let a claimant that stalled or died lock a body for its whole
+    /// life.
+    pub fn working(&self, guid: u32) -> bool {
+        self.mates
+            .iter()
+            .any(|m| m.looting == Some(guid) && m.looting_for < CLAIM_STALE)
+    }
+
+    /// Which character opens the body at `at` first, `me` being this
+    /// one's player guid: the lowest guid of those standing over it and
+    /// not already holding another body.
+    ///
+    /// This is only for the moment before a claim can have reached the
+    /// board -- the word goes out every half second and a body is
+    /// chosen within a tick of falling -- and in that moment the fleet
+    /// needs an answer every session reaches on its own. The lowest
+    /// guid is such an answer: all of them work it out of the same
+    /// roster, so there is nothing to negotiate and nothing to vote on,
+    /// which is how the leader is settled too (`ac_plugin::team`).
+    pub fn opens_first(&self, at: glam::Vec3, me: u32) -> u32 {
+        self.mates
+            .iter()
+            // Only the ones that would open it: playing on their own,
+            // alive, in the world, standing over it, and not already at
+            // another body.
+            .filter(|m| m.autoplay && m.health > 0.0 && m.guid != 0 && m.looting.is_none())
+            .filter(|m| corpse_within_reach(m.world, at))
+            .map(|m| m.guid)
+            .chain(std::iter::once(me))
+            .min()
+            .unwrap_or(me)
     }
 
     /// The mate nearest `me` that is short of something we could hand
@@ -1830,6 +1919,52 @@ impl Autoplay {
     ) -> bool {
         self.corpse_waiting(guid, now, room)
             && corpse_is_ours(me, at, self.config.fight.radius, &self.kill_spots)
+    }
+
+    /// The body this character is working and how long it has been at
+    /// it: the one it has open, else the one it is walking to. This is
+    /// what it tells the others so they leave that body alone (see
+    /// [`TeamView::working`]).
+    ///
+    /// The walk counts, not just the open. Nine characters that all
+    /// walk to one body and race at the far end of the walk have wasted
+    /// the walk as well as the open.
+    pub fn corpse_claim(&self, now: Instant) -> Option<(u32, Duration)> {
+        self.corpse
+            .map(|(guid, since, ..)| (guid, since))
+            .or_else(|| self.walking_to.map(|w| (w.guid, w.started)))
+            .map(|(guid, since)| (guid, now.saturating_duration_since(since)))
+    }
+
+    /// When the body `guid` first came into sight, or `now` for one
+    /// never noted (see [`Autoplay::corpse_seen`]).
+    fn corpse_first_seen(&self, guid: u32, now: Instant) -> Instant {
+        self.corpse_seen
+            .iter()
+            .find(|(g, _)| *g == guid)
+            .map_or(now, |(_, t)| *t)
+    }
+
+    /// Whether the body `guid`, lying at `at`, is this character's to
+    /// open or one of the others' -- `me` being this character's player
+    /// guid. Asked of every body the character is owed, by the looting
+    /// and by what holds the next fight alike, so the two cannot come
+    /// to disagree (see [`Autoplay::corpse_owed`]).
+    ///
+    /// A character alone answers yes to everything it is owed: with
+    /// nobody on the board there is nothing to divide, and a body its
+    /// pet killed is still its own.
+    pub(crate) fn ours_to_open(&self, guid: u32, at: glam::Vec3, me: u32, now: Instant) -> bool {
+        if self.team.mates.is_empty() {
+            return true;
+        }
+        if self.team.working(guid) {
+            return false;
+        }
+        // Newly fallen, so nobody's claim can have reached the board
+        // yet: the tie-break says whose it is until it has.
+        let seen = self.corpse_first_seen(guid, now);
+        now.saturating_duration_since(seen) >= CLAIM_SETTLE || self.team.opens_first(at, me) == me
     }
 
     /// Set aside a corpse the character cannot walk to. It is left
@@ -2956,6 +3091,49 @@ impl Client {
         }
     }
 
+    /// Press on with a walk to the corpse `guid`, called `name`, lying
+    /// at `spot` and `away` metres off. True while the walk is getting
+    /// somewhere; false once it cannot arrive -- what becomes of the
+    /// body then is for the caller to say, because a body being walked
+    /// to and a body already in hand end differently.
+    fn walk_to_corpse(
+        &mut self,
+        guid: u32,
+        name: &str,
+        spot: glam::Vec3,
+        away: f32,
+        now: Instant,
+    ) -> bool {
+        // The walk ends any journey under way, and it is a detour the
+        // character comes back from: a town run picks its walk to the
+        // counter up again once the body is dealt with (see
+        // `Client::journey_broken_off`). +Verity's run did not, and
+        // gave up 224 m short of Shopkeeper Renald the Elder.
+        self.interrupt_travel("walking to a corpse");
+        // Well inside the radius rather than on its edge: the last
+        // metre of a walk wanders, and stopping on the line means
+        // stepping back off it again.
+        let did = self.head_for(spot, CORPSE_REACH / 2.0, "the corpse");
+        // Said once for the walk, not once a frame: the distance
+        // changes every tick and the log is not a tape measure.
+        if self.autoplay.walking_to.map(|w| w.guid) != Some(guid) {
+            self.autoplay.walking_to = Some(CorpseWalk::new(guid, away, now));
+            self.autoplay.say(
+                Doing::Looting,
+                format!("walking to {name} ({} m)", away.round()),
+            );
+        }
+        // A route being followed is a way there, whatever the steering
+        // said before it had one.
+        let no_way = self.steering.no_way() && self.steering.route.is_none();
+        did.fine()
+            && self
+                .autoplay
+                .walking_to
+                .as_mut()
+                .is_some_and(|w| w.goes_on(away, no_way, now))
+    }
+
     /// A weapon waiting for empty hands is taken up as soon as they
     /// are: a bow cannot be drawn with a shield up, and a two-handed
     /// weapon needs both. Runs every tick and never claims one.
@@ -3146,17 +3324,52 @@ impl Client {
             // own skills are (see `corpse_now`).
             let at = self.corpse_now(guid, &items, &profile, since, now);
             let next = self.autoplay.loot_run.step(&at, now);
+            // Any walk back to this body is over the moment the rules
+            // stop asking for one (see the branch below).
+            if !matches!(
+                next.act,
+                Some(ac_loot::Act::Approach) | Some(ac_loot::Act::Open)
+            ) {
+                self.stop_walking_to_loot();
+            }
             match next.act {
                 Some(ac_loot::Act::Approach) | Some(ac_loot::Act::Open) => {
-                    // The walking and the opening are done below, when a
-                    // corpse is chosen; being asked for them here means
-                    // the character is out of reach of a corpse it has
-                    // open. Nothing here walks, so waiting did nothing
-                    // but run out the give-up clock and write the body
-                    // off. It is shut and put down, not written off or
-                    // set aside, so the next turn walks back to it and
-                    // opens it again.
-                    tracing::info!("autoplay: corpse {guid:#010x} is out of reach; going back");
+                    // Out of reach of a body it is holding: the
+                    // character drifted while it worked, or a fight came
+                    // to it and moved it.
+                    //
+                    // The body is still open on the server, whatever the
+                    // distance. ACE shuts a container when its viewer
+                    // stops viewing it, when that viewer uses another,
+                    // or on the container's own reset -- and a corpse
+                    // has no reset interval. Shutting it here therefore
+                    // gave a body the character was already holding back
+                    // to everyone else standing over it, and the walk
+                    // back had to win it again: fifty times in one
+                    // nine-character run.
+                    //
+                    // So walk back still holding it, and put it down
+                    // only once the character has really gone
+                    // ([`HOLD_ON_WITHIN`]) or the walk cannot arrive.
+                    let spot = self.world.objects.get(&guid).and_then(|o| o.world_pos());
+                    let setting_off = self.autoplay.walking_to.map(|w| w.guid) != Some(guid);
+                    let going_back = still_holding_at(at.away)
+                        && spot.is_some_and(|spot| {
+                            self.walk_to_corpse(guid, &at.name, spot, at.away, now)
+                        });
+                    if going_back {
+                        if setting_off {
+                            tracing::info!(
+                                "autoplay: corpse {guid:#010x} is {} m off; walking back to it \
+                                 without shutting it",
+                                at.away.round()
+                            );
+                        }
+                        return true;
+                    }
+                    tracing::info!(
+                        "autoplay: corpse {guid:#010x} is out of reach for good; letting it go"
+                    );
                     self.close_container();
                     self.autoplay.let_go_of_corpse();
                     self.stop_walking_to_loot();
@@ -3267,6 +3480,7 @@ impl Client {
         let seen_at: std::collections::BTreeMap<u32, Instant> =
             self.autoplay.corpse_seen.iter().copied().collect();
         let room = self.room_for_loot();
+        let my_guid = self.world.player_guid.unwrap_or(0);
         let corpse = self
             .world
             .objects
@@ -3275,11 +3489,15 @@ impl Client {
             // Not emptied, not set aside, something there is room for, and
             // close by on this floor or where one of this character's kills
             // fell -- which a caster makes from well past twenty metres.
+            // And not one of the others' to open: nine characters that
+            // rank the bodies by the same rule choose the same one, and
+            // the server gives it to one of them (see
+            // [`Autoplay::ours_to_open`]).
             .filter_map(|o| {
                 let p = o.world_pos()?;
-                self.autoplay
-                    .corpse_owed(o.guid, p, me, now, room)
-                    .then(|| (p.distance(me), o))
+                (self.autoplay.corpse_owed(o.guid, p, me, now, room)
+                    && self.autoplay.ours_to_open(o.guid, p, my_guid, now))
+                .then(|| (p.distance(me), o))
             })
             // Another player's corpse is theirs: a teammate's gear taken
             // off their body is not loot, whatever the filters say. Our
@@ -3323,36 +3541,7 @@ impl Client {
         // Stand over it first (see [`CORPSE_REACH`]).
         if away > CORPSE_REACH {
             if let Some(at) = self.world.objects.get(&guid).and_then(|o| o.world_pos()) {
-                // The walk ends any journey under way, and it is a detour
-                // the character comes back from: a town run picks its walk
-                // to the counter up again once the body is dealt with (see
-                // `Client::journey_broken_off`). +Verity's run did not, and
-                // gave up 224 m short of Shopkeeper Renald the Elder.
-                self.interrupt_travel("walking to a corpse");
-                // Well inside the radius rather than on its edge: the
-                // last metre of a walk wanders, and stopping on the
-                // line means stepping back off it again.
-                let did = self.head_for(at, CORPSE_REACH / 2.0, "the corpse");
-                // Said once for the walk, not once a frame: the
-                // distance changes every tick and the log is not a
-                // tape measure.
-                if self.autoplay.walking_to.map(|w| w.guid) != Some(guid) {
-                    self.autoplay.walking_to = Some(CorpseWalk::new(guid, away, now));
-                    self.autoplay.say(
-                        Doing::Looting,
-                        format!("walking to {name} ({} m)", away.round()),
-                    );
-                }
-                // A route being followed is a way there, whatever the
-                // steering said before it had one.
-                let no_way = self.steering.no_way() && self.steering.route.is_none();
-                let goes_on = did.fine()
-                    && self
-                        .autoplay
-                        .walking_to
-                        .as_mut()
-                        .is_some_and(|w| w.goes_on(away, no_way, now));
-                if !goes_on {
+                if !self.walk_to_corpse(guid, &name, at, away, now) {
                     // Through a floor or behind a wall, the walk never
                     // ends by itself, and it held the looting and the
                     // next fight until the body rotted. Set it aside and
@@ -4242,16 +4431,21 @@ impl Client {
         let Some(me) = self.player.as_ref().map(|p| p.world_position()) else {
             return false;
         };
+        let my_guid = self.world.player_guid.unwrap_or(0);
         self.world
             .objects
             .values()
             .filter(|o| o.object_desc_flags & ac_world::object_desc_flags::CORPSE != 0)
             // One that would not open, or cannot be walked to, is set
             // aside for a while, and waiting on it would stop the
-            // fighting altogether.
+            // fighting altogether. So is one a mate has claimed: the
+            // looting will not choose it, and the fight must not be held
+            // for a body this character is never going to open.
             .filter(|o| {
-                o.world_pos()
-                    .is_some_and(|at| self.autoplay.corpse_owed(o.guid, at, me, now, room))
+                o.world_pos().is_some_and(|at| {
+                    self.autoplay.corpse_owed(o.guid, at, me, now, room)
+                        && self.autoplay.ours_to_open(o.guid, at, my_guid, now)
+                })
             })
             .any(|o| !self.corpse_is_someone_elses(&o.name))
     }
@@ -7511,6 +7705,152 @@ mod tests {
         // Where a kill of its own fell it is still its own: whether it
         // can be walked to is for the walk to find out.
         assert!(corpse_is_ours(me, below, 60.0, &[(below, now)]));
+    }
+
+    /// One of the others, standing at `at`, with `looting` in hand for
+    /// `held`.
+    fn looter(guid: u32, at: glam::Vec3, looting: Option<u32>, held: Duration) -> Mate {
+        Mate {
+            name: format!("Bryn{guid:02}"),
+            guid,
+            world: at,
+            health: 1.0,
+            autoplay: true,
+            looting,
+            looting_for: held,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_body_one_of_the_others_has_is_left_to_them() {
+        // Nine characters in one huddle rank the bodies by the same
+        // rule and so choose the same one: 1,386 opens for 41 bodies in
+        // one run, because the server hands a container to one viewer
+        // and refuses everyone else. Whoever has a body says so, and
+        // the rest take another.
+        let t0 = Instant::now();
+        let (a, b) = (0x8000_0001, 0x8000_0002);
+        let (here, there) = (glam::Vec3::ZERO, glam::Vec3::new(4.0, 0.0, 0.0));
+        let me = 0x5000_0001;
+        // Both fell a while back, so the tie-break has had its moment
+        // and the claims are what speak.
+        let mut ap = Autoplay {
+            corpse_seen: vec![(a, t0), (b, t0)],
+            ..Default::default()
+        };
+        let now = t0 + CLAIM_SETTLE;
+
+        // Alone on the board, nothing changes: both are ours.
+        assert!(ap.ours_to_open(a, here, me, now));
+        assert!(ap.ours_to_open(b, there, me, now));
+
+        // One mate is at the first body, another at nothing.
+        ap.team.mates = vec![
+            looter(2, here, Some(a), Duration::ZERO),
+            looter(3, here, None, Duration::ZERO),
+        ];
+        assert!(
+            !ap.ours_to_open(a, here, me, now),
+            "raced a mate for a body"
+        );
+        assert!(ap.ours_to_open(b, there, me, now), "left a free body lying");
+
+        // A claim goes stale. A mate that stalled, died or was dragged
+        // into a fight over a body must not hold it for the five
+        // minutes it lies there.
+        ap.team.mates = vec![looter(2, here, Some(a), CLAIM_STALE)];
+        assert!(
+            ap.ours_to_open(a, here, me, now),
+            "a stale claim still held"
+        );
+        ap.team.mates = vec![looter(
+            2,
+            here,
+            Some(a),
+            CLAIM_STALE - Duration::from_millis(1),
+        )];
+        assert!(!ap.ours_to_open(a, here, me, now));
+    }
+
+    #[test]
+    fn the_lowest_guid_opens_a_body_that_has_only_just_fallen() {
+        // A claim is said every half second and a body is chosen within
+        // a tick of falling, so for that first moment there is no claim
+        // to read and the nine have to agree without one. Every session
+        // works the same answer out of the same roster: the lowest
+        // player guid opens it, the rest stand off.
+        let t0 = Instant::now();
+        let body = 0x8000_0001;
+        let at = glam::Vec3::ZERO;
+        let fleet: Vec<u32> = (0..9).map(|i| 0x5000_0010 + i).collect();
+        let first = fleet[0];
+        for &me in &fleet {
+            let mates = fleet
+                .iter()
+                .filter(|g| **g != me)
+                .map(|g| looter(*g, at, None, Duration::ZERO))
+                .collect();
+            let ap = Autoplay {
+                corpse_seen: vec![(body, t0)],
+                team: TeamView {
+                    mates,
+                    leader: false,
+                },
+                ..Default::default()
+            };
+            assert_eq!(ap.team.opens_first(at, me), first, "disagreed about who");
+            assert_eq!(
+                ap.ours_to_open(body, at, me, t0),
+                me == first,
+                "{me:#010x} did not stand off"
+            );
+            // Once the board has had time to catch up the claims are
+            // the truth, and whoever has not been told otherwise goes
+            // ahead.
+            assert!(ap.ours_to_open(body, at, me, t0 + CLAIM_SETTLE));
+        }
+
+        // Only the ones that would open it count. A mate played by
+        // hand, a dead one, one already at another body and one across
+        // the field all leave it to us, whatever their guid.
+        let mine = fleet[8];
+        let field_away = glam::Vec3::new(LOOT_NEAR + 5.0, 0.0, 0.0);
+        let view = TeamView {
+            mates: vec![
+                Mate {
+                    autoplay: false,
+                    ..looter(first, at, None, Duration::ZERO)
+                },
+                Mate {
+                    health: 0.0,
+                    ..looter(first + 1, at, None, Duration::ZERO)
+                },
+                looter(first + 2, at, Some(0x8000_0002), Duration::ZERO),
+                looter(first + 3, field_away, None, Duration::ZERO),
+            ],
+            leader: false,
+        };
+        assert_eq!(view.opens_first(at, mine), mine);
+    }
+
+    #[test]
+    fn a_body_a_step_or_two_off_is_walked_back_to_and_not_let_go_of() {
+        // The server does not mind the distance: a corpse has no reset
+        // interval, so it stays open until its viewer shuts it. Shutting
+        // one the character was already holding handed it back to the
+        // other eight and the walk back had to win it again -- fifty
+        // times in one run.
+        //
+        // A dodge or a knock-back moves a character several metres in a
+        // frame, and that is the drift this covers.
+        assert!(still_holding_at(CORPSE_REACH + 0.5), "no room to drift");
+        assert!(still_holding_at(HOLD_ON_WITHIN));
+        // Really gone: shut it and walk back to it like any other body.
+        assert!(!still_holding_at(HOLD_ON_WITHIN + 0.5));
+        // Never as far as the twenty metres the looting calls its own,
+        // or a body held would be one nothing else could ever have.
+        assert!(!still_holding_at(LOOT_NEAR));
     }
 
     #[test]

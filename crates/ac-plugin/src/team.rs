@@ -264,6 +264,13 @@ pub fn describe(client: &ac_client::Client, session: usize) -> Option<Mate> {
         .fellowship
         .as_ref()
         .is_some_and(|f| f.members.iter().any(|m| m.guid == guid));
+    // The body this one is working, so the others leave it alone. Its
+    // age goes with it: a claim is only believed while it is fresh, and
+    // it is this character's clock that says how old it is.
+    let (looting, looting_for) = client
+        .autoplay
+        .corpse_claim(Instant::now())
+        .map_or((None, Duration::ZERO), |(g, held)| (Some(g), held));
     Some(Mate {
         name,
         guid,
@@ -276,6 +283,8 @@ pub fn describe(client: &ac_client::Client, session: usize) -> Option<Mate> {
         in_fellowship,
         wants: client.autoplay.wants.clone(),
         debuffed: client.autoplay.debuffed.clone(),
+        looting,
+        looting_for,
         leader: false,
         life_magic: client.life_magic(),
         can_soften: client.can_soften(),
@@ -400,6 +409,35 @@ mod tests {
             guid,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn a_mate_that_says_it_has_a_body_is_left_to_it() {
+        // The claim travels the same way everything else about a mate
+        // does: said on the blackboard, heard into the roster, handed
+        // to the rules. Everyone else's looting reads it and takes
+        // another body (`TeamView::working`).
+        let now = Instant::now();
+        let body = 0x8000_0001;
+        let me = mate("Reborn", 1);
+        let theirs = Mate {
+            looting: Some(body),
+            looting_for: Duration::from_secs(2),
+            ..mate("Brynna", 2)
+        };
+        // Over the bus it goes as JSON, and it has to come back whole.
+        let said = serde_json::to_value(&theirs).expect("a mate is JSON");
+        let heard: Mate = serde_json::from_value(said).expect("and comes back");
+        assert_eq!(heard.looting, Some(body));
+        assert_eq!(heard.looting_for, theirs.looting_for);
+
+        let mut r = Roster::default();
+        r.hear("other", 0, heard, now);
+        assert!(r.view_for(&me).working(body));
+        assert!(!r.view_for(&me).working(0x8000_0002), "claimed every body");
+        // Gone quiet: gone, and the body is anyone's again.
+        r.forget_quiet(now + FORGET_AFTER + Duration::from_secs(1));
+        assert!(!r.view_for(&me).working(body));
     }
 
     #[test]

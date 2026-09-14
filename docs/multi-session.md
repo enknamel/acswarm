@@ -295,6 +295,21 @@ than two epics is `epics>2`. A rule the parser cannot make sense of is
 shown in red with what is wrong (`Query::check`); it still runs, meaning
 as much as it can.
 
+**Who opens which body.** The server gives an open corpse to one
+player and refuses everyone else, so a body two characters want is a
+body one empties and the other asks about until it rots: nine
+characters hunting one spot opened 41 bodies 1,386 times, against 2.75
+opens a body for one character alone. So each session says which body
+it has open or is walking to, and the others leave that one alone and
+take another. A claim is only believed for twenty seconds, so a
+character that stalled or died over a body does not hold it for the
+five minutes it lies there. A body that has only just fallen is not
+claimed by anyone yet: for its first second the lowest player guid
+standing over it opens it and the rest stand off, which every session
+works out of the same roster without asking anyone. A character alone,
+or with the team rules off, sees none of this and takes every body it
+is owed.
+
 **Who salvages.** Every session on the team says its Salvaging skill
 (buffs counted) and whether it carries an Ust, and everyone reaches the
 same answer: the highest Salvaging with an Ust, ties to the name that
