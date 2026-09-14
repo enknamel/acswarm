@@ -7,15 +7,19 @@
 //! [`Client::autoplay_spend_xp`]); the other two when nothing more
 //! pressing is going on (see [`Client::autoplay_grow`]):
 //!
-//! 1. **Spend experience.** The unassigned pool is spent a rank at a
-//!    time, the way a player would: the skills it fights with first (the
-//!    weapon in hand, the defences, the magic it casts), the attributes
-//!    those skills are built from next, then the rest. Each candidate
-//!    rank is priced from the XpTable and weighed by how much it matters,
-//!    and the best value is bought; one rank at a time, no more often
-//!    than the server can answer, in the middle of a walk or a fight --
-//!    except a rank that raises a maximum, which waits for the fight to
-//!    be over.
+//! 1. **Spend experience.** The unassigned pool is spent the way a
+//!    player would: the skills it fights with first (the weapon in hand,
+//!    the defences, the magic it casts), the attributes those skills are
+//!    built from next, then the rest. Each candidate rank is priced from
+//!    the XpTable and weighed by how much it matters, and the best value
+//!    is bought -- a rank to a message for what a kill brings in, and for
+//!    a large pool as many ranks of it as buying a rank at a time would
+//!    have given it, so the pool is spread as far in a few messages. When
+//!    the best buy costs more than the pool holds, the pool saves for it
+//!    rather than going on a worse buy that fits. One message at a time,
+//!    no more often than the server can answer, in the middle of a walk or
+//!    a fight -- except a rank that raises a maximum, which waits for the
+//!    fight to be over with its share of the pool kept for it.
 //! 2. **Go where the monsters are.** When nothing has been worth fighting
 //!    for a while, a hunting ground that suits the character's level is
 //!    picked from `ac_world::hunting` (the nearest, leaving out the one
@@ -50,11 +54,15 @@ use crate::logistics::{self, Stage, Supplies};
 use crate::Client;
 use ac_world::{equip, item_type, object_desc_flags};
 
-/// One rank is bought at most this often.
+/// One raise -- a rank, or a batch of them -- is sent at most this often.
 const RAISE_EVERY: Duration = Duration::from_millis(700);
-/// After a rank is bought, nothing more is spent until the server has
+/// After a raise is sent, nothing more is spent until the server has
 /// answered with the new pool, or this long has passed.
 const RAISE_SETTLE: Duration = Duration::from_secs(3);
+/// A pool worth fewer than this many of the chosen rank buys that one
+/// rank, as it always did; a larger one buys several to a message (see
+/// [`batch_raise`]).
+const BATCH_FROM: i64 = 10;
 /// When nothing was affordable, the pool is looked at again this often
 /// (or as soon as it changes).
 const XP_CHECK_EVERY: Duration = Duration::from_secs(20);
@@ -212,6 +220,18 @@ pub enum Raise {
     Vital(usize),
 }
 
+impl Raise {
+    /// What the stat is called.
+    pub fn name(self) -> &'static str {
+        use crate::advance::{ATTRIBUTE_NAMES, VITAL_NAMES};
+        match self {
+            Raise::Skill(id) => ac_world::stats::skill_name(id),
+            Raise::Attribute(i) => ATTRIBUTE_NAMES.get(i).copied().unwrap_or("an attribute"),
+            Raise::Vital(i) => VITAL_NAMES.get(i).copied().unwrap_or("a vital"),
+        }
+    }
+}
+
 /// A rank on offer: what it is, what it costs, and how much it matters
 /// (1 for the skill the character fights with, less for the rest).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -221,21 +241,187 @@ pub struct Offer {
     pub weight: f32,
 }
 
-/// The rank worth buying with `xp` to spend: of the affordable ones,
-/// the cheapest for what it is worth. A cheap rank of a minor skill is
-/// bought before a dear rank of the main one, and the main one catches
-/// up as the minor ones get dear; nothing is bought when nothing can be
-/// afforded.
+/// The better buy of two ranks, each a cost and a weight: the cheaper for
+/// what it is worth, and of two as good, the cheaper outright.
+fn by_value(a: (u32, f32), b: (u32, f32)) -> std::cmp::Ordering {
+    (a.0 as f32 / a.1)
+        .total_cmp(&(b.0 as f32 / b.1))
+        .then(a.0.cmp(&b.0))
+}
+
+/// Of ranks each a cost and a weight, the best buy (see [`by_value`]),
+/// with what it costs. A rank that matters not at all is never one.
+fn best_buy<T>(ranks: impl Iterator<Item = (T, u32, f32)>) -> Option<(T, u32)> {
+    ranks
+        .filter(|r| r.2 > 0.0)
+        .min_by(|a, b| by_value((a.1, a.2), (b.1, b.2)))
+        .map(|(what, cost, _)| (what, cost))
+}
+
+/// The rank worth buying with `xp` to spend: the cheapest for what it is
+/// worth, and nothing while the pool is short of it. A cheap rank of a
+/// minor skill is bought before a dear rank of the main one, and the main
+/// one catches up as the minor ones get dear.
+///
+/// It catches up only because the pool saves for it. Of the affordable
+/// ranks alone, a character that had spent a large pool bought a minor
+/// rank the moment the kills after it covered one: ten billion left
+/// War Magic's next rank at 110 million and Arcane Lore's at 17 million,
+/// worth about the same for what they are, and two billion more a kill at
+/// a time went on Arcane Lore, Jump, Loyalty and the like, ten ranks each,
+/// while War, Life, Focus, Self and Health got none.
 pub fn choose_raise(offers: &[Offer], xp: i64) -> Option<Raise> {
-    offers
-        .iter()
-        .filter(|o| o.weight > 0.0 && (o.cost as i64) <= xp)
-        .min_by(|a, b| {
-            (a.cost as f32 / a.weight)
-                .total_cmp(&(b.cost as f32 / b.weight))
-                .then(a.cost.cmp(&b.cost))
-        })
-        .map(|o| o.raise)
+    best_buy(offers.iter().map(|o| (o.raise, o.cost, o.weight)))
+        .filter(|&(_, cost)| i64::from(cost) <= xp)
+        .map(|(raise, _)| raise)
+}
+
+/// A stat in the running for the pool: the whole of its ladder, not only
+/// its next rank, how much a rank of it matters, and whether it may be
+/// bought now.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Climb<'a> {
+    pub raise: Raise,
+    pub ladder: crate::advance::Ladder<'a>,
+    pub weight: f32,
+    /// Not to be bought for now -- a maximum in the middle of a fight, or
+    /// a stat whose last raise the server has not answered -- but its
+    /// share of the pool is kept for it all the same.
+    pub held: bool,
+}
+
+/// The rank each stat of `field` is at once `xp` is spent on paper a rank
+/// at a time, as [`choose_raise`] spends it: the best buy each time, until
+/// the best buy costs more than is left.
+///
+/// Where it stops is the only thing the pool decides. The order of the
+/// ranks is set by their prices and weights alone, so a pool spent in
+/// parts -- some of the stats bought, the rest still to come, or answers
+/// that have not arrived yet -- comes to the same ranks as the whole of it
+/// spent at once, and the parts never add up to more than the pool.
+fn plan(field: &[Climb], xp: i64) -> Vec<u32> {
+    let mut at: Vec<u32> = field.iter().map(|c| c.ladder.ranks).collect();
+    let mut left = xp;
+    loop {
+        let best = best_buy(
+            field
+                .iter()
+                .zip(&at)
+                .enumerate()
+                .filter_map(|(i, (c, &rank))| Some((i, c.ladder.step(rank)?, c.weight))),
+        );
+        match best {
+            Some((i, cost)) if i64::from(cost) <= left => {
+                left -= i64::from(cost);
+                at[i] += 1;
+            }
+            _ => return at,
+        }
+    }
+}
+
+/// Ranks of one stat bought in one message, and the experience they cost.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Batch {
+    pub ranks: u32,
+    pub xp: u32,
+}
+
+/// A raise sent to the server and not yet answered.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Pending {
+    raise: Raise,
+    batch: Batch,
+    /// Where the stat stood when it was sent (see [`Raise::standing`]).
+    /// The answer moves it. The pool alone says nothing: a kill moves that
+    /// too, and a stat sized again from a record the answer has not
+    /// reached yet is bought twice.
+    was: Option<(u32, u32)>,
+    /// When the message went out, which is not when it was queued: it
+    /// goes on the wire at the top of the next tick, and a round of nine
+    /// headless characters took four and a half seconds on the local
+    /// server. Stamped by the first look at it after that.
+    since: Option<Instant>,
+}
+
+impl Raise {
+    /// The stat's ranks and the experience spent on it, as the server last
+    /// said. None for a skill not on the sheet.
+    fn standing(self, stats: &ac_world::stats::PlayerStats) -> Option<(u32, u32)> {
+        match self {
+            Raise::Skill(id) => stats.skill(id).map(|s| (u32::from(s.ranks), s.xp)),
+            Raise::Attribute(i) => stats.attributes.get(i).map(|a| (a.ranks, a.xp)),
+            Raise::Vital(i) => stats.vitals.get(i).map(|v| (v.ranks, v.xp)),
+        }
+    }
+}
+
+/// What to raise in one message, and by how many ranks, with `xp` to spend
+/// and `field` every stat in the running for it.
+///
+/// ACE takes the experience for any number of ranks in one message and
+/// puts all of it on the stat, and a rank to a message is hopeless for a
+/// large pool: nine characters granted ten to fifty billion each on the
+/// local server bought about a rank a second, and the one given ten
+/// billion spent a thousandth of a percent of it in five minutes. But a
+/// large pool must still be spread the way [`choose_raise`] spreads it,
+/// over the skills and bars that matter, not poured into whichever stat
+/// happened to be the best buy when it came in.
+///
+/// So the whole pool is spent on paper exactly as it would be a rank at a
+/// time (see [`plan`]), and the best buy of the stats that paper run
+/// raises is given the ranks it gives it, no more. No stat goes past the
+/// rank buying one at a time would have left it at; each of the others is
+/// bought up to its own in a message of its own when its turn comes. A
+/// pool of any size is spread as it always was, and spent in about as
+/// many messages as there are stats: ten billion in two dozen. Two
+/// simpler rules were tried on the real XpTable and left behind. Buying
+/// the best buy only while it stays the best value is a rank a message
+/// again as soon as the stats are level, and spent nothing of ten billion
+/// in a minute; capping a message at a share of the pool ran the first
+/// stats bought sixty ranks ahead of the rest.
+///
+/// A stat held back for now (see [`Climb::held`]) is spent on in the paper
+/// run like any other, and never sent. Its share waits for it, and a stat
+/// the run gives nothing more is not sold a rank anyway: a caster given
+/// ten billion in the middle of a fight was, on paper, a rank a message at
+/// up to a hundred million, until Self, Health and Mana came out of the
+/// fight ninety ranks short.
+///
+/// A pool worth fewer than [`BATCH_FROM`] of the chosen stat's next rank
+/// buys the one rank, as it always did: what a kill brings in goes a rank
+/// a message. A batch never goes past the top rank (ACE refuses an amount
+/// past the experience left to the top outright, rather than trimming
+/// it), never costs more than the pool, and so never more than the `u32`
+/// a message carries, which is what the table's entries are. The paper
+/// run is a step per rank: a few thousand at most, over a few dozen
+/// stats, once a message.
+///
+/// None when the paper run raises nothing that may be bought now.
+pub fn batch_raise(field: &[Climb], xp: i64) -> Option<(Raise, Batch)> {
+    let planned = plan(field, xp);
+    let (c, to) = best_buy(
+        field
+            .iter()
+            .zip(planned)
+            .filter(|(c, to)| !c.held && *to > c.ladder.ranks)
+            .filter_map(|(c, to)| Some(((c, to), c.ladder.step(c.ladder.ranks)?, c.weight))),
+    )
+    .map(|((c, to), first)| {
+        let to = if xp < i64::from(first) * BATCH_FROM {
+            c.ladder.ranks + 1
+        } else {
+            to
+        };
+        (c, to)
+    })?;
+    Some((
+        c.raise,
+        Batch {
+            ranks: to - c.ladder.ranks,
+            xp: c.ladder.cost_to(to)?,
+        },
+    ))
 }
 
 /// Whether a rank raises the maximum of a vital: Health, Stamina or Mana
@@ -395,15 +581,15 @@ pub struct State {
     /// the log to the moments it changes.
     held_back: String,
     last_raise: Option<Instant>,
-    /// The pool as it stood when the last rank was bought, and when.
-    raise_pending: Option<(i64, Instant)>,
-    /// The pool at which nothing was affordable, and when that was seen.
-    nothing_at: Option<(i64, Instant)>,
-    /// The rank last asked for, so one the server would not sell can be
-    /// left alone.
-    last_pick: Option<Raise>,
-    /// Ranks the server would not sell, and when it was asked.
-    sulking: Vec<(Raise, Instant)>,
+    /// The raise last sent, until the server answers it or it is given up
+    /// on.
+    pending: Option<Pending>,
+    /// The pool at which nothing was worth buying, whether the character
+    /// was in a fight then, and when that was seen.
+    nothing_at: Option<(i64, bool, Instant)>,
+    /// Raises the server did not answer in time, and when they were given
+    /// up on: refused, or only late.
+    sulking: Vec<(Pending, Instant)>,
     /// What the character was last found short of, and when.
     needs_seen: Option<(Instant, Vec<Need>)>,
     /// How many times the character has walked about the ground it is
@@ -1323,10 +1509,11 @@ impl Client {
     /// Something always did. A character granted a hundred billion
     /// experience on the local server spent none of it in three minutes,
     /// because exploring had another room to walk to on every one of
-    /// those ticks. A rank needs no tick of its own: it is one message,
-    /// and the pacing keeps it to one at a time -- no more often than
+    /// those ticks. A raise needs no tick of its own: it is one message --
+    /// a rank, or for a large pool a batch of them (see [`batch_raise`])
+    /// -- and the pacing keeps it to one at a time: no more often than
     /// [`RAISE_EVERY`], nothing more until the server has answered or
-    /// [`RAISE_SETTLE`] has passed, and a rank it would not sell left
+    /// [`RAISE_SETTLE`] has passed, and a raise it would not sell left
     /// alone for [`SULK_FOR`].
     ///
     /// Nor does it wait for a fight to end. ACE takes a raise with no
@@ -1345,38 +1532,73 @@ impl Client {
         }
     }
 
-    /// Buy one rank if one is worth buying. True when one was.
+    /// Buy the rank worth buying -- with a large pool, as many of its
+    /// ranks as buying a rank at a time would give it -- in one message.
+    /// True when one was sent.
     fn grow_spend_xp(&mut self, now: Instant) -> bool {
         let xp = self.world.stats.available_xp;
         if xp <= 0 || self.world.stats.level <= 0 {
             return false;
         }
+        let stats = &self.world.stats;
         let st = &mut self.autoplay.growth;
-        if let Some((seen, when)) = st.raise_pending {
-            if xp == seen && now.duration_since(when) < RAISE_SETTLE {
-                return false;
-            }
-            // The pool did not move: the server would not sell that
-            // rank. Leave it alone for a while.
-            if xp == seen {
-                if let Some(pick) = st.last_pick.take() {
-                    tracing::info!("growth: the server did not take a raise of {pick:?}");
-                    st.sulking.push((pick, now));
+        // The raise last sent is answered when its stat moves.
+        if let Some(p) = st.pending {
+            if p.raise.standing(stats) != p.was {
+                st.pending = None;
+            } else {
+                match p.since {
+                    // Queued on the last look, and on the wire since the
+                    // top of this tick: its time starts now. Started when
+                    // it was queued, a round of nine headless characters
+                    // that took four and a half seconds gave up on nine
+                    // raises in the tick they were sent, and every one of
+                    // them landed a third of a second later.
+                    None => {
+                        st.pending = Some(Pending {
+                            since: Some(now),
+                            ..p
+                        });
+                        return false;
+                    }
+                    Some(since) if now.duration_since(since) < RAISE_SETTLE => return false,
+                    // No answer in time: refused, or only late. It is left
+                    // alone for a while, and keeps its share of the pool.
+                    Some(_) => {
+                        tracing::info!(
+                            "growth: no answer to a raise of {} ({} ranks for {} xp)",
+                            p.raise.name(),
+                            p.batch.ranks,
+                            p.batch.xp
+                        );
+                        st.sulking.push((p, now));
+                        st.pending = None;
+                    }
                 }
             }
-            st.raise_pending = None;
         }
-        st.sulking
-            .retain(|(_, t)| now.duration_since(*t) < SULK_FOR);
-        let st = &self.autoplay.growth;
+        // An answer that comes in late ends the wait; the rest wear off.
+        // Either can leave something to buy that was not there.
+        let sulks = st.sulking.len();
+        st.sulking.retain(|(p, since)| {
+            let landed = p.raise.standing(stats) != p.was;
+            if landed {
+                tracing::info!("growth: the raise of {} came in late", p.raise.name());
+            }
+            !landed && now.duration_since(*since) < SULK_FOR
+        });
+        if st.sulking.len() < sulks {
+            st.nothing_at = None;
+        }
         if st
             .last_raise
             .is_some_and(|t| now.duration_since(t) < RAISE_EVERY)
         {
             return false;
         }
-        if let Some((at, when)) = st.nothing_at {
-            if at == xp && now.duration_since(when) < XP_CHECK_EVERY {
+        let fighting = self.in_a_fight();
+        if let Some((at, was_fighting, when)) = self.autoplay.growth.nothing_at {
+            if at == xp && was_fighting == fighting && now.duration_since(when) < XP_CHECK_EVERY {
                 return false;
             }
         }
@@ -1391,55 +1613,61 @@ impl Client {
             .growth
             .sulking
             .iter()
-            .map(|(r, _)| *r)
+            .map(|(p, _)| p.raise)
             .collect();
+        let Ok(table) = self.assets.xp_table() else {
+            self.autoplay.growth.nothing_at = Some((xp, fighting, now));
+            return false;
+        };
         // A rank that raises a maximum waits for the fight to be over.
         // The fight under way is fought with what is left, which the rank
         // does not raise, and the fraction left drops as surely as it
         // would for a blow: a character with a large pool bought Health
         // between swings until it healed, mid-fight, health it had never
         // lost. Skills and the other attributes count at once, and go on
-        // being bought. A pool with only a maximum to buy is noted as
-        // having nothing, which the kill that ends the fight undoes by
-        // moving the pool.
-        let fighting = self.in_a_fight();
-        let offers: Vec<Offer> = self
+        // being bought. A stat whose raise went unanswered waits too. Both
+        // are held, not left out: the pool is spread over them all the
+        // same, and what is theirs waits for them (see [`batch_raise`]).
+        // A pool with nothing to buy but what is held is noted as having
+        // nothing until it moves or the fight ends.
+        let field: Vec<Climb> = self
             .raise_offers()
             .into_iter()
-            .filter(|o| !sulking.contains(&o.raise))
-            .filter(|o| !(fighting && raises_a_maximum(o.raise)))
+            .filter_map(|o| {
+                Some(Climb {
+                    raise: o.raise,
+                    ladder: self.raise_ladder(&table, o.raise)?,
+                    weight: o.weight,
+                    held: (fighting && raises_a_maximum(o.raise)) || sulking.contains(&o.raise),
+                })
+            })
             .collect();
-        let Some(pick) = choose_raise(&offers, xp) else {
-            self.autoplay.growth.nothing_at = Some((xp, now));
+        let Some((pick, batch)) = batch_raise(&field, xp) else {
+            self.autoplay.growth.nothing_at = Some((xp, fighting, now));
             return false;
         };
-        let (sent, what) = match pick {
-            Raise::Skill(id) => (
-                self.raise_skill(id),
-                ac_world::stats::skill_name(id).to_string(),
-            ),
-            Raise::Attribute(i) => (
-                self.raise_attribute(i),
-                crate::advance::ATTRIBUTE_NAMES[i.min(5)].to_string(),
-            ),
-            Raise::Vital(i) => (
-                self.raise_vital(i),
-                crate::advance::VITAL_NAMES[i.min(2)].to_string(),
-            ),
-        };
-        if !sent {
-            self.autoplay.growth.nothing_at = Some((xp, now));
+        let was = pick.standing(&self.world.stats);
+        if !self.raise_by(pick, batch.xp) {
+            self.autoplay.growth.nothing_at = Some((xp, fighting, now));
             return false;
         }
         let st = &mut self.autoplay.growth;
         st.last_raise = Some(now);
-        st.raise_pending = Some((xp, now));
-        st.last_pick = Some(pick);
+        st.pending = Some(Pending {
+            raise: pick,
+            batch,
+            was,
+            since: None,
+        });
         st.nothing_at = None;
         // A note, not a status. This is housekeeping, and the status line
         // belongs to whatever claims the tick: said here, a character with
         // nothing else to do would go from "waiting" to "spending
         // experience" and back again with every rank.
+        let what = match batch.ranks {
+            1 => pick.name().to_string(),
+            n => format!("{} {n} ranks", pick.name()),
+        };
         self.autoplay
             .note(format!("raising {what} ({xp} xp to spend)"), now);
         true
@@ -4241,8 +4469,9 @@ mod tests {
             if let Some(at) = c.autoplay.growth.last_raise {
                 if !raised.contains(&at) {
                     raised.push(at);
-                    // The server takes it, and the pool moves.
-                    c.world.stats.available_xp -= 1;
+                    // The server takes it.
+                    let (pick, batch) = sent(&c);
+                    server_takes(&mut c, pick, batch);
                 }
             }
             t += Duration::from_millis(100);
@@ -4251,7 +4480,7 @@ mod tests {
             raised.first().is_some_and(|at| *at - start <= RAISE_EVERY),
             "nothing was raised within {RAISE_EVERY:?}"
         );
-        // And it goes on, a rank at a time.
+        // And it goes on, a message at a time.
         assert!(raised.len() >= 4, "only {} ranks", raised.len());
         assert!(
             raised.windows(2).all(|w| w[1] - w[0] >= RAISE_EVERY),
@@ -4294,79 +4523,344 @@ mod tests {
         };
         let start = Instant::now();
         assert!(c.grow_spend_xp(start));
-        let refused = c.autoplay.growth.last_pick.expect("a rank was picked");
+        let (refused, _) = sent(&c);
 
-        // The pool does not move. Nothing more is asked for until the
-        // server has had time to answer.
-        assert!(!c.grow_spend_xp(start + RAISE_SETTLE / 2));
+        // Nothing comes back. Nothing more is asked for until the server
+        // has had time to answer, from the look after it went out.
+        let out = start + Duration::from_millis(100);
+        assert!(!c.grow_spend_xp(out));
+        assert!(!c.grow_spend_xp(out + RAISE_SETTLE / 2));
         assert_eq!(c.session.actions_sent(), 1);
 
-        // Then the rank is taken as refused, and the next best is bought
-        // instead for as long as the refusal holds.
-        let sulked = start + RAISE_SETTLE;
+        // Then it is taken as refused, and the rest are bought instead for
+        // as long as the refusal holds, the server taking each.
+        let sulked = out + RAISE_SETTLE;
         let mut t = sulked;
         let mut bought = 0;
         while t < sulked + SULK_FOR {
             if c.grow_spend_xp(t) {
-                let pick = c.autoplay.growth.last_pick.expect("a rank was picked");
+                let (pick, batch) = sent(&c);
                 assert_ne!(
                     pick,
                     refused,
                     "asked again {:?} after it was refused",
                     t - start
                 );
+                server_takes(&mut c, pick, batch);
                 bought += 1;
-                c.world.stats.available_xp -= 1;
             }
             t += Duration::from_secs(5);
         }
         assert!(bought > 0, "nothing else was bought");
 
-        // Once the sulk is over, it is the best buy again.
+        // Once the sulk is over it is the best buy again, and what is left
+        // of the pool was kept for it.
         assert!(c.grow_spend_xp(sulked + SULK_FOR + Duration::from_secs(5)));
-        assert_eq!(c.autoplay.growth.last_pick, Some(refused));
+        assert_eq!(sent(&c).0, refused);
     }
 
-    /// Up to `ranks` ranks, a `RAISE_EVERY` apart from `from`, the server
-    /// selling each one: the pool pays for it and the rank goes up.
-    fn buy_ranks(c: &mut Client, from: Instant, ranks: u32) -> Vec<Raise> {
+    #[test]
+    fn a_raise_is_not_given_up_on_before_it_has_gone_out() {
+        // A round of nine headless characters took four and a half seconds
+        // on the local server. A raise queued in it goes on the wire at the
+        // top of the next tick, and was given up on in that same tick,
+        // before any answer could come: nine of them, and all nine landed a
+        // third of a second later.
+        let Some(mut c) = with_experience_to_spend(10_000_000_000) else {
+            return;
+        };
+        let start = Instant::now();
+        let round = Duration::from_millis(4_600);
+        assert!(c.grow_spend_xp(start));
+        let (pick, batch) = sent(&c);
+        assert!(!c.grow_spend_xp(start + round));
+        assert!(
+            c.autoplay.growth.sulking.is_empty(),
+            "{pick:?} was given up on as it went out"
+        );
+        // The answer comes, and the next raise goes out on the round after.
+        server_takes(&mut c, pick, batch);
+        assert!(c.grow_spend_xp(start + round * 2));
+        assert!(c.autoplay.growth.sulking.is_empty());
+        assert_eq!(c.session.actions_sent(), 2);
+    }
+
+    #[test]
+    fn an_answer_that_comes_late_ends_the_wait_and_finds_its_share_kept() {
+        // When the local server stopped answering for forty seconds, nine
+        // characters gave up on ninety raises, and nearly all of them
+        // landed afterwards. A stat given up on must not lose its share of
+        // the pool to the others meanwhile, nor stay shut out once its
+        // answer is in.
+        let pool = 10_000_000_000;
+        let (Some(mut slow), Some(mut calm)) = (
+            with_experience_to_spend(pool),
+            with_experience_to_spend(pool),
+        ) else {
+            return;
+        };
+        let step = Duration::from_millis(100);
+        let start = Instant::now();
+        let spend_until = |c: &mut Client, from: Instant, until: Instant| {
+            let mut t = from;
+            while t < until {
+                if c.grow_spend_xp(t) {
+                    let (pick, batch) = sent(c);
+                    server_takes(c, pick, batch);
+                }
+                t += step;
+            }
+        };
+        spend_until(&mut calm, start, start + Duration::from_secs(120));
+
+        // The first raise goes unanswered, and is given up on.
+        assert!(slow.grow_spend_xp(start));
+        let (late, late_batch) = sent(&slow);
+        let mut t = start + step;
+        loop {
+            assert!(t < start + Duration::from_secs(5), "never given up on");
+            let went = slow.grow_spend_xp(t);
+            t += step;
+            if slow.autoplay.growth.sulking.is_empty() {
+                assert!(!went, "another raise went out before it was given up on");
+                continue;
+            }
+            // Given up on; the next raise goes out in the same look.
+            if went {
+                let (pick, batch) = sent(&slow);
+                assert_ne!(pick, late, "sized again before its answer came");
+                server_takes(&mut slow, pick, batch);
+            }
+            break;
+        }
+        // The rest go out and are answered at once, and none of them is
+        // the late one sized again.
+        let mut others = 0;
+        while t < start + Duration::from_secs(20) {
+            if slow.grow_spend_xp(t) {
+                let (pick, batch) = sent(&slow);
+                assert_ne!(pick, late, "sized again before its answer came");
+                server_takes(&mut slow, pick, batch);
+                others += 1;
+            }
+            t += step;
+        }
+        assert!(others > 0, "nothing else went out");
+        // Twenty seconds on, the answer comes. The pool still holds it.
+        server_takes(&mut slow, late, late_batch);
+        spend_until(&mut slow, t, t + Duration::from_secs(100));
+        assert!(
+            slow.autoplay.growth.sulking.is_empty(),
+            "still waiting on an answer that came"
+        );
+        // And it all comes to what a server that answers at once gives.
+        let (s, c) = (&slow.world.stats, &calm.world.stats);
+        assert_eq!(s.available_xp, c.available_xp);
+        assert_eq!(s.attributes, c.attributes);
+        assert_eq!(s.vitals, c.vitals);
+    }
+
+    #[test]
+    fn a_stat_is_not_sized_again_before_its_answer_comes() {
+        // A kill's experience moves the pool too. Taken for the answer, it
+        // let the stat be sized again from the record the answer had not
+        // reached yet, and bought twice.
+        let Some(mut c) = with_experience_to_spend(10_000_000_000) else {
+            return;
+        };
+        let start = Instant::now();
+        assert!(c.grow_spend_xp(start));
+        let (pick, batch) = sent(&c);
+        c.world.stats.available_xp += 2_000_000;
+        for n in 1..=5 {
+            assert!(
+                !c.grow_spend_xp(start + RAISE_EVERY * n),
+                "a raise went out {:?} after {pick:?}, before its answer",
+                RAISE_EVERY * n
+            );
+        }
+        server_takes(&mut c, pick, batch);
+        assert!(c.grow_spend_xp(start + RAISE_EVERY * 6));
+        let (next, next_batch) = sent(&c);
+        server_takes(&mut c, next, next_batch);
+        assert_eq!(c.session.actions_sent(), 2);
+    }
+
+    /// The raise last sent, still waiting on its answer.
+    fn sent(c: &Client) -> (Raise, Batch) {
+        let p = c.autoplay.growth.pending.expect("a raise was sent");
+        (p.raise, p.batch)
+    }
+
+    /// The server taking a raise as ACE does. It would refuse one past the
+    /// pool or past the experience left to the top, so neither may ever be
+    /// sent; otherwise the pool pays, the stat takes all of it, and its
+    /// rank is the highest the experience spent on it reaches.
+    fn server_takes(c: &mut Client, pick: Raise, batch: Batch) {
+        let table = c.assets.xp_table().expect("the XpTable");
+        let ladder = c.raise_ladder(&table, pick).expect("on the sheet");
+        let left = ladder.cost_to(ladder.top()).expect("not at the top");
+        assert!(
+            batch.xp <= left,
+            "{pick:?}: {} xp is past the {left} left to the top",
+            batch.xp
+        );
+        assert!(
+            i64::from(batch.xp) <= c.world.stats.available_xp,
+            "{pick:?}: {} xp is more than the pool of {}",
+            batch.xp,
+            c.world.stats.available_xp
+        );
+        let ranks = ladder.rank_after(batch.xp);
+        assert_eq!(
+            ranks,
+            ladder.ranks + batch.ranks,
+            "{pick:?}: the server's rank is not the one it was sized for"
+        );
+        let stats = &mut c.world.stats;
+        stats.available_xp -= i64::from(batch.xp);
+        match pick {
+            Raise::Skill(id) => {
+                let s = stats
+                    .skills
+                    .iter_mut()
+                    .find(|s| s.id == id)
+                    .expect("on the sheet");
+                s.ranks = ranks as u16;
+                s.xp += batch.xp;
+            }
+            Raise::Attribute(i) => {
+                stats.attributes[i].ranks = ranks;
+                stats.attributes[i].xp += batch.xp;
+            }
+            Raise::Vital(i) => {
+                stats.vitals[i].ranks = ranks;
+                stats.vitals[i].xp += batch.xp;
+            }
+        }
+    }
+
+    /// Up to `messages` raises, a `RAISE_EVERY` apart from `from`, the
+    /// server taking each one.
+    fn buy_ranks(c: &mut Client, from: Instant, messages: u32) -> Vec<Raise> {
         let mut bought = Vec::new();
-        for n in 0..ranks {
+        for n in 0..messages {
             if !c.grow_spend_xp(from + RAISE_EVERY * n) {
                 continue;
             }
-            let pick = c.autoplay.growth.last_pick.expect("a rank was picked");
-            let cost = match pick {
-                Raise::Skill(id) => c.skill_raise_cost(id),
-                Raise::Attribute(i) => c.attribute_raise_cost(i),
-                Raise::Vital(i) => c.vital_raise_cost(i),
-            }
-            .xp()
-            .expect("a rank on offer has a price");
-            let stats = &mut c.world.stats;
-            stats.available_xp -= i64::from(cost);
-            match pick {
-                Raise::Skill(id) => {
-                    let s = stats
-                        .skills
-                        .iter_mut()
-                        .find(|s| s.id == id)
-                        .expect("on the sheet");
-                    s.ranks += 1;
-                    s.xp += cost;
-                }
-                Raise::Attribute(i) => {
-                    stats.attributes[i].ranks += 1;
-                    stats.attributes[i].xp += cost;
-                }
-                Raise::Vital(i) => {
-                    stats.vitals[i].ranks += 1;
-                    stats.vitals[i].xp += cost;
-                }
-            }
+            let (pick, batch) = sent(c);
+            server_takes(c, pick, batch);
             bought.push(pick);
         }
         bought
+    }
+
+    /// Spending looked at every 100 ms for `how_long` from `from`, the
+    /// server taking each raise as it goes out. When it stopped.
+    fn spend_for(c: &mut Client, from: Instant, how_long: Duration) -> Instant {
+        let mut t = from;
+        while t < from + how_long {
+            if c.grow_spend_xp(t) {
+                let (pick, batch) = sent(c);
+                server_takes(c, pick, batch);
+            }
+            t += Duration::from_millis(100);
+        }
+        t
+    }
+
+    #[test]
+    fn raises_sent_while_the_server_is_not_answering_come_to_no_more_than_the_pool() {
+        // For forty seconds the local server answered nothing. Each raise
+        // was given up on after RAISE_SETTLE and the next one sized on a
+        // pool not yet charged for those before it, and without the stats
+        // given up on, so each was given their shares too. On paper, on the
+        // real XpTable, a caster given ten billion queued eighteen raises
+        // for thirty-six billion, and the server refuses all it cannot pay.
+        let pool = 10_000_000_000;
+        let (Some(mut stalled), Some(mut calm)) = (
+            with_experience_to_spend(pool),
+            with_experience_to_spend(pool),
+        ) else {
+            return;
+        };
+        let start = Instant::now();
+        spend_for(&mut calm, start, Duration::from_secs(120));
+
+        let mut queued = Vec::new();
+        let mut t = start;
+        while t < start + Duration::from_secs(90) {
+            if stalled.grow_spend_xp(t) {
+                queued.push(sent(&stalled));
+            }
+            t += Duration::from_millis(100);
+        }
+        assert!(queued.len() > 1, "only {queued:?} went out");
+        let total: i64 = queued.iter().map(|(_, b)| i64::from(b.xp)).sum();
+        assert!(
+            total <= pool,
+            "{total} xp queued against a pool of {pool}: {queued:?}"
+        );
+        // The server wakes and takes them in order, refusing none, and the
+        // rest of the pool goes as it would have gone.
+        for (pick, batch) in queued {
+            server_takes(&mut stalled, pick, batch);
+        }
+        spend_for(&mut stalled, t, Duration::from_secs(120));
+        let (s, c) = (&stalled.world.stats, &calm.world.stats);
+        assert_eq!(s.available_xp, c.available_xp);
+        assert_eq!(s.attributes, c.attributes);
+        assert_eq!(s.vitals, c.vitals);
+    }
+
+    #[test]
+    fn a_fight_does_not_sell_off_the_share_kept_for_the_maximums() {
+        // On paper, on the real XpTable: a caster given ten billion in the
+        // middle of a fight had every other stat bought to its share in
+        // thirteen messages, and then sold a rank a message more of them
+        // out of the share kept for the maximums. Fifty-six seconds in, Self,
+        // Health and Mana came out of the fight ninety ranks short.
+        let pool = 10_000_000_000;
+        let (Some(mut fighting), Some(mut calm)) = (
+            with_experience_to_spend(pool),
+            with_experience_to_spend(pool),
+        ) else {
+            return;
+        };
+        let start = Instant::now();
+        spend_for(&mut calm, start, Duration::from_secs(120));
+
+        let foe = standing_by(&mut fighting, 0x8000_0301, "Revenant", 3.0).guid;
+        fighting.attack_target = Some(foe);
+        let bought = buy_ranks(&mut fighting, start, 80);
+        assert!(!bought.is_empty(), "spending stopped for the fight");
+        assert!(
+            !bought.iter().copied().any(raises_a_maximum),
+            "a maximum was raised mid-fight: {bought:?}"
+        );
+        use crate::advance::ATTRIBUTE_NAMES;
+        let (f, c) = (&fighting.world.stats, &calm.world.stats);
+        for (i, name) in ATTRIBUTE_NAMES.iter().enumerate() {
+            let (f, c) = (f.attributes[i].ranks, c.attributes[i].ranks);
+            assert!(f <= c, "{name} ran ahead to {f} in the fight, against {c}");
+        }
+
+        // The fight is over, and what was kept for the maximums buys them.
+        fighting
+            .world
+            .objects
+            .get_mut(&foe)
+            .expect("the Revenant")
+            .health = Some(0.0);
+        spend_for(
+            &mut fighting,
+            start + RAISE_EVERY * 80,
+            Duration::from_secs(120),
+        );
+        let (f, c) = (&fighting.world.stats, &calm.world.stats);
+        assert_eq!(f.available_xp, c.available_xp);
+        assert_eq!(f.attributes, c.attributes);
+        assert_eq!(f.vitals, c.vitals);
     }
 
     #[test]
@@ -4393,25 +4887,122 @@ mod tests {
         let foe = standing_by(&mut fighting, 0x8000_0301, "Revenant", 3.0).guid;
         fighting.attack_target = Some(foe);
         let bought = buy_ranks(&mut fighting, start, 20);
-        assert_eq!(
-            bought.len(),
-            20,
-            "spending stopped for the fight: {bought:?}"
-        );
         assert!(
             !bought.iter().copied().any(raises_a_maximum),
             "a maximum was raised mid-fight: {bought:?}"
         );
+        // Spending did not stop for the fight: a pool this size takes every
+        // attribute that raises no maximum to the top, a message each, and
+        // leaves the ones that do where they were.
+        let top = fighting
+            .assets
+            .xp_table()
+            .expect("the XpTable")
+            .attribute
+            .len() as u32
+            - 1;
+        for (i, a) in fighting.world.stats.attributes.iter().enumerate() {
+            let held = raises_a_maximum(Raise::Attribute(i));
+            assert_eq!(
+                a.ranks,
+                if held { 0 } else { top },
+                "{} after spending through the fight: {bought:?}",
+                crate::advance::ATTRIBUTE_NAMES[i]
+            );
+        }
 
-        // The Revenant is dead, and the maximums are bought again.
+        // The Revenant is dead, its experience comes in, and the maximums
+        // are bought again.
         fighting
             .world
             .objects
             .get_mut(&foe)
             .expect("the Revenant")
             .health = Some(0.0);
+        fighting.world.stats.available_xp += 1_000;
         let bought = buy_ranks(&mut fighting, start + RAISE_EVERY * 20, 20);
         assert!(bought.iter().copied().any(raises_a_maximum), "{bought:?}");
+    }
+
+    #[test]
+    fn a_pool_worth_hundreds_of_ranks_is_spent_within_a_minute() {
+        // Nine characters granted billions on the local server bought
+        // about a rank a second each: a large pool would have taken days.
+        let pool = 1_000_000;
+        let (Some(mut batched), Some(mut one_at_a_time)) = (
+            with_experience_to_spend(pool),
+            with_experience_to_spend(pool),
+        ) else {
+            return;
+        };
+        // A rank a message, as it was, to the end of the pool.
+        let mut ranks = 0;
+        while let Some(pick) = choose_raise(
+            &one_at_a_time.raise_offers(),
+            one_at_a_time.world.stats.available_xp,
+        ) {
+            let xp = one_at_a_time.raise_cost(pick).xp().expect("a price");
+            server_takes(&mut one_at_a_time, pick, Batch { ranks: 1, xp });
+            ranks += 1;
+        }
+        assert!(
+            ranks >= 300,
+            "the pool is worth only {ranks} ranks, so this proves nothing"
+        );
+
+        let start = Instant::now();
+        let (mut t, mut messages) = (start, 0);
+        while t < start + Duration::from_secs(60) {
+            if batched.grow_spend_xp(t) {
+                let (pick, batch) = sent(&batched);
+                server_takes(&mut batched, pick, batch);
+                messages += 1;
+            }
+            t += Duration::from_millis(100);
+        }
+        // All of it that a rank at a time spends: what is left is saved for
+        // the next best buy.
+        let left = batched.world.stats.available_xp;
+        assert_eq!(
+            left, one_at_a_time.world.stats.available_xp,
+            "{left} of {pool} left after a minute and {messages} messages"
+        );
+        assert!(
+            messages * 5 < ranks,
+            "{messages} messages for {ranks} ranks"
+        );
+        // Spread over the attributes and vitals as a rank at a time
+        // spreads it.
+        use crate::advance::{ATTRIBUTE_NAMES, VITAL_NAMES};
+        let (b, o) = (&batched.world.stats, &one_at_a_time.world.stats);
+        for (i, name) in ATTRIBUTE_NAMES.iter().enumerate() {
+            let (b, o) = (b.attributes[i].ranks, o.attributes[i].ranks);
+            assert!(b.abs_diff(o) <= 1, "{name}: {b} against {o}");
+        }
+        for (i, name) in VITAL_NAMES.iter().enumerate() {
+            let (b, o) = (b.vitals[i].ranks, o.vitals[i].ranks);
+            assert!(b.abs_diff(o) <= 1, "{name}: {b} against {o}");
+        }
+    }
+
+    #[test]
+    fn a_kills_worth_of_experience_still_goes_a_rank_a_message() {
+        let Some(mut c) = with_experience_to_spend(400) else {
+            return;
+        };
+        let start = Instant::now();
+        let (mut t, mut messages) = (start, 0);
+        while t < start + Duration::from_secs(30) {
+            if c.grow_spend_xp(t) {
+                let (pick, batch) = sent(&c);
+                let one = c.raise_cost(pick).xp().map(|xp| Batch { ranks: 1, xp });
+                assert_eq!(Some(batch), one, "{pick:?}");
+                server_takes(&mut c, pick, batch);
+                messages += 1;
+            }
+            t += Duration::from_millis(100);
+        }
+        assert!(messages >= 2, "only {messages} ranks");
     }
 
     #[test]
@@ -4506,9 +5097,11 @@ mod tests {
         // Attribute: 500/0.6 = 833 beats 1000, 1000 and 800? No: health
         // 400/0.5 = 800 is the best value.
         assert_eq!(choose_raise(&offers, 5000), Some(Raise::Vital(0)));
-        // With less to spend, only what is affordable.
-        assert_eq!(choose_raise(&offers, 350), Some(Raise::Skill(24)));
-        assert_eq!(choose_raise(&offers, 100), None);
+        // With less to spend than the best buy costs, nothing: the pool
+        // saves for it rather than going on a worse buy that fits.
+        assert_eq!(choose_raise(&offers, 399), None);
+        assert_eq!(choose_raise(&offers, 350), None);
+        assert_eq!(choose_raise(&offers, 400), Some(Raise::Vital(0)));
         assert_eq!(choose_raise(&[], 100), None);
         // The main skill wins over a minor one at the same price.
         let tie = [
@@ -4516,8 +5109,307 @@ mod tests {
             offer(Raise::Skill(47), 300, 1.0),
         ];
         assert_eq!(choose_raise(&tie, 300), Some(Raise::Skill(47)));
-        // A zero weight is never bought.
+        // A zero weight is never bought, nor saved for.
         assert_eq!(choose_raise(&[offer(Raise::Skill(1), 1, 0.0)], 10), None);
+        let free = [
+            offer(Raise::Skill(1), 1, 0.0),
+            offer(Raise::Skill(24), 300, 0.3),
+        ];
+        assert_eq!(choose_raise(&free, 300), Some(Raise::Skill(24)));
+    }
+
+    /// A column shaped like the XpTable's: the first rank costs `first`,
+    /// each after it a twentieth more, up to rank `top`.
+    fn column(first: u32, top: usize) -> Vec<u32> {
+        let mut table = vec![0u32];
+        let (mut total, mut step) = (0.0f64, f64::from(first));
+        for _ in 0..top {
+            total += step.round();
+            table.push(total as u32);
+            step *= 1.05;
+        }
+        table
+    }
+
+    /// A stat standing at `ranks` of `table`, nothing spent past them, and
+    /// not held.
+    fn climb(raise: Raise, table: &[u32], ranks: u32, weight: f32) -> Climb<'_> {
+        Climb {
+            raise,
+            ladder: crate::advance::Ladder {
+                table,
+                ranks,
+                spent: table[ranks as usize],
+            },
+            weight,
+            held: false,
+        }
+    }
+
+    /// Spend `pool` over `field` the way `grow_spend_xp` does, a message at
+    /// a time until nothing more is affordable, and take each message as
+    /// the server does: batched, or a rank a message as before batches.
+    /// `each` looks at the field after every message. How many messages
+    /// it took, and what is left of the pool.
+    fn spend_on_paper(
+        field: &mut [Climb],
+        mut pool: i64,
+        batched: bool,
+        mut each: impl FnMut(&[Climb]),
+    ) -> (u32, i64) {
+        let mut messages = 0;
+        loop {
+            let offers: Vec<Offer> = field
+                .iter()
+                .filter_map(|c| Some(offer(c.raise, c.ladder.next_cost().xp()?, c.weight)))
+                .collect();
+            let Some(pick) = choose_raise(&offers, pool) else {
+                return (messages, pool);
+            };
+            let batch = if batched {
+                let (raise, batch) = batch_raise(field, pool).expect("the best buy is affordable");
+                assert_eq!(raise, pick, "sent for another stat than the best buy");
+                batch
+            } else {
+                let o = offers.iter().find(|o| o.raise == pick).expect("on offer");
+                Batch {
+                    ranks: 1,
+                    xp: o.cost,
+                }
+            };
+            let c = field
+                .iter_mut()
+                .find(|c| c.raise == pick)
+                .expect("in the field");
+            let left = c.ladder.cost_to(c.ladder.top()).expect("not at the top");
+            assert!(
+                batch.xp <= left,
+                "{pick:?}: {} is past the {left} left to the top",
+                batch.xp
+            );
+            assert!(
+                i64::from(batch.xp) <= pool,
+                "{pick:?}: {} is more than the pool of {pool}",
+                batch.xp
+            );
+            let ranks = c.ladder.rank_after(batch.xp);
+            assert_eq!(ranks, c.ladder.ranks + batch.ranks, "{pick:?}: sized wrong");
+            pool -= i64::from(batch.xp);
+            c.ladder.ranks = ranks;
+            c.ladder.spent += batch.xp;
+            messages += 1;
+            each(field);
+        }
+    }
+
+    #[test]
+    fn a_large_pool_goes_out_a_message_a_stat_and_spread_as_a_rank_at_a_time_spreads_it() {
+        let (attribute, vital, skill) = (column(110, 190), column(73, 196), column(23, 226));
+        let start = [
+            climb(Raise::Skill(47), &skill, 40, 1.0),
+            climb(Raise::Skill(6), &skill, 20, 0.5),
+            climb(Raise::Attribute(3), &attribute, 30, 0.6),
+            climb(Raise::Attribute(0), &attribute, 10, 0.15),
+            climb(Raise::Vital(0), &vital, 5, 0.5),
+            climb(Raise::Vital(2), &vital, 0, 0.15),
+        ];
+        for pool in [500_000, 5_000_000] {
+            // A rank a message, as it was: hundreds of messages.
+            let mut one_at_a_time = start;
+            let (slow, left) = spend_on_paper(&mut one_at_a_time, pool, false, |_| {});
+            assert!(
+                slow >= 300,
+                "a pool of {pool} is worth only {slow} ranks, so this proves nothing"
+            );
+
+            // Batched: about a message a stat, and no stat is ever taken
+            // past the rank a rank at a time leaves it at.
+            let mut batched = start;
+            let (fast, batched_left) = spend_on_paper(&mut batched, pool, true, |field| {
+                for (now, end) in field.iter().zip(&one_at_a_time) {
+                    assert!(
+                        now.ladder.ranks <= end.ladder.ranks,
+                        "{:?} ran ahead to {} of the {} it ends at",
+                        now.raise,
+                        now.ladder.ranks,
+                        end.ladder.ranks
+                    );
+                }
+            });
+            assert!(
+                fast <= 2 * start.len() as u32,
+                "{fast} messages for {} stats, against {slow} a rank at a time",
+                start.len()
+            );
+            // And it ends where a rank at a time ends, rank for rank.
+            assert_eq!(batched_left, left);
+            for (b, o) in batched.iter().zip(&one_at_a_time) {
+                assert_eq!(b.ladder, o.ladder, "{:?} with a pool of {pool}", b.raise);
+            }
+        }
+    }
+
+    #[test]
+    fn a_kills_worth_of_experience_buys_the_one_rank_as_it_always_did() {
+        let skill = column(23, 226);
+        let field = [
+            climb(Raise::Skill(47), &skill, 40, 1.0),
+            climb(Raise::Skill(6), &skill, 40, 0.5),
+        ];
+        let rank = field[0].ladder.step(40).expect("a rank above");
+        let one = Some((Raise::Skill(47), Batch { ranks: 1, xp: rank }));
+        for pool in [rank, 3 * rank, BATCH_FROM as u32 * rank - 1] {
+            assert_eq!(
+                batch_raise(&field, i64::from(pool)),
+                one,
+                "a pool of {pool}"
+            );
+        }
+        // Short of the rank, nothing; worth many of it, several.
+        assert_eq!(batch_raise(&field, i64::from(rank) - 1), None);
+        let (_, many) = batch_raise(&field, 100 * i64::from(rank)).expect("a batch");
+        assert!(many.ranks > 1, "{many:?}");
+        // Nothing while every stat is held.
+        let held = field.map(|c| Climb { held: true, ..c });
+        assert_eq!(batch_raise(&held, 1_000_000), None);
+    }
+
+    #[test]
+    fn a_trickle_of_kills_buys_what_the_same_experience_in_one_lump_buys() {
+        // On paper, on the real XpTable: after a caster spent ten billion,
+        // two billion more a kill at a time went only on ranks that cost
+        // little -- Arcane Lore, Jump, Loyalty, Salvaging, Strength,
+        // Coordination and Quickness ten each -- and War, Life, Focus,
+        // Self and Health none, where the same two billion at once gave War
+        // three and the others two. A kill never filled the pool to the
+        // best buy before a cheap rank took it.
+        let (attribute, vital, skill) = (column(110, 190), column(73, 196), column(23, 226));
+        let mut spent = [
+            climb(Raise::Skill(47), &skill, 0, 1.0),
+            climb(Raise::Skill(6), &skill, 0, 0.6),
+            climb(Raise::Skill(22), &skill, 0, 0.15),
+            climb(Raise::Attribute(4), &attribute, 0, 0.6),
+            climb(Raise::Attribute(0), &attribute, 0, 0.15),
+            climb(Raise::Vital(0), &vital, 0, 0.5),
+        ];
+        let (_, left) = spend_on_paper(&mut spent, 5_000_000, true, |_| {});
+        let (kill, kills): (i64, i64) = (2_000, 1_000);
+        // The cheapest rank now costs several kills, and the best buy many
+        // more.
+        let next = |c: &Climb| c.ladder.step(c.ladder.ranks).expect("below the top");
+        assert!(
+            spent.iter().all(|c| i64::from(next(c)) > 4 * kill),
+            "{spent:?}"
+        );
+
+        let mut lump = spent;
+        let (_, lump_left) = spend_on_paper(&mut lump, left + kill * kills, true, |_| {});
+        let mut trickle = spent;
+        let mut pool = left;
+        for _ in 0..kills {
+            (_, pool) = spend_on_paper(&mut trickle, pool + kill, true, |_| {});
+        }
+        assert_eq!(pool, lump_left);
+        for ((t, l), s) in trickle.iter().zip(&lump).zip(&spent) {
+            assert_eq!(t.ladder, l.ladder, "{:?}", t.raise);
+            assert!(
+                t.ladder.ranks > s.ladder.ranks,
+                "{:?} got nothing of {} kills",
+                t.raise,
+                kills
+            );
+        }
+    }
+
+    #[test]
+    fn a_batch_stops_at_the_top_rank_whatever_the_pool() {
+        // A stat partway to its next rank, a column whose top is nearly all
+        // a u32 holds, and a pool of a hundred billion.
+        let table = [0u32, 1_000, 3_000, 4_000_000_000, u32::MAX - 5];
+        let partway = Climb {
+            raise: Raise::Attribute(0),
+            ladder: crate::advance::Ladder {
+                table: &table,
+                ranks: 1,
+                spent: 2_500,
+            },
+            weight: 1.0,
+            held: false,
+        };
+        let batch = batch_raise(&[partway], 100_000_000_000).expect("a batch");
+        // To the top and no further: exactly the experience left to it,
+        // which is all the server takes and fits the u32 a message carries.
+        assert_eq!(
+            batch,
+            (
+                partway.raise,
+                Batch {
+                    ranks: 3,
+                    xp: u32::MAX - 5 - 2_500
+                }
+            )
+        );
+        assert_eq!(
+            Some(batch.1.xp),
+            partway.ladder.cost_to(partway.ladder.top())
+        );
+        // At the top, nothing.
+        let topped = Climb {
+            ladder: crate::advance::Ladder {
+                ranks: 4,
+                spent: u32::MAX - 5,
+                ..partway.ladder
+            },
+            ..partway
+        };
+        assert_eq!(batch_raise(&[topped], 100_000_000_000), None);
+    }
+
+    #[test]
+    fn a_maximum_held_for_the_fight_keeps_its_share_of_the_pool() {
+        let (skill, vital) = (column(23, 226), column(73, 196));
+        let weapon = climb(Raise::Skill(47), &skill, 50, 1.0);
+        let health = climb(Raise::Vital(0), &vital, 10, 0.5);
+        let held = Climb {
+            held: true,
+            ..health
+        };
+        let pool = 1_000_000;
+        // With nothing else in the running, the weapon's skill takes the
+        // pool.
+        let (_, alone) = batch_raise(&[weapon], pool).expect("a batch");
+        assert!(i64::from(alone.xp) > pool * 9 / 10, "{alone:?}");
+        // With Health held for the fight but still in the running, only
+        // its own share, and Health nothing.
+        let (raise, sharing) = batch_raise(&[weapon, held], pool).expect("a batch");
+        assert_eq!(raise, weapon.raise);
+        assert!(
+            sharing.ranks < alone.ranks && sharing.xp < alone.xp,
+            "{sharing:?} against {alone:?}"
+        );
+
+        // Nor is a rank of the weapon's sold out of Health's share when the
+        // pool runs short. Health's next three ranks are better buys than
+        // the weapon's next, and the one after them is not.
+        let (h, w) = (
+            |r| health.ladder.step(r).expect("below the top"),
+            weapon.ladder.step(50).expect("below the top"),
+        );
+        let worth = |cost: u32, weight: f32| cost as f32 / weight;
+        assert!(worth(h(12), 0.5) < worth(w, 1.0) && worth(h(13), 0.5) > worth(w, 1.0));
+        let kept = h(10) + h(11) + h(12);
+        // A pool one short of those and the weapon's rank: the weapon waits.
+        assert_eq!(batch_raise(&[weapon, held], i64::from(kept + w - 1)), None);
+        // Enough for both: the weapon's one rank, and no more.
+        assert_eq!(
+            batch_raise(&[weapon, held], i64::from(kept + w)),
+            Some((weapon.raise, Batch { ranks: 1, xp: w }))
+        );
+        // Not held, Health is bought first.
+        assert_eq!(
+            batch_raise(&[weapon, health], i64::from(kept + w - 1)).map(|(r, _)| r),
+            Some(health.raise)
+        );
     }
 
     #[test]
