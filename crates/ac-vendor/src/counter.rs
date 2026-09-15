@@ -36,6 +36,11 @@ pub struct Item {
     pub wielded: bool,
     /// Why it must not be sold, whatever any rule says.
     pub keep: Keep,
+    /// The player's own word that it goes: it was picked up under a
+    /// loot rule that said "sell", and the ledger has carried that
+    /// decision since. It is the one thing that beats the shopping
+    /// list (see [`Snapshot::offers`]).
+    pub to_sell: bool,
 }
 
 /// The reasons an item is not for sale, whatever a profile says about
@@ -216,5 +221,39 @@ impl Snapshot {
 
     pub fn item(&self, guid: u32) -> Option<&Item> {
         self.items.iter().find(|i| i.guid == guid)
+    }
+
+    /// Whether the counter in front of the character is offered this
+    /// carried thing: the rules do not forbid it, the counter takes
+    /// its kind, it is worth the floor, and it is not something the
+    /// character came here to buy.
+    ///
+    /// One answer for the selling and for the panel's "for sale here"
+    /// count. The panel used to keep a count of its own, which never
+    /// asked what the counter buys, and so showed nine things for sale
+    /// at a tailor who would take none of them.
+    pub fn offers(&self, it: &Item) -> bool {
+        let Some(counter) = self.counter.as_ref() else {
+            return false;
+        };
+        if it.keep.forbidden() || it.wielded {
+            return false;
+        }
+        if counter.buys != 0 && it.item_type & counter.buys == 0 {
+            return false;
+        }
+        if it.value < self.rules.floor_value || it.value == 0 {
+            return false;
+        }
+        // Not what the character came here to buy. Selling the tapers
+        // out of the pack and buying them back a moment later is a
+        // round trip that costs the markup and gains nothing.
+        //
+        // Unless the player said to sell it. A thing tagged for sale
+        // when it was picked up is loot, whatever the shopping list
+        // says: the skip is there to save a round trip, and it was
+        // keeping a caster's peas in its pack for good.
+        let wanted = self.wants.iter().any(|w| w.wcid == it.wcid && w.short > 0);
+        !wanted || it.to_sell
     }
 }

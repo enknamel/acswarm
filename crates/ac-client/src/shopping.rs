@@ -15,7 +15,7 @@ use std::collections::BTreeMap;
 use ac_vendor::counter::{Counter, Item, Keep, Rules, Want, Ware};
 use ac_vendor::{Act, Snapshot};
 
-use crate::autoplay::Doing;
+use crate::autoplay::{Doing, LootAction};
 use crate::growth::Growth;
 use crate::items::ItemStats;
 use crate::Client;
@@ -104,6 +104,10 @@ impl Client {
             item_type: s.item_type,
             pack: (s.container != 0).then_some(s.container),
             wielded: s.wielded,
+            // What it was picked up for, when the ledger remembers: the
+            // one word the counter's rules take over their own shopping
+            // list.
+            to_sell: self.autoplay.ledger.of(s) == Some(LootAction::Sell),
             keep: Keep {
                 tinkered: s.tinks > 0,
                 inscribed: s.inscribed,

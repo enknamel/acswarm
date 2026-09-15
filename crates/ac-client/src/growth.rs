@@ -2564,7 +2564,7 @@ impl Client {
                 if let Ok(mapper) = self.assets.spell_component_ids() {
                     let targets = self.component_targets(tapers);
                     // Every component the spells this character casts
-                    // will burn, and every one it happens to carry.
+                    // will burn, and nothing else.
                     //
                     // The targets are what matters. Asking only what is
                     // in the pack, as this once did, leaves a caster
@@ -2572,17 +2572,27 @@ impl Client {
                     // notice: with none of it carried there is nothing
                     // to count, so nothing is short, so it never goes
                     // to town for more.
+                    //
+                    // And what is carried is not asked at all. It used
+                    // to be added to the targets, at the taper count
+                    // for want of a burn rate, and the peas a mage
+                    // loots sit in the component table too (seventy-odd
+                    // of them, at 113-186, 189 and 191): each became a
+                    // need for ninety-nine more, which the counter would
+                    // buy at markup and refuse to sell as "what the
+                    // character came here to buy". A thing no cast
+                    // burns is not stock, whatever table it is in, and
+                    // the formulas already say which things are burnt.
+                    // The spells autoplay casts, not every spell in the
+                    // book: that is the same set `burns` keeps from the
+                    // counter, so nothing is both bought and sold, and
+                    // nothing is bought for a spell that is never cast.
                     let carried = self.components();
-                    let mut ids: Vec<u32> = targets.keys().copied().collect();
-                    ids.extend(carried.iter().map(|c| c.component_id));
-                    ids.sort_unstable();
-                    ids.dedup();
-                    for id in ids {
+                    for (&id, &keep) in &targets {
                         let Some(wcid) = mapper.component_wcid(id) else {
                             continue;
                         };
                         // What this one burns at, not what a taper does.
-                        let keep = targets.get(&id).copied().unwrap_or(tapers);
                         let c = carried.iter().find(|c| c.component_id == id);
                         let have = c.map_or(0, |c| c.count);
                         let buyable = ac_world::shops::sold_anywhere(wcid);
@@ -8066,6 +8076,138 @@ mod tests {
         );
         let stats = c.stats_of(guid).unwrap();
         c.autoplay.tag(&stats, LootAction::Sell);
+    }
+
+    /// A wand in hand, a bolt in the book and the Foci of Strife in the
+    /// pack: a war mage, whose every cast burns a scarab and a prismatic
+    /// taper.
+    fn as_a_war_mage(c: &mut Client) {
+        const FLAME_BOLT_I: u32 = 27;
+        const FOCI_OF_STRIFE: u32 = 15271;
+        let me = c.world.player_guid.unwrap();
+        c.world.stats.spells = vec![FLAME_BOLT_I];
+        c.world.objects.insert(
+            0x8000_0040,
+            ac_world::WorldObject {
+                guid: 0x8000_0040,
+                name: "Wand".into(),
+                item_type: item_type::CASTER,
+                value: 100,
+                wielder: Some(me),
+                parent: Some(me),
+                ..Default::default()
+            },
+        );
+        c.world.objects.insert(
+            0x8000_0041,
+            ac_world::WorldObject {
+                guid: 0x8000_0041,
+                name: "Foci of Strife".into(),
+                weenie_class_id: FOCI_OF_STRIFE,
+                value: 100,
+                container: Some(me),
+                ..Default::default()
+            },
+        );
+    }
+
+    /// `stack` prismatic tapers in the pack.
+    fn tapers_in_the_pack(c: &mut Client, guid: u32, stack: u32) {
+        let me = c.world.player_guid.unwrap();
+        c.world.objects.insert(
+            guid,
+            ac_world::WorldObject {
+                guid,
+                name: "Prismatic Taper".into(),
+                weenie_class_id: 20631,
+                item_type: item_type::SPELL_COMPONENTS,
+                value: stack,
+                stack_size: stack,
+                max_stack_size: 1_000,
+                container: Some(me),
+                ..Default::default()
+            },
+        );
+    }
+
+    #[test]
+    fn a_casters_peas_are_loot_to_sell_and_not_stock_to_buy() {
+        // The report: "autovendoring doesn't seem to sell at all", from
+        // a caster with a spellbook and a wand. The peas it looted sit
+        // in the component table beside the scarabs, and every carried
+        // component went on the restock list at the taper count for
+        // want of a burn rate: two peas became two wants for ninety-nine
+        // more, the counter skipped them as what the character came to
+        // buy, and a counter with peas on the shelf would have bought
+        // them at markup. The character that passed a live proof knew
+        // spells and wielded nothing, so this never opened for it.
+        use ac_vendor::Act;
+        let holtburg = 0xA9B4_0019;
+        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
+            return;
+        };
+        c.world.stats.level = 20;
+        with_a_pack(&mut c, 20);
+        as_a_war_mage(&mut c);
+        pea_in_the_pack(&mut c, 0x8000_0010, "Iron Pea", 8328, 2_500);
+        pea_in_the_pack(&mut c, 0x8000_0011, "Lead Pea", 8329, 500);
+        tapers_in_the_pack(&mut c, 0x8000_0012, 78);
+        with_a_buy_list(&mut c, &[("Prismatic Taper", 100, 25)]);
+        let cfg = c.autoplay.config.growth.clone();
+
+        // The gate is open: the tapers are stock, scaled from the line.
+        let needs = c.grow_needs(&cfg);
+        let taper = needs
+            .iter()
+            .find(|n| n.kind == NeedKind::Component(20631))
+            .expect("the tapers it is short of");
+        assert_eq!((taper.have, taper.keep, taper.want), (78, 100, 22));
+        // And a pea is not: no cast burns one.
+        let pea = needs.iter().find(|n| n.name.contains("Pea"));
+        assert!(pea.is_none(), "a pea is stock: {pea:?}");
+        let wants = c.vendor_shortfall(&cfg);
+        assert!(
+            wants.iter().all(|w| w.wcid != 8328 && w.wcid != 8329),
+            "a pea on the shopping list: {wants:?}"
+        );
+        assert!(wants.iter().any(|w| w.wcid == 20631), "{wants:?}");
+
+        // At a counter that buys components, the peas go and the
+        // tapers stay.
+        let cindrue = 0x8000_0002;
+        vendor_beside(
+            &mut c,
+            cindrue,
+            "Archmage Cindrue",
+            glam::Vec3::new(1.0, 0.0, 0.0),
+        );
+        let mut window = window_of(cindrue);
+        window.item_types = item_type::SPELL_COMPONENTS;
+        c.world.open_vendor = Some(window);
+        let snap = c.vendor_snapshot(&cfg);
+        let mut offered: Vec<u32> = snap
+            .items
+            .iter()
+            .filter(|i| snap.offers(i))
+            .map(|i| i.guid)
+            .collect();
+        offered.sort_unstable();
+        assert_eq!(offered, [0x8000_0010, 0x8000_0011]);
+        assert!(
+            snap.items
+                .iter()
+                .any(|i| i.guid == 0x8000_0010 && i.to_sell),
+            "the ledger's word travels with the pea"
+        );
+        let next = ac_vendor::Run::new().step(&snap, Instant::now());
+        assert_eq!(
+            next.act,
+            Some(Act::Sell {
+                items: vec![0x8000_0010, 0x8000_0011]
+            }),
+            "{}",
+            next.saying
+        );
     }
 
     #[test]

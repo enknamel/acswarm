@@ -330,29 +330,13 @@ impl Run {
     /// on.
     fn sell_one(&mut self, snap: &Snapshot, now: Instant) -> Option<Next> {
         let counter = snap.counter.as_ref()?;
-        let mut offer: Vec<&Item> = Vec::new();
-        for it in &snap.items {
-            if it.keep.forbidden() || it.wielded {
-                continue;
-            }
-            if self.refused.held(&it.guid, now) {
-                continue;
-            }
-            if counter.buys != 0 && it.item_type & counter.buys == 0 {
-                continue;
-            }
-            if it.value < snap.rules.floor_value || it.value == 0 {
-                continue;
-            }
-            // Not what the character came here to buy. Selling the
-            // tapers out of the pack and buying them back a moment
-            // later is a round trip that costs the markup and gains
-            // nothing.
-            if snap.wants.iter().any(|w| w.wcid == it.wcid && w.short > 0) {
-                continue;
-            }
-            offer.push(it);
-        }
+        // What the counter is offered (`Snapshot::offers`), less what
+        // it has already turned down this trip.
+        let mut offer: Vec<&Item> = snap
+            .items
+            .iter()
+            .filter(|it| snap.offers(it) && !self.refused.held(&it.guid, now))
+            .collect();
         // The dearest first: they are the ones most worth the slot they
         // sit in, and the ones the armful should certainly include.
         offer.sort_by_key(|i| std::cmp::Reverse(i.value));
@@ -525,6 +509,7 @@ mod tests {
             pack: None,
             wielded: false,
             keep: Keep::default(),
+            to_sell: false,
         }
     }
 
@@ -825,6 +810,65 @@ mod tests {
             "{}",
             next.saying
         );
+    }
+
+    #[test]
+    fn what_the_player_said_to_sell_goes_even_when_it_is_on_the_list() {
+        // The shopping-list skip (`Snapshot::offers`) saves a round trip,
+        // and it was keeping loot in the pack for good: a pea taken under a "sell" rule that was
+        // also, wrongly, on the shopping list was never offered, and
+        // the counter saw nothing at all. The player's word that it
+        // goes beats the list; the list still keeps what it was for.
+        let mut run = Run::new();
+        let mut pea = item(1, "Lead Pea", 500, 1, 100);
+        pea.wcid = 8329;
+        pea.to_sell = true;
+        let mut taper = item(2, "Prismatic Taper", 2_000, 78, 1000);
+        taper.wcid = 20631;
+        let mut s = snap(vec![pea, taper]);
+        s.wants = vec![
+            Want {
+                wcid: 8329,
+                name: "Lead Pea".into(),
+                short: 99,
+                urgent: false,
+            },
+            Want {
+                wcid: 20631,
+                name: "Prismatic Taper".into(),
+                short: 500,
+                urgent: true,
+            },
+        ];
+        assert!(s.offers(&s.items[0]), "the pea the player said to sell");
+        assert!(!s.offers(&s.items[1]), "the tapers it is short of");
+        let next = run.step(&s, Instant::now());
+        assert_eq!(
+            next.act,
+            Some(Act::Sell { items: vec![1] }),
+            "{}",
+            next.saying
+        );
+    }
+
+    #[test]
+    fn the_counter_is_offered_only_what_it_buys() {
+        // The panel's count and the selling ask one question. A
+        // tailor's window takes armour and clothing; the pea is not for
+        // sale there, whatever the player said about it.
+        let mut pea = item(1, "Lead Pea", 500, 1, 100);
+        pea.item_type = 0x1000;
+        pea.to_sell = true;
+        let mut s = snap(vec![pea, item(2, "Tunic", 300, 1, 1)]);
+        s.items[1].item_type = 0x8;
+        assert!(s.offers(&s.items[0]), "a counter that buys anything");
+        s.counter.as_mut().unwrap().buys = 0x8 | 0x4;
+        assert!(!s.offers(&s.items[0]), "a tailor does not take peas");
+        assert!(s.offers(&s.items[1]), "but takes a tunic");
+        assert_eq!(s.items.iter().filter(|i| s.offers(i)).count(), 1);
+        // No counter, nothing on offer.
+        s.counter = None;
+        assert!(!s.offers(&s.items[1]));
     }
 
     #[test]
