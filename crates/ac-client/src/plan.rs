@@ -27,7 +27,11 @@
 //!   still routed as it was (`Shut::left_for`): the deal only covers
 //!   bodies nobody has opened yet.
 //! - [`stragglers`]: whom the leader waits for before it moves the
-//!   party on: a follower still fighting, or too far behind.
+//!   party on: a follower still fighting, or too far behind. And before
+//!   it walks off to the next fight, the one it dealt a body to that is
+//!   still emptying it (`Autoplay::body_dealt_to_another`): the deal
+//!   took the body off the leader's own conscience, and a leader with
+//!   nothing to wait for led the party away from every body it dealt.
 //!
 //! An order is obeyed while it is fresh ([`ORDERS_LAST`]) and falls
 //! away by itself: a leader that goes quiet leaves no order standing,
@@ -49,10 +53,14 @@ use serde::{Deserialize, Serialize};
 pub const ORDERS_LAST: Duration = Duration::from_millis(2500);
 
 /// A body dealt to a character that has not gone for it in this long is
-/// dealt to another. The turn was a plan, not a claim, and a character
-/// that stays in a fight rather than come for its body has not lost the
-/// fellowship the body.
-pub const DEAL_PATIENCE: Duration = Duration::from_secs(8);
+/// dealt to another, and never to that one again. Four board rounds: the
+/// deal crosses the board, the character reads it and sets off, and its
+/// claim comes back. One that has not by then will not -- its pack is
+/// full, or the body is not its own by its own lights -- and it says
+/// nothing about that on the board. Measured at eight seconds, a party
+/// whose packs were filling stood eight seconds at every body while the
+/// leader waited for a hand that had already left it.
+pub const DEAL_PATIENCE: Duration = Duration::from_secs(2);
 
 /// A follower more than this many follow distances from its leader is
 /// left behind, and the leader waits for it before moving the party on.
@@ -169,17 +177,30 @@ impl Orders {
     }
 }
 
-/// What the leader remembers between plans: the deals it has made and
-/// the turns each character has had.
+/// What the leader remembers between plans: the deals it has made, the
+/// ones that lapsed, and the turns each character has had.
 #[derive(Clone, Debug, Default)]
 pub struct Planner {
     /// The bodies dealt, to whom, and when: `(body, to, since)`.
     pub deals: Vec<(u32, u32, Instant)>,
+    /// Deals that lapsed (see [`DEAL_PATIENCE`]), and when: that body is
+    /// not dealt to that character again.
+    pub passed: Vec<(u32, u32, Instant)>,
     /// A turn a character was dealt, and when: what makes the deal go
     /// round.
     pub turns: Vec<(u32, Instant)>,
     /// How many plans have been made.
     pub n: u32,
+}
+
+/// What a plan made of the bodies (see [`deal_bodies`]).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Dealt {
+    /// Whose turn each body is: `(body, player guid)`.
+    pub deals: Vec<(u32, u32)>,
+    /// Deals that stood last time and have lapsed: the body, and the one
+    /// that did not come for it.
+    pub lapsed: Vec<(u32, u32)>,
 }
 
 impl Planner {
@@ -205,11 +226,23 @@ impl Planner {
         u16::try_from(n).unwrap_or(u16::MAX)
     }
 
+    /// The deals that lapsed and are not to be made again: `(body, to)`.
+    pub fn passed(&self) -> BTreeSet<(u32, u32)> {
+        self.passed.iter().map(|(b, t, _)| (*b, *t)).collect()
+    }
+
     /// Take in the deals of the plan just made: a deal already standing
-    /// keeps its clock, a new one starts it and is a turn.
-    pub fn dealt(&mut self, deals: &[(u32, u32)], now: Instant, window: Duration) {
+    /// keeps its clock, a new one starts it and is a turn, and a lapsed
+    /// one is remembered for as long as a body lies (`window`, here too:
+    /// a body is gone long before a turn is forgotten).
+    pub fn dealt(&mut self, dealt: &Dealt, now: Instant, window: Duration) {
+        self.passed
+            .extend(dealt.lapsed.iter().map(|(b, t)| (*b, *t, now)));
+        self.passed
+            .retain(|(_, _, t)| now.saturating_duration_since(*t) < window);
         let old = std::mem::take(&mut self.deals);
-        self.deals = deals
+        self.deals = dealt
+            .deals
             .iter()
             .map(|&(body, to)| {
                 let since = old
@@ -394,28 +427,37 @@ pub fn assign_targets(
 ///
 /// A deal standing from the last plan stands while the body lies there
 /// and the one it went to is still about and either at it or not yet
-/// past its patience ([`DEAL_PATIENCE`]). Each body not dealt goes to a
-/// free hand within `reach` of it -- one that opens bodies, has room,
-/// is at no body and holds no other deal -- the ones not fighting
-/// first, then the fewest turns lately, then the nearest, then the
-/// lowest guid. A hand is dealt one body a plan. A body no hand can be
-/// dealt is left undealt, and the sessions judge it as they did before
-/// there was a plan.
+/// past its patience ([`DEAL_PATIENCE`]); past it, the deal lapses and
+/// that pair is never made again (`passed`). Each body not dealt goes to
+/// a free hand within `reach` of it -- one that opens bodies, has room,
+/// is at no body, holds no other deal and has not let this one lapse --
+/// the ones not fighting first, then the fewest turns lately, then the
+/// nearest, then the lowest guid. A hand is dealt one body a plan. A
+/// body no hand can be dealt is left undealt, and the sessions judge it
+/// as they did before there was a plan.
 pub fn deal_bodies(
     hands: &[Hand],
     bodies: &[Body],
     standing: &[Standing],
+    passed: &BTreeSet<(u32, u32)>,
     reach: impl Fn(Vec3, Vec3) -> bool,
-) -> Vec<(u32, u32)> {
+) -> Dealt {
     let lying: BTreeSet<u32> = bodies.iter().map(|b| b.guid).collect();
+    let stands = |s: &Standing| {
+        hands.iter().any(|h| {
+            h.guid == s.to && h.opens && (h.looting == Some(s.body) || s.age < DEAL_PATIENCE)
+        })
+    };
+    let mut lapsed: Vec<(u32, u32)> = standing
+        .iter()
+        .filter(|s| lying.contains(&s.body) && !stands(s))
+        .map(|s| (s.body, s.to))
+        .collect();
+    lapsed.sort_unstable();
+    lapsed.dedup();
     let mut deals: Vec<(u32, u32)> = standing
         .iter()
-        .filter(|s| lying.contains(&s.body))
-        .filter(|s| {
-            hands.iter().any(|h| {
-                h.guid == s.to && h.opens && (h.looting == Some(s.body) || s.age < DEAL_PATIENCE)
-            })
-        })
+        .filter(|s| lying.contains(&s.body) && stands(s))
         .map(|s| (s.body, s.to))
         .collect();
     deals.sort_unstable();
@@ -430,6 +472,7 @@ pub fn deal_bodies(
         let pick = hands
             .iter()
             .filter(|h| h.guid != 0 && h.opens && h.looting.is_none() && !held.contains(&h.guid))
+            .filter(|h| !passed.contains(&(b.guid, h.guid)) && !lapsed.contains(&(b.guid, h.guid)))
             .filter(|h| reach(h.world, b.world))
             .min_by(|x, y| {
                 x.target
@@ -449,7 +492,7 @@ pub fn deal_bodies(
         }
     }
     deals.sort_unstable();
-    deals
+    Dealt { deals, lapsed }
 }
 
 /// Why a follower is being waited for.
@@ -679,8 +722,15 @@ mod tests {
         hands[0].turns = 2;
         hands[1].turns = 0;
         hands[2].turns = 1;
-        let deals = deal_bodies(&hands, &[body(0x8001, 1.0), body(0x8002, 2.0)], &[], near);
-        assert_eq!(deals, vec![(0x8001, 2), (0x8002, 3)]);
+        let deals = deal_bodies(
+            &hands,
+            &[body(0x8001, 1.0), body(0x8002, 2.0)],
+            &[],
+            &BTreeSet::new(),
+            near,
+        );
+        assert_eq!(deals.deals, vec![(0x8001, 2), (0x8002, 3)]);
+        assert!(deals.lapsed.is_empty());
     }
 
     #[test]
@@ -689,18 +739,20 @@ mod tests {
         hands[0].looting = Some(0x9000);
         hands[1].target = Some(0x77);
         hands[2].opens = false;
+        let none = BTreeSet::new();
         // Only 4 is free: it gets the first body; the second goes to the
         // one fighting, which will come for it when it is done.
         let deals = deal_bodies(
             &hands,
             &[body(0x8001, 1.0), body(0x8002, 2.0), body(0x8003, 3.0)],
             &[],
+            &none,
             near,
         );
-        assert_eq!(deals, vec![(0x8001, 4), (0x8002, 2)]);
+        assert_eq!(deals.deals, vec![(0x8001, 4), (0x8002, 2)]);
         // Out of reach of everyone, a body is nobody's to be dealt.
-        let deals = deal_bodies(&hands, &[body(0x8001, 500.0)], &[], near);
-        assert!(deals.is_empty());
+        let deals = deal_bodies(&hands, &[body(0x8001, 500.0)], &[], &none, near);
+        assert!(deals.deals.is_empty());
     }
 
     #[test]
@@ -712,22 +764,66 @@ mod tests {
             to,
             age,
         };
+        let none = BTreeSet::new();
         // Fresh: stands, and the body is not dealt to the nearer hand.
-        let deals = deal_bodies(&hands, &bodies, &[stood(Duration::from_secs(2), 2)], near);
-        assert_eq!(deals, vec![(0x8001, 2)]);
-        // Past patience with nobody at it: dealt again.
-        let deals = deal_bodies(&hands, &bodies, &[stood(DEAL_PATIENCE, 2)], near);
-        assert_eq!(deals, vec![(0x8001, 1)]);
+        let deals = deal_bodies(&hands, &bodies, &[stood(DEAL_PATIENCE / 2, 2)], &none, near);
+        assert_eq!(deals.deals, vec![(0x8001, 2)]);
+        assert!(deals.lapsed.is_empty());
+        // Past patience with nobody at it: lapsed, and dealt to the other.
+        let deals = deal_bodies(&hands, &bodies, &[stood(DEAL_PATIENCE, 2)], &none, near);
+        assert_eq!(deals.deals, vec![(0x8001, 1)]);
+        assert_eq!(deals.lapsed, vec![(0x8001, 2)]);
         // Past patience but at it: stands.
         let mut at_it = hands.clone();
         at_it[1].looting = Some(0x8001);
-        let deals = deal_bodies(&at_it, &bodies, &[stood(DEAL_PATIENCE * 3, 2)], near);
-        assert_eq!(deals, vec![(0x8001, 2)]);
-        // The body gone: the deal goes with it.
-        assert!(deal_bodies(&hands, &[], &[stood(Duration::ZERO, 2)], near).is_empty());
+        let deals = deal_bodies(&at_it, &bodies, &[stood(DEAL_PATIENCE * 3, 2)], &none, near);
+        assert_eq!(deals.deals, vec![(0x8001, 2)]);
+        // The body gone: the deal goes with it, and nothing lapsed.
+        let gone = deal_bodies(&hands, &[], &[stood(Duration::ZERO, 2)], &none, near);
+        assert_eq!(gone, Dealt::default());
         // The hand gone from the board: dealt to whoever is left.
-        let deals = deal_bodies(&hands[..1], &bodies, &[stood(Duration::ZERO, 2)], near);
-        assert_eq!(deals, vec![(0x8001, 1)]);
+        let deals = deal_bodies(
+            &hands[..1],
+            &bodies,
+            &[stood(Duration::ZERO, 2)],
+            &none,
+            near,
+        );
+        assert_eq!(deals.deals, vec![(0x8001, 1)]);
+    }
+
+    #[test]
+    fn a_hand_that_let_a_body_lapse_is_not_dealt_it_again() {
+        // The bug, measured: a character whose pack filled took a few
+        // things off a body and left it, saying nothing, and the deal put
+        // the body back on it eight seconds at a time while the leader
+        // held the party for it. The pair is remembered, and the body
+        // goes to the next hand; with nobody else, it is left to the
+        // sessions' own rules rather than dealt to the same hand again.
+        let hands: Vec<Hand> = (1..=2).map(|g| hand(g, g as f32)).collect();
+        let bodies = [body(0x8001, 1.0)];
+        let passed: BTreeSet<(u32, u32)> = [(0x8001, 1)].into_iter().collect();
+        let deals = deal_bodies(&hands, &bodies, &[], &passed, near);
+        assert_eq!(deals.deals, vec![(0x8001, 2)]);
+        let both: BTreeSet<(u32, u32)> = [(0x8001, 1), (0x8001, 2)].into_iter().collect();
+        assert!(deal_bodies(&hands, &bodies, &[], &both, near)
+            .deals
+            .is_empty());
+        // And the planner keeps the lapsed pairs for as long as a body lies.
+        let t0 = Instant::now();
+        let window = Duration::from_secs(120);
+        let mut p = Planner::default();
+        p.dealt(
+            &Dealt {
+                deals: vec![(0x8001, 2)],
+                lapsed: vec![(0x8001, 1)],
+            },
+            t0,
+            window,
+        );
+        assert_eq!(p.passed(), [(0x8001, 1)].into_iter().collect());
+        p.dealt(&Dealt::default(), t0 + window, window);
+        assert!(p.passed().is_empty());
     }
 
     #[test]
@@ -735,10 +831,14 @@ mod tests {
         let t0 = Instant::now();
         let window = Duration::from_secs(120);
         let mut p = Planner::default();
-        p.dealt(&[(0x8001, 2)], t0, window);
+        let dealt = |deals: Vec<(u32, u32)>| Dealt {
+            deals,
+            lapsed: Vec::new(),
+        };
+        p.dealt(&dealt(vec![(0x8001, 2)]), t0, window);
         assert_eq!(p.turns_of(2, t0, window), 1);
         p.dealt(
-            &[(0x8001, 2), (0x8002, 1)],
+            &dealt(vec![(0x8001, 2), (0x8002, 1)]),
             t0 + Duration::from_secs(3),
             window,
         );

@@ -3676,6 +3676,34 @@ impl Autoplay {
         self.current_plan(now)?.body_dealt_to(body)
     }
 
+    /// A body this character, leading, dealt to one of the others and
+    /// that still lies there (`there`) unemptied: `(body, whom)`. The
+    /// leader's next chosen fight waits on it the way its own kill's body
+    /// holds it (see `Client::waits_for_a_corpse`).
+    ///
+    /// Measured without this: the deal gave each body to one hand, so
+    /// the leader owed none and walked off to the next creature the
+    /// moment one fell, the party followed it, and the hand dealt the
+    /// body was left forty metres behind or gave the body up. The
+    /// party walked twice as far and took a quarter of the loot. Only
+    /// while the plan is fresh: a leader that has stopped planning holds
+    /// nothing for a deal it is no longer making.
+    pub fn body_dealt_to_another(
+        &self,
+        me: u32,
+        now: Instant,
+        there: impl Fn(u32) -> bool,
+    ) -> Option<(u32, u32)> {
+        self.current_plan(now)?;
+        self.planner
+            .deals
+            .iter()
+            .filter(|(body, to, _)| *to != me && there(*body))
+            .filter(|(body, _, _)| !self.looted.contains(body) && !self.shut_by_anyone(*body))
+            .map(|(body, to, _)| (*body, *to))
+            .min()
+    }
+
     /// How many bodies this character opened first lately, within
     /// [`DEAL_WINDOW`]: its turns, as it says them on the board (see
     /// [`Mate::opened_first`]).
@@ -6121,8 +6149,22 @@ impl Client {
             .unwrap_or_default();
         let targets = crate::plan::assign_targets(&hands, &foes, &prior);
         let standing = self.autoplay.planner.standing(now);
-        let deals = crate::plan::deal_bodies(&hands, &bodies, &standing, corpse_within_reach);
-        self.autoplay.planner.dealt(&deals, now, DEAL_WINDOW);
+        let passed = self.autoplay.planner.passed();
+        let dealt =
+            crate::plan::deal_bodies(&hands, &bodies, &standing, &passed, corpse_within_reach);
+        for (body, to) in &dealt.lapsed {
+            let who = hands
+                .iter()
+                .find(|h| h.guid == *to)
+                .map(|h| h.name.clone())
+                .unwrap_or_default();
+            self.autoplay.note(
+                format!("{who} did not come for the body {body:#010x}; dealing it on"),
+                now,
+            );
+        }
+        self.autoplay.planner.dealt(&dealt, now, DEAL_WINDOW);
+        let deals = dealt.deals;
         self.autoplay.planner.n = self.autoplay.planner.n.wrapping_add(1);
         let mut orders: std::collections::BTreeMap<u32, crate::plan::Order> =
             std::collections::BTreeMap::new();
@@ -7301,8 +7343,42 @@ impl Client {
     pub fn waits_for_a_corpse(&self) -> bool {
         self.loot_profile()
             .is_some_and(|p| p.looting.after_every_fight)
-            && self.owes_a_corpse()
+            && (self.owes_a_corpse() || self.party_owed_a_body(Instant::now()).is_some())
             && !self.under_attack()
+    }
+
+    /// A body the plan dealt to one of the others, still lying there
+    /// within the leader's reach, as `(who, what)` by name (see
+    /// [`Autoplay::body_dealt_to_another`]). Within reach: a body across
+    /// the field is nothing to hold the party for, as it is nothing for
+    /// a character alone (see [`Self::owes_a_corpse`]).
+    pub(crate) fn party_owed_a_body(&self, now: Instant) -> Option<(String, String)> {
+        if !self.autoplay.team.leader {
+            return None;
+        }
+        let me = self.world.player_guid?;
+        let mine = self.player.as_ref()?.world_position();
+        let objects = &self.world.objects;
+        let there = |g: u32| {
+            objects
+                .get(&g)
+                .and_then(|o| o.world_pos())
+                .is_some_and(|at| corpse_within_reach(mine, at))
+        };
+        let (body, to) = self.autoplay.body_dealt_to_another(me, now, there)?;
+        let who = self
+            .autoplay
+            .team
+            .mates
+            .iter()
+            .find(|m| m.guid == to)
+            .map(|m| m.name.clone())
+            .unwrap_or_else(|| format!("{to:#010x}"));
+        let what = objects
+            .get(&body)
+            .map(|o| o.name.clone())
+            .unwrap_or_else(|| format!("{body:#010x}"));
+        Some((who, what))
     }
 
     /// No pack has a slot for a take.
@@ -7687,8 +7763,15 @@ impl Client {
                 }
             }
         }
-        // Finish what it killed before setting off after the next one.
+        // Finish what it killed before setting off after the next one --
+        // and, leading, what the party killed: the next fight is not
+        // walked off to while a body dealt to one of the others still
+        // lies here (see `Self::party_owed_a_body`).
         if self.waits_for_a_corpse() {
+            if let Some((who, what)) = self.party_owed_a_body(now) {
+                self.autoplay
+                    .say(Doing::Idle, format!("waiting for {who} to empty {what}"));
+            }
             return false;
         }
         if self
@@ -14088,6 +14171,66 @@ mod tests {
         ap.team.mates[1].looting = None;
         ap.config.team.enabled = false;
         assert_eq!(ap.body_dealt_to(body, late), None);
+    }
+
+    #[test]
+    fn a_leader_holds_the_next_fight_for_a_body_it_dealt_to_another_while_it_lies_there() {
+        use crate::plan::{Order, Plan, ORDERS_LAST};
+        let t0 = Instant::now();
+        let (me, other) = (1, 2);
+        let (body, gone) = (0x8000_0001, 0x8000_0002);
+        let mut ap = Autoplay::default();
+        ap.config.enabled = true;
+        ap.config.team.enabled = true;
+        ap.team = view_of(vec![looter(other, glam::Vec3::ZERO, None, Duration::ZERO)]);
+        ap.team.leader = true;
+        ap.team.me = Some(looter(me, glam::Vec3::ZERO, None, Duration::ZERO));
+        // Nothing dealt: nothing held.
+        assert_eq!(ap.body_dealt_to_another(me, t0, |_| true), None);
+        // A plan dealing one body to the other, one to this character.
+        let mut plan = Plan {
+            leader: "Bryn01".into(),
+            ..Default::default()
+        };
+        plan.orders.insert(
+            other,
+            Order {
+                target: None,
+                body: Some(body),
+            },
+        );
+        plan.orders.insert(
+            me,
+            Order {
+                target: None,
+                body: Some(gone),
+            },
+        );
+        ap.planner.dealt(
+            &crate::plan::Dealt {
+                deals: vec![(body, other), (gone, me)],
+                lapsed: Vec::new(),
+            },
+            t0,
+            DEAL_WINDOW,
+        );
+        ap.take_orders(plan, t0);
+        assert_eq!(
+            ap.body_dealt_to_another(me, t0, |_| true),
+            Some((body, other)),
+            "the other's body holds the leader; its own is its own to loot"
+        );
+        // Gone from the ground (rotted, or out of reach): nothing to hold for.
+        assert_eq!(ap.body_dealt_to_another(me, t0, |g| g != body), None);
+        // Said emptied by the one it went to: done with.
+        ap.shut_by.insert((body, other, 0));
+        assert_eq!(ap.body_dealt_to_another(me, t0, |_| true), None);
+        ap.shut_by.clear();
+        // A leader that has stopped planning holds nothing.
+        assert_eq!(
+            ap.body_dealt_to_another(me, t0 + ORDERS_LAST, |_| true),
+            None
+        );
     }
 
     #[test]
