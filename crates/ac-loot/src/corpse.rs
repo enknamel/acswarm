@@ -1,23 +1,14 @@
-//! What a corpse and the character looking into it look like to the
-//! rules.
+//! What a corpse and the character looking into it look like to the rules.
 //!
-//! Plain values, so that emptying one can be followed at a desk. What
-//! it deliberately does not describe is *why* an item is worth having:
-//! that is the player's profile, judged elsewhere, and arrives here as
-//! a verdict already reached -- carrying the decision with it, so that
-//! nothing downstream has to ask again and get a different answer.
+//! Plain values, so emptying one can be followed at a desk. Why an item is worth having is the
+//! player's profile, judged elsewhere: it arrives as a [`Verdict`] carrying the decision, so
+//! nothing downstream asks again and gets a different answer.
 
 /// What the rules have been told about one thing in the corpse.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Verdict {
-    /// Worth taking, and what for.
-    ///
-    /// The decision travels with the verdict because it used to be
-    /// reached twice: once here to settle the order a corpse is emptied
-    /// in, and again as each thing was picked up, to recover what it was
-    /// picked up *for*. The two disagreed whenever an appraisal landed
-    /// in between, or when a cap filled because an earlier item on the
-    /// same body had been taken.
+    /// Worth taking, and what for: pickup reads this rather than judging again, which disagrees
+    /// once an appraisal lands or a cap fills (`a_verdict_carries_what_the_thing_is_wanted_for`).
     Take(crate::profile::LootAction),
     /// Not worth taking.
     Leave,
@@ -34,10 +25,7 @@ pub struct Lying {
     pub burden: u32,
     /// What the profile made of it.
     pub verdict: Verdict,
-    /// It can be taken without a slot: coin or a component the whole
-    /// of which fits onto a stack already carried, poured straight
-    /// from the body (see `ac_agent::room::how_to_take`). Such a thing
-    /// is taken off a body a full pack would otherwise be shut on.
+    /// Fits whole on a carried stack (`ac_agent::room::how_to_take`): a full pack still takes it.
     pub needs_no_slot: bool,
 }
 
@@ -57,78 +45,49 @@ pub struct Open {
     /// The corpse itself.
     pub guid: u32,
     pub name: String,
-    /// How far off the character is standing.
+    /// How far off the character is standing, in metres.
     pub away: f32,
     /// The window is open and its contents are known.
     pub open: bool,
     pub items: Vec<Lying>,
-    /// Slots one take can use: the most room any one pack has (see
-    /// `ac_agent::room::Packs::for_a_take`). Not the sum over the
-    /// packs: a take goes into one pack, and the sum read as room
-    /// while every take was refused.
+    /// Free slots in the roomiest pack (`ac_agent::room::Packs::for_a_take`), not the sum:
+    /// a take goes into one pack.
     pub slots_free: u32,
-    /// Slots free in every pack together (see
-    /// `ac_agent::room::Packs::anywhere`): what a counter's money is
-    /// spread over, and so what `keep_free` is measured against.
+    /// Free slots over every pack (`ac_agent::room::Packs::anywhere`): where a counter's coin goes.
     pub room_anywhere: u32,
-    /// Slots to leave empty however much is lying here. A counter needs
-    /// somewhere to put the coin before it takes anything, so a pack
-    /// looted to its last slot cannot be sold out of at all. The coin
-    /// is created by the server, which fills the main pack and then
-    /// each side pack in turn, so the slots kept are counted over every
-    /// pack: kept in the one pack a take could use, a character with
-    /// two slots in the main pack and two in the sack was sent to town
-    /// with room for its money twice over.
+    /// Slots left empty for a counter's coin, which it needs before it takes anything.
+    /// Counted over every pack: the server fills the main pack, then each side pack in turn.
     pub keep_free: u32,
-    /// How much more loot the character means to carry (see
-    /// `growth::carry_room`): zero when it has had enough. What it
-    /// wears, wields and keeps is not measured against the loot limit,
-    /// only against twice its capacity and the server's wall.
+    /// Burden of loot it still means to carry (`growth::carry_room`); 0 once it has had enough.
+    /// Worn, wielded and kept things count only against twice capacity and the server's wall.
     pub carry_room: u32,
     /// Asking the server to identify things is allowed.
     pub may_ask: bool,
     /// An identify is already out for these.
     pub asking: Vec<u32>,
-    /// Takes the server has turned down since the corpse was asked to
-    /// open. It answers a take it will not make -- too encumbered by its
-    /// own reckoning, a drop that can only be had so often, a unique
-    /// already carried -- by naming the item, and the item stays put.
+    /// Takes the server turned down since the corpse was asked to open.
+    /// It names the item and the item stays: too encumbered, a rate-limited drop, a unique carried.
     pub refused: Vec<u32>,
-    /// Listed on the corpse but not yet described. The server sends
-    /// what a corpse holds as a list first and describes each thing a
-    /// moment later, so in between the body looks emptier than it is.
+    /// Listed on the corpse but not yet described.
+    /// The server sends the list first and each description a moment later.
     pub arriving: Vec<u32>,
 }
 
-/// How near the character must be before a corpse will open for it.
+/// How near, in metres, the character must be before a corpse will open for it.
 pub const REACH: f32 = 2.5;
 
-/// What something taken off your own corpse is for.
-///
-/// Everything on it comes back -- it is all yours, and the wand and the
-/// components are what the character needs to fight again -- but what
-/// each thing is *for* is still the profile's answer. Answering "keep"
-/// for the lot writes a Keep over every decision the character had
-/// already made: twenty things meant for a counter and three for the
-/// salvage bag come home unsellable and unsalvageable, and the pack
-/// fills with loot it can no longer get rid of.
+/// What something taken off the character's own corpse is for: the profile's answer, else Keep.
+/// Keep for the lot would overwrite each Sell and Salvage already decided and clog the pack.
 pub fn recovered(judged: Option<crate::profile::LootAction>) -> crate::profile::LootAction {
     match judged {
         Some(a) if a.takes() => a,
-        // Nothing claimed it, or the rules said leave it -- which is not
-        // an answer that applies to your own belongings.
+        // Unclaimed, or Skip: leaving is no answer about the character's own belongings.
         _ => crate::profile::LootAction::Keep,
     }
 }
 
-/// How many of each kind have been claimed off this body so far.
-///
-/// A cap ("keep at most two healing kits") counts what the character
-/// will be carrying, so what has already been claimed off the body in
-/// front of it counts towards that. Judging every item against the pack
-/// as it was when the lid came up makes a cap of one take all four
-/// copies lying there -- each of them judged against a pack holding
-/// none, because none of them has arrived yet.
+/// How many of each wcid have been claimed off this body so far.
+/// A cap counts these too: none has reached the pack yet when the next copy is judged.
 #[derive(Clone, Debug, Default)]
 pub struct Claimed(std::collections::HashMap<u32, u32>);
 
@@ -145,21 +104,16 @@ impl Claimed {
 }
 
 impl Open {
-    /// The things still worth taking, dearest first is not the order --
-    /// a corpse is emptied in the order it lists, because the server
-    /// moves one at a time and the character wants the lot.
+    /// The things worth taking, in the corpse's own order, not dearest first:
+    /// the server moves one at a time and the character wants the lot.
     pub fn wanted(&self) -> impl Iterator<Item = &Lying> {
         self.items
             .iter()
             .filter(|i| matches!(i.verdict, Verdict::Take(_)))
     }
 
-    /// The things whose fate cannot be settled without the server.
-    ///
-    /// Only these are asked about. An identify is a round trip each,
-    /// and on a corpse of eight that is eight of them before anything
-    /// is picked up; a profile whose early rules ask about name, kind
-    /// and worth empties a corpse without a single one.
+    /// The things only the server can settle, not already being asked about.
+    /// Only these are identified: each identify is a round trip before anything is picked up.
     pub fn unjudged(&self) -> impl Iterator<Item = &Lying> {
         self.items
             .iter()
@@ -184,24 +138,18 @@ mod tests {
 
     #[test]
     fn your_own_corpse_gives_back_what_each_thing_was_already_for() {
-        // Everything on it comes back. What it is for is what it was
-        // for: the ring meant for a counter is still meant for one, and
-        // writing Keep over the lot is how a recovered pack becomes
-        // unsellable for good.
+        // Each thing keeps what it was for: Keep over the lot makes a recovered pack unsellable.
         assert_eq!(recovered(Some(LootAction::Sell)), LootAction::Sell);
         assert_eq!(recovered(Some(LootAction::Salvage)), LootAction::Salvage);
         assert_eq!(recovered(Some(LootAction::Keep)), LootAction::Keep);
-        // "Leave it" is not an answer about your own belongings, and
-        // neither is silence.
+        // Neither "leave it" nor silence is an answer about the character's own belongings.
         assert_eq!(recovered(Some(LootAction::Skip)), LootAction::Keep);
         assert_eq!(recovered(None), LootAction::Keep);
     }
 
     #[test]
     fn a_cap_counts_what_is_already_spoken_for_on_this_body() {
-        // Four healing kits on one corpse and a rule that says keep two.
-        // Judged against the pack alone, every one of the four is the
-        // first, and all four come home.
+        // Four kits on one corpse, a rule keeping two: judged against the pack alone, all four come.
         const KIT: u32 = 500;
         let mut claimed = Claimed::default();
         let carried = 0;
@@ -220,10 +168,8 @@ mod tests {
 
     #[test]
     fn a_verdict_carries_what_the_thing_is_wanted_for() {
-        // The whole reason it is not a bare `Take`: whoever picks the
-        // item up needs to know what it was picked up for, and asking
-        // the rules a second time gave a different answer whenever an
-        // appraisal had landed or a cap had filled in between.
+        // Pickup needs what the item was taken for; asking the rules again answers differently once
+        // an appraisal lands or a cap fills in between.
         let take = lying(1, Verdict::Take(LootAction::Salvage));
         assert_eq!(take.took(), Some(LootAction::Salvage));
         assert_eq!(lying(2, Verdict::Leave).took(), None);
