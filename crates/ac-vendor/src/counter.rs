@@ -8,6 +8,8 @@
 
 use std::collections::BTreeMap;
 
+pub use ac_loot::LootAction;
+
 /// One thing in the pack, as the shopping needs to see it.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Item {
@@ -36,11 +38,13 @@ pub struct Item {
     pub wielded: bool,
     /// Why it must not be sold, whatever any rule says.
     pub keep: Keep,
-    /// The player's own word that it goes: it was picked up under a
-    /// loot rule that said "sell", and the ledger has carried that
-    /// decision since. It is the one thing that beats the shopping
-    /// list (see [`Snapshot::offers`]).
-    pub to_sell: bool,
+    /// The player's own word on it, if the ledger has one: what it was
+    /// picked up for, carried with it since. "Sell" is the one thing
+    /// that beats the shopping list (see [`Snapshot::offers`]), and
+    /// two stacks are poured together only when their words agree
+    /// (see `Run::compress`), because a pour makes one stack of two
+    /// and one stack can carry only one word.
+    pub taken_for: Option<LootAction>,
 }
 
 /// The reasons an item is not for sale, whatever a profile says about
@@ -93,6 +97,11 @@ impl Keep {
 }
 
 impl Item {
+    /// The player's word that it goes.
+    pub fn to_sell(&self) -> bool {
+        self.taken_for == Some(LootAction::Sell)
+    }
+
     /// What one of them is worth.
     pub fn each(&self) -> u32 {
         self.value / self.stack.max(1)
@@ -254,6 +263,6 @@ impl Snapshot {
         // says: the skip is there to save a round trip, and it was
         // keeping a caster's peas in its pack for good.
         let wanted = self.wants.iter().any(|w| w.wcid == it.wcid && w.short > 0);
-        !wanted || it.to_sell
+        !wanted || it.to_sell()
     }
 }

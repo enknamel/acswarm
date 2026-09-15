@@ -707,12 +707,15 @@ pub struct Profile {
     pub note: String,
     /// In order. The first rule that claims an item decides it.
     pub rules: Vec<Rule>,
-    /// What to keep stocked. Membership of this list is a floor on
-    /// stock, and a guard for what the rules did not decide: a thing
-    /// the character buys is a thing the character uses, so one that
-    /// arrived with no rule claiming it is never offered to a counter
-    /// (`ac_loot::sale::offer_to_vendor`). It is not a rule over the
-    /// rules. What a rule wrote down when the item was taken is the
+    /// What to keep stocked. A line here is the player's word too,
+    /// read when a thing is judged: up to the line's count, the thing
+    /// is kept whatever the rules would make of it, and past the count
+    /// the rules answer (`ac_client::autoplay::judge_loot`). So the
+    /// tapers bought for the line are stock as they arrive, and a
+    /// surplus under "sell the rest" still goes. For a thing nothing
+    /// was decided about, membership is a guard against the counter
+    /// (`ac_loot::sale::offer_to_vendor`). It is not a rule over a
+    /// tag: what was written down when the item was taken is the
     /// player's word on that item, and this list does not answer back
     /// to it.
     #[serde(default)]

@@ -271,8 +271,21 @@ impl Run {
             .map(|c| c.max_value)
             .filter(|c| *c > 0);
         let worth = |guid: u32| snap.item(guid).map(|i| i.value).unwrap_or(0);
+        // And never pour two stacks whose words disagree. A pour makes
+        // one stack of two, and one stack carries one word: pouring a
+        // stack the player said to sell into one they said to keep, or
+        // into one nothing was decided about, settles the lot as kept
+        // (the ledger takes the cautious answer) or as undecided, and
+        // the counter is then offered none of it. That is how a Sell
+        // tag was quietly overruled by the tidy that runs before every
+        // sale. Kept apart, each stack keeps its word and goes where
+        // the word says.
+        let word = |guid: u32| snap.item(guid).map(|i| i.taken_for);
         let held = |from: u32, to: u32| {
             if self.wont_merge.held(&(from, to), now) {
+                return true;
+            }
+            if word(from) != word(to) {
                 return true;
             }
             match ceiling {
@@ -490,7 +503,7 @@ fn face_wcid(counter: &crate::counter::Counter, face: u32) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::counter::{Counter, Keep, Rules, Want, Ware};
+    use crate::counter::{Counter, Keep, LootAction, Rules, Want, Ware};
     use std::collections::BTreeMap;
 
     const COIN: u32 = 273; // the pyreal's own weenie
@@ -509,7 +522,7 @@ mod tests {
             pack: None,
             wielded: false,
             keep: Keep::default(),
-            to_sell: false,
+            taken_for: None,
         }
     }
 
@@ -822,7 +835,7 @@ mod tests {
         let mut run = Run::new();
         let mut pea = item(1, "Lead Pea", 500, 1, 100);
         pea.wcid = 8329;
-        pea.to_sell = true;
+        pea.taken_for = Some(LootAction::Sell);
         let mut taper = item(2, "Prismatic Taper", 2_000, 78, 1000);
         taper.wcid = 20631;
         let mut s = snap(vec![pea, taper]);
@@ -852,13 +865,79 @@ mod tests {
     }
 
     #[test]
+    fn a_stack_the_player_said_to_sell_is_not_poured_into_one_they_said_to_keep() {
+        // Two stacks of one kind, one word each: ten scarabs taken
+        // under "sell the rest" past a cap, and ninety-five the same
+        // rule kept. The tidy that runs before every sale used to pour
+        // the small stack into the large one, the ledger settled the
+        // whole as kept, and the counter was offered nothing -- the
+        // player's Sell overruled by a pour. The two stay apart, and
+        // the ten go over the counter whole.
+        let mut run = Run::new();
+        let mut to_sell = item(1, "Lead Scarab", 50, 10, 100);
+        to_sell.wcid = 691;
+        to_sell.taken_for = Some(LootAction::Sell);
+        let mut kept = item(2, "Lead Scarab", 475, 95, 100);
+        kept.wcid = 691;
+        kept.taken_for = Some(LootAction::Keep);
+        kept.keep.mine = true;
+        let s = snap(vec![to_sell, kept]);
+        let next = run.step(&s, Instant::now());
+        assert_eq!(
+            next.act,
+            Some(Act::Sell { items: vec![1] }),
+            "{}",
+            next.saying
+        );
+
+        // The same for a stack nothing was decided about: undecided is
+        // not the same word as "sell", and a pour would make it so.
+        let mut run = Run::new();
+        let mut to_sell = item(1, "Lead Scarab", 50, 10, 100);
+        to_sell.wcid = 691;
+        to_sell.taken_for = Some(LootAction::Sell);
+        let mut undecided = item(2, "Lead Scarab", 475, 95, 100);
+        undecided.wcid = 691;
+        undecided.keep.mine = true;
+        let s = snap(vec![to_sell, undecided]);
+        let next = run.step(&s, Instant::now());
+        assert_eq!(
+            next.act,
+            Some(Act::Sell { items: vec![1] }),
+            "{}",
+            next.saying
+        );
+
+        // Two stacks with the same word are still tidied.
+        let mut run = Run::new();
+        let mut a = item(1, "Lead Scarab", 50, 10, 100);
+        a.wcid = 691;
+        a.taken_for = Some(LootAction::Sell);
+        let mut b = item(2, "Lead Scarab", 100, 20, 100);
+        b.wcid = 691;
+        b.taken_for = Some(LootAction::Sell);
+        let s = snap(vec![a, b]);
+        let next = run.step(&s, Instant::now());
+        assert_eq!(
+            next.act,
+            Some(Act::Merge {
+                from: 1,
+                to: 2,
+                amount: 10
+            }),
+            "{}",
+            next.saying
+        );
+    }
+
+    #[test]
     fn the_counter_is_offered_only_what_it_buys() {
         // The panel's count and the selling ask one question. A
         // tailor's window takes armour and clothing; the pea is not for
         // sale there, whatever the player said about it.
         let mut pea = item(1, "Lead Pea", 500, 1, 100);
         pea.item_type = 0x1000;
-        pea.to_sell = true;
+        pea.taken_for = Some(LootAction::Sell);
         let mut s = snap(vec![pea, item(2, "Tunic", 300, 1, 1)]);
         s.items[1].item_type = 0x8;
         assert!(s.offers(&s.items[0]), "a counter that buys anything");

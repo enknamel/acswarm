@@ -7,3 +7,4 @@ license.workspace = true
 
 [dependencies]
 ac-agent = { path = "../ac-agent" }
+ac-loot = { path = "../ac-loot" }

@@ -32,7 +32,7 @@ fn thing(guid: u32, name: &str, value: u32, stack: u32, max: u32, wcid: u32) -> 
         pack: None,
         wielded: false,
         keep: Keep::default(),
-        to_sell: false,
+        taken_for: None,
     }
 }
 
@@ -242,7 +242,7 @@ fn apply(snap: &mut Snapshot, act: &Act, next_guid: &mut u32) {
                     pack: None,
                     wielded: false,
                     keep: Keep::default(),
-                    to_sell: false,
+                    taken_for: None,
                 });
                 *next_guid += 1;
                 snap.slots_free = snap.slots_free.saturating_sub(1);
