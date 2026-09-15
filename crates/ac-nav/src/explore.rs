@@ -1,38 +1,18 @@
-//! Finding the fight in a dungeon.
-//!
-//! A dungeon is described to a client a room at a time. The server
-//! sends the creatures standing in the cell the character is in and in
-//! the cells that one can see, and nothing else at all: Holtburg
-//! Dungeon holds fifty-eight creatures across seventy-four rooms, and
-//! the room its portal drops you in holds two monster generators, both
-//! of them server-side and never described to anybody. So a character
-//! that arrives and waits for something to fight waits for ever, and
-//! reports an empty dungeon. It was never empty; it was never walked.
-//!
-//! What comes out of here is the *next doorway*, not the next room:
-//! a room four rooms off is not a walk the router can plan, because the
-//! navigation lattice only covers what is loaded and a dungeon bends
-//! round corners the whole way. One room at a time is a few metres in
-//! a straight line, which is a walk anything can manage, and repeating
-//! it walks the dungeon.
+//! Finding the fight in a dungeon by walking it: [`next_step`] gives the next doorway.
+//! The server describes creatures only in the character's cell and the cells visible from it, so
+//! waiting finds nothing (Holtburg Dungeon: 58 creatures in 74 rooms; its portal room's two
+//! generators are server-side and never described).
+//! A doorway, not a far room: the navigation lattice covers only loaded cells and a dungeon bends.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-/// The openings out of a room: the cells its portals lead to. The cell
-/// data says this outright (an `EnvCell`'s portal list), so nothing
-/// here has to work it out from geometry.
+/// The cells a room's portals lead to, read from the `EnvCell`'s portal list rather than geometry.
 pub trait Doors {
     fn beyond(&self, cell: u32) -> Vec<u32>;
 }
 
-/// The room to step into next: the first doorway on the way to the
-/// nearest room not yet stood in. Rooms in `blocked` are ones that
-/// could not be got into, and are neither entered nor walked through.
-///
-/// `None` when every room reachable from here has been seen -- which is
-/// a dungeon walked, not a failure: the caller forgets what it has seen
-/// and walks it again, because what it came for has respawned behind
-/// it.
+/// The first doorway toward the nearest room not yet stood in; `blocked` rooms are neither entered
+/// nor crossed. `None` is a dungeon walked: the caller forgets `seen` and walks again for respawns.
 pub fn next_step(
     here: u32,
     doors: &impl Doors,
@@ -89,13 +69,10 @@ mod tests {
 
     #[test]
     fn a_room_further_off_is_walked_to_one_doorway_at_a_time() {
-        // Everything up to the end of the line is walked; the only room
-        // left is the branch off room two, three doorways back. The
-        // answer is the first of those three, not the branch itself.
+        // Only the branch off room 2 is unseen, three doorways back: each answer is the next
+        // doorway toward it, not the branch.
         assert_eq!(step(4, &[1, 2, 3, 4]), Some(3));
-        // And from there, the next one along.
         assert_eq!(step(3, &[1, 2, 3, 4]), Some(2));
-        // And now the branch is next door.
         assert_eq!(step(2, &[1, 2, 3, 4]), Some(9));
     }
 
@@ -106,12 +83,10 @@ mod tests {
 
     #[test]
     fn a_room_that_cannot_be_got_into_is_not_walked_through() {
-        // Room three will not admit us, so room four is unreachable and
-        // only the branch is left.
+        // Room 3 will not admit us, so room 4 is unreachable and only the branch is left.
         let seen = HashSet::from([1, 2]);
         let blocked = HashSet::from([3]);
         assert_eq!(next_step(2, &Map, &seen, &blocked), Some(9));
-        // With the branch walked as well there is nowhere left at all.
         let seen = HashSet::from([1, 2, 9]);
         assert_eq!(next_step(2, &Map, &seen, &blocked), None);
     }
