@@ -417,8 +417,9 @@ impl Rule {
 
 fn holds(ask: &Ask, item: &ItemStats, id: Option<&Appraisal>, me: &Wielder, name: &str) -> bool {
     match ask {
-        // Name conditions match whole words; search lines, like the inventory's, match part of one:
-        // "pea" is not in "Spear" (`the_starter_profile_is_one_a_player_would_recognise`).
+        // A name condition is a whole word: "pea" is not in "Spear"
+        // (`the_starter_profile_is_one_a_player_would_recognise`). A search line, like
+        // the inventory's, matches part of one.
         Ask::Item(Term::Word(w)) => item.has_word(w),
         Ask::Item(t) => item.matches_term(t),
         Ask::Search(line) => {
