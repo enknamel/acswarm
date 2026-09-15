@@ -291,6 +291,16 @@ pub struct WorldObject {
     pub display: Option<Position>,
     /// Server-issued move-to target, predicted locally until an update.
     pub target: Option<MoveTarget>,
+    /// The last object the server walked this one at (a MoveToObject),
+    /// kept until it walks at something else or is gone. `target` is
+    /// for prediction and every position report clears it, and a
+    /// server reports a chase's position five times a second, so
+    /// `target` shows a chase only for the moment between the walk and
+    /// the next report. A creature that has walked at something has
+    /// shown its temper, and this remembers it: on ACE only a monster
+    /// after its target and a pet after its owner walk at an object;
+    /// vendors, wanderers and emotes walk to positions.
+    pub walked_at: Option<u32>,
     /// The velocity the server last sent, in metres a second (world
     /// axes). A spell projectile is created with the one it flies at
     /// and gets no position updates on the way: `position` and this
@@ -727,6 +737,7 @@ impl World {
                             .unwrap_or_default(),
                         display: oc.position,
                         target: None,
+                        walked_at: None,
                         velocity: oc.velocity,
                         physics_state: oc.physics_state,
                         locked: previous.as_ref().and_then(|o| o.locked),
@@ -903,6 +914,9 @@ impl World {
                         run_rate: ev.run_rate,
                     };
                     o.target = ev.target;
+                    if let Some(MoveTarget::Object(at)) = ev.target {
+                        o.walked_at = Some(at);
+                    }
                     for &(cmd, seq, speed) in &ev.commands {
                         if o.commands.push(cmd, seq, speed) {
                             tracing::debug!(
@@ -2200,6 +2214,93 @@ mod tests {
             Some(MoveTarget::Object(CORPSE))
         );
         assert_eq!(MovementEvent::parse(&walk[4..]).unwrap().turn_to, None);
+    }
+
+    #[test]
+    fn a_creature_that_walked_at_something_is_remembered_past_the_next_position_report() {
+        // ACE chases with one MoveToObject and then a position report
+        // every monster tick, and a report clears `target`: read live,
+        // the chase shows for a fifth of a second in every second.
+        const DRUDGE: u32 = 0x8000_0001;
+        const CELL: u32 = 0x01F6_022F;
+        let mut world = World {
+            player_guid: Some(ME),
+            ..Default::default()
+        };
+        world.objects.insert(
+            DRUDGE,
+            WorldObject {
+                guid: DRUDGE,
+                position: Some(Position::new_flat(CELL, Vec3::new(40.0, -18.0, 0.0))),
+                ..Default::default()
+            },
+        );
+        let mut walk = Writer::new();
+        walk.u32(ME)
+            .u32(CELL)
+            .f32(33.0)
+            .f32(-18.0)
+            .f32(0.0)
+            .u32(0)
+            .f32(0.6)
+            .f32(0.0)
+            .f32(f32::MAX)
+            .f32(1.0)
+            .f32(15.0)
+            .f32(0.0)
+            .f32(1.5);
+        assert_eq!(
+            world.apply(&movement_event(DRUDGE, 6, &walk.finish())),
+            Applied::Moved
+        );
+        let drudge = &world.objects[&DRUDGE];
+        assert_eq!(drudge.target, Some(MoveTarget::Object(ME)));
+        assert_eq!(drudge.walked_at, Some(ME));
+        // The next report: the walk is the server's to predict now, and
+        // the chase is still a chase.
+        let mut report = Writer::new();
+        report
+            .u32(opcode::UPDATE_POSITION)
+            .u32(DRUDGE)
+            .u32(0)
+            .u32(CELL)
+            .f32(38.0)
+            .f32(-18.0)
+            .f32(0.0)
+            .f32(1.0)
+            .f32(0.0)
+            .f32(0.0)
+            .f32(0.0)
+            .u16(0)
+            .u16(0)
+            .u16(1)
+            .u16(1);
+        assert_eq!(world.apply(&report.finish()), Applied::Moved);
+        let drudge = &world.objects[&DRUDGE];
+        assert_eq!(drudge.target, None);
+        assert_eq!(drudge.walked_at, Some(ME));
+        // A walk to a position (home, or where an emote sends it) is
+        // no one's business and changes nothing.
+        let mut home = Writer::new();
+        home.u32(CELL)
+            .f32(50.0)
+            .f32(-18.0)
+            .f32(0.0)
+            .u32(0)
+            .f32(0.6)
+            .f32(0.0)
+            .f32(f32::MAX)
+            .f32(1.0)
+            .f32(15.0)
+            .f32(0.0)
+            .f32(1.5);
+        assert_eq!(
+            world.apply(&movement_event(DRUDGE, 7, &home.finish())),
+            Applied::Moved
+        );
+        let drudge = &world.objects[&DRUDGE];
+        assert!(matches!(drudge.target, Some(MoveTarget::Position { .. })));
+        assert_eq!(drudge.walked_at, Some(ME));
     }
 
     /// A whole GameEvent message: opcode, our guid, sequence, event, body.

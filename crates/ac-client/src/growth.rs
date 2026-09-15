@@ -7750,15 +7750,14 @@ mod tests {
         assert!(!c.would_fight(&it, &fight, false, now));
 
         // Unless it swings: the road does not get to decide that.
-        c.autoplay.last_hit_us = Some(now);
-        c.autoplay.hit_by = Some(("Revenant".into(), now));
+        c.autoplay.attacked_by("Revenant", now);
         assert!(!c.passing_by(&it, &fight));
         assert!(c.would_fight(&it, &fight, false, now));
         // Which says nothing about the one standing next to it.
         let other = standing_by(&mut c, 0x8000_0002, "Drudge Skulker", 6.0);
         assert!(c.passing_by(&other, &fight));
         c.autoplay.last_hit_us = None;
-        c.autoplay.hit_by = None;
+        c.autoplay.hit_by.clear();
 
         // Named in "only these", it is still the road. The list says which
         // kind to hunt at the far end, and every creature the fight could
@@ -7781,7 +7780,7 @@ mod tests {
                 name: "Fire Elemental".into(),
                 item_type: ac_world::item_type::CREATURE,
                 pet_owner: 0x5000_0001,
-                target: Some(ac_world::object::MoveTarget::Object(it.guid)),
+                walked_at: Some(it.guid),
                 ..Default::default()
             },
         );
@@ -7926,8 +7925,7 @@ mod tests {
             "turned back for the party"
         );
         // Until the Drudge attacks the character itself.
-        c.autoplay.last_hit_us = Some(Instant::now());
-        c.autoplay.hit_by = Some(("Drudge Skulker".into(), Instant::now()));
+        c.autoplay.attacked_by("Drudge Skulker", Instant::now());
         assert!(c.joins_the_team_on(drudge.guid, &fight));
     }
 

@@ -926,6 +926,7 @@ impl Client {
                             }
                         }
                     }
+                    self.forget_the_departed(&msg);
                     match self.world.apply(&msg) {
                         ac_world::Applied::PlayerSet => {
                             // The server ignores our positions until we say we landed.
@@ -1900,7 +1901,7 @@ impl Client {
                     self.autoplay.last_hit_us = Some(Instant::now());
                     match ac_net::messages::AttackNotice::parse_defender(rest) {
                         Ok(n) => Ok({
-                            self.autoplay.hit_by = Some((n.name.clone(), Instant::now()));
+                            self.autoplay.attacked_by(&n.name, Instant::now());
                             ChatLine {
                                 text: format!(
                                     "{} {} you for {} points.",
@@ -1941,7 +1942,7 @@ impl Client {
                     self.autoplay.last_hit_us = Some(Instant::now());
                     match ac_net::wire::Reader::new(rest).string16() {
                         Ok(n) => Ok({
-                            self.autoplay.hit_by = Some((n.clone(), Instant::now()));
+                            self.autoplay.attacked_by(&n, Instant::now());
                             ChatLine {
                                 text: format!("You evade {n}'s attack."),
                                 sender: String::new(),
@@ -2996,6 +2997,37 @@ impl Client {
             self.appraisal_seq += 1;
         }
         self.appraisals.insert(a.guid, a);
+    }
+
+    /// A creature the server lets go of takes its appraisal with it.
+    /// ACE reuses a guid six hours after the thing that had it is gone
+    /// (`GuidManager`), and a session runs longer than that: kept, the
+    /// answer about a Drudge was read as the answer about the Cow that
+    /// got its guid, and the Cow was fought on it. A creature that only
+    /// went out of range is let go of the same way and asked about
+    /// afresh when it comes back, which costs one question. Corpses and
+    /// items keep theirs: the loot rules read those, and a guid that
+    /// was a corpse comes back as nothing the loot rules would be asked
+    /// about before the answer has long stopped mattering.
+    fn forget_the_departed(&mut self, msg: &[u8]) {
+        use ac_net::messages::{opcode, split};
+        let Some((opcode::OBJECT_DELETE, body)) = split(msg) else {
+            return;
+        };
+        let Some(guid) = body
+            .get(..4)
+            .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+        else {
+            return;
+        };
+        let creature = self
+            .world
+            .objects
+            .get(&guid)
+            .is_some_and(|o| o.item_type & ac_world::item_type::CREATURE != 0 && !o.is_player);
+        if creature {
+            self.appraisals.remove(&guid);
+        }
     }
 
     /// Use an object where it is (Use 0x0036), never picking it up: read
