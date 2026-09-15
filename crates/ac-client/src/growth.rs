@@ -2474,6 +2474,12 @@ impl Client {
         // picking their own corner scatter the party across the ground
         // instead of moving it.
         let goes_looking = self.followed_leader().is_none();
+        // A leader moves the party, not itself: it waits for a follower
+        // still fighting or left behind before it goes anywhere (see
+        // `Client::waits_for_stragglers`).
+        if goes_looking && self.waits_for_stragglers(now) {
+            return false;
+        }
         // A hunting area is where the hunting is: no other ground is gone
         // to. An outline is walked about, corner by corner, well inside
         // it; a dungeon is the explorer's to walk.

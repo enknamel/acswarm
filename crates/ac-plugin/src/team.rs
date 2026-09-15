@@ -38,6 +38,7 @@ use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 use ac_client::autoplay::{Mate, TeamView};
+use ac_client::plan::Plan;
 use serde_json::Value;
 
 use crate::{Ctx, Plugin};
@@ -49,6 +50,10 @@ pub const MATE_TOPIC: &str = "autoplay.mate";
 /// `action` is a [`Request`] word. The team plugin in the process named
 /// applies it to the session named (see [`Request::apply`]).
 pub const REQUEST_TOPIC: &str = "fleet.request";
+/// The topic the leader's plan for the party goes out on, once a board
+/// round: an `ac_client::plan::Plan`. Every session on the team takes its
+/// orders from the plan of the leader it sees, and from nobody else's.
+pub const PLAN_TOPIC: &str = "autoplay.plan";
 /// How often each session speaks.
 const SAY_EVERY: Duration = Duration::from_millis(500);
 /// A mate not heard from for this long has gone.
@@ -375,6 +380,7 @@ pub fn describe(client: &ac_client::Client, session: usize) -> Option<Mate> {
         shut: client.autoplay.shuts_to_say(Instant::now()),
         opened_first: client.autoplay.opened_first(Instant::now()),
         opens_bodies: client.opens_bodies(),
+        hit_by: client.attackers_lately(),
     })
 }
 
@@ -437,6 +443,13 @@ impl Plugin for Team {
             self.roster.hear(&process, from, mate, now);
         }
         self.roster.forget_quiet(now);
+        // The plans heard this frame, whoever made them: which to obey is
+        // decided against the view below.
+        let plans: Vec<Plan> = cx
+            .board
+            .messages_on(PLAN_TOPIC)
+            .filter_map(|m| serde_json::from_value(m.value.clone()).ok())
+            .collect();
         // What another process's fleet view asked of this session. (The
         // fleet view here applies its own asks directly.)
         let asked: Vec<Request> = cx
@@ -486,10 +499,31 @@ impl Plugin for Team {
             // has been quiet a while.
             client.take_in_shuts();
         }
+        // The leader plans for the party once a round, and holds its own
+        // orders; everyone else takes the orders of the leader it sees.
+        // A plan from anyone else -- a leader since replaced, a fleet
+        // this one is not on -- is left alone (see `ac_client::plan`).
+        let plan = if client.autoplay.team.leader {
+            (due && client.autoplay.team.settled && client.autoplay.config.enabled)
+                .then(|| client.plan_for_team(now))
+        } else {
+            let leader = client.autoplay.team.leader_mate().map(|m| m.name.clone());
+            for plan in plans {
+                if Some(&plan.leader) == leader.as_ref() {
+                    client.autoplay.take_orders(plan, now);
+                }
+            }
+            None
+        };
         // And say our piece, a few times a second.
         if due {
             if let Ok(value) = serde_json::to_value(&me) {
                 cx.post(MATE_TOPIC, value);
+            }
+        }
+        if let Some(plan) = plan {
+            if let Ok(value) = serde_json::to_value(&plan) {
+                cx.post(PLAN_TOPIC, value);
             }
         }
     }
@@ -798,6 +832,55 @@ mod tests {
         assert_eq!(
             (heard[0].0, heard[0].1, heard[0].2.name.as_str()),
             ("bob", 1, "Brannoc")
+        );
+    }
+
+    #[test]
+    fn a_session_takes_the_plan_of_the_leader_it_sees_and_no_other() {
+        // The plan crosses the board as JSON like everything else, and
+        // is obeyed only while it is fresh and signed by the leader the
+        // roster names: a plan from a leader since replaced, or from a
+        // leader gone quiet, orders nobody about.
+        let t0 = Instant::now();
+        let mut plan = Plan {
+            leader: "+Admin".into(),
+            n: 1,
+            ..Default::default()
+        };
+        plan.orders.insert(
+            2,
+            ac_client::plan::Order {
+                target: Some(0x77),
+                body: None,
+            },
+        );
+        let json = serde_json::to_value(&plan).expect("a plan is JSON");
+        let back: Plan = serde_json::from_value(json).expect("and comes back");
+        assert_eq!(back, plan);
+
+        let mut r = Roster::default();
+        let me = mate("Reborn", 2);
+        r.hear("other", 0, mate("+Admin", 1), t0);
+        r.hear("other", 1, mate("Zed", 3), t0);
+        let v = r.view_for(&me);
+        assert_eq!(v.leader_mate().map(|m| m.name.as_str()), Some("+Admin"));
+        let mut ap = ac_client::autoplay::Autoplay::default();
+        ap.config.team.enabled = true;
+        ap.team = v;
+        ap.take_orders(
+            Plan {
+                leader: "Zed".into(),
+                ..plan.clone()
+            },
+            t0,
+        );
+        assert_eq!(ap.order_for(2, t0), None, "a plan from one not leading");
+        ap.take_orders(plan, t0);
+        assert_eq!(ap.order_for(2, t0).and_then(|o| o.target), Some(0x77));
+        assert_eq!(
+            ap.order_for(2, t0 + ac_client::plan::ORDERS_LAST),
+            None,
+            "the leader gone quiet"
         );
     }
 
