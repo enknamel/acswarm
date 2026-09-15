@@ -255,9 +255,10 @@ fn main() {
 }
 
 /// Every landblock in the world: which models at least `minsize` big
-/// would have no collision at all under the client's own rule (no part
-/// with physics polygons, no Setup cylinder or sphere). These are the
-/// models the drawing-polygon fallback is currently keeping solid.
+/// have no collision at all under the client's own rule (no part with
+/// physics polygons, no Setup cylinder or sphere). Collision follows
+/// that rule, so these are walked through, as the client walked
+/// through them; the scan says what that amounts to.
 fn world_scan(assets: &Assets, minsize: f32) {
     let mut kind: HashMap<u32, Option<(f32, f32)>> = HashMap::new();
     let mut counts: HashMap<u32, usize> = HashMap::new();

@@ -16,10 +16,12 @@
 //! ramp, and the character fell through the ramp -- and ran on through
 //! the air past the end of the floor below.
 //!
-//! Over the rooms 0x01F6022C, 022D, 023B and 023C the vaults rise into
-//! the cells 0x01F60291, 0292, 0297 and 0298, and the tops of their ribs
-//! are floor as far as the geometry is concerned: seven or eight metres
-//! up, unrailed, with nothing joining them to the rooms below.
+//! In 0x01F6026C a ledge stands four metres over the room's floor,
+//! unrailed on its west side, with nothing in the graph joining the two.
+//! (The vault ribs over 0x01F6022C were the ledge these tests first
+//! stood on: seven metres up, and floor only because the ribs' drawing
+//! polygons were built as collision. The retail client never collided
+//! with them, and now nor does this one.)
 
 use ac_client::pathfinder::Pathfinder;
 use ac_client::player::{Input, MovementLimits, Player};
@@ -173,52 +175,59 @@ fn chase(
     frames
 }
 
-/// The top of a rib in 0x01F60291, over the room 0x01F6022C, where the
+/// A ledge in 0x01F6026C, four metres over the room's floor, where the
 /// graph stands an island of nodes.
-const RIB: Vec3 = Vec3::new(225.0, 47_166.0, 7.2);
-const RIB_CELL: u32 = 0x01F6_0291;
-/// The floor of the room below, off the rib's open south-west side.
-const BELOW: Vec3 = Vec3::new(218.0, 47_159.0, 0.0);
-/// Somewhere to stand in the room below, with the rib ahead and above.
+const LEDGE: Vec3 = Vec3::new(261.0, 47_185.0, 3.9);
+const LEDGE_CELL: u32 = 0x01F6_026C;
+/// The floor of the room below, off the ledge's open west side.
+const BELOW: Vec3 = Vec3::new(258.5, 47_185.0, 0.0);
+/// A higher ledge over the same room, in 0x01F6029C, ten metres up
+/// with open floor all the way to the spot under it.
+const HIGH_LEDGE: Vec3 = Vec3::new(262.0, 47_182.0, 9.5);
+/// The room's floor three metres short of standing under it.
+const UNDER: Vec3 = Vec3::new(262.0, 47_179.0, 0.0);
+/// Somewhere to stand in the room 0x01F6022C, with the storey below it
+/// out of sight and out of reach.
 const ROOM: Vec3 = Vec3::new(223.5, 47_158.5, 0.0);
 const ROOM_CELL: u32 = 0x01F6_022C;
 
 #[test]
-fn a_straight_walk_off_a_vault_rib_onto_the_floor_below_is_leaned_on() {
+fn a_straight_walk_off_a_ledge_onto_the_floor_below_is_leaned_on() {
     let Some(assets) = assets() else {
         return;
     };
-    let rib = floor(&assets, RIB);
-    assert!(rib.z > 6.0, "not up on the rib: {rib}");
+    let ledge = floor(&assets, LEDGE);
+    assert!(ledge.z > 3.0, "not up on the ledge: {ledge}");
     let goal = floor(&assets, BELOW);
-    let mut pl = stand(&assets, RIB_CELL, rib);
-    assert!(pl.line_blocked(&assets, DUNGEON, rib, goal));
+    let mut pl = stand(&assets, LEDGE_CELL, ledge);
+    assert!(pl.line_blocked(&assets, DUNGEON, ledge, goal));
     assert!(
-        pl.find_path(&assets, DUNGEON, rib, goal, DUNGEON).is_none(),
-        "the rib is an island: nothing leads down from it"
+        pl.find_path(&assets, DUNGEON, ledge, goal, DUNGEON)
+            .is_none(),
+        "the ledge is an island: nothing leads down from it"
     );
     // Off the edge onto the room's floor is the only way down there is,
-    // and a fall that lands. Refused, the character stood on the rib for
-    // as long as what it wanted stayed below.
-    assert!(!pl.line_drops(&assets, DUNGEON, rib, goal));
+    // and a fall that lands. Refused, the character stood on the ledge
+    // for as long as what it wanted stayed below.
+    assert!(!pl.line_drops(&assets, DUNGEON, ledge, goal));
     assert_eq!(steer(&assets, &mut pl, goal), Aim::Go(goal));
     let frames = chase(&assets, &mut pl, None, goal, 1.0 / 30.0, 4.0);
     let (end, air) = *frames.last().unwrap();
     assert!(
         !air && end.z.abs() < 0.5 && Vec2::new(goal.x - end.x, goal.y - end.y).length() < 3.0,
-        "leaned off the rib and came to {end}"
+        "leaned off the ledge and came to {end}"
     );
 }
 
 #[test]
-fn a_straight_walk_from_the_floor_to_a_goal_up_on_a_rib_is_refused() {
+fn a_straight_walk_from_the_floor_to_a_goal_up_on_a_ledge_is_refused() {
     let Some(assets) = assets() else {
         return;
     };
-    let me = floor(&assets, ROOM);
-    let goal = floor(&assets, RIB);
-    assert!(goal.z > 6.0, "not up on the rib: {goal}");
-    let mut pl = stand(&assets, ROOM_CELL, me);
+    let me = floor(&assets, UNDER);
+    let goal = floor(&assets, HIGH_LEDGE);
+    assert!(goal.z > 9.0, "not up on the ledge: {goal}");
+    let mut pl = stand(&assets, LEDGE_CELL, me);
     assert!(pl.line_blocked(&assets, DUNGEON, me, goal));
     assert!(pl.find_path(&assets, DUNGEON, me, goal, DUNGEON).is_none());
     // Nothing solid in the way and floor all the way to the spot under
@@ -226,6 +235,27 @@ fn a_straight_walk_from_the_floor_to_a_goal_up_on_a_rib_is_refused() {
     // and push, for ever.
     assert!(pl.line_drops(&assets, DUNGEON, me, goal));
     assert_eq!(steer(&assets, &mut pl, goal), Aim::NoWay);
+}
+
+#[test]
+fn a_goal_on_the_storey_above_is_climbed_to_by_the_stairs_not_pushed_under() {
+    let Some(assets) = assets() else {
+        return;
+    };
+    // The lower storey under 0x01F6021D, with the goal on the room's
+    // floor six metres straight up: the walk there keeps the lower
+    // floor all the way and ends a storey under the goal, and the
+    // graph knows the stairs.
+    let me = floor(&assets, Vec3::new(216.0, 47_152.0, -6.0));
+    let goal = floor(&assets, Vec3::new(216.0, 47_152.0, 0.0));
+    assert!(goal.z - me.z > 5.0, "{me} is not a storey under {goal}");
+    let mut pl = stand(&assets, 0x01F6_01B6, me);
+    assert!(pl.line_blocked(&assets, DUNGEON, me, goal));
+    assert!(pl.line_drops(&assets, DUNGEON, me, goal));
+    match steer(&assets, &mut pl, goal) {
+        Aim::Go(to) => assert!(to.distance(goal) > 1.0, "ran straight at the storey above"),
+        Aim::NoWay => panic!("refused a goal the stairs lead to"),
+    }
 }
 
 #[test]
@@ -301,14 +331,14 @@ fn the_stair_corridor_is_walked_not_refused() {
 }
 
 #[test]
-fn a_fall_off_a_rib_onto_the_floor_below_still_lands_there() {
+fn a_fall_off_a_ledge_onto_the_floor_below_still_lands_there() {
     let Some(assets) = assets() else {
         return;
     };
-    let rib = floor(&assets, RIB);
-    let mut pl = stand(&assets, RIB_CELL, rib);
+    let ledge = floor(&assets, LEDGE);
+    let mut pl = stand(&assets, LEDGE_CELL, ledge);
     // Straight off it, the way the refused walk would have gone.
-    pl.heading = (-(BELOW.x - rib.x)).atan2(BELOW.y - rib.y);
+    pl.heading = (-(BELOW.x - ledge.x)).atan2(BELOW.y - ledge.y);
     let run = Input {
         forward: 1.0,
         run: true,
@@ -323,7 +353,7 @@ fn a_fall_off_a_rib_onto_the_floor_below_still_lands_there() {
         }
     }
     let end = pl.world_position();
-    assert!(fell, "never left the rib: {end}");
+    assert!(fell, "never left the ledge: {end}");
     assert!(!pl.is_airborne(), "still falling at {end}");
     assert!(end.z.abs() < 0.5, "a real fall lands on the floor: {end}");
     assert!(
@@ -569,29 +599,40 @@ fn a_character_put_back_on_its_feet_tells_the_server_at_once_standing_still() {
 }
 
 #[test]
-fn a_step_down_from_an_upper_floor_the_graph_has_no_way_down_from_is_leaned_on() {
+fn the_stairs_down_from_an_upper_floor_are_found_and_walked() {
     let Some(assets) = assets() else {
         return;
     };
     // Upstairs in a Holtburg house, on a floor reached on foot from the
     // lifestone; the goal in the room under it, two and a half metres
-    // down over the edge, where the graph stands a single node with no
-    // way to it.
+    // down over the edge. The graph used to stand a single node down
+    // there with no way to it, and the character stepped off the edge:
+    // the stairs were walled off by the drawing polygons of a banister
+    // the client never collided with. Built by the client's own rule
+    // they are stairs, the graph finds them, and the way down is walked.
     const HOLTBURG: u32 = 0xA9B4_0000;
     let me = Vec3::new(32_553.0, 34_594.5, 97.5);
-    let goal = Vec3::new(32_550.17, 34_597.33, 94.92);
+    let goal = Vec3::new(32_550.17, 34_597.33, 94.0);
     let mut pl = stand(&assets, 0xA9B4_0160, me);
     assert!(pl.line_blocked(&assets, HOLTBURG, me, goal));
-    assert!(pl
+    let route = pl
         .find_path(&assets, HOLTBURG, me, goal, HOLTBURG)
-        .is_none());
+        .expect("the stairs down");
+    assert!(route.len() > 4, "not the stairs: {route:?}");
     assert!(!pl.line_drops(&assets, HOLTBURG, me, goal));
-    assert_eq!(steer(&assets, &mut pl, goal), Aim::Go(goal));
-    let frames = chase(&assets, &mut pl, None, goal, 1.0 / 30.0, 4.0);
+    match steer(&assets, &mut pl, goal) {
+        Aim::Go(to) => assert!(to.distance(goal) > 1.0, "stepped off the edge instead"),
+        Aim::NoWay => panic!("refused the stairs"),
+    }
+    let frames = chase(&assets, &mut pl, None, goal, 1.0 / 30.0, 12.0);
     let (end, air) = *frames.last().unwrap();
     assert!(
         !air && (end.z - goal.z).abs() < 0.5
             && Vec2::new(goal.x - end.x, goal.y - end.y).length() < 3.0,
-        "stepped off toward {goal} and came to {end}"
+        "walked the stairs toward {goal} and came to {end}"
+    );
+    assert!(
+        frames.iter().all(|(_, air)| !air),
+        "left the stairs on the way down"
     );
 }

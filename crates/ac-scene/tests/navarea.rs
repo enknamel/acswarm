@@ -40,7 +40,7 @@ fn a_walk_into_sanamar_goes_round_the_walls_not_into_them() {
     assert!(!area.dungeon);
     assert_eq!(area.blocks.len(), 9, "a full neighbourhood around the town");
     assert!(
-        area.collision.tris.len() > 50_000,
+        area.collision.tris.len() > 30_000,
         "the walls and buildings are there: {} triangles",
         area.collision.tris.len()
     );

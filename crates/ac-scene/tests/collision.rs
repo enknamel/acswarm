@@ -35,6 +35,74 @@ fn holtburg_walls_push_and_floors_hold() {
     assert_eq!(cell, 0x8602_01AD, "spawn cell from the floor triangle");
 }
 
+/// What the client collided with a placed model by, and so what we
+/// build: a model with physics polygons its physics polygons, a model
+/// with none the cylinder of its Setup, and a model with neither
+/// nothing at all -- the retail client walked through it, and so must
+/// the character here. The Holtburg Dungeon places two hundred and
+/// fifty arches, door frames and beams of the last kind, and building
+/// their drawing polygons instead caught the character on every one.
+#[test]
+fn a_placed_model_collides_by_what_the_client_collided_by() {
+    let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
+        return;
+    };
+    let assets = Assets::open(dir).unwrap();
+    let cap = Capsule::default();
+    // The arch over the Holtburg Dungeon's doorways: drawing polygons
+    // only, four metres across, placed twenty-four times in 0x01F6.
+    let mut arch = CollisionWorld::default();
+    arch.add_model(&assets, 0x0200_0382, glam::Mat4::IDENTITY, 0);
+    assert!(
+        arch.tris.is_empty(),
+        "an arch the client walked through has {} tris",
+        arch.tris.len()
+    );
+    // A Holtburg post: no physics polygons, a cylinder in its Setup.
+    // Solid, by the cylinder: a capsule at its middle is pushed out.
+    let mut post = CollisionWorld::default();
+    post.add_model(&assets, 0x0200_040b, glam::Mat4::IDENTITY, 0);
+    assert!(!post.tris.is_empty(), "a post is air");
+    assert!(post.wall_contact(Vec3::ZERO, cap.radius, cap.height, 0.0));
+    // A Holtburg house (a bare GfxObj) keeps its physics polygons and
+    // nothing else.
+    let mut house = CollisionWorld::default();
+    house.add_model(&assets, 0x0100_0c1e, glam::Mat4::IDENTITY, 0);
+    let g = assets.gfxobj(0x0100_0c1e).unwrap();
+    assert!(!g.physics_polygons.is_empty());
+    assert!(house.tris.len() >= g.physics_polygons.len());
+    assert!(house.tris.len() < g.physics_polygons.len() + g.polygons.len());
+}
+
+/// The cylinder a model without physics polygons collides by is solid
+/// on its sides and stood on at its top, as a crate is.
+#[test]
+fn a_setup_cylinder_is_bumped_into_and_stood_on() {
+    let mut w = CollisionWorld::default();
+    floor(&mut w, -5.0, 5.0, 0.0, 0);
+    w.add_cylinder(Vec3::ZERO, 0.5, 1.0, 0);
+    let cap = Capsule::default();
+    // Walked at in strides of a third of a metre, as the physics does:
+    // held off it, sliding round its side as a wall slides a walker,
+    // never inside it. The prism's faces stand at the twelve-gon's
+    // inscribed radius.
+    let side = 0.5 * (std::f32::consts::PI / 12.0).cos();
+    let mut at = Vec3::new(-2.0, 0.0, 0.0);
+    for _ in 0..12 {
+        at = w.walk(at, at + Vec3::new(0.3, 0.0, 0.0), &cap).pos;
+        let off = glam::Vec2::new(at.x, at.y).length();
+        assert!(
+            off >= side + cap.radius - 2e-2,
+            "walked into the crate: {at}"
+        );
+    }
+    assert!(at.x > -1.4, "never got up to the crate: {at}");
+    let (z, _) = w
+        .floor_at(Vec3::new(0.0, 0.0, 1.2), 1.0, 3.0)
+        .expect("a top to stand on");
+    assert!((z - 1.0).abs() < 1e-4, "top at {z}");
+}
+
 fn ac_world_origin(cell: u32) -> Vec3 {
     Vec3::new(
         (cell >> 24) as f32 * 192.0,

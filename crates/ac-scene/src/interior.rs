@@ -24,6 +24,10 @@ pub struct CellScene {
     pub transform: Mat4,
     pub submeshes: Vec<SubMesh>,
     pub parts: Vec<PlacedPart>,
+    /// The cell's static objects before expansion into parts:
+    /// `(model id, world transform)`, for collision (see
+    /// [`crate::landblock::LandblockScene::placements`]).
+    pub placements: Vec<(u32, Mat4)>,
     /// Lights carried by the cell's static objects, in world space.
     pub lights: Vec<CellLight>,
     /// Full ids of the cells behind this cell's portals.
@@ -134,9 +138,14 @@ pub fn load_cells(
         // client places them by the block's frame alone (as does ACViewer
         // with its landblock matrix).
         let mut parts = Vec::new();
+        let mut placements: Vec<(u32, Mat4)> = Vec::new();
         for stab in &cell.static_objects {
-            match place(assets, stab.id, origin * frame_to_mat(&stab.frame)) {
-                Ok(p) => parts.extend(p),
+            let world = origin * frame_to_mat(&stab.frame);
+            match place(assets, stab.id, world) {
+                Ok(p) => {
+                    placements.push((stab.id, world));
+                    parts.extend(p)
+                }
                 Err(e) => tracing::warn!("cell static {:#010x}: {e}", stab.id),
             }
         }
@@ -190,6 +199,7 @@ pub fn load_cells(
             transform,
             submeshes,
             parts,
+            placements,
             lights,
             portal_cells,
             doorways,
