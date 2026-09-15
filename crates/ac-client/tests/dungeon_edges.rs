@@ -636,3 +636,59 @@ fn the_stairs_down_from_an_upper_floor_are_found_and_walked() {
         "left the stairs on the way down"
     );
 }
+
+/// The doorway between 0x01F60216 and 0x01F60215, sill at (202, 47177),
+/// a wall along x with the way through along y. Brynvor came at it on
+/// 2026-09-15 from the corner of 0x01F60216 and stood half a metre past
+/// it, at `JAMB_215`, for ten seconds at a time, five times in ten
+/// minutes: the explore had aimed two and a half metres past the sill
+/// along that diagonal, into the corridor's side wall.
+const JAMB_215: Vec3 = Vec3::new(201.43, 47_177.42, 0.0);
+const JAMB_CELL: u32 = 0x01F6_0215;
+const JAMB_SILL: Vec3 = Vec3::new(202.0, 47_177.0, 0.1);
+
+#[test]
+fn the_way_into_a_corridor_is_through_its_door_not_into_its_wall() {
+    let Some(assets) = assets() else {
+        return;
+    };
+    let scene = ac_scene::landblock::load(&assets, DUNGEON).unwrap();
+    let cell = scene.cells.iter().find(|c| c.cell_id == JAMB_CELL).unwrap();
+    let (i, sill) = cell
+        .doorways
+        .iter()
+        .enumerate()
+        .min_by(|a, b| a.1.distance(JAMB_SILL).total_cmp(&b.1.distance(JAMB_SILL)))
+        .unwrap();
+    assert!(sill.distance(JAMB_SILL) < 0.2, "sill {sill:?}");
+    let n = cell.doorway_normals[i];
+    assert!(
+        n.x.abs() < 0.05 && n.y.abs() > 0.99,
+        "through the wall along y: {n:?}"
+    );
+    // Where the old rule aimed there is no floor, and nor is there
+    // straight through: the corridor beyond runs north-east from its
+    // door. The floor rule turns the aim into it.
+    let coll = assets.block_collision(DUNGEON).unwrap();
+    let has_floor = |p: Vec3| coll.world.floor_at(p, 0.6, 1.5).is_some();
+    assert!(!has_floor(Vec3::new(200.32, 47_178.85, 0.1)));
+    let straight = Vec3::new(202.0, 47_179.5, 0.1);
+    assert!(!has_floor(straight));
+    let aim = ac_client::explore::aim_on_floor(JAMB_SILL, straight, has_floor);
+    assert!(has_floor(aim), "{aim:?}");
+    assert!(
+        aim.x > 203.0 && aim.y > 47_178.0,
+        "into the corridor: {aim:?}"
+    );
+    // And from the jamb, a walk to it arrives.
+    let me = floor(&assets, JAMB_215);
+    let goal = floor(&assets, aim);
+    let mut pl = stand(&assets, JAMB_CELL, me);
+    let frames = chase(&assets, &mut pl, None, goal, 0.05, 3.0);
+    let (end, _) = frames.last().unwrap();
+    let left = Vec2::new(goal.x - end.x, goal.y - end.y).length();
+    assert!(
+        left < 2.6,
+        "still {left:.2} m from the point through the door"
+    );
+}

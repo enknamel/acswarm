@@ -54,31 +54,154 @@ impl Doors for Rooms<'_> {
     }
 }
 
-/// Where to walk to to be in `room`: through the opening between us and
-/// it, and a couple of paces beyond, so that the character ends up
-/// inside rather than standing in the doorway.
-fn way_into(cells: &[CellScene], room: u32, from: Vec3) -> Option<Vec3> {
-    let cell = cells.iter().find(|c| c.cell_id == room)?;
-    let Some(sill) = cell
-        .doorways
-        .iter()
-        .copied()
-        .min_by(|a, b| a.distance(from).total_cmp(&b.distance(from)))
-    else {
-        // No opening in the data: the middle of the cell structure is
-        // the best guess there is.
-        return Some(cell.transform.transform_point3(Vec3::ZERO));
-    };
+/// A walk into the next room: where we set out from, the room, the
+/// point past its threshold we are aiming at, and whether that point
+/// has already been pushed further in once because reaching it did not
+/// put us in the room.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RoomWalk {
+    pub from: u32,
+    pub room: u32,
+    pub at: Vec3,
+    pub pushed: bool,
+}
+
+/// The point to aim at to be through a doorway whose sill is at `sill`
+/// and whose wall stands across `normal` (a unit vector on the map,
+/// pointing either way through it), coming from `from` and facing
+/// `facing`: `past` metres beyond the sill, straight through the wall,
+/// on the far side from where we came.
+///
+/// Straight through, not along the line we approached on: a character
+/// coming at a corridor's door from the corner of the room before it
+/// was sent two and a half metres past the sill on that diagonal, into
+/// the corridor's side wall, where there was no floor to reach and every
+/// step was a centimetre of jitter for ten seconds. Which side is the
+/// far side is read off where we stand; standing on the sill itself
+/// there is no side, and the way we face -- the way we were walking --
+/// says. Aiming at the sill from the sill was the other stall: the walk
+/// had arrived by its own measure while the server still had the
+/// character in the room it started in.
+fn past_the_door(sill: Vec3, normal: Vec3, from: Vec3, facing: glam::Vec2, past: f32) -> Vec3 {
     let across = glam::Vec2::new(sill.x - from.x, sill.y - from.y);
-    let on = if across.length() > 0.1 {
-        across.normalize() * PAST_THE_DOOR
+    let n = glam::Vec2::new(normal.x, normal.y);
+    let through = if n.length() > 0.5 {
+        let side = across.dot(n);
+        let ahead = facing.dot(n);
+        if side.abs() >= STOP * 0.5 {
+            n * side.signum()
+        } else if ahead.abs() > 0.1 {
+            n * ahead.signum()
+        } else {
+            n
+        }
+    } else if across.length() >= STOP {
+        across.normalize()
+    } else if facing.length() > 0.1 {
+        facing.normalize()
     } else {
         glam::Vec2::ZERO
     };
-    Some(Vec3::new(sill.x + on.x, sill.y + on.y, sill.z))
+    let on = through * past;
+    Vec3::new(sill.x + on.x, sill.y + on.y, sill.z)
+}
+
+/// The doorway of `room` nearest `from`: where its sill is and the way
+/// through it, or the middle of the cell when the data has no opening.
+fn nearest_door(cells: &[CellScene], room: u32, from: Vec3) -> Option<(Vec3, Vec3)> {
+    let cell = cells.iter().find(|c| c.cell_id == room)?;
+    let Some((i, sill)) = cell
+        .doorways
+        .iter()
+        .copied()
+        .enumerate()
+        .min_by(|a, b| a.1.distance(from).total_cmp(&b.1.distance(from)))
+    else {
+        return Some((cell.transform.transform_point3(Vec3::ZERO), Vec3::ZERO));
+    };
+    let normal = cell.doorway_normals.get(i).copied().unwrap_or(Vec3::ZERO);
+    Some((sill, normal))
+}
+
+/// Where to walk to to be in `room`: through the opening between us and
+/// it, and a couple of paces beyond, so that the character ends up
+/// inside rather than standing in the doorway. `facing` is the way the
+/// character is pointing, for when it stands on the sill already.
+fn way_into(
+    cells: &[CellScene],
+    room: u32,
+    from: Vec3,
+    facing: glam::Vec2,
+    past: f32,
+) -> Option<Vec3> {
+    let (sill, normal) = nearest_door(cells, room, from)?;
+    if normal == Vec3::ZERO
+        && cells
+            .iter()
+            .any(|c| c.cell_id == room && c.doorways.is_empty())
+    {
+        // No opening in the data: the middle of the cell structure is
+        // the best guess there is.
+        return Some(sill);
+    }
+    Some(past_the_door(sill, normal, from, facing, past))
+}
+
+/// `at`, or the nearest thing to it past `sill` that `has_floor`: an aim
+/// with nothing to stand on is inside a wall, and a walk at it jitters
+/// against the wall until the room is given up.
+///
+/// Straight through the door is tried first; then the same distance
+/// bearing forty-five degrees either way, for a corridor that turns at
+/// its door (the Holtburg Dungeon's run diagonally from theirs); then
+/// shorter, straight through, down to a pace past the sill.
+pub fn aim_on_floor(sill: Vec3, at: Vec3, has_floor: impl Fn(Vec3) -> bool) -> Vec3 {
+    if has_floor(at) {
+        return at;
+    }
+    let through = glam::Vec2::new(at.x - sill.x, at.y - sill.y);
+    let past = through.length();
+    if past < 1e-3 {
+        return at;
+    }
+    let turned = |a: f32| {
+        let d = glam::Vec2::from_angle(a).rotate(through);
+        Vec3::new(sill.x + d.x, sill.y + d.y, at.z)
+    };
+    let quarter = std::f32::consts::FRAC_PI_4;
+    for p in [turned(quarter), turned(-quarter)] {
+        if has_floor(p) {
+            return p;
+        }
+    }
+    for k in [0.6, 0.4, 0.25] {
+        let p = sill.lerp(at, k);
+        if has_floor(p) {
+            return p;
+        }
+    }
+    at
+}
+
+/// The way a character with `heading` is pointing, on the map.
+/// Headings turn the other way from the maths: see `Player::heading`.
+fn facing(heading: f32) -> glam::Vec2 {
+    glam::Vec2::new(-heading.sin(), heading.cos())
 }
 
 impl Client {
+    /// [`aim_on_floor`] against the block's own collision.
+    fn on_a_floor(&self, block: u32, sill: Vec3, at: Vec3) -> Vec3 {
+        let Ok(coll) = self.assets.block_collision(block) else {
+            return at;
+        };
+        let aim = aim_on_floor(sill, at, |p| coll.world.floor_at(p, 0.6, 1.5).is_some());
+        if aim != at {
+            tracing::debug!("explore: no floor at {at:?}; aiming at {aim:?} instead");
+        }
+        aim
+    }
+
     /// With nothing to fight and nothing to loot, and underground: step
     /// into a room we have not been in. Claims the tick while it has
     /// somewhere to go.
@@ -109,6 +232,7 @@ impl Client {
             return false;
         }
         let me = pl.world_position();
+        let facing = facing(pl.heading);
         // Outside the hunting area's dungeon there is nothing here to look
         // for: keeping to the area takes the character back to it. Inside
         // it, a room that is not one of the area's own is walked through
@@ -132,7 +256,13 @@ impl Client {
         self.autoplay.rooms_seen.insert(cell);
         self.autoplay.rooms_shut.remove(&cell);
 
-        if let Some((from, room, at)) = self.autoplay.room_bound {
+        if let Some(RoomWalk {
+            from,
+            room,
+            at,
+            pushed,
+        }) = self.autoplay.room_bound
+        {
             // Arriving is the server putting us in another room, not
             // reaching a point on the floor. Any other room will do:
             // being somewhere new is progress and the next doorway is
@@ -147,7 +277,30 @@ impl Client {
                 self.forget_the_room();
                 return true;
             }
-            if too_long {
+            // Standing at the point aimed at, and still in the room we
+            // set out from: the point was not far enough in. Once, it
+            // is pushed the same way again; waiting out the clock here
+            // was a ten-second stand at every doorway this happened at.
+            let there = glam::Vec2::new(at.x - me.x, at.y - me.y).length() <= STOP;
+            if there && !pushed {
+                let sill = nearest_door(&scene.cells, room, me)
+                    .map(|d| d.0)
+                    .unwrap_or(at);
+                if let Some(further) = way_into(&scene.cells, room, me, facing, PAST_THE_DOOR * 2.0)
+                    .map(|p| self.on_a_floor(cell & 0xFFFF_0000, sill, p))
+                {
+                    tracing::info!("explore: at the sill of {room:#010x} and not in it; aiming further, at {further:?}");
+                    self.autoplay.room_bound = Some(RoomWalk {
+                        from,
+                        room,
+                        at: further,
+                        pushed: true,
+                    });
+                    self.head_for(further, STOP, "the next room");
+                    return true;
+                }
+            }
+            if too_long || (there && pushed) {
                 // Not a room to keep trying: shut for now, and the way
                 // on is planned round it.
                 self.autoplay.rooms_shut.insert(room);
@@ -208,12 +361,21 @@ impl Client {
         let Some(room) = next else {
             return false;
         };
-        let Some(at) = way_into(&scene.cells, room, me) else {
+        let Some(at) = way_into(&scene.cells, room, me, facing, PAST_THE_DOOR) else {
             self.autoplay.rooms_shut.insert(room);
             return true;
         };
+        let sill = nearest_door(&scene.cells, room, me)
+            .map(|d| d.0)
+            .unwrap_or(at);
+        let at = self.on_a_floor(cell & 0xFFFF_0000, sill, at);
         tracing::info!("explore: {cell:#010x} -> {room:#010x} at {at:?}");
-        self.autoplay.room_bound = Some((cell, room, at));
+        self.autoplay.room_bound = Some(RoomWalk {
+            from: cell,
+            room,
+            at,
+            pushed: false,
+        });
         self.autoplay.room_since = Some(now);
         self.autoplay
             .say(Doing::Traveling, "looking for something to fight");
@@ -223,5 +385,108 @@ impl Client {
     fn forget_the_room(&mut self) {
         self.autoplay.room_bound = None;
         self.autoplay.room_since = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use glam::Vec2;
+
+    /// The doorway between 0x01F60216 and 0x01F60215 in the Holtburg
+    /// Dungeon: a wall along x, the way through along y.
+    const SILL: Vec3 = Vec3::new(202.0, 47177.0, 0.1);
+    const THROUGH: Vec3 = Vec3::new(0.0, 1.0, 0.0);
+
+    #[test]
+    fn the_way_through_is_straight_through_the_wall_whatever_the_approach() {
+        // Brynvor, 2026-09-15: from the corner of the room before, the
+        // aim along the approach was (200.3, 47178.85), inside the
+        // corridor's west wall, and the walk jittered there ten seconds.
+        let corner = Vec3::new(205.04, 47173.55, 0.0);
+        let at = past_the_door(SILL, THROUGH, corner, Vec2::new(-0.7, 0.7), 2.5);
+        assert_eq!(at, Vec3::new(202.0, 47179.5, 0.1));
+        // And back the other way from the far side, whichever way the
+        // normal happens to point.
+        let at = past_the_door(
+            SILL,
+            -THROUGH,
+            Vec3::new(199.0, 47180.0, 0.0),
+            Vec2::ZERO,
+            2.5,
+        );
+        assert_eq!(at, Vec3::new(202.0, 47174.5, 0.1));
+    }
+
+    #[test]
+    fn standing_on_the_sill_the_way_through_is_the_way_we_face() {
+        // Bound to the room again from the sill itself, the aim was the
+        // sill: "reached" at once, and ten seconds for the room to be
+        // written off.
+        let on_it = Vec3::new(201.43, 47177.42, 0.0);
+        let at = past_the_door(SILL, THROUGH, on_it, Vec2::new(-0.7, 0.7), 2.5);
+        assert_eq!(at, Vec3::new(202.0, 47179.5, 0.1));
+        let at = past_the_door(SILL, THROUGH, on_it, Vec2::new(0.3, -0.95), 2.5);
+        assert_eq!(at, Vec3::new(202.0, 47174.5, 0.1));
+    }
+
+    #[test]
+    fn without_a_normal_the_approach_line_serves_and_never_degenerates() {
+        let far = past_the_door(
+            SILL,
+            Vec3::ZERO,
+            Vec3::new(202.0, 47167.0, 0.0),
+            Vec2::X,
+            2.5,
+        );
+        assert_eq!(far, Vec3::new(202.0, 47179.5, 0.1));
+        let near = past_the_door(
+            SILL,
+            Vec3::ZERO,
+            Vec3::new(202.0, 47177.3, 0.0),
+            Vec2::Y,
+            2.5,
+        );
+        assert!(
+            near.distance(SILL) > 2.0,
+            "aimed at the sill itself: {near:?}"
+        );
+    }
+
+    #[test]
+    fn an_aim_in_the_wall_is_turned_to_the_corridor_or_drawn_in() {
+        // The corridor beyond the (202, 47177) door runs north-east at
+        // forty-five degrees: straight through, 2.5 m past the sill, is
+        // wall. A floor only within a metre of the line y - 47177 = x - 202.
+        let diagonal = |p: Vec3| ((p.y - 47177.0) - (p.x - 202.0)).abs() < 1.0;
+        let straight = Vec3::new(202.0, 47179.5, 0.1);
+        let aim = aim_on_floor(SILL, straight, diagonal);
+        assert!(diagonal(aim), "{aim:?}");
+        assert!(
+            (aim.distance(SILL) - 2.5).abs() < 0.01,
+            "the full distance, turned: {aim:?}"
+        );
+        assert!(
+            aim.x > 203.0 && aim.y > 47178.0,
+            "north-east, not south-west: {aim:?}"
+        );
+        // No corridor either way: drawn in along the line instead.
+        let near_only = |p: Vec3| p.distance(SILL) < 1.2;
+        let aim = aim_on_floor(SILL, straight, near_only);
+        assert!(
+            aim.distance(Vec3::new(202.0, 47178.0, 0.1)) < 1e-3,
+            "{aim:?}"
+        );
+        // A floor where aimed is left alone.
+        assert_eq!(aim_on_floor(SILL, straight, |_| true), straight);
+    }
+
+    #[test]
+    fn facing_follows_the_heading_convention() {
+        // A walk in +y gives heading atan2(-0, 1) = 0; in +x, atan2(-1, 0).
+        let north = facing(0.0);
+        assert!((north - Vec2::new(0.0, 1.0)).length() < 1e-6);
+        let east = facing((-1.0f32).atan2(0.0));
+        assert!((east - Vec2::new(1.0, 0.0)).length() < 1e-6, "{east:?}");
     }
 }

@@ -304,7 +304,15 @@ to nobody. So a character that arrives and waits sees an empty dungeon
 and reports one. The cure is `crate::explore`: walk the rooms, one
 doorway at a time, aiming a couple of paces *past* each threshold --
 stop on the threshold and the server goes on describing the room
-behind.
+behind. Past it *straight through the wall* (`CellScene::doorway_normals`,
+the portal polygon's normal), on the far side from where we stand, or
+the way we face when we stand on the sill: aimed along the line we
+approached on, a character coming at a door from the corner of the
+room before it was sent into the corridor's side wall, and aimed from
+the sill itself it was sent nowhere and stood ten seconds for the room
+to be written off. And on a floor: the Holtburg Dungeon's corridors run
+diagonally from their doors, so an aim with nothing to stand on is
+turned forty-five degrees either way, then drawn in (`aim_on_floor`).
 
 **The world you leave stays in the object table.** ACE holds an object
 that has dropped out of sight for twenty-five seconds before it sends

@@ -44,6 +44,14 @@ pub struct CellScene {
     /// from the street. The data says where the openings are, so the
     /// graph is told rather than left to find them.
     pub doorways: Vec<Vec3>,
+    /// The way through each doorway, one per entry of `doorways`: the
+    /// portal polygon's unit normal laid flat, pointing either way.
+    /// A doorway is a hole in a wall, and the way into the room beyond
+    /// is straight through the wall, not along whatever line the
+    /// character happened to approach on -- aimed along that line, a
+    /// character coming at a corridor's door from a corner was sent
+    /// a couple of paces past the sill into the corridor's side wall.
+    pub doorway_normals: Vec<Vec3>,
     /// The cell can be seen from outdoors (`env_cell_flags::SEEN_OUTSIDE`).
     pub seen_outside: bool,
 }
@@ -159,7 +167,7 @@ pub fn load_cells(
         // leaves these polygons out of the drawing because they are holes
         // in the wall; a hole in the wall is exactly where a doorway node
         // belongs.
-        let doorways = cs
+        let (doorways, doorway_normals): (Vec<Vec3>, Vec<Vec3>) = cs
             .polygons
             .iter()
             .filter(|(id, _)| cs.portals.contains(id))
@@ -173,6 +181,7 @@ pub fn load_cells(
                 let mut mid = Vec3::ZERO;
                 let mut sill = f32::MAX;
                 let mut n = 0.0f32;
+                let mut corners = Vec::with_capacity(p.vertex_ids.len());
                 for v in &p.vertex_ids {
                     let v = cs.vertices.iter().find(|(k, _)| *k as i32 == *v as i32)?;
                     let w = transform.transform_point3(Vec3::new(
@@ -183,15 +192,24 @@ pub fn load_cells(
                     mid += w;
                     sill = sill.min(w.z);
                     n += 1.0;
+                    corners.push(w);
                 }
                 (n > 0.0).then(|| {
                     let mid = mid / n;
+                    // Through the opening: the polygon's normal, laid
+                    // flat. A doorway stands upright, so its normal is
+                    // horizontal already, give or take a sloping sill.
+                    let normal = corners
+                        .windows(3)
+                        .map(|w| (w[1] - w[0]).cross(w[2] - w[0]))
+                        .fold(Vec3::ZERO, |a, b| a + b);
+                    let normal = Vec3::new(normal.x, normal.y, 0.0).normalize_or_zero();
                     // A hand's breadth above the threshold, so the probe
                     // starts clear of the floor plane itself.
-                    Vec3::new(mid.x, mid.y, sill + 0.1)
+                    (Vec3::new(mid.x, mid.y, sill + 0.1), normal)
                 })
             })
-            .collect();
+            .unzip();
         out.push(CellScene {
             cell_id,
             environment_id: cell.environment_id,
@@ -203,6 +221,7 @@ pub fn load_cells(
             lights,
             portal_cells,
             doorways,
+            doorway_normals,
             seen_outside: cell.flags & env_cell_flags::SEEN_OUTSIDE != 0,
         });
     }

@@ -2725,7 +2725,7 @@ pub struct Autoplay {
     pub rooms_shut: std::collections::HashSet<u32>,
     /// The room we set out from, the one we are walking into, and
     /// the point past its threshold we are aiming at.
-    pub room_bound: Option<(u32, u32, glam::Vec3)>,
+    pub room_bound: Option<crate::explore::RoomWalk>,
     pub room_since: Option<Instant>,
     /// A line for the panel: "fighting Drudge Skulker".
     pub status: String,
@@ -7306,22 +7306,9 @@ impl Client {
             if self.stalled_on(t, now) {
                 return false;
             }
-            // And still here. A target is chosen from within the fight
-            // radius, but nothing checked it was still within it
-            // afterwards -- so a creature the character walked away
-            // from, or left behind in the Academy, stayed its target
-            // for ever while it planned a journey to the other side of
-            // the world to swing at it.
-            // Or gone out of the hunting area, and not hitting us: let it go.
+            // And still here (see `fight_target_gone`).
             let underground = self.underground();
-            let gone = self
-                .world
-                .objects
-                .get(&t)
-                .and_then(|o| o.world_pos())
-                .zip(self.player.as_ref().map(|p| p.world_position()))
-                .is_some_and(|(at, me)| at.distance(me) > crate::travel::WALKABLE)
-                || !self.area_allows_guid(t, underground);
+            let gone = self.fight_target_gone(t, underground);
             if gone {
                 self.attack_target = None;
                 self.autoplay.casting_at = None;
@@ -7490,10 +7477,11 @@ impl Client {
                 return false;
             }
         }
-        // Out of the hunting area, and not hitting us, it is let go.
+        // Out of the hunting area and not hitting us, or not here at
+        // all any more, it is let go (see `fight_target_gone`).
         let underground = self.underground();
         let target = match self.autoplay.casting_at {
-            Some(g) if alive(self, g) && self.area_allows_guid(g, underground) => Some(g),
+            Some(g) if alive(self, g) && !self.fight_target_gone(g, underground) => Some(g),
             _ => {
                 self.autoplay.casting_at = None;
                 if self.waits_for_a_corpse() {
@@ -7929,6 +7917,31 @@ impl Client {
                 false
             }
         }
+    }
+
+    /// Whether `guid`, the creature being fought, is not there to fight
+    /// any more.
+    ///
+    /// A target is chosen from within the fight radius, but nothing
+    /// checked it was still within it afterwards -- so a creature the
+    /// character walked away from, or left behind in the Academy,
+    /// stayed its target for ever while it planned a journey to the
+    /// other side of the world to swing at it. Anything further off than
+    /// a walk is an object left over from somewhere the character has
+    /// since left. The swing had this rule and the spell did not:
+    /// teleported out of the Holtburg Dungeon mid-fight, a caster stood
+    /// in town for ten minutes throwing Flame Arc at a Swamp Rat
+    /// thirty-four kilometres away, "closing" on it by halves.
+    ///
+    /// Or gone out of the hunting area, and not hitting us: let it go.
+    pub(crate) fn fight_target_gone(&self, guid: u32, underground: bool) -> bool {
+        self.world
+            .objects
+            .get(&guid)
+            .and_then(|o| o.world_pos())
+            .zip(self.player.as_ref().map(|p| p.world_position()))
+            .is_some_and(|(at, me)| at.distance(me) > crate::travel::WALKABLE)
+            || !self.area_allows_guid(guid, underground)
     }
 
     /// Whether the walk up to `guid` has brought the character nearer to
@@ -10548,6 +10561,37 @@ mod tests {
         assert!(
             c.a_critter(&cow, &cfg),
             "fought on another creature's answer"
+        );
+    }
+
+    #[test]
+    fn a_target_left_half_a_world_away_is_not_fought_by_spell_either() {
+        // Brynvor, 2026-09-15: teleported from the Holtburg Dungeon to
+        // the town above it with a Swamp Rat as the casting target, and
+        // stood there ten minutes casting at it from 34 km. The swing
+        // already let such a target go; the spell now does too.
+        let Some(mut c) =
+            standing_in_the_field(999, 0xA9B4_002E, glam::Vec3::new(125.0, 132.0, 67.0))
+        else {
+            return;
+        };
+        let rat = in_view(&mut c, 0x8000_20AD, 0, "Swamp Rat");
+        let put = |c: &mut Client, cell: u32, local: glam::Vec3| {
+            c.world.objects.get_mut(&rat.guid).unwrap().position = Some(ac_world::Position {
+                cell,
+                local,
+                rotation: glam::Quat::IDENTITY,
+            });
+        };
+        put(&mut c, 0x01F6_01FA, glam::Vec3::new(94.0, -63.0, -6.0));
+        assert!(
+            c.fight_target_gone(rat.guid, false),
+            "not a walk away, so not here"
+        );
+        put(&mut c, 0xA9B4_002E, glam::Vec3::new(130.0, 132.0, 67.0));
+        assert!(
+            !c.fight_target_gone(rat.guid, false),
+            "beside us, it is a fight"
         );
     }
 
