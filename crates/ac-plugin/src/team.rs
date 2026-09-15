@@ -22,6 +22,17 @@
 //! answer from the same roster, so there is no vote and nothing to
 //! agree on, and a leader who logs off is replaced the moment the
 //! others stop hearing from it.
+//!
+//! The same roster, that is, once everyone has been heard. A session
+//! that has just come onto the team has heard nobody and leads its
+//! roster of one, and nine sessions coming on in the same tick led
+//! nine such rosters for a frame: two of them founded a fellowship
+//! each before the first board round had carried a word, the fleet
+//! split between the two, and members of one had no right to the
+//! other's bodies. So a view says whether it has *settled* (see
+//! [`Settling`]): the leader flag is acted on -- a fellowship founded
+//! or given up -- only once the roster has stood unchanged for a full
+//! board round.
 
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
@@ -42,6 +53,11 @@ pub const REQUEST_TOPIC: &str = "fleet.request";
 const SAY_EVERY: Duration = Duration::from_millis(500);
 /// A mate not heard from for this long has gone.
 const FORGET_AFTER: Duration = Duration::from_secs(6);
+/// How long a session's roster must stand unchanged before its view is
+/// settled: one full board round, in which everyone already on the
+/// team has said its piece, and a little over for a word crossing the
+/// bus from another process at the very end of the round.
+const SETTLE_AFTER: Duration = Duration::from_millis(750);
 
 /// A mate as last heard, and when.
 #[derive(Clone, Debug)]
@@ -92,6 +108,9 @@ impl Roster {
             mates,
             leader,
             me: Some(me.clone()),
+            // Whether the roster has stood a round is the plugin's to say
+            // (see `Settling`); a view read straight off the roster has not.
+            settled: false,
         }
     }
 
@@ -108,6 +127,40 @@ impl Roster {
 
     pub fn is_empty(&self) -> bool {
         self.heard.is_empty()
+    }
+}
+
+/// Whether one session's roster has stood still long enough to be acted
+/// on (see [`TeamView::settled`]).
+///
+/// A session that has just come onto the team leads a roster of one
+/// until the others' words arrive, a frame later in this process and a
+/// hop later from another. Acting on that view founded two fellowships
+/// for one fleet. The roster is settled once the names on it have not
+/// changed for [`SETTLE_AFTER`]: a full board round, by the end of
+/// which everyone who was on the team when this session joined has
+/// spoken. Anyone joining during the round speaks the moment it joins,
+/// and its word starts the round again.
+#[derive(Clone, Debug, Default)]
+pub struct Settling {
+    /// The names heard, sorted, and since when they have been these.
+    names: Vec<String>,
+    since: Option<Instant>,
+}
+
+impl Settling {
+    /// Note the roster as this session sees it at `now`, and say whether
+    /// it has stood for a full round. The first look starts the round;
+    /// a roster with different names on it starts it again.
+    pub fn settle(&mut self, mut names: Vec<String>, now: Instant) -> bool {
+        names.sort_unstable();
+        if self.since.is_none() || names != self.names {
+            self.names = names;
+            self.since = Some(now);
+            return false;
+        }
+        self.since
+            .is_some_and(|t| now.duration_since(t) >= SETTLE_AFTER)
     }
 }
 
@@ -233,6 +286,10 @@ pub struct Team {
     /// When each session last said its piece on the board, and what it
     /// said.
     last_said: BTreeMap<usize, (Instant, Mate)>,
+    /// How long each session's roster has stood unchanged (see
+    /// [`Settling`]). Forgotten when the session leaves the team, so
+    /// coming back on starts the round again.
+    settling: BTreeMap<usize, Settling>,
 }
 
 /// A vital (0 health, 1 stamina, 2 mana) as a fraction of its maximum,
@@ -311,7 +368,7 @@ pub fn describe(client: &ac_client::Client, session: usize) -> Option<Mate> {
         following: cfg.enabled && cfg.follow && !cfg.lead,
         salvaging: client.salvaging(),
         has_ust: client.salvage_tool().is_some(),
-        supplies: client.supplies(&client.autoplay.config.growth),
+        supplies: client.supplies(&client.autoplay.config.growth, Instant::now()),
         ground: client.hunting_ground(),
         on_its_way: client.on_its_way(),
         skills: client.skills_its_rules_ask_about(),
@@ -350,6 +407,7 @@ impl Plugin for Team {
 
     fn session_removed(&mut self, index: usize) {
         crate::shift_removed(&mut self.last_said, index);
+        crate::shift_removed(&mut self.settling, index);
     }
 
     fn tick(&mut self, cx: &mut Ctx) {
@@ -398,7 +456,9 @@ impl Plugin for Team {
             tracing::info!(request = r.as_str(), session, "fleet request applied");
         }
         if !client.autoplay.config.team.enabled {
-            // Off the team: the rules see nobody.
+            // Off the team: the rules see nobody, and the next time on
+            // starts a round of its own.
+            self.settling.remove(&session);
             if !client.autoplay.team.mates.is_empty() || client.autoplay.team.leader {
                 client.autoplay.team = TeamView::default();
             }
@@ -414,6 +474,10 @@ impl Plugin for Team {
         // too (see `Autoplay::ours_to_open`).
         let mut view = self.roster.view_for(&me);
         view.me = self.said(session).cloned();
+        // Whether the roster behind it has stood a full round: what the
+        // leader flag is worth to the fellowship rules.
+        let names = view.mates.iter().map(|m| m.name.clone()).collect();
+        view.settled = self.settling.entry(session).or_default().settle(names, now);
         if client.autoplay.team != view {
             client.autoplay.team = view;
             // A body one of them emptied and found nothing left on for
@@ -627,6 +691,87 @@ mod tests {
         r.forget_quiet(now + FORGET_AFTER + Duration::from_secs(2));
         assert!(r.is_empty());
         assert!(r.view_for(&me).leader, "alone again, so leading again");
+    }
+
+    #[test]
+    fn nine_sessions_coming_on_in_one_tick_have_one_settled_leader() {
+        // The bug, measured: nine sessions ran the team-on line in the
+        // same tick, and two of them founded a fellowship each, fourteen
+        // milliseconds apart, before the first board round had carried a
+        // word. Each led its roster of one. A view is acted on only once
+        // it has settled, and then exactly one of the nine leads.
+        let t0 = Instant::now();
+        let frame = Duration::from_millis(16);
+        let names = [
+            "+Brynith", "+Brynlyn", "+Brynoth", "+Brynrun", "+Brynuth", "+Brynvor", "+Brynwyn",
+            "+Brynna", "+Reborn",
+        ];
+        let mates: Vec<Mate> = names
+            .iter()
+            .enumerate()
+            .map(|(i, n)| mate(n, 0x5000_0001 + i as u32))
+            .collect();
+        let mut rosters: Vec<Roster> = (0..9).map(|_| Roster::default()).collect();
+        let mut settling: Vec<Settling> = (0..9).map(|_| Settling::default()).collect();
+        // What each session's rules would act on this frame: leader, and
+        // settled.
+        let founders =
+            |rosters: &[Roster], settling: &mut [Settling], now: Instant| -> Vec<String> {
+                (0..9)
+                    .filter(|&i| {
+                        let v = rosters[i].view_for(&mates[i]);
+                        let names = v.mates.iter().map(|m| m.name.clone()).collect();
+                        v.leader && settling[i].settle(names, now)
+                    })
+                    .map(|i| names[i].to_string())
+                    .collect()
+            };
+        // The tick they all come on: nobody has heard anybody, everyone
+        // leads its own roster -- and nobody has settled.
+        let leading = (0..9)
+            .filter(|&i| rosters[i].view_for(&mates[i]).leader)
+            .count();
+        assert_eq!(leading, 9, "each led its roster of one");
+        assert!(founders(&rosters, &mut settling, t0).is_empty());
+        // Next frame everyone hears the eight others (local posts are
+        // read at home the next frame). A changed roster starts the
+        // round again.
+        for (i, r) in rosters.iter_mut().enumerate() {
+            for (j, m) in mates.iter().enumerate() {
+                if i != j {
+                    r.hear("local", j, m.clone(), t0 + frame);
+                }
+            }
+        }
+        assert!(founders(&rosters, &mut settling, t0 + frame).is_empty());
+        assert!(founders(&rosters, &mut settling, t0 + frame + SAY_EVERY).is_empty());
+        // A round later, one leader, the first name.
+        assert_eq!(
+            founders(&rosters, &mut settling, t0 + frame + SETTLE_AFTER),
+            vec!["+Brynith".to_string()]
+        );
+    }
+
+    #[test]
+    fn a_roster_settles_once_its_names_have_stood_a_round() {
+        let t0 = Instant::now();
+        let mut s = Settling::default();
+        // The first look starts the round.
+        assert!(!s.settle(vec![], t0));
+        assert!(!s.settle(vec![], t0 + SETTLE_AFTER / 2));
+        // Alone for a round: settled, and it leads a roster of one for
+        // as long as nobody comes.
+        assert!(s.settle(vec![], t0 + SETTLE_AFTER));
+        // Somebody comes: the round starts again, however they are
+        // ordered.
+        assert!(!s.settle(vec!["Zed".into(), "Alpha".into()], t0 + SETTLE_AFTER));
+        assert!(!s.settle(
+            vec!["Alpha".into(), "Zed".into()],
+            t0 + SETTLE_AFTER * 2 - Duration::from_millis(1)
+        ));
+        assert!(s.settle(vec!["Alpha".into(), "Zed".into()], t0 + SETTLE_AFTER * 2));
+        // And somebody going quiet starts it again too.
+        assert!(!s.settle(vec!["Alpha".into()], t0 + SETTLE_AFTER * 2));
     }
 
     #[test]

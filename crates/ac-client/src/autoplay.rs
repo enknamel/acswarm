@@ -1066,16 +1066,78 @@ const RECRUIT_RANGE: f32 = 25.0;
 /// the leader: the others are asked meanwhile.
 const RECRUIT_AGAIN: Duration = Duration::from_secs(5);
 
+/// How long an invitee the server turned down in words is left alone
+/// before it is asked again, doubling with every refusal after. The
+/// server answers a recruit of someone already in a fellowship, or busy
+/// with something, in plain chat (ACE `Entity/Fellowship.cs`,
+/// `AddFellowshipMember`), and until those words were read two mates
+/// were asked ten times each every [`RECRUIT_AGAIN`] and never came.
+/// "Busy" passes (a use finishes, a cast lands), so the wait starts
+/// short; "already a member" is settled by that mate's own row on the
+/// board, which says so within a round, and by the rightful leader
+/// taking the fleet's fellowships apart (see [`rival_leader`]).
+const HELD_OFF_FIRST: Duration = Duration::from_secs(10);
+
+/// How long the team's rightful leader must be seen in a fellowship of
+/// its own before this character gives up the one it founded. The
+/// board's word on a mate is up to a round old and the world's on a
+/// fellowship comes in its own time, so for a moment after that mate
+/// quits this fellowship its row still says it is in one and the world
+/// says it is not: a few rounds tell that from a second fellowship.
+const YIELD_AFTER: Duration = Duration::from_secs(3);
+
+/// Why the server would not recruit somebody, in its own words (see
+/// [`recruit_refusal`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RecruitRefusal {
+    /// "{Name} is already a member of a Fellowship."
+    AlreadyAMember,
+    /// "{Name} is busy.": the server's `fellow_busy_no_recruit` rule, or
+    /// a confirmation it could not put to that character.
+    Busy,
+    /// WeenieError 0x041E, "Your fellowship is full": the one code a
+    /// recruit meets that names nobody, so it is about the last asked.
+    Full,
+}
+
+/// How many a fellowship holds, the leader counted (ACE
+/// `Entity/Fellowship.cs`, `MaxFellows`). A team of ten is one too
+/// many, and the tenth is not asked.
+const MAX_FELLOWS: usize = 9;
+
+/// WeenieError for an invitation into a full fellowship (ACE
+/// `WeenieError.YourFellowshipIsFull`).
+pub(crate) const FELLOWSHIP_FULL: u32 = 0x041e;
+
+/// The mate a recruiting refusal is about and why, from a chat line.
+/// ACE answers the two refusals a recruit can meet with plain Broadcast
+/// chat, not a WeenieError (`Entity/Fellowship.cs`,
+/// `AddFellowshipMember`), so nothing on the wire but these words says
+/// the invitation came to nothing. The name is the server's for the
+/// character, `+` and all, as the board has it.
+pub(crate) fn recruit_refusal(text: &str) -> Option<(&str, RecruitRefusal)> {
+    let text = text.trim();
+    if let Some(name) = text.strip_suffix(" is already a member of a Fellowship.") {
+        return Some((name, RecruitRefusal::AlreadyAMember));
+    }
+    if let Some(name) = text.strip_suffix(" is busy.") {
+        return Some((name, RecruitRefusal::Busy));
+    }
+    None
+}
+
 /// Who to ask into the fellowship next, out of the mates standing by:
 /// the nearest one that has not been asked in the last
-/// [`RECRUIT_AGAIN`]. `None` when there is nobody to ask, or when the
-/// last invitation went out inside [`RECRUIT_FLOOR`].
+/// [`RECRUIT_AGAIN`] and is not being held off after a refusal in words
+/// (`held_off`, see [`HELD_OFF_FIRST`]). `None` when there is nobody to
+/// ask, or when the last invitation went out inside [`RECRUIT_FLOOR`].
 ///
 /// `waiting` is (guid, metres away), `asked` is when each invitee was
 /// last sent an invitation.
 fn next_invitee(
     waiting: &[(u32, f32)],
     asked: &[(u32, Instant)],
+    held_off: &crate::did::Patience<u32>,
     last_sent: Option<Instant>,
     now: Instant,
 ) -> Option<u32> {
@@ -1085,12 +1147,39 @@ fn next_invitee(
     waiting
         .iter()
         .filter(|(guid, _)| {
-            !asked
-                .iter()
-                .any(|(g, t)| g == guid && now.duration_since(*t) < RECRUIT_AGAIN)
+            !held_off.held(guid, now)
+                && !asked
+                    .iter()
+                    .any(|(g, t)| g == guid && now.duration_since(*t) < RECRUIT_AGAIN)
         })
         .min_by(|a, b| a.1.total_cmp(&b.1))
         .map(|(guid, _)| *guid)
+}
+
+/// The mate the fleet should be following instead of this character,
+/// when this character leads a fellowship it founded and that mate has
+/// one of its own: the second fellowship this character gives up (see
+/// [`Client::autoplay_yield_fellowship`]).
+///
+/// A session learns of another fellowship from two words that have to
+/// agree. The world's own record says who is in *this* fellowship,
+/// first-hand (`members`). The board's row for each mate says whether
+/// it is in *a* fellowship (`Mate::in_fellowship`), up to a round old.
+/// A mate whose row says it is in one and whom the world does not list
+/// is in another. Only the mate the settled roster says leads counts:
+/// the leader of the team is the one to gather it, and a leader that
+/// let itself be recruited into this fellowship instead is a working
+/// party, not a rival. And only one whose session will do the
+/// gathering: one playing on its own, or one that asked to lead. A
+/// person standing in a fellowship of their own with autoplay off
+/// would recruit nobody, and a fleet given up to them would stand
+/// unfellowshipped.
+pub(crate) fn rival_leader<'a>(view: &'a TeamView, members: &[u32]) -> Option<&'a Mate> {
+    if !view.settled || view.leader {
+        return None;
+    }
+    view.leader_mate()
+        .filter(|m| m.in_fellowship && !members.contains(&m.guid) && (m.autoplay || m.leads))
 }
 
 /// How often one character hands something to another. The server
@@ -1991,6 +2080,14 @@ pub struct TeamView {
     /// [`Autoplay::ours_to_open`]). `None` in a view nobody said anything
     /// into.
     pub me: Option<Mate>,
+    /// The roster behind this view has stood unchanged for a full board
+    /// round (see `ac_plugin::team::Settling`). Until it has, `leader`
+    /// is only what this session knows so far: a session that has just
+    /// come onto the team has heard nobody and leads a roster of one.
+    /// The fellowship rules found or give up a fellowship on the leader
+    /// flag only once the view has settled; everything else reads the
+    /// flag as it comes.
+    pub settled: bool,
 }
 
 impl TeamView {
@@ -2747,6 +2844,14 @@ pub struct Autoplay {
     /// Whether the leader has already said that the fellowship it is in
     /// may not share loot, so it says it once rather than every note.
     said_not_sharing: bool,
+    /// Mates the server turned down an invitation to in words, by guid,
+    /// each held off recruiting for a doubling wait (see
+    /// [`HELD_OFF_FIRST`]). Forgotten the moment the mate is in.
+    held_off: crate::did::Patience<u32>,
+    /// Since when the team's rightful leader has been seen in a
+    /// fellowship of its own while this character leads one it founded
+    /// (see [`rival_leader`], [`YIELD_AFTER`]).
+    outled_since: Option<Instant>,
     /// Where the journey after a far-off leader was bound, to plan
     /// again once it has moved on.
     follow_trip: Option<glam::Vec2>,
@@ -3472,6 +3577,90 @@ impl Autoplay {
             craft_to,
             self.handing.map(|(item, _)| item),
         ]
+    }
+
+    /// The server's words on an invitation that came to nothing (see
+    /// [`recruit_refusal`]): the mate named is held off recruiting for a
+    /// doubling wait, and the log says so once. Only a mate this
+    /// character has invited is read this way: "{Name} is busy." is also
+    /// what the server says of a patron who cannot take an oath just
+    /// now (ACE `Player_Allegiance.cs`).
+    pub(crate) fn hear_recruit_refusal(&mut self, text: &str, now: Instant) {
+        let Some((name, why)) = recruit_refusal(text) else {
+            return;
+        };
+        let Some(guid) = self
+            .team
+            .mates
+            .iter()
+            .find(|m| m.name == name)
+            .map(|m| m.guid)
+            .filter(|g| self.asked_lately(*g, now))
+        else {
+            return;
+        };
+        self.refuse_recruit(guid, why, now);
+    }
+
+    /// The server's code on an invitation that came to nothing: the
+    /// fellowship is full (WeenieError 0x041E, ACE `Fellowship.cs`,
+    /// `AddFellowshipMember`), which is about whoever was asked last.
+    /// The recruiting stops by the count before this is ever heard;
+    /// this is for a count the server disagrees with.
+    pub(crate) fn hear_fellowship_full(&mut self, now: Instant) {
+        let Some(guid) = self
+            .recruited
+            .iter()
+            .filter(|(g, _)| self.asked_lately(*g, now))
+            .max_by_key(|(_, t)| *t)
+            .map(|(g, _)| *g)
+        else {
+            return;
+        };
+        self.refuse_recruit(guid, RecruitRefusal::Full, now);
+    }
+
+    /// Whether this mate was invited within the last [`RECRUIT_AGAIN`]:
+    /// what makes a refusal the answer to that invitation. The list of
+    /// the invited is pruned only on the next invitation, so without
+    /// the age a "+X is busy." ten minutes later -- a patron who could
+    /// not take an oath -- held X off the fellowship.
+    fn asked_lately(&self, guid: u32, now: Instant) -> bool {
+        self.recruited
+            .iter()
+            .any(|(g, t)| *g == guid && now.duration_since(*t) < RECRUIT_AGAIN)
+    }
+
+    /// Hold the mate off recruiting after a refusal, and say so once.
+    /// "Busy" is over in the seconds a use or a cast takes, so it is
+    /// the same short wait every time: doubling, a mage that happened
+    /// to be casting at each of eight asks was left out for hours. The
+    /// others double, since what they wait on is slower to change.
+    fn refuse_recruit(&mut self, guid: u32, why: RecruitRefusal, now: Instant) {
+        if why == RecruitRefusal::Busy {
+            self.held_off.forget(&guid);
+        }
+        self.held_off.hold(guid, HELD_OFF_FIRST, now);
+        let wait = self.held_off.waited(&guid).unwrap_or(HELD_OFF_FIRST);
+        let name = self
+            .team
+            .mates
+            .iter()
+            .find(|m| m.guid == guid)
+            .map(|m| m.name.clone())
+            .unwrap_or_else(|| format!("{guid:#010x}"));
+        let why = match why {
+            RecruitRefusal::AlreadyAMember => "is already in a fellowship",
+            RecruitRefusal::Busy => "is busy",
+            RecruitRefusal::Full => "would not fit: the fellowship is full",
+        };
+        self.note(
+            format!(
+                "{name} {why}: not asked into the fellowship again for {} s",
+                wait.as_secs()
+            ),
+            now,
+        );
     }
 
     /// Something worth knowing that is not what the character is doing:
@@ -7821,11 +8010,76 @@ impl Client {
             .is_some_and(|o| self.option_enabled(o))
     }
 
+    /// The fellowship this character founded is given up when the team's
+    /// rightful leader has one of its own (see [`rival_leader`]): the
+    /// server refuses no founding (ACE `Player_Fellowship.cs`,
+    /// `FellowshipCreate`), so two leaders make two fellowships, the
+    /// fleet splits between them, and members of one have no right to
+    /// the other's bodies. Disbanded, this one's members are free for
+    /// the rightful leader to recruit, and this character with them.
+    ///
+    /// Only a fellowship this character founded itself, and still leads
+    /// (`founded`, the same word that decides whether it can vouch for
+    /// the loot sharing): one a person made by hand is never taken
+    /// apart on the strength of a roster, as the note on a fellowship
+    /// "not founded by me" already has it. True when it was given up.
+    fn autoplay_yield_fellowship(&mut self, now: Instant) -> bool {
+        let (Some(f), Some(me)) = (self.world.fellowship.as_ref(), self.world.player_guid) else {
+            self.autoplay.outled_since = None;
+            return false;
+        };
+        if self.autoplay.founded.is_none() || f.leader != me {
+            self.autoplay.outled_since = None;
+            return false;
+        }
+        let fname = f.name.clone();
+        let members: Vec<u32> = f.members.iter().map(|m| m.guid).collect();
+        let Some(rival) = rival_leader(&self.autoplay.team, &members).map(|m| m.name.clone())
+        else {
+            self.autoplay.outled_since = None;
+            return false;
+        };
+        let since = *self.autoplay.outled_since.get_or_insert(now);
+        if now.duration_since(since) < YIELD_AFTER {
+            return false;
+        }
+        self.fellowship_quit(true);
+        self.autoplay.founded = None;
+        self.autoplay.outled_since = None;
+        self.autoplay.say(
+            Doing::Helping,
+            format!("disbanding the fellowship {fname}: {rival} leads, and has one of its own"),
+        );
+        true
+    }
+
     /// The leader founds the fellowship and brings the others into it,
     /// one invitation at a time. True when one went out.
     fn autoplay_fellowship(&mut self, now: Instant) -> bool {
         let team = self.autoplay.config.team.clone();
-        if !team.enabled || !team.fellowship || !self.autoplay.team.leader {
+        if !team.enabled || !team.fellowship {
+            return false;
+        }
+        if self.autoplay_yield_fellowship(now) {
+            return true;
+        }
+        // Who gathers: the team's leader founds the fellowship, and
+        // whoever leads a fellowship brings the team's mates into it --
+        // the team's leader among them, when it stands outside. It does
+        // stand outside: slow to post, it came on after a mate had
+        // founded and gathered everyone else, and with nobody free to
+        // found with it stayed out for the life of the run, since the
+        // founder recruited only while it led the team. The same
+        // follows the leader's own disconnect: the server quits it on
+        // logout and hands the fellowship to whoever is left (ACE
+        // `Fellowship.QuitFellowship`, `AssignNewLeader`), and the
+        // leader comes back to a fellowship it is outside of.
+        let leads_this = self
+            .world
+            .fellowship
+            .as_ref()
+            .is_some_and(|f| Some(f.leader) == self.world.player_guid);
+        if !self.autoplay.team.leader && !leads_this {
             return false;
         }
         let Some(me) = self.player.as_ref().map(|p| p.world_position()) else {
@@ -7839,6 +8093,15 @@ impl Client {
             .as_ref()
             .map(|f| f.members.iter().map(|m| m.guid).collect())
             .unwrap_or_default();
+        // One that is in is no longer held off: the next refusal, if it
+        // ever leaves and is asked again, starts a wait of its own. Nor
+        // is one off the roster: a mate that left the team, or lost its
+        // session, is asked afresh when it is back.
+        for guid in &joined {
+            self.autoplay.held_off.forget(guid);
+        }
+        let on_the_team: Vec<u32> = self.autoplay.team.mates.iter().map(|m| m.guid).collect();
+        self.autoplay.held_off.retain(|g| on_the_team.contains(g));
         let waiting: Vec<(u32, f32)> = self
             .autoplay
             .team
@@ -7864,6 +8127,18 @@ impl Client {
             self.autoplay.founded = None;
             self.autoplay.said_not_sharing = false;
             if waiting.is_empty() {
+                return false;
+            }
+            // Not until the roster has stood a full board round: until
+            // then this session may be leading only what it has heard so
+            // far, and the one that sorts first among everyone is a frame
+            // or a hop away from being heard. Nine sessions coming onto
+            // the team in one tick founded two fellowships this way.
+            if !self.autoplay.team.settled {
+                self.autoplay.note(
+                    "waiting for the roster to settle before founding the fellowship",
+                    now,
+                );
                 return false;
             }
             // Nothing re-reads the option once the fellowship exists, so
@@ -7909,9 +8184,32 @@ impl Client {
                 now,
             );
         }
+        // Only the fellowship's own leader may recruit into it (ACE
+        // `Player_Fellowship.cs`, `FellowshipRecruit`: anyone else is
+        // answered 0x041D). A team leader that let itself be recruited
+        // into a mate's fellowship leaves the gathering to that mate.
+        if !leads_this {
+            return false;
+        }
+        // A fellowship holds nine (ACE `Fellowship.MaxFellows`), and the
+        // tenth asked is refused (0x041E) as often as it is asked. Said
+        // once, and nobody is asked.
+        if joined.len() >= MAX_FELLOWS {
+            if !waiting.is_empty() {
+                self.autoplay.note(
+                    format!(
+                        "the fellowship is full at {MAX_FELLOWS}: {} mate(s) left outside it",
+                        waiting.len()
+                    ),
+                    now,
+                );
+            }
+            return false;
+        }
         let Some(guid) = next_invitee(
             &waiting,
             &self.autoplay.recruited,
+            &self.autoplay.held_off,
             self.autoplay.last_recruit,
             now,
         ) else {
@@ -8071,7 +8369,7 @@ impl Client {
             return matches!(stage, Stage::HandOver | Stage::HandOut);
         }
         let growth = self.autoplay.config.growth.clone();
-        let Some(runner) = self.quartermaster_name(&growth) else {
+        let Some(runner) = self.quartermaster_name(&growth, now) else {
             return false;
         };
         let am_runner = runner == self.world.stats.name;
@@ -8252,7 +8550,7 @@ impl Client {
 
     /// Give everyone what they ordered.
     fn unload_the_quartermaster(&mut self, growth: &crate::growth::Growth, now: Instant) -> bool {
-        let party = self.party_supplies(growth);
+        let party = self.party_supplies(growth, now);
         // Work the whole party's split out for each thing carried, so
         // that a short run is shared rather than filling the first
         // order and leaving the last character with nothing.
@@ -11737,6 +12035,228 @@ mod tests {
     }
 
     #[test]
+    fn the_leader_that_does_not_sort_first_gives_up_the_fellowship_it_founded() {
+        // Two fellowships for one fleet, and this character founded the
+        // one whose leader does not sort first. Once the rightful leader
+        // has been seen in a fellowship of its own for a few seconds,
+        // this one is disbanded, so the rightful leader can recruit its
+        // members and this character with them.
+        let holtburg = 0xA9B4_0019;
+        let Some(mut c) = standing_in_the_field(20, holtburg, glam::Vec3::new(84.0, 84.0, 10.0))
+        else {
+            return;
+        };
+        let t0 = Instant::now();
+        let me = c.world.player_guid.unwrap();
+        let member = 0x5000_0005;
+        c.autoplay.config.team.enabled = true;
+        c.autoplay.config.team.fellowship = true;
+        let fellow = |guid| ac_world::Fellow {
+            guid,
+            ..Default::default()
+        };
+        c.world.fellowship = Some(ac_world::Fellowship {
+            name: "acreborn".into(),
+            leader: me,
+            members: vec![fellow(me), fellow(member)],
+            ..Default::default()
+        });
+        c.autoplay.founded = Some(t0);
+        c.autoplay.team = TeamView {
+            mates: vec![
+                Mate {
+                    name: "+Brynith".into(),
+                    guid: 0x5000_0002,
+                    in_fellowship: true,
+                    leader: true,
+                    autoplay: true,
+                    ..Default::default()
+                },
+                Mate {
+                    name: "+Brynwyn".into(),
+                    guid: member,
+                    in_fellowship: true,
+                    ..Default::default()
+                },
+            ],
+            leader: false,
+            settled: true,
+            ..Default::default()
+        };
+        // The first sight starts the clock; the board's word on a mate
+        // is up to a round old, so it is given a few rounds to agree
+        // with the world's.
+        assert!(!c.autoplay_fellowship(t0));
+        assert!(!c.autoplay_fellowship(t0 + YIELD_AFTER / 2));
+        assert!(c.autoplay_fellowship(t0 + YIELD_AFTER), "not given up");
+        assert!(c.autoplay.founded.is_none());
+        assert!(
+            c.autoplay.status.contains("disbanding"),
+            "{}",
+            c.autoplay.status
+        );
+        // One this character did not found is never given up, whoever
+        // leads: the note on a fellowship "not founded by me" stands.
+        c.autoplay.founded = None;
+        c.autoplay.status.clear();
+        assert!(!c.autoplay_fellowship(t0 + YIELD_AFTER * 4));
+        assert!(!c.autoplay_fellowship(t0 + YIELD_AFTER * 8));
+        assert!(!c.autoplay.status.contains("disbanding"));
+        // Nor is one this character founded while it leads the team.
+        c.autoplay.founded = Some(t0);
+        c.autoplay.team.leader = true;
+        assert!(!c.autoplay_fellowship(t0 + YIELD_AFTER * 12));
+        assert!(c.autoplay.founded.is_some());
+    }
+
+    /// A character leading a fellowship it founded, with `others` in
+    /// it besides itself, on a settled team.
+    fn leading_a_fellowship(c: &mut Client, others: &[u32], t0: Instant) {
+        let me = c.world.player_guid.unwrap();
+        c.autoplay.config.team.enabled = true;
+        c.autoplay.config.team.fellowship = true;
+        let fellow = |guid| ac_world::Fellow {
+            guid,
+            ..Default::default()
+        };
+        c.world.fellowship = Some(ac_world::Fellowship {
+            name: "acreborn".into(),
+            leader: me,
+            members: std::iter::once(me)
+                .chain(others.iter().copied())
+                .map(fellow)
+                .collect(),
+            ..Default::default()
+        });
+        c.autoplay.founded = Some(t0);
+        c.autoplay.team.settled = true;
+    }
+
+    #[test]
+    fn whoever_leads_the_fellowship_brings_in_the_rightful_leader_standing_outside() {
+        // +Brynlyn founded and gathered the seven that came on with it;
+        // +Brynith, first by name, came on a few seconds later. Every
+        // roster's leader flipped to +Brynith the moment it was heard:
+        // +Brynlyn stopped recruiting, since it led the team no longer,
+        // and +Brynith, with nobody free to found with, founded
+        // nothing. Seven in a fellowship and the team's leader outside
+        // it for the life of the run. Whoever leads a fellowship brings
+        // the team's mates into it, the rightful leader among them.
+        let holtburg = 0xA9B4_0019;
+        let Some(mut c) = standing_in_the_field(20, holtburg, glam::Vec3::new(84.0, 84.0, 10.0))
+        else {
+            return;
+        };
+        let t0 = Instant::now();
+        let here = c.player.as_ref().unwrap().world_position();
+        let (rightful, member) = (0x5000_0002, 0x5000_0005);
+        leading_a_fellowship(&mut c, &[member], t0);
+        c.autoplay.team.leader = false;
+        c.autoplay.team.mates = vec![
+            Mate {
+                name: "+Brynith".into(),
+                guid: rightful,
+                in_fellowship: false,
+                leader: true,
+                autoplay: true,
+                world: here,
+                ..Default::default()
+            },
+            Mate {
+                name: "+Brynwyn".into(),
+                guid: member,
+                in_fellowship: true,
+                world: here,
+                ..Default::default()
+            },
+        ];
+        assert!(c.autoplay_fellowship(t0), "{}", c.autoplay.status);
+        assert!(
+            c.autoplay
+                .status
+                .contains("bringing +Brynith into the fellowship"),
+            "{}",
+            c.autoplay.status
+        );
+        assert_eq!(
+            c.autoplay
+                .recruited
+                .iter()
+                .map(|(g, _)| *g)
+                .collect::<Vec<_>>(),
+            vec![rightful]
+        );
+        // The other way about, nothing: a team leader that let itself
+        // be recruited into a mate's fellowship cannot recruit into it
+        // (the server answers 0x041D), and leaves the gathering to that
+        // mate.
+        c.autoplay.recruited.clear();
+        c.autoplay.last_recruit = None;
+        c.world.fellowship.as_mut().unwrap().leader = member;
+        c.autoplay.founded = None;
+        c.autoplay.team.leader = true;
+        c.autoplay.team.mates[0].leader = false;
+        assert!(!c.autoplay_fellowship(t0 + RECRUIT_AGAIN));
+        assert!(c.autoplay.recruited.is_empty());
+    }
+
+    #[test]
+    fn a_full_fellowship_asks_nobody_else() {
+        // Nine in, a tenth on the team: the server answered 0x041E to
+        // every ask and the tenth was asked every five seconds for the
+        // life of the run. The count says so first, once; and the code,
+        // should the server's count differ, holds off whoever was asked
+        // last.
+        let holtburg = 0xA9B4_0019;
+        let Some(mut c) = standing_in_the_field(20, holtburg, glam::Vec3::new(84.0, 84.0, 10.0))
+        else {
+            return;
+        };
+        let t0 = Instant::now();
+        let here = c.player.as_ref().unwrap().world_position();
+        let eight: Vec<u32> = (0..8).map(|i| 0x5000_0010 + i).collect();
+        leading_a_fellowship(&mut c, &eight, t0);
+        c.autoplay.team.leader = true;
+        let tenth = 0x5000_0030;
+        c.autoplay.team.mates = eight
+            .iter()
+            .map(|&guid| Mate {
+                name: format!("+Bryn{guid:x}"),
+                guid,
+                in_fellowship: true,
+                world: here,
+                ..Default::default()
+            })
+            .chain(std::iter::once(Mate {
+                name: "+Brynzed".into(),
+                guid: tenth,
+                world: here,
+                ..Default::default()
+            }))
+            .collect();
+        // A hold on somebody no longer on the team goes with them.
+        let gone = 0x5000_0099;
+        c.autoplay.held_off.hold(gone, HELD_OFF_FIRST, t0);
+        assert!(!c.autoplay_fellowship(t0));
+        assert!(c.autoplay.recruited.is_empty(), "the tenth was asked");
+        assert!(
+            c.autoplay
+                .noted
+                .iter()
+                .any(|(t, _)| t.contains("the fellowship is full at 9: 1 mate(s)")),
+            "{:?}",
+            c.autoplay.noted
+        );
+        assert!(!c.autoplay.held_off.held(&gone, t0));
+        // The server's own word on it, about the last one asked.
+        c.autoplay.recruited = vec![(tenth, t0)];
+        let soon = t0 + Duration::from_secs(1);
+        c.autoplay.hear_fellowship_full(soon);
+        assert!(c.autoplay.held_off.held(&tenth, soon));
+        assert!(!c.autoplay.held_off.held(&tenth, soon + HELD_OFF_FIRST));
+    }
+
+    #[test]
     fn a_body_emptied_by_a_mate_stays_emptied_after_the_mate_goes_quiet() {
         // The row goes from the board once its mate has been quiet for six
         // seconds, and a shut is said for twenty; what it said stays said.
@@ -14084,8 +14604,238 @@ mod loot_timing_tests {
 
 #[cfg(test)]
 mod fellowship_tests {
-    use super::{next_invitee, RECRUIT_AGAIN, RECRUIT_FLOOR, TEAM_OPTIONS};
+    use super::{
+        next_invitee, recruit_refusal, rival_leader, Mate, RecruitRefusal, TeamView,
+        HELD_OFF_FIRST, RECRUIT_AGAIN, RECRUIT_FLOOR, TEAM_OPTIONS,
+    };
+    use crate::did::Patience;
     use std::time::Instant;
+
+    /// Nobody held off.
+    fn nobody() -> Patience<u32> {
+        Patience::new()
+    }
+
+    #[test]
+    fn the_words_of_a_refusal_name_the_mate() {
+        // ACE answers both in plain Broadcast chat, not a WeenieError
+        // (`Entity/Fellowship.cs`, `AddFellowshipMember`).
+        assert_eq!(
+            recruit_refusal("+Brynlyn is already a member of a Fellowship."),
+            Some(("+Brynlyn", RecruitRefusal::AlreadyAMember))
+        );
+        assert_eq!(
+            recruit_refusal("+Brynoth is busy."),
+            Some(("+Brynoth", RecruitRefusal::Busy))
+        );
+        assert_eq!(recruit_refusal("You are too busy."), None);
+        assert_eq!(recruit_refusal("Brynoth is busy"), None);
+    }
+
+    #[test]
+    fn a_recruit_answered_already_a_member_is_not_asked_again_within_the_hold() {
+        // Two mates were "brought into the fellowship" ten times each and
+        // never came: the server's answer was chat the client never
+        // read, and `next_invitee` asked again every RECRUIT_AGAIN. Read,
+        // the answer holds that mate off for a doubling wait while the
+        // others are still asked.
+        let start = Instant::now();
+        let (lyn, oth) = (0x1001, 0x1002);
+        let waiting = [(lyn, 3.0), (oth, 5.0)];
+        let mut held = nobody();
+        let mut asked = vec![(lyn, start)];
+        held.hold(lyn, HELD_OFF_FIRST, start);
+        // The other is asked meanwhile.
+        assert_eq!(
+            next_invitee(&waiting, &asked, &held, Some(start), start + RECRUIT_FLOOR),
+            Some(oth)
+        );
+        asked.push((oth, start + RECRUIT_FLOOR));
+        // RECRUIT_AGAIN later the held one would have been asked again;
+        // now it waits out its hold.
+        let again = start + RECRUIT_AGAIN;
+        assert_eq!(
+            next_invitee(&waiting, &asked, &nobody(), Some(start), again),
+            Some(lyn)
+        );
+        assert_eq!(
+            next_invitee(&waiting, &asked, &held, Some(start), again),
+            None
+        );
+        let free = start + HELD_OFF_FIRST;
+        assert_eq!(
+            next_invitee(&waiting, &asked, &held, Some(start), free),
+            Some(lyn)
+        );
+        // Refused again: twice the wait. (The other, long since asked,
+        // is asked again meanwhile, so only this one is on the list.)
+        let only_lyn = [(lyn, 3.0)];
+        held.hold(lyn, HELD_OFF_FIRST, free);
+        assert_eq!(
+            next_invitee(&only_lyn, &asked, &held, Some(start), free + HELD_OFF_FIRST),
+            None
+        );
+        assert_eq!(
+            next_invitee(
+                &only_lyn,
+                &asked,
+                &held,
+                Some(start),
+                free + HELD_OFF_FIRST * 2
+            ),
+            Some(lyn)
+        );
+    }
+
+    #[test]
+    fn a_refusal_in_words_holds_off_the_mate_it_names_and_only_one_that_was_asked() {
+        let t0 = Instant::now();
+        let (lyn, oth) = (0x1001, 0x1002);
+        let mut ap = super::Autoplay::default();
+        ap.team.mates = vec![
+            Mate {
+                name: "+Brynlyn".into(),
+                guid: lyn,
+                ..Default::default()
+            },
+            Mate {
+                name: "+Brynoth".into(),
+                guid: oth,
+                ..Default::default()
+            },
+        ];
+        ap.recruited = vec![(lyn, t0)];
+        ap.hear_recruit_refusal("+Brynlyn is busy.", t0);
+        assert!(ap.held_off.held(&lyn, t0 + RECRUIT_AGAIN));
+        assert!(!ap.held_off.held(&lyn, t0 + HELD_OFF_FIRST));
+        // The same words about a mate never invited are about something
+        // else -- a patron busy with an oath says "is busy." too.
+        ap.hear_recruit_refusal("+Brynoth is busy.", t0);
+        assert!(!ap.held_off.held(&oth, t0));
+        // And a stranger's name is nobody's.
+        ap.hear_recruit_refusal("Ulgrim is already a member of a Fellowship.", t0);
+        assert_eq!(ap.held_off.len(), 1);
+    }
+
+    /// An autoplay with two mates on its roster, and the first of them
+    /// just invited.
+    fn having_asked_lyn(t0: Instant) -> (super::Autoplay, u32, u32) {
+        let (lyn, oth) = (0x1001, 0x1002);
+        let mut ap = super::Autoplay::default();
+        ap.team.mates = vec![
+            Mate {
+                name: "+Brynlyn".into(),
+                guid: lyn,
+                ..Default::default()
+            },
+            Mate {
+                name: "+Brynoth".into(),
+                guid: oth,
+                ..Default::default()
+            },
+        ];
+        ap.recruited = vec![(lyn, t0)];
+        (ap, lyn, oth)
+    }
+
+    #[test]
+    fn a_busy_mate_s_hold_does_not_outgrow_ten_seconds() {
+        // The server's `fellow_busy_no_recruit` answers "is busy." for
+        // a mate mid-use or mid-cast, which is over in seconds. Doubled
+        // each time, a mage that happened to be casting at each of
+        // eight asks was left out for hours; it is the same ten seconds
+        // every time. "Already a member" is slower to change, and
+        // doubles.
+        let t0 = Instant::now();
+        let (mut ap, lyn, _) = having_asked_lyn(t0);
+        let mut now = t0;
+        for _ in 0..8 {
+            ap.recruited = vec![(lyn, now)];
+            ap.hear_recruit_refusal("+Brynlyn is busy.", now);
+            assert_eq!(ap.held_off.waited(&lyn), Some(HELD_OFF_FIRST));
+            now += HELD_OFF_FIRST * 2;
+        }
+        ap.recruited = vec![(lyn, now)];
+        ap.hear_recruit_refusal("+Brynlyn is already a member of a Fellowship.", now);
+        assert_eq!(ap.held_off.waited(&lyn), Some(HELD_OFF_FIRST * 2));
+    }
+
+    #[test]
+    fn a_refusal_long_after_the_invitation_is_about_something_else() {
+        // The list of the invited is pruned only on the next invitation.
+        // "+Brynlyn is busy." ten minutes after the last invitation is
+        // a patron who could not take an oath (ACE
+        // `Player_Allegiance.cs`), not an answer to it.
+        let t0 = Instant::now();
+        let (mut ap, lyn, _) = having_asked_lyn(t0);
+        let later = t0 + RECRUIT_AGAIN * 2;
+        ap.hear_recruit_refusal("+Brynlyn is busy.", later);
+        assert!(!ap.held_off.held(&lyn, later));
+        assert_eq!(ap.held_off.len(), 0);
+        // Within the wait for an answer, it is the answer.
+        let soon = t0 + RECRUIT_AGAIN / 2;
+        ap.hear_recruit_refusal("+Brynlyn is busy.", soon);
+        assert!(ap.held_off.held(&lyn, soon));
+    }
+
+    #[test]
+    fn a_second_fellowship_is_given_up_by_the_leader_whose_name_does_not_sort_first() {
+        // Two fellowships for one fleet: the one founded by the leader
+        // that does not sort first goes, so the rightful leader can
+        // recruit its members. The rival is read off two words that
+        // have to agree -- the board's row says it is in a fellowship,
+        // the world's record says not in this one.
+        let me = 0x5000_0009;
+        let rival = Mate {
+            name: "+Brynith".into(),
+            guid: 0x5000_0001,
+            in_fellowship: true,
+            leader: true,
+            autoplay: true,
+            ..Default::default()
+        };
+        let mine = [me, 0x5000_0005];
+        let view = |m: Mate, settled: bool| TeamView {
+            mates: vec![m],
+            leader: false,
+            settled,
+            ..Default::default()
+        };
+        assert_eq!(
+            rival_leader(&view(rival.clone(), true), &mine).map(|m| m.guid),
+            Some(rival.guid)
+        );
+        // Not on a roster that has yet to settle: the rightful leader
+        // may still be a frame away from being heard.
+        assert!(rival_leader(&view(rival.clone(), false), &mine).is_none());
+        // Nor while this character leads the team itself.
+        let mut led = view(rival.clone(), true);
+        led.leader = true;
+        assert!(rival_leader(&led, &mine).is_none());
+        // A rightful leader that let itself be recruited into this one
+        // is a working party, not a rival.
+        assert!(rival_leader(&view(rival.clone(), true), &[me, rival.guid]).is_none());
+        // One in no fellowship at all is recruited, not yielded to.
+        let free = Mate {
+            in_fellowship: false,
+            ..rival.clone()
+        };
+        assert!(rival_leader(&view(free, true), &mine).is_none());
+        // A person standing in a fellowship of their own, with autoplay
+        // off and not asking to lead, would recruit nobody: this one is
+        // kept rather than given up to them.
+        let person = Mate {
+            autoplay: false,
+            leads: false,
+            ..rival.clone()
+        };
+        assert!(rival_leader(&view(person.clone(), true), &mine).is_none());
+        let leads = Mate {
+            leads: true,
+            ..person
+        };
+        assert!(rival_leader(&view(leads, true), &mine).is_some());
+    }
 
     #[test]
     fn every_option_a_teammate_keeps_on_is_one_the_table_knows() {
@@ -14120,12 +14870,12 @@ mod fellowship_tests {
         // tick now asks somebody who has not been asked yet.
         let start = Instant::now();
         let waiting = [(0x1001, 3.0), (0x1002, 5.0), (0x1003, 9.0)];
-        let first = next_invitee(&waiting, &[], None, start).expect("nobody asked");
+        let first = next_invitee(&waiting, &[], &nobody(), None, start).expect("nobody asked");
         assert_eq!(first, 0x1001, "the nearest is asked first");
         let asked = [(first, start)];
         let then = start + RECRUIT_FLOOR;
         assert_eq!(
-            next_invitee(&waiting, &asked, Some(start), then),
+            next_invitee(&waiting, &asked, &nobody(), Some(start), then),
             Some(0x1002)
         );
     }
@@ -14137,10 +14887,18 @@ mod fellowship_tests {
         // the invitations keep a small gap.
         let start = Instant::now();
         let waiting = [(0x1001, 3.0), (0x1002, 5.0)];
-        assert_eq!(next_invitee(&waiting, &[], Some(start), start), None);
+        assert_eq!(
+            next_invitee(&waiting, &[], &nobody(), Some(start), start),
+            None
+        );
         let soon = start + RECRUIT_FLOOR / 2;
-        assert_eq!(next_invitee(&waiting, &[], Some(start), soon), None);
-        assert!(next_invitee(&waiting, &[], Some(start), start + RECRUIT_FLOOR).is_some());
+        assert_eq!(
+            next_invitee(&waiting, &[], &nobody(), Some(start), soon),
+            None
+        );
+        assert!(
+            next_invitee(&waiting, &[], &nobody(), Some(start), start + RECRUIT_FLOOR).is_some()
+        );
     }
 
     #[test]
@@ -14152,10 +14910,13 @@ mod fellowship_tests {
         let waiting = [(0x1001, 3.0)];
         let asked = [(0x1001, start)];
         let soon = start + RECRUIT_AGAIN / 2;
-        assert_eq!(next_invitee(&waiting, &asked, Some(start), soon), None);
+        assert_eq!(
+            next_invitee(&waiting, &asked, &nobody(), Some(start), soon),
+            None
+        );
         let later = start + RECRUIT_AGAIN;
         assert_eq!(
-            next_invitee(&waiting, &asked, Some(start), later),
+            next_invitee(&waiting, &asked, &nobody(), Some(start), later),
             Some(0x1001)
         );
     }
@@ -14171,7 +14932,7 @@ mod fellowship_tests {
         let mut last = None;
         let mut now = start;
         while asked.len() < waiting.len() {
-            match next_invitee(&waiting, &asked, last, now) {
+            match next_invitee(&waiting, &asked, &nobody(), last, now) {
                 Some(guid) => {
                     asked.push((guid, now));
                     last = Some(now);

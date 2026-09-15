@@ -1996,6 +1996,11 @@ impl Client {
                         .unwrap_or(0);
                     tracing::info!("weenie error {code:#x}");
                     self.recall_error(code);
+                    // A full fellowship is refused by code, and names
+                    // nobody: it is about whoever was invited last.
+                    if code == autoplay::FELLOWSHIP_FULL {
+                        self.autoplay.hear_fellowship_full(Instant::now());
+                    }
                     // The informational ones (teleported, turbine chat) stay
                     // in the log; refusals reach the chat.
                     match weenie_errors::text(code) {
@@ -2071,6 +2076,12 @@ impl Client {
             // no notification, only this line (see
             // `autoplay::spell_attacker`).
             self.hear_spell_attack(&line.text, Instant::now());
+            // And on an invitation into the fellowship that came to
+            // nothing: a mate already in one, or busy, is refused in
+            // these words and nothing else (see
+            // `autoplay::recruit_refusal`).
+            self.autoplay
+                .hear_recruit_refusal(&line.text, Instant::now());
         }
         let text = match (op, line.sender.is_empty()) {
             _ if line.kind == ac_net::messages::turbine::KIND => {

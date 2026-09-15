@@ -255,12 +255,20 @@ pub struct Supplies {
     /// What it wants brought back, by name and count. The quartermaster
     /// adds these up into one shopping list.
     pub order: Vec<(String, u32)>,
+    /// It carries loot tagged for a counter that is worth a trip by its
+    /// own rules (see `growth::worth_a_sale_run`): worth enough, an
+    /// armful, or carried long enough. Judged by each character for
+    /// itself, since the thresholds are its own, and said to the party
+    /// as one word: a party that read only packs and supplies hunted on
+    /// while a member carried eight peas about all afternoon.
+    #[serde(default)]
+    pub sale: bool,
 }
 
 impl Supplies {
     /// Whether this character alone is reason enough to go shopping.
     fn wants_town(&self, cfg: &Restock) -> bool {
-        self.pack_full || self.laden || self.level < cfg.go_at
+        self.pack_full || self.laden || self.sale || self.level < cfg.go_at
     }
 
     /// Whether the party need wait for it any longer.
@@ -310,6 +318,8 @@ fn start_trip(mates: &[Supplies], cfg: &Restock) -> Option<Switch> {
                 format!("{}'s pack is full", m.name)
             } else if m.laden {
                 format!("{} is carrying as much as it means to", m.name)
+            } else if m.sale {
+                format!("{} is carrying loot for a counter", m.name)
             } else {
                 format!("{} is down to {:.0}% supplies", m.name, m.level * 100.0)
             }
@@ -677,6 +687,31 @@ mod tests {
         let cfg = Restock::default();
         assert_eq!(decide(GroupMode::Hunting, &[], &cfg, 0), None);
         assert_eq!(decide(SHOPPING, &[], &cfg, 0), None);
+    }
+
+    #[test]
+    fn loot_for_a_counter_sends_the_party_to_town() {
+        // A party that read only packs and supplies hunted on while a
+        // member carried eight peas about all afternoon. The member
+        // judges its own loot by its own rules and says so in a word.
+        let cfg = Restock::default();
+        let stocked = [mate("+Brynith", 1.0), mate("+Brynlyn", 1.0)];
+        assert_eq!(decide(GroupMode::Hunting, &stocked, &cfg, 0), None);
+        let mut laden_with_peas = mate("+Brynlyn", 1.0);
+        laden_with_peas.sale = true;
+        let sw = decide(
+            GroupMode::Hunting,
+            &[mate("+Brynith", 1.0), laden_with_peas],
+            &cfg,
+            0,
+        )
+        .expect("hunted on");
+        assert!(
+            sw.because
+                .contains("+Brynlyn is carrying loot for a counter"),
+            "{}",
+            sw.because
+        );
     }
 
     fn purse(name: &str, purse: u32, bill: u32) -> Supplies {
