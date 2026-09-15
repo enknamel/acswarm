@@ -2390,22 +2390,41 @@ pub fn judge_loot(
     if name_matches(&stats.name, &p.looting.always) {
         return Verdict::Decided(LootAction::Keep, "always take these".into());
     }
+    // The buy list is the player's word too: a line on it says "keep
+    // this many of these stocked", and up to that many of the thing
+    // are kept, whatever the rules below would make of it. Without
+    // this the tapers a character had just bought for its line were
+    // judged by "the rest, to the counter" as they arrived, tagged to
+    // sell, sold on the next trip and bought again at markup, for as
+    // long as the profile stood. Beyond the line the rules answer: a
+    // stack over what the line asks for is loot like any other, and
+    // "sell the rest" sells it. Judged here, once, when the thing is
+    // taken -- the list does not answer back to a tag already written.
+    let stocked = p.stocked_count(&stats.name);
+    if stocked > 0 && held < stocked {
+        return Verdict::Decided(LootAction::Keep, "kept stocked".into());
+    }
     p.judge(stats, id, me, my_name, held)
 }
 
-/// Each carried thing paired with how many of its kind come at or
-/// before it, oldest first.
+/// Each carried thing paired with how many of its kind came before
+/// it, oldest first.
 ///
 /// `carried` is `(guid, wcid, stack)`. The server hands out rising ids,
 /// so sorting by guid is the order the character came by the things in,
-/// and the running count is what a rule with a `keep_up_to` on it was
-/// answered with when they arrived one at a time.
+/// and the running count *before* each is what a rule with a
+/// `keep_up_to` on it was answered with when they arrived one at a
+/// time: `held` is what was already in the pack when the thing was
+/// judged, on the corpse path and everywhere else, and a rule with a
+/// cap keeps while `held` is under it.
 ///
 /// The whole point is not to hand every item the pack's total. A rule
 /// that keeps up to two rings, asked about three rings and told three
 /// times that three are carried, claims none of them -- and a profile
 /// edit would turn a set of keepers into a set of vendor trash in one
-/// pass.
+/// pass. Nor the count with the item itself in it, which this once
+/// was: told it was the second of two, the second ring was over a cap
+/// of two, and the pass kept one ring fewer than the cap.
 fn in_arrival_order(carried: &mut [(u32, u32, u32)]) -> Vec<(u32, u32)> {
     carried.sort_unstable();
     let mut seen_of: std::collections::BTreeMap<u32, u32> = std::collections::BTreeMap::new();
@@ -2413,8 +2432,9 @@ fn in_arrival_order(carried: &mut [(u32, u32, u32)]) -> Vec<(u32, u32)> {
         .iter()
         .map(|(guid, wcid, stack)| {
             let n = seen_of.entry(*wcid).or_insert(0);
+            let before = *n;
             *n += stack;
-            (*guid, *n)
+            (*guid, before)
         })
         .collect()
 }
@@ -3989,21 +4009,30 @@ impl Client {
     /// The buffs this character should be wearing right now, worked out
     /// from what it is (see `crate::buffs::wanted`).
     pub fn wanted_buffs(&self) -> Vec<crate::buffs::Want> {
+        // With the components and mana to try: a wand not yet in hand
+        // is the one lack that does not count, since wielding one is
+        // the first thing done.
+        self.wanted_buffs_if(|id| {
+            matches!(
+                self.can_cast(id),
+                crate::magic::CastCheck::Ok | crate::magic::CastCheck::NoCaster
+            )
+        })
+    }
+
+    /// The same, with `ready` saying which spells may be counted on
+    /// besides being likely enough to land. The buffing asks for what
+    /// can be cast this moment; the restock list asks for what would
+    /// be cast once the pack were filled (`growth::spells_cast`), which
+    /// is a different question with the same answer otherwise.
+    pub(crate) fn wanted_buffs_if(&self, ready: impl Fn(u32) -> bool) -> Vec<crate::buffs::Want> {
         let Ok(table) = self.assets.spell_table() else {
             return Vec::new();
         };
         let trained = crate::buffs::trained_skills(&self.world.stats.skills);
         let least = self.autoplay.config.buffs.least_chance;
-        // Likely enough to land, and with the components and mana to
-        // try: a wand not yet in hand is the one lack that does not
-        // count, since wielding one is the first thing done.
-        let usable = |id: u32| {
-            self.cast_chance(id) >= least
-                && matches!(
-                    self.can_cast(id),
-                    crate::magic::CastCheck::Ok | crate::magic::CastCheck::NoCaster
-                )
-        };
+        // Likely enough to land, and ready by the caller's measure.
+        let usable = |id: u32| self.cast_chance(id) >= least && ready(id);
         // Anything the armour spells could harden: armour, clothing or
         // a shield, since a cast at ourselves lands on all of it.
         let wears_armour = self.world.wielded().any(|o| {
@@ -4318,6 +4347,38 @@ impl Client {
             .filter(|o| o.weenie_class_id == wcid)
             .map(|o| o.stack_size.max(1))
             .sum()
+    }
+
+    /// The carried stack to hand a teammate short of `want`, by name.
+    ///
+    /// The stack the player said to sell first, since it is leaving
+    /// anyway, and a stack they said to keep only when there is no
+    /// other of the kind. The first stack whose name matched used to
+    /// go, which was the kept stack as often as not while the one
+    /// meant for a counter stayed.
+    pub(crate) fn spare_for(&self, want: &str) -> Option<(u32, String)> {
+        let want = want.to_lowercase();
+        let ledger = &self.autoplay.ledger;
+        self.world
+            .inventory()
+            .filter(|o| o.name.to_lowercase().contains(&want))
+            .min_by_key(|o| match ledger.by_guid(o.guid) {
+                Some(LootAction::Sell) => 0,
+                Some(LootAction::Keep) => 2,
+                _ => 1,
+            })
+            .map(|o| (o.guid, o.name.clone()))
+    }
+
+    /// The same, for a thing already in the pack: how many of its kind
+    /// are carried besides it, which is what was held when it arrived.
+    fn carried_besides(&self, stats: &crate::items::ItemStats) -> u32 {
+        let own = self
+            .world
+            .objects
+            .get(&stats.guid)
+            .map_or(0, |o| o.stack_size.max(1));
+        self.already_carried(stats.wcid).saturating_sub(own)
     }
 
     /// What the rules say to do with an item, now.
@@ -5853,7 +5914,12 @@ impl Client {
                 self.autoplay.pending_tags.push((g, since));
                 continue;
             }
-            let held = self.already_carried(stats.wcid);
+            // What was held before it arrived: the count every other
+            // path judges against, and the count a cap is a cap on.
+            // With the arrival itself counted, the fourth kit under
+            // "keep up to four" was the fourth of four, over the cap,
+            // and "the rest, to the counter" had it.
+            let held = self.carried_besides(&stats);
             if let Some(action) = arrival_tag(
                 &stats,
                 self.appraisals.get(&g),
@@ -7949,10 +8015,16 @@ impl Client {
         // (`Mate::wants`), so a character with nothing on its buy list
         // asks for nothing -- which is right, and is also why the list
         // matters more than it looks.
+        //
+        // Counted the way the character's own restock list counts it:
+        // what is carried less what the profile is selling out of. The
+        // two once differed, and a mate handed scarabs over while the
+        // character's own list said it wanted none.
         let profile = self.profiles.get(&self.autoplay.config.loot.profile);
+        let leaving = self.leaving_of(&self.item_stats());
         self.autoplay.wants = profile
             .map(|p| {
-                p.shortfall(|what| self.carried_named(what))
+                p.shortfall(|what| self.carried_named(what).saturating_sub(leaving.named(what)))
                     .into_iter()
                     .map(|s| s.want.what.clone())
                     .collect()
@@ -8711,13 +8783,7 @@ impl Client {
             let mate = self.autoplay.team.wanting(me, 6.0).cloned();
             if let Some(mate) = mate {
                 for want in &mate.wants {
-                    let spare = self
-                        .world
-                        .inventory()
-                        .filter(|o| o.name.to_lowercase().contains(&want.to_lowercase()))
-                        .map(|o| (o.guid, o.name.clone()))
-                        .next();
-                    if let Some((item, name)) = spare {
+                    if let Some((item, name)) = self.spare_for(want) {
                         self.give(mate.guid, item, None);
                         self.autoplay.last_give = Some(now);
                         self.autoplay
@@ -10195,6 +10261,186 @@ mod tests {
             Verdict::Decided(LootAction::Skip, "never take these".into())
         );
         let _ = std::fs::remove_dir_all(library.dir());
+    }
+
+    /// Set the buy list on the test profile.
+    fn buy_list(library: &crate::profile::Library, lines: &[(&str, u32)]) {
+        let mut p = (*library.get("test").expect("the test profile")).clone();
+        p.buy = lines
+            .iter()
+            .map(|(what, keep)| crate::profile::Buy {
+                what: what.to_string(),
+                keep: *keep,
+                restock_at: None,
+                from: None,
+                on: true,
+            })
+            .collect();
+        library.put(p).expect("put");
+    }
+
+    #[test]
+    fn the_buy_list_keeps_its_line_and_the_rules_answer_for_the_rest() {
+        // A line on the buy list is the player's word that this many
+        // are stock. Up to the line, a taper is kept whatever the rules
+        // make of it -- "sell the rest" once tagged the tapers just
+        // bought for the line, and the next trip sold them and bought
+        // them again. Over the line, the rules answer, so a surplus
+        // under "sell the rest" still goes.
+        use crate::profile::Verdict;
+        let library = shelf(
+            "stock",
+            vec![asks("the rest", "value>=0", LootAction::Sell)],
+        );
+        buy_list(&library, &[("Prismatic Taper", 100)]);
+        let profile = library.get("test");
+        let me = crate::weapons::Wielder::default();
+        let judge = |stats: &ItemStats, held: u32| {
+            judge_loot(stats, None, profile.as_deref(), &me, "Aldric", held)
+        };
+        let taper = item("Prismatic Taper", 500, 0);
+        assert_eq!(
+            judge(&taper, 0),
+            Verdict::Decided(LootAction::Keep, "kept stocked".into())
+        );
+        assert_eq!(
+            judge(&taper, 99),
+            Verdict::Decided(LootAction::Keep, "kept stocked".into()),
+            "one short of the line: the stack that fills it is kept"
+        );
+        assert_eq!(
+            judge(&taper, 100),
+            Verdict::Decided(LootAction::Sell, "the rest".into()),
+            "the line is full: the rules answer"
+        );
+        // What the list does not name is the rules' from the start.
+        assert_eq!(
+            judge(&item("Lead Scarab", 5, 0), 0),
+            Verdict::Decided(LootAction::Sell, "the rest".into())
+        );
+        // A line switched off says nothing.
+        let mut p = (*library.get("test").unwrap()).clone();
+        p.buy[0].on = false;
+        library.put(p).unwrap();
+        let profile = library.get("test");
+        assert_eq!(
+            judge_loot(&taper, None, profile.as_deref(), &me, "Aldric", 0),
+            Verdict::Decided(LootAction::Sell, "the rest".into())
+        );
+        let _ = std::fs::remove_dir_all(library.dir());
+    }
+
+    #[test]
+    fn what_arrives_is_judged_against_what_was_held_before_it() {
+        // "Keep up to four healing kits", three in the pack, a fourth
+        // bought. The arrival pass once counted the arrival itself, so
+        // the fourth was the fourth of four, over the cap, and "the
+        // rest, to the counter" tagged it to sell: the kit just bought
+        // for the line went back over the counter. Held is what was
+        // held before it, on this path as on the corpse's, and a fifth
+        // is the one over the cap.
+        let Some(mut c) = character_of_level(20) else {
+            return;
+        };
+        let dir = std::env::temp_dir().join("acswarm-test-arrival-profiles");
+        std::fs::create_dir_all(&dir).ok();
+        let shelf = std::sync::Arc::new(crate::profile::Library::default());
+        shelf.open(&dir);
+        let mut kits = crate::profile::Rule {
+            name: "kits".into(),
+            action: LootAction::Keep,
+            all: vec![crate::profile::Ask::Item(crate::items::Term::Word(
+                "healing kit".into(),
+            ))],
+            ..Default::default()
+        };
+        kits.keep_up_to = Some(4);
+        shelf
+            .put(crate::profile::Profile {
+                name: "four-kits".into(),
+                rules: vec![kits, asks("the rest", "value>=0", LootAction::Sell)],
+                ..Default::default()
+            })
+            .unwrap();
+        c.profiles = shelf;
+        c.autoplay.config.loot.profile = "four-kits".into();
+        let me = c.world.player_guid.unwrap();
+        let kit = |guid: u32| ac_world::WorldObject {
+            guid,
+            name: "Healing Kit".into(),
+            weenie_class_id: 4000,
+            item_type: ac_world::item_type::MISC,
+            value: 100,
+            stack_size: 1,
+            container: Some(me),
+            ..Default::default()
+        };
+        for guid in [0x8000_0001, 0x8000_0002, 0x8000_0003] {
+            c.world.objects.insert(guid, kit(guid));
+        }
+        let t0 = Instant::now();
+        // The first pass only notes what is carried.
+        c.autoplay_tag_arrivals(t0);
+        c.world.objects.insert(0x8000_0004, kit(0x8000_0004));
+        c.autoplay_tag_arrivals(t0);
+        assert_eq!(
+            c.autoplay.ledger.by_guid(0x8000_0004),
+            Some(LootAction::Keep),
+            "the fourth of four is under the cap"
+        );
+        c.world.objects.insert(0x8000_0005, kit(0x8000_0005));
+        c.autoplay_tag_arrivals(t0);
+        assert_eq!(
+            c.autoplay.ledger.by_guid(0x8000_0005),
+            Some(LootAction::Sell),
+            "the fifth is over it"
+        );
+    }
+
+    #[test]
+    fn supplies_are_handed_over_from_the_stack_that_is_leaving_anyway() {
+        // A mate short of tapers: the stack the player said to sell
+        // goes first, and the one they said to keep only when it is
+        // the only one.
+        let Some(mut c) = character_of_level(20) else {
+            return;
+        };
+        let me = c.world.player_guid.unwrap();
+        let tapers = |guid: u32, stack: u32| ac_world::WorldObject {
+            guid,
+            name: "Prismatic Taper".into(),
+            weenie_class_id: 20631,
+            item_type: ac_world::item_type::SPELL_COMPONENTS,
+            value: stack,
+            stack_size: stack,
+            max_stack_size: 1_000,
+            container: Some(me),
+            ..Default::default()
+        };
+        c.world
+            .objects
+            .insert(0x8000_0001, tapers(0x8000_0001, 1_000));
+        let kept = c.stats_of(0x8000_0001).unwrap();
+        c.autoplay.tag(&kept, LootAction::Keep);
+        assert_eq!(
+            c.spare_for("prismatic taper").map(|(g, _)| g),
+            Some(0x8000_0001)
+        );
+        c.world.objects.insert(0x8000_0002, tapers(0x8000_0002, 40));
+        assert_eq!(
+            c.spare_for("prismatic taper").map(|(g, _)| g),
+            Some(0x8000_0002),
+            "nothing decided about it beats a keeper"
+        );
+        c.world.objects.insert(0x8000_0003, tapers(0x8000_0003, 12));
+        let to_sell = c.stats_of(0x8000_0003).unwrap();
+        c.autoplay.tag(&to_sell, LootAction::Sell);
+        assert_eq!(
+            c.spare_for("prismatic taper").map(|(g, _)| g),
+            Some(0x8000_0003),
+            "leaving anyway"
+        );
+        assert_eq!(c.spare_for("lead scarab"), None);
     }
 
     #[test]
@@ -12996,9 +13242,11 @@ mod tests {
     #[test]
     fn a_re_judged_pack_counts_each_kind_as_it_goes() {
         // Three rings and two piles of tapers, in the order they were
-        // come by. Each ring is told it is the first, second, third of
-        // its kind -- not that three are carried -- so a rule that
-        // keeps up to two still claims two of them.
+        // come by. Each ring is told how many rings were held before
+        // it -- none, one, two -- not that three are carried, so a rule
+        // that keeps up to two claims the first two and not the third.
+        // Told instead that it was the second of two, the second ring
+        // sat over the cap and only one was kept.
         let mut carried = vec![
             (30, 500, 1),   // third ring
             (10, 500, 1),   // first ring
@@ -13008,11 +13256,11 @@ mod tests {
         ];
         assert_eq!(
             in_arrival_order(&mut carried),
-            vec![(10, 1), (15, 120), (20, 2), (25, 420), (30, 3)]
+            vec![(10, 0), (15, 0), (20, 1), (25, 120), (30, 2)]
         );
         // A stack counts for what it holds, not for one.
-        let mut one = vec![(7, 691, 4059)];
-        assert_eq!(in_arrival_order(&mut one), vec![(7, 4059)]);
+        let mut two = vec![(7, 691, 4059), (8, 691, 1)];
+        assert_eq!(in_arrival_order(&mut two), vec![(7, 0), (8, 4059)]);
         assert!(in_arrival_order(&mut []).is_empty());
     }
 

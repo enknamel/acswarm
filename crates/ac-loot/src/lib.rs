@@ -35,5 +35,5 @@ pub use items::{ItemStats, NumKey, Op, Query, Term, Tier};
 pub use ledger::{Ledger, Took};
 pub use profile::{Library, LootAction, Profile, Rule, Verdict as RuleVerdict};
 pub use run::{Act, Next, Run, Tally};
-pub use sale::offer_to_vendor;
+pub use sale::{fate, offer_to_vendor, Fate};
 pub use weapons::{Stance, Wielder};

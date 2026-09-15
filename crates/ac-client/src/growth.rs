@@ -1478,7 +1478,9 @@ fn vendor_rings(within: Option<f32>) -> Vec<f32> {
 /// character fights and lives in; and an item the server has flagged
 /// unsellable will be refused anyway, so offering it is a wasted round
 /// trip and, worse, a chance to get stuck on it.
-pub use ac_loot::sale::{never_sell, never_sell_because, never_sell_carried, offer_to_vendor};
+pub use ac_loot::sale::{
+    fate, never_sell, never_sell_because, never_sell_carried, offer_to_vendor, Fate,
+};
 
 /// Which of two counters is worth walking to, better first.
 ///
@@ -1533,6 +1535,49 @@ fn choose_counter<'a>(
         .filter(|(_, _, f)| errand.served_by(f))
         .min_by(|(_, ra, fa), (_, rb, fb)| better_counter(errand, (fa, *ra), (fb, *rb)))
         .map(|(s, _, f)| (s, f))
+}
+
+/// What is on its way out of the pack (see [`Client::leaving_of`]),
+/// counted: how many of each kind, so that the rest of a kind can
+/// still be short.
+///
+/// Counted, not merely noted. This once held only which kinds were
+/// leaving, and a line or a component was dropped from the restock
+/// list whenever any stack of it was: one stack of scarabs tagged to
+/// sell hid the kept stack's shortfall, a Sell-tagged "Lead Scarab"
+/// muted a buy line for "Scarab", and the party heard a different
+/// count than the character used. Taking the leaving stacks off what
+/// is held answers all three.
+#[derive(Default)]
+pub(crate) struct Leaving {
+    /// How many of each weenie class are leaving.
+    by_wcid: BTreeMap<u32, u32>,
+    /// Each leaving stack's name, lower-cased, with its count, for the
+    /// buy list's lines, which name a thing the way `carried_named`
+    /// counts it: by what its name contains.
+    names: Vec<(String, u32)>,
+    /// How many rounds of ammunition are leaving.
+    ammo: u32,
+}
+
+impl Leaving {
+    /// How many of this weenie class are leaving.
+    fn of(&self, wcid: u32) -> u32 {
+        self.by_wcid.get(&wcid).copied().unwrap_or(0)
+    }
+
+    /// How many of what a buy-list line names are leaving.
+    pub(crate) fn named(&self, line: &str) -> u32 {
+        let want = line.trim().to_lowercase();
+        if want.is_empty() {
+            return 0;
+        }
+        self.names
+            .iter()
+            .filter(|(n, _)| n.contains(&want))
+            .map(|(_, count)| *count)
+            .sum()
+    }
 }
 
 /// What the sale decision needs, gathered once (see
@@ -2476,9 +2521,116 @@ impl Client {
             .sum()
     }
 
+    /// What is on its way out of the pack: every carried thing the
+    /// profile said to sell and the server will let go (see
+    /// [`ac_loot::sale::fate`]), counted by weenie class and by name.
+    ///
+    /// What is held is counted less this before anything is called
+    /// short. A thing that is leaving is not stock, whatever else says
+    /// it is -- the buy list, the component table, the formulas of the
+    /// spells this character casts -- because the player decided it.
+    /// It is not the whole of the answer, though: what leaves is
+    /// forgotten with it, and whether more of the kind should then be
+    /// bought is a question about the kind, which the profile answers
+    /// (see [`Client::bought_to_sell`]).
+    pub(crate) fn leaving_of(&self, stats: &[ItemStats]) -> Leaving {
+        let mut out = Leaving::default();
+        for s in stats {
+            if fate(self.autoplay.ledger.of(s), never_sell(s)) != Fate::Leaving {
+                continue;
+            }
+            let count = s.stack.max(1);
+            *out.by_wcid.entry(s.wcid).or_insert(0) += count;
+            out.names.push((s.name.to_lowercase(), count));
+            if s.valid_locations & equip::MISSILE_AMMO != 0 {
+                out.ammo += count;
+            }
+        }
+        out
+    }
+
+    /// Whether `count` of this spell component, bought at a counter,
+    /// would be written down as loot to sell the moment they arrived
+    /// -- in which case buying them is a round trip at the counter's
+    /// markup, and they are not stock.
+    ///
+    /// Asked of the profile the way the arrival pass will ask it
+    /// (`autoplay_tag_arrivals`): the same rules, over the thing a
+    /// purchase arrives as. A verdict about the *kind* rather than
+    /// about a stack in the pack, which is what the restock list
+    /// needs: the moment a tagged stack goes over the counter its tag
+    /// is forgotten with it, and a list that only asked "is any of
+    /// this leaving?" bought the scarabs straight back in the same
+    /// visit, the arrival pass tagged them to sell, and the next trip
+    /// sold them again.
+    ///
+    /// `held` is what will be held when the purchase arrives, less
+    /// anything leaving: the count a `keep_up_to` rule, or the buy
+    /// list's own line, is judged against.
+    fn bought_to_sell(&self, wcid: u32, name: &str, count: u32, held: u32) -> bool {
+        let Some(profile) = self.loot_profile() else {
+            return false;
+        };
+        // Worth what a counter lists it at: the one in front of the
+        // character, else the world's shops. A rule that sells by value
+        // is asked about the stack a purchase makes.
+        let each = self
+            .world
+            .open_vendor
+            .as_ref()
+            .and_then(|v| {
+                v.items
+                    .iter()
+                    .find(|w| w.desc.weenie_class_id == wcid)
+                    .map(|w| w.desc.value)
+            })
+            .or_else(|| {
+                ac_world::shops::all()
+                    .iter()
+                    .flat_map(|s| &s.sells)
+                    .find(|w| w.wcid == wcid)
+                    .map(|w| w.value)
+            })
+            .unwrap_or(0);
+        let count = count.max(1);
+        let arrives = ItemStats {
+            name: name.to_string(),
+            wcid,
+            item_type: item_type::SPELL_COMPONENTS,
+            kind: crate::items::kind_name(item_type::SPELL_COMPONENTS),
+            stack: count,
+            max_stack: 1_000,
+            value: each.saturating_mul(count),
+            ..Default::default()
+        };
+        matches!(
+            crate::autoplay::judge_loot(
+                &arrives,
+                None,
+                Some(&profile),
+                &self.wielder(),
+                &self.world.stats.name,
+                held,
+            ),
+            crate::profile::Verdict::Decided(LootAction::Sell, _)
+        )
+    }
+
     /// What the character is short of.
     fn grow_needs(&self, cfg: &Growth) -> Vec<Need> {
+        self.grow_needs_with(cfg, &self.item_stats())
+    }
+
+    /// The same, over a pack already read: the counter's snapshot reads
+    /// it once for the sale and once more here, every tick of the
+    /// shopping loop, and the second reading is the same pack.
+    fn grow_needs_with(&self, cfg: &Growth, stats: &[ItemStats]) -> Vec<Need> {
         let mut needs = Vec::new();
+        let leaving = self.leaving_of(stats);
+        // What is held as stock: what is carried, less what is on its
+        // way out. Both the character and the party read this count
+        // (see `autoplay_stock`), so they agree on what is short.
+        let stock = |what: &str| self.carried_named(what).saturating_sub(leaving.named(what));
         // The profile's buy list first: it is where a player says what
         // to keep stocked now, and it is the same list that makes those
         // things unsellable. `keep_stocked` is what it grew out of and
@@ -2487,15 +2639,16 @@ impl Client {
         // of what is short. `grow_needs` used to re-implement that
         // filter, which is two statements of one rule and the way they
         // come to disagree.
-        let named: Vec<(String, u32, Option<String>, bool)> = self
+        let named: Vec<(String, u32, u32, Option<String>, bool)> = self
             .profiles
             .get(&self.autoplay.config.loot.profile)
             .map(|p| {
-                p.shortfall(|what| self.carried_named(what))
+                p.shortfall(stock)
                     .into_iter()
                     .map(|s| {
                         (
                             s.want.what.clone(),
+                            s.have,
                             s.want.keep,
                             s.want.from.clone(),
                             s.urgent,
@@ -2504,14 +2657,13 @@ impl Client {
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
-        for (name, least, from, urgent) in named {
+        for (name, have, least, from, urgent) in named {
             if name.trim().is_empty() || least == 0 {
                 continue;
             }
             if !worth_stocking(&name, self.heals_with_kits()) {
                 continue;
             }
-            let have = self.carried_named(&name);
             if have < least
                 && !needs
                     .iter()
@@ -2531,7 +2683,12 @@ impl Client {
                 });
             }
         }
-        if let Some((kind, have)) = self.ammo_carried() {
+        if let Some((kind, carried)) = self.ammo_carried() {
+            // Less the rounds the player said to sell: ammunition the
+            // profile is selling out of is loot in the ammunition
+            // slot, not stock, and it goes over the counter. The
+            // launcher is still short by what is left after it does.
+            let have = carried.saturating_sub(leaving.ammo);
             if have < cfg.ammo_keep {
                 needs.push(Need {
                     name: ac_world::fletching::ammo_type::name(kind).to_string(),
@@ -2564,7 +2721,7 @@ impl Client {
                 if let Ok(mapper) = self.assets.spell_component_ids() {
                     let targets = self.component_targets(tapers);
                     // Every component the spells this character casts
-                    // will burn, and every one it happens to carry.
+                    // will burn, and nothing else.
                     //
                     // The targets are what matters. Asking only what is
                     // in the pack, as this once did, leaves a caster
@@ -2572,19 +2729,35 @@ impl Client {
                     // notice: with none of it carried there is nothing
                     // to count, so nothing is short, so it never goes
                     // to town for more.
+                    //
+                    // And what is carried is not asked at all. It used
+                    // to be added to the targets, at the taper count
+                    // for want of a burn rate, and the peas a mage
+                    // loots sit in the component table too (seventy-odd
+                    // of them, at 113-186, 189 and 191): each became a
+                    // need for ninety-nine more. A thing no cast burns
+                    // is not stock, whatever table it is in, and the
+                    // formulas already say which things are burnt. The
+                    // spells autoplay casts, not every spell in the
+                    // book, so nothing is bought for a spell that is
+                    // never cast.
+                    //
+                    // That is a rule about what to stock, and it is not
+                    // what keeps the player's loot off this list. The
+                    // profile does: a stack tagged to sell is not
+                    // counted as stock even when a spell burns it, and
+                    // a kind the rules would tag to sell the moment it
+                    // was bought is not bought, because a need for it
+                    // would only buy back at markup what the counter
+                    // was just handed, to be sold again next trip.
                     let carried = self.components();
-                    let mut ids: Vec<u32> = targets.keys().copied().collect();
-                    ids.extend(carried.iter().map(|c| c.component_id));
-                    ids.sort_unstable();
-                    ids.dedup();
-                    for id in ids {
+                    for (&id, &keep) in &targets {
                         let Some(wcid) = mapper.component_wcid(id) else {
                             continue;
                         };
                         // What this one burns at, not what a taper does.
-                        let keep = targets.get(&id).copied().unwrap_or(tapers);
                         let c = carried.iter().find(|c| c.component_id == id);
-                        let have = c.map_or(0, |c| c.count);
+                        let have = c.map_or(0, |c| c.count).saturating_sub(leaving.of(wcid));
                         let buyable = ac_world::shops::sold_anywhere(wcid);
                         if have < keep {
                             // What it is called in the client's own
@@ -2602,6 +2775,9 @@ impl Client {
                                 })
                                 .or_else(|| mapper.name_of(id).map(str::to_string))
                                 .unwrap_or_else(|| format!("component {id}"));
+                            if self.bought_to_sell(wcid, &name, keep - have, have) {
+                                continue;
+                            }
                             needs.push(Need {
                                 name,
                                 want: keep - have,
@@ -2867,6 +3043,115 @@ impl Client {
             .any(|o| wanted.iter().any(|w| o.name.eq_ignore_ascii_case(w)))
     }
 
+    /// Every spell autoplay casts, in one list: what the restock list
+    /// stocks components for, and what the counter's component guard
+    /// keeps.
+    ///
+    /// All of them, not only the buffs and the bolts. The list once
+    /// held those two alone, and a caster's heal, its vulnerabilities
+    /// and imperils, the team's debuffs, its recalls and the casts
+    /// that keep its stamina and mana up were stocked for nothing: each
+    /// carries its own herb, powder, potion and talisman that no buff
+    /// or bolt shares (Heal Self V burns 7, 26, 41 and 61; Flame Bolt
+    /// I burns 15, 34, 46 and 55), so when the pack ran out the heal
+    /// stopped casting and nobody went to town for it.
+    ///
+    /// Known, not castable. Whether a spell can be cast this moment is
+    /// mostly a question of whether its components are in the pack,
+    /// and that is the question this list is asked in order to answer.
+    /// A buff is asked for with that check left out for the same
+    /// reason (`wanted_buffs_if`).
+    pub(crate) fn spells_cast(&self) -> Vec<u32> {
+        use ac_world::vitals::{boosts_of, transfers_between, vital};
+        let known = |id: &u32| self.world.stats.spells.contains(id);
+        let table = self.assets.spell_table().ok();
+        let at_another = |id: &u32| {
+            table
+                .as_ref()
+                .and_then(|t| t.get(*id))
+                .is_some_and(|s| s.needs_target())
+        };
+        let by_name = |names: &[String]| -> Vec<u32> {
+            names.iter().filter_map(|n| self.spell_by_name(n)).collect()
+        };
+        let cfg = &self.autoplay.config;
+        let mut out: Vec<u32> = Vec::new();
+        // The buffs it should be wearing, castable or not, and the
+        // ones the player named.
+        let wearable = |id: u32| {
+            !matches!(
+                self.can_cast(id),
+                crate::magic::CastCheck::NotKnown | crate::magic::CastCheck::TooHard { .. }
+            )
+        };
+        out.extend(self.wanted_buffs_if(wearable).iter().map(|w| w.spell));
+        out.extend(by_name(&cfg.buffs.spells));
+        // The attack: every bolt in the book, or the ones named.
+        if cfg.fight.spells.is_empty() {
+            out.extend(self.attack_spells_known());
+        } else {
+            out.extend(by_name(&cfg.fight.spells));
+        }
+        // Softening: a vulnerability for each element, and the
+        // imperils (see `autoplay_make_vulnerable`, `autoplay_soften`).
+        for element in ac_world::elements::ALL {
+            out.extend(
+                crate::weapons::vulnerability_spells(element)
+                    .into_iter()
+                    .filter(known)
+                    .filter(at_another),
+            );
+        }
+        out.extend(self.imperil_spells());
+        // The team's work: its debuffs by name, and the healer's heal.
+        out.extend(by_name(&cfg.team.debuffs));
+        if cfg.team.role == crate::autoplay::Role::Healer {
+            out.extend(self.spell_by_name("Heal Other"));
+        }
+        // Its own heals (see `choose_heal`), and the casts that keep
+        // stamina and mana up (see `autoplay_vitals`).
+        out.extend(
+            boosts_of(vital::HEALTH)
+                .iter()
+                .map(|b| b.spell)
+                .filter(known),
+        );
+        for from in [vital::STAMINA, vital::MANA] {
+            out.extend(
+                transfers_between(from, vital::HEALTH)
+                    .iter()
+                    .map(|t| t.spell)
+                    .filter(known),
+            );
+        }
+        if cfg.survive.manage_mana {
+            out.extend(
+                boosts_of(vital::STAMINA)
+                    .iter()
+                    .map(|b| b.spell)
+                    .filter(known),
+            );
+            out.extend(
+                transfers_between(vital::STAMINA, vital::MANA)
+                    .iter()
+                    .map(|t| t.spell)
+                    .filter(known),
+            );
+        }
+        // The recalls a journey is planned over (see `castable_recalls`).
+        out.extend(
+            self.world
+                .stats
+                .spells
+                .iter()
+                .copied()
+                .filter(|id| ac_world::recalls::is_recall(*id)),
+        );
+        out.sort_unstable();
+        out.dedup();
+        out
+    }
+
     /// How many of each spell component to carry, keyed by component id.
     ///
     /// A taper is the yardstick: it is what a caster runs out of, and
@@ -2898,13 +3183,7 @@ impl Client {
         // The fastest rate each component burns at, across the spells
         // this character actually casts.
         let mut fastest: BTreeMap<u32, f32> = BTreeMap::new();
-        let spells: Vec<u32> = self
-            .wanted_buffs()
-            .iter()
-            .map(|w| w.spell)
-            .chain(self.attack_spells_known())
-            .collect();
-        for spell in spells {
+        for spell in self.spells_cast() {
             let Some(sp) = table.get(spell) else { continue };
             for id in self.current_formula(spell) {
                 let Some(c) = comps.get(id) else { continue };
@@ -3305,6 +3584,11 @@ impl Client {
         // switchable off by editing a shopping list. Any positive scale
         // gives the same set of keys, so it is given one of its own
         // rather than the number of tapers the player happens to keep.
+        //
+        // A guard, not a verdict. It answers for a component the
+        // profile said nothing about; one a loot rule tagged to sell
+        // is the player's word, which is not a shopping list, and goes
+        // (`ac_loot::sale::offer_to_vendor` reads the tag first).
         const ENOUGH_TO_NAME_THEM: u32 = 1_000;
         self.component_targets(ENOUGH_TO_NAME_THEM)
             .keys()
@@ -3411,9 +3695,20 @@ impl Client {
         // stack another errand is holding is left where it is. Without
         // the first, one stubborn pair was the only answer ever given
         // and nothing else in the pack was ever poured.
+        //
+        // And two stacks whose words disagree are never poured
+        // together. A pour makes one stack of two, and one stack can
+        // carry one word: a stack the player said to sell poured into
+        // one they said to keep was settled as kept (the ledger takes
+        // the cautious answer), and poured into one nothing was
+        // decided about it was settled as nothing -- either way the
+        // Sell was gone before the character set off for town. Kept
+        // apart, each stack goes where its own word says.
+        let ledger = &self.autoplay.ledger;
         let skip = |from: u32, to: u32| {
             self.autoplay.growth.wont_merge.held(&(from, to), now)
                 || errands.iter().flatten().any(|g| *g == from || *g == to)
+                || ledger.by_guid(from) != ledger.by_guid(to)
         };
         let Some(m) = crate::pack::next_merge_unless(&stacks, may_carry, skip) else {
             // Nothing to pour -- or nothing light enough. The two are
@@ -3512,8 +3807,18 @@ impl Client {
     /// Only lines that can actually be bought. What no counter stocks
     /// is farmed instead, and a want nobody can fill would hold a trip
     /// open for ever.
+    #[cfg(test)]
     pub(crate) fn vendor_shortfall(&self, cfg: &Growth) -> Vec<ac_vendor::counter::Want> {
-        self.grow_needs(cfg)
+        self.vendor_shortfall_with(cfg, &self.item_stats())
+    }
+
+    /// The same, over a pack already read (see [`Client::grow_needs_with`]).
+    pub(crate) fn vendor_shortfall_with(
+        &self,
+        cfg: &Growth,
+        stats: &[ItemStats],
+    ) -> Vec<ac_vendor::counter::Want> {
+        self.grow_needs_with(cfg, stats)
             .into_iter()
             .filter(|n| n.buyable && n.want > 0)
             .filter_map(|n| {
@@ -6787,7 +7092,7 @@ mod tests {
     }
 
     #[test]
-    fn what_a_stack_was_taken_for_is_settled_when_the_pour_lands_and_not_before() {
+    fn stacks_whose_words_disagree_are_never_poured_together() {
         use ac_loot::LootAction;
         let stats = |guid: u32| crate::items::ItemStats {
             guid,
@@ -6795,8 +7100,11 @@ mod tests {
             name: "Lead Pea".into(),
             ..Default::default()
         };
-        // The big stack is meant for a counter, the small one is kept:
-        // pouring the kept one in makes the survivor a keeper too.
+        // The big stack is meant for a counter, the small one is kept.
+        // Pouring the small one in would settle the survivor as kept
+        // (the ledger takes the cautious answer), and forty peas the
+        // player said to sell would stay in the pack for good: the
+        // player's Sell overruled by a tidy. So nothing is poured.
         let Some(mut c) = carrying(&[(1, 8329, 40, 100), (2, 8329, 5, 100)]) else {
             return;
         };
@@ -6804,24 +7112,36 @@ mod tests {
         c.autoplay.ledger.remember(&stats(2), LootAction::Keep);
         let t0 = Instant::now();
         c.autoplay_tidy(t0);
-        c.move_refused
-            .insert(2, (0, t0 + Duration::from_millis(50)));
-        c.autoplay_tidy(t0 + Duration::from_millis(700));
-        assert_eq!(
-            c.autoplay.ledger.by_guid(1),
-            Some(LootAction::Sell),
-            "a pour that never happened settles nothing"
+        assert!(
+            c.autoplay.pour.is_none(),
+            "poured across words: {:?}",
+            c.autoplay.pour
         );
-        // The same pour, landed: now the survivor is a keeper.
+        assert_eq!(c.autoplay.ledger.by_guid(1), Some(LootAction::Sell));
+
+        // Nor into a stack nothing was decided about. "Undecided" is
+        // not "sell": the guards answer for the survivor, and a Sell
+        // poured into it is a Sell lost.
+        let Some(mut c) = carrying(&[(1, 8329, 40, 100), (2, 8329, 5, 100)]) else {
+            return;
+        };
+        c.autoplay.ledger.remember(&stats(2), LootAction::Sell);
+        c.autoplay_tidy(t0);
+        assert!(c.autoplay.pour.is_none(), "{:?}", c.autoplay.pour);
+
+        // Two stacks with one word are poured, and the word survives
+        // the pour.
         let Some(mut c) = carrying(&[(1, 8329, 40, 100), (2, 8329, 5, 100)]) else {
             return;
         };
         c.autoplay.ledger.remember(&stats(1), LootAction::Sell);
-        c.autoplay.ledger.remember(&stats(2), LootAction::Keep);
+        c.autoplay.ledger.remember(&stats(2), LootAction::Sell);
         c.autoplay_tidy(t0);
+        let sent = c.autoplay.pour.clone().expect("a pour went out").0;
+        assert_eq!((sent.merge.from, sent.merge.to), (2, 1));
         poured(&mut c, 2, 1, 45);
         c.autoplay_tidy(t0 + Duration::from_millis(700));
-        assert_eq!(c.autoplay.ledger.by_guid(1), Some(LootAction::Keep));
+        assert_eq!(c.autoplay.ledger.by_guid(1), Some(LootAction::Sell));
     }
 
     #[test]
@@ -8068,6 +8388,833 @@ mod tests {
         c.autoplay.tag(&stats, LootAction::Sell);
     }
 
+    /// A wand in hand, a bolt in the book and the Foci of Strife in the
+    /// pack: a war mage, whose every cast burns a scarab and a prismatic
+    /// taper.
+    fn as_a_war_mage(c: &mut Client) {
+        const FLAME_BOLT_I: u32 = 27;
+        const FOCI_OF_STRIFE: u32 = 15271;
+        let me = c.world.player_guid.unwrap();
+        c.world.stats.spells = vec![FLAME_BOLT_I];
+        c.world.objects.insert(
+            0x8000_0040,
+            ac_world::WorldObject {
+                guid: 0x8000_0040,
+                name: "Wand".into(),
+                item_type: item_type::CASTER,
+                value: 100,
+                wielder: Some(me),
+                parent: Some(me),
+                ..Default::default()
+            },
+        );
+        c.world.objects.insert(
+            0x8000_0041,
+            ac_world::WorldObject {
+                guid: 0x8000_0041,
+                name: "Foci of Strife".into(),
+                weenie_class_id: FOCI_OF_STRIFE,
+                value: 100,
+                container: Some(me),
+                ..Default::default()
+            },
+        );
+    }
+
+    /// `stack` prismatic tapers in the pack.
+    fn tapers_in_the_pack(c: &mut Client, guid: u32, stack: u32) {
+        let me = c.world.player_guid.unwrap();
+        c.world.objects.insert(
+            guid,
+            ac_world::WorldObject {
+                guid,
+                name: "Prismatic Taper".into(),
+                weenie_class_id: 20631,
+                item_type: item_type::SPELL_COMPONENTS,
+                value: stack,
+                stack_size: stack,
+                max_stack_size: 1_000,
+                container: Some(me),
+                ..Default::default()
+            },
+        );
+    }
+
+    #[test]
+    fn a_casters_peas_are_loot_to_sell_and_not_stock_to_buy() {
+        // The report: "autovendoring doesn't seem to sell at all", from
+        // a caster with a spellbook and a wand. The peas it looted sit
+        // in the component table beside the scarabs, and every carried
+        // component went on the restock list at the taper count for
+        // want of a burn rate: two peas became two wants for ninety-nine
+        // more, the counter skipped them as what the character came to
+        // buy, and a counter with peas on the shelf would have bought
+        // them at markup. The character that passed a live proof knew
+        // spells and wielded nothing, so this never opened for it.
+        use ac_vendor::Act;
+        let holtburg = 0xA9B4_0019;
+        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
+            return;
+        };
+        c.world.stats.level = 20;
+        with_a_pack(&mut c, 20);
+        as_a_war_mage(&mut c);
+        pea_in_the_pack(&mut c, 0x8000_0010, "Iron Pea", 8328, 2_500);
+        pea_in_the_pack(&mut c, 0x8000_0011, "Lead Pea", 8329, 500);
+        tapers_in_the_pack(&mut c, 0x8000_0012, 78);
+        with_a_buy_list(&mut c, &[("Prismatic Taper", 100, 25)]);
+        let cfg = c.autoplay.config.growth.clone();
+
+        // The gate is open: the tapers are stock, scaled from the line.
+        let needs = c.grow_needs(&cfg);
+        let taper = needs
+            .iter()
+            .find(|n| n.kind == NeedKind::Component(20631))
+            .expect("the tapers it is short of");
+        assert_eq!((taper.have, taper.keep, taper.want), (78, 100, 22));
+        // And a pea is not: no cast burns one.
+        let pea = needs.iter().find(|n| n.name.contains("Pea"));
+        assert!(pea.is_none(), "a pea is stock: {pea:?}");
+        let wants = c.vendor_shortfall(&cfg);
+        assert!(
+            wants.iter().all(|w| w.wcid != 8328 && w.wcid != 8329),
+            "a pea on the shopping list: {wants:?}"
+        );
+        assert!(wants.iter().any(|w| w.wcid == 20631), "{wants:?}");
+
+        // At a counter that buys components, the peas go and the
+        // tapers stay.
+        let cindrue = 0x8000_0002;
+        vendor_beside(
+            &mut c,
+            cindrue,
+            "Archmage Cindrue",
+            glam::Vec3::new(1.0, 0.0, 0.0),
+        );
+        let mut window = window_of(cindrue);
+        window.item_types = item_type::SPELL_COMPONENTS;
+        c.world.open_vendor = Some(window);
+        let snap = c.vendor_snapshot(&cfg);
+        let mut offered: Vec<u32> = snap
+            .items
+            .iter()
+            .filter(|i| snap.offers(i))
+            .map(|i| i.guid)
+            .collect();
+        offered.sort_unstable();
+        assert_eq!(offered, [0x8000_0010, 0x8000_0011]);
+        assert!(
+            snap.items
+                .iter()
+                .any(|i| i.guid == 0x8000_0010 && i.to_sell()),
+            "the ledger's word travels with the pea"
+        );
+        let next = ac_vendor::Run::new().step(&snap, Instant::now());
+        assert_eq!(
+            next.act,
+            Some(Act::Sell {
+                items: vec![0x8000_0010, 0x8000_0011]
+            }),
+            "{}",
+            next.saying
+        );
+    }
+
+    /// A stack of `stack` `name` in the pack, a spell component, with
+    /// nothing written down about it.
+    fn component_in_the_pack(c: &mut Client, guid: u32, name: &str, wcid: u32, stack: u32) {
+        let me = c.world.player_guid.unwrap();
+        c.world.objects.insert(
+            guid,
+            ac_world::WorldObject {
+                guid,
+                name: name.into(),
+                weenie_class_id: wcid,
+                item_type: item_type::SPELL_COMPONENTS,
+                value: 5 * stack,
+                stack_size: stack,
+                max_stack_size: 1_000,
+                container: Some(me),
+                ..Default::default()
+            },
+        );
+    }
+
+    /// The weenie class the archives give a component of this name.
+    fn component_named(c: &Client, name: &str) -> u32 {
+        let table = c.assets.spell_components().unwrap();
+        let id = table.find_by_name(name).expect(name);
+        c.assets
+            .spell_component_ids()
+            .unwrap()
+            .component_wcid(id)
+            .expect(name)
+    }
+
+    /// Write down what the profile makes of this item now, as the
+    /// arrival pass does: the item is judged by the rules once, when it
+    /// is taken, and the answer travels with it.
+    fn tagged_by_the_profile(c: &mut Client, guid: u32) -> LootAction {
+        let stats = c.stats_of(guid).unwrap();
+        let action = c.loot_action(&stats).expect("a rule claims it");
+        c.autoplay.tag(&stats, action);
+        action
+    }
+
+    /// The war mage in front of Cindrue's open window, which buys
+    /// components: what she is offered, and what the run does first.
+    fn at_cindrues_counter(c: &mut Client, cfg: &Growth) -> (Vec<u32>, ac_vendor::Next) {
+        let cindrue = 0x8000_0002;
+        vendor_beside(
+            c,
+            cindrue,
+            "Archmage Cindrue",
+            glam::Vec3::new(1.0, 0.0, 0.0),
+        );
+        let mut window = window_of(cindrue);
+        window.item_types = item_type::SPELL_COMPONENTS;
+        c.world.open_vendor = Some(window);
+        let snap = c.vendor_snapshot(cfg);
+        let mut offered: Vec<u32> = snap
+            .items
+            .iter()
+            .filter(|i| snap.offers(i))
+            .map(|i| i.guid)
+            .collect();
+        offered.sort_unstable();
+        let next = ac_vendor::Run::new().step(&snap, Instant::now());
+        (offered, next)
+    }
+
+    #[test]
+    fn a_scarab_the_player_said_to_sell_goes_though_its_own_spells_burn_it() {
+        // The principle, in the player's words: follow the loot
+        // profile. A rule that says "sell lead scarabs" is the player's
+        // decision about every lead scarab the character picks up, and
+        // it was being overruled three ways at once: the component
+        // guard kept it from the counter because Flame Bolt burns it,
+        // the restock list wanted more of it for the same reason, and
+        // the counter skipped it as what the character came to buy.
+        use ac_vendor::Act;
+        let holtburg = 0xA9B4_0019;
+        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
+            return;
+        };
+        c.world.stats.level = 20;
+        with_a_pack(&mut c, 20);
+        as_a_war_mage(&mut c);
+        let scarab = component_named(&c, "Lead Scarab");
+        tapers_in_the_pack(&mut c, 0x8000_0012, 78);
+        component_in_the_pack(&mut c, 0x8000_0013, "Lead Scarab", scarab, 3);
+        with_a_profile(
+            &mut c,
+            "sells-scarabs",
+            vec![
+                word_rule("lead scarabs to sell", "lead scarab", LootAction::Sell),
+                word_rule("components", "taper", LootAction::Keep),
+            ],
+            &[("Prismatic Taper", 100, 25)],
+        );
+        assert_eq!(tagged_by_the_profile(&mut c, 0x8000_0013), LootAction::Sell);
+        let cfg = c.autoplay.config.growth.clone();
+        assert!(
+            c.burns(&cfg).contains(&scarab),
+            "the spells do burn it; that is the point"
+        );
+
+        // Not stock: leaving, so never a need and never a want. The
+        // tapers, which the player keeps, still are.
+        let needs = c.grow_needs(&cfg);
+        assert!(
+            !needs.iter().any(|n| n.kind == NeedKind::Component(scarab)),
+            "a need for what is being sold: {needs:?}"
+        );
+        assert!(needs.iter().any(|n| n.kind == NeedKind::Component(20631)));
+        let wants = c.vendor_shortfall(&cfg);
+        assert!(wants.iter().all(|w| w.wcid != scarab), "{wants:?}");
+
+        // Offered, and sold, at a counter that buys components.
+        let (offered, next) = at_cindrues_counter(&mut c, &cfg);
+        assert_eq!(offered, [0x8000_0013]);
+        assert_eq!(
+            next.act,
+            Some(Act::Sell {
+                items: vec![0x8000_0013]
+            }),
+            "{}",
+            next.saying
+        );
+    }
+
+    #[test]
+    fn a_scarab_nothing_was_decided_about_is_kept_by_the_guard() {
+        // The guards still answer for what the profile did not decide.
+        // A scarab with no entry in the ledger, burnt by the spells
+        // this mage casts, stays out of the counter's hands: "the rest,
+        // to the counter" would sell it today, and the guard says no.
+        let holtburg = 0xA9B4_0019;
+        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
+            return;
+        };
+        c.world.stats.level = 20;
+        with_a_pack(&mut c, 20);
+        as_a_war_mage(&mut c);
+        let scarab = component_named(&c, "Lead Scarab");
+        tapers_in_the_pack(&mut c, 0x8000_0012, 78);
+        component_in_the_pack(&mut c, 0x8000_0013, "Lead Scarab", scarab, 1);
+        with_a_profile(
+            &mut c,
+            "sells-the-rest",
+            vec![the_rest_to_the_counter()],
+            &[("Prismatic Taper", 100, 25)],
+        );
+        assert_eq!(c.autoplay.ledger.by_guid(0x8000_0013), None);
+        let cfg = c.autoplay.config.growth.clone();
+        let (offered, next) = at_cindrues_counter(&mut c, &cfg);
+        assert!(offered.is_empty(), "{offered:x?}");
+        assert!(
+            !matches!(next.act, Some(ac_vendor::Act::Sell { .. })),
+            "{}",
+            next.saying
+        );
+    }
+
+    #[test]
+    fn a_kind_the_rules_would_sell_on_arrival_is_not_bought() {
+        // Whether to buy more of a thing is a question about the kind,
+        // and the profile answers it the way it will answer for the
+        // purchase when it arrives. Under "the rest, to the counter"
+        // a bought scarab is tagged to sell as it lands and sold on
+        // the next trip, so it is not bought, however low the pack is
+        // and whatever the spells burn. Under the starter's rules,
+        // which keep components, it is.
+        let holtburg = 0xA9B4_0019;
+        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
+            return;
+        };
+        c.world.stats.level = 20;
+        with_a_pack(&mut c, 20);
+        as_a_war_mage(&mut c);
+        let scarab = component_named(&c, "Lead Scarab");
+        tapers_in_the_pack(&mut c, 0x8000_0012, 78);
+        component_in_the_pack(&mut c, 0x8000_0013, "Lead Scarab", scarab, 1);
+        with_a_profile(
+            &mut c,
+            "sells-the-rest",
+            vec![the_rest_to_the_counter()],
+            &[("Prismatic Taper", 100, 25)],
+        );
+        let cfg = c.autoplay.config.growth.clone();
+        let needs = c.grow_needs(&cfg);
+        assert!(
+            !needs.iter().any(|n| n.kind == NeedKind::Component(scarab)),
+            "bought to be sold: {needs:?}"
+        );
+        // The tapers are on the buy list, which is the player's word
+        // that they are stock: still a need, whatever the rules say.
+        assert!(needs.iter().any(|n| n.kind == NeedKind::Component(20631)));
+
+        with_a_buy_list(&mut c, &[("Prismatic Taper", 100, 25)]);
+        let needs = c.grow_needs(&cfg);
+        let need = needs
+            .iter()
+            .find(|n| n.kind == NeedKind::Component(scarab))
+            .unwrap_or_else(|| panic!("the scarabs it is short of: {needs:?}"));
+        assert_eq!(need.have, 1);
+        assert!(need.want > 0);
+        assert!(c.vendor_shortfall(&cfg).iter().any(|w| w.wcid == scarab));
+    }
+
+    #[test]
+    fn tapers_taken_to_keep_are_neither_sold_nor_wanted() {
+        // On the buy list and written down as kept: the counter is not
+        // offered them, and a pack holding its full line has nothing
+        // to buy. A Keep says "do not sell this"; it does not say "do
+        // not buy more", so a short line is still filled -- the buy
+        // list is the player's word too.
+        let holtburg = 0xA9B4_0019;
+        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
+            return;
+        };
+        c.world.stats.level = 20;
+        with_a_pack(&mut c, 20);
+        as_a_war_mage(&mut c);
+        tapers_in_the_pack(&mut c, 0x8000_0012, 100);
+        with_a_profile(
+            &mut c,
+            "keeps-tapers",
+            vec![
+                word_rule("components", "taper", LootAction::Keep),
+                the_rest_to_the_counter(),
+            ],
+            &[("Prismatic Taper", 100, 25)],
+        );
+        assert_eq!(tagged_by_the_profile(&mut c, 0x8000_0012), LootAction::Keep);
+        let cfg = c.autoplay.config.growth.clone();
+
+        let wants = c.vendor_shortfall(&cfg);
+        assert!(wants.iter().all(|w| w.wcid != 20631), "{wants:?}");
+        let (offered, next) = at_cindrues_counter(&mut c, &cfg);
+        assert!(offered.is_empty(), "{offered:x?}");
+        assert!(
+            !matches!(next.act, Some(ac_vendor::Act::Sell { .. })),
+            "{}",
+            next.saying
+        );
+
+        // Short of the line, still kept, and still bought.
+        c.world.objects.get_mut(&0x8000_0012).unwrap().stack_size = 78;
+        let wants = c.vendor_shortfall(&cfg);
+        let taper = wants
+            .iter()
+            .find(|w| w.wcid == 20631)
+            .unwrap_or_else(|| panic!("the tapers it is short of: {wants:?}"));
+        assert_eq!(taper.short, 22);
+        let snap = c.vendor_snapshot(&cfg);
+        assert!(snap.items.iter().filter(|i| snap.offers(i)).count() == 0);
+    }
+
+    #[test]
+    fn what_the_server_will_not_take_stays_whatever_the_profile_said() {
+        // The one word ahead of the profile's is the server's own. A
+        // dagger in hand and a tinkered ring, both written down as
+        // meant for a counter, are not offered: a sale the server will
+        // not make is not a decision anybody gets to take.
+        let holtburg = 0xA9B4_0019;
+        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
+            return;
+        };
+        c.world.stats.level = 20;
+        with_a_pack(&mut c, 20);
+        let me = c.world.player_guid.unwrap();
+        c.world.objects.insert(
+            0x8000_0020,
+            ac_world::WorldObject {
+                guid: 0x8000_0020,
+                name: "Dagger".into(),
+                weenie_class_id: 300,
+                item_type: item_type::MELEE_WEAPON,
+                value: 900,
+                wielder: Some(me),
+                parent: Some(me),
+                ..Default::default()
+            },
+        );
+        c.world.objects.insert(
+            0x8000_0021,
+            ac_world::WorldObject {
+                guid: 0x8000_0021,
+                name: "Ornate Ring".into(),
+                weenie_class_id: 301,
+                item_type: item_type::JEWELRY,
+                value: 900,
+                container: Some(me),
+                ..Default::default()
+            },
+        );
+        // Tinkered twice, by the server's appraisal (int 171).
+        c.appraisals.insert(
+            0x8000_0021,
+            ac_net::messages::Appraisal {
+                guid: 0x8000_0021,
+                success: true,
+                ints: vec![(171, 2)],
+                ..Default::default()
+            },
+        );
+        with_a_profile(
+            &mut c,
+            "sells-the-rest",
+            vec![the_rest_to_the_counter()],
+            &[],
+        );
+        for guid in [0x8000_0020, 0x8000_0021] {
+            let stats = c.stats_of(guid).unwrap();
+            c.autoplay.tag(&stats, LootAction::Sell);
+        }
+        let cfg = c.autoplay.config.growth.clone();
+        assert!(c.for_sale(&cfg).is_empty());
+        let (offered, next) = at_cindrues_counter(&mut c, &cfg);
+        assert!(offered.is_empty(), "{offered:x?}");
+        assert!(
+            !matches!(next.act, Some(ac_vendor::Act::Sell { .. })),
+            "{}",
+            next.saying
+        );
+    }
+
+    #[test]
+    fn what_was_taken_to_keep_is_not_swept_up_by_the_rest_to_the_counter() {
+        // The decision is made once, when the item is taken. A ring
+        // taken under "keep ornate rings" stays kept when the rules are
+        // later just "the rest, to the counter": asking again at the
+        // counter is how a thing taken to keep gets sold on the next
+        // run to town.
+        let holtburg = 0xA9B4_0019;
+        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
+            return;
+        };
+        c.world.stats.level = 20;
+        with_a_pack(&mut c, 20);
+        let me = c.world.player_guid.unwrap();
+        c.world.objects.insert(
+            0x8000_0021,
+            ac_world::WorldObject {
+                guid: 0x8000_0021,
+                name: "Ornate Ring".into(),
+                weenie_class_id: 301,
+                item_type: item_type::JEWELRY,
+                value: 900,
+                container: Some(me),
+                ..Default::default()
+            },
+        );
+        with_a_profile(
+            &mut c,
+            "keeps-rings",
+            vec![
+                word_rule("ornate rings", "ornate", LootAction::Keep),
+                the_rest_to_the_counter(),
+            ],
+            &[],
+        );
+        assert_eq!(tagged_by_the_profile(&mut c, 0x8000_0021), LootAction::Keep);
+        // The rules change under it: today they would sell it.
+        with_a_profile(
+            &mut c,
+            "sells-the-rest",
+            vec![the_rest_to_the_counter()],
+            &[],
+        );
+        let stats = c.stats_of(0x8000_0021).unwrap();
+        let policy = c.sell_policy(&c.autoplay.config.growth.clone());
+        assert!(
+            policy.profile.as_ref().is_some_and(|p| matches!(
+                p.judge(&stats, None, &policy.wielder, &policy.me, 0),
+                crate::profile::Verdict::Decided(LootAction::Sell, _)
+            )),
+            "the rules as they read now would sell it"
+        );
+        let cfg = c.autoplay.config.growth.clone();
+        assert!(c.for_sale(&cfg).is_empty(), "but it was taken to keep");
+        let (offered, _) = at_cindrues_counter(&mut c, &cfg);
+        assert!(offered.is_empty(), "{offered:x?}");
+    }
+
+    #[test]
+    fn a_stack_to_sell_beside_one_to_keep_goes_whole_and_is_not_poured_into_it() {
+        // Two stacks of scarabs, one word each: ten the player said to
+        // sell and ninety-five they said to keep. The tidy that runs
+        // before every sale used to pour the ten into the ninety-five,
+        // the ledger settled the lot as kept, and the counter was
+        // offered nothing. The ten go over the counter whole.
+        use ac_vendor::Act;
+        let holtburg = 0xA9B4_0019;
+        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
+            return;
+        };
+        c.world.stats.level = 20;
+        with_a_pack(&mut c, 20);
+        as_a_war_mage(&mut c);
+        let scarab = component_named(&c, "Lead Scarab");
+        tapers_in_the_pack(&mut c, 0x8000_0012, 100);
+        component_in_the_pack(&mut c, 0x8000_0013, "Lead Scarab", scarab, 10);
+        component_in_the_pack(&mut c, 0x8000_0014, "Lead Scarab", scarab, 95);
+        with_a_profile(
+            &mut c,
+            "keeps-some",
+            vec![word_rule("components", "taper", LootAction::Keep)],
+            &[("Prismatic Taper", 100, 25)],
+        );
+        for (guid, word) in [
+            (0x8000_0013, LootAction::Sell),
+            (0x8000_0014, LootAction::Keep),
+        ] {
+            let stats = c.stats_of(guid).unwrap();
+            c.autoplay.tag(&stats, word);
+        }
+        let cfg = c.autoplay.config.growth.clone();
+        // The client's own tidy leaves them apart too.
+        assert!(
+            matches!(c.pour_next(Instant::now()), Err(Unpoured::Tight)),
+            "the tidy poured across words"
+        );
+        let (offered, next) = at_cindrues_counter(&mut c, &cfg);
+        assert_eq!(offered, [0x8000_0013]);
+        assert_eq!(
+            next.act,
+            Some(Act::Sell {
+                items: vec![0x8000_0013]
+            }),
+            "{}",
+            next.saying
+        );
+    }
+
+    #[test]
+    fn a_stack_on_its_way_out_does_not_hide_the_shortfall_of_the_one_that_stays() {
+        // Seventy-eight tapers kept and five hundred tagged to sell,
+        // against a line of a hundred. The five hundred are not stock:
+        // the line is twenty-two short, and the party hears the same.
+        // The restock list once dropped the whole line while any of
+        // the kind was leaving, and the party's broadcast counted the
+        // leaving stack as stock, so a mate handed tapers over while
+        // the character's own list said it wanted none.
+        let holtburg = 0xA9B4_0019;
+        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
+            return;
+        };
+        c.world.stats.level = 20;
+        with_a_pack(&mut c, 20);
+        as_a_war_mage(&mut c);
+        tapers_in_the_pack(&mut c, 0x8000_0012, 78);
+        tapers_in_the_pack(&mut c, 0x8000_0015, 500);
+        with_a_profile(
+            &mut c,
+            "sells-the-rest",
+            vec![the_rest_to_the_counter()],
+            &[("Prismatic Taper", 100, 25)],
+        );
+        for (guid, word) in [
+            (0x8000_0012, LootAction::Keep),
+            (0x8000_0015, LootAction::Sell),
+        ] {
+            let stats = c.stats_of(guid).unwrap();
+            c.autoplay.tag(&stats, word);
+        }
+        let cfg = c.autoplay.config.growth.clone();
+        let needs = c.grow_needs(&cfg);
+        let taper = needs
+            .iter()
+            .find(|n| n.kind == NeedKind::Component(20631))
+            .unwrap_or_else(|| panic!("the tapers it is short of: {needs:?}"));
+        assert_eq!((taper.have, taper.want), (78, 22));
+        let line = needs
+            .iter()
+            .find(|n| n.kind == NeedKind::Named("Prismatic Taper".into()))
+            .unwrap_or_else(|| panic!("the line it is short of: {needs:?}"));
+        assert_eq!((line.have, line.want), (78, 22));
+        // And the party is told the same.
+        c.autoplay.config.team.enabled = true;
+        c.autoplay_stock();
+        assert_eq!(c.autoplay.wants, vec!["Prismatic Taper".to_string()]);
+        // With the five hundred sold, nothing changes but the count.
+        c.world.objects.remove(&0x8000_0015);
+        c.autoplay.ledger.forget(0x8000_0015);
+        let needs = c.grow_needs(&cfg);
+        let taper = needs
+            .iter()
+            .find(|n| n.kind == NeedKind::Component(20631))
+            .unwrap();
+        assert_eq!((taper.have, taper.want), (78, 22));
+    }
+
+    #[test]
+    fn a_scarab_sold_at_the_counter_is_not_bought_straight_back() {
+        // The round trip the restock list is there to avoid, in one
+        // visit: the scarab the player said to sell goes over the
+        // counter, its tag is forgotten with it, and the same counter
+        // has scarabs on the shelf. Asking only "is any of this
+        // leaving?" said no the moment it had gone, and the run bought
+        // it back at markup for the arrival pass to tag to sell again.
+        use ac_vendor::Act;
+        let holtburg = 0xA9B4_0019;
+        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
+            return;
+        };
+        c.world.stats.level = 20;
+        with_a_pack(&mut c, 20);
+        as_a_war_mage(&mut c);
+        let scarab = component_named(&c, "Lead Scarab");
+        tapers_in_the_pack(&mut c, 0x8000_0012, 100);
+        component_in_the_pack(&mut c, 0x8000_0013, "Lead Scarab", scarab, 3);
+        let me = c.world.player_guid.unwrap();
+        c.world.objects.insert(
+            0x8000_0016,
+            ac_world::WorldObject {
+                guid: 0x8000_0016,
+                name: "Pyreal".into(),
+                weenie_class_id: 273,
+                item_type: item_type::MONEY,
+                value: 5_000,
+                stack_size: 5_000,
+                max_stack_size: 25_000,
+                container: Some(me),
+                ..Default::default()
+            },
+        );
+        with_a_profile(
+            &mut c,
+            "sells-scarabs",
+            vec![
+                word_rule("lead scarabs to sell", "lead scarab", LootAction::Sell),
+                word_rule("components", "taper", LootAction::Keep),
+            ],
+            &[("Prismatic Taper", 100, 25)],
+        );
+        assert_eq!(tagged_by_the_profile(&mut c, 0x8000_0013), LootAction::Sell);
+        let cfg = c.autoplay.config.growth.clone();
+
+        let cindrue = 0x8000_0002;
+        vendor_beside(
+            &mut c,
+            cindrue,
+            "Archmage Cindrue",
+            glam::Vec3::new(1.0, 0.0, 0.0),
+        );
+        let mut window = window_of(cindrue);
+        window.item_types = item_type::SPELL_COMPONENTS;
+        window.items.push(ac_world::object::VendorItem {
+            guid: 0x9000_0001,
+            stack: 100,
+            desc: ac_world::object::WeenieDesc {
+                name: "Lead Scarab".into(),
+                weenie_class_id: scarab,
+                item_type: item_type::SPELL_COMPONENTS,
+                value: 5,
+                ..Default::default()
+            },
+        });
+        c.world.open_vendor = Some(window);
+        let mut run = ac_vendor::Run::new();
+        let snap = c.vendor_snapshot(&cfg);
+        assert!(
+            snap.wants.iter().all(|w| w.wcid != scarab),
+            "{:?}",
+            snap.wants
+        );
+        let next = run.step(&snap, Instant::now());
+        assert_eq!(
+            next.act,
+            Some(Act::Sell {
+                items: vec![0x8000_0013]
+            }),
+            "{}",
+            next.saying
+        );
+        // Sold: the server takes it, and the ledger forgets it.
+        c.world.objects.remove(&0x8000_0013);
+        c.autoplay.ledger.forget(0x8000_0013);
+        let snap = c.vendor_snapshot(&cfg);
+        assert!(
+            snap.wants.iter().all(|w| w.wcid != scarab),
+            "wanted back the moment it was gone: {:?}",
+            snap.wants
+        );
+        let next = run.step(&snap, Instant::now());
+        assert!(
+            !matches!(next.act, Some(Act::Buy { wcid, .. }) if wcid == scarab),
+            "bought straight back: {} ({:?})",
+            next.saying,
+            next.act
+        );
+    }
+
+    #[test]
+    fn a_casters_heal_is_stocked_for_though_no_bolt_shares_its_herb() {
+        // Heal Self V burns an herb, a powder, a potion and a talisman
+        // (7, 26, 41, 61 in the dat) that no bolt or buff burns, and a
+        // caster without a Life focus needs every one of them. The
+        // restock list once stocked for the buffs and the bolts alone,
+        // so when the pack ran out the heal stopped casting and nobody
+        // went to town for it.
+        const HEAL_SELF_V: u32 = 1160;
+        const HERB: u32 = 7;
+        let holtburg = 0xA9B4_0019;
+        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
+            return;
+        };
+        c.world.stats.level = 20;
+        with_a_pack(&mut c, 20);
+        as_a_war_mage(&mut c);
+        tapers_in_the_pack(&mut c, 0x8000_0012, 100);
+        with_a_buy_list(&mut c, &[("Prismatic Taper", 100, 25)]);
+        let herb = c
+            .assets
+            .spell_component_ids()
+            .unwrap()
+            .component_wcid(HERB)
+            .expect("the herb's weenie");
+        let cfg = c.autoplay.config.growth.clone();
+        let needs = c.grow_needs(&cfg);
+        assert!(
+            !needs.iter().any(|n| n.kind == NeedKind::Component(herb)),
+            "no spell of a war mage's burns the herb: {needs:?}"
+        );
+
+        c.world.stats.spells.push(HEAL_SELF_V);
+        assert!(c.spells_cast().contains(&HEAL_SELF_V));
+        let needs = c.grow_needs(&cfg);
+        let need = needs
+            .iter()
+            .find(|n| n.kind == NeedKind::Component(herb))
+            .unwrap_or_else(|| panic!("the heal's herb: {needs:?}"));
+        assert_eq!(need.have, 0);
+        assert!(need.want > 0);
+    }
+
+    #[test]
+    fn arrows_the_player_said_to_sell_are_not_counted_as_the_launchers_stock() {
+        // Three hundred arrows in the pack and a bow in hand. Tagged to
+        // sell, they are loot in the ammunition slot, not stock: the
+        // launcher is short by the whole of what it keeps, and a
+        // forecast that counted the arrows as stock would set off to
+        // town for what it was about to sell -- or not set off at all.
+        use ac_world::fletching::ammo_type;
+        let holtburg = 0xA9B4_0019;
+        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
+            return;
+        };
+        c.world.stats.level = 20;
+        with_a_pack(&mut c, 20);
+        let me = c.world.player_guid.unwrap();
+        c.world.objects.insert(
+            0x8000_0030,
+            ac_world::WorldObject {
+                guid: 0x8000_0030,
+                name: "Yumi".into(),
+                item_type: item_type::MISSILE_WEAPON,
+                ammo_type: ammo_type::ARROW,
+                value: 500,
+                wielder: Some(me),
+                parent: Some(me),
+                ..Default::default()
+            },
+        );
+        c.world.objects.insert(
+            0x8000_0031,
+            ac_world::WorldObject {
+                guid: 0x8000_0031,
+                name: "Arrow".into(),
+                weenie_class_id: 300,
+                item_type: item_type::MISSILE_WEAPON,
+                valid_locations: equip::MISSILE_AMMO,
+                value: 300,
+                stack_size: 300,
+                max_stack_size: 1_000,
+                container: Some(me),
+                ..Default::default()
+            },
+        );
+        let mut cfg = c.autoplay.config.growth.clone();
+        cfg.ammo_keep = 250;
+        let needs = c.grow_needs(&cfg);
+        assert!(
+            !needs
+                .iter()
+                .any(|n| n.kind == NeedKind::Ammo(ammo_type::ARROW)),
+            "three hundred in the pack: {needs:?}"
+        );
+        let stats = c.stats_of(0x8000_0031).unwrap();
+        c.autoplay.tag(&stats, LootAction::Sell);
+        let needs = c.grow_needs(&cfg);
+        let arrows = needs
+            .iter()
+            .find(|n| n.kind == NeedKind::Ammo(ammo_type::ARROW))
+            .unwrap_or_else(|| panic!("the arrows it will be short of: {needs:?}"));
+        assert_eq!((arrows.have, arrows.want), (0, 250));
+    }
+
     #[test]
     fn a_counter_that_buys_none_of_the_loot_is_walked_past_on_a_run_to_sell() {
         // At the counter, with the window open, the pack looked over
@@ -8293,15 +9440,27 @@ mod tests {
     }
 
     /// The character's buy list, and nothing else on it: `what`, `keep`
-    /// of them, urgent at `restock_at` or fewer. A shelf of its own, so
-    /// the one every session shares is not touched.
+    /// of them, urgent at `restock_at` or fewer. The starter's rules.
     fn with_a_buy_list(c: &mut Client, lines: &[(&str, u32, u32)]) {
+        with_a_profile(c, "wants", crate::profile::Profile::starter().rules, lines);
+    }
+
+    /// A profile of the character's own, `name`, with these `rules` in
+    /// this order and this buy list. A shelf of its own, so the one
+    /// every session shares is not touched.
+    fn with_a_profile(
+        c: &mut Client,
+        name: &str,
+        rules: Vec<crate::profile::Rule>,
+        lines: &[(&str, u32, u32)],
+    ) {
         let dir = std::env::temp_dir().join("acswarm-test-growth-profiles");
         std::fs::create_dir_all(&dir).ok();
         let shelf = std::sync::Arc::new(crate::profile::Library::default());
         shelf.open(&dir);
         let mut p = crate::profile::Profile::starter();
-        p.name = "wants".into();
+        p.name = name.into();
+        p.rules = rules;
         p.buy.clear();
         for (what, keep, restock_at) in lines {
             p.buy.push(crate::profile::Buy {
@@ -8314,7 +9473,33 @@ mod tests {
         }
         shelf.put(p).ok();
         c.profiles = shelf;
-        c.autoplay.config.loot.profile = "wants".into();
+        c.autoplay.config.loot.profile = name.into();
+    }
+
+    /// One rule: `action` for anything whose name contains `word`.
+    fn word_rule(name: &str, word: &str, action: LootAction) -> crate::profile::Rule {
+        crate::profile::Rule {
+            name: name.into(),
+            action,
+            all: vec![crate::profile::Ask::Item(crate::items::Term::Word(
+                word.into(),
+            ))],
+            ..Default::default()
+        }
+    }
+
+    /// "The rest, to the counter": a rule that claims anything at all.
+    fn the_rest_to_the_counter() -> crate::profile::Rule {
+        crate::profile::Rule {
+            name: "the rest".into(),
+            action: LootAction::Sell,
+            all: vec![crate::profile::Ask::Item(crate::items::Term::Num(
+                crate::items::NumKey::Value,
+                crate::items::Op::Ge,
+                0.0,
+            ))],
+            ..Default::default()
+        }
     }
 
     /// The shop of this name.

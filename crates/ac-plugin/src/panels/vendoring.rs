@@ -209,11 +209,7 @@ fn view(c: &mut ac_client::Client, now: std::time::Instant) -> Option<VendorView
     let cfg = c.autoplay.config.growth.clone();
     let snap: Snapshot = c.vendor_snapshot(&cfg);
     let counter = snap.counter.clone();
-    let for_sale = snap
-        .items
-        .iter()
-        .filter(|i| !i.keep.forbidden() && !i.wielded && i.value > 0)
-        .count();
+    let for_sale = for_sale_here(&snap);
     let kept = snap
         .items
         .iter()
@@ -265,6 +261,15 @@ fn view(c: &mut ac_client::Client, now: std::time::Instant) -> Option<VendorView
         waiting,
         kept,
     })
+}
+
+/// How many carried things the counter in front of the character
+/// would be offered: the selling's own rule, so the count says what the
+/// counter will take rather than what the pack holds. The panel used to
+/// count everything not forbidden and showed nine for sale at a tailor
+/// who buys none of them.
+fn for_sale_here(snap: &Snapshot) -> usize {
+    snap.items.iter().filter(|i| snap.offers(i)).count()
 }
 
 /// A short name for an act, for the panel's line.
@@ -479,6 +484,43 @@ impl Plugin for Vendoring {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ac_vendor::counter::{Counter, Item};
+
+    #[test]
+    fn the_for_sale_count_is_what_the_counter_will_take() {
+        // A pea and a tunic in the pack, at a tailor's window: one for
+        // sale here, not two.
+        let thing = |guid: u32, name: &str, item_type: u32| Item {
+            guid,
+            wcid: guid,
+            name: name.into(),
+            value: 500,
+            stack: 1,
+            max_stack: 1,
+            item_type,
+            ..Default::default()
+        };
+        let mut snap = Snapshot {
+            items: vec![thing(1, "Lead Pea", 0x1000), thing(2, "Tunic", 0x8)],
+            slots_free: 10,
+            counter: Some(Counter {
+                guid: 900,
+                name: "Rakk the Peddler".into(),
+                open: true,
+                buys: 0x8 | 0x4,
+                max_value: 0,
+                wares: Vec::new(),
+                note_face: None,
+                away: 1.0,
+            }),
+            ..Default::default()
+        };
+        assert_eq!(for_sale_here(&snap), 1);
+        snap.counter.as_mut().unwrap().buys = 0;
+        assert_eq!(for_sale_here(&snap), 2, "a counter that takes anything");
+        snap.counter = None;
+        assert_eq!(for_sale_here(&snap), 0, "no counter to offer them to");
+    }
 
     #[test]
     fn a_step_holds_after_one_act_and_waits_out_a_wait() {

@@ -162,6 +162,7 @@ name = "ac-vendor"
 version = "0.0.3"
 dependencies = [
  "ac-agent",
+ "ac-loot",
 ]
 
 [[package]]

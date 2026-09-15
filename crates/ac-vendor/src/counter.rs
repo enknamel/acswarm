@@ -8,6 +8,8 @@
 
 use std::collections::BTreeMap;
 
+pub use ac_loot::LootAction;
+
 /// One thing in the pack, as the shopping needs to see it.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Item {
@@ -36,6 +38,13 @@ pub struct Item {
     pub wielded: bool,
     /// Why it must not be sold, whatever any rule says.
     pub keep: Keep,
+    /// The player's own word on it, if the ledger has one: what it was
+    /// picked up for, carried with it since. "Sell" is the one thing
+    /// that beats the shopping list (see [`Snapshot::offers`]), and
+    /// two stacks are poured together only when their words agree
+    /// (see `Run::compress`), because a pour makes one stack of two
+    /// and one stack can carry only one word.
+    pub taken_for: Option<LootAction>,
 }
 
 /// The reasons an item is not for sale, whatever a profile says about
@@ -49,9 +58,9 @@ pub struct Keep {
     pub equipped: bool,
     pub retained: bool,
     pub unsellable: bool,
-    /// The character's own: what it was picked up to keep, what it
-    /// keeps stocked, a component its own spells burn, the focus that
-    /// halves them.
+    /// The character's own: what it was picked up to keep, and -- for
+    /// a thing nothing was decided about -- what it keeps stocked, a
+    /// component its own spells burn, the focus that halves them.
     ///
     /// The five above are the server's refusals and somebody's work.
     /// This one is policy, and it was missing entirely: the sale list a
@@ -88,6 +97,11 @@ impl Keep {
 }
 
 impl Item {
+    /// The player's word that it goes.
+    pub fn to_sell(&self) -> bool {
+        self.taken_for == Some(LootAction::Sell)
+    }
+
     /// What one of them is worth.
     pub fn each(&self) -> u32 {
         self.value / self.stack.max(1)
@@ -216,5 +230,39 @@ impl Snapshot {
 
     pub fn item(&self, guid: u32) -> Option<&Item> {
         self.items.iter().find(|i| i.guid == guid)
+    }
+
+    /// Whether the counter in front of the character is offered this
+    /// carried thing: the rules do not forbid it, the counter takes
+    /// its kind, it is worth the floor, and it is not something the
+    /// character came here to buy.
+    ///
+    /// One answer for the selling and for the panel's "for sale here"
+    /// count. The panel used to keep a count of its own, which never
+    /// asked what the counter buys, and so showed nine things for sale
+    /// at a tailor who would take none of them.
+    pub fn offers(&self, it: &Item) -> bool {
+        let Some(counter) = self.counter.as_ref() else {
+            return false;
+        };
+        if it.keep.forbidden() || it.wielded {
+            return false;
+        }
+        if counter.buys != 0 && it.item_type & counter.buys == 0 {
+            return false;
+        }
+        if it.value < self.rules.floor_value || it.value == 0 {
+            return false;
+        }
+        // Not what the character came here to buy. Selling the tapers
+        // out of the pack and buying them back a moment later is a
+        // round trip that costs the markup and gains nothing.
+        //
+        // Unless the player said to sell it. A thing tagged for sale
+        // when it was picked up is loot, whatever the shopping list
+        // says: the skip is there to save a round trip, and it was
+        // keeping a caster's peas in its pack for good.
+        let wanted = self.wants.iter().any(|w| w.wcid == it.wcid && w.short > 0);
+        !wanted || it.to_sell()
     }
 }

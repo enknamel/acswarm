@@ -268,6 +268,13 @@ impl Ledger {
     /// a stack still in the pack can be sold tomorrow and a sold one
     /// cannot be got back.
     ///
+    /// Which is also why the client never chooses such a pour: the
+    /// cautious answer is a Sell overruled, and the tidy that ran
+    /// before every sale was quietly settling the player's loot as
+    /// kept. The pack tidy and the counter's compress both leave two
+    /// stacks apart when their words differ, so this is reached only
+    /// with agreeing entries, or after a pour somebody else made.
+    ///
     /// Called once the pour has landed, while both entries still exist
     /// -- the source's is left for [`Ledger::forget_gone`] to clear when
     /// the server confirms the object is gone. Called when the merge

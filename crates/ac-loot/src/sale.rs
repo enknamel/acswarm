@@ -1,7 +1,9 @@
 //! What may go over a counter, and what may not.
 //!
-//! The bars a sale has to get past, in one place, because they were in
-//! four and the path a loot profile took went through none of them.
+//! One place, because it was four and the path a loot profile took
+//! went through none of them. And one order ([`fate`]): the profile's
+//! word first, then the server's, and only for a thing neither has
+//! decided the guesses about what the character uses.
 //!
 //! Nothing here needs a server, a socket or a pack: it is a question
 //! about an item and about what the character has already decided, and
@@ -57,25 +59,72 @@ fn is_focus(wcid: u32) -> bool {
 /// The five foci, by weenie class id (ACE's world database).
 const FOCI: [u32; 5] = [15271, 15270, 15268, 15269, 43173];
 
+/// What a carried thing is for, once the profile has spoken and the
+/// server has had its word.
+///
+/// This is the one place the two are put in order, and the order is
+/// the point. The profile is the player's decision about every item
+/// the character picks up, written down when it was taken
+/// ([`crate::ledger`]), and nothing downstream may overrule it: not a
+/// restock list, not the spell-component table, not a buy list, not a
+/// name on a keep list. Every one of those is a guess about what the
+/// character uses, and every one of them was at some time wrapped
+/// around the profile's answer and quietly vetoed it, which is how a
+/// mage that had said "sell the peas" carried its peas for good.
+///
+/// The guesses are still worth making, for a thing the profile said
+/// nothing about. The server's own refusals stand ahead of everything,
+/// because a sale the server will not make is not a decision anybody
+/// gets to take.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Fate {
+    /// Picked up to sell, and nothing stops it going: it is on its way
+    /// out of the pack. Not stock, not a need, not a want, and not
+    /// anybody's to guard.
+    Leaving,
+    /// Not going over a counter: picked up to keep or to salvage, or
+    /// picked up to sell but the server will not take it.
+    Staying,
+    /// The profile said nothing about it. The guards and the rules
+    /// answer.
+    Undecided,
+}
+
+/// Where a carried thing stands, from the ledger's word (`tagged`) and
+/// the server's (`refused`, see [`never_sell`]).
+pub fn fate(tagged: Option<LootAction>, refused: bool) -> Fate {
+    match tagged {
+        Some(LootAction::Sell) if !refused => Fate::Leaving,
+        Some(_) => Fate::Staying,
+        None => Fate::Undecided,
+    }
+}
+
 /// Whether something in the pack goes over the counter.
 ///
-/// The bars come first and nothing gets past them: what is equipped,
-/// tinkered, inscribed or worth nothing, ammunition, the focus that
+/// The profile decides. What was written down when the item was picked
+/// up ([`fate`]) is read first and is final: taken to sell, it goes,
+/// unless the server itself will not take it; taken to keep or to
+/// salvage, it stays, whatever any rule would make of it today.
+/// Deciding again at the counter is how a thing taken to keep gets
+/// sold on the next run to town.
+///
+/// The guards only fill in for an item the profile did not decide --
+/// bought, traded, or in the pack from before there was a profile.
+/// For those, nothing gets past them: ammunition, the focus that
 /// halves a school's components, a component this character's own
-/// spells burn, and anything the player named by hand.
+/// spells burn, whatever is on the buy list, and anything the player
+/// named by hand. Then `judge`, the rules as they read now.
 ///
-/// Those bars used to live inside ac-client's `sellable`, which the
-/// profile path
-/// did not call -- so giving a character a loot profile quietly
-/// switched off the focus guard, the keep list and the component guard,
-/// and a profile with a broad "sell the cheap stuff" rule would take the
-/// Peas out of a mage's pack. Peas are bought, not looted.
-///
-/// Then `tagged`: what was decided when the item was picked up. That
-/// decision stands. Deciding again at the counter is how a thing taken
-/// to keep gets sold on the next run to town. `judge` is asked only for
-/// what carries no decision -- bought, traded, or in the pack from
-/// before there was a profile.
+/// The guards used to come first, and vetoed the tag. They were
+/// written in place of a profile path that ran through none of them,
+/// and once the profile was the path they were wrapped around it
+/// anyway, so a buy list, a name in `keep`, or a spell that burns the
+/// thing each overruled the player's own "sell this". Ammunition sits
+/// with the guesses rather than with the server's refusals on purpose:
+/// `ammo` is anything that goes in the ammunition slot, a mage's
+/// looted arrows included, and it says what the character might use,
+/// not what the player decided.
 pub fn offer_to_vendor(
     stats: &ItemStats,
     ammo: bool,
@@ -85,24 +134,19 @@ pub fn offer_to_vendor(
     tagged: Option<LootAction>,
     judge: impl FnOnce() -> bool,
 ) -> bool {
-    let forbidden = never_sell(stats)
-        || ammo
-        // A thing the character goes to town to buy is not a thing the
-        // character goes to town to sell. Membership of the profile's
-        // buy list says so on its own, which is one rule in place of
-        // the four guards that used to try to say it and the profile
-        // path that heard none of them.
-        || stocked
-        || is_focus(stats.wcid)
-        || (stats.item_type & ac_world::item_type::SPELL_COMPONENTS != 0 && burns.contains(&stats.wcid))
-        || name_matches(&stats.name, keep);
-    if forbidden {
-        return false;
-    }
-    match tagged {
-        Some(LootAction::Sell) => true,
-        Some(_) => false,
-        None => judge(),
+    match fate(tagged, never_sell(stats)) {
+        Fate::Leaving => true,
+        Fate::Staying => false,
+        Fate::Undecided => {
+            let guarded = never_sell(stats)
+                || ammo
+                || stocked
+                || is_focus(stats.wcid)
+                || (stats.item_type & ac_world::item_type::SPELL_COMPONENTS != 0
+                    && burns.contains(&stats.wcid))
+                || name_matches(&stats.name, keep);
+            !guarded && judge()
+        }
     }
 }
 
@@ -156,13 +200,17 @@ mod tests {
     }
 
     #[test]
-    fn a_profile_cannot_sell_what_the_bars_forbid() {
-        // Giving a character a loot profile used to switch off the bars:
-        // the profile path never called `sellable`, so the focus guard,
-        // the player's keep list and the guard on the components its own
-        // spells burn all went with it. A profile whose rules say "sell
-        // everything" is the test, because that is the rule a player
-        // writes and then wonders where their Peas went.
+    fn the_rules_read_now_cannot_sell_what_the_guards_forbid() {
+        // An item nothing was written down about is judged by the rules
+        // as they read today, and those do not get past the guards.
+        // Giving a character a loot profile used to switch the guards
+        // off entirely: the profile path never called `sellable`, so
+        // the focus guard, the player's keep list and the guard on the
+        // components its own spells burn all went with it. A profile
+        // whose rules say "sell everything" is the test, because that
+        // is the rule a player writes and then wonders where their
+        // Peas went. (What the ledger has written down is another
+        // matter: see `the_profiles_word_beats_every_guard_but_the_servers`.)
         const TAPER: u32 = 691;
         let burns = [TAPER];
         let sell_it_all = || true;
@@ -246,23 +294,147 @@ mod tests {
     }
 
     #[test]
-    fn nothing_on_the_shopping_list_is_ever_offered() {
-        // The one line that replaces four guards. A player who writes
-        // "sell anything worth under a thousand" has not said "sell my
-        // Peas", and a Blue Pea is 3,125 pyreals to replace.
+    fn the_shopping_list_decides_only_what_the_profile_did_not() {
+        // A player who writes "sell anything worth under a thousand"
+        // has not said "sell my Peas", and a Blue Pea is 3,125 pyreals
+        // to replace: on the buy list and undecided, it stays. But a
+        // player who writes "sell peas" has said exactly that, and the
+        // list is not allowed to answer back. It did, and a mage that
+        // had said "sell the peas" carried them for good.
         let mut pea = item("Blue Pea", item_type::SPELL_COMPONENTS, 3_125);
         pea.wcid = 8346;
         assert!(
             !offer_to_vendor(&pea, false, &[], &[], true, None, || true),
-            "on the buy list, so never sold"
+            "on the buy list and undecided, so not sold"
         );
         assert!(
-            !offer_to_vendor(&pea, false, &[], &[], true, Some(LootAction::Sell), || true),
-            "not even when something tagged it to sell"
+            offer_to_vendor(&pea, false, &[], &[], true, Some(LootAction::Sell), || true),
+            "the profile said sell: the buy list does not overrule it"
         );
         assert!(
             offer_to_vendor(&pea, false, &[], &[], false, None, || true),
             "off the list, it is vendor trash like any other"
+        );
+    }
+
+    #[test]
+    fn the_profiles_word_beats_every_guard_but_the_servers() {
+        // Each guard is a guess about what the character uses: a
+        // component its spells burn, a name on the keep list, the focus,
+        // the ammunition slot. A guess is worth making about a thing
+        // the player has not decided; it may not contradict a thing
+        // they have. Only the server's own refusals stand ahead of the
+        // tag, because a sale the server will not make is not a
+        // decision anybody gets to take.
+        const LEAD_SCARAB: u32 = 691;
+        let burns = [LEAD_SCARAB];
+        let never = || false;
+
+        let mut scarab = item("Lead Scarab", item_type::SPELL_COMPONENTS, 5);
+        scarab.wcid = LEAD_SCARAB;
+        assert!(
+            !offer_to_vendor(&scarab, false, &burns, &[], false, None, || true),
+            "undecided and burnt by its own spells, it stays"
+        );
+        assert!(
+            offer_to_vendor(
+                &scarab,
+                false,
+                &burns,
+                &[],
+                false,
+                Some(LootAction::Sell),
+                never
+            ),
+            "the player said sell: the spells that burn it do not overrule that"
+        );
+
+        let named = item("Ornate Ring", item_type::JEWELRY, 900);
+        let keep = ["ornate ring".to_string()];
+        assert!(
+            offer_to_vendor(
+                &named,
+                false,
+                &[],
+                &keep,
+                false,
+                Some(LootAction::Sell),
+                never
+            ),
+            "a name on the keep list is not the player's word on this ring"
+        );
+
+        let mut focus = item("Foci of Strife", item_type::MISC, 5_000);
+        focus.wcid = 15271;
+        assert!(
+            offer_to_vendor(
+                &focus,
+                false,
+                &[],
+                &[],
+                false,
+                Some(LootAction::Sell),
+                never
+            ),
+            "even the focus goes when the profile said so"
+        );
+
+        let arrow = item("Arrow", item_type::MISSILE_WEAPON, 20);
+        assert!(
+            offer_to_vendor(&arrow, true, &[], &[], false, Some(LootAction::Sell), never),
+            "ammunition is a guess about what the character shoots, not the player's word"
+        );
+
+        // The server's refusals are the one thing ahead of the tag.
+        let mut worn = item("Dagger", item_type::MELEE_WEAPON, 900);
+        worn.wielded = true;
+        assert!(
+            !offer_to_vendor(
+                &worn,
+                false,
+                &[],
+                &[],
+                false,
+                Some(LootAction::Sell),
+                || true
+            ),
+            "wielded: the server will not take it, whatever the profile said"
+        );
+        let mut tinkered = item("Dagger", item_type::MELEE_WEAPON, 900);
+        tinkered.tinks = 2;
+        assert!(
+            !offer_to_vendor(
+                &tinkered,
+                false,
+                &[],
+                &[],
+                false,
+                Some(LootAction::Sell),
+                || true
+            ),
+            "tinkered: somebody's work"
+        );
+    }
+
+    #[test]
+    fn a_things_fate_is_the_profiles_word_and_then_the_servers() {
+        // The one ordering every site reads, so the counter, the
+        // restock list and the component guard cannot drift apart
+        // again.
+        assert_eq!(fate(Some(LootAction::Sell), false), Fate::Leaving);
+        assert_eq!(
+            fate(Some(LootAction::Sell), true),
+            Fate::Staying,
+            "sell, but the server will not take it"
+        );
+        for kept in [LootAction::Keep, LootAction::Salvage, LootAction::Skip] {
+            assert_eq!(fate(Some(kept), false), Fate::Staying, "{}", kept.label());
+        }
+        assert_eq!(fate(None, false), Fate::Undecided);
+        assert_eq!(
+            fate(None, true),
+            Fate::Undecided,
+            "nothing decided: the guards answer, and never_sell is the first of them"
         );
     }
 
