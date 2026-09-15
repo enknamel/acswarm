@@ -1,79 +1,47 @@
-//! Choosing what to fight something with.
+//! Choosing what to fight with: [`best`] picks from what is carried, [`score`] rates one weapon.
 //!
-//! A character carrying several weapons should not swing whichever it
-//! picked up last. Creatures take far more damage from some elements
-//! than others, and a weapon that deals the right one, or that has been
-//! imbued to rend the target's resistance to it, is worth several times
-//! one that has not: a fire weapon against something that takes 1.4
-//! times from fire and 0.5 from slashing is nearly three times the
-//! weapon before its own damage is counted.
-//!
-//! None of that matters for a weapon the character cannot pick up. The
-//! better a weapon is, the more it asks of whoever wields it --- the top
-//! wands want a base War Magic of 275 --- and the server simply refuses
-//! to arm anyone who falls short. So a [`Wielder`] is weighed against
-//! every requirement first, and what the character is actually skilled
-//! at then counts towards the score: a great sword swung at a hundred
-//! skill is worth less than a wand cast at four hundred, whatever their
-//! elements.
-//!
-//! [`score`] puts a number on a weapon against a particular creature and
-//! [`best`] picks from what is carried. The numbers are a judgement, not
-//! the game's own formula: they rank weapons against each other and
-//! nothing more, and they only use what an appraisal has told us, so an
-//! unappraised weapon is scored on what little its description carries.
+//! A [`Wielder`] must meet every requirement first: the server refuses to arm anyone short (the top
+//! wands want base War Magic 275). Then the element the target takes most, rending, and skill count.
+//! Scores only rank weapons, a judgement rather than the game's formula, from what appraisals told.
 
 use ac_world::elements::{self, imbue, Creature, Element};
 use ac_world::fletching::combat_use;
 
 use crate::items::ItemStats;
 
-/// Rending strips resistance, so a rended element is never worth less
-/// than a neutral one, and is worth this much more on top.
+/// Multiplier on what the target takes from an element the weapon rends (guess).
 const RENDING_BONUS: f32 = 1.25;
-/// Criticals land often enough to matter over a long fight; this is what
-/// critical strike is treated as adding against something with health to
-/// spare.
+/// Worth added by critical strike in a long fight, where criticals pay for themselves (guess).
 const CRIT_STRIKE_BONUS: f32 = 0.5;
-/// And crippling blow, which makes them hurt more rather than land more.
+/// Worth added by crippling blow, which makes criticals hurt more rather than land more (guess).
 const CRIPPLING_BONUS: f32 = 0.35;
-/// Ignoring armour is worth about as much as rending it.
+/// Worth added by armour rending, and by ignoring armour, reckoned about equal (guess).
 const ARMOR_RENDING_BONUS: f32 = 0.25;
-/// A creature with at least this much health lives long enough for a
-/// better critical rate to pay for itself. Roughly a Drudge Skulker
-/// several times over.
+/// Health from which criticals pay for themselves: a Drudge Skulker several times over (guess).
 pub const LONG_FIGHT_HEALTH: u32 = 200;
-/// The skill a weapon is judged as ordinary at. Skill above this counts
-/// for the weapon, below it against, which is how a well-trained wand
-/// beats a barely-trained sword.
+/// Skill a weapon counts as ordinary at: above it helps the score, below it hurts (guess).
 const ORDINARY_SKILL: f32 = 250.0;
-/// How far skill may swing the score either way.
+/// Bounds on how far skill may swing the score either way (guess).
 const SKILL_FLOOR: f32 = 0.25;
 const SKILL_CEILING: f32 = 2.0;
 
-/// What the character can bring to bear: enough to answer whether a
-/// weapon may be wielded at all, and how well it would be used.
-///
-/// Each skill is carried twice: as it stands with every buff counted,
-/// which is what a plain skill requirement and a swing are measured
-/// against, and as the base without them, which is what a raw-skill
-/// requirement wants. The same for attributes.
+/// What the character brings to bear: whether it may wield a weapon, and how well it uses one.
+/// Buffed values meet plain requirements and score a swing; base values meet raw requirements.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Wielder {
     pub level: u32,
     /// `(skill id, base, current, advancement class)`.
     pub skills: Vec<(u32, u32, u32, u32)>,
-    /// Strength, Endurance, Coordination, Quickness, Focus, Self: base
-    /// and current.
+    /// Base Strength, Endurance, Coordination, Quickness, Focus, Self, in that order.
     pub attributes: [u32; 6],
+    /// The same, buffs counted.
     pub attributes_current: [u32; 6],
     /// Maximum health, stamina and mana.
     pub vitals: [u32; 3],
 }
 
 impl Wielder {
-    /// How high this skill stands right now, buffs counted; 0 when the
-    /// character does not have it.
+    /// Current skill, buffs counted; 0 when the character does not have it.
     pub fn skill(&self, id: u32) -> u32 {
         self.skills
             .iter()
@@ -103,10 +71,8 @@ impl Wielder {
             .unwrap_or(0)
     }
 
-    /// Whether one `(kind, what, difficulty)` requirement is met. A kind
-    /// we do not understand is treated as met: refusing to wield
-    /// something over a rule we cannot read would be worse than letting
-    /// the server say no.
+    /// Whether one `(kind, what, difficulty)` requirement is met; an unknown kind counts as met.
+    /// Refusing over a rule we cannot read would be worse than letting the server say no.
     pub fn meets(&self, req: (u32, u32, u32)) -> bool {
         use ac_world::wield;
         let (kind, what, difficulty) = req;
@@ -131,9 +97,7 @@ impl Wielder {
         item.wield_reqs.iter().all(|r| self.meets(*r))
     }
 
-    /// How much the character's skill with this weapon counts for or
-    /// against it. A weapon whose skill is unknown, or a character whose
-    /// skills we have not been told, is neither helped nor hurt.
+    /// Score multiplier from the wielder's skill with this weapon; 1.0 when either is unknown.
     fn skill_factor(&self, item: &ItemStats) -> f32 {
         if self.skills.is_empty() {
             return 1.0;
@@ -156,13 +120,8 @@ pub struct Choice {
     pub why: String,
 }
 
-/// Which stance a weapon gives, or `None` when it is not a weapon.
-/// Ammunition is not one: it shares the missile item type with the
-/// bows that shoot it, and is told apart by what it is for.
-/// The way a character fights, which is decided by what is in its
-/// hands and by nothing else: a wand, orb or staff means magic, a bow,
-/// crossbow or thrown weapon means missile, and anything else -- a
-/// sword, a mace, bare fists -- means melee.
+/// How a character fights, decided only by what is in its hands.
+/// Wand, orb or staff: magic; bow, crossbow or thrown: missile; anything else, fists too: melee.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stance {
     Melee,
@@ -180,6 +139,8 @@ impl Stance {
     }
 }
 
+/// Which stance a weapon gives, or `None` when it is not a weapon.
+/// Ammunition is not one: it shares the bows' missile item type and is told apart by `combat_use`.
 pub fn stance_of(item: &ItemStats) -> Option<Stance> {
     use ac_world::item_type;
     if item.item_type & item_type::CASTER != 0 {
@@ -198,9 +159,8 @@ pub fn is_ammo(item: &ItemStats) -> bool {
     item.combat_use == combat_use::AMMO
 }
 
-/// A bow, crossbow or atlatl: shoots ammunition rather than being
-/// thrown. Told by what it is for; failing that, by needing a kind of
-/// ammunition while doing no damage of its own.
+/// A bow, crossbow or atlatl: shoots ammunition rather than being thrown.
+/// Told by `combat_use`, else by wanting ammunition while dealing no damage of its own.
 pub fn is_launcher(item: &ItemStats) -> bool {
     use ac_world::item_type;
     item.item_type & item_type::MISSILE_WEAPON != 0
@@ -209,18 +169,14 @@ pub fn is_launcher(item: &ItemStats) -> bool {
             || (item.ammo_type != 0 && item.damage_high == 0))
 }
 
-/// How good a launcher is with a particular ammunition against
-/// `target`. The element is the ammunition's; a bow's rending counts
-/// when it rends that element; the bow's damage modifier and criticals
-/// are its own, and the skill is the bow's.
+/// How good a launcher is with one ammunition against `target`, judged as one weapon.
+/// Damage and element are the ammunition's; rending, modifier, criticals and skill the launcher's.
 pub fn score_pair(
     launcher: &ItemStats,
     ammo: &ItemStats,
     target: Option<&Creature>,
     wielder: &Wielder,
 ) -> f32 {
-    // Judge the pair as one weapon: the arrow's damage and element,
-    // the bow's imbues, modifier and skill.
     let together = ItemStats {
         damage_low: ammo.damage_low,
         damage_high: ammo.damage_high,
@@ -239,9 +195,7 @@ pub fn score_pair(
     score(&together, target, wielder) * modifier
 }
 
-/// The best launcher and ammunition carried, judged together, against
-/// `target`; or a thrown weapon, which is its own ammunition. `None`
-/// when nothing carried shoots.
+/// The best launcher and ammunition, judged together, or a thrown weapon, its own ammunition.
 pub fn best_missile(
     carried: &[ItemStats],
     target: Option<&Creature>,
@@ -308,9 +262,8 @@ pub fn best_missile(
 /// The Two Handed Combat skill: what a two-handed weapon is swung with.
 const TWO_HANDED_COMBAT: u32 = 41;
 
-/// A weapon that takes both hands, so no shield goes with it. Told by
-/// what it is for, or by the skill it is swung with, or by the slot it
-/// asks for before it has been appraised.
+/// A weapon that takes both hands, so no shield goes with it.
+/// Told by `combat_use` or skill, or before appraisal by the slot it asks for.
 pub fn is_two_handed(item: &ItemStats) -> bool {
     item.combat_use == combat_use::TWO_HANDED
         || item.weapon_skill_id == TWO_HANDED_COMBAT
@@ -322,10 +275,8 @@ pub fn is_shield(item: &ItemStats) -> bool {
     item.combat_use == combat_use::SHIELD || item.valid_locations & ac_world::equip::SHIELD != 0
 }
 
-/// Whether this weapon wants the off hand empty. The server will not
-/// put a shield on with a caster, a bow or crossbow, or a two-handed
-/// weapon (a thrown weapon, a dagger or a sword is fine); a missile
-/// weapon not yet appraised is taken for a bow, the common case.
+/// The server will not put a shield on with a caster, bow, crossbow or two-hander; thrown is fine.
+/// A missile weapon not yet appraised is taken for a bow, the common case.
 pub fn needs_free_offhand(item: &ItemStats) -> bool {
     use ac_world::item_type;
     if item.item_type & item_type::CASTER != 0 {
@@ -337,8 +288,7 @@ pub fn needs_free_offhand(item: &ItemStats) -> bool {
     is_two_handed(item)
 }
 
-/// The best shield carried that the character may hold: the highest
-/// shield value, the dearest breaking a tie. `None` when none is.
+/// The wieldable shield with the highest shield value, the dearest breaking a tie.
 pub fn best_shield(carried: &[ItemStats], wielder: &Wielder) -> Option<Choice> {
     carried
         .iter()
@@ -353,10 +303,7 @@ pub fn best_shield(carried: &[ItemStats], wielder: &Wielder) -> Option<Choice> {
         .reduce(|best, next| if next.score > best.score { next } else { best })
 }
 
-/// The skill a weapon is used with. The weapon profile says so for a
-/// sword or a bow, but a wand's appraisal names no skill: what it does
-/// name is the skill it asks of the wielder, which for a caster is the
-/// school it is cast with, so that stands in.
+/// A wand's appraisal names no weapon skill, so its wield skill requirement, the school, stands in.
 fn skill_used(item: &ItemStats) -> Option<u32> {
     if item.weapon_skill_id != 0 {
         return Some(item.weapon_skill_id);
@@ -368,31 +315,19 @@ fn skill_used(item: &ItemStats) -> Option<u32> {
         .map(|(_, what, _)| *what)
 }
 
-/// How good this weapon is against `target`, higher being better.
-///
-/// The elements it deals are weighed by how much the creature takes from
-/// them, rending counted; the result is multiplied by how hard the
-/// weapon hits. A long fight is worth more critical damage, so critical
-/// strike and crippling blow only count against something with health to
-/// spare. Nothing known about the target means every weapon is judged on
-/// its damage alone.
+/// How good this weapon is against `target`: best element taken, imbues, power and skill.
+/// Critical imbues count only from [`LONG_FIGHT_HEALTH`]; with no target every element counts evenly.
 pub fn score(item: &ItemStats, target: Option<&Creature>, wielder: &Wielder) -> f32 {
     let elements_dealt = Element::from_bits(item.damage_type_bits);
     let long_fight = target.is_some_and(|c| c.health >= LONG_FIGHT_HEALTH);
-    // The best element it deals: a weapon that does two is used for
-    // whichever serves better.
+    // A weapon dealing two elements is used for whichever serves better.
     let mut worth = elements_dealt
         .iter()
         .map(|e| {
             let takes = target.map(|c| c.takes_from(*e)).unwrap_or(1.0);
             if item.imbued & e.rending() != 0 {
-                // Rending strips some of the target's protection, so it
-                // is worth more than the bare figure -- but it does not
-                // make every element alike. Raising a resistant one to
-                // a flat 1.0 did: a character carrying a rending caster
-                // of all seven elements scored them identically against
-                // anything that resists across the board, and so never
-                // swapped off whichever was already in hand.
+                // A multiplier, not a flat 1.0, so rending casters still differ by what the target
+                // resists (`rending_casters_are_still_told_apart_by_what_the_target_resists`).
                 takes * RENDING_BONUS
             } else {
                 takes
@@ -417,10 +352,8 @@ pub fn score(item: &ItemStats, target: Option<&Creature>, wielder: &Wielder) -> 
     worth * power(item) * wielder.skill_factor(item)
 }
 
-/// How hard the weapon hits, on a scale where an ordinary one is about
-/// 1.0. A caster is judged by its elemental bonus, everything else by
-/// its damage. An unappraised weapon has neither, and is worth 1.0 so it
-/// is not ruled out before it has been looked at.
+/// How hard the weapon hits, about 1.0 for an ordinary one: a caster's elemental bonus, else damage.
+/// Unappraised reads 1.0, so it is not ruled out before it has been looked at.
 fn power(item: &ItemStats) -> f32 {
     if stance_of(item) == Some(Stance::Magic) {
         // A caster with no bonus reads as 0 until it is appraised.
@@ -465,11 +398,8 @@ fn reason(item: &ItemStats, target: Option<&Creature>) -> String {
         parts.push("crippling blow".into());
     }
     if parts.is_empty() {
-        // A plain wand deals no element of its own, and a weapon nobody
-        // has looked at has none to read: the pick rests on the
-        // character's skill with it and on nothing else. Said as "()"
-        // in the log, that read like a bug in the choosing rather than
-        // a weapon with nothing to say for itself.
+        // A plain wand deals no element, and an unappraised weapon has none to read: the pick rests
+        // on skill alone, which is said rather than left as "()" in the log.
         return if item.appraised {
             "no element of its own".into()
         } else {
@@ -479,12 +409,7 @@ fn reason(item: &ItemStats, target: Option<&Creature>) -> String {
     parts.join(", ")
 }
 
-/// The best of `carried` for the stance `want` against `target`.
-///
-/// Only weapons that give that stance are considered, so asking for a
-/// bow never hands back a sword, and only ones the character may
-/// actually hold: a wand that wants a War Magic it does not have is not
-/// an option however good it would be. `None` when none is carried.
+/// The best of `carried` for stance `want` against `target`, among weapons the wielder may hold.
 pub fn best(
     carried: &[ItemStats],
     want: Stance,
@@ -508,9 +433,7 @@ pub fn best(
         .reduce(|best, next| if next.score > best.score { next } else { best })
 }
 
-/// The best weapon carried, whichever way it is used, and the stance it
-/// gives. For a character told to fight with whatever suits: a wand it
-/// is skilled with beats a sword it is not, and the other way round.
+/// The best weapon in any stance, and the stance: a wand it is skilled with beats a sword it is not.
 pub fn best_any(
     carried: &[ItemStats],
     target: Option<&Creature>,
@@ -528,19 +451,15 @@ pub fn best_any(
         })
 }
 
-/// The vulnerability worth casting on `target`: the element it is
-/// weakest to, when it has health enough for the spell to pay for
-/// itself. `None` for something that dies before the spell lands, or
-/// that nothing is known about.
+/// The element worth a vulnerability on `target`: its weakest, when it has `least_health`.
+/// Anything weaker dies before the spell pays for itself.
 pub fn vulnerability_for(target: Option<&Creature>, least_health: u32) -> Option<Element> {
     let c = target?;
     if c.health < least_health {
         return None;
     }
     let weakest = c.weakest_to()?;
-    // No point telling something it is weak to what it already shrugs
-    // off less than everything else: only worth it if it is a real
-    // weakness or at least not a resistance.
+    // Not worth casting when even its weakest element does nothing to it.
     (c.takes_from(weakest) > 0.0).then_some(weakest)
 }
 
@@ -630,8 +549,7 @@ mod tests {
             ],
         };
         assert_eq!(firefly.takes_from(Element::Fire), 1.5);
-        // A hard-hitting plain sword, a lighter fire rending one, and a
-        // two-hander it takes a strong arm to lift.
+        // A hard-hitting plain sword, a lighter fire rending one, and a two-hander for strong arms.
         let mut plain = weapon(MELEE_WEAPON, 30, 40, Element::Slash as u32, 0);
         plain.guid = 1;
         plain.name = "Broad Sword".into();
@@ -654,8 +572,7 @@ mod tests {
         great.wield_reqs = vec![(wield::RAW_ATTRIB, 1, 250)];
         let carried = [plain.clone(), fire.clone(), great.clone()];
 
-        // Weak arms: the two-hander is out of reach, and the fire
-        // rending sword beats the harder-hitting plain one.
+        // Weak arms: the two-hander is out of reach, and fire rending beats the harder hitter.
         let weak = Wielder {
             level: 50,
             skills: vec![(44, 200, 200, 2), (TWO_HANDED_COMBAT, 200, 200, 2)],
@@ -936,16 +853,12 @@ mod tests {
     #[test]
     fn a_weapon_with_no_element_still_says_why_it_was_picked() {
         use ac_world::item_type::CASTER;
-        // "autoplay: wielding Training Wand against Sandy Armoredillo ()"
-        // -- a plain wand deals no element of its own, so there was
-        // nothing to weigh and nothing to say, and the empty brackets
-        // read like a bug in the choosing rather than a plain weapon.
+        // A plain wand deals no element; empty brackets in the log read like a bug in the choosing.
         let mut wand = weapon(CASTER, 0, 0, 0, 0);
         wand.name = "Training Wand".into();
         assert_eq!(reason(&wand, None), "no element of its own");
 
-        // One nobody has appraised has none to read yet, which is a
-        // different thing and worth saying differently.
+        // One nobody has appraised has none to read yet, which is said differently.
         wand.appraised = false;
         assert_eq!(reason(&wand, None), "not looked at yet");
 
@@ -1038,9 +951,8 @@ mod tests {
         assert!(!vulnerability_spells(Element::Fire).is_empty());
         assert_eq!(vulnerability_for(None, LONG_FIGHT_HEALTH), None);
     }
-    /// A caster is chosen for the target the same way a sword is: the
-    /// seven element sceptres differ only in what they deal and rend, so
-    /// against a drudge (slash 0.86, fire 1.42) the fiery one has to win.
+    /// Sceptres differing only in what they deal and rend: against a drudge (slash 0.86, fire 1.42)
+    /// the fiery one has to win.
     #[test]
     fn the_caster_matching_the_targets_weakness_is_the_one_picked() {
         use ac_world::item_type::CASTER;
@@ -1065,11 +977,8 @@ mod tests {
         assert!(fire > slash, "fire {fire} should beat slash {slash}");
     }
 
-    /// Seven rending casters, one per element, against something that
-    /// resists every element (a Soiled Doll: slash 0.95, fire 0.6). They
-    /// used to score identically, because rending raised each to a flat
-    /// 1.0, so the one already in hand was never swapped off. The one
-    /// the target resists least has to win.
+    /// Rending casters against a Soiled Doll, which resists every element (slash 0.95, fire 0.6):
+    /// the one it resists least has to win, not whichever is in hand.
     #[test]
     fn rending_casters_are_still_told_apart_by_what_the_target_resists() {
         use ac_world::item_type::CASTER;
