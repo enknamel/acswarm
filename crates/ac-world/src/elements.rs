@@ -22,7 +22,7 @@
 //!
 //! Weapons carry an element too, and some are imbued to rend a
 //! creature's resistance to it. A fire weapon against something weak to
-//! fire is worth several times one that is not, so [`Imbue`] and
+//! fire is worth several times one that is not, so [`Imbue`](imbue) and
 //! [`Element::rending`] are here as well, for the code that chooses
 //! what to wield.
 //!

@@ -2593,7 +2593,7 @@ impl Client {
     ///
     /// Nothing is sent for an item already wielded, nor for one asked
     /// for so recently that the answer may still be in flight (see
-    /// [`Autoplay::wield_in_flight`]) -- both of those the server
+    /// `Autoplay::wield_in_flight`) -- both of those the server
     /// answers with "You must remove your Slashing Sceptre to wield
     /// Slashing Sceptre" and a refusal that then backs the weapon off.
     /// Nothing is sent either while the item is inside a refusal's wait
@@ -2761,7 +2761,7 @@ impl Client {
 
 impl Client {
     /// Whether a swing or a charge is out and unanswered (see
-    /// [`attack_unanswered`]). While one is, the rules leave the
+    /// `attack_unanswered`). While one is, the rules leave the
     /// character's hands and its combat mode alone: every one of those
     /// changes cancels the attack in flight.
     ///
@@ -3655,7 +3655,7 @@ impl Client {
     ///
     /// This is the way in for anything that asks for a merge and does
     /// not follow it up: a panel's drag, a script, the shopping. The
-    /// rules' own tidying sends it with [`Self::send_merge`] and settles
+    /// rules' own tidying sends it with `Self::send_merge` and settles
     /// the ledger when the server says the pour landed, since a refused
     /// pour settles nothing.
     pub fn merge_stacks(&mut self, from: u32, to: u32, amount: Option<u32>) -> bool {

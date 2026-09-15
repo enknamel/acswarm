@@ -48,7 +48,7 @@ pub const PORTAL_GIVE_UP: Duration = Duration::from_secs(12);
 const RECALL_SETTLE: Duration = Duration::from_millis(800);
 /// A recall that has not carried us off this long after the cast was
 /// sent (the cast takes a few seconds and the server pauses two more
-/// before the teleport) is cast again, and after [`RECALL_TRIES`] casts
+/// before the teleport) is cast again, and after `RECALL_TRIES` casts
 /// the journey is planned again without that spell.
 pub const RECALL_GIVE_UP: Duration = Duration::from_secs(15);
 const RECALL_TRIES: u32 = 2;
@@ -276,7 +276,7 @@ impl Client {
     /// break the journey off: following a leader, exploring, going back to
     /// the hunting area are somewhere else to be, not a detour to come back
     /// from. What does come back (a corpse, a fight, a use) says so with
-    /// [`interrupt_travel`](Self::interrupt_travel). Counting every walk as
+    /// `interrupt_travel`. Counting every walk as
     /// a break-off had a follower on a party's town run pulled back to its
     /// leader, its walk to the counter planned again, and pulled back
     /// again, each time it closed to the following distance.
@@ -364,7 +364,7 @@ impl Client {
     }
 
     /// [`travel_to`](Self::travel_to) a goal in a known cell: see
-    /// [`plan_trip_in`](Self::plan_trip_in).
+    /// `plan_trip_in`.
     pub fn travel_to_in(&mut self, goal: Vec2, cell: u32) -> bool {
         self.drop_visit("travelling somewhere else");
         self.plan_trip_in(goal, cell)

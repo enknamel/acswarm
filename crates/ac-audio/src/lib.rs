@@ -4,7 +4,7 @@
 //! [`Audio::new`] opens the default output device (fallible, so callers
 //! without one keep running silent), [`Audio::play`] plays a clip once at a
 //! volume, and [`sound_for`] / [`pick_entry`] resolve a sound type through a
-//! [`SoundTable`] the way the client does: roll against each candidate's
+//! [`SoundTable`](ac_formats::sound_table::SoundTable) the way the client does: roll against each candidate's
 //! `probability` in order.
 //!
 //! Clips are converted to kira frames on every `play`; they are short

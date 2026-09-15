@@ -27,7 +27,7 @@
 //! - a **strike** starts beside the target and flies at it;
 //! - an **arrow** or **thrown weapon** flies like a bolt, under gravity.
 //!
-//! Each tick [`Client::autoplay_dodge`] looks at every missile in view,
+//! Each tick `Client::autoplay_dodge` looks at every missile in view,
 //! works out where it is now from where it started and how long ago,
 //! and asks [`threat`] whether it will pass within [`MISS_BY`] of us in
 //! the next [`HORIZON`]. For the soonest one it measures the room to
@@ -55,7 +55,7 @@
 //! and everything else, and nothing that cannot hurt us is worth an
 //! interrupted cast or a broken swing. So [`can_hurt_us`] is read at
 //! intake and a fellow's bolt is stepped out of the way of only when
-//! the moment is going spare (see [`Client::free_to_step_aside`]).
+//! the moment is going spare (see `Client::free_to_step_aside`).
 //!
 //! A projectile is dodged whether or not it could reach us: the wire
 //! names its weenie, not its spell, and the DAT spell table carries no
@@ -113,7 +113,7 @@ pub struct Track {
     pub gravity: f32,
     /// When it appeared.
     pub seen: Instant,
-    /// Who it looks to have come from (see [`Client::fired_by`]): a
+    /// Who it looks to have come from (see `Client::fired_by`): a
     /// guess from where it appeared, not the wire's word.
     pub from: Option<u32>,
     /// Whether it could hurt this character if it landed (see
@@ -140,7 +140,7 @@ pub struct Track {
 /// for full damage. Either side carrying that bit is a threat.
 ///
 /// Read the other way round when there is any doubt. The caster is a
-/// guess (see [`Client::fired_by`]), and the two PK statuses the server
+/// guess (see `Client::fired_by`), and the two PK statuses the server
 /// keeps are finer than these bits -- a PK and a PK Lite cannot touch
 /// each other either -- so anything that looks at all like a threat is
 /// taken for one and dodged as it always was.
@@ -182,7 +182,7 @@ pub struct State {
     /// The sidestep in hand is a courtesy to a fellow rather than a
     /// dodge: it saves his spell and nothing of ours, so it is given up
     /// the moment there is something better to do (see
-    /// [`Client::free_to_step_aside`]). Read only while `dodge_to` is
+    /// `Client::free_to_step_aside`). Read only while `dodge_to` is
     /// set, and written afresh with every step.
     pub courtesy: bool,
 }

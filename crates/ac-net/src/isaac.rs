@@ -127,7 +127,7 @@ fn shuffle(x: &mut [u32; 8]) {
 /// * the look ahead never runs more than [`KeyStream::MAX_EFFORT`] keys past
 ///   the newest key we accepted, so unrecognised packets cannot walk the
 ///   stream away from the peer;
-/// * unclaimed keys are dropped once they fall [`BACKLOG`] behind, oldest
+/// * unclaimed keys are dropped once they fall `BACKLOG` behind, oldest
 ///   first, instead of filling a fixed budget and failing every packet from
 ///   then on.
 pub struct KeyStream {

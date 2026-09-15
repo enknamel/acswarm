@@ -1,7 +1,7 @@
 //! Getting back in after a drop.
 //!
 //! A session can end three ways. The player quits, which is a clean
-//! [`Client::disconnect`] and the end of it. The server refuses us for a
+//! [`Client::disconnect`](crate::Client::disconnect) and the end of it. The server refuses us for a
 //! reason waiting will not fix (banned, wrong password, a character that
 //! is not ours), which is also the end of it. Or the connection dies:
 //! the router hiccups, the server restarts, a packet storm eats the

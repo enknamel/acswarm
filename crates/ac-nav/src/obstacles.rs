@@ -203,7 +203,7 @@ pub struct Clutter {
 impl Clutter {
     /// The cylinders within [`NEARBY`] of `at`, gathered afresh only
     /// when the world has changed or the character has moved
-    /// [`MARGIN`] from where they were last gathered.
+    /// `MARGIN` from where they were last gathered.
     pub fn refresh(
         &mut self,
         world: &World,
@@ -429,7 +429,7 @@ pub fn thread(
 /// Where to head this frame instead of `aim`: the first corner of the
 /// way round whatever stands on the straight walk from `from` to it,
 /// or `aim` itself when nothing does, or when no way round clears the
-/// ground within [`DEPTH`] objects.
+/// ground within `DEPTH` objects.
 ///
 /// An object the leg ends in is no obstacle to that leg. A walk to a
 /// chest ends at the chest, within arm's reach of its middle, and a

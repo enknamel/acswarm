@@ -40,6 +40,8 @@ use winit::window::{Window, WindowId};
 
 #[derive(Parser)]
 #[command(version, about)]
+// Clap prints these docs as --help, where [..] marks an optional part, not a link.
+#[allow(rustdoc::broken_intra_doc_links)]
 struct Cli {
     /// Directory with client_portal.dat and client_cell_1.dat. When
     /// omitted, the app remembers your last choice, looks in the usual

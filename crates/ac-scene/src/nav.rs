@@ -152,7 +152,7 @@ impl Ground<'_> {
     }
 
     /// Sample the walk from `a` to `b` (feet positions) every
-    /// [`SUBSTEP`]: the capsule must fit at every sample, the floor must
+    /// `SUBSTEP`: the capsule must fit at every sample, the floor must
     /// continue, and the chest ray between samples must be clear. Returns
     /// whether the walk is possible from `a` to `b` and from `b` to `a`
     /// (they differ by the step-up and step-down limits).
@@ -204,7 +204,7 @@ impl Ground<'_> {
     /// or keeps a floor all the way and ends under (or over) a `b` that
     /// stands a storey away, at the foot of an edge it never crosses.
     ///
-    /// The walk is sampled every [`SUBSTEP`] as in
+    /// The walk is sampled every `SUBSTEP` as in
     /// [`walkable`](Self::walkable), and followed the way the walking
     /// code would follow it. Something solid first -- the capsule does
     /// not fit, the chest ray is blocked, or the ground rises over the
