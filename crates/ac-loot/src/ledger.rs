@@ -232,6 +232,8 @@ impl Ledger {
 
     /// Where one character's ledger lives: per server and character, as guids are a server's own.
     pub fn path_of(dir: &Path, server: &str, character: &str) -> PathBuf {
+        // Not `ac_store::file_safe`: ASCII letters and digits only, and renaming these directories
+        // now would hide the ledgers players already have -- a ledger read as empty sells keepers.
         let tidy = |s: &str| {
             s.chars()
                 .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
@@ -245,11 +247,12 @@ impl Ledger {
     /// Read one back. No file is an honest empty ledger; a file that will not read says so
     /// ([`Ledger::trusted`]), its decisions being lost rather than absent.
     pub fn load(path: &Path) -> Ledger {
-        let Ok(text) = std::fs::read_to_string(path) else {
-            return Ledger::default();
-        };
-        match serde_json::from_str::<Ledger>(&text) {
-            Ok(l) => l,
+        match ac_store::read_json::<Ledger>(path) {
+            Ok(Some(l)) => l,
+            Ok(None) => Ledger::default(),
+            // Only a file that opens and will not parse says its decisions are lost; one that will
+            // not open at all reads as none.
+            Err(e) if e.kind() != std::io::ErrorKind::InvalidData => Ledger::default(),
             Err(e) => {
                 tracing::error!(
                     path = %path.display(),
@@ -272,11 +275,8 @@ impl Ledger {
 
     /// Write it out, on every change rather than at exit: a crash is what it defends against.
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)?;
-        }
         let text = serde_json::to_string_pretty(self).unwrap_or_default();
-        std::fs::write(path, text)
+        ac_store::write_atomic(path, text.as_bytes(), ac_store::Visibility::Normal)
     }
 
     /// Write it out if anything changed. Called every tick, so it costs a bool most of the time.

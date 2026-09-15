@@ -45,13 +45,7 @@ pub use testing::{Recorder, ScriptHarness};
 
 /// `$ACSWARM_SCRIPTS`, else `~/.acswarm/scripts`.
 pub fn default_dir() -> PathBuf {
-    if let Some(dir) = std::env::var_os("ACSWARM_SCRIPTS") {
-        return PathBuf::from(dir);
-    }
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."));
-    home.join(".acswarm").join("scripts")
+    ac_store::scripts_dir()
 }
 
 /// The event map handed to `on_event(ev)`.

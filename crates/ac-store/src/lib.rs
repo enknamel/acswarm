@@ -241,7 +241,9 @@ mod tests {
         // exercises $ACSWARM_CONFIG_DIR and $ACSWARM_SCRIPTS for real.
         assert!(config_dir().ends_with("acswarm"));
         assert!(app_dir().ends_with(".acswarm") || std::env::var_os("HOME").is_none());
-        assert!(scripts_dir().ends_with("scripts") || std::env::var_os("ACSWARM_SCRIPTS").is_some());
+        assert!(
+            scripts_dir().ends_with("scripts") || std::env::var_os("ACSWARM_SCRIPTS").is_some()
+        );
         assert!(cache_dir().ends_with("acswarm"));
         assert!(!home().as_os_str().is_empty());
     }

@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 ac-dat = { path = "../ac-dat" }
 ac-formats = { path = "../ac-formats" }
+ac-store = { path = "../ac-store" }
 glam = "0.30"
 thiserror.workspace = true
 tracing.workspace = true

@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 ac-plugin = { path = "../ac-plugin" }
 ac-client = { path = "../ac-client" }
+ac-store = { path = "../ac-store" }
 ac-net = { path = "../ac-net" }
 ac-world = { path = "../ac-world" }
 glam = "0.30"

@@ -11,6 +11,8 @@
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+use ac_store::Visibility;
+
 use crate::servers::Servers;
 use crate::Settings;
 
@@ -26,7 +28,7 @@ pub fn path() -> PathBuf {
             .join(format!("acswarm-test-store-{}", std::process::id()))
             .join(FILE_NAME);
     }
-    Settings::config_dir().join(FILE_NAME)
+    ac_store::config_dir().join(FILE_NAME)
 }
 
 /// Read them from `path`; a missing or unreadable file is an empty store.
@@ -39,11 +41,14 @@ pub fn load() -> Servers {
     load_at(&path())
 }
 
-/// Write them to `path`, leaving anything else in the file alone.
+/// Write them to `path`, leaving anything else in the file alone. The
+/// remembered logins are passwords in the clear, so the file goes out
+/// [`Visibility::Private`] whichever screen wrote it -- and this is the
+/// only path that writes it.
 pub fn save_at(path: &Path, servers: &Servers) -> std::io::Result<()> {
     let mut settings = Settings::load(path);
     servers.save(&mut settings);
-    settings.save(path)
+    settings.save_as(path, Visibility::Private)
 }
 
 /// Read `path`, let `edit` change what is there, write it back, and hand
@@ -101,6 +106,20 @@ mod tests {
         assert_eq!(after.accounts_for("h:9000").len(), 2);
         assert_eq!(load_at(&path).accounts_for("h:9000").len(), 2);
         assert_eq!(after.custom.len(), 1);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_store_written_here_is_readable_only_by_its_owner() {
+        // Whichever screen creates it -- this is the path both take --
+        // the file holds passwords in the clear.
+        use std::os::unix::fs::PermissionsExt;
+        let path = scratch("private");
+        update_at(&path, |s| s.remember("h:9000", "alice", "pw", ""));
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&path), 0o600, "the file");
+        assert_eq!(mode(path.parent().unwrap()), 0o700, "its directory");
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 }

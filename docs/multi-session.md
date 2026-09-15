@@ -516,7 +516,9 @@ once. The accounts themselves live in the login store
 (`~/.config/acswarm/servers.json`, `servers.logins`, one entry per
 account: `host` as `host:port`, `account`, `password`, `character`) with
 the servers you have added; that is what the connect screen reads and
-what the roster is built from. What the fleet adds is kept beside it in
+what the roster is built from. The passwords are in the clear, so
+whichever screen writes the file writes it owner-only (0600, and 0700 on
+the directory). What the fleet adds is kept beside it in
 the settings file (`~/.config/acswarm/ui.json`, `fleet.entries`, one
 entry per server and account: `host`, `account`, `role`, `create`
 `{name, template, town, heritage, sex}`) with the leading account per
