@@ -2550,12 +2550,18 @@ impl Client {
         self.packs().anywhere()
     }
 
-    /// No pack has more than the slots kept free for a counter's money
-    /// (`restock.keep_slots`): time to sell, while a sale can still be
-    /// paid for. The server finds room for the coin before it takes the
-    /// goods, so a pack with no slot at all cannot be sold out of.
+    /// No pack has a slot for a take, or the packs together are down to
+    /// the slots kept free for a counter's money (`restock.keep_slots`):
+    /// time to sell, while a sale can still be paid for. The server
+    /// finds room for the coin before it takes the goods, so a pack with
+    /// no slot at all cannot be sold out of -- and it finds that room
+    /// in any pack, so the slots kept are counted over all of them.
+    /// Counted in the one pack a take could use, a character with two
+    /// slots in the main pack and two in the sack went to town with
+    /// room for its money twice over.
     pub fn pack_low_on_room(&self) -> bool {
-        self.free_space() <= self.autoplay.config.team.restock.keep_slots
+        let packs = self.packs();
+        packs.for_a_take() == 0 || packs.anywhere() <= self.autoplay.config.team.restock.keep_slots
     }
 
     /// What the character has room for, as a corpse waiting on it sees

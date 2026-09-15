@@ -115,6 +115,21 @@ pub fn still_full(held: u32, used: u32) -> bool {
     used >= held
 }
 
+/// The word as it is to be kept from one look to the next: the most
+/// the pack has been seen to hold since the server said it was full
+/// (`held`), against what it holds now (`used`). `None` once something
+/// has left it, and otherwise the higher of the two.
+///
+/// The count climbs after the word as often as not: the server called
+/// the pack full when the client had counted a hundred, and the two
+/// descriptions it was still waiting on then arrive. Kept at a hundred,
+/// the word would outlive the next two things sold; kept at the most
+/// seen, one thing leaving is enough to lift it, which is what the
+/// word meant.
+pub fn full_mark(held: u32, used: u32) -> Option<u32> {
+    still_full(held, used).then_some(held.max(used))
+}
+
 /// A thing lying loose -- on a corpse, on the ground -- as the choice
 /// of how to take it needs to see it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -183,20 +198,18 @@ pub fn how_to_take(item: &Loose, carried: &[Stack], packs: &Packs) -> Option<Tak
 /// The item the server's words say would not go into its pack, out of
 /// a line of chat: "Unable to put Pyreal into container". ACE's whole
 /// word on a take aimed at a pack with no slot, sent ahead of an
-/// `InventoryServerSaveFailed` with no reason in it.
+/// `InventoryServerSaveFailed` with no reason in it -- and its only
+/// word: these words are what makes a refusal the pack's. A refusal
+/// with no reason and no word at all is not the pack, however much it
+/// looks like one with the words still on their way: it is what ACE
+/// sends for a second of a unique (`CheckUniques` explains itself in
+/// the system chat, not in a game event), and for a pack put into a
+/// sack. Read as the pack being full, a unique on a body marked every
+/// pack full in turn and sent the character to town with its slots
+/// free.
 pub fn unable_to_put(text: &str) -> Option<&str> {
     text.strip_prefix("Unable to put ")?
         .strip_suffix(" into container")
-}
-
-/// Whether a refusal of a take was for want of room in the pack it
-/// named: the server said so in words (`said_so`), or it said nothing
-/// at all and gave no reason (`err` 0 with no word since the take went
-/// out). Every other refusal of a take from a body carries a code or
-/// a line -- too busy, too encumbered, a quest's cap, a body that is
-/// not ours -- so a wordless, reasonless one is the pack.
-pub fn refused_for_room(said_so: bool, err: u32, told_since_sent: bool) -> bool {
-    said_so || (err == 0 && !told_since_sent)
 }
 
 #[cfg(test)]
@@ -300,6 +313,19 @@ mod tests {
         assert!(still_full(102, 102));
         assert!(still_full(102, 103), "counted past what the server had");
         assert!(!still_full(102, 101), "something left");
+    }
+
+    #[test]
+    fn the_word_is_kept_at_the_most_seen_so_one_thing_leaving_lifts_it() {
+        // Called full when the client had counted a hundred; the two
+        // descriptions still on their way arrive, and the count reads
+        // 102. Two sold: kept at a hundred the word would still stand,
+        // and the pack would read as full until a third left.
+        assert_eq!(full_mark(100, 100), Some(100));
+        assert_eq!(full_mark(100, 102), Some(102), "the count caught up");
+        assert_eq!(full_mark(102, 102), Some(102));
+        assert_eq!(full_mark(102, 101), None, "one left: room again");
+        assert_eq!(full_mark(100, 99), None);
     }
 
     #[test]
@@ -423,17 +449,5 @@ mod tests {
         );
         assert_eq!(unable_to_put("You are too encumbered to carry that!"), None);
         assert_eq!(unable_to_put("Unable to put"), None);
-    }
-
-    #[test]
-    fn a_refusal_is_for_room_when_the_server_said_so_or_said_nothing_at_all() {
-        assert!(refused_for_room(true, 0, true));
-        // Wordless and reasonless: the pack.
-        assert!(refused_for_room(false, 0, false));
-        // A reason given is that reason, not the pack.
-        assert!(!refused_for_room(false, 0x43e, false));
-        // Words that were not about room -- "You are too encumbered to
-        // carry that!" -- with the usual reasonless refusal after them.
-        assert!(!refused_for_room(false, 0, true));
     }
 }

@@ -67,9 +67,18 @@ pub struct Open {
     /// packs: a take goes into one pack, and the sum read as room
     /// while every take was refused.
     pub slots_free: u32,
+    /// Slots free in every pack together (see
+    /// `ac_agent::room::Packs::anywhere`): what a counter's money is
+    /// spread over, and so what `keep_free` is measured against.
+    pub room_anywhere: u32,
     /// Slots to leave empty however much is lying here. A counter needs
     /// somewhere to put the coin before it takes anything, so a pack
-    /// looted to its last slot cannot be sold out of at all.
+    /// looted to its last slot cannot be sold out of at all. The coin
+    /// is created by the server, which fills the main pack and then
+    /// each side pack in turn, so the slots kept are counted over every
+    /// pack: kept in the one pack a take could use, a character with
+    /// two slots in the main pack and two in the sack was sent to town
+    /// with room for its money twice over.
     pub keep_free: u32,
     /// How much more loot the character means to carry (see
     /// `growth::carry_room`): zero when it has had enough. What it

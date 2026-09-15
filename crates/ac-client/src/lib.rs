@@ -217,6 +217,12 @@ fn answers_a_pour(pour: Option<&(pack::PourSent, Instant)>, item: u32, now: Inst
     })
 }
 
+/// How long a take off a body -- a put or a pour -- is waited on before
+/// it is given up for lost. The server walks to the body and stoops
+/// before it answers; nine characters' takes were answered in 1.4 s at
+/// the median and 2.1 s at the ninety-ninth.
+const TAKE_LOST: Duration = Duration::from_secs(4);
+
 /// A take off a body as it went out: what was asked for, where it was
 /// to go, and what the server has said of it since.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -224,7 +230,6 @@ pub(crate) struct TakeSent {
     pub(crate) item: u32,
     /// The pack named in the put, or the carried stack poured onto.
     pub(crate) into: u32,
-    pub(crate) at: Instant,
     /// Sent once already and refused for room: this is its second try,
     /// into another pack, and there is no third.
     pub(crate) retried: bool,
@@ -234,8 +239,8 @@ pub(crate) struct TakeSent {
     /// The server has refused it, with this reason (0 for none). Kept
     /// with the take rather than acted on at once because the words
     /// that say why come as chat, and a tick reads its chat after its
-    /// events: the refusal is judged again when they arrive (see
-    /// `Client::judge_take_refusal`).
+    /// events -- or a packet later: the refusal is judged again when
+    /// they arrive (see `Client::judge_take_refusal`).
     pub(crate) refused: Option<u32>,
 }
 pub mod logoff;
@@ -3006,9 +3011,11 @@ impl Client {
         }
         tracing::info!("pick up {} ({guid:#010x})", o.name);
         self.last_used = Some(guid);
-        // With no room anywhere the main pack is named, and the server
-        // says so; a caller that meant to check first has `pack_full`.
-        let into = self.packs().container_for_a_take().unwrap_or(me);
+        // The same choice a take makes, less the pour (see
+        // `Client::where_to_pick_up`). With no room anywhere the main
+        // pack is named, and the server says so; a caller that meant to
+        // check first has `pack_full`.
+        let into = self.where_to_pick_up(guid).unwrap_or(me);
         let mut w = ac_net::wire::Writer::new();
         w.u32(guid).u32(into).u32(0);
         self.session
@@ -3068,6 +3075,9 @@ impl Client {
     pub fn tick_loot(&mut self, now: Instant) {
         use ac_net::messages::action;
         let me = self.world.player_guid.unwrap_or(0);
+        // What the server said was full is held against what each pack
+        // holds now, before anything is judged from it.
+        self.note_pack_counts();
         // The in-flight pickup is done once the item is ours, gone, or stale.
         if let Some((guid, since)) = self.loot_inflight {
             let over = match self.loot_merge.as_ref() {
@@ -3084,8 +3094,15 @@ impl Client {
                         self.move_refused.get(&from).copied(),
                         self.move_refused.get(&to).copied(),
                     );
+                    // Waited on as long as a put would be: the server
+                    // walks to the body and stoops for a merge off it
+                    // exactly as for a take, and one take in ten took
+                    // longer than the tidy's two seconds. Given up
+                    // sooner, the coin still lying there was asked for
+                    // again and a second merge went out behind the
+                    // first, to fail on a stack that had gone.
                     let waited = now.saturating_duration_since(since);
-                    match pack::pour_answer(sent, target_now, refusal, waited) {
+                    match pack::pour_answer_within(sent, target_now, refusal, waited, TAKE_LOST) {
                         pack::PourAnswer::InAir => false,
                         pack::PourAnswer::Landed => {
                             // What the pile is for is settled now that
@@ -3107,23 +3124,43 @@ impl Client {
                         .objects
                         .get(&guid)
                         .is_none_or(|o| self.world.is_carried(guid) || o.wielder == Some(me));
-                    landed || now.saturating_duration_since(since) > Duration::from_secs(4)
+                    landed || now.saturating_duration_since(since) > TAKE_LOST
                 }
             };
             if over {
                 self.loot_inflight = None;
             }
         }
-        if self.loot_inflight.is_none() {
-            self.loot_sent = None;
-            self.loot_merge = None;
-        }
+        // What was sent (`loot_sent`, `loot_merge`) is kept past the
+        // take's end, until the next goes out: the words that say why
+        // a take was refused come as chat, and can come a packet behind
+        // the refusal itself.
+        //
         // Not while the server has us busy: it refuses the take outright
         // and spends two messages saying so (see [`Client::server_busy`]).
         // The item stays at the head of the queue and goes out on the
         // first free tick, which costs a frame and never a pickup.
         if self.loot_inflight.is_none() && !self.server_busy(now) {
-            if let Some(guid) = self.loot_queue.pop_front() {
+            // Where it goes is decided as it is sent, from the room
+            // there is now: the pack with a slot, or the carried pile
+            // it pours onto (see `room::how_to_take`).
+            let next = self
+                .loot_queue
+                .front()
+                .map(|guid| (*guid, self.how_to_take(*guid)));
+            // Not a pour while the tidying's own pour is in the air.
+            // The tidying holds off while a take is (see
+            // `autoplay::TidyGate`), and this is the other half of it:
+            // the pile the coin would join may be the one the tidying is
+            // emptying, or the one it is filling, whose count the two
+            // answers would then be read off together. A pour within
+            // the pack is answered in a tick or two, and this waits the
+            // tick.
+            let tidy_pouring = self.autoplay.pour.is_some();
+            if let Some((guid, how)) = next
+                .filter(|(_, how)| !(tidy_pouring && matches!(how, Some(room::Take::Merge { .. }))))
+            {
+                self.loot_queue.pop_front();
                 let retried = self.loot_retry.take() == Some(guid);
                 let name = self
                     .world
@@ -3131,11 +3168,9 @@ impl Client {
                     .get(&guid)
                     .map(|o| o.name.clone())
                     .unwrap_or_default();
-                // Where it goes is decided as it is sent, from the room
-                // there is now: the pack with a slot, or the carried
-                // pile it pours onto (see `room::how_to_take`).
                 let mut w = ac_net::wire::Writer::new();
-                let into = match self.how_to_take(guid) {
+                self.loot_merge = None;
+                let into = match how {
                     Some(room::Take::Merge { to, amount }) => {
                         tracing::info!("take {name} ({guid:#010x}): pouring onto {to:#010x}");
                         let to_before = self
@@ -3174,14 +3209,10 @@ impl Client {
                         into
                     }
                 };
-                // Stamped with the tick's clock, as the server's words
-                // are (`told`): the two are compared to tell what was
-                // said after the take from what was said before it.
                 self.loot_inflight = Some((guid, now));
                 self.loot_sent = Some(TakeSent {
                     item: guid,
                     into,
-                    at: now,
                     retried,
                     said_full: false,
                     refused: None,

@@ -171,7 +171,11 @@ impl Run {
         // Unless something on it needs no slot: coin poured onto the
         // pile carried spends nothing the counter wants, so that much is
         // still taken off a body the pack has no slot for.
-        let has_a_slot = at.slots_free > at.keep_free;
+        //
+        // A slot for the take, in whichever pack has one, and the slots
+        // kept for the money over every pack together: the server puts
+        // the coin wherever there is room.
+        let has_a_slot = at.slots_free > 0 && at.room_anywhere > at.keep_free;
         if !has_a_slot && !at.wanted().any(|i| i.needs_no_slot) {
             return Next::set_aside(
                 "the pack is full",
@@ -395,6 +399,7 @@ mod tests {
             open: true,
             items,
             slots_free: 20,
+            room_anywhere: 20,
             keep_free: 0,
             carry_room: 10_000,
             may_ask: true,
@@ -551,6 +556,7 @@ mod tests {
         let mut run = Run::new();
         let mut at = body(vec![thing(1, "Dagger", Verdict::Take(LootAction::Keep))]);
         at.slots_free = 0;
+        at.room_anywhere = 0;
         let next = run.step(&at, Instant::now());
         assert_eq!(next.act, Some(Act::Close), "{}", next.saying);
         // Set aside, not emptied. Shut as done with, every body reached
@@ -570,9 +576,34 @@ mod tests {
         let mut at = body(vec![thing(1, "Dagger", Verdict::Take(LootAction::Keep))]);
         at.keep_free = 3;
         at.slots_free = 3;
+        at.room_anywhere = 3;
         assert_eq!(Run::new().step(&at, Instant::now()).act, Some(Act::Close));
         at.slots_free = 4;
+        at.room_anywhere = 4;
         assert_ne!(Run::new().step(&at, Instant::now()).act, Some(Act::Close));
+    }
+
+    #[test]
+    fn the_slots_kept_for_the_money_are_counted_over_every_pack() {
+        // Two slots in the main pack and two in the sack, three kept
+        // for the money: the money goes wherever there is room, so the
+        // take has a slot and the counter still its three. With one
+        // slot in all, the last one is the counter's.
+        let mut at = body(vec![thing(1, "Dagger", Verdict::Take(LootAction::Keep))]);
+        at.keep_free = 3;
+        at.slots_free = 2;
+        at.room_anywhere = 4;
+        let next = Run::new().step(&at, Instant::now());
+        assert_eq!(next.act, Some(Act::Take(1)), "{}", next.saying);
+        at.slots_free = 1;
+        at.room_anywhere = 3;
+        assert_eq!(Run::new().step(&at, Instant::now()).act, Some(Act::Close));
+        // Room for the money is not a slot for the take: every pack
+        // full but for what the server itself could spread over them is
+        // still nowhere a take can go.
+        at.slots_free = 0;
+        at.room_anywhere = 5;
+        assert_eq!(Run::new().step(&at, Instant::now()).act, Some(Act::Close));
     }
 
     #[test]
@@ -589,6 +620,7 @@ mod tests {
         let mut at = body(vec![dagger, coin]);
         at.keep_free = 3;
         at.slots_free = 3;
+        at.room_anywhere = 3;
         let next = run.step(&at, now);
         assert_eq!(next.act, Some(Act::Take(1)), "{}", next.saying);
         // The coin is gone; the dagger is still there with no slot.
@@ -609,20 +641,40 @@ mod tests {
         // and the server said otherwise on the first take: the count
         // is corrected (`slots_free` falls to nothing) and the body is
         // set aside for room, the same as one reached with a full pack,
-        // rather than opened again to be refused the same take.
+        // rather than opened again to be refused the same take. Even
+        // with something on it given up on -- the coin the server
+        // would not pour -- it is the room the body is left for, not
+        // the refusal: set aside for a refusal it is opened again as
+        // soon as the wait lifts, to be refused the dagger.
         let now = Instant::now();
         let mut run = Run::new();
+        let mut coin = thing(1, "Pyreal", Verdict::Take(LootAction::Keep));
+        coin.needs_no_slot = true;
         let mut at = body(vec![
-            thing(1, "Pyreal", Verdict::Take(LootAction::Keep)),
+            coin,
             thing(2, "Dagger", Verdict::Take(LootAction::Sell)),
         ]);
         assert_eq!(run.step(&at, now).act, Some(Act::Take(1)));
         at.refused.push(1);
         at.slots_free = 0;
+        at.room_anywhere = 0;
         let next = run.step(&at, now + Duration::from_millis(500));
         assert_eq!(next.act, Some(Act::Close), "{}", next.saying);
         assert!(
             matches!(&next.did, Did::Blocked(b) if b.what == "the pack is full"),
+            "{:?}",
+            next.did
+        );
+        // With a slot for it, the dagger is taken and the coin's
+        // refusal is what the body is left for.
+        let mut run = Run::new();
+        at.slots_free = 5;
+        at.room_anywhere = 5;
+        assert_eq!(run.step(&at, now).act, Some(Act::Take(2)));
+        at.items.retain(|i| i.guid != 2);
+        let next = run.step(&at, now + Duration::from_millis(500));
+        assert!(
+            matches!(&next.did, Did::Blocked(b) if b.what == "it would not give something up"),
             "{:?}",
             next.did
         );
@@ -668,6 +720,7 @@ mod tests {
         let mut run = Run::new();
         at.carry_room = 10_000;
         at.slots_free = 0;
+        at.room_anywhere = 0;
         assert_eq!(run.step(&at, Instant::now()).left_for_weight, None);
     }
 
