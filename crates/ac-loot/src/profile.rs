@@ -1,34 +1,8 @@
-//! Loot profiles: what to pick up, and what to sell.
-//!
-//! A profile is an ordered list of rules; the first whose every
-//! condition holds decides what happens to an item, and an item no rule
-//! matches is left alone. That is the shape players already work in,
-//! and it is the shape an editor can show honestly: a rule is a name, a
-//! disposition, and a list of things that must all be true.
-//!
-//! Two things a rule can ask about.
-//!
-//! The item, which is the obvious half: its name, kind, worth,
-//! workmanship, armour, the spells on it. And **the character**, which
-//! is the half that makes a profile worth sharing. One profile is
-//! handed to a whole group and each member reads it differently: the
-//! one with the lockpick skill picks up the broken keys that only
-//! lockpicking can mend, and nobody else carries them home. Without
-//! that, a group needs a profile per character and no profile can be
-//! passed to a friend.
-//!
-//! Profiles are files ([`Profile::save`]), one JSON document each, so
-//! that sharing one is sending a file.
-//!
-//! # Deciding without an appraisal
-//!
-//! Half of what a rule can ask needs the server to be asked about the
-//! item first, and that costs a round trip per item on every corpse.
-//! So the rules are read in order and the walk stops at the first rule
-//! that *could* match but cannot be judged yet ([`Verdict::NeedsId`]).
-//! A profile whose early rules ask only about the cheap fields decides
-//! most items without asking the server anything, which is the whole
-//! reason players tune profiles this way.
+//! Loot profiles: the first rule whose conditions all hold decides an item; unmatched items stay.
+//! Rules ask about the item and about the character reading it, so a party shares one profile.
+//! [`Profile::judge`] stops at the first rule that could match but needs an appraisal
+//! ([`Verdict::NeedsId`]), so cheap rules placed first settle most items with no round trip.
+//! One JSON file each ([`Profile::save`]); [`Library`] shares them live across characters.
 
 use crate::items::{ItemStats, NumKey, Op, Query, Term};
 use crate::weapons::Wielder;
@@ -80,30 +54,19 @@ impl LootAction {
     }
 
     /// How cautious this action is: the higher, the less it gives away.
-    ///
-    /// Keeping is always recoverable -- a thing still in the pack can
-    /// be sold tomorrow -- where selling and salvaging are not. So when
-    /// two decisions have to become one and there is no better reason
-    /// to prefer either, the cautious one wins.
+    /// Keeping is recoverable and selling or salvaging is not, so the cautious one wins a merge.
     fn caution(self) -> u8 {
         match self {
             LootAction::Keep => 3,
             LootAction::Salvage => 2,
             LootAction::Sell => 1,
-            // Nothing is held under a skip -- it was never taken -- so
-            // it loses to anything that was.
+            // Nothing is held under a skip, so it loses to anything taken.
             LootAction::Skip => 0,
         }
     }
 
-    /// The more cautious of two decisions.
-    ///
-    /// This is for the one case where two decisions end up describing
-    /// one item: two stacks of the same thing poured together. The
-    /// halves may honestly have been taken for different reasons -- a
-    /// rule with a `keep_up_to` cap says keep up to the cap and the
-    /// next rule says sell the rest -- and the merged stack can only
-    /// have one answer.
+    /// The more cautious of two decisions, for two stacks of one thing poured together.
+    /// The halves may differ: a `keep_up_to` rule keeps up to its cap and the next sells the rest.
     pub fn safer_of(self, other: LootAction) -> LootAction {
         if other.caution() > self.caution() {
             other
@@ -114,18 +77,14 @@ impl LootAction {
 }
 
 /// Something a rule asks about the character holding it.
-///
-/// Everything here is a feature of the character: who it is and what it
-/// can do. Nothing here is about the moment -- where it stands, what it
-/// is fighting -- because a profile is a standing policy, not a plan.
+/// Only standing features, never the moment (place, target): a profile is a policy, not a plan.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Mine {
     /// The character's name contains this, case-insensitively.
     Name(String),
     /// This skill stands at least this high, buffs counted.
     Skill { skill: u32, op: Op, level: u32 },
-    /// This skill is at least trained (2) or specialised (3): see
-    /// `ac_world::stats::sac`.
+    /// This skill is at least trained (2) or specialised (3): `ac_world::stats::sac`.
     Trained { skill: u32, at_least: u32 },
     /// The character's level.
     Level { op: Op, level: u32 },
@@ -169,9 +128,7 @@ pub enum TextOp {
     /// Contains it, ignoring case. What most rules want.
     #[default]
     Has,
-    /// Does not contain it. The plain way to say "armour, but not
-    /// Covenant", which players write as a lookahead when their tool
-    /// only offers a positive match.
+    /// Does not contain it: "armour, but not Covenant" without a lookahead.
     HasNot,
     /// Matches this regular expression.
     Like,
@@ -197,10 +154,7 @@ impl TextOp {
     }
 
     /// Whether `text` answers this test against `pattern`.
-    ///
-    /// A pattern that will not compile matches nothing rather than
-    /// everything: a rule with a typo in it should take no loot, not
-    /// all of it.
+    /// A pattern that will not compile matches nothing: a rule with a typo takes no loot, not all.
     pub fn holds(self, text: &str, pattern: &str) -> bool {
         match self {
             TextOp::Has => contains_fold(text, pattern),
@@ -216,8 +170,7 @@ fn contains_fold(text: &str, needle: &str) -> bool {
     !needle.is_empty() && text.to_lowercase().contains(&needle.to_lowercase())
 }
 
-/// The compiled form of a pattern, kept so that a rule read on every
-/// item of every corpse compiles its regular expressions once.
+/// The compiled pattern, cached because rules are read on every item of every corpse.
 fn regex_for(pattern: &str) -> Option<regex::Regex> {
     use std::sync::{Mutex, OnceLock};
     static CACHE: OnceLock<Mutex<std::collections::HashMap<String, Option<regex::Regex>>>> =
@@ -237,8 +190,7 @@ fn regex_for(pattern: &str) -> Option<regex::Regex> {
         .clone()
 }
 
-/// Whether a pattern will compile, for the editor to say so before the
-/// rule is ever run.
+/// Why a pattern will not compile, for the editor to say before the rule ever runs.
 pub fn pattern_error(pattern: &str) -> Option<String> {
     regex::Regex::new(pattern).err().map(|e| e.to_string())
 }
@@ -248,25 +200,13 @@ pub fn pattern_error(pattern: &str) -> Option<String> {
 pub enum Ask {
     /// About the item: every term the search language understands.
     Item(Term),
-    /// A whole search line, in the same language the inventory window
-    /// uses: `type:armor value<2500`, `(ring or bracelet) not minors>0`.
-    ///
-    /// The typed conditions above are what an editor can draw and
-    /// reason about, and are the ones to prefer. This is for a rule
-    /// written as a line of text -- by a script, or by someone who
-    /// already knows the language -- and for the `or` and `not` that
-    /// a list of conditions, being an `and`, cannot say.
+    /// A search line in the inventory window's language: `(ring or bracelet) not minors>0`.
+    /// Prefer the typed conditions an editor draws; this gives `or` and `not`, which a rule lacks.
     Search(String),
     /// About the character reading the profile.
     Me(Mine),
-    /// About any property the server sent when it identified the item,
-    /// by the server's own number: `ac_world::properties`.
-    ///
-    /// The friendly terms above cover what most rules want. This covers
-    /// the rest, which is everything: what set a piece of armour
-    /// belongs to, what a rare's icon sits on, how much of a salvage
-    /// bag is left. Numbers, flags and data ids are all compared as
-    /// numbers, a flag being 1 or 0.
+    /// Any identify property by the number the server uses: `ac_world::properties`.
+    /// Numbers, flags and data ids all compare as numbers, a flag being 1 or 0.
     Prop {
         kind: PropKind,
         id: u32,
@@ -275,10 +215,8 @@ pub enum Ask {
     },
     /// The same, for a property whose value is text.
     Text { id: u32, op: TextOp, value: String },
-    /// Any spell on the item whose name answers this. `Like` with
-    /// `^Legendary ` is how a rule asks for a legendary cantrip of any
-    /// kind, which is a thing every profile wants and no list of spell
-    /// names can keep up with.
+    /// Any spell on the item whose name answers this.
+    /// `Like` `^Legendary ` asks for any legendary cantrip; no list of spell names keeps up.
     Spell { op: TextOp, value: String },
 }
 
@@ -349,15 +287,11 @@ impl PropKind {
 }
 
 impl Ask {
-    /// Whether answering this needs the server to be asked about the
-    /// item first. Asking about the character never does, and nor do
-    /// the item's name, kind, worth or workmanship -- they arrive with
-    /// the item itself.
+    /// Whether answering this needs the item appraised first.
+    /// Not for the character, nor the item's name, kind, worth or workmanship, which come with it.
     pub fn needs_id(&self) -> bool {
         let term = match self {
             Ask::Me(_) => return false,
-            // Everything the server sends on an identify needs the
-            // identify, by definition.
             Ask::Prop { .. } | Ask::Text { .. } | Ask::Spell { .. } => return true,
             Ask::Search(line) => return Query::parse(line).needs_appraisal(),
             Ask::Item(t) => t,
@@ -397,9 +331,8 @@ impl Ask {
     }
 }
 
-/// Whether a numeric field is only known once the item has been
-/// appraised. Worth, burden, workmanship and how many are in the stack
-/// come with the item; the rest are the server's to tell.
+/// Whether a numeric field is only known once the item has been appraised.
+/// Worth, burden, workmanship and stack size come with the item; the rest need the server.
 pub fn needs_id(key: NumKey) -> bool {
     !matches!(
         key,
@@ -407,21 +340,14 @@ pub fn needs_id(key: NumKey) -> bool {
     )
 }
 
-/// One rule: a name, what to do, and everything that must be true.
-///
-/// Every condition must hold. There is no "or" inside a rule on
-/// purpose: two rules say it more plainly than one rule with a tree in
-/// it, and an editor can show a list of conditions in a way it cannot
-/// show a tree.
+/// One rule: a name, what to do, and conditions that must all hold.
+/// No "or" on purpose: two rules say it more plainly, and an editor can show a list but not a tree.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Rule {
     /// What the rule is for, in the player's words.
     pub name: String,
-    /// A heading to file it under in the editor -- "keep", "vendor
-    /// trash", "salvage", whatever the player likes. It means nothing
-    /// to the rules; it is there so that a profile of forty rules can
-    /// be read.
+    /// An editor heading to file it under ("vendor trash"); the rules ignore it.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub group: String,
     /// Turned off without being deleted.
@@ -453,12 +379,8 @@ impl Rule {
         self.all.iter().any(Ask::needs_id)
     }
 
-    /// The first skill a condition of this rule asks of the character
-    /// reading it (`Mine::Skill`, `Mine::Trained`), if any does.
-    ///
-    /// A party reads one profile, so a rule that asks about a skill says
-    /// which of the party what it takes is for: whoever has the most of
-    /// that skill.
+    /// The first skill a condition asks of the reader (`Mine::Skill`, `Mine::Trained`), if any.
+    /// What such a rule takes is for whichever of the party has the most of that skill.
     pub fn skill_asked(&self) -> Option<u32> {
         self.all.iter().find_map(|a| match a {
             Ask::Me(Mine::Skill { skill, .. } | Mine::Trained { skill, .. }) => Some(*skill),
@@ -466,9 +388,8 @@ impl Rule {
         })
     }
 
-    /// Whether every condition that can be judged without an appraisal
-    /// holds. A rule that fails one of those is out whatever the
-    /// server would say, which is what saves the round trip.
+    /// Whether every condition judgeable without an appraisal holds.
+    /// A rule failing one is out whatever the server would say, which saves the round trip.
     fn cheap_half_holds(&self, item: &ItemStats, me: &Wielder, name: &str) -> bool {
         self.all
             .iter()
@@ -496,10 +417,8 @@ impl Rule {
 
 fn holds(ask: &Ask, item: &ItemStats, id: Option<&Appraisal>, me: &Wielder, name: &str) -> bool {
     match ask {
-        // A name condition is a whole word. Matched as any part of one,
-        // Starter's "peas to sell" found the pea in "Spear", and every
-        // spear was taken to sell. A search line keeps matching part of a
-        // word, as the inventory's search does.
+        // Name conditions match whole words; search lines, like the inventory's, match part of one:
+        // "pea" is not in "Spear" (`the_starter_profile_is_one_a_player_would_recognise`).
         Ask::Item(Term::Word(w)) => item.has_word(w),
         Ask::Item(t) => item.matches_term(t),
         Ask::Search(line) => {
@@ -520,9 +439,8 @@ fn holds(ask: &Ask, item: &ItemStats, id: Option<&Appraisal>, me: &Wielder, name
             op,
             value,
         } => {
-            // A property the item does not carry is empty text, so
-            // "does not contain" holds for it -- which is what a rule
-            // that excludes a set name means.
+            // A property the item lacks is empty text, so "does not contain" holds for it,
+            // which is what a rule excluding a set name means.
             let text = id
                 .and_then(|a| a.strings.iter().find(|(k, _)| k == prop))
                 .map(|(_, v)| v.as_str())
@@ -532,8 +450,7 @@ fn holds(ask: &Ask, item: &ItemStats, id: Option<&Appraisal>, me: &Wielder, name
         Ask::Spell { op, value } => match op {
             // "Any spell that looks like this": true if one does.
             TextOp::Has | TextOp::Like => item.spells.iter().any(|s| op.holds(s, value)),
-            // "No spell that looks like this": true only if none does,
-            // so the test is turned round rather than asked of each.
+            // "No spell like this": negate "any", or any one other spell would pass.
             TextOp::HasNot => !item.spells.iter().any(|s| TextOp::Has.holds(s, value)),
             TextOp::Unlike => !item.spells.iter().any(|s| TextOp::Like.holds(s, value)),
         },
@@ -545,39 +462,22 @@ fn holds(ask: &Ask, item: &ItemStats, id: Option<&Appraisal>, me: &Wielder, name
 pub enum Verdict {
     /// This is what to do with it, and the rule that said so.
     Decided(LootAction, String),
-    /// A rule might claim it, but not until the item has been
-    /// appraised. Ask the server, then judge again.
+    /// A rule might claim it once appraised: ask the server, then judge again.
     NeedsId(String),
     /// No rule wants it.
     None,
 }
 
 /// One thing to keep in the pack, and where to get it.
-///
-/// This is not a rule and cannot be written as one: a rule is a
-/// question about an item in hand, and there is no item in hand when
-/// the question is "have I enough tapers". It is a floor on stock,
-/// where [`Rule::keep_up_to`] is a ceiling on taking.
-///
-/// A character needs several of these and they do not all come from one
-/// counter: components from an archmage, healing kits by level, arrow
-/// heads by level *and* element.
+/// Not a rule, as no item is in hand: a floor on stock, where [`Rule::keep_up_to`] caps taking.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Buy {
-    /// The thing, by the name a counter lists it under. Specific, not a
-    /// family: "Peerless Healing Kit", not "Healing Kit", because the
-    /// levels are different items at different prices.
+    /// The counter's name for it, specific ("Peerless Healing Kit"): each level is its own item.
     pub what: String,
     /// How many to carry when stocked up.
     pub keep: u32,
-    /// How few may be left before a trip to town is worth making.
-    ///
-    /// Without this every line is urgent the moment it is one short,
-    /// and a caster walks to town nine hundred tapers from empty.
-    /// Absent means a quarter of `keep`, which is the rule the older
-    /// `ammo_keep` and `tapers_keep` settings used and a fair reading of
-    /// "keep a thousand of these". Zero means "only when it runs out",
-    /// which is how a line that is merely nice to have is written.
+    /// How few may be left before a trip to town is worth it; `None` is a quarter of `keep`.
+    /// Zero means only when it runs out; see `a_line_is_only_urgent_once_it_is_low`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub restock_at: Option<u32>,
     /// A particular counter by name, or whichever sells it when None.
@@ -611,17 +511,11 @@ pub struct Short<'a> {
     pub urgent: bool,
 }
 
-/// Where what is for sale goes.
-///
-/// One counter, because that is how the game is played: everything is
-/// sold at the best rate the character can reach, which for most of a
-/// character's life is the broker outside Cragstone. Buying is a list
-/// because a character needs several shelves; selling is not.
+/// The one counter everything for sale goes to.
+/// One, unlike the buy list: all sells at the best rate in reach (mostly the Cragstone broker).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SellTo {
-    /// The best rate within reach: what a counter pays is
-    /// `value * buy_rate`, and the spread between the worst and the
-    /// best is nearly half.
+    /// The best rate in reach: a counter pays `value * buy_rate`, and rates spread nearly half.
     #[default]
     Best,
     /// This one, by name, wherever it is.
@@ -629,56 +523,30 @@ pub enum SellTo {
 }
 
 /// How a character goes about looting, beside what it takes.
-///
-/// These were switches on each character's autoplay settings, beside
-/// the name of the profile it read, so "how does this character loot"
-/// was answered in two windows. They travel with the rules now.
+/// Kept with the rules, so one profile answers "how does this character loot".
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Looting {
-    /// Always take these, whatever the rules say (by name). Read before
-    /// any rule, and beaten only by `never`.
+    /// Names always taken whatever the rules say; read before any rule, beaten only by `never`.
     pub always: Vec<String>,
     /// Never take these (by name), even when a rule matches.
     pub never: Vec<String>,
-    /// Ask the server about a corpse's items before deciding, so that
-    /// rules on damage, armour and spells can be judged.
+    /// Appraise a corpse's items before deciding, so rules on damage, armour and spells can judge.
     pub appraise: bool,
-    /// Finish what you kill: while a body the character made is still
-    /// unlooted nearby, another fight waits -- unless something is
-    /// hitting it. Off, a body only outranks the next fight once it is
-    /// old enough to be in danger of rotting.
+    /// Loot its own kills nearby before the next fight, unless something is hitting it.
+    /// Off, a body outranks the next fight only once it is old enough to risk rotting.
     pub after_every_fight: bool,
-    /// Salvage what the rules tagged, when this character is the team's
-    /// best salvager.
+    /// Salvage what the rules tagged, when this character is the team's best salvager.
     pub salvage: bool,
-    /// Carry what the rules tagged to the team's best salvager, when
-    /// that is someone else.
+    /// Carry what the rules tagged to the team's best salvager, when that is someone else.
     pub hand_off: bool,
-    /// Pour loose stacks of the same thing together, so that slots are
-    /// not wasted on the change left by buying and looting.
+    /// Pour loose stacks of one thing together, so change from buying and looting wastes no slot.
     pub tidy_pack: bool,
-    /// How much loot to take on while hunting before going to sell, in
-    /// multiples of carrying capacity (150 x Strength). At one a
-    /// character is comfortable, at two it is slow and has no Melee or
-    /// Missile Defense left, at three the server stops it picking
-    /// anything up -- and hunting up to that wall leaves it unable to
-    /// loot, pour stacks together or move. So it stops well short and
-    /// goes to sell.
-    ///
-    /// Only loot counts towards it: what the selling rules would hand a
-    /// counter. What the character wears and wields, and what the rules
-    /// keep -- foci, components, what it keeps stocked, what it took to
-    /// keep or to salvage -- does not, because no trip to town takes it
-    /// off. Counted, a character carrying 13866 against a limit of
-    /// 13500, nearly all of it its own plate, foci and tapers, had no
-    /// room from the start and took nothing from any corpse.
-    ///
-    /// So a character in heavy gear carries this much loot on top of
-    /// it, and a second line keeps it well short all the same: loot
-    /// never takes the whole load past twice capacity, unless this is
-    /// set higher than two or what the character keeps weighs that much
-    /// on its own. The server's wall at three times counts everything.
+    /// Loot to take on before going to sell, in multiples of carrying capacity (150 x Strength).
+    /// At 1x comfortable; 2x slow, no Melee or Missile Defense; 3x cannot pick up, merge or move.
+    /// Counts only what sell rules hand a counter: no sale takes off worn, wielded or kept things.
+    /// The whole load stays under 2x unless this is set above 2 or kept weight alone reaches 2x.
+    /// The 3x wall counts everything; arithmetic and tests: `loot_room`, ac-client growth.rs.
     pub carry_up_to: f32,
 }
 
@@ -707,17 +575,9 @@ pub struct Profile {
     pub note: String,
     /// In order. The first rule that claims an item decides it.
     pub rules: Vec<Rule>,
-    /// What to keep stocked. A line here is the player's word too,
-    /// read when a thing is judged: up to the line's count, the thing
-    /// is kept whatever the rules would make of it, and past the count
-    /// the rules answer (`ac_client::autoplay::judge_loot`). So the
-    /// tapers bought for the line are stock as they arrive, and a
-    /// surplus under "sell the rest" still goes. For a thing nothing
-    /// was decided about, membership is a guard against the counter
-    /// (`ac_loot::sale::offer_to_vendor`). It is not a rule over a
-    /// tag: what was written down when the item was taken is the
-    /// player's word on that item, and this list does not answer back
-    /// to it.
+    /// What to keep stocked: up to a line's count a thing is kept, past it the rules decide.
+    /// Read in ac-client `judge_loot`; guards only untagged things in `sale::offer_to_vendor`.
+    /// A tag written when the item was taken is the player's word; this list never overrides it.
     #[serde(default)]
     pub buy: Vec<Buy>,
     /// Where what is for sale goes.
@@ -729,14 +589,8 @@ pub struct Profile {
 }
 
 impl Profile {
-    /// What to do with `item`, judged for this character. `held` is how
-    /// many of the thing are already carried, for the rules that cap a
-    /// stack.
-    ///
-    /// Rules are read in order and the first that claims the item wins.
-    /// A rule that would claim it but cannot be judged until the item
-    /// is appraised stops the reading: what a later rule would have
-    /// said does not matter, because this one comes first.
+    /// What to do with `item` for this character; `held` is how many are carried, for capped rules.
+    /// A rule that could claim it but awaits an appraisal stops the reading; no later rule decides.
     pub fn judge(
         &self,
         item: &ItemStats,
@@ -752,10 +606,8 @@ impl Profile {
         }
     }
 
-    /// The rule that decides `item` for this character, with where it
-    /// stands among the rules, read the way [`Profile::judge`] reads
-    /// them. `None` when no rule claims it, and when the first rule that
-    /// might has to wait for the item to be appraised.
+    /// The deciding rule and its index in `rules`, off rules counted, read as `judge` reads them.
+    /// `None` when no rule claims it or the first that might awaits an appraisal.
     pub fn decided_by(
         &self,
         item: &ItemStats,
@@ -770,9 +622,7 @@ impl Profile {
         }
     }
 
-    /// The first rule that claims `item` for this character, where it
-    /// stands among the rules, and whether it has to wait for an
-    /// appraisal before it can say.
+    /// The first rule that claims `item`, its index in `rules`, and whether it awaits an appraisal.
     fn reading(
         &self,
         item: &ItemStats,
@@ -798,31 +648,21 @@ impl Profile {
         None
     }
 
-    /// A number that changes when the rules do, and does not when only
-    /// the note or the name does.
-    ///
-    /// What this is for is noticing that the answers already written
-    /// down were reached under different rules -- including rules
-    /// edited while the client was not running, which is why it has to
-    /// be a fact about the content and not a counter in memory.
-    ///
-    /// Taken off the serialised rules rather than off a derived `Hash`,
-    /// because a rule holds floats and those do not implement it. It is
-    /// worked out when the rules change, never per frame.
+    /// Tells whether written answers were reached under these rules; note and name excluded.
+    /// A content hash, not a counter, so an edit made while the client was closed still counts.
+    /// JSON-hashed as rules hold floats (no `Hash`); computed when rules change, never per frame.
     pub fn fingerprint(&self) -> u64 {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
         serde_json::to_string(&self.rules)
             .unwrap_or_default()
             .hash(&mut h);
-        // The buy list decides the undecided: what a character stocks
-        // is never offered to a counter unless a rule said to
-        // (`ac_loot::sale::offer_to_vendor`).
+        // The buy list decides the undecided: stock is never offered to a counter unless a rule
+        // said to (`ac_loot::sale::offer_to_vendor`).
         serde_json::to_string(&self.buy)
             .unwrap_or_default()
             .hash(&mut h);
-        // Always and never are read before any rule, so they decide
-        // items as surely as the rules do.
+        // Always and never are read before any rule, so they decide items too.
         (&self.looting.always, &self.looting.never).hash(&mut h);
         h.finish()
     }
@@ -833,14 +673,8 @@ impl Profile {
         self.rules.iter().filter(|r| r.on).any(Rule::needs_id)
     }
 
-    /// The skills the rules switched on ask of the character reading
-    /// them (`Mine::Skill`, `Mine::Trained`), by id, each once and in
-    /// order.
-    ///
-    /// A party reads one profile, and what a rule lets one of them take
-    /// turns on nothing about it but these, its name and its level. So
-    /// these are what a character says about itself for another to judge
-    /// a body on its behalf.
+    /// Skill ids the switched-on rules ask of the reader, sorted and each once.
+    /// Rules turn only on these, name and level: what a member tells others to judge bodies for it.
     pub fn skills_asked(&self) -> Vec<u32> {
         let mut asked: Vec<u32> = self
             .rules
@@ -857,11 +691,8 @@ impl Profile {
         asked
     }
 
-    /// Whether anything these rules take is meant for one of a party in
-    /// particular rather than for whoever opens the body: a rule switched
-    /// on that takes what it claims and asks about a skill, or, while the
-    /// salvager salvages ([`Looting::salvage`]), one that salvages. Every
-    /// character has Salvaging, so a salvage rule asks it without saying.
+    /// Whether a rule that is on takes things for one member rather than whoever opens the body.
+    /// It asks a skill or, while [`Looting::salvage`], salvages: every character has Salvaging.
     pub fn sends_to_the_best(&self) -> bool {
         self.rules
             .iter()
@@ -896,8 +727,7 @@ impl Profile {
         names
     }
 
-    /// Read one. A profile that will not parse is an error rather than
-    /// an empty one: silently looting nothing is worse than saying so.
+    /// Read one; an unparsable profile is an error, not an empty one that silently loots nothing.
     pub fn load(dir: &Path, name: &str) -> std::io::Result<Profile> {
         let path = Self::path_of(dir, name);
         let text = std::fs::read_to_string(&path)?;
@@ -922,10 +752,7 @@ impl Profile {
 
 impl Profile {
     /// The counter this profile names for selling, if it names one.
-    ///
-    /// `Best` is not a name: it means "work it out", and so does a name
-    /// with nothing in it, which is what an editor leaves behind when
-    /// somebody picks "this counter" and then changes their mind.
+    /// A blank name, as an editor leaves after un-picking "this counter", means `Best` too.
     pub fn sell_to_named(&self) -> Option<&str> {
         match &self.sell_to {
             SellTo::Best => None,
@@ -933,13 +760,8 @@ impl Profile {
         }
     }
 
-    /// Whether this is something the character keeps stocked, and so
-    /// never sells.
-    ///
-    /// Membership of the buy list is itself the rule, and no rule in
-    /// the list above may override it. A player who writes "sell
-    /// anything worth under a thousand" has not said "sell my Peas",
-    /// and the client should not hear it that way.
+    /// Whether the character keeps this stocked, so no rule read at the counter may sell it.
+    /// "Sell anything worth under a thousand" has not said "sell my Peas".
     pub fn stocks(&self, name: &str) -> bool {
         self.buy
             .iter()
@@ -947,8 +769,7 @@ impl Profile {
             .any(|b| contains_fold(name, b.what.trim()))
     }
 
-    /// How many of a thing the buy list says to carry, 0 when it does
-    /// not mention it.
+    /// How many of a thing the buy list says to carry, 0 when it does not mention it.
     pub fn stocked_count(&self, what: &str) -> u32 {
         self.buy
             .iter()
@@ -958,9 +779,7 @@ impl Profile {
     }
 
     /// What is short, against what is carried: the shopping list.
-    ///
-    /// `held` answers how many of a thing are in the pack, by the same
-    /// name the counter lists it under.
+    /// `held` counts a thing in the pack by the name the counter lists it under.
     pub fn shortfall(&self, held: impl Fn(&str) -> u32) -> Vec<Short<'_>> {
         self.buy
             .iter()
@@ -979,14 +798,8 @@ impl Profile {
 }
 
 impl Profile {
-    /// A profile to start from: what a character would take if nobody
-    /// had told it anything.
-    ///
-    /// Ordered the way a profile should be -- the rules that need
-    /// nothing from the server first, so that most of a corpse is
-    /// settled before anything is identified -- and meant to be edited
-    /// rather than obeyed. Every rule in it is one a player would
-    /// recognise.
+    /// A profile to start from, meant to be edited rather than obeyed.
+    /// Rules needing no appraisal come first, so most of a corpse settles before any identify.
     pub fn starter() -> Profile {
         let word = |w: &str| Ask::Item(Term::Word(w.into()));
         let kind = |k: &str| Ask::Item(Term::Kind(k.into()));
@@ -1016,10 +829,8 @@ impl Profile {
                     keep_up_to: Some(4),
                     ..Default::default()
                 },
-                // Peas are what a run to town is paid for with, and
-                // they come first because a pea is a spell component by
-                // item type. The rule below would otherwise keep every
-                // one of them, which is what it used to do.
+                // Peas pay for the trip, and a pea is a spell component by item type,
+                // so this comes before the rule that keeps components.
                 Rule {
                     name: "peas to sell".into(),
                     action: LootAction::Sell,
@@ -1038,25 +849,21 @@ impl Profile {
                     all: vec![kind("gem"), num(NumKey::Value, Op::Ge, 100.0)],
                     ..Default::default()
                 },
-                // Salvage is judged on what it is made of and how well,
-                // both of which come with the item.
+                // Material and workmanship both come with the item, so no appraisal.
                 Rule {
                     name: "good salvage".into(),
                     action: LootAction::Salvage,
                     all: vec![kind("salvage"), num(NumKey::Workmanship, Op::Ge, 8.0)],
                     ..Default::default()
                 },
-                // Nothing below this is worth a slot, and saying so
-                // early keeps the rules under it from asking the server
-                // about junk.
+                // Early, so the rules below never ask the server about junk.
                 Rule {
                     name: "nothing cheap".into(),
                     action: LootAction::Skip,
                     all: vec![num(NumKey::Value, Op::Le, 250.0)],
                     ..Default::default()
                 },
-                // From here down the server has to be asked. Every one
-                // of these is about a thing worth a round trip.
+                // From here down the server is asked, each about a thing worth the round trip.
                 Rule {
                     name: "anything legendary".into(),
                     action: LootAction::Keep,
@@ -1088,22 +895,13 @@ impl Profile {
                     ..Default::default()
                 },
             ],
-            // What a character of any kind runs out of. A caster's
-            // components are scaled from the taper because that is what
-            // a cast actually burns; an archer's arrowheads and a
-            // healer's kits are named outright because their levels and
-            // elements are different items at different prices.
-            //
-            // Everything on this list is a thing the character uses, so
-            // nothing on it is ever offered to a counter -- which is the
-            // whole of the guard that used to be four separate ones.
+            // A caster's components scale from the taper, which every cast burns; kits go by name.
+            // Everything listed is used, so none reaches a counter unless its loot tag says sell.
             buy: vec![
                 Buy {
                     what: "Prismatic Taper".into(),
                     keep: 1000,
-                    // A quarter left is the old rule and a fair one: a
-                    // caster with two hundred and fifty tapers is not
-                    // in trouble, and one with two hundred is.
+                    // A quarter: a caster with 250 tapers is not in trouble yet, with 200 it is.
                     restock_at: Some(250),
                     from: None,
                     on: true,
@@ -1123,8 +921,7 @@ impl Profile {
     }
 }
 
-/// A name safe to use as a file name: what a player types, less the
-/// characters a path cannot hold.
+/// A name safe as a file name: what a player types, less the characters a path cannot hold.
 pub fn tidy_name(name: &str) -> String {
     let cleaned: String = name
         .trim()
@@ -1243,16 +1040,13 @@ mod tests {
             ..Default::default()
         };
         let was = p.fingerprint();
-        // Renaming it and writing prose about it changes no answer.
         p.note = "a much longer note about what this profile is for".into();
         p.name = "renamed".into();
         assert_eq!(p.fingerprint(), was);
-        // Switching a rule off does.
         p.rules[0].on = false;
         assert_ne!(p.fingerprint(), was);
         p.rules[0].on = true;
         assert_eq!(p.fingerprint(), was);
-        // So does what the rule asks, what it does, and its cap.
         p.rules[0].action = LootAction::Keep;
         assert_ne!(p.fingerprint(), was);
         p.rules[0].action = LootAction::Sell;
@@ -1260,8 +1054,7 @@ mod tests {
         assert_ne!(p.fingerprint(), was);
         p.rules[0].keep_up_to = None;
         assert_eq!(p.fingerprint(), was);
-        // The buy list is a rule too: what a character stocks is never
-        // offered to a counter.
+        // The buy list is a rule too: stock is never offered to a counter.
         p.buy.push(Buy {
             what: "Prismatic Taper".into(),
             keep: 1000,
@@ -1307,8 +1100,7 @@ mod tests {
 
     #[test]
     fn one_profile_reads_differently_for_each_of_a_group() {
-        // The party shares a profile. Only the one who can mend a
-        // broken key carries one home.
+        // The party shares a profile; only the one who can mend a broken key carries one home.
         let profile = Profile {
             name: "group".into(),
             note: String::new(),
@@ -1338,8 +1130,7 @@ mod tests {
 
     #[test]
     fn only_the_skills_a_rule_asks_of_me_are_named() {
-        // What a character says about itself for the others to judge a
-        // body by: the skills a rule turns on, and no more.
+        // A character tells the others only the skills its rules turn on, to judge a body for it.
         let lockpick = |level| {
             Ask::Me(Mine::Skill {
                 skill: skill::LOCKPICK,
@@ -1391,8 +1182,7 @@ mod tests {
             profile.skills_asked(),
             vec![skill::LOCKPICK, skill::SALVAGING]
         );
-        // The starter asks nothing of the character, so a party reading
-        // it says nothing more about itself than it did.
+        // The starter asks nothing of the character, so a party reading it shares nothing more.
         assert!(Profile::starter().skills_asked().is_empty());
     }
 
@@ -1446,12 +1236,10 @@ mod tests {
             p.looting.salvage = salvaging;
             p
         };
-        // Nothing asked of anyone, and nobody salvaging: nothing is meant
-        // for anyone in particular.
+        // No skill asked and nobody salvaging: nothing is meant for anyone in particular.
         assert!(!group(vec![sell.clone(), salvage.clone()], false).sends_to_the_best());
         // A salvage rule, while the salvager salvages.
         assert!(group(vec![sell.clone(), salvage.clone()], true).sends_to_the_best());
-        // A skill asked about.
         assert!(group(vec![sell.clone(), keys.clone()], false).sends_to_the_best());
         // But not by a rule switched off, or one that leaves what it claims.
         let mut off = keys.clone();
@@ -1537,12 +1325,10 @@ mod tests {
             ..Default::default()
         };
         let me = me(50, &[]);
-        // Not armour: judged and dismissed without asking the server,
-        // because the cheap half of the rule already fails.
+        // Not armour: the cheap half already fails, so the server is never asked.
         let gem = item("Ruby", item_type::GEM, 9_000);
         assert_eq!(profile.judge_test(&gem, &me, "Aldric", 0), Verdict::None);
-        // Armour: the rest of the rule cannot be judged until the
-        // server has been asked.
+        // Armour: the rest of the rule waits for the server.
         let mut plate = item("Platemail Hauberk", item_type::ARMOR, 4_000);
         assert_eq!(
             profile.judge_test(&plate, &me, "Aldric", 0),
@@ -1582,11 +1368,8 @@ mod tests {
 
     #[test]
     fn any_property_the_server_sends_can_be_asked_about() {
-        // The set a piece of armour belongs to: an int the client has
-        // no field of its own for, reached by the server's own number.
-        // The server calls it EquipmentSetId; the looter players are
-        // used to calls it ArmorSetId, and the editor shows the
-        // server's name because that is what the number means.
+        // Int 265 is the armour set: the server's EquipmentSetId, other looters' ArmorSetId.
+        // The editor shows the server's name, because that is what the number means.
         const ARMOR_SET_ID: u32 = 265;
         let profile = Profile {
             name: "sets".into(),
@@ -1608,7 +1391,6 @@ mod tests {
         plate.appraised = true;
         // No identify to read: nothing to say yet.
         assert_eq!(profile.judge(&plate, None, &me, "Aldric", 0), Verdict::None);
-        // Not part of a set.
         let plain = Appraisal {
             ints: vec![(19, 4_000)],
             ..Default::default()
@@ -1617,7 +1399,6 @@ mod tests {
             profile.judge(&plate, Some(&plain), &me, "Aldric", 0),
             Verdict::None
         );
-        // Part of one.
         let set = Appraisal {
             ints: vec![(ARMOR_SET_ID, 12)],
             ..Default::default()
@@ -1633,8 +1414,7 @@ mod tests {
 
     #[test]
     fn a_pattern_catches_what_a_list_of_names_cannot() {
-        // Any legendary cantrip, whatever it is of. No list of spell
-        // names keeps up with that; a pattern does.
+        // Any legendary cantrip, whatever it is of: no list of spell names keeps up.
         let profile = Profile {
             name: "legendaries".into(),
             note: String::new(),
@@ -1658,20 +1438,17 @@ mod tests {
         ));
         ring.spells = vec!["Major Strength".into(), "Blood Drinker".into()];
         assert_eq!(profile.judge_test(&ring, &me, "Aldric", 0), Verdict::None);
-        // "Legendary" alone would match "Legendary Armor Ineptitude"
-        // too; anchoring is the point of using a pattern.
+        // Anchoring is the point of a pattern: "Legendary" mid-name is not a legendary cantrip.
         ring.spells = vec!["Surge of Legendary Regret".into()];
         assert_eq!(profile.judge_test(&ring, &me, "Aldric", 0), Verdict::None);
 
-        // Saying "not Covenant" plainly, rather than as a lookahead
-        // that Rust's patterns do not have.
+        // "Not Covenant" said plainly, as Rust's regex has no lookahead.
         assert!(TextOp::HasNot.holds("Platemail Hauberk", "Covenant"));
         assert!(!TextOp::HasNot.holds("Covenant Hauberk", "covenant"));
         // Case is ignored, both ways.
         assert!(TextOp::Has.holds("Platemail Hauberk", "HAUBERK"));
         assert!(TextOp::Like.holds("Legendary Focus", "^legendary"));
-        // A pattern that will not compile takes nothing rather than
-        // everything: a typo should not empty the corpse into the pack.
+        // An uncompilable pattern takes nothing: a typo must not empty the corpse into the pack.
         assert!(!TextOp::Like.holds("anything", "("));
         assert!(pattern_error("(").is_some());
         assert!(pattern_error("^Legendary ").is_none());
@@ -1679,12 +1456,7 @@ mod tests {
 
     #[test]
     fn what_the_character_buys_it_never_sells() {
-        // A rule that says "sell anything cheap" and a buy list that
-        // says "keep a thousand tapers" are not in conflict: the buy
-        // list wins, because a thing you go to town to buy is not a
-        // thing you go to town to sell. This one line replaces a guard
-        // that used to live in four places and was missing from the
-        // profile path in all of them.
+        // A thing bought in town is not sold there: the buy list beats "sell anything cheap".
         let p = Profile::starter();
         assert!(p.stocks("Prismatic Taper"));
         assert!(p.stocks("Healing Kit"), "by the name the counter uses");
@@ -1733,20 +1505,14 @@ mod tests {
 
     #[test]
     fn the_suit_being_built_is_not_sold_for_pocket_change() {
-        // Plain armour off a drudge is trash and goes. The same piece
-        // with a cantrip on it is a piece of a suit somebody is
-        // building, and selling it for its face value is the most
-        // expensive mistake this whole profile can make -- which is why
-        // the cantrip rules sit above the one that sends things to the
-        // counter.
+        // A cantrip marks a piece of a suit being built, so the starter's cantrip rules sit above
+        // the rule that sells to the counter: selling it at face value is the costliest mistake.
         let p = Profile::starter();
         let me = me(50, &[]);
 
         let mut hauberk = item("Hauberk", item_type::ARMOR, 900);
         hauberk.spells = vec!["Epic Life Magic Aptitude".into()];
-        // What is on a piece is not known until the server is asked, so
-        // the profile says so rather than guessing -- and a corpse that
-        // holds one is worth the identify it costs.
+        // Spells are unknown until the server is asked, so the profile asks rather than guesses.
         assert!(
             matches!(
                 p.judge_test(&hauberk, &me, "Aldric", 0),
@@ -1785,9 +1551,7 @@ mod tests {
 
     #[test]
     fn a_line_is_only_urgent_once_it_is_low() {
-        // Being one short is not a reason to walk to town. Without a
-        // low mark every line was urgent the moment it was not full,
-        // and a caster nine hundred tapers from empty went shopping.
+        // Without a low mark one short is urgent, and a caster holding 900 tapers walks to town.
         let mut p = Profile::starter();
         p.buy = vec![Buy {
             what: "Prismatic Taper".into(),
@@ -1810,9 +1574,6 @@ mod tests {
 
     #[test]
     fn a_line_with_no_mark_falls_back_to_a_quarter() {
-        // The rule the old `ammo_keep` and `tapers_keep` used, kept as
-        // the default so a line written without a number behaves the
-        // way those settings did.
         let quarter = Buy {
             what: "Arrow".into(),
             keep: 250,
@@ -1831,8 +1592,7 @@ mod tests {
 
     #[test]
     fn a_want_can_name_its_own_counter() {
-        // Components from an archmage, kits from a healer, arrowheads
-        // from a bowyer: one character, three shelves.
+        // Components from an archmage, arrowheads from a bowyer: one character, several shelves.
         let mut p = Profile::starter();
         p.buy = vec![
             Buy {
@@ -1865,17 +1625,14 @@ mod tests {
         p.sell_to = SellTo::Named("  Arcanum Broker  ".into());
         assert_eq!(p.sell_to_named(), Some("Arcanum Broker"), "trimmed");
 
-        // What an editor leaves behind when somebody picks "this
-        // counter" and then changes their mind: a name with nothing in
-        // it means the same as not having named one.
+        // A blank name, as an editor leaves after un-picking "this counter", means none was named.
         p.sell_to = SellTo::Named("   ".into());
         assert_eq!(p.sell_to_named(), None);
     }
 
     #[test]
     fn an_older_profile_file_still_reads() {
-        // Files written before there was a buy list or a counter must
-        // still load, and get the empty list and the default counter.
+        // A file with no `buy` or `sell_to` must load with an empty list and the default counter.
         let text = r#"{"name":"Old","note":"","rules":[]}"#;
         let p: Profile = serde_json::from_str(text).unwrap();
         assert_eq!(p.name, "Old");
@@ -1907,22 +1664,18 @@ mod tests {
         ));
         assert!(keeps("Prismatic Taper", item_type::SPELL_COMPONENTS, 5));
         assert!(sells("Copper Pea", item_type::MISC, 40));
-        // A pea is a spell component by item type, and is still sold:
-        // the rule that says so comes before the one that keeps
-        // components, because peas are what the trip is paid for.
+        // A pea is a spell component by item type yet sold: its rule comes before the one that
+        // keeps components, because peas pay for the trip.
         assert!(sells("Pyreal Pea", item_type::SPELL_COMPONENTS, 50_000));
         // "pea" is a word of its own: a Spear is not one.
         assert!(!sells("Spear", item_type::MELEE_WEAPON, 40));
         assert!(sells("Ruby", item_type::GEM, 9_000));
-        // Junk is dismissed without the server being asked about it,
-        // and the rule that dismisses it comes before every rule that
-        // would have needed asking.
+        // Junk is skipped by a rule placed before every rule that needs the server.
         let junk = item("Quartz", item_type::GEM, 20);
         assert!(matches!(
             p.judge_test(&junk, &me, "Aldric", 0),
             Verdict::Decided(LootAction::Skip, _)
         ));
-        // A stack cap holds.
         let kit = item("Healing Kit", item_type::MISC, 100);
         assert!(matches!(
             p.judge_test(&kit, &me, "Aldric", 0),
@@ -1932,23 +1685,19 @@ mod tests {
             p.judge_test(&kit, &me, "Aldric", 4),
             Verdict::Decided(LootAction::Keep, _)
         ));
-        // Something dear enough to be worth a look is looked at rather
-        // than guessed about.
+        // Something dear enough to be worth a look is looked at rather than guessed about.
         let plate = item("Platemail Hauberk", item_type::ARMOR, 4_000);
         assert!(matches!(
             p.judge_test(&plate, &me, "Aldric", 0),
             Verdict::NeedsId(_)
         ));
-        // And the profile does need the server sometimes, which is the
-        // point of the ordering rather than a fault in it.
+        // Needing the server sometimes is the point of the ordering, not a fault in it.
         assert!(p.needs_id());
     }
 
     #[test]
     fn the_cheap_rules_settle_most_of_a_corpse_without_asking_the_server() {
-        // The shape of a profile a player would actually write: the
-        // dear things first, judged on worth alone, and the fussy rule
-        // that needs the numbers last.
+        // The shape players write: rules on cheap fields first, the one needing an appraisal last.
         let profile = Profile {
             name: "tuned".into(),
             note: String::new(),
@@ -1987,11 +1736,9 @@ mod tests {
             .iter()
             .map(|it| profile.judge_test(it, &me, "Aldric", 0))
             .collect();
-        // The pea is claimed by the first rule and the quartz by the
-        // second, both without the server being asked anything.
+        // The pea and the quartz are decided without the server being asked anything.
         assert!(matches!(verdicts[0], Verdict::Decided(LootAction::Sell, _)));
         assert!(matches!(verdicts[1], Verdict::Decided(LootAction::Skip, _)));
-        // Only the hauberk needs looking over.
         assert!(matches!(verdicts[2], Verdict::NeedsId(_)));
         let to_look_over = verdicts
             .iter()
@@ -2007,8 +1754,7 @@ mod tests {
         let library = Library::default();
         library.open(&dir);
 
-        // A profile nobody has seen is written straight away, so that
-        // the file exists to be found and shared.
+        // A new profile is written at once, so the file exists to be found and shared.
         let mut profile = Profile {
             name: "notes".into(),
             note: "first".into(),
@@ -2022,14 +1768,12 @@ mod tests {
         profile.note = "a much longer note, typed a letter at a time".into();
         library.put(profile.clone()).expect("held");
         assert_eq!(library.get("notes").expect("live").note, profile.note);
-        // ...and has not gone to the disk yet, which is the point: a
-        // file write per keystroke is what this avoids.
+        // ...but not yet on disk: a file write per keystroke is what this avoids.
         assert_eq!(
             Profile::load(&dir, "notes").expect("still there").note,
             "first"
         );
 
-        // It catches up.
         library.flush_all();
         assert_eq!(
             Profile::load(&dir, "notes").expect("caught up").note,
@@ -2073,22 +1817,18 @@ mod tests {
             Some(Verdict::Decided(LootAction::Sell, _))
         ));
 
-        // The player switches the rule off. Nobody re-reads anything
-        // and nobody is told; the next item judged is judged anew.
+        // Switched off: nobody re-reads or is told; the next item judged uses the new rules.
         profile.rules[0].on = false;
         library.put(profile).expect("saved again");
         assert_eq!(look(), Some(Verdict::None));
 
-        // And it is on the disk that way, for the next time the app
-        // starts and for whoever it is sent to -- once the writing has
-        // caught up with the editing.
+        // On disk that way once writing catches up, for the next start and whoever gets the file.
         library.flush_all();
         assert_eq!(library.reload(), 1);
         assert_eq!(look(), Some(Verdict::None));
         assert_eq!(library.names(), vec!["party".to_string()]);
 
-        // A character told to use no profile has none, which is not an
-        // error.
+        // A character told to use no profile has none, which is not an error.
         assert!(library.get("").is_none());
         assert!(library.get("no such profile").is_none());
 
@@ -2124,35 +1864,21 @@ mod tests {
     }
 }
 
-/// Every profile in one place, shared by every character in the
-/// process.
-///
-/// A player toggling a rule expects it to take effect everywhere at
-/// once -- on the character they are watching and on the eleven others
-/// working the same ground -- so nothing keeps a copy. A profile is
-/// looked up by name each time it is used; saving one replaces it here
-/// and the next item judged, by anybody, is judged by the new rules.
+/// Every profile in one place, shared by every character in the process.
+/// Nothing keeps a copy: each use looks a profile up by name, so an edit reaches everyone at once.
 #[derive(Debug, Default)]
 pub struct Library {
     dir: std::sync::RwLock<PathBuf>,
     by_name: std::sync::RwLock<std::collections::BTreeMap<String, std::sync::Arc<Profile>>>,
-    /// Profiles changed but not yet written, and when each was last
-    /// written. See [`Library::put`].
+    /// Profiles changed but not yet written, and since when (see `put`).
     unwritten: std::sync::Mutex<std::collections::BTreeMap<String, std::time::Instant>>,
 }
 
-/// How long a profile may sit changed-but-unwritten.
-///
-/// Being live and being saved are different things. An edit has to
-/// reach every character at once, which is memory and costs nothing;
-/// it does not have to reach the disk at once, and writing the file on
-/// every keystroke of a rule's name would. So the shelf is updated the
-/// moment anything changes and the file follows a moment later.
+/// How long an edit waits before its file is written: no file write per keystroke (guess).
 const WRITE_AFTER: std::time::Duration = std::time::Duration::from_millis(750);
 
 impl Library {
-    /// The one every session shares. A test that wants its own makes
-    /// one with [`Library::default`].
+    /// The one every session shares; a test makes its own with `Library::default()`.
     pub fn shared() -> std::sync::Arc<Library> {
         static SHARED: std::sync::OnceLock<std::sync::Arc<Library>> = std::sync::OnceLock::new();
         SHARED.get_or_init(Default::default).clone()
@@ -2168,9 +1894,8 @@ impl Library {
         self.dir.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
-    /// Read the shelf, and put a starter profile on it when it is
-    /// bare. A player opening the editor for the first time should
-    /// find something to read and change rather than a blank page.
+    /// Read the shelf, adding the starter profile when it is bare,
+    /// so a player opening the editor first finds something to change rather than a blank page.
     pub fn open_or_start(&self, dir: impl Into<PathBuf>) -> usize {
         let n = self.open(dir);
         if n > 0 {
@@ -2185,9 +1910,8 @@ impl Library {
         }
     }
 
-    /// Read every profile in the directory, replacing what is held.
-    /// Returns how many were read. One that will not parse is logged
-    /// and left out rather than taking the rest down with it.
+    /// Read every profile in the directory, replacing what is held; returns how many were read.
+    /// One that will not parse is logged and left out rather than taking the rest down with it.
     pub fn reload(&self) -> usize {
         let dir = self.dir();
         let mut found = std::collections::BTreeMap::new();
@@ -2204,9 +1928,7 @@ impl Library {
         n
     }
 
-    /// The profile of this name, if there is one. An empty name is no
-    /// profile rather than an error: that is a character told to use
-    /// none.
+    /// The profile of this name; an empty name is a character told to use none, not an error.
     pub fn get(&self, name: &str) -> Option<std::sync::Arc<Profile>> {
         let name = name.trim();
         if name.is_empty() {
@@ -2229,15 +1951,8 @@ impl Library {
             .collect()
     }
 
-    /// Put a profile in front of every character at once, and write it
-    /// out shortly afterwards.
-    ///
-    /// This is what an editor calls when anything changes, a rule being
-    /// switched off included, so it is called on every keystroke of a
-    /// rule's name. The change is live immediately -- that is the point
-    /// of it -- but the file is left for [`Library::flush`] a moment
-    /// later, unless the profile is new, in which case it is written at
-    /// once so that the file exists.
+    /// Make a profile live for every character at once; an editor calls this on every keystroke.
+    /// A new profile is written at once so its file exists; others wait for [`Library::flush`].
     pub fn put(&self, profile: Profile) -> std::io::Result<()> {
         let name = profile.name.clone();
         let is_new = !self
@@ -2260,8 +1975,8 @@ impl Library {
         Ok(())
     }
 
-    /// Write out anything changed and left long enough. Called once a
-    /// frame; almost always a lock and a look at the clock.
+    /// Write out anything changed at least `WRITE_AFTER` ago.
+    /// Called once a frame, so it is almost always a lock and a look at the clock.
     pub fn flush(&self) {
         let due: Vec<String> = {
             let waiting = self.unwritten.lock().unwrap_or_else(|e| e.into_inner());
@@ -2282,8 +1997,7 @@ impl Library {
         }
     }
 
-    /// Write everything outstanding, whatever the clock says: for
-    /// shutting down, where a moment later never comes.
+    /// Write everything outstanding now, for shutting down, where a moment later never comes.
     pub fn flush_all(&self) {
         let due: Vec<String> = self
             .unwritten
