@@ -1,0 +1,10 @@
+pub const EVENT: u16 = 1;
+pub const CONTROL: u16 = 2;
+pub const WEENIE: u16 = 3;
+pub const LOGIN: u16 = 4;
+pub const DATABASE: u16 = 5;
+pub const SECURE_CONTROL: u16 = 6;
+pub const SECURE_WEENIE: u16 = 7;
+pub const SECURE_LOGIN: u16 = 8;
+pub const UI: u16 = 9;
+pub const SMARTBOX: u16 = 10;

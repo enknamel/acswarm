@@ -1,0 +1,14 @@
+pub const INVALID: u32 = 0x0;
+pub const READY: u32 = 0x4100_0003;
+pub const WALK_FORWARD: u32 = 0x4500_0005;
+pub const WALK_BACKWARDS: u32 = 0x4500_0006;
+pub const RUN_FORWARD: u32 = 0x4400_0007;
+pub const TURN_RIGHT: u32 = 0x6500_000D;
+pub const TURN_LEFT: u32 = 0x6500_000E;
+pub const SIDE_STEP_RIGHT: u32 = 0x6500_000F;
+pub const SIDE_STEP_LEFT: u32 = 0x6500_0010;
+pub const STANCE_HAND_COMBAT: u32 = 0x8000_003C;
+pub const STANCE_NON_COMBAT: u32 = 0x8000_003D;
+pub const STANCE_SWORD_COMBAT: u32 = 0x8000_003E;
+pub const HOLD_KEY_NONE: u32 = 1;
+pub const HOLD_KEY_RUN: u32 = 2;
