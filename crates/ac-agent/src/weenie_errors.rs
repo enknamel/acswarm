@@ -552,17 +552,26 @@ mod tests {
 
     #[test]
     fn every_fellowship_refusal_ace_sends_as_a_code_has_text() {
-        // The refusals founding and recruiting can meet as codes (ACE
-        // `Entity/Fellowship.cs`, `Player_Fellowship.cs`); the two that
-        // come as chat are read by their words instead.
-        for code in [
-            0x041d, 0x041e, 0x0519, 0x0528, 0x050f, 0x058b, 0x04db, 0x04dc,
-        ] {
+        // The refusals a recruit can meet as a code, the moment it is
+        // sent (ACE `Player_Fellowship.cs` `FellowshipRecruit`,
+        // `Entity/Fellowship.cs` `AddFellowshipMember`): ignoring
+        // requests (moot while `TEAM_OPTIONS` keeps accepting on), not
+        // the leader, full, locked (with the name), and an Olthoi. The
+        // two that come as chat -- busy, already a member -- are read by
+        // their words instead.
+        for code in [0x0417, 0x041d, 0x041e, 0x0519, 0x0528, 0x058b] {
             assert!(text(code).is_some(), "no text for {code:#06x}");
         }
         assert_eq!(
             text_with(0x0518, "Bob").as_deref(),
             Some("Locked fellowship cannot recruit Bob")
         );
+        // And the two that come after the invitee has answered
+        // (`AddConfirmedMember`, `ConfirmationManager`): declined, and
+        // timed out. Not refusals of the recruit, but heard by the same
+        // inviter.
+        for code in [0x04db, 0x04dc] {
+            assert!(text(code).is_some(), "no text for {code:#06x}");
+        }
     }
 }

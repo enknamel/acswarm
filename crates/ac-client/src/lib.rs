@@ -1996,6 +1996,11 @@ impl Client {
                         .unwrap_or(0);
                     tracing::info!("weenie error {code:#x}");
                     self.recall_error(code);
+                    // A full fellowship is refused by code, and names
+                    // nobody: it is about whoever was invited last.
+                    if code == autoplay::FELLOWSHIP_FULL {
+                        self.autoplay.hear_fellowship_full(Instant::now());
+                    }
                     // The informational ones (teleported, turbine chat) stay
                     // in the log; refusals reach the chat.
                     match weenie_errors::text(code) {

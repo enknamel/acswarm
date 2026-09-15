@@ -248,21 +248,27 @@ default; both in the Autoplay panel's Team section, or
   time, half a second apart, so a party of nine is gathered in a few
   seconds rather than in nine five-second turns; only a character that
   did not answer waits (five seconds) before being asked again, and one
-  the server turned down in words ("X is busy.", "X is already a member
-  of a Fellowship.") waits ten seconds, doubling each time, with a line
-  in the log.
+  the server turned down in words waits ten seconds before the next
+  ask -- the same ten every time for "X is busy.", which a use or a
+  cast is over in; doubling for "X is already a member of a
+  Fellowship." -- with a line in the log. A fellowship holds nine, the
+  leader counted; a team of ten leaves one outside, and the log says so
+  once rather than asking it every five seconds.
 
 The leader founds the fellowship only once its roster has stood
 unchanged for a full board round (about three quarters of a second).
 Until then a session that has just come onto the team has heard nobody
 and leads a roster of one, and nine sessions coming on in the same tick
 once founded two fellowships between them, with the fleet split and
-neither half allowed the other's bodies. Should two exist anyway -- a
-race that slipped through, or a session that founded alone before the
-rest arrived -- the leader whose name does not sort first disbands the
-one it founded, once it has seen the rightful leader in a fellowship of
-its own for a few seconds, and is recruited along with its members. A
-fellowship a session did not found itself is never disbanded.
+neither half allowed the other's bodies. Whoever leads a fellowship
+brings the team's mates into it -- the team's leader among them, when
+it came on after a mate had founded, or came back from a disconnect to
+find the server had handed its fellowship to whoever was left. Should
+two exist anyway -- a race that slipped through -- the leader whose
+name does not sort first disbands the one it founded, once it has seen
+the rightful leader in a fellowship of its own for a few seconds, and
+is recruited along with its members. A fellowship a session did not
+found itself is never disbanded.
 
 `scripts/examples/follow.rhai` sets a follower up with one `/follow`.
 Every process has to be on the bus (`--bus`) for the sessions to hear

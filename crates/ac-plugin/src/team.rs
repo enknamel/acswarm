@@ -368,7 +368,7 @@ pub fn describe(client: &ac_client::Client, session: usize) -> Option<Mate> {
         following: cfg.enabled && cfg.follow && !cfg.lead,
         salvaging: client.salvaging(),
         has_ust: client.salvage_tool().is_some(),
-        supplies: client.supplies(&client.autoplay.config.growth),
+        supplies: client.supplies(&client.autoplay.config.growth, Instant::now()),
         ground: client.hunting_ground(),
         on_its_way: client.on_its_way(),
         skills: client.skills_its_rules_ask_about(),
