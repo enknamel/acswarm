@@ -198,7 +198,7 @@ impl Ledger {
         self.dirty
     }
 
-    /// Guids tagged Sell whose last refusal is older than [`TRY_AGAIN_AFTER`]; `now` in Unix seconds.
+    /// Guids tagged Sell, less any refused inside [`TRY_AGAIN_AFTER`]; `now` in Unix seconds.
     pub fn for_sale(&self, now: u64) -> Vec<u32> {
         self.with(LootAction::Sell, now)
     }
