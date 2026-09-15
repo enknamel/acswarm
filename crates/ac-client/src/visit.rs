@@ -11,7 +11,7 @@
 //! A visit carries on from there. Far away, the journey is made the way
 //! any journey is (portals, recalls, gems). Within walking distance the
 //! last stretch goes to the steering with her real height
-//! ([`Client::head_toward`]), which takes the character through the
+//! (`Client::head_toward`), which takes the character through the
 //! doorway and up the stairs. Only once the character stands on her
 //! floor, close by, is she used.
 //!

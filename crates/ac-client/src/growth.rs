@@ -4,7 +4,7 @@
 //! and a character that grows with the experience it earns.
 //!
 //! Three rules. The first runs every tick as housekeeping (see
-//! [`Client::autoplay_spend_xp`]); the other two when nothing more
+//! `Client::autoplay_spend_xp`); the other two when nothing more
 //! pressing is going on (see [`Client::autoplay_grow`]):
 //!
 //! 1. **Spend experience.** The unassigned pool is spent the way a
@@ -206,7 +206,7 @@ pub struct Growth {
     /// Loot taken for a counter is reason enough for a run to town on
     /// its own -- the pack need not be full nor a supply short -- once
     /// it is worth this much at face value, in pyreals. 0 turns the
-    /// rule off. See [`worth_a_sale_run`].
+    /// rule off. See `worth_a_sale_run`.
     pub sell_run_value: u32,
     /// The same, once this many things are being carried for a
     /// counter, whatever they are worth: they are slots as well as
@@ -509,7 +509,7 @@ impl Raise {
 /// happened to be the best buy when it came in.
 ///
 /// So the whole pool is spent on paper exactly as it would be a rank at a
-/// time (see [`plan`]), and the best buy of the stats that paper run
+/// time (see `plan`), and the best buy of the stats that paper run
 /// raises is given the ranks it gives it, no more. No stat goes past the
 /// rank buying one at a time would have left it at; each of the others is
 /// bought up to its own in a message of its own when its turn comes. A
@@ -528,7 +528,7 @@ impl Raise {
 /// up to a hundred million, until Self, Health and Mana came out of the
 /// fight ninety ranks short.
 ///
-/// A pool worth fewer than [`BATCH_FROM`] of the chosen stat's next rank
+/// A pool worth fewer than `BATCH_FROM` of the chosen stat's next rank
 /// buys the one rank, as it always did: what a kill brings in goes a rank
 /// a message. A batch never goes past the top rank (ACE refuses an amount
 /// past the experience left to the top outright, rather than trimming
@@ -1790,7 +1790,7 @@ impl Client {
     ///
     /// Why it is walking comes from the growth rules' errands, not from
     /// [`Client::traveling`], which says a journey is under way and nothing
-    /// about why. The patrol and the roam ([`Client::grow_hunt`]) travel
+    /// about why. The patrol and the roam (`Client::grow_hunt`) travel
     /// too, about the very ground the character came for, so a rule that
     /// read `traveling` alone would have a character stand in its own
     /// hunting ground refusing to fight. Both set off and return before
@@ -1806,7 +1806,7 @@ impl Client {
     /// the monster standing over it. `run` spans the counters as well,
     /// where there is no road. A walk broken off by a corpse or a fight is
     /// still the walk, since its errand takes it up again (see
-    /// [`Client::journey_broken_off`]), and so is stepping out of a shop
+    /// `Client::journey_broken_off`), and so is stepping out of a shop
     /// before it.
     ///
     /// A follower is on its leader's way. It keeps up through the follow
@@ -1815,7 +1815,7 @@ impl Client {
     /// was fetched back and turned to fight again, and the party came apart
     /// on the road. Each character says on the board whether it is on its
     /// way (`Mate::on_its_way`), which is also how the party stops together
-    /// for what attacks any of it (see [`Client::passing_by`]).
+    /// for what attacks any of it (see `Client::passing_by`).
     ///
     /// And a road is a road whoever planned it. The errands are the growth
     /// rules' own, so a journey a script asked for, or the walk to the
@@ -1825,7 +1825,7 @@ impl Client {
     /// fights in a hundred and forty seconds, most of them picked by the
     /// party, on a walk of forty. Every journey says whether it is a road
     /// or a walk about the ground the character is hunting (see
-    /// [`Client::travel_about`]), and the patrol, the roam and a
+    /// `Client::travel_about`), and the patrol, the roam and a
     /// follower's own catching up are the only walks about the ground.
     pub fn on_its_way(&self) -> bool {
         let st = &self.autoplay.growth;
@@ -3518,7 +3518,7 @@ impl Client {
     }
 
     /// The counter the loot profile names for selling, if it names
-    /// one. The policy is [`Profile::sell_to_named`]; this is the
+    /// one. The policy is [`Profile::sell_to_named`](ac_loot::profile::Profile::sell_to_named); this is the
     /// lookup.
     fn sell_to_named(&self) -> Option<String> {
         let loot = &self.autoplay.config.loot;
@@ -4137,7 +4137,7 @@ impl Client {
     /// and towards the server's wall at three times (`loot_room` has the
     /// arithmetic and the whole story).
     ///
-    /// This is the working limit, not the server's. [`burden_room`] is
+    /// This is the working limit, not the server's. [`burden_room`](Self::burden_room) is
     /// the wall -- what the server will still accept -- and a character
     /// that hunts up to the wall cannot loot, cannot merge stacks and
     /// can barely walk.
@@ -4159,7 +4159,7 @@ impl Client {
     ///
     /// Having had enough is not only having no room at all: it is having
     /// less room than the lightest thing the looting last left on a body
-    /// still lying about (see [`had_enough`]).
+    /// still lying about (see `had_enough`).
     pub fn laden(&self, cfg: &Growth) -> bool {
         let (carried, capacity) = self.burden();
         if capacity == 0 {

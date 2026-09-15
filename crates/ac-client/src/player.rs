@@ -1123,7 +1123,7 @@ impl Player {
     /// `block`'s geometry runs off an edge with nothing under it before
     /// anything solid stops it, or ends under a `to` standing a storey up
     /// (see `nav::Ground::drops_along`). A floor within the depth a fall
-    /// is looked for ([`FALL_SEARCH`]) is where the walk comes down, and
+    /// is looked for (`FALL_SEARCH`) is where the walk comes down, and
     /// it goes on from there. The steering asks this before it leans on
     /// whatever is in the way: leaning on a wall gets nowhere, leaning
     /// over a ledge lands on the floor below it, and leaning over the

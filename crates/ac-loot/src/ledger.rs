@@ -17,7 +17,7 @@
 //!
 //! * **A freed id comes back.** Six hours later from the recycle queue,
 //!   or immediately after a restart out of the sequence gaps. So an
-//!   entry is kept only while the thing is still held ([`forget_gone`])
+//!   entry is kept only while the thing is still held ([`forget_gone`](Ledger::forget_gone))
 //!   and only applies to an item of the same kind ([`Ledger::of`]).
 //! * **Stacks split and merge.** Splitting a stack makes a *new*
 //!   object with a new id, and merging destroys one. A split half

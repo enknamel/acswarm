@@ -739,7 +739,7 @@ pub struct Buffs {
     /// and otherwise a buff that has actually run out still goes back
     /// up while one with time left on it waits for the fight to end
     /// rather than costing the character its weapon for a tick (see
-    /// [`buff_within`]).
+    /// `buff_within`).
     pub out_of_combat_only: bool,
     /// Keep this fraction of mana back from buffing, for healing and
     /// fighting. A character that spends its last point on Quickness
@@ -1342,7 +1342,7 @@ pub struct Mate {
     /// The bodies it shut lately as emptied, and what each is for the
     /// others (see [`Shut`], [`Autoplay::shuts_to_say`]).
     pub shut: Vec<Shut>,
-    /// How many bodies it opened first lately, within [`DEAL_WINDOW`]:
+    /// How many bodies it opened first lately, within `DEAL_WINDOW`:
     /// its turns at the bodies (see [`TeamView::opens_first`]). Going back
     /// for what one of the others shut first and left for it is no turn.
     pub opened_first: u16,
@@ -1353,7 +1353,7 @@ pub struct Mate {
     /// loot profile never came, and the salvage left for it rotted.
     pub opens_bodies: bool,
     /// The names of what has attacked it lately (see
-    /// [`Autoplay::attacked_by`]): what the leader's plan reads to give
+    /// `Autoplay::attacked_by`): what the leader's plan reads to give
     /// it the creature that is on it rather than the party's.
     pub hit_by: Vec<String>,
 }
@@ -1363,7 +1363,7 @@ pub struct Mate {
 ///
 /// Every body shut as emptied is said, whomever it is done for, so that
 /// the others know who has shut it: nothing on it is sent back to one of
-/// those (see [`Autoplay::may_be_sent`]), and going back to it is no turn.
+/// those (see `Autoplay::may_be_sent`), and going back to it is no turn.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Shut {
@@ -1979,7 +1979,7 @@ pub struct TeamView {
     /// What this character said about itself as the view was made (see
     /// `ac_plugin::team::describe`): what the others read it by, and so
     /// what the turns at a newly fallen body read it by too (see
-    /// [`Autoplay::ours_to_open`]). `None` in a view nobody said anything
+    /// `Autoplay::ours_to_open`). `None` in a view nobody said anything
     /// into.
     pub me: Option<Mate>,
     /// The roster behind this view has stood unchanged for a full board
@@ -2029,7 +2029,7 @@ impl TeamView {
     /// bodies 1,386 times, against 2.75 times each for one character
     /// hunting alone.
     ///
-    /// A claim goes stale ([`CLAIM_STALE`]): one that never did would
+    /// A claim goes stale (`CLAIM_STALE`): one that never did would
     /// let a claimant that stalled lock a body for its whole life. One
     /// that has died is dropped at once rather than waited out: its
     /// client keeps saying what it was working, and the same board row
@@ -2091,14 +2091,14 @@ impl TeamView {
     /// not fighting, and with room in its pack. With nobody free in reach
     /// it is ours to walk to, as it is everyone's, since standing off from
     /// a body nobody will open leaves it lying. And the turn only holds
-    /// for the first second ([`CLAIM_SETTLE`]): one dealt a body that does
+    /// for the first second (`CLAIM_SETTLE`): one dealt a body that does
     /// not claim it by then loses it to whoever is free first.
     ///
     /// That only holds while every session judges the same candidates,
     /// so this character passes the same tests as the others, reach among
     /// them. A body is owed to a character out to the fight radius when
     /// one of its own kills fell there, which is further than
-    /// [`LOOT_NEAR`]: without the test on ourselves, a caster twenty-two
+    /// `LOOT_NEAR`: without the test on ourselves, a caster twenty-two
     /// metres off called a body its own while every mate's roster had it
     /// too far away to count, and two of them opened it in the same second.
     pub fn opens_first(&self, guid: u32, at: glam::Vec3, me: Turn) -> u32 {
@@ -2217,7 +2217,7 @@ const STRANGER_HEALTH: u32 = 30;
 /// dropped out of it: the character is on its way somewhere, the
 /// creature has not attacked it lately, is not walking at it or a mate,
 /// nobody on the road is fighting it, and it stands `away` metres off,
-/// beyond a swing's reach ([`ROAD_REACH`]).
+/// beyond a swing's reach (`ROAD_REACH`).
 ///
 /// On the road a character takes on only what attacks it (see
 /// `Client::passing_by`), and a creature that swung once and then fell
@@ -2245,7 +2245,7 @@ pub fn road_fight_over(
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Seen {
     /// It has attacked this character lately: a blow landed, a swing
-    /// missed or a spell cast at it (see [`Client::hit_lately_by`]).
+    /// missed or a spell cast at it (see `Client::hit_lately_by`).
     pub attacked_us: bool,
     /// The server has walked it at this character or at one of the
     /// team (see `WorldObject::walked_at`: the walk is remembered, since
@@ -2347,8 +2347,8 @@ impl<'a> Hint<'a> {
 /// which beat them. A row found by name is a guess at the kind of
 /// thing it is, and its figures are not this creature's at all (see
 /// [`Hint::Name`]): the appraisal is waited for. A creature the table
-/// knows is held to the table's own line ([`CRITTER_HEALTH`]) and one
-/// it does not to a wider one ([`STRANGER_HEALTH`]); not being in the
+/// knows is held to the table's own line (`CRITTER_HEALTH`) and one
+/// it does not to a wider one (`STRANGER_HEALTH`); not being in the
 /// table is never itself a reason to fight.
 ///
 /// The one flag that stands on its own is "never attacks anything":
@@ -2577,7 +2577,7 @@ impl Doing {
 
 /// A body this character leaves to the fellows something on it was left
 /// for, before it takes what it wants off it itself (see
-/// [`Autoplay::stands_by`]).
+/// `Autoplay::stands_by`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct StandBy {
     /// Where the body lies, which those fellows' reach is measured from.
@@ -2626,7 +2626,7 @@ impl Emptied {
 }
 
 /// What a character took in from a shut one of the others said (see
-/// [`Autoplay::take_in_shuts`]), for the log.
+/// `Autoplay::take_in_shuts`), for the log.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TakenIn {
     /// The body `body` is done for this character, by the word of `by`.
@@ -3228,8 +3228,8 @@ impl Autoplay {
 
     /// The bodies this character shut lately as emptied, and what each is
     /// for the others: what it says about itself on the board (see
-    /// [`Mate::shut`]). The newest [`SHUTS_SAID`], each for
-    /// [`SHUT_SAID_FOR`].
+    /// [`Mate::shut`]). The newest `SHUTS_SAID`, each for
+    /// `SHUT_SAID_FOR`.
     pub fn shuts_to_say(&self, now: Instant) -> Vec<Shut> {
         self.shut_lately
             .iter()
@@ -3642,7 +3642,7 @@ impl Autoplay {
     }
 
     /// How many bodies this character opened first lately, within
-    /// [`DEAL_WINDOW`]: its turns, as it says them on the board (see
+    /// `DEAL_WINDOW`: its turns, as it says them on the board (see
     /// [`Mate::opened_first`]).
     pub fn opened_first(&self, now: Instant) -> u16 {
         let lately = self
@@ -5939,7 +5939,7 @@ impl Client {
     }
 
     /// The names of what has attacked this character lately (see
-    /// [`Autoplay::attacked_by`]), as it says them on the board.
+    /// `Autoplay::attacked_by`), as it says them on the board.
     pub fn attackers_lately(&self) -> Vec<String> {
         let mut names: Vec<String> = self
             .autoplay
@@ -6335,7 +6335,7 @@ impl Client {
 
     /// Take in the bodies the others said they emptied for this
     /// character, and say so in the log (see
-    /// [`Autoplay::take_in_shuts`]). The team plugin calls this as it
+    /// `Autoplay::take_in_shuts`). The team plugin calls this as it
     /// hands the rules what the others said.
     pub fn take_in_shuts(&mut self) {
         let me = self.world.player_guid.unwrap_or(0);

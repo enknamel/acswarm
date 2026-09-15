@@ -142,7 +142,7 @@ impl Roster {
 /// until the others' words arrive, a frame later in this process and a
 /// hop later from another. Acting on that view founded two fellowships
 /// for one fleet. The roster is settled once the names on it have not
-/// changed for [`SETTLE_AFTER`]: a full board round, by the end of
+/// changed for `SETTLE_AFTER`: a full board round, by the end of
 /// which everyone who was on the team when this session joined has
 /// spoken. Anyone joining during the round speaks the moment it joins,
 /// and its word starts the round again.

@@ -640,7 +640,7 @@ pub struct XpMeter {
 
 impl XpMeter {
     /// Note `total_xp` for `key` at `now`. Samples closer together than
-    /// [`SAMPLE_EVERY`] are skipped; a total that went down (another
+    /// `SAMPLE_EVERY` are skipped; a total that went down (another
     /// character logged in on the same session) starts over.
     pub fn sample(&mut self, key: &Key, total_xp: i64, now: Instant) {
         let s = self.samples.entry(key.clone()).or_default();
@@ -661,7 +661,7 @@ impl XpMeter {
         }
     }
 
-    /// XP an hour for `key` as of `now`, or `None` until [`MIN_SPAN`]
+    /// XP an hour for `key` as of `now`, or `None` until `MIN_SPAN`
     /// has been watched.
     pub fn rate(&self, key: &Key, now: Instant) -> Option<f64> {
         let s = self.samples.get(key)?;
