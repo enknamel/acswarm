@@ -201,6 +201,12 @@ pub struct Travel {
     /// arriving, giving up or being cancelled. Cleared when the next one
     /// sets off (see [`Client::journey_broken_off`]).
     broken_off: bool,
+    /// The journey under way is about the character's own hunting
+    /// ground -- a roam, a patrol, a follower keeping up with its leader
+    /// -- rather than a road to somewhere else (see
+    /// [`Client::travel_about`]). Kept through a replan of the same
+    /// journey, and let go with a new destination.
+    about_the_ground: bool,
 }
 
 impl Travel {
@@ -333,6 +339,30 @@ impl Client {
         self.plan_trip(goal)
     }
 
+    /// [`travel_to`](Self::travel_to) somewhere about the character's own
+    /// hunting ground: a roam, a patrol, a follower keeping up. The
+    /// journey is not a road: what stands about the ground is what the
+    /// character came to fight, and a patrol that walked past it would
+    /// never fight anything. Every other journey is a road, whoever set
+    /// it off -- a script, a hunting area's portal, an errand of the
+    /// growth rules, the player -- because going somewhere is the same
+    /// errand whoever asked for it (see `Client::on_its_way`).
+    pub(crate) fn travel_about(&mut self, goal: Vec2) -> bool {
+        let ok = self.travel_to(goal);
+        if ok {
+            self.travel.about_the_ground = true;
+        }
+        ok
+    }
+
+    /// Whether the journey under way, or the last one, was about the
+    /// character's own ground (see [`Self::travel_about`]). Read by the
+    /// walk past the road, and when a journey is put down for a fight,
+    /// so that it is picked up again as what it was.
+    pub(crate) fn travel_about_the_ground(&self) -> bool {
+        self.travel.about_the_ground
+    }
+
     /// [`travel_to`](Self::travel_to) a goal in a known cell: see
     /// [`plan_trip_in`](Self::plan_trip_in).
     pub fn travel_to_in(&mut self, goal: Vec2, cell: u32) -> bool {
@@ -372,6 +402,9 @@ impl Client {
             self.travel.refused_recalls.clear();
             self.travel.refused_gems.clear();
             self.travel.replans = 0;
+            // A new journey is a road until whoever planned it says
+            // otherwise (see `travel_about`).
+            self.travel.about_the_ground = false;
         }
         let level = self.world.stats.level.max(1) as u32;
         let mut refused = self.travel.refused.clone();

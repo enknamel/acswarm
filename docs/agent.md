@@ -408,3 +408,11 @@ These are settled and are not up for redesign by a later stage.
   steering itself unless autoplay is on.
 - **A profile is shared, live.** A rule switched off is off for every
   character reading that profile, at once.
+- **A road is walked, not fought.** On its way somewhere -- a hunting
+  ground, a counter, wherever a script or a hunting area's portal sends
+  it -- a character fights only what attacks it, walks at it or a mate,
+  or is fighting one of the party on the road, and lets a creature go
+  once it stops following. The fighting is what the far end is for. A
+  road is a road whoever planned it; only a roam or a patrol about the
+  character's own ground is not one (`Client::on_its_way`,
+  `Client::travel_about`).
