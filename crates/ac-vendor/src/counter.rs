@@ -1,10 +1,6 @@
-//! What the character and the counter look like to the vendoring
-//! rules.
-//!
-//! Everything here is a plain value. Nothing reaches back into a world,
-//! a socket or a character, which is the whole point: a trip to the
-//! shops can then be decided, replayed and argued about without a
-//! server being awake, and the same decisions run live.
+//! The pack, purse and counter as plain values for the vendoring rules.
+//! Nothing here reaches a world, socket or character, so a trip is decided and replayed offline
+//! exactly as it runs live.
 
 use std::collections::BTreeMap;
 
@@ -14,22 +10,15 @@ pub use ac_loot::LootAction;
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Item {
     pub guid: u32,
-    /// Weenie class: what kind of thing it is. Two stacks join only if
-    /// these match.
+    /// Weenie class id; two stacks join only when these match.
     pub wcid: u32,
     pub name: String,
-    /// What the whole stack is worth, which is how the server counts it
-    /// and what a counter's ceiling is measured against. A hundred
-    /// Pyreal Peas worth five million are refused by a counter that
-    /// will not look at anything over a million.
+    /// Worth of the whole stack, as the server counts it and a counter's `max_value` measures it.
     pub value: u32,
-    /// What the whole stack weighs. A side pack's weight already
-    /// includes everything inside it.
+    /// Burden of the whole stack; a side pack's includes everything inside it.
     pub burden: u32,
     pub stack: u32,
-    /// The largest this stack may grow to. Whether two things combine
-    /// is this, never how many are in them now: two single tapers are
-    /// one stack of two.
+    /// Largest the stack may grow to; whether two things combine is this, never the count held.
     pub max_stack: u32,
     /// `ac_world::item_type` bits.
     pub item_type: u32,
@@ -38,19 +27,13 @@ pub struct Item {
     pub wielded: bool,
     /// Why it must not be sold, whatever any rule says.
     pub keep: Keep,
-    /// The player's own word on it, if the ledger has one: what it was
-    /// picked up for, carried with it since. "Sell" is the one thing
-    /// that beats the shopping list (see [`Snapshot::offers`]), and
-    /// two stacks are poured together only when their words agree
-    /// (see `Run::compress`), because a pour makes one stack of two
-    /// and one stack can carry only one word.
+    /// The ledger's word since pickup; `Sell` beats the shopping list ([`Snapshot::offers`]).
+    /// Stacks pour together only when words agree: one stack carries one word (`Run::compress`).
     pub taken_for: Option<LootAction>,
 }
 
-/// The reasons an item is not for sale, whatever a profile says about
-/// it. These are settled and no policy may override them: a tinkered or
-/// inscribed item is somebody's work, an equipped one is being worn,
-/// and the last two are the server's own word.
+/// Reasons an item is not for sale, whatever a profile says; no policy overrides them.
+/// Tinkered/inscribed: somebody's work; equipped: worn; retained/unsellable: the server's word.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Keep {
     pub tinkered: bool,
@@ -58,21 +41,13 @@ pub struct Keep {
     pub equipped: bool,
     pub retained: bool,
     pub unsellable: bool,
-    /// The character's own: what it was picked up to keep, and -- for
-    /// a thing nothing was decided about -- what it keeps stocked, a
-    /// component its own spells burn, the focus that halves them.
-    ///
-    /// The five above are the server's refusals and somebody's work.
-    /// This one is policy, and it was missing entirely: the sale list a
-    /// counter is offered was every carried item less those five, so a
-    /// mage with a full thousand tapers had them sold -- the only
-    /// component guard here spared a want it was *short* of, which a
-    /// stocked one is not.
+    /// Kept for the character: taken to keep or, undecided, a stocked spell component or the
+    /// focus that halves them. Policy: `Snapshot::offers` spares a wanted kind only while short.
     pub mine: bool,
 }
 
 impl Keep {
-    /// Whether anything at all forbids selling it, and what.
+    /// What forbids selling it, if anything.
     pub fn why(&self) -> Option<&'static str> {
         if self.tinkered {
             Some("it has been tinkered")
@@ -107,12 +82,11 @@ impl Item {
         self.value / self.stack.max(1)
     }
 
-    /// Whether it stacks at all.
     pub fn stackable(&self) -> bool {
         self.max_stack > 1
     }
 
-    /// Room left in it.
+    /// How many more it can take.
     pub fn room(&self) -> u32 {
         self.max_stack.saturating_sub(self.stack)
     }
@@ -127,11 +101,7 @@ pub struct Ware {
     pub price: u32,
     /// How many it has, or `None` for a shelf that never empties.
     pub stock: Option<u32>,
-    /// What one of them weighs, or 0 when the counter did not say.
-    ///
-    /// A purse says how many can be paid for and this says how many can
-    /// be carried home. Buying without it is how a character came to be
-    /// too laden to buy anything and went on asking anyway.
+    /// Burden of one, or 0 when the counter did not say; caps how many can be carried home.
     pub burden: u32,
 }
 
@@ -147,11 +117,9 @@ pub struct Counter {
     /// The most it will pay for one thing; 0 for no limit.
     pub max_value: u32,
     pub wares: Vec<Ware>,
-    /// The face value of the trade note it deals in, when it deals in
-    /// them at all. Only these are worth making: coin takes slots and a
-    /// note does not.
+    /// Face of the trade note it sells, if any; the only note worth making, as coin takes slots.
     pub note_face: Option<u32>,
-    /// How far the character is standing from it.
+    /// Horizontal distance from the character, in metres (world x/y).
     pub away: f32,
 }
 
@@ -162,25 +130,20 @@ pub struct Want {
     pub name: String,
     /// How many more are wanted than are carried.
     pub short: u32,
-    /// It cannot hunt without this, so the trip is for nothing without
-    /// it.
+    /// It cannot hunt without this, so the trip is for nothing without it.
     pub urgent: bool,
 }
 
 /// The rules of the trip, as the player set them.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Rules {
-    /// Stop selling and make notes with this many slots still free.
-    /// Low on room, not out of it: waiting for the last slot means the
-    /// next handful of coin has nowhere to go.
+    /// Free slots at which selling stops to make notes; the next handful of coin still needs one.
     pub keep_slots: u32,
-    /// Coin to keep loose rather than turn into notes, so that small
-    /// change is payable without breaking one.
+    /// Coin kept loose rather than turned into notes, so small change needs no note broken.
     pub float: u32,
     /// Do not bother selling anything worth less than this.
     pub floor_value: u32,
-    /// How near the counter the character must stand before it will
-    /// trade.
+    /// How near the counter must be before it will trade, in metres (as `Counter::away`).
     pub reach: f32,
 }
 
@@ -201,10 +164,11 @@ pub struct Snapshot {
     pub items: Vec<Item>,
     /// Loose coin.
     pub coin: u32,
-    /// Trade notes held, by face value.
+    /// Trade notes held: count by face value.
     pub notes: BTreeMap<u32, u32>,
-    /// Burden carried and the most that may be carried (150 x Strength).
+    /// Burden carried.
     pub carried: u32,
+    /// Burden capacity: 150 x Strength before augmentations (ACE Player_Inventory.cs:50).
     pub capacity: u32,
     /// Slots free across the main pack and the side packs.
     pub slots_free: u32,
@@ -214,16 +178,15 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
-    /// What the character can spend: coin and notes both, since a
-    /// counter takes either.
+    /// What the character can spend: coin and notes both, since a counter takes either.
     pub fn purse(&self) -> u32 {
         self.notes
             .iter()
             .fold(self.coin, |t, (face, n)| t.saturating_add(face * n))
     }
 
-    /// How much more may be carried before the server starts refusing.
-    /// Three times capacity is its hard ceiling.
+    /// Burden that may still be added before the server refuses.
+    /// The hard ceiling is 3 x capacity (ACE Player_Inventory.cs:56).
     pub fn burden_room(&self) -> u32 {
         self.capacity.saturating_mul(3).saturating_sub(self.carried)
     }
@@ -232,15 +195,8 @@ impl Snapshot {
         self.items.iter().find(|i| i.guid == guid)
     }
 
-    /// Whether the counter in front of the character is offered this
-    /// carried thing: the rules do not forbid it, the counter takes
-    /// its kind, it is worth the floor, and it is not something the
-    /// character came here to buy.
-    ///
-    /// One answer for the selling and for the panel's "for sale here"
-    /// count. The panel used to keep a count of its own, which never
-    /// asked what the counter buys, and so showed nine things for sale
-    /// at a tailor who would take none of them.
+    /// Whether the counter is offered it: not kept, a kind it buys, worth the floor, not wanted.
+    /// The one answer for both the selling and the panel's "for sale here" count.
     pub fn offers(&self, it: &Item) -> bool {
         let Some(counter) = self.counter.as_ref() else {
             return false;
@@ -254,14 +210,8 @@ impl Snapshot {
         if it.value < self.rules.floor_value || it.value == 0 {
             return false;
         }
-        // Not what the character came here to buy. Selling the tapers
-        // out of the pack and buying them back a moment later is a
-        // round trip that costs the markup and gains nothing.
-        //
-        // Unless the player said to sell it. A thing tagged for sale
-        // when it was picked up is loot, whatever the shopping list
-        // says: the skip is there to save a round trip, and it was
-        // keeping a caster's peas in its pack for good.
+        // Skip what the character came to buy (selling and rebuying costs the markup),
+        // unless the player tagged it Sell: then it is loot whatever the list says.
         let wanted = self.wants.iter().any(|w| w.wcid == it.wcid && w.short > 0);
         !wanted || it.to_sell()
     }
