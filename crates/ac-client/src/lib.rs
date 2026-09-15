@@ -270,6 +270,8 @@ mod refused;
 pub mod shopping;
 pub mod steps;
 pub mod summoning;
+#[cfg(any(test, feature = "testkit"))]
+pub mod testkit;
 pub mod travel;
 pub mod visit;
 pub mod weapons;

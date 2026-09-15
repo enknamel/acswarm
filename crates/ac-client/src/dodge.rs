@@ -1211,17 +1211,10 @@ mod tests {
     /// A creature standing at `at`, described by `flags`.
     fn creature(guid: u32, name: &str, flags: u32, at: Vec3) -> ac_world::WorldObject {
         ac_world::WorldObject {
-            guid,
-            name: name.into(),
-            item_type: ac_world::item_type::CREATURE,
             object_desc_flags: flags,
-            health: Some(1.0),
-            position: Some(ac_world::object::Position::new_flat(
-                HOLTBURG,
-                at - ac_world::landblock_origin(HOLTBURG),
-            )),
+            position: crate::testkit::placed(HOLTBURG, at),
             scale: 1.0,
-            ..Default::default()
+            ..crate::testkit::creature(guid, name)
         }
     }
 
@@ -1244,32 +1237,13 @@ mod tests {
         }
     }
 
-    /// A character standing in the Holtburg field, offline, when the
-    /// archives are there to be read. The room to either side is
+    /// A character standing in the Holtburg field, offline, over the
+    /// game's archives. The room to either side is
     /// measured with the walker's own collision, so this wants the
     /// real landscape.
-    fn in_the_field() -> Option<Client> {
-        let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
-            eprintln!("AC_DATA_DIR unset; skipping");
-            return None;
-        };
-        let assets = std::rc::Rc::new(ac_scene::Assets::open(dir).unwrap());
-        let mut c = Client::connect(
-            crate::Config {
-                host: "127.0.0.1:1".into(),
-                account: "acreborn".into(),
-                password: "x".into(),
-                character: None,
-                auto_enter: true,
-            },
-            assets.clone(),
-        )
-        .unwrap();
-        let local = Vec3::new(84.0, 84.0, 94.0);
-        let mut pl = crate::player::Player::new(&assets, HOLTBURG, local, glam::Quat::IDENTITY);
-        pl.set_motion_table(&assets, 0x0200_0001, 0x0900_0001);
-        let me = pl.world_position();
-        c.player = Some(pl);
+    fn in_the_field() -> Client {
+        let mut c = crate::testkit::standing_at(HOLTBURG, Vec3::new(84.0, 84.0, 94.0));
+        let me = c.player.as_ref().unwrap().world_position();
         c.world.player_guid = Some(ME_GUID);
         // The character's own object: the PK rule reads its flags.
         c.world.objects.insert(
@@ -1281,14 +1255,13 @@ mod tests {
                 me,
             ),
         );
-        Some(c)
+        c
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_fellows_bolt_is_known_at_intake_and_never_takes_the_tick_from_a_cast() {
-        let Some(mut c) = in_the_field() else {
-            return;
-        };
+        let mut c = in_the_field();
         let me = c.player.as_ref().unwrap().world_position();
         let now = Instant::now();
         // A fellow twelve metres off, shooting through where we stand
@@ -1336,13 +1309,12 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_monsters_bolt_is_dodged_whatever_else_is_in_hand() {
         // The reflex as it was. In the run this change came from it
         // fired 543 times and nothing landed on anyone, and for a
         // character that can be hurt it is what keeps him alive.
-        let Some(mut c) = in_the_field() else {
-            return;
-        };
+        let mut c = in_the_field();
         let me = c.player.as_ref().unwrap().world_position();
         let now = Instant::now();
         let (shaman, shot) = (0x6000_0001, 0x8000_0002);
@@ -1370,10 +1342,9 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_spell_that_would_land_outranks_a_fellows_that_arrives_sooner() {
-        let Some(mut c) = in_the_field() else {
-            return;
-        };
+        let mut c = in_the_field();
         let me = c.player.as_ref().unwrap().world_position();
         let now = Instant::now();
         // The fellow is nearer, so his bolt gets here first; the

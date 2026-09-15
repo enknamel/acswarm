@@ -10009,6 +10009,7 @@ impl Client {
 
 #[cfg(test)]
 mod tests {
+    use crate::testkit::{character_of_level, game_data, no_data, standing_in_the_field};
 
     #[test]
     fn a_quests_refusal_that_names_no_item_is_about_the_take_in_flight() {
@@ -10614,46 +10615,6 @@ mod tests {
         }
     }
 
-    /// Offline session over the real archives: nothing calls `tick`, so
-    /// no packet is ever sent.
-    fn offline_client(assets: std::rc::Rc<ac_scene::Assets>) -> Client {
-        Client::connect(
-            crate::Config {
-                host: "127.0.0.1:1".into(),
-                account: "acreborn".into(),
-                password: "x".into(),
-                character: None,
-                auto_enter: true,
-            },
-            assets,
-        )
-        .unwrap()
-    }
-
-    /// A character of `level` with nothing around it yet.
-    fn character_of_level(level: i32) -> Option<Client> {
-        let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
-            eprintln!("AC_DATA_DIR unset; skipping");
-            return None;
-        };
-        let assets = std::rc::Rc::new(ac_scene::Assets::open(dir).unwrap());
-        let mut c = offline_client(assets);
-        c.world.player_guid = Some(0x5000_0001);
-        c.world.stats.level = level;
-        Some(c)
-    }
-
-    /// The same character, standing somewhere, for the rules that read
-    /// a position.
-    fn standing_in_the_field(level: i32, cell: u32, local: glam::Vec3) -> Option<Client> {
-        let mut c = character_of_level(level)?;
-        let assets = c.assets.clone();
-        let mut pl = crate::player::Player::new(&assets, cell, local, glam::Quat::IDENTITY);
-        pl.set_motion_table(&assets, 0x0200_0001, 0x0900_0001);
-        c.player = Some(pl);
-        Some(c)
-    }
-
     /// A shelf of its own holding one starter profile, so the looting
     /// has rules to carry out without touching the one every session
     /// shares.
@@ -10674,12 +10635,8 @@ mod tests {
     /// the fight rules about.
     fn in_view(c: &mut Client, guid: u32, wcid: u32, name: &str) -> ac_world::WorldObject {
         let o = ac_world::WorldObject {
-            guid,
             weenie_class_id: wcid,
-            name: name.into(),
-            item_type: ac_world::item_type::CREATURE,
-            health: Some(1.0),
-            ..Default::default()
+            ..crate::testkit::creature(guid, name)
         };
         c.world.objects.insert(guid, o.clone());
         o
@@ -10689,9 +10646,7 @@ mod tests {
     fn a_rabbit_is_walked_past_once_it_is_outgrown_and_a_revenant_never_is() {
         // Brown Rabbit 2567 (passive, level 4), Revenant 8592 (passive,
         // level 61), Chicken 35499 (attacks on sight, level 8).
-        let Some(mut c) = character_of_level(20) else {
-            return;
-        };
+        let mut c = character_of_level(no_data(), 20);
         let cfg = Fight::default();
         let rabbit = in_view(&mut c, 0x8000_0001, 2567, "Brown Rabbit");
         let revenant = in_view(&mut c, 0x8000_0002, 8592, "Revenant");
@@ -10762,9 +10717,7 @@ mod tests {
 
     #[test]
     fn an_evaded_swing_counts_as_being_attacked() {
-        let Some(mut c) = character_of_level(20) else {
-            return;
-        };
+        let mut c = character_of_level(no_data(), 20);
         assert!(!c.under_attack(), "nothing has happened yet");
         c.chat_message(
             ac_net::messages::opcode::GAME_EVENT,
@@ -10852,9 +10805,7 @@ mod tests {
         // `under_attack` stayed false while it worked the character over,
         // and every "but fight back when it attacks you" carve-out walked
         // on past it.
-        let Some(mut c) = character_of_level(20) else {
-            return;
-        };
+        let mut c = character_of_level(no_data(), 20);
         let op = ac_net::messages::opcode::SERVER_MESSAGE;
         assert!(!c.under_attack(), "nothing has happened yet");
         c.chat_message(
@@ -10886,9 +10837,7 @@ mod tests {
 
     #[test]
     fn a_critter_that_swings_and_misses_is_fought_rather_than_walked_past() {
-        let Some(mut c) = character_of_level(20) else {
-            return;
-        };
+        let mut c = character_of_level(no_data(), 20);
         let cfg = Fight::default();
         let rabbit = in_view(&mut c, 0x8000_0001, 2567, "Brown Rabbit");
         let other = in_view(&mut c, 0x8000_0002, 2566, "Black Rabbit");
@@ -10914,6 +10863,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_fight_on_the_road_ends_when_the_creature_stops_following() {
         // Off the road the fight is the fight, however far it has got.
         assert!(!road_fight_over(false, false, false, false, 20.0));
@@ -10937,10 +10887,7 @@ mod tests {
         // The same, read off the world: a Drudge that swung once on the
         // road and fell twenty metres behind.
         let holtburg = 0xA9B4_0019;
-        let Some(mut c) = standing_in_the_field(20, holtburg, glam::Vec3::new(84.0, 7.1, 94.0))
-        else {
-            return;
-        };
+        let mut c = standing_in_the_field(20, holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
         let me = c.player.as_ref().unwrap().world_position();
         let now = Instant::now();
         let guid = 0x8000_0001;
@@ -11002,9 +10949,7 @@ mod tests {
 
     #[test]
     fn a_level_read_off_the_creature_itself_stands_in_for_the_tables() {
-        let Some(mut c) = character_of_level(50) else {
-            return;
-        };
+        let mut c = character_of_level(no_data(), 50);
         let cfg = Fight::default();
         // A Portal Pillar (32522) never attacks anything and the table
         // has no level for it. Nothing is walked past on a guess, nor
@@ -11061,9 +11006,7 @@ mod tests {
         // past by anyone of level 8: the appraisal that was to beat
         // the row never came, because a creature walked past is never
         // asked about.
-        let Some(mut c) = character_of_level(20) else {
-            return;
-        };
+        let mut c = character_of_level(no_data(), 20);
         let cfg = Fight::default();
         let dire = in_view(&mut c, 0x8000_0021, STRANGER + 2, "Dire Brown Rabbit");
         assert!(
@@ -11089,9 +11032,7 @@ mod tests {
     fn a_creature_the_server_lets_go_of_takes_its_appraisal_with_it() {
         // ACE hands a gone creature's guid to a new one six hours on.
         // Kept, the Drudge's answer was read as the Cow's.
-        let Some(mut c) = character_of_level(20) else {
-            return;
-        };
+        let mut c = character_of_level(no_data(), 20);
         let cfg = Fight::default();
         let drudge = in_view(&mut c, 0x8000_0041, STRANGER, "Drudge Skulker");
         appraised_as(&mut c, drudge.guid, Some(8), 42);
@@ -11131,16 +11072,13 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_target_left_half_a_world_away_is_not_fought_by_spell_either() {
         // Brynvor, 2026-09-15: teleported from the Holtburg Dungeon to
         // the town above it with a Swamp Rat as the casting target, and
         // stood there ten minutes casting at it from 34 km. The swing
         // already let such a target go; the spell now does too.
-        let Some(mut c) =
-            standing_in_the_field(999, 0xA9B4_002E, glam::Vec3::new(125.0, 132.0, 67.0))
-        else {
-            return;
-        };
+        let mut c = standing_in_the_field(999, 0xA9B4_002E, glam::Vec3::new(125.0, 132.0, 67.0));
         let rat = in_view(&mut c, 0x8000_20AD, 0, "Swamp Rat");
         let put = |c: &mut Client, cell: u32, local: glam::Vec3| {
             c.world.objects.get_mut(&rat.guid).unwrap().position = Some(ac_world::Position {
@@ -11167,9 +11105,7 @@ mod tests {
         // name alone had the other walked past between its swings, and
         // the target moved off something still in melee with the
         // character.
-        let Some(mut c) = character_of_level(20) else {
-            return;
-        };
+        let mut c = character_of_level(no_data(), 20);
         let cfg = Fight::default();
         let now = Instant::now();
         let cow = in_view(&mut c, 0x8000_0031, STRANGER, "Cow");
@@ -11205,9 +11141,7 @@ mod tests {
         // The table was read off a server with no Cow in it, and the
         // rule fought whatever the table did not know: a level 20
         // character killed a Cow on a server that has them.
-        let Some(mut c) = character_of_level(20) else {
-            return;
-        };
+        let mut c = character_of_level(no_data(), 20);
         let cfg = Fight::default();
         let now = Instant::now();
         assert!(
@@ -11277,12 +11211,10 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn the_fight_picker_asks_about_a_stranger_rather_than_attacking_it() {
         let holtburg = 0xA9B4_0019;
-        let Some(mut c) = standing_in_the_field(20, holtburg, glam::Vec3::new(84.0, 84.0, 10.0))
-        else {
-            return;
-        };
+        let mut c = standing_in_the_field(20, holtburg, glam::Vec3::new(84.0, 84.0, 10.0));
         let me = c.player.as_ref().unwrap().world_position();
         let cfg = Fight::default();
         let now = Instant::now();
@@ -11384,11 +11316,11 @@ mod tests {
 
     /// A character with a mace in hand, a wand in the pack, and a
     /// creature it is swinging at.
-    fn mid_fight() -> Option<(Client, u32)> {
+    fn mid_fight(assets: std::rc::Rc<ac_scene::Assets>) -> (Client, u32) {
         const MACE: u32 = 0x8000_0101;
         const WAND: u32 = 0x8000_0102;
         const CREATURE: u32 = 0x8000_0103;
-        let mut c = character_of_level(20)?;
+        let mut c = character_of_level(assets, 20);
         a_weapon(
             &mut c,
             MACE,
@@ -11407,14 +11339,13 @@ mod tests {
         c.combat = true;
         c.attack_target = Some(CREATURE);
         c.last_attack = Instant::now() - Duration::from_secs(5);
-        Some((c, WAND))
+        (c, WAND)
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn the_swing_waits_for_a_swap_the_buff_pass_started() {
-        let Some((mut c, wand)) = mid_fight() else {
-            return;
-        };
+        let (mut c, wand) = mid_fight(game_data());
         // The in-fight buffing reaches for the wand. The mace goes back
         // in the pack and the wand waits on empty hands.
         assert!(c.wield_for(Stance::Magic), "the swap went out");
@@ -11438,10 +11369,9 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn the_weapon_comes_back_out_of_the_pack_after_a_buff() {
-        let Some((mut c, wand)) = mid_fight() else {
-            return;
-        };
+        let (mut c, wand) = mid_fight(game_data());
         const MACE: u32 = 0x8000_0101;
         // The buff pass put the mace down and took the wand up.
         a_weapon(
@@ -11470,10 +11400,9 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn an_errand_the_server_is_refusing_is_kept_rather_than_dropped() {
-        let Some((mut c, _)) = mid_fight() else {
-            return;
-        };
+        let (mut c, _) = mid_fight(game_data());
         const MACE: u32 = 0x8000_0101;
         const SHIELD: u32 = 0x8000_0104;
         let me = c.world.player_guid;
@@ -11511,9 +11440,7 @@ mod tests {
 
     #[test]
     fn the_shield_goes_on_between_swings_and_not_during_one() {
-        let Some((mut c, _)) = mid_fight() else {
-            return;
-        };
+        let (mut c, _) = mid_fight(no_data());
         const SHIELD: u32 = 0x8000_0104;
         let me = c.world.player_guid;
         c.world.objects.insert(
@@ -11540,10 +11467,9 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_weapon_choice_put_off_for_a_swing_is_made_once_the_fight_is_joined() {
-        let Some((mut c, _)) = mid_fight() else {
-            return;
-        };
+        let (mut c, _) = mid_fight(game_data());
         let cfg = Fight::default();
         // The choice was put off: a swing was in the air when the target
         // was picked, so `arm_for` booked the gap and returned without
@@ -11567,10 +11493,9 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_softening_with_no_wand_to_be_had_lets_the_fight_go_ahead() {
-        let Some((mut c, wand)) = mid_fight() else {
-            return;
-        };
+        let (mut c, wand) = mid_fight(game_data());
         const CREATURE: u32 = 0x8000_0103;
         // A Drudge Skulker is weakest to cold, fire and electricity
         // alike; whichever it picks, the character knows the
@@ -11599,9 +11524,7 @@ mod tests {
         // the softening gives the tick back rather than holding fire on
         // the target for ever: every expiry of the wait earned one more
         // refusal and doubled the next, up towards four hours.
-        let Some((mut c, wand)) = mid_fight() else {
-            return;
-        };
+        let (mut c, wand) = mid_fight(game_data());
         for element in [
             ac_world::elements::Element::Cold,
             ac_world::elements::Element::Fire,
@@ -11792,6 +11715,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn what_arrives_is_judged_against_what_was_held_before_it() {
         // "Keep up to four healing kits", three in the pack, a fourth
         // bought. The arrival pass once counted the arrival itself, so
@@ -11800,9 +11724,7 @@ mod tests {
         // for the line went back over the counter. Held is what was
         // held before it, on this path as on the corpse's, and a fifth
         // is the one over the cap.
-        let Some(mut c) = character_of_level(20) else {
-            return;
-        };
+        let mut c = character_of_level(game_data(), 20);
         let dir = std::env::temp_dir().join("acswarm-test-arrival-profiles");
         std::fs::create_dir_all(&dir).ok();
         let shelf = std::sync::Arc::new(crate::profile::Library::default());
@@ -11859,13 +11781,12 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn supplies_are_handed_over_from_the_stack_that_is_leaving_anyway() {
         // A mate short of tapers: the stack the player said to sell
         // goes first, and the one they said to keep only when it is
         // the only one.
-        let Some(mut c) = character_of_level(20) else {
-            return;
-        };
+        let mut c = character_of_level(game_data(), 20);
         let me = c.world.player_guid.unwrap();
         let tapers = |guid: u32, stack: u32| ac_world::WorldObject {
             guid,
@@ -12082,8 +12003,8 @@ mod tests {
 
     /// A level 20 character that salvages for itself: an Ust in the pack,
     /// and a loot profile of its own called `profile`.
-    fn a_salvager(profile: &str) -> Option<Client> {
-        let mut c = character_of_level(20)?;
+    fn a_salvager(assets: std::rc::Rc<ac_scene::Assets>, profile: &str) -> Client {
+        let mut c = character_of_level(assets, 20);
         a_loot_profile(&mut c, profile);
         let ust = 0x8000_0100;
         c.world.objects.insert(
@@ -12096,7 +12017,7 @@ mod tests {
                 ..Default::default()
             },
         );
-        Some(c)
+        c
     }
 
     /// An Iron mace of `workmanship` in `container`, tagged for salvage.
@@ -12122,13 +12043,12 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn what_the_team_hands_the_salvager_is_salvaged_a_grade_at_a_time() {
         // Teammates hand salvage over one item at a time, and the
         // salvager salvages it along with its own: that is where a 10
         // one teammate carried would meet another's 6.
-        let Some(mut c) = a_salvager("salvage test") else {
-            return;
-        };
+        let mut c = a_salvager(game_data(), "salvage test");
         let me = c.world.player_guid;
         // The 9 is in a side pack: the server finds it there, and so
         // must the salvage.
@@ -12170,13 +12090,12 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_ten_the_server_skips_holds_up_none_of_the_grades_below_it() {
         // ACE skips a Retained item without a word, and its salvage times
         // out. Chosen again as the best grade, the 10 went out alone after
         // every timeout, and the 9 and the 6 waited behind all three.
-        let Some(mut c) = a_salvager("salvage skipped") else {
-            return;
-        };
+        let mut c = a_salvager(game_data(), "salvage skipped");
         let me = c.world.player_guid;
         let (ten, nine, six) = (0x8000_0121, 0x8000_0122, 0x8000_0123);
         for (guid, workmanship) in [(ten, 10.0), (nine, 9.0), (six, 6.0)] {
@@ -12209,14 +12128,13 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn tidying_the_pack_never_pours_one_salvage_bag_into_another() {
         // Two bags of Iron share a wcid, but only an Ust puts bags
         // together. The server sends a bag with no stack size, which
         // leaves it at 1, and both pours -- the tidy chore and the one
         // at a vendor's counter -- read that to decide what stacks.
-        let Some(mut c) = character_of_level(20) else {
-            return;
-        };
+        let mut c = character_of_level(game_data(), 20);
         let me = c.world.player_guid;
         let bag = |guid: u32, workmanship: f32| ac_world::WorldObject {
             guid,
@@ -12359,6 +12277,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn the_moment_held_open_for_a_falling_body_ends_when_one_lands() {
         // The next fight is held for three seconds after a killing blow,
         // because the body comes a moment after the creature dies. Held
@@ -12366,9 +12285,7 @@ mod tests {
         // killing in one huddle each spent it standing over a body one
         // of the others was already opening: fighting was 13% of that
         // run and opening a corpse 53%.
-        let Some(mut c) = character_of_level(20) else {
-            return;
-        };
+        let mut c = character_of_level(game_data(), 20);
         let s = Duration::from_secs;
         let t0 = Instant::now();
         let spot = glam::Vec3::new(40.0, 40.0, 10.0);
@@ -12646,6 +12563,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_walk_to_a_body_this_character_has_given_up_on_is_let_go_of() {
         // The one way out of the looting that did not stop the walk. A
         // character that chose a body, set off for it, and then heard a
@@ -12655,9 +12573,7 @@ mod tests {
         // own worth up, for a body it would never open.
         let holtburg = 0xA9B4_0019;
         let at = glam::Vec3::new(84.0, 84.0, 10.0);
-        let Some(mut c) = standing_in_the_field(20, holtburg, at) else {
-            return;
-        };
+        let mut c = standing_in_the_field(20, holtburg, at);
         a_loot_profile(&mut c, "walk test");
         let me = c.player.as_ref().unwrap().world_position();
         let now = Instant::now();
@@ -13639,14 +13555,13 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_body_left_for_a_mate_still_waits_on_that_mate() {
         // One party, one profile, and a broken key left on a body whose
         // opener cannot mend it. The mage is told the body is done with and
         // stays away; the lockpicker is not, and still goes to it.
         use crate::did::Did;
-        let Some(mut c) = character_of_level(30) else {
-            return;
-        };
+        let mut c = character_of_level(game_data(), 30);
         let t0 = Instant::now();
         let profile = a_party_profile();
         let (body, key) = (0x8000_3001, 0x8000_3002);
@@ -13742,6 +13657,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn the_leader_that_does_not_sort_first_gives_up_the_fellowship_it_founded() {
         // Two fellowships for one fleet, and this character founded the
         // one whose leader does not sort first. Once the rightful leader
@@ -13749,10 +13665,7 @@ mod tests {
         // this one is disbanded, so the rightful leader can recruit its
         // members and this character with them.
         let holtburg = 0xA9B4_0019;
-        let Some(mut c) = standing_in_the_field(20, holtburg, glam::Vec3::new(84.0, 84.0, 10.0))
-        else {
-            return;
-        };
+        let mut c = standing_in_the_field(20, holtburg, glam::Vec3::new(84.0, 84.0, 10.0));
         let t0 = Instant::now();
         let me = c.world.player_guid.unwrap();
         let member = 0x5000_0005;
@@ -13840,6 +13753,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn whoever_leads_the_fellowship_brings_in_the_rightful_leader_standing_outside() {
         // +Brynlyn founded and gathered the seven that came on with it;
         // +Brynith, first by name, came on a few seconds later. Every
@@ -13850,10 +13764,7 @@ mod tests {
         // it for the life of the run. Whoever leads a fellowship brings
         // the team's mates into it, the rightful leader among them.
         let holtburg = 0xA9B4_0019;
-        let Some(mut c) = standing_in_the_field(20, holtburg, glam::Vec3::new(84.0, 84.0, 10.0))
-        else {
-            return;
-        };
+        let mut c = standing_in_the_field(20, holtburg, glam::Vec3::new(84.0, 84.0, 10.0));
         let t0 = Instant::now();
         let here = c.player.as_ref().unwrap().world_position();
         let (rightful, member) = (0x5000_0002, 0x5000_0005);
@@ -13908,6 +13819,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_full_fellowship_asks_nobody_else() {
         // Nine in, a tenth on the team: the server answered 0x041E to
         // every ask and the tenth was asked every five seconds for the
@@ -13915,10 +13827,7 @@ mod tests {
         // should the server's count differ, holds off whoever was asked
         // last.
         let holtburg = 0xA9B4_0019;
-        let Some(mut c) = standing_in_the_field(20, holtburg, glam::Vec3::new(84.0, 84.0, 10.0))
-        else {
-            return;
-        };
+        let mut c = standing_in_the_field(20, holtburg, glam::Vec3::new(84.0, 84.0, 10.0));
         let t0 = Instant::now();
         let here = c.player.as_ref().unwrap().world_position();
         let eight: Vec<u32> = (0..8).map(|i| 0x5000_0010 + i).collect();
@@ -14188,9 +14097,7 @@ mod tests {
         assert!(!ap.corpse_waiting(body, t0, Room::PLENTY));
 
         // And a character alone finds nobody to judge a body for.
-        let Some(c) = character_of_level(30) else {
-            return;
-        };
+        let c = character_of_level(no_data(), 30);
         assert_eq!(
             c.shut_for(body, &[0x8000_0002], &a_party_profile()),
             ShutFor::default()
@@ -14606,13 +14513,11 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn the_salvage_on_an_open_body_is_left_for_the_salvager_standing_by() {
         use crate::logistics::Supplies;
         let holtburg = 0xA9B4_0019;
-        let Some(mut c) = standing_in_the_field(20, holtburg, glam::Vec3::new(84.0, 84.0, 10.0))
-        else {
-            return;
-        };
+        let mut c = standing_in_the_field(20, holtburg, glam::Vec3::new(84.0, 84.0, 10.0));
         let me = c.player.as_ref().unwrap().world_position();
         let t0 = Instant::now();
         let (body, plate, gem) = (0x8000_5001, 0x8000_5002, 0x8000_5003);
@@ -15370,13 +15275,13 @@ mod tests {
     /// A character with a mace in hand and a wand in the pack, and
     /// nothing the server is waiting on: no swing out, no spell in the
     /// air.
-    fn hands_free() -> Option<Client> {
-        let (mut c, _) = mid_fight()?;
+    fn hands_free(assets: std::rc::Rc<ac_scene::Assets>) -> Client {
+        let (mut c, _) = mid_fight(assets);
         c.attack_target = None;
         c.attack_pending = false;
         c.autoplay.cast_sent = None;
         assert!(!c.server_busy(Instant::now()), "nothing owed to the server");
-        Some(c)
+        c
     }
 
     #[test]
@@ -15384,9 +15289,7 @@ mod tests {
         // All 71 "You must remove your X to wield Y" lines of a
         // ten-minute run had X and Y the same item: the client asking
         // the server to wield what it was already holding.
-        let Some(mut c) = hands_free() else {
-            return;
-        };
+        let mut c = hands_free(no_data());
         const MACE: u32 = 0x8000_0101;
         assert!(c.wield_guid(MACE), "the mace is in hand, so the ask stands");
         assert_eq!(c.autoplay.wield_asked, None, "and nothing was sent");
@@ -15394,9 +15297,7 @@ mod tests {
 
     #[test]
     fn one_wield_goes_out_once_however_often_it_is_asked_for() {
-        let Some(mut c) = hands_free() else {
-            return;
-        };
+        let mut c = hands_free(no_data());
         const WAND: u32 = 0x8000_0102;
         assert!(c.wield_guid(WAND), "the wand is asked for");
         let first = c.autoplay.wield_asked;
@@ -15416,9 +15317,7 @@ mod tests {
 
     #[test]
     fn a_refused_wield_that_worked_forgets_the_wait_rather_than_doubling_it() {
-        let Some(mut c) = hands_free() else {
-            return;
-        };
+        let mut c = hands_free(no_data());
         const WAND: u32 = 0x8000_0102;
         let now = Instant::now();
         // The wand was asked for twice and taken up once. The second
@@ -15448,9 +15347,7 @@ mod tests {
         // InventoryServerSaveFailed with nothing in it. Nine characters
         // bought 89 of those pairs in ten minutes, taking from a body
         // with a spell in the air.
-        let Some(mut c) = hands_free() else {
-            return;
-        };
+        let mut c = hands_free(no_data());
         const WAND: u32 = 0x8000_0102;
         const LOOT: u32 = 0x8000_0105;
         let now = Instant::now();
@@ -15502,12 +15399,13 @@ mod tests {
     /// of them taken by daggers, and a Sack of `sack_slots` slots with
     /// `sack_used` daggers in it.
     fn with_packs(
+        assets: std::rc::Rc<ac_scene::Assets>,
         main_slots: u32,
         main_used: u32,
         sack_slots: u32,
         sack_used: u32,
-    ) -> Option<Client> {
-        let mut c = character_of_level(20)?;
+    ) -> Client {
+        let mut c = character_of_level(assets, 20);
         let me = c.world.player_guid.unwrap();
         c.world.objects.insert(
             me,
@@ -15559,7 +15457,7 @@ mod tests {
         // packs being full, not low.
         c.autoplay.config.team.restock.keep_slots = 0;
         assert!(!c.server_busy(Instant::now()));
-        Some(c)
+        c
     }
 
     /// A thing of `wcid` lying on the body, `count` to the stack.
@@ -15587,9 +15485,7 @@ mod tests {
     fn free_space_is_what_one_take_can_use_and_not_the_sum_over_the_packs() {
         // Main pack 2 of 4, Sack 19 of 24: seventeen free in all, and
         // five for any one take.
-        let Some(c) = with_packs(4, 2, 24, 19) else {
-            return;
-        };
+        let c = with_packs(no_data(), 4, 2, 24, 19);
         let me = c.world.player_guid.unwrap();
         assert_eq!(c.free_space(), 5);
         assert_eq!(c.room_anywhere(), 7);
@@ -15602,9 +15498,7 @@ mod tests {
         assert_eq!(packs.container_for_a_take(), Some(me));
         // Every pack down to its last slot: room for one take, however
         // many packs there are.
-        let Some(mut c) = with_packs(4, 3, 24, 23) else {
-            return;
-        };
+        let mut c = with_packs(no_data(), 4, 3, 24, 23);
         assert_eq!(c.free_space(), 1);
         assert_eq!(c.room_anywhere(), 2);
         // A character with an empty main pack reads as it always did.
@@ -15619,9 +15513,7 @@ mod tests {
     fn a_take_with_the_main_pack_full_goes_into_the_sack_with_room() {
         // Nine characters at 102/102 with a Sack at 7 of 24 aimed every
         // take at the main pack and were refused seven thousand times.
-        let Some(mut c) = with_packs(2, 2, 24, 7) else {
-            return;
-        };
+        let mut c = with_packs(no_data(), 2, 2, 24, 7);
         let me = c.world.player_guid.unwrap();
         const DAGGER: u32 = 0x8000_0401;
         on_the_body(&mut c, DAGGER, "Dagger", 21, 0, 1);
@@ -15644,10 +15536,9 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn with_every_pack_full_the_body_is_set_aside_once_and_not_reopened() {
-        let Some(mut c) = with_packs(2, 2, 3, 3) else {
-            return;
-        };
+        let mut c = with_packs(game_data(), 2, 2, 3, 3);
         const DAGGER: u32 = 0x8000_0401;
         on_the_body(&mut c, DAGGER, "Dagger", 21, 0, 1);
         let t0 = Instant::now();
@@ -15688,13 +15579,12 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn the_servers_word_that_a_pack_is_full_sends_the_take_elsewhere_and_then_gives_up() {
         // The count said the main pack had two slots; the server said
         // "Unable to put Dagger into container". Believed, the next try
         // names the Sack; refused there too, the body is left for room.
-        let Some(mut c) = with_packs(4, 2, 24, 23) else {
-            return;
-        };
+        let mut c = with_packs(game_data(), 4, 2, 24, 23);
         let me = c.world.player_guid.unwrap();
         const DAGGER: u32 = 0x8000_0401;
         on_the_body(&mut c, DAGGER, "Dagger", 21, 0, 1);
@@ -15762,15 +15652,14 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_refusal_with_no_reason_and_no_word_at_all_is_not_the_pack() {
         // A second of a unique: the server refuses it with no code, and
         // explains itself in the system chat, which is not a word about
         // the take. Read as the pack being full, it marked the main
         // pack, then the Sack, and sent the character to town with
         // seventeen slots free.
-        let Some(mut c) = with_packs(4, 2, 24, 7) else {
-            return;
-        };
+        let mut c = with_packs(game_data(), 4, 2, 24, 7);
         let me = c.world.player_guid.unwrap();
         const KEY: u32 = 0x8000_0401;
         on_the_body(&mut c, KEY, "Sturdy Iron Key", 9000, 0, 1);
@@ -15801,9 +15690,7 @@ mod tests {
         // The refusal in one packet, the words in the next: the tick
         // between has read the take as over. What was sent is kept
         // until the next goes out, so the words still find it.
-        let Some(mut c) = with_packs(4, 2, 24, 7) else {
-            return;
-        };
+        let mut c = with_packs(no_data(), 4, 2, 24, 7);
         let me = c.world.player_guid.unwrap();
         const DAGGER: u32 = 0x8000_0401;
         on_the_body(&mut c, DAGGER, "Dagger", 21, 0, 1);
@@ -15828,9 +15715,7 @@ mod tests {
         // still on their way arrive, and the count reads four. One
         // sold: the word held at two would still stand, and the pack
         // would read as full until a third left.
-        let Some(mut c) = with_packs(4, 2, 24, 24) else {
-            return;
-        };
+        let mut c = with_packs(no_data(), 4, 2, 24, 24);
         let me = c.world.player_guid.unwrap();
         c.packs_said_full.insert(me, 2);
         let t0 = Instant::now();
@@ -15868,9 +15753,7 @@ mod tests {
         // ground goes into the Sack, and a Pouch into the main pack's
         // pack slots, where the server would refuse it named into the
         // Sack without a word.
-        let Some(mut c) = with_packs(2, 2, 24, 7) else {
-            return;
-        };
+        let mut c = with_packs(no_data(), 2, 2, 24, 7);
         let me = c.world.player_guid.unwrap();
         const POUCH: u32 = 0x8000_0801;
         const DAGGER: u32 = 0x8000_0802;
@@ -15902,9 +15785,7 @@ mod tests {
 
     #[test]
     fn a_refusal_with_a_reason_or_other_words_is_not_read_as_a_full_pack() {
-        let Some(mut c) = with_packs(4, 2, 24, 7) else {
-            return;
-        };
+        let mut c = with_packs(no_data(), 4, 2, 24, 7);
         let me = c.world.player_guid.unwrap();
         const DAGGER: u32 = 0x8000_0401;
         on_the_body(&mut c, DAGGER, "Dagger", 21, 0, 1);
@@ -15932,13 +15813,12 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn coin_off_a_body_is_poured_onto_the_pile_carried_rather_than_given_a_slot() {
         // The main pack full but for the pyreals in it: the body's
         // coin joins the pile, spending no slot, and the rules take it
         // off a body they would otherwise shut as full.
-        let Some(mut c) = with_packs(2, 1, 0, 0) else {
-            return;
-        };
+        let mut c = with_packs(game_data(), 2, 1, 0, 0);
         c.world.objects.remove(&SACK);
         let me = c.world.player_guid.unwrap();
         const PILE: u32 = 0x8000_0600;
@@ -16054,9 +15934,7 @@ mod tests {
         // shot still unanswered or a spell in the air made every tick a
         // false one, and an archer with a full pack was sent to make
         // arrows it was already carrying.
-        let Some(mut c) = character_of_level(20) else {
-            return;
-        };
+        let mut c = character_of_level(no_data(), 20);
         const ARROWS: u32 = 0x8000_0201;
         let me = c.world.player_guid;
         c.world.objects.insert(
@@ -16088,14 +15966,13 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn no_spell_is_sent_at_a_creature_that_has_already_died() {
         // 36 "Target not acquired" in a run, every one a cast at a
         // creature that had died since the tick that chose it: ACE looks
         // the target up before the windup and answers TargetNotAcquired.
         // The swing has always made this test; the cast never did.
-        let Some((mut c, wand)) = mid_fight() else {
-            return;
-        };
+        let (mut c, wand) = mid_fight(game_data());
         const MACE: u32 = 0x8000_0101;
         const CREATURE: u32 = 0x8000_0103;
         // Incantation of Lightning Vulnerability Other, one of the

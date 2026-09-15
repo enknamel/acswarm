@@ -1,6 +1,6 @@
 //! The Training Academy tutorial's legs are walkable on the academy
 //! landblock's own navigation graph (see `ac_client::academy`). Needs
-//! AC_DATA_DIR; skipped without it.
+//! AC_DATA_DIR.
 
 use ac_scene::{
     collision::{Capsule, CollisionWorld},
@@ -11,10 +11,9 @@ use ac_scene::{
 use glam::Vec3;
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn academy_legs_are_walkable() {
-    let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
-        return;
-    };
+    let dir = ac_dat::test_data_dir();
     let assets = Assets::open(dir).unwrap();
     let block = ac_client::academy::LANDBLOCK;
     let scene = landblock::load(&assets, block).unwrap();

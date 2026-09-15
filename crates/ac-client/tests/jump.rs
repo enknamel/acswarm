@@ -4,15 +4,15 @@
 //! arrived a few centimetres under the porch top used to pass down
 //! through the slab and leave the character stuck in the one-metre gap
 //! beneath it (the server then refused every move).
-use ac_client::player::{Input, MovementLimits, Player};
+use ac_client::player::{Input, MovementLimits};
+use ac_client::testkit::human;
 use ac_scene::{collision::CollisionWorld, landblock, Assets};
 use glam::{Quat, Vec3};
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn jumps_at_the_shoushi_porch_never_end_under_it() {
-    let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
-        return;
-    };
+    let dir = ac_dat::test_data_dir();
     let assets = Assets::open(std::path::Path::new(&dir)).unwrap();
     let block = 0xDA55_0000;
     let scene = landblock::load(&assets, block).unwrap();
@@ -23,8 +23,7 @@ fn jumps_at_the_shoushi_porch_never_end_under_it() {
     for power in [0.9f32, 0.95, 1.0] {
         for deg in (0..360).step_by(15) {
             let heading = (deg as f32).to_radians();
-            let mut pl = Player::new(&assets, cell, start, Quat::from_rotation_z(heading));
-            pl.set_motion_table(&assets, 0x0200_0001, 0x0900_0001);
+            let mut pl = human(&assets, cell, start, Quat::from_rotation_z(heading));
             pl.max_jump_power = 1.0;
             for frame in 0..210 {
                 let input = Input {
@@ -64,10 +63,9 @@ fn jumps_at_the_shoushi_porch_never_end_under_it() {
 /// building and fall forever ("stuck in the air" in the client, the
 /// server refusing every position).
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn jumps_beside_meeting_hall_walls_stay_inside() {
-    let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
-        return;
-    };
+    let dir = ac_dat::test_data_dir();
     let assets = Assets::open(std::path::Path::new(&dir)).unwrap();
     let cases = [
         // South wall of the ground-floor hall.
@@ -82,8 +80,7 @@ fn jumps_beside_meeting_hall_walls_stay_inside() {
     let mut bad = Vec::new();
     for (cell, start, deg) in cases {
         let heading = (deg as f32).to_radians();
-        let mut pl = Player::new(&assets, cell, start, Quat::from_rotation_z(heading));
-        pl.set_motion_table(&assets, 0x0200_0001, 0x0900_0001);
+        let mut pl = human(&assets, cell, start, Quat::from_rotation_z(heading));
         pl.max_jump_power = 1.0;
         for frame in 0..360 {
             let input = Input {
@@ -113,10 +110,9 @@ fn jumps_beside_meeting_hall_walls_stay_inside() {
 /// and a floor, so a jump from the balcony landed on an invisible floor
 /// six metres above the hall, boxed in by invisible walls.
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn air_cells_above_the_meeting_hall_have_no_floor() {
-    let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
-        return;
-    };
+    let dir = ac_dat::test_data_dir();
     let assets = Assets::open(std::path::Path::new(&dir)).unwrap();
     let block = 0x0125_0000;
     let scene = landblock::load(&assets, block).unwrap();
@@ -131,8 +127,7 @@ fn air_cells_above_the_meeting_hall_have_no_floor() {
 
     // A running jump north off the balcony ends on the hall floor.
     let cell = 0x0125_010F;
-    let mut pl = Player::new(&assets, cell, Vec3::new(30.0, -43.0, 6.0), Quat::IDENTITY);
-    pl.set_motion_table(&assets, 0x0200_0001, 0x0900_0001);
+    let mut pl = human(&assets, cell, Vec3::new(30.0, -43.0, 6.0), Quat::IDENTITY);
     pl.max_jump_power = 1.0;
     for frame in 0..300 {
         let input = Input {
@@ -158,10 +153,9 @@ fn air_cells_above_the_meeting_hall_have_no_floor() {
 /// character still carries the building's interior cell id, which used to
 /// stop the terrain from catching them).
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn jumps_on_holtburg_hills_land_on_the_ground() {
-    let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
-        return;
-    };
+    let dir = ac_dat::test_data_dir();
     let assets = Assets::open(std::path::Path::new(&dir)).unwrap();
     let block = 0xA9B4_0000;
     let scene = landblock::load(&assets, block).unwrap();
@@ -171,13 +165,12 @@ fn jumps_on_holtburg_hills_land_on_the_ground() {
         for deg in (0..360).step_by(45) {
             let start = Vec3::new(x, y, z);
             let cell = ac_world::outdoor_cell(block, start);
-            let mut pl = Player::new(
+            let mut pl = human(
                 &assets,
                 cell,
                 start,
                 Quat::from_rotation_z((deg as f32).to_radians()),
             );
-            pl.set_motion_table(&assets, 0x0200_0001, 0x0900_0001);
             pl.max_jump_power = 1.0;
             for frame in 0..300 {
                 let input = Input {
@@ -205,16 +198,14 @@ fn jumps_on_holtburg_hills_land_on_the_ground() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_previewed_jump_lands_where_the_real_one_does_and_leaves_no_trace() {
-    let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
-        return;
-    };
+    let dir = ac_dat::test_data_dir();
     let assets = Assets::open(std::path::Path::new(&dir)).unwrap();
     let block = 0xDA55_0000;
     let start = Vec3::new(129.5, 175.0, 20.0);
     let cell = ac_world::outdoor_cell(block, start);
-    let mut pl = Player::new(&assets, cell, start, Quat::from_rotation_z(0.7));
-    pl.set_motion_table(&assets, 0x0200_0001, 0x0900_0001);
+    let mut pl = human(&assets, cell, start, Quat::from_rotation_z(0.7));
     pl.max_jump_power = 1.0;
     // Settle on the ground first.
     for _ in 0..30 {
@@ -252,16 +243,14 @@ fn a_previewed_jump_lands_where_the_real_one_does_and_leaves_no_trace() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn flying_ignores_the_ground_and_landing_finds_it_again() {
-    let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
-        return;
-    };
+    let dir = ac_dat::test_data_dir();
     let assets = Assets::open(std::path::Path::new(&dir)).unwrap();
     let block = 0xDA55_0000;
     let start = Vec3::new(129.5, 175.0, 20.0);
     let cell = ac_world::outdoor_cell(block, start);
-    let mut pl = Player::new(&assets, cell, start, Quat::from_rotation_z(0.7));
-    pl.set_motion_table(&assets, 0x0200_0001, 0x0900_0001);
+    let mut pl = human(&assets, cell, start, Quat::from_rotation_z(0.7));
     for _ in 0..30 {
         pl.update(&assets, &Input::default(), 1.0 / 30.0);
     }
@@ -313,16 +302,14 @@ fn flying_ignores_the_ground_and_landing_finds_it_again() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_wall_hides_what_is_behind_it() {
-    let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
-        return;
-    };
+    let dir = ac_dat::test_data_dir();
     let assets = Assets::open(std::path::Path::new(&dir)).unwrap();
     // The Holtburg meeting hall: standing near its south wall.
     let cell = 0x0125_010F;
     let start = Vec3::new(25.5, -44.5, 0.0);
-    let mut pl = Player::new(&assets, cell, start, Quat::IDENTITY);
-    pl.set_motion_table(&assets, 0x0200_0001, 0x0900_0001);
+    let mut pl = human(&assets, cell, start, Quat::IDENTITY);
     for _ in 0..30 {
         pl.update(&assets, &Input::default(), 1.0 / 30.0);
     }
@@ -334,17 +321,15 @@ fn a_wall_hides_what_is_behind_it() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_bolt_through_the_wall_does_not_get_there() {
     use ac_client::aim::{flight, Body, Shot};
-    let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
-        return;
-    };
+    let dir = ac_dat::test_data_dir();
     let assets = Assets::open(std::path::Path::new(&dir)).unwrap();
     // The Holtburg meeting hall again, by its south wall.
     let cell = 0x0125_010F;
     let start = Vec3::new(25.5, -44.5, 0.0);
-    let mut pl = Player::new(&assets, cell, start, Quat::IDENTITY);
-    pl.set_motion_table(&assets, 0x0200_0001, 0x0900_0001);
+    let mut pl = human(&assets, cell, start, Quat::IDENTITY);
     for _ in 0..30 {
         pl.update(&assets, &Input::default(), 1.0 / 30.0);
     }

@@ -7,15 +7,15 @@
 //! then carry on under the mountain to the portal's map position, two
 //! hundred metres beneath the portal.
 
-use ac_client::player::{Input, Player};
+use ac_client::player::Input;
+use ac_client::testkit::human;
 use ac_scene::Assets;
 use glam::{Quat, Vec3};
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn walking_up_the_villas_hillside_stays_on_the_hill() {
-    let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
-        return;
-    };
+    let dir = ac_dat::test_data_dir();
     let assets = Assets::open(std::path::Path::new(&dir)).unwrap();
     let block = 0x6F8B_0000;
     let origin = ac_scene::lbid::world_origin(block);
@@ -25,8 +25,7 @@ fn walking_up_the_villas_hillside_stays_on_the_hill() {
     let start = Vec3::new(108.7, 13.5, 4.2);
     let goal = origin + Vec3::new(-12.0, 212.0, 34.0);
     let cell = ac_world::outdoor_cell(block, start);
-    let mut pl = Player::new(&assets, cell, start, Quat::IDENTITY);
-    pl.set_motion_table(&assets, 0x0200_0001, 0x0900_0001);
+    let mut pl = human(&assets, cell, start, Quat::IDENTITY);
     // Follow the route the planner gives, as the client would.
     let cap = ac_scene::collision::Capsule {
         radius: 0.5,
