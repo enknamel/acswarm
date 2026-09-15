@@ -1,7 +1,8 @@
 # The autoplay agent
 
-How a character decides what to do, why it is built the way it is, and
-what it is being moved towards.
+How a character decides what to do, and why it is built that way. The
+order of the steps lives in `crates/ac-client/src/steps.rs`; the code
+map is `crates/ac-client/CLAUDE.md`.
 
 See also: [CLAUDE.md](../CLAUDE.md) (the crate map),
 [multi-session.md](multi-session.md) (many characters at once).
@@ -28,189 +29,69 @@ the design, and they pull in different directions:
   the group's mode from the same roster and must reach the same answer,
   because there is no authority to arbitrate and no time to vote.
 
-## What it is now
+## How it is built
 
-Three things that grew separately.
+Four layers, because the four demands above are different problems and
+one paradigm serves none of them well.
 
-**A flattened behaviour tree.** `Client::tick_autoplay` is a fixed
-priority chain -- dodge, survive, recover, academy, buff, vitals, loot,
-follow, team, salvage, fight, buff again, follow again, explore,
-grow --
-where each step returns whether it claimed the tick. That is exactly a
-behaviour tree's root selector, written out by hand. It works, and the
-order is genuinely load-bearing, but the order is control flow rather
-than data: nothing can read it, show it, or reason about it.
+**Reflexes: fixed priority.** Healing, stepping out of a projectile's
+way, coming back from a death, the Training Academy, a buff about to
+lapse, vitals. The reflex rows of `steps::STEPS`, run in order with no
+scoring. A reflex is paid for by every tick it claims, so it has to be
+worth the tick: a projectile that cannot hurt the character is stepped
+out of the way of only when the moment is going spare (`dodge`).
 
-Tidying the pack is not in the chain. Pouring one carried stack into
-another is made by the server on the spot, with no walk and no
-animation, so it costs no tick and runs as housekeeping. As a step it
-never won one -- a character that fights, loots and walks all afternoon
-has no quiet tick to give it -- and the pack filled up with part stacks
-while tidying waited its turn.
+**Goals: utility.** The goal rows of `steps::STEPS` are scored from the
+world each tick and the best one that acts takes the tick. A goal with
+no curve of its own is worth its place in the table, so the order holds
+until a curve is written on purpose. Looting has one: a body is worth
+more every second it waits and each body still on the floor adds to it,
+so past about a third of its life a body outranks starting another
+fight. Scoring stays cheap, a few sums per goal and no allocation,
+because it runs per session per tick.
 
-Spending experience moved out for the same reason. It was the first
-thing the grow step did, and grow is the last goal: reached only when
-nothing else wants the tick. Something always did. A character granted a
-hundred billion experience on the local server spent none of it in three
-minutes, because exploring claimed every tick and always had another
-room to walk to. A raise is one message, and the server takes it with no
-busy check, no animation and no movement -- it checks the stat and the
-pool, spends, and answers -- so it runs as housekeeping too, in the
-middle of a walk or a fight, still paced to one message at a time. A
-message can carry many ranks of one stat: a large pool goes out as the
-ranks buying one at a time would have given each stat, a message a stat,
-so it is spread as before and spent in seconds rather than days. The
-best buy is bought or saved for, never passed over for a cheaper rank
-that happens to fit: the kills after a large pool went only to the
-cheapest skills, and the ones a character fights with stopped growing.
-A rank that raises a maximum (Health, Stamina, Mana, or Endurance and
-Self, which they are built from) waits for the fight to be over, and its
-share of the pool waits with it. The fight under way is fought with what
-is left, which that rank leaves where it was, and the fraction left
-drops with it: a character with a large pool bought Health between
-swings until it healed, mid-fight, health it had never lost. A raise the
-server has not answered keeps its share too, and is given up on only
-once it has had time to arrive: a server that answers late, or a round
-of nine headless characters that takes seconds, is not a refusal.
+**Housekeeping: every tick, never claiming it.** `steps::HOUSEKEEPING`
+holds what the server does on the spot with no walk, no animation and
+no busy check: pouring stacks together, taking up a weapon, restocking a
+quiver, spending experience. As goals they never won a tick, because a
+character that fights, loots and walks is never idle. The clocks read
+off the ground -- how long a spot has been quiet, when each body first
+came into sight -- are wound before even the reflexes
+(`autoplay_watch_the_ground`), because a clock wound only where it is
+read stands still exactly when it is needed.
 
-Watching the ground runs before even the reflexes, for the same reason
-and one more. The clocks it keeps -- how long a spot has had nothing on
-it, and when each body on it first came into sight -- are read off the
-world every tick, not off what the character happens to be doing: the
-hunting step that acts on the first is the last goal in the table, so a
-character with a body to open never reaches it, and the second used to
-be wound inside the looting, which a character standing off from a body
-never runs at all. A clock only wound where it is read stands still
-exactly when it is most needed. Nine characters queueing at one corpse
-restarted the quiet clock every couple of seconds and never once walked
-the two hundred metres they had been given; and a body nobody had noted
-stayed for ever "newly fallen", so the claim tie-break over it never
-expired. Housekeeping alone was not enough for either: a tick claimed by
-a dodge, a heal, a death or the Academy returns before the housekeeping
-table is reached.
+Spending experience is paced to one message at a time, and a message
+can carry many ranks of one stat. The best buy is bought or saved for,
+never passed over for a cheaper rank that fits. A rank that raises a
+maximum (Health, Stamina, Mana, or Endurance and Self) waits for the
+fight to be over and keeps its share of the pool meanwhile, and a raise
+the server has not answered keeps its share until it has had time to
+arrive: a late answer is not a refusal.
 
-A reflex is paid for by every tick it claims, so a reflex has to be
-worth the tick. Dodging sits second in the chain, ahead of the healing,
-because a spell already in the air cannot be argued with -- and it took
-up every projectile in view without asking whose it was. Nine
-characters shooting the same creature from a metre apart aimed a fifth
-of one run's dodges at each other, and each of those held the legs for
-six hundred milliseconds and claimed the tick for a bolt that could not
-have hurt anybody. The place in the chain was right; what was missing
-was the price. A projectile that cannot hurt the character is still
-worth stepping out of the way of -- the server destroys it on us and
-the fellow loses his spell -- but only when the moment is going spare
-(`dodge`).
+**Plans: small sequences, and one planner.** Each goal is a short
+resumable sequence with guards. The town run is the exception and is
+planned: it has interacting preconditions over a shared pool -- purse,
+burden, slots, what the counter stocks and will buy -- and `ac_vendor`
+walks the resources forward (sell, cash, buy, convert), each act taking
+what it costs and giving what it yields. "Sell first, because too laden
+to buy" falls out of the arithmetic rather than being patched in. It is
+arithmetic over a plain state, so a trip is judged before the character
+leaves as well as at the counter.
 
-**A group state machine.** `logistics` is a proper FSM over
-`Hunting | Restocking{Shopping, HandOver, Away, HandOut}`, computed by
-every session from the shared roster. This part is right and is not
-changing: determinism is the whole point of it.
-
-**Sixty-two fields of state.** `Autoplay` carries 62 fields and
-`growth::State` another 32. Many are legitimate memory. A growing
-number are not: `too_heavy`, `run_was_futile`, `stopped_in_town`,
-`handed_over`, `give_tries`, `take_tries`, `refused_kinds`, `shelved`,
-`walking_to`, `reaching`, `unsellable`, `skip_vendors`, `held_back`.
-
-Each of those is the scar of one bug. Every one of them encodes the
-same thing in a slightly different way: *something was refused, and
-here is how long to wait before asking again.*
-
-## The actual problem
-
-Every failure found in a day of live testing was one of two kinds:
-
-- **An unmodelled precondition.** Buying without checking the weight it
-  would add. Offering a vendor an item it will never take. Walking to a
-  counter behind a door the character cannot open. Asking for a
-  component no shop in the world sells.
-- **An unhandled outcome.** A give of part of a stack that the server
-  drops without a word, asked 496 times. A corpse that will not open,
-  asked until it rotted. An item refused for the day, asked on every
-  corpse after.
-
-Both have the same root: **an action returns `bool`.** True means it
-did something. False means... it did not, this tick, for a reason the
-caller cannot see and therefore cannot act on. So "keeps trying for
-ever" is not a bug that was written; it is the default that falls out
-of the type. Every fix has been a new flag bolted on beside the call
-site, which is why there are sixty-two of them.
-
-This is the thing to fix, and it is independent of any larger
-restructuring.
-
-## Where it is going
-
-Four layers, because the four demands above are genuinely different
-problems and one paradigm serves none of them well.
-
-### 0. Reflexes -- fixed priority
-
-Dodge, survive, recover, hand back to the player. An ordered list, no
-scoring, no planning, O(1). This is what the current chain does well and
-it stays as it is.
-
-### 1. Goal selection -- utility
-
-Score the standing goals each tick -- Fight, Loot, Restock, Buff,
-Follow, Salvage, Idle -- from world state, and take the best.
-
-Static priority is what makes the present code brittle: the order of
-the chain silently decides a hundred questions, and every "except when"
-becomes another branch. Utility says the same things out loud and in
-one place. It is already being hand-written as constants: `CORPSE_URGENT`
-is "looting outscores fighting when the body is nearly gone",
-`go_at: 0.35` is "restocking outscores hunting below a third of stock".
-Those are utility curves with the arithmetic inlined.
-
-Scoring must stay cheap: a handful of arithmetic per goal, no
-allocation, because it runs per session per tick.
-
-### 2. Plans -- behaviour trees, and one planner
-
-Each goal expands into a small behaviour tree: a sequence of steps with
-guards, resumable, interruptible. Most goals are honestly a fixed
-sequence and a tree says so plainly.
-
-**Restocking is the exception and should be planned.** It is the one
-goal with interacting preconditions over a shared resource pool --
-purse, burden, slots, what the shop stocks, what it will buy, whether
-the door opens, whether the place can be reached -- and it is where
-every bug has been. A small domain planner over those preconditions
-would have *derived* "cannot buy because too heavy, therefore sell
-first" instead of it being patched in after the fact. Not general GOAP:
-a handful of actions with declared preconditions and effects, searched
-over a tiny state, replanned only when something changes.
-
-### 3. The group -- keep the FSM
-
-Unchanged. Small, deterministic, and its determinism is the point.
-
-One thing now sits on top of it, and it is not a state: a plan. Every
-session judged the world alone and read what the others said about
-themselves, and what came of that was coordination by coincidence --
-six characters joined their leader on one Drudge while three more hit
-the followers from behind, and each body went to whoever was free
-first. The leader is the one session that sees the same board the
-others see, so it plans (`plan`): who fights what, spread by who is
-being attacked and by distance with focus fire kept for the hard
-targets; whose turn each body is, one body a turn round the party, the
-skill rules' routing left as it was; and whom it waits for before it
-moves the party on -- a follower still fighting or left behind before
-it goes looking for the next spot, and the one it dealt a body to
-before it walks off to the next fight. That last one was measured in:
-with each body given to one hand the leader owed none, walked off the
-moment a creature fell, and the party followed it, twice as far and
-with a quarter of the loot. The plan goes out on the board like everything
-else, and an order is obeyed only while it is fresh -- a leader that
-goes quiet leaves no order standing, and every session falls back to
-the rules it had before there was a plan, which is why a plan that
-never arrives stops nobody fighting. It stays an FSM underneath because
-the plan reads the roster and never drives it: it does not choose the
-leader, found the fellowship or start the walk to town, and every
-decision in it is a pure function over a plain state that a test can
-run without a clock or a server.
+**The group: a state machine, with a plan on top.** `logistics` is an
+FSM over `Hunting | Restocking{Shopping, HandOver, Away, HandOut}`,
+computed by every session from the shared roster, and determinism is
+the point of it: there is no authority to arbitrate. The leader also
+plans (`plan`): who fights what, spread by who is being attacked and by
+distance with focus fire kept for hard targets; whose turn each body
+is; and whom it waits for before moving the party on -- a follower
+still fighting or left behind, and the one it dealt a body to. The plan
+goes out on the board, an order is obeyed only while it is fresh, and a
+session with no fresh order falls back to its own rules, so a plan that
+never arrives stops nobody fighting. The plan reads the roster and never
+drives it: it does not choose the leader, found the fellowship or start
+the walk to town, and every decision in it is a pure function a test
+can run without a clock or a server.
 
 ### Why not one paradigm
 
@@ -224,96 +105,31 @@ run without a clock or a server.
 - **Pure utility**: no good account of multi-step plans, which is most
   of what a trip to town is.
 
-## The migration
+## Outcomes, not booleans
 
-Four stages, each shippable on its own, in this order. Nothing here is
-a rewrite; the behaviour at each step is meant to be identical except
-where a bug is being fixed.
-
-### Stage 1 -- typed outcomes
-
-Replace `bool` with an outcome that says what happened:
-
-```rust
-pub enum Did {
-    /// Claimed the tick and is working.
-    Acting,
-    /// Finished; let something else have the tick.
-    Done,
-    /// Cannot proceed yet, for a reason that will pass by itself.
-    Waiting(Because),
-    /// Cannot proceed, and asking again soon will not help.
-    Blocked(Because),
-    /// Will never work. Do not ask again.
-    Refused(Because),
-}
-```
-
-`Because` carries a short reason and, where the server gave one, the
-weenie error behind it. One retry policy reads that: `Waiting` retries
-freely, `Blocked` backs off, `Refused` stops. That single change
-subsumes `give_tries`, `take_tries`, `refused_kinds`, `shelved`,
-`unsellable`, `run_was_futile`, `too_heavy` and `skip_vendors`, and it
-makes every one of them visible in the log and the UI instead of
-invisible in a boolean.
-
-Done first because it is mechanical, testable, pays for itself
-immediately, and makes the later stages cheaper.
-
-**Done**: the looting waits (`shelved`, `refused_kinds`, `take_tries`),
-the selling ones (`unsellable`, `skip_vendors`) and the hand-over
-(`give_tries`). Six flags and five constants replaced by one policy.
-
-**Deliberately not done here**: `run_was_futile`, `too_heavy` and
-`stopped_in_town`. They look like the others but are not. All three are
-read by `Supplies::broke`, which is how a character tells the *party*
-it is done shopping and should be carried on without -- so they are
-goal-layer state, not retry bookkeeping, and forcing them into a
-`Patience` would hide that. They become one honest "this character
-cannot restock, and here is why" in stage 3.
-
-### Stage 2 -- the chain becomes data
-
-**Done.** `steps::STEPS`: the same order, each entry carrying its name
-and why it sits where it does, and marked reflex or goal. Tests hold
-that healing comes before hunting, that looting comes before the shops,
-and that no reflex sits below a goal.
-
-### Stage 3 -- utility at the root
-
-**Done.** Goals are scored; one with no opinion takes its place in the
-table, so nothing moved until a curve was written on purpose.
-
-The first curve: a body is worth more every second it waits and each
-one still on the floor adds to that, so past about a third of its life
-a body outranks starting another fight. A character that only broke off
-for a corpse about to rot never went back for the older ones, because
-in a busy dungeon there is always another fight.
-
-### Stage 4 -- the errand planner
-
-**Done.** `errand::plan` walks the resources forward -- sell, cash, buy,
-convert -- and each act takes from the pool what it costs and gives
-back what it yields. "Cannot buy because too laden, therefore sell
-first" is not written down: it falls out of selling happening before
-buying and of weight being counted.
-
-It is arithmetic over a plain state, so it runs before the character
-leaves as well as when it arrives, which is how a trip is known to be
-worth making.
+Almost nothing a character tries is guaranteed, and a step that answers
+only "acted or not" leaves its caller nothing to act on: "keeps trying
+for ever" is the default that falls out of a `bool`. So steps answer
+`did::Did` -- `Acting`, `Done`, `Waiting(Because)`, `Blocked(Because)`
+or `Refused(Because)` -- where `Because` carries a short reason and,
+when the server gave one, the weenie error behind it. One retry policy,
+`did::Patience`, reads it: waiting retries freely, blocked backs off,
+refused stops. A new wait on a refusal belongs there, not in a flag
+beside the call site.
 
 ## What is left
 
-- The three goal-layer flags stage one left alone: `run_was_futile`,
-  `too_heavy`, `stopped_in_town`. They belong with `Supplies::broke` as
-  one "cannot restock, and why" that the party can read.
-- The steps still answer `Did::Acting` or `Did::Done` and nothing else.
-  Each one that learns to say why it stood aside makes the log and the
-  autoplay panel better; none of them has to.
-- Reachability is not yet a precondition anywhere. The planner knows
-  what a counter stocks and what the character can pay and lift; it
-  does not know that the counter is up a flight of stairs the
-  navigation graph has no path to.
+- `run_was_futile`, `too_heavy` and `stopped_in_town` look like retry
+  bookkeeping but are goal-layer state: they tell the party this
+  character cannot restock. They belong together as one "cannot
+  restock, and here is why" that the party can read.
+- Most steps still answer only `Did::Acting` or `Did::Done`. Each one
+  that learns to say why it stood aside makes the log and the autoplay
+  panel better; none of them has to.
+- Reachability is not yet a precondition of the town-run planner. It
+  knows what a counter stocks and what the character can pay and lift,
+  not that the counter is up a flight of stairs the navigation graph
+  has no path to.
 
 ## What the server will and will not tell a character
 
@@ -441,67 +257,43 @@ the ACE file and line, a test in the exact wording, an arm in
 `refusals::answer`, and a hand-off in `hear_refusal`. Not a
 `strip_prefix` in the system that noticed.
 
-## Getting there is four questions, and height is in all of them
+## Getting there: height, wedges and clutter
 
-A character sent to Asenala, who keeps a shop on the upper floor of a
-house in Holtburg, walked a hundred and forty metres, stopped six
-millimetres from her on the map and three metres below her on the
-ground floor, and stood there for good. Five separate things had to be
-right before it could climb the stairs, and four of them were the same
-mistake: a place is a point in three dimensions, and every one of these
-was judging it on the flat.
+A place is a point in three dimensions, and navigation that judges it on
+the flat strands a character under its goal: a shopkeeper on an upper
+floor was reached six millimetres away on the map and three metres
+below on the ground floor. The rules that came of it:
 
-- **Is the goal's height to be believed?** Both planners grounded a
-  goal onto the terrain under it unless told otherwise, and what told
-  them was a cell id that the steering fills in with a *landblock* --
-  whose low word is zero, which reads as "outdoors". Neither the
-  block's graph nor the neighbourhood planner ever saw the real
-  height. They ask the geometry now (`CollisionWorld::in_known_cell`),
-  which is not something a caller can get wrong.
-- **Have we arrived?** `flat.length() > stop`. Standing under someone
-  is not standing with them: arrival counts height now, to within a
-  doorsill.
-- **Have we reached this waypoint?** The same again, one level down,
-  and worse: a waypoint at the top of a staircase is a pace away on the
-  map, so the route was thrown away a waypoint at a time and the
-  character left aiming at a point above its own head.
-- **How far may one frame carry us?** Building a chunk of the
-  navigation graph takes a couple of hundred milliseconds and the walk
-  that follows is charged the whole of it at running speed -- three
-  metres in one step, past the waypoint and out the far side, turned
-  round by the next frame. At the foot of a staircase that reads as a
-  character crossing and re-crossing the bottom step for ever. A frame
-  may not carry us past what we are walking to.
-
-And one that was not about height at all: **a wedge has to let go**.
-The rule that stops a character leaning on a wall returned before the
-line that cleared its own counter, so the first doorframe a character
-brushed froze it for the rest of the session -- for that errand and
-every errand after it. It now clears the moment the character is asked
-to go somewhere else, and otherwise rests a second and tries again,
-because doors open and whatever was leaned on walks away.
-
-And one that was not about the landblock at all: **what the server
-puts in the room is not in the ground**. The collision world and the
-graph over it are built from the DAT files once a block and shared by
-every character in the process; a chest, a hook, a cart are objects,
-and arrive and leave with the packets. The physics walks straight
-through them, and the server takes the position it is sent, so they
-never stalled a walk -- a stall is always the landblock's own geometry
--- but the retail client stopped at them, and a character that walks
-through the furniture does not move the way a player does.
-`ac_nav::obstacles` keeps the ones near the character, as the
-cylinders the retail client collided with them by (the Setup's
-`CylSphere`s, its `Sphere`s failing those), gathered again only when
-the world changes or the character has moved. They are not laid over
-the ground for the steering to plan on: clutter must not send a walk
-to the block's graph or the neighbourhood planner, which are for what
-actually stops the character. Once the steering has said where to
-head, the leg there is walked round the first cylinder on it, a frame
-at a time, and a leg no detour clears is walked as it was. A creature,
-anything carried, anything Ethereal, a missile, anything the client
-collided with by its parts' own BSP rather than a cylinder, and -- by
-the rule below -- a door are never obstacles.
+- **A goal's height is believed** when the geometry says the point is
+  in a known cell (`CollisionWorld::in_known_cell`). A cell id is not
+  enough: the steering fills one in with a landblock, whose low word
+  reads as "outdoors", and the goal was grounded onto the terrain.
+- **Arrival counts height**, to within a doorsill, and so does reaching
+  a waypoint: a waypoint at the top of a staircase is a pace away on the
+  map.
+- **One frame may not carry the character past what it is walking to.**
+  Building a chunk of the navigation graph takes a couple of hundred
+  milliseconds, and a walk charged all of it at running speed crossed
+  the bottom step and back for ever.
+- **A wedge lets go.** The rule that stops a character leaning on a wall
+  clears the moment it is sent somewhere else, and otherwise rests a
+  second and tries again: doors open and what was leaned on walks away.
+- **What the server puts in the room is not in the ground.** The
+  collision world and its graph are built from the DAT files and shared
+  by every character in the process; a chest, a hook or a cart arrives
+  and leaves with the packets. The walking physics goes through them
+  and the server takes the position it is sent, so they never stall a
+  walk -- a stall is always the landblock's own geometry -- but the
+  retail client stopped at them. `ac_nav::obstacles` keeps the ones near
+  the character as the cylinders the retail client collided them by
+  (the Setup's `CylSphere`s, else its `Sphere`s), gathered again only
+  when the world changes or the character moves. They are not laid over
+  the ground the steering plans on; once the steering has chosen where
+  to head, the leg there is walked round the first cylinder on it, a
+  frame at a time, and a leg no detour clears is walked as it was. A
+  creature, anything carried, anything Ethereal, a missile, anything
+  collided by its parts' own BSP, and -- by the rule below -- a door are
+  never obstacles.
 
 ## Rules that hold whatever the structure
 
