@@ -193,12 +193,13 @@ pub fn plan(
         let mut batch = Vec::new();
         let mut takings = 0;
         let mut lighter = 0;
-        // Slots for the coin, counted per item because each sale frees the item's own slot.
+        // Free slots as the round goes, since each sale frees the item's own slot.
         let mut slots = left.slots;
         let mut coin = left.coin;
         while let Some(item) = to_sell.first() {
             let would = coin.saturating_add(item.pays);
-            // Sold only if the item's slot plus the coin's current slots cover the coin after it.
+            // Sold only if the free slots, the item's own slot and the slots its coin already
+            // fills cover the coin after it.
             let have = slots + 1 + coin_slots(coin);
             let needs = coin_slots(would);
             if have < needs {
