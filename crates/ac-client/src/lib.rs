@@ -262,6 +262,7 @@ pub mod options;
 pub mod pathfinder;
 pub mod plan;
 pub mod player;
+pub mod position;
 pub mod profile;
 pub mod recalls;
 pub mod reconnect;

@@ -12,6 +12,8 @@
 //!
 //! - [`did`] -- what happened ([`did::Did`]), why not ([`did::Because`]),
 //!   and the one retry policy that reads them ([`did::Patience`]).
+//! - [`recent`] -- when each thing was last seen, forgotten after a fixed
+//!   window that, unlike [`did::Patience`], never doubles.
 //! - [`weenie_errors`] -- what the server's own refusal codes mean, so a
 //!   reason can be told apart by its number rather than by its English.
 //! - [`pack`] -- the arithmetic of a pack full of stacks: which two to
@@ -28,6 +30,7 @@
 
 pub mod did;
 pub mod pack;
+pub mod recent;
 pub mod refusals;
 pub mod room;
 pub mod weenie_errors;
