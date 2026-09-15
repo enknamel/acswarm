@@ -39,6 +39,7 @@ dir gives false compile errors); check `df -g /` first, stop below 15 GB free, d
 
 | crate | role | entry | uses |
 |---|---|---|---|
+| ac-store | the files kept between runs: config, cache and script directories, whole-file JSON reads and writes, owner-only (0600) for the ones holding passwords | `read_json`, `write_json_atomic`, `file_safe` | - |
 | ac-dat | DAT container: block chains, B-tree directory, file by id; knows nothing of contents | `DatArchive` | - |
 | ac-formats | one decoder module per asset type; every `parse` consumes its bytes exactly | `gfxobj`, `setup`, `spell_table` | dat |
 | ac-scene | GPU-free assembly: memoizing loader, terrain, landblocks, interiors, collision, nav graph, particles, chargen | `Assets` | dat, formats |
@@ -77,7 +78,7 @@ UDP <-> ac-net::Session <-> ac-client::Client::tick <-> ac-world::World::apply
 - ac-client renders nothing; only the session the window shows holds GPU state. Window, headless
   loop, panels, scripts and the bus all act through `Client` methods and `Event`s.
 - `~/.config/acswarm` (`$ACSWARM_CONFIG_DIR`) holds the settings, `~/.acswarm` the launcher config
-  and scripts (`$ACSWARM_SCRIPTS`). Passwords live in the servers store (`ac_plugin::servers`).
+  and scripts (`$ACSWARM_SCRIPTS`); ac-store owns both. Passwords: `ac_plugin::servers`, 0600.
 
 ## Logging
 

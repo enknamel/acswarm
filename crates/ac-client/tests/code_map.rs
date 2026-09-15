@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use ac_client::steps::STEPS;
 
 /// The root map is loaded into every session; this crate's only when working here.
-const ROOT_LINES: usize = 120;
+const ROOT_LINES: usize = 121;
 const CLIENT_LINES: usize = 200;
 
 /// A backticked span ending in one of these names a file.

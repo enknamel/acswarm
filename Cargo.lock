@@ -162,6 +162,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ac-store"
+version = "0.0.3"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "ac-vendor"
 version = "0.0.3"
 dependencies = [
