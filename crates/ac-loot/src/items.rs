@@ -1,9 +1,7 @@
-//! Carried items as searchable records: what an item is from its object
-//! description, plus its numbers once it has been appraised (damage,
-//! armor level, spells, wield requirement...). [`Query`] parses an
-//! inventory search line ("dmg>10 spell:blood type:weapon", "slot:ring
-//! epics>=2", "hauberk \"epic life magic\"", "(ring or bracelet) not
-//! minors>0") and [`ItemStats::matches`] tests an item against it.
+//! Carried items as searchable records: what an item is from its object description, plus its
+//! numbers once appraised (damage, armor level, spells, wield requirement).
+//! [`Query`] parses a search line ("dmg>10 spell:blood", "slot:ring epics>=2",
+//! "(ring or bracelet) not minors>0") and [`ItemStats::matches`] tests an item against it.
 
 use ac_net::messages::Appraisal;
 use ac_world::{item_type, WorldObject};
@@ -55,14 +53,10 @@ pub struct ItemStats {
     /// See [`kind_name`].
     pub kind: &'static str,
     pub stack: u32,
-    /// The largest this stack may grow to. 1 (or 0) is a thing
-    /// that does not stack at all. Whether two things can be put
-    /// together is this, never how many are in them now: two
-    /// single tapers are one stack of two.
+    /// Largest the stack may grow to (0 or 1: none); stacking asks this, never `stack`.
     pub max_stack: u32,
     pub wielded: bool,
-    /// Where it can be worn or held (see `ac_world::equip`): what tells
-    /// a shield from the rest of the armour.
+    /// Where it can be worn or held (`ac_world::equip` bits); tells a shield from other armour.
     pub valid_locations: u32,
     /// The pack holding it (our own guid for the main pack).
     pub container: u32,
@@ -81,19 +75,16 @@ pub struct ItemStats {
     pub damage_type: String,
     /// The same as bits, for matching against what a creature resists.
     pub damage_type_bits: u32,
-    /// What the weapon was imbued with: critical strike, crippling blow,
-    /// rending of one element (see `ac_world::elements::imbue`).
+    /// Imbue bits (`ac_world::elements::imbue`): critical strike, crippling blow, element rending.
     pub imbued: u32,
     /// A caster's elemental damage bonus, 1.0 when it has none.
     pub elemental_damage: f32,
     /// How often and how hard criticals land, 0 when not said.
     pub crit_frequency: f32,
     pub crit_multiplier: f32,
-    /// A launcher's damage modifier (a bow multiplies its arrows' damage
-    /// by this), 0 when not said.
+    /// A launcher's multiplier on its ammunition's damage, 0 when not said.
     pub damage_mod: f32,
-    /// What ammunition it takes or is (see `ac_world::fletching::ammo_type`),
-    /// 0 for a weapon that needs none.
+    /// Ammunition it takes or is (`ac_world::fletching::ammo_type`), 0 for a weapon needing none.
     pub ammo_type: u32,
     /// What it is for in a fight (see `ac_world::fletching::combat_use`).
     pub combat_use: u32,
@@ -110,9 +101,7 @@ pub struct ItemStats {
     /// Skill and level needed to wield it, in words.
     pub wield_skill: String,
     pub wield_level: u32,
-    /// Every requirement for wielding it, as `(kind, what, difficulty)`:
-    /// see `ac_world::wield`. A weapon may carry up to four, and all of
-    /// them must be met.
+    /// Wield requirements `(kind, what, difficulty)` (`ac_world::wield`): up to four, all needed.
     pub wield_reqs: Vec<(u32, u32, u32)>,
     pub mana: u32,
     pub max_mana: u32,
@@ -120,13 +109,10 @@ pub struct ItemStats {
     pub tinks: u32,
     pub bonded: bool,
     pub attuned: bool,
-    /// Somebody has written on it. An inscription is a person's, not
-    /// the item's, and a vendor is not where it should end up.
+    /// Somebody has written on it: a person's work, not the item's, so it never goes to a vendor.
     pub inscribed: bool,
-    /// The server says it will not take this over a counter at all:
-    /// `IsSellable` false, or `Retained`, which is the flag a player
-    /// puts on a thing to stop exactly this. Quest items, the
-    /// Academy's bread, tokens.
+    /// The server will not buy it: `IsSellable` false (quest items, Academy bread, tokens),
+    /// or `Retained` true, the flag a player sets to stop exactly this.
     pub unsellable: bool,
 }
 
@@ -189,9 +175,8 @@ impl ItemStats {
         .with_launcher_guess()
     }
 
-    /// A bow, crossbow or atlatl the server did not describe: the header
-    /// fields are optional and appraisal never carries them (ACE sends
-    /// neither), so what it shoots is worked out from its skill or name.
+    /// What a bow, crossbow or atlatl shoots, from its skill or name, when the server did not say.
+    /// The header fields are optional and appraisal never carries them (ACE sends neither).
     fn with_launcher_guess(mut self) -> Self {
         use ac_world::fletching::{ammo_type, combat_use};
         use ac_world::item_type;
@@ -251,8 +236,6 @@ impl ItemStats {
             self.wield_skill = skill_name(skill as u32);
             self.wield_level = level.max(0) as u32;
         }
-        // Up to four requirement sets, each a kind, what it is about and
-        // how much of it is needed. A top wand asks for War Magic 275.
         self.wield_reqs = [
             (158, 159, 160),
             (270, 271, 272),
@@ -282,8 +265,7 @@ impl ItemStats {
             self.structure = s.max(0) as u32;
             self.max_structure = m.max(0) as u32;
         }
-        // A weapon may carry up to five imbued effects, in five
-        // separate properties; they are one word as far as we care.
+        // Imbues arrive in up to five separate properties; a rule needs only their union.
         self.imbued = [179, 303, 304, 305, 306]
             .into_iter()
             .filter_map(|p| a.int(p))
@@ -321,11 +303,8 @@ impl ItemStats {
             .strings
             .iter()
             .any(|(k, v)| *k == 7 && !v.trim().is_empty());
-        // Absent means sellable: only the things a vendor refuses
-        // carry `IsSellable`, and they carry it as false. `Retained`
-        // is the other way round -- present and true is the player
-        // saying "not this one" -- and the server refuses it just the
-        // same.
+        // Absent means sellable: only what a vendor refuses carries `IsSellable`, and as false.
+        // `Retained` is the other way round (present and true) and is refused just the same.
         self.unsellable = a
             .bools
             .iter()
@@ -334,8 +313,7 @@ impl ItemStats {
         self.with_launcher_guess()
     }
 
-    /// The short lines a tooltip shows: damage, armor, spells, requirement,
-    /// value and burden.
+    /// The short lines a tooltip shows.
     pub fn summary(&self) -> Vec<String> {
         let mut out = Vec::new();
         if self.damage_high > 0 {
@@ -422,9 +400,8 @@ impl ItemStats {
             NumKey::Stack => Some(self.stack as f64),
             NumKey::Attack => Some((self.attack_bonus - 1.0) * 100.0),
             NumKey::Defense => Some((self.defense_bonus - 1.0) * 100.0),
-            // Spell counts are known once appraised (or when the
-            // description itself names a spell, a scroll's say); an
-            // unknown list is not an empty one.
+            // Known once appraised or once the description names a spell (a scroll);
+            // an unknown list is not an empty one.
             NumKey::Spells => self.spells_known().then_some(self.spells.len() as f64),
             NumKey::Cantrips => self.spells_known().then_some(self.tiers().count() as f64),
             NumKey::Minors => self.tier_count(Tier::Minor),
@@ -494,11 +471,8 @@ impl ItemStats {
         }
     }
 
-    /// Whether the item has `w` as a word of its own -- in its name,
-    /// material, kind or a spell, or as a slot word it fits -- rather than
-    /// inside a longer word (see [`word_in`]). What a profile's "item
-    /// name" condition asks. A search line still takes any part of a
-    /// word, as a search box should: "plate" is how Platemail is found.
+    /// Whether `w` is a whole word of its name, material, kind or a spell, or a slot it fits.
+    /// What a profile's "item name" condition asks; a search line takes part of a word ("plate").
     pub fn has_word(&self, w: &str) -> bool {
         word_in(&self.name, w)
             || word_in(self.material, w)
@@ -508,11 +482,8 @@ impl ItemStats {
     }
 }
 
-/// Whether `needle` stands in `hay` as a word or words of its own, case
-/// aside: "pea" is in "Hyssop Pea" and "Lead Pea" but not in "Spear" or
-/// "Pearl". A word ends wherever its letters and digits do, so a phrase
-/// ("healing kit") is found as it is written and "Pea," still has its
-/// pea. A blank needle asks nothing, and is in everything.
+/// Whether `needle` stands as whole words in `hay`, case aside: "pea" in "Lead Pea", not "Spear".
+/// Words end where letters and digits do, so "Pea," has its pea; a blank needle is in everything.
 pub fn word_in(hay: &str, needle: &str) -> bool {
     let needle = needle.trim().to_lowercase();
     if needle.is_empty() {
@@ -520,8 +491,7 @@ pub fn word_in(hay: &str, needle: &str) -> bool {
     }
     let hay = hay.to_lowercase();
     let wordy = |c: Option<char>| c.is_some_and(char::is_alphanumeric);
-    // Only an end of the needle that is part of a word needs a break
-    // beside it.
+    // Only a needle end that is a letter or digit needs a word break beside it.
     let open = wordy(needle.chars().next());
     let close = wordy(needle.chars().next_back());
     hay.char_indices().any(|(at, _)| {
@@ -531,9 +501,8 @@ pub fn word_in(hay: &str, needle: &str) -> bool {
     })
 }
 
-/// A cantrip's tier, read off the front of its name ("Epic Strength",
-/// "Legendary Life Magic Aptitude"): what an item's spell list says, not
-/// what is cast.
+/// A cantrip's tier, read off the front of its name ("Epic Strength").
+/// What an item's spell list says, not what is cast.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Tier {
     Minor,
@@ -748,8 +717,7 @@ pub enum Op {
 }
 
 impl Op {
-    /// The comparison in words, for anything that shows a rule to a
-    /// person rather than running it.
+    /// The comparison in words, for showing a rule to a person.
     pub fn word(self) -> &'static str {
         match self {
             Op::Lt => "is under",
@@ -774,11 +742,8 @@ impl Op {
 /// One term of a query.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Term {
-    /// Matches the name, material, kind, a spell name or a slot word. A
-    /// quoted phrase (`"epic life magic"`) is one word, spaces and all.
-    /// In a search line any part of a word will do; as a profile's own
-    /// "item name" condition it must be a whole word (see
-    /// [`ItemStats::has_word`]).
+    /// Name, material, kind, a spell name or a slot word; a quoted phrase is one word.
+    /// Any part of a word matches; a profile's "item name" uses [`ItemStats::has_word`] instead.
     Word(String),
     /// `spell:blood`
     Spell(String),
@@ -821,11 +786,8 @@ impl Expr {
     }
 }
 
-/// A parsed search line. Words are matched case-insensitively as
-/// substrings; a space between terms means both must hold, `or` means
-/// either, `not x` (or `-x`) means the opposite, and parentheses group:
-/// `a b or c` is `(a and b) or c`. Bad input never fails to parse, it
-/// just means less (see [`Query::check`] for what was wrong with it).
+/// A parsed search line of case-insensitive substrings; `a b or c` is `(a and b) or c`.
+/// Bad input never fails to parse, it only means less ([`Query::check`] says what was wrong).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Query {
     pub expr: Option<Expr>,
@@ -843,9 +805,8 @@ enum Token {
     Word(String),
 }
 
-/// Cut a line into tokens: parentheses stand alone even when stuck to a
-/// word, double quotes hold a phrase together (`"epic life"` or
-/// `spell:"life magic"`), and a leading `-` on a word is a `not`.
+/// Cut a line into tokens: parentheses stand alone even stuck to a word, quotes hold a phrase
+/// (`spell:"life magic"`), and a leading `-` on a word is a `not`.
 fn tokenize(line: &str) -> Vec<Token> {
     let mut out = Vec::new();
     let mut word = String::new();
@@ -878,8 +839,7 @@ fn tokenize(line: &str) -> Vec<Token> {
                 out.push(Token::Not);
             }
             '"' => {
-                // A phrase: whatever was typed before the quote (a
-                // `spell:` key) stays in front of it.
+                // What came before the quote (a `spell:` key) stays in front of the phrase.
                 for c in chars.by_ref() {
                     if c == '"' {
                         break;
@@ -898,9 +858,8 @@ fn tokenize(line: &str) -> Vec<Token> {
     out
 }
 
-/// A recursive-descent parser over the tokens that never fails: a
-/// stray `)` is skipped, a missing one closes at the end of the line,
-/// an `or` with nothing on one side joins what there is.
+/// Recursive descent that never fails: a stray `)` is skipped, a missing one closes at line end,
+/// and an `or` with nothing on one side joins what there is.
 struct Parser<'a> {
     tokens: &'a [Token],
     at: usize,
@@ -983,8 +942,7 @@ impl Parser<'_> {
                 self.problems.push("a `)` without its `(`".into());
                 None
             }
-            // `and`/`or` here is a stray one; the loops above eat the
-            // meaningful ones.
+            // A stray `and`/`or`: the loops above consume the meaningful ones.
             Token::And | Token::Or => None,
             Token::Word(w) => {
                 let (term, problem) = parse_term(&w);
@@ -997,8 +955,8 @@ impl Parser<'_> {
     }
 }
 
-/// One word as a term, and what was doubtful about it (an unknown key
-/// still becomes a plain word, so the query keeps working).
+/// One word as a term, and what was doubtful about it.
+/// An unknown key still becomes a plain word, so the query keeps working.
 fn parse_term(w: &str) -> (Term, Option<String>) {
     match parse_num(w) {
         Ok(Some(t)) => return (t, None),
@@ -1054,9 +1012,8 @@ fn parse_term(w: &str) -> (Term, Option<String>) {
 }
 
 impl Parser<'_> {
-    /// The whole line. Anything left over after the first expression (a
-    /// stray `)`) is skipped and what follows it joined on with `and`,
-    /// so nothing typed is silently dropped.
+    /// The whole line: a stray `)` after the first expression is skipped and what follows is joined
+    /// on with `and`, so nothing typed is silently dropped.
     fn line(&mut self) -> Option<Expr> {
         let mut expr = self.or_expr();
         while self.at < self.tokens.len() {
@@ -1092,10 +1049,8 @@ impl Query {
         Query { expr: p.line() }
     }
 
-    /// What is wrong with a line, for a rule editor to show: unbalanced
-    /// parentheses, an unknown key (`foo:bar`, `x<3`), a dangling `or`.
-    /// The line still parses (see [`Query::parse`]); this only says
-    /// whether it means what was typed.
+    /// What a rule editor shows as wrong: unbalanced parentheses, an unknown key, a dangling `or`.
+    /// The line still parses ([`Query::parse`]); this only says whether it means what was typed.
     pub fn check(line: &str) -> Result<(), String> {
         let tokens = tokenize(line);
         let mut p = Parser {
@@ -1129,8 +1084,7 @@ impl Query {
     }
 }
 
-/// `dmg>10` as a term: `Ok(None)` when the word has no comparison in
-/// it, `Err` when it has one but the key or the number is not right.
+/// `dmg>10` as a term: `Ok(None)` when the word has no comparison, `Err` for a bad key or number.
 fn parse_num(w: &str) -> Result<Option<Term>, String> {
     for (sym, op) in [
         (">=", Op::Ge),
@@ -1204,8 +1158,7 @@ pub fn sort(items: &mut [ItemStats], key: SortKey, descending: bool) {
 }
 
 impl ItemStats {
-    /// From a vendor's stock description (a `WeenieDesc` with no world
-    /// object behind it): name, kind, value, burden, material.
+    /// From a vendor's stock description, a `WeenieDesc` with no world object behind it.
     pub fn of_desc(guid: u32, d: &ac_world::object::WeenieDesc) -> Self {
         ItemStats {
             guid,
@@ -1369,7 +1322,7 @@ mod tests {
             Some(Expr::And(vec![word("a"), word("b")]))
         );
         assert_eq!(Query::parse("not").expr, None);
-        // The new keys.
+        // Slot, cantrip-count and tier keys.
         assert_eq!(
             Query::parse("slot:ring epics>=2 tier:epic spells<4")
                 .terms()
@@ -1418,7 +1371,7 @@ mod tests {
             .contains("nothing after"));
     }
 
-    /// A ring, a bracelet and a hauberk with cantrips on them.
+    /// A ring and a hauberk carrying the given spells.
     fn ring(spells: &[&str]) -> ItemStats {
         ItemStats {
             guid: 10,
@@ -1488,8 +1441,7 @@ mod tests {
             "Epic Impregnability",
         ]);
         let plain = hauberk(&["Minor Strength"]);
-        // "a Hauberk with Epic Life Mastery" (however the cantrip is
-        // spelt, a phrase finds it).
+        // "a Hauberk with Epic Life Mastery": a phrase finds the cantrip however it is spelt.
         let q = Query::parse("hauberk \"epic life\"");
         assert!(h.matches(&q));
         assert!(!plain.matches(&q));
@@ -1550,8 +1502,7 @@ mod tests {
 
     #[test]
     fn a_word_of_its_own_is_not_found_inside_a_longer_one() {
-        // Starter's "peas to sell" asked for "pea", and a Spear has one
-        // in the middle: every spear was taken to sell as a pea.
+        // Guards the Starter profile's "peas to sell" rule matching "pea" inside "Spear".
         assert!(!word_in("Spear", "pea"));
         assert!(!word_in("Pearl", "pea"));
         assert!(word_in("Pea", "pea"));
@@ -1605,9 +1556,8 @@ mod tests {
         assert_eq!(kind_name(item_type::ARMOR | item_type::CLOTHING), "armor");
         assert_eq!(kind_name(item_type::MISC), "misc");
         assert_eq!(kind_name(0), "misc");
-        // The bits that used to be mislabelled: a book is Writable, a
-        // healing kit is Misc, 0x10000 is Portal (not a healer) and
-        // 0x20000 is Lockable (a chest, not a lockpick).
+        // A book is Writable, a healing kit Misc, 0x10000 Portal (not a healer)
+        // and 0x20000 Lockable (a chest, not a lockpick).
         assert_eq!(kind_name(item_type::WRITABLE), "writable");
         assert_eq!(kind_name(item_type::PORTAL), "portal");
         assert_eq!(kind_name(item_type::SPELL_COMPONENTS), "comps");
