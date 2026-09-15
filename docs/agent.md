@@ -333,6 +333,89 @@ mouth for good. What is set aside returns when the character comes
 within sight of it or the server speaks of it, and goes for good when
 the server deletes it.
 
+## What the server says in words
+
+Not every refusal comes as a code. ACE answers a good many in plain
+chat -- a transient string (`GameEventCommunicationTransientString`) or
+a Broadcast line (`GameMessageSystemChat`) -- and says nothing else:
+the game event that follows, when there is one, carries no reason, and
+often there is none at all. A client that reads only the codes sees a
+request go quiet, waits out a clock, and asks again for ever. Two mates
+were invited into a fellowship ten times each because "{Name} is busy."
+was never read; a body was opened thirty times for a take that "Unable
+to put {item} into container" had already answered; a body someone else
+had open was asked for on a clock while "The Corpse of X is already in
+use by someone else!" sat in the chat log.
+
+So there is one place the words are read: `ac_agent::refusals::refused`
+matches every line of server chat against a table quoted from the ACE
+source, file and line, and `refusals::answer` decides once, by kind,
+what to do -- ask again after a doubling wait, ask again after the same
+short wait, or never. `Client::hear_refusal` (`crates/ac-client/src/refused.rs`)
+hands each refusal to the system that was waiting on it. No system
+matches English of its own; the tests for the wording live with the
+table, in the server's exact words with a name substituted.
+
+**Read and acted on** (the request autoplay was retrying on a clock):
+
+| The server says | From | Refusal | Decision |
+|---|---|---|---|
+| `The {name} is already in use by {viewer}!` | `Container.cs:740` | `Open InUse` | again in 3 s, doubling |
+| `You do not yet have the right to loot the {name}.` | `Corpse.cs:133` | `Open NotYetOurs` | again in 5 s, doubling |
+| `You may not loot the {name} because ...` | `Corpse.cs:129, :131` | `Open NeverOurs` | never |
+| `Unable to put {item} into container` | `Player_Inventory.cs:1322` | `Put NoRoom` | never into that pack; once into another |
+| `{name} is already a member of a Fellowship.` | `Entity/Fellowship.cs:110` | `Recruit AlreadyAMember` | again in 10 s, doubling |
+| `{name} is busy.` | `Entity/Fellowship.cs:116, :128` | `Recruit Busy` | again in 10 s, same every time |
+| `{name} is not accepting fellowship requests.` | `Player_Fellowship.cs:100` | `Recruit NotAccepting` | again in 10 s, doubling |
+| `{name} declines your invite` | `Entity/Fellowship.cs:146` | `Recruit Declined` | again in 10 s, doubling |
+| `You cannot attack {name}` | `Player_Melee.cs:122`, `Player_Missile.cs:110` | `Attack` | the target is given up for 90 s |
+| `You must be a {mastery} to use the {essence}` | `PetDevice.cs:115` | `Summon NotForUs` | never |
+| `{pet} is already active` | `PetDevice.cs:130`, `Pet.cs:133` | `Summon OneIsOut` | the essence is left ready |
+
+**Read, decided, and waited on by nothing yet** -- they reach the log as
+`the server refused (...)`, and the row is there to wire to the moment
+something starts retrying on them:
+
+| The server says | From | Refusal |
+|---|---|---|
+| `You cannot put {item} in that.` | `Player_Inventory.cs:855` | `Put NotThere` |
+| `You are too encumbered to carry that!` | `Player_Inventory.cs:841, :1555, :2285, :2637, :2881` | `Carry` (the take-refusal event already steps the item over) |
+| `You must first pick up the {item}` | `Player_Inventory.cs:1154` | `PickUpFirst` |
+| `{spell} cannot be cast on {target}.` | `Player_Magic.cs:417` | `Cast` |
+| `You must wield the {item} to use it.` / `You must contain the {item} to use it.` | `Player_Use.cs:73` | `Use` |
+| `Cannot use the {item} with the {target}` | `Player_Use.cs:142` | `UseWith` |
+| `The {item} is unsellable.` / `The {item} has no value and cannot be sold.` | `Player_Commerce.cs:271, :278` | `Sell` (the vendor run judges a sale by the item still being in the pack) |
+| `You cannot sell that! The {item} is currently being traded.` / `... must be empty.` | `Player_Commerce.cs:285, :292` | `Sell` |
+| `You are too encumbered to sell that!` / `You do not have enough free pack space to sell that!` | `Player_Commerce.cs:185, :187` | `Sell` |
+| `You are too encumbered to buy that!` / `... enough pack space ...` / `... enough container slots ...` | `Vendor.cs:496, :498, :500` | `Buy` |
+
+**Seen in the sweep and left out of the table**, because nothing here
+asks for them and they are not answers to a request autoplay makes:
+"You are out of ammunition!" (`Player_Combat.cs:852`, `Player_Missile.cs:253`;
+the quiver is counted, not heard); the give and trade lines
+("{Name} tries to give you ...", "You give {Name} ...", "You have accepted
+the offer", "The items are being traded", "Trade confirmation failed...",
+`Player_Inventory.cs:3292-3532`, `Player_Trade.cs:204-422`); the split and
+merge complaints ("Split amount not valid!", "Stack not valid!", "You
+cannot merge from vendor", "Stacks not compatible!", `Player_Inventory.cs:2250-3036`,
+which are about a request malformed on this side); the fellowship
+housekeeping lines ("... has given you permission to loot his or her
+kills.", "You no longer have permission to loot anyone else's kills.",
+"Your fellow {Name} has died!", "{Name} is now level {n}!", `Entity/Fellowship.cs:171-734`);
+the allegiance answers (`Player_Allegiance.cs:92-1475`, of which "{patron}
+is busy." shares its words with the recruit refusal and is told apart by
+whom the character has invited); the Olthoi lines; "Cast efficiency:
+{n}%" (`Player_Magic.cs:846`, a debugging aid); and the ACE-internal
+"... failed!" strings ("TryDequipObjectWithNetworking failed!", "Item not
+found!", "Target container not found!"), which are bugs on one side or
+the other rather than refusals.
+
+The rule for the next one: if the server refuses something in words and
+the client retries it on a clock, add a row to `refusals::refused` with
+the ACE file and line, a test in the exact wording, an arm in
+`refusals::answer`, and a hand-off in `hear_refusal`. Not a
+`strip_prefix` in the system that noticed.
+
 ## Getting there is four questions, and height is in all of them
 
 A character sent to Asenala, who keeps a shop on the upper floor of a

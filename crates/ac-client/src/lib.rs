@@ -16,7 +16,7 @@ pub mod explore;
 // The vocabulary every system speaks now lives below this crate, in
 // `ac-agent`. Re-exported under its old names so that nothing which
 // says `crate::did` or `crate::pack` has to care where it went.
-pub use ac_agent::{did, pack, room, weenie_errors};
+pub use ac_agent::{did, pack, refusals, room, weenie_errors};
 // The judgements about carried items live in ac-loot now (the search
 // language, what to wield, how a character fights); the client keeps
 // the network side of them.
@@ -234,7 +234,7 @@ pub(crate) struct TakeSent {
     /// into another pack, and there is no third.
     pub(crate) retried: bool,
     /// The server has said "Unable to put {item} into container" of it
-    /// since it went out (see `room::unable_to_put`).
+    /// since it went out (see `refusals::Refusal::Put`).
     pub(crate) said_full: bool,
     /// The server has refused it, with this reason (0 for none). Kept
     /// with the take rather than acted on at once because the words
@@ -265,6 +265,7 @@ pub mod profile;
 pub mod recalls;
 pub mod reconnect;
 pub mod recovery;
+mod refused;
 pub mod shopping;
 pub mod steps;
 pub mod summoning;
@@ -2105,27 +2106,15 @@ impl Client {
         // dropped, nothing to go back for.
         if line.sender.is_empty() {
             self.autoplay.recovery.heard(&line.text, Instant::now());
-            // And on a summon: an essence turned away for good is set
-            // aside at once (see `summoning`).
-            self.hear_summoning(&line.text, Instant::now());
-            // And on a body that will not open: the server says whether
-            // someone is in it or it is not ours yet, and the answer is
-            // a different wait (see `autoplay::corpse_refused`).
-            self.hear_corpse_refusal(&line.text, Instant::now());
-            // And on a take the pack it named had no room for: the
-            // refusal that follows carries no reason, and these words
-            // are the reason (see `room::unable_to_put`).
-            self.hear_put_refusal(&line.text);
+            // And on anything it would not do -- open a body, put a
+            // take away, recruit a mate, summon, fight -- which it says
+            // in words and nothing else: read once against the table
+            // of refusals (see `refused`, and `refusals` for the table).
+            self.hear_refusal(&line.text, Instant::now());
             // And on a spell cast at the character: a caster attacks with
             // no notification, only this line (see
             // `autoplay::spell_attacker`).
             self.hear_spell_attack(&line.text, Instant::now());
-            // And on an invitation into the fellowship that came to
-            // nothing: a mate already in one, or busy, is refused in
-            // these words and nothing else (see
-            // `autoplay::recruit_refusal`).
-            self.autoplay
-                .hear_recruit_refusal(&line.text, Instant::now());
         }
         let text = match (op, line.sender.is_empty()) {
             _ if line.kind == ac_net::messages::turbine::KIND => {

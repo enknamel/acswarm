@@ -18,6 +18,9 @@
 //!   pour together, and what it is worth.
 //! - [`room`] -- where the room is, pack by pack, and how a thing lying
 //!   loose is to be taken into it.
+//! - [`refusals`] -- what the server says in words when it will not do
+//!   a thing, read once against one table, and what to do about each
+//!   kind, decided once.
 //!
 //! Nothing here talks to a server, draws anything, or knows what a
 //! character is doing. It is all plain data and arithmetic, which is
@@ -25,5 +28,6 @@
 
 pub mod did;
 pub mod pack;
+pub mod refusals;
 pub mod room;
 pub mod weenie_errors;

@@ -7,8 +7,8 @@
 //! and goes into that pack or nowhere: ACE's `PutItemInContainer` adds
 //! to the named container with `limitToMainPackOnly`, so a take aimed
 //! at the character goes into the main pack and, when that is full, is
-//! turned down -- "Unable to put Pyreal into container" -- however
-//! empty the sacks beside it. Only what the server creates itself (a
+//! turned down -- "Unable to put Pyreal into container", read by
+//! `refusals` -- however empty the sacks beside it. Only what the server creates itself (a
 //! counter's payout, a purchase, a gift) spills from the main pack
 //! into the side packs, through `TryCreateInInventory`.
 //!
@@ -193,23 +193,6 @@ pub fn how_to_take(item: &Loose, carried: &[Stack], packs: &Packs) -> Option<Tak
         }
     }
     packs.container_for_a_take().map(Take::Put)
-}
-
-/// The item the server's words say would not go into its pack, out of
-/// a line of chat: "Unable to put Pyreal into container". ACE's whole
-/// word on a take aimed at a pack with no slot, sent ahead of an
-/// `InventoryServerSaveFailed` with no reason in it -- and its only
-/// word: these words are what makes a refusal the pack's. A refusal
-/// with no reason and no word at all is not the pack, however much it
-/// looks like one with the words still on their way: it is what ACE
-/// sends for a second of a unique (`CheckUniques` explains itself in
-/// the system chat, not in a game event), and for a pack put into a
-/// sack. Read as the pack being full, a unique on a body marked every
-/// pack full in turn and sent the character to town with its slots
-/// free.
-pub fn unable_to_put(text: &str) -> Option<&str> {
-    text.strip_prefix("Unable to put ")?
-        .strip_suffix(" into container")
 }
 
 #[cfg(test)]
@@ -435,19 +418,5 @@ mod tests {
             side: vec![pack(SACK, 24, 7)],
         };
         assert_eq!(how_to_take(&sack, &[], &full), Some(Take::Put(ME)));
-    }
-
-    #[test]
-    fn the_servers_words_name_what_would_not_go_in() {
-        assert_eq!(
-            unable_to_put("Unable to put Pyreal into container"),
-            Some("Pyreal")
-        );
-        assert_eq!(
-            unable_to_put("Unable to put Major Mana Stone into container"),
-            Some("Major Mana Stone")
-        );
-        assert_eq!(unable_to_put("You are too encumbered to carry that!"), None);
-        assert_eq!(unable_to_put("Unable to put"), None);
     }
 }
