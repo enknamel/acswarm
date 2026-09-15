@@ -1,30 +1,8 @@
-//! Where the room is: the main pack and each side pack, counted apart.
-//!
-//! A character's slots are not one number. The main pack has its own
-//! (102, for a player), and every side pack hanging from it has its
-//! own, and the server never moves a thing from one to another on its
-//! own account. A take off a corpse names the pack it is to go into,
-//! and goes into that pack or nowhere: ACE's `PutItemInContainer` adds
-//! to the named container with `limitToMainPackOnly`, so a take aimed
-//! at the character goes into the main pack and, when that is full, is
-//! turned down -- "Unable to put Pyreal into container", read by
-//! `refusals` -- however empty the sacks beside it. Only what the server creates itself (a
-//! counter's payout, a purchase, a gift) spills from the main pack
-//! into the side packs, through `TryCreateInInventory`.
-//!
-//! Counted as one sum, nine characters whose main packs had filled
-//! believed they had room, offered every body for looting, and were
-//! refused 2,114 takes in ten minutes; kills fell from eight a minute
-//! to under three. So the room is kept pack by pack, and what a caller
-//! means by "room" is asked for by name: what one take can use
-//! ([`Packs::for_a_take`]) is the most room any one pack has, and what
-//! the server may spread new stacks over ([`Packs::anywhere`]) is all
-//! of it together.
-//!
-//! A stack is the exception. Money and spell components off a corpse
-//! can be poured straight onto a stack already carried
-//! (`StackableMerge`), which needs no slot at all; [`how_to_take`]
-//! chooses that where it can.
+//! Room pack by pack ([`Packs`]) and how to take a loose thing into it ([`how_to_take`]).
+//! A take goes into the pack it names or nowhere (ACE `PutItemInContainer`, `limitToMainPackOnly`),
+//! refused when full ("Unable to put Pyreal into container", read by `refusals`) however empty the sacks.
+//! Only what the server creates (payout, purchase, gift) spills into side packs (`TryCreateInInventory`).
+//! Coin and components can pour onto a carried stack (`StackableMerge`) with no slot; pours live in `pack`.
 
 use crate::pack::Stack;
 
@@ -32,15 +10,11 @@ use crate::pack::Stack;
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Pack {
     pub guid: u32,
-    /// Item slots it has. 0 when the server has not said, and a pack
-    /// whose size is not known has no room anyone can count on.
+    /// Item slots (102 in a player's main pack); 0 when unknown, which is room nobody can count on.
     pub capacity: u32,
-    /// Items in it. A pack in a pack slot is not one of the main
-    /// pack's items, and nor is a Focus.
+    /// Items in it; a pack in a pack slot and a Focus are not main-pack items.
     pub used: u32,
-    /// The server has said it is full, and nothing has left it since.
-    /// What the server says outranks the count: a pack the count
-    /// believes has room and the server has just refused has none.
+    /// The server said it is full and nothing has left since; this outranks the count.
     pub said_full: bool,
 }
 
@@ -68,33 +42,20 @@ impl Packs {
         std::iter::once(&self.main).chain(self.side.iter())
     }
 
-    /// What one take can use: the most room any one pack has. A take
-    /// goes into one pack, so two packs with a slot each are room for
-    /// two takes but never for a thing that needs two slots -- and
-    /// added together they read as a pack with room to spare when
-    /// every one of them is down to its last slot.
+    /// What one take can use: the most room in any one pack.
+    /// A take goes into one pack, so a sum reads as room to spare when every pack is on its last slot.
     pub fn for_a_take(&self) -> u32 {
         self.all().map(Pack::room).max().unwrap_or(0)
     }
 
-    /// What the server may spread new stacks over: every pack's room
-    /// together. A counter's payout, a purchase and a gift are created
-    /// in the pack by the server (`TryCreateInInventory`), which fills
-    /// the main pack and then each side pack in turn, and a sale is
-    /// judged against this same total (`GetFreeInventorySlots`, side
-    /// packs included).
+    /// Every pack's room together: a payout, purchase or gift fills the main pack, then each side pack
+    /// (`TryCreateInInventory`), and a sale is judged on this total (`GetFreeInventorySlots`, Container.cs:214).
     pub fn anywhere(&self) -> u32 {
         self.all().map(Pack::room).sum()
     }
 
-    /// The pack to name in a take: the main pack while it has a slot,
-    /// else the side pack with the most room, the first of equals.
-    ///
-    /// The main pack first because that is where the server puts
-    /// things itself, so a character that fills its main pack last
-    /// keeps the most room for what it is handed; and the roomiest
-    /// side pack next so that the sacks empty evenly rather than one
-    /// filling while the rest sit empty.
+    /// Pack to name in a take: main while it has a slot, else the roomiest side pack, ties to the lowest guid.
+    /// Main first because the server puts things there itself; roomiest next so the sacks fill evenly.
     pub fn container_for_a_take(&self) -> Option<u32> {
         if self.main.room() > 0 {
             return Some(self.main.guid);
@@ -107,45 +68,28 @@ impl Packs {
     }
 }
 
-/// Whether the server's word that a pack was full, given when it held
-/// `held` items, still stands now that it holds `used`. It stands until
-/// something leaves: a pack the server called full at 102 is full at
-/// 102 however the count was reached, and has room again at 101.
+/// Whether the server's "full", said when the pack held `held` items, still stands at `used` items.
+/// It stands until something leaves: full at 102 is full at 102 however the count got there, not at 101.
 pub fn still_full(held: u32, used: u32) -> bool {
     used >= held
 }
 
-/// The word as it is to be kept from one look to the next: the most
-/// the pack has been seen to hold since the server said it was full
-/// (`held`), against what it holds now (`used`). `None` once something
-/// has left it, and otherwise the higher of the two.
-///
-/// The count climbs after the word as often as not: the server called
-/// the pack full when the client had counted a hundred, and the two
-/// descriptions it was still waiting on then arrive. Kept at a hundred,
-/// the word would outlive the next two things sold; kept at the most
-/// seen, one thing leaving is enough to lift it, which is what the
-/// word meant.
+/// The `held` to keep for the server's "full": the higher of `held` and `used`, `None` once something left.
+/// The count often climbs after the word as awaited descriptions arrive; kept at the most seen, one leaving lifts it.
 pub fn full_mark(held: u32, used: u32) -> Option<u32> {
     still_full(held, used).then_some(held.max(used))
 }
 
-/// A thing lying loose -- on a corpse, on the ground -- as the choice
-/// of how to take it needs to see it.
+/// A thing lying loose (on a corpse, on the ground), as [`how_to_take`] sees it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Loose {
     pub wcid: u32,
     /// How many are in it (1 for a thing that does not stack).
     pub count: u32,
-    /// It may be poured onto a stack already carried: money or a spell
-    /// component. Nothing else is, however well it stacks. The server
-    /// caps what can be had of a quest's drop and refuses a second of
-    /// a unique, and a merge slips past the checks a take is put
-    /// through; coin and components are what it never limits.
+    /// Money or a spell component, which may be poured onto a carried stack; nothing else, however it stacks.
+    /// A merge slips past a take's checks (quest drop caps, a second unique); coin and components are never capped.
     pub pours: bool,
-    /// It is a pack. A pack goes in a pack slot, of which the main pack
-    /// holds the only ones, and the server turns a pack put into a
-    /// side pack down without a word.
+    /// It is a pack: only the main pack has pack slots, and a pack put into a side pack is refused silently.
     pub is_pack: bool,
 }
 
@@ -158,19 +102,8 @@ pub enum Take {
     Merge { to: u32, amount: u32 },
 }
 
-/// How to take `item`, given the stacks carried and the room in the
-/// packs, or `None` when there is no way to.
-///
-/// A pour comes first wherever the whole stack fits onto one carried:
-/// it costs the same round trip as a put, spends no slot, and saves
-/// the pour the tidying would otherwise make of the two stacks later.
-/// Only the whole of it, though. Half a stack poured leaves the other
-/// half lying on the body, asked for again and again until it is given
-/// up on; a stack too big for any pile it could join is put in a slot
-/// instead, and left for room when there is none.
-///
-/// The pile chosen is the fullest that still fits it, so the piles stay
-/// few and full rather than each being topped up a little.
+/// How to take `item` (`None`: no room): whole onto the fullest carried pile it fits, so piles stay few; else put.
+/// A pour costs no slot and no extra trip; half a pour leaves the rest on the body, asked for again and again.
 pub fn how_to_take(item: &Loose, carried: &[Stack], packs: &Packs) -> Option<Take> {
     if item.is_pack {
         return Some(Take::Put(packs.main.guid));
@@ -226,17 +159,14 @@ mod tests {
 
     #[test]
     fn room_for_a_take_is_the_roomiest_pack_and_not_the_sum() {
-        // Nine characters at 102/102 with a sack at 7 of 24: summed,
-        // seventeen free; for a take, seventeen -- in the sack, and
-        // none in the main pack the takes were aimed at.
+        // A sum counts sack room for takes aimed at a full main pack, so every body is offered and
+        // every take refused.
         let packs = Packs {
             main: pack(ME, 102, 100),
             side: vec![pack(SACK, 24, 19), pack(POUCH, 24, 21)],
         };
         assert_eq!(packs.for_a_take(), 5);
         assert_eq!(packs.anywhere(), 2 + 5 + 3);
-        // Every pack down to its last slot is room for one take, not
-        // three.
         let last_slots = Packs {
             main: pack(ME, 102, 101),
             side: vec![pack(SACK, 24, 23), pack(POUCH, 24, 23)],
@@ -275,9 +205,7 @@ mod tests {
 
     #[test]
     fn what_the_server_called_full_has_no_room_however_the_count_reads() {
-        // The client's count of the main pack was two short of the
-        // server's -- a description missed, a thing counted twice --
-        // and the take went to it four hundred times.
+        // Guards a count two short of the server's (a description missed): 400 takes to a full pack.
         let mut main = pack(ME, 102, 100);
         assert_eq!(main.room(), 2);
         main.said_full = true;
@@ -300,10 +228,8 @@ mod tests {
 
     #[test]
     fn the_word_is_kept_at_the_most_seen_so_one_thing_leaving_lifts_it() {
-        // Called full when the client had counted a hundred; the two
-        // descriptions still on their way arrive, and the count reads
-        // 102. Two sold: kept at a hundred the word would still stand,
-        // and the pack would read as full until a third left.
+        // Full said at 100, then two awaited descriptions make it 102: kept at 100, the pack would read
+        // full after two sold, until a third left.
         assert_eq!(full_mark(100, 100), Some(100));
         assert_eq!(full_mark(100, 102), Some(102), "the count caught up");
         assert_eq!(full_mark(102, 102), Some(102));
@@ -327,8 +253,7 @@ mod tests {
 
     #[test]
     fn coin_is_poured_onto_the_pile_carried_rather_than_given_a_slot() {
-        // Even with a slot to spare: the pour costs the same round trip
-        // and saves the slot and the tidying's pour of the two later.
+        // Even with a slot to spare: the same round trip, no slot, and no tidying pour later.
         let packs = Packs {
             main: pack(ME, 102, 50),
             side: vec![],
@@ -338,13 +263,11 @@ mod tests {
             how_to_take(&pyreals(320), &carried, &packs),
             Some(Take::Merge { to: 1, amount: 320 })
         );
-        // Onto the fullest pile it fits, so the piles stay few.
         let two_piles = [pile(1, 273, 5_000, 25_000), pile(2, 273, 24_000, 25_000)];
         assert_eq!(
             how_to_take(&pyreals(320), &two_piles, &packs),
             Some(Take::Merge { to: 2, amount: 320 })
         );
-        // A pile it does not wholly fit is passed over for one it does.
         assert_eq!(
             how_to_take(&pyreals(1_500), &two_piles, &packs),
             Some(Take::Merge {
@@ -370,7 +293,6 @@ mod tests {
             side: vec![pack(SACK, 24, 24)],
         };
         assert_eq!(how_to_take(&pyreals(1_500), &carried, &full), None);
-        // But what fits whole is poured with no slot at all.
         assert_eq!(
             how_to_take(&pyreals(500), &carried, &full),
             Some(Take::Merge { to: 1, amount: 500 })
@@ -379,8 +301,7 @@ mod tests {
 
     #[test]
     fn only_money_and_components_are_poured() {
-        // Arrows stack, and a quiver-full is carried, but a take is
-        // what the server puts through its checks; a merge is not.
+        // Arrows stack, but the server puts a take through its checks and a merge not.
         let arrows = Loose {
             wcid: 300,
             count: 50,
@@ -393,8 +314,7 @@ mod tests {
             side: vec![],
         };
         assert_eq!(how_to_take(&arrows, &carried, &packs), Some(Take::Put(ME)));
-        // Nor onto a pile in the character's hands: the quiver is
-        // topped up by the tidying, not off a body.
+        // Nor onto a wielded pile: the tidying tops up the quiver, not a take off a body.
         let mut quiver = pile(1, 273, 100, 25_000);
         quiver.wielded = true;
         assert_eq!(
@@ -405,8 +325,7 @@ mod tests {
 
     #[test]
     fn a_pack_off_a_body_goes_to_the_main_pack_whatever_the_room() {
-        // Pack slots are the main pack's alone, and the server refuses
-        // a pack put into a sack without a word.
+        // Pack slots are the main pack's alone; a pack put into a sack is refused without a word.
         let sack = Loose {
             wcid: 166,
             count: 1,
