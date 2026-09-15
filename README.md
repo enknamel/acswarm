@@ -5,14 +5,14 @@
 A from-scratch Rust reimplementation of the Asheron's Call client, built to
 play against the [ACE](https://github.com/ACEmulator/ACE) server emulator.
 
-Status: **Phase 4** (world). The DAT reader is verified byte-for-byte
-against ACE; thirteen asset types decode every file in both archives;
-`acswarm` renders outdoor landblocks with scenery, interiors and models,
-and in `--connect` mode logs in to a local ACE server and walks your
-character around the live world with server-accepted movement, with a
-chat overlay for talking to the server and other players.
-See [`docs/architecture.md`](docs/architecture.md) for the crate map and
-data flow, [`docs/plugins.md`](docs/plugins.md) for writing a plugin,
+Status: pre-release (0.0.x), playable against ACE. The DAT reader is
+verified byte-for-byte against ACE; `acswarm` renders the world
+(landblocks, scenery, interiors, models, particles), logs in and plays a
+character by hand with a chat overlay, and lets characters play on their
+own (autoplay: fighting, looting, buffing, town runs, a fellowship that
+follows its leader), many sessions per process, windowed or `--headless`.
+See [`CLAUDE.md`](CLAUDE.md) for the crate map, data flow and build
+commands, [`docs/plugins.md`](docs/plugins.md) for writing a plugin,
 [`docs/multi-session.md`](docs/multi-session.md) for running several
 clients, [`docs/game/mechanics.md`](docs/game/mechanics.md) for the game
 rules the client must follow (magic, combat, advancement, death, trade),
@@ -72,8 +72,8 @@ across characters" there).
 Against a local ACE (`tools/ace/up.sh` starts one in Docker):
 
 ```
-# headless: log in, create a character, enter the world, print messages
-cargo run --release -p acclient -- -h 127.0.0.1 -a myaccount -v mypassword --create Reborn
+# headless: log in, create the character if the account lacks it, enter the world, print chat
+cargo run --release -p acswarm -- --headless --connect 127.0.0.1 --client myaccount:mypassword --create Reborn --log-chat
 # admin accounts can teleport: --say "@telepoi holtburg"
 # play: third-person view, WASD walks the character, right-drag turns, Shift walks
 # slowly, Enter opens the chat box (server commands start with @; the log
@@ -189,7 +189,7 @@ Each launch spawns a separate client process:
 
 with its output appended to `~/.acswarm/logs/<account>.log`. Nothing is
 killed when an account is removed or the launcher exits. "Launch headless"
-adds `--mute` (and will add `--headless` once acswarm has it). "Add /
+adds `--mute` only; run `acswarm --headless` for no window at all. "Add /
 create" is just adding an account: ACE creates it on the first login.
 
 The config lives in `~/.acswarm/launcher.json`:
@@ -211,18 +211,19 @@ The config lives in `~/.acswarm/launcher.json`:
 `cargo run -p acswarm --` from the workspace root. **Passwords are stored
 in plain text** in this file; it is only as private as your home directory.
 
-## Headless sessions (acbot)
+## Headless sessions (`acswarm --headless`)
 
-`acbot` runs many sessions in one process with no window and no GPU: the
-"as many clients as possible on one computer" case. Each `--client` logs in,
-enters the world and is ticked `--hz` (`--tick-hz`) times a second (default 20; the
-loop sleeps in between, and 4 Hz is enough for the server) with no keyboard
-input, so plugins and the server's own move-to drive movement. The console
-plugin (`ac_plugin::console::Console`, the same one the viewer registers)
-answers `/commands`.
+`acswarm --headless` runs many sessions in one process with no window and
+no GPU: the "as many clients as possible on one computer" case. Each
+`--client` logs in, enters the world and is ticked `--tick-hz` times a
+second (default 20; the loop sleeps in between, and 4 Hz is enough for the
+server) with no keyboard input, so plugins and the server's own move-to
+drive movement. The viewer's plugins (the panels' commands, console, party,
+team and scripts) answer `/commands`, and the rules in the settings file
+are played by (`--settings FILE`, or `--no-settings` for the defaults).
 
 ```
-cargo run --release -p acbot -- --data-dir $AC_DATA_DIR --connect 127.0.0.1 \
+cargo run --release -p acswarm -- --headless --data-dir $AC_DATA_DIR --connect 127.0.0.1 \
     --client bot1:pw --client bot2:pw:Reborn --client bot3:pw \
     --tick-hz 10 --duration 300 --log-chat \
     --say "@telepoi holtburg" --say /combat --script walk.txt
@@ -239,17 +240,14 @@ rate, and every 10 s one status line per session (placed?, cell, health,
 target). `--log-chat` prints chat lines prefixed with the account;
 `RUST_LOG=info` shows the connection log as well.
 
-Workspace: `crates/ac-dat` (container), `crates/ac-formats` (asset
-decoders), `crates/ac-scene` (GPU-free assembly, collision, lighting,
-particles, chargen), `crates/ac-net` (protocol, sans-IO session),
-`crates/ac-world` (object table, character sheet, motions),
-`crates/ac-client` (headless game session: connect, tick, actions, events,
-player physics), `crates/ac-plugin` (`Plugin` trait, `Ctx`, blackboard and
-bus, host, the console and party plugins), `crates/ac-audio` (sound
-playback), `bins/acdat` (CLI), `bins/acswarm` (wgpu viewer and
-multi-session client), `bins/acbot` (headless multi-session runner),
-`bins/aclauncher` (launch manager), `bins/acclient` (old headless CLI).
-See `docs/architecture.md`.
+Workspace: fourteen library crates under `crates/` (DAT container and
+decoders, scene assembly, wire protocol, world state, the vocabulary the
+autoplay systems share, navigation, loot, vendoring, the game session,
+plugins, scripting, the cross-process bus, audio) and three binaries
+under `bins/`: `acswarm` (the client, windowed or `--headless`),
+`aclauncher` (launch manager) and `acdat` (DAT CLI).
+[`CLAUDE.md`](CLAUDE.md) has a line per crate, the data flow, and the
+build, test and logging commands.
 
 Debugging aids: `RUST_LOG=acswarm=debug`, `ACV_HIDE_STATIC=1` (draw only
 server objects), and in connected `--screenshot` mode `--walk`, `--say`,
@@ -281,7 +279,7 @@ in [`scripts/examples/`](scripts/examples/README.md); the plugin is
 ## Releases
 
 Pushing a tag `vX.Y.Z` runs `.github/workflows/release.yml`: a macOS disk
-image (`acswarm.app` plus the tools), Windows (x86_64 zip) and Linux
+image (`acswarm.app`), Windows (x86_64 zip) and Linux
 (x86_64 tar.gz, built on Ubuntu 22.04 for glibc compatibility) are
 attached to a GitHub release with generated notes. Run it by hand from
 the Actions tab to try the builds without tagging. Signing happens when
@@ -295,8 +293,7 @@ anyway"). Linux binaries are not signed.
 ## Releasing on macOS by hand
 
 `tools/release/macos.sh VERSION` builds the binaries, wraps the viewer
-in `acswarm.app` (with `acbot`, `acclient`, `aclauncher` and the example
-scripts beside it), signs everything with the "Developer ID Application"
+in `acswarm.app` (the licence, README and example scripts inside it), signs everything with the "Developer ID Application"
 identity in the login keychain (hardened runtime, timestamp) and packs
 it all into `dist/acswarm-VERSION-macos.dmg` with an Applications
 shortcut. Add `--notarize` to submit the app and then the disk image to

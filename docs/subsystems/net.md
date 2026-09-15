@@ -142,7 +142,7 @@ bytes, pad to 4).
 
 ## Verified against ACE (2026-09-04)
 
-`acclient --create` logs in, creates a character, enters the world and
+A headless session with `--create` logs in, creates a character, enters the world and
 receives PlayerDescription, PlayerCreate and ~30 ObjectCreate messages.
 Three ACE behaviours that are not obvious from the protocol alone:
 

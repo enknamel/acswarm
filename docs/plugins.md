@@ -13,7 +13,7 @@ different sessions coordinate through the shared `Blackboard`.
 
 The crate re-exports what you need: `ac_plugin::{Client, Event, Ctx,
 Plugin, Blackboard, Message, Host, Requests, IconCache, IconLayers,
-IconLoader, egui, serde_json, Value}`. The client's own panels are plugins
+IconLoader, Settings, egui, serde_json, Value}`. The client's own panels are plugins
 too (`ac_plugin::panels`, see below): read them as worked examples of a UI
 plugin, or replace them.
 
@@ -39,6 +39,19 @@ pub trait Plugin {
 
     /// `/name args` typed in the chat box. Return true when handled.
     fn command(&mut self, _cx: &mut Ctx, _name: &str, _args: &str) -> bool { false }
+
+    /// Once, after the host read the settings file: take back what
+    /// `save` stored last time (`settings.get::<T>(key)`).
+    fn load(&mut self, _settings: &Settings) {}
+
+    /// Before the host writes the settings file (on exit and every 30 s):
+    /// store what should survive a restart (`settings.set(key, value)`).
+    fn save(&self, _settings: &mut Settings) {}
+
+    /// Session `index` was disconnected and dropped; the sessions after
+    /// it now have one index less. A plugin keeping state by session
+    /// index drops the entry and shifts the rest.
+    fn session_removed(&mut self, _index: usize) {}
 }
 ```
 
@@ -217,19 +230,30 @@ pub struct Message { pub from: usize, pub topic: String, pub value: Value }
 `bins/acswarm/src/plugins/mod.rs`:
 
 ```rust
-pub mod autoheal;
-pub use ac_plugin::{console, panels};
+pub use ac_plugin::{console, panels, party};
+pub use ac_plugin::{Host, Requests};
 
 pub fn builtin() -> Host {
     let mut host = Host::new();
-    for p in panels::live() {          // vitals, radar, target, vendor, loot,
-        host.register(p);              // inventory, skills, spellbook,
-    }                                  // spellbar, components, buffs
-    host.register(Box::new(console::Console::default()));
-    host.register(Box::new(autoheal::AutoHeal::default()));
+    for p in panels::live() {          // every built-in panel, first
+        host.register(p);
+    }
+    host.register(Box::new(console::Console));
+    host.register(Box::new(party::Party::default()));
+    host.register(Box::new(ac_plugin::team::Team::default()));
+    host.register(Box::new(ac_script::ScriptPlugin::new(
+        ac_script::default_dir(),
+    )));
     host
 }
 ```
+
+A plugin of your own is one more line here: for the auto-heal example
+below, `pub mod autoheal;` at the top and
+`host.register(Box::new(autoheal::AutoHeal::default()))`.
+`acswarm --headless` builds its own host with the same list in
+`bins/acswarm/src/headless.rs` (`run`); register it there too to have it
+run with no window.
 
 Order matters for `key` and `command` (first to return `true` wins), so
 put plugins that claim generic keys last; the panels go first so they draw

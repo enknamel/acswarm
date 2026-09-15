@@ -537,8 +537,8 @@ In acswarm: `ac_client::creation` (`rules`, `Rules`, `CharacterBuild`,
 enter_world, delete_character, restore_character}`, the events
 `Characters`, `CharacterCreated` and `CharacterCreateFailed`, and
 `Config::auto_enter` (off, with no character named, the client shows the
-list instead of entering). Headless: `acclient --create NAME` and `acbot
---create NAME` with `--heritage`, `--gender`, `--template`,
+list instead of entering). Headless: `acswarm --headless --create NAME`
+with `--heritage`, `--gender`, `--template`,
 `--start-area`; `--show-rules` prints a heritage's credits and costs.
 
 ## 4. Death and corpses
@@ -560,7 +560,7 @@ list instead of entering). Headless: `acclient --create NAME` and `acbot
   and, after the death animation, the "You've lost 223 Pyreals, and your
   Iron Scarab!" system line and the teleport to the lifestone. The purge
   keeps the vitae: the client holds it in its own registry slot.
-* Verified on ACE with acbot: suicide, corpse listed and opened at the
+* Verified on ACE with a headless session: suicide, corpse listed and opened at the
   death spot, item taken back, vitae shown, lifestone attune ("You have
   attuned your spirit to this Lifestone...").
 * `/lifestone` (`/ls`) recalls to the attuned lifestone alive (long
@@ -871,7 +871,7 @@ list instead of entering). Headless: `acclient --create NAME` and `acbot
   answers the request with an ack blob. `/g`, `/trade`, `/lfg`, `/rp`
   and `/a` in the chat box; lines show as "[General] Name: text".
   Verified with two sessions on ACE in all three public rooms.
-* Verified on ACE with two acbot sessions: swear + confirmation, both
+* Verified on ACE with two headless sessions: swear + confirmation, both
   profiles, naming, `/p` and `/v` chat both ways, break from the vassal.
 * **Commands**: the server (ACE `GameActionTalk`) treats only Talk lines
   starting with `@` as commands (`@acehelp`, `@myquests`, admin commands;

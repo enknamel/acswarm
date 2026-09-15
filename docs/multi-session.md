@@ -43,7 +43,7 @@ animation state are built for them (a switch clears what the session
 left behind and re-instances the new one). A process whose window is
 only a follower's can pass `--render none` and draw no world at all, and
 `--fps` caps the frame rate of any window; see "Rendering cost" in
-[architecture.md](architecture.md).
+[performance.md](performance.md).
 
 ## Coming back after a drop
 
@@ -174,19 +174,20 @@ acswarm"]` or `["cargo","run","-p","acswarm","--"]`); empty means the
 `acswarm` next to the launcher binary if there is one, else `cargo run -p
 acswarm --` from the workspace root. Passwords are plain text. "Add /
 create" only adds an account: ACE creates it on first login, and
-`acclient --create NAME` makes the first character.
+`acswarm --headless --create NAME` or the Fleet panel's **create if
+missing** makes the first character.
 
 ## Cross-process bus
 
 Sessions in one process share the plugin blackboard (`docs/plugins.md`);
-processes do not, so a party split across several `acswarm`/`acbot`
+processes do not, so a party split across several `acswarm`
 processes could not coordinate. `--bus [ADDR]` links them through
 `crates/ac-bus`, a local hub on loopback TCP:
 
 ```
-cargo run -p acbot -- --connect HOST --client alice:pw1 --bus
+cargo run -p acswarm -- --headless --connect HOST --client alice:pw1 --bus
 cargo run -p acswarm -- --connect HOST -a bob -v pw2 --bus          # joins alice's hub
-ACSWARM_BUS=127.0.0.1:9600 cargo run -p acbot -- ... --bus          # another bus
+ACSWARM_BUS=127.0.0.1:9600 cargo run -p acswarm -- --headless ... --bus   # another bus
 ```
 
 * `ADDR` is `HOST:PORT` or a bare port; empty means `$ACSWARM_BUS` or
@@ -487,7 +488,7 @@ click:
    character's name, pick its role (follower, leader, manual) and, with
    **create if missing** ticked, the template, heritage, sex and town
    to make it with when the account has no character of that name (the
-   choices `acbot --create` accepts: Adventurer, Bow Hunter,
+   choices `--create` with `--template` accepts: Adventurer, Bow Hunter,
    Swashbuckler, Life Caster, War Mage, Wayfarer, Soldier; Holtburg,
    Shoushi, Yaraq, Sanamar). Click **Add**. ACE creates the account
    itself on its first login, so a new name is fine. Without **create
@@ -551,7 +552,7 @@ connects (`ac_client::Client::connect` with the `--connect` host and
 or disconnects and removes one, between frames. A removed session's
 successors move down one index and every plugin hears
 `Plugin::session_removed(index)` (the team, party, autoplay, fleet and
-script plugins shift what they keep by session). `acbot` applies starts
+script plugins shift what they keep by session). `acswarm --headless` applies starts
 the same way and ignores stops with a warning. A script or the command
 line drives the same path through two blackboard keys: `fleet.start`
 (a session spec or a list of them, each added to the roster and
@@ -714,9 +715,9 @@ file-backed archive pages.
 * **Tick rates.** Windowed, every session ticks once per presented frame
   (vsync, `PresentMode::AutoVsync`), so a 60 Hz display gives 60 ticks/s
   per session; `dt` is clamped to 0.1 s so a stall does not teleport the
-  character. `acbot` ticks every session `--hz N` times a second
-  (`--tick-hz`; default 20, the game's pace); a process of followers
-  gets by on `--hz 10`, which halves its share of the CPU. Headless
+  character. `acswarm --headless` ticks every session `--tick-hz N`
+  times a second (default 20, the game's pace); a process of followers
+  gets by on `--tick-hz 10`, which halves its share of the CPU. Headless
   `--screenshot` loops with a 1 ms sleep and logs `ticks/s`. On the wire
   a moving character sends AutonomousPosition four times a second,
   MoveToState on input changes, an echo every 5 s and an ack every 2 s,
@@ -744,12 +745,13 @@ file-backed archive pages.
 * The headless `--screenshot` script (`--use`, `--attack`, ...) acts on
   session 1; extra `--client`s connect and tick but are not scripted.
 * A session stopped from the Fleet panel leaves what it streamed on the
-  GPU like a switch does, and `acbot` cannot stop sessions at all.
+  GPU like a switch does, and `acswarm --headless` cannot stop sessions
+  at all.
 * All sessions in one process must be on the same host (`--connect`); use
   the launcher for several servers.
 * GPU-side caches are duplicated per session (above); memory grows with
   the number of sessions that have seen distinct areas.
 * One window, one active view: there is no split screen. Run several
   launcher processes for several windows.
-* The launcher's "Launch headless" only mutes; a truly windowless
-  `acswarm --headless` does not exist yet.
+* The launcher's "Launch headless" only mutes; run `acswarm --headless`
+  for sessions with no window.
