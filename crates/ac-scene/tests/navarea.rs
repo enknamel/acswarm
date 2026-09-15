@@ -25,10 +25,9 @@ fn capsule() -> Capsule {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_walk_into_sanamar_goes_round_the_walls_not_into_them() {
-    let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
-        return;
-    };
+    let dir = ac_dat::test_data_dir();
     let assets = Assets::open(dir).unwrap();
     let cap = capsule();
     let block = lbid::from_xy(0x33, 0xD9);
@@ -104,10 +103,9 @@ fn a_walk_into_sanamar_goes_round_the_walls_not_into_them() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_dungeon_is_planned_on_its_own_and_its_stairs_connect_its_floors() {
-    let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
-        return;
-    };
+    let dir = ac_dat::test_data_dir();
     let assets = Assets::open(dir).unwrap();
     let cap = capsule();
     // The Old Talisman dungeon: several floors joined by stairs.
@@ -167,10 +165,9 @@ fn a_dungeon_is_planned_on_its_own_and_its_stairs_connect_its_floors() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_route_goes_round_the_ocean_rather_than_across_it() {
-    let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
-        return;
-    };
+    let dir = ac_dat::test_data_dir();
     let assets = Assets::open(dir).unwrap();
     let cap = capsule();
     // Sanamar is a port: about six per cent of its neighbourhood is

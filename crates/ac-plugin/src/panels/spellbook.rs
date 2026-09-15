@@ -692,10 +692,9 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn demo_spellbook_from_the_portal() {
-        let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
-            return;
-        };
+        let dir = ac_dat::test_data_dir();
         let assets = ac_scene::Assets::open(dir).unwrap();
         let table = assets.spell_table().unwrap();
         let comps = assets.spell_components().unwrap();

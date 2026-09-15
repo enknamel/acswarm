@@ -6,10 +6,9 @@ use ac_scene::{
 use glam::Vec3;
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn holtburg_walls_push_and_floors_hold() {
-    let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
-        return;
-    };
+    let dir = ac_dat::test_data_dir();
     let assets = Assets::open(dir).unwrap();
     let scene = landblock::load(&assets, 0xA9B4_0000).unwrap();
     let w = CollisionWorld::from_scene(&assets, &scene).unwrap();
@@ -43,10 +42,9 @@ fn holtburg_walls_push_and_floors_hold() {
 /// fifty arches, door frames and beams of the last kind, and building
 /// their drawing polygons instead caught the character on every one.
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_placed_model_collides_by_what_the_client_collided_by() {
-    let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
-        return;
-    };
+    let dir = ac_dat::test_data_dir();
     let assets = Assets::open(dir).unwrap();
     let cap = Capsule::default();
     // The arch over the Holtburg Dungeon's doorways: drawing polygons
@@ -282,10 +280,9 @@ fn ceilings_block_walking_and_jumping() {
 /// their cell id: a cell-0 floor inside a dungeon used to re-home the
 /// character to an outdoor cell under it.
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn dungeon_geometry_is_all_tagged_with_cells() {
-    let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
-        return;
-    };
+    let dir = ac_dat::test_data_dir();
     let assets = Assets::open(dir).unwrap();
     // The sewer dungeon where the fall-through was seen, and the Academy.
     for block in [0x012F_0000u32, 0x8602_0000] {
@@ -372,10 +369,9 @@ fn one_sided_walls_hold_only_what_started_in_front() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn world_grid_matches_the_terrain_mesh() {
-    let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
-        return;
-    };
+    let dir = ac_dat::test_data_dir();
     let assets = Assets::open(dir).unwrap();
     let cache = std::env::temp_dir().join("acswarm-test-cache");
     let grid = ac_scene::worldgrid::WorldGrid::load_cached(&assets, &cache).unwrap();
@@ -404,10 +400,9 @@ fn world_grid_matches_the_terrain_mesh() {
 /// one, so on any cell whose corners are not level the two disagreed by
 /// metres and a jump off a Holtburg hill ended under the ground.
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn the_terrain_sampler_agrees_with_the_drawn_mesh() {
-    let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
-        return;
-    };
+    let dir = ac_dat::test_data_dir();
     let assets = Assets::open(dir).unwrap();
     let region = assets.region().unwrap();
     let table = &region.land_defs.land_height_table;

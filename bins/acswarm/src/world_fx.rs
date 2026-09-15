@@ -200,10 +200,9 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_portal_gets_emitters_that_follow_it_and_leave_with_it() {
-        let Ok(dir) = std::env::var("AC_DATA_DIR") else {
-            return;
-        };
+        let dir = ac_dat::test_data_dir();
         let assets = Assets::open(dir).unwrap();
         let mut world = World::default();
         world

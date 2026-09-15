@@ -11,14 +11,15 @@ const HUMAN: u32 = 0x0900_0001;
 /// A plain door.
 const DOOR: u32 = 0x0900_0004;
 
-fn assets() -> Option<Assets> {
-    let dir = std::env::var_os("AC_DATA_DIR")?;
-    Some(Assets::open(dir).unwrap())
+fn assets() -> Assets {
+    let dir = ac_dat::test_data_dir();
+    Assets::open(dir).unwrap()
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn human_hand_combat_attack_plays_once() {
-    let Some(assets) = assets() else { return };
+    let assets = assets();
     let table = ac_scene::anim::motion_table(&assets, HUMAN).unwrap();
     let stance = motion::STANCE_HAND_COMBAT;
     let idle = table
@@ -74,8 +75,9 @@ fn human_hand_combat_attack_plays_once() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn door_swings_between_off_and_on() {
-    let Some(assets) = assets() else { return };
+    let assets = assets();
     let table = ac_scene::anim::motion_table(&assets, DOOR).unwrap();
     let stance = motion::STANCE_NON_COMBAT;
     assert_eq!(table.default_style, stance);

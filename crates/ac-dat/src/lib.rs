@@ -58,6 +58,26 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// The game's data directory for a test that reads the archives:
+/// `AC_DATA_DIR`, the folder holding `client_portal.dat`. Such a test is
+/// marked `#[ignore = "needs AC_DATA_DIR"]` and run with `cargo test-data`;
+/// this panics with the fix rather than letting it pass without looking.
+pub fn test_data_dir() -> std::path::PathBuf {
+    let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
+        panic!(
+            "AC_DATA_DIR is unset: this test reads the game's archives. Set it to \
+             the folder holding client_portal.dat and run `cargo test-data`."
+        );
+    };
+    let dir = std::path::PathBuf::from(dir);
+    assert!(
+        dir.join("client_portal.dat").is_file(),
+        "AC_DATA_DIR={} holds no client_portal.dat",
+        dir.display()
+    );
+    dir
+}
+
 /// Which archive this is, as recorded in `Header::data_set`.
 /// `client_highres.dat` also reports `Portal`; `Language`/`HighRes` are
 /// ACE's extensions, not values the client writes.

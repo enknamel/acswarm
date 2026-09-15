@@ -214,10 +214,9 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn flaming_staff_draws_additive_flames() {
-        let Ok(dir) = std::env::var("AC_DATA_DIR") else {
-            return;
-        };
+        let dir = ac_dat::test_data_dir();
         let assets = Assets::open(dir).unwrap();
         // A flaming staff: its default script starts five fire emitters
         // along the shaft, among them the torch flame 0x3200026E.

@@ -56,6 +56,7 @@ jobs:
             pkg-config libasound2-dev libxkbcommon-dev libwayland-dev libudev-dev
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      # Tests that need the game archives skip themselves when AC_DATA_DIR is
-      # unset; tests that touch an audio/GPU device tolerate having none.
+      # Tests that need the game archives are ignored here (run them locally
+      # with `cargo test-data`); tests that touch an audio/GPU device
+      # tolerate having none.
       - run: cargo test --workspace

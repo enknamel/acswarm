@@ -1007,11 +1007,9 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn olthoi_hidden_unless_asked() {
-        let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
-            eprintln!("AC_DATA_DIR unset; skipping");
-            return;
-        };
+        let dir = ac_dat::test_data_dir();
         let assets = Assets::open(std::path::Path::new(&dir)).unwrap();
         let cg = assets.chargen().unwrap();
         let some = heritage_choices(&cg, false);

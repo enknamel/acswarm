@@ -1734,10 +1734,9 @@ mod room_tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_click_on_the_lich_room_picks_it_and_it_has_a_floor_to_shade() {
-        let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
-            return;
-        };
+        let dir = ac_dat::test_data_dir();
         let assets = ac_scene::Assets::open(std::path::Path::new(&dir)).unwrap();
         let coll = assets.block_collision(0x01F6_0000).unwrap();
         // Where the spawn table puts the Lich's generator.
