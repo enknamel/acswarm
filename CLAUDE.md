@@ -9,14 +9,16 @@ characters that play on their own, many per process. Before changing `crates/ac-
 ```sh
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace                                      # what CI runs
-AC_DATA_DIR=$HOME/Downloads/ac_data cargo test --workspace  # the data tests too
+cargo test --workspace                                      # what CI runs; data tests show as ignored
+AC_DATA_DIR=$HOME/Downloads/ac_data cargo test-data         # every test, the data tests too
 cargo test -p ac-client critter                             # one crate, filtered by test name
+cargo run -p xtask -- same-code BASE                        # comment-only proof (`facts BASE`: removed facts)
 cargo build --release -p acswarm
 ```
 
-Tests needing the game archives return early without `AC_DATA_DIR` and pass silently: run the data
-command before calling a change done. Golden files: `tests/golden` (`tools/regen-golden.sh`).
+Data tests are `#[ignore = "needs AC_DATA_DIR"]` (folder: `ac_dat::test_data_dir()`, builders:
+`ac_client::testkit`); run `cargo test-data` before calling a change done. CI also gates intra-doc
+links (`rustdoc` job). Golden files: `tests/golden` (`tools/regen-golden.sh`).
 
 Local ACE server in Docker (needs the ACE source cloned to reference/ext/ACE and `AC_DATA_DIR`
 set; login on udp/9000; the first login creates its account):
@@ -30,9 +32,8 @@ cargo run --release -p acswarm -- --headless --connect 127.0.0.1 \
   --client ACCOUNT:PASSWORD[:CHARACTER] --duration 60 --log-chat   # --create NAME, --script FILE, --bus
 ```
 
-Parallel worktrees: each builds with its own `CARGO_TARGET_DIR` (target/wt-NAME) and `CARGO_INCREMENTAL=0`;
-two trees in one target dir overwrite each other's crates and report false compile errors. A target
-dir is 20-50 GB: check `df -g /` first, stop below 15 GB free, delete the dir when done.
+Parallel worktrees: each its own `CARGO_TARGET_DIR` (target/wt-NAME) and `CARGO_INCREMENTAL=0` (a shared
+dir gives false compile errors); check `df -g /` first, stop below 15 GB free, delete the dir when done.
 
 ## Crates (libraries in dependency order; "uses" drops the ac- prefix)
 

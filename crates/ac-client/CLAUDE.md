@@ -165,6 +165,8 @@ the column (the module path; see the root map for `RUST_LOG`).
 | `logistics.rs` | the party's mode (hunting or restocking) and money sharing, the same on every session |
 | `buffs.rs` | which buffs a character should wear, from its skills and spells |
 | `hunt.rs` | hunting areas drawn on the map |
+| `position.rs` | `my_position()`: the character's world position |
+| `testkit.rs` | test-only: `Client::offline` sessions over `no_data()` or `game_data()`, `standing_at()`, `creature()`, `corpse()`, `mate()` builders |
 
-Unit tests sit in each file's `mod tests`; tests that need `AC_DATA_DIR` (`tests/` and many unit
-tests) return early without it.
+Unit tests sit in each file's `mod tests`; tests that read the archives are
+`#[ignore = "needs AC_DATA_DIR"]` and run with `cargo test-data`.
