@@ -18,3 +18,7 @@ serde.workspace = true
 serde_json = "1"
 glam = "0.30"
 tracing.workspace = true
+
+[dev-dependencies]
+# The data directory for tests that read the archives.
+ac-dat = { path = "../ac-dat" }

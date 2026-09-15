@@ -58,6 +58,26 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// The game's data directory for a test that reads the archives:
+/// `AC_DATA_DIR`, the folder holding `client_portal.dat`. Such a test is
+/// marked `#[ignore = "needs AC_DATA_DIR"]` and run with `cargo test-data`;
+/// this panics with the fix rather than letting it pass without looking.
+pub fn test_data_dir() -> std::path::PathBuf {
+    let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
+        panic!(
+            "AC_DATA_DIR is unset: this test reads the game's archives. Set it to \
+             the folder holding client_portal.dat and run `cargo test-data`."
+        );
+    };
+    let dir = std::path::PathBuf::from(dir);
+    assert!(
+        dir.join("client_portal.dat").is_file(),
+        "AC_DATA_DIR={} holds no client_portal.dat",
+        dir.display()
+    );
+    dir
+}
+
 /// Which archive this is, as recorded in `Header::data_set`.
 /// `client_highres.dat` also reports `Portal`; `Language`/`HighRes` are
 /// ACE's extensions, not values the client writes.
@@ -104,6 +124,30 @@ pub struct Header {
 }
 
 impl Header {
+    /// The header of an archive with no blocks ([`DatArchive::empty`]).
+    fn empty(data_set: DataSet) -> Self {
+        Header {
+            file_type: MAGIC,
+            // Any size `read_chain` accepts: there is no block to read.
+            block_size: 0x400,
+            file_size: 0,
+            data_set,
+            data_subset: 0,
+            free_head: 0,
+            free_tail: 0,
+            free_count: 0,
+            btree: 0,
+            new_lru: 0,
+            old_lru: 0,
+            use_lru: false,
+            master_map_id: 0,
+            engine_pack_version: 0,
+            game_pack_version: 0,
+            version_major: [0; 16],
+            version_minor: 0,
+        }
+    }
+
     fn parse(b: &[u8]) -> Result<Self> {
         if b.len() < HEADER_SIZE {
             return Err(Error::TooSmall);
@@ -309,7 +353,8 @@ impl FileKind {
 /// An opened DAT archive. The whole file is memory-mapped; reads copy the
 /// requested chain out of the map.
 pub struct DatArchive {
-    map: Mmap,
+    /// The mapped file; `None` for [`DatArchive::empty`].
+    map: Option<Mmap>,
     header: Header,
     /// Directory entries sorted by id (the cell archive has close to a
     /// million, so a flat table beats a map for both opening and lookup).
@@ -328,7 +373,7 @@ impl DatArchive {
         }
         let header = Header::parse(&map[HEADER_OFFSET..HEADER_OFFSET + HEADER_SIZE])?;
         let mut archive = DatArchive {
-            map,
+            map: Some(map),
             header,
             entries: Vec::new(),
         };
@@ -341,6 +386,20 @@ impl DatArchive {
         entries.dedup_by_key(|e| e.id);
         archive.entries = entries;
         Ok(archive)
+    }
+
+    /// An archive with no files in it: every read is `NotFound`. For a
+    /// session or test that runs without the game's data.
+    pub fn empty(data_set: DataSet) -> Self {
+        DatArchive {
+            map: None,
+            header: Header::empty(data_set),
+            entries: Vec::new(),
+        }
+    }
+
+    fn bytes(&self) -> &[u8] {
+        self.map.as_deref().unwrap_or(&[])
     }
 
     pub fn header(&self) -> &Header {
@@ -388,7 +447,7 @@ impl DatArchive {
         let mut out = Vec::with_capacity(len);
         let mut next = offset;
         // A chain can never legitimately be longer than the archive holds.
-        let max_blocks = self.map.len() / block + 1;
+        let max_blocks = self.bytes().len() / block + 1;
         let mut visited = 0usize;
         while out.len() < len {
             if next == 0 || visited > max_blocks {
@@ -409,16 +468,16 @@ impl DatArchive {
         let end = offset.checked_add(len as u64).ok_or(Error::OutOfBounds {
             offset,
             len,
-            file_len: self.map.len(),
+            file_len: self.bytes().len(),
         })?;
-        if end > self.map.len() as u64 {
+        if end > self.bytes().len() as u64 {
             return Err(Error::OutOfBounds {
                 offset,
                 len,
-                file_len: self.map.len(),
+                file_len: self.bytes().len(),
             });
         }
-        Ok(&self.map[offset as usize..end as usize])
+        Ok(&self.bytes()[offset as usize..end as usize])
     }
 
     /// In-order walk: the subtree below branch `i` holds ids smaller than
@@ -536,5 +595,13 @@ mod tests {
         let it = Iteration::parse(&b).unwrap();
         assert_eq!(it.total, 2072);
         assert_eq!(it.ranges, vec![(1, -2072)]);
+    }
+    #[test]
+    fn an_empty_archive_finds_nothing() {
+        let dat = DatArchive::empty(DataSet::Portal);
+        assert!(dat.is_empty());
+        assert_eq!(dat.kind(0x0100_0001), FileKind::GfxObj);
+        assert!(matches!(dat.read(0x0100_0001), Err(Error::NotFound(_))));
+        assert!(dat.read_chain(0x400, 8).is_err());
     }
 }

@@ -173,9 +173,10 @@ is written when they settle:
 Together with `tools/ace/up.sh` (a local ACE in Docker) this is the
 integration test: a scene is set up with admin commands (`@create 7`,
 `@ci 314`, `@smite all`, `@telepoi holtburg`), the client acts, and the
-PNG plus the `RUST_LOG=acswarm=debug` log are checked. Unit tests that
-need the archives skip themselves when `AC_DATA_DIR` is unset; golden
-files for the DAT reader and ISAAC live in `tests/golden/`.
+PNG plus the `RUST_LOG=acswarm=debug` log are checked. Tests that need
+the archives are marked `#[ignore = "needs AC_DATA_DIR"]` and run with
+`cargo test-data`; golden files for the DAT reader and ISAAC live in
+`tests/golden/`.
 
 ## Rendering cost
 

@@ -4,10 +4,9 @@
 use ac_scene::{landblock, Assets};
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn academy_cells_carry_lights() {
-    let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
-        return;
-    };
+    let dir = ac_dat::test_data_dir();
     let assets = Assets::open(dir).unwrap();
     let scene = landblock::load(&assets, 0x8602_0000).unwrap();
     assert!(scene.is_dungeon, "the Academy is underground");

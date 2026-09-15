@@ -1,14 +1,12 @@
 //! Decode every file of each supported kind from the real archives and
-//! require exact byte consumption. Skipped unless `AC_DATA_DIR` is set.
-
-use std::path::PathBuf;
+//! require exact byte consumption. Needs AC_DATA_DIR.
 
 use ac_dat::{DatArchive, FileKind};
 use ac_formats::*;
 
-fn archive(name: &str) -> Option<DatArchive> {
-    let dir = PathBuf::from(std::env::var_os("AC_DATA_DIR")?);
-    Some(DatArchive::open(dir.join(name)).unwrap())
+fn archive(name: &str) -> DatArchive {
+    let dir = ac_dat::test_data_dir();
+    DatArchive::open(dir.join(name)).unwrap()
 }
 
 fn check(kind: FileKind, parse: impl Fn(u32, &[u8]) -> Result<()>) {
@@ -16,10 +14,7 @@ fn check(kind: FileKind, parse: impl Fn(u32, &[u8]) -> Result<()>) {
 }
 
 fn check_in(name: &str, kind: FileKind, parse: impl Fn(u32, &[u8]) -> Result<()>) {
-    let Some(dat) = archive(name) else {
-        eprintln!("AC_DATA_DIR unset; skipping");
-        return;
-    };
+    let dat = archive(name);
     let mut n = 0;
     let mut failures = Vec::new();
     for e in dat.entries().filter(|e| dat.kind(e.id) == kind) {
@@ -45,6 +40,7 @@ fn check_in(name: &str, kind: FileKind, parse: impl Fn(u32, &[u8]) -> Result<()>
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn palettes() {
     check(FileKind::Palette, |id, b| {
         palette::Palette::parse(id, b).map(|_| ())
@@ -52,6 +48,7 @@ fn palettes() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn textures() {
     check(FileKind::Texture, |id, b| {
         texture::Texture::parse(id, b).map(|_| ())
@@ -59,6 +56,7 @@ fn textures() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn surface_textures() {
     check(FileKind::SurfaceTexture, |id, b| {
         surface_texture::SurfaceTexture::parse(id, b).map(|_| ())
@@ -66,6 +64,7 @@ fn surface_textures() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn surfaces() {
     check(FileKind::Surface, |id, b| {
         surface::Surface::parse(id, b).map(|_| ())
@@ -73,6 +72,7 @@ fn surfaces() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn gfxobjs() {
     check(FileKind::GfxObj, |id, b| {
         gfxobj::GfxObj::parse(id, b).map(|_| ())
@@ -80,6 +80,7 @@ fn gfxobjs() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn setups() {
     check(FileKind::Setup, |id, b| {
         setup::Setup::parse(id, b).map(|_| ())
@@ -87,6 +88,7 @@ fn setups() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn animations() {
     check(FileKind::Animation, |id, b| {
         animation::Animation::parse(id, b).map(|_| ())
@@ -94,6 +96,7 @@ fn animations() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn environments() {
     check(FileKind::Environment, |id, b| {
         environment::Environment::parse(id, b).map(|_| ())
@@ -101,6 +104,7 @@ fn environments() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn scenes() {
     check(FileKind::Scene, |id, b| {
         scene::Scene::parse(id, b).map(|_| ())
@@ -108,6 +112,7 @@ fn scenes() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn region() {
     check(FileKind::Region, |id, b| {
         region::Region::parse(id, b).map(|_| ())
@@ -115,6 +120,7 @@ fn region() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn cell_landblocks() {
     check_in("client_cell_1.dat", FileKind::LandBlock, |id, b| {
         landblock::CellLandblock::parse(id, b).map(|_| ())
@@ -122,6 +128,7 @@ fn cell_landblocks() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn landblock_infos() {
     check_in("client_cell_1.dat", FileKind::LandBlockInfo, |id, b| {
         landblock::LandblockInfo::parse(id, b).map(|_| ())
@@ -129,6 +136,7 @@ fn landblock_infos() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn env_cells() {
     check_in("client_cell_1.dat", FileKind::EnvCell, |id, b| {
         landblock::EnvCell::parse(id, b).map(|_| ())
@@ -137,10 +145,9 @@ fn env_cells() {
 
 /// Every texture must expand to RGBA of the declared size.
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn textures_to_rgba() {
-    let Some(dat) = archive("client_portal.dat") else {
-        return;
-    };
+    let dat = archive("client_portal.dat");
     let mut palettes = std::collections::HashMap::new();
     let mut formats = std::collections::BTreeMap::new();
     let mut failures = Vec::new();
@@ -193,10 +200,9 @@ fn textures_to_rgba() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn skill_table() {
-    let Some(dat) = archive("client_portal.dat") else {
-        return;
-    };
+    let dat = archive("client_portal.dat");
     use skill_table::{attribute, SkillTable};
     let t = SkillTable::parse(SkillTable::ID, &dat.read(SkillTable::ID).unwrap()).unwrap();
     // 38 live skills; the retired weapon skills are not in the table.
@@ -225,10 +231,9 @@ fn skill_table() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn chargen() {
-    let Some(dat) = archive("client_portal.dat") else {
-        return;
-    };
+    let dat = archive("client_portal.dat");
     let cg = chargen::CharGen::parse(
         chargen::CharGen::ID,
         &dat.read(chargen::CharGen::ID).unwrap(),
@@ -262,6 +267,7 @@ fn chargen() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn motion_tables() {
     check(FileKind::MotionTable, |id, b| {
         motion_table::MotionTable::parse(id, b).map(|_| ())
@@ -269,6 +275,7 @@ fn motion_tables() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn particle_emitters() {
     check(FileKind::ParticleEmitter, |id, b| {
         particle_emitter::ParticleEmitterInfo::parse(id, b).map(|_| ())
@@ -276,6 +283,7 @@ fn particle_emitters() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn physics_scripts() {
     check(FileKind::PhysicsScript, |id, b| {
         physics_script::PhysicsScript::parse(id, b).map(|_| ())
@@ -283,6 +291,7 @@ fn physics_scripts() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn physics_script_tables() {
     check(FileKind::PhysicsScriptTable, |id, b| {
         physics_script_table::PhysicsScriptTable::parse(id, b).map(|_| ())
@@ -290,11 +299,13 @@ fn physics_script_tables() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn waves() {
     check(FileKind::Wave, |id, b| wave::Wave::parse(id, b).map(|_| ()));
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn sound_tables() {
     check(FileKind::SoundTable, |id, b| {
         sound_table::SoundTable::parse(id, b).map(|_| ())
@@ -304,10 +315,9 @@ fn sound_tables() {
 /// Every wave must be a format the audio layer knows how to play, and its
 /// RIFF form must be self-consistent.
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn wave_formats() {
-    let Some(dat) = archive("client_portal.dat") else {
-        return;
-    };
+    let dat = archive("client_portal.dat");
     let mut tags = std::collections::BTreeMap::new();
     for e in dat.entries().filter(|e| dat.kind(e.id) == FileKind::Wave) {
         let w = wave::Wave::parse(e.id, &dat.read(e.id).unwrap()).unwrap();
@@ -337,10 +347,9 @@ fn wave_formats() {
 /// leaves `default_sound_table` at 0) resolves the common combat and
 /// movement sound types to existing waves.
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn human_sound_table_resolves() {
-    let Some(dat) = archive("client_portal.dat") else {
-        return;
-    };
+    let dat = archive("client_portal.dat");
     let setup = setup::Setup::parse(0x0200_0001, &dat.read(0x0200_0001).unwrap()).unwrap();
     let table_id = if setup.default_sound_table != 0 {
         setup.default_sound_table
@@ -368,10 +377,9 @@ fn human_sound_table_resolves() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn spell_table() {
-    let Some(dat) = archive("client_portal.dat") else {
-        return;
-    };
+    let dat = archive("client_portal.dat");
     use spell_table::{flags, school, spell_type, SpellTable, TypeData};
     let t = SpellTable::parse(SpellTable::ID, &dat.read(SpellTable::ID).unwrap()).unwrap();
     assert_eq!(t.spells.len(), 6266, "{} spells", t.spells.len());
@@ -464,10 +472,9 @@ fn spell_table() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn spell_components() {
-    let Some(dat) = archive("client_portal.dat") else {
-        return;
-    };
+    let dat = archive("client_portal.dat");
     use spell_components::{component_type, SpellComponentTable};
     let t = SpellComponentTable::parse(
         SpellComponentTable::ID,
@@ -499,6 +506,7 @@ fn spell_components() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn dual_did_mappers() {
     check(FileKind::DualDidMapper, |id, b| {
         dual_did_mapper::DualDidMapper::parse(id, b).map(|_| ())
@@ -508,10 +516,9 @@ fn dual_did_mappers() {
 /// The spell component mapper agrees with the SpellComponentsTable and the
 /// ACE world database (Lead Scarab 691, Prismatic Taper 20631).
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn spell_component_mapper() {
-    let Some(dat) = archive("client_portal.dat") else {
-        return;
-    };
+    let dat = archive("client_portal.dat");
     use dual_did_mapper::DualDidMapper;
     let m = DualDidMapper::parse(
         DualDidMapper::SPELL_COMPONENTS,
@@ -541,10 +548,9 @@ fn spell_component_mapper() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn xp_table() {
-    let Some(dat) = archive("client_portal.dat") else {
-        return;
-    };
+    let dat = archive("client_portal.dat");
     use xp_table::XpTable;
     let t = XpTable::parse(XpTable::ID, &dat.read(XpTable::ID).unwrap()).unwrap();
     assert_eq!(t.max_level(), 275);

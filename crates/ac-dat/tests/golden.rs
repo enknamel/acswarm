@@ -1,15 +1,11 @@
 //! Differential tests against manifests produced by ACE's DatLoader
-//! (`tools/regen-golden.sh`). They need the real archives and are skipped
-//! unless `AC_DATA_DIR` is set.
+//! (`tools/regen-golden.sh`). They need the real archives, from
+//! AC_DATA_DIR.
 
 use std::path::PathBuf;
 
 use ac_dat::DatArchive;
 use sha2::{Digest, Sha256};
-
-fn data_dir() -> Option<PathBuf> {
-    std::env::var_os("AC_DATA_DIR").map(PathBuf::from)
-}
 
 fn golden(name: &str) -> String {
     let p = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -31,10 +27,7 @@ fn manifest_line(dat: &DatArchive, e: &ac_dat::Entry) -> String {
 }
 
 fn check(archive: &str) {
-    let Some(dir) = data_dir() else {
-        eprintln!("AC_DATA_DIR unset; skipping");
-        return;
-    };
+    let dir = ac_dat::test_data_dir();
     let dat = DatArchive::open(dir.join(format!("client_{archive}.dat"))).unwrap();
 
     // Sampled rows must match exactly.
@@ -57,11 +50,13 @@ fn check(archive: &str) {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn portal_matches_ace() {
     check("portal");
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn cell_matches_ace() {
     check("cell_1");
 }

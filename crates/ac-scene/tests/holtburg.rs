@@ -3,10 +3,9 @@
 use ac_scene::{landblock, model, Assets};
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn holtburg_assembles() {
-    let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
-        return;
-    };
+    let dir = ac_dat::test_data_dir();
     let assets = Assets::open(dir).unwrap();
     let scene = landblock::load(&assets, 0xA9B4_0000).unwrap();
     assert_eq!(scene.terrain.vertices.len(), 81);

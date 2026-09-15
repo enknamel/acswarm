@@ -98,10 +98,9 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn holtburg_river_gets_water_at_the_water_height() {
-        let Ok(dir) = std::env::var("AC_DATA_DIR") else {
-            return;
-        };
+        let dir = ac_dat::test_data_dir();
         let assets = ac_scene::Assets::open(dir).unwrap();
         let region = assets.region().unwrap();
         assert!(is_water(&region, 16));

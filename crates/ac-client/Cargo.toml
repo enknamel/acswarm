@@ -5,8 +5,13 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+# Offline clients and world objects for tests (`ac_client::testkit`).
+testkit = ["dep:ac-dat"]
+
 [dependencies]
 ac-agent = { path = "../ac-agent" }
+ac-dat = { path = "../ac-dat", optional = true }
 ac-nav = { path = "../ac-nav" }
 ac-loot = { path = "../ac-loot" }
 ac-vendor = { path = "../ac-vendor" }
@@ -21,4 +26,7 @@ regex.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+# The integration tests use the testkit too.
+ac-client = { path = ".", features = ["testkit"] }
+ac-dat = { path = "../ac-dat" }
 tracing-subscriber.workspace = true

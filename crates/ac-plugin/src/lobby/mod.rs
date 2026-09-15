@@ -668,11 +668,9 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn create_screen_steps_and_cancels() {
-        let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
-            eprintln!("AC_DATA_DIR unset; skipping");
-            return;
-        };
+        let dir = ac_dat::test_data_dir();
         let assets = Rc::new(Assets::open(std::path::Path::new(&dir)).unwrap());
         let mut l = Lobby::demo_create(assets).unwrap();
         assert!(l.preview().is_some());

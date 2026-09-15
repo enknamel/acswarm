@@ -1,27 +1,23 @@
 //! Decode real clips from the portal archive into kira frames and resolve
-//! sound types through the human sound table. Skipped unless `AC_DATA_DIR`
-//! is set. No audio device is needed.
-
-use std::path::PathBuf;
+//! sound types through the human sound table. Needs AC_DATA_DIR. No
+//! audio device is needed.
 
 use ac_dat::{DatArchive, FileKind};
 use ac_formats::sound_table::SoundTable;
 use ac_formats::wave::Wave;
 
-fn portal() -> Option<DatArchive> {
-    let dir = PathBuf::from(std::env::var_os("AC_DATA_DIR")?);
-    Some(DatArchive::open(dir.join("client_portal.dat")).unwrap())
+fn portal() -> DatArchive {
+    let dir = ac_dat::test_data_dir();
+    DatArchive::open(dir.join("client_portal.dat")).unwrap()
 }
 
 /// Human sound table (weenie DID 0x20000001).
 const HUMAN: u32 = 0x2000_0001;
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn human_sounds_decode() {
-    let Some(dat) = portal() else {
-        eprintln!("AC_DATA_DIR unset; skipping");
-        return;
-    };
+    let dat = portal();
     let table = SoundTable::parse(HUMAN, &dat.read(HUMAN).unwrap()).unwrap();
     // Attack1, Wound1, Death1.
     for sound_type in [3u32, 0x0C, 0x0F] {
@@ -40,10 +36,9 @@ fn human_sounds_decode() {
 /// Every clip in the archive converts; the one MP3 goes through kira's
 /// decoder and must come out with roughly the duration its header claims.
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn every_wave_decodes() {
-    let Some(dat) = portal() else {
-        return;
-    };
+    let dat = portal();
     let mut n = 0;
     let mut mp3 = 0;
     for e in dat.entries().filter(|e| dat.kind(e.id) == FileKind::Wave) {

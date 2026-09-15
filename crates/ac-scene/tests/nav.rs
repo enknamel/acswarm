@@ -10,10 +10,9 @@ use ac_scene::{
 use glam::Vec3;
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn academy_start_room_to_the_far_end() {
-    let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
-        return;
-    };
+    let dir = ac_dat::test_data_dir();
     let assets = Assets::open(dir).unwrap();
     let block = 0x8602_0000;
     let scene = landblock::load(&assets, block).unwrap();

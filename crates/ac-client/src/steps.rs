@@ -889,33 +889,8 @@ mod tests {
         assert!(!ap.corpse_waiting(fresh, now, full));
     }
 
-    /// A character standing in `cell` at `local`, offline, when the
-    /// archives are there to be read.
-    fn standing_at(cell: u32, local: glam::Vec3) -> Option<Client> {
-        let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
-            eprintln!("AC_DATA_DIR unset; skipping");
-            return None;
-        };
-        let assets = std::rc::Rc::new(ac_scene::Assets::open(dir).unwrap());
-        let mut c = Client::connect(
-            crate::Config {
-                host: "127.0.0.1:1".into(),
-                account: "acreborn".into(),
-                password: "x".into(),
-                character: None,
-                auto_enter: true,
-            },
-            assets.clone(),
-        )
-        .unwrap();
-        let mut pl = crate::player::Player::new(&assets, cell, local, glam::Quat::IDENTITY);
-        pl.set_motion_table(&assets, 0x0200_0001, 0x0900_0001);
-        c.player = Some(pl);
-        c.world.player_guid = Some(0x5000_0009);
-        Some(c)
-    }
-
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn looting_is_worth_only_the_bodies_this_character_would_go_to() {
         // The two predicates disagreed: what looting was worth counted
         // every body waiting, ownership and all, while the looting step
@@ -925,20 +900,13 @@ mod tests {
         // the tick with nothing to go to. Nine characters spent 53% of
         // a run standing over bodies and 13% fighting.
         let holtburg = 0xA9B4_0019;
-        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 84.0, 94.0)) else {
-            return;
-        };
+        let mut c = crate::testkit::standing_at(holtburg, glam::Vec3::new(84.0, 84.0, 94.0));
+        c.world.player_guid = Some(0x5000_0009);
         let me = c.player.as_ref().unwrap().world_position();
         let now = Instant::now();
         let body = |guid: u32, at: glam::Vec3| ac_world::WorldObject {
-            guid,
-            name: "Corpse of Drudge Slave".into(),
-            object_desc_flags: ac_world::object_desc_flags::CORPSE,
-            position: Some(ac_world::object::Position::new_flat(
-                holtburg,
-                at - ac_world::landblock_origin(holtburg),
-            )),
-            ..Default::default()
+            position: crate::testkit::placed(holtburg, at),
+            ..crate::testkit::corpse(guid, "Corpse of Drudge Slave")
         };
         // One at the character's feet, and five more: three beside it
         // that teammates have claimed, and two lying out of reach.
@@ -949,14 +917,12 @@ mod tests {
             let at = me + glam::Vec3::new(n as f32 + 1.0, 0.0, 0.0);
             c.world.objects.insert(guid, body(guid, at));
             c.autoplay.team.mates.push(crate::autoplay::Mate {
-                guid: 0x5000_0001 + n as u32,
-                name: format!("Mate {n}"),
                 autoplay: true,
                 health: 1.0,
                 world: at,
                 looting: Some(guid),
                 looting_for: std::time::Duration::ZERO,
-                ..Default::default()
+                ..crate::testkit::mate(0x5000_0001 + n as u32, &format!("Mate {n}"))
             });
         }
         for i in 5..7u32 {

@@ -657,22 +657,6 @@ mod tests {
         assert_eq!(focus_wcid(school::NONE), None);
     }
 
-    /// Offline session over the real archives: no packet is ever sent
-    /// (nothing calls `tick`).
-    fn offline_client(assets: std::rc::Rc<ac_scene::Assets>) -> Client {
-        Client::connect(
-            crate::Config {
-                host: "127.0.0.1:1".into(),
-                account: "acreborn".into(),
-                password: "x".into(),
-                character: None,
-                auto_enter: true,
-            },
-            assets,
-        )
-        .unwrap()
-    }
-
     const ME: u32 = 0x5000_0001;
 
     fn pack_item(c: &mut Client, guid: u32, wcid: u32, stack: u32) {
@@ -690,14 +674,11 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn components_and_cast_checks_over_the_archives() {
-        let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
-            eprintln!("AC_DATA_DIR unset; skipping");
-            return;
-        };
-        let assets = std::rc::Rc::new(ac_scene::Assets::open(dir).unwrap());
+        let assets = crate::testkit::game_data();
         let mapper = assets.spell_component_ids().unwrap();
-        let mut c = offline_client(assets);
+        let mut c = Client::offline(assets);
         c.world.player_guid = Some(ME);
         const HEAL_SELF_I: u32 = 6;
         c.world.stats.spells = vec![HEAL_SELF_I];

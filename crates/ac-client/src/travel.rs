@@ -1797,22 +1797,6 @@ mod tests {
         assert_eq!(leg_height(None, next_door, me, false), 0.0);
     }
 
-    /// Offline session over the real archives: nothing calls `tick`, so
-    /// no packet is ever sent.
-    fn offline_client(assets: Rc<ac_scene::Assets>) -> Client {
-        Client::connect(
-            crate::Config {
-                host: "127.0.0.1:1".into(),
-                account: "acreborn".into(),
-                password: "x".into(),
-                character: None,
-                auto_enter: true,
-            },
-            assets,
-        )
-        .unwrap()
-    }
-
     /// Walk the journey the client is on for up to `seconds` of game
     /// time, frame by frame the way `tick_player` does: the journey's leg,
     /// the steering toward it, the player's own physics. Stops when the
@@ -1858,14 +1842,11 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_corpse_in_the_holtburg_dungeon_is_walked_to_from_its_portal() {
-        let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
-            eprintln!("AC_DATA_DIR unset; skipping");
-            return;
-        };
-        let assets = Rc::new(ac_scene::Assets::open(dir).unwrap());
+        let assets = crate::testkit::game_data();
         let rooms = assets.block_collision(0x01F6_0000).unwrap();
-        let mut c = offline_client(assets.clone());
+        let mut c = Client::offline(assets.clone());
         // Both corpses recovery walked at from the arrival rooms, on the
         // local server, and never reached.
         for corpse in [
@@ -1878,14 +1859,7 @@ mod tests {
                 .expect("the corpse lies on a floor of the dungeon");
             eprintln!("corpse {corpse:?}: floor {floor:.1} in {cell:#010x}");
             // Where the Holtburg Dungeon's portal drops a character.
-            let mut pl = crate::player::Player::new(
-                &assets,
-                0x01F6_0289,
-                Vec3::new(96.7, -10.0, 0.0),
-                glam::Quat::IDENTITY,
-            );
-            pl.set_motion_table(&assets, 0x0200_0001, 0x0900_0001);
-            c.player = Some(pl);
+            crate::testkit::stand(&mut c, 0x01F6_0289, Vec3::new(96.7, -10.0, 0.0));
             c.steering.reset();
             assert!(c.plan_trip_in(corpse, cell), "no way to {corpse:?}");
             assert_eq!(

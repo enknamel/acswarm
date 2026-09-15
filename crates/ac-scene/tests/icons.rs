@@ -3,9 +3,9 @@
 
 use ac_scene::Assets;
 
-fn assets() -> Option<Assets> {
-    let dir = std::env::var_os("AC_DATA_DIR")?;
-    Some(Assets::open(dir).unwrap())
+fn assets() -> Assets {
+    let dir = ac_dat::test_data_dir();
+    Assets::open(dir).unwrap()
 }
 
 /// A handful of inventory icons of different pixel formats.
@@ -21,8 +21,9 @@ const ICONS: &[u32] = &[
 ];
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn icons_decode_to_32x32_rgba() {
-    let Some(assets) = assets() else { return };
+    let assets = assets();
     for &id in ICONS {
         let tex = assets.texture(id).unwrap();
         assert_eq!((tex.width, tex.height), (32, 32), "{id:#010x}");
@@ -48,8 +49,9 @@ fn icons_decode_to_32x32_rgba() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn icon_ids_are_render_surfaces() {
-    let Some(assets) = assets() else { return };
+    let assets = assets();
     for &id in ICONS {
         assert_eq!(id >> 24, 0x06);
         assert!(assets.portal.entry(id).is_some(), "{id:#010x} in portal");

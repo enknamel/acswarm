@@ -11,10 +11,9 @@ fn block_centre(id: u32) -> Vec2 {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn holtburg_is_land_and_the_open_sea_is_water() {
-    let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
-        return;
-    };
+    let dir = ac_dat::test_data_dir();
     let assets = Assets::open(dir).unwrap();
     let grid = WorldGrid::load_cached(&assets, &WorldGrid::cache_dir()).unwrap();
     let region = assets.region().unwrap();
@@ -48,10 +47,9 @@ fn holtburg_is_land_and_the_open_sea_is_water() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn cached_round_trips_through_the_file() {
-    let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
-        return;
-    };
+    let dir = ac_dat::test_data_dir();
     let assets = Assets::open(dir).unwrap();
     let tmp = std::env::temp_dir().join(format!("acswarm-worldmap-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);

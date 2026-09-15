@@ -153,10 +153,9 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn default_matches_region_midday() {
-        let Ok(dir) = std::env::var("AC_DATA_DIR") else {
-            return;
-        };
+        let dir = ac_dat::test_data_dir();
         let assets = ac_scene::Assets::open(dir).unwrap();
         let region = assets.region().unwrap();
         let env = Environment::from_region(&region, 0.5).unwrap();

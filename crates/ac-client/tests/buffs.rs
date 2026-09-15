@@ -31,10 +31,9 @@ const EPIC_FLAME_BANE: u32 = 4664;
 const RUN: u32 = 24;
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_swordsman_gets_his_own_masteries_and_the_highest_level_he_can_land() {
-    let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
-        return;
-    };
+    let dir = ac_dat::test_data_dir();
     let assets = Assets::open(dir).unwrap();
     let table = assets.spell_table().unwrap();
     let known = [
@@ -115,10 +114,9 @@ fn a_swordsman_gets_his_own_masteries_and_the_highest_level_he_can_land() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn short_lived_spells_are_not_buffs() {
-    let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
-        return;
-    };
+    let dir = ac_dat::test_data_dir();
     let assets = Assets::open(dir).unwrap();
     let table = assets.spell_table().unwrap();
     let known = [LICORICE_LEAP, TUSKER_SPRINT, PRODIGAL_JUMPING];
@@ -137,10 +135,9 @@ fn short_lived_spells_are_not_buffs() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn one_spell_per_effect_the_one_that_does_most() {
-    let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
-        return;
-    };
+    let dir = ac_dat::test_data_dir();
     let assets = Assets::open(dir).unwrap();
     let table = assets.spell_table().unwrap();
     let known = [MINOR_FLAME_BANE, INCANTATION_FLAME_BANE, EPIC_FLAME_BANE];
@@ -164,12 +161,11 @@ fn one_spell_per_effect_the_one_that_does_most() {
 /// protection, which is what a character with 613 Life Magic was
 /// casting. The level has to win.
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn the_strongest_protection_is_the_highest_level_not_the_biggest_number() {
     const ACID_PROTECTION_I: u32 = 515;
     const ACID_PROTECTION_VI: u32 = 520;
-    let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
-        return;
-    };
+    let dir = ac_dat::test_data_dir();
     let assets = Assets::open(dir).unwrap();
     let table = assets.spell_table().unwrap();
     // Offered in the order that used to win, weakest first.
@@ -191,13 +187,12 @@ fn the_strongest_protection_is_the_highest_level_not_the_biggest_number() {
 /// Only the levels it can actually cast are on offer: with the sixth
 /// out of reach the fifth is wanted, not the first.
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn the_highest_level_it_can_cast_is_the_one_wanted() {
     const ACID_PROTECTION_I: u32 = 515;
     const ACID_PROTECTION_V: u32 = 519;
     const ACID_PROTECTION_VI: u32 = 520;
-    let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
-        return;
-    };
+    let dir = ac_dat::test_data_dir();
     let assets = Assets::open(dir).unwrap();
     let table = assets.spell_table().unwrap();
     let known = [ACID_PROTECTION_I, ACID_PROTECTION_V, ACID_PROTECTION_VI];

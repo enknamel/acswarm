@@ -8,10 +8,9 @@ use ac_scene::Assets;
 use glam::{Vec2, Vec3};
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_walk_through_the_hub_keeps_its_berth_from_the_other_portals() {
-    let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
-        return;
-    };
+    let dir = ac_dat::test_data_dir();
     let assets = Assets::open(dir).unwrap();
     // The hub is landblock 0007: arrivals land at (70, -80) and the
     // Portal to Sanamar's mouth stands at (86, -120), with the Portal to

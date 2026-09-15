@@ -46,6 +46,8 @@ name = "ac-client"
 version = "0.0.3"
 dependencies = [
  "ac-agent",
+ "ac-client",
+ "ac-dat",
  "ac-formats",
  "ac-loot",
  "ac-nav",
@@ -120,6 +122,7 @@ version = "0.0.3"
 dependencies = [
  "ac-bus",
  "ac-client",
+ "ac-dat",
  "ac-formats",
  "ac-net",
  "ac-scene",

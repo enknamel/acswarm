@@ -4,9 +4,9 @@
 use ac_scene::chargen::{self, Look, HEAD_PART};
 use ac_scene::{model, Assets};
 
-fn assets() -> Option<Assets> {
-    let dir = std::env::var_os("AC_DATA_DIR")?;
-    Some(Assets::open(dir).unwrap())
+fn assets() -> Assets {
+    let dir = ac_dat::test_data_dir();
+    Assets::open(dir).unwrap()
 }
 
 /// Texture overrides the head part ends up with: (surface id, new texture).
@@ -25,8 +25,9 @@ fn head_overrides(assets: &Assets, setup_id: u32, app: &model::Appearance) -> Ve
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn aluvian_male_head_gets_hair_and_face() {
-    let Some(assets) = assets() else { return };
+    let assets = assets();
     let look = Look {
         hair_style: 3,
         ..Look::default()
@@ -70,8 +71,9 @@ fn aluvian_male_head_gets_hair_and_face() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn bald_style_still_has_a_face() {
-    let Some(assets) = assets() else { return };
+    let assets = assets();
     // Aluvian male hair style 0 is bald; the eye strip then uses its bald
     // variant, and the head is still retextured with eyes, nose and mouth.
     let desc = chargen::describe(&assets, &Look::default()).unwrap();
@@ -93,8 +95,9 @@ fn bald_style_still_has_a_face() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn later_texture_changes_replace_earlier_ones() {
-    let Some(assets) = assets() else { return };
+    let assets = assets();
     // A server lists the base body before clothing: the client's
     // ObjDesc::AddTextureMapChange drops the earlier entry for the same
     // part and old texture, so the shirt (second entry) wins.
@@ -122,8 +125,9 @@ fn later_texture_changes_replace_earlier_ones() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn heritage_lookup() {
-    let Some(assets) = assets() else { return };
+    let assets = assets();
     let cg = assets.chargen().unwrap();
     assert_eq!(chargen::heritage_id(&cg, "aluvian"), Some(1));
     assert_eq!(chargen::heritage_id(&cg, "Sho"), Some(3));

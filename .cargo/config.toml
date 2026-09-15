@@ -1,0 +1,4 @@
+[alias]
+# Every test, including those that read the game archives (AC_DATA_DIR);
+# plain `cargo test` leaves them ignored.
+test-data = "test --workspace -- --include-ignored"

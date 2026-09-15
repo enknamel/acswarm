@@ -17,10 +17,9 @@ fn alpha_at(map: &localmap::LocalMap, world: Vec2) -> u8 {
 /// The Holtburg meeting hall (0x0125): a hall floor at z = 0 with a
 /// balcony at z = 6 whose entrance is at local (30, -60, 6).
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn meeting_hall_plan_shows_the_balcony_but_not_the_hall_below() {
-    let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
-        return;
-    };
+    let dir = ac_dat::test_data_dir();
     let assets = ac_scene::Assets::open(dir).unwrap();
     let block = 0x0125_0000;
     let origin = lbid::world_origin(block);
@@ -60,10 +59,9 @@ fn meeting_hall_plan_shows_the_balcony_but_not_the_hall_below() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn holtburg_outdoors_is_the_block_square_and_opaque() {
-    let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
-        return;
-    };
+    let dir = ac_dat::test_data_dir();
     let assets = ac_scene::Assets::open(dir).unwrap();
     let block = 0xA9B4_0000;
     let map = localmap::render(&assets, block, 2.0, None).unwrap();

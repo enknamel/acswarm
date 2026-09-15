@@ -1367,11 +1367,19 @@ mod tests {
             create_failure_message(SPEC_REJECTED),
             "the character could not be built from its options (see the log)"
         );
-        let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
-            eprintln!("AC_DATA_DIR unset; skipping the build");
-            return;
+        // Built over the archives in `create_specs_build_over_the_archives`.
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn create_specs_build_over_the_archives() {
+        let spec = CreateSpec {
+            name: "Fleetbot One".into(),
+            template: Some("bow".into()),
+            town: Some("holtburg".into()),
+            ..Default::default()
         };
-        let assets = ac_scene::Assets::open(dir).unwrap();
+        let assets = ac_scene::Assets::open(ac_dat::test_data_dir()).unwrap();
         let (build, rules) = spec.build(&assets).unwrap();
         assert_eq!(build.name, "Fleetbot One");
         assert_eq!(rules.templates[build.template], "Bow Hunter");
@@ -1385,11 +1393,9 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn rules_and_templates_over_the_archives() {
-        let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
-            eprintln!("AC_DATA_DIR unset; skipping");
-            return;
-        };
+        let dir = ac_dat::test_data_dir();
         let assets = ac_scene::Assets::open(dir).unwrap();
         let cg = assets.chargen().unwrap();
         let r = rules(&assets, HERITAGE_ALUVIAN).unwrap();

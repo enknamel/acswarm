@@ -645,10 +645,9 @@ mod tests {
     /// Needs AC_DATA_DIR: Holtburg to Arwic exists, stays near the
     /// straight line and off the water; a goal in the sea fails fast.
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn holtburg_to_arwic_over_real_terrain() {
-        let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
-            return;
-        };
+        let dir = ac_dat::test_data_dir();
         let assets = crate::Assets::open(dir).unwrap();
         let region = assets.region().unwrap();
         let cache = std::env::temp_dir().join("acswarm-test-cache");

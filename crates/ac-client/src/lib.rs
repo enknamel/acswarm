@@ -271,6 +271,8 @@ mod refused;
 pub mod shopping;
 pub mod steps;
 pub mod summoning;
+#[cfg(any(test, feature = "testkit"))]
+pub mod testkit;
 pub mod travel;
 pub mod visit;
 pub mod weapons;
@@ -394,7 +396,8 @@ pub struct PlayerFrame {
 
 pub struct Client {
     pub config: Config,
-    pub socket: std::net::UdpSocket,
+    /// `None` for a session with no server ([`Client::offline`]).
+    pub socket: Option<std::net::UdpSocket>,
     pub primary: std::net::SocketAddr,
     pub secondary: std::net::SocketAddr,
     pub session: ac_net::session::Session,
@@ -620,8 +623,6 @@ pub struct Client {
 impl Client {
     /// Open the sockets, start the login handshake, and return the session.
     pub fn connect(config: Config, assets: std::rc::Rc<ac_scene::Assets>) -> std::io::Result<Self> {
-        use ac_net::messages::DatIteration;
-        use ac_net::session::{Config as NetConfig, Session};
         let host = config.host.clone();
         // Resolve the login address, accepting a hostname or an IP, with or
         // without a port (the public servers are named hosts, so a bare
@@ -636,9 +637,39 @@ impl Client {
             .map_err(std::io::Error::other)?
             .next()
             .ok_or_else(|| std::io::Error::other(format!("no address found for {host}")))?;
-        let secondary = std::net::SocketAddr::new(primary.ip(), primary.port() + 1);
         let socket = std::net::UdpSocket::bind("0.0.0.0:0")?;
         socket.set_nonblocking(true)?;
+        tracing::info!("connecting to {primary} as {}", config.account);
+        Ok(Self::start(config, assets, Some(socket), primary))
+    }
+
+    /// A session with no server: no socket and no address lookup, so
+    /// nothing it sends goes anywhere and nothing arrives. Tests build
+    /// the situation they ask about by setting its state by hand.
+    pub fn offline(assets: std::rc::Rc<ac_scene::Assets>) -> Self {
+        let config = Config {
+            host: "127.0.0.1:1".into(),
+            account: "acreborn".into(),
+            password: "x".into(),
+            character: None,
+            auto_enter: true,
+        };
+        let nowhere = std::net::SocketAddr::from(([127, 0, 0, 1], 1));
+        Self::start(config, assets, None, nowhere)
+    }
+
+    /// The one place a session is put together, with or without a
+    /// server: the login handshake queued, and every default that is not
+    /// zero (see the test `an_offline_session_starts_with_the_defaults_of_a_connected_one`).
+    fn start(
+        config: Config,
+        assets: std::rc::Rc<ac_scene::Assets>,
+        socket: Option<std::net::UdpSocket>,
+        primary: std::net::SocketAddr,
+    ) -> Self {
+        use ac_net::messages::DatIteration;
+        use ac_net::session::{Config as NetConfig, Session};
+        let secondary = std::net::SocketAddr::new(primary.ip(), primary.port() + 1);
         let now = Instant::now();
         let mut session = Session::new(
             NetConfig {
@@ -662,9 +693,8 @@ impl Client {
             now,
         );
         session.login(now);
-        tracing::info!("connecting to {primary} as {}", config.account);
         let pathfinder = pathfinder::Pathfinder::new(&assets);
-        Ok(Client {
+        Client {
             profiles: profile::Library::shared(),
             config,
             socket,
@@ -750,7 +780,7 @@ impl Client {
             ended: None,
             last_refusal: None,
             events: Vec::new(),
-        })
+        }
     }
 
     /// Send a clean disconnect (flushing it immediately). This marks the
@@ -817,7 +847,9 @@ impl Client {
             } else {
                 self.secondary
             };
-            let _ = self.socket.send_to(&dg, to);
+            if let Some(socket) = &self.socket {
+                let _ = socket.send_to(&dg, to);
+            }
         }
     }
 
@@ -887,11 +919,15 @@ impl Client {
             } else {
                 self.secondary
             };
-            let _ = self.socket.send_to(&dg, to);
+            if let Some(socket) = &self.socket {
+                let _ = socket.send_to(&dg, to);
+            }
         }
-        let mut buf = [0u8; 2048];
-        while let Ok((n, _)) = self.socket.recv_from(&mut buf) {
-            self.session.receive(&buf[..n], now);
+        if let Some(socket) = &self.socket {
+            let mut buf = [0u8; 2048];
+            while let Ok((n, _)) = socket.recv_from(&mut buf) {
+                self.session.receive(&buf[..n], now);
+            }
         }
         self.session.poll(now);
         for ev in self.session.events() {
@@ -4679,6 +4715,41 @@ mod salvage_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_offline_session_starts_with_the_defaults_of_a_connected_one() {
+        // One constructor builds both. The numbers are pinned here so
+        // that grouping these fields behind a derived Default cannot zero
+        // them unseen.
+        let assets = std::rc::Rc::new(ac_scene::Assets::empty());
+        let offline = Client::offline(assets.clone());
+        let online = Client::connect(
+            Config {
+                host: "127.0.0.1:1".into(),
+                account: "acreborn".into(),
+                password: "x".into(),
+                character: None,
+                auto_enter: true,
+            },
+            assets,
+        )
+        .unwrap();
+        assert!(offline.socket.is_none());
+        assert!(online.socket.is_some());
+        assert_eq!(
+            (offline.primary, offline.secondary),
+            (online.primary, online.secondary)
+        );
+        assert_eq!(offline.session.state(), online.session.state());
+        for c in [&offline, &online] {
+            assert_eq!(c.attack_height, 2);
+            assert_eq!(c.attack_power, 0.5);
+            assert_eq!(c.attack_backoff, Duration::from_millis(300));
+            assert_eq!(c.speed_boost, 2.0);
+            assert_eq!(c.jump_height, 9.0);
+            assert_eq!(c.turbine_context, 1);
+        }
+    }
 
     #[test]
     fn a_busy_refusal_does_not_free_the_cast_slot() {

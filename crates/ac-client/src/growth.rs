@@ -5548,6 +5548,7 @@ impl Client {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testkit::standing_at;
 
     fn offer(raise: Raise, cost: u32, weight: f32) -> Offer {
         Offer {
@@ -5785,37 +5786,6 @@ mod tests {
         );
     }
 
-    /// Offline session over the real archives: nothing calls `tick`, so
-    /// no packet is ever sent.
-    fn offline_client(assets: std::rc::Rc<ac_scene::Assets>) -> Client {
-        Client::connect(
-            crate::Config {
-                host: "127.0.0.1:1".into(),
-                account: "acreborn".into(),
-                password: "x".into(),
-                character: None,
-                auto_enter: true,
-            },
-            assets,
-        )
-        .unwrap()
-    }
-
-    /// A character standing in `cell` at `local`, offline, when the
-    /// archives are there to be read.
-    fn standing_at(cell: u32, local: glam::Vec3) -> Option<Client> {
-        let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
-            eprintln!("AC_DATA_DIR unset; skipping");
-            return None;
-        };
-        let assets = std::rc::Rc::new(ac_scene::Assets::open(dir).unwrap());
-        let mut c = offline_client(assets.clone());
-        let mut pl = crate::player::Player::new(&assets, cell, local, glam::Quat::IDENTITY);
-        pl.set_motion_table(&assets, 0x0200_0001, 0x0900_0001);
-        c.player = Some(pl);
-        Some(c)
-    }
-
     /// A run on its way to a counter at `at`, set off at `now`.
     fn run_to(at: Vec2, now: Instant) -> Run {
         Run {
@@ -5835,6 +5805,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_follower_on_its_own_town_run_is_not_pulled_back_to_its_leader() {
         // A party restocking with everyone going: each follower makes its
         // own run while the leader goes on leading. Following ranks above
@@ -5843,9 +5814,7 @@ mod tests {
         // run planned it again, and the walk after the leader ended it
         // again, for the run's four minutes.
         let holtburg = 0xA9B4_0019;
-        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
-            return;
-        };
+        let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
         let me = c.player.as_ref().unwrap().world_position();
         let team = &mut c.autoplay.config.team;
         team.enabled = true;
@@ -5905,6 +5874,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_town_run_between_journeys_is_not_taken_exploring_or_back_to_the_area() {
         // Underground, a corpse on the way ends the run's journey, and
         // exploring ranks above the run: a room chosen then kept the tick
@@ -5915,9 +5885,7 @@ mod tests {
         let now = Instant::now();
 
         // Where the Holtburg Dungeon's portal drops a character.
-        let Some(mut c) = standing_at(0x01F6_0289, glam::Vec3::new(96.7, -10.0, 0.0)) else {
-            return;
-        };
+        let mut c = standing_at(0x01F6_0289, glam::Vec3::new(96.7, -10.0, 0.0));
         c.autoplay.growth.run = Some(run_to(renald, now));
         assert!(!c.traveling());
         assert!(!c.autoplay_explore(now), "went exploring on a run to town");
@@ -5927,9 +5895,7 @@ mod tests {
         assert!(c.autoplay_explore(now));
 
         // Outdoors by the Holtburg lifestone, a field to hunt 40 m off.
-        let Some(mut c) = standing_at(0xA9B4_0019, glam::Vec3::new(84.0, 7.1, 94.0)) else {
-            return;
-        };
+        let mut c = standing_at(0xA9B4_0019, glam::Vec3::new(84.0, 7.1, 94.0));
         let me = c.player.as_ref().unwrap().world_position();
         let (x, y) = (me.x + 40.0, me.y);
         let fight = &mut c.autoplay.config.fight;
@@ -5954,23 +5920,22 @@ mod tests {
     /// A level 10 character playing on its own where the Holtburg
     /// Dungeon's portal drops it -- a dungeon, so exploring always has a
     /// room to walk to -- with `xp` to spend and nothing spent yet.
-    fn with_experience_to_spend(xp: i64) -> Option<Client> {
-        let mut c = standing_at(0x01F6_0289, glam::Vec3::new(96.7, -10.0, 0.0))?;
+    fn with_experience_to_spend(xp: i64) -> Client {
+        let mut c = standing_at(0x01F6_0289, glam::Vec3::new(96.7, -10.0, 0.0));
         c.world.player_guid = Some(0x5000_0001);
         c.world.stats.level = 10;
         c.world.stats.available_xp = xp;
         c.autoplay.config.enabled = true;
-        Some(c)
+        c
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn experience_is_spent_while_exploring_claims_every_tick() {
         // On the local server a character granted a hundred billion
         // experience spent none of it in three minutes. Spending was part
         // of the last goal, and exploring claimed every tick before it.
-        let Some(mut c) = with_experience_to_spend(1_000_000) else {
-            return;
-        };
+        let mut c = with_experience_to_spend(1_000_000);
         let start = Instant::now();
         let mut raised: Vec<Instant> = Vec::new();
         let mut t = start;
@@ -6005,10 +5970,9 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn nothing_is_sent_with_auto_xp_off_or_nothing_to_spend() {
-        let Some(mut c) = with_experience_to_spend(1_000_000) else {
-            return;
-        };
+        let mut c = with_experience_to_spend(1_000_000);
         let start = Instant::now();
         let at = |s: u64| start + Duration::from_secs(s);
 
@@ -6033,10 +5997,9 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_rank_the_server_refuses_is_not_asked_for_again_while_it_sulks() {
-        let Some(mut c) = with_experience_to_spend(1_000_000) else {
-            return;
-        };
+        let mut c = with_experience_to_spend(1_000_000);
         let start = Instant::now();
         assert!(c.grow_spend_xp(start));
         let (refused, _) = sent(&c);
@@ -6076,15 +6039,14 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_raise_is_not_given_up_on_before_it_has_gone_out() {
         // A round of nine headless characters took four and a half seconds
         // on the local server. A raise queued in it goes on the wire at the
         // top of the next tick, and was given up on in that same tick,
         // before any answer could come: nine of them, and all nine landed a
         // third of a second later.
-        let Some(mut c) = with_experience_to_spend(10_000_000_000) else {
-            return;
-        };
+        let mut c = with_experience_to_spend(10_000_000_000);
         let start = Instant::now();
         let round = Duration::from_millis(4_600);
         assert!(c.grow_spend_xp(start));
@@ -6102,6 +6064,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn an_answer_that_comes_late_ends_the_wait_and_finds_its_share_kept() {
         // When the local server stopped answering for forty seconds, nine
         // characters gave up on ninety raises, and nearly all of them
@@ -6109,12 +6072,10 @@ mod tests {
         // the pool to the others meanwhile, nor stay shut out once its
         // answer is in.
         let pool = 10_000_000_000;
-        let (Some(mut slow), Some(mut calm)) = (
+        let (mut slow, mut calm) = (
             with_experience_to_spend(pool),
             with_experience_to_spend(pool),
-        ) else {
-            return;
-        };
+        );
         let step = Duration::from_millis(100);
         let start = Instant::now();
         let spend_until = |c: &mut Client, from: Instant, until: Instant| {
@@ -6177,13 +6138,12 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_stat_is_not_sized_again_before_its_answer_comes() {
         // A kill's experience moves the pool too. Taken for the answer, it
         // let the stat be sized again from the record the answer had not
         // reached yet, and bought twice.
-        let Some(mut c) = with_experience_to_spend(10_000_000_000) else {
-            return;
-        };
+        let mut c = with_experience_to_spend(10_000_000_000);
         let start = Instant::now();
         assert!(c.grow_spend_xp(start));
         let (pick, batch) = sent(&c);
@@ -6286,6 +6246,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn raises_sent_while_the_server_is_not_answering_come_to_no_more_than_the_pool() {
         // For forty seconds the local server answered nothing. Each raise
         // was given up on after RAISE_SETTLE and the next one sized on a
@@ -6294,12 +6255,10 @@ mod tests {
         // real XpTable, a caster given ten billion queued eighteen raises
         // for thirty-six billion, and the server refuses all it cannot pay.
         let pool = 10_000_000_000;
-        let (Some(mut stalled), Some(mut calm)) = (
+        let (mut stalled, mut calm) = (
             with_experience_to_spend(pool),
             with_experience_to_spend(pool),
-        ) else {
-            return;
-        };
+        );
         let start = Instant::now();
         spend_for(&mut calm, start, Duration::from_secs(120));
 
@@ -6330,6 +6289,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_fight_does_not_sell_off_the_share_kept_for_the_maximums() {
         // On paper, on the real XpTable: a caster given ten billion in the
         // middle of a fight had every other stat bought to its share in
@@ -6337,12 +6297,10 @@ mod tests {
         // out of the share kept for the maximums. Fifty-six seconds in, Self,
         // Health and Mana came out of the fight ninety ranks short.
         let pool = 10_000_000_000;
-        let (Some(mut fighting), Some(mut calm)) = (
+        let (mut fighting, mut calm) = (
             with_experience_to_spend(pool),
             with_experience_to_spend(pool),
-        ) else {
-            return;
-        };
+        );
         let start = Instant::now();
         spend_for(&mut calm, start, Duration::from_secs(120));
 
@@ -6380,18 +6338,17 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_rank_that_raises_a_maximum_waits_for_the_fight_to_be_over() {
         // A character with a large pool bought Health between swings. Its
         // maximum rose and what was left of it did not, until the fraction
         // left fell under the heal line and it healed, mid-fight, health
         // it had never lost.
         let pool = 100_000_000_000;
-        let (Some(mut calm), Some(mut fighting)) = (
+        let (mut calm, mut fighting) = (
             with_experience_to_spend(pool),
             with_experience_to_spend(pool),
-        ) else {
-            return;
-        };
+        );
         let start = Instant::now();
         // With nothing to fight, the maximums are among the best buys.
         let bought = buy_ranks(&mut calm, start, 20);
@@ -6441,16 +6398,15 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_pool_worth_hundreds_of_ranks_is_spent_within_a_minute() {
         // Nine characters granted billions on the local server bought
         // about a rank a second each: a large pool would have taken days.
         let pool = 1_000_000;
-        let (Some(mut batched), Some(mut one_at_a_time)) = (
+        let (mut batched, mut one_at_a_time) = (
             with_experience_to_spend(pool),
             with_experience_to_spend(pool),
-        ) else {
-            return;
-        };
+        );
         // A rank a message, as it was, to the end of the pool.
         let mut ranks = 0;
         while let Some(pick) = choose_raise(
@@ -6502,10 +6458,9 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_kills_worth_of_experience_still_goes_a_rank_a_message() {
-        let Some(mut c) = with_experience_to_spend(400) else {
-            return;
-        };
+        let mut c = with_experience_to_spend(400);
         let start = Instant::now();
         let (mut t, mut messages) = (start, 0);
         while t < start + Duration::from_secs(30) {
@@ -7285,14 +7240,9 @@ mod tests {
     const TIDIER: u32 = 0x5000_0001;
 
     /// A character carrying `stacks` of `(guid, wcid, count, max)`,
-    /// offline, when the archives are there to be read.
-    fn carrying(stacks: &[(u32, u32, u32, u32)]) -> Option<Client> {
-        let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
-            eprintln!("AC_DATA_DIR unset; skipping");
-            return None;
-        };
-        let assets = std::rc::Rc::new(ac_scene::Assets::open(dir).unwrap());
-        let mut c = offline_client(assets);
+    /// offline, over the game's archives.
+    fn carrying(stacks: &[(u32, u32, u32, u32)]) -> Client {
+        let mut c = Client::offline(crate::testkit::game_data());
         c.world.player_guid = Some(TIDIER);
         for &(guid, wcid, count, max) in stacks {
             c.world.objects.insert(
@@ -7309,7 +7259,7 @@ mod tests {
                 },
             );
         }
-        Some(c)
+        c
     }
 
     /// The server's answer to a whole pour: the source forgotten, the
@@ -7322,14 +7272,13 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn lead_peas_taken_in_two_stacks_are_poured_together_without_a_tick_of_their_own() {
         // The report: peas looted off one corpse after another sit in
         // stacks of their own. Nothing here waits for a quiet moment --
         // there is a fight on -- because the server makes a pack-to-pack
         // merge on the spot.
-        let Some(mut c) = carrying(&[(1, 8329, 40, 100), (2, 8329, 5, 100)]) else {
-            return;
-        };
+        let mut c = carrying(&[(1, 8329, 40, 100), (2, 8329, 5, 100)]);
         c.attack_target = Some(0x8000_30F2);
         let t0 = Instant::now();
         c.autoplay_tidy(t0);
@@ -7353,18 +7302,17 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_pair_the_server_turns_down_does_not_stop_the_rest_being_tidied() {
         // One stubborn pair used to be the only answer ever offered, so
         // it was asked for every 600 ms and nothing else in the pack was
         // ever poured together.
-        let Some(mut c) = carrying(&[
+        let mut c = carrying(&[
             (1, 273, 5000, 25000),
             (2, 273, 900, 25000),
             (3, 8329, 40, 100),
             (4, 8329, 5, 100),
-        ]) else {
-            return;
-        };
+        ]);
         let t0 = Instant::now();
         c.autoplay_tidy(t0);
         let first = c.autoplay.pour.clone().expect("a pour went out").0.merge;
@@ -7383,13 +7331,12 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_refusal_naming_the_target_is_read_as_this_pours_answer() {
         // A stack that is stuck, or being traded, is refused under the
         // target's guid. Read only under the source's, these were never
         // seen at all and the same pair was offered every 600 ms.
-        let Some(mut c) = carrying(&[(1, 8329, 40, 100), (2, 8329, 5, 100)]) else {
-            return;
-        };
+        let mut c = carrying(&[(1, 8329, 40, 100), (2, 8329, 5, 100)]);
         let t0 = Instant::now();
         c.autoplay_tidy(t0);
         c.move_refused
@@ -7406,6 +7353,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn stacks_whose_words_disagree_are_never_poured_together() {
         use ac_loot::LootAction;
         let stats = |guid: u32| crate::items::ItemStats {
@@ -7419,9 +7367,7 @@ mod tests {
         // (the ledger takes the cautious answer), and forty peas the
         // player said to sell would stay in the pack for good: the
         // player's Sell overruled by a tidy. So nothing is poured.
-        let Some(mut c) = carrying(&[(1, 8329, 40, 100), (2, 8329, 5, 100)]) else {
-            return;
-        };
+        let mut c = carrying(&[(1, 8329, 40, 100), (2, 8329, 5, 100)]);
         c.autoplay.ledger.remember(&stats(1), LootAction::Sell);
         c.autoplay.ledger.remember(&stats(2), LootAction::Keep);
         let t0 = Instant::now();
@@ -7436,18 +7382,14 @@ mod tests {
         // Nor into a stack nothing was decided about. "Undecided" is
         // not "sell": the guards answer for the survivor, and a Sell
         // poured into it is a Sell lost.
-        let Some(mut c) = carrying(&[(1, 8329, 40, 100), (2, 8329, 5, 100)]) else {
-            return;
-        };
+        let mut c = carrying(&[(1, 8329, 40, 100), (2, 8329, 5, 100)]);
         c.autoplay.ledger.remember(&stats(2), LootAction::Sell);
         c.autoplay_tidy(t0);
         assert!(c.autoplay.pour.is_none(), "{:?}", c.autoplay.pour);
 
         // Two stacks with one word are poured, and the word survives
         // the pour.
-        let Some(mut c) = carrying(&[(1, 8329, 40, 100), (2, 8329, 5, 100)]) else {
-            return;
-        };
+        let mut c = carrying(&[(1, 8329, 40, 100), (2, 8329, 5, 100)]);
         c.autoplay.ledger.remember(&stats(1), LootAction::Sell);
         c.autoplay.ledger.remember(&stats(2), LootAction::Sell);
         c.autoplay_tidy(t0);
@@ -7459,10 +7401,9 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_pour_with_no_word_at_all_is_given_up_on_and_the_pack_read_afresh() {
-        let Some(mut c) = carrying(&[(1, 8329, 40, 100), (2, 8329, 5, 100)]) else {
-            return;
-        };
+        let mut c = carrying(&[(1, 8329, 40, 100), (2, 8329, 5, 100)]);
         let t0 = Instant::now();
         c.autoplay_tidy(t0);
         assert!(c.autoplay.pour.is_some());
@@ -7472,6 +7413,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_quiet_ground_is_read_off_the_world_and_not_off_the_status_line() {
         // The roam clock counted only the frames where the engine had
         // found nothing to do, and put itself back to nothing the moment
@@ -7481,9 +7423,7 @@ mod tests {
         // its minute, and they worked a 40 x 32 m corner of a
         // 197 x 192 m field.
         let holtburg = 0xA9B4_0019;
-        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 84.0, 94.0)) else {
-            return;
-        };
+        let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 84.0, 94.0));
         let s = Duration::from_secs;
         let now = Instant::now();
         c.world.stats.level = 20;
@@ -7532,6 +7472,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_body_is_noted_when_it_appears_and_not_when_the_looting_gets_round_to_it() {
         // The bodies used to be noted inside the looting. A character
         // the claim tie-break tells to stand off scores that body
@@ -7541,9 +7482,7 @@ mod tests {
         // could not loot locked every body near it away from the other
         // eight for good.
         let holtburg = 0xA9B4_0019;
-        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 84.0, 94.0)) else {
-            return;
-        };
+        let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 84.0, 94.0));
         let me = c.player.as_ref().unwrap().world_position();
         let s = Duration::from_secs;
         let now = Instant::now();
@@ -7597,14 +7536,13 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn only_the_one_leading_walks_the_area_looking_for_a_fight() {
         // Nine characters each picking their own corner of an outline
         // scatter the party across two hundred metres instead of moving
         // it. The followers keep to their leader and it takes them.
         let holtburg = 0xA9B4_0019;
-        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
-            return;
-        };
+        let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
         let me = c.player.as_ref().unwrap().world_position();
         let now = Instant::now();
         let cfg = Growth::default();
@@ -7645,6 +7583,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_follower_with_no_hunting_area_does_not_go_looking_for_a_ground_of_its_own() {
         // The guard that keeps a follower from walking an area of its
         // own covered the roam as well, but not the tail below it: a
@@ -7653,9 +7592,7 @@ mod tests {
         // a landblock and travelling to it -- which is the scattering
         // the guard was added to stop, only sooner than before.
         let holtburg = 0xA9B4_0019;
-        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
-            return;
-        };
+        let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
         let me = c.player.as_ref().unwrap().world_position();
         let now = Instant::now();
         let cfg = Growth::default();
@@ -7693,6 +7630,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_walk_to_a_ground_broken_off_by_a_corpse_is_walked_on() {
         // A body on the road -- a fellow's kill, shared -- took the
         // character off its walk to the ground, and walking to a corpse
@@ -7700,9 +7638,7 @@ mod tests {
         // no journey under way, took that for a walk that could not get
         // there, put the ground on the skip list and set off for another.
         let holtburg = 0xA9B4_0019;
-        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
-            return;
-        };
+        let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
         c.world.stats.level = 20;
         c.world.player_guid = Some(0x5000_0001);
         let me = c.player.as_ref().unwrap().world_position();
@@ -7760,14 +7696,13 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn what_stands_on_the_road_is_walked_past_and_what_swings_at_us_is_not() {
         // "Traveling to the hunting ground shouldn't have much fighting,
         // more ignoring the monsters on the way so you can get to the
         // hunting ground" -- the player, and the reason for the rule.
         let holtburg = 0xA9B4_0019;
-        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
-            return;
-        };
+        let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
         c.world.stats.level = 20;
         c.world.player_guid = Some(0x5000_0001);
         let me = c.player.as_ref().unwrap().world_position();
@@ -7851,6 +7786,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn an_errand_is_on_its_way_only_while_its_walk_is() {
         // The errand outlives its walk. `bound` is let go only when the
         // hunting step next looks, and a party restocking does not call
@@ -7859,9 +7795,7 @@ mod tests {
         // party had shopped. And a body at its feet kept the grow step
         // from running at all, so the body beat the monster beside it.
         let holtburg = 0xA9B4_0019;
-        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
-            return;
-        };
+        let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
         c.world.stats.level = 20;
         c.world.player_guid = Some(0x5000_0001);
         let me = c.player.as_ref().unwrap().world_position();
@@ -7900,6 +7834,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_party_on_the_road_walks_past_together_and_stops_together() {
         // The leader, bound for a new ground, walked past a Drudge. Its
         // followers keep up through the follow step, which sets no errand,
@@ -7907,9 +7842,7 @@ mod tests {
         // fetched after it and turned on the Drudge again each time they
         // closed, and the leader never helped.
         let holtburg = 0xA9B4_0019;
-        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
-            return;
-        };
+        let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
         c.world.stats.level = 20;
         c.world.player_guid = Some(0x5000_0001);
         let me = c.player.as_ref().unwrap().world_position();
@@ -7983,6 +7916,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_road_is_a_road_whoever_planned_it() {
         // The walk past the road read only the growth rules' errands, so
         // a journey a script asked for was not "on its way": a party sent
@@ -7990,9 +7924,7 @@ mod tests {
         // the drop and the far end, fourteen fights on a walk of forty
         // seconds.
         let holtburg = 0xA9B4_0019;
-        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
-            return;
-        };
+        let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
         c.world.stats.level = 20;
         c.world.player_guid = Some(0x5000_0001);
         let me = c.player.as_ref().unwrap().world_position();
@@ -8050,14 +7982,13 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn an_errand_whose_setting_is_turned_off_is_let_go() {
         // Nothing carries a run on with town runs turned off, nor a walk
         // to a ground with grounds off, so neither was ever let go. The
         // errand read as under way for the rest of the session.
         let holtburg = 0xA9B4_0019;
-        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
-            return;
-        };
+        let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
         c.world.stats.level = 20;
         c.world.player_guid = Some(0x5000_0001);
         let now = Instant::now();
@@ -8074,6 +8005,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_run_asked_for_from_the_panel_chooses_a_counter_and_sets_off() {
         // The panel's Step and Run once put the shopping rules straight
         // to the character where it stood. With no window open the
@@ -8083,9 +8015,7 @@ mod tests {
         // run autoplay would start: a counter is chosen and the walk
         // to it begins, with autoplay off and none of its throttles.
         let holtburg = 0xA9B4_0019;
-        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
-            return;
-        };
+        let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
         c.world.stats.level = 20;
         c.world.player_guid = Some(0x5000_0001);
         let now = Instant::now();
@@ -8138,14 +8068,13 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_run_started_under_autoplay_is_autoplays_to_step() {
         // With autoplay on and running town runs, Run from the panel
         // starts the run now, and autoplay's tick takes it from there:
         // the panel shows it and does not step it too.
         let holtburg = 0xA9B4_0019;
-        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
-            return;
-        };
+        let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
         c.world.stats.level = 20;
         c.world.player_guid = Some(0x5000_0001);
         c.autoplay.config.enabled = true;
@@ -8160,6 +8089,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn the_shopping_rules_start_every_counter_fresh() {
         // The rules remember what a trip offered, what was refused and
         // whether it is done, and were made afresh only when a trip
@@ -8169,9 +8099,7 @@ mod tests {
         // once, with nothing sold. Now they are started fresh as each
         // counter's selling begins.
         let holtburg = 0xA9B4_0019;
-        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
-            return;
-        };
+        let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
         c.world.player_guid = Some(0x5000_0001);
         let me = c.player.as_ref().unwrap().world_position();
         let now = Instant::now();
@@ -8261,6 +8189,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_hand_run_left_held_is_autoplays_again_once_it_runs_town_runs() {
         // Step once with autoplay off, close the panel, turn autoplay
         // on: the run was the panel's for good, autoplay claimed every
@@ -8269,9 +8198,7 @@ mod tests {
         // for a moment is autoplay's to carry on, when it runs town
         // runs.
         let holtburg = 0xA9B4_0019;
-        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
-            return;
-        };
+        let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
         c.world.stats.level = 20;
         c.world.player_guid = Some(0x5000_0001);
         let now = Instant::now();
@@ -8297,6 +8224,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_hand_run_with_town_runs_off_keeps_the_hunting_off_the_counter() {
         // Autoplay on with town runs off is the panel's to drive, and
         // the run is kept for it -- but with town runs off the run was
@@ -8304,9 +8232,7 @@ mod tests {
         // tick for it and the hunting, finding nothing in sight, walked
         // the character off the open window to look about the ground.
         let holtburg = 0xA9B4_0019;
-        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
-            return;
-        };
+        let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
         c.world.stats.level = 20;
         c.world.player_guid = Some(0x5000_0001);
         let me = c.player.as_ref().unwrap().world_position();
@@ -8349,6 +8275,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn run_pressed_at_a_counter_the_player_opened_sells_there() {
         // The panel shows what the rules would do at a window the
         // player opened by hand; Run then chose a counter of its own
@@ -8356,9 +8283,7 @@ mod tests {
         // open window within reach the run is made there, and its
         // first turn is the appraising.
         let holtburg = 0xA9B4_0019;
-        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
-            return;
-        };
+        let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
         c.world.stats.level = 20;
         c.world.player_guid = Some(0x5000_0001);
         let now = Instant::now();
@@ -8395,15 +8320,14 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_hand_run_is_refused_with_no_slot_for_the_money() {
         // Autoplay's own refusal lived only in its tick, so the panel's
         // Run walked a pack with no free slot to town, sold nothing
         // there, and came home futile -- which held autoplay's next run
         // back for the longer while.
         let holtburg = 0xA9B4_0019;
-        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
-            return;
-        };
+        let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
         c.world.stats.level = 20;
         let me = 0x5000_0001;
         c.world.player_guid = Some(me);
@@ -8438,15 +8362,14 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_window_that_opens_after_the_run_stopped_is_closed() {
         // Stop pressed while the counter was being asked for its window
         // left the window to arrive afterwards, and nothing closed it:
         // the tidying refused every pour for "a counter is open" and
         // the panel showed a counter open with nobody at it.
         let holtburg = 0xA9B4_0019;
-        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
-            return;
-        };
+        let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
         c.world.player_guid = Some(0x5000_0001);
         let me = c.player.as_ref().unwrap().world_position();
         let now = Instant::now();
@@ -8493,15 +8416,14 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_hand_runs_status_stays_with_autoplay_off() {
         // With autoplay off its tick cleared the status every frame,
         // and the run's next turn said it again: a log line, an event
         // and a bus post a frame for the length of the walk. The run
         // the panel is driving keeps its line.
         let holtburg = 0xA9B4_0019;
-        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
-            return;
-        };
+        let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
         c.world.player_guid = Some(0x5000_0001);
         let me = c.player.as_ref().unwrap().world_position();
         let now = Instant::now();
@@ -8524,6 +8446,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn walking_the_hunting_ground_is_not_being_on_the_way_to_it() {
         // The trap this rule had to be kept out of. A patrol of the
         // hunting area, and the roam around a ground, both travel --
@@ -8533,9 +8456,7 @@ mod tests {
         // and return before `bound` is ever set, and that is the whole
         // of the difference.
         let holtburg = 0xA9B4_0019;
-        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
-            return;
-        };
+        let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
         c.world.stats.level = 20;
         c.world.player_guid = Some(0x5000_0001);
         let me = c.player.as_ref().unwrap().world_position();
@@ -8841,6 +8762,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_casters_peas_are_loot_to_sell_and_not_stock_to_buy() {
         // The report: "autovendoring doesn't seem to sell at all", from
         // a caster with a spellbook and a wand. The peas it looted sit
@@ -8853,9 +8775,7 @@ mod tests {
         // spells and wielded nothing, so this never opened for it.
         use ac_vendor::Act;
         let holtburg = 0xA9B4_0019;
-        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
-            return;
-        };
+        let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
         c.world.stats.level = 20;
         with_a_pack(&mut c, 20);
         as_a_war_mage(&mut c);
@@ -8987,6 +8907,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_scarab_the_player_said_to_sell_goes_though_its_own_spells_burn_it() {
         // The principle, in the player's words: follow the loot
         // profile. A rule that says "sell lead scarabs" is the player's
@@ -8997,9 +8918,7 @@ mod tests {
         // the counter skipped it as what the character came to buy.
         use ac_vendor::Act;
         let holtburg = 0xA9B4_0019;
-        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
-            return;
-        };
+        let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
         c.world.stats.level = 20;
         with_a_pack(&mut c, 20);
         as_a_war_mage(&mut c);
@@ -9047,15 +8966,14 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_scarab_nothing_was_decided_about_is_kept_by_the_guard() {
         // The guards still answer for what the profile did not decide.
         // A scarab with no entry in the ledger, burnt by the spells
         // this mage casts, stays out of the counter's hands: "the rest,
         // to the counter" would sell it today, and the guard says no.
         let holtburg = 0xA9B4_0019;
-        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
-            return;
-        };
+        let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
         c.world.stats.level = 20;
         with_a_pack(&mut c, 20);
         as_a_war_mage(&mut c);
@@ -9080,6 +8998,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_kind_the_rules_would_sell_on_arrival_is_not_bought() {
         // Whether to buy more of a thing is a question about the kind,
         // and the profile answers it the way it will answer for the
@@ -9089,9 +9008,7 @@ mod tests {
         // and whatever the spells burn. Under the starter's rules,
         // which keep components, it is.
         let holtburg = 0xA9B4_0019;
-        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
-            return;
-        };
+        let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
         c.world.stats.level = 20;
         with_a_pack(&mut c, 20);
         as_a_war_mage(&mut c);
@@ -9126,6 +9043,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn tapers_taken_to_keep_are_neither_sold_nor_wanted() {
         // On the buy list and written down as kept: the counter is not
         // offered them, and a pack holding its full line has nothing
@@ -9133,9 +9051,7 @@ mod tests {
         // not buy more", so a short line is still filled -- the buy
         // list is the player's word too.
         let holtburg = 0xA9B4_0019;
-        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
-            return;
-        };
+        let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
         c.world.stats.level = 20;
         with_a_pack(&mut c, 20);
         as_a_war_mage(&mut c);
@@ -9175,15 +9091,14 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn what_the_server_will_not_take_stays_whatever_the_profile_said() {
         // The one word ahead of the profile's is the server's own. A
         // dagger in hand and a tinkered ring, both written down as
         // meant for a counter, are not offered: a sale the server will
         // not make is not a decision anybody gets to take.
         let holtburg = 0xA9B4_0019;
-        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
-            return;
-        };
+        let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
         c.world.stats.level = 20;
         with_a_pack(&mut c, 20);
         let me = c.world.player_guid.unwrap();
@@ -9244,6 +9159,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn what_was_taken_to_keep_is_not_swept_up_by_the_rest_to_the_counter() {
         // The decision is made once, when the item is taken. A ring
         // taken under "keep ornate rings" stays kept when the rules are
@@ -9251,9 +9167,7 @@ mod tests {
         // counter is how a thing taken to keep gets sold on the next
         // run to town.
         let holtburg = 0xA9B4_0019;
-        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
-            return;
-        };
+        let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
         c.world.stats.level = 20;
         with_a_pack(&mut c, 20);
         let me = c.world.player_guid.unwrap();
@@ -9302,6 +9216,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_stack_to_sell_beside_one_to_keep_goes_whole_and_is_not_poured_into_it() {
         // Two stacks of scarabs, one word each: ten the player said to
         // sell and ninety-five they said to keep. The tidy that runs
@@ -9310,9 +9225,7 @@ mod tests {
         // offered nothing. The ten go over the counter whole.
         use ac_vendor::Act;
         let holtburg = 0xA9B4_0019;
-        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
-            return;
-        };
+        let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
         c.world.stats.level = 20;
         with_a_pack(&mut c, 20);
         as_a_war_mage(&mut c);
@@ -9352,6 +9265,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_stack_on_its_way_out_does_not_hide_the_shortfall_of_the_one_that_stays() {
         // Seventy-eight tapers kept and five hundred tagged to sell,
         // against a line of a hundred. The five hundred are not stock:
@@ -9361,9 +9275,7 @@ mod tests {
         // leaving stack as stock, so a mate handed tapers over while
         // the character's own list said it wanted none.
         let holtburg = 0xA9B4_0019;
-        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
-            return;
-        };
+        let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
         c.world.stats.level = 20;
         with_a_pack(&mut c, 20);
         as_a_war_mage(&mut c);
@@ -9410,6 +9322,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_scarab_sold_at_the_counter_is_not_bought_straight_back() {
         // The round trip the restock list is there to avoid, in one
         // visit: the scarab the player said to sell goes over the
@@ -9419,9 +9332,7 @@ mod tests {
         // it back at markup for the arrival pass to tag to sell again.
         use ac_vendor::Act;
         let holtburg = 0xA9B4_0019;
-        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
-            return;
-        };
+        let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
         c.world.stats.level = 20;
         with_a_pack(&mut c, 20);
         as_a_war_mage(&mut c);
@@ -9511,6 +9422,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_casters_heal_is_stocked_for_though_no_bolt_shares_its_herb() {
         // Heal Self V burns an herb, a powder, a potion and a talisman
         // (7, 26, 41, 61 in the dat) that no bolt or buff burns, and a
@@ -9521,9 +9433,7 @@ mod tests {
         const HEAL_SELF_V: u32 = 1160;
         const HERB: u32 = 7;
         let holtburg = 0xA9B4_0019;
-        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
-            return;
-        };
+        let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
         c.world.stats.level = 20;
         with_a_pack(&mut c, 20);
         as_a_war_mage(&mut c);
@@ -9554,6 +9464,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn arrows_the_player_said_to_sell_are_not_counted_as_the_launchers_stock() {
         // Three hundred arrows in the pack and a bow in hand. Tagged to
         // sell, they are loot in the ammunition slot, not stock: the
@@ -9562,9 +9473,7 @@ mod tests {
         // town for what it was about to sell -- or not set off at all.
         use ac_world::fletching::ammo_type;
         let holtburg = 0xA9B4_0019;
-        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
-            return;
-        };
+        let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
         c.world.stats.level = 20;
         with_a_pack(&mut c, 20);
         let me = c.world.player_guid.unwrap();
@@ -9616,15 +9525,14 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_counter_that_buys_none_of_the_loot_is_walked_past_on_a_run_to_sell() {
         // At the counter, with the window open, the pack looked over
         // and nothing on the sale list: the run used to stand there and
         // sell nothing, say "sold 0 item(s)", and walk home with the
         // peas. It says who would not buy them and goes on to who will.
         let holtburg = 0xA9B4_0019;
-        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
-            return;
-        };
+        let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
         c.world.stats.level = 20;
         with_a_pack(&mut c, 20);
         pea_in_the_pack(&mut c, 0x8000_0010, "Iron Pea", 8328, 2_500);
@@ -9709,15 +9617,14 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn peas_for_a_counter_send_a_roomy_pack_to_town_once_the_waits_are_up() {
         // The user's report: two peas tagged to sell, room in the pack,
         // nothing short, and no run was ever made. Now the peas are the
         // reason -- once the waits between runs are up, as for any
         // other reason, so one pea does not wear a path to town.
         let holtburg = 0xA9B4_0019;
-        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
-            return;
-        };
+        let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
         c.world.stats.level = 20;
         with_a_pack(&mut c, 50);
         pea_in_the_pack(&mut c, 0x8000_0010, "Iron Pea", 8328, 2_500);
@@ -9911,6 +9818,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn an_urgent_need_comes_before_the_loot_and_the_loot_is_sold_on_the_way() {
         // An archer out of arrows with an armful of cheap peas. Ranked
         // for the sale first, the run went to the archmage and the
@@ -9919,9 +9827,7 @@ mod tests {
         // the counter a hundred metres on, not carried home for a run
         // of their own.
         let holtburg = 0xA9B4_0019;
-        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
-            return;
-        };
+        let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
         c.world.stats.level = 20;
         with_a_pack(&mut c, 50);
         for i in 0..8 {
@@ -9970,6 +9876,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn the_panel_run_with_a_list_and_a_pea_goes_to_the_counter_with_the_list() {
         // The archer has 180 of 250 arrows -- short, not urgent -- and
         // a pea. The panel's button, made a run to sell whenever the
@@ -9977,9 +9884,7 @@ mod tests {
         // the pea and ended in town with the arrows unbought. It goes
         // where the list is, and the pea to the archmage after.
         let holtburg = 0xA9B4_0019;
-        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
-            return;
-        };
+        let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
         c.world.stats.level = 20;
         with_a_pack(&mut c, 50);
         pea_in_the_pack(&mut c, 0x8000_0010, "Lead Pea", 8329, 500);
@@ -10038,14 +9943,13 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn the_panel_run_starts_even_when_nobody_buys_the_pea() {
         // Nothing on the list, a pea in the pack, and no counter near
         // that takes it: the button still starts a run, to the nearest
         // counter, as it always did.
         let holtburg = 0xA9B4_0019;
-        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
-            return;
-        };
+        let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
         c.world.stats.level = 20;
         with_a_pack(&mut c, 50);
         pea_in_the_pack(&mut c, 0x8000_0010, "Lead Pea", 8329, 500);
@@ -10059,15 +9963,14 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_run_to_sell_for_a_light_reason_stays_within_the_town() {
         // One Lead Pea, carried a quarter of an hour, with nobody in
         // the town buying it: not a walk to an archmage three towns
         // over. A pack that cannot hunt on is worth a walk anywhere; a
         // pea is worth the town the character is in.
         let holtburg = 0xA9B4_0019;
-        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
-            return;
-        };
+        let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
         c.world.stats.level = 20;
         with_a_pack(&mut c, 50);
         pea_in_the_pack(&mut c, 0x8000_0010, "Lead Pea", 8329, 500);
@@ -10090,6 +9993,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_party_run_sells_what_this_character_carries_first() {
         // Two on a team that restocks together, the party gone shopping
         // for a mate's full pack, and this one carrying two Iron Peas.
@@ -10097,9 +10001,7 @@ mod tests {
         // was whichever counter had the most of the list, with the
         // peas along for the walk; its own pack decides its errand.
         let holtburg = 0xA9B4_0019;
-        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
-            return;
-        };
+        let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
         c.world.stats.level = 20;
         with_a_pack(&mut c, 50);
         pea_in_the_pack(&mut c, 0x8000_0010, "Iron Pea", 8328, 2_500);
@@ -10225,6 +10127,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_counter_that_said_busy_is_asked_again_once_the_cast_lands() {
         // +Vesperi's Use of Archmage Cindrue went out with a protection
         // still going up, ACE turned it away as YoureTooBusy, and the
@@ -10233,9 +10136,7 @@ mod tests {
         // held off as no use, the peas still in the pack.
         let holtburg = 0xA9B4_0019;
         let here = glam::Vec3::new(84.0, 7.1, 94.0);
-        let Some(mut c) = standing_at(holtburg, here) else {
-            return;
-        };
+        let mut c = standing_at(holtburg, here);
         c.world.player_guid = Some(0x5000_0001);
         let me = c.player.as_ref().unwrap().world_position();
         let cfg = Growth::default();
@@ -10344,10 +10245,10 @@ mod tests {
     /// A caster standing in Holtburg with a wand in hand, the
     /// components, the skill and the mana for each of `spells`, and
     /// the server's clock known. The spells, in the order asked for.
-    fn a_caster_knowing(now: Instant, spells: &[&str]) -> Option<(Client, Vec<u32>)> {
+    fn a_caster_knowing(now: Instant, spells: &[&str]) -> (Client, Vec<u32>) {
         let holtburg = 0xA9B4_0019;
         let here = glam::Vec3::new(84.0, 7.1, 94.0);
-        let mut c = standing_at(holtburg, here)?;
+        let mut c = standing_at(holtburg, here);
         let me = 0x5000_0001;
         c.world.player_guid = Some(me);
         // The server's clock, without which nothing is ever due.
@@ -10362,7 +10263,7 @@ mod tests {
         );
         c.session.receive(&clock, now);
         assert!(c.session.server_time().is_some(), "the clock was not taken");
-        let table = c.assets.spell_table().ok()?;
+        let table = c.assets.spell_table().expect("the spell table");
         let mut known = Vec::new();
         for name in spells {
             let (spell, sp) = table
@@ -10396,7 +10297,7 @@ mod tests {
                 ..Default::default()
             },
         );
-        let mapper = c.assets.spell_component_ids().ok()?;
+        let mapper = c.assets.spell_component_ids().expect("the component ids");
         let mut guid = 0x8000_0200;
         for spell in &known {
             for component in c.current_formula(*spell) {
@@ -10424,17 +10325,17 @@ mod tests {
                 c.can_cast(*spell)
             );
         }
-        Some((c, known))
+        (c, known)
     }
 
     /// A caster standing in Holtburg with a wand in hand, the
     /// components and mana for Blade Protection Self, the server's
     /// clock known and no protection up: one buff due, urgent or not.
-    fn a_caster_with_a_buff_due(now: Instant) -> Option<(Client, u32)> {
-        let (mut c, known) = a_caster_knowing(now, &["Blade Protection Self I"])?;
+    fn a_caster_with_a_buff_due(now: Instant) -> (Client, u32) {
+        let (mut c, known) = a_caster_knowing(now, &["Blade Protection Self I"]);
         c.autoplay.config.buffs.auto = false;
         c.autoplay.config.buffs.spells = vec!["Blade Protection Self".into()];
-        Some((c, known[0]))
+        (c, known[0])
     }
 
     /// A run standing at Archmage Cindrue's counter, the Use just
@@ -10467,15 +10368,14 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn buffs_wait_at_the_counter_and_go_up_on_the_walk_and_after() {
         // +Vesperi arrived at Archmage Cindrue with eight protections
         // lapsing and cast them one after another from the counter; the
         // buff pass held for a journey and for a fight, and standing at
         // a counter was neither.
         let now = Instant::now();
-        let Some((mut c, _)) = a_caster_with_a_buff_due(now) else {
-            return;
-        };
+        let (mut c, _) = a_caster_with_a_buff_due(now);
         let me = c.player.as_ref().unwrap().world_position();
         let cindrue = 0x7a9b_4033;
         a_counter(
@@ -10546,6 +10446,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn urgent_buffs_go_up_in_a_fight_at_the_counter() {
         // A wandering monster catches the caster at the counter. The
         // fight outranks the run, which stays in its counter phase
@@ -10553,9 +10454,7 @@ mod tests {
         // protection down for a window nobody was trading at until
         // the fight was over.
         let now = Instant::now();
-        let Some((mut c, _)) = a_caster_with_a_buff_due(now) else {
-            return;
-        };
+        let (mut c, _) = a_caster_with_a_buff_due(now);
         let cindrue = 0x7a9b_4033;
         a_run_at_cindrue(&mut c, opening(cindrue), now);
         assert!(
@@ -10573,15 +10472,14 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_window_left_open_from_across_the_town_holds_no_buff() {
         // Nothing closes a window but this client, since the server
         // keeps none. One the player opened and walked away from read
         // as a counter at hand for the rest of the session, and no
         // buff went up again.
         let now = Instant::now();
-        let Some((mut c, _)) = a_caster_with_a_buff_due(now) else {
-            return;
-        };
+        let (mut c, _) = a_caster_with_a_buff_due(now);
         let cindrue = 0x7a9b_4033;
         // The counter is a hundred metres off.
         a_counter(
@@ -10601,14 +10499,13 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn town_runs_switched_off_at_the_counter_close_its_window() {
         // A run let go for town runs being switched off left its
         // window open, and with town runs off no later run would ever
         // close it: a counter at hand for the rest of the session.
         let now = Instant::now();
-        let Some(mut c) = standing_at(0xA9B4_0019, glam::Vec3::new(84.0, 7.1, 94.0)) else {
-            return;
-        };
+        let mut c = standing_at(0xA9B4_0019, glam::Vec3::new(84.0, 7.1, 94.0));
         c.world.player_guid = Some(0x5000_0001);
         let cindrue = a_run_at_cindrue(&mut c, Phase::Selling { sent: Vec::new() }, now);
         c.world.open_vendor = Some(window_of(cindrue));
@@ -10627,15 +10524,14 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn dying_at_the_counter_ends_the_visit() {
         // The run stood at its counter through the death, the window
         // stayed open, and recovery -- which puts the buffs back before
         // the walk to the corpse -- waited on buffs that waited on the
         // counter.
         let now = Instant::now();
-        let Some(mut c) = standing_at(0xA9B4_0019, glam::Vec3::new(84.0, 7.1, 94.0)) else {
-            return;
-        };
+        let mut c = standing_at(0xA9B4_0019, glam::Vec3::new(84.0, 7.1, 94.0));
         c.world.player_guid = Some(0x5000_0001);
         let cindrue = a_run_at_cindrue(&mut c, Phase::Selling { sent: Vec::new() }, now);
         c.world.open_vendor = Some(window_of(cindrue));
@@ -10663,15 +10559,14 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn vitals_wait_at_the_counter() {
         // Only the buffs were held. The vitals pass runs every tick
         // and casts the moment the last cast lands, so a Revitalize
         // thrown from the counter never left it a gap to open its
         // window in: the measured failure, one reflex over.
         let now = Instant::now();
-        let Some((mut c, _)) = a_caster_knowing(now, &["Revitalize Self I"]) else {
-            return;
-        };
+        let (mut c, _) = a_caster_knowing(now, &["Revitalize Self I"]);
         c.autoplay.config.survive.manage_mana = true;
         // The stamina is gone.
         c.world.stats.vitals[1].current = 0;
@@ -10698,15 +10593,14 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn the_use_waits_for_a_cast_on_the_walk_in_to_land() {
         // The first Use went out the moment the character stood at
         // the counter, whatever was in the air: a protection put back
         // on the walk in met it with its recoil, and the counter turned
         // the Use away for it.
         let now = Instant::now();
-        let Some(mut c) = standing_at(0xA9B4_0019, glam::Vec3::new(84.0, 7.1, 94.0)) else {
-            return;
-        };
+        let mut c = standing_at(0xA9B4_0019, glam::Vec3::new(84.0, 7.1, 94.0));
         c.world.player_guid = Some(0x5000_0001);
         let cfg = Growth::default();
         a_run_at_cindrue(&mut c, Phase::Going, now);
@@ -10733,14 +10627,13 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_refusal_past_the_busy_asks_is_the_counters_own() {
         // Past the asks a busy refusal earns the run is on the ordinary
         // clock, but a later refusal was still kept, and the status
         // promised an ask "once the cast lands" that was never coming.
         let now = Instant::now();
-        let Some(mut c) = standing_at(0xA9B4_0019, glam::Vec3::new(84.0, 7.1, 94.0)) else {
-            return;
-        };
+        let mut c = standing_at(0xA9B4_0019, glam::Vec3::new(84.0, 7.1, 94.0));
         c.world.player_guid = Some(0x5000_0001);
         let cindrue = 0x7a9b_4033;
         a_run_at_cindrue(
@@ -10785,14 +10678,13 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_swing_in_the_air_does_not_hold_the_ask() {
         // ACE is never busy for a swing, and a swing's answer can go
         // missing: read raw, one lost AttackDone parked a busy wait in
         // Opening with no clock at all.
         let now = Instant::now();
-        let Some(mut c) = standing_at(0xA9B4_0019, glam::Vec3::new(84.0, 7.1, 94.0)) else {
-            return;
-        };
+        let mut c = standing_at(0xA9B4_0019, glam::Vec3::new(84.0, 7.1, 94.0));
         c.world.player_guid = Some(0x5000_0001);
         let cfg = Growth::default();
         let cindrue = 0x7a9b_4033;
@@ -10831,15 +10723,14 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn the_hold_is_let_go_by_a_pass_that_left_early() {
         // The note's flag was cleared only on the way past the hold. A
         // pass that turned back before it -- the top-ups, in a fight,
         // out of combat only -- left the flag set after the counter,
         // and the next visit's wait went unsaid.
         let now = Instant::now();
-        let Some((mut c, _)) = a_caster_with_a_buff_due(now) else {
-            return;
-        };
+        let (mut c, _) = a_caster_with_a_buff_due(now);
         let cindrue = 0x7a9b_4033;
         a_run_at_cindrue(&mut c, opening(cindrue), now);
         assert!(!c.autoplay_buff(now, true));

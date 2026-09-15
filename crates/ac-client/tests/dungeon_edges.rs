@@ -25,6 +25,7 @@
 
 use ac_client::pathfinder::Pathfinder;
 use ac_client::player::{Input, MovementLimits, Player};
+use ac_client::testkit::human;
 use ac_nav::{Aim, Ground, Steering};
 use ac_net::session::{Config, Session};
 use ac_scene::Assets;
@@ -33,9 +34,9 @@ use std::time::{Duration, Instant};
 
 const DUNGEON: u32 = 0x01F6_0000;
 
-fn assets() -> Option<Assets> {
-    let dir = std::env::var_os("AC_DATA_DIR")?;
-    Some(Assets::open(std::path::Path::new(&dir)).unwrap())
+fn assets() -> Assets {
+    let dir = ac_dat::test_data_dir();
+    Assets::open(std::path::Path::new(&dir)).unwrap()
 }
 
 /// The dungeon's floor under a world `(x, y)`, within a step of `z`.
@@ -56,9 +57,7 @@ fn floor(assets: &Assets, at: Vec3) -> Vec3 {
 /// A character standing at the world position `at` in `cell`.
 fn stand(assets: &Assets, cell: u32, at: Vec3) -> Player {
     let local = at - ac_world::landblock_origin(cell);
-    let mut pl = Player::new(assets, cell, local, Quat::IDENTITY);
-    pl.set_motion_table(assets, 0x0200_0001, 0x0900_0001);
-    pl
+    human(assets, cell, local, Quat::IDENTITY)
 }
 
 /// The steering's questions answered as the client answers them, from
@@ -192,10 +191,9 @@ const ROOM: Vec3 = Vec3::new(223.5, 47_158.5, 0.0);
 const ROOM_CELL: u32 = 0x01F6_022C;
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_straight_walk_off_a_ledge_onto_the_floor_below_is_leaned_on() {
-    let Some(assets) = assets() else {
-        return;
-    };
+    let assets = assets();
     let ledge = floor(&assets, LEDGE);
     assert!(ledge.z > 3.0, "not up on the ledge: {ledge}");
     let goal = floor(&assets, BELOW);
@@ -220,10 +218,9 @@ fn a_straight_walk_off_a_ledge_onto_the_floor_below_is_leaned_on() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_straight_walk_from_the_floor_to_a_goal_up_on_a_ledge_is_refused() {
-    let Some(assets) = assets() else {
-        return;
-    };
+    let assets = assets();
     let me = floor(&assets, UNDER);
     let goal = floor(&assets, HIGH_LEDGE);
     assert!(goal.z > 9.0, "not up on the ledge: {goal}");
@@ -238,10 +235,9 @@ fn a_straight_walk_from_the_floor_to_a_goal_up_on_a_ledge_is_refused() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_goal_on_the_storey_above_is_climbed_to_by_the_stairs_not_pushed_under() {
-    let Some(assets) = assets() else {
-        return;
-    };
+    let assets = assets();
     // The lower storey under 0x01F6021D, with the goal on the room's
     // floor six metres straight up: the walk there keeps the lower
     // floor all the way and ends a storey under the goal, and the
@@ -259,10 +255,9 @@ fn a_goal_on_the_storey_above_is_climbed_to_by_the_stairs_not_pushed_under() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_walk_across_the_room_is_still_a_walk() {
-    let Some(assets) = assets() else {
-        return;
-    };
+    let assets = assets();
     let me = floor(&assets, ROOM);
     // Into the next room south, 0x01F6022D, on the same floor.
     let goal = floor(&assets, Vec3::new(222.0, 47_150.0, 0.0));
@@ -272,10 +267,9 @@ fn a_walk_across_the_room_is_still_a_walk() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn the_stair_corridor_is_walked_not_refused() {
-    let Some(assets) = assets() else {
-        return;
-    };
+    let assets = assets();
     // Down the corridor 0x01F6029F -> 0x01F602A3 -> 0x01F6028E: from the
     // top at six metres to the foot at minus six, near twelve metres
     // down in twenty along.
@@ -331,10 +325,9 @@ fn the_stair_corridor_is_walked_not_refused() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_fall_off_a_ledge_onto_the_floor_below_still_lands_there() {
-    let Some(assets) = assets() else {
-        return;
-    };
+    let assets = assets();
     let ledge = floor(&assets, LEDGE);
     let mut pl = stand(&assets, LEDGE_CELL, ledge);
     // Straight off it, the way the refused walk would have gone.
@@ -404,10 +397,9 @@ fn fly_out_and_let_go(assets: &Assets, pl: &mut Player) -> (f32, Vec3) {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_fall_with_nothing_under_it_comes_back_to_the_last_floor() {
-    let Some(assets) = assets() else {
-        return;
-    };
+    let assets = assets();
     let me = floor(&assets, ROOM);
     let mut pl = stand(&assets, ROOM_CELL, me);
     for _ in 0..10 {
@@ -422,10 +414,9 @@ fn a_fall_with_nothing_under_it_comes_back_to_the_last_floor() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_character_put_somewhere_else_comes_back_to_where_it_was_put() {
-    let Some(assets) = assets() else {
-        return;
-    };
+    let assets = assets();
     let me = floor(&assets, ROOM);
     let mut pl = stand(&assets, ROOM_CELL, me);
     for _ in 0..10 {
@@ -453,10 +444,9 @@ const RUN_RATE: f32 = 2.5;
 const HEADLESS_FRAME: f32 = 0.25;
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_long_frame_running_up_the_stairs_out_of_028e_keeps_its_feet() {
-    let Some(assets) = assets() else {
-        return;
-    };
+    let assets = assets();
     // The cell the character was last placed in and the way it went,
     // west: up the flight out of 0x01F6028E toward 02A3. Under the flight
     // there is nothing; under 02A3, the storey twelve metres down, ending
@@ -495,10 +485,9 @@ fn a_long_frame_running_up_the_stairs_out_of_028e_keeps_its_feet() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn the_walk_that_fell_keeps_to_the_floor_at_a_headless_frame() {
-    let Some(assets) = assets() else {
-        return;
-    };
+    let assets = assets();
     // Where the watcher had the character when it set off, on the ramp in
     // 0x01F6029F, and something twenty-nine metres off with no clear shot
     // at it: on the storey six metres down to the west, reached over the
@@ -535,10 +524,9 @@ fn the_walk_that_fell_keeps_to_the_floor_at_a_headless_frame() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_stride_longer_than_a_step_can_climb_is_held_at_the_stairs_not_dropped_through_them() {
-    let Some(assets) = assets() else {
-        return;
-    };
+    let assets = assets();
     // Faster than any run there is, so that even cut as fine as a frame
     // is cut each step still rises more than a step up the flight out of
     // 0x01F6028E. The stairs are in the way, and the storey twelve metres
@@ -563,10 +551,9 @@ fn a_stride_longer_than_a_step_can_climb_is_held_at_the_stairs_not_dropped_throu
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_character_put_back_on_its_feet_tells_the_server_at_once_standing_still() {
-    let Some(assets) = assets() else {
-        return;
-    };
+    let assets = assets();
     let me = floor(&assets, ROOM);
     let mut pl = stand(&assets, ROOM_CELL, me);
     for _ in 0..10 {
@@ -599,10 +586,9 @@ fn a_character_put_back_on_its_feet_tells_the_server_at_once_standing_still() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn the_stairs_down_from_an_upper_floor_are_found_and_walked() {
-    let Some(assets) = assets() else {
-        return;
-    };
+    let assets = assets();
     // Upstairs in a Holtburg house, on a floor reached on foot from the
     // lifestone; the goal in the room under it, two and a half metres
     // down over the edge. The graph used to stand a single node down
@@ -648,10 +634,9 @@ const JAMB_CELL: u32 = 0x01F6_0215;
 const JAMB_SILL: Vec3 = Vec3::new(202.0, 47_177.0, 0.1);
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn the_way_into_a_corridor_is_through_its_door_not_into_its_wall() {
-    let Some(assets) = assets() else {
-        return;
-    };
+    let assets = assets();
     let scene = ac_scene::landblock::load(&assets, DUNGEON).unwrap();
     let cell = scene.cells.iter().find(|c| c.cell_id == JAMB_CELL).unwrap();
     let (i, sill) = cell

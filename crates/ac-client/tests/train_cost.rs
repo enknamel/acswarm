@@ -2,10 +2,9 @@
 use ac_scene::Assets;
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn the_table_has_a_training_cost_for_the_magic_schools() {
-    let Some(dir) = std::env::var_os("AC_DATA_DIR") else {
-        return;
-    };
+    let dir = ac_dat::test_data_dir();
     let assets = Assets::open(dir).unwrap();
     let table = assets.skill_table().unwrap();
     for (id, name) in [
