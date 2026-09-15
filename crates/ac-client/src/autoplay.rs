@@ -2621,6 +2621,10 @@ pub struct Autoplay {
     softening: Vec<(u32, u8)>,
     last_vuln: Option<Instant>,
     last_buff: Option<Instant>,
+    /// The buff pass has said it is waiting for the counter this
+    /// visit, so it is not said again every tick (see
+    /// `Client::autoplay_buff`).
+    pub(crate) buffs_held_at_counter: bool,
     /// Enchantments put on items: `(item, category, when, seconds it
     /// lasts)`. An item's enchantments are not reported the way the
     /// character's own are, so the cast is remembered instead.
@@ -8886,6 +8890,32 @@ impl Client {
         if !urgent && self.traveling() {
             return false;
         }
+        // At a counter every cast waits, urgent or not, for the same
+        // reason and one more: a cast roots the character where it
+        // stands, and here it also has the counter turn us away. ACE
+        // will not open a window for, sell for or buy for a character
+        // in the middle of a cast (`Vendor.ActOnUse`,
+        // `Player_Commerce.cs`: IsBusy is YoureTooBusy), and the answer
+        // reads as the counter's own refusal. +Vesperi arrived at
+        // Archmage Cindrue with eight protections lapsing, cast them
+        // one after another, and the run gave the counter up as one
+        // that "would not trade" with every pea still in the pack. A
+        // cast does not close the window -- the server keeps none, and
+        // `open_vendor` is ours -- but a sale sent during one is thrown
+        // away the same way, so nothing goes up between the acts
+        // either: the visit is short, and what lapses in it goes back
+        // up the moment the window closes.
+        if let Some(counter) = self.counter_holding_buffs() {
+            if !self.autoplay.buffs_held_at_counter {
+                self.autoplay.buffs_held_at_counter = true;
+                self.autoplay.note(
+                    format!("buffs wait for the counter: a cast would have {counter} turn us away"),
+                    now,
+                );
+            }
+            return false;
+        }
+        self.autoplay.buffs_held_at_counter = false;
         if self
             .autoplay
             .last_buff
@@ -9015,6 +9045,24 @@ impl Client {
         self.autoplay.last_buff = Some(now);
         self.autoplay.cast_sent = Some(now);
         true
+    }
+
+    /// The counter the buff pass is waiting for, by name: the one a
+    /// run to town is standing at, from its Use going out until its
+    /// window is closed, or one whose window the player has open (see
+    /// `growth::at_a_counter`).
+    fn counter_holding_buffs(&self) -> Option<String> {
+        if let Some(vendor) = self.autoplay.growth.counter() {
+            return Some(vendor.to_string());
+        }
+        let window = self.world.open_vendor.as_ref()?;
+        Some(
+            self.world
+                .objects
+                .get(&window.vendor)
+                .map(|o| o.name.clone())
+                .unwrap_or_else(|| "the open counter".to_string()),
+        )
     }
 
     /// A stronger spell than `spell` that we know, do the same thing

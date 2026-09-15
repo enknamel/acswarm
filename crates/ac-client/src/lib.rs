@@ -1996,6 +1996,12 @@ impl Client {
                         .unwrap_or(0);
                     tracing::info!("weenie error {code:#x}");
                     self.recall_error(code);
+                    // A counter turns a Use away as too busy while a
+                    // cast of ours is in the air: ours to wait out,
+                    // not the counter refusing (see `growth::on_opening`).
+                    if code == YOURE_TOO_BUSY {
+                        self.autoplay.growth.counter_said_busy(Instant::now());
+                    }
                     // A full fellowship is refused by code, and names
                     // nobody: it is about whoever was invited last.
                     if code == autoplay::FELLOWSHIP_FULL {
