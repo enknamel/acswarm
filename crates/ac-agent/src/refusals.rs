@@ -1,67 +1,36 @@
-//! What the server says in words when it will not do a thing.
-//!
-//! Not every refusal comes as a code. ACE answers a good many of them
-//! in plain chat -- a transient string, or a Broadcast line -- and
-//! says nothing else: the game event that follows, when there is one,
-//! carries no reason, and often there is none at all. A client that
-//! reads only the codes sees a request go quiet, waits out a clock,
-//! and asks again, for ever. Two mates were invited into a fellowship
-//! ten times each because "{Name} is busy." was never read; a body was
-//! opened thirty times for a take that "Unable to put {item} into
-//! container" had already answered.
-//!
-//! So every line of chat the server sends is read once, here, against
-//! one table ([`refused`]), and what to do about each kind is decided
-//! once, here, by the kind alone ([`answer`]). The systems that made
-//! the request -- looting, recruiting, fighting -- are told what was
-//! refused and act on it; none of them matches English of its own.
-//! Every line in the table is quoted from the ACE source it is sent
-//! from, so the next refusal of this shape is a row added here, not a
-//! special case written somewhere else.
-//!
-//! Only the wording is matched, because that is all there is: a
-//! transient string carries no code, no guid, nothing but its English.
-//! That the words were about *our* request is for the caller to say --
-//! the in-use words are sent for any container, a chest as readily as
-//! a corpse, and nine characters round one body each hear the answers
-//! to the other eight.
+//! Refusals the server sends only in words, matched once in [`refused`] and answered by kind in [`answer`].
+//! ACE sends many as a transient string or Broadcast line with no code; any event after carries no reason.
+//! Every row quotes its ACE source, so a new refusal is a row here, never English matched elsewhere.
+//! The words carry no guid: whether they answer our request is the caller's call (ac-client `refused.rs`),
+//! as the in-use words come for any container and characters round one body hear each other's answers.
 
 use crate::did::{Did, Patience};
 use std::time::{Duration, Instant};
 
 /// A thing the server said it would not do, out of one line of chat.
-///
-/// The names in it are the server's own for the things named -- a
-/// character's with its `+`, an item's as it is listed -- borrowed
-/// from the line.
+/// Names are the server's own, borrowed from the line: a character's with its `+`, an item's as listed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Refusal<'a> {
     /// It would not open the container `name`.
     Open { name: &'a str, why: OpenRefusal },
     /// It would not put `item` into the pack named in the request.
     Put { item: &'a str, why: PutRefusal },
-    /// It would not let the character carry the thing asked for: too
-    /// heavy for what it can bear. The line names nothing; it is about
-    /// the take, the pickup, the split or the merge just sent.
+    /// Too heavy to carry. The line names nothing, so it answers the take, pickup, split or merge just sent.
     Carry,
-    /// It would not move `item` from where it lies without a pickup
-    /// first: the request named a container the item's owner does not
-    /// hold.
+    /// It would not move `item` from where it lies without a pickup first:
+    /// the request named a container the item's owner does not hold.
     PickUpFirst { item: &'a str },
     /// It would not recruit `name` into the fellowship.
     Recruit { name: &'a str, why: RecruitRefusal },
     /// It would not let the character attack `name`.
     Attack { name: &'a str },
-    /// It would not cast `spell` at `target`: not a thing that spell
-    /// can be cast on.
+    /// It would not cast `spell` at `target`: not a thing that spell can be cast on.
     Cast { spell: &'a str, target: &'a str },
-    /// It would not use `item` from where it is: it has to be wielded,
-    /// or carried, first.
+    /// It would not use `item` from where it is: it has to be wielded, or carried, first.
     Use { item: &'a str, why: UseRefusal },
     /// It would not use `item` on `target`: not a thing it works on.
     UseWith { item: &'a str, target: &'a str },
-    /// It would not buy `item` off the character, or would not pay for
-    /// the sale.
+    /// It would not buy `item` off the character, or would not pay for the sale.
     Sell {
         item: Option<&'a str>,
         why: SellRefusal,
@@ -75,24 +44,18 @@ pub enum Refusal<'a> {
 /// Why a container would not open.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OpenRefusal {
-    /// Someone has it open this moment. The server hands a container
-    /// to one viewer at a time and turns the rest away outright; that
-    /// viewer is usually done with it in a moment.
+    /// Someone has it open: the server hands a container to one viewer at a time, usually done in a moment.
     InUse,
-    /// It is the killer's for now. A monster's body opens to everyone
-    /// once the killer has closed it, or once it is half rotted.
+    /// The killer's for now: a monster's body opens to everyone once the killer closes it or it half rots.
     NotYetOurs,
-    /// It is the killer's for good: a body that made a rare, or a
-    /// player killer's doing. Neither is ever shared, however long it
-    /// lies there.
+    /// The killer's for good: a body that made a rare, or a player killer's doing, is never shared.
     NeverOurs,
 }
 
 /// Why an item would not go into a pack.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PutRefusal {
-    /// The pack named has no slot. It is full until something leaves
-    /// it; the sacks beside it may have room.
+    /// The pack named is full until something leaves it; the sacks beside it may have room.
     NoRoom,
     /// The pack named is not a pack a thing can be put in: a corpse.
     NotThere,
@@ -103,18 +66,15 @@ pub enum PutRefusal {
 pub enum RecruitRefusal {
     /// In a fellowship already, this one or another.
     AlreadyAMember,
-    /// Busy: mid-use or mid-cast, on a server that will not recruit a
-    /// busy character, or with an invitation already up that has not
-    /// been answered. Over in the seconds those take.
+    /// Mid-use or mid-cast on a server that refuses busy recruits, or an invitation still unanswered.
+    /// Over in the seconds those take.
     Busy,
     /// Has fellowship requests turned off.
     NotAccepting,
     /// Was asked, and said no.
     Declined,
-    /// There is no room: the one refusal a recruit meets that comes
-    /// as a code, not words (WeenieError 0x041E,
-    /// `YourFellowshipIsFull`, Entity/Fellowship.cs:104), and names
-    /// nobody, so it is about whoever was asked last.
+    /// No room: a code, not words (WeenieError 0x041E `YourFellowshipIsFull`, Entity/Fellowship.cs:104).
+    /// It names nobody, so it is about whoever was asked last.
     Full,
 }
 
@@ -130,8 +90,7 @@ pub enum UseRefusal {
 /// Why a sale would not go through.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SellRefusal {
-    /// The counter does not deal in it, or it is marked unsellable or
-    /// retained.
+    /// The counter does not deal in it, or it is marked unsellable or retained.
     Unsellable,
     /// Worth nothing.
     NoValue,
@@ -159,30 +118,21 @@ pub enum BuyRefusal {
 /// Why an essence would not summon.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SummonRefusal {
-    /// Not for this character: of another mastery, or needing more
-    /// skill than it has.
+    /// Not for this character: another mastery, or more skill than it has.
     NotForUs,
-    /// A creature of the character's is still out. Nothing is wrong
-    /// with the essence, and its cooldown was not started.
+    /// A creature of the character's is still out; the essence is fine and its cooldown did not start.
     OneIsOut,
 }
 
-/// What the server refused, if this line of chat says it refused
-/// anything. `None` for every other line.
-///
-/// Each arm quotes the ACE source the line is sent from, under
-/// `reference/ext/ACE/Source/ACE.Server/`. The parameters ACE fills in
-/// are the things the refusal names, and are borrowed out of the line.
+/// What the server refused, if this line of chat says it refused anything; `None` for every other line.
+/// Each arm quotes its source under `reference/ext/ACE/Source/ACE.Server/`; ACE's parameters are borrowed
+/// out of the line.
 pub fn refused(text: &str) -> Option<Refusal<'_>> {
     let text = text.trim();
 
-    // -- A container that would not open ---------------------------------
-
     // WorldObjects/Container.cs:740
     //   $"The {Name} is already in use by {currentViewer}!"
-    // `currentViewer` is "someone else", or the viewer's name on a
-    // server with `container_opener_name` on. Sent for any container,
-    // a chest as readily as a corpse.
+    // `currentViewer` is "someone else", or the viewer's name with `container_opener_name` on.
     if let Some((name, _who)) = text
         .strip_prefix("The ")
         .and_then(|s| s.strip_suffix('!'))
@@ -218,12 +168,9 @@ pub fn refused(text: &str) -> Option<Refusal<'_>> {
         });
     }
 
-    // -- A thing that would not go into a pack -----------------------------
-
     // WorldObjects/Player_Inventory.cs:1322
     //   $"Unable to put {item.Name} into container"
-    // Sent ahead of an InventoryServerSaveFailed with no reason in it:
-    // these words are the whole of what makes that refusal the pack's.
+    // Sent before an InventoryServerSaveFailed with no reason in it: only these words make it the pack's.
     if let Some(item) = text
         .strip_prefix("Unable to put ")
         .and_then(|s| s.strip_suffix(" into container"))
@@ -256,8 +203,6 @@ pub fn refused(text: &str) -> Option<Refusal<'_>> {
         return Some(Refusal::PickUpFirst { item });
     }
 
-    // -- Somebody who would not be recruited ------------------------------
-
     // Entity/Fellowship.cs:110
     //   $"{newMember.Name} is already a member of a Fellowship."
     if let Some(name) = text.strip_suffix(" is already a member of a Fellowship.") {
@@ -269,9 +214,8 @@ pub fn refused(text: &str) -> Option<Refusal<'_>> {
     // Entity/Fellowship.cs:116 (the `fellow_busy_no_recruit` rule),
     // :128 (an invitation already up for them, unanswered)
     //   $"{newMember.Name} is busy."
-    // Also what a patron who cannot take an oath just now is called
-    // (WorldObjects/Player_Allegiance.cs:92): the caller tells the two
-    // apart by whom it has invited.
+    // Also what a patron who cannot take an oath just now is called (WorldObjects/Player_Allegiance.cs:92);
+    // the caller tells the two apart by whom it has invited.
     if let Some(name) = text.strip_suffix(" is busy.") {
         return Some(Refusal::Recruit {
             name,
@@ -295,8 +239,6 @@ pub fn refused(text: &str) -> Option<Refusal<'_>> {
         });
     }
 
-    // -- A target that would not be fought --------------------------------
-
     // WorldObjects/Player_Melee.cs:122, WorldObjects/Player_Missile.cs:110
     //   $"You cannot attack {creatureTarget.Name}"
     if let Some(name) = text.strip_prefix("You cannot attack ") {
@@ -310,8 +252,6 @@ pub fn refused(text: &str) -> Option<Refusal<'_>> {
     {
         return Some(Refusal::Cast { spell, target });
     }
-
-    // -- A thing that would not be used -----------------------------------
 
     // WorldObjects/Player_Use.cs:73
     //   $"You must {action} the {sourceItem.Name} to use it."
@@ -338,8 +278,6 @@ pub fn refused(text: &str) -> Option<Refusal<'_>> {
     {
         return Some(Refusal::UseWith { item, target });
     }
-
-    // -- A sale the counter would not make ---------------------------------
 
     // WorldObjects/Player_Commerce.cs:271
     //   $"The {itemName} is unsellable."
@@ -401,8 +339,6 @@ pub fn refused(text: &str) -> Option<Refusal<'_>> {
         _ => {}
     }
 
-    // -- A purchase the counter would not make ----------------------------
-
     // WorldObjects/Vendor.cs:496
     //   "You are too encumbered to buy that!"
     // WorldObjects/Vendor.cs:498
@@ -428,14 +364,11 @@ pub fn refused(text: &str) -> Option<Refusal<'_>> {
         _ => {}
     }
 
-    // -- A summon that would not come ----------------------------------------
-
     // WorldObjects/PetDevice.cs:115
     //   $"You must be a {SummoningMastery} to use the {Name}"
-    // WeenieErrorWithString 0x04C9 (`YourIsTooLowToUseItemMagic`), as
-    // `weenie_errors` renders it: "Your Summoning is too low to use
-    // item magic". The one row here that is our own English for the
-    // server's code, since the code names the skill and nothing else.
+    // WeenieErrorWithString 0x04C9 (`YourIsTooLowToUseItemMagic`), as `weenie_errors` renders it:
+    //   "Your Summoning is too low to use item magic"
+    // The one row in our own English, since that code names the skill and nothing else.
     if (text.starts_with("You must be a ") && text.contains(" to use the "))
         || text == "Your Summoning is too low to use item magic"
     {
@@ -457,72 +390,45 @@ pub fn refused(text: &str) -> Option<Refusal<'_>> {
 /// What to do about a refusal, by its kind alone.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Answer {
-    /// Ask again after this wait, and twice as long after each further
-    /// refusal of the same thing: what it waits on changes slowly, and
-    /// a thing that keeps saying no is asked less and less often.
+    /// Ask again after this wait, doubling on each further refusal: what it waits on changes slowly.
     Again(Duration),
-    /// Ask again after this same wait every time: what it waits on
-    /// passes in the seconds a use or a cast takes, so a doubling wait
-    /// would leave out a mate that happened to be casting at each ask.
+    /// Ask again after this same wait every time: it passes in the seconds a use or a cast takes, and
+    /// a doubling wait would leave out a mate that happened to be casting at each ask.
     Soon(Duration),
-    /// Never ask that again. The thing is done with, or dropped from
-    /// the list it was on, and the log says so once.
+    /// Never ask that again: the thing is done with, or dropped from its list, and the log says so once.
     Never,
 }
 
-/// How long to leave a container someone else has open. Long enough
-/// that the two of us are not asking over each other, short enough to
-/// have it the moment they are done: emptying one takes a few seconds.
+/// Wait on a container someone else has open: long enough not to ask over them, and emptying one takes
+/// a few seconds.
 pub const OPEN_IN_USE_AGAIN: Duration = Duration::from_secs(3);
 
-/// How long to leave a body the server says is not ours yet.
-///
-/// Half decay is the slowest way a body opens up, not the usual one:
-/// ACE marks a corpse looted the moment anyone closes it, and a looted
-/// corpse is everyone's (`Corpse.Close` sets `IsLooted`, which
-/// `Corpse.HasPermission` answers on before it ever looks at the
-/// clock). So the ordinary course -- the killer opens it, empties it,
-/// closes it -- makes a body public within seconds of the refusal, and
-/// writing it off until it had half rotted left its loot on the floor
-/// for two minutes.
+/// Wait on a body not ours yet: it is everyone's once anyone closes it, usually seconds after the refusal.
+/// ACE `Corpse.Close` (Corpse.cs:209) sets `IsLooted`, which `HasPermission` (:152) reads before the clock.
 pub const OPEN_NOT_OURS_AGAIN: Duration = Duration::from_secs(5);
 
-/// How long an invitee the server turned down is left alone before it
-/// is asked again. "Busy" passes when a use finishes or a cast lands,
-/// so it is short; "already a member" is settled by that mate's own
-/// row on the board, which says so within a round, and by the rightful
-/// leader taking the fleet's fellowships apart.
+/// Wait before asking a turned-down invitee again: short, as "busy" passes when a use or a cast ends.
+/// "Already a member" settles within a round: that mate's own board row, and the rightful leader disbanding.
 pub const RECRUIT_HELD_OFF: Duration = Duration::from_secs(10);
 
-/// How long a target the server would not let us attack is left alone.
-/// What makes a creature unattackable -- a vendor, a town guard, a
-/// player not at war -- does not change while we stand there, and a
-/// fight given up on is left for this long anyway.
+/// Wait on a target the server would not let us attack: a vendor, a town guard or a player not at war
+/// stays one while we stand there, and a fight given up on is left this long anyway.
 pub const ATTACK_AGAIN: Duration = Duration::from_secs(90);
 
-/// The decision for a refusal of this kind. It is the whole of the
-/// policy: the systems that act on a refusal read this and do as it
-/// says with their own tables, and none of them chooses a wait of its
-/// own.
+/// The decision for a refusal of this kind, and the whole of the policy: the systems that act on a
+/// refusal apply it to their own tables, and none of them chooses a wait of its own.
 pub fn answer(refusal: &Refusal) -> Answer {
     match refusal {
         Refusal::Open { why, .. } => match why {
             OpenRefusal::InUse => Answer::Again(OPEN_IN_USE_AGAIN),
-            // It becomes everyone's the moment whoever has it closes
-            // it, which is usually within seconds.
             OpenRefusal::NotYetOurs => Answer::Again(OPEN_NOT_OURS_AGAIN),
-            // Nobody but the killer will ever open it. Left for good
-            // rather than waited on: it still lies there, and every
-            // wait that runs out is another walk back to it.
+            // Never, not a wait: it still lies there, and each lapsed wait is another walk back to it.
             OpenRefusal::NeverOurs => Answer::Never,
         },
-        // The pack named is full until something leaves it, and a
-        // corpse is never a pack: not into that one again. The take may
-        // go once into another pack with room, which is the looting's
-        // business, not the words'.
+        // Not into that pack again (full until something leaves, and a corpse is never a pack); another
+        // pack with room is the looting's business, not the words'.
         Refusal::Put { .. } => Answer::Never,
-        // The item stays where it lies; the loot rules pass it over
-        // and take what is lighter.
+        // The item stays where it lies; the loot rules pass it over for something lighter.
         Refusal::Carry => Answer::Never,
         Refusal::PickUpFirst { .. } => Answer::Never,
         Refusal::Recruit { why, .. } => match why {
@@ -535,26 +441,21 @@ pub fn answer(refusal: &Refusal) -> Answer {
         Refusal::Attack { .. } => Answer::Again(ATTACK_AGAIN),
         // A spell that cannot be cast on a thing never can be.
         Refusal::Cast { .. } => Answer::Never,
-        // Wielding or picking up is the caller's to do first; asking
-        // again from where it is gets the same answer.
+        // Wielding or picking up is the caller's to do first; asking again from here gets the same answer.
         Refusal::Use { .. } | Refusal::UseWith { .. } => Answer::Never,
-        // Nothing at the counter changes what it will not buy or has
-        // no room to pay for: the trip goes on without that item, or
-        // ends.
+        // Nothing at the counter changes what it will not buy or has no room to pay for: the trip goes
+        // on without that item, or ends.
         Refusal::Sell { .. } | Refusal::Buy { .. } => Answer::Never,
         Refusal::Summon { why } => match why {
             SummonRefusal::NotForUs => Answer::Never,
-            // The creature out is what is waited on, and the essence
-            // is ready again the moment it is gone.
+            // Ready again the moment the creature out is gone.
             SummonRefusal::OneIsOut => Answer::Soon(Duration::ZERO),
         },
     }
 }
 
 impl Answer {
-    /// Apply the decision to `key` in `held`, the table of things being
-    /// held off: a doubling wait, the same wait afresh, or for good,
-    /// with `why` as the note for the log.
+    /// Apply the decision to `key` in `held`, the table of things held off; `why` is the log's note.
     pub fn hold<K: Ord + Clone>(self, held: &mut Patience<K>, key: K, why: &str, now: Instant) {
         match self {
             Answer::Again(first) => held.hold(key, first, now),
@@ -580,8 +481,7 @@ mod tests {
                 why: OpenRefusal::InUse
             })
         );
-        // On a server that tells you whose (`container_opener_name`),
-        // and for a container that is not a body.
+        // A server with `container_opener_name` on names the viewer, and a chest is refused the same.
         assert_eq!(
             refused("The Chest is already in use by +Brynna!"),
             Some(Refusal::Open {
@@ -839,8 +739,7 @@ mod tests {
         let later = now + Duration::from_secs(1);
         let key = 0x8000_0001u32;
 
-        // Busy passes in seconds: the same short wait every time, never
-        // doubling, however often it is heard.
+        // Busy passes in seconds: the same short wait every time, never doubling.
         let busy = Refusal::Recruit {
             name: "+Caius",
             why: RecruitRefusal::Busy,
@@ -853,7 +752,6 @@ mod tests {
         assert!(held.held(&key, later));
         assert!(!held.held(&key, later + RECRUIT_HELD_OFF));
 
-        // Already a member doubles.
         let member = Refusal::Recruit {
             name: "+Caius",
             why: RecruitRefusal::AlreadyAMember,
@@ -864,8 +762,6 @@ mod tests {
         answer(&member).hold(&mut held, key, "a member", later);
         assert_eq!(held.waited(&key), Some(RECRUIT_HELD_OFF * 2));
 
-        // A body in use is left a moment; one the killer's for good is
-        // left for good.
         let in_use = Refusal::Open {
             name: "Corpse of Hellion",
             why: OpenRefusal::InUse,
@@ -880,8 +776,6 @@ mod tests {
         answer(&rare).hold(&mut held, key, "the killer's alone", now);
         assert!(held.held(&key, now + Duration::from_secs(3600)));
 
-        // A pack that is full is not asked about again; the take goes
-        // elsewhere, which is the looting's business.
         assert_eq!(
             answer(&Refusal::Put {
                 item: "Dagger",

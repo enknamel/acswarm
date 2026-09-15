@@ -1,63 +1,32 @@
-//! Keeping the pack tidy: pouring loose stacks together so that slots
-//! are not wasted on them.
-//!
-//! Slots are the scarce thing in Asheron's Call, not weight. Buy five
-//! scarabs and they arrive as a stack of five, sitting in their own slot
-//! next to the fifteen already carried; loot four arrows off a corpse
-//! and they land beside the two hundred in the pack. Nothing warns you.
-//! An afternoon of this fills a pack with change while the character
-//! believes it has room.
-//!
-//! So the rules pour stacks together whenever two of the same thing are
-//! carried loose. A stack has a maximum -- a trade note holds 250, an
-//! arrow 1,000 -- so a large enough pile still needs more than one
-//! stack; what it must not need is eleven.
-//!
-//! The server takes one merge at a time and answers in its own time,
-//! so [`next_merge`] returns a single move and is asked again once that
-//! move has landed. Reading that answer is [`pour_answer`]'s job: until
-//! a pour is known to have landed or been turned down, the counts the
-//! next choice would be made from are the ones before it.
+//! Pouring loose stacks together so slots are not wasted: slots, not weight, are what runs out.
+//! [`next_merge`] picks one pour at a time, as the server takes one merge and answers in its own time.
+//! [`pour_answer`] reads that answer; until a pour lands or is refused, the counts are from before it.
+//! How a thing lying loose is taken into a pack lives in `room`.
 
 use std::time::{Duration, Instant};
 
-/// One stack in the pack, as the compactor needs to see it.
+/// One stack in the pack, as the compactor sees it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Stack {
     pub guid: u32,
-    /// What it is. Two stacks merge only if these match: an Arrow and a
-    /// Broadhead Arrow look alike and are not.
+    /// Two stacks merge only if these match: an Arrow and a Broadhead Arrow look alike and are not.
     pub wcid: u32,
     pub name: String,
-    /// How many are in it.
     pub count: u32,
-    /// How many it could hold. 1 (or 0) is something that does not
-    /// stack at all.
+    /// Most it can hold (a trade note 250, an arrow 1,000); 1 or 0 does not stack.
     pub max: u32,
-    /// It is in the character's hands rather than the pack: arrows in
-    /// the quiver slot, say. A wielded stack can be topped up, but is
-    /// never the one poured away.
+    /// In the character's hands (arrows in the quiver): may be topped up, never poured away.
     pub wielded: bool,
-    /// What the whole stack weighs, in burden units, or 0 when the
-    /// server has not said.
-    ///
-    /// This is here for one reason. Pouring one stack into another
-    /// changes what a character carries by nothing at all, but the
-    /// server checks the pour as though the source were being picked
-    /// up for the first time -- carried weight plus the source's whole
-    /// weight against the ceiling -- and refuses it without a word
-    /// when that does not fit. So a character near its limit cannot
-    /// tidy, and must be told so rather than left asking.
+    /// The whole stack's weight in burden units, 0 when the server has not said.
+    /// The server checks a pour like a first pickup (carried plus this vs. the ceiling), refusing silently.
     pub burden: u32,
 }
 
 impl Stack {
-    /// Whether it stacks at all.
     fn stackable(&self) -> bool {
         self.max > 1
     }
 
-    /// Room left in it.
     fn room(&self) -> u32 {
         self.max.saturating_sub(self.count)
     }
@@ -68,39 +37,22 @@ impl Stack {
 pub struct Merge {
     pub from: u32,
     pub to: u32,
-    /// How many to move. Never more than the source holds, and never
-    /// more than the target has room for: the server refuses both.
+    /// Never more than the source holds or the target has room for: the server refuses both.
     pub amount: u32,
     /// What is being poured, for the log.
     pub name: String,
-    /// The move empties the source, freeing its slot.
+    /// The move empties the source.
     pub frees_a_slot: bool,
 }
 
-/// The next merge worth making, or `None` when the pack is as tight as
-/// it goes.
-///
-/// Of all the merges available, the one that frees a slot outright is
-/// taken first: that is the whole point of the exercise, and a move
-/// that only shuffles counts between two stacks can wait. Among equals
-/// the largest pour wins, so the pack settles in as few round trips to
-/// the server as it can, and ties go to the lowest guid so that the
-/// answer does not wander between frames.
+/// The next merge worth making; `None` when the pack is as tight as it goes.
+/// Slot-freeing pours first, then the largest (fewest round trips); ties to the lowest guid so frames agree.
 pub fn next_merge(stacks: &[Stack]) -> Option<Merge> {
     next_merge_unless(stacks, u32::MAX, |_, _| false)
 }
 
-/// The same, within a weight budget and skipping pairs the caller has
-/// been told no about.
-///
-/// `may_carry` is how much more the server believes the character may
-/// be handed. A pour it reckons too heavy is refused silently, so a
-/// pour that would not fit is not worth asking for.
-///
-/// The skip is the other half: a pair the server will not join must
-/// not stop the rest of the pack being tidied. Without it, one
-/// stubborn pair meant nothing else was ever poured together, because
-/// it is the only answer ever offered.
+/// [`next_merge`] within `may_carry` more burden units, skipping the (from, to) guid pairs `skip` names.
+/// The server refuses a too-heavy pour silently, and one pair it will not join must not stall the rest.
 pub fn next_merge_unless(
     stacks: &[Stack],
     may_carry: u32,
@@ -108,13 +60,11 @@ pub fn next_merge_unless(
 ) -> Option<Merge> {
     let mut best: Option<Merge> = None;
     for from in stacks {
-        // A stack in the character's hands stays there, and a full one
-        // has nothing spare to give.
+        // Wielded stacks stay in the hands, and an empty one has nothing to give.
         if !from.stackable() || from.wielded || from.count == 0 {
             continue;
         }
-        // Nothing known about the weight is not a reason to refuse:
-        // ask, and let the server's answer settle it.
+        // Unknown weight (0) is no reason to refuse: ask, and let the server settle it.
         if from.burden > 0 && from.burden > may_carry {
             continue;
         }
@@ -130,9 +80,7 @@ pub fn next_merge_unless(
             if amount == 0 {
                 continue;
             }
-            // Pour the smaller into the larger. Without this the pair
-            // would swap back and forth for ever, each frame deciding
-            // the other way round.
+            // Smaller into larger only, or a pair swaps back and forth, each frame deciding the other way.
             if (to.count, to.guid) <= (from.count, from.guid) {
                 continue;
             }
@@ -158,8 +106,7 @@ pub fn next_merge_unless(
 #[derive(Clone, Debug, PartialEq)]
 pub struct PourSent {
     pub merge: Merge,
-    /// What the target held when the pour went out. The answer is read
-    /// off how much the target has grown, so this is half of it.
+    /// The target's count when the pour went out; the answer is read off how much it has grown.
     pub to_before: u32,
 }
 
@@ -170,35 +117,19 @@ pub enum PourAnswer {
     InAir,
     /// The two stacks are one.
     Landed,
-    /// The server will not make it, with whatever reason it gave (0 for
-    /// the half of them that carry none).
+    /// The server will not make it, with its reason (0 for the half of refusals that carry none).
     Refused(u32),
-    /// Long enough with no word at all that none is coming.
+    /// No word for so long that none is coming.
     Lost,
 }
 
-/// How long a pour within the pack is waited on before it is given up
-/// for lost.
-///
-/// The server's answer is two or three messages in the same breath as
-/// the merge, so a second is already generous; what this is really for
-/// is the pour that is answered with nothing whatever -- a stack whose
-/// size the server failed to adjust, or a packet that never arrived --
-/// where the alternative is a character that never tidies again.
-///
-/// Within the pack only. A pour off a body is walked to and stooped
-/// for like a take (ACE's `HandleActionStackableMerge` runs the same
-/// move-to and pickup chain as a put when either stack is in the
-/// world), and one take in ten was answered after two seconds; given
-/// up at two, the source still lying there was asked for again and a
-/// second merge went out behind the first. Such a pour is given a
-/// take's allowance instead (see [`pour_answer_within`]).
+/// A pour within the pack unanswered this long is lost, so a reply that never comes cannot stop tidying.
+/// Generous: the reply is two or three messages sent with the merge.
+/// Off a body ACE walks and stoops as for a take (`HandleActionStackableMerge`, Player_Inventory.cs:2849),
+/// and one take in ten is answered after 2 s (measured), so that pour waits a take's allowance instead.
 pub const POUR_LOST: Duration = Duration::from_secs(2);
 
-/// What the server has said about a pour within the pack, given what
-/// the target holds now (`target_now`, `None` when the target itself is
-/// gone), any refusal that names either stack, and how long since it
-/// was asked for. Lost after [`POUR_LOST`].
+/// [`pour_answer_within`] for a pour within the pack, lost after [`POUR_LOST`].
 pub fn pour_answer(
     sent: &PourSent,
     target_now: Option<u32>,
@@ -208,17 +139,8 @@ pub fn pour_answer(
     pour_answer_within(sent, target_now, refusal, waited, POUR_LOST)
 }
 
-/// What the server has said about a pour, given what the target holds
-/// now (`target_now`, `None` when the target itself is gone), any
-/// refusal that names either stack, how long since it was asked for,
-/// and how long it is waited on before it is given up for lost -- a
-/// take's allowance for a pour off a body, [`POUR_LOST`] within the
-/// pack.
-///
-/// The target's count is the signal, not the source's. The server sends
-/// the target's new size last for both a whole pour and a partial one,
-/// so a choice made on "the source is gone" would be made from a target
-/// count that is still the old one, and would offer the same pour again.
+/// What the server has said about a pour; `target_now` is `None` once the target itself is gone.
+/// Read off the target, not the source: the server sends the target's new size last, whole pour or partial.
 pub fn pour_answer_within(
     sent: &PourSent,
     target_now: Option<u32>,
@@ -226,14 +148,11 @@ pub fn pour_answer_within(
     waited: Duration,
     lost_after: Duration,
 ) -> PourAnswer {
-    // A refusal is the whole answer, whatever the counts say: a stack
-    // that grew by the right amount in the same moment grew for some
-    // other reason.
+    // A refusal wins over the counts: a stack that grew at the same moment grew for another reason.
     if let Some(code) = refusal {
         return PourAnswer::Refused(code);
     }
-    // The target gone -- poured on somewhere else, sold, handed over --
-    // is nothing this pour can still be waiting for.
+    // A target gone (poured elsewhere, sold, handed over) leaves nothing to wait for.
     let Some(count) = target_now else {
         return PourAnswer::Landed;
     };
@@ -246,19 +165,9 @@ pub fn pour_answer_within(
     PourAnswer::InAir
 }
 
-/// The refusal that answers a pour sent at `sent_at`, out of what the
-/// server last said about the source (`from`) and the target (`to`),
-/// each a reason and when it was said.
-///
-/// Both stacks are looked at because the server names the target in a
-/// good few of its refusals -- a stack that is stuck, one that does not
-/// stack, one in a trade window -- and a tidier that only ever read the
-/// source's entry never saw those at all.
-///
-/// The stamp is what makes it this pour's answer. Refusals are kept by
-/// guid and never expire, and a looted item keeps its guid once it is in
-/// the pack, so the entry sitting there may be about something that
-/// happened minutes ago.
+/// The refusal answering a pour sent at `sent_at`, out of the last (code, when) for source and target.
+/// Both stacks: many refusals name the target (stuck, does not stack, in a trade window).
+/// Only a stamp from `sent_at` on counts: refusals are kept by guid, never expire, and loot keeps its guid.
 pub fn refusal_of(
     sent_at: Instant,
     from: Option<(u32, Instant)>,
@@ -271,14 +180,13 @@ pub fn refusal_of(
         .map(|(code, _)| code)
 }
 
-/// Whether `a` is a better move than what has been found so far.
+/// Whether `a` beats the best found so far.
 fn better(a: &Merge, best: &Option<Merge>) -> bool {
     let Some(b) = best else { return true };
     (a.frees_a_slot, a.amount, b.from, b.to).gt(&(b.frees_a_slot, b.amount, a.from, a.to))
 }
 
-/// How many slots the stacks are using, and how few they could use.
-/// What the tidying is worth, for the log and the UI.
+/// Slots the pack's stacks use beyond the fewest they could: what tidying is worth, for the log and UI.
 pub fn slots_wasted(stacks: &[Stack]) -> u32 {
     use std::collections::BTreeMap;
     let mut piles: BTreeMap<u32, (u32, u32, u32)> = BTreeMap::new();
@@ -311,16 +219,14 @@ mod tests {
             count,
             max,
             wielded: false,
-            // Weightless, so the tests that are about slots stay
-            // about slots. The weight budget has tests of its own.
+            // Weight unknown, so the tests about slots stay about slots.
             burden: 0,
         }
     }
 
     #[test]
     fn five_scarabs_bought_go_into_the_fifteen_already_carried() {
-        // The case that started this: a purchase arrives in its own
-        // slot beside what is already there.
+        // A purchase arrives in its own slot beside the stack already carried.
         let pack = [stack(1, 690, 15, 100), stack(2, 690, 5, 100)];
         let m = next_merge(&pack).expect("a merge");
         assert_eq!(m.from, 2, "poured the big stack into the small one");
@@ -338,7 +244,6 @@ mod tests {
 
     #[test]
     fn things_that_do_not_stack_are_left_alone() {
-        // Two swords are two swords, however alike.
         let pack = [stack(1, 555, 1, 1), stack(2, 555, 1, 1)];
         assert_eq!(next_merge(&pack), None);
         let unstackable = [stack(1, 555, 1, 0), stack(2, 555, 1, 0)];
@@ -347,7 +252,6 @@ mod tests {
 
     #[test]
     fn different_things_never_merge() {
-        // An Arrow and a Broadhead Arrow look alike and are not.
         let pack = [stack(1, 300, 50, 1000), stack(2, 301, 50, 1000)];
         assert_eq!(next_merge(&pack), None);
     }
@@ -355,8 +259,6 @@ mod tests {
     #[test]
     fn a_full_stack_is_not_poured_into() {
         let pack = [stack(1, 690, 100, 100), stack(2, 690, 5, 100)];
-        // The only stack with room is the small one, and pouring the
-        // full one into it would free nothing.
         assert_eq!(next_merge(&pack), None);
     }
 
@@ -371,8 +273,7 @@ mod tests {
 
     #[test]
     fn freeing_a_slot_comes_before_shuffling_counts() {
-        // Two things to do: top up a nearly-full note stack (frees
-        // nothing), or empty a stray taper stack (frees a slot).
+        // Topping up the note stack frees nothing; emptying the stray taper stack frees a slot.
         let pack = [
             stack(1, 2621, 240, 250),
             stack(2, 2621, 200, 250),
@@ -387,8 +288,6 @@ mod tests {
 
     #[test]
     fn the_pack_settles_and_stays_settled() {
-        // Run the moves out to the end: it must terminate, and the
-        // result must be as few stacks as the maximum allows.
         let mut pack = vec![
             stack(1, 690, 15, 100),
             stack(2, 690, 5, 100),
@@ -419,8 +318,6 @@ mod tests {
 
     #[test]
     fn the_answer_does_not_wander_between_frames() {
-        // Asked twice about the same pack, the same move comes back;
-        // and the order the stacks arrive in does not change it.
         let mut pack = vec![
             stack(1, 690, 15, 100),
             stack(2, 690, 5, 100),
@@ -445,8 +342,6 @@ mod tests {
 
     #[test]
     fn lead_peas_looted_into_stacks_of_their_own_are_poured_into_one() {
-        // The report this was written for: three stacks of the same
-        // component in the pack where one would do.
         let mut pack = vec![
             stack(1, 8329, 40, 100),
             stack(2, 8329, 3, 100),
@@ -468,7 +363,6 @@ mod tests {
         let peas: Vec<&Stack> = pack.iter().filter(|s| s.wcid == 8329).collect();
         assert_eq!(peas.len(), 1);
         assert_eq!(peas[0].count, 48);
-        // The tapers were never part of it.
         assert_eq!(pack.iter().filter(|s| s.wcid == 693).count(), 1);
     }
 
@@ -490,7 +384,7 @@ mod tests {
             pack[to].count += m.amount;
             pack.retain(|s| s.count > 0);
         }
-        // 180 at a hundred to a stack is two, and no pour spilled.
+        // 180 at 100 to a stack is two.
         assert_eq!(pack.len(), 2);
         assert_eq!(pack.iter().map(|s| s.count).sum::<u32>(), 180);
         assert_eq!(slots_wasted(&pack), 0);
@@ -498,8 +392,7 @@ mod tests {
 
     #[test]
     fn a_pair_the_server_turned_down_does_not_hold_up_the_lead_peas() {
-        // The pyreal pair is the better move and the server will not
-        // make it. Skipped, the peas are offered instead of nothing.
+        // The pyreal pair is the better move and the server refuses it; skipped, the peas are offered.
         let pack = [
             stack(1, 273, 5000, 25000),
             stack(2, 273, 900, 25000),
@@ -515,8 +408,6 @@ mod tests {
 
     #[test]
     fn a_stack_an_errand_holds_is_neither_poured_away_nor_poured_into() {
-        // The money counted out for a runner, say: another part of the
-        // client is holding that guid across ticks.
         let pack = [
             stack(1, 273, 5000, 25000),
             stack(2, 273, 900, 25000),
@@ -527,7 +418,6 @@ mod tests {
         let m = next_merge_unless(&pack, u32::MAX, |from, to| from == errand || to == errand)
             .expect("the other pair is still offered");
         assert_eq!((m.from, m.to), (4, 3));
-        // And with both of that pair held, nothing of theirs moves.
         let m = next_merge_unless(&pack, u32::MAX, |from, to| [from, to].contains(&2));
         assert_eq!(m.map(|m| (m.from, m.to)), Some((4, 3)));
     }
@@ -553,8 +443,7 @@ mod tests {
             pour_answer(&whole, Some(45), None, Duration::ZERO),
             PourAnswer::Landed
         );
-        // A partial pour: five of the forty went into a stack with
-        // only five slots left.
+        // A partial pour: five into a target with room for only five.
         let partial = sent(95, 5);
         assert_eq!(
             pour_answer(&partial, Some(100), None, Duration::ZERO),
@@ -564,9 +453,8 @@ mod tests {
 
     #[test]
     fn a_pour_is_in_the_air_until_the_target_has_grown() {
-        // The server forgets the source before it says what the target
-        // holds, and reading the first as the answer would choose the
-        // next pour from a stale count.
+        // The server forgets the source before it says what the target holds; reading the first as
+        // the answer would choose the next pour from a stale count.
         let s = sent(40, 5);
         assert_eq!(
             pour_answer(&s, Some(40), None, Duration::from_millis(100)),
@@ -604,9 +492,8 @@ mod tests {
 
     #[test]
     fn a_pour_off_a_body_is_waited_on_as_long_as_a_take_would_be() {
-        // Walked to and stooped for like a take: one in ten was
-        // answered after two seconds. Given up then, the coin still on
-        // the body was asked for again behind the first merge.
+        // Walked and stooped for like a take, one in ten answered after 2 s: given up at 2 s, the coin
+        // still on the body is asked for again behind the first merge.
         let s = sent(40, 5);
         let takes = Duration::from_secs(4);
         assert_eq!(
@@ -617,7 +504,6 @@ mod tests {
             pour_answer_within(&s, Some(40), None, takes, takes),
             PourAnswer::Lost
         );
-        // Landed and refused are read the same whatever the allowance.
         assert_eq!(
             pour_answer_within(&s, Some(45), None, Duration::from_secs(3), takes),
             PourAnswer::Landed
@@ -630,8 +516,7 @@ mod tests {
 
     #[test]
     fn a_component_burned_from_the_target_mid_pour_is_not_taken_for_the_answer() {
-        // A spell eats one of the target's peas while the pour is out.
-        // One short of the mark is not the mark.
+        // A spell eats one of the target's peas mid-pour: one short of the mark is not the mark.
         let s = sent(40, 5);
         assert_eq!(
             pour_answer(&s, Some(44), None, Duration::from_millis(100)),
@@ -654,8 +539,7 @@ mod tests {
 
     #[test]
     fn a_refusal_from_before_the_pour_is_not_its_answer() {
-        // Refusals are kept by guid and never expire, and a looted
-        // stack keeps the guid it was refused under.
+        // Refusals are kept by guid and never expire; a looted stack keeps the guid it was refused under.
         let before = Instant::now();
         let at = before + Duration::from_secs(30);
         assert_eq!(refusal_of(at, Some((0x427, before)), None), None);
@@ -673,7 +557,6 @@ mod tests {
             stack(4, 693, 7, 25),
         ];
         assert_eq!(slots_wasted(&pack), 2);
-        // A single stack wastes nothing, whatever its size.
         assert_eq!(slots_wasted(&[stack(1, 693, 3, 25)]), 0);
         assert_eq!(slots_wasted(&[]), 0);
     }
