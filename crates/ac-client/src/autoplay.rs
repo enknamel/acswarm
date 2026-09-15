@@ -224,6 +224,11 @@ const STALL_AFTER: Duration = Duration::from_secs(20);
 const APPROACH_PROGRESS: f32 = 1.0;
 /// And left alone for this long afterwards.
 const GIVE_UP_FOR: Duration = refusals::ATTACK_AGAIN;
+/// How far off a creature that has stopped attacking can stand before a
+/// character on the road lets it go and walks on (see
+/// [`road_fight_over`]): beyond a swing's reach, so one still being hit
+/// is finished rather than left at half health.
+const ROAD_REACH: f32 = 8.0;
 /// Casting or shooting this long from one spot with nothing landing:
 /// the spot is no good, and the character closes in rather than going on.
 const CLOSE_IN_AFTER: Duration = Duration::from_secs(8);
@@ -2204,6 +2209,30 @@ const CRITTER_HEALTH: u32 = 5;
 /// those two apart.
 const STRANGER_HEALTH: u32 = 30;
 
+/// Whether a fight taken on the road is over because the creature has
+/// dropped out of it: the character is on its way somewhere, the
+/// creature has not attacked it lately, is not walking at it or a mate,
+/// nobody on the road is fighting it, and it stands `away` metres off,
+/// beyond a swing's reach ([`ROAD_REACH`]).
+///
+/// On the road a character takes on only what attacks it (see
+/// `Client::passing_by`), and a creature that swung once and then fell
+/// behind -- the party outran it, it lost interest, it was never going
+/// to keep up -- was chased until it died or until twenty seconds
+/// without a hit gave it up (`STALL_AFTER`), the road forgotten
+/// meanwhile. The fight ends when the creature stops following. One
+/// still in reach is finished: leaving a creature at half health a
+/// swing away is a chase the other way round.
+pub fn road_fight_over(
+    on_the_road: bool,
+    attacking_us: bool,
+    coming_at_us: bool,
+    a_mate_is_on_it: bool,
+    away: f32,
+) -> bool {
+    on_the_road && !attacking_us && !coming_at_us && !a_mate_is_on_it && away > ROAD_REACH
+}
+
 /// What a creature in view has been seen doing, which is all a client
 /// can know about its temper. ACE never sends a creature's tolerance
 /// -- it lives in the server's monster awareness and nowhere else --
@@ -2684,6 +2713,11 @@ pub struct Autoplay {
     pub(crate) wield_refused: crate::did::Patience<u32>,
     /// A journey put down for a fight, to be picked up again after it.
     pub(crate) resume_trip: Option<glam::Vec2>,
+    /// Whether that journey was a walk about the character's own ground
+    /// rather than a road (see `Client::travel_about`): it is picked up
+    /// again as what it was, and the walk past the road reads it while
+    /// it waits.
+    pub(crate) resume_about_the_ground: bool,
     /// The target being worked on, since when, and its health when
     /// last seen to drop: a target that takes no damage for a while is
     /// out of reach, and is let go.
@@ -4926,7 +4960,7 @@ impl Client {
     /// somewhere; false once it cannot arrive -- what becomes of the
     /// body then is for the caller to say, because a body being walked
     /// to and a body already in hand end differently.
-    fn walk_to_corpse(
+    pub(crate) fn walk_to_corpse(
         &mut self,
         guid: u32,
         name: &str,
@@ -4938,7 +4972,11 @@ impl Client {
         // character comes back from: a town run picks its walk to the
         // counter up again once the body is dealt with (see
         // `Client::journey_broken_off`). +Verity's run did not, and
-        // gave up 224 m short of Shopkeeper Renald the Elder.
+        // gave up 224 m short of Shopkeeper Renald the Elder. A road
+        // that is nobody's errand -- a script's, a hunting area's --
+        // has only the remembered journey to bring it back, so it is
+        // remembered as a fight remembers it.
+        self.remember_journey();
         self.interrupt_travel("walking to a corpse");
         // Well inside the radius rather than on its edge: the last
         // metre of a walk wanders, and stopping on the line means
@@ -7063,6 +7101,33 @@ impl Client {
         !(self.hit_lately_by(&o.name) || self.a_mate_on_the_road_is_on(o.guid))
     }
 
+    /// Say what the character is walking past on its way somewhere: the
+    /// nearest creature in reach that would be fought were the road not
+    /// being walked (see [`Self::passing_by`]). Once per creature every
+    /// few seconds, so a road can be read back from the log; nothing is
+    /// asked when the character is not on a road.
+    fn note_walked_past(&mut self, me: glam::Vec3, cfg: &Fight, underground: bool, now: Instant) {
+        if !cfg.walk_past_on_the_way || !self.on_its_way() {
+            return;
+        }
+        let mut standing = cfg.clone();
+        standing.walk_past_on_the_way = false;
+        let passed = self
+            .world
+            .objects
+            .values()
+            .filter(|o| self.would_fight(o, &standing, underground, now))
+            .filter_map(|o| {
+                let d = o.world_pos()?.distance(me);
+                (d <= cfg.radius).then_some((d, o.name.clone()))
+            })
+            .min_by(|a, b| a.0.total_cmp(&b.0));
+        if let Some((_, name)) = passed {
+            self.autoplay
+                .note(format!("walking past {name} on the road"), now);
+        }
+    }
+
     /// Whether one of the party, on its way as well, is fighting `guid`.
     ///
     /// A character on the road takes on nothing but what attacks it, so
@@ -7221,7 +7286,8 @@ impl Client {
             }
             // And still here (see `fight_target_gone`).
             let underground = self.underground();
-            let gone = self.fight_target_gone(t, underground);
+            let gone =
+                self.fight_target_gone(t, underground) || self.left_behind_on_the_road(t, now);
             if gone {
                 self.attack_target = None;
                 self.autoplay.casting_at = None;
@@ -7324,6 +7390,7 @@ impl Client {
             })
             .min_by(|a, b| a.0.total_cmp(&b.0));
         let Some((_, guid, name)) = target else {
+            self.note_walked_past(me, &cfg, underground, now);
             return false;
         };
         if self.autoplay_plan_hard(guid, &name, now) {
@@ -7393,9 +7460,15 @@ impl Client {
         // Out of the hunting area and not hitting us, or not here at
         // all any more, it is let go (see `fight_target_gone`).
         let underground = self.underground();
-        let target = match self.autoplay.casting_at {
-            Some(g) if alive(self, g) && !self.fight_target_gone(g, underground) => Some(g),
-            _ => {
+        let casting_at = self.autoplay.casting_at;
+        let kept = casting_at.filter(|g| {
+            alive(self, *g)
+                && !self.fight_target_gone(*g, underground)
+                && !self.left_behind_on_the_road(*g, now)
+        });
+        let target = match kept {
+            Some(g) => Some(g),
+            None => {
                 self.autoplay.casting_at = None;
                 if self.waits_for_a_corpse() {
                     None
@@ -7741,10 +7814,11 @@ impl Client {
     /// A swing cancels the journey (the move-to and the trip cannot both
     /// steer). Note where it was going, so it is taken up again once
     /// the fight is over.
-    fn remember_journey(&mut self) {
+    pub(crate) fn remember_journey(&mut self) {
         if self.traveling() {
             if let Some(goal) = self.travel_goal_xy() {
                 self.autoplay.resume_trip = Some(goal);
+                self.autoplay.resume_about_the_ground = self.travel_about_the_ground();
             }
         }
     }
@@ -7759,7 +7833,12 @@ impl Client {
             return false;
         }
         self.autoplay.resume_trip = None;
-        if self.travel_to(goal) {
+        let resumed = if self.autoplay.resume_about_the_ground {
+            self.travel_about(goal)
+        } else {
+            self.travel_to(goal)
+        };
+        if resumed {
             self.autoplay.say(Doing::Idle, "back on the road");
             return true;
         }
@@ -7883,6 +7962,40 @@ impl Client {
             .zip(self.player.as_ref().map(|p| p.world_position()))
             .is_some_and(|(at, me)| at.distance(me) > crate::travel::WALKABLE)
             || !self.area_allows_guid(guid, underground)
+    }
+
+    /// Whether `guid`, the creature being fought, has dropped out of a
+    /// fight taken on the road (see [`road_fight_over`]), and say so
+    /// when it has. Asked of the fight in hand each tick, beside
+    /// [`Self::fight_target_gone`].
+    fn left_behind_on_the_road(&mut self, guid: u32, now: Instant) -> bool {
+        let Some(o) = self.world.objects.get(&guid) else {
+            return false;
+        };
+        let Some(away) = o
+            .world_pos()
+            .zip(self.player.as_ref().map(|p| p.world_position()))
+            .map(|(at, me)| at.distance(me))
+        else {
+            return false;
+        };
+        let mates = &self.autoplay.team.mates;
+        let ours = |g: u32| self.world.player_guid == Some(g) || mates.iter().any(|m| m.guid == g);
+        let over = road_fight_over(
+            self.on_its_way(),
+            self.hit_lately_by(&o.name),
+            o.walked_at.is_some_and(ours),
+            self.a_mate_on_the_road_is_on(guid),
+            away,
+        );
+        if over {
+            let name = o.name.clone();
+            self.autoplay.note(
+                format!("letting {name} go: it stopped following on the road ({away:.0} m)"),
+                now,
+            );
+        }
+        over
     }
 
     /// Whether the walk up to `guid` has brought the character nearer to
@@ -8594,7 +8707,9 @@ impl Client {
                 .is_none_or(|g| g.distance(goal) > 30.0);
             let due = self.autoplay.next_follow_plan.is_none_or(|t| now >= t);
             if (stale || !self.traveling()) && due {
-                if self.travel_to(goal) {
+                // On the leader's way, whatever the leader is on (see
+                // `Client::on_its_way`): not a road of its own.
+                if self.travel_about(goal) {
                     self.autoplay.follow_trip = Some(goal);
                     self.autoplay.next_follow_plan = Some(now + Duration::from_secs(3));
                 } else {
@@ -10352,6 +10467,69 @@ mod tests {
         assert!(
             c.a_critter(&other, &cfg),
             "which says nothing about its neighbour"
+        );
+    }
+
+    #[test]
+    fn a_fight_on_the_road_ends_when_the_creature_stops_following() {
+        // Off the road the fight is the fight, however far it has got.
+        assert!(!road_fight_over(false, false, false, false, 20.0));
+        // On the road, a creature that has stopped attacking and fallen
+        // behind is let go.
+        assert!(road_fight_over(true, false, false, false, 20.0));
+        // Not while it is still attacking, walking at us, or being fought
+        // by one of the party on the road.
+        assert!(!road_fight_over(true, true, false, false, 20.0));
+        assert!(!road_fight_over(true, false, true, false, 20.0));
+        assert!(!road_fight_over(true, false, false, true, 20.0));
+        // And one a swing away is finished, not left at half health.
+        assert!(!road_fight_over(
+            true,
+            false,
+            false,
+            false,
+            ROAD_REACH - 1.0
+        ));
+
+        // The same, read off the world: a Drudge that swung once on the
+        // road and fell twenty metres behind.
+        let holtburg = 0xA9B4_0019;
+        let Some(mut c) = standing_in_the_field(20, holtburg, glam::Vec3::new(84.0, 7.1, 94.0))
+        else {
+            return;
+        };
+        let me = c.player.as_ref().unwrap().world_position();
+        let now = Instant::now();
+        let guid = 0x8000_0001;
+        let place = |c: &mut Client, metres: f32| {
+            let mut o = in_view(c, guid, 0, "Drudge Skulker");
+            o.position = Some(ac_world::object::Position::new_flat(
+                holtburg,
+                me + glam::Vec3::new(metres, 0.0, 0.0) - ac_world::landblock_origin(holtburg),
+            ));
+            c.world.objects.insert(guid, o);
+        };
+        place(&mut c, 20.0);
+        assert!(!c.left_behind_on_the_road(guid, now), "not on a road");
+        assert!(
+            c.travel_to(glam::Vec2::new(me.x + 250.0, me.y)),
+            "no way there"
+        );
+        assert!(c.on_its_way());
+        assert!(c.left_behind_on_the_road(guid, now), "it fell behind");
+        c.autoplay.attacked_by("Drudge Skulker", now);
+        assert!(
+            !c.left_behind_on_the_road(guid, now),
+            "it is still swinging"
+        );
+        c.autoplay.hit_by.clear();
+        c.autoplay.last_hit_us = None;
+        c.world.objects.get_mut(&guid).unwrap().walked_at = Some(0x5000_0001);
+        assert!(!c.left_behind_on_the_road(guid, now), "it is coming at us");
+        place(&mut c, 3.0);
+        assert!(
+            !c.left_behind_on_the_road(guid, now),
+            "a swing away: finished"
         );
     }
 

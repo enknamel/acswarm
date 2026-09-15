@@ -1768,6 +1768,20 @@ impl State {
     }
 }
 
+/// Whether a journey that is not one of the growth rules' errands still
+/// has the character on its way somewhere: a road is under way, or one
+/// put down for a fight is waiting to be picked up again. `trip` is the
+/// journey under way, if any, and whether it is about the character's
+/// own ground; `resumed` the same for the journey remembered for after
+/// the fight (see `Client::on_its_way`).
+///
+/// A walk about the ground -- a roam, a patrol -- is never a road: what
+/// stands about the ground is what the character came for.
+fn road_under_way(trip: Option<bool>, resumed: Option<bool>) -> bool {
+    trip.is_some_and(|about_the_ground| !about_the_ground)
+        || resumed.is_some_and(|about_the_ground| !about_the_ground)
+}
+
 impl Client {
     /// Whether the character is on its way somewhere it decided to go:
     /// out to a hunting ground, back to one from town, or to a counter.
@@ -1802,11 +1816,29 @@ impl Client {
     /// on the road. Each character says on the board whether it is on its
     /// way (`Mate::on_its_way`), which is also how the party stops together
     /// for what attacks any of it (see [`Client::passing_by`]).
+    ///
+    /// And a road is a road whoever planned it. The errands are the growth
+    /// rules' own, so a journey a script asked for, or the walk to the
+    /// portal into a hunting area, was not "on its way" at all, and a
+    /// party sent down the Singularity Caul by script fought every Biaka,
+    /// Hellion and Carenzi between the drop and the far end: fourteen
+    /// fights in a hundred and forty seconds, most of them picked by the
+    /// party, on a walk of forty. Every journey says whether it is a road
+    /// or a walk about the ground the character is hunting (see
+    /// [`Client::travel_about`]), and the patrol, the roam and a
+    /// follower's own catching up are the only walks about the ground.
     pub fn on_its_way(&self) -> bool {
         let st = &self.autoplay.growth;
         let walking = st.has_an_errand()
             && (self.traveling() || self.journey_broken_off() || st.after_out.is_some());
-        walking || self.followed_leader().is_some_and(|m| m.on_its_way)
+        walking
+            || road_under_way(
+                self.traveling().then_some(self.travel_about_the_ground()),
+                self.autoplay
+                    .resume_trip
+                    .map(|_| self.autoplay.resume_about_the_ground),
+            )
+            || self.followed_leader().is_some_and(|m| m.on_its_way)
     }
 
     /// The growth rules: spend experience, find monsters, run to town.
@@ -2459,7 +2491,7 @@ impl Client {
             self.autoplay.growth.roams = n.wrapping_add(1);
             self.autoplay.growth.quiet_since = Some(now);
             let goal = crate::hunt::patrol_point(&corners, n);
-            if self.travel_to(goal) {
+            if self.travel_about(goal) {
                 self.autoplay.say(
                     Doing::Traveling,
                     format!("nothing in sight; looking about {}", area.name),
@@ -2505,7 +2537,7 @@ impl Client {
             );
             self.autoplay.growth.roams += 1;
             self.autoplay.growth.quiet_since = Some(now);
-            if self.travel_to(goal) {
+            if self.travel_about(goal) {
                 self.autoplay.say(
                     Doing::Traveling,
                     "nothing in sight; looking about the ground",
@@ -7799,13 +7831,16 @@ mod tests {
         // A town run is the same errand: the counters are the point of
         // it, not whatever stands between here and them.
         c.autoplay.growth.bound = None;
-        assert!(!c.passing_by(&it, &fight), "nowhere to be again");
         c.autoplay.growth.run = Some(run_to(Vec2::new(32_500.0, 34_500.0), now));
         assert!(c.passing_by(&it, &fight));
 
-        // And the moment the errand ends, so does the walking past.
+        // The errand ending does not end the walking past: the journey
+        // still under way is a road whoever planned it (see
+        // `a_road_is_a_road_whoever_planned_it`). The journey ending does.
         c.autoplay.growth.run = None;
-        assert!(!c.passing_by(&it, &fight));
+        assert!(c.passing_by(&it, &fight), "the journey is still under way");
+        c.cancel_travel();
+        assert!(!c.passing_by(&it, &fight), "nowhere to be again");
         assert!(c.would_fight(&it, &fight, false, now));
     }
 
@@ -7927,6 +7962,85 @@ mod tests {
         // Until the Drudge attacks the character itself.
         c.autoplay.attacked_by("Drudge Skulker", Instant::now());
         assert!(c.joins_the_team_on(drudge.guid, &fight));
+    }
+
+    #[test]
+    fn a_road_is_under_way_unless_it_is_a_walk_about_the_ground() {
+        // No journey, nothing remembered: not on a road.
+        assert!(!road_under_way(None, None));
+        // A journey to somewhere else, or one put down for a fight.
+        assert!(road_under_way(Some(false), None));
+        assert!(road_under_way(None, Some(false)));
+        // A roam, a patrol: about the ground, so never a road.
+        assert!(!road_under_way(Some(true), None));
+        assert!(!road_under_way(None, Some(true)));
+    }
+
+    #[test]
+    fn a_road_is_a_road_whoever_planned_it() {
+        // The walk past the road read only the growth rules' errands, so
+        // a journey a script asked for was not "on its way": a party sent
+        // down the Singularity Caul by script fought everything between
+        // the drop and the far end, fourteen fights on a walk of forty
+        // seconds.
+        let holtburg = 0xA9B4_0019;
+        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
+            return;
+        };
+        c.world.stats.level = 20;
+        c.world.player_guid = Some(0x5000_0001);
+        let me = c.player.as_ref().unwrap().world_position();
+        let now = Instant::now();
+        let fight = c.autoplay.config.fight.clone();
+        let it = standing_by(&mut c, 0x8000_0001, "Revenant", 5.0);
+        let at = Vec2::new(me.x + 250.0, me.y);
+        assert!(c.autoplay.growth.bound.is_none() && c.autoplay.growth.run.is_none());
+
+        // A script's journey: on its way, and walking past.
+        assert!(c.travel_to(at), "no way there");
+        assert!(c.on_its_way());
+        assert!(!c.would_fight(&it, &fight, false, now));
+
+        // Put down for a fight that came to it: still the road, and the
+        // road again once the fight is over.
+        c.remember_journey();
+        c.interrupt_travel("attacking");
+        assert!(!c.traveling());
+        assert!(
+            c.on_its_way(),
+            "a road put down for a fight is still the road"
+        );
+        assert!(c.autoplay_resume_journey());
+        assert!(c.traveling() && c.on_its_way());
+
+        // Cancelled -- the player took the keys -- is no road.
+        c.cancel_travel();
+        assert!(!c.on_its_way());
+        assert!(c.would_fight(&it, &fight, false, now));
+
+        // A roam about the ground is not a road, and is not one after a
+        // fight has put it down either: what stands about the ground is
+        // what the character came for.
+        assert!(c.travel_about(at));
+        assert!(!c.on_its_way(), "a roam walked past the ground");
+        assert!(c.would_fight(&it, &fight, false, now));
+        c.remember_journey();
+        c.interrupt_travel("attacking");
+        assert!(!c.on_its_way());
+        assert!(c.autoplay_resume_journey());
+        assert!(c.traveling());
+        assert!(!c.on_its_way(), "a roam picked up again became a road");
+
+        // A road put down for a body on it is remembered like one put
+        // down for a fight, since nothing else would bring it back.
+        c.cancel_travel();
+        assert!(c.travel_to(at));
+        c.autoplay.resume_trip = None;
+        let spot = glam::Vec3::new(me.x + 30.0, me.y, me.z);
+        c.walk_to_corpse(0x8000_0002, "Corpse of Drudge", spot, 30.0, now);
+        assert!(!c.traveling());
+        assert_eq!(c.autoplay.resume_trip, Some(at));
+        assert!(c.on_its_way(), "a road put down for a body was lost");
     }
 
     #[test]
