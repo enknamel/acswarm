@@ -612,6 +612,11 @@ impl Client {
             self.attack_target = None;
             self.autoplay.drop_target();
             self.autoplay.resume_trip = None;
+            // And so is a visit to a counter: the run past its walk is
+            // stopped and the window closed, or the buffs that go back
+            // up below would wait for a counter across the town (see
+            // `Client::counter_left_behind`).
+            self.counter_left_behind(now);
             let spot = self.autoplay.recovery.death_xy.unwrap_or_default();
             tracing::info!(
                 "recovery: died at ({:.0}, {:.0}) with {} item(s) wielded",

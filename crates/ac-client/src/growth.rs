@@ -81,6 +81,21 @@ pub(crate) const COUNTER_REACH: f32 = 3.0;
 /// A vendor that does not answer a Use in this long is tried once more,
 /// then left.
 const VENDOR_OPEN_TIMEOUT: Duration = Duration::from_secs(12);
+/// How long after a counter turned the Use away as busy it is asked
+/// over, once nothing of ours is in flight. ACE is busy with a cast
+/// for its recoil only -- `IsBusy` is set in `FinishCast` and cleared
+/// when the Ready motion ends, about a second later (`Player_Magic.cs`)
+/// -- and this comfortably outlasts one. The cast slot alone cannot be
+/// trusted for it: ACE answers the turned-away Use with a UseDone of
+/// its own (`Player_Use.cs`, `TryUseItem`), and that frees the slot
+/// here while the recoil that made the character busy is still
+/// running.
+const BUSY_REASK: Duration = Duration::from_secs(3);
+/// How many times a Use turned away as busy is sent over before the
+/// refusals are taken for the counter's own. A counter that keeps
+/// saying busy with nothing of ours in flight is busy with something
+/// this client does not track, and is left to the ordinary timeout.
+const BUSY_ASKS: u32 = 3;
 /// A rank the server would not sell (the pool did not move) is not
 /// asked for again for this long.
 const SULK_FOR: Duration = Duration::from_secs(10 * 60);
@@ -618,8 +633,16 @@ fn skill_weight(skill: u32, weapon_skill: Option<u32>, caster: bool) -> f32 {
 enum Phase {
     /// Walking to the vendor.
     Going,
-    /// The vendor was used; waiting for its stock.
-    Opening { guid: u32, tries: u32 },
+    /// The vendor was used; waiting for its stock. `busy` is when the
+    /// counter last turned the Use away for our own doing -- a cast in
+    /// the air, not the counter refusing -- and `asked_over` how many
+    /// times the Use has gone out again for that (see [`on_opening`]).
+    Opening {
+        guid: u32,
+        tries: u32,
+        busy: Option<Instant>,
+        asked_over: u32,
+    },
     /// The pack's items are being appraised before the sale.
     Appraising,
     /// Selling. `sent` is what has gone over the counter and not yet
@@ -701,6 +724,81 @@ pub enum Driver {
     Autoplay,
     /// The vendoring panel, one act or one frame at a time.
     Hand,
+}
+
+/// What a run waiting on a counter's window does next.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OnOpening {
+    /// The window is open: on to the pack.
+    Opened,
+    /// Nothing yet.
+    Wait,
+    /// Send the Use over. The last one was turned away for our own
+    /// doing, so this is not counted against the counter.
+    AskOver,
+    /// Ask again after the counter's silence, counted against it.
+    AskAgain,
+    /// The counter will not open.
+    GiveUp,
+}
+
+/// What a run waiting on a counter's window does next (see
+/// [`Phase::Opening`]).
+///
+/// ACE will not open a window for a character in the middle of
+/// something: `Vendor.ActOnUse` turns the Use away as YoureTooBusy
+/// while `IsBusy` is set, and a cast sets it for its recoil, from the
+/// last gesture to the Ready stance (`Player_Magic.cs`, `FinishCast`;
+/// the gestures before it set only `MagicState.IsCasting`, which the
+/// counter does not look at). A refusal like that is ours, not the
+/// counter's -- +Vesperi arrived at Archmage Cindrue with eight
+/// protections lapsing and had every Use turned away until the run gave
+/// the counter up as one that "would not trade", the peas still in the
+/// pack. So a Use turned away as busy (`busy`, how long ago) is sent
+/// over once nothing of ours is in flight and a recoil's length has
+/// passed, without spending the retry or the counter's patience on it.
+/// Only silence and the counter's own refusal give it up, and a counter
+/// that keeps saying busy past [`BUSY_ASKS`] sends is taken at its word.
+fn on_opening(
+    open: bool,
+    busy: Option<Duration>,
+    ours_in_flight: bool,
+    asked_over: u32,
+    elapsed: Duration,
+    tries: u32,
+) -> OnOpening {
+    if open {
+        return OnOpening::Opened;
+    }
+    if let Some(ago) = busy.filter(|_| asked_over < BUSY_ASKS) {
+        return if ours_in_flight || ago < BUSY_REASK {
+            OnOpening::Wait
+        } else {
+            OnOpening::AskOver
+        };
+    }
+    if elapsed <= VENDOR_OPEN_TIMEOUT {
+        OnOpening::Wait
+    } else if tries < 2 {
+        OnOpening::AskAgain
+    } else {
+        OnOpening::GiveUp
+    }
+}
+
+/// The counter the character has asked for its window, if any: the
+/// one a run is asking, or the one whose window is open -- the run's
+/// once it is past the asking, or the player's own with no run on. A
+/// window open while a run is still walking is one left over from
+/// before it, not a counter at hand. A cast made at one is turned away
+/// or turns the counter's answer away (see [`on_opening`]), so the
+/// casts that can wait do (see `Client::counter_holding_casts`).
+fn counter_asked(phase: Option<&Phase>, window: Option<u32>) -> Option<u32> {
+    match phase {
+        Some(Phase::Going) => None,
+        Some(Phase::Opening { guid, .. }) => Some(*guid),
+        Some(Phase::Appraising | Phase::Selling { .. }) | None => window,
+    }
 }
 
 /// Who steps a run to town: the panel when it asked for the run, or
@@ -1606,6 +1704,28 @@ impl State {
         self.run.is_some()
     }
 
+    /// The server turned something away because the character was
+    /// busy. Heard while a counter is being asked for its window, that
+    /// is the Use being turned away for a cast of our own, and the run
+    /// waits for the cast rather than for the counter (see
+    /// [`on_opening`]). Past the asks a busy refusal earns, the
+    /// refusals are the counter's own and the run is on the ordinary
+    /// clock: kept, the refusal had the status promise an ask "once
+    /// the cast lands" that was never coming.
+    pub(crate) fn counter_said_busy(&mut self, now: Instant) {
+        if let Some(Run {
+            phase: Phase::Opening {
+                busy, asked_over, ..
+            },
+            ..
+        }) = self.run.as_mut()
+        {
+            if *asked_over < BUSY_ASKS {
+                *busy = Some(now);
+            }
+        }
+    }
+
     /// Whether the run under way is the vendoring panel's to step.
     pub(crate) fn run_by_hand(&self) -> bool {
         self.by_hand && self.run.is_some()
@@ -1626,17 +1746,25 @@ impl State {
     /// session -- the character walked past what stood on its own ground
     /// on every patrol, and a run held open kept a follower from its
     /// leader.
-    fn drop_what_is_turned_off(&mut self, town_runs: bool, grounds: bool) {
+    ///
+    /// The run let go is handed back: its window, if it had one, is the
+    /// client's to close (see [`Client::autoplay_grow`]).
+    fn drop_what_is_turned_off(&mut self, town_runs: bool, grounds: bool) -> Option<Run> {
         // A run the panel is driving is not autoplay's to let go: town
         // runs being off is exactly when the panel is the thing running
         // one.
-        if !town_runs && !self.by_hand && self.run.take().is_some() {
-            self.needs.clear();
+        let mut dropped = None;
+        if !town_runs && !self.by_hand {
+            dropped = self.run.take();
+            if dropped.is_some() {
+                self.needs.clear();
+            }
         }
         if !grounds {
             self.bound = None;
             self.bound_since = None;
         }
+        dropped
     }
 }
 
@@ -1708,9 +1836,21 @@ impl Client {
         // An errand whose setting was turned off part-way is carried on by
         // nothing below, so it is let go here.
         let roams_an_area = self.autoplay.config.fight.area.is_some();
-        self.autoplay
+        let dropped = self
+            .autoplay
             .growth
             .drop_what_is_turned_off(cfg.town_runs, cfg.hunt_grounds || roams_an_area);
+        // A run let go at its counter leaves its window behind, and the
+        // window is ours: the server keeps none, so nothing closes it
+        // but this client, and with town runs off no later run would.
+        // Left open it read as a counter at hand for the rest of the
+        // session (see [`Client::counter_at_hand`]).
+        if let Some(run) = dropped {
+            self.window_no_longer_wanted(&run);
+            if self.world.open_vendor.is_some() {
+                self.close_vendor();
+            }
+        }
         let mode = self.grow_mode(now, &cfg);
         // A run the vendoring panel is driving is the panel's to step,
         // and has the tick whether or not town runs are on: the
@@ -4470,7 +4610,12 @@ impl Client {
                 st.run = Some(Run {
                     vendor: vendor.clone(),
                     at,
-                    phase: Phase::Opening { guid, tries: 1 },
+                    phase: Phase::Opening {
+                        guid,
+                        tries: 1,
+                        busy: None,
+                        asked_over: 0,
+                    },
                     since: now,
                     last_sell: None,
                     town: at,
@@ -4538,11 +4683,57 @@ impl Client {
     /// town is not a counter at hand.
     fn open_counter_at_hand(&self) -> Option<(u32, String, Vec2)> {
         let guid = self.world.open_vendor.as_ref()?.vendor;
+        let (name, at) = self.counter_in_reach(guid)?;
+        Some((guid, name, at))
+    }
+
+    /// The counter `guid` when the character is still near enough to
+    /// trade at it: its name and where it stands.
+    fn counter_in_reach(&self, guid: u32) -> Option<(String, Vec2)> {
         let me = self.player.as_ref()?.world_position();
         let o = self.world.objects.get(&guid)?;
         let p = o.world_pos()?;
         let at = Vec2::new(p.x, p.y);
-        (at.distance(Vec2::new(me.x, me.y)) <= VENDOR_REACH).then(|| (guid, o.name.clone(), at))
+        (at.distance(Vec2::new(me.x, me.y)) <= VENDOR_REACH).then(|| (o.name.clone(), at))
+    }
+
+    /// The counter the character stands at, by name: one it has asked
+    /// for its window (see [`counter_asked`]) and is still near enough
+    /// to trade at. The reach is what makes it a counter *at hand*. A
+    /// run remembers its counter through a death, and a window is ours
+    /// and closes only when we close it, so read off those alone a
+    /// character waking at the lifestone, or one that walked off from
+    /// a window it opened by hand, stood at a counter for the rest of
+    /// the session -- and every buff waited for it.
+    pub(crate) fn counter_at_hand(&self) -> Option<String> {
+        let phase = self.autoplay.growth.run.as_ref().map(|r| &r.phase);
+        let window = self.world.open_vendor.as_ref().map(|v| v.vendor);
+        let guid = counter_asked(phase, window)?;
+        self.counter_in_reach(guid).map(|(name, _)| name)
+    }
+
+    /// The character has died at a counter: it wakes at the lifestone,
+    /// and the visit is over. A run past its walk is stopped -- it
+    /// cannot go on from there, and autoplay sets off again when the
+    /// need still stands -- and a window, the run's or the player's
+    /// own, is closed: the server keeps none and a dead character
+    /// trades at nothing. Left as they were, the run stood at its
+    /// counter through the death and the buffs waited for it, while
+    /// recovery, which puts the buffs back before the walk to the
+    /// corpse, waited on the buffs.
+    pub(crate) fn counter_left_behind(&mut self, now: Instant) {
+        let past_the_walk = self
+            .autoplay
+            .growth
+            .run
+            .as_ref()
+            .is_some_and(|r| !matches!(r.phase, Phase::Going));
+        if past_the_walk {
+            self.town_run_stop(now);
+        }
+        if self.world.open_vendor.is_some() {
+            self.close_vendor();
+        }
     }
 
     /// One turn of the run in progress, from the vendoring panel: the
@@ -4650,11 +4841,21 @@ impl Client {
                     format!("going to {}{}", run.vendor, away.unwrap_or_default()),
                 )
             }
-            Phase::Opening { tries, .. } => (
+            Phase::Opening {
+                tries, busy: None, ..
+            } => (
                 "Opening",
                 None,
                 format!(
                     "waiting for {} to open its window (try {tries})",
+                    run.vendor
+                ),
+            ),
+            Phase::Opening { busy: Some(_), .. } => (
+                "Opening",
+                None,
+                format!(
+                    "{} turned the Use away while a cast was in the air; asking again once it lands",
                     run.vendor
                 ),
             ),
@@ -4828,11 +5029,37 @@ impl Client {
                                 return Turn::Acted;
                             }
                         }
+                        // A cast of ours still in the air -- a
+                        // protection put back on the walk in, a heal
+                        // -- lands before the counter is asked. The
+                        // buffs wait once the Use is out (see
+                        // `Client::counter_holding_casts`), but a Use
+                        // thrown over a cast already going up meets
+                        // its recoil as often as not, and is turned
+                        // away for it (see `on_opening`): a second's
+                        // wait here against a re-ask three seconds
+                        // later.
+                        if self.autoplay.cast_in_flight(now) {
+                            self.autoplay.say(
+                                Doing::Shopping,
+                                format!(
+                                    "waiting for the cast to land before talking to {}",
+                                    run.vendor
+                                ),
+                            );
+                            self.autoplay.growth.run = Some(run);
+                            return Turn::Waited;
+                        }
                         if self.follow.take().is_some() {
                             self.steering.reset();
                         }
                         self.use_object(guid);
-                        run.phase = Phase::Opening { guid, tries: 1 };
+                        run.phase = Phase::Opening {
+                            guid,
+                            tries: 1,
+                            busy: None,
+                            asked_over: 0,
+                        };
                         run.since = now;
                         self.autoplay
                             .say(Doing::Shopping, format!("talking to {}", run.vendor));
@@ -4848,55 +5075,104 @@ impl Client {
                     }
                 }
             }
-            Phase::Opening { guid, tries } => {
+            Phase::Opening {
+                guid,
+                tries,
+                busy,
+                asked_over,
+            } => {
                 let open = self
                     .world
                     .open_vendor
                     .as_ref()
                     .is_some_and(|v| v.vendor == guid);
-                if open {
-                    // Appraise what might be sold, so weapons can be
-                    // judged.
-                    let candidates: Vec<u32> = self
-                        .world
-                        .inventory()
-                        .filter(|o| !o.wielder.is_some())
-                        .filter(|o| o.value > 0)
-                        .filter(|o| !self.appraisals.contains_key(&o.guid))
-                        .map(|o| o.guid)
-                        .collect();
-                    let n = self.appraise_many(candidates);
-                    run.phase = Phase::Appraising;
-                    run.since = now;
-                    self.autoplay.say(
-                        Doing::Shopping,
-                        format!("at {}; looking over {n} item(s)", run.vendor),
-                    );
-                    self.autoplay.growth.run = Some(run);
-                    return Turn::Acted;
-                }
-                if elapsed > VENDOR_OPEN_TIMEOUT {
-                    if tries < 2 {
+                // A swing in the air is not ours to wait out: ACE is
+                // never busy for one (`IsBusy` is set by casts, uses
+                // and the like, never in `Player_Melee`), so the
+                // counter did not turn the Use away for it -- and a
+                // swing's answer can go missing (see
+                // `attack_unanswered`). Read raw, one lost AttackDone
+                // parked the run here with no clock at all.
+                let ours_in_flight = self.autoplay.cast_in_flight(now);
+                let next = on_opening(
+                    open,
+                    busy.map(|t| now.saturating_duration_since(t)),
+                    ours_in_flight,
+                    asked_over,
+                    elapsed,
+                    tries,
+                );
+                match next {
+                    OnOpening::Opened => {
+                        // Appraise what might be sold, so weapons can
+                        // be judged.
+                        let candidates: Vec<u32> = self
+                            .world
+                            .inventory()
+                            .filter(|o| !o.wielder.is_some())
+                            .filter(|o| o.value > 0)
+                            .filter(|o| !self.appraisals.contains_key(&o.guid))
+                            .map(|o| o.guid)
+                            .collect();
+                        let n = self.appraise_many(candidates);
+                        run.phase = Phase::Appraising;
+                        run.since = now;
+                        self.autoplay.say(
+                            Doing::Shopping,
+                            format!("at {}; looking over {n} item(s)", run.vendor),
+                        );
+                        self.autoplay.growth.run = Some(run);
+                        Turn::Acted
+                    }
+                    OnOpening::AskOver => {
+                        self.use_object(guid);
+                        run.phase = Phase::Opening {
+                            guid,
+                            tries,
+                            busy: None,
+                            asked_over: asked_over + 1,
+                        };
+                        // The counter's time starts over: the wait so
+                        // far was ours.
+                        run.since = now;
+                        self.autoplay.note(
+                            format!("asking {} again now the cast has landed", run.vendor),
+                            now,
+                        );
+                        self.autoplay.growth.run = Some(run);
+                        Turn::Acted
+                    }
+                    OnOpening::AskAgain => {
                         self.use_object(guid);
                         run.phase = Phase::Opening {
                             guid,
                             tries: tries + 1,
+                            busy: None,
+                            asked_over,
                         };
                         run.since = now;
                         self.autoplay.growth.run = Some(run);
-                        return Turn::Acted;
+                        Turn::Acted
                     }
-                    self.autoplay
-                        .note(format!("{} would not trade", run.vendor), now);
-                    return Turn::after_stop(self.grow_run_next(
-                        run,
-                        now,
-                        cfg,
-                        Some("would not trade"),
-                    ));
+                    OnOpening::GiveUp => {
+                        self.autoplay
+                            .note(format!("{} would not trade", run.vendor), now);
+                        Turn::after_stop(self.grow_run_next(run, now, cfg, Some("would not trade")))
+                    }
+                    OnOpening::Wait => {
+                        if busy.is_some() {
+                            self.autoplay.say(
+                                Doing::Shopping,
+                                format!(
+                                    "{} turned the Use away while a cast was in the air; asking again once it lands",
+                                    run.vendor
+                                ),
+                            );
+                        }
+                        self.autoplay.growth.run = Some(run);
+                        Turn::Waited
+                    }
                 }
-                self.autoplay.growth.run = Some(run);
-                Turn::Waited
             }
             Phase::Appraising => {
                 let waiting = self
@@ -7814,6 +8090,8 @@ mod tests {
         run.phase = Phase::Opening {
             guid: 0x8000_0001,
             tries: 1,
+            busy: None,
+            asked_over: 0,
         };
         c.autoplay.growth.run = Some(run);
         assert_eq!(c.grow_run_step(now, &cfg), Turn::Waited);
@@ -7927,6 +8205,8 @@ mod tests {
         run.phase = Phase::Opening {
             guid: 0x8000_0001,
             tries: 1,
+            busy: None,
+            asked_over: 0,
         };
         c.autoplay.growth.run = Some(run);
         c.autoplay.growth.by_hand = true;
@@ -8058,6 +8338,8 @@ mod tests {
             run.phase = Phase::Opening {
                 guid: rakk,
                 tries: 1,
+                busy: None,
+                asked_over: 0,
             };
             c.autoplay.growth.run = Some(run);
         };
@@ -9727,5 +10009,732 @@ mod tests {
         assert_eq!(run.reason, "+Brynith's pack is full");
         assert_eq!(run.errand, Errand::Sell);
         assert_eq!(run.vendor, "Archmage Cindrue");
+    }
+
+    #[test]
+    fn a_use_turned_away_for_our_own_cast_is_sent_over_not_given_up() {
+        use OnOpening::*;
+        let (open, shut) = (true, false);
+        let (flying, landed) = (true, false);
+        let soon = Duration::from_secs(1);
+        let long = VENDOR_OPEN_TIMEOUT + Duration::from_secs(1);
+        // An open window ends the wait whatever else is going on.
+        assert_eq!(on_opening(open, Some(soon), flying, 0, long, 2), Opened);
+        // Turned away as busy: wait for our own cast, then a cast's
+        // length more (the counter's UseDone frees the slot early), then
+        // ask over -- and the retry is not spent, however long it took.
+        assert_eq!(on_opening(shut, Some(soon), flying, 0, soon, 1), Wait);
+        assert_eq!(on_opening(shut, Some(soon), landed, 0, soon, 1), Wait);
+        assert_eq!(on_opening(shut, Some(soon), flying, 0, long, 1), Wait);
+        assert_eq!(
+            on_opening(shut, Some(BUSY_REASK), landed, 0, long, 1),
+            AskOver
+        );
+        assert_eq!(
+            on_opening(shut, Some(BUSY_REASK), landed, 0, long, 2),
+            AskOver
+        );
+        // A counter that keeps saying busy with nothing of ours in the
+        // air is taken at its word: the ordinary silence rules apply.
+        assert_eq!(
+            on_opening(shut, Some(BUSY_REASK), landed, BUSY_ASKS, soon, 1),
+            Wait
+        );
+        assert_eq!(
+            on_opening(shut, Some(BUSY_REASK), landed, BUSY_ASKS, long, 1),
+            AskAgain
+        );
+        assert_eq!(
+            on_opening(shut, Some(BUSY_REASK), landed, BUSY_ASKS, long, 2),
+            GiveUp
+        );
+        // Silence: one more ask, then the counter is given up.
+        assert_eq!(on_opening(shut, None, landed, 0, soon, 1), Wait);
+        assert_eq!(on_opening(shut, None, landed, 0, long, 1), AskAgain);
+        assert_eq!(on_opening(shut, None, landed, 0, long, 2), GiveUp);
+    }
+
+    #[test]
+    fn the_counter_is_stood_at_from_the_use_to_the_window_closing() {
+        let opening = Phase::Opening {
+            guid: 1,
+            tries: 1,
+            busy: None,
+            asked_over: 0,
+        };
+        let selling = Phase::Selling { sent: Vec::new() };
+        assert_eq!(
+            counter_asked(Some(&Phase::Going), Some(2)),
+            None,
+            "still walking: a window open now is one left over"
+        );
+        assert_eq!(counter_asked(Some(&opening), None), Some(1));
+        assert_eq!(counter_asked(Some(&Phase::Appraising), Some(1)), Some(1));
+        assert_eq!(counter_asked(Some(&selling), Some(1)), Some(1));
+        assert_eq!(
+            counter_asked(None, Some(2)),
+            Some(2),
+            "a window open by hand"
+        );
+        assert_eq!(counter_asked(None, None), None);
+    }
+
+    /// A weenie error as the server sends it, as a game event body.
+    fn weenie_error(code: u32) -> Vec<u8> {
+        let mut w = ac_net::wire::Writer::new();
+        w.u32(0x5000_0001)
+            .u32(0)
+            .u32(ac_net::messages::event::WEENIE_ERROR)
+            .u32(code);
+        w.finish()
+    }
+
+    /// A counter in view at `at`.
+    fn a_counter(c: &mut Client, guid: u32, name: &str, at: glam::Vec3) {
+        let mut o = ac_world::WorldObject {
+            guid,
+            name: name.into(),
+            item_type: item_type::CREATURE,
+            object_desc_flags: object_desc_flags::VENDOR,
+            ..Default::default()
+        };
+        o.position = Some(ac_world::object::Position {
+            cell: 0xA9B4_0019,
+            local: at,
+            rotation: glam::Quat::IDENTITY,
+        });
+        c.world.objects.insert(guid, o);
+    }
+
+    #[test]
+    fn a_counter_that_said_busy_is_asked_again_once_the_cast_lands() {
+        // +Vesperi's Use of Archmage Cindrue went out with a protection
+        // still going up, ACE turned it away as YoureTooBusy, and the
+        // run read the counter's silence as a counter that would not
+        // trade: one retry spent on the same refusal, then the counter
+        // held off as no use, the peas still in the pack.
+        let holtburg = 0xA9B4_0019;
+        let here = glam::Vec3::new(84.0, 7.1, 94.0);
+        let Some(mut c) = standing_at(holtburg, here) else {
+            return;
+        };
+        c.world.player_guid = Some(0x5000_0001);
+        let me = c.player.as_ref().unwrap().world_position();
+        let cfg = Growth::default();
+        let now = Instant::now();
+        let cindrue = 0x7a9b_4033;
+        a_counter(&mut c, cindrue, "Archmage Cindrue", here);
+        let mut run = run_to(Vec2::new(me.x, me.y), now);
+        run.vendor = "Archmage Cindrue".into();
+        run.phase = Phase::Opening {
+            guid: cindrue,
+            tries: 1,
+            busy: None,
+            asked_over: 0,
+        };
+        c.autoplay.growth.run = Some(run);
+        // A cast is in the air, and the counter says so.
+        c.autoplay.cast_sent = Some(now);
+        c.chat_message(
+            ac_net::messages::opcode::GAME_EVENT,
+            &weenie_error(crate::YOURE_TOO_BUSY),
+        );
+        assert!(
+            matches!(
+                c.autoplay.growth.run.as_ref().unwrap().phase,
+                Phase::Opening { busy: Some(_), .. }
+            ),
+            "the refusal was not heard as ours"
+        );
+        let sent = c.session.actions_sent();
+        assert_eq!(c.grow_run_step(now, &cfg), Turn::Waited);
+        assert!(
+            c.town_run_view(now)
+                .unwrap()
+                .saying
+                .contains("turned the Use away"),
+            "the wait is not said"
+        );
+        // The counter's own UseDone frees the slot a moment after the
+        // refusal, with the cast still going up: the ask waits a cast's
+        // length after the refusal as well as for the slot.
+        c.autoplay.cast_sent = None;
+        let soon = now + Duration::from_secs(1);
+        assert_eq!(c.grow_run_step(soon, &cfg), Turn::Waited);
+        assert_eq!(
+            c.session.actions_sent(),
+            sent,
+            "the Use went out into the cast"
+        );
+        // Long past the counter's time, with a cast in the air again:
+        // no retry is spent and nothing is given up.
+        let late = now + VENDOR_OPEN_TIMEOUT + Duration::from_secs(1);
+        c.autoplay.cast_sent = Some(late);
+        assert_eq!(c.grow_run_step(late, &cfg), Turn::Waited);
+        assert_eq!(
+            c.session.actions_sent(),
+            sent,
+            "the Use went out into the cast"
+        );
+        // The cast lands: the Use goes out again.
+        c.autoplay.cast_sent = None;
+        let landed = late;
+        assert_eq!(c.grow_run_step(landed, &cfg), Turn::Acted);
+        assert_eq!(
+            c.session.actions_sent(),
+            sent + 1,
+            "the Use was not sent over"
+        );
+        let run = c.autoplay.growth.run.as_ref().expect("the run goes on");
+        assert!(
+            matches!(
+                run.phase,
+                Phase::Opening {
+                    tries: 1,
+                    busy: None,
+                    asked_over: 1,
+                    ..
+                }
+            ),
+            "the retry was spent, or the refusal kept: {:?}",
+            run.phase
+        );
+        assert_eq!(run.since, landed, "the counter's time did not start over");
+        assert!(
+            !c.autoplay.growth.skip_vendors.held(&spot(run.at), landed),
+            "the counter was held off as no use"
+        );
+        // Silence from here on is the counter's own: the ordinary
+        // retry, then given up.
+        let quiet = landed + VENDOR_OPEN_TIMEOUT + Duration::from_secs(1);
+        assert_eq!(c.grow_run_step(quiet, &cfg), Turn::Acted);
+        assert!(matches!(
+            c.autoplay.growth.run.as_ref().unwrap().phase,
+            Phase::Opening { tries: 2, .. }
+        ));
+        let quieter = quiet + VENDOR_OPEN_TIMEOUT + Duration::from_secs(1);
+        c.grow_run_step(quieter, &cfg);
+        assert!(
+            c.autoplay
+                .growth
+                .skip_vendors
+                .held(&spot(Vec2::new(me.x, me.y)), quieter),
+            "a counter that never answered was not held off"
+        );
+    }
+
+    /// A caster standing in Holtburg with a wand in hand, the
+    /// components, the skill and the mana for each of `spells`, and
+    /// the server's clock known. The spells, in the order asked for.
+    fn a_caster_knowing(now: Instant, spells: &[&str]) -> Option<(Client, Vec<u32>)> {
+        let holtburg = 0xA9B4_0019;
+        let here = glam::Vec3::new(84.0, 7.1, 94.0);
+        let mut c = standing_at(holtburg, here)?;
+        let me = 0x5000_0001;
+        c.world.player_guid = Some(me);
+        // The server's clock, without which nothing is ever due.
+        let clock = ac_net::packet::build(
+            ac_net::packet::Header {
+                flags: ac_net::packet::flags::TIME_SYNC,
+                ..Default::default()
+            },
+            &1000.0f64.to_le_bytes(),
+            &[],
+            0,
+        );
+        c.session.receive(&clock, now);
+        assert!(c.session.server_time().is_some(), "the clock was not taken");
+        let table = c.assets.spell_table().ok()?;
+        let mut known = Vec::new();
+        for name in spells {
+            let (spell, sp) = table
+                .spells
+                .iter()
+                .find(|(_, sp)| sp.name == *name)
+                .map(|(id, sp)| (*id, sp.clone()))
+                .unwrap_or_else(|| panic!("the spell table knows {name}"));
+            c.world.stats.spells.push(spell);
+            let skill = Client::school_skill(sp.school).expect("a school with a skill");
+            if !c.world.stats.skills.iter().any(|s| s.id == skill) {
+                c.world.stats.skills.push(ac_world::stats::Skill {
+                    id: skill,
+                    advancement: ac_world::stats::sac::TRAINED,
+                    init_level: 300,
+                    ..Default::default()
+                });
+            }
+            known.push(spell);
+        }
+        c.world.stats.vitals[2].current = 500;
+        const WAND: u32 = 0x8000_0102;
+        c.world.objects.insert(
+            WAND,
+            ac_world::WorldObject {
+                guid: WAND,
+                name: "Training Wand".into(),
+                item_type: item_type::CASTER,
+                valid_locations: equip::HELD,
+                wielder: Some(me),
+                ..Default::default()
+            },
+        );
+        let mapper = c.assets.spell_component_ids().ok()?;
+        let mut guid = 0x8000_0200;
+        for spell in &known {
+            for component in c.current_formula(*spell) {
+                let wcid = mapper
+                    .component_wcid(component)
+                    .expect("a component with a weenie");
+                c.world.objects.insert(
+                    guid,
+                    ac_world::WorldObject {
+                        guid,
+                        name: format!("Component {component}"),
+                        weenie_class_id: wcid,
+                        stack_size: 20,
+                        container: Some(me),
+                        ..Default::default()
+                    },
+                );
+                guid += 1;
+            }
+        }
+        for spell in &known {
+            assert!(
+                matches!(c.can_cast(*spell), crate::magic::CastCheck::Ok),
+                "the caster cannot cast {spell}: {:?}",
+                c.can_cast(*spell)
+            );
+        }
+        Some((c, known))
+    }
+
+    /// A caster standing in Holtburg with a wand in hand, the
+    /// components and mana for Blade Protection Self, the server's
+    /// clock known and no protection up: one buff due, urgent or not.
+    fn a_caster_with_a_buff_due(now: Instant) -> Option<(Client, u32)> {
+        let (mut c, known) = a_caster_knowing(now, &["Blade Protection Self I"])?;
+        c.autoplay.config.buffs.auto = false;
+        c.autoplay.config.buffs.spells = vec!["Blade Protection Self".into()];
+        Some((c, known[0]))
+    }
+
+    /// A run standing at Archmage Cindrue's counter, the Use just
+    /// gone out: the counter in view where the character stands, and
+    /// the run in `phase` there.
+    fn a_run_at_cindrue(c: &mut Client, phase: Phase, now: Instant) -> u32 {
+        let me = c.player.as_ref().unwrap().world_position();
+        let cindrue = 0x7a9b_4033;
+        a_counter(
+            c,
+            cindrue,
+            "Archmage Cindrue",
+            glam::Vec3::new(84.0, 7.1, 94.0),
+        );
+        let mut run = run_to(Vec2::new(me.x, me.y), now);
+        run.vendor = "Archmage Cindrue".into();
+        run.phase = phase;
+        c.autoplay.growth.run = Some(run);
+        cindrue
+    }
+
+    /// The Opening phase as a run enters it.
+    fn opening(guid: u32) -> Phase {
+        Phase::Opening {
+            guid,
+            tries: 1,
+            busy: None,
+            asked_over: 0,
+        }
+    }
+
+    #[test]
+    fn buffs_wait_at_the_counter_and_go_up_on_the_walk_and_after() {
+        // +Vesperi arrived at Archmage Cindrue with eight protections
+        // lapsing and cast them one after another from the counter; the
+        // buff pass held for a journey and for a fight, and standing at
+        // a counter was neither.
+        let now = Instant::now();
+        let Some((mut c, _)) = a_caster_with_a_buff_due(now) else {
+            return;
+        };
+        let me = c.player.as_ref().unwrap().world_position();
+        let cindrue = 0x7a9b_4033;
+        a_counter(
+            &mut c,
+            cindrue,
+            "Archmage Cindrue",
+            glam::Vec3::new(84.0, 7.1, 94.0),
+        );
+        // On the walk to town the urgent pass casts as it always did.
+        let mut run = run_to(Vec2::new(me.x, me.y), now);
+        run.vendor = "Archmage Cindrue".into();
+        c.autoplay.growth.run = Some(run.clone());
+        let sent = c.session.actions_sent();
+        assert!(c.autoplay_buff(now, true), "no cast on the walk");
+        assert!(c.session.actions_sent() > sent, "the cast did not go out");
+        assert!(!c.autoplay.buffs_held_at_counter);
+        // At the counter, from the Use going out, neither pass casts.
+        let at_counter = |phase: Phase| {
+            let mut run = run.clone();
+            run.phase = phase;
+            run
+        };
+        let mut then = now;
+        for phase in [
+            Phase::Opening {
+                guid: cindrue,
+                tries: 1,
+                busy: None,
+                asked_over: 0,
+            },
+            Phase::Appraising,
+            Phase::Selling { sent: Vec::new() },
+        ] {
+            then += Duration::from_secs(2);
+            c.autoplay.growth.run = Some(at_counter(phase.clone()));
+            // The window is open once the counter has answered the Use.
+            c.world.open_vendor =
+                (!matches!(phase, Phase::Opening { .. })).then(|| window_of(cindrue));
+            c.autoplay.cast_sent = None;
+            let sent = c.session.actions_sent();
+            assert!(!c.autoplay_buff(then, true), "an urgent cast at {phase:?}");
+            assert!(!c.autoplay_buff(then, false), "a cast at {phase:?}");
+            assert_eq!(
+                c.session.actions_sent(),
+                sent,
+                "something went out at {phase:?}"
+            );
+            assert!(c.autoplay.buffs_held_at_counter, "the hold was not said");
+        }
+        // A window the player opened by hand holds the pass the same way.
+        c.autoplay.growth.run = None;
+        c.world.open_vendor = Some(window_of(cindrue));
+        then += Duration::from_secs(2);
+        assert!(!c.autoplay_buff(then, true), "a cast into an open window");
+        // The window closed, the buff goes up.
+        c.world.open_vendor = None;
+        then += Duration::from_secs(2);
+        let sent = c.session.actions_sent();
+        assert!(
+            c.autoplay_buff(then, true),
+            "no cast once the window closed"
+        );
+        assert!(c.session.actions_sent() > sent, "the cast did not go out");
+        assert!(
+            !c.autoplay.buffs_held_at_counter,
+            "the hold outlived the counter"
+        );
+    }
+
+    #[test]
+    fn urgent_buffs_go_up_in_a_fight_at_the_counter() {
+        // A wandering monster catches the caster at the counter. The
+        // fight outranks the run, which stays in its counter phase
+        // throughout, and a hold that read the phase alone kept every
+        // protection down for a window nobody was trading at until
+        // the fight was over.
+        let now = Instant::now();
+        let Some((mut c, _)) = a_caster_with_a_buff_due(now) else {
+            return;
+        };
+        let cindrue = 0x7a9b_4033;
+        a_run_at_cindrue(&mut c, opening(cindrue), now);
+        assert!(
+            !c.autoplay_buff(now, true),
+            "a cast at the counter with no fight on"
+        );
+        // Something is hitting the character.
+        c.autoplay.last_hit_us = Some(Instant::now());
+        let sent = c.session.actions_sent();
+        assert!(
+            c.autoplay_buff(now, true),
+            "the urgent buff waited for the counter through the fight"
+        );
+        assert!(c.session.actions_sent() > sent, "the cast did not go out");
+    }
+
+    #[test]
+    fn a_window_left_open_from_across_the_town_holds_no_buff() {
+        // Nothing closes a window but this client, since the server
+        // keeps none. One the player opened and walked away from read
+        // as a counter at hand for the rest of the session, and no
+        // buff went up again.
+        let now = Instant::now();
+        let Some((mut c, _)) = a_caster_with_a_buff_due(now) else {
+            return;
+        };
+        let cindrue = 0x7a9b_4033;
+        // The counter is a hundred metres off.
+        a_counter(
+            &mut c,
+            cindrue,
+            "Archmage Cindrue",
+            glam::Vec3::new(184.0, 7.1, 94.0),
+        );
+        c.world.open_vendor = Some(window_of(cindrue));
+        assert_eq!(c.counter_at_hand(), None);
+        let sent = c.session.actions_sent();
+        assert!(
+            c.autoplay_buff(now, true),
+            "held for a window left open across the town"
+        );
+        assert!(c.session.actions_sent() > sent, "the cast did not go out");
+    }
+
+    #[test]
+    fn town_runs_switched_off_at_the_counter_close_its_window() {
+        // A run let go for town runs being switched off left its
+        // window open, and with town runs off no later run would ever
+        // close it: a counter at hand for the rest of the session.
+        let now = Instant::now();
+        let Some(mut c) = standing_at(0xA9B4_0019, glam::Vec3::new(84.0, 7.1, 94.0)) else {
+            return;
+        };
+        c.world.player_guid = Some(0x5000_0001);
+        let cindrue = a_run_at_cindrue(&mut c, Phase::Selling { sent: Vec::new() }, now);
+        c.world.open_vendor = Some(window_of(cindrue));
+        assert_eq!(c.counter_at_hand().as_deref(), Some("Archmage Cindrue"));
+        c.autoplay.config.growth.town_runs = false;
+        c.autoplay_grow(now);
+        assert!(
+            !c.autoplay.growth.town_run_under_way(),
+            "the run was not let go"
+        );
+        assert!(
+            c.world.open_vendor.is_none(),
+            "the run's window was left open"
+        );
+        assert_eq!(c.counter_at_hand(), None, "still at a counter");
+    }
+
+    #[test]
+    fn dying_at_the_counter_ends_the_visit() {
+        // The run stood at its counter through the death, the window
+        // stayed open, and recovery -- which puts the buffs back before
+        // the walk to the corpse -- waited on buffs that waited on the
+        // counter.
+        let now = Instant::now();
+        let Some(mut c) = standing_at(0xA9B4_0019, glam::Vec3::new(84.0, 7.1, 94.0)) else {
+            return;
+        };
+        c.world.player_guid = Some(0x5000_0001);
+        let cindrue = a_run_at_cindrue(&mut c, Phase::Selling { sent: Vec::new() }, now);
+        c.world.open_vendor = Some(window_of(cindrue));
+        // Dead: health at zero on a sheet with a name and an Endurance
+        // to draw a maximum from.
+        c.world.stats.name = "Vesperi".into();
+        c.world.stats.attributes[1].base = 100;
+        c.world.stats.vitals[0].current = 0;
+        assert!(c.is_dead(), "not dead");
+        c.autoplay_recover(now);
+        assert!(
+            !c.autoplay.growth.town_run_under_way(),
+            "the run stood at the counter through the death"
+        );
+        assert!(c.world.open_vendor.is_none(), "the window was left open");
+        assert_eq!(c.counter_at_hand(), None);
+        // A run still on its walk is kept: the journey is resumed after.
+        let me = c.player.as_ref().unwrap().world_position();
+        c.autoplay.growth.run = Some(run_to(Vec2::new(me.x, me.y), now));
+        c.counter_left_behind(now);
+        assert!(
+            c.autoplay.growth.town_run_under_way(),
+            "a run on its walk was stopped for a death"
+        );
+    }
+
+    #[test]
+    fn vitals_wait_at_the_counter() {
+        // Only the buffs were held. The vitals pass runs every tick
+        // and casts the moment the last cast lands, so a Revitalize
+        // thrown from the counter never left it a gap to open its
+        // window in: the measured failure, one reflex over.
+        let now = Instant::now();
+        let Some((mut c, _)) = a_caster_knowing(now, &["Revitalize Self I"]) else {
+            return;
+        };
+        c.autoplay.config.survive.manage_mana = true;
+        // The stamina is gone.
+        c.world.stats.vitals[1].current = 0;
+        // Away from any counter the top-up goes out.
+        let sent = c.session.actions_sent();
+        assert!(
+            c.autoplay_vitals(now),
+            "no Revitalize with the stamina gone"
+        );
+        assert!(c.session.actions_sent() > sent, "the cast did not go out");
+        c.autoplay.cast_sent = None;
+        // At the counter it waits.
+        let cindrue = 0x7a9b_4033;
+        a_run_at_cindrue(&mut c, opening(cindrue), now);
+        let sent = c.session.actions_sent();
+        assert!(!c.autoplay_vitals(now), "a top-up cast at the counter");
+        assert_eq!(c.session.actions_sent(), sent, "something went out");
+        // Unless a fight has come to it there.
+        c.autoplay.last_hit_us = Some(Instant::now());
+        assert!(
+            c.autoplay_vitals(now),
+            "the top-up waited for the counter through a fight"
+        );
+    }
+
+    #[test]
+    fn the_use_waits_for_a_cast_on_the_walk_in_to_land() {
+        // The first Use went out the moment the character stood at
+        // the counter, whatever was in the air: a protection put back
+        // on the walk in met it with its recoil, and the counter turned
+        // the Use away for it.
+        let now = Instant::now();
+        let Some(mut c) = standing_at(0xA9B4_0019, glam::Vec3::new(84.0, 7.1, 94.0)) else {
+            return;
+        };
+        c.world.player_guid = Some(0x5000_0001);
+        let cfg = Growth::default();
+        a_run_at_cindrue(&mut c, Phase::Going, now);
+        c.autoplay.cast_sent = Some(now);
+        let sent = c.session.actions_sent();
+        assert_eq!(c.grow_run_step(now, &cfg), Turn::Waited);
+        assert_eq!(
+            c.session.actions_sent(),
+            sent,
+            "the Use went out into the cast"
+        );
+        assert!(matches!(
+            c.autoplay.growth.run.as_ref().unwrap().phase,
+            Phase::Going
+        ));
+        // The cast lands: the counter is asked.
+        c.autoplay.cast_sent = None;
+        assert_eq!(c.grow_run_step(now, &cfg), Turn::Acted);
+        assert_eq!(c.session.actions_sent(), sent + 1, "the Use was not sent");
+        assert!(matches!(
+            c.autoplay.growth.run.as_ref().unwrap().phase,
+            Phase::Opening { .. }
+        ));
+    }
+
+    #[test]
+    fn a_refusal_past_the_busy_asks_is_the_counters_own() {
+        // Past the asks a busy refusal earns the run is on the ordinary
+        // clock, but a later refusal was still kept, and the status
+        // promised an ask "once the cast lands" that was never coming.
+        let now = Instant::now();
+        let Some(mut c) = standing_at(0xA9B4_0019, glam::Vec3::new(84.0, 7.1, 94.0)) else {
+            return;
+        };
+        c.world.player_guid = Some(0x5000_0001);
+        let cindrue = 0x7a9b_4033;
+        a_run_at_cindrue(
+            &mut c,
+            Phase::Opening {
+                guid: cindrue,
+                tries: 1,
+                busy: None,
+                asked_over: BUSY_ASKS,
+            },
+            now,
+        );
+        c.autoplay.growth.counter_said_busy(now);
+        assert!(
+            matches!(
+                c.autoplay.growth.run.as_ref().unwrap().phase,
+                Phase::Opening { busy: None, .. }
+            ),
+            "a refusal past the cap was kept"
+        );
+        let saying = c.town_run_view(now).unwrap().saying;
+        assert!(
+            saying.contains("waiting for"),
+            "the status still promises an ask: {saying}"
+        );
+        // Under the cap it is heard.
+        a_run_at_cindrue(
+            &mut c,
+            Phase::Opening {
+                guid: cindrue,
+                tries: 1,
+                busy: None,
+                asked_over: BUSY_ASKS - 1,
+            },
+            now,
+        );
+        c.autoplay.growth.counter_said_busy(now);
+        assert!(matches!(
+            c.autoplay.growth.run.as_ref().unwrap().phase,
+            Phase::Opening { busy: Some(_), .. }
+        ));
+    }
+
+    #[test]
+    fn a_swing_in_the_air_does_not_hold_the_ask() {
+        // ACE is never busy for a swing, and a swing's answer can go
+        // missing: read raw, one lost AttackDone parked a busy wait in
+        // Opening with no clock at all.
+        let now = Instant::now();
+        let Some(mut c) = standing_at(0xA9B4_0019, glam::Vec3::new(84.0, 7.1, 94.0)) else {
+            return;
+        };
+        c.world.player_guid = Some(0x5000_0001);
+        let cfg = Growth::default();
+        let cindrue = 0x7a9b_4033;
+        a_run_at_cindrue(
+            &mut c,
+            Phase::Opening {
+                guid: cindrue,
+                tries: 1,
+                busy: Some(now),
+                asked_over: 0,
+            },
+            now,
+        );
+        c.attack_pending = true;
+        c.autoplay.cast_sent = None;
+        let sent = c.session.actions_sent();
+        let later = now + BUSY_REASK;
+        assert_eq!(
+            c.grow_run_step(later, &cfg),
+            Turn::Acted,
+            "the ask waited on a swing"
+        );
+        assert_eq!(
+            c.session.actions_sent(),
+            sent + 1,
+            "the Use was not sent over"
+        );
+        assert!(matches!(
+            c.autoplay.growth.run.as_ref().unwrap().phase,
+            Phase::Opening {
+                busy: None,
+                asked_over: 1,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn the_hold_is_let_go_by_a_pass_that_left_early() {
+        // The note's flag was cleared only on the way past the hold. A
+        // pass that turned back before it -- the top-ups, in a fight,
+        // out of combat only -- left the flag set after the counter,
+        // and the next visit's wait went unsaid.
+        let now = Instant::now();
+        let Some((mut c, _)) = a_caster_with_a_buff_due(now) else {
+            return;
+        };
+        let cindrue = 0x7a9b_4033;
+        a_run_at_cindrue(&mut c, opening(cindrue), now);
+        assert!(!c.autoplay_buff(now, true));
+        assert!(c.autoplay.buffs_held_at_counter, "the hold was not said");
+        // Off the counter and in a fight, the top-up pass turns back
+        // at once.
+        c.autoplay.growth.run = None;
+        c.autoplay.config.buffs.out_of_combat_only = true;
+        c.attack_target = Some(0xdead);
+        assert!(!c.autoplay_buff(now, false));
+        assert!(
+            !c.autoplay.buffs_held_at_counter,
+            "the flag outlived the counter"
+        );
     }
 }
