@@ -1502,7 +1502,7 @@ mod tests {
 
     #[test]
     fn a_word_of_its_own_is_not_found_inside_a_longer_one() {
-        // Guards the Starter profile's "peas to sell" rule matching "pea" inside "Spear".
+        // A profile's "item name" is a whole word: Starter's "peas to sell" must not take a Spear.
         assert!(!word_in("Spear", "pea"));
         assert!(!word_in("Pearl", "pea"));
         assert!(word_in("Pea", "pea"));
