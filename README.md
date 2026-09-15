@@ -241,10 +241,11 @@ target). `--log-chat` prints chat lines prefixed with the account;
 `RUST_LOG=info` shows the connection log as well.
 
 Workspace: fourteen library crates under `crates/` (DAT container and
-decoders, scene assembly, wire protocol, world state, navigation, loot,
-vendoring, the game session, plugins, scripting, the cross-process bus,
-audio) and three binaries under `bins/`: `acswarm` (the client, windowed
-or `--headless`), `aclauncher` (launch manager) and `acdat` (DAT CLI).
+decoders, scene assembly, wire protocol, world state, the vocabulary the
+autoplay systems share, navigation, loot, vendoring, the game session,
+plugins, scripting, the cross-process bus, audio) and three binaries
+under `bins/`: `acswarm` (the client, windowed or `--headless`),
+`aclauncher` (launch manager) and `acdat` (DAT CLI).
 [`CLAUDE.md`](CLAUDE.md) has a line per crate, the data flow, and the
 build, test and logging commands.
 
