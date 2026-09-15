@@ -181,6 +181,20 @@ pub struct Growth {
     /// than a walk to a door that will not open. Society membership is
     /// not listed here: the character carries that itself.
     pub gates_open: Vec<String>,
+    /// Loot taken for a counter is reason enough for a run to town on
+    /// its own -- the pack need not be full nor a supply short -- once
+    /// it is worth this much at face value, in pyreals. 0 turns the
+    /// rule off. See [`worth_a_sale_run`].
+    pub sell_run_value: u32,
+    /// The same, once this many things are being carried for a
+    /// counter, whatever they are worth: they are slots as well as
+    /// money. 0 turns the rule off.
+    pub sell_run_count: u32,
+    /// The same, once anything has been carried for a counter this
+    /// long, in seconds, however little it is: one Lead Pea is not
+    /// worth a trip, but it is not worth carrying about all afternoon
+    /// either. 0 turns the rule off.
+    pub sell_run_patience: f32,
 }
 
 impl Default for Growth {
@@ -195,8 +209,106 @@ impl Default for Growth {
             town_runs: true,
             ammo_keep: 250,
             gates_open: Vec::new(),
+            // Five thousand at face is a few thousand in hand at any
+            // counter's rate: minutes of hunting at the levels a
+            // character first carries loot, and worth the minutes the
+            // walk costs. An Iron Pea and a Lead Pea, three thousand
+            // between them, are not -- they go on the count or the
+            // patience.
+            sell_run_value: 5_000,
+            // Eight things for a counter is an armful: slots are going,
+            // and it is well short of the pack filling by itself.
+            sell_run_count: 8,
+            // A quarter of an hour, near twice the least wait between
+            // runs (`RUN_EVERY`): a character with one pea to sell goes
+            // at most once in that while, and is not still carrying it
+            // at dinner.
+            sell_run_patience: 15.0 * 60.0,
         }
     }
+}
+
+/// Whether what the pack holds for a counter is reason enough for a
+/// run to town, and the reason if it is.
+///
+/// A run used to be made for a full pack, a heavy one or a supply run
+/// short, and for nothing else: what the loot rules had tagged for a
+/// counter never came into it, so two peas taken to sell sat in a
+/// roomy pack for ever and the character never went. The ledger says
+/// why each thing was taken; this is where "to sell" is acted on.
+///
+/// `sale` is what the selling rules would let go today (see
+/// [`Client::salables`]), and `carried_for` how long any of it has
+/// been in the pack. Three rules, any one enough: it is worth
+/// `sell_run_value` at face, there are `sell_run_count` things, or it
+/// has been carried for `sell_run_patience`. Each is off at 0.
+///
+/// This is only the reason. The waits between runs and after a futile
+/// one are the caller's ([`Client::grow_town_run`]), which is what
+/// keeps a lone character from wearing a path to town for one pea.
+fn worth_a_sale_run(
+    sale: &[Salable],
+    carried_for: Option<Duration>,
+    cfg: &Growth,
+) -> Option<String> {
+    if sale.is_empty() {
+        return None;
+    }
+    let worth: u32 = sale.iter().fold(0u32, |sum, s| sum.saturating_add(s.value));
+    let count = sale.len() as u32;
+    if cfg.sell_run_value > 0 && worth >= cfg.sell_run_value {
+        return Some(format!(
+            "carrying {worth} pyreals' worth for a counter ({count} thing(s))"
+        ));
+    }
+    if cfg.sell_run_count > 0 && count >= cfg.sell_run_count {
+        return Some(format!("carrying {count} things for a counter"));
+    }
+    if cfg.sell_run_patience > 0.0 {
+        let patience = Duration::from_secs_f32(cfg.sell_run_patience);
+        if let Some(d) = carried_for.filter(|d| *d >= patience) {
+            return Some(format!(
+                "{count} thing(s) for a counter carried {} min",
+                d.as_secs() / 60
+            ));
+        }
+    }
+    None
+}
+
+/// What a run to town is for, which decides which counter it goes to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Errand {
+    /// To buy what the character is short of. A counter is chosen on
+    /// what it stocks; what it pays for the loot carried along is a
+    /// tiebreak, and with nothing on the list the nearest counter will
+    /// do.
+    Buy,
+    /// To sell what is carried: a full or heavy pack, or loot tagged for
+    /// a counter. A counter is chosen on what it pays for that, and one
+    /// that buys none of it is never chosen -- that was the walk to a
+    /// tailor with a pack of peas, and home again with the peas.
+    Sell,
+}
+
+impl Errand {
+    /// Whether a trip with this forecast does what the errand is for.
+    fn served_by(self, look: &Forecast) -> bool {
+        match self {
+            Errand::Buy => look.worth_going(),
+            Errand::Sell => look.selling > 0,
+        }
+    }
+}
+
+/// What the next counter of a run is chosen for, and among which (see
+/// [`Client::pick_vendor`]).
+struct Stop<'a> {
+    errand: Errand,
+    /// No further than this from a way out, once a run is already out.
+    within: Option<f32>,
+    /// The counters this run has already called at, by position.
+    visited: &'a [Vec2],
 }
 
 /// How long a spot with nothing on it is given before the character
@@ -521,6 +633,8 @@ struct Run {
     sold: u32,
     /// Why the run was made.
     reason: String,
+    /// What it is for: to sell, or to buy (see [`Errand`]).
+    errand: Errand,
     /// The vendors already called on this run, by position.
     visited: Vec<Vec2>,
     /// When the walk to this counter was last planned again after
@@ -689,6 +803,13 @@ pub struct State {
     /// once a frame and the answer is usually the same one; this keeps
     /// the log to the moments it changes.
     held_back: String,
+    /// Since when the pack has held loot for a counter, `None` while
+    /// it holds none -- the clock the patience in [`worth_a_sale_run`]
+    /// reads. Read on the frames a run could start, so it starts once
+    /// the waits after the last run are up, and it is put back when a
+    /// run sets off: what a counter would not take is counted afresh
+    /// from then, not carried over into the next run's reason.
+    sale_since: Option<Instant>,
     last_raise: Option<Instant>,
     /// The raise last sent, until the server answers it or it is given up
     /// on.
@@ -1355,14 +1476,50 @@ pub use ac_loot::sale::{never_sell, never_sell_because, never_sell_carried, offe
 /// eighty metres off pay 0.5 and the Arcanum Broker three hundred
 /// metres further on pays 0.95, and ranking on distance alone walked
 /// past the broker every time. Distance settles what is left.
-fn better_counter(a: (&Forecast, f32), b: (&Forecast, f32)) -> std::cmp::Ordering {
+///
+/// That is the order for a trip to buy. A trip to sell turns it round:
+/// what the counter pays for the loot comes first, then how much of
+/// the loot it takes, and what it stocks only settles ties. Ranked the
+/// buying way, a run made to empty a pack of peas went to whichever
+/// counter had the most of the shopping list on its shelf, and the
+/// peas came home.
+fn better_counter(errand: Errand, a: (&Forecast, f32), b: (&Forecast, f32)) -> std::cmp::Ordering {
     let (fa, near_a) = a;
     let (fb, near_b) = b;
-    fb.covers_it()
-        .cmp(&fa.covers_it())
-        .then_with(|| fb.stocks.len().cmp(&fa.stocks.len()))
-        .then_with(|| fb.takings.cmp(&fa.takings))
-        .then_with(|| near_a.total_cmp(&near_b))
+    let to_buy = || {
+        fb.covers_it()
+            .cmp(&fa.covers_it())
+            .then_with(|| fb.stocks.len().cmp(&fa.stocks.len()))
+            .then_with(|| fb.takings.cmp(&fa.takings))
+    };
+    match errand {
+        Errand::Buy => to_buy(),
+        Errand::Sell => fb
+            .takings
+            .cmp(&fa.takings)
+            .then_with(|| fb.selling.cmp(&fa.selling))
+            .then_with(to_buy),
+    }
+    .then_with(|| near_a.total_cmp(&near_b))
+}
+
+/// The best of these counters for the errand, each with how far off it
+/// is, and the forecast it was chosen on; `None` when none of them
+/// serves it. The heart of [`Client::pick_vendor`], with the walking
+/// of the shop list and the character's own circumstances left to it,
+/// so that the choice can be tested on its own.
+fn choose_counter<'a>(
+    counters: impl Iterator<Item = (&'a ac_world::shops::Shop, f32)>,
+    errand: Errand,
+    wants: &[(&Need, String)],
+    purse: u32,
+    salables: &[Salable],
+) -> Option<(&'a ac_world::shops::Shop, Forecast)> {
+    counters
+        .map(|(s, reach)| (s, reach, forecast(s, wants, purse, salables)))
+        .filter(|(_, _, f)| errand.served_by(f))
+        .min_by(|(_, ra, fa), (_, rb, fb)| better_counter(errand, (fa, *ra), (fb, *rb)))
+        .map(|(s, _, f)| (s, f))
 }
 
 /// What the sale decision needs, gathered once (see
@@ -2961,15 +3118,25 @@ impl Client {
     ///
     /// Comes back with the forecast it was chosen on, so the caller can
     /// decide whether to set off at all and can say why.
+    ///
+    /// `stop` says what the trip is for and where it may go. A trip to
+    /// sell goes to a counter that pays for what is carried and to
+    /// nothing else: the shops are ranked on what they pay, and there
+    /// is no "any counter will do" when none of them buys any of it
+    /// (see [`Errand`]).
     fn pick_vendor(
         &self,
         cfg: &Growth,
         needs: &[Need],
         ways: &[(Vec2, String)],
-        within: Option<f32>,
-        visited: &[Vec2],
+        stop: Stop<'_>,
         now: Instant,
     ) -> Option<(String, Vec2, Forecast)> {
+        let Stop {
+            errand,
+            within,
+            visited,
+        } = stop;
         // How far a shop is: from the nearest way out, not from the
         // feet.
         let reach = |at: Vec2| {
@@ -3041,31 +3208,32 @@ impl Client {
                 .find(|s| s.name.eq_ignore_ascii_case(want))
             {
                 let f = forecast(found, &wants, purse, &salables);
-                if f.worth_going() {
+                if errand.served_by(&f) {
                     return Some((found.name.clone(), found.xy(), f));
                 }
             }
         }
         for ring in vendor_rings(within) {
-            let best = ac_world::shops::all()
+            let counters = ac_world::shops::all()
                 .iter()
                 .filter(|s| allowed(s.xy()) && reach(s.xy()) <= ring)
                 .filter(|s| s.open_to(society, &quests))
-                .map(|s| (s, forecast(s, &wants, purse, &salables)))
-                .filter(|(_, f)| f.worth_going())
-                .min_by(|(a, fa), (b, fb)| {
-                    // The whole order in one stop beats part of it, then
-                    better_counter((fa, reach(a.xy())), (fb, reach(b.xy())))
-                })
-                .map(|(s, f)| (s.name.clone(), s.xy(), f));
-            if best.is_some() {
-                return best;
+                .map(|s| (s, reach(s.xy())));
+            if let Some((s, f)) = choose_counter(counters, errand, &wants, purse, &salables) {
+                return Some((s.name.clone(), s.xy(), f));
             }
+        }
+        // A trip to sell has nowhere to go: no counter in reach buys any
+        // of what is carried. Walking to one that does not is the trip
+        // there and the trip back with the same pack, and there is no
+        // nearest-counter fallback for it.
+        if errand == Errand::Sell {
+            return None;
         }
         // Nothing sells what is wanted, nothing is wanted at all, or
         // there is no money for any of it: any counter will do, which is
-        // the case when the trip is to empty a full pack rather than to
-        // buy something. The forecast comes back saying as much, and the
+        // the case when the trip is to stop in town rather than to buy
+        // something. The forecast comes back saying as much, and the
         // caller decides whether that is reason enough to walk.
         ac_world::landmarks::all()
             .iter()
@@ -3655,19 +3823,32 @@ impl Client {
         // nothing to sell.
         let laden = self.laden(cfg);
         let needs = self.needs_now(now, cfg);
+        // What the loot rules tagged for a counter, and since when. The
+        // ledger says why each thing was taken, and "to sell" is a
+        // reason to go and sell it: without this the list was read only
+        // once a counter was open, and a pack with room in it never
+        // got one open.
+        let salables = self.salables(cfg);
+        let st = &mut self.autoplay.growth;
+        if salables.is_empty() {
+            st.sale_since = None;
+        } else if st.sale_since.is_none() {
+            st.sale_since = Some(now);
+        }
+        let carried_for = st.sale_since.map(|t| now.duration_since(t));
         // On a team that restocks together, the party's mode decides:
         // one character does not walk off to a vendor while the rest
         // are fighting, and none of them stays behind when the party
         // has agreed to go. Alone, the older rule stands -- something
-        // urgent, a pack with no room left, or as much loot as it means
-        // to carry. Alone includes a character set to restock together
-        // with nobody else on the team, which is how Blargerton never
-        // went to sell.
+        // urgent, a pack with no room left, as much loot as it means
+        // to carry, or loot enough tagged for a counter. Alone includes
+        // a character set to restock together with nobody else on the
+        // team, which is how Blargerton never went to sell.
         let party_mode = self.autoplay.growth.mode;
         let together =
             restocks_as_a_party(&self.autoplay.config.team, self.autoplay.team.mates.len());
         let urgent: Vec<&Need> = needs.iter().filter(|n| n.urgent).collect();
-        let reason = if together {
+        let (reason, errand) = if together {
             match party_mode.stage() {
                 None => return self.held_back("the party is hunting"),
                 // Only the runner walks to town; the rest hold their
@@ -3681,27 +3862,43 @@ impl Client {
                 }
                 Some(_) => {
                     let because = self.autoplay.growth.mode_because.clone();
-                    if because.is_empty() {
+                    let reason = if because.is_empty() {
                         "the party is restocking".to_string()
                     } else {
                         because
-                    }
+                    };
+                    (reason, Errand::Buy)
                 }
             }
         } else if full {
-            "the pack is full".to_string()
+            ("the pack is full".to_string(), Errand::Sell)
         } else if laden {
-            "carrying as much as it means to".to_string()
+            ("carrying as much as it means to".to_string(), Errand::Sell)
+        } else if let Some(why) = worth_a_sale_run(&salables, carried_for, cfg) {
+            (why, Errand::Sell)
         } else if urgent.is_empty() {
             let short: Vec<&str> = needs.iter().map(|n| n.name.as_str()).collect();
-            return self.held_back(format!("nothing urgent (short of {})", a_few(&short)));
+            let sale = match salables.len() {
+                0 => String::new(),
+                n => format!("; {n} thing(s) for a counter, not yet worth the trip"),
+            };
+            return self.held_back(format!("nothing urgent (short of {}{sale})", a_few(&short)));
         } else {
             let short: Vec<&str> = urgent
                 .iter()
                 .filter(|n| n.buyable)
                 .map(|n| n.name.as_str())
                 .collect();
-            format!("short of {}", a_few(&short))
+            (format!("short of {}", a_few(&short)), Errand::Buy)
+        };
+        // A pack that is full or heavy with nothing in it a counter
+        // takes is not emptied by any counter. The trip is then
+        // whatever one can do for it -- and if that is nothing, town is
+        // where the character stops (see [`Self::stranded`]).
+        let errand = if salables.is_empty() {
+            Errand::Buy
+        } else {
+            errand
         };
         // Know before setting off whether the trip can achieve anything.
         // A counter with nothing the character needs, or nothing it can
@@ -3713,7 +3910,7 @@ impl Client {
         // to spend and nothing to sell goes anyway, because town is
         // where it stops: see [`Self::stranded`].
         let go_anyway = full || self.stranded(&needs, cfg);
-        match self.start_town_run(now, cfg, needs, reason, go_anyway) {
+        match self.start_town_run(now, cfg, needs, reason, errand, go_anyway) {
             Ok(()) => true,
             Err(why) => self.held_back(why),
         }
@@ -3732,6 +3929,7 @@ impl Client {
         cfg: &Growth,
         needs: Vec<Need>,
         reason: String,
+        errand: Errand,
         go_anyway: bool,
     ) -> Result<(), String> {
         let Some(me) = self.player.as_ref().map(|p| p.world_position()) else {
@@ -3748,10 +3946,24 @@ impl Client {
         // somewhere particular; the shops worth considering are the
         // ones near *that*.
         let ways = self.ways_out(me);
-        let Some((vendor, at, look)) = self.pick_vendor(cfg, &needs, &ways, None, &[], now) else {
-            self.autoplay.note("no vendor to run to", now);
+        let first = Stop {
+            errand,
+            within: None,
+            visited: &[],
+        };
+        let Some((vendor, at, look)) = self.pick_vendor(cfg, &needs, &ways, first, now) else {
+            let why = match errand {
+                Errand::Buy => "no vendor to run to".to_string(),
+                // Said with the count, so that whoever is watching can
+                // tell "nothing to sell" from "nothing anyone buys".
+                Errand::Sell => format!(
+                    "no counter buys any of the {} thing(s) for sale",
+                    self.salables(cfg).len()
+                ),
+            };
+            self.autoplay.note(why.clone(), now);
             self.autoplay.growth.last_run = Some(now);
-            return Err("no vendor to run to".into());
+            return Err(why);
         };
         // Why this counter and not another, in the log. The choice is a
         // ring search outwards from `from`, taking the best shop in the
@@ -3796,6 +4008,9 @@ impl Client {
         st.needs = needs;
         st.by_hand = false;
         st.window_unwanted = None;
+        // The loot for a counter is on its way to one: what comes home
+        // unsold is counted from when it is next seen.
+        st.sale_since = None;
         st.run = Some(Run {
             vendor: vendor.clone(),
             at,
@@ -3806,6 +4021,7 @@ impl Client {
             stops: 1,
             sold: 0,
             reason: reason.clone(),
+            errand,
             visited: vec![at],
             walked_on: None,
         });
@@ -3898,13 +4114,27 @@ impl Client {
                     stops: 1,
                     sold: 0,
                     reason: reason.clone(),
+                    // This counter, whatever it takes: the player opened
+                    // it, and a run made to sell would walk off from a
+                    // counter that buys none of the pack.
+                    errand: Errand::Buy,
                     visited: vec![at],
                     walked_on: None,
                 });
                 self.autoplay
                     .say(Doing::Shopping, format!("{reason}: at {vendor}"));
             }
-            None => self.start_town_run(now, &cfg, needs, reason, true)?,
+            None => {
+                // With something in the pack for a counter, the run is
+                // to a counter that buys it: that is what the button is
+                // pressed for. With nothing, the shopping decides.
+                let errand = if self.salables(&cfg).is_empty() {
+                    Errand::Buy
+                } else {
+                    Errand::Sell
+                };
+                self.start_town_run(now, &cfg, needs, reason, errand, true)?
+            }
         }
         let by_hand = !self.autoplay_drives_town_runs();
         self.autoplay.growth.by_hand = by_hand;
@@ -4111,7 +4341,12 @@ impl Client {
                         now,
                     );
                     self.cancel_travel();
-                    return Turn::after_stop(self.grow_run_next(run, now, cfg, true));
+                    return Turn::after_stop(self.grow_run_next(
+                        run,
+                        now,
+                        cfg,
+                        Some("was too long a walk"),
+                    ));
                 }
                 if self.traveling() || self.grow_travel_on() {
                     self.autoplay.say(
@@ -4154,7 +4389,12 @@ impl Client {
                                 ),
                                 now,
                             );
-                            return Turn::after_stop(self.grow_run_next(run, now, cfg, true));
+                            return Turn::after_stop(self.grow_run_next(
+                                run,
+                                now,
+                                cfg,
+                                Some("could not be got to"),
+                            ));
                         }
                         self.autoplay.note(
                             format!("on the way to {} again ({away:.0} m)", run.vendor),
@@ -4169,7 +4409,12 @@ impl Client {
                             format!("could not get to {} ({away:.0} m short)", run.vendor),
                             now,
                         );
-                        return Turn::after_stop(self.grow_run_next(run, now, cfg, true));
+                        return Turn::after_stop(self.grow_run_next(
+                            run,
+                            now,
+                            cfg,
+                            Some("could not be got to"),
+                        ));
                     }
                 }
                 match self.vendor_object(&run.vendor, run.at) {
@@ -4209,7 +4454,7 @@ impl Client {
                             format!("{} is not here (indoors, or gone)", run.vendor),
                             now,
                         );
-                        Turn::after_stop(self.grow_run_next(run, now, cfg, true))
+                        Turn::after_stop(self.grow_run_next(run, now, cfg, Some("is not here")))
                     }
                 }
             }
@@ -4253,7 +4498,12 @@ impl Client {
                     }
                     self.autoplay
                         .note(format!("{} would not trade", run.vendor), now);
-                    return Turn::after_stop(self.grow_run_next(run, now, cfg, true));
+                    return Turn::after_stop(self.grow_run_next(
+                        run,
+                        now,
+                        cfg,
+                        Some("would not trade"),
+                    ));
                 }
                 self.autoplay.growth.run = Some(run);
                 Turn::Waited
@@ -4295,6 +4545,31 @@ impl Client {
                     _ => {}
                 }
                 let n = self.sale_list(cfg).len();
+                // The window says what this counter takes, and when that
+                // is none of what the pack holds for a counter, say so
+                // plainly -- "sold 0 item(s)" told nobody why. A run
+                // made to sell does not stand here buying: it goes on
+                // to a counter that will take the loot, and this one is
+                // left alone for a while.
+                if n == 0 {
+                    let carrying = self.salables(cfg).len();
+                    if carrying > 0 {
+                        let why = format!(
+                            "{} buys none of this ({carrying} thing(s) for a counter)",
+                            run.vendor
+                        );
+                        self.autoplay.note(why.clone(), now);
+                        if run.errand == Errand::Sell {
+                            self.autoplay.say(Doing::Shopping, why);
+                            return Turn::after_stop(self.grow_run_next(
+                                run,
+                                now,
+                                cfg,
+                                Some("buys none of this"),
+                            ));
+                        }
+                    }
+                }
                 run.phase = Phase::Selling { sent: Vec::new() };
                 run.since = now;
                 // The shopping rules start this counter fresh. They
@@ -4344,7 +4619,7 @@ impl Client {
                         run.sold += self.autoplay.growth.shop.sold;
                         self.close_vendor();
                         self.autoplay.growth.shop = ac_vendor::Run::new();
-                        Turn::after_stop(self.grow_run_next(run, now, cfg, false))
+                        Turn::after_stop(self.grow_run_next(run, now, cfg, None))
                     }
                     Some(act) => {
                         // A refusal on this side is an answer too: the
@@ -4371,25 +4646,36 @@ impl Client {
     }
 
     /// The run is done with this vendor: on to the next of the town
-    /// when something is still wanted, else home. `failed` says the
-    /// vendor was no use and is to be avoided for a while. True while
-    /// the run goes on.
-    fn grow_run_next(&mut self, run: Run, now: Instant, cfg: &Growth, failed: bool) -> bool {
+    /// when something is still wanted, else home. `left` says the
+    /// vendor was no use -- what it did, as a predicate on its name:
+    /// "would not trade", "buys none of this" -- and is to be avoided
+    /// for a while; it is said in the status with where the run goes
+    /// next, so that a counter walked past is a counter walked past
+    /// for a reason. True while the run goes on.
+    fn grow_run_next(&mut self, run: Run, now: Instant, cfg: &Growth, left: Option<&str>) -> bool {
         self.window_no_longer_wanted(&run);
         if self.world.open_vendor.is_some() {
             self.close_vendor();
         }
-        if failed {
+        let left = left.map(|why| format!("{} {why}", run.vendor));
+        if let Some(why) = left.as_deref() {
             self.autoplay.growth.skip_vendors.note(
                 spot(run.at),
-                &crate::did::Did::blocked("that counter was no use"),
+                &crate::did::Did::blocked(why),
                 now,
             );
         }
         let needs = self.grow_needs(cfg);
         let still_full = self.pack_low_on_room();
+        // A run made to sell goes on while there is loot for a counter
+        // left and a counter in reach that takes it. This is how a
+        // counter that bought none of it is walked past rather than
+        // home from -- and how the peas a general store would not look
+        // at reach the archmage next door.
+        let more_to_sell = run.errand == Errand::Sell && !self.salables(cfg).is_empty();
         // With no slot at all the next counter could not pay out either.
-        let wanting = self.room_anywhere() > 0 && (needs.iter().any(|n| n.urgent) || still_full);
+        let wanting = self.room_anywhere() > 0
+            && (needs.iter().any(|n| n.urgent) || still_full || more_to_sell);
         if wanting && run.stops < STOPS_PER_RUN {
             // The next counter is chosen by what is still on the list,
             // not by what is closest -- and only when there is reason to
@@ -4407,18 +4693,29 @@ impl Client {
                 Some(p) => self.ways_out(Vec2::new(p.x, p.y)),
                 None => vec![(run.town, "in town".to_string())],
             };
-            if let Some((vendor, at, look)) =
-                self.pick_vendor(cfg, &needs, &ways, Some(NEAR_A_WAY_OUT), &run.visited, now)
-            {
+            let errand = if more_to_sell {
+                Errand::Sell
+            } else {
+                Errand::Buy
+            };
+            let next = Stop {
+                errand,
+                within: Some(NEAR_A_WAY_OUT),
+                visited: &run.visited,
+            };
+            if let Some((vendor, at, look)) = self.pick_vendor(cfg, &needs, &ways, next, now) {
                 if (still_full || look.worth_going()) && self.grow_travel(at, now) {
-                    let what = if still_full {
+                    let what = if still_full || more_to_sell {
                         "the rest of the loot"
                     } else {
                         "the rest"
                     };
+                    let leaving = left
+                        .as_deref()
+                        .map_or(String::new(), |why| format!("{why}; "));
                     self.autoplay.say(
                         Doing::Shopping,
-                        format!("on to {vendor} for {what} -- {}", look.tell()),
+                        format!("{leaving}on to {vendor} for {what} -- {}", look.tell()),
                     );
                     let mut visited = run.visited;
                     visited.push(at);
@@ -4432,6 +4729,7 @@ impl Client {
                         stops: run.stops + 1,
                         sold: run.sold,
                         reason: run.reason,
+                        errand,
                         visited,
                         walked_on: None,
                     });
@@ -4463,8 +4761,11 @@ impl Client {
         let by_hand = std::mem::take(&mut st.by_hand);
         let sold = run.sold;
         let full = if still_full { ", pack still full" } else { "" };
-        self.autoplay
-            .note(format!("town run done: sold {sold} item(s){full}"), now);
+        let leaving = left.map_or(String::new(), |why| format!("; {why}"));
+        self.autoplay.note(
+            format!("town run done: sold {sold} item(s){full}{leaving}"),
+            now,
+        );
         // A run the panel asked for ends where the last counter was.
         // Whoever is watching it asked to see the shopping, not the
         // walk back to a hunting ground; and giving up in town is a
@@ -4794,6 +5095,7 @@ mod tests {
             stops: 1,
             sold: 0,
             reason: "carrying as much as it means to".into(),
+            errand: Errand::Sell,
             visited: vec![at],
             walked_on: None,
         }
@@ -6074,7 +6376,7 @@ mod tests {
         let near = look(500, 0);
         let far = look(950, 0);
         assert_eq!(
-            better_counter((&far, 380.0), (&near, 80.0)),
+            better_counter(Errand::Buy, (&far, 380.0), (&near, 80.0)),
             std::cmp::Ordering::Less,
             "the broker is worth the extra three hundred metres"
         );
@@ -6083,7 +6385,7 @@ mod tests {
         // character came for still beats a richer one that does not.
         let stocked_but_poor = look(0, 2);
         assert_eq!(
-            better_counter((&stocked_but_poor, 380.0), (&far, 80.0)),
+            better_counter(Errand::Buy, (&stocked_but_poor, 380.0), (&far, 80.0)),
             std::cmp::Ordering::Less,
             "what it came to buy comes first"
         );
@@ -6096,7 +6398,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            better_counter((&same, 50.0), (&same, 900.0)),
+            better_counter(Errand::Buy, (&same, 50.0), (&same, 900.0)),
             std::cmp::Ordering::Less,
             "all else equal, the nearer one"
         );
@@ -7444,5 +7746,363 @@ mod tests {
         assert!(!partial.auto_xp);
         assert_eq!(partial.level_margin, 3);
         assert!(partial.town_runs);
+        // A config saved before the sale rules had thresholds reads
+        // with the defaults, and the defaults are on.
+        assert_eq!(partial.sell_run_value, 5_000);
+        assert_eq!(partial.sell_run_count, 8);
+        assert_eq!(partial.sell_run_patience, 15.0 * 60.0);
+        let set: Growth =
+            serde_json::from_str(r#"{"sell_run_value":0,"sell_run_count":3}"#).unwrap();
+        assert_eq!(set.sell_run_value, 0);
+        assert_eq!(set.sell_run_count, 3);
+    }
+
+    #[test]
+    fn loot_for_a_counter_is_reason_enough_for_a_run() {
+        // An Iron Pea and a Lead Pea, taken to sell, in a pack with room
+        // to spare. The ledger said what they were for and nothing read
+        // it: a run was made for a full pack, a heavy one or a supply
+        // short, and the peas were carried about for ever.
+        use ac_world::item_type::{ARMOR, GEM, SPELL_COMPONENTS};
+        let cfg = Growth::default();
+        let minutes = |m: u64| Some(Duration::from_secs(m * 60));
+        let two_peas = [
+            salable(1, SPELL_COMPONENTS, 2_500, 1),
+            salable(2, SPELL_COMPONENTS, 500, 1),
+        ];
+        // Three thousand at face is not worth the walk on its own...
+        assert_eq!(worth_a_sale_run(&two_peas, None, &cfg), None);
+        assert_eq!(worth_a_sale_run(&two_peas, minutes(5), &cfg), None);
+        // ...but it is not carried about all afternoon either.
+        let why = worth_a_sale_run(&two_peas, minutes(15), &cfg).expect("a quarter of an hour");
+        assert!(why.contains("carried 15 min"), "{why}");
+        // Worth enough is reason at once, and a stack is worth the lot.
+        let gem = [salable(3, GEM, 5_000, 1)];
+        let why = worth_a_sale_run(&gem, None, &cfg).expect("five thousand");
+        assert!(why.contains("5000 pyreals"), "{why}");
+        let peas = [salable(4, SPELL_COMPONENTS, 10 * 500, 10)];
+        assert!(worth_a_sale_run(&peas, None, &cfg).is_some());
+        // So is an armful, however cheap: the slots are going.
+        let junk: Vec<Salable> = (0..8).map(|i| salable(10 + i, ARMOR, 50, 1)).collect();
+        let why = worth_a_sale_run(&junk, None, &cfg).expect("an armful");
+        assert!(why.contains("8 things"), "{why}");
+        assert_eq!(worth_a_sale_run(&junk[..7], None, &cfg), None);
+        // Nothing for a counter is no reason, however long since.
+        assert_eq!(worth_a_sale_run(&[], minutes(60), &cfg), None);
+        // Each rule is off at zero.
+        let off = Growth {
+            sell_run_value: 0,
+            sell_run_count: 0,
+            sell_run_patience: 0.0,
+            ..cfg
+        };
+        assert_eq!(worth_a_sale_run(&junk, minutes(60), &off), None);
+        assert_eq!(worth_a_sale_run(&gem, minutes(60), &off), None);
+    }
+
+    #[test]
+    fn a_sale_is_ranked_on_what_the_counter_pays() {
+        // A tailor with the shopping list on the shelf and no use for
+        // the pack, and an archmage with the pack's worth in her purse
+        // and nothing on the list. A trip to buy goes to the tailor; a
+        // trip to sell goes to the archmage, and the tailor is not so
+        // much as a candidate for it.
+        let look = |takings: u32, selling: usize, stocks: usize| Forecast {
+            takings,
+            selling,
+            stocks: vec!["something".into(); stocks],
+            cheapest: if stocks > 0 { 10 } else { 0 },
+            purse: 100,
+            ..Default::default()
+        };
+        let tailor = look(0, 0, 2);
+        let archmage = look(2_700, 2, 0);
+        assert!(Errand::Buy.served_by(&tailor));
+        assert!(!Errand::Sell.served_by(&tailor), "buys none of it");
+        assert!(Errand::Sell.served_by(&archmage));
+        assert_eq!(
+            better_counter(Errand::Buy, (&tailor, 300.0), (&archmage, 20.0)),
+            std::cmp::Ordering::Less
+        );
+        assert_eq!(
+            better_counter(Errand::Sell, (&archmage, 300.0), (&tailor, 20.0)),
+            std::cmp::Ordering::Less
+        );
+        // Between two that buy: what they pay, then how much of the
+        // pack they take, then the shelf, then the walk.
+        let scriveners = look(500, 2, 0);
+        let broker = look(950, 2, 0);
+        assert_eq!(
+            better_counter(Errand::Sell, (&broker, 380.0), (&scriveners, 80.0)),
+            std::cmp::Ordering::Less
+        );
+        let takes_more = look(950, 3, 0);
+        assert_eq!(
+            better_counter(Errand::Sell, (&takes_more, 380.0), (&broker, 80.0)),
+            std::cmp::Ordering::Less
+        );
+        let stocked_too = look(950, 3, 1);
+        assert_eq!(
+            better_counter(Errand::Sell, (&stocked_too, 380.0), (&takes_more, 80.0)),
+            std::cmp::Ordering::Less
+        );
+        assert_eq!(
+            better_counter(Errand::Sell, (&broker, 80.0), (&broker, 380.0)),
+            std::cmp::Ordering::Less
+        );
+    }
+
+    #[test]
+    fn a_run_to_sell_goes_to_a_counter_that_buys_what_it_carries() {
+        // Holtburg, with two peas in the pack. Fourteen counters stand
+        // in the town and one of them, the archmage, buys spell
+        // components; the shops that do so at a worse rate are a few
+        // hundred metres out. Ranked the buying way the choice fell to
+        // whoever had the most of the shopping list, and the peas went
+        // to a counter that would not look at them.
+        use ac_world::item_type::{LIFESTONE, SPELL_COMPONENTS};
+        let from = ac_world::towns::find("Holtburg").unwrap().world_xy();
+        let in_town = || {
+            ac_world::shops::all()
+                .iter()
+                .filter(|s| s.gate.is_none())
+                .map(|s| (s, s.xy().distance(from)))
+                .filter(|(_, d)| *d <= VENDOR_RINGS[0])
+        };
+        let peas = [
+            salable(1, SPELL_COMPONENTS, 2_500, 1),
+            salable(2, SPELL_COMPONENTS, 500, 1),
+        ];
+        let (shop, look) =
+            choose_counter(in_town(), Errand::Sell, &[], 0, &peas).expect("nobody buys peas");
+        assert_eq!(shop.name, "Archmage Cindrue");
+        assert_eq!(look.selling, 2);
+        assert_eq!(look.takings, 2_250 + 450, "nine tenths of both");
+        assert!(shop.pays_for(SPELL_COMPONENTS, 2_500).is_some());
+
+        // With a healing kit on the list, the trip to buy goes to a
+        // counter with kits -- the pawn shop out on the road, as it
+        // happens, which also takes peas at eight tenths...
+        let mut kits = need(NeedKind::Named("Healing Kit".into()), 1);
+        kits.name = "Healing Kit".into();
+        let wants = [(&kits, "healing kit".to_string())];
+        let (to_buy, look) =
+            choose_counter(in_town(), Errand::Buy, &wants, 10_000, &peas).expect("no kits");
+        assert!(to_buy.stocks("Healing Kit").is_some());
+        assert!(look.covers_it());
+        assert_ne!(to_buy.name, "Archmage Cindrue");
+        // ...while the trip to sell, list and all, goes where the peas
+        // fetch most.
+        let (to_sell, look) =
+            choose_counter(in_town(), Errand::Sell, &wants, 10_000, &peas).unwrap();
+        assert_eq!(to_sell.name, "Archmage Cindrue");
+        assert!(look.takings > 2_400, "{}", look.takings);
+
+        // Nothing in town buys a lifestone: no counter, and no falling
+        // back on the nearest one.
+        let odd = [salable(3, LIFESTONE, 1_000, 1)];
+        assert!(choose_counter(in_town(), Errand::Sell, &[], 0, &odd).is_none());
+        // Nothing wanted and nothing anyone buys is no trip to buy
+        // either; the nearest-counter fallback is `pick_vendor`'s own.
+        assert!(choose_counter(in_town(), Errand::Buy, &[], 0, &odd).is_none());
+    }
+
+    /// The character, with `capacity` slots in its main pack.
+    fn with_a_pack(c: &mut Client, capacity: u32) {
+        let me = 0x5000_0001;
+        c.world.player_guid = Some(me);
+        c.world.objects.insert(
+            me,
+            ac_world::WorldObject {
+                guid: me,
+                name: "Verity".into(),
+                is_player: true,
+                items_capacity: capacity,
+                ..Default::default()
+            },
+        );
+    }
+
+    /// A pea in the pack, taken to sell.
+    fn pea_in_the_pack(c: &mut Client, guid: u32, name: &str, wcid: u32, value: u32) {
+        let me = c.world.player_guid.unwrap();
+        c.world.objects.insert(
+            guid,
+            ac_world::WorldObject {
+                guid,
+                name: name.into(),
+                weenie_class_id: wcid,
+                item_type: item_type::SPELL_COMPONENTS,
+                value,
+                stack_size: 1,
+                max_stack_size: 100,
+                container: Some(me),
+                ..Default::default()
+            },
+        );
+        let stats = c.stats_of(guid).unwrap();
+        c.autoplay.tag(&stats, LootAction::Sell);
+    }
+
+    #[test]
+    fn a_counter_that_buys_none_of_the_loot_is_walked_past_on_a_run_to_sell() {
+        // At the counter, with the window open, the pack looked over
+        // and nothing on the sale list: the run used to stand there and
+        // sell nothing, say "sold 0 item(s)", and walk home with the
+        // peas. It says who would not buy them and goes on to who will.
+        let holtburg = 0xA9B4_0019;
+        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
+            return;
+        };
+        c.world.stats.level = 20;
+        with_a_pack(&mut c, 20);
+        pea_in_the_pack(&mut c, 0x8000_0010, "Iron Pea", 8328, 2_500);
+        pea_in_the_pack(&mut c, 0x8000_0011, "Lead Pea", 8329, 500);
+        let cfg = c.autoplay.config.growth.clone();
+        assert_eq!(c.salables(&cfg).len(), 2, "the peas are for a counter");
+        let me = c.player.as_ref().unwrap().world_position();
+        let me = Vec2::new(me.x, me.y);
+        let now = Instant::now();
+        let rakk = 0x8000_0002;
+        vendor_beside(
+            &mut c,
+            rakk,
+            "Rakk the Peddler",
+            glam::Vec3::new(1.0, 0.0, 0.0),
+        );
+        // A tailor's window: armour and clothing, no components.
+        let mut window = window_of(rakk);
+        window.item_types = item_type::ARMOR | item_type::CLOTHING;
+        c.world.open_vendor = Some(window);
+        assert!(c.sale_list(&cfg).is_empty(), "Rakk buys peas");
+
+        let mut run = run_to(me, now);
+        run.vendor = "Rakk the Peddler".into();
+        run.phase = Phase::Appraising;
+        run.since = now - SETTLE * 3;
+        c.autoplay.growth.run = Some(run);
+        c.grow_run_step(now, &cfg);
+        assert!(
+            c.autoplay
+                .status
+                .contains("Rakk the Peddler buys none of this"),
+            "{}",
+            c.autoplay.status
+        );
+        assert!(c.world.open_vendor.is_none(), "the window was left open");
+        assert!(
+            c.autoplay.growth.skip_vendors.held(&spot(me), now),
+            "Rakk is not left alone"
+        );
+        // Not standing at Rakk's counter selling nothing: on to a
+        // counter that buys peas, of which Holtburg has one.
+        let on = c
+            .autoplay
+            .growth
+            .run
+            .as_ref()
+            .expect("walked home with the peas");
+        assert_eq!(on.vendor, "Archmage Cindrue");
+        assert_eq!(on.stops, 2);
+        assert_eq!(on.errand, Errand::Sell);
+        assert!(c.traveling());
+
+        // A run made to buy stays and shops: the counter is the one the
+        // player opened, or the one with the tapers on the shelf.
+        c.town_run_stop(now);
+        c.world.open_vendor = Some({
+            let mut w = window_of(rakk);
+            w.item_types = item_type::ARMOR;
+            w
+        });
+        let mut run = run_to(me, now);
+        run.vendor = "Rakk the Peddler".into();
+        run.errand = Errand::Buy;
+        run.phase = Phase::Appraising;
+        run.since = now - SETTLE * 3;
+        c.autoplay.growth.run = Some(run);
+        c.grow_run_step(now, &cfg);
+        let stayed = c.autoplay.growth.run.as_ref().expect("the run ended");
+        assert_eq!(stayed.vendor, "Rakk the Peddler");
+        assert!(matches!(stayed.phase, Phase::Selling { .. }));
+    }
+
+    #[test]
+    fn peas_for_a_counter_send_a_roomy_pack_to_town_once_the_waits_are_up() {
+        // The user's report: two peas tagged to sell, room in the pack,
+        // nothing short, and no run was ever made. Now the peas are the
+        // reason -- once the waits between runs are up, as for any
+        // other reason, so one pea does not wear a path to town.
+        let holtburg = 0xA9B4_0019;
+        let Some(mut c) = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0)) else {
+            return;
+        };
+        c.world.stats.level = 20;
+        with_a_pack(&mut c, 50);
+        pea_in_the_pack(&mut c, 0x8000_0010, "Iron Pea", 8328, 2_500);
+        pea_in_the_pack(&mut c, 0x8000_0011, "Iron Pea", 8328, 2_500);
+        let cfg = c.autoplay.config.growth.clone();
+        assert!(!c.pack_low_on_room() && !c.laden(&cfg), "the old reasons");
+        let now = Instant::now();
+
+        // Just back from a run: the wait between runs holds.
+        c.autoplay.growth.last_run = Some(now);
+        assert!(!c.grow_town_run(now, &cfg));
+        assert!(
+            c.autoplay
+                .growth
+                .held_back
+                .contains("to wait since the last run"),
+            "{}",
+            c.autoplay.growth.held_back
+        );
+        // A futile one holds for its own while.
+        c.autoplay.growth.run_was_futile = true;
+        let soon = now + FUTILE_RUN_WAIT - Duration::from_secs(1);
+        assert!(!c.grow_town_run(soon, &cfg));
+        c.autoplay.growth.run_was_futile = false;
+        // Waits up, five thousand at face in the pack: off to the one
+        // counter in town that buys peas.
+        let later = now + RUN_EVERY;
+        assert!(
+            c.grow_town_run(later, &cfg),
+            "{}",
+            c.autoplay.growth.held_back
+        );
+        let run = c.autoplay.growth.run.as_ref().expect("no run");
+        assert_eq!(run.errand, Errand::Sell);
+        assert!(run.reason.contains("5000 pyreals' worth"), "{}", run.reason);
+        assert_eq!(run.vendor, "Archmage Cindrue");
+        assert!(c.traveling());
+
+        // One Lead Pea is not worth the trip on its own...
+        c.town_run_stop(later);
+        c.world.objects.remove(&0x8000_0010);
+        c.world.objects.remove(&0x8000_0011);
+        pea_in_the_pack(&mut c, 0x8000_0012, "Lead Pea", 8329, 500);
+        let again = later + RUN_EVERY;
+        assert!(!c.grow_town_run(again, &cfg));
+        assert!(
+            c.autoplay
+                .growth
+                .held_back
+                .contains("1 thing(s) for a counter, not yet worth the trip"),
+            "{}",
+            c.autoplay.growth.held_back
+        );
+        // ...until it has been carried a quarter of an hour.
+        let patience = Duration::from_secs_f32(cfg.sell_run_patience);
+        assert!(!c.grow_town_run(again + patience / 2, &cfg));
+        assert!(
+            c.grow_town_run(again + patience, &cfg),
+            "{}",
+            c.autoplay.growth.held_back
+        );
+        let run = c.autoplay.growth.run.as_ref().expect("no run");
+        assert!(run.reason.contains("carried 15 min"), "{}", run.reason);
+        assert_eq!(run.vendor, "Archmage Cindrue");
+        // Setting off put the clock back: what comes home unsold is
+        // counted afresh.
+        assert_eq!(c.autoplay.growth.sale_since, None);
     }
 }
