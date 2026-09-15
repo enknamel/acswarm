@@ -3,7 +3,7 @@
 How a character decides what to do, why it is built the way it is, and
 what it is being moved towards.
 
-See also: [architecture.md](architecture.md) (the crate map),
+See also: [CLAUDE.md](../CLAUDE.md) (the crate map),
 [multi-session.md](multi-session.md) (many characters at once).
 
 ## What this has to be good at

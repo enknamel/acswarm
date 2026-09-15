@@ -11,8 +11,8 @@ against ACE; thirteen asset types decode every file in both archives;
 and in `--connect` mode logs in to a local ACE server and walks your
 character around the live world with server-accepted movement, with a
 chat overlay for talking to the server and other players.
-See [`docs/architecture.md`](docs/architecture.md) for the crate map and
-data flow, [`docs/plugins.md`](docs/plugins.md) for writing a plugin,
+See [`CLAUDE.md`](CLAUDE.md) for the crate map, data flow and build
+commands, [`docs/plugins.md`](docs/plugins.md) for writing a plugin,
 [`docs/multi-session.md`](docs/multi-session.md) for running several
 clients, [`docs/game/mechanics.md`](docs/game/mechanics.md) for the game
 rules the client must follow (magic, combat, advancement, death, trade),
@@ -239,17 +239,13 @@ rate, and every 10 s one status line per session (placed?, cell, health,
 target). `--log-chat` prints chat lines prefixed with the account;
 `RUST_LOG=info` shows the connection log as well.
 
-Workspace: `crates/ac-dat` (container), `crates/ac-formats` (asset
-decoders), `crates/ac-scene` (GPU-free assembly, collision, lighting,
-particles, chargen), `crates/ac-net` (protocol, sans-IO session),
-`crates/ac-world` (object table, character sheet, motions),
-`crates/ac-client` (headless game session: connect, tick, actions, events,
-player physics), `crates/ac-plugin` (`Plugin` trait, `Ctx`, blackboard and
-bus, host, the console and party plugins), `crates/ac-audio` (sound
-playback), `bins/acdat` (CLI), `bins/acswarm` (wgpu viewer and
-multi-session client), `bins/acbot` (headless multi-session runner),
-`bins/aclauncher` (launch manager), `bins/acclient` (old headless CLI).
-See `docs/architecture.md`.
+Workspace: fourteen library crates under `crates/` (DAT container and
+decoders, scene assembly, wire protocol, world state, navigation, loot,
+vendoring, the game session, plugins, scripting, the cross-process bus,
+audio) and three binaries under `bins/`: `acswarm` (the client, windowed
+or `--headless`), `aclauncher` (launch manager) and `acdat` (DAT CLI).
+[`CLAUDE.md`](CLAUDE.md) has a line per crate, the data flow, and the
+build, test and logging commands.
 
 Debugging aids: `RUST_LOG=acswarm=debug`, `ACV_HIDE_STATIC=1` (draw only
 server objects), and in connected `--screenshot` mode `--walk`, `--say`,

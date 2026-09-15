@@ -43,7 +43,7 @@ animation state are built for them (a switch clears what the session
 left behind and re-instances the new one). A process whose window is
 only a follower's can pass `--render none` and draw no world at all, and
 `--fps` caps the frame rate of any window; see "Rendering cost" in
-[architecture.md](architecture.md).
+[performance.md](performance.md).
 
 ## Coming back after a drop
 
