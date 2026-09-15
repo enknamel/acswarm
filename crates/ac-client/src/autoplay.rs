@@ -1454,6 +1454,10 @@ pub struct Mate {
     /// never dealt a body nor left anything on one: an Ust carrier with no
     /// loot profile never came, and the salvage left for it rotted.
     pub opens_bodies: bool,
+    /// The names of what has attacked it lately (see
+    /// [`Autoplay::attacked_by`]): what the leader's plan reads to give
+    /// it the creature that is on it rather than the party's.
+    pub hit_by: Vec<String>,
 }
 
 /// What a character that shut a body as emptied says about it to the
@@ -2807,6 +2811,17 @@ pub struct Autoplay {
     /// silenced the first, which was then walked past between its
     /// swings (see [`Autoplay::attacked_by`]).
     pub(crate) hit_by: Vec<(String, Instant)>,
+    /// What the leader remembers between plans, when this character
+    /// leads: the bodies it has dealt and the turns each of the others
+    /// has had (see `crate::plan`).
+    pub(crate) planner: crate::plan::Planner,
+    /// The leader's latest plan as heard, and when: what this character
+    /// fights and which body it opens, while the plan is fresh (see
+    /// [`Autoplay::current_plan`]). A leader holds its own.
+    pub(crate) orders: Option<crate::plan::Orders>,
+    /// Since when the leader has been waiting for stragglers before
+    /// moving the party on (see `Client::waits_for_stragglers`).
+    pub(crate) straggling_since: Option<Instant>,
     /// The first shot thrown at a target since anything last got to it,
     /// and when: damage, a resist or an evasion clears it. The time spent
     /// walking to a clear shot, with nothing thrown, is not a miss.
@@ -3553,6 +3568,12 @@ impl Autoplay {
         if self.team.working(guid) {
             return false;
         }
+        // Dealt by the leader's plan: whoever it was dealt to opens it,
+        // and the rest leave it. Only while the plan is fresh; a leader
+        // gone quiet leaves the turns below to say (see `crate::plan`).
+        if let Some(to) = self.body_dealt_to(guid, now) {
+            return to == me;
+        }
         // Newly fallen, so nobody's claim can have reached the board
         // yet: the turns say whose it is until it has.
         let seen = self.corpse_first_seen(guid, now);
@@ -3613,12 +3634,46 @@ impl Autoplay {
         {
             return None;
         }
-        let dealt = self.team.opens_first(guid, at, self.my_turn(me, mine, now));
+        let dealt = self
+            .body_dealt_to(guid, now)
+            .unwrap_or_else(|| self.team.opens_first(guid, at, self.my_turn(me, mine, now)));
         self.team
             .mates
             .iter()
             .find(|m| m.guid == dealt)
             .map(|m| m.name.as_str())
+    }
+
+    /// Take in the leader's plan, heard at `now`.
+    pub fn take_orders(&mut self, plan: crate::plan::Plan, now: Instant) {
+        self.orders = Some(crate::plan::Orders { plan, heard: now });
+    }
+
+    /// The plan this character is under, while it is fresh (see
+    /// `crate::plan::ORDERS_LAST`) and from whoever leads the team as
+    /// this character now sees it. A plan from a leader since replaced,
+    /// or from before the team was left, is nobody's to obey.
+    pub fn current_plan(&self, now: Instant) -> Option<&crate::plan::Plan> {
+        if !self.config.team.enabled {
+            return None;
+        }
+        let plan = self.orders.as_ref()?.current(now)?;
+        let leader = if self.team.leader {
+            self.team.me.as_ref().map(|m| m.name.as_str())
+        } else {
+            self.team.leader_mate().map(|m| m.name.as_str())
+        };
+        (leader == Some(plan.leader.as_str())).then_some(plan)
+    }
+
+    /// This character's orders under the plan, `me` being its player guid.
+    pub fn order_for(&self, me: u32, now: Instant) -> Option<crate::plan::Order> {
+        self.current_plan(now)?.order_for(me)
+    }
+
+    /// Whom the plan deals the body `body` to, if it is fresh and deals it.
+    pub fn body_dealt_to(&self, body: u32, now: Instant) -> Option<u32> {
+        self.current_plan(now)?.body_dealt_to(body)
     }
 
     /// How many bodies this character opened first lately, within
@@ -3631,6 +3686,16 @@ impl Autoplay {
             .filter(|t| now.saturating_duration_since(**t) < DEAL_WINDOW)
             .count();
         u16::try_from(lately).unwrap_or(u16::MAX)
+    }
+
+    /// Whether any of the others has said it shut the body `corpse`: one
+    /// the leader's plan does not deal, what is still on it being routed
+    /// by the shut (see [`Shut`]).
+    pub(crate) fn shut_by_anyone(&self, corpse: u32) -> bool {
+        self.shut_by
+            .range((corpse, 0, 0)..=(corpse, u32::MAX, u32::MAX))
+            .next()
+            .is_some()
     }
 
     /// Whether the mate `who` has said it shut the body `corpse` (see
@@ -5892,6 +5957,277 @@ impl Client {
         self.loot_profile().is_some() && !room.pack_low && !room.past_the_wall
     }
 
+    /// The names of what has attacked this character lately (see
+    /// [`Autoplay::attacked_by`]), as it says them on the board.
+    pub fn attackers_lately(&self) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .autoplay
+            .hit_by
+            .iter()
+            .filter(|(_, when)| when.elapsed() < UNDER_ATTACK)
+            .map(|(who, _)| who.clone())
+            .collect();
+        names.sort_unstable();
+        names.dedup();
+        names
+    }
+
+    /// The party as the planner reads it: this character first, from
+    /// what it knows of itself, then each mate from its row on the board
+    /// (see `crate::plan::Hand`).
+    fn hands_of_team(&self, now: Instant, with_me: bool) -> Vec<crate::plan::Hand> {
+        let alive = |g: u32| {
+            self.world
+                .objects
+                .get(&g)
+                .is_some_and(|o| o.health.unwrap_or(1.0) > 0.0)
+        };
+        let me = self.world.player_guid.unwrap_or(0);
+        let mine = self.player.as_ref().map(|p| p.world_position());
+        let mut hands = Vec::with_capacity(self.autoplay.team.mates.len() + 1);
+        if let Some(mine) = mine.filter(|_| me != 0 && with_me) {
+            let supplies = self.supplies(&self.autoplay.config.growth, now);
+            hands.push(crate::plan::Hand {
+                guid: me,
+                name: self.world.stats.name.clone(),
+                world: mine,
+                health: self.health_fraction(),
+                fights: self.autoplay.config.enabled,
+                target: self
+                    .attack_target
+                    .or(self.autoplay.casting_at())
+                    .filter(|g| alive(*g)),
+                looting: self.autoplay.corpse_claim(now).map(|(g, _)| g),
+                opens: self.autoplay.config.enabled
+                    && self.opens_bodies()
+                    && !supplies.pack_full
+                    && !supplies.laden,
+                following: false,
+                turns: self.autoplay.planner.turns_of(me, now, DEAL_WINDOW),
+                hit_by: self.attackers_lately(),
+            });
+        }
+        for m in &self.autoplay.team.mates {
+            if m.guid == 0 {
+                continue;
+            }
+            hands.push(crate::plan::Hand {
+                guid: m.guid,
+                name: m.name.clone(),
+                world: m.world,
+                health: m.health,
+                fights: m.autoplay && m.health > 0.0,
+                target: m.target,
+                looting: m.looting.filter(|_| m.looting_for < CLAIM_STALE),
+                opens: m.turn().is_some_and(|t| t.room),
+                following: m.following,
+                turns: self.autoplay.planner.turns_of(m.guid, now, DEAL_WINDOW),
+                hit_by: m.hit_by.clone(),
+            });
+        }
+        hands
+    }
+
+    /// The leader's plan for the party (see `crate::plan`): who fights
+    /// what, whose turn each body is, and whom the leader is waiting
+    /// for. Made from what the leader sees of the field and what the
+    /// others have said on the board, and kept as the leader's own orders
+    /// too. The team plugin asks for it once a board round and posts it.
+    pub fn plan_for_team(&mut self, now: Instant) -> crate::plan::Plan {
+        let cfg = self.autoplay.config.fight.clone();
+        let hands = self.hands_of_team(now, true);
+        let me = self.player.as_ref().map(|p| p.world_position());
+        let underground = self.underground();
+        // The creatures the party would fight, within the leader's own
+        // radius and the one a follower fights within of its leader
+        // (`Team::fight_radius`): further off, an order would draw a
+        // follower away just as picking for itself would have.
+        let within = cfg
+            .radius
+            .min(self.autoplay.config.team.fight_radius.max(1.0));
+        let named: Vec<(u32, String, glam::Vec3)> = self
+            .world
+            .objects
+            .values()
+            .filter(|o| self.would_fight(o, &cfg, underground, now))
+            .filter_map(|o| {
+                let at = o.world_pos()?;
+                (me.is_none_or(|m| at.distance(m) <= within)).then(|| (o.guid, o.name.clone(), at))
+            })
+            .collect();
+        let by_name: Vec<(u32, &str, glam::Vec3)> = named
+            .iter()
+            .map(|(g, n, at)| (*g, n.as_str(), *at))
+            .collect();
+        let hunted: Vec<(u32, Vec<u32>)> = hands
+            .iter()
+            .map(|h| (h.guid, crate::plan::hunted_by(&by_name, h)))
+            .collect();
+        let foes: Vec<crate::plan::Foe> = named
+            .iter()
+            .map(|(guid, _, at)| {
+                let mut after: Vec<u32> = self
+                    .world
+                    .objects
+                    .get(guid)
+                    .and_then(|o| o.walked_at)
+                    .filter(|w| hands.iter().any(|h| h.guid == *w))
+                    .into_iter()
+                    .collect();
+                after.extend(
+                    hunted
+                        .iter()
+                        .filter(|(_, foes)| foes.contains(guid))
+                        .map(|(h, _)| *h),
+                );
+                after.sort_unstable();
+                after.dedup();
+                crate::plan::Foe {
+                    guid: *guid,
+                    world: *at,
+                    hard: self.is_hard_fight(*guid),
+                    after,
+                }
+            })
+            .collect();
+        // The bodies nobody has opened: not emptied by this character,
+        // not shut by any of the others, and no player's remains.
+        let bodies: Vec<crate::plan::Body> = self
+            .world
+            .objects
+            .values()
+            .filter(|o| o.object_desc_flags & ac_world::object_desc_flags::CORPSE != 0)
+            .filter(|o| !self.corpse_is_someone_elses(&o.name))
+            .filter(|o| !self.autoplay.looted.contains(&o.guid))
+            .filter(|o| !self.autoplay.shut_by_anyone(o.guid))
+            .filter_map(|o| {
+                Some(crate::plan::Body {
+                    guid: o.guid,
+                    world: o.world_pos()?,
+                })
+            })
+            .collect();
+        // What each was last told to fight, so that nobody is moved for
+        // nothing (see `plan::assign_targets`).
+        let prior: std::collections::BTreeMap<u32, u32> = self
+            .autoplay
+            .current_plan(now)
+            .map(|p| {
+                p.orders
+                    .iter()
+                    .filter_map(|(who, o)| Some((*who, o.target?)))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let targets = crate::plan::assign_targets(&hands, &foes, &prior);
+        let standing = self.autoplay.planner.standing(now);
+        let deals = crate::plan::deal_bodies(&hands, &bodies, &standing, corpse_within_reach);
+        self.autoplay.planner.dealt(&deals, now, DEAL_WINDOW);
+        self.autoplay.planner.n = self.autoplay.planner.n.wrapping_add(1);
+        let mut orders: std::collections::BTreeMap<u32, crate::plan::Order> =
+            std::collections::BTreeMap::new();
+        for h in &hands {
+            let order = crate::plan::Order {
+                target: targets.get(&h.guid).copied(),
+                body: deals
+                    .iter()
+                    .find(|(_, to)| *to == h.guid)
+                    .map(|(body, _)| *body),
+            };
+            if order != crate::plan::Order::default() {
+                orders.insert(h.guid, order);
+            }
+        }
+        let waiting_for = match (self.autoplay.straggling_since, me) {
+            (Some(_), Some(mine)) => {
+                crate::plan::stragglers(mine, self.autoplay.config.team.follow_distance, &hands)
+                    .into_iter()
+                    .map(|s| s.name)
+                    .collect()
+            }
+            _ => Vec::new(),
+        };
+        let plan = crate::plan::Plan {
+            leader: self.world.stats.name.clone(),
+            n: self.autoplay.planner.n,
+            orders,
+            waiting_for,
+        };
+        self.autoplay.take_orders(plan.clone(), now);
+        plan
+    }
+
+    /// What the leader's plan has this character fight, while the plan
+    /// is fresh and the creature is alive and not one this character is
+    /// walking past on its way somewhere (see [`Self::joins_the_team_on`]).
+    /// Only with focus fire on: that is the switch for fighting as a
+    /// party rather than each for itself.
+    pub(crate) fn ordered_target(&self, cfg: &Fight, now: Instant) -> Option<(u32, String)> {
+        let team = &self.autoplay.config.team;
+        if !team.enabled || !team.focus_fire {
+            return None;
+        }
+        let me = self.world.player_guid?;
+        let guid = self.autoplay.order_for(me, now)?.target?;
+        let o = self.world.objects.get(&guid)?;
+        (o.health.unwrap_or(1.0) > 0.0 && !self.passing_by(o, cfg)).then(|| (guid, o.name.clone()))
+    }
+
+    /// Whether an order to fight something other than `current` is to be
+    /// followed now: it names a live creature, and the one in hand is not
+    /// hitting this character. What is hitting us is fought to the end
+    /// whatever the plan says, since that fight is already happening.
+    fn ordered_elsewhere(&self, current: u32, cfg: &Fight, now: Instant) -> bool {
+        let Some((ordered, _)) = self.ordered_target(cfg, now) else {
+            return false;
+        };
+        if ordered == current {
+            return false;
+        }
+        let hitting_us = self
+            .world
+            .objects
+            .get(&current)
+            .is_some_and(|o| self.hit_lately_by(&o.name));
+        !hitting_us
+    }
+
+    /// Whether the leader holds the party where it is, for a follower
+    /// still fighting or too far behind (see `crate::plan::stragglers`),
+    /// and says so. Up to `crate::plan::STRAGGLE_PATIENCE`; past that the
+    /// party moves and the following brings the straggler along.
+    pub(crate) fn waits_for_stragglers(&mut self, now: Instant) -> bool {
+        let team = &self.autoplay.config.team;
+        if !team.enabled || !self.autoplay.team.leader || self.autoplay.team.mates.is_empty() {
+            self.autoplay.straggling_since = None;
+            return false;
+        }
+        let Some(me) = self.player.as_ref().map(|p| p.world_position()) else {
+            self.autoplay.straggling_since = None;
+            return false;
+        };
+        let keep = team.follow_distance;
+        let hands = self.hands_of_team(now, false);
+        let behind = crate::plan::stragglers(me, keep, &hands);
+        if behind.is_empty() {
+            self.autoplay.straggling_since = None;
+            return false;
+        }
+        let since = *self.autoplay.straggling_since.get_or_insert(now);
+        if now.duration_since(since) >= crate::plan::STRAGGLE_PATIENCE {
+            let names: Vec<&str> = behind.iter().map(|s| s.name.as_str()).collect();
+            self.autoplay.note(
+                format!("waited long enough for {}; moving on", names.join(", ")),
+                now,
+            );
+            self.autoplay.straggling_since = None;
+            return false;
+        }
+        self.autoplay
+            .say(Doing::Idle, crate::plan::waiting_line(&behind));
+        true
+    }
+
     /// Where the body `corpse` lies, the fellows judged at its shut (see
     /// [`Autoplay::may_judge`]), and those of them things on it may be left
     /// for (see [`Autoplay::may_be_sent`]), each as its row says it. `None`
@@ -7301,7 +7637,15 @@ impl Client {
         if stance == Stance::Magic {
             return self.autoplay_fight_with_spells(now, &cfg);
         }
-        // Already on one that is still alive.
+        // Already on one that is still alive -- unless the leader's plan
+        // has this character on another, and this one is not hitting us
+        // (see `Client::ordered_elsewhere`).
+        if let Some(t) = self.attack_target {
+            if self.ordered_elsewhere(t, &cfg, now) {
+                self.attack_target = None;
+                self.autoplay.drop_target();
+            }
+        }
         if let Some(t) = self.attack_target {
             if self.stalled_on(t, now) {
                 return false;
@@ -7362,15 +7706,21 @@ impl Client {
         }
         let me = self.player.as_ref().map(|p| p.world_position());
         let Some(me) = me else { return false };
-        // Hunting together: hit what the team is hitting, unless it is
-        // something this character is walking past on its way somewhere.
+        // Hunting together: hit what the leader's plan says, and with no
+        // plan what the team is hitting, unless it is something this
+        // character is walking past on its way somewhere. The leader
+        // takes its own orders; without a plan it picks for itself.
         let team = &self.autoplay.config.team;
-        if team.enabled && team.focus_fire && !self.autoplay.team.leader {
-            let joined = self
-                .autoplay
-                .team
-                .target()
-                .filter(|(guid, _)| self.joins_the_team_on(*guid, &cfg));
+        if team.enabled && team.focus_fire {
+            let joined = self.ordered_target(&cfg, now).or_else(|| {
+                if self.autoplay.team.leader {
+                    return None;
+                }
+                self.autoplay
+                    .team
+                    .target()
+                    .filter(|(guid, _)| self.joins_the_team_on(*guid, &cfg))
+            });
             if let Some((guid, name)) = joined {
                 if self.autoplay_plan_hard(guid, &name, now) {
                     return true;
@@ -7470,6 +7820,13 @@ impl Client {
                 .get(&g)
                 .is_some_and(|o| o.health.unwrap_or(1.0) > 0.0)
         };
+        // The leader's plan has this character on another, and the one
+        // being cast at is not hitting us: let it go for the other.
+        if let Some(g) = self.autoplay.casting_at {
+            if self.ordered_elsewhere(g, cfg, now) {
+                self.autoplay.casting_at = None;
+            }
+        }
         // Stay on the one already being fought while it lives, and is
         // taking damage.
         if let Some(g) = self.autoplay.casting_at {
@@ -7487,7 +7844,10 @@ impl Client {
                 if self.waits_for_a_corpse() {
                     None
                 } else {
-                    self.pick_target(cfg)
+                    // What the plan says first, else what is nearest.
+                    self.ordered_target(cfg, now)
+                        .map(|(g, _)| g)
+                        .or_else(|| self.pick_target(cfg))
                 }
             }
         };
@@ -13665,6 +14025,69 @@ mod tests {
             mates,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn a_body_the_plan_deals_is_the_dealt_ones_while_the_plan_is_fresh_and_from_the_leader() {
+        use crate::plan::{Order, Plan, ORDERS_LAST};
+        let t0 = Instant::now();
+        let (body, at) = (0x8000_0001, glam::Vec3::ZERO);
+        let (me, other) = (2, 3);
+        let mut ap = Autoplay::default();
+        ap.config.enabled = true;
+        ap.config.team.enabled = true;
+        let mut leader = looter(1, at, None, Duration::ZERO);
+        leader.leader = true;
+        ap.team = view_of(vec![leader, looter(other, at, None, Duration::ZERO)]);
+        ap.team.me = Some(looter(me, at, None, Duration::ZERO));
+        ap.corpse_seen.push((body, t0));
+        let plan = |to: u32| {
+            let mut p = Plan {
+                leader: "Bryn01".into(),
+                ..Default::default()
+            };
+            p.orders.insert(
+                to,
+                Order {
+                    target: None,
+                    body: Some(body),
+                },
+            );
+            p
+        };
+        // Dealt to another: left to it, and the log says whose it is.
+        ap.take_orders(plan(other), t0);
+        assert!(!ap.ours_to_open(body, at, me, at, t0));
+        assert_eq!(ap.whose_turn(body, at, me, at, t0), Some("Bryn03"));
+        // Still the other's once the turns would have let anyone free
+        // take it (see `CLAIM_SETTLE`): the deal is the leader's word.
+        let settled = t0 + CLAIM_SETTLE * 2;
+        assert!(!ap.ours_to_open(body, at, me, at, settled));
+        // Dealt to this character: its own.
+        ap.take_orders(plan(me), t0);
+        assert!(ap.ours_to_open(body, at, me, at, t0));
+        // The leader gone quiet: the plan lapses and the turns say again.
+        ap.take_orders(plan(other), t0);
+        let late = t0 + ORDERS_LAST + CLAIM_SETTLE * 2;
+        assert!(
+            ap.ours_to_open(body, at, me, at, late),
+            "a stale plan held a body"
+        );
+        // A plan signed by one not leading is nobody's to obey.
+        let mut theirs = plan(other);
+        theirs.leader = "Bryn03".into();
+        ap.take_orders(theirs, late);
+        assert!(ap.ours_to_open(body, at, me, at, late));
+        // And a mate's standing claim on the body outranks a deal to us:
+        // the deal is a plan, the claim is a body already in hand.
+        ap.take_orders(plan(me), late);
+        ap.team.mates[1].looting = Some(body);
+        ap.team.mates[1].looting_for = Duration::from_secs(2);
+        assert!(!ap.ours_to_open(body, at, me, at, late));
+        // Off the team, no plan is obeyed at all.
+        ap.team.mates[1].looting = None;
+        ap.config.team.enabled = false;
+        assert_eq!(ap.body_dealt_to(body, late), None);
     }
 
     #[test]

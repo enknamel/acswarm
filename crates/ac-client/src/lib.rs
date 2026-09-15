@@ -260,6 +260,7 @@ pub mod logistics;
 pub mod magic;
 pub mod options;
 pub mod pathfinder;
+pub mod plan;
 pub mod player;
 pub mod profile;
 pub mod recalls;

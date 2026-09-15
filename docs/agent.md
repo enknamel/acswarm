@@ -187,6 +187,26 @@ over a tiny state, replanned only when something changes.
 
 Unchanged. Small, deterministic, and its determinism is the point.
 
+One thing now sits on top of it, and it is not a state: a plan. Every
+session judged the world alone and read what the others said about
+themselves, and what came of that was coordination by coincidence --
+six characters joined their leader on one Drudge while three more hit
+the followers from behind, and each body went to whoever was free
+first. The leader is the one session that sees the same board the
+others see, so it plans (`plan`): who fights what, spread by who is
+being attacked and by distance with focus fire kept for the hard
+targets; whose turn each body is, one body a turn round the party, the
+skill rules' routing left as it was; and whom it waits for before it
+moves the party on. The plan goes out on the board like everything
+else, and an order is obeyed only while it is fresh -- a leader that
+goes quiet leaves no order standing, and every session falls back to
+the rules it had before there was a plan, which is why a plan that
+never arrives stops nobody fighting. It stays an FSM underneath because
+the plan reads the roster and never drives it: it does not choose the
+leader, found the fellowship or start the walk to town, and every
+decision in it is a pure function over a plain state that a test can
+run without a clock or a server.
+
 ### Why not one paradigm
 
 - **Pure FSM**: state explosion. Every new concern is another flag or
