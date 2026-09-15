@@ -1,5 +1,5 @@
 //! Route on foot between two map coordinates.
-//! `cargo run --release -p ac-scene --example route -- 69.6,-62.4 -60.5,-88.0`
+//! `AC_DATA_DIR=... cargo run --release -p ac-scene --example route -- 69.6,-62.4 -60.5,-88.0`
 use ac_scene::{worldgrid::WorldGrid, worldroute, Assets};
 use glam::Vec2;
 

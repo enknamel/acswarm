@@ -1,4 +1,5 @@
 //! Print scenery counts per landblock around a center block.
+//! `AC_DATA_DIR=... cargo run -p ac-scene --example scenery_count -- [BLOCK]` (default A9B4)
 use ac_scene::{landblock, Assets};
 
 fn main() {

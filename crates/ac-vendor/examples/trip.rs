@@ -6,9 +6,8 @@
 //! with the pack still full shows up here in a second rather than
 //! twenty minutes into a live run.
 //!
-//! Usage: trip [slots] [coin]
-//!   slots  how many free slots the pack starts with (default 6)
-//!   coin   loose coin to start with (default 0)
+//! `cargo run -p ac-vendor --example trip -- [slots] [coin]`: free pack slots
+//! to start with (default 6) and loose coin to start with (default 0).
 
 use std::collections::BTreeMap;
 use std::time::Instant;

@@ -1,4 +1,5 @@
 //! A cell's doorways and the cells behind its portals.
+//! `AC_DATA_DIR=... cargo run -p ac-scene --example celldoors -- BLOCK CELL...`
 use ac_scene::{landblock, Assets};
 fn main() {
     let dir = std::env::var_os("AC_DATA_DIR").expect("AC_DATA_DIR");

@@ -1,5 +1,5 @@
 //! List the collision triangles within `r` of a landblock-local point.
-//! `AC_DATA_DIR=... cargo run --release -p ac-scene --example tris_near BLOCK x y z r`
+//! `AC_DATA_DIR=... cargo run --release -p ac-scene --example tris_near -- BLOCK x y z r`
 use ac_scene::collision::CollisionWorld;
 use ac_scene::{landblock, Assets};
 use glam::Vec3;

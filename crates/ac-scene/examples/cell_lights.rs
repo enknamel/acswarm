@@ -1,6 +1,5 @@
 //! List the interior cells of a landblock with their lights.
-//!
-//!     AC_DATA_DIR=~/Downloads/ac_data cargo run -p ac-scene --example cell_lights -- 8602
+//! `AC_DATA_DIR=... cargo run -p ac-scene --example cell_lights -- BLOCK` (hex, e.g. 8602)
 
 use ac_scene::{landblock, Assets};
 

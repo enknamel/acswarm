@@ -1,4 +1,5 @@
 //! Print the skill table: id and name.
+//! `AC_DATA_DIR=... cargo run -p ac-scene --example skills`
 use ac_scene::Assets;
 fn main() {
     let dir = std::env::var_os("AC_DATA_DIR").expect("AC_DATA_DIR");
