@@ -40,6 +40,9 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(test)]
+use crate::refusals::refused;
+use crate::refusals::{self, Answer, OpenRefusal, RecruitRefusal, Refusal};
 use crate::{Client, Stance, SAME_FLOOR};
 // The rule vocabulary lives in ac-loot; this file still speaks it.
 pub use ac_loot::profile::LootAction;
@@ -212,59 +215,6 @@ fn answered_with_nothing(
         && told.is_none_or(|at| at <= asked)
 }
 
-/// Why the server would not open a body.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum CorpseRefusal {
-    /// Someone has it open this moment. The server hands a container to
-    /// one viewer at a time and turns the rest away outright
-    /// (`Container.InUseMessage`); that viewer is usually done with it
-    /// in a moment.
-    InUse,
-    /// It is the killer's for now (`Corpse.Open`). A monster's body
-    /// opens to everyone once it is half rotted.
-    NotYetOurs,
-    /// It is the killer's for good: a body that made a rare, or a
-    /// player killer's doing. Neither is ever shared, however long it
-    /// lies there.
-    NeverOurs,
-}
-
-/// Which body the server's words named, and why it would not open it.
-///
-/// Matched on the English because that is all there is to match on:
-/// every one of these arrives as a transient string, which carries no
-/// error code. They are what ACE answers an open with and nothing else,
-/// so a line that reads this way was an answer to an open -- of a
-/// container, at least. That it was *our* body's open is for the caller
-/// to say (see [`Autoplay::corpse_refused`]); the in-use words are sent
-/// for any container, a chest as readily as a corpse.
-fn corpse_refusal(text: &str) -> Option<(&str, CorpseRefusal)> {
-    // "The Corpse of Hellion is already in use by someone else!" -- or
-    // by a name, on a server that tells you whose (`container_opener_name`).
-    if let Some((name, _who)) = text
-        .strip_prefix("The ")
-        .and_then(|s| s.strip_suffix('!'))
-        .and_then(|s| s.split_once(" is already in use by "))
-    {
-        return Some((name, CorpseRefusal::InUse));
-    }
-    // "You do not yet have the right to loot the Corpse of Hellion."
-    if let Some(name) = text.strip_prefix("You do not yet have the right to loot the ") {
-        return Some((
-            name.strip_suffix('.').unwrap_or(name),
-            CorpseRefusal::NotYetOurs,
-        ));
-    }
-    // "You may not loot the Corpse of Hellion because ..." -- the body
-    // made a rare, or the death was a player killer's doing.
-    if let Some((name, _why)) = text
-        .strip_prefix("You may not loot the ")
-        .and_then(|s| s.split_once(" because "))
-    {
-        return Some((name, CorpseRefusal::NeverOurs));
-    }
-    None
-}
 /// Least time between two casts of the same buff.
 const BUFF_EVERY: Duration = Duration::from_millis(1500);
 /// A target that takes no damage for this long is let go.
@@ -273,7 +223,7 @@ const STALL_AFTER: Duration = Duration::from_secs(20);
 /// character this much nearer than it has been (see [`came_nearer`]).
 const APPROACH_PROGRESS: f32 = 1.0;
 /// And left alone for this long afterwards.
-const GIVE_UP_FOR: Duration = Duration::from_secs(90);
+const GIVE_UP_FOR: Duration = refusals::ATTACK_AGAIN;
 /// Casting or shooting this long from one spot with nothing landing:
 /// the spot is no good, and the character closes in rather than going on.
 const CLOSE_IN_AFTER: Duration = Duration::from_secs(8);
@@ -1066,17 +1016,11 @@ const RECRUIT_RANGE: f32 = 25.0;
 /// the leader: the others are asked meanwhile.
 const RECRUIT_AGAIN: Duration = Duration::from_secs(5);
 
-/// How long an invitee the server turned down in words is left alone
-/// before it is asked again, doubling with every refusal after. The
-/// server answers a recruit of someone already in a fellowship, or busy
-/// with something, in plain chat (ACE `Entity/Fellowship.cs`,
-/// `AddFellowshipMember`), and until those words were read two mates
+/// How long an invitee the server turned down is left alone before it
+/// is asked again: the table's wait for a refused recruit (see
+/// `refusals::answer`). Until the server's words were read, two mates
 /// were asked ten times each every [`RECRUIT_AGAIN`] and never came.
-/// "Busy" passes (a use finishes, a cast lands), so the wait starts
-/// short; "already a member" is settled by that mate's own row on the
-/// board, which says so within a round, and by the rightful leader
-/// taking the fleet's fellowships apart (see [`rival_leader`]).
-const HELD_OFF_FIRST: Duration = Duration::from_secs(10);
+const HELD_OFF_FIRST: Duration = refusals::RECRUIT_HELD_OFF;
 
 /// How long the team's rightful leader must be seen in a fellowship of
 /// its own before this character gives up the one it founded. The
@@ -1086,20 +1030,6 @@ const HELD_OFF_FIRST: Duration = Duration::from_secs(10);
 /// says it is not: a few rounds tell that from a second fellowship.
 const YIELD_AFTER: Duration = Duration::from_secs(3);
 
-/// Why the server would not recruit somebody, in its own words (see
-/// [`recruit_refusal`]).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum RecruitRefusal {
-    /// "{Name} is already a member of a Fellowship."
-    AlreadyAMember,
-    /// "{Name} is busy.": the server's `fellow_busy_no_recruit` rule, or
-    /// a confirmation it could not put to that character.
-    Busy,
-    /// WeenieError 0x041E, "Your fellowship is full": the one code a
-    /// recruit meets that names nobody, so it is about the last asked.
-    Full,
-}
-
 /// How many a fellowship holds, the leader counted (ACE
 /// `Entity/Fellowship.cs`, `MaxFellows`). A team of ten is one too
 /// many, and the tenth is not asked.
@@ -1108,23 +1038,6 @@ const MAX_FELLOWS: usize = 9;
 /// WeenieError for an invitation into a full fellowship (ACE
 /// `WeenieError.YourFellowshipIsFull`).
 pub(crate) const FELLOWSHIP_FULL: u32 = 0x041e;
-
-/// The mate a recruiting refusal is about and why, from a chat line.
-/// ACE answers the two refusals a recruit can meet with plain Broadcast
-/// chat, not a WeenieError (`Entity/Fellowship.cs`,
-/// `AddFellowshipMember`), so nothing on the wire but these words says
-/// the invitation came to nothing. The name is the server's for the
-/// character, `+` and all, as the board has it.
-pub(crate) fn recruit_refusal(text: &str) -> Option<(&str, RecruitRefusal)> {
-    let text = text.trim();
-    if let Some(name) = text.strip_suffix(" is already a member of a Fellowship.") {
-        return Some((name, RecruitRefusal::AlreadyAMember));
-    }
-    if let Some(name) = text.strip_suffix(" is busy.") {
-        return Some((name, RecruitRefusal::Busy));
-    }
-    None
-}
 
 /// Who to ask into the fellowship next, out of the mates standing by:
 /// the nearest one that has not been asked in the last
@@ -1208,26 +1121,6 @@ const UNDER_ATTACK: Duration = Duration::from_secs(4);
 /// takes the default of five minutes and counts down from there
 /// (`WorldObject_Decay`), so this is the whole window there is.
 pub(crate) const CORPSE_LIFE: Duration = Duration::from_secs(300);
-
-/// How long to leave a body someone else has open. Long enough that the
-/// two of us are not asking over each other, short enough to have it the
-/// moment they are done: emptying one takes a few seconds. It doubles
-/// from there like any other wait.
-const CORPSE_IN_USE_AGAIN: Duration = Duration::from_secs(3);
-
-/// How long to leave a body the server says is not ours yet.
-///
-/// Half decay is the slowest way a body opens up, not the usual one:
-/// ACE marks a corpse looted the moment anyone closes it, and a looted
-/// corpse is everyone's (`Corpse.Close` sets `IsLooted`, which
-/// `Corpse.HasPermission` answers on before it ever looks at the clock).
-/// So the ordinary course -- the killer opens it, empties it, closes it
-/// -- makes a body public within seconds of the refusal, and writing it
-/// off until it had half rotted left its loot on the floor for two
-/// minutes. Short, and doubling like any other wait, so a body that
-/// really is locked to its killer is asked about a handful of times
-/// rather than every half minute.
-const CORPSE_NOT_OURS_AGAIN: Duration = Duration::from_secs(5);
 
 /// How close to rotting a corpse has to be before it is worth breaking
 /// off for. Inside this there is no second chance.
@@ -3128,7 +3021,8 @@ impl Autoplay {
     /// or about a body one of the others is working, change nothing.
     pub(crate) fn corpse_refused(
         &mut self,
-        text: &str,
+        named: &str,
+        why: OpenRefusal,
         in_hand: &str,
         told: Option<Instant>,
         now: Instant,
@@ -3136,38 +3030,47 @@ impl Autoplay {
         let Some((guid, asked, ..)) = self.corpse else {
             return false;
         };
-        let Some((named, why)) = corpse_refusal(text) else {
-            return false;
-        };
         if named != in_hand || told.is_none_or(|at| at <= asked) {
             return false;
         }
-        match why {
-            CorpseRefusal::InUse => self.shelved.hold(guid, CORPSE_IN_USE_AGAIN, now),
-            // Not ours yet; it becomes everyone's the moment whoever
-            // has it closes it, which is usually within seconds (see
-            // [`CORPSE_NOT_OURS_AGAIN`]). A short wait, doubling.
-            CorpseRefusal::NotYetOurs => self.shelved.hold(guid, CORPSE_NOT_OURS_AGAIN, now),
-            // Nobody but the killer will ever open it. Left for good
-            // rather than waited on: it still lies there, and every wait
-            // that runs out is another walk back to it.
-            CorpseRefusal::NeverOurs => self.shelved.note(
-                guid,
-                &crate::did::Did::refused("it is the killer's alone"),
-                now,
-            ),
-        }
-        match (why, self.shelved.waited(&guid)) {
-            (CorpseRefusal::NeverOurs, _) | (_, None) => {
-                tracing::info!("autoplay: {in_hand} ({guid:#010x}): {text} -- leaving it");
+        let said = match why {
+            OpenRefusal::InUse => "someone else has it open",
+            OpenRefusal::NotYetOurs => "not ours yet",
+            OpenRefusal::NeverOurs => "it is the killer's alone",
+        };
+        // The table's decision: a short doubling wait while someone has
+        // it or it is not ours yet, and for good when it never will be
+        // -- it still lies there, and every wait that runs out would be
+        // another walk back to it.
+        let answer = refusals::answer(&Refusal::Open { name: named, why });
+        answer.hold(&mut self.shelved, guid, said, now);
+        match (answer, self.shelved.waited(&guid)) {
+            (Answer::Never, _) | (_, None) => {
+                tracing::info!("autoplay: {in_hand} ({guid:#010x}): {said} -- leaving it");
             }
             (_, Some(wait)) => tracing::info!(
-                "autoplay: {in_hand} ({guid:#010x}): {text} -- trying again in {} s",
+                "autoplay: {in_hand} ({guid:#010x}): {said} -- trying again in {} s",
                 wait.as_secs().max(1)
             ),
         }
         self.let_go_of_corpse();
         true
+    }
+
+    /// [`Autoplay::corpse_refused`] from the server's own words, for
+    /// the tests, which are written in them.
+    #[cfg(test)]
+    pub(crate) fn corpse_refused_in_words(
+        &mut self,
+        text: &str,
+        in_hand: &str,
+        told: Option<Instant>,
+        now: Instant,
+    ) -> bool {
+        match refused(text) {
+            Some(Refusal::Open { name, why }) => self.corpse_refused(name, why, in_hand, told, now),
+            _ => false,
+        }
     }
 
     /// What becomes of a corpse the loot rules have shut, by what they
@@ -3751,15 +3654,12 @@ impl Autoplay {
     }
 
     /// The server's words on an invitation that came to nothing (see
-    /// [`recruit_refusal`]): the mate named is held off recruiting for a
-    /// doubling wait, and the log says so once. Only a mate this
-    /// character has invited is read this way: "{Name} is busy." is also
-    /// what the server says of a patron who cannot take an oath just
-    /// now (ACE `Player_Allegiance.cs`).
-    pub(crate) fn hear_recruit_refusal(&mut self, text: &str, now: Instant) {
-        let Some((name, why)) = recruit_refusal(text) else {
-            return;
-        };
+    /// `refusals::Refusal::Recruit`): the mate named is held off
+    /// recruiting for the table's wait, and the log says so once. Only
+    /// a mate this character has invited is read this way: "{Name} is
+    /// busy." is also what the server says of a patron who cannot take
+    /// an oath just now (ACE `Player_Allegiance.cs`).
+    pub(crate) fn hear_recruit_refusal(&mut self, name: &str, why: RecruitRefusal, now: Instant) {
         let Some(guid) = self
             .team
             .mates
@@ -3771,6 +3671,15 @@ impl Autoplay {
             return;
         };
         self.refuse_recruit(guid, why, now);
+    }
+
+    /// [`Autoplay::hear_recruit_refusal`] from the server's own words,
+    /// for the tests, which are written in them.
+    #[cfg(test)]
+    pub(crate) fn hear_recruit_words(&mut self, text: &str, now: Instant) {
+        if let Some(Refusal::Recruit { name, why }) = refused(text) {
+            self.hear_recruit_refusal(name, why, now);
+        }
     }
 
     /// The server's code on an invitation that came to nothing: the
@@ -3802,17 +3711,13 @@ impl Autoplay {
             .any(|(g, t)| *g == guid && now.duration_since(*t) < RECRUIT_AGAIN)
     }
 
-    /// Hold the mate off recruiting after a refusal, and say so once.
-    /// "Busy" is over in the seconds a use or a cast takes, so it is
-    /// the same short wait every time: doubling, a mage that happened
-    /// to be casting at each of eight asks was left out for hours. The
-    /// others double, since what they wait on is slower to change.
+    /// Hold the mate off recruiting after a refusal, as the table
+    /// decides (see `refusals::answer`), and say so once. "Busy" is
+    /// over in the seconds a use or a cast takes, so it is the same
+    /// short wait every time: doubling, a mage that happened to be
+    /// casting at each of eight asks was left out for hours. The others
+    /// double, since what they wait on is slower to change.
     fn refuse_recruit(&mut self, guid: u32, why: RecruitRefusal, now: Instant) {
-        if why == RecruitRefusal::Busy {
-            self.held_off.forget(&guid);
-        }
-        self.held_off.hold(guid, HELD_OFF_FIRST, now);
-        let wait = self.held_off.waited(&guid).unwrap_or(HELD_OFF_FIRST);
         let name = self
             .team
             .mates
@@ -3820,11 +3725,21 @@ impl Autoplay {
             .find(|m| m.guid == guid)
             .map(|m| m.name.clone())
             .unwrap_or_else(|| format!("{guid:#010x}"));
-        let why = match why {
+        let said = match why {
             RecruitRefusal::AlreadyAMember => "is already in a fellowship",
             RecruitRefusal::Busy => "is busy",
+            RecruitRefusal::NotAccepting => "is not accepting fellowship requests",
+            RecruitRefusal::Declined => "declined",
             RecruitRefusal::Full => "would not fit: the fellowship is full",
         };
+        refusals::answer(&Refusal::Recruit { name: &name, why }).hold(
+            &mut self.held_off,
+            guid,
+            said,
+            now,
+        );
+        let wait = self.held_off.waited(&guid).unwrap_or(HELD_OFF_FIRST);
+        let why = said;
         self.note(
             format!(
                 "{name} {why}: not asked into the fellowship again for {} s",
@@ -6659,15 +6574,13 @@ impl Client {
         }
     }
 
-    /// The server has said "Unable to put {item} into container" (see
-    /// `room::unable_to_put`). About the take in flight, when it names
-    /// that take's item: the refusal that goes with it says nothing
-    /// more, and has usually been read already -- a tick reads its
-    /// chat after its events -- so the refusal is judged again now.
-    pub(crate) fn hear_put_refusal(&mut self, text: &str) {
-        let Some(name) = crate::room::unable_to_put(text) else {
-            return;
-        };
+    /// The server has said "Unable to put {item} into container" of
+    /// `name` (see `refusals::Refusal::Put`). About the take in flight,
+    /// when it names that take's item: the refusal that goes with it
+    /// says nothing more, and has usually been read already -- a tick
+    /// reads its chat after its events -- so the refusal is judged
+    /// again now.
+    pub(crate) fn hear_put_refusal(&mut self, name: &str) {
         let Some(sent) = self.loot_sent.as_mut() else {
             return;
         };
@@ -6701,7 +6614,7 @@ impl Client {
     }
 
     /// Read a refused take as the pack it named being full when the
-    /// server said so in words (see `room::unable_to_put`), and only
+    /// server said so in words (see `refusals::Refusal::Put`), and only
     /// then: that pack is full until something leaves it, and the take
     /// goes once more into another pack with room. There is no third
     /// try, and a body nothing on it can go into is set aside for room
@@ -7853,6 +7766,49 @@ impl Client {
         false
     }
 
+    /// Let the target go and leave it alone for [`GIVE_UP_FOR`], saying
+    /// why once.
+    fn give_up_target(&mut self, guid: u32, why: &str, now: Instant) {
+        let name = self
+            .world
+            .objects
+            .get(&guid)
+            .map(|o| o.name.clone())
+            .unwrap_or_else(|| format!("{guid:#010x}"));
+        self.autoplay
+            .note(format!("giving up on {name}: {why}"), now);
+        self.autoplay
+            .given_up
+            .retain(|(_, t)| now.duration_since(*t) < GIVE_UP_FOR);
+        self.autoplay.given_up.push((guid, now));
+        self.autoplay.engaged = None;
+        self.autoplay.closing = None;
+        self.attack_target = None;
+        self.autoplay.casting_at = None;
+    }
+
+    /// The server's words on a target it will not let us fight, "You
+    /// cannot attack {name}" (see `refusals::Refusal::Attack`): the
+    /// target in hand, when it is the one named, is given up at once
+    /// rather than when the stall clock runs out. What makes a creature
+    /// unattackable does not change while we stand there swinging.
+    pub(crate) fn hear_attack_refusal(&mut self, name: &str, now: Instant) {
+        let Some(guid) = self
+            .attack_target
+            .or_else(|| self.autoplay.engaged.map(|(g, ..)| g))
+        else {
+            return;
+        };
+        if self
+            .world
+            .objects
+            .get(&guid)
+            .is_some_and(|o| o.name == name)
+        {
+            self.give_up_target(guid, "the server will not let us attack it", now);
+        }
+    }
+
     /// Note the target being worked on. True when it has taken no
     /// damage for too long and should be let go: it is out of reach,
     /// behind something, or not what it seems.
@@ -7889,22 +7845,7 @@ impl Client {
                     self.autoplay.thrown = None;
                     false
                 } else if now.duration_since(since) > STALL_AFTER {
-                    let name = self
-                        .world
-                        .objects
-                        .get(&guid)
-                        .map(|o| o.name.clone())
-                        .unwrap_or_else(|| format!("{guid:#010x}"));
-                    self.autoplay
-                        .note(format!("giving up on {name}: no damage in a while"), now);
-                    self.autoplay
-                        .given_up
-                        .retain(|(_, t)| now.duration_since(*t) < GIVE_UP_FOR);
-                    self.autoplay.given_up.push((guid, now));
-                    self.autoplay.engaged = None;
-                    self.autoplay.closing = None;
-                    self.attack_target = None;
-                    self.autoplay.casting_at = None;
+                    self.give_up_target(guid, "no damage in a while", now);
                     true
                 } else {
                     false
@@ -8029,11 +7970,11 @@ impl Client {
         })
     }
 
-    /// A line from the server while a body is waiting to open. One
-    /// refusing that body is acted on at once rather than waited out
-    /// (see [`Autoplay::corpse_refused`]), and the walk to it, if there
-    /// was one, ends with it.
-    pub(crate) fn hear_corpse_refusal(&mut self, text: &str, now: Instant) {
+    /// The server's words refusing to open the container `named`, while
+    /// a body is waiting to open. One refusing that body is acted on at
+    /// once rather than waited out (see [`Autoplay::corpse_refused`]),
+    /// and the walk to it, if there was one, ends with it.
+    pub(crate) fn hear_corpse_refusal(&mut self, named: &str, why: OpenRefusal, now: Instant) {
         let Some((guid, ..)) = self.autoplay.corpse else {
             return;
         };
@@ -8042,7 +7983,10 @@ impl Client {
         let Some(name) = self.world.objects.get(&guid).map(|o| o.name.clone()) else {
             return;
         };
-        if self.autoplay.corpse_refused(text, &name, self.told, now) {
+        if self
+            .autoplay
+            .corpse_refused(named, why, &name, self.told, now)
+        {
             self.stop_walking_to_loot();
         }
     }
@@ -9728,6 +9672,7 @@ mod tests {
 
     use super::*;
     use crate::items::ItemStats;
+    use crate::refusals::{OPEN_IN_USE_AGAIN, OPEN_NOT_OURS_AGAIN};
 
     #[test]
     fn ammunition_is_made_for_the_bow_and_the_targets_weakness() {
@@ -14249,41 +14194,6 @@ mod tests {
     }
 
     #[test]
-    fn the_server_names_the_body_it_will_not_open() {
-        assert_eq!(
-            corpse_refusal("The Corpse of Hellion is already in use by someone else!"),
-            Some(("Corpse of Hellion", CorpseRefusal::InUse))
-        );
-        // A server that tells you whose (`container_opener_name`).
-        assert_eq!(
-            corpse_refusal("The Chest is already in use by +Brynna!"),
-            Some(("Chest", CorpseRefusal::InUse))
-        );
-        assert_eq!(
-            corpse_refusal("You do not yet have the right to loot the Corpse of Hellion."),
-            Some(("Corpse of Hellion", CorpseRefusal::NotYetOurs))
-        );
-        assert_eq!(
-            corpse_refusal(
-                "You may not loot the Corpse of Hellion because the Corpse of Hellion \
-                 has generated a rare item."
-            ),
-            Some(("Corpse of Hellion", CorpseRefusal::NeverOurs))
-        );
-        assert_eq!(
-            corpse_refusal(
-                "You may not loot the Corpse of Biaka because the death was caused by \
-                 a player killer."
-            ),
-            Some(("Corpse of Biaka", CorpseRefusal::NeverOurs))
-        );
-        // Everything else the server says while a body waits to open.
-        assert_eq!(corpse_refusal("You're too busy"), None);
-        assert_eq!(corpse_refusal("The Corpse of Hellion is open"), None);
-        assert_eq!(corpse_refusal("You do not have permission to loot"), None);
-    }
-
-    #[test]
     fn the_words_a_body_is_refused_in_say_how_long_to_leave_it() {
         // 1,044 refusals arrived in that run, a third of a second after
         // the ask, and every one of them was thrown away: the take-up
@@ -14302,27 +14212,27 @@ mod tests {
         // Someone is inside it: let it go and have it the moment they
         // are done, not in the half minute anything blocked waits.
         ap.take_up_corpse(held, t0, LOOT_TIMEOUT);
-        assert!(ap.corpse_refused(&in_use, name, Some(answered), answered));
+        assert!(ap.corpse_refused_in_words(&in_use, name, Some(answered), answered));
         assert_eq!(ap.corpse, None, "still holding a body it cannot open");
-        assert_eq!(ap.shelved.waited(&held), Some(CORPSE_IN_USE_AGAIN));
+        assert_eq!(ap.shelved.waited(&held), Some(OPEN_IN_USE_AGAIN));
         assert!(ap.shelved.held(
             &held,
-            answered + CORPSE_IN_USE_AGAIN - Duration::from_millis(1)
+            answered + OPEN_IN_USE_AGAIN - Duration::from_millis(1)
         ));
-        assert!(!ap.shelved.held(&held, answered + CORPSE_IN_USE_AGAIN));
+        assert!(!ap.shelved.held(&held, answered + OPEN_IN_USE_AGAIN));
 
         // The killer's for now: a short wait, because a corpse becomes
         // everyone's the moment whoever has it closes it and not only
         // when it half rots.
         ap.take_up_corpse(locked, t0, LOOT_TIMEOUT);
-        assert!(ap.corpse_refused(&not_ours, name, Some(answered), answered));
+        assert!(ap.corpse_refused_in_words(&not_ours, name, Some(answered), answered));
         assert_eq!(ap.corpse, None);
-        assert_eq!(ap.shelved.waited(&locked), Some(CORPSE_NOT_OURS_AGAIN));
+        assert_eq!(ap.shelved.waited(&locked), Some(OPEN_NOT_OURS_AGAIN));
         assert!(ap.shelved.held(
             &locked,
-            answered + CORPSE_NOT_OURS_AGAIN - Duration::from_millis(1)
+            answered + OPEN_NOT_OURS_AGAIN - Duration::from_millis(1)
         ));
-        assert!(!ap.shelved.held(&locked, answered + CORPSE_NOT_OURS_AGAIN));
+        assert!(!ap.shelved.held(&locked, answered + OPEN_NOT_OURS_AGAIN));
 
         // A body refused twice, in two different sets of words, waits
         // longer the second time -- and the wait it is given is a wait
@@ -14334,15 +14244,15 @@ mod tests {
         let both = 0x8000_1224;
         ap.corpse_seen.push((both, t0));
         ap.take_up_corpse(both, t0, LOOT_TIMEOUT);
-        assert!(ap.corpse_refused(&in_use, name, Some(answered), answered));
-        assert_eq!(ap.shelved.waited(&both), Some(CORPSE_IN_USE_AGAIN));
-        let again = answered + CORPSE_IN_USE_AGAIN;
+        assert!(ap.corpse_refused_in_words(&in_use, name, Some(answered), answered));
+        assert_eq!(ap.shelved.waited(&both), Some(OPEN_IN_USE_AGAIN));
+        let again = answered + OPEN_IN_USE_AGAIN;
         ap.take_up_corpse(both, again, LOOT_TIMEOUT);
         let told = again + Duration::from_millis(360);
-        assert!(ap.corpse_refused(&not_ours, name, Some(told), told));
+        assert!(ap.corpse_refused_in_words(&not_ours, name, Some(told), told));
         assert_eq!(
             ap.shelved.waited(&both),
-            Some(CORPSE_IN_USE_AGAIN * 2),
+            Some(OPEN_IN_USE_AGAIN * 2),
             "a doubling wait, not a deadline the shelf then doubled"
         );
 
@@ -14350,7 +14260,7 @@ mod tests {
         ap.take_up_corpse(rare, t0, LOOT_TIMEOUT);
         let words =
             format!("You may not loot the {name} because the {name} has generated a rare item.");
-        assert!(ap.corpse_refused(&words, name, Some(answered), answered));
+        assert!(ap.corpse_refused_in_words(&words, name, Some(answered), answered));
         assert!(ap.shelved.held(&rare, t0 + CORPSE_LIFE));
     }
 
@@ -14369,14 +14279,14 @@ mod tests {
         // Nine characters stand in one huddle and the server answers all
         // of them: words about a body this character is not working
         // change nothing.
-        assert!(!ap.corpse_refused(
+        assert!(!ap.corpse_refused_in_words(
             "The Corpse of Drudge Slave is already in use by someone else!",
             "Corpse of Hellion",
             Some(answered),
             answered,
         ));
         // Nor do words about something that is not a refusal.
-        assert!(!ap.corpse_refused(
+        assert!(!ap.corpse_refused_in_words(
             "You're too busy",
             "Corpse of Hellion",
             Some(answered),
@@ -14385,8 +14295,8 @@ mod tests {
         // Nor an answer that came in before this ask went out: it was
         // the ask before it that was refused.
         let words = "You do not yet have the right to loot the Corpse of Hellion.";
-        assert!(!ap.corpse_refused(words, "Corpse of Hellion", Some(asked), answered));
-        assert!(!ap.corpse_refused(words, "Corpse of Hellion", None, answered));
+        assert!(!ap.corpse_refused_in_words(words, "Corpse of Hellion", Some(asked), answered));
+        assert!(!ap.corpse_refused_in_words(words, "Corpse of Hellion", None, answered));
         assert_eq!(
             ap.corpse.map(|c| c.0),
             Some(body),
@@ -14395,7 +14305,7 @@ mod tests {
         assert!(ap.shelved.is_empty(), "set a body aside for nothing");
 
         // The same words, stamped after the ask, are this body's.
-        assert!(ap.corpse_refused(words, "Corpse of Hellion", Some(answered), answered));
+        assert!(ap.corpse_refused_in_words(words, "Corpse of Hellion", Some(answered), answered));
         assert_eq!(ap.corpse, None);
     }
 
@@ -15061,9 +14971,9 @@ mod tests {
             "something was said, and not read yet"
         );
         // Words about some other take are not about this one.
-        c.hear_put_refusal("Unable to put Pyreal into container");
+        c.hear_put_refusal("Pyreal");
         assert!(c.packs_said_full.is_empty());
-        c.hear_put_refusal("Unable to put Dagger into container");
+        c.hear_put_refusal("Dagger");
         assert_eq!(
             c.packs_said_full.get(&me),
             Some(&2),
@@ -15086,7 +14996,7 @@ mod tests {
         c.move_refused.insert(DAGGER, (0, again));
         c.loot_inflight = None;
         c.take_refused(DAGGER, 0);
-        c.hear_put_refusal("Unable to put Dagger into container");
+        c.hear_put_refusal("Dagger");
         assert_eq!(c.packs_said_full.get(&SACK), Some(&23));
         assert_eq!(c.free_space(), 0);
         assert!(c.loot_queue.is_empty(), "no third try");
@@ -15163,7 +15073,7 @@ mod tests {
         c.tick_loot(answered);
         assert!(c.loot_inflight.is_none());
         assert!(c.loot_sent.is_some(), "kept for the words");
-        c.hear_put_refusal("Unable to put Dagger into container");
+        c.hear_put_refusal("Dagger");
         assert_eq!(c.packs_said_full.get(&me), Some(&2));
         assert_eq!(c.loot_queue.front(), Some(&DAGGER), "sent once more");
     }
@@ -15748,8 +15658,8 @@ mod loot_timing_tests {
 #[cfg(test)]
 mod fellowship_tests {
     use super::{
-        next_invitee, recruit_refusal, rival_leader, Mate, RecruitRefusal, TeamView,
-        HELD_OFF_FIRST, RECRUIT_AGAIN, RECRUIT_FLOOR, TEAM_OPTIONS,
+        next_invitee, rival_leader, Mate, TeamView, HELD_OFF_FIRST, RECRUIT_AGAIN, RECRUIT_FLOOR,
+        TEAM_OPTIONS,
     };
     use crate::did::Patience;
     use std::time::Instant;
@@ -15757,22 +15667,6 @@ mod fellowship_tests {
     /// Nobody held off.
     fn nobody() -> Patience<u32> {
         Patience::new()
-    }
-
-    #[test]
-    fn the_words_of_a_refusal_name_the_mate() {
-        // ACE answers both in plain Broadcast chat, not a WeenieError
-        // (`Entity/Fellowship.cs`, `AddFellowshipMember`).
-        assert_eq!(
-            recruit_refusal("+Brynlyn is already a member of a Fellowship."),
-            Some(("+Brynlyn", RecruitRefusal::AlreadyAMember))
-        );
-        assert_eq!(
-            recruit_refusal("+Brynoth is busy."),
-            Some(("+Brynoth", RecruitRefusal::Busy))
-        );
-        assert_eq!(recruit_refusal("You are too busy."), None);
-        assert_eq!(recruit_refusal("Brynoth is busy"), None);
     }
 
     #[test]
@@ -15848,15 +15742,15 @@ mod fellowship_tests {
             },
         ];
         ap.recruited = vec![(lyn, t0)];
-        ap.hear_recruit_refusal("+Brynlyn is busy.", t0);
+        ap.hear_recruit_words("+Brynlyn is busy.", t0);
         assert!(ap.held_off.held(&lyn, t0 + RECRUIT_AGAIN));
         assert!(!ap.held_off.held(&lyn, t0 + HELD_OFF_FIRST));
         // The same words about a mate never invited are about something
         // else -- a patron busy with an oath says "is busy." too.
-        ap.hear_recruit_refusal("+Brynoth is busy.", t0);
+        ap.hear_recruit_words("+Brynoth is busy.", t0);
         assert!(!ap.held_off.held(&oth, t0));
         // And a stranger's name is nobody's.
-        ap.hear_recruit_refusal("Ulgrim is already a member of a Fellowship.", t0);
+        ap.hear_recruit_words("Ulgrim is already a member of a Fellowship.", t0);
         assert_eq!(ap.held_off.len(), 1);
     }
 
@@ -15894,12 +15788,12 @@ mod fellowship_tests {
         let mut now = t0;
         for _ in 0..8 {
             ap.recruited = vec![(lyn, now)];
-            ap.hear_recruit_refusal("+Brynlyn is busy.", now);
+            ap.hear_recruit_words("+Brynlyn is busy.", now);
             assert_eq!(ap.held_off.waited(&lyn), Some(HELD_OFF_FIRST));
             now += HELD_OFF_FIRST * 2;
         }
         ap.recruited = vec![(lyn, now)];
-        ap.hear_recruit_refusal("+Brynlyn is already a member of a Fellowship.", now);
+        ap.hear_recruit_words("+Brynlyn is already a member of a Fellowship.", now);
         assert_eq!(ap.held_off.waited(&lyn), Some(HELD_OFF_FIRST * 2));
     }
 
@@ -15912,12 +15806,12 @@ mod fellowship_tests {
         let t0 = Instant::now();
         let (mut ap, lyn, _) = having_asked_lyn(t0);
         let later = t0 + RECRUIT_AGAIN * 2;
-        ap.hear_recruit_refusal("+Brynlyn is busy.", later);
+        ap.hear_recruit_words("+Brynlyn is busy.", later);
         assert!(!ap.held_off.held(&lyn, later));
         assert_eq!(ap.held_off.len(), 0);
         // Within the wait for an answer, it is the answer.
         let soon = t0 + RECRUIT_AGAIN / 2;
-        ap.hear_recruit_refusal("+Brynlyn is busy.", soon);
+        ap.hear_recruit_words("+Brynlyn is busy.", soon);
         assert!(ap.held_off.held(&lyn, soon));
     }
 
