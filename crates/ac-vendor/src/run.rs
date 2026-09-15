@@ -7,12 +7,8 @@ use ac_agent::pack;
 
 use crate::counter::{Item, Snapshot};
 
-/// The one thing the rules want done next.
-///
-/// At most one per turn, and every one of them is something a player
-/// could do by hand. The server takes one at a time and answers in its
-/// own time, so asking for two is how a run ends up selling a stack it
-/// has already merged away.
+/// The one thing the rules want done next; each is something a player could do by hand.
+/// At most one per turn: the server answers in its own time, and two can sell a stack merged away.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Act {
     /// Walk to the counter: it will not trade across a room.
@@ -23,22 +19,13 @@ pub enum Act {
     Merge { from: u32, to: u32, amount: u32 },
     /// Cut a piece off a stack worth more than the counter will look at.
     Split { guid: u32, amount: u32 },
-    /// Hand these over, all in one go.
-    ///
-    /// A counter takes a whole armful at once -- the sell action has
-    /// always carried a list, and sending them one at a time was a
-    /// round trip per dagger. What bounds an armful is not the counter
-    /// but the pack: the takings come back as coin, and coin needs
-    /// slots.
+    /// Hand these over in one go: a counter takes a whole armful (the sell action carries a list).
+    /// The pack bounds an armful, not the counter: the takings come back as coin, needing slots.
     Sell { items: Vec<u32> },
     /// Buy this many of something on the shelf.
     Buy { wcid: u32, count: u32 },
     /// Turn trade notes back into coin to pay a bill.
-    ///
-    /// A counter takes notes for what it sells, but not as change: a
-    /// purse of notes and no coin cannot buy a handful of tapers. The
-    /// notes are sold back first, which costs their markup and is
-    /// still the only way to spend them on something small.
+    /// No change is given for a note, so selling notes back is the only way to buy something small.
     Cash { face: u32, count: u32 },
     /// Shut the window; the trip is over.
     Close,
@@ -87,14 +74,8 @@ impl Next {
     }
 }
 
-/// A trip to one counter.
-///
-/// It holds only what cannot be seen in a snapshot: which phase the
-/// trip is in, what has been handed over and not yet answered for, and
-/// what has been refused and should not be asked about again yet.
-///
-/// It clones, so that a panel can ask a copy what the trip would do
-/// next without moving the trip itself on.
+/// A trip to one counter; holds only what no snapshot shows: phase, pending offers, refusals.
+/// Cloned so a panel can ask a copy what the trip would do next without moving it on.
 #[derive(Clone, Debug, Default)]
 pub struct Run {
     pub phase: Phase,
@@ -104,11 +85,9 @@ pub struct Run {
     refused: Patience<u32>,
     /// Pairs of stacks that would not join.
     wont_merge: Patience<(u32, u32)>,
-    /// How many things have been sold this trip.
+    /// Items sold this trip.
     pub sold: u32,
-    /// There was something to sell and no free slot for what it would
-    /// fetch. Nothing at the counter changes that, so selling stands aside
-    /// and the visit ends saying why.
+    /// Goods to sell, no slot for their coin: selling stands aside and the visit says why.
     no_room: bool,
 }
 
@@ -117,16 +96,13 @@ impl Run {
         Run::default()
     }
 
-    /// What a person would see: where the trip is and what is waiting.
+    /// How many offered items the counter has not yet answered for.
     pub fn waiting_on(&self) -> usize {
         self.offered.len()
     }
 
-    /// The act could not be carried out on the character's side -- the
-    /// stacks would not pour, the stack would not cut. That is an answer
-    /// as much as the counter's no, and is remembered the same way, so
-    /// the same thing is not asked for again every turn until the trip
-    /// is over. Nothing was handed over, so nothing is waited on.
+    /// Records that this side could not do `act` (a pour, a cut), as a counter's no is recorded.
+    /// So it is not asked for again every turn; nothing was handed over, so nothing is waited on.
     pub fn refused(&mut self, act: &Act, now: Instant) {
         match act {
             Act::Merge { from, to, .. } => {
@@ -140,9 +116,7 @@ impl Run {
                 self.refused
                     .note(*guid, &Did::refused("the stack would not cut"), now);
             }
-            // Approaching, opening, selling, buying and cashing are
-            // asked of the world afresh from every snapshot: what could
-            // not be done is not in the next one.
+            // Every other act is decided afresh from each snapshot, which shows what failed.
             Act::Approach { .. }
             | Act::Open { .. }
             | Act::Sell { .. }
@@ -159,10 +133,8 @@ impl Run {
             return Next::nothing(Did::blocked("there is no counter here"), "no counter");
         };
 
-        // Stand at it first. A counter will not trade with somebody
-        // across the room: the server answers by telling us to walk
-        // there, and a client that does not walk waits for a window
-        // that never opens.
+        // Stand at it first: asked from across the room, the server tells the character to walk
+        // there, and a client that does not walk waits for a window that never opens.
         if counter.away > snap.rules.reach {
             self.phase = Phase::Walking;
             return Next::acting(
@@ -178,9 +150,7 @@ impl Run {
             );
         }
 
-        // Anything handed over that is still in the pack has not been
-        // taken. The kind and the worth were checked before it was
-        // offered, so this is the item refusing for itself.
+        // Offered but still in the pack: the item itself refused; kind and worth were checked.
         if !self.offered.is_empty() {
             let still: Vec<u32> = self
                 .offered
@@ -201,9 +171,8 @@ impl Run {
         }
 
         if self.phase == Phase::Selling {
-            // 1. Compress. Before any of it is sold, and again every
-            //    round: a sale makes the character lighter, and the
-            //    server weighs a pour against what is carried.
+            // 1. Compress before any sale and again each round: a sale lightens the character,
+            //    and the server weighs a pour against what is carried.
             if let Some(next) = self.compress(snap, now) {
                 return next;
             }
@@ -213,7 +182,7 @@ impl Run {
                     return next;
                 }
             }
-            // 3. Sell one thing.
+            // 3. Sell an armful.
             if let Some(next) = self.sell_one(snap, now) {
                 return next;
             }
@@ -241,8 +210,7 @@ impl Run {
         }
     }
 
-    /// Pour one pair of stacks together, if any pair is worth pouring
-    /// and light enough for the server to allow it.
+    /// Pour one pair of stacks together, if one is worth pouring and light enough for the server.
     fn compress(&mut self, snap: &Snapshot, now: Instant) -> Option<Next> {
         let stacks: Vec<pack::Stack> = snap
             .items
@@ -258,28 +226,16 @@ impl Run {
             })
             .collect();
         let room = snap.burden_room();
-        // Never pour two stacks into one the counter will not look at.
-        //
-        // Selling cuts a stack down when it is worth more than the
-        // ceiling; compressing would pour the piece straight back, and
-        // the two would take it in turns for ever -- the same argument
-        // the quartermaster and the tidier once had over a counted-out
-        // purse. Whichever ran first would look like it was working.
+        // Never pour past the counter's ceiling: selling cuts such a stack down, and pouring the
+        // piece straight back would have the two alternate for ever.
         let ceiling = snap
             .counter
             .as_ref()
             .map(|c| c.max_value)
             .filter(|c| *c > 0);
         let worth = |guid: u32| snap.item(guid).map(|i| i.value).unwrap_or(0);
-        // And never pour two stacks whose words disagree. A pour makes
-        // one stack of two, and one stack carries one word: pouring a
-        // stack the player said to sell into one they said to keep, or
-        // into one nothing was decided about, settles the lot as kept
-        // (the ledger takes the cautious answer) or as undecided, and
-        // the counter is then offered none of it. That is how a Sell
-        // tag was quietly overruled by the tidy that runs before every
-        // sale. Kept apart, each stack keeps its word and goes where
-        // the word says.
+        // Never pour stacks whose words differ: one stack carries one word, and the ledger settles
+        // a mix as kept (the cautious answer) or undecided, so a Sell tag would be overruled.
         let word = |guid: u32| snap.item(guid).map(|i| i.taken_for);
         let held = |from: u32, to: u32| {
             if self.wont_merge.held(&(from, to), now) {
@@ -317,10 +273,7 @@ impl Run {
     fn make_notes(&mut self, snap: &Snapshot) -> Option<Next> {
         let counter = snap.counter.as_ref()?;
         let face = counter.note_face.filter(|f| *f > 0)?;
-        // A note costs more than its face -- fifteen per cent, whatever
-        // the denomination -- so this always loses a little. It is
-        // worth it: a slot of Mayoi notes carries sixty two million and
-        // a slot of coin carries twenty five thousand.
+        // Loses the 15% markup, but a slot of Mayoi notes holds 62.5 million, coin 25,000.
         let each = crate::errand::note_cost(face).max(1);
         let count = snap.coin.saturating_sub(snap.rules.float) / each;
         if count == 0 {
@@ -333,30 +286,21 @@ impl Run {
         ))
     }
 
-    /// Hand over an armful, cutting a stack down first when it is worth
-    /// more than the counter will look at.
-    ///
-    /// As many as the pack can take the money for. Twenty-five thousand
-    /// pyreals fill a slot, so a big enough armful pays for itself in
-    /// slots and then starts costing them; the armful stops at the
-    /// reserve, and the next round turns the coin into notes and goes
-    /// on.
+    /// Hand over an armful, cutting down first a stack worth more than the counter will look at.
+    /// The armful stops before its coin needs more slots than are free; the next round makes notes.
     fn sell_one(&mut self, snap: &Snapshot, now: Instant) -> Option<Next> {
         let counter = snap.counter.as_ref()?;
-        // What the counter is offered (`Snapshot::offers`), less what
-        // it has already turned down this trip.
+        // The answer the panel counts too (`Snapshot::offers`), less this trip's refusals.
         let mut offer: Vec<&Item> = snap
             .items
             .iter()
             .filter(|it| snap.offers(it) && !self.refused.held(&it.guid, now))
             .collect();
-        // The dearest first: they are the ones most worth the slot they
-        // sit in, and the ones the armful should certainly include.
+        // Dearest first: most worth their slot, and the ones the armful must include.
         offer.sort_by_key(|i| std::cmp::Reverse(i.value));
 
-        // Anything too dear for this counter is cut down first, on its
-        // own: the piece is a new object and the armful would be naming
-        // a guid that does not exist yet.
+        // A stack too dear for this counter is cut on its own turn: the piece is a new object, and
+        // an armful cannot name a guid that does not exist yet.
         if let Some(it) = offer.first().copied() {
             if counter.max_value > 0 && it.value > counter.max_value {
                 let each = it.each().max(1);
@@ -388,12 +332,9 @@ impl Run {
         for it in offer {
             anything = true;
             let after = pay.saturating_add(it.value);
-            // The server finds room for the whole payment before the goods
-            // leave the pack, and counts it in new stacks of coin: room left
-            // in a pile already carried does not count, and nor does the
-            // slot the item being sold is about to free. Assuming both was
-            // how a full pack offered the same cap to a counter thirteen
-            // times and sold nothing.
+            // The server finds room for the whole payment before goods leave, in new coin stacks:
+            // room in a carried pile and the sold item's slot do not count
+            // (test: a_sale_needs_room_for_its_money_before_the_goods_leave).
             if coin_slots(after) > snap.slots_free {
                 break;
             }
@@ -401,10 +342,8 @@ impl Run {
             pay = after;
         }
         if items.is_empty() {
-            // Goods to sell and no room for the money is not something the
-            // counter can fix: selling stands aside, so what can still be
-            // done here -- cashing notes, buying -- gets its turn, and the
-            // visit ends saying why nothing sold.
+            // No room for the money is not the counter's to fix: stand aside so cashing and buying
+            // get their turn, and the visit ends saying why nothing sold.
             self.no_room |= anything;
             return None;
         }
@@ -416,8 +355,7 @@ impl Run {
         Some(Next::acting(Act::Sell { items }, saying))
     }
 
-    /// Buy one thing the character came for, within the purse and what
-    /// it can still lift.
+    /// Buy one thing the character came for, within the purse and the burden it can still lift.
     fn buy_one(&mut self, snap: &Snapshot) -> Option<Next> {
         let counter = snap.counter.as_ref()?;
         let purse = snap.purse();
@@ -432,9 +370,7 @@ impl Run {
                 continue;
             }
             let afford = purse / ware.price;
-            // And what it can carry home. Nothing known about the
-            // weight is not a reason to refuse: buy, and let the server
-            // answer for it.
+            // Unknown burden (0) is no reason to refuse: buy, and let the server answer for it.
             let liftable = match ware.burden {
                 0 => u32::MAX,
                 each => snap.burden_room() / each,
@@ -448,10 +384,8 @@ impl Run {
                 continue;
             }
             let bill = ware.price.saturating_mul(count);
-            // Coin first. A purse whose worth is all in notes cannot
-            // pay a small bill, so enough of them are turned back into
-            // coin -- the smallest note that covers it, so that a
-            // fortune is not broken to buy a handful of tapers.
+            // Coin first: a purse all in notes cannot pay a small bill, so cash the smallest note
+            // that covers it rather than break a fortune for a handful of tapers.
             if bill > snap.coin {
                 let short = bill - snap.coin;
                 if let Some((face, have)) = snap
@@ -485,8 +419,6 @@ impl Run {
     }
 }
 
-/// How many slots a pile of coin takes up. A pyreal stack holds
-/// twenty-five thousand and then wants another slot.
 fn coin_slots(coin: u32) -> u32 {
     coin.div_ceil(crate::errand::COIN_STACK)
 }
@@ -580,9 +512,7 @@ mod tests {
     #[test]
     fn the_pack_is_compressed_before_anything_is_sold() {
         let mut run = Run::new();
-        // Two part stacks of the same thing and one thing worth
-        // selling. The stacks go together first: slots are what a sale
-        // runs out of.
+        // Two part stacks join before the dagger sells: slots are what a sale runs out of.
         let mut a = item(1, "Taper", 100, 37, 1000);
         let mut b = item(2, "Taper", 100, 41, 1000);
         a.wcid = 20631;
@@ -600,11 +530,7 @@ mod tests {
 
     #[test]
     fn an_act_refused_on_this_side_is_not_asked_for_again() {
-        // A pour or a cut the character's own side would not send --
-        // the stacks would not pour, the stack would not cut -- used to
-        // be asked for again every turn, since the rules only ever
-        // heard the counter's answers. Told of the refusal, they move
-        // on to the next thing, as they do when the counter says no.
+        // Told a pour was refused on this side, the rules move on as after a counter's no.
         let now = Instant::now();
         let mut run = Run::new();
         let mut a = item(1, "Taper", 100, 37, 1000);
@@ -621,8 +547,7 @@ mod tests {
             "asked for the refused pour again: {next:?}"
         );
 
-        // A stack worth more than the counter will look at is cut down
-        // first; refused, the stack is left be and the visit goes on.
+        // A too-dear stack is cut first; the cut refused, it is left be and the visit goes on.
         let mut run = Run::new();
         let mut s = snap(vec![item(4, "Pyreal Motes", 2_000, 10, 100)]);
         s.counter.as_mut().unwrap().max_value = 500;
@@ -643,13 +568,10 @@ mod tests {
         a.burden = 456;
         b.burden = 500;
         let mut s = snap(vec![a, b, item(3, "Dagger", 500, 1, 1)]);
-        // Seventeen units under the ceiling, as a real character was:
-        // the server weighs a merge as though the source were being
-        // picked up afresh, and refuses it without a word.
+        // 17 burden under the ceiling, as a live character was: the server weighs a merge as
+        // though the source were picked up afresh, and refuses it without a word.
         s.carried = s.capacity * 3 - 17;
-        // It does not try to pour them together; it gets on with the
-        // selling, which is what makes the character light enough to
-        // pour them together later.
+        // So it sells instead, which is what makes the character light enough to pour later.
         let next = run.step(&s, Instant::now());
         assert!(
             matches!(&next.act, Some(Act::Sell { .. })),
@@ -661,16 +583,14 @@ mod tests {
 
     #[test]
     fn a_sale_needs_room_for_its_money_before_the_goods_leave() {
-        // The server counts the payment in new stacks of coin and looks
-        // for room before it takes anything: with no slot free nothing
-        // sells, and the run says so rather than asking again.
+        // The server counts the payment in new coin stacks and finds room before taking anything:
+        // with no slot free nothing sells, and the run says so rather than asking again.
         let mut s = snap(vec![item(3, "Dagger", 500, 1, 1)]);
         s.slots_free = 0;
         let next = Run::new().step(&s, Instant::now());
         assert_eq!(next.act, Some(Act::Close), "{}", next.saying);
         assert!(matches!(next.did, Did::Blocked(_)), "{:?}", next.did);
-        // One free slot takes one stack of coin's worth of goods at a
-        // time, and the slots those goods will free do not count yet.
+        // One free slot holds one coin stack's worth of goods; slots they will free do not count.
         let mut s = snap(vec![
             item(3, "Dagger", 13_000, 1, 1),
             item(4, "Sword", 13_000, 1, 1),
@@ -711,13 +631,8 @@ mod tests {
 
     #[test]
     fn the_things_the_character_lives_on_are_not_stock() {
-        // The counter used to be handed every carried item less the
-        // server's own five refusals. The only component guard here
-        // spares a want it is *short* of -- so a mage with its full
-        // thousand tapers had them sold, and its Peas, and the focus,
-        // and the healing kits it bought an hour before. What the loot
-        // policy keeps back is a sixth refusal now, decided before the
-        // snapshot is built.
+        // The loot policy's keep (`Keep::mine`) is decided before the snapshot and covers a full
+        // stock: the wants skip spares only a component the character is short of.
         let now = Instant::now();
         let mut tapers = item(4, "Prismatic Taper", 5_000, 1000, 1000);
         tapers.keep.mine = true;
@@ -793,8 +708,7 @@ mod tests {
         let mut run = Run::new();
         let s = snap(vec![item(3, "Dagger", 500, 1, 1)]);
         assert_eq!(run.step(&s, now).act, Some(Act::Sell { items: vec![3] }));
-        // It is still in the pack a moment later: the counter would not
-        // have it. Asking again is how a run spends an afternoon.
+        // Still in the pack a moment later, so the counter would not have it: not offered again.
         let next = run.step(&s, now);
         assert!(
             !matches!(&next.act, Some(Act::Sell { items }) if items.contains(&3)),
@@ -827,11 +741,8 @@ mod tests {
 
     #[test]
     fn what_the_player_said_to_sell_goes_even_when_it_is_on_the_list() {
-        // The shopping-list skip (`Snapshot::offers`) saves a round trip,
-        // and it was keeping loot in the pack for good: a pea taken under a "sell" rule that was
-        // also, wrongly, on the shopping list was never offered, and
-        // the counter saw nothing at all. The player's word that it
-        // goes beats the list; the list still keeps what it was for.
+        // A pea tagged Sell that is also on the shopping list is still offered: the player's word
+        // beats the list's skip (`Snapshot::offers`), and the list still keeps the tapers.
         let mut run = Run::new();
         let mut pea = item(1, "Lead Pea", 500, 1, 100);
         pea.wcid = 8329;
@@ -866,13 +777,8 @@ mod tests {
 
     #[test]
     fn a_stack_the_player_said_to_sell_is_not_poured_into_one_they_said_to_keep() {
-        // Two stacks of one kind, one word each: ten scarabs taken
-        // under "sell the rest" past a cap, and ninety-five the same
-        // rule kept. The tidy that runs before every sale used to pour
-        // the small stack into the large one, the ledger settled the
-        // whole as kept, and the counter was offered nothing -- the
-        // player's Sell overruled by a pour. The two stay apart, and
-        // the ten go over the counter whole.
+        // Ten scarabs tagged Sell past a cap, ninety-five kept: a pour would settle the whole as
+        // kept and offer nothing, so the two stay apart and the ten go over the counter whole.
         let mut run = Run::new();
         let mut to_sell = item(1, "Lead Scarab", 50, 10, 100);
         to_sell.wcid = 691;
@@ -932,9 +838,8 @@ mod tests {
 
     #[test]
     fn the_counter_is_offered_only_what_it_buys() {
-        // The panel's count and the selling ask one question. A
-        // tailor's window takes armour and clothing; the pea is not for
-        // sale there, whatever the player said about it.
+        // The panel's count and the selling ask one question: a tailor's window does not take
+        // a pea, whatever the player said about it.
         let mut pea = item(1, "Lead Pea", 500, 1, 100);
         pea.item_type = 0x1000;
         pea.taken_for = Some(LootAction::Sell);
@@ -1035,8 +940,7 @@ mod tests {
     #[test]
     fn the_armful_stops_where_the_coin_would_fill_the_pack() {
         let mut run = Run::new();
-        // Each of these turns into two slots of coin, and there are
-        // only a few slots to put it in.
+        // Each ingot pays two slots of coin, and only five slots are free.
         let mut s = snap((1..=8).map(|g| item(g, "Ingot", 50_000, 1, 1)).collect());
         s.slots_free = 5;
         s.rules.keep_slots = 3;

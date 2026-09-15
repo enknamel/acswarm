@@ -1,37 +1,13 @@
-//! What a trip to a counter will actually do, worked out before it is
-//! done.
-//!
-//! A trip to town is the one goal with interacting preconditions over a
-//! shared pool. Money buys components; selling makes money; selling also
-//! frees slots and lifts weight; trade notes turn money into something
-//! weightless but cost thirteen per cent to make and unmake; and every
-//! purchase is held back by whichever of purse, weight and slots runs
-//! out first.
-//!
-//! Every bug this subsystem has had came from that. Buying without
-//! counting the weight it would add. Turning the money into notes and
-//! then being unable to pay. Shopping again and again at a counter with
-//! nothing affordable on it. Each was fixed where it was found, which
-//! is to say each was fixed once, in one order, for one case.
-//!
-//! So the order is not written out any more. [`plan`] walks the
-//! resources forward -- sell, cash, buy, convert -- and each act takes
-//! from the pool what it costs and gives back what it yields. "Cannot
-//! buy because too laden, therefore sell first" is not a rule here: it
-//! is what falls out of selling happening before buying and of weight
-//! being counted. And because the whole thing is arithmetic over a
-//! plain state, it can be run before the character leaves, which is how
-//! a trip is known to be worth making.
-//!
+//! What a whole trip to a counter will do, worked out before the character leaves.
+//! [`plan`] walks the means forward (sell, cash, buy, convert): each act takes what it costs and
+//! gives back what it yields, so "too laden, sell first" falls out of the order, not a rule.
+//! Notes weigh nothing but a round trip through them loses 13%; [`crate::Run`] decides act by act.
 //! See `docs/agent.md`.
 
 use ac_agent::did::Because;
 
 /// What a character has to spend on a trip, and what it has room for.
-///
-/// Coin and notes are kept apart because a counter takes coin: a purse
-/// of notes is a rich character who cannot pay for anything until it
-/// has cashed some.
+/// Coin and notes are apart because a counter takes coin: notes must be cashed to pay.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Means {
     /// Spendable at the counter, now.
@@ -57,7 +33,7 @@ pub struct ForSale {
     pub guid: u32,
     /// What the counter pays for the whole stack.
     pub pays: u32,
-    /// What carrying it costs, which selling gives back.
+    /// Its burden, which selling gives back.
     pub weighs: u32,
 }
 
@@ -77,8 +53,9 @@ pub struct Wanted {
     pub name: String,
     /// How many are wanted.
     pub want: u32,
-    /// What one costs and what one weighs.
+    /// Price of one.
     pub each: u32,
+    /// Burden of one.
     pub weighs: u32,
     /// How many the shelf has; `None` for an endless supply.
     pub stock: Option<u32>,
@@ -87,8 +64,7 @@ pub struct Wanted {
 /// One thing the trip does, in the order it does it.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Act {
-    /// Hand these over. Always first: it is what pays for everything
-    /// after it, and what makes room to carry what is bought.
+    /// Hand these over; always first, as it pays for the rest and frees room to carry it.
     Sell { items: Vec<u32>, takings: u32 },
     /// Turn these notes back into coin, because the counter takes coin.
     Cash { notes: Vec<u32>, coin: u32 },
@@ -99,12 +75,8 @@ pub enum Act {
         amount: u32,
         cost: u32,
     },
-    /// Turn coin into trade notes: `count` of them at this face,
-    /// costing `spend`.
-    ///
-    /// Not only a tidy-up at the end. A sale of any size has to stop
-    /// part way and do this, because the coin it has taken in is
-    /// filling the pack (see [`COIN_STACK`]).
+    /// Turn coin into `count` trade notes of this face, costing `spend`.
+    /// Also mid-sale: the coin a sale takes in fills the pack (see [`COIN_STACK`]).
     Keep { face: u32, count: u32, spend: u32 },
 }
 
@@ -120,15 +92,14 @@ pub struct Plan {
 }
 
 impl Plan {
-    /// Whether the trip does anything at all. A plan that neither sells
-    /// nor buys is a walk to town for its own sake.
+    /// Whether it sells or buys anything; cashing and making notes alone are no reason to go.
     pub fn worth_going(&self) -> bool {
         self.acts
             .iter()
             .any(|a| !matches!(a, Act::Keep { .. } | Act::Cash { .. }))
     }
 
-    /// What it will spend.
+    /// Coin spent on buying and on making notes.
     pub fn cost(&self) -> u32 {
         self.acts
             .iter()
@@ -140,7 +111,6 @@ impl Plan {
             .sum()
     }
 
-    /// What it will take in.
     pub fn takings(&self) -> u32 {
         self.acts
             .iter()
@@ -183,52 +153,28 @@ impl Plan {
     }
 }
 
-/// How much coin to keep back rather than turn into notes. Notes cost
-/// to make and unmake, so a character keeps enough to shop with.
+/// Pyreals kept loose to shop with rather than made into notes, which cost to make (guess).
 pub const FLOAT: u32 = 2_000;
 
-/// How many pyreals go in one pack slot, and how many trade notes do.
-///
-/// This is the whole reason selling is not one act. Coin weighs
-/// nothing, so weight never stops a sale -- but twenty-five thousand
-/// pyreals fill a slot, and a note of a quarter of a million stacks two
-/// hundred and fifty deep. One slot of notes holds sixty-two and a half
-/// million; one slot of coin holds twenty-five thousand. Sell a serious
-/// pile of loot without converting and the pack is full of change
-/// before half of it has gone over the counter.
+/// Pyreals per pack slot (max stack); coin weighs nothing, so slots, not burden, stop a big sale.
 pub const COIN_STACK: u32 = 25_000;
+/// Trade notes per pack slot (max stack): a slot of 250,000 notes holds 62.5 million.
 pub const NOTE_STACK: u32 = 250;
 
-/// What a counter charges to make a trade note, as a multiple of its
-/// face. The server fixes this and pays back only face, so a purse
-/// turned into notes and back is thirteen per cent lighter.
+/// Trade-note price as a multiple of face, whatever the shop's rate (ACE Vendor.cs:581).
+/// A note sells back at face (Vendor.cs:595), so a purse turned into notes and back is 13% lighter.
 pub const NOTE_MARKUP: f32 = 1.15;
 
-/// How many slots this much coin takes up.
 pub fn coin_slots(coin: u32) -> u32 {
     coin.div_ceil(COIN_STACK)
 }
 
-/// What one note of this face costs to make.
 pub fn note_cost(face: u32) -> u32 {
     (face as f32 * NOTE_MARKUP).ceil() as u32
 }
 
-/// Work out what the trip does.
-///
-/// The order is the argument. Selling comes first because it is what
-/// pays for the buying and what makes room to carry it; cashing comes
-/// next because a counter takes coin and not notes; buying is held to
-/// whichever of purse, weight and slots runs out first; and only what
-/// is left over after all of that becomes notes to carry home.
-///
-/// Selling is not one act. Coin fills slots as it comes in, so a sale
-/// of any size runs out of pack before it runs out of loot, and has to
-/// stop and turn what it has taken into notes before it can go on.
-/// That is a round; a big pile of loot takes several. `note_face` is
-/// the face of the Mayoi note this counter makes, if it makes one --
-/// without it the sale simply stops when the pack is full, which is
-/// what it should do rather than offer things it cannot be paid for.
+/// Work out what the trip does: sell, cash, buy, then carry what is left home as notes.
+/// `note_face` is the note this counter makes; without one a sale stops when the pack is full.
 pub fn plan(
     means: Means,
     sale: &[ForSale],
@@ -240,24 +186,20 @@ pub fn plan(
     let mut left = means;
     let mut plan = Plan::default();
 
-    // 1. Sell, in rounds, converting the takings whenever they have
-    //    filled the pack.
+    // 1. Sell in rounds: coin fills slots, so a round stops to convert before the next.
     let mut to_sell: Vec<&ForSale> = sale.iter().collect();
     while !to_sell.is_empty() {
         let before = to_sell.len();
         let mut batch = Vec::new();
         let mut takings = 0;
         let mut lighter = 0;
-        // Room for the coin, in slots. Each item sold frees its own
-        // slot as it goes, which is why this is worked out as it goes
-        // rather than up front.
+        // Free slots as the round goes, since each sale frees the item's own slot.
         let mut slots = left.slots;
         let mut coin = left.coin;
         while let Some(item) = to_sell.first() {
             let would = coin.saturating_add(item.pays);
-            // Selling frees the item's own slot and gives back the
-            // slots its coin was in; the coin it pays takes some. The
-            // question is whether what comes back covers what goes out.
+            // Sold only if the free slots, the item's own slot and the slots its coin already
+            // fills cover the coin after it.
             let have = slots + 1 + coin_slots(coin);
             let needs = coin_slots(would);
             if have < needs {
@@ -283,11 +225,9 @@ pub fn plan(
         if to_sell.is_empty() {
             break;
         }
-        // The pack is full of change and there is still loot to sell.
-        // Convert, which is the only thing that makes room.
+        // Pack full of change with loot left: converting is the only thing that makes room.
         if !convert(&mut left, &mut plan, note_face, float) || to_sell.len() == before {
-            // Nothing to convert with, or converting freed nothing: the
-            // rest of the loot goes home again.
+            // Nothing to convert, or this round sold nothing: the rest of the loot goes home.
             let short = to_sell.len() as u32;
             plan.unmet.push((
                 "loot to sell".to_string(),
@@ -298,15 +238,13 @@ pub fn plan(
         }
     }
 
-    // 2. What the shopping will cost, as far as it can be afforded at
-    //    all. Cashing notes is worth doing only for what will be spent.
+    // 2. Cash notes only for what the shopping will spend: a counter takes coin, not notes.
     let bill = affordable_bill(&left, wanted);
     if bill > left.coin && !notes.is_empty() {
         let short = bill - left.coin;
         let mut cashed = Vec::new();
         let mut coin = 0;
-        // Smallest first, so that no more of the fortune is unpacked
-        // than the shopping needs.
+        // Smallest first, so no more of the fortune is unpacked than the bill needs.
         let mut by_size: Vec<&Note> = notes.iter().collect();
         by_size.sort_by_key(|n| n.face);
         for note in by_size {
@@ -326,9 +264,7 @@ pub fn plan(
         }
     }
 
-    // 3. Buy, in the order asked, each line held to whatever runs out
-    //    first. This is where "too laden to buy" stops being a rule
-    //    somebody has to remember to write.
+    // 3. Buy in the order asked, each line held to whichever of stock, purse and room ends first.
     for want in wanted {
         if want.want == 0 {
             continue;
@@ -341,9 +277,7 @@ pub fn plan(
                 stopped = Some(Because::ours("the shelf has no more"));
             }
         }
-        // A free line is held back by nothing; a weightless one by
-        // nothing either. Both happen -- a trade note weighs nothing,
-        // which is the whole reason a fortune travels as notes.
+        // A free line is not held by the purse, nor a weightless one (a trade note) by burden.
         if let Some(afford) = left.coin.checked_div(want.each) {
             if afford < amount {
                 amount = afford;
@@ -382,29 +316,19 @@ pub fn plan(
         }
     }
 
-    // 4. Whatever is left above the float travels home as notes. This
-    //    is last on purpose: the money the shopping needed has already
-    //    been spent, so nothing here can leave the character unable to
-    //    pay -- which is exactly what it used to do.
+    // 4. Coin above the float goes home as notes, last so the shopping is already paid for
+    //    (test: the_money_the_shopping_needs_is_not_turned_into_notes).
     convert(&mut left, &mut plan, note_face, float);
 
     plan.left = left;
     plan
 }
 
-/// Turn the coin above the float into trade notes, and say whether any
-/// were made.
-///
-/// A note costs more than its face, so this always loses a little; it
-/// is worth it because a slot of notes holds two and a half thousand
-/// times what a slot of coin does.
+/// Turn the coin above the float into trade notes, and say whether any were made.
+/// Always loses the markup, but a slot of notes holds 2,500 times what a slot of coin does.
 fn convert(left: &mut Means, plan: &mut Plan, face: Option<u32>, float: u32) -> bool {
-    // One denomination, and it is the largest: the Mayoi note of a
-    // quarter of a million. No smaller one is worth making. Every note
-    // costs fifteen per cent of its face whatever it is worth, so the
-    // small ones pay the same toll to carry a fraction as much, and a
-    // purse turned into hundred-notes is a purse that has paid to fill
-    // its own pack.
+    // One denomination, the largest (Mayoi, 250,000): every note costs 15% over face, so a
+    // smaller one pays the same toll to carry a fraction as much.
     let Some(face) = face.filter(|f| *f > 0) else {
         return false;
     };
@@ -413,9 +337,7 @@ fn convert(left: &mut Means, plan: &mut Plan, face: Option<u32>, float: u32) -> 
     if count == 0 {
         return false;
     }
-    // And only when it frees a slot, which the Mayoi always does: a
-    // quarter of a million in coin is ten slots and the note it becomes
-    // is a fraction of one.
+    // Only when it frees a slot, which a Mayoi always does: 250,000 in coin is ten slots.
     let spend = count * each;
     if spend < COIN_STACK {
         return false;
@@ -423,17 +345,14 @@ fn convert(left: &mut Means, plan: &mut Plan, face: Option<u32>, float: u32) -> 
     let before = coin_slots(left.coin);
     left.coin -= spend;
     left.notes = left.notes.saturating_add(count * face);
-    // Notes take a slot for every two hundred and fifty of them; the
-    // coin gives back every slot it was sitting in.
     left.slots = left.slots.saturating_sub(count.div_ceil(NOTE_STACK));
     left.slots = left.slots + before - coin_slots(left.coin);
     plan.acts.push(Act::Keep { face, count, spend });
     true
 }
 
-/// What the wanted lines would cost if bought as far as the purse and
-/// the weight allow. Used to decide how many notes to cash, so that a
-/// fortune is not unpacked for a bill the character cannot pay anyway.
+/// What the wanted lines would cost as far as shelf and burden allow.
+/// Caps the notes cashed, so a fortune is not unpacked for goods that cannot be carried.
 fn affordable_bill(means: &Means, wanted: &[Wanted]) -> u32 {
     let mut room = means.room;
     let mut bill: u32 = 0;
@@ -455,8 +374,7 @@ fn affordable_bill(means: &Means, wanted: &[Wanted]) -> u32 {
 mod tests {
     use super::*;
 
-    /// The only note worth making: the Mayoi, a quarter of a million,
-    /// two hundred and fifty to a stack.
+    /// The Mayoi trade note's face, 250,000: the only note worth making.
     const MMD: Option<u32> = Some(250_000);
 
     fn means(coin: u32, notes: u32, room: u32) -> Means {
@@ -493,9 +411,7 @@ mod tests {
 
     #[test]
     fn selling_comes_first_because_it_pays_for_the_rest() {
-        // Not a penny, but a pack of loot. The old code asked whether
-        // it could afford the shopping before it had sold anything and
-        // concluded it could not.
+        // No coin, but loot: whether the shopping is affordable is judged after the sale.
         let loot = [
             ForSale {
                 guid: 1,
@@ -518,9 +434,7 @@ mod tests {
         );
         assert!(matches!(p.acts.first(), Some(Act::Sell { .. })));
         assert_eq!(p.takings(), 8_000);
-        // And the weight the loot was taking is weight the scarabs can
-        // use: a hundred at ten each needs a thousand, and only five
-        // hundred of that came free, so it buys what it can carry.
+        // The loot's 500 burden plus 100 room carries 60 scarabs at 10 each, not the 100 wanted.
         assert_eq!(bought(&p, "Lead Scarab"), 60);
         assert!(p
             .unmet
@@ -530,8 +444,7 @@ mod tests {
 
     #[test]
     fn weight_holds_an_order_back_as_surely_as_money_does() {
-        // Rich and full. This is the character that asked for scarabs,
-        // was refused, and asked again on the next trip for ever.
+        // Rich, with no burden room: nothing bought, and the plan says why.
         let p = plan(
             means(1_000_000, 0, 0),
             &[],
@@ -561,9 +474,6 @@ mod tests {
 
     #[test]
     fn the_money_the_shopping_needs_is_not_turned_into_notes() {
-        // The bug this whole module exists to make impossible: the
-        // trip turned its coin into trade notes and then could not pay
-        // the bill.
         let p = plan(
             means(10_000, 0, 100_000),
             &[],
@@ -573,17 +483,11 @@ mod tests {
             MMD,
         );
         assert_eq!(bought(&p, "Prismatic Taper"), 500);
-        // Seven and a half thousand spent, two and a half left. The
-        // float keeps two thousand, and the five hundred over it is
-        // left as change: it would buy four hundred-notes, lose sixty
-        // doing it, and free no slot at all, since five hundred coins
-        // and four notes both sit in one.
+        // 7,500 spent leaves 2,500: the 500 above the float buys no Mayoi note, so it stays change.
         assert_eq!(p.cost(), 500 * 15);
         assert!(!p.acts.iter().any(|a| matches!(a, Act::Keep { .. })));
         assert_eq!(p.left.coin, 2_500);
-        // Buying comes before converting, always. With a fortune in
-        // hand rather than pocket change, both happen and in that
-        // order.
+        // Buying comes before converting, always: with a fortune both happen, in that order.
         let rich = plan(
             means(1_000_000, 0, 100_000),
             &[],
@@ -603,18 +507,13 @@ mod tests {
             .position(|a| matches!(a, Act::Keep { .. }))
             .expect("kept something");
         assert!(buy_at < keep_at, "the tapers are paid for first");
-        // And the tapers were all bought before any of it was packed
-        // away, which is the bug this guards.
+        // All the tapers were bought before any coin was packed into notes.
         assert_eq!(bought(&rich, "Prismatic Taper"), 500);
     }
 
     #[test]
     fn a_big_sale_stops_to_convert_and_goes_on_selling() {
-        // Forty pieces of loot at fifty thousand each: two million
-        // pyreals, which is eighty slots of coin. The character has
-        // ten slots. Selling it in one go is impossible and always was;
-        // the old plan said it would sell the lot and then wondered why
-        // the counter stopped taking things.
+        // 40 x 50,000 is two million pyreals: eighty slots of coin, and ten slots free.
         let loot: Vec<ForSale> = (0..40)
             .map(|i| ForSale {
                 guid: 100 + i,
@@ -662,13 +561,9 @@ mod tests {
         assert_eq!(sold, 40, "the whole pile went over the counter");
         assert!(p.unmet.is_empty(), "nothing was carried home again");
 
-        // And the takings came home as notes, not as eighty slots of
-        // change.
+        // The takings came home as notes, not eighty slots of change.
         assert!(p.left.notes > 1_000_000, "{} in notes", p.left.notes);
-        // What is left is less than one note costs, which is as far as
-        // packing away can go when the Mayoi is the only note worth
-        // making: it comes in lumps of two hundred and eighty-seven
-        // thousand five hundred and there is no smaller lump.
+        // Coin left is under one Mayoi's 287,500 cost plus the float: there is no smaller lump.
         assert!(
             p.left.coin < note_cost(250_000) + FLOAT,
             "{} left as coin",
@@ -678,9 +573,7 @@ mod tests {
 
     #[test]
     fn a_counter_that_makes_no_notes_sells_what_it_can_and_says_so() {
-        // Nowhere to put the money means the sale stops when the pack
-        // does. Better to say that than to keep offering things the
-        // character cannot be paid for.
+        // No note to convert into: the sale stops when the pack does, and says so.
         let loot: Vec<ForSale> = (0..40)
             .map(|i| ForSale {
                 guid: 100 + i,
@@ -721,8 +614,7 @@ mod tests {
 
     #[test]
     fn notes_are_cashed_for_the_shopping_and_no_further() {
-        // A fortune in notes and nothing spendable. It cashes what the
-        // bill needs, smallest first, and leaves the rest packed.
+        // Notes and no coin: it cashes what the bill needs, smallest first, and leaves the rest.
         let notes = [
             Note { guid: 1, face: 250 },
             Note {
@@ -788,8 +680,7 @@ mod tests {
 
     #[test]
     fn a_trip_that_does_nothing_says_so_before_it_is_walked() {
-        // No money, nothing to sell: whatever is on the shelf, there is
-        // no reason to go.
+        // No money and nothing to sell: whatever is on the shelf, no reason to go.
         let p = plan(
             means(0, 0, 100_000),
             &[],
