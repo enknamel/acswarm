@@ -84,6 +84,15 @@ impl SharedArchives {
             cell: Arc::new(DatArchive::open(d.join("client_cell_1.dat"))?),
         })
     }
+
+    /// Archives with no files in them (see [`Assets::empty`]).
+    pub fn empty() -> Self {
+        SharedArchives {
+            data_dir: std::path::PathBuf::new(),
+            portal: Arc::new(DatArchive::empty(ac_dat::DataSet::Portal)),
+            cell: Arc::new(DatArchive::empty(ac_dat::DataSet::Cell)),
+        }
+    }
 }
 
 /// Memoizing asset loader. Single-threaded (`Rc`), intended to be owned by
@@ -148,6 +157,12 @@ impl Assets {
         Ok(Self::with_archives(SharedArchives::open(data_dir)?))
     }
 
+    /// A loader with no game data behind it: every lookup is not found.
+    /// For sessions and tests that never read the archives.
+    pub fn empty() -> Self {
+        Self::with_archives(SharedArchives::empty())
+    }
+
     /// The archives, to hand to another thread's [`Assets`].
     pub fn archives(&self) -> SharedArchives {
         SharedArchives {
@@ -201,6 +216,12 @@ impl Assets {
     pub fn world_grid(&self) -> Result<Rc<worldgrid::WorldGrid>> {
         if let Some(g) = self.world_grid.borrow().as_ref() {
             return Ok(g.clone());
+        }
+        // The disk cache was built from some other archives.
+        if self.portal.is_empty() {
+            return Err(Error::Other(
+                "no archives to build the world grid from".into(),
+            ));
         }
         let g = Rc::new(worldgrid::WorldGrid::load_cached(
             self,
@@ -486,5 +507,19 @@ pub mod lbid {
     }
     pub fn from_xy(x: u32, y: u32) -> u32 {
         (x << 24) | (y << 16)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_empty_loader_finds_nothing_and_reads_no_disk_cache() {
+        let assets = Assets::empty();
+        assert!(assets.setup(0x0200_0001).is_err());
+        assert!(assets.region().is_err());
+        assert!(assets.block_collision(0xA9B4_0000).is_err());
+        assert!(assets.world_grid().is_err());
     }
 }
