@@ -89,6 +89,10 @@ pub const PHYSICS_STATE_STATIC: u32 = 0x1;
 pub const PHYSICS_STATE_ETHEREAL: u32 = 0x4;
 /// `PhysicsState` bit that hides an object.
 pub const PHYSICS_STATE_NO_DRAW: u32 = 0x20;
+/// `PhysicsState` bit the server sets when the object's Setup carries
+/// a physics BSP: the retail client collided with such a thing by its
+/// parts' own geometry, and never by the Setup's cylinders or spheres.
+pub const PHYSICS_STATE_HAS_PHYSICS_BSP: u32 = 0x10000;
 /// `PhysicsState` bit for hidden (admin-invisible) objects.
 pub const PHYSICS_STATE_HIDDEN: u32 = 0x4000;
 /// `PhysicsState` bit the server sets on things it flies at a target:

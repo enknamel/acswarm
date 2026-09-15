@@ -28,5 +28,5 @@ pub mod obstacles;
 pub mod steering;
 
 pub use means::{how_to_get_there, Means, WALKABLE};
-pub use obstacles::{Cluttered, Cylinder};
+pub use obstacles::{Clutter, Cylinder};
 pub use steering::{Aim, Ground, Steering};

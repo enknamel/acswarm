@@ -1,38 +1,48 @@
 //! What stands in the room, and the way round it.
 //!
-//! The steering routes on the landblock's own geometry: walls, floors,
-//! the statues and braziers the DAT files place, the trees the terrain
-//! grows. What the server places is another matter. A chest, a hook, a
-//! bush that can be picked, a cart in the road -- these arrive as
-//! objects, with the packets, and leave the same way, and the
-//! collision world and the graph over it (shared by every character in
-//! the process, built once a block) never hear of them. A walk that was
-//! planned clear ran into them, and the only thing that noticed was the
-//! stuck clock, which skips a waypoint rather than go round.
+//! The walking physics collides with the landblock alone: walls,
+//! floors, the statues and braziers the DAT files place, the trees and
+//! bushes the terrain grows. What the server places -- a chest, a hook,
+//! a cart in the road -- arrives as objects, with the packets, and
+//! nothing here stops at one: the physics walks straight through it,
+//! and the server takes the position it is sent (ACE's
+//! `update_object_server` runs the transition only to note the
+//! collision and sets the requested position regardless). So an object
+//! in the way never stalled a walk; a stall is always the landblock's
+//! own geometry, and belongs to the steering and the graph over that.
+//! What this buys is the walk looking right: the retail client did stop
+//! at a chest, and a character that goes round one moves the way a
+//! player would rather than through the furniture.
 //!
-//! So they are carried apart from the ground, as the shapes the retail
-//! client collided with them by: the `CylSphere`s of the object's
-//! Setup, vertical cylinders in the object's frame, and failing those
-//! its `Sphere`s. [`Cluttered`] lays them over a [`Ground`] for one
-//! steer: the straight line is blocked where it meets one, and a route
-//! is threaded round each one it crosses. The list is rebuilt from the
-//! object table every tick rather than cached: a few hundred objects at
-//! most, a distance test each, and nothing to invalidate when one is
-//! moved, rescaled or deleted between frames.
+//! The objects are carried apart from the ground, as the shapes the
+//! retail client collided with them by: the `CylSphere`s of the
+//! object's Setup, vertical cylinders in the object's frame, and
+//! failing those its `Sphere`s. They are not laid over the ground for
+//! the steering to plan on -- the graph and the neighbourhood planner
+//! are for what actually stops the character -- but applied to the
+//! answer: each frame the leg from here to wherever the steering aims,
+//! the goal or the next waypoint of its route, is threaded round the
+//! first cylinder it meets ([`detour`]), and the character heads for
+//! the first corner of that. Asked again next frame from a little
+//! further on, the corner moves with it, and the walk hugs the object
+//! round to where the straight line is clear again. A leg no detour
+//! clears is left as it was.
 //!
 //! What is left out is as important as what goes in, and every case is
 //! the retail rule or the project's own: a creature (the client walked
 //! through them), anything carried (it is in a pack, not on the floor),
-//! anything Ethereal (an open door, a portal, a corpse), a missile, and
-//! a door whatever its state, because a character here walks straight
-//! through doors and the navigation must never route round one.
+//! anything Ethereal (an open door, a portal, a corpse), a missile, an
+//! object the client collided with by its parts' own BSP rather than by
+//! any cylinder (there is no cylinder to stand in for it), and a door
+//! whatever its state, because a character here walks straight through
+//! doors and the navigation must never route round one.
+
+use std::rc::Rc;
 
 use ac_formats::setup::Setup;
 use ac_scene::collision::Capsule;
 use ac_world::{item_type, object, object_desc_flags, World, WorldObject};
 use glam::{Vec2, Vec3};
-
-use crate::steering::Ground;
 
 /// A vertical cylinder standing in the world: an object's collision
 /// shape as the retail client kept it, placed.
@@ -46,19 +56,31 @@ pub struct Cylinder {
     pub top: f32,
 }
 
-/// Objects further off than this are not gathered. The server only
-/// describes what is in sight, and a walk plans a landblock at most.
-pub const NEARBY: f32 = 64.0;
+/// Objects further off than this from the character are not in play.
+/// Only the first thing on the leg being walked matters this frame;
+/// anything further off is met when the walk gets there.
+pub const NEARBY: f32 = 32.0;
+/// How far the character may move before the objects gathered round
+/// it are gathered again. They are gathered a margin wider than
+/// [`NEARBY`] so that everything within it stays in the list until
+/// then.
+const MARGIN: f32 = 8.0;
 /// Room a detour keeps between the character's side and the object
 /// (metres), on top of both radii: the walking code slides along what
 /// it touches, and a corner cut to the millimetre is a touch.
 const BERTH: f32 = 0.3;
 /// How many objects a single leg may be threaded round, one after
-/// another, before it is left as it was for the stuck clocks.
+/// another, before it is left as it was. The search this bounds is
+/// cheap in practice: a side is dropped at its first leg the ground
+/// refuses, and a leg that meets one thing too many is dropped without
+/// asking the ground at all, so a room packed with crates costs a
+/// detour a dozen or so questions, not the hundreds two sides by a few
+/// legs by three deep could reach.
 const DEPTH: u32 = 3;
 
-/// Whether the retail client would have stopped a character walking
-/// into `o`, and this one should walk round it.
+/// Whether `o` is something this client walks round: solid to the
+/// retail client, standing on the floor, and collided with by the
+/// shapes its Setup carries rather than by a part's own BSP.
 pub fn in_the_way(o: &WorldObject) -> bool {
     // In a pack, on a belt, in a chest: not on the floor.
     let carried =
@@ -66,6 +88,13 @@ pub fn in_the_way(o: &WorldObject) -> bool {
     // An open door, a portal, a corpse: solid to look at, not to walk.
     let ethereal = o.physics_state & object::PHYSICS_STATE_ETHEREAL != 0;
     let flying = o.physics_state & object::PHYSICS_STATE_MISSILE != 0;
+    // Collided with by its parts' physics BSP (a table, a bench, most
+    // furniture with a real shape). The Setup's cylinder, where it has
+    // one, is a bounding shape the retail client never consulted for
+    // these -- as wide as the table is long -- and there is no cylinder
+    // that stands in for a slab. Left to the physics, which walks
+    // through it.
+    let by_bsp = o.physics_state & object::PHYSICS_STATE_HAS_PHYSICS_BSP != 0;
     // The client never collided the viewer with a creature, and a
     // vendor or a monster is what most walks are to.
     let creature = o.is_player
@@ -75,7 +104,7 @@ pub fn in_the_way(o: &WorldObject) -> bool {
     // whatever the server says its physics are, because a route that
     // goes round one strands the character at the doorway.
     let door = o.object_desc_flags & object_desc_flags::DOOR != 0;
-    !(carried || ethereal || flying || creature || door)
+    !(carried || ethereal || flying || by_bsp || creature || door)
 }
 
 /// The cylinders `o` stands as, in world space, from its Setup: its
@@ -128,21 +157,67 @@ pub fn cylinders(o: &WorldObject, setup: &Setup) -> Vec<Cylinder> {
     }
 }
 
-/// Everything within [`NEARBY`] of `at` that a walk must go round,
-/// gathered afresh from the object table.
-pub fn around(world: &World, assets: &ac_scene::Assets, at: Vec3) -> Vec<Cylinder> {
+/// Everything within `within` of `at` that a walk goes round, gathered
+/// from the object table; `setup` answers for an object's Setup, and
+/// is never asked about an object described without one.
+pub fn around(
+    world: &World,
+    at: Vec3,
+    within: f32,
+    mut setup: impl FnMut(u32) -> Option<Rc<Setup>>,
+) -> Vec<Cylinder> {
     world
         .objects
         .values()
         .filter(|o| in_the_way(o))
-        .filter(|o| o.world_pos().is_some_and(|p| p.distance(at) < NEARBY))
+        // Described without a Setup: nothing to look up, and the
+        // archive would be searched for it every time.
+        .filter(|o| o.setup_id != 0)
+        .filter(|o| o.world_pos().is_some_and(|p| p.distance(at) < within))
         .flat_map(|o| {
-            assets
-                .setup(o.setup_id)
+            setup(o.setup_id)
                 .map(|s| cylinders(o, &s))
                 .unwrap_or_default()
         })
         .collect()
+}
+
+/// The objects gathered round one character, kept from one frame to
+/// the next.
+///
+/// A walk asks about them every frame, and the object table is a few
+/// hundred entries with a Setup lookup for each one in reach. The
+/// world says when anything about them changes (`World::generation`
+/// moves on every object made, moved, hidden or deleted), and the
+/// character says when it has walked far enough that things at the
+/// edge of its reach have changed; between those the list stands.
+#[derive(Debug, Default)]
+pub struct Clutter {
+    /// The world generation the list was gathered at.
+    generation: Option<u64>,
+    /// Where the character stood when it was gathered.
+    at: Vec3,
+    cylinders: Vec<Cylinder>,
+}
+
+impl Clutter {
+    /// The cylinders within [`NEARBY`] of `at`, gathered afresh only
+    /// when the world has changed or the character has moved
+    /// [`MARGIN`] from where they were last gathered.
+    pub fn refresh(
+        &mut self,
+        world: &World,
+        at: Vec3,
+        setup: impl FnMut(u32) -> Option<Rc<Setup>>,
+    ) -> &[Cylinder] {
+        let stale = self.generation != Some(world.generation) || self.at.distance(at) > MARGIN;
+        if stale {
+            self.cylinders = around(world, at, NEARBY + MARGIN, setup);
+            self.generation = Some(world.generation);
+            self.at = at;
+        }
+        &self.cylinders
+    }
 }
 
 impl Cylinder {
@@ -157,9 +232,9 @@ impl Cylinder {
     /// `step_up`; too high is walked under.
     ///
     /// A walk that begins inside the reach -- the character is already
-    /// leaning on the thing -- is blocked only if it gets closer still:
-    /// away from it is the way out, and calling every direction blocked
-    /// left it standing there.
+    /// in the thing, the physics having no reason to keep it out -- is
+    /// blocked only if it gets closer still: away from it is the way
+    /// out, and calling every direction blocked left it standing there.
     pub fn blocks(&self, from: Vec3, to: Vec3, cap: &Capsule) -> bool {
         let feet = from.z.min(to.z);
         let head = from.z.max(to.z) + cap.height;
@@ -206,46 +281,21 @@ pub fn first_hit<'c>(
         })
 }
 
-/// `p` moved out of any cylinder it stands within reach of, radially,
-/// to a berth's clearance. For a waypoint the graph put inside an
-/// object it never knew about: a leg to a point inside a chest cannot
-/// be threaded round the chest.
-fn pushed_out(p: Vec3, cyls: &[Cylinder], cap: &Capsule) -> Vec3 {
-    let mut q = p;
-    for c in cyls {
-        if c.top <= q.z + cap.step_up || c.bottom >= q.z + cap.height {
-            continue;
-        }
-        let flat = q.truncate();
-        let d = flat.distance(c.center);
-        let want = c.reach(cap) + BERTH;
-        if d < want {
-            let dir = if d > 1e-4 {
-                (flat - c.center) / d
-            } else {
-                Vec2::X
-            };
-            let moved = c.center + dir * want;
-            q = Vec3::new(moved.x, moved.y, q.z);
-        }
-    }
-    q
-}
-
 /// The corners of the way round `hit` from `a` to `b` on `side` (the
 /// sign of the cross product with the direction of travel: left is
 /// positive), in order, `a` and `b` themselves left out. Each corner
-/// stands `berth` from the cylinder's middle.
+/// stands `berth` from the cylinder's middle, which is further than
+/// `reach`, the distance the walk must keep.
 ///
 /// From each end the walk goes to its tangent point on the circle of
 /// that radius (an end already on or inside the circle starts from
 /// where it is), and between the two tangent points it follows the arc
-/// in chords short enough that none cuts back inside the cylinder's
-/// reach. A single corner off the line beside the cylinder was the
-/// first answer, and it clipped the cylinder whenever an end stood
-/// close by: the leg from a corner to a waypoint just past a crate ran
-/// through the crate's side.
-fn corners_round(hit: &Cylinder, a: Vec2, b: Vec2, side: f32, berth: f32) -> Vec<Vec2> {
+/// in chords short enough that none cuts back inside the reach. A
+/// single corner off the line beside the cylinder was the first
+/// answer, and it clipped the cylinder whenever an end stood close by:
+/// the leg from a corner to a waypoint just past a crate ran through
+/// the crate's side.
+fn corners_round(hit: &Cylinder, a: Vec2, b: Vec2, side: f32, berth: f32, reach: f32) -> Vec<Vec2> {
     let c = hit.center;
     let dir = (b - a).normalize_or_zero();
     let on_side = |q: Vec2| dir.perp_dot(q - c) * side;
@@ -287,9 +337,16 @@ fn corners_round(hit: &Cylinder, a: Vec2, b: Vec2, side: f32, berth: f32) -> Vec
     } else {
         long
     };
-    // Chords of a sixth of a turn at most keep the walk further from
-    // the middle than the reach the berth was built on.
-    let chords = (sweep.abs() / (std::f32::consts::PI / 3.0)).ceil().max(1.0) as usize;
+    // A chord's middle is the nearest it comes to the centre, at
+    // berth * cos(half the sweep): the sweep is chosen so that it stays
+    // half a berth's clearance outside the reach, and never wider than
+    // a sixth of a turn. A fixed sixth of a turn was the first answer,
+    // and it holds only for things under two metres across -- a
+    // lifestone's chords cut back inside its reach, and the walk
+    // reported its own detour as blocked by the thing it was rounding.
+    let chord = (2.0 * ((reach + BERTH * 0.5) / berth).clamp(-1.0, 1.0).acos())
+        .clamp(0.05, std::f32::consts::FRAC_PI_3);
+    let chords = (sweep.abs() / chord).ceil().max(1.0) as usize;
     let mut out = Vec::new();
     if ta != a {
         out.push(ta);
@@ -343,10 +400,11 @@ pub fn thread(
     } else {
         [1.0, -1.0]
     };
-    let berth = hit.reach(cap) + BERTH;
+    let reach = hit.reach(cap);
+    let berth = reach + BERTH;
     let rest: Vec<Cylinder> = cyls.iter().filter(|c| *c != hit).copied().collect();
     'side: for side in sides {
-        let corners = corners_round(hit, a, b, side, berth);
+        let corners = corners_round(hit, a, b, side, berth, reach);
         let lift = |q: Vec2| {
             let t = ((q - a).dot(dir) / len).clamp(0.0, 1.0);
             Vec3::new(q.x, q.y, from.z + (to.z - from.z) * t)
@@ -368,165 +426,43 @@ pub fn thread(
     None
 }
 
-/// A [`Ground`] with the server's objects standing on it, for one
-/// steer to one goal.
+/// Where to head this frame instead of `aim`: the first corner of the
+/// way round whatever stands on the straight walk from `from` to it,
+/// or `aim` itself when nothing does, or when no way round clears the
+/// ground within [`DEPTH`] objects.
 ///
-/// The ground answers for its geometry as before; this answers for the
-/// cylinders on top. The straight line is blocked where it meets one,
-/// and every route -- the block's own, the neighbourhood planner's --
-/// has its legs threaded round the ones they cross before the steering
-/// sees it. A leg that cannot be threaded is left as it was: the stuck
-/// clocks remain the last resort, not the first.
-///
-/// An object the goal itself stands in is not an obstacle to that
-/// goal. A walk to a chest ends at the chest, within arm's reach of
-/// its middle, and a cylinder round the goal would have every approach
-/// blocked and the character refusing the last stride.
-pub struct Cluttered<'a, G: Ground> {
-    ground: &'a mut G,
-    cylinders: Vec<Cylinder>,
-    cap: Capsule,
-}
-
-impl<'a, G: Ground> Cluttered<'a, G> {
-    pub fn new(ground: &'a mut G, clutter: &[Cylinder], cap: Capsule, goal: Vec3) -> Self {
-        let cylinders = clutter
-            .iter()
-            .filter(|c| c.center.distance(goal.truncate()) >= c.reach(&cap))
-            .copied()
-            .collect();
-        Cluttered {
-            ground,
-            cylinders,
-            cap,
+/// An object the leg ends in is no obstacle to that leg. A walk to a
+/// chest ends at the chest, within arm's reach of its middle, and a
+/// waypoint the graph put in one (it never heard of the chest) is
+/// reached the same way; a cylinder round the end would have every
+/// approach blocked and the character refusing the last stride.
+pub fn detour(
+    cyls: &[Cylinder],
+    from: Vec3,
+    aim: Vec3,
+    cap: &Capsule,
+    mut clear: impl FnMut(Vec3, Vec3) -> bool,
+) -> Vec3 {
+    let ends_in = |c: &Cylinder| c.center.distance(aim.truncate()) < c.reach(cap);
+    if !cyls.iter().any(|c| !ends_in(c) && c.blocks(from, aim, cap)) {
+        return aim;
+    }
+    let in_play: Vec<Cylinder> = cyls.iter().filter(|c| !ends_in(c)).copied().collect();
+    match thread(&in_play, from, aim, cap, &mut clear, DEPTH) {
+        Some(legs) => legs.first().copied().unwrap_or(aim),
+        None => {
+            tracing::trace!(target: "steer", "no way round what stands between {from:?} and {aim:?}");
+            aim
         }
-    }
-
-    /// The obstacles this steer goes round.
-    pub fn cylinders(&self) -> &[Cylinder] {
-        &self.cylinders
-    }
-
-    /// `waypoints` from `from`, each leg threaded round the cylinders
-    /// it crosses. The last waypoint is the goal and stays where it is;
-    /// any other standing inside an object is first moved out of it.
-    fn threaded(&mut self, block: u32, from: Vec3, waypoints: Vec<Vec3>) -> Vec<Vec3> {
-        let Cluttered {
-            ground,
-            cylinders,
-            cap,
-        } = self;
-        let mut clear = |a: Vec3, b: Vec3| !ground.line_blocked(block, a, b);
-        let n = waypoints.len();
-        let mut out = Vec::with_capacity(n);
-        let mut at = from;
-        for (i, w) in waypoints.into_iter().enumerate() {
-            let w = if i + 1 < n {
-                pushed_out(w, cylinders, cap)
-            } else {
-                w
-            };
-            match thread(cylinders, at, w, cap, &mut clear, DEPTH) {
-                Some(legs) => out.extend(legs),
-                None => {
-                    tracing::debug!("route: no way round what stands between {at:?} and {w:?}");
-                    out.push(w)
-                }
-            }
-            at = w;
-        }
-        out
-    }
-}
-
-impl<G: Ground> Ground for Cluttered<'_, G> {
-    fn at(&self) -> Vec3 {
-        self.ground.at()
-    }
-
-    fn cell(&self) -> u32 {
-        self.ground.cell()
-    }
-
-    fn block(&self) -> u32 {
-        self.ground.block()
-    }
-
-    fn line_blocked(&mut self, block: u32, from: Vec3, to: Vec3) -> bool {
-        self.ground.line_blocked(block, from, to)
-            || first_hit(&self.cylinders, from, to, &self.cap).is_some()
-    }
-
-    fn line_drops(&mut self, block: u32, from: Vec3, to: Vec3) -> bool {
-        self.ground.line_drops(block, from, to)
-    }
-
-    fn find_path(&mut self, block: u32, from: Vec3, to: Vec3, goal_cell: u32) -> Option<Vec<Vec3>> {
-        // The graph knows nothing of objects, so a goal with only an
-        // object between here and it may have no graph route at all
-        // (the straight line is the route): thread that line.
-        let waypoints = self
-            .ground
-            .find_path(block, from, to, goal_cell)
-            .or_else(|| (!self.ground.line_blocked(block, from, to)).then(|| vec![to]))?;
-        Some(self.threaded(block, from, waypoints))
-    }
-
-    fn ask_wide(&mut self, from: Vec3, to: Vec3, block: u32, outdoors: bool, exact_to: bool) {
-        self.ground.ask_wide(from, to, block, outdoors, exact_to)
-    }
-
-    fn take_wide(&mut self, from: Vec3, to: Vec3) -> Option<Vec<Vec3>> {
-        let block = self.ground.block();
-        let waypoints = self.ground.take_wide(from, to)?;
-        Some(self.threaded(block, from, waypoints))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::steering::{Aim, Steering};
     use ac_formats::geom::{CylSphere, Sphere};
     use ac_world::object::Position;
     use glam::Quat;
-    use std::time::Instant;
-
-    /// Open ground: nothing built on it, every straight walk clear, and
-    /// the graph's route to anywhere the straight line.
-    #[derive(Default)]
-    struct Open {
-        at: Vec3,
-        /// Straight walks the ground itself refuses, as (from, to) pairs
-        /// judged by their midpoint: a wall standing there.
-        walls: Vec<Vec2>,
-    }
-
-    impl Ground for Open {
-        fn at(&self) -> Vec3 {
-            self.at
-        }
-        fn cell(&self) -> u32 {
-            0
-        }
-        fn block(&self) -> u32 {
-            0
-        }
-        fn line_blocked(&mut self, _b: u32, from: Vec3, to: Vec3) -> bool {
-            let mid = (from + to).truncate() * 0.5;
-            self.walls.iter().any(|w| w.distance(mid) < 1.0)
-        }
-        fn line_drops(&mut self, _b: u32, _f: Vec3, _t: Vec3) -> bool {
-            false
-        }
-        fn find_path(&mut self, _b: u32, _f: Vec3, to: Vec3, _c: u32) -> Option<Vec<Vec3>> {
-            Some(vec![to])
-        }
-        fn ask_wide(&mut self, _f: Vec3, _t: Vec3, _b: u32, _o: bool, _e: bool) {}
-        fn take_wide(&mut self, _f: Vec3, _t: Vec3) -> Option<Vec<Vec3>> {
-            None
-        }
-    }
 
     fn cap() -> Capsule {
         Capsule::default()
@@ -542,17 +478,45 @@ mod tests {
         }
     }
 
-    /// Every leg of a route from `me` through `route`, none crossing a
-    /// cylinder.
-    fn clears(route: &[Vec3], me: Vec3, cyls: &[Cylinder]) -> bool {
-        let mut at = me;
-        for w in route {
-            if first_hit(cyls, at, *w, &cap()).is_some() {
-                return false;
-            }
-            at = *w;
+    /// Open ground, but for walls: a straight walk is refused when its
+    /// middle lies within a metre of one.
+    fn walls(at: &[(f32, f32)]) -> impl FnMut(Vec3, Vec3) -> bool + '_ {
+        move |a: Vec3, b: Vec3| {
+            let mid = (a + b).truncate() * 0.5;
+            !at.iter().any(|&(x, y)| Vec2::new(x, y).distance(mid) < 1.0)
         }
-        true
+    }
+
+    /// Walks from `me` towards `goal` a quarter-metre a frame, asking
+    /// [`detour`] afresh each frame as the client does: the positions
+    /// visited, ending within a stride of the goal.
+    fn walk(
+        cyls: &[Cylinder],
+        me: Vec3,
+        goal: Vec3,
+        mut clear: impl FnMut(Vec3, Vec3) -> bool,
+    ) -> Vec<Vec3> {
+        let mut at = me;
+        let mut seen = vec![me];
+        for _ in 0..400 {
+            if at.truncate().distance(goal.truncate()) < 0.3 {
+                return seen;
+            }
+            let aim = detour(cyls, at, goal, &cap(), &mut clear);
+            let d = (aim - at).truncate();
+            let step = d.normalize_or_zero() * d.length().min(0.25);
+            at += step.extend(0.0);
+            seen.push(at);
+        }
+        panic!("never arrived: ended at {at:?}");
+    }
+
+    /// No point of `path` stands within reach of a cylinder.
+    fn keeps_clear(path: &[Vec3], cyls: &[Cylinder]) -> bool {
+        path.iter().all(|p| {
+            cyls.iter()
+                .all(|c| p.truncate().distance(c.center) >= c.reach(&cap()) - 1e-3)
+        })
     }
 
     /// A setup with one cylinder: base at `origin`, `radius`, `height`.
@@ -608,47 +572,23 @@ mod tests {
     }
 
     #[test]
-    fn a_cylinder_between_character_and_goal_is_routed_around() {
+    fn a_cylinder_between_character_and_goal_is_walked_round() {
         // Standing at the origin with a crate five metres off on the
-        // way to a goal ten metres off. The ground is open, so the
-        // steering used to walk straight and lean on the crate.
+        // way to a goal ten metres off. The physics would walk straight
+        // through it; the walk goes round.
         let me = Vec3::ZERO;
         let goal = Vec3::new(10.0, 0.0, 0.0);
         let clutter = [crate_at(5.0, 0.0)];
-        let mut open = Open {
-            at: me,
-            ..Default::default()
-        };
-        let mut g = Cluttered::new(&mut open, &clutter, cap(), goal);
-        let mut st = Steering::new(Instant::now());
-        let aim = match st.steer(&mut g, goal, 0, Instant::now()) {
-            Aim::Go(at) => at,
-            Aim::NoWay => panic!("refused a walk round a crate"),
-        };
+        let first = detour(&clutter, me, goal, &cap(), |_, _| true);
+        assert!(first.distance(goal) > 1.0, "walked straight at the crate");
+        let path = walk(&clutter, me, goal, |_, _| true);
+        assert!(keeps_clear(&path, &clutter), "{path:?}");
+        // And it is a step aside, not a tour.
         assert!(
-            aim.distance(goal) > 1.0,
-            "walked straight at the crate: {aim:?}"
+            path.iter().all(|p| p.y.abs() < 2.0),
+            "wandered off: {path:?}"
         );
-        let route = st
-            .route
-            .as_ref()
-            .expect("a route round it")
-            .waypoints
-            .clone();
-        assert_eq!(route.last().copied(), Some(goal), "ends at the goal");
-        assert!(
-            clears(&route, me, &clutter),
-            "the route crosses the crate: {route:?}"
-        );
-        // And it is a step aside, not a tour: the two tangent points
-        // beside the crate, and on to the goal.
-        assert!(route.len() <= 3, "{route:?}");
-        assert!(
-            route[..route.len() - 1]
-                .iter()
-                .all(|w| w.truncate().distance(clutter[0].center) < 2.0),
-            "wandered off: {route:?}"
-        );
+        assert!(path.len() < 60, "{} frames for ten metres", path.len());
     }
 
     #[test]
@@ -658,25 +598,12 @@ mod tests {
         let me = Vec3::ZERO;
         let goal = Vec3::new(10.0, 0.0, 0.0);
         let clutter = [crate_at(5.0, 0.2)];
-        // A wall where the left-hand detour's legs would cross.
-        let mut open = Open {
-            at: me,
-            walls: vec![Vec2::new(2.5, 0.75), Vec2::new(7.5, 0.75)],
-        };
-        let mut g = Cluttered::new(&mut open, &clutter, cap(), goal);
-        let mut st = Steering::new(Instant::now());
-        st.steer(&mut g, goal, 0, Instant::now());
-        let route = st
-            .route
-            .as_ref()
-            .expect("a route round it")
-            .waypoints
-            .clone();
+        let path = walk(&clutter, me, goal, walls(&[(2.5, 0.75), (7.5, 0.75)]));
         assert!(
-            route[0].y < 0.0,
-            "took the side against the wall: {route:?}"
+            path.iter().all(|p| p.y < 0.05),
+            "took the side against the wall: {path:?}"
         );
-        assert!(clears(&route, me, &clutter));
+        assert!(keeps_clear(&path, &clutter));
     }
 
     #[test]
@@ -684,81 +611,32 @@ mod tests {
         let me = Vec3::ZERO;
         let goal = Vec3::new(12.0, 0.0, 0.0);
         let clutter = [crate_at(4.0, 0.0), crate_at(8.0, 0.4)];
-        let mut open = Open {
-            at: me,
-            ..Default::default()
-        };
-        let mut g = Cluttered::new(&mut open, &clutter, cap(), goal);
-        let mut st = Steering::new(Instant::now());
-        assert!(matches!(
-            st.steer(&mut g, goal, 0, Instant::now()),
-            Aim::Go(_)
-        ));
-        let route = st
-            .route
-            .as_ref()
-            .expect("a route round them")
-            .waypoints
-            .clone();
-        assert!(clears(&route, me, &clutter), "{route:?}");
+        let path = walk(&clutter, me, goal, |_, _| true);
+        assert!(keeps_clear(&path, &clutter), "{path:?}");
     }
 
     #[test]
-    fn no_way_round_leaves_the_leg_to_the_stuck_clocks() {
+    fn no_way_round_leaves_the_leg_as_it_was() {
         // Walls on both sides of the crate: nothing to be done here,
-        // and the answer is the old one -- walk, and let the clocks
-        // decide -- not a refusal.
+        // and the answer is the old one -- walk at the aim.
         let me = Vec3::ZERO;
         let goal = Vec3::new(10.0, 0.0, 0.0);
         let clutter = [crate_at(5.0, 0.0)];
-        let mut open = Open {
-            at: me,
-            walls: vec![
-                Vec2::new(2.5, 0.6),
-                Vec2::new(7.5, 0.6),
-                Vec2::new(2.5, -0.6),
-                Vec2::new(7.5, -0.6),
-            ],
-        };
-        let mut g = Cluttered::new(&mut open, &clutter, cap(), goal);
-        let mut st = Steering::new(Instant::now());
-        assert_eq!(st.steer(&mut g, goal, 0, Instant::now()), Aim::Go(goal));
-        assert!(!st.no_way());
+        let both_sides = [(2.5, 0.6), (7.5, 0.6), (2.5, -0.6), (7.5, -0.6)];
+        assert_eq!(detour(&clutter, me, goal, &cap(), walls(&both_sides)), goal);
     }
 
     #[test]
-    fn the_goal_inside_an_object_is_still_walked_to() {
-        // A walk to a chest ends at the chest. Its own cylinder is no
-        // obstacle to that walk, or the last stride is refused.
+    fn the_leg_that_ends_in_an_object_is_still_walked() {
+        // A walk to a chest ends at the chest, and a waypoint the graph
+        // put in one is reached the same way. The chest's own cylinder
+        // is no obstacle to that leg, or the last stride is refused.
         let me = Vec3::ZERO;
+        let clutter = [crate_at(5.0, 0.0)];
         let goal = Vec3::new(5.0, 0.0, 0.0);
-        let clutter = [crate_at(5.0, 0.0)];
-        let mut open = Open {
-            at: me,
-            ..Default::default()
-        };
-        let mut g = Cluttered::new(&mut open, &clutter, cap(), goal);
-        assert!(g.cylinders().is_empty());
-        let mut st = Steering::new(Instant::now());
-        assert_eq!(st.steer(&mut g, goal, 0, Instant::now()), Aim::Go(goal));
-    }
-
-    #[test]
-    fn a_route_is_not_cut_through_an_object() {
-        // A corner waypoint is passed early when the walk to the one
-        // after it is clear -- clear of objects too, now.
-        let me = Vec3::new(0.0, 0.0, 0.0);
-        let corner = Vec3::new(0.5, 0.0, 0.0);
-        let goal = Vec3::new(10.0, 0.0, 0.0);
-        let clutter = [crate_at(5.0, 0.0)];
-        let mut open = Open {
-            at: me,
-            ..Default::default()
-        };
-        let mut g = Cluttered::new(&mut open, &clutter, cap(), goal);
-        let mut r = crate::steering::Route::new(goal, vec![corner, goal], Instant::now());
-        let aim = r.target(me, |a, b| !g.line_blocked(0, a, b));
-        assert_eq!(aim, corner, "cut the corner straight into the crate");
+        assert_eq!(detour(&clutter, me, goal, &cap(), |_, _| true), goal);
+        let corner = Vec3::new(4.5, 0.3, 0.0);
+        assert_eq!(detour(&clutter, me, corner, &cap(), |_, _| true), corner);
     }
 
     #[test]
@@ -783,15 +661,89 @@ mod tests {
     }
 
     #[test]
-    fn already_leaning_on_it_the_way_out_is_open() {
-        // The physics walked us into the thing (it collides with
-        // nothing the server places). From inside its reach only a
-        // walk closer in is blocked; away is the answer.
+    fn already_in_it_the_way_out_is_open() {
+        // The physics walked us into the thing. From inside its reach
+        // only a walk closer in is blocked; away is the answer.
         let c = crate_at(5.0, 0.0);
         let inside = Vec3::new(4.3, 0.0, 0.0);
         assert!(c.blocks(inside, Vec3::new(6.0, 0.0, 0.0), &cap()));
         assert!(!c.blocks(inside, Vec3::new(0.0, 0.0, 0.0), &cap()));
         assert!(!c.blocks(inside, Vec3::new(4.3, 3.0, 0.0), &cap()));
+        // And a walk that starts in it gets out and on to the goal.
+        let path = walk(&[c], inside, Vec3::new(10.0, 0.0, 0.0), |_, _| true);
+        assert!(keeps_clear(&path[8..], &[c]), "{path:?}");
+    }
+
+    #[test]
+    fn a_big_round_thing_is_rounded_without_cutting_into_it() {
+        // A lifestone: a sphere a metre and a half across. Chords of a
+        // sixth of a turn round something that size cut back inside
+        // its reach, and every leg of the detour read as blocked by
+        // the thing being rounded.
+        let stone = Cylinder {
+            center: Vec2::new(5.0, 0.0),
+            radius: 1.504,
+            bottom: -1.5,
+            top: 1.5,
+        };
+        let (me, goal) = (Vec3::ZERO, Vec3::new(10.0, 0.0, 0.0));
+        let legs = thread(&[stone], me, goal, &cap(), &mut |_, _| true, DEPTH).expect("a way");
+        let mut at = me;
+        for leg in &legs {
+            assert!(
+                !stone.blocks(at, *leg, &cap()),
+                "the leg {at:?} -> {leg:?} cuts into the stone"
+            );
+            at = *leg;
+        }
+        let path = walk(&[stone], me, goal, |_, _| true);
+        assert!(keeps_clear(&path, &[stone]), "{path:?}");
+    }
+
+    #[test]
+    fn a_crowded_room_costs_the_ground_few_questions() {
+        // The search runs two sides by a few legs by DEPTH deep, and
+        // every question it asks the ground is a raycast and a sampled
+        // walk on the frame thread, asked again every frame while the
+        // detour keeps failing. It stays cheap because a side is
+        // dropped at the first leg the ground refuses and a leg that
+        // meets one thing too many is dropped unasked. Rooms packed
+        // with crates closer together than a character is wide, with
+        // a wall across the far end so that no detour ever succeeds:
+        // a dozen or so questions each, measured.
+        let (me, goal) = (Vec3::ZERO, Vec3::new(12.0, 0.0, 0.0));
+        let rooms: Vec<Vec<Cylinder>> = vec![
+            vec![crate_at(3.0, 0.0), crate_at(3.0, -1.5), crate_at(3.0, 1.5)],
+            (0..4)
+                .flat_map(|i| {
+                    [
+                        crate_at(3.0 + i as f32 * 1.6, -0.8),
+                        crate_at(3.8 + i as f32 * 1.6, 0.8),
+                    ]
+                })
+                .collect(),
+            (0..4)
+                .flat_map(|i| {
+                    (0..5).map(move |j| crate_at(3.0 + i as f32 * 2.4, j as f32 * 2.4 - 4.8))
+                })
+                .collect(),
+        ];
+        for room in rooms {
+            let mut asked = 0u32;
+            let way = thread(
+                &room,
+                me,
+                goal,
+                &cap(),
+                &mut |_, b: Vec3| {
+                    asked += 1;
+                    b.x < 11.5
+                },
+                DEPTH,
+            );
+            assert!(way.is_none(), "found a way through the wall");
+            assert!(asked <= 20, "{asked} questions asked of the ground");
+        }
     }
 
     #[test]
@@ -837,6 +789,18 @@ mod tests {
         ghost.physics_state |= object::PHYSICS_STATE_ETHEREAL;
         assert!(!in_the_way(&ghost));
         assert!(cylinders(&ghost, &setup).is_empty());
+    }
+
+    #[test]
+    fn a_thing_collided_with_by_its_bsp_is_left_to_the_physics() {
+        // A table: the server says its Setup has a physics BSP, so the
+        // retail client collided with the slab, never with the
+        // cylinder as long as the table that its Setup also carries.
+        let setup = setup_with_cylinder(Vec3::ZERO, 2.0, 1.0);
+        let mut table = chest();
+        table.physics_state |= object::PHYSICS_STATE_HAS_PHYSICS_BSP;
+        assert!(!in_the_way(&table));
+        assert!(cylinders(&table, &setup).is_empty());
     }
 
     #[test]
@@ -890,21 +854,56 @@ mod tests {
         assert!(cylinders(&bolt, &setup).is_empty());
     }
 
+    /// A world with a chest at (5, 0) and, `far` metres along x, a
+    /// second one described without a Setup.
+    fn room() -> World {
+        let mut world = World::default();
+        world.objects.insert(chest().guid, chest());
+        let mut bare = chest();
+        bare.guid = 0x8000_0002;
+        bare.setup_id = 0;
+        world.objects.insert(bare.guid, bare);
+        world
+    }
+
     #[test]
-    fn a_waypoint_inside_an_object_is_moved_out_of_it() {
-        // The graph put a corner in the middle of a crate it had never
-        // heard of. The leg to it cannot be threaded; the corner is
-        // moved out to the crate's side first.
-        let me = Vec3::ZERO;
-        let goal = Vec3::new(10.0, 5.0, 0.0);
-        let clutter = [crate_at(5.0, 0.0)];
-        let mut open = Open {
-            at: me,
-            ..Default::default()
+    fn an_object_without_a_setup_is_not_looked_up() {
+        let setup = Rc::new(setup_with_cylinder(Vec3::ZERO, 0.5, 1.0));
+        let mut asked = Vec::new();
+        let cyls = around(&room(), Vec3::ZERO, NEARBY, |id| {
+            asked.push(id);
+            Some(setup.clone())
+        });
+        assert_eq!(cyls.len(), 1);
+        assert_eq!(
+            asked,
+            vec![0x0200_0001],
+            "looked up a Setup it was never given"
+        );
+    }
+
+    #[test]
+    fn the_gather_stands_until_the_world_changes_or_the_character_moves() {
+        let setup = Rc::new(setup_with_cylinder(Vec3::ZERO, 0.5, 1.0));
+        let mut world = room();
+        let mut clutter = Clutter::default();
+        let lookups = std::cell::Cell::new(0);
+        let lookup = |_: u32| {
+            lookups.set(lookups.get() + 1);
+            Some(setup.clone())
         };
-        let mut g = Cluttered::new(&mut open, &clutter, cap(), goal);
-        let route = g.threaded(0, me, vec![Vec3::new(5.0, 0.0, 0.0), goal]);
-        assert!(clears(&route, me, &clutter), "{route:?}");
-        assert_eq!(route.last().copied(), Some(goal));
+        assert_eq!(clutter.refresh(&world, Vec3::ZERO, lookup).len(), 1);
+        // The next frames, a stride on: nothing to gather again.
+        for i in 1..20 {
+            clutter.refresh(&world, Vec3::new(i as f32 * 0.1, 0.0, 0.0), lookup);
+        }
+        assert_eq!(lookups.get(), 1, "gathered again with nothing changed");
+        // Something in the world changed: gathered afresh.
+        world.generation += 1;
+        clutter.refresh(&world, Vec3::new(2.0, 0.0, 0.0), lookup);
+        assert_eq!(lookups.get(), 2);
+        // Walked far enough for the edge of its reach to have moved.
+        clutter.refresh(&world, Vec3::new(2.0 + MARGIN + 1.0, 0.0, 0.0), lookup);
+        assert_eq!(lookups.get(), 3);
     }
 }
