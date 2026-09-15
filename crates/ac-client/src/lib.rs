@@ -1578,16 +1578,31 @@ impl Client {
                     } else if !manual && !reached(pl.world_position(), g, stop) {
                         // Straight at the goal while nothing is in the
                         // way; through the waypoints of a route otherwise.
+                        //
+                        // What the server has put in the room -- a
+                        // chest, a hook, a bush -- is not in the
+                        // block's geometry and never reached the
+                        // steering, which planned through it and left
+                        // the character leaning on it until the stuck
+                        // clock skipped the waypoint. Gathered afresh
+                        // each frame and laid over the ground here.
+                        let clutter = ac_nav::obstacles::around(
+                            &self.world,
+                            &self.assets,
+                            pl.world_position(),
+                        );
+                        let cap = pl.capsule();
                         let mut standing = Standing {
                             player: pl,
                             assets: &self.assets,
                             wide: &mut self.pathfinder,
                         };
+                        let mut standing = ac_nav::Cluttered::new(&mut standing, &clutter, cap, g);
                         let aim = self.steering.steer(&mut standing, g, goal_cell, now);
                         tracing::trace!(
                             target: "steer",
                             "at {:?} goal {g:?} aim {aim:?}",
-                            standing.player.world_position()
+                            ac_nav::Ground::at(&standing)
                         );
                         // No way there at all: the line is blocked and
                         // no route was found. Standing still is the

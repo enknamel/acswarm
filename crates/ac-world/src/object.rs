@@ -78,6 +78,15 @@ pub mod physics_flags {
     pub const TRANSLUCENCY: u32 = 0x40000;
 }
 
+/// `PhysicsState` bit for things that stand still: furniture, a chest,
+/// a statue. Nothing here relies on it -- what matters to a walk is
+/// whether a thing is solid, not whether it moves -- but it is the bit
+/// the retail client reads first, and worth naming beside the others.
+pub const PHYSICS_STATE_STATIC: u32 = 0x1;
+/// `PhysicsState` bit for things a character walks straight through:
+/// an open door, a portal's swirl, a corpse, a hook's ghost item. The
+/// retail client collided with nothing carrying it.
+pub const PHYSICS_STATE_ETHEREAL: u32 = 0x4;
 /// `PhysicsState` bit that hides an object.
 pub const PHYSICS_STATE_NO_DRAW: u32 = 0x20;
 /// `PhysicsState` bit for hidden (admin-invisible) objects.

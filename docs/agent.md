@@ -365,6 +365,21 @@ every errand after it. It now clears the moment the character is asked
 to go somewhere else, and otherwise rests a second and tries again,
 because doors open and whatever was leaned on walks away.
 
+And one that was not about the landblock at all: **what the server
+puts in the room is not in the ground**. The collision world and the
+graph over it are built from the DAT files once a block and shared by
+every character in the process; a chest, a hook, a cart, a bush that
+can be picked are objects, and arrive and leave with the packets. The
+steering planned straight through them and the only thing that noticed
+was the stuck clock, which skips a waypoint rather than go round.
+`ac_nav::obstacles` gathers them afresh each frame, as the cylinders
+the retail client collided with them by (the Setup's `CylSphere`s, its
+`Sphere`s failing those), and `Cluttered` lays them over the ground for
+one steer: the straight line is blocked where it meets one and every
+route has its legs threaded round the ones they cross. A creature,
+anything carried, anything Ethereal, a missile and -- by the rule below
+-- a door are never obstacles.
+
 ## Rules that hold whatever the structure
 
 These are settled and are not up for redesign by a later stage.
