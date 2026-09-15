@@ -43,7 +43,7 @@ settings written at /Users/you/.config/acswarm/ui.json
 ```
 
 Set `ACSWARM_CONFIG_DIR` to write the settings somewhere else. With
-`--bus` and an `acbot --bus` or `acswarm --bus` running, the runner
+`--bus` and an `acswarm --bus` (windowed or `--headless`) running, the runner
 also prints what their characters are doing (the `autoplay.event`
 topic) and they hear the greeting.
 
@@ -53,12 +53,12 @@ topic) and they hear the greeting.
    through `examples/*`; a copy under `examples/` or `crates/` is picked
    up the same way). Rename the package in `Cargo.toml` and the type in
    `lib.rs`.
-2. Add the crate to `bins/acswarm/Cargo.toml` (and `bins/acbot/Cargo.toml`
-   for headless runs) and one line to each binary's host setup:
-   `host.register(Box::new(my_plugin::MyPlugin::new()))` in
-   `bins/acswarm/src/plugins/mod.rs` (`builtin`) and `bins/acbot/src/main.rs`.
+2. Add the crate to `bins/acswarm/Cargo.toml` and one line to each host
+   setup: `host.register(Box::new(my_plugin::MyPlugin::new()))` in
+   `bins/acswarm/src/plugins/mod.rs` (`builtin`, the window) and
+   `bins/acswarm/src/headless.rs` (`run`, `--headless`).
    Register after the panels if the plugin should not take their keys.
-3. Rebuild; F7 and `/hello` work in the viewer, `/hello` in acbot.
+3. Rebuild; F7 and `/hello` work in the viewer, `/hello` in `acswarm --headless`.
 
 Every hook copes with `cx.try_client()` being `None`: that is what makes
 the offline runner, `--demo-ui` and the test possible, and it costs one

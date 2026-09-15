@@ -44,7 +44,7 @@ no scenery. Treat 0.2 MB as a floor.
 ## Live cost
 
 ```
-./target/release/acbot --data-dir ~/Downloads/ac_data --connect 127.0.0.1 \
+./target/release/acswarm --headless --data-dir ~/Downloads/ac_data --connect 127.0.0.1 \
   --client acct1:pass --client acct2:pass ... --duration 90
 # then, against the pid:
 vmmap --summary <pid> | grep 'Physical footprint:'
@@ -72,7 +72,7 @@ on the next frame (`bins/acswarm/src/main.rs`, `switch_to`), so the
 window costs one session's worth of GPU whatever else is running
 alongside it.
 
-`acbot --tick-hz` sets the pace for every session in a process; 20 is
+`acswarm --headless --tick-hz` sets the pace for every session in a process; 20 is
 the game's, and a process of followers gets by on 10.
 
 ## Rendering cost (the window)
