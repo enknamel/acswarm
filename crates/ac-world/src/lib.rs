@@ -12,6 +12,7 @@ pub mod gems;
 pub mod housing;
 pub mod hunting;
 pub mod landmarks;
+pub mod lookup;
 pub mod material;
 pub mod motion;
 pub mod object;
