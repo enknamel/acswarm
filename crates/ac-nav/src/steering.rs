@@ -126,12 +126,12 @@ pub struct Steering {
     straight_blocked_until: Instant,
     /// The route came from the neighbourhood planner; a single-block re-plan should not swap in a worse one.
     route_is_wide: bool,
-    /// The last steer answered [`Aim::NoWay`].
+    /// Set when a steer refuses [`Aim::NoWay`]; a steer that decides a way clears it.
     no_way: bool,
 }
 
 impl Steering {
-    /// Whether the last steer found no way at all to its goal: ask before calling a character slow,
+    /// Whether a steer's [`Aim::NoWay`] refusal still stands: ask before calling a character slow,
     /// since that walk will not improve and a recall, portal or other shop beats a timeout.
     pub fn no_way(&self) -> bool {
         self.no_way
