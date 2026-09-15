@@ -450,6 +450,9 @@ pub struct Client {
     /// Route steering toward `move_to` when the straight line to it is
     /// blocked (see `route`).
     pub steering: route::Steering,
+    /// The server's objects standing round the character, which a
+    /// walk goes round (see `ac_nav::obstacles`).
+    pub clutter: ac_nav::Clutter,
     /// Planner for routes that leave the landblock we stand in, run on a
     /// thread of its own (see `pathfinder`).
     pub pathfinder: pathfinder::Pathfinder,
@@ -686,6 +689,7 @@ impl Client {
             use_done: None,
             told: None,
             steering: route::Steering::new(Instant::now()),
+            clutter: Default::default(),
             pathfinder,
             travel: Default::default(),
             visits: Default::default(),
@@ -1590,6 +1594,34 @@ impl Client {
                             "at {:?} goal {g:?} aim {aim:?}",
                             standing.player.world_position()
                         );
+                        // What the server has put in the room -- a
+                        // chest, a hook, a cart -- is not in the block's
+                        // geometry, and the physics walks straight
+                        // through it; the retail client did not. The
+                        // leg to wherever the steering aims is walked
+                        // round the first such thing on it, a frame at
+                        // a time, once the steering has had its say:
+                        // the graph and the planner are for what
+                        // actually stops the character, and clutter
+                        // must not send a walk to them.
+                        let aim = match aim {
+                            ac_nav::Aim::Go(at) => {
+                                let me = pl.world_position();
+                                let block = pl.landblock();
+                                let cap = pl.capsule();
+                                let clutter = self
+                                    .clutter
+                                    .refresh(&self.world, me, |id| self.assets.setup(id).ok());
+                                ac_nav::Aim::Go(ac_nav::obstacles::detour(
+                                    clutter,
+                                    me,
+                                    at,
+                                    &cap,
+                                    |a, b| !pl.line_blocked(&self.assets, block, a, b),
+                                ))
+                            }
+                            ac_nav::Aim::NoWay => ac_nav::Aim::NoWay,
+                        };
                         // No way there at all: the line is blocked and
                         // no route was found. Standing still is the
                         // whole of the answer.

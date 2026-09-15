@@ -365,6 +365,28 @@ every errand after it. It now clears the moment the character is asked
 to go somewhere else, and otherwise rests a second and tries again,
 because doors open and whatever was leaned on walks away.
 
+And one that was not about the landblock at all: **what the server
+puts in the room is not in the ground**. The collision world and the
+graph over it are built from the DAT files once a block and shared by
+every character in the process; a chest, a hook, a cart are objects,
+and arrive and leave with the packets. The physics walks straight
+through them, and the server takes the position it is sent, so they
+never stalled a walk -- a stall is always the landblock's own geometry
+-- but the retail client stopped at them, and a character that walks
+through the furniture does not move the way a player does.
+`ac_nav::obstacles` keeps the ones near the character, as the
+cylinders the retail client collided with them by (the Setup's
+`CylSphere`s, its `Sphere`s failing those), gathered again only when
+the world changes or the character has moved. They are not laid over
+the ground for the steering to plan on: clutter must not send a walk
+to the block's graph or the neighbourhood planner, which are for what
+actually stops the character. Once the steering has said where to
+head, the leg there is walked round the first cylinder on it, a frame
+at a time, and a leg no detour clears is walked as it was. A creature,
+anything carried, anything Ethereal, a missile, anything the client
+collided with by its parts' own BSP rather than a cylinder, and -- by
+the rule below -- a door are never obstacles.
+
 ## Rules that hold whatever the structure
 
 These are settled and are not up for redesign by a later stage.
