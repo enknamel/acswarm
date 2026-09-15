@@ -4,7 +4,7 @@ What the client handles of the ACE wire protocol, audited on 2026-09-08
 against `reference/ext/ACE/Source/ACE.Server/Network/{GameMessages,GameEvent,GameAction}`
 (the opcode enums plus the `Messages/`, `Events/` and `Actions/` folders,
 which say what ACE actually sends and accepts). Layouts are in
-`crates/ac-net/src/messages.rs` (`opcode`, `event`, `action` modules, with
+`crates/ac-net/src/messages/` (`opcode`, `event`, `action` modules, with
 `opcode::name` / `event::name` for logs) and `crates/ac-world/src/object.rs`.
 
 Status words:
