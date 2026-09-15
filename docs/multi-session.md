@@ -247,7 +247,22 @@ default; both in the Autoplay panel's Team section, or
   the team is on). The invitations go to a different character each
   time, half a second apart, so a party of nine is gathered in a few
   seconds rather than in nine five-second turns; only a character that
-  did not answer waits (five seconds) before being asked again.
+  did not answer waits (five seconds) before being asked again, and one
+  the server turned down in words ("X is busy.", "X is already a member
+  of a Fellowship.") waits ten seconds, doubling each time, with a line
+  in the log.
+
+The leader founds the fellowship only once its roster has stood
+unchanged for a full board round (about three quarters of a second).
+Until then a session that has just come onto the team has heard nobody
+and leads a roster of one, and nine sessions coming on in the same tick
+once founded two fellowships between them, with the fleet split and
+neither half allowed the other's bodies. Should two exist anyway -- a
+race that slipped through, or a session that founded alone before the
+rest arrived -- the leader whose name does not sort first disbands the
+one it founded, once it has seen the rightful leader in a fellowship of
+its own for a few seconds, and is recruited along with its members. A
+fellowship a session did not found itself is never disbanded.
 
 `scripts/examples/follow.rhai` sets a follower up with one `/follow`.
 Every process has to be on the bus (`--bus`) for the sessions to hear

@@ -2071,6 +2071,12 @@ impl Client {
             // no notification, only this line (see
             // `autoplay::spell_attacker`).
             self.hear_spell_attack(&line.text, Instant::now());
+            // And on an invitation into the fellowship that came to
+            // nothing: a mate already in one, or busy, is refused in
+            // these words and nothing else (see
+            // `autoplay::recruit_refusal`).
+            self.autoplay
+                .hear_recruit_refusal(&line.text, Instant::now());
         }
         let text = match (op, line.sender.is_empty()) {
             _ if line.kind == ac_net::messages::turbine::KIND => {
