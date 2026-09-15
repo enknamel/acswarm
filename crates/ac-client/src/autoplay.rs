@@ -3917,6 +3917,15 @@ impl Client {
         if self.autoplay.cast_in_flight(now) {
             return false;
         }
+        // A top-up is a cast that can wait, and at a counter it does,
+        // with the buffs (see `counter_holding_casts`). This is the
+        // pass that runs every tick and casts the moment the last cast
+        // lands, so a transfer thrown from the counter never left it a
+        // gap to open its window in: the same failure as the buffs,
+        // one reflex over.
+        if self.counter_holding_casts().is_some() {
+            return false;
+        }
         let frac = |i: usize| {
             let max = self.world.stats.vital_max_current(i).max(1) as f32;
             self.world.stats.vitals[i].current as f32 / max
@@ -8880,21 +8889,11 @@ impl Client {
             return false;
         }
         let fighting = self.attack_target.is_some() || self.autoplay.casting_at.is_some();
-        if !urgent && cfg.out_of_combat_only && fighting {
-            return false;
-        }
-        // On a journey the top-ups wait: every cast roots the character
-        // where it stands, and a character with a hundred buffs to put
-        // back would never leave town. What is about to run out still
-        // goes back up on the way.
-        if !urgent && self.traveling() {
-            return false;
-        }
-        // At a counter every cast waits, urgent or not, for the same
-        // reason and one more: a cast roots the character where it
-        // stands, and here it also has the counter turn us away. ACE
-        // will not open a window for, sell for or buy for a character
-        // in the middle of a cast (`Vendor.ActOnUse`,
+        // At a counter every cast waits, urgent or not, for the reason
+        // the top-ups wait on a journey and one more: a cast roots the
+        // character where it stands, and here it also has the counter
+        // turn us away. ACE will not open a window for, sell for or
+        // buy for a character in a cast's recoil (`Vendor.ActOnUse`,
         // `Player_Commerce.cs`: IsBusy is YoureTooBusy), and the answer
         // reads as the counter's own refusal. +Vesperi arrived at
         // Archmage Cindrue with eight protections lapsing, cast them
@@ -8904,8 +8903,15 @@ impl Client {
         // `open_vendor` is ours -- but a sale sent during one is thrown
         // away the same way, so nothing goes up between the acts
         // either: the visit is short, and what lapses in it goes back
-        // up the moment the window closes.
-        if let Some(counter) = self.counter_holding_buffs() {
+        // up the moment the window closes. A fight at the counter is
+        // the one exception (see `counter_holding_casts`).
+        //
+        // Judged before the other holds so that every call not made at
+        // a counter lets go of the note's flag, whatever else keeps the
+        // pass from casting: cleared only on the way past the hold, it
+        // outlived a visit that the fight hold ended, and the next
+        // visit's wait went unsaid.
+        if let Some(counter) = self.counter_holding_casts() {
             if !self.autoplay.buffs_held_at_counter {
                 self.autoplay.buffs_held_at_counter = true;
                 self.autoplay.note(
@@ -8916,6 +8922,16 @@ impl Client {
             return false;
         }
         self.autoplay.buffs_held_at_counter = false;
+        if !urgent && cfg.out_of_combat_only && fighting {
+            return false;
+        }
+        // On a journey the top-ups wait: every cast roots the character
+        // where it stands, and a character with a hundred buffs to put
+        // back would never leave town. What is about to run out still
+        // goes back up on the way.
+        if !urgent && self.traveling() {
+            return false;
+        }
         if self
             .autoplay
             .last_buff
@@ -9047,22 +9063,19 @@ impl Client {
         true
     }
 
-    /// The counter the buff pass is waiting for, by name: the one a
-    /// run to town is standing at, from its Use going out until its
-    /// window is closed, or one whose window the player has open (see
-    /// `growth::at_a_counter`).
-    fn counter_holding_buffs(&self) -> Option<String> {
-        if let Some(vendor) = self.autoplay.growth.counter() {
-            return Some(vendor.to_string());
+    /// The counter a cast that can wait is waiting for, by name: the
+    /// one the character stands at (see `Client::counter_at_hand`),
+    /// unless a fight is on there. A fight at the counter is fought as
+    /// anywhere: the run is not stepped while the fight claims the
+    /// tick, so a cast in it meets no Use of ours, and one that does
+    /// costs a busy re-ask (see `growth::on_opening`) -- while a
+    /// protection that lapsed in it, held for a window nobody is
+    /// trading at, would not go back up until the fight was over.
+    pub(crate) fn counter_holding_casts(&self) -> Option<String> {
+        if self.in_a_fight() {
+            return None;
         }
-        let window = self.world.open_vendor.as_ref()?;
-        Some(
-            self.world
-                .objects
-                .get(&window.vendor)
-                .map(|o| o.name.clone())
-                .unwrap_or_else(|| "the open counter".to_string()),
-        )
+        self.counter_at_hand()
     }
 
     /// A stronger spell than `spell` that we know, do the same thing
