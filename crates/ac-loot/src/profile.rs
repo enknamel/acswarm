@@ -707,11 +707,14 @@ pub struct Profile {
     pub note: String,
     /// In order. The first rule that claims an item decides it.
     pub rules: Vec<Rule>,
-    /// What to keep stocked. Membership of this list is itself a rule
-    /// no other rule may override: a thing the character buys is a
-    /// thing the character uses, and it is never offered to a counter.
-    /// That one line is what stops a broad "sell the cheap stuff" rule
-    /// walking a mage's Peas to the shops.
+    /// What to keep stocked. Membership of this list is a floor on
+    /// stock, and a guard for what the rules did not decide: a thing
+    /// the character buys is a thing the character uses, so one that
+    /// arrived with no rule claiming it is never offered to a counter
+    /// (`ac_loot::sale::offer_to_vendor`). It is not a rule over the
+    /// rules. What a rule wrote down when the item was taken is the
+    /// player's word on that item, and this list does not answer back
+    /// to it.
     #[serde(default)]
     pub buy: Vec<Buy>,
     /// Where what is for sale goes.
@@ -809,8 +812,9 @@ impl Profile {
         serde_json::to_string(&self.rules)
             .unwrap_or_default()
             .hash(&mut h);
-        // The buy list is a rule too: what a character stocks is never
-        // offered to a counter (`ac_loot::sale::offer_to_vendor`).
+        // The buy list decides the undecided: what a character stocks
+        // is never offered to a counter unless a rule said to
+        // (`ac_loot::sale::offer_to_vendor`).
         serde_json::to_string(&self.buy)
             .unwrap_or_default()
             .hash(&mut h);

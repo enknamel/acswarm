@@ -54,9 +54,9 @@ pub struct Keep {
     pub equipped: bool,
     pub retained: bool,
     pub unsellable: bool,
-    /// The character's own: what it was picked up to keep, what it
-    /// keeps stocked, a component its own spells burn, the focus that
-    /// halves them.
+    /// The character's own: what it was picked up to keep, and -- for
+    /// a thing nothing was decided about -- what it keeps stocked, a
+    /// component its own spells burn, the focus that halves them.
     ///
     /// The five above are the server's refusals and somebody's work.
     /// This one is policy, and it was missing entirely: the sale list a

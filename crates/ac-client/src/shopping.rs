@@ -63,9 +63,10 @@ impl Client {
     }
 
     /// The carried things the loot policy will not let go: what was
-    /// picked up to keep or to salvage, what the profile keeps stocked,
-    /// the components this character's own spells burn, the focus that
-    /// halves them, and anything the player named by hand.
+    /// picked up to keep or to salvage, and, for what the profile did
+    /// not decide, what the profile keeps stocked, the components this
+    /// character's own spells burn, the focus that halves them, and
+    /// anything the player named by hand.
     ///
     /// This is the same judgement the forecast makes before setting off
     /// (`growth::offer_to_vendor`); it was only ever applied there, and
