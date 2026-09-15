@@ -46,7 +46,11 @@ impl Client {
             notes,
             carried,
             capacity,
-            slots_free: self.free_space(),
+            // The counter's payout is created in the pack by the server
+            // and spills into the side packs, and the sale is judged
+            // against every pack's room together (ACE's `ItemsToReceive`
+            // reads `GetFreeInventorySlots` with the side packs in).
+            slots_free: self.room_anywhere(),
             counter: self.counter_now(),
             wants: self.vendor_wants(cfg),
             rules: Rules {

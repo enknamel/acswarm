@@ -2532,19 +2532,36 @@ impl Client {
         self.autoplay.growth.mode
     }
 
-    /// Free item slots, side packs counted: what decides who can carry
-    /// the party's shopping.
+    /// Free item slots as one take can use them: the most room any one
+    /// pack has (see `room::Packs::for_a_take`). A take goes into the
+    /// pack it names, so the slots of the main pack and each side pack
+    /// are not added: added, a character with every pack down to its
+    /// last slot read as having room for a dozen takes.
     pub fn free_space(&self) -> u32 {
-        let (used, capacity) = self.item_slots();
-        capacity.saturating_sub(used)
+        self.packs().for_a_take()
     }
 
-    /// The pack is down to the slots kept free for a counter's money
-    /// (`restock.keep_slots`): time to sell, while a sale can still be
-    /// paid for. The server finds room for the coin before it takes the
-    /// goods, so a pack with no slot at all cannot be sold out of.
+    /// Free item slots as the server spreads what it creates over them:
+    /// every pack's room together (see `room::Packs::anywhere`). A
+    /// counter's payout, a purchase and a gift are created in the main
+    /// pack and spill into the side packs, and a sale is judged
+    /// against this same total.
+    pub fn room_anywhere(&self) -> u32 {
+        self.packs().anywhere()
+    }
+
+    /// No pack has a slot for a take, or the packs together are down to
+    /// the slots kept free for a counter's money (`restock.keep_slots`):
+    /// time to sell, while a sale can still be paid for. The server
+    /// finds room for the coin before it takes the goods, so a pack with
+    /// no slot at all cannot be sold out of -- and it finds that room
+    /// in any pack, so the slots kept are counted over all of them.
+    /// Counted in the one pack a take could use, a character with two
+    /// slots in the main pack and two in the sack went to town with
+    /// room for its money twice over.
     pub fn pack_low_on_room(&self) -> bool {
-        self.free_space() <= self.autoplay.config.team.restock.keep_slots
+        let packs = self.packs();
+        packs.for_a_take() == 0 || packs.anywhere() <= self.autoplay.config.team.restock.keep_slots
     }
 
     /// What the character has room for, as a corpse waiting on it sees
@@ -2617,7 +2634,9 @@ impl Client {
             // character is done shopping and goes back to earning.
             broke: !needs.is_empty()
                 && (self.spendable() == 0 || self.autoplay.growth.run_was_futile),
-            free_space: self.free_space(),
+            // What it can be handed: a gift is created in the pack by
+            // the server, which spills into the side packs.
+            free_space: self.room_anywhere(),
             order: needs
                 .iter()
                 .filter(|n| n.want > 0 && n.buyable)
@@ -3611,7 +3630,7 @@ impl Client {
         // Low on room, not out of it: a run that waited for the last slot
         // arrived with nowhere for the money to go.
         let full = self.pack_low_on_room();
-        if self.free_space() == 0 {
+        if self.room_anywhere() == 0 {
             // No counter anywhere can pay out into a pack with no slot, and
             // buying needs one too: walking to one achieves nothing.
             self.autoplay.note(
@@ -3847,7 +3866,7 @@ impl Client {
         // The same refusal autoplay makes before a run: no counter can
         // pay into a pack with no slot, and buying needs one too, so
         // the trip would sell nothing and count as futile afterwards.
-        if self.free_space() == 0 {
+        if self.room_anywhere() == 0 {
             return Err("no free slot for a counter's money".into());
         }
         // Whatever journey was under way, the run plans its own; and a
@@ -4370,7 +4389,7 @@ impl Client {
         let needs = self.grow_needs(cfg);
         let still_full = self.pack_low_on_room();
         // With no slot at all the next counter could not pay out either.
-        let wanting = self.free_space() > 0 && (needs.iter().any(|n| n.urgent) || still_full);
+        let wanting = self.room_anywhere() > 0 && (needs.iter().any(|n| n.urgent) || still_full);
         if wanting && run.stops < STOPS_PER_RUN {
             // The next counter is chosen by what is still on the list,
             // not by what is closest -- and only when there is reason to

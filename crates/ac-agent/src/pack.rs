@@ -177,28 +177,54 @@ pub enum PourAnswer {
     Lost,
 }
 
-/// How long a pour is waited on before it is given up for lost.
+/// How long a pour within the pack is waited on before it is given up
+/// for lost.
 ///
 /// The server's answer is two or three messages in the same breath as
 /// the merge, so a second is already generous; what this is really for
 /// is the pour that is answered with nothing whatever -- a stack whose
 /// size the server failed to adjust, or a packet that never arrived --
 /// where the alternative is a character that never tidies again.
+///
+/// Within the pack only. A pour off a body is walked to and stooped
+/// for like a take (ACE's `HandleActionStackableMerge` runs the same
+/// move-to and pickup chain as a put when either stack is in the
+/// world), and one take in ten was answered after two seconds; given
+/// up at two, the source still lying there was asked for again and a
+/// second merge went out behind the first. Such a pour is given a
+/// take's allowance instead (see [`pour_answer_within`]).
 pub const POUR_LOST: Duration = Duration::from_secs(2);
 
-/// What the server has said about a pour, given what the target holds
-/// now (`target_now`, `None` when the target itself is gone), any
-/// refusal that names either stack, and how long since it was asked for.
-///
-/// The target's count is the signal, not the source's. The server sends
-/// the target's new size last for both a whole pour and a partial one,
-/// so a choice made on "the source is gone" would be made from a target
-/// count that is still the old one, and would offer the same pour again.
+/// What the server has said about a pour within the pack, given what
+/// the target holds now (`target_now`, `None` when the target itself is
+/// gone), any refusal that names either stack, and how long since it
+/// was asked for. Lost after [`POUR_LOST`].
 pub fn pour_answer(
     sent: &PourSent,
     target_now: Option<u32>,
     refusal: Option<u32>,
     waited: Duration,
+) -> PourAnswer {
+    pour_answer_within(sent, target_now, refusal, waited, POUR_LOST)
+}
+
+/// What the server has said about a pour, given what the target holds
+/// now (`target_now`, `None` when the target itself is gone), any
+/// refusal that names either stack, how long since it was asked for,
+/// and how long it is waited on before it is given up for lost -- a
+/// take's allowance for a pour off a body, [`POUR_LOST`] within the
+/// pack.
+///
+/// The target's count is the signal, not the source's. The server sends
+/// the target's new size last for both a whole pour and a partial one,
+/// so a choice made on "the source is gone" would be made from a target
+/// count that is still the old one, and would offer the same pour again.
+pub fn pour_answer_within(
+    sent: &PourSent,
+    target_now: Option<u32>,
+    refusal: Option<u32>,
+    waited: Duration,
+    lost_after: Duration,
 ) -> PourAnswer {
     // A refusal is the whole answer, whatever the counts say: a stack
     // that grew by the right amount in the same moment grew for some
@@ -214,7 +240,7 @@ pub fn pour_answer(
     if count >= sent.to_before.saturating_add(sent.merge.amount) {
         return PourAnswer::Landed;
     }
-    if waited >= POUR_LOST {
+    if waited >= lost_after {
         return PourAnswer::Lost;
     }
     PourAnswer::InAir
@@ -573,6 +599,32 @@ mod tests {
         assert_eq!(
             pour_answer(&s, Some(40), None, POUR_LOST - Duration::from_millis(1)),
             PourAnswer::InAir
+        );
+    }
+
+    #[test]
+    fn a_pour_off_a_body_is_waited_on_as_long_as_a_take_would_be() {
+        // Walked to and stooped for like a take: one in ten was
+        // answered after two seconds. Given up then, the coin still on
+        // the body was asked for again behind the first merge.
+        let s = sent(40, 5);
+        let takes = Duration::from_secs(4);
+        assert_eq!(
+            pour_answer_within(&s, Some(40), None, Duration::from_secs(3), takes),
+            PourAnswer::InAir
+        );
+        assert_eq!(
+            pour_answer_within(&s, Some(40), None, takes, takes),
+            PourAnswer::Lost
+        );
+        // Landed and refused are read the same whatever the allowance.
+        assert_eq!(
+            pour_answer_within(&s, Some(45), None, Duration::from_secs(3), takes),
+            PourAnswer::Landed
+        );
+        assert_eq!(
+            pour_answer_within(&s, Some(40), Some(0), Duration::ZERO, takes),
+            PourAnswer::Refused(0)
         );
     }
 
