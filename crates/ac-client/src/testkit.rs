@@ -7,13 +7,13 @@
 //! `#[ignore = "needs AC_DATA_DIR"]`; `cargo test-data` runs those.
 
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use ac_scene::Assets;
 use ac_world::WorldObject;
 use glam::{Quat, Vec3};
 
-use crate::autoplay::{LootAction, Mate, TeamView, Turn};
+use crate::autoplay::{LootAction, Mate, TeamView, Turn, CREATURE_LEVEL};
 use crate::items::ItemStats;
 use crate::player::Player;
 use crate::Client;
@@ -203,4 +203,99 @@ pub fn view_of(mates: Vec<Mate>) -> TeamView {
         mates,
         ..Default::default()
     }
+}
+
+/// A creature of `wcid` standing in view, and a copy of it to ask
+/// the fight rules about.
+pub fn in_view(c: &mut Client, guid: u32, wcid: u32, name: &str) -> ac_world::WorldObject {
+    let o = ac_world::WorldObject {
+        weenie_class_id: wcid,
+        ..creature(guid, name)
+    };
+    c.world.objects.insert(guid, o.clone());
+    o
+}
+
+/// The GameEvent behind "You evade <name>'s attack.": the server's
+/// word that `name` swung at the character and missed.
+pub fn evaded(guid: u32, name: &str) -> Vec<u8> {
+    let mut w = ac_net::wire::Writer::new();
+    w.u32(guid)
+        .u32(0)
+        .u32(ac_net::messages::event::EVASION_DEFENDER_NOTIFICATION)
+        .string16(name);
+    w.finish()
+}
+
+/// An appraisal of `guid` saying it is `level`, with the health the
+/// server sends whether or not the assessment succeeded.
+pub fn appraised_as(c: &mut Client, guid: u32, level: Option<i32>, health: u32) {
+    c.appraisals.insert(
+        guid,
+        ac_net::messages::Appraisal {
+            guid,
+            success: true,
+            ints: level.map(|l| (CREATURE_LEVEL, l)).into_iter().collect(),
+            creature: Some(ac_net::messages::CreatureProfile {
+                health,
+                health_max: health,
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+    );
+}
+
+/// A weenie no table has heard of.
+pub const STRANGER: u32 = 0x00FF_FFF0;
+
+/// A weapon in the character's hand, or in its pack.
+pub fn a_weapon(c: &mut Client, guid: u32, kind: u32, name: &str, in_hand: bool) {
+    let me = c.world.player_guid;
+    let locations = if kind == ac_world::item_type::CASTER {
+        ac_world::equip::HELD
+    } else {
+        ac_world::equip::MELEE_WEAPON
+    };
+    c.world.objects.insert(
+        guid,
+        ac_world::WorldObject {
+            guid,
+            name: name.into(),
+            item_type: kind,
+            value: 100,
+            valid_locations: locations,
+            container: if in_hand { None } else { me },
+            wielder: if in_hand { me } else { None },
+            ..Default::default()
+        },
+    );
+}
+
+/// A character with a mace in hand, a wand in the pack, and a
+/// creature it is swinging at.
+pub fn mid_fight(assets: std::rc::Rc<ac_scene::Assets>) -> (Client, u32) {
+    const MACE: u32 = 0x8000_0101;
+    const WAND: u32 = 0x8000_0102;
+    const CREATURE: u32 = 0x8000_0103;
+    let mut c = character_of_level(assets, 20);
+    a_weapon(
+        &mut c,
+        MACE,
+        ac_world::item_type::MELEE_WEAPON,
+        "Mace",
+        true,
+    );
+    a_weapon(
+        &mut c,
+        WAND,
+        ac_world::item_type::CASTER,
+        "Training Wand",
+        false,
+    );
+    in_view(&mut c, CREATURE, 19257, "Drudge Skulker");
+    c.combat = true;
+    c.attack_target = Some(CREATURE);
+    c.last_attack = Instant::now() - Duration::from_secs(5);
+    (c, WAND)
 }
