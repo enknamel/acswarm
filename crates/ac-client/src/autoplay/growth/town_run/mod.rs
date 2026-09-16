@@ -88,7 +88,7 @@ pub(super) enum Errand {
 
 impl Errand {
     /// Whether a trip with this forecast does what the errand is for.
-    pub(super) fn served_by(self, look: &Forecast) -> bool {
+    fn served_by(self, look: &Forecast) -> bool {
         match self {
             Errand::Buy => look.worth_going(),
             Errand::Sell => look.selling > 0,
