@@ -208,6 +208,35 @@ Every action a player can take is a method on `ac_client::Client`, and
 the script functions mirror them one to one (each does what the matching
 `/command` in the console does).
 
+### One vocabulary: `Client::act`
+
+What comes from *outside* the character -- a chat line, a key, a Rhai call,
+the bus, the CLI, a panel button -- can be named rather than spelled out:
+build an `ac_client::action::Action` and hand it to `act`. It answers
+`Ok(())` when the request went out and `Err(Refused)` with the words to show
+when it did not (the server's own answer comes back later as an `Event`).
+
+```rust
+use ac_client::action::{Action, SpellRef, Target};
+
+if let Err(why) = cx.client().act(Action::Cast {
+    spell: SpellRef::Name("Heal Self".into()),
+    at: Some(Target::Me),
+}) {
+    cx.log(why.to_string());        // "no spell called ..."; "mana 12/25"
+}
+```
+
+A name becomes a thing in one place, `ac_client::action::resolve`: a spell by
+prefix, then substring, then a Scroll of it in the pack; an item in the pack,
+a ware on the open counter, an object in view, the corpse of the last target,
+a place on the map.
+
+**`act` carries external intent, and only that.** Autoplay does not route
+through it and neither does any read: those stay direct `Client` method
+calls. Adding a variant to `Action` is for something a person, a script or
+another process asks for.
+
 **Rust**, in `tick` (once per frame per session) or in a `command`:
 
 ```rust
