@@ -237,6 +237,31 @@ through it and neither does any read: those stay direct `Client` method
 calls. Adding a variant to `Action` is for something a person, a script or
 another process asks for.
 
+### A typed line: `Client::chat_line`
+
+One router decides what a line in the chat box means, in this order: the
+retail command table (`action::RETAIL`), then the plugin and script
+`command` hooks, then the server for a line beginning `@` or an unknown `/`,
+then the words are said aloud. A front end runs the hooks step itself, since
+only it holds the plugins:
+
+```rust
+match client.chat_line(&line) {
+    Line::Acted(done) => { if let Err(why) = done { log(why.to_string()) } }
+    Line::Offer { unclaimed, .. } => {
+        // /nop, /v_burden, a panel's own command...
+        if !host.command(clients, active, &line).consumed {
+            let _ = clients[active].act(unclaimed);
+        }
+    }
+}
+```
+
+The table holds only names the retail client registered, with retail's own
+aliases; `action::PENDING` is the rest of them, waiting for the family that
+answers them. A command of ours is a key, a panel or a script command --
+never a new `/name` (see the project's rules).
+
 **Rust**, in `tick` (once per frame per session) or in a `command`:
 
 ```rust

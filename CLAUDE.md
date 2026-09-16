@@ -112,7 +112,7 @@ UDP <-> ac-net::Session <-> ac-client::Client::tick <-> ac-world::World::apply
 
 - Server refusals in words are matched only in `ac_agent::refusals` and handed to the waiting
   system by `hear_refusal()` (crates/ac-client/src/refused.rs); no system matches server English.
-- Slash commands are only those the retail client registered; never invent one.
+- Slash commands are only those the retail client registered, with retail's own aliases; never invent one. The table is `RETAIL` in crates/ac-client/src/action/mod.rs, `PENDING` the rest.
 - Characters walk straight through doors: navigation never stops at, opens or routes round one
   (`in_the_way()` in crates/ac-nav/src/obstacles.rs).
 - The loot profile's Sell/Keep tag is final; only the server's own refusal (wielded, tinkered,

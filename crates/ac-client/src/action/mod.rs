@@ -256,6 +256,284 @@ impl Client {
             Action::PkLite => recall::pk_lite(self),
         }
     }
+
+    /// The one way in for a line the player typed, in this order: the retail
+    /// command table; the plugin and script hooks, which the caller runs on a
+    /// [`Line::Offer`] because only it holds them; the server, for a line
+    /// beginning `@` or an unknown `/`; else the words are said aloud.
+    pub fn chat_line(&mut self, line: &str) -> Line {
+        let line = line.trim();
+        // Retail's own help: "You may substitute a forward slash (/) for the
+        // at symbol (@)", so both prefixes take the same way through.
+        let Some(rest) = line.strip_prefix(['/', '@']) else {
+            return Line::Acted(self.act(Action::Say(line.to_string())));
+        };
+        let body = rest.trim();
+        if body.is_empty() {
+            return Line::Acted(Err(Refused::ours("no command")));
+        }
+        let (name, args) = body
+            .split_once(char::is_whitespace)
+            .map(|(n, a)| (n, a.trim()))
+            .unwrap_or((body, ""));
+        let name = name.to_ascii_lowercase();
+        if let Some(cmd) = command(&name) {
+            return Line::Acted(match (cmd.action)(args) {
+                Some(a) => self.act(a),
+                None => Err(Refused::ours(format!("{}: {}", name, cmd.usage))),
+            });
+        }
+        Line::Offer {
+            unclaimed: unclaimed(&name, args, body),
+            name,
+            args: args.to_string(),
+        }
+    }
+}
+
+/// What a typed line came to. The caller runs the hooks itself, since only it
+/// holds the plugins and the scripts.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Line {
+    /// Done with: a retail command acted, or the words were said aloud.
+    Acted(Outcome),
+    /// A `/name args` the table has no row for: offer it to the plugins and
+    /// scripts, and when none takes it, `act(unclaimed)`.
+    Offer {
+        name: String,
+        args: String,
+        unclaimed: Action,
+    },
+}
+
+/// One command the retail client registered: its own name and aliases, and
+/// what a typed line means. A family fills rows in as it lands; the names with
+/// no row yet are in [`PENDING`].
+pub struct Command {
+    /// Retail's name first, then retail's own aliases, lowercase.
+    pub names: &'static [&'static str],
+    /// The trimmed argument text as an action, `None` when it makes no sense.
+    pub action: fn(&str) -> Option<Action>,
+    /// What to type, for the line shown when `action` says `None`.
+    pub usage: &'static str,
+}
+
+/// The retail commands acswarm answers itself. Never a name retail did not
+/// register: a command of ours is a key, a panel or a script (see the
+/// project's rules).
+pub const RETAIL: &[Command] = &[
+    Command {
+        names: &["tell", "t", "send", "whisper", "w"],
+        action: |args| {
+            // `/tell Name, message`, and `/tell Name message` as well.
+            let (who, text) = match args.split_once(',') {
+                Some((w, t)) => (w.trim(), t.trim()),
+                None => args
+                    .split_once(char::is_whitespace)
+                    .map(|(w, t)| (w.trim(), t.trim()))
+                    .unwrap_or((args, "")),
+            };
+            (!who.is_empty() && !text.is_empty()).then(|| Action::Tell {
+                who: who.to_string(),
+                text: text.to_string(),
+            })
+        },
+        usage: "/tell NAME, message",
+    },
+    Command {
+        names: &["emote", "e", "em", "me"],
+        action: |args| (!args.is_empty()).then(|| Action::Emote(args.to_string())),
+        usage: "/emote what you are doing",
+    },
+    Command {
+        names: &["afk"],
+        action: |args| {
+            Some(Action::Afk {
+                away: true,
+                message: args.to_string(),
+            })
+        },
+        usage: "/afk [message]",
+    },
+    Command {
+        names: &["lifestone", "lif", "ls"],
+        action: |_| Some(Action::RecallLifestone),
+        usage: "/lifestone",
+    },
+    Command {
+        names: &["house", "hou"],
+        action: |_| Some(Action::RecallHouse),
+        usage: "/house",
+    },
+    Command {
+        names: &["marketplace", "mar", "mp"],
+        action: |_| Some(Action::RecallMarketplace),
+        usage: "/marketplace",
+    },
+    Command {
+        names: &["die"],
+        action: |_| Some(Action::Die),
+        usage: "/die",
+    },
+    Command {
+        names: &["pklite", "pkl"],
+        action: |_| Some(Action::PkLite),
+        usage: "/pklite",
+    },
+];
+
+/// Retail names with no row yet: the list the families work through. Some are
+/// still reached by [`unclaimed`] as they were before the table -- the Turbine
+/// rooms and the group channels -- which leaves them behind the plugin hooks
+/// until a row takes them.
+pub const PENDING: &[&str] = &[
+    "?",
+    "help",
+    "allegiance",
+    "all",
+    "ab",
+    "alh",
+    "ah",
+    "motd",
+    "a",
+    "co-vassals",
+    "covassals",
+    "covassal",
+    "c",
+    "fellowship",
+    "fellows",
+    "fellow",
+    "f",
+    "group",
+    "g",
+    "party",
+    "monarch",
+    "m",
+    "patron",
+    "p",
+    "vassals",
+    "vassal",
+    "v",
+    "join",
+    "leave",
+    "chat",
+    "notell",
+    "reply",
+    "r",
+    "rp",
+    "retell",
+    "rt",
+    "say",
+    "s",
+    "consent",
+    "corpse",
+    "cor",
+    "permit",
+    "pkarena",
+    "pka",
+    "pklarena",
+    "pla",
+    "fillcomps",
+    "loadfile",
+    "friends",
+    "friends_add",
+    "friends_remove",
+    "hslist",
+    "hor",
+    "hr",
+    "hom",
+    "hoa",
+    "squelch",
+    "unsquelch",
+    "messagetypes",
+    "message_types",
+    "msgtypes",
+    "msg_types",
+    "age",
+    "birth",
+    "day",
+    "endurance",
+    "framerate",
+    "loc",
+    "version",
+    "clear",
+    "filter",
+    "unfilter",
+    "log",
+    "title",
+    "index",
+    "clist",
+    "on",
+    "off",
+    "guild",
+    "gu",
+    "general",
+    "cg",
+    "trade",
+    "ct",
+    "lfg",
+    "clfg",
+    "roleplay",
+    "crp",
+    "society",
+    "soc",
+    "olthoi",
+    "o",
+];
+
+/// Retail names that never left the retail client: help topics with no handler
+/// at all, the two that only filled in the chat entry, and the windows and
+/// bindings a UI of ours keeps its own way.
+pub const CLIENT_UI_ONLY: &[&str] = &[
+    "commands",
+    "allegiances",
+    "channels",
+    "chatting",
+    "death",
+    "status",
+    "text",
+    "mr",
+    "pr",
+    "emotes",
+    "saveui",
+    "loadui",
+    "saveautoui",
+    "loadautoui",
+    "lockui",
+];
+
+/// Retail names whose handler did nothing by the end of retail.
+pub const RETIRED: &[&str] = &["speaker", "render"];
+
+/// The retail command `name` (case-insensitively), whoever asks.
+pub fn command(name: &str) -> Option<&'static Command> {
+    let name = name.trim().to_ascii_lowercase();
+    RETAIL.iter().find(|c| c.names.contains(&name.as_str()))
+}
+
+/// What a `/name` with no row means when no plugin or script takes it: a soul
+/// emote, a chat room or a group channel by its prefix, else the server's own.
+fn unclaimed(name: &str, args: &str, body: &str) -> Action {
+    // `/wave`, `/bow`: retail read these from its emote table, not from the
+    // command table (`*wave*` typed in chat does the same).
+    if args.is_empty() && crate::emotes::lookup(name).is_some() {
+        return Action::SoulEmote(name.to_string());
+    }
+    if !args.is_empty() {
+        if let Some(room) = ac_net::messages::turbine::from_prefix(name) {
+            return Action::Room {
+                room,
+                text: args.to_string(),
+            };
+        }
+        if let Some(channel) = ac_net::messages::channel::from_prefix(name) {
+            return Action::Channel {
+                channel,
+                text: args.to_string(),
+            };
+        }
+    }
+    Action::ServerCommand(body.to_string())
 }
 
 /// Nothing of that name is there to act on.
