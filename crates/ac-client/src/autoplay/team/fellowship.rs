@@ -329,7 +329,7 @@ impl Client {
         if !self.autoplay.team.leader && !leads_this {
             return false;
         }
-        let Some(me) = self.player.as_ref().map(|p| p.world_position()) else {
+        let Some(me) = self.my_position() else {
             return false;
         };
         // Whoever is already in, first-hand: the server tells the leader

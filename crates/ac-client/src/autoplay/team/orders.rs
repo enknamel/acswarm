@@ -79,7 +79,7 @@ impl Client {
                 .is_some_and(|o| o.health.unwrap_or(1.0) > 0.0)
         };
         let me = self.world.player_guid.unwrap_or(0);
-        let mine = self.player.as_ref().map(|p| p.world_position());
+        let mine = self.my_position();
         let mut hands = Vec::with_capacity(self.autoplay.team.mates.len() + 1);
         if let Some(mine) = mine.filter(|_| me != 0 && with_me) {
             let supplies = self.supplies(&self.autoplay.config.growth, now);
@@ -132,7 +132,7 @@ impl Client {
     pub fn plan_for_team(&mut self, now: Instant) -> crate::plan::Plan {
         let cfg = self.autoplay.config.fight.clone();
         let hands = self.hands_of_team(now, true);
-        let me = self.player.as_ref().map(|p| p.world_position());
+        let me = self.my_position();
         let underground = self.underground();
         // The creatures the party would fight, within the leader's own
         // radius and the one a follower fights within of its leader
@@ -312,7 +312,7 @@ impl Client {
             self.autoplay.straggling_since = None;
             return false;
         }
-        let Some(me) = self.player.as_ref().map(|p| p.world_position()) else {
+        let Some(me) = self.my_position() else {
             self.autoplay.straggling_since = None;
             return false;
         };

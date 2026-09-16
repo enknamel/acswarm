@@ -150,7 +150,7 @@ impl Client {
     /// it names, the longest name that fits first (a "Mite Scion" is not
     /// a "Mite").
     pub(crate) fn killed_in(&self, text: &str) -> Option<glam::Vec3> {
-        let me = self.player.as_ref()?.world_position();
+        let me = self.my_position()?;
         let named = |name: &str| !name.is_empty() && text.contains(name);
         let fought = [self.attack_target, self.autoplay.casting_at]
             .into_iter()

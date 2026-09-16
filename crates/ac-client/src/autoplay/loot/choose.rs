@@ -214,7 +214,7 @@ impl Client {
     ) -> ac_loot::Open {
         use crate::profile::Verdict as Judged;
         let away = match (
-            self.player.as_ref().map(|p| p.world_position()),
+            self.my_position(),
             self.world.objects.get(&guid).and_then(|o| o.world_pos()),
         ) {
             (Some(me), Some(at)) => at.distance(me),
@@ -466,7 +466,7 @@ impl Client {
             if !opened && now.duration_since(since) > allow {
                 // How this ask came back, from where the character stands
                 // now: nothing walks it while nothing comes back.
-                let me = self.player.as_ref().map(|p| p.world_position());
+                let me = self.my_position();
                 let away = self
                     .world
                     .objects
@@ -696,7 +696,7 @@ impl Client {
             .casting_at()
             .and_then(|g| self.world.objects.get(&g))
             .is_some_and(|o| o.health.unwrap_or(1.0) > 0.0);
-        let me = self.player.as_ref().map(|p| p.world_position());
+        let me = self.my_position();
         let Some(me) = me else { return false };
         // Kills go stale with the bodies they leave.
         self.autoplay

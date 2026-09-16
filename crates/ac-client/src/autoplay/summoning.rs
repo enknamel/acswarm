@@ -372,7 +372,7 @@ impl Client {
         if self.under_attack() {
             return true;
         }
-        let Some(me) = self.player.as_ref().map(|p| p.world_position()) else {
+        let Some(me) = self.my_position() else {
             return false;
         };
         let radius = self.autoplay.config.fight.radius;

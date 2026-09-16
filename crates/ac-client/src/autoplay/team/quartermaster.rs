@@ -365,7 +365,7 @@ impl Client {
     /// Walk towards a spot until close enough to hand something over.
     /// True once in reach.
     fn step_into_reach(&mut self, spot: glam::Vec3) -> bool {
-        let Some(me) = self.player.as_ref().map(|p| p.world_position()) else {
+        let Some(me) = self.my_position() else {
             return false;
         };
         if glam::Vec2::new(spot.x - me.x, spot.y - me.y).length() <= Self::REACH {
@@ -388,7 +388,7 @@ impl Client {
     /// real progress towards it, so a long walk is fine and a stopped
     /// one is not.
     fn reaching_too_long(&mut self, spot: glam::Vec3, now: Instant) -> bool {
-        let Some(me) = self.player.as_ref().map(|p| p.world_position()) else {
+        let Some(me) = self.my_position() else {
             return false;
         };
         let away = glam::Vec2::new(spot.x - me.x, spot.y - me.y).length();

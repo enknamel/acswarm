@@ -195,9 +195,8 @@ impl Client {
             return true;
         }
         let near = self
-            .player
-            .as_ref()
-            .is_some_and(|pl| pl.world_position().distance(at) <= DEFEND_REACH);
+            .my_position()
+            .is_some_and(|me| me.distance(at) <= DEFEND_REACH);
         near && self.hit_lately_by(&o.name)
     }
 

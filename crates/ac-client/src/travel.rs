@@ -294,10 +294,9 @@ impl Client {
         why: &str,
     ) -> crate::did::Did {
         use crate::did::Did;
-        let Some(pl) = self.player.as_ref() else {
+        let Some(me) = self.my_position() else {
             return Did::waiting("not in the world yet");
         };
-        let me = pl.world_position();
         let away = Vec2::new(goal.x - me.x, goal.y - me.y).length();
         // Near enough to walk to.
         //
@@ -1115,7 +1114,7 @@ impl Client {
     /// The portal a gem has just put in front of the character: the
     /// nearest portal in the world within [`SUMMONED_REACH`].
     fn summoned_portal(&self) -> Option<u32> {
-        let me = self.player.as_ref()?.world_position().truncate();
+        let me = self.my_position()?.truncate();
         self.world
             .objects
             .values()

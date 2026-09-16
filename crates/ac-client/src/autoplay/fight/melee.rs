@@ -149,7 +149,7 @@ impl Client {
         if missile && !self.ready_ammo() && self.autoplay_craft_ammo(now) {
             return true;
         }
-        let me = self.player.as_ref().map(|p| p.world_position());
+        let me = self.my_position();
         let Some(me) = me else { return false };
         // Hunting together: hit what the leader's plan says, and with no
         // plan what the team is hitting, unless it is something this
@@ -315,7 +315,7 @@ impl Client {
             .objects
             .get(&guid)
             .and_then(|o| o.world_pos())
-            .zip(self.player.as_ref().map(|p| p.world_position()))
+            .zip(self.my_position())
             .is_some_and(|(at, me)| at.distance(me) > crate::travel::WALKABLE)
             || !self.area_allows_guid(guid, underground)
     }
@@ -330,7 +330,7 @@ impl Client {
         };
         let Some(away) = o
             .world_pos()
-            .zip(self.player.as_ref().map(|p| p.world_position()))
+            .zip(self.my_position())
             .map(|(at, me)| at.distance(me))
         else {
             return false;
@@ -357,7 +357,7 @@ impl Client {
     /// Whether the walk up to `guid` has brought the character nearer to
     /// it than it has been in this fight (see [`came_nearer`]).
     fn walking_nearer(&mut self, guid: u32) -> bool {
-        let Some(me) = self.player.as_ref().map(|p| p.world_position()) else {
+        let Some(me) = self.my_position() else {
             return false;
         };
         let Some(at) = self.world.objects.get(&guid).and_then(|o| o.world_pos()) else {
@@ -396,7 +396,7 @@ impl Client {
             return false;
         }
         let (Some(me), Some(at)) = (
-            self.player.as_ref().map(|p| p.world_position()),
+            self.my_position(),
             self.world.objects.get(&guid).and_then(|o| o.world_pos()),
         ) else {
             return false;
@@ -422,7 +422,7 @@ impl Client {
     /// Where the creature just killed was standing: the one being fought
     /// when it has that name, else the nearest creature by that name.
     pub(crate) fn killed_at(&self, name: &str) -> Option<glam::Vec3> {
-        let me = self.player.as_ref()?.world_position();
+        let me = self.my_position()?;
         let fought = [self.attack_target, self.autoplay.casting_at]
             .into_iter()
             .flatten()

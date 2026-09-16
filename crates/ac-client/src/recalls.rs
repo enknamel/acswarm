@@ -245,7 +245,7 @@ impl Client {
     /// The world position of the nearest object of an item type in
     /// view, within [`NEXT_TO`] of the character.
     fn nearest_of(&self, item_type: u32) -> Option<Vec3> {
-        let me = self.player.as_ref()?.world_position();
+        let me = self.my_position()?;
         self.world
             .objects
             .values()

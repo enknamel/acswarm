@@ -31,7 +31,7 @@ pub(crate) struct TakeSent {
 
 impl Client {
     pub fn use_by_name(&mut self, name: &str) -> bool {
-        let me = self.player.as_ref().map(|p| p.world_position());
+        let me = self.my_position();
         let my_guid = self.world.player_guid;
         let mut best: Option<(f32, u32)> = None;
         for o in self.world.objects.values() {

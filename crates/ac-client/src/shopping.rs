@@ -133,7 +133,7 @@ impl Client {
             .map(|o| o.name.clone())
             .unwrap_or_default();
         let away = match (
-            self.player.as_ref().map(|p| p.world_position()),
+            self.my_position(),
             self.world
                 .objects
                 .get(&v.vendor)

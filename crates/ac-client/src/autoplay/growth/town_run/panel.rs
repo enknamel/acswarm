@@ -222,7 +222,7 @@ impl Client {
     /// The counter `guid` when the character is still near enough to
     /// trade at it: its name and where it stands.
     fn counter_in_reach(&self, guid: u32) -> Option<(String, Vec2)> {
-        let me = self.player.as_ref()?.world_position();
+        let me = self.my_position()?;
         let o = self.world.objects.get(&guid)?;
         let p = o.world_pos()?;
         let at = Vec2::new(p.x, p.y);
@@ -359,11 +359,7 @@ impl Client {
     pub fn town_run_view(&self, now: Instant) -> Option<TownRunView> {
         let st = &self.autoplay.growth;
         let run = st.run.as_ref()?;
-        let me = self
-            .player
-            .as_ref()
-            .map(|p| p.world_position())
-            .map(|p| Vec2::new(p.x, p.y));
+        let me = self.my_position().map(|p| Vec2::new(p.x, p.y));
         let (phase, next, saying) = match &run.phase {
             Phase::Going => {
                 let away = me.map(|me| format!(" ({})", about(run.at.distance(me))));
