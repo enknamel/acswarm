@@ -155,23 +155,29 @@ fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
+/// The name of every `fn` this text writes.
+fn fns_written(text: &str) -> BTreeSet<String> {
+    let ident = |c: char| c.is_alphanumeric() || c == '_';
+    let mut names = BTreeSet::new();
+    for (at, _) in text.match_indices("fn ") {
+        if text[..at].chars().next_back().is_some_and(ident) {
+            continue;
+        }
+        let name: String = text[at + 3..].chars().take_while(|&c| ident(c)).collect();
+        if !name.is_empty() {
+            names.insert(name);
+        }
+    }
+    names
+}
+
 /// The name of every `fn` written under `crates/`.
 fn defined_fns() -> BTreeSet<String> {
     let mut files = Vec::new();
     rust_files(&workspace().join("crates"), &mut files);
-    let ident = |c: char| c.is_alphanumeric() || c == '_';
     let mut names = BTreeSet::new();
     for file in files {
-        let text = fs::read_to_string(&file).unwrap_or_default();
-        for (at, _) in text.match_indices("fn ") {
-            if text[..at].chars().next_back().is_some_and(ident) {
-                continue;
-            }
-            let name: String = text[at + 3..].chars().take_while(|&c| ident(c)).collect();
-            if !name.is_empty() {
-                names.insert(name);
-            }
-        }
+        names.extend(fns_written(&fs::read_to_string(&file).unwrap_or_default()));
     }
     names
 }
@@ -249,6 +255,55 @@ fn undefined_fns(text: &str, defined: &BTreeSet<String>) -> Vec<String> {
     missing
 }
 
+/// The fns written in the files a systems row names, the row's own `.rs` files read and, where a
+/// span names a directory, everything under it.
+fn fns_in_row_files(map_dir: &Path, cell: &str) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    for span in spans(cell) {
+        let Some((path, _)) = as_path(&span) else {
+            continue;
+        };
+        let Some(at) = resolve(map_dir, path) else {
+            continue;
+        };
+        let mut files = Vec::new();
+        if at.is_dir() {
+            rust_files(&at, &mut files);
+        } else {
+            files.push(at);
+        }
+        for file in files {
+            names.extend(fns_written(&fs::read_to_string(&file).unwrap_or_default()));
+        }
+    }
+    names
+}
+
+/// Entry fns a systems row names that none of that row's own files writes. A row whose system has
+/// moved still passes every other check here -- the fn exists somewhere, the file exists -- and
+/// sends the reader to a file the system left; this is what says which row went stale.
+fn fns_away_from_their_row(map_dir: &Path, text: &str) -> Vec<String> {
+    let prose = prose(text);
+    let systems = column(&prose, "system", "system");
+    let entries = column(&prose, "system", "entry fns");
+    let files = column(&prose, "system", "files");
+    let mut wrong = Vec::new();
+    for ((system, entry), file_cell) in systems.iter().zip(&entries).zip(&files) {
+        let written = fns_in_row_files(map_dir, file_cell);
+        for span in spans(entry) {
+            let Some(name) = fn_name(&span) else {
+                continue;
+            };
+            if !written.contains(name) {
+                wrong.push(format!(
+                    "`{span}`: no file the {system} row names writes it"
+                ));
+            }
+        }
+    }
+    wrong
+}
+
 fn with_label(label: &str, found: Vec<String>) -> Vec<String> {
     found.into_iter().map(|f| format!("{label}: {f}")).collect()
 }
@@ -274,6 +329,21 @@ fn every_fn_the_maps_name_is_defined() {
         missing.extend(with_label(map.label, undefined_fns(&map.text, &defined)));
     }
     assert!(missing.is_empty(), "unknown fns:\n{}", missing.join("\n"));
+}
+
+#[test]
+fn every_systems_row_names_the_files_its_entry_fns_are_written_in() {
+    let map = client_map();
+    let wrong = fns_away_from_their_row(&map.dir, &map.text);
+    assert!(
+        !column(&prose(&map.text), "system", "files").is_empty(),
+        "the systems table was not read"
+    );
+    assert!(
+        wrong.is_empty(),
+        "rows pointing at the wrong file:\n{}",
+        with_label(map.label, wrong).join("\n")
+    );
 }
 
 #[test]
@@ -475,6 +545,16 @@ Calls `real_fn()` and `path::other_gone()`; see `no/such/file.rs` and `CLAUDE.md
     assert_eq!(missing.len(), 3, "{missing:?}");
     let stale = stale_paths(&workspace(), text);
     assert_eq!(stale.len(), 2, "{stale:?}");
+    // A row naming a file its own entry fn is not written in, which every other check above
+    // lets through: both fns exist, and both files do.
+    let rows = "\
+| system | entry fns | files |
+|---|---|---|
+| one | `read_map`, `prose` | `tests/code_map.rs` |
+| two | `read_map` | `Cargo.toml` |
+";
+    let away = fns_away_from_their_row(&client_dir(), rows);
+    assert_eq!(away.len(), 1, "{away:?}");
     assert_eq!(fn_name("steps::weigh()"), Some("weigh"));
     assert_eq!(
         as_path("autoplay.rs:10-20"),

@@ -724,6 +724,3 @@ impl Client {
         self.appraise_many(ask);
     }
 }
-
-#[cfg(test)]
-mod tests;

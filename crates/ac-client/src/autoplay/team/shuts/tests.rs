@@ -7,7 +7,8 @@ use crate::autoplay::{
 };
 use crate::items::ItemStats;
 use crate::testkit::{
-    a_party_profile, asks, character_of_level, game_data, item, looter, no_data, turn_at, view_of,
+    a_party_profile, asks, character_of_level, game_data, item, looter, no_data,
+    standing_in_the_field, turn_at, view_of,
 };
 
 #[test]
@@ -1107,4 +1108,132 @@ fn a_mate_dead_or_missing_from_the_board_is_never_waited_on() {
     assert_eq!(ap.whose_turn(body, at, me, at, t0), None);
     ap.team.mates.clear();
     assert!(ap.ours_to_open(body, at, me, at, t0));
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn the_salvage_on_an_open_body_is_left_for_the_salvager_standing_by() {
+    use crate::logistics::Supplies;
+    let holtburg = 0xA9B4_0019;
+    let mut c = standing_in_the_field(20, holtburg, glam::Vec3::new(84.0, 84.0, 10.0));
+    let me = c.player.as_ref().unwrap().world_position();
+    let t0 = Instant::now();
+    let (body, plate, gem) = (0x8000_5001, 0x8000_5002, 0x8000_5003);
+    c.world.objects.insert(
+        body,
+        ac_world::WorldObject {
+            guid: body,
+            name: "Corpse of Drudge Slave".into(),
+            object_desc_flags: ac_world::object_desc_flags::CORPSE,
+            position: Some(ac_world::object::Position::new_flat(
+                holtburg,
+                me + glam::Vec3::new(2.0, 0.0, 0.0) - ac_world::landblock_origin(holtburg),
+            )),
+            ..Default::default()
+        },
+    );
+    for (guid, name) in [(plate, "Platemail"), (gem, "Diamond")] {
+        c.world.objects.insert(
+            guid,
+            ac_world::WorldObject {
+                guid,
+                name: name.into(),
+                container: Some(body),
+                ..Default::default()
+            },
+        );
+    }
+    let mut profile = crate::profile::Profile {
+        name: "party".into(),
+        rules: vec![
+            asks("platemail to salvage", "platemail", LootAction::Salvage),
+            asks("gems", "diamond", LootAction::Sell),
+        ],
+        ..Default::default()
+    };
+    // Bryn02 salvages for the party and stands by; Bryn03 does not
+    // salvage. This character carries no Ust.
+    let salvager = Mate {
+        has_ust: true,
+        salvaging: 300,
+        ..looter(2, me, None, Duration::ZERO)
+    };
+    let other = looter(3, me, None, Duration::ZERO);
+    c.autoplay.team.mates = vec![salvager.clone(), other.clone()];
+    let verdicts = |c: &mut Client, profile: &crate::profile::Profile| {
+        let open = c.corpse_now(body, &[plate, gem], profile, t0, t0);
+        let of = |g| open.items.iter().find(|i| i.guid == g).map(|i| i.verdict);
+        (of(plate), of(gem))
+    };
+    let take = |a| Some(ac_loot::Verdict::Take(a));
+    assert_eq!(
+        verdicts(&mut c, &profile),
+        (Some(ac_loot::Verdict::Leave), take(LootAction::Sell)),
+        "took the salvager's salvage, or left the rest"
+    );
+    // Shut with the platemail on it: left for the salvager. Bryn03 would
+    // take it too and stands by for the salvager, and so does this
+    // character, rather than either writing the body off.
+    let shut = c.shut_for(body, &[plate], &profile);
+    assert_eq!(
+        (shut.done_for, shut.stand_by, shut.left_for, shut.waits),
+        (Vec::<u32>::new(), vec![3], vec![2], true)
+    );
+
+    // Never waited on: dead, off the board, with no room, not looting,
+    // or having shut this body already. Each time it is taken as ever.
+    let salvage = (take(LootAction::Salvage), take(LootAction::Sell));
+    c.autoplay.team.mates = vec![
+        Mate {
+            health: 0.0,
+            ..salvager.clone()
+        },
+        other.clone(),
+    ];
+    assert_eq!(verdicts(&mut c, &profile), salvage, "dead");
+    c.autoplay.team.mates = vec![other.clone()];
+    assert_eq!(verdicts(&mut c, &profile), salvage, "off the board");
+    c.autoplay.team.mates = vec![
+        Mate {
+            supplies: Supplies {
+                laden: true,
+                ..Default::default()
+            },
+            ..salvager.clone()
+        },
+        other.clone(),
+    ];
+    assert_eq!(verdicts(&mut c, &profile), salvage, "laden");
+    c.autoplay.team.mates = vec![
+        Mate {
+            opens_bodies: false,
+            ..salvager.clone()
+        },
+        other.clone(),
+    ];
+    assert_eq!(verdicts(&mut c, &profile), salvage, "not looting");
+    c.autoplay.config.team.enabled = true;
+    c.autoplay.team.mates = vec![
+        Mate {
+            shut: vec![Shut {
+                body,
+                done_for: vec![3],
+                ..Default::default()
+            }],
+            ..salvager.clone()
+        },
+        other.clone(),
+    ];
+    c.autoplay.take_in_shuts(0x5000_0001, t0, |_| None);
+    assert_eq!(verdicts(&mut c, &profile), salvage, "shut it already");
+
+    // Rules that mean nothing for anyone in particular, and alone.
+    c.autoplay.team.mates = vec![salvager, other];
+    c.autoplay.shut_by.clear();
+    c.autoplay.done_with.clear();
+    profile.looting.salvage = false;
+    assert_eq!(verdicts(&mut c, &profile), salvage, "nobody salvages");
+    profile.looting.salvage = true;
+    c.autoplay.team.mates.clear();
+    assert_eq!(verdicts(&mut c, &profile), salvage, "alone");
 }

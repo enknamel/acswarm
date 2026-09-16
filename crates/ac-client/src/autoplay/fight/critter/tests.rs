@@ -1,4 +1,10 @@
+use std::time::Instant;
+
 use super::*;
+use crate::autoplay::Mate;
+use crate::testkit::{
+    appraised_as, character_of_level, evaded, in_view, no_data, standing_in_the_field, STRANGER,
+};
 
 /// A table row made up for a test.
 fn row(tolerance: u32, health: u32, level: Option<u32>) -> ac_world::elements::Creature {
@@ -324,4 +330,377 @@ fn the_holtburg_fields_are_still_a_hunting_ground_at_any_level() {
             c.name
         );
     }
+}
+
+#[test]
+fn a_rabbit_is_walked_past_once_it_is_outgrown_and_a_revenant_never_is() {
+    // Brown Rabbit 2567 (passive, level 4), Revenant 8592 (passive,
+    // level 61), Chicken 35499 (attacks on sight, level 8).
+    let mut c = character_of_level(no_data(), 20);
+    let cfg = Fight::default();
+    let rabbit = in_view(&mut c, 0x8000_0001, 2567, "Brown Rabbit");
+    let revenant = in_view(&mut c, 0x8000_0002, 8592, "Revenant");
+    let chicken = in_view(&mut c, 0x8000_0003, 35499, "Chicken");
+    assert!(c.a_critter(&rabbit, &cfg));
+    assert!(!c.a_critter(&revenant, &cfg), "worth sixty levels");
+    assert!(!c.a_critter(&chicken, &cfg), "this one starts fights");
+
+    // A character the Rabbit is still worth something to fights it.
+    c.world.stats.level = 5;
+    assert!(!c.a_critter(&rabbit, &cfg));
+    assert!(!c.a_critter(&revenant, &cfg));
+
+    // Back at 20, and hitting back is never refused.
+    c.world.stats.level = 20;
+    assert!(c.a_critter(&rabbit, &cfg));
+    c.autoplay.attacked_by("Brown Rabbit", Instant::now());
+    assert!(!c.a_critter(&rabbit, &cfg), "it is hitting the character");
+    // Which says nothing about the one next to it.
+    let other = in_view(&mut c, 0x8000_0004, 2566, "Black Rabbit");
+    assert!(c.a_critter(&other, &cfg));
+    c.autoplay.last_hit_us = None;
+    c.autoplay.hit_by.clear();
+
+    // Named outright, it is what the player asked to hunt.
+    let only = Fight {
+        only: vec!["rabbit".into()],
+        ..Fight::default()
+    };
+    assert!(!c.a_critter(&rabbit, &only));
+
+    // A creature of ours already on it: its fight, and ours to end.
+    c.world.objects.insert(
+        0x8000_0005,
+        ac_world::WorldObject {
+            guid: 0x8000_0005,
+            name: "Fire Elemental".into(),
+            item_type: ac_world::item_type::CREATURE,
+            health: Some(1.0),
+            pet_owner: 0x5000_0001,
+            walked_at: Some(rabbit.guid),
+            ..Default::default()
+        },
+    );
+    assert!(!c.a_critter(&rabbit, &cfg));
+    assert!(c.a_critter(&other, &cfg), "the one it is not on");
+    c.world.objects.remove(&0x8000_0005);
+
+    // With the setting off, everything is fought.
+    let all = Fight {
+        skip_critters: false,
+        ..Fight::default()
+    };
+    assert!(!c.a_critter(&rabbit, &all));
+    assert!(!c.a_critter(&other, &all));
+}
+
+#[test]
+fn a_critter_that_swings_and_misses_is_fought_rather_than_walked_past() {
+    let mut c = character_of_level(no_data(), 20);
+    let cfg = Fight::default();
+    let rabbit = in_view(&mut c, 0x8000_0001, 2567, "Brown Rabbit");
+    let other = in_view(&mut c, 0x8000_0002, 2566, "Black Rabbit");
+    assert!(
+        c.a_critter(&rabbit, &cfg),
+        "outgrown, and it has done nothing"
+    );
+
+    // It swings and misses, over and over: the character never takes
+    // a point of damage, so nothing but this says it is in a fight.
+    c.chat_message(
+        ac_net::messages::opcode::GAME_EVENT,
+        &evaded(rabbit.guid, "Brown Rabbit"),
+    );
+    assert!(
+        !c.a_critter(&rabbit, &cfg),
+        "it is swinging at the character"
+    );
+    assert!(
+        c.a_critter(&other, &cfg),
+        "which says nothing about its neighbour"
+    );
+}
+
+/// An appraisal of `guid` saying it is `level`.
+fn appraised_at(c: &mut Client, guid: u32, level: i32) {
+    appraised_as(c, guid, Some(level), 0);
+}
+
+#[test]
+fn a_level_read_off_the_creature_itself_stands_in_for_the_tables() {
+    let mut c = character_of_level(no_data(), 50);
+    let cfg = Fight::default();
+    // A Portal Pillar (32522) never attacks anything and the table
+    // has no level for it. Nothing is walked past on a guess, nor
+    // attacked on one: it is asked about, and left alone until the
+    // appraisal says what it is worth.
+    let pillar = in_view(&mut c, 0x8000_0011, 32522, "Portal Pillar");
+    assert_eq!(
+        ac_world::elements::creature_by_id(32522).and_then(|k| k.level),
+        None
+    );
+    assert_eq!(c.critter_verdict(&pillar, &cfg), Critter::Appraise);
+    assert!(c.a_critter(&pillar, &cfg), "attacked on a guess");
+    appraised_at(&mut c, pillar.guid, 4);
+    assert!(c.a_critter(&pillar, &cfg));
+    // Asked and answered with a profile and no level at all --
+    // not something ACE does -- it is fought rather than left for
+    // ever.
+    appraised_as(&mut c, pillar.guid, None, 2001);
+    assert!(!c.a_critter(&pillar, &cfg));
+    // Answered with nothing, not even a profile: ACE's word for a
+    // thing it has not got. Not there to fight, and left alone.
+    c.appraisals.insert(
+        pillar.guid,
+        ac_net::messages::Appraisal {
+            guid: pillar.guid,
+            ..Default::default()
+        },
+    );
+    assert_eq!(c.critter_verdict(&pillar, &cfg), Critter::Appraise);
+    assert!(
+        c.a_critter(&pillar, &cfg),
+        "attacked a thing the server has not got"
+    );
+
+    // A creature whose weenie is not in the table at all is known
+    // only by the end of its name, and that row is some other
+    // weenie: a Brown Rabbit is level 4, and this is not one.
+    let stronger = in_view(&mut c, 0x8000_0012, 0x00FF_FFFF, "Weakened Brown Rabbit");
+    assert_eq!(
+        c.critter_verdict(&stronger, &cfg),
+        Critter::Appraise,
+        "the name says what kind of thing it is, not what it is worth"
+    );
+    assert!(c.a_critter(&stronger, &cfg), "left alone until it is known");
+    appraised_at(&mut c, stronger.guid, 40);
+    assert!(!c.a_critter(&stronger, &cfg), "not at forty it is not");
+}
+
+#[test]
+fn a_stranger_named_like_a_critter_is_asked_about_and_judged_on_its_own_figures() {
+    // On a live server a "Dire Brown Rabbit" the table has never heard of
+    // is level 40 with three hundred health. Its name found the
+    // Rabbit's row, and the Rabbit's four and five had it walked
+    // past by anyone of level 8: the appraisal that was to beat
+    // the row never came, because a creature walked past is never
+    // asked about.
+    let mut c = character_of_level(no_data(), 20);
+    let cfg = Fight::default();
+    let dire = in_view(&mut c, 0x8000_0021, STRANGER + 2, "Dire Brown Rabbit");
+    assert!(
+        ac_world::elements::creature_by_id(STRANGER + 2).is_none()
+            && ac_world::elements::creature("Dire Brown Rabbit").is_some(),
+        "known by name alone is what the test is about"
+    );
+    assert_eq!(c.critter_verdict(&dire, &cfg), Critter::Appraise);
+    assert!(c.a_critter(&dire, &cfg), "left alone until it is known");
+    // The answer says a Rabbit after all: walked past.
+    appraised_as(&mut c, dire.guid, Some(4), 5);
+    assert!(c.a_critter(&dire, &cfg));
+    // The answer says a monster: fought.
+    appraised_as(&mut c, dire.guid, Some(40), 300);
+    assert!(!c.a_critter(&dire, &cfg), "not at forty it is not");
+    // The one the table has by weenie is walked past on the table's
+    // word, with no question asked.
+    let rabbit = in_view(&mut c, 0x8000_0022, 2567, "Brown Rabbit");
+    assert_eq!(c.critter_verdict(&rabbit, &cfg), Critter::WalkPast);
+}
+
+#[test]
+fn a_creature_the_server_lets_go_of_takes_its_appraisal_with_it() {
+    // ACE hands a gone creature's guid to a new one six hours on.
+    // Kept, the Drudge's answer was read as the Cow's.
+    let mut c = character_of_level(no_data(), 20);
+    let cfg = Fight::default();
+    let drudge = in_view(&mut c, 0x8000_0041, STRANGER, "Drudge Skulker");
+    appraised_as(&mut c, drudge.guid, Some(8), 42);
+    assert!(!c.a_critter(&drudge, &cfg), "worth the fight");
+    // A corpse asked about keeps its answer: the loot rules read it.
+    let corpse = 0x8000_0042;
+    c.world.objects.insert(
+        corpse,
+        ac_world::WorldObject {
+            guid: corpse,
+            name: "Corpse of Drudge Skulker".into(),
+            item_type: ac_world::item_type::CONTAINER,
+            object_desc_flags: ac_world::object_desc_flags::CORPSE,
+            ..Default::default()
+        },
+    );
+    appraised_as(&mut c, corpse, None, 0);
+    let delete = |guid: u32| {
+        let mut w = ac_net::wire::Writer::new();
+        w.u32(ac_net::messages::opcode::OBJECT_DELETE)
+            .u32(guid)
+            .u32(0);
+        w.finish()
+    };
+    c.forget_the_departed(&delete(corpse));
+    assert!(c.appraisals.contains_key(&corpse));
+    c.forget_the_departed(&delete(drudge.guid));
+    assert!(!c.appraisals.contains_key(&drudge.guid));
+    // The guid comes back as a Cow: nothing known, asked about
+    // afresh, and not fought on the Drudge's figures.
+    let cow = in_view(&mut c, drudge.guid, STRANGER + 1, "Cow");
+    assert_eq!(c.critter_verdict(&cow, &cfg), Critter::Appraise);
+    assert!(
+        c.a_critter(&cow, &cfg),
+        "fought on another creature's answer"
+    );
+}
+
+#[test]
+fn a_cow_the_table_has_never_heard_of_is_walked_past_until_it_starts_something() {
+    // The table was read off a server with no Cow in it, and the
+    // rule fought whatever the table did not know: a level 20
+    // character killed a Cow on a server that has them.
+    let mut c = character_of_level(no_data(), 20);
+    let cfg = Fight::default();
+    let now = Instant::now();
+    assert!(
+        ac_world::elements::known(STRANGER, "Cow").is_none(),
+        "the table knows a Cow after all"
+    );
+    let cow = in_view(&mut c, 0x8000_0001, STRANGER, "Cow");
+    // Nothing known about it: asked about, and not attacked meanwhile.
+    assert_eq!(c.critter_verdict(&cow, &cfg), Critter::Appraise);
+    assert!(c.a_critter(&cow, &cfg), "attacked on nothing");
+    // The answer: level 8, twenty health, and it has done nothing.
+    appraised_as(&mut c, cow.guid, Some(8), 20);
+    assert!(c.a_critter(&cow, &cfg), "a Cow, killed");
+    // A level 15 has not outgrown it.
+    c.world.stats.level = 15;
+    assert!(!c.a_critter(&cow, &cfg));
+    c.world.stats.level = 20;
+
+    // It kicks: fought back.
+    c.autoplay.attacked_by("Cow", now);
+    assert!(!c.a_critter(&cow, &cfg), "it is hitting the character");
+    c.autoplay.last_hit_us = None;
+    c.autoplay.hit_by.clear();
+    assert!(c.a_critter(&cow, &cfg));
+
+    // It comes at the character, or at a mate, or at anyone: read
+    // off what it walked at, since the live move target is cleared
+    // by every position report of the chase (see
+    // `WorldObject::walked_at`).
+    let me = c.world.player_guid.unwrap();
+    let mate = 0x5000_0002;
+    c.autoplay.team.mates = vec![Mate {
+        name: "Aldric".into(),
+        guid: mate,
+        ..Default::default()
+    }];
+    for at in [me, mate, 0x8000_0009] {
+        let mut charging = cow.clone();
+        charging.walked_at = Some(at);
+        charging.target = None;
+        assert!(!c.a_critter(&charging, &cfg), "walked at {at:#010x}");
+    }
+    // A mate is on it.
+    c.autoplay.team.mates[0].target = Some(cow.guid);
+    assert!(!c.a_critter(&cow, &cfg), "a mate is fighting it");
+    c.autoplay.team.mates.clear();
+    assert!(c.a_critter(&cow, &cfg));
+
+    // Named outright, it is what the player asked to hunt.
+    let only = Fight {
+        only: vec!["cow".into()],
+        ..Fight::default()
+    };
+    assert!(!c.a_critter(&cow, &only));
+    // With the setting off, everything is fought.
+    let all = Fight {
+        skip_critters: false,
+        ..Fight::default()
+    };
+    assert!(!c.a_critter(&cow, &all));
+
+    // A stranger that is no Cow: an Auroch Yearling's sixty-five
+    // health is a fight.
+    let auroch = in_view(&mut c, 0x8000_0002, STRANGER + 1, "Auroch Yearling");
+    appraised_as(&mut c, auroch.guid, Some(8), 65);
+    assert!(!c.a_critter(&auroch, &cfg));
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn the_fight_picker_asks_about_a_stranger_rather_than_attacking_it() {
+    let holtburg = 0xA9B4_0019;
+    let mut c = standing_in_the_field(20, holtburg, glam::Vec3::new(84.0, 84.0, 10.0));
+    let me = c.player.as_ref().unwrap().world_position();
+    let cfg = Fight::default();
+    let now = Instant::now();
+    let cow = 0x8000_0001;
+    c.world.objects.insert(
+        cow,
+        ac_world::WorldObject {
+            guid: cow,
+            weenie_class_id: STRANGER,
+            name: "Cow".into(),
+            item_type: ac_world::item_type::CREATURE,
+            object_desc_flags: ac_world::object_desc_flags::ATTACKABLE,
+            health: Some(1.0),
+            position: Some(ac_world::object::Position::new_flat(
+                holtburg,
+                me + glam::Vec3::new(5.0, 0.0, 0.0) - ac_world::landblock_origin(holtburg),
+            )),
+            ..Default::default()
+        },
+    );
+    // A second stranger, farther off.
+    let far = 0x8000_0002;
+    c.world.objects.insert(
+        far,
+        ac_world::WorldObject {
+            guid: far,
+            weenie_class_id: STRANGER + 1,
+            name: "Yak".into(),
+            item_type: ac_world::item_type::CREATURE,
+            object_desc_flags: ac_world::object_desc_flags::ATTACKABLE,
+            health: Some(1.0),
+            position: Some(ac_world::object::Position::new_flat(
+                holtburg,
+                me + glam::Vec3::new(12.0, 0.0, 0.0) - ac_world::landblock_origin(holtburg),
+            )),
+            ..Default::default()
+        },
+    );
+    assert!(c.appraise_queue.is_empty());
+    // Under attack, nothing is asked: the fight in hand comes first,
+    // and a question can wake what it is asked about.
+    c.autoplay.attacked_by("Drudge Skulker", now);
+    assert!(!c.autoplay_fight_as(now, &cfg), "attacked a stranger");
+    assert!(c.appraise_queue.is_empty(), "asked while under attack");
+    c.autoplay.last_hit_us = None;
+    c.autoplay.hit_by.clear();
+    assert!(!c.autoplay_fight_as(now, &cfg), "attacked a stranger");
+    assert_eq!(
+        c.appraise_queue.iter().copied().collect::<Vec<_>>(),
+        [cow],
+        "the nearest, alone"
+    );
+    // Asked again before the answer: still the one.
+    assert!(!c.autoplay_fight_as(now, &cfg));
+    assert_eq!(c.appraise_queue.iter().copied().collect::<Vec<_>>(), [cow]);
+    // The answer says a Cow: walked past, and the next is asked about.
+    appraised_as(&mut c, cow, Some(8), 20);
+    c.appraise_queue.clear();
+    assert!(!c.autoplay_fight_as(now, &cfg), "a Cow, attacked");
+    assert_eq!(c.appraise_queue.iter().copied().collect::<Vec<_>>(), [far]);
+    appraised_as(&mut c, far, Some(8), 20);
+    // The answer says something bigger: attacked.
+    appraised_as(&mut c, cow, Some(8), 65);
+    assert!(c.autoplay_fight_as(now, &cfg), "a fight, walked past");
+    // With the setting off, nothing is asked: it is attacked.
+    c.appraisals.remove(&cow);
+    c.appraise_queue.clear();
+    c.autoplay.last_attack = None;
+    let all = Fight {
+        skip_critters: false,
+        ..Fight::default()
+    };
+    assert!(c.autoplay_fight_as(now, &all));
+    assert!(c.appraise_queue.is_empty());
 }

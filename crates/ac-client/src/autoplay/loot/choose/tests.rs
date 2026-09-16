@@ -1,5 +1,7 @@
 use super::*;
 use crate::autoplay::{Room, ShutFor};
+use crate::refusals::{OPEN_IN_USE_AGAIN, OPEN_NOT_OURS_AGAIN};
+use crate::testkit::corpse_at_hand;
 
 #[test]
 fn a_corpse_the_rules_set_aside_is_shelved_and_not_written_off() {
@@ -210,5 +212,146 @@ fn breaking_off_a_fight_is_reserved_for_a_corpse_about_to_go() {
     assert!(
         CORPSE_URGENT >= Duration::from_secs(30),
         "no time to get there"
+    );
+}
+
+#[test]
+fn the_corpse_opened_after_one_was_given_up_on_is_not_written_off_on_its_first_step() {
+    // Blargerton: a corpse that would not empty was given up on after
+    // forty-five seconds, and the loot rules' clock went on running
+    // from it. The next body he opened was shut on its first step
+    // for having taken too long, and marked looted with everything
+    // still on it.
+    let t0 = Instant::now();
+    let mut ap = Autoplay::default();
+    let (first, second) = (0x8000_1001, 0x8000_1002);
+    ap.take_up_corpse(first, t0, LOOT_TIMEOUT);
+    let next = ap.loot_run.step(&corpse_at_hand(first, 1), t0);
+    assert_eq!(next.act, Some(ac_loot::Act::Take(1)), "{}", next.saying);
+    // Let go of some way other than a shut by the rules: given up on
+    // as it once was, or asked again when it would not open.
+    let gave_up = t0 + ac_loot::run::KEEP_AT_IT + Duration::from_secs(1);
+    ap.let_go_of_corpse();
+    assert_eq!(ap.corpse, None);
+    // The next corpse is chosen, and opens a moment later.
+    ap.take_up_corpse(second, gave_up, LOOT_TIMEOUT);
+    let opened = gave_up + Duration::from_secs(1);
+    let next = ap.loot_run.step(&corpse_at_hand(second, 2), opened);
+    assert_eq!(next.act, Some(ac_loot::Act::Take(2)), "{}", next.saying);
+    assert!(!ap.looted.contains(&second), "written off unlooted");
+}
+
+#[test]
+fn the_words_a_body_is_refused_in_say_how_long_to_leave_it() {
+    // 1,044 refusals arrived in that run, a third of a second after
+    // the ask, and every one of them was thrown away: the take-up
+    // ended on a clock instead, and asked again three times more.
+    let t0 = Instant::now();
+    let name = "Corpse of Hellion";
+    let answered = t0 + Duration::from_millis(360);
+    let in_use = format!("The {name} is already in use by someone else!");
+    let not_ours = format!("You do not yet have the right to loot the {name}.");
+    let (held, locked, rare) = (0x8000_1221, 0x8000_1222, 0x8000_1223);
+    let mut ap = Autoplay {
+        corpse_seen: vec![(held, t0), (locked, t0), (rare, t0)],
+        ..Default::default()
+    };
+
+    // Someone is inside it: let it go and have it the moment they
+    // are done, not in the half minute anything blocked waits.
+    ap.take_up_corpse(held, t0, LOOT_TIMEOUT);
+    assert!(ap.corpse_refused_in_words(&in_use, name, Some(answered), answered));
+    assert_eq!(ap.corpse, None, "still holding a body it cannot open");
+    assert_eq!(ap.shelved.waited(&held), Some(OPEN_IN_USE_AGAIN));
+    assert!(ap.shelved.held(
+        &held,
+        answered + OPEN_IN_USE_AGAIN - Duration::from_millis(1)
+    ));
+    assert!(!ap.shelved.held(&held, answered + OPEN_IN_USE_AGAIN));
+
+    // The killer's for now: a short wait, because a corpse becomes
+    // everyone's the moment whoever has it closes it and not only
+    // when it half rots.
+    ap.take_up_corpse(locked, t0, LOOT_TIMEOUT);
+    assert!(ap.corpse_refused_in_words(&not_ours, name, Some(answered), answered));
+    assert_eq!(ap.corpse, None);
+    assert_eq!(ap.shelved.waited(&locked), Some(OPEN_NOT_OURS_AGAIN));
+    assert!(ap.shelved.held(
+        &locked,
+        answered + OPEN_NOT_OURS_AGAIN - Duration::from_millis(1)
+    ));
+    assert!(!ap.shelved.held(&locked, answered + OPEN_NOT_OURS_AGAIN));
+
+    // A body refused twice, in two different sets of words, waits
+    // longer the second time -- and the wait it is given is a wait
+    // and not a deadline. Handing the shelf an exact "come back in
+    // 117 seconds" doubled the three seconds already on the body
+    // instead: six, then twelve, then twenty-four, five more asks
+    // and five more refusals before it reached the wait that was
+    // meant the first time.
+    let both = 0x8000_1224;
+    ap.corpse_seen.push((both, t0));
+    ap.take_up_corpse(both, t0, LOOT_TIMEOUT);
+    assert!(ap.corpse_refused_in_words(&in_use, name, Some(answered), answered));
+    assert_eq!(ap.shelved.waited(&both), Some(OPEN_IN_USE_AGAIN));
+    let again = answered + OPEN_IN_USE_AGAIN;
+    ap.take_up_corpse(both, again, LOOT_TIMEOUT);
+    let told = again + Duration::from_millis(360);
+    assert!(ap.corpse_refused_in_words(&not_ours, name, Some(told), told));
+    assert_eq!(
+        ap.shelved.waited(&both),
+        Some(OPEN_IN_USE_AGAIN * 2),
+        "a doubling wait, not a deadline the shelf then doubled"
+    );
+
+    // The killer's for good: not waited on at all.
+    ap.take_up_corpse(rare, t0, LOOT_TIMEOUT);
+    let words =
+        format!("You may not loot the {name} because the {name} has generated a rare item.");
+    assert!(ap.corpse_refused_in_words(&words, name, Some(answered), answered));
+    assert!(ap.shelved.held(&rare, t0 + CORPSE_LIFE));
+}
+
+#[test]
+fn every_body_opened_is_counted_for_the_panel_however_it_was_let_go() {
+    // Blargerton's log said "emptied" whether he took something or
+    // nothing. The panel's count tells the two apart, and a body given
+    // up on still counts for what came off it.
+    use crate::did::Did;
+    let t0 = Instant::now();
+    let mut ap = Autoplay::default();
+    // Opened, the dagger asked for, then given up on.
+    let first = 0x8000_3001;
+    ap.take_up_corpse(first, t0, LOOT_TIMEOUT);
+    let next = ap.loot_run.step(&corpse_at_hand(first, 1), t0);
+    assert_eq!(next.act, Some(ac_loot::Act::Take(1)), "{}", next.saying);
+    ap.let_go_of_corpse();
+    // Shut by the rules with nothing worth taking on it.
+    let second = 0x8000_3002;
+    ap.take_up_corpse(second, t0, LOOT_TIMEOUT);
+    let mut bare = corpse_at_hand(second, 2);
+    bare.items[0].verdict = ac_loot::Verdict::Leave;
+    let next = ap.loot_run.step(&bare, t0);
+    assert_eq!(next.did, Did::Done, "{}", next.saying);
+    ap.corpse_shut(
+        second,
+        &next.did,
+        next.left_for_weight,
+        ShutFor::default(),
+        t0,
+    );
+    // Walked to and never opened, then the next body taken up.
+    let third = 0x8000_3003;
+    ap.take_up_corpse(third, t0, LOOT_TIMEOUT);
+    let mut unopened = corpse_at_hand(third, 3);
+    unopened.open = false;
+    ap.loot_run.step(&unopened, t0);
+    ap.take_up_corpse(0x8000_3004, t0, LOOT_TIMEOUT);
+    assert_eq!(
+        ap.loot_tally,
+        ac_loot::Tally {
+            opened: 2,
+            taken: 1
+        }
     );
 }

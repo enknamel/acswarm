@@ -289,3 +289,6 @@ impl Client {
         self.profiles.get(&self.autoplay.config.loot.profile)
     }
 }
+
+#[cfg(test)]
+mod tests;
