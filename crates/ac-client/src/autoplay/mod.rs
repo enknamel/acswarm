@@ -48,9 +48,24 @@ use crate::{Client, Stance, SAME_FLOOR};
 pub use ac_loot::profile::LootAction;
 
 // Autoplay's own rules, each in its own file below this one.
+mod cast;
+mod config;
+mod fight;
 pub mod growth;
+mod hear;
+mod journey;
+mod ledger;
 pub mod steps;
 pub mod summoning;
+mod team;
+
+pub use cast::cast_problem;
+pub use config::{Buffs, Config, Fight, Loot, Role, Style, Survive, Team};
+pub use fight::critter::{critter, Critter, Hint, Seen};
+#[cfg(doc)]
+use hear::{arrived_unharmed, spell_attacker};
+use team::view::rival_leader;
+pub use team::view::{Mate, TeamView};
 
 /// How long to wait for a corpse to open before asking again, when it
 /// is right under our feet. A corpse further off is given time for the
@@ -241,10 +256,6 @@ const CLOSE_IN_AFTER: Duration = Duration::from_secs(8);
 const MIN_STAND_OFF: f32 = 6.0;
 /// A corpse within this of where a kill fell is that kill's body.
 const KILL_SPOT: f32 = 6.0;
-/// Appraisal int: a creature's level (ACE `Level`), for the creatures
-/// the table has no level for.
-const CREATURE_LEVEL: u32 = 25;
-
 /// Whether a corpse at `at` lies where one of the character's kills fell.
 fn near_a_kill(at: glam::Vec3, spots: &[(glam::Vec3, Instant)]) -> bool {
     spots
@@ -474,58 +485,6 @@ impl CorpseWalk {
     }
 }
 
-/// The creature a line says was reached and not hurt: "X resists your
-/// spell" (ACE `TryResistSpell`, projectile or not) or "X evades your
-/// attack.". Either way the shot got there.
-fn arrived_unharmed(text: &str) -> Option<&str> {
-    text.strip_suffix(" resists your spell")
-        .or_else(|| text.strip_suffix(" evades your attack."))
-}
-
-/// Who a line says has just cast a spell at this character to hurt it: a
-/// war spell that landed ("Drudge Shaman blasts you for 12 points with
-/// Flame Bolt I."), a drain ("Drudge Shaman casts Harm Other I and drains
-/// 9 points of your health."), a vital taken ("You lose 20 points of mana
-/// due to Drudge Shaman casting Mana to Health Other I on you"), or a
-/// spell resisted ("You resist the spell cast by Drudge Shaman").
-///
-/// ACE tells a character it was hit by a swing with a notification, and
-/// by a spell with nothing but one of these lines (`SpellProjectile`,
-/// `WorldObject_Magic`). A caster working on the character from twenty
-/// metres never closes in to swing, so without these it never counted as
-/// attacking it at all.
-///
-/// "X cast Y on you" is left out on purpose: a fellow's buff reads the
-/// same as a monster's curse, and a buff is not a fight.
-fn spell_attacker(text: &str) -> Option<&str> {
-    if let Some(who) = text.strip_prefix("You resist the spell cast by ") {
-        return Some(who);
-    }
-    if let Some(rest) = text.strip_prefix("You lose ") {
-        let (_, by) = rest.split_once(" due to ")?;
-        let (who, _) = by.strip_suffix(" on you")?.split_once(" casting ")?;
-        return Some(who);
-    }
-    // A bolt that landed can come with any of these in front of it.
-    let mut line = text;
-    while let Some(rest) = ["Critical hit! ", "Overpower! ", "Sneak Attack! "]
-        .into_iter()
-        .find_map(|p| line.strip_prefix(p))
-    {
-        line = rest;
-    }
-    if let Some((before, after)) = line.split_once(" you for ") {
-        // The verb is one word, and says how hard: "blasts", "singes".
-        return after
-            .contains(" points with ")
-            .then(|| before.rsplit_once(' ').map(|(who, _)| who))
-            .flatten()
-            .filter(|who| !who.is_empty());
-    }
-    let (who, rest) = line.split_once(" casts ")?;
-    (rest.contains(" and drains ") && rest.contains(" points of your ")).then_some(who)
-}
-
 /// Whether what has been thrown at a target has had long enough to get
 /// there and has not: the first shot since anything last arrived went
 /// out at `thrown`, more than [`CLOSE_IN_AFTER`] ago. Nothing thrown is
@@ -657,328 +616,6 @@ const SALVAGING: u32 = 40;
 const BUFF_CHECK_EVERY: Duration = Duration::from_millis(1000);
 /// Least time between two attack orders.
 const ATTACK_EVERY: Duration = Duration::from_millis(1200);
-/// How long to wait on a cast the server never answers for. Casting is
-/// paced by its answer, not by a clock; this only stops a character
-/// waiting for ever on one that went astray.
-const CAST_LOST: Duration = Duration::from_secs(6);
-
-/// Staying alive.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct Survive {
-    /// Heal when health falls below this fraction of its maximum.
-    pub heal_below: f32,
-    /// Stop fighting below this fraction (0 to keep fighting).
-    /// Use a carried healing kit.
-    pub use_kits: bool,
-    /// Keep mana up by pouring stamina into it, and stamina up with
-    /// Revitalize, the way a caster does: the transfer gives more mana
-    /// than the Revitalize costs, so the round is a gain.
-    pub manage_mana: bool,
-    /// Pour stamina into mana when mana is under this fraction.
-    pub mana_below: f32,
-    /// Revitalize when stamina is under this fraction.
-    pub stamina_below: f32,
-    /// After a death, go back for the corpse and take the gear off it
-    /// (see `crate::recovery`).
-    pub recover_corpse: bool,
-    /// Give up on the corpse when it has not been reached in this many
-    /// minutes.
-    pub corpse_minutes: f32,
-    /// While the vitae penalty is at least `vitae_above`, leave the
-    /// hard fights and whatever killed us alone.
-    pub vitae_wait: bool,
-    /// The vitae penalty, as a fraction, from which the fights are
-    /// picked with care: 0.25 is five deaths' worth.
-    pub vitae_above: f32,
-    /// Step out of the way of spells flying at us instead of standing
-    /// in them (see `crate::dodge`).
-    pub dodge: bool,
-}
-
-impl Default for Survive {
-    fn default() -> Self {
-        Survive {
-            heal_below: 0.6,
-            use_kits: true,
-            manage_mana: true,
-            mana_below: 0.4,
-            stamina_below: 0.3,
-            recover_corpse: true,
-            corpse_minutes: 10.0,
-            vitae_wait: true,
-            vitae_above: 0.25,
-            dodge: true,
-        }
-    }
-}
-
-/// Buffs to keep up.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct Buffs {
-    /// Work the buffs out from the character itself: every Life and
-    /// Creature self-enchantment it knows for the skills it has trained,
-    /// the Item auras for the way it fights, and the armour spells on
-    /// each piece worn; the highest level of each (see `crate::buffs`).
-    pub auto: bool,
-    /// The lowest chance of a cast landing that is still worth the
-    /// mana: a level that fizzles more often than this is passed over
-    /// for the one below it. Half is the point where the school's skill
-    /// equals the spell's power.
-    pub least_chance: f32,
-    /// Spell names to keep on the character as well, by hand.
-    pub spells: Vec<String>,
-    /// In a quiet moment, put back any buff with this many seconds or
-    /// fewer left. Wide on purpose: refreshing a few at every lull
-    /// spreads the work out, so the set never all runs out at once and
-    /// the character is never stood still for twenty casts in a row.
-    pub top_up_within: f32,
-    /// A buff with this many seconds or fewer left is put back at once,
-    /// fight or no fight, swapping to a wand for it if need be. A buff
-    /// must never be allowed to run out: the protections going down in
-    /// the middle of a fight is how a character dies.
-    pub never_below: f32,
-    /// Only top up out of combat. This is about the weapon: with a wand
-    /// already in hand `never_below` holds mid-fight as it always did,
-    /// and otherwise a buff that has actually run out still goes back
-    /// up while one with time left on it waits for the fight to end
-    /// rather than costing the character its weapon for a tick (see
-    /// `buff_within`).
-    pub out_of_combat_only: bool,
-    /// Keep this fraction of mana back from buffing, for healing and
-    /// fighting. A character that spends its last point on Quickness
-    /// Self cannot heal, and buffs are the one thing that can wait.
-    pub keep_mana: f32,
-}
-
-impl Default for Buffs {
-    fn default() -> Self {
-        Buffs {
-            auto: true,
-            least_chance: 0.5,
-            spells: Vec::new(),
-            top_up_within: 300.0,
-            never_below: 60.0,
-            out_of_combat_only: true,
-            keep_mana: 0.35,
-        }
-    }
-}
-
-/// What to fight.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct Fight {
-    pub enabled: bool,
-    /// How to fight: with a weapon in hand, at range, or with spells.
-    pub style: Style,
-    /// Attack spells to throw, by name. Empty means every attack spell
-    /// in the spellbook: of the ones that can be cast right now, the one
-    /// the target is weakest to is used. Only read when fighting with
-    /// magic.
-    pub spells: Vec<String>,
-    /// Wield the best weapon carried for whatever is being fought: the
-    /// one whose element it takes most damage from, rending and
-    /// criticals counted (see `crate::weapons`).
-    pub pick_weapon: bool,
-    /// Cast a vulnerability for the target's weakest element before
-    /// fighting anything with at least this much health. 0 never does.
-    pub vuln_above_health: u32,
-    /// Only attack creatures whose name contains one of these; empty
-    /// means anything that can be attacked.
-    pub only: Vec<String>,
-    /// Never attack creatures whose name contains one of these.
-    pub avoid: Vec<String>,
-    /// Walk past a creature that has started nothing with anyone when
-    /// a swing or two would end it and the character has outgrown it:
-    /// a Rabbit, a Chicken, a Bunny, a Cow (see [`critter`]). Never a
-    /// reason not to hit back.
-    ///
-    /// Defaulted by name, because serde fills a missing field from its
-    /// type and a settings file written before this existed would
-    /// otherwise turn it off.
-    #[serde(default = "yes")]
-    pub skip_critters: bool,
-    /// Walk past what stands about while the character is on its way
-    /// somewhere it decided to go: out to a hunting ground, back from
-    /// town, round the counters. Getting there is the errand; the
-    /// fighting is what the ground at the far end is for. Never a
-    /// reason not to hit back.
-    ///
-    /// Defaulted by name for the same reason as `skip_critters`.
-    #[serde(default = "yes")]
-    pub walk_past_on_the_way: bool,
-    /// Farthest creature to pick, metres.
-    pub radius: f32,
-    /// Make more ammunition when out, from a bundle of heads and a
-    /// bundle of shafts carried, if Fletching is up to it.
-    pub craft_ammo: bool,
-    /// Summon a creature from an essence carried to fight beside the
-    /// character (see `crate::summoning`).
-    pub summon: bool,
-    /// Hunt only here (see `crate::hunt`): fight what stands inside it,
-    /// let what leaves it go, and come back to it. `None` hunts wherever
-    /// the character is.
-    pub area: Option<crate::hunt::HuntArea>,
-}
-
-impl Default for Fight {
-    fn default() -> Self {
-        Fight {
-            enabled: true,
-            style: Style::Auto,
-            spells: Vec::new(),
-            pick_weapon: true,
-            vuln_above_health: crate::weapons::LONG_FIGHT_HEALTH,
-            craft_ammo: true,
-            summon: true,
-            area: None,
-            only: Vec::new(),
-            avoid: Vec::new(),
-            skip_critters: true,
-            walk_past_on_the_way: true,
-            radius: 25.0,
-        }
-    }
-}
-
-/// What a bool setting defaults to when a settings file leaves it out.
-fn yes() -> bool {
-    true
-}
-
-/// Which weapon the character should be holding.
-///
-/// How a character fights is not a setting: it follows what is in its
-/// hands. A wand, orb or staff casts, a bow or crossbow shoots, a sword
-/// swings. So this does not choose a stance, it chooses a weapon:
-/// [`Style::Auto`] fights with whatever is already held, and the other
-/// three wield a weapon of that kind first, for a character that
-/// carries more than one and should only use the one.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Style {
-    #[default]
-    Auto,
-    Melee,
-    Missile,
-    Magic,
-}
-
-impl Style {
-    pub fn label(self) -> &'static str {
-        match self {
-            Style::Auto => "whatever is held",
-            Style::Melee => "a melee weapon",
-            Style::Missile => "a bow or thrown weapon",
-            Style::Magic => "a wand or staff",
-        }
-    }
-
-    pub const ALL: [Style; 4] = [Style::Auto, Style::Melee, Style::Missile, Style::Magic];
-}
-
-/// Which loot profile this character reads.
-///
-/// Everything about looting -- what to take, what to do with it, when a
-/// body outranks the next fight, whether to salvage -- is the profile's
-/// (`crate::profile::Looting`). A character without one does not loot.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct Loot {
-    /// The profile's name. None, or a name nothing on the shelf answers
-    /// to, means nothing is looted at all.
-    ///
-    /// Defaulted by name rather than by `Default::default`, because a
-    /// settings file that mentions `loot` at all and leaves this out
-    /// would otherwise get an empty string -- serde fills a missing
-    /// field from its type, not from the struct's own default -- and a
-    /// character would quietly stop reading its profile.
-    #[serde(default = "starter")]
-    pub profile: String,
-}
-
-/// The profile the shelf seeds itself with, which is what a character
-/// reads when nobody has said otherwise.
-fn starter() -> String {
-    "Starter".to_string()
-}
-
-impl Default for Loot {
-    fn default() -> Self {
-        Loot { profile: starter() }
-    }
-}
-
-/// What this character does for the others playing alongside it.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Role {
-    /// Attacks the team's target.
-    #[default]
-    Fighter,
-    /// Lands the debuffs on the team's target before the others hit it.
-    Debuffer,
-    /// Heals whoever is worst off, and fights only when everyone is
-    /// healthy.
-    Healer,
-}
-
-impl Role {
-    pub fn label(self) -> &'static str {
-        match self {
-            Role::Fighter => "fighter",
-            Role::Debuffer => "debuffer",
-            Role::Healer => "healer",
-        }
-    }
-}
-
-/// Hunting with the other characters being played.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct Team {
-    pub enabled: bool,
-    pub role: Role,
-    /// Attack whatever the team is attacking rather than picking alone.
-    pub focus_fire: bool,
-    /// Form a fellowship and recruit the others.
-    pub fellowship: bool,
-    /// The fellowship's name.
-    pub fellowship_name: String,
-    /// Spells a debuffer lands on the team's target, in order
-    /// ("Imperil", "Magic Yield Other").
-    pub debuffs: Vec<String>,
-    /// Hand a teammate standing next to us what they are short of.
-    pub share_supplies: bool,
-    /// Ask for more when fewer than this many are carried (by name).
-    pub keep_stocked: Vec<(String, u32)>,
-    /// A creature with at least this much health is a hard fight, and
-    /// hard fights are planned: the teammate with the highest Life
-    /// Magic softens it with a vulnerability and an imperil, and the
-    /// rest hold their fire until it has. 0 plans nothing.
-    pub hard_fight_health: u32,
-    /// Whether the rest wait for the softening before opening fire on
-    /// a hard target. Off by default: the shots and spells spent before
-    /// the vulnerability lands cost next to nothing, and every second
-    /// the target is not being hit is a second it is hitting someone.
-    pub wait_for_debuff: bool,
-    /// This character leads: the others come to it, follow it about and
-    /// fly when it flies. The one played by hand, usually. Without one
-    /// the leader is whoever's name sorts first, and nobody follows.
-    pub lead: bool,
-    /// Follow the leader about (a character that leads never does).
-    pub follow: bool,
-    /// How close to keep to the leader, metres.
-    pub follow_distance: f32,
-    /// A follower fights only what stands within this of its leader,
-    /// metres: further off, a monster would draw it away.
-    pub fight_radius: f32,
-    /// When the party stops hunting to restock, how it makes the trip,
-    /// and what it does about money. How much of each thing to carry
-    /// lives in `growth::Growth`.
-    pub restock: crate::logistics::Restock,
-}
-
 /// A leader further off than twice the following distance (and at least
 /// this) is followed before anything else, a fight included; nearer,
 /// the fight comes first. Following is the follower's job.
@@ -1077,32 +714,6 @@ fn next_invitee(
         })
         .min_by(|a, b| a.1.total_cmp(&b.1))
         .map(|(guid, _)| *guid)
-}
-
-/// The mate the fleet should be following instead of this character,
-/// when this character leads a fellowship it founded and that mate has
-/// one of its own: the second fellowship this character gives up (see
-/// [`Client::autoplay_yield_fellowship`]).
-///
-/// A session learns of another fellowship from two words that have to
-/// agree. The world's own record says who is in *this* fellowship,
-/// first-hand (`members`). The board's row for each mate says whether
-/// it is in *a* fellowship (`Mate::in_fellowship`), up to a round old.
-/// A mate whose row says it is in one and whom the world does not list
-/// is in another. Only the mate the settled roster says leads counts:
-/// the leader of the team is the one to gather it, and a leader that
-/// let itself be recruited into this fellowship instead is a working
-/// party, not a rival. And only one whose session will do the
-/// gathering: one playing on its own, or one that asked to lead. A
-/// person standing in a fellowship of their own with autoplay off
-/// would recruit nobody, and a fleet given up to them would stand
-/// unfellowshipped.
-pub(crate) fn rival_leader<'a>(view: &'a TeamView, members: &[u32]) -> Option<&'a Mate> {
-    if !view.settled || view.leader {
-        return None;
-    }
-    view.leader_mate()
-        .filter(|m| m.in_fellowship && !members.contains(&m.guid) && (m.autoplay || m.leads))
 }
 
 /// How often one character hands something to another. The server
@@ -1246,123 +857,6 @@ pub fn follow_break(keep: f32) -> f32 {
 /// journey is planned.
 const FOLLOW_WALK: f32 = 120.0;
 
-impl Default for Team {
-    fn default() -> Self {
-        Team {
-            enabled: false,
-            role: Role::Fighter,
-            focus_fire: true,
-            fellowship: true,
-            fellowship_name: "acswarm".into(),
-            debuffs: Vec::new(),
-            share_supplies: true,
-            keep_stocked: vec![("Healing Kit".into(), 1)],
-            hard_fight_health: 400,
-            wait_for_debuff: false,
-            lead: false,
-            follow: true,
-            follow_distance: 4.0,
-            fight_radius: 25.0,
-            restock: crate::logistics::Restock::default(),
-        }
-    }
-}
-
-/// What one of the others has told us about itself. The host fills this
-/// in from the bus every frame (see `ac_plugin::team`); the rules here
-/// only read it.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct Mate {
-    pub name: String,
-    pub guid: u32,
-    /// Its session index in its own process.
-    pub session: usize,
-    pub world: glam::Vec3,
-    pub health: f32,
-    pub role: Role,
-    pub target: Option<u32>,
-    pub target_name: String,
-    pub in_fellowship: bool,
-    /// Items it is short of, by name.
-    pub wants: Vec<String>,
-    /// Targets it has already debuffed.
-    pub debuffed: Vec<u32>,
-    /// The body it has open or is walking to, and how long it has been
-    /// at that one: its claim on it. The others leave a claimed body
-    /// alone (see [`TeamView::working`]). The age travels with the
-    /// claim because it is the claimant's own clock that says whether
-    /// the claim is still good, not the clock of whoever reads it.
-    pub looting: Option<u32>,
-    pub looting_for: Duration,
-    /// True for the one that picks the targets.
-    pub leader: bool,
-    /// Its Life Magic as it stands, buffs counted: what decides who
-    /// softens a hard target.
-    pub life_magic: u32,
-    /// It knows a vulnerability or an imperil it can cast right now.
-    pub can_soften: bool,
-    /// It asked to lead (see `Team::lead`).
-    pub leads: bool,
-    /// It is flying (no-clip); followers fly too.
-    pub flying: bool,
-    /// The cell it stands in: indoors (a hub, a dungeon) is somewhere
-    /// a journey cannot be planned to from outside.
-    pub cell: u32,
-    /// Level and experience, total and unspent, as the sheet has them
-    /// (0 before it arrives). The fleet view works XP an hour out of
-    /// the total over time.
-    pub level: i32,
-    pub total_xp: i64,
-    pub available_xp: i64,
-    /// Stamina and mana as fractions of their maximum, like `health`.
-    pub stamina: f32,
-    pub mana: f32,
-    /// Its rules are on: it plays on its own.
-    pub autoplay: bool,
-    /// It follows the leader about (`Team::follow`, and not leading).
-    pub following: bool,
-    /// Its Salvaging as it stands, buffs counted, and whether it carries
-    /// an Ust: what decides who salvages for the team.
-    pub salvaging: u32,
-    pub has_ust: bool,
-    /// How close to empty it is, what it still has to buy and what that
-    /// will cost: what the party decides hunting and restocking from.
-    pub supplies: crate::logistics::Supplies,
-    /// The hunting ground it is on or heading for: landblock, where,
-    /// and what it is called. What the party goes back to together
-    /// after a trip to town.
-    pub ground: Option<(u32, glam::Vec2, String)>,
-    /// It is on its way somewhere, or keeping up with a leader that is
-    /// (see `Client::on_its_way`). A party on the road walks past what its
-    /// leader walks past and stops for what any of it on the road is
-    /// fighting, so it neither scatters to fight nor walks off and leaves
-    /// one of its own behind.
-    pub on_its_way: bool,
-    /// Its skills that its loot rules ask about (see
-    /// `Profile::skills_asked`), as `(id, base, current, advancement)`:
-    /// what another character needs to judge a body on its behalf (see
-    /// [`Mate::wielder`]). Empty when its rules ask about none.
-    pub skills: Vec<(u32, u32, u32, u32)>,
-    /// The bodies it shut lately as emptied, and what each is for the
-    /// others (see [`Shut`], [`Autoplay::shuts_to_say`]).
-    pub shut: Vec<Shut>,
-    /// How many bodies it opened first lately, within `DEAL_WINDOW`:
-    /// its turns at the bodies (see [`TeamView::opens_first`]). Going back
-    /// for what one of the others shut first and left for it is no turn.
-    pub opened_first: u16,
-    /// It opens bodies at all: it has loot rules to go by, and its pack is
-    /// neither down to the slots kept for a counter's money nor past the
-    /// server's wall (see `Client::opens_bodies`). One that does not is
-    /// never dealt a body nor left anything on one: an Ust carrier with no
-    /// loot profile never came, and the salvage left for it rotted.
-    pub opens_bodies: bool,
-    /// The names of what has attacked it lately (see
-    /// `Autoplay::attacked_by`): what the leader's plan reads to give
-    /// it the creature that is on it rather than the party's.
-    pub hit_by: Vec<String>,
-}
-
 /// What a character that shut a body as emptied says about it to the
 /// others, each by player guid (see [`judge_shut`]).
 ///
@@ -1422,45 +916,6 @@ pub fn deal(body: u32, who: u32) -> u64 {
     z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
     z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
     z ^ (z >> 31)
-}
-
-impl Mate {
-    /// The mate as the turns at a newly fallen body read it; `None` for
-    /// one that would not open a body at all: played by hand, dead, not
-    /// in the world yet, or not opening bodies ([`Mate::opens_bodies`]).
-    pub fn turn(&self) -> Option<Turn> {
-        (self.autoplay && self.health > 0.0 && self.guid != 0 && self.opens_bodies).then(|| Turn {
-            guid: self.guid,
-            world: self.world,
-            looting: self.looting.is_some(),
-            fighting: self.target.is_some(),
-            room: !self.supplies.pack_full && !self.supplies.laden,
-            opened: self.opened_first,
-        })
-    }
-
-    /// Whether the mate could come for something left for it on a body at
-    /// `at` (see [`called_to`]): it would open a body at all, it stands
-    /// within reach of this one, and it has room to carry what is left.
-    /// One at another body or fighting still could, once it is done. One
-    /// dead, across the field, with no loot rules or a pack its own looting
-    /// would not take from could not, and nothing is left waiting on it;
-    /// nor on one gone from the board, which is not asked about at all.
-    pub fn could_come_for(&self, at: glam::Vec3) -> bool {
-        self.turn()
-            .is_some_and(|t| t.room && corpse_within_reach(t.world, at))
-    }
-
-    /// The mate as a loot rule sees the character reading it: its level
-    /// and the skills it said its rules ask about. A rule asks nothing
-    /// else of the character but its name (see `ac_loot::profile::Mine`).
-    pub fn wielder(&self) -> crate::weapons::Wielder {
-        crate::weapons::Wielder {
-            level: self.level.max(0) as u32,
-            skills: self.skills.clone(),
-            ..Default::default()
-        }
-    }
 }
 
 /// Health left below which there is no time to be careful: the biggest
@@ -1974,212 +1429,6 @@ fn next_salvage_batch(
     Some((first.1, batch))
 }
 
-/// The team as the host last saw it.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct TeamView {
-    pub mates: Vec<Mate>,
-    /// Whether this character is the one picking targets.
-    pub leader: bool,
-    /// What this character said about itself as the view was made (see
-    /// `ac_plugin::team::describe`): what the others read it by, and so
-    /// what the turns at a newly fallen body read it by too (see
-    /// `Autoplay::ours_to_open`). `None` in a view nobody said anything
-    /// into.
-    pub me: Option<Mate>,
-    /// The roster behind this view has stood unchanged for a full board
-    /// round (see `ac_plugin::team::Settling`). Until it has, `leader`
-    /// is only what this session knows so far: a session that has just
-    /// come onto the team has heard nobody and leads a roster of one.
-    /// The fellowship rules found or give up a fellowship on the leader
-    /// flag only once the view has settled; everything else reads the
-    /// flag as it comes.
-    pub settled: bool,
-}
-
-impl TeamView {
-    /// The one leading, if it is one of the others.
-    pub fn leader_mate(&self) -> Option<&Mate> {
-        self.mates.iter().find(|m| m.leader)
-    }
-
-    /// The target the team is on: the leader's, else the first anyone has.
-    pub fn target(&self) -> Option<(u32, String)> {
-        let leader = self
-            .mates
-            .iter()
-            .find(|m| m.leader)
-            .and_then(|m| m.target.map(|t| (t, m.target_name.clone())));
-        leader.or_else(|| {
-            self.mates
-                .iter()
-                .find_map(|m| m.target.map(|t| (t, m.target_name.clone())))
-        })
-    }
-
-    /// Whether anyone has already landed the debuffs on `target`.
-    pub fn debuffed(&self, target: u32) -> bool {
-        self.mates.iter().any(|m| m.debuffed.contains(&target))
-    }
-
-    /// Whether one of the others has the body `guid` open or is on its
-    /// way to it.
-    ///
-    /// The server hands a container to one viewer and refuses everyone
-    /// else outright (ACE `Container.CheckUseRequirements`), so a body
-    /// two characters want is a body one of them empties and the other
-    /// asks about until it rots. Nine characters standing on one tile
-    /// see the same bodies and rank them by the same rule, so without
-    /// this they all open the same one: a nine-character run opened 41
-    /// bodies 1,386 times, against 2.75 times each for one character
-    /// hunting alone.
-    ///
-    /// A claim goes stale (`CLAIM_STALE`): one that never did would
-    /// let a claimant that stalled lock a body for its whole life. One
-    /// that has died is dropped at once rather than waited out: its
-    /// client keeps saying what it was working, and the same board row
-    /// that says so already says its health is nothing.
-    pub fn working(&self, guid: u32) -> bool {
-        self.mates
-            .iter()
-            .any(|m| m.health > 0.0 && m.looting == Some(guid) && m.looting_for < CLAIM_STALE)
-    }
-
-    /// Whether one of the others has a better claim on `guid` than this
-    /// character's own, which has stood for `ours`; `me` is this
-    /// character's player guid.
-    ///
-    /// Better is older. Two claims made within a board round of each
-    /// other are the same moment -- each session ages its own claim on
-    /// its own clock and hears the others' a board round late, so
-    /// nothing finer than that can be told apart -- and there the lower
-    /// player guid wins, which is an answer both sides reach.
-    ///
-    /// Without this a body two characters chose in the same tick was
-    /// opened by neither: each heard the other's claim half a second
-    /// later, each read it as "someone else has it", and each stood
-    /// off, while the walk both had started went on being published as
-    /// a claim until every claim in it aged out at once.
-    pub fn outranks_our_claim(&self, guid: u32, ours: Duration, me: u32) -> bool {
-        self.mates.iter().any(|m| {
-            m.health > 0.0
-                && m.looting == Some(guid)
-                && m.looting_for < CLAIM_STALE
-                && match m.looting_for.checked_sub(ours) {
-                    Some(older) if older > SAME_MOMENT => true,
-                    _ => ours.saturating_sub(m.looting_for) <= SAME_MOMENT && m.guid < me,
-                }
-        })
-    }
-
-    /// Whose turn it is to open the body `guid`, lying at `at`, `me` being
-    /// this character as the others read it: the player guid of one of
-    /// those standing over it.
-    ///
-    /// This is only for the moment before a claim can have reached the
-    /// board -- the word goes out every half second and a body is
-    /// chosen within a tick of falling -- and in that moment the fleet
-    /// needs an answer every session reaches on its own. All of them work
-    /// this one out of the same roster, so there is nothing to negotiate
-    /// and nothing to vote on, which is how the leader is settled too
-    /// (`ac_plugin::team`).
-    ///
-    /// Turns go round, a body a turn: the one that has opened the fewest
-    /// bodies first lately ([`Mate::opened_first`]), and among those the
-    /// first in the deal for this body ([`deal`]), so bodies falling
-    /// together go to different characters. It used to be the lowest
-    /// guid, which opened every body that fell while it stood over one
-    /// and carried the whole party's loot.
-    ///
-    /// Best effort. Only one free to open it is dealt a turn: playing on
-    /// its own, alive, in the world, standing over it, not at another body,
-    /// not fighting, and with room in its pack. With nobody free in reach
-    /// it is ours to walk to, as it is everyone's, since standing off from
-    /// a body nobody will open leaves it lying. And the turn only holds
-    /// for the first second (`CLAIM_SETTLE`): one dealt a body that does
-    /// not claim it by then loses it to whoever is free first.
-    ///
-    /// That only holds while every session judges the same candidates,
-    /// so this character passes the same tests as the others, reach among
-    /// them. A body is owed to a character out to the fight radius when
-    /// one of its own kills fell there, which is further than
-    /// `LOOT_NEAR`: without the test on ourselves, a caster twenty-two
-    /// metres off called a body its own while every mate's roster had it
-    /// too far away to count, and two of them opened it in the same second.
-    pub fn opens_first(&self, guid: u32, at: glam::Vec3, me: Turn) -> u32 {
-        self.mates
-            .iter()
-            .filter_map(Mate::turn)
-            .chain(std::iter::once(me))
-            .filter(|t| !t.looting && !t.fighting && t.room)
-            .filter(|t| corpse_within_reach(t.world, at))
-            .min_by_key(|t| (t.opened, deal(guid, t.guid)))
-            .map_or(me.guid, |t| t.guid)
-    }
-
-    /// The others a body this character empties is judged for as it is
-    /// shut (see `Client::shut_for`): everyone in the world, or, while
-    /// this character is in a fellowship (`fellows`, its members' player
-    /// guids), its fellows only. One outside it is left to open the body
-    /// or not by its own lights, as before.
-    pub fn judged_at_a_shut<'a>(
-        &'a self,
-        fellows: Option<&'a [u32]>,
-    ) -> impl Iterator<Item = &'a Mate> {
-        self.mates
-            .iter()
-            .filter(move |m| m.guid != 0 && fellows.is_none_or(|f| f.contains(&m.guid)))
-    }
-
-    /// The mate nearest `me` that is short of something we could hand
-    /// over, within `radius` metres.
-    pub fn wanting(&self, me: glam::Vec3, radius: f32) -> Option<&Mate> {
-        self.mates
-            .iter()
-            .filter(|m| !m.wants.is_empty() && m.world.distance(me) <= radius)
-            .min_by(|a, b| a.world.distance(me).total_cmp(&b.world.distance(me)))
-    }
-
-    /// The mate in the worst shape, for a healer.
-    pub fn worst_hurt(&self) -> Option<&Mate> {
-        self.mates
-            .iter()
-            .filter(|m| m.health > 0.0 && m.health < 1.0)
-            .min_by(|a, b| a.health.total_cmp(&b.health))
-    }
-}
-
-/// Everything the character does on its own.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct Config {
-    pub enabled: bool,
-    pub survive: Survive,
-    pub buffs: Buffs,
-    pub fight: Fight,
-    pub loot: Loot,
-    pub team: Team,
-    /// Growing and keeping supplied over the hours (see `crate::growth`).
-    pub growth: crate::growth::Growth,
-    /// Getting a new character through the Training Academy (see
-    /// `crate::academy`).
-    pub academy: crate::academy::Academy,
-}
-
-/// Why a cast is refused, in a few words for a status line.
-pub fn cast_problem(check: &crate::magic::CastCheck) -> String {
-    use crate::magic::CastCheck;
-    match check {
-        CastCheck::Ok => "fine".into(),
-        CastCheck::NotKnown => "not known".into(),
-        CastCheck::NoCaster => "no wand wielded".into(),
-        CastCheck::NoTarget => "the target is gone".into(),
-        CastCheck::MissingComponents(m) => format!("short of {} components", m.len()),
-        CastCheck::NotEnoughMana { need, have } => format!("mana {have}/{need}"),
-        CastCheck::TooHard { power, skill } => format!("power {power} over skill {skill}"),
-    }
-}
-
 /// Whether `name` contains any of `list`, case-insensitively. An empty
 /// list matches nothing.
 pub fn name_matches(name: &str, list: &[String]) -> bool {
@@ -2195,28 +1444,6 @@ pub fn wanted_target(name: &str, f: &Fight) -> bool {
     }
     f.only.iter().all(|w| w.trim().is_empty()) || name_matches(name, &f.only)
 }
-
-/// The most health a creature the table knows can have and still be a
-/// critter. A Black Rabbit has five, a Chicken three, a Bunny three;
-/// the smallest thing in a hunting field that is really a monster -- a
-/// Gnawer Shrethlet -- has eight, a Gnawer Shreth fifteen, a Mite
-/// Snippet twenty, a Drudge Skulker forty-two. One swing ends anything
-/// under this line, and there is nothing in it for a character that
-/// can swing.
-const CRITTER_HEALTH: u32 = 5;
-
-/// The most health a creature the table does not know can have and
-/// still be a critter. The table was read off one server's data and a
-/// live server keeps animals that data never had: a Cow is level 8
-/// with twenty health, docile until attacked, and the table's line of
-/// five would have it killed. Thirty covers a Cow with room for a
-/// server that gave it a little more, and stays under the Drudge
-/// Skulker's forty-two and the Auroch Yearling's sixty-five, the
-/// smallest things worth hunting at the level that outgrows a Cow. A
-/// Mite Snippet has a Cow's twenty, which is why the table's own line
-/// still holds for what the table knows: nothing but the table tells
-/// those two apart.
-const STRANGER_HEALTH: u32 = 30;
 
 /// Whether a fight taken on the road is over because the creature has
 /// dropped out of it: the character is on its way somewhere, the
@@ -2240,169 +1467,6 @@ pub fn road_fight_over(
     away: f32,
 ) -> bool {
     on_the_road && !attacking_us && !coming_at_us && !a_mate_is_on_it && away > ROAD_REACH
-}
-
-/// What a creature in view has been seen doing, which is all a client
-/// can know about its temper. ACE never sends a creature's tolerance
-/// -- it lives in the server's monster awareness and nowhere else --
-/// but every creature shows what it does, and a passive one, by
-/// definition, never starts a fight.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct Seen {
-    /// It has attacked this character lately: a blow landed, a swing
-    /// missed or a spell cast at it (see `Client::hit_lately_by`).
-    pub attacked_us: bool,
-    /// The server has walked it at this character or at one of the
-    /// team (see `WorldObject::walked_at`: the walk is remembered, since
-    /// the live move target shows a chase only for the moment between
-    /// the walk and the next position report).
-    pub targets_us_or_mate: bool,
-    /// It has walked at anyone at all, or something of ours -- a mate,
-    /// a creature this character summoned -- is on it.
-    pub fighting_anyone: bool,
-}
-
-impl Seen {
-    /// Whether it has done nothing to anyone: what passive looks like
-    /// from outside.
-    pub fn quiet(self) -> bool {
-        !(self.attacked_us || self.targets_us_or_mate || self.fighting_anyone)
-    }
-}
-
-/// What the critter rule makes of a creature (see [`critter`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Critter {
-    /// Worth the fight, or in one already.
-    Fight,
-    /// Beneath fighting: walked past.
-    WalkPast,
-    /// Nothing to judge it by yet: ask the server what it is before
-    /// deciding, and leave it alone meanwhile.
-    Appraise,
-}
-
-/// What the table knows about a creature, and how it was found (see
-/// [`critter`]).
-#[derive(Debug, Clone, Copy)]
-pub enum Hint<'a> {
-    /// By weenie: this very kind of creature, whose figures are its own.
-    Weenie(&'a ac_world::elements::Creature),
-    /// By the end of its name: a kind the table has not seen, that may
-    /// be a stronger version of a familiar thing. Its temper is
-    /// believed -- a thing called a Rabbit is not going to start a
-    /// fight -- and its level and health are not: a "Dire Brown Rabbit" at
-    /// level 40 with three hundred health was walked past on the
-    /// Rabbit's four and five.
-    Name(&'a ac_world::elements::Creature),
-}
-
-impl<'a> Hint<'a> {
-    /// The row, however it was found.
-    pub fn row(self) -> &'a ac_world::elements::Creature {
-        match self {
-            Hint::Weenie(k) | Hint::Name(k) => k,
-        }
-    }
-
-    /// The row's level and health, when they are this creature's.
-    fn figures(self) -> Option<&'a ac_world::elements::Creature> {
-        match self {
-            Hint::Weenie(k) => Some(k),
-            Hint::Name(_) => None,
-        }
-    }
-}
-
-/// Whether a creature is beneath fighting: it has started nothing with
-/// anyone, it dies to a swing or two, and the character has long since
-/// outgrown it. A Rabbit, a Chicken, a Bunny, a Cow.
-///
-/// What it has been seen doing comes first, because that is known for
-/// every creature and the table is not. Something that has attacked
-/// the character, or is walking at it or at a mate, or is fighting
-/// anyone, is a fight already, whatever else is known about it. This
-/// used to ask the table first and fight whatever the table did not
-/// know, and the table was read off one server's data: a live
-/// server's Cow was not in it, so it was killed for not being in it.
-///
-/// Passive on its own is not the answer. A Revenant stands there until
-/// it is hit, and so do Cursed Bones and a Silver Tusker: half of what
-/// a hunting ground is for waits to be provoked, and those are worth
-/// sixty levels or more. So the level has to be well below the
-/// character's, twice over.
-///
-/// Nor is passive and far below by level, which is what this asked at
-/// first and what emptied the fields it was meant to tidy. ACE gives
-/// the newbie-field spawns Retaliate so they do not come at a new
-/// player -- generators 2007 and 5150 around Holtburg put out nothing
-/// but Drudge Skulkers, Gnawer Shreths, Mites and Mosswarts, every one
-/// of them passive and level 8 -- so twice the level left a level 16
-/// character with nothing in reach to attack anywhere in Holtburg, and
-/// no reason to walk anywhere either. The level is a poor separator in
-/// any case: a Black Rabbit is level 4 and a Gnawer Shrethlet level 2.
-/// What does separate them is how much they can take, and that is the
-/// figure this leans on for anything that will fight back.
-///
-/// The table, where it knows the creature, is a hint and not a gate.
-/// Its tolerance says outright whether the thing starts fights, which
-/// a creature that has not noticed the character yet does not show,
-/// so that is believed. Its level and health stand in for a creature
-/// found by weenie until an appraisal gives this very creature's,
-/// which beat them. A row found by name is a guess at the kind of
-/// thing it is, and its figures are not this creature's at all (see
-/// [`Hint::Name`]): the appraisal is waited for. A creature the table
-/// knows is held to the table's own line (`CRITTER_HEALTH`) and one
-/// it does not to a wider one (`STRANGER_HEALTH`); not being in the
-/// table is never itself a reason to fight.
-///
-/// The one flag that stands on its own is "never attacks anything":
-/// that is not a creature with a health bar, it is scenery with one --
-/// an Egg, a Totem, a Pillar, a Reinforced Door -- and hitting it is a
-/// chore, not a fight, however much health it has.
-///
-/// With no level to judge by, or no health, the answer is to ask: an
-/// appraisal brings both, and a creature is neither walked past on a
-/// guess nor attacked on one.
-pub fn critter(
-    seen: Seen,
-    level: Option<u32>,
-    health: Option<u32>,
-    hint: Option<Hint<'_>>,
-    mine: i32,
-) -> Critter {
-    use ac_world::elements::tolerance as flag;
-    if !seen.quiet() {
-        return Critter::Fight;
-    }
-    let row = hint.map(Hint::row);
-    // The table knows it starts fights: it will, once it notices.
-    if row.is_some_and(|k| !k.passive()) {
-        return Critter::Fight;
-    }
-    let figures = hint.and_then(Hint::figures);
-    let Some(level) = level.or(figures.and_then(|k| k.level)) else {
-        return Critter::Appraise;
-    };
-    if i64::from(level) * 2 > i64::from(mine) {
-        return Critter::Fight;
-    }
-    if row.is_some_and(|k| k.tolerance & flag::NO_ATTACK != 0) {
-        return Critter::WalkPast;
-    }
-    let Some(health) = health.or(figures.map(|k| k.health).filter(|h| *h > 0)) else {
-        return Critter::Appraise;
-    };
-    let line = if row.is_some() {
-        CRITTER_HEALTH
-    } else {
-        STRANGER_HEALTH
-    };
-    if health <= line {
-        Critter::WalkPast
-    } else {
-        Critter::Fight
-    }
 }
 
 /// Whether an item is worth taking.
@@ -3729,25 +2793,6 @@ impl Autoplay {
         self.closing.filter(|(g, _)| *g == guid).map(|(_, cap)| cap)
     }
 
-    /// A spell of any kind went out less than a cast ago, so another
-    /// sent now would queue behind it or be dropped.
-    pub(crate) fn cast_in_flight(&self, now: Instant) -> bool {
-        // The server says when a cast is finished, so that is what is
-        // waited on -- not a guess at how long spells take. A heal sent
-        // the moment the last one lands is the difference between
-        // living and dying, and no fixed interval can be both quick
-        // enough for that and slow enough never to have the next spell
-        // dropped for arriving early.
-        //
-        // The clock that remains is a backstop, not the pacing: if the
-        // server never answers at all, the character must not wait for
-        // ever.
-        match self.cast_sent {
-            Some(t) => now.duration_since(t) < CAST_LOST,
-            None => false,
-        }
-    }
-
     /// Whether this item was asked for a moment ago and the server's
     /// word could still be on its way (see [`WIELD_ANSWERS_IN`]).
     ///
@@ -3920,46 +2965,6 @@ impl Client {
         stats.vitals[0].current as f32 / max as f32
     }
 
-    /// The id of a known spell whose name starts with `name`, preferring
-    /// the highest level learnt (the last in the spellbook order).
-    pub fn spell_by_name(&self, name: &str) -> Option<u32> {
-        let want = name.trim().to_lowercase();
-        if want.is_empty() {
-            return None;
-        }
-        let table = self.assets.spell_table().ok();
-        // Of the family, the strongest that can be cast right now: a
-        // name like "Heal Self" means the best Heal Self we can manage,
-        // not the best in the book. Failing any castable, the strongest
-        // known, so the reason it cannot be cast can be reported.
-        let mut best_castable: Option<(u32, u32)> = None;
-        let mut best_known: Option<(u32, u32)> = None;
-        for id in &self.world.stats.spells {
-            let sp = table.as_ref().and_then(|t| t.get(*id));
-            let full = sp
-                .map(|s| s.name.clone())
-                .or_else(|| self.known_spells.get(id).cloned())
-                .unwrap_or_default()
-                .to_lowercase();
-            if !full.starts_with(&want) && !full.contains(&want) {
-                continue;
-            }
-            // Power orders a family; a spell the table lacks ranks by id.
-            let power = sp.map(|s| s.power).unwrap_or(*id);
-            let castable = matches!(
-                self.can_cast(*id),
-                crate::magic::CastCheck::Ok | crate::magic::CastCheck::NoCaster
-            );
-            if castable && best_castable.is_none_or(|(_, p)| power > p) {
-                best_castable = Some((*id, power));
-            }
-            if best_known.is_none_or(|(_, p)| power > p) {
-                best_known = Some((*id, power));
-            }
-        }
-        best_castable.or(best_known).map(|(id, _)| id)
-    }
-
     /// The strongest known boost of a vital that can be cast right now,
     /// whatever it is called: Heal Self VI and Adja's Intervention are
     /// both health boosts, and the table says so where a name would not.
@@ -4078,23 +3083,6 @@ impl Client {
             .min_by_key(|(_, s)| s.power)
             .map(|(id, s)| (id, s.name.clone()))?;
         Some(format!("{name} {}", cast_problem(&self.can_cast(spell))))
-    }
-
-    /// Cast `spell` and hold the next cast until the server answers for
-    /// this one (see [`Autoplay::cast_in_flight`]). Every cast autoplay
-    /// sends goes through here or sets the same clock itself: the heal
-    /// once did neither, and a character at 16% health sent Heal Self
-    /// every frame, forty times in under two seconds, until the first
-    /// one went up.
-    ///
-    /// A cast the client declines to send earns no wait. Nothing is
-    /// coming back to end one, so the whole six-second backstop would be
-    /// spent standing still -- and now that the takes and the wields
-    /// wait on this clock too, standing still over a corpse.
-    pub(crate) fn cast_paced(&mut self, spell: u32, now: Instant) {
-        if matches!(self.try_cast(spell), crate::magic::CastCheck::Ok) {
-            self.autoplay.cast_sent = Some(now);
-        }
     }
 
     /// Keep mana and stamina up the way a caster does: stamina poured
@@ -5910,19 +4898,6 @@ impl Client {
         best_salvager(std::iter::once(&me).chain(self.autoplay.team.mates.iter()))
     }
 
-    /// This character's skills that its loot rules ask about, for the
-    /// others to judge a body on its behalf (see [`Mate::skills`]).
-    pub fn skills_its_rules_ask_about(&self) -> Vec<(u32, u32, u32, u32)> {
-        let asked = self
-            .loot_profile()
-            .map(|p| p.skills_asked())
-            .unwrap_or_default();
-        if asked.is_empty() {
-            return Vec::new();
-        }
-        skills_asked_of(&self.wielder(), &asked)
-    }
-
     /// The fellowship's members by player guid, while this character is
     /// one of them.
     fn fellows(&self) -> Option<Vec<u32>> {
@@ -5932,15 +4907,6 @@ impl Client {
             .as_ref()
             .map(|f| f.members.iter().map(|m| m.guid).collect::<Vec<u32>>())
             .filter(|f| f.contains(&me))
-    }
-
-    /// Whether this character opens bodies at all: it has loot rules to go
-    /// by, and a pack its looting takes from (see
-    /// `Autoplay::corpse_waiting`). What it says about itself as
-    /// [`Mate::opens_bodies`].
-    pub fn opens_bodies(&self) -> bool {
-        let room = self.room_for_loot();
-        self.loot_profile().is_some() && !room.pack_low && !room.past_the_wall
     }
 
     /// The names of what has attacked this character lately (see
@@ -7342,133 +6308,6 @@ impl Client {
         self.packs().for_a_take() == 0
     }
 
-    /// What is known about the kind of creature `guid` is.
-    fn creature_known(&self, guid: u32) -> Option<&'static ac_world::elements::Creature> {
-        let o = self.world.objects.get(&guid)?;
-        ac_world::elements::known(o.weenie_class_id, &o.name)
-    }
-
-    /// Whether `o` is a critter to walk past rather than fight (see
-    /// [`critter`]), or one left alone until the server has said what
-    /// it is.
-    ///
-    /// A name in "only these" outranks the rule: that is a player
-    /// saying outright what to hunt. The rest of what outranks it --
-    /// the creature is attacking the character, walking at it or at a
-    /// mate, or fighting anyone, a creature this one summoned included
-    /// -- is the behaviour the rule itself reads first.
-    pub(crate) fn a_critter(&self, o: &ac_world::WorldObject, cfg: &Fight) -> bool {
-        match self.critter_verdict(o, cfg) {
-            Critter::Fight => false,
-            Critter::WalkPast => true,
-            // Left alone while the question is out. ACE answers about a
-            // creature it has with its profile every time, assessed or
-            // not, and about one it has not got with nothing at all: an
-            // answer with no profile says the thing is not there to
-            // fight, and it is left alone. Answered with a profile and
-            // still nothing to judge by -- not something ACE does, whose
-            // every profile comes with a level -- it is fought: it can
-            // be attacked, and nothing waits for ever on a second
-            // answer.
-            Critter::Appraise => self
-                .appraisals
-                .get(&o.guid)
-                .is_none_or(|a| a.creature.is_none()),
-        }
-    }
-
-    /// What the critter rule makes of `o`: what it has been seen doing,
-    /// what an appraisal has said about it, and what the table knows
-    /// (see [`critter`]).
-    ///
-    /// This runs for every creature in view every tick -- `would_fight`
-    /// asks it -- so the one question that walks the whole object map,
-    /// whether a creature this character summoned is on it, is asked
-    /// last and only of something the rest would have walked past or
-    /// asked about.
-    fn critter_verdict(&self, o: &ac_world::WorldObject, cfg: &Fight) -> Critter {
-        if !cfg.skip_critters || name_matches(&o.name, &cfg.only) {
-            return Critter::Fight;
-        }
-        let appraisal = self.appraisals.get(&o.guid);
-        let level = appraisal
-            .and_then(|a| a.int(CREATURE_LEVEL))
-            .and_then(|l| u32::try_from(l).ok());
-        let health = appraisal
-            .and_then(|a| a.creature.as_ref())
-            .map(|c| c.health_max);
-        let mates = &self.autoplay.team.mates;
-        let ours = |g: u32| self.world.player_guid == Some(g) || mates.iter().any(|m| m.guid == g);
-        let seen = Seen {
-            attacked_us: self.hit_lately_by(&o.name),
-            targets_us_or_mate: o.walked_at.is_some_and(ours),
-            fighting_anyone: o.walked_at.is_some()
-                || mates.iter().any(|m| m.target == Some(o.guid)),
-        };
-        let hint = ac_world::elements::creature_by_id(o.weenie_class_id)
-            .map(Hint::Weenie)
-            .or_else(|| ac_world::elements::creature(&o.name).map(Hint::Name));
-        let verdict = critter(seen, level, health, hint, self.world.stats.level);
-        // Its fight, and the character's to finish.
-        if verdict != Critter::Fight && self.a_pet_is_on(o.guid) {
-            return Critter::Fight;
-        }
-        verdict
-    }
-
-    /// Ask the server about the creature in reach the critter rule
-    /// cannot judge yet (see [`Critter::Appraise`]): the answer brings
-    /// the level and the health it judges by, and until it comes the
-    /// creature is left alone rather than attacked. Asked as a target
-    /// is being picked, which is when the answer is wanted, and the
-    /// queue asks about each once.
-    ///
-    /// Asking is not always free. ACE wakes an idle creature whose
-    /// tolerance is "attacks once appraised" onto whoever appraised it
-    /// (`Player.OnAppraisal`): a Wisp, a Scarecrow, but a Virindi
-    /// Observer too, and the table's own such rows all carry a level
-    /// and are never asked. A stranger of that kind is provoked by the
-    /// question, and then fought as anything that attacks is. So the
-    /// nearest is asked about, alone, and nothing is asked while
-    /// something is attacking the character: what the question wakes
-    /// comes one at a time, with the last fight over first.
-    fn ask_about_strangers(&mut self, me: glam::Vec3, cfg: &Fight) {
-        if !cfg.skip_critters || self.under_attack() {
-            return;
-        }
-        let underground = self.underground();
-        let nearest = self
-            .world
-            .objects
-            .values()
-            .filter(|o| {
-                o.item_type & ac_world::item_type::CREATURE != 0
-                    && o.object_desc_flags & ac_world::object_desc_flags::ATTACKABLE != 0
-                    && o.object_desc_flags & ac_world::object_desc_flags::PLAYER == 0
-                    && o.health.unwrap_or(1.0) > 0.0
-                    && !o.is_player
-                    && o.pet_owner == 0
-                    && !self.appraisals.contains_key(&o.guid)
-            })
-            .filter_map(|o| {
-                let away = o.world_pos()?.distance(me);
-                (away <= cfg.radius).then_some((o, away))
-            })
-            .filter(|(o, _)| self.area_allows(o, underground) && wanted_target(&o.name, cfg))
-            .filter(|(o, _)| self.critter_verdict(o, cfg) == Critter::Appraise)
-            .min_by(|(_, a), (_, b)| a.total_cmp(b))
-            .map(|(o, _)| o.guid);
-        // Already asked about and not yet answered: the next waits on
-        // the answer, which is the one at a time.
-        if let Some(guid) = nearest {
-            if self.appraise_many([guid]) > 0 {
-                tracing::debug!(
-                    "autoplay: asking about {guid:#010x}, which the critter rule cannot judge"
-                );
-            }
-        }
-    }
-
     /// Whether `o` is a creature to walk past because the character is
     /// on its way somewhere (see [`Self::on_its_way`]).
     ///
@@ -8259,40 +7098,6 @@ impl Client {
         ids
     }
 
-    /// A swing cancels the journey (the move-to and the trip cannot both
-    /// steer). Note where it was going, so it is taken up again once
-    /// the fight is over.
-    pub(crate) fn remember_journey(&mut self) {
-        if self.traveling() {
-            if let Some(goal) = self.travel_goal_xy() {
-                self.autoplay.resume_trip = Some(goal);
-                self.autoplay.resume_about_the_ground = self.travel_about_the_ground();
-            }
-        }
-    }
-
-    /// Pick the journey up again after a fight, once there is nothing
-    /// else to do.
-    pub(crate) fn autoplay_resume_journey(&mut self) -> bool {
-        let Some(goal) = self.autoplay.resume_trip else {
-            return false;
-        };
-        if self.traveling() || self.attack_target.is_some() || self.autoplay.casting_at.is_some() {
-            return false;
-        }
-        self.autoplay.resume_trip = None;
-        let resumed = if self.autoplay.resume_about_the_ground {
-            self.travel_about(goal)
-        } else {
-            self.travel_to(goal)
-        };
-        if resumed {
-            self.autoplay.say(Doing::Idle, "back on the road");
-            return true;
-        }
-        false
-    }
-
     /// Let the target go and leave it alone for [`GIVE_UP_FOR`], saying
     /// why once.
     fn give_up_target(&mut self, guid: u32, why: &str, now: Instant) {
@@ -8312,28 +7117,6 @@ impl Client {
         self.autoplay.closing = None;
         self.attack_target = None;
         self.autoplay.casting_at = None;
-    }
-
-    /// The server's words on a target it will not let us fight, "You
-    /// cannot attack {name}" (see `refusals::Refusal::Attack`): the
-    /// target in hand, when it is the one named, is given up at once
-    /// rather than when the stall clock runs out. What makes a creature
-    /// unattackable does not change while we stand there swinging.
-    pub(crate) fn hear_attack_refusal(&mut self, name: &str, now: Instant) {
-        let Some(guid) = self
-            .attack_target
-            .or_else(|| self.autoplay.engaged.map(|(g, ..)| g))
-        else {
-            return;
-        };
-        if self
-            .world
-            .objects
-            .get(&guid)
-            .is_some_and(|o| o.name == name)
-        {
-            self.give_up_target(guid, "the server will not let us attack it", now);
-        }
     }
 
     /// Note the target being worked on. True when it has taken no
@@ -8529,107 +7312,6 @@ impl Client {
                 .filter_map(|o| o.world_pos())
                 .min_by(|a, b| a.distance(me).total_cmp(&b.distance(me)))
         })
-    }
-
-    /// The server's words refusing to open the container `named`, while
-    /// a body is waiting to open. One refusing that body is acted on at
-    /// once rather than waited out (see [`Autoplay::corpse_refused`]),
-    /// and the walk to it, if there was one, ends with it.
-    pub(crate) fn hear_corpse_refusal(&mut self, named: &str, why: OpenRefusal, now: Instant) {
-        let Some((guid, ..)) = self.autoplay.corpse else {
-            return;
-        };
-        // What the server calls it. Without the name there is no telling
-        // this body's refusal from another's, so nothing is done.
-        let Some(name) = self.world.objects.get(&guid).map(|o| o.name.clone()) else {
-            return;
-        };
-        if self
-            .autoplay
-            .corpse_refused(named, why, &name, self.told, now)
-        {
-            self.stop_walking_to_loot();
-        }
-    }
-
-    /// A line saying something cast a spell at this character to hurt it
-    /// (see [`spell_attacker`]), kept in the same two fields a swing sets.
-    /// Every "but fight back when it attacks you" carve-out reads those,
-    /// and a caster attacks as surely as a creature that swings.
-    pub(crate) fn hear_spell_attack(&mut self, text: &str, now: Instant) {
-        let Some(who) = spell_attacker(text) else {
-            return;
-        };
-        self.autoplay.attacked_by(who, now);
-    }
-
-    /// A line saying a shot got to something and did not hurt it (see
-    /// [`arrived_unharmed`]): noted against the target it names.
-    pub(crate) fn hear_arrival(&mut self, text: &str) {
-        let Some(name) = arrived_unharmed(text) else {
-            return;
-        };
-        let target = [self.autoplay.casting_at, self.attack_target]
-            .into_iter()
-            .flatten()
-            .find(|g| self.world.objects.get(g).is_some_and(|o| o.name == name));
-        if let Some(g) = target {
-            self.autoplay.thrown = self.autoplay.thrown.filter(|(t, _)| *t != g);
-            // Resisted or evaded, it still got there: the target is in
-            // reach and being worked on, whatever its health says. Counting
-            // only damage gave a creature that resisted a run of spells up
-            // as out of reach.
-            if let Some((engaged, _, health)) = self.autoplay.engaged {
-                if engaged == g {
-                    self.autoplay.engaged = Some((g, Instant::now(), health));
-                }
-            }
-        }
-    }
-
-    /// A shot has gone out at `guid`: the clock on it getting there
-    /// starts now, unless one is already running for that target.
-    fn throw_at(&mut self, guid: u32, now: Instant) {
-        if self.autoplay.thrown.is_none_or(|(g, _)| g != guid) {
-            self.autoplay.thrown = Some((guid, now));
-        }
-    }
-
-    /// Where the creature a kill message names was standing: the one
-    /// being fought when the message names it, else the nearest creature
-    /// it names, the longest name that fits first (a "Mite Scion" is not
-    /// a "Mite").
-    pub(crate) fn killed_in(&self, text: &str) -> Option<glam::Vec3> {
-        let me = self.player.as_ref()?.world_position();
-        let named = |name: &str| !name.is_empty() && text.contains(name);
-        let fought = [self.attack_target, self.autoplay.casting_at]
-            .into_iter()
-            .flatten()
-            .filter_map(|g| self.world.objects.get(&g))
-            .find(|o| named(&o.name))
-            .and_then(|o| o.world_pos());
-        fought.or_else(|| {
-            self.world
-                .objects
-                .values()
-                .filter(|o| o.item_type & ac_world::item_type::CREATURE != 0)
-                .filter(|o| named(&o.name))
-                .filter_map(|o| Some((o.name.len(), o.world_pos()?)))
-                .max_by(|a, b| {
-                    a.0.cmp(&b.0)
-                        .then(b.1.distance(me).total_cmp(&a.1.distance(me)))
-                })
-                .map(|(_, at)| at)
-        })
-    }
-
-    /// A corpse is done with: the kill spot it lay at is too.
-    fn forget_kill_spot(&mut self, corpse: u32) {
-        if let Some(at) = self.world.objects.get(&corpse).and_then(|o| o.world_pos()) {
-            self.autoplay
-                .kill_spots
-                .retain(|(k, _)| k.truncate().distance(at.truncate()) > KILL_SPOT);
-        }
     }
 
     /// Claim the bodies a creature this character summoned killed.
