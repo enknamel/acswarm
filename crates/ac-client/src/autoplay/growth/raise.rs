@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use super::BATCH_FROM;
+use super::xp::BATCH_FROM;
 
 /// One thing experience can be spent on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

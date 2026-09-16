@@ -10,9 +10,10 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use ac_scene::Assets;
-use ac_world::WorldObject;
+use ac_world::{item_type, object_desc_flags, WorldObject};
 use glam::{Quat, Vec3};
 
+use crate::autoplay::growth::{Growth, Salable};
 use crate::autoplay::{LootAction, Mate, TeamView, Turn, CREATURE_LEVEL};
 use crate::items::ItemStats;
 use crate::player::Player;
@@ -298,4 +299,292 @@ pub fn mid_fight(assets: std::rc::Rc<ac_scene::Assets>) -> (Client, u32) {
     c.attack_target = Some(CREATURE);
     c.last_attack = Instant::now() - Duration::from_secs(5);
     (c, WAND)
+}
+
+pub fn salable(guid: u32, item_type: u32, value: u32, stack: u32) -> Salable {
+    Salable {
+        guid,
+        item_type,
+        value,
+        stack,
+    }
+}
+
+/// A Revenant called `name` standing `metres` east of the character:
+/// a real fight at level 20, not a critter walked past for its own
+/// sake.
+pub fn standing_by(c: &mut Client, guid: u32, name: &str, metres: f32) -> ac_world::WorldObject {
+    let pl = c.player.as_ref().unwrap();
+    let (cell, me) = (pl.cell, pl.world_position());
+    let o = ac_world::WorldObject {
+        guid,
+        weenie_class_id: 8592,
+        name: name.into(),
+        item_type: ac_world::item_type::CREATURE,
+        object_desc_flags: ac_world::object_desc_flags::ATTACKABLE,
+        health: Some(1.0),
+        position: Some(ac_world::object::Position::new_flat(
+            cell,
+            me + glam::Vec3::new(metres, 0.0, 0.0) - ac_world::landblock_origin(cell),
+        )),
+        ..Default::default()
+    };
+    c.world.objects.insert(guid, o.clone());
+    o
+}
+
+/// A vendor's window as the server sends it, with nothing on the
+/// shelf.
+pub fn window_of(vendor: u32) -> ac_world::object::ApproachVendor {
+    ac_world::object::ApproachVendor {
+        vendor,
+        item_types: 0,
+        min_value: 0,
+        max_value: 0,
+        magical: false,
+        buy_rate: 1.0,
+        sell_rate: 1.0,
+        alt_currency: 0,
+        alt_amount: 0,
+        alt_name: String::new(),
+        items: Vec::new(),
+    }
+}
+
+/// A vendor standing `off` from the character, in view.
+pub fn vendor_beside(c: &mut Client, guid: u32, name: &str, off: glam::Vec3) {
+    let holtburg = 0xA9B4_0019;
+    let me = c.player.as_ref().unwrap().world_position();
+    c.world.objects.insert(
+        guid,
+        ac_world::WorldObject {
+            guid,
+            name: name.into(),
+            item_type: ac_world::item_type::CREATURE,
+            object_desc_flags: object_desc_flags::VENDOR,
+            position: Some(ac_world::object::Position::new_flat(
+                holtburg,
+                me + off - ac_world::landblock_origin(holtburg),
+            )),
+            ..Default::default()
+        },
+    );
+}
+
+/// The character, with `capacity` slots in its main pack.
+pub fn with_a_pack(c: &mut Client, capacity: u32) {
+    let me = 0x5000_0001;
+    c.world.player_guid = Some(me);
+    c.world.objects.insert(
+        me,
+        ac_world::WorldObject {
+            guid: me,
+            name: "Verity".into(),
+            is_player: true,
+            items_capacity: capacity,
+            ..Default::default()
+        },
+    );
+}
+
+/// A pea in the pack, taken to sell.
+pub fn pea_in_the_pack(c: &mut Client, guid: u32, name: &str, wcid: u32, value: u32) {
+    let me = c.world.player_guid.unwrap();
+    c.world.objects.insert(
+        guid,
+        ac_world::WorldObject {
+            guid,
+            name: name.into(),
+            weenie_class_id: wcid,
+            item_type: item_type::SPELL_COMPONENTS,
+            value,
+            stack_size: 1,
+            max_stack_size: 100,
+            container: Some(me),
+            ..Default::default()
+        },
+    );
+    let stats = c.stats_of(guid).unwrap();
+    c.autoplay.tag(&stats, LootAction::Sell);
+}
+
+/// A wand in hand, a bolt in the book and the Foci of Strife in the
+/// pack: a war mage, whose every cast burns a scarab and a prismatic
+/// taper.
+pub fn as_a_war_mage(c: &mut Client) {
+    const FLAME_BOLT_I: u32 = 27;
+    const FOCI_OF_STRIFE: u32 = 15271;
+    let me = c.world.player_guid.unwrap();
+    c.world.stats.spells = vec![FLAME_BOLT_I];
+    c.world.objects.insert(
+        0x8000_0040,
+        ac_world::WorldObject {
+            guid: 0x8000_0040,
+            name: "Wand".into(),
+            item_type: item_type::CASTER,
+            value: 100,
+            wielder: Some(me),
+            parent: Some(me),
+            ..Default::default()
+        },
+    );
+    c.world.objects.insert(
+        0x8000_0041,
+        ac_world::WorldObject {
+            guid: 0x8000_0041,
+            name: "Foci of Strife".into(),
+            weenie_class_id: FOCI_OF_STRIFE,
+            value: 100,
+            container: Some(me),
+            ..Default::default()
+        },
+    );
+}
+
+/// `stack` prismatic tapers in the pack.
+pub fn tapers_in_the_pack(c: &mut Client, guid: u32, stack: u32) {
+    let me = c.world.player_guid.unwrap();
+    c.world.objects.insert(
+        guid,
+        ac_world::WorldObject {
+            guid,
+            name: "Prismatic Taper".into(),
+            weenie_class_id: 20631,
+            item_type: item_type::SPELL_COMPONENTS,
+            value: stack,
+            stack_size: stack,
+            max_stack_size: 1_000,
+            container: Some(me),
+            ..Default::default()
+        },
+    );
+}
+
+/// A stack of `stack` `name` in the pack, a spell component, with
+/// nothing written down about it.
+pub fn component_in_the_pack(c: &mut Client, guid: u32, name: &str, wcid: u32, stack: u32) {
+    let me = c.world.player_guid.unwrap();
+    c.world.objects.insert(
+        guid,
+        ac_world::WorldObject {
+            guid,
+            name: name.into(),
+            weenie_class_id: wcid,
+            item_type: item_type::SPELL_COMPONENTS,
+            value: 5 * stack,
+            stack_size: stack,
+            max_stack_size: 1_000,
+            container: Some(me),
+            ..Default::default()
+        },
+    );
+}
+
+/// The weenie class the archives give a component of this name.
+pub fn component_named(c: &Client, name: &str) -> u32 {
+    let table = c.assets.spell_components().unwrap();
+    let id = table.find_by_name(name).expect(name);
+    c.assets
+        .spell_component_ids()
+        .unwrap()
+        .component_wcid(id)
+        .expect(name)
+}
+
+/// Write down what the profile makes of this item now, as the
+/// arrival pass does: the item is judged by the rules once, when it
+/// is taken, and the answer travels with it.
+pub fn tagged_by_the_profile(c: &mut Client, guid: u32) -> LootAction {
+    let stats = c.stats_of(guid).unwrap();
+    let action = c.loot_action(&stats).expect("a rule claims it");
+    c.autoplay.tag(&stats, action);
+    action
+}
+
+/// The war mage in front of Cindrue's open window, which buys
+/// components: what she is offered, and what the run does first.
+pub fn at_cindrues_counter(c: &mut Client, cfg: &Growth) -> (Vec<u32>, ac_vendor::Next) {
+    let cindrue = 0x8000_0002;
+    vendor_beside(
+        c,
+        cindrue,
+        "Archmage Cindrue",
+        glam::Vec3::new(1.0, 0.0, 0.0),
+    );
+    let mut window = window_of(cindrue);
+    window.item_types = item_type::SPELL_COMPONENTS;
+    c.world.open_vendor = Some(window);
+    let snap = c.vendor_snapshot(cfg);
+    let mut offered: Vec<u32> = snap
+        .items
+        .iter()
+        .filter(|i| snap.offers(i))
+        .map(|i| i.guid)
+        .collect();
+    offered.sort_unstable();
+    let next = ac_vendor::Run::new().step(&snap, Instant::now());
+    (offered, next)
+}
+
+/// The character's buy list, and nothing else on it: `what`, `keep`
+/// of them, urgent at `restock_at` or fewer. The starter's rules.
+pub fn with_a_buy_list(c: &mut Client, lines: &[(&str, u32, u32)]) {
+    with_a_profile(c, "wants", crate::profile::Profile::starter().rules, lines);
+}
+
+/// A profile of the character's own, `name`, with these `rules` in
+/// this order and this buy list. A shelf of its own, so the one
+/// every session shares is not touched.
+pub fn with_a_profile(
+    c: &mut Client,
+    name: &str,
+    rules: Vec<crate::profile::Rule>,
+    lines: &[(&str, u32, u32)],
+) {
+    let dir = std::env::temp_dir().join("acswarm-test-growth-profiles");
+    std::fs::create_dir_all(&dir).ok();
+    let shelf = std::sync::Arc::new(crate::profile::Library::default());
+    shelf.open(&dir);
+    let mut p = crate::profile::Profile::starter();
+    p.name = name.into();
+    p.rules = rules;
+    p.buy.clear();
+    for (what, keep, restock_at) in lines {
+        p.buy.push(crate::profile::Buy {
+            what: (*what).into(),
+            keep: *keep,
+            restock_at: Some(*restock_at),
+            on: true,
+            ..Default::default()
+        });
+    }
+    shelf.put(p).ok();
+    c.profiles = shelf;
+    c.autoplay.config.loot.profile = name.into();
+}
+
+/// One rule: `action` for anything whose name contains `word`.
+pub fn word_rule(name: &str, word: &str, action: LootAction) -> crate::profile::Rule {
+    crate::profile::Rule {
+        name: name.into(),
+        action,
+        all: vec![crate::profile::Ask::Item(crate::items::Term::Word(
+            word.into(),
+        ))],
+        ..Default::default()
+    }
+}
+
+/// "The rest, to the counter": a rule that claims anything at all.
+pub fn the_rest_to_the_counter() -> crate::profile::Rule {
+    crate::profile::Rule {
+        name: "the rest".into(),
+        action: LootAction::Sell,
+        all: vec![crate::profile::Ask::Item(crate::items::Term::Num(
+            crate::items::NumKey::Value,
+            crate::items::Op::Ge,
+            0.0,
+        ))],
+        ..Default::default()
+    }
 }
