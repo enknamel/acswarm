@@ -423,7 +423,7 @@ impl Plugin for Housing {
         let a = draw(egui, &v, &mut self.guest_name);
         if let (Source::Live, Some(c)) = (&self.source, cx.try_client()) {
             if a.recall {
-                c.slash_command("/house");
+                let _ = c.act(ac_client::action::Action::RecallHouse);
             }
             if a.buy {
                 c.buy_house();

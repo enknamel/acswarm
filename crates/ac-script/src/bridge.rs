@@ -26,29 +26,6 @@ fn opt_guid(g: Option<u32>) -> Dynamic {
     g.map_or(Dynamic::UNIT, int)
 }
 
-/// A spellbook spell by name prefix, or one learnt from a scroll this
-/// session.
-fn spell_by_name(c: &Client, name: &str) -> Option<u32> {
-    let table = c.assets.spell_table().ok();
-    c.world
-        .stats
-        .spells
-        .iter()
-        .copied()
-        .find(|id| {
-            table
-                .as_ref()
-                .and_then(|t| t.get(*id))
-                .is_some_and(|sp| sp.name.starts_with(name))
-        })
-        .or_else(|| {
-            c.known_spells
-                .iter()
-                .find(|(_, n)| n.starts_with(name))
-                .map(|(id, _)| *id)
-        })
-}
-
 fn player_position(c: &Client) -> Option<[f32; 3]> {
     let p = match c.player.as_ref() {
         Some(p) => p.world_position(),
@@ -668,7 +645,7 @@ impl Api for CtxApi<'_, '_> {
 
     fn cast(&mut self, name: &str) -> bool {
         let c = self.client();
-        let id = spell_by_name(c, name);
+        let id = c.spell_by_name(name);
         match id {
             Some(id) => {
                 c.cast(id);
@@ -1406,7 +1383,7 @@ impl Api for CtxApi<'_, '_> {
 
     fn can_cast(&mut self, name: &str) -> String {
         let c = self.client();
-        let Some(id) = spell_by_name(c, name) else {
+        let Some(id) = c.spell_by_name(name) else {
             return "not_known".into();
         };
         use ac_plugin::ac_client::magic::CastCheck;

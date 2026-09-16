@@ -876,16 +876,17 @@ with `--heritage`, `--gender`, `--template`,
 * **Commands**: the server (ACE `GameActionTalk`) treats only Talk lines
   starting with `@` as commands (`@acehelp`, `@myquests`, admin commands;
   unknown ones answer "Unknown command: X"). Retail's `/` commands were
-  the client's own and map to game actions: `/lifestone` (`/ls`)
+  the client's own and map to game actions: `/lifestone` (`/lif`, `/ls`)
   TeleToLifestone 0x0063 (refused with WeenieError 0x055D while
   `RecallsDisabled` is set: from character creation until the Training
-  Academy's exit portal is used), `/die` Suicide 0x0279, `/house` TeleToHouse
-  0x0262, `/mansion` TeleToMansion 0x0278, `/hometown`
-  RecallAllegianceHometown 0x02AB, `/marketplace` 0x028D, `/pklite`
+  Academy's exit portal is used), `/die` Suicide 0x0279, `/house` (`/hou`)
+  TeleToHouse 0x0262, TeleToMansion 0x0278, RecallAllegianceHometown 0x02AB,
+  `/marketplace` (`/mar`, `/mp`) 0x028D, `/pklite` (`/pkl`)
   EnterPkLite 0x028F, `/afk [message]` SetAfkMessage 0x0010 + SetAfkMode
-  0x000F, `/tell Name, text` Tell 0x005D (text, name), `/emote text`
-  Emote 0x01DF. acswarm's chat box tries plugin commands first, then
-  these (`Client::slash_command`), then sends the rest as `@command`.
+  0x000F, `/tell Name, text` (`/t`, `/send`, `/whisper`, `/w`) Tell 0x005D
+  (text, name), `/emote text` (`/e`, `/em`, `/me`) Emote 0x01DF. acswarm
+  answers the ones its table has a row for, offers the rest to the plugins
+  and scripts, then sends them as `@command` (`Client::chat_line`).
 * **Character options**: two bitfields in PlayerDescription
   (CharacterOptions1/2), changed with SetSingleCharacterOption (0x0005:
   option id from ACE `CharacterOption`, value); "ignore fellowship
