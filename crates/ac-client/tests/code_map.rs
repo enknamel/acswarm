@@ -286,41 +286,85 @@ fn the_map_lists_the_steps_in_their_order() {
     );
 }
 
+/// Every module of this crate, as the file holding it under `src/`: the ones `lib.rs` declares,
+/// and the ones it re-exports from another of them to keep an old path alive
+/// (`pub use autoplay::{growth, steps, summoning};`), which are modules of this crate still.
+fn client_modules() -> BTreeSet<String> {
+    let src = client_dir().join("src");
+    // `name` under `dir`: `dir/name.rs`, or the `dir/name/mod.rs` of a directory module.
+    let file_of = |dir: &str, name: &str| {
+        [format!("{name}.rs"), format!("{name}/mod.rs")]
+            .into_iter()
+            .map(|file| {
+                if dir.is_empty() {
+                    file
+                } else {
+                    format!("{dir}/{file}")
+                }
+            })
+            .find(|file| src.join(file).exists())
+    };
+    let lib = fs::read_to_string(src.join("lib.rs")).expect("lib.rs");
+    let mut files = BTreeSet::new();
+    for line in lib.lines() {
+        let line = line.trim();
+        if let Some(name) = line
+            .strip_prefix("pub mod ")
+            .or_else(|| line.strip_prefix("pub(crate) mod "))
+            .or_else(|| line.strip_prefix("mod "))
+            .and_then(|rest| rest.strip_suffix(';'))
+        {
+            files.extend(file_of("", name));
+        } else if let Some(rest) = line
+            .strip_prefix("pub use ")
+            .and_then(|r| r.strip_suffix(';'))
+        {
+            let (path, names) = match rest.split_once("::{") {
+                Some((path, names)) => (path, names.trim_end_matches('}')),
+                None => match rest.rsplit_once("::") {
+                    Some((path, name)) => (path, name),
+                    None => continue,
+                },
+            };
+            // A re-exported name is one of ours only when a file under `src/` holds it, which
+            // leaves the re-exports of other crates (`pub use ac_agent::{did, ..}`) out.
+            let dir = path.replace("::", "/");
+            for name in names.split(',').map(str::trim) {
+                files.extend(file_of(&dir, name));
+            }
+        }
+    }
+    files
+}
+
 #[test]
 fn every_client_module_has_a_row() {
-    let lib = fs::read_to_string(client_dir().join("src").join("lib.rs")).expect("lib.rs");
-    let modules: Vec<&str> = lib
-        .lines()
-        .filter_map(|l| {
-            let l = l.trim();
-            let rest = l
-                .strip_prefix("pub mod ")
-                .or_else(|| l.strip_prefix("pub(crate) mod "))
-                .or_else(|| l.strip_prefix("mod "))?;
-            rest.strip_suffix(';')
-        })
-        .collect();
-    assert!(modules.contains(&"autoplay"), "no modules read from lib.rs");
+    let modules = client_modules();
+    assert!(
+        modules.contains("autoplay/mod.rs"),
+        "no modules read from lib.rs"
+    );
+    assert!(
+        modules
+            .iter()
+            .any(|f| f.starts_with("autoplay/") && f != "autoplay/mod.rs"),
+        "lib.rs re-exports autoplay's modules; none was read, so they are no longer checked"
+    );
     let map = client_map();
     let named: BTreeSet<String> = spans(&prose(&map.text))
         .iter()
         .filter_map(|s| as_path(s).map(|(path, _)| path.to_string()))
         .collect();
-    let missing: Vec<&str> = modules
+    let missing: Vec<String> = modules
         .into_iter()
-        .filter(|m| {
-            // A module is either `name.rs` or the `name/mod.rs` of a directory.
-            [format!("{m}.rs"), format!("{m}/mod.rs")]
-                .iter()
-                .all(|file| {
-                    ![
-                        file.clone(),
-                        format!("src/{file}"),
-                        format!("crates/ac-client/src/{file}"),
-                    ]
-                    .iter()
-                    .any(|f| named.contains(f))
-                })
+        .filter(|file| {
+            ![
+                file.clone(),
+                format!("src/{file}"),
+                format!("crates/ac-client/src/{file}"),
+            ]
+            .iter()
+            .any(|f| named.contains(f))
         })
         .collect();
     assert!(
