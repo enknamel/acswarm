@@ -37,7 +37,7 @@
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
-use ac_client::autoplay::{Mate, TeamView};
+use ac_client::autoplay::{Mate, Release, TeamView};
 use ac_client::plan::Plan;
 use serde_json::Value;
 
@@ -245,13 +245,11 @@ impl Request {
                 cfg.enabled = true;
                 cfg.team.enabled = true;
                 cfg.team.follow = true;
-                client.autoplay.drop_target();
-                client.attack_target = None;
+                client.let_go(Release::Fight);
             }
             Request::Stop => {
                 cfg.enabled = false;
-                client.autoplay.drop_target();
-                client.attack_target = None;
+                client.let_go(Release::Fight);
                 client.follow = None;
                 if client.traveling() || client.visiting().is_some() {
                     client.cancel_travel();

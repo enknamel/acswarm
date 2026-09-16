@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use super::road_fight_over;
 #[cfg(doc)]
 use crate::autoplay::hear::arrived_unharmed;
-use crate::autoplay::{Autoplay, Doing, Fight};
+use crate::autoplay::{Autoplay, Doing, Fight, Release};
 use crate::refusals;
 use crate::{Client, Stance};
 
@@ -81,8 +81,7 @@ impl Client {
         // (see `Client::ordered_elsewhere`).
         if let Some(t) = self.attack_target {
             if self.ordered_elsewhere(t, &cfg, now) {
-                self.attack_target = None;
-                self.autoplay.drop_target();
+                self.let_go(Release::Fight);
             }
         }
         if let Some(t) = self.attack_target {
@@ -94,8 +93,7 @@ impl Client {
             let gone =
                 self.fight_target_gone(t, underground) || self.left_behind_on_the_road(t, now);
             if gone {
-                self.attack_target = None;
-                self.autoplay.casting_at = None;
+                self.let_go(Release::Targets);
             }
             if let Some(o) = self.world.objects.get(&t).filter(|_| !gone) {
                 if o.health.unwrap_or(1.0) > 0.0 {

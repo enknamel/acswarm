@@ -5,7 +5,7 @@ use super::take::only_so_often;
 #[cfg(doc)]
 use super::take::refused_item;
 use super::walk::{loot_wait, still_holding_at};
-use crate::autoplay::{shut_line, Autoplay, Doing, ShutFor};
+use crate::autoplay::{shut_line, Autoplay, Doing, Release, ShutFor};
 #[cfg(test)]
 use crate::refusals::refused;
 use crate::refusals::{self, Answer, OpenRefusal, Refusal};
@@ -771,8 +771,7 @@ impl Client {
         // anything for it, so letting the attack run while walking to a
         // corpse buys "You're too busy" and nothing else -- the target
         // goes first, then the combat stance.
-        self.attack_target = None;
-        self.autoplay.casting_at = None;
+        self.let_go(Release::Targets);
         self.autoplay.armed_for = None;
         if self.combat {
             self.toggle_combat();

@@ -30,7 +30,7 @@ use serde::{Deserialize, Serialize};
 
 pub use ac_world::academy::{skip_steps, steps, Kind, Step, LANDBLOCK};
 
-use crate::autoplay::Doing;
+use crate::autoplay::{Doing, Release};
 use crate::Client;
 
 /// The settings.
@@ -882,8 +882,7 @@ impl Client {
         match action {
             Action::Nothing => false,
             Action::Left => {
-                self.attack_target = None;
-                self.autoplay.drop_target();
+                self.let_go(Release::Fight);
                 self.autoplay
                     .say(Doing::Training, "out of the Training Academy");
                 false
@@ -1053,10 +1052,10 @@ impl Client {
 
     /// Let go of whatever the fight rule was on.
     fn academy_leave_fight(&mut self) {
-        if self.attack_target.take().is_some() {
+        if self.attack_target.is_some() {
             tracing::info!("academy: leaving the fight");
         }
-        self.autoplay.drop_target();
+        self.let_go(Release::Fight);
     }
 
     /// Out of combat mode, to use, give and pick up.
@@ -1165,7 +1164,7 @@ impl Client {
             if let Some(c) = corpse {
                 let (guid, cname) = (c.guid, c.name.clone());
                 self.academy_peace();
-                self.autoplay.drop_target();
+                self.let_go(Release::Engagement);
                 if self.follow.take().is_some() {
                     self.steering.reset();
                 }

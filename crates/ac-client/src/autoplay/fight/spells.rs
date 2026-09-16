@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use crate::autoplay::{cast_problem, Autoplay, Doing, Fight};
+use crate::autoplay::{cast_problem, Autoplay, Doing, Fight, Release};
 use crate::{Client, Stance};
 
 impl Autoplay {
@@ -38,7 +38,7 @@ impl Client {
         // being cast at is not hitting us: let it go for the other.
         if let Some(g) = self.autoplay.casting_at {
             if self.ordered_elsewhere(g, cfg, now) {
-                self.autoplay.casting_at = None;
+                self.let_go(Release::Cast);
             }
         }
         // Stay on the one already being fought while it lives, and is
@@ -60,7 +60,7 @@ impl Client {
         let target = match kept {
             Some(g) => Some(g),
             None => {
-                self.autoplay.casting_at = None;
+                self.let_go(Release::Cast);
                 if self.waits_for_a_corpse() {
                     None
                 } else {

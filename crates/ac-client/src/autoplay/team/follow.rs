@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
 use super::view::Mate;
-use crate::autoplay::Doing;
+use crate::autoplay::{Doing, Release};
 use crate::Client;
 
 /// A leader further off than twice the following distance (and at least
@@ -83,8 +83,7 @@ impl Client {
         }
         if far {
             // Whatever we were fighting is not worth losing the leader.
-            self.autoplay.casting_at = None;
-            self.attack_target = None;
+            self.let_go(Release::Targets);
         }
         if leader.flying || flat < FOLLOW_WALK {
             // Straight after it: the steering finds the way round

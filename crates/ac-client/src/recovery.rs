@@ -25,7 +25,7 @@ use std::time::{Duration, Instant};
 
 use glam::Vec2;
 
-use crate::autoplay::Doing;
+use crate::autoplay::{Doing, Release};
 use crate::Client;
 
 /// A lifestone further than this from the death spot means the
@@ -609,8 +609,7 @@ impl Client {
             // still fighting: the buffs were never put back (the buff rule
             // waits out a fight) and the walk back waited out the cap, and
             // two minutes later a creature a dungeon away was given up on.
-            self.attack_target = None;
-            self.autoplay.drop_target();
+            self.let_go(Release::Fight);
             self.autoplay.resume_trip = None;
             // And so is a visit to a counter: the run past its walk is
             // stopped and the window closed, or the buffs that go back

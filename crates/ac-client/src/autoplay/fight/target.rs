@@ -1,7 +1,7 @@
 use std::time::Instant;
 
 use super::melee::GIVE_UP_FOR;
-use crate::autoplay::{Autoplay, Fight, Style};
+use crate::autoplay::{Fight, Style};
 use crate::{Client, Stance};
 
 /// Whether `name` contains any of `list`, case-insensitively. An empty
@@ -20,15 +20,19 @@ pub fn wanted_target(name: &str, f: &Fight) -> bool {
     f.only.iter().all(|w| w.trim().is_empty()) || name_matches(name, &f.only)
 }
 
-impl Autoplay {
-    /// Let go of whatever is being fought: the spells' target and the
-    /// engagement (the fleet view's "regroup" and "stop"; the caller
-    /// clears `Client::attack_target` itself).
-    pub fn drop_target(&mut self) {
-        self.casting_at = None;
-        self.engaged = None;
-        self.closing = None;
-    }
+/// How much of a fight to let go of.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Release {
+    /// The spell's target only. A swing keeps `Client::attack_target`,
+    /// which the server goes on driving until it is told otherwise.
+    Cast,
+    /// Both targets, while the engagement stands: another rule has this tick.
+    Targets,
+    /// Both targets and the engagement: this fight is over.
+    Fight,
+    /// The engagement and the spell's target, keeping the swing's. Only
+    /// the Academy's turn towards a corpse lets go this far.
+    Engagement,
 }
 
 impl Client {
@@ -92,6 +96,19 @@ impl Client {
         }
     }
 
+    /// Let the fight go, as far as `how` says. Giving up on the creature
+    /// for a while is `give_up_target`, which is this plus the list.
+    pub fn let_go(&mut self, how: Release) {
+        if !matches!(how, Release::Cast | Release::Engagement) {
+            self.attack_target = None;
+        }
+        self.autoplay.casting_at = None;
+        if matches!(how, Release::Fight | Release::Engagement) {
+            self.autoplay.engaged = None;
+            self.autoplay.closing = None;
+        }
+    }
+
     /// Let the target go and leave it alone for [`GIVE_UP_FOR`], saying
     /// why once.
     pub(crate) fn give_up_target(&mut self, guid: u32, why: &str, now: Instant) {
@@ -107,10 +124,7 @@ impl Client {
             .given_up
             .retain(|(_, t)| now.duration_since(*t) < GIVE_UP_FOR);
         self.autoplay.given_up.push((guid, now));
-        self.autoplay.engaged = None;
-        self.autoplay.closing = None;
-        self.attack_target = None;
-        self.autoplay.casting_at = None;
+        self.let_go(Release::Fight);
     }
 
     /// The nearest creature the name rules allow, within the radius.
