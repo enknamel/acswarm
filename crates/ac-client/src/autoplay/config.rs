@@ -9,7 +9,6 @@ use super::critter;
 pub struct Survive {
     /// Heal when health falls below this fraction of its maximum.
     pub heal_below: f32,
-    /// Stop fighting below this fraction (0 to keep fighting).
     /// Use a carried healing kit.
     pub use_kits: bool,
     /// Keep mana up by pouring stamina into it, and stamina up with
