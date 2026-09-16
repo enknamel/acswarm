@@ -11,7 +11,8 @@ and autoplay. File names are under `src/`; grep an entry fn for where its system
    (`session/chat.rs`), which hands refusals in words to `hear_refusal()` (`refused.rs`)
 2. manual-play timers: `tick_combat()`, `tick_loot()`, `tick_store()`, `tick_appraise()`
 3. `tick_autoplay()` (`autoplay/mod.rs`), then `tick_retag()` and `save_ledger()`
-4. `tick_player()` moves the body (`player.rs`) and runs `tick_visit()` (`visit.rs`)
+4. `tick_player()` (`body/player_tick.rs`) moves the body (`player.rs`) and runs `tick_visit()`
+   (`visit.rs`)
 
 `tick_autoplay()`, in order:
 - with the team on, even with autoplay off: `autoplay_accept_invites()`, and `autoplay_fellowship()`
@@ -144,8 +145,9 @@ the column (the module path; see the root map for `RUST_LOG`).
 
 | module | what |
 |---|---|
-| `lib.rs` | `Client`, `Event`, `Config`; the body and the manual actions (combat, items, trade, fellowship, housing, allegiance, chat). Re-exports `ac_agent::{did, pack, refusals, room, weenie_errors}`, `route` (`ac_nav::steering`), `errand` (`ac_vendor::errand`) |
+| `lib.rs` | `Client`, `Event`, `Config`; the manual actions (combat, items, trade, fellowship, housing, allegiance, chat). Re-exports `ac_agent::{did, pack, refusals, room, weenie_errors}`, `route` (`ac_nav::steering`), `errand` (`ac_vendor::errand`) |
 | `session/mod.rs` | the connection and what arrives on it: `session/connect.rs` (connect, offline, disconnect, log off), `session/net.rs` (sending), `session/apply.rs` (`Client::tick` and the message match), `session/lobby.rs` (the character list), `session/chat.rs` (server chat and sounds) |
+| `body/mod.rs` | where the character is and how it gets there: `body/player_tick.rs` (`tick_player`, `PlayerFrame`), `body/movement.rs` (`Follow`, speed, jumps, noclip), `body/server_walk.rs` (walks the server makes for us), `body/standing.rs` (`Standing`, the client's answers to `ac_nav::Ground`) |
 | `player.rs` | body physics: walking, floors, ledges, falls, jumps, cell tracking |
 | `creation.rs` | character creation rules and create-if-missing |
 | `magic.rs` | spellbook, spell bars, enchantments, components, cast checks |
