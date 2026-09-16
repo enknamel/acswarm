@@ -1,5 +1,7 @@
 use std::time::{Duration, Instant};
 
+use ac_agent::recent::Recent;
+
 use super::view::rival_leader;
 use crate::autoplay::{Autoplay, Doing};
 #[cfg(test)]
@@ -82,7 +84,7 @@ pub(crate) const FELLOWSHIP_FULL: u32 = 0x041e;
 /// last sent an invitation.
 fn next_invitee(
     waiting: &[(u32, f32)],
-    asked: &[(u32, Instant)],
+    asked: &Recent<u32>,
     held_off: &crate::did::Patience<u32>,
     last_sent: Option<Instant>,
     now: Instant,
@@ -92,12 +94,7 @@ fn next_invitee(
     }
     waiting
         .iter()
-        .filter(|(guid, _)| {
-            !held_off.held(guid, now)
-                && !asked
-                    .iter()
-                    .any(|(g, t)| g == guid && now.duration_since(*t) < RECRUIT_AGAIN)
-        })
+        .filter(|(guid, _)| !held_off.held(guid, now) && !asked.within(guid, now, RECRUIT_AGAIN))
         .min_by(|a, b| a.1.total_cmp(&b.1))
         .map(|(guid, _)| *guid)
 }
@@ -141,7 +138,7 @@ impl Autoplay {
         let Some(guid) = self
             .recruited
             .iter()
-            .filter(|(g, _)| self.asked_lately(*g, now))
+            .filter(|(g, _)| self.asked_lately(**g, now))
             .max_by_key(|(_, t)| *t)
             .map(|(g, _)| *g)
         else {
@@ -156,9 +153,7 @@ impl Autoplay {
     /// the age a "+X is busy." ten minutes later -- a patron who could
     /// not take an oath -- held X off the fellowship.
     fn asked_lately(&self, guid: u32, now: Instant) -> bool {
-        self.recruited
-            .iter()
-            .any(|(g, t)| *g == guid && now.duration_since(*t) < RECRUIT_AGAIN)
+        self.recruited.within(&guid, now, RECRUIT_AGAIN)
     }
 
     /// Hold the mate off recruiting after a refusal, as the table
@@ -469,10 +464,8 @@ impl Client {
         };
         self.fellowship_recruit(guid);
         self.autoplay.last_recruit = Some(now);
-        self.autoplay
-            .recruited
-            .retain(|(g, t)| *g != guid && now.duration_since(*t) < RECRUIT_AGAIN);
-        self.autoplay.recruited.push((guid, now));
+        self.autoplay.recruited.expire(now, RECRUIT_AGAIN);
+        self.autoplay.recruited.mark(guid, now);
         let name = self
             .autoplay
             .team

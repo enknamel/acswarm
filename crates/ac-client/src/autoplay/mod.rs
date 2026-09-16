@@ -449,7 +449,7 @@ pub struct Autoplay {
     /// When each mate was last asked into the fellowship, so that one
     /// that has not answered waits its turn while the others are asked
     /// (see [`RECRUIT_AGAIN`]).
-    recruited: Vec<(u32, Instant)>,
+    recruited: Recent<u32>,
     /// When this character asked for the fellowship it leads to be
     /// founded. It asks only once loot sharing has taken, so a
     /// fellowship it founded is the one fellowship it can vouch for:
