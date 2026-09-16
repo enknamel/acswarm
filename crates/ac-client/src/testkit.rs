@@ -588,3 +588,46 @@ pub fn the_rest_to_the_counter() -> crate::profile::Rule {
         ..Default::default()
     }
 }
+
+/// Coin in the pack.
+pub fn coin_in_the_pack(c: &mut Client, guid: u32, amount: u32) {
+    let me = c.world.player_guid.unwrap();
+    c.world.objects.insert(
+        guid,
+        ac_world::WorldObject {
+            guid,
+            name: "Pyreal".into(),
+            item_type: item_type::MONEY,
+            value: 1,
+            stack_size: amount,
+            max_stack_size: 25_000,
+            container: Some(me),
+            ..Default::default()
+        },
+    );
+}
+
+/// The shop of this name.
+pub fn shop_named(name: &str) -> &'static ac_world::shops::Shop {
+    ac_world::shops::all()
+        .iter()
+        .find(|s| s.name == name)
+        .unwrap_or_else(|| panic!("no shop {name}"))
+}
+
+/// A counter in view at `at`.
+pub fn a_counter(c: &mut Client, guid: u32, name: &str, at: glam::Vec3) {
+    let mut o = ac_world::WorldObject {
+        guid,
+        name: name.into(),
+        item_type: item_type::CREATURE,
+        object_desc_flags: object_desc_flags::VENDOR,
+        ..Default::default()
+    };
+    o.position = Some(ac_world::object::Position {
+        cell: 0xA9B4_0019,
+        local: at,
+        rotation: glam::Quat::IDENTITY,
+    });
+    c.world.objects.insert(guid, o);
+}

@@ -1,6 +1,7 @@
 use super::*;
 use crate::autoplay::growth::tests::run_to;
-use crate::autoplay::growth::{Growth, VENDOR_REACH};
+use crate::autoplay::growth::town_run::VENDOR_REACH;
+use crate::autoplay::growth::Growth;
 use crate::testkit::{standing_at, standing_by};
 
 /// Whether a run standing `away` metres from its counter is there.
