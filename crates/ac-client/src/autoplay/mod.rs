@@ -485,7 +485,7 @@ pub struct Autoplay {
     /// The corpse the academy rule is emptying, and since when.
     pub(crate) academy_corpse: Option<(u32, Instant)>,
     /// Doors the academy rule opened lately, and when.
-    pub(crate) academy_doors: Vec<(u32, Instant)>,
+    pub(crate) academy_doors: Recent<u32>,
     /// When the academy rule last asked for a weapon to be wielded.
     pub(crate) academy_armed: Option<Instant>,
 }

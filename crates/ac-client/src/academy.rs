@@ -1073,16 +1073,9 @@ impl Client {
             .map(|o| o.guid)
             .collect();
         for guid in doors {
-            let recently = self
-                .autoplay
-                .academy_doors
-                .iter()
-                .any(|(g, t)| *g == guid && now.duration_since(*t) < DOOR_EVERY);
-            if !recently {
-                self.autoplay
-                    .academy_doors
-                    .retain(|(_, t)| now.duration_since(*t) < DOOR_EVERY);
-                self.autoplay.academy_doors.push((guid, now));
+            if !self.autoplay.academy_doors.within(&guid, now, DOOR_EVERY) {
+                self.autoplay.academy_doors.expire(now, DOOR_EVERY);
+                self.autoplay.academy_doors.mark(guid, now);
                 self.use_object(guid);
             }
         }
