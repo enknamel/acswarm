@@ -7,7 +7,7 @@ use super::{caption, title_bar, window, Source};
 use crate::{egui, Client, Ctx, Plugin, Settings};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct MemberRow {
+pub(crate) struct MemberRow {
     pub guid: u32,
     pub name: String,
     pub level: u32,
@@ -18,7 +18,7 @@ pub struct MemberRow {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FellowshipView {
+pub(crate) struct FellowshipView {
     /// None when not in a fellowship.
     pub name: Option<String>,
     pub share_xp: bool,
@@ -29,7 +29,7 @@ pub struct FellowshipView {
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
-pub struct Actions {
+pub(crate) struct Actions {
     pub create: Option<(String, bool)>,
     pub recruit: Option<u32>,
     pub quit: bool,
@@ -37,7 +37,7 @@ pub struct Actions {
     pub dismiss: Vec<u32>,
 }
 
-pub fn view(c: &Client) -> FellowshipView {
+pub(crate) fn view(c: &Client) -> FellowshipView {
     let me = c.world.player_guid;
     let selected = c
         .selected
@@ -77,11 +77,11 @@ pub fn view(c: &Client) -> FellowshipView {
 }
 
 /// `12/40` style vital text.
-pub fn vital_text((cur, max): (u32, u32)) -> String {
+pub(crate) fn vital_text((cur, max): (u32, u32)) -> String {
     format!("{cur}/{max}")
 }
 
-pub fn draw(
+pub(crate) fn draw(
     egui: &egui::Context,
     v: &FellowshipView,
     new_name: &mut String,
@@ -188,7 +188,7 @@ pub fn draw(
     actions
 }
 
-pub struct Fellowship {
+pub(crate) struct Fellowship {
     source: Source<FellowshipView>,
     pub show: bool,
     new_name: String,
@@ -207,7 +207,7 @@ impl Default for Fellowship {
 }
 
 impl Fellowship {
-    pub fn demo() -> Self {
+    pub(crate) fn demo() -> Self {
         let m = |guid, name: &str, level, h, s, mn, leader| MemberRow {
             guid,
             name: name.into(),

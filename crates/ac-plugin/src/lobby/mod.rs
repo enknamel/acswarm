@@ -1,6 +1,6 @@
 //! The lobby: what the client shows between login and the world when it
-//! is not auto-entering. [`select`] lists the account's characters
-//! (Enter, Delete, Restore, New); [`create`] builds a new one from the
+//! is not auto-entering. `select` lists the account's characters
+//! (Enter, Delete, Restore, New); `create` builds a new one from the
 //! CharGen rules. [`Lobby`] holds both, turns their clicks into `Client`
 //! calls, and follows the client's events (`Characters`, `Placed`,
 //! `CharacterCreated`, `CharacterCreateFailed`). The host draws the 3D
@@ -10,9 +10,9 @@
 //! state) and have a demo mode with no session: `acswarm --demo-select`
 //! and `--demo-create`.
 
-pub mod connect;
-pub mod create;
-pub mod select;
+mod connect;
+mod create;
+mod select;
 pub mod store;
 
 use std::rc::Rc;
@@ -28,7 +28,7 @@ use select::{SelectAction, SelectState, SelectView};
 
 /// Which screen is up.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Screen {
+pub(crate) enum Screen {
     /// Pick a server, account and password.
     Connect,
     Select,
@@ -39,7 +39,7 @@ pub enum Screen {
 /// is folded into the file (the fleet panel writes the same file, so the
 /// whole of an in-memory copy is never written over it).
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ServerEdit {
+pub(crate) enum ServerEdit {
     Add(Server),
     Remember {
         host: String,
@@ -67,7 +67,7 @@ pub enum ServerEdit {
 
 impl ServerEdit {
     /// Make this change to `servers`.
-    pub fn apply(self, servers: &mut Servers) {
+    pub(crate) fn apply(self, servers: &mut Servers) {
         match self {
             ServerEdit::Add(s) => servers.add(s),
             ServerEdit::Remember {
@@ -102,12 +102,12 @@ impl ServerEdit {
 
 #[derive(Default)]
 pub struct Lobby {
-    pub screen: Option<Screen>,
-    pub select: SelectState,
-    pub create: Option<CreateState>,
+    pub(crate) screen: Option<Screen>,
+    pub(crate) select: SelectState,
+    pub(crate) create: Option<CreateState>,
     /// The connect screen's state and the servers/logins it draws from.
-    pub servers: Servers,
-    pub connect: ConnectState,
+    pub(crate) servers: Servers,
+    pub(crate) connect: ConnectState,
     /// A login the connect screen asked to start, for the host to pick up.
     pending: Option<Login>,
     /// Changes the connect screen made that are not on disk yet.
@@ -303,7 +303,7 @@ impl Lobby {
 
     /// Open the creation screen for `assets` (the session's, or the
     /// demo's), keeping an earlier build if one is in progress.
-    pub fn open_create(&mut self, assets: Rc<Assets>) {
+    pub(crate) fn open_create(&mut self, assets: Rc<Assets>) {
         if self.create.is_none() {
             match CreateState::new(assets, 1, 1) {
                 Ok(st) => self.create = Some(st),

@@ -34,7 +34,7 @@ use ac_client::logistics::Plan;
 /// What the panel draws: the rules, what the character is doing, and how
 /// many carried items each loot search matches.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct AutoplayView {
+pub(crate) struct AutoplayView {
     pub config: Config,
     /// `autoplay.doing.label()`: "waiting", "fighting", "looting"...
     pub doing: String,
@@ -58,7 +58,7 @@ pub struct AutoplayView {
 /// words for it. The status usually already begins with the label
 /// ("fighting" / "fighting Drudge Skulker"), and then it is not said
 /// twice; with no status yet, the label stands alone.
-pub fn status_line(doing: &str, status: &str) -> String {
+pub(crate) fn status_line(doing: &str, status: &str) -> String {
     let status = status.trim();
     if status.is_empty() {
         doing.to_string()
@@ -71,7 +71,7 @@ pub fn status_line(doing: &str, status: &str) -> String {
 
 /// Add `text` to `list` unless it is blank or already there (names and
 /// searches are matched case-insensitively). True when it was added.
-pub fn add_entry(list: &mut Vec<String>, text: &str) -> bool {
+pub(crate) fn add_entry(list: &mut Vec<String>, text: &str) -> bool {
     let text = text.trim();
     if text.is_empty() || list.iter().any(|e| e.trim().eq_ignore_ascii_case(text)) {
         return false;
@@ -81,7 +81,7 @@ pub fn add_entry(list: &mut Vec<String>, text: &str) -> bool {
 }
 
 /// Drop entry `i`. True when there was one.
-pub fn remove_entry(list: &mut Vec<String>, i: usize) -> bool {
+pub(crate) fn remove_entry(list: &mut Vec<String>, i: usize) -> bool {
     if i >= list.len() {
         return false;
     }
@@ -92,7 +92,7 @@ pub fn remove_entry(list: &mut Vec<String>, i: usize) -> bool {
 /// The half-typed line under each editable list, kept by list name so
 /// the text survives between frames.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Drafts(BTreeMap<String, String>);
+pub(crate) struct Drafts(BTreeMap<String, String>);
 
 impl Drafts {
     fn get(&mut self, key: &str) -> &mut String {
@@ -177,7 +177,12 @@ fn percent(ui: &mut egui::Ui, label: &str, value: &mut f32, hint: &str) {
 /// spellbook and components panels and steps aside for the open ones).
 /// Returns the rules when they were edited this frame, so the caller can
 /// put them back on the session.
-pub fn draw(egui: &egui::Context, v: &AutoplayView, x: f32, drafts: &mut Drafts) -> Option<Config> {
+pub(crate) fn draw(
+    egui: &egui::Context,
+    v: &AutoplayView,
+    x: f32,
+    drafts: &mut Drafts,
+) -> Option<Config> {
     let mut cfg = v.config.clone();
     window(
         "autoplay",
@@ -777,7 +782,7 @@ pub fn draw(egui: &egui::Context, v: &AutoplayView, x: f32, drafts: &mut Drafts)
 /// The settings and what the character is doing. What it takes and what
 /// it does with it is the loot profile's business now, and has its own
 /// window.
-pub fn view(c: &Client) -> AutoplayView {
+pub(crate) fn view(c: &Client) -> AutoplayView {
     AutoplayView {
         config: c.autoplay.config.clone(),
         doing: c.autoplay.doing.label().to_string(),
@@ -797,7 +802,7 @@ pub fn view(c: &Client) -> AutoplayView {
     }
 }
 
-pub struct Autoplay {
+pub(crate) struct Autoplay {
     source: Source<AutoplayView>,
     /// Open (its key toggles it). Starts closed.
     pub show: bool,
@@ -823,7 +828,7 @@ impl Default for Autoplay {
 
 impl Autoplay {
     /// A character in the middle of a fight, with rules filled in.
-    pub fn demo() -> Self {
+    pub(crate) fn demo() -> Self {
         let config = Config {
             team: Default::default(),
             enabled: true,

@@ -18,36 +18,36 @@ use crate::{egui, Client, Ctx, Plugin};
 
 /// The open container's name and contents, each with its stats.
 #[derive(Clone, Debug, PartialEq)]
-pub struct LootView {
+pub(crate) struct LootView {
     pub name: String,
     pub rows: Vec<Row>,
 }
 
 impl LootView {
     /// Whether the list is long enough to want the search line.
-    pub fn searchable(&self) -> bool {
+    pub(crate) fn searchable(&self) -> bool {
         self.rows.len() > SEARCH_MIN
     }
 
     /// The guids of the rows a filter keeps, in list order.
-    pub fn shown(&self, f: &Filter) -> Vec<u32> {
+    pub(crate) fn shown(&self, f: &Filter) -> Vec<u32> {
         f.matching(&self.rows, |r| &r.stats)
             .into_iter()
             .map(|i| self.rows[i].item.guid)
             .collect()
     }
 
-    pub fn unappraised(&self) -> usize {
+    pub(crate) fn unappraised(&self) -> usize {
         self.rows.iter().filter(|r| !r.stats.appraised).count()
     }
 }
 
 /// Containers with more items than this get the search line and chips.
-pub const SEARCH_MIN: usize = 8;
+pub(crate) const SEARCH_MIN: usize = 8;
 
 /// What the panel asked for.
 #[derive(Default, Debug, PartialEq, Eq)]
-pub struct Actions {
+pub(crate) struct Actions {
     pub take: Vec<u32>,
     pub close: bool,
     /// Carried items dragged onto the window: put into the container.
@@ -60,7 +60,7 @@ pub struct Actions {
 
 /// The open container, if any. Items the server has not described yet
 /// are skipped.
-pub fn view(c: &Client) -> Option<LootView> {
+pub(crate) fn view(c: &Client) -> Option<LootView> {
     let (guid, items) = c.world.open_container.as_ref()?;
     // Our own side packs list their contents the same way at login; they
     // belong in the inventory panel, not here.
@@ -101,7 +101,12 @@ fn suffix(r: &Row) -> String {
     }
 }
 
-pub fn draw(egui: &egui::Context, icons: &mut IconCache, v: &LootView, f: &mut Filter) -> Actions {
+pub(crate) fn draw(
+    egui: &egui::Context,
+    icons: &mut IconCache,
+    v: &LootView,
+    f: &mut Filter,
+) -> Actions {
     let mut actions = Actions::default();
     let rect = egui.viewport_rect();
     let (w, h) = (rect.width(), rect.height());
@@ -218,7 +223,7 @@ pub fn draw(egui: &egui::Context, icons: &mut IconCache, v: &LootView, f: &mut F
 }
 
 #[derive(Default)]
-pub struct Loot {
+pub(crate) struct Loot {
     source: Source<LootView>,
     /// The search line and chip; kept while the window is open.
     pub filter: Filter,
@@ -227,7 +232,7 @@ pub struct Loot {
 impl Loot {
     /// Known icons, one with an overlay, to check the layering; enough
     /// items for the search line, with sample stats for the tooltips.
-    pub fn demo() -> Self {
+    pub(crate) fn demo() -> Self {
         use super::inventory::{demo_item, demo_row};
         use ac_client::items::ItemStats;
         let mut layered = demo_item(12, "0x06001A8A + 0x06006A21", 1, false, 0x0600_1A8A);

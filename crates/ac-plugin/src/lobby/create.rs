@@ -17,7 +17,7 @@ use crate::panels::{caption, frame, title};
 
 /// The panes of the creation screen, in order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Step {
+pub(crate) enum Step {
     Heritage,
     Appearance,
     Attributes,
@@ -26,7 +26,7 @@ pub enum Step {
 }
 
 impl Step {
-    pub const ALL: [Step; 5] = [
+    pub(crate) const ALL: [Step; 5] = [
         Step::Heritage,
         Step::Appearance,
         Step::Attributes,
@@ -34,7 +34,7 @@ impl Step {
         Step::Finish,
     ];
 
-    pub fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> &'static str {
         match self {
             Step::Heritage => "Heritage",
             Step::Appearance => "Appearance",
@@ -49,19 +49,19 @@ impl Step {
     }
 
     /// The next step; the last stays put.
-    pub fn next(self) -> Step {
+    pub(crate) fn next(self) -> Step {
         Step::ALL[(self.index() + 1).min(Step::ALL.len() - 1)]
     }
 
     /// The previous step; the first stays put.
-    pub fn prev(self) -> Step {
+    pub(crate) fn prev(self) -> Step {
         Step::ALL[self.index().saturating_sub(1)]
     }
 }
 
 /// One skill line of the skills pane.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SkillLine {
+pub(crate) struct SkillLine {
     pub id: u32,
     pub name: String,
     pub choice: SkillChoice,
@@ -80,7 +80,7 @@ pub struct SkillLine {
 
 /// The skills pane, grouped by choice, each group sorted by name.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct SkillGroups {
+pub(crate) struct SkillGroups {
     pub specialized: Vec<SkillLine>,
     pub trained: Vec<SkillLine>,
     pub untrained: Vec<SkillLine>,
@@ -89,7 +89,7 @@ pub struct SkillGroups {
 
 impl SkillGroups {
     /// `(heading, lines)` in display order.
-    pub fn sections(&self) -> [(&'static str, &[SkillLine]); 4] {
+    pub(crate) fn sections(&self) -> [(&'static str, &[SkillLine]); 4] {
         [
             ("Specialized", &self.specialized),
             ("Trained", &self.trained),
@@ -100,7 +100,7 @@ impl SkillGroups {
 }
 
 /// Group every skill of the rules by the build's choice for it.
-pub fn group_skills(build: &CharacterBuild, rules: &Rules) -> SkillGroups {
+pub(crate) fn group_skills(build: &CharacterBuild, rules: &Rules) -> SkillGroups {
     let mut g = SkillGroups::default();
     for r in &rules.skills {
         let choice = build.skill(r.skill);
@@ -134,7 +134,7 @@ pub fn group_skills(build: &CharacterBuild, rules: &Rules) -> SkillGroups {
 }
 
 /// White with points to spare, dim at zero, red when over budget.
-pub fn points_color(left: i64) -> egui::Color32 {
+pub(crate) fn points_color(left: i64) -> egui::Color32 {
     if left < 0 {
         egui::Color32::from_rgb(255, 90, 90)
     } else if left == 0 {
@@ -145,7 +145,7 @@ pub fn points_color(left: i64) -> egui::Color32 {
 }
 
 /// `idx + delta` wrapped into `0..count`.
-pub fn cycle(idx: usize, count: usize, delta: i32) -> usize {
+pub(crate) fn cycle(idx: usize, count: usize, delta: i32) -> usize {
     if count == 0 {
         return 0;
     }
@@ -154,7 +154,7 @@ pub fn cycle(idx: usize, count: usize, delta: i32) -> usize {
 
 /// Heritage groups to offer: `(id, name)`, without the Olthoi variants
 /// unless `show_all`.
-pub fn heritage_choices(cg: &CharGen, show_all: bool) -> Vec<(u32, String)> {
+pub(crate) fn heritage_choices(cg: &CharGen, show_all: bool) -> Vec<(u32, String)> {
     cg.heritage_groups
         .iter()
         .filter(|(_, h)| show_all || !h.name.to_ascii_lowercase().contains("olthoi"))
@@ -163,7 +163,7 @@ pub fn heritage_choices(cg: &CharGen, show_all: bool) -> Vec<(u32, String)> {
 }
 
 /// What a validation error means to the person at the keyboard.
-pub fn describe_error(e: &CreateError) -> String {
+pub(crate) fn describe_error(e: &CreateError) -> String {
     match e {
         CreateError::AttributeOutOfRange(i) => format!(
             "{} must be {ATTRIBUTE_MIN}..{ATTRIBUTE_MAX}",
@@ -191,7 +191,7 @@ pub fn describe_error(e: &CreateError) -> String {
 }
 
 /// `1` male, `2` female, as the CharGen table names them.
-pub fn sex_of(cg: &CharGen, heritage: u32, gender: u32) -> Option<&SexCg> {
+pub(crate) fn sex_of(cg: &CharGen, heritage: u32, gender: u32) -> Option<&SexCg> {
     creation::heritage(cg, heritage)?
         .genders
         .iter()
@@ -200,13 +200,13 @@ pub fn sex_of(cg: &CharGen, heritage: u32, gender: u32) -> Option<&SexCg> {
 }
 
 /// Position of a palette id in a colour list (0 when absent).
-pub fn color_index(list: &[u32], value: u32) -> usize {
+pub(crate) fn color_index(list: &[u32], value: u32) -> usize {
     list.iter().position(|v| *v == value).unwrap_or(0)
 }
 
 /// What the creation screen asked the host to do.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum CreateAction {
+pub(crate) enum CreateAction {
     /// Send `build` to the server.
     Create,
     /// Back to the select screen.
@@ -214,7 +214,7 @@ pub enum CreateAction {
 }
 
 /// The creation screen's state.
-pub struct CreateState {
+pub(crate) struct CreateState {
     pub assets: Rc<Assets>,
     pub cg: Rc<CharGen>,
     pub build: CharacterBuild,
@@ -230,7 +230,7 @@ pub struct CreateState {
 impl CreateState {
     /// The screen on `heritage` and `gender` (1 male, 2 female), first
     /// template, home town, unnamed.
-    pub fn new(assets: Rc<Assets>, heritage: u32, gender: u32) -> Result<Self, CreateError> {
+    pub(crate) fn new(assets: Rc<Assets>, heritage: u32, gender: u32) -> Result<Self, CreateError> {
         let cg = assets.chargen().map_err(|_| CreateError::UnknownHeritage)?;
         let build = CharacterBuild::new(&assets, heritage, gender)?;
         let rules = creation::rules(&assets, heritage)?;
@@ -247,7 +247,7 @@ impl CreateState {
     }
 
     /// Start over on another heritage or sex, keeping the name.
-    pub fn reset(&mut self, heritage: u32, gender: u32) {
+    pub(crate) fn reset(&mut self, heritage: u32, gender: u32) {
         match (
             CharacterBuild::new(&self.assets, heritage, gender),
             creation::rules(&self.assets, heritage),
@@ -262,13 +262,13 @@ impl CreateState {
         }
     }
 
-    pub fn apply_template(&mut self, index: usize) {
+    pub(crate) fn apply_template(&mut self, index: usize) {
         let cg = self.cg.clone();
         self.build.apply_template(&cg, &self.rules, index);
     }
 
     /// Change a skill, keeping the refusal as the message.
-    pub fn set_skill(&mut self, skill: u32, choice: SkillChoice) {
+    pub(crate) fn set_skill(&mut self, skill: u32, choice: SkillChoice) {
         match self.build.set_skill(&self.rules, skill, choice) {
             Ok(()) => self.message = None,
             Err(CreateError::SkillNotAllowed(_)) => {
@@ -294,7 +294,7 @@ impl CreateState {
     }
 
     /// The first thing wrong with the build, if anything.
-    pub fn problem(&self) -> Option<String> {
+    pub(crate) fn problem(&self) -> Option<String> {
         self.build
             .validate(&self.rules)
             .err()
@@ -306,7 +306,8 @@ impl CreateState {
     }
 
     /// The heritage's name.
-    pub fn heritage_name(&self) -> &str {
+    #[allow(dead_code)] // only the tests in this file call it
+    pub(crate) fn heritage_name(&self) -> &str {
         &self.rules.heritage_name
     }
 }
@@ -762,7 +763,7 @@ fn draw_finish(ui: &mut egui::Ui, st: &mut CreateState) -> bool {
 }
 
 /// Draw the creation screen; returns what the host should do.
-pub fn draw(egui: &egui::Context, st: &mut CreateState) -> Vec<CreateAction> {
+pub(crate) fn draw(egui: &egui::Context, st: &mut CreateState) -> Vec<CreateAction> {
     let mut actions = Vec::new();
     egui::Window::new("character_create")
         .fade_in(false)
@@ -845,7 +846,7 @@ pub fn draw(egui: &egui::Context, st: &mut CreateState) -> Vec<CreateAction> {
 /// A key while the creation screen is up: Left/PageUp and Right/PageDown
 /// move between steps; Escape cancels. Returns the action, and whether
 /// the key was used.
-pub fn key(st: &mut CreateState, key: egui::Key) -> (Option<CreateAction>, bool) {
+pub(crate) fn key(st: &mut CreateState, key: egui::Key) -> (Option<CreateAction>, bool) {
     match key {
         egui::Key::ArrowRight | egui::Key::PageDown => {
             st.step = st.step.next();

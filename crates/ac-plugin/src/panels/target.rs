@@ -6,20 +6,20 @@ use crate::{egui, Client, Ctx, Plugin};
 
 /// The target's name and health fraction.
 #[derive(Clone, Debug, PartialEq)]
-pub struct TargetView {
+pub(crate) struct TargetView {
     pub guid: u32,
     pub name: String,
     pub health: f32,
 }
 
 /// `Drudge Skulker  60%`.
-pub fn bar_text(name: &str, health: f32) -> String {
+pub(crate) fn bar_text(name: &str, health: f32) -> String {
     format!("{name}  {:.0}%", health.clamp(0.0, 1.0) * 100.0)
 }
 
 /// The attack target first, else the selection, if it is a creature.
 /// Creatures we have not hit yet show as full health.
-pub fn view(c: &Client) -> Option<TargetView> {
+pub(crate) fn view(c: &Client) -> Option<TargetView> {
     c.attack_target
         .or(c.selected)
         .and_then(|g| c.world.objects.get(&g))
@@ -33,7 +33,7 @@ pub fn view(c: &Client) -> Option<TargetView> {
 
 /// Draw the bar; returns a carried item dropped on it (give it to the
 /// target).
-pub fn draw(egui: &egui::Context, t: &TargetView) -> Option<u32> {
+pub(crate) fn draw(egui: &egui::Context, t: &TargetView) -> Option<u32> {
     let w = egui.viewport_rect().width();
     let mut given = None;
     super::area("target", egui::pos2(w * 0.5 - 130.0, 8.0)).show(egui, |ui| {
@@ -63,12 +63,12 @@ pub fn draw(egui: &egui::Context, t: &TargetView) -> Option<u32> {
 }
 
 #[derive(Default)]
-pub struct Target {
+pub(crate) struct Target {
     source: Source<TargetView>,
 }
 
 impl Target {
-    pub fn demo() -> Self {
+    pub(crate) fn demo() -> Self {
         Target {
             source: Source::Demo(TargetView {
                 guid: 0,

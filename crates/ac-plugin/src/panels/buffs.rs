@@ -22,11 +22,11 @@ use crate::icons::{IconCache, IconLayers};
 use crate::{egui, Client, Ctx, Plugin, Settings};
 
 /// The vitae penalty's spell id (ACE `SpellId.Vitae`).
-pub const VITAE_SPELL: u16 = 666;
+pub(crate) const VITAE_SPELL: u16 = 666;
 
 /// One active enchantment.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Buff {
+pub(crate) struct Buff {
     pub spell: u16,
     pub layer: u16,
     pub name: String,
@@ -40,7 +40,7 @@ pub struct Buff {
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct BuffsView {
+pub(crate) struct BuffsView {
     pub beneficial: Vec<Buff>,
     pub harmful: Vec<Buff>,
     /// Vitae penalty in percent (5 for 95% vitae), if any.
@@ -50,7 +50,7 @@ pub struct BuffsView {
 /// Seconds left on an enchantment seen `elapsed` seconds ago with the
 /// given `start_time` and `duration`; `None` without a timer. The flag is
 /// set when `start_time` is an absolute time the client cannot anchor.
-pub fn remaining(start_time: f64, duration: f64, elapsed: f64) -> Option<(f64, bool)> {
+pub(crate) fn remaining(start_time: f64, duration: f64, elapsed: f64) -> Option<(f64, bool)> {
     if duration < 0.0 {
         return None;
     }
@@ -61,12 +61,12 @@ pub fn remaining(start_time: f64, duration: f64, elapsed: f64) -> Option<(f64, b
 }
 
 /// `0.95` (95% vitae) -> `5`.
-pub fn vitae_percent(stat_mod_value: f32) -> u32 {
+pub(crate) fn vitae_percent(stat_mod_value: f32) -> u32 {
     ((1.0 - stat_mod_value as f64) * 100.0).round().max(0.0) as u32
 }
 
 /// Soonest to expire first; timerless entries last; by name within.
-pub fn sort(buffs: &mut [Buff]) {
+pub(crate) fn sort(buffs: &mut [Buff]) {
     buffs.sort_by(|a, b| {
         match (a.remaining, b.remaining) {
             (Some(x), Some(y)) => x.partial_cmp(&y).unwrap_or(std::cmp::Ordering::Equal),
@@ -81,14 +81,14 @@ pub fn sort(buffs: &mut [Buff]) {
 /// When each enchantment's `start_time` was last seen, so its countdown
 /// runs on the local clock between server updates.
 #[derive(Debug, Default)]
-pub struct Anchors {
+pub(crate) struct Anchors {
     seen: HashMap<(u16, u16), (f64, Instant)>,
 }
 
 impl Anchors {
     /// Seconds since `start_time` was first seen for this enchantment
     /// (0 when it is new or changed, which a refresh does).
-    pub fn elapsed(&mut self, spell: u16, layer: u16, start_time: f64, now: Instant) -> f64 {
+    pub(crate) fn elapsed(&mut self, spell: u16, layer: u16, start_time: f64, now: Instant) -> f64 {
         let e = self.seen.entry((spell, layer)).or_insert((start_time, now));
         if e.0 != start_time {
             *e = (start_time, now);
@@ -97,14 +97,14 @@ impl Anchors {
     }
 
     /// Forget enchantments that are gone.
-    pub fn retain(&mut self, live: &[Enchantment]) {
+    pub(crate) fn retain(&mut self, live: &[Enchantment]) {
         self.seen
             .retain(|k, _| live.iter().any(|e| (e.spell_id, e.layer) == *k));
     }
 }
 
 /// Build the view from the registry, naming spells through `table`.
-pub fn build(
+pub(crate) fn build(
     table: Option<&SpellTable>,
     enchantments: &[Enchantment],
     anchors: &mut Anchors,
@@ -145,7 +145,7 @@ pub fn build(
 }
 
 /// This session's enchantments; `None` until the sheet arrived.
-pub fn view(c: &Client, anchors: &mut Anchors, now: Instant) -> Option<BuffsView> {
+pub(crate) fn view(c: &Client, anchors: &mut Anchors, now: Instant) -> Option<BuffsView> {
     if !has_sheet(c) {
         return None;
     }
@@ -186,7 +186,7 @@ fn list(
 }
 
 /// Draw the panel under the inventory, on the right.
-pub fn draw(egui: &egui::Context, icons: &mut IconCache, v: &BuffsView) {
+pub(crate) fn draw(egui: &egui::Context, icons: &mut IconCache, v: &BuffsView) {
     let w = egui.viewport_rect().width();
     let r = super::radar::RADIUS;
     window(
@@ -231,7 +231,7 @@ pub fn draw(egui: &egui::Context, icons: &mut IconCache, v: &BuffsView) {
     });
 }
 
-pub struct Buffs {
+pub(crate) struct Buffs {
     source: Source<BuffsView>,
     /// Open (U toggles it). Starts open.
     pub show: bool,
@@ -251,7 +251,7 @@ impl Default for Buffs {
 impl Buffs {
     /// Three real enchantments (two buffs, one debuff) and a vitae line
     /// when the table is given, open.
-    pub fn demo(table: Option<&SpellTable>) -> Self {
+    pub(crate) fn demo(table: Option<&SpellTable>) -> Self {
         let find = |name: &str, fallback: u16| -> u16 {
             table
                 .and_then(|t| {

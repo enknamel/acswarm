@@ -7,12 +7,12 @@ use super::{has_sheet, Source};
 use crate::{egui, Client, Ctx, Plugin};
 
 /// Radar range in metres (the edge of the circle).
-pub const RANGE: f32 = 100.0;
+pub(crate) const RANGE: f32 = 100.0;
 /// Radius of the drawn circle in points.
-pub const RADIUS: f32 = 80.0;
+pub(crate) const RADIUS: f32 = 80.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BlipKind {
+pub(crate) enum BlipKind {
     Player,
     Creature,
     Other,
@@ -20,7 +20,7 @@ pub enum BlipKind {
 
 /// A radar blip in radar space: x right, y forward, metres.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Blip {
+pub(crate) struct Blip {
     pub x: f32,
     pub y: f32,
     pub kind: BlipKind,
@@ -28,7 +28,7 @@ pub struct Blip {
 
 /// Where `at` lands on a radar centred on `me` whose up is `heading`
 /// (radians, the character's yaw): (right, forward) in metres.
-pub fn relative(me: Vec3, heading: f32, at: Vec3) -> (f32, f32) {
+pub(crate) fn relative(me: Vec3, heading: f32, at: Vec3) -> (f32, f32) {
     let fwd = Vec2::new(-heading.sin(), heading.cos());
     let right = Vec2::new(heading.cos(), heading.sin());
     let d = at - me;
@@ -38,7 +38,7 @@ pub fn relative(me: Vec3, heading: f32, at: Vec3) -> (f32, f32) {
 
 /// Players by their description flag, creatures by having a motion table,
 /// everything else (doors, items, scenery) as other.
-pub fn kind_of(o: &ac_world::WorldObject) -> BlipKind {
+pub(crate) fn kind_of(o: &ac_world::WorldObject) -> BlipKind {
     if o.object_desc_flags & ac_world::object_desc_flags::PLAYER != 0 {
         BlipKind::Player
     } else if o.motion_table_id != 0 {
@@ -50,7 +50,7 @@ pub fn kind_of(o: &ac_world::WorldObject) -> BlipKind {
 
 /// The blips for this session; `None` until the sheet arrived. Empty
 /// while we have no position yet.
-pub fn view(c: &Client) -> Option<Vec<Blip>> {
+pub(crate) fn view(c: &Client) -> Option<Vec<Blip>> {
     if !has_sheet(c) {
         return None;
     }
@@ -83,7 +83,7 @@ pub fn view(c: &Client) -> Option<Vec<Blip>> {
     )
 }
 
-pub fn draw(egui: &egui::Context, blips: &[Blip], range: f32) {
+pub(crate) fn draw(egui: &egui::Context, blips: &[Blip], range: f32) {
     let r = RADIUS;
     let w = egui.viewport_rect().width();
     let center = egui::pos2(w - r - 16.0, r + 16.0);
@@ -127,7 +127,7 @@ pub fn draw(egui: &egui::Context, blips: &[Blip], range: f32) {
     });
 }
 
-pub struct Radar {
+pub(crate) struct Radar {
     source: Source<Vec<Blip>>,
     /// Radar range in metres (edge of the circle).
     pub range: f32,
@@ -143,7 +143,7 @@ impl Default for Radar {
 }
 
 impl Radar {
-    pub fn demo() -> Self {
+    pub(crate) fn demo() -> Self {
         let blip = |x, y, kind| Blip { x, y, kind };
         Radar {
             source: Source::Demo(vec![

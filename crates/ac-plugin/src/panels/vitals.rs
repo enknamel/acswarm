@@ -6,14 +6,14 @@ use crate::{egui, Client, Ctx, Plugin};
 
 /// One vital bar: label, current, maximum.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct VitalBar {
+pub(crate) struct VitalBar {
     pub name: &'static str,
     pub current: u32,
     pub max: u32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct VitalsView {
+pub(crate) struct VitalsView {
     pub name: String,
     pub level: i32,
     pub bars: Vec<VitalBar>,
@@ -22,7 +22,7 @@ pub struct VitalsView {
 }
 
 /// How full a bar is, 0..=1; empty when the maximum is unknown.
-pub fn fraction(current: u32, max: u32) -> f32 {
+pub(crate) fn fraction(current: u32, max: u32) -> f32 {
     if max > 0 {
         (current as f32 / max as f32).clamp(0.0, 1.0)
     } else {
@@ -31,7 +31,7 @@ pub fn fraction(current: u32, max: u32) -> f32 {
 }
 
 /// What to draw for this session; nothing until the sheet arrived.
-pub fn view(c: &Client) -> Option<VitalsView> {
+pub(crate) fn view(c: &Client) -> Option<VitalsView> {
     if !has_sheet(c) {
         return None;
     }
@@ -52,7 +52,7 @@ pub fn view(c: &Client) -> Option<VitalsView> {
 
 /// Draw the bars; returns a carried item dropped on them (use it on
 /// yourself: a healing kit, food, a potion).
-pub fn draw(egui: &egui::Context, v: &VitalsView) -> Option<u32> {
+pub(crate) fn draw(egui: &egui::Context, v: &VitalsView) -> Option<u32> {
     let mut dropped = None;
     super::area("vitals", egui::pos2(8.0, 36.0)).show(egui, |ui| {
         let (zone, _) = ui.dnd_drop_zone::<ItemDrag, _>(egui::Frame::new(), |ui| {
@@ -103,12 +103,12 @@ pub fn draw(egui: &egui::Context, v: &VitalsView) -> Option<u32> {
 }
 
 #[derive(Default)]
-pub struct Vitals {
+pub(crate) struct Vitals {
     source: Source<VitalsView>,
 }
 
 impl Vitals {
-    pub fn demo() -> Self {
+    pub(crate) fn demo() -> Self {
         Vitals {
             source: Source::Demo(VitalsView {
                 name: "Demo".into(),

@@ -21,43 +21,43 @@ use crate::icons::{IconCache, IconLayers};
 use crate::{egui, Client, Ctx, Plugin, Settings};
 
 /// Whether this panel is open, on the bus: the panels that share the
-/// left column (see [`super::autoplay`]) step aside for it.
+/// left column (see `super::autoplay`) step aside for it.
 pub const OPEN_KEY: &str = "panels.components_open";
 
 /// Highest desired quantity the server accepts.
-pub const MAX_DESIRED: u32 = 999;
+pub(crate) const MAX_DESIRED: u32 = 999;
 
 /// One component line.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ComponentRow {
+pub(crate) struct ComponentRow {
     /// Id in the SpellComponentsTable.
-    pub id: u32,
-    pub name: String,
-    pub count: u32,
-    pub desired: u32,
+    pub(crate) id: u32,
+    pub(crate) name: String,
+    pub(crate) count: u32,
+    pub(crate) desired: u32,
     /// RenderSurface (0x06) id.
-    pub icon: u32,
+    pub(crate) icon: u32,
 }
 
 /// A school's focus and whether it is carried.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Focus {
-    pub school: &'static str,
-    pub name: &'static str,
-    pub carried: bool,
+pub(crate) struct Focus {
+    pub(crate) school: &'static str,
+    pub(crate) name: &'static str,
+    pub(crate) carried: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct ComponentsView {
+pub(crate) struct ComponentsView {
     /// Kind name and its rows, in [`KIND_ORDER`].
-    pub groups: Vec<(&'static str, Vec<ComponentRow>)>,
-    pub foci: Vec<Focus>,
+    pub(crate) groups: Vec<(&'static str, Vec<ComponentRow>)>,
+    pub(crate) foci: Vec<Focus>,
     /// A vendor is open, so "Fill from vendor" can run.
-    pub vendor_open: bool,
+    pub(crate) vendor_open: bool,
 }
 
 /// Display order of the component kinds.
-pub const KIND_ORDER: [u32; 7] = [
+pub(crate) const KIND_ORDER: [u32; 7] = [
     component_type::SCARAB,
     component_type::TAPER,
     component_type::HERB,
@@ -68,7 +68,7 @@ pub const KIND_ORDER: [u32; 7] = [
 ];
 
 /// The focus item of each school (see `ac_client::magic::focus_wcid`).
-pub fn focus_name(school_id: u32) -> &'static str {
+pub(crate) fn focus_name(school_id: u32) -> &'static str {
     match school_id {
         school::WAR => "Foci of Strife",
         school::LIFE => "Foci of Verdancy",
@@ -80,7 +80,7 @@ pub fn focus_name(school_id: u32) -> &'static str {
 }
 
 /// The schools with a focus, in spellbook-filter order.
-pub const FOCUS_SCHOOLS: [u32; 5] = [
+pub(crate) const FOCUS_SCHOOLS: [u32; 5] = [
     school::CREATURE,
     school::ITEM,
     school::LIFE,
@@ -91,7 +91,7 @@ pub const FOCUS_SCHOOLS: [u32; 5] = [
 /// Group `(kind, row)` pairs by kind in [`KIND_ORDER`] (unknown kinds
 /// last), each group sorted by component id, which orders scarabs by
 /// level.
-pub fn group(rows: Vec<(u32, ComponentRow)>) -> Vec<(&'static str, Vec<ComponentRow>)> {
+pub(crate) fn group(rows: Vec<(u32, ComponentRow)>) -> Vec<(&'static str, Vec<ComponentRow>)> {
     let mut by_kind: HashMap<u32, Vec<ComponentRow>> = HashMap::new();
     for (kind, row) in rows {
         by_kind.entry(kind).or_default().push(row);
@@ -115,7 +115,7 @@ pub fn group(rows: Vec<(u32, ComponentRow)>) -> Vec<(&'static str, Vec<Component
 }
 
 /// This session's components and foci; `None` until the sheet arrived.
-pub fn view(c: &Client) -> Option<ComponentsView> {
+pub(crate) fn view(c: &Client) -> Option<ComponentsView> {
     if !has_sheet(c) {
         return None;
     }
@@ -153,20 +153,20 @@ pub fn view(c: &Client) -> Option<ComponentsView> {
 
 /// What the panel asked for.
 #[derive(Default, Debug, PartialEq, Eq)]
-pub struct Actions {
+pub(crate) struct Actions {
     /// `(component id, desired quantity)`.
-    pub desired: Vec<(u32, u32)>,
-    pub fill: bool,
+    pub(crate) desired: Vec<(u32, u32)>,
+    pub(crate) fill: bool,
 }
 
 /// Desired quantities being edited, sent when the edit ends.
 #[derive(Default, Debug)]
-pub struct UiState {
+pub(crate) struct UiState {
     edits: HashMap<u32, u32>,
 }
 
 /// Draw the panel at `x`, in the row of the skills and spellbook panels.
-pub fn draw(
+pub(crate) fn draw(
     egui: &egui::Context,
     icons: &mut IconCache,
     v: &ComponentsView,
@@ -280,17 +280,17 @@ pub fn draw(
 }
 
 #[derive(Default)]
-pub struct Components {
+pub(crate) struct Components {
     source: Source<ComponentsView>,
     /// Open (its key toggles it). Starts closed.
-    pub show: bool,
+    pub(crate) show: bool,
     state: UiState,
 }
 
 impl Components {
     /// A few real components (named through the table when given) with
     /// counts and desired quantities, two foci, a vendor open; open.
-    pub fn demo(table: Option<&SpellComponentTable>) -> Self {
+    pub(crate) fn demo(table: Option<&SpellComponentTable>) -> Self {
         let row = |id: u32, fallback: &str, count: u32, desired: u32| {
             let entry = table.and_then(|t| t.get(id));
             (

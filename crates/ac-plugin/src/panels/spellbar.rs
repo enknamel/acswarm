@@ -40,19 +40,19 @@ pub const VISIBLE_KEY: &str = "panels.spellbar_visible";
 
 /// One slot of a spell bar.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct BarSpell {
-    pub id: u32,
-    pub name: String,
+pub(crate) struct BarSpell {
+    pub(crate) id: u32,
+    pub(crate) name: String,
     /// RenderSurface (0x06) id of the spell icon.
-    pub icon: u32,
+    pub(crate) icon: u32,
     /// Why the spell cannot be cast right now; `None` when it can.
-    pub blocked: Option<String>,
+    pub(crate) blocked: Option<String>,
 }
 
 /// The eight bars.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct BarView {
-    pub bars: Vec<Vec<BarSpell>>,
+pub(crate) struct BarView {
+    pub(crate) bars: Vec<Vec<BarSpell>>,
 }
 
 impl Default for BarView {
@@ -65,7 +65,7 @@ impl Default for BarView {
 
 /// How a cycling key moves the selection.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Step {
+pub(crate) enum Step {
     Next,
     Prev,
     First,
@@ -74,7 +74,7 @@ pub enum Step {
 
 /// Move through `len` slots with wrap-around; `None` when there are none.
 /// From no selection, `Next` picks the first slot and `Prev` the last.
-pub fn cycle(current: Option<usize>, len: usize, step: Step) -> Option<usize> {
+pub(crate) fn cycle(current: Option<usize>, len: usize, step: Step) -> Option<usize> {
     if len == 0 {
         return None;
     }
@@ -87,7 +87,7 @@ pub fn cycle(current: Option<usize>, len: usize, step: Step) -> Option<usize> {
 }
 
 /// `1`..`9` -> slot 0..8.
-pub fn number_key(key: egui::Key) -> Option<usize> {
+pub(crate) fn number_key(key: egui::Key) -> Option<usize> {
     use egui::Key::*;
     Some(match key {
         Num1 => 0,
@@ -104,7 +104,7 @@ pub fn number_key(key: egui::Key) -> Option<usize> {
 }
 
 /// PageUp / Insert cycle the tabs; Ctrl jumps to the last / first.
-pub fn tab_step(key: egui::Key, ctrl: bool) -> Option<Step> {
+pub(crate) fn tab_step(key: egui::Key, ctrl: bool) -> Option<Step> {
     Some(match (key, ctrl) {
         (egui::Key::PageUp, false) => Step::Next,
         (egui::Key::PageUp, true) => Step::Last,
@@ -116,7 +116,7 @@ pub fn tab_step(key: egui::Key, ctrl: bool) -> Option<Step> {
 
 /// PageDown / Delete cycle the selected spell; Ctrl jumps to the last /
 /// first.
-pub fn spell_step(key: egui::Key, ctrl: bool) -> Option<Step> {
+pub(crate) fn spell_step(key: egui::Key, ctrl: bool) -> Option<Step> {
     Some(match (key, ctrl) {
         (egui::Key::PageDown, false) => Step::Next,
         (egui::Key::PageDown, true) => Step::Last,
@@ -128,7 +128,8 @@ pub fn spell_step(key: egui::Key, ctrl: bool) -> Option<Step> {
 
 /// The spell called `query` among `names`: an exact (case-insensitive)
 /// match first, else the first whose name starts with it.
-pub fn resolve_spell(names: &[(u32, String)], query: &str) -> Option<u32> {
+#[allow(dead_code)] // only the tests in this file call it
+pub(crate) fn resolve_spell(names: &[(u32, String)], query: &str) -> Option<u32> {
     let q = query.trim().to_ascii_lowercase();
     if q.is_empty() {
         return None;
@@ -146,7 +147,10 @@ pub fn resolve_spell(names: &[(u32, String)], query: &str) -> Option<u32> {
 
 /// A one-line reason a spell cannot be cast, with component names from
 /// the SpellComponentsTable when given; `None` when it can.
-pub fn blocked_reason(check: &CastCheck, comps: Option<&SpellComponentTable>) -> Option<String> {
+pub(crate) fn blocked_reason(
+    check: &CastCheck,
+    comps: Option<&SpellComponentTable>,
+) -> Option<String> {
     Some(match check {
         CastCheck::Ok => return None,
         CastCheck::NotKnown => "not in the spellbook".to_string(),
@@ -178,7 +182,7 @@ pub fn blocked_reason(check: &CastCheck, comps: Option<&SpellComponentTable>) ->
 
 /// The bars of this session, named through the spell table, with the
 /// cast check of every slot.
-pub fn view(c: &Client) -> BarView {
+pub(crate) fn view(c: &Client) -> BarView {
     let table = c.assets.spell_table().ok();
     let comps = c.assets.spell_components().ok();
     let mut bars: Vec<Vec<BarSpell>> = c
@@ -207,16 +211,16 @@ pub fn view(c: &Client) -> BarView {
 
 /// What the panel asked for.
 #[derive(Default, Debug, PartialEq, Eq)]
-pub struct Actions {
+pub(crate) struct Actions {
     /// Show this tab.
-    pub show: Option<usize>,
+    pub(crate) show: Option<usize>,
     /// Select this slot of the shown tab.
-    pub select: Option<usize>,
-    pub cast: Option<u32>,
+    pub(crate) select: Option<usize>,
+    pub(crate) cast: Option<u32>,
     /// `(tab, position, spell)`; `usize::MAX` appends.
-    pub add: Vec<(usize, usize, u32)>,
+    pub(crate) add: Vec<(usize, usize, u32)>,
     /// `(tab, spell)`.
-    pub remove: Option<(usize, u32)>,
+    pub(crate) remove: Option<(usize, u32)>,
 }
 
 const HIGHLIGHT: egui::Color32 = egui::Color32::from_rgb(255, 215, 120);
@@ -231,7 +235,7 @@ fn drop_outline(ui: &egui::Ui, rect: egui::Rect) {
 }
 
 /// Draw the bar along the bottom of the viewport.
-pub fn draw(
+pub(crate) fn draw(
     egui: &egui::Context,
     icons: &mut IconCache,
     v: &BarView,
@@ -378,15 +382,15 @@ pub fn draw(
     a
 }
 
-pub struct SpellBar {
+pub(crate) struct SpellBar {
     source: Source<BarView>,
     /// Toggled by its key or the menu; the bar also shows with the
     /// spellbook or in magic mode.
-    pub show: bool,
+    pub(crate) show: bool,
     /// The shown tab, 0-based.
-    pub shown: usize,
+    pub(crate) shown: usize,
     /// Selected slot of the shown tab.
-    pub selected: Option<usize>,
+    pub(crate) selected: Option<usize>,
     /// Drawn this frame (keys only act then).
     visible: bool,
     ctrl: bool,
@@ -413,7 +417,7 @@ impl Default for SpellBar {
 impl SpellBar {
     /// Two tabs of real spells when the table is given (one slot shown as
     /// missing its components), open.
-    pub fn demo(table: Option<&SpellTable>) -> Self {
+    pub(crate) fn demo(table: Option<&SpellTable>) -> Self {
         let spell = |id: u32, blocked: Option<&str>| {
             let sp = table.and_then(|t| t.get(id));
             BarSpell {

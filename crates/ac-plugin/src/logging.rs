@@ -23,14 +23,14 @@ pub const SYSTEMS: &[(&str, &str)] = &[
 ];
 
 /// The levels a system can be set to, quietest first.
-pub const LEVELS: &[&str] = &["off", "error", "warn", "info", "debug", "trace"];
+pub(crate) const LEVELS: &[&str] = &["off", "error", "warn", "info", "debug", "trace"];
 
 /// What the filter starts as when nothing says otherwise: the app's own
 /// progress, and warnings from everything else.
 pub const DEFAULT: &str = "warn,acswarm=info";
 
 /// Read one system's level out of a filter line, if it names one.
-pub fn level_of(filter: &str, system: &str) -> Option<String> {
+pub(crate) fn level_of(filter: &str, system: &str) -> Option<String> {
     filter.split(',').find_map(|part| {
         let (target, level) = part.trim().split_once('=')?;
         (target.trim() == system).then(|| level.trim().to_string())
@@ -38,7 +38,7 @@ pub fn level_of(filter: &str, system: &str) -> Option<String> {
 }
 
 /// The default level a filter line sets for everything unnamed.
-pub fn base_of(filter: &str) -> String {
+pub(crate) fn base_of(filter: &str) -> String {
     filter
         .split(',')
         .map(str::trim)
@@ -49,7 +49,7 @@ pub fn base_of(filter: &str) -> String {
 
 /// A filter line with `system` set to `level`, or dropped when `level`
 /// is `None` (back to the default).
-pub fn with_level(filter: &str, system: &str, level: Option<&str>) -> String {
+pub(crate) fn with_level(filter: &str, system: &str, level: Option<&str>) -> String {
     let mut parts: Vec<String> = filter
         .split(',')
         .map(str::trim)
@@ -67,7 +67,7 @@ pub fn with_level(filter: &str, system: &str, level: Option<&str>) -> String {
 }
 
 /// A filter line with the default level for everything unnamed changed.
-pub fn with_base(filter: &str, level: &str) -> String {
+pub(crate) fn with_base(filter: &str, level: &str) -> String {
     let rest: Vec<&str> = filter
         .split(',')
         .map(str::trim)

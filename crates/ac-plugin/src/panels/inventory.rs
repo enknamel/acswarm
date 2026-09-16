@@ -34,14 +34,14 @@ use ac_client::items::{self, ItemStats, NumKey, Query, SortKey};
 
 /// One row of the panel: the drawable item and its numbers.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Row {
+pub(crate) struct Row {
     pub item: Item,
     pub stats: ItemStats,
 }
 
 /// A side pack: a header the list groups under and a drop target.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Pack {
+pub(crate) struct Pack {
     pub guid: u32,
     pub name: String,
     pub count: u32,
@@ -56,7 +56,7 @@ pub struct Pack {
 /// as the full, because a slot you cannot see is a slot you forget you
 /// have.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Slot {
+pub(crate) enum Slot {
     /// A pack, with what is in it and what it holds.
     Pack(Pack),
     /// One of the Foci: a slot spent, and nothing goes in it.
@@ -67,7 +67,8 @@ pub enum Slot {
 
 impl Slot {
     /// The item filling the slot, if anything is.
-    pub fn guid(&self) -> Option<u32> {
+    #[allow(dead_code)] // only the tests in this file call it
+    pub(crate) fn guid(&self) -> Option<u32> {
         match self {
             Slot::Pack(p) => Some(p.guid),
             Slot::Foci { guid, .. } => Some(*guid),
@@ -82,7 +83,7 @@ impl Slot {
 /// nothing at all -- but it still takes a whole pack slot, which is the
 /// most expensive kind of slot there is. It is worth saying so; it is
 /// not worth throwing away for somebody, so this only reports.
-pub fn duplicate_foci(foci: &[(u32, String)]) -> Vec<(u32, String)> {
+pub(crate) fn duplicate_foci(foci: &[(u32, String)]) -> Vec<(u32, String)> {
     let mut seen: Vec<&str> = Vec::new();
     let mut spare = Vec::new();
     for (guid, name) in foci {
@@ -99,7 +100,7 @@ pub fn duplicate_foci(foci: &[(u32, String)]) -> Vec<(u32, String)> {
 ///
 /// `capacity` is what the character has; a slot count of zero before
 /// the player description arrives shows nothing rather than guessing.
-pub fn slots(packs: &[Pack], foci: &[(u32, String)], capacity: u32) -> Vec<Slot> {
+pub(crate) fn slots(packs: &[Pack], foci: &[(u32, String)], capacity: u32) -> Vec<Slot> {
     let mut out: Vec<Slot> = packs.iter().cloned().map(Slot::Pack).collect();
     out.extend(foci.iter().map(|(guid, name)| Slot::Foci {
         guid: *guid,
@@ -113,7 +114,7 @@ pub fn slots(packs: &[Pack], foci: &[(u32, String)], capacity: u32) -> Vec<Slot>
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct InventoryView {
+pub(crate) struct InventoryView {
     pub rows: Vec<Row>,
     /// Our own guid: the main pack's container id.
     pub me: u32,
@@ -137,7 +138,7 @@ pub struct InventoryView {
 }
 
 /// The chips above the list: a label and the kinds it keeps.
-pub const KINDS: &[(&str, &[&str])] = &[
+pub(crate) const KINDS: &[(&str, &[&str])] = &[
     ("All", &[]),
     ("Weapons", &["weapon", "missile", "caster"]),
     ("Armor", &["armor"]),
@@ -168,7 +169,7 @@ pub const KINDS: &[(&str, &[&str])] = &[
 ];
 
 /// The sort choices: a label and the key.
-pub const SORTS: &[(&str, SortKey)] = &[
+pub(crate) const SORTS: &[(&str, SortKey)] = &[
     ("name", SortKey::Name),
     ("value", SortKey::Num(NumKey::Value)),
     ("burden", SortKey::Num(NumKey::Burden)),
@@ -181,7 +182,7 @@ pub const SORTS: &[(&str, SortKey)] = &[
 ];
 
 /// "Foci of Strife" -> "War" and the other three schools.
-pub fn focus_school(name: &str) -> Option<&'static str> {
+pub(crate) fn focus_school(name: &str) -> Option<&'static str> {
     let school = name.strip_prefix("Foci of ")?;
     Some(match school {
         "Strife" => "War",
@@ -193,7 +194,7 @@ pub fn focus_school(name: &str) -> Option<&'static str> {
 }
 
 /// Build the view from the session; `None` until the sheet arrived.
-pub fn view(c: &Client) -> Option<InventoryView> {
+pub(crate) fn view(c: &Client) -> Option<InventoryView> {
     if !has_sheet(c) {
         return None;
     }
@@ -273,7 +274,7 @@ pub fn view(c: &Client) -> Option<InventoryView> {
 
 /// What the player did in the panel this frame.
 #[derive(Debug, Default, PartialEq, Eq)]
-pub struct Actions {
+pub(crate) struct Actions {
     /// Double-clicked items (use: wield, take off, read...).
     pub activated: Vec<u32>,
     /// Items dragged onto a pack: (item, container guid; 0 = main pack).
@@ -302,7 +303,7 @@ pub struct Actions {
 /// The panel's own state: search line, chip, sort, folded packs.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
-pub struct State {
+pub(crate) struct State {
     /// Not kept across restarts: a search that survived would hide
     /// most of the list on the next run and look like a broken panel.
     #[serde(skip)]
@@ -322,13 +323,13 @@ pub struct State {
 
 impl State {
     /// Whether anything narrows the list.
-    pub fn filtering(&self) -> bool {
+    pub(crate) fn filtering(&self) -> bool {
         !self.search.trim().is_empty() || self.kind != 0
     }
 }
 
 /// The rows the state keeps, in its order, as indices into `v.rows`.
-pub fn shown(v: &InventoryView, st: &State) -> Vec<usize> {
+pub(crate) fn shown(v: &InventoryView, st: &State) -> Vec<usize> {
     let q = Query::parse(&st.search);
     let kinds = KINDS.get(st.kind).map(|k| k.1).unwrap_or(&[]);
     let mut stats: Vec<(usize, ItemStats)> = v
@@ -381,7 +382,7 @@ fn tooltip(ui: &mut egui::Ui, r: &Row) {
 
 /// What clicking an item does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Click {
+pub(crate) enum Click {
     /// Finish a waiting "Use on...": use this source on the clicked item.
     UseOn(u32),
     /// Select and appraise the clicked item.
@@ -391,7 +392,7 @@ pub enum Click {
 /// A click on `target` finishes a pending use, unless the pending item is
 /// the one clicked (using something on itself is not a recipe, so that
 /// just selects it again).
-pub fn click_action(pending: Option<u32>, target: u32) -> Click {
+pub(crate) fn click_action(pending: Option<u32>, target: u32) -> Click {
     match pending {
         Some(source) if source != target => Click::UseOn(source),
         _ => Click::Select,
@@ -561,7 +562,7 @@ fn pack_header(ui: &mut egui::Ui, text: String, container: u32, actions: &mut Ac
 }
 
 /// Draw the panel.
-pub fn draw(
+pub(crate) fn draw(
     egui: &egui::Context,
     icons: &mut IconCache,
     v: &InventoryView,
@@ -799,7 +800,7 @@ pub fn draw(
     actions
 }
 
-pub struct Inventory {
+pub(crate) struct Inventory {
     source: Source<InventoryView>,
     /// Open (its bound key toggles it). Starts open.
     pub show: bool,
@@ -810,7 +811,7 @@ pub struct Inventory {
 
 /// The split popup: a slider from 1 to stack - 1 and a Split button.
 /// Returns Some(amount) when confirmed, and clears `split` on cancel.
-pub fn draw_split(
+pub(crate) fn draw_split(
     egui: &egui::Context,
     item: &Item,
     split: &mut Option<(u32, u32)>,
@@ -856,7 +857,7 @@ impl Default for Inventory {
 }
 
 /// A sample item with a bare icon, for demos.
-pub fn demo_item(guid: u32, name: &str, stack: u32, wielded: bool, icon: u32) -> Item {
+pub(crate) fn demo_item(guid: u32, name: &str, stack: u32, wielded: bool, icon: u32) -> Item {
     Item {
         guid,
         name: name.to_string(),
@@ -870,7 +871,7 @@ pub fn demo_item(guid: u32, name: &str, stack: u32, wielded: bool, icon: u32) ->
 }
 
 /// A demo row: the item plus made-up numbers.
-pub fn demo_row(item: Item, container: u32, stats: ItemStats) -> Row {
+pub(crate) fn demo_row(item: Item, container: u32, stats: ItemStats) -> Row {
     let mut stats = stats;
     stats.guid = item.guid;
     stats.name = item.name.clone();
@@ -882,7 +883,7 @@ pub fn demo_row(item: Item, container: u32, stats: ItemStats) -> Row {
 
 impl Inventory {
     /// Known 32x32 icons from the portal, with sample stats.
-    pub fn demo() -> Self {
+    pub(crate) fn demo() -> Self {
         let me = 0x5000_0001;
         let pack = 0x8000_0010;
         let mut pack_item = demo_item(pack, "Pack", 1, false, 0x0600_2F40);

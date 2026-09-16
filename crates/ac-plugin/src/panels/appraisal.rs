@@ -17,7 +17,7 @@ use crate::{egui, Client, Ctx, Plugin, Settings};
 use ac_net::messages::Appraisal;
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct AppraisalView {
+pub(crate) struct AppraisalView {
     pub name: String,
     /// (label, value) lines in display order.
     pub lines: Vec<(String, String)>,
@@ -29,7 +29,7 @@ pub struct AppraisalView {
 }
 
 /// The damage type bits as words.
-pub fn damage_type_name(bits: u32) -> String {
+pub(crate) fn damage_type_name(bits: u32) -> String {
     let names = [
         (0x1, "Slashing"),
         (0x2, "Piercing"),
@@ -53,14 +53,14 @@ pub fn damage_type_name(bits: u32) -> String {
 }
 
 /// `+5%` / `-3%` from a multiplier such as 1.05.
-pub fn percent_bonus(mult: f64) -> String {
+pub(crate) fn percent_bonus(mult: f64) -> String {
     let pct = ((mult - 1.0) * 100.0).round() as i64;
     format!("{pct:+}%")
 }
 
 /// Build the lines from an appraisal; `skill_name`/`spell_name` resolve
 /// ids through the DAT tables.
-pub fn build(
+pub(crate) fn build(
     name: &str,
     a: &Appraisal,
     material_name: &dyn Fn(u32) -> &'static str,
@@ -245,7 +245,7 @@ pub fn build(
     }
 }
 
-pub fn view(c: &Client) -> Option<AppraisalView> {
+pub(crate) fn view(c: &Client) -> Option<AppraisalView> {
     let guid = c.last_appraisal?;
     let a = c.appraisals.get(&guid)?;
     let name = c
@@ -277,7 +277,7 @@ pub fn view(c: &Client) -> Option<AppraisalView> {
 
 /// Returns true when the window was closed (its title bar's close
 /// button, or Escape).
-pub fn draw(egui: &egui::Context, v: &AppraisalView) -> bool {
+pub(crate) fn draw(egui: &egui::Context, v: &AppraisalView) -> bool {
     let w = egui.viewport_rect().width();
     window(
         "appraisal",
@@ -327,14 +327,14 @@ pub fn draw(egui: &egui::Context, v: &AppraisalView) -> bool {
 }
 
 #[derive(Default)]
-pub struct AppraisalPanel {
+pub(crate) struct AppraisalPanel {
     source: Source<AppraisalView>,
     /// Open (its key toggles it). Starts closed.
     pub show: bool,
 }
 
 impl AppraisalPanel {
-    pub fn demo() -> Self {
+    pub(crate) fn demo() -> Self {
         AppraisalPanel {
             source: Source::Demo(AppraisalView {
                 name: "Demo Dagger".into(),

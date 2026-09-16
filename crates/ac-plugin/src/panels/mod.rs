@@ -22,36 +22,38 @@
 //! dropped, there is no session to send them to). [`demo`] builds the demo
 //! set; [`live`] the real one.
 
-pub mod allegiance;
-pub mod appraisal;
-pub mod autoplay;
-pub mod book;
-pub mod buffs;
-pub mod combat;
+// The `pub mod` below are the panel paths named outside the crate: the fleet,
+// camera, log-filter and draw-distance keys, and the open keys panels share.
+mod allegiance;
+mod appraisal;
+mod autoplay;
+mod book;
+mod buffs;
+mod combat;
 pub mod components;
-pub mod confirm;
-pub mod fellowship;
+mod confirm;
+mod fellowship;
 pub mod fleet;
-pub mod holdings;
-pub mod housing;
-pub mod inventory;
-pub mod loot;
-pub mod loot_profiles;
-pub mod map;
-pub mod menu;
+mod holdings;
+mod housing;
+mod inventory;
+mod loot;
+mod loot_profiles;
+mod map;
+mod menu;
 pub mod nameplates;
 pub mod options;
-pub mod radar;
-pub mod salvage;
+pub(crate) mod radar;
+mod salvage;
 pub mod skills;
-pub mod social;
+mod social;
 pub mod spellbar;
 pub mod spellbook;
-pub mod target;
-pub mod trade;
-pub mod vendor;
-pub mod vendoring;
-pub mod vitals;
+mod target;
+mod trade;
+mod vendor;
+mod vendoring;
+mod vitals;
 
 use crate::icons::{IconCache, IconLayers};
 use crate::{egui, Client, Plugin};
@@ -234,14 +236,14 @@ fn remembered(name: &str, fallback: egui::Pos2) -> egui::Pos2 {
 /// Take the saved positions out of the settings (see
 /// [`crate::Host::load_settings`]). Call before the first frame: a panel
 /// only takes its saved position the first time it is drawn.
-pub fn restore_positions(saved: std::collections::BTreeMap<String, [f32; 2]>) {
+pub(crate) fn restore_positions(saved: std::collections::BTreeMap<String, [f32; 2]>) {
     if let Ok(mut guard) = LAYOUT.lock() {
         guard.get_or_insert_with(Layout::default).saved = saved;
     }
 }
 
 /// Where every panel drawn this run sits now, for the settings file.
-pub fn positions(egui: &egui::Context) -> std::collections::BTreeMap<String, [f32; 2]> {
+pub(crate) fn positions(egui: &egui::Context) -> std::collections::BTreeMap<String, [f32; 2]> {
     let Ok(guard) = LAYOUT.lock() else {
         return Default::default();
     };
@@ -261,7 +263,7 @@ pub fn positions(egui: &egui::Context) -> std::collections::BTreeMap<String, [f3
 /// Forget the saved positions so the panels fall back to their built-in
 /// places (the options panel's "Reset window layout", together with
 /// egui's `reset_areas`).
-pub fn forget_positions() {
+pub(crate) fn forget_positions() {
     if let Ok(mut guard) = LAYOUT.lock() {
         guard.get_or_insert_with(Layout::default).saved.clear();
     }
@@ -359,7 +361,7 @@ pub fn closed(id: &str) -> bool {
 
 /// Close the window opened most recently (what Escape does); true when
 /// there was one. `frame` is the current egui frame.
-pub fn close_newest(frame: u64) -> bool {
+pub(crate) fn close_newest(frame: u64) -> bool {
     let newest = OPEN.with(|o| {
         o.borrow()
             .iter()
@@ -379,7 +381,8 @@ pub fn close_newest(frame: u64) -> bool {
 }
 
 /// Whether any window with a title bar is open right now.
-pub fn any_open(frame: u64) -> bool {
+#[allow(dead_code)] // nothing calls it; kept pending a delete decision
+pub(crate) fn any_open(frame: u64) -> bool {
     OPEN.with(|o| o.borrow().values().any(|(seen, _)| *seen + 1 >= frame))
 }
 
@@ -558,7 +561,7 @@ pub fn stats_tooltip(ui: &mut egui::Ui, name: &str, stats: &ac_client::items::It
 /// A search line and a kind chip narrowing an item list: the loot window,
 /// the two vendor lists. The search uses the inventory's query language
 /// (`ac_client::items::Query`: `dmg>10 spell:blood type:armor`), the chip
-/// is an index into [`inventory::KINDS`] (0 = all).
+/// is an index into `inventory::KINDS` (0 = all).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Filter {
     pub search: String,

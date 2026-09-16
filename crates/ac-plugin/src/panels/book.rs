@@ -8,7 +8,7 @@ use super::{caption, title_bar, window, Source};
 use crate::{egui, Client, Ctx, Plugin};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct BookView {
+pub(crate) struct BookView {
     pub title: String,
     pub author: String,
     /// Page texts; None until read.
@@ -16,13 +16,13 @@ pub struct BookView {
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
-pub struct Actions {
+pub(crate) struct Actions {
     pub close: bool,
     /// Turned to a page whose text is not here yet.
     pub want_page: Option<u32>,
 }
 
-pub fn view(c: &Client) -> Option<BookView> {
+pub(crate) fn view(c: &Client) -> Option<BookView> {
     let b = c.book.as_ref()?;
     let name = c
         .world
@@ -41,7 +41,7 @@ pub fn view(c: &Client) -> Option<BookView> {
     })
 }
 
-pub fn draw(egui: &egui::Context, v: &BookView, page: &mut usize) -> Actions {
+pub(crate) fn draw(egui: &egui::Context, v: &BookView, page: &mut usize) -> Actions {
     let mut actions = Actions::default();
     let rect = egui.viewport_rect();
     let n = v.pages.len();
@@ -111,7 +111,7 @@ pub fn draw(egui: &egui::Context, v: &BookView, page: &mut usize) -> Actions {
 }
 
 #[derive(Default)]
-pub struct Book {
+pub(crate) struct Book {
     source: Source<BookView>,
     page: usize,
     seen: u64,
@@ -121,7 +121,7 @@ pub struct Book {
 }
 
 impl Book {
-    pub fn demo() -> Self {
+    pub(crate) fn demo() -> Self {
         Book {
             source: Source::Demo(BookView {
                 title: "BASICS OF MAGIC".into(),

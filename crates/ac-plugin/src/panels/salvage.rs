@@ -11,7 +11,7 @@ use crate::icons::IconCache;
 use crate::{egui, Client, Ctx, Plugin};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Candidate {
+pub(crate) struct Candidate {
     pub item: Item,
     pub material: String,
     /// Workmanship times 100 (an integer for the view's `Eq`).
@@ -19,13 +19,13 @@ pub struct Candidate {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SalvageView {
+pub(crate) struct SalvageView {
     pub has_tool: bool,
     pub candidates: Vec<Candidate>,
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
-pub struct Actions {
+pub(crate) struct Actions {
     pub toggle: Vec<u32>,
     /// Carried items dragged in: tick them.
     pub add: Vec<u32>,
@@ -34,7 +34,7 @@ pub struct Actions {
     pub close: bool,
 }
 
-pub fn view(c: &Client) -> Option<SalvageView> {
+pub(crate) fn view(c: &Client) -> Option<SalvageView> {
     if !c.salvage_open {
         return None;
     }
@@ -55,7 +55,7 @@ pub fn view(c: &Client) -> Option<SalvageView> {
 }
 
 /// "Oak, workmanship 8.0".
-pub fn detail(c: &Candidate) -> String {
+pub(crate) fn detail(c: &Candidate) -> String {
     format!(
         "{}, workmanship {:.1}",
         c.material,
@@ -63,7 +63,7 @@ pub fn detail(c: &Candidate) -> String {
     )
 }
 
-pub fn draw(
+pub(crate) fn draw(
     egui: &egui::Context,
     icons: &mut IconCache,
     v: &SalvageView,
@@ -158,13 +158,13 @@ pub fn draw(
 }
 
 #[derive(Default)]
-pub struct Salvage {
+pub(crate) struct Salvage {
     source: Source<SalvageView>,
     chosen: Vec<u32>,
 }
 
 impl Salvage {
-    pub fn demo() -> Self {
+    pub(crate) fn demo() -> Self {
         use super::inventory::demo_item;
         let cand = |guid, name: &str, icon, material: &str, ws| Candidate {
             item: demo_item(guid, name, 1, false, icon),

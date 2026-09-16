@@ -7,7 +7,7 @@ use crate::{egui, Client};
 
 /// One character of the account.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CharacterRow {
+pub(crate) struct CharacterRow {
     pub id: u32,
     pub name: String,
     /// Non-zero while the character is pending deletion.
@@ -15,14 +15,14 @@ pub struct CharacterRow {
 }
 
 impl CharacterRow {
-    pub fn pending_deletion(&self) -> bool {
+    pub(crate) fn pending_deletion(&self) -> bool {
         self.seconds_until_deleted > 0
     }
 }
 
 /// What the select screen draws.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct SelectView {
+pub(crate) struct SelectView {
     pub account: String,
     pub host: String,
     pub characters: Vec<CharacterRow>,
@@ -33,7 +33,7 @@ pub struct SelectView {
 
 /// Highlight, confirmation and status of the select screen.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct SelectState {
+pub(crate) struct SelectState {
     pub highlighted: usize,
     /// Delete was pressed for this character; Yes/No decide.
     pub confirm_delete: Option<u32>,
@@ -43,14 +43,14 @@ pub struct SelectState {
 
 /// What was clicked.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum SelectAction {
+pub(crate) enum SelectAction {
     Enter(u32),
     Delete(u32),
     Restore(u32),
     New,
 }
 
-pub fn view(c: &Client) -> SelectView {
+pub(crate) fn view(c: &Client) -> SelectView {
     SelectView {
         account: c.config.account.clone(),
         host: c.config.host.clone(),
@@ -74,12 +74,12 @@ pub fn view(c: &Client) -> SelectView {
 }
 
 /// `deleting in 12m 34s`.
-pub fn deletion_label(seconds: u32) -> String {
+pub(crate) fn deletion_label(seconds: u32) -> String {
     format!("deleting in {}", fmt_seconds(seconds as f64))
 }
 
 /// Move the highlight by `delta` rows, clamped to the list.
-pub fn move_highlight(highlighted: usize, delta: i32, len: usize) -> usize {
+pub(crate) fn move_highlight(highlighted: usize, delta: i32, len: usize) -> usize {
     if len == 0 {
         return 0;
     }
@@ -88,7 +88,7 @@ pub fn move_highlight(highlighted: usize, delta: i32, len: usize) -> usize {
 
 /// A key while the select screen is up: Up/Down move, Enter enters the
 /// highlighted character, Escape cancels a pending confirmation.
-pub fn key(st: &mut SelectState, v: &SelectView, key: egui::Key) -> Option<SelectAction> {
+pub(crate) fn key(st: &mut SelectState, v: &SelectView, key: egui::Key) -> Option<SelectAction> {
     let len = v.characters.len();
     st.highlighted = st.highlighted.min(len.saturating_sub(1));
     match key {
@@ -109,7 +109,11 @@ pub fn key(st: &mut SelectState, v: &SelectView, key: egui::Key) -> Option<Selec
     None
 }
 
-pub fn draw(egui: &egui::Context, v: &SelectView, st: &mut SelectState) -> Vec<SelectAction> {
+pub(crate) fn draw(
+    egui: &egui::Context,
+    v: &SelectView,
+    st: &mut SelectState,
+) -> Vec<SelectAction> {
     let mut actions = Vec::new();
     let busy = v.entering.is_some();
     st.highlighted = st.highlighted.min(v.characters.len().saturating_sub(1));
@@ -222,7 +226,7 @@ pub fn draw(egui: &egui::Context, v: &SelectView, st: &mut SelectState) -> Vec<S
 }
 
 /// Three characters, one pending deletion, for `--demo-select`.
-pub fn demo_view() -> SelectView {
+pub(crate) fn demo_view() -> SelectView {
     SelectView {
         account: "demo".into(),
         host: "127.0.0.1".into(),

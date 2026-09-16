@@ -10,7 +10,7 @@ use crate::{egui, Client, Ctx, Plugin};
 use ac_client::items::ItemStats;
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct TradeView {
+pub(crate) struct TradeView {
     pub partner: String,
     pub mine: Vec<Item>,
     pub theirs: Vec<Item>,
@@ -23,7 +23,7 @@ pub struct TradeView {
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
-pub struct Actions {
+pub(crate) struct Actions {
     pub add: Vec<u32>,
     /// Single-clicked items on either side: select and appraise.
     pub inspect: Vec<u32>,
@@ -34,7 +34,7 @@ pub struct Actions {
     pub close: bool,
 }
 
-pub fn view(c: &Client) -> Option<TradeView> {
+pub(crate) fn view(c: &Client) -> Option<TradeView> {
     let t = c.world.trade.as_ref()?;
     let name = |g: &u32| {
         c.world
@@ -76,7 +76,7 @@ pub fn view(c: &Client) -> Option<TradeView> {
 }
 
 /// The WeenieErrors a TradeFailure carries.
-pub fn failure_text(reason: u32) -> &'static str {
+pub(crate) fn failure_text(reason: u32) -> &'static str {
     match reason {
         0x0430 => "attuned item",
         0x03F2 => "you cannot trade that",
@@ -85,7 +85,7 @@ pub fn failure_text(reason: u32) -> &'static str {
 }
 
 /// What the status line says about acceptance.
-pub fn status_text(v: &TradeView) -> String {
+pub(crate) fn status_text(v: &TradeView) -> String {
     match (v.i_accepted, v.they_accepted) {
         (true, true) => "Both accepted: trading".into(),
         (true, false) => format!("You accepted, waiting for {}", v.partner),
@@ -94,7 +94,7 @@ pub fn status_text(v: &TradeView) -> String {
     }
 }
 
-pub fn draw(egui: &egui::Context, icons: &mut IconCache, v: &TradeView) -> Actions {
+pub(crate) fn draw(egui: &egui::Context, icons: &mut IconCache, v: &TradeView) -> Actions {
     let mut actions = Actions::default();
     let rect = egui.viewport_rect();
     let (w, h) = (rect.width(), rect.height());
@@ -182,12 +182,12 @@ pub fn draw(egui: &egui::Context, icons: &mut IconCache, v: &TradeView) -> Actio
 }
 
 #[derive(Default)]
-pub struct Trade {
+pub(crate) struct Trade {
     source: Source<TradeView>,
 }
 
 impl Trade {
-    pub fn demo() -> Self {
+    pub(crate) fn demo() -> Self {
         let item = |guid, name: &str, stack, icon| Item {
             guid,
             name: name.to_string(),

@@ -14,7 +14,7 @@ use ac_client::items::{self, ItemStats, NumKey, SortKey};
 
 /// A vendor's stock line or one of our items offered for sale.
 #[derive(Clone, Debug, PartialEq)]
-pub struct TradeItem {
+pub(crate) struct TradeItem {
     pub guid: u32,
     pub name: String,
     pub price: u32,
@@ -26,7 +26,7 @@ pub struct TradeItem {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct VendorView {
+pub(crate) struct VendorView {
     pub name: String,
     pub stock: Vec<TradeItem>,
     pub selling: Vec<TradeItem>,
@@ -35,7 +35,7 @@ pub struct VendorView {
 }
 
 /// The sort choices over each list.
-pub const SORTS: &[(&str, Option<SortKey>)] = &[
+pub(crate) const SORTS: &[(&str, Option<SortKey>)] = &[
     ("price", None),
     ("name", Some(SortKey::Name)),
     ("value", Some(SortKey::Num(NumKey::Value))),
@@ -46,7 +46,7 @@ pub const SORTS: &[(&str, Option<SortKey>)] = &[
 
 /// The items a filter keeps, in the chosen order (price is the panel's
 /// own key; the rest come from `ac_client::items::sort`).
-pub fn shown(items: &[TradeItem], f: &Filter, sort: usize, descending: bool) -> Vec<usize> {
+pub(crate) fn shown(items: &[TradeItem], f: &Filter, sort: usize, descending: bool) -> Vec<usize> {
     let mut idx = f.matching(items, |it| &it.stats);
     match SORTS.get(sort).and_then(|s| s.1) {
         None => idx.sort_by(|a, b| {
@@ -73,7 +73,7 @@ pub fn shown(items: &[TradeItem], f: &Filter, sort: usize, descending: bool) -> 
 
 /// What the panel asked for.
 #[derive(Default, Debug, PartialEq, Eq)]
-pub struct Actions {
+pub(crate) struct Actions {
     pub buy: Vec<u32>,
     pub sell: Vec<u32>,
     /// The title bar's close button (or Escape): end the trade.
@@ -86,7 +86,7 @@ pub struct Actions {
 
 /// The panel's own state: a filter and a sort per side.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct State {
+pub(crate) struct State {
     pub stock: Filter,
     pub selling: Filter,
     pub sort: usize,
@@ -95,7 +95,7 @@ pub struct State {
 
 /// The open vendor, if any. Only pack items with a value that are not
 /// money are offered for sale.
-pub fn view(c: &Client) -> Option<VendorView> {
+pub(crate) fn view(c: &Client) -> Option<VendorView> {
     let v = c.world.open_vendor.as_ref()?;
     let stats_of = |guid: u32| c.stats_of(guid).unwrap_or_default();
     Some(VendorView {
@@ -195,7 +195,7 @@ fn trade_list(
     wants_appraisal
 }
 
-pub fn draw(egui: &egui::Context, v: &VendorView, st: &mut State) -> Actions {
+pub(crate) fn draw(egui: &egui::Context, v: &VendorView, st: &mut State) -> Actions {
     let mut actions = Actions::default();
     let w = egui.viewport_rect().width();
     window(
@@ -292,13 +292,13 @@ pub fn draw(egui: &egui::Context, v: &VendorView, st: &mut State) -> Actions {
 }
 
 #[derive(Default)]
-pub struct Vendor {
+pub(crate) struct Vendor {
     source: Source<VendorView>,
     state: State,
 }
 
 impl Vendor {
-    pub fn demo() -> Self {
+    pub(crate) fn demo() -> Self {
         let item = |guid: u32, name: &str, price, unlimited, stats: ItemStats| TradeItem {
             guid,
             name: name.into(),

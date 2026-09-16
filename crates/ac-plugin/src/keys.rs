@@ -128,7 +128,7 @@ pub const ACTIONS: &[Action] = &[
 
 /// Keys the viewer itself answers to, not bindable here, listed so the
 /// menu can say what they are.
-pub const FIXED: &[(&str, &str)] = &[
+pub(crate) const FIXED: &[(&str, &str)] = &[
     ("W A S D", "walk (Shift: slow)"),
     ("Space", "jump: hold to charge, wheel to place the landing"),
     ("C", "combat on or off"),
@@ -148,7 +148,7 @@ fn key_name(k: egui::Key) -> String {
 }
 
 /// The key bound to `action`, if any.
-pub fn binding(action: &str) -> Option<egui::Key> {
+pub(crate) fn binding(action: &str) -> Option<egui::Key> {
     let name = {
         let b = BINDINGS.read().ok()?;
         match b.get(action) {
@@ -169,7 +169,7 @@ pub fn bound(action: &str, key: egui::Key) -> bool {
 
 /// Bind `action` to `key` (or to nothing); any other action that had the
 /// key loses it.
-pub fn rebind(action: &str, key: Option<egui::Key>) {
+pub(crate) fn rebind(action: &str, key: Option<egui::Key>) {
     let Ok(mut b) = BINDINGS.write() else { return };
     if let Some(k) = key {
         let taken: Vec<String> = ACTIONS
@@ -192,14 +192,14 @@ pub fn rebind(action: &str, key: Option<egui::Key>) {
 }
 
 /// The key's name as the menu shows it ("I", "F5", "none").
-pub fn binding_label(action: &str) -> String {
+pub(crate) fn binding_label(action: &str) -> String {
     binding(action)
         .map(key_name)
         .unwrap_or_else(|| "none".to_string())
 }
 
 /// Back to the keys out of the box.
-pub fn reset() {
+pub(crate) fn reset() {
     if let Ok(mut b) = BINDINGS.write() {
         b.clear();
     }
@@ -207,7 +207,7 @@ pub fn reset() {
 
 /// Read the bindings from the settings (`keys.<action>`: a key name, or
 /// "" for none).
-pub fn load(settings: &Settings) {
+pub(crate) fn load(settings: &Settings) {
     let Ok(mut b) = BINDINGS.write() else { return };
     b.clear();
     for a in ACTIONS {
@@ -218,7 +218,7 @@ pub fn load(settings: &Settings) {
 }
 
 /// Write the bindings that differ from the defaults.
-pub fn save(settings: &mut Settings) {
+pub(crate) fn save(settings: &mut Settings) {
     let Ok(b) = BINDINGS.read() else { return };
     for a in ACTIONS {
         let key = format!("keys.{}", a.id);
