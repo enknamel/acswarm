@@ -38,6 +38,8 @@
 
 use std::time::{Duration, Instant};
 
+use ac_agent::recent::Recent;
+
 use crate::Client;
 // The rule vocabulary lives in ac-loot; this file still speaks it.
 pub use ac_loot::profile::LootAction;
@@ -276,7 +278,7 @@ pub struct Autoplay {
     /// lets through and something on the way stops.
     closing: Option<(u32, f32)>,
     /// Targets let go, and when, so they are left alone for a while.
-    given_up: Vec<(u32, Instant)>,
+    given_up: Recent<u32>,
     /// When ammunition was last made.
     last_craft: Option<Instant>,
     /// Bundles waiting to be used on each other once the character has

@@ -120,10 +120,8 @@ impl Client {
             .unwrap_or_else(|| format!("{guid:#010x}"));
         self.autoplay
             .note(format!("giving up on {name}: {why}"), now);
-        self.autoplay
-            .given_up
-            .retain(|(_, t)| now.duration_since(*t) < GIVE_UP_FOR);
-        self.autoplay.given_up.push((guid, now));
+        self.autoplay.given_up.expire(now, GIVE_UP_FOR);
+        self.autoplay.given_up.mark(guid, now);
         self.let_go(Release::Fight);
     }
 

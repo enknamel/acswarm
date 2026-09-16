@@ -245,11 +245,7 @@ impl Client {
             // With the vitae high, the hard ones and the killer wait.
             && !self.shy_of(o)
             // And one there is no getting to is not a fight on offer.
-            && !self
-                .autoplay
-                .given_up
-                .iter()
-                .any(|(g, t)| *g == o.guid && now.duration_since(*t) < GIVE_UP_FOR)
+            && !self.autoplay.given_up.within(&o.guid, now, GIVE_UP_FOR)
     }
 }
 
