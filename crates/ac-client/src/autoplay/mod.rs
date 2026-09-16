@@ -254,7 +254,7 @@ pub struct Autoplay {
     /// All of them: kept as the last one only, a second attacker
     /// silenced the first, which was then walked past between its
     /// swings (see [`Autoplay::attacked_by`]).
-    pub(crate) hit_by: Vec<(String, Instant)>,
+    pub(crate) hit_by: Recent<String>,
     /// What the leader remembers between plans, when this character
     /// leads: the bodies it has dealt and the turns each of the others
     /// has had (see `crate::plan`).

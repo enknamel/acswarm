@@ -53,7 +53,7 @@ fn a_caster_that_only_casts_is_attacking_the_character() {
 
     // Resisted, it was still cast at the character.
     c.autoplay.last_hit_us = None;
-    c.autoplay.hit_by.clear();
+    c.autoplay.hit_by = Default::default();
     c.chat_message(
         op,
         &magic_line("You resist the spell cast by Drudge Shaman"),
@@ -62,7 +62,7 @@ fn a_caster_that_only_casts_is_attacking_the_character() {
 
     // A fellow's heal is not.
     c.autoplay.last_hit_us = None;
-    c.autoplay.hit_by.clear();
+    c.autoplay.hit_by = Default::default();
     c.chat_message(
         op,
         &magic_line("Aldric casts Heal Other I and restores 30 points of your health."),
@@ -120,7 +120,7 @@ fn a_fight_on_the_road_ends_when_the_creature_stops_following() {
         !c.left_behind_on_the_road(guid, now),
         "it is still swinging"
     );
-    c.autoplay.hit_by.clear();
+    c.autoplay.hit_by = Default::default();
     c.autoplay.last_hit_us = None;
     c.world.objects.get_mut(&guid).unwrap().walked_at = Some(0x5000_0001);
     assert!(!c.left_behind_on_the_road(guid, now), "it is coming at us");
