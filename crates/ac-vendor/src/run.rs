@@ -326,25 +326,15 @@ impl Run {
             }
         }
 
-        let mut items: Vec<u32> = Vec::new();
-        let mut pay = 0u32;
-        let mut anything = false;
-        for it in offer {
-            anything = true;
-            let after = pay.saturating_add(it.value);
-            // The server finds room for the whole payment before goods leave, in new coin stacks:
-            // room in a carried pile and the sold item's slot do not count
-            // (test: a_sale_needs_room_for_its_money_before_the_goods_leave).
-            if coin_slots(after) > snap.slots_free {
-                break;
-            }
-            items.push(it.guid);
-            pay = after;
-        }
+        // One armful is one payment, and the pack must hold it before the goods go: the errand
+        // plans the trip by this same rule (`errand::armful_within_slots`).
+        let pays: Vec<u32> = offer.iter().map(|it| it.value).collect();
+        let (taken, _) = crate::errand::armful_within_slots(&pays, snap.slots_free);
+        let items: Vec<u32> = offer[..taken].iter().map(|it| it.guid).collect();
         if items.is_empty() {
             // No room for the money is not the counter's to fix: stand aside so cashing and buying
             // get their turn, and the visit ends saying why nothing sold.
-            self.no_room |= anything;
+            self.no_room |= !offer.is_empty();
             return None;
         }
         self.offered.extend(items.iter().copied());
@@ -417,10 +407,6 @@ impl Run {
         }
         None
     }
-}
-
-fn coin_slots(coin: u32) -> u32 {
-    coin.div_ceil(crate::errand::COIN_STACK)
 }
 
 /// The weenie of the note a counter deals in, found on its own shelf.

@@ -169,6 +169,21 @@ pub fn coin_slots(coin: u32) -> u32 {
     coin.div_ceil(COIN_STACK)
 }
 
+/// How much of `pays`, in order, one armful sells for, and what the counter pays for it.
+/// Whole new coin stacks weighed against the slots free before any goods leave, so the sold slots
+/// and the carried pile do not count (Player_Commerce.cs:178,:182,:199; ItemsToReceive.cs:41,:103).
+pub fn armful_within_slots(pays: &[u32], slots_free: u32) -> (usize, u32) {
+    let mut takings = 0u32;
+    for (taken, pay) in pays.iter().enumerate() {
+        let after = takings.saturating_add(*pay);
+        if coin_slots(after) > slots_free {
+            return (taken, takings);
+        }
+        takings = after;
+    }
+    (pays.len(), takings)
+}
+
 pub fn note_cost(face: u32) -> u32 {
     (face as f32 * NOTE_MARKUP).ceil() as u32
 }
