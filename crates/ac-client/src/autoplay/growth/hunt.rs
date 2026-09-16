@@ -207,7 +207,7 @@ impl Client {
                 self.autoplay
                     .note(format!("at the hunting ground: {name}"), now);
             } else {
-                st.skip.push((lb, now));
+                st.skip.mark(lb, now);
                 self.autoplay
                     .note(format!("could not reach the {name} ground; another"), now);
             }
@@ -325,8 +325,7 @@ impl Client {
             }
         }
         let st = &mut self.autoplay.growth;
-        st.skip
-            .retain(|(_, t)| now.duration_since(*t) < SKIP_GROUND_FOR);
+        st.skip.expire(now, SKIP_GROUND_FOR);
         let mut skip: Vec<u32> = st.skip.iter().map(|(g, _)| *g).collect();
         skip.push(here);
         if let Some(h) = st.hunting_at {
@@ -405,7 +404,7 @@ impl Client {
             st.bound_since = Some(now);
             st.quiet_since = None;
             if let Some(h) = st.hunting_at.take() {
-                st.skip.push((h, now));
+                st.skip.mark(h, now);
             }
             self.autoplay.say(
                 Doing::Traveling,
@@ -417,7 +416,7 @@ impl Client {
             true
         } else {
             let st = &mut self.autoplay.growth;
-            st.skip.push((lb, now));
+            st.skip.mark(lb, now);
             st.quiet_since = None;
             st.next_hunt = Some(now + RETRY_AFTER);
             self.autoplay

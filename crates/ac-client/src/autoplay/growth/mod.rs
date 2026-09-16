@@ -43,6 +43,7 @@
 
 use std::time::Instant;
 
+use ac_agent::recent::Recent;
 use glam::Vec2;
 
 use crate::autoplay::Doing;
@@ -170,7 +171,7 @@ pub struct State {
     /// The ground the character hunts on, once it has arrived.
     pub hunting_at: Option<u32>,
     /// Grounds not to go to for a while, and since when.
-    skip: Vec<(u32, Instant)>,
+    skip: Recent<u32>,
     run: Option<Run>,
     /// The run in progress was asked for from the vendoring panel and
     /// is stepped from there, not by autoplay's tick (see
