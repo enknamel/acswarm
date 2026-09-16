@@ -1,9 +1,12 @@
 use super::{
-    next_invitee, rival_leader, Mate, TeamView, HELD_OFF_FIRST, RECRUIT_AGAIN, RECRUIT_FLOOR,
-    TEAM_OPTIONS,
+    next_invitee, rival_leader, HELD_OFF_FIRST, RECRUIT_AGAIN, RECRUIT_FLOOR, TEAM_OPTIONS,
+    YIELD_AFTER,
 };
+use crate::autoplay::{Mate, TeamView};
 use crate::did::Patience;
-use std::time::Instant;
+use crate::testkit::standing_in_the_field;
+use crate::Client;
+use std::time::{Duration, Instant};
 
 /// Nobody held off.
 fn nobody() -> Patience<u32> {
@@ -321,4 +324,219 @@ fn nine_are_all_asked_inside_ten_seconds() {
             asked.len()
         );
     }
+}
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn the_leader_that_does_not_sort_first_gives_up_the_fellowship_it_founded() {
+    // Two fellowships for one fleet, and this character founded the
+    // one whose leader does not sort first. Once the rightful leader
+    // has been seen in a fellowship of its own for a few seconds,
+    // this one is disbanded, so the rightful leader can recruit its
+    // members and this character with them.
+    let holtburg = 0xA9B4_0019;
+    let mut c = standing_in_the_field(20, holtburg, glam::Vec3::new(84.0, 84.0, 10.0));
+    let t0 = Instant::now();
+    let me = c.world.player_guid.unwrap();
+    let member = 0x5000_0005;
+    c.autoplay.config.team.enabled = true;
+    c.autoplay.config.team.fellowship = true;
+    let fellow = |guid| ac_world::Fellow {
+        guid,
+        ..Default::default()
+    };
+    c.world.fellowship = Some(ac_world::Fellowship {
+        name: "acreborn".into(),
+        leader: me,
+        members: vec![fellow(me), fellow(member)],
+        ..Default::default()
+    });
+    c.autoplay.founded = Some(t0);
+    c.autoplay.team = TeamView {
+        mates: vec![
+            Mate {
+                name: "+Brynith".into(),
+                guid: 0x5000_0002,
+                in_fellowship: true,
+                leader: true,
+                autoplay: true,
+                ..Default::default()
+            },
+            Mate {
+                name: "+Brynwyn".into(),
+                guid: member,
+                in_fellowship: true,
+                ..Default::default()
+            },
+        ],
+        leader: false,
+        settled: true,
+        ..Default::default()
+    };
+    // The first sight starts the clock; the board's word on a mate
+    // is up to a round old, so it is given a few rounds to agree
+    // with the world's.
+    assert!(!c.autoplay_fellowship(t0));
+    assert!(!c.autoplay_fellowship(t0 + YIELD_AFTER / 2));
+    assert!(c.autoplay_fellowship(t0 + YIELD_AFTER), "not given up");
+    assert!(c.autoplay.founded.is_none());
+    assert!(
+        c.autoplay.status.contains("disbanding"),
+        "{}",
+        c.autoplay.status
+    );
+    // One this character did not found is never given up, whoever
+    // leads: the note on a fellowship "not founded by me" stands.
+    c.autoplay.founded = None;
+    c.autoplay.status.clear();
+    assert!(!c.autoplay_fellowship(t0 + YIELD_AFTER * 4));
+    assert!(!c.autoplay_fellowship(t0 + YIELD_AFTER * 8));
+    assert!(!c.autoplay.status.contains("disbanding"));
+    // Nor is one this character founded while it leads the team.
+    c.autoplay.founded = Some(t0);
+    c.autoplay.team.leader = true;
+    assert!(!c.autoplay_fellowship(t0 + YIELD_AFTER * 12));
+    assert!(c.autoplay.founded.is_some());
+}
+
+/// A character leading a fellowship it founded, with `others` in
+/// it besides itself, on a settled team.
+fn leading_a_fellowship(c: &mut Client, others: &[u32], t0: Instant) {
+    let me = c.world.player_guid.unwrap();
+    c.autoplay.config.team.enabled = true;
+    c.autoplay.config.team.fellowship = true;
+    let fellow = |guid| ac_world::Fellow {
+        guid,
+        ..Default::default()
+    };
+    c.world.fellowship = Some(ac_world::Fellowship {
+        name: "acreborn".into(),
+        leader: me,
+        members: std::iter::once(me)
+            .chain(others.iter().copied())
+            .map(fellow)
+            .collect(),
+        ..Default::default()
+    });
+    c.autoplay.founded = Some(t0);
+    c.autoplay.team.settled = true;
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn whoever_leads_the_fellowship_brings_in_the_rightful_leader_standing_outside() {
+    // +Brynlyn founded and gathered the seven that came on with it;
+    // +Brynith, first by name, came on a few seconds later. Every
+    // roster's leader flipped to +Brynith the moment it was heard:
+    // +Brynlyn stopped recruiting, since it led the team no longer,
+    // and +Brynith, with nobody free to found with, founded
+    // nothing. Seven in a fellowship and the team's leader outside
+    // it for the life of the run. Whoever leads a fellowship brings
+    // the team's mates into it, the rightful leader among them.
+    let holtburg = 0xA9B4_0019;
+    let mut c = standing_in_the_field(20, holtburg, glam::Vec3::new(84.0, 84.0, 10.0));
+    let t0 = Instant::now();
+    let here = c.player.as_ref().unwrap().world_position();
+    let (rightful, member) = (0x5000_0002, 0x5000_0005);
+    leading_a_fellowship(&mut c, &[member], t0);
+    c.autoplay.team.leader = false;
+    c.autoplay.team.mates = vec![
+        Mate {
+            name: "+Brynith".into(),
+            guid: rightful,
+            in_fellowship: false,
+            leader: true,
+            autoplay: true,
+            world: here,
+            ..Default::default()
+        },
+        Mate {
+            name: "+Brynwyn".into(),
+            guid: member,
+            in_fellowship: true,
+            world: here,
+            ..Default::default()
+        },
+    ];
+    assert!(c.autoplay_fellowship(t0), "{}", c.autoplay.status);
+    assert!(
+        c.autoplay
+            .status
+            .contains("bringing +Brynith into the fellowship"),
+        "{}",
+        c.autoplay.status
+    );
+    assert_eq!(
+        c.autoplay
+            .recruited
+            .iter()
+            .map(|(g, _)| *g)
+            .collect::<Vec<_>>(),
+        vec![rightful]
+    );
+    // The other way about, nothing: a team leader that let itself
+    // be recruited into a mate's fellowship cannot recruit into it
+    // (the server answers 0x041D), and leaves the gathering to that
+    // mate.
+    c.autoplay.recruited.clear();
+    c.autoplay.last_recruit = None;
+    c.world.fellowship.as_mut().unwrap().leader = member;
+    c.autoplay.founded = None;
+    c.autoplay.team.leader = true;
+    c.autoplay.team.mates[0].leader = false;
+    assert!(!c.autoplay_fellowship(t0 + RECRUIT_AGAIN));
+    assert!(c.autoplay.recruited.is_empty());
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_full_fellowship_asks_nobody_else() {
+    // Nine in, a tenth on the team: the server answered 0x041E to
+    // every ask and the tenth was asked every five seconds for the
+    // life of the run. The count says so first, once; and the code,
+    // should the server's count differ, holds off whoever was asked
+    // last.
+    let holtburg = 0xA9B4_0019;
+    let mut c = standing_in_the_field(20, holtburg, glam::Vec3::new(84.0, 84.0, 10.0));
+    let t0 = Instant::now();
+    let here = c.player.as_ref().unwrap().world_position();
+    let eight: Vec<u32> = (0..8).map(|i| 0x5000_0010 + i).collect();
+    leading_a_fellowship(&mut c, &eight, t0);
+    c.autoplay.team.leader = true;
+    let tenth = 0x5000_0030;
+    c.autoplay.team.mates = eight
+        .iter()
+        .map(|&guid| Mate {
+            name: format!("+Bryn{guid:x}"),
+            guid,
+            in_fellowship: true,
+            world: here,
+            ..Default::default()
+        })
+        .chain(std::iter::once(Mate {
+            name: "+Brynzed".into(),
+            guid: tenth,
+            world: here,
+            ..Default::default()
+        }))
+        .collect();
+    // A hold on somebody no longer on the team goes with them.
+    let gone = 0x5000_0099;
+    c.autoplay.held_off.hold(gone, HELD_OFF_FIRST, t0);
+    assert!(!c.autoplay_fellowship(t0));
+    assert!(c.autoplay.recruited.is_empty(), "the tenth was asked");
+    assert!(
+        c.autoplay
+            .noted
+            .iter()
+            .any(|(t, _)| t.contains("the fellowship is full at 9: 1 mate(s)")),
+        "{:?}",
+        c.autoplay.noted
+    );
+    assert!(!c.autoplay.held_off.held(&gone, t0));
+    // The server's own word on it, about the last one asked.
+    c.autoplay.recruited = vec![(tenth, t0)];
+    let soon = t0 + Duration::from_secs(1);
+    c.autoplay.hear_fellowship_full(soon);
+    assert!(c.autoplay.held_off.held(&tenth, soon));
+    assert!(!c.autoplay.held_off.held(&tenth, soon + HELD_OFF_FIRST));
 }

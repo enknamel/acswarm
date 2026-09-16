@@ -2,11 +2,10 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use super::turns::{deal, Shut, Turn, CLAIM_STALE, SAME_MOMENT};
 #[cfg(doc)]
 use crate::autoplay::{called_to, Autoplay};
-use crate::autoplay::{
-    corpse_within_reach, deal, skills_asked_of, Role, Shut, Turn, CLAIM_STALE, SAME_MOMENT,
-};
+use crate::autoplay::{corpse_within_reach, skills_asked_of, Role};
 use crate::Client;
 
 /// The mate the fleet should be following instead of this character,
