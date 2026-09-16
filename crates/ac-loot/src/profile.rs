@@ -731,9 +731,12 @@ impl Profile {
     /// Read one; an unparsable profile is an error, not an empty one that silently loots nothing.
     pub fn load(dir: &Path, name: &str) -> std::io::Result<Profile> {
         let path = Self::path_of(dir, name);
-        let text = std::fs::read_to_string(&path)?;
-        let mut p: Profile = serde_json::from_str(&text)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let mut p: Profile = ac_store::read_json(&path)?.ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("no loot profile at {}", path.display()),
+            )
+        })?;
         if p.name.trim().is_empty() {
             p.name = name.to_string();
         }
@@ -742,11 +745,10 @@ impl Profile {
 
     /// Write it out, creating the directory if it is not there.
     pub fn save(&self, dir: &Path) -> std::io::Result<PathBuf> {
-        std::fs::create_dir_all(dir)?;
         let path = Self::path_of(dir, &self.name);
         let text = serde_json::to_string_pretty(self)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        std::fs::write(&path, text)?;
+        ac_store::write_atomic(&path, text.as_bytes(), ac_store::Visibility::Normal)?;
         Ok(path)
     }
 }
@@ -923,6 +925,8 @@ impl Profile {
 }
 
 /// A name safe as a file name: what a player types, less the characters a path cannot hold.
+/// Not `ac_store::file_safe`: this one writes `-` and falls back to "profile", and changing that
+/// would write a second file beside the one a player's profile already lives in.
 pub fn tidy_name(name: &str) -> String {
     let cleaned: String = name
         .trim()

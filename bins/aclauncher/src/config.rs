@@ -3,7 +3,6 @@
 //! Passwords are stored in plain text: the file is only as private as the
 //! user's home directory.
 
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -91,14 +90,12 @@ impl Default for Config {
 
 /// The user's home directory, from `$HOME`.
 pub fn home_dir() -> PathBuf {
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."))
+    ac_store::home()
 }
 
 /// `~/.acswarm`.
 pub fn acswarm_dir() -> PathBuf {
-    home_dir().join(".acswarm")
+    ac_store::app_dir()
 }
 
 /// `~/.acswarm/launcher.json`.
@@ -118,25 +115,21 @@ fn default_data_dir() -> PathBuf {
 impl Config {
     /// Load `path`, or the defaults when it does not exist yet.
     pub fn load(path: &Path) -> Result<Config> {
-        match fs::read(path) {
-            Ok(bytes) => {
-                serde_json::from_slice(&bytes).with_context(|| format!("parse {}", path.display()))
+        match ac_store::read_json(path) {
+            Ok(Some(config)) => Ok(config),
+            Ok(None) => Ok(Config::default()),
+            Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
+                Err(e).with_context(|| format!("parse {}", path.display()))
             }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Config::default()),
             Err(e) => Err(e).with_context(|| format!("read {}", path.display())),
         }
     }
 
     /// Write `path` (creating its directory), replacing it atomically.
     pub fn save(&self, path: &Path) -> Result<()> {
-        if let Some(dir) = path.parent() {
-            fs::create_dir_all(dir).with_context(|| format!("create {}", dir.display()))?;
-        }
         let json = serde_json::to_string_pretty(self)?;
-        let tmp = path.with_extension("json.tmp");
-        fs::write(&tmp, json.as_bytes()).with_context(|| format!("write {}", tmp.display()))?;
-        fs::rename(&tmp, path).with_context(|| format!("rename to {}", path.display()))?;
-        Ok(())
+        ac_store::write_atomic(path, json.as_bytes(), ac_store::Visibility::Normal)
+            .with_context(|| format!("write {}", path.display()))
     }
 
     pub fn server(&self, name: &str) -> Option<&Server> {
@@ -208,6 +201,7 @@ pub fn format_rfc3339(secs: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     fn temp_path(name: &str) -> PathBuf {
         let dir =

@@ -1,0 +1,10 @@
+[package]
+name = "ac-store"
+description = "The files acswarm keeps: where they live, and reading and writing them whole"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true

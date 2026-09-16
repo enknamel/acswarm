@@ -18,6 +18,7 @@ ac-vendor = { path = "../ac-vendor" }
 ac-formats = { path = "../ac-formats" }
 ac-net = { path = "../ac-net" }
 ac-scene = { path = "../ac-scene" }
+ac-store = { path = "../ac-store" }
 ac-world = { path = "../ac-world" }
 glam = "0.30"
 serde.workspace = true

@@ -8,6 +8,7 @@
 
 use std::path::{Path, PathBuf};
 
+use ac_store::Visibility;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -32,13 +33,7 @@ impl Settings {
     /// The config directory: `$ACSWARM_CONFIG_DIR`, else
     /// `~/.config/acswarm`.
     pub fn config_dir() -> PathBuf {
-        if let Some(d) = std::env::var_os("ACSWARM_CONFIG_DIR") {
-            return PathBuf::from(d);
-        }
-        let home = std::env::var_os("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_default();
-        home.join(".config").join("acswarm")
+        ac_store::config_dir()
     }
 
     /// Where the UI settings live: [`Settings::config_dir`]`/ui.json`.
@@ -50,25 +45,18 @@ impl Settings {
     /// malformed one is logged and treated the same (the next save
     /// overwrites it).
     pub fn load(path: &Path) -> Self {
-        let text = match std::fs::read_to_string(path) {
-            Ok(t) => t,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Self::new(),
-            Err(e) => {
-                tracing::warn!("settings: cannot read {}: {e}", path.display());
-                return Self::new();
-            }
-        };
-        match serde_json::from_str::<Value>(&text) {
-            Ok(Value::Object(values)) => Settings {
+        match ac_store::read_json::<Value>(path) {
+            Ok(None) => Self::new(),
+            Ok(Some(Value::Object(values))) => Settings {
                 values,
                 dirty: false,
             },
-            Ok(_) => {
+            Ok(Some(_)) => {
                 tracing::warn!("settings: {} is not a JSON object", path.display());
                 Self::new()
             }
             Err(e) => {
-                tracing::warn!("settings: {} is malformed: {e}", path.display());
+                tracing::warn!("settings: cannot read {}: {e}", path.display());
                 Self::new()
             }
         }
@@ -77,14 +65,14 @@ impl Settings {
     /// Write `path` as pretty JSON, creating its directory. Clears the
     /// dirty flag on success.
     pub fn save(&mut self, path: &Path) -> std::io::Result<()> {
-        if let Some(dir) = path.parent() {
-            if !dir.as_os_str().is_empty() {
-                std::fs::create_dir_all(dir)?;
-            }
-        }
-        let text = serde_json::to_string_pretty(&Value::Object(self.values.clone()))
-            .map_err(std::io::Error::other)?;
-        std::fs::write(path, text + "\n")?;
+        self.save_as(path, Visibility::Normal)
+    }
+
+    /// [`Settings::save`], saying who may read the file afterwards: the
+    /// login store keeps passwords in the clear and is written
+    /// [`Visibility::Private`].
+    pub fn save_as(&mut self, path: &Path, visibility: Visibility) -> std::io::Result<()> {
+        ac_store::write_json_atomic(path, &self.values, visibility)?;
         self.dirty = false;
         Ok(())
     }

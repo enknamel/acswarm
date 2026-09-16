@@ -267,7 +267,7 @@ impl Cli {
 
 /// Where the chosen data directory is remembered between launches.
 fn saved_data_dir_file() -> PathBuf {
-    ac_plugin::Settings::config_dir().join("data-dir")
+    ac_store::config_dir().join("data-dir")
 }
 
 /// A directory holds the game data when the portal DAT is inside it.
@@ -296,16 +296,15 @@ fn save_data_dir(dir: &Path) {
 /// The usual places the game data sits, tried before asking.
 fn common_data_dirs() -> Vec<PathBuf> {
     let mut out = Vec::new();
-    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
-        out.push(home.join("Downloads").join("ac_data"));
-        out.push(home.join("ac_data"));
-        out.push(
-            home.join("Library")
-                .join("Application Support")
-                .join("acswarm")
-                .join("ac_data"),
-        );
-    }
+    let home = ac_store::home();
+    out.push(home.join("Downloads").join("ac_data"));
+    out.push(home.join("ac_data"));
+    out.push(
+        home.join("Library")
+            .join("Application Support")
+            .join("acswarm")
+            .join("ac_data"),
+    );
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
             out.push(dir.join("ac_data"));
@@ -313,7 +312,7 @@ fn common_data_dirs() -> Vec<PathBuf> {
             out.push(dir.join("..").join("Resources").join("ac_data"));
         }
     }
-    out.push(ac_plugin::Settings::config_dir().join("ac_data"));
+    out.push(ac_store::config_dir().join("ac_data"));
     out
 }
 
@@ -362,54 +361,6 @@ fn no_data_dir_notice() {
 
 #[cfg(target_os = "linux")]
 fn no_data_dir_notice() {}
-
-/// Where the player's servers and remembered logins are kept.
-fn servers_path() -> PathBuf {
-    ac_plugin::Settings::config_dir().join("servers.json")
-}
-
-/// Read the player's servers and logins.
-fn load_servers() -> ac_plugin::servers::Servers {
-    ac_plugin::servers::Servers::load(&ac_plugin::Settings::load(&servers_path()))
-}
-
-/// Write the player's servers and logins back to their file.
-fn save_servers(servers: &ac_plugin::servers::Servers) {
-    let path = servers_path();
-    let mut settings = ac_plugin::Settings::load(&path);
-    servers.save(&mut settings);
-    if let Err(e) = settings.save(&path) {
-        tracing::warn!("could not save the server list: {e}");
-        return;
-    }
-    keep_to_yourself(&path);
-}
-
-/// Make a file readable only by the person who owns it.
-///
-/// This file holds account passwords in the clear, and it was being
-/// written world-readable, which on a shared machine means any other
-/// account could read them. Tightening the mode is not encryption and
-/// does not pretend to be: anything running as this user can still read
-/// it. It closes the easy door, not every door.
-fn keep_to_yourself(path: &Path) {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        // The directory too: a world-readable directory is how the
-        // backup file beside this one gets found.
-        for target in [path.parent().unwrap_or(path), path] {
-            let owner_only = if target.is_dir() { 0o700 } else { 0o600 };
-            if let Err(e) =
-                std::fs::set_permissions(target, std::fs::Permissions::from_mode(owner_only))
-            {
-                tracing::warn!("could not lock down {}: {e}", target.display());
-            }
-        }
-    }
-    #[cfg(not(unix))]
-    let _ = path;
-}
 
 /// Settle on a data directory: an explicit choice wins; otherwise the
 /// remembered one, then the usual places, then a folder picker when a
@@ -1269,7 +1220,10 @@ impl App {
             self.begin_login(login);
         }
         if let Some(servers) = self.lobby.take_dirty_servers() {
-            save_servers(&servers);
+            let path = ac_plugin::lobby::store::path();
+            if let Err(e) = ac_plugin::lobby::store::save_at(&path, &servers) {
+                tracing::warn!("could not save the server list: {e}");
+            }
         }
     }
 
@@ -1961,7 +1915,7 @@ impl App {
         }
         let assets = ac_scene::Assets::open(self.cli.data_dir()).context("opening DAT archives")?;
         if self.cli.demo_connect {
-            self.lobby.open_connect(load_servers());
+            self.lobby.open_connect(ac_plugin::lobby::store::load());
         }
         if self.cli.demo_select || self.cli.demo_create {
             // The lobby with no server: daylight sky, no world; the creation
@@ -2130,7 +2084,7 @@ impl ApplicationHandler for App {
             && !self.lobby.visible()
             && self.nets.is_empty()
         {
-            self.lobby.open_connect(load_servers());
+            self.lobby.open_connect(ac_plugin::lobby::store::load());
         }
     }
 

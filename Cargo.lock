@@ -53,6 +53,7 @@ dependencies = [
  "ac-nav",
  "ac-net",
  "ac-scene",
+ "ac-store",
  "ac-vendor",
  "ac-world",
  "glam 0.30.10",
@@ -90,6 +91,7 @@ version = "0.0.3"
 dependencies = [
  "ac-agent",
  "ac-net",
+ "ac-store",
  "ac-world",
  "regex",
  "serde",
@@ -126,6 +128,7 @@ dependencies = [
  "ac-formats",
  "ac-net",
  "ac-scene",
+ "ac-store",
  "ac-vendor",
  "ac-world",
  "egui",
@@ -141,6 +144,7 @@ version = "0.0.3"
 dependencies = [
  "ac-dat",
  "ac-formats",
+ "ac-store",
  "glam 0.30.10",
  "image",
  "thiserror 2.0.20",
@@ -154,11 +158,20 @@ dependencies = [
  "ac-client",
  "ac-net",
  "ac-plugin",
+ "ac-store",
  "ac-world",
  "glam 0.30.10",
  "rhai",
  "serde_json",
  "tracing",
+]
+
+[[package]]
+name = "ac-store"
+version = "0.0.3"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -208,6 +221,7 @@ dependencies = [
 name = "aclauncher"
 version = "0.0.3"
 dependencies = [
+ "ac-store",
  "anyhow",
  "clap",
  "egui",
@@ -234,6 +248,7 @@ dependencies = [
  "ac-plugin",
  "ac-scene",
  "ac-script",
+ "ac-store",
  "ac-world",
  "anyhow",
  "bytemuck",

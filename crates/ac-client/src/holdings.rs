@@ -50,7 +50,7 @@ pub const ONLINE_FOR: u64 = 90;
 pub fn bus_key(server: &str, account: &str, character: &str) -> String {
     format!(
         "{BUS_PREFIX}{}/{}/{character}",
-        safe_name(&server.to_ascii_lowercase()),
+        ac_store::file_safe(&server.to_ascii_lowercase()),
         account.to_ascii_lowercase()
     )
 }
@@ -440,28 +440,6 @@ pub struct Hit {
     pub took: Option<ac_loot::LootAction>,
 }
 
-/// A file-system safe form of a name: letters, digits and a few marks
-/// kept, the rest replaced.
-pub fn safe_name(name: &str) -> String {
-    let s: String = name
-        .trim()
-        .chars()
-        .map(|c| {
-            if c.is_alphanumeric() || matches!(c, ' ' | '-' | '_' | '+' | '\'' | '.') {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    let s = s.trim_matches(|c| c == '.' || c == ' ').to_string();
-    if s.is_empty() {
-        "_".into()
-    } else {
-        s
-    }
-}
-
 /// Every snapshot known to this process, by (account, character).
 #[derive(Debug, Default)]
 pub struct HoldingsStore {
@@ -519,18 +497,16 @@ impl HoldingsStore {
             if path.extension().and_then(|e| e.to_str()) != Some("json") {
                 return;
             }
-            match std::fs::read_to_string(path)
-                .map_err(|e| e.to_string())
-                .and_then(|t| {
-                    serde_json::from_str::<CharacterHoldings>(&t).map_err(|e| e.to_string())
-                }) {
-                Ok(h) => {
+            match ac_store::read_json::<CharacterHoldings>(path) {
+                Ok(Some(h)) => {
                     if h.server.is_empty() {
                         orphans += 1;
                     }
                     store.merge(h);
                     n += 1;
                 }
+                // Gone between listing the directory and reading it.
+                Ok(None) => {}
                 Err(e) => tracing::warn!("holdings: cannot read {}: {e}", path.display()),
             }
         };
@@ -568,19 +544,16 @@ impl HoldingsStore {
 
     /// The file a character's snapshot lives in under `dir`.
     pub fn path_for(dir: &Path, server: &str, account: &str, character: &str) -> PathBuf {
-        dir.join(safe_name(&server.to_ascii_lowercase()))
-            .join(safe_name(&account.to_ascii_lowercase()))
-            .join(format!("{}.json", safe_name(character)))
+        dir.join(ac_store::file_safe(&server.to_ascii_lowercase()))
+            .join(ac_store::file_safe(&account.to_ascii_lowercase()))
+            .join(format!("{}.json", ac_store::file_safe(character)))
     }
 
     /// Write one snapshot under `dir`.
     pub fn save_to(dir: &Path, h: &CharacterHoldings) -> std::io::Result<PathBuf> {
         let path = Self::path_for(dir, &h.server, &h.account, &h.character);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
         let text = serde_json::to_string(h).map_err(std::io::Error::other)?;
-        std::fs::write(&path, text)?;
+        ac_store::write_atomic(&path, text.as_bytes(), ac_store::Visibility::Normal)?;
         Ok(path)
     }
 
@@ -1014,10 +987,14 @@ mod tests {
             Some(("", "fleetbot1", "Fleetbot One"))
         );
         assert_eq!(parse_bus_key("autoplay.mate"), None);
-        assert_eq!(safe_name("+Fletch"), "+Fletch");
-        assert_eq!(safe_name("Al'Arqas of Yaraq"), "Al'Arqas of Yaraq");
-        assert_eq!(safe_name("../x/y"), "_x_y");
-        assert_eq!(safe_name("  .. "), "_");
+        // The snapshots on disk keep the names they were written under.
+        assert_eq!(ac_store::file_safe("+Fletch"), "+Fletch");
+        assert_eq!(
+            ac_store::file_safe("Al'Arqas of Yaraq"),
+            "Al'Arqas of Yaraq"
+        );
+        assert_eq!(ac_store::file_safe("../x/y"), "_x_y");
+        assert_eq!(ac_store::file_safe("  .. "), "_");
         assert_eq!(
             HoldingsStore::path_for(Path::new("/c"), "A.Server", "Acc", "Ch/ar"),
             PathBuf::from("/c/a.server/acc/Ch_ar.json")

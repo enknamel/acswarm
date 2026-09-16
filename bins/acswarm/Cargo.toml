@@ -10,6 +10,7 @@ ctrlc = "3"
 ac-dat = { path = "../../crates/ac-dat" }
 ac-formats = { path = "../../crates/ac-formats" }
 ac-scene = { path = "../../crates/ac-scene" }
+ac-store = { path = "../../crates/ac-store" }
 ac-net = { path = "../../crates/ac-net" }
 ac-world = { path = "../../crates/ac-world" }
 ac-audio = { path = "../../crates/ac-audio" }
