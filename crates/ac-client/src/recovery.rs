@@ -705,12 +705,7 @@ impl Client {
                 true
             }
             Action::Wield(guid) => {
-                let name = self
-                    .world
-                    .objects
-                    .get(&guid)
-                    .map(|o| o.name.clone())
-                    .unwrap_or_default();
+                let name = self.world.name_of(guid).unwrap_or_default().to_string();
                 self.autoplay
                     .say(Doing::Recovering, format!("wielding {name} again"));
                 self.wield_guid(guid);

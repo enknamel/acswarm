@@ -1354,10 +1354,9 @@ impl App {
         let name = net
             .client
             .world
-            .objects
-            .get(&guid)
-            .map(|o| o.name.clone())
-            .unwrap_or_default();
+            .name_of(guid)
+            .unwrap_or_default()
+            .to_string();
         if again {
             net.client.last_click = None;
             self.interact(guid);

@@ -217,12 +217,7 @@ impl Client {
                 let n = self.autoplay.refused.entry(item).or_default();
                 *n += 1;
                 if *n >= SALVAGE_TRIES {
-                    let name = self
-                        .world
-                        .objects
-                        .get(&item)
-                        .map(|o| o.name.clone())
-                        .unwrap_or_default();
+                    let name = self.world.name_of(item).unwrap_or_default().to_string();
                     self.autoplay
                         .tag_failed(item, "the salvager would not take it");
                     self.autoplay

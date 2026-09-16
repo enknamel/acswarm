@@ -311,12 +311,7 @@ impl Client {
             {
                 self.loot_queue.pop_front();
                 let retried = self.loot_retry.take() == Some(guid);
-                let name = self
-                    .world
-                    .objects
-                    .get(&guid)
-                    .map(|o| o.name.clone())
-                    .unwrap_or_default();
+                let name = self.world.name_of(guid).unwrap_or_default().to_string();
                 let mut w = ac_net::wire::Writer::new();
                 self.loot_merge = None;
                 let into = match how {

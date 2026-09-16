@@ -189,12 +189,7 @@ impl Client {
             self.autoplay.growth.handed_over = true;
             return false;
         };
-        let name = self
-            .world
-            .objects
-            .get(&item)
-            .map(|o| o.name.clone())
-            .unwrap_or_default();
+        let name = self.world.name_of(item).unwrap_or_default().to_string();
         if !self.give(mate.guid, item, None) {
             // The server would not take it; do not jam on this item.
             self.autoplay.growth.handed_over = true;

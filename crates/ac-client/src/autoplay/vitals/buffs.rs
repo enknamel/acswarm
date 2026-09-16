@@ -331,12 +331,7 @@ impl Client {
                     .item_buffs
                     .retain(|(i, c, _, _)| !(*i == g && *c == category));
                 self.autoplay.item_buffs.push((g, category, now, lasts));
-                let on = self
-                    .world
-                    .objects
-                    .get(&g)
-                    .map(|o| o.name.clone())
-                    .unwrap_or_default();
+                let on = self.world.name_of(g).unwrap_or_default().to_string();
                 self.autoplay
                     .say(Doing::Buffing, format!("casting {name} on {on}"));
             }

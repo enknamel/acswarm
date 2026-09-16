@@ -405,12 +405,7 @@ impl Client {
         let Some(cap) = closer_stand_off(away) else {
             return false;
         };
-        let name = self
-            .world
-            .objects
-            .get(&guid)
-            .map(|o| o.name.clone())
-            .unwrap_or_default();
+        let name = self.world.name_of(guid).unwrap_or_default().to_string();
         self.autoplay.note(
             format!("nothing landing on {name} from {away:.0} m; closing to {cap:.0} m"),
             Instant::now(),

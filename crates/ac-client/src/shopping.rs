@@ -126,12 +126,7 @@ impl Client {
     /// The counter in front of us, if its window is open.
     fn counter_now(&self) -> Option<Counter> {
         let v = self.world.open_vendor.as_ref()?;
-        let name = self
-            .world
-            .objects
-            .get(&v.vendor)
-            .map(|o| o.name.clone())
-            .unwrap_or_default();
+        let name = self.world.name_of(v.vendor).unwrap_or_default().to_string();
         let away = match (
             self.my_position(),
             self.world
