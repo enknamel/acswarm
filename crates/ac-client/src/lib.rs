@@ -252,7 +252,8 @@ pub use ac_nav::steering as route;
 // built around keeps its old name here.
 pub use ac_vendor::errand;
 
-pub mod growth;
+// Autoplay's own rules live under `autoplay` now, and keep their old paths.
+pub use autoplay::{growth, steps, summoning};
 pub mod holdings;
 pub mod hunt;
 pub mod items;
@@ -269,8 +270,6 @@ pub mod reconnect;
 pub mod recovery;
 mod refused;
 pub mod shopping;
-pub mod steps;
-pub mod summoning;
 #[cfg(any(test, feature = "testkit"))]
 pub mod testkit;
 pub mod travel;

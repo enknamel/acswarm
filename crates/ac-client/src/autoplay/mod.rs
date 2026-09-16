@@ -47,6 +47,11 @@ use crate::{Client, Stance, SAME_FLOOR};
 // The rule vocabulary lives in ac-loot; this file still speaks it.
 pub use ac_loot::profile::LootAction;
 
+// Autoplay's own rules, each in its own file below this one.
+pub mod growth;
+pub mod steps;
+pub mod summoning;
+
 /// How long to wait for a corpse to open before asking again, when it
 /// is right under our feet. A corpse further off is given time for the
 /// walk as well (see [`loot_wait`]).

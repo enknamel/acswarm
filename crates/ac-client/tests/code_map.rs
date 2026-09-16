@@ -309,14 +309,18 @@ fn every_client_module_has_a_row() {
     let missing: Vec<&str> = modules
         .into_iter()
         .filter(|m| {
-            let file = format!("{m}.rs");
-            ![
-                file.clone(),
-                format!("src/{file}"),
-                format!("crates/ac-client/src/{file}"),
-            ]
-            .iter()
-            .any(|f| named.contains(f))
+            // A module is either `name.rs` or the `name/mod.rs` of a directory.
+            [format!("{m}.rs"), format!("{m}/mod.rs")]
+                .iter()
+                .all(|file| {
+                    ![
+                        file.clone(),
+                        format!("src/{file}"),
+                        format!("crates/ac-client/src/{file}"),
+                    ]
+                    .iter()
+                    .any(|f| named.contains(f))
+                })
         })
         .collect();
     assert!(
