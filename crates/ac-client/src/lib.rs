@@ -3,6 +3,7 @@
 //! Nothing here renders; several `Client`s can live in one process.
 
 pub mod academy;
+pub mod action;
 mod actions;
 pub use actions::items::salvage_text;
 pub(crate) use actions::items::TakeSent;
