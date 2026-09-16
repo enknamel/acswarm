@@ -78,12 +78,7 @@ impl Client {
                 return;
             }
         };
-        let name = self
-            .world
-            .objects
-            .get(&a.guid)
-            .map(|o| o.name.clone())
-            .unwrap_or_else(|| format!("{:#010x}", a.guid));
+        let name = self.world.name_or_hex(a.guid);
         let mut lines = vec![name.clone()];
         for key in [
             Appraisal::STRING_SHORT_DESC,

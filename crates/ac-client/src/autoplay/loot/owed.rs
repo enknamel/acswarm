@@ -466,10 +466,7 @@ impl Client {
             .find(|m| m.guid == to)
             .map(|m| m.name.clone())
             .unwrap_or_else(|| format!("{to:#010x}"));
-        let what = objects
-            .get(&body)
-            .map(|o| o.name.clone())
-            .unwrap_or_else(|| format!("{body:#010x}"));
+        let what = self.world.name_or_hex(body);
         Some((who, what))
     }
 }

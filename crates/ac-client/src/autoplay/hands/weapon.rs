@@ -127,12 +127,7 @@ impl Client {
     pub(crate) fn hold_off_wield(&mut self, item: u32, now: Instant) {
         self.autoplay.wield_asked = None;
         self.autoplay.wield_refused.hold(item, WIELD_AGAIN, now);
-        let name = self
-            .world
-            .objects
-            .get(&item)
-            .map(|o| o.name.clone())
-            .unwrap_or_else(|| format!("{item:#010x}"));
+        let name = self.world.name_or_hex(item);
         let waited = self
             .autoplay
             .wield_refused

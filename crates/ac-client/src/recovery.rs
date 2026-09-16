@@ -568,8 +568,7 @@ impl Client {
         let fighting = self
             .attack_target
             .or(self.autoplay.casting_at())
-            .and_then(|g| self.world.objects.get(&g))
-            .map(|o| o.name.clone());
+            .and_then(|g| self.world.name_of(g).map(str::to_string));
         let trip = self.autoplay.resume_trip.or_else(|| self.travel_goal_xy());
         let cfg = &self.autoplay.config.survive;
         Some(View {

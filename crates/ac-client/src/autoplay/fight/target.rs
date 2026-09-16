@@ -112,12 +112,7 @@ impl Client {
     /// Let the target go and leave it alone for [`GIVE_UP_FOR`], saying
     /// why once.
     pub(crate) fn give_up_target(&mut self, guid: u32, why: &str, now: Instant) {
-        let name = self
-            .world
-            .objects
-            .get(&guid)
-            .map(|o| o.name.clone())
-            .unwrap_or_else(|| format!("{guid:#010x}"));
+        let name = self.world.name_or_hex(guid);
         self.autoplay
             .note(format!("giving up on {name}: {why}"), now);
         self.autoplay.given_up.expire(now, GIVE_UP_FOR);

@@ -191,7 +191,7 @@ impl Client {
                     let n = self.autoplay.refused.entry(g).or_default();
                     *n += 1;
                     if *n >= SALVAGE_TRIES {
-                        let name = self.world.objects.get(&g).map(|o| o.name.clone());
+                        let name = self.world.name_of(g).map(str::to_string);
                         // A refusal is not a new decision. Rewriting it
                         // to Keep made the thing eligible for nothing
                         // while it went on holding a slot.

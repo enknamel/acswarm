@@ -248,12 +248,7 @@ pub(crate) fn build(
 pub(crate) fn view(c: &Client) -> Option<AppraisalView> {
     let guid = c.last_appraisal?;
     let a = c.appraisals.get(&guid)?;
-    let name = c
-        .world
-        .objects
-        .get(&guid)
-        .map(|o| o.name.clone())
-        .unwrap_or_else(|| format!("{guid:#010x}"));
+    let name = c.world.name_or_hex(guid);
     let skills = c.assets.skill_table().ok();
     let spells = c.assets.spell_table().ok();
     Some(build(

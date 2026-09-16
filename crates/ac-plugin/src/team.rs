@@ -331,7 +331,7 @@ pub(crate) fn describe(client: &ac_client::Client, session: usize) -> Option<Mat
                 .is_some_and(|o| o.health.unwrap_or(1.0) > 0.0)
         });
     let target_name = target
-        .and_then(|g| client.world.objects.get(&g).map(|o| o.name.clone()))
+        .and_then(|g| client.world.name_of(g).map(str::to_string))
         .unwrap_or_default();
     let in_fellowship = client
         .world

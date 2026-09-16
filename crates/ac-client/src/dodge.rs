@@ -733,8 +733,7 @@ impl Client {
             .unwrap_or_else(|| "a spell".into());
         let caster = track
             .from
-            .and_then(|g| self.world.objects.get(&g))
-            .map(|o| o.name.clone());
+            .and_then(|g| self.world.name_of(g).map(str::to_string));
         // Room to either side, measured with the walker's own collision
         // half a metre at a time.
         let (left, right) = sides(track.velocity);

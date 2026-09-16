@@ -91,7 +91,7 @@ impl Client {
         };
         // What the server calls it. Without the name there is no telling
         // this body's refusal from another's, so nothing is done.
-        let Some(name) = self.world.objects.get(&guid).map(|o| o.name.clone()) else {
+        let Some(name) = self.world.name_of(guid).map(str::to_string) else {
             return;
         };
         if self
