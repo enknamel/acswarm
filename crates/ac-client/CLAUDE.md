@@ -29,8 +29,10 @@ system's entry fns are written in the files its own row names.
 ## Steps
 
 `steps::STEPS` (`autoplay/steps.rs`). A goal with no scorer is worth its `base`, written in the
-table, so a row may be added or dropped without re-scoring the rest. The fixed curves sit between
-those numbers: `LOOT_AT_REST` (45) and `WALK_TO_A_FIGHT` (40) fall under `follow` (50).
+table, so a row may be added or dropped without re-scoring the rest. `weigh` takes goals only, most
+worth first, ties going to the earlier row; reflexes run in table order and their `base` is not
+read. The fixed curves are placed against those numbers: `LOOT_AT_REST` (45) sits under `follow`
+(50), and `WALK_TO_A_FIGHT` (40) ties `resume the journey`, which the tie rule puts second.
 
 | # | step | layer | worth | runs |
 |---|---|---|---|---|
