@@ -2,7 +2,8 @@
 
 One `Client` per game session: connection, `World`, body, the manual actions a UI or script calls,
 and autoplay. File names are under `src/`; grep an entry fn for where its system sits in one.
-`tests/code_map.rs` checks the paths, entry fns, steps and modules named here.
+`tests/code_map.rs` checks the paths, entry fns, steps and modules named here, and that each
+system's entry fns are written in the files its own row names.
 
 ## Tick path
 
@@ -10,7 +11,8 @@ and autoplay. File names are under `src/`; grep an entry fn for where its system
 1. drain the socket and `World::apply` each message; server chat goes to `chat_message()`
    (`session/chat.rs`), which hands refusals in words to `hear_refusal()` (`refused.rs`)
 2. manual-play timers: `tick_combat()`, `tick_loot()`, `tick_store()`, `tick_appraise()`
-3. `tick_autoplay()` (`autoplay/mod.rs`), then `tick_retag()` and `save_ledger()`
+3. `tick_autoplay()` (`autoplay/mod.rs`), then `tick_retag()` (`autoplay/ledger/retag.rs`) and
+   `save_ledger()` (`autoplay/ledger/store.rs`)
 4. `tick_player()` (`body/player_tick.rs`) moves the body (`player.rs`) and runs `tick_visit()`
    (`visit.rs`)
 
@@ -58,35 +60,37 @@ Housekeeping, every tick and never claiming it: `autoplay_pending_wield`, `autop
 ## Systems
 
 Tests: `cargo test -p ac-client WORD` with the tests column's word. Log target: `ac_client::` plus
-the column (the module path; see the root map for `RUST_LOG`).
+the log column, which is the module path of the file the system's entry point is written in. A
+target covers its submodules, and a rule's own status line (`note`, `say`) comes out under
+`ac_client::autoplay` whichever row wrote it (see the root map for `RUST_LOG`).
 
 | system | entry fns | files | state | tests | log target | term |
 |---|---|---|---|---|---|---|
-| steps and tick | `tick_autoplay`, `weigh`, `reflexes` | `autoplay/mod.rs`, `autoplay/steps.rs` | `Autoplay.step`, `Autoplay.doing`, `Autoplay.status` | steps:: | autoplay | step |
-| target choice | `pick_target`, `would_fight`, `ordered_target`, `a_fight_in_sight` | `autoplay/mod.rs` | `Client.attack_target`, `Autoplay.config.fight` | target | autoplay | target |
-| melee | `autoplay_fight`, `autoplay_fight_as`, `give_up_target`, `stalled_on` | `autoplay/mod.rs` | `Client.attack_target`, `Autoplay.engaged`, `Autoplay.given_up` | target | autoplay | fight |
-| spells in a fight | `autoplay_fight_with_spells`, `autoplay_soften`, `autoplay_make_vulnerable` | `autoplay/mod.rs`, `aim.rs` | `Autoplay.casting_at`, `Autoplay.softening`, `Autoplay.vulned` | spell | autoplay | fight |
-| critter | `critter`, `a_critter`, `ask_about_strangers` | `autoplay/mod.rs` | `Fight.skip_critters`, `Client.appraisals` | critter | autoplay | critter |
-| road | `on_its_way`, `passing_by`, `road_fight_over` | `autoplay/growth/mod.rs`, `autoplay/mod.rs` | `Fight.walk_past_on_the_way` | road | autoplay::growth | road |
-| looting | `autoplay_loot`, `corpse_for_us`, `walk_to_corpse`, `worth_looting` | `autoplay/mod.rs`, `crates/ac-loot/src/run.rs` | `Autoplay.corpse`, `Autoplay.looted`, `Autoplay.walking_to`, `Autoplay.loot_run` | corpse | autoplay | corpse |
-| corpse turns and shuts | `whose_turn`, `judge_shut`, `take_in_shuts`, `claim_on` | `autoplay/mod.rs` | `Autoplay.standing_by`, `Autoplay.shut_by`, `Autoplay.whose` | body | autoplay | turn, shut |
-| ledger | `tick_retag`, `autoplay_tag_arrivals`, `judge_loot`, `loot_action` | `autoplay/mod.rs`, `crates/ac-loot/src/ledger.rs` | `Autoplay.ledger`, `Autoplay.pending_tags` | (`-p ac-loot ledger`) | autoplay | tag |
-| salvage | `autoplay_salvage`, `salvage_tagged`, `next_salvage_batch` | `autoplay/mod.rs` | `Autoplay.salvaging`, `Autoplay.last_salvage` | salvage | autoplay | salvage |
-| pack tidy | `autoplay_tidy`, `settle_pour`, `pour_next`, `compress` | `autoplay/mod.rs`, `autoplay/growth/mod.rs` | `Autoplay.pour`, `Autoplay.tidy_looked`, `growth::State.wont_merge` | pour | autoplay | tidy, pour |
-| weapons | `autoplay_pending_wield`, `arm_for`, `autoplay_shield`, `autoplay_rearm` | `autoplay/mod.rs`, `crates/ac-loot/src/weapons.rs` | `Autoplay.pending_wield`, `Autoplay.wield_refused`, `Autoplay.armed_for` | wield | autoplay | wield |
-| ammo | `ready_ammo`, `autoplay_craft_ammo`, `choose_recipe`, `ammo_carried` | `autoplay/mod.rs`, `autoplay/growth/mod.rs` | `Autoplay.crafting`, `Autoplay.wanted_ammo` | arrow | autoplay | ammo |
-| healing | `autoplay_survive`, `choose_heal`, `self_heals`, `autoplay_vitals` | `autoplay/mod.rs` | `Autoplay.config.survive`, `Autoplay.last_heal`, `Autoplay.last_vital` | heal | autoplay | heal, vitals |
-| buffs | `autoplay_buff`, `wanted_buffs`, `due_buff`, `wanted` | `autoplay/mod.rs`, `buffs.rs` | `Autoplay.config.buffs`, `Autoplay.last_buff`, `Autoplay.item_buffs` | buff | autoplay | buff |
-| recruiting | `autoplay_fellowship`, `autoplay_accept_invites`, `next_invitee`, `hear_recruit_refusal` | `autoplay/mod.rs` | `Autoplay.recruited`, `Autoplay.held_off`, `Team.fellowship` | invit | autoplay | recruit |
-| team board | `autoplay_team`, `leader_mate`, `worst_hurt`, `rival_leader` | `autoplay/mod.rs`, `crates/ac-plugin/src/team.rs` | `Autoplay.team` (`TeamView.mates`), `Config.team` | leader | autoplay | mate |
-| fellowship planner | `plan_for_team`, `assign_targets`, `deal_bodies`, `stragglers`, `take_orders` | `plan.rs`, `autoplay/mod.rs` | `Autoplay.planner`, `Autoplay.orders` | plan:: | autoplay | plan, order |
-| follow | `autoplay_follow`, `followed_leader`, `follow_break` | `autoplay/mod.rs` | `Autoplay.follow_trip`, `Team.follow`, `Client.follow` | follow | autoplay | follow |
-| quartermaster | `autoplay_quartermaster`, `decide`, `quartermaster`, `hand_out` | `autoplay/mod.rs`, `logistics.rs`, `autoplay/growth/mod.rs` | `growth::State.mode`, `Team.restock` | quartermaster | autoplay | quartermaster |
-| town run | `grow_town_run`, `start_town_run`, `grow_run_step`, `grow_run_next`, `pick_vendor` | `autoplay/growth/mod.rs`, `shopping.rs`, `crates/ac-vendor/src/run.rs` | `growth::State.run`, `growth::State.shop` | counter | autoplay::growth | town_run, counter |
-| supplies and sale | `grow_needs_with`, `supplies`, `sell_policy`, `offers_for_sale`, `burns` | `autoplay/growth/mod.rs`, `crates/ac-loot/src/sale.rs` | `growth::State.needs`, `Growth.ammo_keep` | counter | autoplay::growth | need, sale |
-| XP spending | `autoplay_spend_xp`, `grow_spend_xp`, `raise_offers`, `batch_raise` | `autoplay/growth/mod.rs`, `advance.rs` | `growth::State.pending`, `growth::State.sulking` | experience | autoplay::growth | raise |
-| hunting ground and area | `autoplay_grow`, `grow_hunt`, `autoplay_watch_the_ground`, `autoplay_keep_to_area` | `autoplay/growth/mod.rs`, `hunt.rs` | `growth::State.bound`, `growth::State.quiet_since`, `Fight.area` | ground | autoplay::growth | ground, area |
-| travel | `travel_to`, `travel_about`, `plan_trip`, `autoplay_resume_journey` | `travel.rs`, `pathfinder.rs`, `recalls.rs`, `autoplay/mod.rs`, `crates/ac-nav/src/steering.rs` | `Client.travel`, `Client.steering`, `Autoplay.resume_trip` | travel | travel | journey |
+| steps and tick | `tick_autoplay`, `weigh`, `reflexes` | `autoplay/mod.rs`, `autoplay/steps.rs`, `autoplay/config.rs` | `Autoplay.step`, `Autoplay.doing`, `Autoplay.status` | steps:: | autoplay | step |
+| target choice | `pick_target`, `a_fight_in_sight`, `would_fight`, `ordered_target` | `autoplay/fight/target.rs`, `autoplay/fight/mod.rs`, `autoplay/team/orders.rs` | `Client.attack_target`, `Autoplay.config.fight` | target | autoplay::fight::target | target |
+| melee | `autoplay_fight`, `autoplay_fight_as`, `stalled_on`, `give_up_target` | `autoplay/fight/melee.rs`, `autoplay/fight/target.rs` | `Client.attack_target`, `Autoplay.engaged`, `Autoplay.given_up` | target | autoplay::fight::melee | fight |
+| spells in a fight | `autoplay_fight_with_spells`, `autoplay_soften`, `autoplay_make_vulnerable` | `autoplay/fight/spells.rs`, `autoplay/fight/soften.rs`, `autoplay/cast.rs`, `aim.rs` | `Autoplay.casting_at`, `Autoplay.softening`, `Autoplay.vulned`, `Autoplay.cast_sent` | spell | autoplay::fight::spells | fight |
+| critter | `critter`, `a_critter`, `ask_about_strangers` | `autoplay/fight/critter.rs` | `Fight.skip_critters`, `Client.appraisals` | critter | autoplay::fight::critter | critter |
+| road | `on_its_way`, `passing_by`, `road_fight_over` | `autoplay/growth/road.rs`, `autoplay/fight/mod.rs` | `Fight.walk_past_on_the_way` | road | autoplay::growth::road | road |
+| looting | `autoplay_loot`, `corpse_for_us`, `walk_to_corpse`, `how_to_take`, `room_for_loot`, `worth_looting` | `autoplay/loot/choose.rs`, `autoplay/loot/owed.rs`, `autoplay/loot/walk.rs`, `autoplay/loot/take.rs`, `autoplay/loot/room.rs`, `autoplay/steps.rs`, `crates/ac-loot/src/run.rs` | `Autoplay.corpse`, `Autoplay.looted`, `Autoplay.walking_to`, `Autoplay.loot_run`, `Client.packs_said_full` | corpse | autoplay::loot | corpse |
+| corpse turns and shuts | `whose_turn`, `judge_shut`, `take_in_shuts`, `claim_on` | `autoplay/team/turns.rs`, `autoplay/team/shuts.rs`, `autoplay/loot/judge.rs` | `Autoplay.standing_by`, `Autoplay.shut_by`, `Autoplay.whose` | body | autoplay::team::shuts | turn, shut |
+| ledger | `tick_retag`, `autoplay_tag_arrivals`, `judge_loot`, `loot_action` | `autoplay/ledger/retag.rs`, `autoplay/ledger/store.rs`, `autoplay/loot/judge.rs`, `crates/ac-loot/src/ledger.rs` | `Autoplay.ledger`, `Autoplay.pending_tags` | (`-p ac-loot ledger`) | autoplay::ledger | tag |
+| salvage | `autoplay_salvage`, `salvage_tagged`, `next_salvage_batch` | `autoplay/ledger/salvage.rs` | `Autoplay.salvaging`, `Autoplay.last_salvage` | salvage | autoplay::ledger::salvage | salvage |
+| pack tidy | `autoplay_tidy`, `settle_pour`, `pour_next`, `compress` | `autoplay/tidy.rs`, `autoplay/growth/mod.rs` | `Autoplay.pour`, `Autoplay.tidy_looked`, `growth::State.wont_merge` | pour | autoplay::tidy | tidy, pour |
+| weapons | `autoplay_pending_wield`, `arm_for`, `autoplay_shield`, `autoplay_rearm` | `autoplay/hands/weapon.rs`, `crates/ac-loot/src/weapons.rs` | `Autoplay.pending_wield`, `Autoplay.wield_refused`, `Autoplay.armed_for` | wield | autoplay::hands::weapon | wield |
+| ammo | `ready_ammo`, `autoplay_craft_ammo`, `choose_recipe`, `ammo_carried` | `autoplay/hands/ammo.rs` | `Autoplay.crafting`, `Autoplay.wanted_ammo` | arrow | autoplay::hands::ammo | ammo |
+| healing | `autoplay_survive`, `choose_heal`, `self_heals`, `autoplay_vitals` | `autoplay/vitals/heal.rs` | `Autoplay.config.survive`, `Autoplay.last_heal`, `Autoplay.last_vital` | heal | autoplay::vitals::heal | heal, vitals |
+| buffs | `autoplay_buff`, `wanted_buffs`, `due_buff`, `wanted` | `autoplay/vitals/buffs.rs`, `buffs.rs` | `Autoplay.config.buffs`, `Autoplay.last_buff`, `Autoplay.item_buffs` | buff | autoplay::vitals::buffs | buff |
+| recruiting | `autoplay_fellowship`, `autoplay_accept_invites`, `next_invitee`, `hear_recruit_refusal` | `autoplay/team/fellowship.rs` | `Autoplay.recruited`, `Autoplay.held_off`, `Team.fellowship` | invit | autoplay::team::fellowship | recruit |
+| team board | `autoplay_team`, `leader_mate`, `worst_hurt`, `rival_leader` | `autoplay/team/mod.rs`, `autoplay/team/view.rs`, `crates/ac-plugin/src/team.rs` | `Autoplay.team` (`TeamView.mates`), `Config.team` | leader | autoplay::team | mate |
+| fellowship planner | `plan_for_team`, `take_orders`, `assign_targets`, `deal_bodies`, `stragglers` | `autoplay/team/orders.rs`, `plan.rs` | `Autoplay.planner`, `Autoplay.orders` | plan:: | autoplay::team::orders | plan, order |
+| follow | `autoplay_follow`, `followed_leader`, `follow_break` | `autoplay/team/follow.rs` | `Autoplay.follow_trip`, `Team.follow`, `Client.follow` | follow | autoplay::team::follow | follow |
+| quartermaster | `autoplay_quartermaster`, `autoplay_stock`, `decide`, `quartermaster`, `hand_out` | `autoplay/team/quartermaster.rs`, `logistics.rs`, `autoplay/growth/policy.rs` | `growth::State.mode`, `Team.restock` | quartermaster | autoplay::team::quartermaster | quartermaster |
+| town run | `grow_town_run`, `start_town_run`, `grow_run_step`, `grow_run_next`, `pick_vendor` | `autoplay/growth/town_run/mod.rs`, `autoplay/growth/town_run/counter.rs`, `autoplay/growth/town_run/vendor.rs`, `autoplay/growth/town_run/panel.rs`, `shopping.rs`, `crates/ac-vendor/src/run.rs` | `growth::State.run`, `growth::State.shop` | counter | autoplay::growth::town_run | town_run, counter |
+| supplies and sale | `grow_needs_with`, `supplies`, `sell_policy`, `offers_for_sale`, `burns` | `autoplay/growth/needs.rs`, `autoplay/growth/policy.rs`, `autoplay/growth/sale.rs`, `autoplay/growth/supplies.rs`, `crates/ac-loot/src/sale.rs` | `growth::State.needs`, `Growth.ammo_keep` | counter | autoplay::growth | need, sale |
+| XP spending | `autoplay_spend_xp`, `grow_spend_xp`, `raise_offers`, `batch_raise` | `autoplay/growth/xp.rs`, `autoplay/growth/raise.rs`, `advance.rs` | `growth::State.pending`, `growth::State.sulking` | experience | autoplay::growth::xp | raise |
+| hunting ground and area | `autoplay_grow`, `grow_hunt`, `autoplay_watch_the_ground`, `autoplay_keep_to_area` | `autoplay/growth/mod.rs`, `autoplay/growth/hunt.rs`, `hunt.rs` | `growth::State.bound`, `growth::State.quiet_since`, `Fight.area` | ground | autoplay::growth::hunt | ground, area |
+| travel | `travel_to`, `travel_about`, `plan_trip`, `autoplay_resume_journey` | `travel.rs`, `pathfinder.rs`, `recalls.rs`, `autoplay/journey.rs`, `crates/ac-nav/src/steering.rs` | `Client.travel`, `Client.steering`, `Autoplay.resume_trip` | travel | travel | journey |
 | visits | `visit_landmark`, `tick_visit`, `visit_person` | `visit.rs` | `Client.visits` | visit | visit | visit |
 | dungeon explore | `autoplay_explore`, `aim_on_floor`, `past_the_door` | `explore.rs`, `crates/ac-nav/src/explore.rs` | `Autoplay.room_bound`, `Autoplay.rooms_seen` | explore | explore | explore |
 | dodge | `autoplay_dodge`, `autoplay_approach`, `sidestep`, `threat` | `dodge.rs`, `aim.rs` | `Client.dodge`, `Client.dodge_to` | dodge | dodge | dodge |
@@ -94,7 +98,7 @@ the column (the module path; see the root map for `RUST_LOG`).
 | academy | `autoplay_academy`, `academy_open_doors` | `academy.rs`, `tests/academy_route.rs` | `Autoplay.academy`, `Autoplay.academy_corpse`, `Autoplay.academy_doors`, `Autoplay.academy_armed` | academy | academy | academy |
 | summoning | `autoplay_summon`, `autoplay_claim_pet_kills`, `hear_summoning` | `autoplay/summoning.rs`, `autoplay/mod.rs` | `Autoplay.summoning` | summon | autoplay::summoning | summon, pet |
 | refusals | `hear_refusal`, `refused`, `answer` | `refused.rs`, `crates/ac-agent/src/refusals.rs` | the waiting system's own wait, e.g. `Autoplay.shelved` | refus | refused | refusal |
-| server chat | `chat_message`, `hear_arrival`, `hear_spell_attack` | `session/chat.rs`, `autoplay/mod.rs` | `Autoplay.hit_by` | arriv | session::chat | heard |
+| server chat | `chat_message`, `hear_arrival`, `hear_spell_attack` | `session/chat.rs`, `autoplay/hear.rs` | `Autoplay.hit_by` | arriv | session::chat | heard |
 
 ## Glossary
 
