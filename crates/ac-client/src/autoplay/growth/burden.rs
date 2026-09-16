@@ -78,7 +78,7 @@ fn had_enough(room: u32, left: Option<u32>, sold: u32) -> bool {
 /// +Verity at 36462 of a 7500 capacity walked off her way to town for
 /// one, was told "You are too encumbered to carry that!", and went back
 /// for it twice more. With no capacity known yet nothing is past it.
-pub(super) fn past_the_wall(carried: u32, capacity: u32) -> bool {
+pub(crate) fn past_the_wall(carried: u32, capacity: u32) -> bool {
     capacity > 0 && carried > capacity.saturating_mul(3)
 }
 
