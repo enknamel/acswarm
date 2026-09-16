@@ -7,7 +7,7 @@ use crate::autoplay::{
 };
 use crate::items::ItemStats;
 use crate::testkit::{
-    a_party_profile, asks, character_of_level, game_data, item, looter, no_data,
+    a_party_profile, asks, character_of_level, corpses_seen, game_data, item, looter, no_data,
     standing_in_the_field, turn_at, view_of,
 };
 
@@ -569,7 +569,7 @@ fn a_session_deals_itself_by_what_it_last_said_about_itself() {
     let (body, other_body, at) = (0x8000_0001, 0x8000_0002, glam::Vec3::ZERO);
     let me = 0x5000_0011;
     let mut ap = Autoplay {
-        corpse_seen: vec![(body, t0)],
+        corpse_seen: corpses_seen([(body, t0)]),
         first_opens: vec![t0; 3],
         team: view_of(vec![Mate {
             opened_first: 1,
@@ -637,7 +637,7 @@ fn a_body_one_of_the_others_emptied_for_everyone_is_not_opened_again() {
     let (body, another) = (0x8000_0001, 0x8000_0002);
     let (here, at) = (glam::Vec3::ZERO, glam::Vec3::new(3.0, 0.0, 0.0));
     let mut ap = Autoplay {
-        corpse_seen: vec![(body, t0), (another, t0)],
+        corpse_seen: corpses_seen([(body, t0), (another, t0)]),
         ..Default::default()
     };
     ap.config.enabled = true;
@@ -979,7 +979,7 @@ fn a_character_alone_loots_exactly_as_it_did() {
     let (me, body) = (2, 0x8000_0001);
     let (here, at) = (glam::Vec3::ZERO, glam::Vec3::new(3.0, 0.0, 0.0));
     let mut ap = Autoplay {
-        corpse_seen: vec![(body, t0)],
+        corpse_seen: corpses_seen([(body, t0)]),
         ..Default::default()
     };
     ap.config.enabled = true;
@@ -1091,7 +1091,7 @@ fn a_mate_dead_or_missing_from_the_board_is_never_waited_on() {
     // off the board: either way the body is this character's.
     let me = 3;
     let mut ap = Autoplay {
-        corpse_seen: vec![(body, t0)],
+        corpse_seen: corpses_seen([(body, t0)]),
         first_opens: vec![t0; 3],
         team: view_of(vec![looter(1, at, None, Duration::ZERO)]),
         ..Default::default()

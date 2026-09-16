@@ -114,14 +114,15 @@ fn a_body_is_noted_when_it_appears_and_not_when_the_looting_gets_round_to_it() {
     c.autoplay.config.loot.profile = String::new();
     c.autoplay_watch_the_ground(now);
     assert_eq!(
-        c.autoplay.corpse_seen,
-        vec![(body, now)],
+        c.autoplay.corpse_seen.since(&body),
+        Some(now),
         "a body nobody looted was never noted"
     );
     // Noted once, not restamped every tick: the age is what the
     // tie-break and the rotting order both read.
     c.autoplay_watch_the_ground(now + s(5));
-    assert_eq!(c.autoplay.corpse_seen, vec![(body, now)]);
+    assert_eq!(c.autoplay.corpse_seen.since(&body), Some(now));
+    assert_eq!(c.autoplay.corpse_seen.len(), 1);
     // Forgotten once emptied, so the list stays the size of what is
     // on the ground.
     c.autoplay.looted.push(body, now + s(5));

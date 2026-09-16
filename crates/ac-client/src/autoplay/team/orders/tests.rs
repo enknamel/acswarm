@@ -17,7 +17,7 @@ fn a_body_the_plan_deals_is_the_dealt_ones_while_the_plan_is_fresh_and_from_the_
     leader.leader = true;
     ap.team = view_of(vec![leader, looter(other, at, None, Duration::ZERO)]);
     ap.team.me = Some(looter(me, at, None, Duration::ZERO));
-    ap.corpse_seen.push((body, t0));
+    ap.corpse_seen.mark(body, t0);
     let plan = |to: u32| {
         let mut p = Plan {
             leader: "Bryn01".into(),

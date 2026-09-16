@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use super::*;
 use crate::autoplay::loot::choose::LOOT_NEAR;
 use crate::autoplay::{Mate, ShutFor};
-use crate::testkit::{looter, turn_at, view_of};
+use crate::testkit::{corpses_seen, looter, turn_at, view_of};
 
 #[test]
 fn every_session_deals_a_newly_fallen_body_to_the_same_character() {
@@ -28,7 +28,7 @@ fn every_session_deals_a_newly_fallen_body_to_the_same_character() {
     let first = 0x5000_0012;
     for &me in &fleet {
         let ap = Autoplay {
-            corpse_seen: vec![(body, t0)],
+            corpse_seen: corpses_seen([(body, t0)]),
             team: view_of(others(me)),
             ..Default::default()
         };
@@ -210,7 +210,7 @@ fn a_busy_fellows_turn_passes_on_and_the_body_is_still_opened() {
             ..looter(g, at, None, Duration::ZERO)
         };
         let mut ap = Autoplay {
-            corpse_seen: vec![(body, t0)],
+            corpse_seen: corpses_seen([(body, t0)]),
             team: view_of(
                 party
                     .iter()

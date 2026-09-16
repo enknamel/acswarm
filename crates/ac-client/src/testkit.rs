@@ -9,6 +9,7 @@
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
+use ac_agent::recent::Recent;
 use ac_scene::Assets;
 use ac_world::{item_type, object_desc_flags, WorldObject};
 use glam::{Quat, Vec3};
@@ -97,6 +98,15 @@ pub fn corpse(guid: u32, name: &str) -> WorldObject {
         object_desc_flags: ac_world::object_desc_flags::CORPSE,
         ..Default::default()
     }
+}
+
+/// When each body came into sight, as `Autoplay::corpse_seen` holds it.
+pub fn corpses_seen(rows: impl IntoIterator<Item = (u32, Instant)>) -> Recent<u32> {
+    let mut seen = Recent::new();
+    for (guid, when) in rows {
+        seen.mark(guid, when);
+    }
+    seen
 }
 
 /// An object's position for the world point `at`, in `cell`'s landblock.

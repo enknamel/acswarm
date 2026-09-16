@@ -442,7 +442,7 @@ pub struct Autoplay {
     pub loot_tally: ac_loot::Tally,
     /// When each corpse was first seen, so the ones about to rot can be
     /// emptied first. A corpse we never saw appear is taken as fresh.
-    pub(crate) corpse_seen: Vec<(u32, Instant)>,
+    pub(crate) corpse_seen: Recent<u32>,
     /// When the last fellowship invitation went out, whoever it was to
     /// (see [`RECRUIT_FLOOR`]).
     last_recruit: Option<Instant>,

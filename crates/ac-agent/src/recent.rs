@@ -42,6 +42,12 @@ impl<K: Ord + Clone> Recent<K> {
         self.seen.remove(key);
     }
 
+    /// Forget every key `keep` turns down, whenever it was marked: for a
+    /// list that lets go on something else as well as on its window.
+    pub fn retain(&mut self, mut keep: impl FnMut(&K) -> bool) {
+        self.seen.retain(|key, _| keep(key));
+    }
+
     /// How many are remembered, for the log.
     pub fn len(&self) -> usize {
         self.seen.len()
@@ -129,5 +135,17 @@ mod tests {
         r.forget(&"Mite".into());
         r.forget(&"Banderling Scout".into());
         assert!(r.is_empty());
+    }
+
+    #[test]
+    fn retaining_lets_go_by_key_however_fresh_the_mark() {
+        let t0 = Instant::now();
+        let mut r: Recent<u32> = Recent::new();
+        r.mark(1, t0);
+        r.mark(2, t0);
+        r.retain(|key| *key != 2);
+        assert_eq!(r.since(&1), Some(t0));
+        assert_eq!(r.since(&2), None);
+        assert_eq!(r.len(), 1);
     }
 }

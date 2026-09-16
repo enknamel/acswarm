@@ -209,13 +209,7 @@ fn worth_looting(client: &Client, now: Instant) -> f32 {
         .map(|o| {
             // A corpse we never saw appear is taken as fresh, which is
             // what the looting step assumes too.
-            let seen = client
-                .autoplay
-                .corpse_seen
-                .iter()
-                .find(|(g, _)| *g == o.guid)
-                .map(|(_, t)| *t)
-                .unwrap_or(now);
+            let seen = client.autoplay.corpse_seen.since(&o.guid).unwrap_or(now);
             CORPSE_LIFE.saturating_sub(now.duration_since(seen))
         });
     worth_of_bodies(waiting)

@@ -112,15 +112,17 @@ impl Client {
             .values()
             .filter(|o| o.object_desc_flags & object_desc_flags::CORPSE != 0)
             .map(|o| o.guid)
-            .filter(|g| !self.autoplay.corpse_seen.iter().any(|(seen, _)| seen == g))
+            .filter(|g| self.autoplay.corpse_seen.since(g).is_none())
             .collect();
         let st = &mut self.autoplay;
-        st.corpse_seen.extend(fresh.into_iter().map(|g| (g, now)));
+        for g in fresh {
+            st.corpse_seen.mark(g, now);
+        }
         // Forgotten once emptied, so the list stays the size of what is
         // on the ground.
         let looted = &st.looted;
-        st.corpse_seen
-            .retain(|(g, t)| now.duration_since(*t) < CORPSE_LIFE * 2 && !looted.contains(g));
+        st.corpse_seen.expire(now, CORPSE_LIFE * 2);
+        st.corpse_seen.retain(|g| !looted.contains(g));
         let st = &mut st.growth;
         if quiet {
             st.quiet_since.get_or_insert(now);

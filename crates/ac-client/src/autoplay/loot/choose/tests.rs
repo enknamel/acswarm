@@ -1,7 +1,7 @@
 use super::*;
 use crate::autoplay::{Room, ShutFor};
 use crate::refusals::{OPEN_IN_USE_AGAIN, OPEN_NOT_OURS_AGAIN};
-use crate::testkit::corpse_at_hand;
+use crate::testkit::{corpse_at_hand, corpses_seen};
 
 #[test]
 fn a_corpse_the_rules_set_aside_is_shelved_and_not_written_off() {
@@ -42,7 +42,7 @@ fn a_refusal_about_another_body_leaves_the_one_in_hand_alone() {
     let asked = t0 + Duration::from_secs(1);
     let answered = asked + Duration::from_millis(360);
     let mut ap = Autoplay {
-        corpse_seen: vec![(body, t0)],
+        corpse_seen: corpses_seen([(body, t0)]),
         ..Default::default()
     };
     ap.take_up_corpse(body, asked, LOOT_TIMEOUT);
@@ -253,7 +253,7 @@ fn the_words_a_body_is_refused_in_say_how_long_to_leave_it() {
     let not_ours = format!("You do not yet have the right to loot the {name}.");
     let (held, locked, rare) = (0x8000_1221, 0x8000_1222, 0x8000_1223);
     let mut ap = Autoplay {
-        corpse_seen: vec![(held, t0), (locked, t0), (rare, t0)],
+        corpse_seen: corpses_seen([(held, t0), (locked, t0), (rare, t0)]),
         ..Default::default()
     };
 
@@ -290,7 +290,7 @@ fn the_words_a_body_is_refused_in_say_how_long_to_leave_it() {
     // and five more refusals before it reached the wait that was
     // meant the first time.
     let both = 0x8000_1224;
-    ap.corpse_seen.push((both, t0));
+    ap.corpse_seen.mark(both, t0);
     ap.take_up_corpse(both, t0, LOOT_TIMEOUT);
     assert!(ap.corpse_refused_in_words(&in_use, name, Some(answered), answered));
     assert_eq!(ap.shelved.waited(&both), Some(OPEN_IN_USE_AGAIN));
