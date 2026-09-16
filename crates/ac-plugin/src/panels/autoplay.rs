@@ -983,9 +983,15 @@ impl Plugin for Autoplay {
                 d.config = edited;
             }
             Source::Live => {
+                // Unticking "pick fights" is the rules' own stop: the
+                // config alone leaves the fight held (`Client::let_go`).
+                let stopped = v.config.fight.enabled && !edited.fight.enabled;
                 self.saved = edited.clone();
                 if let Some(c) = cx.try_client() {
                     c.autoplay.config = edited;
+                    if stopped {
+                        c.let_go(ac_client::autoplay::Release::Fight);
+                    }
                 }
             }
         }
