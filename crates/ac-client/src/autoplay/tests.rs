@@ -1,5 +1,6 @@
 use crate::autoplay::fight::critter::CREATURE_LEVEL;
 use crate::autoplay::hands::weapon::{SWAP_SETTLES, WIELD_ANSWERS_IN};
+use crate::autoplay::ledger::salvage::{SALVAGE_TIMEOUT, SALVAGE_TRIES};
 use crate::testkit::{character_of_level, game_data, no_data, standing_in_the_field};
 
 #[test]
@@ -1404,121 +1405,6 @@ fn what_arrives_in_the_pack_is_judged_like_what_lies_on_a_corpse() {
     assert_eq!(LootAction::parse("burn"), None);
     assert!(!LootAction::Skip.takes());
     let _ = std::fs::remove_dir_all(library.dir());
-}
-
-#[test]
-fn the_best_salvager_has_an_ust_and_the_highest_skill() {
-    let mate = |name: &str, guid: u32, salvaging: u32, has_ust: bool| Mate {
-        name: name.into(),
-        guid,
-        salvaging,
-        has_ust,
-        ..Default::default()
-    };
-    let team = [
-        mate("Zed", 1, 300, true),
-        mate("Amy", 2, 300, true),
-        mate("Bob", 3, 400, false),
-        mate("Cal", 4, 200, true),
-    ];
-    // Bob's skill is highest but he has no Ust; Amy and Zed tie and
-    // the name that sorts first wins.
-    assert_eq!(best_salvager(team.iter()), Some(("Amy".into(), 2)));
-    assert_eq!(best_salvager(team[3..].iter()), Some(("Cal".into(), 4)));
-    assert_eq!(best_salvager(team[2..3].iter()), None);
-    assert_eq!(best_salvager(std::iter::empty()), None);
-    // Someone not yet in the world (guid 0) cannot be handed anything.
-    assert_eq!(best_salvager([mate("Nobody", 0, 999, true)].iter()), None);
-}
-
-/// `items` (guid and workmanship), none of them refused yet.
-fn never_refused(items: &[(u32, f32)]) -> Vec<(u32, f32, u8)> {
-    items.iter().map(|(g, w)| (*g, *w, 0)).collect()
-}
-
-/// Every salvage sent for `items` (guid and workmanship), the server
-/// taking each batch before the next is chosen.
-fn salvages(items: &[(u32, f32)]) -> Vec<Vec<u32>> {
-    let mut left = items.to_vec();
-    let mut sent = Vec::new();
-    while let Some((_, batch)) = next_salvage_batch(never_refused(&left)) {
-        left.retain(|(g, _)| !batch.contains(g));
-        sent.push(batch);
-    }
-    sent
-}
-
-#[test]
-fn a_salvage_that_came_to_nothing_waits_behind_the_grades_not_yet_tried() {
-    // ACE skips a Retained item without a word. Chosen as the best
-    // grade every time, a 10 like that went out alone after each
-    // timeout, and everything below it waited behind all three.
-    let (ten, nine, six, five) = (1, 2, 3, 4);
-    assert_eq!(
-        next_salvage_batch([(ten, 10.0, 1), (nine, 9.0, 0), (six, 6.0, 0)]),
-        Some((SalvageGrade::Nine, vec![nine]))
-    );
-    assert_eq!(
-        next_salvage_batch([(ten, 10.0, 1), (six, 6.0, 0)]),
-        Some((SalvageGrade::Common, vec![six]))
-    );
-    // Once the rest are gone it is asked for again, still on its own.
-    assert_eq!(
-        next_salvage_batch([(ten, 10.0, 1)]),
-        Some((SalvageGrade::Ten, vec![ten]))
-    );
-    // Refused alike, the grades still keep apart.
-    assert_eq!(
-        next_salvage_batch([(six, 6.0, 1), (ten, 10.0, 1), (five, 5.0, 1)]),
-        Some((SalvageGrade::Ten, vec![ten]))
-    );
-    // And the one refused least goes first.
-    assert_eq!(
-        next_salvage_batch([(six, 6.0, 2), (five, 5.0, 1)]),
-        Some((SalvageGrade::Common, vec![five]))
-    );
-}
-
-#[test]
-fn a_workmanship_10_iron_mace_is_not_salvaged_with_a_6() {
-    // In one salvage both go into the same bag of Iron, and the bag
-    // comes out a workmanship 8.
-    let (six, ten) = (0x8000_0001, 0x8000_0002);
-    assert_eq!(
-        salvages(&[(six, 6.0), (ten, 10.0)]),
-        vec![vec![ten], vec![six]]
-    );
-}
-
-#[test]
-fn nines_and_tens_never_share_a_salvage() {
-    let items = [(1, 9.0), (2, 10.0), (3, 6.0), (4, 9.0), (5, 10.0), (6, 3.0)];
-    assert_eq!(
-        next_salvage_batch(never_refused(&items)),
-        Some((SalvageGrade::Ten, vec![2, 5]))
-    );
-    // The best first, each grade alone, in the order they were given.
-    assert_eq!(salvages(&items), vec![vec![2, 5], vec![1, 4], vec![3, 6]]);
-}
-
-#[test]
-fn everything_below_nine_goes_in_one_salvage() {
-    let items = [(1, 1.0), (2, 8.0), (3, 5.0), (4, 8.0)];
-    assert_eq!(
-        next_salvage_batch(never_refused(&items)),
-        Some((SalvageGrade::Common, vec![1, 2, 3, 4]))
-    );
-    assert_eq!(salvages(&items), vec![vec![1, 2, 3, 4]]);
-}
-
-#[test]
-fn a_grade_with_nothing_in_it_sends_no_salvage() {
-    assert_eq!(next_salvage_batch([]), None);
-    assert_eq!(salvages(&[]), Vec::<Vec<u32>>::new());
-    // No 9s: the 10 and the rest, and no empty salvage between.
-    assert_eq!(salvages(&[(1, 6.0), (2, 10.0)]), vec![vec![2], vec![1]]);
-    // Only 9s: one salvage.
-    assert_eq!(salvages(&[(1, 9.0), (2, 9.0)]), vec![vec![1, 2]]);
 }
 
 /// A level 20 character that salvages for itself: an Ust in the pack,
@@ -4219,31 +4105,6 @@ fn a_ranged_attacker_closes_in_before_it_gives_up() {
     assert_eq!(closer_stand_off(10.0), Some(MIN_STAND_OFF));
     assert_eq!(closer_stand_off(MIN_STAND_OFF), None);
     assert_eq!(closer_stand_off(MIN_STAND_OFF + 0.5), None);
-}
-
-#[test]
-fn a_re_judged_pack_counts_each_kind_as_it_goes() {
-    // Three rings and two piles of tapers, in the order they were
-    // come by. Each ring is told how many rings were held before
-    // it -- none, one, two -- not that three are carried, so a rule
-    // that keeps up to two claims the first two and not the third.
-    // Told instead that it was the second of two, the second ring
-    // sat over the cap and only one was kept.
-    let mut carried = vec![
-        (30, 500, 1),   // third ring
-        (10, 500, 1),   // first ring
-        (25, 691, 300), // second pile of tapers
-        (20, 500, 1),   // second ring
-        (15, 691, 120), // first pile of tapers
-    ];
-    assert_eq!(
-        in_arrival_order(&mut carried),
-        vec![(10, 0), (15, 0), (20, 1), (25, 120), (30, 2)]
-    );
-    // A stack counts for what it holds, not for one.
-    let mut two = vec![(7, 691, 4059), (8, 691, 1)];
-    assert_eq!(in_arrival_order(&mut two), vec![(7, 0), (8, 4059)]);
-    assert!(in_arrival_order(&mut []).is_empty());
 }
 
 #[test]

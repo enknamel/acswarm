@@ -67,6 +67,10 @@ pub use fight::critter::{critter, Critter, Hint, Seen};
 pub use hands::ammo::choose_recipe;
 #[cfg(doc)]
 use hear::{arrived_unharmed, spell_attacker};
+pub use ledger::retag::arrival_tag;
+#[cfg(doc)]
+use ledger::retag::{RETAG_EVERY, TAG_TIMEOUT};
+pub use ledger::salvage::best_salvager;
 use team::view::rival_leader;
 pub use team::view::{Mate, TeamView};
 use vitals::buffs::BUFF_EVERY;
@@ -511,33 +515,8 @@ fn closer_stand_off(distance: f32) -> Option<f32> {
 }
 /// The same note is not logged again within this.
 const NOTE_EVERY: Duration = Duration::from_secs(5);
-/// Least time between two hand-offs, and between two salvage batches
-/// when the first has not been seen to go: a batch whose items have
-/// left the pack is followed by the next at once.
-const SALVAGE_EVERY: Duration = Duration::from_secs(3);
-/// How long a salvage batch or a hand-off is given to take effect (the
-/// items leaving the pack) before it counts as refused.
-const SALVAGE_TIMEOUT: Duration = Duration::from_secs(5);
-/// A batch or an item refused this many times is left alone.
-const SALVAGE_TRIES: u8 = 3;
-/// The salvager is walked to when within this; further off, the salvage
-/// waits for the team to come together.
-const HAND_OFF_RANGE: f32 = 30.0;
 /// Close enough to hand something over (ACE's use radius, with room).
 const GIVE_REACH: f32 = 2.0;
-/// How long an item that arrived in the pack waits for its appraisal
-/// before the rules judge it as it is.
-const TAG_TIMEOUT: Duration = Duration::from_secs(15);
-/// How often the pack is judged afresh while a re-judge is waiting on
-/// appraisals.
-///
-/// The answers cannot change faster than the server sends them, so
-/// there is nothing to be had from asking every frame -- and a hundred
-/// and fifty items judged sixty times a second for the fifteen seconds
-/// an appraisal may take is real work for no answer.
-const RETAG_EVERY: Duration = Duration::from_millis(250);
-/// The Salvaging skill.
-const SALVAGING: u32 = 40;
 /// Least time between two attack orders.
 const ATTACK_EVERY: Duration = Duration::from_millis(1200);
 /// A leader further off than twice the following distance (and at least
@@ -840,20 +819,6 @@ pub fn deal(body: u32, who: u32) -> u64 {
     z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
     z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
     z ^ (z >> 31)
-}
-
-/// Who salvages for the team, out of `mates` (the caller includes
-/// itself): the highest Salvaging among those with an Ust, ties to the
-/// name that sorts first. `None` when nobody carries an Ust.
-pub fn best_salvager<'a>(mates: impl Iterator<Item = &'a Mate>) -> Option<(String, u32)> {
-    mates
-        .filter(|m| m.has_ust && m.guid != 0)
-        .max_by(|a, b| {
-            a.salvaging
-                .cmp(&b.salvaging)
-                .then_with(|| b.name.cmp(&a.name))
-        })
-        .map(|m| (m.name.clone(), m.guid))
 }
 
 /// What means a thing on a body for one of a party in particular, rather
@@ -1176,69 +1141,6 @@ pub fn standing_by_line(me: &str, corpse: &str, guid: u32, by: &str, on: &[Strin
     )
 }
 
-/// Where an item stands for salvaging, by its workmanship.
-///
-/// The server puts everything of one material salvaged in one go into
-/// the same bag, and the bag's workmanship is the average of what went
-/// in (ACE `TryAddSalvage`); a bag already carried is never added to.
-/// So a workmanship 10 Iron mace salvaged beside a workmanship 6 one
-/// makes a bag of 8, and the 10 is wasted. Skill cannot make up for it:
-/// it decides how many units come out, never their workmanship. Below 9
-/// nobody minds the averaging and everything goes in together; a 9 is
-/// salvaged only with 9s, and a 10 only with 10s.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum SalvageGrade {
-    /// Below workmanship 9.
-    Common,
-    Nine,
-    Ten,
-}
-
-impl SalvageGrade {
-    fn of(workmanship: f32) -> Self {
-        if workmanship >= 10.0 {
-            Self::Ten
-        } else if workmanship >= 9.0 {
-            Self::Nine
-        } else {
-            Self::Common
-        }
-    }
-}
-
-/// One salvage's worth out of `items` (guid, workmanship, and how many
-/// times a salvage of it has come to nothing, in the order they are to
-/// go), and the grade they share. `None` with nothing to salvage.
-///
-/// What has come to nothing least goes first, and of that every 10 when
-/// there is one, else every 9, else the rest. The best go first, so that
-/// ordinary loot turning up between batches never keeps them waiting;
-/// each grade is a batch, and so a turn, of its own.
-///
-/// The refusals come before the grade because ACE skips some items
-/// without a word -- a Retained one, say. Chosen as the best grade every
-/// time, a 10 like that went out alone again after each timeout, and the
-/// 9s and everything below waited behind three of them, where a single
-/// salvage of everything used to take the rest at once.
-fn next_salvage_batch(
-    items: impl IntoIterator<Item = (u32, f32, u8)>,
-) -> Option<(SalvageGrade, Vec<u32>)> {
-    use std::cmp::Reverse;
-    let turns: Vec<(u32, (Reverse<u8>, SalvageGrade))> = items
-        .into_iter()
-        .map(|(guid, workmanship, refused)| {
-            (guid, (Reverse(refused), SalvageGrade::of(workmanship)))
-        })
-        .collect();
-    let first = turns.iter().map(|(_, turn)| *turn).max()?;
-    let batch = turns
-        .into_iter()
-        .filter(|(_, turn)| *turn == first)
-        .map(|(guid, _)| guid)
-        .collect();
-    Some((first.1, batch))
-}
-
 /// Whether `name` contains any of `list`, case-insensitively. An empty
 /// list matches nothing.
 pub fn name_matches(name: &str, list: &[String]) -> bool {
@@ -1319,65 +1221,6 @@ pub fn judge_loot(
         return Verdict::Decided(LootAction::Keep, "kept stocked".into());
     }
     p.judge(stats, id, me, my_name, held)
-}
-
-/// Each carried thing paired with how many of its kind came before
-/// it, oldest first.
-///
-/// `carried` is `(guid, wcid, stack)`. The server hands out rising ids,
-/// so sorting by guid is the order the character came by the things in,
-/// and the running count *before* each is what a rule with a
-/// `keep_up_to` on it was answered with when they arrived one at a
-/// time: `held` is what was already in the pack when the thing was
-/// judged, on the corpse path and everywhere else, and a rule with a
-/// cap keeps while `held` is under it.
-///
-/// The whole point is not to hand every item the pack's total. A rule
-/// that keeps up to two rings, asked about three rings and told three
-/// times that three are carried, claims none of them -- and a profile
-/// edit would turn a set of keepers into a set of vendor trash in one
-/// pass. Nor the count with the item itself in it, which this once
-/// was: told it was the second of two, the second ring was over a cap
-/// of two, and the pass kept one ring fewer than the cap.
-fn in_arrival_order(carried: &mut [(u32, u32, u32)]) -> Vec<(u32, u32)> {
-    carried.sort_unstable();
-    let mut seen_of: std::collections::BTreeMap<u32, u32> = std::collections::BTreeMap::new();
-    carried
-        .iter()
-        .map(|(guid, wcid, stack)| {
-            let n = seen_of.entry(*wcid).or_insert(0);
-            let before = *n;
-            *n += stack;
-            (*guid, before)
-        })
-        .collect()
-}
-
-/// What to write down about something that turned up in the pack
-/// (given, bought, made) rather than off a corpse.
-///
-/// The same judgement as a corpse item's, and by the same profile: a
-/// bundle of arrowheads is a bundle of arrowheads whether it came off a
-/// drudge or over a counter, and it used to be judged by two different
-/// sets of rules depending on which. `Keep` is written down too, where
-/// this once answered only Salvage or Sell -- "the character means to
-/// keep this" is exactly what the vendor side needs to hear, and
-/// silence let it be sold.
-pub fn arrival_tag(
-    stats: &crate::items::ItemStats,
-    id: Option<&ac_net::messages::Appraisal>,
-    profile: Option<&crate::profile::Profile>,
-    me: &crate::weapons::Wielder,
-    my_name: &str,
-    held: u32,
-) -> Option<LootAction> {
-    match judge_loot(stats, id, profile, me, my_name, held) {
-        crate::profile::Verdict::Decided(LootAction::Skip, _) => None,
-        crate::profile::Verdict::Decided(a, _) => Some(a),
-        // Not judgeable yet, or nothing claimed it: nothing to write
-        // down, and the pack keeps it either way.
-        crate::profile::Verdict::NeedsId(_) | crate::profile::Verdict::None => None,
-    }
 }
 
 /// What the character is doing on its own right now.
@@ -1844,26 +1687,6 @@ impl Autoplay {
         self.hit_by
             .retain(|(name, when)| name != who && now.duration_since(*when) < UNDER_ATTACK);
         self.hit_by.push((who.to_string(), now));
-    }
-
-    /// Write down what an item was taken for (the loot pass, a script,
-    /// the inventory panel): what the salvage and vendor passes do with
-    /// it from now on.
-    pub fn tag(&mut self, stats: &crate::items::ItemStats, action: LootAction) {
-        self.ledger.remember(stats, action);
-        self.seen.insert(stats.guid);
-    }
-
-    /// What was decided could not be done -- a counter that would not
-    /// take it, a salvage refused. Not a new decision: the thing is
-    /// still meant for what it was meant for.
-    pub fn tag_failed(&mut self, guid: u32, why: impl Into<String>) {
-        self.ledger.failed(guid, why, crate::holdings::unix_now());
-    }
-
-    /// What each item was taken for, by guid.
-    pub fn tags(&self) -> std::collections::BTreeMap<u32, LootAction> {
-        self.ledger.actions()
     }
 
     /// Start on a corpse: asked to open just now, with `allow` for it
@@ -3004,172 +2827,6 @@ impl Client {
         self.profiles.get(&self.autoplay.config.loot.profile)
     }
 
-    /// Notice the rules changing and re-judge what is already carried.
-    ///
-    /// A decision stands for as long as the rules that made it do. It
-    /// has to: a character that judged its pack afresh every time it
-    /// looked would sell the ring it kept the moment the pack filled,
-    /// which is the whole reason the ledger exists. But the *rules*
-    /// changing is the one thing that should reach back. The player has
-    /// just said what their things are worth, and a decision written
-    /// down under the old rules is an answer to a question nobody is
-    /// asking any more.
-    ///
-    /// Runs whatever else the character is doing, autoplay off
-    /// included: the ledger is what the Items window reads, and it
-    /// should not be telling somebody their mule is holding things for
-    /// a rule they deleted.
-    pub(crate) fn tick_retag(&mut self, now: Instant) {
-        let profile = self.loot_profile();
-        // The cheap half, run every frame: has the shelf handed out a
-        // different profile? It replaces the whole profile on every edit,
-        // name lists and all, so identity answers it without reading a
-        // rule.
-        let untouched = match &self.autoplay.judged_under {
-            Some(was) => match (was, &profile) {
-                (None, None) => true,
-                (Some(a), Some(b)) => std::sync::Arc::ptr_eq(a, b),
-                _ => false,
-            },
-            None => false,
-        };
-        if !untouched {
-            // A character that has not entered the world yet has no
-            // pack to judge and no name to file a ledger under. Leave
-            // the rules unrecorded so this runs again once it has.
-            if self.world.stats.name.trim().is_empty() {
-                return;
-            }
-            let rules = self.rules_fingerprint(profile.as_deref());
-            self.autoplay.judged_under = Some(profile);
-            // Something was handed out, but were the rules themselves
-            // any different? Typing in a profile's note replaces it
-            // without changing a single answer, and neither does
-            // opening a client that has been shut since the last edit.
-            //
-            // This is also what keeps a decision from being re-made on
-            // every login. Judging the pack afresh each time is the one
-            // thing the ledger exists to prevent: a rule that keeps up
-            // to a number reads the pack it is in, and a pack that has
-            // since filled turns yesterday's keepers into today's
-            // vendor trash.
-            if self.autoplay.ledger.rules() == Some(rules) {
-                return;
-            }
-            self.autoplay.ledger.judged_under(rules);
-            self.autoplay.retagging = Some(now);
-            self.autoplay.retag_due = Some(now);
-        }
-        let Some(since) = self.autoplay.retagging else {
-            return;
-        };
-        if self.autoplay.retag_due.is_some_and(|due| now < due) {
-            return;
-        }
-        self.autoplay.retag_due = Some(now + RETAG_EVERY);
-        if self.retag_pack(now.duration_since(since) >= TAG_TIMEOUT) {
-            self.autoplay.retagging = None;
-            self.autoplay.retag_due = None;
-        }
-    }
-
-    /// Everything that decides an item, as one number (see
-    /// `Profile::fingerprint`). A character reading no profile still has
-    /// a fingerprint, so being given one counts as a change.
-    fn rules_fingerprint(&self, profile: Option<&crate::profile::Profile>) -> u64 {
-        use std::hash::{Hash, Hasher};
-        let mut h = std::collections::hash_map::DefaultHasher::new();
-        profile.map(|p| p.fingerprint()).hash(&mut h);
-        h.finish()
-    }
-
-    /// Judge everything carried against the rules as they stand now and
-    /// write the answers down. True when nothing is left waiting on an
-    /// appraisal, so the caller can stop.
-    ///
-    /// `settle` says to take the answer as it is rather than go on
-    /// waiting for the server.
-    ///
-    /// Items are gone through oldest first and each is told how many of
-    /// its kind come at or before it, rather than how many are carried
-    /// altogether. That is what a rule with a `keep_up_to` on it was
-    /// answered with when the things arrived one at a time, and telling
-    /// all three rings that three rings are carried would put every one
-    /// of them over a cap of two -- turning a set of keepers into a set
-    /// of vendor trash in one pass.
-    fn retag_pack(&mut self, settle: bool) -> bool {
-        let profile = self.loot_profile();
-        let wielder = self.wielder();
-        let who = self.world.stats.name.clone();
-        let mut carried: Vec<(u32, u32, u32)> = self
-            .world
-            .inventory()
-            .chain(self.world.wielded())
-            .map(|o| (o.guid, o.weenie_class_id, o.stack_size.max(1)))
-            .collect();
-        let mut waiting = Vec::new();
-        for (guid, held) in in_arrival_order(&mut carried) {
-            let Some(stats) = self.stats_of(guid) else {
-                continue;
-            };
-            match judge_loot(
-                &stats,
-                self.appraisals.get(&guid),
-                profile.as_deref(),
-                &wielder,
-                &who,
-                held,
-            ) {
-                crate::profile::Verdict::Decided(LootAction::Skip, _)
-                | crate::profile::Verdict::None => {
-                    // Nothing claims it any more. That is not a decision
-                    // to be rid of it -- it is no decision at all, and
-                    // an item with no entry is never sold.
-                    self.autoplay.ledger.forget(guid);
-                }
-                crate::profile::Verdict::Decided(action, _) => {
-                    if self.autoplay.ledger.of(&stats) != Some(action) {
-                        self.autoplay.tag(&stats, action);
-                    }
-                }
-                // A rule wants it but cannot say so until the server has
-                // identified it. Yesterday's answer stands in the
-                // meantime rather than being thrown away over a question
-                // that has not been answered.
-                crate::profile::Verdict::NeedsId(_) if !settle && !stats.appraised => {
-                    waiting.push(guid);
-                }
-                crate::profile::Verdict::NeedsId(_) => {}
-            }
-        }
-        if waiting.is_empty() {
-            return true;
-        }
-        self.appraise_many(waiting);
-        false
-    }
-
-    /// Judge a carried item by this character's profile and write down
-    /// what it is for, the way the arrival pass does for something that
-    /// turns up in the pack ([`arrival_tag`]).
-    ///
-    /// `None` when nothing claimed it, and then nothing is written:
-    /// silence is not a decision to leave it, and an item with no entry
-    /// is judged afresh next time.
-    pub fn tag_loot(&mut self, guid: u32) -> Option<LootAction> {
-        let stats = self.stats_of(guid)?;
-        let action = arrival_tag(
-            &stats,
-            self.appraisals.get(&guid),
-            self.loot_profile().as_deref(),
-            &self.wielder(),
-            &self.world.stats.name.clone(),
-            self.already_carried(stats.wcid),
-        )?;
-        self.autoplay.tag(&stats, action);
-        Some(action)
-    }
-
     /// The corpse `guid` holding `items`, asked to open at `asked`, and
     /// the character standing over it, as the loot rules see them.
     fn corpse_now(
@@ -3914,11 +3571,6 @@ impl Client {
         self.skill_now(33)
     }
 
-    /// This character's Salvaging as it stands, buffs counted.
-    pub fn salvaging(&self) -> u32 {
-        self.skill_now(SALVAGING)
-    }
-
     /// A skill as it stands right now, 0 when the sheet lacks it.
     fn skill_now(&self, id: u32) -> u32 {
         let stats = &self.world.stats;
@@ -3927,20 +3579,6 @@ impl Client {
         };
         let table = self.assets.skill_table().ok();
         stats.skill_current(sk, table.as_ref().and_then(|t| t.get(id)))
-    }
-
-    /// Who salvages for the team, this character included: the highest
-    /// Salvaging among those carrying an Ust (see [`best_salvager`]).
-    /// Off the team it is this character, if it has an Ust.
-    pub fn best_salvager(&self) -> Option<(String, u32)> {
-        let me = Mate {
-            name: self.world.stats.name.clone(),
-            guid: self.world.player_guid.unwrap_or(0),
-            salvaging: self.salvaging(),
-            has_ust: self.salvage_tool().is_some(),
-            ..Default::default()
-        };
-        best_salvager(std::iter::once(&me).chain(self.autoplay.team.mates.iter()))
     }
 
     /// The fellowship's members by player guid, while this character is
@@ -4372,314 +4010,6 @@ impl Client {
                 ),
             }
         }
-    }
-
-    /// Look at what has turned up in the pack since last time and tag
-    /// what the rules would salvage or sell (see [`arrival_tag`]): the
-    /// salvage a teammate handed over, mostly. The first pass only
-    /// notes what is carried.
-    fn autoplay_tag_arrivals(&mut self, now: Instant) {
-        let profile = self.loot_profile();
-        let wielder = self.wielder();
-        let who = self.world.stats.name.clone();
-        let carried: Vec<u32> = self
-            .world
-            .inventory()
-            .chain(self.world.wielded())
-            .map(|o| o.guid)
-            .collect();
-        let ap = &mut self.autoplay;
-        if !ap.baselined {
-            ap.seen = carried.iter().copied().collect();
-            ap.baselined = true;
-            return;
-        }
-        ap.seen.retain(|g| carried.contains(g));
-        // An entry lives only as long as the thing does: this is what
-        // stops a recycled id ever being mistaken for the item it used
-        // to name (see `ac_loot::ledger`).
-        ap.ledger.forget_gone(&carried);
-        ap.refused.retain(|g, _| carried.contains(g));
-        ap.pending_tags.retain(|(g, _)| carried.contains(g));
-        for g in &carried {
-            if ap.seen.insert(*g) && ap.ledger.by_guid(*g).is_none() {
-                ap.pending_tags.push((*g, now));
-            }
-        }
-        // Whether an identify is worth asking for: the profile says,
-        // since it is the only thing that judges anything now.
-        let needs = profile
-            .as_ref()
-            .is_some_and(|p| p.looting.appraise && p.needs_id());
-        let pending = std::mem::take(&mut self.autoplay.pending_tags);
-        for (g, since) in pending {
-            let Some(stats) = self.stats_of(g) else {
-                continue;
-            };
-            if needs && !stats.appraised && now.duration_since(since) < TAG_TIMEOUT {
-                self.appraise_many([g]);
-                self.autoplay.pending_tags.push((g, since));
-                continue;
-            }
-            // What was held before it arrived: the count every other
-            // path judges against, and the count a cap is a cap on.
-            // With the arrival itself counted, the fourth kit under
-            // "keep up to four" was the fourth of four, over the cap,
-            // and "the rest, to the counter" had it.
-            let held = self.carried_besides(&stats);
-            if let Some(action) = arrival_tag(
-                &stats,
-                self.appraisals.get(&g),
-                profile.as_deref(),
-                &wielder,
-                &who,
-                held,
-            ) {
-                tracing::info!(
-                    "autoplay: {} arrived, tagged {}",
-                    stats.name,
-                    action.label()
-                );
-                self.autoplay.tag(&stats, action);
-            }
-        }
-    }
-
-    /// Carried items tagged for salvage that can go: not worn, not
-    /// wanted by a blank tag. `bags` says whether salvage bags count
-    /// (they are handed on, never salvaged again). Each comes with its
-    /// name, for the log, and its workmanship, which decides the batch
-    /// it is salvaged in (see `SalvageGrade`).
-    fn salvage_tagged(&self, bags: bool) -> Vec<(u32, String, f32)> {
-        let me = self.world.player_guid;
-        let mut items: Vec<(u32, String, f32)> = self
-            .autoplay
-            .ledger
-            .for_salvage(crate::holdings::unix_now())
-            .into_iter()
-            .filter_map(|g| self.world.objects.get(&g))
-            .filter(|o| o.wielder != me && self.world.is_carried(o.guid))
-            .filter(|o| {
-                let bag = o.name.starts_with("Salvaged ");
-                if bag {
-                    bags
-                } else {
-                    o.material != 0 && o.workmanship > 0.0
-                }
-            })
-            .filter(|o| {
-                self.autoplay
-                    .refused
-                    .get(&o.guid)
-                    .is_none_or(|n| *n < SALVAGE_TRIES)
-            })
-            .map(|o| (o.guid, o.name.clone(), o.workmanship))
-            .collect();
-        items.sort_by(|a, b| a.1.cmp(&b.1).then(a.0.cmp(&b.0)));
-        items
-    }
-
-    /// Salvage what the rules tagged, or carry it to whoever salvages
-    /// for the team. Runs between fights. True while busy with it.
-    pub(crate) fn autoplay_salvage(&mut self, now: Instant) -> bool {
-        if self.world.player_guid.is_none() {
-            return false;
-        }
-        self.autoplay_tag_arrivals(now);
-        let Some(profile) = self.loot_profile() else {
-            return false;
-        };
-        let cfg = profile.looting.clone();
-        if self.attack_target.is_some() || self.autoplay.corpse.is_some() {
-            return false;
-        }
-        // A batch on its way: wait for the items to go, and count a
-        // refusal against each when they do not.
-        let mut answered = false;
-        if let Some((items, since)) = self.autoplay.salvaging.clone() {
-            let left: Vec<u32> = items
-                .iter()
-                .copied()
-                .filter(|g| self.world.is_carried(*g))
-                .collect();
-            if left.is_empty() {
-                self.autoplay.salvaging = None;
-                answered = true;
-                self.autoplay.say(
-                    Doing::Salvaging,
-                    format!("salvaged {} item(s)", items.len()),
-                );
-            } else if now.duration_since(since) < SALVAGE_TIMEOUT {
-                return true;
-            } else {
-                self.autoplay.salvaging = None;
-                for g in left {
-                    let n = self.autoplay.refused.entry(g).or_default();
-                    *n += 1;
-                    if *n >= SALVAGE_TRIES {
-                        let name = self.world.objects.get(&g).map(|o| o.name.clone());
-                        // A refusal is not a new decision. Rewriting it
-                        // to Keep made the thing eligible for nothing
-                        // while it went on holding a slot.
-                        self.autoplay.tag_failed(g, "could not be salvaged");
-                        self.autoplay.note(
-                            format!(
-                                "could not salvage {}, setting it aside",
-                                name.unwrap_or_default()
-                            ),
-                            now,
-                        );
-                    }
-                }
-            }
-        }
-        if let Some((item, since)) = self.autoplay.handing {
-            if !self.world.is_carried(item) {
-                self.autoplay.handing = None;
-            } else if now.duration_since(since) < SALVAGE_TIMEOUT {
-                return true;
-            } else {
-                self.autoplay.handing = None;
-                let n = self.autoplay.refused.entry(item).or_default();
-                *n += 1;
-                if *n >= SALVAGE_TRIES {
-                    let name = self
-                        .world
-                        .objects
-                        .get(&item)
-                        .map(|o| o.name.clone())
-                        .unwrap_or_default();
-                    self.autoplay
-                        .tag_failed(item, "the salvager would not take it");
-                    self.autoplay
-                        .note(format!("{name} was not taken, setting it aside"), now);
-                }
-            }
-        }
-        let Some((who, guid)) = self.best_salvager() else {
-            if !self.salvage_tagged(false).is_empty() {
-                self.autoplay
-                    .note("salvage waiting: nobody on the team carries an Ust", now);
-            }
-            return false;
-        };
-        // A batch the server has just salvaged is answered, and the next
-        // grade goes at once. Sitting out the gap after it returned the
-        // tick to the goals below, the fight among them, and the grades
-        // still to come waited out a whole fight and its looting.
-        let rate_ok = answered
-            || self
-                .autoplay
-                .last_salvage
-                .is_none_or(|t| now.duration_since(t) >= SALVAGE_EVERY);
-        if Some(guid) == self.world.player_guid {
-            if !cfg.salvage {
-                return false;
-            }
-            let items = self.salvage_tagged(false);
-            if items.is_empty() || !rate_ok {
-                return false;
-            }
-            // The server salvages in peace mode only.
-            if self.combat {
-                self.toggle_combat();
-                return true;
-            }
-            // A 9 or a 10 goes only with its own grade, and the rest wait
-            // their turn. What teammates handed over is batched the same
-            // way: it was tagged when it arrived, like anything looted.
-            let refused = |g: &u32| self.autoplay.refused.get(g).copied().unwrap_or(0);
-            let Some((grade, guids)) =
-                next_salvage_batch(items.iter().map(|(g, _, w)| (*g, *w, refused(g))))
-            else {
-                return false;
-            };
-            if !self.salvage(&guids) {
-                return false;
-            }
-            self.autoplay.salvaging = Some((guids.clone(), now));
-            self.autoplay.last_salvage = Some(now);
-            let apart = match grade {
-                SalvageGrade::Common => "",
-                SalvageGrade::Nine => " of workmanship 9, on their own",
-                SalvageGrade::Ten => " of workmanship 10, on their own",
-            };
-            self.autoplay.say(
-                Doing::Salvaging,
-                format!("salvaging {} item(s){apart}", guids.len()),
-            );
-            return true;
-        }
-        if !cfg.hand_off {
-            return false;
-        }
-        let items = self.salvage_tagged(true);
-        if items.is_empty() {
-            return false;
-        }
-        let Some(mate) = self
-            .autoplay
-            .team
-            .mates
-            .iter()
-            .find(|m| m.guid == guid)
-            .cloned()
-        else {
-            return false;
-        };
-        let Some(me) = self.player.as_ref().map(|p| p.world_position()) else {
-            return false;
-        };
-        // Not while it is fighting, and not from across the map.
-        if mate.target.is_some() {
-            return false;
-        }
-        let distance = mate.world.distance(me);
-        if distance > HAND_OFF_RANGE {
-            self.autoplay.note(
-                format!(
-                    "salvage waiting: {who} is {distance:.0} m off (salvaging {})",
-                    mate.salvaging
-                ),
-                now,
-            );
-            return false;
-        }
-        if distance > GIVE_REACH {
-            if self
-                .follow
-                .is_none_or(|f| f.target.distance(mate.world) > 1.0)
-            {
-                self.interrupt_travel("taking salvage to the salvager");
-                self.steering.reset();
-            }
-            self.head_for(mate.world, GIVE_REACH * 0.8, &who);
-            self.autoplay
-                .say(Doing::Salvaging, format!("taking salvage to {who}"));
-            return true;
-        }
-        if self.follow.take().is_some() {
-            self.steering.reset();
-        }
-        if !rate_ok {
-            return true;
-        }
-        // One item at a time, so a hand-off never mixes grades: the
-        // salvager batches what arrives like the rest of its own.
-        let (item, name, _) = items[0].clone();
-        if !self.give(guid, item, None) {
-            return false;
-        }
-        self.autoplay.handing = Some((item, now));
-        self.autoplay.last_salvage = Some(now);
-        self.autoplay.say(
-            Doing::Salvaging,
-            format!(
-                "giving {name} to {who} to salvage ({} left)",
-                items.len() - 1
-            ),
-        );
-        true
     }
 
     /// Knows a vulnerability or an imperil it could cast right now (a
