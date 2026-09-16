@@ -53,11 +53,10 @@ use crate::logistics::{self, Stage, Supplies};
 use crate::Client;
 use ac_world::{equip, item_type, object_desc_flags};
 
-mod burden;
+pub(crate) mod burden;
 mod config;
 mod raise;
 
-use burden::past_the_wall;
 pub use config::Growth;
 pub use raise::{batch_raise, choose_raise, Batch, Climb, Offer, Raise};
 use raise::{raises_a_maximum, skill_weight, Pending};
@@ -2565,56 +2564,6 @@ impl Client {
             );
         }
         self.autoplay.growth.mode
-    }
-
-    /// Free item slots as one take can use them: the most room any one
-    /// pack has (see `room::Packs::for_a_take`). A take goes into the
-    /// pack it names, so the slots of the main pack and each side pack
-    /// are not added: added, a character with every pack down to its
-    /// last slot read as having room for a dozen takes.
-    pub fn free_space(&self) -> u32 {
-        self.packs().for_a_take()
-    }
-
-    /// Free item slots as the server spreads what it creates over them:
-    /// every pack's room together (see `room::Packs::anywhere`). A
-    /// counter's payout, a purchase and a gift are created in the main
-    /// pack and spill into the side packs, and a sale is judged
-    /// against this same total.
-    pub fn room_anywhere(&self) -> u32 {
-        self.packs().anywhere()
-    }
-
-    /// No pack has a slot for a take, or the packs together are down to
-    /// the slots kept free for a counter's money (`restock.keep_slots`):
-    /// time to sell, while a sale can still be paid for. The server
-    /// finds room for the coin before it takes the goods, so a pack with
-    /// no slot at all cannot be sold out of -- and it finds that room
-    /// in any pack, so the slots kept are counted over all of them.
-    /// Counted in the one pack a take could use, a character with two
-    /// slots in the main pack and two in the sack went to town with
-    /// room for its money twice over.
-    pub fn pack_low_on_room(&self) -> bool {
-        let packs = self.packs();
-        packs.for_a_take() == 0 || packs.anywhere() <= self.autoplay.config.team.restock.keep_slots
-    }
-
-    /// What the character has room for, as a corpse waiting on it sees
-    /// it (see `Autoplay::corpse_waiting`).
-    pub(crate) fn room_for_loot(&self) -> crate::autoplay::Room {
-        let (carried, capacity) = self.burden();
-        crate::autoplay::Room {
-            pack_low: self.pack_low_on_room(),
-            past_the_wall: past_the_wall(carried, capacity),
-            // Weighed only while a body is waiting on it: what the loot
-            // weighs is judged item by item, and this is asked on every
-            // tick a corpse lies about.
-            carry: if self.autoplay.left_for_weight.is_empty() {
-                u32::MAX
-            } else {
-                self.carry_room(&self.autoplay.config.growth)
-            },
-        }
     }
 
     /// What the character can spend. Coin and trade notes both: a note
