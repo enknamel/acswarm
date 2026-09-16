@@ -28,9 +28,9 @@ system's entry fns are written in the files its own row names.
 
 ## Steps
 
-`steps::STEPS` (`autoplay/steps.rs`). A goal with no scorer is worth `(STEPS.len() - place) * 10`,
-so adding, removing or moving a row re-scores every goal below it against `LOOT_AT_REST` (45) and
-`WALK_TO_A_FIGHT` (40).
+`steps::STEPS` (`autoplay/steps.rs`). A goal with no scorer is worth its `base`, written in the
+table, so a row may be added or dropped without re-scoring the rest. The fixed curves sit between
+those numbers: `LOOT_AT_REST` (45) and `WALK_TO_A_FIGHT` (40) fall under `follow` (50).
 
 | # | step | layer | worth | runs |
 |---|---|---|---|---|
@@ -41,18 +41,17 @@ so adding, removing or moving a row re-scores every goal below it against `LOOT_
 | 5 | urgent buffs | reflex | - | `autoplay_buff` (urgent) |
 | 6 | vitals | reflex | - | `autoplay_vitals` |
 | 7 | loot | goal | `worth_looting` | `autoplay_loot` |
-| 8 | catch up | goal | place | `autoplay_follow` (urgent) |
-| 9 | team | goal | place | `autoplay_team` |
-| 10 | salvage | goal | place | `autoplay_salvage` |
+| 8 | catch up | goal | 120 | `autoplay_follow` (urgent) |
+| 9 | team | goal | 110 | `autoplay_team` |
+| 10 | salvage | goal | 100 | `autoplay_salvage` |
 | 11 | summon | goal | `worth_fighting` | `autoplay_summon` |
 | 12 | fight | goal | `worth_fighting` | `autoplay_fight` |
-| 13 | keep to the area | goal | place | `autoplay_keep_to_area` |
-| 14 | buffs | goal | place | `autoplay_buff` |
-| 15 | follow | goal | place | `autoplay_follow` |
-| 16 | resume the journey | goal | place | `autoplay_resume_journey` |
-| 17 | tidy | goal | never weighed | nothing: the row only holds the scores below it |
-| 18 | explore | goal | place | `autoplay_explore` |
-| 19 | grow | goal | place | `autoplay_grow` |
+| 13 | keep to the area | goal | 70 | `autoplay_keep_to_area` |
+| 14 | buffs | goal | 60 | `autoplay_buff` |
+| 15 | follow | goal | 50 | `autoplay_follow` |
+| 16 | resume the journey | goal | 40 | `autoplay_resume_journey` |
+| 17 | explore | goal | 20 | `autoplay_explore` |
+| 18 | grow | goal | 10 | `autoplay_grow` |
 
 Housekeeping, every tick and never claiming it: `autoplay_pending_wield`, `autoplay_shield`,
 `autoplay_rearm`, `autoplay_stock`, `autoplay_claim_pet_kills`, `autoplay_tidy`, `autoplay_spend_xp`.

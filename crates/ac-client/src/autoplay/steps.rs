@@ -95,14 +95,6 @@ fn by_place(_: &Client, _: Instant) -> f32 {
     UNDECIDED
 }
 
-/// The scorer for a row that is no longer a goal: worth nothing, so it
-/// is never weighed and never run. The row stays where it is because
-/// every other goal's worth is its place in this table, and taking a
-/// row out moves all of them.
-fn not_weighed(_: &Client, _: Instant) -> f32 {
-    0.0
-}
-
 /// What looting is worth: nothing at all when there is no body, its
 /// usual place while the body will keep, and more than the next fight
 /// once it will not.
@@ -462,17 +454,6 @@ pub const STEPS: &[Step] = &[
                 Did::Done
             }
         },
-    },
-    Step {
-        name: "tidy",
-        layer: Layer::Goal,
-        base: 30.0,
-        why: "holds tidy's old place so no goal's worth moves; the pack is tidied every tick as housekeeping, which needs no tick of its own",
-        // Never weighed, so never run: every other goal's worth is its
-        // place in this table, and taking the row out would move six of
-        // them against the fixed scores that some goals do give.
-        worth: not_weighed,
-        run: |_, _| Did::Done,
     },
     Step {
         name: "explore",

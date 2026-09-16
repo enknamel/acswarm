@@ -44,9 +44,6 @@ fn the_order_says_what_the_character_cares_about() {
     assert!(at("loot") < at("grow"), "loot before shopping");
     assert!(at("loot") < at("salvage"));
 
-    // Tidying comes before anything that decides the pack is full.
-    assert!(at("tidy") < at("grow"));
-
     // And the last word is the one that finds something to do.
     assert_eq!(STEPS.last().map(|s| s.name), Some("grow"));
 }
@@ -61,13 +58,10 @@ fn the_pack_is_tidied_as_housekeeping_and_never_claims_a_tick() {
         HOUSEKEEPING.iter().any(|h| h.name == "tidy the pack"),
         "tidying is housekeeping now"
     );
-    let tidy = named("tidy").expect("the row is still there");
     assert!(
-        std::ptr::fn_addr_eq(tidy.worth, not_weighed as fn(&Client, Instant) -> f32),
-        "the row is a placeholder, not a goal"
+        named("tidy").is_none(),
+        "and it holds no row: the scores are written out, so it needed no placeholder"
     );
-    let at = |name: &str| STEPS.iter().position(|s| s.name == name).expect(name);
-    assert!(at("tidy") < at("grow"), "and it keeps its old place");
 }
 
 #[test]
@@ -95,7 +89,7 @@ fn every_goal_keeps_the_worth_it_had_when_tidying_moved() {
     // the contract. They are written in the table now, so a row may come
     // or go without moving them.
     let base = |name: &str| STEPS.iter().find(|s| s.name == name).expect(name).base;
-    assert_eq!(STEPS.len(), 19);
+    assert_eq!(STEPS.len(), 18);
     assert_eq!(base("fight"), 80.0);
     assert_eq!(base("summon"), 90.0);
     assert_eq!(base("keep to the area"), 70.0);
@@ -373,15 +367,12 @@ fn looting_is_worth_only_the_bodies_this_character_would_go_to() {
 }
 
 #[test]
-fn the_score_column_is_the_one_the_table_order_used_to_give() {
-    // Written out when the scores stopped being arithmetic on the row's
-    // place, so the move changed no goal's worth. Ten apart, first worth
-    // most; a new row picks a number, it does not shift its neighbours.
-    let expected: Vec<f32> = (0..STEPS.len())
-        .map(|p| (STEPS.len() - p) as f32 * 10.0)
-        .collect();
-    let actual: Vec<f32> = STEPS.iter().map(|s| s.base).collect();
-    assert_eq!(actual, expected);
+fn the_score_column_falls_from_first_to_last() {
+    // The numbers are the ones the old arithmetic gave, less the 30 the
+    // tidy row held: a row may come or go now without moving the rest,
+    // which is the whole point of writing them down.
+    assert_eq!(STEPS.first().map(|s| s.base), Some(190.0));
+    assert_eq!(STEPS.last().map(|s| s.base), Some(10.0));
     for pair in STEPS.windows(2) {
         assert!(
             pair[0].base > pair[1].base,
