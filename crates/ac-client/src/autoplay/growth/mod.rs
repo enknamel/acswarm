@@ -2653,34 +2653,6 @@ impl Client {
         unit.saturating_mul(need.want)
     }
 
-    /// Whether this character is carrying something another character
-    /// asked for. On a quartermaster run that is how the party knows
-    /// the runner still has goods to hand out; on any other it is
-    /// simply false, since nobody has asked it for anything.
-    ///
-    /// Worked out from the others' orders alone, never from who the
-    /// runner is: the runner is chosen from these reports, so asking
-    /// would be circular.
-    fn holding_orders(&self) -> bool {
-        let me = self.world.stats.name.as_str();
-        let wanted: Vec<&str> = self
-            .autoplay
-            .team
-            .mates
-            .iter()
-            .filter(|m| m.name != me)
-            .flat_map(|m| m.supplies.order.iter())
-            .filter(|(_, count)| *count > 0)
-            .map(|(name, _)| name.as_str())
-            .collect();
-        if wanted.is_empty() {
-            return false;
-        }
-        self.world
-            .inventory()
-            .any(|o| wanted.iter().any(|w| o.name.eq_ignore_ascii_case(w)))
-    }
-
     /// Every spell autoplay casts, in one list: what the restock list
     /// stocks components for, and what the counter's component guard
     /// keeps.
@@ -2869,21 +2841,6 @@ impl Client {
             .collect();
         party.push(self.supplies(cfg, now));
         party
-    }
-
-    /// Who is doing the party's shopping, when it sends one character
-    /// rather than all going.
-    pub fn quartermaster_name(&self, cfg: &Growth, now: Instant) -> Option<String> {
-        if self.autoplay.config.team.restock.plan != crate::logistics::Plan::Quartermaster {
-            return None;
-        }
-        crate::logistics::quartermaster(&self.party_supplies(cfg, now)).map(|m| m.name.clone())
-    }
-
-    /// Whether this character is the one doing the shopping.
-    pub fn is_quartermaster(&self, cfg: &Growth, now: Instant) -> bool {
-        let me = self.world.stats.name.as_str();
-        !me.is_empty() && self.quartermaster_name(cfg, now).as_deref() == Some(me)
     }
 
     /// Everything the character is carrying that the rules would sell,

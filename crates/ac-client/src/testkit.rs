@@ -7,12 +7,14 @@
 //! `#[ignore = "needs AC_DATA_DIR"]`; `cargo test-data` runs those.
 
 use std::rc::Rc;
+use std::time::Duration;
 
 use ac_scene::Assets;
 use ac_world::WorldObject;
 use glam::{Quat, Vec3};
 
-use crate::autoplay::Mate;
+use crate::autoplay::{LootAction, Mate, TeamView, Turn};
+use crate::items::ItemStats;
 use crate::player::Player;
 use crate::Client;
 
@@ -109,6 +111,96 @@ pub fn mate(guid: u32, name: &str) -> Mate {
     Mate {
         guid,
         name: name.into(),
+        ..Default::default()
+    }
+}
+
+pub fn item(name: &str, value: u32, armor: u32) -> ItemStats {
+    ItemStats {
+        name: name.into(),
+        value,
+        armor_level: armor,
+        appraised: true,
+        kind: if armor > 0 { "armor" } else { "misc" },
+        ..Default::default()
+    }
+}
+
+/// A rule that claims what `line` matches, in the inventory's own
+/// search language.
+pub fn asks(name: &str, line: &str, action: LootAction) -> crate::profile::Rule {
+    crate::profile::Rule {
+        name: name.into(),
+        action,
+        all: vec![crate::profile::Ask::Search(line.into())],
+        ..Default::default()
+    }
+}
+
+/// One of the others, standing at `at`, with `looting` in hand for
+/// `held`.
+pub fn looter(guid: u32, at: glam::Vec3, looting: Option<u32>, held: Duration) -> Mate {
+    Mate {
+        name: format!("Bryn{guid:02}"),
+        guid,
+        world: at,
+        health: 1.0,
+        autoplay: true,
+        looting,
+        looting_for: held,
+        opens_bodies: true,
+        ..Default::default()
+    }
+}
+
+/// One profile for a whole party: a broken key for whoever can mend
+/// it, and healing kits up to four.
+pub fn a_party_profile() -> crate::profile::Profile {
+    use crate::profile::{Ask, Mine, Profile, Rule};
+    Profile {
+        name: "party".into(),
+        rules: vec![
+            Rule {
+                name: "broken keys, if I can mend them".into(),
+                action: LootAction::Keep,
+                all: vec![
+                    Ask::Search("broken".into()),
+                    Ask::Me(Mine::Skill {
+                        skill: ac_world::stats::skill::LOCKPICK,
+                        op: crate::items::Op::Ge,
+                        level: 250,
+                    }),
+                ],
+                ..Default::default()
+            },
+            Rule {
+                name: "healing kits, a few".into(),
+                action: LootAction::Keep,
+                all: vec![Ask::Search("healing kit".into())],
+                keep_up_to: Some(4),
+                ..Default::default()
+            },
+        ],
+        ..Default::default()
+    }
+}
+
+/// A character as the turns read it: standing at `at`, free, with
+/// room, having opened `opened` bodies first lately.
+pub fn turn_at(guid: u32, at: glam::Vec3, opened: u16) -> Turn {
+    Turn {
+        guid,
+        world: at,
+        looting: false,
+        fighting: false,
+        room: true,
+        opened,
+    }
+}
+
+pub fn view_of(mates: Vec<Mate>) -> TeamView {
+    TeamView {
+        mates,
         ..Default::default()
     }
 }
