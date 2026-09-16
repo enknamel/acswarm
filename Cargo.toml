@@ -20,6 +20,15 @@ serde_json = "1"
 regex = "1"
 sha2 = "0.10"
 hex = "0.4"
+glam = "0.30"
+# Decoders and the GUI binaries each pick their own formats and backends.
+image = { version = "0.25", default-features = false }
+egui = "0.36"
+egui-wgpu = "0.36"
+egui-winit = { version = "0.36", default-features = false, features = ["links"] }
+wgpu = "30"
+winit = "0.30"
+pollster = "0.4"
 
 [profile.release]
 debug = 1

@@ -9,7 +9,7 @@ license.workspace = true
 ac-formats = { path = "../ac-formats" }
 ac-net = { path = "../ac-net" }
 flate2 = "1"
-glam = "0.30"
+glam.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
