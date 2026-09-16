@@ -1,3 +1,4 @@
-# Wave 1 of the acswarm refactor: file moves, tests out of line, re-exports. No code changed;
-# `git blame --ignore-revs-file .git-blame-ignore-revs` (or `git config blame.ignoreRevsFile
-# .git-blame-ignore-revs`) looks past them.
+# Wave 1 of the acswarm refactor: files moved and test modules taken out of line, no code
+# changed. `git config blame.ignoreRevsFile .git-blame-ignore-revs` looks past them.
+07278ae9b4af7c46e609db83aead0adb635abc0b  Move autoplay's own rules under src/autoplay/
+caa7470d764e07a859578214af4ece567a30a232  Take autoplay's inline test modules out into sibling files
