@@ -1,4 +1,6 @@
 use crate::autoplay::fight::critter::CREATURE_LEVEL;
+use crate::autoplay::hands::weapon::{SWAP_SETTLES, WIELD_ANSWERS_IN};
+use crate::autoplay::ledger::salvage::{SALVAGE_TIMEOUT, SALVAGE_TRIES};
 use crate::testkit::{character_of_level, game_data, no_data, standing_in_the_field};
 
 #[test]
@@ -34,105 +36,6 @@ fn a_pour_refused_while_a_take_is_in_the_air_is_not_the_takes_refusal() {
 }
 
 #[test]
-fn a_profile_with_tidy_pack_off_is_never_tidied() {
-    assert_eq!(
-        why_not_tidy(TidyGate {
-            tidy_pack_off: true,
-            ..TidyGate::default()
-        }),
-        Some("this profile leaves the pack as it is")
-    );
-}
-
-#[test]
-fn nothing_is_poured_with_a_counter_open() {
-    // A sale holds what it has sent the vendor by guid, and a pour
-    // makes one of those vanish out from under it.
-    assert_eq!(
-        why_not_tidy(TidyGate {
-            counter_open: true,
-            ..TidyGate::default()
-        }),
-        Some("a counter is open")
-    );
-}
-
-#[test]
-fn nor_while_the_quartermaster_is_loaded_or_unloaded() {
-    // Money counted out into its own stack was poured straight back
-    // into the pile it came from, a hundred and twenty six times.
-    assert_eq!(
-        why_not_tidy(TidyGate {
-            quartermaster: true,
-            ..TidyGate::default()
-        }),
-        Some("the quartermaster is being loaded or unloaded")
-    );
-}
-
-#[test]
-fn nor_while_ammunition_is_being_made() {
-    assert_eq!(
-        why_not_tidy(TidyGate {
-            crafting: true,
-            ..TidyGate::default()
-        }),
-        Some("ammunition is being made")
-    );
-}
-
-#[test]
-fn nor_just_after_a_hand_over_to_a_teammate() {
-    assert_eq!(
-        why_not_tidy(TidyGate {
-            gave_lately: true,
-            ..TidyGate::default()
-        }),
-        Some("something was just handed to a teammate")
-    );
-}
-
-#[test]
-fn nor_while_a_take_is_queued_or_in_the_air() {
-    assert_eq!(
-        why_not_tidy(TidyGate {
-            take_in_air: true,
-            ..TidyGate::default()
-        }),
-        Some("a take is queued or in the air")
-    );
-}
-
-#[test]
-fn with_nothing_in_the_way_the_pack_is_tidied() {
-    assert_eq!(why_not_tidy(TidyGate::default()), None);
-    // The first reason that applies is the one given.
-    assert_eq!(
-        why_not_tidy(TidyGate {
-            counter_open: true,
-            take_in_air: true,
-            ..TidyGate::default()
-        }),
-        Some("a counter is open")
-    );
-}
-
-#[test]
-fn every_errand_holding_a_stack_is_offered_up() {
-    // Whatever another part of the rules is holding across ticks
-    // must not be poured away under it.
-    let mut ap = Autoplay::default();
-    assert_eq!(ap.held_by_an_errand().iter().flatten().count(), 0);
-    ap.pending_wield = Some(1);
-    ap.wanted_ammo = Some(2);
-    ap.put_down = Some(3);
-    ap.crafting = Some((4, 5, Instant::now()));
-    ap.handing = Some((6, Instant::now()));
-    let held: Vec<u32> = ap.held_by_an_errand().iter().flatten().copied().collect();
-    assert_eq!(held, vec![1, 2, 3, 4, 5, 6]);
-}
-
-#[test]
 fn a_daily_limit_is_a_wait_and_not_a_grudge() {
     use crate::did::{Because, Did, Patience};
     let t0 = Instant::now();
@@ -159,101 +62,9 @@ fn a_daily_limit_is_a_wait_and_not_a_grudge() {
     assert!(kinds.held(&1, t0 + Duration::from_secs(24 * 60 * 60)));
 }
 
-#[test]
-fn a_buff_pass_that_wants_a_wand_waits_rather_than_disarming_mid_charge() {
-    use crate::Stance;
-    // +Verity's buffing reached for her Training Wand every second
-    // and a half while she was charging a Drudge Servant, and every
-    // reach put her mace away and cancelled the charge with it.
-    assert!(change_of_hands_waits(Stance::Melee, Stance::Magic, true));
-    assert!(change_of_hands_waits(Stance::Missile, Stance::Magic, true));
-
-    // Answered, the gap between two swings is hers: the wand goes in
-    // then, and nothing is cancelled.
-    assert!(!change_of_hands_waits(Stance::Melee, Stance::Magic, false));
-
-    // A pass that already holds a wand changes nothing, so there is
-    // nothing to wait for and the buff goes up mid-fight as before.
-    assert!(!change_of_hands_waits(Stance::Magic, Stance::Magic, true));
-
-    // The rule is about hands, not about wands: a character told to
-    // fight with a bow waits for the swing just the same.
-    assert!(change_of_hands_waits(Stance::Melee, Stance::Missile, true));
-}
-
-#[test]
-fn a_refused_wield_is_left_alone_for_longer_every_time() {
-    use crate::did::Patience;
-    // ACE refuses a wield it will not make with no error code at all
-    // -- a caster cannot go in while a shield is up, and it says so
-    // with WeenieError.None -- so there is nothing to read and
-    // nothing to do but wait. +Verity asked 150 times in a minute.
-    const WAND: u32 = 0x8000_00C3;
-    let t0 = Instant::now();
-    let mut held: Patience<u32> = Patience::new();
-
-    held.hold(WAND, WIELD_AGAIN, t0);
-    assert!(held.held(&WAND, t0), "not asked for again at once");
-    assert!(
-        held.held(&WAND, t0 + WIELD_AGAIN - Duration::from_millis(1)),
-        "nor a moment before the wait is up"
-    );
-    assert!(
-        !held.held(&WAND, t0 + WIELD_AGAIN),
-        "asked again once the wait is up"
-    );
-
-    // Refused again: the wait doubles, so an item the server will
-    // never wield in this state costs a handful of asks rather than
-    // one every buff pass.
-    let second = t0 + WIELD_AGAIN;
-    held.hold(WAND, WIELD_AGAIN, second);
-    assert_eq!(held.waited(&WAND), Some(WIELD_AGAIN * 2));
-    assert!(held.held(&WAND, second + WIELD_AGAIN));
-    assert!(!held.held(&WAND, second + WIELD_AGAIN * 2));
-
-    // A wield that lands forgets the wait: the hands have changed,
-    // so whatever the server was objecting to has gone.
-    held.forget(&WAND);
-    assert!(!held.held(&WAND, second));
-    assert_eq!(held.waited(&WAND), None);
-}
-
 use super::*;
 use crate::items::ItemStats;
 use crate::refusals::{OPEN_IN_USE_AGAIN, OPEN_NOT_OURS_AGAIN};
-
-#[test]
-fn ammunition_is_made_for_the_bow_and_the_targets_weakness() {
-    use ac_world::elements::Element;
-    use ac_world::fletching::ammo_type;
-    // Plain arrowheads (4586), fire arrowheads (5341), arrowshafts
-    // (4585) and quarrel shafts (5339), by guid.
-    let carried = [(4586, 1), (5341, 2), (4585, 3), (5339, 4)];
-    // Fletching enough for fire arrows, against something weak to fire.
-    let (r, heads, shafts) =
-        choose_recipe(ammo_type::ARROW, 100, &carried, Some(Element::Fire)).expect("fire");
-    assert_eq!(
-        (r.result_name.as_str(), heads, shafts),
-        ("Fire Arrow", 2, 3)
-    );
-    // Weak to cold and no cold heads carried: the hardest recipe
-    // that can be made, which is still the fire one.
-    let (r, _, _) =
-        choose_recipe(ammo_type::ARROW, 100, &carried, Some(Element::Cold)).expect("any");
-    assert_eq!(r.result_name, "Fire Arrow");
-    // Not skilled enough for fire arrows: plain ones.
-    let (r, heads, shafts) =
-        choose_recipe(ammo_type::ARROW, 10, &carried, Some(Element::Fire)).expect("plain");
-    assert_eq!((r.result_name.as_str(), heads, shafts), ("Arrow", 1, 3));
-    // A crossbow wants quarrels, made on the quarrel shafts.
-    let (r, _, shafts) = choose_recipe(ammo_type::BOLT, 100, &carried, None).expect("quarrels");
-    assert_eq!((r.result_name.as_str(), shafts), ("Fire Quarrel", 4));
-    // No dart shafts: nothing for an atlatl.
-    assert!(choose_recipe(ammo_type::ATLATL, 100, &carried, None).is_none());
-    // Untrained (0): nothing at all.
-    assert!(choose_recipe(ammo_type::ARROW, 0, &carried, None).is_none());
-}
 
 #[test]
 fn a_follower_strays_no_further_than_twice_its_distance() {
@@ -1497,121 +1308,6 @@ fn what_arrives_in_the_pack_is_judged_like_what_lies_on_a_corpse() {
     let _ = std::fs::remove_dir_all(library.dir());
 }
 
-#[test]
-fn the_best_salvager_has_an_ust_and_the_highest_skill() {
-    let mate = |name: &str, guid: u32, salvaging: u32, has_ust: bool| Mate {
-        name: name.into(),
-        guid,
-        salvaging,
-        has_ust,
-        ..Default::default()
-    };
-    let team = [
-        mate("Zed", 1, 300, true),
-        mate("Amy", 2, 300, true),
-        mate("Bob", 3, 400, false),
-        mate("Cal", 4, 200, true),
-    ];
-    // Bob's skill is highest but he has no Ust; Amy and Zed tie and
-    // the name that sorts first wins.
-    assert_eq!(best_salvager(team.iter()), Some(("Amy".into(), 2)));
-    assert_eq!(best_salvager(team[3..].iter()), Some(("Cal".into(), 4)));
-    assert_eq!(best_salvager(team[2..3].iter()), None);
-    assert_eq!(best_salvager(std::iter::empty()), None);
-    // Someone not yet in the world (guid 0) cannot be handed anything.
-    assert_eq!(best_salvager([mate("Nobody", 0, 999, true)].iter()), None);
-}
-
-/// `items` (guid and workmanship), none of them refused yet.
-fn never_refused(items: &[(u32, f32)]) -> Vec<(u32, f32, u8)> {
-    items.iter().map(|(g, w)| (*g, *w, 0)).collect()
-}
-
-/// Every salvage sent for `items` (guid and workmanship), the server
-/// taking each batch before the next is chosen.
-fn salvages(items: &[(u32, f32)]) -> Vec<Vec<u32>> {
-    let mut left = items.to_vec();
-    let mut sent = Vec::new();
-    while let Some((_, batch)) = next_salvage_batch(never_refused(&left)) {
-        left.retain(|(g, _)| !batch.contains(g));
-        sent.push(batch);
-    }
-    sent
-}
-
-#[test]
-fn a_salvage_that_came_to_nothing_waits_behind_the_grades_not_yet_tried() {
-    // ACE skips a Retained item without a word. Chosen as the best
-    // grade every time, a 10 like that went out alone after each
-    // timeout, and everything below it waited behind all three.
-    let (ten, nine, six, five) = (1, 2, 3, 4);
-    assert_eq!(
-        next_salvage_batch([(ten, 10.0, 1), (nine, 9.0, 0), (six, 6.0, 0)]),
-        Some((SalvageGrade::Nine, vec![nine]))
-    );
-    assert_eq!(
-        next_salvage_batch([(ten, 10.0, 1), (six, 6.0, 0)]),
-        Some((SalvageGrade::Common, vec![six]))
-    );
-    // Once the rest are gone it is asked for again, still on its own.
-    assert_eq!(
-        next_salvage_batch([(ten, 10.0, 1)]),
-        Some((SalvageGrade::Ten, vec![ten]))
-    );
-    // Refused alike, the grades still keep apart.
-    assert_eq!(
-        next_salvage_batch([(six, 6.0, 1), (ten, 10.0, 1), (five, 5.0, 1)]),
-        Some((SalvageGrade::Ten, vec![ten]))
-    );
-    // And the one refused least goes first.
-    assert_eq!(
-        next_salvage_batch([(six, 6.0, 2), (five, 5.0, 1)]),
-        Some((SalvageGrade::Common, vec![five]))
-    );
-}
-
-#[test]
-fn a_workmanship_10_iron_mace_is_not_salvaged_with_a_6() {
-    // In one salvage both go into the same bag of Iron, and the bag
-    // comes out a workmanship 8.
-    let (six, ten) = (0x8000_0001, 0x8000_0002);
-    assert_eq!(
-        salvages(&[(six, 6.0), (ten, 10.0)]),
-        vec![vec![ten], vec![six]]
-    );
-}
-
-#[test]
-fn nines_and_tens_never_share_a_salvage() {
-    let items = [(1, 9.0), (2, 10.0), (3, 6.0), (4, 9.0), (5, 10.0), (6, 3.0)];
-    assert_eq!(
-        next_salvage_batch(never_refused(&items)),
-        Some((SalvageGrade::Ten, vec![2, 5]))
-    );
-    // The best first, each grade alone, in the order they were given.
-    assert_eq!(salvages(&items), vec![vec![2, 5], vec![1, 4], vec![3, 6]]);
-}
-
-#[test]
-fn everything_below_nine_goes_in_one_salvage() {
-    let items = [(1, 1.0), (2, 8.0), (3, 5.0), (4, 8.0)];
-    assert_eq!(
-        next_salvage_batch(never_refused(&items)),
-        Some((SalvageGrade::Common, vec![1, 2, 3, 4]))
-    );
-    assert_eq!(salvages(&items), vec![vec![1, 2, 3, 4]]);
-}
-
-#[test]
-fn a_grade_with_nothing_in_it_sends_no_salvage() {
-    assert_eq!(next_salvage_batch([]), None);
-    assert_eq!(salvages(&[]), Vec::<Vec<u32>>::new());
-    // No 9s: the 10 and the rest, and no empty salvage between.
-    assert_eq!(salvages(&[(1, 6.0), (2, 10.0)]), vec![vec![2], vec![1]]);
-    // Only 9s: one salvage.
-    assert_eq!(salvages(&[(1, 9.0), (2, 9.0)]), vec![vec![1, 2]]);
-}
-
 /// A level 20 character that salvages for itself: an Ust in the pack,
 /// and a loot profile of its own called `profile`.
 fn a_salvager(assets: std::rc::Rc<ac_scene::Assets>, profile: &str) -> Client {
@@ -1735,60 +1431,6 @@ fn a_ten_the_server_skips_holds_up_none_of_the_grades_below_it() {
     now += SALVAGE_TIMEOUT;
     assert!(!c.autoplay_salvage(now), "tried {SALVAGE_TRIES} times");
     assert_eq!(salvage_on_its_way(&c), None);
-}
-
-#[test]
-#[ignore = "needs AC_DATA_DIR"]
-fn tidying_the_pack_never_pours_one_salvage_bag_into_another() {
-    // Two bags of Iron share a wcid, but only an Ust puts bags
-    // together. The server sends a bag with no stack size, which
-    // leaves it at 1, and both pours -- the tidy chore and the one
-    // at a vendor's counter -- read that to decide what stacks.
-    let mut c = character_of_level(game_data(), 20);
-    let me = c.world.player_guid;
-    let bag = |guid: u32, workmanship: f32| ac_world::WorldObject {
-        guid,
-        weenie_class_id: 20986,
-        name: "Salvaged Iron".into(),
-        item_type: ac_world::item_type::TINKERING_MATERIAL,
-        material: 0x3D,
-        workmanship,
-        structure: 50,
-        max_structure: 100,
-        stack_size: 1,
-        max_stack_size: 1,
-        container: me,
-        ..Default::default()
-    };
-    let (tens, sixes) = (0x8000_0201, 0x8000_0202);
-    c.world.objects.insert(tens, bag(tens, 10.0));
-    c.world.objects.insert(sixes, bag(sixes, 6.0));
-    // A pair that does pour, so the bags are not passed over only
-    // because nothing is looked at.
-    let arrows = |guid: u32, count: u32| ac_world::WorldObject {
-        guid,
-        weenie_class_id: 300,
-        name: "Arrow".into(),
-        stack_size: count,
-        max_stack_size: 250,
-        container: me,
-        ..Default::default()
-    };
-    let (few, many) = (0x8000_0203, 0x8000_0204);
-    c.world.objects.insert(few, arrows(few, 5));
-    c.world.objects.insert(many, arrows(many, 40));
-    let m = crate::pack::next_merge(&c.pack_stacks()).expect("the arrows pour");
-    assert_eq!((m.from, m.to), (few, many));
-    c.world.objects.remove(&few);
-    assert_eq!(crate::pack::next_merge(&c.pack_stacks()), None);
-    let counter = c.vendor_snapshot(&crate::growth::Growth::default());
-    let bags: Vec<_> = counter
-        .items
-        .iter()
-        .filter(|i| i.guid == tens || i.guid == sixes)
-        .collect();
-    assert_eq!(bags.len(), 2);
-    assert!(bags.iter().all(|i| i.max_stack <= 1), "{bags:?}");
 }
 
 #[test]
@@ -4313,31 +3955,6 @@ fn a_ranged_attacker_closes_in_before_it_gives_up() {
 }
 
 #[test]
-fn a_re_judged_pack_counts_each_kind_as_it_goes() {
-    // Three rings and two piles of tapers, in the order they were
-    // come by. Each ring is told how many rings were held before
-    // it -- none, one, two -- not that three are carried, so a rule
-    // that keeps up to two claims the first two and not the third.
-    // Told instead that it was the second of two, the second ring
-    // sat over the cap and only one was kept.
-    let mut carried = vec![
-        (30, 500, 1),   // third ring
-        (10, 500, 1),   // first ring
-        (25, 691, 300), // second pile of tapers
-        (20, 500, 1),   // second ring
-        (15, 691, 120), // first pile of tapers
-    ];
-    assert_eq!(
-        in_arrival_order(&mut carried),
-        vec![(10, 0), (15, 0), (20, 1), (25, 120), (30, 2)]
-    );
-    // A stack counts for what it holds, not for one.
-    let mut two = vec![(7, 691, 4059), (8, 691, 1)];
-    assert_eq!(in_arrival_order(&mut two), vec![(7, 0), (8, 4059)]);
-    assert!(in_arrival_order(&mut []).is_empty());
-}
-
-#[test]
 fn what_an_item_was_taken_for_is_written_down() {
     let mut ap = Autoplay::default();
     let ring = item("Ornate Ring", 900, 0);
@@ -5478,45 +5095,6 @@ fn coin_off_a_body_is_poured_onto_the_pile_carried_rather_than_given_a_slot() {
 }
 
 #[test]
-fn a_busy_tick_is_not_an_empty_quiver() {
-    // The one caller of `ready_ammo` reads a false as "no
-    // ammunition" and goes off to fletch some, dropping out of
-    // combat stance to do it. With the busy test on every wield, a
-    // shot still unanswered or a spell in the air made every tick a
-    // false one, and an archer with a full pack was sent to make
-    // arrows it was already carrying.
-    let mut c = character_of_level(no_data(), 20);
-    const ARROWS: u32 = 0x8000_0201;
-    let me = c.world.player_guid;
-    c.world.objects.insert(
-        ARROWS,
-        ac_world::WorldObject {
-            guid: ARROWS,
-            name: "Arrow".into(),
-            stack_size: 100,
-            valid_locations: ac_world::equip::MISSILE_AMMO,
-            container: me,
-            ..Default::default()
-        },
-    );
-    c.autoplay.wanted_ammo = Some(ARROWS);
-    assert!(c.wielded_ammo().is_none(), "the slot is empty");
-
-    // A spell in the air: the wield waits, and the quiver is still
-    // not empty.
-    let now = Instant::now();
-    c.autoplay.cast_sent = Some(now);
-    assert!(c.server_busy(now));
-    assert!(c.ready_ammo(), "a busy tick read as an empty quiver");
-    assert_eq!(c.autoplay.wield_asked, None, "nothing sent mid-cast");
-
-    // The spell lands and the arrows go into the slot.
-    c.autoplay.cast_sent = None;
-    assert!(c.ready_ammo());
-    assert_eq!(c.autoplay.wield_asked.map(|(g, _)| g), Some(ARROWS));
-}
-
-#[test]
 #[ignore = "needs AC_DATA_DIR"]
 fn no_spell_is_sent_at_a_creature_that_has_already_died() {
     // 36 "Target not acquired" in a run, every one a cast at a
@@ -5556,46 +5134,4 @@ fn no_spell_is_sent_at_a_creature_that_has_already_died() {
     c.cast_paced(VULNERABILITY, Instant::now());
     assert_eq!(c.autoplay.cast_sent, None, "nothing to wait for");
     assert!(!c.server_busy(Instant::now()));
-}
-
-#[test]
-fn an_urgent_buff_waits_for_the_fight_only_when_it_costs_the_weapon() {
-    // The urgent pass runs as a reflex, ahead of loot and ahead of
-    // the fight, and ignored `out_of_combat_only` outright: a buff
-    // with a minute still on it was enough to put the sword away
-    // mid-swing. Under god mode that cost throughput; for a mortal
-    // character it is a fight fought bare-handed.
-    let (sword, wand) = (false, true);
-    let mut cfg = Buffs {
-        never_below: 60.0,
-        top_up_within: 300.0,
-        out_of_combat_only: true,
-        ..Buffs::default()
-    };
-    assert_eq!(
-        buff_within(&cfg, true, true, sword),
-        0.0,
-        "only what has lapsed"
-    );
-    // A buff that is not up at all reads as nought seconds left, so
-    // it still goes back up in the middle of a fight. That is what
-    // "never below" is for.
-    assert!(0.0 <= buff_within(&cfg, true, true, sword));
-    // With a wand already in hand the recast costs a cast and
-    // nothing else, so `never_below` holds. Answering nought here
-    // meant a mortal caster's protections were put back only after
-    // they had lapsed -- the very window the setting names.
-    assert_eq!(
-        buff_within(&cfg, true, true, wand),
-        60.0,
-        "a free recast was still made to wait for the fight"
-    );
-    // Out of the fight the urgent pass is unchanged, and so is the
-    // quiet one either way.
-    assert_eq!(buff_within(&cfg, true, false, sword), 60.0);
-    assert_eq!(buff_within(&cfg, false, true, sword), 300.0);
-    // And a player who has not asked for the restraint keeps the
-    // old behaviour: buffs go back up mid-fight.
-    cfg.out_of_combat_only = false;
-    assert_eq!(buff_within(&cfg, true, true, sword), 60.0);
 }
