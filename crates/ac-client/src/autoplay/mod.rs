@@ -48,11 +48,13 @@ use crate::{Client, Stance, SAME_FLOOR};
 pub use ac_loot::profile::LootAction;
 
 // Autoplay's own rules, each in its own file below this one.
+mod cast;
 mod config;
 pub mod growth;
 pub mod steps;
 pub mod summoning;
 
+pub use cast::cast_problem;
 pub use config::{Buffs, Config, Fight, Loot, Role, Style, Survive, Team};
 
 /// How long to wait for a corpse to open before asking again, when it
@@ -660,11 +662,6 @@ const SALVAGING: u32 = 40;
 const BUFF_CHECK_EVERY: Duration = Duration::from_millis(1000);
 /// Least time between two attack orders.
 const ATTACK_EVERY: Duration = Duration::from_millis(1200);
-/// How long to wait on a cast the server never answers for. Casting is
-/// paced by its answer, not by a clock; this only stops a character
-/// waiting for ever on one that went astray.
-const CAST_LOST: Duration = Duration::from_secs(6);
-
 /// A leader further off than twice the following distance (and at least
 /// this) is followed before anything else, a fight included; nearer,
 /// the fight comes first. Following is the follower's job.
@@ -1810,20 +1807,6 @@ impl TeamView {
             .iter()
             .filter(|m| m.health > 0.0 && m.health < 1.0)
             .min_by(|a, b| a.health.total_cmp(&b.health))
-    }
-}
-
-/// Why a cast is refused, in a few words for a status line.
-pub fn cast_problem(check: &crate::magic::CastCheck) -> String {
-    use crate::magic::CastCheck;
-    match check {
-        CastCheck::Ok => "fine".into(),
-        CastCheck::NotKnown => "not known".into(),
-        CastCheck::NoCaster => "no wand wielded".into(),
-        CastCheck::NoTarget => "the target is gone".into(),
-        CastCheck::MissingComponents(m) => format!("short of {} components", m.len()),
-        CastCheck::NotEnoughMana { need, have } => format!("mana {have}/{need}"),
-        CastCheck::TooHard { power, skill } => format!("power {power} over skill {skill}"),
     }
 }
 
@@ -3376,25 +3359,6 @@ impl Autoplay {
         self.closing.filter(|(g, _)| *g == guid).map(|(_, cap)| cap)
     }
 
-    /// A spell of any kind went out less than a cast ago, so another
-    /// sent now would queue behind it or be dropped.
-    pub(crate) fn cast_in_flight(&self, now: Instant) -> bool {
-        // The server says when a cast is finished, so that is what is
-        // waited on -- not a guess at how long spells take. A heal sent
-        // the moment the last one lands is the difference between
-        // living and dying, and no fixed interval can be both quick
-        // enough for that and slow enough never to have the next spell
-        // dropped for arriving early.
-        //
-        // The clock that remains is a backstop, not the pacing: if the
-        // server never answers at all, the character must not wait for
-        // ever.
-        match self.cast_sent {
-            Some(t) => now.duration_since(t) < CAST_LOST,
-            None => false,
-        }
-    }
-
     /// Whether this item was asked for a moment ago and the server's
     /// word could still be on its way (see [`WIELD_ANSWERS_IN`]).
     ///
@@ -3567,46 +3531,6 @@ impl Client {
         stats.vitals[0].current as f32 / max as f32
     }
 
-    /// The id of a known spell whose name starts with `name`, preferring
-    /// the highest level learnt (the last in the spellbook order).
-    pub fn spell_by_name(&self, name: &str) -> Option<u32> {
-        let want = name.trim().to_lowercase();
-        if want.is_empty() {
-            return None;
-        }
-        let table = self.assets.spell_table().ok();
-        // Of the family, the strongest that can be cast right now: a
-        // name like "Heal Self" means the best Heal Self we can manage,
-        // not the best in the book. Failing any castable, the strongest
-        // known, so the reason it cannot be cast can be reported.
-        let mut best_castable: Option<(u32, u32)> = None;
-        let mut best_known: Option<(u32, u32)> = None;
-        for id in &self.world.stats.spells {
-            let sp = table.as_ref().and_then(|t| t.get(*id));
-            let full = sp
-                .map(|s| s.name.clone())
-                .or_else(|| self.known_spells.get(id).cloned())
-                .unwrap_or_default()
-                .to_lowercase();
-            if !full.starts_with(&want) && !full.contains(&want) {
-                continue;
-            }
-            // Power orders a family; a spell the table lacks ranks by id.
-            let power = sp.map(|s| s.power).unwrap_or(*id);
-            let castable = matches!(
-                self.can_cast(*id),
-                crate::magic::CastCheck::Ok | crate::magic::CastCheck::NoCaster
-            );
-            if castable && best_castable.is_none_or(|(_, p)| power > p) {
-                best_castable = Some((*id, power));
-            }
-            if best_known.is_none_or(|(_, p)| power > p) {
-                best_known = Some((*id, power));
-            }
-        }
-        best_castable.or(best_known).map(|(id, _)| id)
-    }
-
     /// The strongest known boost of a vital that can be cast right now,
     /// whatever it is called: Heal Self VI and Adja's Intervention are
     /// both health boosts, and the table says so where a name would not.
@@ -3725,23 +3649,6 @@ impl Client {
             .min_by_key(|(_, s)| s.power)
             .map(|(id, s)| (id, s.name.clone()))?;
         Some(format!("{name} {}", cast_problem(&self.can_cast(spell))))
-    }
-
-    /// Cast `spell` and hold the next cast until the server answers for
-    /// this one (see [`Autoplay::cast_in_flight`]). Every cast autoplay
-    /// sends goes through here or sets the same clock itself: the heal
-    /// once did neither, and a character at 16% health sent Heal Self
-    /// every frame, forty times in under two seconds, until the first
-    /// one went up.
-    ///
-    /// A cast the client declines to send earns no wait. Nothing is
-    /// coming back to end one, so the whole six-second backstop would be
-    /// spent standing still -- and now that the takes and the wields
-    /// wait on this clock too, standing still over a corpse.
-    pub(crate) fn cast_paced(&mut self, spell: u32, now: Instant) {
-        if matches!(self.try_cast(spell), crate::magic::CastCheck::Ok) {
-            self.autoplay.cast_sent = Some(now);
-        }
     }
 
     /// Keep mana and stamina up the way a caster does: stamina poured
