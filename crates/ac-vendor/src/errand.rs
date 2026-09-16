@@ -201,52 +201,32 @@ pub fn plan(
     let mut left = means;
     let mut plan = Plan::default();
 
-    // 1. Sell in rounds: coin fills slots, so a round stops to convert before the next.
+    // 1. Sell an armful at a time, each paid for out of the slots free when it is handed over.
     let mut to_sell: Vec<&ForSale> = sale.iter().collect();
     while !to_sell.is_empty() {
-        let before = to_sell.len();
-        let mut batch = Vec::new();
-        let mut takings = 0;
-        let mut lighter = 0;
-        // Free slots as the round goes, since each sale frees the item's own slot.
-        let mut slots = left.slots;
-        let mut coin = left.coin;
-        while let Some(item) = to_sell.first() {
-            let would = coin.saturating_add(item.pays);
-            // Sold only if the free slots, the item's own slot and the slots its coin already
-            // fills cover the coin after it.
-            let have = slots + 1 + coin_slots(coin);
-            let needs = coin_slots(would);
-            if have < needs {
-                break;
-            }
-            let after = have - needs;
-            batch.push(item.guid);
-            takings += item.pays;
-            lighter += item.weighs;
-            coin = would;
-            slots = after;
-            to_sell.remove(0);
-        }
-        if !batch.is_empty() {
-            left.coin = coin;
-            left.slots = slots;
-            left.room = left.room.saturating_add(lighter);
+        let pays: Vec<u32> = to_sell.iter().map(|i| i.pays).collect();
+        let (taken, takings) = armful_within_slots(&pays, left.slots);
+        if taken > 0 {
+            let going: Vec<&ForSale> = to_sell.drain(..taken).collect();
+            // Room for the payment was found before the goods left, so the slots they vacate come
+            // back only now, for the next armful.
+            left.slots = left.slots - coin_slots(takings) + taken as u32;
+            left.coin = left.coin.saturating_add(takings);
+            left.room = left
+                .room
+                .saturating_add(going.iter().map(|i| i.weighs).sum::<u32>());
             plan.acts.push(Act::Sell {
-                items: batch,
+                items: going.iter().map(|i| i.guid).collect(),
                 takings,
             });
-        }
-        if to_sell.is_empty() {
-            break;
+            continue;
         }
         // Pack full of change with loot left: converting is the only thing that makes room.
-        if !convert(&mut left, &mut plan, note_face, float) || to_sell.len() == before {
-            // Nothing to convert, or this round sold nothing: the rest of the loot goes home.
-            let short = to_sell.len() as u32;
+        if !convert(&mut left, &mut plan, note_face, float) {
+            // Nothing to convert: the rest of the loot goes home.
             plan.unmet.push((
                 "loot to sell".to_string(),
-                short,
+                to_sell.len() as u32,
                 Because::ours("no room for the money it would make"),
             ));
             break;
@@ -524,6 +504,82 @@ mod tests {
         assert!(buy_at < keep_at, "the tapers are paid for first");
         // All the tapers were bought before any coin was packed into notes.
         assert_eq!(bought(&rich, "Prismatic Taper"), 500);
+    }
+
+    #[test]
+    fn a_sale_is_paid_into_the_slots_free_before_the_goods_leave() {
+        // One free slot holds one coin stack, so a payment of 30,000 wants two and cannot have it.
+        assert_eq!(armful_within_slots(&[30_000], 1), (0, 0));
+        assert_eq!(armful_within_slots(&[25_000], 1), (1, 25_000));
+        // An armful is one payment, not one per item: three sales of 10,000 come to two stacks.
+        assert_eq!(armful_within_slots(&[10_000; 3], 2), (3, 30_000));
+        // Neither the slot the dagger vacates nor the 20,000 already carried lends room for them.
+        let loot = [ForSale {
+            guid: 1,
+            pays: 30_000,
+            weighs: 500,
+        }];
+        let p = plan(
+            Means {
+                coin: 20_000,
+                notes: 0,
+                room: 10_000,
+                slots: 1,
+            },
+            &loot,
+            &[],
+            &[],
+            FLOAT,
+            None,
+        );
+        assert!(
+            !p.acts.iter().any(|a| matches!(a, Act::Sell { .. })),
+            "{:?}",
+            p.acts
+        );
+        assert!(p
+            .unmet
+            .iter()
+            .any(|(what, _, why)| what == "loot to sell" && why.what.contains("no room")));
+    }
+
+    #[test]
+    fn the_slots_the_goods_vacate_pay_for_the_next_armful() {
+        // Eight daggers at 50,000 with ten slots free: ten stacks of change is all the first armful
+        // can be paid, and only once those five are gone do their slots buy the next five.
+        let loot: Vec<ForSale> = (0..8)
+            .map(|i| ForSale {
+                guid: 100 + i,
+                pays: 50_000,
+                weighs: 100,
+            })
+            .collect();
+        let p = plan(
+            Means {
+                coin: 0,
+                notes: 0,
+                room: 1_000_000,
+                slots: 10,
+            },
+            &loot,
+            &[],
+            &[],
+            FLOAT,
+            None,
+        );
+        let sells: Vec<usize> = p
+            .acts
+            .iter()
+            .filter_map(|a| match a {
+                Act::Sell { items, .. } => Some(items.len()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(sells, vec![5, 2, 1], "{:?}", p.acts);
+        assert!(p.unmet.is_empty(), "{:?}", p.unmet);
+        // 400,000 in change is sixteen slots, against ten free and eight the daggers left.
+        assert_eq!(p.left.coin, 400_000);
+        assert_eq!(p.left.slots, 2);
     }
 
     #[test]
