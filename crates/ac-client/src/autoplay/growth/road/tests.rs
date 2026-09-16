@@ -98,7 +98,7 @@ fn what_stands_on_the_road_is_walked_past_and_what_swings_at_us_is_not() {
     let other = standing_by(&mut c, 0x8000_0002, "Drudge Skulker", 6.0);
     assert!(c.passing_by(&other, &fight));
     c.autoplay.last_hit_us = None;
-    c.autoplay.hit_by.clear();
+    c.autoplay.hit_by = Default::default();
 
     // Named in "only these", it is still the road. The list says which
     // kind to hunt at the far end, and every creature the fight could

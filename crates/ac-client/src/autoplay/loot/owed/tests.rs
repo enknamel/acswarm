@@ -3,7 +3,8 @@ use crate::autoplay::loot::choose::LOOT_TIMEOUT;
 use crate::autoplay::team::turns::{CLAIM_STALE, SAME_MOMENT};
 use crate::autoplay::{LootAction, Mate, ShutFor};
 use crate::testkit::{
-    asks, character_of_level, corpse_at_hand, game_data, looter, on_the_body, with_packs, BODY,
+    asks, character_of_level, corpse_at_hand, corpses_seen, game_data, looter, on_the_body,
+    with_packs, BODY,
 };
 
 #[test]
@@ -98,7 +99,7 @@ fn the_moment_held_open_for_a_falling_body_ends_when_one_lands() {
     // nothing about this one, wherever it lies.
     let (early, elsewhere, ours) = (0x8000_0001, 0x8000_0002, 0x8000_0003);
     c.world.objects.insert(early, body(early, spot));
-    c.autoplay.corpse_seen = vec![(early, t0 - s(1))];
+    c.autoplay.corpse_seen = corpses_seen([(early, t0 - s(1))]);
     assert!(c.own_body_still_falling(t0));
 
     // Nor does a body that landed since the blow somewhere this
@@ -108,7 +109,7 @@ fn the_moment_held_open_for_a_falling_body_ends_when_one_lands() {
     // fight leaving the body it had just made behind.
     let away = spot + glam::Vec3::new(KILL_SPOT * 2.0, 0.0, 0.0);
     c.world.objects.insert(elsewhere, body(elsewhere, away));
-    c.autoplay.corpse_seen.push((elsewhere, t0));
+    c.autoplay.corpse_seen.mark(elsewhere, t0);
     assert!(
         c.own_body_still_falling(t0),
         "let go of its own body for somebody else's"
@@ -118,7 +119,7 @@ fn the_moment_held_open_for_a_falling_body_ends_when_one_lands() {
     // the bodies on the floor are the answer, a mate's claim among
     // them.
     c.world.objects.insert(ours, body(ours, spot));
-    c.autoplay.corpse_seen.push((ours, t0));
+    c.autoplay.corpse_seen.mark(ours, t0);
     assert!(!c.own_body_still_falling(t0));
     assert!(!c.owes_a_corpse());
 }
@@ -235,7 +236,7 @@ fn a_body_one_of_the_others_has_is_left_to_them() {
     // Both fell a while back, so the tie-break has had its moment
     // and the claims are what speak.
     let mut ap = Autoplay {
-        corpse_seen: vec![(a, t0), (b, t0)],
+        corpse_seen: corpses_seen([(a, t0), (b, t0)]),
         ..Default::default()
     };
     let now = t0 + CLAIM_SETTLE;
@@ -301,7 +302,7 @@ fn a_body_this_character_has_already_claimed_is_not_given_up_for_a_mates() {
     let at = glam::Vec3::ZERO;
     let (me, lower, higher) = (0x5000_0005, 0x5000_0001, 0x5000_0009);
     let mut ap = Autoplay {
-        corpse_seen: vec![(body, t0)],
+        corpse_seen: corpses_seen([(body, t0)]),
         ..Default::default()
     };
     ap.take_up_corpse(body, t0, LOOT_TIMEOUT);

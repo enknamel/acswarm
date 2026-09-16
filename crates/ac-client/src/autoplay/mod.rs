@@ -38,6 +38,8 @@
 
 use std::time::{Duration, Instant};
 
+use ac_agent::recent::Recent;
+
 use crate::Client;
 // The rule vocabulary lives in ac-loot; this file still speaks it.
 pub use ac_loot::profile::LootAction;
@@ -206,7 +208,7 @@ pub struct Autoplay {
     /// The last note logged and when (see `note`).
     /// Notes said lately and when, so that two alternating notes are
     /// each said once per `NOTE_EVERY` rather than every frame.
-    noted: Vec<(String, Instant)>,
+    noted: Recent<String>,
     /// When the buffs were last gone through. The urgent pass runs
     /// every tick, and working out what is due walks the whole
     /// spellbook, so it is only done once a second.
@@ -252,7 +254,7 @@ pub struct Autoplay {
     /// All of them: kept as the last one only, a second attacker
     /// silenced the first, which was then walked past between its
     /// swings (see [`Autoplay::attacked_by`]).
-    pub(crate) hit_by: Vec<(String, Instant)>,
+    pub(crate) hit_by: Recent<String>,
     /// What the leader remembers between plans, when this character
     /// leads: the bodies it has dealt and the turns each of the others
     /// has had (see `crate::plan`).
@@ -276,7 +278,7 @@ pub struct Autoplay {
     /// lets through and something on the way stops.
     closing: Option<(u32, f32)>,
     /// Targets let go, and when, so they are left alone for a while.
-    given_up: Vec<(u32, Instant)>,
+    given_up: Recent<u32>,
     /// When ammunition was last made.
     last_craft: Option<Instant>,
     /// Bundles waiting to be used on each other once the character has
@@ -440,14 +442,14 @@ pub struct Autoplay {
     pub loot_tally: ac_loot::Tally,
     /// When each corpse was first seen, so the ones about to rot can be
     /// emptied first. A corpse we never saw appear is taken as fresh.
-    pub(crate) corpse_seen: Vec<(u32, Instant)>,
+    pub(crate) corpse_seen: Recent<u32>,
     /// When the last fellowship invitation went out, whoever it was to
     /// (see [`RECRUIT_FLOOR`]).
     last_recruit: Option<Instant>,
     /// When each mate was last asked into the fellowship, so that one
     /// that has not answered waits its turn while the others are asked
     /// (see [`RECRUIT_AGAIN`]).
-    recruited: Vec<(u32, Instant)>,
+    recruited: Recent<u32>,
     /// When this character asked for the fellowship it leads to be
     /// founded. It asks only once loot sharing has taken, so a
     /// fellowship it founded is the one fellowship it can vouch for:
@@ -483,7 +485,7 @@ pub struct Autoplay {
     /// The corpse the academy rule is emptying, and since when.
     pub(crate) academy_corpse: Option<(u32, Instant)>,
     /// Doors the academy rule opened lately, and when.
-    pub(crate) academy_doors: Vec<(u32, Instant)>,
+    pub(crate) academy_doors: Recent<u32>,
     /// When the academy rule last asked for a weapon to be wielded.
     pub(crate) academy_armed: Option<Instant>,
 }
@@ -495,11 +497,10 @@ impl Autoplay {
     /// and flip the status back and forth with whatever else is going on.
     pub(crate) fn note(&mut self, text: impl Into<String>, now: Instant) {
         let text = text.into();
-        self.noted
-            .retain(|(_, when)| now.duration_since(*when) < NOTE_EVERY);
-        if !self.noted.iter().any(|(t, _)| *t == text) {
+        self.noted.expire(now, NOTE_EVERY);
+        if self.noted.since(&text).is_none() {
             tracing::info!("autoplay: {text}");
-            self.noted.push((text, now));
+            self.noted.mark(text, now);
         }
     }
 

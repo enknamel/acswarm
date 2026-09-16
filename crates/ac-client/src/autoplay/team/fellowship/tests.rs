@@ -6,11 +6,21 @@ use crate::autoplay::{Mate, TeamView};
 use crate::did::Patience;
 use crate::testkit::standing_in_the_field;
 use crate::Client;
+use ac_agent::recent::Recent;
 use std::time::{Duration, Instant};
 
 /// Nobody held off.
 fn nobody() -> Patience<u32> {
     Patience::new()
+}
+
+/// The invitations already sent, as `next_invitee` reads them.
+fn asked_at(rows: impl IntoIterator<Item = (u32, Instant)>) -> Recent<u32> {
+    let mut asked = Recent::new();
+    for (guid, when) in rows {
+        asked.mark(guid, when);
+    }
+    asked
 }
 
 #[test]
@@ -24,14 +34,14 @@ fn a_recruit_answered_already_a_member_is_not_asked_again_within_the_hold() {
     let (lyn, oth) = (0x1001, 0x1002);
     let waiting = [(lyn, 3.0), (oth, 5.0)];
     let mut held = nobody();
-    let mut asked = vec![(lyn, start)];
+    let mut asked = asked_at([(lyn, start)]);
     held.hold(lyn, HELD_OFF_FIRST, start);
     // The other is asked meanwhile.
     assert_eq!(
         next_invitee(&waiting, &asked, &held, Some(start), start + RECRUIT_FLOOR),
         Some(oth)
     );
-    asked.push((oth, start + RECRUIT_FLOOR));
+    asked.mark(oth, start + RECRUIT_FLOOR);
     // RECRUIT_AGAIN later the held one would have been asked again;
     // now it waits out its hold.
     let again = start + RECRUIT_AGAIN;
@@ -85,7 +95,7 @@ fn a_refusal_in_words_holds_off_the_mate_it_names_and_only_one_that_was_asked() 
             ..Default::default()
         },
     ];
-    ap.recruited = vec![(lyn, t0)];
+    ap.recruited = asked_at([(lyn, t0)]);
     ap.hear_recruit_words("+Brynlyn is busy.", t0);
     assert!(ap.held_off.held(&lyn, t0 + RECRUIT_AGAIN));
     assert!(!ap.held_off.held(&lyn, t0 + HELD_OFF_FIRST));
@@ -115,7 +125,7 @@ fn having_asked_lyn(t0: Instant) -> (super::Autoplay, u32, u32) {
             ..Default::default()
         },
     ];
-    ap.recruited = vec![(lyn, t0)];
+    ap.recruited = asked_at([(lyn, t0)]);
     (ap, lyn, oth)
 }
 
@@ -131,12 +141,12 @@ fn a_busy_mate_s_hold_does_not_outgrow_ten_seconds() {
     let (mut ap, lyn, _) = having_asked_lyn(t0);
     let mut now = t0;
     for _ in 0..8 {
-        ap.recruited = vec![(lyn, now)];
+        ap.recruited = asked_at([(lyn, now)]);
         ap.hear_recruit_words("+Brynlyn is busy.", now);
         assert_eq!(ap.held_off.waited(&lyn), Some(HELD_OFF_FIRST));
         now += HELD_OFF_FIRST * 2;
     }
-    ap.recruited = vec![(lyn, now)];
+    ap.recruited = asked_at([(lyn, now)]);
     ap.hear_recruit_words("+Brynlyn is already a member of a Fellowship.", now);
     assert_eq!(ap.held_off.waited(&lyn), Some(HELD_OFF_FIRST * 2));
 }
@@ -251,9 +261,10 @@ fn the_others_are_asked_while_one_invitee_waits() {
     // tick now asks somebody who has not been asked yet.
     let start = Instant::now();
     let waiting = [(0x1001, 3.0), (0x1002, 5.0), (0x1003, 9.0)];
-    let first = next_invitee(&waiting, &[], &nobody(), None, start).expect("nobody asked");
+    let first =
+        next_invitee(&waiting, &Recent::new(), &nobody(), None, start).expect("nobody asked");
     assert_eq!(first, 0x1001, "the nearest is asked first");
-    let asked = [(first, start)];
+    let asked = asked_at([(first, start)]);
     let then = start + RECRUIT_FLOOR;
     assert_eq!(
         next_invitee(&waiting, &asked, &nobody(), Some(start), then),
@@ -269,15 +280,22 @@ fn two_invitations_do_not_leave_in_the_same_breath() {
     let start = Instant::now();
     let waiting = [(0x1001, 3.0), (0x1002, 5.0)];
     assert_eq!(
-        next_invitee(&waiting, &[], &nobody(), Some(start), start),
+        next_invitee(&waiting, &Recent::new(), &nobody(), Some(start), start),
         None
     );
     let soon = start + RECRUIT_FLOOR / 2;
     assert_eq!(
-        next_invitee(&waiting, &[], &nobody(), Some(start), soon),
+        next_invitee(&waiting, &Recent::new(), &nobody(), Some(start), soon),
         None
     );
-    assert!(next_invitee(&waiting, &[], &nobody(), Some(start), start + RECRUIT_FLOOR).is_some());
+    assert!(next_invitee(
+        &waiting,
+        &Recent::new(),
+        &nobody(),
+        Some(start),
+        start + RECRUIT_FLOOR
+    )
+    .is_some());
 }
 
 #[test]
@@ -287,7 +305,7 @@ fn an_invitee_that_never_came_is_asked_again_later() {
     // "never" is to ask again once the others have been asked.
     let start = Instant::now();
     let waiting = [(0x1001, 3.0)];
-    let asked = [(0x1001, start)];
+    let asked = asked_at([(0x1001, start)]);
     let soon = start + RECRUIT_AGAIN / 2;
     assert_eq!(
         next_invitee(&waiting, &asked, &nobody(), Some(start), soon),
@@ -307,13 +325,13 @@ fn nine_are_all_asked_inside_ten_seconds() {
     // first two minutes of every body's life have gone by.
     let start = Instant::now();
     let waiting: Vec<(u32, f32)> = (0..9).map(|i| (0x1000 + i, i as f32)).collect();
-    let mut asked: Vec<(u32, Instant)> = Vec::new();
+    let mut asked: Recent<u32> = Recent::new();
     let mut last = None;
     let mut now = start;
     while asked.len() < waiting.len() {
         match next_invitee(&waiting, &asked, &nobody(), last, now) {
             Some(guid) => {
-                asked.push((guid, now));
+                asked.mark(guid, now);
                 last = Some(now);
             }
             None => now += RECRUIT_FLOOR / 4,
@@ -477,7 +495,7 @@ fn whoever_leads_the_fellowship_brings_in_the_rightful_leader_standing_outside()
     // be recruited into a mate's fellowship cannot recruit into it
     // (the server answers 0x041D), and leaves the gathering to that
     // mate.
-    c.autoplay.recruited.clear();
+    c.autoplay.recruited = Recent::new();
     c.autoplay.last_recruit = None;
     c.world.fellowship.as_mut().unwrap().leader = member;
     c.autoplay.founded = None;
@@ -534,7 +552,7 @@ fn a_full_fellowship_asks_nobody_else() {
     );
     assert!(!c.autoplay.held_off.held(&gone, t0));
     // The server's own word on it, about the last one asked.
-    c.autoplay.recruited = vec![(tenth, t0)];
+    c.autoplay.recruited = asked_at([(tenth, t0)]);
     let soon = t0 + Duration::from_secs(1);
     c.autoplay.hear_fellowship_full(soon);
     assert!(c.autoplay.held_off.held(&tenth, soon));

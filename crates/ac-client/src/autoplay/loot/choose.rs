@@ -506,7 +506,7 @@ impl Client {
                     );
                     self.forget_kill_spot(guid);
                     self.world.forget(guid);
-                    self.autoplay.corpse_seen.retain(|(g, _)| *g != guid);
+                    self.autoplay.corpse_seen.forget(&guid);
                     return false;
                 }
                 // Not "done with": set aside. A corpse belongs to
@@ -717,8 +717,7 @@ impl Client {
         // [`Client::autoplay_watch_the_ground`]): a body this character
         // is standing off from never reaches this step, and a body it
         // never noted is for ever newly fallen.
-        let seen_at: std::collections::BTreeMap<u32, Instant> =
-            self.autoplay.corpse_seen.iter().copied().collect();
+        let seen_at = self.autoplay.corpse_seen.clone();
         let room = self.room_for_loot();
         let corpse = self
             .world
@@ -734,7 +733,7 @@ impl Client {
             .filter_map(|o| Some((o.world_pos()?.distance(me), o)))
             .map(|(d, o)| (d, o.guid, o.name.clone()))
             .map(|(d, guid, name)| {
-                let seen = seen_at.get(&guid).copied().unwrap_or(now);
+                let seen = seen_at.since(&guid).unwrap_or(now);
                 let left = CORPSE_LIFE.saturating_sub(now.duration_since(seen));
                 (left, d, guid, name)
             })

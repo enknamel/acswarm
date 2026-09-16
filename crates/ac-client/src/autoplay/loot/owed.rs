@@ -238,10 +238,7 @@ impl Autoplay {
     /// When the body `guid` first came into sight, or `now` for one
     /// never noted (see [`Autoplay::corpse_seen`]).
     pub(crate) fn corpse_first_seen(&self, guid: u32, now: Instant) -> Instant {
-        self.corpse_seen
-            .iter()
-            .find(|(g, _)| *g == guid)
-            .map_or(now, |(_, t)| *t)
+        self.corpse_seen.since(&guid).unwrap_or(now)
     }
 
     /// Whether the body `guid`, lying at `at`, is this character's to
@@ -410,7 +407,7 @@ impl Client {
             .autoplay
             .corpse_seen
             .iter()
-            .any(|(guid, seen)| *seen >= blow && ours(*guid))
+            .any(|(guid, seen)| seen >= blow && ours(*guid))
     }
 
     /// Whether the corpse named `corpse` is another player's, and theirs:

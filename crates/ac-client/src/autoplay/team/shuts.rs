@@ -1,5 +1,7 @@
 use std::time::{Duration, Instant};
 
+use ac_agent::recent::Recent;
+
 use super::turns::Shut;
 use super::view::Mate;
 #[cfg(doc)]
@@ -209,26 +211,25 @@ pub struct StandBy {
 /// The bodies emptied, and when each was written off (see
 /// [`Autoplay::looted`]).
 #[derive(Clone, Debug, Default)]
-pub(crate) struct Emptied(Vec<(u32, Instant)>);
+pub(crate) struct Emptied(Recent<u32>);
 
 impl Emptied {
     /// Whether the body `guid` has been emptied.
     pub(crate) fn contains(&self, guid: &u32) -> bool {
-        self.0.iter().any(|(g, _)| g == guid)
+        self.0.since(guid).is_some()
     }
 
     /// Write the body `guid` off as emptied at `now`, once.
     pub(crate) fn push(&mut self, guid: u32, now: Instant) {
         if !self.contains(&guid) {
-            self.0.push((guid, now));
+            self.0.mark(guid, now);
         }
     }
 
     /// Forget the bodies written off [`EMPTIED_KEPT`] or longer before
     /// `now`, long rotted, before their guids can come back on others.
     pub(crate) fn forget_old(&mut self, now: Instant) {
-        self.0
-            .retain(|(_, when)| now.saturating_duration_since(*when) < EMPTIED_KEPT);
+        self.0.expire(now, EMPTIED_KEPT);
     }
 
     /// How many bodies are remembered as emptied.

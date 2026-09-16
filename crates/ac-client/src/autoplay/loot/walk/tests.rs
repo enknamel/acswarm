@@ -2,7 +2,7 @@ use super::*;
 use crate::autoplay::loot::choose::LOOT_NEAR;
 use crate::autoplay::team::turns::SAME_MOMENT;
 use crate::autoplay::{Autoplay, Room};
-use crate::testkit::{a_loot_profile, looter, standing_in_the_field};
+use crate::testkit::{a_loot_profile, corpses_seen, looter, standing_in_the_field};
 
 #[test]
 fn a_body_a_step_or_two_off_is_walked_back_to_and_not_let_go_of() {
@@ -137,7 +137,7 @@ fn a_walk_to_a_body_this_character_has_given_up_on_is_let_go_of() {
             ..Default::default()
         },
     );
-    c.autoplay.corpse_seen = vec![(body, now)];
+    c.autoplay.corpse_seen = corpses_seen([(body, now)]);
     // Walking to it, seven metres off, and a mate says it claimed
     // the same body well before we did.
     c.autoplay.walking_to = Some(CorpseWalk::new(body, 7.0, now));

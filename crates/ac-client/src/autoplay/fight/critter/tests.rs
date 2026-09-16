@@ -359,7 +359,7 @@ fn a_rabbit_is_walked_past_once_it_is_outgrown_and_a_revenant_never_is() {
     let other = in_view(&mut c, 0x8000_0004, 2566, "Black Rabbit");
     assert!(c.a_critter(&other, &cfg));
     c.autoplay.last_hit_us = None;
-    c.autoplay.hit_by.clear();
+    c.autoplay.hit_by = Default::default();
 
     // Named outright, it is what the player asked to hunt.
     let only = Fight {
@@ -578,7 +578,7 @@ fn a_cow_the_table_has_never_heard_of_is_walked_past_until_it_starts_something()
     c.autoplay.attacked_by("Cow", now);
     assert!(!c.a_critter(&cow, &cfg), "it is hitting the character");
     c.autoplay.last_hit_us = None;
-    c.autoplay.hit_by.clear();
+    c.autoplay.hit_by = Default::default();
     assert!(c.a_critter(&cow, &cfg));
 
     // It comes at the character, or at a mate, or at anyone: read
@@ -674,7 +674,7 @@ fn the_fight_picker_asks_about_a_stranger_rather_than_attacking_it() {
     assert!(!c.autoplay_fight_as(now, &cfg), "attacked a stranger");
     assert!(c.appraise_queue.is_empty(), "asked while under attack");
     c.autoplay.last_hit_us = None;
-    c.autoplay.hit_by.clear();
+    c.autoplay.hit_by = Default::default();
     assert!(!c.autoplay_fight_as(now, &cfg), "attacked a stranger");
     assert_eq!(
         c.appraise_queue.iter().copied().collect::<Vec<_>>(),

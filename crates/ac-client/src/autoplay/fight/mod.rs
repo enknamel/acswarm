@@ -48,26 +48,22 @@ impl Autoplay {
     /// let go.
     pub(crate) fn attacked_by(&mut self, who: &str, now: Instant) {
         self.last_hit_us = Some(now);
-        self.hit_by
-            .retain(|(name, when)| name != who && now.duration_since(*when) < UNDER_ATTACK);
-        self.hit_by.push((who.to_string(), now));
+        self.hit_by.expire(now, UNDER_ATTACK);
+        self.hit_by.mark(who.to_string(), now);
     }
 }
 
 impl Client {
     /// The names of what has attacked this character lately (see
-    /// `Autoplay::attacked_by`), as it says them on the board.
+    /// `Autoplay::attacked_by`), in name order, one row a name.
     pub fn attackers_lately(&self) -> Vec<String> {
-        let mut names: Vec<String> = self
-            .autoplay
+        let now = Instant::now();
+        self.autoplay
             .hit_by
             .iter()
-            .filter(|(_, when)| when.elapsed() < UNDER_ATTACK)
+            .filter(|(_, when)| now.duration_since(*when) < UNDER_ATTACK)
             .map(|(who, _)| who.clone())
-            .collect();
-        names.sort_unstable();
-        names.dedup();
-        names
+            .collect()
     }
 
     /// Something has attacked the character in the last few seconds --
@@ -245,11 +241,7 @@ impl Client {
             // With the vitae high, the hard ones and the killer wait.
             && !self.shy_of(o)
             // And one there is no getting to is not a fight on offer.
-            && !self
-                .autoplay
-                .given_up
-                .iter()
-                .any(|(g, t)| *g == o.guid && now.duration_since(*t) < GIVE_UP_FOR)
+            && !self.autoplay.given_up.within(&o.guid, now, GIVE_UP_FOR)
     }
 }
 

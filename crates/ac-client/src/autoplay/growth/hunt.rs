@@ -112,15 +112,17 @@ impl Client {
             .values()
             .filter(|o| o.object_desc_flags & object_desc_flags::CORPSE != 0)
             .map(|o| o.guid)
-            .filter(|g| !self.autoplay.corpse_seen.iter().any(|(seen, _)| seen == g))
+            .filter(|g| self.autoplay.corpse_seen.since(g).is_none())
             .collect();
         let st = &mut self.autoplay;
-        st.corpse_seen.extend(fresh.into_iter().map(|g| (g, now)));
+        for g in fresh {
+            st.corpse_seen.mark(g, now);
+        }
         // Forgotten once emptied, so the list stays the size of what is
         // on the ground.
         let looted = &st.looted;
-        st.corpse_seen
-            .retain(|(g, t)| now.duration_since(*t) < CORPSE_LIFE * 2 && !looted.contains(g));
+        st.corpse_seen.expire(now, CORPSE_LIFE * 2);
+        st.corpse_seen.retain(|g| !looted.contains(g));
         let st = &mut st.growth;
         if quiet {
             st.quiet_since.get_or_insert(now);
@@ -207,7 +209,7 @@ impl Client {
                 self.autoplay
                     .note(format!("at the hunting ground: {name}"), now);
             } else {
-                st.skip.push((lb, now));
+                st.skip.mark(lb, now);
                 self.autoplay
                     .note(format!("could not reach the {name} ground; another"), now);
             }
@@ -325,8 +327,7 @@ impl Client {
             }
         }
         let st = &mut self.autoplay.growth;
-        st.skip
-            .retain(|(_, t)| now.duration_since(*t) < SKIP_GROUND_FOR);
+        st.skip.expire(now, SKIP_GROUND_FOR);
         let mut skip: Vec<u32> = st.skip.iter().map(|(g, _)| *g).collect();
         skip.push(here);
         if let Some(h) = st.hunting_at {
@@ -405,7 +406,7 @@ impl Client {
             st.bound_since = Some(now);
             st.quiet_since = None;
             if let Some(h) = st.hunting_at.take() {
-                st.skip.push((h, now));
+                st.skip.mark(h, now);
             }
             self.autoplay.say(
                 Doing::Traveling,
@@ -417,7 +418,7 @@ impl Client {
             true
         } else {
             let st = &mut self.autoplay.growth;
-            st.skip.push((lb, now));
+            st.skip.mark(lb, now);
             st.quiet_since = None;
             st.next_hunt = Some(now + RETRY_AFTER);
             self.autoplay
