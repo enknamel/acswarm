@@ -120,12 +120,7 @@ impl Client {
         if !self.combat {
             return;
         }
-        let name = self
-            .world
-            .objects
-            .get(&guid)
-            .map(|o| o.name.clone())
-            .unwrap_or_default();
+        let name = self.world.name_of(guid).unwrap_or_default().to_string();
         tracing::info!(
             "attack {name} ({guid:#010x}){}",
             if self.missile { " with a missile" } else { "" }

@@ -568,8 +568,7 @@ impl Client {
         let fighting = self
             .attack_target
             .or(self.autoplay.casting_at())
-            .and_then(|g| self.world.objects.get(&g))
-            .map(|o| o.name.clone());
+            .and_then(|g| self.world.name_of(g).map(str::to_string));
         let trip = self.autoplay.resume_trip.or_else(|| self.travel_goal_xy());
         let cfg = &self.autoplay.config.survive;
         Some(View {
@@ -706,12 +705,7 @@ impl Client {
                 true
             }
             Action::Wield(guid) => {
-                let name = self
-                    .world
-                    .objects
-                    .get(&guid)
-                    .map(|o| o.name.clone())
-                    .unwrap_or_default();
+                let name = self.world.name_of(guid).unwrap_or_default().to_string();
                 self.autoplay
                     .say(Doing::Recovering, format!("wielding {name} again"));
                 self.wield_guid(guid);

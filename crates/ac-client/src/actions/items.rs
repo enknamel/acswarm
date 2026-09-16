@@ -31,7 +31,7 @@ pub(crate) struct TakeSent {
 
 impl Client {
     pub fn use_by_name(&mut self, name: &str) -> bool {
-        let me = self.player.as_ref().map(|p| p.world_position());
+        let me = self.my_position();
         let my_guid = self.world.player_guid;
         let mut best: Option<(f32, u32)> = None;
         for o in self.world.objects.values() {
@@ -78,12 +78,7 @@ impl Client {
                 return;
             }
         };
-        let name = self
-            .world
-            .objects
-            .get(&a.guid)
-            .map(|o| o.name.clone())
-            .unwrap_or_else(|| format!("{:#010x}", a.guid));
+        let name = self.world.name_or_hex(a.guid);
         let mut lines = vec![name.clone()];
         for key in [
             Appraisal::STRING_SHORT_DESC,
@@ -316,12 +311,7 @@ impl Client {
             {
                 self.loot_queue.pop_front();
                 let retried = self.loot_retry.take() == Some(guid);
-                let name = self
-                    .world
-                    .objects
-                    .get(&guid)
-                    .map(|o| o.name.clone())
-                    .unwrap_or_default();
+                let name = self.world.name_of(guid).unwrap_or_default().to_string();
                 let mut w = ac_net::wire::Writer::new();
                 self.loot_merge = None;
                 let into = match how {

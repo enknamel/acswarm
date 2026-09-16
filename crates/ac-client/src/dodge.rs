@@ -343,7 +343,7 @@ impl Client {
     /// gets to `target` without striking a wall or the ground on the way
     /// (see `crate::aim`). With nothing to go on it is taken to.
     pub(crate) fn shot_clears(&mut self, target: u32, how: How) -> bool {
-        let Some(me) = self.player.as_ref().map(|p| p.world_position()) else {
+        let Some(me) = self.my_position() else {
             return true;
         };
         let Some(at) = self.world.objects.get(&target).and_then(|o| o.world_pos()) else {
@@ -385,7 +385,7 @@ impl Client {
             self.dodge.fired = None;
             return;
         }
-        let Some(me) = self.player.as_ref().map(|p| p.world_position()) else {
+        let Some(me) = self.my_position() else {
             return;
         };
         let speed = self
@@ -733,8 +733,7 @@ impl Client {
             .unwrap_or_else(|| "a spell".into());
         let caster = track
             .from
-            .and_then(|g| self.world.objects.get(&g))
-            .map(|o| o.name.clone());
+            .and_then(|g| self.world.name_of(g).map(str::to_string));
         // Room to either side, measured with the walker's own collision
         // half a metre at a time.
         let (left, right) = sides(track.velocity);

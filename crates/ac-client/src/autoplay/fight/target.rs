@@ -46,7 +46,7 @@ impl Client {
     pub(crate) fn a_fight_in_sight(&mut self, now: Instant) -> bool {
         // Not in the world yet: nothing to say about the ground, and
         // nothing that should start a clock running on it.
-        let Some(me) = self.player.as_ref().map(|p| p.world_position()) else {
+        let Some(me) = self.my_position() else {
             return true;
         };
         // A fight already joined counts wherever it has led. A creature
@@ -112,12 +112,7 @@ impl Client {
     /// Let the target go and leave it alone for [`GIVE_UP_FOR`], saying
     /// why once.
     pub(crate) fn give_up_target(&mut self, guid: u32, why: &str, now: Instant) {
-        let name = self
-            .world
-            .objects
-            .get(&guid)
-            .map(|o| o.name.clone())
-            .unwrap_or_else(|| format!("{guid:#010x}"));
+        let name = self.world.name_or_hex(guid);
         self.autoplay
             .note(format!("giving up on {name}: {why}"), now);
         self.autoplay.given_up.expire(now, GIVE_UP_FOR);
@@ -128,7 +123,7 @@ impl Client {
     /// The nearest creature the name rules allow, within the radius.
     pub(super) fn pick_target(&mut self, cfg: &Fight) -> Option<u32> {
         let underground = self.underground();
-        let me = self.player.as_ref()?.world_position();
+        let me = self.my_position()?;
         let now = Instant::now();
         // A follower fights beside its leader, not wherever a monster
         // happens to be.

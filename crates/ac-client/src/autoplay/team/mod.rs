@@ -21,7 +21,7 @@ impl Client {
         if !team.enabled {
             return false;
         }
-        let me = self.player.as_ref().map(|p| p.world_position());
+        let me = self.my_position();
         let Some(me) = me else { return false };
 
         if self.autoplay_fellowship(now) {

@@ -45,8 +45,7 @@ pub(crate) fn view(c: &Client) -> Option<CombatView> {
         auto_repeat: auto,
         target: c
             .attack_target
-            .and_then(|g| c.world.objects.get(&g))
-            .map(|o| o.name.clone()),
+            .and_then(|g| c.world.name_of(g).map(str::to_string)),
     })
 }
 

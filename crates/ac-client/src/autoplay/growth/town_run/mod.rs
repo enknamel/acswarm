@@ -484,7 +484,7 @@ impl Client {
         go_anyway: bool,
     ) -> Result<(), String> {
         let Stop { errand, within, .. } = first;
-        let Some(me) = self.player.as_ref().map(|p| p.world_position()) else {
+        let Some(me) = self.my_position() else {
             return Err("not placed in the world yet".into());
         };
         let me = Vec2::new(me.x, me.y);

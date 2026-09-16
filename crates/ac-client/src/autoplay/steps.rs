@@ -117,7 +117,7 @@ fn by_place(_: &Client, _: Instant) -> f32 {
 /// already in reach keeps its usual place and outranks the body, so a
 /// character does not stop to loot with something swinging at it.
 fn worth_fighting(client: &Client, _now: Instant) -> f32 {
-    let Some(me) = client.player.as_ref().map(|p| p.world_position()) else {
+    let Some(me) = client.my_position() else {
         return UNDECIDED;
     };
     // Already swinging at something that is still alive: that is a
@@ -187,7 +187,7 @@ fn fight_worth(engaged: bool, owes_a_body: bool, nearest: f32) -> f32 {
 fn worth_looting(client: &Client, now: Instant) -> f32 {
     use crate::autoplay::CORPSE_LIFE;
     let room = client.room_for_loot();
-    let Some(me) = client.player.as_ref().map(|p| p.world_position()) else {
+    let Some(me) = client.my_position() else {
         return 0.0;
     };
     // The body in hand, or the one being walked to: whatever the board

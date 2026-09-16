@@ -74,12 +74,7 @@ impl Client {
         let Some(guid) = target else {
             return false;
         };
-        let name = self
-            .world
-            .objects
-            .get(&guid)
-            .map(|o| o.name.clone())
-            .unwrap_or_default();
+        let name = self.world.name_of(guid).unwrap_or_default().to_string();
         self.autoplay.casting_at = Some(guid);
         // Paced to the casting, buffs included: the server queues one
         // spell sent over another and drops the next, so an attack

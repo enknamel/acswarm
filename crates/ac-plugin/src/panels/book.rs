@@ -24,12 +24,7 @@ pub(crate) struct Actions {
 
 pub(crate) fn view(c: &Client) -> Option<BookView> {
     let b = c.book.as_ref()?;
-    let name = c
-        .world
-        .objects
-        .get(&b.guid)
-        .map(|o| o.name.clone())
-        .unwrap_or_default();
+    let name = c.world.name_of(b.guid).unwrap_or_default().to_string();
     Some(BookView {
         title: if b.inscription.is_empty() {
             name

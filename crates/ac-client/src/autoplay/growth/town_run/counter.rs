@@ -106,7 +106,7 @@ impl Client {
         let Some(mut run) = self.autoplay.growth.run.take() else {
             return Turn::Over;
         };
-        let Some(me) = self.player.as_ref().map(|p| p.world_position()) else {
+        let Some(me) = self.my_position() else {
             self.autoplay.growth.run = Some(run);
             return Turn::Waited;
         };
@@ -569,7 +569,7 @@ impl Client {
             // other side of the world two actions away, and judging the
             // second stop by how far it is from the first is what kept a
             // run inside one town.
-            let me = self.player.as_ref().map(|p| p.world_position());
+            let me = self.my_position();
             let ways = match me {
                 Some(p) => self.ways_out(Vec2::new(p.x, p.y)),
                 None => vec![(run.town, "in town".to_string())],

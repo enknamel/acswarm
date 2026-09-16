@@ -197,12 +197,7 @@ impl Client {
             .filter(|c| *c != sent.into)
         {
             Some(other) => {
-                let name = self
-                    .world
-                    .objects
-                    .get(&item)
-                    .map(|o| o.name.clone())
-                    .unwrap_or_else(|| format!("{item:#010x}"));
+                let name = self.world.name_or_hex(item);
                 tracing::info!(
                     "the server says {pack} is full ({held} items); taking {name} into {} instead",
                     self.pack_name(other)
@@ -227,11 +222,7 @@ impl Client {
         if Some(guid) == self.world.player_guid {
             return "the main pack".into();
         }
-        self.world
-            .objects
-            .get(&guid)
-            .map(|o| o.name.clone())
-            .unwrap_or_else(|| format!("{guid:#010x}"))
+        self.world.name_or_hex(guid)
     }
 }
 

@@ -378,7 +378,7 @@ impl Client {
         let Some(mut v) = self.visits.current.take() else {
             return;
         };
-        let Some(me) = self.player.as_ref().map(|p| p.world_position()) else {
+        let Some(me) = self.my_position() else {
             self.visits.current = Some(v);
             return;
         };
@@ -551,7 +551,7 @@ impl Client {
         };
         let name = o.name.clone();
         let at = ac_world::landblock_origin(p.cell) + p.local;
-        let Some(me) = self.player.as_ref().map(|p| p.world_position()) else {
+        let Some(me) = self.my_position() else {
             return;
         };
         if arrived(me, at) {

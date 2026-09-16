@@ -58,7 +58,7 @@ impl Client {
         else {
             return false;
         };
-        let Some(me) = self.player.as_ref().map(|p| p.world_position()) else {
+        let Some(me) = self.my_position() else {
             return false;
         };
         let keep = team.follow_distance.max(1.5);

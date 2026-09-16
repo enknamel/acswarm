@@ -191,7 +191,7 @@ impl Client {
                     let n = self.autoplay.refused.entry(g).or_default();
                     *n += 1;
                     if *n >= SALVAGE_TRIES {
-                        let name = self.world.objects.get(&g).map(|o| o.name.clone());
+                        let name = self.world.name_of(g).map(str::to_string);
                         // A refusal is not a new decision. Rewriting it
                         // to Keep made the thing eligible for nothing
                         // while it went on holding a slot.
@@ -217,12 +217,7 @@ impl Client {
                 let n = self.autoplay.refused.entry(item).or_default();
                 *n += 1;
                 if *n >= SALVAGE_TRIES {
-                    let name = self
-                        .world
-                        .objects
-                        .get(&item)
-                        .map(|o| o.name.clone())
-                        .unwrap_or_default();
+                    let name = self.world.name_of(item).unwrap_or_default().to_string();
                     self.autoplay
                         .tag_failed(item, "the salvager would not take it");
                     self.autoplay
@@ -301,7 +296,7 @@ impl Client {
         else {
             return false;
         };
-        let Some(me) = self.player.as_ref().map(|p| p.world_position()) else {
+        let Some(me) = self.my_position() else {
             return false;
         };
         // Not while it is fighting, and not from across the map.

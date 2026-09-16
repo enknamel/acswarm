@@ -1294,12 +1294,7 @@ impl Api for CtxApi<'_, '_> {
             return Dynamic::UNIT;
         };
         let mut m = Map::new();
-        let name = c
-            .world
-            .objects
-            .get(&a.guid)
-            .map(|o| o.name.clone())
-            .unwrap_or_default();
+        let name = c.world.name_of(a.guid).unwrap_or_default().to_string();
         m.insert("name".into(), name.into());
         // "use" is a Rhai keyword, so the use line is "usage".
         for (key, id) in [

@@ -320,16 +320,12 @@ impl Client {
         // will not -- set aside, out of reach, a mate's to open -- is not
         // waited on: waiting on a body it is never going to open would
         // stop the fighting altogether (see [`Client::corpse_for_us`]).
-        let on_the_floor = self
-            .player
-            .as_ref()
-            .map(|p| p.world_position())
-            .is_some_and(|me| {
-                self.world
-                    .objects
-                    .values()
-                    .any(|o| self.corpse_for_us(o, me, now, room))
-            });
+        let on_the_floor = self.my_position().is_some_and(|me| {
+            self.world
+                .objects
+                .values()
+                .any(|o| self.corpse_for_us(o, me, now, room))
+        });
         // Otherwise the only thing owed is a body of its own still on
         // its way.
         on_the_floor || self.own_body_still_falling(now)
@@ -453,7 +449,7 @@ impl Client {
             return None;
         }
         let me = self.world.player_guid?;
-        let mine = self.player.as_ref()?.world_position();
+        let mine = self.my_position()?;
         let objects = &self.world.objects;
         let there = |g: u32| {
             objects
@@ -470,10 +466,7 @@ impl Client {
             .find(|m| m.guid == to)
             .map(|m| m.name.clone())
             .unwrap_or_else(|| format!("{to:#010x}"));
-        let what = objects
-            .get(&body)
-            .map(|o| o.name.clone())
-            .unwrap_or_else(|| format!("{body:#010x}"));
+        let what = self.world.name_or_hex(body);
         Some((who, what))
     }
 }
