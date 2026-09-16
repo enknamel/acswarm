@@ -6,12 +6,13 @@ and autoplay. File names are under `src/`; grep an entry fn for where its system
 
 ## Tick path
 
-`Client::tick` (`lib.rs`), once a frame per session:
+`Client::tick` (`session/apply.rs`), once a frame per session:
 1. drain the socket and `World::apply` each message; server chat goes to `chat_message()`
-   (`lib.rs`), which hands refusals in words to `hear_refusal()` (`refused.rs`)
+   (`session/chat.rs`), which hands refusals in words to `hear_refusal()` (`refused.rs`)
 2. manual-play timers: `tick_combat()`, `tick_loot()`, `tick_store()`, `tick_appraise()`
 3. `tick_autoplay()` (`autoplay/mod.rs`), then `tick_retag()` and `save_ledger()`
-4. `tick_player()` moves the body (`player.rs`) and runs `tick_visit()` (`visit.rs`)
+4. `tick_player()` (`body/player_tick.rs`) moves the body (`player.rs`) and runs `tick_visit()`
+   (`visit.rs`)
 
 `tick_autoplay()`, in order:
 - with the team on, even with autoplay off: `autoplay_accept_invites()`, and `autoplay_fellowship()`
@@ -93,7 +94,7 @@ the column (the module path; see the root map for `RUST_LOG`).
 | academy | `autoplay_academy`, `academy_open_doors` | `academy.rs`, `tests/academy_route.rs` | `Autoplay.academy`, `Autoplay.academy_corpse`, `Autoplay.academy_doors`, `Autoplay.academy_armed` | academy | academy | academy |
 | summoning | `autoplay_summon`, `autoplay_claim_pet_kills`, `hear_summoning` | `autoplay/summoning.rs`, `autoplay/mod.rs` | `Autoplay.summoning` | summon | autoplay::summoning | summon, pet |
 | refusals | `hear_refusal`, `refused`, `answer` | `refused.rs`, `crates/ac-agent/src/refusals.rs` | the waiting system's own wait, e.g. `Autoplay.shelved` | refus | refused | refusal |
-| server chat | `chat_message`, `hear_arrival`, `hear_spell_attack` | `lib.rs`, `autoplay/mod.rs` | `Autoplay.hit_by` | arriv | (crate root) | heard |
+| server chat | `chat_message`, `hear_arrival`, `hear_spell_attack` | `session/chat.rs`, `autoplay/mod.rs` | `Autoplay.hit_by` | arriv | session::chat | heard |
 
 ## Glossary
 
@@ -144,7 +145,10 @@ the column (the module path; see the root map for `RUST_LOG`).
 
 | module | what |
 |---|---|
-| `lib.rs` | `Client`, `Event`, `Config`; connect, tick, manual actions (combat, items, trade, fellowship, housing, allegiance, chat). Re-exports `ac_agent::{did, pack, refusals, room, weenie_errors}`, `route` (`ac_nav::steering`), `errand` (`ac_vendor::errand`) |
+| `lib.rs` | `Client`, `Event`, `Config`, `placed`, `drain_events`; the module declarations, and the re-exports that keep every old path: `ac_agent::{did, pack, refusals, room, weenie_errors}`, `route` (`ac_nav::steering`), `errand` (`ac_vendor::errand`), and the names lifted into `session/`, `body/` and `actions/` |
+| `actions/mod.rs` | what a player, script or panel can ask for: `actions/combat.rs` (casting, attacking, what is wielded), `actions/items.rs` (using, taking, packing, splitting, salvaging), `actions/social.rs` (emotes, fellowship, friends, housing, allegiance, chat), `actions/trade_vendor.rs` (trade windows and counters), `actions/ui.rs` (`interact`, `slash_command`, selection) |
+| `session/mod.rs` | the connection and what arrives on it: `session/connect.rs` (connect, offline, disconnect, log off), `session/net.rs` (sending), `session/apply.rs` (`Client::tick` and the message match), `session/lobby.rs` (the character list), `session/chat.rs` (server chat and sounds) |
+| `body/mod.rs` | where the character is and how it gets there: `body/player_tick.rs` (`tick_player`, `PlayerFrame`), `body/movement.rs` (`Follow`, speed, jumps, noclip), `body/server_walk.rs` (walks the server makes for us), `body/standing.rs` (`Standing`, the client's answers to `ac_nav::Ground`) |
 | `player.rs` | body physics: walking, floors, ledges, falls, jumps, cell tracking |
 | `creation.rs` | character creation rules and create-if-missing |
 | `magic.rs` | spellbook, spell bars, enchantments, components, cast checks |
