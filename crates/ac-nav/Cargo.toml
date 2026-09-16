@@ -9,5 +9,5 @@ license.workspace = true
 ac-formats = { path = "../ac-formats" }
 ac-scene = { path = "../ac-scene" }
 ac-world = { path = "../ac-world" }
-glam = "0.30"
+glam.workspace = true
 tracing.workspace = true

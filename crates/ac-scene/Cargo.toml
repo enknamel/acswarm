@@ -9,9 +9,9 @@ license.workspace = true
 ac-dat = { path = "../ac-dat" }
 ac-formats = { path = "../ac-formats" }
 ac-store = { path = "../ac-store" }
-glam = "0.30"
+glam.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-image = { version = "0.25", default-features = false, features = ["png"] }
+image = { workspace = true, features = ["png"] }

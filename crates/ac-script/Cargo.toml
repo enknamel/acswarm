@@ -11,7 +11,7 @@ ac-client = { path = "../ac-client" }
 ac-store = { path = "../ac-store" }
 ac-net = { path = "../ac-net" }
 ac-world = { path = "../ac-world" }
-glam = "0.30"
+glam.workspace = true
 # Single-threaded on purpose: the engine lives on the client's main thread
 # next to the sessions, so the `sync` feature (Send + Sync everything) is off.
 rhai = { version = "1", features = ["serde"] }

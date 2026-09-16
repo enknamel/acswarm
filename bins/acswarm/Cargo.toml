@@ -18,24 +18,24 @@ ac-client = { path = "../../crates/ac-client" }
 ac-plugin = { path = "../../crates/ac-plugin" }
 ac-script = { path = "../../crates/ac-script" }
 anyhow.workspace = true
-clap = { version = "4", features = ["derive", "env"] }
+clap = { workspace = true, features = ["env"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true
-glam = { version = "0.30", features = ["bytemuck"] }
-wgpu = "30"
-winit = "0.30"
-pollster = "0.4"
+glam = { workspace = true, features = ["bytemuck"] }
+wgpu.workspace = true
+winit.workspace = true
+pollster.workspace = true
 bytemuck = { version = "1", features = ["derive"] }
-egui = "0.36"
-egui-wgpu = "0.36"
-egui-winit = { version = "0.36", default-features = false, features = ["links"] }
-image = { version = "0.25", default-features = false, features = ["png"] }
+egui.workspace = true
+egui-wgpu.workspace = true
+egui-winit.workspace = true
+image = { workspace = true, features = ["png"] }
 libc = "0.2"
 
 [dev-dependencies]
 # Live hal buffer counts, for the tests that check wgpu is not holding
 # uploads (they read 0 without it).
-wgpu = { version = "30", features = ["counters"] }
+wgpu = { workspace = true, features = ["counters"] }
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 rfd = "0.15"

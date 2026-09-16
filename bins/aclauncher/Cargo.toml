@@ -13,9 +13,9 @@ serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
-wgpu = "30"
-winit = "0.30"
-pollster = "0.4"
-egui = "0.36"
-egui-wgpu = "0.36"
-egui-winit = { version = "0.36", default-features = false, features = ["links"] }
+wgpu.workspace = true
+winit.workspace = true
+pollster.workspace = true
+egui.workspace = true
+egui-wgpu.workspace = true
+egui-winit.workspace = true
