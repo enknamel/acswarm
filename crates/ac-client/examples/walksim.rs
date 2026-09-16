@@ -4,7 +4,7 @@
 //! how it copes with walls without a server.
 //!
 //! `AC_DATA_DIR=... cargo run --release -p ac-client --example walksim \
-//!     BLOCK x y z GOAL_BLOCK gx gy [seconds]`
+//!     -- BLOCK x y z GOAL_BLOCK gx gy [seconds]`
 //! Coordinates are local to their landblock (`g` for z stands the
 //! character on the terrain). `RUST_LOG=ac_client=debug` shows the route
 //! decisions; `WALKSIM_TRACE=<seconds>` prints the position and the

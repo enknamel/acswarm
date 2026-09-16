@@ -1,6 +1,6 @@
 //! How many cell structures have no physics polygons: those get their
-//! drawn solid faces as collision instead. `AC_DATA_DIR=... cargo run
-//! --release -p ac-scene --example env_survey`
+//! drawn solid faces as collision instead.
+//! `AC_DATA_DIR=... cargo run --release -p ac-scene --example env_survey`
 use ac_scene::Assets;
 
 fn main() {

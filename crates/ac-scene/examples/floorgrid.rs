@@ -1,4 +1,5 @@
 //! Which points round a spot have a floor: a map of the room's shape.
+//! `AC_DATA_DIR=... cargo run -p ac-scene --example floorgrid -- BLOCK cx cy z radius`
 use ac_scene::Assets;
 use glam::Vec3;
 fn main() {

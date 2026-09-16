@@ -1,8 +1,8 @@
 //! Print the journey from one place to another.
-//! `cargo run -p ac-world --example plan_trip Holtburg Arwic`
+//! `cargo run -p ac-world --example plan_trip -- FROM TO [level] [far]`, where
+//! TO is a town name and FROM a town name or `ns,ew` map coordinates.
 fn main() {
     let a: Vec<String> = std::env::args().skip(1).collect();
-    // plan_trip FROM TO [level]   or   plan_trip ns,ew TO [level]
     let from_xy = match a[0].split_once(',') {
         Some((ns, ew)) => ac_world::towns::world_xy(
             ns.trim().parse().expect("ns"),

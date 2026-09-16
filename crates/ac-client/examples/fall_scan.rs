@@ -1,7 +1,7 @@
 //! Jump from a grid of spots across an outdoor landblock and report any
 //! that end below the terrain: falling through the ground.
 //!
-//! `AC_DATA_DIR=... cargo run --release -p ac-client --example fall_scan BLOCK [step_m]`
+//! `AC_DATA_DIR=... cargo run --release -p ac-client --example fall_scan -- BLOCK [step_m]`
 
 use ac_client::player::{Input, Player};
 use ac_scene::{landblock, Assets};

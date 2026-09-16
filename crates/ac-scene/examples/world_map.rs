@@ -1,8 +1,5 @@
-//! Render the world map of Dereth to a PNG so it can be looked at:
-//!
-//! ```text
-//! AC_DATA_DIR=... cargo run --release -p ac-scene --example world_map OUT.png [px_per_block]
-//! ```
+//! Render the world map of Dereth to a PNG so it can be looked at.
+//! `AC_DATA_DIR=... cargo run --release -p ac-scene --example world_map -- OUT.png [px_per_block]`
 //!
 //! The terrain grid comes from (or goes into) `WorldGrid::cache_dir()`;
 //! the map itself is rendered fresh each run so palette changes show.

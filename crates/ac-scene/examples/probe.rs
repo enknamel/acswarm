@@ -1,7 +1,7 @@
 //! Probe the collision world at one point: wall contact, floor, and
 //! walk results in the four compass directions.
 //!
-//! `AC_DATA_DIR=... cargo run --release -p ac-scene --example probe BLOCK x y z`
+//! `AC_DATA_DIR=... cargo run --release -p ac-scene --example probe -- BLOCK x y z`
 use ac_scene::{
     collision::{Capsule, CollisionWorld},
     landblock, Assets,

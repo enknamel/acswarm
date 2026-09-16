@@ -2,7 +2,8 @@
 //! report the ones that never land: the character hovering in the air
 //! is the bug this catches (stairs, ledges, low ceilings).
 //!
-//! `AC_DATA_DIR=... cargo run --release -p ac-client --example jump_scan BLOCK [power]`
+//! `AC_DATA_DIR=... cargo run --release -p ac-client --example jump_scan -- BLOCK [power]`
+//! Only level standing spots are tried unless `SLOPES` is set in the environment.
 
 use ac_client::player::{Input, Player};
 use ac_scene::collision::CollisionWorld;

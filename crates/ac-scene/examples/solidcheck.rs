@@ -6,7 +6,8 @@
 //! triangles inside its bounds, and whether a capsule standing at its
 //! middle reports wall contact.
 //!
-//! `AC_DATA_DIR=... cargo run --release -p ac-scene --example solidcheck BLOCK [minsize]`
+//! `AC_DATA_DIR=... cargo run --release -p ac-scene --example solidcheck -- BLOCK [minsize]`
+//! In place of `BLOCK`: `all` every block, `model ID` one model's parts, `find ID` who places it.
 use std::collections::HashMap;
 
 use ac_formats::landblock::{CellLandblock, EnvCell, LandblockInfo};

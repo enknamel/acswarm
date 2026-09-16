@@ -1,6 +1,6 @@
 //! What the Nth session in a process costs, in memory, with no server.
 //!
-//! `AC_DATA_DIR=... cargo run --release -p ac-client --example session_cost [N] [BLOCK]`
+//! `AC_DATA_DIR=... cargo run --release -p ac-client --example session_cost -- [N] [BLOCK]`
 //!
 //! Opens the archives once, then N sessions the way `acbot` does
 //! (`Client::connect` to a port nobody listens on, so no packet is

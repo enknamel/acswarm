@@ -2,7 +2,7 @@
 //! where the character ends up, to catch falls into places a capsule
 //! cannot stand (under a porch, between floors).
 //!
-//! `AC_DATA_DIR=... cargo run --release -p ac-client --example jump_probe BLOCK x y z [power]`
+//! `AC_DATA_DIR=... cargo run --release -p ac-client --example jump_probe -- BLOCK x y z [power]`
 use ac_client::player::{Input, Player};
 use ac_scene::{collision::CollisionWorld, landblock, Assets};
 use glam::{Quat, Vec3};

@@ -1,5 +1,5 @@
 //! Trace one running jump frame by frame from a spot in a cell.
-//! `AC_DATA_DIR=... cargo run --release -p ac-client --example jump_trace CELL x y z heading_deg [power]`
+//! `AC_DATA_DIR=... cargo run --release -p ac-client --example jump_trace -- CELL x y z heading_deg [power]`
 use ac_client::player::{Input, Player};
 use ac_scene::Assets;
 use glam::{Quat, Vec3};

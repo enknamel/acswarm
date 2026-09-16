@@ -1,7 +1,7 @@
 //! Render a landblock's local map (dungeon floor plan or outdoor block)
 //! to a PNG.
 //!
-//! `AC_DATA_DIR=... cargo run --release -p ac-scene --example local_map BLOCK OUT.png [px_per_metre] [zlo zhi]`
+//! `AC_DATA_DIR=... cargo run --release -p ac-scene --example local_map -- BLOCK OUT.png [px_per_metre] [zlo zhi]`
 //!
 //! `BLOCK` is a hex landblock id such as `0125` or `A9B4`; `zlo zhi`
 //! limits a dungeon plan to floors between those heights.
