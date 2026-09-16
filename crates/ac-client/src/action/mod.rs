@@ -383,9 +383,9 @@ pub const RETAIL: &[Command] = &[
 ];
 
 /// Retail names with no row yet: the list the families work through. Some are
-/// still reached by [`unclaimed`] as they were before the table -- the Turbine
-/// rooms and the group channels -- which leaves them behind the plugin hooks
-/// until a row takes them.
+/// still reached by the router's fallback where they were before the table --
+/// the Turbine rooms and the group channels -- which leaves them behind the
+/// plugin hooks until a row takes them.
 pub const PENDING: &[&str] = &[
     "?",
     "help",
