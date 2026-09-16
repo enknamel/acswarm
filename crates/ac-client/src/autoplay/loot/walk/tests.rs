@@ -1,6 +1,8 @@
 use super::*;
 use crate::autoplay::loot::choose::LOOT_NEAR;
+use crate::autoplay::team::turns::SAME_MOMENT;
 use crate::autoplay::{Autoplay, Room};
+use crate::testkit::{a_loot_profile, looter, standing_in_the_field};
 
 #[test]
 fn a_body_a_step_or_two_off_is_walked_back_to_and_not_let_go_of() {
@@ -104,4 +106,49 @@ fn the_wait_does_not_run_away_with_itself() {
     // corpse for ever.
     let silly = loot_wait(100_000.0);
     assert!(silly <= LOOT_TIMEOUT + std::time::Duration::from_secs(30));
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_walk_to_a_body_this_character_has_given_up_on_is_let_go_of() {
+    // The one way out of the looting that did not stop the walk. A
+    // character that chose a body, set off for it, and then heard a
+    // better claim on it walked on -- and the walk is itself a claim
+    // (see `Autoplay::corpse_claim`), so it went on telling the
+    // others the body was taken, and went on holding the looting's
+    // own worth up, for a body it would never open.
+    let holtburg = 0xA9B4_0019;
+    let at = glam::Vec3::new(84.0, 84.0, 10.0);
+    let mut c = standing_in_the_field(20, holtburg, at);
+    a_loot_profile(&mut c, "walk test");
+    let me = c.player.as_ref().unwrap().world_position();
+    let now = Instant::now();
+    let body = 0x8000_0001;
+    c.world.objects.insert(
+        body,
+        ac_world::WorldObject {
+            guid: body,
+            name: "Corpse of Drudge Slave".into(),
+            object_desc_flags: ac_world::object_desc_flags::CORPSE,
+            position: Some(ac_world::object::Position::new_flat(
+                holtburg,
+                me + glam::Vec3::new(7.0, 0.0, 0.0) - ac_world::landblock_origin(holtburg),
+            )),
+            ..Default::default()
+        },
+    );
+    c.autoplay.corpse_seen = vec![(body, now)];
+    // Walking to it, seven metres off, and a mate says it claimed
+    // the same body well before we did.
+    c.autoplay.walking_to = Some(CorpseWalk::new(body, 7.0, now));
+    c.autoplay.team.mates = vec![looter(
+        0x5000_0002,
+        me,
+        Some(body),
+        SAME_MOMENT + Duration::from_secs(5),
+    )];
+
+    assert!(!c.autoplay_loot(now), "went to a body that is not ours");
+    assert_eq!(c.autoplay.walking_to.map(|w| w.guid), None, "still walking");
+    assert_eq!(c.autoplay.corpse_claim(now), None, "still claiming it");
 }

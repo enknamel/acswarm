@@ -14,7 +14,7 @@ use ac_world::{item_type, object_desc_flags, WorldObject};
 use glam::{Quat, Vec3};
 
 use crate::autoplay::growth::{Growth, Salable};
-use crate::autoplay::{LootAction, Mate, TeamView, Turn, CREATURE_LEVEL};
+use crate::autoplay::{judge_loot, LootAction, Mate, TeamView, Turn, CREATURE_LEVEL};
 use crate::items::ItemStats;
 use crate::player::Player;
 use crate::Client;
@@ -630,4 +630,173 @@ pub fn a_counter(c: &mut Client, guid: u32, name: &str, at: glam::Vec3) {
         rotation: glam::Quat::IDENTITY,
     });
     c.world.objects.insert(guid, o);
+}
+
+/// A shelf of its own holding one starter profile, so the looting
+/// has rules to carry out without touching the one every session
+/// shares.
+pub fn a_loot_profile(c: &mut Client, name: &str) {
+    let dir = std::env::temp_dir().join("acswarm-test-loot-profiles");
+    std::fs::create_dir_all(&dir).ok();
+    let shelf = std::sync::Arc::new(crate::profile::Library::default());
+    shelf.open(&dir);
+    let mut p = crate::profile::Profile::starter();
+    p.name = name.into();
+    shelf.put(p).ok();
+    c.profiles = shelf;
+    c.autoplay.config.loot.profile = name.into();
+    assert!(c.loot_profile().is_some(), "no rules to loot by");
+}
+
+/// A shelf holding one profile of `rules`, in a directory of its
+/// own so that two tests never read each other's files.
+pub fn shelf(named: &str, rules: Vec<crate::profile::Rule>) -> crate::profile::Library {
+    let dir = std::env::temp_dir().join(format!("acswarm-{named}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let library = crate::profile::Library::default();
+    library.open(&dir);
+    library
+        .put(crate::profile::Profile {
+            name: "test".into(),
+            rules,
+            ..Default::default()
+        })
+        .expect("saved");
+    library
+}
+
+pub fn judged(
+    stats: &ItemStats,
+    library: &crate::profile::Library,
+    profile: &str,
+) -> crate::profile::Verdict {
+    judge_loot(
+        stats,
+        None,
+        library.get(profile).as_deref(),
+        &crate::weapons::Wielder::default(),
+        "Aldric",
+        0,
+    )
+}
+
+/// Set the name lists on the test profile. They are the profile's
+/// now, so they change for everyone reading it.
+pub fn name_lists(library: &crate::profile::Library, always: &[&str], never: &[&str]) {
+    let mut p = (*library.get("test").expect("the test profile")).clone();
+    p.looting.always = always.iter().map(|s| s.to_string()).collect();
+    p.looting.never = never.iter().map(|s| s.to_string()).collect();
+    library.put(p).expect("put");
+}
+
+/// A corpse open at the character's feet, as the loot rules see it,
+/// with one thing on it worth taking.
+pub fn corpse_at_hand(guid: u32, item: u32) -> ac_loot::Open {
+    ac_loot::Open {
+        guid,
+        name: "Corpse of a Drudge Skulker".into(),
+        open: true,
+        items: vec![ac_loot::Lying {
+            guid: item,
+            name: "Dagger".into(),
+            burden: 10,
+            verdict: ac_loot::Verdict::Take(LootAction::Keep),
+            needs_no_slot: false,
+        }],
+        slots_free: 20,
+        room_anywhere: 20,
+        carry_room: 10_000,
+        ..Default::default()
+    }
+}
+
+/// A Sack hanging from the main pack, with `capacity` slots.
+pub const SACK: u32 = 0x8000_0300;
+/// A body at the character's feet.
+pub const BODY: u32 = 0x8000_0400;
+
+/// A character whose main pack has `main_slots` slots, `main_used`
+/// of them taken by daggers, and a Sack of `sack_slots` slots with
+/// `sack_used` daggers in it.
+pub fn with_packs(
+    assets: std::rc::Rc<ac_scene::Assets>,
+    main_slots: u32,
+    main_used: u32,
+    sack_slots: u32,
+    sack_used: u32,
+) -> Client {
+    let mut c = character_of_level(assets, 20);
+    let me = c.world.player_guid.unwrap();
+    c.world.objects.insert(
+        me,
+        ac_world::WorldObject {
+            guid: me,
+            name: "Verity".into(),
+            is_player: true,
+            items_capacity: main_slots,
+            ..Default::default()
+        },
+    );
+    c.world.objects.insert(
+        SACK,
+        ac_world::WorldObject {
+            guid: SACK,
+            name: "Sack".into(),
+            weenie_class_id: 166,
+            item_type: ac_world::item_type::CONTAINER,
+            items_capacity: sack_slots,
+            container: Some(me),
+            ..Default::default()
+        },
+    );
+    let mut next = 0x8000_0500;
+    for (holder, n) in [(me, main_used), (SACK, sack_used)] {
+        for _ in 0..n {
+            c.world.objects.insert(
+                next,
+                ac_world::WorldObject {
+                    guid: next,
+                    name: "Dagger".into(),
+                    container: Some(holder),
+                    ..Default::default()
+                },
+            );
+            next += 1;
+        }
+    }
+    c.world.objects.insert(
+        BODY,
+        ac_world::WorldObject {
+            guid: BODY,
+            name: "Corpse of a Drudge Skulker".into(),
+            object_desc_flags: ac_world::object_desc_flags::CORPSE,
+            ..Default::default()
+        },
+    );
+    // No slots kept back for a counter's money: these are about the
+    // packs being full, not low.
+    c.autoplay.config.team.restock.keep_slots = 0;
+    assert!(!c.server_busy(Instant::now()));
+    c
+}
+
+/// A thing of `wcid` lying on the body, `count` to the stack.
+pub fn on_the_body(c: &mut Client, guid: u32, name: &str, wcid: u32, kind: u32, count: u32) {
+    c.world.objects.insert(
+        guid,
+        ac_world::WorldObject {
+            guid,
+            name: name.into(),
+            weenie_class_id: wcid,
+            item_type: kind,
+            stack_size: count,
+            max_stack_size: if count > 1 { 25_000 } else { 1 },
+            container: Some(BODY),
+            ..Default::default()
+        },
+    );
+    match &mut c.world.open_container {
+        Some((body, items)) if *body == BODY => items.push(guid),
+        _ => c.world.open_container = Some((BODY, vec![guid])),
+    }
 }
