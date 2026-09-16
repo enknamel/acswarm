@@ -16,29 +16,29 @@ use ac_world::object::MoveTarget;
 use glam::Vec3;
 
 /// Followers stay within this many metres of the leader.
-pub const FOLLOW_DISTANCE: f32 = 3.0;
+pub(crate) const FOLLOW_DISTANCE: f32 = 3.0;
 /// How long to keep trying to open a corpse that has not appeared.
-pub const CORPSE_TIMEOUT: Duration = Duration::from_secs(20);
+pub(crate) const CORPSE_TIMEOUT: Duration = Duration::from_secs(20);
 /// Interval between attempts to open a corpse.
-pub const CORPSE_RETRY: Duration = Duration::from_secs(3);
+pub(crate) const CORPSE_RETRY: Duration = Duration::from_secs(3);
 
-pub const LEADER_KEY: &str = "party.leader";
-pub const TARGET_TOPIC: &str = "party.target";
+pub(crate) const LEADER_KEY: &str = "party.leader";
+pub(crate) const TARGET_TOPIC: &str = "party.target";
 
 // ---------------------------------------------------------------------------
 // Decisions: plain data in, plain data out.
 
 /// Where the leader's character stands.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct LeaderPose {
+pub(crate) struct LeaderPose {
     /// The leader's own object guid, when it has one.
-    pub guid: Option<u32>,
-    pub cell: u32,
-    pub local: Vec3,
+    pub(crate) guid: Option<u32>,
+    pub(crate) cell: u32,
+    pub(crate) local: Vec3,
 }
 
 impl LeaderPose {
-    pub fn world(&self) -> Vec3 {
+    pub(crate) fn world(&self) -> Vec3 {
         ac_world::landblock_origin(self.cell) + self.local
     }
 }
@@ -46,7 +46,11 @@ impl LeaderPose {
 /// What a follower standing at `me` should run toward: nothing when close
 /// enough, the leader's object when the follower's world contains it
 /// (the client then tracks it as it moves), else the leader's position.
-pub fn follow_target(me: Vec3, leader: &LeaderPose, leader_in_view: bool) -> Option<MoveTarget> {
+pub(crate) fn follow_target(
+    me: Vec3,
+    leader: &LeaderPose,
+    leader_in_view: bool,
+) -> Option<MoveTarget> {
     let d = leader.world() - me;
     if Vec3::new(d.x, d.y, 0.0).length() <= FOLLOW_DISTANCE {
         return None;
@@ -62,14 +66,14 @@ pub fn follow_target(me: Vec3, leader: &LeaderPose, leader_in_view: bool) -> Opt
 
 /// What a follower should do about the leader's target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Assist {
+pub(crate) enum Assist {
     Stay,
     Attack { guid: u32, enter_combat: bool },
 }
 
 /// A follower attacks the leader's target once, when it can see it, is not
 /// already on it, and is not a caster (magic mode is left alone).
-pub fn assist_decision(
+pub(crate) fn assist_decision(
     leader_target: Option<u32>,
     my_target: Option<u32>,
     combat: bool,
@@ -87,17 +91,17 @@ pub fn assist_decision(
 
 /// A watched target is dead when its object is gone (`alive` is None) or
 /// its health reached zero.
-pub fn target_died(watched: Option<u32>, alive: Option<bool>) -> bool {
+pub(crate) fn target_died(watched: Option<u32>, alive: Option<bool>) -> bool {
     watched.is_some() && !alive.unwrap_or(false)
 }
 
 /// The corpse a creature leaves behind, as the server names it.
-pub fn corpse_name(target: &str) -> String {
+pub(crate) fn corpse_name(target: &str) -> String {
     format!("Corpse of {target}")
 }
 
 /// Items of an open container not yet asked for, in container order.
-pub fn items_to_take(container: &[u32], taken: &HashSet<u32>) -> Vec<u32> {
+pub(crate) fn items_to_take(container: &[u32], taken: &HashSet<u32>) -> Vec<u32> {
     container
         .iter()
         .copied()
@@ -106,7 +110,7 @@ pub fn items_to_take(container: &[u32], taken: &HashSet<u32>) -> Vec<u32> {
 }
 
 /// `on`/`off`/empty (toggle) for the switch commands; None for anything else.
-pub fn parse_switch(args: &str, current: bool) -> Option<bool> {
+pub(crate) fn parse_switch(args: &str, current: bool) -> Option<bool> {
     match args.trim().to_ascii_lowercase().as_str() {
         "" | "toggle" => Some(!current),
         "on" | "1" | "true" | "yes" => Some(true),
@@ -117,7 +121,7 @@ pub fn parse_switch(args: &str, current: bool) -> Option<bool> {
 
 /// Distance between two characters, flat (height differences are not
 /// something following can fix).
-pub fn flat_distance(a: Vec3, b: Vec3) -> f32 {
+pub(crate) fn flat_distance(a: Vec3, b: Vec3) -> f32 {
     let d = a - b;
     Vec3::new(d.x, d.y, 0.0).length()
 }

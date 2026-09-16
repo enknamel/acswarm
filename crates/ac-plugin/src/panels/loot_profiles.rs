@@ -81,7 +81,7 @@ const NUM_KEYS: [NumKey; 21] = [
 
 /// Where the profiles live when nobody has said otherwise:
 /// `~/.config/acswarm/profiles`, beside the UI settings.
-pub fn default_dir() -> PathBuf {
+pub(crate) fn default_dir() -> PathBuf {
     Settings::config_dir().join("profiles")
 }
 
@@ -101,7 +101,7 @@ fn dir_of(library: &Library) -> PathBuf {
 
 /// One carried item and what the profile makes of it.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Trial {
+pub(crate) struct Trial {
     pub item: String,
     pub verdict: Verdict,
 }
@@ -109,7 +109,7 @@ pub struct Trial {
 /// What the panel draws: the shelf, the profile open for editing, and
 /// what this character carries judged by it.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct ProfilesView {
+pub(crate) struct ProfilesView {
     /// Every profile on the shelf, in order.
     pub names: Vec<String>,
     /// The one being edited, when it is still there.
@@ -123,7 +123,7 @@ pub struct ProfilesView {
 }
 
 /// The shelf, and what the character carries judged by `chosen`.
-pub fn view(c: &Client, chosen: &str) -> ProfilesView {
+pub(crate) fn view(c: &Client, chosen: &str) -> ProfilesView {
     let library = &c.profiles;
     let dir = dir_of(library);
     let profile = library.get(chosen).map(|p| (*p).clone());
@@ -165,7 +165,7 @@ fn judge_carried(c: &Client, p: &Profile, me: &Wielder, who: &str) -> Vec<Trial>
 }
 
 /// A verdict in words, and the colour it is said in.
-pub fn verdict_words(v: &Verdict) -> (String, egui::Color32) {
+pub(crate) fn verdict_words(v: &Verdict) -> (String, egui::Color32) {
     match v {
         Verdict::Decided(action, rule) => {
             let colour = match action {
@@ -183,7 +183,7 @@ pub fn verdict_words(v: &Verdict) -> (String, egui::Color32) {
 /// The regular expression a condition carries, when it has one that
 /// will not compile. Said in the editor rather than found out on a
 /// corpse, where a pattern with a typo in it quietly matches nothing.
-pub fn ask_pattern_error(ask: &Ask) -> Option<String> {
+pub(crate) fn ask_pattern_error(ask: &Ask) -> Option<String> {
     match ask {
         Ask::Text { op, value, .. } | Ask::Spell { op, value } if op.is_regex() => {
             profile::pattern_error(value)
@@ -193,7 +193,7 @@ pub fn ask_pattern_error(ask: &Ask) -> Option<String> {
 }
 
 /// A name no profile on the shelf has: `Rares`, then `Rares 2`.
-pub fn unused_name(names: &[String], want: &str) -> String {
+pub(crate) fn unused_name(names: &[String], want: &str) -> String {
     let want = want.trim();
     let want = if want.is_empty() { "profile" } else { want };
     let taken = |n: &str| names.iter().any(|x| x.eq_ignore_ascii_case(n));
@@ -207,7 +207,7 @@ pub fn unused_name(names: &[String], want: &str) -> String {
 }
 
 /// Move entry `i` of a list one step up or down. True when it moved.
-pub fn move_entry<T>(list: &mut [T], i: usize, up: bool) -> bool {
+pub(crate) fn move_entry<T>(list: &mut [T], i: usize, up: bool) -> bool {
     let Some(j) = (if up { i.checked_sub(1) } else { Some(i + 1) }) else {
         return false;
     };
@@ -220,7 +220,7 @@ pub fn move_entry<T>(list: &mut [T], i: usize, up: bool) -> bool {
 
 /// Every word `ItemStats::kind` can hold, for the kind dropdown: the
 /// inventory's own chips flattened, so the two lists cannot drift.
-pub fn item_kinds() -> Vec<&'static str> {
+pub(crate) fn item_kinds() -> Vec<&'static str> {
     let mut kinds: Vec<&'static str> = super::inventory::KINDS
         .iter()
         .flat_map(|(_, words)| words.iter().copied())
@@ -233,7 +233,7 @@ pub fn item_kinds() -> Vec<&'static str> {
 /// The places a rule can name, one per slot: the search language lists
 /// a few of them twice ("ring" and "finger" are the same place) and a
 /// dropdown wants each place once.
-pub fn slots() -> Vec<(&'static str, u32)> {
+pub(crate) fn slots() -> Vec<(&'static str, u32)> {
     let mut out: Vec<(&'static str, u32)> = Vec::new();
     for (word, mask) in ac_client::items::SLOTS {
         if !out.iter().any(|(_, m)| *m == mask) {
@@ -250,7 +250,7 @@ pub fn slots() -> Vec<(&'static str, u32)> {
 /// choice to the compiler and nine to a player; splitting it here is
 /// what lets each sort of question show only the fields it has.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AskKind {
+pub(crate) enum AskKind {
     Name,
     Kind,
     Material,
@@ -271,7 +271,7 @@ pub enum AskKind {
 }
 
 impl AskKind {
-    pub const ALL: [AskKind; 15] = [
+    pub(crate) const ALL: [AskKind; 15] = [
         AskKind::Name,
         AskKind::Kind,
         AskKind::Material,
@@ -289,7 +289,7 @@ impl AskKind {
         AskKind::Search,
     ];
 
-    pub fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> &'static str {
         match self {
             AskKind::Name => "item name",
             AskKind::Kind => "item kind",
@@ -309,7 +309,7 @@ impl AskKind {
         }
     }
 
-    pub fn help(self) -> &'static str {
+    pub(crate) fn help(self) -> &'static str {
         match self {
             AskKind::Name => "The item's name has this as a whole word: \"pea\" is not in Spear",
             AskKind::Kind => "What the item is: armour, a gem, a weapon",
@@ -335,7 +335,7 @@ impl AskKind {
     }
 
     /// Which sort of question this condition is.
-    pub fn of(ask: &Ask) -> AskKind {
+    pub(crate) fn of(ask: &Ask) -> AskKind {
         match ask {
             Ask::Item(Term::Word(_)) => AskKind::Name,
             Ask::Item(Term::Kind(_)) => AskKind::Kind,
@@ -358,7 +358,7 @@ impl AskKind {
     /// A blank condition of this sort, for the row that has just been
     /// added or had its sort changed. The defaults are the common case:
     /// value at least a thousand, level at least one.
-    pub fn blank(self) -> Ask {
+    pub(crate) fn blank(self) -> Ask {
         match self {
             AskKind::Name => Ask::Item(Term::Word(String::new())),
             AskKind::Kind => Ask::Item(Term::Kind("armor".into())),
@@ -398,7 +398,7 @@ impl AskKind {
 /// being typed, the search line inside each property picker, and what
 /// went wrong with the last write.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Editor {
+pub(crate) struct Editor {
     /// The rule whose conditions are shown, by position in the list.
     pub open_rule: Option<usize>,
     /// The name being typed for a new profile, while "New" waits for one.
@@ -424,7 +424,7 @@ impl Editor {
 /// What the panel asked for. Everything that changes a profile goes
 /// through the library, so it reaches every character at once.
 #[derive(Default, Debug, PartialEq)]
-pub struct Actions {
+pub(crate) struct Actions {
     /// Profiles to write, in order.
     pub put: Vec<Profile>,
     /// The profile to have open after this frame.
@@ -1276,7 +1276,7 @@ fn rules(ui: &mut egui::Ui, p: &mut Profile, editor: &mut Editor) {
 
 /// The panel. Returns what was asked for; every edit to the profile
 /// open comes back as a `put`, so nothing waits on an Apply button.
-pub fn draw(egui: &egui::Context, v: &ProfilesView, editor: &mut Editor) -> Actions {
+pub(crate) fn draw(egui: &egui::Context, v: &ProfilesView, editor: &mut Editor) -> Actions {
     let mut a = Actions::default();
     let mut edited = v.profile.clone();
     let size = egui::vec2(640.0, 580.0);
@@ -1465,7 +1465,7 @@ fn reveal(dir: &std::path::Path) -> std::io::Result<()> {
 }
 
 #[derive(Default)]
-pub struct LootProfiles {
+pub(crate) struct LootProfiles {
     source: Source<ProfilesView>,
     /// Open (bindable from the menu). Starts closed.
     pub show: bool,
@@ -1478,7 +1478,7 @@ impl LootProfiles {
     /// A shelf with one profile on it, filled in enough to show what
     /// the panel is for: a cheap rule that decides without an
     /// appraisal, and one that cannot.
-    pub fn demo() -> Self {
+    pub(crate) fn demo() -> Self {
         let profile = Profile {
             name: "Rares and rings".into(),
             note: "what the party takes on a drudge run".into(),

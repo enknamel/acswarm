@@ -38,21 +38,21 @@ use ac_client::holdings::{
 use ac_client::items::{ItemStats, Query};
 
 /// A changed inventory is published at most this often.
-pub const PUBLISH_EVERY: Duration = Duration::from_secs(2);
+pub(crate) const PUBLISH_EVERY: Duration = Duration::from_secs(2);
 /// An unchanged one is said again this often, so the snapshot's
 /// `taken_at` says the session lives (see `holdings::ONLINE_FOR`).
-pub const HEARTBEAT: Duration = Duration::from_secs(30);
+pub(crate) const HEARTBEAT: Duration = Duration::from_secs(30);
 /// How often the bus values are looked through for new snapshots.
-pub const MERGE_EVERY: Duration = Duration::from_millis(500);
+pub(crate) const MERGE_EVERY: Duration = Duration::from_millis(500);
 /// Refresh, and answering a `holdings.request`, at most this often.
-pub const REFRESH_EVERY: Duration = Duration::from_secs(10);
+pub(crate) const REFRESH_EVERY: Duration = Duration::from_secs(10);
 
 /// The window's action id (its key and open requests) and window name.
-pub const ID: &str = "holdings";
+pub(crate) const ID: &str = "holdings";
 
 /// The columns, in order; each sorts the table.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum Column {
+pub(crate) enum Column {
     Character,
     Account,
     #[default]
@@ -66,7 +66,7 @@ pub enum Column {
 }
 
 impl Column {
-    pub const ALL: [Column; 8] = [
+    pub(crate) const ALL: [Column; 8] = [
         Column::Character,
         Column::Account,
         Column::Item,
@@ -77,7 +77,7 @@ impl Column {
         Column::Updated,
     ];
 
-    pub fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> &'static str {
         match self {
             Column::Character => "Character",
             Column::Account => "Account",
@@ -130,7 +130,7 @@ impl Column {
 }
 
 /// Sort hits by a column; ties by character, then item name.
-pub fn sort_hits(hits: &mut [Hit], by: Column, descending: bool) {
+pub(crate) fn sort_hits(hits: &mut [Hit], by: Column, descending: bool) {
     hits.sort_by(|a, b| {
         let o = by.cmp(a, b);
         let o = if descending { o.reverse() } else { o };
@@ -140,7 +140,7 @@ pub fn sort_hits(hits: &mut [Hit], by: Column, descending: bool) {
 }
 
 /// `taken_at` as "online", "just now", "5m ago", "2d ago".
-pub fn ago(online: bool, taken_at: u64, now: u64) -> String {
+pub(crate) fn ago(online: bool, taken_at: u64, now: u64) -> String {
     if online {
         return "online".into();
     }
@@ -157,7 +157,7 @@ pub fn ago(online: bool, taken_at: u64, now: u64) -> String {
 }
 
 /// The search language, for the help popover.
-pub const HELP: &[(&str, &str)] = &[
+pub(crate) const HELP: &[(&str, &str)] = &[
     (
         "words",
         "match the name, material, kind, a spell or a slot; \"epic life magic\" in quotes is one phrase",
@@ -184,7 +184,7 @@ pub const HELP: &[(&str, &str)] = &[
 /// The panel's own state; the search is not kept across restarts.
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
-pub struct State {
+pub(crate) struct State {
     #[serde(skip)]
     pub search: String,
     pub sort: Column,
@@ -196,7 +196,7 @@ pub struct State {
 
 /// What the window draws.
 #[derive(Debug, Clone, Default, PartialEq)]
-pub struct HoldingsView {
+pub(crate) struct HoldingsView {
     pub rows: Vec<Hit>,
     pub characters: usize,
     pub items: usize,
@@ -219,7 +219,7 @@ pub struct HoldingsView {
 /// `server` is the world the looking character is logged in to, and
 /// nothing from another world is shown: there is no way to move an item
 /// between worlds, so a row from one would be a fact nobody can act on.
-pub fn view(
+pub(crate) fn view(
     store: &HoldingsStore,
     server: &str,
     st: &State,
@@ -252,7 +252,7 @@ pub fn view(
 
 /// What the player did in the window this frame.
 #[derive(Debug, Default, PartialEq)]
-pub struct Actions {
+pub(crate) struct Actions {
     pub refresh: bool,
     /// A column header was clicked.
     pub sort: Option<Column>,
@@ -419,7 +419,7 @@ fn detail(ui: &mut egui::Ui, hit: &Hit) {
 }
 
 /// Draw the window.
-pub fn draw(egui: &egui::Context, v: &HoldingsView, st: &mut State) -> Actions {
+pub(crate) fn draw(egui: &egui::Context, v: &HoldingsView, st: &mut State) -> Actions {
     let mut a = Actions::default();
     let w = egui.viewport_rect().width();
     let h = egui.viewport_rect().height();
@@ -565,7 +565,7 @@ struct Published {
 
 /// The plugin: publisher for this process's sessions, reader of the bus,
 /// and the window.
-pub struct Holdings {
+pub(crate) struct Holdings {
     source: Source<HoldingsStore>,
     pub show: bool,
     pub state: State,
@@ -610,7 +610,7 @@ impl Default for Holdings {
 
 impl Holdings {
     /// Three sample characters on two accounts, one of them offline.
-    pub fn demo() -> Self {
+    pub(crate) fn demo() -> Self {
         let now = unix_now();
         let record = |guid: u32, stats: ItemStats| {
             let mut s = stats;
@@ -752,7 +752,8 @@ impl Holdings {
     }
 
     /// A plugin whose snapshot files live under `dir` (tests).
-    pub fn with_dir(dir: std::path::PathBuf) -> Self {
+    #[allow(dead_code)] // only the tests in this file call it
+    pub(crate) fn with_dir(dir: std::path::PathBuf) -> Self {
         Holdings {
             dir: Some(dir),
             ..Default::default()

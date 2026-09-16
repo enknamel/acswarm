@@ -39,11 +39,11 @@ use ac_vendor::{Act, Snapshot};
 
 use crate::{Ctx, Plugin, Settings};
 
-pub const OPEN_KEY: &str = "vendoring.open";
+pub(crate) const OPEN_KEY: &str = "vendoring.open";
 
 /// What the panel draws, read fresh from the character each frame.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct VendorView {
+pub(crate) struct VendorView {
     pub counter: Option<String>,
     /// How far the character is standing from it.
     pub away: f32,
@@ -146,7 +146,7 @@ struct Hand {
 }
 
 #[derive(Default)]
-pub struct Vendoring {
+pub(crate) struct Vendoring {
     show: bool,
     /// One hand per session, by index: the host ticks every session
     /// through this one panel, and one drive for all of them let any
@@ -161,7 +161,7 @@ impl Vendoring {
     /// A character halfway through a trip: low on room, a fortune in
     /// coin waiting to become notes, and two things it will not part
     /// with.
-    pub fn demo() -> Self {
+    pub(crate) fn demo() -> Self {
         Vendoring {
             show: false,
             hands: BTreeMap::new(),

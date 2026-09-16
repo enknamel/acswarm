@@ -8,7 +8,7 @@ use crate::panels::{caption, frame, title};
 use crate::servers::{Server, Servers};
 
 /// What the connect screen asks the host to do this frame.
-pub enum ConnectAction {
+pub(crate) enum ConnectAction {
     /// Connect to `host` (an `address:port`) with these credentials.
     Connect {
         host: String,
@@ -33,7 +33,7 @@ pub enum ConnectAction {
 
 /// The connect form's state (what is typed, and the add-server sub-form).
 #[derive(Default)]
-pub struct ConnectState {
+pub(crate) struct ConnectState {
     /// The chosen server as `host:port`.
     pub host: String,
     pub account: String,
@@ -51,7 +51,7 @@ pub struct ConnectState {
 impl ConnectState {
     /// Fill the form from what was used last: the last server and account,
     /// with its remembered password.
-    pub fn from_servers(s: &Servers) -> Self {
+    pub(crate) fn from_servers(s: &Servers) -> Self {
         let all = s.all();
         let host = if !s.last_host.is_empty() {
             s.last_host.clone()
@@ -95,7 +95,11 @@ impl ConnectState {
     }
 }
 
-pub fn draw(egui: &egui::Context, servers: &Servers, st: &mut ConnectState) -> Vec<ConnectAction> {
+pub(crate) fn draw(
+    egui: &egui::Context,
+    servers: &Servers,
+    st: &mut ConnectState,
+) -> Vec<ConnectAction> {
     let mut actions = Vec::new();
     let all = servers.all();
     egui::Window::new("connect")

@@ -7,7 +7,7 @@ use super::{caption, title_bar, window, Source};
 use crate::{egui, Client, Ctx, Plugin, Settings};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SocialView {
+pub(crate) struct SocialView {
     /// (id, name) of every earned title, and the shown one's id.
     pub titles: Vec<(u32, String)>,
     pub current_title: u32,
@@ -20,7 +20,7 @@ pub struct SocialView {
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
-pub struct Actions {
+pub(crate) struct Actions {
     pub set_title: Option<u32>,
     pub add_friend: Option<String>,
     pub remove_friend: Option<u32>,
@@ -29,7 +29,7 @@ pub struct Actions {
 }
 
 /// Words for a squelch mask.
-pub fn mask_text(mask: u32) -> String {
+pub(crate) fn mask_text(mask: u32) -> String {
     if mask == 0xFFFF_FFFF {
         return "everything".into();
     }
@@ -63,7 +63,7 @@ pub fn mask_text(mask: u32) -> String {
 
 /// "ID_CharacterTitle_Bearer_of_Darkness" -> "Bearer of Darkness";
 /// "AbhorrentWarrior" -> "Abhorrent Warrior".
-pub fn title_words(name: &str) -> String {
+pub(crate) fn title_words(name: &str) -> String {
     let name = name.strip_prefix("ID_CharacterTitle_").unwrap_or(name);
     if name.contains('_') {
         return name.replace('_', " ");
@@ -78,7 +78,7 @@ pub fn title_words(name: &str) -> String {
     out
 }
 
-pub fn view(c: &Client) -> SocialView {
+pub(crate) fn view(c: &Client) -> SocialView {
     let me = c.world.player_guid;
     let names = c.assets.character_titles().ok();
     let titles = c
@@ -127,7 +127,7 @@ pub fn view(c: &Client) -> SocialView {
     }
 }
 
-pub fn draw(egui: &egui::Context, v: &SocialView, name_box: &mut String) -> Actions {
+pub(crate) fn draw(egui: &egui::Context, v: &SocialView, name_box: &mut String) -> Actions {
     let mut actions = Actions::default();
     let w = egui.viewport_rect().width();
     window(
@@ -228,7 +228,7 @@ pub fn draw(egui: &egui::Context, v: &SocialView, name_box: &mut String) -> Acti
     actions
 }
 
-pub struct Social {
+pub(crate) struct Social {
     source: Source<SocialView>,
     pub show: bool,
     name_box: String,
@@ -245,7 +245,7 @@ impl Default for Social {
 }
 
 impl Social {
-    pub fn demo() -> Self {
+    pub(crate) fn demo() -> Self {
         Social {
             source: Source::Demo(SocialView {
                 titles: vec![(1, "Adventurer".into()), (2, "Archer".into())],

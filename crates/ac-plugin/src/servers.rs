@@ -1,8 +1,8 @@
 //! Public Asheron's Call server list, and the player's own additions.
 //!
-//! [`builtin`] is a snapshot of the community list (ACEmulator servers,
+//! `builtin` is a snapshot of the community list (ACEmulator servers,
 //! from `github.com/acresources/serverslist`), Coldeve first as the
-//! largest. The player can add their own with [`Servers::add`]; those and
+//! largest. The player can add their own with `Servers::add`; those and
 //! the remembered logins live in the settings so they come back next
 //! launch.
 
@@ -12,10 +12,10 @@ use crate::Settings;
 
 /// One server the client can connect to.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Server {
-    pub name: String,
-    pub host: String,
-    pub port: u16,
+pub(crate) struct Server {
+    pub(crate) name: String,
+    pub(crate) host: String,
+    pub(crate) port: u16,
 }
 
 impl Server {
@@ -23,20 +23,20 @@ impl Server {
     /// than a `Server` because the table is a `const` and a `String`
     /// cannot be built in one; [`From`] turns it into a `Server`.
     #[allow(clippy::new_ret_no_self)]
-    pub const fn new(name: &'static str, host: &'static str, port: u16) -> ServerLit {
+    pub(crate) const fn new(name: &'static str, host: &'static str, port: u16) -> ServerLit {
         ServerLit { name, host, port }
     }
     /// `host:port`, what the client connects with.
-    pub fn address(&self) -> String {
+    pub(crate) fn address(&self) -> String {
         format!("{}:{}", self.host, self.port)
     }
 }
 
 /// A `const`-friendly server literal (the builtin table is `&'static`).
-pub struct ServerLit {
-    pub name: &'static str,
-    pub host: &'static str,
-    pub port: u16,
+pub(crate) struct ServerLit {
+    pub(crate) name: &'static str,
+    pub(crate) host: &'static str,
+    pub(crate) port: u16,
 }
 
 impl From<&ServerLit> for Server {
@@ -50,7 +50,7 @@ impl From<&ServerLit> for Server {
 }
 
 /// The bundled public servers, Coldeve first.
-pub fn builtin() -> Vec<Server> {
+pub(crate) fn builtin() -> Vec<Server> {
     BUILTIN.iter().map(Server::from).collect()
 }
 
@@ -80,10 +80,10 @@ pub struct Login {
 /// The player's own servers and remembered logins, kept in the settings.
 #[derive(Clone, Debug, Default)]
 pub struct Servers {
-    pub custom: Vec<Server>,
-    pub logins: Vec<Login>,
-    pub last_host: String,
-    pub last_account: String,
+    pub(crate) custom: Vec<Server>,
+    pub(crate) logins: Vec<Login>,
+    pub(crate) last_host: String,
+    pub(crate) last_account: String,
 }
 
 /// Seconds since the epoch, or 0 if the clock is before it.
@@ -102,7 +102,7 @@ const LAST_ACCOUNT_KEY: &str = "servers.last_account";
 
 impl Servers {
     /// Read the player's servers and logins from the settings.
-    pub fn load(settings: &Settings) -> Self {
+    pub(crate) fn load(settings: &Settings) -> Self {
         let mut s = Servers {
             custom: settings.get(CUSTOM_KEY).unwrap_or_default(),
             logins: settings.get(LOGINS_KEY).unwrap_or_default(),
@@ -132,7 +132,7 @@ impl Servers {
     }
 
     /// Write them back.
-    pub fn save(&self, settings: &mut Settings) {
+    pub(crate) fn save(&self, settings: &mut Settings) {
         settings.set(CUSTOM_KEY, &self.custom);
         settings.set(LOGINS_KEY, &self.logins);
         settings.set(LAST_HOST_KEY, &self.last_host);
@@ -141,7 +141,7 @@ impl Servers {
 
     /// Every server to choose from: the builtin list, then the player's,
     /// with duplicates (same host:port) dropped.
-    pub fn all(&self) -> Vec<Server> {
+    pub(crate) fn all(&self) -> Vec<Server> {
         let mut out = builtin();
         for s in &self.custom {
             if !out.iter().any(|o| o.host == s.host && o.port == s.port) {
@@ -152,7 +152,7 @@ impl Servers {
     }
 
     /// Add (or update the name of) one of the player's servers.
-    pub fn add(&mut self, server: Server) {
+    pub(crate) fn add(&mut self, server: Server) {
         if let Some(existing) = self
             .custom
             .iter_mut()
@@ -174,7 +174,7 @@ impl Servers {
     /// filled in when the server is chosen. Logins saved before this
     /// was recorded all have the same stamp, so the account name breaks
     /// the tie and the list at least stays put between runs.
-    pub fn accounts_for(&self, host: &str) -> Vec<&Login> {
+    pub(crate) fn accounts_for(&self, host: &str) -> Vec<&Login> {
         let mut out: Vec<&Login> = self.logins.iter().filter(|l| l.host == host).collect();
         out.sort_by(|a, b| b.used.cmp(&a.used).then_with(|| a.account.cmp(&b.account)));
         out
@@ -182,13 +182,13 @@ impl Servers {
 
     /// The account to fill in for a server: whichever was last used on
     /// *that* server. `None` when none has been saved for it.
-    pub fn last_login(&self, host: &str) -> Option<&Login> {
+    pub(crate) fn last_login(&self, host: &str) -> Option<&Login> {
         self.accounts_for(host).into_iter().next()
     }
 
     /// Remember a login (or update its password/character). An empty
     /// password clears a stored one.
-    pub fn remember(&mut self, host: &str, account: &str, password: &str, character: &str) {
+    pub(crate) fn remember(&mut self, host: &str, account: &str, password: &str, character: &str) {
         self.last_host = host.to_string();
         self.last_account = account.to_string();
         let now = now_secs();
@@ -220,7 +220,7 @@ impl Servers {
     /// character deleted on the server should not linger in a menu. If
     /// the account is not one that was saved, nothing is recorded --
     /// the player did not ask to remember it.
-    pub fn note_characters(&mut self, host: &str, account: &str, names: &[String]) {
+    pub(crate) fn note_characters(&mut self, host: &str, account: &str, names: &[String]) {
         if let Some(l) = self
             .logins
             .iter_mut()
@@ -236,7 +236,7 @@ impl Servers {
 
     /// Remember which character an account enters with. Empty means
     /// stop at the character list and choose by hand.
-    pub fn set_character(&mut self, host: &str, account: &str, character: &str) {
+    pub(crate) fn set_character(&mut self, host: &str, account: &str, character: &str) {
         if let Some(l) = self
             .logins
             .iter_mut()
@@ -247,7 +247,7 @@ impl Servers {
     }
 
     /// Forget a remembered login.
-    pub fn forget(&mut self, host: &str, account: &str) {
+    pub(crate) fn forget(&mut self, host: &str, account: &str) {
         self.logins
             .retain(|l| !(l.host == host && l.account.eq_ignore_ascii_case(account)));
     }

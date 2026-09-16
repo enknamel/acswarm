@@ -1,11 +1,11 @@
 //! Where the player's servers and remembered logins live on disk: one
 //! JSON file in the config directory, read and written by both the
-//! connect screen ([`super::connect`]) and the fleet panel
+//! connect screen (`super::connect`) and the fleet panel
 //! ([`crate::panels::fleet`]) so the two offer the same accounts.
 //!
 //! Two screens change the same file, so a change is made as a
-//! read-modify-write ([`update_at`]): whatever the other one wrote in
-//! the meantime is kept. [`changed_at`] tells a screen that is already
+//! read-modify-write (`update_at`): whatever the other one wrote in
+//! the meantime is kept. `changed_at` tells a screen that is already
 //! open that the file moved under it.
 
 use std::path::{Path, PathBuf};
@@ -17,7 +17,7 @@ use crate::servers::Servers;
 use crate::Settings;
 
 /// The file's name inside [`Settings::config_dir`].
-pub const FILE_NAME: &str = "servers.json";
+pub(crate) const FILE_NAME: &str = "servers.json";
 
 /// Where the servers and remembered logins are kept. Under `cargo test`
 /// it is a scratch file of the test process's own: a test must never
@@ -32,7 +32,7 @@ pub fn path() -> PathBuf {
 }
 
 /// Read them from `path`; a missing or unreadable file is an empty store.
-pub fn load_at(path: &Path) -> Servers {
+pub(crate) fn load_at(path: &Path) -> Servers {
     Servers::load(&Settings::load(path))
 }
 
@@ -55,7 +55,7 @@ pub fn save_at(path: &Path, servers: &Servers) -> std::io::Result<()> {
 /// back the result: a change made here does not lose one another screen
 /// made since. A failed write is logged and the edited value returned,
 /// so the caller still shows what was asked for.
-pub fn update_at(path: &Path, edit: impl FnOnce(&mut Servers)) -> Servers {
+pub(crate) fn update_at(path: &Path, edit: impl FnOnce(&mut Servers)) -> Servers {
     let mut s = load_at(path);
     edit(&mut s);
     if let Err(e) = save_at(path, &s) {
@@ -66,7 +66,7 @@ pub fn update_at(path: &Path, edit: impl FnOnce(&mut Servers)) -> Servers {
 
 /// When the file was last written, or `None` when there is none: an
 /// open screen re-reads once this changes.
-pub fn changed_at(path: &Path) -> Option<SystemTime> {
+pub(crate) fn changed_at(path: &Path) -> Option<SystemTime> {
     std::fs::metadata(path).ok()?.modified().ok()
 }
 

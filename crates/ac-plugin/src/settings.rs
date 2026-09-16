@@ -14,7 +14,7 @@ use serde::Serialize;
 use serde_json::{Map, Value};
 
 /// The settings file's name inside the config directory.
-pub const FILE_NAME: &str = "ui.json";
+pub(crate) const FILE_NAME: &str = "ui.json";
 
 /// A typed view over a JSON object, with a dirty flag so the host writes
 /// the file only when something changed.

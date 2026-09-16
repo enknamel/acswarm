@@ -26,7 +26,7 @@ struct Actions {
 }
 
 #[derive(Default)]
-pub struct Menu {
+pub(crate) struct Menu {
     pub show: bool,
     /// The action whose key is being chosen: the next key pressed is it.
     listening: Option<&'static str>,
@@ -37,7 +37,7 @@ pub struct Menu {
 }
 
 impl Menu {
-    pub fn demo() -> Self {
+    pub(crate) fn demo() -> Self {
         Menu {
             show: true,
             ..Default::default()

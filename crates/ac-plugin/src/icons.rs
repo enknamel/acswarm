@@ -6,21 +6,21 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-pub use ac_formats::texture::Rgba;
+pub(crate) use ac_formats::texture::Rgba;
 
 /// Decodes a RenderSurface id to RGBA. Installed by the host so this crate
 /// stays free of DAT code; shared between every cache in the process.
 pub type IconLoader = Rc<dyn Fn(u32) -> Option<Rgba>>;
 
 /// Side of a drawn icon in points.
-pub const ICON_SIZE: f32 = 24.0;
+pub(crate) const ICON_SIZE: f32 = 24.0;
 
 /// The layers of an object's icon, bottom to top; 0 = layer absent.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct IconLayers {
-    pub underlay: u32,
-    pub icon: u32,
-    pub overlay: u32,
+    pub(crate) underlay: u32,
+    pub(crate) icon: u32,
+    pub(crate) overlay: u32,
 }
 
 impl IconLayers {
@@ -63,13 +63,14 @@ impl IconCache {
         self.textures.clear();
     }
 
-    pub fn has_loader(&self) -> bool {
+    #[allow(dead_code)] // only the tests in this file call it
+    pub(crate) fn has_loader(&self) -> bool {
         self.loader.is_some()
     }
 
     /// The texture for an icon id, uploading it on first use. `None` when
     /// the id is 0, no loader is installed, or the surface did not decode.
-    pub fn texture(&mut self, ctx: &egui::Context, id: u32) -> Option<egui::TextureId> {
+    pub(crate) fn texture(&mut self, ctx: &egui::Context, id: u32) -> Option<egui::TextureId> {
         if id == 0 {
             return None;
         }
@@ -90,7 +91,7 @@ impl IconCache {
         self.textures.get(&id)?.as_ref().map(|h| h.id())
     }
 
-    /// Allocate an [`ICON_SIZE`] square and paint the layers into it.
+    /// Allocate an `ICON_SIZE` square and paint the layers into it.
     pub fn draw(
         &mut self,
         ui: &mut egui::Ui,

@@ -9,7 +9,7 @@ use super::{caption, title, title_bar, window, Source};
 use crate::{egui, Client, Ctx, Plugin, Settings};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PaymentRow {
+pub(crate) struct PaymentRow {
     pub name: String,
     pub needed: u32,
     pub paid: u32,
@@ -18,7 +18,7 @@ pub struct PaymentRow {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct OwnHouse {
+pub(crate) struct OwnHouse {
     pub kind: String,
     pub cell: u32,
     pub rent_paid: bool,
@@ -31,7 +31,7 @@ pub struct OwnHouse {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SignView {
+pub(crate) struct SignView {
     pub kind: String,
     pub owner_name: String,
     pub for_sale: bool,
@@ -45,7 +45,7 @@ pub struct SignView {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct HousingView {
+pub(crate) struct HousingView {
     /// None until the server answered the house query.
     pub loaded: bool,
     pub house: Option<OwnHouse>,
@@ -53,7 +53,7 @@ pub struct HousingView {
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
-pub struct Actions {
+pub(crate) struct Actions {
     pub recall: bool,
     pub buy: bool,
     pub rent: bool,
@@ -84,7 +84,7 @@ fn rows(c: &Client, list: &[ac_world::housing::Payment]) -> Vec<PaymentRow> {
         .collect()
 }
 
-pub fn view(c: &Client) -> HousingView {
+pub(crate) fn view(c: &Client) -> HousingView {
     let house = match c.world.house.as_ref() {
         Some(Some(h)) => {
             let access = c.world.house_access.as_ref();
@@ -130,7 +130,7 @@ pub fn view(c: &Client) -> HousingView {
 }
 
 /// "Pyreal 10,000 / 10,000 (have 25,000)".
-pub fn payment_text(p: &PaymentRow) -> String {
+pub(crate) fn payment_text(p: &PaymentRow) -> String {
     format!(
         "{} {} / {} (have {})",
         p.name,
@@ -141,7 +141,7 @@ pub fn payment_text(p: &PaymentRow) -> String {
 }
 
 /// Thousands separators.
-pub fn group(n: u32) -> String {
+pub(crate) fn group(n: u32) -> String {
     let s = n.to_string();
     let mut out = String::new();
     for (i, ch) in s.chars().enumerate() {
@@ -167,7 +167,7 @@ fn payment_list(ui: &mut egui::Ui, header: &str, list: &[PaymentRow]) {
     }
 }
 
-pub fn draw(egui: &egui::Context, v: &HousingView, guest_name: &mut String) -> Actions {
+pub(crate) fn draw(egui: &egui::Context, v: &HousingView, guest_name: &mut String) -> Actions {
     let mut actions = Actions::default();
     let w = egui.viewport_rect().width();
     window(
@@ -321,7 +321,7 @@ pub fn draw(egui: &egui::Context, v: &HousingView, guest_name: &mut String) -> A
     actions
 }
 
-pub struct Housing {
+pub(crate) struct Housing {
     source: Source<HousingView>,
     pub show: bool,
     guest_name: String,
@@ -341,7 +341,7 @@ impl Default for Housing {
 }
 
 impl Housing {
-    pub fn demo() -> Self {
+    pub(crate) fn demo() -> Self {
         let pay = |name: &str, needed, paid, have| PaymentRow {
             name: name.into(),
             needed,

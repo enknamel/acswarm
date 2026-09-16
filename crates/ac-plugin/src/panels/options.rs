@@ -9,30 +9,30 @@ use ac_client::options::{CharacterOption, OPTIONS};
 use ac_client::player::MovementRules;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct OptionsView {
+pub(crate) struct OptionsView {
     /// The log filter in force, as a `tracing` line.
-    pub log_filter: String,
+    pub(crate) log_filter: String,
     /// (option, enabled) in panel order.
-    pub rows: Vec<(CharacterOption, bool)>,
+    pub(crate) rows: Vec<(CharacterOption, bool)>,
     /// The client-side run speed multiplier, times 100 (so the view can
     /// stay `Eq`).
-    pub speed_boost_pct: u32,
+    pub(crate) speed_boost_pct: u32,
     /// The height of a full jump, in centimetres.
-    pub jump_height_cm: u32,
+    pub(crate) jump_height_cm: u32,
     /// How far from the camera objects are drawn, metres (0 = no limit).
     /// The viewer's, not the client's: see [`DRAW_DISTANCE_KEY`].
-    pub draw_distance_m: u32,
+    pub(crate) draw_distance_m: u32,
     /// Which movement rules the character is held to.
-    pub movement_rules: MovementRules,
+    pub(crate) movement_rules: MovementRules,
     /// What that comes to on the server we are connected to: true when
     /// the run boost, the jump height and flying are all held back.
-    pub server_safe: bool,
+    pub(crate) server_safe: bool,
     /// Flying was asked for and refused, for the panel to say so.
-    pub noclip_refused: bool,
+    pub(crate) noclip_refused: bool,
 }
 
 /// Settings key the movement rules are kept under.
-pub const MOVEMENT_RULES_KEY: &str = "options.movement_rules";
+pub(crate) const MOVEMENT_RULES_KEY: &str = "options.movement_rules";
 
 /// Blackboard key the draw distance is published on, metres as a number
 /// (0 = no limit); the viewer reads it each frame.
@@ -40,7 +40,7 @@ pub const DRAW_DISTANCE_KEY: &str = "render.draw_distance";
 /// Which log lines reach the terminal, as a `tracing` filter line.
 pub const LOG_FILTER_KEY: &str = "log.filter";
 
-pub fn view(c: &Client) -> OptionsView {
+pub(crate) fn view(c: &Client) -> OptionsView {
     OptionsView {
         log_filter: String::new(),
         rows: OPTIONS.iter().map(|o| (*o, c.option_enabled(o))).collect(),
@@ -55,20 +55,20 @@ pub fn view(c: &Client) -> OptionsView {
 
 /// What the panel changed this frame.
 #[derive(Default)]
-pub struct Changes {
-    pub options: Vec<(CharacterOption, bool)>,
+pub(crate) struct Changes {
+    pub(crate) options: Vec<(CharacterOption, bool)>,
     /// A new run speed multiplier.
-    pub speed_boost: Option<f32>,
+    pub(crate) speed_boost: Option<f32>,
     /// A new full-jump height, metres.
-    pub jump_height: Option<f32>,
+    pub(crate) jump_height: Option<f32>,
     /// A new draw distance, metres (0 = no limit).
-    pub draw_distance: Option<f32>,
+    pub(crate) draw_distance: Option<f32>,
     /// A new movement rules setting.
-    pub movement_rules: Option<MovementRules>,
+    pub(crate) movement_rules: Option<MovementRules>,
     /// The player clicked "Change…" to re-pick the game data folder.
-    pub pick_data_dir: bool,
+    pub(crate) pick_data_dir: bool,
     /// A new log filter line, for the host to apply and remember.
-    pub log_filter: Option<String>,
+    pub(crate) log_filter: Option<String>,
 }
 
 /// The remembered game data folder, for the Options panel to show.
@@ -82,7 +82,7 @@ fn saved_data_dir() -> String {
 
 /// Returns the options toggled this frame with their new value. The
 /// layout reset is applied here directly: it only touches egui's memory.
-pub fn draw(egui: &egui::Context, v: &OptionsView) -> Changes {
+pub(crate) fn draw(egui: &egui::Context, v: &OptionsView) -> Changes {
     let mut changed = Changes::default();
     let mut reset_layout = false;
     let w = egui.viewport_rect().width();
@@ -289,9 +289,9 @@ pub fn draw(egui: &egui::Context, v: &OptionsView) -> Changes {
 }
 
 #[derive(Default)]
-pub struct Options {
+pub(crate) struct Options {
     source: Source<OptionsView>,
-    pub show: bool,
+    pub(crate) show: bool,
     /// The run speed multiplier chosen here, kept between sessions and
     /// given to each client as it appears.
     speed_boost: Option<f32>,
@@ -315,7 +315,7 @@ pub struct Options {
 }
 
 impl Options {
-    pub fn demo() -> Self {
+    pub(crate) fn demo() -> Self {
         Options {
             log_filter: crate::logging::DEFAULT.to_string(),
             source: Source::Demo(OptionsView {

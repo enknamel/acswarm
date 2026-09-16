@@ -24,21 +24,21 @@ pub const OPEN_KEY: &str = "panels.spellbook_open";
 
 /// The spellbook filter bits as the server stores them (SpellbookFilter
 /// 0x0286): a set bit shows that school or level.
-pub mod filter {
+pub(crate) mod filter {
     use ac_formats::spell_table::school;
 
-    pub const CREATURE: u32 = 0x1;
-    pub const ITEM: u32 = 0x2;
-    pub const LIFE: u32 = 0x4;
-    pub const WAR: u32 = 0x8;
-    pub const VOID: u32 = 0x2000;
+    pub(crate) const CREATURE: u32 = 0x1;
+    pub(crate) const ITEM: u32 = 0x2;
+    pub(crate) const LIFE: u32 = 0x4;
+    pub(crate) const WAR: u32 = 0x8;
+    pub(crate) const VOID: u32 = 0x2000;
     /// Level1..Level9.
-    pub const LEVELS: u32 = 0x1FF0;
-    pub const SCHOOLS: u32 = CREATURE | ITEM | LIFE | WAR | VOID;
-    pub const ALL: u32 = SCHOOLS | LEVELS;
+    pub(crate) const LEVELS: u32 = 0x1FF0;
+    pub(crate) const SCHOOLS: u32 = CREATURE | ITEM | LIFE | WAR | VOID;
+    pub(crate) const ALL: u32 = SCHOOLS | LEVELS;
 
     /// The schools with a toggle, in the client's order.
-    pub const SCHOOL_TOGGLES: [(&str, u32); 5] = [
+    pub(crate) const SCHOOL_TOGGLES: [(&str, u32); 5] = [
         ("Creature", CREATURE),
         ("Item", ITEM),
         ("Life", LIFE),
@@ -47,7 +47,7 @@ pub mod filter {
     ];
 
     /// The bit for spell level 1..=9; 0 otherwise.
-    pub fn level(level: u32) -> u32 {
+    pub(crate) fn level(level: u32) -> u32 {
         if (1..=9).contains(&level) {
             0x10 << (level - 1)
         } else {
@@ -56,7 +56,7 @@ pub mod filter {
     }
 
     /// The bit for a `spell_table::school` id; 0 for none.
-    pub fn school_bit(school_id: u32) -> u32 {
+    pub(crate) fn school_bit(school_id: u32) -> u32 {
         match school_id {
             school::CREATURE => CREATURE,
             school::ITEM => ITEM,
@@ -69,14 +69,14 @@ pub mod filter {
 
     /// Flip one bit. A zero bitfield (the server sent no filters) means
     /// everything is shown, so the first toggle starts from [`ALL`].
-    pub fn toggled(bits: u32, bit: u32) -> u32 {
+    pub(crate) fn toggled(bits: u32, bit: u32) -> u32 {
         let base = if bits == 0 { ALL } else { bits };
         base ^ bit
     }
 
     /// Whether a spell of this school and level is shown. Spells without a
     /// school or level bit (quest spells) are always shown.
-    pub fn passes(bits: u32, school_id: u32, level: u32) -> bool {
+    pub(crate) fn passes(bits: u32, school_id: u32, level: u32) -> bool {
         if bits == 0 {
             return true;
         }
@@ -87,7 +87,7 @@ pub mod filter {
 }
 
 /// `1` -> `I` ... `8` -> `VIII`.
-pub fn roman(level: u32) -> &'static str {
+pub(crate) fn roman(level: u32) -> &'static str {
     match level {
         1 => "I",
         2 => "II",
@@ -104,39 +104,39 @@ pub fn roman(level: u32) -> &'static str {
 
 /// One line of the spellbook panel.
 #[derive(Clone, Debug, PartialEq)]
-pub struct SpellRow {
-    pub id: u32,
-    pub name: String,
+pub(crate) struct SpellRow {
+    pub(crate) id: u32,
+    pub(crate) name: String,
     /// Spell level 1..=8 (from the spell's power; the scarab's level when
     /// the power gives none).
-    pub level: u32,
-    pub school_id: u32,
-    pub school: &'static str,
-    pub mana: u32,
+    pub(crate) level: u32,
+    pub(crate) school_id: u32,
+    pub(crate) school: &'static str,
+    pub(crate) mana: u32,
     /// Only castable on ourselves; other spells need a selected target.
-    pub self_targeted: bool,
+    pub(crate) self_targeted: bool,
     /// RenderSurface (0x06) id of the spell icon.
-    pub icon: u32,
-    pub description: String,
+    pub(crate) icon: u32,
+    pub(crate) description: String,
     /// The incantation.
-    pub words: String,
+    pub(crate) words: String,
     /// The spell table's display order.
-    pub display_order: u32,
+    pub(crate) display_order: u32,
     /// Enchantment duration in seconds, if the spell has one.
-    pub duration: Option<f64>,
+    pub(crate) duration: Option<f64>,
     /// The components one cast needs right now (prismatic when the
     /// school's focus is carried), by name, and whether each is carried.
-    pub formula: Vec<(String, bool)>,
+    pub(crate) formula: Vec<(String, bool)>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct SpellbookView {
-    pub filters: u32,
-    pub rows: Vec<SpellRow>,
+pub(crate) struct SpellbookView {
+    pub(crate) filters: u32,
+    pub(crate) rows: Vec<SpellRow>,
 }
 
 /// By display order, then level, then name.
-pub fn sort(rows: &mut [SpellRow]) {
+pub(crate) fn sort(rows: &mut [SpellRow]) {
     rows.sort_by(|a, b| {
         a.display_order
             .cmp(&b.display_order)
@@ -155,7 +155,7 @@ fn spell_level(s: &Spell) -> u32 {
 /// Spellbook rows for the given spell ids, sorted. `formula_of` gives the
 /// components a cast needs right now and `carried` whether a component is
 /// in the packs. Ids missing from the table are skipped.
-pub fn rows(
+pub(crate) fn rows(
     table: &SpellTable,
     comps: &SpellComponentTable,
     ids: impl IntoIterator<Item = u32>,
@@ -201,7 +201,7 @@ pub fn rows(
 
 /// This session's spellbook with its filters. Rows are empty when the
 /// tables do not load.
-pub fn view(c: &Client) -> SpellbookView {
+pub(crate) fn view(c: &Client) -> SpellbookView {
     let rows = match (c.assets.spell_table(), c.assets.spell_components()) {
         (Ok(table), Ok(comps)) => {
             let counts: HashMap<u32, u32> = c
@@ -227,20 +227,20 @@ pub fn view(c: &Client) -> SpellbookView {
 
 /// What the panel asked for.
 #[derive(Default, Debug, PartialEq, Eq)]
-pub struct Actions {
+pub(crate) struct Actions {
     /// Filter bit to flip.
-    pub toggle: Option<u32>,
+    pub(crate) toggle: Option<u32>,
     /// Spells to put on the shown spell bar.
-    pub add_to_bar: Vec<u32>,
-    pub cast: Vec<u32>,
-    pub forget: Option<u32>,
+    pub(crate) add_to_bar: Vec<u32>,
+    pub(crate) cast: Vec<u32>,
+    pub(crate) forget: Option<u32>,
 }
 
 /// Which spell's details are open and which delete awaits confirmation.
 #[derive(Default, Debug)]
-pub struct UiState {
-    pub info: Option<u32>,
-    pub confirm: Option<u32>,
+pub(crate) struct UiState {
+    pub(crate) info: Option<u32>,
+    pub(crate) confirm: Option<u32>,
 }
 
 fn toggle_button(ui: &mut egui::Ui, on: bool, label: &str) -> bool {
@@ -324,7 +324,7 @@ fn details(ui: &mut egui::Ui, sp: &SpellRow, st: &mut UiState, a: &mut Actions) 
 }
 
 /// Draw the panel at `x`.
-pub fn draw(
+pub(crate) fn draw(
     egui: &egui::Context,
     icons: &mut IconCache,
     v: &SpellbookView,
@@ -491,10 +491,10 @@ pub fn draw(
 }
 
 #[derive(Default)]
-pub struct Spellbook {
+pub(crate) struct Spellbook {
     source: Source<SpellbookView>,
     /// Open (its key or the menu toggles it). Starts closed.
-    pub show: bool,
+    pub(crate) show: bool,
     state: UiState,
 }
 
@@ -503,7 +503,7 @@ impl Spellbook {
     /// Invulnerability Other I, the Self variants, protections, Acid
     /// Stream III, Shock Wave II, Mind Blossom) when the tables are given,
     /// scarabs and tapers carried, every filter on, open.
-    pub fn demo(tables: Option<(&SpellTable, &SpellComponentTable)>) -> Self {
+    pub(crate) fn demo(tables: Option<(&SpellTable, &SpellComponentTable)>) -> Self {
         let rows = match tables {
             Some((table, comps)) => rows(
                 table,

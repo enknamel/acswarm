@@ -16,10 +16,10 @@ use glam::{Mat4, Vec3, Vec4};
 /// Blackboard key of the camera matrix the host sets every frame.
 pub const CAMERA_KEY: &str = "camera.view_proj";
 /// Farthest labelled object, metres.
-pub const RANGE: f32 = 80.0;
+pub(crate) const RANGE: f32 = 80.0;
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Plate {
+pub(crate) struct Plate {
     pub guid: u32,
     pub name: String,
     pub kind: Kind,
@@ -33,13 +33,13 @@ pub struct Plate {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct PlatesView {
+pub(crate) struct PlatesView {
     pub plates: Vec<Plate>,
     pub view_proj: Option<Mat4>,
 }
 
 /// The camera matrix from the blackboard value the host publishes.
-pub fn camera_from(v: Option<&crate::Value>) -> Option<Mat4> {
+pub(crate) fn camera_from(v: Option<&crate::Value>) -> Option<Mat4> {
     let arr = v?.as_array()?;
     if arr.len() != 16 {
         return None;
@@ -53,7 +53,7 @@ pub fn camera_from(v: Option<&crate::Value>) -> Option<Mat4> {
 
 /// Screen point (egui points) of a world position, or None when behind
 /// the camera.
-pub fn project(view_proj: &Mat4, screen: egui::Rect, world: Vec3) -> Option<egui::Pos2> {
+pub(crate) fn project(view_proj: &Mat4, screen: egui::Rect, world: Vec3) -> Option<egui::Pos2> {
     let clip = *view_proj * Vec4::new(world.x, world.y, world.z, 1.0);
     if clip.w <= 1e-4 {
         return None;
@@ -68,7 +68,7 @@ pub fn project(view_proj: &Mat4, screen: egui::Rect, world: Vec3) -> Option<egui
     ))
 }
 
-pub fn view(c: &Client, view_proj: Option<Mat4>) -> Option<PlatesView> {
+pub(crate) fn view(c: &Client, view_proj: Option<Mat4>) -> Option<PlatesView> {
     let me = c
         .player
         .as_ref()
@@ -109,7 +109,7 @@ pub fn view(c: &Client, view_proj: Option<Mat4>) -> Option<PlatesView> {
     Some(PlatesView { plates, view_proj })
 }
 
-pub fn draw(egui: &egui::Context, v: &PlatesView) {
+pub(crate) fn draw(egui: &egui::Context, v: &PlatesView) {
     let Some(vp) = &v.view_proj else { return };
     let screen = egui.viewport_rect();
     let painter = egui.layer_painter(egui::LayerId::new(
@@ -161,7 +161,7 @@ pub fn draw(egui: &egui::Context, v: &PlatesView) {
     }
 }
 
-pub struct Nameplates {
+pub(crate) struct Nameplates {
     source: Source<PlatesView>,
     pub show: bool,
 }
@@ -177,7 +177,7 @@ impl Default for Nameplates {
 
 impl Nameplates {
     /// A few plates in front of a demo camera.
-    pub fn demo() -> Self {
+    pub(crate) fn demo() -> Self {
         let vp = Mat4::perspective_rh(1.0, 1.6, 0.1, 500.0)
             * Mat4::look_to_rh(Vec3::new(0.0, -10.0, 2.0), Vec3::Y, Vec3::Z);
         let plate = |guid, name: &str, kind, x: f32, y: f32, health| Plate {

@@ -13,26 +13,30 @@
 //! messages from [`REMOTE`]. Plugins are plain Rust types registered with
 //! the host.
 
+#![warn(unreachable_pub)]
+
 use std::collections::{HashMap, VecDeque};
 use std::time::Instant;
 
 pub mod console;
-pub mod host;
+mod host;
 pub mod icons;
+pub mod keys;
 pub mod lobby;
 pub mod logging;
 pub mod panels;
 pub mod party;
 pub mod servers;
-pub mod settings;
+mod settings;
 pub mod team;
 
+// The crate's API in one block: the facade below, plus the crates a plugin
+// reaches through ac-plugin instead of depending on them itself.
 pub use ac_bus::{self, BusClient, Incoming};
 pub use ac_client::creation::CreateSpec;
 pub use ac_client::{self, Client, Event};
 pub use egui;
 pub use host::{Host, Requests, AUTOPLAY_TOPIC};
-pub mod keys;
 pub use icons::{IconCache, IconLayers, IconLoader};
 pub use serde_json::{self, Value};
 pub use settings::Settings;
@@ -230,7 +234,7 @@ pub struct Ctx<'a> {
     pub clients: Vec<&'a mut Client>,
     pub index: usize,
     pub board: &'a mut Blackboard,
-    /// What survives a restart (see [`settings`]): read and write it
+    /// What survives a restart (see [`Settings`]): read and write it
     /// freely, the host writes the file.
     pub settings: &'a mut Settings,
     /// Item and spell icons as egui textures (see [`icons`]).

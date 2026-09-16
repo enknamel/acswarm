@@ -9,7 +9,7 @@ use super::{caption, title_bar, window, Source};
 use crate::{egui, Client, Ctx, Plugin, Settings};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct MemberRow {
+pub(crate) struct MemberRow {
     pub guid: u32,
     pub name: String,
     pub level: u32,
@@ -27,7 +27,7 @@ pub struct MemberRow {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AllegianceView {
+pub(crate) struct AllegianceView {
     /// False until the server has answered the profile request.
     pub loaded: bool,
     /// None when not in an allegiance.
@@ -49,7 +49,7 @@ pub struct AllegianceView {
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
-pub struct Actions {
+pub(crate) struct Actions {
     pub swear: Option<u32>,
     pub break_with: Option<u32>,
     pub refresh: bool,
@@ -57,7 +57,7 @@ pub struct Actions {
     pub set_motd: Option<String>,
 }
 
-pub const OFFICER_TITLES: [&str; 4] = ["", "Speaker", "Seneschal", "Castellan"];
+pub(crate) const OFFICER_TITLES: [&str; 4] = ["", "Speaker", "Seneschal", "Castellan"];
 
 fn row(a: &ac_world::allegiance::Allegiance, m: &ac_world::allegiance::Member) -> MemberRow {
     MemberRow {
@@ -75,7 +75,7 @@ fn row(a: &ac_world::allegiance::Allegiance, m: &ac_world::allegiance::Member) -
     }
 }
 
-pub fn view(c: &Client) -> AllegianceView {
+pub(crate) fn view(c: &Client) -> AllegianceView {
     let me = c.world.player_guid;
     let selected = c
         .selected
@@ -135,7 +135,7 @@ pub fn view(c: &Client) -> AllegianceView {
 }
 
 /// `12.3k` style XP text.
-pub fn xp_text(xp: u64) -> String {
+pub(crate) fn xp_text(xp: u64) -> String {
     match xp {
         0 => "-".into(),
         x if x < 10_000 => x.to_string(),
@@ -146,7 +146,7 @@ pub fn xp_text(xp: u64) -> String {
 
 /// The columns of one member line: role, name, level, rank, loyalty,
 /// leadership, XP passed up (tithed) and waiting (cached), online.
-pub fn member_columns(role: &str, m: &MemberRow) -> [String; 8] {
+pub(crate) fn member_columns(role: &str, m: &MemberRow) -> [String; 8] {
     let name = if m.officer > 0 {
         format!("{} ({})", m.name, OFFICER_TITLES[m.officer.min(3) as usize])
     } else {
@@ -168,7 +168,7 @@ pub fn member_columns(role: &str, m: &MemberRow) -> [String; 8] {
     ]
 }
 
-pub fn draw(
+pub(crate) fn draw(
     egui: &egui::Context,
     v: &AllegianceView,
     new_name: &mut String,
@@ -319,7 +319,7 @@ pub fn draw(
     actions
 }
 
-pub struct Allegiance {
+pub(crate) struct Allegiance {
     source: Source<AllegianceView>,
     pub show: bool,
     new_name: String,
@@ -338,7 +338,7 @@ impl Default for Allegiance {
 }
 
 impl Allegiance {
-    pub fn demo() -> Self {
+    pub(crate) fn demo() -> Self {
         let m = |guid, name: &str, level, rank, online, tithed, cached, officer| MemberRow {
             guid,
             name: name.into(),

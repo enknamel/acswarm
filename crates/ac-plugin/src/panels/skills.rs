@@ -11,55 +11,55 @@ pub const OPEN_KEY: &str = "panels.skills_open";
 
 /// One line of the skills panel.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SkillRow {
-    pub id: u32,
-    pub name: &'static str,
+pub(crate) struct SkillRow {
+    pub(crate) id: u32,
+    pub(crate) name: &'static str,
     /// Current skill value (attribute base + creation bonus + ranks).
-    pub value: u32,
-    pub ranks: u16,
+    pub(crate) value: u32,
+    pub(crate) ranks: u16,
     /// Advancement class: 0 inactive, 1 untrained, 2 trained, 3 specialized.
-    pub advancement: u32,
-    pub training: &'static str,
+    pub(crate) advancement: u32,
+    pub(crate) training: &'static str,
     /// XP for the next rank (trained/specialized skills below max).
-    pub raise_xp: Option<u32>,
+    pub(crate) raise_xp: Option<u32>,
     /// Credits to train (untrained/inactive skills).
-    pub train_credits: Option<u32>,
+    pub(crate) train_credits: Option<u32>,
 }
 
 /// An attribute or vital line: current value, ranks bought, next cost.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct StatRow {
-    pub name: &'static str,
-    pub value: u32,
-    pub ranks: u32,
-    pub raise_xp: Option<u32>,
+pub(crate) struct StatRow {
+    pub(crate) name: &'static str,
+    pub(crate) value: u32,
+    pub(crate) ranks: u32,
+    pub(crate) raise_xp: Option<u32>,
 }
 
 /// What the player clicked this frame.
 #[derive(Debug, Default, PartialEq, Eq)]
-pub struct Actions {
-    pub raise_attribute: Vec<usize>,
-    pub raise_vital: Vec<usize>,
-    pub raise_skill: Vec<u32>,
-    pub train_skill: Vec<u32>,
+pub(crate) struct Actions {
+    pub(crate) raise_attribute: Vec<usize>,
+    pub(crate) raise_vital: Vec<usize>,
+    pub(crate) raise_skill: Vec<u32>,
+    pub(crate) train_skill: Vec<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SkillsView {
-    pub name: String,
-    pub level: i32,
-    pub total_xp: i64,
-    pub available_xp: i64,
-    pub skill_credits: i32,
-    pub attributes: Vec<StatRow>,
-    pub vitals: Vec<StatRow>,
-    pub skills: Vec<SkillRow>,
+pub(crate) struct SkillsView {
+    pub(crate) name: String,
+    pub(crate) level: i32,
+    pub(crate) total_xp: i64,
+    pub(crate) available_xp: i64,
+    pub(crate) skill_credits: i32,
+    pub(crate) attributes: Vec<StatRow>,
+    pub(crate) vitals: Vec<StatRow>,
+    pub(crate) skills: Vec<SkillRow>,
     /// Augmentations taken: (name, times, maximum).
-    pub augmentations: Vec<(String, u32, u32)>,
+    pub(crate) augmentations: Vec<(String, u32, u32)>,
 }
 
 /// `1234567` -> `1,234,567`.
-pub fn thousands(n: i64) -> String {
+pub(crate) fn thousands(n: i64) -> String {
     let digits = n.unsigned_abs().to_string();
     let mut out = String::with_capacity(digits.len() + digits.len() / 3 + 1);
     if n < 0 {
@@ -75,13 +75,13 @@ pub fn thousands(n: i64) -> String {
 }
 
 /// Specialized first, then trained, untrained, inactive; by name within.
-pub fn sort(skills: &mut [SkillRow]) {
+pub(crate) fn sort(skills: &mut [SkillRow]) {
     skills.sort_by(|a, b| b.advancement.cmp(&a.advancement).then(a.name.cmp(b.name)));
 }
 
 /// The sheet for this session; `None` until it arrived. Skill values need
 /// the portal's SkillTable for the attribute formula.
-pub fn view(c: &Client) -> Option<SkillsView> {
+pub(crate) fn view(c: &Client) -> Option<SkillsView> {
     if !has_sheet(c) {
         return None;
     }
@@ -157,7 +157,7 @@ pub fn view(c: &Client) -> Option<SkillsView> {
     })
 }
 
-pub fn draw(egui: &egui::Context, v: &SkillsView) -> Actions {
+pub(crate) fn draw(egui: &egui::Context, v: &SkillsView) -> Actions {
     let mut actions = Actions::default();
     window(
         "skills",
@@ -293,15 +293,15 @@ pub fn draw(egui: &egui::Context, v: &SkillsView) -> Actions {
 }
 
 #[derive(Default)]
-pub struct Skills {
+pub(crate) struct Skills {
     source: Source<SkillsView>,
     /// Open (its key or the menu toggles it). Starts closed.
-    pub show: bool,
+    pub(crate) show: bool,
 }
 
 impl Skills {
     /// A small sheet; closed until opened, like the live one.
-    pub fn demo() -> Self {
+    pub(crate) fn demo() -> Self {
         let row = |name, value, ranks, advancement| SkillRow {
             id: 0,
             name,

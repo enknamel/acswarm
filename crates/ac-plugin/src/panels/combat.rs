@@ -9,7 +9,7 @@ use super::{frame, Source};
 use crate::{egui, Client, Ctx, Plugin};
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct CombatView {
+pub(crate) struct CombatView {
     /// Missile (accuracy) rather than melee (power).
     pub missile: bool,
     /// 1 high, 2 medium, 3 low.
@@ -20,16 +20,16 @@ pub struct CombatView {
 }
 
 #[derive(Debug, Default, PartialEq)]
-pub struct Actions {
+pub(crate) struct Actions {
     pub height: Option<u32>,
     pub power: Option<f32>,
     pub auto_repeat: Option<bool>,
     pub peace: bool,
 }
 
-pub const HEIGHTS: [(u32, &str); 3] = [(1, "High"), (2, "Medium"), (3, "Low")];
+pub(crate) const HEIGHTS: [(u32, &str); 3] = [(1, "High"), (2, "Medium"), (3, "Low")];
 
-pub fn view(c: &Client) -> Option<CombatView> {
+pub(crate) fn view(c: &Client) -> Option<CombatView> {
     if !c.combat || c.magic {
         return None;
     }
@@ -52,7 +52,7 @@ pub fn view(c: &Client) -> Option<CombatView> {
 
 /// Step the height the way the keys do: Delete goes up the body,
 /// PageDown down, wrapping.
-pub fn step_height(height: u32, up: bool) -> u32 {
+pub(crate) fn step_height(height: u32, up: bool) -> u32 {
     let i = HEIGHTS.iter().position(|(h, _)| *h == height).unwrap_or(1);
     let n = HEIGHTS.len();
     let j = if up { (i + n - 1) % n } else { (i + 1) % n };
@@ -60,11 +60,11 @@ pub fn step_height(height: u32, up: bool) -> u32 {
 }
 
 /// Step the power bar by a tenth, clamped.
-pub fn step_power(power: f32, up: bool) -> f32 {
+pub(crate) fn step_power(power: f32, up: bool) -> f32 {
     (power + if up { 0.1 } else { -0.1 }).clamp(0.0, 1.0)
 }
 
-pub fn draw(egui: &egui::Context, v: &CombatView) -> Actions {
+pub(crate) fn draw(egui: &egui::Context, v: &CombatView) -> Actions {
     let mut actions = Actions::default();
     let rect = egui.viewport_rect();
     super::area(
@@ -121,12 +121,12 @@ pub fn draw(egui: &egui::Context, v: &CombatView) -> Actions {
 }
 
 #[derive(Default)]
-pub struct Combat {
+pub(crate) struct Combat {
     source: Source<CombatView>,
 }
 
 impl Combat {
-    pub fn demo() -> Self {
+    pub(crate) fn demo() -> Self {
         Combat {
             source: Source::Demo(CombatView {
                 missile: false,

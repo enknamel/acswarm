@@ -11,7 +11,7 @@ use crate::{panels, Blackboard, BusClient, Client, Ctx, Event, Plugin, SessionSp
 
 /// How often [`Host::autosave`] writes the settings file when something
 /// changed.
-pub const AUTOSAVE_EVERY: Duration = Duration::from_secs(30);
+pub(crate) const AUTOSAVE_EVERY: Duration = Duration::from_secs(30);
 
 /// The blackboard topic every [`Event::Autoplay`] is repeated on, as
 /// `{"session", "name", "doing", "text"}`: readable next frame by every
@@ -157,7 +157,7 @@ impl Host {
         }
     }
 
-    /// [`Host::save_settings`] when [`AUTOSAVE_EVERY`] passed since the
+    /// [`Host::save_settings`] when `AUTOSAVE_EVERY` passed since the
     /// last one; call it once per frame.
     pub fn autosave(&mut self) -> bool {
         if self.last_save.elapsed() < AUTOSAVE_EVERY {

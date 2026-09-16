@@ -6,14 +6,14 @@ use super::{title, Source};
 use crate::{egui, Client, Ctx, Plugin};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Question {
+pub(crate) struct Question {
     pub kind: u32,
     pub context: u32,
     pub text: String,
 }
 
 /// A short label for the popup title by ACE `ConfirmationType`.
-pub fn kind_name(kind: u32) -> &'static str {
+pub(crate) fn kind_name(kind: u32) -> &'static str {
     match kind {
         1 => "Allegiance",
         2 => "Skill",
@@ -27,7 +27,7 @@ pub fn kind_name(kind: u32) -> &'static str {
 
 /// The text to show: ACE sends only the other player's name for an
 /// allegiance oath (kind 1); the client wrote the sentence.
-pub fn question_text(q: &Question) -> String {
+pub(crate) fn question_text(q: &Question) -> String {
     match q.kind {
         1 => format!(
             "{} wants to swear allegiance to you. Accept the oath?",
@@ -37,7 +37,7 @@ pub fn question_text(q: &Question) -> String {
     }
 }
 
-pub fn view(c: &Client) -> Vec<Question> {
+pub(crate) fn view(c: &Client) -> Vec<Question> {
     c.world
         .confirmations
         .iter()
@@ -50,7 +50,7 @@ pub fn view(c: &Client) -> Vec<Question> {
 }
 
 /// Returns (kind, context, answer) for each popup answered this frame.
-pub fn draw(egui: &egui::Context, questions: &[Question]) -> Vec<(u32, u32, bool)> {
+pub(crate) fn draw(egui: &egui::Context, questions: &[Question]) -> Vec<(u32, u32, bool)> {
     let mut answers = Vec::new();
     let rect = egui.viewport_rect();
     for (i, q) in questions.iter().enumerate() {
@@ -86,12 +86,12 @@ pub fn draw(egui: &egui::Context, questions: &[Question]) -> Vec<(u32, u32, bool
 }
 
 #[derive(Default)]
-pub struct Confirm {
+pub(crate) struct Confirm {
     source: Source<Vec<Question>>,
 }
 
 impl Confirm {
-    pub fn demo() -> Self {
+    pub(crate) fn demo() -> Self {
         Confirm {
             source: Source::Demo(vec![Question {
                 kind: 4,

@@ -61,7 +61,7 @@ use std::sync::mpsc::Receiver;
 
 /// What an object on the map is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Kind {
+pub(crate) enum Kind {
     Player,
     Npc,
     Monster,
@@ -72,7 +72,7 @@ pub enum Kind {
 }
 
 impl Kind {
-    pub fn of(o: &ac_world::WorldObject) -> Kind {
+    pub(crate) fn of(o: &ac_world::WorldObject) -> Kind {
         use ac_world::{item_type, object_desc_flags as f};
         let d = o.object_desc_flags;
         if d & f::PLAYER != 0 {
@@ -94,7 +94,7 @@ impl Kind {
         }
     }
 
-    pub fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> &'static str {
         match self {
             Kind::Player => "player",
             Kind::Npc => "npc",
@@ -106,7 +106,7 @@ impl Kind {
         }
     }
 
-    pub fn color(self) -> egui::Color32 {
+    pub(crate) fn color(self) -> egui::Color32 {
         match self {
             Kind::Player => egui::Color32::from_rgb(80, 200, 255),
             Kind::Npc => egui::Color32::from_rgb(120, 230, 120),
@@ -120,7 +120,7 @@ impl Kind {
 }
 
 /// The chips over the object list: a label and the kinds it keeps.
-pub const KINDS: &[(&str, &[Kind])] = &[
+pub(crate) const KINDS: &[(&str, &[Kind])] = &[
     ("All", &[]),
     ("Players", &[Kind::Player]),
     ("NPCs", &[Kind::Npc]),
@@ -133,7 +133,7 @@ pub const KINDS: &[(&str, &[Kind])] = &[
 /// fight, a way out, something to pick up, or something to use. What is
 /// left out is the scenery the server also sends: statues, furniture,
 /// fences and the like, which are fixed, lifeless and do nothing.
-pub fn worth_listing(o: &ac_world::WorldObject) -> bool {
+pub(crate) fn worth_listing(o: &ac_world::WorldObject) -> bool {
     use ac_world::{item_type, object_desc_flags as f};
     let d = o.object_desc_flags;
     if d & (f::PLAYER | f::CORPSE | f::PORTAL | f::VENDOR) != 0 {
@@ -152,7 +152,7 @@ pub fn worth_listing(o: &ac_world::WorldObject) -> bool {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct MapObject {
+pub(crate) struct MapObject {
     pub guid: u32,
     pub name: String,
     pub kind: Kind,
@@ -164,7 +164,7 @@ pub struct MapObject {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct MapView {
+pub(crate) struct MapView {
     /// The character's landblock (`xxyy0000`) and whether it is a dungeon.
     pub block: u32,
     pub dungeon: bool,
@@ -189,7 +189,7 @@ pub struct MapView {
 
 /// One thing the search found elsewhere in the world.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Elsewhere {
+pub(crate) struct Elsewhere {
     pub label: String,
     pub at: Vec2,
     /// Metres away.
@@ -231,7 +231,7 @@ impl Elsewhere {
 /// dungeon is not somewhere to walk to from here, and the data is
 /// mostly such portals. The ruined ones say so themselves and are left
 /// out.
-pub fn world_search(search: &str, me: Vec2) -> Vec<Elsewhere> {
+pub(crate) fn world_search(search: &str, me: Vec2) -> Vec<Elsewhere> {
     let needle = search.trim().to_lowercase();
     if needle.len() < 3 {
         return Vec::new();
@@ -314,7 +314,7 @@ fn me_of(c: &Client) -> Option<(Vec2, f32, f32, u32)> {
     Some((Vec2::new(w.x, w.y), w.z, 0.0, pos.cell & 0xFFFF_0000))
 }
 
-pub fn view(c: &Client) -> Option<MapView> {
+pub(crate) fn view(c: &Client) -> Option<MapView> {
     if !has_sheet(c) {
         return None;
     }
@@ -386,7 +386,7 @@ pub fn view(c: &Client) -> Option<MapView> {
 }
 
 /// Objects of the view kept by the search line and chip, nearest first.
-pub fn shown(objects: &[MapObject], search: &str, kind: usize) -> Vec<usize> {
+pub(crate) fn shown(objects: &[MapObject], search: &str, kind: usize) -> Vec<usize> {
     let needle = search.trim().to_lowercase();
     let kinds = KINDS.get(kind).map(|k| k.1).unwrap_or(&[]);
     objects
@@ -403,7 +403,7 @@ pub fn shown(objects: &[MapObject], search: &str, kind: usize) -> Vec<usize> {
 }
 
 /// Map coordinates ("42.1N, 33.6E") of a world xy.
-pub fn coords_of(world: Vec2) -> String {
+pub(crate) fn coords_of(world: Vec2) -> String {
     let ns = world.y / 240.0 - 102.0;
     let ew = world.x / 240.0 - 102.0;
     format!(
@@ -417,7 +417,7 @@ pub fn coords_of(world: Vec2) -> String {
 
 /// Where a world xy lands on screen for a view centred on `center`
 /// showing `s` screen points per metre.
-pub fn to_screen(rect: egui::Rect, center: Vec2, s: f32, world: Vec2) -> egui::Pos2 {
+pub(crate) fn to_screen(rect: egui::Rect, center: Vec2, s: f32, world: Vec2) -> egui::Pos2 {
     let c = rect.center();
     egui::pos2(
         c.x + (world.x - center.x) * s,
@@ -425,7 +425,7 @@ pub fn to_screen(rect: egui::Rect, center: Vec2, s: f32, world: Vec2) -> egui::P
     )
 }
 
-pub fn to_world(rect: egui::Rect, center: Vec2, s: f32, screen: egui::Pos2) -> Vec2 {
+pub(crate) fn to_world(rect: egui::Rect, center: Vec2, s: f32, screen: egui::Pos2) -> Vec2 {
     let c = rect.center();
     Vec2::new(
         center.x + (screen.x - c.x) / s,
@@ -434,14 +434,14 @@ pub fn to_world(rect: egui::Rect, center: Vec2, s: f32, screen: egui::Pos2) -> V
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum Tab {
+pub(crate) enum Tab {
     World,
     Local,
 }
 
 /// What the player did this frame.
 #[derive(Debug, Default, PartialEq)]
-pub struct Actions {
+pub(crate) struct Actions {
     pub select: Option<u32>,
     pub activate: Option<u32>,
     pub travel_to: Option<Vec2>,
@@ -466,7 +466,7 @@ pub struct Actions {
 /// A hunting area being drawn: its name so far, and the corners clicked
 /// on the map (world xy). In a dungeon it is the dungeon.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct Drawing {
+pub(crate) struct Drawing {
     pub name: String,
     pub corners: Vec<Vec2>,
     /// In a dungeon, the rooms picked on its map; none is all of it.
@@ -476,7 +476,7 @@ pub struct Drawing {
 impl Drawing {
     /// The area as drawn, for a map showing `v`: the outline clicked, or,
     /// in a dungeon, the whole of it.
-    pub fn area(&self, v: &MapView) -> HuntArea {
+    pub(crate) fn area(&self, v: &MapView) -> HuntArea {
         let shape = if v.dungeon {
             Shape::Dungeon {
                 landblock: v.block,
@@ -502,7 +502,7 @@ const DRAWING: egui::Color32 = egui::Color32::from_rgb(90, 220, 255);
 /// opens on the character.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
-pub struct State {
+pub(crate) struct State {
     pub tab: Tab,
     /// Not kept across restarts: a search that survived would hide most
     /// of the list on the next run and look like a broken panel.
@@ -543,7 +543,7 @@ impl Default for State {
 }
 
 /// A map texture on the GPU with the image's world transform.
-pub struct MapTexture {
+pub(crate) struct MapTexture {
     pub handle: egui::TextureHandle,
     pub origin: Vec2,
     pub size: Vec2,
@@ -551,7 +551,7 @@ pub struct MapTexture {
 }
 
 impl MapTexture {
-    pub fn upload(egui: &egui::Context, name: &str, img: &MapImage) -> MapTexture {
+    pub(crate) fn upload(egui: &egui::Context, name: &str, img: &MapImage) -> MapTexture {
         let image = egui::ColorImage::from_rgba_unmultiplied(
             [img.width as usize, img.height as usize],
             &img.rgba,
@@ -768,7 +768,7 @@ fn draw_map(
 
 /// How hard a creature of some level is for the character.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Danger {
+pub(crate) enum Danger {
     /// Ten levels or more below: not worth the time.
     Trivial,
     /// About the character's own level.
@@ -792,7 +792,7 @@ impl Danger {
 
 /// How hard something of `level` is for a character of level `me` (0
 /// when not known, which calls everything fair).
-pub fn danger(level: u32, me: u32) -> Danger {
+pub(crate) fn danger(level: u32, me: u32) -> Danger {
     if me == 0 {
         Danger::Fair
     } else if level + 10 <= me {
@@ -808,7 +808,7 @@ pub fn danger(level: u32, me: u32) -> Danger {
 
 /// The landblocks `radius` either side of `block` (`xxyy0000`), inside
 /// the world.
-pub fn blocks_around(block: u32, radius: u32) -> Vec<u32> {
+pub(crate) fn blocks_around(block: u32, radius: u32) -> Vec<u32> {
     let (bx, by) = ((block >> 24) as i64, ((block >> 16) & 0xFF) as i64);
     let r = radius as i64;
     let mut out = Vec::new();
@@ -836,7 +836,7 @@ fn storey_range(band: i32) -> (f32, f32) {
 
 /// The dungeon room whose floor is under world `xy` on the storey spanning
 /// `(low, high)`: the highest floor from the top of the storey down.
-pub fn room_at(
+pub(crate) fn room_at(
     world: &ac_scene::collision::CollisionWorld,
     xy: Vec2,
     (low, high): (f32, f32),
@@ -849,7 +849,7 @@ pub fn room_at(
 
 /// The floor triangles of `rooms` on the storey spanning `(low, high)`, in
 /// world xy, to shade them on the dungeon map.
-pub fn room_floors(
+pub(crate) fn room_floors(
     world: &ac_scene::collision::CollisionWorld,
     rooms: &[u32],
     (low, high): (f32, f32),
@@ -972,7 +972,7 @@ fn draw_spawns(
 
 /// Draw the panel.
 #[allow(clippy::too_many_arguments)]
-pub fn draw(
+pub(crate) fn draw(
     egui: &egui::Context,
     v: &MapView,
     st: &mut State,
@@ -1235,7 +1235,7 @@ fn render_world_map(assets: &ac_scene::Assets) -> Result<MapImage, String> {
 /// A background render of the world map.
 type WorldRender = Receiver<Result<MapImage, String>>;
 
-pub struct Map {
+pub(crate) struct Map {
     source: Source<MapView>,
     pub show: bool,
     pub state: State,
@@ -1280,7 +1280,7 @@ impl Default for Map {
 }
 
 impl Map {
-    pub fn demo() -> Self {
+    pub(crate) fn demo() -> Self {
         let me = Vec2::new(0xA9 as f32 * 192.0 + 90.0, 0xB4 as f32 * 192.0 + 100.0);
         let obj = |guid: u32, name: &str, kind: Kind, dx: f32, dy: f32| MapObject {
             guid,

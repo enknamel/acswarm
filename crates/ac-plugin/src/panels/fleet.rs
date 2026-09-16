@@ -6,7 +6,7 @@
 //! The rows come from two places. This process's sessions are read
 //! directly (`team::describe`, the same word the team plugin puts on
 //! the bus), whether or not their team rules are on. Other processes'
-//! sessions are heard on `autoplay.mate` (kept in a [`Roster`] of this
+//! sessions are heard on `autoplay.mate` (kept in a `Roster` of this
 //! panel's own, so it does not depend on the team plugin's) and what
 //! each is doing on `autoplay.event`. Experience an hour is worked out
 //! here, from the totals seen over the last quarter of an hour.
@@ -23,22 +23,22 @@
 //! [`crate::lobby::store`]'s file), so an account added or forgotten in
 //! one shows in the other. The account, its password and the character
 //! to enter with are the login store's; what the fleet adds is an
-//! [`Entry`] per (server, account) with the [`Role`] and what to create
+//! `Entry` per (server, account) with the [`Role`] and what to create
 //! when the account lacks the character ([`CreateSpec`]: template,
-//! heritage, sex, town), kept in the settings under [`ENTRIES_KEY`].
-//! [`roster`] puts the two together into the [`SessionSpec`]s the rows
+//! heritage, sex, town), kept in the settings under `ENTRIES_KEY`.
+//! `roster` puts the two together into the [`SessionSpec`]s the rows
 //! stand for.
 //!
 //! Start asks the host for a session (`Ctx::start_session`); once its
-//! character stands in the world the role is applied ([`apply_role`]):
+//! character stands in the world the role is applied (`apply_role`):
 //! a follower gets team, follow and autoplay on, the leader team and
 //! lead. "I lead" does the same for the session being played and
-//! remembers its account for that server ([`LEADS_KEY`]) for the next
+//! remembers its account for that server (`LEADS_KEY`) for the next
 //! launch. A script or the command line drives the same path through
 //! the blackboard keys [`START_KEY`] and [`STOP_KEY`].
 //!
 //! An older build kept one global roster of accounts under
-//! [`ROSTER_KEY`] with no server against it. [`migrate`] folds that into
+//! `ROSTER_KEY` with no server against it. `migrate` folds that into
 //! the login store once, on the first launch that knows a server.
 
 use std::collections::{BTreeMap, VecDeque};
@@ -56,18 +56,18 @@ use ac_client::autoplay::Mate;
 
 /// The settings key the old global roster (a list of [`SessionSpec`],
 /// with no server against it) was kept under. Read once, by
-/// [`migrate`], and never written again.
-pub const ROSTER_KEY: &str = "fleet.roster";
+/// `migrate`, and never written again.
+pub(crate) const ROSTER_KEY: &str = "fleet.roster";
 /// The settings key the old global "I lead" account was kept under.
-pub const LEAD_KEY: &str = "fleet.lead_account";
+pub(crate) const LEAD_KEY: &str = "fleet.lead_account";
 /// The settings key the fleet's own knowledge of an account is kept
-/// under: a list of [`Entry`], one per (server, account).
-pub const ENTRIES_KEY: &str = "fleet.entries";
+/// under: a list of `Entry`, one per (server, account).
+pub(crate) const ENTRIES_KEY: &str = "fleet.entries";
 /// The settings key naming, per server, the account whose session leads
 /// ("I lead"): a `{host: account}` object.
-pub const LEADS_KEY: &str = "fleet.leads";
-/// The settings key set once [`ROSTER_KEY`] has been folded in.
-pub const MIGRATED_KEY: &str = "fleet.roster_migrated";
+pub(crate) const LEADS_KEY: &str = "fleet.leads";
+/// The settings key set once `ROSTER_KEY` has been folded in.
+pub(crate) const MIGRATED_KEY: &str = "fleet.roster_migrated";
 /// The login store is re-read no more often than this.
 const RELOAD_EVERY: Duration = Duration::from_millis(1000);
 /// A blackboard key a script or the command line sets to start
@@ -90,7 +90,7 @@ const STARTING_FOR: Duration = Duration::from_secs(15);
 
 /// The choices the Add form offers, as the names the creation rules
 /// accept (`CharacterBuild::from_options`, case-insensitive prefixes).
-pub const HERITAGES: [&str; 11] = [
+pub(crate) const HERITAGES: [&str; 11] = [
     "Aluvian",
     "Gharu'ndim",
     "Sho",
@@ -103,8 +103,8 @@ pub const HERITAGES: [&str; 11] = [
     "Undead",
     "Gearknight",
 ];
-pub const SEXES: [(&str, &str); 2] = [("m", "male"), ("f", "female")];
-pub const TEMPLATES: [&str; 7] = [
+pub(crate) const SEXES: [(&str, &str); 2] = [("m", "male"), ("f", "female")];
+pub(crate) const TEMPLATES: [&str; 7] = [
     "Adventurer",
     "Bow Hunter",
     "Swashbuckler",
@@ -113,27 +113,27 @@ pub const TEMPLATES: [&str; 7] = [
     "Wayfarer",
     "Soldier",
 ];
-pub const TOWNS: [&str; 4] = ["Holtburg", "Shoushi", "Yaraq", "Sanamar"];
+pub(crate) const TOWNS: [&str; 4] = ["Holtburg", "Shoushi", "Yaraq", "Sanamar"];
 
 /// What the fleet knows about one remembered account on one server, on
 /// top of what the login store holds (the account, its password and the
 /// character to enter with): the [`Role`] its session takes, and what to
 /// create when the account has no such character.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct Entry {
+pub(crate) struct Entry {
     /// The server, as `host:port` (a [`crate::servers::Server`] address).
-    pub host: String,
-    pub account: String,
+    pub(crate) host: String,
+    pub(crate) account: String,
     #[serde(default)]
-    pub role: Role,
+    pub(crate) role: Role,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub create: Option<CreateSpec>,
+    pub(crate) create: Option<CreateSpec>,
 }
 
 /// A server address as the login store writes it: `host:port`, with the
 /// login port assumed when none is given (the same rule the client's
 /// `Config::host` follows).
-pub fn address_of(host: &str) -> String {
+pub(crate) fn address_of(host: &str) -> String {
     let host = host.trim();
     if host.is_empty() || host.contains(':') {
         host.to_string()
@@ -143,7 +143,7 @@ pub fn address_of(host: &str) -> String {
 }
 
 /// The fleet's entry for `account` on `host`, if it has one.
-pub fn entry_of<'a>(entries: &'a [Entry], host: &str, account: &str) -> Option<&'a Entry> {
+pub(crate) fn entry_of<'a>(entries: &'a [Entry], host: &str, account: &str) -> Option<&'a Entry> {
     entries
         .iter()
         .find(|e| e.host == host && e.account.eq_ignore_ascii_case(account))
@@ -151,7 +151,7 @@ pub fn entry_of<'a>(entries: &'a [Entry], host: &str, account: &str) -> Option<&
 
 /// Put `entry` among `entries`, replacing the one for the same server
 /// and account.
-pub fn upsert_entry(entries: &mut Vec<Entry>, entry: Entry) {
+pub(crate) fn upsert_entry(entries: &mut Vec<Entry>, entry: Entry) {
     match entries
         .iter()
         .position(|e| e.host == entry.host && e.account.eq_ignore_ascii_case(&entry.account))
@@ -164,7 +164,7 @@ pub fn upsert_entry(entries: &mut Vec<Entry>, entry: Entry) {
 /// The session a remembered login stands for, with what the fleet adds.
 /// The login holds the one character name: it is the one to enter with,
 /// or the one to create when there is a creation rule.
-pub fn session_spec(login: &Login, entry: Option<&Entry>) -> SessionSpec {
+pub(crate) fn session_spec(login: &Login, entry: Option<&Entry>) -> SessionSpec {
     let create = entry.and_then(|e| e.create.clone()).map(|mut c| {
         if !login.character.is_empty() {
             c.name = login.character.clone();
@@ -186,7 +186,7 @@ pub fn session_spec(login: &Login, entry: Option<&Entry>) -> SessionSpec {
 /// The roster for `host`: every account remembered there, in the order
 /// they were remembered, with the fleet's role and creation rule for it.
 /// This is the same set of accounts the connect screen offers.
-pub fn roster(servers: &Servers, entries: &[Entry], host: &str) -> Vec<SessionSpec> {
+pub(crate) fn roster(servers: &Servers, entries: &[Entry], host: &str) -> Vec<SessionSpec> {
     servers
         .accounts_for(host)
         .into_iter()
@@ -218,12 +218,12 @@ fn remember_quietly(servers: &mut Servers, host: &str, account: &str, password: 
 /// account, password and character are remembered for the server it
 /// belongs to (the one that already knows the account, else `current`,
 /// the server being played or last connected to), and its role and
-/// creation rule become an [`Entry`] there. An account already
+/// creation rule become an `Entry` there. An account already
 /// remembered keeps a password it has when the old entry has none.
 ///
 /// `false` when there is nowhere to put them yet (no server is known):
 /// nothing is changed and the fold is tried again next launch.
-pub fn migrate(
+pub(crate) fn migrate(
     old: &[SessionSpec],
     lead: Option<&str>,
     current: &str,
@@ -291,7 +291,7 @@ pub fn migrate(
 /// Switch the team rules on for a role: a follower follows, fights and
 /// plays on its own; the leader leads (and does not follow); manual
 /// leaves everything as it is.
-pub fn apply_role(cfg: &mut ac_client::autoplay::Config, role: Role) {
+pub(crate) fn apply_role(cfg: &mut ac_client::autoplay::Config, role: Role) {
     match role {
         Role::Leader => {
             cfg.team.enabled = true;
@@ -310,7 +310,7 @@ pub fn apply_role(cfg: &mut ac_client::autoplay::Config, role: Role) {
 
 /// Where a roster entry stands.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Status {
+pub(crate) enum Status {
     /// No session for the account.
     Stopped,
     /// Asked for, not seen yet.
@@ -325,7 +325,7 @@ pub enum Status {
 }
 
 impl Status {
-    pub fn label(&self) -> String {
+    pub(crate) fn label(&self) -> String {
         match self {
             Status::Stopped => "not running".into(),
             Status::Starting => "starting".into(),
@@ -336,7 +336,7 @@ impl Status {
         }
     }
 
-    pub fn running(&self) -> bool {
+    pub(crate) fn running(&self) -> bool {
         matches!(
             self,
             Status::Starting | Status::Connecting | Status::Creating(_) | Status::InWorld(_)
@@ -346,17 +346,17 @@ impl Status {
 
 /// What the panel reads off a running session to place it.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct Snapshot {
-    pub placed: bool,
-    pub name: String,
-    pub creating: Option<String>,
-    pub create_error: Option<String>,
+pub(crate) struct Snapshot {
+    pub(crate) placed: bool,
+    pub(crate) name: String,
+    pub(crate) creating: Option<String>,
+    pub(crate) create_error: Option<String>,
     /// The connection ended: why.
-    pub ended: Option<String>,
+    pub(crate) ended: Option<String>,
 }
 
 impl Snapshot {
-    pub fn of(c: &ac_client::Client, ended: Option<&str>) -> Self {
+    pub(crate) fn of(c: &ac_client::Client, ended: Option<&str>) -> Self {
         Snapshot {
             placed: c.placed(),
             name: c.world.stats.name.clone(),
@@ -370,7 +370,7 @@ impl Snapshot {
 /// The status of a roster entry from what is known: its session (if
 /// any), whether a start was asked recently, and what the host said
 /// when it could not start it.
-pub fn status_of(session: Option<&Snapshot>, starting: bool, error: Option<&str>) -> Status {
+pub(crate) fn status_of(session: Option<&Snapshot>, starting: bool, error: Option<&str>) -> Status {
     match session {
         Some(s) => {
             if let Some(why) = &s.ended {
@@ -395,30 +395,30 @@ pub fn status_of(session: Option<&Snapshot>, starting: bool, error: Option<&str>
 
 /// One roster entry as the panel draws it.
 #[derive(Clone, Debug, PartialEq)]
-pub struct SessionRow {
+pub(crate) struct SessionRow {
     /// Index in the roster.
-    pub index: usize,
-    pub spec: SessionSpec,
+    pub(crate) index: usize,
+    pub(crate) spec: SessionSpec,
     /// The session index in this process, when running.
-    pub running: Option<usize>,
-    pub status: Status,
+    pub(crate) running: Option<usize>,
+    pub(crate) status: Status,
 }
 
 /// The Add form's fields, kept between frames.
 #[derive(Clone, Debug, PartialEq)]
-pub struct AddForm {
-    pub account: String,
-    pub password: String,
-    pub character: String,
-    pub role: Role,
+pub(crate) struct AddForm {
+    pub(crate) account: String,
+    pub(crate) password: String,
+    pub(crate) character: String,
+    pub(crate) role: Role,
     /// Create the character when the account lacks it.
-    pub create: bool,
-    pub heritage: usize,
-    pub sex: usize,
-    pub template: usize,
-    pub town: usize,
+    pub(crate) create: bool,
+    pub(crate) heritage: usize,
+    pub(crate) sex: usize,
+    pub(crate) template: usize,
+    pub(crate) town: usize,
     /// Why the last Add was refused.
-    pub error: Option<String>,
+    pub(crate) error: Option<String>,
 }
 
 impl Default for AddForm {
@@ -440,7 +440,7 @@ impl Default for AddForm {
 
 impl AddForm {
     /// The entry the form describes, or what is wrong with it.
-    pub fn spec(&self) -> Result<SessionSpec, String> {
+    pub(crate) fn spec(&self) -> Result<SessionSpec, String> {
         let account = self.account.trim();
         if account.is_empty() {
             return Err("an account name is needed".into());
@@ -481,7 +481,7 @@ impl AddForm {
 
     /// Fill the form from a roster entry, so a remembered account is
     /// picked rather than typed again.
-    pub fn fill_from(&mut self, spec: &SessionSpec) {
+    pub(crate) fn fill_from(&mut self, spec: &SessionSpec) {
         self.account = spec.account.clone();
         self.password = spec.password.clone();
         self.character = spec.character_name().unwrap_or_default().to_string();
@@ -514,7 +514,7 @@ impl AddForm {
     }
 
     /// Clear the fields (the dropdown choices stay) after an Add.
-    pub fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         self.account.clear();
         self.password.clear();
         self.character.clear();
@@ -525,13 +525,13 @@ impl AddForm {
 /// Where a character is played: the process (this one, or a name on
 /// the bus) and the session within it.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Key {
-    pub process: String,
-    pub session: usize,
+pub(crate) struct Key {
+    pub(crate) process: String,
+    pub(crate) session: usize,
 }
 
 impl Key {
-    pub fn new(process: &str, session: usize) -> Self {
+    pub(crate) fn new(process: &str, session: usize) -> Self {
         Key {
             process: process.to_string(),
             session,
@@ -541,75 +541,75 @@ impl Key {
 
 /// One character, as the panel draws it.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Row {
-    pub key: Key,
+pub(crate) struct Row {
+    pub(crate) key: Key,
     /// A session of this process: clickable to switch to.
-    pub local: bool,
+    pub(crate) local: bool,
     /// The session the window shows right now.
-    pub active: bool,
-    pub name: String,
-    pub leader: bool,
-    pub level: i32,
-    pub health: f32,
-    pub stamina: f32,
-    pub mana: f32,
+    pub(crate) active: bool,
+    pub(crate) name: String,
+    pub(crate) leader: bool,
+    pub(crate) level: i32,
+    pub(crate) health: f32,
+    pub(crate) stamina: f32,
+    pub(crate) mana: f32,
     /// Experience an hour, once enough has been seen to say.
-    pub xp_per_hour: Option<f64>,
-    pub available_xp: i64,
+    pub(crate) xp_per_hour: Option<f64>,
+    pub(crate) available_xp: i64,
     /// The nearest town (and a landmark, standing at one).
-    pub place: String,
+    pub(crate) place: String,
     /// Metres to the leader; `None` for the leader itself.
-    pub to_leader: Option<f32>,
+    pub(crate) to_leader: Option<f32>,
     /// The last autoplay line: "fighting Drudge Skulker".
-    pub doing: String,
-    pub autoplay: bool,
-    pub following: bool,
-    pub flying: bool,
-    pub in_fellowship: bool,
+    pub(crate) doing: String,
+    pub(crate) autoplay: bool,
+    pub(crate) following: bool,
+    pub(crate) flying: bool,
+    pub(crate) in_fellowship: bool,
     /// The roster's role for the account, for a session of this process
     /// that the roster knows.
-    pub role: Option<Role>,
+    pub(crate) role: Option<Role>,
 }
 
 impl Row {
-    pub fn alive(&self) -> bool {
+    pub(crate) fn alive(&self) -> bool {
         self.health > 0.0
     }
 }
 
 /// What the panel draws.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct FleetView {
-    pub rows: Vec<Row>,
+pub(crate) struct FleetView {
+    pub(crate) rows: Vec<Row>,
     /// A bus is attached: other processes can be seen.
-    pub on_bus: bool,
+    pub(crate) on_bus: bool,
     /// The roster, with where each entry stands. It is the accounts
     /// remembered for [`FleetView::host`], the same ones the connect
     /// screen offers.
-    pub sessions: Vec<SessionRow>,
+    pub(crate) sessions: Vec<SessionRow>,
     /// The server the roster is for, as `host:port`.
-    pub host: String,
+    pub(crate) host: String,
     /// That server's name in the server list, when it has one.
-    pub server: String,
+    pub(crate) server: String,
     /// The session being played leads (its team rules say so).
-    pub lead: bool,
+    pub(crate) lead: bool,
     /// The account of the session being played, if any.
-    pub active_account: Option<String>,
+    pub(crate) active_account: Option<String>,
 }
 
 /// The header's sums.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct Totals {
-    pub sessions: usize,
-    pub alive: usize,
+pub(crate) struct Totals {
+    pub(crate) sessions: usize,
+    pub(crate) alive: usize,
     /// Mean health fraction over everyone.
-    pub avg_health: f32,
+    pub(crate) avg_health: f32,
     /// Experience an hour, summed over those with a rate.
-    pub xp_per_hour: f64,
+    pub(crate) xp_per_hour: f64,
 }
 
 impl FleetView {
-    pub fn totals(&self) -> Totals {
+    pub(crate) fn totals(&self) -> Totals {
         let n = self.rows.len();
         Totals {
             sessions: n,
@@ -634,7 +634,7 @@ const MIN_SPAN: Duration = Duration::from_secs(30);
 /// Experience an hour per character, from the totals seen over time:
 /// the gain since the oldest sample in the window, over the time since.
 #[derive(Debug, Default)]
-pub struct XpMeter {
+pub(crate) struct XpMeter {
     samples: BTreeMap<Key, VecDeque<(Instant, i64)>>,
 }
 
@@ -642,7 +642,7 @@ impl XpMeter {
     /// Note `total_xp` for `key` at `now`. Samples closer together than
     /// `SAMPLE_EVERY` are skipped; a total that went down (another
     /// character logged in on the same session) starts over.
-    pub fn sample(&mut self, key: &Key, total_xp: i64, now: Instant) {
+    pub(crate) fn sample(&mut self, key: &Key, total_xp: i64, now: Instant) {
         let s = self.samples.entry(key.clone()).or_default();
         if let Some((t, last)) = s.back() {
             if now.duration_since(*t) < SAMPLE_EVERY {
@@ -663,7 +663,7 @@ impl XpMeter {
 
     /// XP an hour for `key` as of `now`, or `None` until `MIN_SPAN`
     /// has been watched.
-    pub fn rate(&self, key: &Key, now: Instant) -> Option<f64> {
+    pub(crate) fn rate(&self, key: &Key, now: Instant) -> Option<f64> {
         let s = self.samples.get(key)?;
         let (t0, x0) = *s.front()?;
         let (_, x1) = *s.back()?;
@@ -675,13 +675,14 @@ impl XpMeter {
     }
 
     /// Drop the characters `keep` does not.
-    pub fn retain(&mut self, keep: impl Fn(&Key) -> bool) {
+    #[allow(dead_code)] // nothing calls it; kept pending a delete decision
+    pub(crate) fn retain(&mut self, keep: impl Fn(&Key) -> bool) {
         self.samples.retain(|k, _| keep(k));
     }
 
     /// Session `index` of `process` went: its samples go, and the
     /// sessions above it keep theirs under their new index.
-    pub fn session_removed(&mut self, process: &str, index: usize) {
+    pub(crate) fn session_removed(&mut self, process: &str, index: usize) {
         let mut shifted = BTreeMap::new();
         for (k, v) in std::mem::take(&mut self.samples) {
             if k.process != process || k.session < index {
@@ -696,17 +697,17 @@ impl XpMeter {
 
 /// A character as seen this frame, before it becomes a [`Row`].
 #[derive(Clone, Debug)]
-pub struct Seen {
-    pub key: Key,
-    pub local: bool,
-    pub active: bool,
-    pub mate: Mate,
-    pub doing: String,
-    pub role: Option<Role>,
+pub(crate) struct Seen {
+    pub(crate) key: Key,
+    pub(crate) local: bool,
+    pub(crate) active: bool,
+    pub(crate) mate: Mate,
+    pub(crate) doing: String,
+    pub(crate) role: Option<Role>,
 }
 
 /// The rows, leader first, then by name.
-pub fn rows(seen: &[Seen], xp: &XpMeter, now: Instant) -> Vec<Row> {
+pub(crate) fn rows(seen: &[Seen], xp: &XpMeter, now: Instant) -> Vec<Row> {
     let leader = team::leader_name(seen.iter().map(|s| &s.mate));
     let leader_at = seen
         .iter()
@@ -761,7 +762,7 @@ const AT_LANDMARK: f32 = 25.0;
 /// The nearest town, with the distance to it when out of town, and
 /// the landmark stood at, if any: "Holtburg", "Holtburg 1.2 km",
 /// "Holtburg (Life Stone)".
-pub fn place_of(world: glam::Vec3) -> String {
+pub(crate) fn place_of(world: glam::Vec3) -> String {
     let xy = world.truncate();
     let town = ac_world::towns::PLACES
         .iter()
@@ -779,7 +780,7 @@ pub fn place_of(world: glam::Vec3) -> String {
 }
 
 /// `15 m`, `1.2 km`.
-pub fn fmt_distance(m: f32) -> String {
+pub(crate) fn fmt_distance(m: f32) -> String {
     if m < 1000.0 {
         format!("{} m", m.round() as i64)
     } else {
@@ -788,7 +789,7 @@ pub fn fmt_distance(m: f32) -> String {
 }
 
 /// `850`, `12.3k`, `1.2M`, for an XP an hour figure.
-pub fn fmt_xp(x: f64) -> String {
+pub(crate) fn fmt_xp(x: f64) -> String {
     let a = x.abs();
     if a >= 1e6 {
         format!("{:.1}M", x / 1e6)
@@ -803,32 +804,32 @@ pub fn fmt_xp(x: f64) -> String {
 
 /// What the panel's draw returned.
 #[derive(Debug, Default, PartialEq)]
-pub struct Actions {
+pub(crate) struct Actions {
     /// A row of this process was clicked: show that session.
-    pub activate: Option<usize>,
+    pub(crate) activate: Option<usize>,
     /// Requests made of rows.
-    pub ask: Vec<(Key, Request)>,
+    pub(crate) ask: Vec<(Key, Request)>,
     /// The compact toggle was clicked.
-    pub compact: Option<bool>,
+    pub(crate) compact: Option<bool>,
     /// Roster entries (by roster index) to start, stop, remove.
-    pub start: Vec<usize>,
-    pub stop: Vec<usize>,
-    pub remove: Vec<usize>,
+    pub(crate) start: Vec<usize>,
+    pub(crate) stop: Vec<usize>,
+    pub(crate) remove: Vec<usize>,
     /// A roster entry's role was changed.
-    pub set_role: Vec<(usize, Role)>,
+    pub(crate) set_role: Vec<(usize, Role)>,
     /// The Add form was submitted.
-    pub add: bool,
+    pub(crate) add: bool,
     /// A remembered account (by roster index) was picked into the form.
-    pub pick: Option<usize>,
+    pub(crate) pick: Option<usize>,
     /// Start every follower that is not running.
-    pub start_followers: bool,
+    pub(crate) start_followers: bool,
     /// "I lead" was ticked or unticked for the session being played.
-    pub lead: Option<bool>,
+    pub(crate) lead: Option<bool>,
     /// The Sessions section was opened or closed.
-    pub sessions_open: Option<bool>,
+    pub(crate) sessions_open: Option<bool>,
     /// The "items" button: open the Items window (every character's
     /// inventory, see `super::holdings`).
-    pub items: bool,
+    pub(crate) items: bool,
 }
 
 const HEALTH: egui::Color32 = egui::Color32::from_rgb(200, 40, 40);
@@ -1398,7 +1399,7 @@ fn sessions(ui: &mut egui::Ui, v: &FleetView, form: &mut AddForm, a: &mut Action
 
 /// Draw the panel. `compact` picks one line per character over the
 /// table; `sessions_open` whether the Sessions section is unfolded.
-pub fn draw(
+pub(crate) fn draw(
     egui: &egui::Context,
     v: &FleetView,
     compact: bool,
@@ -1461,12 +1462,12 @@ pub fn draw(
 
 /// The panel.
 #[derive(Default)]
-pub struct Fleet {
+pub(crate) struct Fleet {
     source: Source<FleetView>,
-    pub show: bool,
-    pub compact: bool,
+    pub(crate) show: bool,
+    pub(crate) compact: bool,
     /// The Sessions section is unfolded.
-    pub sessions_open: bool,
+    pub(crate) sessions_open: bool,
     /// Other processes' sessions, as last heard.
     roster: Roster,
     /// The last `autoplay.event` line of each other process's session.
@@ -1474,19 +1475,19 @@ pub struct Fleet {
     xp: XpMeter,
     /// The login store, as last read from its file: the servers the
     /// player knows and the accounts remembered for each.
-    pub servers: Servers,
-    /// What the fleet adds to those accounts (settings: [`ENTRIES_KEY`]).
-    pub entries: Vec<Entry>,
+    pub(crate) servers: Servers,
+    /// What the fleet adds to those accounts (settings: `ENTRIES_KEY`).
+    pub(crate) entries: Vec<Entry>,
     /// Per server, the account whose session leads (settings:
-    /// [`LEADS_KEY`]).
-    pub leads: BTreeMap<String, String>,
+    /// `LEADS_KEY`).
+    pub(crate) leads: BTreeMap<String, String>,
     /// The server the roster is for, worked out each frame: the session
     /// being played, else any session's, else the last connected to.
-    pub host: String,
+    pub(crate) host: String,
     /// The current server's roster, from `servers` and `entries`. Held
     /// so the rows have stable indices within a frame.
-    pub accounts: Vec<SessionSpec>,
-    /// The old global roster and leader, until [`migrate`] folds them in.
+    pub(crate) accounts: Vec<SessionSpec>,
+    /// The old global roster and leader, until `migrate` folds them in.
     legacy: Vec<SessionSpec>,
     legacy_lead: Option<String>,
     migrated: bool,
@@ -1495,7 +1496,7 @@ pub struct Fleet {
     store: Option<PathBuf>,
     store_seen: Option<std::time::SystemTime>,
     store_checked: Option<Instant>,
-    pub form: AddForm,
+    pub(crate) form: AddForm,
     /// Accounts asked to start, and when, until their session appears.
     starting: BTreeMap<String, Instant>,
     /// Sessions whose connection ended: index -> why.
@@ -1507,7 +1508,7 @@ pub struct Fleet {
 }
 
 impl Fleet {
-    pub fn demo() -> Self {
+    pub(crate) fn demo() -> Self {
         let now = Instant::now();
         let holt = ac_world::towns::find("Holtburg")
             .map(|p| p.world_xy())
@@ -1631,7 +1632,8 @@ impl Fleet {
 
     /// A panel reading and writing `path` instead of the usual login
     /// store, for tests.
-    pub fn using_store(path: PathBuf) -> Self {
+    #[allow(dead_code)] // only the tests in this file call it
+    pub(crate) fn using_store(path: PathBuf) -> Self {
         Fleet {
             store: Some(path),
             ..Default::default()
@@ -2112,7 +2114,7 @@ impl Plugin for Fleet {
         self.migrated = settings.get(MIGRATED_KEY).unwrap_or(false);
         if !self.migrated {
             // An older build's global roster, folded in on the first
-            // tick that knows a server (see [`migrate`]).
+            // tick that knows a server (see `migrate`).
             self.legacy = settings.get(ROSTER_KEY).unwrap_or_default();
             self.legacy_lead = settings.get::<Option<String>>(LEAD_KEY).unwrap_or_default();
         }

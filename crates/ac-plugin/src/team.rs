@@ -30,7 +30,7 @@
 //! each before the first board round had carried a word, the fleet
 //! split between the two, and members of one had no right to the
 //! other's bodies. So a view says whether it has *settled* (see
-//! [`Settling`]): the leader flag is acted on -- a fellowship founded
+//! `Settling`): the leader flag is acted on -- a fellowship founded
 //! or given up -- only once the roster has stood unchanged for a full
 //! board round.
 
@@ -44,16 +44,16 @@ use serde_json::Value;
 use crate::{Ctx, Plugin};
 
 /// The topic a session's word about itself goes out on.
-pub const MATE_TOPIC: &str = "autoplay.mate";
+pub(crate) const MATE_TOPIC: &str = "autoplay.mate";
 /// The topic the fleet view asks another process's session to do
 /// something on: `{"process", "session", "name", "action"}`, where
 /// `action` is a [`Request`] word. The team plugin in the process named
 /// applies it to the session named (see [`Request::apply`]).
-pub const REQUEST_TOPIC: &str = "fleet.request";
+pub(crate) const REQUEST_TOPIC: &str = "fleet.request";
 /// The topic the leader's plan for the party goes out on, once a board
 /// round: an `ac_client::plan::Plan`. Every session on the team takes its
 /// orders from the plan of the leader it sees, and from nobody else's.
-pub const PLAN_TOPIC: &str = "autoplay.plan";
+pub(crate) const PLAN_TOPIC: &str = "autoplay.plan";
 /// How often each session speaks.
 const SAY_EVERY: Duration = Duration::from_millis(500);
 /// A mate not heard from for this long has gone.
@@ -74,19 +74,19 @@ struct Heard {
 /// Everyone on the team, keyed by where they spoke from: the process
 /// (this one or a name on the bus) and the session within it.
 #[derive(Debug, Default)]
-pub struct Roster {
+pub(crate) struct Roster {
     heard: BTreeMap<(String, usize), Heard>,
 }
 
 impl Roster {
     /// Take in one word from a mate.
-    pub fn hear(&mut self, process: &str, session: usize, mate: Mate, now: Instant) {
+    pub(crate) fn hear(&mut self, process: &str, session: usize, mate: Mate, now: Instant) {
         self.heard
             .insert((process.to_string(), session), Heard { mate, at: now });
     }
 
     /// Forget whoever has gone quiet.
-    pub fn forget_quiet(&mut self, now: Instant) {
+    pub(crate) fn forget_quiet(&mut self, now: Instant) {
         self.heard
             .retain(|_, h| now.duration_since(h.at) < FORGET_AFTER);
     }
@@ -97,7 +97,7 @@ impl Roster {
     /// the one whose name sorts first, this one included. What the
     /// session said about itself goes with it, so that the turns at a
     /// newly fallen body read it as the others read it.
-    pub fn view_for(&self, me: &Mate) -> TeamView {
+    pub(crate) fn view_for(&self, me: &Mate) -> TeamView {
         let mut mates: Vec<Mate> = self
             .heard
             .values()
@@ -120,17 +120,19 @@ impl Roster {
     }
 
     /// Everyone heard, with where each spoke from (process, session).
-    pub fn iter(&self) -> impl Iterator<Item = (&str, usize, &Mate)> {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&str, usize, &Mate)> {
         self.heard
             .iter()
             .map(|((p, s), h)| (p.as_str(), *s, &h.mate))
     }
 
-    pub fn len(&self) -> usize {
+    #[allow(dead_code)] // nothing calls it; kept pending a delete decision
+    pub(crate) fn len(&self) -> usize {
         self.heard.len()
     }
 
-    pub fn is_empty(&self) -> bool {
+    #[allow(dead_code)] // nothing calls it; kept pending a delete decision
+    pub(crate) fn is_empty(&self) -> bool {
         self.heard.is_empty()
     }
 }
@@ -147,7 +149,7 @@ impl Roster {
 /// spoken. Anyone joining during the round speaks the moment it joins,
 /// and its word starts the round again.
 #[derive(Clone, Debug, Default)]
-pub struct Settling {
+pub(crate) struct Settling {
     /// The names heard, sorted, and since when they have been these.
     names: Vec<String>,
     since: Option<Instant>,
@@ -157,7 +159,7 @@ impl Settling {
     /// Note the roster as this session sees it at `now`, and say whether
     /// it has stood for a full round. The first look starts the round;
     /// a roster with different names on it starts it again.
-    pub fn settle(&mut self, mut names: Vec<String>, now: Instant) -> bool {
+    pub(crate) fn settle(&mut self, mut names: Vec<String>, now: Instant) -> bool {
         names.sort_unstable();
         if self.since.is_none() || names != self.names {
             self.names = names;
@@ -171,7 +173,7 @@ impl Settling {
 
 /// Who leads among `mates`: the first by name of those that asked to,
 /// else the first by name of all. `None` when nobody has a name.
-pub fn leader_name<'a>(mates: impl Iterator<Item = &'a Mate> + Clone) -> Option<String> {
+pub(crate) fn leader_name<'a>(mates: impl Iterator<Item = &'a Mate> + Clone) -> Option<String> {
     let named = |lead_only: bool| {
         mates
             .clone()
@@ -185,7 +187,7 @@ pub fn leader_name<'a>(mates: impl Iterator<Item = &'a Mate> + Clone) -> Option<
 }
 
 /// What the fleet view can ask of a session, its own or another
-/// process's (over [`REQUEST_TOPIC`]).
+/// process's (over `REQUEST_TOPIC`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Request {
     /// Play on its own.
@@ -268,7 +270,7 @@ impl Request {
         })
     }
 
-    /// Read a [`REQUEST_TOPIC`] message: what it asks and of whom, as
+    /// Read a `REQUEST_TOPIC` message: what it asks and of whom, as
     /// `(process, session, name, request)`.
     pub fn from_message(value: &Value) -> Option<(String, usize, String, Request)> {
         let process = value.get("process")?.as_str()?.to_string();
@@ -292,14 +294,14 @@ pub struct Team {
     /// said.
     last_said: BTreeMap<usize, (Instant, Mate)>,
     /// How long each session's roster has stood unchanged (see
-    /// [`Settling`]). Forgotten when the session leaves the team, so
+    /// `Settling`). Forgotten when the session leaves the team, so
     /// coming back on starts the round again.
     settling: BTreeMap<usize, Settling>,
 }
 
 /// A vital (0 health, 1 stamina, 2 mana) as a fraction of its maximum,
 /// 1.0 when the sheet has not arrived.
-pub fn vital_fraction(stats: &ac_world::stats::PlayerStats, i: usize) -> f32 {
+pub(crate) fn vital_fraction(stats: &ac_world::stats::PlayerStats, i: usize) -> f32 {
     let max = stats.vital_max_current(i);
     if max == 0 {
         return 1.0;
@@ -310,7 +312,7 @@ pub fn vital_fraction(stats: &ac_world::stats::PlayerStats, i: usize) -> f32 {
 /// What a session says about itself; `None` before it is in the world
 /// with a name. The fleet view builds its rows for this process's
 /// sessions from the same word.
-pub fn describe(client: &ac_client::Client, session: usize) -> Option<Mate> {
+pub(crate) fn describe(client: &ac_client::Client, session: usize) -> Option<Mate> {
     let player = client.player.as_ref()?;
     let cfg = &client.autoplay.config.team;
     let name = client.world.stats.name.clone();
@@ -530,7 +532,8 @@ impl Plugin for Team {
 }
 
 /// For a panel or a script: the roster as JSON, everyone heard.
-pub fn roster_json(team: &Team) -> Value {
+#[allow(dead_code)] // nothing calls it; kept pending a delete decision
+pub(crate) fn roster_json(team: &Team) -> Value {
     Value::Array(
         team.roster
             .heard
