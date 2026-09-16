@@ -46,6 +46,9 @@ pub struct Step {
     /// What it is called, in the log and in the panel.
     pub name: &'static str,
     pub layer: Layer,
+    /// What this goal is worth when its scorer has no opinion. Written
+    /// out so that adding or dropping a row moves nothing else.
+    pub base: f32,
     /// Why it sits where it does. The reason the order matters, kept
     /// beside the order rather than in a comment above one branch of a
     /// chain.
@@ -55,14 +58,6 @@ pub struct Step {
     worth: fn(&Client, Instant) -> f32,
     run: fn(&mut Client, Instant) -> Did,
 }
-
-/// What a goal is worth when it has no opinion of its own: its place in
-/// the table, so that goals which do not score behave exactly as they
-/// did when the order was all there was.
-///
-/// Spaced ten apart, which leaves room for a goal to say "this is worth
-/// rather more than usual" without leaping the whole table.
-const BY_PLACE: f32 = 10.0;
 
 impl Step {
     pub fn run(&self, client: &mut Client, now: Instant) -> Did {
@@ -79,8 +74,8 @@ impl Step {
     ///
     /// A goal that does not score gets its place in the table, so
     /// nothing moves until a curve is written on purpose.
-    pub fn worth(&self, client: &Client, now: Instant, place: usize) -> f32 {
-        let base = (STEPS.len() - place) as f32 * BY_PLACE;
+    pub fn worth(&self, client: &Client, now: Instant) -> f32 {
+        let base = self.base;
         let said = (self.worth)(client, now);
         if said == UNDECIDED {
             base
@@ -313,6 +308,7 @@ pub const STEPS: &[Step] = &[
     Step {
         name: "survive",
         layer: Layer::Reflex,
+        base: 190.0,
         why: "healing comes before everything, a spell in the air included: a character that dodges well and dies is no better off",
         worth: by_place,
         run: claimed!(Client::autoplay_survive),
@@ -320,6 +316,7 @@ pub const STEPS: &[Step] = &[
     Step {
         name: "dodge",
         layer: Layer::Reflex,
+        base: 180.0,
         why: "a spell already in the air is stepped out of before anything but healing",
         worth: by_place,
         run: claimed!(Client::autoplay_dodge),
@@ -327,6 +324,7 @@ pub const STEPS: &[Step] = &[
     Step {
         name: "recover",
         layer: Layer::Reflex,
+        base: 170.0,
         why: "dead, or on the way back from it: nothing else until the corpse is dealt with",
         worth: by_place,
         run: claimed!(Client::autoplay_recover),
@@ -334,6 +332,7 @@ pub const STEPS: &[Step] = &[
     Step {
         name: "academy",
         layer: Layer::Reflex,
+        base: 160.0,
         why: "a new character finishes the tutorial before it is let loose on anything else",
         worth: by_place,
         run: claimed!(Client::autoplay_academy),
@@ -341,6 +340,7 @@ pub const STEPS: &[Step] = &[
     Step {
         name: "urgent buffs",
         layer: Layer::Reflex,
+        base: 150.0,
         why: "a buff about to lapse goes back up before anything else, fight or no fight",
         worth: by_place,
         run: |c, now| {
@@ -354,6 +354,7 @@ pub const STEPS: &[Step] = &[
     Step {
         name: "vitals",
         layer: Layer::Reflex,
+        base: 140.0,
         why: "mana and stamina are kept up between everything else",
         worth: by_place,
         run: claimed!(Client::autoplay_vitals),
@@ -361,6 +362,7 @@ pub const STEPS: &[Step] = &[
     Step {
         name: "loot",
         layer: Layer::Goal,
+        base: 130.0,
         why: "a corpse keeps for five minutes and rots; the leader and the shops do not",
         worth: worth_looting,
         run: claimed!(Client::autoplay_loot),
@@ -368,6 +370,7 @@ pub const STEPS: &[Step] = &[
     Step {
         name: "catch up",
         layer: Layer::Goal,
+        base: 120.0,
         why: "a leader that has got well away is caught up with before anything else is considered",
         worth: by_place,
         run: |c, now| {
@@ -381,6 +384,7 @@ pub const STEPS: &[Step] = &[
     Step {
         name: "team",
         layer: Layer::Goal,
+        base: 110.0,
         why: "debuff the party's target, hand a teammate what it is short of, heal whoever is worst",
         worth: by_place,
         run: claimed!(Client::autoplay_team),
@@ -388,6 +392,7 @@ pub const STEPS: &[Step] = &[
     Step {
         name: "salvage",
         layer: Layer::Goal,
+        base: 100.0,
         why: "salvage sits between fights: left alone while anything is being fought",
         worth: by_place,
         run: claimed!(Client::autoplay_salvage),
@@ -395,6 +400,7 @@ pub const STEPS: &[Step] = &[
     Step {
         name: "summon",
         layer: Layer::Goal,
+        base: 90.0,
         worth: worth_fighting,
         why: "a summoned creature fights beside the character: called as a fight begins, and again whenever the last one is gone and an essence is ready",
         run: claimed!(Client::autoplay_summon),
@@ -402,6 +408,7 @@ pub const STEPS: &[Step] = &[
     Step {
         name: "fight",
         layer: Layer::Goal,
+        base: 80.0,
         worth: worth_fighting,
         why: "what the character is mostly for",
         run: claimed!(Client::autoplay_fight),
@@ -409,6 +416,7 @@ pub const STEPS: &[Step] = &[
     Step {
         name: "keep to the area",
         layer: Layer::Goal,
+        base: 70.0,
         worth: by_place,
         why: "a hunting area is where the fights are to be had: outside it, with nothing to fight, go back",
         run: claimed!(Client::autoplay_keep_to_area),
@@ -416,6 +424,7 @@ pub const STEPS: &[Step] = &[
     Step {
         name: "buffs",
         layer: Layer::Goal,
+        base: 60.0,
         why: "the buffs that were not urgent, once the fighting is done",
         worth: by_place,
         run: |c, now| {
@@ -429,6 +438,7 @@ pub const STEPS: &[Step] = &[
     Step {
         name: "follow",
         layer: Layer::Goal,
+        base: 50.0,
         why: "a leader near at hand is followed once the fighting is done",
         worth: by_place,
         run: |c, now| {
@@ -442,6 +452,7 @@ pub const STEPS: &[Step] = &[
     Step {
         name: "resume the journey",
         layer: Layer::Goal,
+        base: 40.0,
         why: "a walk broken off by a fight is picked up again",
         worth: by_place,
         run: |c, _| {
@@ -455,6 +466,7 @@ pub const STEPS: &[Step] = &[
     Step {
         name: "tidy",
         layer: Layer::Goal,
+        base: 30.0,
         why: "holds tidy's old place so no goal's worth moves; the pack is tidied every tick as housekeeping, which needs no tick of its own",
         // Never weighed, so never run: every other goal's worth is its
         // place in this table, and taking the row out would move six of
@@ -465,6 +477,7 @@ pub const STEPS: &[Step] = &[
     Step {
         name: "explore",
         layer: Layer::Goal,
+        base: 20.0,
         why: "a dungeon is described a room at a time, so a character that waits at the entrance waits in the one room that is empty; walk it before deciding the ground is dead",
         worth: by_place,
         run: claimed!(Client::autoplay_explore),
@@ -472,6 +485,7 @@ pub const STEPS: &[Step] = &[
     Step {
         name: "grow",
         layer: Layer::Goal,
+        base: 10.0,
         why: "with nothing else to do: find monsters, run to town; experience is spent as housekeeping, since this is reached only on a tick nothing else wants",
         worth: by_place,
         run: claimed!(Client::autoplay_grow),
@@ -551,7 +565,7 @@ pub fn weigh(client: &Client, now: Instant) -> Weighed {
         if step.layer != Layer::Goal {
             continue;
         }
-        let worth = step.worth(client, now, place);
+        let worth = step.worth(client, now);
         if worth > 0.0 {
             order.push((place, worth));
         }
@@ -578,7 +592,7 @@ impl Weighed {
         while let Some(&(place, worth)) = self.order.get(self.next) {
             self.next += 1;
             let step = &STEPS[place];
-            if step.worth(client, now, place) > 0.0 {
+            if step.worth(client, now) > 0.0 {
                 return Some((step, worth));
             }
         }

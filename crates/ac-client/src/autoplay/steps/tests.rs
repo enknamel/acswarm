@@ -91,13 +91,10 @@ fn experience_is_spent_as_housekeeping_and_never_claims_a_tick() {
 
 #[test]
 fn every_goal_keeps_the_worth_it_had_when_tidying_moved() {
-    // The reason the row stays: every goal with no opinion is worth
-    // its place in this table, and six of them are weighed against
-    // fixed scores. Taking a row out shifts all of them.
-    let base = |name: &str| {
-        let place = STEPS.iter().position(|s| s.name == name).expect(name);
-        (STEPS.len() - place) as f32 * BY_PLACE
-    };
+    // Six goals are weighed against fixed scores, so these numbers are
+    // the contract. They are written in the table now, so a row may come
+    // or go without moving them.
+    let base = |name: &str| STEPS.iter().find(|s| s.name == name).expect(name).base;
     assert_eq!(STEPS.len(), 19);
     assert_eq!(base("fight"), 80.0);
     assert_eq!(base("summon"), 90.0);
@@ -138,7 +135,7 @@ fn a_goal_with_no_opinion_keeps_its_place() {
         .filter(|(_, s)| s.layer == Layer::Goal)
         .map(|(i, _)| i)
         .collect();
-    let base = |place: usize| (STEPS.len() - place) as f32 * BY_PLACE;
+    let base = |place: usize| STEPS[place].base;
     for pair in places.windows(2) {
         assert!(
             base(pair[0]) > base(pair[1]),
@@ -156,10 +153,7 @@ fn a_goal_with_no_opinion_keeps_its_place() {
 
 #[test]
 fn a_body_gets_more_worth_going_back_for_the_longer_it_waits() {
-    let base = |name: &str| {
-        let place = STEPS.iter().position(|s| s.name == name).expect(name);
-        (STEPS.len() - place) as f32 * BY_PLACE
-    };
+    let base = |name: &str| STEPS.iter().find(|s| s.name == name).expect(name).base;
     let fight = base("fight");
     // The arithmetic of the curve, without a world to hang it on.
     let worth = |left_secs: f32, waiting: usize| {
@@ -192,7 +186,7 @@ fn a_body_about_to_rot_outranks_the_next_fight() {
     // middle of choosing a corpse: a fight will still be there
     // afterwards and the body will not.
     let at = |name: &str| STEPS.iter().position(|s| s.name == name).expect(name);
-    let base = |place: usize| (STEPS.len() - place) as f32 * BY_PLACE;
+    let base = |place: usize| STEPS[place].base;
     assert!(
         base(at("loot")) < WORTH_A_LOT,
         "an urgent corpse must be able to outrank its own place"
@@ -350,8 +344,8 @@ fn looting_is_worth_only_the_bodies_this_character_would_go_to() {
     assert_eq!(worth_looting(&c, now), one);
     let fight = STEPS
         .iter()
-        .position(|s| s.name == "fight")
-        .map(|p| (STEPS.len() - p) as f32 * BY_PLACE)
+        .find(|s| s.name == "fight")
+        .map(|s| s.base)
         .expect("the fight is in the table");
     assert!(
         worth_looting(&c, now) < fight,
@@ -376,4 +370,24 @@ fn looting_is_worth_only_the_bodies_this_character_would_go_to() {
     c.autoplay
         .take_up_corpse(mine, now, std::time::Duration::from_secs(10));
     assert_eq!(worth_looting(&c, now), one, "let go of a body in hand");
+}
+
+#[test]
+fn the_score_column_is_the_one_the_table_order_used_to_give() {
+    // Written out when the scores stopped being arithmetic on the row's
+    // place, so the move changed no goal's worth. Ten apart, first worth
+    // most; a new row picks a number, it does not shift its neighbours.
+    let expected: Vec<f32> = (0..STEPS.len())
+        .map(|p| (STEPS.len() - p) as f32 * 10.0)
+        .collect();
+    let actual: Vec<f32> = STEPS.iter().map(|s| s.base).collect();
+    assert_eq!(actual, expected);
+    for pair in STEPS.windows(2) {
+        assert!(
+            pair[0].base > pair[1].base,
+            "{} must outrank {}",
+            pair[0].name,
+            pair[1].name
+        );
+    }
 }
