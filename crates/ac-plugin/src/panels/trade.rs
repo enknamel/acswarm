@@ -75,11 +75,12 @@ pub(crate) fn view(c: &Client) -> Option<TradeView> {
     })
 }
 
-/// The WeenieErrors a TradeFailure carries.
+/// The WeenieError a TradeFailure carries. ACE sends `AttunedItem` both for an attuned item and
+/// for a pet still out (`WorldObjects/Player_Trade.cs:143`, `:150`), so the transient line beside
+/// it is what tells those two apart, and `None` for a unique the other pack cannot hold (`:157`).
 pub(crate) fn failure_text(reason: u32) -> &'static str {
     match reason {
-        0x0430 => "attuned item",
-        0x03F2 => "you cannot trade that",
+        0x0426 => "attuned, or a pet still out",
         _ => "the server refused it",
     }
 }
@@ -270,5 +271,12 @@ mod tests {
         assert_eq!(status_text(&v), "Bob accepted: press Accept to trade");
         v.i_accepted = true;
         assert_eq!(status_text(&v), "Both accepted: trading");
+    }
+
+    #[test]
+    fn the_only_reason_a_trade_failure_carries_is_read() {
+        // 0x0426 is ACE's AttunedItem, the one code Player_Trade sends with a reason.
+        assert_eq!(failure_text(0x0426), "attuned, or a pet still out");
+        assert_eq!(failure_text(0x0000), "the server refused it");
     }
 }
