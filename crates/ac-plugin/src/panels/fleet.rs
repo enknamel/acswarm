@@ -2706,6 +2706,10 @@ mod tests {
             s.remember("127.0.0.1:9000", "alice", "pw", "");
             s.remember("127.0.0.1:9000", "bob", "", "");
             s.remember("other:9000", "carol", "pw", "");
+            // Accounts come back newest first and `used` counts whole
+            // seconds, so age these: the account folded in below is then
+            // the newest whichever second its write lands in.
+            s.logins.iter_mut().for_each(|l| l.used = 1);
             s.last_host = "127.0.0.1:9000".into();
             s.last_account = "alice".into();
         });
@@ -2729,8 +2733,8 @@ mod tests {
         let names: Vec<&str> = fleet.accounts.iter().map(|s| s.account.as_str()).collect();
         assert_eq!(
             names,
-            ["alice", "bob", "fleetbot1"],
-            "the old one folded in"
+            ["fleetbot1", "alice", "bob"],
+            "the old one folded in, newest first"
         );
         assert_eq!(
             fleet.leads.get("127.0.0.1:9000").map(String::as_str),
