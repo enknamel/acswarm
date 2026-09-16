@@ -34,6 +34,7 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
+use ac_agent::recent::Recent;
 use ac_world::elements::Element;
 
 use crate::autoplay::Doing;
@@ -62,7 +63,7 @@ const ITEM_SKILL_LEVEL_LIMIT: u32 = 115;
 pub struct State {
     /// When each cooldown was last started, by cooldown id (the item's
     /// own guid when it has none).
-    used: HashMap<u32, Instant>,
+    used: Recent<u32>,
     /// The essence last used and when, until its creature turns up.
     pending: Option<(u32, Instant)>,
     /// Essences that brought nothing: how many times in a row, and when
@@ -223,7 +224,7 @@ impl Client {
                         o.guid
                     }
                 });
-                self.autoplay.summoning.used.remove(&key);
+                self.autoplay.summoning.used.forget(&key);
             }
         }
     }
@@ -306,10 +307,7 @@ impl Client {
                 } else {
                     COOLDOWN
                 };
-                let cooled = state
-                    .used
-                    .get(&key)
-                    .is_none_or(|t| now.duration_since(*t) >= wait);
+                let cooled = !state.used.within(&key, now, wait);
                 let set_aside = state.failed.get(&o.guid).is_some_and(|(n, t)| {
                     *n >= FAILS_BEFORE_SET_ASIDE && now.duration_since(*t) < SET_ASIDE
                 });
@@ -345,7 +343,7 @@ impl Client {
         };
         let name = o.name.clone();
         self.interact(guid);
-        self.autoplay.summoning.used.insert(key, now);
+        self.autoplay.summoning.used.mark(key, now);
         self.autoplay.summoning.pending = Some((guid, now));
         self.autoplay
             .say(Doing::Fighting, format!("summoning with {name}"));
