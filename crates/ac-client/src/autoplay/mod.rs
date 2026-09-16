@@ -52,6 +52,7 @@ mod cast;
 mod config;
 pub mod growth;
 mod hear;
+mod journey;
 pub mod steps;
 pub mod summoning;
 
@@ -7762,40 +7763,6 @@ impl Client {
             .collect();
         ids.sort_by_key(|id| std::cmp::Reverse(table.get(*id).map(|s| s.power).unwrap_or(0)));
         ids
-    }
-
-    /// A swing cancels the journey (the move-to and the trip cannot both
-    /// steer). Note where it was going, so it is taken up again once
-    /// the fight is over.
-    pub(crate) fn remember_journey(&mut self) {
-        if self.traveling() {
-            if let Some(goal) = self.travel_goal_xy() {
-                self.autoplay.resume_trip = Some(goal);
-                self.autoplay.resume_about_the_ground = self.travel_about_the_ground();
-            }
-        }
-    }
-
-    /// Pick the journey up again after a fight, once there is nothing
-    /// else to do.
-    pub(crate) fn autoplay_resume_journey(&mut self) -> bool {
-        let Some(goal) = self.autoplay.resume_trip else {
-            return false;
-        };
-        if self.traveling() || self.attack_target.is_some() || self.autoplay.casting_at.is_some() {
-            return false;
-        }
-        self.autoplay.resume_trip = None;
-        let resumed = if self.autoplay.resume_about_the_ground {
-            self.travel_about(goal)
-        } else {
-            self.travel_to(goal)
-        };
-        if resumed {
-            self.autoplay.say(Doing::Idle, "back on the road");
-            return true;
-        }
-        false
     }
 
     /// Let the target go and leave it alone for [`GIVE_UP_FOR`], saying
