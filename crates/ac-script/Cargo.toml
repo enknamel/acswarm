@@ -17,3 +17,7 @@ glam.workspace = true
 rhai = { version = "1", features = ["serde"] }
 serde_json.workspace = true
 tracing.workspace = true
+
+[dev-dependencies]
+# Offline sessions, so a test can drive the bridge against a real client.
+ac-client = { path = "../ac-client", features = ["testkit"] }

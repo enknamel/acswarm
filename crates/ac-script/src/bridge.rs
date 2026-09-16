@@ -436,10 +436,13 @@ impl Api for CtxApi<'_, '_> {
     }
 
     fn fight(&mut self, on: bool) -> bool {
+        use ac_client::autoplay::Release;
         let c = self.client();
         c.autoplay.config.fight.enabled = on;
         if !on {
-            c.attack_target = None;
+            // The rules' own stop: the swing's target alone leaves the
+            // spell's and the engagement, a fight to every rule that asks.
+            c.let_go(Release::Fight);
         }
         on
     }
@@ -1631,6 +1634,50 @@ fn skill_by_name(c: &ac_plugin::ac_client::Client, name: &str) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A `Ctx` over one offline session, to drive the real bridge.
+    fn ctx<'a>(
+        client: &'a mut Client,
+        board: &'a mut ac_plugin::Blackboard,
+        settings: &'a mut ac_plugin::Settings,
+        icons: &'a mut ac_plugin::IconCache,
+    ) -> Ctx<'a> {
+        Ctx {
+            clients: vec![client],
+            index: 0,
+            board,
+            settings,
+            icons,
+            dt: 0.05,
+            now: std::time::Instant::now(),
+            chat: Vec::new(),
+            activate: None,
+            quit: false,
+            pick_data_dir: false,
+            start_sessions: Vec::new(),
+            stop_sessions: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn turning_the_fight_off_lets_the_whole_fight_go() {
+        // Live dodge testing stops a caster and shoots at it, so a fight
+        // half let go would quietly corrupt that measurement.
+        let mut client = ac_client::testkit::offline_client();
+        client.autoplay.config.fight.enabled = true;
+        client.take_up_fight(0x5000_0001);
+        let mut board = ac_plugin::Blackboard::default();
+        let mut settings = ac_plugin::Settings::new();
+        let mut icons = ac_plugin::IconCache::default();
+        let mut cx = ctx(&mut client, &mut board, &mut settings, &mut icons);
+        assert!(!CtxApi { cx: &mut cx }.fight(false));
+        assert!(!client.autoplay.config.fight.enabled, "the rule is off");
+        assert_eq!(
+            client.fight_held(),
+            (false, false, false, false),
+            "swing, spell, engagement and closing walk all let go"
+        );
+    }
 
     #[test]
     fn item_map_carries_every_field_and_the_summary() {
