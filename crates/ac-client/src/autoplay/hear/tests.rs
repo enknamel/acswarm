@@ -1,5 +1,5 @@
 use super::*;
-use crate::autoplay::{nothing_arrived, CLOSE_IN_AFTER};
+use crate::autoplay::fight::melee::{nothing_arrived, CLOSE_IN_AFTER};
 
 #[test]
 fn a_spell_cast_at_the_character_names_its_caster() {
