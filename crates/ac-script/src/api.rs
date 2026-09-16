@@ -88,8 +88,8 @@ pub trait Api {
     /// The growth rules (spend experience, seek hunting grounds, run to
     /// town) on or off; all three at once.
     fn growth(&mut self, on: bool) -> bool;
-    /// The fight rules (pick a creature and attack it) on or off. Off,
-    /// the character still heals, buffs, loots and dodges.
+    /// The fight rules (pick a creature and attack it) on or off. Off
+    /// lets the fight go, swing and spell; heals, buffs and loots stay.
     fn fight(&mut self, on: bool) -> bool;
     /// The teammates heard from, as maps of `name`, `guid`, `health`,
     /// `role`, `target`, `target_name`, `leader`, `in_fellowship`; plus

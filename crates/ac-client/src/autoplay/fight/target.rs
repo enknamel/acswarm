@@ -109,6 +109,28 @@ impl Client {
         }
     }
 
+    /// Test-only: hold a fight the way a caster in one holds it, so what
+    /// a front end's stop lets go can be read from outside the crate.
+    #[cfg(any(test, feature = "testkit"))]
+    pub fn take_up_fight(&mut self, guid: u32) {
+        self.attack_target = Some(guid);
+        self.autoplay.casting_at = Some(guid);
+        self.autoplay.engaged = Some((guid, Instant::now(), 1.0));
+        self.autoplay.closing = Some((guid, 1.0));
+    }
+
+    /// Test-only: what of a fight is still held -- the swing's target,
+    /// the spell's, the engagement, the closing walk.
+    #[cfg(any(test, feature = "testkit"))]
+    pub fn fight_held(&self) -> (bool, bool, bool, bool) {
+        (
+            self.attack_target.is_some(),
+            self.autoplay.casting_at.is_some(),
+            self.autoplay.engaged.is_some(),
+            self.autoplay.closing.is_some(),
+        )
+    }
+
     /// Let the target go and leave it alone for [`GIVE_UP_FOR`], saying
     /// why once.
     pub(crate) fn give_up_target(&mut self, guid: u32, why: &str, now: Instant) {
