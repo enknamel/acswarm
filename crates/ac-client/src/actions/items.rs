@@ -31,33 +31,8 @@ pub(crate) struct TakeSent {
 
 impl Client {
     pub fn use_by_name(&mut self, name: &str) -> bool {
-        let me = self.my_position();
-        let my_guid = self.world.player_guid;
-        let mut best: Option<(f32, u32)> = None;
-        for o in self.world.objects.values() {
-            if !o.name.starts_with(name) {
-                continue;
-            }
-            // Carried items count as distance zero, so they win over the floor;
-            // exact names beat prefix matches.
-            let carried = my_guid.is_some() && (o.container == my_guid || o.wielder == my_guid);
-            let exact = if o.name == name { 0.0 } else { 1000.0 };
-            let d = exact
-                + if carried {
-                    0.0
-                } else {
-                    let Some(p) = o.display.or(o.position) else {
-                        continue;
-                    };
-                    me.map(|m| (ac_world::landblock_origin(p.cell) + p.local).distance(m))
-                        .unwrap_or(0.0)
-                };
-            if best.map(|(bd, _)| d < bd).unwrap_or(true) {
-                best = Some((d, o.guid));
-            }
-        }
-        match best {
-            Some((_, guid)) => {
+        match self.object_by_name(name) {
+            Some(guid) => {
                 self.select(Some(guid));
                 self.interact(guid);
                 true

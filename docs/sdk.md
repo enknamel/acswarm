@@ -208,6 +208,60 @@ Every action a player can take is a method on `ac_client::Client`, and
 the script functions mirror them one to one (each does what the matching
 `/command` in the console does).
 
+### One vocabulary: `Client::act`
+
+What comes from *outside* the character -- a chat line, a key, a Rhai call,
+the bus, the CLI, a panel button -- can be named rather than spelled out:
+build an `ac_client::action::Action` and hand it to `act`. It answers
+`Ok(())` when the request went out and `Err(Refused)` with the words to show
+when it did not (the server's own answer comes back later as an `Event`).
+
+```rust
+use ac_client::action::{Action, SpellRef, Target};
+
+if let Err(why) = cx.client().act(Action::Cast {
+    spell: SpellRef::Name("Heal Self".into()),
+    at: Some(Target::Me),
+}) {
+    cx.log(why.to_string());        // "no spell called ..."; "mana 12/25"
+}
+```
+
+A name becomes a thing in one place, `ac_client::action::resolve`: a spell by
+prefix, then substring, then a Scroll of it in the pack; an item in the pack,
+a ware on the open counter, an object in view, the corpse of the last target,
+a place on the map.
+
+**`act` carries external intent, and only that.** Autoplay does not route
+through it and neither does any read: those stay direct `Client` method
+calls. Adding a variant to `Action` is for something a person, a script or
+another process asks for.
+
+### A typed line: `Client::chat_line`
+
+One router decides what a line in the chat box means, in this order: the
+retail command table (`action::RETAIL`), then the plugin and script
+`command` hooks, then the server for a line beginning `@` or an unknown `/`,
+then the words are said aloud. A front end runs the hooks step itself, since
+only it holds the plugins:
+
+```rust
+match client.chat_line(&line) {
+    Line::Acted(done) => { if let Err(why) = done { log(why.to_string()) } }
+    Line::Offer { unclaimed, .. } => {
+        // /nop, /v_burden, a panel's own command...
+        if !host.command(clients, active, &line).consumed {
+            let _ = clients[active].act(unclaimed);
+        }
+    }
+}
+```
+
+The table holds only names the retail client registered, with retail's own
+aliases; `action::PENDING` is the rest of them, waiting for the family that
+answers them. A command of ours is a key, a panel or a script command --
+never a new `/name` (see the project's rules).
+
 **Rust**, in `tick` (once per frame per session) or in a `command`:
 
 ```rust

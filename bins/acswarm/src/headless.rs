@@ -5,8 +5,8 @@
 //! `--hz` (`--tick-hz`) times a second with no keyboard input (plugins and the
 //! server's move-to drive movement), prints what the server says, and runs
 //! the plugin host once per session per frame. Lines from `--say` and
-//! `--script` are typed one per second after the character is placed; those
-//! starting with `/` go to the plugin host as commands. Ctrl-C disconnects
+//! `--script` are typed one per second after the character is placed, through
+//! the same router the chat box uses (`ac_client::action`). Ctrl-C disconnects
 //! every session cleanly.
 
 use std::rc::Rc;
@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 
+use ac_client::action::Line;
 use ac_client::creation::{self, CreateSpec};
 use ac_client::{Client, Config, Event};
 use ac_plugin::console::Console;
@@ -441,18 +442,25 @@ pub fn run(cli: crate::Cli) -> Result<()> {
             };
             for line in due {
                 let account = sessions[i].account().to_string();
-                if line.starts_with('/') {
-                    println!("[{account}] {line}");
-                    let r = host.command(clients_of(&mut sessions), i, &line);
-                    for (text, _) in r.chat {
-                        println!("[{account}] {text}");
+                let spoken = !line.starts_with(['/', '@']);
+                println!("[{account}] {}{line}", if spoken { "> " } else { "" });
+                // One router decides what the line means (`ac_client::action`);
+                // a command the table has no row for is the plugins' and the
+                // scripts' first, and the server's only if none takes it.
+                match sessions[i].client.chat_line(&line) {
+                    Line::Acted(Err(why)) => println!("[{account}] {why}"),
+                    Line::Acted(Ok(())) => {}
+                    Line::Offer { unclaimed, .. } => {
+                        let r = host.command(clients_of(&mut sessions), i, &line);
+                        for (text, _) in r.chat {
+                            println!("[{account}] {text}");
+                        }
+                        if !r.consumed {
+                            if let Err(why) = sessions[i].client.act(unclaimed) {
+                                println!("[{account}] {why}");
+                            }
+                        }
                     }
-                    if !r.consumed {
-                        sessions[i].client.slash_command(&line);
-                    }
-                } else {
-                    println!("[{account}] > {line}");
-                    sessions[i].client.say(&line);
                 }
             }
         }

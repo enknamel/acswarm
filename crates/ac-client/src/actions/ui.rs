@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use crate::{emotes, Client};
+use crate::Client;
 
 impl Client {
     pub fn interact(&mut self, guid: u32) {
@@ -112,104 +112,6 @@ impl Client {
             self.last_used = Some(guid);
             self.session.send_action(action::USE, &guid.to_le_bytes());
         }
-    }
-
-    /// A chat line starting with `/`: the retail client's own commands
-    /// become their game actions; anything else goes to the server as an
-    /// `@command` (ACE runs its command manager on those and answers
-    /// "Unknown command" for the rest). Returns false for an empty line.
-    pub fn slash_command(&mut self, line: &str) -> bool {
-        use ac_net::messages::action;
-        let body = line.trim_start_matches(['/', '@']).trim();
-        if body.is_empty() {
-            return false;
-        }
-        let (name, args) = body
-            .split_once(char::is_whitespace)
-            .map(|(n, a)| (n, a.trim()))
-            .unwrap_or((body, ""));
-        let name = name.to_ascii_lowercase();
-        // A logout the player asked for is a session ending on purpose,
-        // however the server ends up ending it: never reconnected (see
-        // [`reconnect`]). The command itself is passed on as a server
-        // command like any other.
-        if matches!(name.as_str(), "logout" | "logoff" | "quit" | "exit") {
-            self.quitting = true;
-        }
-        let mut w = ac_net::wire::Writer::new();
-        match name.as_str() {
-            "lifestone" | "ls" => self.session.send_action(action::TELE_TO_LIFESTONE, &[]),
-            "die" => self.session.send_action(action::DIE, &[]),
-            "house" | "home" => self.session.send_action(action::TELE_TO_HOUSE, &[]),
-            "mansion" | "mp" => self.session.send_action(action::TELE_TO_MANSION, &[]),
-            "hometown" => self
-                .session
-                .send_action(action::RECALL_ALLEGIANCE_HOMETOWN, &[]),
-            "marketplace" | "mkt" => self.session.send_action(action::TELE_TO_MARKETPLACE, &[]),
-            "pklite" => self.session.send_action(action::ENTER_PK_LITE, &[]),
-            "afk" => {
-                if !args.is_empty() {
-                    w.string16(args);
-                    self.session
-                        .send_action(action::SET_AFK_MESSAGE, &w.finish());
-                    w = ac_net::wire::Writer::new();
-                }
-                w.u32(1);
-                self.session.send_action(action::SET_AFK_MODE, &w.finish());
-            }
-            "back" => {
-                w.u32(0);
-                self.session.send_action(action::SET_AFK_MODE, &w.finish());
-            }
-            "tell" | "t" => {
-                // `/tell Name, message` or `/tell Name message`.
-                let (target, msg) = match args.split_once(',') {
-                    Some((t, m)) => (t.trim(), m.trim()),
-                    None => args
-                        .split_once(char::is_whitespace)
-                        .map(|(t, m)| (t.trim(), m.trim()))
-                        .unwrap_or((args, "")),
-                };
-                if target.is_empty() || msg.is_empty() {
-                    return false;
-                }
-                w.string16(msg).string16(target);
-                self.session.send_action(action::TELL, &w.finish());
-            }
-            "emote" | "e" | "me" => {
-                w.string16(args);
-                self.session.send_action(action::EMOTE, &w.finish());
-            }
-            // `/wave`, `/bow`...: the soul emotes (retail typed them as
-            // `*wave*`; both work).
-            n if emotes::lookup(n).is_some() && args.is_empty() => {
-                self.emote(n);
-            }
-            // `/g`, `/trade`, `/lfg`, `/rp`, `/a`: the Turbine chat rooms.
-            n if ac_net::messages::turbine::from_prefix(n).is_some() => {
-                if args.is_empty() {
-                    return false;
-                }
-                let room = ac_net::messages::turbine::from_prefix(n).unwrap_or(0);
-                return self.turbine_say(room, args);
-            }
-            // `/v`, `/p`, `/m`, `/c`, `/f`: vassals, patron, monarch,
-            // co-vassals and fellowship group chat.
-            n if ac_net::messages::channel::from_prefix(n).is_some() => {
-                if args.is_empty() {
-                    return false;
-                }
-                let channel = ac_net::messages::channel::from_prefix(n).unwrap_or(0);
-                self.chat_channel(channel, args);
-            }
-            _ => {
-                // The server's own commands (@acehelp, @myquests, admin
-                // commands...): ACE reads them from Talk with an @ prefix.
-                w.string16(&format!("@{body}"));
-                self.session.send_action(action::TALK, &w.finish());
-            }
-        }
-        true
     }
 
     /// Select an object (what the target bar and appraisal refer to).

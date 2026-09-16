@@ -15,6 +15,7 @@ mod logging;
 mod particles;
 mod perf;
 mod scene;
+use ac_client::action::Line;
 use ac_client::player;
 mod chat;
 mod plugins;
@@ -1111,24 +1112,33 @@ impl App {
         }
         let mut requests: Vec<plugins::Requests> = Vec::new();
         for t in outgoing {
-            if t.starts_with('/') {
-                tracing::info!("command {t} (session {})", active + 1);
-                let clients = clients_of(&mut self.nets);
-                let r = self.plugins.command(clients, active, &t);
-                for (l, _) in &r.chat {
-                    tracing::info!("{t} -> {l}");
-                }
-                let consumed = r.consumed;
-                requests.push(r);
-                if !consumed {
-                    // Not a plugin command: the game's own (/lifestone,
-                    // /tell ...) or a server command sent as @.
-                    if let Some(net) = self.nets.get_mut(active) {
-                        net.client.slash_command(&t);
+            let Some(net) = self.nets.get_mut(active) else {
+                continue;
+            };
+            // What a line means is decided in one place (`ac_client::action`):
+            // a retail command acts here and words are said; the rest is
+            // offered to the plugins and scripts before the server sees it.
+            match net.client.chat_line(&t) {
+                Line::Acted(done) => {
+                    if let Err(why) = done {
+                        tracing::info!("{t} -> {why}");
                     }
                 }
-            } else if let Some(net) = self.nets.get_mut(active) {
-                net.client.say(&t);
+                Line::Offer { unclaimed, .. } => {
+                    tracing::info!("command {t} (session {})", active + 1);
+                    let clients = clients_of(&mut self.nets);
+                    let r = self.plugins.command(clients, active, &t);
+                    for (l, _) in &r.chat {
+                        tracing::info!("{t} -> {l}");
+                    }
+                    let consumed = r.consumed;
+                    requests.push(r);
+                    if let (false, Some(net)) = (consumed, self.nets.get_mut(active)) {
+                        if let Err(why) = net.client.act(unclaimed) {
+                            tracing::info!("{t} -> {why}");
+                        }
+                    }
+                }
             }
         }
         for r in requests {

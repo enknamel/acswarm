@@ -50,27 +50,7 @@ impl Plugin for Console {
                 cx.client().let_go(Release::Fight);
             }
             "cast" => {
-                let table = cx.client().assets.spell_table().ok();
-                let id = cx
-                    .client()
-                    .world
-                    .stats
-                    .spells
-                    .iter()
-                    .copied()
-                    .find(|id| {
-                        table
-                            .as_ref()
-                            .and_then(|t| t.get(*id))
-                            .is_some_and(|sp| sp.name.starts_with(args))
-                    })
-                    .or_else(|| {
-                        cx.client()
-                            .known_spells
-                            .iter()
-                            .find(|(_, n)| n.starts_with(args))
-                            .map(|(id, _)| *id)
-                    });
+                let id = cx.client().spell_by_name(args);
                 match id {
                     Some(id) => cx.client().cast(id),
                     None => cx.log(format!("No known spell named {args:?}")),
