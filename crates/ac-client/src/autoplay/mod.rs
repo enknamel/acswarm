@@ -52,6 +52,7 @@ mod cast;
 mod config;
 mod fight;
 pub mod growth;
+mod hands;
 mod hear;
 mod journey;
 mod ledger;
@@ -62,6 +63,8 @@ mod team;
 pub use cast::cast_problem;
 pub use config::{Buffs, Config, Fight, Loot, Role, Style, Survive, Team};
 pub use fight::critter::{critter, Critter, Hint, Seen};
+pub use hands::ammo::choose_recipe;
+use hands::weapon::change_of_hands_waits;
 #[cfg(doc)]
 use hear::{arrived_unharmed, spell_attacker};
 use team::view::rival_leader;
@@ -506,23 +509,6 @@ fn came_nearer(best: Option<(u32, f32)>, guid: u32, distance: f32) -> bool {
 fn closer_stand_off(distance: f32) -> Option<f32> {
     (distance > MIN_STAND_OFF + 1.0).then(|| (distance * 0.5).max(MIN_STAND_OFF))
 }
-/// Whether a change of hands must wait for the swing in flight.
-///
-/// True only when both hold: the hands do not already give the stance
-/// wanted, so something would have to be wielded or put away; and a
-/// swing or a charge is out unanswered. ACE turns every combat-mode
-/// change into a cancelled attack, and putting the weapon in hand away
-/// to reach for a wand is one -- so a buff pass that wants a wand waits
-/// for the swing to land rather than taking the charge down with it. A
-/// pass that already holds a wand changes nothing and casts at once.
-///
-/// The wait costs a second of a buff's life. +Verity's cost her the
-/// fight: she reached for her wand every second and a half for a minute,
-/// and the Drudge Servant she was charging was never once reached.
-fn change_of_hands_waits(have: Stance, want: Stance, mid_attack: bool) -> bool {
-    have != want && mid_attack
-}
-
 /// How near to running out a buff must be, in seconds, before this pass
 /// will put it back.
 ///
@@ -554,35 +540,6 @@ fn buff_within(cfg: &Buffs, urgent: bool, fighting: bool, wand_in_hand: bool) ->
     cfg.never_below
 }
 
-/// A change of weapon is asked for at most this often.
-const REWIELD_EVERY: Duration = Duration::from_millis(1000);
-/// How long an item the server refused to wield is left alone the first
-/// time. It doubles with every refusal after that. Short to begin with
-/// on purpose: most refusals are about what else is in the hands, and
-/// that changes within a few seconds.
-const WIELD_AGAIN: Duration = Duration::from_secs(3);
-/// How long a wield already asked for is given to be answered before it
-/// is worth asking again.
-///
-/// The client thinks at 8 Hz and the server's word takes a few hundred
-/// milliseconds to come back, so without this the same weapon goes out
-/// two or three times over and every ask after the first is refused --
-/// for the first one having worked. Nine characters sent 81 wields in
-/// ten minutes and were refused 71 of them, every refusal reading "You
-/// must remove your Slashing Sceptre to wield Slashing Sceptre".
-const WIELD_ANSWERS_IN: Duration = Duration::from_millis(1500);
-/// How long a weapon swap is given to land before the character gives
-/// up waiting and fights with whatever is in its hands. A put and a
-/// wield are a tick or two; anything longer means the swap is stuck.
-const SWAP_SETTLES: Duration = Duration::from_millis(1500);
-/// Ammunition is made at most this often: a use takes a moment and
-/// the bundles need to answer.
-const CRAFT_EVERY: Duration = Duration::from_secs(4);
-/// How long dropping to peace mode takes on the server, which will not
-/// craft in any other stance.
-const STANCE_CHANGE: Duration = Duration::from_millis(1000);
-/// The Fletching skill.
-const FLETCHING: u32 = 37;
 /// The same note is not logged again within this.
 const NOTE_EVERY: Duration = Duration::from_secs(5);
 /// Least time between two hand-offs, and between two salvage batches
@@ -1467,30 +1424,6 @@ pub fn road_fight_over(
     away: f32,
 ) -> bool {
     on_the_road && !attacking_us && !coming_at_us && !a_mate_is_on_it && away > ROAD_REACH
-}
-
-/// Whether an item is worth taking.
-/// The ammunition to make for a launcher that takes `fits` (see
-/// `ac_world::fletching::ammo_type`), from what is carried as `(wcid,
-/// guid)` pairs, within a Fletching of `fletching`: `(recipe, heads,
-/// shafts)`. The element `weakest` (the target's weakest, when known)
-/// comes first, then whatever is hardest to make, which is the better
-/// arrow. `None` when no pair of bundles carried makes anything the
-/// launcher shoots.
-pub fn choose_recipe(
-    fits: u32,
-    fletching: u32,
-    carried: &[(u32, u32)],
-    weakest: Option<ac_world::elements::Element>,
-) -> Option<(&'static ac_world::fletching::Recipe, u32, u32)> {
-    let held = |wcid: u32| carried.iter().find(|(w, _)| *w == wcid).map(|(_, g)| *g);
-    ac_world::fletching::making(fits)
-        .filter(|r| r.difficulty <= fletching)
-        .filter_map(|r| Some((r, held(r.source)?, held(r.target)?)))
-        .max_by_key(|(r, _, _)| {
-            let hits = weakest.is_some_and(|w| r.element() == Some(w));
-            (hits, r.difficulty)
-        })
 }
 
 /// What the loot rules make of an item, and whether they can say yet.
@@ -2793,18 +2726,6 @@ impl Autoplay {
         self.closing.filter(|(g, _)| *g == guid).map(|(_, cap)| cap)
     }
 
-    /// Whether this item was asked for a moment ago and the server's
-    /// word could still be on its way (see [`WIELD_ANSWERS_IN`]).
-    ///
-    /// Asking twice for one weapon is not a wasted message but a
-    /// harmful one: the second ask is refused because the first worked,
-    /// and the refusal backs the item off for three seconds and then
-    /// six and then twelve (see `Client::hold_off_wield`).
-    pub(crate) fn wield_in_flight(&self, guid: u32, now: Instant) -> bool {
-        self.wield_asked
-            .is_some_and(|(g, t)| g == guid && now.duration_since(t) < WIELD_ANSWERS_IN)
-    }
-
     /// Every guid some other errand is holding on to across ticks.
     ///
     /// Each of these is a thing another part of the rules has written
@@ -4088,86 +4009,6 @@ impl Client {
                 .is_some_and(|w| w.goes_on(away, no_way, now))
     }
 
-    /// A weapon waiting for empty hands is taken up as soon as they
-    /// are: a bow cannot be drawn with a shield up, and a two-handed
-    /// weapon needs both. Runs every tick and never claims one.
-    ///
-    /// This is also where a wield that did land forgets whatever wait a
-    /// refusal earned it: the hands have changed, so whatever the server
-    /// was objecting to has gone.
-    pub(crate) fn autoplay_pending_wield(&mut self, now: Instant) {
-        if let Some((g, _)) = self.autoplay.wield_asked {
-            let me = self.world.player_guid;
-            if self.world.objects.get(&g).is_some_and(|o| o.wielder == me) {
-                self.autoplay.wield_refused.forget(&g);
-                self.autoplay.wield_asked = None;
-            }
-        }
-        if let Some(g) = self.autoplay.pending_wield {
-            // A shield in the off hand counts as a full hand for a
-            // weapon that cannot be held with one.
-            let offhand_matters = self
-                .stats_of(g)
-                .is_some_and(|i| crate::weapons::needs_free_offhand(&i));
-            let hands_full = self.world.wielded().any(|o| {
-                (o.item_type
-                    & (ac_world::item_type::MELEE_WEAPON
-                        | ac_world::item_type::MISSILE_WEAPON
-                        | ac_world::item_type::CASTER)
-                    != 0
-                    && o.valid_locations & ac_world::equip::MISSILE_AMMO == 0)
-                    || (offhand_matters && o.valid_locations & ac_world::equip::SHIELD != 0)
-            });
-            if !hands_full {
-                // Inside the wait a refusal earned it, or with the
-                // server busy swinging, the errand keeps rather than
-                // being dropped: giving up here would leave the weapon
-                // in the pack and the character bare-handed with
-                // nothing left to ask again.
-                if self.world.is_carried(g) && self.wield_must_wait(g, now) {
-                    return;
-                }
-                self.autoplay.pending_wield = None;
-                if self.world.is_carried(g) {
-                    self.wield_guid(g);
-                }
-            } else if !self.world.is_carried(g) && !self.world.objects.contains_key(&g) {
-                self.autoplay.pending_wield = None;
-            }
-        }
-    }
-
-    /// Leave an item the server has just refused to wield alone for a
-    /// while, and say so once rather than every pass.
-    ///
-    /// A refused wield carries no error code worth reading -- ACE sends
-    /// InventoryServerSaveFailed with WeenieError.None -- so there is
-    /// nothing to act on and nothing to do but wait. The wait doubles
-    /// each time, so an item the server will never wield in this state
-    /// costs a handful of messages rather than one every buff pass:
-    /// +Verity asked for her Training Wand a hundred and fifty times in
-    /// a minute, because a shield in her off hand made the wield
-    /// impossible and the refusal said nothing about it.
-    pub(crate) fn hold_off_wield(&mut self, item: u32, now: Instant) {
-        self.autoplay.wield_asked = None;
-        self.autoplay.wield_refused.hold(item, WIELD_AGAIN, now);
-        let name = self
-            .world
-            .objects
-            .get(&item)
-            .map(|o| o.name.clone())
-            .unwrap_or_else(|| format!("{item:#010x}"));
-        let waited = self
-            .autoplay
-            .wield_refused
-            .waited(&item)
-            .unwrap_or(WIELD_AGAIN);
-        tracing::info!(
-            "the server will not wield {name}; leaving it for {} s",
-            waited.as_secs().max(1)
-        );
-    }
-
     /// Open the corpse of something we killed and take what is worth
     /// taking. True while looting.
     pub(crate) fn autoplay_loot(&mut self, now: Instant) -> bool {
@@ -4553,269 +4394,6 @@ impl Client {
         self.autoplay.take_up_corpse(guid, now, loot_wait(away));
         self.autoplay.say(Doing::Looting, format!("looting {name}"));
         true
-    }
-
-    /// The stance the rules want this character in, and the weapon that
-    /// gives it wielded if one is carried.
-    ///
-    /// Which way a character fights is not a setting: it follows what
-    /// is in its hands, so [`Style::Auto`] simply reads them. The other
-    /// three ask for a weapon of that kind to be wielded, and if none is
-    /// carried the character fights with what it has and the rules say
-    /// so rather than pretending.
-    fn fighting_stance_as(&mut self, style: Style) -> Stance {
-        let want = match style {
-            Style::Auto => return self.combat_stance(),
-            Style::Melee => Stance::Melee,
-            Style::Missile => Stance::Missile,
-            Style::Magic => Stance::Magic,
-        };
-        // Not with a swing out: changing weapon cancels it, so the
-        // stance the hands give now is the honest answer until the
-        // attack has been answered (see `change_of_hands_waits`).
-        if change_of_hands_waits(self.combat_stance(), want, self.mid_attack()) {
-            self.wait_for_the_swing();
-        } else if self.combat_stance() != want {
-            // Wielding takes a moment; until the server confirms it, the
-            // hands still say what they said. Asked once a second, not
-            // once a tick: the server answers each ask, and refuses the
-            // ones it cannot yet do.
-            let now = Instant::now();
-            if self
-                .autoplay
-                .last_rewield
-                .is_none_or(|t| now.duration_since(t) >= REWIELD_EVERY)
-            {
-                self.autoplay.last_rewield = Some(now);
-                self.wield_for(want);
-            }
-        }
-        self.combat_stance()
-    }
-
-    /// Wield the best weapon carried for `target`, if a better one than
-    /// the one in hand is carried. Done once per target: swapping
-    /// weapons mid-swing is worse than a slightly wrong weapon.
-    ///
-    /// Told to fight with whatever suits, this looks across all three
-    /// kinds of weapon at once, so a character skilled with a wand and
-    /// poor with a sword reaches for the wand. Changing weapon changes
-    /// the stance, which the next tick reads back out of its hands.
-    fn arm_for(&mut self, target: u32, stance: Stance, cfg: &Fight) {
-        if !cfg.pick_weapon {
-            return;
-        }
-        if self.autoplay.armed_for == Some(target) {
-            return;
-        }
-        // Not with a swing or a charge out: putting the weapon in hand
-        // away cancels it (see `Client::mid_attack`). The choice keeps,
-        // and is made in the gap after the attack is answered -- a
-        // fraction of a second with the wrong weapon beats a charge that
-        // never lands.
-        if self.mid_attack() {
-            self.wait_for_the_swing();
-            return;
-        }
-        self.autoplay.armed_for = Some(target);
-        let Some(known) = self.creature_known(target) else {
-            tracing::debug!("arm: nothing known about {target:#010x}, keeping what is held");
-            return;
-        };
-        let carried: Vec<crate::items::ItemStats> = self.item_stats();
-        // A weapon nobody has looked at has no element, no imbue and no
-        // requirement to read, so it can neither be judged nor safely
-        // reached for. Ask about the ones we are carrying; the answers
-        // come back over the next few seconds and the choice improves
-        // with them.
-        let unknown: Vec<u32> = carried
-            .iter()
-            .filter(|i| !i.appraised && crate::weapons::stance_of(i).is_some())
-            .map(|i| i.guid)
-            .collect();
-        if !unknown.is_empty() {
-            self.appraise_many(unknown);
-            // Come back to the choice once the answers are in.
-            self.autoplay.armed_for = None;
-        }
-        let wielder = self.wielder();
-        let free_choice = cfg.style == Style::Auto;
-        let picked = if free_choice {
-            crate::weapons::best_any(&carried, Some(known), &wielder).map(|(_, c)| c)
-        } else {
-            crate::weapons::best(&carried, stance, Some(known), &wielder)
-        };
-        // A bow's choice comes with the arrows to shoot from it.
-        self.autoplay.wanted_ammo = picked
-            .as_ref()
-            .filter(|p| {
-                carried
-                    .iter()
-                    .any(|i| i.guid == p.guid && crate::weapons::is_launcher(i))
-            })
-            .and_then(|_| crate::weapons::best_missile(&carried, Some(known), &wielder))
-            .and_then(|(_, ammo)| ammo.map(|a| a.guid));
-        let Some(pick) = picked else {
-            tracing::debug!("arm: nothing to pick from for {}", known.name);
-            return;
-        };
-        // What is in hand now, whichever kind it is when the choice is
-        // free, so the comparison is between the two real options.
-        let held = carried.iter().find(|i| {
-            i.wielded
-                && match crate::weapons::stance_of(i) {
-                    Some(s) => free_choice || s == stance,
-                    None => false,
-                }
-        });
-        // Swapping costs nothing worth counting, so take the best there
-        // is: anything better than what is in hand wins. Equal keeps
-        // what is held, so a tie cannot set it swapping back and forth.
-        let now_worth = held
-            .map(|i| crate::weapons::score(i, Some(known), &wielder))
-            .unwrap_or(0.0);
-        tracing::debug!(
-            "arm: {} vs {} -> best {} {:.3} (held {:.3})",
-            known.name,
-            held.map(|i| i.name.as_str()).unwrap_or("nothing"),
-            pick.name,
-            pick.score,
-            now_worth
-        );
-        if held.map(|i| i.guid) == Some(pick.guid) || pick.score <= now_worth {
-            return;
-        }
-        tracing::info!(
-            "autoplay: wielding {} against {} ({})",
-            pick.name,
-            known.name,
-            pick.why
-        );
-        let picked_stats = carried.iter().find(|i| i.guid == pick.guid);
-        // A one-handed melee weapon leaves the off hand for a shield,
-        // which is put on once the weapon is in hand (see
-        // `autoplay_shield`); anything else wants that hand empty.
-        let free_offhand = picked_stats.is_some_and(crate::weapons::needs_free_offhand);
-        self.autoplay.wanted_shield = if free_offhand {
-            None
-        } else {
-            crate::weapons::best_shield(&carried, &wielder).map(|s| s.guid)
-        };
-        // The server will not put a second weapon in full hands: the
-        // old one goes back in the pack first, the shield too when the
-        // new weapon cannot be held with one, and the new one is
-        // wielded once the hands are empty.
-        let mut sent = self.put_weapons_away();
-        if free_offhand {
-            let me = self.world.player_guid;
-            let shield = self.wielded_shield();
-            if let (Some(me), Some(shield)) = (me, shield) {
-                sent |= self.put_in_container(shield, me);
-            }
-        }
-        // When the swap started, so the fight waits for the hands to
-        // settle rather than swinging into the moment they are empty.
-        self.autoplay.last_rewield = Some(Instant::now());
-        // A wield that could not go out this tick -- the item is inside
-        // a refusal's wait, or the server has us mid-swing -- becomes an
-        // errand rather than being forgotten, so the weapon is taken up
-        // on the first free tick instead of being left in the pack.
-        if sent || !self.wield_guid(pick.guid) {
-            self.autoplay.pending_wield = Some(pick.guid);
-        }
-    }
-
-    /// Whether a wand, orb or staff is carried at all, in hand or in
-    /// the pack. Not the same question as whether one can be taken up
-    /// right now, which is a wait rather than a want.
-    pub(crate) fn carries_a_caster(&self) -> bool {
-        self.world.objects.values().any(|o| {
-            self.world.is_carried(o.guid) && o.item_type & ac_world::item_type::CASTER != 0
-        })
-    }
-
-    /// Whether a weapon swap asked for a moment ago has yet to land.
-    ///
-    /// Between the put and the wield the hands are empty, and a swing
-    /// sent into that gap is a punch: +Verity put her Flaming Takuba
-    /// away for a wand and attacked a Spikey Armoredillo bare-handed in
-    /// the same tick. Bounded by [`SWAP_SETTLES`] so a swap the server
-    /// never finishes cannot stop the character fighting.
-    pub(crate) fn hands_changing(&self, now: Instant) -> bool {
-        self.autoplay.pending_wield.is_some()
-            && self
-                .autoplay
-                .last_rewield
-                .is_some_and(|t| now.duration_since(t) < SWAP_SETTLES)
-    }
-
-    /// The shield on the off hand, if any.
-    pub(crate) fn wielded_shield(&self) -> Option<u32> {
-        self.world
-            .wielded()
-            .find(|o| o.valid_locations & ac_world::equip::SHIELD != 0)
-            .map(|o| o.guid)
-    }
-
-    /// Put the shield chosen with a one-handed weapon on, once that
-    /// weapon is in hand and the off hand is free.
-    pub(crate) fn autoplay_shield(&mut self, now: Instant) {
-        let Some(shield) = self.autoplay.wanted_shield else {
-            return;
-        };
-        if self.autoplay.pending_wield.is_some() {
-            return;
-        }
-        if !self.world.is_carried(shield) || self.wielded_shield().is_some() {
-            self.autoplay.wanted_shield = None;
-            return;
-        }
-        // Not with a swing out. ACE shuffles the stance on every
-        // successful equip, a shield included (TryShuffleStance ->
-        // HandleActionChangeCombatMode), and a combat-mode change
-        // cancels the attack in flight. The shield keeps; it goes on in
-        // the gap after the swing is answered.
-        if self.mid_attack() {
-            self.wait_for_the_swing();
-            return;
-        }
-        // Inside the wait a refusal earned it, or with the server busy
-        // with a spell, the errand keeps: asking now sends nothing, and
-        // clearing it would leave the shield in the pack with nothing
-        // left to ask again.
-        if self.wield_must_wait(shield, now) {
-            return;
-        }
-        // Only with a one-handed melee weapon actually in hand: the
-        // weapon may still be on its way, or have turned out to be
-        // something a shield cannot go with.
-        let held: Vec<crate::items::ItemStats> = self
-            .world
-            .wielded()
-            .filter(|o| crate::weapons::stance_of(&crate::items::ItemStats::of(o, None)).is_some())
-            .map(|o| {
-                self.stats_of(o.guid)
-                    .unwrap_or_else(|| crate::items::ItemStats::of(o, None))
-            })
-            .collect();
-        let Some(weapon) = held.first() else {
-            return;
-        };
-        if crate::weapons::needs_free_offhand(weapon) {
-            self.autoplay.wanted_shield = None;
-            return;
-        }
-        if self
-            .autoplay
-            .last_rewield
-            .is_some_and(|t| now.duration_since(t) < REWIELD_EVERY)
-        {
-            return;
-        }
-        self.autoplay.last_rewield = Some(now);
-        self.autoplay.wanted_shield = None;
-        tracing::info!("autoplay: putting the shield on with the weapon");
-        self.wield_guid(shield);
     }
 
     /// A hard fight: the creature has at least the team's threshold of
@@ -5672,151 +5250,6 @@ impl Client {
             })
             .filter(|id| table.get(*id).is_some_and(|s| s.needs_target()))
             .collect()
-    }
-
-    /// See that the bow has something to shoot: the ammunition chosen
-    /// for the target if it is still carried, else whatever fits. True
-    /// when there is something to shoot -- in the slot, or on its way
-    /// into it.
-    ///
-    /// Not "did a wield go out this tick": the one caller reads a false
-    /// as "no ammunition" and goes off to fletch some (see
-    /// [`Client::autoplay_craft_ammo`]). A wield held back because the
-    /// server is busy is a tick's wait, not an empty quiver, and reading
-    /// it as one dropped an archer with a full quiver into peace stance
-    /// to make arrows it was already carrying.
-    fn ready_ammo(&mut self) -> bool {
-        if self.wielded_ammo().is_some() {
-            // The chosen kind, if it is not the one in the slot.
-            if let Some(want) = self.autoplay.wanted_ammo {
-                if self.wielded_ammo() != Some(want) && self.world.is_carried(want) {
-                    self.wield_guid(want);
-                }
-            }
-            return true;
-        }
-        if let Some(want) = self.autoplay.wanted_ammo {
-            if self.world.is_carried(want) {
-                // Sent, or waiting on a busy tick: either way there is
-                // something to shoot and nothing to make. Only a stack
-                // the server keeps refusing to wield is an answer of
-                // "not this kind", and then another stack is tried.
-                if self.wield_guid(want) || !self.wield_held_off(want) {
-                    return true;
-                }
-            }
-        }
-        self.wield_ammo()
-    }
-
-    /// Make ammunition for the launcher in hand from a bundle of heads
-    /// and a bundle of shafts carried, the recipe within Fletching, for
-    /// the element the target is weakest to when there is a choice.
-    /// True when this tick went on making some.
-    ///
-    /// The server's side of it (ACE `RecipeManager::UseObjectOnTarget`):
-    /// using the heads on the shafts is refused outright in any combat
-    /// stance, and by a character not trained in Fletching, so the
-    /// character drops to peace first and the bundles are used once the
-    /// stance change has had its moment. The server may then ask, as a
-    /// yes/no confirmation, whether the chance of success is good
-    /// enough; it is answered yes, and the arrows land in the pack a
-    /// clap of the hands later, where the bow's arming picks them up.
-    fn autoplay_craft_ammo(&mut self, now: Instant) -> bool {
-        if !self.autoplay.config.fight.craft_ammo {
-            return false;
-        }
-        // The chance-of-success question, if the character has that
-        // option on: the answer is always yes, the bundles being for
-        // nothing else.
-        const CRAFT: u32 = 5;
-        let asked: Vec<u32> = self
-            .world
-            .confirmations
-            .iter()
-            .filter(|c| c.kind == CRAFT)
-            .map(|c| c.context)
-            .collect();
-        if !asked.is_empty() && self.autoplay.last_craft.is_some() {
-            for context in asked {
-                self.confirm(CRAFT, context, true);
-            }
-            return true;
-        }
-        // Waiting for peace mode before the bundles are used.
-        if let Some((source, target, since)) = self.autoplay.crafting {
-            if now.duration_since(since) < STANCE_CHANGE {
-                return true;
-            }
-            self.autoplay.crafting = None;
-            self.autoplay.last_craft = Some(now);
-            return self.use_on(source, target);
-        }
-        if self
-            .autoplay
-            .last_craft
-            .is_some_and(|t| now.duration_since(t) < CRAFT_EVERY)
-        {
-            return false;
-        }
-        let launcher = self
-            .wielded_missile_weapon()
-            .and_then(|g| self.stats_of(g))
-            .filter(crate::weapons::is_launcher);
-        let Some(launcher) = launcher else {
-            return false;
-        };
-        if launcher.ammo_type == 0 {
-            return false;
-        }
-        // Fletching as it stands, and only if trained: an untrained
-        // skill has a number too, but the server will not craft with it.
-        let fletching = {
-            let stats = &self.world.stats;
-            let table = self.assets.skill_table().ok();
-            stats
-                .skill(FLETCHING)
-                .filter(|sk| sk.advancement >= ac_world::stats::sac::TRAINED)
-                .map(|sk| stats.skill_current(sk, table.as_ref().and_then(|t| t.get(FLETCHING))))
-                .unwrap_or(0)
-        };
-        let carried: Vec<(u32, u32)> = self
-            .world
-            .objects
-            .values()
-            .filter(|o| self.world.is_carried(o.guid))
-            .map(|o| (o.weenie_class_id, o.guid))
-            .collect();
-        let weakest = self
-            .autoplay
-            .casting_at
-            .or(self.attack_target)
-            .and_then(|g| self.creature_known(g))
-            .and_then(|c| c.weakest_to());
-        let Some((recipe, source, target)) =
-            choose_recipe(launcher.ammo_type, fletching, &carried, weakest)
-        else {
-            self.autoplay.note(
-                format!(
-                    "out of {} and nothing to make more from",
-                    ac_world::fletching::ammo_type::name(launcher.ammo_type)
-                ),
-                now,
-            );
-            return false;
-        };
-        self.autoplay.say(
-            Doing::Looting,
-            format!("making {} from {}", recipe.result_name, recipe.source_name),
-        );
-        if self.combat || self.magic {
-            // Peace first; the use goes out once the stance has changed.
-            self.leave_combat();
-            self.autoplay.crafting = Some((source, target, now));
-            return true;
-        }
-        self.autoplay.last_craft = Some(now);
-        self.use_on(source, target)
     }
 
     /// The room in the packs, pack by pack: the main pack and each side
@@ -8576,48 +8009,6 @@ impl Client {
     /// The maximum of a vital (0 health, 1 stamina, 2 mana).
     fn vital_max_of(&self, i: usize) -> u32 {
         self.world.stats.vital_max_current(i)
-    }
-
-    /// Take up again the weapon put down for an urgent buff, once no
-    /// buff is due any more.
-    pub(crate) fn autoplay_rearm(&mut self) {
-        let Some(weapon) = self.autoplay.put_down else {
-            return;
-        };
-        let never_below = self.autoplay.config.buffs.never_below;
-        if self.due_buff(never_below, Instant::now()).is_some() {
-            return;
-        }
-        if !self
-            .world
-            .objects
-            .get(&weapon)
-            .is_some_and(|o| o.container == self.world.player_guid)
-        {
-            // Sold, given away, or in hand already: no errand left.
-            self.autoplay.put_down = None;
-            return;
-        }
-        // Inside the wait a refusal earned it, or with the server busy,
-        // the errand keeps, the way a pending wield's does: dropping it
-        // here would leave the weapon in the pack and the character
-        // fighting with the wand.
-        if self.wield_must_wait(weapon, Instant::now()) {
-            return;
-        }
-        self.autoplay.put_down = None;
-        tracing::info!("autoplay: taking the weapon up again after buffing");
-        // The wand is still in the hand, and ACE will not put a sword
-        // in a hand that holds a caster -- CheckWeaponCollision refuses
-        // it outright, with no error to read. So the wand goes back in
-        // the pack and the housekeeping takes the weapon up once the
-        // hands are empty, the same two steps the arming uses.
-        if self.put_weapons_away() {
-            self.autoplay.last_rewield = Some(Instant::now());
-            self.autoplay.pending_wield = Some(weapon);
-        } else {
-            self.wield_guid(weapon);
-        }
     }
 
     /// The buff with the least time left of those under `within`

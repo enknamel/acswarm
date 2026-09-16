@@ -2220,39 +2220,6 @@ impl Client {
 
     // ---- town runs ------------------------------------------------
 
-    /// Ammunition carried, wielded and in the packs, for a bow or
-    /// crossbow in hand: `(kind, count)`.
-    fn ammo_carried(&self) -> Option<(u32, u32)> {
-        let launcher = self
-            .wielded_missile_weapon()
-            .and_then(|g| self.stats_of(g))
-            .filter(crate::weapons::is_launcher)?;
-        if launcher.ammo_type == 0 {
-            return None;
-        }
-        let me = self.world.player_guid;
-        let count: u32 = self
-            .world
-            .objects
-            .values()
-            .filter(|o| o.valid_locations & equip::MISSILE_AMMO != 0)
-            .filter(|o| o.wielder == me || self.world.is_carried(o.guid))
-            .map(|o| o.stack_size.max(1))
-            .sum();
-        Some((launcher.ammo_type, count))
-    }
-
-    /// Whether more ammunition of `kind` could be made from what is
-    /// carried (see `autoplay::Fight::craft_ammo`).
-    fn can_craft_ammo(&self, kind: u32) -> bool {
-        if !self.autoplay.config.fight.craft_ammo {
-            return false;
-        }
-        let carried: Vec<u32> = self.world.inventory().map(|o| o.weenie_class_id).collect();
-        ac_world::fletching::making(kind)
-            .any(|r| carried.contains(&r.source) && carried.contains(&r.target))
-    }
-
     /// How many of a named thing are carried (name contains, as the
     /// team's `keep_stocked` counts).
     pub(crate) fn carried_named(&self, name: &str) -> u32 {
