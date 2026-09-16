@@ -3,6 +3,8 @@
 //! Every command here is one call into `ac_client::Client`; scripts and
 //! agent plugins call those methods directly instead. `/help` lists them.
 
+use ac_client::autoplay::Release;
+
 use crate::{Ctx, Plugin};
 
 #[derive(Default)]
@@ -43,7 +45,9 @@ impl Plugin for Console {
                 if cx.client().combat {
                     cx.client().toggle_combat();
                 }
-                cx.client().attack_target = None;
+                // The rules' own stop: the swing's target alone leaves
+                // the spell's and the engagement (see `Client::let_go`).
+                cx.client().let_go(Release::Fight);
             }
             "cast" => {
                 let table = cx.client().assets.spell_table().ok();
