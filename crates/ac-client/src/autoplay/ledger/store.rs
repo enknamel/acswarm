@@ -4,7 +4,7 @@ impl Client {
     /// Where this character's loot ledger lives: beside the profiles,
     /// under the server it plays on. Two worlds share no object ids, so
     /// two worlds get two files.
-    pub(crate) fn ledger_path(&self) -> Option<std::path::PathBuf> {
+    fn ledger_path(&self) -> Option<std::path::PathBuf> {
         let name = self.world.stats.name.trim();
         if name.is_empty() {
             return None;
