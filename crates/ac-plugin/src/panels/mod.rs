@@ -380,12 +380,6 @@ pub(crate) fn close_newest(frame: u64) -> bool {
     }
 }
 
-/// Whether any window with a title bar is open right now.
-#[allow(dead_code)] // nothing calls it; kept pending a delete decision
-pub(crate) fn any_open(frame: u64) -> bool {
-    OPEN.with(|o| o.borrow().values().any(|(seen, _)| *seen + 1 >= frame))
-}
-
 /// The blackboard key on which the menu (or a script) asks panel `name`
 /// to open, close or toggle.
 fn open_key(name: &str) -> String {

@@ -675,7 +675,7 @@ impl XpMeter {
     }
 
     /// Drop the characters `keep` does not.
-    #[allow(dead_code)] // nothing calls it; kept pending a delete decision
+    #[allow(dead_code)] // the tests in this file call it
     pub(crate) fn retain(&mut self, keep: impl Fn(&Key) -> bool) {
         self.samples.retain(|k, _| keep(k));
     }

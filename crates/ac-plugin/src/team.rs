@@ -126,12 +126,13 @@ impl Roster {
             .map(|((p, s), h)| (p.as_str(), *s, &h.mate))
     }
 
-    #[allow(dead_code)] // nothing calls it; kept pending a delete decision
+    /// How many rosters are held, for the tests.
+    #[allow(dead_code)] // the tests in this file call it
     pub(crate) fn len(&self) -> usize {
         self.heard.len()
     }
 
-    #[allow(dead_code)] // nothing calls it; kept pending a delete decision
+    #[allow(dead_code)] // the tests in this file call it
     pub(crate) fn is_empty(&self) -> bool {
         self.heard.is_empty()
     }
@@ -529,18 +530,6 @@ impl Plugin for Team {
             }
         }
     }
-}
-
-/// For a panel or a script: the roster as JSON, everyone heard.
-#[allow(dead_code)] // nothing calls it; kept pending a delete decision
-pub(crate) fn roster_json(team: &Team) -> Value {
-    Value::Array(
-        team.roster
-            .heard
-            .values()
-            .filter_map(|h| serde_json::to_value(&h.mate).ok())
-            .collect(),
-    )
 }
 
 #[cfg(test)]
