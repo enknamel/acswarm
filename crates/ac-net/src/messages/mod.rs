@@ -15,6 +15,9 @@ pub mod motion;
 pub mod opcode;
 /// Message queues (fragment `queue` field).
 pub mod queue;
+/// Squelch categories: the ChatMessageType a squelch, a filter or a
+/// global squelch names (ACE `ChatMessageType`).
+pub mod squelch;
 /// Turbine chat (message 0xF7DE): the rooms every player can join
 /// (General, Trade, LFG, Roleplay), the society rooms, and each
 /// allegiance's own room (its id is the allegiance's biota id, sent in
