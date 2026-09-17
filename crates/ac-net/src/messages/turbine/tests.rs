@@ -38,5 +38,11 @@ fn room_line_round_trips() {
     assert_eq!(r.u32().unwrap(), SEND_TO_ROOM_BY_ID);
     assert!(parse(&msg[4..]).unwrap().is_none());
     assert_eq!(from_prefix("g"), Some(GENERAL));
+    assert_eq!(from_prefix("cg"), Some(GENERAL));
+    assert_eq!(from_prefix("soc"), Some(SOCIETY));
+    assert_eq!(from_prefix("gu"), Some(ALLEGIANCE));
+    // `rp` is the reply retail registered, not the Roleplay room.
+    assert_eq!(from_prefix("rp"), None);
+    assert_eq!(from_prefix("crp"), Some(ROLEPLAY));
     assert_eq!(chat_type(0x3300), ALLEGIANCE);
 }
