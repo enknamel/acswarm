@@ -164,6 +164,7 @@ cargo run --release -p acswarm -- --headless --connect 127.0.0.1 --client myacco
 # (/acehelp lists those).
 cargo run --release -p acswarm -- --connect 127.0.0.1 -a myaccount -v mypassword
 # several characters in one window: --client ACCOUNT:PASSWORD[:CHARACTER]
+# (and, after the character, :TEMPLATE:TOWN:HERITAGE:SEX to create it)
 # per extra session; Tab (or /switch N) picks the one shown and steered
 cargo run --release -p acswarm -- --connect 127.0.0.1 -a alice -v pw1 --client bob:pw2:Bob
 ```

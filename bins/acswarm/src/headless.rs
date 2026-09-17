@@ -1,13 +1,14 @@
 //! Headless mode: run many game sessions in one process with no window
 //! and no GPU. What used to be a separate headless mode binary.
 //!
-//! Every `--client` becomes an `ac_client::Client`; the loop ticks each one
-//! `--hz` (`--tick-hz`) times a second with no keyboard input (plugins and the
-//! server's move-to drive movement), prints what the server says, and runs
-//! the plugin host once per session per frame. Lines from `--say` and
-//! `--script` are typed one per second after the character is placed, through
-//! the same router the chat box uses (`ac_client::action`). Ctrl-C disconnects
-//! every session cleanly.
+//! The sessions themselves are `ac_plugin::Sessions`, the same core the
+//! window runs on, so a session dropped mid-run is logged back in here
+//! too. The loop ticks each one `--hz` (`--tick-hz`) times a second with
+//! no keyboard input (plugins and the server's move-to drive movement),
+//! prints what the server says, and runs the plugin host once per session
+//! per frame. Lines from `--say` and `--script` are typed one per second
+//! after the character is placed, through the same router the chat box
+//! uses (`ac_client::action`). Ctrl-C disconnects every session cleanly.
 
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -16,46 +17,11 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 
-use ac_client::action::Line;
 use ac_client::creation::{self, CreateSpec};
-use ac_client::{Client, Config, Event};
+use ac_client::reconnect::Ending;
+use ac_client::Event;
 use ac_plugin::console::Console;
-use ac_plugin::Host;
-
-/// One `--client` argument, parsed.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ClientSpec {
-    pub account: String,
-    pub password: String,
-    pub character: Option<String>,
-}
-
-/// Parse `ACCOUNT:PASSWORD[:CHARACTER]`. The character may contain colons;
-/// the account and password may not.
-pub fn parse_client_spec(spec: &str) -> Result<ClientSpec, String> {
-    let mut parts = spec.splitn(3, ':');
-    let (Some(account), Some(password)) = (parts.next(), parts.next()) else {
-        return Err(format!(
-            "--client wants ACCOUNT:PASSWORD[:CHARACTER], got {spec:?}"
-        ));
-    };
-    if account.is_empty() {
-        return Err(format!("--client {spec:?}: empty account"));
-    }
-    if password.is_empty() {
-        return Err(format!("--client {spec:?}: empty password"));
-    }
-    let character = parts
-        .next()
-        .map(str::trim)
-        .filter(|c| !c.is_empty())
-        .map(str::to_string);
-    Ok(ClientSpec {
-        account: account.to_string(),
-        password: password.to_string(),
-        character,
-    })
-}
+use ac_plugin::{Enter, Host, Requests, SessionSpec, Sessions};
 
 /// The lines of a script file: trimmed, without blanks and `#` comments.
 pub fn parse_script(text: &str) -> Vec<String> {
@@ -110,87 +76,93 @@ impl Schedule {
     }
 }
 
-/// One headless session and what the loop remembers about it.
-struct Session {
-    client: Client,
+/// What a headless run keeps beside each session: the scripted lines it
+/// still has to type, when its character was placed (the lines are timed
+/// from that), and the file `/log` is copying its chat to.
+pub struct Typing {
     schedule: Schedule,
     placed_at: Option<Instant>,
-    /// Terminated or refused: the connection is gone.
-    ended: bool,
-    /// The file `/log` is copying this session's chat to.
     chat_file: Option<crate::chat::ChatFile>,
 }
 
-/// Log `account` in: enter with `character` (else the account's first,
-/// or the `create` name), and with `create` make the character when
-/// the account lacks it (`Client::create_when_missing`).
-fn connect_session(
-    connect: &str,
-    assets: &Rc<ac_scene::Assets>,
-    account: &str,
-    password: &str,
-    character: Option<&str>,
-    create: Option<&CreateSpec>,
-) -> Result<Client> {
-    let mut client = Client::connect(
-        Config {
-            host: connect.to_string(),
-            account: account.to_string(),
-            password: password.to_string(),
-            character: character
-                .map(str::to_string)
-                .or_else(|| create.map(|c| c.name.clone())),
-            auto_enter: true,
-        },
-        assets.clone(),
-    )
-    .with_context(|| format!("connecting {account} to {connect}"))?;
-    if let Some(c) = create {
-        client.create_when_missing(c.clone());
-        // A named character is still the one to enter with; the create
-        // only fills in for it when it is missing.
-        if let Some(name) = character {
-            client.config.character = Some(name.to_string());
+impl Typing {
+    fn new(lines: Vec<String>) -> Self {
+        Typing {
+            schedule: Schedule::new(lines, 1.0),
+            placed_at: None,
+            chat_file: None,
         }
     }
-    Ok(client)
 }
 
-impl Session {
-    fn account(&self) -> &str {
-        &self.client.config.account
-    }
-
-    /// One line: placed?, cell, health, target.
-    fn status(&self) -> String {
-        let c = &self.client;
-        let placed = if c.placed() { "yes" } else { "no" };
-        let cell = match c.player.as_ref().map(|p| p.cell) {
-            Some(cell) => format!("{cell:08X}"),
-            None => "-".to_string(),
-        };
-        let st = &c.world.stats;
-        let health = if st.name.is_empty() {
-            "-".to_string()
-        } else {
-            format!("{}/{}", st.vitals[0].current, st.vital_max_current(0))
-        };
-        let target = c
-            .attack_target
-            .or(c.selected)
-            .and_then(|g| c.world.objects.get(&g))
-            .map(|o| o.name.clone())
-            .unwrap_or_else(|| "-".to_string());
-        let state = if self.ended { " ended" } else { "" };
-        format!(
-            "[{}] placed={placed} cell={cell} hp={health} target={target}{state}",
-            self.account()
-        )
-    }
+/// One line about a session: placed?, cell, health, target.
+fn status(s: &ac_plugin::Session<Typing>) -> String {
+    let c = &s.client;
+    let placed = if c.placed() { "yes" } else { "no" };
+    let cell = match c.player.as_ref().map(|p| p.cell) {
+        Some(cell) => format!("{cell:08X}"),
+        None => "-".to_string(),
+    };
+    let st = &c.world.stats;
+    let health = if st.name.is_empty() {
+        "-".to_string()
+    } else {
+        format!("{}/{}", st.vitals[0].current, st.vital_max_current(0))
+    };
+    let target = c
+        .attack_target
+        .or(c.selected)
+        .and_then(|g| c.world.objects.get(&g))
+        .map(|o| o.name.clone())
+        .unwrap_or_else(|| "-".to_string());
+    let state = if s.is_finished() {
+        " ended"
+    } else if s.is_reconnecting() {
+        " reconnecting"
+    } else {
+        ""
+    };
+    format!(
+        "[{}] placed={placed} cell={cell} hp={health} target={target}{state}",
+        s.account()
+    )
 }
 
-fn clients_of(sessions: &mut [Session]) -> Vec<&mut Client> {
-    sessions.iter_mut().map(|s| &mut s.client).collect()
+/// Print what a plugin's callbacks asked for and apply the rest. A
+/// headless run has no window, so a session to show (`activate`) and a
+/// folder to pick (`pick_data_dir`) are nothing it can answer.
+fn apply_requests(
+    sessions: &mut Sessions<Typing>,
+    host: &mut Host,
+    account: &str,
+    connect: &str,
+    lines: &[String],
+    quit: &mut bool,
+    r: Requests,
+) {
+    for (text, _) in r.chat {
+        println!("[{account}] {text}");
+    }
+    let _ = quit;
+    if !r.stop_sessions.is_empty() {
+        tracing::warn!(
+            "headless: a plugin asked to stop sessions {:?}; not supported headless (Ctrl-C ends the run)",
+            r.stop_sessions
+        );
+    }
+    // A plugin (the fleet panel's roster, a script through `fleet.start`)
+    // asked for sessions: start them here too.
+    for spec in r.start_sessions {
+        let account = spec.account.clone();
+        match sessions.start(&spec, connect, Enter::First, Typing::new(lines.to_vec())) {
+            Ok(i) => println!("[{account}] session {} started", i + 1),
+            Err(e) => {
+                println!("[{account}] cannot start: {e}");
+                host.board
+                    .set_local(ac_plugin::panels::fleet::error_key(&account), e);
+            }
+        }
+    }
 }
 
 pub fn run(cli: crate::Cli) -> Result<()> {
@@ -210,11 +182,6 @@ pub fn run(cli: crate::Cli) -> Result<()> {
         return Ok(());
     }
     let connect = cli.connect.clone().context("--connect is required")?;
-    let specs: Vec<ClientSpec> = cli
-        .clients
-        .iter()
-        .map(|s| parse_client_spec(s).map_err(anyhow::Error::msg))
-        .collect::<Result<_>>()?;
     let mut lines = cli.say.clone();
     if let Some(path) = &cli.script {
         let text = std::fs::read_to_string(path)
@@ -226,7 +193,8 @@ pub fn run(cli: crate::Cli) -> Result<()> {
         ac_scene::Assets::open(cli.data_dir.as_ref().expect("data dir"))
             .context("opening DAT archives")?,
     );
-    // What --create makes on a session whose account lacks the character.
+    // What --create makes on a session whose account lacks the character,
+    // for every `--client` that named no creation fields of its own.
     let create: Option<CreateSpec> = cli.create.as_ref().map(|name| CreateSpec {
         name: name.clone(),
         heritage: cli.heritage.clone(),
@@ -234,28 +202,41 @@ pub fn run(cli: crate::Cli) -> Result<()> {
         template: cli.template.clone(),
         town: cli.start_area.clone(),
     });
-    let mut sessions: Vec<Session> = Vec::with_capacity(specs.len());
-    for spec in specs {
-        let client = connect_session(
-            &connect,
-            &assets,
-            &spec.account,
-            &spec.password,
-            spec.character.as_deref(),
-            create.as_ref(),
-        )?;
-        sessions.push(Session {
-            client,
-            schedule: Schedule::new(lines.clone(), 1.0),
-            placed_at: None,
-            ended: false,
-            chat_file: None,
-        });
+    let mut specs: Vec<SessionSpec> = cli
+        .clients
+        .iter()
+        .map(|s| {
+            s.parse::<SessionSpec>()
+                .map_err(|e| anyhow::anyhow!("--client: {e}"))
+        })
+        .collect::<Result<_>>()?;
+    for spec in &mut specs {
+        if spec.create.is_none() {
+            spec.create = create.clone();
+        }
+    }
+    // A dropped session is logged back in where it stood; without this a
+    // fleet measurement scored a character that dropped as one that did
+    // less. `--reconnect-tries 0` turns it off.
+    let mut sessions: Sessions<Typing> = Sessions::new(
+        cli.data_dir.clone().unwrap_or_default(),
+        ac_client::reconnect::Policy {
+            tries: cli.reconnect_tries,
+            ..Default::default()
+        },
+    );
+    sessions.set_assets(assets);
+    for spec in &specs {
+        // Nobody is at the keyboard, so a session with no character named
+        // enters with the account's first.
+        sessions
+            .start(spec, &connect, Enter::First, Typing::new(lines.clone()))
+            .map_err(|e| anyhow::anyhow!("connecting {} to {connect}: {e}", spec.account))?;
     }
 
     let mut host = Host::new();
     if let Some(bus) = &cli.bus {
-        let name = sessions.first().map(|s| s.client.config.account.clone());
+        let name = sessions.get(0).map(|s| s.account().to_string());
         host.join_bus(
             Some(bus),
             &name.unwrap_or_else(|| format!("pid{}", std::process::id())),
@@ -309,13 +290,14 @@ pub fn run(cli: crate::Cli) -> Result<()> {
     let mut last = start;
     let mut next_tick = start;
     let mut next_status = start + Duration::from_secs(10);
+    let mut quit = false;
     loop {
         let now = Instant::now();
         let dt = (now - last).as_secs_f32().min(0.25);
         last = now;
 
         for i in 0..sessions.len() {
-            if sessions[i].ended {
+            if sessions[i].is_finished() {
                 continue;
             }
             let _frame = sessions[i].client.tick(None, dt, now);
@@ -324,7 +306,7 @@ pub fn run(cli: crate::Cli) -> Result<()> {
                 let account = sessions[i].account().to_string();
                 match ev {
                     Event::Chat { text, .. } => {
-                        if let Some(f) = sessions[i].chat_file.as_mut() {
+                        if let Some(f) = sessions[i].extra.chat_file.as_mut() {
                             f.write(&crate::chat::stamp_now(), text);
                         }
                         if cli.log_chat {
@@ -338,14 +320,14 @@ pub fn run(cli: crate::Cli) -> Result<()> {
                     // to empty.
                     Event::ChatToFile(file) => {
                         let said = match file {
-                            None => match sessions[i].chat_file.take() {
+                            None => match sessions[i].extra.chat_file.take() {
                                 Some(f) => format!("chat log {} closed", f.path().display()),
                                 None => "no chat log to close".to_string(),
                             },
                             Some(name) => match crate::chat::ChatFile::open(name) {
                                 Ok(f) => {
                                     let said = format!("copying chat to {}", f.path().display());
-                                    sessions[i].chat_file = Some(f);
+                                    sessions[i].extra.chat_file = Some(f);
                                     said
                                 }
                                 Err(e) => format!("cannot write to {name}: {e}"),
@@ -357,15 +339,17 @@ pub fn run(cli: crate::Cli) -> Result<()> {
                     Event::Connected => println!("[{account}] connected"),
                     Event::Placed { cell } => {
                         println!("[{account}] placed in cell {cell:08X}");
-                        sessions[i].placed_at.get_or_insert(now);
+                        sessions[i].extra.placed_at.get_or_insert(now);
                     }
+                    // Whether this is the end of the session or a drop to
+                    // come back from is `Sessions::tick_reconnect`'s to
+                    // say, off `Client::ending`; both of these are only
+                    // reported here.
                     Event::Terminated(reason) => {
                         println!("[{account}] terminated: {reason}");
-                        sessions[i].ended = true;
                     }
                     Event::Refused(op) => {
                         println!("[{account}] refused (opcode {op:#06X})");
-                        sessions[i].ended = true;
                     }
                     Event::Characters(list) => {
                         let names: Vec<&str> = list.iter().map(|c| c.name.as_str()).collect();
@@ -391,22 +375,34 @@ pub fn run(cli: crate::Cli) -> Result<()> {
                             );
                         } else if let Some(why) = c.create_error() {
                             println!("[{account}] cannot create: {why}");
-                            sessions[i].ended = true;
+                            sessions.ended(i, Ending::Fatal(format!("cannot create: {why}")), now);
                         } else if c.entering.is_none() {
                             println!("[{account}] no character to enter the world with (use --create NAME)");
-                            sessions[i].ended = true;
+                            sessions.ended(
+                                i,
+                                Ending::Fatal("no character to enter the world with".into()),
+                                now,
+                            );
                         }
                     }
                     Event::CharacterCreated { id, name } => {
                         println!("[{account}] created {name} ({id:#010x}); entering the world");
                     }
                     Event::CharacterCreateFailed(code) => {
-                        println!(
-                            "[{account}] character creation failed: {} (code {code})",
-                            creation::create_failure_message(*code)
+                        let why = creation::create_failure_message(*code);
+                        println!("[{account}] character creation failed: {why} (code {code})");
+                        sessions.ended(
+                            i,
+                            Ending::Fatal(format!("character creation failed: {why}")),
+                            now,
                         );
-                        sessions[i].ended = true;
                     }
+                    // Nothing a windowless run can do with these: no
+                    // audio device to play a sound on, nothing drawing
+                    // the particles of an effect, and a spell coming or
+                    // going is already in `client.world`, which is what
+                    // the plugins and scripts read. `Autoplay` the host
+                    // itself puts on the blackboard for them.
                     Event::Sound { .. }
                     | Event::Effect { .. }
                     | Event::SpellLearned(_)
@@ -414,89 +410,62 @@ pub fn run(cli: crate::Cli) -> Result<()> {
                     | Event::Autoplay { .. } => {}
                 }
             }
-            let r = host.frame(clients_of(&mut sessions), i, &events, dt, now);
-            for (text, _) in r.chat {
-                println!("[{}] {text}", sessions[i].account());
-            }
-            // A plugin (the fleet panel's roster, a script through
-            // `fleet.start`) asked for sessions: start them here too.
-            // Stopping is not supported headless; every session runs
-            // until the end.
-            for spec in r.start_sessions {
-                if sessions
-                    .iter()
-                    .any(|s| s.client.config.account.eq_ignore_ascii_case(&spec.account))
-                {
-                    println!("[{}] already running", spec.account);
-                    continue;
+            let account = sessions[i].account().to_string();
+            let r = host.frame(sessions.clients(), i, &events, dt, now);
+            apply_requests(
+                &mut sessions,
+                &mut host,
+                &account,
+                &connect,
+                &lines,
+                &mut quit,
+                r,
+            );
+            let Some(s) = sessions.get_mut(i) else {
+                continue;
+            };
+            // Only a session actually in the world types: one waiting to
+            // be logged back in has nobody to say it to.
+            let due = match s.extra.placed_at {
+                Some(t) if !s.is_finished() && !s.is_reconnecting() => {
+                    s.extra.schedule.poll((now - t).as_secs_f32())
                 }
-                match connect_session(
-                    &connect,
-                    &assets,
-                    &spec.account,
-                    &spec.password,
-                    spec.character.as_deref(),
-                    spec.create.as_ref(),
-                ) {
-                    Ok(client) => {
-                        println!("[{}] session {} started", spec.account, sessions.len() + 1);
-                        sessions.push(Session {
-                            client,
-                            schedule: Schedule::new(lines.clone(), 1.0),
-                            placed_at: None,
-                            ended: false,
-                            chat_file: None,
-                        });
-                    }
-                    Err(e) => {
-                        println!("[{}] cannot start: {e:#}", spec.account);
-                        host.board.set_local(
-                            ac_plugin::panels::fleet::error_key(&spec.account),
-                            e.to_string(),
-                        );
-                    }
-                }
-            }
-            if !r.stop_sessions.is_empty() {
-                tracing::warn!(
-                    "headless: a plugin asked to stop sessions {:?}; not supported headless (Ctrl-C ends the run)",
-                    r.stop_sessions
-                );
-            }
-
-            let due = match sessions[i].placed_at {
-                Some(t) if !sessions[i].ended => sessions[i].schedule.poll((now - t).as_secs_f32()),
                 _ => Vec::new(),
             };
             for line in due {
-                let account = sessions[i].account().to_string();
                 let spoken = !line.starts_with(['/', '@']);
                 println!("[{account}] {}{line}", if spoken { "> " } else { "" });
-                // One router decides what the line means (`ac_client::action`);
-                // a command the table has no row for is the plugins' and the
-                // scripts' first, and the server's only if none takes it.
-                match sessions[i].client.chat_line(&line) {
-                    Line::Acted(Err(why)) => println!("[{account}] {why}"),
-                    Line::Acted(Ok(())) => {}
-                    Line::Offer { unclaimed, .. } => {
-                        let r = host.command(clients_of(&mut sessions), i, &line);
-                        for (text, _) in r.chat {
-                            println!("[{account}] {text}");
-                        }
-                        if !r.consumed {
-                            if let Err(why) = sessions[i].client.act(unclaimed) {
-                                println!("[{account}] {why}");
-                            }
-                        }
-                    }
+                let typed = sessions.typed(&mut host, i, &line);
+                if let Some(why) = typed.refused {
+                    println!("[{account}] {why}");
                 }
+                apply_requests(
+                    &mut sessions,
+                    &mut host,
+                    &account,
+                    &connect,
+                    &lines,
+                    &mut quit,
+                    typed.requests,
+                );
             }
         }
         host.end_frame();
+        // A session that ended without being asked to comes back here, in
+        // its own slot, so the plugins keep the state they index by it.
+        let report = sessions.tick_reconnect(now);
+        for (_, account, line) in report.notices {
+            println!("[{account}] {line}");
+        }
+        for i in report.reconnected {
+            // The world it was placed in is gone; the lines already typed
+            // stay typed, and the rest wait for the new placement.
+            sessions[i].extra.placed_at = None;
+        }
 
         if now >= next_status {
-            for s in &sessions {
-                println!("{}", s.status());
+            for s in sessions.iter() {
+                println!("{}", status(s));
             }
             next_status += Duration::from_secs(10);
         }
@@ -505,11 +474,14 @@ pub fn run(cli: crate::Cli) -> Result<()> {
             println!("headless: interrupted, disconnecting");
             break;
         }
+        if quit {
+            break;
+        }
         if cli.duration > 0 && now - start >= Duration::from_secs(cli.duration) {
             println!("headless: {} s elapsed, disconnecting", cli.duration);
             break;
         }
-        if sessions.iter().all(|s| s.ended) {
+        if sessions.all_finished() {
             println!("headless: every session ended");
             break;
         }
@@ -526,7 +498,7 @@ pub fn run(cli: crate::Cli) -> Result<()> {
 
     let mut clients: Vec<&mut ac_client::Client> = sessions
         .iter_mut()
-        .filter(|s| !s.ended)
+        .filter(|s| !s.is_finished())
         .map(|s| &mut s.client)
         .collect();
     ac_client::log_off_all(&mut clients, ac_client::LOG_OFF_WAIT);
@@ -536,36 +508,6 @@ pub fn run(cli: crate::Cli) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn client_specs_parse() {
-        assert_eq!(
-            parse_client_spec("bob:secret"),
-            Ok(ClientSpec {
-                account: "bob".into(),
-                password: "secret".into(),
-                character: None,
-            })
-        );
-        assert_eq!(
-            parse_client_spec("bob:secret:Reborn"),
-            Ok(ClientSpec {
-                account: "bob".into(),
-                password: "secret".into(),
-                character: Some("Reborn".into()),
-            })
-        );
-        // The character keeps any further colons; blanks mean none.
-        assert_eq!(
-            parse_client_spec("bob:secret:A:B").unwrap().character,
-            Some("A:B".into())
-        );
-        assert_eq!(parse_client_spec("bob:secret:").unwrap().character, None);
-        assert!(parse_client_spec("bob").is_err());
-        assert!(parse_client_spec(":secret").is_err());
-        assert!(parse_client_spec("bob:").is_err());
-        assert!(parse_client_spec("").is_err());
-    }
 
     #[test]
     fn scripts_skip_blanks_and_comments() {
@@ -611,5 +553,24 @@ mod tests {
         assert_eq!(s.poll(1.0), vec!["line 0", "line 1"]);
         assert!(Schedule::new(Vec::new(), 1.0).finished());
         assert_eq!(Schedule::new(lines(2), 0.0).due_by(5.0), 0);
+    }
+
+    /// A line typed after a reconnect is not one already typed: the
+    /// schedule keeps count across the drop, and the clock it is timed
+    /// from starts again at the new placement, so nothing is said into a
+    /// world that has not settled.
+    #[test]
+    fn a_reconnect_resumes_the_script_rather_than_replaying_it() {
+        let mut t = Typing::new(lines(4));
+        let placed = Instant::now();
+        t.placed_at = Some(placed);
+        assert_eq!(t.schedule.poll(2.0), vec!["line 0", "line 1"]);
+        // Dropped, then placed again: the clock is the new placement's.
+        t.placed_at = None;
+        t.placed_at.get_or_insert(placed + Duration::from_secs(300));
+        assert!(t.schedule.poll(1.0).is_empty(), "nothing twice");
+        assert_eq!(t.schedule.poll(3.0), vec!["line 2"]);
+        assert_eq!(t.schedule.poll(4.0), vec!["line 3"]);
+        assert!(t.schedule.finished());
     }
 }

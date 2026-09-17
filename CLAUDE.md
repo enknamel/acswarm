@@ -52,7 +52,7 @@ dir gives false compile errors); check `df -g /` first, stop below 15 GB free, d
 | ac-vendor | the town run at a counter, decided from a snapshot with no server | `Run::step`, `Snapshot` | agent, loot |
 | ac-client | one headless game session: socket, world, body, manual actions, autoplay | `Client::tick` | agent, formats, loot, nav, net, scene, vendor, world |
 | ac-bus | cross-process bus: JSON lines over loopback TCP, hosted by the first process | `BusServer`, `BusClient` | - |
-| ac-plugin | plugin trait and host, blackboard, settings, built-in panels, team and fleet, servers store | `Plugin`, `Host`, `Ctx` | bus, client, formats, net, scene, vendor, world |
+| ac-plugin | plugin trait and host, blackboard, settings, built-in panels, team and fleet, servers store, the sessions a host runs (start, stop, reconnect) | `Plugin`, `Host`, `Ctx`, `Sessions` | bus, client, formats, net, scene, vendor, world |
 | ac-script | Rhai scripts as a plugin, hot-reloaded; `crates/ac-script/src/api.rs` lists every script call | `ScriptPlugin`, `Api` | client, net, plugin, world |
 
 | bin | role | entry |

@@ -71,8 +71,10 @@ struct Cli {
     /// Connect to an ACE server, log in, and view the world around the character
     #[arg(long)]
     connect: Option<String>,
-    /// Extra sessions in the same process: ACCOUNT:PASSWORD[:CHARACTER], repeatable.
-    /// Tab (or /switch N) picks which one the window shows and steers.
+    /// Extra sessions in the same process, repeatable:
+    /// ACCOUNT:PASSWORD[:CHARACTER[:TEMPLATE[:TOWN[:HERITAGE[:SEX]]]]].
+    /// With a template the character is created when the account lacks
+    /// it. Tab (or /switch N) picks which one the window shows and steers.
     #[arg(long = "client")]
     clients: Vec<String>,
     #[arg(short = 'a', long)]
@@ -236,10 +238,9 @@ struct Cli {
     #[arg(long, num_args = 0..=1, default_missing_value = "")]
     bus: Option<String>,
     /// Connected headless mode: once session 1 is placed, start this
-    /// follower through the fleet panel (what its Start button does):
-    /// ACCOUNT:PASSWORD:CHARACTER[:TEMPLATE[:TOWN[:HERITAGE[:SEX]]]]. With
-    /// a template the character is created when the account lacks it.
-    /// Repeatable; the run ends `--fleet-stop-after` seconds later.
+    /// follower through the fleet panel (what its Start button does),
+    /// as one --client spec. Repeatable; the run ends
+    /// `--fleet-stop-after` seconds later.
     #[arg(long)]
     fleet_start: Vec<String>,
     /// Connected headless mode: stop every `--fleet-start` session this

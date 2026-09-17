@@ -12,11 +12,14 @@ cargo run --release -p acswarm -- --connect 127.0.0.1 -a alice -v pw1 --characte
 ```
 
 * `--connect`, `-a`, `-v`, `--character` describe session 1.
-* `--client ACCOUNT:PASSWORD[:CHARACTER]` adds a session on the same host;
-  repeat it for more. Without a character name the first on the account
-  is used.
-* All sessions log in at once (`App::start_connect` calls
-  `ac_client::Client::connect` for each) and tick every frame.
+* `--client ACCOUNT:PASSWORD[:CHARACTER[:TEMPLATE[:TOWN[:HERITAGE[:SEX]]]]]`
+  adds a session on the same host; repeat it for more. Without a
+  character name the first on the account is used; with the creation
+  fields the character is made when the account lacks it. This is the
+  one session spec (`ac_plugin::SessionSpec: FromStr`), the same string
+  `--fleet-start` takes and the same one `acswarm --headless` reads.
+* All sessions log in at once (`App::start_connect` hands each to
+  `ac_plugin::Sessions::start`) and tick every frame.
 
 Switching which session the window shows:
 
@@ -90,10 +93,12 @@ in `crates/ac-client/src/reconnect.rs`).
 * **An attempt that hangs.** One that has neither placed the character
   nor been refused within 45 s counts as failed.
 
-The viewer does the connecting, in `App::tick_reconnect` and
-`App::reconnect_session`. A session being reconnected **keeps its place
-in `nets`**: the window goes on showing the world it was last in, the
-plugins keep the per-session state they index by that slot, and the
+`ac_plugin::Sessions::tick_reconnect` does the connecting, for the
+window and for `acswarm --headless` alike -- a fleet measurement is a
+headless run, and a character that dropped and stayed down scored as one
+that simply did less. A session being reconnected **keeps its place in
+the session list**: the window goes on showing the world it was last in,
+the plugins keep the per-session state they index by that slot, and the
 fleet panel keeps its row. Only the `Client` inside is replaced, which
 is what makes an unattended fleet heal itself. The new client logs in as
 the character the old one was actually playing (the name the server
@@ -554,14 +559,13 @@ connects (`ac_client::Client::connect` with the `--connect` host and
 or disconnects and removes one, between frames. A removed session's
 successors move down one index and every plugin hears
 `Plugin::session_removed(index)` (the team, party, autoplay, fleet and
-script plugins shift what they keep by session). `acswarm --headless` applies starts
-the same way and ignores stops with a warning. A script or the command
+script plugins shift what they keep by session). `acswarm --headless`
+applies starts and stops the same way. A script or the command
 line drives the same path through two blackboard keys: `fleet.start`
 (a session spec or a list of them, each added to the roster and
 started) and `fleet.stop` (an account or a list); with `--bus`, add
-`"process": NAME` so only that process acts. `acswarm --fleet-start
-ACCOUNT:PASSWORD:CHARACTER[:TEMPLATE[:TOWN[:HERITAGE[:SEX]]]]` (headless,
-with `--screenshot`) sets `fleet.start` once session 1 is placed and
+`"process": NAME` so only that process acts. `acswarm --fleet-start SPEC` (headless,
+with `--screenshot`; `SPEC` is the session spec above) sets `fleet.start` once session 1 is placed and
 `fleet.stop` `--fleet-stop-after` seconds later, which is how the flow
 is tested:
 
@@ -739,7 +743,7 @@ file-backed archive pages.
 * `switch_to` does not clear the GPU: landblocks the previous session
   streamed stay uploaded (and drawn, if in view) until that session is
   active again and unloads them, since `gpu.blocks` is keyed by block id
-  while each `Net` only tracks its own `loaded_blocks`. Switching between
+  while the window tracks only the active session's `loaded_blocks`. Switching between
   characters in the same area is seamless; far-apart ones leave stray
   geometry.
 * Keys steer only the active session; a plugin cannot yet hand a
@@ -747,8 +751,7 @@ file-backed archive pages.
 * The headless `--screenshot` script (`--use`, `--attack`, ...) acts on
   session 1; extra `--client`s connect and tick but are not scripted.
 * A session stopped from the Fleet panel leaves what it streamed on the
-  GPU like a switch does, and `acswarm --headless` cannot stop sessions
-  at all.
+  GPU like a switch does.
 * All sessions in one process must be on the same host (`--connect`); use
   the launcher for several servers.
 * GPU-side caches are duplicated per session (above); memory grows with
