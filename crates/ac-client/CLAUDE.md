@@ -20,11 +20,10 @@ system's entry fns are written in the files its own row names.
 - with the team on, even with autoplay off: `autoplay_accept_invites()`, and `autoplay_fellowship()`
   for a leader played by hand; always `autoplay_close_unwanted_window()`
 - returns if autoplay is off or no character is in the world
-- `autoplay_watch_the_ground()`; then `autoplay_dodge()`, `autoplay_survive()`, `autoplay_recover()`,
-  `autoplay_academy()` called directly, and any that acts ends the tick
+- `autoplay_watch_the_ground()`, whose clocks are wound before any step can claim the tick
 - every `steps::HOUSEKEEPING` row; `steps::reflexes()` in table order; goals from `steps::weigh()`,
   best first. The first step that acts sets `Autoplay.step` and ends the tick.
-- The four direct calls run again as the first reflex rows, in another order (survive before dodge).
+- Each reflex runs once a tick and only from the table: nothing calls one ahead of it.
 
 ## Steps
 

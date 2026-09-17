@@ -550,40 +550,23 @@ impl Client {
             return;
         }
         // The clocks read off the ground are wound before anything can
-        // claim the tick. The four reflexes below return without
-        // reaching the housekeeping, so a character that healed, dodged
-        // or died wound neither of them for as long as that went on:
-        // it came back from a death with a quiet clock from before the
-        // death still running, and bodies that fell while it was busy
-        // stayed for ever newly fallen (see
+        // claim the tick: a step that acts returns, so a character that
+        // healed, dodged or died wound neither of them for as long as
+        // that went on -- it came back from a death with a quiet clock
+        // from before the death still running, and bodies that fell
+        // while it was busy stayed for ever newly fallen (see
         // [`Client::autoplay_watch_the_ground`]).
         self.autoplay_watch_the_ground(now);
-        // A spell on its way to us is stepped out of before anything
-        // else, healing included (see `crate::dodge`).
-        if self.autoplay_dodge(now) {
-            return;
-        }
-        if self.autoplay_survive(now) {
-            return;
-        }
-        // Dead, or on the way back from it: nothing else until the
-        // corpse is dealt with (see `crate::recovery`).
-        if self.autoplay_recover(now) {
-            return;
-        }
-        // A new character in the Training Academy does the tutorial
-        // before anything else (see `crate::academy`).
-        if self.autoplay_academy(now) {
-            return;
-        }
         // Everything from here is a table rather than a chain, so the
         // order can be read, logged and tested rather than only obeyed
         // (see `crate::steps` and `docs/agent.md`).
         for chore in crate::steps::HOUSEKEEPING {
             chore.run(self, now);
         }
-        // The reflexes run in their order, always. Nothing is weighed
-        // against a spell already in the air.
+        // The reflexes run in their order, always, and only from here:
+        // a rule called ahead of the table would run twice and in an
+        // order the table does not say. Nothing is weighed against a
+        // spell already in the air.
         for step in crate::steps::reflexes() {
             let did = step.run(self, now);
             if did.acting() {

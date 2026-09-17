@@ -51,8 +51,8 @@
 //! `ProjectileImpact` before it asks about PK), so standing in a
 //! fellow's line destroys his spell and nobody is any better off.
 //! Stepping aside genuinely saves it. What is wrong is the price: a
-//! dodge takes the legs and the tick with them, ahead of the healing
-//! and everything else, and nothing that cannot hurt us is worth an
+//! dodge takes the legs and the tick with them, ahead of everything
+//! but the healing, and nothing that cannot hurt us is worth an
 //! interrupted cast or a broken swing. So [`can_hurt_us`] is read at
 //! intake and a fellow's bolt is stepped out of the way of only when
 //! the moment is going spare (see `Client::free_to_step_aside`).
@@ -590,7 +590,7 @@ pub fn sidestep(
 impl Client {
     /// Step out of the way of any projectile about to hit us. True
     /// while a sidestep is under way, when nothing else should take
-    /// the legs. Runs before everything else in `tick_autoplay`.
+    /// the legs. The second reflex of `tick_autoplay`, after healing.
     pub(crate) fn autoplay_dodge(&mut self, now: Instant) -> bool {
         // A target being closed on that has died or gone is not walked
         // after any further (the fight rules only speak up about one

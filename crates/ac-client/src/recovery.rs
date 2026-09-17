@@ -590,7 +590,8 @@ impl Client {
     }
 
     /// The death recovery rule: true while it has the character, so the
-    /// rest of the rules wait. Runs right after "stay alive".
+    /// rest of the rules wait. The third reflex, after "stay alive" and
+    /// the sidestep.
     pub fn autoplay_recover(&mut self, now: Instant) -> bool {
         let underground = self.underground();
         let Some(view) = self.recovery_view(now, underground) else {

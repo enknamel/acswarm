@@ -13,7 +13,9 @@ fn the_order_says_what_the_character_cares_about() {
     // that cost a character its life when they are wrong.
     // Healing outranks everything, a spell already in the air
     // included. Stepping out of the way is worth little to a
-    // character that dies while doing it.
+    // character that dies while doing it, and healing is paced by
+    // the server, so it gives the tick back between casts and the
+    // dodge loses almost nothing by going second.
     assert!(at("survive") < at("dodge"), "heal before stepping out");
     // A body on the floor beats a fight that has to be walked to:
     // it is already dead, already ours, and rotting on a clock,
@@ -381,4 +383,31 @@ fn the_score_column_falls_from_first_to_last() {
             pair[1].name
         );
     }
+}
+
+#[test]
+fn a_reflex_that_claims_the_tick_names_the_step_that_did() {
+    // Every reflex runs once a tick, from this table and nowhere
+    // else. Four of them were called by hand above the table as well
+    // as sitting in it: one that acted returned before the table was
+    // reached, so it claimed the tick without naming itself, and on
+    // every tick none of them acted all four ran a second time, in
+    // the other order.
+    let now = Instant::now();
+    let mut c = crate::testkit::offline_client();
+    crate::testkit::stand(&mut c, 0xA9B4_0019, glam::Vec3::new(84.0, 84.0, 94.0));
+    c.world.player_guid = Some(crate::testkit::ME);
+    c.autoplay.config.enabled = true;
+    // Dead, with an Endurance to draw a maximum from: the recovery
+    // reflex has the character and nothing below it gets the tick.
+    c.world.stats.name = "Verity".into();
+    c.world.stats.attributes[1].base = 100;
+    c.world.stats.vitals[0].current = 0;
+    assert!(c.is_dead(), "not dead");
+    c.tick_autoplay(now);
+    assert_eq!(
+        c.autoplay.step,
+        Some("recover"),
+        "the reflex that claimed the tick did not name itself"
+    );
 }
