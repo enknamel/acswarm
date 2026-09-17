@@ -4,6 +4,7 @@
 //! only -- autoplay decides for itself and calls the same `Client` methods
 //! directly, as does every read.
 
+use ac_net::messages::{channel, turbine};
 use serde::{Deserialize, Serialize};
 
 use crate::autoplay::Role;
@@ -388,6 +389,60 @@ pub const RETAIL: &[Command] = &[
     //
     // -- allegiance and fellowship --
     //
+    // The group channels, a ChatChannel (0x0147) each: what a character says
+    // to its fellowship, its patron, its vassals, its monarch, its co-vassals
+    // or the whole allegiance. `/a` is the odd one out -- retail hands the
+    // allegiance over to Turbine chat as it starts (FUN_0057fcc0:17-39), so it
+    // speaks in the allegiance's room while `/ab` keeps the broadcast channel.
+    Command {
+        names: &[
+            "fellowship",
+            "fellows",
+            "fellow",
+            "f",
+            "group",
+            "g",
+            "party",
+        ],
+        action: |args| fellow::say_on(channel::FELLOW, args),
+        usage: "/fellowship what you are saying",
+    },
+    Command {
+        names: &["vassals", "vassal", "v"],
+        action: |args| fellow::say_on(channel::VASSALS, args),
+        usage: "/vassals what you are saying",
+    },
+    Command {
+        names: &["patron", "p"],
+        action: |args| fellow::say_on(channel::PATRON, args),
+        usage: "/patron what you are saying",
+    },
+    Command {
+        names: &["monarch", "m"],
+        action: |args| fellow::say_on(channel::MONARCH, args),
+        usage: "/monarch what you are saying",
+    },
+    Command {
+        names: &["covassals", "co-vassals", "covassal", "c"],
+        action: |args| fellow::say_on(channel::CO_VASSALS, args),
+        usage: "/covassals what you are saying",
+    },
+    Command {
+        names: &["ab"],
+        action: |args| fellow::say_on(channel::ALLEGIANCE_BROADCAST, args),
+        usage: "/ab what the allegiance is to hear",
+    },
+    Command {
+        names: &["a"],
+        action: |args| {
+            (!args.is_empty()).then(|| Action::Room {
+                room: turbine::ALLEGIANCE,
+                text: args.to_string(),
+            })
+        },
+        usage: "/a what you are saying",
+    },
+    //
     // -- status and who (age, loc, version, friends, the housing list) --
     //
     // -- player killing, consent and items --
@@ -402,29 +457,9 @@ pub const PENDING: &[&str] = &[
     "help",
     "allegiance",
     "all",
-    "ab",
     "alh",
     "ah",
     "motd",
-    "a",
-    "co-vassals",
-    "covassals",
-    "covassal",
-    "c",
-    "fellowship",
-    "fellows",
-    "fellow",
-    "f",
-    "group",
-    "g",
-    "party",
-    "monarch",
-    "m",
-    "patron",
-    "p",
-    "vassals",
-    "vassal",
-    "v",
     "join",
     "leave",
     "chat",

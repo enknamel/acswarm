@@ -253,35 +253,6 @@ impl Party {
             .collect()
     }
 
-    fn print_state(&self, cx: &mut Ctx) {
-        let rows = self.rows(cx);
-        let leader = leader_index(cx);
-        cx.log(format!(
-            "party: leader {}  follow {}  assist {}  lootall {}",
-            leader.map(|l| (l + 1).to_string()).unwrap_or("none".into()),
-            onoff(self.follow),
-            onoff(self.assist),
-            onoff(self.lootall),
-        ));
-        for (i, r) in rows.iter().enumerate() {
-            cx.log(format!(
-                "#{} {}{} L{} {}/{} hp{}{}",
-                i + 1,
-                r.name,
-                if r.leader { " (leader)" } else { "" },
-                r.level,
-                r.health.0,
-                r.health.1,
-                r.distance.map(|d| format!(" {d:.1}m")).unwrap_or_default(),
-                if r.target.is_empty() {
-                    String::new()
-                } else {
-                    format!(" -> {}", r.target)
-                },
-            ));
-        }
-    }
-
     /// The leader's part of a tick: publish its target when it changes.
     fn tick_leader(&mut self, cx: &mut Ctx) {
         let target = cx.client().attack_target;
@@ -581,7 +552,6 @@ impl Plugin for Party {
                 }
                 None => cx.log("/lootall [on|off]"),
             },
-            "party" => self.print_state(cx),
             _ => return false,
         }
         true

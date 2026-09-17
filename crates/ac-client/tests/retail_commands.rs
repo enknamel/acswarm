@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 use ac_client::action::{self, Action, Line, CLIENT_UI_ONLY, PENDING, RETAIL, RETIRED};
 use ac_client::testkit;
+use ac_net::messages::{channel, turbine};
 
 /// Every command name the retail client registered, from its own command table
 /// (131 registrations, `a` twice: the legacy allegiance room and the Turbine
@@ -312,6 +313,69 @@ fn a_soul_emote_is_what_a_slash_word_falls_back_to() {
         panic!("no row has /bow: retail read it from the emote table");
     };
     assert_eq!(unclaimed, Action::SoulEmote("bow".into()));
+}
+
+/// What a row makes of its argument text, without a session to act on.
+fn asked(line: &str) -> Option<Action> {
+    let (name, args) = line
+        .trim_start_matches('/')
+        .split_once(char::is_whitespace)
+        .unwrap_or((line.trim_start_matches('/'), ""));
+    (action::command(name).expect("a row of its own").action)(args.trim())
+}
+
+#[test]
+fn the_group_channels_are_the_ones_retail_speaks_on() {
+    for (line, channel) in [
+        ("/fellowship hello", channel::FELLOW),
+        ("/fellows hello", channel::FELLOW),
+        ("/f hello", channel::FELLOW),
+        // Retail's /group and /g are the fellowship's, not the General room's.
+        ("/group hello", channel::FELLOW),
+        ("/g hello", channel::FELLOW),
+        ("/party hello", channel::FELLOW),
+        ("/vassals hello", channel::VASSALS),
+        ("/vassal hello", channel::VASSALS),
+        ("/v hello", channel::VASSALS),
+        ("/patron hello", channel::PATRON),
+        ("/p hello", channel::PATRON),
+        ("/monarch hello", channel::MONARCH),
+        ("/m hello", channel::MONARCH),
+        ("/covassals hello", channel::CO_VASSALS),
+        ("/co-vassals hello", channel::CO_VASSALS),
+        ("/covassal hello", channel::CO_VASSALS),
+        ("/c hello", channel::CO_VASSALS),
+        ("/ab hello", channel::ALLEGIANCE_BROADCAST),
+    ] {
+        assert_eq!(
+            asked(line),
+            Some(Action::Channel {
+                channel,
+                text: "hello".into()
+            }),
+            "{line}"
+        );
+    }
+    // Retail replaces the legacy /a when Turbine chat starts, so it speaks in
+    // the allegiance's room and only /ab keeps the broadcast channel.
+    assert_eq!(
+        asked("/a hello"),
+        Some(Action::Room {
+            room: turbine::ALLEGIANCE,
+            text: "hello".into()
+        })
+    );
+}
+
+#[test]
+fn a_channel_with_nothing_to_say_is_refused_here() {
+    for line in ["/fellowship", "/ab", "/a", "/c"] {
+        assert_eq!(asked(line), None, "{line}");
+    }
+    let mut c = testkit::offline_client();
+    let sent = c.session.actions_sent();
+    assert!(matches!(c.chat_line("/fellowship"), Line::Acted(Err(_))));
+    assert_eq!(c.session.actions_sent(), sent, "nothing went out");
 }
 
 #[test]

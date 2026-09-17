@@ -3,6 +3,9 @@ pub const VASSALS: u32 = 0x0000_1000;
 pub const PATRON: u32 = 0x0000_2000;
 pub const MONARCH: u32 = 0x0000_4000;
 pub const CO_VASSALS: u32 = 0x0100_0000;
+/// The monarch's broadcast to the whole allegiance (`/ab`,
+/// `@allegiance broadcast`); ACE `Channel.cs:127`.
+pub const ALLEGIANCE_BROADCAST: u32 = 0x0200_0000;
 /// The `ChatLine::kind` a channel line is tagged with; not a
 /// ChatMessageType, the line carries the channel id instead.
 pub const KIND: u32 = 0x1000_0000;
@@ -21,6 +24,7 @@ pub fn name(id: u32) -> &'static str {
         PATRON => "Patron",
         MONARCH => "Monarch",
         CO_VASSALS => "Co-vassals",
+        ALLEGIANCE_BROADCAST => "Allegiance Broadcast",
         _ => "Channel",
     }
 }

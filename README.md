@@ -51,9 +51,10 @@ it is more than 3 m away (around corners too: a blocked line plans a route
 on the landblock's walkable grid, see `ac_scene::nav`), `/assist` makes them attack whatever the leader
 attacks (entering melee mode first), and `/lootall` makes each session open
 the corpse of its last kill and take everything in it; each switch takes
-`on`/`off` or toggles. `/party` prints the state, and the Party window lists
-every session (name, level, health, distance to the leader, target) with
-Switch and Lead buttons. The leader's target is broadcast on the bus as
+`on`/`off` or toggles. The Party window lists every session (name, level,
+health, distance to the leader, target) with Switch and Lead buttons, and
+the switches above them. (`/party` is retail's own: it speaks to the
+fellowship.) The leader's target is broadcast on the bus as
 `party.target`; the leader's index is the blackboard value `party.leader`.
 Sessions in different processes coordinate the same way when each is
 started with `--bus`: the first process hosts a loopback hub, the others
