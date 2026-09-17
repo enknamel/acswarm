@@ -20,6 +20,8 @@ mod status;
 mod team;
 mod trade;
 
+pub use status::Friends;
+
 /// Why an action did not happen: the words a front end shows, and the server's
 /// own code when it gave one (the vocabulary every system refuses in).
 pub type Refused = ac_agent::did::Because;
@@ -200,6 +202,9 @@ pub enum Action {
     QueryAge,
     /// Ask what day it was made.
     QueryBirth,
+
+    /// The friends list: show it, add to it, take from it.
+    Friends(Friends),
 }
 
 impl Client {
@@ -281,6 +286,8 @@ impl Client {
 
             Action::QueryAge => status::age(self),
             Action::QueryBirth => status::birth(self),
+
+            Action::Friends(what) => status::friends(self, &what),
         }
     }
 
@@ -455,6 +462,21 @@ pub const RETAIL: &[Command] = &[
         action: |_| Some(Action::QueryBirth),
         usage: "/birth",
     },
+    Command {
+        names: &["friends"],
+        action: |args| status::friends_args(args).map(Action::Friends),
+        usage: "/friends [online | add NAME | remove NAME | remove -all | old]",
+    },
+    Command {
+        names: &["friends_add"],
+        action: |args| status::add_args(args).map(Action::Friends),
+        usage: "/friends_add NAME",
+    },
+    Command {
+        names: &["friends_remove"],
+        action: |args| status::remove_args(args).map(Action::Friends),
+        usage: "/friends_remove NAME | -all",
+    },
     //
     // -- player killing, consent and items --
 ];
@@ -512,9 +534,6 @@ pub const PENDING: &[&str] = &[
     "pla",
     "fillcomps",
     "loadfile",
-    "friends",
-    "friends_add",
-    "friends_remove",
     "hslist",
     "hor",
     "hr",

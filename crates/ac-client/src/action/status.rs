@@ -1,17 +1,40 @@
 //! The status and who family: what the client can answer by itself --
 //! where the body stands, the client's version, the frame-rate display,
 //! the daylight switch and what endurance is for, and what only the
-//! server knows: how old this character is and when it was made.
+//! server knows: how old this character is, when it was made, and the
+//! friends list.
 //!
 //! The lines these print are retail's own words, because they are the
 //! command's whole answer; a refusal is in acswarm's voice, as in every
 //! other family.
+
+use serde::{Deserialize, Serialize};
 
 use ac_net::messages::{action, opcode, queue};
 use ac_net::wire::{Reader, Writer};
 
 use super::{Outcome, Refused};
 use crate::{options, Client, Event};
+
+/// What `/friends` was asked for. `/friends_add` and `/friends_remove`
+/// are retail's own names for two of these.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Friends {
+    /// The whole list.
+    List,
+    /// Only those online.
+    Online,
+    Add(String),
+    Remove(String),
+    /// Everyone at once (`/friends remove -all`).
+    RemoveAll,
+    /// The list as the client before the friends window asked for it.
+    Old,
+}
+
+/// Retail's cap on the friends list (client string 0x561); the server
+/// keeps none (ACE `WorldObjects/Player_Character.cs:141-176`).
+const MOST_FRIENDS: usize = 50;
 
 /// Always-daylight outdoors, the option `/day` flips (ACE
 /// `CharacterOption.AlwaysDaylightOutdoors`, `CharacterOptions2` bit 0x1).
@@ -68,6 +91,39 @@ fn line(c: &mut Client, text: impl Into<String>) {
         text: text.into(),
         kind: 0,
     });
+}
+
+/// `/friends [online | add NAME | remove NAME | remove -all | old]`; the
+/// first word says which, whatever its case (retail `LAB_0057c9d0`).
+pub(super) fn friends_args(args: &str) -> Option<Friends> {
+    let (word, rest) = args
+        .split_once(char::is_whitespace)
+        .map(|(w, r)| (w, r.trim()))
+        .unwrap_or((args, ""));
+    Some(match word.to_ascii_lowercase().as_str() {
+        "" => Friends::List,
+        "online" => Friends::Online,
+        "old" => Friends::Old,
+        "add" => add_args(rest)?,
+        "remove" => remove_args(rest)?,
+        _ => return None,
+    })
+}
+
+/// `/friends_add NAME`, and the same words after `/friends add`.
+pub(super) fn add_args(name: &str) -> Option<Friends> {
+    let name = name.trim();
+    (!name.is_empty()).then(|| Friends::Add(name.to_string()))
+}
+
+/// `/friends_remove NAME | -all`, and the same words after
+/// `/friends remove`.
+pub(super) fn remove_args(name: &str) -> Option<Friends> {
+    let name = name.trim();
+    if name.eq_ignore_ascii_case("-all") {
+        return Some(Friends::RemoveAll);
+    }
+    (!name.is_empty()).then(|| Friends::Remove(name.to_string()))
 }
 
 /// How long this character has been played (QueryAge 0x01C2: the target's
@@ -160,6 +216,83 @@ pub(super) fn daylight(c: &mut Client) -> Outcome {
         },
     );
     Ok(())
+}
+
+pub(super) fn friends(c: &mut Client, what: &Friends) -> Outcome {
+    match what {
+        Friends::List => show_friends(c, false),
+        Friends::Online => show_friends(c, true),
+        Friends::Add(name) => {
+            if c.world.friends.len() >= MOST_FRIENDS {
+                return Err(Refused::ours("the friends list is full"));
+            }
+            c.add_friend(name);
+            Ok(())
+        }
+        Friends::Remove(name) => {
+            // RemoveFriend names a guid, so the list is where a typed name
+            // is looked up; the server never sees the name.
+            let Some(guid) = friend_guid(c, name) else {
+                return Err(Refused::ours(format!("no friend named {name:?}")));
+            };
+            c.remove_friend(Some(guid));
+            Ok(())
+        }
+        Friends::RemoveAll => {
+            c.remove_friend(None);
+            // ACE clears the list without a word (Player_Character.cs:203-211),
+            // so this line is the client's, as it was retail's.
+            line(c, "Your friends list has been cleared.");
+            Ok(())
+        }
+        Friends::Old => {
+            // FriendsOld 0xF7CD (u32, string16), which ACE answers "That
+            // command is not used in the emulator." (FriendsOldHandler.cs).
+            let mut w = Writer::new();
+            w.u32(opcode::FRIENDS_OLD).u32(0).string16("");
+            c.session.send_message(queue::WEENIE, w.finish());
+            Ok(())
+        }
+    }
+}
+
+/// The friends list as retail printed it: a heading, then each name
+/// indented, with "(Online)" after those who are.
+fn show_friends(c: &mut Client, online_only: bool) -> Outcome {
+    if c.world.friends.is_empty() {
+        line(c, "Your friends list is empty!");
+        return Ok(());
+    }
+    let rows: Vec<String> = c
+        .world
+        .friends
+        .iter()
+        .filter(|f| f.online || !online_only)
+        .map(|f| {
+            if f.online {
+                format!("  {} (Online)", f.name)
+            } else {
+                format!("  {}", f.name)
+            }
+        })
+        .collect();
+    line(c, "Your friends:");
+    if rows.is_empty() {
+        line(c, "  You have no friends that are online.");
+    }
+    for row in rows {
+        line(c, row);
+    }
+    Ok(())
+}
+
+/// The guid of the friend of that name, whatever its case.
+fn friend_guid(c: &Client, name: &str) -> Option<u32> {
+    c.world
+        .friends
+        .iter()
+        .find(|f| f.name.eq_ignore_ascii_case(name.trim()))
+        .map(|f| f.guid)
 }
 
 impl Client {
@@ -324,5 +457,96 @@ mod tests {
         assert_eq!(said(&mut c), ["Verity has played for 1y 2mo."]);
         c.hear_age(&[0, 0]);
         assert!(said(&mut c).is_empty(), "a truncated answer says nothing");
+    }
+
+    #[test]
+    fn the_friends_list_is_read_off_the_one_the_server_sent() {
+        let mut c = testkit::offline_client();
+        assert_eq!(c.chat_line("/friends"), Line::Acted(Ok(())));
+        assert_eq!(said(&mut c), ["Your friends list is empty!"]);
+        c.world.friends = vec![
+            ac_world::social::Friend {
+                guid: 0x5000_0002,
+                name: "Verity".into(),
+                online: true,
+            },
+            ac_world::social::Friend {
+                guid: 0x5000_0003,
+                name: "Fletch".into(),
+                online: false,
+            },
+        ];
+        assert_eq!(c.chat_line("/friends"), Line::Acted(Ok(())));
+        assert_eq!(
+            said(&mut c),
+            ["Your friends:", "  Verity (Online)", "  Fletch"]
+        );
+        assert_eq!(c.chat_line("/friends online"), Line::Acted(Ok(())));
+        assert_eq!(said(&mut c), ["Your friends:", "  Verity (Online)"]);
+        c.world.friends[0].online = false;
+        assert_eq!(c.chat_line("/friends online"), Line::Acted(Ok(())));
+        assert_eq!(
+            said(&mut c),
+            ["Your friends:", "  You have no friends that are online."]
+        );
+    }
+
+    #[test]
+    fn a_friend_is_added_by_name_and_removed_by_guid() {
+        let mut c = testkit::offline_client();
+        let sent = c.session.actions_sent();
+        assert_eq!(c.chat_line("/friends add Verity"), Line::Acted(Ok(())));
+        assert_eq!(c.chat_line("/friends_add Verity"), Line::Acted(Ok(())));
+        assert_eq!(c.session.actions_sent(), sent + 2);
+        // Removing wants the guid, which only the list we were sent holds.
+        assert!(matches!(
+            c.chat_line("/friends remove Verity"),
+            Line::Acted(Err(_))
+        ));
+        c.world.friends = vec![ac_world::social::Friend {
+            guid: 0x5000_0002,
+            name: "Verity".into(),
+            online: true,
+        }];
+        assert_eq!(c.chat_line("/friends_remove verity"), Line::Acted(Ok(())));
+        assert_eq!(c.session.actions_sent(), sent + 3);
+        assert_eq!(c.chat_line("/friends remove -all"), Line::Acted(Ok(())));
+        assert_eq!(said(&mut c), ["Your friends list has been cleared."]);
+        assert_eq!(c.chat_line("/friends old"), Line::Acted(Ok(())));
+    }
+
+    #[test]
+    fn the_friends_grammar_is_retails() {
+        assert_eq!(friends_args(""), Some(Friends::List));
+        assert_eq!(friends_args("ONLINE"), Some(Friends::Online));
+        assert_eq!(
+            friends_args("add  Verity"),
+            Some(Friends::Add("Verity".into()))
+        );
+        assert_eq!(friends_args("remove -ALL"), Some(Friends::RemoveAll));
+        assert_eq!(
+            friends_args("Remove Verity"),
+            Some(Friends::Remove("Verity".into()))
+        );
+        assert_eq!(friends_args("add"), None, "a name is wanted");
+        assert_eq!(friends_args("list"), None, "retail knew four words");
+        assert_eq!(remove_args("-all"), Some(Friends::RemoveAll));
+        assert_eq!(add_args("  "), None);
+    }
+
+    #[test]
+    fn the_full_friends_list_takes_no_more() {
+        let mut c = testkit::offline_client();
+        c.world.friends = (0..MOST_FRIENDS)
+            .map(|i| ac_world::social::Friend {
+                guid: 0x5000_0000 + i as u32,
+                name: format!("Friend{i}"),
+                online: false,
+            })
+            .collect();
+        assert!(matches!(
+            c.chat_line("/friends add Verity"),
+            Line::Acted(Err(_))
+        ));
     }
 }
