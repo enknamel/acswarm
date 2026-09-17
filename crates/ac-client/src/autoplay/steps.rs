@@ -132,7 +132,7 @@ fn worth_fighting(client: &Client, _now: Instant) -> f32 {
     let engaged = client
         .attack_target
         .and_then(|t| client.world.objects.get(&t))
-        .is_some_and(|o| o.health.unwrap_or(0.0) > 0.0);
+        .is_some_and(|o| o.known_alive());
     if engaged {
         return UNDECIDED;
     }

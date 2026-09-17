@@ -3,12 +3,15 @@
 use crate::{World, WorldObject};
 
 impl WorldObject {
-    /// Alive unless the server has said its health is gone: what target picking and fighting ask.
+    /// Alive unless the server has said its health is gone: what picking a target, fighting and
+    /// looting ask. ACE sends a health only for the selected target (Player_Vitals.cs:173) or an
+    /// appraisal (WorldObject.cs:617), so most creatures in view have none at all.
     pub fn alive_or_unknown(&self) -> bool {
         self.health.unwrap_or(1.0) > 0.0
     }
 
-    /// Alive only once the server has sent a health above zero: what `worth_fighting` asks.
+    /// Alive on the server's word alone: what a claim to be in a fight already asks, since that
+    /// claim outranks how far off the fight is and an unknown health is no ground for it.
     pub fn known_alive(&self) -> bool {
         self.health.unwrap_or(0.0) > 0.0
     }

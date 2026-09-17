@@ -297,7 +297,7 @@ impl Client {
                 o.item_type & ac_world::item_type::CREATURE != 0
                     && o.object_desc_flags & ac_world::object_desc_flags::ATTACKABLE != 0
                     && o.object_desc_flags & ac_world::object_desc_flags::PLAYER == 0
-                    && o.health.unwrap_or(1.0) > 0.0
+                    && o.alive_or_unknown()
                     && !o.is_player
                     && o.pet_owner == 0
                     && !self.appraisals.contains_key(&o.guid)

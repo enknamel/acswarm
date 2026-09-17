@@ -203,7 +203,7 @@ impl Client {
         self.world
             .objects
             .get(&guid)
-            .is_some_and(|o| o.health.unwrap_or(1.0) > 0.0 && !self.passing_by(o, cfg))
+            .is_some_and(|o| o.alive_or_unknown() && !self.passing_by(o, cfg))
     }
 
     /// Whether `o` is something this character would take on: a live
@@ -226,7 +226,7 @@ impl Client {
         o.item_type & ac_world::item_type::CREATURE != 0
             && o.object_desc_flags & ac_world::object_desc_flags::ATTACKABLE != 0
             && o.object_desc_flags & ac_world::object_desc_flags::PLAYER == 0
-            && o.health.unwrap_or(1.0) > 0.0
+            && o.alive_or_unknown()
             && !o.is_player
             // A summoned creature is its owner's, ours or anyone's.
             && o.pet_owner == 0

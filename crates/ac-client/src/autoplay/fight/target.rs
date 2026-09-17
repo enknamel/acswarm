@@ -56,7 +56,7 @@ impl Client {
             .attack_target
             .or_else(|| self.autoplay.casting_at())
             .and_then(|g| self.world.objects.get(&g))
-            .is_some_and(|o| o.health.unwrap_or(0.0) > 0.0);
+            .is_some_and(|o| o.known_alive());
         if joined {
             return true;
         }

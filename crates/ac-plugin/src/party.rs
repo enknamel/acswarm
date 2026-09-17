@@ -312,11 +312,7 @@ impl Party {
         if let Some(g) = me.attack_target {
             st.watched = Some((g, me.last_target_name.clone()));
         } else if let Some((g, name)) = st.watched.clone() {
-            let alive = me
-                .world
-                .objects
-                .get(&g)
-                .map(|o| o.health.is_none_or(|h| h > 0.0));
+            let alive = me.world.objects.get(&g).map(|o| o.alive_or_unknown());
             if target_died(Some(g), alive) {
                 st.watched = None;
                 if st.loot.is_none() {

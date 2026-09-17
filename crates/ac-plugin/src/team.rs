@@ -328,7 +328,7 @@ pub(crate) fn describe(client: &ac_client::Client, session: usize) -> Option<Mat
                 .world
                 .objects
                 .get(g)
-                .is_some_and(|o| o.health.unwrap_or(1.0) > 0.0)
+                .is_some_and(|o| o.alive_or_unknown())
         });
     let target_name = target
         .and_then(|g| client.world.name_of(g).map(str::to_string))

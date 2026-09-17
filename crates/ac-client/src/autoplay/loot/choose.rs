@@ -695,7 +695,7 @@ impl Client {
             .autoplay
             .casting_at()
             .and_then(|g| self.world.objects.get(&g))
-            .is_some_and(|o| o.health.unwrap_or(1.0) > 0.0);
+            .is_some_and(|o| o.alive_or_unknown());
         let me = self.my_position();
         let Some(me) = me else { return false };
         // Kills go stale with the bodies they leave.

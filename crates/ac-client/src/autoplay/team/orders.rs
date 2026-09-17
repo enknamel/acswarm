@@ -76,7 +76,7 @@ impl Client {
             self.world
                 .objects
                 .get(&g)
-                .is_some_and(|o| o.health.unwrap_or(1.0) > 0.0)
+                .is_some_and(|o| o.alive_or_unknown())
         };
         let me = self.world.player_guid.unwrap_or(0);
         let mine = self.my_position();
@@ -280,7 +280,7 @@ impl Client {
         let me = self.world.player_guid?;
         let guid = self.autoplay.order_for(me, now)?.target?;
         let o = self.world.objects.get(&guid)?;
-        (o.health.unwrap_or(1.0) > 0.0 && !self.passing_by(o, cfg)).then(|| (guid, o.name.clone()))
+        (o.alive_or_unknown() && !self.passing_by(o, cfg)).then(|| (guid, o.name.clone()))
     }
 
     /// Whether an order to fight something other than `current` is to be
