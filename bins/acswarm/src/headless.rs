@@ -130,7 +130,8 @@ fn status(s: &ac_plugin::Session<Typing>) -> String {
 
 /// Print what a plugin's callbacks asked for and apply the rest. A
 /// headless run has no window, so a session to show (`activate`) and a
-/// folder to pick (`pick_data_dir`) are nothing it can answer.
+/// folder to pick (`pick_data_dir`) are nothing it can answer; the
+/// sessions to start and stop, and the ask to close, it can.
 fn apply_requests(
     sessions: &mut Sessions<Typing>,
     host: &mut Host,
@@ -143,12 +144,23 @@ fn apply_requests(
     for (text, _) in r.chat {
         println!("[{account}] {text}");
     }
-    let _ = quit;
-    if !r.stop_sessions.is_empty() {
-        tracing::warn!(
-            "headless: a plugin asked to stop sessions {:?}; not supported headless (Ctrl-C ends the run)",
-            r.stop_sessions
-        );
+    if r.quit {
+        println!("[{account}] a plugin asked to close; disconnecting");
+        *quit = true;
+    }
+    // Stops go first, highest index first, so each index still means the
+    // session the plugin saw; then the starts are appended in order.
+    let mut stop = r.stop_sessions;
+    stop.sort_unstable();
+    stop.dedup();
+    for i in stop.into_iter().rev() {
+        match sessions.stop(i) {
+            Some(gone) => {
+                println!("[{gone}] session {} stopped", i + 1);
+                host.session_removed(i);
+            }
+            None => tracing::warn!("a plugin asked to stop session {i}, which is not running"),
+        }
     }
     // A plugin (the fleet panel's roster, a script through `fleet.start`)
     // asked for sessions: start them here too.
