@@ -314,6 +314,75 @@ fn a_soul_emote_is_what_a_slash_word_falls_back_to() {
     assert_eq!(unclaimed, Action::SoulEmote("bow".into()));
 }
 
+/// What the row for `name` makes of an argument line.
+fn means(name: &str, args: &str) -> Option<Action> {
+    let row = action::command(name).unwrap_or_else(|| panic!("no row for /{name}"));
+    (row.action)(args)
+}
+
+#[test]
+fn consent_takes_the_five_words_retail_gave_it() {
+    assert_eq!(means("consent", "on"), Some(Action::ConsentAccept(true)));
+    assert_eq!(means("consent", "OFF"), Some(Action::ConsentAccept(false)));
+    assert_eq!(means("consent", "who"), Some(Action::ConsentList));
+    assert_eq!(means("consent", "clear"), Some(Action::ConsentClear));
+    assert_eq!(
+        means("consent", "remove +Verity"),
+        Some(Action::ConsentRemove("Verity".into())),
+        "an admin character's name is typed with a plus"
+    );
+    assert_eq!(means("consent", "remove"), None, "remove wants a name");
+    assert_eq!(means("consent", ""), None);
+    assert_eq!(means("consent", "yes please"), None);
+}
+
+#[test]
+fn permit_adds_and_removes_one_named_player() {
+    assert_eq!(
+        means("permit", "add Verity"),
+        Some(Action::Permit {
+            who: "Verity".into(),
+            allow: true
+        })
+    );
+    assert_eq!(
+        means("permit", "remove   Fletch  "),
+        Some(Action::Permit {
+            who: "Fletch".into(),
+            allow: false
+        })
+    );
+    assert_eq!(means("permit", "add"), None, "no name, no permit");
+    assert_eq!(means("permit", "grant Verity"), None);
+    assert_eq!(means("permit", ""), None);
+}
+
+#[test]
+fn an_arena_command_takes_no_arguments() {
+    assert_eq!(means("pka", ""), Some(Action::RecallPkArena));
+    assert_eq!(means("pklarena", ""), Some(Action::RecallPklArena));
+    assert_eq!(means("pkarena", "now"), None, "retail printed the hint");
+    assert_eq!(means("pla", "now"), None);
+    assert_eq!(means("cor", "anything"), Some(Action::CorpseLocation));
+}
+
+#[test]
+fn a_corpse_line_is_answered_without_asking_the_server() {
+    let mut c = testkit::offline_client();
+    let sent = c.session.actions_sent();
+    assert_eq!(c.chat_line("/corpse"), Line::Acted(Ok(())));
+    assert_eq!(c.session.actions_sent(), sent, "nothing goes out");
+    let said: Vec<String> = c
+        .drain_events()
+        .into_iter()
+        .filter_map(|e| match e {
+            ac_client::Event::Chat { text, .. } => Some(text),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(said.len(), 1, "one line, the one with no record: {said:?}");
+}
+
 #[test]
 fn the_table_is_asked_by_name_whatever_the_case() {
     assert_eq!(action::command("LS").map(|c| c.names[0]), Some("lifestone"));

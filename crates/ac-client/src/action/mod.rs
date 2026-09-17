@@ -11,6 +11,7 @@ use crate::Client;
 
 mod chat;
 mod combat;
+mod consent;
 mod fellow;
 mod item;
 mod magic;
@@ -182,6 +183,24 @@ pub enum Action {
     Die,
     /// Enter PK Lite.
     PkLite,
+    /// To the arena a player killer fights in.
+    RecallPkArena,
+    /// To the one a PK Lite character fights in.
+    RecallPklArena,
+
+    // ---- consent ----
+    /// Whether other players may give us permission to loot their corpses.
+    ConsentAccept(bool),
+    /// Ask which of them have.
+    ConsentList,
+    /// Give back every permission we hold.
+    ConsentClear,
+    /// Give back one player's.
+    ConsentRemove(String),
+    /// Let a player loot our corpse, or take that back.
+    Permit { who: String, allow: bool },
+    /// Say where the character last died outdoors.
+    CorpseLocation,
 }
 
 impl Client {
@@ -254,6 +273,15 @@ impl Client {
             Action::RecallHometown => recall::hometown(self),
             Action::Die => recall::die(self),
             Action::PkLite => recall::pk_lite(self),
+            Action::RecallPkArena => recall::pk_arena(self),
+            Action::RecallPklArena => recall::pkl_arena(self),
+
+            Action::ConsentAccept(on) => consent::accept(self, on),
+            Action::ConsentList => consent::list(self),
+            Action::ConsentClear => consent::clear(self),
+            Action::ConsentRemove(who) => consent::drop_one(self, &who),
+            Action::Permit { who, allow } => consent::permit(self, &who, allow),
+            Action::CorpseLocation => consent::corpse_location(self),
         }
     }
 
@@ -391,12 +419,61 @@ pub const RETAIL: &[Command] = &[
     // -- status and who (age, loc, version, friends, the housing list) --
     //
     // -- player killing, consent and items --
+    Command {
+        names: &["consent"],
+        action: |args| {
+            let (word, rest) = args.split_once(char::is_whitespace).unwrap_or((args, ""));
+            Some(match word.to_ascii_lowercase().as_str() {
+                "on" => Action::ConsentAccept(true),
+                "off" => Action::ConsentAccept(false),
+                "who" => Action::ConsentList,
+                "clear" => Action::ConsentClear,
+                "remove" => match consent::name_of(rest) {
+                    who if who.is_empty() => return None,
+                    who => Action::ConsentRemove(who),
+                },
+                _ => return None,
+            })
+        },
+        usage: "/consent on | off | who | clear | remove NAME",
+    },
+    Command {
+        names: &["permit"],
+        action: |args| {
+            let (word, rest) = args.split_once(char::is_whitespace).unwrap_or((args, ""));
+            let allow = match word.to_ascii_lowercase().as_str() {
+                "add" => true,
+                "remove" => false,
+                _ => return None,
+            };
+            let who = consent::name_of(rest);
+            (!who.is_empty()).then_some(Action::Permit { who, allow })
+        },
+        usage: "/permit add NAME, /permit remove NAME",
+    },
+    Command {
+        names: &["corpse", "cor"],
+        action: |_| Some(Action::CorpseLocation),
+        usage: "/corpse",
+    },
+    Command {
+        names: &["pkarena", "pka"],
+        action: |args| args.is_empty().then_some(Action::RecallPkArena),
+        usage: "/pkarena",
+    },
+    Command {
+        names: &["pklarena", "pla"],
+        action: |args| args.is_empty().then_some(Action::RecallPklArena),
+        usage: "/pklarena",
+    },
 ];
 
 /// Retail names with no row yet: the list the families work through. Some are
 /// still reached by the router's fallback where they were before the table --
 /// the Turbine rooms and the group channels -- which leaves them behind the
-/// plugin hooks until a row takes them.
+/// plugin hooks until a row takes them. `loadfile` waits on more than a row:
+/// it replays a file of lines as if each were typed, and only the caller of
+/// [`Client::chat_line`] holds the hooks a typed line goes through.
 pub const PENDING: &[&str] = &[
     "?",
     "help",
@@ -436,14 +513,6 @@ pub const PENDING: &[&str] = &[
     "rt",
     "say",
     "s",
-    "consent",
-    "corpse",
-    "cor",
-    "permit",
-    "pkarena",
-    "pka",
-    "pklarena",
-    "pla",
     "fillcomps",
     "loadfile",
     "friends",
