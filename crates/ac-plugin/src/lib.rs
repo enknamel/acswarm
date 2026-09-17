@@ -27,6 +27,7 @@ pub mod logging;
 pub mod panels;
 pub mod party;
 pub mod servers;
+pub mod sessions;
 mod settings;
 pub mod team;
 
@@ -39,6 +40,7 @@ pub use egui;
 pub use host::{Host, Requests, AUTOPLAY_TOPIC};
 pub use icons::{IconCache, IconLayers, IconLoader};
 pub use serde_json::{self, Value};
+pub use sessions::{Enter, Session, Sessions};
 pub use settings::Settings;
 
 /// The `from` of a message that came over the cross-process bus; its
@@ -119,6 +121,55 @@ impl SessionSpec {
         self.character
             .as_deref()
             .or(self.create.as_ref().map(|c| c.name.as_str()))
+    }
+}
+
+/// What a session written out as one string looks like, for the command
+/// line and anywhere else a session is named in words.
+pub const SESSION_SPEC_FORM: &str =
+    "ACCOUNT:PASSWORD[:CHARACTER[:TEMPLATE[:TOWN[:HERITAGE[:SEX]]]]]";
+
+impl std::str::FromStr for SessionSpec {
+    type Err = String;
+
+    /// Parse [`SESSION_SPEC_FORM`]. Two fields log in and enter with the
+    /// account's first character; a third names the character; anything
+    /// after it is a creation rule for when the account lacks that
+    /// character. A blank field keeps the default. Neither the account
+    /// nor the password may contain a colon, and nor may a character
+    /// name: the server accepts only letters, spaces, apostrophes and
+    /// hyphens in one.
+    fn from_str(spec: &str) -> Result<Self, String> {
+        let parts: Vec<&str> = spec.split(':').collect();
+        let field = |i: usize| {
+            parts
+                .get(i)
+                .map(|p| p.trim())
+                .filter(|p| !p.is_empty())
+                .map(str::to_string)
+        };
+        let (Some(account), Some(password)) = (field(0), field(1)) else {
+            return Err(format!("a session wants {SESSION_SPEC_FORM}, got {spec:?}"));
+        };
+        let character = field(2);
+        // Creation fields with no character to make would name nobody.
+        let create = match (&character, parts.len() > 3) {
+            (Some(name), true) => Some(CreateSpec {
+                name: name.clone(),
+                template: field(3),
+                town: field(4),
+                heritage: field(5),
+                sex: field(6),
+            }),
+            _ => None,
+        };
+        Ok(SessionSpec {
+            account,
+            password,
+            character: create.is_none().then_some(character).flatten(),
+            create,
+            role: Role::default(),
+        })
     }
 }
 
@@ -417,6 +468,44 @@ mod tests {
             serde_json::from_value(serde_json::json!({"account": "a", "password": "p"})).unwrap();
         assert_eq!(old.role, Role::Follower);
         assert_eq!(old.character_name(), None);
+    }
+
+    #[test]
+    fn a_session_spec_reads_back_from_one_string() {
+        let one = |s: &str| s.parse::<SessionSpec>();
+        assert_eq!(
+            one("bob:secret"),
+            Ok(SessionSpec {
+                account: "bob".into(),
+                password: "secret".into(),
+                ..Default::default()
+            })
+        );
+        assert_eq!(
+            one("bob:secret:Reborn").unwrap().character_name(),
+            Some("Reborn")
+        );
+        // Creation fields name the character to make, not another one.
+        let s = one("fleetbot1:testpass:Fleetbot One:bow:holtburg").unwrap();
+        assert_eq!(s.character, None);
+        assert_eq!(s.character_name(), Some("Fleetbot One"));
+        let c = s.create.expect("a creation rule");
+        assert_eq!(c.template.as_deref(), Some("bow"));
+        assert_eq!(c.town.as_deref(), Some("holtburg"));
+        assert_eq!(c.heritage, None);
+        // A blank field keeps the default; the last two are heritage and sex.
+        let s = one("bob:pw:Bob::yaraq:sho:f").unwrap().create.unwrap();
+        assert_eq!(s.template, None);
+        assert_eq!(s.town.as_deref(), Some("yaraq"));
+        assert_eq!(s.heritage.as_deref(), Some("sho"));
+        assert_eq!(s.sex.as_deref(), Some("f"));
+        // A blank character is none, and creation fields need one to name.
+        assert_eq!(one("bob:secret:").unwrap().character, None);
+        assert!(one("bob:secret::bow").unwrap().create.is_none());
+        assert!(one("bob").is_err());
+        assert!(one(":secret").is_err());
+        assert!(one("bob:").is_err());
+        assert!(one("").is_err());
     }
 
     #[test]
