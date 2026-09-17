@@ -195,6 +195,11 @@ pub enum Action {
     Framerate,
     /// Daylight outdoors whatever the hour, or the world's own time.
     Daylight,
+
+    /// Ask how long this character has been played.
+    QueryAge,
+    /// Ask what day it was made.
+    QueryBirth,
 }
 
 impl Client {
@@ -273,6 +278,9 @@ impl Client {
             Action::Version => status::version(self),
             Action::Framerate => status::framerate(self),
             Action::Daylight => status::daylight(self),
+
+            Action::QueryAge => status::age(self),
+            Action::QueryBirth => status::birth(self),
         }
     }
 
@@ -437,6 +445,16 @@ pub const RETAIL: &[Command] = &[
         action: |args| args.is_empty().then_some(Action::Version),
         usage: "/version",
     },
+    Command {
+        names: &["age"],
+        action: |_| Some(Action::QueryAge),
+        usage: "/age",
+    },
+    Command {
+        names: &["birth"],
+        action: |_| Some(Action::QueryBirth),
+        usage: "/birth",
+    },
     //
     // -- player killing, consent and items --
 ];
@@ -508,8 +526,6 @@ pub const PENDING: &[&str] = &[
     "message_types",
     "msgtypes",
     "msg_types",
-    "age",
-    "birth",
     "clear",
     "filter",
     "unfilter",

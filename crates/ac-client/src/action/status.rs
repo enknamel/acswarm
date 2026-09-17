@@ -1,13 +1,14 @@
 //! The status and who family: what the client can answer by itself --
 //! where the body stands, the client's version, the frame-rate display,
-//! the daylight switch and what endurance is for.
+//! the daylight switch and what endurance is for, and what only the
+//! server knows: how old this character is and when it was made.
 //!
 //! The lines these print are retail's own words, because they are the
 //! command's whole answer; a refusal is in acswarm's voice, as in every
 //! other family.
 
-use ac_net::messages::{opcode, queue};
-use ac_net::wire::Writer;
+use ac_net::messages::{action, opcode, queue};
+use ac_net::wire::{Reader, Writer};
 
 use super::{Outcome, Refused};
 use crate::{options, Client, Event};
@@ -67,6 +68,24 @@ fn line(c: &mut Client, text: impl Into<String>) {
         text: text.into(),
         kind: 0,
     });
+}
+
+/// How long this character has been played (QueryAge 0x01C2: the target's
+/// name, empty for ourselves -- only an admin named another).
+pub(super) fn age(c: &mut Client) -> Outcome {
+    let mut w = Writer::new();
+    w.string16("");
+    c.session.send_action(action::QUERY_AGE, &w.finish());
+    Ok(())
+}
+
+/// When this character was made (QueryBirth 0x01C4); ACE answers in
+/// ordinary system chat (`GameActionQueryBirth.cs:17`).
+pub(super) fn birth(c: &mut Client) -> Outcome {
+    let mut w = Writer::new();
+    w.string16("");
+    c.session.send_action(action::QUERY_BIRTH, &w.finish());
+    Ok(())
 }
 
 /// What endurance is for: a text the client holds, with nothing asked of
@@ -148,6 +167,21 @@ impl Client {
     /// `/day` turns on: the window's question, not the world's clock.
     pub fn is_always_daylight(&self) -> bool {
         self.option_enabled(&ALWAYS_DAYLIGHT)
+    }
+
+    /// QueryAgeResponse 0x01C3: the target's name and its age in words
+    /// (`GameEventQueryAgeResponse.cs`). The name is empty for ourselves.
+    pub(crate) fn hear_age(&mut self, body: &[u8]) {
+        let mut r = Reader::new(body);
+        let (Ok(who), Ok(age)) = (r.string16(), r.string16()) else {
+            return;
+        };
+        let text = if who.is_empty() {
+            format!("You have played for {age}.")
+        } else {
+            format!("{who} has played for {age}.")
+        };
+        line(self, text);
     }
 }
 
@@ -262,5 +296,33 @@ mod tests {
         assert_eq!(c.chat_line("/day"), Line::Acted(Ok(())));
         assert!(!c.is_always_daylight());
         assert_eq!(said(&mut c), ["Normality has been restored."]);
+    }
+
+    #[test]
+    fn age_and_birth_are_asked_of_the_server() {
+        let mut c = testkit::offline_client();
+        let sent = c.session.actions_sent();
+        assert_eq!(c.chat_line("/age"), Line::Acted(Ok(())));
+        assert_eq!(c.chat_line("/birth"), Line::Acted(Ok(())));
+        assert_eq!(c.session.actions_sent(), sent + 2);
+        assert!(said(&mut c).is_empty(), "the answer comes back in chat");
+        // Retail ignored what was typed after either of them.
+        assert_eq!(c.chat_line("/age now"), Line::Acted(Ok(())));
+        assert_eq!(c.chat_line("/birth now"), Line::Acted(Ok(())));
+    }
+
+    #[test]
+    fn the_age_answer_names_who_was_asked_about() {
+        let mut c = testkit::offline_client();
+        let mut w = Writer::new();
+        w.string16("").string16("5d 8h 52m 25s");
+        c.hear_age(&w.finish());
+        assert_eq!(said(&mut c), ["You have played for 5d 8h 52m 25s."]);
+        let mut w = Writer::new();
+        w.string16("Verity").string16("1y 2mo");
+        c.hear_age(&w.finish());
+        assert_eq!(said(&mut c), ["Verity has played for 1y 2mo."]);
+        c.hear_age(&[0, 0]);
+        assert!(said(&mut c).is_empty(), "a truncated answer says nothing");
     }
 }
