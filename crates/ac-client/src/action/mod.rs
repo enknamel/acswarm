@@ -119,8 +119,15 @@ pub enum Action {
     // ---- magic ----
     /// Cast a spell, on `at` or on whatever is selected.
     Cast { spell: SpellRef, at: Option<Target> },
-    /// Buy the components the spellbook burns, at the open counter.
-    FillComponents,
+    /// Buy the components the spellbook burns, at the open counter: one
+    /// kind of them (`ac_formats::spell_components::component_type`) or
+    /// every kind, stopping once the bill would pass `budget` pyreals.
+    FillComponents {
+        kind: Option<u32>,
+        budget: Option<u32>,
+    },
+    /// Forget how many of each component to keep.
+    ClearComponents,
 
     // ---- trade ----
     /// Open a secure trade with a player.
@@ -241,7 +248,8 @@ impl Client {
             Action::Select(t) => combat::select(self, t.as_ref()),
 
             Action::Cast { spell, at } => magic::cast(self, &spell, at.as_ref()),
-            Action::FillComponents => magic::fill_components(self),
+            Action::FillComponents { kind, budget } => magic::fill_components(self, kind, budget),
+            Action::ClearComponents => magic::clear_components(self),
 
             Action::TradeOpen(t) => trade::open(self, &t),
             Action::TradeAdd(t) => trade::add(self, &t),
@@ -466,6 +474,11 @@ pub const RETAIL: &[Command] = &[
         action: |args| args.is_empty().then_some(Action::RecallPklArena),
         usage: "/pklarena",
     },
+    Command {
+        names: &["fillcomps"],
+        action: magic::fill_command,
+        usage: "/fillcomps [KIND] [PYREALS], /fillcomps clear",
+    },
 ];
 
 /// Retail names with no row yet: the list the families work through. Some are
@@ -513,7 +526,6 @@ pub const PENDING: &[&str] = &[
     "rt",
     "say",
     "s",
-    "fillcomps",
     "loadfile",
     "friends",
     "friends_add",

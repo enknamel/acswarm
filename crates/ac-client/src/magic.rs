@@ -412,6 +412,31 @@ impl Client {
             Some(e) => e.1 = quantity,
             None => list.push((wcid, quantity)),
         }
+        self.send_desired_component(wcid, quantity);
+    }
+
+    /// Want none of anything (`/fillcomps clear`), and say so for each.
+    /// Retail sent one SetDesiredComponentLevel with no weenie behind it,
+    /// which ACE drops as an invalid wcid (`Player_Spells.cs:428-434`).
+    /// Returns how many wants were forgotten.
+    pub fn clear_desired_components(&mut self) -> usize {
+        let wcids: Vec<u32> = self
+            .world
+            .stats
+            .options
+            .desired_comps
+            .iter()
+            .map(|&(wcid, _)| wcid)
+            .collect();
+        for &wcid in &wcids {
+            self.send_desired_component(wcid, 0);
+        }
+        self.world.stats.options.desired_comps.clear();
+        wcids.len()
+    }
+
+    /// SetDesiredComponentLevel for one weenie class; 0 forgets it.
+    fn send_desired_component(&mut self, wcid: u32, quantity: u32) {
         let mut w = ac_net::wire::Writer::new();
         w.u32(wcid);
         w.u32(quantity);
@@ -422,16 +447,19 @@ impl Client {
     }
 
     /// With a vendor open, buy components up to their desired quantities
-    /// (the `@fillcomps` command): one Buy naming every stocked component
-    /// that is short, for its shortfall. Returns how many kinds were
-    /// ordered (0 with no vendor open or nothing to buy).
-    pub fn fill_components(&mut self) -> usize {
+    /// (the `/fillcomps` command): one Buy naming every stocked component
+    /// that is short, for its shortfall. `kind` keeps to one
+    /// [`component_type`](ac_formats::spell_components::component_type),
+    /// `budget` stops once the bill would pass that many pyreals. Returns
+    /// how many kinds were ordered (0 with no vendor open or nothing to buy).
+    pub fn fill_components(&mut self, kind: Option<u32>, budget: Option<u32>) -> usize {
         let Some(vendor) = self.world.open_vendor.as_ref() else {
             return 0;
         };
         let Ok(mapper) = self.assets.spell_component_ids() else {
             return 0;
         };
+        let table = self.assets.spell_components().ok();
         tracing::debug!(
             "vendor stock: {:?}",
             vendor
@@ -440,26 +468,39 @@ impl Client {
                 .map(|i| (i.desc.name.clone(), i.desc.weenie_class_id, i.stack))
                 .collect::<Vec<_>>()
         );
-        let orders: Vec<(u32, i32)> = self
-            .components()
-            .iter()
-            .filter(|c| c.desired > c.count)
-            .filter_map(|c| {
-                let wcid = mapper.component_wcid(c.component_id)?;
-                let item = vendor
-                    .items
-                    .iter()
-                    .find(|i| i.desc.weenie_class_id == wcid)?;
-                let short = c.desired - c.count;
-                // A stock count below the "unlimited" marker caps the order.
-                let amount = if item.stack < 0x00FF_FFFF {
-                    short.min(item.stack)
-                } else {
-                    short
-                };
-                (amount > 0).then_some((item.guid, amount as i32))
-            })
-            .collect();
+        let mut spent = 0;
+        let mut orders: Vec<(u32, i32)> = Vec::new();
+        for c in self.components().iter().filter(|c| c.desired > c.count) {
+            if kind.is_some()
+                && table
+                    .as_ref()
+                    .and_then(|t| t.get(c.component_id))
+                    .map(|e| e.kind)
+                    != kind
+            {
+                continue;
+            }
+            let Some(wcid) = mapper.component_wcid(c.component_id) else {
+                continue;
+            };
+            let Some(item) = vendor.items.iter().find(|i| i.desc.weenie_class_id == wcid) else {
+                continue;
+            };
+            let mut amount = c.desired - c.count;
+            // A shelf that empties caps the order; most never do.
+            if let Some(stock) = item.in_stock() {
+                amount = amount.min(stock);
+            }
+            if let Some(budget) = budget {
+                let each =
+                    ac_world::shops::charge(item.desc.value, vendor.sell_rate, item.desc.item_type);
+                amount = amount.min(budget.saturating_sub(spent) / each.max(1));
+                spent += amount * each;
+            }
+            if amount > 0 {
+                orders.push((item.guid, amount as i32));
+            }
+        }
         if orders.is_empty() {
             return 0;
         }
@@ -747,7 +788,7 @@ mod tests {
         c.world.stats.vitals[2].current = 15;
         assert_eq!(c.can_cast(HEAL_SELF_I), CastCheck::Ok);
         // No vendor open: nothing to fill.
-        assert_eq!(c.fill_components(), 0);
+        assert_eq!(c.fill_components(None, None), 0);
         // A taper stack that got burned down is reflected through the
         // world's stack-size update.
         let mut w = ac_net::wire::Writer::new();

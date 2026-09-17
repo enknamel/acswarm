@@ -367,6 +367,28 @@ fn an_arena_command_takes_no_arguments() {
 }
 
 #[test]
+fn fillcomps_takes_a_kind_a_bill_both_or_the_word_clear() {
+    let fill = |kind, budget| Some(Action::FillComponents { kind, budget });
+    assert_eq!(means("fillcomps", ""), fill(None, None));
+    assert_eq!(means("fillcomps", "clear"), Some(Action::ClearComponents));
+    // The kinds are the component table's own: a scarab leads a formula
+    // (`ac_formats::spell_components::component_type`), a taper ends one.
+    assert_eq!(means("fillcomps", "Scarabs"), fill(Some(1), None));
+    assert_eq!(means("fillcomps", "peas"), fill(Some(7), None));
+    assert_eq!(means("fillcomps", "500"), fill(None, Some(500)));
+    assert_eq!(means("fillcomps", "taper 250"), fill(Some(6), Some(250)));
+    assert_eq!(
+        means("fillcomps", "taper lots"),
+        fill(Some(6), None),
+        "a second word that is no number is no bill"
+    );
+    assert_eq!(means("fillcomps", "0"), None, "a bill wants to be worth it");
+    assert_eq!(means("fillcomps", "taper -1"), None);
+    assert_eq!(means("fillcomps", "chorizite"), None, "no such kind");
+    assert_eq!(means("fillcomps", "taper 250 more"), None);
+}
+
+#[test]
 fn a_corpse_line_is_answered_without_asking_the_server() {
     let mut c = testkit::offline_client();
     let sent = c.session.actions_sent();
