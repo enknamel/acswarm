@@ -130,17 +130,10 @@ fn status(s: &ac_plugin::Session<Typing>) -> String {
 
 /// Print what a plugin's callbacks asked for and apply the rest. A
 /// headless run has no window, so a session to show (`activate`) and a
-/// folder to pick (`pick_data_dir`) are nothing it can answer; the
-/// sessions to start and stop, and the ask to close, it can.
-fn apply_requests(
-    sessions: &mut Sessions<Typing>,
-    host: &mut Host,
-    account: &str,
-    connect: &str,
-    lines: &[String],
-    quit: &mut bool,
-    r: Requests,
-) {
+/// folder to pick (`pick_data_dir`) are nothing it can answer; the ask
+/// to close it answers here and the sessions to start and stop wait for
+/// [`apply_pending`], since a stop moves every session after it down.
+fn apply_requests(account: &str, quit: &mut bool, pending: &mut Pending, r: Requests) {
     for (text, _) in r.chat {
         println!("[{account}] {text}");
     }
@@ -148,30 +141,49 @@ fn apply_requests(
         println!("[{account}] a plugin asked to close; disconnecting");
         *quit = true;
     }
-    // Stops go first, highest index first, so each index still means the
-    // session the plugin saw; then the starts are appended in order.
-    let mut stop = r.stop_sessions;
-    stop.sort_unstable();
-    stop.dedup();
-    for i in stop.into_iter().rev() {
-        match sessions.stop(i) {
-            Some(gone) => {
-                println!("[{gone}] session {} stopped", i + 1);
-                host.session_removed(i);
-            }
-            None => tracing::warn!("a plugin asked to stop session {i}, which is not running"),
-        }
+    if !r.start_sessions.is_empty() || !r.stop_sessions.is_empty() {
+        pending.push((r.start_sessions, r.stop_sessions));
     }
-    // A plugin (the fleet panel's roster, a script through `fleet.start`)
-    // asked for sessions: start them here too.
-    for spec in r.start_sessions {
-        let account = spec.account.clone();
-        match sessions.start(&spec, connect, Enter::First, Typing::new(lines.to_vec())) {
-            Ok(i) => println!("[{account}] session {} started", i + 1),
-            Err(e) => {
-                println!("[{account}] cannot start: {e}");
-                host.board
-                    .set_local(ac_plugin::panels::fleet::error_key(&account), e);
+}
+
+/// Sessions plugins asked to start and stop this frame, applied once no
+/// session is being ticked.
+type Pending = Vec<(Vec<SessionSpec>, Vec<usize>)>;
+
+/// Start and stop the sessions plugins asked for. Stops go first,
+/// highest index first, so each index still means the session the plugin
+/// saw; then the starts are appended in order.
+fn apply_pending(
+    sessions: &mut Sessions<Typing>,
+    host: &mut Host,
+    connect: &str,
+    lines: &[String],
+    pending: &mut Pending,
+) {
+    for (start, stop) in std::mem::take(pending) {
+        let mut stop = stop;
+        stop.sort_unstable();
+        stop.dedup();
+        for i in stop.into_iter().rev() {
+            match sessions.stop(i) {
+                Some(gone) => {
+                    println!("[{gone}] session {} stopped", i + 1);
+                    host.session_removed(i);
+                }
+                None => tracing::warn!("a plugin asked to stop session {i}, which is not running"),
+            }
+        }
+        // A plugin (the fleet panel's roster, a script through
+        // `fleet.start`) asked for sessions: start them here too.
+        for spec in start {
+            let account = spec.account.clone();
+            match sessions.start(&spec, connect, Enter::First, Typing::new(lines.to_vec())) {
+                Ok(i) => println!("[{account}] session {} started", i + 1),
+                Err(e) => {
+                    println!("[{account}] cannot start: {e}");
+                    host.board
+                        .set_local(ac_plugin::panels::fleet::error_key(&account), e);
+                }
             }
         }
     }
@@ -303,6 +315,7 @@ pub fn run(cli: crate::Cli) -> Result<()> {
     let mut next_tick = start;
     let mut next_status = start + Duration::from_secs(10);
     let mut quit = false;
+    let mut pending: Pending = Vec::new();
     loop {
         let now = Instant::now();
         let dt = (now - last).as_secs_f32().min(0.25);
@@ -424,15 +437,7 @@ pub fn run(cli: crate::Cli) -> Result<()> {
             }
             let account = sessions[i].account().to_string();
             let r = host.frame(sessions.clients(), i, &events, dt, now);
-            apply_requests(
-                &mut sessions,
-                &mut host,
-                &account,
-                &connect,
-                &lines,
-                &mut quit,
-                r,
-            );
+            apply_requests(&account, &mut quit, &mut pending, r);
             let Some(s) = sessions.get_mut(i) else {
                 continue;
             };
@@ -451,20 +456,13 @@ pub fn run(cli: crate::Cli) -> Result<()> {
                 if let Some(why) = typed.refused {
                     println!("[{account}] {why}");
                 }
-                apply_requests(
-                    &mut sessions,
-                    &mut host,
-                    &account,
-                    &connect,
-                    &lines,
-                    &mut quit,
-                    typed.requests,
-                );
+                apply_requests(&account, &mut quit, &mut pending, typed.requests);
             }
         }
         host.end_frame();
         // A session that ended without being asked to comes back here, in
-        // its own slot, so the plugins keep the state they index by it.
+        // its own slot, before the starts and stops below can move the
+        // slots around.
         let report = sessions.tick_reconnect(now);
         for (_, account, line) in report.notices {
             println!("[{account}] {line}");
@@ -474,6 +472,9 @@ pub fn run(cli: crate::Cli) -> Result<()> {
             // stay typed, and the rest wait for the new placement.
             sessions[i].extra.placed_at = None;
         }
+        // Sessions come and go only here, between frames: no session is
+        // being ticked and no plugin holds them.
+        apply_pending(&mut sessions, &mut host, &connect, &lines, &mut pending);
 
         if now >= next_status {
             for s in sessions.iter() {
