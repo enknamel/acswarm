@@ -168,6 +168,7 @@ impl Client {
             ended: None,
             last_refusal: None,
             events: Vec::new(),
+            show_framerate: true,
         }
     }
 

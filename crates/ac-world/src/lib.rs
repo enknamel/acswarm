@@ -363,6 +363,17 @@ pub fn outdoor_cell(landblock: u32, local: Vec3) -> u32 {
     (landblock & 0xFFFF_0000) | (cx * 8 + cy + 1)
 }
 
+/// The middle of an outdoor cell, landblock-local: the inverse of
+/// [`outdoor_cell`], for a cell id that names a spot and nothing else.
+pub fn outdoor_cell_centre(cell: u32) -> Vec3 {
+    let at = (cell & 0xFFFF).saturating_sub(1);
+    Vec3::new(
+        (at / 8) as f32 * 24.0 + 12.0,
+        (at % 8) as f32 * 24.0 + 12.0,
+        0.0,
+    )
+}
+
 /// World origin of a cell's landblock: block x/y from the high 16 bits.
 pub fn landblock_origin(cell: u32) -> Vec3 {
     let bx = (cell >> 24) as f32;

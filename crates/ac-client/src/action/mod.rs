@@ -18,8 +18,11 @@ mod item;
 mod magic;
 mod recall;
 pub mod resolve;
+mod status;
 mod team;
 mod trade;
+
+pub use status::{Friends, HouseKind};
 
 /// Why an action did not happen: the words a front end shows, and the server's
 /// own code when it gave one (the vocabulary every system refuses in).
@@ -344,6 +347,29 @@ pub enum Action {
     Die,
     /// Enter PK Lite.
     PkLite,
+
+    // ---- status ----
+    /// What the endurance attribute is for.
+    Endurance,
+    /// Where the body stands, as a cell id and a frame.
+    Location,
+    /// Which client this is, and whether Turbine chat is on.
+    Version,
+    /// Show the frame rate, or stop.
+    Framerate,
+    /// Daylight outdoors whatever the hour, or the world's own time.
+    Daylight,
+
+    /// Ask how long this character has been played.
+    QueryAge,
+    /// Ask what day it was made.
+    QueryBirth,
+
+    /// The friends list: show it, add to it, take from it.
+    Friends(Friends),
+
+    /// Ask how many dwellings of a kind are for sale, and where.
+    HousesAvailable(HouseKind),
 }
 
 impl Client {
@@ -437,6 +463,19 @@ impl Client {
             Action::RecallHometown => recall::hometown(self),
             Action::Die => recall::die(self),
             Action::PkLite => recall::pk_lite(self),
+
+            Action::Endurance => status::endurance(self),
+            Action::Location => status::location(self),
+            Action::Version => status::version(self),
+            Action::Framerate => status::framerate(self),
+            Action::Daylight => status::daylight(self),
+
+            Action::QueryAge => status::age(self),
+            Action::QueryBirth => status::birth(self),
+
+            Action::Friends(what) => status::friends(self, &what),
+
+            Action::HousesAvailable(kind) => status::houses_available(self, kind),
         }
     }
 
@@ -808,6 +847,77 @@ pub const RETAIL: &[Command] = &[
     //
     // -- status and who (age, loc, version, friends, the housing list) --
     //
+    // `/help` and `/?` are not here: retail's help is every family's own
+    // text, and until that is written the console plugin's list answers.
+    Command {
+        names: &["day"],
+        action: |_| Some(Action::Daylight),
+        usage: "/day",
+    },
+    Command {
+        names: &["endurance"],
+        action: |_| Some(Action::Endurance),
+        usage: "/endurance",
+    },
+    // Retail turned the three below away when words followed them.
+    Command {
+        names: &["framerate"],
+        action: |args| args.is_empty().then_some(Action::Framerate),
+        usage: "/framerate",
+    },
+    Command {
+        names: &["loc"],
+        action: |args| args.is_empty().then_some(Action::Location),
+        usage: "/loc",
+    },
+    Command {
+        names: &["version"],
+        action: |args| args.is_empty().then_some(Action::Version),
+        usage: "/version",
+    },
+    Command {
+        names: &["age"],
+        action: |_| Some(Action::QueryAge),
+        usage: "/age",
+    },
+    Command {
+        names: &["birth"],
+        action: |_| Some(Action::QueryBirth),
+        usage: "/birth",
+    },
+    Command {
+        names: &["friends"],
+        action: |args| status::friends_args(args).map(Action::Friends),
+        usage: "/friends [online | add NAME | remove NAME | remove -all | old]",
+    },
+    Command {
+        names: &["friends_add"],
+        action: |args| status::add_args(args).map(Action::Friends),
+        usage: "/friends_add NAME",
+    },
+    Command {
+        names: &["friends_remove"],
+        action: |args| status::remove_args(args).map(Action::Friends),
+        usage: "/friends_remove NAME | -all",
+    },
+    Command {
+        names: &["hslist"],
+        action: |args| status::house_kind(args).map(Action::HousesAvailable),
+        usage: "/hslist apartment | cottage | villa | mansion",
+    },
+    // The two house recalls under their own names; `/house` is the recall
+    // family's row for the same action.
+    Command {
+        names: &["hor", "hr"],
+        action: |args| args.is_empty().then_some(Action::RecallHouse),
+        usage: "/hor",
+    },
+    Command {
+        names: &["hom", "hoa"],
+        action: |args| args.is_empty().then_some(Action::RecallMansion),
+        usage: "/hom",
+    },
+    //
     // -- player killing, consent and items --
 ];
 
@@ -827,21 +937,6 @@ pub const PENDING: &[&str] = &[
     "pla",
     "fillcomps",
     "loadfile",
-    "friends",
-    "friends_add",
-    "friends_remove",
-    "hslist",
-    "hor",
-    "hr",
-    "hom",
-    "hoa",
-    "age",
-    "birth",
-    "day",
-    "endurance",
-    "framerate",
-    "loc",
-    "version",
 ];
 
 /// Retail names that never left the retail client: help topics with no handler

@@ -583,6 +583,19 @@ const UNFOCUSED_FPS: u32 = 10;
 /// How often meshes and materials nothing references are dropped.
 const PRUNE_EVERY: Duration = Duration::from_secs(30);
 
+/// Midday on the world's clock (`ac_client::daytime::DayTime::fraction`).
+const MIDDAY: f32 = 0.5;
+
+/// The hour the sky is drawn at: midday while `/day` holds the world in
+/// daylight ([`ac_client::Client::is_always_daylight`]), else the real one.
+fn daylight_at(always: bool, fraction: f32) -> f32 {
+    if always {
+        MIDDAY
+    } else {
+        fraction
+    }
+}
+
 /// Whether this tick uploads its particles. A hidden window uploads
 /// nothing: nobody sees them, and each upload is buffers wgpu holds until
 /// a frame submits. Otherwise there is something to draw, or last tick's
@@ -1401,10 +1414,8 @@ impl App {
         let Some(day) = net.client.day_time() else {
             return;
         };
-        if self
-            .sky_at
-            .is_some_and(|t: f32| (t - day.fraction).abs() < 0.004)
-        {
+        let at = daylight_at(net.client.is_always_daylight(), day.fraction);
+        if self.sky_at.is_some_and(|t: f32| (t - at).abs() < 0.004) {
             return;
         }
         let Some(env) = net
@@ -1412,17 +1423,25 @@ impl App {
             .assets
             .region()
             .ok()
-            .and_then(|r| sky::Environment::from_region(&r, day.fraction))
+            .and_then(|r| sky::Environment::from_region(&r, at))
         else {
             return;
         };
-        self.sky_at = Some(day.fraction);
+        self.sky_at = Some(at);
         gpu.set_environment(env);
     }
 
     fn refresh_status(&mut self) {
         let Some(ui) = &mut self.ui else { return };
-        let mut s = format!("{:.0} fps", self.fps);
+        let shows_fps = self
+            .nets
+            .get(self.active)
+            .is_none_or(|net| net.client.show_framerate);
+        let mut s = if shows_fps {
+            format!("{:.0} fps", self.fps)
+        } else {
+            String::new()
+        };
         if self.cli.perf {
             s += &self.render.perf.status();
         }
@@ -1460,7 +1479,7 @@ impl App {
                 c.position.x, c.position.y, c.position.z
             );
         }
-        ui.status = s;
+        ui.status = s.trim_start().to_string();
     }
 
     fn start_connect(&mut self) -> Result<()> {
@@ -1780,7 +1799,10 @@ impl App {
             }
             if let Some(&id) = wanted.iter().find(|id| !self.loaded_blocks.contains(id)) {
                 let t0 = Instant::now();
-                let day_fraction = net.client.day_time().map(|d| d.fraction).unwrap_or(0.5);
+                let day_fraction = daylight_at(
+                    net.client.is_always_daylight(),
+                    net.client.day_time().map(|d| d.fraction).unwrap_or(MIDDAY),
+                );
                 match scene::build_landblock(&net.client.assets, id, &mut self.mesh_cache) {
                     Ok(built) => {
                         self.dungeon.insert(id, built.is_dungeon);

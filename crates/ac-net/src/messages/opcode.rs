@@ -107,6 +107,9 @@ pub const PLAY_SCRIPT_ID: u32 = 0xF754;
 pub const PLAY_EFFECT: u32 = 0xF755;
 /// `u32 seconds until the ban ends, [string16 reason]`.
 pub const ACCOUNT_BANNED: u32 = 0xF7C1;
+/// No payload: the server's own build, which retail asked for from an
+/// admin, arch or PSR character only.
+pub const GET_SERVER_VERSION: u32 = 0xF7CC;
 pub const FRIENDS_OLD: u32 = 0xF7CD;
 pub const DDD_DATA_MESSAGE: u32 = 0xF7E2;
 pub const DDD_REQUEST_DATA_MESSAGE: u32 = 0xF7E3;
@@ -180,7 +183,7 @@ pub fn name(op: u32) -> Option<&'static str> {
         GAME_ACTION => "GameAction",
         ACCOUNT_BANNED => "AccountBanned",
         CHARACTER_ENTER_WORLD_REQUEST => "CharacterEnterWorldRequest",
-        0xF7CC => "GetServerVersion",
+        GET_SERVER_VERSION => "GetServerVersion",
         FRIENDS_OLD => "FriendsOld",
         CHARACTER_RESTORE => "CharacterRestore",
         ACCOUNT_BOOT => "AccountBoot",

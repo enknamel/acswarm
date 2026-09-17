@@ -465,6 +465,10 @@ impl Client {
                                     if for_the_walk && self.move_to.is_some() {
                                         self.move_to_answered = true;
                                     }
+                                } else if ev == ac_net::messages::event::QUERY_AGE_RESPONSE {
+                                    self.hear_age(rest);
+                                } else if ev == ac_net::messages::event::AVAILABLE_HOUSES {
+                                    self.hear_houses(rest);
                                 } else if ev == ac_net::messages::event::SET_TURBINE_CHAT_CHANNELS
                                     && rest.len() >= 4
                                 {
