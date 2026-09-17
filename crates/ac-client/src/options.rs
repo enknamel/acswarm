@@ -27,7 +27,7 @@ pub struct CharacterOption {
 }
 
 /// The options a player is likely to touch, in panel order.
-pub const OPTIONS: [CharacterOption; 21] = [
+pub const OPTIONS: [CharacterOption; 22] = [
     CharacterOption {
         id: 0x1A,
         word: Word::One,
@@ -155,6 +155,13 @@ pub const OPTIONS: [CharacterOption; 21] = [
         inverted: false,
     },
     CharacterOption {
+        id: 0x2E,
+        word: Word::Two,
+        bit: 0x0008_0000,
+        label: "Listen to Society chat",
+        inverted: false,
+    },
+    CharacterOption {
         id: 0x27,
         word: Word::Two,
         bit: 0x0000_1000,
@@ -176,6 +183,22 @@ pub const OPTIONS: [CharacterOption; 21] = [
         inverted: false,
     },
 ];
+
+/// The option that decides whether a Turbine chat room is heard, the one
+/// `@join` and `@leave` set (ACE `CharacterOption.cs:97-154`, `ListenTo*`).
+pub fn listen_option(room: u32) -> Option<&'static CharacterOption> {
+    use ac_net::messages::turbine;
+    let id = match room {
+        turbine::ALLEGIANCE => 0x1B,
+        turbine::GENERAL => 0x23,
+        turbine::TRADE => 0x24,
+        turbine::LFG => 0x25,
+        turbine::ROLEPLAY => 0x26,
+        turbine::SOCIETY => 0x2E,
+        _ => return None,
+    };
+    OPTIONS.iter().find(|o| o.id == id)
+}
 
 /// The option whose label starts with `name` (case-insensitive).
 pub fn option_by_name(name: &str) -> Option<&'static CharacterOption> {

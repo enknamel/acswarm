@@ -379,6 +379,27 @@ fn a_channel_with_nothing_to_say_is_refused_here() {
 }
 
 #[test]
+fn joining_and_leaving_read_the_first_word_only() {
+    assert_eq!(
+        asked("/join General"),
+        Some(Action::Listen {
+            room: turbine::GENERAL,
+            on: true
+        })
+    );
+    assert_eq!(
+        asked("/leave soc please"),
+        Some(Action::Listen {
+            room: turbine::SOCIETY,
+            on: false
+        })
+    );
+    // Retail's own list, and nothing beside it.
+    assert_eq!(asked("/join olthoi"), None);
+    assert_eq!(asked("/join"), None);
+}
+
+#[test]
 fn the_table_is_asked_by_name_whatever_the_case() {
     assert_eq!(action::command("LS").map(|c| c.names[0]), Some("lifestone"));
     assert_eq!(

@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::autoplay::Role;
 use crate::Client;
 
+mod allegiance;
 mod chat;
 mod combat;
 mod fellow;
@@ -154,6 +155,10 @@ pub enum Action {
     /// Answer the question the server asked (a recruit, an allegiance).
     Confirm(bool),
 
+    // ---- allegiance ----
+    /// Hear a Turbine chat room (`ac_net::messages::turbine`), or stop.
+    Listen { room: u32, on: bool },
+
     // ---- team ----
     /// Play on its own.
     Autoplay(bool),
@@ -240,6 +245,8 @@ impl Client {
             Action::FellowDismiss(t) => fellow::dismiss(self, &t),
             Action::FellowQuit { disband } => fellow::quit(self, disband),
             Action::Confirm(yes) => fellow::confirm(self, yes),
+
+            Action::Listen { room, on } => allegiance::listen(self, room, on),
 
             Action::Autoplay(on) => team::autoplay(self, on),
             Action::Team(on) => team::team(self, on),
@@ -442,6 +449,18 @@ pub const RETAIL: &[Command] = &[
         },
         usage: "/a what you are saying",
     },
+    // Hearing a room is one character option, which the server answers with
+    // "You have entered the X channel." Only the first word is read.
+    Command {
+        names: &["join"],
+        action: |args| allegiance::room_wanted(args).map(|room| Action::Listen { room, on: true }),
+        usage: "/join allegiance|general|trade|lfg|roleplay|society",
+    },
+    Command {
+        names: &["leave"],
+        action: |args| allegiance::room_wanted(args).map(|room| Action::Listen { room, on: false }),
+        usage: "/leave allegiance|general|trade|lfg|roleplay|society",
+    },
     //
     // -- status and who (age, loc, version, friends, the housing list) --
     //
@@ -460,8 +479,6 @@ pub const PENDING: &[&str] = &[
     "alh",
     "ah",
     "motd",
-    "join",
-    "leave",
     "chat",
     "notell",
     "reply",
