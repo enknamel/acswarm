@@ -156,7 +156,11 @@ fn worth_fighting(client: &Client, _now: Instant) -> f32 {
         .objects
         .values()
         .filter(|o| o.item_type & ac_world::item_type::CREATURE != 0)
-        .filter(|o| o.health.unwrap_or(0.0) > 0.0)
+        // Not known dead, which is what the fight itself asks of a
+        // creature before picking it (`would_fight`): the two have to
+        // agree, or this says there is nothing here and the fight then
+        // goes and hits it.
+        .filter(|o| o.alive_or_unknown())
         .filter(|o| !client.a_critter(o, fight))
         .filter(|o| !client.passing_by(o, fight))
         .filter_map(|o| o.world_pos())
