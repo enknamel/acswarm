@@ -389,6 +389,15 @@ fn fillcomps_takes_a_kind_a_bill_both_or_the_word_clear() {
 }
 
 #[test]
+fn the_housing_recalls_have_their_own_short_names() {
+    assert_eq!(means("hor", ""), Some(Action::RecallHouse));
+    assert_eq!(means("hr", ""), Some(Action::RecallHouse));
+    assert_eq!(means("hom", ""), Some(Action::RecallMansion));
+    assert_eq!(means("hoa", ""), Some(Action::RecallMansion));
+    assert_eq!(means("hor", "now"), None, "retail printed the house hint");
+}
+
+#[test]
 fn a_corpse_line_is_answered_without_asking_the_server() {
     let mut c = testkit::offline_client();
     let sent = c.session.actions_sent();

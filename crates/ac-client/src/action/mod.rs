@@ -479,6 +479,18 @@ pub const RETAIL: &[Command] = &[
         action: magic::fill_command,
         usage: "/fillcomps [KIND] [PYREALS], /fillcomps clear",
     },
+    //
+    // -- the two housing recalls, which no family above claimed --
+    Command {
+        names: &["hor", "hr"],
+        action: |args| args.is_empty().then_some(Action::RecallHouse),
+        usage: "/hor",
+    },
+    Command {
+        names: &["hom", "hoa"],
+        action: |args| args.is_empty().then_some(Action::RecallMansion),
+        usage: "/hom",
+    },
 ];
 
 /// Retail names with no row yet: the list the families work through. Some are
@@ -531,10 +543,6 @@ pub const PENDING: &[&str] = &[
     "friends_add",
     "friends_remove",
     "hslist",
-    "hor",
-    "hr",
-    "hom",
-    "hoa",
     "squelch",
     "unsquelch",
     "messagetypes",
