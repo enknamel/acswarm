@@ -103,28 +103,9 @@ impl Client {
         // from cold and full damage from fire, so the difference between
         // choosing well and throwing the first spell on the list is the
         // difference between a fight and a stalemate.
-        // The spells on offer: the ones named, or, with none named,
-        // every attack spell in the book. The game is a closed system
-        // and the book says what can be thrown.
         let table = self.assets.spell_table().ok();
-        let offered: Vec<(u32, String)> = if cfg.spells.is_empty() {
-            self.attack_spells_known()
-                .into_iter()
-                .map(|id| {
-                    let name = table
-                        .as_ref()
-                        .and_then(|t| t.get(id).map(|s| s.name.clone()))
-                        .unwrap_or_default();
-                    (id, name)
-                })
-                .collect()
-        } else {
-            cfg.spells
-                .iter()
-                .filter_map(|n| self.spell_by_name(n).map(|id| (id, n.clone())))
-                .collect()
-        };
-        let ready: Vec<(u32, String)> = offered
+        let ready: Vec<(u32, String)> = self
+            .offered_spells(cfg)
             .into_iter()
             .filter(|(id, _)| matches!(self.can_cast(*id), crate::magic::CastCheck::Ok))
             .collect();
@@ -184,6 +165,31 @@ impl Client {
         self.autoplay
             .say(Doing::Fighting, format!("cannot cast at {name} ({why})"));
         true
+    }
+
+    /// The attack spells on offer, in the order they are tried and with
+    /// the name to say for each: the ones the rules name, else every
+    /// attack spell in the book -- the game is a closed system, and the
+    /// book says what can be thrown.
+    fn offered_spells(&self, cfg: &Fight) -> Vec<(u32, String)> {
+        if cfg.spells.is_empty() {
+            let table = self.assets.spell_table().ok();
+            self.attack_spells_known()
+                .into_iter()
+                .map(|id| {
+                    let name = table
+                        .as_ref()
+                        .and_then(|t| t.get(id).map(|s| s.name.clone()))
+                        .unwrap_or_default();
+                    (id, name)
+                })
+                .collect()
+        } else {
+            cfg.spells
+                .iter()
+                .filter_map(|n| self.spell_by_name(n).map(|id| (id, n.clone())))
+                .collect()
+        }
     }
 
     /// Every attack spell in the spellbook that is thrown at a target:
