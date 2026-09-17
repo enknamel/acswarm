@@ -82,6 +82,14 @@ pub enum Event {
         text: String,
         kind: u32,
     },
+    /// What `/log` asks of the front end: copy the chat to this file
+    /// from now on, or stop with None. The chat window is the front
+    /// end's, and only it knows what it has shown.
+    ChatToFile(Option<String>),
+    /// What `/clear` asks of it: empty the chat window, or every one.
+    ChatClear {
+        all: bool,
+    },
     /// A sound to play at a volume (0..=1).
     Sound {
         wave: std::rc::Rc<ac_formats::wave::Wave>,

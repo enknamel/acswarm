@@ -23,6 +23,7 @@ fn on_event(ev)         // ev.kind: "chat" (ev.text, ev.chat_kind), "sound" (ev.
                         // "connected", "terminated" (ev.reason), "refused" (ev.code), "placed" (ev.cell),
                         // "spell_learned" / "spell_forgotten" (ev.spell), "characters" (ev.names, ev.count),
                         // "character_created" (ev.guid, ev.name), "character_create_failed" (ev.code, ev.message),
+                        // "chat_to_file" (ev.file, empty to stop) and "chat_clear" (ev.all): what /log and /clear ask,
                         // "autoplay" (ev.doing: "fighting", "looting", "buffing", "healing", "following", "idle"...;
                         //             ev.text: the Autoplay panel's line), once per change
 fn tick(dt)             // every frame, per session; dt in seconds

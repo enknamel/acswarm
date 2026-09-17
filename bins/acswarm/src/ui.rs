@@ -138,6 +138,35 @@ impl Ui {
         self.chat.push(text, kind);
     }
 
+    /// Start or stop copying the chat to a file (`/log`), answering in
+    /// retail's own words.
+    pub fn log_chat_to(&mut self, file: Option<&str>) -> String {
+        let Some(name) = file else {
+            return match self.chat.file.take() {
+                Some(f) => format!(
+                    "Chat log {} closed.  Chat output now directed only to the screen.",
+                    f.path().display()
+                ),
+                None => "Please specify a file to append chat messages to.".into(),
+            };
+        };
+        match chat::ChatFile::open(name) {
+            Ok(f) => {
+                let said = format!(
+                    "Copying chat to {}.  Run command again with no arguments to turn off logging.",
+                    f.path().display()
+                );
+                self.chat.file = Some(f);
+                said
+            }
+            Err(e) => format!("Failed to redirect to file {name}! ({e})"),
+        }
+    }
+
+    pub fn clear_chat(&mut self, all: bool) {
+        self.chat.clear(all);
+    }
+
     /// Put `/tell Name ` in the chat box, caret at the end, and focus it.
     fn start_tell(&mut self, name: &str) {
         self.input = chat::tell_prefix(name);

@@ -4,9 +4,55 @@
 //! Drawing is in `ui.rs`; everything here is plain data so it can be
 //! tested without a GPU.
 
+use std::io::{self, Write};
 use std::ops::Range;
+use std::path::{Path, PathBuf};
 
 use ac_net::messages::{channel, turbine};
+
+/// The chat copied to a file (`/log`), the stamp in front of each line
+/// as the window shows it.
+pub struct ChatFile {
+    path: PathBuf,
+    file: std::fs::File,
+}
+
+impl ChatFile {
+    /// Open `name` to append to, the way retail did: ".txt" when the
+    /// name brings no extension of its own. A bare name lands in the
+    /// app's `logs` directory, never in whatever directory the client
+    /// was started from (a session log is not the repo's).
+    pub fn open(name: &str) -> io::Result<ChatFile> {
+        let name = name.trim();
+        let mut path = PathBuf::from(name);
+        if path.is_relative() {
+            let mut file = ac_store::file_safe(name);
+            if !file.contains('.') {
+                file.push_str(".txt");
+            }
+            let dir = ac_store::app_dir().join("logs");
+            std::fs::create_dir_all(&dir)?;
+            path = dir.join(file);
+        }
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)?;
+        Ok(ChatFile { path, file })
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// One line, stamp and all. A log that cannot be written to is left
+    /// alone: the window has already shown the line.
+    pub fn write(&mut self, stamp: &str, text: &str) {
+        if let Err(e) = writeln!(self.file, "{stamp} {text}") {
+            tracing::debug!("chat log {}: {e}", self.path.display());
+        }
+    }
+}
 
 /// The tabs across the top of the chat window, in display order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -184,6 +230,8 @@ pub struct ChatLog {
     pub jump: bool,
     /// Height of the chat window in points; dragged from its top edge.
     pub height: f32,
+    /// The file `/log` is copying every line to.
+    pub file: Option<ChatFile>,
 }
 
 impl ChatLog {
@@ -199,6 +247,7 @@ impl ChatLog {
             scroll: Scrollback::default(),
             jump: false,
             height: Self::DEFAULT_HEIGHT,
+            file: None,
         }
     }
 
@@ -220,6 +269,9 @@ impl ChatLog {
                 }
             }
         }
+        if let Some(f) = self.file.as_mut() {
+            f.write(&stamp, &text);
+        }
         let name = sender_name(&text);
         self.lines.push(ChatLine {
             text,
@@ -231,6 +283,20 @@ impl ChatLog {
             let extra = self.lines.len() - Self::MAX_LINES;
             self.lines.drain(..extra);
         }
+    }
+
+    /// Empty the window: the lines the active tab shows, or with `all`
+    /// every line there is (`/clear` and `/clear all`).
+    pub fn clear(&mut self, all: bool) {
+        let tab = self.tab;
+        self.lines.retain(|l| !all && !tab.shows(l.kind));
+        if all {
+            self.unread = [0; 6];
+        } else {
+            self.unread[tab.index()] = 0;
+        }
+        self.scroll.jump();
+        self.jump = true;
     }
 
     /// Switch tabs: the tab's unread count clears and the view jumps to
