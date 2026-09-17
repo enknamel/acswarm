@@ -60,4 +60,38 @@ impl Client {
             self.autoplay.cast_sent = Some(now);
         }
     }
+
+    /// Cast a spell the fight is throwing -- an attack, a vulnerability,
+    /// an imperil -- paced like any other, and remember it as the
+    /// fight's own so a stop can take it back (`Client::stop_fight_cast`).
+    pub(crate) fn cast_fight_spell(&mut self, spell: u32, now: Instant) {
+        self.cast_paced(spell, now);
+        // Only when it actually went out: a cast the client declined
+        // leaves `cast_sent` alone, and there is nothing to take back.
+        self.autoplay.fight_cast = self.autoplay.cast_sent;
+    }
+
+    /// Stop the fight's own spell when the server is still winding it up.
+    ///
+    /// No message recalls a cast. What reaches one is a combat-mode
+    /// change: ACE fails the cast outright for a character still casting
+    /// (`HandleActionChangeCombatMode_Inner`, Player_Combat.cs:787),
+    /// and `FailCast` fizzles the spell rather than landing it
+    /// (Player_Magic.cs:1309). Past the windup the spell is already
+    /// made and nothing takes it back, so this is a chance, not a
+    /// promise.
+    ///
+    /// Only the fight's own spell. `cast_sent` is set by a heal, a
+    /// healing kit and a counter as well, and a stop that fizzled those
+    /// would take the heal a character is alive by.
+    pub(crate) fn stop_fight_cast(&mut self) {
+        let ours = self.autoplay.fight_cast.take();
+        if ours.is_none() || ours != self.autoplay.cast_sent {
+            return;
+        }
+        if !self.autoplay.cast_in_flight(Instant::now()) {
+            return;
+        }
+        self.leave_combat();
+    }
 }

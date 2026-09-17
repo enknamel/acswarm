@@ -147,7 +147,7 @@ impl Client {
             if self.autoplay_approach(guid, &name, crate::dodge::How::Spell(spell)) {
                 return true;
             }
-            self.cast_paced(spell, now);
+            self.cast_fight_spell(spell, now);
             self.note_fired(spell, now);
             self.autoplay.attack_spell = Some(spell);
             self.throw_at(guid, now);

@@ -181,6 +181,10 @@ pub struct Autoplay {
     /// server has not yet said it is done. Cleared by its answer
     /// (`UseDone`), which is what paces the next one.
     pub(crate) cast_sent: Option<Instant>,
+    /// When the fight's own spell went out, so a stop can tell it from a
+    /// heal, a kit or a counter, which set `cast_sent` too. It is the
+    /// unanswered cast only while it still equals `cast_sent`.
+    pub(crate) fight_cast: Option<Instant>,
     /// What the attack spells are being thrown at: a spell keeps no
     /// `attack_target` of its own the way a swing does, so the engine
     /// remembers what it is working on.

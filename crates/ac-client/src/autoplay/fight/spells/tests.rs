@@ -42,3 +42,32 @@ fn no_spell_is_sent_at_a_creature_that_has_already_died() {
     assert_eq!(c.autoplay.cast_sent, None, "nothing to wait for");
     assert!(!c.server_busy(Instant::now()));
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn the_fights_spell_is_remembered_as_its_own_and_a_stop_takes_it_back() {
+    let (mut c, wand) = mid_fight(game_data());
+    const MACE: u32 = 0x8000_0101;
+    const CREATURE: u32 = 0x8000_0103;
+    // Incantation of Lightning Vulnerability Other, a softening spell.
+    const VULNERABILITY: u32 = 4483;
+    a_weapon(
+        &mut c,
+        MACE,
+        ac_world::item_type::MELEE_WEAPON,
+        "Mace",
+        false,
+    );
+    a_weapon(&mut c, wand, ac_world::item_type::CASTER, "Wand", true);
+    c.select(Some(CREATURE));
+    c.cast_fight_spell(VULNERABILITY, Instant::now());
+    assert!(c.magic, "a cast enters magic mode");
+    assert_eq!(
+        c.autoplay.fight_cast, c.autoplay.cast_sent,
+        "the unanswered cast is the fight's own"
+    );
+    // The stop reaches it: ACE fails a cast still being wound up when
+    // the combat mode changes (Player_Combat.cs:787).
+    c.let_go(Release::Fight);
+    assert!(!c.magic, "a spell was left to land after the stop");
+}

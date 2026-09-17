@@ -28,7 +28,8 @@ pub enum Release {
     Cast,
     /// Both targets, while the engagement stands: another rule has this tick.
     Targets,
-    /// Both targets and the engagement: this fight is over.
+    /// Both targets and the engagement: this fight is over, and a spell
+    /// the server is still winding up goes with it (`stop_fight_cast`).
     Fight,
     /// The engagement and the spell's target, keeping the swing's. Only
     /// the Academy's turn towards a corpse lets go this far.
@@ -98,6 +99,11 @@ impl Client {
 
     /// Let the fight go, as far as `how` says. Giving up on the creature
     /// for a while is `give_up_target`, which is this plus the list.
+    ///
+    /// A stop that only forgot the target left the spell already sent to
+    /// land anyway, one more after the character was told to stop; the
+    /// fight being over, `stop_fight_cast` spends the one chance there
+    /// is of taking it back.
     pub fn let_go(&mut self, how: Release) {
         if !matches!(how, Release::Cast | Release::Engagement) {
             self.attack_target = None;
@@ -106,6 +112,9 @@ impl Client {
         if matches!(how, Release::Fight | Release::Engagement) {
             self.autoplay.engaged = None;
             self.autoplay.closing = None;
+        }
+        if matches!(how, Release::Fight) {
+            self.stop_fight_cast();
         }
     }
 
