@@ -808,4 +808,38 @@ mod tests {
             1
         );
     }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn a_fill_keeps_to_its_kind_and_to_its_bill() {
+        use ac_formats::spell_components::component_type as kind;
+        let mut c = Client::offline(crate::testkit::game_data());
+        c.world.player_guid = Some(ME);
+        // Ten lead scarabs and four prismatic tapers wanted, none carried.
+        c.world.stats.options.desired_comps = vec![(691, 10), (20631, 4)];
+        let shelf = |guid: u32, wcid: u32, name: &str, value: u32| ac_world::object::VendorItem {
+            guid,
+            stack: ac_world::object::UNLIMITED_STACK,
+            desc: ac_world::object::WeenieDesc {
+                name: name.into(),
+                weenie_class_id: wcid,
+                item_type: ac_world::item_type::SPELL_COMPONENTS,
+                value,
+                ..Default::default()
+            },
+        };
+        let mut window = crate::testkit::window_of(0x8000_0002);
+        window.items.push(shelf(0x9000_0001, 691, "Lead Scarab", 5));
+        window
+            .items
+            .push(shelf(0x9000_0002, 20631, "Prismatic Taper", 25));
+        c.world.open_vendor = Some(window);
+        assert_eq!(c.fill_components(None, None), 2, "both are short");
+        assert_eq!(c.fill_components(Some(kind::TAPER), None), 1);
+        assert_eq!(c.fill_components(Some(kind::HERB), None), 0, "none wanted");
+        // Five pyreals buys one scarab and no taper, whichever is reached
+        // first; one pyreal buys neither.
+        assert_eq!(c.fill_components(None, Some(5)), 1);
+        assert_eq!(c.fill_components(None, Some(1)), 0);
+    }
 }
