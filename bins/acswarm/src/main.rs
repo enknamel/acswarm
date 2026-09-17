@@ -15,7 +15,6 @@ mod logging;
 mod particles;
 mod perf;
 mod scene;
-use ac_client::action::Line;
 use ac_client::player;
 mod chat;
 mod plugins;
@@ -395,37 +394,6 @@ fn resolve_data_dir(given: Option<PathBuf>, interactive: bool) -> Result<PathBuf
     )
 }
 
-/// Parse a `--fleet-start` spec into the session the fleet panel starts
-/// (a follower). Fields after the character are creation choices; a
-/// blank one keeps the default.
-fn parse_fleet_start(spec: &str) -> Result<ac_plugin::SessionSpec> {
-    let parts: Vec<&str> = spec.split(':').collect();
-    anyhow::ensure!(
-        parts.len() >= 3 && !parts[0].is_empty() && !parts[1].is_empty() && !parts[2].is_empty(),
-        "--fleet-start wants ACCOUNT:PASSWORD:CHARACTER[:TEMPLATE[:TOWN[:HERITAGE[:SEX]]]], got {spec:?}"
-    );
-    let field = |i: usize| {
-        parts
-            .get(i)
-            .filter(|p| !p.is_empty())
-            .map(|p| p.to_string())
-    };
-    let create = (parts.len() > 3).then(|| ac_plugin::CreateSpec {
-        name: parts[2].to_string(),
-        template: field(3),
-        town: field(4),
-        heritage: field(5),
-        sex: field(6),
-    });
-    Ok(ac_plugin::SessionSpec {
-        account: parts[0].to_string(),
-        password: parts[1].to_string(),
-        character: create.is_none().then(|| parts[2].to_string()),
-        create,
-        role: ac_plugin::Role::Follower,
-    })
-}
-
 /// An icon loader for the egui overlay: decodes RenderSurfaces (0x06) from
 /// the portal on demand. The archives are opened on the first icon so a
 /// viewer that never draws one pays nothing.
@@ -440,9 +408,16 @@ fn egui_key(code: KeyCode) -> Option<egui::Key> {
     egui::Key::from_name(name)
 }
 
-/// Every session's client, for plugin callbacks.
-fn clients_of(nets: &mut [Net]) -> Vec<&mut ac_client::Client> {
-    nets.iter_mut().map(|n| &mut n.client).collect()
+/// This window's sessions, with the reconnection rule `--reconnect-tries`
+/// asked for.
+fn sessions_of(cli: &Cli) -> ac_plugin::Sessions<Render> {
+    ac_plugin::Sessions::new(
+        cli.data_dir().to_path_buf(),
+        ac_client::reconnect::Policy {
+            tries: cli.reconnect_tries,
+            ..Default::default()
+        },
+    )
 }
 
 fn icon_loader(data_dir: PathBuf) -> ac_plugin::IconLoader {
@@ -467,31 +442,33 @@ fn icon_loader(data_dir: PathBuf) -> ac_plugin::IconLoader {
     })
 }
 
-/// Live server connection state for `--connect`.
-struct Net {
-    client: ac_client::Client,
-    /// The server this session was started against, so a dropped
-    /// session can be started again against the same one. Who it was
-    /// comes from the session itself (`reconnect::Carry`), which knows
-    /// the character actually in the world rather than the one asked
-    /// for.
-    host: String,
-    /// When to come back after a drop (see `ac_client::reconnect`).
-    reconnect: ac_client::reconnect::Reconnect,
-    /// This client's ending has been handed to `reconnect`. Cleared when
-    /// a fresh client replaces it, so the next ending is heard too.
-    ending_reported: bool,
+/// The GPU-side state one session carries, beside the session itself
+/// (`ac_plugin::Sessions` keeps the rest). Only the session the window
+/// shows has any of it filled in.
+struct Render {
+    /// The world generation the instances were built for.
     last_generation: u64,
     pickables: Vec<scene::Pickable>,
     anims: std::collections::HashMap<u32, scene::ObjectAnim>,
     last_anim_refresh: Instant,
 }
 
+impl Default for Render {
+    fn default() -> Self {
+        Render {
+            last_generation: 0,
+            pickables: Vec::new(),
+            anims: Default::default(),
+            last_anim_refresh: Instant::now(),
+        }
+    }
+}
+
 struct App {
     cli: Cli,
     window: Option<Arc<Window>>,
     gpu: Option<gpu::Gpu>,
-    nets: Vec<Net>,
+    sessions: ac_plugin::Sessions<Render>,
     /// Which session the window draws and the keys steer.
     active: usize,
     frame_dt: f32,
@@ -542,8 +519,6 @@ struct App {
     lobby: ac_plugin::lobby::Lobby,
     /// The creation screen's 3D preview, while it is up.
     preview: Option<Preview>,
-    /// The archives every session shares, once the first connected.
-    assets: Option<std::rc::Rc<ac_scene::Assets>>,
     /// Sessions plugins asked to start and stop this frame, applied
     /// once no session is being ticked (`apply_pending_sessions`).
     pending_sessions: Vec<(Vec<ac_plugin::SessionSpec>, Vec<usize>)>,
@@ -802,63 +777,20 @@ impl App {
             );
             return;
         };
-        if self
-            .nets
-            .iter()
-            .any(|n| n.client.config.account.eq_ignore_ascii_case(&account))
+        // Enter the world straight away when a character (or a character
+        // to create) is named; otherwise stop at the lobby's
+        // character-select screen (the connect screen's path).
+        if let Err(why) =
+            self.sessions
+                .start(&spec, &host, ac_plugin::Enter::Named, Render::default())
         {
-            fail(self, "already running".into());
+            fail(self, why);
             return;
         }
-        let assets = match &self.assets {
-            Some(a) => a.clone(),
-            None => match ac_scene::Assets::open(self.cli.data_dir()) {
-                Ok(a) => {
-                    let a = std::rc::Rc::new(a);
-                    self.assets = Some(a.clone());
-                    a
-                }
-                Err(e) => {
-                    fail(self, format!("opening the DAT archives: {e}"));
-                    return;
-                }
-            },
-        };
-        let cfg = ac_client::Config {
-            host: host.clone(),
-            account: account.clone(),
-            password: spec.password.clone(),
-            character: spec.character_name().map(str::to_string),
-            // Enter the world straight away when a character (or a
-            // character to create) is named; otherwise stop at the lobby's
-            // character-select screen (the connect screen's path).
-            auto_enter: spec.character_name().is_some() || spec.create.is_some(),
-        };
-        let mut client = match ac_client::Client::connect(cfg, assets) {
-            Ok(c) => c,
-            Err(e) => {
-                fail(self, e.to_string());
-                return;
-            }
-        };
-        if let Some(create) = spec.create.clone() {
-            client.create_when_missing(create);
-        }
-        let reconnect = self.reconnect_rule();
-        self.nets.push(Net {
-            client,
-            host,
-            reconnect,
-            ending_reported: false,
-            last_generation: 0,
-            pickables: Vec::new(),
-            anims: Default::default(),
-            last_anim_refresh: Instant::now(),
-        });
         self.plugins
             .board
             .set_local(err_key, ac_plugin::Value::Null);
-        let n = self.nets.len();
+        let n = self.sessions.len();
         tracing::info!("session {n} started for {account} ({})", spec.role.label());
         if let Some(ui) = &mut self.ui {
             ui.push_chat(format!("Session {n} started ({account})"), 0);
@@ -874,9 +806,7 @@ impl App {
         }
         self.plugins.save_settings();
         let now = Instant::now();
-        for net in &mut self.nets {
-            net.client.log_off(now);
-        }
+        self.sessions.log_off_all(now);
         self.closing = Some(now + ac_client::LOG_OFF_WAIT);
     }
 
@@ -887,10 +817,10 @@ impl App {
             return false;
         };
         let now = Instant::now();
-        if now < deadline && !self.nets.iter().all(|n| n.client.logged_off()) {
+        if now < deadline && !self.sessions.all_logged_off() {
             return false;
         }
-        for net in &mut self.nets {
+        for net in self.sessions.iter_mut() {
             net.client.disconnect(now);
         }
         true
@@ -901,17 +831,12 @@ impl App {
     /// keeps showing the same session when it was not the one dropped,
     /// else the nearest one left.
     fn remove_session(&mut self, i: usize) {
-        if i >= self.nets.len() {
+        if i >= self.sessions.len() {
             return;
         }
-        let mut net = self.nets.remove(i);
-        // Logged off first, as far as a session about to be dropped can
-        // be: there is no frame left to wait for the server in.
-        let now = Instant::now();
-        net.client.log_off(now);
-        net.client.disconnect(now);
-        let account = net.client.config.account.clone();
-        drop(net);
+        let Some(account) = self.sessions.stop(i) else {
+            return;
+        };
         self.plugins.session_removed(i);
         tracing::info!("session {} stopped ({account})", i + 1);
         if let Some(ui) = &mut self.ui {
@@ -922,75 +847,26 @@ impl App {
                 self.pending_switch = Some(if p > i { p - 1 } else { p });
             }
         }
-        if self.nets.is_empty() {
+        if self.sessions.is_empty() {
             self.active = 0;
         } else if i < self.active {
             self.active -= 1;
         } else if i == self.active {
-            let next = self.active.min(self.nets.len() - 1);
+            let next = self.active.min(self.sessions.len() - 1);
             self.active = usize::MAX;
             self.lobby = Default::default();
             self.switch_to(next);
         }
     }
 
-    /// The reconnection rule a new session starts with (`--reconnect-tries`).
-    fn reconnect_rule(&self) -> ac_client::reconnect::Reconnect {
-        ac_client::reconnect::Reconnect::new(ac_client::reconnect::Policy {
-            tries: self.cli.reconnect_tries,
-            ..Default::default()
-        })
-    }
-
-    /// Notice the sessions that have ended, and put the dropped ones
-    /// back.
-    ///
-    /// A session being reconnected keeps its place in `nets`: the window
-    /// goes on showing the world it was last in, the plugins keep the
-    /// per-session state they index by that slot, and the fleet panel
-    /// keeps its row. Only the `Client` inside is replaced, so what
-    /// survives a reconnect is what `reconnect::Carry` names and nothing
-    /// else.
+    /// Notice the sessions that have ended, put the dropped ones back,
+    /// and say so. The rule itself is `ac_plugin::Sessions`; what is
+    /// left here is the window's part: the chat log, the character
+    /// select screen a reconnected session comes back through, and the
+    /// fleet panel's row.
     fn tick_reconnect(&mut self, now: Instant) {
-        if self.nets.is_empty() {
-            return;
-        }
-        use ac_client::reconnect::{Action, State};
-        let mut notices: Vec<(usize, String, String)> = Vec::new();
-        let mut attempts: Vec<usize> = Vec::new();
-        let mut settled: Vec<String> = Vec::new();
-        for (i, net) in self.nets.iter_mut().enumerate() {
-            // In the world (or back at the select screen we were
-            // dropped from): the attempt worked. `Client::placed` stays
-            // true on a dropped client, whose scene is still up, so this
-            // only counts while an attempt is actually in flight.
-            let back = net.client.placed()
-                || (net.client.config.character.is_none() && net.client.characters_known);
-            if back && matches!(net.reconnect.state(), State::Trying { .. }) {
-                net.reconnect.placed();
-                settled.push(net.client.config.account.clone());
-            }
-            if let Some(ending) = net.client.ending() {
-                if !net.ending_reported {
-                    net.ending_reported = true;
-                    tracing::warn!(
-                        "session {} ({}) ended: {}",
-                        i + 1,
-                        net.client.config.account,
-                        ending.describe()
-                    );
-                    net.reconnect.ended(ending, now);
-                }
-            }
-            if net.reconnect.poll(now) == Action::Connect {
-                attempts.push(i);
-            }
-            let account = net.client.config.account.clone();
-            while let Some(line) = net.reconnect.take_notice() {
-                notices.push((i, account.clone(), line));
-            }
-        }
-        for (i, account, line) in notices {
+        let report = self.sessions.tick_reconnect(now);
+        for (i, account, line) in report.notices {
             let line = if i == self.active {
                 line
             } else {
@@ -1003,112 +879,48 @@ impl App {
         }
         // A session that gave up shows in the fleet panel the way one
         // that could not be started does; one that came back clears it.
-        for account in settled {
+        for account in report.back {
             self.plugins.board.set_local(
                 plugins::panels::fleet::error_key(&account),
                 ac_plugin::Value::Null,
             );
         }
-        for i in attempts {
-            self.reconnect_session(i, now);
-        }
-        for net in &self.nets {
-            if let Some(stopped) = net.reconnect.stopped() {
-                let why = match stopped {
-                    ac_client::reconnect::Stopped::Quit => continue,
-                    ac_client::reconnect::Stopped::Exhausted => {
-                        "dropped, and out of retries".into()
-                    }
-                    ac_client::reconnect::Stopped::Fatal(why) => why.clone(),
-                };
-                let key = plugins::panels::fleet::error_key(&net.client.config.account);
-                if self.plugins.board.get(&key).is_none() {
-                    self.plugins.board.set_local(key, why);
-                }
+        // The fresh client describes a world that is built from scratch,
+        // so nothing the old one left on the GPU still stands for it.
+        for i in report.reconnected {
+            self.sessions[i].extra = Render::default();
+            if i == self.active {
+                self.lobby = Default::default();
             }
         }
-    }
-
-    /// Log a dropped session back in where it stood: the same slot in
-    /// `nets`, the same account against the same server, and the same
-    /// character, so the player lands back in the world rather than at
-    /// the character-select screen.
-    fn reconnect_session(&mut self, i: usize, now: Instant) {
-        let Some(net) = self.nets.get(i) else { return };
-        let carry = ac_client::reconnect::Carry::of(&net.client);
-        let cfg = ac_client::Config {
-            host: net.host.clone(),
-            account: net.client.config.account.clone(),
-            password: net.client.config.password.clone(),
-            character: carry.character.clone(),
-            // Straight back into the world when we know who we were; a
-            // session dropped at the select screen comes back to it.
-            auto_enter: carry.character.is_some(),
-        };
-        let account = cfg.account.clone();
-        let assets = match self.assets.clone() {
-            Some(a) => a,
-            None => {
-                let net = &mut self.nets[i];
-                net.reconnect.ended(
-                    ac_client::reconnect::Ending::Fatal("the DAT archives are not open".into()),
-                    now,
-                );
-                return;
-            }
-        };
-        tracing::info!(
-            "reconnecting session {} ({account}) as {}",
-            i + 1,
-            carry.character.as_deref().unwrap_or("<character select>")
-        );
-        match ac_client::Client::connect(cfg, assets) {
-            Ok(mut client) => {
-                carry.apply(&mut client);
-                let net = &mut self.nets[i];
-                // Tell the server to let the old session go, in case it
-                // is only half dead (an attempt that timed out).
-                net.client.disconnect(now);
-                net.client = client;
-                net.ending_reported = false;
-                net.last_generation = 0;
-                net.pickables = Vec::new();
-                net.anims.clear();
-                if i == self.active {
-                    self.lobby = Default::default();
-                }
-            }
-            Err(e) => {
-                // The socket would not open (no route, DNS gone): this
-                // attempt is spent, and the rule schedules the next.
-                tracing::warn!("reconnecting {account}: {e}");
-                let net = &mut self.nets[i];
-                net.reconnect
-                    .ended(ac_client::reconnect::Ending::Dropped(e.to_string()), now);
+        for (account, why) in report.gave_up {
+            let key = plugins::panels::fleet::error_key(&account);
+            if self.plugins.board.get(&key).is_none() {
+                self.plugins.board.set_local(key, why);
             }
         }
     }
 
     fn interact(&mut self, guid: u32) {
-        if let Some(net) = self.nets.get_mut(self.active) {
+        if let Some(net) = self.sessions.get_mut(self.active) {
             net.client.interact(guid);
         }
     }
 
     fn cast(&mut self, spell: u32) {
-        if let Some(net) = self.nets.get_mut(self.active) {
+        if let Some(net) = self.sessions.get_mut(self.active) {
             net.client.cast(spell);
         }
     }
 
     fn toggle_combat(&mut self) {
-        if let Some(net) = self.nets.get_mut(self.active) {
+        if let Some(net) = self.sessions.get_mut(self.active) {
             net.client.toggle_combat();
         }
     }
 
     fn use_by_name(&mut self, name: &str) -> bool {
-        self.nets
+        self.sessions
             .get_mut(self.active)
             .is_some_and(|net| net.client.use_by_name(name))
     }
@@ -1120,39 +932,22 @@ impl App {
         let Some(ui) = self.ui.as_mut() else { return };
         let outgoing = std::mem::take(&mut ui.outgoing);
         let active = self.active;
-        if self.nets.is_empty() {
+        if self.sessions.is_empty() {
             return;
         }
         let mut requests: Vec<plugins::Requests> = Vec::new();
         for t in outgoing {
-            let Some(net) = self.nets.get_mut(active) else {
-                continue;
-            };
-            // What a line means is decided in one place (`ac_client::action`):
-            // a retail command acts here and words are said; the rest is
-            // offered to the plugins and scripts before the server sees it.
-            match net.client.chat_line(&t) {
-                Line::Acted(done) => {
-                    if let Err(why) = done {
-                        tracing::info!("{t} -> {why}");
-                    }
-                }
-                Line::Offer { unclaimed, .. } => {
-                    tracing::info!("command {t} (session {})", active + 1);
-                    let clients = clients_of(&mut self.nets);
-                    let r = self.plugins.command(clients, active, &t);
-                    for (l, _) in &r.chat {
-                        tracing::info!("{t} -> {l}");
-                    }
-                    let consumed = r.consumed;
-                    requests.push(r);
-                    if let (false, Some(net)) = (consumed, self.nets.get_mut(active)) {
-                        if let Err(why) = net.client.act(unclaimed) {
-                            tracing::info!("{t} -> {why}");
-                        }
-                    }
-                }
+            let typed = self.sessions.typed(&mut self.plugins, active, &t);
+            if typed.offered {
+                tracing::info!("command {t} (session {})", active + 1);
             }
+            for (l, _) in &typed.requests.chat {
+                tracing::info!("{t} -> {l}");
+            }
+            if let Some(why) = typed.refused {
+                tracing::info!("{t} -> {why}");
+            }
+            requests.push(typed.requests);
         }
         for r in requests {
             self.apply_requests(r);
@@ -1167,9 +962,9 @@ impl App {
         let plugins = &mut self.plugins;
         let lobby = &mut self.lobby;
         let active = self.active;
-        let draw_plugins = !self.nets.is_empty() || self.cli.demo_ui;
+        let draw_plugins = !self.sessions.is_empty() || self.cli.demo_ui;
         let mut clients: Vec<&mut ac_client::Client> =
-            self.nets.iter_mut().map(|n| &mut n.client).collect();
+            self.sessions.iter_mut().map(|n| &mut n.client).collect();
         let mut requests: Option<plugins::Requests> = None;
         let mut world_drop: Option<(u32, f64, f64)> = None;
         ui.hud_hidden = lobby.visible();
@@ -1272,7 +1067,7 @@ impl App {
     fn world_drop(&mut self, item: u32, px: f64, py: f64, size: (u32, u32)) {
         use ac_world::{item_type, object_desc_flags};
         let target = self.pick(px, py, size);
-        let Some(net) = self.nets.get_mut(self.active) else {
+        let Some(net) = self.sessions.get_mut(self.active) else {
             return;
         };
         let c = &mut net.client;
@@ -1329,9 +1124,9 @@ impl App {
         let near = inv.project_point3(ndc);
         let far = inv.project_point3(ndc.with_z(1.0));
         let dir = (far - near).normalize_or_zero();
-        let net = self.nets.get_mut(self.active)?;
+        let net = self.sessions.get_mut(self.active)?;
         let mut best: Option<(f32, u32)> = None;
-        for p in &net.pickables {
+        for p in &net.extra.pickables {
             if let Some(t) = p.hit(near, dir) {
                 tracing::trace!(
                     "hit {} at t={t:.2} (center {:?} r {:.2})",
@@ -1363,7 +1158,7 @@ impl App {
     fn click(&mut self, px: f64, py: f64, (w, h): (u32, u32)) {
         use ac_net::messages::action;
         let picked = self.pick(px, py, (w, h));
-        let Some(net) = self.nets.get_mut(self.active) else {
+        let Some(net) = self.sessions.get_mut(self.active) else {
             return;
         };
         let Some(guid) = picked else {
@@ -1398,7 +1193,7 @@ impl App {
     /// be worth rebuilding (a day in Dereth is under an hour, so this is
     /// every few seconds).
     fn tick_sky(&mut self, gpu: &mut gpu::Gpu) {
-        let Some(net) = self.nets.get(self.active) else {
+        let Some(net) = self.sessions.get(self.active) else {
             return;
         };
         let indoors = net
@@ -1434,7 +1229,7 @@ impl App {
     fn refresh_status(&mut self) {
         let Some(ui) = &mut self.ui else { return };
         let shows_fps = self
-            .nets
+            .sessions
             .get(self.active)
             .is_none_or(|net| net.client.show_framerate);
         let mut s = if shows_fps {
@@ -1445,7 +1240,7 @@ impl App {
         if self.cli.perf {
             s += &self.render.perf.status();
         }
-        if let Some(net) = self.nets.get(self.active) {
+        if let Some(net) = self.sessions.get(self.active) {
             match net.client.world.player().and_then(|o| o.position) {
                 Some(p) => {
                     s += &format!(
@@ -1508,45 +1303,30 @@ impl App {
                 }
             }
         };
-        // Headless runs enter with the first character as before; a window
-        // with no --character shows the select screen.
-        let auto_enter = self.cli.screenshot.is_some();
-        let mut configs = vec![ac_client::Config {
+        self.audio = audio;
+        self.sessions.set_assets(assets);
+        // A screenshot run enters with the first character; a window with
+        // no --character shows the select screen.
+        let first = ac_client::Config {
             host: host.clone(),
             account,
             password,
             character: self.cli.character.clone(),
-            auto_enter,
-        }];
-        for spec in &self.cli.clients {
-            let mut parts = spec.splitn(3, ':');
-            let (Some(a), Some(p)) = (parts.next(), parts.next()) else {
-                anyhow::bail!("--client wants ACCOUNT:PASSWORD[:CHARACTER], got {spec:?}");
-            };
-            configs.push(ac_client::Config {
-                host: host.clone(),
-                account: a.to_string(),
-                password: p.to_string(),
-                character: parts.next().map(str::to_string),
-                auto_enter: true,
-            });
-        }
-        self.audio = audio;
-        self.assets = Some(assets.clone());
-        for cfg in configs {
-            let host = cfg.host.clone();
-            let client = ac_client::Client::connect(cfg, assets.clone())?;
-            let reconnect = self.reconnect_rule();
-            self.nets.push(Net {
-                client,
-                host,
-                reconnect,
-                ending_reported: false,
-                last_generation: 0,
-                pickables: Vec::new(),
-                anims: Default::default(),
-                last_anim_refresh: Instant::now(),
-            });
+            auto_enter: self.cli.screenshot.is_some(),
+        };
+        self.sessions
+            .start_config(first, None, Render::default())
+            .map_err(anyhow::Error::msg)?;
+        // The command line's extra sessions have nobody at the keyboard,
+        // so each enters the world with the character it names or the
+        // account's first.
+        for spec in self.cli.clients.clone() {
+            let spec: ac_plugin::SessionSpec = spec
+                .parse()
+                .map_err(|e: String| anyhow::anyhow!("--client: {e}"))?;
+            self.sessions
+                .start(&spec, &host, ac_plugin::Enter::First, Render::default())
+                .map_err(anyhow::Error::msg)?;
         }
         Ok(())
     }
@@ -1566,8 +1346,8 @@ impl App {
             false
         };
         let keys = &self.keys;
-        let flying = self.nets.get(i)?.client.noclip();
-        let input = self.nets.get(i)?.client.player.as_ref().map(|_| {
+        let flying = self.sessions.get(i)?.client.noclip();
+        let input = self.sessions.get(i)?.client.player.as_ref().map(|_| {
             if is_active {
                 // Flying, the jump key climbs and Control descends.
                 player::Input {
@@ -1599,8 +1379,8 @@ impl App {
         let steering = input
             .as_ref()
             .is_some_and(|i| i.forward != 0.0 || i.strafe != 0.0 || i.climb != 0.0 || i.jump);
-        let count = self.nets.len();
-        let net = self.nets.get_mut(i)?;
+        let count = self.sessions.len();
+        let net = self.sessions.get_mut(i)?;
         if steering && !net.client.autoplay.config.enabled {
             net.client.stop_moving_by_itself();
         }
@@ -1684,13 +1464,13 @@ impl App {
     /// hold meshes) and animation players go, and the new one is
     /// re-instanced on the next frame.
     fn switch_to(&mut self, i: usize) {
-        if i < self.nets.len() && i != self.active {
+        if i < self.sessions.len() && i != self.active {
             tracing::info!("switching to session {}", i + 1);
-            if let Some(old) = self.nets.get_mut(self.active) {
-                old.pickables = Vec::new();
-                old.anims.clear();
+            if let Some(old) = self.sessions.get_mut(self.active) {
+                old.extra.pickables = Vec::new();
+                old.extra.anims.clear();
             }
-            self.nets[i].last_generation = 0;
+            self.sessions[i].extra.last_generation = 0;
             self.active = i;
             self.camera.pitch = -0.15;
             if let Some(ui) = &mut self.ui {
@@ -1698,7 +1478,7 @@ impl App {
                     format!(
                         "Now showing session {} ({})",
                         i + 1,
-                        self.nets[i].client.config.account
+                        self.sessions[i].client.config.account
                     ),
                     0,
                 );
@@ -1707,7 +1487,7 @@ impl App {
     }
 
     fn tick_net(&mut self, gpu: &mut gpu::Gpu) {
-        if self.nets.is_empty() {
+        if self.sessions.is_empty() {
             return;
         }
         let now = Instant::now();
@@ -1717,7 +1497,7 @@ impl App {
         self.apply_ui_commands();
         let mut frame = ac_client::PlayerFrame::default();
         let mut per_session: Vec<Vec<ac_client::Event>> = Vec::new();
-        for i in 0..self.nets.len() {
+        for i in 0..self.sessions.len() {
             match self.tick_client(i, now) {
                 Some((f, events)) => {
                     if i == self.active {
@@ -1731,7 +1511,7 @@ impl App {
         // Plugins see every session, one callback batch per session.
         let dt = self.frame_dt;
         for (i, events) in per_session.iter().enumerate() {
-            let clients = clients_of(&mut self.nets);
+            let clients = self.sessions.clients();
             let r = self.plugins.frame(clients, i, events, dt, now);
             if i == self.active {
                 self.apply_requests(r);
@@ -1778,7 +1558,7 @@ impl App {
                 tracing::debug!("dropped {meshes} unused gpu meshes, {materials} materials");
             }
         }
-        let Some(net) = self.nets.get_mut(self.active) else {
+        let Some(net) = self.sessions.get_mut(self.active) else {
             return;
         };
         // Stream landblocks around the character: the block we stand in
@@ -1888,24 +1668,24 @@ impl App {
                 });
             }
         }
-        let changed = net.client.world.generation != net.last_generation;
-        let animate = scene::any_animated(&net.anims)
-            && net.last_anim_refresh.elapsed() > Duration::from_millis(66);
+        let changed = net.client.world.generation != net.extra.last_generation;
+        let animate = scene::any_animated(&net.extra.anims)
+            && net.extra.last_anim_refresh.elapsed() > Duration::from_millis(66);
         if net.client.scene_block.is_some() && (changed || animate) {
-            net.last_generation = net.client.world.generation;
-            let dt = net.last_anim_refresh.elapsed().as_secs_f32().min(0.2);
-            net.last_anim_refresh = Instant::now();
+            net.extra.last_generation = net.client.world.generation;
+            let dt = net.extra.last_anim_refresh.elapsed().as_secs_f32().min(0.2);
+            net.extra.last_anim_refresh = Instant::now();
             let (instances, picks) = scene::object_instances(
                 &net.client.assets,
                 gpu,
                 &net.client.world,
                 &mut self.gpu_meshes,
                 &mut self.palettes,
-                &mut net.anims,
+                &mut net.extra.anims,
                 &mut self.tables,
                 dt,
             );
-            net.pickables = picks;
+            net.extra.pickables = picks;
             gpu.set_dynamic_instances(instances);
         }
         // Third-person camera behind the character, and its model.
@@ -1952,8 +1732,8 @@ impl App {
             self.start_connect()?;
             // Daylight behind the lobby until the first landblock streams in.
             if let Some(env) = self
-                .nets
-                .first()
+                .sessions
+                .get(0)
                 .and_then(|n| n.client.assets.region().ok())
                 .and_then(|r| sky::Environment::from_region(&r, 0.5))
             {
@@ -2130,7 +1910,7 @@ impl ApplicationHandler for App {
             && !self.cli.demo_select
             && !self.cli.demo_create
             && !self.lobby.visible()
-            && self.nets.is_empty()
+            && self.sessions.is_empty()
         {
             self.lobby.open_connect(ac_plugin::lobby::store::load());
         }
@@ -2162,7 +1942,7 @@ impl ApplicationHandler for App {
         if let WindowEvent::KeyboardInput { event: key, .. } = &event {
             if key.physical_key == PhysicalKey::Code(KeyCode::Enter)
                 && key.state == ElementState::Pressed
-                && !self.nets.is_empty()
+                && !self.sessions.is_empty()
                 && self.ui.as_ref().is_some_and(|u| !u.text_field_focused())
             {
                 if let Some(ui) = &mut self.ui {
@@ -2224,7 +2004,7 @@ impl ApplicationHandler for App {
                     if self.lobby.visible() {
                         if let Some(key) = egui_key(code) {
                             let active = self.active;
-                            let client = self.nets.get_mut(active).map(|n| &mut n.client);
+                            let client = self.sessions.get_mut(active).map(|n| &mut n.client);
                             if self
                                 .lobby
                                 .key(key, event.state == ElementState::Pressed, client)
@@ -2233,9 +2013,9 @@ impl ApplicationHandler for App {
                             }
                         }
                     }
-                    if let (Some(key), false) = (egui_key(code), self.nets.is_empty()) {
+                    if let (Some(key), false) = (egui_key(code), self.sessions.is_empty()) {
                         let active = self.active;
-                        let clients = clients_of(&mut self.nets);
+                        let clients = self.sessions.clients();
                         let r = self.plugins.key(
                             clients,
                             active,
@@ -2250,9 +2030,9 @@ impl ApplicationHandler for App {
                     }
                     if code == KeyCode::Tab
                         && event.state == ElementState::Pressed
-                        && !self.nets.is_empty()
+                        && !self.sessions.is_empty()
                     {
-                        let next = (self.active + 1) % self.nets.len();
+                        let next = (self.active + 1) % self.sessions.len();
                         self.switch_to(next);
                         return;
                     }
@@ -2265,7 +2045,7 @@ impl ApplicationHandler for App {
                     // whatever is below. (F is the fellowship panel, and
                     // every other letter is taken too.)
                     if code == KeyCode::KeyY && event.state == ElementState::Pressed {
-                        if let Some(net) = self.nets.get_mut(self.active) {
+                        if let Some(net) = self.sessions.get_mut(self.active) {
                             let on = !net.client.noclip();
                             net.client.set_noclip(on);
                             net.client.events.push(ac_client::Event::Chat {
@@ -2283,7 +2063,7 @@ impl ApplicationHandler for App {
                     // route the character is walking.
                     if code == KeyCode::KeyT && event.state == ElementState::Pressed {
                         self.show_route = !self.show_route;
-                        if let Some(net) = self.nets.get_mut(self.active) {
+                        if let Some(net) = self.sessions.get_mut(self.active) {
                             net.client.events.push(ac_client::Event::Chat {
                                 text: if self.show_route {
                                     "Route shown on the ground.".into()
@@ -2301,7 +2081,7 @@ impl ApplicationHandler for App {
                     if (code == KeyCode::KeyR || code == KeyCode::KeyG)
                         && event.state == ElementState::Pressed
                     {
-                        if let Some(net) = self.nets.get_mut(self.active) {
+                        if let Some(net) = self.sessions.get_mut(self.active) {
                             if let Some(g) = net.client.selected {
                                 if code == KeyCode::KeyR {
                                     net.client.use_object(g);
@@ -2314,7 +2094,7 @@ impl ApplicationHandler for App {
                     }
                     if code == KeyCode::Enter
                         && event.state == ElementState::Pressed
-                        && !self.nets.is_empty()
+                        && !self.sessions.is_empty()
                     {
                         if let Some(ui) = &mut self.ui {
                             ui.chat_focus = true;
@@ -2362,7 +2142,7 @@ impl ApplicationHandler for App {
                         MouseScrollDelta::LineDelta(_, y) => y,
                         MouseScrollDelta::PixelDelta(p) => (p.y / 40.0) as f32,
                     };
-                    if let Some(net) = self.nets.get_mut(self.active) {
+                    if let Some(net) = self.sessions.get_mut(self.active) {
                         net.client.adjust_jump_charge(notches * 0.05);
                     }
                 }
@@ -2379,7 +2159,7 @@ impl ApplicationHandler for App {
                             return;
                         }
                         match self
-                            .nets
+                            .sessions
                             .get_mut(self.active)
                             .and_then(|n| n.client.player.as_mut())
                         {
@@ -2399,7 +2179,7 @@ impl ApplicationHandler for App {
                 let dt = (now - self.last_frame).as_secs_f32().min(0.1);
                 self.last_frame = now;
                 self.frame_dt = dt;
-                if self.nets.is_empty() && !self.lobby.visible() {
+                if self.sessions.is_empty() && !self.lobby.visible() {
                     self.update(dt);
                 }
                 if let Some(mut g) = self.gpu.take() {
@@ -2563,11 +2343,12 @@ fn main() -> Result<()> {
     }
     if let Some(path) = cli.screenshot.clone() {
         let mut gpu = gpu::Gpu::headless(1280, 800)?;
+        let sessions = sessions_of(&cli);
         let mut app = App {
             cli,
             window: None,
             gpu: None,
-            nets: Vec::new(),
+            sessions,
             active: 0,
             frame_dt: 0.0,
             camera: camera::Camera {
@@ -2606,7 +2387,6 @@ fn main() -> Result<()> {
             audio: None,
             lobby: Default::default(),
             preview: None,
-            assets: None,
             pending_sessions: Vec::new(),
             render: Default::default(),
             current_host: None,
@@ -2636,7 +2416,10 @@ fn main() -> Result<()> {
                 .cli
                 .fleet_start
                 .iter()
-                .map(|s| parse_fleet_start(s))
+                .map(|s| {
+                    s.parse()
+                        .map_err(|e: String| anyhow::anyhow!("--fleet-start: {e}"))
+                })
                 .collect::<Result<_>>()?;
             let fleet_accounts: Vec<String> = fleet.iter().map(|s| s.account.clone()).collect();
             if !fleet.is_empty() {
@@ -2721,7 +2504,7 @@ fn main() -> Result<()> {
                     last_flush = Instant::now();
                 }
                 let placed = app
-                    .nets
+                    .sessions
                     .get(app.active)
                     .map(|n| n.client.scene_block.is_some())
                     .unwrap_or(false);
@@ -2771,7 +2554,7 @@ fn main() -> Result<()> {
                     }
                     if let Some(want) = app.cli.cast.clone() {
                         if t > 4.0 + app.cli.walk + say_delay {
-                            let id = app.nets.get(app.active).and_then(|n| {
+                            let id = app.sessions.get(app.active).and_then(|n| {
                                 // Spellbook first (ids from PlayerDescription), then
                                 // scrolls learnt this session or still in the pack.
                                 let table = n.client.assets.spell_table().ok();
@@ -2815,7 +2598,7 @@ fn main() -> Result<()> {
                         }
                     }
                     if let Some(want) = app.cli.sell.clone() {
-                        if let Some(net) = app.nets.get_mut(app.active) {
+                        if let Some(net) = app.sessions.get_mut(app.active) {
                             if net.client.world.open_vendor.is_some() {
                                 let found = net
                                     .client
@@ -2833,7 +2616,7 @@ fn main() -> Result<()> {
                         }
                     }
                     if let Some(want) = app.cli.buy.clone() {
-                        if let Some(net) = app.nets.get_mut(app.active) {
+                        if let Some(net) = app.sessions.get_mut(app.active) {
                             if let Some(v) = &net.client.world.open_vendor {
                                 tracing::info!(
                                     "vendor stock: {}",
@@ -2886,7 +2669,11 @@ fn main() -> Result<()> {
                             }
                         }
                         if let Some(name) = app.cli.attack.clone() {
-                            if !app.nets.get(app.active).is_some_and(|n| n.client.combat) {
+                            if !app
+                                .sessions
+                                .get(app.active)
+                                .is_some_and(|n| n.client.combat)
+                            {
                                 app.toggle_combat();
                             }
                             if app.use_by_name(&name) || t > 60.0 + say_delay {
@@ -2897,7 +2684,7 @@ fn main() -> Result<()> {
                     }
                     // Attack phase: wait for the target to die, then loot.
                     let fighting = attack_started.is_some_and(|s| {
-                        app.nets
+                        app.sessions
                             .get(app.active)
                             .is_some_and(|n| n.client.attack_target.is_some())
                             && s.elapsed() < Duration::from_secs(90)
@@ -2913,13 +2700,17 @@ fn main() -> Result<()> {
                     }
                     if loot_state == 1 && loot_at.elapsed() > Duration::from_secs(2) {
                         if let Some(name) = app.cli.loot.clone() {
-                            if app.nets.get(app.active).is_some_and(|n| n.client.combat) {
+                            if app
+                                .sessions
+                                .get(app.active)
+                                .is_some_and(|n| n.client.combat)
+                            {
                                 app.toggle_combat();
                             }
                             let corpse = if name.is_empty() {
                                 format!(
                                     "Corpse of {}",
-                                    app.nets
+                                    app.sessions
                                         .get(app.active)
                                         .map(|n| n.client.last_target_name.clone())
                                         .unwrap_or_default()
@@ -2941,7 +2732,7 @@ fn main() -> Result<()> {
                         }
                     }
                     if loot_state == 2 && app.cli.loot.is_some() {
-                        if let Some(net) = app.nets.get_mut(app.active) {
+                        if let Some(net) = app.sessions.get_mut(app.active) {
                             let items: Vec<u32> = net
                                 .client
                                 .world
@@ -2965,7 +2756,7 @@ fn main() -> Result<()> {
                     if !listed && t > 1.5 + say_delay {
                         listed = true;
                         let mut names: Vec<String> = app
-                            .nets
+                            .sessions
                             .get(app.active)
                             .map(|n| {
                                 n.client
@@ -2977,7 +2768,7 @@ fn main() -> Result<()> {
                             .unwrap_or_default();
                         names.sort();
                         tracing::debug!("objects in view: {}", names.join(" | "));
-                        if let Some(n) = app.nets.get(app.active) {
+                        if let Some(n) = app.sessions.get(app.active) {
                             let st = &n.client.world.stats;
                             tracing::info!(
                                 "sheet: level {} xp {} avail {} credits {}; {} skills, {} spells, {} inventory guids, {} wielded guids",
@@ -3004,7 +2795,7 @@ fn main() -> Result<()> {
                         );
                         for key in keys {
                             let active = app.active;
-                            let clients = clients_of(&mut app.nets);
+                            let clients = app.sessions.clients();
                             let r = app.plugins.key(clients, active, key, true);
                             app.apply_requests(r);
                         }
@@ -3034,7 +2825,7 @@ fn main() -> Result<()> {
                     if ticks_since.elapsed() >= Duration::from_secs(1) {
                         tracing::info!(
                             "{ticks} ticks/s; {} gpu meshes, {} materials ({} MB textures), {} instances, {} buffers ({} MB) created",
-                            app.nets
+                            app.sessions
                                 .get(app.active)
                                 .map(|_| app.gpu_meshes.len())
                                 .unwrap_or(0),
@@ -3053,7 +2844,7 @@ fn main() -> Result<()> {
                         || app.cli.use_name.is_some()
                         || said < app.cli.say.len()
                         || (!app.cli.say.is_empty() && t < say_delay + 2.0);
-                    let looting = app.nets.get(app.active).is_some_and(|n| {
+                    let looting = app.sessions.get(app.active).is_some_and(|n| {
                         !n.client.loot_queue.is_empty() || n.client.loot_inflight.is_some()
                     });
                     let done = if !fleet_accounts.is_empty() {
@@ -3171,17 +2962,18 @@ fn main() -> Result<()> {
         }
         app.plugins.save_settings();
         let mut clients: Vec<&mut ac_client::Client> =
-            app.nets.iter_mut().map(|n| &mut n.client).collect();
+            app.sessions.iter_mut().map(|n| &mut n.client).collect();
         ac_client::log_off_all(&mut clients, ac_client::LOG_OFF_WAIT);
         return Ok(());
     }
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Poll);
+    let sessions = sessions_of(&cli);
     let mut app = App {
         cli,
         window: None,
         gpu: None,
-        nets: Vec::new(),
+        sessions,
         active: 0,
         frame_dt: 0.0,
         camera: camera::Camera {
@@ -3220,7 +3012,6 @@ fn main() -> Result<()> {
         audio: None,
         lobby: Default::default(),
         preview: None,
-        assets: None,
         pending_sessions: Vec::new(),
         render: Default::default(),
         current_host: None,
@@ -3246,35 +3037,6 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn fleet_start_specs_parse() {
-        let s = parse_fleet_start("fleetbot1:testpass:Fleetbot One:bow:holtburg").unwrap();
-        assert_eq!(
-            (s.account.as_str(), s.password.as_str()),
-            ("fleetbot1", "testpass")
-        );
-        assert_eq!(s.character, None, "created, so named once");
-        let c = s.create.unwrap();
-        assert_eq!(c.name, "Fleetbot One");
-        assert_eq!(c.template.as_deref(), Some("bow"));
-        assert_eq!(c.town.as_deref(), Some("holtburg"));
-        assert_eq!(c.heritage, None);
-        assert_eq!(s.role, ac_plugin::Role::Follower);
-        // Without a template: enter with the character, create nothing.
-        let s = parse_fleet_start("bob:pw:Bob").unwrap();
-        assert_eq!(s.character.as_deref(), Some("Bob"));
-        assert!(s.create.is_none());
-        // Blank middle fields keep the defaults.
-        let s = parse_fleet_start("bob:pw:Bob::yaraq:sho:f").unwrap();
-        let c = s.create.unwrap();
-        assert_eq!(c.template, None);
-        assert_eq!(c.town.as_deref(), Some("yaraq"));
-        assert_eq!(c.heritage.as_deref(), Some("sho"));
-        assert_eq!(c.sex.as_deref(), Some("f"));
-        assert!(parse_fleet_start("bob:pw").is_err());
-        assert!(parse_fleet_start("bob::Bob").is_err());
-    }
 
     #[test]
     fn particles_upload_only_while_shown() {

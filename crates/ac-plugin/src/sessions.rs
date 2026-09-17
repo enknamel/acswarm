@@ -94,6 +94,9 @@ pub struct Typed {
     pub requests: Requests,
     /// Why the client would not do it, when it refused.
     pub refused: Option<ac_client::did::Because>,
+    /// It was a command the retail table has no row for, so the plugins
+    /// and scripts were offered it first.
+    pub offered: bool,
 }
 
 /// Every session in one process, in the order they started.
@@ -115,7 +118,7 @@ impl<E> Sessions<E> {
             assets: None,
             data_dir,
             policy,
-            open: Box::new(|cfg, assets| Client::connect(cfg, assets)),
+            open: Box::new(Client::connect),
         }
     }
 
@@ -414,8 +417,8 @@ impl<E> Sessions<E> {
         match s.client.chat_line(line) {
             Line::Acted(Ok(())) => Typed::default(),
             Line::Acted(Err(why)) => Typed {
-                requests: Requests::default(),
                 refused: Some(why),
+                ..Typed::default()
             },
             Line::Offer { unclaimed, .. } => {
                 let requests = host.command(self.clients(), i, line);
@@ -427,7 +430,11 @@ impl<E> Sessions<E> {
                         }
                     }
                 }
-                Typed { requests, refused }
+                Typed {
+                    requests,
+                    refused,
+                    offered: true,
+                }
             }
         }
     }
