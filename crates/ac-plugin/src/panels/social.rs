@@ -303,7 +303,7 @@ impl Plugin for Social {
                 c.remove_friend(Some(g));
             }
             if let Some((g, n, on)) = a.squelch {
-                c.squelch(g, &n, on);
+                c.squelch(g, &n, ac_net::messages::squelch::ALL, on);
                 self.name_box.clear();
             }
         }

@@ -373,6 +373,13 @@ pub struct Client {
     /// Our allegiance's Turbine chat room (SetTurbineChatChannels), 0
     /// without one.
     pub allegiance_room: u32,
+    /// Our society's Turbine chat room (the seventh id of the same
+    /// message, ACE GameEventSetTurbineChatChannels.cs:16), 0 without one.
+    pub society_room: u32,
+    /// The last player who told us, for `/reply`: their guid and name.
+    pub last_teller: Option<(u32, String)>,
+    /// The last player we told, for `/retell`; only `/tell` sets it.
+    pub last_told: Option<String>,
     /// Context id of the next Turbine chat request.
     turbine_context: u32,
     pub last_click: Option<(Instant, u32)>,

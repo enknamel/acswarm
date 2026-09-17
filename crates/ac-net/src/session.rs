@@ -280,6 +280,13 @@ impl Session {
         self.action_seq - 1
     }
 
+    /// The messages waiting for the next [`Session::poll`] to cut them
+    /// into fragments, `(queue, body)` with the opcode first in the
+    /// body. What a test reads when the message is not a GameAction.
+    pub fn queued(&self) -> &[(u16, Vec<u8>)] {
+        &self.pending_msgs
+    }
+
     /// Queue a GameAction (0xF7B1) with the next action sequence.
     pub fn send_action(&mut self, action: u32, body: &[u8]) {
         let seq = self.action_seq;

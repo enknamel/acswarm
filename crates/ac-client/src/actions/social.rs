@@ -94,13 +94,16 @@ impl Client {
 
     /// Squelch or unsquelch a character (ModifyCharacterSquelch 0x0058:
     /// flag, guid, name, ChatMessageType; guid 0 with a name looks the
-    /// player up, chat type 1 = all channels), their whole account
+    /// player up, `squelch::ALL` for every channel), their whole account
     /// (ModifyAccountSquelch 0x0059: flag, name), or a chat type from
     /// everyone (ModifyGlobalSquelch 0x005B: flag, ChatMessageType). The
     /// server confirms in chat and re-sends the squelch list.
-    pub fn squelch(&mut self, guid: u32, name: &str, on: bool) {
+    pub fn squelch(&mut self, guid: u32, name: &str, kind: u32, on: bool) {
         let mut w = ac_net::wire::Writer::new();
-        w.u32(u32::from(on)).u32(guid).string16(name.trim()).u32(1);
+        w.u32(u32::from(on))
+            .u32(guid)
+            .string16(name.trim())
+            .u32(kind);
         self.session.send_action(
             ac_net::messages::action::MODIFY_CHARACTER_SQUELCH,
             &w.finish(),
@@ -323,17 +326,26 @@ impl Client {
         if text.is_empty() {
             return false;
         }
-        let room = if room == ac_net::messages::turbine::ALLEGIANCE {
-            if self.allegiance_room == 0 {
+        // Two rooms stand for one of ours, whose id the server named in
+        // SetTurbineChatChannels; the rest are the same for everyone.
+        let room = match room {
+            ac_net::messages::turbine::ALLEGIANCE if self.allegiance_room == 0 => {
                 self.events.push(Event::Chat {
                     text: "You are not in an allegiance.".into(),
                     kind: 0,
                 });
                 return false;
             }
-            self.allegiance_room
-        } else {
-            room
+            ac_net::messages::turbine::ALLEGIANCE => self.allegiance_room,
+            ac_net::messages::turbine::SOCIETY if self.society_room == 0 => {
+                self.events.push(Event::Chat {
+                    text: "You do not belong to a society.".into(),
+                    kind: 0,
+                });
+                return false;
+            }
+            ac_net::messages::turbine::SOCIETY => self.society_room,
+            other => other,
         };
         let me = self.world.player_guid.unwrap_or(0);
         let context = self.turbine_context;

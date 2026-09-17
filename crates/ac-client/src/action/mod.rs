@@ -58,17 +58,71 @@ pub enum Action {
     /// Say it aloud, to everyone in earshot.
     Say(String),
     /// Tell one player, wherever they are.
-    Tell { who: String, text: String },
+    Tell {
+        who: String,
+        text: String,
+    },
     /// A freeform emote ("/emote grins"), said as an action of ours.
     Emote(String),
     /// A soul emote by word ("wave", "*bow*"): the motion and its line.
     SoulEmote(String),
     /// Speak in a Turbine chat room (`ac_net::messages::turbine`).
-    Room { room: u32, text: String },
+    Room {
+        room: u32,
+        text: String,
+    },
     /// Speak on a group channel (`ac_net::messages::channel`).
-    Channel { channel: u32, text: String },
+    Channel {
+        channel: u32,
+        text: String,
+    },
+    /// Tell the last player who told us.
+    Reply(String),
+    /// Tell again the last player we told.
+    Retell(String),
     /// Away from keyboard, with the message others get when they tell us.
-    Afk { away: bool, message: String },
+    Afk {
+        away: bool,
+        message: String,
+    },
+    /// Stop hearing one player, or their whole account, on one chat
+    /// category (`ac_net::messages::squelch`); `who` None is the last
+    /// player who told us. `on` false hears them again.
+    Squelch {
+        who: Option<String>,
+        account: bool,
+        kind: u32,
+        on: bool,
+    },
+    /// Stop hearing one chat category from everyone, which is what
+    /// `/filter`, `/chat` and `/notell` each ask for.
+    Filter {
+        kind: u32,
+        on: bool,
+    },
+    /// Show whom we squelch, or the categories we filter from everyone.
+    ShowSquelches {
+        global: bool,
+    },
+    /// Show the categories a squelch or a filter can name.
+    ShowMessageTypes,
+    /// Join a chat channel, leave it, or ask who is on it
+    /// (`ac_net::messages::channel`); these are the staff channels, and
+    /// ACE answers everyone else with silence.
+    ChannelJoin(u32),
+    ChannelLeave(u32),
+    ChannelList(u32),
+    /// Ask which channels we may join.
+    ChannelIndex,
+    /// Copy the chat to this file from now on, or stop with None.
+    ChatToFile(Option<String>),
+    /// Empty the chat window, or every one of them.
+    ChatClear {
+        all: bool,
+    },
+    /// Rename the chat window the line was typed in; not the character's
+    /// title, which `Client::set_title` shows.
+    ChatTitle(String),
     /// A command for the server itself, sent as its `@command` line.
     ServerCommand(String),
 
@@ -77,7 +131,10 @@ pub enum Action {
     /// double-click did).
     Use(Target),
     /// Apply one carried thing to another (a kit, a stone, a key).
-    UseOn { item: Target, target: Target },
+    UseOn {
+        item: Target,
+        target: Target,
+    },
     /// Take it out of the open container.
     Take(Target),
     /// Take everything in the open container.
@@ -91,11 +148,20 @@ pub enum Action {
         amount: Option<u32>,
     },
     /// Move it into a pack.
-    PutIn { item: Target, container: Target },
+    PutIn {
+        item: Target,
+        container: Target,
+    },
     /// Take `amount` off a stack, into the pack.
-    Split { item: Target, amount: u32 },
+    Split {
+        item: Target,
+        amount: u32,
+    },
     /// Pour one stack into another.
-    Merge { from: Target, to: Target },
+    Merge {
+        from: Target,
+        to: Target,
+    },
     /// Break these down at the Ust.
     Salvage(Vec<Target>),
     /// Ask the server what it is.
@@ -117,7 +183,10 @@ pub enum Action {
 
     // ---- magic ----
     /// Cast a spell, on `at` or on whatever is selected.
-    Cast { spell: SpellRef, at: Option<Target> },
+    Cast {
+        spell: SpellRef,
+        at: Option<Target>,
+    },
     /// Buy the components the spellbook burns, at the open counter.
     FillComponents,
 
@@ -135,7 +204,10 @@ pub enum Action {
     /// Shut the trade window.
     TradeClose,
     /// Buy from the open counter.
-    Buy { ware: Target, amount: u32 },
+    Buy {
+        ware: Target,
+        amount: u32,
+    },
     /// Sell to the open counter.
     Sell(Target),
     /// Leave the counter.
@@ -143,13 +215,18 @@ pub enum Action {
 
     // ---- fellow ----
     /// Found a fellowship.
-    FellowCreate { name: String, share_xp: bool },
+    FellowCreate {
+        name: String,
+        share_xp: bool,
+    },
     /// Invite a player into ours.
     FellowRecruit(Target),
     /// Put a fellow out of it.
     FellowDismiss(Target),
     /// Leave ours, disbanding it if we lead.
-    FellowQuit { disband: bool },
+    FellowQuit {
+        disband: bool,
+    },
     /// Answer the question the server asked (a recruit, an allegiance).
     Confirm(bool),
 
@@ -195,7 +272,25 @@ impl Client {
             Action::SoulEmote(words) => chat::soul_emote(self, &words),
             Action::Room { room, text } => chat::room(self, room, &text),
             Action::Channel { channel, text } => chat::channel(self, channel, &text),
+            Action::Reply(text) => chat::reply(self, &text),
+            Action::Retell(text) => chat::retell(self, &text),
             Action::Afk { away, message } => chat::afk(self, away, &message),
+            Action::Squelch {
+                who,
+                account,
+                kind,
+                on,
+            } => chat::squelch(self, who.as_deref(), account, kind, on),
+            Action::Filter { kind, on } => chat::filter(self, kind, on),
+            Action::ShowSquelches { global } => chat::show_squelches(self, global),
+            Action::ShowMessageTypes => chat::show_message_types(self),
+            Action::ChannelJoin(id) => chat::channel_join(self, id),
+            Action::ChannelLeave(id) => chat::channel_leave(self, id),
+            Action::ChannelList(id) => chat::channel_list(self, id),
+            Action::ChannelIndex => chat::channel_index(self),
+            Action::ChatToFile(file) => chat::chat_to_file(self, file.as_deref()),
+            Action::ChatClear { all } => chat::chat_clear(self, all),
+            Action::ChatTitle(name) => chat::chat_title(self, &name),
             Action::ServerCommand(line) => chat::server_command(self, &line),
 
             Action::Use(t) => item::use_thing(self, &t),
@@ -385,6 +480,155 @@ pub const RETAIL: &[Command] = &[
     // then retail's own aliases, and never a name retail did not register.
     //
     // -- channels and speech (chat, say, the group channels, filtering) --
+    Command {
+        names: &["say", "s"],
+        action: |args| (!args.is_empty()).then(|| Action::Say(args.to_string())),
+        usage: "/say what to say aloud",
+    },
+    Command {
+        names: &["reply", "r", "rp"],
+        action: |args| (!args.is_empty()).then(|| Action::Reply(args.to_string())),
+        usage: "/reply what to tell whoever told us last",
+    },
+    Command {
+        names: &["retell", "rt"],
+        action: |args| (!args.is_empty()).then(|| Action::Retell(args.to_string())),
+        usage: "/retell what to tell whoever we told last",
+    },
+    Command {
+        names: &["chat"],
+        action: |args| {
+            // "@chat on" is speech we want, so the squelch comes off.
+            let on = chat::on_or_off(args, true)?;
+            Some(Action::Filter {
+                kind: ac_net::messages::squelch::SPEECH,
+                on: !on,
+            })
+        },
+        usage: "/chat on|off",
+    },
+    Command {
+        names: &["notell"],
+        action: |args| {
+            // And "@notell on" is tells we do not want, so it goes on.
+            Some(Action::Filter {
+                kind: ac_net::messages::squelch::TELL,
+                on: chat::on_or_off(args, false)?,
+            })
+        },
+        usage: "/notell on|off",
+    },
+    // The Turbine rooms. `/a` says the same as `/guild` and `/gu`, and
+    // reaches the room through the router's fallback until the
+    // allegiance family takes it.
+    Command {
+        names: &["guild", "gu"],
+        action: |args| chat::room_line(ac_net::messages::turbine::ALLEGIANCE, args),
+        usage: "/guild what to say to the allegiance",
+    },
+    Command {
+        names: &["general", "cg"],
+        action: |args| chat::room_line(ac_net::messages::turbine::GENERAL, args),
+        usage: "/general what to say on the General channel",
+    },
+    Command {
+        names: &["trade", "ct"],
+        action: |args| chat::room_line(ac_net::messages::turbine::TRADE, args),
+        usage: "/trade what to say on the Trade channel",
+    },
+    Command {
+        names: &["lfg", "clfg"],
+        action: |args| chat::room_line(ac_net::messages::turbine::LFG, args),
+        usage: "/lfg what to say on the LFG channel",
+    },
+    Command {
+        names: &["roleplay", "crp"],
+        action: |args| chat::room_line(ac_net::messages::turbine::ROLEPLAY, args),
+        usage: "/roleplay what to say on the Roleplay channel",
+    },
+    Command {
+        names: &["society", "soc"],
+        action: |args| chat::room_line(ac_net::messages::turbine::SOCIETY, args),
+        usage: "/society what to say to the society",
+    },
+    Command {
+        names: &["olthoi", "o"],
+        action: |args| chat::room_line(ac_net::messages::turbine::OLTHOI, args),
+        usage: "/olthoi what to say on the Olthoi channel",
+    },
+    // Squelching and filtering.
+    Command {
+        names: &["squelch"],
+        action: |args| chat::squelch_line(args, true),
+        usage: "/squelch [-account] [-CATEGORY] NAME, or /squelch -reply",
+    },
+    Command {
+        names: &["unsquelch"],
+        action: |args| chat::squelch_line(args, false),
+        usage: "/unsquelch [-account] [-CATEGORY] NAME, or /unsquelch -reply",
+    },
+    Command {
+        names: &["filter"],
+        action: |args| chat::filter_line(args, true),
+        usage: "/filter -CATEGORY, or /filter for what is filtered",
+    },
+    Command {
+        names: &["unfilter"],
+        action: |args| chat::filter_line(args, false),
+        usage: "/unfilter -CATEGORY, or /unfilter for what is filtered",
+    },
+    Command {
+        names: &["messagetypes", "message_types", "msgtypes", "msg_types"],
+        action: |_| Some(Action::ShowMessageTypes),
+        usage: "/messagetypes",
+    },
+    // The staff channels, which ACE answers for advocates alone.
+    Command {
+        names: &["on"],
+        action: |args| ac_net::messages::channel::from_name(args).map(Action::ChannelJoin),
+        usage: "/on CHANNEL",
+    },
+    Command {
+        names: &["off"],
+        action: |args| ac_net::messages::channel::from_name(args).map(Action::ChannelLeave),
+        usage: "/off CHANNEL",
+    },
+    Command {
+        names: &["clist"],
+        action: |args| ac_net::messages::channel::from_name(args).map(Action::ChannelList),
+        usage: "/clist CHANNEL",
+    },
+    Command {
+        names: &["index"],
+        action: |_| Some(Action::ChannelIndex),
+        usage: "/index",
+    },
+    // The chat window itself.
+    Command {
+        names: &["log"],
+        action: |args| {
+            Some(Action::ChatToFile(
+                (!args.is_empty()).then(|| args.to_string()),
+            ))
+        },
+        usage: "/log FILE, or /log to stop",
+    },
+    Command {
+        names: &["clear"],
+        action: |args| {
+            // Retail read the first word and ignored the rest.
+            let first = args.split_whitespace().next().unwrap_or_default();
+            Some(Action::ChatClear {
+                all: first.eq_ignore_ascii_case("all"),
+            })
+        },
+        usage: "/clear [all]",
+    },
+    Command {
+        names: &["title"],
+        action: |args| (!args.is_empty()).then(|| Action::ChatTitle(args.to_string())),
+        usage: "/title what to call this chat window",
+    },
     //
     // -- allegiance and fellowship --
     //
@@ -395,8 +639,9 @@ pub const RETAIL: &[Command] = &[
 
 /// Retail names with no row yet: the list the families work through. Some are
 /// still reached by the router's fallback where they were before the table --
-/// the Turbine rooms and the group channels -- which leaves them behind the
-/// plugin hooks until a row takes them.
+/// the group channels, and `/a` for the allegiance room the rows for `/guild`
+/// and `/gu` reach -- which leaves them behind the plugin hooks until a row
+/// takes them.
 pub const PENDING: &[&str] = &[
     "?",
     "help",
@@ -427,15 +672,6 @@ pub const PENDING: &[&str] = &[
     "v",
     "join",
     "leave",
-    "chat",
-    "notell",
-    "reply",
-    "r",
-    "rp",
-    "retell",
-    "rt",
-    "say",
-    "s",
     "consent",
     "corpse",
     "cor",
@@ -454,12 +690,6 @@ pub const PENDING: &[&str] = &[
     "hr",
     "hom",
     "hoa",
-    "squelch",
-    "unsquelch",
-    "messagetypes",
-    "message_types",
-    "msgtypes",
-    "msg_types",
     "age",
     "birth",
     "day",
@@ -467,29 +697,6 @@ pub const PENDING: &[&str] = &[
     "framerate",
     "loc",
     "version",
-    "clear",
-    "filter",
-    "unfilter",
-    "log",
-    "title",
-    "index",
-    "clist",
-    "on",
-    "off",
-    "guild",
-    "gu",
-    "general",
-    "cg",
-    "trade",
-    "ct",
-    "lfg",
-    "clfg",
-    "roleplay",
-    "crp",
-    "society",
-    "soc",
-    "olthoi",
-    "o",
 ];
 
 /// Retail names that never left the retail client: help topics with no handler

@@ -1202,7 +1202,8 @@ impl Api for CtxApi<'_, '_> {
     }
 
     fn squelch(&mut self, name: &str, on: bool) {
-        self.client().squelch(0, name, on);
+        self.client()
+            .squelch(0, name, ac_net::messages::squelch::ALL, on);
     }
 
     fn squelches(&mut self) -> Array {
