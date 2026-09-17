@@ -1,3 +1,4 @@
+pub(crate) mod by_hand;
 pub(crate) mod fellowship;
 pub(crate) mod follow;
 pub(crate) mod orders;

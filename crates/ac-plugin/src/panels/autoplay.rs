@@ -196,7 +196,11 @@ pub(crate) fn draw(
         ui.set_min_width(300.0);
         title_bar(ui, "autoplay", "Play on its own");
         ui.checkbox(&mut cfg.enabled, egui::RichText::new("Enabled").strong())
-            .on_hover_text("Let the character heal, fight, loot and buff by itself");
+            .on_hover_text(
+                "Let the character heal, fight, loot and buff by itself. Off, its \
+                 player plays it and only the team's own rules run: it answers \
+                 invitations, keeps up with its leader and hits what the leader hits",
+            );
         let line = status_line(&v.doing, &v.status);
         let colour = if cfg.enabled {
             egui::Color32::from_rgb(150, 210, 150)
@@ -481,8 +485,7 @@ pub(crate) fn draw(
                             cfg.loot.profile
                         )
                     } else {
-                        "what it takes, and how, is edited in the Loot profiles window"
-                            .to_string()
+                        "what it takes, and how, is edited in the Loot profiles window".to_string()
                     },
                 );
                 // A count, so a character with nothing worth taking can be
@@ -506,7 +509,9 @@ pub(crate) fn draw(
                     .on_hover_text(
                         "Every character being played that has this on hears the \
                          others: the same target, the debuffs landed first, spare \
-                         supplies handed over, one fellowship",
+                         supplies handed over, one fellowship. With autoplay off it \
+                         is narrower and it still holds: invitations answered, the \
+                         leader followed, the leader's target hit",
                     );
                 ui.horizontal(|ui| {
                     ui.label("role");
@@ -519,13 +524,27 @@ pub(crate) fn draw(
                         });
                 });
                 ui.checkbox(&mut cfg.team.focus_fire, "fight what the leader fights")
-                    .on_hover_text("The leader is the one that leads, else whoever's name sorts first");
-                ui.checkbox(&mut cfg.team.lead, "lead: the others come to me and follow me about")
                     .on_hover_text(
-                        "For the character played by hand. The others keep close,                          fly when it flies, and take a journey after it when it                          goes through a portal",
+                        "The leader is the one that leads, else whoever's name sorts \
+                         first. With autoplay off it is an assist, and only on a \
+                         leader that asked to lead: the character hits what that \
+                         leader is already on and picks nothing of its own",
                     );
+                ui.checkbox(
+                    &mut cfg.team.lead,
+                    "lead: the others come to me and follow me about",
+                )
+                .on_hover_text(
+                    "For the character played by hand. The others keep close, fly \
+                     when it flies, and take a journey after it when it goes through \
+                     a portal, whether their own autoplay is on or off",
+                );
                 ui.horizontal(|ui| {
-                    ui.checkbox(&mut cfg.team.follow, "follow the leader, keeping within");
+                    ui.checkbox(&mut cfg.team.follow, "follow the leader, keeping within")
+                        .on_hover_text(
+                            "Holds with autoplay off too: the character keeps up with its \
+                             leader while its player plays it",
+                        );
                     ui.add(
                         egui::DragValue::new(&mut cfg.team.follow_distance)
                             .speed(0.5)
@@ -595,8 +614,11 @@ pub(crate) fn draw(
                         "Off, unassigned experience is left alone and the character \
                          is yours to raise by hand. What is already spent stays spent.",
                     );
-                ui.checkbox(&mut cfg.growth.hunt_grounds, "go to a hunting ground that suits")
-                    .on_hover_text("Move on when nothing worth fighting is about");
+                ui.checkbox(
+                    &mut cfg.growth.hunt_grounds,
+                    "go to a hunting ground that suits",
+                )
+                .on_hover_text("Move on when nothing worth fighting is about");
 
                 // Where the party hunts, and how it hunts there.
                 let here = ac_world::hunting::at(cfg.growth.hunt_at);
@@ -708,11 +730,7 @@ pub(crate) fn draw(
                         .selected_text(cfg.team.restock.plan.label())
                         .show_ui(ui, |ui| {
                             for plan in Plan::ALL {
-                                ui.selectable_value(
-                                    &mut cfg.team.restock.plan,
-                                    plan,
-                                    plan.label(),
-                                );
+                                ui.selectable_value(&mut cfg.team.restock.plan, plan, plan.label());
                             }
                         });
                 })
