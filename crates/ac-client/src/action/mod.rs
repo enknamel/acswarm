@@ -380,6 +380,17 @@ pub const RETAIL: &[Command] = &[
         action: |_| Some(Action::PkLite),
         usage: "/pklite",
     },
+    // Each family below fills in its own block, so two families landing at
+    // once do not meet in the same lines. Retail's name first in every row,
+    // then retail's own aliases, and never a name retail did not register.
+    //
+    // -- channels and speech (chat, say, the group channels, filtering) --
+    //
+    // -- allegiance and fellowship --
+    //
+    // -- status and who (age, loc, version, friends, the housing list) --
+    //
+    // -- player killing, consent and items --
 ];
 
 /// Retail names with no row yet: the list the families work through. Some are
