@@ -13,6 +13,7 @@ use crate::Client;
 mod allegiance;
 mod chat;
 mod combat;
+mod consent;
 mod fellow;
 mod item;
 mod magic;
@@ -266,9 +267,15 @@ pub enum Action {
         spell: SpellRef,
         at: Option<Target>,
     },
-    /// Buy the components the spellbook burns, at the open counter.
-    FillComponents,
-
+    /// Buy the components the spellbook burns, at the open counter: one
+    /// kind of them (`ac_formats::spell_components::component_type`) or
+    /// every kind, stopping once the bill would pass `budget` pyreals.
+    FillComponents {
+        kind: Option<u32>,
+        budget: Option<u32>,
+    },
+    /// Forget how many of each component to keep.
+    ClearComponents,
     // ---- trade ----
     /// Open a secure trade with a player.
     TradeOpen(Target),
@@ -370,6 +377,27 @@ pub enum Action {
 
     /// Ask how many dwellings of a kind are for sale, and where.
     HousesAvailable(HouseKind),
+    /// To the arena a player killer fights in.
+    RecallPkArena,
+    /// To the one a PK Lite character fights in.
+    RecallPklArena,
+
+    // ---- consent ----
+    /// Whether other players may give us permission to loot their corpses.
+    ConsentAccept(bool),
+    /// Ask which of them have.
+    ConsentList,
+    /// Give back every permission we hold.
+    ConsentClear,
+    /// Give back one player's.
+    ConsentRemove(String),
+    /// Let a player loot our corpse, or take that back.
+    Permit {
+        who: String,
+        allow: bool,
+    },
+    /// Say where the character last died outdoors.
+    CorpseLocation,
 }
 
 impl Client {
@@ -428,7 +456,8 @@ impl Client {
             Action::Select(t) => combat::select(self, t.as_ref()),
 
             Action::Cast { spell, at } => magic::cast(self, &spell, at.as_ref()),
-            Action::FillComponents => magic::fill_components(self),
+            Action::FillComponents { kind, budget } => magic::fill_components(self, kind, budget),
+            Action::ClearComponents => magic::clear_components(self),
 
             Action::TradeOpen(t) => trade::open(self, &t),
             Action::TradeAdd(t) => trade::add(self, &t),
@@ -476,6 +505,15 @@ impl Client {
             Action::Friends(what) => status::friends(self, &what),
 
             Action::HousesAvailable(kind) => status::houses_available(self, kind),
+            Action::RecallPkArena => recall::pk_arena(self),
+            Action::RecallPklArena => recall::pkl_arena(self),
+
+            Action::ConsentAccept(on) => consent::accept(self, on),
+            Action::ConsentList => consent::list(self),
+            Action::ConsentClear => consent::clear(self),
+            Action::ConsentRemove(who) => consent::drop_one(self, &who),
+            Action::Permit { who, allow } => consent::permit(self, &who, allow),
+            Action::CorpseLocation => consent::corpse_location(self),
         }
     }
 
@@ -919,25 +957,64 @@ pub const RETAIL: &[Command] = &[
     },
     //
     // -- player killing, consent and items --
+    Command {
+        names: &["consent"],
+        action: |args| {
+            let (word, rest) = args.split_once(char::is_whitespace).unwrap_or((args, ""));
+            Some(match word.to_ascii_lowercase().as_str() {
+                "on" => Action::ConsentAccept(true),
+                "off" => Action::ConsentAccept(false),
+                "who" => Action::ConsentList,
+                "clear" => Action::ConsentClear,
+                "remove" => match consent::name_of(rest) {
+                    who if who.is_empty() => return None,
+                    who => Action::ConsentRemove(who),
+                },
+                _ => return None,
+            })
+        },
+        usage: "/consent on | off | who | clear | remove NAME",
+    },
+    Command {
+        names: &["permit"],
+        action: |args| {
+            let (word, rest) = args.split_once(char::is_whitespace).unwrap_or((args, ""));
+            let allow = match word.to_ascii_lowercase().as_str() {
+                "add" => true,
+                "remove" => false,
+                _ => return None,
+            };
+            let who = consent::name_of(rest);
+            (!who.is_empty()).then_some(Action::Permit { who, allow })
+        },
+        usage: "/permit add NAME, /permit remove NAME",
+    },
+    Command {
+        names: &["corpse", "cor"],
+        action: |_| Some(Action::CorpseLocation),
+        usage: "/corpse",
+    },
+    Command {
+        names: &["pkarena", "pka"],
+        action: |args| args.is_empty().then_some(Action::RecallPkArena),
+        usage: "/pkarena",
+    },
+    Command {
+        names: &["pklarena", "pla"],
+        action: |args| args.is_empty().then_some(Action::RecallPklArena),
+        usage: "/pklarena",
+    },
+    Command {
+        names: &["fillcomps"],
+        action: magic::fill_command,
+        usage: "/fillcomps [KIND] [PYREALS], /fillcomps clear",
+    },
 ];
 
 /// Retail names with no row yet: the list the families work through. Every
 /// chat name now has a row, so none of these is reached by the router's
 /// fallback any more.
-pub const PENDING: &[&str] = &[
-    "?",
-    "help",
-    "consent",
-    "corpse",
-    "cor",
-    "permit",
-    "pkarena",
-    "pka",
-    "pklarena",
-    "pla",
-    "fillcomps",
-    "loadfile",
-];
+pub const PENDING: &[&str] = &["?", "help", "loadfile"];
 
 /// Retail names that never left the retail client: help topics with no handler
 /// at all, the two that only filled in the chat entry, and the windows and

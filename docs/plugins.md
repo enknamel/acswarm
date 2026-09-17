@@ -191,7 +191,7 @@ Vec<u32>` (known spell ids), `enchantments`, `inventory`, `wielded`,
 | `cast(spell_id)` | Enter magic mode if needed, then cast: self-targeted spells untargeted, others at `selected` (or ourselves). |
 | `known_spell_ids()`, `spell(id)`, `spellbook_filters()`, `set_spellbook_filters(bits)`, `forget_spell(id)` | The spellbook (`ac_client::magic`). |
 | `spell_bars()`, `add_to_spell_bar(bar, pos, id)`, `remove_from_spell_bar(bar, id)` | The eight server-persisted spell bars. |
-| `enchantments()`, `components()`, `has_focus(school)`, `current_formula(id)`, `can_cast(id)`, `set_desired_component(id, n)`, `fill_components()` | Buffs, components and the cast pre-check. |
+| `enchantments()`, `components()`, `has_focus(school)`, `current_formula(id)`, `can_cast(id)`, `set_desired_component(id, n)`, `clear_desired_components()`, `fill_components(kind, budget)` | Buffs, components and the cast pre-check. |
 | `take(guid)` | Queue an item of the open container for pickup. |
 | `close_container()` | Stop viewing the open container. |
 | `buy(guid)`, `sell(guid)`, `close_vendor()` | Trade with `world.open_vendor`. |

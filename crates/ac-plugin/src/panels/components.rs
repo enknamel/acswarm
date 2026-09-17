@@ -412,7 +412,7 @@ impl Plugin for Components {
                     c.set_desired_component(id, want);
                 }
                 if a.fill {
-                    let n = c.fill_components();
+                    let n = c.fill_components(None, None);
                     cx.log(format!("components: asked the vendor for {n} stacks"));
                 }
             }

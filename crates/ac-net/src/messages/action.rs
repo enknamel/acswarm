@@ -85,6 +85,16 @@ pub const SET_HOOKS_VISIBILITY: u32 = 0x0266;
 pub const MODIFY_ALLEGIANCE_GUEST_PERMISSION: u32 = 0x0267;
 pub const MODIFY_ALLEGIANCE_STORAGE_PERMISSION: u32 = 0x0268;
 pub const LIST_AVAILABLE_HOUSES: u32 = 0x0270;
+/// Corpse looting: the permissions others gave us, which the first three
+/// read and give back, and the ones we give out (ACE Player_Death.cs:736-893).
+pub const CLEAR_PLAYER_CONSENT_LIST: u32 = 0x0216;
+pub const DISPLAY_PLAYER_CONSENT_LIST: u32 = 0x0217;
+/// String16L name.
+pub const REMOVE_FROM_PLAYER_CONSENT_LIST: u32 = 0x0218;
+/// String16L name.
+pub const ADD_PLAYER_PERMISSION: u32 = 0x0219;
+/// String16L name.
+pub const REMOVE_PLAYER_PERMISSION: u32 = 0x021A;
 pub const OPEN_TRADE_NEGOTIATIONS: u32 = 0x01F6;
 pub const CLOSE_TRADE_NEGOTIATIONS: u32 = 0x01F7;
 pub const ADD_TO_TRADE: u32 = 0x01F8;
@@ -98,6 +108,10 @@ pub const TRAIN_SKILL: u32 = 0x0047;
 pub const SET_AFK_MODE: u32 = 0x000F;
 pub const SET_AFK_MESSAGE: u32 = 0x0010;
 pub const TELL: u32 = 0x005D;
+/// The two PK arenas; ACE refuses anyone whose PlayerKillerStatus is not
+/// the matching one (Player_Location.cs:480,558).
+pub const TELE_TO_PKL_ARENA: u32 = 0x0026;
+pub const TELE_TO_PK_ARENA: u32 = 0x0027;
 pub const TELE_TO_LIFESTONE: u32 = 0x0063;
 pub const EMOTE: u32 = 0x01DF;
 pub const SOUL_EMOTE: u32 = 0x01E1;

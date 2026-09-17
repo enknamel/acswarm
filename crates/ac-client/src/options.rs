@@ -184,6 +184,15 @@ pub const OPTIONS: [CharacterOption; 22] = [
     },
 ];
 
+/// Wire id of "Accept corpse looting permissions", the option `/consent on`
+/// sets (ACE `CharacterOption.cs:64`).
+pub const ACCEPT_LOOT_PERMITS: u32 = 0x10;
+
+/// The option the server knows by this id.
+pub fn option_by_id(id: u32) -> Option<&'static CharacterOption> {
+    OPTIONS.iter().find(|o| o.id == id)
+}
+
 /// The option that decides whether a Turbine chat room is heard, the one
 /// `@join` and `@leave` set (ACE `CharacterOption.cs:97-154`, `ListenTo*`).
 pub fn listen_option(room: u32) -> Option<&'static CharacterOption> {
@@ -197,7 +206,7 @@ pub fn listen_option(room: u32) -> Option<&'static CharacterOption> {
         turbine::SOCIETY => 0x2E,
         _ => return None,
     };
-    OPTIONS.iter().find(|o| o.id == id)
+    option_by_id(id)
 }
 
 /// The option whose label starts with `name` (case-insensitive).
@@ -264,5 +273,12 @@ mod tests {
         );
         assert_eq!(option_by_name("Run").map(|o| o.id), Some(0x0A));
         assert!(option_by_name("zzz").is_none());
+    }
+
+    #[test]
+    fn the_consent_option_is_the_loot_permits_bit() {
+        let o = option_by_id(ACCEPT_LOOT_PERMITS).expect("accept loot permits");
+        assert_eq!((o.word, o.bit, o.inverted), (Word::One, 0x0008_0000, false));
+        assert!(option_by_id(0xFF).is_none());
     }
 }

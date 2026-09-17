@@ -1420,7 +1420,7 @@ impl Api for CtxApi<'_, '_> {
     }
 
     fn fill_components(&mut self) -> i64 {
-        self.client().fill_components() as i64
+        self.client().fill_components(None, None) as i64
     }
 
     /// Set the desired quantity of a component by (prefix of) its name;

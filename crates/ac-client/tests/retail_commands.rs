@@ -317,13 +317,19 @@ fn a_soul_emote_is_what_a_slash_word_falls_back_to() {
     assert_eq!(unclaimed, Action::SoulEmote("bow".into()));
 }
 
-/// What a row makes of its argument text, without a session to act on.
+/// What the row for `name` makes of an argument line.
+fn means(name: &str, args: &str) -> Option<Action> {
+    let row = action::command(name).unwrap_or_else(|| panic!("no row for /{name}"));
+    (row.action)(args)
+}
+
+/// The same, given a whole typed line.
 fn asked(line: &str) -> Option<Action> {
     let (name, args) = line
         .trim_start_matches('/')
         .split_once(char::is_whitespace)
         .unwrap_or((line.trim_start_matches('/'), ""));
-    (action::command(name).expect("a row of its own").action)(args.trim())
+    means(name, args.trim())
 }
 
 #[test]
@@ -487,6 +493,100 @@ fn joining_and_leaving_read_the_first_word_only() {
     // Retail's own list, and nothing beside it.
     assert_eq!(asked("/join olthoi"), None);
     assert_eq!(asked("/join"), None);
+}
+
+#[test]
+fn consent_takes_the_five_words_retail_gave_it() {
+    assert_eq!(means("consent", "on"), Some(Action::ConsentAccept(true)));
+    assert_eq!(means("consent", "OFF"), Some(Action::ConsentAccept(false)));
+    assert_eq!(means("consent", "who"), Some(Action::ConsentList));
+    assert_eq!(means("consent", "clear"), Some(Action::ConsentClear));
+    assert_eq!(
+        means("consent", "remove +Verity"),
+        Some(Action::ConsentRemove("Verity".into())),
+        "an admin character's name is typed with a plus"
+    );
+    assert_eq!(means("consent", "remove"), None, "remove wants a name");
+    assert_eq!(means("consent", ""), None);
+    assert_eq!(means("consent", "yes please"), None);
+}
+
+#[test]
+fn permit_adds_and_removes_one_named_player() {
+    assert_eq!(
+        means("permit", "add Verity"),
+        Some(Action::Permit {
+            who: "Verity".into(),
+            allow: true
+        })
+    );
+    assert_eq!(
+        means("permit", "remove   Fletch  "),
+        Some(Action::Permit {
+            who: "Fletch".into(),
+            allow: false
+        })
+    );
+    assert_eq!(means("permit", "add"), None, "no name, no permit");
+    assert_eq!(means("permit", "grant Verity"), None);
+    assert_eq!(means("permit", ""), None);
+}
+
+#[test]
+fn an_arena_command_takes_no_arguments() {
+    assert_eq!(means("pka", ""), Some(Action::RecallPkArena));
+    assert_eq!(means("pklarena", ""), Some(Action::RecallPklArena));
+    assert_eq!(means("pkarena", "now"), None, "retail printed the hint");
+    assert_eq!(means("pla", "now"), None);
+    assert_eq!(means("cor", "anything"), Some(Action::CorpseLocation));
+}
+
+#[test]
+fn fillcomps_takes_a_kind_a_bill_both_or_the_word_clear() {
+    let fill = |kind, budget| Some(Action::FillComponents { kind, budget });
+    assert_eq!(means("fillcomps", ""), fill(None, None));
+    assert_eq!(means("fillcomps", "clear"), Some(Action::ClearComponents));
+    // The kinds are the component table's own: a scarab leads a formula
+    // (`ac_formats::spell_components::component_type`), a taper ends one.
+    assert_eq!(means("fillcomps", "Scarabs"), fill(Some(1), None));
+    assert_eq!(means("fillcomps", "peas"), fill(Some(7), None));
+    assert_eq!(means("fillcomps", "500"), fill(None, Some(500)));
+    assert_eq!(means("fillcomps", "taper 250"), fill(Some(6), Some(250)));
+    assert_eq!(
+        means("fillcomps", "taper lots"),
+        fill(Some(6), None),
+        "a second word that is no number is no bill"
+    );
+    assert_eq!(means("fillcomps", "0"), None, "a bill wants to be worth it");
+    assert_eq!(means("fillcomps", "taper -1"), None);
+    assert_eq!(means("fillcomps", "chorizite"), None, "no such kind");
+    assert_eq!(means("fillcomps", "taper 250 more"), None);
+}
+
+#[test]
+fn the_housing_recalls_have_their_own_short_names() {
+    assert_eq!(means("hor", ""), Some(Action::RecallHouse));
+    assert_eq!(means("hr", ""), Some(Action::RecallHouse));
+    assert_eq!(means("hom", ""), Some(Action::RecallMansion));
+    assert_eq!(means("hoa", ""), Some(Action::RecallMansion));
+    assert_eq!(means("hor", "now"), None, "retail printed the house hint");
+}
+
+#[test]
+fn a_corpse_line_is_answered_without_asking_the_server() {
+    let mut c = testkit::offline_client();
+    let sent = c.session.actions_sent();
+    assert_eq!(c.chat_line("/corpse"), Line::Acted(Ok(())));
+    assert_eq!(c.session.actions_sent(), sent, "nothing goes out");
+    let said: Vec<String> = c
+        .drain_events()
+        .into_iter()
+        .filter_map(|e| match e {
+            ac_client::Event::Chat { text, .. } => Some(text),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(said.len(), 1, "one line, the one with no record: {said:?}");
 }
 
 #[test]
