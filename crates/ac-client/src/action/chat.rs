@@ -1,6 +1,7 @@
 //! The chat family: what the character says and to whom -- aloud, to one
-//! player, in a Turbine room or on a group channel -- the away message, and
-//! the commands the server itself reads off a Talk line.
+//! player, in a Turbine room or on a group channel -- the away message,
+//! whom we stop hearing, the chat window the front end keeps, and the
+//! commands the server itself reads off a Talk line.
 
 use ac_net::messages::action;
 use ac_net::wire::Writer;
