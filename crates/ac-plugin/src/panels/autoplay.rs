@@ -481,8 +481,7 @@ pub(crate) fn draw(
                             cfg.loot.profile
                         )
                     } else {
-                        "what it takes, and how, is edited in the Loot profiles window"
-                            .to_string()
+                        "what it takes, and how, is edited in the Loot profiles window".to_string()
                     },
                 );
                 // A count, so a character with nothing worth taking can be
@@ -519,11 +518,18 @@ pub(crate) fn draw(
                         });
                 });
                 ui.checkbox(&mut cfg.team.focus_fire, "fight what the leader fights")
-                    .on_hover_text("The leader is the one that leads, else whoever's name sorts first");
-                ui.checkbox(&mut cfg.team.lead, "lead: the others come to me and follow me about")
                     .on_hover_text(
-                        "For the character played by hand. The others keep close,                          fly when it flies, and take a journey after it when it                          goes through a portal",
+                        "The leader is the one that leads, else whoever's name sorts first",
                     );
+                ui.checkbox(
+                    &mut cfg.team.lead,
+                    "lead: the others come to me and follow me about",
+                )
+                .on_hover_text(
+                    "For the character played by hand. The others keep close, fly \
+                     when it flies, and take a journey after it when it goes through \
+                     a portal",
+                );
                 ui.horizontal(|ui| {
                     ui.checkbox(&mut cfg.team.follow, "follow the leader, keeping within");
                     ui.add(
@@ -595,8 +601,11 @@ pub(crate) fn draw(
                         "Off, unassigned experience is left alone and the character \
                          is yours to raise by hand. What is already spent stays spent.",
                     );
-                ui.checkbox(&mut cfg.growth.hunt_grounds, "go to a hunting ground that suits")
-                    .on_hover_text("Move on when nothing worth fighting is about");
+                ui.checkbox(
+                    &mut cfg.growth.hunt_grounds,
+                    "go to a hunting ground that suits",
+                )
+                .on_hover_text("Move on when nothing worth fighting is about");
 
                 // Where the party hunts, and how it hunts there.
                 let here = ac_world::hunting::at(cfg.growth.hunt_at);
@@ -708,11 +717,7 @@ pub(crate) fn draw(
                         .selected_text(cfg.team.restock.plan.label())
                         .show_ui(ui, |ui| {
                             for plan in Plan::ALL {
-                                ui.selectable_value(
-                                    &mut cfg.team.restock.plan,
-                                    plan,
-                                    plan.label(),
-                                );
+                                ui.selectable_value(&mut cfg.team.restock.plan, plan, plan.label());
                             }
                         });
                 })
