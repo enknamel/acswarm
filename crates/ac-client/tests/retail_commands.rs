@@ -7,8 +7,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use ac_client::action::{self, Action, Line, CLIENT_UI_ONLY, PENDING, RETAIL, RETIRED};
+use ac_client::action::{
+    self, Action, HouseAccess, Line, Lock, Manage, CLIENT_UI_ONLY, PENDING, RETAIL, RETIRED,
+};
 use ac_client::testkit;
+use ac_net::messages::{channel, turbine};
 
 /// Every command name the retail client registered, from its own command table
 /// (131 registrations, `a` twice: the legacy allegiance room and the Turbine
@@ -312,6 +315,178 @@ fn a_soul_emote_is_what_a_slash_word_falls_back_to() {
         panic!("no row has /bow: retail read it from the emote table");
     };
     assert_eq!(unclaimed, Action::SoulEmote("bow".into()));
+}
+
+/// What a row makes of its argument text, without a session to act on.
+fn asked(line: &str) -> Option<Action> {
+    let (name, args) = line
+        .trim_start_matches('/')
+        .split_once(char::is_whitespace)
+        .unwrap_or((line.trim_start_matches('/'), ""));
+    (action::command(name).expect("a row of its own").action)(args.trim())
+}
+
+#[test]
+fn the_group_channels_are_the_ones_retail_speaks_on() {
+    for (line, channel) in [
+        ("/fellowship hello", channel::FELLOW),
+        ("/fellows hello", channel::FELLOW),
+        ("/f hello", channel::FELLOW),
+        // Retail's /group and /g are the fellowship's, not the General room's.
+        ("/group hello", channel::FELLOW),
+        ("/g hello", channel::FELLOW),
+        ("/party hello", channel::FELLOW),
+        ("/vassals hello", channel::VASSALS),
+        ("/vassal hello", channel::VASSALS),
+        ("/v hello", channel::VASSALS),
+        ("/patron hello", channel::PATRON),
+        ("/p hello", channel::PATRON),
+        ("/monarch hello", channel::MONARCH),
+        ("/m hello", channel::MONARCH),
+        ("/covassals hello", channel::CO_VASSALS),
+        ("/co-vassals hello", channel::CO_VASSALS),
+        ("/covassal hello", channel::CO_VASSALS),
+        ("/c hello", channel::CO_VASSALS),
+        ("/ab hello", channel::ALLEGIANCE_BROADCAST),
+    ] {
+        assert_eq!(
+            asked(line),
+            Some(Action::Channel {
+                channel,
+                text: "hello".into()
+            }),
+            "{line}"
+        );
+    }
+    // Retail replaces the legacy /a when Turbine chat starts, so it speaks in
+    // the allegiance's room and only /ab keeps the broadcast channel.
+    assert_eq!(
+        asked("/a hello"),
+        Some(Action::Room {
+            room: turbine::ALLEGIANCE,
+            text: "hello".into()
+        })
+    );
+}
+
+#[test]
+fn a_channel_with_nothing_to_say_is_refused_here() {
+    for line in ["/fellowship", "/ab", "/a", "/c"] {
+        assert_eq!(asked(line), None, "{line}");
+    }
+    let mut c = testkit::offline_client();
+    let sent = c.session.actions_sent();
+    assert!(matches!(c.chat_line("/fellowship"), Line::Acted(Err(_))));
+    assert_eq!(c.session.actions_sent(), sent, "nothing went out");
+}
+
+#[test]
+fn an_allegiance_subcommand_is_acted_on_and_never_said() {
+    let mut c = testkit::offline_client();
+    let sent = c.session.actions_sent();
+    // The line the earlier review found going out as chat: it is one
+    // ListAllegianceOfficers action and nothing is offered to the plugins.
+    assert_eq!(c.chat_line("/allegiance officer list"), Line::Acted(Ok(())));
+    assert_eq!(c.session.actions_sent(), sent + 1);
+    assert_eq!(
+        asked("/allegiance officer list"),
+        Some(Action::Allegiance(Manage::OfficerList))
+    );
+    // And @ is the same way in as / (retail's own help says so).
+    assert_eq!(c.chat_line("@all motd"), Line::Acted(Ok(())));
+    assert_eq!(c.session.actions_sent(), sent + 2);
+}
+
+#[test]
+fn an_allegiance_subcommand_keeps_retails_argument_shapes() {
+    assert_eq!(
+        asked("/allegiance officer set 2 +Verity"),
+        Some(Action::Allegiance(Manage::OfficerSet {
+            name: "Verity".into(),
+            level: 2
+        }))
+    );
+    assert_eq!(
+        asked("/allegiance BOOT -account Verity"),
+        Some(Action::Allegiance(Manage::Boot {
+            name: "Verity".into(),
+            account: true
+        }))
+    );
+    assert_eq!(
+        asked("/allegiance chat kick Verity, quiet please"),
+        Some(Action::Allegiance(Manage::ChatBoot {
+            name: "Verity".into(),
+            reason: "quiet please".into()
+        }))
+    );
+    assert_eq!(
+        asked("/allegiance lock bypass clear"),
+        Some(Action::Allegiance(Manage::Lock(Lock::ClearApproved)))
+    );
+    assert_eq!(
+        asked("/allegiance house storage open"),
+        Some(Action::Allegiance(Manage::House(HouseAccess::StorageOpen)))
+    );
+    // Three of them land outside the allegiance's own actions.
+    assert_eq!(asked("/allegiance ho"), Some(Action::RecallHometown));
+    assert_eq!(
+        asked("/allegiance br stand fast"),
+        Some(Action::Channel {
+            channel: channel::ALLEGIANCE_BROADCAST,
+            text: "stand fast".into()
+        })
+    );
+    assert_eq!(
+        asked("/allegiance chat on"),
+        Some(Action::Listen {
+            room: turbine::ALLEGIANCE,
+            on: true
+        })
+    );
+    // A word retail never dispatched is refused here, not sent.
+    assert_eq!(asked("/allegiance officers"), None);
+    assert_eq!(asked("/allegiance"), None);
+}
+
+#[test]
+fn the_motd_and_the_hometown_have_their_own_names_too() {
+    assert_eq!(asked("/motd"), Some(Action::Allegiance(Manage::Motd)));
+    assert_eq!(
+        asked("/motd set be good"),
+        Some(Action::Allegiance(Manage::SetMotd("be good".into())))
+    );
+    assert_eq!(
+        asked("/motd clear"),
+        Some(Action::Allegiance(Manage::ClearMotd))
+    );
+    assert_eq!(asked("/motd please"), None);
+    assert_eq!(asked("/ah"), Some(Action::RecallHometown));
+    assert_eq!(asked("/alh"), Some(Action::RecallHometown));
+    // "This command takes no arguments!", where @allegiance hometown ignores
+    // whatever follows it.
+    assert_eq!(asked("/ah now"), None);
+}
+
+#[test]
+fn joining_and_leaving_read_the_first_word_only() {
+    assert_eq!(
+        asked("/join General"),
+        Some(Action::Listen {
+            room: turbine::GENERAL,
+            on: true
+        })
+    );
+    assert_eq!(
+        asked("/leave soc please"),
+        Some(Action::Listen {
+            room: turbine::SOCIETY,
+            on: false
+        })
+    );
+    // Retail's own list, and nothing beside it.
+    assert_eq!(asked("/join olthoi"), None);
+    assert_eq!(asked("/join"), None);
 }
 
 #[test]

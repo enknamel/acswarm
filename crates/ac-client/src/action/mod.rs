@@ -4,11 +4,13 @@
 //! only -- autoplay decides for itself and calls the same `Client` methods
 //! directly, as does every read.
 
+use ac_net::messages::{channel, turbine};
 use serde::{Deserialize, Serialize};
 
 use crate::autoplay::Role;
 use crate::Client;
 
+mod allegiance;
 mod chat;
 mod combat;
 mod fellow;
@@ -26,6 +28,80 @@ pub type Refused = ac_agent::did::Because;
 /// What came of an [`Action`]: the request went out, or it was refused here
 /// before it went. The server's own answer arrives later, as an `Event`.
 pub type Outcome = Result<(), Refused>;
+
+/// One thing `@allegiance` asks of the server, a subcommand each. The ranks
+/// they want are the server's to check (ACE `Player_Allegiance.cs:1478-1515`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Manage {
+    /// Throw a member out, by character or by every character on the account.
+    Boot { name: String, account: bool },
+    /// Another member's profile, by name.
+    Info(String),
+    /// Put somebody out of allegiance chat, with the reason they are told.
+    ChatBoot { name: String, reason: String },
+    /// Silence a member in allegiance chat for five minutes, or let them back.
+    Gag { name: String, gagged: bool },
+    /// Who is banned from the allegiance.
+    BanList,
+    /// Put a name on the ban list, or take it off.
+    Ban { name: String, banned: bool },
+    /// Who the officers are.
+    OfficerList,
+    /// Make a member an officer of level 1 to 3.
+    OfficerSet { name: String, level: u32 },
+    /// Take a member out of the officers.
+    OfficerRemove(String),
+    /// Leave the allegiance with no officers at all.
+    OfficerClear,
+    /// The titles the three officer levels carry.
+    TitleList,
+    /// Name an officer level (1 to 3).
+    TitleSet { level: u32, title: String },
+    /// Back to the titles the server names them by.
+    TitleClear,
+    /// The allegiance's message of the day, as it stands.
+    Motd,
+    /// Set the message of the day.
+    SetMotd(String),
+    /// Leave the allegiance with no message of the day.
+    ClearMotd,
+    /// The allegiance's name, as it stands.
+    Name,
+    /// Name the allegiance.
+    SetName(String),
+    /// Leave the allegiance unnamed.
+    ClearName,
+    /// Lock the allegiance against new vassals, unlock it, or ask.
+    Lock(Lock),
+    /// Let one name swear in while the allegiance is locked.
+    ApproveVassal(String),
+    /// The monarch's house, and what the allegiance may do in it.
+    House(HouseAccess),
+}
+
+/// What `@allegiance lock` asks (ACE `AllegianceLockAction.cs:5-11`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Lock {
+    Off,
+    On,
+    Toggle,
+    Check,
+    /// The names allowed in while it is locked.
+    Approved,
+    /// Let none of them in any more.
+    ClearApproved,
+}
+
+/// What `@allegiance house` asks (ACE `AllegianceHouseAction.cs:8-14`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum HouseAccess {
+    /// What the allegiance may do there, as it stands.
+    Check,
+    GuestOpen,
+    GuestClose,
+    StorageOpen,
+    StorageClose,
+}
 
 /// What a thing is named by. A front end that already has a guid sends one;
 /// one with a word the player typed sends [`Target::Name`].
@@ -153,6 +229,12 @@ pub enum Action {
     /// Answer the question the server asked (a recruit, an allegiance).
     Confirm(bool),
 
+    // ---- allegiance ----
+    /// Manage the allegiance: one of retail's `@allegiance` subcommands.
+    Allegiance(Manage),
+    /// Hear a Turbine chat room (`ac_net::messages::turbine`), or stop.
+    Listen { room: u32, on: bool },
+
     // ---- team ----
     /// Play on its own.
     Autoplay(bool),
@@ -239,6 +321,9 @@ impl Client {
             Action::FellowDismiss(t) => fellow::dismiss(self, &t),
             Action::FellowQuit { disband } => fellow::quit(self, disband),
             Action::Confirm(yes) => fellow::confirm(self, yes),
+
+            Action::Allegiance(what) => allegiance::manage(self, &what),
+            Action::Listen { room, on } => allegiance::listen(self, room, on),
 
             Action::Autoplay(on) => team::autoplay(self, on),
             Action::Team(on) => team::team(self, on),
@@ -388,6 +473,92 @@ pub const RETAIL: &[Command] = &[
     //
     // -- allegiance and fellowship --
     //
+    // Managing the allegiance: one subcommand tree, which `@motd` and `@ah`
+    // are two more ways into (retail registers them with the same handlers).
+    // Every one sends a game action of its own; only `broadcast`, `hometown`
+    // and `chat on|off` land somewhere else.
+    Command {
+        names: &["allegiance", "all"],
+        action: allegiance::subcommand,
+        usage: "/allegiance boot|info|chat|broadcast|ban|officer|title|hometown|motd|name|lock|house ...",
+    },
+    Command {
+        names: &["motd"],
+        action: |args| allegiance::motd(args).map(Action::Allegiance),
+        usage: "/motd [set TEXT|clear]",
+    },
+    Command {
+        names: &["ah", "alh"],
+        // Retail refuses arguments here: "This command takes no arguments!".
+        action: |args| args.is_empty().then_some(Action::RecallHometown),
+        usage: "/ah",
+    },
+    // The group channels, a ChatChannel (0x0147) each: what a character says
+    // to its fellowship, its patron, its vassals, its monarch, its co-vassals
+    // or the whole allegiance. `/a` is the odd one out -- retail hands the
+    // allegiance over to Turbine chat as it starts (FUN_0057fcc0:17-39), so it
+    // speaks in the allegiance's room while `/ab` keeps the broadcast channel.
+    Command {
+        names: &[
+            "fellowship",
+            "fellows",
+            "fellow",
+            "f",
+            "group",
+            "g",
+            "party",
+        ],
+        action: |args| fellow::say_on(channel::FELLOW, args),
+        usage: "/fellowship what you are saying",
+    },
+    Command {
+        names: &["vassals", "vassal", "v"],
+        action: |args| fellow::say_on(channel::VASSALS, args),
+        usage: "/vassals what you are saying",
+    },
+    Command {
+        names: &["patron", "p"],
+        action: |args| fellow::say_on(channel::PATRON, args),
+        usage: "/patron what you are saying",
+    },
+    Command {
+        names: &["monarch", "m"],
+        action: |args| fellow::say_on(channel::MONARCH, args),
+        usage: "/monarch what you are saying",
+    },
+    Command {
+        names: &["covassals", "co-vassals", "covassal", "c"],
+        action: |args| fellow::say_on(channel::CO_VASSALS, args),
+        usage: "/covassals what you are saying",
+    },
+    Command {
+        names: &["ab"],
+        action: |args| fellow::say_on(channel::ALLEGIANCE_BROADCAST, args),
+        usage: "/ab what the allegiance is to hear",
+    },
+    Command {
+        names: &["a"],
+        action: |args| {
+            (!args.is_empty()).then(|| Action::Room {
+                room: turbine::ALLEGIANCE,
+                text: args.to_string(),
+            })
+        },
+        usage: "/a what you are saying",
+    },
+    // Hearing a room is one character option, which the server answers with
+    // "You have entered the X channel." Only the first word is read.
+    Command {
+        names: &["join"],
+        action: |args| allegiance::room_wanted(args).map(|room| Action::Listen { room, on: true }),
+        usage: "/join allegiance|general|trade|lfg|roleplay|society",
+    },
+    Command {
+        names: &["leave"],
+        action: |args| allegiance::room_wanted(args).map(|room| Action::Listen { room, on: false }),
+        usage: "/leave allegiance|general|trade|lfg|roleplay|society",
+    },
+    //
     // -- status and who (age, loc, version, friends, the housing list) --
     //
     // -- player killing, consent and items --
@@ -400,33 +571,6 @@ pub const RETAIL: &[Command] = &[
 pub const PENDING: &[&str] = &[
     "?",
     "help",
-    "allegiance",
-    "all",
-    "ab",
-    "alh",
-    "ah",
-    "motd",
-    "a",
-    "co-vassals",
-    "covassals",
-    "covassal",
-    "c",
-    "fellowship",
-    "fellows",
-    "fellow",
-    "f",
-    "group",
-    "g",
-    "party",
-    "monarch",
-    "m",
-    "patron",
-    "p",
-    "vassals",
-    "vassal",
-    "v",
-    "join",
-    "leave",
     "chat",
     "notell",
     "reply",

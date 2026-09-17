@@ -1,8 +1,19 @@
-//! The fellow family: the server's own fellowship, and the questions it asks
-//! about joining one.
+//! The fellow family: the server's own fellowship, the questions it asks
+//! about joining one, and what is said on the group channels its commands
+//! share with the allegiance's.
 
-use super::{nothing_named, resolve, Outcome, Refused, Target};
+use super::{nothing_named, resolve, Action, Outcome, Refused, Target};
 use crate::Client;
+
+/// What a group-channel command means (`/fellowship`, `/patron`, `/ab`):
+/// the words, or nothing when retail would have answered "You must specify
+/// the text you wish to broadcast!".
+pub(super) fn say_on(channel: u32, args: &str) -> Option<Action> {
+    (!args.is_empty()).then(|| Action::Channel {
+        channel,
+        text: args.to_string(),
+    })
+}
 
 pub(super) fn create(c: &mut Client, name: &str, share_xp: bool) -> Outcome {
     if name.trim().is_empty() {

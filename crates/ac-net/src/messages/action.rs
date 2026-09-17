@@ -22,6 +22,26 @@ pub const QUERY_ALLEGIANCE_NAME: u32 = 0x0030;
 pub const CLEAR_ALLEGIANCE_NAME: u32 = 0x0031;
 pub const SET_ALLEGIANCE_NAME: u32 = 0x0033;
 pub const ALLEGIANCE_INFO_REQUEST: u32 = 0x027B;
+/// What `@allegiance` manages, in retail's own order: name then level for an
+/// officer, level then title for a title, name then a u32 flag for a boot or
+/// a gag, and a bare `AllegianceLockAction`/`AllegianceHouseAction` u32 for
+/// the other two (ACE `GameActionType.cs:29-36, 132, 142-148`).
+pub const SET_ALLEGIANCE_OFFICER: u32 = 0x003B;
+pub const SET_ALLEGIANCE_OFFICER_TITLE: u32 = 0x003C;
+pub const LIST_ALLEGIANCE_OFFICER_TITLES: u32 = 0x003D;
+pub const CLEAR_ALLEGIANCE_OFFICER_TITLES: u32 = 0x003E;
+pub const DO_ALLEGIANCE_LOCK_ACTION: u32 = 0x003F;
+pub const SET_ALLEGIANCE_APPROVED_VASSAL: u32 = 0x0040;
+pub const ALLEGIANCE_CHAT_GAG: u32 = 0x0041;
+pub const DO_ALLEGIANCE_HOUSE_ACTION: u32 = 0x0042;
+pub const BREAK_ALLEGIANCE_BOOT: u32 = 0x0277;
+pub const ALLEGIANCE_CHAT_BOOT: u32 = 0x02A0;
+pub const ADD_ALLEGIANCE_BAN: u32 = 0x02A1;
+pub const REMOVE_ALLEGIANCE_BAN: u32 = 0x02A2;
+pub const LIST_ALLEGIANCE_BANS: u32 = 0x02A3;
+pub const REMOVE_ALLEGIANCE_OFFICER: u32 = 0x02A5;
+pub const LIST_ALLEGIANCE_OFFICERS: u32 = 0x02A6;
+pub const CLEAR_ALLEGIANCE_OFFICERS: u32 = 0x02A7;
 /// Group chat: channel id (see `channel`), text.
 pub const CHAT_CHANNEL: u32 = 0x0147;
 pub const SET_MOTD: u32 = 0x0254;
