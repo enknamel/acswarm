@@ -7,7 +7,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use ac_client::action::{self, Action, Line, CLIENT_UI_ONLY, PENDING, RETAIL, RETIRED};
+use ac_client::action::{
+    self, Action, HouseAccess, Line, Lock, Manage, CLIENT_UI_ONLY, PENDING, RETAIL, RETIRED,
+};
 use ac_client::testkit;
 use ac_net::messages::{channel, turbine};
 
@@ -376,6 +378,94 @@ fn a_channel_with_nothing_to_say_is_refused_here() {
     let sent = c.session.actions_sent();
     assert!(matches!(c.chat_line("/fellowship"), Line::Acted(Err(_))));
     assert_eq!(c.session.actions_sent(), sent, "nothing went out");
+}
+
+#[test]
+fn an_allegiance_subcommand_is_acted_on_and_never_said() {
+    let mut c = testkit::offline_client();
+    let sent = c.session.actions_sent();
+    // The line the earlier review found going out as chat: it is one
+    // ListAllegianceOfficers action and nothing is offered to the plugins.
+    assert_eq!(c.chat_line("/allegiance officer list"), Line::Acted(Ok(())));
+    assert_eq!(c.session.actions_sent(), sent + 1);
+    assert_eq!(
+        asked("/allegiance officer list"),
+        Some(Action::Allegiance(Manage::OfficerList))
+    );
+    // And @ is the same way in as / (retail's own help says so).
+    assert_eq!(c.chat_line("@all motd"), Line::Acted(Ok(())));
+    assert_eq!(c.session.actions_sent(), sent + 2);
+}
+
+#[test]
+fn an_allegiance_subcommand_keeps_retails_argument_shapes() {
+    assert_eq!(
+        asked("/allegiance officer set 2 +Verity"),
+        Some(Action::Allegiance(Manage::OfficerSet {
+            name: "Verity".into(),
+            level: 2
+        }))
+    );
+    assert_eq!(
+        asked("/allegiance BOOT -account Verity"),
+        Some(Action::Allegiance(Manage::Boot {
+            name: "Verity".into(),
+            account: true
+        }))
+    );
+    assert_eq!(
+        asked("/allegiance chat kick Verity, quiet please"),
+        Some(Action::Allegiance(Manage::ChatBoot {
+            name: "Verity".into(),
+            reason: "quiet please".into()
+        }))
+    );
+    assert_eq!(
+        asked("/allegiance lock bypass clear"),
+        Some(Action::Allegiance(Manage::Lock(Lock::ClearApproved)))
+    );
+    assert_eq!(
+        asked("/allegiance house storage open"),
+        Some(Action::Allegiance(Manage::House(HouseAccess::StorageOpen)))
+    );
+    // Three of them land outside the allegiance's own actions.
+    assert_eq!(asked("/allegiance ho"), Some(Action::RecallHometown));
+    assert_eq!(
+        asked("/allegiance br stand fast"),
+        Some(Action::Channel {
+            channel: channel::ALLEGIANCE_BROADCAST,
+            text: "stand fast".into()
+        })
+    );
+    assert_eq!(
+        asked("/allegiance chat on"),
+        Some(Action::Listen {
+            room: turbine::ALLEGIANCE,
+            on: true
+        })
+    );
+    // A word retail never dispatched is refused here, not sent.
+    assert_eq!(asked("/allegiance officers"), None);
+    assert_eq!(asked("/allegiance"), None);
+}
+
+#[test]
+fn the_motd_and_the_hometown_have_their_own_names_too() {
+    assert_eq!(asked("/motd"), Some(Action::Allegiance(Manage::Motd)));
+    assert_eq!(
+        asked("/motd set be good"),
+        Some(Action::Allegiance(Manage::SetMotd("be good".into())))
+    );
+    assert_eq!(
+        asked("/motd clear"),
+        Some(Action::Allegiance(Manage::ClearMotd))
+    );
+    assert_eq!(asked("/motd please"), None);
+    assert_eq!(asked("/ah"), Some(Action::RecallHometown));
+    assert_eq!(asked("/alh"), Some(Action::RecallHometown));
+    // "This command takes no arguments!", where @allegiance hometown ignores
+    // whatever follows it.
+    assert_eq!(asked("/ah now"), None);
 }
 
 #[test]

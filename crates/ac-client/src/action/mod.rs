@@ -29,6 +29,80 @@ pub type Refused = ac_agent::did::Because;
 /// before it went. The server's own answer arrives later, as an `Event`.
 pub type Outcome = Result<(), Refused>;
 
+/// One thing `@allegiance` asks of the server, a subcommand each. The ranks
+/// they want are the server's to check (ACE `Player_Allegiance.cs:1478-1515`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Manage {
+    /// Throw a member out, by character or by every character on the account.
+    Boot { name: String, account: bool },
+    /// Another member's profile, by name.
+    Info(String),
+    /// Put somebody out of allegiance chat, with the reason they are told.
+    ChatBoot { name: String, reason: String },
+    /// Silence a member in allegiance chat for five minutes, or let them back.
+    Gag { name: String, gagged: bool },
+    /// Who is banned from the allegiance.
+    BanList,
+    /// Put a name on the ban list, or take it off.
+    Ban { name: String, banned: bool },
+    /// Who the officers are.
+    OfficerList,
+    /// Make a member an officer of level 1 to 3.
+    OfficerSet { name: String, level: u32 },
+    /// Take a member out of the officers.
+    OfficerRemove(String),
+    /// Leave the allegiance with no officers at all.
+    OfficerClear,
+    /// The titles the three officer levels carry.
+    TitleList,
+    /// Name an officer level (1 to 3).
+    TitleSet { level: u32, title: String },
+    /// Back to the titles the server names them by.
+    TitleClear,
+    /// The allegiance's message of the day, as it stands.
+    Motd,
+    /// Set the message of the day.
+    SetMotd(String),
+    /// Leave the allegiance with no message of the day.
+    ClearMotd,
+    /// The allegiance's name, as it stands.
+    Name,
+    /// Name the allegiance.
+    SetName(String),
+    /// Leave the allegiance unnamed.
+    ClearName,
+    /// Lock the allegiance against new vassals, unlock it, or ask.
+    Lock(Lock),
+    /// Let one name swear in while the allegiance is locked.
+    ApproveVassal(String),
+    /// The monarch's house, and what the allegiance may do in it.
+    House(HouseAccess),
+}
+
+/// What `@allegiance lock` asks (ACE `AllegianceLockAction.cs:5-11`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Lock {
+    Off,
+    On,
+    Toggle,
+    Check,
+    /// The names allowed in while it is locked.
+    Approved,
+    /// Let none of them in any more.
+    ClearApproved,
+}
+
+/// What `@allegiance house` asks (ACE `AllegianceHouseAction.cs:8-14`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum HouseAccess {
+    /// What the allegiance may do there, as it stands.
+    Check,
+    GuestOpen,
+    GuestClose,
+    StorageOpen,
+    StorageClose,
+}
+
 /// What a thing is named by. A front end that already has a guid sends one;
 /// one with a word the player typed sends [`Target::Name`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -156,6 +230,8 @@ pub enum Action {
     Confirm(bool),
 
     // ---- allegiance ----
+    /// Manage the allegiance: one of retail's `@allegiance` subcommands.
+    Allegiance(Manage),
     /// Hear a Turbine chat room (`ac_net::messages::turbine`), or stop.
     Listen { room: u32, on: bool },
 
@@ -246,6 +322,7 @@ impl Client {
             Action::FellowQuit { disband } => fellow::quit(self, disband),
             Action::Confirm(yes) => fellow::confirm(self, yes),
 
+            Action::Allegiance(what) => allegiance::manage(self, &what),
             Action::Listen { room, on } => allegiance::listen(self, room, on),
 
             Action::Autoplay(on) => team::autoplay(self, on),
@@ -396,6 +473,26 @@ pub const RETAIL: &[Command] = &[
     //
     // -- allegiance and fellowship --
     //
+    // Managing the allegiance: one subcommand tree, which `@motd` and `@ah`
+    // are two more ways into (retail registers them with the same handlers).
+    // Every one sends a game action of its own; only `broadcast`, `hometown`
+    // and `chat on|off` land somewhere else.
+    Command {
+        names: &["allegiance", "all"],
+        action: allegiance::subcommand,
+        usage: "/allegiance boot|info|chat|broadcast|ban|officer|title|hometown|motd|name|lock|house ...",
+    },
+    Command {
+        names: &["motd"],
+        action: |args| allegiance::motd(args).map(Action::Allegiance),
+        usage: "/motd [set TEXT|clear]",
+    },
+    Command {
+        names: &["ah", "alh"],
+        // Retail refuses arguments here: "This command takes no arguments!".
+        action: |args| args.is_empty().then_some(Action::RecallHometown),
+        usage: "/ah",
+    },
     // The group channels, a ChatChannel (0x0147) each: what a character says
     // to its fellowship, its patron, its vassals, its monarch, its co-vassals
     // or the whole allegiance. `/a` is the odd one out -- retail hands the
@@ -474,11 +571,6 @@ pub const RETAIL: &[Command] = &[
 pub const PENDING: &[&str] = &[
     "?",
     "help",
-    "allegiance",
-    "all",
-    "alh",
-    "ah",
-    "motd",
     "chat",
     "notell",
     "reply",
