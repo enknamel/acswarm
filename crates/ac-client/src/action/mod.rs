@@ -16,6 +16,7 @@ mod item;
 mod magic;
 mod recall;
 pub mod resolve;
+mod status;
 mod team;
 mod trade;
 
@@ -182,6 +183,18 @@ pub enum Action {
     Die,
     /// Enter PK Lite.
     PkLite,
+
+    // ---- status ----
+    /// What the endurance attribute is for.
+    Endurance,
+    /// Where the body stands, as a cell id and a frame.
+    Location,
+    /// Which client this is, and whether Turbine chat is on.
+    Version,
+    /// Show the frame rate, or stop.
+    Framerate,
+    /// Daylight outdoors whatever the hour, or the world's own time.
+    Daylight,
 }
 
 impl Client {
@@ -254,6 +267,12 @@ impl Client {
             Action::RecallHometown => recall::hometown(self),
             Action::Die => recall::die(self),
             Action::PkLite => recall::pk_lite(self),
+
+            Action::Endurance => status::endurance(self),
+            Action::Location => status::location(self),
+            Action::Version => status::version(self),
+            Action::Framerate => status::framerate(self),
+            Action::Daylight => status::daylight(self),
         }
     }
 
@@ -390,6 +409,35 @@ pub const RETAIL: &[Command] = &[
     //
     // -- status and who (age, loc, version, friends, the housing list) --
     //
+    // `/help` and `/?` are not here: retail's help is every family's own
+    // text, and until that is written the console plugin's list answers.
+    Command {
+        names: &["day"],
+        action: |_| Some(Action::Daylight),
+        usage: "/day",
+    },
+    Command {
+        names: &["endurance"],
+        action: |_| Some(Action::Endurance),
+        usage: "/endurance",
+    },
+    // Retail turned the three below away when words followed them.
+    Command {
+        names: &["framerate"],
+        action: |args| args.is_empty().then_some(Action::Framerate),
+        usage: "/framerate",
+    },
+    Command {
+        names: &["loc"],
+        action: |args| args.is_empty().then_some(Action::Location),
+        usage: "/loc",
+    },
+    Command {
+        names: &["version"],
+        action: |args| args.is_empty().then_some(Action::Version),
+        usage: "/version",
+    },
+    //
     // -- player killing, consent and items --
 ];
 
@@ -462,11 +510,6 @@ pub const PENDING: &[&str] = &[
     "msg_types",
     "age",
     "birth",
-    "day",
-    "endurance",
-    "framerate",
-    "loc",
-    "version",
     "clear",
     "filter",
     "unfilter",

@@ -382,6 +382,9 @@ pub struct Client {
     pub last_refusal: Option<(u32, u32)>,
     /// Pending events for the driver.
     pub events: Vec<Event>,
+    /// Whether the window shows the frame rate, which `/framerate` flips.
+    /// It starts on, as acswarm's status line has always shown it.
+    pub show_framerate: bool,
 }
 
 impl Client {
