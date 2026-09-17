@@ -2,6 +2,7 @@ use std::time::Instant;
 
 use super::melee::GIVE_UP_FOR;
 use crate::autoplay::{Fight, Style};
+use crate::dodge::How;
 use crate::{Client, Stance};
 
 /// Whether `name` contains any of `list`, case-insensitively. An empty
@@ -142,6 +143,24 @@ impl Client {
         self.let_go(Release::Fight);
     }
 
+    /// The attack this character is about to make, for the sight test:
+    /// the spell it would throw, the wielded launcher's shot, or a
+    /// swing.
+    ///
+    /// What is in its hands says which, and `Client::missile` does not:
+    /// that is the combat mode the server has been told about, which a
+    /// caster's magic stance clears and which an archer has not entered
+    /// before its first shot of a fight.
+    fn attack_kind(&self, cfg: &Fight) -> How {
+        match self.combat_stance() {
+            // With nothing it can name to throw, a bolt's line stands
+            // in: every spell but an arc flies one, and so does a swing.
+            Stance::Magic => self.spell_to_throw(cfg).map_or(How::Melee, How::Spell),
+            Stance::Missile => How::Missile,
+            Stance::Melee => How::Melee,
+        }
+    }
+
     /// The nearest creature the name rules allow, within the radius.
     pub(super) fn pick_target(&mut self, cfg: &Fight) -> Option<u32> {
         let underground = self.underground();
@@ -166,12 +185,10 @@ impl Client {
             .collect();
         // The nearest one we can actually hit: one behind a wall is
         // taken only when nothing is in sight, and then the fight rules
-        // walk round to it.
-        let how = if self.missile {
-            crate::dodge::How::Missile
-        } else {
-            crate::dodge::How::Melee
-        };
+        // walk round to it. In sight of what is the attack being made:
+        // an arc is lobbed over what stops a bolt, an arrow falls on the
+        // way and past its reach gets nowhere (see `crate::aim`).
+        let how = self.attack_kind(cfg);
         candidates
             .into_iter()
             .map(|(guid, at)| {

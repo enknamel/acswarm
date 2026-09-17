@@ -192,6 +192,23 @@ impl Client {
         }
     }
 
+    /// The spell this character would throw, before there is a target to
+    /// throw it at: the first on offer it can cast this moment, else the
+    /// first it would try.
+    ///
+    /// Which one the fight throws is chosen against the creature
+    /// (`ac_world::elements::best_spell`), and that keeps the first of
+    /// the ready ones wherever the element table has nothing to say
+    /// about it -- so this is what the target pick asks about too.
+    pub(super) fn spell_to_throw(&self, cfg: &Fight) -> Option<u32> {
+        let offered = self.offered_spells(cfg);
+        offered
+            .iter()
+            .find(|(id, _)| matches!(self.can_cast(*id), crate::magic::CastCheck::Ok))
+            .or_else(|| offered.first())
+            .map(|(id, _)| *id)
+    }
+
     /// Every attack spell in the spellbook that is thrown at a target:
     /// the ones the element table knows deal an element, strongest
     /// first. Which of them to throw is decided against the target.
