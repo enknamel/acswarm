@@ -19,7 +19,8 @@ system's entry fns are written in the files its own row names.
 `tick_autoplay()`, in order:
 - with the team on, even with autoplay off: `autoplay_accept_invites()`, and `autoplay_fellowship()`
   for a leader played by hand; always `autoplay_close_unwanted_window()`
-- returns if autoplay is off or no character is in the world
+- with autoplay off, `autoplay_by_hand()`: the team rules a player keeps, and then it returns, as
+  it does with no character in the world
 - `autoplay_watch_the_ground()`, whose clocks are wound before any step can claim the tick
 - every `steps::HOUSEKEEPING` row; `steps::reflexes()` in table order; goals from `steps::weigh()`,
   best first. The first step that acts sets `Autoplay.step` and ends the tick.
@@ -84,7 +85,8 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 | recruiting | `autoplay_fellowship`, `autoplay_accept_invites`, `next_invitee`, `hear_recruit_refusal` | `autoplay/team/fellowship.rs` | `Autoplay.recruited`, `Autoplay.held_off`, `Team.fellowship` | invit | autoplay::team::fellowship | recruit |
 | team board | `autoplay_team`, `leader_mate`, `worst_hurt`, `rival_leader` | `autoplay/team/mod.rs`, `autoplay/team/view.rs`, `crates/ac-plugin/src/team.rs` | `Autoplay.team` (`TeamView.mates`), `Config.team` | leader | autoplay::team | mate |
 | fellowship planner | `plan_for_team`, `take_orders`, `assign_targets`, `deal_bodies`, `stragglers` | `autoplay/team/orders.rs`, `plan.rs` | `Autoplay.planner`, `Autoplay.orders` | plan:: | autoplay::team::orders | plan, order |
-| follow | `autoplay_follow`, `followed_leader`, `follow_break` | `autoplay/team/follow.rs` | `Autoplay.follow_trip`, `Team.follow`, `Client.follow` | follow | autoplay::team::follow | follow |
+| follow | `autoplay_follow`, `followed_leader`, `team_leader`, `follow_break` | `autoplay/team/follow.rs` | `Autoplay.follow_trip`, `Team.follow`, `Client.follow` | follow | autoplay::team::follow | follow |
+| played by hand | `autoplay_by_hand`, `autoplay_assist` | `autoplay/team/by_hand.rs` | `Team.follow`, `Team.focus_fire` | by_hand | autoplay::team::by_hand | assist |
 | quartermaster | `autoplay_quartermaster`, `autoplay_stock`, `decide`, `quartermaster`, `hand_out` | `autoplay/team/quartermaster.rs`, `logistics.rs`, `autoplay/growth/policy.rs` | `growth::State.mode`, `Team.restock` | quartermaster | autoplay::team::quartermaster | quartermaster |
 | town run | `grow_town_run`, `start_town_run`, `grow_run_step`, `grow_run_next`, `pick_vendor` | `autoplay/growth/town_run/mod.rs`, `autoplay/growth/town_run/counter.rs`, `autoplay/growth/town_run/vendor.rs`, `autoplay/growth/town_run/panel.rs`, `shopping.rs`, `crates/ac-vendor/src/run.rs` | `growth::State.run`, `growth::State.shop` | counter | autoplay::growth::town_run | town_run, counter |
 | supplies and sale | `grow_needs_with`, `supplies`, `sell_policy`, `offers_for_sale`, `burns` | `autoplay/growth/needs.rs`, `autoplay/growth/policy.rs`, `autoplay/growth/sale.rs`, `autoplay/growth/supplies.rs`, `crates/ac-loot/src/sale.rs` | `growth::State.needs`, `Growth.ammo_keep` | counter | autoplay::growth | need, sale |
@@ -123,6 +125,7 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 | step | a `steps::STEPS` row, reflex or goal; housekeeping never claims a tick | chore |
 | refusal | the server's no, by weenie error or in words | error, rejection |
 | plan, order | the leader's plan for the party, and one character's part in it | - |
+| assist | hit what the leader is hitting, picking nothing | help, support |
 
 ## Domain rules
 
@@ -145,6 +148,9 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
   follower inside its leader's `team.fight_radius` and prefers a target in line of sight. The melee
   and missile path scans inline in `autoplay_fight_as()` and takes the nearest inside `cfg.radius`,
   with neither of those two terms. Both gate on `would_fight()`, and a team order outranks both.
+- Played by hand, `autoplay_by_hand()`: with autoplay off only the team's own rules run -- invites,
+  a leader's fellowship, following and assisting. Nothing takes the legs or the hands for an errand
+  of its own: no town run, no ground, no experience spent, no weapon changed, no target picked.
 - Refusals table: `refused()` quotes ACE's words with `File.cs:line` and `answer()` sets the wait;
   `hear_refusal()` hands each to the waiting system. A new one is a row, a test in the exact words,
   an `answer()` arm and a hand-off; never a `strip_prefix` in the system that noticed.

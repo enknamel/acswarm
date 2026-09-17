@@ -21,13 +21,25 @@ pub fn follow_break(keep: f32) -> f32 {
 const FOLLOW_WALK: f32 = 120.0;
 
 impl Client {
-    /// The leader this character follows, when it follows one.
-    pub(crate) fn followed_leader(&self) -> Option<&Mate> {
+    /// The mate this character takes its lead from: the team is on, this
+    /// character is not the one leading, and that mate asked to lead
+    /// (`Team::lead`). Only the asking makes a leader to take from: a
+    /// roster whose leader is no more than the first name in it is a
+    /// party of equals, and nobody goes anywhere for it.
+    pub(crate) fn team_leader(&self) -> Option<&Mate> {
         let team = &self.autoplay.config.team;
-        if !team.enabled || !team.follow || team.lead || self.autoplay.team.leader {
+        if !team.enabled || team.lead || self.autoplay.team.leader {
             return None;
         }
         self.autoplay.team.leader_mate().filter(|m| m.leads)
+    }
+
+    /// The leader this character follows, when it follows one.
+    pub(crate) fn followed_leader(&self) -> Option<&Mate> {
+        if !self.autoplay.config.team.follow {
+            return None;
+        }
+        self.team_leader()
     }
 
     /// Keep up with the leader: fly when it flies, walk straight after

@@ -196,7 +196,11 @@ pub(crate) fn draw(
         ui.set_min_width(300.0);
         title_bar(ui, "autoplay", "Play on its own");
         ui.checkbox(&mut cfg.enabled, egui::RichText::new("Enabled").strong())
-            .on_hover_text("Let the character heal, fight, loot and buff by itself");
+            .on_hover_text(
+                "Let the character heal, fight, loot and buff by itself. Off, its \
+                 player plays it and only the team's own rules run: it answers \
+                 invitations, keeps up with its leader and hits what the leader hits",
+            );
         let line = status_line(&v.doing, &v.status);
         let colour = if cfg.enabled {
             egui::Color32::from_rgb(150, 210, 150)
@@ -505,7 +509,9 @@ pub(crate) fn draw(
                     .on_hover_text(
                         "Every character being played that has this on hears the \
                          others: the same target, the debuffs landed first, spare \
-                         supplies handed over, one fellowship",
+                         supplies handed over, one fellowship. With autoplay off it \
+                         is narrower and it still holds: invitations answered, the \
+                         leader followed, the leader's target hit",
                     );
                 ui.horizontal(|ui| {
                     ui.label("role");
@@ -519,7 +525,10 @@ pub(crate) fn draw(
                 });
                 ui.checkbox(&mut cfg.team.focus_fire, "fight what the leader fights")
                     .on_hover_text(
-                        "The leader is the one that leads, else whoever's name sorts first",
+                        "The leader is the one that leads, else whoever's name sorts \
+                         first. With autoplay off it is an assist, and only on a \
+                         leader that asked to lead: the character hits what that \
+                         leader is already on and picks nothing of its own",
                     );
                 ui.checkbox(
                     &mut cfg.team.lead,
@@ -528,10 +537,14 @@ pub(crate) fn draw(
                 .on_hover_text(
                     "For the character played by hand. The others keep close, fly \
                      when it flies, and take a journey after it when it goes through \
-                     a portal",
+                     a portal, whether their own autoplay is on or off",
                 );
                 ui.horizontal(|ui| {
-                    ui.checkbox(&mut cfg.team.follow, "follow the leader, keeping within");
+                    ui.checkbox(&mut cfg.team.follow, "follow the leader, keeping within")
+                        .on_hover_text(
+                            "Holds with autoplay off too: the character keeps up with its \
+                             leader while its player plays it",
+                        );
                     ui.add(
                         egui::DragValue::new(&mut cfg.team.follow_distance)
                             .speed(0.5)
