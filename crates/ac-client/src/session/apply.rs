@@ -468,8 +468,16 @@ impl Client {
                                 } else if ev == ac_net::messages::event::SET_TURBINE_CHAT_CHANNELS
                                     && rest.len() >= 4
                                 {
+                                    // Ten room ids: allegiance, the five
+                                    // every player has, then our society's
+                                    // and the three fixed society rooms
+                                    // (ACE GameEventSetTurbineChatChannels.cs:10-19).
                                     self.allegiance_room =
                                         u32::from_le_bytes([rest[0], rest[1], rest[2], rest[3]]);
+                                    if let Some(id) = rest.get(24..28) {
+                                        self.society_room =
+                                            u32::from_le_bytes(id.try_into().expect("four bytes"));
+                                    }
                                 } else if !chat_handles(op, ev) {
                                     // Everything neither World::apply
                                     // nor chat_message takes.

@@ -151,6 +151,7 @@ impl Plugin for Watcher {
 | `ev.kind` | fields |
 | --- | --- |
 | `chat` | `text`, `chat_kind` |
+| `chat_to_file` (`file`, empty to stop), `chat_clear` (`all`) | what `/log` and `/clear` ask of the front end |
 | `sound` | `volume` |
 | `connected`, `terminated` (`reason`), `refused` (`code`), `placed` (`cell`) | |
 | `spell_learned`, `spell_forgotten` | `spell` |

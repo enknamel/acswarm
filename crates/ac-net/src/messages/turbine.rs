@@ -30,15 +30,18 @@ pub fn name(id: u32) -> &'static str {
     }
 }
 
-/// The room a `/g`, `/trade`, `/lfg`, `/rp` or `/a` prefix means
-/// (`ALLEGIANCE` stands for "our allegiance's room").
+/// The room a chat prefix means, retail's own name for it and every
+/// alias it registered (`ALLEGIANCE` stands for "our allegiance's
+/// room"). Not `rp`, which retail registered as `@reply`.
 pub fn from_prefix(p: &str) -> Option<u32> {
     match p {
-        "g" | "general" => Some(GENERAL),
-        "tr" | "trade" => Some(TRADE),
-        "lfg" => Some(LFG),
-        "rp" | "roleplay" => Some(ROLEPLAY),
-        "a" | "allegiance" => Some(ALLEGIANCE),
+        "g" | "general" | "cg" => Some(GENERAL),
+        "tr" | "trade" | "ct" => Some(TRADE),
+        "lfg" | "clfg" => Some(LFG),
+        "roleplay" | "crp" => Some(ROLEPLAY),
+        "society" | "soc" => Some(SOCIETY),
+        "olthoi" | "o" => Some(OLTHOI),
+        "a" | "allegiance" | "guild" | "gu" => Some(ALLEGIANCE),
         _ => None,
     }
 }

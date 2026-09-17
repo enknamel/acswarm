@@ -65,6 +65,17 @@ impl Client {
         });
     }
 
+    /// Remember whom to `/reply` to. Retail took the sender from a tell
+    /// only when it was a player's (guid 0x50000001..=0x6FFFFFFF), so an
+    /// NPC's does not become the reply target (FUN_00572370:147-151); it
+    /// also checked the tell was addressed to us, which ACE guarantees by
+    /// sending GameEventTell to the target alone (GameActionTalkDirect.cs:46).
+    pub(crate) fn hear_tell(&mut self, sender_id: u32, sender: &str) {
+        if (0x5000_0001..=0x6FFF_FFFF).contains(&sender_id) && !sender.is_empty() {
+            self.last_teller = Some((sender_id, sender.to_string()));
+        }
+    }
+
     pub fn chat_message(&mut self, op: u32, body: &[u8]) {
         use ac_net::messages::{event, opcode, ChatLine};
         if op == opcode::SOUND {
@@ -93,7 +104,13 @@ impl Client {
                 Err(e) => Err(e),
             },
             opcode::GAME_EVENT => match ac_net::messages::split_game_event(body) {
-                Some((_, _, event::TELL, rest)) => ChatLine::parse_tell(rest),
+                Some((_, _, event::TELL, rest)) => {
+                    let line = ChatLine::parse_tell(rest);
+                    if let Ok(l) = &line {
+                        self.hear_tell(l.sender_id, &l.sender);
+                    }
+                    line
+                }
                 Some((_, _, event::CHANNEL_BROADCAST, rest)) => {
                     ChatLine::parse_channel_broadcast(rest)
                 }

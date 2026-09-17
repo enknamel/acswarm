@@ -1597,6 +1597,23 @@ impl App {
                         }
                     }
                 }
+                // The chat window is this front end's, so `/log` and
+                // `/clear` are answered here, for the session it shows.
+                ac_client::Event::ChatToFile(file) => {
+                    if is_active {
+                        if let Some(ui) = &mut self.ui {
+                            let said = ui.log_chat_to(file.as_deref());
+                            ui.push_chat(said, 0);
+                        }
+                    }
+                }
+                ac_client::Event::ChatClear { all } => {
+                    if is_active {
+                        if let Some(ui) = &mut self.ui {
+                            ui.clear_chat(*all);
+                        }
+                    }
+                }
                 ac_client::Event::Sound { wave, volume } => {
                     if is_active {
                         if let Some(audio) = &self.audio {

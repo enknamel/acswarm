@@ -1,4 +1,8 @@
 pub const TALK: u32 = 0x0015;
+/// Tell one player in view by guid: text, target guid. The server only
+/// looks the guid up in our own landblock (ACE
+/// GameActionTalkDirect.cs:21), so `TELL` by name reaches further.
+pub const TALK_DIRECT: u32 = 0x0032;
 pub const USE_WITH_TARGET: u32 = 0x0035;
 pub const SET_SINGLE_CHARACTER_OPTION: u32 = 0x0005;
 pub const FELLOWSHIP_CREATE: u32 = 0x00A2;

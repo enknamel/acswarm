@@ -117,6 +117,8 @@ struct Session {
     placed_at: Option<Instant>,
     /// Terminated or refused: the connection is gone.
     ended: bool,
+    /// The file `/log` is copying this session's chat to.
+    chat_file: Option<crate::chat::ChatFile>,
 }
 
 /// Log `account` in: enter with `character` (else the account's first,
@@ -247,6 +249,7 @@ pub fn run(cli: crate::Cli) -> Result<()> {
             schedule: Schedule::new(lines.clone(), 1.0),
             placed_at: None,
             ended: false,
+            chat_file: None,
         });
     }
 
@@ -321,12 +324,36 @@ pub fn run(cli: crate::Cli) -> Result<()> {
                 let account = sessions[i].account().to_string();
                 match ev {
                     Event::Chat { text, .. } => {
+                        if let Some(f) = sessions[i].chat_file.as_mut() {
+                            f.write(&crate::chat::stamp_now(), text);
+                        }
                         if cli.log_chat {
                             println!("[{account}] {text}");
                         } else {
                             tracing::debug!("[{account}] chat: {text}");
                         }
                     }
+                    // A headless run has no chat window: `/log` still
+                    // copies the lines it prints, `/clear` has nothing
+                    // to empty.
+                    Event::ChatToFile(file) => {
+                        let said = match file {
+                            None => match sessions[i].chat_file.take() {
+                                Some(f) => format!("chat log {} closed", f.path().display()),
+                                None => "no chat log to close".to_string(),
+                            },
+                            Some(name) => match crate::chat::ChatFile::open(name) {
+                                Ok(f) => {
+                                    let said = format!("copying chat to {}", f.path().display());
+                                    sessions[i].chat_file = Some(f);
+                                    said
+                                }
+                                Err(e) => format!("cannot write to {name}: {e}"),
+                            },
+                        };
+                        println!("[{account}] {said}");
+                    }
+                    Event::ChatClear { .. } => {}
                     Event::Connected => println!("[{account}] connected"),
                     Event::Placed { cell } => {
                         println!("[{account}] placed in cell {cell:08X}");
@@ -418,6 +445,7 @@ pub fn run(cli: crate::Cli) -> Result<()> {
                             schedule: Schedule::new(lines.clone(), 1.0),
                             placed_at: None,
                             ended: false,
+                            chat_file: None,
                         });
                     }
                     Err(e) => {

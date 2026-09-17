@@ -57,6 +57,14 @@ pub fn event_map(ev: &Event) -> Map {
             m.insert("chat_kind".into(), Dynamic::from_int(*kind as i64));
             "chat"
         }
+        Event::ChatToFile(file) => {
+            m.insert("file".into(), file.clone().unwrap_or_default().into());
+            "chat_to_file"
+        }
+        Event::ChatClear { all } => {
+            m.insert("all".into(), (*all).into());
+            "chat_clear"
+        }
         Event::Sound { volume, .. } => {
             m.insert("volume".into(), Dynamic::from_float(*volume as f64));
             "sound"
