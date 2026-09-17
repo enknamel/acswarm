@@ -20,7 +20,7 @@ mod status;
 mod team;
 mod trade;
 
-pub use status::Friends;
+pub use status::{Friends, HouseKind};
 
 /// Why an action did not happen: the words a front end shows, and the server's
 /// own code when it gave one (the vocabulary every system refuses in).
@@ -205,6 +205,9 @@ pub enum Action {
 
     /// The friends list: show it, add to it, take from it.
     Friends(Friends),
+
+    /// Ask how many dwellings of a kind are for sale, and where.
+    HousesAvailable(HouseKind),
 }
 
 impl Client {
@@ -288,6 +291,8 @@ impl Client {
             Action::QueryBirth => status::birth(self),
 
             Action::Friends(what) => status::friends(self, &what),
+
+            Action::HousesAvailable(kind) => status::houses_available(self, kind),
         }
     }
 
@@ -477,6 +482,23 @@ pub const RETAIL: &[Command] = &[
         action: |args| status::remove_args(args).map(Action::Friends),
         usage: "/friends_remove NAME | -all",
     },
+    Command {
+        names: &["hslist"],
+        action: |args| status::house_kind(args).map(Action::HousesAvailable),
+        usage: "/hslist apartment | cottage | villa | mansion",
+    },
+    // The two house recalls under their own names; `/house` is the recall
+    // family's row for the same action.
+    Command {
+        names: &["hor", "hr"],
+        action: |args| args.is_empty().then_some(Action::RecallHouse),
+        usage: "/hor",
+    },
+    Command {
+        names: &["hom", "hoa"],
+        action: |args| args.is_empty().then_some(Action::RecallMansion),
+        usage: "/hom",
+    },
     //
     // -- player killing, consent and items --
 ];
@@ -534,11 +556,6 @@ pub const PENDING: &[&str] = &[
     "pla",
     "fillcomps",
     "loadfile",
-    "hslist",
-    "hor",
-    "hr",
-    "hom",
-    "hoa",
     "squelch",
     "unsquelch",
     "messagetypes",

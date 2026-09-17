@@ -1,8 +1,7 @@
 //! The status and who family: what the client can answer by itself --
 //! where the body stands, the client's version, the frame-rate display,
-//! the daylight switch and what endurance is for, and what only the
-//! server knows: how old this character is, when it was made, and the
-//! friends list.
+//! the daylight switch and what endurance is for -- what only the server
+//! knows (age, birth, the dwellings for sale), and the friends list.
 //!
 //! The lines these print are retail's own words, because they are the
 //! command's whole answer; a refusal is in acswarm's voice, as in every
@@ -32,9 +31,55 @@ pub enum Friends {
     Old,
 }
 
+/// A kind of dwelling, by the server's own numbers (ACE
+/// `ACE.Entity/Enum/HouseType.cs:6-10`, which retail's `@hslist` matched).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum HouseKind {
+    Cottage,
+    Villa,
+    Mansion,
+    Apartment,
+}
+
+impl HouseKind {
+    /// The number the wire carries.
+    pub fn id(self) -> u32 {
+        match self {
+            HouseKind::Cottage => 1,
+            HouseKind::Villa => 2,
+            HouseKind::Mansion => 3,
+            HouseKind::Apartment => 4,
+        }
+    }
+
+    fn of_id(id: u32) -> Option<HouseKind> {
+        Some(match id {
+            1 => HouseKind::Cottage,
+            2 => HouseKind::Villa,
+            3 => HouseKind::Mansion,
+            4 => HouseKind::Apartment,
+            _ => return None,
+        })
+    }
+
+    /// How the count line names several of them.
+    fn plural(self) -> &'static str {
+        match self {
+            HouseKind::Cottage => "cottages",
+            HouseKind::Villa => "villas",
+            HouseKind::Mansion => "mansions",
+            HouseKind::Apartment => "apartments",
+        }
+    }
+}
+
 /// Retail's cap on the friends list (client string 0x561); the server
 /// keeps none (ACE `WorldObjects/Player_Character.cs:141-176`).
 const MOST_FRIENDS: usize = 50;
+
+/// Locations past this many are the server's own, not sent (retail's
+/// note in `FUN_00586bd0:46-48`).
+const HOUSES_LISTED: u32 = 400;
 
 /// Always-daylight outdoors, the option `/day` flips (ACE
 /// `CharacterOption.AlwaysDaylightOutdoors`, `CharacterOptions2` bit 0x1).
@@ -126,6 +171,19 @@ pub(super) fn remove_args(name: &str) -> Option<Friends> {
     (!name.is_empty()).then(|| Friends::Remove(name.to_string()))
 }
 
+/// `/hslist apartment | cottage | villa | mansion`: the first word only,
+/// whatever its case and never a prefix of one (retail `FUN_005712e0:17-50`).
+pub(super) fn house_kind(args: &str) -> Option<HouseKind> {
+    let word = args.split_whitespace().next().unwrap_or_default();
+    Some(match word.to_ascii_lowercase().as_str() {
+        "cottage" => HouseKind::Cottage,
+        "villa" => HouseKind::Villa,
+        "mansion" => HouseKind::Mansion,
+        "apartment" => HouseKind::Apartment,
+        _ => return None,
+    })
+}
+
 /// How long this character has been played (QueryAge 0x01C2: the target's
 /// name, empty for ourselves -- only an admin named another).
 pub(super) fn age(c: &mut Client) -> Outcome {
@@ -215,6 +273,14 @@ pub(super) fn daylight(c: &mut Client) -> Outcome {
             "Normality has been restored."
         },
     );
+    Ok(())
+}
+
+/// How many dwellings of a kind are for sale, and where
+/// (ListAvailableHouses 0x0270); [`Client::hear_houses`] prints the answer.
+pub(super) fn houses_available(c: &mut Client, kind: HouseKind) -> Outcome {
+    c.session
+        .send_action(action::LIST_AVAILABLE_HOUSES, &kind.id().to_le_bytes());
     Ok(())
 }
 
@@ -315,6 +381,47 @@ impl Client {
             format!("{who} has played for {age}.")
         };
         line(self, text);
+    }
+
+    /// AvailableHouses 0x0271, the answer to `/hslist`: the kind, the cell
+    /// of each dwelling for sale and how many there are in all
+    /// (`GameEventHouseAvailableHouses.cs`). Apartments have no place on
+    /// the map, so retail listed the locations of every other kind only.
+    pub(crate) fn hear_houses(&mut self, body: &[u8]) {
+        let mut r = Reader::new(body);
+        let (Ok(kind), Ok(count)) = (r.u32(), r.u32()) else {
+            return;
+        };
+        let Some(kind) = HouseKind::of_id(kind) else {
+            return;
+        };
+        let mut cells = Vec::new();
+        for _ in 0..count {
+            let Ok(cell) = r.u32() else { break };
+            cells.push(cell);
+        }
+        let Ok(total) = r.u32() else { return };
+        line(
+            self,
+            format!("There are {total} {} available.", kind.plural()),
+        );
+        if kind == HouseKind::Apartment {
+            return;
+        }
+        for cell in cells {
+            let where_it_is = ac_world::map_coord_str(&ac_world::object::Position::new_flat(
+                cell,
+                ac_world::outdoor_cell_centre(cell),
+            ));
+            line(self, format!("     {where_it_is}"));
+        }
+        if total > HOUSES_LISTED {
+            line(
+                self,
+                "There were too many houses to display all the locations. \
+                 Only the first 400 locations are displayed here.",
+            );
+        }
     }
 }
 
@@ -548,5 +655,67 @@ mod tests {
             c.chat_line("/friends add Verity"),
             Line::Acted(Err(_))
         ));
+    }
+
+    #[test]
+    fn hslist_wants_one_of_the_four_kinds() {
+        assert_eq!(house_kind("Cottage"), Some(HouseKind::Cottage));
+        assert_eq!(house_kind("mansion and more"), Some(HouseKind::Mansion));
+        assert_eq!(house_kind("cot"), None, "retail matched the whole word");
+        assert_eq!(house_kind(""), None);
+        let mut c = testkit::offline_client();
+        let sent = c.session.actions_sent();
+        assert!(matches!(c.chat_line("/hslist"), Line::Acted(Err(_))));
+        assert_eq!(c.session.actions_sent(), sent, "nothing goes out unasked");
+        assert_eq!(c.chat_line("/hslist villa"), Line::Acted(Ok(())));
+        assert_eq!(c.session.actions_sent(), sent + 1);
+    }
+
+    #[test]
+    fn the_houses_answer_counts_them_and_says_where() {
+        let mut c = testkit::offline_client();
+        let mut w = Writer::new();
+        w.u32(HouseKind::Cottage.id())
+            .u32(2)
+            .u32(0xA9B4_0019)
+            .u32(0xA9B4_0001)
+            .u32(2);
+        c.hear_houses(&w.finish());
+        let lines = said(&mut c);
+        assert_eq!(lines[0], "There are 2 cottages available.");
+        assert_eq!(lines.len(), 3, "a line each: {lines:?}");
+        assert!(
+            lines[1].starts_with("     ") && lines[1].ends_with('E'),
+            "{lines:?}"
+        );
+        // Apartments have no place on the map, so only the count is printed.
+        let mut w = Writer::new();
+        w.u32(HouseKind::Apartment.id()).u32(0).u32(37);
+        c.hear_houses(&w.finish());
+        assert_eq!(said(&mut c), ["There are 37 apartments available."]);
+    }
+
+    #[test]
+    fn the_house_recalls_are_the_ones_the_panel_asks_for() {
+        for (line, want) in [
+            ("/hor", Action::RecallHouse),
+            ("/hr", Action::RecallHouse),
+            ("/hom", Action::RecallMansion),
+            ("/hoa", Action::RecallMansion),
+        ] {
+            let mut c = testkit::offline_client();
+            let sent = c.session.actions_sent();
+            assert_eq!(c.chat_line(line), Line::Acted(Ok(())), "{line}");
+            assert_eq!(c.session.actions_sent(), sent + 1, "{line}");
+            assert_eq!(
+                crate::action::command(line.trim_start_matches('/'))
+                    .and_then(|cmd| (cmd.action)("")),
+                Some(want),
+                "{line}"
+            );
+        }
+        // Retail sent nothing at all when words followed these.
+        let mut c = testkit::offline_client();
+        assert!(matches!(c.chat_line("/hor now"), Line::Acted(Err(_))));
     }
 }
