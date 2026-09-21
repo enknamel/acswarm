@@ -54,11 +54,12 @@ because it runs per session per tick.
 holds what the server does on the spot with no walk, no animation and
 no busy check: pouring stacks together, taking up a weapon, restocking a
 quiver, spending experience. As goals they never won a tick, because a
-character that fights, loots and walks is never idle. The clocks read
-off the ground -- how long a spot has been quiet, when each body first
-came into sight -- are wound before even the reflexes
-(`autoplay_watch_the_ground`), because a clock wound only where it is
-read stands still exactly when it is needed.
+character that fights, loots and walks is never idle. What is read off
+the ground -- how long a spot has been quiet, when each body first came
+into sight, how far off the nearest fight is -- is taken before even the
+reflexes (`autoplay_watch_the_ground`), because a clock wound only where
+it is read stands still exactly when it is needed, and because a scorer
+takes the world through `&Client` and cannot go and measure it.
 
 Spending experience is paced to one message at a time, and a message
 can carry many ranks of one stat. The best buy is bought or saved for,

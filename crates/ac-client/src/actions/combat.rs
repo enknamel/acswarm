@@ -176,7 +176,7 @@ impl Client {
         self.world
             .objects
             .get(&guid)
-            .is_some_and(|o| o.health.is_none_or(|h| h > 0.0))
+            .is_some_and(|o| o.alive_or_unknown())
     }
 
     pub fn tick_combat(&mut self) {

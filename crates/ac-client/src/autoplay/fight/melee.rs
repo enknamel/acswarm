@@ -96,7 +96,7 @@ impl Client {
                 self.let_go(Release::Targets);
             }
             if let Some(o) = self.world.objects.get(&t).filter(|_| !gone) {
-                if o.health.unwrap_or(1.0) > 0.0 {
+                if o.alive_or_unknown() {
                     let name = o.name.clone();
                     // A weapon choice put off for a swing in the air, or
                     // waiting on an appraisal, is made here. Nothing else

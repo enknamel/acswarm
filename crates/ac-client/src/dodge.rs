@@ -600,7 +600,7 @@ impl Client {
                 .world
                 .objects
                 .get(&g)
-                .is_some_and(|o| o.health.unwrap_or(1.0) > 0.0);
+                .is_some_and(|o| o.alive_or_unknown());
             if !alive {
                 self.stop_approaching();
             }

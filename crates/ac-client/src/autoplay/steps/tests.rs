@@ -236,6 +236,110 @@ fn a_fight_in_reach_still_beats_a_resting_body() {
     assert_eq!(fight_worth(false, false, 1.0), UNDECIDED);
 }
 
+/// A character on its feet in the Holtburg field, level 20, with the
+/// fight rules at their defaults and nothing about it.
+fn in_the_field() -> Client {
+    const HOLTBURG: u32 = 0xA9B4_0019;
+    let mut c = crate::testkit::offline_client();
+    c.world.player_guid = Some(crate::testkit::ME);
+    c.world.stats.level = 20;
+    crate::testkit::stand(&mut c, HOLTBURG, glam::vec3(84.0, 84.0, 94.0));
+    c
+}
+
+/// What the fight step is worth where the character stands, the tick's
+/// own measurement taken first the way `tick_autoplay` takes it before
+/// it weighs anything (`Client::autoplay_watch_the_ground`).
+fn fighting_is_worth(c: &mut Client, now: Instant) -> f32 {
+    c.autoplay_watch_the_ground(now);
+    named("fight").expect("the fight step").worth(c, now)
+}
+
+#[test]
+fn a_creature_the_server_has_sent_no_health_for_is_a_fight_in_reach() {
+    // ACE sends a health only for the target a player has selected
+    // (Player_Vitals.cs:173) or one it has appraised
+    // (WorldObject.cs:617), so a creature standing about has none at
+    // all -- nearly every creature in view. Read as dead, the field was
+    // hidden from this scan: fighting was worth a walk with a Revenant
+    // two metres off, under keeping to the area (70), buffs (60),
+    // follow (50) and a body at rest, while the fight step -- which
+    // picks through `would_fight`, where an unknown health is alive --
+    // would have gone and hit it.
+    let mut c = in_the_field();
+    let it = crate::testkit::standing_by(&mut c, 0x8000_0001, "Revenant", 2.0);
+    c.world.objects.get_mut(&it.guid).expect("in view").health = None;
+    let now = Instant::now();
+    assert!(fighting_is_worth(&mut c, now) > LOOT_AT_REST);
+    // One the server has said is dead is no fight at all.
+    c.world.objects.get_mut(&it.guid).expect("in view").health = Some(0.0);
+    assert_eq!(fighting_is_worth(&mut c, now), WALK_TO_A_FIGHT);
+}
+
+#[test]
+fn what_the_character_would_not_fight_is_no_fight_in_reach() {
+    // The scan asks the fight step's whole question and not a predicate
+    // or two of it. Each of these stands at the character's feet and
+    // none of them will be fought, so counting any one pinned the
+    // distance near zero and turned the curve this scorer draws into a
+    // constant: fighting outranked the body at its feet for as long as
+    // the thing stood there.
+    let now = Instant::now();
+
+    // The creature it summoned itself, which is on by default and
+    // fights at its owner's heel.
+    let mut c = in_the_field();
+    let pet = crate::testkit::standing_by(&mut c, 0x8000_0002, "Fire Elemental", 2.0);
+    let o = c.world.objects.get_mut(&pet.guid).expect("in view");
+    o.weenie_class_id = 0;
+    o.pet_owner = crate::testkit::ME;
+    o.walked_at = Some(0x8000_0009);
+    assert_eq!(fighting_is_worth(&mut c, now), WALK_TO_A_FIGHT);
+
+    // Another player: a player carries the creature item type in this
+    // world model, which is why every other reader subtracts them by
+    // hand.
+    let mut c = in_the_field();
+    let mate = crate::testkit::standing_by(&mut c, 0x5000_0002, "Bryn02", 2.0);
+    c.world
+        .objects
+        .get_mut(&mate.guid)
+        .expect("in view")
+        .is_player = true;
+    assert_eq!(fighting_is_worth(&mut c, now), WALK_TO_A_FIGHT);
+
+    // And one it has given up reaching, which goes on standing there.
+    let mut c = in_the_field();
+    let it = crate::testkit::standing_by(&mut c, 0x8000_0003, "Revenant", 2.0);
+    assert!(
+        fighting_is_worth(&mut c, now) > LOOT_AT_REST,
+        "a fight it would take on"
+    );
+    c.give_up_target(it.guid, "there is no way to it", now);
+    assert_eq!(fighting_is_worth(&mut c, now), WALK_TO_A_FIGHT);
+}
+
+#[test]
+fn a_fight_out_of_reach_leaves_the_body_at_its_feet_first() {
+    // The arithmetic 8e7366b settled, in the shape a fleet run has it:
+    // a character with no loot profile at all, so nothing holds the
+    // fight back for a body (`waits_for_a_corpse` reads the profile's
+    // `after_every_fight`, and there is no profile), a summoned
+    // creature at its heel, and the nearest real fight past
+    // `IN_REACH_OF_A_FIGHT`. The body goes first.
+    let now = Instant::now();
+    let mut c = in_the_field();
+    assert!(c.loot_profile().is_none(), "no profile, so nothing is owed");
+    let pet = crate::testkit::standing_by(&mut c, 0x8000_0004, "Fire Elemental", 2.0);
+    let o = c.world.objects.get_mut(&pet.guid).expect("in view");
+    o.weenie_class_id = 0;
+    o.pet_owner = crate::testkit::ME;
+    o.walked_at = Some(0x8000_0009);
+    crate::testkit::standing_by(&mut c, 0x8000_0005, "Revenant", IN_REACH_OF_A_FIGHT + 1.0);
+    assert_eq!(fighting_is_worth(&mut c, now), WALK_TO_A_FIGHT);
+    const _: () = assert!(WALK_TO_A_FIGHT < LOOT_AT_REST);
+}
+
 #[test]
 fn a_body_emptied_or_set_aside_does_not_make_looting_worth_more() {
     // Every body on the floor counted as one waiting to be looted:

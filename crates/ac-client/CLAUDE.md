@@ -68,7 +68,7 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 | system | entry fns | files | state | tests | log target | term |
 |---|---|---|---|---|---|---|
 | steps and tick | `tick_autoplay`, `weigh`, `reflexes` | `autoplay/mod.rs`, `autoplay/steps.rs`, `autoplay/config.rs` | `Autoplay.step`, `Autoplay.doing`, `Autoplay.status` | steps:: | autoplay | step |
-| target choice | `pick_target`, `a_fight_in_sight`, `would_fight`, `ordered_target` | `autoplay/fight/target.rs`, `autoplay/fight/mod.rs`, `autoplay/team/orders.rs` | `Client.attack_target`, `Autoplay.config.fight` | target | autoplay::fight::target | target |
+| target choice | `pick_target`, `a_fight_in_sight`, `nearest_fight`, `would_fight`, `ordered_target` | `autoplay/fight/target.rs`, `autoplay/fight/mod.rs`, `autoplay/team/orders.rs` | `Client.attack_target`, `Autoplay.config.fight`, `Autoplay.nearest_fight` | target | autoplay::fight::target | target |
 | melee | `autoplay_fight`, `autoplay_fight_as`, `stalled_on`, `give_up_target`, `let_go` | `autoplay/fight/melee.rs`, `autoplay/fight/target.rs` | `Client.attack_target`, `Autoplay.engaged`, `Autoplay.given_up` | target | autoplay::fight::melee | fight |
 | spells in a fight | `autoplay_fight_with_spells`, `autoplay_soften`, `autoplay_make_vulnerable` | `autoplay/fight/spells.rs`, `autoplay/fight/soften.rs`, `autoplay/cast.rs`, `aim.rs` | `Autoplay.casting_at`, `Autoplay.softening`, `Autoplay.vulned`, `Autoplay.cast_sent` | spell | autoplay::fight::spells | fight |
 | critter | `critter`, `a_critter`, `ask_about_strangers` | `autoplay/fight/critter.rs` | `Fight.skip_critters`, `Client.appraisals` | critter | autoplay::fight::critter | critter |
