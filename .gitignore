@@ -55,4 +55,4 @@ Thumbs.db
 perf.data*
 flamegraph.svg
 
-/.claude/bisect/
+/.claude/
