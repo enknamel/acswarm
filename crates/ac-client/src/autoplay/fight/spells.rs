@@ -32,7 +32,7 @@ impl Client {
             c.world
                 .objects
                 .get(&g)
-                .is_some_and(|o| o.health.unwrap_or(1.0) > 0.0)
+                .is_some_and(|o| o.alive_or_unknown())
         };
         // The leader's plan has this character on another, and the one
         // being cast at is not hitting us: let it go for the other.

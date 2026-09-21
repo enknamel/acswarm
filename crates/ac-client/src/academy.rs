@@ -845,7 +845,7 @@ impl Client {
                     wcid: o.weenie_class_id,
                     pos: o.world_pos()?,
                     creature: o.item_type & item_type::CREATURE != 0 && !o.is_player,
-                    alive: o.health.unwrap_or(1.0) > 0.0,
+                    alive: o.alive_or_unknown(),
                     door: o.object_desc_flags & f::DOOR != 0,
                     portal: o.object_desc_flags & f::PORTAL != 0,
                     corpse: o.object_desc_flags & f::CORPSE != 0,
@@ -1146,7 +1146,7 @@ impl Client {
         let fighting = self
             .attack_target
             .and_then(|g| self.world.objects.get(&g))
-            .is_some_and(|o| o.health.unwrap_or(1.0) > 0.0);
+            .is_some_and(|o| o.alive_or_unknown());
         if !fighting {
             let corpse = objects
                 .iter()

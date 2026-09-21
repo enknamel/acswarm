@@ -244,7 +244,7 @@ impl Client {
             .world
             .objects
             .values()
-            .any(|o| o.pet_owner == me && !o.no_draw && o.health.unwrap_or(1.0) > 0.0);
+            .any(|o| o.pet_owner == me && !o.no_draw && o.alive_or_unknown());
         // What came of the last one.
         if let Some((guid, at)) = self.autoplay.summoning.pending {
             if out {
@@ -382,7 +382,7 @@ impl Client {
             .filter_map(|g| self.world.objects.get(&g))
             .any(|o| {
                 o.pet_owner == 0
-                    && o.health.unwrap_or(1.0) > 0.0
+                    && o.alive_or_unknown()
                     && o.world_pos().is_some_and(|at| at.distance(me) <= radius)
             })
     }

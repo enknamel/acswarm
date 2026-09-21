@@ -237,6 +237,40 @@ fn a_fight_in_reach_still_beats_a_resting_body() {
 }
 
 #[test]
+fn a_creature_the_server_has_said_nothing_about_is_a_fight_in_reach() {
+    // ACE sends a health only for the target a player has selected
+    // (Player_Vitals.cs:173) or appraised (WorldObject.cs:617), so a
+    // creature standing about has none at all -- the usual case, read
+    // as dead 32k times a run. Fighting was then worth a walk with a
+    // Drudge two metres off, under keeping to the area, buffs, follow
+    // and a body at rest, while the fight step, which asks
+    // `would_fight`, would have hit it.
+    const HOLTBURG: u32 = 0xA9B4_0019;
+    let mut c = crate::testkit::offline_client();
+    crate::testkit::stand(&mut c, HOLTBURG, glam::vec3(84.0, 84.0, 94.0));
+    // The critter rule left out of it: what it makes of a creature it
+    // knows nothing about is a different question (see `a_critter`).
+    c.autoplay.config.fight.skip_critters = false;
+    let me = c.my_position().unwrap();
+    let guid = 0x8000_0001;
+    let mut skulker = crate::testkit::creature(guid, "Drudge Skulker");
+    skulker.health = None;
+    skulker.position = crate::testkit::placed(HOLTBURG, me + glam::vec3(2.0, 0.0, 0.0));
+    c.world.objects.insert(guid, skulker);
+    let now = Instant::now();
+    assert_eq!(worth_fighting(&c, now), UNDECIDED);
+    let fight = STEPS
+        .iter()
+        .find(|s| s.name == "fight")
+        .expect("fight step");
+    assert_eq!(fight.worth(&c, now), fight.base);
+    assert!(fight.worth(&c, now) > LOOT_AT_REST);
+    // And one the server has said is dead is no fight at all.
+    c.world.objects.get_mut(&guid).unwrap().health = Some(0.0);
+    assert_eq!(worth_fighting(&c, now), WALK_TO_A_FIGHT);
+}
+
+#[test]
 fn a_body_emptied_or_set_aside_does_not_make_looting_worth_more() {
     // Every body on the floor counted as one waiting to be looted:
     // those the looting had finished with, those set aside, and the
