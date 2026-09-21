@@ -6,7 +6,7 @@
 use ac_net::messages::action;
 use ac_net::wire::Writer;
 
-use super::{Action, Outcome, Refused};
+use super::{line, Action, Outcome, Refused};
 use crate::{Client, Event};
 
 pub(super) fn say(c: &mut Client, text: &str) -> Outcome {
@@ -323,15 +323,6 @@ fn mask_words(mask: u32, empty: &str) -> String {
     } else {
         named.join(", ")
     }
-}
-
-/// A line for the chat window from the client itself, the way retail
-/// printed its own answers (chat type 0).
-fn line(c: &mut Client, text: impl Into<String>) {
-    c.events.push(crate::Event::Chat {
-        text: text.into(),
-        kind: 0,
-    });
 }
 
 #[cfg(test)]

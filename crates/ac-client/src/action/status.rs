@@ -12,8 +12,8 @@ use serde::{Deserialize, Serialize};
 use ac_net::messages::{action, opcode, queue};
 use ac_net::wire::{Reader, Writer};
 
-use super::{Outcome, Refused};
-use crate::{options, Client, Event};
+use super::{line, Outcome, Refused};
+use crate::{options, Client};
 
 /// What `/friends` was asked for. `/friends_add` and `/friends_remove`
 /// are retail's own names for two of these.
@@ -128,15 +128,6 @@ const ENDURANCE: &[&str] = &[
      equally amongst the 5 (e.g. Poor describes having anywhere from 1-10% resistance against \
      drain health attacks, etc.).",
 ];
-
-/// A line of ours for the chat log, in the type retail printed these
-/// answers in (0, the server's Broadcast).
-fn line(c: &mut Client, text: impl Into<String>) {
-    c.events.push(Event::Chat {
-        text: text.into(),
-        kind: 0,
-    });
-}
 
 /// `/friends [online | add NAME | remove NAME | remove -all | old]`; the
 /// first word says which, whatever its case (retail `LAB_0057c9d0`).

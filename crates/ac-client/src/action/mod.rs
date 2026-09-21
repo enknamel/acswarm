@@ -1071,6 +1071,15 @@ fn unclaimed(name: &str, args: &str, body: &str) -> Action {
     Action::ServerCommand(body.to_string())
 }
 
+/// A line for the chat window from the client itself, the way retail
+/// printed its own answers (chat type 0).
+pub(super) fn line(c: &mut Client, text: impl Into<String>) {
+    c.events.push(crate::Event::Chat {
+        text: text.into(),
+        kind: 0,
+    });
+}
+
 /// Nothing of that name is there to act on.
 pub(crate) fn nothing_named(target: &Target) -> Refused {
     match target {
