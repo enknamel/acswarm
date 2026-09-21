@@ -104,11 +104,7 @@ impl Client {
         // choosing well and throwing the first spell on the list is the
         // difference between a fight and a stalemate.
         let table = self.assets.spell_table().ok();
-        let ready: Vec<(u32, String)> = self
-            .offered_spells(cfg)
-            .into_iter()
-            .filter(|(id, _)| matches!(self.can_cast(*id), crate::magic::CastCheck::Ok))
-            .collect();
+        let ready = self.ready_spells(cfg);
         let ids: Vec<u32> = ready.iter().map(|(id, _)| *id).collect();
         let wcid = self
             .world
@@ -192,21 +188,19 @@ impl Client {
         }
     }
 
-    /// The spell this character would throw, before there is a target to
-    /// throw it at: the first on offer it can cast this moment, else the
-    /// first it would try.
+    /// The spells that could be thrown this moment: [`Self::offered_spells`]
+    /// less the ones `can_cast` refuses, in the same order.
     ///
-    /// Which one the fight throws is chosen against the creature
-    /// (`ac_world::elements::best_spell`), and that keeps the first of
-    /// the ready ones wherever the element table has nothing to say
-    /// about it -- so this is what the target pick asks about too.
-    pub(super) fn spell_to_throw(&self, cfg: &Fight) -> Option<u32> {
-        let offered = self.offered_spells(cfg);
-        offered
-            .iter()
-            .find(|(id, _)| matches!(self.can_cast(*id), crate::magic::CastCheck::Ok))
-            .or_else(|| offered.first())
-            .map(|(id, _)| *id)
+    /// The one to throw is chosen from these against the creature
+    /// (`ac_world::elements::best_spell`), so the target pick reads the
+    /// same list and names the same spell (`Client::attack_kind`).
+    /// Costly -- `can_cast` walks the packs for components -- so both
+    /// callers look once and neither on every tick.
+    pub(super) fn ready_spells(&self, cfg: &Fight) -> Vec<(u32, String)> {
+        self.offered_spells(cfg)
+            .into_iter()
+            .filter(|(id, _)| matches!(self.can_cast(*id), crate::magic::CastCheck::Ok))
+            .collect()
     }
 
     /// Every attack spell in the spellbook that is thrown at a target:

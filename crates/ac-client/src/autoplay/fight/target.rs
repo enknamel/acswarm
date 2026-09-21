@@ -143,21 +143,31 @@ impl Client {
         self.let_go(Release::Fight);
     }
 
-    /// The attack this character is about to make, for the sight test:
-    /// the spell it would throw, the wielded launcher's shot, or a
-    /// swing.
+    /// The attack this character is about to make at `guid`, for the
+    /// sight test: out of `ready` the spell the cast would throw at that
+    /// creature, the wielded launcher's shot, or a swing.
     ///
-    /// What is in its hands says which, and `Client::missile` does not:
-    /// that is the combat mode the server has been told about, which a
-    /// caster's magic stance clears and which an archer has not entered
-    /// before its first shot of a fight.
-    fn attack_kind(&self, cfg: &Fight) -> How {
-        match self.combat_stance() {
-            // With nothing it can name to throw, a bolt's line stands
-            // in: every spell but an arc flies one, and so does a swing.
-            Stance::Magic => self.spell_to_throw(cfg).map_or(How::Melee, How::Spell),
-            Stance::Missile => How::Missile,
-            Stance::Melee => How::Melee,
+    /// `stance` is what is in the character's hands, and
+    /// `Client::missile` is not: that is the combat mode the server has
+    /// been told about, which a caster's magic stance clears and which
+    /// an archer has not entered before its first shot of a fight.
+    ///
+    /// The spell is named per creature by the very fn the cast chooses
+    /// with (`autoplay_fight_with_spells`), so the flight tested and the
+    /// flight thrown are one answer. `None` when a caster can name no
+    /// spell: there is no attack to test, and no `How` says so -- a
+    /// `How::Melee` would name a swing it cannot make and a reach it
+    /// does not have (`Client::attack_range`).
+    fn attack_kind(&self, stance: Stance, ready: &[u32], guid: u32) -> Option<How> {
+        match stance {
+            Stance::Magic => {
+                let o = self.world.objects.get(&guid);
+                let wcid = o.map_or(0, |o| o.weenie_class_id);
+                let name = o.map_or("", |o| o.name.as_str());
+                ac_world::elements::best_spell(wcid, name, ready).map(|(id, _)| How::Spell(id))
+            }
+            Stance::Missile => Some(How::Missile),
+            Stance::Melee => Some(How::Melee),
         }
     }
 
@@ -183,16 +193,33 @@ impl Client {
                 (at.distance(me) <= cfg.radius && near_leader).then_some((o.guid, at))
             })
             .collect();
+        // With nothing to choose between, the sight test cannot change
+        // the answer, and `ready_spells` walks the packs: it is not paid
+        // to rank one creature, or none.
+        if candidates.len() < 2 {
+            return candidates.first().map(|(g, _)| *g);
+        }
         // The nearest one we can actually hit: one behind a wall is
         // taken only when nothing is in sight, and then the fight rules
         // walk round to it. In sight of what is the attack being made:
         // an arc is lobbed over what stops a bolt, an arrow falls on the
         // way and past its reach gets nowhere (see `crate::aim`).
-        let how = self.attack_kind(cfg);
+        let stance = self.combat_stance();
+        let ready: Vec<u32> = match stance {
+            Stance::Magic => self
+                .ready_spells(cfg)
+                .into_iter()
+                .map(|(id, _)| id)
+                .collect(),
+            _ => Vec::new(),
+        };
         candidates
             .into_iter()
             .map(|(guid, at)| {
-                let seen = self.shot_clears(guid, how);
+                // A caster with no spell to name has no flight to test,
+                // and then the nearest is as good an answer as any.
+                let how = self.attack_kind(stance, &ready, guid);
+                let seen = how.is_none_or(|how| self.shot_clears(guid, how));
                 ((!seen) as u8, at.distance(me), guid)
             })
             .min_by(|a, b| a.0.cmp(&b.0).then(a.1.total_cmp(&b.1)))
