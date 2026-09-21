@@ -20,7 +20,6 @@ use anyhow::{Context, Result};
 use ac_client::creation::{self, CreateSpec};
 use ac_client::reconnect::Ending;
 use ac_client::Event;
-use ac_plugin::console::Console;
 use ac_plugin::{Enter, Host, Requests, SessionSpec, Sessions};
 
 /// The lines of a script file: trimmed, without blanks and `#` comments.
@@ -267,12 +266,12 @@ pub fn run(cli: crate::Cli) -> Result<()> {
         )
         .context("joining the bus")?;
     }
-    // The panels draw nothing here but their commands (/bar ...) work.
+    // The panels draw nothing here, but the ones that act every tick
+    // still do: the autoplay panel applies the settings file, the fleet
+    // panel starts and stops sessions, holdings gathers the packs.
     for p in ac_plugin::panels::live() {
         host.register(p);
     }
-    host.register(Box::new(Console));
-    host.register(Box::new(ac_plugin::party::Party::default()));
     host.register(Box::new(ac_plugin::team::Team::default()));
     host.register(Box::new(ac_script::ScriptPlugin::new(
         ac_script::default_dir(),

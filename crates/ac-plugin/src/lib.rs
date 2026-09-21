@@ -18,14 +18,12 @@
 use std::collections::{HashMap, VecDeque};
 use std::time::Instant;
 
-pub mod console;
 mod host;
 pub mod icons;
 pub mod keys;
 pub mod lobby;
 pub mod logging;
 pub mod panels;
-pub mod party;
 pub mod servers;
 pub mod sessions;
 mod settings;
@@ -569,16 +567,16 @@ mod tests {
 
         // A local post is readable at home next frame, and abroad soon
         // after, tagged with the process it came from.
-        alice.post(0, "party.target", serde_json::json!({"guid": 42}));
+        alice.post(0, "assist", serde_json::json!({"guid": 42}));
         alice.end_frame();
-        let home: Vec<_> = alice.messages_on("party.target").cloned().collect();
+        let home: Vec<_> = alice.messages_on("assist").cloned().collect();
         assert_eq!(home.len(), 1);
         assert_eq!(home[0].from, 0);
         assert_eq!(home[0].origin, None);
         frames_until(&mut bob, "bob sees the post", |b| {
-            b.messages_on("party.target").next().is_some()
+            b.messages_on("assist").next().is_some()
         });
-        let abroad: Vec<_> = bob.messages_on("party.target").cloned().collect();
+        let abroad: Vec<_> = bob.messages_on("assist").cloned().collect();
         assert_eq!(abroad.len(), 1);
         assert_eq!(abroad[0].from, REMOTE);
         assert!(abroad[0].is_remote());

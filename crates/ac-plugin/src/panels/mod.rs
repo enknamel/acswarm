@@ -714,7 +714,6 @@ mod tests {
                 !matches!(
                     name.as_str(),
                     "menu"
-                        | "console"
                         | "confirm"
                         | "nameplates"
                         | "vitals"
