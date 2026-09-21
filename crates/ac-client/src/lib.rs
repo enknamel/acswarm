@@ -2,6 +2,8 @@
 //! our character, and the gameplay commands a UI or a script can issue.
 //! Nothing here renders; several `Client`s can live in one process.
 
+#![warn(unreachable_pub)]
+
 pub mod academy;
 pub mod action;
 mod actions;

@@ -2,7 +2,7 @@
 
 A Rust Asheron's Call client for the ACE server emulator: DAT reader, renderer, wire protocol, and
 characters that play on their own, many per process. Before changing `crates/ac-client`, read
-`crates/ac-client/CLAUDE.md`; `crates/ac-client/tests/code_map.rs` fails when a map goes stale.
+`crates/ac-client/CLAUDE.md`. `crates/ac-client/tests` gates the maps, file length and fn names.
 
 ## Build, test, run
 
