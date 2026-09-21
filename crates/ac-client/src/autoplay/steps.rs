@@ -117,9 +117,9 @@ fn by_place(_: &Client, _: Instant) -> f32 {
 /// already in reach keeps its usual place and outranks the body, so a
 /// character does not stop to loot with something swinging at it.
 fn worth_fighting(client: &Client, _now: Instant) -> f32 {
-    let Some(me) = client.my_position() else {
+    if client.my_position().is_none() {
         return UNDECIDED;
-    };
+    }
     // Already swinging at something that is still alive: that is a
     // fight in hand whatever the distance, and it is not interrupted.
     //
@@ -146,26 +146,17 @@ fn worth_fighting(client: &Client, _now: Instant) -> f32 {
     if client.waits_for_a_corpse() {
         return fight_worth(false, true, 0.0);
     }
-    // A critter at the character's feet is no fight in reach: the fight
-    // rules will walk past it, and reading it as one held the loot back.
-    // Nor is one the character is walking past on its way somewhere, for
-    // the same reason -- it is not going to be fought either.
-    let fight = &client.autoplay.config.fight;
-    let nearest = client
-        .world
-        .objects
-        .values()
-        .filter(|o| o.item_type & ac_world::item_type::CREATURE != 0)
-        // Not known dead, which is what the fight itself asks of a
-        // creature before picking it (`would_fight`): the two have to
-        // agree, or this says there is nothing here and the fight then
-        // goes and hits it.
-        .filter(|o| o.alive_or_unknown())
-        .filter(|o| !client.a_critter(o, fight))
-        .filter(|o| !client.passing_by(o, fight))
-        .filter_map(|o| o.world_pos())
-        .map(|at| at.distance(me))
-        .fold(f32::MAX, f32::min);
+    // How far off the nearest fight is, measured once this tick by
+    // `Client::autoplay_watch_the_ground` before anything is weighed
+    // (`Client::nearest_fight`).
+    //
+    // That measurement asks `would_fight`, which is what the fight step
+    // picks through, so the two agree about what a fight in reach is. A
+    // few of that fn's predicates are not enough: a creature the server
+    // has sent no health for, this character's own summoned creature,
+    // another player and one it has given up reaching all stand at its
+    // feet, and any of them pins this to nothing (see the tests below).
+    let nearest = client.autoplay.nearest_fight.unwrap_or(f32::MAX);
     fight_worth(false, false, nearest)
 }
 

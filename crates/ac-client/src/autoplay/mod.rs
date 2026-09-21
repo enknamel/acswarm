@@ -443,6 +443,13 @@ pub struct Autoplay {
     /// When each corpse was first seen, so the ones about to rot can be
     /// emptied first. A corpse we never saw appear is taken as fresh.
     pub(crate) corpse_seen: Recent<u32>,
+    /// How far off the nearest fight on offer is, as
+    /// [`Client::nearest_fight`] last measured it; `None` for none
+    /// within the fight radius. Wound with the clocks above it, and for
+    /// the same reason: what reads it is a scorer, which takes the
+    /// world through `&Client` and so cannot ask
+    /// [`Client::would_fight`] itself (see `crate::steps`).
+    pub(crate) nearest_fight: Option<f32>,
     /// When the last fellowship invitation went out, whoever it was to
     /// (see [`RECRUIT_FLOOR`]).
     last_recruit: Option<Instant>,

@@ -44,11 +44,17 @@ impl Client {
     /// rather than the status line (see
     /// `Client::autoplay_watch_the_ground`).
     pub(crate) fn a_fight_in_sight(&mut self, now: Instant) -> bool {
+        // Measured before anything is answered and on every tick, not
+        // only the ones that reach the scan: the fight's scorer reads
+        // the answer out of `Autoplay::nearest_fight` and cannot take
+        // it itself (see [`Self::nearest_fight`]).
+        let nearest = self.nearest_fight(now);
+        self.autoplay.nearest_fight = nearest;
         // Not in the world yet: nothing to say about the ground, and
         // nothing that should start a clock running on it.
-        let Some(me) = self.my_position() else {
+        if self.my_position().is_none() {
             return true;
-        };
+        }
         // A fight already joined counts wherever it has led. A creature
         // chased past the radius is still a fight, and walking off to
         // look for one in the middle of it is not looking for a fight.
@@ -57,21 +63,43 @@ impl Client {
             .or_else(|| self.autoplay.casting_at())
             .and_then(|g| self.world.objects.get(&g))
             .is_some_and(|o| o.known_alive());
-        if joined {
-            return true;
-        }
-        // Every session pays for this on every tick, so the cheap
-        // question -- is it near enough -- is asked first.
+        joined || nearest.is_some()
+    }
+
+    /// How far off the nearest creature this character would take on is
+    /// (see [`Self::would_fight`]), within its fight radius; `None`
+    /// when there is none.
+    ///
+    /// Every session pays for this on every tick, so the cheap question
+    /// -- is it near enough -- is asked first, and the answer is kept:
+    /// the fight's and the summoning's scorers each read it twice a
+    /// tick (weighed, then re-checked before the step runs), and taking
+    /// it four times over is four passes across the object map for
+    /// every session in the process.
+    ///
+    /// The whole of [`Self::would_fight`] is asked, not a predicate or
+    /// two of it. What the scan is for is the distance to a fight the
+    /// character is actually going to have, and the ones left out are
+    /// not a nicety: a creature this character summoned is the commonest
+    /// object at its feet (`summon` is on by default), another player
+    /// carries the creature item type in this world model, and a
+    /// creature it has given up reaching goes on standing beside it.
+    /// Every one of those would pin the distance near zero and turn the
+    /// curve the scorer draws into a constant.
+    fn nearest_fight(&mut self, now: Instant) -> Option<f32> {
+        let me = self.my_position()?;
         let underground = self.underground();
         let cfg = &self.autoplay.config.fight;
         self.world
             .objects
             .values()
-            .filter(|o| {
-                o.world_pos()
-                    .is_some_and(|at| at.distance(me) <= cfg.radius)
+            .filter_map(|o| {
+                let away = o.world_pos()?.distance(me);
+                (away <= cfg.radius).then_some((o, away))
             })
-            .any(|o| self.would_fight(o, cfg, underground, now))
+            .filter(|(o, _)| self.would_fight(o, cfg, underground, now))
+            .map(|(_, away)| away)
+            .min_by(f32::total_cmp)
     }
 
     /// Whether a creature this character summoned is already on `guid`:
