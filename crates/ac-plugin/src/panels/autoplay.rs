@@ -1008,7 +1008,7 @@ impl Plugin for Autoplay {
                 if let Some(c) = cx.try_client() {
                     c.autoplay.config = edited;
                     if stopped {
-                        c.let_go(ac_client::autoplay::Release::Fight);
+                        c.let_go(ac_client::autoplay::Release::Stop);
                     }
                 }
             }

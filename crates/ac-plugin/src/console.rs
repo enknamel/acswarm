@@ -46,8 +46,9 @@ impl Plugin for Console {
                     cx.client().toggle_combat();
                 }
                 // The rules' own stop: the swing's target alone leaves
-                // the spell's and the engagement (see `Client::let_go`).
-                cx.client().let_go(Release::Fight);
+                // the spell's, the engagement and a spell in the air
+                // (see `Client::let_go`).
+                cx.client().let_go(Release::Stop);
             }
             "cast" => {
                 let id = cx.client().spell_by_name(args);

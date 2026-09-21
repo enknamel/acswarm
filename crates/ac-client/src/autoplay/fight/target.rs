@@ -28,9 +28,13 @@ pub enum Release {
     Cast,
     /// Both targets, while the engagement stands: another rule has this tick.
     Targets,
-    /// Both targets and the engagement: this fight is over, and a spell
-    /// the server is still winding up goes with it (`stop_fight_cast`).
+    /// Both targets and the engagement: this fight is over. What was
+    /// already sent stands; the character goes on to the next one.
     Fight,
+    /// Everything `Fight` lets go, and the spell still in the air with
+    /// it: the character is being told to stop fighting rather than to
+    /// change targets (`stop_fight_cast`).
+    Stop,
     /// The engagement and the spell's target, keeping the swing's. Only
     /// the Academy's turn towards a corpse lets go this far.
     Engagement,
@@ -100,21 +104,23 @@ impl Client {
     /// Let the fight go, as far as `how` says. Giving up on the creature
     /// for a while is `give_up_target`, which is this plus the list.
     ///
-    /// A stop that only forgot the target left the spell already sent to
-    /// land anyway, one more after the character was told to stop; the
-    /// fight being over, `stop_fight_cast` spends the one chance there
-    /// is of taking it back.
+    /// Only `Release::Stop` reaches the spell already sent. Losing it
+    /// costs the spell, so a rule that goes on fighting -- a re-target,
+    /// a creature given up on -- is better off letting it land
+    /// (`stop_fight_cast`).
     pub fn let_go(&mut self, how: Release) {
         if !matches!(how, Release::Cast | Release::Engagement) {
             self.attack_target = None;
         }
         self.autoplay.casting_at = None;
-        if matches!(how, Release::Fight | Release::Engagement) {
+        if matches!(how, Release::Fight | Release::Stop | Release::Engagement) {
             self.autoplay.engaged = None;
             self.autoplay.closing = None;
         }
-        if matches!(how, Release::Fight) {
-            self.stop_fight_cast();
+        if matches!(how, Release::Stop) {
+            // A front end's stop, with no tick of its own to read the
+            // clock from.
+            self.stop_fight_cast(Instant::now());
         }
     }
 

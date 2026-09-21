@@ -425,7 +425,7 @@ impl Client {
                                     // ends with an answer of its own, and that
                                     // is what frees the slot.
                                     if frees_the_cast_slot(err) {
-                                        self.autoplay.cast_sent = None;
+                                        self.autoplay.cast_answered();
                                     }
                                     // A use by hand that has been answered
                                     // is not carried on when the walk for
