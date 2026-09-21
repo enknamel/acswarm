@@ -418,8 +418,9 @@ impl Api for CtxApi<'_, '_> {
         c.autoplay.config.fight.enabled = on;
         if !on {
             // The rules' own stop: the swing's target alone leaves the
-            // spell's and the engagement, a fight to every rule that asks.
-            c.let_go(Release::Fight);
+            // spell's and the engagement, a fight to every rule that
+            // asks, and a spell in the air goes with it.
+            c.let_go(Release::Stop);
         }
         on
     }

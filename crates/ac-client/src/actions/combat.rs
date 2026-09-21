@@ -526,6 +526,33 @@ impl Client {
             .send_action(action::CHANGE_COMBAT_MODE, &mode.to_le_bytes());
     }
 
+    /// Send the combat mode the character already holds. True when
+    /// something went out: in peace there is no mode to send. What it is
+    /// for is the way through the server's handler, not the mode itself.
+    ///
+    /// `HandleActionChangeCombatMode_Inner` fails a cast still being
+    /// wound up before it looks at the mode asked for
+    /// (Player_Combat.cs:787-788), while `SetCombatMode` returns at once
+    /// with no animation for a stance the character is already in
+    /// (Creature_Combat.cs:67-71). So this costs one message and changes
+    /// nothing else, where `leave_combat` would drop the stance, the
+    /// swing's target and the pending attack as well.
+    pub(crate) fn resend_combat_mode(&mut self) -> bool {
+        use ac_net::messages::{action, combat_mode};
+        let mode = if self.magic {
+            combat_mode::MAGIC
+        } else if self.combat && self.missile {
+            combat_mode::MISSILE
+        } else if self.combat {
+            combat_mode::MELEE
+        } else {
+            return false;
+        };
+        self.session
+            .send_action(action::CHANGE_COMBAT_MODE, &mode.to_le_bytes());
+        true
+    }
+
     /// Wield a carried weapon that gives the stance `want`, so the
     /// character fights that way. True when something was sent. Nothing
     /// happens when the hands already give that stance, or when no such

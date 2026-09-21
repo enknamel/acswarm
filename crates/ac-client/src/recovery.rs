@@ -609,6 +609,9 @@ impl Client {
             // still fighting: the buffs were never put back (the buff rule
             // waits out a fight) and the walk back waited out the cap, and
             // two minutes later a creature a dungeon away was given up on.
+            // No stop is needed for a cast in the air: ACE fails it on
+            // death itself, and without the fizzle's price
+            // (`FailCast(false)`, Player_Death.cs:173).
             self.let_go(Release::Fight);
             self.autoplay.resume_trip = None;
             // And so is a visit to a counter: the run past its walk is

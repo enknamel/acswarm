@@ -245,11 +245,11 @@ impl Request {
                 cfg.enabled = true;
                 cfg.team.enabled = true;
                 cfg.team.follow = true;
-                client.let_go(Release::Fight);
+                client.let_go(Release::Stop);
             }
             Request::Stop => {
                 cfg.enabled = false;
-                client.let_go(Release::Fight);
+                client.let_go(Release::Stop);
                 client.follow = None;
                 if client.traveling() || client.visiting().is_some() {
                     client.cancel_travel();

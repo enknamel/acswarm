@@ -124,10 +124,14 @@ impl Client {
             if self.autoplay_approach(guid, &name, crate::dodge::How::Spell(spell)) {
                 return true;
             }
-            self.cast_paced(spell, now);
-            self.note_fired(spell, now);
-            self.autoplay.attack_spell = Some(spell);
-            self.throw_at(guid, now);
+            // Only what went out is recorded: a cast the client
+            // declined leaves no projectile to time and no shot to
+            // wait on (see `Client::cast_fight_spell`).
+            if self.cast_fight_spell(spell, guid, now) {
+                self.note_fired(spell, now);
+                self.autoplay.attack_spell = Some(spell);
+                self.throw_at(guid, now);
+            }
             let element = ac_world::elements::spell_element(spell)
                 .map(|e| e.name())
                 .unwrap_or("");
