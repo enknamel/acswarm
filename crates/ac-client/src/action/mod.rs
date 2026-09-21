@@ -15,6 +15,7 @@ mod chat;
 mod combat;
 mod consent;
 mod fellow;
+mod help;
 mod item;
 mod magic;
 mod recall;
@@ -398,6 +399,11 @@ pub enum Action {
     },
     /// Say where the character last died outdoors.
     CorpseLocation,
+
+    // ---- help ----
+    /// What this client answers, or what one command of it takes. The word
+    /// is a command's name, empty for the list of them.
+    Help(String),
 }
 
 impl Client {
@@ -514,6 +520,8 @@ impl Client {
             Action::ConsentRemove(who) => consent::drop_one(self, &who),
             Action::Permit { who, allow } => consent::permit(self, &who, allow),
             Action::CorpseLocation => consent::corpse_location(self),
+
+            Action::Help(topic) => help::help(self, &topic),
         }
     }
 
@@ -884,9 +892,6 @@ pub const RETAIL: &[Command] = &[
     },
     //
     // -- status and who (age, loc, version, friends, the housing list) --
-    //
-    // `/help` and `/?` are not here: retail's help is every family's own
-    // text, and until that is written the console plugin's list answers.
     Command {
         names: &["day"],
         action: |_| Some(Action::Daylight),
@@ -1009,12 +1014,20 @@ pub const RETAIL: &[Command] = &[
         action: magic::fill_command,
         usage: "/fillcomps [KIND] [PYREALS], /fillcomps clear",
     },
+    //
+    // -- the help the client answers out of this very table --
+    Command {
+        names: &["help", "?"],
+        action: |args| Some(Action::Help(args.to_string())),
+        usage: "/help [COMMAND]",
+    },
 ];
 
-/// Retail names with no row yet: the list the families work through. Every
-/// chat name now has a row, so none of these is reached by the router's
-/// fallback any more.
-pub const PENDING: &[&str] = &["?", "help", "loadfile"];
+/// Retail names with no row yet: the list the families work through. What
+/// is left is `@loadfile`, which read a file and typed every line of it into
+/// the chat box (wiki `Miscellaneous_Commands.txt:77`), the job `--script`
+/// does here; until it has a row the router hands it to the server.
+pub const PENDING: &[&str] = &["loadfile"];
 
 /// Retail names that never left the retail client: help topics with no handler
 /// at all, the two that only filled in the chat entry, and the windows and
