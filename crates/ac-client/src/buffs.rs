@@ -88,9 +88,9 @@ const WEAPON_SKILLS: [u32; 8] = [41, 44, 45, 46, 47, 48, 49, 50];
 /// from a mana link, so each stance wants its own.
 mod aura {
     /// Damage, speed and attack: for anything swung or shot.
-    pub const WEAPON: [u32; 3] = [360, 361, 168];
+    pub(super) const WEAPON: [u32; 3] = [360, 361, 168];
     /// Elemental damage and mana conversion: for a caster.
-    pub const CASTER: [u32; 2] = [170, 171];
+    pub(super) const CASTER: [u32; 2] = [170, 171];
 }
 
 /// The buffs `me` should be wearing, one per category, the highest level
