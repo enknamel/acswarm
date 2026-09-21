@@ -1,6 +1,6 @@
 //! [`Api`] over `ac_plugin::Ctx`: the real client behind the script
-//! functions. Each action mirrors what the console plugin does for the
-//! same `/command`, so scripts and typed commands behave alike.
+//! functions. Each action calls the `Client` method a key or a panel
+//! button calls, so a script and a hand at the keyboard do the same.
 
 use ac_client::items::ItemStats;
 use ac_plugin::{Client, Ctx, Message};

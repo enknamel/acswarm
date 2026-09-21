@@ -44,21 +44,22 @@ works with any `--screenshot`; the model stands at the origin facing -Y.
 Viewer controls: right-drag to look, WASD to move, Q/E down/up, Shift to
 boost, Escape to quit.
 
-With several sessions in one process, the `party` plugin coordinates them
-from the chat box: `/leader` makes the current session the leader (`/leader
-N` picks another), `/follow` makes every other session run after it whenever
-it is more than 3 m away (around corners too: a blocked line plans a route
-on the landblock's walkable grid, see `ac_scene::nav`), `/assist` makes them attack whatever the leader
-attacks (entering melee mode first), and `/lootall` makes each session open
-the corpse of its last kill and take everything in it; each switch takes
-`on`/`off` or toggles. The Party window lists every session (name, level,
-health, distance to the leader, target) with Switch and Lead buttons, and
-the switches above them. (`/party` is retail's own: it speaks to the
-fellowship.) The leader's target is broadcast on the bus as
-`party.target`; the leader's index is the blackboard value `party.leader`.
-Sessions in different processes coordinate the same way when each is
-started with `--bus`: the first process hosts a loopback hub, the others
-join it, and posts and blackboard values flow between them (see
+With several sessions in one process, the team rules coordinate them,
+from the Autoplay panel's Team block: "hunt with the others" switches the
+team on, "lead: the others come to me and follow me about" says which
+session is the leader, "follow the leader, keeping within" makes the rest
+run after it (around corners too: a blocked line plans a route on the
+landblock's walkable grid, see `ac_scene::nav`), and "fight what the
+leader fights" makes them hit what it hits. The last two hold with
+autoplay off as well, for the character played by hand: it keeps up with
+its leader and swings at what the leader is already on, picking nothing
+of its own (`autoplay_by_hand` in
+`crates/ac-client/src/autoplay/team/by_hand.rs`). The Fleet panel lists
+every session (name, level, health, stamina, mana, XP an hour, where it
+is, its leader and what it is doing) with per-row autoplay and follow
+switches. Sessions in different processes coordinate the same way when
+each is started with `--bus`: the first process hosts a loopback hub, the
+others join it, and posts and blackboard values flow between them (see
 [docs/multi-session.md](docs/multi-session.md)). A fleet needs no
 command line at all: the Fleet panel (menu → Fleet → Sessions) takes
 follower accounts, starts them as extra sessions of the client you play,
@@ -220,9 +221,10 @@ no GPU: the "as many clients as possible on one computer" case. Each
 `--client` logs in, enters the world and is ticked `--tick-hz` times a
 second (default 20; the loop sleeps in between, and 4 Hz is enough for the
 server) with no keyboard input, so plugins and the server's own move-to
-drive movement. The viewer's plugins (the panels' commands, console, party,
-team and scripts) answer `/commands`, and the rules in the settings file
-are played by (`--settings FILE`, or `--no-settings` for the defaults).
+drive movement. The viewer's plugins (the panels, the team and the scripts)
+run here too, so a script's own `/commands` are answered, and the rules in
+the settings file are played by (`--settings FILE`, or `--no-settings` for
+the defaults).
 
 ```
 cargo run --release -p acswarm -- --headless --data-dir $AC_DATA_DIR --connect 127.0.0.1 \
@@ -271,7 +273,7 @@ The viewer runs every `*.rhai` file in `~/.acswarm/scripts` (or
 and reloads a file when it changes, so the client can be extended without
 recompiling. A script defines `on_event(ev)`, `tick(dt)`,
 `command(name, args)` and/or `key(name, pressed)`, and calls into the game
-with the same verbs as the console: `me()`, `objects()`, `attack(name)`,
+with the same verbs the panels and keys use: `me()`, `objects()`, `attack(name)`,
 `cast(spell)`, `loot()`, `say(text)`, `post(topic, value)` /
 `messages(topic)` for talking to other sessions, `with_session(i, || ...)`
 to act as another one. `/scripts` lists what is loaded; script errors go

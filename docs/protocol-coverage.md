@@ -197,7 +197,7 @@ each server echo, and retransmissions on request.
 |---|---|---|---|
 | 0x0005 | SetSingleCharacterOption | options.rs | |
 | 0x0008 / 0x000A | TargetedMeleeAttack / TargetedMissileAttack | `Client::attack` | target, height, power |
-| 0x000F / 0x0010 | SetAfkMode / SetAfkMessage | console | |
+| 0x000F / 0x0010 | SetAfkMode / SetAfkMessage | `action/chat.rs` | |
 | 0x0015 | Talk | `say` | |
 | 0x0017 / 0x0018 / 0x0025 | Remove/Add/RemoveAllFriends | social | |
 | 0x0019 | PutItemInContainer | loot, store, packs | one at a time |
@@ -212,7 +212,7 @@ each server echo, and retransmissions on request.
 | 0x0053 | ChangeCombatMode | combat toggles | 1 peace, 2 melee, 4 missile, 8 magic |
 | 0x0054..0x0056 | StackableMerge, SplitToContainer, SplitTo3D | items | |
 | 0x0058 / 0x0059 / 0x005B | Modify character/account/global squelch | social | |
-| 0x005D | Tell | console | |
+| 0x005D | Tell | `action/chat.rs` | |
 | 0x005F / 0x0060 | Buy / Sell | vendors | |
 | 0x0063 | TeleToLifestone | recalls | |
 | 0x00A1 | LoginComplete | after PlayerTeleport and at entry | the server ignores positions before it |
@@ -235,11 +235,11 @@ each server echo, and retransmissions on request.
 | 0x0254 / 0x0256 | Set/ClearMotd | allegiance | |
 | 0x0262 / 0x0278 / 0x028D / 0x02AB | TeleToHouse/Mansion/MarketPlace, RecallAllegianceHometown | recalls | |
 | 0x0275 | ConfirmationResponse | confirm | |
-| 0x0279 | Suicide ("die") | console | |
+| 0x0279 | Suicide ("die") | `action/recall.rs` | |
 | 0x027B | AllegianceInfoRequest | allegiance | |
 | 0x027D | CreateTinkeringTool | salvage | |
 | 0x0286 | SpellbookFilter | spellbook | |
-| 0x028F | EnterPkLite | console | |
+| 0x028F | EnterPkLite | `action/recall.rs` | |
 | 0xF61B | Jump | player.rs | extent, local velocity, sequences, two trailing u32 |
 | 0xF61C | MoveToState | player.rs, on every input change | raw motion flags, stance NonCombat, position, sequences 1/0/0/0, contact |
 | 0xF753 | AutonomousPosition | player.rs, 4 a second while moving | position, sequences, contact |

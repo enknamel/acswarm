@@ -206,8 +206,8 @@ the same by setting the blackboard keys `fleet.start` and `fleet.stop`
 ## I want to drive the character
 
 Every action a player can take is a method on `ac_client::Client`, and
-the script functions mirror them one to one (each does what the matching
-`/command` in the console does).
+the script functions mirror them one to one: a script call, a key, a panel
+button and a typed line all end at the same method.
 
 ### One vocabulary: `Client::act`
 
@@ -261,7 +261,9 @@ match client.chat_line(&line) {
 The table holds only names the retail client registered, with retail's own
 aliases; `action::PENDING` is the rest of them, waiting for the family that
 answers them. A command of ours is a key, a panel or a script command --
-never a new `/name` (see the project's rules).
+never a new `/name` (see the project's rules). `/help` says both halves of
+that: it lists the table's own names (`/help NAME` gives one row's usage
+and aliases) and ends by pointing at the keys, the panels and the scripts.
 
 **Rust**, in `tick` (once per frame per session) or in a `command`:
 
@@ -462,7 +464,8 @@ harness below.
 own (a workspace member under `examples/` or `crates/`), keep the
 `ac-plugin` dependency, and register your type in
 `bins/acswarm/src/plugins/mod.rs` and `bins/acswarm/src/headless.rs`. Panels
-go before the console so they see keys first. A plugin never needs to
+go first so they see keys before anything registered after them. A
+plugin never needs to
 touch the binaries beyond that one line.
 
 **As a separate process.** Speak the bus protocol (above); start every
