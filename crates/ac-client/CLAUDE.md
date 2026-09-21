@@ -145,9 +145,12 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 - The loot profile decides: `fate()` puts a tag ahead of every guard (restock, burns, keep names);
   only the server's own refusal overrides it.
 - Two target pickers, and they disagree. The spell path calls `pick_target()`, which keeps a
-  follower inside its leader's `team.fight_radius` and prefers a target in line of sight. The melee
-  and missile path scans inline in `autoplay_fight_as()` and takes the nearest inside `cfg.radius`,
-  with neither of those two terms. Both gate on `would_fight()`, and a team order outranks both.
+  follower inside its leader's `team.fight_radius` and prefers one the attack in hand gets to:
+  `attack_kind()` reads the hands, never `Client::missile`, and names the spell per creature with
+  the `best_spell()` the cast itself chooses by, so the flight tested is the flight thrown -- a
+  spell, an arrow and a swing being three different ones. The melee and missile path scans inline
+  in `autoplay_fight_as()` and takes the nearest inside `cfg.radius`, with neither of those two
+  terms. Both gate on `would_fight()`, and a team order outranks both.
 - Played by hand, `autoplay_by_hand()`: with autoplay off only the team's own rules run -- invites,
   a leader's fellowship, following and assisting. Nothing takes the legs or the hands for an errand
   of its own: no town run, no ground, no experience spent, no weapon changed, no target picked.
