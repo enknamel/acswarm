@@ -45,7 +45,7 @@ Reads (maps have the listed fields):
 - `inventory()`, `container()` (items of the open corpse/chest): same shape, plus `material` (name or `()`), `workmanship`, `structure` (a salvage bag's units)
 - `sessions()`: number of sessions; `session(i)`: summary of session `i` or `()`; `session_index()`
 
-Actions (on the current session; names match by prefix, like the console):
+Actions (on the current session; names match by prefix):
 
 - `use_name(name)`, `use_guid(guid)` (double-click: pick up a loose item, use anything else), `activate(guid)` (use in place, e.g. read a book on the ground), `pickup(guid)`, `attack(name)`, `attack(guid)`, `cast(spell)`, `say(text)`
 - `loot()` / `loot(name)`: open the corpse of the last target / by name; `take(guid)`, `take_all()`, `close_container()`
@@ -77,7 +77,7 @@ Shared state:
 Values cross to the other plugins as JSON: maps, arrays, strings, ints,
 floats, bools and `()` go through; other Rhai types do not.
 
-Session indices are zero-based (the console's `/switch N` is 1-based).
+Session indices are zero-based.
 A hook that throws, or spins for more than about two million operations,
 is stopped and reported; the rest of the client carries on.
 

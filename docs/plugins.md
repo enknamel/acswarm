@@ -230,7 +230,7 @@ pub struct Message { pub from: usize, pub topic: String, pub value: Value }
 `bins/acswarm/src/plugins/mod.rs`:
 
 ```rust
-pub use ac_plugin::{console, panels, party};
+pub use ac_plugin::panels;
 pub use ac_plugin::{Host, Requests};
 
 pub fn builtin() -> Host {
@@ -238,8 +238,6 @@ pub fn builtin() -> Host {
     for p in panels::live() {          // every built-in panel, first
         host.register(p);
     }
-    host.register(Box::new(console::Console));
-    host.register(Box::new(party::Party::default()));
     host.register(Box::new(ac_plugin::team::Team::default()));
     host.register(Box::new(ac_script::ScriptPlugin::new(
         ac_script::default_dir(),

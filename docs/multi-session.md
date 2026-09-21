@@ -221,8 +221,8 @@ ACSWARM_BUS=127.0.0.1:9600 cargo run -p acswarm -- --headless ... --bus   # anot
   other processes come in as messages readable next frame with
   `from == ac_plugin::REMOTE` and `origin: Some(process name)`,
   `Blackboard::set` publishes, and incoming sets and the join-time state
-  update `values`. A plugin that already reads `messages_on("party.target")`
-  therefore sees the whole party's posts without change; one that must not
+  update `values`. A plugin that already reads `messages_on("autoplay.mate")`
+  therefore sees every process's posts without change; one that must not
   act on other processes' posts checks `Message::is_remote()`. Rhai scripts
   see `origin` on the message map.
 * **Latency and ordering.** Local posts are readable at home the next
@@ -558,8 +558,8 @@ connects (`ac_client::Client::connect` with the `--connect` host and
 `Client::create_when_missing` for the creation) and appends a session,
 or disconnects and removes one, between frames. A removed session's
 successors move down one index and every plugin hears
-`Plugin::session_removed(index)` (the team, party, autoplay, fleet and
-script plugins shift what they keep by session). `acswarm --headless`
+`Plugin::session_removed(index)` (the team, autoplay, fleet and script
+plugins shift what they keep by session). `acswarm --headless`
 applies starts and stops the same way. A script or the command
 line drives the same path through two blackboard keys: `fleet.start`
 (a session spec or a list of them, each added to the roster and

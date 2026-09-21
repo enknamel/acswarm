@@ -1,7 +1,7 @@
 // greeter.rhai: `/hello` says hello in local chat, `/hello Name` greets Name.
 //
 // `command(name, args)` runs for every "/name args" typed in the chat box
-// that the built-in console did not claim first. Return true when handled;
+// that the retail command table has no row for. Return true when handled;
 // anything else lets the next script (or "Unknown command") have it.
 
 fn command(name, args) {

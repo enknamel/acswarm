@@ -1,6 +1,6 @@
 //! The viewer's built-in plugins and how they are registered.
 
-pub use ac_plugin::{console, panels, party};
+pub use ac_plugin::panels;
 
 pub use ac_plugin::{Host, Requests};
 
@@ -13,8 +13,6 @@ pub fn builtin() -> Host {
     for p in panels::live() {
         host.register(p);
     }
-    host.register(Box::new(console::Console));
-    host.register(Box::new(party::Party::default()));
     host.register(Box::new(ac_plugin::team::Team::default()));
     host.register(Box::new(ac_script::ScriptPlugin::new(
         ac_script::default_dir(),
