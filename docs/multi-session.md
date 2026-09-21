@@ -24,8 +24,7 @@ cargo run --release -p acswarm -- --connect 127.0.0.1 -a alice -v pw1 --characte
 Switching which session the window shows:
 
 * **Tab** cycles to the next session.
-* `/switch N` (1-based) in the chat box picks one; `/clients` prints how
-  many there are and which is shown; a plugin can set `cx.activate`.
+* A plugin can set `cx.activate` to show one.
 * On a switch the camera pitch resets and the chat log gets a
   `Now showing session N (account)` line. Streaming then builds the
   blocks around the new character, one per frame, and the object

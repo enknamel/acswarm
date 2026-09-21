@@ -159,14 +159,14 @@ cargo run --release -p acswarm -- --headless --connect 127.0.0.1 --client myacco
 # Create sends it when the rules pass; Escape returns to the list.
 # Offline: --demo-select and --demo-create show both screens with no server
 # (--press ArrowRight steps the creation panes; add --screenshot out.png).
-# Chat lines starting with / go to the plugins first (/help lists them),
-# then to the game's own commands (/lifestone, /die, /house, /tell Name,
-# text, /emote, /afk), and anything else to the server as @command
-# (/acehelp lists those).
+# Chat lines starting with / are the retail client's own commands
+# (/lifestone, /die, /house, /tell Name, text, /emote, /afk, /cg and the
+# rest); a plugin or script may claim a name the table does not hold, and
+# anything else goes to the server as @command (/acehelp lists those).
 cargo run --release -p acswarm -- --connect 127.0.0.1 -a myaccount -v mypassword
 # several characters in one window: --client ACCOUNT:PASSWORD[:CHARACTER]
 # (and, after the character, :TEMPLATE:TOWN:HERITAGE:SEX to create it)
-# per extra session; Tab (or /switch N) picks the one shown and steered
+# per extra session; Tab picks the one shown and steered
 cargo run --release -p acswarm -- --connect 127.0.0.1 -a alice -v pw1 --client bob:pw2:Bob
 ```
 
