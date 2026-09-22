@@ -323,9 +323,9 @@ impl Client {
             // Waiting for the next heal is not a reason to stand
             // still. Everything below this in the list -- looting,
             // walking, tidying -- carries on; it is only the fighting
-            // that must not go first, and the fight rule sees to that
-            // itself (`too_hurt_to_fight`). Holding the tick here
-            // instead left the character idle between heals.
+            // that must not go first, and the step table sees to that by
+            // scoring survive above it. Holding the tick here instead
+            // left the character idle between heals.
             return false;
         }
         // A kit is quicker and cheaper than a spell -- but only to

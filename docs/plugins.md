@@ -355,8 +355,8 @@ spellbook, components, spell bar and autoplay panels do the same
 character follows when nobody is at the keyboard: a "Play on its own"
 checkbox on `client.autoplay.config.enabled`, a line reading
 `autoplay.doing.label()` and `autoplay.status` ("fighting Drudge
-Skulker"), and a section per rule group — Stay alive (heal and break-off
-health as percentage sliders, healing kits, the healing spell), Buffs (the
+Skulker"), and a section per rule group — Stay alive (the heal threshold
+as a percentage slider, healing kits, the healing spell), Buffs (the
 spells to keep up, how many seconds before they run out to recast, whether
 to bother in combat), Fight (radius, and the names to take on or leave
 alone) and Loot (searches in the inventory's own language, plus names
