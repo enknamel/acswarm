@@ -8,7 +8,8 @@
 //! prints what the server says, and runs the plugin host once per session
 //! per frame. Lines from `--say` and `--script` are typed one per second
 //! after the character is placed, through the same router the chat box
-//! uses (`ac_client::action`). Ctrl-C disconnects every session cleanly.
+//! uses (`ac_client::action`). Ctrl-C, SIGTERM and SIGHUP disconnect every
+//! session cleanly.
 
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -320,7 +321,7 @@ pub fn run(cli: crate::Cli) -> Result<()> {
     {
         let stop = stop.clone();
         ctrlc::set_handler(move || stop.store(true, Ordering::SeqCst))
-            .context("installing the Ctrl-C handler")?;
+            .context("installing the Ctrl-C and termination handler")?;
     }
 
     let start = Instant::now();
