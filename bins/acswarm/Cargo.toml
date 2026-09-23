@@ -6,7 +6,8 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-ctrlc = "3"
+# SIGTERM and SIGHUP log the headless sessions off as Ctrl-C does, not kill them mid-session.
+ctrlc = { version = "3", features = ["termination"] }
 ac-dat = { path = "../../crates/ac-dat" }
 ac-formats = { path = "../../crates/ac-formats" }
 ac-scene = { path = "../../crates/ac-scene" }

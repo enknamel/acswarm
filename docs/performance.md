@@ -158,9 +158,130 @@ eight times), merging the static batches of neighbouring blocks by
 material (a third of the draw calls in a town), and an egui pass only
 when its input or data changed (it is half the CPU time when idle).
 
+## Measuring many sessions
+
+```
+ACSWARM_LOAD_PASSWORD=... tools/load-test.sh 25 300             # 25 sessions, one process, 5 min
+ACSWARM_LOAD_PASSWORD=... tools/load-test.sh 25 300 --procs 5   # the same 25 in five processes
+```
+
+The harness logs `load01` to `load25` into the local ACE at 127.0.0.1
+(`--prefix` changes `load`; ACE creates an account at its first login),
+each with one character named from its number, "Load Zero One", made
+when missing. Names are letters and spaces: the retail creation screen
+took no digits (`valid_name` in `crates/ac-client/src/creation.rs`); ACE
+itself refuses only taboo words, creature names and names in use
+(`CharacterHandler.cs:51-70`). Once placed, each session types
+`/load_autoplay`, a script command hook that turns autoplay on, so the
+sessions play rather than stand.
+
+It builds the release `acswarm` first, which takes no time when it is
+current; `--bin` names another binary, which must print the `perf run:`
+line the script reads. Every 5 s it samples each process's RSS and CPU
+(`ps`) and the server container's CPU and memory (`docker stats
+ace-server`), and at the end prints one table. It exits 1 when a session
+was never placed, a process failed, or a process left no `perf run:` line
+it can read, and says which.
+
+It refuses to start with under 15 GB free, or when a running `acswarm`
+was started with `--client` or `-a` for one of its accounts. It reads
+command lines only, so it misses a session opened from a window's fleet
+panel. The local ACE admits 128 sessions in all, everyone's
+(`MaximumAllowedSessions` in `reference/ace-run/Config/Config.js`); past
+that a login is refused as the logon server is full and retried, so the
+script warns above 128. Ctrl-C logs the sessions off and still prints
+the table; a second Ctrl-C, or SIGTERM or SIGHUP, gives them 15 s to log
+off and then kills them. `acswarm` logs off on any of the three, so a
+signal sent to the whole process group logs off too. A session killed
+without logging off holds its account on the server until its 60 s
+timeout (`NetworkSession.cs:338`), so a rerun straight after one is
+refused as already logged on (`AuthenticationHandler.cs:159-161`).
+
+Each run gets its own config and cache directory under `--out`, a new or
+empty folder outside the repository (default a fresh
+`$TMPDIR/acswarm-load-DATE.XXXX`), so it plays by the default rules and
+its characters stay out of the everyday settings, ledger and holdings.
+There too: `procN.log` (all a process printed), `samples.tsv` and
+`summary.md`. Take numbers on a quiet machine, with the lid open and
+nothing building.
+
+### The perf line
+
+Every headless run, not only the harness's, logs one line every 10 s at
+INFO on `acswarm::tick_meter` (in `RUST_LOG`'s default filter):
+
+```
+perf: N sessions, T ticks at R of 20 Hz, work p50 A ms p95 B max C of 50 ms, over O,
+      behind K, late p95 L ms, per session S ms, plugins P ms, costliest NAME M ms
+```
+
+* **ticks at R of 20 Hz**: the rate the loop achieved against
+  `--tick-hz`. A process that cannot keep up shows it here first.
+* **work**: one loop iteration, from its start to just before it sleeps
+  (never the sleep), against the period, 1000 / `--tick-hz` ms.
+* **over**: iterations whose work alone ran past the period. **behind**:
+  iterations after which the loop gave up its schedule and started the
+  next one at once; lateness plus work can cause that too, so behind is
+  at least over.
+* **late p95**: how far past its due time an iteration began. While the
+  loop keeps up that is the sleep's overshoot, the operating system's
+  timer, which on a Mac measured about 10 ms on a 30 to 50 ms sleep and
+  under 1 ms on a 2 ms one, so it falls as the work grows. Once the loop falls behind it is
+  how far the iteration before overran, and grows with the load.
+* **per session**: the mean time one session's own work takes in an
+  iteration: its tick, its events and the lines it types. **plugins**:
+  the plugin host's time per iteration, every session's calls together;
+  part of it is per session (scripts, the autoplay panel) and part once
+  per iteration (the fleet, holdings and lobby panels keep house on the
+  first session's call). What is left of work is the loop's own:
+  reconnects, starts and stops, the status lines. **costliest**: the
+  session whose own work has the highest mean, by character name (by
+  account before the character is known, or once it is stopped). It
+  leans to the first session ticked in an iteration: two sessions in one
+  process read 1.29 and 1.05 ms, the same two 1.16 and 1.19 ms alone, so
+  some of a tick's work falls on whichever session ticks first.
+
+Each session added costs about per session plus its share of plugins.
+A process is full when the rate drops below `--tick-hz`, behind climbs,
+or work p95 nears the period. Percentiles come from a fixed histogram and
+are within 3%; max is exact.
+
+At exit a `perf run:` line covers the whole run and adds overruns per
+minute, seconds measured against seconds of wall time, and the sleep
+windows excluded. `tools/load-test.sh` parses it, and the test
+`the_run_line_has_the_shape_the_harness_reads` pins its shape. The
+monotonic clock the loop runs on stops while the machine sleeps (so
+`--duration` does too). The boot clock (CLOCK_MONOTONIC on macOS,
+CLOCK_BOOTTIME on Linux) runs on and cannot be set. When it gets more
+than 2 s ahead of the monotonic clock between two iterations, a WARN
+says how long the machine slept, and that window is dropped rather than
+reported.
+
+### The table
+
+| row | what it is |
+|---|---|
+| sessions | asked; placed (a `placed in cell` line); with autoplay on (the script's reply) |
+| RSS | peak of the processes' summed RSS over the samples, and that over the sessions |
+| acswarm CPU | mean from each process's CPU time over the samples taken inside its loop, summed over processes; a gap over 10 s between two samples (a machine sleep) is left out, and so are startup and logging off; peak is the highest summed `ps` %CPU sample in the loop |
+| ACE CPU | the server container's mean and peak, and its peak memory; `-` without Docker |
+| tick rate, tick work, overruns, late, per session tick, plugins | from the `perf run:` lines; with `--procs`, the worst figure of any process, column by column (the lowest rate) |
+| measured | seconds measured and of wall time, both from the process measured least |
+| sleep windows excluded | windows dropped for a machine sleep |
+
+RSS counts the resident pages of the memory-mapped DATs, which are clean
+and shared, so it reads far above the footprint figures earlier on this
+page, and a sum over processes counts those pages once per process.
+Compare RSS with RSS. When the server's CPU climbs with the sessions
+while the client's tick work stays flat, the server is the bottleneck.
+
 ## Not yet measured
 
 * Frame time in the window, with a person playing one session and
-  others following. There is no headless frame-time harness.
+  others following. The headless tick is measured
+  ([Measuring many sessions](#measuring-many-sessions)); the window's
+  frame is `--perf`'s, and nobody has run it with followers.
 * A session under load: fighting, casting, looting, autoplay running.
+  The harness turns autoplay on in every session; no numbers yet.
 * Many sessions across separate processes rather than within one.
+  `tools/load-test.sh --procs` splits them; no numbers yet.
