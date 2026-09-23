@@ -115,12 +115,9 @@ pub fn boot_clock() -> Duration {
     const CLOCK: libc::clockid_t = libc::CLOCK_MONOTONIC;
     #[cfg(target_os = "linux")]
     const CLOCK: libc::clockid_t = libc::CLOCK_BOOTTIME;
-    let mut ts = libc::timespec {
-        tv_sec: 0,
-        tv_nsec: 0,
-    };
-    // SAFETY: `clock_gettime` writes only into `ts`, which outlives the call; it fails only for
-    // a clock the system lacks, and each of these is its own system's.
+    // SAFETY: all-zero is a valid timespec on every target, padded ones too; `clock_gettime`
+    // writes only into `ts`, and fails only for a clock the system lacks, which these are not.
+    let mut ts: libc::timespec = unsafe { std::mem::zeroed() };
     unsafe { libc::clock_gettime(CLOCK, &mut ts) };
     Duration::new(ts.tv_sec as u64, ts.tv_nsec as u32)
 }
