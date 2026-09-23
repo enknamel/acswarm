@@ -487,7 +487,7 @@ pub const HOUSEKEEPING: &[Housekeeping] = &[
     },
     Housekeeping {
         name: "rearm",
-        run: |c, _| c.autoplay_rearm(),
+        run: Client::autoplay_rearm,
     },
     Housekeeping {
         name: "restock from the pack",

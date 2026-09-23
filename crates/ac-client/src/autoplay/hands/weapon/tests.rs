@@ -108,7 +108,7 @@ fn the_weapon_comes_back_out_of_the_pack_after_a_buff() {
         true,
     );
     c.autoplay.put_down = Some(MACE);
-    c.autoplay_rearm();
+    c.autoplay_rearm(Instant::now());
     // ACE will not put a mace in a hand that holds a caster -- it
     // refuses the wield outright, with no error to read -- so the
     // wand goes back in the pack first and the mace waits on empty
@@ -134,7 +134,7 @@ fn an_errand_the_server_is_refusing_is_kept_rather_than_dropped() {
     );
     c.autoplay.put_down = Some(MACE);
     c.hold_off_wield(MACE, Instant::now());
-    c.autoplay_rearm();
+    c.autoplay_rearm(Instant::now());
     // Asking now sends nothing, so clearing the errand would leave
     // the mace in the pack with nothing left to ask again.
     assert_eq!(c.autoplay.put_down, Some(MACE), "still owed the weapon");

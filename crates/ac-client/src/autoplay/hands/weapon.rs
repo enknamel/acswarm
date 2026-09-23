@@ -404,12 +404,12 @@ impl Client {
 
     /// Take up again the weapon put down for an urgent buff, once no
     /// buff is due any more.
-    pub(crate) fn autoplay_rearm(&mut self) {
+    pub(crate) fn autoplay_rearm(&mut self, now: Instant) {
         let Some(weapon) = self.autoplay.put_down else {
             return;
         };
         let never_below = self.autoplay.config.buffs.never_below;
-        if self.due_buff(never_below, Instant::now()).is_some() {
+        if self.due_buff(never_below, now).is_some() {
             return;
         }
         if !self
@@ -426,7 +426,7 @@ impl Client {
         // the errand keeps, the way a pending wield's does: dropping it
         // here would leave the weapon in the pack and the character
         // fighting with the wand.
-        if self.wield_must_wait(weapon, Instant::now()) {
+        if self.wield_must_wait(weapon, now) {
             return;
         }
         self.autoplay.put_down = None;
@@ -437,7 +437,7 @@ impl Client {
         // the pack and the housekeeping takes the weapon up once the
         // hands are empty, the same two steps the arming uses.
         if self.put_weapons_away() {
-            self.autoplay.last_rewield = Some(Instant::now());
+            self.autoplay.last_rewield = Some(now);
             self.autoplay.pending_wield = Some(weapon);
         } else {
             self.wield_guid(weapon);
