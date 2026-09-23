@@ -160,6 +160,22 @@ impl Client {
         crate::buffs::wanted(&table, &me)
     }
 
+    /// Whether a target is being fought, by weapon or by spell: a fight, to the buff passes.
+    fn has_target(&self) -> bool {
+        self.attack_target.is_some() || self.autoplay.casting_at.is_some()
+    }
+
+    /// `buff_within` for this moment, the fight and the hands read as the passes read them.
+    fn buff_within_now(&self, urgent: bool) -> f32 {
+        let wand_in_hand = self.combat_stance() == Stance::Magic;
+        buff_within(
+            &self.autoplay.config.buffs,
+            urgent,
+            self.has_target(),
+            wand_in_hand,
+        )
+    }
+
     /// Put a buff back up. True when it cast one.
     ///
     /// Two passes share this. The urgent one runs before anything else
@@ -174,7 +190,7 @@ impl Client {
         if cfg.spells.is_empty() && !cfg.auto {
             return false;
         }
-        let fighting = self.attack_target.is_some() || self.autoplay.casting_at.is_some();
+        let fighting = self.has_target();
         // At a counter every cast waits, urgent or not, for the reason
         // the top-ups wait on a journey and one more: a cast roots the
         // character where it stands, and here it also has the counter
@@ -251,12 +267,7 @@ impl Client {
         } else {
             self.autoplay.top_ups_checked = Some(now);
         }
-        let within = buff_within(
-            &cfg,
-            urgent,
-            fighting,
-            self.combat_stance() == Stance::Magic,
-        );
+        let within = self.buff_within_now(urgent);
         // Find what is due before touching the hands: the urgent pass
         // runs every tick and must cost nothing when nothing is due.
         // Worked out once, for the pick and for saying why none is due.
