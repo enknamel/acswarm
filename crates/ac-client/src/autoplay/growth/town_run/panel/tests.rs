@@ -2,10 +2,9 @@ use super::super::tests::nobody_near_buys_peas;
 use super::*;
 use crate::autoplay::growth::tests::{a_run_at_cindrue, run_to};
 use crate::testkit::{
-    a_counter, coin_in_the_pack, pea_in_the_pack, shop_named, standing_at, vendor_beside,
-    window_of, with_a_buy_list, with_a_pack,
+    a_caster_knowing, a_caster_with_a_buff_due, a_counter, coin_in_the_pack, pea_in_the_pack,
+    shop_named, standing_at, vendor_beside, window_of, with_a_buy_list, with_a_pack,
 };
-use ac_world::{equip, item_type};
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
@@ -429,102 +428,6 @@ fn the_panel_run_starts_even_when_nobody_buys_the_pea() {
     let run = c.autoplay.growth.run.as_ref().expect("no run");
     assert_eq!(run.errand, Errand::Buy);
     assert_ne!(run.vendor, "Archmage Cindrue");
-}
-
-/// A caster standing in Holtburg with a wand in hand, the
-/// components, the skill and the mana for each of `spells`, and
-/// the server's clock known. The spells, in the order asked for.
-fn a_caster_knowing(now: Instant, spells: &[&str]) -> (Client, Vec<u32>) {
-    let holtburg = 0xA9B4_0019;
-    let here = glam::Vec3::new(84.0, 7.1, 94.0);
-    let mut c = standing_at(holtburg, here);
-    let me = 0x5000_0001;
-    c.world.player_guid = Some(me);
-    // The server's clock, without which nothing is ever due.
-    let clock = ac_net::packet::build(
-        ac_net::packet::Header {
-            flags: ac_net::packet::flags::TIME_SYNC,
-            ..Default::default()
-        },
-        &1000.0f64.to_le_bytes(),
-        &[],
-        0,
-    );
-    c.session.receive(&clock, now);
-    assert!(c.session.server_time().is_some(), "the clock was not taken");
-    let table = c.assets.spell_table().expect("the spell table");
-    let mut known = Vec::new();
-    for name in spells {
-        let (spell, sp) = table
-            .spells
-            .iter()
-            .find(|(_, sp)| sp.name == *name)
-            .map(|(id, sp)| (*id, sp.clone()))
-            .unwrap_or_else(|| panic!("the spell table knows {name}"));
-        c.world.stats.spells.push(spell);
-        let skill = Client::school_skill(sp.school).expect("a school with a skill");
-        if !c.world.stats.skills.iter().any(|s| s.id == skill) {
-            c.world.stats.skills.push(ac_world::stats::Skill {
-                id: skill,
-                advancement: ac_world::stats::sac::TRAINED,
-                init_level: 300,
-                ..Default::default()
-            });
-        }
-        known.push(spell);
-    }
-    c.world.stats.vitals[2].current = 500;
-    const WAND: u32 = 0x8000_0102;
-    c.world.objects.insert(
-        WAND,
-        ac_world::WorldObject {
-            guid: WAND,
-            name: "Training Wand".into(),
-            item_type: item_type::CASTER,
-            valid_locations: equip::HELD,
-            wielder: Some(me),
-            ..Default::default()
-        },
-    );
-    let mapper = c.assets.spell_component_ids().expect("the component ids");
-    let mut guid = 0x8000_0200;
-    for spell in &known {
-        for component in c.current_formula(*spell) {
-            let wcid = mapper
-                .component_wcid(component)
-                .expect("a component with a weenie");
-            c.world.objects.insert(
-                guid,
-                ac_world::WorldObject {
-                    guid,
-                    name: format!("Component {component}"),
-                    weenie_class_id: wcid,
-                    stack_size: 20,
-                    container: Some(me),
-                    ..Default::default()
-                },
-            );
-            guid += 1;
-        }
-    }
-    for spell in &known {
-        assert!(
-            matches!(c.can_cast(*spell), crate::magic::CastCheck::Ok),
-            "the caster cannot cast {spell}: {:?}",
-            c.can_cast(*spell)
-        );
-    }
-    (c, known)
-}
-
-/// A caster standing in Holtburg with a wand in hand, the
-/// components and mana for Blade Protection Self, the server's
-/// clock known and no protection up: one buff due, urgent or not.
-fn a_caster_with_a_buff_due(now: Instant) -> (Client, u32) {
-    let (mut c, known) = a_caster_knowing(now, &["Blade Protection Self I"]);
-    c.autoplay.config.buffs.auto = false;
-    c.autoplay.config.buffs.spells = vec!["Blade Protection Self".into()];
-    (c, known[0])
 }
 
 /// The Opening phase as a run enters it.
