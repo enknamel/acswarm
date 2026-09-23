@@ -168,12 +168,12 @@ ACSWARM_LOAD_PASSWORD=... tools/load-test.sh 25 300 --procs 5   # the same 25 in
 The harness logs `load01` to `load25` into the local ACE at 127.0.0.1
 (`--prefix` changes `load`; ACE creates an account at its first login),
 each with one character named from its number, "Load Zero One", made
-when missing. Names are letters and spaces because the retail creation
-screen allowed nothing else (`valid_name` in
-`crates/ac-client/src/creation.rs`); ACE itself refuses only taboo words,
-creature names and names in use (`CharacterHandler.cs:51-70`). Once
-placed, each session types `/load_autoplay`, a script command hook that
-turns autoplay on, so the sessions play rather than stand.
+when missing. Names are letters and spaces: the retail creation screen
+took no digits (`valid_name` in `crates/ac-client/src/creation.rs`); ACE
+itself refuses only taboo words, creature names and names in use
+(`CharacterHandler.cs:51-70`). Once placed, each session types
+`/load_autoplay`, a script command hook that turns autoplay on, so the
+sessions play rather than stand.
 
 It builds the release `acswarm` first, which takes no time when it is
 current; `--bin` names another binary, which must print the `perf run:`
@@ -192,9 +192,10 @@ that a login is refused as the logon server is full and retried, so the
 script warns above 128. Ctrl-C logs the sessions off and still prints
 the table; a second Ctrl-C, or SIGTERM or SIGHUP, gives them 15 s to log
 off and then kills them. `acswarm` logs off on any of the three, so a
-signal sent to the whole process group logs off too. A session killed without logging off holds its
-account on the server for about a minute, so a rerun straight after one
-is refused as already logged on.
+signal sent to the whole process group logs off too. A session killed
+without logging off holds its account on the server until its 60 s
+timeout (`NetworkSession.cs:338`), so a rerun straight after one is
+refused as already logged on (`AuthenticationHandler.cs:159-161`).
 
 Each run gets its own config and cache directory under `--out`, a new or
 empty folder outside the repository (default a fresh

@@ -50,8 +50,8 @@ die() { echo "load-test: $*" >&2; exit 1; }
   echo "load-test: warning: the local ACE admits 128 sessions (MaximumAllowedSessions); the rest will retry" >&2
 [[ "${duration}" =~ ^[0-9]+$ ]] && ((duration >= 1)) || die "SECONDS must be a whole number of seconds"
 [[ "${procs}" =~ ^[0-9]+$ ]] && ((procs >= 1 && procs <= sessions)) || die "--procs must be 1..SESSIONS"
-# Letters only: the character names are made from it, and the server takes letters,
-# spaces, hyphens and apostrophes in a name (crates/ac-client/src/creation.rs, valid_name).
+# Letters only: the character names are made from it, and the client's valid_name (the retail
+# creation screen's rule, crates/ac-client/src/creation.rs) takes no digits.
 [[ "${prefix}" =~ ^[a-z]{1,12}$ ]] || die "--prefix must be 1..12 lowercase letters"
 pw="${ACSWARM_LOAD_PASSWORD:-}"
 [[ -n "${pw}" ]] || die "set ACSWARM_LOAD_PASSWORD to the load accounts' password"
@@ -174,7 +174,7 @@ sampler=""
 
 # Every child goes on exit: acswarm logs off on SIGINT, SIGTERM or SIGHUP (up to 10 s,
 # ac_client::LOG_OFF_WAIT), so it gets that long before SIGKILL; a killed session holds its
-# account on the server for about a minute.
+# account on the server for its 60 s timeout (NetworkSession.cs:338).
 # SIGINT goes again every second: bash starts a background child with SIGINT ignored, and until
 # acswarm's handler is in (about a second into startup) one would be lost; after, it is harmless.
 cleanup() {
