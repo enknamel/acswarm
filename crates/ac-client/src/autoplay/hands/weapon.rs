@@ -402,14 +402,15 @@ impl Client {
         self.wield_guid(shield);
     }
 
-    /// Take up again the weapon put down for an urgent buff, once no
-    /// buff is due any more.
+    /// Take up again the weapon put down for an urgent buff, once the
+    /// urgent pass has no buff left to put back.
     pub(crate) fn autoplay_rearm(&mut self, now: Instant) {
         let Some(weapon) = self.autoplay.put_down else {
             return;
         };
-        let never_below = self.autoplay.config.buffs.never_below;
-        if self.due_buff(never_below, now).is_some() {
+        // Asked before the pack is looked in: until the server moves the
+        // weapon put down it is still in hand, which reads as no errand.
+        if self.has_urgent_buff_due(now) {
             return;
         }
         if !self

@@ -176,6 +176,12 @@ impl Client {
         )
     }
 
+    /// Whether the urgent pass would put a buff back now, by its own `buff_within`: a
+    /// weapon put down for one waits on nothing that pass would leave down.
+    pub(crate) fn has_urgent_buff_due(&self, now: Instant) -> bool {
+        self.due_buff(self.buff_within_now(true), now).is_some()
+    }
+
     /// Put a buff back up. True when it cast one.
     ///
     /// Two passes share this. The urgent one runs before anything else
