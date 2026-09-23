@@ -218,8 +218,10 @@ pub struct Autoplay {
     /// The same for the top-up pass: each keeps its own clock (see `BUFF_CHECK_EVERY`).
     top_ups_checked: Option<Instant>,
     /// The weapon put down to cast an urgent buff mid-fight, to be taken
-    /// up again the moment the buffing is done.
+    /// up again once the buffing is done (see `Client::autoplay_rearm`).
     put_down: Option<u32>,
+    /// When the rearm last asked whether an urgent buff is due: its own clock, a third.
+    rearm_checked: Option<Instant>,
     /// The ammunition chosen for the target, to be wielded with the bow.
     wanted_ammo: Option<u32>,
     /// The shield to put on once a one-handed weapon is in hand.

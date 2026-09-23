@@ -38,8 +38,8 @@ fn buff_within(cfg: &Buffs, urgent: bool, fighting: bool, wand_in_hand: bool) ->
     cfg.never_below
 }
 
-/// How often each buff pass, urgent and top-up, works out what is due.
-const BUFF_CHECK_EVERY: Duration = Duration::from_millis(1000);
+/// How often each buff pass, urgent and top-up, and the rearm work out what is due.
+pub(crate) const BUFF_CHECK_EVERY: Duration = Duration::from_millis(1000);
 
 impl Client {
     /// Seconds left on the enchantment of a spell family, if any is up.

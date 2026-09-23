@@ -1,5 +1,6 @@
 use std::time::{Duration, Instant};
 
+use crate::autoplay::vitals::buffs::BUFF_CHECK_EVERY;
 use crate::autoplay::{Autoplay, Fight, Style};
 use crate::{Client, Stance};
 
@@ -408,6 +409,23 @@ impl Client {
         let Some(weapon) = self.autoplay.put_down else {
             return;
         };
+        // Inside the wait a refusal earned it, or with the server busy,
+        // the errand keeps, the way a pending wield's does: dropping it
+        // here would leave the weapon in the pack and the character
+        // fighting with the wand.
+        if self.wield_must_wait(weapon, now) {
+            return;
+        }
+        // What is due walks the whole spellbook: asked once a BUFF_CHECK_EVERY
+        // on a clock of its own, and only when the weapon could go out on the answer.
+        if self
+            .autoplay
+            .rearm_checked
+            .is_some_and(|t| now.duration_since(t) < BUFF_CHECK_EVERY)
+        {
+            return;
+        }
+        self.autoplay.rearm_checked = Some(now);
         // Asked before the pack is looked in: until the server moves the
         // weapon put down it is still in hand, which reads as no errand.
         if self.has_urgent_buff_due(now) {
@@ -421,13 +439,6 @@ impl Client {
         {
             // Sold, given away, or in hand already: no errand left.
             self.autoplay.put_down = None;
-            return;
-        }
-        // Inside the wait a refusal earned it, or with the server busy,
-        // the errand keeps, the way a pending wield's does: dropping it
-        // here would leave the weapon in the pack and the character
-        // fighting with the wand.
-        if self.wield_must_wait(weapon, now) {
             return;
         }
         self.autoplay.put_down = None;
