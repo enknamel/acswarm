@@ -236,7 +236,10 @@ perf: N sessions, T ticks at R of 20 Hz, work p50 A ms p95 B max C of 50 ms, ove
   first session's call). What is left of work is the loop's own:
   reconnects, starts and stops, the status lines. **costliest**: the
   session whose own work has the highest mean, by character name (by
-  account before the character is known, or once it is stopped).
+  account before the character is known, or once it is stopped). It
+  leans to the first session ticked in an iteration: two sessions in one
+  process read 1.29 and 1.05 ms, the same two 1.16 and 1.19 ms alone, so
+  some of a tick's work falls on whichever session ticks first.
 
 Each session added costs about per session plus its share of plugins.
 A process is full when the rate drops below `--tick-hz`, behind climbs,
