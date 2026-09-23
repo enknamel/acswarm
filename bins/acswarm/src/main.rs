@@ -15,6 +15,7 @@ mod logging;
 mod particles;
 mod perf;
 mod scene;
+mod tick_meter;
 use ac_client::player;
 mod chat;
 mod plugins;

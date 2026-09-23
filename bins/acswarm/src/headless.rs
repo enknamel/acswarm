@@ -13,7 +13,7 @@
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{Context, Result};
 
@@ -21,6 +21,8 @@ use ac_client::creation::{self, CreateSpec};
 use ac_client::reconnect::Ending;
 use ac_client::Event;
 use ac_plugin::{Enter, Host, Requests, SessionSpec, Sessions};
+
+use crate::tick_meter::TickMeter;
 
 /// The lines of a script file: trimmed, without blanks and `#` comments.
 pub fn parse_script(text: &str) -> Vec<String> {
@@ -125,6 +127,15 @@ fn status(s: &ac_plugin::Session<Typing>) -> String {
         "[{}] placed={placed} cell={cell} hp={health} target={target}{state}",
         s.account()
     )
+}
+
+/// What the `perf:` line calls session `i`: its character once known, else its account.
+fn session_name(sessions: &Sessions<Typing>, i: usize) -> String {
+    match sessions.get(i) {
+        Some(s) if !s.client.world.stats.name.is_empty() => s.client.world.stats.name.clone(),
+        Some(s) => s.account().to_string(),
+        None => format!("session {}", i + 1),
+    }
 }
 
 /// Print what a plugin's callbacks asked for and apply the rest. A
@@ -315,8 +326,10 @@ pub fn run(cli: crate::Cli) -> Result<()> {
     let mut next_status = start + Duration::from_secs(10);
     let mut quit = false;
     let mut pending: Pending = Vec::new();
+    let mut meter = TickMeter::new(period);
     loop {
         let now = Instant::now();
+        meter.begin(now, SystemTime::now(), next_tick);
         let dt = (now - last).as_secs_f32().min(0.25);
         last = now;
 
@@ -324,6 +337,7 @@ pub fn run(cli: crate::Cli) -> Result<()> {
             if sessions[i].is_finished() {
                 continue;
             }
+            let began = Instant::now();
             let _frame = sessions[i].client.tick(None, dt, now);
             let events = sessions[i].client.drain_events();
             for ev in &events {
@@ -437,16 +451,16 @@ pub fn run(cli: crate::Cli) -> Result<()> {
             let account = sessions[i].account().to_string();
             let r = host.frame(sessions.clients(), i, &events, dt, now);
             apply_requests(&account, &mut quit, &mut pending, r);
-            let Some(s) = sessions.get_mut(i) else {
-                continue;
-            };
             // Only a session actually in the world types: one waiting to
             // be logged back in has nobody to say it to.
-            let due = match s.extra.placed_at {
-                Some(t) if !s.is_finished() && !s.is_reconnecting() => {
-                    s.extra.schedule.poll((now - t).as_secs_f32())
-                }
-                _ => Vec::new(),
+            let due = match sessions.get_mut(i) {
+                Some(s) => match s.extra.placed_at {
+                    Some(t) if !s.is_finished() && !s.is_reconnecting() => {
+                        s.extra.schedule.poll((now - t).as_secs_f32())
+                    }
+                    _ => Vec::new(),
+                },
+                None => Vec::new(),
             };
             for line in due {
                 let spoken = !line.starts_with(['/', '@']);
@@ -457,6 +471,7 @@ pub fn run(cli: crate::Cli) -> Result<()> {
                 }
                 apply_requests(&account, &mut quit, &mut pending, typed.requests);
             }
+            meter.session(i, began.elapsed());
         }
         host.end_frame();
         // A session that ended without being asked to comes back here, in
@@ -473,12 +488,16 @@ pub fn run(cli: crate::Cli) -> Result<()> {
         }
         // Sessions come and go only here, between frames: no session is
         // being ticked and no plugin holds them.
+        if pending.iter().any(|(_, stop)| !stop.is_empty()) {
+            meter.forget_slots();
+        }
         apply_pending(&mut sessions, &mut host, &connect, &lines, &mut pending);
 
         if now >= next_status {
             for s in sessions.iter() {
                 println!("{}", status(s));
             }
+            meter.report(&|i| session_name(&sessions, i));
             next_status += Duration::from_secs(10);
         }
 
@@ -500,6 +519,7 @@ pub fn run(cli: crate::Cli) -> Result<()> {
 
         next_tick += period;
         let after = Instant::now();
+        meter.end(after - now, next_tick <= after);
         if next_tick > after {
             std::thread::sleep(next_tick - after);
         } else {
@@ -508,6 +528,7 @@ pub fn run(cli: crate::Cli) -> Result<()> {
         }
     }
 
+    meter.finish(&|i| session_name(&sessions, i));
     let mut clients: Vec<&mut ac_client::Client> = sessions
         .iter_mut()
         .filter(|s| !s.is_finished())
