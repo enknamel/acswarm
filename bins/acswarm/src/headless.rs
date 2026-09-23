@@ -13,7 +13,7 @@
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 
@@ -22,7 +22,7 @@ use ac_client::reconnect::Ending;
 use ac_client::Event;
 use ac_plugin::{Enter, Host, Requests, SessionSpec, Sessions};
 
-use crate::tick_meter::TickMeter;
+use crate::tick_meter::{boot_clock, TickMeter};
 
 /// The lines of a script file: trimmed, without blanks and `#` comments.
 pub fn parse_script(text: &str) -> Vec<String> {
@@ -129,13 +129,16 @@ fn status(s: &ac_plugin::Session<Typing>) -> String {
     )
 }
 
-/// What the `perf:` line calls session `i`: its character once known, else its account.
-fn session_name(sessions: &Sessions<Typing>, i: usize) -> String {
-    match sessions.get(i) {
-        Some(s) if !s.client.world.stats.name.is_empty() => s.client.world.stats.name.clone(),
-        Some(s) => s.account().to_string(),
-        None => format!("session {}", i + 1),
-    }
+/// What the `perf:` line calls the session on `account`: its character once known, else the
+/// account, which is all a stopped session leaves.
+fn session_name(sessions: &Sessions<Typing>, account: &str) -> String {
+    sessions
+        .iter()
+        .find(|s| s.account() == account && !s.client.world.stats.name.is_empty())
+        .map_or_else(
+            || account.to_string(),
+            |s| s.client.world.stats.name.clone(),
+        )
 }
 
 /// Print what a plugin's callbacks asked for and apply the rest. A
@@ -322,14 +325,14 @@ pub fn run(cli: crate::Cli) -> Result<()> {
 
     let start = Instant::now();
     let mut last = start;
-    let mut next_tick = start;
     let mut next_status = start + Duration::from_secs(10);
     let mut quit = false;
     let mut pending: Pending = Vec::new();
-    let mut meter = TickMeter::new(period);
+    // The schedule as well as its timing, so the schedule measured is the one the loop kept.
+    let mut meter = TickMeter::new(period, start);
     loop {
         let now = Instant::now();
-        meter.begin(now, SystemTime::now(), next_tick);
+        meter.begin(now, boot_clock());
         let dt = (now - last).as_secs_f32().min(0.25);
         last = now;
 
@@ -449,7 +452,12 @@ pub fn run(cli: crate::Cli) -> Result<()> {
                 }
             }
             let account = sessions[i].account().to_string();
+            // Timed apart from the session: the fleet, holdings and lobby panels keep house for
+            // the whole process on session 0's call only.
+            let framed = Instant::now();
             let r = host.frame(sessions.clients(), i, &events, dt, now);
+            let in_plugins = framed.elapsed();
+            meter.plugins(in_plugins);
             apply_requests(&account, &mut quit, &mut pending, r);
             // Only a session actually in the world types: one waiting to
             // be logged back in has nobody to say it to.
@@ -471,9 +479,11 @@ pub fn run(cli: crate::Cli) -> Result<()> {
                 }
                 apply_requests(&account, &mut quit, &mut pending, typed.requests);
             }
-            meter.session(i, began.elapsed());
+            meter.session(i, &account, began.elapsed().saturating_sub(in_plugins));
         }
+        let framed = Instant::now();
         host.end_frame();
+        meter.plugins(framed.elapsed());
         // A session that ended without being asked to comes back here, in
         // its own slot, before the starts and stops below can move the
         // slots around.
@@ -488,16 +498,13 @@ pub fn run(cli: crate::Cli) -> Result<()> {
         }
         // Sessions come and go only here, between frames: no session is
         // being ticked and no plugin holds them.
-        if pending.iter().any(|(_, stop)| !stop.is_empty()) {
-            meter.forget_slots();
-        }
         apply_pending(&mut sessions, &mut host, &connect, &lines, &mut pending);
 
         if now >= next_status {
             for s in sessions.iter() {
                 println!("{}", status(s));
             }
-            meter.report(&|i| session_name(&sessions, i));
+            meter.report(&|a| session_name(&sessions, a));
             next_status += Duration::from_secs(10);
         }
 
@@ -517,18 +524,12 @@ pub fn run(cli: crate::Cli) -> Result<()> {
             break;
         }
 
-        next_tick += period;
-        let after = Instant::now();
-        meter.end(after - now, next_tick <= after);
-        if next_tick > after {
-            std::thread::sleep(next_tick - after);
-        } else {
-            // Fell behind: don't try to catch up with a burst of ticks.
-            next_tick = after;
+        if let Some(nap) = meter.end(now, Instant::now()) {
+            std::thread::sleep(nap);
         }
     }
 
-    meter.finish(&|i| session_name(&sessions, i));
+    meter.finish(&|a| session_name(&sessions, a));
     let mut clients: Vec<&mut ac_client::Client> = sessions
         .iter_mut()
         .filter(|s| !s.is_finished())

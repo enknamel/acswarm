@@ -1,11 +1,12 @@
-//! Headless tick timing: each loop iteration's work and lateness against the `--tick-hz`
-//! period and each session's share, as one `perf:` line per status period and one at exit.
-//! The monotonic clock stops while the machine sleeps and wall time does not, so a window
-//! a sleep fell in is dropped with a warning rather than reported as a measurement.
+//! Headless tick timing and pacing: the loop's `--tick-hz` schedule, each iteration's work and
+//! lateness against it, the rate achieved, and each session's own cost apart from the plugins',
+//! as a `perf:` line per status period and a `perf run:` line at exit (tools/load-test.sh reads
+//! it). Instant stops while the machine sleeps and the boot clock does not, so a window a sleep
+//! fell in is dropped with a warning rather than reported as a measurement.
 
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 
-/// Wall time this far past the monotonic clock between two iterations is a machine sleep.
+/// Boot clock time this far past Instant between two iterations is a machine sleep.
 const SLEEP_GAP: Duration = Duration::from_secs(2);
 
 /// Durations under 2^6 µs get a bucket each.
@@ -106,9 +107,35 @@ impl Histogram {
     }
 }
 
-/// How long the machine slept between two iterations `mono` and `wall` apart, if it did.
-pub fn sleep_gap(mono: Duration, wall: Duration) -> Option<Duration> {
-    let gap = wall.saturating_sub(mono);
+/// Time since boot with sleep counted, on a clock nobody can set: CLOCK_MONOTONIC on macOS and
+/// CLOCK_BOOTTIME on Linux, where Instant (CLOCK_UPTIME_RAW, CLOCK_MONOTONIC) stops asleep.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+pub fn boot_clock() -> Duration {
+    #[cfg(target_os = "macos")]
+    const CLOCK: libc::clockid_t = libc::CLOCK_MONOTONIC;
+    #[cfg(target_os = "linux")]
+    const CLOCK: libc::clockid_t = libc::CLOCK_BOOTTIME;
+    let mut ts = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: `clock_gettime` writes only into `ts`, which outlives the call; it fails only for
+    // a clock the system lacks, and each of these is its own system's.
+    unsafe { libc::clock_gettime(CLOCK, &mut ts) };
+    Duration::new(ts.tv_sec as u64, ts.tv_nsec as u32)
+}
+
+/// Elsewhere the wall clock, so setting it there reads as a sleep or hides one.
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub fn boot_clock() -> Duration {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+}
+
+/// How long the machine slept between two iterations `mono` (Instant) and `boot` apart, if it did.
+pub fn sleep_gap(mono: Duration, boot: Duration) -> Option<Duration> {
+    let gap = boot.saturating_sub(mono);
     (gap > SLEEP_GAP).then_some(gap)
 }
 
@@ -122,7 +149,7 @@ pub fn per_minute(count: u64, span: Duration) -> f64 {
     }
 }
 
-/// One session slot's ticks and the time they took.
+/// One session's ticks and the time they took.
 #[derive(Clone, Copy, Default)]
 pub struct SessionCost {
     spent: Duration,
@@ -135,6 +162,28 @@ impl SessionCost {
     }
 }
 
+/// Add `spent` over `ticks` to `account`'s row, trying row `hint` (its slot, as a rule) first.
+fn add_to_account(
+    rows: &mut Vec<(String, SessionCost)>,
+    hint: usize,
+    account: &str,
+    spent: Duration,
+    ticks: u64,
+) {
+    let row = match rows.get(hint) {
+        Some((a, _)) if a == account => hint,
+        _ => match rows.iter().position(|(a, _)| a == account) {
+            Some(row) => row,
+            None => {
+                rows.push((account.to_string(), SessionCost::default()));
+                rows.len() - 1
+            }
+        },
+    };
+    rows[row].1.spent += spent;
+    rows[row].1.ticks += ticks;
+}
+
 /// The iterations of one stretch of the run, a status window or the whole of it.
 #[derive(Clone, Default)]
 pub struct TickStats {
@@ -144,12 +193,14 @@ pub struct TickStats {
     over: u64,
     /// Iterations after which the loop dropped its schedule and started again from now.
     behind: u64,
-    /// Monotonic time the stretch covered.
+    /// Instant time the stretch covered: one interval between begins per iteration.
     span: Duration,
     /// Every session tick together, for the mean.
     all: SessionCost,
-    /// By session slot, for the costliest.
-    slots: Vec<SessionCost>,
+    /// The plugin host's time, every session's calls together.
+    plugins: Duration,
+    /// By account, which a stop that moves the slots down does not change; for the costliest.
+    accounts: Vec<(String, SessionCost)>,
 }
 
 impl TickStats {
@@ -161,16 +212,15 @@ impl TickStats {
         self.span += other.span;
         self.all.spent += other.all.spent;
         self.all.ticks += other.all.ticks;
-        if self.slots.len() < other.slots.len() {
-            self.slots.resize(other.slots.len(), SessionCost::default());
-        }
-        for (a, b) in self.slots.iter_mut().zip(&other.slots) {
-            a.spent += b.spent;
-            a.ticks += b.ticks;
+        self.plugins += other.plugins;
+        for (row, (account, cost)) in other.accounts.iter().enumerate() {
+            if cost.ticks > 0 {
+                add_to_account(&mut self.accounts, row, account, cost.spent, cost.ticks);
+            }
         }
     }
 
-    /// Back to empty, keeping the slots' storage.
+    /// Back to empty, keeping the accounts' rows.
     fn clear(&mut self) {
         self.work.clear();
         self.late.clear();
@@ -178,29 +228,40 @@ impl TickStats {
         self.behind = 0;
         self.span = Duration::ZERO;
         self.all = SessionCost::default();
-        self.slots.fill(SessionCost::default());
+        self.plugins = Duration::ZERO;
+        for (_, cost) in &mut self.accounts {
+            *cost = SessionCost::default();
+        }
     }
 
-    /// The slot with the highest mean tick cost, and that mean.
-    fn costliest(&self) -> Option<(usize, Duration)> {
-        self.slots
+    /// The account with the highest mean tick cost, and that mean.
+    fn costliest(&self) -> Option<(&str, Duration)> {
+        self.accounts
             .iter()
-            .enumerate()
-            .filter_map(|(i, c)| c.mean().map(|m| (i, m)))
+            .filter_map(|(a, c)| c.mean().map(|m| (a.as_str(), m)))
             .max_by_key(|&(_, m)| m)
     }
 
-    /// The line's body: sessions, ticks, work and lateness against `period`, the session costs.
-    pub fn summary(&self, period: Duration, name_of: &dyn Fn(usize) -> String) -> String {
-        let sessions = self.slots.iter().filter(|c| c.ticks > 0).count();
+    /// The line's body: sessions, ticks and their rate, work and lateness against `period`, and
+    /// the sessions' and plugins' costs; `name_of` turns an account into what the line calls it.
+    pub fn summary(&self, period: Duration, name_of: &dyn Fn(&str) -> String) -> String {
+        let sessions = self.accounts.iter().filter(|(_, c)| c.ticks > 0).count();
+        let ticks = self.work.count();
+        let rate = match ticks {
+            0 => "-".to_string(),
+            _ if self.span.is_zero() => "-".to_string(),
+            n => format!("{:.1}", n as f64 / self.span.as_secs_f64()),
+        };
+        let plugins = (ticks > 0).then(|| self.plugins / u32::try_from(ticks).unwrap_or(u32::MAX));
         let costliest = match self.costliest() {
-            Some((i, mean)) => format!("{} {} ms", name_of(i), ms(Some(mean), 2)),
+            Some((account, mean)) => format!("{} {} ms", name_of(account), ms(Some(mean), 2)),
             None => "-".to_string(),
         };
         format!(
-            "{sessions} sessions, {} ticks, work p50 {} ms p95 {} max {} of {} ms, over {}, \
-             behind {}, late p95 {} ms, per session {} ms, costliest {costliest}",
-            self.work.count(),
+            "{sessions} sessions, {ticks} ticks at {rate} of {:.0} Hz, work p50 {} ms p95 {} max \
+             {} of {} ms, over {}, behind {}, late p95 {} ms, per session {} ms, plugins {} ms, \
+             costliest {costliest}",
+            1.0 / period.as_secs_f64(),
             ms(self.work.quantile(0.5), 1),
             ms(self.work.quantile(0.95), 1),
             ms(self.work.max(), 1),
@@ -209,6 +270,7 @@ impl TickStats {
             self.behind,
             ms(self.late.quantile(0.95), 1),
             ms(self.all.mean(), 2),
+            ms(plugins, 2),
         )
     }
 }
@@ -221,17 +283,24 @@ fn ms(d: Option<Duration>, places: usize) -> String {
     }
 }
 
-/// The headless loop's timing, fed by `begin`, `session` and `end` once per iteration.
+/// The headless loop's schedule and timing, fed by `begin`, `session`, `plugins` and `end` once
+/// per iteration; `end` says how long to sleep, so the schedule measured is the one kept.
 pub struct TickMeter {
     period: Duration,
+    /// When the next iteration is due.
+    next: Instant,
+    /// When the iteration under way was due: the tick it missed when the loop started over.
+    due: Instant,
     window: TickStats,
     run: TickStats,
-    /// When the first iteration began, on both clocks, for the wall time the run spanned.
-    first: Option<(Instant, SystemTime)>,
+    /// When the first iteration began, on Instant and the boot clock, for the wall time spanned.
+    first: Option<(Instant, Duration)>,
     /// When the last iteration began, on both clocks.
-    last: Option<(Instant, SystemTime)>,
+    last: Option<(Instant, Duration)>,
     /// The lateness of the iteration under way, recorded once its work is known.
     late: Duration,
+    /// The plugin host's time in the iteration under way.
+    plugins: Duration,
     /// Windows dropped for a machine sleep.
     sleeps: u32,
     /// How long the machine slept, all the dropped windows together.
@@ -239,77 +308,86 @@ pub struct TickMeter {
 }
 
 impl TickMeter {
-    pub fn new(period: Duration) -> Self {
+    /// A loop ticking every `period`, the first iteration due at `start`.
+    pub fn new(period: Duration, start: Instant) -> Self {
         TickMeter {
             period,
+            next: start,
+            due: start,
             window: TickStats::default(),
             run: TickStats::default(),
             first: None,
             last: None,
             late: Duration::ZERO,
+            plugins: Duration::ZERO,
             sleeps: 0,
             slept: Duration::ZERO,
         }
     }
 
-    /// An iteration begins at `now` (`wall` on the wall clock), scheduled for `due`. A sleep
-    /// since the last one drops the window under way and is returned.
-    pub fn begin(&mut self, now: Instant, wall: SystemTime, due: Instant) -> Option<Duration> {
+    /// An iteration begins at `now` (`boot` on [`boot_clock`]). A sleep since the last one
+    /// drops the window under way and is returned.
+    pub fn begin(&mut self, now: Instant, boot: Duration) -> Option<Duration> {
         let mut slept = None;
-        if let Some((mono0, wall0)) = self.last {
+        if let Some((mono0, boot0)) = self.last {
             let mono = now.saturating_duration_since(mono0);
-            slept = wall
-                .duration_since(wall0)
-                .ok()
-                .and_then(|w| sleep_gap(mono, w));
-            match slept {
-                Some(gap) => {
-                    tracing::warn!(
-                        "the machine slept for about {:.0} s: the wall clock ran that far past \
-                         the monotonic one; this window is left out of the measurements",
-                        gap.as_secs_f64()
-                    );
-                    self.sleeps += 1;
-                    self.slept += gap;
-                    self.window.clear();
-                }
-                None => self.window.span += mono,
+            slept = sleep_gap(mono, boot.saturating_sub(boot0));
+            if let Some(gap) = slept {
+                tracing::warn!(
+                    "the machine slept for about {:.0} s: the boot clock ran that far past the \
+                     monotonic one; this window is left out of the measurements",
+                    gap.as_secs_f64()
+                );
+                self.sleeps += 1;
+                self.slept += gap;
+                self.window.clear();
             }
+            // Its awake part only, so that the span and the ticks count the same iterations.
+            self.window.span += mono;
         }
-        self.first.get_or_insert((now, wall));
-        self.last = Some((now, wall));
-        self.late = now.saturating_duration_since(due);
+        self.first.get_or_insert((now, boot));
+        self.last = Some((now, boot));
+        self.late = now.saturating_duration_since(self.due);
+        self.plugins = Duration::ZERO;
         slept
     }
 
-    /// Session slot `slot` took `spent` this iteration: its tick, events and plugins.
-    pub fn session(&mut self, slot: usize, spent: Duration) {
-        let slots = &mut self.window.slots;
-        if slots.len() <= slot {
-            slots.resize(slot + 1, SessionCost::default());
-        }
-        slots[slot].spent += spent;
-        slots[slot].ticks += 1;
+    /// Session `slot`, logged in as `account`, took `spent` of its own this iteration: its
+    /// tick, its events and the lines it typed, not the plugin host's frame.
+    pub fn session(&mut self, slot: usize, account: &str, spent: Duration) {
+        add_to_account(&mut self.window.accounts, slot, account, spent, 1);
         self.window.all.spent += spent;
         self.window.all.ticks += 1;
     }
 
-    /// The iteration's work took `work`; `behind` when the loop then dropped its schedule.
-    pub fn end(&mut self, work: Duration, behind: bool) {
+    /// The plugin host took `spent` this iteration, on whichever session's call.
+    pub fn plugins(&mut self, spent: Duration) {
+        self.plugins += spent;
+    }
+
+    /// The iteration that began at `now` ended its work at `after`: the sleep until the next is
+    /// due, or `None` when the loop fell behind and gives the missed ticks up rather than burst.
+    pub fn end(&mut self, now: Instant, after: Instant) -> Option<Duration> {
+        let work = after.saturating_duration_since(now);
+        self.next += self.period;
+        // Kept when the loop starts over, so the next iteration is late by what this one overran.
+        self.due = self.next;
+        let behind = self.next <= after;
         self.window.work.record(work);
         self.window.late.record(self.late);
         self.window.over += u64::from(work > self.period);
         self.window.behind += u64::from(behind);
-    }
-
-    /// Sessions were stopped and the slots after them moved down: a slot names another session.
-    pub fn forget_slots(&mut self) {
-        self.window.slots.clear();
-        self.run.slots.clear();
+        self.window.plugins += self.plugins;
+        if behind {
+            self.next = after;
+            None
+        } else {
+            Some(self.next - after)
+        }
     }
 
     /// The `perf:` line for the window under way.
-    pub fn window_line(&self, name_of: &dyn Fn(usize) -> String) -> String {
+    pub fn window_line(&self, name_of: &dyn Fn(&str) -> String) -> String {
         format!("perf: {}", self.window.summary(self.period, name_of))
     }
 
@@ -320,15 +398,16 @@ impl TickMeter {
     }
 
     /// Log the window's line and start the next window.
-    pub fn report(&mut self, name_of: &dyn Fn(usize) -> String) {
+    pub fn report(&mut self, name_of: &dyn Fn(&str) -> String) {
         tracing::info!("{}", self.window_line(name_of));
         self.close_window();
     }
 
-    /// The `perf run:` line: the whole run, with what was left out of it and why.
-    pub fn run_line(&self, name_of: &dyn Fn(usize) -> String) -> String {
+    /// The `perf run:` line: the whole run, with what was left out of it and why. Its shape is
+    /// pinned by `the_run_line_has_the_shape_the_harness_reads`: tools/load-test.sh parses it.
+    pub fn run_line(&self, name_of: &dyn Fn(&str) -> String) -> String {
         let wall = match (self.first, self.last) {
-            (Some((_, w0)), Some((_, w1))) => w1.duration_since(w0).unwrap_or_default(),
+            (Some((_, b0)), Some((_, b1))) => b1.saturating_sub(b0),
             _ => Duration::ZERO,
         };
         format!(
@@ -344,7 +423,7 @@ impl TickMeter {
     }
 
     /// Fold in the last window and log the run's line.
-    pub fn finish(&mut self, name_of: &dyn Fn(usize) -> String) {
+    pub fn finish(&mut self, name_of: &dyn Fn(&str) -> String) {
         self.close_window();
         tracing::info!("{}", self.run_line(name_of));
     }
@@ -441,7 +520,7 @@ mod tests {
     }
 
     #[test]
-    fn only_a_wall_clock_well_ahead_is_a_sleep() {
+    fn only_a_boot_clock_well_ahead_is_a_sleep() {
         assert_eq!(sleep_gap(millis(50), millis(50)), None);
         assert_eq!(sleep_gap(millis(50), millis(1_900)), None, "under the gap");
         assert_eq!(
@@ -451,8 +530,18 @@ mod tests {
         assert_eq!(
             sleep_gap(millis(500), millis(100)),
             None,
-            "wall behind is not a sleep"
+            "boot clock behind is not a sleep"
         );
+    }
+
+    #[test]
+    fn the_boot_clock_keeps_pace_with_instant_while_awake() {
+        let (b0, i0) = (boot_clock(), Instant::now());
+        std::thread::sleep(millis(20));
+        let (b1, i1) = (boot_clock(), Instant::now());
+        let (boot, mono) = (b1 - b0, i1 - i0);
+        assert!(boot >= millis(20), "{boot:?}");
+        assert_eq!(sleep_gap(mono, boot), None, "{boot:?} against {mono:?}");
     }
 
     #[test]
@@ -461,12 +550,12 @@ mod tests {
         assert_eq!(per_minute(3, Duration::from_secs(30)), 6.0);
     }
 
-    /// Runs `n` iterations `step` apart starting at `t`, each with `work`, one session each.
-    fn iterate(m: &mut TickMeter, t: &mut (Instant, SystemTime), n: u32, step: Duration) {
+    /// Runs `n` iterations `step` apart from `t` (Instant, boot clock), 2 ms of work each.
+    fn iterate(m: &mut TickMeter, t: &mut (Instant, Duration), n: u32, step: Duration) {
         for _ in 0..n {
-            m.begin(t.0, t.1, t.0);
-            m.session(0, millis(1));
-            m.end(millis(2), false);
+            m.begin(t.0, t.1);
+            m.session(0, "ann", millis(1));
+            m.end(t.0, t.0 + millis(2));
             t.0 += step;
             t.1 += step;
         }
@@ -474,22 +563,20 @@ mod tests {
 
     #[test]
     fn a_sleep_drops_its_window_and_is_counted() {
-        let mut m = TickMeter::new(millis(50));
-        let mut t = (
-            Instant::now(),
-            SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000),
-        );
-        let name = |i: usize| format!("s{i}");
+        let start = Instant::now();
+        let mut m = TickMeter::new(millis(50), start);
+        let mut t = (start, Duration::from_secs(1_000_000));
+        let name = |a: &str| a.to_string();
         iterate(&mut m, &mut t, 200, millis(50));
         m.close_window();
         iterate(&mut m, &mut t, 100, millis(50));
-        // The lid closes: the wall clock runs on, the monotonic one does not.
+        // The lid closes: the boot clock runs on, Instant does not.
         t.1 += Duration::from_secs(467);
-        assert_eq!(m.begin(t.0, t.1, t.0), Some(Duration::from_secs(467)));
-        m.end(millis(2), false);
+        assert_eq!(m.begin(t.0, t.1), Some(Duration::from_secs(467)));
+        m.end(t.0, t.0 + millis(2));
         m.close_window();
         let line = m.run_line(&name);
-        assert!(line.contains(" 201 ticks"), "{line}");
+        assert!(line.contains(" 201 ticks at 20.1 of 20 Hz"), "{line}");
         assert!(
             line.contains("1 sleep windows excluded (467 s asleep)"),
             "{line}"
@@ -498,39 +585,90 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_window_prints_dashes() {
-        let m = TickMeter::new(millis(50));
-        let line = m.window_line(&|i| format!("s{i}"));
-        assert_eq!(
-            line,
-            "perf: 0 sessions, 0 ticks, work p50 - ms p95 - max - of 50 ms, over 0, behind 0, \
-             late p95 - ms, per session - ms, costliest -"
+    fn a_loop_that_keeps_up_sleeps_to_its_schedule() {
+        let t = Instant::now();
+        let mut m = TickMeter::new(millis(50), t);
+        m.begin(t, Duration::ZERO);
+        assert_eq!(m.end(t, t + millis(1)), Some(millis(49)));
+        // The sleep ran 10 ms long; the schedule does not move for it.
+        m.begin(t + millis(60), millis(60));
+        assert_eq!(m.end(t + millis(60), t + millis(61)), Some(millis(39)));
+        let line = m.window_line(&|a| a.to_string());
+        assert!(line.contains("late p95 10.0 ms"), "{line}");
+        assert!(line.contains("over 0, behind 0"), "{line}");
+    }
+
+    #[test]
+    fn a_loop_that_falls_behind_is_late_by_what_it_overran() {
+        let t = Instant::now();
+        let mut m = TickMeter::new(millis(50), t);
+        let mut now = t;
+        // 52 ms of work a 50 ms tick: each iteration starts 2 ms past the tick it missed.
+        for _ in 0..40 {
+            m.begin(now, now - t);
+            assert_eq!(m.end(now, now + millis(52)), None);
+            now += millis(52);
+        }
+        m.begin(now, now - t);
+        let line = m.window_line(&|a| a.to_string());
+        assert!(line.contains("40 ticks at 19.2 of 20 Hz"), "{line}");
+        assert!(
+            line.contains("over 40, behind 40, late p95 2.0 ms"),
+            "{line}"
         );
     }
 
     #[test]
-    fn the_line_names_the_costliest_session_and_counts_overruns() {
-        let mut m = TickMeter::new(millis(50));
-        let t = Instant::now();
-        let wall = SystemTime::UNIX_EPOCH;
-        m.begin(t, wall, t);
-        m.session(0, millis(1));
-        m.session(1, millis(9));
-        m.end(millis(10), false);
-        m.begin(t + millis(80), wall + millis(80), t + millis(50));
-        m.session(0, millis(1));
-        m.session(1, millis(59));
-        m.end(millis(60), true);
-        let line = m.window_line(&|i| ["+Ann", "+Bob"][i].to_string());
-        assert!(line.starts_with("perf: 2 sessions, 2 ticks,"), "{line}");
-        assert!(
-            line.contains("max 60.0 of 50 ms, over 1, behind 1"),
-            "{line}"
+    fn an_empty_window_prints_dashes() {
+        let m = TickMeter::new(millis(50), Instant::now());
+        let line = m.window_line(&|a| a.to_string());
+        assert_eq!(
+            line,
+            "perf: 0 sessions, 0 ticks at - of 20 Hz, work p50 - ms p95 - max - of 50 ms, over 0, \
+             behind 0, late p95 - ms, per session - ms, plugins - ms, costliest -"
         );
-        assert!(line.contains("late p95 30.0 ms"), "{line}");
-        assert!(line.contains("per session 17.50 ms"), "{line}");
-        assert!(line.ends_with("costliest +Bob 34.00 ms"), "{line}");
-        m.forget_slots();
-        assert!(m.window_line(&|_| unreachable!()).ends_with("costliest -"));
+    }
+
+    #[test]
+    fn the_run_line_has_the_shape_the_harness_reads() {
+        let t = Instant::now();
+        let mut m = TickMeter::new(millis(50), t);
+        // (began, work ms, +Bob's ms): the second overruns, so the third starts 22 ms late.
+        for (at, work, bob) in [(0, 12, 9), (60, 62, 59), (122, 12, 9)] {
+            m.begin(t + millis(at), millis(at));
+            m.session(0, "ann", millis(1));
+            m.session(1, "bob", millis(bob));
+            m.plugins(millis(2));
+            m.end(t + millis(at), t + millis(at + work));
+        }
+        m.begin(t + millis(172), millis(172));
+        m.close_window();
+        let names = |a: &str| if a == "bob" { "+Bob" } else { "+Ann" }.to_string();
+        assert_eq!(
+            m.run_line(&names),
+            "perf run: 2 sessions, 3 ticks at 17.4 of 20 Hz, work p50 12.0 ms p95 62.0 max 62.0 \
+             of 50 ms, over 1, behind 1, late p95 21.8 ms, per session 13.33 ms, plugins 2.00 \
+             ms, costliest +Bob 25.67 ms, 348.8 overruns/min, 0 s measured of 0 s wall, 0 sleep \
+             windows excluded (0 s asleep)"
+        );
+    }
+
+    #[test]
+    fn costs_follow_the_account_when_a_stop_moves_the_slots() {
+        let t = Instant::now();
+        let mut m = TickMeter::new(millis(50), t);
+        m.begin(t, Duration::ZERO);
+        m.session(0, "ann", millis(1));
+        m.session(1, "bob", millis(9));
+        m.end(t, t + millis(10));
+        m.close_window();
+        // Ann is stopped and Bob moves down to slot 0.
+        m.begin(t + millis(50), millis(50));
+        m.session(0, "bob", millis(11));
+        m.end(t + millis(50), t + millis(61));
+        m.close_window();
+        let line = m.run_line(&|a| a.to_string());
+        assert!(line.starts_with("perf run: 2 sessions, 2 ticks"), "{line}");
+        assert!(line.contains("costliest bob 10.00 ms"), "{line}");
     }
 }

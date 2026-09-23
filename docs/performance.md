@@ -196,33 +196,48 @@ Every headless run, not only the harness's, logs one line every 10 s at
 INFO on `acswarm::tick_meter` (in `RUST_LOG`'s default filter):
 
 ```
-perf: N sessions, T ticks, work p50 A ms p95 B max C of 50 ms, over O, behind K,
-      late p95 L ms, per session S ms, costliest NAME M ms
+perf: N sessions, T ticks at R of 20 Hz, work p50 A ms p95 B max C of 50 ms, over O,
+      behind K, late p95 L ms, per session S ms, plugins P ms, costliest NAME M ms
 ```
 
+* **ticks at R of 20 Hz**: the rate the loop achieved against
+  `--tick-hz`. A process that cannot keep up shows it here first.
 * **work**: one loop iteration, from its start to just before it sleeps
   (never the sleep), against the period, 1000 / `--tick-hz` ms.
 * **over**: iterations whose work alone ran past the period. **behind**:
   iterations after which the loop gave up its schedule and started the
   next one at once; lateness plus work can cause that too, so behind is
   at least over.
-* **late p95**: how far past its scheduled time an iteration began. That
-  is the sleep's overshoot, the operating system's timer and not the
-  client's work: a figure that stays put as sessions are added is the OS.
-* **per session**: the mean time one session takes in an iteration (its
-  tick, its events, the plugins and scripts run for it). **costliest**:
-  the session with the highest mean, by character name.
+* **late p95**: how far past its due time an iteration began. While the
+  loop keeps up that is the sleep's overshoot, the operating system's
+  timer, which on a Mac measured about 10 ms on a 30 to 50 ms sleep and
+  under 1 ms on a 2 ms one, so it falls as the work grows. Once the loop falls behind it is
+  how far the iteration before overran, and grows with the load.
+* **per session**: the mean time one session's own work takes in an
+  iteration: its tick, its events and the lines it types. **plugins**:
+  the plugin host's time per iteration, every session's calls together;
+  part of it is per session (scripts, the autoplay panel) and part once
+  per iteration (the fleet, holdings and lobby panels keep house on the
+  first session's call). What is left of work is the loop's own:
+  reconnects, starts and stops, the status lines. **costliest**: the
+  session whose own work has the highest mean, by character name (by
+  account before the character is known, or once it is stopped).
 
-A process holds roughly period / per session sessions, less headroom for
-the spikes p95 and max show; one whose work p95 nears the period is full.
-Percentiles come from a fixed histogram and are within 3%; max is exact.
+Each session added costs about per session plus its share of plugins.
+A process is full when the rate drops below `--tick-hz`, behind climbs,
+or work p95 nears the period. Percentiles come from a fixed histogram and
+are within 3%; max is exact.
 
 At exit a `perf run:` line covers the whole run and adds overruns per
 minute, seconds measured against seconds of wall time, and the sleep
-windows excluded. The monotonic clock the loop runs on stops while the
-machine sleeps (so `--duration` does too); when the wall clock gets more
-than 2 s ahead of it between two iterations, a WARN says how long the
-machine slept and that window is dropped rather than reported.
+windows excluded. `tools/load-test.sh` parses it, and the test
+`the_run_line_has_the_shape_the_harness_reads` pins its shape. The
+monotonic clock the loop runs on stops while the machine sleeps (so
+`--duration` does too). The boot clock (CLOCK_MONOTONIC on macOS,
+CLOCK_BOOTTIME on Linux) runs on and cannot be set. When it gets more
+than 2 s ahead of the monotonic clock between two iterations, a WARN
+says how long the machine slept, and that window is dropped rather than
+reported.
 
 ### The table
 
@@ -232,8 +247,8 @@ machine slept and that window is dropped rather than reported.
 | RSS | peak of the processes' summed RSS over the samples, and that over the sessions |
 | acswarm CPU | mean from each process's CPU time over the sampled span, summed over processes; peak is the highest summed `ps` %CPU sample |
 | ACE CPU | the server container's mean and peak, and its peak memory; `-` without Docker |
-| tick work, overruns, late, per session tick | from the `perf run:` lines; with `--procs`, the worst process |
-| measured | seconds measured and of wall time, from the shortest process |
+| tick rate, tick work, overruns, late, per session tick, plugins | from the `perf run:` lines; with `--procs`, the worst figure of any process, column by column (the lowest rate) |
+| measured | seconds measured and of wall time, both from the process measured least |
 | sleep windows excluded | windows dropped for a machine sleep |
 
 RSS counts the resident pages of the memory-mapped DATs, which are clean

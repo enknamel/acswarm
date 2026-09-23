@@ -237,26 +237,49 @@ unmade=$(strip "${logs[@]}" | grep -c 'character creation failed\|cannot create'
 
 echo
 echo "load-test: each process's whole run"
+run_lines=()
 for log in "${logs[@]}"; do
   line=$(strip "${log}" | sed -n 's/.*\(perf run: .*\)/\1/p' | tail -1)
-  echo "  $(basename "${log}" .log): ${line:-no perf run line (did it exit cleanly?)}"
+  echo "  $(basename "${log}" .log): ${line:-no perf run line (it crashed or was killed)}"
+  [[ -z "${line}" ]] || run_lines+=("${line}")
 done
 
-# The run lines' numbers, one row per process: work p50, p95 and max, the period,
-# overruns per minute, late p95, per session, seconds measured and of wall (sed stops at \9).
-runs=$(strip "${logs[@]}" | sed -E -n 's/.*perf run: [0-9]+ sessions, [0-9]+ ticks, work p50 ([0-9.-]+) ms p95 ([0-9.-]+) max ([0-9.-]+) of ([0-9.]+) ms, over [0-9]+, behind [0-9]+, late p95 ([0-9.-]+) ms, per session ([0-9.-]+) ms, costliest .*, ([0-9.]+) overruns\/min, ([0-9]+) s measured of ([0-9]+) s wall, .*/\1 \2 \3 \4 \7 \5 \6 \8 \9/p')
-sleeps=$(strip "${logs[@]}" | sed -E -n 's/.*, ([0-9]+) sleep windows excluded.*/\1/p' |
-  awk 'BEGIN { m = 0 } $1 > m { m = $1 } END { print m }')
-ticks=$(printf '%s\n' "${runs}" | awk '
-  function worst(i, v) { if ($i != "-" && (!(i in w) || $i + 0 > w[i])) w[i] = $i + 0 }
-  NF >= 9 { n++; for (i = 1; i <= 7; i++) worst(i); if (!m || $8 < m) m = $8; if ($9 > wall) wall = $9 }
+# The run lines' numbers, worst of the processes column by column: the lowest rate, the Hz,
+# the highest work p50, p95 and max, the period, the highest late p95, per session, plugins and
+# overruns per minute, and seconds measured and of wall from the process measured least, then
+# how many lines had the shape pinned by `the_run_line_has_the_shape_the_harness_reads`
+# (bins/acswarm/src/tick_meter.rs) and how many did not. A field is `-` when nothing was timed.
+ticks=$(printf '%s\n' "${run_lines[@]+"${run_lines[@]}"}" | awk '
+  BEGIN {
+    v = "([0-9.]+|-)"
+    shape = "^perf run: [0-9]+ sessions, [0-9]+ ticks at " v " of [0-9]+ Hz, work p50 " v \
+      " ms p95 " v " max " v " of [0-9.]+ ms, over [0-9]+, behind [0-9]+, late p95 " v \
+      " ms, per session " v " ms, plugins " v " ms, costliest .*, [0-9.]+ overruns/min, " \
+      "[0-9]+ s measured of [0-9]+ s wall, [0-9]+ sleep windows excluded \\([0-9]+ s asleep\\)$"
+  }
+  function most(i, x) { if (x != "-" && (!(i in w) || x + 0 > w[i])) w[i] = x + 0 }
   function f(i, fmt) { return (i in w) ? sprintf(fmt, w[i]) : "-" }
+  NF == 0 { next }
+  $0 !~ shape { bad++; next }
+  {
+    n++; k = split($0, t, " ")
+    if (t[8] != "-" && (!("rate" in w) || t[8] + 0 < w["rate"])) w["rate"] = t[8] + 0
+    hz = t[10]; period = t[21]
+    most("p50", t[14]); most("p95", t[17]); most("max", t[19]); most("late", t[29])
+    most("per", t[33]); most("plugins", t[36]); most("over", t[k - 15])
+    if (!n0 || t[k - 13] + 0 < measured) { n0 = 1; measured = t[k - 13] + 0; wall = t[k - 9] + 0 }
+  }
   END {
-    if (!n) { print "-\t-\t-\t-\t-\t-\t-\t-\t-"; exit }
-    printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%d\n", f(1, "%.1f"), f(2, "%.1f"), f(3, "%.1f"),
-      f(4, "%g"), f(5, "%.1f"), f(6, "%.1f"), f(7, "%.2f"), m, wall
+    if (!n) { printf "-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t0\t%d\n", bad; exit }
+    printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%d\t%d\t%d\n", f("rate", "%.1f"), hz,
+      f("p50", "%.1f"), f("p95", "%.1f"), f("max", "%.1f"), period, f("late", "%.1f"),
+      f("per", "%.2f"), f("plugins", "%.2f"), f("over", "%.1f"), measured, wall, n, bad
   }')
-IFS=$'\t' read -r p50 p95 pmax period over late per_session measured wall <<<"${ticks}"
+IFS=$'\t' read -r rate hz p50 p95 pmax period late per_session plugins over measured wall \
+  parsed unparsed <<<"${ticks}"
+sleeps=$(printf '%s\n' "${run_lines[@]+"${run_lines[@]}"}" |
+  sed -E -n 's/.*, ([0-9]+) sleep windows excluded.*/\1/p' |
+  awk 'BEGIN { m = 0 } $1 > m { m = $1 } END { print m }')
 
 # The samples: peak total RSS, mean CPU from CPU time over the sampled span (ps %CPU is a
 # decaying average, so its peak is shown beside it), and the server's CPU and memory.
@@ -306,14 +329,21 @@ worst=""
   echo "| RSS | ${rss_mb} MB peak total, ${per_session_mb} MB per session (process base included) |"
   echo "| acswarm CPU | ${cpu_mean}% mean, ${cpu_peak}% peak ps sample (all processes; one core = 100%) |"
   echo "| ACE CPU | ${ace_cpu}% mean, ${ace_peak}% peak; ${ace_mem} MB peak memory |"
+  echo "| tick rate | ${rate} of ${hz} Hz${worst} |"
   echo "| tick work | p50 ${p50} ms, p95 ${p95} ms, max ${pmax} ms of ${period} ms${worst} |"
   echo "| overruns | ${over} per minute${worst} |"
   echo "| late | p95 ${late} ms${worst} |"
-  echo "| per session tick | ${per_session} ms mean${worst} |"
-  echo "| measured | ${measured} s of ${wall} s wall; ${nsamples} process samples |"
+  echo "| per session tick | ${per_session} ms mean, the session's own work${worst} |"
+  echo "| plugins | ${plugins} ms per tick, every session's calls together${worst} |"
+  echo "| measured | ${measured} s of ${wall} s wall, the process measured least; ${nsamples} process samples |"
   echo "| sleep windows excluded | ${sleeps} |"
 } | tee "${out}/summary.md"
 ((refused)) && echo "load-test: ${refused} line(s) say an account was still logged on: wait a minute and rerun"
 ((unmade)) && echo "load-test: ${unmade} character creation(s) failed; the proc logs say why"
 echo "load-test: logs, samples.tsv and summary.md in ${out}"
+if ((parsed < procs)); then
+  echo "load-test: only ${parsed} of ${procs} processes left a perf run line this script can read" \
+    "(${unparsed} of another shape); the tick rows leave the others out" >&2
+  exit 1
+fi
 exit $((interrupted ? 130 : 0))
