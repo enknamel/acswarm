@@ -104,10 +104,11 @@ impl Client {
     pub fn wanted_buffs(&self) -> Vec<crate::buffs::Want> {
         // With the components and mana to try: a wand not yet in hand
         // is the one lack that does not count, since wielding one is
-        // the first thing done.
+        // the first thing done. The pack is counted once, not per spell.
+        let carried = self.components();
         self.wanted_buffs_if(|id| {
             matches!(
-                self.can_cast(id),
+                self.can_cast_from(id, Some(&carried)),
                 crate::magic::CastCheck::Ok | crate::magic::CastCheck::NoCaster
             )
         })
