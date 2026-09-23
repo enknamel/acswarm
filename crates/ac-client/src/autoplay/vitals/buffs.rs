@@ -291,13 +291,20 @@ impl Client {
                 // A wand that is carried but held off after a refusal is
                 // a wait, not a want: saying "no wand" for it sent an
                 // earlier reader looking through the pack for one.
-                self.autoplay.say(
-                    Doing::Buffing,
+                //
+                // Noted, not said: this rule is standing aside, and the
+                // step that does claim the tick writes the status line
+                // next. Setting it here only made the two flap, which a
+                // live run turned into 667 identical lines in five
+                // minutes -- twice a second, enough to bury anything
+                // worth reading. `note` says it once a window.
+                self.autoplay.note(
                     if self.carries_a_caster() {
                         format!("waiting to take a wand up to cast {name}")
                     } else {
                         format!("no wand to cast {name} with")
                     },
+                    now,
                 );
                 return false;
             }
