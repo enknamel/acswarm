@@ -248,7 +248,9 @@ impl Client {
             return false;
         }
         // Each pass looks once a BUFF_CHECK_EVERY on its own clock, so a
-        // top-up that holds off cannot stop the urgent one looking.
+        // top-up that holds off cannot stop the urgent one looking. A top-up
+        // paced out in a shorter lull waits for a later one, perhaps a fight
+        // on: top_up_within, far wider than never_below, leaves that room.
         let checked = if urgent {
             self.autoplay.urgent_buffs_checked
         } else {
