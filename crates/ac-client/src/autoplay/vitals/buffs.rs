@@ -38,7 +38,7 @@ fn buff_within(cfg: &Buffs, urgent: bool, fighting: bool, wand_in_hand: bool) ->
     cfg.never_below
 }
 
-/// How often the buffs are gone through to see what is due.
+/// How often each buff pass, urgent and top-up, works out what is due.
 const BUFF_CHECK_EVERY: Duration = Duration::from_millis(1000);
 
 impl Client {
@@ -224,12 +224,14 @@ impl Client {
         {
             return false;
         }
-        if urgent
-            && self
-                .autoplay
-                .buffs_checked
-                .is_some_and(|t| now.duration_since(t) < BUFF_CHECK_EVERY)
-        {
+        // Each pass looks once a BUFF_CHECK_EVERY on its own clock, so a
+        // top-up that holds off cannot stop the urgent one looking.
+        let checked = if urgent {
+            self.autoplay.urgent_buffs_checked
+        } else {
+            self.autoplay.top_ups_checked
+        };
+        if checked.is_some_and(|t| now.duration_since(t) < BUFF_CHECK_EVERY) {
             return false;
         }
         // A buff is never worth a cancelled swing: it goes back up in
@@ -243,7 +245,11 @@ impl Client {
             );
             return false;
         }
-        self.autoplay.buffs_checked = Some(now);
+        if urgent {
+            self.autoplay.urgent_buffs_checked = Some(now);
+        } else {
+            self.autoplay.top_ups_checked = Some(now);
+        }
         let within = buff_within(
             &cfg,
             urgent,
@@ -252,9 +258,12 @@ impl Client {
         );
         // Find what is due before touching the hands: the urgent pass
         // runs every tick and must cost nothing when nothing is due.
-        let Some((spell, target, category, name, lasts)) = self.due_buff(within, now) else {
+        // Worked out once, for the pick and for saying why none is due.
+        let wants = self.auto_buffs();
+        let Some((spell, target, category, name, lasts)) = self.due_buff_among(&wants, within, now)
+        else {
             if !urgent {
-                self.autoplay_explain_buffs(now);
+                self.autoplay_explain_buffs(&wants, now);
             }
             return false;
         };
@@ -394,14 +403,15 @@ impl Client {
 
     /// When buffs are wanted but none can be cast, say why for the
     /// first of them, so a character standing unbuffed is not a mystery.
-    fn autoplay_explain_buffs(&mut self, now: Instant) {
+    /// `wants` is `wanted_buffs()` as the pass that found none due saw it.
+    fn autoplay_explain_buffs(&mut self, wants: &[crate::buffs::Want], now: Instant) {
         use crate::buffs::Target;
         use crate::magic::CastCheck;
         if !self.autoplay.config.buffs.auto {
             return;
         }
         let top_up = self.autoplay.config.buffs.top_up_within;
-        for want in self.wanted_buffs() {
+        for want in wants {
             let left = match want.target {
                 Target::Me => self.category_left(want.category, want.power),
                 Target::Item(g) => self.item_buff_left(g, want.category, now),
@@ -431,6 +441,25 @@ impl Client {
     /// first. `(spell, target, category, name, seconds it lasts)`.
     pub(crate) fn due_buff(
         &self,
+        within: f32,
+        now: Instant,
+    ) -> Option<(u32, crate::buffs::Target, u32, String, f32)> {
+        self.due_buff_among(&self.auto_buffs(), within, now)
+    }
+
+    /// `wanted_buffs()` when the config's `auto` is on, else none.
+    fn auto_buffs(&self) -> Vec<crate::buffs::Want> {
+        if self.autoplay.config.buffs.auto {
+            self.wanted_buffs()
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// The same as `due_buff`, from `wants` as `auto_buffs` gave them.
+    fn due_buff_among(
+        &self,
+        wants: &[crate::buffs::Want],
         within: f32,
         now: Instant,
     ) -> Option<(u32, crate::buffs::Target, u32, String, f32)> {
@@ -474,14 +503,12 @@ impl Client {
             let lasts = sp.and_then(|s| s.duration()).unwrap_or(1800.0) as f32;
             due = Some((rank, left, spell, target, category, name, lasts));
         };
-        if cfg.auto {
-            for want in self.wanted_buffs() {
-                let left = match want.target {
-                    Target::Me => self.category_left(want.category, want.power),
-                    Target::Item(g) => self.item_buff_left(g, want.category, now),
-                };
-                offer(left, want.spell, want.target, want.category);
-            }
+        for want in wants {
+            let left = match want.target {
+                Target::Me => self.category_left(want.category, want.power),
+                Target::Item(g) => self.item_buff_left(g, want.category, now),
+            };
+            offer(left, want.spell, want.target, want.category);
         }
         for name in &cfg.spells {
             let Some(spell) = self.spell_by_name(name) else {

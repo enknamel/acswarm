@@ -213,10 +213,10 @@ pub struct Autoplay {
     /// Notes said lately and when, so that two alternating notes are
     /// each said once per `NOTE_EVERY` rather than every frame.
     noted: Recent<String>,
-    /// When the buffs were last gone through. The urgent pass runs
-    /// every tick, and working out what is due walks the whole
-    /// spellbook, so it is only done once a second.
-    buffs_checked: Option<Instant>,
+    /// When the urgent buff pass last worked out what is due, which walks the whole spellbook.
+    urgent_buffs_checked: Option<Instant>,
+    /// The same for the top-up pass: each keeps its own clock (see `BUFF_CHECK_EVERY`).
+    top_ups_checked: Option<Instant>,
     /// The weapon put down to cast an urgent buff mid-fight, to be taken
     /// up again the moment the buffing is done.
     put_down: Option<u32>,
