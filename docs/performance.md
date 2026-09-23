@@ -175,20 +175,34 @@ creature names and names in use (`CharacterHandler.cs:51-70`). Once
 placed, each session types `/load_autoplay`, a script command hook that
 turns autoplay on, so the sessions play rather than stand.
 
-Every 5 s it samples each process's RSS and CPU (`ps`) and the server
-container's CPU and memory (`docker stats ace-server`), and at the end
-prints one table. It refuses to start with under 15 GB free or when an
-`acswarm` already holds one of its accounts. Ctrl-C logs the sessions off
-and still prints the table; a second Ctrl-C gives them 15 s to log off
-and then kills them. A session killed without logging off holds its
+It builds the release `acswarm` first, which takes no time when it is
+current; `--bin` names another binary, which must print the `perf run:`
+line the script reads. Every 5 s it samples each process's RSS and CPU
+(`ps`) and the server container's CPU and memory (`docker stats
+ace-server`), and at the end prints one table. It exits 1 when a session
+was never placed, a process failed, or a process left no `perf run:` line
+it can read, and says which.
+
+It refuses to start with under 15 GB free, or when a running `acswarm`
+was started with `--client` or `-a` for one of its accounts. It reads
+command lines only, so it misses a session opened from a window's fleet
+panel. The local ACE admits 128 sessions in all, everyone's
+(`MaximumAllowedSessions` in `reference/ace-run/Config/Config.js`); past
+that a login is refused as the logon server is full and retried, so the
+script warns above 128. Ctrl-C logs the sessions off and still prints
+the table; a second Ctrl-C, or SIGTERM or SIGHUP, gives them 15 s to log
+off and then kills them. `acswarm` logs off on any of the three, so a
+signal sent to the whole process group logs off too. A session killed without logging off holds its
 account on the server for about a minute, so a rerun straight after one
 is refused as already logged on.
 
-Each run gets its own config and cache directory under `--out` (default
-`$TMPDIR/acswarm-load-DATE`), so it plays by the default rules and its
-characters stay out of the everyday settings, ledger and holdings. There
-too: `procN.log` (all a process printed), `samples.tsv` and `summary.md`.
-Take numbers on a quiet machine, with the lid open and nothing building.
+Each run gets its own config and cache directory under `--out`, a new or
+empty folder outside the repository (default a fresh
+`$TMPDIR/acswarm-load-DATE.XXXX`), so it plays by the default rules and
+its characters stay out of the everyday settings, ledger and holdings.
+There too: `procN.log` (all a process printed), `samples.tsv` and
+`summary.md`. Take numbers on a quiet machine, with the lid open and
+nothing building.
 
 ### The perf line
 
@@ -245,7 +259,7 @@ reported.
 |---|---|
 | sessions | asked; placed (a `placed in cell` line); with autoplay on (the script's reply) |
 | RSS | peak of the processes' summed RSS over the samples, and that over the sessions |
-| acswarm CPU | mean from each process's CPU time over the sampled span, summed over processes; peak is the highest summed `ps` %CPU sample |
+| acswarm CPU | mean from each process's CPU time over the samples taken inside its loop, summed over processes; a gap over 10 s between two samples (a machine sleep) is left out, and so are startup and logging off; peak is the highest summed `ps` %CPU sample in the loop |
 | ACE CPU | the server container's mean and peak, and its peak memory; `-` without Docker |
 | tick rate, tick work, overruns, late, per session tick, plugins | from the `perf run:` lines; with `--procs`, the worst figure of any process, column by column (the lowest rate) |
 | measured | seconds measured and of wall time, both from the process measured least |

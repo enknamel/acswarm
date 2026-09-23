@@ -43,6 +43,11 @@ done
 die() { echo "load-test: $*" >&2; exit 1; }
 
 [[ "${sessions}" =~ ^[0-9]+$ ]] && ((sessions >= 1 && sessions <= 999)) || die "SESSIONS must be 1..999"
+# The local ACE admits 128 authenticated sessions in all, everyone's (MaximumAllowedSessions in
+# reference/ace-run/Config/Config.js, NetworkManager.cs:101-104); past that a login is refused as
+# the logon server is full, which acswarm counts as a drop and retries.
+((sessions <= 128)) ||
+  echo "load-test: warning: the local ACE admits 128 sessions (MaximumAllowedSessions); the rest will retry" >&2
 [[ "${duration}" =~ ^[0-9]+$ ]] && ((duration >= 1)) || die "SECONDS must be a whole number of seconds"
 [[ "${procs}" =~ ^[0-9]+$ ]] && ((procs >= 1 && procs <= sessions)) || die "--procs must be 1..SESSIONS"
 # Letters only: the character names are made from it, and the server takes letters,
@@ -77,21 +82,28 @@ for ((i = 1; i <= sessions; i++)); do
   names+=("${name}")
 done
 
-# One session per account: a process already holding one would be refused or would drop.
+# One session per account: a process already holding one would be refused or would drop. Only
+# command lines are read (--client, or -a as aclauncher passes it), not a window's fleet panel.
 for acct in "${accounts[@]}"; do
-  if running=$(pgrep -f -- "--client ${acct}:" 2>/dev/null); then
+  if running=$(pgrep -f -- "(--client[ =]${acct}:|(-a|--account)[ =]${acct}( |$))" 2>/dev/null); then
     die "account ${acct} is already in use by pid(s) $(echo ${running}); stop it first"
   fi
 done
 
+# Without --bin, HEAD's release acswarm, built every time (nothing to do when it is current), in
+# the target folder cargo itself reports, which follows CARGO_TARGET_DIR relative to the repo.
 if [[ -z "${bin}" ]]; then
-  bin="${CARGO_TARGET_DIR:-${root}/target}/release/acswarm"
-  if [[ ! -x "${bin}" ]]; then
-    echo "load-test: building the release acswarm" >&2
-    (cd "${root}" && cargo build --release -p acswarm)
-  fi
+  echo "load-test: building the release acswarm" >&2
+  (cd "${root}" && cargo build --release -p acswarm)
+  target=$(cd "${root}" && cargo metadata --no-deps --format-version 1 |
+    sed -E -n 's/.*"target_directory":"([^"]*)".*/\1/p')
+  bin="${target}/release/acswarm"
 fi
 [[ -x "${bin}" ]] || die "no acswarm binary at ${bin}"
+# A piece of the `perf run:` line's format (TickMeter's summary) that the summary below reads:
+# an older binary would log every account in and leave the tick rows empty.
+grep -a -q -F ' ms, plugins ' "${bin}" ||
+  die "${bin} predates the perf run line this script reads; rebuild it or drop --bin"
 
 data_dir="${AC_DATA_DIR:-}"
 if [[ -z "${data_dir}" ]]; then
@@ -100,21 +112,49 @@ if [[ -z "${data_dir}" ]]; then
 fi
 [[ -f "${data_dir}/client_portal.dat" ]] || die "set AC_DATA_DIR to the folder holding client_portal.dat"
 
-# Logs stay out of the repo: session logs never enter it.
-out="${out:-${TMPDIR:-/tmp}/acswarm-load-$(date +%Y%m%d-%H%M%S)}"
-mkdir -p "${out}"
-out="$(cd "${out}" && pwd -P)"
+# The absolute, symlink-free form of a folder whose last parts may not exist yet.
+resolve() {
+  local path="$1" rest=""
+  [[ "${path}" == /* ]] || path="${PWD}/${path}"
+  while [[ "${path}" == */ && "${path}" != / ]]; do path="${path%/}"; done
+  while [[ ! -d "${path}" ]]; do
+    rest="/${path##*/}${rest}"
+    path="${path%/*}"
+    [[ -n "${path}" ]] || path=/
+  done
+  printf '%s%s\n' "$(cd "${path}" && pwd -P)" "${rest}"
+}
+
+# Logs stay out of the repo: session logs never enter it. Checked before anything is made.
 repo="$(cd "${root}" && pwd -P)"
 common="$(git -C "${root}" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
-for inside in "${repo}" "${common%/.git}"; do
-  [[ -n "${inside}" && "${out}/" == "${inside}/"* ]] && die "--out ${out} is inside the repository"
-done
+is_in_repo() {
+  local inside
+  for inside in "${repo}" "${common%/.git}"; do
+    [[ -n "${inside}" && "$1/" == "${inside}/"* ]] && return 0
+  done
+  return 1
+}
+if [[ -n "${out}" ]]; then
+  out="$(resolve "${out}")"
+  [[ "${out}/" != */../* && "${out}/" != */./* ]] ||
+    die "--out ${out} climbs through folders that do not exist yet; name it without . or .."
+  is_in_repo "${out}" && die "--out ${out} is inside the repository"
+  # A folder of its own: an earlier run's proc logs and samples would join this run's summary.
+  [[ ! -d "${out}" || -z "$(ls -A "${out}")" ]] ||
+    die "--out ${out} already holds files; name a new or empty folder"
+  mkdir -p "${out}"
+else
+  out="$(mktemp -d "${TMPDIR:-/tmp}/acswarm-load-$(date +%Y%m%d-%H%M%S).XXXX")"
+  out="$(cd "${out}" && pwd -P)"
+  if is_in_repo "${out}"; then rmdir "${out}"; die "TMPDIR is inside the repository; pass --out"; fi
+fi
 
 # A config and cache of their own, so the run plays by the default rules and its characters
 # stay out of the everyday settings, ledger and holdings; the world grid is copied in.
 user_cache="${ACSWARM_CACHE_DIR:-${HOME}/.cache/acswarm}"
 mkdir -p "${out}/cache" "${out}/scripts"
-if [[ -f "${user_cache}/worldgrid.bin" && ! -f "${out}/cache/worldgrid.bin" ]]; then
+if [[ -f "${user_cache}/worldgrid.bin" ]]; then
   cp -c "${user_cache}/worldgrid.bin" "${out}/cache/" 2>/dev/null ||
     cp "${user_cache}/worldgrid.bin" "${out}/cache/"
 fi
@@ -132,9 +172,11 @@ printf '%s\n' "/load_autoplay" >"${out}/lines.txt"
 pids=()
 sampler=""
 
-# Every child goes on exit: acswarm logs off on SIGINT (up to 10 s, ac_client::LOG_OFF_WAIT),
-# so it gets that long before SIGKILL; a killed session holds its account on the server
-# for about a minute.
+# Every child goes on exit: acswarm logs off on SIGINT, SIGTERM or SIGHUP (up to 10 s,
+# ac_client::LOG_OFF_WAIT), so it gets that long before SIGKILL; a killed session holds its
+# account on the server for about a minute.
+# SIGINT goes again every second: bash starts a background child with SIGINT ignored, and until
+# acswarm's handler is in (about a second into startup) one would be lost; after, it is harmless.
 cleanup() {
   local code=$? live=() pid tries any
   trap - EXIT INT TERM HUP
@@ -144,11 +186,11 @@ cleanup() {
   done
   if ((${#live[@]})); then
     echo "load-test: stopping ${#live[@]} acswarm process(es); they log off first" >&2
-    kill -INT "${live[@]}" 2>/dev/null || true
     for ((tries = 0; tries < 15; tries++)); do
       any=0
       for pid in "${live[@]}"; do kill -0 "${pid}" 2>/dev/null && any=1; done
       ((any)) || break
+      kill -INT "${live[@]}" 2>/dev/null || true
       sleep 1
     done
     for pid in "${live[@]}"; do kill -KILL "${pid}" 2>/dev/null || true; done
@@ -160,14 +202,14 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 trap 'exit 129' HUP
 
-# The first Ctrl-C once the sessions run logs them off and still prints the table; a second
-# stops the script, which gives them the same 15 s as on any exit.
+# The first Ctrl-C once the sessions run logs them off and still prints the table (the wait
+# below sends SIGINT on every second); a second stops the script, which gives them the same
+# 15 s as on any exit.
 interrupted=0
 interrupt() {
   if ((interrupted)); then exit 130; fi
   interrupted=1
   echo "load-test: interrupted; the sessions log off (Ctrl-C again to stop harder)" >&2
-  for pid in "${pids[@]+"${pids[@]}"}"; do kill -INT "${pid}" 2>/dev/null || true; done
 }
 trap interrupt INT
 
@@ -190,11 +232,13 @@ for ((p = 0; p < procs && !interrupted; p++)); do
   pids+=($!)
 done
 unset args
+((${#pids[@]})) || exit 130 # interrupted before the first launch
 
-# Every 5 s: each process's RSS (KB), ps %CPU and CPU time, and the server container's
-# CPU and memory, one tab-separated row each.
+# Every 5 s: each process's RSS (KB), ps %CPU and CPU time, and where it is: 0 starting, 1 in
+# its loop (after acswarm's `headless: N session(s) to` line), 2 past it (a `perf run:` line);
+# and the server container's CPU and memory. One tab-separated row each.
 sample() {
-  local next now p pid row any ace
+  local next now p pid row any ace log phase
   next=$(date +%s)
   while :; do
     now=$(date +%s)
@@ -203,8 +247,12 @@ sample() {
       pid=${pids[p]}
       row=$(ps -o rss=,%cpu=,time= -p "${pid}" 2>/dev/null) || continue
       any=1
+      log="${out}/proc$((p + 1)).log"
+      phase=0
+      grep -q -F 'session(s) to ' "${log}" && phase=1
+      grep -q -F 'perf run: ' "${log}" && phase=2
       # shellcheck disable=SC2086 # the row is split into its three columns on purpose
-      printf '%s\tproc%d\t%s\t%s\t%s\t%s\n' "${now}" $((p + 1)) "${pid}" ${row}
+      printf '%s\tproc%d\t%s\t%s\t%s\t%s\t%s\n' "${now}" $((p + 1)) "${pid}" ${row} "${phase}"
     done
     if command -v docker >/dev/null 2>&1 &&
       ace=$(docker stats --no-stream --format '{{.CPUPerc}}\t{{.MemUsage}}' ace-server 2>/dev/null); then
@@ -214,26 +262,38 @@ sample() {
     next=$((next + 5))
     now=$(date +%s)
     if ((next > now)); then sleep $((next - now)); else next=${now}; fi
-  done >>"${out}/samples.tsv"
+  done >"${out}/samples.tsv"
 }
 sample &
 sampler=$!
 
-for pid in "${pids[@]}"; do
-  # A trapped Ctrl-C ends a wait early; wait again until the process is gone.
-  while kill -0 "${pid}" 2>/dev/null; do wait "${pid}" || true; done
+# Polled rather than waited on, so that after a Ctrl-C SIGINT goes again every second (see
+# cleanup); bash keeps each exit status for the one wait after.
+failed=()
+for p in "${!pids[@]}"; do
+  pid=${pids[p]}
+  while kill -0 "${pid}" 2>/dev/null; do
+    if ((interrupted)); then kill -INT "${pids[@]}" 2>/dev/null || true; fi
+    sleep 1
+  done
+  status=0
+  wait "${pid}" 2>/dev/null || status=$?
+  ((status == 0)) || failed+=("proc$((p + 1)) exited with status ${status}")
 done
 kill "${sampler}" 2>/dev/null || true
 wait "${sampler}" 2>/dev/null || true
 sampler=""
 
 # ---- the summary ------------------------------------------------------------------------
-logs=("${out}"/proc*.log)
+logs=()
+for ((p = 1; p <= ${#pids[@]}; p++)); do logs+=("${out}/proc${p}.log"); done
 strip() { sed -E $'s/\x1b\\[[0-9;]*m//g' "$@"; }
 placed=$(strip "${logs[@]}" | sed -E -n 's/^\[([^]]+)\] placed in cell .*/\1/p' | sort -u | wc -l | tr -d ' ')
 autoplay=$(strip "${logs[@]}" | grep -c 'load test: autoplay on' || true)
 refused=$(strip "${logs[@]}" | grep -c 'already logged on' || true)
 unmade=$(strip "${logs[@]}" | grep -c 'character creation failed\|cannot create' || true)
+full=$(strip "${logs[@]}" | grep -c 'the logon server is full' || true)
+denied=$(strip "${logs[@]}" | grep -c 'not accepted\|booted this account' || true)
 
 echo
 echo "load-test: each process's whole run"
@@ -281,8 +341,9 @@ sleeps=$(printf '%s\n' "${run_lines[@]+"${run_lines[@]}"}" |
   sed -E -n 's/.*, ([0-9]+) sleep windows excluded.*/\1/p' |
   awk 'BEGIN { m = 0 } $1 > m { m = $1 } END { print m }')
 
-# The samples: peak total RSS, mean CPU from CPU time over the sampled span (ps %CPU is a
-# decaying average, so its peak is shown beside it), and the server's CPU and memory.
+# The samples: peak total RSS; mean CPU from CPU time over the pairs of samples inside the loop
+# at most 10 s apart (a wider gap is a machine sleep), and ps %CPU, a decaying average, for the
+# peak beside it; and the server's CPU and memory.
 res=$(awk -F'\t' '
   function secs(t, n, a, d, s, i) {
     d = 0; if (index(t, "-")) { d = substr(t, 1, index(t, "-") - 1); t = substr(t, index(t, "-") + 1) }
@@ -298,10 +359,13 @@ res=$(awk -F'\t' '
     return m / 1048576
   }
   $2 ~ /^proc/ && $4 > 0 {
-    rss[$1] += $4; pcpu[$1] += $5
+    rss[$1] += $4
     c = secs($6)
-    if (!($3 in t0)) { t0[$3] = $1; c0[$3] = c }
-    t1[$3] = $1; c1[$3] = c
+    if ($7 == 1) {
+      pcpu[$1] += $5
+      if (pp[$3] == 1 && $1 - pt[$3] <= 10) { dc[$3] += c - pc[$3]; dt[$3] += $1 - pt[$3] }
+    }
+    pt[$3] = $1; pc[$3] = c; pp[$3] = $7
     samples++
   }
   $2 == "ace" {
@@ -310,7 +374,7 @@ res=$(awk -F'\t' '
   }
   END {
     for (t in rss) { if (rss[t] > peak) peak = rss[t]; if (pcpu[t] > ppeak) ppeak = pcpu[t] }
-    for (p in t0) if (t1[p] > t0[p]) cpu += (c1[p] - c0[p]) / (t1[p] - t0[p]) * 100
+    for (p in dt) if (dt[p] > 0) cpu += dc[p] / dt[p] * 100
     printf "%.1f\t%.1f\t%.1f\t%s\t%s\t%s\t%d\n", peak / 1024, cpu, ppeak,
       an ? sprintf("%.1f", acpu / an) : "-", an ? sprintf("%.1f", amax) : "-",
       an ? sprintf("%.0f", amem) : "-", samples
@@ -327,7 +391,7 @@ worst=""
   echo "| sessions | ${sessions} asked, ${placed} placed, ${autoplay} with autoplay on |"
   echo "| processes | ${procs} |"
   echo "| RSS | ${rss_mb} MB peak total, ${per_session_mb} MB per session (process base included) |"
-  echo "| acswarm CPU | ${cpu_mean}% mean, ${cpu_peak}% peak ps sample (all processes; one core = 100%) |"
+  echo "| acswarm CPU | ${cpu_mean}% mean, ${cpu_peak}% peak ps sample, in the loop (all processes; one core = 100%) |"
   echo "| ACE CPU | ${ace_cpu}% mean, ${ace_peak}% peak; ${ace_mem} MB peak memory |"
   echo "| tick rate | ${rate} of ${hz} Hz${worst} |"
   echo "| tick work | p50 ${p50} ms, p95 ${p95} ms, max ${pmax} ms of ${period} ms${worst} |"
@@ -340,10 +404,13 @@ worst=""
 } | tee "${out}/summary.md"
 ((refused)) && echo "load-test: ${refused} line(s) say an account was still logged on: wait a minute and rerun"
 ((unmade)) && echo "load-test: ${unmade} character creation(s) failed; the proc logs say why"
+((full)) && echo "load-test: ${full} login(s) refused as the logon server is full: ACE admits 128 sessions"
+((denied)) && echo "load-test: ${denied} login(s) refused: ACE boots a wrong password for an existing account (AuthenticationHandler.cs:168-175); check ACSWARM_LOAD_PASSWORD"
 echo "load-test: logs, samples.tsv and summary.md in ${out}"
-if ((parsed < procs)); then
-  echo "load-test: only ${parsed} of ${procs} processes left a perf run line this script can read" \
-    "(${unparsed} of another shape); the tick rows leave the others out" >&2
-  exit 1
-fi
-exit $((interrupted ? 130 : 0))
+
+problems=("${failed[@]+"${failed[@]}"}")
+((placed >= sessions)) || problems+=("only ${placed} of ${sessions} sessions were placed")
+((parsed >= procs)) || problems+=("only ${parsed} of ${procs} processes left a perf run line this script can read (${unparsed} of another shape); the tick rows leave the others out")
+for problem in "${problems[@]+"${problems[@]}"}"; do echo "load-test: ${problem}" >&2; done
+((interrupted)) && exit 130
+exit $((${#problems[@]} ? 1 : 0))
