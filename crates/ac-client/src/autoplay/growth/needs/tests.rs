@@ -519,3 +519,32 @@ fn arrows_the_player_said_to_sell_are_not_counted_as_the_launchers_stock() {
         .unwrap_or_else(|| panic!("the arrows it will be short of: {needs:?}"));
     assert_eq!((arrows.have, arrows.want), (0, 250));
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_counter_is_asked_for_the_named_stock_the_trip_was_made_for() {
+    // A character with no spell that burns tapers wants them by the buy list's name. The trip
+    // planner found a counter by that name, the counter's list only knew components by weenie,
+    // and a character walked to Archmage Cindrue again and again and bought none.
+    let holtburg = 0xA9B4_0019;
+    let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
+    c.world.stats.level = 20;
+    with_a_pack(&mut c, 20);
+    with_a_buy_list(&mut c, &[("Prismatic Taper", 100, 25)]);
+    let cfg = c.autoplay.config.growth.clone();
+    let stats = c.item_stats();
+    let taper = ac_vendor::counter::Ware {
+        wcid: 20631,
+        name: "Prismatic Taper".into(),
+        price: 300,
+        stock: None,
+        burden: 1,
+    };
+    let wants = c.vendor_shortfall_at(&cfg, &stats, std::slice::from_ref(&taper));
+    assert!(
+        wants.iter().any(|w| w.wcid == 20631 && w.short == 100),
+        "{wants:?}"
+    );
+    // A shelf without it: nothing is asked for.
+    assert!(c.vendor_shortfall_at(&cfg, &stats, &[]).is_empty());
+}
