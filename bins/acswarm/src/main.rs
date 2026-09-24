@@ -1386,6 +1386,8 @@ impl App {
         if steering && !net.client.autoplay.config.enabled {
             net.client.stop_moving_by_itself();
         }
+        // Every line this session's tick logs says whose it is.
+        let _whose = tracing::info_span!("s", a = %net.client.config.account).entered();
         let frame = net.client.tick(input, self.frame_dt, now);
         let events = net.client.drain_events();
         for ev in &events {
