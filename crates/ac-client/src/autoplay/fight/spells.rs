@@ -50,13 +50,12 @@ impl Client {
             }
         }
         // Out of the hunting area and not hitting us, or not here at
-        // all any more, it is let go (see `fight_target_gone`).
+        // all any more, it is let go (see `can_keep_target`, which the
+        // swing asks of what it holds too).
         let casting_at = self.autoplay.casting_at;
-        let kept = casting_at.filter(|g| {
-            alive(self, *g)
-                && !self.fight_target_gone(*g, underground)
-                && !self.left_behind_on_the_road(*g, now)
-        });
+        let kept = casting_at
+            .filter(|g| alive(self, *g))
+            .filter(|g| self.can_keep_target(*g, underground, now));
         let target = match kept {
             Some(g) => Some(g),
             None => {
@@ -69,7 +68,7 @@ impl Client {
                     self.ordered_target(cfg, now)
                         .map(|(g, _)| g)
                         .filter(|g| self.can_take_on(*g, cfg, underground, now))
-                        .or_else(|| self.pick_target(cfg))
+                        .or_else(|| self.pick_target(cfg, now))
                 }
             }
         };

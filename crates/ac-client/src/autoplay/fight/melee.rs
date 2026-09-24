@@ -89,9 +89,9 @@ impl Client {
             if self.stalled_on(t, now) {
                 return false;
             }
-            // And still here (see `fight_target_gone`).
-            let gone =
-                self.fight_target_gone(t, underground) || self.left_behind_on_the_road(t, now);
+            // And still here (see `can_keep_target`, which the spell
+            // path asks of what it holds too).
+            let gone = !self.can_keep_target(t, underground, now);
             if gone {
                 self.let_go(Release::Targets);
             }
@@ -191,23 +191,13 @@ impl Client {
                 return true;
             }
         }
-        // What cannot be judged yet is asked about, not attacked.
-        self.ask_about_strangers(me, &cfg);
-        let target = self
-            .world
-            .objects
-            .values()
-            .filter(|o| self.would_fight(o, &cfg, underground, now))
-            .filter_map(|o| {
-                let p = o.world_pos()?;
-                let d = p.distance(me);
-                (d <= cfg.radius).then_some((d, o.guid, o.name.clone()))
-            })
-            .min_by(|a, b| a.0.total_cmp(&b.0));
-        let Some((_, guid, name)) = target else {
+        // The spell path's own pick (`Client::pick_target`): a follower with nothing beside its
+        // leader picks nothing, and the follow steps have the tick.
+        let Some(guid) = self.pick_target(&cfg, now) else {
             self.note_walked_past(me, &cfg, underground, now);
             return false;
         };
+        let name = self.world.name_or_hex(guid);
         if self.autoplay_plan_hard(guid, &name, now) {
             return true;
         }

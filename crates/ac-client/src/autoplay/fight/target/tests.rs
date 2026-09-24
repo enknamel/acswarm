@@ -130,7 +130,7 @@ fn an_archer_picks_what_an_arrow_reaches_not_what_a_bolt_would() {
         radius: 40.0,
         ..Fight::default()
     };
-    assert_eq!(c.pick_target(&cfg), Some(ON_THE_FLAT));
+    assert_eq!(c.pick_target(&cfg, Instant::now()), Some(ON_THE_FLAT));
 }
 
 /// An Ice Golem standing at `at`, in the character's own landblock: the
@@ -219,7 +219,7 @@ fn a_caster_picks_what_its_arc_gets_over_not_what_a_swing_would_reach() {
         ..Fight::default()
     };
     assert_eq!(
-        c.pick_target(&cfg),
+        c.pick_target(&cfg, Instant::now()),
         Some(BEHIND_THE_RISE),
         "the arc gets over the rise, so the nearer one is in sight"
     );
@@ -269,7 +269,7 @@ fn the_pick_traces_the_spell_this_creature_will_be_thrown() {
         "the arc the caster leads with would have got over"
     );
     assert_eq!(
-        c.pick_target(&cfg),
+        c.pick_target(&cfg, Instant::now()),
         Some(IN_THE_OPEN),
         "naming one spell for the whole pick would have walked it round the rise"
     );
@@ -297,8 +297,163 @@ fn a_caster_with_nothing_to_throw_names_no_attack() {
         radius: 40.0,
         ..Fight::default()
     };
-    assert_eq!(c.pick_target(&cfg), Some(NEAR), "and then the nearest");
+    assert_eq!(
+        c.pick_target(&cfg, Instant::now()),
+        Some(NEAR),
+        "and then the nearest"
+    );
 }
+
+/// A level-20 character on its feet in the Holtburg field, on nobody's
+/// team: the block the fleet is measured in.
+fn in_the_field() -> Client {
+    const HOLTBURG: u32 = 0xA9B4_0019;
+    let mut c = testkit::character_of_level(testkit::no_data(), 20);
+    testkit::stand(&mut c, HOLTBURG, glam::vec3(84.0, 108.0, 94.0));
+    c
+}
+
+/// Put `c` behind a leader it follows, standing `metres` east of it.
+fn following_a_leader(c: &mut Client, metres: f32) {
+    let me = c.my_position().expect("on its feet");
+    c.autoplay.config.team.enabled = true;
+    c.autoplay.config.team.follow = true;
+    let mut boss = testkit::mate(0x5000_0002, "Fleetbot One");
+    boss.leader = true;
+    boss.leads = true;
+    boss.world = me + glam::vec3(metres, 0.0, 0.0);
+    c.autoplay.team = testkit::view_of(vec![boss]);
+}
+
+#[test]
+fn the_swing_and_the_spell_pick_the_same_creature() {
+    // The melee and missile path scanned inline in `autoplay_fight_as`
+    // for the plain nearest creature inside `Fight::radius`, with
+    // neither the leader's radius nor sight, so a follower whose leader
+    // hunted a field away turned and fought whatever wandered up to it
+    // while a caster beside it, picking through `pick_target`, did not.
+    let now = Instant::now();
+    let cfg = Fight::default();
+
+    // Alone, the nearest is the pick, and the swing goes at it.
+    let mut c = in_the_field();
+    let it = testkit::standing_by(&mut c, 0x8000_0001, "Revenant", 5.0).guid;
+    assert_eq!(c.pick_target(&cfg, now), Some(it));
+    assert!(c.autoplay_fight_as(now, &cfg));
+    assert_eq!(c.attack_target, Some(it));
+
+    // The same creature with a leader forty metres off stands
+    // thirty-five from it, outside the team's twenty-five metre fight
+    // radius: both paths pick nothing.
+    let mut c = in_the_field();
+    following_a_leader(&mut c, 40.0);
+    testkit::standing_by(&mut c, 0x8000_0001, "Revenant", 5.0);
+    assert_eq!(c.pick_target(&cfg, now), None);
+    assert!(!c.autoplay_fight_as(now, &cfg), "the inline scan swung");
+    assert_eq!(c.attack_target, None);
+
+    // And beside its leader it fights it again.
+    let mut c = in_the_field();
+    following_a_leader(&mut c, 3.0);
+    let it = testkit::standing_by(&mut c, 0x8000_0001, "Revenant", 5.0).guid;
+    assert_eq!(c.pick_target(&cfg, now), Some(it));
+    assert!(c.autoplay_fight_as(now, &cfg));
+    assert_eq!(c.attack_target, Some(it));
+}
+
+#[test]
+fn a_follower_out_of_reach_of_its_leader_picks_nothing_not_the_nearest() {
+    // Deliberate, and the whole point of the leader's radius: falling
+    // back to the nearest is the pick this replaces, so a fallback
+    // would undo the change on exactly the picks that differ. Standing
+    // down hands the tick to `catch up` (120) and `follow` (50), which
+    // close the gap, and the same creature is inside the radius once
+    // the follower is back beside its leader.
+    let now = Instant::now();
+    let cfg = Fight::default();
+    let mut c = in_the_field();
+    following_a_leader(&mut c, 40.0);
+    let near = testkit::standing_by(&mut c, 0x8000_0001, "Revenant", 2.0).guid;
+    let far = testkit::standing_by(&mut c, 0x8000_0002, "Revenant", 20.0).guid;
+    assert_eq!(c.pick_target(&cfg, now), Some(far), "the one by the leader");
+
+    // The leader out of reach of both: nothing is picked at all, though
+    // a creature stands two metres off.
+    following_a_leader(&mut c, 120.0);
+    assert_eq!(c.pick_target(&cfg, now), None);
+    assert!(!c.autoplay_fight_as(now, &cfg));
+
+    // A fight already joined is another matter: `can_keep_target` never
+    // asks where the leader stands, so one chased past that radius is
+    // finished rather than dropped.
+    c.attack_target = Some(near);
+    assert!(c.can_keep_target(near, false, now));
+    assert!(c.autoplay_fight_as(now, &cfg), "still fighting it");
+    assert_eq!(c.attack_target, Some(near));
+    assert_eq!(c.pick_target(&cfg, now), None, "and picks no other");
+}
+
+#[test]
+fn something_hitting_the_follower_is_fought_though_the_leader_is_a_field_away() {
+    // Every other walk-past rule yields to a creature already hitting
+    // the character -- the hunting area (`area_allows`), the road
+    // (`passing_by`), the critter rule (`a_critter`) -- and the
+    // leader's radius is another walk-past rule. Asked of the fight
+    // alone: in the table, catching up still comes first (below).
+    let now = Instant::now();
+    let cfg = Fight::default();
+    let mut c = in_the_field();
+    following_a_leader(&mut c, 40.0);
+    let it = testkit::standing_by(&mut c, 0x8000_0001, "Revenant", 5.0).guid;
+    assert_eq!(c.pick_target(&cfg, now), None, "nothing beside the leader");
+    assert!(!c.autoplay_fight_as(now, &cfg));
+
+    // The server names the attacker in what it sends, hit, miss or
+    // spell (see `Client::hit_lately_by`). One picker, so this is the
+    // swing's answer and the spell's alike.
+    c.autoplay.attacked_by("Revenant", Instant::now());
+    assert_eq!(c.pick_target(&cfg, now), Some(it));
+    assert!(c.autoplay_fight_as(now, &cfg), "it swings back");
+    assert_eq!(c.attack_target, Some(it));
+}
+
+/// `c` playing on its own with a Revenant `metres` east that has just attacked it.
+fn hit_by_a_revenant(c: &mut Client, metres: f32) -> u32 {
+    c.autoplay.config.enabled = true;
+    let it = testkit::standing_by(c, 0x8000_0001, "Revenant", metres).guid;
+    c.autoplay.attacked_by("Revenant", Instant::now());
+    it
+}
+
+#[test]
+fn a_follower_beside_its_leader_fights_back_at_what_hits_it_from_past_the_leaders_radius() {
+    // The leader eight metres east, inside the catch-up break; the Revenant twenty west, so
+    // twenty-eight from the leader and outside its radius. The fight has the tick, not `follow`.
+    let mut c = in_the_field();
+    following_a_leader(&mut c, 8.0);
+    let it = hit_by_a_revenant(&mut c, -20.0);
+    c.tick_autoplay(Instant::now());
+    assert_eq!(c.autoplay.step, Some("fight"));
+    assert_eq!(
+        c.attack_target,
+        Some(it),
+        "it walked back to its leader under attack"
+    );
+}
+
+#[test]
+fn past_the_break_catching_up_still_comes_before_fighting_back() {
+    // The user's call: a follower more than `follow_break` from its leader rejoins it first,
+    // attacker or not (catch up, 120, over the fight, 80).
+    let mut c = in_the_field();
+    following_a_leader(&mut c, 40.0);
+    hit_by_a_revenant(&mut c, 5.0);
+    c.tick_autoplay(Instant::now());
+    assert_eq!(c.autoplay.step, Some("catch up"));
+    assert_eq!(c.attack_target, None);
+    assert!(c.follow.is_some(), "not on its way back to the leader");
+}
+
 #[test]
 fn a_stop_takes_the_fights_own_spell_back_and_stays_in_magic_mode() {
     // A cast already sent goes on to land unless something reaches it.

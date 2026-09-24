@@ -70,7 +70,7 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 | system | entry fns | files | state | tests | log target | term |
 |---|---|---|---|---|---|---|
 | steps and tick | `tick_autoplay`, `weigh`, `reflexes` | `autoplay/mod.rs`, `autoplay/steps.rs`, `autoplay/config.rs` | `Autoplay.step`, `Autoplay.doing`, `Autoplay.status` | steps:: | autoplay | step |
-| target choice | `pick_target`, `a_fight_in_sight`, `nearest_fight`, `would_fight`, `can_take_on`, `ordered_target` | `autoplay/fight/target.rs`, `autoplay/fight/mod.rs`, `autoplay/team/orders.rs` | `Client.attack_target`, `Autoplay.config.fight`, `Autoplay.nearest_fight` | target | autoplay::fight::target | target |
+| target choice | `pick_target`, `can_keep_target`, `a_fight_in_sight`, `nearest_fight`, `would_fight`, `can_take_on`, `ordered_target` | `autoplay/fight/target.rs`, `autoplay/fight/mod.rs`, `autoplay/team/orders.rs` | `Client.attack_target`, `Autoplay.config.fight`, `Autoplay.nearest_fight` | target | autoplay::fight::target | target |
 | melee | `autoplay_fight`, `autoplay_fight_as`, `stalled_on`, `give_up_target`, `let_go` | `autoplay/fight/melee.rs`, `autoplay/fight/target.rs` | `Client.attack_target`, `Autoplay.engaged`, `Autoplay.given_up` | target | autoplay::fight::melee | fight |
 | spells in a fight | `autoplay_fight_with_spells`, `autoplay_soften`, `autoplay_make_vulnerable` | `autoplay/fight/spells.rs`, `autoplay/fight/soften.rs`, `autoplay/cast.rs`, `aim.rs` | `Autoplay.casting_at`, `Autoplay.softening`, `Autoplay.vulned`, `Autoplay.cast_sent`, `Autoplay.fight_cast` | spell | autoplay::fight::spells | fight |
 | critter | `critter`, `a_critter`, `ask_about_strangers` | `autoplay/fight/critter.rs` | `Fight.skip_critters`, `Client.appraisals` | critter | autoplay::fight::critter | critter |
@@ -146,14 +146,14 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
   (`component_targets()`, `burns()`), and a pea the profile tagged Sell is sold (`offer_to_vendor()`).
 - The loot profile decides: `fate()` puts a tag ahead of every guard (restock, burns, keep names);
   only the server's own refusal overrides it.
-- Two target pickers, and they disagree. The spell path calls `pick_target()`, which keeps a
-  follower inside its leader's `team.fight_radius` and prefers one the attack in hand gets to:
-  `attack_kind()` reads the hands, never `Client::missile`, and names the spell per creature with
-  the `best_spell()` the cast itself chooses by, so the flight tested is the flight thrown -- a
-  spell, an arrow and a swing being three different ones. The melee and missile path scans inline
-  in `autoplay_fight_as()` and takes the nearest inside `cfg.radius`, with neither of those two
-  terms. Both gate on `would_fight()`; a team order or the board's target outranks both, but
-  only through `can_take_on()`, the same rules asked by guid.
+- One target picker. Swing, shot and spell all call `pick_target()`: the nearest of what
+  `would_fight()` allows inside `cfg.radius`, kept within the leader's `team.fight_radius` while
+  following one unless it is hitting the character (`hit_lately_by()`), and preferring one the
+  attack in hand gets to: `attack_kind()` reads the hands, never `Client::missile`, and names the
+  spell per creature by the cast's own `best_spell()`, so the flight tested is the flight thrown.
+  Nothing beside the leader, nothing is picked (no fallback: `follow` fetches it; past
+  `follow_break()` catch up outranks the fight). A team proposal outranks the pick only through
+  `can_take_on()`, and `can_keep_target()` holds the fight in hand, wherever the leader stands.
 - Played by hand, `autoplay_by_hand()`: with autoplay off only the team's own rules run -- invites,
   a leader's fellowship, following and assisting. Nothing takes the legs or the hands for an errand
   of its own: no town run, no ground, no experience spent, no weapon changed, no target picked.
