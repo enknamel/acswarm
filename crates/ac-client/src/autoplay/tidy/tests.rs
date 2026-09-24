@@ -305,6 +305,17 @@ fn stacks_whose_words_disagree_are_never_poured_together() {
     c.autoplay_tidy(t0);
     assert!(c.autoplay.pour.is_none(), "{:?}", c.autoplay.pour);
 
+    // Kept and undecided both stay in the pack, so they pour: a stack
+    // of tapers bought (kept) and one carried from before (no word)
+    // were left as two part-stacks for good.
+    let mut c = carrying(&[(1, 8329, 40, 100), (2, 8329, 5, 100)]);
+    c.autoplay.ledger.remember(&stats(1), LootAction::Keep);
+    c.autoplay_tidy(t0);
+    assert!(
+        c.autoplay.pour.is_some(),
+        "a kept and an undecided stack were not poured"
+    );
+
     // Two stacks with one word are poured, and the word survives
     // the pour.
     let mut c = carrying(&[(1, 8329, 40, 100), (2, 8329, 5, 100)]);

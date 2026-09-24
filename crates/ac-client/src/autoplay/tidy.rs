@@ -327,11 +327,21 @@ impl Client {
         // decided about it was settled as nothing -- either way the
         // Sell was gone before the character set off for town. Kept
         // apart, each stack goes where its own word says.
+        //
+        // Kept and undecided both leave a stack in the pack, so those two
+        // pour together: only a word that sends a stack away (sell,
+        // salvage) has to be the same on both.
         let ledger = &self.autoplay.ledger;
+        let stays =
+            |w: Option<ac_loot::LootAction>| matches!(w, None | Some(ac_loot::LootAction::Keep));
+        let words_agree = |from: u32, to: u32| {
+            let (a, b) = (ledger.by_guid(from), ledger.by_guid(to));
+            a == b || (stays(a) && stays(b))
+        };
         let skip = |from: u32, to: u32| {
             self.autoplay.growth.wont_merge.held(&(from, to), now)
                 || errands.iter().flatten().any(|g| *g == from || *g == to)
-                || ledger.by_guid(from) != ledger.by_guid(to)
+                || !words_agree(from, to)
         };
         let Some(m) = crate::pack::next_merge_unless(&stacks, may_carry, skip) else {
             // Nothing to pour -- or nothing light enough. The two are
