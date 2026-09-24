@@ -25,9 +25,9 @@ set; login on udp/9000; the first login creates its account):
 
 ```sh
 tools/ace/up.sh      # build and start
-tools/ace/logs.sh    # follow the server log
-tools/ace/down.sh    # stop
+tools/ace/logs.sh    # follow the server log (tools/ace/down.sh stops it)
 validate/run.sh      # live acceptance suite (validate/suite.rhai) with the release acswarm
+tools/scenarios.sh   # does autoplay play? pass or fail per character; run before an autoplay merge
 cargo run --release -p acswarm -- --headless --connect 127.0.0.1 \
   --client ACCOUNT:PASSWORD[:CHARACTER] --duration 60 --log-chat   # --create NAME, --script FILE, --bus
 ```
