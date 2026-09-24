@@ -519,9 +519,15 @@ mod tests {
         assert_eq!(armful_within_slots(&[30_000], 1), (vec![], 0));
         assert_eq!(armful_within_slots(&[25_000], 1), (vec![0], 25_000));
         // An armful is one payment, not one per item: three sales of 10,000 come to two stacks.
-        assert_eq!(armful_within_slots(&[10_000; 3], 2), (vec![0, 1, 2], 30_000));
+        assert_eq!(
+            armful_within_slots(&[10_000; 3], 2),
+            (vec![0, 1, 2], 30_000)
+        );
         // One too dear for the slots is left for later, and the cheaper ones behind it still go.
-        assert_eq!(armful_within_slots(&[30_000, 10_000, 5_000], 1), (vec![1, 2], 15_000));
+        assert_eq!(
+            armful_within_slots(&[30_000, 10_000, 5_000], 1),
+            (vec![1, 2], 15_000)
+        );
         // Neither the slot the dagger vacates nor the 20,000 already carried lends room for them.
         let loot = [ForSale {
             guid: 1,

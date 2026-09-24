@@ -58,7 +58,10 @@ fn a_use_of_something_in_the_world_reports_the_stop_before_the_use() {
     assert!(c.use_object(0x8000_1234));
     let sent = actions_sent(&c);
     let stop = sent.iter().position(|a| *a == MOVE_TO_STATE);
-    let used = sent.iter().position(|a| *a == USE).expect("the use goes out");
+    let used = sent
+        .iter()
+        .position(|a| *a == USE)
+        .expect("the use goes out");
     assert!(
         stop.is_some_and(|s| s < used),
         "the stop goes out before the use: {sent:x?}"

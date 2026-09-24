@@ -576,7 +576,11 @@ mod tests {
         ]);
         s.counter.as_mut().unwrap().max_value = 1_000_000;
         let next = run.step(&s, now).act;
-        assert_eq!(next, Some(Act::Sell { items: vec![2, 3] }), "the rest was not sold");
+        assert_eq!(
+            next,
+            Some(Act::Sell { items: vec![2, 3] }),
+            "the rest was not sold"
+        );
     }
 
     #[test]
