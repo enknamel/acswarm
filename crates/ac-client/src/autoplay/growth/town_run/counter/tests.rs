@@ -722,3 +722,25 @@ fn a_swing_in_the_air_does_not_hold_the_ask() {
         }
     ));
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_counter_reached_after_the_walks_clock_ran_out_is_still_asked() {
+    // The walk's clock was read before the arrival: a character standing at
+    // the counter four minutes and a second in gave it up as too long a walk.
+    let now = Instant::now();
+    let mut c = standing_at(0xA9B4_0019, glam::Vec3::new(84.0, 7.1, 94.0));
+    c.world.player_guid = Some(0x5000_0001);
+    let cfg = Growth::default();
+    a_run_at_cindrue(&mut c, Phase::Going, now);
+    let late =
+        now + crate::autoplay::growth::road::WALK_TIMEOUT + std::time::Duration::from_secs(1);
+    assert_eq!(c.grow_run_step(late, &cfg), Turn::Acted);
+    assert!(
+        matches!(
+            c.autoplay.growth.run.as_ref().unwrap().phase,
+            Phase::Opening { .. }
+        ),
+        "gave the counter up while standing at it"
+    );
+}
