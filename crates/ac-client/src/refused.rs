@@ -49,19 +49,26 @@ impl Client {
             // An essence turned away: for good, or for the creature
             // still out (see `summoning::Client::hear_summoning`).
             Refusal::Summon { why } => self.hear_summoning(why, text, now),
+            // A purchase the counter turned down leaves the pack as it
+            // was, so the rules are told, or they ask again at once
+            // (see `ac_vendor::Run::buy_refused`).
+            Refusal::Buy { .. } => {
+                tracing::info!("the server refused ({refusal:?}): {text}");
+                let answer = crate::refusals::answer(&refusal);
+                self.autoplay.growth.shop.buy_refused(answer, now);
+            }
             // Read, and waited on by nothing here yet. The item stays
             // where it lies and the loot rules pass it over
-            // (`Carry`, `PickUpFirst`); a sale or a purchase is judged
-            // by the pack afterwards (`Sell`, `Buy`); a cast or a use
-            // the server will not make is not asked of it on a clock
-            // (`Cast`, `Use`, `UseWith`).
+            // (`Carry`, `PickUpFirst`); a sale is judged by the pack
+            // afterwards (`Sell`); a cast or a use the server will not
+            // make is not asked of it on a clock (`Cast`, `Use`,
+            // `UseWith`).
             Refusal::Carry
             | Refusal::PickUpFirst { .. }
             | Refusal::Cast { .. }
             | Refusal::Use { .. }
             | Refusal::UseWith { .. }
-            | Refusal::Sell { .. }
-            | Refusal::Buy { .. } => {
+            | Refusal::Sell { .. } => {
                 tracing::info!("the server refused ({refusal:?}): {text}");
             }
         }

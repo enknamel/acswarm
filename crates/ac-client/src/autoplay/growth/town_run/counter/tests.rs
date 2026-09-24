@@ -1,7 +1,8 @@
 use super::*;
 use crate::autoplay::growth::tests::{a_run_at_cindrue, run_to};
 use crate::testkit::{
-    a_counter, pea_in_the_pack, standing_at, vendor_beside, window_of, with_a_pack,
+    a_counter, coin_in_the_pack, pea_in_the_pack, standing_at, vendor_beside, window_of,
+    window_stocked_as, with_a_pack,
 };
 use ac_world::item_type;
 
@@ -340,6 +341,181 @@ fn the_counter_is_stood_at_from_the_use_to_the_window_closing() {
         "a window open by hand"
     );
     assert_eq!(counter_asked(None, None), None);
+}
+
+#[test]
+fn the_counter_names_its_note_by_its_own_weenie_off_its_own_shelf() {
+    // Sedor Wystan's shelf holds a basinet at 1,750 ahead of his largest note, the 1,000 at
+    // 1,150: the note is read off the shelf by weenie, and the purchase names that line.
+    let mut c = crate::testkit::offline_client();
+    with_a_pack(&mut c, 20);
+    for (n, amount) in [25_000; 8].into_iter().chain([1_307]).enumerate() {
+        coin_in_the_pack(&mut c, 0x8000_0100 + n as u32, amount);
+    }
+    let sedor = 0x7a9b_4026;
+    c.world.open_vendor = Some(window_stocked_as(sedor, "Sedor Wystan the Blacksmith"));
+    let cfg = c.autoplay.config.growth.clone();
+    let mut snap = c.vendor_snapshot(&cfg);
+    let counter = snap.counter.as_ref().expect("no counter");
+    assert_eq!(counter.note_face, Some(1_000));
+    assert_eq!(counter.note_wcid, Some(2623));
+    let first_dear = counter.wares.iter().find(|w| w.price >= 1_000);
+    assert_eq!(
+        first_dear.map(|w| w.wcid),
+        Some(35),
+        "the basinet stands first"
+    );
+
+    snap.slots_free = 2;
+    let next = ac_vendor::Run::new().step(&snap, Instant::now());
+    let Some(ac_vendor::Act::Buy { wcid, count }) = next.act else {
+        panic!("no notes made: {:?} -- {}", next.act, next.saying);
+    };
+    assert_eq!((wcid, count), (2623, 173));
+    let line = c.world.open_vendor.as_ref().and_then(|v| {
+        v.items
+            .iter()
+            .find(|w| w.desc.weenie_class_id == 2623)
+            .map(|w| w.guid)
+    });
+    let sent = c.session.actions_sent();
+    assert!(c.do_vendor_act(&ac_vendor::Act::Buy { wcid, count }, &next.saying));
+    assert_eq!(c.session.actions_sent(), sent + 1);
+    let (_, msg) = c.session.queued().last().expect("nothing went out");
+    let line = line.expect("no note on the shelf").to_le_bytes();
+    assert!(
+        msg.windows(4).any(|w| w == line),
+        "the purchase did not name the note's line"
+    );
+}
+
+/// The GameActions queued so far, by action code, oldest first.
+fn actions_queued(c: &Client) -> Vec<u32> {
+    let game_action = ac_net::messages::opcode::GAME_ACTION.to_le_bytes();
+    c.session
+        .queued()
+        .iter()
+        .filter(|(_, m)| m.starts_with(&game_action))
+        .filter_map(|(_, m)| Some(u32::from_le_bytes(m.get(8..12)?.try_into().ok()?)))
+        .collect()
+}
+
+/// A leather cap in the pack, taken to sell.
+fn cap_to_sell(c: &mut Client, guid: u32) {
+    let me = c.world.player_guid.unwrap();
+    c.world.objects.insert(
+        guid,
+        ac_world::WorldObject {
+            guid,
+            name: "Leather Cap".into(),
+            weenie_class_id: 118,
+            item_type: item_type::ARMOR,
+            value: 640,
+            stack_size: 1,
+            max_stack_size: 1,
+            container: Some(me),
+            ..Default::default()
+        },
+    );
+    let stats = c.stats_of(guid).unwrap();
+    c.autoplay.tag(&stats, crate::autoplay::LootAction::Sell);
+}
+
+/// A run selling at Sedor Wystan's open window, the character two slots
+/// short of its reserve with 201,307 in coin and a cap to sell.
+fn selling_at_sedor(now: Instant) -> Client {
+    let here = glam::Vec3::new(84.0, 7.1, 94.0);
+    let mut c = standing_at(0xA9B4_0019, here);
+    with_a_pack(&mut c, 12);
+    for (n, amount) in [25_000; 8].into_iter().chain([1_307]).enumerate() {
+        coin_in_the_pack(&mut c, 0x8000_0100 + n as u32, amount);
+    }
+    cap_to_sell(&mut c, 0x8000_0200);
+    let sedor = 0x7a9b_4026;
+    let name = "Sedor Wystan the Blacksmith";
+    a_counter(&mut c, sedor, name, here);
+    c.world.open_vendor = Some(window_stocked_as(sedor, name));
+    let me = c.player.as_ref().unwrap().world_position();
+    let mut run = run_to(Vec2::new(me.x, me.y), now);
+    run.vendor = name.into();
+    run.phase = Phase::Selling { sent: Vec::new() };
+    c.autoplay.growth.run = Some(run);
+    c
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_purchase_the_counter_refused_is_not_sent_again() {
+    // The server turns a purchase down in words and then sends its UseDone, which frees the
+    // run to ask again of a pack that has not changed: told of the words, the rules go on to
+    // the selling instead of sending the same purchase on every answer.
+    let now = Instant::now();
+    let mut c = selling_at_sedor(now);
+    let cfg = c.autoplay.config.growth.clone();
+    assert_eq!(c.vendor_snapshot(&cfg).slots_free, 2);
+    assert_eq!(c.grow_run_step(now, &cfg), Turn::Acted);
+    assert_eq!(
+        actions_queued(&c).last(),
+        Some(&ac_net::messages::action::BUY),
+        "{}",
+        c.autoplay.growth.last_saying
+    );
+    c.hear_refusal("You do not have enough pack space to buy that!", now);
+    c.autoplay.cast_answered();
+    assert_eq!(c.grow_run_step(now, &cfg), Turn::Acted);
+    assert_eq!(
+        actions_queued(&c).last(),
+        Some(&ac_net::messages::action::SELL),
+        "{}",
+        c.autoplay.growth.last_saying
+    );
+    for _ in 0..20 {
+        c.autoplay.cast_answered();
+        c.grow_run_step(now, &cfg);
+    }
+    let buys = actions_queued(&c)
+        .into_iter()
+        .filter(|a| *a == ac_net::messages::action::BUY)
+        .count();
+    assert_eq!(buys, 1, "the refused purchase went out again");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn the_selling_at_a_counter_ends_on_its_own_clock() {
+    // An act the counter keeps turning down without a word the rules read is asked again on
+    // every answer. The selling's clock runs from its first act, and the acts along the way do
+    // not wind it back: once it runs out the run leaves the counter, saying why.
+    let now = Instant::now();
+    let mut c = selling_at_sedor(now);
+    let cfg = c.autoplay.config.growth.clone();
+    let soon = now + Duration::from_secs(10);
+    assert_eq!(c.grow_run_step(soon, &cfg), Turn::Acted);
+    let run = c.autoplay.growth.run.as_ref().expect("the run ended");
+    assert_eq!(run.since, now, "an act wound the clock back");
+    let at = run.at;
+    c.autoplay.cast_answered();
+    let late = now + SELLING_TIMEOUT + Duration::from_secs(1);
+    let sent = c.session.actions_sent();
+    c.grow_run_step(late, &cfg);
+    assert_eq!(c.session.actions_sent(), sent, "asked the counter again");
+    assert!(c.world.open_vendor.is_none(), "the window was left open");
+    assert!(
+        c.autoplay.growth.run.as_ref().is_none_or(|r| r.at != at),
+        "still at the counter"
+    );
+    assert!(
+        c.autoplay.growth.skip_vendors.held(&spot(at), late),
+        "the counter is not left alone"
+    );
+    assert!(
+        c.autoplay
+            .noted
+            .iter()
+            .any(|(t, _)| t.contains("taking too long to trade with")),
+        "{:?}",
+        c.autoplay.noted
+    );
 }
 
 /// A weenie error as the server sends it, as a game event body.

@@ -4,8 +4,8 @@ use glam::Vec2;
 
 use super::vendor::{spot, Stop, NEAR_A_WAY_OUT};
 use super::{
-    Errand, Phase, Run, Turn, BUSY_ASKS, BUSY_REASK, COUNTER_REACH, RUN_EVERY, SETTLE,
-    STOPS_PER_RUN, VENDOR_OPEN_TIMEOUT, VENDOR_REACH,
+    Errand, Phase, Run, Turn, BUSY_ASKS, BUSY_REASK, COUNTER_REACH, RUN_EVERY, SELLING_TIMEOUT,
+    SETTLE, STOPS_PER_RUN, VENDOR_OPEN_TIMEOUT, VENDOR_REACH,
 };
 use crate::autoplay::growth::road::{on_the_way, OnTheWay, WALK_ON_EVERY, WALK_TIMEOUT};
 use crate::autoplay::growth::{a_few, about, Growth};
@@ -468,6 +468,23 @@ impl Client {
                 // goes out then. A fixed pause is either slower than
                 // the counter or quicker, and quicker is how a run
                 // sells a stack it has already merged away.
+                //
+                // The phase's clock runs from the first act here, not
+                // from the last: an act turned down without a word the
+                // rules can read is asked again on every answer, and
+                // this is where that ends.
+                if elapsed > SELLING_TIMEOUT {
+                    self.autoplay.note(
+                        format!("{} is taking too long to trade with", run.vendor),
+                        now,
+                    );
+                    return Turn::after_stop(self.leave_counter(
+                        run,
+                        now,
+                        cfg,
+                        Some("took too long to trade with"),
+                    ));
+                }
                 if self.vendor_busy(now) {
                     self.autoplay.growth.run = Some(run);
                     return Turn::Waited;
@@ -477,13 +494,12 @@ impl Client {
                 self.autoplay.growth.last_saying = next.saying.clone();
                 match next.act {
                     Some(ac_vendor::Act::Close) | None => {
-                        // Added to, not set: the run's count is for all
-                        // its counters, and the rules count one at a
-                        // time.
-                        run.sold += self.autoplay.growth.shop.sold;
-                        self.close_vendor();
-                        self.autoplay.growth.shop = ac_vendor::Run::new();
-                        Turn::after_stop(self.grow_run_next(run, now, cfg, None))
+                        // Said, so a visit that ends with nothing sold says why.
+                        if !next.saying.is_empty() {
+                            self.autoplay
+                                .note(format!("{}: {}", run.vendor, next.saying), now);
+                        }
+                        Turn::after_stop(self.leave_counter(run, now, cfg, None))
                     }
                     Some(act) => {
                         // A refusal on this side is an answer too: the
@@ -499,7 +515,6 @@ impl Client {
                             return Turn::Waited;
                         }
                         run.last_sell = Some(now);
-                        run.since = now;
                         run.phase = Phase::Selling { sent: Vec::new() };
                         self.autoplay.growth.run = Some(run);
                         Turn::Acted
@@ -507,6 +522,24 @@ impl Client {
                 }
             }
         }
+    }
+
+    /// Done at this counter's window: what it sold goes on the run's
+    /// count, the shopping rules start afresh for the next, and the run
+    /// moves on as [`Self::grow_run_next`] decides, `left` as there.
+    fn leave_counter(
+        &mut self,
+        mut run: Run,
+        now: Instant,
+        cfg: &Growth,
+        left: Option<&str>,
+    ) -> bool {
+        // Added to, not set: the run's count is for all its counters,
+        // and the rules count one at a time.
+        run.sold += self.autoplay.growth.shop.sold;
+        self.close_vendor();
+        self.autoplay.growth.shop = ac_vendor::Run::new();
+        self.grow_run_next(run, now, cfg, left)
     }
 
     /// The run is done with this vendor: on to the next of the town

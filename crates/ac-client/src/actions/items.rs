@@ -127,6 +127,9 @@ impl Client {
             return false;
         };
         tracing::info!("use {} ({guid:#010x}) in place", o.name);
+        if o.container.is_none() && o.wielder.is_none() {
+            self.stop_before_use(guid);
+        }
         self.last_used = Some(guid);
         self.session
             .send_action(ac_net::messages::action::USE, &guid.to_le_bytes());

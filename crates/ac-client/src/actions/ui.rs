@@ -96,22 +96,26 @@ impl Client {
                 .send_action(action::PUT_ITEM_IN_CONTAINER, &w.finish());
         } else {
             tracing::info!("use {name} ({guid:#010x})");
-            // Stopped first, on the wire: a stop reported after the use
-            // cancels the walk the server starts for it, and the use with
-            // it (ACE `GameActionMoveToState`).
             if in_the_world {
-                if let Some(pl) = self.player.as_mut() {
-                    pl.report_stopped(&mut self.session, self.held_run);
-                    if let Some((cell, local)) = pl.take_sent() {
-                        self.world.player_reported(cell, local);
-                    }
-                }
-                // What a server walk that runs out was walking to.
-                self.visits.used(guid, Instant::now());
+                self.stop_before_use(guid);
             }
             self.last_used = Some(guid);
             self.session.send_action(action::USE, &guid.to_le_bytes());
         }
+    }
+
+    /// Report the stop on the wire before using `guid`, something in the world: a stop reported
+    /// after the use cancels the walk the server starts for it, and the use with it (ACE
+    /// `GameActionMoveToState.cs:22-23`, `Player_Move.cs:101-107`).
+    pub(crate) fn stop_before_use(&mut self, guid: u32) {
+        if let Some(pl) = self.player.as_mut() {
+            pl.report_stopped(&mut self.session, self.held_run);
+            if let Some((cell, local)) = pl.take_sent() {
+                self.world.player_reported(cell, local);
+            }
+        }
+        // What a server walk that runs out was walking to.
+        self.visits.used(guid, Instant::now());
     }
 
     /// Select an object (what the target bar and appraisal refer to).

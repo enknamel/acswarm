@@ -91,6 +91,7 @@ fn main() {
                 },
             ],
             note_face: Some(NOTE_FACE),
+            note_wcid: Some(NOTE_WCID),
             away: 14.0,
         }),
         wants: vec![Want {

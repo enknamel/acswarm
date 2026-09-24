@@ -4,6 +4,7 @@ use std::time::Instant;
 
 use ac_agent::did::{Did, Patience};
 use ac_agent::pack;
+use ac_agent::refusals::Answer;
 
 use crate::counter::{Item, Snapshot};
 
@@ -89,6 +90,10 @@ pub struct Run {
     pub sold: u32,
     /// Goods to sell, no slot for their coin: selling stands aside and the visit says why.
     no_room: bool,
+    /// The ware last asked for, until the counter answers: what a refusal in words is about.
+    buying: Option<u32>,
+    /// Wares the counter would not sell this visit, by weenie.
+    wont_sell: Patience<u32>,
 }
 
 impl Run {
@@ -101,8 +106,8 @@ impl Run {
         self.offered.len()
     }
 
-    /// Records that this side could not do `act` (a pour, a cut), as a counter's no is recorded.
-    /// So it is not asked for again every turn; nothing was handed over, so nothing is waited on.
+    /// Records that this side could not do `act` (a pour, a cut, a ware with no shelf line), as a
+    /// counter's no is recorded: so it is not asked for again every turn, and nothing is waited on.
     pub fn refused(&mut self, act: &Act, now: Instant) {
         match act {
             Act::Merge { from, to, .. } => {
@@ -116,18 +121,37 @@ impl Run {
                 self.refused
                     .note(*guid, &Did::refused("the stack would not cut"), now);
             }
+            Act::Buy { wcid, .. } => {
+                self.wont_sell
+                    .note(*wcid, &Did::refused("the counter would not sell it"), now);
+            }
             // Every other act is decided afresh from each snapshot, which shows what failed.
             Act::Approach { .. }
             | Act::Open { .. }
             | Act::Sell { .. }
-            | Act::Buy { .. }
             | Act::Cash { .. }
             | Act::Close => {}
         }
     }
 
+    /// The counter turned down the purchase in flight, in words (`Refusal::Buy`): that ware is
+    /// held as the refusals table answers, and a snapshot the refusal left unchanged moves on.
+    pub fn buy_refused(&mut self, answer: Answer, now: Instant) {
+        if let Some(wcid) = self.buying.take() {
+            answer.hold(
+                &mut self.wont_sell,
+                wcid,
+                "the counter would not sell it",
+                now,
+            );
+        }
+    }
+
     /// The next thing to do, or why there is nothing.
     pub fn step(&mut self, snap: &Snapshot, now: Instant) -> Next {
+        // Asked once the counter has answered the last act, and its words come ahead of that
+        // answer (Vendor.cs:496-500, then UseDone at Player_Commerce.cs:51): a buy unrefused went.
+        self.buying = None;
         let Some(counter) = snap.counter.as_ref() else {
             self.phase = Phase::Done;
             return Next::nothing(Did::blocked("there is no counter here"), "no counter");
@@ -178,7 +202,7 @@ impl Run {
             }
             // 2. Make notes once the pack is low on room.
             if snap.slots_free <= snap.rules.keep_slots {
-                if let Some(next) = self.make_notes(snap) {
+                if let Some(next) = self.make_notes(snap, now) {
                     return next;
                 }
             }
@@ -190,7 +214,7 @@ impl Run {
         }
 
         if self.phase == Phase::Buying {
-            if let Some(next) = self.buy_one(snap) {
+            if let Some(next) = self.buy_one(snap, now) {
                 return next;
             }
             self.phase = Phase::Done;
@@ -270,16 +294,20 @@ impl Run {
     }
 
     /// Turn the takings into trade notes, so the selling can go on.
-    fn make_notes(&mut self, snap: &Snapshot) -> Option<Next> {
+    fn make_notes(&mut self, snap: &Snapshot, now: Instant) -> Option<Next> {
         let counter = snap.counter.as_ref()?;
         let face = counter.note_face.filter(|f| *f > 0)?;
         // Loses the 15% markup, but a slot of Mayoi notes holds 62.5 million, coin 25,000.
         let each = crate::errand::note_cost(face).max(1);
-        let count = snap.coin.saturating_sub(snap.rules.float) / each;
+        // Each new stack needs a slot free before any coin leaves, a carried note stack no help
+        // (ItemsToReceive.cs:97-108; Vendor.cs:471-503): with none free, the selling goes first.
+        let count = (snap.coin.saturating_sub(snap.rules.float) / each)
+            .min(snap.slots_free.saturating_mul(crate::errand::NOTE_STACK));
         if count == 0 {
             return None;
         }
-        let wcid = face_wcid(counter, face)?;
+        let wcid = counter.note_wcid.filter(|w| !self.wont_sell.held(w, now))?;
+        self.buying = Some(wcid);
         Some(Next::acting(
             Act::Buy { wcid, count },
             format!("packing the takings into {count} note(s)"),
@@ -314,15 +342,13 @@ impl Run {
                         format!("cutting {take} off the {}", it.name),
                     ));
                 }
+                // Set aside, and the rest still sold: an answer with no act closes the visit.
                 self.refused.note(
                     it.guid,
                     &Did::refused("worth more than this counter will look at"),
                     now,
                 );
-                return Some(Next::nothing(
-                    Did::waiting("that one is too dear for this counter"),
-                    format!("{} is worth more than {} will take", it.name, counter.name),
-                ));
+                offer.remove(0);
             }
         }
 
@@ -330,7 +356,7 @@ impl Run {
         // plans the trip by this same rule (`errand::armful_within_slots`).
         let pays: Vec<u32> = offer.iter().map(|it| it.value).collect();
         let (taken, _) = crate::errand::armful_within_slots(&pays, snap.slots_free);
-        let items: Vec<u32> = offer[..taken].iter().map(|it| it.guid).collect();
+        let items: Vec<u32> = taken.iter().map(|&i| offer[i].guid).collect();
         if items.is_empty() {
             // No room for the money is not the counter's to fix: stand aside so cashing and buying
             // get their turn, and the visit ends saying why nothing sold.
@@ -346,11 +372,11 @@ impl Run {
     }
 
     /// Buy one thing the character came for, within the purse and the burden it can still lift.
-    fn buy_one(&mut self, snap: &Snapshot) -> Option<Next> {
+    fn buy_one(&mut self, snap: &Snapshot, now: Instant) -> Option<Next> {
         let counter = snap.counter.as_ref()?;
         let purse = snap.purse();
         for want in &snap.wants {
-            if want.short == 0 {
+            if want.short == 0 || self.wont_sell.held(&want.wcid, now) {
                 continue;
             }
             let Some(ware) = counter.wares.iter().find(|w| w.wcid == want.wcid) else {
@@ -397,6 +423,7 @@ impl Run {
                 }
                 continue;
             }
+            self.buying = Some(want.wcid);
             return Some(Next::acting(
                 Act::Buy {
                     wcid: want.wcid,
@@ -407,15 +434,6 @@ impl Run {
         }
         None
     }
-}
-
-/// The weenie of the note a counter deals in, found on its own shelf.
-fn face_wcid(counter: &crate::counter::Counter, face: u32) -> Option<u32> {
-    counter
-        .wares
-        .iter()
-        .find(|w| w.price >= face)
-        .map(|w| w.wcid)
 }
 
 #[cfg(test)]
@@ -459,6 +477,7 @@ mod tests {
                 burden: 1,
             }],
             note_face: Some(250_000),
+            note_wcid: Some(NOTE),
             away: 0.0,
         }
     }
@@ -545,6 +564,26 @@ mod tests {
     }
 
     #[test]
+    fn one_thing_too_dear_for_the_counter_is_set_aside_and_the_rest_still_sold() {
+        let now = Instant::now();
+        let mut run = Run::new();
+        // A single piece worth more than the counter will look at cannot be cut, so it is left be,
+        // and the cheaper ones beside it are sold in the same visit rather than the visit ending.
+        let mut s = snap(vec![
+            item(1, "Heirloom Sword", 2_000_000, 1, 1),
+            item(2, "Dagger", 500, 1, 1),
+            item(3, "Buckler", 300, 1, 1),
+        ]);
+        s.counter.as_mut().unwrap().max_value = 1_000_000;
+        let next = run.step(&s, now).act;
+        assert_eq!(
+            next,
+            Some(Act::Sell { items: vec![2, 3] }),
+            "the rest was not sold"
+        );
+    }
+
+    #[test]
     fn a_pour_heavier_than_the_room_is_not_asked_for() {
         let mut run = Run::new();
         let mut a = item(1, "Taper", 100, 37, 1000);
@@ -613,6 +652,173 @@ mod tests {
             run.step(&s, Instant::now()).act,
             Some(Act::Sell { items: vec![3] })
         );
+    }
+
+    #[test]
+    fn the_note_bought_is_the_note_not_the_first_dear_ware_on_the_shelf() {
+        // Sedor Wystan's shelf in the order the server sends it: a basinet at 1,750 stands ahead
+        // of his largest note, the 1,000 at 1,150, and a ware priced over the face is not a note.
+        let ware = |wcid: u32, name: &str, price: u32, burden: u32| Ware {
+            wcid,
+            name: name.into(),
+            price,
+            stock: None,
+            burden,
+        };
+        let mut s = snap(vec![item(3, "Dagger", 500, 1, 1)]);
+        let c = s.counter.as_mut().unwrap();
+        c.name = "Sedor Wystan the Blacksmith".into();
+        c.wares = vec![
+            ware(4190, "Cestus", 63, 50),
+            ware(35, "Chainmail Basinet", 1_750, 320),
+            ware(2621, "Trade Note (100)", 115, 1),
+            ware(2623, "Trade Note (1,000)", 1_150, 1),
+            ware(2622, "Trade Note (500)", 575, 1),
+        ];
+        c.note_face = Some(1_000);
+        c.note_wcid = Some(2623);
+        s.coin = 201_307;
+        s.slots_free = 2;
+        let next = Run::new().step(&s, Instant::now());
+        assert_eq!(
+            next.act,
+            Some(Act::Buy {
+                wcid: 2623,
+                count: 173
+            }),
+            "{}",
+            next.saying
+        );
+        // A counter with no note on its shelf makes none, whatever else it sells dear.
+        let c = s.counter.as_mut().unwrap();
+        c.note_face = None;
+        c.note_wcid = None;
+        let next = Run::new().step(&s, Instant::now());
+        assert!(
+            !matches!(next.act, Some(Act::Buy { .. })),
+            "{:?} -- {}",
+            next.act,
+            next.saying
+        );
+    }
+
+    #[test]
+    fn a_note_needs_a_free_slot_before_the_coin_leaves() {
+        // The server finds a slot for each new stack before taking the coin, and a note stack
+        // already carried lends no room: with none free no note is asked for, and the visit
+        // ends saying why rather than asking for what the server must refuse.
+        let mut s = snap(vec![item(3, "Dagger", 500, 1, 1)]);
+        s.coin = 1_000_000;
+        s.notes.insert(250_000, 1);
+        s.slots_free = 0;
+        let mut run = Run::new();
+        let next = run.step(&s, Instant::now());
+        assert!(
+            !matches!(next.act, Some(Act::Buy { .. })),
+            "{:?} -- {}",
+            next.act,
+            next.saying
+        );
+        assert_eq!(next.act, Some(Act::Close), "{}", next.saying);
+        assert!(matches!(next.did, Did::Blocked(_)), "{:?}", next.did);
+        // One slot holds one stack, 250 notes, however much more the purse would buy.
+        s.coin = 100_000_000;
+        s.slots_free = 1;
+        s.counter.as_mut().unwrap().note_face = Some(1_000);
+        let next = Run::new().step(&s, Instant::now());
+        assert_eq!(
+            next.act,
+            Some(Act::Buy {
+                wcid: NOTE,
+                count: crate::errand::NOTE_STACK
+            }),
+            "{}",
+            next.saying
+        );
+    }
+
+    #[test]
+    fn a_purchase_the_counter_turned_down_is_not_asked_for_again_this_visit() {
+        // The server answers a refused purchase in words and then its usual UseDone, and the pack
+        // is as it was: told of the words, the rules go on to the selling instead of asking again.
+        let now = Instant::now();
+        let mut s = snap(vec![item(3, "Leather Cap", 640, 1, 1)]);
+        s.coin = 1_000_000;
+        s.slots_free = 2;
+        let mut run = Run::new();
+        let asked = run.step(&s, now).act;
+        assert_eq!(
+            asked,
+            Some(Act::Buy {
+                wcid: NOTE,
+                count: 3
+            })
+        );
+        run.buy_refused(Answer::Never, now);
+        let next = run.step(&s, now);
+        assert_eq!(
+            next.act,
+            Some(Act::Sell { items: vec![3] }),
+            "{}",
+            next.saying
+        );
+        for _ in 0..50 {
+            let next = run.step(&s, now);
+            assert_ne!(next.act, asked, "asked again: {}", next.saying);
+        }
+        // For this visit: the next counter's rules ask for their notes afresh.
+        assert_eq!(Run::new().step(&s, now).act, asked);
+    }
+
+    #[test]
+    fn a_refusal_with_no_purchase_in_flight_holds_nothing() {
+        // Words about a purchase that went through, or one made by hand, are nothing to the run.
+        let now = Instant::now();
+        let mut s = snap(vec![item(3, "Leather Cap", 640, 1, 1)]);
+        s.coin = 1_000_000;
+        s.slots_free = 2;
+        let mut run = Run::new();
+        let asked = run.step(&s, now).act;
+        assert!(matches!(asked, Some(Act::Buy { .. })), "{asked:?}");
+        // The notes came, and the next turn sells: the words heard now are about nothing of ours.
+        s.coin = 2_000;
+        let next = run.step(&s, now);
+        assert_eq!(
+            next.act,
+            Some(Act::Sell { items: vec![3] }),
+            "{}",
+            next.saying
+        );
+        run.buy_refused(Answer::Never, now);
+        assert!(run.wont_sell.is_empty(), "a refusal was pinned on nothing");
+    }
+
+    #[test]
+    fn a_ware_refused_on_this_side_is_not_bought_again() {
+        // No shelf line to name, say: the rules are told, and the trip finishes without it.
+        let now = Instant::now();
+        let mut s = snap(Vec::new());
+        s.coin = 10_000;
+        s.wants = vec![Want {
+            wcid: 20631,
+            name: "Prismatic Taper".into(),
+            short: 100,
+            urgent: true,
+        }];
+        s.counter.as_mut().unwrap().wares.push(Ware {
+            wcid: 20631,
+            name: "Prismatic Taper".into(),
+            price: 26,
+            stock: None,
+            burden: 6,
+        });
+        let mut run = Run::new();
+        let buy = run.step(&s, now).act.expect("nothing asked for");
+        assert!(matches!(buy, Act::Buy { wcid: 20631, .. }), "{buy:?}");
+        run.refused(&buy, now);
+        let next = run.step(&s, now);
+        assert_eq!(next.act, Some(Act::Close), "{}", next.saying);
+        assert_eq!(run.phase, Phase::Done);
     }
 
     #[test]
