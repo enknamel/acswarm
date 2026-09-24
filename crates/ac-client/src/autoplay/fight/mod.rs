@@ -194,11 +194,12 @@ impl Client {
     /// and not one this character is walking past on its way somewhere
     /// (see [`Self::passing_by`]).
     ///
-    /// Focus fire and the debuffer take the team's target off the board
-    /// rather than choosing through [`Self::would_fight`], so they ask
-    /// this instead. Without it a character setting off for town turned
-    /// round for whatever the party back at the ground was hitting, from
-    /// as far off as it could see it.
+    /// The debuffer and the assist played by hand take the team's target
+    /// off the board rather than choosing through [`Self::would_fight`],
+    /// so they ask this instead; the fight asks [`Self::can_take_on`].
+    /// Without it a character setting off for town turned round for
+    /// whatever the party back at the ground was hitting, from as far off
+    /// as it could see it.
     pub(crate) fn joins_the_team_on(&self, guid: u32, cfg: &Fight) -> bool {
         self.world
             .objects
@@ -242,6 +243,21 @@ impl Client {
             && !self.shy_of(o)
             // And one there is no getting to is not a fight on offer.
             && !self.autoplay.given_up.within(&o.guid, now, GIVE_UP_FOR)
+    }
+
+    /// [`Self::would_fight`] asked of `guid`: the one gate a target the team proposes -- the leader's
+    /// order or its target on the board -- passes before a fight takes it, so neither goes round it.
+    pub(crate) fn can_take_on(
+        &self,
+        guid: u32,
+        cfg: &Fight,
+        underground: bool,
+        now: Instant,
+    ) -> bool {
+        self.world
+            .objects
+            .get(&guid)
+            .is_some_and(|o| self.would_fight(o, cfg, underground, now))
     }
 }
 

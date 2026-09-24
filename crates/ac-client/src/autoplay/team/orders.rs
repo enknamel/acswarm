@@ -271,7 +271,8 @@ impl Client {
     /// is fresh and the creature is alive and not one this character is
     /// walking past on its way somewhere (see [`Self::joins_the_team_on`]).
     /// Only with focus fire on: that is the switch for fighting as a
-    /// party rather than each for itself.
+    /// party rather than each for itself. A proposal: a fight takes it
+    /// only through [`Self::can_take_on`].
     pub(crate) fn ordered_target(&self, cfg: &Fight, now: Instant) -> Option<(u32, String)> {
         let team = &self.autoplay.config.team;
         if !team.enabled || !team.focus_fire {
@@ -287,11 +288,19 @@ impl Client {
     /// followed now: it names a live creature, and the one in hand is not
     /// hitting this character. What is hitting us is fought to the end
     /// whatever the plan says, since that fight is already happening.
-    pub(crate) fn ordered_elsewhere(&self, current: u32, cfg: &Fight, now: Instant) -> bool {
+    pub(crate) fn ordered_elsewhere(
+        &self,
+        current: u32,
+        cfg: &Fight,
+        underground: bool,
+        now: Instant,
+    ) -> bool {
         let Some((ordered, _)) = self.ordered_target(cfg, now) else {
             return false;
         };
-        if ordered == current {
+        // Nor for an order the fight would refuse (see `can_take_on`): the
+        // fight in hand would be let go every tick and picked again.
+        if ordered == current || !self.can_take_on(ordered, cfg, underground, now) {
             return false;
         }
         let hitting_us = self

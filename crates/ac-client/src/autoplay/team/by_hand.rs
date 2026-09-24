@@ -54,13 +54,13 @@ impl Client {
     /// send -- into combat, swing -- and only at what the leader is
     /// already on.
     ///
-    /// The reach is the pair [`Client::pick_target`] uses, so assisting
-    /// takes on exactly what fighting alongside would: within
+    /// The reach is the pair [`Client::pick_target`] uses: within
     /// `Fight::radius` of the character, since further is a walk and the
     /// walk is the player's, and within `Team::fight_radius` of the
     /// leader, since further would draw the party apart. The leader's
-    /// own choice stands otherwise: the name lists are for picking, and
-    /// nothing is being picked here.
+    /// own choice stands otherwise: the name lists, the area and the
+    /// rest of autoplay's own rules ([`Client::can_take_on`]) are for
+    /// picking, and played by hand nothing is being picked here.
     pub(crate) fn autoplay_assist(&mut self) -> bool {
         if !self.autoplay.config.team.focus_fire {
             return false;

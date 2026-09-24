@@ -126,3 +126,163 @@ fn a_leader_holds_the_next_fight_for_a_body_it_dealt_to_another_while_it_lies_th
         None
     );
 }
+
+/// The leader's own guid.
+const LEADER: u32 = 0x5000_0002;
+
+/// A level-20 character playing on its own in the Holtburg field, fighting beside a leader called
+/// Verity three metres off, with focus fire on.
+fn beside_the_leader() -> Client {
+    let mut c = crate::testkit::character_of_level(crate::testkit::no_data(), 20);
+    crate::testkit::stand(&mut c, 0xA9B4_0019, glam::Vec3::new(84.0, 84.0, 94.0));
+    c.autoplay.config.enabled = true;
+    let team = &mut c.autoplay.config.team;
+    team.enabled = true;
+    team.follow = true;
+    team.focus_fire = true;
+    let me = c.my_position().expect("on its feet");
+    let mut leader = crate::testkit::mate(LEADER, "Verity");
+    leader.leader = true;
+    leader.leads = true;
+    leader.world = me + glam::vec3(3.0, 0.0, 0.0);
+    c.autoplay.team = view_of(vec![leader]);
+    c
+}
+
+/// Verity's plan, heard at `now`, ordering this character onto `target`.
+fn ordered_onto(c: &mut Client, target: u32, now: Instant) {
+    use crate::plan::{Order, Plan};
+    let mut plan = Plan {
+        leader: "Verity".into(),
+        ..Default::default()
+    };
+    let me = c.world.player_guid.expect("a guid");
+    plan.orders.insert(
+        me,
+        Order {
+            target: Some(target),
+            body: None,
+        },
+    );
+    c.autoplay.take_orders(plan, now);
+}
+
+#[test]
+fn neither_the_order_nor_the_board_puts_a_follower_on_a_creature_it_avoids() {
+    // The round-3 failure: the order's check refused the avoided creature, and the fight fell
+    // straight back to the leader's own target on the board -- in focus fire the same creature --
+    // asked only whether it was alive and off the road.
+    let now = Instant::now();
+    let mut c = beside_the_leader();
+    let avoided = crate::testkit::standing_by(&mut c, 0x8000_0001, "Drudge Slinker", 4.0).guid;
+    let other = crate::testkit::standing_by(&mut c, 0x8000_0002, "Revenant", 8.0).guid;
+    let mut cfg = c.autoplay.config.fight.clone();
+    cfg.avoid = vec!["Slinker".into()];
+    c.autoplay.config.fight = cfg.clone();
+    c.autoplay.team.mates[0].target = Some(avoided);
+    // The board alone, then the order and the board together.
+    assert!(c.autoplay_fight_as(now, &cfg));
+    assert_eq!(c.attack_target, Some(other), "the board's target was taken");
+    let mut c2 = beside_the_leader();
+    crate::testkit::standing_by(&mut c2, avoided, "Drudge Slinker", 4.0);
+    crate::testkit::standing_by(&mut c2, other, "Revenant", 8.0);
+    c2.autoplay.config.fight = cfg.clone();
+    c2.autoplay.team.mates[0].target = Some(avoided);
+    ordered_onto(&mut c2, avoided, now);
+    assert!(c2.autoplay_fight_as(now, &cfg));
+    assert_eq!(
+        c2.attack_target,
+        Some(other),
+        "the ordered target was taken"
+    );
+    // And the order does not pull it off the fight it picked instead.
+    let underground = c2.underground();
+    assert!(!c2.ordered_elsewhere(other, &cfg, underground, now));
+}
+
+#[test]
+fn an_order_outside_the_hunting_area_is_not_taken_and_dropped_each_tick() {
+    // Taken, the order's creature was let go again the next tick by `fight_target_gone` (outside
+    // the area), and taken again, for as long as the plan named it.
+    let now = Instant::now();
+    let mut c = beside_the_leader();
+    let me = c.my_position().expect("on its feet");
+    c.autoplay.config.fight.area = Some(crate::hunt::HuntArea {
+        name: "test".into(),
+        shape: crate::hunt::Shape::Outline {
+            points: vec![
+                [me.x - 15.0, me.y - 15.0],
+                [me.x + 15.0, me.y - 15.0],
+                [me.x + 15.0, me.y + 15.0],
+                [me.x - 15.0, me.y + 15.0],
+            ],
+        },
+    });
+    let outside = crate::testkit::standing_by(&mut c, 0x8000_0001, "Revenant", 20.0).guid;
+    let inside = crate::testkit::standing_by(&mut c, 0x8000_0002, "Revenant", 6.0).guid;
+    assert!(c.fight_target_gone(outside, false), "not outside the area");
+    ordered_onto(&mut c, outside, now);
+    c.autoplay.team.mates[0].target = Some(outside);
+    let cfg = c.autoplay.config.fight.clone();
+    assert!(c.autoplay_fight_as(now, &cfg));
+    assert_eq!(
+        c.attack_target,
+        Some(inside),
+        "the order out there was taken"
+    );
+    // The fight in hand stands, tick after tick, with no swing sent at it again.
+    assert!(!c.ordered_elsewhere(inside, &cfg, false, now));
+    let sent = c.session.actions_sent();
+    for n in 1..4 {
+        let t = now + Duration::from_secs(2 * n);
+        assert!(c.autoplay_fight_as(t, &cfg));
+        assert_eq!(c.attack_target, Some(inside), "let go at tick {n}");
+    }
+    assert_eq!(c.session.actions_sent(), sent, "let go and taken again");
+}
+
+#[test]
+fn a_creature_given_up_on_is_not_taken_again_off_the_board() {
+    let now = Instant::now();
+    let mut c = beside_the_leader();
+    let stuck = crate::testkit::standing_by(&mut c, 0x8000_0001, "Revenant", 4.0).guid;
+    let other = crate::testkit::standing_by(&mut c, 0x8000_0002, "Revenant", 8.0).guid;
+    c.autoplay.team.mates[0].target = Some(stuck);
+    let cfg = c.autoplay.config.fight.clone();
+    c.give_up_target(stuck, "no damage in a while", now);
+    assert!(c.autoplay_fight_as(now, &cfg));
+    assert_eq!(
+        c.attack_target,
+        Some(other),
+        "the given-up one was taken again"
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_caster_takes_no_order_on_a_creature_it_avoids() {
+    // The spell path's own join, through the same gate as the swing's.
+    let now = Instant::now();
+    let (mut c, _) = crate::testkit::a_caster_knowing(now, &["Flame Bolt I"]);
+    c.autoplay.config.enabled = true;
+    let team = &mut c.autoplay.config.team;
+    team.enabled = true;
+    team.follow = true;
+    team.focus_fire = true;
+    let me = c.my_position().expect("on its feet");
+    let mut leader = crate::testkit::mate(LEADER, "Verity");
+    leader.leader = true;
+    leader.leads = true;
+    leader.world = me + glam::vec3(3.0, 0.0, 0.0);
+    c.autoplay.team = view_of(vec![leader]);
+    let avoided = crate::testkit::standing_by(&mut c, 0x8000_0001, "Drudge Slinker", 6.0).guid;
+    let mut cfg = c.autoplay.config.fight.clone();
+    cfg.avoid = vec!["Slinker".into()];
+    ordered_onto(&mut c, avoided, now);
+    c.autoplay_fight_as(now, &cfg);
+    assert_eq!(
+        c.autoplay.casting_at(),
+        None,
+        "a spell went at the avoided one"
+    );
+}
