@@ -275,13 +275,59 @@ page, and a sum over processes counts those pages once per process.
 Compare RSS with RSS. When the server's CPU climbs with the sessions
 while the client's tick work stays flat, the server is the bottleneck.
 
+## Many sessions, measured
+
+Measured 2026-09-23 with `tools/load-test.sh` on an Apple Silicon machine
+(12 cores, 36 GB) with the ACE server in Docker on the same machine. Every
+run is 240 s at 20 Hz (a 50 ms budget per tick); the first 60 s are left
+out as warm-up. Memory is RSS, which counts the mapped DAT files, so it
+reads far higher than the footprint figures above.
+
+New characters from the harness (most still in the Training Academy),
+main at 7a2ad25:
+
+| sessions | processes | work p50 | work p95 | per session | RSS | acswarm CPU | ACE CPU | fighting |
+|---|---|---|---|---|---|---|---|---|
+| 1 | 1 | 1.3 ms | 1.9 ms | 1.16 ms | 441 MB | 2.5% | 20% | 79% |
+| 10 | 1 | 5.1 ms | 7.5 ms | 0.48 ms | 462 MB | 10% | 23% | 59% |
+| 25 | 1 | 4.9 ms | 8.0 ms | 0.18 ms | 464 MB | 11% | 26% | 29% |
+| 50 | 1 | 7.7 ms | 12.1 ms | 0.14 ms | 479 MB | 17% | 30% | 17% |
+| 50 | 5 x 10 | 2.3 ms | 3.7 ms | 0.22 ms | 2,265 MB | 26% | 31% | 23% |
+
+Ten admin characters fighting on a busy hunting ground, the two builds
+interleaved, two runs each (per session, then kills in 240 s):
+
+| build | work p50 | work p95 | per session | ticks | overruns | kills |
+|---|---|---|---|---|---|---|
+| 7a2ad25 | 42.9 / 25.0 ms | 61.1 / 32.0 ms | 4.45 / 2.54 ms | 12.2 / 19.9 Hz | 1366 / 12 | 32 / 31 |
+| 6d05419 | 6.2 / 15.4 ms | 23.4 / 27.9 ms | 0.78 / 1.61 ms | 19.9 / 19.8 Hz | 5 / 8 | 44 / 52 |
+
+What they say:
+
+* The process is the costly unit. Each carries about 440 MB of RSS
+  before its first session (the DAT files mapped, the asset caches); a
+  session adds under 1 MB. Fifty sessions in one process hold 0.48 GB,
+  the same fifty in five processes 2.3 GB.
+* What a session costs depends on what it does, not on how many there
+  are: a new character in the Academy costs ~0.15 ms a tick, a fighting
+  character with a large spellbook ~1-2.5 ms. One process keeps twenty
+  fighters inside the budget at p95 with room to spare.
+* The server is not the limit at this scale: 30% of a core at fifty
+  sessions.
+* The per-session cost of the first session carries work the process
+  does once, and "costliest" leans to the session ticked first.
+* Before 6d05419, 86% of a fighting process's work was the list of buffs
+  worth casting, rebuilt on nearly every tick; a profile is how to find
+  the next such thing (`sample <pid> 40` on the release build, read
+  against the working frames, not the loop's sleep).
+
 ## Not yet measured
 
 * Frame time in the window, with a person playing one session and
-  others following. The headless tick is measured
-  ([Measuring many sessions](#measuring-many-sessions)); the window's
-  frame is `--perf`'s, and nobody has run it with followers.
-* A session under load: fighting, casting, looting, autoplay running.
-  The harness turns autoplay on in every session; no numbers yet.
-* Many sessions across separate processes rather than within one.
-  `tools/load-test.sh --procs` splits them; no numbers yet.
+  others following. The window's frame is `--perf`'s, and nobody has run
+  it with followers.
+* Fifty sessions all out hunting. The fifty-session rows above are
+  mostly new characters in the Academy; their fighting share falls as
+  sessions are added.
+* A team on: `team::describe` runs the supplies planner for every
+  session on every plugin tick, and the runs above had the team off.
