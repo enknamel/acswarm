@@ -33,11 +33,10 @@ const ROAMS: u32 = 3;
 /// character picking a whole new ground is given.
 const PATROL_AFTER: f32 = 10.0;
 
-/// How long a spot with nothing on it is given before the character
-/// looks elsewhere, seconds. See [`PATROL_AFTER`] for why a hunting
-/// area is given less; a setting shorter than that is still obeyed.
-fn quiet_before_move(cfg: &Growth, in_an_area: bool) -> f32 {
-    if in_an_area {
+/// How long a spot with nothing on it is given before the character looks elsewhere, seconds.
+/// Looking about an area or a ground costs only the walk ([`PATROL_AFTER`]); the setting is for leaving.
+fn quiet_before_move(cfg: &Growth, looking_about: bool) -> f32 {
+    if looking_about {
         cfg.idle_before_move.min(PATROL_AFTER)
     } else {
         cfg.idle_before_move
@@ -236,8 +235,18 @@ impl Client {
             return false;
         }
         let area = self.autoplay.config.fight.area.clone();
+        let tactic = ac_world::hunting::tactic_for(cfg.tactic, ac_world::hunting::at(here));
+        // Patrol keeps walking the ground; only Sweep gives up on it.
+        let roams_allowed = if tactic == ac_world::hunting::Tactic::Patrol {
+            u32::MAX
+        } else {
+            ROAMS
+        };
+        let roams_left = tactic != ac_world::hunting::Tactic::Camp
+            && self.autoplay.growth.hunting_at == Some(here)
+            && self.autoplay.growth.roams < roams_allowed;
         if now.saturating_duration_since(since).as_secs_f32()
-            < quiet_before_move(cfg, area.is_some())
+            < quiet_before_move(cfg, area.is_some() || roams_left)
         {
             return false;
         }
@@ -286,7 +295,6 @@ impl Client {
         // idle and walking away only leaves the fight; most need
         // covering on foot; a thin one is worth leaving once it is
         // quiet.
-        let tactic = ac_world::hunting::tactic_for(cfg.tactic, ac_world::hunting::at(here));
         if tactic == ac_world::hunting::Tactic::Camp
             && self.autoplay.growth.hunting_at == Some(here)
         {
@@ -299,16 +307,7 @@ impl Client {
             self.autoplay.growth.quiet_since = Some(now);
             return false;
         }
-        // Patrol keeps walking the ground; only Sweep gives up on it.
-        let roams_allowed = if tactic == ac_world::hunting::Tactic::Patrol {
-            u32::MAX
-        } else {
-            ROAMS
-        };
-        if goes_looking
-            && self.autoplay.growth.hunting_at == Some(here)
-            && self.autoplay.growth.roams < roams_allowed
-        {
+        if goes_looking && roams_left {
             let n = self.autoplay.growth.roams % ROAMS;
             let angle = (n as f32 + 0.5) * std::f32::consts::TAU / ROAMS as f32;
             let origin = ac_world::landblock_origin(cell);

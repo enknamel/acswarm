@@ -5,6 +5,7 @@
                                          xp, town runs, stalls, refusals, marks (default: newest file)
   tools/telemetry.py --compare A B       two runs side by side, per hour, to measure a change
   tools/telemetry.py --marks [FILE]      each F9 mark with the status lines around it
+  tools/telemetry.py --setup [FILE]      each character's autoplay settings, as last written
 
 A stall is a stretch of samples, SAMPLE_GAP apart, where the character meant to move (walking,
 going, following, a town run) and got less than a metre from where it was, for STALL_AFTER or more.
@@ -51,7 +52,7 @@ def newest():
 
 def summarise(path):
     """Per character: a dict of measures, and the stalls and marks behind them."""
-    by = defaultdict(lambda: {"samples": [], "chat": [], "status": [], "refused": 0, "marks": []})
+    by = defaultdict(lambda: {"samples": [], "chat": [], "status": [], "refused": 0, "marks": [], "setup": None})
     for r in records(path):
         who = (r.get("a", "?"), r.get("c", "?"))
         k = r.get("k")
@@ -59,12 +60,14 @@ def summarise(path):
             by[who]["samples"].append(r)
         elif k == "chat":
             by[who]["chat"].append(r)
-        elif k == "status":
+        elif k in ("status", "note"):
             by[who]["status"].append(r)
         elif k == "refused":
             by[who]["refused"] += 1
         elif k == "mark":
             by[who]["marks"].append(r)
+        elif k == "setup":
+            by[who]["setup"] = r
     out = {}
     for who, d in by.items():
         s = d["samples"]
@@ -99,6 +102,7 @@ def summarise(path):
             "stall_s": sum(x["secs"] for x in stalls),
             "stalls": stalls,
             "marks": d["marks"],
+            "setup": d["setup"],
         }
     return out
 
@@ -145,10 +149,33 @@ def show(path):
         print("  time: " + ", ".join(f"{k} {v:.0%}" for k, v in list(m["doing"].items())[:7]))
         print(f"  sold {m['sold']}, bought {m['bought']}, gave up {m['gave_up']}, refused {m['refused']}, "
               f"marks {len(m['marks'])}")
+        if m["setup"]:
+            print("  setup: " + brief(m["setup"]))
         if m["stalls"]:
             print(f"  stalls: {len(m['stalls'])}, {m['stall_s']:.0f} s in all; longest:")
             for st in m["stalls"][:5]:
                 print(f"    {st['secs']:5.0f} s at {st['cell']}  {st['status']}")
+
+
+def brief(setup):
+    c = setup.get("config", {})
+    f, g, t = c.get("fight", {}), c.get("growth", {}), c.get("team", {})
+    on = lambda b: "on" if b else "off"
+    return (f"autoplay {on(c.get('enabled'))}, {setup.get('sessions')} session(s), profile "
+            f"{c.get('loot', {}).get('profile')!r}, fight {on(f.get('enabled'))} {f.get('style')} "
+            f"r{f.get('radius')}, town runs {on(g.get('town_runs'))}, grounds {on(g.get('hunt_grounds'))}, "
+            f"xp {on(g.get('auto_xp'))}, team {on(t.get('enabled'))} {t.get('role')}"
+            + (f", area {f['area'].get('name', 'set')}" if f.get("area") else ""))
+
+
+def setups(path):
+    last = {}
+    for r in records(path):
+        if r.get("k") == "setup":
+            last[(r.get("a"), r.get("c"))] = r
+    for (acct, name), r in last.items():
+        print(f"== {name} ({acct})")
+        print(json.dumps(r.get("config"), indent=1))
 
 
 def compare(a, b):
@@ -181,7 +208,7 @@ def marks(path):
         print(f"   hp {r.get('hp')} st {r.get('st')} mp {r.get('mp')} slots {r.get('slots')} "
               f"burden {r.get('burden')} coin {r.get('coin')} target {r.get('target')!r}")
         near = [x for x in rows[max(0, i - 400):i + 40]
-                if (x.get("a"), x.get("c")) == who and x.get("k") in ("status", "chat", "refused")]
+                if (x.get("a"), x.get("c")) == who and x.get("k") in ("status", "note", "chat", "refused")]
         for x in near[-25:]:
             print(f"   {x.get('k'):7} {x.get('text') or x.get('code')}")
 
@@ -190,6 +217,8 @@ if __name__ == "__main__":
     args = sys.argv[1:]
     if args[:1] == ["--compare"] and len(args) == 3:
         compare(args[1], args[2])
+    elif args[:1] == ["--setup"]:
+        setups(args[1] if len(args) > 1 else newest())
     elif args[:1] == ["--marks"]:
         marks(args[1] if len(args) > 1 else newest())
     else:

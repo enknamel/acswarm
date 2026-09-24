@@ -1450,7 +1450,8 @@ impl App {
                 | ac_client::Event::Effect { .. }
                 | ac_client::Event::SpellLearned(_)
                 | ac_client::Event::SpellForgotten(_)
-                | ac_client::Event::Autoplay { .. } => {}
+                | ac_client::Event::Autoplay { .. }
+                | ac_client::Event::Noted(_) => {}
             }
             if is_active {
                 self.lobby.on_event(ev);

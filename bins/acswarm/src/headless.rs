@@ -452,7 +452,8 @@ pub fn run(cli: crate::Cli) -> Result<()> {
                     | Event::Effect { .. }
                     | Event::SpellLearned(_)
                     | Event::SpellForgotten(_)
-                    | Event::Autoplay { .. } => {}
+                    | Event::Autoplay { .. }
+                    | Event::Noted(_) => {}
                 }
             }
             let account = sessions[i].account().to_string();

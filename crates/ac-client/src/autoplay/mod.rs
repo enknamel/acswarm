@@ -172,8 +172,8 @@ pub struct Autoplay {
     pub room_since: Option<Instant>,
     /// A line for the panel: "fighting Drudge Skulker".
     pub status: String,
-    /// `Event::Autoplay`s not yet handed out: one per change of `doing`
-    /// or `status`, taken by `Client::drain_events`.
+    /// `Event::Autoplay`s not yet handed out, one per change of `doing` or `status`, and
+    /// `Event::Noted`s; taken by `Client::drain_events`.
     pub announced: Vec<crate::Event>,
     last_heal: Option<Instant>,
     last_attack: Option<Instant>,
@@ -522,6 +522,7 @@ impl Autoplay {
         self.noted.expire(now, NOTE_EVERY);
         if self.noted.since(&text).is_none() {
             tracing::info!("autoplay: {text}");
+            self.announced.push(crate::Event::Noted(text.clone()));
             self.noted.mark(text, now);
         }
     }

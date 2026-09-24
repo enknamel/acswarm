@@ -1,7 +1,7 @@
 //! What every session did, as JSON lines for `tools/telemetry.py`: a sample of each session every
 //! two seconds, and a line for each status change, chat line worth keeping, refusal, session
-//! change and mark. One file per process under the cache's `telemetry` folder, capped, newest kept.
-//! F9 marks the moment, in the log and here, so a report of something odd can point at it.
+//! change and mark, and the autoplay settings whenever they change. One file per process under the
+//! cache's `telemetry` folder, capped, newest kept. F9 marks the moment, in the log and here.
 
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -37,6 +37,8 @@ pub struct Telemetry {
     out: Option<std::io::BufWriter<std::fs::File>>,
     left: u64,
     sampled: BTreeMap<usize, Instant>,
+    /// The autoplay settings each session last wrote, so a change is written once.
+    setup: BTreeMap<usize, ac_client::autoplay::Config>,
 }
 
 impl Default for Telemetry {
@@ -56,6 +58,7 @@ impl Default for Telemetry {
             out,
             left: FILE_CAP,
             sampled: BTreeMap::new(),
+            setup: BTreeMap::new(),
         }
     }
 }
@@ -127,7 +130,7 @@ impl Plugin for Telemetry {
     }
 
     fn tick(&mut self, cx: &mut Ctx) {
-        let (index, now) = (cx.index, cx.now);
+        let (index, now, sessions) = (cx.index, cx.now, cx.clients.len());
         let due = self
             .sampled
             .get(&index)
@@ -139,6 +142,12 @@ impl Plugin for Telemetry {
             return;
         }
         self.sampled.insert(index, now);
+        if self.setup.get(&index) != Some(&client.autoplay.config) {
+            self.setup.insert(index, client.autoplay.config.clone());
+            let record =
+                json!({"k": "setup", "sessions": sessions, "config": client.autoplay.config});
+            self.write(record, client);
+        }
         let mut record = sample(client);
         record["k"] = json!("sample");
         self.write(record, client);
@@ -154,6 +163,7 @@ impl Plugin for Telemetry {
         };
         let record = match ev {
             Event::Autoplay { doing, text } => json!({"k": "status", "doing": doing, "text": text}),
+            Event::Noted(text) => json!({"k": "note", "text": text}),
             Event::Chat { text, kind } => {
                 if SPAM.iter().any(|s| text.contains(s)) {
                     return;
@@ -195,5 +205,6 @@ impl Plugin for Telemetry {
 
     fn session_removed(&mut self, index: usize) {
         crate::shift_removed(&mut self.sampled, index);
+        crate::shift_removed(&mut self.setup, index);
     }
 }
