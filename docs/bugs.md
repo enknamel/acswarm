@@ -15,6 +15,10 @@ priority; a live report starts from the telemetry (`tools/telemetry.py`, `--mark
   min, scenarios run 2). Blargerton took 58 s to walk 9 m towards Boddry the Chancy, and props
   near local (14.88, -26.79) in 0x860201AD wedged walks there while `line_blocked` called the
   line clear. Shows as: `no stall over 30 s` fails with a cell in 0x8602 or near a counter.
+- **No way back to town from a far ground.** Scn Taper, out of tapers at the Mosswart ground
+  (0xBAAD, 2.8 km from Holtburg, where the ground-picker had walked it), noted "no way to Magus
+  Guthima the Wise from here" and could not cast for the rest of the run; Scn Seller the same for
+  Denterra the Healer (scenarios run 3). Shows as: `tapers bought` fails, "no way to" notes.
 - **The two town-run planners disagree.** The first plan said "Boddry the Chancy it is: nowhere
   sells what is wanted", the next-stop plan found Cindrue with "2 of 2 on the shelf", so the run
   walked to the wrong counter. Shows as: two stops for one need in the status lines.
