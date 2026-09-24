@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use super::town_run::vendor::worth_stocking;
+use super::town_run::vendor::{answers_need, worth_stocking};
 use super::Growth;
 use crate::items::ItemStats;
 use crate::Client;
@@ -285,25 +285,35 @@ impl Client {
     /// open for ever.
     #[cfg(test)]
     pub(crate) fn vendor_shortfall(&self, cfg: &Growth) -> Vec<ac_vendor::counter::Want> {
-        self.vendor_shortfall_with(cfg, &self.item_stats())
+        self.vendor_shortfall_at(cfg, &self.item_stats(), &[])
     }
 
-    /// The same, over a pack already read (see [`Client::grow_needs_with`]).
-    pub(crate) fn vendor_shortfall_with(
+    /// The same at a counter whose shelf holds `wares`: named stock and ammunition are known on a
+    /// shelf by name, and taken to the ware the trip planner chose the counter for (`answers_need`),
+    /// or the trip was made for what the counter was never asked for.
+    pub(crate) fn vendor_shortfall_at(
         &self,
         cfg: &Growth,
         stats: &[ItemStats],
+        wares: &[ac_vendor::counter::Ware],
     ) -> Vec<ac_vendor::counter::Want> {
         self.grow_needs_with(cfg, stats)
             .into_iter()
             .filter(|n| n.buyable && n.want > 0)
             .filter_map(|n| {
-                let wcid = match n.kind {
-                    NeedKind::Component(wcid) => wcid,
-                    // Ammunition and named stock are matched on the
-                    // shelf by name rather than by class, so they are
-                    // left to the older path for now.
-                    _ => return None,
+                let wcid = match &n.kind {
+                    NeedKind::Component(wcid) => *wcid,
+                    kind => {
+                        let needle = match kind {
+                            NeedKind::Named(t) => t.trim().to_lowercase(),
+                            _ => String::new(),
+                        };
+                        wares
+                            .iter()
+                            .filter(|w| answers_need(kind, &w.name, w.wcid, &needle))
+                            .min_by_key(|w| w.price)?
+                            .wcid
+                    }
                 };
                 Some(ac_vendor::counter::Want {
                     wcid,

@@ -12,7 +12,7 @@
 
 use std::collections::BTreeMap;
 
-use ac_vendor::counter::{Counter, Item, Keep, Rules, Want, Ware};
+use ac_vendor::counter::{Counter, Item, Keep, Rules, Ware};
 use ac_vendor::{Act, Snapshot};
 
 use crate::autoplay::Doing;
@@ -40,6 +40,7 @@ impl Client {
                 *notes.entry(o.value / o.stack_size.max(1)).or_insert(0) += o.stack_size.max(1);
             }
         }
+        let counter = self.counter_now();
         Snapshot {
             items,
             coin: self.purse(),
@@ -51,8 +52,12 @@ impl Client {
             // against every pack's room together (ACE's `ItemsToReceive`
             // reads `GetFreeInventorySlots` with the side packs in).
             slots_free: self.room_anywhere(),
-            counter: self.counter_now(),
-            wants: self.vendor_wants(cfg, &stats),
+            wants: self.vendor_shortfall_at(
+                cfg,
+                &stats,
+                counter.as_ref().map_or(&[], |c| &c.wares),
+            ),
+            counter,
             rules: Rules {
                 keep_slots: self.autoplay.config.team.restock.keep_slots,
                 float: ac_vendor::errand::FLOAT,
@@ -173,15 +178,6 @@ impl Client {
             note_wcid: note.map(|(_, wcid)| wcid),
             away,
         })
-    }
-
-    /// What the character came to buy.
-    ///
-    /// A line nobody sells is left out: the Void components and, in
-    /// practice, the Diamond Scarab, whose one seller is a curiosity
-    /// shop. A want like that would hold a trip open for ever.
-    fn vendor_wants(&self, cfg: &Growth, stats: &[ItemStats]) -> Vec<Want> {
-        self.vendor_shortfall_with(cfg, stats)
     }
 
     /// Do the one thing the rules asked for. `false` when the act was

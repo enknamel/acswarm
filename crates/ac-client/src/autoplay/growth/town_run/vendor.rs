@@ -186,12 +186,18 @@ fn shop_ware<'a>(
 ) -> Option<&'a ac_world::shops::Ware> {
     shop.sells
         .iter()
-        .filter(|w| match &need.kind {
-            NeedKind::Named(_) => contains_fold(&w.name, needle),
-            NeedKind::Ammo(kind) => ammo_stock(&w.name, *kind),
-            NeedKind::Component(wcid) => w.wcid == *wcid,
-        })
+        .filter(|w| answers_need(&need.kind, &w.name, w.wcid, needle))
         .min_by_key(|w| w.value)
+}
+
+/// Whether a ware called `name` (weenie `wcid`) answers a need of `kind`: the one rule the trip
+/// planner picks a shop by and the counter buys by. `needle` is a named need's words, lowercased.
+pub(crate) fn answers_need(kind: &NeedKind, name: &str, wcid: u32, needle: &str) -> bool {
+    match kind {
+        NeedKind::Named(_) => contains_fold(name, needle),
+        NeedKind::Ammo(kind) => ammo_stock(name, *kind),
+        NeedKind::Component(want) => wcid == *want,
+    }
 }
 
 /// What a trip to `shop` would buy, cost and fetch. `wants` is the

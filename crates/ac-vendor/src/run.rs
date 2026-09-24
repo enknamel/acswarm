@@ -94,6 +94,8 @@ pub struct Run {
     buying: Option<u32>,
     /// Wares the counter would not sell this visit, by weenie.
     wont_sell: Patience<u32>,
+    /// Why the first ware still wanted was not bought here, for the visit to say.
+    unbought: Option<String>,
 }
 
 impl Run {
@@ -227,10 +229,15 @@ impl Run {
                 saying: format!("no room in the pack for what {} would pay", counter.name),
             };
         }
+        let unbought = self
+            .unbought
+            .as_ref()
+            .map(|why| format!("; bought no {why}"))
+            .unwrap_or_default();
         Next {
             act: Some(Act::Close),
             did: Did::Done,
-            saying: format!("sold {} item(s) to {}", self.sold, counter.name),
+            saying: format!("sold {} item(s) to {}{unbought}", self.sold, counter.name),
         }
     }
 
@@ -376,13 +383,24 @@ impl Run {
         let counter = snap.counter.as_ref()?;
         let purse = snap.purse();
         for want in &snap.wants {
-            if want.short == 0 || self.wont_sell.held(&want.wcid, now) {
+            if want.short == 0 {
+                continue;
+            }
+            let mut skip = |why: String| {
+                if self.unbought.is_none() {
+                    self.unbought = Some(format!("{}: {why}", want.name));
+                }
+            };
+            if self.wont_sell.held(&want.wcid, now) {
+                skip("the counter would not sell it".into());
                 continue;
             }
             let Some(ware) = counter.wares.iter().find(|w| w.wcid == want.wcid) else {
+                skip("not on this shelf".into());
                 continue;
             };
             if ware.price == 0 || ware.price > purse {
+                skip(format!("{} each, {purse} in coin", ware.price));
                 continue;
             }
             let afford = purse / ware.price;
@@ -397,6 +415,14 @@ impl Run {
                 .min(liftable)
                 .min(ware.stock.unwrap_or(u32::MAX));
             if count == 0 {
+                let why = if liftable == 0 {
+                    format!("no burden room ({} to carry)", snap.burden_room())
+                } else {
+                    "none left on the shelf".to_string()
+                };
+                if self.unbought.is_none() {
+                    self.unbought = Some(format!("{}: {why}", want.name));
+                }
                 continue;
             }
             let bill = ware.price.saturating_mul(count);
@@ -580,6 +606,28 @@ mod tests {
             next,
             Some(Act::Sell { items: vec![2, 3] }),
             "the rest was not sold"
+        );
+    }
+
+    #[test]
+    fn a_visit_that_buys_nothing_it_came_for_says_why() {
+        let now = Instant::now();
+        let mut run = Run::new();
+        let mut s = snap(vec![]);
+        s.coin = 10_000;
+        s.wants = vec![Want {
+            wcid: 20631,
+            name: "Prismatic Taper".into(),
+            short: 99,
+            urgent: true,
+        }];
+        let next = run.step(&s, now);
+        assert_eq!(next.act, Some(Act::Close));
+        assert!(
+            next.saying
+                .contains("bought no Prismatic Taper: not on this shelf"),
+            "{}",
+            next.saying
         );
     }
 

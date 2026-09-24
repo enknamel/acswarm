@@ -182,6 +182,16 @@ impl Client {
         self.due_buff(self.buff_within_now(true), now).is_some()
     }
 
+    /// The buff pass `urgent` (or the top-up) has looked at `now`; it looks again a
+    /// [`BUFF_CHECK_EVERY`] on.
+    fn stamp_buff_look(&mut self, urgent: bool, now: Instant) {
+        if urgent {
+            self.autoplay.urgent_buffs_checked = Some(now);
+        } else {
+            self.autoplay.top_ups_checked = Some(now);
+        }
+    }
+
     /// Put a buff back up. True when it cast one.
     ///
     /// Two passes share this. The urgent one runs before anything else
@@ -259,34 +269,32 @@ impl Client {
         if checked.is_some_and(|t| now.duration_since(t) < BUFF_CHECK_EVERY) {
             return false;
         }
-        // A buff is never worth a cancelled swing: it goes back up in
-        // the gap between two of them instead (see
-        // `change_of_hands_waits`).
-        if change_of_hands_waits(self.combat_stance(), Stance::Magic, self.mid_attack()) {
-            self.wait_for_the_swing();
-            self.autoplay.note(
-                "waiting for the swing to land before reaching for a wand",
-                now,
-            );
-            return false;
-        }
-        if urgent {
-            self.autoplay.urgent_buffs_checked = Some(now);
-        } else {
-            self.autoplay.top_ups_checked = Some(now);
-        }
         let within = self.buff_within_now(urgent);
-        // Find what is due before touching the hands: the urgent pass
-        // runs every tick and must cost nothing when nothing is due.
-        // Worked out once, for the pick and for saying why none is due.
+        // Find what is due before touching the hands: a pass with nothing
+        // to cast holds no swing back. Worked out once, for the pick and
+        // for saying why none is due.
         let wants = self.auto_buffs();
         let Some((spell, target, category, name, lasts)) = self.due_buff_among(&wants, within, now)
         else {
+            self.stamp_buff_look(urgent, now);
             if !urgent {
                 self.autoplay_explain_buffs(&wants, now);
             }
             return false;
         };
+        // A buff is never worth a cancelled swing: with one due and the
+        // hands to change, it goes up in the gap after the swing (see
+        // `change_of_hands_waits`), and the look is not stamped, so the
+        // pass is there for that gap rather than a second later.
+        if change_of_hands_waits(self.combat_stance(), Stance::Magic, self.mid_attack()) {
+            self.wait_for_the_swing();
+            self.autoplay.note(
+                format!("waiting for the swing to land before reaching for a wand to cast {name}"),
+                now,
+            );
+            return false;
+        }
+        self.stamp_buff_look(urgent, now);
         // Mana is kept back for healing and fighting: a top-up waits
         // until there is that much to spare, and even an urgent recast
         // leaves half of it.
