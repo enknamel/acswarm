@@ -33,6 +33,11 @@ pub(crate) const COUNTER_REACH: f32 = 3.0;
 /// then left.
 const VENDOR_OPEN_TIMEOUT: Duration = Duration::from_secs(12);
 
+/// Longest the selling and buying at one counter's window may take, from the first act: a big
+/// sale is a few dozen acts of one round trip each, and no act is asked for without end
+/// (test: the_selling_at_a_counter_ends_on_its_own_clock).
+const SELLING_TIMEOUT: Duration = Duration::from_secs(3 * 60);
+
 /// How long after a counter turned the Use away as busy it is asked
 /// over, once nothing of ours is in flight. ACE is busy with a cast
 /// for its recoil only -- `IsBusy` is set in `FinishCast` and cleared

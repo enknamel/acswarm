@@ -4,6 +4,7 @@ use std::time::Instant;
 
 use ac_agent::did::{Did, Patience};
 use ac_agent::pack;
+use ac_agent::refusals::Answer;
 
 use crate::counter::{Item, Snapshot};
 
@@ -89,6 +90,10 @@ pub struct Run {
     pub sold: u32,
     /// Goods to sell, no slot for their coin: selling stands aside and the visit says why.
     no_room: bool,
+    /// The ware last asked for, until the counter answers: what a refusal in words is about.
+    buying: Option<u32>,
+    /// Wares the counter would not sell this visit, by weenie.
+    wont_sell: Patience<u32>,
 }
 
 impl Run {
@@ -101,8 +106,8 @@ impl Run {
         self.offered.len()
     }
 
-    /// Records that this side could not do `act` (a pour, a cut), as a counter's no is recorded.
-    /// So it is not asked for again every turn; nothing was handed over, so nothing is waited on.
+    /// Records that this side could not do `act` (a pour, a cut, a ware with no shelf line), as a
+    /// counter's no is recorded: so it is not asked for again every turn, and nothing is waited on.
     pub fn refused(&mut self, act: &Act, now: Instant) {
         match act {
             Act::Merge { from, to, .. } => {
@@ -116,18 +121,37 @@ impl Run {
                 self.refused
                     .note(*guid, &Did::refused("the stack would not cut"), now);
             }
+            Act::Buy { wcid, .. } => {
+                self.wont_sell
+                    .note(*wcid, &Did::refused("the counter would not sell it"), now);
+            }
             // Every other act is decided afresh from each snapshot, which shows what failed.
             Act::Approach { .. }
             | Act::Open { .. }
             | Act::Sell { .. }
-            | Act::Buy { .. }
             | Act::Cash { .. }
             | Act::Close => {}
         }
     }
 
+    /// The counter turned down the purchase in flight, in words (`Refusal::Buy`): that ware is
+    /// held as the refusals table answers, and a snapshot the refusal left unchanged moves on.
+    pub fn buy_refused(&mut self, answer: Answer, now: Instant) {
+        if let Some(wcid) = self.buying.take() {
+            answer.hold(
+                &mut self.wont_sell,
+                wcid,
+                "the counter would not sell it",
+                now,
+            );
+        }
+    }
+
     /// The next thing to do, or why there is nothing.
     pub fn step(&mut self, snap: &Snapshot, now: Instant) -> Next {
+        // Asked once the counter has answered the last act, and its words come ahead of that
+        // answer (Vendor.cs:496-500, then UseDone at Player_Commerce.cs:51): a buy unrefused went.
+        self.buying = None;
         let Some(counter) = snap.counter.as_ref() else {
             self.phase = Phase::Done;
             return Next::nothing(Did::blocked("there is no counter here"), "no counter");
@@ -178,7 +202,7 @@ impl Run {
             }
             // 2. Make notes once the pack is low on room.
             if snap.slots_free <= snap.rules.keep_slots {
-                if let Some(next) = self.make_notes(snap) {
+                if let Some(next) = self.make_notes(snap, now) {
                     return next;
                 }
             }
@@ -190,7 +214,7 @@ impl Run {
         }
 
         if self.phase == Phase::Buying {
-            if let Some(next) = self.buy_one(snap) {
+            if let Some(next) = self.buy_one(snap, now) {
                 return next;
             }
             self.phase = Phase::Done;
@@ -270,7 +294,7 @@ impl Run {
     }
 
     /// Turn the takings into trade notes, so the selling can go on.
-    fn make_notes(&mut self, snap: &Snapshot) -> Option<Next> {
+    fn make_notes(&mut self, snap: &Snapshot, now: Instant) -> Option<Next> {
         let counter = snap.counter.as_ref()?;
         let face = counter.note_face.filter(|f| *f > 0)?;
         // Loses the 15% markup, but a slot of Mayoi notes holds 62.5 million, coin 25,000.
@@ -282,7 +306,8 @@ impl Run {
         if count == 0 {
             return None;
         }
-        let wcid = counter.note_wcid?;
+        let wcid = counter.note_wcid.filter(|w| !self.wont_sell.held(w, now))?;
+        self.buying = Some(wcid);
         Some(Next::acting(
             Act::Buy { wcid, count },
             format!("packing the takings into {count} note(s)"),
@@ -349,11 +374,11 @@ impl Run {
     }
 
     /// Buy one thing the character came for, within the purse and the burden it can still lift.
-    fn buy_one(&mut self, snap: &Snapshot) -> Option<Next> {
+    fn buy_one(&mut self, snap: &Snapshot, now: Instant) -> Option<Next> {
         let counter = snap.counter.as_ref()?;
         let purse = snap.purse();
         for want in &snap.wants {
-            if want.short == 0 {
+            if want.short == 0 || self.wont_sell.held(&want.wcid, now) {
                 continue;
             }
             let Some(ware) = counter.wares.iter().find(|w| w.wcid == want.wcid) else {
@@ -400,6 +425,7 @@ impl Run {
                 }
                 continue;
             }
+            self.buying = Some(want.wcid);
             return Some(Next::acting(
                 Act::Buy {
                     wcid: want.wcid,
@@ -691,6 +717,90 @@ mod tests {
             "{}",
             next.saying
         );
+    }
+
+    #[test]
+    fn a_purchase_the_counter_turned_down_is_not_asked_for_again_this_visit() {
+        // The server answers a refused purchase in words and then its usual UseDone, and the pack
+        // is as it was: told of the words, the rules go on to the selling instead of asking again.
+        let now = Instant::now();
+        let mut s = snap(vec![item(3, "Leather Cap", 640, 1, 1)]);
+        s.coin = 1_000_000;
+        s.slots_free = 2;
+        let mut run = Run::new();
+        let asked = run.step(&s, now).act;
+        assert_eq!(
+            asked,
+            Some(Act::Buy {
+                wcid: NOTE,
+                count: 3
+            })
+        );
+        run.buy_refused(Answer::Never, now);
+        let next = run.step(&s, now);
+        assert_eq!(
+            next.act,
+            Some(Act::Sell { items: vec![3] }),
+            "{}",
+            next.saying
+        );
+        for _ in 0..50 {
+            let next = run.step(&s, now);
+            assert_ne!(next.act, asked, "asked again: {}", next.saying);
+        }
+        // For this visit: the next counter's rules ask for their notes afresh.
+        assert_eq!(Run::new().step(&s, now).act, asked);
+    }
+
+    #[test]
+    fn a_refusal_with_no_purchase_in_flight_holds_nothing() {
+        // Words about a purchase that went through, or one made by hand, are nothing to the run.
+        let now = Instant::now();
+        let mut s = snap(vec![item(3, "Leather Cap", 640, 1, 1)]);
+        s.coin = 1_000_000;
+        s.slots_free = 2;
+        let mut run = Run::new();
+        let asked = run.step(&s, now).act;
+        assert!(matches!(asked, Some(Act::Buy { .. })), "{asked:?}");
+        // The notes came, and the next turn sells: the words heard now are about nothing of ours.
+        s.coin = 2_000;
+        let next = run.step(&s, now);
+        assert_eq!(
+            next.act,
+            Some(Act::Sell { items: vec![3] }),
+            "{}",
+            next.saying
+        );
+        run.buy_refused(Answer::Never, now);
+        assert!(run.wont_sell.is_empty(), "a refusal was pinned on nothing");
+    }
+
+    #[test]
+    fn a_ware_refused_on_this_side_is_not_bought_again() {
+        // No shelf line to name, say: the rules are told, and the trip finishes without it.
+        let now = Instant::now();
+        let mut s = snap(Vec::new());
+        s.coin = 10_000;
+        s.wants = vec![Want {
+            wcid: 20631,
+            name: "Prismatic Taper".into(),
+            short: 100,
+            urgent: true,
+        }];
+        s.counter.as_mut().unwrap().wares.push(Ware {
+            wcid: 20631,
+            name: "Prismatic Taper".into(),
+            price: 26,
+            stock: None,
+            burden: 6,
+        });
+        let mut run = Run::new();
+        let buy = run.step(&s, now).act.expect("nothing asked for");
+        assert!(matches!(buy, Act::Buy { wcid: 20631, .. }), "{buy:?}");
+        run.refused(&buy, now);
+        let next = run.step(&s, now);
+        assert_eq!(next.act, Some(Act::Close), "{}", next.saying);
+        assert_eq!(run.phase, Phase::Done);
     }
 
     #[test]
