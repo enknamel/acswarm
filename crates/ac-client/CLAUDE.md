@@ -154,8 +154,8 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
   Nothing beside the leader, nothing is picked (no fallback: `follow` fetches it; past
   `follow_break()` catch up outranks the fight). A team proposal outranks the pick only through
   `can_take_on()`, and `can_keep_target()` holds the fight in hand, wherever the leader stands.
-- Going with the leader, `is_led()`: keep to the area, resume the journey, explore and a ground of
-  its own step aside and nothing is put aside for later; the area limits only what it fights.
+- Going with the leader, `is_led()`: keep to the area (bar into its dungeon after a leader in it),
+  resume the journey, explore and a ground step aside, none is put aside; the area limits its fights.
 - Played by hand, `autoplay_by_hand()`: with autoplay off only the team's own rules run -- invites,
   a leader's fellowship, following and assisting. Nothing takes the legs or the hands for an errand
   of its own: no town run, no ground, no experience spent, no weapon changed, no target picked.

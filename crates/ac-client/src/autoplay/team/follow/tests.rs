@@ -289,6 +289,53 @@ fn a_follower_does_not_walk_back_into_its_area_away_from_its_leader() {
     );
 }
 
+/// A level-20 follower in the Holtburg field over the game data, hunting the Holtburg Dungeon with
+/// town runs off; its leader stands in `cell`.
+fn hunting_the_dungeon_led_from(cell: u32) -> Client {
+    let mut c = testkit::character_of_level(testkit::game_data(), 20);
+    testkit::stand(&mut c, HOLTBURG, Vec3::new(84.0, 84.0, 94.0));
+    c.autoplay.config.enabled = true;
+    c.autoplay.config.growth.town_runs = false;
+    c.autoplay.config.fight.area = Some(crate::hunt::HuntArea {
+        name: "the Holtburg Dungeon".into(),
+        shape: crate::hunt::Shape::Dungeon {
+            landblock: 0x01F6_0000,
+            rooms: Vec::new(),
+        },
+    });
+    let team = &mut c.autoplay.config.team;
+    team.enabled = true;
+    team.follow = true;
+    let mut leader = leader_off(&c, 0.0);
+    leader.cell = cell;
+    leader.world = ac_world::landblock_origin(cell) + Vec3::new(96.7, -10.0, 0.0);
+    c.autoplay.team = testkit::view_of(vec![leader]);
+    c
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_follower_goes_into_its_dungeon_after_a_leader_already_in_it() {
+    // A party hunting a dungeon gets its followers in by "keep to the area" (70): following waits
+    // outside a dungeon the leader stands in, so with the area stepped aside nobody went in.
+    let mut c = hunting_the_dungeon_led_from(0x01F6_0289);
+    let mut t = Instant::now();
+    for n in 0..6 {
+        t = ticks(&mut c, t, 1);
+        assert_eq!(c.autoplay.step, Some("keep to the area"), "tick {n}");
+    }
+    assert_eq!(
+        c.visiting(),
+        Some("Holtburg Dungeon"),
+        "the follower stayed outside its dungeon"
+    );
+    // A leader in some other dungeon is waited for outside, as before: the area does not lead.
+    let mut c = hunting_the_dungeon_led_from(0x01F7_0105);
+    ticks(&mut c, Instant::now(), 3);
+    assert_ne!(c.autoplay.step, Some("keep to the area"));
+    assert_eq!(c.visiting(), None, "it went into its own dungeon alone");
+}
+
 #[test]
 fn a_journey_put_aside_before_following_is_not_taken_up_after_a_stop() {
     // A journey a fight broke off while the character played alone, then following switched on:
