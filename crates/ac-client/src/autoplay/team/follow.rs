@@ -176,6 +176,12 @@ impl Client {
             self.end_trip();
             let_go = true;
         }
+        // A goal with no journey under way is what a failed replan leaves between ticks
+        // (`cancel_travel_keeping_refusals`); whoever wants it plans again, but a death keeps it.
+        if !self.traveling() && self.travel_goal_xy().is_some() {
+            self.end_trip();
+            let_go = true;
+        }
         self.autoplay.follow_trip = None;
         self.autoplay.next_follow_plan = None;
         if let_go {

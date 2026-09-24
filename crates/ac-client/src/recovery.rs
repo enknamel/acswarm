@@ -569,8 +569,11 @@ impl Client {
             .attack_target
             .or(self.autoplay.casting_at())
             .and_then(|g| self.world.name_of(g).map(str::to_string));
-        // Following's own journey is not kept for afterwards: following plans it again itself.
-        let own_trip = self.travel_goal_xy().filter(|_| !self.is_follow_journey());
+        // Following's own journey is not kept for afterwards: following plans it again itself. Nor
+        // anything while led, a failed replan's goal after the leader included (it outlives a stop).
+        let own_trip = self
+            .travel_goal_xy()
+            .filter(|_| !self.is_follow_journey() && !self.is_led());
         let trip = self.autoplay.resume_trip.or(own_trip);
         let cfg = &self.autoplay.config.survive;
         Some(View {
