@@ -25,6 +25,50 @@ fn an_evaded_swing_counts_as_being_attacked() {
     assert!(!c.hit_lately_by("Drudge Robber"), "the one standing by");
 }
 
+/// An attack notice as the server sends it: ours landing on `name` (0x01B1), or `name`'s on us
+/// (0x01B2, which carries the hit location before the critical flag).
+fn blow(name: &str, damage: u32, on_us: bool) -> Vec<u8> {
+    let mut w = ac_net::wire::Writer::new();
+    let event = if on_us {
+        ac_net::messages::event::DEFENDER_NOTIFICATION
+    } else {
+        ac_net::messages::event::ATTACKER_NOTIFICATION
+    };
+    w.u32(0x5000_0001)
+        .u32(0)
+        .u32(event)
+        .string16(name)
+        .u32(1)
+        .f64(0.1)
+        .u32(damage);
+    if on_us {
+        w.u32(0);
+    }
+    w.u32(0);
+    w.finish()
+}
+
+#[test]
+fn blows_are_counted_off_the_attack_notices() {
+    let mut c = character_of_level(no_data(), 20);
+    let event = ac_net::messages::opcode::GAME_EVENT;
+    c.chat_message(event, &blow("Drudge Skulker", 7, false));
+    c.chat_message(event, &blow("Drudge Skulker", 5, false));
+    c.chat_message(event, &blow("Drudge Skulker", 3, true));
+    c.chat_message(event, &evaded(0x8000_0001, "Drudge Skulker"));
+    assert_eq!(
+        c.blows,
+        crate::tally::Blows {
+            dealt: 2,
+            dealt_points: 12,
+            taken: 1,
+            taken_points: 3,
+            missed: 0,
+            evaded: 1,
+        }
+    );
+}
+
 /// A line of system chat as the server sends it (ServerMessage 0xF7E0):
 /// the text, and its ChatMessageType, Magic here.
 fn magic_line(text: &str) -> Vec<u8> {

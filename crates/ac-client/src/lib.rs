@@ -68,6 +68,7 @@ mod refused;
 mod session;
 pub(crate) use session::apply::YOURE_TOO_BUSY;
 pub mod shopping;
+pub mod tally;
 #[cfg(any(test, feature = "testkit"))]
 pub mod testkit;
 pub mod travel;
@@ -236,6 +237,10 @@ pub struct Client {
     /// The server's objects standing round the character, which a
     /// walk goes round (see `ac_nav::obstacles`).
     pub clutter: ac_nav::Clutter,
+    /// This frame's walk, while one is steered: for telemetry.
+    pub walk_frame: Option<tally::WalkFrame>,
+    /// Blows traded this session: for telemetry.
+    pub blows: tally::Blows,
     /// Planner for routes that leave the landblock we stand in, run on a
     /// thread of its own (see `pathfinder`).
     pub pathfinder: pathfinder::Pathfinder,

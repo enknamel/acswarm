@@ -532,6 +532,10 @@ impl Client {
                 None => "No way there from here.".to_string(),
             };
             tracing::warn!("travel: {why} ({goal:?}, level {level})");
+            // The planner's inputs, so telemetry can replay the refusal.
+            self.events.push(crate::Event::Noted(format!(
+                "travel: {why} (to {goal:?} from {cell:#010x} at {me:?}, level {level})"
+            )));
             self.events.push(crate::Event::Chat { text: why, kind: 1 });
             return false;
         };

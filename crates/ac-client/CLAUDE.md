@@ -181,8 +181,8 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 | `holdings.rs` | every character's inventory snapshots, for the Items window |
 | `reconnect.rs` | whether and when a dropped session logs back in |
 | `logoff.rs` | logging every session off on exit |
-| `options.rs` | character option bits |
-| `emotes.rs` | soul emotes |
+| `options.rs`, `emotes.rs` | character option bits; soul emotes |
+| `tally.rs` | what the character did lately, for telemetry: this frame's walk (`WalkFrame`), blows traded (`Blows`) |
 | `daytime.rs` | Dereth's time of day |
 | `augmentations.rs` | augmentation gems |
 | `advance.rs` | experience costs and raise messages |

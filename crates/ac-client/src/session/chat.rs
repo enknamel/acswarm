@@ -189,6 +189,8 @@ impl Client {
                     // the corpse appears, and wherever it fell (see
                     // `Client::owes_a_corpse`).
                     if let Ok(n) = ac_net::messages::AttackNotice::parse_attacker(rest) {
+                        self.blows.dealt += 1;
+                        self.blows.dealt_points += u64::from(n.damage);
                         if n.percent >= 0.999 {
                             let now = Instant::now();
                             self.autoplay.last_kill = Some(now);
@@ -223,6 +225,8 @@ impl Client {
                     match ac_net::messages::AttackNotice::parse_defender(rest) {
                         Ok(n) => Ok({
                             self.autoplay.attacked_by(&n.name, Instant::now());
+                            self.blows.taken += 1;
+                            self.blows.taken_points += u64::from(n.damage);
                             ChatLine {
                                 text: format!(
                                     "{} {} you for {} points.",
@@ -243,6 +247,7 @@ impl Client {
                     }
                 }
                 Some((_, _, event::EVASION_ATTACKER_NOTIFICATION, rest)) => {
+                    self.blows.missed += 1;
                     match ac_net::wire::Reader::new(rest).string16() {
                         Ok(n) => Ok(ChatLine {
                             text: format!("{n} evades your attack."),
@@ -261,6 +266,7 @@ impl Client {
                     // only hits let a critter stand there missing while
                     // the character walked past it.
                     self.autoplay.last_hit_us = Some(Instant::now());
+                    self.blows.evaded += 1;
                     match ac_net::wire::Reader::new(rest).string16() {
                         Ok(n) => Ok({
                             self.autoplay.attacked_by(&n, Instant::now());
