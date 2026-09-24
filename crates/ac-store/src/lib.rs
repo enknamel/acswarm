@@ -66,6 +66,35 @@ pub enum Visibility {
     Private,
 }
 
+/// A new file `<stem>-<unix secs>-<pid>.<ext>` in `dir` for this process to write, after deleting
+/// all but the newest `keep - 1` of the earlier ones (the names sort by the second they were made).
+pub fn fresh_file(
+    dir: &Path,
+    stem: &str,
+    ext: &str,
+    keep: usize,
+) -> io::Result<(std::fs::File, PathBuf)> {
+    std::fs::create_dir_all(dir)?;
+    let (head, tail) = (format!("{stem}-"), format!(".{ext}"));
+    let mut old: Vec<PathBuf> = std::fs::read_dir(dir)?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with(&head) && n.ends_with(&tail))
+        })
+        .collect();
+    old.sort();
+    for stale in old.iter().rev().skip(keep.saturating_sub(1)) {
+        let _ = std::fs::remove_file(stale);
+    }
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    let path = dir.join(format!("{stem}-{secs}-{}.{ext}", std::process::id()));
+    Ok((std::fs::File::create(&path)?, path))
+}
+
 /// Read `path` as JSON. `Ok(None)` when there is no file; a file that
 /// cannot be read or will not parse is an error, so each caller decides
 /// what that means to it rather than being handed an empty value.

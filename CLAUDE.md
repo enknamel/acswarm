@@ -87,6 +87,10 @@ UDP <-> ac-net::Session <-> ac-client::Client::tick <-> ac-world::World::apply
 - Explicit targets: `wire` (trace, every packet and message in and out) and `steer` (trace, obstacle
   detours and the walk): `RUST_LOG=warn,wire=trace`. The log panel reloads the filter live
   (`bins/acswarm/src/logging.rs`, list in `ac_plugin::logging::SYSTEMS`); headless adds `--log-chat`.
+- Every process also writes `~/.cache/acswarm/logs/` (rules, refusals, journeys; each line `s{a=ACCOUNT}`)
+  and `~/.cache/acswarm/telemetry/` (JSON lines: every session sampled each 2 s, plus status, chat,
+  refusal and F9-mark events). Read a live issue there first: `tools/telemetry.py [FILE]` summarises
+  (activity, kills, deaths, xp, town runs, stalls), `--marks` shows each F9, `--compare A B` measures a change.
 
 ## Comments
 

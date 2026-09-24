@@ -23,7 +23,7 @@ impl Client {
     }
 
     /// Pyreals carried.
-    pub(crate) fn purse(&self) -> u32 {
+    pub fn purse(&self) -> u32 {
         self.world
             .inventory()
             .filter(|o| o.item_type & item_type::MONEY != 0)

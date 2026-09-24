@@ -14,6 +14,7 @@ pub fn builtin() -> Host {
         host.register(p);
     }
     host.register(Box::new(ac_plugin::team::Team::default()));
+    host.register(Box::new(ac_plugin::telemetry::Telemetry::default()));
     host.register(Box::new(ac_script::ScriptPlugin::new(
         ac_script::default_dir(),
     )));
