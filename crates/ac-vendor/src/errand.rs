@@ -169,19 +169,22 @@ pub fn coin_slots(coin: u32) -> u32 {
     coin.div_ceil(COIN_STACK)
 }
 
-/// How much of `pays`, in order, one armful sells for, and what the counter pays for it.
-/// Whole new coin stacks weighed against the slots free before any goods leave, so the sold slots
-/// and the carried pile do not count (Player_Commerce.cs:178,:182,:199; ItemsToReceive.cs:41,:103).
-pub fn armful_within_slots(pays: &[u32], slots_free: u32) -> (usize, u32) {
+/// Which of `pays` (indices, in order) one armful sells, and what the counter pays for it; one
+/// whose payment would not fit is left for later and cheaper ones still go. Whole new coin stacks
+/// weighed against the slots free before any goods leave, so the sold slots and the carried pile do
+/// not count (Player_Commerce.cs:178,:182,:199; ItemsToReceive.cs:41,:103).
+pub fn armful_within_slots(pays: &[u32], slots_free: u32) -> (Vec<usize>, u32) {
     let mut takings = 0u32;
-    for (taken, pay) in pays.iter().enumerate() {
+    let mut taken = Vec::new();
+    for (i, pay) in pays.iter().enumerate() {
         let after = takings.saturating_add(*pay);
         if coin_slots(after) > slots_free {
-            return (taken, takings);
+            continue;
         }
         takings = after;
+        taken.push(i);
     }
-    (pays.len(), takings)
+    (taken, takings)
 }
 
 pub fn note_cost(face: u32) -> u32 {
@@ -206,11 +209,14 @@ pub fn plan(
     while !to_sell.is_empty() {
         let pays: Vec<u32> = to_sell.iter().map(|i| i.pays).collect();
         let (taken, takings) = armful_within_slots(&pays, left.slots);
-        if taken > 0 {
-            let going: Vec<&ForSale> = to_sell.drain(..taken).collect();
+        if !taken.is_empty() {
+            let going: Vec<&ForSale> = taken.iter().map(|&i| to_sell[i]).collect();
+            for &i in taken.iter().rev() {
+                to_sell.remove(i);
+            }
             // Room for the payment was found before the goods left, so the slots they vacate come
             // back only now, for the next armful.
-            left.slots = left.slots - coin_slots(takings) + taken as u32;
+            left.slots = left.slots - coin_slots(takings) + going.len() as u32;
             left.coin = left.coin.saturating_add(takings);
             left.room = left
                 .room
@@ -510,10 +516,12 @@ mod tests {
     #[test]
     fn a_sale_is_paid_into_the_slots_free_before_the_goods_leave() {
         // One free slot holds one coin stack, so a payment of 30,000 wants two and cannot have it.
-        assert_eq!(armful_within_slots(&[30_000], 1), (0, 0));
-        assert_eq!(armful_within_slots(&[25_000], 1), (1, 25_000));
+        assert_eq!(armful_within_slots(&[30_000], 1), (vec![], 0));
+        assert_eq!(armful_within_slots(&[25_000], 1), (vec![0], 25_000));
         // An armful is one payment, not one per item: three sales of 10,000 come to two stacks.
-        assert_eq!(armful_within_slots(&[10_000; 3], 2), (3, 30_000));
+        assert_eq!(armful_within_slots(&[10_000; 3], 2), (vec![0, 1, 2], 30_000));
+        // One too dear for the slots is left for later, and the cheaper ones behind it still go.
+        assert_eq!(armful_within_slots(&[30_000, 10_000, 5_000], 1), (vec![1, 2], 15_000));
         // Neither the slot the dagger vacates nor the 20,000 already carried lends room for them.
         let loot = [ForSale {
             guid: 1,

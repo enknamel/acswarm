@@ -494,6 +494,11 @@ impl Client {
                 self.autoplay.growth.last_saying = next.saying.clone();
                 match next.act {
                     Some(ac_vendor::Act::Close) | None => {
+                        // Said, so a visit that ends with nothing sold says why.
+                        if !next.saying.is_empty() {
+                            self.autoplay
+                                .note(format!("{}: {}", run.vendor, next.saying), now);
+                        }
                         Turn::after_stop(self.leave_counter(run, now, cfg, None))
                     }
                     Some(act) => {

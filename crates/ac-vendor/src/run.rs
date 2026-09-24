@@ -342,15 +342,13 @@ impl Run {
                         format!("cutting {take} off the {}", it.name),
                     ));
                 }
+                // Set aside, and the rest still sold: an answer with no act closes the visit.
                 self.refused.note(
                     it.guid,
                     &Did::refused("worth more than this counter will look at"),
                     now,
                 );
-                return Some(Next::nothing(
-                    Did::waiting("that one is too dear for this counter"),
-                    format!("{} is worth more than {} will take", it.name, counter.name),
-                ));
+                offer.remove(0);
             }
         }
 
@@ -358,7 +356,7 @@ impl Run {
         // plans the trip by this same rule (`errand::armful_within_slots`).
         let pays: Vec<u32> = offer.iter().map(|it| it.value).collect();
         let (taken, _) = crate::errand::armful_within_slots(&pays, snap.slots_free);
-        let items: Vec<u32> = offer[..taken].iter().map(|it| it.guid).collect();
+        let items: Vec<u32> = taken.iter().map(|&i| offer[i].guid).collect();
         if items.is_empty() {
             // No room for the money is not the counter's to fix: stand aside so cashing and buying
             // get their turn, and the visit ends saying why nothing sold.
@@ -563,6 +561,22 @@ mod tests {
         run.refused(&cut, now);
         let next = run.step(&s, now).act;
         assert_eq!(next, Some(Act::Close), "asked for the refused cut again");
+    }
+
+    #[test]
+    fn one_thing_too_dear_for_the_counter_is_set_aside_and_the_rest_still_sold() {
+        let now = Instant::now();
+        let mut run = Run::new();
+        // A single piece worth more than the counter will look at cannot be cut, so it is left be,
+        // and the cheaper ones beside it are sold in the same visit rather than the visit ending.
+        let mut s = snap(vec![
+            item(1, "Heirloom Sword", 2_000_000, 1, 1),
+            item(2, "Dagger", 500, 1, 1),
+            item(3, "Buckler", 300, 1, 1),
+        ]);
+        s.counter.as_mut().unwrap().max_value = 1_000_000;
+        let next = run.step(&s, now).act;
+        assert_eq!(next, Some(Act::Sell { items: vec![2, 3] }), "the rest was not sold");
     }
 
     #[test]
