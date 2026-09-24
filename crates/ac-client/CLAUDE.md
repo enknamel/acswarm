@@ -147,13 +147,13 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 - The loot profile decides: `fate()` puts a tag ahead of every guard (restock, burns, keep names);
   only the server's own refusal overrides it.
 - One target picker. Swing, shot and spell all call `pick_target()`: the nearest of what
-  `would_fight()` allows inside `cfg.radius`, within the leader's `team.fight_radius` while
-  following one (not in the academy) unless it is hitting the character (`hit_lately_by()`), and
-  preferring one the attack in hand gets to: `attack_kind()` reads the hands, never
-  `Client::missile`, and names the spell per creature by the cast's own `best_spell()`, so the
-  flight tested is the flight thrown. Nothing beside the leader, nothing is picked (`follow` fetches
-  it; past `follow_break()` catch up outranks the fight). A team proposal outranks the pick only
-  through `can_take_on()`, and `can_keep_target()` holds the fight in hand, wherever the leader is.
+  `would_fight()` allows inside `cfg.radius`, within the leader's `team.fight_radius` while following
+  one (not in the academy) unless it is hitting the character (`hit_lately_by()`), and preferring one
+  the attack in hand gets to: `attack_kind()` reads the hands, never `Client::missile`, and names the
+  spell per creature by the cast's own `best_spell()`, so the flight tested is the flight thrown.
+  Nothing beside the leader, nothing is picked (`follow` fetches it; past `follow_break()` catch up
+  outranks the fight). A team proposal outranks the pick only through `can_take_on()` (less the
+  vitae's `shy_of()`); `can_keep_target()` holds the fight in hand, wherever the leader is.
 - Going with the leader, `is_led()`: keep to the area (bar into its dungeon after a leader in it),
   resume the journey, explore and a ground step aside, none is put aside; the area limits its fights.
 - Played by hand, `autoplay_by_hand()`: with autoplay off only the team's own rules run -- invites,

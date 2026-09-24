@@ -259,6 +259,43 @@ fn a_creature_given_up_on_is_not_taken_again_off_the_board() {
 }
 
 #[test]
+fn the_vitae_keeps_a_follower_off_what_it_picks_not_off_the_partys_fight() {
+    // `shy_of` holds a character with high vitae off the hard fights and its killer when it picks.
+    // An order or the board is the party's fight (`plan.rs` puts every hand on a hard one), and
+    // asked it too a follower stood and took its killer's blows without swinging back.
+    let now = Instant::now();
+    let shy = |c: &mut Client| {
+        c.autoplay.config.survive.vitae_above = 0.0;
+        c.autoplay.recovery.killer = Some("Revenant".into());
+    };
+    let mut c = beside_the_leader();
+    shy(&mut c);
+    let killer = crate::testkit::standing_by(&mut c, 0x8000_0001, "Revenant", 4.0);
+    let cfg = c.autoplay.config.fight.clone();
+    assert!(c.shy_of(&killer));
+    assert!(
+        !c.would_fight(&killer, &cfg, false, now),
+        "alone it takes it on"
+    );
+    // Hitting it, and ordered onto it.
+    c.autoplay.attacked_by("Revenant", Instant::now());
+    ordered_onto(&mut c, killer.guid, now);
+    assert!(c.autoplay_fight_as(now, &cfg));
+    assert_eq!(c.attack_target, Some(killer.guid), "no swing back at it");
+    // Not hitting it, on the leader's board: the party's fight all the same.
+    let mut c = beside_the_leader();
+    shy(&mut c);
+    crate::testkit::standing_by(&mut c, killer.guid, "Revenant", 4.0);
+    c.autoplay.team.mates[0].target = Some(killer.guid);
+    assert!(c.autoplay_fight_as(now, &cfg));
+    assert_eq!(
+        c.attack_target,
+        Some(killer.guid),
+        "the board's target left"
+    );
+}
+
+#[test]
 #[ignore = "needs AC_DATA_DIR"]
 fn a_caster_takes_no_order_on_a_creature_it_avoids() {
     // The spell path's own join, through the same gate as the swing's.
