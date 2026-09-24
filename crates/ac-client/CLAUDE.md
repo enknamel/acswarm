@@ -17,8 +17,8 @@ system's entry fns are written in the files its own row names.
    (`visit.rs`)
 
 `tick_autoplay()`, in order:
-- once no leader is followed, whatever switched it off: `stop_following()`, which lets go of the
-  walk and the journey following planted and nothing else
+- once no leader is followed, whatever switched it off: `stop_following()`, which lets go of only
+  the walk and the journey following planted; on the tick one is, its own plans for the road go
 - with the team on, even with autoplay off: `autoplay_accept_invites()`, and `autoplay_fellowship()`
   for a leader played by hand; always `autoplay_close_unwanted_window()`
 - with autoplay off, `autoplay_by_hand()`: the team rules a player keeps, and then it returns, as
@@ -87,7 +87,7 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 | recruiting | `autoplay_fellowship`, `autoplay_accept_invites`, `next_invitee`, `hear_recruit_refusal` | `autoplay/team/fellowship.rs` | `Autoplay.recruited`, `Autoplay.held_off`, `Team.fellowship` | invit | autoplay::team::fellowship | recruit |
 | team board | `autoplay_team`, `leader_mate`, `worst_hurt`, `rival_leader` | `autoplay/team/mod.rs`, `autoplay/team/view.rs`, `crates/ac-plugin/src/team.rs` | `Autoplay.team` (`TeamView.mates`), `Config.team` | leader | autoplay::team | mate |
 | fellowship planner | `plan_for_team`, `take_orders`, `assign_targets`, `deal_bodies`, `stragglers` | `autoplay/team/orders.rs`, `plan.rs` | `Autoplay.planner`, `Autoplay.orders` | plan:: | autoplay::team::orders | plan, order |
-| follow | `autoplay_follow`, `stop_following`, `followed_leader`, `team_leader`, `follow_break` | `autoplay/team/follow.rs` | `Autoplay.follow_trip`, `Autoplay.follow_walk`, `Team.follow`, `Client.follow` | follow | autoplay::team::follow | follow |
+| follow | `autoplay_follow`, `stop_following`, `followed_leader`, `is_led`, `team_leader`, `follow_break` | `autoplay/team/follow.rs` | `Autoplay.follow_trip`, `Autoplay.follow_walk`, `Autoplay.followed`, `Team.follow`, `Client.follow` | follow | autoplay::team::follow | follow |
 | played by hand | `autoplay_by_hand`, `autoplay_assist` | `autoplay/team/by_hand.rs` | `Team.follow`, `Team.focus_fire` | by_hand | autoplay::team::by_hand | assist |
 | quartermaster | `autoplay_quartermaster`, `autoplay_stock`, `decide`, `quartermaster`, `hand_out` | `autoplay/team/quartermaster.rs`, `logistics.rs`, `autoplay/growth/policy.rs` | `growth::State.mode`, `Team.restock` | quartermaster | autoplay::team::quartermaster | quartermaster |
 | town run | `grow_town_run`, `start_town_run`, `grow_run_step`, `grow_run_next`, `pick_vendor` | `autoplay/growth/town_run/mod.rs`, `autoplay/growth/town_run/counter.rs`, `autoplay/growth/town_run/vendor.rs`, `autoplay/growth/town_run/panel.rs`, `shopping.rs`, `crates/ac-vendor/src/run.rs` | `growth::State.run`, `growth::State.shop` | counter | autoplay::growth::town_run | town_run, counter |
@@ -154,6 +154,8 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
   Nothing beside the leader, nothing is picked (no fallback: `follow` fetches it; past
   `follow_break()` catch up outranks the fight). A team proposal outranks the pick only through
   `can_take_on()`, and `can_keep_target()` holds the fight in hand, wherever the leader stands.
+- Going with the leader, `is_led()`: keep to the area, resume the journey, explore and a ground of
+  its own step aside and nothing is put aside for later; the area limits only what it fights.
 - Played by hand, `autoplay_by_hand()`: with autoplay off only the team's own rules run -- invites,
   a leader's fellowship, following and assisting. Nothing takes the legs or the hands for an errand
   of its own: no town run, no ground, no experience spent, no weapon changed, no target picked.

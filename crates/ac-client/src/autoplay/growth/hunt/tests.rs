@@ -281,3 +281,46 @@ fn a_walk_to_a_ground_broken_off_by_a_corpse_is_walked_on() {
     assert_eq!(c.autoplay.growth.bound, None);
     assert!(c.autoplay.growth.skip.iter().any(|(g, _)| *g == lb));
 }
+
+#[test]
+fn a_walk_to_its_own_ground_is_let_go_once_it_follows() {
+    // Going with the leader: a follower has no ground of its own to walk to. One it was bound for
+    // goes when following begins, and one set while it follows (a town run ends with one) goes
+    // when the hunting step next looks.
+    let now = Instant::now();
+    let mut c = crate::testkit::character_of_level(crate::testkit::no_data(), 20);
+    crate::testkit::stand(&mut c, 0xA9B4_0019, glam::Vec3::new(84.0, 84.0, 94.0));
+    c.autoplay.config.enabled = true;
+    c.autoplay.config.growth.town_runs = false;
+    let me = c.my_position().expect("on its feet");
+    let ground = (
+        0xA9B3_0000,
+        Vec2::new(me.x, me.y - 200.0),
+        "south".to_string(),
+    );
+    c.autoplay.growth.bound = Some(ground.clone());
+    c.autoplay.growth.bound_since = Some(now);
+    let team = &mut c.autoplay.config.team;
+    team.enabled = true;
+    team.follow = true;
+    let mut leader = crate::testkit::mate(0x5000_0002, "Verity");
+    leader.leader = true;
+    leader.leads = true;
+    leader.world = me + glam::Vec3::new(8.0, 0.0, 0.0);
+    c.autoplay.team = crate::testkit::view_of(vec![leader]);
+    c.tick_autoplay(now);
+    assert_eq!(c.autoplay.step, Some("follow"));
+    assert_eq!(
+        c.autoplay.growth.bound, None,
+        "the walk to its ground outlived following"
+    );
+    // Beside the leader, with nothing else to do, the hunting step looks.
+    c.autoplay.team.mates[0].world = me + glam::Vec3::new(2.0, 0.0, 0.0);
+    c.autoplay.growth.bound = Some(ground);
+    c.tick_autoplay(now + Duration::from_millis(100));
+    assert_eq!(
+        c.autoplay.growth.bound, None,
+        "a follower kept a ground walk of its own"
+    );
+    assert!(!c.traveling(), "it set off for a ground of its own");
+}

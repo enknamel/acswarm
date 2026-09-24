@@ -258,3 +258,152 @@ fn a_death_on_the_way_after_the_leader_keeps_no_journey_for_afterwards() {
         "the journey after the leader was kept"
     );
 }
+
+#[test]
+fn a_follower_does_not_walk_back_into_its_area_away_from_its_leader() {
+    // Going with the leader: the hunting area limits what a follower fights, not where it goes, so
+    // "keep to the area" (70) no longer outranks "follow" (50).
+    let mut c = following(8.0);
+    let me = c.my_position().expect("on its feet");
+    c.autoplay.config.fight.area = Some(crate::hunt::HuntArea {
+        name: "the north field".into(),
+        shape: crate::hunt::Shape::Outline {
+            points: vec![
+                [me.x - 20.0, me.y + 100.0],
+                [me.x + 20.0, me.y + 100.0],
+                [me.x + 20.0, me.y + 140.0],
+                [me.x - 20.0, me.y + 140.0],
+            ],
+        },
+    });
+    let now = Instant::now();
+    c.tick_autoplay(now);
+    assert_eq!(c.autoplay.step, Some("follow"));
+    assert!(makes_for(&c, leader_xy(&c)), "it made for its area");
+    // Beside its leader, it stands there.
+    c.autoplay.team.mates[0].world = me + Vec3::new(2.0, 0.0, 0.0);
+    ticks(&mut c, now, 3);
+    assert!(
+        c.follow.is_none() && !c.traveling(),
+        "it walked off to its area"
+    );
+}
+
+#[test]
+fn a_journey_put_aside_before_following_is_not_taken_up_after_a_stop() {
+    // A journey a fight broke off while the character played alone, then following switched on:
+    // "follow" (50) has every tick while the leader is eight metres off, so "resume the journey"
+    // (40) never sees the copy -- and after a stop it would have set off on it.
+    let mut c = following(8.0);
+    c.autoplay.config.team.enabled = false;
+    let me = c.my_position().expect("on its feet").truncate();
+    let away = me + Vec2::new(0.0, 300.0);
+    c.travel_to(away);
+    c.remember_journey();
+    c.interrupt_travel("a fight");
+    assert_eq!(c.autoplay.resume_trip, Some(away), "nothing was put aside");
+    c.autoplay.config.team.enabled = true;
+    let now = Instant::now();
+    let t = ticks(&mut c, now, 3);
+    assert_eq!(c.autoplay.step, Some("follow"));
+    assert_eq!(c.autoplay.resume_trip, None, "kept through following");
+    c.autoplay.config.team.follow = false;
+    ticks(&mut c, t, 5);
+    assert!(
+        !makes_for(&c, away),
+        "it set off on the journey from before"
+    );
+}
+
+#[test]
+fn a_follower_takes_up_no_journey_of_its_own_beside_its_leader() {
+    // One left from before it was led -- its own town run's, say -- is let go by "resume the
+    // journey", not walked off on and not kept for after a stop.
+    let mut c = following(2.0);
+    let now = Instant::now();
+    let t = ticks(&mut c, now, 1);
+    let me = c.my_position().expect("on its feet").truncate();
+    let away = me + Vec2::new(0.0, 300.0);
+    c.autoplay.resume_trip = Some(away);
+    ticks(&mut c, t, 3);
+    assert!(!makes_for(&c, away), "it set off on a journey of its own");
+    assert_eq!(c.autoplay.resume_trip, None);
+}
+
+#[test]
+fn a_journey_broken_off_while_following_is_not_taken_up_after_a_stop() {
+    // Nothing is put aside while led: a journey another planted -- a script's, say -- that a fight
+    // breaks off while "follow" (50) has every tick would be walked off on once following stopped.
+    let mut c = following(8.0);
+    let t = ticks(&mut c, Instant::now(), 1);
+    let me = c.my_position().expect("on its feet").truncate();
+    let away = me + Vec2::new(0.0, 300.0);
+    c.travel_to(away);
+    assert!(makes_for(&c, away), "no journey to put aside");
+    c.remember_journey();
+    c.interrupt_travel("a fight");
+    assert_eq!(c.autoplay.resume_trip, None, "put aside while led");
+    let t = ticks(&mut c, t, 3);
+    assert_eq!(c.autoplay.step, Some("follow"));
+    c.autoplay.config.team.follow = false;
+    ticks(&mut c, t, 5);
+    assert!(
+        !makes_for(&c, away),
+        "it set off on the journey after the stop"
+    );
+}
+
+#[test]
+fn a_follower_back_from_the_dead_takes_up_no_trip_it_had() {
+    // The recovery hands back the trip under way at death once it is done. Led, none is taken up,
+    // and none is left for "resume the journey" to walk off on after a stop.
+    let mut c = following(8.0);
+    let t = ticks(&mut c, Instant::now(), 1);
+    let me = c.my_position().expect("on its feet").truncate();
+    let away = me + Vec2::new(0.0, 300.0);
+    // Landed at the lifestone with no death spot to go back to: the next step finishes.
+    let rec = &mut c.autoplay.recovery;
+    rec.phase = crate::recovery::Phase::Landed;
+    rec.since = t;
+    rec.trip = Some(away);
+    let t = ticks(&mut c, t + Duration::from_secs(5), 1);
+    assert!(!c.autoplay.recovery.active(), "the recovery did not finish");
+    assert_eq!(c.autoplay.resume_trip, None, "the trip was handed back");
+    let t = ticks(&mut c, t, 3);
+    c.autoplay.config.team.follow = false;
+    ticks(&mut c, t, 5);
+    assert!(
+        !makes_for(&c, away),
+        "it set off on the trip from before its death"
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_follower_in_a_dungeon_keeps_to_its_leader_rather_than_exploring() {
+    // Where the Holtburg Dungeon's portal drops a character, with rooms to walk: alone it explores,
+    // following it stays beside its leader.
+    let mut c = testkit::standing_at(0x01F6_0289, Vec3::new(96.7, -10.0, 0.0));
+    c.world.player_guid = Some(testkit::ME);
+    c.world.stats.level = 10;
+    c.autoplay.config.enabled = true;
+    let now = Instant::now();
+    c.tick_autoplay(now);
+    assert_eq!(c.autoplay.step, Some("explore"), "alone it did not explore");
+    let mut c = testkit::standing_at(0x01F6_0289, Vec3::new(96.7, -10.0, 0.0));
+    c.world.player_guid = Some(testkit::ME);
+    c.world.stats.level = 10;
+    c.autoplay.config.enabled = true;
+    let team = &mut c.autoplay.config.team;
+    team.enabled = true;
+    team.follow = true;
+    let mut leader = leader_off(&c, 2.0);
+    leader.cell = 0x01F6_0289;
+    c.autoplay.team = testkit::view_of(vec![leader]);
+    ticks(&mut c, now, 3);
+    assert_ne!(c.autoplay.step, Some("explore"));
+    assert!(
+        c.follow.is_none() && !c.traveling(),
+        "it walked off to a room"
+    );
+}

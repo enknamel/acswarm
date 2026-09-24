@@ -43,6 +43,12 @@ impl Client {
         self.team_leader()
     }
 
+    /// Whether the leader says where this character goes: followed, and not on a town run of its
+    /// own, which following waits out. Its own walks step aside; the area limits only its fights.
+    pub(crate) fn is_led(&self) -> bool {
+        self.followed_leader().is_some() && !self.autoplay.growth.town_run_under_way()
+    }
+
     /// Keep up with the leader: fly when it flies, walk straight after
     /// it while it is near, plan a journey after it when it has gone
     /// through a portal. With `urgent`, only a leader that has got well

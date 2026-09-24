@@ -76,6 +76,52 @@ fn a_follower_on_its_own_town_run_is_not_pulled_back_to_its_leader() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
+fn a_followers_own_town_run_goes_on_through_following_and_a_fight() {
+    // Going with the leader leaves a follower's own run alone: following waits it out, the steps
+    // that step aside for a leader do not step aside from it, and following beginning mid-run
+    // drops none of the run's own plans.
+    let holtburg = 0xA9B4_0019;
+    let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
+    c.world.player_guid = Some(crate::testkit::ME);
+    c.world.stats.level = 20;
+    c.autoplay.config.enabled = true;
+    let me = c.player.as_ref().unwrap().world_position();
+    let now = Instant::now();
+    let counter = Vec2::new(me.x + 250.0, me.y);
+    assert!(c.grow_travel(counter, now), "no way to the counter");
+    c.autoplay.growth.run = Some(run_to(counter, now));
+    let bound_for = |c: &Client| c.traveling() && c.travel_goal_xy() == Some(counter);
+    // Following begins, the leader thirty metres the other way.
+    let team = &mut c.autoplay.config.team;
+    team.enabled = true;
+    team.follow = true;
+    c.autoplay.team.mates = vec![crate::autoplay::Mate {
+        name: "Leader".into(),
+        leader: true,
+        leads: true,
+        world: me - glam::Vec3::new(30.0, 0.0, 0.0),
+        cell: holtburg,
+        ..Default::default()
+    }];
+    c.tick_autoplay(now);
+    assert!(bound_for(&c), "following pulled it off its run");
+    // A fight breaks the walk off; once it is over the run walks on, taken up as it would be alone:
+    // by "resume the journey", which steps aside for a leader only off a run of its own.
+    c.remember_journey();
+    c.interrupt_travel("a fight");
+    let mut t = now + Duration::from_millis(100);
+    c.tick_autoplay(t);
+    assert_eq!(c.autoplay.step, Some("resume the journey"));
+    for _ in 0..4 {
+        t += Duration::from_millis(100);
+        c.tick_autoplay(t);
+    }
+    assert!(bound_for(&c), "the run did not walk on after the fight");
+    assert!(c.autoplay.growth.town_run_under_way());
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn the_shopping_rules_start_every_counter_fresh() {
     // The rules remember what a trip offered, what was refused and
     // whether it is done, and were made afresh only when a trip

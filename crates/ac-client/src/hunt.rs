@@ -220,6 +220,10 @@ impl Client {
         if !self.autoplay.config.fight.enabled {
             return false;
         }
+        // Nor for a follower: it goes with its leader, and the area limits only what it fights.
+        if self.is_led() {
+            return false;
+        }
         // Nor on a run to town, which leaves the area on purpose. At the
         // counter, or between journeys once a corpse or a fight on the way
         // has ended one, a walk back to the area would take the character

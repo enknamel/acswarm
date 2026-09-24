@@ -336,8 +336,9 @@ impl Client {
         // A ground the player named is where the party hunts. Not the
         // nearest one that suits its level: a place is hunted for its
         // loot, its money, its trophies, and none of that is the level
-        // table's business. A follower takes its leader's ground the
-        // same way, so naming one on the leader moves everybody.
+        // table's business. A mate that does not follow takes its
+        // leader's ground the same way, and a follower goes with the
+        // leader, so naming one on the leader moves everybody.
         let pinned = (cfg.hunt_at != 0)
             .then(|| ac_world::hunting::at(cfg.hunt_at))
             .flatten()

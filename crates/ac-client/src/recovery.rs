@@ -718,7 +718,8 @@ impl Client {
                 true
             }
             Action::Finish { trip } => {
-                if let Some(goal) = trip {
+                // Not for a follower, whose way is its leader's: a trip handed back outlives a stop.
+                if let Some(goal) = trip.filter(|_| !self.is_led()) {
                     self.autoplay.resume_trip = Some(goal);
                 }
                 self.autoplay.armed_for = None;
