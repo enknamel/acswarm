@@ -328,7 +328,9 @@ fn convert(left: &mut Means, plan: &mut Plan, face: Option<u32>, float: u32) -> 
         return false;
     };
     let each = note_cost(face).max(1);
-    let count = left.coin.saturating_sub(float) / each;
+    // The notes' new stacks need slots free before the coin leaves, as at the counter
+    // (`Run::make_notes`; ItemsToReceive.cs:97-108): none free, none made.
+    let count = (left.coin.saturating_sub(float) / each).min(left.slots.saturating_mul(NOTE_STACK));
     if count == 0 {
         return false;
     }
@@ -340,8 +342,7 @@ fn convert(left: &mut Means, plan: &mut Plan, face: Option<u32>, float: u32) -> 
     let before = coin_slots(left.coin);
     left.coin -= spend;
     left.notes = left.notes.saturating_add(count * face);
-    left.slots = left.slots.saturating_sub(count.div_ceil(NOTE_STACK));
-    left.slots = left.slots + before - coin_slots(left.coin);
+    left.slots = left.slots - count.div_ceil(NOTE_STACK) + before - coin_slots(left.coin);
     plan.acts.push(Act::Keep { face, count, spend });
     true
 }
@@ -541,6 +542,43 @@ mod tests {
             .unmet
             .iter()
             .any(|(what, _, why)| what == "loot to sell" && why.what.contains("no room")));
+    }
+
+    #[test]
+    fn a_note_is_not_planned_without_a_slot_for_it() {
+        // A full pack with a fortune in coin: the note's own stack needs a slot before the coin
+        // leaves, so no note is made and the loot the notes would have made room for goes home.
+        let loot = [ForSale {
+            guid: 1,
+            pays: 30_000,
+            weighs: 100,
+        }];
+        let full = Means {
+            coin: 300_000,
+            notes: 0,
+            room: 10_000,
+            slots: 0,
+        };
+        let p = plan(full, &loot, &[], &[], FLOAT, MMD);
+        assert!(
+            !p.acts.iter().any(|a| matches!(a, Act::Keep { .. })),
+            "{:?}",
+            p.acts
+        );
+        assert!(p
+            .unmet
+            .iter()
+            .any(|(what, _, why)| what == "loot to sell" && why.what.contains("no room")));
+        assert_eq!(p.left.slots, 0);
+        // One slot is room for the note but not for the sale's two stacks of coin: the note is
+        // made first, and the coin it frees takes the sale.
+        let p = plan(Means { slots: 1, ..full }, &loot, &[], &[], FLOAT, MMD);
+        assert!(
+            matches!(p.acts.first(), Some(Act::Keep { count: 1, .. })),
+            "{:?}",
+            p.acts
+        );
+        assert!(p.acts.iter().any(|a| matches!(a, Act::Sell { .. })));
     }
 
     #[test]

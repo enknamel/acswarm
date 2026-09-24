@@ -275,7 +275,10 @@ impl Run {
         let face = counter.note_face.filter(|f| *f > 0)?;
         // Loses the 15% markup, but a slot of Mayoi notes holds 62.5 million, coin 25,000.
         let each = crate::errand::note_cost(face).max(1);
-        let count = snap.coin.saturating_sub(snap.rules.float) / each;
+        // Each new stack needs a slot free before any coin leaves, a carried note stack no help
+        // (ItemsToReceive.cs:97-108; Vendor.cs:471-503): with none free, the selling goes first.
+        let count = (snap.coin.saturating_sub(snap.rules.float) / each)
+            .min(snap.slots_free.saturating_mul(crate::errand::NOTE_STACK));
         if count == 0 {
             return None;
         }
@@ -651,6 +654,41 @@ mod tests {
             !matches!(next.act, Some(Act::Buy { .. })),
             "{:?} -- {}",
             next.act,
+            next.saying
+        );
+    }
+
+    #[test]
+    fn a_note_needs_a_free_slot_before_the_coin_leaves() {
+        // The server finds a slot for each new stack before taking the coin, and a note stack
+        // already carried lends no room: with none free no note is asked for, and the visit
+        // ends saying why rather than asking for what the server must refuse.
+        let mut s = snap(vec![item(3, "Dagger", 500, 1, 1)]);
+        s.coin = 1_000_000;
+        s.notes.insert(250_000, 1);
+        s.slots_free = 0;
+        let mut run = Run::new();
+        let next = run.step(&s, Instant::now());
+        assert!(
+            !matches!(next.act, Some(Act::Buy { .. })),
+            "{:?} -- {}",
+            next.act,
+            next.saying
+        );
+        assert_eq!(next.act, Some(Act::Close), "{}", next.saying);
+        assert!(matches!(next.did, Did::Blocked(_)), "{:?}", next.did);
+        // One slot holds one stack, 250 notes, however much more the purse would buy.
+        s.coin = 100_000_000;
+        s.slots_free = 1;
+        s.counter.as_mut().unwrap().note_face = Some(1_000);
+        let next = Run::new().step(&s, Instant::now());
+        assert_eq!(
+            next.act,
+            Some(Act::Buy {
+                wcid: NOTE,
+                count: crate::errand::NOTE_STACK
+            }),
+            "{}",
             next.saying
         );
     }
