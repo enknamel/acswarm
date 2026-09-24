@@ -417,6 +417,28 @@ fn something_hitting_the_follower_is_fought_though_the_leader_is_a_field_away() 
     assert_eq!(c.attack_target, Some(it));
 }
 
+#[test]
+fn a_follower_in_the_academy_fights_its_task_wherever_the_leader_is() {
+    // The academy (a reflex) runs before catching up, so a new follower does its tasks away from a
+    // leader already out; the Sparring Golem is passive (creatures.csv tolerance 64) and never
+    // hits it, and with the leader's radius asked the task waited for it to appear for ever.
+    let now = Instant::now();
+    let mut c = testkit::character_of_level(testkit::no_data(), 5);
+    testkit::stand(&mut c, 0xA9B4_0019, glam::vec3(84.0, 108.0, 94.0));
+    following_a_leader(&mut c, 500.0);
+    let golem = testkit::standing_by(&mut c, 0x8000_0001, "Sparring Golem", 4.0).guid;
+    // The fight as the academy's hunt task builds it.
+    let mut task = c.autoplay.config.fight.clone();
+    task.only = vec!["Sparring Golem".into()];
+    task.radius = 45.0;
+    task.pick_weapon = false;
+    task.walk_past_on_the_way = false;
+    assert_eq!(c.pick_target(&task, now), None, "outside, beside no leader");
+    c.autoplay.academy.active = true;
+    assert!(c.autoplay_fight_as(now, &task), "no swing at the task");
+    assert_eq!(c.attack_target, Some(golem));
+}
+
 /// `c` playing on its own with a Revenant `metres` east that has just attacked it.
 fn hit_by_a_revenant(c: &mut Client, metres: f32) -> u32 {
     c.autoplay.config.enabled = true;

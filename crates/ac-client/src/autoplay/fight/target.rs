@@ -225,9 +225,12 @@ impl Client {
     pub(super) fn pick_target(&mut self, cfg: &Fight, now: Instant) -> Option<u32> {
         let underground = self.underground();
         let me = self.my_position()?;
-        // A follower fights beside its leader, not wherever a monster
-        // happens to be.
-        let leader_at = self.followed_leader().map(|m| m.world);
+        // A follower fights beside its leader, not wherever a monster happens to be. Not in the
+        // academy, whose tasks (a reflex) come before following: the task's creature is the fight.
+        let leader_at = self
+            .followed_leader()
+            .filter(|_| !self.autoplay.academy.active)
+            .map(|m| m.world);
         let fight_radius = self.autoplay.config.team.fight_radius.max(1.0);
         // What cannot be judged yet is asked about, not attacked.
         self.ask_about_strangers(me, cfg);
