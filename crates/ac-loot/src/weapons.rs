@@ -38,6 +38,8 @@ pub struct Wielder {
     pub attributes_current: [u32; 6],
     /// Maximum health, stamina and mana.
     pub vitals: [u32; 3],
+    /// Knows no attack spell, so a caster is no weapon to it.
+    pub no_attack_spells: bool,
 }
 
 impl Wielder {
@@ -420,6 +422,9 @@ pub fn best(
         // A bow is nothing without its arrows: judged as a pair.
         return best_missile(carried, target, wielder).map(|(l, _)| l);
     }
+    if want == Stance::Magic && wielder.no_attack_spells {
+        return None;
+    }
     carried
         .iter()
         .filter(|i| stance_of(i) == Some(want))
@@ -480,6 +485,7 @@ mod tests {
             attributes: [300; 6],
             attributes_current: [300; 6],
             vitals: [1000; 3],
+            no_attack_spells: false,
         }
     }
 
@@ -579,6 +585,7 @@ mod tests {
             attributes: [150; 6],
             attributes_current: [150; 6],
             vitals: [300; 3],
+            no_attack_spells: false,
         };
         let pick = best(&carried, Stance::Melee, Some(&firefly), &weak).expect("a sword");
         assert_eq!(pick.guid, 2, "{pick:?}");
@@ -660,6 +667,7 @@ mod tests {
             attributes: [100; 6],
             attributes_current: [100; 6],
             vitals: [200; 3],
+            no_attack_spells: false,
         };
         assert_eq!(best_shield(&carried, &untrained).unwrap().guid, 2);
         let trained = Wielder {
@@ -769,6 +777,7 @@ mod tests {
             attributes: [100; 6],
             attributes_current: [100; 6],
             vitals: [200; 3],
+            no_attack_spells: false,
         };
         let pick = best(&carried, Stance::Magic, None, &novice).expect("the plain one");
         assert_eq!(pick.guid, 2, "the great wand is out of reach");
@@ -824,6 +833,7 @@ mod tests {
             attributes: [200; 6],
             attributes_current: [200; 6],
             vitals: [500; 3],
+            no_attack_spells: false,
         };
         let (stance, pick) = best_any(&carried, None, &mage).expect("something to hold");
         assert_eq!(stance, Stance::Magic, "{pick:?}");
@@ -834,6 +844,14 @@ mod tests {
             ..mage.clone()
         };
         let (stance, pick) = best_any(&carried, None, &swordsman).expect("something to hold");
+        assert_eq!(stance, Stance::Melee, "{pick:?}");
+        assert_eq!(pick.guid, 2);
+        // The same mage knowing no attack spell: the wand throws nothing, so the sword it is.
+        let no_spells = Wielder {
+            no_attack_spells: true,
+            ..mage.clone()
+        };
+        let (stance, pick) = best_any(&carried, None, &no_spells).expect("something to hold");
         assert_eq!(stance, Stance::Melee, "{pick:?}");
         assert_eq!(pick.guid, 2);
         // A wand names no weapon skill, only the skill it asks for; that

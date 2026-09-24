@@ -150,7 +150,23 @@ impl Client {
     /// so rather than pretending.
     pub(crate) fn fighting_stance_as(&mut self, style: Style) -> Stance {
         let want = match style {
-            Style::Auto => return self.combat_stance(),
+            Style::Auto => {
+                // A caster in hand is no way to fight without an attack spell: a weapon carried is
+                // taken up instead, which `arm_for` can then better (regression test
+                // a_caster_with_no_attack_spells_takes_up_a_carried_weapon).
+                if self.combat_stance() == Stance::Magic && self.attack_spells_known().is_empty() {
+                    let now = Instant::now();
+                    if self
+                        .autoplay
+                        .last_rewield
+                        .is_none_or(|t| now.duration_since(t) >= REWIELD_EVERY)
+                    {
+                        self.autoplay.last_rewield = Some(now);
+                        let _ = self.wield_for(Stance::Melee) || self.wield_for(Stance::Missile);
+                    }
+                }
+                return self.combat_stance();
+            }
             Style::Melee => Stance::Melee,
             Style::Missile => Stance::Missile,
             Style::Magic => Stance::Magic,
@@ -223,7 +239,10 @@ impl Client {
             // Come back to the choice once the answers are in.
             self.autoplay.armed_for = None;
         }
-        let wielder = self.wielder();
+        let wielder = crate::weapons::Wielder {
+            no_attack_spells: self.attack_spells_known().is_empty(),
+            ..self.wielder()
+        };
         let free_choice = cfg.style == Style::Auto;
         let picked = if free_choice {
             crate::weapons::best_any(&carried, Some(known), &wielder).map(|(_, c)| c)
