@@ -281,7 +281,7 @@ Measured 2026-09-23 with `tools/load-test.sh` on an Apple Silicon machine
 (12 cores, 36 GB) with the ACE server in Docker on the same machine. Every
 run is 240 s at 20 Hz (a 50 ms budget per tick); the first 60 s are left
 out as warm-up. Memory is RSS, which counts the mapped DAT files, so it
-reads far higher than the footprint figures above.
+reads far higher than the footprint figures above (see below).
 
 New characters from the harness (most still in the Training Academy),
 main at 7a2ad25:
@@ -304,10 +304,13 @@ interleaved, two runs each (per session, then kills in 240 s):
 
 What they say:
 
-* The process is the costly unit. Each carries about 440 MB of RSS
-  before its first session (the DAT files mapped, the asset caches); a
-  session adds under 1 MB. Fifty sessions in one process hold 0.48 GB,
-  the same fifty in five processes 2.3 GB.
+* RSS overstates a process: about 350 MB of it is the DAT files mapped
+  read-only, which the OS shares between processes. A headless process's
+  own memory (`footprint <pid>`) is about 32 MB, and a session adds under
+  1 MB, so ten headless processes cost about 0.3 GB beyond the one shared
+  copy of the files, not ten times the RSS. A windowed client is the
+  costly unit: about 410 MB of footprint (GPU state included) and a fifth
+  of a core to draw, measured on one that had run four hours.
 * What a session costs depends on what it does, not on how many there
   are: a new character in the Academy costs ~0.15 ms a tick, a fighting
   character with a large spellbook ~1-2.5 ms. One process keeps twenty
