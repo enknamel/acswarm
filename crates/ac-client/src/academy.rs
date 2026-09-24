@@ -1136,6 +1136,15 @@ impl Client {
                 .filter(|o| o.pos.distance(pos) <= LOOT_RANGE)
                 .min_by(|a, b| a.pos.distance(pos).total_cmp(&b.pos.distance(pos)));
             if let Some(c) = corpse {
+                // A use thrown over our own cast meets its recoil and is turned away without a word,
+                // and a corpse that does not open is not tried again: the kill's spell lands first.
+                if self.autoplay.cast_in_flight(now) {
+                    self.autoplay.say(
+                        Doing::Training,
+                        format!("{progress}: waiting for the cast to land"),
+                    );
+                    return;
+                }
                 let (guid, cname) = (c.guid, c.name.clone());
                 self.academy_peace();
                 self.let_go(Release::Engagement);
@@ -1260,6 +1269,42 @@ mod tests {
         assert!(step_named(&st, "Sentry", Kind::Talk), "{:?}", st.current());
         // A portal that ends its quest still proves it.
         assert!(through_portal("Central Courtyard").is_done("token"));
+    }
+
+    #[test]
+    fn a_corpse_is_opened_once_the_killing_spell_has_landed() {
+        // Opened into the spell's recoil the use was turned away without a word, the corpse
+        // was written off, and a caster hunted wasps for the item on one without end.
+        let now = Instant::now();
+        let mut c = crate::Client::offline(crate::testkit::no_data());
+        let corpse = Seen {
+            guid: 0x8000_4079,
+            name: "Corpse of Carpenter Wasp".into(),
+            corpse: true,
+            pos: origin() + Vec3::new(40.0, -70.0, 0.0),
+            ..Default::default()
+        };
+        let pos = origin() + Vec3::new(38.0, -70.0, 0.0);
+        c.autoplay.cast_sent = Some(now);
+        c.academy_hunt(
+            "Carpenter Wasp",
+            pos,
+            std::slice::from_ref(&corpse),
+            pos,
+            now,
+            "step",
+        );
+        assert_eq!(c.autoplay.academy_corpse, None, "opened into the cast");
+        c.autoplay.cast_sent = None;
+        c.academy_hunt(
+            "Carpenter Wasp",
+            pos,
+            std::slice::from_ref(&corpse),
+            pos,
+            now,
+            "step",
+        );
+        assert_eq!(c.autoplay.academy_corpse.map(|(g, _)| g), Some(corpse.guid));
     }
 
     #[test]
