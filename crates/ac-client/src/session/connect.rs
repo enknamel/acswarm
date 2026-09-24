@@ -108,6 +108,8 @@ impl Client {
             told: None,
             steering: route::Steering::new(Instant::now()),
             clutter: Default::default(),
+            walk_frame: None,
+            blows: Default::default(),
             pathfinder,
             travel: Default::default(),
             visits: Default::default(),

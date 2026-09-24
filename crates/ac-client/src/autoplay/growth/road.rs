@@ -8,6 +8,23 @@ use crate::Client;
 /// than this is stuck somewhere: the place is given up on.
 pub(super) const WALK_TIMEOUT: Duration = Duration::from_secs(4 * 60);
 
+/// How long a walk may take before it counts as stuck: [`WALK_TIMEOUT`], or twice the journey
+/// planned (`Trip::seconds`) when that is longer, as the last-resort walk home from a far ground is.
+pub(super) fn walk_limit(planned_seconds: Option<f32>) -> Duration {
+    planned_seconds
+        .filter(|s| s.is_finite() && *s > 0.0)
+        .map_or(WALK_TIMEOUT, |s| {
+            Duration::from_secs_f32(2.0 * s).max(WALK_TIMEOUT)
+        })
+}
+
+impl Client {
+    /// [`walk_limit`] for the journey just planned.
+    pub(super) fn planned_walk_limit(&self) -> Duration {
+        walk_limit(self.travel_trip().map(|t| t.seconds))
+    }
+}
+
 /// After a journey that could not be planned, the next place is not
 /// tried for this long.
 pub(super) const RETRY_AFTER: Duration = Duration::from_secs(30);

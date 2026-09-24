@@ -160,6 +160,7 @@ impl Client {
                     errand: Errand::Buy,
                     visited: vec![at],
                     walked_on: None,
+                    walk_limit: crate::autoplay::growth::road::WALK_TIMEOUT,
                 });
                 self.autoplay
                     .say(Doing::Shopping, format!("{reason}: at {vendor}"));

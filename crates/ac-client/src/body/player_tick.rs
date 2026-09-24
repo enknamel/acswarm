@@ -38,6 +38,7 @@ impl Client {
         // Player movement, camera, and reporting.
         if let Some(pl) = self.player.as_mut() {
             let mut input = input;
+            self.walk_frame = None;
             // Server-driven MoveTo (using something out of reach): run toward
             // the target until close enough, unless the user takes over.
             // Without one, the current leg of the overland route.
@@ -167,6 +168,7 @@ impl Client {
                         // the graph and the planner are for what
                         // actually stops the character, and clutter
                         // must not send a walk to them.
+                        let steered = aim;
                         let aim = match aim {
                             ac_nav::Aim::Go(at) => {
                                 let me = pl.world_position();
@@ -185,6 +187,21 @@ impl Client {
                             }
                             ac_nav::Aim::NoWay => ac_nav::Aim::NoWay,
                         };
+                        self.walk_frame = Some(crate::tally::WalkFrame {
+                            at: now,
+                            goal: g,
+                            aim: match aim {
+                                ac_nav::Aim::Go(at) => Some(at),
+                                ac_nav::Aim::NoWay => None,
+                            },
+                            detoured: aim != steered,
+                            route: self
+                                .steering
+                                .route
+                                .as_ref()
+                                .map(|r| (r.next, r.waypoints.len())),
+                            wedged: pl.wedged(),
+                        });
                         // No way there at all: the line is blocked and
                         // no route was found. Standing still is the
                         // whole of the answer.

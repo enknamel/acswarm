@@ -7,7 +7,7 @@ use super::{
     Errand, Phase, Run, Turn, BUSY_ASKS, BUSY_REASK, COUNTER_REACH, RUN_EVERY, SELLING_TIMEOUT,
     SETTLE, STOPS_PER_RUN, VENDOR_OPEN_TIMEOUT, VENDOR_REACH,
 };
-use crate::autoplay::growth::road::{on_the_way, OnTheWay, WALK_ON_EVERY, WALK_TIMEOUT};
+use crate::autoplay::growth::road::{on_the_way, OnTheWay, WALK_ON_EVERY};
 use crate::autoplay::growth::{a_few, about, Growth};
 use crate::autoplay::Doing;
 use crate::Client;
@@ -115,7 +115,7 @@ impl Client {
         match run.phase.clone() {
             Phase::Going => {
                 // Out of time only while still short of it: one that got there is not walked away.
-                if elapsed > WALK_TIMEOUT && run.at.distance(me) > VENDOR_REACH {
+                if elapsed > run.walk_limit && run.at.distance(me) > VENDOR_REACH {
                     self.autoplay.note(
                         format!("the walk to {} is taking too long", run.vendor),
                         now,
@@ -655,6 +655,7 @@ impl Client {
                         errand,
                         visited,
                         walked_on: None,
+                        walk_limit: self.planned_walk_limit(),
                     });
                     return true;
                 }

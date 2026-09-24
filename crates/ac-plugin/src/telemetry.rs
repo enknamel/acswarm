@@ -102,6 +102,29 @@ fn sample(client: &Client) -> Value {
         .and_then(|g| client.world.name_of(g))
         .unwrap_or("");
     let (carried, capacity) = client.burden();
+    // A walk frame older than a second is a walk that has ended.
+    let walk = client
+        .walk_frame
+        .filter(|w| w.at.elapsed() < Duration::from_secs(1))
+        .map(|w| {
+            json!({
+                "goal": w.goal.to_array(),
+                "aim": w.aim.map(|a| a.to_array()),
+                "detour": w.detoured,
+                "route": w.route,
+                "wedged": w.wedged,
+            })
+        });
+    let hands = ac_world::item_type::MELEE_WEAPON
+        | ac_world::item_type::MISSILE_WEAPON
+        | ac_world::item_type::CASTER;
+    let wield: Vec<&str> = client
+        .world
+        .wielded()
+        .filter(|o| o.item_type & hands != 0)
+        .map(|o| o.name.as_str())
+        .collect();
+    let b = client.blows;
     json!({
         "lvl": client.world.stats.level,
         "xp": client.world.stats.total_xp,
@@ -115,6 +138,11 @@ fn sample(client: &Client) -> Value {
         "slots": client.room_anywhere(),
         "burden": [carried, capacity],
         "coin": client.purse(),
+        "walk": walk,
+        "trip": client.travel_progress(),
+        "wield": wield,
+        // Totals this session: dealt, points dealt, taken, points taken, our misses, our evades.
+        "blows": [b.dealt, b.dealt_points, b.taken, b.taken_points, b.missed, b.evaded],
     })
 }
 

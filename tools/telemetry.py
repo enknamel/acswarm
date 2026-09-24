@@ -7,8 +7,9 @@
   tools/telemetry.py --marks [FILE]      each F9 mark with the status lines around it
   tools/telemetry.py --setup [FILE]      each character's autoplay settings, as last written
 
-A stall is a stretch of samples, SAMPLE_GAP apart, where the character meant to move (walking,
-going, following, a town run) and got less than a metre from where it was, for STALL_AFTER or more.
+A stall is a stretch of samples, SAMPLE_GAP apart, where the character meant to move (a walk being
+steered, or a status that says it is going somewhere) and got less than a metre from where it was,
+for STALL_AFTER or more; each says what the steering and the body were doing through it.
 Kills and deaths are the server's own words, matched by the templates tools/fleet-score.py reads
 from the ACE checkout (kills show as "?" without it).
 """
@@ -24,6 +25,7 @@ HERE = Path(__file__).resolve().parent
 DIR = Path.home() / ".cache" / "acswarm" / "telemetry"
 SAMPLE_GAP = 2.0  # seconds between samples (SAMPLE_EVERY in crates/ac-plugin/src/telemetry.rs)
 STALL_AFTER = 10.0  # seconds without a metre of progress while meaning to move
+SPELL_HIT = re.compile(r"^You \w+ .+ for (\d+) points? with ")
 MOVING = re.compile(r"going to|walking|on the way|heading|following|back to|travel|approach", re.I)
 
 try:
@@ -100,11 +102,43 @@ def summarise(path):
             "gave_up": gave_up,
             "refused": d["refused"],
             "stall_s": sum(x["secs"] for x in stalls),
+            "blows": blows(s),
+            "spell_points": sum(int(m.group(1)) for t in chat for m in [SPELL_HIT.match(t)] if m),
+            "wield": Counter(", ".join(x.get("wield") or []) or "nothing" for x in s).most_common(1)[0][0],
             "stalls": stalls,
             "marks": d["marks"],
             "setup": d["setup"],
         }
     return out
+
+
+def blows(samples):
+    """Blows traded between the first sample and the last (the samples carry session totals)."""
+    have = [x["blows"] for x in samples if x.get("blows")]
+    if not have:
+        return None
+    d = [b - a for a, b in zip(have[0], have[-1])]
+    return {"dealt": d[0], "dealt_points": d[1], "taken": d[2], "taken_points": d[3],
+            "missed": d[4], "evaded": d[5]}
+
+
+def walk_detail(run):
+    """What the steering and the body did through a stall, from the samples' walk frames."""
+    walks = [x["walk"] for x in run if x.get("walk")]
+    if not walks:
+        return "no walk steered"
+    n = len(walks)
+    no_way = sum(1 for w in walks if w.get("aim") is None)
+    wedged = sum(1 for w in walks if w.get("wedged"))
+    detour = sum(1 for w in walks if w.get("detour"))
+    pos, goal = run[-1].get("pos"), walks[-1].get("goal")
+    away = sum((a - b) ** 2 for a, b in zip(pos[:2], goal[:2])) ** 0.5 if pos and goal else None
+    routes = [tuple(w["route"]) for w in walks if w.get("route")]
+    route = f"route waypoint {routes[0][0]}->{routes[-1][0]} of {routes[-1][1]}" if routes else "straight line"
+    trips = [tuple(x["trip"]) for x in run if x.get("trip")]
+    trip = f", journey step {trips[-1][0]} of {trips[-1][1]}" if trips else ""
+    return (f"goal {away:.0f} m off, {route}{trip}; no way {no_way}/{n}, wedged {wedged}/{n}, "
+            f"detour {detour}/{n}" if away is not None else f"{route}; no way {no_way}/{n}, wedged {wedged}/{n}")
 
 
 def find_stalls(samples):
@@ -115,13 +149,15 @@ def find_stalls(samples):
             stalls.append({
                 "secs": (run[-1]["t"] - run[0]["t"]) / 1000 + SAMPLE_GAP,
                 "cell": run[0].get("cell"),
+                "pos": run[0].get("pos"),
                 "status": run[0].get("status"),
                 "t": run[0]["t"],
+                "why": walk_detail(run),
             })
 
     for a, b in zip(samples, samples[1:]):
         pa, pb = a.get("pos"), b.get("pos")
-        meaning = MOVING.search(b.get("status") or "") is not None
+        meaning = b.get("walk") is not None or MOVING.search(b.get("status") or "") is not None
         still = pa and pb and sum((x - y) ** 2 for x, y in zip(pa, pb)) ** 0.5 < 1.0
         if meaning and still:
             if not run:
@@ -149,12 +185,19 @@ def show(path):
         print("  time: " + ", ".join(f"{k} {v:.0%}" for k, v in list(m["doing"].items())[:7]))
         print(f"  sold {m['sold']}, bought {m['bought']}, gave up {m['gave_up']}, refused {m['refused']}, "
               f"marks {len(m['marks'])}")
+        b = m["blows"]
+        if b:
+            per = lambda n, p: f"{n} ({p / n:.1f} a blow)" if n else "0"
+            print(f"  in hand: {m['wield']}; dealt {per(b['dealt'], b['dealt_points'])}, missed {b['missed']}, "
+                  f"spells {m['spell_points']} points; took {per(b['taken'], b['taken_points'])}, evaded {b['evaded']}")
         if m["setup"]:
             print("  setup: " + brief(m["setup"]))
         if m["stalls"]:
             print(f"  stalls: {len(m['stalls'])}, {m['stall_s']:.0f} s in all; longest:")
             for st in m["stalls"][:5]:
-                print(f"    {st['secs']:5.0f} s at {st['cell']}  {st['status']}")
+                at = ", ".join(f"{v:.1f}" for v in st["pos"]) if st.get("pos") else "?"
+                print(f"    {st['secs']:5.0f} s at {st['cell']} ({at})  {st['status']}")
+                print(f"          {st['why']}")
 
 
 def brief(setup):

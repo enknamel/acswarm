@@ -6,13 +6,14 @@
 #   ACSWARM_TEST_PASSWORD=... tools/scenarios.sh [MINUTES] [--out DIR]
 #
 #   fight    Scn Mage, Scn Blade, Scn Bow hunt: kills, corpses opened, buffs, no deaths
-#   restock  Scn Taper starts each run with no tapers: a town run buys some
+#   restock  Scn Taper starts each run with no tapers at the Mosswart ground, 2.5 km out: it buys some
 #   sell     Scn Seller starts each run with ten rings: a town run sells them
 #   academy  a new character each run leaves the Training Academy
 #   (all)    no stall: never stands still for long while meaning to walk
 #
 # Accounts scn01..05 are made on the first run and given developer access in ace_auth (for @grantxp,
-# @teleloc and @ci), so their characters keep their level, gear and loot from run to run.
+# @teleloc and @ci), so their characters keep their level, gear and loot from run to run. Each run
+# starts them in the same places, so two runs measure the code and not where the last one ended.
 set -euo pipefail
 minutes=10
 out=""
@@ -44,6 +45,11 @@ fn command(name, args) {
         if m.level < 20 { say("@grantxp 300000"); }
         if type_of(board_get("scn.set." + who)) == "()" {
             board_set("scn.set." + who, true);
+            if who == "Scn Taper" {
+                say("@teleloc 0xBAAD0017 65.4 144.0 88.0");
+            } else {
+                say("@teleloc 0xA9B40019 84 7.1 94");
+            }
             // A level-20 fighter owns a real weapon: the Academy's training bow hits for 0-1.
             let coin = 0; let axe = false; let bow = false; let arrows = 0;
             for it in inventory() {
