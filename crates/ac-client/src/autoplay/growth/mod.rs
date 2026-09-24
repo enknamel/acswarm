@@ -165,6 +165,8 @@ pub struct State {
     /// The ground being travelled to, and since when.
     bound: Option<(u32, Vec2, String)>,
     bound_since: Option<Instant>,
+    /// How long that walk may take before it counts as stuck (see `road::walk_limit`).
+    bound_limit: Option<std::time::Duration>,
     /// When the walk to that ground was last planned again after
     /// something else broke it off (see [`on_the_way`]).
     bound_walked_on: Option<Instant>,
@@ -279,6 +281,7 @@ impl State {
     pub fn let_go(&mut self) {
         self.bound = None;
         self.bound_since = None;
+        self.bound_limit = None;
         self.after_out = None;
     }
 
@@ -287,6 +290,7 @@ impl State {
     pub(crate) fn drop_ground_walk(&mut self) {
         self.bound = None;
         self.bound_since = None;
+        self.bound_limit = None;
         if self.run.is_none() {
             self.after_out = None;
         }
@@ -357,6 +361,8 @@ impl State {
         if !grounds {
             self.bound = None;
             self.bound_since = None;
+            self.bound_limit = None;
+            self.bound_limit = None;
         }
         dropped
     }

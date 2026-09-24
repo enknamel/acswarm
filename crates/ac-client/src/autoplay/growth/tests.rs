@@ -18,6 +18,7 @@ pub(super) fn run_to(at: Vec2, now: Instant) -> Run {
         errand: Errand::Sell,
         visited: vec![at],
         walked_on: None,
+        walk_limit: super::road::WALK_TIMEOUT,
     }
 }
 
@@ -165,5 +166,21 @@ fn the_spells_cast_are_kept_a_second_and_worked_out_again_when_one_is_learned() 
         when(&c).map(|w| w.1),
         Some(2),
         "a spell learned was not noticed"
+    );
+}
+
+#[test]
+fn a_long_planned_walk_is_given_twice_its_time_and_a_short_one_the_fixed_four_minutes() {
+    use super::road::{walk_limit, WALK_TIMEOUT};
+    assert_eq!(walk_limit(None), WALK_TIMEOUT);
+    assert_eq!(walk_limit(Some(30.0)), WALK_TIMEOUT);
+    assert_eq!(
+        walk_limit(Some(654.0)),
+        std::time::Duration::from_secs(1308)
+    );
+    assert_eq!(
+        walk_limit(Some(f32::INFINITY)),
+        WALK_TIMEOUT,
+        "a planner's nonsense is not believed"
     );
 }

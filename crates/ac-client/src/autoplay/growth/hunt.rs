@@ -140,11 +140,9 @@ impl Client {
         let here = cell >> 16;
         // On the way: keep going, and notice arriving.
         if let Some((lb, at, name)) = self.autoplay.growth.bound.clone() {
-            let too_long = self
-                .autoplay
-                .growth
-                .bound_since
-                .is_some_and(|t| now.duration_since(t) > WALK_TIMEOUT);
+            let too_long = self.autoplay.growth.bound_since.is_some_and(|t| {
+                now.duration_since(t) > self.autoplay.growth.bound_limit.unwrap_or(WALK_TIMEOUT)
+            });
             if too_long {
                 self.autoplay.note(
                     format!("the walk to the {name} ground is taking too long"),
@@ -346,9 +344,11 @@ impl Client {
         if let Some((lb, at, name)) = pinned.or_else(|| self.party_ground()) {
             if self.autoplay.growth.hunting_at != Some(lb) {
                 if self.grow_travel(at, now) {
+                    let limit = self.planned_walk_limit();
                     let st = &mut self.autoplay.growth;
                     st.bound = Some((lb, at, name.clone()));
                     st.bound_since = Some(now);
+                    st.bound_limit = Some(limit);
                     st.quiet_since = None;
                     self.autoplay
                         .say(Doing::Traveling, format!("on the way to {name}"));
@@ -401,9 +401,11 @@ impl Client {
         let (lb, at, name) = (g.landblock, g.at, g.name.clone());
         let (glo, ghi) = (g.min_level, g.max_level);
         if self.grow_travel(at, now) {
+            let limit = self.planned_walk_limit();
             let st = &mut self.autoplay.growth;
             st.bound = Some((lb, at, name.clone()));
             st.bound_since = Some(now);
+            st.bound_limit = Some(limit);
             st.quiet_since = None;
             if let Some(h) = st.hunting_at.take() {
                 st.skip.mark(h, now);

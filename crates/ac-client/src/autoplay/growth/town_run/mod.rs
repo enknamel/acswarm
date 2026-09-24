@@ -149,6 +149,8 @@ pub(crate) struct Run {
     /// When the walk to this counter was last planned again after
     /// something broke it off (see [`on_the_way`]).
     pub(super) walked_on: Option<Instant>,
+    /// How long the walk there may take before it counts as stuck (see `road::walk_limit`).
+    pub(super) walk_limit: Duration,
 }
 
 /// What one turn of a run to town came to.
@@ -561,6 +563,7 @@ impl Client {
             self.autoplay.note(why.clone(), now);
             return Err(why);
         }
+        let walk_limit = self.planned_walk_limit();
         let st = &mut self.autoplay.growth;
         st.needs = needs;
         st.by_hand = false;
@@ -581,6 +584,7 @@ impl Client {
             errand,
             visited: vec![at],
             walked_on: None,
+            walk_limit,
         });
         self.autoplay.say(
             Doing::Shopping,

@@ -492,6 +492,31 @@ impl Client {
                 }
             }
         }
+        // Nothing within a believable walk or a portal: walk the whole way, as the last resort.
+        // A ground reached by a one-way portal has no way back otherwise, and the character was
+        // left there (a_ground_reached_through_a_one_way_portal_has_a_way_home_on_foot).
+        if planned.is_none() {
+            let far = trip::Prefs {
+                walk_reach: trip::Prefs::far().walk_reach,
+                portal_reach: trip::Prefs::far().portal_reach,
+                ..prefs
+            };
+            planned = trip::plan_with_recalls_and_gems(
+                Vec2::new(me.x, me.y),
+                cell,
+                goal,
+                goal_cell,
+                level,
+                &[],
+                &refused,
+                &recalls,
+                &gems,
+                far,
+            );
+            if let Some(t) = &planned {
+                tracing::info!("travel: no shorter way; the long walk, {:.0} s", t.seconds);
+            }
+        }
         let Some(trip) = planned else {
             // Say why. Often there is a way, but not one this character
             // may take yet: every chain to the far continents runs
@@ -1841,6 +1866,25 @@ mod tests {
                 None => c.steering.reset(),
             }
             pl.update(&c.assets, &input, dt);
+        }
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn a_ground_reached_through_a_one_way_portal_has_a_way_home_on_foot() {
+        // Where a scenario's caster ran out of tapers: the Mosswart ground, reached from Holtburg
+        // through a portal with none back, 3.5 km from town and 2.5 km from Magus Guthima.
+        let mut c =
+            crate::testkit::standing_in_the_field(20, 0xBAAD_0017, Vec3::new(65.4, 144.0, 88.0));
+        for goal in [Vec2::new(32532.0, 34567.1), Vec2::new(38076.7, 32340.6)] {
+            c.travel = Default::default();
+            assert!(c.plan_trip(goal), "no way to {goal:?}");
+            let steps = c.travel_trip().map(|t| t.steps.clone());
+            assert_eq!(steps, Some(vec![Step::Walk(goal)]), "the whole way on foot");
+            assert!(
+                c.travel_route().is_some_and(|r| r.len() > 2),
+                "routed over the terrain"
+            );
         }
     }
 
