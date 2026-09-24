@@ -157,6 +157,7 @@ impl Plugin for Watcher {
 | `spell_learned`, `spell_forgotten` | `spell` |
 | `characters` (`names`, `count`), `character_created` (`guid`, `name`), `character_create_failed` (`code`, `message`) | |
 | `autoplay` | `doing`, `text` |
+| `noted` (a line autoplay logged beside its status) | `text` |
 
 ```rhai
 fn on_event(ev) {

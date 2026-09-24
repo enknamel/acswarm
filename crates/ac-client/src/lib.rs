@@ -142,6 +142,9 @@ pub enum Event {
         doing: String,
         text: String,
     },
+    /// A line autoplay logged beside its status ("town run done: sold 3 item(s)"), each once a
+    /// while at most: the record telemetry keeps of what the status line passed over.
+    Noted(String),
 }
 
 /// How to reach the server and who to be.

@@ -60,7 +60,7 @@ def summarise(path):
             by[who]["samples"].append(r)
         elif k == "chat":
             by[who]["chat"].append(r)
-        elif k == "status":
+        elif k in ("status", "note"):
             by[who]["status"].append(r)
         elif k == "refused":
             by[who]["refused"] += 1
@@ -208,7 +208,7 @@ def marks(path):
         print(f"   hp {r.get('hp')} st {r.get('st')} mp {r.get('mp')} slots {r.get('slots')} "
               f"burden {r.get('burden')} coin {r.get('coin')} target {r.get('target')!r}")
         near = [x for x in rows[max(0, i - 400):i + 40]
-                if (x.get("a"), x.get("c")) == who and x.get("k") in ("status", "chat", "refused")]
+                if (x.get("a"), x.get("c")) == who and x.get("k") in ("status", "note", "chat", "refused")]
         for x in near[-25:]:
             print(f"   {x.get('k'):7} {x.get('text') or x.get('code')}")
 

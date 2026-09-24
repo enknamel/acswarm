@@ -163,6 +163,7 @@ impl Plugin for Telemetry {
         };
         let record = match ev {
             Event::Autoplay { doing, text } => json!({"k": "status", "doing": doing, "text": text}),
+            Event::Noted(text) => json!({"k": "note", "text": text}),
             Event::Chat { text, kind } => {
                 if SPAM.iter().any(|s| text.contains(s)) {
                     return;

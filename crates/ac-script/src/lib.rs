@@ -124,6 +124,10 @@ pub fn event_map(ev: &Event) -> Map {
             m.insert("text".into(), text.clone().into());
             "autoplay"
         }
+        Event::Noted(text) => {
+            m.insert("text".into(), text.clone().into());
+            "noted"
+        }
     };
     m.insert("kind".into(), kind.into());
     m
