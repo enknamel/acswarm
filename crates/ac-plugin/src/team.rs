@@ -312,6 +312,12 @@ pub(crate) fn vital_fraction(stats: &ac_world::stats::PlayerStats, i: usize) -> 
 /// with a name. The fleet view builds its rows for this process's
 /// sessions from the same word.
 pub(crate) fn describe(client: &ac_client::Client, session: usize) -> Option<Mate> {
+    describe_as(client, session, true)
+}
+
+/// [`describe`], with the supplies worked out only when `with_supplies`: they are the costly part,
+/// and only a Mate that goes on the board carries them (the view reads the last one said).
+fn describe_as(client: &ac_client::Client, session: usize, with_supplies: bool) -> Option<Mate> {
     let player = client.player.as_ref()?;
     let cfg = &client.autoplay.config.team;
     let name = client.world.stats.name.clone();
@@ -374,7 +380,11 @@ pub(crate) fn describe(client: &ac_client::Client, session: usize) -> Option<Mat
         following: cfg.enabled && cfg.follow && !cfg.lead,
         salvaging: client.salvaging(),
         has_ust: client.salvage_tool().is_some(),
-        supplies: client.supplies(&client.autoplay.config.growth, Instant::now()),
+        supplies: if with_supplies {
+            client.supplies(&client.autoplay.config.growth, Instant::now())
+        } else {
+            Default::default()
+        },
         ground: client.hunting_ground(),
         on_its_way: client.on_its_way(),
         skills: client.skills_its_rules_ask_about(),
@@ -390,14 +400,18 @@ impl Team {
     /// due to say so on the board (every [`SAY_EVERY`]). When it is, `me`
     /// is what it last said from then on.
     fn say(&mut self, session: usize, me: &Mate, now: Instant) -> bool {
-        let due = self
-            .last_said
-            .get(&session)
-            .is_none_or(|(t, _)| now.duration_since(*t) >= SAY_EVERY);
+        let due = self.is_due(session, now);
         if due {
             self.last_said.insert(session, (now, me.clone()));
         }
         due
+    }
+
+    /// Whether session `session` is due to say itself on the board at `now`.
+    fn is_due(&self, session: usize, now: Instant) -> bool {
+        self.last_said
+            .get(&session)
+            .is_none_or(|(t, _)| now.duration_since(*t) >= SAY_EVERY)
     }
 
     /// What session `session` last said about itself on the board: what
@@ -478,7 +492,7 @@ impl Plugin for Team {
             }
             return;
         }
-        let Some(me) = describe(client, session) else {
+        let Some(me) = describe_as(client, session, self.is_due(session, now)) else {
             return;
         };
         let due = self.say(session, &me, now);

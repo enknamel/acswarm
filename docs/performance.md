@@ -321,6 +321,20 @@ What they say:
   the next such thing (`sample <pid> 40` on the release build, read
   against the working frames, not the loop's sleep).
 
+With the team on, four admin characters fighting as a team (a leader and
+three followers), one process, 150 s:
+
+| build | ticks | work p50 | work p95 | overruns | plugins per tick |
+|---|---|---|---|---|---|
+| 8ff8069 | 12.0 of 20 Hz | 63.5 ms | 76.9 ms | 713 | 41.1 ms |
+| after | 19.8 of 20 Hz | 14.3 ms | 36.1 ms | 13 | 4.0 ms |
+
+Before, the grow goal asked the supplies planner three times a tick and
+each walked the spellbook to learn what its spells burn (95% of the
+work), and the team plugin described every session every frame though it
+posts twice a second. `spells_cast` now keeps its answer for a second,
+and the supplies go into a Mate only when it is posted.
+
 ## Not yet measured
 
 * Frame time in the window, with a person playing one session and
@@ -329,5 +343,3 @@ What they say:
 * Fifty sessions all out hunting. The fifty-session rows above are
   mostly new characters in the Academy; their fighting share falls as
   sessions are added.
-* A team on: `team::describe` runs the supplies planner for every
-  session on every plugin tick, and the runs above had the team off.

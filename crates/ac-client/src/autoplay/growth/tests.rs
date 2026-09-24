@@ -143,3 +143,27 @@ fn a_refusal_past_the_busy_asks_is_the_counters_own() {
         Phase::Opening { busy: Some(_), .. }
     ));
 }
+
+#[test]
+fn the_spells_cast_are_kept_a_second_and_worked_out_again_when_one_is_learned() {
+    let mut c = Client::offline(crate::testkit::no_data());
+    c.world.stats.spells = vec![1];
+    let first = c.spells_cast();
+    let when = |c: &Client| {
+        c.autoplay
+            .spells_cast_memo
+            .borrow()
+            .as_ref()
+            .map(|m| (m.0, m.1))
+    };
+    let kept = when(&c);
+    assert_eq!(c.spells_cast(), first);
+    assert_eq!(when(&c), kept, "worked out again within the second");
+    c.world.stats.spells.push(2);
+    c.spells_cast();
+    assert_eq!(
+        when(&c).map(|w| w.1),
+        Some(2),
+        "a spell learned was not noticed"
+    );
+}
