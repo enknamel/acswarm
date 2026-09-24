@@ -1,8 +1,12 @@
 use std::collections::BTreeMap;
+use std::time::{Duration, Instant};
 
 use super::Growth;
 use crate::Client;
 use ac_world::item_type;
+
+/// How long a [`Client::spells_cast`] answer is kept while the spellbook stays the same size.
+const SPELLS_CAST_EVERY: Duration = Duration::from_secs(1);
 
 impl Client {
     // ---- town runs ------------------------------------------------
@@ -58,6 +62,21 @@ impl Client {
     /// A buff is asked for with that check left out for the same
     /// reason (`wanted_buffs_if`).
     pub(crate) fn spells_cast(&self) -> Vec<u32> {
+        // It walks the whole spellbook and the buffs worth wearing, and the planners ask it several
+        // times a tick; what it answers moves with the book, the skills and the settings, over minutes.
+        let book = self.world.stats.spells.len();
+        if let Some((at, n, spells)) = self.autoplay.spells_cast_memo.borrow().as_ref() {
+            if *n == book && at.elapsed() < SPELLS_CAST_EVERY {
+                return spells.clone();
+            }
+        }
+        let spells = self.spells_cast_now();
+        *self.autoplay.spells_cast_memo.borrow_mut() = Some((Instant::now(), book, spells.clone()));
+        spells
+    }
+
+    /// [`Self::spells_cast`], worked out afresh.
+    fn spells_cast_now(&self) -> Vec<u32> {
         use ac_world::vitals::{boosts_of, transfers_between, vital};
         let known = |id: &u32| self.world.stats.spells.contains(id);
         let table = self.assets.spell_table().ok();
