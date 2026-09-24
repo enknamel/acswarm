@@ -114,7 +114,8 @@ impl Client {
         let elapsed = now.duration_since(run.since);
         match run.phase.clone() {
             Phase::Going => {
-                if elapsed > WALK_TIMEOUT {
+                // Out of time only while still short of it: one that got there is not walked away.
+                if elapsed > WALK_TIMEOUT && run.at.distance(me) > VENDOR_REACH {
                     self.autoplay.note(
                         format!("the walk to {} is taking too long", run.vendor),
                         now,

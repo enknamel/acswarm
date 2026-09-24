@@ -361,3 +361,27 @@ fn a_run_to_sell_goes_to_a_counter_that_buys_what_it_carries() {
     // either; the nearest-counter fallback is `pick_vendor`'s own.
     assert!(choose_counter(in_town(), Errand::Buy, &[], 0, &odd).is_none());
 }
+
+#[test]
+fn the_counter_named_is_asked_even_with_another_vendor_nearer() {
+    let mut c = Client::offline(crate::testkit::no_data());
+    let vendor = |guid: u32, name: &str, x: f32| {
+        let mut o = crate::testkit::creature(guid, name);
+        o.object_desc_flags = ac_world::object_desc_flags::VENDOR;
+        o.position = Some(ac_world::Position {
+            cell: 0xA9B2_0001,
+            local: glam::Vec3::new(x, 90.0, 94.0),
+            rotation: glam::Quat::IDENTITY,
+        });
+        o
+    };
+    // Boddry's listed spot, with the Pawn Shopkeep standing nearer to it than Boddry does.
+    c.world.objects.insert(1, vendor(1, "Pawn Shopkeep", 91.0));
+    c.world
+        .objects
+        .insert(2, vendor(2, "Boddry the Chancy", 96.0));
+    let at = ac_world::landblock_origin(0xA9B2_0001).truncate() + glam::Vec2::new(90.6, 90.0);
+    assert_eq!(c.vendor_object("Boddry the Chancy", at), Some(2));
+    // With nobody by that name about, the nearest vendor still answers.
+    assert_eq!(c.vendor_object("Gone Missing", at), Some(1));
+}

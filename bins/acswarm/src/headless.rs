@@ -342,6 +342,8 @@ pub fn run(cli: crate::Cli) -> Result<()> {
                 continue;
             }
             let began = Instant::now();
+            // Every line this session's tick logs says whose it is.
+            let _whose = tracing::info_span!("s", a = %sessions[i].account()).entered();
             let _frame = sessions[i].client.tick(None, dt, now);
             let events = sessions[i].client.drain_events();
             for ev in &events {

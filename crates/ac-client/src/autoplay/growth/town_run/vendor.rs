@@ -592,12 +592,14 @@ impl Client {
                 (d <= VENDOR_REACH + 10.0).then_some((d, o.name == name, o.guid))
             })
             .collect();
-        vendors
-            .iter()
-            .filter(|(_, named, _)| *named)
-            .chain(vendors.iter())
-            .min_by(|a, b| a.0.total_cmp(&b.0))
-            .map(|(_, _, g)| *g)
+        let nearest = |named_only: bool| {
+            vendors
+                .iter()
+                .filter(|(_, named, _)| *named || !named_only)
+                .min_by(|a, b| a.0.total_cmp(&b.0))
+                .map(|(_, _, g)| *g)
+        };
+        nearest(true).or_else(|| nearest(false))
     }
 }
 
