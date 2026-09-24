@@ -6,19 +6,20 @@ priority; a live report starts from the telemetry (`tools/telemetry.py`, `--mark
 
 ## 1. Stops the character playing
 
-- **Standing about a quiet ground.** The ground's wait before each of its three looks about was the
-  whole `idle_before_move` (60 s), so a cleared ground held a character still for four minutes
-  (scenarios run 2: all five fixtures 237 s "waiting" at 0xADAF0020). Fix under test: looking
-  about waits 10 s, the setting is for leaving. Shows as: `not idle over 90 s` fails.
 - **The Jonathan shortcut out of the Academy fails**: "waiting for the Jonathan to turn up", then
   "nothing to give", and the character does the whole tutorial instead (a war mage left in 6.5
   min, scenarios run 2). Blargerton took 58 s to walk 9 m towards Boddry the Chancy, and props
   near local (14.88, -26.79) in 0x860201AD wedged walks there while `line_blocked` called the
   line clear. Shows as: `no stall over 30 s` fails with a cell in 0x8602 or near a counter.
-- **No way back to town from a far ground.** Scn Taper, out of tapers at the Mosswart ground
-  (0xBAAD, 2.8 km from Holtburg, where the ground-picker had walked it), noted "no way to Magus
-  Guthima the Wise from here" and could not cast for the rest of the run; Scn Seller the same for
-  Denterra the Healer (scenarios run 3). Shows as: `tapers bought` fails, "no way to" notes.
+- **Stands at a counter it has not reached.** Scn Mage stood 240 s 4 m from Shopkeeper Renald the
+  Elder (0xA9B40117, 32599.8 34689.8): straight line, aim set, not wedged, no detour, in both runs
+  of 2026-09-24. Shows as: `no stall over 30 s` fails with "going to <vendor> (150 m)".
+- **A caster in hand and no attack spells: no fight at all.** Scn Blade held a looted Staff, knew no
+  attack spells ("no attack spells known" from its first second) and never took up a weapon; 0
+  blows in both runs. (The fixture's Battle Axe went to a counter: the Check profile sells anything
+  worth 25, so the scenario profile must keep the fixtures' weapons.)
+- **A purchase hangs at the counter.** After "buying 150 Prismatic Taper" at Magus Guthima the run
+  waited the whole 3-minute `SELLING_TIMEOUT` ("taking too long to trade with").
 - **The two town-run planners disagree.** The first plan said "Boddry the Chancy it is: nowhere
   sells what is wanted", the next-stop plan found Cindrue with "2 of 2 on the shelf", so the run
   walked to the wrong counter. Shows as: two stops for one need in the status lines.
@@ -42,3 +43,11 @@ priority; a live report starts from the telemetry (`tools/telemetry.py`, `--mark
   in argv (`-v`), visible to `ps`.
 - **`--create` with no template makes a crippled character** (60 attribute points, 18 HP at
   level 5); use a template, as `tools/scenarios.sh` does.
+
+## Fixed
+
+- **No way back to town from a far ground** (3b64241): the planner believed a leg on foot only to
+  1200 m, so a ground reached through a one-way portal had no way home. Scn Taper, out of tapers
+  2.5 km out: before, 17 "no way to" refusals, 0 bought, no casts; after, a 656 s walk planned,
+  there in 129 s, 150 tapers bought, run done at 365 s.
+- **Standing about a quiet ground** (f37ffc3): longest idle 237 s -> 24-63 s.
