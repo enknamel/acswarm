@@ -351,6 +351,15 @@ impl Client {
     }
 
     pub fn can_cast(&self, spell: u32) -> CastCheck {
+        self.can_cast_from(spell, None)
+    }
+
+    /// `can_cast`, against `carried` when the caller holds `components()` already.
+    pub(crate) fn can_cast_from(
+        &self,
+        spell: u32,
+        carried: Option<&[ComponentCount]>,
+    ) -> CastCheck {
         if !self.world.stats.spells.contains(&spell) {
             return CastCheck::NotKnown;
         }
@@ -373,7 +382,14 @@ impl Client {
         }
         let need = self.current_formula(spell);
         if !need.is_empty() {
-            let have = self.components();
+            let counted;
+            let have = match carried {
+                Some(have) => have,
+                None => {
+                    counted = self.components();
+                    &counted
+                }
+            };
             let count = |id: u32| {
                 have.iter()
                     .find(|c| c.component_id == id)

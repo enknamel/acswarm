@@ -451,6 +451,102 @@ pub fn as_a_war_mage(c: &mut Client) {
     );
 }
 
+/// A caster standing in Holtburg with a wand in hand, the
+/// components, the skill and the mana for each of `spells`, and
+/// the server's clock known. The spells, in the order asked for.
+pub fn a_caster_knowing(now: Instant, spells: &[&str]) -> (Client, Vec<u32>) {
+    let holtburg = 0xA9B4_0019;
+    let here = glam::Vec3::new(84.0, 7.1, 94.0);
+    let mut c = standing_at(holtburg, here);
+    let me = 0x5000_0001;
+    c.world.player_guid = Some(me);
+    // The server's clock, without which nothing is ever due.
+    let clock = ac_net::packet::build(
+        ac_net::packet::Header {
+            flags: ac_net::packet::flags::TIME_SYNC,
+            ..Default::default()
+        },
+        &1000.0f64.to_le_bytes(),
+        &[],
+        0,
+    );
+    c.session.receive(&clock, now);
+    assert!(c.session.server_time().is_some(), "the clock was not taken");
+    let table = c.assets.spell_table().expect("the spell table");
+    let mut known = Vec::new();
+    for name in spells {
+        let (spell, sp) = table
+            .spells
+            .iter()
+            .find(|(_, sp)| sp.name == *name)
+            .map(|(id, sp)| (*id, sp.clone()))
+            .unwrap_or_else(|| panic!("the spell table knows {name}"));
+        c.world.stats.spells.push(spell);
+        let skill = Client::school_skill(sp.school).expect("a school with a skill");
+        if !c.world.stats.skills.iter().any(|s| s.id == skill) {
+            c.world.stats.skills.push(ac_world::stats::Skill {
+                id: skill,
+                advancement: ac_world::stats::sac::TRAINED,
+                init_level: 300,
+                ..Default::default()
+            });
+        }
+        known.push(spell);
+    }
+    c.world.stats.vitals[2].current = 500;
+    const WAND: u32 = 0x8000_0102;
+    c.world.objects.insert(
+        WAND,
+        ac_world::WorldObject {
+            guid: WAND,
+            name: "Training Wand".into(),
+            item_type: item_type::CASTER,
+            valid_locations: ac_world::equip::HELD,
+            wielder: Some(me),
+            ..Default::default()
+        },
+    );
+    let mapper = c.assets.spell_component_ids().expect("the component ids");
+    let mut guid = 0x8000_0200;
+    for spell in &known {
+        for component in c.current_formula(*spell) {
+            let wcid = mapper
+                .component_wcid(component)
+                .expect("a component with a weenie");
+            c.world.objects.insert(
+                guid,
+                ac_world::WorldObject {
+                    guid,
+                    name: format!("Component {component}"),
+                    weenie_class_id: wcid,
+                    stack_size: 20,
+                    container: Some(me),
+                    ..Default::default()
+                },
+            );
+            guid += 1;
+        }
+    }
+    for spell in &known {
+        assert!(
+            matches!(c.can_cast(*spell), crate::magic::CastCheck::Ok),
+            "the caster cannot cast {spell}: {:?}",
+            c.can_cast(*spell)
+        );
+    }
+    (c, known)
+}
+
+/// A caster standing in Holtburg with a wand in hand, the
+/// components and mana for Blade Protection Self, the server's
+/// clock known and no protection up: one buff due, urgent or not.
+pub fn a_caster_with_a_buff_due(now: Instant) -> (Client, u32) {
+    let (mut c, known) = a_caster_knowing(now, &["Blade Protection Self I"]);
+    c.autoplay.config.buffs.auto = false;
+    c.autoplay.config.buffs.spells = vec!["Blade Protection Self".into()];
+    (c, known[0])
+}
+
 /// `stack` prismatic tapers in the pack.
 pub fn tapers_in_the_pack(c: &mut Client, guid: u32, stack: u32) {
     let me = c.world.player_guid.unwrap();

@@ -38,8 +38,8 @@ fn buff_within(cfg: &Buffs, urgent: bool, fighting: bool, wand_in_hand: bool) ->
     cfg.never_below
 }
 
-/// How often the buffs are gone through to see what is due.
-const BUFF_CHECK_EVERY: Duration = Duration::from_millis(1000);
+/// How often each buff pass, urgent and top-up, and the rearm work out what is due.
+pub(crate) const BUFF_CHECK_EVERY: Duration = Duration::from_millis(1000);
 
 impl Client {
     /// Seconds left on the enchantment of a spell family, if any is up.
@@ -104,10 +104,11 @@ impl Client {
     pub fn wanted_buffs(&self) -> Vec<crate::buffs::Want> {
         // With the components and mana to try: a wand not yet in hand
         // is the one lack that does not count, since wielding one is
-        // the first thing done.
+        // the first thing done. The pack is counted once, not per spell.
+        let carried = self.components();
         self.wanted_buffs_if(|id| {
             matches!(
-                self.can_cast(id),
+                self.can_cast_from(id, Some(&carried)),
                 crate::magic::CastCheck::Ok | crate::magic::CastCheck::NoCaster
             )
         })
@@ -159,6 +160,28 @@ impl Client {
         crate::buffs::wanted(&table, &me)
     }
 
+    /// Whether a target is being fought, by weapon or by spell: a fight, to the buff passes.
+    fn has_target(&self) -> bool {
+        self.attack_target.is_some() || self.autoplay.casting_at.is_some()
+    }
+
+    /// `buff_within` for this moment, the fight and the hands read as the passes read them.
+    fn buff_within_now(&self, urgent: bool) -> f32 {
+        let wand_in_hand = self.combat_stance() == Stance::Magic;
+        buff_within(
+            &self.autoplay.config.buffs,
+            urgent,
+            self.has_target(),
+            wand_in_hand,
+        )
+    }
+
+    /// Whether the urgent pass would put a buff back now, by its own `buff_within`: a
+    /// weapon put down for one waits on nothing that pass would leave down.
+    pub(crate) fn has_urgent_buff_due(&self, now: Instant) -> bool {
+        self.due_buff(self.buff_within_now(true), now).is_some()
+    }
+
     /// Put a buff back up. True when it cast one.
     ///
     /// Two passes share this. The urgent one runs before anything else
@@ -173,7 +196,7 @@ impl Client {
         if cfg.spells.is_empty() && !cfg.auto {
             return false;
         }
-        let fighting = self.attack_target.is_some() || self.autoplay.casting_at.is_some();
+        let fighting = self.has_target();
         // At a counter every cast waits, urgent or not, for the reason
         // the top-ups wait on a journey and one more: a cast roots the
         // character where it stands, and here it also has the counter
@@ -224,12 +247,16 @@ impl Client {
         {
             return false;
         }
-        if urgent
-            && self
-                .autoplay
-                .buffs_checked
-                .is_some_and(|t| now.duration_since(t) < BUFF_CHECK_EVERY)
-        {
+        // Each pass looks once a BUFF_CHECK_EVERY on its own clock, so a
+        // top-up that holds off cannot stop the urgent one looking. A top-up
+        // paced out in a shorter lull waits for a later one, perhaps a fight
+        // on: top_up_within, far wider than never_below, leaves that room.
+        let checked = if urgent {
+            self.autoplay.urgent_buffs_checked
+        } else {
+            self.autoplay.top_ups_checked
+        };
+        if checked.is_some_and(|t| now.duration_since(t) < BUFF_CHECK_EVERY) {
             return false;
         }
         // A buff is never worth a cancelled swing: it goes back up in
@@ -243,18 +270,20 @@ impl Client {
             );
             return false;
         }
-        self.autoplay.buffs_checked = Some(now);
-        let within = buff_within(
-            &cfg,
-            urgent,
-            fighting,
-            self.combat_stance() == Stance::Magic,
-        );
+        if urgent {
+            self.autoplay.urgent_buffs_checked = Some(now);
+        } else {
+            self.autoplay.top_ups_checked = Some(now);
+        }
+        let within = self.buff_within_now(urgent);
         // Find what is due before touching the hands: the urgent pass
         // runs every tick and must cost nothing when nothing is due.
-        let Some((spell, target, category, name, lasts)) = self.due_buff(within, now) else {
+        // Worked out once, for the pick and for saying why none is due.
+        let wants = self.auto_buffs();
+        let Some((spell, target, category, name, lasts)) = self.due_buff_among(&wants, within, now)
+        else {
             if !urgent {
-                self.autoplay_explain_buffs(now);
+                self.autoplay_explain_buffs(&wants, now);
             }
             return false;
         };
@@ -394,14 +423,15 @@ impl Client {
 
     /// When buffs are wanted but none can be cast, say why for the
     /// first of them, so a character standing unbuffed is not a mystery.
-    fn autoplay_explain_buffs(&mut self, now: Instant) {
+    /// `wants` is `wanted_buffs()` as the pass that found none due saw it.
+    fn autoplay_explain_buffs(&mut self, wants: &[crate::buffs::Want], now: Instant) {
         use crate::buffs::Target;
         use crate::magic::CastCheck;
         if !self.autoplay.config.buffs.auto {
             return;
         }
         let top_up = self.autoplay.config.buffs.top_up_within;
-        for want in self.wanted_buffs() {
+        for want in wants {
             let left = match want.target {
                 Target::Me => self.category_left(want.category, want.power),
                 Target::Item(g) => self.item_buff_left(g, want.category, now),
@@ -431,6 +461,25 @@ impl Client {
     /// first. `(spell, target, category, name, seconds it lasts)`.
     pub(crate) fn due_buff(
         &self,
+        within: f32,
+        now: Instant,
+    ) -> Option<(u32, crate::buffs::Target, u32, String, f32)> {
+        self.due_buff_among(&self.auto_buffs(), within, now)
+    }
+
+    /// `wanted_buffs()` when the config's `auto` is on, else none.
+    fn auto_buffs(&self) -> Vec<crate::buffs::Want> {
+        if self.autoplay.config.buffs.auto {
+            self.wanted_buffs()
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// The same as `due_buff`, from `wants` as `auto_buffs` gave them.
+    fn due_buff_among(
+        &self,
+        wants: &[crate::buffs::Want],
         within: f32,
         now: Instant,
     ) -> Option<(u32, crate::buffs::Target, u32, String, f32)> {
@@ -474,14 +523,12 @@ impl Client {
             let lasts = sp.and_then(|s| s.duration()).unwrap_or(1800.0) as f32;
             due = Some((rank, left, spell, target, category, name, lasts));
         };
-        if cfg.auto {
-            for want in self.wanted_buffs() {
-                let left = match want.target {
-                    Target::Me => self.category_left(want.category, want.power),
-                    Target::Item(g) => self.item_buff_left(g, want.category, now),
-                };
-                offer(left, want.spell, want.target, want.category);
-            }
+        for want in wants {
+            let left = match want.target {
+                Target::Me => self.category_left(want.category, want.power),
+                Target::Item(g) => self.item_buff_left(g, want.category, now),
+            };
+            offer(left, want.spell, want.target, want.category);
         }
         for name in &cfg.spells {
             let Some(spell) = self.spell_by_name(name) else {

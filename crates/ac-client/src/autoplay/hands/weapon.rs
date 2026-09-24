@@ -1,5 +1,6 @@
 use std::time::{Duration, Instant};
 
+use crate::autoplay::vitals::buffs::BUFF_CHECK_EVERY;
 use crate::autoplay::{Autoplay, Fight, Style};
 use crate::{Client, Stance};
 
@@ -402,14 +403,32 @@ impl Client {
         self.wield_guid(shield);
     }
 
-    /// Take up again the weapon put down for an urgent buff, once no
-    /// buff is due any more.
-    pub(crate) fn autoplay_rearm(&mut self) {
+    /// Take up again the weapon put down for an urgent buff, once the
+    /// urgent pass has no buff left to put back.
+    pub(crate) fn autoplay_rearm(&mut self, now: Instant) {
         let Some(weapon) = self.autoplay.put_down else {
             return;
         };
-        let never_below = self.autoplay.config.buffs.never_below;
-        if self.due_buff(never_below, Instant::now()).is_some() {
+        // Inside the wait a refusal earned it, or with the server busy,
+        // the errand keeps, the way a pending wield's does: dropping it
+        // here would leave the weapon in the pack and the character
+        // fighting with the wand.
+        if self.wield_must_wait(weapon, now) {
+            return;
+        }
+        // What is due walks the whole spellbook: asked once a BUFF_CHECK_EVERY
+        // on a clock of its own, and only when the weapon could go out on the answer.
+        if self
+            .autoplay
+            .rearm_checked
+            .is_some_and(|t| now.duration_since(t) < BUFF_CHECK_EVERY)
+        {
+            return;
+        }
+        self.autoplay.rearm_checked = Some(now);
+        // Asked before the pack is looked in: until the server moves the
+        // weapon put down it is still in hand, which reads as no errand.
+        if self.has_urgent_buff_due(now) {
             return;
         }
         if !self
@@ -422,13 +441,6 @@ impl Client {
             self.autoplay.put_down = None;
             return;
         }
-        // Inside the wait a refusal earned it, or with the server busy,
-        // the errand keeps, the way a pending wield's does: dropping it
-        // here would leave the weapon in the pack and the character
-        // fighting with the wand.
-        if self.wield_must_wait(weapon, Instant::now()) {
-            return;
-        }
         self.autoplay.put_down = None;
         tracing::info!("autoplay: taking the weapon up again after buffing");
         // The wand is still in the hand, and ACE will not put a sword
@@ -437,7 +449,7 @@ impl Client {
         // the pack and the housekeeping takes the weapon up once the
         // hands are empty, the same two steps the arming uses.
         if self.put_weapons_away() {
-            self.autoplay.last_rewield = Some(Instant::now());
+            self.autoplay.last_rewield = Some(now);
             self.autoplay.pending_wield = Some(weapon);
         } else {
             self.wield_guid(weapon);

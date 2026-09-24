@@ -108,7 +108,7 @@ fn the_weapon_comes_back_out_of_the_pack_after_a_buff() {
         true,
     );
     c.autoplay.put_down = Some(MACE);
-    c.autoplay_rearm();
+    c.autoplay_rearm(Instant::now());
     // ACE will not put a mace in a hand that holds a caster -- it
     // refuses the wield outright, with no error to read -- so the
     // wand goes back in the pack first and the mace waits on empty
@@ -134,7 +134,7 @@ fn an_errand_the_server_is_refusing_is_kept_rather_than_dropped() {
     );
     c.autoplay.put_down = Some(MACE);
     c.hold_off_wield(MACE, Instant::now());
-    c.autoplay_rearm();
+    c.autoplay_rearm(Instant::now());
     // Asking now sends nothing, so clearing the errand would leave
     // the mace in the pack with nothing left to ask again.
     assert_eq!(c.autoplay.put_down, Some(MACE), "still owed the weapon");
@@ -155,6 +155,138 @@ fn an_errand_the_server_is_refusing_is_kept_rather_than_dropped() {
     c.hold_off_wield(SHIELD, Instant::now());
     c.autoplay_shield(Instant::now());
     assert_eq!(c.autoplay.wanted_shield, Some(SHIELD), "still owed it");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_weapon_put_down_waits_only_on_a_buff_the_urgent_pass_would_put_back() {
+    use ac_world::item_type::{CASTER, MELEE_WEAPON};
+    const MACE: u32 = 0x8000_0101;
+    const WAND: u32 = 0x8000_0102;
+    let now = Instant::now();
+    let (mut c, spell) = crate::testkit::a_caster_with_a_buff_due(now);
+    a_weapon(&mut c, MACE, MELEE_WEAPON, "Mace", false);
+    c.attack_target = Some(0x8000_0103);
+    // Half a minute left: under never_below, not run out.
+    let sp = c.assets.spell_table().unwrap().get(spell).cloned().unwrap();
+    c.world
+        .stats
+        .enchantments
+        .push(ac_world::stats::Enchantment {
+            spell_id: spell as u16,
+            category: sp.category as u16,
+            power: sp.power,
+            duration: 30.0,
+            received: c.session.server_time(),
+            ..Default::default()
+        });
+    c.autoplay.put_down = Some(MACE);
+    // With the wand in hand the urgent pass puts it back mid-fight.
+    c.autoplay_rearm(now);
+    assert_eq!(c.autoplay.put_down, Some(MACE), "rearmed with a buff due");
+    // The fight took the mace up for its next target. With
+    // out_of_combat_only on, the urgent pass leaves that buff for the
+    // fight's end: asked by never_below, the errand waited on it every
+    // tick until it ran out or the fight ended.
+    a_weapon(&mut c, WAND, CASTER, "Training Wand", false);
+    a_weapon(&mut c, MACE, MELEE_WEAPON, "Mace", true);
+    let never_below = c.autoplay.config.buffs.never_below;
+    assert!(c.due_buff(never_below, now).is_some(), "the buff went up");
+    c.autoplay_rearm(now + BUFF_CHECK_EVERY);
+    assert_eq!(c.autoplay.put_down, None, "waiting on a buff left down");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_weapon_put_down_is_still_owed_while_the_server_moves_it() {
+    use ac_world::item_type::{CASTER, MELEE_WEAPON};
+    const MACE: u32 = 0x8000_0101;
+    const WAND: u32 = 0x8000_0102;
+    let now = Instant::now();
+    // The urgent pass has just sent the mace to the pack and asked for
+    // the wand, for a protection that has run out; the server has
+    // answered neither, so the mace is still in hand.
+    let (mut c, _) = crate::testkit::a_caster_with_a_buff_due(now);
+    a_weapon(&mut c, WAND, CASTER, "Training Wand", false);
+    a_weapon(&mut c, MACE, MELEE_WEAPON, "Mace", true);
+    c.attack_target = Some(0x8000_0103);
+    c.autoplay.put_down = Some(MACE);
+    c.autoplay_rearm(now);
+    // Looking in the pack first reads the mace in hand as an errand
+    // already done, and the fight goes on with the wand.
+    assert_eq!(c.autoplay.put_down, Some(MACE), "the errand was dropped");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn the_weapon_comes_back_at_the_first_look_after_the_last_buff_lands() {
+    use ac_world::item_type::MELEE_WEAPON;
+    const MACE: u32 = 0x8000_0101;
+    let now = Instant::now();
+    // Wand in hand mid-fight, the mace in the pack, the protection down.
+    let (mut c, spell) = crate::testkit::a_caster_with_a_buff_due(now);
+    a_weapon(&mut c, MACE, MELEE_WEAPON, "Mace", false);
+    c.attack_target = Some(0x8000_0103);
+    c.autoplay.put_down = Some(MACE);
+    c.autoplay_rearm(now);
+    assert_eq!(c.autoplay.put_down, Some(MACE), "rearmed with a buff due");
+    // The protection lands a moment later; the rearm sees it at its
+    // next look, not on the tick it lands.
+    let sp = c.assets.spell_table().unwrap().get(spell).cloned().unwrap();
+    c.world
+        .stats
+        .enchantments
+        .push(ac_world::stats::Enchantment {
+            spell_id: spell as u16,
+            category: sp.category as u16,
+            power: sp.power,
+            duration: 1800.0,
+            received: c.session.server_time(),
+            ..Default::default()
+        });
+    c.autoplay_rearm(now + Duration::from_millis(500));
+    assert_eq!(c.autoplay.put_down, Some(MACE), "looked within a second");
+    c.autoplay_rearm(now + BUFF_CHECK_EVERY);
+    assert_eq!(c.autoplay.put_down, None, "no look a second on");
+    assert_eq!(
+        c.autoplay.pending_wield,
+        Some(MACE),
+        "the mace not asked for"
+    );
+}
+
+#[test]
+fn the_rearm_asks_what_is_due_once_a_second_on_its_own_clock() {
+    // No game data, so nothing is ever due, and the mace is in hand:
+    // every look ends the errand, and a look not taken leaves it owed.
+    const MACE: u32 = 0x8000_0101;
+    let now = Instant::now();
+    let mut c = hands_free(no_data());
+    // The buff passes' own looks just now do not hold the rearm back.
+    c.autoplay.urgent_buffs_checked = Some(now);
+    c.autoplay.top_ups_checked = Some(now);
+    c.autoplay.put_down = Some(MACE);
+    c.autoplay_rearm(now);
+    assert_eq!(c.autoplay.put_down, None, "no look");
+    assert_eq!(c.autoplay.rearm_checked, Some(now));
+    assert_eq!(c.autoplay.urgent_buffs_checked, Some(now));
+    // Owed again: no look until a second after the last.
+    c.autoplay.put_down = Some(MACE);
+    c.autoplay_rearm(now + Duration::from_millis(500));
+    assert_eq!(c.autoplay.put_down, Some(MACE), "looked within a second");
+    // With a swing in the air no wield could go out, so no look is spent.
+    let then = now + BUFF_CHECK_EVERY;
+    c.attack_pending = true;
+    c.last_attack = then;
+    c.autoplay_rearm(then);
+    assert_eq!(
+        c.autoplay.rearm_checked,
+        Some(now),
+        "a look spent mid-swing"
+    );
+    c.attack_pending = false;
+    c.autoplay_rearm(then);
+    assert_eq!(c.autoplay.put_down, None, "no look a second on");
 }
 
 #[test]
