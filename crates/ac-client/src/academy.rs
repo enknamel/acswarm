@@ -708,10 +708,16 @@ impl State {
 
     fn portal(&mut self, v: &View, s: &Step) -> Action {
         let spot = v.origin + s.at.unwrap_or_default();
-        // Landed on the far side: the quest before it is proven done.
+        // Landed on the far side: a portal that ends its quest proves it done. One in the middle of
+        // its quest (the Outer Courtyard, before the Sentry's hunt) proves nothing, and read as done it
+        // skipped the hunt and left the exit portal refusing.
         if let Some(l) = s.lands {
             if v.pos.distance(v.origin + l) < LANDED && self.acted.is_some() {
-                if s.quest != "exit" {
+                let ends_quest = self
+                    .table()
+                    .get(self.step + 1)
+                    .is_none_or(|next| next.quest != s.quest);
+                if s.quest != "exit" && ends_quest {
                     let q = s.quest.clone();
                     self.quest_done(&q);
                 }
@@ -1224,6 +1230,36 @@ mod tests {
     fn step_named(st: &State, target: &str, kind: Kind) -> bool {
         st.current()
             .is_some_and(|s| s.target == target && s.kind == kind)
+    }
+
+    /// Through the portal named `target`, as the tutorial walks it: the step, the portal entered, and
+    /// the character landed where the table says.
+    fn through_portal(target: &str) -> State {
+        let t0 = Instant::now();
+        let at = steps()
+            .iter()
+            .position(|s| s.kind == Kind::Portal && s.target == target)
+            .expect("a portal step by that name");
+        let mut st = State {
+            active: true,
+            step: at,
+            acted: Some(t0),
+            ..Default::default()
+        };
+        let lands = steps()[at].lands.expect("the table says where it lands");
+        st.step(&view(t0 + Duration::from_secs(1), lands, &[], &[]), false);
+        st
+    }
+
+    #[test]
+    fn a_portal_in_the_middle_of_its_quest_does_not_prove_the_quest_done() {
+        // The Outer Courtyard lies before the Sentry's hunt: read as the quest's end it skipped
+        // the hunt, and the exit portal refused the character for good.
+        let st = through_portal("Outer Courtyard");
+        assert!(!st.is_done("sentry"));
+        assert!(step_named(&st, "Sentry", Kind::Talk), "{:?}", st.current());
+        // A portal that ends its quest still proves it.
+        assert!(through_portal("Central Courtyard").is_done("token"));
     }
 
     #[test]

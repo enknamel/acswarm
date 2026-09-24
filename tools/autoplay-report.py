@@ -26,11 +26,11 @@ STATUS = re.compile(r"^\[([\w-]+)\] placed=(\w+) cell=([0-9A-F]{8}) hp=(\d+)/(\d
 # (row, pattern on the line after the span, "chat" when it is a chat line's text)
 SIGNALS = [
     ("left the Academy", r"academy: .*(out of the Academy|left the Academy|through the way out|outside)", None),
-    ("buffs cast", r"^You cast .* on (yourself|{me})", "chat"),
-    ("spells at creatures", r"^You cast (?!.* on (yourself|{me})).* on ", "chat"),
+    ("buffs cast", r"autoplay: casting .+ on ", None),
+    ("spells at creatures", r"autoplay: casting .+ at ", None),
     ("heals", r"autoplay: (healing|heal) ", None),
     ("corpses opened", r"use Corpse of ", None),
-    ("items looted", r"autoplay: (took|taking|picked up|loot(ing|ed)) ", None),
+    ("items looted", r"(actions::items: take .+ \(0x[0-9a-f]+\)|emptied a corpse)", None),
     ("town runs begun", r"autoplay: .*going to .*\(\d+ m\)", None),
     ("counters asked", r"autoplay: at .*; looking over", None),
     ("sales sent", r"trade_vendor: sell \d+ item", None),
