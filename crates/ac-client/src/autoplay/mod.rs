@@ -508,6 +508,11 @@ pub struct Autoplay {
 }
 
 impl Autoplay {
+    /// The step that claimed the last tick, if one did (`crate::steps`).
+    pub fn step_name(&self) -> Option<&'static str> {
+        self.step
+    }
+
     /// Something worth knowing that is not what the character is doing:
     /// logged, at most every few seconds for the same words, and the
     /// status left as it was. Said every tick it would drown the log

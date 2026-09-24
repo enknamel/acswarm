@@ -28,6 +28,7 @@ pub mod servers;
 pub mod sessions;
 mod settings;
 pub mod team;
+pub mod telemetry;
 
 // The crate's API in one block: the facade below, plus the crates a plugin
 // reaches through ac-plugin instead of depending on them itself.

@@ -72,26 +72,7 @@ const FILE_CAP: u64 = 256 * 1024 * 1024;
 /// deleting all but the newest few. None when the folder cannot be written: the terminal still logs.
 fn open_file() -> Option<(LogFile, PathBuf)> {
     let dir = ac_store::cache_dir().join("logs");
-    std::fs::create_dir_all(&dir).ok()?;
-    let mut old: Vec<PathBuf> = std::fs::read_dir(&dir)
-        .ok()?
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| {
-            p.file_name()
-                .and_then(|n| n.to_str())
-                .is_some_and(|n| n.starts_with("acswarm-") && n.ends_with(".log"))
-        })
-        .collect();
-    // The names sort by the second they were opened in.
-    old.sort();
-    for stale in old.iter().rev().skip(KEEP_FILES - 1) {
-        let _ = std::fs::remove_file(stale);
-    }
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs());
-    let path = dir.join(format!("acswarm-{secs}-{}.log", std::process::id()));
-    let file = std::fs::File::create(&path).ok()?;
+    let (file, path) = ac_store::fresh_file(&dir, "acswarm", "log", KEEP_FILES).ok()?;
     let log = LogFile(std::sync::Arc::new(Mutex::new(Capped {
         file,
         left: FILE_CAP,

@@ -389,6 +389,12 @@ impl Client {
     }
 
     /// The maximum of a vital (0 health, 1 stamina, 2 mana).
+    /// Vital `i` (0 health, 1 stamina, 2 mana) as (current, most).
+    pub fn vital_now(&self, i: usize) -> (u32, u32) {
+        let current = self.world.stats.vitals.get(i).map_or(0, |v| v.current);
+        (current, self.vital_max_of(i))
+    }
+
     pub(super) fn vital_max_of(&self, i: usize) -> u32 {
         self.world.stats.vital_max_current(i)
     }
