@@ -279,7 +279,7 @@ impl Run {
         if count == 0 {
             return None;
         }
-        let wcid = face_wcid(counter, face)?;
+        let wcid = counter.note_wcid?;
         Some(Next::acting(
             Act::Buy { wcid, count },
             format!("packing the takings into {count} note(s)"),
@@ -409,15 +409,6 @@ impl Run {
     }
 }
 
-/// The weenie of the note a counter deals in, found on its own shelf.
-fn face_wcid(counter: &crate::counter::Counter, face: u32) -> Option<u32> {
-    counter
-        .wares
-        .iter()
-        .find(|w| w.price >= face)
-        .map(|w| w.wcid)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -459,6 +450,7 @@ mod tests {
                 burden: 1,
             }],
             note_face: Some(250_000),
+            note_wcid: Some(NOTE),
             away: 0.0,
         }
     }
@@ -612,6 +604,54 @@ mod tests {
         assert_eq!(
             run.step(&s, Instant::now()).act,
             Some(Act::Sell { items: vec![3] })
+        );
+    }
+
+    #[test]
+    fn the_note_bought_is_the_note_not_the_first_dear_ware_on_the_shelf() {
+        // Sedor Wystan's shelf in the order the server sends it: a basinet at 1,750 stands ahead
+        // of his largest note, the 1,000 at 1,150, and a ware priced over the face is not a note.
+        let ware = |wcid: u32, name: &str, price: u32, burden: u32| Ware {
+            wcid,
+            name: name.into(),
+            price,
+            stock: None,
+            burden,
+        };
+        let mut s = snap(vec![item(3, "Dagger", 500, 1, 1)]);
+        let c = s.counter.as_mut().unwrap();
+        c.name = "Sedor Wystan the Blacksmith".into();
+        c.wares = vec![
+            ware(4190, "Cestus", 63, 50),
+            ware(35, "Chainmail Basinet", 1_750, 320),
+            ware(2621, "Trade Note (100)", 115, 1),
+            ware(2623, "Trade Note (1,000)", 1_150, 1),
+            ware(2622, "Trade Note (500)", 575, 1),
+        ];
+        c.note_face = Some(1_000);
+        c.note_wcid = Some(2623);
+        s.coin = 201_307;
+        s.slots_free = 2;
+        let next = Run::new().step(&s, Instant::now());
+        assert_eq!(
+            next.act,
+            Some(Act::Buy {
+                wcid: 2623,
+                count: 173
+            }),
+            "{}",
+            next.saying
+        );
+        // A counter with no note on its shelf makes none, whatever else it sells dear.
+        let c = s.counter.as_mut().unwrap();
+        c.note_face = None;
+        c.note_wcid = None;
+        let next = Run::new().step(&s, Instant::now());
+        assert!(
+            !matches!(next.act, Some(Act::Buy { .. })),
+            "{:?} -- {}",
+            next.act,
+            next.saying
         );
     }
 

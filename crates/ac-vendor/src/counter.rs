@@ -119,6 +119,8 @@ pub struct Counter {
     pub wares: Vec<Ware>,
     /// Face of the trade note it sells, if any; the only note worth making, as coin takes slots.
     pub note_face: Option<u32>,
+    /// That note's own weenie on this shelf: bought by this, never by a price near its face.
+    pub note_wcid: Option<u32>,
     /// Horizontal distance from the character, in metres (world x/y).
     pub away: f32,
 }

@@ -721,6 +721,34 @@ pub fn shop_named(name: &str) -> &'static ac_world::shops::Shop {
         .unwrap_or_else(|| panic!("no shop {name}"))
 }
 
+/// The window of the shop named `name`, as `vendor` sends it: what it buys, its rates, and its
+/// shelf in the order the data lists it, each line a never-empty stack.
+pub fn window_stocked_as(vendor: u32, name: &str) -> ac_world::object::ApproachVendor {
+    let shop = shop_named(name);
+    let mut window = window_of(vendor);
+    window.item_types = shop.buys;
+    window.max_value = shop.max_value;
+    window.buy_rate = shop.buy_rate;
+    window.sell_rate = shop.sell_rate;
+    window.items = shop
+        .sells
+        .iter()
+        .zip(0x8000_2800..)
+        .map(|(w, guid)| ac_world::object::VendorItem {
+            guid,
+            stack: ac_world::object::UNLIMITED_STACK,
+            desc: ac_world::object::WeenieDesc {
+                name: w.name.clone(),
+                weenie_class_id: w.wcid,
+                item_type: w.item_type,
+                value: w.value,
+                ..Default::default()
+            },
+        })
+        .collect();
+    window
+}
+
 /// A counter in view at `at`.
 pub fn a_counter(c: &mut Client, guid: u32, name: &str, at: glam::Vec3) {
     let mut o = ac_world::WorldObject {

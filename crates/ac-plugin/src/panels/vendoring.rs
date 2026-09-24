@@ -511,6 +511,7 @@ mod tests {
                 max_value: 0,
                 wares: Vec::new(),
                 note_face: None,
+                note_wcid: None,
                 away: 1.0,
             }),
             ..Default::default()

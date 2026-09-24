@@ -1,7 +1,8 @@
 use super::*;
 use crate::autoplay::growth::tests::{a_run_at_cindrue, run_to};
 use crate::testkit::{
-    a_counter, pea_in_the_pack, standing_at, vendor_beside, window_of, with_a_pack,
+    a_counter, coin_in_the_pack, pea_in_the_pack, standing_at, vendor_beside, window_of,
+    window_stocked_as, with_a_pack,
 };
 use ac_world::item_type;
 
@@ -294,6 +295,52 @@ fn the_counter_is_stood_at_from_the_use_to_the_window_closing() {
         "a window open by hand"
     );
     assert_eq!(counter_asked(None, None), None);
+}
+
+#[test]
+fn the_counter_names_its_note_by_its_own_weenie_off_its_own_shelf() {
+    // Sedor Wystan's shelf holds a basinet at 1,750 ahead of his largest note, the 1,000 at
+    // 1,150: the note is read off the shelf by weenie, and the purchase names that line.
+    let mut c = crate::testkit::offline_client();
+    with_a_pack(&mut c, 20);
+    for (n, amount) in [25_000; 8].into_iter().chain([1_307]).enumerate() {
+        coin_in_the_pack(&mut c, 0x8000_0100 + n as u32, amount);
+    }
+    let sedor = 0x7a9b_4026;
+    c.world.open_vendor = Some(window_stocked_as(sedor, "Sedor Wystan the Blacksmith"));
+    let cfg = c.autoplay.config.growth.clone();
+    let mut snap = c.vendor_snapshot(&cfg);
+    let counter = snap.counter.as_ref().expect("no counter");
+    assert_eq!(counter.note_face, Some(1_000));
+    assert_eq!(counter.note_wcid, Some(2623));
+    let first_dear = counter.wares.iter().find(|w| w.price >= 1_000);
+    assert_eq!(
+        first_dear.map(|w| w.wcid),
+        Some(35),
+        "the basinet stands first"
+    );
+
+    snap.slots_free = 2;
+    let next = ac_vendor::Run::new().step(&snap, Instant::now());
+    let Some(ac_vendor::Act::Buy { wcid, count }) = next.act else {
+        panic!("no notes made: {:?} -- {}", next.act, next.saying);
+    };
+    assert_eq!((wcid, count), (2623, 173));
+    let line = c.world.open_vendor.as_ref().and_then(|v| {
+        v.items
+            .iter()
+            .find(|w| w.desc.weenie_class_id == 2623)
+            .map(|w| w.guid)
+    });
+    let sent = c.session.actions_sent();
+    assert!(c.do_vendor_act(&ac_vendor::Act::Buy { wcid, count }, &next.saying));
+    assert_eq!(c.session.actions_sent(), sent + 1);
+    let (_, msg) = c.session.queued().last().expect("nothing went out");
+    let line = line.expect("no note on the shelf").to_le_bytes();
+    assert!(
+        msg.windows(4).any(|w| w == line),
+        "the purchase did not name the note's line"
+    );
 }
 
 /// A weenie error as the server sends it, as a game event body.

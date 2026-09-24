@@ -127,6 +127,17 @@ impl Client {
     fn counter_now(&self) -> Option<Counter> {
         let v = self.world.open_vendor.as_ref()?;
         let name = self.world.name_of(v.vendor).unwrap_or_default().to_string();
+        // Which note this counter deals in: the largest of the trade
+        // notes actually on its shelf, face and weenie together, so
+        // the note is bought by its own weenie and never by price.
+        let note = v
+            .items
+            .iter()
+            .filter_map(|w| {
+                let wcid = w.desc.weenie_class_id;
+                ac_world::shops::note_face(wcid).map(|face| (face, wcid))
+            })
+            .max();
         let away = match (
             self.my_position(),
             self.world
@@ -158,13 +169,8 @@ impl Client {
                     burden: w.desc.burden,
                 })
                 .collect(),
-            // Which note this counter deals in: whichever of the
-            // trade notes is actually on its shelf.
-            note_face: v
-                .items
-                .iter()
-                .filter_map(|w| ac_world::shops::note_face(w.desc.weenie_class_id))
-                .max(),
+            note_face: note.map(|(face, _)| face),
+            note_wcid: note.map(|(_, wcid)| wcid),
             away,
         })
     }
