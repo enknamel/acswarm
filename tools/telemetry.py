@@ -131,13 +131,16 @@ def walk_detail(run):
     no_way = sum(1 for w in walks if w.get("aim") is None)
     wedged = sum(1 for w in walks if w.get("wedged"))
     detour = sum(1 for w in walks if w.get("detour"))
-    pos, goal = run[-1].get("pos"), walks[-1].get("goal")
+    # The walk the stall began with: a later sample can belong to the next plan, made after it.
+    pos, goal = run[0].get("pos"), walks[0].get("goal")
     away = sum((a - b) ** 2 for a, b in zip(pos[:2], goal[:2])) ** 0.5 if pos and goal else None
     routes = [tuple(w["route"]) for w in walks if w.get("route")]
     route = f"route waypoint {routes[0][0]}->{routes[-1][0]} of {routes[-1][1]}" if routes else "straight line"
     trips = [tuple(x["trip"]) for x in run if x.get("trip")]
     trip = f", journey step {trips[-1][0]} of {trips[-1][1]}" if trips else ""
-    return (f"goal {away:.0f} m off, {route}{trip}; no way {no_way}/{n}, wedged {wedged}/{n}, "
+    cell = run[0].get("cell") or "0"
+    inside = " from indoors" if int(cell, 16) & 0xFFFF >= 0x100 else ""
+    return (f"goal {away:.0f} m off{inside}, {route}{trip}; no way {no_way}/{n}, wedged {wedged}/{n}, "
             f"detour {detour}/{n}" if away is not None else f"{route}; no way {no_way}/{n}, wedged {wedged}/{n}")
 
 
