@@ -81,10 +81,6 @@ const STUCK_AFTER: Duration = Duration::from_secs(15);
 const PROGRESS: f32 = 0.5;
 /// How often a portal is stepped into again.
 const PORTAL_RETRY: Duration = Duration::from_secs(5);
-/// A door is opened at most this often.
-const DOOR_EVERY: Duration = Duration::from_secs(8);
-/// Doors this near are opened on the way.
-const DOOR_NEAR: f32 = 4.5;
 /// Corpses this near are emptied while hunting.
 const LOOT_RANGE: f32 = 20.0;
 /// A corpse that does not open in this long is left.
@@ -678,9 +674,9 @@ impl State {
             return Action::Wait("no door".into());
         };
         let Some(key) = Self::carried(v, s.wcid) else {
-            tracing::info!("academy: no key for {}; trying the door as it is", s.target);
-            self.unlocked = true;
-            return self.open_door(v, door, s);
+            tracing::info!("academy: no key for {}; walking through it", s.target);
+            self.advance();
+            return Action::Wait(format!("through the {}", s.target));
         };
         if let Some(a) = self.approach(v, door.pos, REACH, format!("unlocking the {}", s.target)) {
             return a;
@@ -693,19 +689,15 @@ impl State {
                 target: door.guid,
             };
         }
-        self.open_door(v, door, s)
+        self.past_door(v, s)
     }
 
-    fn open_door(&mut self, v: &View, door: &Seen, s: &Step) -> Action {
-        // A moment after the key, the door; a moment after that, on.
+    /// The key used (the task), on through the door a moment later: walked through, never opened,
+    /// as every door is (`in_the_way()` in crates/ac-nav/src/obstacles.rs).
+    fn past_door(&mut self, v: &View, s: &Step) -> Action {
         match self.acted {
             Some(t) if v.now.duration_since(t) < Duration::from_millis(1500) => {
-                Action::Wait(format!("opening the {}", s.target))
-            }
-            _ if self.tries == 0 => {
-                self.tries = 1;
-                self.acted = Some(v.now);
-                Action::Use(door.guid)
+                Action::Wait(format!("unlocking the {}", s.target))
             }
             _ => {
                 self.advance();
@@ -903,7 +895,6 @@ impl Client {
                 status,
             } => {
                 self.academy_leave_fight();
-                self.academy_open_doors(&objects, pos, now);
                 self.head_for(target, stop, "the way on");
                 self.autoplay
                     .say(Doing::Training, format!("{progress}: {status}"));
@@ -1065,22 +1056,6 @@ impl Client {
         }
     }
 
-    /// Open any door close by on the way (once in a while each).
-    fn academy_open_doors(&mut self, objects: &[Seen], pos: Vec3, now: Instant) {
-        let doors: Vec<u32> = objects
-            .iter()
-            .filter(|o| o.door && o.pos.distance(pos) < DOOR_NEAR)
-            .map(|o| o.guid)
-            .collect();
-        for guid in doors {
-            if !self.autoplay.academy_doors.within(&guid, now, DOOR_EVERY) {
-                self.autoplay.academy_doors.expire(now, DOOR_EVERY);
-                self.autoplay.academy_doors.mark(guid, now);
-                self.use_object(guid);
-            }
-        }
-    }
-
     /// Fight the creatures called `name` around `centre` and empty their
     /// corpses: the fight rule pointed at them, a small loot of its own
     /// (the tutorial drops are one item each), and a walk to the spot
@@ -1195,7 +1170,6 @@ impl Client {
         // Nothing to fight: to the spot, then wait for them to appear.
         let flat = glam::Vec2::new(centre.x - pos.x, centre.y - pos.y).length();
         if flat > REACH {
-            self.academy_open_doors(objects, pos, now);
             self.head_for(centre, REACH, name);
             self.autoplay
                 .say(Doing::Training, format!("{progress}: going after {name}"));
