@@ -27,7 +27,16 @@ done
 repo=$(cd "$(dirname "$0")/.." && pwd)
 out=${out:-$(mktemp -d "${TMPDIR:-/tmp}/scenarios.XXXXXX")}
 mkdir -p "${out}/cfg/profiles" "${out}/scripts"
-cp "${repo}/tools/autoplay-check-profile.json" "${out}/cfg/profiles/Check.json"
+# The check profile, keeping the fixtures' own weapons as a player's profile keeps theirs: an
+# unwielded weapon is loot to the Check profile, and a counter took the Battle Axe from Scn Blade.
+python3 - "${repo}/tools/autoplay-check-profile.json" "${out}/cfg/profiles/Check.json" <<'PY2'
+import json, sys
+profile = json.load(open(sys.argv[1]))
+keep = [{"name": f"our {w}", "on": True, "action": "keep", "all": [{"Item": {"Word": w}}], "keep_up_to": None}
+        for w in ("Battle Axe", "Longbow", "Arrow")]
+profile["rules"] = keep + profile["rules"]
+json.dump(profile, open(sys.argv[2], "w"), indent=1)
+PY2
 cat > "${out}/scripts/scenario.rhai" <<'RHAI'
 // Sets each character up for its scenario, asked every twenty seconds: every step looks before it
 // acts, so an early or repeated ask costs nothing. The @commands need the account's developer access.
