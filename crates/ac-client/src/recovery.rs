@@ -569,7 +569,12 @@ impl Client {
             .attack_target
             .or(self.autoplay.casting_at())
             .and_then(|g| self.world.name_of(g).map(str::to_string));
-        let trip = self.autoplay.resume_trip.or_else(|| self.travel_goal_xy());
+        // Following's own journey is not kept for afterwards: following plans it again itself. Nor
+        // anything while led, a failed replan's goal after the leader included (it outlives a stop).
+        let own_trip = self
+            .travel_goal_xy()
+            .filter(|_| !self.is_follow_journey() && !self.is_led());
+        let trip = self.autoplay.resume_trip.or(own_trip);
         let cfg = &self.autoplay.config.survive;
         Some(View {
             now,
@@ -716,7 +721,8 @@ impl Client {
                 true
             }
             Action::Finish { trip } => {
-                if let Some(goal) = trip {
+                // Not for a follower, whose way is its leader's: a trip handed back outlives a stop.
+                if let Some(goal) = trip.filter(|_| !self.is_led()) {
                     self.autoplay.resume_trip = Some(goal);
                 }
                 self.autoplay.armed_for = None;

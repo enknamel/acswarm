@@ -221,6 +221,10 @@ impl Client {
         if self.traveling() || self.autoplay.growth.town_run_under_way() {
             return false;
         }
+        // Nor for a follower: its leader walks the rooms, and it keeps up.
+        if self.is_led() {
+            return false;
+        }
         let assets = self.assets.clone();
         let Some(pl) = self.player.as_mut() else {
             return false;

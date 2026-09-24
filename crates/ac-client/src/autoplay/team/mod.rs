@@ -95,8 +95,20 @@ impl Client {
             if let Some((guid, name)) = target {
                 // Not one it is walking past on its way somewhere, any more
                 // than the fight would be (see `joins_the_team_on`).
+                let underground = self.underground();
                 let fight = &self.autoplay.config.fight;
                 if self.joins_the_team_on(guid, fight) && !self.autoplay.debuffed.contains(&guid) {
+                    // A debuff is an attack, waking the creature onto the caster (ACE
+                    // Player_Magic.cs:1103, Player_Monster.cs:50): none on one avoided or outside
+                    // the area, but marked, or a `wait_for_debuff` party waits on it for ever.
+                    let barred = self.world.objects.get(&guid).is_some_and(|o| {
+                        !crate::autoplay::wanted_target(&o.name, fight)
+                            || !self.area_allows(o, underground)
+                    });
+                    if barred {
+                        self.autoplay.debuffed.push(guid);
+                        return false;
+                    }
                     for spell_name in &team.debuffs {
                         let Some(spell) = self.spell_by_name(spell_name) else {
                             continue;

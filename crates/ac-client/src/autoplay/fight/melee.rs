@@ -76,11 +76,12 @@ impl Client {
         if stance == Stance::Magic {
             return self.autoplay_fight_with_spells(now, &cfg);
         }
+        let underground = self.underground();
         // Already on one that is still alive -- unless the leader's plan
         // has this character on another, and this one is not hitting us
         // (see `Client::ordered_elsewhere`).
         if let Some(t) = self.attack_target {
-            if self.ordered_elsewhere(t, &cfg, now) {
+            if self.ordered_elsewhere(t, &cfg, underground, now) {
                 self.let_go(Release::Fight);
             }
         }
@@ -88,10 +89,9 @@ impl Client {
             if self.stalled_on(t, now) {
                 return false;
             }
-            // And still here (see `fight_target_gone`).
-            let underground = self.underground();
-            let gone =
-                self.fight_target_gone(t, underground) || self.left_behind_on_the_road(t, now);
+            // And still here (see `can_keep_target`, which the spell
+            // path asks of what it holds too).
+            let gone = !self.can_keep_target(t, underground, now);
             if gone {
                 self.let_go(Release::Targets);
             }
@@ -152,20 +152,20 @@ impl Client {
         let me = self.my_position();
         let Some(me) = me else { return false };
         // Hunting together: hit what the leader's plan says, and with no
-        // plan what the team is hitting, unless it is something this
-        // character is walking past on its way somewhere. The leader
-        // takes its own orders; without a plan it picks for itself.
+        // plan what the team is hitting -- either only if this character's
+        // own rules would take it on (`can_take_on`), else it picks for
+        // itself. The leader takes its own orders; without a plan it picks.
         let team = &self.autoplay.config.team;
         if team.enabled && team.focus_fire {
-            let joined = self.ordered_target(&cfg, now).or_else(|| {
-                if self.autoplay.team.leader {
-                    return None;
-                }
-                self.autoplay
-                    .team
-                    .target()
-                    .filter(|(guid, _)| self.joins_the_team_on(*guid, &cfg))
-            });
+            let joined = self
+                .ordered_target(&cfg, now)
+                .or_else(|| {
+                    if self.autoplay.team.leader {
+                        return None;
+                    }
+                    self.autoplay.team.target()
+                })
+                .filter(|(guid, _)| self.can_take_on(*guid, &cfg, underground, now));
             if let Some((guid, name)) = joined {
                 if self.autoplay_plan_hard(guid, &name, now) {
                     return true;
@@ -191,24 +191,13 @@ impl Client {
                 return true;
             }
         }
-        // What cannot be judged yet is asked about, not attacked.
-        self.ask_about_strangers(me, &cfg);
-        let underground = self.underground();
-        let target = self
-            .world
-            .objects
-            .values()
-            .filter(|o| self.would_fight(o, &cfg, underground, now))
-            .filter_map(|o| {
-                let p = o.world_pos()?;
-                let d = p.distance(me);
-                (d <= cfg.radius).then_some((d, o.guid, o.name.clone()))
-            })
-            .min_by(|a, b| a.0.total_cmp(&b.0));
-        let Some((_, guid, name)) = target else {
+        // The spell path's own pick (`Client::pick_target`): a follower with nothing beside its
+        // leader picks nothing, and the follow steps have the tick.
+        let Some(guid) = self.pick_target(&cfg, now) else {
             self.note_walked_past(me, &cfg, underground, now);
             return false;
         };
+        let name = self.world.name_or_hex(guid);
         if self.autoplay_plan_hard(guid, &name, now) {
             return true;
         }

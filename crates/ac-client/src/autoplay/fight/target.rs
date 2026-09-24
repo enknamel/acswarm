@@ -214,14 +214,23 @@ impl Client {
         }
     }
 
-    /// The nearest creature the name rules allow, within the radius.
-    pub(super) fn pick_target(&mut self, cfg: &Fight) -> Option<u32> {
+    /// Whether the fight in hand goes on, asked by the swing and the spell alike: not gone (see
+    /// [`Self::fight_target_gone`]) nor left behind on the road; never where the leader stands.
+    pub(super) fn can_keep_target(&mut self, guid: u32, underground: bool, now: Instant) -> bool {
+        !self.fight_target_gone(guid, underground) && !self.left_behind_on_the_road(guid, now)
+    }
+
+    /// The nearest [`Self::would_fight`] allows inside `cfg.radius`, preferring one the attack in
+    /// hand reaches; a follower's is beside its leader or hitting it, else none (`follow` fetches it).
+    pub(super) fn pick_target(&mut self, cfg: &Fight, now: Instant) -> Option<u32> {
         let underground = self.underground();
         let me = self.my_position()?;
-        let now = Instant::now();
-        // A follower fights beside its leader, not wherever a monster
-        // happens to be.
-        let leader_at = self.followed_leader().map(|m| m.world);
+        // A follower fights beside its leader, not wherever a monster happens to be. Not in the
+        // academy, whose tasks (a reflex) come before following: the task's creature is the fight.
+        let leader_at = self
+            .followed_leader()
+            .filter(|_| !self.autoplay.academy.active)
+            .map(|m| m.world);
         let fight_radius = self.autoplay.config.team.fight_radius.max(1.0);
         // What cannot be judged yet is asked about, not attacked.
         self.ask_about_strangers(me, cfg);
@@ -232,7 +241,10 @@ impl Client {
             .filter(|o| self.would_fight(o, cfg, underground, now))
             .filter_map(|o| {
                 let at = o.world_pos()?;
-                let near_leader = leader_at.is_none_or(|l| at.distance(l) <= fight_radius);
+                // Or hitting the character: a fight it is in, not one it chooses, as
+                // `area_allows`, `passing_by` and `a_critter` each carve out too.
+                let near_leader = leader_at.is_none_or(|l| at.distance(l) <= fight_radius)
+                    || self.hit_lately_by(&o.name);
                 (at.distance(me) <= cfg.radius && near_leader).then_some((o.guid, at))
             })
             .collect();

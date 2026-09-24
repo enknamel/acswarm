@@ -194,11 +194,12 @@ impl Client {
     /// and not one this character is walking past on its way somewhere
     /// (see [`Self::passing_by`]).
     ///
-    /// Focus fire and the debuffer take the team's target off the board
-    /// rather than choosing through [`Self::would_fight`], so they ask
-    /// this instead. Without it a character setting off for town turned
-    /// round for whatever the party back at the ground was hitting, from
-    /// as far off as it could see it.
+    /// The debuffer and the assist played by hand take the team's target
+    /// off the board rather than choosing through [`Self::would_fight`],
+    /// so they ask this instead; the fight asks [`Self::can_take_on`].
+    /// Without it a character setting off for town turned round for
+    /// whatever the party back at the ground was hitting, from as far off
+    /// as it could see it.
     pub(crate) fn joins_the_team_on(&self, guid: u32, cfg: &Fight) -> bool {
         self.world
             .objects
@@ -223,6 +224,19 @@ impl Client {
         underground: bool,
         now: Instant,
     ) -> bool {
+        // With the vitae high, the hard ones and the killer wait.
+        self.would_join(o, cfg, underground, now) && !self.shy_of(o)
+    }
+
+    /// [`Self::would_fight`] less the vitae (`shy_of`), which is for the fights a character picks: a
+    /// hard fight is the whole party's (`plan.rs`), and its softener is waited for (`soften.rs`).
+    fn would_join(
+        &self,
+        o: &ac_world::WorldObject,
+        cfg: &Fight,
+        underground: bool,
+        now: Instant,
+    ) -> bool {
         o.item_type & ac_world::item_type::CREATURE != 0
             && o.object_desc_flags & ac_world::object_desc_flags::ATTACKABLE != 0
             && o.object_desc_flags & ac_world::object_desc_flags::PLAYER == 0
@@ -238,10 +252,23 @@ impl Client {
             // And so is whatever stands about while it is on its way
             // somewhere: the trip is the errand, not the road.
             && !self.passing_by(o, cfg)
-            // With the vitae high, the hard ones and the killer wait.
-            && !self.shy_of(o)
             // And one there is no getting to is not a fight on offer.
             && !self.autoplay.given_up.within(&o.guid, now, GIVE_UP_FOR)
+    }
+
+    /// [`Self::would_join`] asked of `guid`: the one gate a target the team proposes -- the leader's
+    /// order or its target on the board -- passes before a fight takes it, so neither goes round it.
+    pub(crate) fn can_take_on(
+        &self,
+        guid: u32,
+        cfg: &Fight,
+        underground: bool,
+        now: Instant,
+    ) -> bool {
+        self.world
+            .objects
+            .get(&guid)
+            .is_some_and(|o| self.would_join(o, cfg, underground, now))
     }
 }
 

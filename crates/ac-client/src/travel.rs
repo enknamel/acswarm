@@ -2000,4 +2000,93 @@ mod tests {
         assert_eq!(WorldGrid::block_of(l), WorldGrid::block_of(me));
         assert!(l.x > 192.0 * 10.0 && l.y < 192.0 * 11.0, "{l:?}");
     }
+
+    /// A level-20 follower in the Holtburg field on its journey after a leader 400 m east, the
+    /// journey then ended by a refusal whose replan found no way: the goal is left, no trip.
+    fn after_a_failed_replan() -> (Client, Vec2, Instant) {
+        let mut c = crate::testkit::character_of_level(crate::testkit::no_data(), 20);
+        crate::testkit::stand(&mut c, 0xA9B4_0019, Vec3::new(84.0, 84.0, 94.0));
+        c.autoplay.config.enabled = true;
+        let team = &mut c.autoplay.config.team;
+        team.enabled = true;
+        team.follow = true;
+        let me = c.my_position().expect("on its feet");
+        let mut leader = crate::testkit::mate(0x5000_0002, "Verity");
+        leader.leader = true;
+        leader.leads = true;
+        leader.cell = 0xA9B4_0019;
+        leader.world = me + Vec3::new(400.0, 0.0, 0.0);
+        c.autoplay.team = crate::testkit::view_of(vec![leader]);
+        let now = Instant::now();
+        c.tick_autoplay(now);
+        assert!(c.is_follow_journey(), "following planned no journey");
+        let goal = c.travel_goal_xy().expect("a goal");
+        c.cancel_travel_keeping_refusals();
+        assert!(!c.traveling());
+        assert_eq!(c.travel_goal_xy(), Some(goal));
+        (c, goal, now)
+    }
+
+    /// Kill `c` at `now`, as the recovery sees a death.
+    fn die(c: &mut Client, now: Instant) {
+        c.world.stats.name = "Bryn".into();
+        c.world.stats.attributes[1].base = 100;
+        c.world.stats.vitals[0].current = 0;
+        c.tick_autoplay(now);
+        assert_eq!(c.autoplay.step, Some("recover"));
+    }
+
+    /// Up at the lifestone with no death spot to go back to, at `t`: the recovery finishes.
+    fn back_from_the_dead(c: &mut Client, t: Instant) -> Instant {
+        c.world.stats.vitals[0].current = 100;
+        let rec = &mut c.autoplay.recovery;
+        rec.phase = crate::recovery::Phase::Landed;
+        rec.since = t;
+        rec.death_xy = None;
+        let t = t + Duration::from_secs(5);
+        c.tick_autoplay(t);
+        assert!(!c.autoplay.recovery.active(), "the recovery did not finish");
+        for n in 1..=5 {
+            c.tick_autoplay(t + Duration::from_millis(100 * n));
+        }
+        t
+    }
+
+    #[test]
+    fn a_stop_after_a_failed_replan_leaves_no_goal_for_a_death_to_keep() {
+        // Refused at a portal after the leader with no other way, then stopped, then dead before
+        // any other journey: the recovery kept the goal left over and walked back to it after.
+        let (mut c, goal, now) = after_a_failed_replan();
+        c.autoplay.config.team.follow = false;
+        c.tick_autoplay(now + Duration::from_millis(100));
+        assert_eq!(c.travel_goal_xy(), None, "the goal outlived the stop");
+        die(&mut c, now + Duration::from_millis(200));
+        assert_eq!(
+            c.autoplay.recovery.trip, None,
+            "kept for after the recovery"
+        );
+        back_from_the_dead(&mut c, now + Duration::from_secs(1));
+        assert!(
+            !(c.traveling() && c.travel_goal_xy() == Some(goal)),
+            "it set off for where the leader was when following stopped"
+        );
+    }
+
+    #[test]
+    fn a_death_while_led_keeps_no_goal_left_by_a_failed_replan() {
+        // Dead while still following, and stopped before the recovery hands its trip back.
+        let (mut c, goal, now) = after_a_failed_replan();
+        die(&mut c, now + Duration::from_millis(100));
+        assert_eq!(
+            c.autoplay.recovery.trip, None,
+            "kept for after the recovery"
+        );
+        c.autoplay.config.team.follow = false;
+        back_from_the_dead(&mut c, now + Duration::from_secs(1));
+        assert_eq!(c.autoplay.resume_trip, None);
+        assert!(
+            !(c.traveling() && c.travel_goal_xy() == Some(goal)),
+            "it set off for where the leader was when it died"
+        );
+    }
 }

@@ -17,6 +17,8 @@ system's entry fns are written in the files its own row names.
    (`visit.rs`)
 
 `tick_autoplay()`, in order:
+- once no leader is followed, whatever switched it off: `stop_following()`, which lets go of only
+  the walk and the journey following planted; on the tick one is, its own plans for the road go
 - with the team on, even with autoplay off: `autoplay_accept_invites()`, and `autoplay_fellowship()`
   for a leader played by hand; always `autoplay_close_unwanted_window()`
 - with autoplay off, `autoplay_by_hand()`: the team rules a player keeps, and then it returns, as
@@ -68,7 +70,7 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 | system | entry fns | files | state | tests | log target | term |
 |---|---|---|---|---|---|---|
 | steps and tick | `tick_autoplay`, `weigh`, `reflexes` | `autoplay/mod.rs`, `autoplay/steps.rs`, `autoplay/config.rs` | `Autoplay.step`, `Autoplay.doing`, `Autoplay.status` | steps:: | autoplay | step |
-| target choice | `pick_target`, `a_fight_in_sight`, `nearest_fight`, `would_fight`, `ordered_target` | `autoplay/fight/target.rs`, `autoplay/fight/mod.rs`, `autoplay/team/orders.rs` | `Client.attack_target`, `Autoplay.config.fight`, `Autoplay.nearest_fight` | target | autoplay::fight::target | target |
+| target choice | `pick_target`, `can_keep_target`, `a_fight_in_sight`, `nearest_fight`, `would_fight`, `can_take_on`, `ordered_target` | `autoplay/fight/target.rs`, `autoplay/fight/mod.rs`, `autoplay/team/orders.rs` | `Client.attack_target`, `Autoplay.config.fight`, `Autoplay.nearest_fight` | target | autoplay::fight::target | target |
 | melee | `autoplay_fight`, `autoplay_fight_as`, `stalled_on`, `give_up_target`, `let_go` | `autoplay/fight/melee.rs`, `autoplay/fight/target.rs` | `Client.attack_target`, `Autoplay.engaged`, `Autoplay.given_up` | target | autoplay::fight::melee | fight |
 | spells in a fight | `autoplay_fight_with_spells`, `autoplay_soften`, `autoplay_make_vulnerable` | `autoplay/fight/spells.rs`, `autoplay/fight/soften.rs`, `autoplay/cast.rs`, `aim.rs` | `Autoplay.casting_at`, `Autoplay.softening`, `Autoplay.vulned`, `Autoplay.cast_sent`, `Autoplay.fight_cast` | spell | autoplay::fight::spells | fight |
 | critter | `critter`, `a_critter`, `ask_about_strangers` | `autoplay/fight/critter.rs` | `Fight.skip_critters`, `Client.appraisals` | critter | autoplay::fight::critter | critter |
@@ -85,7 +87,7 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 | recruiting | `autoplay_fellowship`, `autoplay_accept_invites`, `next_invitee`, `hear_recruit_refusal` | `autoplay/team/fellowship.rs` | `Autoplay.recruited`, `Autoplay.held_off`, `Team.fellowship` | invit | autoplay::team::fellowship | recruit |
 | team board | `autoplay_team`, `leader_mate`, `worst_hurt`, `rival_leader` | `autoplay/team/mod.rs`, `autoplay/team/view.rs`, `crates/ac-plugin/src/team.rs` | `Autoplay.team` (`TeamView.mates`), `Config.team` | leader | autoplay::team | mate |
 | fellowship planner | `plan_for_team`, `take_orders`, `assign_targets`, `deal_bodies`, `stragglers` | `autoplay/team/orders.rs`, `plan.rs` | `Autoplay.planner`, `Autoplay.orders` | plan:: | autoplay::team::orders | plan, order |
-| follow | `autoplay_follow`, `followed_leader`, `team_leader`, `follow_break` | `autoplay/team/follow.rs` | `Autoplay.follow_trip`, `Team.follow`, `Client.follow` | follow | autoplay::team::follow | follow |
+| follow | `autoplay_follow`, `stop_following`, `followed_leader`, `is_led`, `team_leader`, `follow_break` | `autoplay/team/follow.rs` | `Autoplay.follow_trip`, `Autoplay.follow_walk`, `Autoplay.followed`, `Team.follow`, `Client.follow` | follow | autoplay::team::follow | follow |
 | played by hand | `autoplay_by_hand`, `autoplay_assist` | `autoplay/team/by_hand.rs` | `Team.follow`, `Team.focus_fire` | by_hand | autoplay::team::by_hand | assist |
 | quartermaster | `autoplay_quartermaster`, `autoplay_stock`, `decide`, `quartermaster`, `hand_out` | `autoplay/team/quartermaster.rs`, `logistics.rs`, `autoplay/growth/policy.rs` | `growth::State.mode`, `Team.restock` | quartermaster | autoplay::team::quartermaster | quartermaster |
 | town run | `grow_town_run`, `start_town_run`, `grow_run_step`, `grow_run_next`, `pick_vendor` | `autoplay/growth/town_run/mod.rs`, `autoplay/growth/town_run/counter.rs`, `autoplay/growth/town_run/vendor.rs`, `autoplay/growth/town_run/panel.rs`, `shopping.rs`, `crates/ac-vendor/src/run.rs` | `growth::State.run`, `growth::State.shop` | counter | autoplay::growth::town_run | town_run, counter |
@@ -144,16 +146,20 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
   (`component_targets()`, `burns()`), and a pea the profile tagged Sell is sold (`offer_to_vendor()`).
 - The loot profile decides: `fate()` puts a tag ahead of every guard (restock, burns, keep names);
   only the server's own refusal overrides it.
-- Two target pickers, and they disagree. The spell path calls `pick_target()`, which keeps a
-  follower inside its leader's `team.fight_radius` and prefers one the attack in hand gets to:
-  `attack_kind()` reads the hands, never `Client::missile`, and names the spell per creature with
-  the `best_spell()` the cast itself chooses by, so the flight tested is the flight thrown -- a
-  spell, an arrow and a swing being three different ones. The melee and missile path scans inline
-  in `autoplay_fight_as()` and takes the nearest inside `cfg.radius`, with neither of those two
-  terms. Both gate on `would_fight()`, and a team order outranks both.
+- One target picker. Swing, shot and spell all call `pick_target()`: the nearest of what
+  `would_fight()` allows inside `cfg.radius`, within the leader's `team.fight_radius` while following
+  one (not in the academy) unless it is hitting the character (`hit_lately_by()`), and preferring one
+  the attack in hand gets to: `attack_kind()` reads the hands, never `Client::missile`, and names the
+  spell per creature by the cast's own `best_spell()`, so the flight tested is the flight thrown.
+  Nothing beside the leader, nothing is picked (`follow` fetches it; past `follow_break()` catch up
+  outranks the fight). A team proposal outranks the pick only through `can_take_on()` (less the
+  vitae's `shy_of()`); `can_keep_target()` holds the fight in hand, wherever the leader is.
+- Going with the leader, `is_led()`: keep to the area (bar into its dungeon after a leader in it),
+  resume the journey, explore and a ground step aside, none is put aside; the area limits its fights.
 - Played by hand, `autoplay_by_hand()`: with autoplay off only the team's own rules run -- invites,
   a leader's fellowship, following and assisting. Nothing takes the legs or the hands for an errand
   of its own: no town run, no ground, no experience spent, no weapon changed, no target picked.
+  The assist asks only `joins_the_team_on()`: the player's rules, not `can_take_on()`.
 - Refusals table: `refused()` quotes ACE's words with `File.cs:line` and `answer()` sets the wait;
   `hear_refusal()` hands each to the waiting system. A new one is a row, a test in the exact words,
   an `answer()` arm and a hand-off; never a `strip_prefix` in the system that noticed.

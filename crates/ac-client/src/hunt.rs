@@ -220,6 +220,17 @@ impl Client {
         if !self.autoplay.config.fight.enabled {
             return false;
         }
+        // Nor for a follower: it goes with its leader, and the area limits only what it fights. Save
+        // into the area's dungeon after a leader already in it: following waits outside, this goes in.
+        let leader_inside = match &area.shape {
+            Shape::Dungeon { landblock, .. } => self.followed_leader().is_some_and(|m| {
+                m.cell & 0xFFFF >= 0x100 && m.cell & 0xFFFF_0000 == landblock & 0xFFFF_0000
+            }),
+            Shape::Outline { .. } => false,
+        };
+        if self.is_led() && !leader_inside {
+            return false;
+        }
         // Nor on a run to town, which leaves the area on purpose. At the
         // counter, or between journeys once a corpse or a fight on the way
         // has ended one, a walk back to the area would take the character

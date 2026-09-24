@@ -34,10 +34,11 @@ impl Client {
                 .get(&g)
                 .is_some_and(|o| o.alive_or_unknown())
         };
+        let underground = self.underground();
         // The leader's plan has this character on another, and the one
         // being cast at is not hitting us: let it go for the other.
         if let Some(g) = self.autoplay.casting_at {
-            if self.ordered_elsewhere(g, cfg, now) {
+            if self.ordered_elsewhere(g, cfg, underground, now) {
                 self.let_go(Release::Cast);
             }
         }
@@ -49,14 +50,12 @@ impl Client {
             }
         }
         // Out of the hunting area and not hitting us, or not here at
-        // all any more, it is let go (see `fight_target_gone`).
-        let underground = self.underground();
+        // all any more, it is let go (see `can_keep_target`, which the
+        // swing asks of what it holds too).
         let casting_at = self.autoplay.casting_at;
-        let kept = casting_at.filter(|g| {
-            alive(self, *g)
-                && !self.fight_target_gone(*g, underground)
-                && !self.left_behind_on_the_road(*g, now)
-        });
+        let kept = casting_at
+            .filter(|g| alive(self, *g))
+            .filter(|g| self.can_keep_target(*g, underground, now));
         let target = match kept {
             Some(g) => Some(g),
             None => {
@@ -64,10 +63,12 @@ impl Client {
                 if self.waits_for_a_corpse() {
                     None
                 } else {
-                    // What the plan says first, else what is nearest.
+                    // What the plan says first, if this character's own
+                    // rules would take it on (`can_take_on`), else what is nearest.
                     self.ordered_target(cfg, now)
                         .map(|(g, _)| g)
-                        .or_else(|| self.pick_target(cfg))
+                        .filter(|g| self.can_take_on(*g, cfg, underground, now))
+                        .or_else(|| self.pick_target(cfg, now))
                 }
             }
         };

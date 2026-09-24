@@ -282,6 +282,16 @@ impl State {
         self.after_out = None;
     }
 
+    /// Let go of the walk to a ground, and of the step outside before it unless a town run under
+    /// way is taking that step: [`State::let_go`] less what would strand a run.
+    pub(crate) fn drop_ground_walk(&mut self) {
+        self.bound = None;
+        self.bound_since = None;
+        if self.run.is_none() {
+            self.after_out = None;
+        }
+    }
+
     /// Whether a run to town is under way, from setting off to the last
     /// counter.
     pub(crate) fn town_run_under_way(&self) -> bool {
@@ -429,6 +439,12 @@ impl Client {
         // rank that waited for it waited for good.
         if cfg.town_runs && self.grow_town_run(now, &cfg) {
             return true;
+        }
+        // A follower goes with its leader, not to a ground of its own (`grow_hunt`): a walk there
+        // set meanwhile, as a town run's end sets one, is let go whatever the party's mode.
+        if self.is_led() {
+            self.autoplay.growth.drop_ground_walk();
+            return false;
         }
         // A party that has stopped to restock does not wander off to a
         // new hunting ground in the middle of it, and nor does one that
