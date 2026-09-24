@@ -99,7 +99,7 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 | dungeon explore | `autoplay_explore`, `aim_on_floor`, `past_the_door` | `explore.rs`, `crates/ac-nav/src/explore.rs` | `Autoplay.room_bound`, `Autoplay.rooms_seen` | explore | explore | explore |
 | dodge | `autoplay_dodge`, `autoplay_approach`, `sidestep`, `threat` | `dodge.rs`, `aim.rs` | `Client.dodge`, `Client.dodge_to` | dodge | dodge | dodge |
 | recovery | `autoplay_recover`, `recovery_view`, `is_dead` | `recovery.rs` | `Autoplay.recovery` | recovery:: | recovery | recovery |
-| academy | `autoplay_academy`, `academy_open_doors` | `academy.rs`, `tests/academy_route.rs` | `Autoplay.academy`, `Autoplay.academy_corpse`, `Autoplay.academy_doors`, `Autoplay.academy_armed` | academy | academy | academy |
+| academy | `autoplay_academy` | `academy.rs`, `tests/academy_route.rs` | `Autoplay.academy`, `Autoplay.academy_corpse`, `Autoplay.academy_armed` | academy | academy | academy |
 | summoning | `autoplay_summon`, `autoplay_claim_pet_kills`, `hear_summoning` | `autoplay/summoning.rs`, `autoplay/mod.rs` | `Autoplay.summoning` | summon | autoplay::summoning | summon, pet |
 | refusals | `hear_refusal`, `refused`, `answer` | `refused.rs`, `crates/ac-agent/src/refusals.rs` | the waiting system's own wait, e.g. `Autoplay.shelved` | refus | refused | refusal |
 | server chat | `chat_message`, `hear_arrival`, `hear_spell_attack` | `session/chat.rs`, `autoplay/hear.rs` | `Autoplay.hit_by` | arriv | session::chat | heard |
@@ -139,8 +139,8 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 - Collision rule, `add_model()` in crates/ac-scene/src/collision.rs: a placed model collides by its
   parts' physics polygons, else its Setup's cylinder-spheres (else spheres), else not at all; never
   by drawn polygons. Server-placed objects never stall a walk; `cylinders()` only steers round them.
-- Doors are walked through: `in_the_way()` never counts a door, and explore aims past the sill
-  (`past_the_door()`).
+- Doors are walked through, never used: `in_the_way()` never counts a door, explore aims past the
+  sill (`past_the_door()`), and the Academy uses only a task's key on one.
 - Peas are components in the data: `spell_component_ids()` maps trade peas to spell-component ids,
   so never key restock or sale on "is a component". Restock follows what cast spells burn
   (`component_targets()`, `burns()`), and a pea the profile tagged Sell is sold (`offer_to_vendor()`).

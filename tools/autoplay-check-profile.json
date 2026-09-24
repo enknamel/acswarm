@@ -1,0 +1,214 @@
+{
+  "name": "Check",
+  "note": "Starter's rules with a low floor, so a new character fills a pack worth a town run within a check.",
+  "rules": [
+    {
+      "name": "money",
+      "on": true,
+      "action": "keep",
+      "all": [
+        {
+          "Item": {
+            "Kind": "money"
+          }
+        }
+      ],
+      "keep_up_to": null
+    },
+    {
+      "name": "trade notes",
+      "on": true,
+      "action": "keep",
+      "all": [
+        {
+          "Item": {
+            "Kind": "note"
+          }
+        }
+      ],
+      "keep_up_to": null
+    },
+    {
+      "name": "healing kits, a few",
+      "on": true,
+      "action": "keep",
+      "all": [
+        {
+          "Item": {
+            "Word": "healing kit"
+          }
+        }
+      ],
+      "keep_up_to": 4
+    },
+    {
+      "name": "peas to sell",
+      "on": true,
+      "action": "sell",
+      "all": [
+        {
+          "Item": {
+            "Word": "pea"
+          }
+        }
+      ],
+      "keep_up_to": null
+    },
+    {
+      "name": "spell components",
+      "on": true,
+      "action": "keep",
+      "all": [
+        {
+          "Item": {
+            "Kind": "comps"
+          }
+        }
+      ],
+      "keep_up_to": null
+    },
+    {
+      "name": "gems to sell",
+      "on": true,
+      "action": "sell",
+      "all": [
+        {
+          "Item": {
+            "Kind": "gem"
+          }
+        },
+        {
+          "Item": {
+            "Num": [
+              "Value",
+              "Ge",
+              100.0
+            ]
+          }
+        }
+      ],
+      "keep_up_to": null
+    },
+    {
+      "name": "good salvage",
+      "on": true,
+      "action": "salvage",
+      "all": [
+        {
+          "Item": {
+            "Kind": "salvage"
+          }
+        },
+        {
+          "Item": {
+            "Num": [
+              "Workmanship",
+              "Ge",
+              8.0
+            ]
+          }
+        }
+      ],
+      "keep_up_to": null
+    },
+    {
+      "name": "nothing cheap",
+      "on": true,
+      "action": "skip",
+      "all": [
+        {
+          "Item": {
+            "Num": [
+              "Value",
+              "Le",
+              10.0
+            ]
+          }
+        }
+      ],
+      "keep_up_to": null
+    },
+    {
+      "name": "anything legendary",
+      "on": true,
+      "action": "keep",
+      "all": [
+        {
+          "Spell": {
+            "op": "Like",
+            "value": "^Legendary "
+          }
+        }
+      ],
+      "keep_up_to": null
+    },
+    {
+      "name": "anything epic",
+      "on": true,
+      "action": "keep",
+      "all": [
+        {
+          "Spell": {
+            "op": "Like",
+            "value": "^Epic "
+          }
+        }
+      ],
+      "keep_up_to": null
+    },
+    {
+      "name": "armour worth wearing",
+      "on": true,
+      "action": "keep",
+      "all": [
+        {
+          "Item": {
+            "Kind": "armor"
+          }
+        },
+        {
+          "Item": {
+            "Num": [
+              "Armor",
+              "Ge",
+              250.0
+            ]
+          }
+        }
+      ],
+      "keep_up_to": null
+    },
+    {
+      "name": "the rest, to the counter",
+      "on": true,
+      "action": "sell",
+      "all": [
+        {
+          "Item": {
+            "Num": [
+              "Value",
+              "Ge",
+              25.0
+            ]
+          }
+        }
+      ],
+      "keep_up_to": null
+    }
+  ],
+  "buy": [
+    {
+      "what": "Prismatic Taper",
+      "keep": 1000,
+      "restock_at": 250,
+      "on": true
+    },
+    {
+      "what": "Healing Kit",
+      "keep": 2,
+      "restock_at": 1,
+      "on": true
+    }
+  ],
+  "sell_to": "Best"
+}

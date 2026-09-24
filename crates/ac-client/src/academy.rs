@@ -81,10 +81,6 @@ const STUCK_AFTER: Duration = Duration::from_secs(15);
 const PROGRESS: f32 = 0.5;
 /// How often a portal is stepped into again.
 const PORTAL_RETRY: Duration = Duration::from_secs(5);
-/// A door is opened at most this often.
-const DOOR_EVERY: Duration = Duration::from_secs(8);
-/// Doors this near are opened on the way.
-const DOOR_NEAR: f32 = 4.5;
 /// Corpses this near are emptied while hunting.
 const LOOT_RANGE: f32 = 20.0;
 /// A corpse that does not open in this long is left.
@@ -678,9 +674,9 @@ impl State {
             return Action::Wait("no door".into());
         };
         let Some(key) = Self::carried(v, s.wcid) else {
-            tracing::info!("academy: no key for {}; trying the door as it is", s.target);
-            self.unlocked = true;
-            return self.open_door(v, door, s);
+            tracing::info!("academy: no key for {}; walking through it", s.target);
+            self.advance();
+            return Action::Wait(format!("through the {}", s.target));
         };
         if let Some(a) = self.approach(v, door.pos, REACH, format!("unlocking the {}", s.target)) {
             return a;
@@ -693,19 +689,15 @@ impl State {
                 target: door.guid,
             };
         }
-        self.open_door(v, door, s)
+        self.past_door(v, s)
     }
 
-    fn open_door(&mut self, v: &View, door: &Seen, s: &Step) -> Action {
-        // A moment after the key, the door; a moment after that, on.
+    /// The key used (the task), on through the door a moment later: walked through, never opened,
+    /// as every door is (`in_the_way()` in crates/ac-nav/src/obstacles.rs).
+    fn past_door(&mut self, v: &View, s: &Step) -> Action {
         match self.acted {
             Some(t) if v.now.duration_since(t) < Duration::from_millis(1500) => {
-                Action::Wait(format!("opening the {}", s.target))
-            }
-            _ if self.tries == 0 => {
-                self.tries = 1;
-                self.acted = Some(v.now);
-                Action::Use(door.guid)
+                Action::Wait(format!("unlocking the {}", s.target))
             }
             _ => {
                 self.advance();
@@ -716,10 +708,16 @@ impl State {
 
     fn portal(&mut self, v: &View, s: &Step) -> Action {
         let spot = v.origin + s.at.unwrap_or_default();
-        // Landed on the far side: the quest before it is proven done.
+        // Landed on the far side: a portal that ends its quest proves it done. One in the middle of
+        // its quest (the Outer Courtyard, before the Sentry's hunt) proves nothing, and read as done it
+        // skipped the hunt and left the exit portal refusing.
         if let Some(l) = s.lands {
             if v.pos.distance(v.origin + l) < LANDED && self.acted.is_some() {
-                if s.quest != "exit" {
+                let ends_quest = self
+                    .table()
+                    .get(self.step + 1)
+                    .is_none_or(|next| next.quest != s.quest);
+                if s.quest != "exit" && ends_quest {
                     let q = s.quest.clone();
                     self.quest_done(&q);
                 }
@@ -903,7 +901,6 @@ impl Client {
                 status,
             } => {
                 self.academy_leave_fight();
-                self.academy_open_doors(&objects, pos, now);
                 self.head_for(target, stop, "the way on");
                 self.autoplay
                     .say(Doing::Training, format!("{progress}: {status}"));
@@ -1065,22 +1062,6 @@ impl Client {
         }
     }
 
-    /// Open any door close by on the way (once in a while each).
-    fn academy_open_doors(&mut self, objects: &[Seen], pos: Vec3, now: Instant) {
-        let doors: Vec<u32> = objects
-            .iter()
-            .filter(|o| o.door && o.pos.distance(pos) < DOOR_NEAR)
-            .map(|o| o.guid)
-            .collect();
-        for guid in doors {
-            if !self.autoplay.academy_doors.within(&guid, now, DOOR_EVERY) {
-                self.autoplay.academy_doors.expire(now, DOOR_EVERY);
-                self.autoplay.academy_doors.mark(guid, now);
-                self.use_object(guid);
-            }
-        }
-    }
-
     /// Fight the creatures called `name` around `centre` and empty their
     /// corpses: the fight rule pointed at them, a small loot of its own
     /// (the tutorial drops are one item each), and a walk to the spot
@@ -1155,6 +1136,15 @@ impl Client {
                 .filter(|o| o.pos.distance(pos) <= LOOT_RANGE)
                 .min_by(|a, b| a.pos.distance(pos).total_cmp(&b.pos.distance(pos)));
             if let Some(c) = corpse {
+                // A use thrown over our own cast meets its recoil and is turned away without a word,
+                // and a corpse that does not open is not tried again: the kill's spell lands first.
+                if self.autoplay.cast_in_flight(now) {
+                    self.autoplay.say(
+                        Doing::Training,
+                        format!("{progress}: waiting for the cast to land"),
+                    );
+                    return;
+                }
                 let (guid, cname) = (c.guid, c.name.clone());
                 self.academy_peace();
                 self.let_go(Release::Engagement);
@@ -1195,7 +1185,6 @@ impl Client {
         // Nothing to fight: to the spot, then wait for them to appear.
         let flat = glam::Vec2::new(centre.x - pos.x, centre.y - pos.y).length();
         if flat > REACH {
-            self.academy_open_doors(objects, pos, now);
             self.head_for(centre, REACH, name);
             self.autoplay
                 .say(Doing::Training, format!("{progress}: going after {name}"));
@@ -1250,6 +1239,72 @@ mod tests {
     fn step_named(st: &State, target: &str, kind: Kind) -> bool {
         st.current()
             .is_some_and(|s| s.target == target && s.kind == kind)
+    }
+
+    /// Through the portal named `target`, as the tutorial walks it: the step, the portal entered, and
+    /// the character landed where the table says.
+    fn through_portal(target: &str) -> State {
+        let t0 = Instant::now();
+        let at = steps()
+            .iter()
+            .position(|s| s.kind == Kind::Portal && s.target == target)
+            .expect("a portal step by that name");
+        let mut st = State {
+            active: true,
+            step: at,
+            acted: Some(t0),
+            ..Default::default()
+        };
+        let lands = steps()[at].lands.expect("the table says where it lands");
+        st.step(&view(t0 + Duration::from_secs(1), lands, &[], &[]), false);
+        st
+    }
+
+    #[test]
+    fn a_portal_in_the_middle_of_its_quest_does_not_prove_the_quest_done() {
+        // The Outer Courtyard lies before the Sentry's hunt: read as the quest's end it skipped
+        // the hunt, and the exit portal refused the character for good.
+        let st = through_portal("Outer Courtyard");
+        assert!(!st.is_done("sentry"));
+        assert!(step_named(&st, "Sentry", Kind::Talk), "{:?}", st.current());
+        // A portal that ends its quest still proves it.
+        assert!(through_portal("Central Courtyard").is_done("token"));
+    }
+
+    #[test]
+    fn a_corpse_is_opened_once_the_killing_spell_has_landed() {
+        // Opened into the spell's recoil the use was turned away without a word, the corpse
+        // was written off, and a caster hunted wasps for the item on one without end.
+        let now = Instant::now();
+        let mut c = crate::Client::offline(crate::testkit::no_data());
+        let corpse = Seen {
+            guid: 0x8000_4079,
+            name: "Corpse of Carpenter Wasp".into(),
+            corpse: true,
+            pos: origin() + Vec3::new(40.0, -70.0, 0.0),
+            ..Default::default()
+        };
+        let pos = origin() + Vec3::new(38.0, -70.0, 0.0);
+        c.autoplay.cast_sent = Some(now);
+        c.academy_hunt(
+            "Carpenter Wasp",
+            pos,
+            std::slice::from_ref(&corpse),
+            pos,
+            now,
+            "step",
+        );
+        assert_eq!(c.autoplay.academy_corpse, None, "opened into the cast");
+        c.autoplay.cast_sent = None;
+        c.academy_hunt(
+            "Carpenter Wasp",
+            pos,
+            std::slice::from_ref(&corpse),
+            pos,
+            now,
+            "step",
+        );
+        assert_eq!(c.autoplay.academy_corpse.map(|(g, _)| g), Some(corpse.guid));
     }
 
     #[test]
