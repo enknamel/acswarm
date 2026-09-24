@@ -6,7 +6,9 @@ impl Client {
     /// steer). Note where it was going, so it is taken up again once
     /// the fight is over.
     pub(crate) fn remember_journey(&mut self) {
-        if self.traveling() {
+        // Not following's own journey: following plans it again itself, and a copy would outlive a
+        // stop (`a_stop_leaves_no_old_aim_behind_when_a_fight_broke_the_journey_off`).
+        if self.traveling() && !self.is_follow_journey() {
             if let Some(goal) = self.travel_goal_xy() {
                 self.autoplay.resume_trip = Some(goal);
                 self.autoplay.resume_about_the_ground = self.travel_about_the_ground();

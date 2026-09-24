@@ -569,7 +569,9 @@ impl Client {
             .attack_target
             .or(self.autoplay.casting_at())
             .and_then(|g| self.world.name_of(g).map(str::to_string));
-        let trip = self.autoplay.resume_trip.or_else(|| self.travel_goal_xy());
+        // Following's own journey is not kept for afterwards: following plans it again itself.
+        let own_trip = self.travel_goal_xy().filter(|_| !self.is_follow_journey());
+        let trip = self.autoplay.resume_trip.or(own_trip);
         let cfg = &self.autoplay.config.survive;
         Some(View {
             now,

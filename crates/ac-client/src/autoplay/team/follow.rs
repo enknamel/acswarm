@@ -2,6 +2,7 @@ use std::time::{Duration, Instant};
 
 use super::view::Mate;
 use crate::autoplay::{Doing, Release};
+use crate::travel::WALKABLE;
 use crate::Client;
 
 /// A leader further off than twice the following distance (and at least
@@ -88,6 +89,7 @@ impl Client {
             if self.follow.take().is_some() {
                 self.steering.reset();
             }
+            self.autoplay.follow_walk = None;
             if self.autoplay.follow_trip.take().is_some() && self.traveling() {
                 self.cancel_travel();
             }
@@ -97,13 +99,19 @@ impl Client {
             // Whatever we were fighting is not worth losing the leader.
             self.let_go(Release::Targets);
         }
-        if leader.flying || flat < FOLLOW_WALK {
+        // Only as far as `head_for` walks: past `WALKABLE` it plans a
+        // journey of its own, which the record below would not name.
+        if flat < FOLLOW_WALK || (leader.flying && flat <= WALKABLE) {
             // Straight after it: the steering finds the way round
             // walls, and flight has nothing in the way.
             if self.autoplay.follow_trip.take().is_some() && self.traveling() {
                 self.cancel_travel();
             }
             self.head_for(leader.world, keep, "the leader");
+            // What a stop takes back, while it is still this walk (see
+            // `Client::stop_following`).
+            let planted = self.follow.is_some_and(|f| f.target == leader.world);
+            self.autoplay.follow_walk = planted.then_some(leader.world);
         } else {
             // Out of sight (through a portal, say): a journey there,
             // planned again once it has moved on. Not while it stands
@@ -111,6 +119,7 @@ impl Client {
             // hub, or a dungeon -- in another landblock: it will come
             // out, and its last position outside is followed meanwhile.
             self.follow = None;
+            self.autoplay.follow_walk = None;
             let indoors = leader.cell & 0xFFFF >= 0x100;
             let my_block = self.player.as_ref().map(|p| p.landblock());
             if indoors && my_block != Some(leader.cell & 0xFFFF_0000) {
@@ -127,18 +136,53 @@ impl Client {
             if (stale || !self.traveling()) && due {
                 // On the leader's way, whatever the leader is on (see
                 // `Client::on_its_way`): not a road of its own.
-                if self.travel_about(goal) {
+                let planned = self.travel_about(goal);
+                // Recorded by what is under way, not by the answer: a journey can start and still
+                // answer no, and a plan that failed leaves the one before it running.
+                if self.traveling() && self.travel_goal_xy() == Some(goal) {
                     self.autoplay.follow_trip = Some(goal);
-                    self.autoplay.next_follow_plan = Some(now + Duration::from_secs(3));
-                } else {
+                } else if !self.is_follow_journey() {
                     self.autoplay.follow_trip = None;
-                    self.autoplay.next_follow_plan = Some(now + Duration::from_secs(10));
                 }
+                let wait = if planned { 3 } else { 10 };
+                self.autoplay.next_follow_plan = Some(now + Duration::from_secs(wait));
             }
         }
         self.autoplay
             .say(Doing::Following, format!("following {}", leader.name));
         true
+    }
+
+    /// Let go of the walk and the journey following planted, each only while it is still following's
+    /// (`Client.follow` is shared with looting, visits and town runs); what others planted stays.
+    pub(crate) fn stop_following(&mut self) {
+        let mut let_go = false;
+        if let Some(at) = self.autoplay.follow_walk.take() {
+            if self.follow.is_some_and(|f| f.target == at) {
+                self.follow = None;
+                self.steering.reset();
+                let_go = true;
+            }
+        }
+        // The trip alone: a visit riding on it is its own, and plans
+        // again once the trip is gone.
+        if self.is_follow_journey() {
+            self.end_trip();
+            let_go = true;
+        }
+        self.autoplay.follow_trip = None;
+        self.autoplay.next_follow_plan = None;
+        if let_go {
+            tracing::info!("follow: no leader followed now; letting go of the way after it");
+        }
+    }
+
+    /// Whether the journey under way is the one following planned: bound for `Autoplay.follow_trip`
+    /// exactly, since the planner keeps the goal it was given.
+    pub(crate) fn is_follow_journey(&self) -> bool {
+        self.traveling()
+            && self.autoplay.follow_trip.is_some()
+            && self.travel_goal_xy() == self.autoplay.follow_trip
     }
 
     /// How close two characters must stand to hand something over.

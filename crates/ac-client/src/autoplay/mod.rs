@@ -487,6 +487,8 @@ pub struct Autoplay {
     /// Where the journey after a far-off leader was bound, to plan
     /// again once it has moved on.
     follow_trip: Option<glam::Vec2>,
+    /// Where following last aimed `Client.follow`: a stop clears that walk only while it aims here.
+    follow_walk: Option<glam::Vec3>,
     /// No journey after the leader is planned before this: planning
     /// costs a search, and one that found no way is not tried again for
     /// a while.
@@ -535,6 +537,14 @@ impl Client {
     /// Run the rules for this moment. Call it once a frame; it does at
     /// most one thing.
     pub fn tick_autoplay(&mut self, now: Instant) {
+        // Whatever ended the following -- a switch, a front end, the board -- and autoplay on or off:
+        // the switches only flip, and this is where the way after the leader is let go.
+        let planted = self.autoplay.follow_walk.is_some()
+            || self.autoplay.follow_trip.is_some()
+            || self.autoplay.next_follow_plan.is_some();
+        if planted && self.followed_leader().is_none() {
+            self.stop_following();
+        }
         // The team's housekeeping runs whether or not the character
         // plays on its own: a leader played by hand still gathers the
         // fellowship, and everyone answers its invitations.
