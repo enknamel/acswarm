@@ -204,3 +204,20 @@ fn counting_the_pack_once_answers_as_counting_it_for_every_spell() {
         );
     }
 }
+
+#[test]
+fn a_fighter_with_no_buff_due_is_not_held_back_between_swings() {
+    // The pass booked the gap after the swing before it had looked for a buff at all, so a
+    // character with nothing to cast had a swing held back on every look.
+    let now = Instant::now();
+    let mut c = Client::offline(crate::testkit::no_data());
+    c.autoplay.config.buffs.auto = true;
+    c.attack_pending = true;
+    c.last_attack = now;
+    assert!(c.mid_attack(), "the test needs a swing in the air");
+    assert!(!c.autoplay_buff(now, true));
+    assert!(
+        !c.wants_the_hands,
+        "a swing was held back for a buff that was never due"
+    );
+}
