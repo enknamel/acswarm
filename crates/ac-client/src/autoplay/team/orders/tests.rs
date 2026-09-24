@@ -323,3 +323,78 @@ fn a_caster_takes_no_order_on_a_creature_it_avoids() {
         "a spell went at the avoided one"
     );
 }
+
+/// `c` as the team's debuffer of Imperil Other I, avoiding Slinkers, with `target` on the
+/// leader's board.
+fn debuffing(c: &mut Client, target: u32) {
+    let team = &mut c.autoplay.config.team;
+    team.role = crate::autoplay::Role::Debuffer;
+    team.debuffs = vec!["Imperil Other I".into()];
+    c.autoplay.config.fight.avoid = vec!["Slinker".into()];
+    c.autoplay.team.mates[0].target = Some(target);
+}
+
+#[test]
+fn a_debuffer_leaves_what_its_rules_bar_marked_so_nobody_waits_on_it() {
+    // A hostile cast is an attack: ACE sets the creature on the caster (Player_Monster.cs:50).
+    // Refused, it is still marked debuffed, or `wait_for_debuff` held the party on it for ever.
+    let now = Instant::now();
+    let mut c = beside_the_leader();
+    let avoided = crate::testkit::standing_by(&mut c, 0x8000_0001, "Drudge Slinker", 6.0).guid;
+    debuffing(&mut c, avoided);
+    assert!(!c.autoplay_team(now), "it went on at the avoided one");
+    assert!(
+        c.autoplay.debuffed.contains(&avoided),
+        "left for the party to wait on"
+    );
+    // Outside its hunting area, likewise.
+    let mut c = beside_the_leader();
+    let me = c.my_position().expect("on its feet");
+    let out = crate::testkit::standing_by(&mut c, 0x8000_0002, "Revenant", 25.0).guid;
+    debuffing(&mut c, out);
+    c.autoplay.config.fight.area = Some(crate::hunt::HuntArea {
+        name: "test".into(),
+        shape: crate::hunt::Shape::Outline {
+            points: vec![
+                [me.x - 15.0, me.y - 15.0],
+                [me.x + 15.0, me.y - 15.0],
+                [me.x + 15.0, me.y + 15.0],
+                [me.x - 15.0, me.y + 15.0],
+            ],
+        },
+    });
+    assert!(!c.autoplay_team(now));
+    assert!(c.autoplay.debuffed.contains(&out));
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_debuffer_casts_at_the_boards_target_but_not_at_one_it_avoids() {
+    let now = Instant::now();
+    let caster = |target_name: &str| {
+        let (mut c, _) = crate::testkit::a_caster_knowing(now, &["Imperil Other I"]);
+        c.autoplay.config.enabled = true;
+        let team = &mut c.autoplay.config.team;
+        team.enabled = true;
+        team.follow = true;
+        let me = c.my_position().expect("on its feet");
+        let mut leader = crate::testkit::mate(LEADER, "Verity");
+        leader.leader = true;
+        leader.leads = true;
+        leader.world = me + glam::vec3(3.0, 0.0, 0.0);
+        c.autoplay.team = view_of(vec![leader]);
+        let it = crate::testkit::standing_by(&mut c, 0x8000_0001, target_name, 6.0).guid;
+        debuffing(&mut c, it);
+        (c, it)
+    };
+    let (mut c, _) = caster("Revenant");
+    assert!(c.autoplay_team(now), "no debuff at the board's target");
+    assert!(c.autoplay.status.starts_with("casting Imperil Other I"));
+    let (mut c, avoided) = caster("Drudge Slinker");
+    assert!(!c.autoplay_team(now), "{}", c.autoplay.status);
+    assert!(
+        c.autoplay.last_debuff.is_none(),
+        "a debuff went at the avoided creature"
+    );
+    assert!(c.autoplay.debuffed.contains(&avoided));
+}
