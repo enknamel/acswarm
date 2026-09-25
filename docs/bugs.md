@@ -18,8 +18,10 @@ priority; a live report starts from the telemetry (`tools/telemetry.py`, `--mark
   attack spells ("no attack spells known" from its first second) and never took up a weapon; 0
   blows in both runs. (The fixture's Battle Axe went to a counter: the Check profile sells anything
   worth 25, so the scenario profile must keep the fixtures' weapons.)
-- **A purchase hangs at the counter.** After "buying 150 Prismatic Taper" at Magus Guthima the run
-  waited the whole 3-minute `SELLING_TIMEOUT` ("taking too long to trade with").
+- **A purchase hangs at the counter** (fix under test). The count was sized at the per-item price
+  (34 a taper at Guthima's 1.55), but a stack is one item to the server: 150 cost 5,115 against a
+  purse of 5,109, refused with no words (Vendor.cs:546-551), and asked again every tick until the
+  3-minute timeout: 1,203 and 1,212 silent refusals in two runs, 0 tapers arrived.
 - **The two town-run planners disagree.** The first plan said "Boddry the Chancy it is: nowhere
   sells what is wanted", the next-stop plan found Cindrue with "2 of 2 on the shelf", so the run
   walked to the wrong counter. Shows as: two stops for one need in the status lines.
@@ -48,6 +50,7 @@ priority; a live report starts from the telemetry (`tools/telemetry.py`, `--mark
 
 - **No way back to town from a far ground** (3b64241): the planner believed a leg on foot only to
   1200 m, so a ground reached through a one-way portal had no way home. Scn Taper, out of tapers
-  2.5 km out: before, 17 "no way to" refusals, 0 bought, no casts; after, a 656 s walk planned,
-  there in 129 s, 150 tapers bought, run done at 365 s.
+  2.5 km out: before, 17 "no way to" refusals; after, none, a 656 s walk planned, at Magus
+  Guthima in 129 s. (Its purchase then failed: see the stack price below; "150 bought" in the
+  first report counted asks, not arrivals.)
 - **Standing about a quiet ground** (f37ffc3): longest idle 237 s -> 24-63 s.

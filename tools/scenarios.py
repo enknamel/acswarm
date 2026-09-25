@@ -60,8 +60,11 @@ def checks(name, m, lines, samples):
             buffs = sum(1 for t in lines if t.startswith("casting ") and " at " not in t)
             out.append(("buffs cast", buffs > 0, buffs))
     elif name == "Scn Taper":
-        tapers = sum(int(g.group(1)) for t in lines for g in [re.match(r"buying (\d+) .*Taper", t)] if g)
-        out += [("tapers bought", tapers > 0, tapers), ("town run done", m["town_runs"] > 0, m["town_runs"])]
+        # What arrived, not what was asked for: a counter can refuse every ask (run A: 1,199 times).
+        arrived = count(r"^Prismatic Taper arrived")
+        casts = sum(1 for t in lines if t.startswith("casting "))
+        out += [("tapers arrived", arrived > 0, arrived), ("casting again", casts > 0, casts),
+                ("town run done", m["town_runs"] > 0, m["town_runs"])]
     elif name == "Scn Seller":
         out.append(("ten rings sold", m["sold"] >= 10, m["sold"]))
     elif name.startswith("Fresh"):
