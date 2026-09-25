@@ -79,6 +79,10 @@ struct Block {
     dungeon: bool,
 }
 
+/// A walk's goal this close (metres, up or down) to a floor of the geometry stands on it, and is
+/// not dropped to the terrain as a goal floating off a hillside is.
+const GOAL_ON_FLOOR: f32 = 0.6;
+
 /// How many blocked steps in a row count as wedged. At twenty a second
 /// this is about half of one: long enough that squeezing past furniture
 /// is not mistaken for a wall, short enough that nobody watching would
@@ -1173,19 +1177,16 @@ impl Player {
         Some(f(&ground, &cap))
     }
 
-    /// A walkable route from `from` to `to` (world positions, both in
-    /// landblock `block`) around the block's static geometry: waypoints
-    /// ending with `to`, or `None` when the graph does not connect them.
-    /// The graph is built around the search on first use and kept with
-    /// the block's collision.
-    pub fn find_path(
+    /// Run `f` on landblock `block`'s navigation graph and the ground it is built over, for a walk
+    /// from `from` to `to` (the portals not on it are given a berth); `None` without collision.
+    fn on_nav<R>(
         &mut self,
         assets: &Assets,
         block: u32,
         from: Vec3,
         to: Vec3,
-        to_cell: u32,
-    ) -> Option<Vec<Vec3>> {
+        f: impl FnOnce(&mut NavGraph, &Ground) -> R,
+    ) -> Option<R> {
         let block = block & 0xFFFF_0000;
         self.collision(assets, block)?;
         let cap = self.capsule;
@@ -1231,43 +1232,86 @@ impl Player {
             doorways: &doorways,
         };
         let mut nav = b.nav.as_ref()?.borrow_mut();
-        let (nodes, chunks) = (nav.len(), nav.chunk_count());
-        let started = Instant::now();
-        // A goal from the overland grid may float a storey off the
-        // hillside; the graph only finds nodes near the height asked,
-        // so such a goal is dropped onto the ground under it.
-        //
-        // Only such a goal. A goal inside a building was not guessed
-        // from a grid -- it is where something actually stands -- and
-        // its height is the whole of the answer. Dropping that one asks
-        // the graph for the ground floor and gets a route to the ground
-        // floor: the character walks in, stands under the vendor on the
-        // storey above, and stops.
-        //
-        // Whether it is inside is a question for the geometry, not for
-        // the caller. The caller's `to_cell` is a *landblock* whenever
-        // the goal came through `Follow`, and a landblock's low word is
-        // zero, which reads here as "outdoors" -- which is how a walk to
-        // Asenala, who keeps a shop on the upper floor of a house in
-        // Holtburg, was quietly rewritten as a walk to the patch of
-        // ground three metres beneath her.
-        let indoors = to_cell & 0xFFFF >= 0x100 || collision.in_known_cell(to);
-        let to = match (b.dungeon, indoors, terrain(to.x, to.y)) {
-            (false, false, Some(z)) if (z - to.z).abs() > 2.0 => Vec3::new(to.x, to.y, z),
-            _ => to,
-        };
-        let path = nav.find_path(&ground, from, to);
-        if nav.chunk_count() != chunks {
-            tracing::debug!(
-                "nav {block:#010x}: {} nodes in {} chunks (+{} nodes, {} chunks, {:.0} ms this search)",
-                nav.len(),
-                nav.chunk_count(),
-                nav.len() - nodes,
-                nav.chunk_count() - chunks,
-                started.elapsed().as_secs_f64() * 1e3
-            );
-        }
-        path
+        Some(f(&mut nav, &ground))
+    }
+
+    /// Where a character can stand within `radius` (metres, flat) of `p` in landblock `block`:
+    /// the navigation graph's own places, empty without collision.
+    pub fn standable_near(
+        &mut self,
+        assets: &Assets,
+        block: u32,
+        p: Vec3,
+        radius: f32,
+    ) -> Vec<Vec3> {
+        self.on_nav(assets, block, p, p, |nav, ground| {
+            nav.standable_near(ground, p, radius)
+        })
+        .unwrap_or_default()
+    }
+
+    /// A walkable route from `from` to `to` (world positions, both in
+    /// landblock `block`) around the block's static geometry: waypoints
+    /// ending with `to`, or `None` when the graph does not connect them.
+    /// The graph is built around the search on first use and kept with
+    /// the block's collision.
+    pub fn find_path(
+        &mut self,
+        assets: &Assets,
+        block: u32,
+        from: Vec3,
+        to: Vec3,
+        to_cell: u32,
+    ) -> Option<Vec<Vec3>> {
+        let block = block & 0xFFFF_0000;
+        self.on_nav(assets, block, from, to, |nav, ground| {
+            let (nodes, chunks) = (nav.len(), nav.chunk_count());
+            let started = Instant::now();
+            // A goal from the overland grid may float a storey off the
+            // hillside; the graph only finds nodes near the height asked,
+            // so such a goal is dropped onto the ground under it.
+            //
+            // Only such a goal. A goal inside a building was not guessed
+            // from a grid -- it is where something actually stands -- and
+            // its height is the whole of the answer. Dropping that one asks
+            // the graph for the ground floor and gets a route to the ground
+            // floor: the character walks in, stands under the vendor on the
+            // storey above, and stops.
+            //
+            // Whether it is inside is a question for the geometry, not for
+            // the caller. The caller's `to_cell` is a *landblock* whenever
+            // the goal came through `Follow`, and a landblock's low word is
+            // zero, which reads here as "outdoors" -- which is how a walk to
+            // Asenala, who keeps a shop on the upper floor of a house in
+            // Holtburg, was quietly rewritten as a walk to the patch of
+            // ground three metres beneath her.
+            let indoors = to_cell & 0xFFFF >= 0x100 || ground.collision.in_known_cell(to);
+            // Nor a goal standing on something: a roof, a bridge, a dock has its floor right under
+            // it, and dropped to the ground below, a caster walked in under a Mite Sentry on a roof
+            // and stood there (a_goal_on_a_roof_is_walked_to_on_the_roof).
+            let on_a_floor = ground
+                .collision
+                .floor_at(to, GOAL_ON_FLOOR, GOAL_ON_FLOOR)
+                .is_some();
+            let terrain = ground.terrain.and_then(|t| t(to.x, to.y));
+            let to = match (ground.terrain.is_none(), indoors || on_a_floor, terrain) {
+                (false, false, Some(z)) if (z - to.z).abs() > 2.0 => Vec3::new(to.x, to.y, z),
+                _ => to,
+            };
+            let path = nav.find_path(ground, from, to);
+            if nav.chunk_count() != chunks {
+                tracing::debug!(
+                    "nav {block:#010x}: {} nodes in {} chunks (+{} nodes, {} chunks, {:.0} ms this search)",
+                    nav.len(),
+                    nav.chunk_count(),
+                    nav.len() - nodes,
+                    nav.chunk_count() - chunks,
+                    started.elapsed().as_secs_f64() * 1e3
+                );
+            }
+            path
+        })
+        .flatten()
     }
 
     /// Fraction along `from`..`to` where static geometry first blocks the

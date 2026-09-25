@@ -209,6 +209,7 @@ impl Client {
                                 .as_ref()
                                 .map(|r| (r.next, r.waypoints.len())),
                             wedged: pl.wedged(),
+                            retracing: self.steering.retracing(),
                         });
                         // No way there at all: the line is blocked and
                         // no route was found. Standing still is the
@@ -265,6 +266,8 @@ impl Client {
                 }
             }
             pl.update(&self.assets, &input, dt);
+            // Every step the body takes, walked or pushed: the way back out of a pocket.
+            self.steering.walked(pl.world_position());
             if let Some(j) = pl.last_jump.take() {
                 tracing::info!("jump power {:.2} velocity {:?}", j.power, j.velocity);
                 self.session.send_action(

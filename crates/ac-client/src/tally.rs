@@ -22,6 +22,8 @@ pub struct WalkFrame {
     pub route: Option<(usize, usize)>,
     /// Pressed against geometry and going nowhere ([`crate::player::Player::wedged`]).
     pub wedged: bool,
+    /// Walking back the way it came, out of somewhere the graph finds no path from.
+    pub retracing: bool,
 }
 
 /// Blows traded since the session began, counted off the server's attack notices (0x01B1-0x01B4).
