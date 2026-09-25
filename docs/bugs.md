@@ -14,6 +14,9 @@ priority; a live report starts from the telemetry (`tools/telemetry.py`, `--mark
   36 s on a corpse 12 m off and 17.6 m below (33149.5 34886.1 40.4), steering "no way" throughout
   (run K). Standing places surround it on a flat floor at 40.4, but no path reaches them from the
   platform or from low ground 30 m off: water, a pit, or a graph stricter than the walking there.
+- **Wedged at the end of a long walk to a ground.** Scn Blade, 4.4 km on foot to hunt Banderling
+  Guard, stood 81 s then 40 s at B2A10022 (34273.5 30958.9 90.0), 59 m and then 14 m from the goal,
+  wedged 24/40 and 20/20 samples, no "no way" (scenario scn-town2).
 - **The two town-run planners disagree.** The first plan said "Boddry the Chancy it is: nowhere
   sells what is wanted", the next-stop plan found Cindrue with "2 of 2 on the shelf", so the run
   walked to the wrong counter. Shows as: two stops for one need in the status lines.
@@ -40,6 +43,15 @@ priority; a live report starts from the telemetry (`tools/telemetry.py`, `--mark
 
 ## Fixed
 
+- **Never went to town when low on supplies** (95e6782, f372476): a due run waited 8 min after
+  any run, waited out a walk to a ground as "busy", ranked under every fight (only the last step
+  started one), stopped at 600 m for loot, and a component sized from a small taper line (two
+  scarabs beside 100 tapers) was never urgent. Starting a run is now its own step over starting a
+  fight; a supply run waits only after a futile one (a sale-only run keeps 8 min, or the fighters
+  spent a third of their time selling), and buy lines ask the character's skills (kits need
+  Healing). +Scn Taper, no tapers at the Mosswart ground, main -> branch: set off 20 s -> 0 s,
+  tapers in the pack 150 -> 130 s. Scenarios (scn-town2 against idle2 on main): kills Mage 8 -> 14,
+  Blade 12 -> 12, Bow 1 -> 6; in town 0-24% before, 0-23% after.
 - **Standing about for no reason** (0d345d7): a crowded ground whose spot falls inside a building
   was camped from indoors for good (the new character, 134 s), and after a town run the quiet
   minute was waited out in a shop before any ground was chosen (four characters, 38-45 s). Idle
