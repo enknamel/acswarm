@@ -6,11 +6,10 @@ priority; a live report starts from the telemetry (`tools/telemetry.py`, `--mark
 
 ## 1. Stops the character playing
 
-- **Leaning for a minute on what the line test calls clear.** Scn Mage at the Mosswart ground
-  (0xBAAD0017, 35773.4 33364.8) "getting Gotrok Lithos in sight" aimed straight at a spot 18 m off
-  (follow, block 0xBAAD0000, straight line chosen) and did not move for 61 s, then 20 s more
-  walking to its corpse (run E). Nothing gives up a target the body cannot get to. Shows as: a
-  stall whose walk detail says straight line, not wedged, outdoors.
+- **A corpse no path reaches is waited on.** Scn Mage on a platform at z 58 in 0xACB5 waited
+  36 s on a corpse 12 m off and 17.6 m below (33149.5 34886.1 40.4), steering "no way" throughout
+  (run K). Standing places surround it on a flat floor at 40.4, but no path reaches them from the
+  platform or from low ground 30 m off: water, a pit, or a graph stricter than the walking there.
 - **The two town-run planners disagree.** The first plan said "Boddry the Chancy it is: nowhere
   sells what is wanted", the next-stop plan found Cindrue with "2 of 2 on the shelf", so the run
   walked to the wrong counter. Shows as: two stops for one need in the status lines.
@@ -36,6 +35,17 @@ priority; a live report starts from the telemetry (`tools/telemetry.py`, `--mark
   level 5); use a template, as `tools/scenarios.sh` does.
 
 ## Fixed
+
+- **Stood in a pocket among props** (91c32c7): from where the body stood the graph found no path
+  anywhere and the steering leaned on the prop for good (Mosswart ground 61 s, run E; the Academy
+  spawn). The steering keeps a trail of where the body walked and, stuck with no path, walks back
+  along it to where the graph finds a way on. Offline on the real map: before, 18.2 m short after
+  30 s; after, at the goal in about 6 s.
+- **Stood under a creature on a roof** (00e938b): an outdoor goal far above the terrain was
+  dropped to it, so the walk to a Mite Sentry 4.3 m overhead ended beneath it; a goal on a floor
+  now keeps its height and the path takes the ramp up. A spell or arrow with no clear shot walks to
+  the nearest reachable place it clears from. Scn Taper's stall seconds 87 and 77 (runs F, J) -> 0
+  (run K, where it reached the roof).
 
 - **Walked into a pocket at the Academy spawn** (6556d76): a steering reset a tenth of a second
   into a routed walk to Jonathan aimed straight at him until the next line check, into a pocket
