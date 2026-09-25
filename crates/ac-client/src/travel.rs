@@ -1981,6 +1981,37 @@ mod tests {
 
     #[test]
     #[ignore = "needs AC_DATA_DIR"]
+    fn a_character_against_a_bookcase_walks_round_it() {
+        // Blargerton in the Holtburg Dungeon, squeezed between a row of bookcases and a chest
+        // 0.75 m apart, stood 12 min: the graph nodes nearest him were snapped out to the far sides
+        // of the two, so every plan began behind the bookcases and the body never got there.
+        let block = 0x01F6_0000u32;
+        let origin = ac_world::landblock_origin(block);
+        let from = Vec3::new(35.3157, -51.0781, 0.0);
+        let corpse = Vec3::new(30.3719, -51.8906, 0.0042);
+        let mut c = crate::testkit::standing_in_the_field(25, 0x01F6_0233, from);
+        let me = c.my_position().unwrap();
+        let assets = c.assets.clone();
+        let path = c
+            .player
+            .as_mut()
+            .unwrap()
+            .find_path(&assets, block, me, origin + corpse, block)
+            .expect("a way round");
+        assert!(
+            path[0].x - origin.x > 34.87,
+            "starts behind the bookcases: {path:?}"
+        );
+        drive(&mut c, origin + corpse, block, true, 30.0);
+        let at = c.player.as_ref().unwrap().world_position() - origin;
+        assert!(
+            at.truncate().distance(corpse.truncate()) <= 1.0,
+            "stuck at {at:?}, short of {corpse:?}"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_goal_on_a_roof_is_walked_to_on_the_roof() {
         // A Mite Sentry on the roof of a building in 0xBDAF, 4.3 m over a caster inside. The goal
         // outdoors and far above the terrain read as floating off a hillside and was dropped to the

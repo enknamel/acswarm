@@ -333,6 +333,8 @@ const NEAREST_REACH: i32 = 2;
 /// leaning on something -- and needs the way back to the walkable
 /// world, however far that is.
 const STRANDED_REACH: i32 = 8;
+/// How many of the nearest nodes `nearest_joined` tries a straight walk to before settling.
+const JOIN_TRIES: usize = 8;
 
 pub struct NavGraph {
     pub spacing: f32,
@@ -702,10 +704,15 @@ impl NavGraph {
     }
 
     fn nearest_within(&mut self, ground: &Ground, p: Vec3, r: i32) -> Option<u32> {
+        self.near(ground, p, r).first().map(|&(_, id)| id)
+    }
+
+    /// The nodes within `r` columns of `p`, nearest first by `nearest`'s score.
+    fn near(&mut self, ground: &Ground, p: Vec3, r: i32) -> Vec<(f32, u32)> {
         let gx = (p.x / self.spacing).round() as i32;
         let gy = (p.y / self.spacing).round() as i32;
         self.ensure_columns(ground, gx - r, gx + r, gy - r, gy + r);
-        let mut best: Option<(f32, u32)> = None;
+        let mut out = Vec::new();
         for dx in -r..=r {
             for dy in -r..=r {
                 let Some(ids) = self.columns.get(&(gx + dx, gy + dy)) else {
@@ -716,14 +723,32 @@ impl NavGraph {
                     if d.z.abs() > MAX_EDGE_RISE {
                         continue;
                     }
-                    let score = flat(d).length_squared() + (3.0 * d.z).powi(2);
-                    if best.map(|(s, _)| score < s).unwrap_or(true) {
-                        best = Some((score, id));
-                    }
+                    out.push((flat(d).length_squared() + (3.0 * d.z).powi(2), id));
                 }
             }
         }
-        best.map(|(_, id)| id)
+        out.sort_by(|a, b| a.0.total_cmp(&b.0));
+        out
+    }
+
+    /// The node nearest `p` that a straight walk from `p` reaches, else `nearest`: the nearest can
+    /// be a lattice point snapped out to a bookcase's far side, and a route starting there aims
+    /// through it for good (test: a_character_against_a_bookcase_walks_round_it, in ac-client).
+    /// The close look only, and the start only: a goal no node walks to (a spot overhead, a
+    /// creature against a wall) cost every replan eight failed walks.
+    fn nearest_joined(&mut self, ground: &Ground, p: Vec3) -> Option<u32> {
+        let cap = self.capsule;
+        for (_, id) in self
+            .near(ground, p, NEAREST_REACH)
+            .into_iter()
+            .take(JOIN_TRIES)
+        {
+            let q = self.nodes[id as usize].pos;
+            if ground.walkable(p, q, &cap).0 && line_clear(ground.collision, p, q) {
+                return Some(id);
+            }
+        }
+        self.nearest(ground, p)
     }
 
     /// A* over the nodes from the one nearest `start` to the one nearest
@@ -737,7 +762,7 @@ impl NavGraph {
         let start = ground
             .collision
             .resolve_above(start, cap.radius, cap.height, cap.step_up);
-        let s = self.nearest(ground, start)?;
+        let s = self.nearest_joined(ground, start)?;
         let g = self.nearest(ground, goal)?;
         let nodes = self.astar(ground, s, g)?;
         let mut points: Vec<Vec3> = nodes.iter().map(|&n| self.nodes[n as usize].pos).collect();
