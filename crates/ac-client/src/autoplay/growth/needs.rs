@@ -258,20 +258,25 @@ impl Client {
         unit.saturating_mul(need.want)
     }
 
-    /// What the character is short of, worked out afresh at most once
-    /// every [`NEEDS_EVERY`]. Counting the pack is not free and the
-    /// answer does not change between frames.
-    /// What the town-run rule last found short, as (name, carried, asked for, urgent), and how
-    /// long ago it looked: telemetry's record of supplies, and of a rule that never got its turn.
-    pub fn supplies_seen(&self, now: Instant) -> Option<(f32, Vec<(String, u32, u32, bool)>)> {
+    /// What the town-run rule last found short, and how many seconds ago it looked: telemetry's
+    /// record of supplies, and of a rule that never got its turn.
+    pub fn supplies_seen(&self, now: Instant) -> Option<(f32, Vec<crate::tally::SupplyLine>)> {
         let (t, needs) = self.autoplay.growth.needs_seen.as_ref()?;
         let lines = needs
             .iter()
-            .map(|n| (n.name.clone(), n.have, n.keep, n.urgent))
+            .map(|n| crate::tally::SupplyLine {
+                name: n.name.clone(),
+                have: n.have,
+                keep: n.keep,
+                urgent: n.urgent,
+            })
             .collect();
         Some((now.saturating_duration_since(*t).as_secs_f32(), lines))
     }
 
+    /// What the character is short of, worked out afresh at most once
+    /// every [`NEEDS_EVERY`]. Counting the pack is not free and the
+    /// answer does not change between frames.
     pub(super) fn needs_now(&mut self, now: Instant, cfg: &Growth) -> Vec<Need> {
         if let Some(n) = self
             .autoplay

@@ -1,5 +1,6 @@
 //! What the character did lately, kept for telemetry to read (`ac_plugin::telemetry`): the walk
-//! as the steering and the body left it this frame, and the blows traded since the session began.
+//! as the steering and the body left it this frame, the blows traded since the session began, and
+//! the supplies the town-run rule last found short.
 
 use std::time::Instant;
 
@@ -37,4 +38,15 @@ pub struct Blows {
     pub missed: u32,
     /// Attacks on us we evaded.
     pub evaded: u32,
+}
+
+/// A supply the town-run rule found short (`Client::supplies_seen`).
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct SupplyLine {
+    pub name: String,
+    /// How many are carried, and how many the rules ask for.
+    pub have: u32,
+    pub keep: u32,
+    /// Short enough for a run to town.
+    pub urgent: bool,
 }
