@@ -1975,6 +1975,33 @@ mod tests {
 
     #[test]
     #[ignore = "needs AC_DATA_DIR"]
+    fn a_goal_on_a_roof_is_walked_to_on_the_roof() {
+        // A Mite Sentry on the roof of a building in 0xBDAF, 4.3 m over a caster inside. The goal
+        // outdoors and far above the terrain read as floating off a hillside and was dropped to the
+        // ground, so the walk ended under the creature; the way up is a ramp round the back.
+        let block = 0xBDAF_0000u32;
+        let origin = ac_world::landblock_origin(block);
+        let mut c =
+            crate::testkit::standing_in_the_field(20, 0xBDAF_0103, Vec3::new(181.0, 129.6, 92.1));
+        let roof = origin + Vec3::new(181.0, 129.6, 96.4);
+        let me = c.my_position().unwrap();
+        let assets = c.assets.clone();
+        let path = c
+            .player
+            .as_mut()
+            .unwrap()
+            .find_path(&assets, block, me, roof, block)
+            .expect("a way up");
+        let before_the_end = path[path.len().saturating_sub(2)];
+        assert!(
+            before_the_end.z > 93.0,
+            "climbs to the roof rather than stopping under it: {:?}",
+            path.iter().map(|w| *w - origin).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_ground_reached_through_a_one_way_portal_has_a_way_home_on_foot() {
         // Where a scenario's caster ran out of tapers: the Mosswart ground, reached from Holtburg
         // through a portal with none back, 3.5 km from town and 2.5 km from Magus Guthima.

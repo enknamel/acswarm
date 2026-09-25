@@ -173,6 +173,9 @@ pub struct State {
     /// `Client::autoplay_approach`), whose `follow` goal is ours to
     /// clear.
     pub approaching: Option<u32>,
+    /// Where to shoot the target from when the shot does not clear from where the character
+    /// stands: the target, where it stood when chosen, and the spot (`None`: none found).
+    pub vantage: Option<(u32, Vec3, Option<Vec3>)>,
     /// How fast this character's own spells have been seen to fly, by
     /// spell: an arc's height depends on it (see `crate::aim`).
     pub shot_speeds: HashMap<u32, f32>,
@@ -229,6 +232,12 @@ pub const WITHIN: f32 = 0.85;
 /// Without a line of sight the walk goes for the target itself, stopping
 /// this close: round the corner it will be in sight long before that.
 const NO_SIGHT_STOP: f32 = 2.5;
+/// Standing places near a target tried for a clear shot, nearest the character first.
+const VANTAGE_LOOKS: usize = 48;
+/// Of those with a clear shot, how many are asked for a path before giving up.
+const VANTAGE_WALKS: usize = 4;
+/// A target that has moved this far (metres) since its vantage was chosen gets a new one.
+const VANTAGE_MOVED: f32 = 2.0;
 
 /// How far a spell with `base_constant` and `base_mod` reaches for a
 /// caster whose school skill (trained level, no buffs) is `skill`.
@@ -409,6 +418,46 @@ impl Client {
         }
     }
 
+    /// Where to shoot `target` (standing at `at`) from when the shot does not clear from here: the
+    /// nearest place the feet can stand, within `reach`, that the shot clears from and a path
+    /// leads to. A creature on a roof is fought from the ground in sight of it, not from under it.
+    fn vantage(&mut self, target: u32, at: Vec3, reach: f32, how: How) -> Option<Vec3> {
+        let me = self.my_position()?;
+        let block = self.player.as_ref()?.cell & 0xFFFF_0000;
+        let assets = self.assets.clone();
+        let mine = self.world.player().map_or(0, |o| o.guid);
+        let shot = self.shot_for(how);
+        let to = self.body_of(target, at);
+        let mut spots = self
+            .player
+            .as_mut()?
+            .standable_near(&assets, block, at, reach);
+        spots.retain(|s| s.distance(at) <= reach);
+        spots.sort_by(|a, b| a.distance(me).total_cmp(&b.distance(me)));
+        let mut clear = Vec::new();
+        for s in spots.into_iter().take(VANTAGE_LOOKS) {
+            let Some(path) = aim::flight(shot, self.body_of(mine, s), to) else {
+                continue;
+            };
+            if self
+                .player
+                .as_mut()
+                .is_some_and(|pl| pl.flies_clear(&assets, &path))
+            {
+                clear.push(s);
+                if clear.len() == VANTAGE_WALKS {
+                    break;
+                }
+            }
+        }
+        clear.into_iter().find(|s| {
+            self.player
+                .as_mut()
+                .and_then(|pl| pl.find_path(&assets, block, me, *s, block))
+                .is_some()
+        })
+    }
+
     /// Close on `target` until it is within [`WITHIN`] of the reach of
     /// `how` and the shot is clear, walking after it like a leader. True
     /// while still too far, when the attack has to wait; false once in
@@ -437,6 +486,39 @@ impl Client {
             self.stop_approaching();
             return false;
         }
+        // No clear shot from here: a spell or an arrow is thrown from wherever it clears, so the
+        // walk is to the nearest such place the feet can get to, not at the target, which may
+        // stand on a roof above (a_caster_under_a_creature_on_a_roof_walks_out_to_where_it_is_in_sight).
+        let spot = if seen || matches!(how, How::Melee) {
+            None
+        } else {
+            let fresh = match self.dodge.vantage {
+                Some((g, was, spot)) if g == target && was.distance(at) <= VANTAGE_MOVED => {
+                    // Got there and still no shot: the flight test was wrong here, so walk at it.
+                    spot.filter(|s| s.distance(me) > 0.5)
+                }
+                _ => {
+                    let spot = self.vantage(target, at, range * WITHIN, how);
+                    if let Some(s) = spot {
+                        tracing::info!(
+                            "range: no clear shot at {name}; shooting from {:.1} {:.1} {:.1}, {:.1} m off",
+                            s.x,
+                            s.y,
+                            s.z,
+                            s.distance(me)
+                        );
+                    }
+                    self.dodge.vantage = Some((target, at, spot));
+                    spot
+                }
+            };
+            if fresh.is_none() {
+                if let Some((_, _, spot)) = self.dodge.vantage.as_mut() {
+                    *spot = None;
+                }
+            }
+            fresh
+        };
         if self.dodge.approaching != Some(target) {
             // Where we stand as well as how far off it is: a walk that
             // goes wrong from here can then be put on the map.
@@ -480,7 +562,10 @@ impl Client {
         self.dodge.approaching = Some(target);
         // Closing on something to hit it is a goal like any other, so
         // it is named to the travel system and not steered by hand.
-        self.head_for(at, stop, name);
+        match spot {
+            Some(s) => self.head_for(s, 0.3, name),
+            None => self.head_for(at, stop, name),
+        };
         self.autoplay.say(
             Doing::Fighting,
             if seen {
@@ -1383,5 +1468,50 @@ mod tests {
             "the step was taken for the fellow's bolt"
         );
         assert!(!c.dodge.tracks[&friendly].dodged);
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn a_caster_under_a_creature_on_a_roof_walks_out_to_where_it_is_in_sight() {
+        // A scenario caster stood inside a building in 0xBDAF under a Mite Sentry on its roof,
+        // 4.3 m up, "getting Mite Sentry in sight" for 30 s: the walk went to the creature's
+        // position and the graph put that on the floor beneath it.
+        let block = 0xBDAF_0000u32;
+        let origin = ac_world::landblock_origin(block);
+        let mut c =
+            crate::testkit::standing_in_the_field(20, 0xBDAF_0103, Vec3::new(181.0, 129.6, 92.1));
+        let roof = Vec3::new(181.0, 129.6, 96.4);
+        const MITE: u32 = 0x8000_0301;
+        let mut mite = crate::testkit::creature(MITE, "Mite Sentry");
+        mite.position = Some(ac_world::object::Position::new_flat(
+            ac_world::outdoor_cell(block, roof),
+            roof,
+        ));
+        c.world.objects.insert(MITE, mite);
+        let (spell, sp) = c
+            .assets
+            .spell_table()
+            .unwrap()
+            .find_by_name("Shock Wave I")
+            .map(|(id, sp)| (id, sp.clone()))
+            .expect("Shock Wave I");
+        let how = How::Spell(spell);
+        let at = origin + roof;
+        assert!(!c.shot_clears(MITE, how), "no shot through the ceiling");
+        let reach = spell_range(sp.base_range_constant, sp.base_range_mod, 0).max(6.0) * WITHIN;
+        let spot = c
+            .vantage(MITE, at, reach, how)
+            .expect("somewhere in sight of the roof");
+        assert!(spot.distance(at) <= reach, "within reach: {spot:?}");
+        crate::testkit::stand(
+            &mut c,
+            ac_world::outdoor_cell(block, spot - origin),
+            spot - origin,
+        );
+        assert!(
+            c.shot_clears(MITE, how),
+            "the shot clears from {:?}",
+            spot - origin
+        );
     }
 }

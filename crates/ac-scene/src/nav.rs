@@ -659,6 +659,28 @@ impl NavGraph {
         &self.edges[node as usize]
     }
 
+    /// Where a character can stand within `radius` (metres, flat) of `p`, building what it looks
+    /// at: the choice for a caller picking where to stand near something, as a caster does to see
+    /// onto a roof.
+    pub fn standable_near(&mut self, ground: &Ground, p: Vec3, radius: f32) -> Vec<Vec3> {
+        let r = (radius / self.spacing).ceil() as i32;
+        let gx = (p.x / self.spacing).round() as i32;
+        let gy = (p.y / self.spacing).round() as i32;
+        self.ensure_columns(ground, gx - r, gx + r, gy - r, gy + r);
+        let mut out = Vec::new();
+        for dx in -r..=r {
+            for dy in -r..=r {
+                for &id in self.columns.get(&(gx + dx, gy + dy)).into_iter().flatten() {
+                    let q = self.nodes[id as usize].pos;
+                    if flat(q - p).length() <= radius {
+                        out.push(q);
+                    }
+                }
+            }
+        }
+        out
+    }
+
     /// The node nearest `p` within a few grid steps, preferring the same
     /// level (height differences count triple). Builds what it looks at.
     pub fn nearest(&mut self, ground: &Ground, p: Vec3) -> Option<u32> {
