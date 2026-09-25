@@ -6,13 +6,6 @@ priority; a live report starts from the telemetry (`tools/telemetry.py`, `--mark
 
 ## 1. Stops the character playing
 
-- **Walked into a pocket at the Academy spawn** (sometimes). In scenario runs A and B the new
-  character went straight from the spawn (12.3, -28.5) to (14.5, -25.5) in 0x860201AD and stood
-  53 s: from there the block's graph finds no path anywhere, so the steering leaned on the prop;
-  Jonathan never answered a use from 10 m, and the full tutorial got it out instead. From the
-  spawn the graph routes round (16.5, -28.5), (21.0, -22.5), and a lone character did that and
-  left by Jonathan in 4 s, so what differs in a busy process's first frames is not yet known: the
-  "steer" records (7eb71fe) catch the first frame next time.
 - **Leaning for a minute on what the line test calls clear.** Scn Mage at the Mosswart ground
   (0xBAAD0017, 35773.4 33364.8) "getting Gotrok Lithos in sight" aimed straight at a spot 18 m off
   (follow, block 0xBAAD0000, straight line chosen) and did not move for 61 s, then 20 s more
@@ -43,6 +36,11 @@ priority; a live report starts from the telemetry (`tools/telemetry.py`, `--mark
   level 5); use a template, as `tools/scenarios.sh` does.
 
 ## Fixed
+
+- **Walked into a pocket at the Academy spawn** (6556d76): a steering reset a tenth of a second
+  into a routed walk to Jonathan aimed straight at him until the next line check, into a pocket
+  among the props no path leaves. Before: stuck 53-55 s (runs A, B, D), 388 s and never out (E),
+  the Jonathan shortcut never working. After: route kept, out by Jonathan at 5.9 s, no stall (F, G).
 
 - **Stood in a shop aiming through its wall** (733ed66): the walk out of a building aimed at the
   threshold, within `ARRIVE` of a character just inside, so it ended at once and the next walk

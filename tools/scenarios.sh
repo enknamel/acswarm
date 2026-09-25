@@ -74,15 +74,19 @@ fn command(name, args) {
             if who == "Scn Seller" { for i in 0..10 { say("@ci 297"); } }
         }
     }
-    // The tapers go on each of the first three asks: a drop sent with the teleport is refused
-    // while the character is in portal space, and a town run takes longer than a minute.
+    // The tapers go before autoplay starts: a drop is refused while the character is busy casting
+    // or teleporting (Player_Inventory.cs:1373), so it stands still until none are left.
     if who == "Scn Taper" {
         let asks = board_get("scn.asks." + who);
         let asks = if type_of(asks) == "()" { 0 } else { asks };
-        if asks < 3 {
-            for it in inventory() { if it.name.contains("Taper") { drop_item(it.guid); } }
-        }
         board_set("scn.asks." + who, asks + 1);
+        let tapers = [];
+        for it in inventory() { if it.name.contains("Taper") { tapers.push(it); } }
+        if asks < 6 && tapers.len() > 0 {
+            autoplay(false);
+            for it in tapers { drop_item(it.guid); }
+            return true;
+        }
     }
     set_loot_profile("Check");
     growth(true);
