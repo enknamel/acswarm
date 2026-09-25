@@ -234,18 +234,32 @@ impl Client {
         }
         let area = self.autoplay.config.fight.area.clone();
         let tactic = ac_world::hunting::tactic_for(cfg.tactic, ac_world::hunting::at(here));
-        // Patrol keeps walking the ground; only Sweep gives up on it.
-        let roams_allowed = if tactic == ac_world::hunting::Tactic::Patrol {
+        use ac_world::hunting::Tactic;
+        // Patrol and Camp keep walking the ground; only Sweep gives up on it.
+        let roams_allowed = if matches!(tactic, Tactic::Patrol | Tactic::Camp) {
             u32::MAX
         } else {
             ROAMS
         };
-        let roams_left = tactic != ac_world::hunting::Tactic::Camp
-            && self.autoplay.growth.hunting_at == Some(here)
-            && self.autoplay.growth.roams < roams_allowed;
-        if now.saturating_duration_since(since).as_secs_f32()
-            < quiet_before_move(cfg, area.is_some() || roams_left)
-        {
+        let on_ground = self.autoplay.growth.hunting_at == Some(here);
+        let roams_left = on_ground && self.autoplay.growth.roams < roams_allowed;
+        // A camp is held for the quiet minute while standing where the creatures come: outdoors.
+        // A ground's spot is the average of its spawn points and can fall inside a building, where
+        // nothing comes; held there, a character stood 134 s doing nothing (scenario idle1).
+        let indoors = cell & 0xFFFF >= 0x100;
+        let camping = tactic == Tactic::Camp && on_ground && !indoors;
+        // Off any ground (in town after a run, say) nothing spawns to wait for: one is chosen at once
+        // (a_character_off_any_ground_goes_to_one_at_once), where four waited 40-47 s in shops.
+        let wait = if on_ground || area.is_some() {
+            quiet_before_move(cfg, area.is_some() || (roams_left && !camping))
+        } else {
+            0.0
+        };
+        if now.saturating_duration_since(since).as_secs_f32() < wait {
+            if camping && self.autoplay.doing == Doing::Idle {
+                self.autoplay
+                    .say(Doing::Idle, "holding the spot; they come to us");
+            }
             return false;
         }
         if self.autoplay.growth.next_hunt.is_some_and(|t| now < t) {
@@ -288,23 +302,9 @@ impl Client {
             }
             return false;
         }
-        // What to do on a ground with nothing in sight depends on the
-        // ground. A few spawn hard enough that standing still is never
-        // idle and walking away only leaves the fight; most need
-        // covering on foot; a thin one is worth leaving once it is
-        // quiet.
-        if tactic == ac_world::hunting::Tactic::Camp
-            && self.autoplay.growth.hunting_at == Some(here)
-        {
-            // Hold the spot. Saying so once is enough; repeating it
-            // every frame would drown the log.
-            if self.autoplay.doing != Doing::Idle {
-                self.autoplay
-                    .say(Doing::Idle, "holding the spot; they come to us");
-            }
-            self.autoplay.growth.quiet_since = Some(now);
-            return false;
-        }
+        // With nothing in sight a ground is looked about: a camp once its quiet minute says nothing
+        // is coming after all (a_camp_nothing_comes_to_is_looked_about), a patrol always, a thin
+        // ground a few times before it is left.
         if goes_looking && roams_left {
             let n = self.autoplay.growth.roams % ROAMS;
             let angle = (n as f32 + 0.5) * std::f32::consts::TAU / ROAMS as f32;
@@ -315,7 +315,16 @@ impl Client {
             );
             self.autoplay.growth.roams += 1;
             self.autoplay.growth.quiet_since = Some(now);
-            if self.travel_about(goal) {
+            // From inside a building the walk steps out first, as a town run's does.
+            let set_off = if indoors {
+                self.grow_travel(goal, now) && {
+                    self.mark_ground_walk();
+                    true
+                }
+            } else {
+                self.travel_about(goal)
+            };
+            if set_off {
                 self.autoplay.say(
                     Doing::Traveling,
                     "nothing in sight; looking about the ground",

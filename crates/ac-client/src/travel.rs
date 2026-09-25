@@ -354,6 +354,12 @@ impl Client {
         ok
     }
 
+    /// Say the journey just set off on is about the character's own ground (see
+    /// [`Self::travel_about`]), for a walk begun some other way.
+    pub(crate) fn mark_ground_walk(&mut self) {
+        self.travel.about_the_ground = true;
+    }
+
     /// Whether the journey under way, or the last one, was about the
     /// character's own ground (see [`Self::travel_about`]). Read by the
     /// walk past the road, and when a journey is put down for a fight,

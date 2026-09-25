@@ -662,6 +662,12 @@ impl Client {
         self.autoplay.note(said, now);
     }
 
+    /// How far off the nearest creature the fight rules would take on is, within the fight
+    /// radius, as the last tick found it: telemetry's measure of a fight passed up.
+    pub fn fight_in_reach(&self) -> Option<f32> {
+        self.autoplay.nearest_fight
+    }
+
     /// A skill as it stands right now, 0 when the sheet lacks it.
     fn skill_now(&self, id: u32) -> u32 {
         let stats = &self.world.stats;

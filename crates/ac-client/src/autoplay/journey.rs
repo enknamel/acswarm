@@ -37,7 +37,7 @@ impl Client {
             self.travel_to(goal)
         };
         if resumed {
-            self.autoplay.say(Doing::Idle, "back on the road");
+            self.autoplay.say(Doing::Traveling, "back on the road");
             return true;
         }
         false
