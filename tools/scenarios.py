@@ -19,7 +19,7 @@ spec.loader.exec_module(tel)
 FIGHTERS = ("Scn Mage", "Scn Blade", "Scn Bow")
 MIN_KILLS = 3
 MAX_STALL = 30.0  # seconds a character may mean to walk and stand still
-MAX_IDLE = 90.0  # seconds a character with autoplay on may stand "waiting" at a stretch
+MAX_IDLE_BESIDE_FIGHT = 6.0  # seconds "waiting" at a stretch with a fight in reach; waiting for spawns is fine
 
 
 def per_character(path):
@@ -32,17 +32,6 @@ def per_character(path):
         elif r.get("k") == "sample" and r.get("on"):
             samples[who].append(r)
     return lines, samples
-
-
-def longest_idle(samples):
-    longest, since = 0.0, None
-    for s in samples:
-        if s.get("doing") == "waiting":
-            since = since or s["t"]
-            longest = max(longest, (s["t"] - since) / 1000 + tel.SAMPLE_GAP)
-        else:
-            since = None
-    return longest
 
 
 def checks(name, m, lines, samples):
@@ -73,8 +62,9 @@ def checks(name, m, lines, samples):
     longest = m["stalls"][0]["secs"] if m["stalls"] else 0.0
     where = f"{longest:.0f} s at {m['stalls'][0]['cell']}" if m["stalls"] else "0 s"
     out.append((f"no stall over {MAX_STALL:.0f} s", longest <= MAX_STALL, where))
-    idle = longest_idle(samples)
-    out.append((f"not idle over {MAX_IDLE:.0f} s", idle <= MAX_IDLE, f"{idle:.0f} s"))
+    idle = m["idle_beside_fight"]
+    out.append((f"no idle beside a fight", idle["longest"] <= MAX_IDLE_BESIDE_FIGHT,
+                f"{idle['secs']:.0f} s, longest {idle['longest']:.0f} s"))
     return out
 
 

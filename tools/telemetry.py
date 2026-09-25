@@ -102,6 +102,7 @@ def summarise(path):
             "gave_up": gave_up,
             "refused": d["refused"],
             "stall_s": sum(x["secs"] for x in stalls),
+            "idle_beside_fight": idle_beside_fight(s, d["status"]),
             "blows": blows(s),
             "spell_points": sum(int(m.group(1)) for t in chat for m in [SPELL_HIT.match(t)] if m),
             "wield": Counter(", ".join(x.get("wield") or []) or "nothing" for x in s).most_common(1)[0][0],
@@ -110,6 +111,30 @@ def summarise(path):
             "setup": d["setup"],
         }
     return out
+
+
+def idle_beside_fight(samples, lines):
+    """Seconds spent "waiting" with something the fight rules would take on in reach, the longest
+    stretch, and the steps' reasons for standing aside then. Waiting on an empty ground is fine;
+    this is the kind that is not."""
+    idle = [x for x in samples if x.get("on") and x.get("doing") == "waiting" and x.get("fight_near") is not None]
+    runs, run = [], []
+    for x in samples:
+        if x in idle:
+            run.append(x)
+        elif run:
+            runs.append(run)
+            run = []
+    if run:
+        runs.append(run)
+    longest = max(((r[-1]["t"] - r[0]["t"]) / 1000 + SAMPLE_GAP for r in runs), default=0.0)
+    times = [x["t"] for x in idle]
+    why = Counter()
+    for line in lines:
+        t, text = line.get("t", 0), line.get("text", "")
+        if ": " in text and any(abs(t - u) <= SAMPLE_GAP * 1000 for u in times):
+            why[text[:90]] += 1
+    return {"secs": len(idle) * SAMPLE_GAP, "longest": longest, "why": why.most_common(5)}
 
 
 def blows(samples):
@@ -193,6 +218,10 @@ def show(path):
             per = lambda n, p: f"{n} ({p / n:.1f} a blow)" if n else "0"
             print(f"  in hand: {m['wield']}; dealt {per(b['dealt'], b['dealt_points'])}, missed {b['missed']}, "
                   f"spells {m['spell_points']} points; took {per(b['taken'], b['taken_points'])}, evaded {b['evaded']}")
+        idle = m["idle_beside_fight"]
+        if idle["secs"]:
+            print(f"  idle beside a fight: {idle['secs']:.0f} s, longest {idle['longest']:.0f} s; stood aside: "
+                  + "; ".join(f"{t} x{n}" for t, n in idle["why"]))
         if m["setup"]:
             print("  setup: " + brief(m["setup"]))
         if m["stalls"]:
