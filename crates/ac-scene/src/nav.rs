@@ -735,15 +735,18 @@ impl NavGraph {
     /// `leaving`, else from the node to `p`), else `nearest`: the nearest node can be a lattice
     /// point snapped out to a bookcase's far side, and a route starting there aims through it for
     /// good (test: a_character_against_a_bookcase_walks_round_it, in ac-client).
+    /// Only the close look: widening it built graph a character never walks, one slow frame each.
     fn nearest_joined(&mut self, ground: &Ground, p: Vec3, leaving: bool) -> Option<u32> {
         let cap = self.capsule;
-        for r in [NEAREST_REACH, STRANDED_REACH] {
-            for (_, id) in self.near(ground, p, r).into_iter().take(JOIN_TRIES) {
-                let q = self.nodes[id as usize].pos;
-                let (a, b) = if leaving { (p, q) } else { (q, p) };
-                if ground.walkable(a, b, &cap).0 && line_clear(ground.collision, a, b) {
-                    return Some(id);
-                }
+        for (_, id) in self
+            .near(ground, p, NEAREST_REACH)
+            .into_iter()
+            .take(JOIN_TRIES)
+        {
+            let q = self.nodes[id as usize].pos;
+            let (a, b) = if leaving { (p, q) } else { (q, p) };
+            if ground.walkable(a, b, &cap).0 && line_clear(ground.collision, a, b) {
+                return Some(id);
             }
         }
         self.nearest(ground, p)
