@@ -220,7 +220,7 @@ pub fn judge_loot(
     // stack over what the line asks for is loot like any other, and
     // "sell the rest" sells it. Judged here, once, when the thing is
     // taken -- the list does not answer back to a tag already written.
-    let stocked = p.stocked_count(&stats.name);
+    let stocked = p.stocked_count(&stats.name, me, my_name);
     if stocked > 0 && held < stocked {
         return Verdict::Decided(LootAction::Keep, "kept stocked".into());
     }

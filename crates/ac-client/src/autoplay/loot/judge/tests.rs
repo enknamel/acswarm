@@ -55,6 +55,7 @@ fn buy_list(library: &crate::profile::Library, lines: &[(&str, u32)]) {
             restock_at: None,
             from: None,
             on: true,
+            when: Vec::new(),
         })
         .collect();
     library.put(p).expect("put");
@@ -255,8 +256,14 @@ fn nobody_is_sent_anything_when_no_rule_asks_about_a_skill_and_nobody_salvages()
             thing.name
         );
     }
-    // Nor under the starter, while its salvager does not salvage.
+    // Nor under the starter while its salvager does not salvage, but for its kits, kept only by
+    // a character trained in Healing.
     let mut starter = crate::profile::Profile::starter();
     starter.looting.salvage = false;
+    assert!(
+        starter.sends_to_the_best(),
+        "kits go to whoever heals with them"
+    );
+    starter.rules.retain(|r| r.skill_asked().is_none());
     assert!(!starter.sends_to_the_best());
 }

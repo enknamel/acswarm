@@ -8,7 +8,8 @@ use glam::Vec2;
 
 #[cfg(doc)]
 use self::counter::on_opening;
-use self::vendor::{nearest_way, spot, Forecast, Stop, SALE_RUN_REACH};
+use self::panel::hand_has_let_go;
+use self::vendor::{nearest_way, spot, Forecast, Stop};
 use crate::autoplay::growth::needs::Need;
 use crate::autoplay::growth::policy::restocks_as_a_party;
 #[cfg(doc)]
@@ -67,11 +68,6 @@ const FUTILE_RUN_WAIT: Duration = Duration::from_secs(300);
 /// How often a character that has stopped in town looks to see whether
 /// its luck has changed.
 const STOPPED_LOOK_EVERY: Duration = Duration::from_secs(5);
-
-/// Least time between two town runs. A run that could sell nothing
-/// leaves the pack as full as it found it, and the next is not until
-/// this has passed.
-const RUN_EVERY: Duration = Duration::from_secs(8 * 60);
 
 /// Most vendors visited in one run.
 const STOPS_PER_RUN: u32 = 3;
@@ -201,13 +197,10 @@ pub enum Driver {
     Hand,
 }
 
-/// How long after one run the next waits: `party_restocking` when the
-/// party has agreed to shop, `futile` when the last run bought and sold
-/// nothing -- which a run that never reached its counter always has.
-fn wait_between_runs(party_restocking: bool, futile: bool) -> Duration {
-    if !party_restocking {
-        RUN_EVERY
-    } else if futile {
+/// How long after one run the next waits: nothing, since a recall makes the trip free, unless the
+/// last run bought and sold nothing (`futile`), which a run that never reached its counter has.
+fn wait_between_runs(futile: bool) -> Duration {
+    if futile {
         FUTILE_RUN_WAIT
     } else {
         Duration::ZERO
@@ -215,6 +208,45 @@ fn wait_between_runs(party_restocking: bool, futile: bool) -> Duration {
 }
 
 impl Client {
+    /// The town-run step: carry on the run under way, or start one that is due (`grow_town_run`).
+    /// True when it acted. It outranks starting a fight (`steps::STEPS`), never a fight in hand.
+    pub fn autoplay_town_run(&mut self, now: Instant) -> bool {
+        let cfg = self.autoplay.config.growth.clone();
+        if self.world.player_guid.is_none() {
+            return false;
+        }
+        self.grow_settle(now, &cfg);
+        // A run the vendoring panel is driving is the panel's to step,
+        // and has the tick whether or not town runs are on: the
+        // character is on a run, and nothing below -- the hunting, with
+        // its patrols and roams -- walks it off the counter in the
+        // middle of one. Held for a while with town runs on, it is
+        // autoplay's again and stepped below; with them off, the panel
+        // is the one thing running it, and the status line says so.
+        if self.autoplay.growth.run_by_hand() {
+            if !hand_has_let_go(self.autoplay.growth.hand_stepped, now) {
+                return true;
+            }
+            if !cfg.town_runs {
+                let vendor = self.autoplay.growth.run.as_ref().map(|r| r.vendor.clone());
+                self.autoplay.say(
+                    Doing::Shopping,
+                    format!(
+                        "the run to {} is held by the vendoring panel",
+                        vendor.unwrap_or_default()
+                    ),
+                );
+                return true;
+            }
+            self.autoplay.growth.by_hand = false;
+            self.autoplay.note(
+                "the vendoring panel let go of its run: autoplay takes it on",
+                now,
+            );
+        }
+        cfg.town_runs && self.grow_town_run(now, &cfg)
+    }
+
     /// Whether the character is stuck: short of something it needs to
     /// go on hunting, with no money to buy it and nothing left to sell.
     ///
@@ -283,41 +315,19 @@ impl Client {
             self.autoplay
                 .note("something to spend again: shopping", now);
         }
-        // Too laden to be handed anything: a counter cannot help, so
-        // it does not go to one. Selling, using or handing something
-        // over is what lifts this, and all three happen elsewhere.
-        if self.autoplay.growth.too_heavy {
-            let needs = self.needs_now(now, cfg);
-            let room = self.burden_room();
-            // Room enough for the lightest thing it still wants is
-            // room enough to be worth the walk.
-            if room == 0 && !needs.is_empty() {
-                let (carrying, capacity) = self.burden();
-                return self.held_back(format!(
-                    "too heavy to buy anything ({carrying} of {capacity}, three times over)"
-                ));
-            }
-            self.autoplay.growth.too_heavy = false;
+        // Only a fight in hand or a journey the growth rules did not plan (a leader's, a
+        // script's) holds a run back: a walk to a ground is dropped for it (test:
+        // a_due_run_leaves_the_walk_to_a_ground_for_town).
+        let own_walk = self.autoplay.growth.bound.is_some() || self.travel_about_the_ground();
+        if self.in_a_fight() {
+            return self.held_back("in a fight");
         }
-        // Not while anything else is going on.
-        if self.attack_target.is_some()
-            || self.autoplay.casting_at().is_some()
-            || self.traveling()
-            || self.autoplay.growth.bound.is_some()
-        {
-            return self.held_back("busy with something else");
+        if self.traveling() && !own_walk {
+            return self.held_back("on a journey growth did not plan");
         }
-        // The party has already decided to shop, so the throttle that
-        // stops a lone character wearing a path to the vendor does not
-        // apply: it would leave the rest waiting at the hunting ground
-        // for nothing. The retry delay still holds, since it means a
-        // vendor could not be reached at all.
-        // The party having agreed to shop lifts the throttle that stops
-        // a lone character wearing a path to the vendor -- but not when
-        // the last trip came back with nothing. Without that a party
-        // that cannot buy what it needs walks between counters for ever.
-        let party_restocking = !self.autoplay.growth.mode.hunting();
-        let wait = wait_between_runs(party_restocking, self.autoplay.growth.run_was_futile);
+        // After a run that came back with nothing, a wait: without it a character that cannot buy
+        // what it needs walks between counters for ever.
+        let wait = wait_between_runs(self.autoplay.growth.run_was_futile);
         if let Some(t) = self
             .autoplay
             .growth
@@ -395,14 +405,8 @@ impl Client {
         } else {
             Errand::Buy
         };
-        // The reason, the errand, and how far the first counter may be
-        // from a way out. A pack that cannot hunt on -- full, heavy,
-        // or a supply run out -- is worth a walk anywhere; loot that
-        // merely adds up is worth the town the character is in, and no
-        // further. Without a reach one Lead Pea carried a quarter of an
-        // hour was a walk to an archmage three towns over, and the
-        // same again for the next pea.
-        let (reason, errand, within) = if together {
+        // The reason and the errand. Any counter will do, however far: a recall makes the trip.
+        let (reason, errand) = if together {
             match party_mode.stage() {
                 None => return self.held_back("the party is hunting"),
                 // Only the runner walks to town; the rest hold their
@@ -421,17 +425,13 @@ impl Client {
                     } else {
                         because
                     };
-                    (reason, own_errand, None)
+                    (reason, own_errand)
                 }
             }
         } else if full {
-            ("the pack is full".to_string(), Errand::Sell, None)
+            ("the pack is full".to_string(), Errand::Sell)
         } else if laden {
-            (
-                "carrying as much as it means to".to_string(),
-                Errand::Sell,
-                None,
-            )
+            ("carrying as much as it means to".to_string(), Errand::Sell)
         } else if !urgent.is_empty() {
             // A supply run out comes before loot that adds up: the
             // counter with the arrows may stand further from a way out
@@ -443,9 +443,9 @@ impl Client {
                 .filter(|n| n.buyable)
                 .map(|n| n.name.as_str())
                 .collect();
-            (format!("short of {}", a_few(&short)), Errand::Buy, None)
+            (format!("short of {}", a_few(&short)), Errand::Buy)
         } else if let Some(why) = sale {
-            (why, Errand::Sell, Some(SALE_RUN_REACH))
+            (why, Errand::Sell)
         } else {
             let short: Vec<&str> = needs.iter().map(|n| n.name.as_str()).collect();
             let sale = match salables.len() {
@@ -475,7 +475,7 @@ impl Client {
         let go_anyway = full || self.stranded(&needs, cfg);
         let first = Stop {
             errand,
-            within,
+            within: None,
             visited: &[],
         };
         match self.start_town_run(now, cfg, needs, reason, first, go_anyway) {
@@ -501,7 +501,7 @@ impl Client {
         first: Stop<'_>,
         go_anyway: bool,
     ) -> Result<(), String> {
-        let Stop { errand, within, .. } = first;
+        let errand = first.errand;
         let Some(me) = self.my_position() else {
             return Err("not placed in the world yet".into());
         };
@@ -517,22 +517,19 @@ impl Client {
         // ones near *that*.
         let ways = self.ways_out(me);
         let Some((vendor, at, look)) = self.pick_vendor(cfg, &needs, &ways, first, now) else {
-            let why = match (errand, within) {
-                (Errand::Buy, _) => "no vendor to run to".to_string(),
-                // Said with the count, so that whoever is watching can
-                // tell "nothing to sell" from "nothing anyone buys" --
-                // and "nobody near enough" from either.
-                (Errand::Sell, Some(reach)) => format!(
-                    "nobody within {reach:.0} m of a way out buys any of the {} thing(s) for sale",
-                    self.salables(cfg).len()
-                ),
-                (Errand::Sell, None) => format!(
+            // Said with the count, so "nothing to sell" and "nothing anyone buys" differ.
+            let why = match errand {
+                Errand::Buy => "no vendor to run to".to_string(),
+                Errand::Sell => format!(
                     "no counter buys any of the {} thing(s) for sale",
                     self.salables(cfg).len()
                 ),
             };
             self.autoplay.note(why.clone(), now);
-            self.autoplay.growth.last_run = Some(now);
+            // Futile, so the next look waits `FUTILE_RUN_WAIT` rather than searching every tick.
+            let st = &mut self.autoplay.growth;
+            st.last_run = Some(now);
+            st.run_was_futile = true;
             return Err(why);
         };
         // Why this counter and not another, in the log. The choice is a
@@ -576,6 +573,7 @@ impl Client {
         }
         let walk_limit = self.planned_walk_limit();
         let st = &mut self.autoplay.growth;
+        st.drop_ground_walk();
         st.needs = needs;
         st.by_hand = false;
         st.window_unwanted = None;

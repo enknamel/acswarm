@@ -37,6 +37,14 @@
           "Item": {
             "Word": "healing kit"
           }
+        },
+        {
+          "Me": {
+            "Trained": {
+              "skill": 21,
+              "at_least": 2
+            }
+          }
         }
       ],
       "keep_up_to": 4
@@ -207,7 +215,15 @@
       "what": "Healing Kit",
       "keep": 2,
       "restock_at": 1,
-      "on": true
+      "on": true,
+      "when": [
+        {
+          "Trained": {
+            "skill": 21,
+            "at_least": 2
+          }
+        }
+      ]
     }
   ],
   "sell_to": "Best"

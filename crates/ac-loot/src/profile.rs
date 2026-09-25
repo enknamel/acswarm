@@ -471,7 +471,7 @@ pub enum Verdict {
 
 /// One thing to keep in the pack, and where to get it.
 /// Not a rule, as no item is in hand: a floor on stock, where [`Rule::keep_up_to`] caps taking.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Buy {
     /// The counter's name for it, specific ("Peerless Healing Kit"): each level is its own item.
     pub what: String,
@@ -487,6 +487,10 @@ pub struct Buy {
     /// Turned off without being deleted.
     #[serde(default = "yes")]
     pub on: bool,
+    /// Only for a character all of these hold for: kits for a trained healer, picks for a
+    /// lockpicker. A line that does not hold is neither bought nor kept from sale.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub when: Vec<Mine>,
 }
 
 fn yes() -> bool {
@@ -497,6 +501,11 @@ impl Buy {
     /// The count at or below which this line is worth a trip to town.
     pub fn low_mark(&self) -> u32 {
         self.restock_at.unwrap_or(self.keep / 4)
+    }
+
+    /// Whether this line is on and stands for this character (`when`).
+    pub fn holds_for(&self, me: &Wielder, name: &str) -> bool {
+        self.on && !self.what.trim().is_empty() && self.when.iter().all(|m| m.holds(me, name))
     }
 }
 
@@ -763,30 +772,35 @@ impl Profile {
         }
     }
 
-    /// Whether the character keeps this stocked, so no rule read at the counter may sell it.
-    /// "Sell anything worth under a thousand" has not said "sell my Peas".
-    pub fn stocks(&self, name: &str) -> bool {
+    /// Whether the character `me`, called `my_name`, keeps this stocked, so no rule read at the
+    /// counter may sell it. "Sell anything worth under a thousand" has not said "sell my Peas".
+    pub fn stocks(&self, name: &str, me: &Wielder, my_name: &str) -> bool {
         self.buy
             .iter()
-            .filter(|b| b.on && !b.what.trim().is_empty())
+            .filter(|b| b.holds_for(me, my_name))
             .any(|b| contains_fold(name, b.what.trim()))
     }
 
-    /// How many of a thing the buy list says to carry, 0 when it does not mention it.
-    pub fn stocked_count(&self, what: &str) -> u32 {
+    /// How many of a thing the buy list says `me` carries, 0 when no line for it holds.
+    pub fn stocked_count(&self, what: &str, me: &Wielder, my_name: &str) -> u32 {
         self.buy
             .iter()
-            .filter(|b| b.on)
+            .filter(|b| b.holds_for(me, my_name))
             .find(|b| contains_fold(what, b.what.trim()))
             .map_or(0, |b| b.keep)
     }
 
-    /// What is short, against what is carried: the shopping list.
+    /// What `me` is short of, against what is carried: the shopping list.
     /// `held` counts a thing in the pack by the name the counter lists it under.
-    pub fn shortfall(&self, held: impl Fn(&str) -> u32) -> Vec<Short<'_>> {
+    pub fn shortfall(
+        &self,
+        held: impl Fn(&str) -> u32,
+        me: &Wielder,
+        my_name: &str,
+    ) -> Vec<Short<'_>> {
         self.buy
             .iter()
-            .filter(|b| b.on && b.keep > 0 && !b.what.trim().is_empty())
+            .filter(|b| b.keep > 0 && b.holds_for(me, my_name))
             .filter_map(|b| {
                 let have = held(&b.what);
                 (have < b.keep).then(|| Short {
@@ -807,6 +821,10 @@ impl Profile {
         let word = |w: &str| Ask::Item(Term::Word(w.into()));
         let kind = |k: &str| Ask::Item(Term::Kind(k.into()));
         let num = |k: NumKey, op: Op, v: f64| Ask::Item(Term::Num(k, op, v));
+        let trained_in_healing = Mine::Trained {
+            skill: ac_world::stats::skill::HEALING,
+            at_least: ac_world::stats::sac::TRAINED,
+        };
         Profile {
             name: "Starter".into(),
             note: "A place to start: money and components kept, vendor \
@@ -825,10 +843,11 @@ impl Profile {
                     all: vec![kind("note")],
                     ..Default::default()
                 },
+                // A kit needs Healing trained to be used at all (`Client::heals_with_kits`).
                 Rule {
                     name: "healing kits, a few".into(),
                     action: LootAction::Keep,
-                    all: vec![word("healing kit")],
+                    all: vec![word("healing kit"), Ask::Me(trained_in_healing.clone())],
                     keep_up_to: Some(4),
                     ..Default::default()
                 },
@@ -908,6 +927,7 @@ impl Profile {
                     restock_at: Some(250),
                     from: None,
                     on: true,
+                    when: Vec::new(),
                 },
                 Buy {
                     what: "Healing Kit".into(),
@@ -916,6 +936,7 @@ impl Profile {
                     restock_at: Some(1),
                     from: None,
                     on: true,
+                    when: vec![trained_in_healing.clone()],
                 },
             ],
             sell_to: SellTo::Best,
@@ -1187,8 +1208,8 @@ mod tests {
             profile.skills_asked(),
             vec![skill::LOCKPICK, skill::SALVAGING]
         );
-        // The starter asks nothing of the character, so a party reading it shares nothing more.
-        assert!(Profile::starter().skills_asked().is_empty());
+        // The starter asks only whether the character can use a healing kit.
+        assert_eq!(Profile::starter().skills_asked(), vec![skill::HEALING]);
     }
 
     #[test]
@@ -1372,6 +1393,22 @@ mod tests {
     }
 
     #[test]
+    fn the_starter_keeps_healing_kits_only_for_a_character_trained_in_healing() {
+        let starter = Profile::starter();
+        let kit = item("Handy Healing Kit", item_type::MISC, 100);
+        let healer = me(25, &[(skill::HEALING, 50, sac::TRAINED)]);
+        assert!(matches!(
+            starter.judge_test(&kit, &healer, "Aldric", 0),
+            Verdict::Decided(LootAction::Keep, ref why) if why == "healing kits, a few"
+        ));
+        let untrained = me(25, &[(skill::HEALING, 10, sac::UNTRAINED)]);
+        assert!(!matches!(
+            starter.judge_test(&kit, &untrained, "Blargerton", 0),
+            Verdict::Decided(LootAction::Keep, _)
+        ));
+    }
+
+    #[test]
     fn any_property_the_server_sends_can_be_asked_about() {
         // Int 265 is the armour set: the server's EquipmentSetId, other looters' ArmorSetId.
         // The editor shows the server's name, because that is what the number means.
@@ -1459,15 +1496,51 @@ mod tests {
         assert!(pattern_error("^Legendary ").is_none());
     }
 
+    /// A character with no skills of note.
+    fn anyone() -> Wielder {
+        me(20, &[])
+    }
+
     #[test]
     fn what_the_character_buys_it_never_sells() {
         // A thing bought in town is not sold there: the buy list beats "sell anything cheap".
         let p = Profile::starter();
-        assert!(p.stocks("Prismatic Taper"));
-        assert!(p.stocks("Healing Kit"), "by the name the counter uses");
-        assert!(p.stocks("Lesser Healing Kit"), "and its levels");
-        assert!(!p.stocks("Pyreal Pea"), "a component it does not stock");
-        assert!(!p.stocks("Ornate Ring"));
+        let healer = me(20, &[(skill::HEALING, 50, sac::TRAINED)]);
+        let stocks = |name: &str| p.stocks(name, &healer, "Aldric");
+        assert!(stocks("Prismatic Taper"));
+        assert!(stocks("Healing Kit"), "by the name the counter uses");
+        assert!(stocks("Lesser Healing Kit"), "and its levels");
+        assert!(!stocks("Pyreal Pea"), "a component it does not stock");
+        assert!(!stocks("Ornate Ring"));
+    }
+
+    #[test]
+    fn a_line_asking_a_skill_counts_only_for_a_character_with_it() {
+        // Kits are no use without Healing trained: not bought, not kept back from a counter.
+        let p = Profile::starter();
+        let healer = me(20, &[(skill::HEALING, 50, sac::TRAINED)]);
+        let untrained = me(20, &[(skill::HEALING, 10, sac::UNTRAINED)]);
+        assert!(p.stocks("Healing Kit", &healer, "Aldric"));
+        assert!(!p.stocks("Healing Kit", &untrained, "Blargerton"));
+        assert_eq!(p.stocked_count("Healing Kit", &healer, "Aldric"), 2);
+        assert_eq!(p.stocked_count("Healing Kit", &untrained, "Blargerton"), 0);
+        let wants = |who: &Wielder| -> Vec<String> {
+            p.shortfall(|_| 0, who, "Aldric")
+                .into_iter()
+                .map(|s| s.want.what.clone())
+                .collect()
+        };
+        assert_eq!(wants(&healer), vec!["Prismatic Taper", "Healing Kit"]);
+        assert_eq!(wants(&untrained), vec!["Prismatic Taper"]);
+        // Written to a profile only when it says something.
+        let taper = serde_json::to_string(&p.buy[0]).unwrap();
+        assert!(!taper.contains("when"), "{taper}");
+        let kit = serde_json::to_string(&p.buy[1]).unwrap();
+        let back: Buy = serde_json::from_str(&kit).unwrap();
+        assert_eq!(back, p.buy[1]);
+        // And a line saved before there were conditions reads as one for anybody.
+        let old: Buy = serde_json::from_str(r#"{"what":"Healing Kit","keep":2}"#).unwrap();
+        assert!(old.when.is_empty() && old.on);
     }
 
     #[test]
@@ -1480,6 +1553,7 @@ mod tests {
                 restock_at: None,
                 from: None,
                 on: true,
+                when: Vec::new(),
             },
             Buy {
                 what: "Peerless Healing Kit".into(),
@@ -1487,6 +1561,7 @@ mod tests {
                 restock_at: None,
                 from: Some("Fletcher".into()),
                 on: true,
+                when: Vec::new(),
             },
             Buy {
                 what: "Acid Arrowhead".into(),
@@ -1494,6 +1569,7 @@ mod tests {
                 restock_at: None,
                 from: None,
                 on: false,
+                when: Vec::new(),
             },
         ];
         let held = |what: &str| match what {
@@ -1501,7 +1577,7 @@ mod tests {
             "Peerless Healing Kit" => 5,
             _ => 0,
         };
-        let short = p.shortfall(held);
+        let short = p.shortfall(held, &anyone(), "Aldric");
         assert_eq!(short.len(), 1, "the kits are stocked, the heads are off");
         assert_eq!(short[0].want.what, "Prismatic Taper");
         assert_eq!(short[0].short, 600, "six hundred short of a thousand");
@@ -1564,9 +1640,10 @@ mod tests {
             restock_at: Some(250),
             from: None,
             on: true,
+            when: Vec::new(),
         }];
         let at = |have: u32| {
-            p.shortfall(|_| have)
+            p.shortfall(|_| have, &anyone(), "Aldric")
                 .first()
                 .map(|s| s.urgent)
                 .expect("short of a thousand")
@@ -1585,6 +1662,7 @@ mod tests {
             restock_at: None,
             from: None,
             on: true,
+            when: Vec::new(),
         };
         assert_eq!(quarter.low_mark(), 62);
         // Zero is a real answer, not a missing one: only when it is out.
@@ -1606,6 +1684,7 @@ mod tests {
                 restock_at: None,
                 from: None,
                 on: true,
+                when: Vec::new(),
             },
             Buy {
                 what: "Acid Arrowhead".into(),
@@ -1613,9 +1692,10 @@ mod tests {
                 restock_at: None,
                 from: Some("Thimrin Woodsetter".into()),
                 on: true,
+                when: Vec::new(),
             },
         ];
-        let short = p.shortfall(|_| 0);
+        let short = p.shortfall(|_| 0, &anyone(), "Aldric");
         assert_eq!(short.len(), 2);
         assert_eq!(short[0].want.from, None, "whoever sells it");
         assert_eq!(short[1].want.from.as_deref(), Some("Thimrin Woodsetter"));
@@ -1648,7 +1728,7 @@ mod tests {
     #[test]
     fn the_starter_profile_is_one_a_player_would_recognise() {
         let p = Profile::starter();
-        let me = me(50, &[]);
+        let me = me(50, &[(skill::HEALING, 100, sac::TRAINED)]);
         let keeps = |name: &str, kind: u32, value: u32| {
             matches!(
                 p.judge_test(&item(name, kind, value), &me, "Aldric", 0),

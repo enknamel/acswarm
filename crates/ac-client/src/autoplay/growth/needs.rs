@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use super::town_run::vendor::{answers_need, worth_stocking};
+use super::town_run::vendor::answers_need;
 use super::Growth;
 use crate::items::ItemStats;
 use crate::Client;
@@ -79,6 +79,7 @@ impl Client {
         // way out. Both the character and the party read this count
         // (see `autoplay_stock`), so they agree on what is short.
         let stock = |what: &str| self.carried_named(what).saturating_sub(leaving.named(what));
+        let (me, my_name) = (self.wielder(), &self.world.stats.name);
         // The profile's buy list first: it is where a player says what
         // to keep stocked now, and it is the same list that makes those
         // things unsellable. `keep_stocked` is what it grew out of and
@@ -91,7 +92,7 @@ impl Client {
             .profiles
             .get(&self.autoplay.config.loot.profile)
             .map(|p| {
-                p.shortfall(stock)
+                p.shortfall(stock, &me, my_name)
                     .into_iter()
                     .map(|s| {
                         (
@@ -107,9 +108,6 @@ impl Client {
             .unwrap_or_default();
         for (name, have, least, from, urgent) in named {
             if name.trim().is_empty() || least == 0 {
-                continue;
-            }
-            if !worth_stocking(&name, self.heals_with_kits()) {
                 continue;
             }
             if have < least
@@ -158,7 +156,7 @@ impl Client {
         let tapers = self
             .profiles
             .get(&self.autoplay.config.loot.profile)
-            .map_or(0, |p| p.stocked_count("Prismatic Taper"));
+            .map_or(0, |p| p.stocked_count("Prismatic Taper", &me, my_name));
         if tapers > 0 && !self.world.stats.spells.is_empty() {
             let has_wand = self.wielded_caster().is_some()
                 || self

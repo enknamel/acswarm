@@ -179,6 +179,29 @@ fn fight_worth(engaged: bool, owes_a_body: bool, nearest: f32) -> f32 {
     }
 }
 
+/// What a town run is worth: nothing in a fight in hand (the road fights only what attacks), just
+/// under looting while bodies of ours wait, and its place otherwise; the step says whether one is
+/// due (`grow_town_run`).
+fn worth_town_run(client: &Client, now: Instant) -> f32 {
+    let growth = &client.autoplay.growth;
+    if !client.autoplay.config.growth.town_runs && !growth.run_by_hand() {
+        return 0.0;
+    }
+    if client.in_a_fight() {
+        return 0.0;
+    }
+    town_run_worth(worth_looting(client, now))
+}
+
+/// The same with the world left out: `loot` is what looting is worth this tick.
+fn town_run_worth(loot: f32) -> f32 {
+    if loot > 0.0 {
+        (loot - 1.0).min(TOWN_RUN)
+    } else {
+        UNDECIDED
+    }
+}
+
 fn worth_looting(client: &Client, now: Instant) -> f32 {
     use crate::autoplay::CORPSE_LIFE;
     let room = client.room_for_loot();
@@ -265,6 +288,8 @@ const IN_REACH_OF_A_FIGHT: f32 = 12.0;
 /// What a fight worth walking to scores: under a body at rest, so the
 /// floor is cleared before the character sets off.
 const WALK_TO_A_FIGHT: f32 = LOOT_AT_REST - 5.0;
+/// A town run's place: over starting any fight (summon 90, fight 80), under salvage and the team.
+const TOWN_RUN: f32 = 95.0;
 
 /// Wrap one of the old `-> bool` steps: true meant it claimed the tick.
 ///
@@ -379,6 +404,14 @@ pub const STEPS: &[Step] = &[
         run: claimed!(Client::autoplay_salvage),
     },
     Step {
+        name: "town run",
+        layer: Layer::Goal,
+        base: TOWN_RUN,
+        why: "short of supplies or loaded with loot, a recall to town comes before starting the next fight; a fight in hand and the bodies of ours on the floor come first",
+        worth: worth_town_run,
+        run: claimed!(Client::autoplay_town_run),
+    },
+    Step {
         name: "summon",
         layer: Layer::Goal,
         base: 90.0,
@@ -456,7 +489,7 @@ pub const STEPS: &[Step] = &[
         name: "grow",
         layer: Layer::Goal,
         base: 10.0,
-        why: "with nothing else to do: find monsters, run to town; experience is spent as housekeeping, since this is reached only on a tick nothing else wants",
+        why: "with nothing else to do: find monsters; a town run is a step of its own and experience is spent as housekeeping, since this is reached only on a tick nothing else wants",
         worth: by_place,
         run: claimed!(Client::autoplay_grow),
     },

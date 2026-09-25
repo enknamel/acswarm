@@ -45,13 +45,13 @@ fn a_run_asked_for_from_the_panel_chooses_a_counter_and_sets_off() {
     c.autoplay.config.enabled = true;
     c.autoplay.config.growth.town_runs = false;
     assert_eq!(c.town_run_driver(), Some(Driver::Hand));
-    c.autoplay_grow(now);
+    c.autoplay_town_run(now);
     assert!(
         c.autoplay.growth.town_run_under_way(),
         "let go for town runs being off"
     );
     c.autoplay.config.growth.town_runs = true;
-    assert!(c.autoplay_grow(now), "the run did not keep the tick");
+    assert!(c.autoplay_town_run(now), "the run did not keep the tick");
     assert_eq!(c.town_run_driver(), Some(Driver::Hand));
     assert!(c.traveling(), "autoplay stepped the panel's run");
 
@@ -65,7 +65,7 @@ fn a_run_asked_for_from_the_panel_chooses_a_counter_and_sets_off() {
     assert_eq!(c.autoplay.growth.shop.phase, ac_vendor::Phase::Walking);
     // And autoplay, now running town runs, does not set straight
     // off on one of its own.
-    assert!(!c.autoplay_grow(now), "autoplay started a run at once");
+    assert!(!c.autoplay_town_run(now), "autoplay started a run at once");
     assert_eq!(c.town_run_driver(), None);
 }
 
@@ -83,7 +83,7 @@ fn a_run_started_under_autoplay_is_autoplays_to_step() {
     let now = Instant::now();
     c.town_run_by_hand(now).expect("no run was started");
     assert_eq!(c.town_run_driver(), Some(Driver::Autoplay));
-    assert!(c.autoplay_grow(now));
+    assert!(c.autoplay_town_run(now));
     assert!(c.traveling());
     // Until the panel steps it itself, which makes it the panel's.
     assert_eq!(c.town_run_step_by_hand(now), Turn::Waited);
@@ -109,11 +109,11 @@ fn a_hand_run_left_held_is_autoplays_again_once_it_runs_town_runs() {
     c.autoplay.config.enabled = true;
     c.autoplay.config.growth.town_runs = true;
     // Just pressed: still the panel's, and not stepped by autoplay.
-    assert!(c.autoplay_grow(now));
+    assert!(c.autoplay_town_run(now));
     assert_eq!(c.town_run_driver(), Some(Driver::Hand));
     // Left alone: autoplay's, and stepped on.
     let later = now + HAND_HOLD;
-    assert!(c.autoplay_grow(later));
+    assert!(c.autoplay_town_run(later));
     assert_eq!(c.town_run_driver(), Some(Driver::Autoplay));
     assert!(c.autoplay.growth.town_run_under_way());
     assert!(c.traveling());
@@ -121,7 +121,7 @@ fn a_hand_run_left_held_is_autoplays_again_once_it_runs_town_runs() {
     // keeps stepping.
     assert_eq!(c.town_run_step_by_hand(later), Turn::Waited);
     assert_eq!(c.town_run_driver(), Some(Driver::Hand));
-    assert!(c.autoplay_grow(later));
+    assert!(c.autoplay_town_run(later));
     assert_eq!(c.town_run_driver(), Some(Driver::Hand));
 }
 
@@ -156,7 +156,7 @@ fn a_hand_run_with_town_runs_off_keeps_the_hunting_off_the_counter() {
     };
     c.autoplay.growth.run = Some(run);
     c.autoplay.growth.by_hand = true;
-    assert!(c.autoplay_grow(now), "the run did not keep the tick");
+    assert!(c.autoplay_town_run(now), "the run did not keep the tick");
     assert!(!c.traveling(), "the hunting walked off the counter");
     assert_eq!(c.autoplay.growth.bound, None);
     assert!(c.autoplay.growth.town_run_under_way());
@@ -165,10 +165,10 @@ fn a_hand_run_with_town_runs_off_keeps_the_hunting_off_the_counter() {
         "nothing said why the character stands still: {:?}",
         c.autoplay.status
     );
-    // Without the run the same tick goes looking about the ground,
+    // Without the run the next tick goes looking about the ground,
     // which is what the run was keeping it from.
     c.autoplay.growth.by_hand = false;
-    assert!(c.autoplay_grow(now));
+    assert!(c.autoplay_grow(now + Duration::from_millis(16)));
     assert!(
         !c.autoplay.growth.town_run_under_way(),
         "kept with town runs off"
@@ -413,7 +413,7 @@ fn the_panel_run_with_a_list_and_a_pea_goes_to_the_counter_with_the_list() {
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
 fn the_panel_run_starts_even_when_nobody_buys_the_pea() {
-    // Nothing on the list, a pea in the pack, and no counter near
+    // Nothing on the list, a pea in the pack, and no counter anywhere
     // that takes it: the button still starts a run, to the nearest
     // counter, as it always did.
     let holtburg = 0xA9B4_0019;
@@ -423,7 +423,7 @@ fn the_panel_run_starts_even_when_nobody_buys_the_pea() {
     pea_in_the_pack(&mut c, 0x8000_0010, "Lead Pea", 8329, 500);
     with_a_buy_list(&mut c, &[]);
     let now = Instant::now();
-    assert!(nobody_near_buys_peas(&mut c, SALE_RUN_REACH, now) > 0);
+    assert!(nobody_near_buys_peas(&mut c, f32::INFINITY, now) > 0);
     c.town_run_by_hand(now).expect("no run");
     let run = c.autoplay.growth.run.as_ref().expect("no run");
     assert_eq!(run.errand, Errand::Buy);

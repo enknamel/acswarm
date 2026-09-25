@@ -4,13 +4,17 @@ use glam::Vec2;
 
 use super::vendor::{spot, Stop, NEAR_A_WAY_OUT};
 use super::{
-    Errand, Phase, Run, Turn, BUSY_ASKS, BUSY_REASK, COUNTER_REACH, RUN_EVERY, SELLING_TIMEOUT,
-    SETTLE, STOPS_PER_RUN, VENDOR_OPEN_TIMEOUT, VENDOR_REACH,
+    Errand, Phase, Run, Turn, BUSY_ASKS, BUSY_REASK, COUNTER_REACH, SELLING_TIMEOUT, SETTLE,
+    STOPS_PER_RUN, VENDOR_OPEN_TIMEOUT, VENDOR_REACH,
 };
 use crate::autoplay::growth::road::{on_the_way, OnTheWay, WALK_ON_EVERY};
 use crate::autoplay::growth::{a_few, about, Growth};
 use crate::autoplay::Doing;
 use crate::Client;
+
+/// How long a counter whose window bought none of the pack is left out of the choice: a shelf
+/// list does not change between runs, and runs follow each other with no wait.
+const BUYS_NONE_HOLD: Duration = Duration::from_secs(60 * 60);
 
 /// What a run waiting on a counter's window does next.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -419,11 +423,11 @@ impl Client {
                         // change by the next run. Left on the half
                         // minute a blocked counter gets, and tidied
                         // away at the end of the run, this counter was
-                        // the best-paying choice again every RUN_EVERY.
+                        // the best-paying choice again on the next run.
                         self.autoplay
                             .growth
                             .skip_vendors
-                            .hold(spot(run.at), RUN_EVERY, now);
+                            .hold(spot(run.at), BUYS_NONE_HOLD, now);
                         if run.errand == Errand::Sell {
                             self.autoplay.say(Doing::Shopping, why);
                             return Turn::after_stop(self.grow_run_next(

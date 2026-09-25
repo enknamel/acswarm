@@ -107,12 +107,12 @@ fn a_followers_own_town_run_goes_on_through_following_and_a_fight() {
     c.tick_autoplay(now);
     assert!(bound_for(&c), "following pulled it off its run");
     // A fight breaks the walk off; once it is over the run walks on, taken up as it would be alone:
-    // by "resume the journey", which steps aside for a leader only off a run of its own.
+    // by its own step, which outranks following a leader.
     c.remember_journey();
     c.interrupt_travel("a fight");
     let mut t = now + Duration::from_millis(100);
     c.tick_autoplay(t);
-    assert_eq!(c.autoplay.step, Some("resume the journey"));
+    assert_eq!(c.autoplay.step, Some("town run"));
     for _ in 0..4 {
         t += Duration::from_millis(100);
         c.tick_autoplay(t);
@@ -232,14 +232,13 @@ fn a_counter_that_buys_none_of_the_loot_is_walked_past_on_a_run_to_sell() {
         c.autoplay.growth.skip_vendors.held(&spot(me), now),
         "Rakk is not left alone"
     );
-    // And left alone for at least a run's wait: on the half minute
-    // a blocked counter gets, tidied away at the end of the run,
-    // Rakk was the best-paying choice again every RUN_EVERY.
+    // And left alone past the next run, which follows with no wait: on the half minute a
+    // blocked counter gets, tidied away at the end of the run, Rakk was chosen again.
     assert!(
         c.autoplay
             .growth
             .skip_vendors
-            .held(&spot(me), now + RUN_EVERY - Duration::from_secs(1)),
+            .held(&spot(me), now + BUYS_NONE_HOLD - Duration::from_secs(1)),
         "Rakk is the next run's counter"
     );
     // Not standing at Rakk's counter selling nothing: on to a

@@ -4,8 +4,6 @@ use glam::Vec2;
 
 use super::{Errand, VENDOR_REACH};
 use crate::autoplay::growth::needs::{Need, NeedKind};
-#[cfg(doc)]
-use crate::autoplay::growth::sale::worth_a_sale_run;
 use crate::autoplay::growth::sale::Salable;
 use crate::autoplay::growth::{a_few, contains_fold, Growth};
 use crate::Client;
@@ -24,14 +22,6 @@ use ac_world::{item_type, object_desc_flags};
 /// a long way from the last one and a few paces from a way out, which
 /// is the distance that actually costs anything.
 pub(super) const NEAR_A_WAY_OUT: f32 = 300.0;
-
-/// How far from a way out the first counter of a run made for loot
-/// that merely adds up (see [`worth_a_sale_run`]) may stand: the town
-/// the character is in, or the one its gem lands in. A pack that
-/// cannot hunt on is walked anywhere; a few peas are not, or one Lead
-/// Pea carried a quarter of an hour is a walk to an archmage three
-/// towns over, and the same again for the next.
-pub(super) const SALE_RUN_REACH: f32 = VENDOR_RINGS[0];
 
 /// What the next counter of a run is chosen for, and among which (see
 /// [`Client::pick_vendor`]).
@@ -276,19 +266,6 @@ fn ammo_stock(name: &str, kind: u32) -> bool {
         _ => return false,
     };
     name.trim().to_lowercase() == plain
-}
-
-/// What the vendor charges for an item of `value` (ACE's SellPrice), at
-/// least a pyreal.
-/// Whether a name on the keep-stocked list is worth buying. A healing
-/// kit does nothing for a character that has not trained Healing -- it
-/// restores next to nothing untrained -- so buying one wastes the money
-/// and the trip. Such a character heals with a spell instead.
-pub(crate) fn worth_stocking(name: &str, heals_with_kits: bool) -> bool {
-    if heals_with_kits {
-        return true;
-    }
-    !name.to_lowercase().contains("healing kit")
 }
 
 /// How far to look for a shop before settling for a nearer one with
