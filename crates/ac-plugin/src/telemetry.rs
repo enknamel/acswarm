@@ -168,6 +168,8 @@ fn sample(client: &Client) -> Value {
         "slots": client.room_anywhere(),
         "burden": [carried, capacity],
         "coin": client.purse(),
+        // What the town-run rule last found short and how long ago: [age s, [[name, have, keep, urgent]]].
+        "needs": client.supplies_seen(Instant::now()).map(|(age, lines)| json!([age.round(), lines])),
         // Something the fight rules would take on this near: "waiting" beside it is idle for no reason.
         "fight_near": client.fight_in_reach(),
         "walk": walk,

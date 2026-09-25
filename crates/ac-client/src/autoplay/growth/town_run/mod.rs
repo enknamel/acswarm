@@ -232,7 +232,18 @@ impl Client {
     fn held_back(&mut self, why: impl Into<String>) -> bool {
         let why = why.into();
         if self.autoplay.growth.held_back != why {
-            tracing::debug!("no town run: {why}");
+            // Said when the reason changes, not its count of seconds: why no run was made is
+            // what a report of "he never went to town" needs, and it was debug only.
+            let kind = |s: &str| {
+                s.chars()
+                    .filter(|c| !c.is_ascii_digit())
+                    .collect::<String>()
+            };
+            if kind(&self.autoplay.growth.held_back) != kind(&why) {
+                tracing::info!("no town run: {why}");
+                self.events
+                    .push(crate::Event::Noted(format!("no town run: {why}")));
+            }
             self.autoplay.growth.held_back = why;
         }
         false
