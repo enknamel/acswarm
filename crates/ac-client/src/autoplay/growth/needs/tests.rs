@@ -539,6 +539,8 @@ fn a_counter_is_asked_for_the_named_stock_the_trip_was_made_for() {
         price: 300,
         stock: None,
         burden: 1,
+        value: 0,
+        sell_rate: 0.0,
     };
     let wants = c.vendor_shortfall_at(&cfg, &stats, std::slice::from_ref(&taper));
     assert!(

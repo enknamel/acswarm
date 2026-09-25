@@ -81,6 +81,8 @@ fn main() {
                     price: 287_500,
                     stock: None,
                     burden: 1,
+                    value: 0,
+                    sell_rate: 0.0,
                 },
                 Ware {
                     wcid: 20631,
@@ -88,6 +90,8 @@ fn main() {
                     price: 26,
                     stock: None,
                     burden: 1,
+                    value: 0,
+                    sell_rate: 0.0,
                 },
             ],
             note_face: Some(NOTE_FACE),

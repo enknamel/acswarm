@@ -403,7 +403,7 @@ impl Run {
                 skip(format!("{} each, {purse} in coin", ware.price));
                 continue;
             }
-            let afford = purse / ware.price;
+            let afford = ware.affordable(purse);
             // Unknown burden (0) is no reason to refuse: buy, and let the server answer for it.
             let liftable = match ware.burden {
                 0 => u32::MAX,
@@ -425,7 +425,7 @@ impl Run {
                 }
                 continue;
             }
-            let bill = ware.price.saturating_mul(count);
+            let bill = ware.bill(count);
             // Coin first: a purse all in notes cannot pay a small bill, so cash the smallest note
             // that covers it rather than break a fortune for a handful of tapers.
             if bill > snap.coin {
@@ -501,6 +501,8 @@ mod tests {
                 price: 287_500,
                 stock: None,
                 burden: 1,
+                value: 0,
+                sell_rate: 0.0,
             }],
             note_face: Some(250_000),
             note_wcid: Some(NOTE),
@@ -520,6 +522,33 @@ mod tests {
             wants: Vec::new(),
             rules: Rules::default(),
         }
+    }
+
+    #[test]
+    fn a_stack_is_charged_as_one_item_and_a_purse_is_sized_to_it() {
+        // Magus Guthima sells a Prismatic Taper, worth 22, at 1.55: 34 each, but 150 in one stack
+        // are one item of 3,300 and cost 5,115. Sized at 34 each, 150 were asked for with 5,109
+        // in the purse, and the server refused that some 1,200 times in three minutes.
+        let taper = Ware {
+            wcid: 20631,
+            name: "Prismatic Taper".into(),
+            price: 34,
+            stock: None,
+            burden: 1,
+            value: 22,
+            sell_rate: 1.55,
+        };
+        assert_eq!(taper.bill(150), 5115);
+        assert_eq!(taper.affordable(5109), 149);
+        assert!(taper.bill(149) <= 5109);
+        // Worth unknown: one charge each, as the counter's own price says.
+        let unknown = Ware {
+            value: 0,
+            sell_rate: 0.0,
+            ..taper.clone()
+        };
+        assert_eq!(unknown.bill(150), 5100);
+        assert_eq!(unknown.affordable(5109), 150);
     }
 
     #[test]
@@ -712,6 +741,8 @@ mod tests {
             price,
             stock: None,
             burden,
+            value: 0,
+            sell_rate: 0.0,
         };
         let mut s = snap(vec![item(3, "Dagger", 500, 1, 1)]);
         let c = s.counter.as_mut().unwrap();
@@ -859,6 +890,8 @@ mod tests {
             price: 26,
             stock: None,
             burden: 6,
+            value: 0,
+            sell_rate: 0.0,
         });
         let mut run = Run::new();
         let buy = run.step(&s, now).act.expect("nothing asked for");
@@ -1113,6 +1146,8 @@ mod tests {
             price: 26,
             stock: None,
             burden: 6,
+            value: 0,
+            sell_rate: 0.0,
         });
         // 2,600 of bill and not a coin to pay it with.
         let next = run.step(&s, Instant::now());
@@ -1147,6 +1182,8 @@ mod tests {
             price: 26,
             stock: None,
             burden: 6,
+            value: 0,
+            sell_rate: 0.0,
         });
         let next = run.step(&s, Instant::now());
         assert_eq!(

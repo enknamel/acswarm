@@ -335,6 +335,16 @@ impl Client {
                                     tracing::warn!(
                                         "inventory action failed for {item:#010x}, error {err:#x}"
                                     );
+                                    // A purchase the counter will not make, short of coin, says
+                                    // only this, about the buyer, before its UseDone
+                                    // (Vendor.cs:546-551, Player_Commerce.cs:48-51): told nothing,
+                                    // the rules asked again every tick for three minutes.
+                                    if Some(item) == self.world.player_guid {
+                                        self.autoplay
+                                            .growth
+                                            .shop
+                                            .buy_refused(crate::refusals::Answer::Never, now);
+                                    }
                                     // This is the server's whole answer
                                     // to a move, a split or a merge it
                                     // will not make, and half the time
