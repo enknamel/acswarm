@@ -33,16 +33,30 @@ priority; a live report starts from the telemetry (`tools/telemetry.py`, `--mark
   Scarab, Prismatic Taper" in the status line.
 - **The Academy tutorial fallback cannot finish for a bow soldier**: no damage to the Olthoi,
   then out of arrows.
+- **Autoplay's walk outlives autoplay.** Blargerton, autoplay switched off in the Holtburg Dungeon
+  and recalled to the lifestone: the walk it had set (source "follow", goal 264.5 47182.0 in 0x01F5)
+  walked him 80 m across Holtburg, then stood "no way" for 25 min (Coldeve, 13:47). Switching
+  autoplay off, or a teleport, should drop the walk autoplay set.
 
 ## 3. Tooling
 
 - **Launcher "Launch headless" is not headless** (it only adds `--mute`) and passes the password
   in argv (`-v`), visible to `ps`.
+- **"wedged" counts only fully blocked steps.** A step the walls slide back to where it began
+  reads as progress, so a body going nowhere for 12 min showed wedged false in every sample; the
+  steering's own no-progress check (`STUCK_AFTER`) is what saw it.
 - **`--create` with no template makes a crippled character** (60 attribute points, 18 HP at
   level 5); use a template, as `tools/scenarios.sh` does.
 
 ## Fixed
 
+- **Ran at a bookcase for 12 minutes** (759744a, e2890ea): Blargerton, squeezed between a row of
+  bookcases and a chest 0.75 m apart in the Holtburg Dungeon (0x01F60233), was routed from the node
+  nearest him, a lattice point snapped out to the bookcases' far side, on every replan. A route now
+  starts at the nearest node a straight walk reaches. Offline on the real dungeon: still there
+  after 30 s before; round the end of the bookcases to the corpse after. `find_path` cost unchanged
+  (ACB5 185 -> 182 us, Holtburg 115 -> 117, the dungeon 985 -> 999). Scenarios: one run all passed;
+  two had only the ACB5 ledge corpse (the entry above) over 30 s.
 - **Never went to town when low on supplies** (95e6782, f372476): a due run waited 8 min after
   any run, waited out a walk to a ground as "busy", ranked under every fight (only the last step
   started one), stopped at 600 m for loot, and a component sized from a small taper line (two
