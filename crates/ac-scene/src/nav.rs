@@ -731,12 +731,12 @@ impl NavGraph {
         out
     }
 
-    /// The node nearest `p` that a straight walk joins to it (from `p` to the node when
-    /// `leaving`, else from the node to `p`), else `nearest`: the nearest node can be a lattice
-    /// point snapped out to a bookcase's far side, and a route starting there aims through it for
-    /// good (test: a_character_against_a_bookcase_walks_round_it, in ac-client).
-    /// Only the close look: widening it built graph a character never walks, one slow frame each.
-    fn nearest_joined(&mut self, ground: &Ground, p: Vec3, leaving: bool) -> Option<u32> {
+    /// The node nearest `p` that a straight walk from `p` reaches, else `nearest`: the nearest can
+    /// be a lattice point snapped out to a bookcase's far side, and a route starting there aims
+    /// through it for good (test: a_character_against_a_bookcase_walks_round_it, in ac-client).
+    /// The close look only, and the start only: a goal no node walks to (a spot overhead, a
+    /// creature against a wall) cost every replan eight failed walks.
+    fn nearest_joined(&mut self, ground: &Ground, p: Vec3) -> Option<u32> {
         let cap = self.capsule;
         for (_, id) in self
             .near(ground, p, NEAREST_REACH)
@@ -744,8 +744,7 @@ impl NavGraph {
             .take(JOIN_TRIES)
         {
             let q = self.nodes[id as usize].pos;
-            let (a, b) = if leaving { (p, q) } else { (q, p) };
-            if ground.walkable(a, b, &cap).0 && line_clear(ground.collision, a, b) {
+            if ground.walkable(p, q, &cap).0 && line_clear(ground.collision, p, q) {
                 return Some(id);
             }
         }
@@ -763,8 +762,8 @@ impl NavGraph {
         let start = ground
             .collision
             .resolve_above(start, cap.radius, cap.height, cap.step_up);
-        let s = self.nearest_joined(ground, start, true)?;
-        let g = self.nearest_joined(ground, goal, false)?;
+        let s = self.nearest_joined(ground, start)?;
+        let g = self.nearest(ground, goal)?;
         let nodes = self.astar(ground, s, g)?;
         let mut points: Vec<Vec3> = nodes.iter().map(|&n| self.nodes[n as usize].pos).collect();
         points.push(goal);
