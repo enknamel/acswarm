@@ -190,6 +190,12 @@ fn worth_town_run(client: &Client, now: Instant) -> f32 {
     if client.in_a_fight() {
         return 0.0;
     }
+    // Starting one is what outranks a fight; one under way is carried on where the grow step
+    // carried it, so buffs go up on the walk and a leader is followed (test:
+    // a_run_under_way_keeps_its_old_place).
+    if growth.town_run_under_way() {
+        return RUN_UNDER_WAY;
+    }
     town_run_worth(worth_looting(client, now))
 }
 
@@ -290,6 +296,8 @@ const IN_REACH_OF_A_FIGHT: f32 = 12.0;
 const WALK_TO_A_FIGHT: f32 = LOOT_AT_REST - 5.0;
 /// A town run's place: over starting any fight (summon 90, fight 80), under salvage and the team.
 const TOWN_RUN: f32 = 95.0;
+/// A run under way: under explore (20), which defers to it, and over grow (10), as when grow ran it.
+const RUN_UNDER_WAY: f32 = 15.0;
 
 /// Wrap one of the old `-> bool` steps: true meant it claimed the tick.
 ///
@@ -407,7 +415,7 @@ pub const STEPS: &[Step] = &[
         name: "town run",
         layer: Layer::Goal,
         base: TOWN_RUN,
-        why: "short of supplies or loaded with loot, a recall to town comes before starting the next fight; a fight in hand and the bodies of ours on the floor come first",
+        why: "short of supplies or loaded with loot, a recall to town comes before starting the next fight; a fight in hand and the bodies of ours on the floor come first, and a run under way is carried on below the other goals",
         worth: worth_town_run,
         run: claimed!(Client::autoplay_town_run),
     },

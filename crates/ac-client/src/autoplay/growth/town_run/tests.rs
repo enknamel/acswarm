@@ -102,10 +102,16 @@ fn peas_for_a_counter_send_a_roomy_pack_to_town_once_the_waits_are_up() {
         "{}",
         c.autoplay.growth.held_back
     );
-    // Just back from one that sold something: off again at once, five thousand at face in the
-    // pack, to the one counter in town that buys peas.
+    // Back from one that sold something, a sale that merely adds up still waits its while.
     c.autoplay.growth.run_was_futile = false;
-    let later = soon;
+    assert!(!c.grow_town_run(soon, &cfg));
+    assert!(
+        c.autoplay.growth.held_back.contains("a sale waits"),
+        "{}",
+        c.autoplay.growth.held_back
+    );
+    // Then off, five thousand at face in the pack, to the one counter in town that buys peas.
+    let later = now + SALE_RUN_EVERY;
     assert!(
         c.grow_town_run(later, &cfg),
         "{}",
@@ -225,6 +231,33 @@ pub(super) fn nobody_near_buys_peas(c: &mut Client, reach: f32, now: Instant) ->
             .hold(spot(*at), Duration::from_secs(60 * 60), now);
     }
     buyers.len()
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_supply_run_goes_straight_after_the_last_one() {
+    // Out of tapers just after a run that sold something: no wait, a recall makes the trip.
+    let holtburg = 0xA9B4_0019;
+    let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
+    c.world.player_guid = Some(crate::testkit::ME);
+    c.world.stats.level = 20;
+    with_a_pack(&mut c, 50);
+    coin_in_the_pack(&mut c, 0x8000_0030, 5_000);
+    with_a_buy_list(&mut c, &[("Prismatic Taper", 100, 5)]);
+    let cfg = c.autoplay.config.growth.clone();
+    let now = Instant::now();
+    c.autoplay.growth.last_run = Some(now);
+    assert!(
+        c.grow_town_run(now, &cfg),
+        "{}",
+        c.autoplay.growth.held_back
+    );
+    let run = c.autoplay.growth.run.as_ref().expect("no run");
+    assert!(
+        run.reason.contains("short of Prismatic Taper"),
+        "{}",
+        run.reason
+    );
 }
 
 #[test]

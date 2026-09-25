@@ -107,12 +107,12 @@ fn a_followers_own_town_run_goes_on_through_following_and_a_fight() {
     c.tick_autoplay(now);
     assert!(bound_for(&c), "following pulled it off its run");
     // A fight breaks the walk off; once it is over the run walks on, taken up as it would be alone:
-    // by its own step, which outranks following a leader.
+    // by "resume the journey", which steps aside for a leader only off a run of its own.
     c.remember_journey();
     c.interrupt_travel("a fight");
     let mut t = now + Duration::from_millis(100);
     c.tick_autoplay(t);
-    assert_eq!(c.autoplay.step, Some("town run"));
+    assert_eq!(c.autoplay.step, Some("resume the journey"));
     for _ in 0..4 {
         t += Duration::from_millis(100);
         c.tick_autoplay(t);

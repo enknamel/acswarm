@@ -258,6 +258,16 @@ fn a_due_town_run_waits_only_for_the_bodies_of_ours() {
 }
 
 #[test]
+fn a_run_under_way_keeps_its_old_place() {
+    // Starting a run outranks a fight; carrying one on sits where the grow step carried it, under
+    // buffs, following and exploring (which defers to it), over grow.
+    let base = |name: &str| named(name).expect(name).base;
+    assert!(RUN_UNDER_WAY < base("explore"));
+    assert!(RUN_UNDER_WAY < base("buffs") && RUN_UNDER_WAY < base("follow"));
+    assert!(RUN_UNDER_WAY > base("grow"));
+}
+
+#[test]
 fn a_town_run_gives_way_to_a_fight_in_hand() {
     let mut c = in_the_field();
     c.autoplay.config.growth.town_runs = true;

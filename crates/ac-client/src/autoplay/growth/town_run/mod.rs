@@ -69,6 +69,10 @@ const FUTILE_RUN_WAIT: Duration = Duration::from_secs(300);
 /// its luck has changed.
 const STOPPED_LOOK_EVERY: Duration = Duration::from_secs(5);
 
+/// Least time between runs made only to sell loot that adds up (`worth_a_sale_run`); a supply
+/// short, a full pack or as much loot as it means to carry go at once.
+const SALE_RUN_EVERY: Duration = Duration::from_secs(8 * 60);
+
 /// Most vendors visited in one run.
 const STOPS_PER_RUN: u32 = 3;
 
@@ -445,6 +449,20 @@ impl Client {
                 .collect();
             (format!("short of {}", a_few(&short)), Errand::Buy)
         } else if let Some(why) = sale {
+            // Loot that merely adds up is no reason to stop hunting every minute: 5,000 pyreals'
+            // worth came every minute on the Holtburg grounds and took a third of the time.
+            if let Some(t) = self
+                .autoplay
+                .growth
+                .last_run
+                .filter(|t| now.duration_since(*t) < SALE_RUN_EVERY)
+            {
+                let left = SALE_RUN_EVERY.saturating_sub(now.duration_since(t));
+                return self.held_back(format!(
+                    "{why}: a sale waits {} s more since the last run",
+                    left.as_secs()
+                ));
+            }
             (why, Errand::Sell)
         } else {
             let short: Vec<&str> = needs.iter().map(|n| n.name.as_str()).collect();
