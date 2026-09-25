@@ -25,6 +25,10 @@ impl Client {
     }
 }
 
+/// How far apart the spots kept on the way into a building are (metres): the walk back out aims at
+/// one 5-10 m outside the door, where arriving means standing outdoors.
+pub(super) const CLEAR_OF_DOOR: f32 = 5.0;
+
 /// After a journey that could not be planned, the next place is not
 /// tried for this long.
 pub(super) const RETRY_AFTER: Duration = Duration::from_secs(30);
@@ -171,7 +175,8 @@ impl Client {
             let block = pl.cell & 0xFFFF_0000;
             let same_block =
                 |p: Vec2| (((p.x / 192.0) as u32) << 24) | (((p.y / 192.0) as u32) << 16) == block;
-            if let Some(out) = self.autoplay.growth.last_outdoors {
+            let st = &self.autoplay.growth;
+            if let Some(out) = st.outdoors_back.or(st.outdoors_mark).or(st.last_outdoors) {
                 if same_block(out)
                     && out.distance(Vec2::new(me.x, me.y)) < 150.0
                     && self.travel_to(out)

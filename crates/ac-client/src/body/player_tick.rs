@@ -63,6 +63,7 @@ impl Client {
                 None => None,
             };
             {
+                let mut source = "dodge";
                 let goal = if let Some(target) = dodging {
                     // Straight there: the step was checked for room
                     // when it was chosen, and there is no time to plan.
@@ -75,6 +76,11 @@ impl Client {
                     input.run = true;
                     None
                 } else {
+                    source = match (self.move_to, travel_goal) {
+                        (Some(_), _) => "server walk",
+                        (None, Some(_)) => "journey",
+                        (None, None) => "follow",
+                    };
                     match self.move_to {
                         Some(ac_world::object::MoveTarget::Object(g)) => self
                             .world
@@ -190,6 +196,8 @@ impl Client {
                         self.walk_frame = Some(crate::tally::WalkFrame {
                             at: now,
                             goal: g,
+                            goal_cell,
+                            source,
                             aim: match aim {
                                 ac_nav::Aim::Go(at) => Some(at),
                                 ac_nav::Aim::NoWay => None,

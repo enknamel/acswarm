@@ -460,3 +460,28 @@ fn nothing_is_sent_to_move_an_item_while_the_server_has_us_busy() {
     c.attack_pending = false;
     assert!(c.wield_guid(WAND));
 }
+
+#[test]
+fn a_caster_with_no_attack_spells_takes_up_a_carried_weapon() {
+    // Scn Blade, a soldier, held a looted Staff for a whole scenario run saying "no attack spells
+    // known" 2,374 times, with a Battle Axe in its pack and Heavy Weapons at 149.
+    const STAFF: u32 = 0x8000_0201;
+    const AXE: u32 = 0x8000_0202;
+    let mut c = crate::testkit::character_of_level(no_data(), 20);
+    a_weapon(&mut c, STAFF, ac_world::item_type::CASTER, "Staff", true);
+    a_weapon(
+        &mut c,
+        AXE,
+        ac_world::item_type::MELEE_WEAPON,
+        "Battle Axe",
+        false,
+    );
+    assert!(c.attack_spells_known().is_empty());
+    c.fighting_stance_as(crate::autoplay::Style::Auto);
+    let asked = c
+        .autoplay
+        .wield_asked
+        .map(|(g, _)| g)
+        .or(c.autoplay.pending_wield);
+    assert_eq!(asked, Some(AXE), "the axe is taken up");
+}

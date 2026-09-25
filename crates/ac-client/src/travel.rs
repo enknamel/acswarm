@@ -1871,6 +1871,33 @@ mod tests {
 
     #[test]
     #[ignore = "needs AC_DATA_DIR"]
+    fn a_walk_out_of_a_shop_to_a_spot_outside_the_door_reaches_the_next_counter() {
+        // Inside Archmage Cindrue's shop, where a scenario's mage stood four minutes: from indoors
+        // the block's graph finds no way to Shopkeeper Renald 112 m off, but it does to a spot
+        // outside the door, and from there the journey on is an ordinary walk.
+        let mut c =
+            crate::testkit::standing_in_the_field(20, 0xA9B4_0117, Vec3::new(151.8, 129.8, 66.0));
+        let renald = Vec2::new(32587.2, 34578.3);
+        assert!(
+            c.travel_to(Vec2::new(32588.0, 34691.0)),
+            "8 m out, on the way in"
+        );
+        walk_the_journey(&mut c, 20.0);
+        let cell = c.player.as_ref().unwrap().cell;
+        assert!(cell & 0xFFFF < 0x100, "outdoors, not {cell:#010x}");
+        c.end_trip();
+        assert!(c.travel_to(renald));
+        walk_the_journey(&mut c, 90.0);
+        let at = c.player.as_ref().unwrap().world_position().truncate();
+        assert!(
+            at.distance(renald) <= 2.0 * ARRIVE,
+            "stopped {:.0} m short",
+            at.distance(renald)
+        );
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_ground_reached_through_a_one_way_portal_has_a_way_home_on_foot() {
         // Where a scenario's caster ran out of tapers: the Mosswart ground, reached from Holtburg
         // through a portal with none back, 3.5 km from town and 2.5 km from Magus Guthima.

@@ -93,7 +93,7 @@ impl Item {
 }
 
 /// Something a counter has on its shelf.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Ware {
     pub wcid: u32,
     pub name: String,
@@ -103,6 +103,37 @@ pub struct Ware {
     pub stock: Option<u32>,
     /// Burden of one, or 0 when the counter did not say; caps how many can be carried home.
     pub burden: u32,
+    /// What one is worth, and the counter's rate on it (a note's is the server's own): together
+    /// they price a stack, which is one item to the server (0 when unknown).
+    pub value: u32,
+    pub sell_rate: f32,
+}
+
+impl Ware {
+    /// What `count` of it cost bought at once. The server charges each item it creates
+    /// ceil(rate x value - 0.1) (Vendor.cs:536-541, 577-585), and a stack is one item whose value
+    /// is the lot: 150 tapers at 1.55 x 22 are 5,115, not 150 x 34. The counter does not say
+    /// which kind a ware is, so the dearer of the two is the bill.
+    pub fn bill(&self, count: u32) -> u32 {
+        let each = self.price.saturating_mul(count);
+        let lot = self.value.saturating_mul(count) as f32;
+        let stack = (self.sell_rate * lot - 0.1).ceil().max(0.0) as u32;
+        each.max(stack)
+    }
+
+    /// The most of it `purse` pays for, by [`Ware::bill`].
+    pub fn affordable(&self, purse: u32) -> u32 {
+        if self.price == 0 {
+            return 0;
+        }
+        // The stack's charge passes `price` times the count by at most a pyreal in ten, so this
+        // steps down a handful of times at most.
+        let mut n = purse / self.price;
+        while n > 0 && self.bill(n) > purse {
+            n -= 1;
+        }
+        n
+    }
 }
 
 /// The counter being stood at.

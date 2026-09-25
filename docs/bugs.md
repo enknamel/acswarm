@@ -6,20 +6,11 @@ priority; a live report starts from the telemetry (`tools/telemetry.py`, `--mark
 
 ## 1. Stops the character playing
 
-- **The Jonathan shortcut out of the Academy fails**: "waiting for the Jonathan to turn up", then
-  "nothing to give", and the character does the whole tutorial instead (a war mage left in 6.5
-  min, scenarios run 2). Blargerton took 58 s to walk 9 m towards Boddry the Chancy, and props
-  near local (14.88, -26.79) in 0x860201AD wedged walks there while `line_blocked` called the
-  line clear. Shows as: `no stall over 30 s` fails with a cell in 0x8602 or near a counter.
-- **Stands at a counter it has not reached.** Scn Mage stood 240 s 4 m from Shopkeeper Renald the
-  Elder (0xA9B40117, 32599.8 34689.8): straight line, aim set, not wedged, no detour, in both runs
-  of 2026-09-24. Shows as: `no stall over 30 s` fails with "going to <vendor> (150 m)".
-- **A caster in hand and no attack spells: no fight at all.** Scn Blade held a looted Staff, knew no
-  attack spells ("no attack spells known" from its first second) and never took up a weapon; 0
-  blows in both runs. (The fixture's Battle Axe went to a counter: the Check profile sells anything
-  worth 25, so the scenario profile must keep the fixtures' weapons.)
-- **A purchase hangs at the counter.** After "buying 150 Prismatic Taper" at Magus Guthima the run
-  waited the whole 3-minute `SELLING_TIMEOUT` ("taking too long to trade with").
+- **Leaning for a minute on what the line test calls clear.** Scn Mage at the Mosswart ground
+  (0xBAAD0017, 35773.4 33364.8) "getting Gotrok Lithos in sight" aimed straight at a spot 18 m off
+  (follow, block 0xBAAD0000, straight line chosen) and did not move for 61 s, then 20 s more
+  walking to its corpse (run E). Nothing gives up a target the body cannot get to. Shows as: a
+  stall whose walk detail says straight line, not wedged, outdoors.
 - **The two town-run planners disagree.** The first plan said "Boddry the Chancy it is: nowhere
   sells what is wanted", the next-stop plan found Cindrue with "2 of 2 on the shelf", so the run
   walked to the wrong counter. Shows as: two stops for one need in the status lines.
@@ -46,8 +37,27 @@ priority; a live report starts from the telemetry (`tools/telemetry.py`, `--mark
 
 ## Fixed
 
+- **Walked into a pocket at the Academy spawn** (6556d76): a steering reset a tenth of a second
+  into a routed walk to Jonathan aimed straight at him until the next line check, into a pocket
+  among the props no path leaves. Before: stuck 53-55 s (runs A, B, D), 388 s and never out (E),
+  the Jonathan shortcut never working. After: route kept, out by Jonathan at 5.9 s, no stall (F, G).
+
+- **Stood in a shop aiming through its wall** (733ed66): the walk out of a building aimed at the
+  threshold, within `ARRIVE` of a character just inside, so it ended at once and the next walk
+  (112 m to Shopkeeper Renald) leaned on the wall; the block's graph finds no path that far from
+  indoors. Now it walks out to a spot 5-10 m outside on the way it came in. Scn Mage: 241 s stalled
+  in both runs before; 0 s after (run A: out of Boddry's shop in 2 s); data test replays Cindrue's.
+- **A caster in hand and no attack spell: no fight at all** (35e30cf). Scn Blade held a looted
+  Staff for whole runs, "no attack spells known" 2,397 times, 0 blows, with a Battle Axe in its
+  pack. Now it takes up the axe: in hand from 2.6 s, 25 blows (187 points), 3 kills (run B).
+- **A purchase refused in silence for three minutes** (e974d12): sized at 34 a taper where the
+  server charges a stack as one item (150 at Magus Guthima's 1.55 cost 5,115 against 5,109), and
+  the silent refusal asked again every tick. Silent refusals 1,203 and 1,212 -> 2 (the bow's arrow
+  wield, not a buy); 677 tapers and a scarab bought at the first ask, then 32 casts (run C).
+
 - **No way back to town from a far ground** (3b64241): the planner believed a leg on foot only to
   1200 m, so a ground reached through a one-way portal had no way home. Scn Taper, out of tapers
-  2.5 km out: before, 17 "no way to" refusals, 0 bought, no casts; after, a 656 s walk planned,
-  there in 129 s, 150 tapers bought, run done at 365 s.
+  2.5 km out: before, 17 "no way to" refusals; after, none, a 656 s walk planned, at Magus
+  Guthima in 129 s. (Its purchase then failed: see the stack price below; "150 bought" in the
+  first report counted asks, not arrivals.)
 - **Standing about a quiet ground** (f37ffc3): longest idle 237 s -> 24-63 s.

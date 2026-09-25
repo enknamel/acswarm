@@ -27,7 +27,16 @@ done
 repo=$(cd "$(dirname "$0")/.." && pwd)
 out=${out:-$(mktemp -d "${TMPDIR:-/tmp}/scenarios.XXXXXX")}
 mkdir -p "${out}/cfg/profiles" "${out}/scripts"
-cp "${repo}/tools/autoplay-check-profile.json" "${out}/cfg/profiles/Check.json"
+# The check profile, keeping the fixtures' own weapons as a player's profile keeps theirs: an
+# unwielded weapon is loot to the Check profile, and a counter took the Battle Axe from Scn Blade.
+python3 - "${repo}/tools/autoplay-check-profile.json" "${out}/cfg/profiles/Check.json" <<'PY2'
+import json, sys
+profile = json.load(open(sys.argv[1]))
+keep = [{"name": f"our {w}", "on": True, "action": "keep", "all": [{"Item": {"Word": w}}], "keep_up_to": None}
+        for w in ("Battle Axe", "Longbow", "Arrow")]
+profile["rules"] = keep + profile["rules"]
+json.dump(profile, open(sys.argv[2], "w"), indent=1)
+PY2
 cat > "${out}/scripts/scenario.rhai" <<'RHAI'
 // Sets each character up for its scenario, asked every twenty seconds: every step looks before it
 // acts, so an early or repeated ask costs nothing. The @commands need the account's developer access.
@@ -57,13 +66,26 @@ fn command(name, args) {
                 if it.name == "Battle Axe" { axe = true; }
                 if it.name == "Longbow" { bow = true; }
                 if it.name == "Arrow" { arrows += it.stack; }
-                if who == "Scn Taper" && it.name.contains("Taper") { drop_item(it.guid); }
             }
             if coin < 3000 { say("@ci 273 5000"); }
             if who == "Scn Blade" && !axe { say("@ci 301"); }
             if who == "Scn Bow" && !bow { say("@ci 306"); }
             if who == "Scn Bow" && arrows < 200 { say("@ci 300 250"); }
             if who == "Scn Seller" { for i in 0..10 { say("@ci 297"); } }
+        }
+    }
+    // The tapers go before autoplay starts: a drop is refused while the character is busy casting
+    // or teleporting (Player_Inventory.cs:1373), so it stands still until none are left.
+    if who == "Scn Taper" {
+        let asks = board_get("scn.asks." + who);
+        let asks = if type_of(asks) == "()" { 0 } else { asks };
+        board_set("scn.asks." + who, asks + 1);
+        let tapers = [];
+        for it in inventory() { if it.name.contains("Taper") { tapers.push(it); } }
+        if asks < 6 && tapers.len() > 0 {
+            autoplay(false);
+            for it in tapers { drop_item(it.guid); }
+            return true;
         }
     }
     set_loot_profile("Check");

@@ -287,6 +287,7 @@ impl Client {
             attributes,
             attributes_current,
             vitals,
+            no_attack_spells: false,
         }
     }
 

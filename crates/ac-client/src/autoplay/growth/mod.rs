@@ -213,6 +213,10 @@ pub struct State {
     /// building begins with a walk back to this spot, since the
     /// planner cannot see out of a shop.
     last_outdoors: Option<Vec2>,
+    /// A spot on the way in every `road::CLEAR_OF_DOOR` metres, and the one before it: the walk out
+    /// ends there, since the threshold itself is within `travel::ARRIVE` of a character inside.
+    outdoors_mark: Option<Vec2>,
+    outdoors_back: Option<Vec2>,
     /// The journey to make once outside.
     after_out: Option<Vec2>,
     /// What the character was short of when the run began, for the
@@ -380,7 +384,16 @@ impl Client {
         if let Some(pl) = self.player.as_ref() {
             if !pl.is_indoors() {
                 let p = pl.world_position();
-                self.autoplay.growth.last_outdoors = Some(Vec2::new(p.x, p.y));
+                let p = Vec2::new(p.x, p.y);
+                let st = &mut self.autoplay.growth;
+                st.last_outdoors = Some(p);
+                if st
+                    .outdoors_mark
+                    .is_none_or(|m| m.distance(p) >= road::CLEAR_OF_DOOR)
+                {
+                    st.outdoors_back = st.outdoors_mark;
+                    st.outdoors_mark = Some(p);
+                }
             }
         }
         // Whether we are underground decides what a journey may be made

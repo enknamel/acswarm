@@ -172,6 +172,12 @@ impl Client {
                     price: ac_world::shops::charge(w.desc.value, v.sell_rate, w.desc.item_type),
                     stock: w.in_stock().filter(|n| *n > 0),
                     burden: w.desc.burden,
+                    value: w.desc.value,
+                    sell_rate: if w.desc.item_type & ac_world::item_type::PROMISSORY_NOTE != 0 {
+                        ac_world::shops::NOTE_MARKUP
+                    } else {
+                        v.sell_rate
+                    },
                 })
                 .collect(),
             note_face: note.map(|(face, _)| face),
