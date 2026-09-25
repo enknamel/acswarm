@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use glam::Vec2;
 
 use super::counter::counter_asked;
-use super::vendor::{Stop, SALE_RUN_REACH};
+use super::vendor::Stop;
 use super::{Driver, Errand, Phase, Run, Turn, VENDOR_OPEN_TIMEOUT, VENDOR_REACH};
 use crate::autoplay::growth::about;
 use crate::autoplay::Doing;
@@ -171,7 +171,7 @@ impl Client {
                 // and the loot goes along as a tiebreak (and to a second
                 // counter after, see [`Self::grow_run_next`]); with
                 // nothing to buy and something to sell it goes to the
-                // counter that pays, in the town it is in. Made to sell
+                // counter that pays, however far. Made to sell
                 // whenever the pack held a pea, the run walked past the
                 // bowyer with the arrows on the list and came home
                 // short of them.
@@ -183,13 +183,13 @@ impl Client {
                 };
                 let first = Stop {
                     errand,
-                    within: (errand == Errand::Sell).then_some(SALE_RUN_REACH),
+                    within: None,
                     visited: &[],
                 };
                 let started =
                     self.start_town_run(now, &cfg, needs.clone(), reason.clone(), first, true);
                 match (started, errand) {
-                    // Nobody near buys what is carried: the player still
+                    // Nobody buys what is carried: the player still
                     // asked for a run, and a run to buy has a counter to
                     // fall back on -- the nearest.
                     (Err(_), Errand::Sell) => {

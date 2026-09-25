@@ -233,19 +233,6 @@ fn there_is_always_a_last_ring_to_fall_back_on() {
 }
 
 #[test]
-fn a_healing_kit_is_not_bought_for_someone_who_cannot_use_one() {
-    // Untrained Healing: a kit restores next to nothing, so it is
-    // not worth the money or the trip to a vendor.
-    assert!(!worth_stocking("Healing Kit", false));
-    assert!(!worth_stocking("Excellent Healing Kit", false));
-    // Trained, it is worth having again.
-    assert!(worth_stocking("Healing Kit", true));
-    // Everything else is judged on its own, either way.
-    assert!(worth_stocking("Prismatic Taper", false));
-    assert!(worth_stocking("Mana Stone", false));
-}
-
-#[test]
 fn ammunition_is_the_plain_kind() {
     use ac_world::fletching::ammo_type;
     assert!(ammo_stock("Arrow", ammo_type::ARROW));

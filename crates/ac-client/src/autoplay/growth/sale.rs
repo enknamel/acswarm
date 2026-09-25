@@ -328,7 +328,9 @@ impl Client {
             ammo,
             &p.burns,
             &p.keep,
-            p.profile.as_ref().is_some_and(|x| x.stocks(&s.name)),
+            p.profile
+                .as_ref()
+                .is_some_and(|x| x.stocks(&s.name, &p.wielder, &p.me)),
             self.autoplay.ledger.of(s),
             // The profile is the source of truth. A character nobody
             // has given one to sells nothing, which is the right way for

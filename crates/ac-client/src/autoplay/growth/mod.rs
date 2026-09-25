@@ -46,7 +46,6 @@ use std::time::Instant;
 use ac_agent::recent::Recent;
 use glam::Vec2;
 
-use crate::autoplay::Doing;
 use crate::Client;
 
 pub(crate) mod burden;
@@ -72,6 +71,7 @@ use sale::worth_a_sale_run;
 pub use sale::Salable;
 #[cfg(doc)]
 use town_run::counter::on_opening;
+#[cfg(doc)]
 use town_run::panel::hand_has_let_go;
 pub use town_run::panel::TownRunView;
 pub use town_run::vendor::Forecast;
@@ -102,10 +102,6 @@ pub struct State {
     pub bought_anything: bool,
     /// How many trips the quartermaster has made this time out.
     pub round: u32,
-    /// The character came home from a counter too laden to be handed
-    /// anything. Nothing at a shop changes that, so it does not go
-    /// back until it has sold or used something.
-    pub too_heavy: bool,
     /// Stacks the server would not join, so the tidying does not ask
     /// for ever. Prismatic Tapers at a hundred and two hundred should
     /// merge and the asking should stop when they do not.
@@ -137,6 +133,8 @@ pub struct State {
     /// once a frame and the answer is usually the same one; this keeps
     /// the log to the moments it changes.
     held_back: String,
+    /// The tick `grow_settle` last read the world on: the town-run and grow steps share one reading.
+    settled_at: Option<Instant>,
     /// Since when the pack has held loot for a counter, `None` while
     /// it holds none -- the clock the patience in [`worth_a_sale_run`]
     /// reads. Read on the frames a run could start, so it starts once
@@ -373,14 +371,51 @@ impl State {
 }
 
 impl Client {
-    /// The growth rules: spend experience, find monsters, run to town.
-    /// Run once a frame when nothing more pressing claimed it; true
-    /// when it did something.
+    /// The growth rules: find monsters (experience is spent as housekeeping and town runs are their
+    /// own step). Run when nothing more pressing claimed the tick; true when it did something.
     pub fn autoplay_grow(&mut self, now: Instant) -> bool {
         let cfg = self.autoplay.config.growth.clone();
         if self.world.player_guid.is_none() {
             return false;
         }
+        let mode = self.grow_settle(now, &cfg);
+        // A run holds the legs even on a tick its step gave to a fight.
+        if self.autoplay.growth.run.is_some() {
+            return false;
+        }
+        // A follower goes with its leader, not to a ground of its own (`grow_hunt`): a walk there
+        // set meanwhile, as a town run's end sets one, is let go whatever the party's mode.
+        if self.is_led() {
+            self.autoplay.growth.drop_ground_walk();
+            return false;
+        }
+        // A party that has stopped to restock does not wander off to a
+        // new hunting ground in the middle of it, and nor does one that
+        // has given up and stopped in town.
+        //
+        // A hunting area the player chose is walked about whether or not
+        // the character is left to find grounds of its own: with that
+        // off, a character that had cleared the Holtburg field it was
+        // given stood in the middle of it for good.
+        let roams_an_area = self.autoplay.config.fight.area.is_some();
+        (cfg.hunt_grounds || roams_an_area)
+            && mode.hunting()
+            && !self.autoplay.growth.stopped_in_town
+            && self.grow_hunt(now, &cfg)
+    }
+
+    /// What the growth rules read off the world once a tick, whichever of their steps runs first:
+    /// where the character last stood outdoors, whether it is underground, the errands whose
+    /// setting was turned off, and the party's mode, which it answers.
+    pub(super) fn grow_settle(
+        &mut self,
+        now: Instant,
+        cfg: &Growth,
+    ) -> crate::logistics::GroupMode {
+        if self.autoplay.growth.settled_at == Some(now) {
+            return self.autoplay.growth.mode;
+        }
+        self.autoplay.growth.settled_at = Some(now);
         if let Some(pl) = self.player.as_ref() {
             if !pl.is_indoors() {
                 let p = pl.world_position();
@@ -424,63 +459,7 @@ impl Client {
                 self.close_vendor();
             }
         }
-        let mode = self.grow_mode(now, &cfg);
-        // A run the vendoring panel is driving is the panel's to step,
-        // and has the tick whether or not town runs are on: the
-        // character is on a run, and nothing below -- the hunting, with
-        // its patrols and roams -- walks it off the counter in the
-        // middle of one. Held for a while with town runs on, it is
-        // autoplay's again and stepped below; with them off, the panel
-        // is the one thing running it, and the status line says so.
-        if self.autoplay.growth.run_by_hand() {
-            if !hand_has_let_go(self.autoplay.growth.hand_stepped, now) {
-                return true;
-            }
-            if !cfg.town_runs {
-                let vendor = self.autoplay.growth.run.as_ref().map(|r| r.vendor.clone());
-                self.autoplay.say(
-                    Doing::Shopping,
-                    format!(
-                        "the run to {} is held by the vendoring panel",
-                        vendor.unwrap_or_default()
-                    ),
-                );
-                return true;
-            }
-            self.autoplay.growth.by_hand = false;
-            self.autoplay.note(
-                "the vendoring panel let go of its run: autoplay takes it on",
-                now,
-            );
-        }
-        // Experience is not spent here but as housekeeping (see
-        // [`Client::autoplay_spend_xp`]): this is the last goal, and a
-        // rank that waited for it waited for good.
-        if cfg.town_runs && self.grow_town_run(now, &cfg) {
-            return true;
-        }
-        // A follower goes with its leader, not to a ground of its own (`grow_hunt`): a walk there
-        // set meanwhile, as a town run's end sets one, is let go whatever the party's mode.
-        if self.is_led() {
-            self.autoplay.growth.drop_ground_walk();
-            return false;
-        }
-        // A party that has stopped to restock does not wander off to a
-        // new hunting ground in the middle of it, and nor does one that
-        // has given up and stopped in town.
-        //
-        // A hunting area the player chose is walked about whether or not
-        // the character is left to find grounds of its own: with that
-        // off, a character that had cleared the Holtburg field it was
-        // given stood in the middle of it for good.
-        if (cfg.hunt_grounds || roams_an_area)
-            && mode.hunting()
-            && !self.autoplay.growth.stopped_in_town
-            && self.grow_hunt(now, &cfg)
-        {
-            return true;
-        }
-        false
+        self.grow_mode(now, cfg)
     }
 }
 

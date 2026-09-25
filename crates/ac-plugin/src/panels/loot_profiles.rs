@@ -1066,6 +1066,37 @@ fn looting(ui: &mut egui::Ui, p: &mut Profile, drafts: &mut super::autoplay::Dra
     );
 }
 
+/// A buy line's conditions on the character, all of which must hold: Healing trained for kits.
+fn buy_conditions(ui: &mut egui::Ui, line: usize, when: &mut Vec<Mine>) {
+    ui.vertical(|ui| {
+        let mut drop = None;
+        for (j, mine) in when.iter_mut().enumerate() {
+            ui.horizontal(|ui| {
+                ui.label("only if");
+                mine_fields(ui, &format!("loot_profiles.buy.{line}.when.{j}"), mine);
+                if ui.add(egui::Button::new("x").small()).clicked() {
+                    drop = Some(j);
+                }
+            });
+        }
+        if let Some(j) = drop {
+            when.remove(j);
+        }
+        if ui
+            .add(egui::Button::new("only if...").small())
+            .on_hover_text(
+                "Buy and keep this only for a character with a skill trained, a level...",
+            )
+            .clicked()
+        {
+            when.push(Mine::Trained {
+                skill: 1,
+                at_least: sac::TRAINED,
+            });
+        }
+    });
+}
+
 fn shopping(ui: &mut egui::Ui, p: &mut Profile) {
     caption(
         ui,
@@ -1073,7 +1104,7 @@ fn shopping(ui: &mut egui::Ui, p: &mut Profile) {
     );
     let mut drop = None;
     egui::Grid::new("loot_profiles.buy")
-        .num_columns(5)
+        .num_columns(6)
         .spacing([6.0, 2.0])
         .show(ui, |ui| {
             for (i, b) in p.buy.iter_mut().enumerate() {
@@ -1118,6 +1149,7 @@ fn shopping(ui: &mut egui::Ui, p: &mut Profile) {
                     b.from = (!from.trim().is_empty()).then(|| from.trim().to_string());
                 }
                 r.on_hover_text("A particular counter by name, or blank for whichever sells it");
+                buy_conditions(ui, i, &mut b.when);
                 if ui.add(egui::Button::new("x").small()).clicked() {
                     drop = Some(i);
                 }

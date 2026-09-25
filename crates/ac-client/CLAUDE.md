@@ -48,14 +48,15 @@ read. The fixed curves are placed against those numbers: `LOOT_AT_REST` (45) sit
 | 8 | catch up | goal | 120 | `autoplay_follow` (urgent) |
 | 9 | team | goal | 110 | `autoplay_team` |
 | 10 | salvage | goal | 100 | `autoplay_salvage` |
-| 11 | summon | goal | `worth_fighting` | `autoplay_summon` |
-| 12 | fight | goal | `worth_fighting` | `autoplay_fight` |
-| 13 | keep to the area | goal | 70 | `autoplay_keep_to_area` |
-| 14 | buffs | goal | 60 | `autoplay_buff` |
-| 15 | follow | goal | 50 | `autoplay_follow` |
-| 16 | resume the journey | goal | 40 | `autoplay_resume_journey` |
-| 17 | explore | goal | 20 | `autoplay_explore` |
-| 18 | grow | goal | 10 | `autoplay_grow` |
+| 11 | town run | goal | `worth_town_run` | `autoplay_town_run` |
+| 12 | summon | goal | `worth_fighting` | `autoplay_summon` |
+| 13 | fight | goal | `worth_fighting` | `autoplay_fight` |
+| 14 | keep to the area | goal | 70 | `autoplay_keep_to_area` |
+| 15 | buffs | goal | 60 | `autoplay_buff` |
+| 16 | follow | goal | 50 | `autoplay_follow` |
+| 17 | resume the journey | goal | 40 | `autoplay_resume_journey` |
+| 18 | explore | goal | 20 | `autoplay_explore` |
+| 19 | grow | goal | 10 | `autoplay_grow` |
 
 Housekeeping, every tick and never claiming it: `autoplay_pending_wield`, `autoplay_shield`,
 `autoplay_rearm`, `autoplay_stock`, `autoplay_claim_pet_kills`, `autoplay_tidy`, `autoplay_spend_xp`.
@@ -90,7 +91,7 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 | follow | `autoplay_follow`, `stop_following`, `followed_leader`, `is_led`, `team_leader`, `follow_break` | `autoplay/team/follow.rs` | `Autoplay.follow_trip`, `Autoplay.follow_walk`, `Autoplay.followed`, `Team.follow`, `Client.follow` | follow | autoplay::team::follow | follow |
 | played by hand | `autoplay_by_hand`, `autoplay_assist` | `autoplay/team/by_hand.rs` | `Team.follow`, `Team.focus_fire` | by_hand | autoplay::team::by_hand | assist |
 | quartermaster | `autoplay_quartermaster`, `autoplay_stock`, `decide`, `quartermaster`, `hand_out` | `autoplay/team/quartermaster.rs`, `logistics.rs`, `autoplay/growth/policy.rs` | `growth::State.mode`, `Team.restock` | quartermaster | autoplay::team::quartermaster | quartermaster |
-| town run | `grow_town_run`, `start_town_run`, `grow_run_step`, `grow_run_next`, `pick_vendor` | `autoplay/growth/town_run/mod.rs`, `autoplay/growth/town_run/counter.rs`, `autoplay/growth/town_run/vendor.rs`, `autoplay/growth/town_run/panel.rs`, `shopping.rs`, `crates/ac-vendor/src/run.rs` | `growth::State.run`, `growth::State.shop` | counter | autoplay::growth::town_run | town_run, counter |
+| town run | `autoplay_town_run`, `grow_town_run`, `start_town_run`, `grow_run_step`, `grow_run_next`, `pick_vendor` | `autoplay/growth/town_run/mod.rs`, `autoplay/growth/town_run/counter.rs`, `autoplay/growth/town_run/vendor.rs`, `autoplay/growth/town_run/panel.rs`, `shopping.rs`, `crates/ac-vendor/src/run.rs` | `growth::State.run`, `growth::State.shop` | counter | autoplay::growth::town_run | town_run, counter |
 | supplies and sale | `grow_needs_with`, `supplies`, `sell_policy`, `offers_for_sale`, `burns` | `autoplay/growth/needs.rs`, `autoplay/growth/policy.rs`, `autoplay/growth/sale.rs`, `autoplay/growth/supplies.rs`, `crates/ac-loot/src/sale.rs` | `growth::State.needs`, `Growth.ammo_keep` | counter | autoplay::growth | need, sale |
 | XP spending | `autoplay_spend_xp`, `grow_spend_xp`, `raise_offers`, `batch_raise` | `autoplay/growth/xp.rs`, `autoplay/growth/raise.rs`, `advance.rs` | `growth::State.pending`, `growth::State.sulking` | experience | autoplay::growth::xp | raise |
 | hunting ground and area | `autoplay_grow`, `grow_hunt`, `autoplay_watch_the_ground`, `autoplay_keep_to_area` | `autoplay/growth/mod.rs`, `autoplay/growth/hunt.rs`, `hunt.rs` | `growth::State.bound`, `growth::State.quiet_since`, `Fight.area` | ground | autoplay::growth::hunt | ground, area |
@@ -182,9 +183,8 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 | `reconnect.rs` | whether and when a dropped session logs back in |
 | `logoff.rs` | logging every session off on exit |
 | `options.rs`, `emotes.rs` | character option bits; soul emotes |
-| `tally.rs` | what the character did lately, for telemetry: this frame's walk (`WalkFrame`), blows traded (`Blows`) |
-| `daytime.rs` | Dereth's time of day |
-| `augmentations.rs` | augmentation gems |
+| `tally.rs` | what the character did lately, for telemetry: this frame's walk (`WalkFrame`), blows traded (`Blows`), supplies short (`SupplyLine`) |
+| `daytime.rs`, `augmentations.rs` | Dereth's time of day; augmentation gems |
 | `advance.rs` | experience costs and raise messages |
 | `recalls.rs` | recall spells the journey planner can use |
 | `pathfinder.rs` | neighbourhood route planning off the frame thread |

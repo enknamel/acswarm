@@ -43,8 +43,11 @@ fn the_order_says_what_the_character_cares_about() {
     assert!(at("keep to the area") < at("grow"));
 
     // A corpse rots and a shop does not.
-    assert!(at("loot") < at("grow"), "loot before shopping");
+    assert!(at("loot") < at("town run"), "loot before shopping");
     assert!(at("loot") < at("salvage"));
+    // A recall to town is free: supplies before the next fight, never instead of one in hand.
+    assert!(at("town run") < at("summon"), "town before calling a pet");
+    assert!(at("town run") < at("fight"), "town before the next fight");
 
     // And the last word is the one that finds something to do.
     assert_eq!(STEPS.last().map(|s| s.name), Some("grow"));
@@ -91,7 +94,8 @@ fn every_goal_keeps_the_worth_it_had_when_tidying_moved() {
     // the contract. They are written in the table now, so a row may come
     // or go without moving them.
     let base = |name: &str| STEPS.iter().find(|s| s.name == name).expect(name).base;
-    assert_eq!(STEPS.len(), 18);
+    assert_eq!(STEPS.len(), 19);
+    assert_eq!(base("town run"), 95.0);
     assert_eq!(base("fight"), 80.0);
     assert_eq!(base("summon"), 90.0);
     assert_eq!(base("keep to the area"), 70.0);
@@ -234,6 +238,48 @@ fn a_fight_across_the_room_does_not_beat_loot_at_your_feet() {
 fn a_fight_in_reach_still_beats_a_resting_body() {
     // Nothing stops to loot with something swinging at it.
     assert_eq!(fight_worth(false, false, 1.0), UNDECIDED);
+}
+
+#[test]
+fn a_due_town_run_waits_only_for_the_bodies_of_ours() {
+    // No body: its place, over starting any fight.
+    assert_eq!(town_run_worth(0.0), UNDECIDED);
+    assert!(named("town run").expect("row").base > named("fight").expect("row").base);
+    // A body waiting: just under looting it, however much that is worth.
+    assert!(town_run_worth(LOOT_AT_REST + 12.0) < LOOT_AT_REST + 12.0);
+    assert!(
+        town_run_worth(LOOT_AT_REST) > WALK_TO_A_FIGHT,
+        "over a fight that waits on it"
+    );
+    assert!(
+        town_run_worth(WORTH_A_LOT) <= TOWN_RUN,
+        "never over the team or salvage"
+    );
+}
+
+#[test]
+fn a_run_under_way_keeps_its_old_place() {
+    // Starting a run outranks a fight; carrying one on sits where the grow step carried it, under
+    // buffs, following and exploring (which defers to it), over grow.
+    let base = |name: &str| named(name).expect(name).base;
+    assert!(RUN_UNDER_WAY < base("explore"));
+    assert!(RUN_UNDER_WAY < base("buffs") && RUN_UNDER_WAY < base("follow"));
+    assert!(RUN_UNDER_WAY > base("grow"));
+}
+
+#[test]
+fn a_town_run_gives_way_to_a_fight_in_hand() {
+    let mut c = in_the_field();
+    c.autoplay.config.growth.town_runs = true;
+    let now = Instant::now();
+    let row = named("town run").expect("row");
+    assert_eq!(row.worth(&c, now), TOWN_RUN);
+    let it = crate::testkit::standing_by(&mut c, 0x8000_0001, "Drudge Skulker", 3.0);
+    c.attack_target = Some(it.guid);
+    assert_eq!(row.worth(&c, now), 0.0, "the fight is finished first");
+    c.attack_target = None;
+    c.autoplay.config.growth.town_runs = false;
+    assert_eq!(row.worth(&c, now), 0.0, "town runs off");
 }
 
 /// A character on its feet in the Holtburg field, level 20, with the

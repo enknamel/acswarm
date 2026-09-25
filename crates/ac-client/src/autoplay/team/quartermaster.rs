@@ -58,9 +58,12 @@ impl Client {
         // character's own list said it wanted none.
         let profile = self.profiles.get(&self.autoplay.config.loot.profile);
         let leaving = self.leaving_of(&self.item_stats());
+        let (me, my_name) = (self.wielder(), &self.world.stats.name);
         self.autoplay.wants = profile
             .map(|p| {
-                p.shortfall(|what| self.carried_named(what).saturating_sub(leaving.named(what)))
+                let held =
+                    |what: &str| self.carried_named(what).saturating_sub(leaving.named(what));
+                p.shortfall(held, &me, my_name)
                     .into_iter()
                     .map(|s| s.want.what.clone())
                     .collect()

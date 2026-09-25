@@ -30,6 +30,51 @@ fn a_want_that_names_its_counter_is_only_filled_there() {
 }
 
 #[test]
+fn a_component_is_restocked_before_the_last_one() {
+    // A hundred tapers, back to town at five: the scarabs sized from them (two) were urgent below
+    // a quarter of two, which is never, so a caster ran out of them and stayed out.
+    let line = |keep, restock_at| crate::profile::Buy {
+        what: "Prismatic Taper".into(),
+        keep,
+        restock_at,
+        on: true,
+        ..Default::default()
+    };
+    let blargerton = line(100, Some(5));
+    assert_eq!(component_low(2, &blargerton), 1, "the last scarab");
+    assert_eq!(component_low(40, &blargerton), 2, "five in the hundred");
+    assert_eq!(component_low(1, &blargerton), 1);
+    // With no minimum given, a quarter, as the taper line itself.
+    let starter = line(1000, None);
+    assert_eq!(component_low(20, &starter), 5);
+}
+
+#[test]
+fn a_kit_line_that_asks_for_healing_is_bought_only_by_a_healer() {
+    // Buying is the profile's to say, skill checks and all: the kits line holds for a character
+    // with Healing trained and for nobody else, with no name matched in the client.
+    use ac_world::stats::{sac, skill, Skill};
+    let mut c = crate::testkit::offline_client();
+    with_a_buy_list(&mut c, &[("Healing Kit", 2, 1)]);
+    let mut shelf = (*c.profiles.get("wants").expect("the profile")).clone();
+    shelf.buy[0].when = vec![crate::profile::Mine::Trained {
+        skill: skill::HEALING,
+        at_least: sac::TRAINED,
+    }];
+    c.profiles.put(shelf).ok();
+    let cfg = c.autoplay.config.growth.clone();
+    let names =
+        |c: &Client| -> Vec<String> { c.grow_needs(&cfg).into_iter().map(|n| n.name).collect() };
+    assert!(names(&c).is_empty(), "bought untrained");
+    c.world.stats.skills.push(Skill {
+        id: skill::HEALING,
+        advancement: sac::TRAINED,
+        ..Default::default()
+    });
+    assert_eq!(names(&c), vec!["Healing Kit"]);
+}
+
+#[test]
 #[ignore = "needs AC_DATA_DIR"]
 fn a_casters_peas_are_loot_to_sell_and_not_stock_to_buy() {
     // The report: "autovendoring doesn't seem to sell at all", from

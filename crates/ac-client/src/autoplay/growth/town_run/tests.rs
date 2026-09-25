@@ -63,17 +63,14 @@ fn a_run_that_could_not_get_there_is_tried_again_once_its_wait_is_up() {
         &crate::did::Did::blocked("that counter was no use"),
         t0,
     );
-    for party_restocking in [false, true] {
-        let wait = wait_between_runs(party_restocking, true);
-        assert!(wait > Duration::ZERO, "straight back to the same counter");
-        assert!(wait <= RUN_EVERY);
-        assert!(
-            !skip.held(&renald, t0 + wait),
-            "the counter is still skipped when the next run is due"
-        );
-    }
-    // A party that did buy or sell something may go again at once.
-    assert_eq!(wait_between_runs(true, false), Duration::ZERO);
+    let wait = wait_between_runs(true);
+    assert!(wait > Duration::ZERO, "straight back to the same counter");
+    assert!(
+        !skip.held(&renald, t0 + wait),
+        "the counter is still skipped when the next run is due"
+    );
+    // One that did buy or sell something may go again at once: a recall makes the trip.
+    assert_eq!(wait_between_runs(false), Duration::ZERO);
 }
 
 #[test]
@@ -81,8 +78,7 @@ fn a_run_that_could_not_get_there_is_tried_again_once_its_wait_is_up() {
 fn peas_for_a_counter_send_a_roomy_pack_to_town_once_the_waits_are_up() {
     // The user's report: two peas tagged to sell, room in the pack,
     // nothing short, and no run was ever made. Now the peas are the
-    // reason -- once the waits between runs are up, as for any
-    // other reason, so one pea does not wear a path to town.
+    // reason, with no wait but the one after a futile run.
     let holtburg = 0xA9B4_0019;
     let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
     c.world.stats.level = 20;
@@ -93,9 +89,11 @@ fn peas_for_a_counter_send_a_roomy_pack_to_town_once_the_waits_are_up() {
     assert!(!c.pack_low_on_room() && !c.laden(&cfg), "the old reasons");
     let now = Instant::now();
 
-    // Just back from a run: the wait between runs holds.
+    // Just back from a futile run: its wait holds.
     c.autoplay.growth.last_run = Some(now);
-    assert!(!c.grow_town_run(now, &cfg));
+    c.autoplay.growth.run_was_futile = true;
+    let soon = now + FUTILE_RUN_WAIT - Duration::from_secs(1);
+    assert!(!c.grow_town_run(soon, &cfg));
     assert!(
         c.autoplay
             .growth
@@ -104,14 +102,16 @@ fn peas_for_a_counter_send_a_roomy_pack_to_town_once_the_waits_are_up() {
         "{}",
         c.autoplay.growth.held_back
     );
-    // A futile one holds for its own while.
-    c.autoplay.growth.run_was_futile = true;
-    let soon = now + FUTILE_RUN_WAIT - Duration::from_secs(1);
-    assert!(!c.grow_town_run(soon, &cfg));
+    // Back from one that sold something, a sale that merely adds up still waits its while.
     c.autoplay.growth.run_was_futile = false;
-    // Waits up, five thousand at face in the pack: off to the one
-    // counter in town that buys peas.
-    let later = now + RUN_EVERY;
+    assert!(!c.grow_town_run(soon, &cfg));
+    assert!(
+        c.autoplay.growth.held_back.contains("a sale waits"),
+        "{}",
+        c.autoplay.growth.held_back
+    );
+    // Then off, five thousand at face in the pack, to the one counter in town that buys peas.
+    let later = now + SALE_RUN_EVERY;
     assert!(
         c.grow_town_run(later, &cfg),
         "{}",
@@ -128,7 +128,7 @@ fn peas_for_a_counter_send_a_roomy_pack_to_town_once_the_waits_are_up() {
     c.world.objects.remove(&0x8000_0010);
     c.world.objects.remove(&0x8000_0011);
     pea_in_the_pack(&mut c, 0x8000_0012, "Lead Pea", 8329, 500);
-    let again = later + RUN_EVERY;
+    let again = later + FUTILE_RUN_WAIT;
     assert!(!c.grow_town_run(again, &cfg));
     assert!(
         c.autoplay
@@ -235,11 +235,75 @@ pub(super) fn nobody_near_buys_peas(c: &mut Client, reach: f32, now: Instant) ->
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
-fn a_run_to_sell_for_a_light_reason_stays_within_the_town() {
-    // One Lead Pea, carried a quarter of an hour, with nobody in
-    // the town buying it: not a walk to an archmage three towns
-    // over. A pack that cannot hunt on is worth a walk anywhere; a
-    // pea is worth the town the character is in.
+fn a_supply_run_goes_straight_after_the_last_one() {
+    // Out of tapers just after a run that sold something: no wait, a recall makes the trip.
+    let holtburg = 0xA9B4_0019;
+    let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
+    c.world.player_guid = Some(crate::testkit::ME);
+    c.world.stats.level = 20;
+    with_a_pack(&mut c, 50);
+    coin_in_the_pack(&mut c, 0x8000_0030, 5_000);
+    with_a_buy_list(&mut c, &[("Prismatic Taper", 100, 5)]);
+    let cfg = c.autoplay.config.growth.clone();
+    let now = Instant::now();
+    c.autoplay.growth.last_run = Some(now);
+    assert!(
+        c.grow_town_run(now, &cfg),
+        "{}",
+        c.autoplay.growth.held_back
+    );
+    let run = c.autoplay.growth.run.as_ref().expect("no run");
+    assert!(
+        run.reason.contains("short of Prismatic Taper"),
+        "{}",
+        run.reason
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_due_run_leaves_the_walk_to_a_ground_for_town() {
+    // Five thousand at face in peas, on the walk out to a hunting ground: that walk held the run
+    // back as "busy" until the ground was reached. Only a fight in hand does now.
+    let holtburg = 0xA9B4_0019;
+    let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
+    c.world.player_guid = Some(crate::testkit::ME);
+    c.world.stats.level = 20;
+    with_a_pack(&mut c, 50);
+    pea_in_the_pack(&mut c, 0x8000_0010, "Iron Pea", 8328, 2_500);
+    pea_in_the_pack(&mut c, 0x8000_0011, "Iron Pea", 8328, 2_500);
+    let cfg = c.autoplay.config.growth.clone();
+    let now = Instant::now();
+    let me = c.player.as_ref().unwrap().world_position();
+    let ground = Vec2::new(me.x + 200.0, me.y);
+    assert!(c.grow_travel(ground, now), "no walk to the ground");
+    c.autoplay.growth.bound = Some((holtburg, ground, "the field".into()));
+
+    let it = crate::testkit::standing_by(&mut c, 0x8000_0001, "Drudge Skulker", 3.0);
+    c.attack_target = Some(it.guid);
+    assert!(!c.grow_town_run(now, &cfg));
+    assert_eq!(c.autoplay.growth.held_back, "in a fight");
+
+    c.attack_target = None;
+    assert!(
+        c.grow_town_run(now, &cfg),
+        "{}",
+        c.autoplay.growth.held_back
+    );
+    assert!(
+        c.autoplay.growth.bound.is_none(),
+        "the walk to the ground is let go"
+    );
+    let run = c.autoplay.growth.run.as_ref().expect("no run");
+    assert_eq!(run.vendor, "Archmage Cindrue");
+    assert!(c.traveling());
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_run_to_sell_goes_to_whoever_buys_however_far() {
+    // One Lead Pea, carried a quarter of an hour, with nobody in the town buying it: a recall
+    // makes any trip, so the run goes to a counter that does.
     let holtburg = 0xA9B4_0019;
     let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
     c.world.stats.level = 20;
@@ -248,18 +312,22 @@ fn a_run_to_sell_for_a_light_reason_stays_within_the_town() {
     with_a_buy_list(&mut c, &[]);
     let cfg = c.autoplay.config.growth.clone();
     let now = Instant::now();
-    assert!(nobody_near_buys_peas(&mut c, SALE_RUN_REACH, now) > 0);
+    let town = 600.0;
+    assert!(nobody_near_buys_peas(&mut c, town, now) > 0);
     let patience = Duration::from_secs_f32(cfg.sell_run_patience);
     c.autoplay.growth.sale_since = Some(now - patience);
-    assert!(!c.grow_town_run(now, &cfg));
-    assert!(c.autoplay.growth.run.is_none());
     assert!(
-        c.autoplay
-            .growth
-            .held_back
-            .contains("nobody within 600 m of a way out buys any of the 1 thing(s)"),
+        c.grow_town_run(now, &cfg),
         "{}",
         c.autoplay.growth.held_back
+    );
+    let run = c.autoplay.growth.run.as_ref().expect("no run");
+    assert_eq!(run.errand, Errand::Sell);
+    let me = c.player.as_ref().unwrap().world_position();
+    assert!(
+        run.at.distance(Vec2::new(me.x, me.y)) > town,
+        "{}",
+        run.vendor
     );
 }
 
