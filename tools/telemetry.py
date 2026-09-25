@@ -103,6 +103,7 @@ def summarise(path):
             "refused": d["refused"],
             "stall_s": sum(x["secs"] for x in stalls),
             "idle_beside_fight": idle_beside_fight(s, d["status"]),
+            "idle_long": idle_stretches(s),
             "blows": blows(s),
             "spell_points": sum(int(m.group(1)) for t in chat for m in [SPELL_HIT.match(t)] if m),
             "wield": Counter(", ".join(x.get("wield") or []) or "nothing" for x in s).most_common(1)[0][0],
@@ -113,11 +114,34 @@ def summarise(path):
     return out
 
 
+def is_idle(x):
+    """Autoplay on, nothing claiming the tick, and no walk under way (a roam says "waiting" too)."""
+    return x.get("on") and x.get("doing") == "waiting" and not x.get("walk")
+
+
+def idle_stretches(samples, least=20.0):
+    """Seconds idle in stretches of `least` or more, indoors and outdoors: indoors (a shop, a
+    house) there is rarely anything to wait for; outdoors it is mostly a ground's quiet wait."""
+    out = {"indoors": 0.0, "outdoors": 0.0}
+    run = []
+    for x in samples + [None]:
+        if x is not None and is_idle(x):
+            run.append(x)
+            continue
+        if run:
+            secs = (run[-1]["t"] - run[0]["t"]) / 1000 + SAMPLE_GAP
+            if secs >= least:
+                inside = int(run[0].get("cell") or "0", 16) & 0xFFFF >= 0x100
+                out["indoors" if inside else "outdoors"] += secs
+        run = []
+    return out
+
+
 def idle_beside_fight(samples, lines):
     """Seconds spent "waiting" with something the fight rules would take on in reach, the longest
     stretch, and the steps' reasons for standing aside then. Waiting on an empty ground is fine;
     this is the kind that is not."""
-    idle = [x for x in samples if x.get("on") and x.get("doing") == "waiting" and x.get("fight_near") is not None]
+    idle = [x for x in samples if is_idle(x) and x.get("fight_near") is not None]
     runs, run = [], []
     for x in samples:
         if x in idle:
@@ -218,6 +242,9 @@ def show(path):
             per = lambda n, p: f"{n} ({p / n:.1f} a blow)" if n else "0"
             print(f"  in hand: {m['wield']}; dealt {per(b['dealt'], b['dealt_points'])}, missed {b['missed']}, "
                   f"spells {m['spell_points']} points; took {per(b['taken'], b['taken_points'])}, evaded {b['evaded']}")
+        long = m["idle_long"]
+        if long["indoors"] or long["outdoors"]:
+            print(f"  idle 20 s or more: indoors {long['indoors']:.0f} s, outdoors {long['outdoors']:.0f} s")
         idle = m["idle_beside_fight"]
         if idle["secs"]:
             print(f"  idle beside a fight: {idle['secs']:.0f} s, longest {idle['longest']:.0f} s; stood aside: "

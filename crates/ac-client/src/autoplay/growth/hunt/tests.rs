@@ -324,3 +324,61 @@ fn a_walk_to_its_own_ground_is_let_go_once_it_follows() {
     );
     assert!(!c.traveling(), "it set off for a ground of its own");
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_camp_nothing_comes_to_is_looked_about() {
+    // The Blood Shrethlet ground in 0xA9B2 has thirty spawn entries, so it is held rather than
+    // walked; held for good, a character stood at it doing nothing while none came.
+    let block = 0xA9B2_0000;
+    let ground = ac_world::hunting::at(block >> 16).expect("the Blood Shrethlet ground");
+    assert_eq!(ground.suggested_tactic(), ac_world::hunting::Tactic::Camp);
+    let outside = glam::Vec3::new(60.0, 60.0, 94.0);
+    let mut c = standing_at(ac_world::outdoor_cell(block, outside), outside);
+    c.world.stats.level = 7;
+    c.autoplay.growth.hunting_at = Some(block >> 16);
+    let cfg = Growth::default();
+    let now = Instant::now();
+    // Inside its quiet minute the spot is held.
+    c.autoplay.growth.quiet_since = Some(now - Duration::from_secs(30));
+    assert!(!c.grow_hunt(now, &cfg), "held for the quiet minute");
+    assert!(!c.traveling());
+    // Past it, nothing is coming: the ground is looked about.
+    let later = now + Duration::from_secs(40);
+    assert!(
+        c.grow_hunt(later, &cfg),
+        "stood on at a camp nothing came to"
+    );
+    assert!(c.traveling());
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_camp_is_not_held_from_inside_a_building() {
+    // The same ground's spot, the average of its spawn points, falls inside a building (cell
+    // 0xA9B2011A): a character arriving there stood 134 s where no creature comes.
+    let block = 0xA9B2_0000;
+    let mut c = standing_at(0xA9B2_011A, glam::Vec3::new(74.0, 83.0, 94.0));
+    c.world.stats.level = 7;
+    c.autoplay.growth.hunting_at = Some(block >> 16);
+    let cfg = Growth::default();
+    let now = Instant::now();
+    c.autoplay.growth.quiet_since = Some(now - Duration::from_secs(12));
+    assert!(c.grow_hunt(now, &cfg), "stood in the building");
+    assert!(c.traveling());
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_character_off_any_ground_goes_to_one_at_once() {
+    // After a town run four characters stood 40-47 s in Holtburg's shops before choosing a ground:
+    // the quiet minute is for a ground going quiet, and nothing spawns in town to wait for.
+    let mut c = standing_at(0xA9B4_0019, glam::Vec3::new(84.0, 7.1, 94.0));
+    c.world.stats.level = 20;
+    assert_eq!(c.autoplay.growth.hunting_at, None);
+    let cfg = Growth::default();
+    let now = Instant::now();
+    c.autoplay.growth.quiet_since = Some(now - Duration::from_secs(1));
+    assert!(c.grow_hunt(now, &cfg), "stood about in town");
+    assert!(c.traveling());
+}
