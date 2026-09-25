@@ -92,6 +92,8 @@ impl Telemetry {
 #[derive(Clone, Copy, PartialEq)]
 struct Steered {
     goal: [i32; 3],
+    goal_cell: u32,
+    source: &'static str,
     way: &'static str,
 }
 
@@ -103,6 +105,8 @@ fn steered(w: &ac_client::tally::WalkFrame) -> Steered {
     };
     Steered {
         goal: w.goal.to_array().map(|v| v.round() as i32),
+        goal_cell: w.goal_cell,
+        source: w.source,
         way,
     }
 }
@@ -132,6 +136,8 @@ fn sample(client: &Client) -> Value {
         .map(|w| {
             json!({
                 "goal": w.goal.to_array(),
+                "goal_cell": format!("{:08X}", w.goal_cell),
+                "source": w.source,
                 "aim": w.aim.map(|a| a.to_array()),
                 "detour": w.detoured,
                 "route": w.route,
@@ -196,6 +202,7 @@ impl Plugin for Telemetry {
             let w = client.walk_frame.expect("way is some");
             let record = json!({
                 "k": "steer", "way": way.map(|s| s.way), "goal": w.goal.to_array(),
+                "goal_cell": format!("{:08X}", w.goal_cell), "source": w.source,
                 "aim": w.aim.map(|a| a.to_array()), "route": w.route, "wedged": w.wedged,
                 "pos": client.my_position().map(|p| [p.x, p.y, p.z]),
                 "cell": client.player.as_ref().map(|p| format!("{:08X}", p.cell)),

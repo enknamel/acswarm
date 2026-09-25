@@ -10,6 +10,10 @@ use glam::Vec3;
 pub struct WalkFrame {
     pub at: Instant,
     pub goal: Vec3,
+    /// The cell or landblock the goal was said to lie in, which decides what the steering plans on.
+    pub goal_cell: u32,
+    /// Who set the goal: "server walk", "journey" or "follow".
+    pub source: &'static str,
     /// Where the steering aimed; `None` when it found no way (`ac_nav::Aim::NoWay`).
     pub aim: Option<Vec3>,
     /// The leg turned aside for a server-placed object on it (`ac_nav::obstacles::detour`).
