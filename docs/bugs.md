@@ -6,6 +6,10 @@ priority; a live report starts from the telemetry (`tools/telemetry.py`, `--mark
 
 ## 1. Stops the character playing
 
+- **The same unreachable creature, again and again.** Scn Mage on the lower floor of the Mite
+  Sentry building (0xBDAF0100) picked one Mite Sentry six times in four minutes, each time "getting
+  Mite Sentry in sight" then "giving up: no damage in a while" after 20 s, with three roams from
+  indoors cut short between and the ground's quiet minute waited out indoors (scenario idle2).
 - **A corpse no path reaches is waited on.** Scn Mage on a platform at z 58 in 0xACB5 waited
   36 s on a corpse 12 m off and 17.6 m below (33149.5 34886.1 40.4), steering "no way" throughout
   (run K). Standing places surround it on a flat floor at 40.4, but no path reaches them from the
@@ -35,6 +39,12 @@ priority; a live report starts from the telemetry (`tools/telemetry.py`, `--mark
   level 5); use a template, as `tools/scenarios.sh` does.
 
 ## Fixed
+
+- **Standing about for no reason** (0d345d7): a crowded ground whose spot falls inside a building
+  was camped from indoors for good (the new character, 134 s), and after a town run the quiet
+  minute was waited out in a shop before any ground was chosen (four characters, 38-45 s). Idle
+  20 s or more indoors, before -> after: Mage 42, Blade 45 -> 0, Bow 45 -> 0, Seller 38 -> 0, new
+  character 164 -> 0 (scenarios idle1, idle2); the Mage's 93 s after is the entry above.
 
 - **Stood in a pocket among props** (91c32c7): from where the body stood the graph found no path
   anywhere and the steering leaned on the prop for good (Mosswart ground 61 s, run E; the Academy
