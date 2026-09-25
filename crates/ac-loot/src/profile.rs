@@ -783,11 +783,15 @@ impl Profile {
 
     /// How many of a thing the buy list says `me` carries, 0 when no line for it holds.
     pub fn stocked_count(&self, what: &str, me: &Wielder, my_name: &str) -> u32 {
+        self.stocked_line(what, me, my_name).map_or(0, |b| b.keep)
+    }
+
+    /// The buy line that holds for `me` and names this thing, if any.
+    pub fn stocked_line(&self, what: &str, me: &Wielder, my_name: &str) -> Option<&Buy> {
         self.buy
             .iter()
             .filter(|b| b.holds_for(me, my_name))
             .find(|b| contains_fold(what, b.what.trim()))
-            .map_or(0, |b| b.keep)
     }
 
     /// What `me` is short of, against what is carried: the shopping list.

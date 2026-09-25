@@ -63,6 +63,14 @@ pub(super) enum NeedKind {
     Component(u32),
 }
 
+/// The count at or below which a component kept at `keep` is worth a trip: the taper line's
+/// minimum as a share of its keep, rounded up and at least one, so a line of two scarabs beside
+/// a hundred tapers is not left to run out (test: a_component_is_restocked_before_the_last_one).
+fn component_low(keep: u32, tapers: &crate::profile::Buy) -> u32 {
+    let share = tapers.low_mark() as f32 / tapers.keep.max(1) as f32;
+    ((keep as f32 * share).ceil() as u32).max(1)
+}
+
 impl Client {
     /// What the character is short of.
     pub(super) fn grow_needs(&self, cfg: &Growth) -> Vec<Need> {
@@ -153,10 +161,11 @@ impl Client {
         // How many tapers to carry, from the buy list. Everything else
         // a caster burns is scaled to it (see `component_targets`),
         // which is why one number buys forty kinds of thing.
-        let tapers = self
+        let taper_line = self
             .profiles
             .get(&self.autoplay.config.loot.profile)
-            .map_or(0, |p| p.stocked_count("Prismatic Taper", &me, my_name));
+            .and_then(|p| p.stocked_line("Prismatic Taper", &me, my_name).cloned());
+        let tapers = taper_line.as_ref().map_or(0, |b| b.keep);
         if tapers > 0 && !self.world.stats.spells.is_empty() {
             let has_wand = self.wielded_caster().is_some()
                 || self
@@ -229,7 +238,10 @@ impl Client {
                                 want: keep - have,
                                 have,
                                 keep,
-                                urgent: have < keep / 4 && buyable,
+                                urgent: taper_line
+                                    .as_ref()
+                                    .is_some_and(|t| have <= component_low(keep, t))
+                                    && buyable,
                                 buyable,
                                 from: None,
                                 kind: NeedKind::Component(wcid),
