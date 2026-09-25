@@ -100,6 +100,7 @@ struct Steered {
 fn steered(w: &ac_client::tally::WalkFrame) -> Steered {
     let way = match (w.aim, w.route) {
         (None, _) => "no way",
+        (Some(_), Some(_)) if w.retracing => "back the way it came",
         (Some(_), Some(_)) => "route",
         (Some(_), None) => "straight",
     };

@@ -2,6 +2,7 @@
 //! landblock's graph or the neighbourhood planner. Entry: [`Steering::steer`] over [`Ground`].
 //! Server-placed objects are walked round afterwards by [`crate::obstacles::detour`].
 
+use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 use glam::Vec3;
@@ -20,6 +21,20 @@ pub const REPLAN_AFTER: Duration = Duration::from_secs(2);
 pub const WIDE_REPLAN_AFTER: Duration = Duration::from_secs(6);
 /// How often the straight line is re-tested while no route is needed.
 const LINE_CHECK: Duration = Duration::from_millis(500);
+/// Metres between the points kept of where the body walked (see [`Steering::walked`]): close
+/// enough that the straight line back between two of them keeps to a slide along a prop.
+const TRAIL_STEP: f32 = 0.3;
+/// Trail points kept: the last thirty metres or so.
+const TRAIL_POINTS: usize = 100;
+/// A move this far (metres) between two looks is a portal or a recall, not a walk: the trail starts again.
+const TRAIL_JUMP: f32 = 10.0;
+/// Trail points tried, newest first, every `RETRACE_STRIDE`th, as the start of a way on.
+const RETRACE_TRIES: usize = 12;
+/// Trail points skipped between two tried: a metre or so.
+const RETRACE_STRIDE: usize = 3;
+/// A way back counts a point reached this close (metres, flat): passed at [`ARRIVE`], the slide
+/// round a prop that brought the body in is cut across and the corner stops it.
+const RETRACE_ARRIVE: f32 = 0.2;
 
 /// The route being followed.
 #[derive(Debug, Clone)]
@@ -31,6 +46,8 @@ pub struct Route {
     /// Index of the waypoint being steered at.
     pub next: usize,
     pub planned: Instant,
+    /// A waypoint counts as reached this close (metres, flat): [`ARRIVE`], or less for a way back.
+    pub arrive: f32,
 }
 
 impl Route {
@@ -40,6 +57,7 @@ impl Route {
             waypoints,
             next: 0,
             planned: now,
+            arrive: ARRIVE,
         }
     }
 
@@ -49,7 +67,7 @@ impl Route {
             || now.duration_since(self.planned) >= REPLAN_AFTER
     }
 
-    /// The next waypoint from `me`, passing those within [`ARRIVE`] but never the last: the caller decides arrival.
+    /// The next waypoint from `me`, passing those within `arrive` but never the last: the caller decides arrival.
     /// A waypoint whose successor `clear(from, to)` denies is held until `ON_THE_SPOT`, so corners are not cut.
     pub fn target(&mut self, me: Vec3, mut clear: impl FnMut(Vec3, Vec3) -> bool) -> Vec3 {
         while self.next + 1 < self.waypoints.len() {
@@ -57,7 +75,7 @@ impl Route {
             let d = glam::Vec2::new(w.x - me.x, w.y - me.y).length();
             // Height counts: judged flat, a waypoint a storey up is "reached" from the floor below
             // (a_waypoint_a_storey_above_is_not_reached_from_below).
-            if d > ARRIVE || (w.z - me.z).abs() > A_STOREY {
+            if d > self.arrive || (w.z - me.z).abs() > A_STOREY {
                 break;
             }
             if d > ON_THE_SPOT && !clear(me, self.waypoints[self.next + 1]) {
@@ -128,6 +146,10 @@ pub struct Steering {
     route_is_wide: bool,
     /// Set when a steer refuses [`Aim::NoWay`]; a steer that decides a way clears it.
     no_way: bool,
+    /// Where the body has walked lately, a point every `TRAIL_STEP` metres, newest last.
+    trail: VecDeque<Vec3>,
+    /// The route is the way back along the trail (see [`Steering::walked`]): kept until walked.
+    retracing: bool,
 }
 
 impl Steering {
@@ -158,7 +180,62 @@ impl Steering {
             straight_blocked_until: now,
             route_is_wide: false,
             no_way: false,
+            trail: VecDeque::new(),
+            retracing: false,
         }
+    }
+
+    /// Whether the route is the way back along the trail (see [`Steering::walked`]).
+    pub fn retracing(&self) -> bool {
+        self.retracing
+    }
+
+    /// Note where the body stands, each frame. The way it came is walkable, whatever the graph
+    /// says, and it is the way out of a pocket among props that no path leaves (see `retrace`).
+    pub fn walked(&mut self, at: Vec3) {
+        if self.retracing {
+            return;
+        }
+        match self.trail.back() {
+            Some(last) if last.distance(at) > TRAIL_JUMP => {
+                self.trail.clear();
+                self.trail.push_back(at);
+            }
+            Some(last) if last.distance(at) < TRAIL_STEP => {}
+            _ => {
+                self.trail.push_back(at);
+                if self.trail.len() > TRAIL_POINTS {
+                    self.trail.pop_front();
+                }
+            }
+        }
+    }
+
+    /// Back the way the body came, from the trail point nearest `me` to the latest one the graph
+    /// finds a way on from, then that way; `None` when no point tried has one.
+    fn retrace(
+        &self,
+        ground: &mut impl Ground,
+        block: u32,
+        me: Vec3,
+        goal: Vec3,
+        goal_block: u32,
+    ) -> Option<Vec<Vec3>> {
+        let back: Vec<Vec3> = self.trail.iter().rev().copied().collect();
+        let here = (0..back.len())
+            .min_by(|a, b| back[*a].distance(me).total_cmp(&back[*b].distance(me)))?;
+        // The oldest point too, where the walk in began, whatever the stride lands on.
+        let last = back.len() - 1;
+        (here..back.len())
+            .filter(|i| (i - here) % RETRACE_STRIDE == 0 || *i == last)
+            .filter(|i| back[*i].distance(me) > 2.0 * ARRIVE)
+            .take(RETRACE_TRIES)
+            .find_map(|i| {
+                let on = ground.find_path(block, back[i], goal, goal_block)?;
+                let mut way: Vec<Vec3> = back[here..=i].to_vec();
+                way.extend(on);
+                Some(way)
+            })
     }
 
     /// Forget the route and progress history, when the goal goes away or the user takes over.
@@ -167,6 +244,7 @@ impl Steering {
         self.last_pos = None;
         self.route_is_wide = false;
         self.no_way = false;
+        self.retracing = false;
     }
 
     /// Where to head this frame for `goal` (world space; `goal_block` its landblock, cell in the low word).
@@ -216,6 +294,7 @@ impl Steering {
                     );
                     self.route = None;
                     self.route_is_wide = false;
+                    self.retracing = false;
                     self.next_check = now;
                     self.straight_blocked_until = now + AVOID_STRAIGHT;
                     self.last_progress = now;
@@ -230,12 +309,16 @@ impl Steering {
         if let Some(waypoints) = ground.take_wide(me, far_goal) {
             self.route = Some(Route::new(far_goal, waypoints, now));
             self.route_is_wide = true;
+            self.retracing = false;
             self.next_check = now + REPLAN_AFTER;
         }
         let replan = match &self.route {
             None => fresh || now >= self.next_check,
             // A wide route stands while it leads to `far_goal`: the block planner cannot beat it, and
             // running out of waypoints is not staleness (the last is the goal; the caller decides arrival).
+            // The way back is walked to its end: planned again half way, from inside the pocket, it
+            // would turn round (a_character_in_a_pocket_no_path_leaves_goes_back_the_way_it_came).
+            Some(r) if self.retracing => r.next + 1 >= r.waypoints.len(),
             Some(r) if self.route_is_wide => {
                 far_goal.distance(r.goal) > REPLAN_DISTANCE
                     || now.duration_since(r.planned) >= WIDE_REPLAN_AFTER
@@ -262,6 +345,7 @@ impl Steering {
                     tracing::debug!("route: straight line clear again");
                 }
                 self.route_is_wide = false;
+                self.retracing = false;
                 self.no_way = false;
                 return Aim::Go(goal);
             }
@@ -286,6 +370,7 @@ impl Steering {
                     );
                     self.route = Some(Route::new(goal, waypoints, now));
                     self.route_is_wide = false;
+                    self.retracing = false;
                     self.no_way = false;
                 }
                 None if following_wide => {
@@ -297,9 +382,29 @@ impl Steering {
                     }
                 }
                 None => {
-                    // No path and a blocked line. In the block, leaning on the obstacle often works as the
-                    // graph is coarser than the world (no_route_and_a_blocked_line_nearby_still_tries); out
-                    // of it never (no_route_to_somewhere_far_is_refused_rather_than_walked_at).
+                    // No path and a blocked line, and leaning on it has already got nowhere: back the
+                    // way the body came to where the graph finds a way on. The body walked in, so it
+                    // can walk out (a_character_in_a_pocket_no_path_leaves_goes_back_the_way_it_came).
+                    if now < self.straight_blocked_until {
+                        if let Some(way) = self.retrace(ground, block, me, goal, goal_block) {
+                            tracing::debug!(
+                                "route: no path from here; back the way it came, {} waypoints",
+                                way.len()
+                            );
+                            let mut r = Route::new(goal, way, now);
+                            r.arrive = RETRACE_ARRIVE;
+                            let aim =
+                                r.target(me, |from, to| !ground.line_blocked(block, from, to));
+                            self.route = Some(r);
+                            self.route_is_wide = false;
+                            self.retracing = true;
+                            self.no_way = false;
+                            return Aim::Go(aim);
+                        }
+                    }
+                    // In the block, leaning on the obstacle often works as the graph is coarser than
+                    // the world (no_route_and_a_blocked_line_nearby_still_tries); out of it never
+                    // (no_route_to_somewhere_far_is_refused_rather_than_walked_at).
                     self.route = None;
                     self.route_is_wide = false;
                     self.next_check = now + REPLAN_AFTER;
@@ -477,6 +582,8 @@ mod tests {
         drops: bool,
         /// What the landblock's graph answers with.
         path: Option<Vec<Vec3>>,
+        /// What it answers from one spot only, where it answers `path` from anywhere else.
+        path_from: Option<(Vec3, Vec<Vec3>)>,
         /// What the neighbourhood planner answers with.
         wide: Option<Vec<Vec3>>,
         asked_wide: bool,
@@ -501,11 +608,14 @@ mod tests {
         fn find_path(
             &mut self,
             _block: u32,
-            _from: Vec3,
+            from: Vec3,
             _to: Vec3,
             _goal_cell: u32,
         ) -> Option<Vec<Vec3>> {
-            self.path.clone()
+            match &self.path_from {
+                Some((at, path)) if at.distance(from) < 0.5 => Some(path.clone()),
+                _ => self.path.clone(),
+            }
         }
         fn ask_wide(&mut self, _f: Vec3, _t: Vec3, _b: u32, _o: bool, _e: bool) {
             self.asked_wide = true;
@@ -573,6 +683,46 @@ mod tests {
             st.steer(&mut g, goal, 0, soon),
             Aim::Go(corner),
             "planned again, not straight"
+        );
+    }
+
+    #[test]
+    fn a_character_in_a_pocket_no_path_leaves_goes_back_the_way_it_came() {
+        // Walked in along x from 0 to 6; from the pocket the graph finds nothing, from (3, 0) it does.
+        let t0 = Instant::now();
+        let mut st = Steering::new(t0);
+        for x in 0..=6 {
+            st.walked(Vec3::new(x as f32, 0.0, 0.0));
+        }
+        let goal = Vec3::new(20.0, 10.0, 0.0);
+        let mut g = Fake {
+            at: Vec3::new(6.0, 0.0, 0.0),
+            blocked: true,
+            path_from: Some((
+                Vec3::new(3.0, 0.0, 0.0),
+                vec![Vec3::new(3.0, 5.0, 0.0), goal],
+            )),
+            ..Default::default()
+        };
+        // Leaning is tried first; getting nowhere by it, the way back.
+        assert_eq!(st.steer(&mut g, goal, 0, t0), Aim::Go(goal));
+        let stuck = t0 + STUCK_AFTER + Duration::from_millis(100);
+        assert_eq!(
+            st.steer(&mut g, goal, 0, stuck),
+            Aim::Go(Vec3::new(5.0, 0.0, 0.0))
+        );
+        let way = st
+            .route
+            .as_ref()
+            .map(|r| r.waypoints.clone())
+            .unwrap_or_default();
+        assert_eq!(way.last(), Some(&goal), "then on to the goal: {way:?}");
+        // A step back along it, it is not planned again from inside the pocket.
+        g.at = Vec3::new(5.0, 0.0, 0.0);
+        let later = stuck + REPLAN_AFTER + Duration::from_millis(100);
+        assert_eq!(
+            st.steer(&mut g, goal, 0, later),
+            Aim::Go(Vec3::new(4.0, 0.0, 0.0))
         );
     }
 

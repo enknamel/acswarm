@@ -1896,6 +1896,83 @@ mod tests {
         );
     }
 
+    /// Walk `c` at `target` for `seconds`, steered or straight, feeding the steering's trail as
+    /// `tick_player` does.
+    fn drive(c: &mut Client, target: Vec3, block: u32, steer: bool, seconds: f32) {
+        use crate::player::Input;
+        let dt = 1.0 / 20.0;
+        let t0 = Instant::now();
+        for frame in 0..(seconds / dt) as u32 {
+            let now = t0 + Duration::from_secs_f32(frame as f32 * dt);
+            let pl = c.player.as_mut().unwrap();
+            let aim = if steer {
+                let mut standing = crate::Standing {
+                    player: pl,
+                    assets: &c.assets,
+                    wide: &mut c.pathfinder,
+                };
+                c.steering.steer(&mut standing, target, block, now)
+            } else {
+                ac_nav::Aim::Go(target)
+            };
+            // As `tick_player` does: stop at the goal, and otherwise walk at the aim however near.
+            let mut input = Input::default();
+            let there = Vec2::new(
+                target.x - pl.world_position().x,
+                target.y - pl.world_position().y,
+            )
+            .length()
+                <= 0.5;
+            if let (ac_nav::Aim::Go(at), false) = (aim, there) {
+                let d = at - pl.world_position();
+                let flat = Vec2::new(d.x, d.y);
+                if flat.length() > 1e-3 {
+                    pl.heading = (-flat.x).atan2(flat.y);
+                }
+                pl.step_cap = Some(flat.length());
+                input.forward = 1.0;
+                input.run = true;
+            }
+            pl.update(&c.assets, &input, dt);
+            c.steering.walked(pl.world_position());
+        }
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn a_character_in_a_pocket_no_path_leaves_goes_back_the_way_it_came() {
+        // Two pockets among props that scenario characters walked into and stood in: at the
+        // Mosswart ground (61 s, run E) and beside the Academy spawn (53-388 s). From inside, the
+        // block's graph finds no path anywhere; the way in is still walkable.
+        for (block, cell, from, pocket, goal) in [
+            (
+                0xBAAD_0000u32,
+                0xBAAD_0017u32,
+                Vec3::new(58.9, 156.0, 88.9),
+                Vec3::new(61.4, 148.8, 88.4),
+                Vec3::new(66.1, 131.1, 88.0),
+            ),
+            (
+                0x8602_0000,
+                0x8602_01AD,
+                Vec3::new(12.3, -28.5, 0.0),
+                Vec3::new(14.5, -25.5, 0.0),
+                Vec3::new(22.1, -19.1, 0.0),
+            ),
+        ] {
+            let origin = ac_world::landblock_origin(block);
+            let mut c = crate::testkit::standing_in_the_field(20, cell, from);
+            drive(&mut c, origin + pocket, block, false, 4.0);
+            c.steering.reset();
+            drive(&mut c, origin + goal, block, true, 30.0);
+            let at = c.player.as_ref().unwrap().world_position() - origin;
+            assert!(
+                at.truncate().distance(goal.truncate()) <= 2.0,
+                "stuck at {at:?} in {block:#010x}, short of {goal:?}"
+            );
+        }
+    }
+
     #[test]
     #[ignore = "needs AC_DATA_DIR"]
     fn a_ground_reached_through_a_one_way_portal_has_a_way_home_on_foot() {
