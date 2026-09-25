@@ -204,6 +204,9 @@ impl Steering {
                 return Aim::Go(goal);
             }
         };
+        // Just made or reset: decide now. Waiting out the last plan's `LINE_CHECK` aimed straight at
+        // the goal unlooked (a_steering_reset_mid_walk_plans_at_once_rather_than_walking_blind).
+        let fresh = self.last_pos.is_none();
         match self.last_pos {
             Some(p) if glam::Vec2::new(me.x - p.x, me.y - p.y).length() < PROGRESS => {
                 if now.duration_since(self.last_progress) >= STUCK_AFTER {
@@ -230,7 +233,7 @@ impl Steering {
             self.next_check = now + REPLAN_AFTER;
         }
         let replan = match &self.route {
-            None => now >= self.next_check,
+            None => fresh || now >= self.next_check,
             // A wide route stands while it leads to `far_goal`: the block planner cannot beat it, and
             // running out of waypoints is not staleness (the last is the goal; the caller decides arrival).
             Some(r) if self.route_is_wide => {
@@ -546,6 +549,31 @@ mod tests {
             Aim::Go(aim) => assert!(!near(aim, goal), "walked at the goal through a wall"),
             Aim::NoWay => panic!("refused a walk it had a route for"),
         }
+    }
+
+    #[test]
+    fn a_steering_reset_mid_walk_plans_at_once_rather_than_walking_blind() {
+        // At the Academy spawn a steering reset a tenth of a second into a routed walk aimed straight
+        // at Jonathan until the next line check, half a second of running into a pocket among the
+        // props that no path leaves; the new character stood there 53 s.
+        let t0 = Instant::now();
+        let mut st = Steering::new(t0);
+        let corner = Vec3::new(10.0, 20.0, 0.0);
+        let goal = Vec3::new(20.0, 20.0, 0.0);
+        let mut g = Fake {
+            at: Vec3::new(10.0, 10.0, 0.0),
+            blocked: true,
+            path: Some(vec![corner, goal]),
+            ..Default::default()
+        };
+        assert_eq!(st.steer(&mut g, goal, 0, t0), Aim::Go(corner));
+        st.reset();
+        let soon = t0 + Duration::from_millis(100);
+        assert_eq!(
+            st.steer(&mut g, goal, 0, soon),
+            Aim::Go(corner),
+            "planned again, not straight"
+        );
     }
 
     #[test]
