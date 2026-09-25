@@ -66,7 +66,6 @@ fn command(name, args) {
                 if it.name == "Battle Axe" { axe = true; }
                 if it.name == "Longbow" { bow = true; }
                 if it.name == "Arrow" { arrows += it.stack; }
-                if who == "Scn Taper" && it.name.contains("Taper") { drop_item(it.guid); }
             }
             if coin < 3000 { say("@ci 273 5000"); }
             if who == "Scn Blade" && !axe { say("@ci 301"); }
@@ -74,6 +73,16 @@ fn command(name, args) {
             if who == "Scn Bow" && arrows < 200 { say("@ci 300 250"); }
             if who == "Scn Seller" { for i in 0..10 { say("@ci 297"); } }
         }
+    }
+    // The tapers go on each of the first three asks: a drop sent with the teleport is refused
+    // while the character is in portal space, and a town run takes longer than a minute.
+    if who == "Scn Taper" {
+        let asks = board_get("scn.asks." + who);
+        let asks = if type_of(asks) == "()" { 0 } else { asks };
+        if asks < 3 {
+            for it in inventory() { if it.name.contains("Taper") { drop_item(it.guid); } }
+        }
+        board_set("scn.asks." + who, asks + 1);
     }
     set_loot_profile("Check");
     growth(true);

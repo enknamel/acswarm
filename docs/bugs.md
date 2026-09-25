@@ -13,6 +13,11 @@ priority; a live report starts from the telemetry (`tools/telemetry.py`, `--mark
   spawn the graph routes round (16.5, -28.5), (21.0, -22.5), and a lone character did that and
   left by Jonathan in 4 s, so what differs in a busy process's first frames is not yet known: the
   "steer" records (7eb71fe) catch the first frame next time.
+- **Leaning for a minute on what the line test calls clear.** Scn Mage at the Mosswart ground
+  (0xBAAD0017, 35773.4 33364.8) "getting Gotrok Lithos in sight" aimed straight at a spot 18 m off
+  (follow, block 0xBAAD0000, straight line chosen) and did not move for 61 s, then 20 s more
+  walking to its corpse (run E). Nothing gives up a target the body cannot get to. Shows as: a
+  stall whose walk detail says straight line, not wedged, outdoors.
 - **The two town-run planners disagree.** The first plan said "Boddry the Chancy it is: nowhere
   sells what is wanted", the next-stop plan found Cindrue with "2 of 2 on the shelf", so the run
   walked to the wrong counter. Shows as: two stops for one need in the status lines.
