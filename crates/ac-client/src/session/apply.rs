@@ -413,6 +413,21 @@ impl Client {
                                     let err =
                                         u32::from_le_bytes([rest[0], rest[1], rest[2], rest[3]]);
                                     tracing::debug!("use done, error {err:#x}");
+                                    // A turned-down act, in the log and telemetry: a cast answered
+                                    // at once, again and again, was otherwise invisible.
+                                    if err != 0 {
+                                        let what = if self.autoplay.cast_sent.is_some() {
+                                            "a cast"
+                                        } else {
+                                            "a use"
+                                        };
+                                        tracing::info!(
+                                            "the server turned down {what}: error {err:#x}"
+                                        );
+                                        self.events.push(crate::Event::Noted(format!(
+                                            "the server turned down {what}: error {err:#x}"
+                                        )));
+                                    }
                                     self.use_done = Some((err, now));
                                     // The server has finished with what
                                     // it was asked to do -- a cast, a
