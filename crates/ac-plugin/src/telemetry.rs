@@ -37,6 +37,8 @@ pub struct Telemetry {
     out: Option<std::io::BufWriter<std::fs::File>>,
     left: u64,
     sampled: BTreeMap<usize, Instant>,
+    /// How each session's walk was last steered, so a change of way is written as it happens.
+    steered: BTreeMap<usize, Steered>,
     /// The autoplay settings each session last wrote, so a change is written once.
     setup: BTreeMap<usize, ac_client::autoplay::Config>,
 }
@@ -58,6 +60,7 @@ impl Default for Telemetry {
             out,
             left: FILE_CAP,
             sampled: BTreeMap::new(),
+            steered: BTreeMap::new(),
             setup: BTreeMap::new(),
         }
     }
@@ -81,6 +84,26 @@ impl Telemetry {
         }
         self.left -= line.len() as u64;
         let _ = out.write_all(line.as_bytes());
+    }
+}
+
+/// How a walk is steered, for spotting the frame it changes: a goal (to the metre), and whether the
+/// steering walks the straight line, a route, or finds no way.
+#[derive(Clone, Copy, PartialEq)]
+struct Steered {
+    goal: [i32; 3],
+    way: &'static str,
+}
+
+fn steered(w: &ac_client::tally::WalkFrame) -> Steered {
+    let way = match (w.aim, w.route) {
+        (None, _) => "no way",
+        (Some(_), Some(_)) => "route",
+        (Some(_), None) => "straight",
+    };
+    Steered {
+        goal: w.goal.to_array().map(|v| v.round() as i32),
+        way,
     }
 }
 
@@ -166,6 +189,27 @@ impl Plugin for Telemetry {
         let Some(client) = cx.try_client() else {
             return;
         };
+        // A walk's way, whenever it changes: the samples are two seconds apart, and a walk can go
+        // wrong in its first frame (a character straight into a pocket the graph cannot leave).
+        let way = client.walk_frame.as_ref().map(steered);
+        if way.is_some() && way != self.steered.get(&index).copied() {
+            let w = client.walk_frame.expect("way is some");
+            let record = json!({
+                "k": "steer", "way": way.map(|s| s.way), "goal": w.goal.to_array(),
+                "aim": w.aim.map(|a| a.to_array()), "route": w.route, "wedged": w.wedged,
+                "pos": client.my_position().map(|p| [p.x, p.y, p.z]),
+                "cell": client.player.as_ref().map(|p| format!("{:08X}", p.cell)),
+            });
+            self.write(record, client);
+        }
+        match way {
+            Some(s) => {
+                self.steered.insert(index, s);
+            }
+            None => {
+                self.steered.remove(&index);
+            }
+        }
         if !due || client.player.is_none() {
             return;
         }
@@ -234,5 +278,6 @@ impl Plugin for Telemetry {
     fn session_removed(&mut self, index: usize) {
         crate::shift_removed(&mut self.sampled, index);
         crate::shift_removed(&mut self.setup, index);
+        crate::shift_removed(&mut self.steered, index);
     }
 }

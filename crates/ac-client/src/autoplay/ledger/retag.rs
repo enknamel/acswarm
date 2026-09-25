@@ -325,11 +325,10 @@ impl Client {
                 &who,
                 held,
             ) {
-                tracing::info!(
-                    "autoplay: {} arrived, tagged {}",
-                    stats.name,
-                    action.label()
-                );
+                let arrived = format!("{} arrived, tagged {}", stats.name, action.label());
+                tracing::info!("autoplay: {arrived}");
+                // Every arrival, in telemetry too: what a purchase or a corpse really put in the pack.
+                self.events.push(crate::Event::Noted(arrived));
                 self.autoplay.tag(&stats, action);
             }
         }
