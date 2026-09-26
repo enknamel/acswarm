@@ -83,3 +83,26 @@ fn the_fights_spell_is_remembered_as_its_own_and_a_stop_takes_it_back() {
     assert!(c.magic, "the mode sent is the one already held");
     assert_eq!(c.autoplay.fight_cast, None, "nothing left to take back");
 }
+
+#[test]
+fn a_target_the_server_cannot_find_is_forgotten() {
+    // Blargerton cast Frost Arc III at a Drudge Servant the server no longer had near him: 44, 95
+    // and 17 "Target not acquired" in a row, closing on it and backing off, a ghost on the screen.
+    let now = Instant::now();
+    let mut c = crate::testkit::offline_client();
+    crate::testkit::stand(&mut c, 0xA9B4_0019, glam::Vec3::new(84.0, 84.0, 94.0));
+    let ghost = crate::testkit::standing_by(&mut c, 0x8000_0001, "Drudge Servant", 5.0);
+    c.autoplay.casting_at = Some(ghost.guid);
+    c.autoplay.fight_cast = Some((ghost.guid, now));
+    // Busy is not gone.
+    c.hear_cast_refused(crate::YOURE_TOO_BUSY, now);
+    assert!(c.world.objects.contains_key(&ghost.guid));
+    assert_eq!(c.autoplay.casting_at(), Some(ghost.guid));
+    c.hear_cast_refused(TARGET_NOT_ACQUIRED, now);
+    assert!(
+        !c.world.objects.contains_key(&ghost.guid),
+        "the ghost is still in the world"
+    );
+    assert_eq!(c.autoplay.casting_at(), None, "still casting at it");
+    assert!(c.autoplay.given_up.since(&ghost.guid).is_some());
+}

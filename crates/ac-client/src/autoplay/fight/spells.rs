@@ -3,6 +3,9 @@ use std::time::Instant;
 use crate::autoplay::{cast_problem, Autoplay, Doing, Fight, Release};
 use crate::{Client, Stance};
 
+/// ACE's `TargetNotAcquired`: the cast's target is nowhere the server looks (`Player_Magic.cs:137`).
+pub(crate) const TARGET_NOT_ACQUIRED: u32 = 0x042C;
+
 impl Autoplay {
     /// The creature spells are being thrown at, if any: the magic
     /// fighter's counterpart to `Client::attack_target`.
@@ -12,6 +15,19 @@ impl Autoplay {
 }
 
 impl Client {
+    /// The server's answer `err` to the fight's last cast. A target it cannot find, here or in the
+    /// blocks around (`Landblock.cs:1043`), is gone and this client missed the word: cast at, it was
+    /// refused three times a second for up to 17 s (test: a_target_the_server_cannot_find_is_forgotten).
+    pub(crate) fn hear_cast_refused(&mut self, err: u32, now: Instant) {
+        if err != TARGET_NOT_ACQUIRED {
+            return;
+        }
+        if let Some((guid, _)) = self.autoplay.fight_cast {
+            self.give_up_target(guid, "the server has no such creature", now);
+            self.world.forget(guid);
+        }
+    }
+
     /// Fighting with spells: pick a target the same way, then throw the
     /// first spell in the list that can be cast right now.
     ///
