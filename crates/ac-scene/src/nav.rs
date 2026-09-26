@@ -229,10 +229,16 @@ impl Ground<'_> {
     /// door frame the body slides past and the lip of a landing over a stair's top step, and so
     /// found no way into a mine at ACB5 the body walks (test: a_mine_is_walked_down_to_its_floor).
     pub fn body_reaches(&self, a: Vec3, b: Vec3, cap: &Capsule) -> bool {
+        self.body_comes_within(a, b, BODY_ARRIVE, cap)
+    }
+
+    /// [`body_reaches`](Self::body_reaches), but `within` metres of `b` (flat, on its floor) is
+    /// there: a walk that stops short, as a corridor's aim by its wall is walked to.
+    pub fn body_comes_within(&self, a: Vec3, b: Vec3, within: f32, cap: &Capsule) -> bool {
         let mut p = a;
         let mut left = flat(b - a).length();
         for _ in 0..(left / BODY_STEP).ceil() as usize + 4 {
-            if left <= BODY_ARRIVE {
+            if left <= within {
                 return (p.z - b.z).abs() <= LEVEL_MERGE;
             }
             let d = flat(b - p);
