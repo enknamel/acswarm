@@ -17,6 +17,9 @@ priority; a live report starts from the telemetry (`tools/telemetry.py`, `--mark
   "back the way it came" 0.25 m from a trail point it never reached (RETRACE_ARRIVE 0.2); each
   stuck replan found no path and retraced to the same point (scenario scn-ghost; the mine itself is
   reachable now, but the loop is not bounded).
+- **No walk out of the ACB5 mine to the open ground.** Scn Blade in 0xACB501C6 stood 77 s on a
+  journey step "walk inside" to a point 63 m off outdoors, no route in the block and the steering
+  straight at the mine's wall; replanning gave the same step (scn-duds, 18:35:14).
 - **Held 0.42 m from a corner waypoint.** A new character on a platform in 0xA9B2 (78.2 85.9 97.5)
   stood 124 s "getting Black Rabbit in sight", 0.42 m from its route's first waypoint: a corner is
   held until the body stands on it (`Route::target`, ON_THE_SPOT) and it could not. Offline over the
