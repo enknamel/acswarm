@@ -81,8 +81,9 @@ fn academy_start_room_to_the_far_end() {
                 line_clear(&collision, from, p),
                 "{from} -> {p} crosses a wall"
             );
+            // By the sampled test, or indoors by the body's own step (`Ground::joins`).
             assert!(
-                ground.walkable(from, p, &cap).0,
+                ground.walkable(from, p, &cap).0 || ground.body_reaches(from, p, &cap),
                 "{from} -> {p} cannot be walked"
             );
             assert!(from.distance(p) > 0.1, "degenerate step at {p}");

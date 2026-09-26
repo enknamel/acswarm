@@ -2088,6 +2088,33 @@ mod tests {
 
     #[test]
     #[ignore = "needs AC_DATA_DIR"]
+    fn a_mine_is_walked_down_to_its_floor() {
+        // The mine at ACB5: a door at 60 m, stairs, a ramp, and a floor at 40.4 where Small
+        // Fledgling Mukkirs live. The graph found no way in or out (an overlay cell's floor over
+        // the ramp, a door frame and a landing's lip the body slides past), so casters stood on
+        // the hill above them "getting them in sight" and a seller stood 390 s inside.
+        let block = 0xACB5_0000u32;
+        let origin = ac_world::landblock_origin(block);
+        let outside = Vec3::new(103.0, 162.5, 60.0);
+        let bottom = Vec3::new(125.5, 134.1, 40.4);
+        let mut c = crate::testkit::standing_in_the_field(21, 0xACB5_0027, outside);
+        drive(&mut c, origin + bottom, 0xACB5_01E2, true, 60.0);
+        let at = c.player.as_ref().unwrap().world_position() - origin;
+        assert!(
+            at.distance(bottom) <= 1.5,
+            "stopped at {at:?}, short of the mine's floor"
+        );
+        c.steering.reset();
+        drive(&mut c, origin + outside, block, true, 60.0);
+        let at = c.player.as_ref().unwrap().world_position() - origin;
+        assert!(
+            at.truncate().distance(outside.truncate()) <= 2.0,
+            "stopped at {at:?} on the way out"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_goal_on_a_roof_is_walked_to_on_the_roof() {
         // A Mite Sentry on the roof of a building in 0xBDAF, 4.3 m over a caster inside. The goal
         // outdoors and far above the terrain read as floating off a hillside and was dropped to the

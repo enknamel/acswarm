@@ -10,7 +10,8 @@
 //! off is not one you can climb) and validated by sampling the capsule
 //! every half metre along the segment: floor continuity within the
 //! capsule's step limits, no wall contact, head room, and a clear ray at
-//! chest height. `find_path` runs A* between the nodes nearest the two
+//! chest height; indoors, a hop that fails that but that the body's own
+//! step walks is an edge too (`Ground::joins`). `find_path` runs A* between the nodes nearest the two
 //! endpoints and then string-pulls the result with the same edge check,
 //! so every consecutive pair of waypoints is walkable in a straight line.
 
@@ -41,6 +42,12 @@ const MAX_EDGE_RISE: f32 = 2.0;
 const SNAP_FRACTION: f32 = 0.6;
 /// Extra clearance a smoothed route keeps from walls (metres).
 const SMOOTH_MARGIN: f32 = 0.3;
+/// How far one step of `body_reaches` goes (metres): a frame's run at 20 Hz.
+const BODY_STEP: f32 = 0.2;
+/// How near `body_reaches` must come to the far node, flat (metres).
+const BODY_ARRIVE: f32 = 0.25;
+/// The least share of a step `body_reaches` must close on the far node; less is a wall.
+const BODY_CLOSING: f32 = 0.3;
 
 /// Where the ground is: static collision plus, outdoors, a terrain
 /// height function over world `(x, y)`.
@@ -197,6 +204,69 @@ impl Ground<'_> {
             return (false, false);
         }
         (forward, backward)
+    }
+
+    /// [`walkable`](Self::walkable), and where it refuses between two nodes `indoors`, the body's
+    /// own step each way ([`body_reaches`](Self::body_reaches)): the test for a hop between
+    /// neighbours. Only indoors: the step knows no terrain, and tried on every refused hop outside
+    /// it made Holtburg's graph five times slower to build (92 -> 445 ms).
+    pub fn joins(&self, a: Vec3, b: Vec3, indoors: bool, cap: &Capsule) -> (bool, bool) {
+        let (fwd, back) = self.walkable(a, b, cap);
+        // A wall at chest height between them is not slid past: the step is for what the sampling
+        // over-counts, a door frame brushed or a landing's lip, never for a wall.
+        if !indoors || (fwd && back) || !line_clear(self.collision, a, b) {
+            return (fwd, back);
+        }
+        (
+            fwd || self.body_reaches(a, b, cap),
+            back || self.body_reaches(b, a, cap),
+        )
+    }
+
+    /// Whether the body gets from `a` to `b` (feet, a hop of a node or two) by the step
+    /// `Player::update` takes: `walk` a fifth of a metre at a time, onto what is below within a
+    /// step down where a step leaves the floor, always closing on `b`. The sampled test refuses a
+    /// door frame the body slides past and the lip of a landing over a stair's top step, and so
+    /// found no way into a mine at ACB5 the body walks (test: a_mine_is_walked_down_to_its_floor).
+    pub fn body_reaches(&self, a: Vec3, b: Vec3, cap: &Capsule) -> bool {
+        let mut p = a;
+        let mut left = flat(b - a).length();
+        for _ in 0..(left / BODY_STEP).ceil() as usize + 4 {
+            if left <= BODY_ARRIVE {
+                return (p.z - b.z).abs() <= LEVEL_MERGE;
+            }
+            let d = flat(b - p);
+            let step = d.normalize() * d.length().min(BODY_STEP);
+            let walk = self
+                .collision
+                .walk(p, Vec3::new(p.x + step.x, p.y + step.y, p.z), cap);
+            if walk.blocked {
+                return false;
+            }
+            let mut next = walk.pos;
+            if walk.floor.is_none() {
+                match self.collision.floor_at(next, 0.0, cap.step_down) {
+                    Some((z, _)) => next.z = z,
+                    None => return false,
+                }
+            }
+            if self.outdoors_only && walk.floor.is_some_and(|(_, cell)| cell != 0) {
+                return false;
+            }
+            if self.no_go.is_some_and(|f| f(next.x, next.y))
+                || self.sea.is_some_and(|f| f(next.x, next.y))
+            {
+                return false;
+            }
+            // A step that closes little is sliding along a wall the hop runs into.
+            let now_left = flat(b - next).length();
+            if now_left > left - BODY_STEP * BODY_CLOSING {
+                return false;
+            }
+            left = now_left;
+            p = next;
+        }
+        false
     }
 
     /// Whether the straight walk from `a` to `b` (feet positions) runs
@@ -539,7 +609,9 @@ impl NavGraph {
                     if (a.z - b.z).abs() > MAX_EDGE_RISE {
                         continue;
                     }
-                    let (fwd, back) = ground.walkable(a, b, &cap);
+                    let indoors =
+                        self.nodes[i as usize].cell != 0 && self.nodes[j as usize].cell != 0;
+                    let (fwd, back) = ground.joins(a, b, indoors, &cap);
                     if fwd {
                         self.edges[i as usize].push(j);
                     }
@@ -563,7 +635,8 @@ impl NavGraph {
                 if (a.z - b.z).abs() > MAX_EDGE_RISE {
                     continue;
                 }
-                let (fwd, back) = ground.walkable(a, b, &cap);
+                let indoors = self.nodes[i as usize].cell != 0 && self.nodes[j as usize].cell != 0;
+                let (fwd, back) = ground.joins(a, b, indoors, &cap);
                 if fwd && !self.edges[i as usize].contains(&j) {
                     self.edges[i as usize].push(j);
                 }
