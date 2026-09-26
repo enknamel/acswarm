@@ -38,6 +38,15 @@ priority; a live report starts from the telemetry (`tools/telemetry.py`, `--mark
 - **The corpse choice flips each frame between two.** Scn Mage at ACB5 alternated "walking to
   Corpse of Small Fledgling Mukkir (19 m)" and "walking to Corpse of Drudge Slinker (13 m)" every
   tick for 2 s (scn-nav3, 15:25:00).
+- **Explore never goes into some rooms.** A sweep of explore from every room of the Holtburg
+  Dungeon had "no way into" 0x164, 0x154, 0x276, 0x1BE, 0x148 and 0x13C over 140 times each (and
+  0x295/0x296, up a wall, as they should be): if a walk reaches them, their creatures are never
+  found. Check each with `has_way_to` against a walk offline.
+- **Our shots burst as they leave some spots.** +Scn Mage's Shock Wave and Frost Arc arrived
+  stopped and hidden 1.2 m out (ACE's world-entry collision, SpellProjectile.cs:219) from spots in
+  0x01F601FA, 0x01F60272 and 0x01F60231 with nothing in our collision within half a metre and no
+  door near; two such casts now move the caster (`hear_burst`), but what the server strikes there
+  is not known.
 - **Our collision has a wall the server does not.** A new character's Lightning Bolt flew 44.3 m in
   0xABB4 through a wall our collision puts 28.1 m out (scn-shots, "shot:" notes): the shot test
   refuses shots the server would let through.
@@ -51,6 +60,19 @@ priority; a live report starts from the telemetry (`tools/telemetry.py`, `--mark
   level 5); use a template, as `tools/scenarios.sh` does.
 
 ## Fixed
+
+- **Cast at a drudge for 40 s and hit nothing** (this merge): Blargerton stood in 0x01F60230
+  casting Frost Arc III every 3 s at a drudge 1.6 m off, no projectile flying, until a step of 2 m
+  let one through. Our shot bursts as it leaves some spots; two bursts from one spot at an unhurt
+  target now mark it for a minute, and the next cast is thrown from a clear spot elsewhere. Closed
+  doors count in the shot test (the server flies a spell into a shut door it lets a walk through).
+  Live on local ACE, +Scn Mage in the Holtburg Dungeon: casts that left 31% and 49% before, 87%
+  after; longest run of casts that never left 40 (69 s) and 35 (59 s) before, 4 (9 s) after.
+- **Explore stood still or paced** (this merge): an aim beside a corridor wall read as no way in and
+  every room round the character was shut; an aim up a stair was drawn back onto the sill; a walked
+  room on the way counted as arriving (0x21A/0x216 every 0.8 s). A sweep of 90 s of explore from
+  every room of the Holtburg Dungeon: 55 of 319 runs stalled before, 0 of 601 after (bar a sealed
+  group of rooms 12.8 m over the portal's room that nothing reaches).
 
 - **A mine at ACB5 had no way in** (550b8d7): Mukkirs on a floor 17 m under the hill were fought
   from above, a corpse there waited on 36 s, a seller stood 390 s inside. The graph now leaves out

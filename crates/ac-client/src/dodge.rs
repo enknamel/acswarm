@@ -186,6 +186,14 @@ pub struct State {
     pub fired_at: Option<(u32, Vec3)>,
     /// Our own projectiles in flight, by guid, until they land (see `Client::land_own_shots`).
     pub own_shots: HashMap<u32, OwnShot>,
+    /// The target's health when the attack spell last cast left.
+    pub fired_health: Option<f32>,
+    /// The last of our shots that burst as it left (see `Client::hear_burst`).
+    pub burst: Option<Burst>,
+    /// Where two of our shots burst as they left, and when: not cast from for a minute (`DUD_KEPT`).
+    pub dud_spots: Vec<(Vec3, Instant)>,
+    /// Each door Setup's box in its own frame (see `Client::doors_near`).
+    pub door_boxes: HashMap<u32, Option<(Vec3, Vec3)>>,
     /// The sidestep in hand is a courtesy to a fellow rather than a
     /// dodge: it saves his spell and nothing of ours, so it is given up
     /// the moment there is something better to do (see
@@ -205,6 +213,36 @@ const SHOT_FLIES_FOR: Duration = Duration::from_secs(10);
 const SHOT_ON_TARGET: f32 = 2.0;
 /// A shot landing within this of the terrain's height struck the ground (metres).
 const SHOT_ON_GROUND: f32 = 0.5;
+
+/// A second shot bursting within this of where the first did is from the same spot (metres).
+const DUD_SPOT: f32 = 1.0;
+/// A place to cast from keeps this far from a dud spot (metres): a step of 1.2 m launched (live).
+const DUD_CLEAR: f32 = 1.5;
+/// How long a dud spot is kept.
+const DUD_KEPT: Duration = Duration::from_secs(60);
+/// A burst pairs with the one before it only within this.
+const BURST_PAIRED: Duration = Duration::from_secs(15);
+/// Doors further than this (metres) from every point of a flight are not looked at: a point is
+/// within [`aim::PIECE`] of the next and a doorway is some three metres across.
+const DOOR_NEAR: f32 = 4.0;
+
+/// One of our shots that burst as it left: where we stood, and at what, with its health then.
+#[derive(Debug, Clone, Copy)]
+pub struct Burst {
+    pub stood: Vec3,
+    pub target: Option<u32>,
+    pub health: Option<f32>,
+    pub when: Instant,
+}
+
+/// A closed door by a flight: where it stands, its turn and scale, and its Setup's box.
+struct DoorBox {
+    at: Vec3,
+    turn: glam::Quat,
+    scale: f32,
+    lo: Vec3,
+    hi: Vec3,
+}
 
 /// One of our own projectiles, from when it left to when it lands.
 #[derive(Debug, Clone)]
@@ -385,10 +423,140 @@ impl Client {
         let Some(path) = aim::flight(self.shot_for(how), from, to) else {
             return false;
         };
+        self.shot_flies(&path)
+    }
+
+    /// Whether a flight along `path` is struck by nothing: the landblock, the ground or a closed
+    /// door.
+    fn shot_flies(&mut self, path: &[Vec3]) -> bool {
         let assets = self.assets.clone();
-        self.player
+        let clear = self
+            .player
             .as_mut()
-            .is_none_or(|pl| pl.flies_clear(&assets, &path))
+            .is_none_or(|pl| pl.flies_clear(&assets, path));
+        clear && self.door_across(path).is_none()
+    }
+
+    /// The closed doors within [`DOOR_NEAR`] of `path`. The server flies a spell into one, though
+    /// it lets a walk through (`ac_nav::obstacles::in_the_way`). A door fills its Setup's box, the
+    /// doorway: its leaf's closed place is an animation frame the default placement lacks.
+    fn doors_near(&mut self, path: &[Vec3]) -> Vec<DoorBox> {
+        use ac_world::{object, object_desc_flags};
+        let near: Vec<(u32, Vec3, glam::Quat, f32)> = self
+            .world
+            .objects
+            .values()
+            .filter(|o| o.object_desc_flags & object_desc_flags::DOOR != 0)
+            .filter(|o| o.physics_state & object::PHYSICS_STATE_ETHEREAL == 0 && o.setup_id != 0)
+            .filter_map(|o| {
+                let p = o.position?;
+                let at = ac_world::landblock_origin(p.cell) + p.local;
+                path.iter().any(|q| q.distance(at) < DOOR_NEAR).then_some((
+                    o.setup_id,
+                    at,
+                    p.rotation,
+                    o.scale.max(1e-3),
+                ))
+            })
+            .collect();
+        let assets = self.assets.clone();
+        near.into_iter()
+            .filter_map(|(setup, at, turn, scale)| {
+                let (lo, hi) = (*self.dodge.door_boxes.entry(setup).or_insert_with(|| {
+                    ac_scene::collision::from_model(&assets, setup, glam::Mat4::IDENTITY)
+                        .ok()?
+                        .bounds()
+                }))?;
+                Some(DoorBox {
+                    at,
+                    turn,
+                    scale,
+                    lo,
+                    hi,
+                })
+            })
+            .collect()
+    }
+
+    /// Where `path` first enters a closed door, if it does.
+    fn door_across(&mut self, path: &[Vec3]) -> Option<Vec3> {
+        let doors = self.doors_near(path);
+        path.windows(2).find_map(|w| {
+            doors
+                .iter()
+                .filter_map(|d| {
+                    let local = |q: Vec3| d.turn.inverse() * (q - d.at) / d.scale;
+                    aim::segment_box(local(w[0]), local(w[1]), d.lo, d.hi)
+                })
+                .min_by(|a, b| a.total_cmp(b))
+                .map(|t| w[0] + (w[1] - w[0]) * t)
+        })
+    }
+
+    /// Whether `at` is a spot two of our shots burst at as they left (see `hear_burst`).
+    pub(crate) fn is_dud_spot(&self, at: Vec3) -> bool {
+        self.dodge
+            .dud_spots
+            .iter()
+            .any(|(d, _)| d.distance(at) <= DUD_SPOT)
+    }
+
+    /// One of our shots, `spell` cast from `stood`, burst at `at` as it left. The second from the
+    /// same spot at the same target, its health no lower than at the first cast, marks the spot:
+    /// ACE had it strike something there (a point-blank hit looks the same on the wire, and hurts).
+    fn hear_burst(&mut self, spell: u32, stood: Vec3, at: Vec3, now: Instant) {
+        let target = self.dodge.fired_at.take().map(|(g, _)| g);
+        let this = Burst {
+            stood,
+            target,
+            health: self.dodge.fired_health.take(),
+            when: now,
+        };
+        let Some(first) = self.dodge.burst.replace(this) else {
+            return;
+        };
+        let health = target
+            .and_then(|g| self.world.objects.get(&g))
+            .and_then(|o| o.health);
+        let unhurt = match (first.health, health) {
+            (Some(was), Some(is)) => is >= was - 0.001,
+            _ => true,
+        };
+        if first.target != target
+            || first.stood.distance(stood) > DUD_SPOT
+            || now.duration_since(first.when) > BURST_PAIRED
+            || !unhurt
+        {
+            return;
+        }
+        self.dodge.burst = None;
+        self.dodge.dud_spots.push((stood, now));
+        self.dodge.vantage = None;
+        let there = match self.first_hit(&[
+            stood + Vec3::Z * aim::UNKNOWN_HEIGHT * aim::SPELL_HEIGHT,
+            at,
+        ]) {
+            Some(_) => "our collision has something there",
+            None => "nothing in our collision there",
+        };
+        let spell = self
+            .assets
+            .spell_table()
+            .ok()
+            .and_then(|t| t.get(spell).map(|s| s.name.clone()))
+            .unwrap_or_else(|| format!("spell {spell}"));
+        let o = ac_world::landblock_origin(crate::player::block_of(at));
+        let line = format!(
+            "shot: {spell} burst as it left, {:.1} m out at ({:.1}, {:.1}, {:.1}) in {:#06x}, twice, {} unhurt; {there}; casting from elsewhere",
+            stood.distance(at),
+            at.x - o.x,
+            at.y - o.y,
+            at.z,
+            crate::player::block_of(at) >> 16,
+            target.map_or_else(|| "the target".to_string(), |g| self.world.name_or_hex(g)),
+        );
+        tracing::info!("aim: {line}");
+        self.events.push(crate::Event::Noted(line));
     }
 
     /// An attack spell has just been cast: its projectile, when it
@@ -402,6 +570,7 @@ impl Client {
             .map(|o| o.guid)
             .collect();
         self.dodge.fired = Some((spell, now, before));
+        self.dodge.fired_health = self.world.objects.get(&target).and_then(|o| o.health);
         self.dodge.fired_at = self
             .world
             .objects
@@ -415,6 +584,9 @@ impl Client {
     /// moving away. The spell table does not say how fast a spell flies,
     /// and an arc's height depends on it.
     pub(crate) fn learn_shot_speeds(&mut self, now: Instant) {
+        self.dodge
+            .dud_spots
+            .retain(|(_, when)| now.duration_since(*when) < DUD_KEPT);
         let Some((spell, at, before)) = self.dodge.fired.clone() else {
             return;
         };
@@ -450,7 +622,22 @@ impl Client {
                         (o.guid, p, o.velocity, falls)
                     })
             });
+        // Burst as it left: stopped and hidden beside us the moment the client first hears of it.
+        let burst = ours.is_none().then(|| {
+            self.world
+                .objects
+                .values()
+                .filter(|o| o.is_missile() && o.parent.is_none() && !before.contains(&o.guid))
+                .filter(|o| o.no_draw && o.velocity.length() < 0.5)
+                .find_map(|o| o.world_pos().filter(|p| p.distance(me) <= CASTER_WITHIN))
+        });
+        if let Some(at) = burst.flatten() {
+            self.dodge.fired = None;
+            self.hear_burst(spell, me, at, now);
+            return;
+        }
         if let Some((guid, origin, velocity, falls)) = ours {
+            self.dodge.burst = None;
             self.dodge.own_shots.insert(
                 guid,
                 OwnShot {
@@ -480,10 +667,14 @@ impl Client {
     /// Where a projectile flying `path` first meets static collision or the ground: the shot test
     /// (`Player::flies_clear`) with the place, for saying what a shot struck.
     fn first_hit(&mut self, path: &[Vec3]) -> Option<Vec3> {
+        let door = self.door_across(path);
         let assets = self.assets.clone();
         let pl = self.player.as_mut()?;
         let worlds = pl.collision_along(&assets, path);
         for w in path.windows(2) {
+            if let Some(d) = door.filter(|d| segment_holds(w[0], w[1], *d)) {
+                return Some(d);
+            }
             let (a, b) = (w[0], w[1]);
             let hit = worlds
                 .iter()
@@ -606,18 +797,17 @@ impl Client {
             .player
             .as_mut()?
             .standable_near(&assets, block, at, reach);
-        spots.retain(|s| s.distance(at) <= reach);
+        let duds: Vec<Vec3> = self.dodge.dud_spots.iter().map(|(d, _)| *d).collect();
+        spots.retain(|s| {
+            s.distance(at) <= reach && duds.iter().all(|d| d.distance(*s) >= DUD_CLEAR)
+        });
         spots.sort_by(|a, b| a.distance(me).total_cmp(&b.distance(me)));
         let mut clear = Vec::new();
         for s in spots.into_iter().take(VANTAGE_LOOKS) {
             let Some(path) = aim::flight(shot, self.body_of(mine, s), to) else {
                 continue;
             };
-            if self
-                .player
-                .as_mut()
-                .is_some_and(|pl| pl.flies_clear(&assets, &path))
-            {
+            if self.shot_flies(&path) {
                 clear.push(s);
                 if clear.len() == VANTAGE_WALKS {
                     break;
@@ -654,7 +844,10 @@ impl Client {
         // there, and one that would strike a wall or the ground on the
         // way is not thrown (see `crate::aim`). Walk round (the steering
         // finds the way) until the shot is clear and in reach.
-        let seen = self.shot_clears(target, how);
+        // Nor from where two of our shots burst as they left: ACE struck something there that our
+        // collision lacks (see `hear_burst`).
+        let seen =
+            self.shot_clears(target, how) && (matches!(how, How::Melee) || !self.is_dud_spot(me));
         let stop = if seen { range * WITHIN } else { NO_SIGHT_STOP };
         if at.distance(me) <= stop && seen {
             self.stop_approaching();
@@ -758,6 +951,11 @@ impl Client {
             self.steering.reset();
         }
     }
+}
+
+/// Whether `p` lies on the segment `a` to `b` (within a centimetre).
+fn segment_holds(a: Vec3, b: Vec3, p: Vec3) -> bool {
+    (a.distance(p) + p.distance(b) - a.distance(b)).abs() < 0.01
 }
 
 /// When a projectile at `pos` moving at `velocity`, falling at
@@ -1779,5 +1977,113 @@ mod tests {
             "the shot clears from {:?}",
             spot - origin
         );
+    }
+
+    /// A shot of ours at `at` that burst as the client first heard of it: stopped and hidden.
+    fn burst_at(c: &mut Client, guid: u32, at: Vec3) {
+        c.world.objects.insert(
+            guid,
+            ac_world::WorldObject {
+                guid,
+                name: "Shockwave".into(),
+                physics_state: ac_world::object::PHYSICS_STATE_MISSILE,
+                no_draw: true,
+                position: Some(ac_world::object::Position::new_flat(
+                    0x01F6_01FA,
+                    at - ac_world::landblock_origin(0x01F6_01FA),
+                )),
+                ..Default::default()
+            },
+        );
+    }
+
+    #[test]
+    fn two_shots_bursting_as_they_leave_one_spot_mark_it() {
+        // +Scn Mage in 0x01F601FA cast Shock Wave I thirty times at a Swamp Rat 4.5 m off: each
+        // projectile arrived stopped and hidden 1.2 m out, and the rat was never touched.
+        let t0 = Instant::now();
+        let mut c = crate::testkit::offline_client();
+        crate::testkit::stand(&mut c, 0x01F6_01FA, Vec3::new(91.6, -61.63, -6.0));
+        let me = c.my_position().unwrap();
+        let rat = crate::testkit::standing_by(&mut c, 0x8000_0001, "Swamp Rat", -4.5);
+        c.note_fired(64, rat.guid, t0);
+        burst_at(&mut c, 0x8000_0100, me + Vec3::new(-1.1, -0.3, 1.2));
+        c.learn_shot_speeds(t0 + Duration::from_millis(2_000));
+        assert!(!c.is_dud_spot(me), "one burst could be a point-blank hit");
+        c.note_fired(64, rat.guid, t0 + Duration::from_millis(3_000));
+        burst_at(&mut c, 0x8000_0101, me + Vec3::new(-1.1, -0.3, 1.2));
+        c.learn_shot_speeds(t0 + Duration::from_millis(5_000));
+        assert!(c.is_dud_spot(me), "the second, the rat unhurt");
+        assert!(
+            !c.is_dud_spot(me + Vec3::new(2.0, 0.0, 0.0)),
+            "a step away is not"
+        );
+        let said = c.drain_events().into_iter().any(
+            |e| matches!(e, crate::Event::Noted(n) if n.starts_with("shot:") && n.contains("burst as it left")),
+        );
+        assert!(said, "the burst is noted");
+        c.learn_shot_speeds(t0 + Duration::from_secs(70));
+        assert!(!c.is_dud_spot(me), "kept a minute, not for good");
+    }
+
+    #[test]
+    fn shots_that_burst_on_a_target_they_hurt_mark_nothing() {
+        // Point-blank, a projectile strikes its target as it leaves: the same on the wire.
+        let t0 = Instant::now();
+        let mut c = crate::testkit::offline_client();
+        crate::testkit::stand(&mut c, 0x01F6_01FA, Vec3::new(91.6, -61.63, -6.0));
+        let me = c.my_position().unwrap();
+        let rat = crate::testkit::standing_by(&mut c, 0x8000_0001, "Swamp Rat", -1.5);
+        c.note_fired(64, rat.guid, t0);
+        burst_at(&mut c, 0x8000_0100, me + Vec3::new(-1.1, 0.0, 1.2));
+        c.learn_shot_speeds(t0 + Duration::from_millis(2_000));
+        c.world.objects.get_mut(&rat.guid).unwrap().health = Some(0.6);
+        c.note_fired(64, rat.guid, t0 + Duration::from_millis(3_000));
+        burst_at(&mut c, 0x8000_0101, me + Vec3::new(-1.1, 0.0, 1.2));
+        c.learn_shot_speeds(t0 + Duration::from_millis(5_000));
+        assert!(!c.is_dud_spot(me), "the rat was hurt");
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn a_closed_door_stops_a_spell() {
+        // "Spells cannot fly through doors": ACE flies them into a closed one, though it lets the
+        // character walk through. The Holtburg Dungeon's door 0x701F6057 stands in 0x01F601FD.
+        let mut c =
+            crate::testkit::standing_in_the_field(27, 0x01F6_01FA, Vec3::new(91.0, -60.0, -6.0));
+        let rat = crate::testkit::standing_by(&mut c, 0x8000_0001, "Swamp Rat", 7.0);
+        let (spell, _) = c
+            .assets
+            .spell_table()
+            .unwrap()
+            .find_by_name("Shock Wave I")
+            .map(|(id, sp)| (id, sp.clone()))
+            .expect("Shock Wave I");
+        let how = How::Spell(spell);
+        assert!(c.shot_clears(rat.guid, how), "through the open doorway");
+        let door = ac_world::WorldObject {
+            guid: 0x701F_6057,
+            name: "Door".into(),
+            setup_id: 0x0200_024F,
+            object_desc_flags: ac_world::object_desc_flags::DOOR,
+            physics_state: 0x10018,
+            position: Some(ac_world::object::Position {
+                cell: 0x01F6_01FD,
+                local: Vec3::new(94.75, -60.0, -6.0),
+                rotation: glam::Quat::from_xyzw(
+                    0.0,
+                    0.0,
+                    -std::f32::consts::FRAC_1_SQRT_2,
+                    std::f32::consts::FRAC_1_SQRT_2,
+                ),
+            }),
+            scale: 1.0,
+            ..Default::default()
+        };
+        c.world.objects.insert(door.guid, door);
+        assert!(!c.shot_clears(rat.guid, how), "not through the shut door");
+        c.world.objects.get_mut(&0x701F_6057).unwrap().physics_state |=
+            ac_world::object::PHYSICS_STATE_ETHEREAL;
+        assert!(c.shot_clears(rat.guid, how), "through it open");
     }
 }

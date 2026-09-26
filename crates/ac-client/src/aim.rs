@@ -182,6 +182,28 @@ fn falling(origin: Vec3, v: Vec3, t: f32, x: f32) -> Vec<Vec3> {
         .collect()
 }
 
+/// Where along the segment `a` to `b` it first enters the box `lo` to `hi`, as a fraction (0 when
+/// `a` is inside it), or `None` when it misses: the slab test.
+pub fn segment_box(a: Vec3, b: Vec3, lo: Vec3, hi: Vec3) -> Option<f32> {
+    let d = b - a;
+    let (mut enter, mut leave) = (0.0f32, 1.0f32);
+    for i in 0..3 {
+        if d[i].abs() < 1e-9 {
+            if a[i] < lo[i] || a[i] > hi[i] {
+                return None;
+            }
+            continue;
+        }
+        let (t0, t1) = ((lo[i] - a[i]) / d[i], (hi[i] - a[i]) / d[i]);
+        enter = enter.max(t0.min(t1));
+        leave = leave.min(t0.max(t1));
+        if enter > leave {
+            return None;
+        }
+    }
+    Some(enter)
+}
+
 /// Whether a flight along `path` gets to its end: no stretch of it is
 /// struck by what `strikes` says stops a segment, and no point of it is
 /// under the ground `ground` gives at that spot (`None` where there is
@@ -314,6 +336,28 @@ mod tests {
         assert!(!clears(&bolt, wall, flat));
         let arc = flight(Shot::Arc { speed: 10.0 }, from, to).unwrap();
         assert!(clears(&arc, wall, flat));
+    }
+
+    #[test]
+    fn a_segment_meets_a_box_where_it_enters() {
+        let (lo, hi) = (Vec3::new(-1.0, -1.0, 0.0), Vec3::new(1.0, 1.0, 2.0));
+        let t = segment_box(Vec3::new(-3.0, 0.0, 1.0), Vec3::new(3.0, 0.0, 1.0), lo, hi);
+        assert!(t.is_some_and(|t| close(t, 2.0 / 6.0)), "{t:?}");
+        assert_eq!(
+            segment_box(Vec3::new(-3.0, 0.0, 3.0), Vec3::new(3.0, 0.0, 3.0), lo, hi),
+            None,
+            "over it"
+        );
+        assert_eq!(
+            segment_box(Vec3::new(-3.0, 0.0, 1.0), Vec3::new(-2.0, 0.0, 1.0), lo, hi),
+            None,
+            "short of it"
+        );
+        assert_eq!(
+            segment_box(Vec3::ZERO + Vec3::Z, Vec3::new(3.0, 0.0, 1.0), lo, hi),
+            Some(0.0),
+            "from inside"
+        );
     }
 
     #[test]
