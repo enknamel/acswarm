@@ -863,6 +863,36 @@ impl Client {
         self.travel.trip.is_some()
     }
 
+    /// Let go of the walk (`head_for`) and the journey under way, saying `why`.
+    pub(crate) fn drop_walk(&mut self, why: &str) {
+        let walking = self.follow.take().is_some();
+        if walking {
+            self.steering.reset();
+        }
+        let journey = self.traveling() || self.travel_goal_xy().is_some();
+        if journey {
+            self.end_trip();
+        }
+        self.autoplay.resume_trip = None;
+        if walking || journey {
+            tracing::info!("travel: {why}; letting go of the walk");
+        }
+    }
+
+    /// A walk's goal further off than a walk goes ([`WALKABLE`]) was left behind by a teleport, a
+    /// recall or a portal: walked at, it was a dungeon spot 34 km from the Holtburg lifestone
+    /// (test: a_walk_left_behind_by_a_recall_is_let_go).
+    pub(crate) fn drop_stale_walk(&mut self) {
+        let (Some(f), Some(me)) = (self.follow, self.my_position()) else {
+            return;
+        };
+        if Vec2::new(f.target.x - me.x, f.target.y - me.y).length() > WALKABLE {
+            self.follow = None;
+            self.steering.reset();
+            tracing::info!("travel: the walk's goal was left behind; letting go of it");
+        }
+    }
+
     /// Stop a journey because the player is doing something with the
     /// world instead: talking to a vendor, opening a chest, attacking.
     /// The server walks the character to whatever they are using, and a
@@ -1759,6 +1789,52 @@ fn gem_next(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn autoplays_walk_ends_when_autoplay_is_switched_off() {
+        // Blargerton, autoplay switched off in the Holtburg Dungeon: the walk it had set stayed on
+        // the body and walked him on after the recall, then stood 25 min on "no way".
+        let now = Instant::now();
+        let mut c = crate::testkit::offline_client();
+        crate::testkit::stand(&mut c, 0xA9B4_0019, Vec3::new(84.0, 84.0, 94.0));
+        c.world.player_guid = Some(crate::testkit::ME);
+        c.autoplay.config.enabled = true;
+        c.tick_autoplay(now);
+        let me = c.my_position().unwrap();
+        let walk = crate::Follow {
+            target: me + Vec3::new(10.0, 0.0, 0.0),
+            stop: 1.0,
+        };
+        c.follow = Some(walk);
+        c.autoplay.config.enabled = false;
+        c.tick_autoplay(now);
+        assert!(c.follow.is_none(), "walked on with autoplay off");
+        // A walk set with it off is the player's or a script's, and stays.
+        c.follow = Some(walk);
+        c.tick_autoplay(now);
+        assert_eq!(c.follow, Some(walk));
+    }
+
+    #[test]
+    fn a_walk_left_behind_by_a_recall_is_let_go() {
+        let mut c = crate::testkit::offline_client();
+        crate::testkit::stand(&mut c, 0xA9B4_0019, Vec3::new(84.0, 84.0, 94.0));
+        let me = c.my_position().unwrap();
+        let near = crate::Follow {
+            target: me + Vec3::new(30.0, 0.0, 0.0),
+            stop: 1.0,
+        };
+        c.follow = Some(near);
+        c.drop_stale_walk();
+        assert_eq!(c.follow, Some(near), "a walk in reach is kept");
+        // The dungeon spot the recall left behind, 34 km from the Holtburg lifestone.
+        c.follow = Some(crate::Follow {
+            target: Vec3::new(264.5, 47182.0, 0.1),
+            stop: 1.0,
+        });
+        c.drop_stale_walk();
+        assert!(c.follow.is_none());
+    }
 
     #[test]
     fn a_building_is_planned_from_the_ground_outside_it() {

@@ -493,6 +493,8 @@ pub struct Autoplay {
     follow_walk: Option<glam::Vec3>,
     /// Whether a leader was followed last tick, so the tick following begins is known.
     followed: bool,
+    /// Whether autoplay was on last tick, so the tick it is switched off is known.
+    was_on: bool,
     /// No journey after the leader is planned before this: planning
     /// costs a search, and one that found no way is not tried again for
     /// a while.
@@ -561,6 +563,13 @@ impl Client {
             self.autoplay.growth.drop_ground_walk();
         }
         self.autoplay.followed = followed;
+        // Switched off: the walk and journey its rules set go with it, or the body walks on to a
+        // goal nobody wants (test: autoplays_walk_ends_when_autoplay_is_switched_off).
+        let on = self.autoplay.config.enabled;
+        if self.autoplay.was_on && !on {
+            self.drop_walk("autoplay switched off");
+        }
+        self.autoplay.was_on = on;
         // The team's housekeeping runs whether or not the character
         // plays on its own: a leader played by hand still gathers the
         // fellowship, and everyone answers its invitations.
