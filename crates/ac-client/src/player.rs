@@ -105,7 +105,7 @@ const WEDGE_TURN: f32 = 0.87;
 const KEEP_BLOCKS_WITHIN: u32 = 1;
 
 /// Landblock id (`xxyy0000`) containing a world position.
-fn block_of(w: Vec3) -> u32 {
+pub(crate) fn block_of(w: Vec3) -> u32 {
     (((w.x / 192.0).floor().clamp(0.0, 255.0) as u32) << 24)
         | (((w.y / 192.0).floor().clamp(0.0, 255.0) as u32) << 16)
 }
@@ -1073,6 +1073,36 @@ impl Player {
             |a, b| worlds.iter().any(|c| c.world.segment_hit(a, b).is_some()),
             |x, y| this.terrain_height(x, y),
         )
+    }
+
+    /// Where a projectile flying `path` first meets static collision or the ground: `flies_clear`
+    /// with the place, for saying what a shot struck.
+    pub fn first_hit(&mut self, assets: &Assets, path: &[Vec3]) -> Option<Vec3> {
+        let mut blocks: Vec<u32> = path.iter().map(|p| block_of(*p)).collect();
+        blocks.push(self.landblock());
+        blocks.sort_unstable();
+        blocks.dedup();
+        let worlds: Vec<Rc<BlockCollision>> = blocks
+            .iter()
+            .filter_map(|&b| self.collision(assets, b))
+            .collect();
+        for w in path.windows(2) {
+            let (a, b) = (w[0], w[1]);
+            let hit = worlds
+                .iter()
+                .filter_map(|c| c.world.segment_hit(a, b))
+                .min_by(|x, y| x.total_cmp(y));
+            if let Some(t) = hit {
+                return Some(a + (b - a) * t);
+            }
+            if self
+                .terrain_height(b.x, b.y)
+                .is_some_and(|z| b.z < z - crate::aim::GROUND_GRAZE)
+            {
+                return Some(b);
+            }
+        }
+        None
     }
 
     /// The height of the open ground at a world `(x, y)`, from a
