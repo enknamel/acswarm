@@ -203,6 +203,8 @@ const AIMED_WITHIN: f32 = 0.82;
 const SHOT_FLIES_FOR: Duration = Duration::from_secs(10);
 /// A shot landing within this of its target's middle is taken to have hit it (metres).
 const SHOT_ON_TARGET: f32 = 2.0;
+/// A shot landing within this of the terrain's height struck the ground (metres).
+const SHOT_ON_GROUND: f32 = 0.5;
 
 /// One of our own projectiles, from when it left to when it lands.
 #[derive(Debug, Clone)]
@@ -475,6 +477,31 @@ impl Client {
         }
     }
 
+    /// Where a projectile flying `path` first meets static collision or the ground: the shot test
+    /// (`Player::flies_clear`) with the place, for saying what a shot struck.
+    fn first_hit(&mut self, path: &[Vec3]) -> Option<Vec3> {
+        let assets = self.assets.clone();
+        let pl = self.player.as_mut()?;
+        let worlds = pl.collision_along(&assets, path);
+        for w in path.windows(2) {
+            let (a, b) = (w[0], w[1]);
+            let hit = worlds
+                .iter()
+                .filter_map(|c| c.world.segment_hit(a, b))
+                .min_by(|x, y| x.total_cmp(y));
+            if let Some(t) = hit {
+                return Some(a + (b - a) * t);
+            }
+            if pl
+                .terrain_height(b.x, b.y)
+                .is_some_and(|z| b.z < z - crate::aim::GROUND_GRAZE)
+            {
+                return Some(b);
+            }
+        }
+        None
+    }
+
     /// Say where each of our own projectiles landed, the tick it is gone from view: how far out,
     /// how far from what it was thrown at, and whether our collision has what it struck. Arcs
     /// were seen striking something just in front of the caster that the shot test let through.
@@ -509,12 +536,7 @@ impl Client {
                 })
                 .collect();
             let flew = shot.track.origin.distance(landed_at);
-            let assets = self.assets.clone();
-            let wall = self
-                .player
-                .as_mut()
-                .and_then(|pl| pl.first_hit(&assets, &path))
-                .map(|p| shot.track.origin.distance(p));
+            let wall = self.first_hit(&path).map(|p| shot.track.origin.distance(p));
             let target = shot.target.map(|(g, was)| {
                 let now_at = self
                     .world
@@ -542,11 +564,19 @@ impl Client {
                 Some((name, away, off)) => format!("{off:.1} m from {name} ({away:.1} m away)"),
                 None => "at nothing known".to_string(),
             };
+            // Landing on the land itself is a shot into a hill, which the path, ending at the
+            // ground, never dips under.
+            let ground = self
+                .player
+                .as_ref()
+                .and_then(|pl| pl.terrain_height(landed_at.x, landed_at.y))
+                .is_some_and(|z| (landed_at.z - z).abs() <= SHOT_ON_GROUND);
             let ours = match wall {
                 Some(d) if (d - flew).abs() <= 1.0 => {
                     "; our collision has what it struck".to_string()
                 }
                 Some(d) => format!("; our collision has a wall {d:.1} m out"),
+                None if ground => "; it struck the ground".to_string(),
                 None => "; nothing in our collision there".to_string(),
             };
             let o = ac_world::landblock_origin(crate::player::block_of(landed_at));

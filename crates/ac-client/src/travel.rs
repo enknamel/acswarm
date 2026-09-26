@@ -863,36 +863,6 @@ impl Client {
         self.travel.trip.is_some()
     }
 
-    /// Let go of the walk (`head_for`) and the journey under way, saying `why`.
-    pub(crate) fn drop_walk(&mut self, why: &str) {
-        let walking = self.follow.take().is_some();
-        if walking {
-            self.steering.reset();
-        }
-        let journey = self.traveling() || self.travel_goal_xy().is_some();
-        if journey {
-            self.end_trip();
-        }
-        self.autoplay.resume_trip = None;
-        if walking || journey {
-            tracing::info!("travel: {why}; letting go of the walk");
-        }
-    }
-
-    /// A walk's goal further off than a walk goes ([`WALKABLE`]) was left behind by a teleport, a
-    /// recall or a portal: walked at, it was a dungeon spot 34 km from the Holtburg lifestone
-    /// (test: a_walk_left_behind_by_a_recall_is_let_go).
-    pub(crate) fn drop_stale_walk(&mut self) {
-        let (Some(f), Some(me)) = (self.follow, self.my_position()) else {
-            return;
-        };
-        if Vec2::new(f.target.x - me.x, f.target.y - me.y).length() > WALKABLE {
-            self.follow = None;
-            self.steering.reset();
-            tracing::info!("travel: the walk's goal was left behind; letting go of it");
-        }
-    }
-
     /// Stop a journey because the player is doing something with the
     /// world instead: talking to a vendor, opening a chest, attacking.
     /// The server walks the character to whatever they are using, and a
@@ -2083,6 +2053,32 @@ mod tests {
         assert!(
             at.truncate().distance(corpse.truncate()) <= 1.0,
             "stuck at {at:?}, short of {corpse:?}"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn a_spot_no_path_reaches_is_known_before_walking_at_it() {
+        // "If there's no path to the corpse, don't bother": asked once as the walk sets off. In the
+        // Holtburg Dungeon, beside the bookcases, the room round them is reachable and the top of a
+        // bookcase is not.
+        let block = 0x01F6_0000u32;
+        let origin = ac_world::landblock_origin(block);
+        let mut c =
+            crate::testkit::standing_in_the_field(25, 0x01F6_0224, Vec3::new(30.37, -51.89, 0.0));
+        assert!(
+            c.has_way_to(origin + Vec3::new(36.0, -54.0, 0.0), 0x01F6_0233),
+            "round the bookcases"
+        );
+        // On top of a bookcase, 1.9 m up: `find_path` ends its route there anyway.
+        let top = origin + Vec3::new(34.68, -50.7, 1.915);
+        let (me, assets) = (c.my_position().unwrap(), c.assets.clone());
+        let pl = c.player.as_mut().unwrap();
+        assert!(pl.find_path(&assets, block, me, top, 0x01F6_0224).is_some());
+        assert!(!c.has_way_to(top, 0x01F6_0224), "on the bookcase");
+        assert!(
+            c.has_way_to(Vec3::new(10.0, 10.0, 0.0), 0x0101_0001),
+            "another block is the planner's"
         );
     }
 

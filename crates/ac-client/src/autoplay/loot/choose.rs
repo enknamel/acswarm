@@ -777,7 +777,22 @@ impl Client {
         }
         // Stand over it first (see [`CORPSE_REACH`]).
         if away > CORPSE_REACH {
-            if let Some(at) = self.world.objects.get(&guid).and_then(|o| o.world_pos()) {
+            let spot = self
+                .world
+                .objects
+                .get(&guid)
+                .and_then(|o| Some((o.world_pos()?, o.position?.cell)));
+            if let Some((at, cell)) = spot {
+                // No path there, no walk: set aside at once rather than after five seconds of
+                // "no way" at it. Asked once, as the walk sets off.
+                let setting_off = self.autoplay.walking_to.map(|w| w.guid) != Some(guid);
+                if setting_off && !self.has_way_to(at, cell) {
+                    tracing::info!("autoplay: no way to corpse {guid:#010x}; leaving it");
+                    self.autoplay.set_aside_out_of_reach(guid, now);
+                    self.autoplay
+                        .say(Doing::Looting, format!("no way to {name}; leaving it"));
+                    return false;
+                }
                 if !self.walk_to_corpse(guid, &name, at, away, now) {
                     // Through a floor or behind a wall, the walk never
                     // ends by itself, and it held the looting and the

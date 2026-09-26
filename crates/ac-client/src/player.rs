@@ -1059,14 +1059,7 @@ impl Player {
     /// `crate::aim::flight` gives them) gets to its end without striking
     /// static geometry or going into the ground on the way.
     pub fn flies_clear(&mut self, assets: &Assets, path: &[Vec3]) -> bool {
-        let mut blocks: Vec<u32> = path.iter().map(|p| block_of(*p)).collect();
-        blocks.push(self.landblock());
-        blocks.sort_unstable();
-        blocks.dedup();
-        let worlds: Vec<Rc<BlockCollision>> = blocks
-            .iter()
-            .filter_map(|&b| self.collision(assets, b))
-            .collect();
+        let worlds = self.collision_along(assets, path);
         let this = &*self;
         crate::aim::clears(
             path,
@@ -1075,40 +1068,26 @@ impl Player {
         )
     }
 
-    /// Where a projectile flying `path` first meets static collision or the ground: `flies_clear`
-    /// with the place, for saying what a shot struck.
-    pub fn first_hit(&mut self, assets: &Assets, path: &[Vec3]) -> Option<Vec3> {
+    /// The collision of every block `path` crosses and the one the body stands in.
+    pub(crate) fn collision_along(
+        &mut self,
+        assets: &Assets,
+        path: &[Vec3],
+    ) -> Vec<Rc<BlockCollision>> {
         let mut blocks: Vec<u32> = path.iter().map(|p| block_of(*p)).collect();
         blocks.push(self.landblock());
         blocks.sort_unstable();
         blocks.dedup();
-        let worlds: Vec<Rc<BlockCollision>> = blocks
+        blocks
             .iter()
             .filter_map(|&b| self.collision(assets, b))
-            .collect();
-        for w in path.windows(2) {
-            let (a, b) = (w[0], w[1]);
-            let hit = worlds
-                .iter()
-                .filter_map(|c| c.world.segment_hit(a, b))
-                .min_by(|x, y| x.total_cmp(y));
-            if let Some(t) = hit {
-                return Some(a + (b - a) * t);
-            }
-            if self
-                .terrain_height(b.x, b.y)
-                .is_some_and(|z| b.z < z - crate::aim::GROUND_GRAZE)
-            {
-                return Some(b);
-            }
-        }
-        None
+            .collect()
     }
 
     /// The height of the open ground at a world `(x, y)`, from a
     /// landblock already loaded; `None` in a dungeon, which has none,
     /// or off the blocks this character has seen.
-    fn terrain_height(&self, x: f32, y: f32) -> Option<f32> {
+    pub(crate) fn terrain_height(&self, x: f32, y: f32) -> Option<f32> {
         let block = block_of(Vec3::new(x, y, 0.0));
         let b = self.blocks.get(&block)?;
         if b.dungeon {
@@ -1209,7 +1188,7 @@ impl Player {
 
     /// Run `f` on landblock `block`'s navigation graph and the ground it is built over, for a walk
     /// from `from` to `to` (the portals not on it are given a berth); `None` without collision.
-    fn on_nav<R>(
+    pub(crate) fn on_nav<R>(
         &mut self,
         assets: &Assets,
         block: u32,
