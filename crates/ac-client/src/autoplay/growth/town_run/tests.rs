@@ -1,8 +1,10 @@
 use super::*;
-use crate::autoplay::growth::tests::run_to;
+use crate::autoplay::growth::needs::NeedKind;
+use crate::autoplay::growth::tests::{need, run_to};
 use crate::logistics;
 use crate::testkit::{
-    coin_in_the_pack, pea_in_the_pack, shop_named, standing_at, with_a_buy_list, with_a_pack,
+    coin_in_the_pack, pea_in_the_pack, shop_named, standing_at, thing_in_the_pack, with_a_buy_list,
+    with_a_pack,
 };
 
 #[test]
@@ -197,8 +199,9 @@ fn an_urgent_need_comes_before_the_loot_and_the_loot_is_sold_on_the_way() {
         run.vendor
     );
     assert_ne!(run.vendor, "Archmage Cindrue");
-    // Done at the bowyer: on to the one counter in town that takes
-    // the peas, on the same run.
+    // Done at the bowyer, the arrows bought: on to the one counter in town that takes the peas,
+    // on the same run.
+    thing_in_the_pack(&mut c, 0x8000_0040, "Bundle of Arrowshafts", 10);
     c.cancel_travel();
     assert!(c.grow_run_next(run, now, &cfg, None), "went home");
     let on = c
@@ -231,6 +234,39 @@ pub(super) fn nobody_near_buys_peas(c: &mut Client, reach: f32, now: Instant) ->
             .hold(spot(*at), Duration::from_secs(60 * 60), now);
     }
     buyers.len()
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn every_stop_is_chosen_by_one_rule() {
+    // The first stop and the ones after were chosen by two sets of rules, and the log read as two
+    // planners disagreeing: "nowhere sells what is wanted", then "2 of 2 on the shelf".
+    let holtburg = 0xA9B4_0019;
+    let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
+    c.world.stats.level = 20;
+    with_a_pack(&mut c, 50);
+    let cfg = c.autoplay.config.growth.clone();
+    let urgent = need(NeedKind::Named("Prismatic Taper".into()), 100);
+    let mut topping_up = urgent.clone();
+    topping_up.urgent = false;
+    // Nothing to do: the nearest counter, as the panel's button always had it.
+    assert_eq!(c.errands_for(&cfg, &[]), vec![Errand::Buy]);
+    assert_eq!(
+        c.errands_for(&cfg, std::slice::from_ref(&urgent)),
+        vec![Errand::Buy]
+    );
+    pea_in_the_pack(&mut c, 0x8000_0010, "Iron Pea", 8328, 2_500);
+    // A supply run out first, the loot sold on the way.
+    assert_eq!(
+        c.errands_for(&cfg, &[urgent]),
+        vec![Errand::Buy, Errand::Sell]
+    );
+    // Otherwise the loot pays for the shopping.
+    assert_eq!(
+        c.errands_for(&cfg, &[topping_up]),
+        vec![Errand::Sell, Errand::Buy]
+    );
+    assert_eq!(c.errands_for(&cfg, &[]), vec![Errand::Sell]);
 }
 
 #[test]

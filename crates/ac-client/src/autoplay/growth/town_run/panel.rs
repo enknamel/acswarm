@@ -3,7 +3,6 @@ use std::time::{Duration, Instant};
 use glam::Vec2;
 
 use super::counter::counter_asked;
-use super::vendor::Stop;
 use super::{Driver, Errand, Phase, Run, Turn, VENDOR_OPEN_TIMEOUT, VENDOR_REACH};
 use crate::autoplay::growth::about;
 use crate::autoplay::Doing;
@@ -166,41 +165,17 @@ impl Client {
                     .say(Doing::Shopping, format!("{reason}: at {vendor}"));
             }
             None => {
-                // The button is pressed to see the shopping happen: with
-                // anything on the list the run goes where the list is
-                // and the loot goes along as a tiebreak (and to a second
-                // counter after, see [`Self::grow_run_next`]); with
-                // nothing to buy and something to sell it goes to the
-                // counter that pays, however far. Made to sell
-                // whenever the pack held a pea, the run walked past the
-                // bowyer with the arrows on the list and came home
-                // short of them.
-                let to_buy = needs.iter().any(|n| n.want > 0 && n.buyable);
-                let errand = if !to_buy && !self.salables(&cfg).is_empty() {
-                    Errand::Sell
-                } else {
-                    Errand::Buy
-                };
-                let first = Stop {
-                    errand,
-                    within: None,
-                    visited: &[],
-                };
+                // The button is pressed to see the shopping happen: the run goes where the one rule
+                // for every stop says (`errands_for`), and when no counter answers it, still to the
+                // nearest counter, as it always did.
+                let errands = self.errands_for(&cfg, &needs);
                 let started =
-                    self.start_town_run(now, &cfg, needs.clone(), reason.clone(), first, true);
-                match (started, errand) {
-                    // Nobody buys what is carried: the player still
-                    // asked for a run, and a run to buy has a counter to
-                    // fall back on -- the nearest.
-                    (Err(_), Errand::Sell) => {
-                        let any = Stop {
-                            errand: Errand::Buy,
-                            within: None,
-                            visited: &[],
-                        };
-                        self.start_town_run(now, &cfg, needs, reason, any, true)?
+                    self.start_town_run(now, &cfg, needs.clone(), reason.clone(), &errands, true);
+                match started {
+                    Err(_) if errands != [Errand::Buy] => {
+                        self.start_town_run(now, &cfg, needs, reason, &[Errand::Buy], true)?
                     }
-                    (started, _) => started?,
+                    started => started?,
                 }
             }
         }

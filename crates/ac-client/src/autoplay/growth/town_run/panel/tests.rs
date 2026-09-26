@@ -3,7 +3,8 @@ use super::*;
 use crate::autoplay::growth::tests::{a_run_at_cindrue, run_to};
 use crate::testkit::{
     a_caster_knowing, a_caster_with_a_buff_due, a_counter, coin_in_the_pack, pea_in_the_pack,
-    shop_named, standing_at, vendor_beside, window_of, with_a_buy_list, with_a_pack,
+    shop_named, standing_at, thing_in_the_pack, vendor_beside, window_of, with_a_buy_list,
+    with_a_pack,
 };
 
 #[test]
@@ -347,31 +348,13 @@ fn a_hand_runs_status_stays_with_autoplay_off() {
     assert!(c.autoplay.status.is_empty());
 }
 
-/// Something in the pack by name, `stack` of it, kept.
-fn thing_in_the_pack(c: &mut Client, guid: u32, name: &str, stack: u32) {
-    let me = c.world.player_guid.unwrap();
-    c.world.objects.insert(
-        guid,
-        ac_world::WorldObject {
-            guid,
-            name: name.into(),
-            value: 1,
-            stack_size: stack,
-            max_stack_size: 1_000,
-            container: Some(me),
-            ..Default::default()
-        },
-    );
-}
-
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
-fn the_panel_run_with_a_list_and_a_pea_goes_to_the_counter_with_the_list() {
-    // The archer has 180 of 250 arrows -- short, not urgent -- and
-    // a pea. The panel's button, made a run to sell whenever the
-    // pack held anything for a counter, went to the archmage, sold
-    // the pea and ended in town with the arrows unbought. It goes
-    // where the list is, and the pea to the archmage after.
+fn the_panel_run_with_a_list_and_a_pea_buys_the_list_on_the_same_run() {
+    // The archer has 18 of 25 arrowshafts -- short, not urgent -- and a pea. The button's run
+    // sold the pea and ended in town with the arrows unbought: a second stop was held to the
+    // town the first stood in. Every stop is chosen by one rule now, from anywhere: the pea pays
+    // first, and the arrows are bought at the next counter.
     let holtburg = 0xA9B4_0019;
     let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
     c.world.stats.level = 20;
@@ -391,23 +374,24 @@ fn the_panel_run_with_a_list_and_a_pea_goes_to_the_counter_with_the_list() {
     );
     c.town_run_by_hand(now).expect("no run");
     let run = c.autoplay.growth.run.take().expect("no run");
-    assert_eq!(run.errand, Errand::Buy);
-    assert!(
-        shop_named(&run.vendor)
-            .stocks("Bundle of Arrowshafts")
-            .is_some(),
-        "{}",
-        run.vendor
-    );
-    assert_ne!(run.vendor, "Archmage Cindrue");
+    assert_eq!(run.errand, Errand::Sell);
+    assert_eq!(run.vendor, "Archmage Cindrue");
+    // Sold there; on to the arrows.
+    c.world.objects.remove(&0x8000_0010);
     c.cancel_travel();
     assert!(
         c.grow_run_next(run, now, &cfg, None),
-        "went home with the pea"
+        "went home without the arrows"
     );
     let on = c.autoplay.growth.run.as_ref().unwrap();
-    assert_eq!(on.vendor, "Archmage Cindrue");
-    assert_eq!(on.errand, Errand::Sell);
+    assert_eq!(on.errand, Errand::Buy);
+    assert!(
+        shop_named(&on.vendor)
+            .stocks("Bundle of Arrowshafts")
+            .is_some(),
+        "{}",
+        on.vendor
+    );
 }
 
 #[test]

@@ -251,6 +251,40 @@ impl Client {
         cfg.town_runs && self.grow_town_run(now, &cfg)
     }
 
+    /// The order a stop's counter is looked for in, the first stop and every one after: a supply
+    /// run out first unless the pack is full or laden, then the loot for a counter, then the rest
+    /// of the list. One rule, so no stop is chosen for a different reason from the last.
+    pub(super) fn errands_for(&self, cfg: &Growth, needs: &[Need]) -> Vec<Errand> {
+        let urgent = needs.iter().any(|n| n.urgent && n.buyable);
+        let to_buy = needs.iter().any(|n| n.want > 0 && n.buyable);
+        let to_sell = !self.salables(cfg).is_empty();
+        let pressed = self.pack_low_on_room() || self.laden(cfg);
+        match (urgent && !pressed, to_sell, to_buy) {
+            (true, true, _) => vec![Errand::Buy, Errand::Sell],
+            (false, true, true) => vec![Errand::Sell, Errand::Buy],
+            (false, true, false) => vec![Errand::Sell],
+            (_, false, _) => vec![Errand::Buy],
+        }
+    }
+
+    /// The counter a stop goes to: the first of `errands` a counter answers, from every way out
+    /// (`ways`), passing the counters this run has `visited`.
+    pub(super) fn choose_stop(
+        &mut self,
+        cfg: &Growth,
+        needs: &[Need],
+        ways: &[(Vec2, String)],
+        errands: &[Errand],
+        visited: &[Vec2],
+        now: Instant,
+    ) -> Option<(Errand, String, Vec2, Forecast)> {
+        errands.iter().find_map(|&errand| {
+            let stop = Stop { errand, visited };
+            self.pick_vendor(cfg, needs, ways, stop, now)
+                .map(|(vendor, at, look)| (errand, vendor, at, look))
+        })
+    }
+
     /// Whether the character is stuck: short of something it needs to
     /// go on hunting, with no money to buy it and nothing left to sell.
     ///
@@ -398,19 +432,9 @@ impl Client {
             restocks_as_a_party(&self.autoplay.config.team, self.autoplay.team.mates.len());
         let urgent: Vec<&Need> = needs.iter().filter(|n| n.urgent).collect();
         let sale = worth_a_sale_run(&salables, carried_for, cfg);
-        // What this character's own pack makes the first stop for,
-        // whatever the party decided. A party's trip is to restock,
-        // but a member whose pack is full of peas goes to the counter
-        // that buys them and shops after (see [`Self::grow_run_next`]);
-        // ranked the buying way its first stop was the tailor with the
-        // list, and the peas came home.
-        let own_errand = if full || laden || sale.is_some() {
-            Errand::Sell
-        } else {
-            Errand::Buy
-        };
-        // The reason and the errand. Any counter will do, however far: a recall makes the trip.
-        let (reason, errand) = if together {
+        // Why the run is made; which counter it goes to is `errands_for`'s, the same for every
+        // stop. Any counter will do, however far: a recall makes the trip.
+        let reason = if together {
             match party_mode.stage() {
                 None => return self.held_back("the party is hunting"),
                 // Only the runner walks to town; the rest hold their
@@ -424,18 +448,17 @@ impl Client {
                 }
                 Some(_) => {
                     let because = self.autoplay.growth.mode_because.clone();
-                    let reason = if because.is_empty() {
+                    if because.is_empty() {
                         "the party is restocking".to_string()
                     } else {
                         because
-                    };
-                    (reason, own_errand)
+                    }
                 }
             }
         } else if full {
-            ("the pack is full".to_string(), Errand::Sell)
+            "the pack is full".to_string()
         } else if laden {
-            ("carrying as much as it means to".to_string(), Errand::Sell)
+            "carrying as much as it means to".to_string()
         } else if !urgent.is_empty() {
             // A supply run out comes before loot that adds up: the
             // counter with the arrows may stand further from a way out
@@ -447,7 +470,7 @@ impl Client {
                 .filter(|n| n.buyable)
                 .map(|n| n.name.as_str())
                 .collect();
-            (format!("short of {}", a_few(&short)), Errand::Buy)
+            format!("short of {}", a_few(&short))
         } else if let Some(why) = sale {
             // Loot that merely adds up is no reason to stop hunting every minute: 5,000 pyreals'
             // worth came every minute on the Holtburg grounds and took a third of the time.
@@ -463,7 +486,7 @@ impl Client {
                     left.as_secs()
                 ));
             }
-            (why, Errand::Sell)
+            why
         } else {
             let short: Vec<&str> = needs.iter().map(|n| n.name.as_str()).collect();
             let sale = match salables.len() {
@@ -471,15 +494,6 @@ impl Client {
                 n => format!("; {n} thing(s) for a counter, not yet worth the trip"),
             };
             return self.held_back(format!("nothing urgent (short of {}{sale})", a_few(&short)));
-        };
-        // A pack that is full or heavy with nothing in it a counter
-        // takes is not emptied by any counter. The trip is then
-        // whatever one can do for it -- and if that is nothing, town is
-        // where the character stops (see [`Self::stranded`]).
-        let errand = if salables.is_empty() {
-            Errand::Buy
-        } else {
-            errand
         };
         // Know before setting off whether the trip can achieve anything.
         // A counter with nothing the character needs, or nothing it can
@@ -491,20 +505,15 @@ impl Client {
         // to spend and nothing to sell goes anyway, because town is
         // where it stops: see [`Self::stranded`].
         let go_anyway = full || self.stranded(&needs, cfg);
-        let first = Stop {
-            errand,
-            within: None,
-            visited: &[],
-        };
-        match self.start_town_run(now, cfg, needs, reason, first, go_anyway) {
+        let errands = self.errands_for(cfg, &needs);
+        match self.start_town_run(now, cfg, needs, reason, &errands, go_anyway) {
             Ok(()) => true,
             Err(why) => self.held_back(why),
         }
     }
 
-    /// Set off for a counter: choose one, plan the walk and open the
-    /// run. `first` is what the first counter is chosen for and how far
-    /// from a way out it may stand; `go_anyway` takes the trip whether
+    /// Set off for a counter: choose one (`choose_stop`, trying `errands` in
+    /// order), plan the walk and open the run. `go_anyway` takes the trip whether
     /// or not the forecast says it is worth making. The throttles --
     /// how long since the last run, whether anything is urgent, whether
     /// the party agrees -- are the caller's: autoplay's tick applies
@@ -516,10 +525,9 @@ impl Client {
         cfg: &Growth,
         needs: Vec<Need>,
         reason: String,
-        first: Stop<'_>,
+        errands: &[Errand],
         go_anyway: bool,
     ) -> Result<(), String> {
-        let errand = first.errand;
         let Some(me) = self.my_position() else {
             return Err("not placed in the world yet".into());
         };
@@ -534,14 +542,15 @@ impl Client {
         // somewhere particular; the shops worth considering are the
         // ones near *that*.
         let ways = self.ways_out(me);
-        let Some((vendor, at, look)) = self.pick_vendor(cfg, &needs, &ways, first, now) else {
+        let Some((errand, vendor, at, look)) =
+            self.choose_stop(cfg, &needs, &ways, errands, &[], now)
+        else {
             // Said with the count, so "nothing to sell" and "nothing anyone buys" differ.
-            let why = match errand {
-                Errand::Buy => "no vendor to run to".to_string(),
-                Errand::Sell => format!(
-                    "no counter buys any of the {} thing(s) for sale",
-                    self.salables(cfg).len()
-                ),
+            let selling = self.salables(cfg).len();
+            let why = if errands == [Errand::Sell] && selling > 0 {
+                format!("no counter buys any of the {selling} thing(s) for sale")
+            } else {
+                "no vendor to run to".to_string()
             };
             self.autoplay.note(why.clone(), now);
             // Futile, so the next look waits `FUTILE_RUN_WAIT` rather than searching every tick.

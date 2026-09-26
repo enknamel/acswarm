@@ -397,6 +397,23 @@ pub fn with_a_pack(c: &mut Client, capacity: u32) {
     );
 }
 
+/// Something in the pack by name, `stack` of it, kept.
+pub fn thing_in_the_pack(c: &mut Client, guid: u32, name: &str, stack: u32) {
+    let me = c.world.player_guid.unwrap();
+    c.world.objects.insert(
+        guid,
+        ac_world::WorldObject {
+            guid,
+            name: name.into(),
+            value: 1,
+            stack_size: stack,
+            max_stack_size: 1_000,
+            container: Some(me),
+            ..Default::default()
+        },
+    );
+}
+
 /// A pea in the pack, taken to sell.
 pub fn pea_in_the_pack(c: &mut Client, guid: u32, name: &str, wcid: u32, value: u32) {
     let me = c.world.player_guid.unwrap();
