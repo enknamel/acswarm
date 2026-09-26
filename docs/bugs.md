@@ -31,6 +31,10 @@ priority; a live report starts from the telemetry (`tools/telemetry.py`, `--mark
   Scarab, Prismatic Taper" in the status line.
 - **The Academy tutorial fallback cannot finish for a bow soldier**: no damage to the Olthoi,
   then out of arrows.
+- **A character with no recall walks kilometres for a supply.** A new war mage, short of Lead
+  Scarab that no counter near Holtburg sells, set off at once for archmages 3.3 km off on foot
+  ("Singud Trell the Archmage it is ... 3309 m by on foot"), 199 pyreals in hand, and spent 77% of
+  the run in town or on the road (scn-final). "Town is one spell away" holds only with a recall.
 - **The corpse choice flips each frame between two.** Scn Mage at ACB5 alternated "walking to
   Corpse of Small Fledgling Mukkir (19 m)" and "walking to Corpse of Drudge Slinker (13 m)" every
   tick for 2 s (scn-nav3, 15:25:00).
