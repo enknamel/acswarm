@@ -38,10 +38,11 @@ fn a_gem_into_the_hub_puts_the_towns_within_reach() {
         .map(|(w, n)| (broker.xy().distance(*w), n.as_str()))
         .min_by(|a, b| a.0.total_cmp(&b.0))
         .unwrap();
-    assert!(far <= NEAR_A_WAY_OUT, "{far} m from {via}");
+    // A short walk: 300 m.
+    assert!(far <= 300.0, "{far} m from {via}");
     assert_eq!(via, "Town Network Portal Gem, then Portal to Cragstone");
     // Judged by the hub alone it was out of reach: the fault.
-    assert!(broker.xy().distance(network.xy()) > NEAR_A_WAY_OUT);
+    assert!(broker.xy().distance(network.xy()) > 300.0);
 }
 
 fn ware(wcid: u32, name: &str, value: u32) -> ac_world::shops::Ware {
@@ -204,32 +205,10 @@ fn the_search_widens_rather_than_crossing_the_world() {
     // The bug: ranking on what a shop stocks alone sent a character
     // twenty-five kilometres to a counter with one more line on the
     // shelf. The rings mean a good enough shop in this town wins.
-    let r = vendor_rings(None);
+    let r = vendor_rings();
     assert_eq!(r.first().copied(), Some(600.0), "the town first");
     assert!(r.windows(2).all(|w| w[0] < w[1]), "{r:?} does not widen");
     assert_eq!(r.last().copied(), Some(f32::INFINITY), "and then anywhere");
-}
-
-#[test]
-fn a_capped_search_never_looks_past_the_cap() {
-    // The next stop of a run stays in the same town.
-    let r = vendor_rings(Some(500.0));
-    assert_eq!(r, vec![500.0]);
-    assert!(r.iter().all(|x| *x <= 500.0));
-    // A cap between rings keeps the ones below it.
-    let mid = vendor_rings(Some(1_000.0));
-    assert_eq!(mid, vec![600.0, 1_000.0]);
-}
-
-#[test]
-fn there_is_always_a_last_ring_to_fall_back_on() {
-    // Whatever the cap, the search ends somewhere rather than
-    // leaving the character with nowhere to go.
-    for cap in [1.0f32, 600.0, 3_000.0, 15_000.0, 100_000.0] {
-        let r = vendor_rings(Some(cap));
-        assert!(!r.is_empty(), "cap {cap}");
-        assert_eq!(r.last().copied(), Some(cap));
-    }
 }
 
 #[test]

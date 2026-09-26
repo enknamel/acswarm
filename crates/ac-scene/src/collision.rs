@@ -60,6 +60,17 @@ impl Default for Capsule {
     }
 }
 
+/// Whether a body can be in `cell`: one with portals that no cell's portal leads into (`entered`)
+/// is an overlay the client's cell-by-cell physics never enters, and its floor lay over the ramp
+/// of the mine at ACB5 and walled it off (test: a_mine_is_walked_down_to_its_floor, in ac-client).
+/// A cell with no portals at all is kept: a teleport or spawn can put a body there.
+fn is_walked_into(
+    cell: &crate::interior::CellScene,
+    entered: &std::collections::HashSet<u32>,
+) -> bool {
+    cell.portal_cells.is_empty() || entered.contains(&cell.cell_id)
+}
+
 /// Result of one walking step through static geometry.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Walk {
@@ -309,7 +320,15 @@ impl CollisionWorld {
                 w.add_model(assets, id, world, 0);
             }
         }
+        let entered: std::collections::HashSet<u32> = scene
+            .cells
+            .iter()
+            .flat_map(|c| c.portal_cells.iter().copied())
+            .collect();
         for cell in &scene.cells {
+            if !is_walked_into(cell, &entered) {
+                continue;
+            }
             // Cell structures: physics polygons in cell space.
             if let Ok(env) = assets.environment(cell.environment_id) {
                 if let Some((_, cs)) = env

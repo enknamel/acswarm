@@ -105,7 +105,7 @@ const WEDGE_TURN: f32 = 0.87;
 const KEEP_BLOCKS_WITHIN: u32 = 1;
 
 /// Landblock id (`xxyy0000`) containing a world position.
-fn block_of(w: Vec3) -> u32 {
+pub(crate) fn block_of(w: Vec3) -> u32 {
     (((w.x / 192.0).floor().clamp(0.0, 255.0) as u32) << 24)
         | (((w.y / 192.0).floor().clamp(0.0, 255.0) as u32) << 16)
 }
@@ -1059,14 +1059,7 @@ impl Player {
     /// `crate::aim::flight` gives them) gets to its end without striking
     /// static geometry or going into the ground on the way.
     pub fn flies_clear(&mut self, assets: &Assets, path: &[Vec3]) -> bool {
-        let mut blocks: Vec<u32> = path.iter().map(|p| block_of(*p)).collect();
-        blocks.push(self.landblock());
-        blocks.sort_unstable();
-        blocks.dedup();
-        let worlds: Vec<Rc<BlockCollision>> = blocks
-            .iter()
-            .filter_map(|&b| self.collision(assets, b))
-            .collect();
+        let worlds = self.collision_along(assets, path);
         let this = &*self;
         crate::aim::clears(
             path,
@@ -1075,10 +1068,26 @@ impl Player {
         )
     }
 
+    /// The collision of every block `path` crosses and the one the body stands in.
+    pub(crate) fn collision_along(
+        &mut self,
+        assets: &Assets,
+        path: &[Vec3],
+    ) -> Vec<Rc<BlockCollision>> {
+        let mut blocks: Vec<u32> = path.iter().map(|p| block_of(*p)).collect();
+        blocks.push(self.landblock());
+        blocks.sort_unstable();
+        blocks.dedup();
+        blocks
+            .iter()
+            .filter_map(|&b| self.collision(assets, b))
+            .collect()
+    }
+
     /// The height of the open ground at a world `(x, y)`, from a
     /// landblock already loaded; `None` in a dungeon, which has none,
     /// or off the blocks this character has seen.
-    fn terrain_height(&self, x: f32, y: f32) -> Option<f32> {
+    pub(crate) fn terrain_height(&self, x: f32, y: f32) -> Option<f32> {
         let block = block_of(Vec3::new(x, y, 0.0));
         let b = self.blocks.get(&block)?;
         if b.dungeon {
@@ -1179,7 +1188,7 @@ impl Player {
 
     /// Run `f` on landblock `block`'s navigation graph and the ground it is built over, for a walk
     /// from `from` to `to` (the portals not on it are given a berth); `None` without collision.
-    fn on_nav<R>(
+    pub(crate) fn on_nav<R>(
         &mut self,
         assets: &Assets,
         block: u32,

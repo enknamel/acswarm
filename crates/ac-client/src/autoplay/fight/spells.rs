@@ -145,7 +145,7 @@ impl Client {
             // declined leaves no projectile to time and no shot to
             // wait on (see `Client::cast_fight_spell`).
             if self.cast_fight_spell(spell, guid, now) {
-                self.note_fired(spell, now);
+                self.note_fired(spell, guid, now);
                 self.autoplay.attack_spell = Some(spell);
                 self.throw_at(guid, now);
             }

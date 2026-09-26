@@ -611,6 +611,10 @@ impl Client {
         // while it was busy stayed for ever newly fallen (see
         // [`Client::autoplay_watch_the_ground`]).
         self.autoplay_watch_the_ground(now);
+        // Our shots, seen leaving and landing before any step can claim the tick: a flight timed a
+        // tick out lands a metre off.
+        self.learn_shot_speeds(now);
+        self.land_own_shots(now);
         // Everything from here is a table rather than a chain, so the
         // order can be read, logged and tested rather than only obeyed
         // (see `crate::steps` and `docs/agent.md`).

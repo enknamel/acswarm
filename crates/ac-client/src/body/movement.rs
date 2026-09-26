@@ -1,3 +1,6 @@
+use glam::{Vec2, Vec3};
+
+use crate::travel::WALKABLE;
 use crate::{player, Client};
 
 /// Where a follower is heading and how close it stops (see
@@ -23,6 +26,64 @@ pub struct Follow {
 pub(crate) const SAME_FLOOR: f32 = 2.0;
 
 impl Client {
+    /// Whether a walk can get from the character to `at` (standing in `cell`): false only when both
+    /// are in one landblock and its graph finds no path; anything further is the journey planner's.
+    pub(crate) fn has_way_to(&mut self, at: Vec3, cell: u32) -> bool {
+        let Some(me) = self.my_position() else {
+            return true;
+        };
+        let assets = self.assets.clone();
+        let Some(pl) = self.player.as_mut() else {
+            return true;
+        };
+        let block = pl.landblock();
+        if cell & 0xFFFF_0000 != block {
+            return true;
+        }
+        // `find_path` ends a route at its goal whether or not the node nearest the goal reaches it,
+        // so a bookcase's top read as a way there: the last step is walked as the body takes it.
+        let Some(path) = pl.find_path(&assets, block, me, at, cell) else {
+            return false;
+        };
+        let goal = *path.last().unwrap_or(&at);
+        let last = path.len().checked_sub(2).map_or(me, |i| path[i]);
+        let cap = pl.capsule();
+        pl.on_nav(&assets, block, last, goal, |_, ground| {
+            ground.walkable(last, goal, &cap).0 || ground.body_reaches(last, goal, &cap)
+        })
+        .unwrap_or(true)
+    }
+
+    /// Let go of the walk (`head_for`) and the journey under way, saying `why`.
+    pub(crate) fn drop_walk(&mut self, why: &str) {
+        let walking = self.follow.take().is_some();
+        if walking {
+            self.steering.reset();
+        }
+        let journey = self.traveling() || self.travel_goal_xy().is_some();
+        if journey {
+            self.end_trip();
+        }
+        self.autoplay.resume_trip = None;
+        if walking || journey {
+            tracing::info!("travel: {why}; letting go of the walk");
+        }
+    }
+
+    /// A walk's goal further off than a walk goes ([`WALKABLE`]) was left behind by a teleport, a
+    /// recall or a portal: walked at, it was a dungeon spot 34 km from the Holtburg lifestone
+    /// (test: a_walk_left_behind_by_a_recall_is_let_go).
+    pub(crate) fn drop_stale_walk(&mut self) {
+        let (Some(f), Some(me)) = (self.follow, self.my_position()) else {
+            return;
+        };
+        if Vec2::new(f.target.x - me.x, f.target.y - me.y).length() > WALKABLE {
+            self.follow = None;
+            self.steering.reset();
+            tracing::info!("travel: the walk's goal was left behind; letting go of it");
+        }
+    }
+
     /// Jump on the next tick with `power` 0..=1 (a script's or bot's
     /// jump; the window charges one by holding the key). Capped by the
     /// stamina left; nothing happens in the air.

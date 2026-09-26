@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use glam::Vec2;
 
-use super::vendor::{spot, Stop, NEAR_A_WAY_OUT};
+use super::vendor::spot;
 use super::{
     Errand, Phase, Run, Turn, BUSY_ASKS, BUSY_REASK, COUNTER_REACH, SELLING_TIMEOUT, SETTLE,
     STOPS_PER_RUN, VENDOR_OPEN_TIMEOUT, VENDOR_REACH,
@@ -612,24 +612,11 @@ impl Client {
                 Some(p) => self.ways_out(Vec2::new(p.x, p.y)),
                 None => vec![(run.town, "in town".to_string())],
             };
-            // The selling first, so that what it fetches is there to
-            // spend; and when nobody in reach buys any of it, the
-            // shopping is still worth the stop.
-            let to_buy = needs.iter().any(|n| n.urgent) || still_full || more_to_buy;
-            let errands: &[Errand] = match (more_to_sell, to_buy) {
-                (true, true) => &[Errand::Sell, Errand::Buy],
-                (true, false) => &[Errand::Sell],
-                (false, _) => &[Errand::Buy],
-            };
-            let picked = errands.iter().find_map(|&errand| {
-                let next = Stop {
-                    errand,
-                    within: Some(NEAR_A_WAY_OUT),
-                    visited: &run.visited,
-                };
-                self.pick_vendor(cfg, &needs, &ways, next, now)
-                    .map(|(vendor, at, look)| (errand, vendor, at, look))
-            });
+            // By the one rule every stop is chosen by (`errands_for`), from anywhere: a recall
+            // makes the trip, and a second stop held to the town it was in walked past a counter
+            // that took the loot.
+            let errands = self.errands_for(cfg, &needs);
+            let picked = self.choose_stop(cfg, &needs, &ways, &errands, &run.visited, now);
             if let Some((errand, vendor, at, look)) = picked {
                 if (still_full || look.worth_going()) && self.grow_travel(at, now) {
                     let what = if still_full || more_to_sell {

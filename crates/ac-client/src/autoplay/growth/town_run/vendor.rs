@@ -9,27 +9,11 @@ use crate::autoplay::growth::{a_few, contains_fold, Growth};
 use crate::Client;
 use ac_world::{item_type, object_desc_flags};
 
-/// How near a counter must stand to a *way out* -- a gem's exit, a
-/// recall's landing, the character's own feet -- to be worth stopping
-/// at on a run.
-///
-/// This used to be measured from the first counter of the run, which
-/// meant one town and no further. But a run is not a walk around a
-/// town: a mid-level character uses a Town Network gem, takes the
-/// portal it summons, sells at the broker outside Cragstone, uses an
-/// Archmage gem, takes that portal, restocks its components there, and
-/// recalls back to where it was hunting. Every one of those counters is
-/// a long way from the last one and a few paces from a way out, which
-/// is the distance that actually costs anything.
-pub(super) const NEAR_A_WAY_OUT: f32 = 300.0;
-
 /// What the next counter of a run is chosen for, and among which (see
 /// [`Client::pick_vendor`]).
 #[derive(Clone, Copy)]
 pub(super) struct Stop<'a> {
     pub(super) errand: Errand,
-    /// No further than this from a way out, once a run is already out.
-    pub(super) within: Option<f32>,
     /// The counters this run has already called at, by position.
     pub(super) visited: &'a [Vec2],
 }
@@ -273,14 +257,11 @@ fn ammo_stock(name: &str, kind: u32) -> bool {
 /// long walk, then anywhere at all.
 const VENDOR_RINGS: [f32; 3] = [600.0, 3_000.0, 15_000.0];
 
-/// The distances to search, widening, never past `within`.
-///
-/// The last one is `within` itself (or everything), so a character with
-/// nothing nearby still finds a shop rather than standing still.
-fn vendor_rings(within: Option<f32>) -> Vec<f32> {
-    let cap = within.unwrap_or(f32::INFINITY);
-    let mut out: Vec<f32> = VENDOR_RINGS.iter().copied().filter(|r| *r < cap).collect();
-    out.push(cap);
+/// The distances to search, widening; the last is everywhere, so a character with nothing nearby
+/// still finds a shop rather than standing still.
+fn vendor_rings() -> Vec<f32> {
+    let mut out = VENDOR_RINGS.to_vec();
+    out.push(f32::INFINITY);
     out
 }
 
@@ -342,8 +323,7 @@ fn choose_counter<'a>(
 impl Client {
     /// The best vendor to make for, given every way the character has
     /// of being somewhere else: not one being avoided, not one in
-    /// `visited`, within `within` metres of a way out when given, and
-    /// -- this is the point of it -- one the trip is known in advance
+    /// `visited`, and -- this is the point of it -- one the trip is known in advance
     /// to achieve something at.
     ///
     /// `ways` is where the character can cheaply be (see
@@ -366,11 +346,7 @@ impl Client {
         stop: Stop<'_>,
         now: Instant,
     ) -> Option<(String, Vec2, Forecast)> {
-        let Stop {
-            errand,
-            within,
-            visited,
-        } = stop;
+        let Stop { errand, visited } = stop;
         // How far a shop is: from the nearest way out, not from the
         // feet.
         let reach = |at: Vec2| {
@@ -385,11 +361,8 @@ impl Client {
         let society = self.society();
         let quests = cfg.gates_open.clone();
         let skip = &self.autoplay.growth.skip_vendors;
-        let allowed = |at: Vec2| {
-            within.is_none_or(|w| reach(at) <= w)
-                && !visited.iter().any(|p| p.distance(at) < 1.0)
-                && !skip.held(&spot(at), now)
-        };
+        let allowed =
+            |at: Vec2| !visited.iter().any(|p| p.distance(at) < 1.0) && !skip.held(&spot(at), now);
         // Worked out once for the whole search rather than per shop:
         // this walks every counter in range.
         let wants: Vec<(&Need, String)> = needs
@@ -447,7 +420,7 @@ impl Client {
                 }
             }
         }
-        for ring in vendor_rings(within) {
+        for ring in vendor_rings() {
             let counters = ac_world::shops::all()
                 .iter()
                 .filter(|s| allowed(s.xy()) && reach(s.xy()) <= ring)

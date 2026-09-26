@@ -182,6 +182,10 @@ pub struct State {
     /// The attack spell last cast, when, and the missiles already in the
     /// air then, until its own projectile is seen.
     pub fired: Option<(u32, Instant, Vec<u32>)>,
+    /// What the attack spell last cast was thrown at, and where it stood then.
+    pub fired_at: Option<(u32, Vec3)>,
+    /// Our own projectiles in flight, by guid, until they land (see `Client::land_own_shots`).
+    pub own_shots: HashMap<u32, OwnShot>,
     /// The sidestep in hand is a courtesy to a fellow rather than a
     /// dodge: it saves his spell and nothing of ours, so it is given up
     /// the moment there is something better to do (see
@@ -192,6 +196,24 @@ pub struct State {
 
 /// A projectile leaving this long after a cast is not taken for it.
 const FIRED_WITHIN: Duration = Duration::from_secs(5);
+/// Our projectile flies within this of the line to its target (cosine, about 35 degrees): the
+/// server aims it there, and a lob only rises (`SpellProjectile`).
+const AIMED_WITHIN: f32 = 0.82;
+/// A shot of ours still in view this long has flown out of reach, not landed.
+const SHOT_FLIES_FOR: Duration = Duration::from_secs(10);
+/// A shot landing within this of its target's middle is taken to have hit it (metres).
+const SHOT_ON_TARGET: f32 = 2.0;
+/// A shot landing within this of the terrain's height struck the ground (metres).
+const SHOT_ON_GROUND: f32 = 0.5;
+
+/// One of our own projectiles, from when it left to when it lands.
+#[derive(Debug, Clone)]
+pub struct OwnShot {
+    pub spell: u32,
+    pub track: Track,
+    /// What it was thrown at, and where that stood when it was.
+    pub target: Option<(u32, Vec3)>,
+}
 
 // ---- Reach: how far our own attacks go ---------------------------------
 //
@@ -371,7 +393,7 @@ impl Client {
 
     /// An attack spell has just been cast: its projectile, when it
     /// leaves, tells how fast that spell flies.
-    pub(crate) fn note_fired(&mut self, spell: u32, now: Instant) {
+    pub(crate) fn note_fired(&mut self, spell: u32, target: u32, now: Instant) {
         let before = self
             .world
             .objects
@@ -380,13 +402,19 @@ impl Client {
             .map(|o| o.guid)
             .collect();
         self.dodge.fired = Some((spell, now, before));
+        self.dodge.fired_at = self
+            .world
+            .objects
+            .get(&target)
+            .and_then(|o| o.world_pos())
+            .map(|at| (target, at));
     }
 
     /// Read the speed of the spell last cast off the projectile that has
     /// just left this character: new since the cast, beside us, and
     /// moving away. The spell table does not say how fast a spell flies,
     /// and an arc's height depends on it.
-    fn learn_shot_speeds(&mut self, now: Instant) {
+    pub(crate) fn learn_shot_speeds(&mut self, now: Instant) {
         let Some((spell, at, before)) = self.dodge.fired.clone() else {
             return;
         };
@@ -397,7 +425,11 @@ impl Client {
         let Some(me) = self.my_position() else {
             return;
         };
-        let speed = self
+        // Flying at what it was thrown at, too: a fellow shooting from the same huddle puts
+        // missiles beside us moving away, and his arrow (24.9 m/s) was taken for our Frost Arc
+        // (40 m/s), its speed and its landing both (test: a_fellows_arrow_is_not_taken_for_our_spell).
+        let toward = self.dodge.fired_at.map(|(_, at)| at);
+        let ours = self
             .world
             .objects
             .values()
@@ -405,16 +437,158 @@ impl Client {
             .find_map(|o| {
                 let p = o.world_pos()?;
                 let flat = o.velocity.truncate();
+                let aimed = toward.is_none_or(|at| {
+                    let to = (at - p).truncate();
+                    flat.dot(to) >= AIMED_WITHIN * flat.length() * to.length()
+                });
                 (p.distance(me) <= CASTER_WITHIN
                     && flat.length() > 0.5
-                    && flat.dot((p - me).truncate()) > 0.0)
-                    .then(|| flat.length())
+                    && flat.dot((p - me).truncate()) > 0.0
+                    && aimed)
+                    .then(|| {
+                        let falls = o.physics_state & ac_world::object::PHYSICS_STATE_GRAVITY != 0;
+                        (o.guid, p, o.velocity, falls)
+                    })
             });
+        if let Some((guid, origin, velocity, falls)) = ours {
+            self.dodge.own_shots.insert(
+                guid,
+                OwnShot {
+                    spell,
+                    track: Track {
+                        origin,
+                        velocity,
+                        gravity: if falls { GRAVITY } else { 0.0 },
+                        seen: now,
+                        from: None,
+                        can_hurt: false,
+                        dodged: false,
+                    },
+                    target: self.dodge.fired_at.take(),
+                },
+            );
+        }
+        let speed = ours.map(|(_, _, v, _)| v.truncate().length());
         if let Some(speed) = speed {
             if self.dodge.shot_speeds.insert(spell, speed).is_none() {
                 tracing::info!("aim: spell {spell} flies at {speed:.1} m/s");
             }
             self.dodge.fired = None;
+        }
+    }
+
+    /// Where a projectile flying `path` first meets static collision or the ground: the shot test
+    /// (`Player::flies_clear`) with the place, for saying what a shot struck.
+    fn first_hit(&mut self, path: &[Vec3]) -> Option<Vec3> {
+        let assets = self.assets.clone();
+        let pl = self.player.as_mut()?;
+        let worlds = pl.collision_along(&assets, path);
+        for w in path.windows(2) {
+            let (a, b) = (w[0], w[1]);
+            let hit = worlds
+                .iter()
+                .filter_map(|c| c.world.segment_hit(a, b))
+                .min_by(|x, y| x.total_cmp(y));
+            if let Some(t) = hit {
+                return Some(a + (b - a) * t);
+            }
+            if pl
+                .terrain_height(b.x, b.y)
+                .is_some_and(|z| b.z < z - crate::aim::GROUND_GRAZE)
+            {
+                return Some(b);
+            }
+        }
+        None
+    }
+
+    /// Say where each of our own projectiles landed, the tick it is gone from view: how far out,
+    /// how far from what it was thrown at, and whether our collision has what it struck. Arcs
+    /// were seen striking something just in front of the caster that the shot test let through.
+    pub(crate) fn land_own_shots(&mut self, now: Instant) {
+        if self.dodge.own_shots.is_empty() {
+            return;
+        }
+        let landed: Vec<u32> = self
+            .dodge
+            .own_shots
+            .iter()
+            .filter(|(g, s)| {
+                self.world.objects.get(g).is_none_or(|o| o.no_draw)
+                    || now.duration_since(s.track.seen) > SHOT_FLIES_FOR
+            })
+            .map(|(g, _)| *g)
+            .collect();
+        for guid in landed {
+            let Some(shot) = self.dodge.own_shots.remove(&guid) else {
+                continue;
+            };
+            let flew_for = now.duration_since(shot.track.seen);
+            if flew_for > SHOT_FLIES_FOR {
+                continue;
+            }
+            let landed_at = shot.track.at(now);
+            let steps = ((flew_for.as_secs_f32() / 0.05).ceil() as u32).max(1);
+            let path: Vec<Vec3> = (0..=steps)
+                .map(|i| {
+                    let t = shot.track.seen + flew_for.mul_f32(i as f32 / steps as f32);
+                    shot.track.at(t)
+                })
+                .collect();
+            let flew = shot.track.origin.distance(landed_at);
+            let wall = self.first_hit(&path).map(|p| shot.track.origin.distance(p));
+            let target = shot.target.map(|(g, was)| {
+                let now_at = self
+                    .world
+                    .objects
+                    .get(&g)
+                    .and_then(|o| o.world_pos())
+                    .unwrap_or(was);
+                let middle = now_at + Vec3::new(0.0, 0.0, 1.0);
+                (
+                    self.world.name_or_hex(g),
+                    shot.track.origin.distance(middle),
+                    landed_at.distance(middle),
+                )
+            });
+            let spell = self
+                .assets
+                .spell_table()
+                .ok()
+                .and_then(|t| t.get(shot.spell).map(|s| s.name.clone()))
+                .unwrap_or_else(|| format!("spell {}", shot.spell));
+            let aimed = match &target {
+                Some((name, away, off)) if *off <= SHOT_ON_TARGET => {
+                    format!("on {name} ({away:.1} m)")
+                }
+                Some((name, away, off)) => format!("{off:.1} m from {name} ({away:.1} m away)"),
+                None => "at nothing known".to_string(),
+            };
+            // Landing on the land itself is a shot into a hill, which the path, ending at the
+            // ground, never dips under.
+            let ground = self
+                .player
+                .as_ref()
+                .and_then(|pl| pl.terrain_height(landed_at.x, landed_at.y))
+                .is_some_and(|z| (landed_at.z - z).abs() <= SHOT_ON_GROUND);
+            let ours = match wall {
+                Some(d) if (d - flew).abs() <= 1.0 => {
+                    "; our collision has what it struck".to_string()
+                }
+                Some(d) => format!("; our collision has a wall {d:.1} m out"),
+                None if ground => "; it struck the ground".to_string(),
+                None => "; nothing in our collision there".to_string(),
+            };
+            let o = ac_world::landblock_origin(crate::player::block_of(landed_at));
+            let line = format!(
+                "shot: {spell} landed {flew:.1} m out at ({:.1}, {:.1}, {:.1}) in {:#06x}, {aimed}{ours}",
+                landed_at.x - o.x,
+                landed_at.y - o.y,
+                landed_at.z,
+                crate::player::block_of(landed_at) >> 16,
+            );
+            tracing::info!("aim: {line}");
+            self.events.push(crate::Event::Noted(line));
         }
     }
 
@@ -690,7 +864,6 @@ impl Client {
                 self.stop_approaching();
             }
         }
-        self.learn_shot_speeds(now);
         if !self.autoplay.config.survive.dodge {
             return false;
         }
@@ -967,6 +1140,99 @@ impl Client {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_fellows_arrow_is_not_taken_for_our_spell() {
+        // Scn Mage and Scn Seller half a metre apart at ACB5: the Seller's arrow appeared beside
+        // the Mage moving away, and was taken for its Frost Arc -- speed, landing and all.
+        let t0 = Instant::now();
+        let mut c = crate::testkit::offline_client();
+        crate::testkit::stand(&mut c, 0xA9B4_0019, Vec3::new(84.0, 84.0, 94.0));
+        let me = c.my_position().unwrap();
+        let drudge = crate::testkit::standing_by(&mut c, 0x8000_0001, "Drudge Skulker", 20.0);
+        c.note_fired(1_234, drudge.guid, t0);
+        let missile = |guid: u32, at: Vec3, velocity: Vec3| ac_world::WorldObject {
+            guid,
+            name: "missile".into(),
+            physics_state: ac_world::object::PHYSICS_STATE_MISSILE,
+            position: Some(ac_world::object::Position::new_flat(
+                0xA9B4_0019,
+                at - ac_world::landblock_origin(0xA9B4_0019),
+            )),
+            velocity,
+            ..Default::default()
+        };
+        // The fellow's arrow, away from us and off to the side.
+        c.world.objects.insert(
+            0x8000_0100,
+            missile(
+                0x8000_0100,
+                me + Vec3::new(-0.5, 1.5, 1.2),
+                Vec3::new(-12.0, 21.8, -1.8),
+            ),
+        );
+        c.learn_shot_speeds(t0 + Duration::from_millis(200));
+        assert!(c.dodge.own_shots.is_empty(), "the arrow was taken for ours");
+        assert!(!c.dodge.shot_speeds.contains_key(&1_234));
+        // Ours, at the drudge.
+        c.world.objects.insert(
+            0x8000_0101,
+            missile(
+                0x8000_0101,
+                me + Vec3::new(0.8, 0.0, 1.2),
+                Vec3::new(40.0, 0.0, 0.0),
+            ),
+        );
+        c.learn_shot_speeds(t0 + Duration::from_millis(2_200));
+        assert!(c.dodge.own_shots.contains_key(&0x8000_0101));
+        assert_eq!(c.dodge.shot_speeds.get(&1_234), Some(&40.0));
+    }
+
+    #[test]
+    fn a_shot_of_ours_is_said_to_land_where_its_flight_ends() {
+        // Where our arcs land was guessed at ("hitting the ceiling"); the landing is now said.
+        let t0 = Instant::now();
+        let mut c = crate::testkit::offline_client();
+        crate::testkit::stand(&mut c, 0xA9B4_0019, Vec3::new(84.0, 84.0, 94.0));
+        let me = c.my_position().unwrap();
+        let drudge = crate::testkit::standing_by(&mut c, 0x8000_0001, "Drudge Slave", 20.0);
+        let track = Track {
+            origin: me + Vec3::new(0.5, 0.0, 1.2),
+            velocity: Vec3::new(15.0, 0.0, 0.0),
+            gravity: 0.0,
+            seen: t0,
+            from: None,
+            can_hurt: false,
+            dodged: false,
+        };
+        let target = Some((drudge.guid, drudge.world_pos().unwrap()));
+        c.dodge.own_shots.insert(
+            0x8000_0100,
+            OwnShot {
+                spell: 1,
+                track,
+                target,
+            },
+        );
+        // Gone from view a fifth of a second out: three metres, nowhere near the drudge.
+        c.land_own_shots(t0 + Duration::from_millis(200));
+        let said: Vec<String> = c
+            .drain_events()
+            .into_iter()
+            .filter_map(|e| match e {
+                crate::Event::Noted(s) if s.starts_with("shot:") => Some(s),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(said.len(), 1, "{said:?}");
+        assert!(said[0].contains("landed 3.0 m out"), "{}", said[0]);
+        assert!(
+            said[0].contains("m from Drudge Slave (19.5 m away)"),
+            "{}",
+            said[0]
+        );
+        assert!(c.dodge.own_shots.is_empty());
+    }
 
     const ME: Vec3 = Vec3::new(100.0, 100.0, 10.0);
     /// Where the server aims: two thirds of the way up the target.
