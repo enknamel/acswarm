@@ -10,22 +10,20 @@ priority; a live report starts from the telemetry (`tools/telemetry.py`, `--mark
   Sentry building (0xBDAF0100) picked one Mite Sentry six times in four minutes, each time "getting
   Mite Sentry in sight" then "giving up: no damage in a while" after 20 s, with three roams from
   indoors cut short between and the ground's quiet minute waited out indoors (scenario idle2).
-- **A corpse no path reaches is waited on.** Scn Mage on a platform at z 58 in 0xACB5 waited
-  36 s on a corpse 12 m off and 17.6 m below (33149.5 34886.1 40.4), steering "no way" throughout
-  (run K). Standing places surround it on a flat floor at 40.4, but no path reaches them from the
-  platform or from low ground 30 m off: water, a pit, or a graph stricter than the walking there.
 - **Wedged at the end of a long walk to a ground.** Scn Blade, 4.4 km on foot to hunt Banderling
   Guard, stood 81 s then 40 s at B2A10022 (34273.5 30958.9 90.0), 59 m and then 14 m from the goal,
   wedged 24/40 and 20/20 samples, no "no way" (scenario scn-town2).
-- **The two town-run planners disagree.** The first plan said "Boddry the Chancy it is: nowhere
-  sells what is wanted", the next-stop plan found Cindrue with "2 of 2 on the shelf", so the run
-  walked to the wrong counter. Shows as: two stops for one need in the status lines.
+- **A walk back that cannot close its last point loops.** Scn Seller in the ACB5 mine stood 390 s
+  "back the way it came" 0.25 m from a trail point it never reached (RETRACE_ARRIVE 0.2); each
+  stuck replan found no path and retraced to the same point (scenario scn-ghost; the mine itself is
+  reachable now, but the loop is not bounded).
+- **Held 0.42 m from a corner waypoint.** A new character on a platform in 0xA9B2 (78.2 85.9 97.5)
+  stood 124 s "getting Black Rabbit in sight", 0.42 m from its route's first waypoint: a corner is
+  held until the body stands on it (`Route::target`, ON_THE_SPOT) and it could not. Offline over the
+  same static geometry the walk arrives, so something the map lacks was in the way (scn-shots).
 
 ## 2. Plays badly
 
-- **The counter spends every coin on buy-list lines** (470 tapers, nothing left for healing kits;
-  scenarios run 2: Scn Seller, a soldier, bought 336 tapers with its 10,000 and kept 20). Shows as:
-  `coin` near 0 in the samples after a town run.
 - **Experience goes to weapon skills with no weapon to use them** (Scn Blade raised Heavy Weapons
   to 149 holding only the Academy's training bow). Found because the fixtures had no weapons; a
   character that has lost its weapon plays the same way.
@@ -33,15 +31,15 @@ priority; a live report starts from the telemetry (`tools/telemetry.py`, `--mark
   Scarab, Prismatic Taper" in the status line.
 - **The Academy tutorial fallback cannot finish for a bow soldier**: no damage to the Olthoi,
   then out of arrows.
-- **Autoplay's walk outlives autoplay.** Blargerton, autoplay switched off in the Holtburg Dungeon
-  and recalled to the lifestone: the walk it had set (source "follow", goal 264.5 47182.0 in 0x01F5)
-  walked him 80 m across Holtburg, then stood "no way" for 25 min (Coldeve, 13:47). Switching
-  autoplay off, or a teleport, should drop the walk autoplay set.
+- **The corpse choice flips each frame between two.** Scn Mage at ACB5 alternated "walking to
+  Corpse of Small Fledgling Mukkir (19 m)" and "walking to Corpse of Drudge Slinker (13 m)" every
+  tick for 2 s (scn-nav3, 15:25:00).
+- **Our collision has a wall the server does not.** A new character's Lightning Bolt flew 44.3 m in
+  0xABB4 through a wall our collision puts 28.1 m out (scn-shots, "shot:" notes): the shot test
+  refuses shots the server would let through.
 
 ## 3. Tooling
 
-- **Launcher "Launch headless" is not headless** (it only adds `--mute`) and passes the password
-  in argv (`-v`), visible to `ps`.
 - **"wedged" counts only fully blocked steps.** A step the walls slide back to where it began
   reads as progress, so a body going nowhere for 12 min showed wedged false in every sample; the
   steering's own no-progress check (`STUCK_AFTER`) is what saw it.
@@ -50,6 +48,17 @@ priority; a live report starts from the telemetry (`tools/telemetry.py`, `--mark
 
 ## Fixed
 
+- **A mine at ACB5 had no way in** (550b8d7): Mukkirs on a floor 17 m under the hill were fought
+  from above, a corpse there waited on 36 s, a seller stood 390 s inside. The graph now leaves out
+  overlay cells no portal leads into and joins indoor hops the body's own step walks; offline the
+  walk goes down to the floor and back (a_mine_is_walked_down_to_its_floor).
+- **Two town-run planners** (this merge): ac-vendor's whole-trip `errand::plan` was dead code, and
+  the first stop and the next were chosen by different rules (and a 300 m reach). One rule now,
+  `errands_for` through `choose_stop`, for every stop and the panel's button.
+- **Autoplay's walk outlived autoplay; a ghost target cast at** (57ee6d4): see that commit.
+- **Our spell taken for a fellow's arrow** (this merge): in a huddle, a fellow's arrow beside us was
+  taken for our Frost Arc, its speed (24.9 against 40 m/s) feeding the arc aim; ours is now the one
+  flying at the target.
 - **Ran at a bookcase for 12 minutes** (759744a, e2890ea): Blargerton, squeezed between a row of
   bookcases and a chest 0.75 m apart in the Holtburg Dungeon (0x01F60233), was routed from the node
   nearest him, a lattice point snapped out to the bookcases' far side, on every replan. A route now
