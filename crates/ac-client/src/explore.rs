@@ -35,6 +35,10 @@ const PAST_THE_DOOR: f32 = 2.5;
 /// How close to the aiming point counts as being there.
 const STOP: f32 = 1.0;
 
+/// How far a room's floor may climb or fall from its sill at the aim (metres): the Holtburg
+/// Dungeon's stairs 0x01F6029F rise 6 m in 10, 3 m at a doubled aim.
+const STAIRS: f32 = 3.5;
+
 /// The dungeon's rooms and what opens on to what.
 struct Rooms<'a>(&'a [CellScene]);
 
@@ -147,17 +151,18 @@ fn way_into(
     Some(past_the_door(sill, normal, from, facing, past))
 }
 
-/// `at`, or the nearest thing to it past `sill` that `has_floor`: an aim
-/// with nothing to stand on is inside a wall, and a walk at it jitters
+/// `at`, or the nearest thing to it past `sill` with a floor, standing on the height `floor` gives:
+/// an aim with nothing to stand on is inside a wall, and a walk at it jitters
 /// against the wall until the room is given up.
 ///
 /// Straight through the door is tried first; then the same distance
 /// bearing forty-five degrees either way, for a corridor that turns at
 /// its door (the Holtburg Dungeon's run diagonally from theirs); then
 /// shorter, straight through, down to a pace past the sill.
-pub fn aim_on_floor(sill: Vec3, at: Vec3, has_floor: impl Fn(Vec3) -> bool) -> Vec3 {
-    if has_floor(at) {
-        return at;
+pub fn aim_on_floor(sill: Vec3, at: Vec3, floor: impl Fn(Vec3) -> Option<f32>) -> Vec3 {
+    let has_floor = |p: Vec3| floor(p).map(|z| Vec3::new(p.x, p.y, z));
+    if let Some(p) = has_floor(at) {
+        return p;
     }
     let through = glam::Vec2::new(at.x - sill.x, at.y - sill.y);
     let past = through.length();
@@ -170,13 +175,12 @@ pub fn aim_on_floor(sill: Vec3, at: Vec3, has_floor: impl Fn(Vec3) -> bool) -> V
     };
     let quarter = std::f32::consts::FRAC_PI_4;
     for p in [turned(quarter), turned(-quarter)] {
-        if has_floor(p) {
+        if let Some(p) = has_floor(p) {
             return p;
         }
     }
     for k in [0.6, 0.4, 0.25] {
-        let p = sill.lerp(at, k);
-        if has_floor(p) {
+        if let Some(p) = has_floor(sill.lerp(at, k)) {
             return p;
         }
     }
@@ -190,12 +194,20 @@ fn facing(heading: f32) -> glam::Vec2 {
 }
 
 impl Client {
-    /// [`aim_on_floor`] against the block's own collision.
-    fn on_a_floor(&self, block: u32, sill: Vec3, at: Vec3) -> Vec3 {
+    /// [`aim_on_floor`] against the block's own collision, on `room`'s own floor: a stair's floor
+    /// climbs from its sill, and an aim at the sill's height found none and was drawn back onto it.
+    fn on_a_floor(&self, block: u32, room: u32, sill: Vec3, at: Vec3) -> Vec3 {
         let Ok(coll) = self.assets.block_collision(block) else {
             return at;
         };
-        let aim = aim_on_floor(sill, at, |p| coll.world.floor_at(p, 0.6, 1.5).is_some());
+        let aim = aim_on_floor(sill, at, |p| {
+            coll.world
+                .floors_at_xy(p.x, p.y)
+                .into_iter()
+                .filter(|&(z, c)| c == room && (z - sill.z).abs() <= STAIRS)
+                .map(|(z, _)| z)
+                .min_by(|a, b| (a - sill.z).abs().total_cmp(&(b - sill.z).abs()))
+        });
         if aim != at {
             tracing::debug!("explore: no floor at {at:?}; aiming at {aim:?} instead");
         }
@@ -257,7 +269,7 @@ impl Client {
         };
         // Standing in a room is having explored it, and clears whatever
         // was held against it when it would not let us in before.
-        self.autoplay.rooms_seen.insert(cell);
+        let new_here = self.autoplay.rooms_seen.insert(cell);
         self.autoplay.rooms_shut.remove(&cell);
 
         if let Some(RoomWalk {
@@ -267,11 +279,10 @@ impl Client {
             pushed,
         }) = self.autoplay.room_bound
         {
-            // Arriving is the server putting us in another room, not
-            // reaching a point on the floor. Any other room will do:
-            // being somewhere new is progress and the next doorway is
-            // chosen again from there.
-            let arrived = cell != from;
+            // Arriving is the server putting us in the room, or in one not walked yet (progress, the
+            // next doorway chosen from there); a walked room on the route is not, or 0x21A and 0x216
+            // took turns (exploring_does_not_pace_between_two_rooms).
+            let arrived = cell == room || (cell != from && new_here);
             let too_long = self
                 .autoplay
                 .room_since
@@ -291,8 +302,8 @@ impl Client {
                     .map(|d| d.0)
                     .unwrap_or(at);
                 if let Some(further) = way_into(&scene.cells, room, me, facing, PAST_THE_DOOR * 2.0)
-                    .map(|p| self.on_a_floor(cell & 0xFFFF_0000, sill, p))
-                    .filter(|p| self.has_way_to(*p, room))
+                    .map(|p| self.on_a_floor(cell & 0xFFFF_0000, room, sill, p))
+                    .filter(|p| self.has_way_to(*p, room, STOP))
                 {
                     tracing::info!("explore: at the sill of {room:#010x} and not in it; aiming further, at {further:?}");
                     self.autoplay.room_bound = Some(RoomWalk {
@@ -373,12 +384,12 @@ impl Client {
         let sill = nearest_door(&scene.cells, room, me)
             .map(|d| d.0)
             .unwrap_or(at);
-        let at = self.on_a_floor(cell & 0xFFFF_0000, sill, at);
+        let at = self.on_a_floor(cell & 0xFFFF_0000, room, sill, at);
         // A room is gone into only when a walk gets there. The doorway of 0x01F60296 opens 6 m up
         // a wall of the room with the bookcases: no path, the steering leant on the line to it,
         // and the bookcases were on the line
         // (exploring_the_holtburg_dungeon_does_not_stand_at_the_bookcases).
-        if !self.has_way_to(at, room) {
+        if !self.has_way_to(at, room, STOP) {
             self.autoplay.rooms_shut.insert(room);
             self.autoplay
                 .note(format!("no way into {room:#06x}; going round"), now);
@@ -447,17 +458,66 @@ mod tests {
             }
         }
         let stood = play(&mut c, 90);
+        assert_keeps_going(&c, &stood);
+    }
+
+    /// In every twenty seconds of `stood` (a place a second), the character gets six metres from
+    /// where it began them: neither standing nor pacing between two doorways, which a
+    /// ten-seconds-in-one-place test let through.
+    fn assert_keeps_going(c: &Client, stood: &[glam::Vec3]) {
         let origin = ac_world::landblock_origin(0x01F6_0000);
-        // Never ten seconds in one spot.
-        for w in stood.windows(10) {
+        for w in stood.windows(20) {
             let moved = w.iter().map(|p| p.distance(w[0])).fold(0.0f32, f32::max);
             assert!(
-                moved > 1.0,
-                "stood at {:?} for ten seconds, bound for {:?}",
+                moved >= 6.0,
+                "kept within {moved:.1} m of {:?} for twenty seconds, bound for {:?}",
                 w[0] - origin,
-                c.autoplay.room_bound.map(|r| (r.room, r.at - origin))
+                c.autoplay
+                    .room_bound
+                    .map(|r| (format!("{:#x}", r.room & 0xFFFF), r.at - origin))
             );
         }
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn exploring_does_not_pace_between_two_rooms() {
+        // Blargerton, 172 s in the Holtburg Dungeon: bound for 0x21B from 0x21A, the route went
+        // back through 0x216 first, and stepping into 0x216 counted as arriving; from there the
+        // way on was 0x21A again. Round every 0.8 s.
+        let mut c = crate::testkit::standing_in_the_field(
+            27,
+            0x01F6_021A,
+            glam::Vec3::new(16.5, -61.5, 0.0),
+        );
+        c.world.player_guid = Some(crate::testkit::ME);
+        c.autoplay.config.enabled = true;
+        c.autoplay.config.fight.enabled = true;
+        let scene = ac_scene::landblock::load(&c.assets, 0x01F6_0000).unwrap();
+        for cs in &scene.cells {
+            if cs.cell_id & 0xFFFF != 0x21B {
+                c.autoplay.rooms_seen.insert(cs.cell_id);
+            }
+        }
+        let stood = play(&mut c, 90);
+        assert_keeps_going(&c, &stood);
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn exploring_climbs_the_stairs() {
+        // On the stairs 0x01F602A3, whose sills are 6 m apart in height: an aim at a sill's height
+        // past it had no floor, was drawn back onto the sill, and read as no way into either room.
+        let mut c = crate::testkit::standing_in_the_field(
+            27,
+            0x01F6_02A3,
+            glam::Vec3::new(94.5, -79.5, 0.3),
+        );
+        c.world.player_guid = Some(crate::testkit::ME);
+        c.autoplay.config.enabled = true;
+        c.autoplay.config.fight.enabled = true;
+        let stood = play(&mut c, 60);
+        assert_keeps_going(&c, &stood);
     }
 
     /// The doorway between 0x01F60216 and 0x01F60215 in the Holtburg
@@ -525,10 +585,10 @@ mod tests {
         // The corridor beyond the (202, 47177) door runs north-east at
         // forty-five degrees: straight through, 2.5 m past the sill, is
         // wall. A floor only within a metre of the line y - 47177 = x - 202.
-        let diagonal = |p: Vec3| ((p.y - 47177.0) - (p.x - 202.0)).abs() < 1.0;
+        let diagonal = |p: Vec3| (((p.y - 47177.0) - (p.x - 202.0)).abs() < 1.0).then_some(p.z);
         let straight = Vec3::new(202.0, 47179.5, 0.1);
         let aim = aim_on_floor(SILL, straight, diagonal);
-        assert!(diagonal(aim), "{aim:?}");
+        assert!(diagonal(aim).is_some(), "{aim:?}");
         assert!(
             (aim.distance(SILL) - 2.5).abs() < 0.01,
             "the full distance, turned: {aim:?}"
@@ -538,14 +598,14 @@ mod tests {
             "north-east, not south-west: {aim:?}"
         );
         // No corridor either way: drawn in along the line instead.
-        let near_only = |p: Vec3| p.distance(SILL) < 1.2;
+        let near_only = |p: Vec3| (p.distance(SILL) < 1.2).then_some(p.z);
         let aim = aim_on_floor(SILL, straight, near_only);
         assert!(
             aim.distance(Vec3::new(202.0, 47178.0, 0.1)) < 1e-3,
             "{aim:?}"
         );
         // A floor where aimed is left alone.
-        assert_eq!(aim_on_floor(SILL, straight, |_| true), straight);
+        assert_eq!(aim_on_floor(SILL, straight, |p| Some(p.z)), straight);
     }
 
     #[test]

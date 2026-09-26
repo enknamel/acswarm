@@ -786,7 +786,7 @@ impl Client {
                 // No path there, no walk: set aside at once rather than after five seconds of
                 // "no way" at it. Asked once, as the walk sets off.
                 let setting_off = self.autoplay.walking_to.map(|w| w.guid) != Some(guid);
-                if setting_off && !self.has_way_to(at, cell) {
+                if setting_off && !self.has_way_to(at, cell, CORPSE_REACH) {
                     tracing::info!("autoplay: no way to corpse {guid:#010x}; leaving it");
                     self.autoplay.set_aside_out_of_reach(guid, now);
                     self.autoplay

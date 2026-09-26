@@ -659,7 +659,9 @@ fn the_way_into_a_corridor_is_through_its_door_not_into_its_wall() {
     assert!(!has_floor(Vec3::new(200.32, 47_178.85, 0.1)));
     let straight = Vec3::new(202.0, 47_179.5, 0.1);
     assert!(!has_floor(straight));
-    let aim = ac_client::explore::aim_on_floor(JAMB_SILL, straight, has_floor);
+    let aim = ac_client::explore::aim_on_floor(JAMB_SILL, straight, |p| {
+        coll.world.floor_at(p, 0.6, 1.5).map(|f| f.0)
+    });
     assert!(has_floor(aim), "{aim:?}");
     assert!(
         aim.x > 203.0 && aim.y > 47_178.0,

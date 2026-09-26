@@ -2067,7 +2067,7 @@ mod tests {
         let mut c =
             crate::testkit::standing_in_the_field(25, 0x01F6_0224, Vec3::new(30.37, -51.89, 0.0));
         assert!(
-            c.has_way_to(origin + Vec3::new(36.0, -54.0, 0.0), 0x01F6_0233),
+            c.has_way_to(origin + Vec3::new(36.0, -54.0, 0.0), 0x01F6_0233, 0.25),
             "round the bookcases"
         );
         // On top of a bookcase, 1.9 m up: `find_path` ends its route there anyway.
@@ -2075,9 +2075,9 @@ mod tests {
         let (me, assets) = (c.my_position().unwrap(), c.assets.clone());
         let pl = c.player.as_mut().unwrap();
         assert!(pl.find_path(&assets, block, me, top, 0x01F6_0224).is_some());
-        assert!(!c.has_way_to(top, 0x01F6_0224), "on the bookcase");
+        assert!(!c.has_way_to(top, 0x01F6_0224, 2.5), "on the bookcase");
         assert!(
-            c.has_way_to(Vec3::new(10.0, 10.0, 0.0), 0x0101_0001),
+            c.has_way_to(Vec3::new(10.0, 10.0, 0.0), 0x0101_0001, 0.25),
             "another block is the planner's"
         );
     }

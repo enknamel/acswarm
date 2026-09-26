@@ -26,9 +26,10 @@ pub struct Follow {
 pub(crate) const SAME_FLOOR: f32 = 2.0;
 
 impl Client {
-    /// Whether a walk can get from the character to `at` (standing in `cell`): false only when both
-    /// are in one landblock and its graph finds no path; anything further is the journey planner's.
-    pub(crate) fn has_way_to(&mut self, at: Vec3, cell: u32) -> bool {
+    /// Whether a walk can get from the character to within `within` metres of `at` (standing in
+    /// `cell`): false only when both are in one landblock and its graph finds no path; anything
+    /// further is the journey planner's.
+    pub(crate) fn has_way_to(&mut self, at: Vec3, cell: u32, within: f32) -> bool {
         let Some(me) = self.my_position() else {
             return true;
         };
@@ -40,8 +41,9 @@ impl Client {
         if cell & 0xFFFF_0000 != block {
             return true;
         }
-        // `find_path` ends a route at its goal whether or not the node nearest the goal reaches it,
-        // so a bookcase's top read as a way there: the last step is walked as the body takes it.
+        // `find_path` ends a route at its goal whether or not the node nearest reaches it (a
+        // bookcase's top read as a way there): the last step is walked as the body takes it, as far
+        // as the walk stops short (exploring_does_not_pace_between_two_rooms).
         let Some(path) = pl.find_path(&assets, block, me, at, cell) else {
             return false;
         };
@@ -49,7 +51,8 @@ impl Client {
         let last = path.len().checked_sub(2).map_or(me, |i| path[i]);
         let cap = pl.capsule();
         pl.on_nav(&assets, block, last, goal, |_, ground| {
-            ground.walkable(last, goal, &cap).0 || ground.body_reaches(last, goal, &cap)
+            ground.walkable(last, goal, &cap).0
+                || ground.body_comes_within(last, goal, within, &cap)
         })
         .unwrap_or(true)
     }
