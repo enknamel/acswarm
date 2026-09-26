@@ -292,6 +292,7 @@ impl Client {
                     .unwrap_or(at);
                 if let Some(further) = way_into(&scene.cells, room, me, facing, PAST_THE_DOOR * 2.0)
                     .map(|p| self.on_a_floor(cell & 0xFFFF_0000, sill, p))
+                    .filter(|p| self.has_way_to(*p, room))
                 {
                     tracing::info!("explore: at the sill of {room:#010x} and not in it; aiming further, at {further:?}");
                     self.autoplay.room_bound = Some(RoomWalk {
@@ -373,6 +374,16 @@ impl Client {
             .map(|d| d.0)
             .unwrap_or(at);
         let at = self.on_a_floor(cell & 0xFFFF_0000, sill, at);
+        // A room is gone into only when a walk gets there. The doorway of 0x01F60296 opens 6 m up
+        // a wall of the room with the bookcases: no path, the steering leant on the line to it,
+        // and the bookcases were on the line
+        // (exploring_the_holtburg_dungeon_does_not_stand_at_the_bookcases).
+        if !self.has_way_to(at, room) {
+            self.autoplay.rooms_shut.insert(room);
+            self.autoplay
+                .note(format!("no way into {room:#06x}; going round"), now);
+            return true;
+        }
         tracing::info!("explore: {cell:#010x} -> {room:#010x} at {at:?}");
         self.autoplay.room_bound = Some(RoomWalk {
             from: cell,
@@ -396,6 +407,58 @@ impl Client {
 mod tests {
     use super::*;
     use glam::Vec2;
+
+    /// Autoplay and the body run offline together, a tick at a time, for `seconds`: where the
+    /// character stood each second.
+    fn play(c: &mut Client, seconds: u32) -> Vec<glam::Vec3> {
+        let dt = 0.05;
+        let t0 = Instant::now();
+        let mut stood = Vec::new();
+        for frame in 0..seconds * 20 {
+            let now = t0 + std::time::Duration::from_secs_f32(frame as f32 * dt);
+            c.tick_autoplay(now);
+            c.tick_player(crate::player::Input::default(), dt, now);
+            if frame % 20 == 0 {
+                stood.push(c.my_position().unwrap());
+            }
+        }
+        stood
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn exploring_the_holtburg_dungeon_does_not_stand_at_the_bookcases() {
+        // Blargerton, exploring, walked into the bookcases in 0x01F60233 again and again: the next
+        // rooms, 0x295 and 0x296, open off a doorway 6 m up the wall, no path reaches it, and the
+        // steering leaned on the straight line to it.
+        let mut c = crate::testkit::standing_in_the_field(
+            26,
+            0x01F6_0233,
+            glam::Vec3::new(35.19, -49.43, 0.0),
+        );
+        c.world.player_guid = Some(crate::testkit::ME);
+        c.autoplay.config.enabled = true;
+        c.autoplay.config.fight.enabled = true;
+        // Most of the dungeon walked already, as it was: the rooms left are the two up the wall.
+        let scene = ac_scene::landblock::load(&c.assets, 0x01F6_0000).unwrap();
+        for cs in &scene.cells {
+            if cs.cell_id & 0xFFFF != 0x295 && cs.cell_id & 0xFFFF != 0x296 {
+                c.autoplay.rooms_seen.insert(cs.cell_id);
+            }
+        }
+        let stood = play(&mut c, 90);
+        let origin = ac_world::landblock_origin(0x01F6_0000);
+        // Never ten seconds in one spot.
+        for w in stood.windows(10) {
+            let moved = w.iter().map(|p| p.distance(w[0])).fold(0.0f32, f32::max);
+            assert!(
+                moved > 1.0,
+                "stood at {:?} for ten seconds, bound for {:?}",
+                w[0] - origin,
+                c.autoplay.room_bound.map(|r| (r.room, r.at - origin))
+            );
+        }
+    }
 
     /// The doorway between 0x01F60216 and 0x01F60215 in the Holtburg
     /// Dungeon: a wall along x, the way through along y.
