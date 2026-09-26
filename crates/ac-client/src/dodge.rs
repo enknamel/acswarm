@@ -196,6 +196,9 @@ pub struct State {
 
 /// A projectile leaving this long after a cast is not taken for it.
 const FIRED_WITHIN: Duration = Duration::from_secs(5);
+/// Our projectile flies within this of the line to its target (cosine, about 35 degrees): the
+/// server aims it there, and a lob only rises (`SpellProjectile`).
+const AIMED_WITHIN: f32 = 0.82;
 /// A shot of ours still in view this long has flown out of reach, not landed.
 const SHOT_FLIES_FOR: Duration = Duration::from_secs(10);
 /// A shot landing within this of its target's middle is taken to have hit it (metres).
@@ -420,6 +423,10 @@ impl Client {
         let Some(me) = self.my_position() else {
             return;
         };
+        // Flying at what it was thrown at, too: a fellow shooting from the same huddle puts
+        // missiles beside us moving away, and his arrow (24.9 m/s) was taken for our Frost Arc
+        // (40 m/s), its speed and its landing both (test: a_fellows_arrow_is_not_taken_for_our_spell).
+        let toward = self.dodge.fired_at.map(|(_, at)| at);
         let ours = self
             .world
             .objects
@@ -428,9 +435,14 @@ impl Client {
             .find_map(|o| {
                 let p = o.world_pos()?;
                 let flat = o.velocity.truncate();
+                let aimed = toward.is_none_or(|at| {
+                    let to = (at - p).truncate();
+                    flat.dot(to) >= AIMED_WITHIN * flat.length() * to.length()
+                });
                 (p.distance(me) <= CASTER_WITHIN
                     && flat.length() > 0.5
-                    && flat.dot((p - me).truncate()) > 0.0)
+                    && flat.dot((p - me).truncate()) > 0.0
+                    && aimed)
                     .then(|| {
                         let falls = o.physics_state & ac_world::object::PHYSICS_STATE_GRAVITY != 0;
                         (o.guid, p, o.velocity, falls)
@@ -1098,6 +1110,53 @@ impl Client {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_fellows_arrow_is_not_taken_for_our_spell() {
+        // Scn Mage and Scn Seller half a metre apart at ACB5: the Seller's arrow appeared beside
+        // the Mage moving away, and was taken for its Frost Arc -- speed, landing and all.
+        let t0 = Instant::now();
+        let mut c = crate::testkit::offline_client();
+        crate::testkit::stand(&mut c, 0xA9B4_0019, Vec3::new(84.0, 84.0, 94.0));
+        let me = c.my_position().unwrap();
+        let drudge = crate::testkit::standing_by(&mut c, 0x8000_0001, "Drudge Skulker", 20.0);
+        c.note_fired(1_234, drudge.guid, t0);
+        let missile = |guid: u32, at: Vec3, velocity: Vec3| ac_world::WorldObject {
+            guid,
+            name: "missile".into(),
+            physics_state: ac_world::object::PHYSICS_STATE_MISSILE,
+            position: Some(ac_world::object::Position::new_flat(
+                0xA9B4_0019,
+                at - ac_world::landblock_origin(0xA9B4_0019),
+            )),
+            velocity,
+            ..Default::default()
+        };
+        // The fellow's arrow, away from us and off to the side.
+        c.world.objects.insert(
+            0x8000_0100,
+            missile(
+                0x8000_0100,
+                me + Vec3::new(-0.5, 1.5, 1.2),
+                Vec3::new(-12.0, 21.8, -1.8),
+            ),
+        );
+        c.learn_shot_speeds(t0 + Duration::from_millis(200));
+        assert!(c.dodge.own_shots.is_empty(), "the arrow was taken for ours");
+        assert!(!c.dodge.shot_speeds.contains_key(&1_234));
+        // Ours, at the drudge.
+        c.world.objects.insert(
+            0x8000_0101,
+            missile(
+                0x8000_0101,
+                me + Vec3::new(0.8, 0.0, 1.2),
+                Vec3::new(40.0, 0.0, 0.0),
+            ),
+        );
+        c.learn_shot_speeds(t0 + Duration::from_millis(2_200));
+        assert!(c.dodge.own_shots.contains_key(&0x8000_0101));
+        assert_eq!(c.dodge.shot_speeds.get(&1_234), Some(&40.0));
+    }
 
     #[test]
     fn a_shot_of_ours_is_said_to_land_where_its_flight_ends() {
