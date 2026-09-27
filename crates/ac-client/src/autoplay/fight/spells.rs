@@ -143,9 +143,8 @@ impl Client {
             }
             // Only what went out is recorded: a cast the client
             // declined leaves no projectile to time and no shot to
-            // wait on (see `Client::cast_fight_spell`).
+            // wait on (see `Client::cast_fight_spell`; `try_cast` notes it fired).
             if self.cast_fight_spell(spell, guid, now) {
-                self.note_fired(spell, guid, now);
                 self.autoplay.attack_spell = Some(spell);
                 self.throw_at(guid, now);
             }

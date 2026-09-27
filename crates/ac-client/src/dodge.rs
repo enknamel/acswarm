@@ -188,6 +188,8 @@ pub struct State {
     pub own_shots: HashMap<u32, OwnShot>,
     /// The target's health when the attack spell last cast left.
     pub fired_health: Option<f32>,
+    /// Where our shot test had the attack spell last cast strike first, metres out; `None` clear.
+    pub fired_strike: Option<f32>,
     /// The last of our shots that burst as it left (see `Client::hear_burst`).
     pub burst: Option<Burst>,
     /// Where two of our shots burst as they left, and when: not cast from for a minute (`DUD_KEPT`).
@@ -251,6 +253,16 @@ pub struct OwnShot {
     pub track: Track,
     /// What it was thrown at, and where that stood when it was.
     pub target: Option<(u32, Vec3)>,
+    /// Where our shot test had it strike first, metres out; `None` clear.
+    pub strike: Option<f32>,
+}
+
+/// Our shot test's word on a shot, for the notes: clear, or where it strikes first.
+fn predicted(strike: Option<f32>) -> String {
+    match strike {
+        None => "predicted clear".to_string(),
+        Some(d) => format!("predicted to strike {d:.1} m out"),
+    }
 }
 
 // ---- Reach: how far our own attacks go ---------------------------------
@@ -426,6 +438,21 @@ impl Client {
         self.shot_flies(&path)
     }
 
+    /// Where our shot test has `spell`, thrown from here at `target`, strike first: metres out
+    /// from the caster's middle, `None` when it flies clear.
+    fn predicted_strike(&mut self, spell: u32, target: u32) -> Option<f32> {
+        let me = self.my_position()?;
+        let at = self
+            .world
+            .objects
+            .get(&target)
+            .and_then(|o| o.world_pos())?;
+        let mine = self.world.player().map_or(0, |o| o.guid);
+        let (from, to) = (self.body_of(mine, me), self.body_of(target, at));
+        let path = aim::flight(self.shot_for(How::Spell(spell)), from, to)?;
+        self.first_hit(&path).map(|p| p.distance(path[0]))
+    }
+
     /// Whether a flight along `path` is struck by nothing: the landblock, the ground or a closed
     /// door.
     fn shot_flies(&mut self, path: &[Vec3]) -> bool {
@@ -505,6 +532,11 @@ impl Client {
     /// same spot at the same target, its health no lower than at the first cast, marks the spot:
     /// ACE had it strike something there (a point-blank hit looks the same on the wire, and hurts).
     fn hear_burst(&mut self, spell: u32, stood: Vec3, at: Vec3, now: Instant) {
+        tracing::info!(
+            "aim: {spell} burst as it left, {:.1} m out; {}",
+            stood.distance(at),
+            predicted(self.dodge.fired_strike.take()),
+        );
         let target = self.dodge.fired_at.take().map(|(g, _)| g);
         let this = Burst {
             stood,
@@ -571,6 +603,25 @@ impl Client {
             .collect();
         self.dodge.fired = Some((spell, now, before));
         self.dodge.fired_health = self.world.objects.get(&target).and_then(|o| o.health);
+        self.dodge.fired_strike = self.predicted_strike(spell, target);
+        if let (Some(me), Some(at)) = (
+            self.my_position(),
+            self.world.objects.get(&target).and_then(|o| o.world_pos()),
+        ) {
+            let o = ac_world::landblock_origin(crate::player::block_of(me));
+            tracing::info!(
+                "aim: {spell} at {} from ({:.1}, {:.1}, {:.1}) to ({:.1}, {:.1}, {:.1}), {:.1} m: {}",
+                self.world.name_or_hex(target),
+                me.x - o.x,
+                me.y - o.y,
+                me.z,
+                at.x - o.x,
+                at.y - o.y,
+                at.z,
+                me.distance(at),
+                predicted(self.dodge.fired_strike),
+            );
+        }
         self.dodge.fired_at = self
             .world
             .objects
@@ -652,6 +703,7 @@ impl Client {
                         dodged: false,
                     },
                     target: self.dodge.fired_at.take(),
+                    strike: self.dodge.fired_strike.take(),
                 },
             );
         }
@@ -772,11 +824,12 @@ impl Client {
             };
             let o = ac_world::landblock_origin(crate::player::block_of(landed_at));
             let line = format!(
-                "shot: {spell} landed {flew:.1} m out at ({:.1}, {:.1}, {:.1}) in {:#06x}, {aimed}{ours}",
+                "shot: {spell} landed {flew:.1} m out at ({:.1}, {:.1}, {:.1}) in {:#06x}, {aimed}{ours}; {}",
                 landed_at.x - o.x,
                 landed_at.y - o.y,
                 landed_at.z,
                 crate::player::block_of(landed_at) >> 16,
+                predicted(shot.strike),
             );
             tracing::info!("aim: {line}");
             self.events.push(crate::Event::Noted(line));
@@ -1417,6 +1470,7 @@ mod tests {
                 spell: 1,
                 track,
                 target,
+                strike: None,
             },
         );
         // Gone from view a fifth of a second out: three metres, nowhere near the drudge.
@@ -2097,9 +2151,9 @@ mod tests {
     #[test]
     #[ignore = "needs AC_DATA_DIR"]
     fn a_caster_beside_its_target_with_nowhere_to_walk_casts() {
-        // Blargerton in 0x01F60230 stood 20 s "getting Drudge Servant in sight", the drudge 1.5 m
-        // north: no clear shot by our test, no spot with one, and the walk at the drudge done
-        // already. His arcs from there were landing.
+        // Blargerton in 0x01F60230 stood 20 s "getting Drudge Servant in sight" while the drudge,
+        // 1.5 m off by our world, hit him: our test found no clear shot and no spot with one, and
+        // the walk at it was done already. Here it is put where the test finds none (north).
         let origin = ac_world::landblock_origin(0x01F6_0000);
         let here = Vec3::new(229.8, 47212.8, 0.0) - origin;
         let mut c = crate::testkit::standing_in_the_field(27, 0x01F6_0230, here);

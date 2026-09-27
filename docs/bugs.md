@@ -50,6 +50,13 @@ priority; a live report starts from the telemetry (`tools/telemetry.py`, `--mark
   0x01F601FA, 0x01F60272 and 0x01F60231 with nothing in our collision within half a metre and no
   door near; two such casts now move the caster (`hear_burst`), but what the server strikes there
   is not known.
+- **A "no clear shot" at a creature hitting us.** Blargerton stood 20 s "getting Drudge Servant in
+  sight" while it hit him from 1.5 m (0x01F60230). The shot test itself was right 46 of 46 in
+  those rooms (below), so the likely fault is where our world had the drudge: check whether a
+  creature chasing us is left at its last reported spot. The shot is thrown now either way.
+- **"On" a target in the shot notes means within 2 m of it**, which read 5 of 46 shots wrongly
+  (four struck something in front of the target, one hit though landing 2.6 m off). Damage is
+  the truth; a note should not call a shot a hit without it.
 - **Our collision has a wall the server does not.** A new character's Lightning Bolt flew 44.3 m in
   0xABB4 through a wall our collision puts 28.1 m out (scn-shots, "shot:" notes): the shot test
   refuses shots the server would let through.
@@ -63,6 +70,11 @@ priority; a live report starts from the telemetry (`tools/telemetry.py`, `--mark
   level 5); use a template, as `tools/scenarios.sh` does.
 
 ## Fixed
+
+- **The shot test, checked against the server** (this merge): +Scn Mage cast Frost Arc III at a
+  Wood Target Drudge (stands still) from 46 spots round three places in Blargerton's rooms of the
+  Holtburg Dungeon. Predicted clear: 23, all did damage; predicted blocked: 23, none did. Every
+  shot note now says what the test predicted, and shots are watched with autoplay off too.
 
 - **Stood 20 s beside a drudge "getting it in sight"** (this merge): Blargerton in 0x01F60230, the
   drudge 1.5 m north. Our shot test found no clear shot and no spot with one, and the fallback walk
