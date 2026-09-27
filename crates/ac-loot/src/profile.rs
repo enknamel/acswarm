@@ -673,7 +673,17 @@ impl Profile {
     pub fn fingerprint(&self) -> u64 {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        serde_json::to_string(&self.rules)
+        // A salvage rule's bands decide how it salvages, not what it takes: edited, they re-judge
+        // nothing, and an empty one is skipped, so every older fingerprint stands.
+        let rules: Vec<Rule> = self
+            .rules
+            .iter()
+            .map(|r| Rule {
+                combine: String::new(),
+                ..r.clone()
+            })
+            .collect();
+        serde_json::to_string(&rules)
             .unwrap_or_default()
             .hash(&mut h);
         // The buy list decides the undecided: stock is never offered to a counter unless a rule
@@ -686,9 +696,12 @@ impl Profile {
         h.finish()
     }
 
-    /// The rule called `name`, the reason the ledger keeps for a tag (`crate::ledger::Took::rule`).
+    /// The rule called `name`, the reason the ledger keeps for a tag (`crate::ledger::Took::rule`);
+    /// `None` when two rules share the name, since which one tagged it is not known.
     pub fn rule_named(&self, name: &str) -> Option<&Rule> {
-        self.rules.iter().find(|r| r.name == name)
+        let mut named = self.rules.iter().filter(|r| r.name == name);
+        let rule = named.next()?;
+        named.next().is_none().then_some(rule)
     }
 
     /// Whether any rule could ever ask for an appraisal. A profile that
@@ -1098,6 +1111,10 @@ mod tests {
         assert_ne!(p.fingerprint(), was);
         p.rules[0].keep_up_to = None;
         assert_eq!(p.fingerprint(), was);
+        // A salvage rule's bands say how it salvages, not what it takes.
+        p.rules[0].combine = "1-7, 8, 9, 10".into();
+        assert_eq!(p.fingerprint(), was);
+        p.rules[0].combine.clear();
         // The buy list is a rule too: stock is never offered to a counter.
         p.buy.push(Buy {
             what: "Prismatic Taper".into(),

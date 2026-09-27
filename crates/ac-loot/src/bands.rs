@@ -10,6 +10,11 @@ pub const ALL: Band = (1, 10);
 
 /// The bands `text` names, "1-7, 8, 9, 10" or "9 10"; with none readable, every workmanship together.
 pub fn parse(text: &str) -> Vec<Band> {
+    // "1 - 7" is one band, not 1 and 7.
+    let mut text = text.to_string();
+    while text.contains(" -") || text.contains("- ") {
+        text = text.replace(" -", "-").replace("- ", "-");
+    }
     let named: Vec<Band> = text
         .split(|c: char| c == ',' || c == ';' || c.is_whitespace())
         .filter(|part| !part.is_empty())
@@ -27,10 +32,10 @@ pub fn parse(text: &str) -> Vec<Band> {
     }
 }
 
-/// The band `workmanship` falls in, rounded to whole since a bag's is an average: the first named
-/// that holds it, else that workmanship on its own.
+/// The band `workmanship` falls in, rounded down since a bag's is an average and may not top up a
+/// band above it: the first named that holds it, else that workmanship on its own.
 pub fn band_of(bands: &[Band], workmanship: f32) -> Band {
-    let w = workmanship.round().clamp(1.0, 10.0) as u8;
+    let w = workmanship.floor().clamp(1.0, 10.0) as u8;
     bands
         .iter()
         .copied()
@@ -58,6 +63,7 @@ mod tests {
             vec![(1, 7), (8, 8), (9, 9), (10, 10)]
         );
         assert_eq!(parse("9 10"), vec![(9, 9), (10, 10)]);
+        assert_eq!(parse("1 - 7, 8"), vec![(1, 7), (8, 8)], "spaced");
         assert_eq!(
             parse("7-1; 12"),
             vec![(1, 7), (10, 10)],
@@ -75,7 +81,7 @@ mod tests {
     fn a_workmanship_goes_in_its_band_or_on_its_own() {
         let bands = parse("1-7, 9");
         assert_eq!(band_of(&bands, 6.0), (1, 7));
-        assert_eq!(band_of(&bands, 7.4), (1, 7), "a bag's average rounds");
+        assert_eq!(band_of(&bands, 7.6), (1, 7), "a bag's average rounds down");
         assert_eq!(band_of(&bands, 8.0), (8, 8), "named nowhere, alone");
         assert_eq!(band_of(&bands, 10.0), (10, 10));
         assert_eq!(band_of(&parse(""), 10.0), ALL);

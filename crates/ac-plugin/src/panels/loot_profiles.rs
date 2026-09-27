@@ -1305,7 +1305,9 @@ fn rules(ui: &mut egui::Ui, p: &mut Profile, editor: &mut Editor) {
     }
     if let Some(i) = copy {
         let mut made = p.rules[i].clone();
-        made.name = format!("{} copy", made.name);
+        // Names are how a tag remembers its rule (`Ledger::why`): never two alike.
+        let names: Vec<String> = p.rules.iter().map(|r| r.name.clone()).collect();
+        made.name = unused_name(&names, &format!("{} copy", made.name));
         p.rules.insert(i + 1, made);
         editor.open_rule = Some(i + 1);
     }
@@ -1420,8 +1422,9 @@ pub(crate) fn draw(egui: &egui::Context, v: &ProfilesView, editor: &mut Editor) 
                     .on_hover_text("A new rule at the end, read last")
                     .clicked()
                 {
+                    let names: Vec<String> = p.rules.iter().map(|r| r.name.clone()).collect();
                     p.rules.push(Rule {
-                        name: format!("rule {}", p.rules.len() + 1),
+                        name: unused_name(&names, &format!("rule {}", p.rules.len() + 1)),
                         ..Default::default()
                     });
                     editor.open_rule = Some(p.rules.len() - 1);

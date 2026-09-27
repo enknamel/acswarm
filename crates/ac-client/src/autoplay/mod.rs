@@ -407,6 +407,8 @@ pub struct Autoplay {
     /// The salvage batch sent, and when; refused batches and hand-offs
     /// are counted per item so a stubborn one is given up on.
     salvaging: Option<(Vec<u32>, Instant)>,
+    /// Salvage calls whose bags are still to be written down (see `Client::note_bags_made`).
+    making: Vec<crate::autoplay::ledger::salvage::Making>,
     handing: Option<(u32, Instant)>,
     refused: std::collections::BTreeMap<u32, u8>,
     last_salvage: Option<Instant>,

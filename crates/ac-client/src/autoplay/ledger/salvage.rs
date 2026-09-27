@@ -43,28 +43,45 @@ struct Waiting {
     guid: u32,
     material: u32,
     workmanship: f32,
-    /// The bands of the rule that tagged it (`ac_loot::bands`).
+    /// The salvage rule whose bands it goes by (`ac_loot::bands`); empty for all together.
+    rule: String,
     bands: Vec<Band>,
     /// Salvages of it that came to nothing.
     refused: u8,
 }
 
-/// A carried salvage bag with room left: the units in it and how many it holds.
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// A carried salvage bag with room left, made by a salvage written down (`ac_loot::ledger::Made`):
+/// the rule and band it was made in, the units in it and how many it holds.
+#[derive(Clone, Debug, PartialEq)]
 struct Partial {
     guid: u32,
     material: u32,
-    /// The header's: the average of what went in (WorldObject_Properties.cs:1560-1568).
-    workmanship: f32,
+    rule: String,
+    band: Band,
     units: u32,
     holds: u32,
 }
+
+/// A salvage call whose bags are still to arrive: its material, rule and band, the bags of that
+/// material carried when it went, and when.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Making {
+    material: u32,
+    rule: String,
+    band: Band,
+    before: Vec<u32>,
+    sent: Instant,
+}
+
+/// How long a call's bags are waited for before it is forgotten.
+const MAKING_WAIT: Duration = Duration::from_secs(30);
 
 /// One salvage call: every item of one material in one band, and the partial bags of that material
 /// in that band it tops up, sent first.
 #[derive(Clone, Debug, PartialEq)]
 struct Batch {
     material: u32,
+    rule: String,
     band: Band,
     bags: Vec<u32>,
     items: Vec<u32>,
@@ -82,16 +99,23 @@ impl Batch {
 
 /// The next salvage call out of `waiting`, topping up bags from `partial`; `None` with nothing to
 /// salvage. ACE puts all of one material in one call into one bag and averages its workmanship
-/// (Player_Crafting.cs:251, 279), so a call holds one material in one band.
+/// (Player_Crafting.cs:251, 279), so a call holds one material in one band of one rule.
 ///
 /// What has come to nothing least goes first (ACE skips a Retained item without a word), then the
-/// best band, so ordinary loot arriving between calls never keeps it waiting. The bags taken are
-/// the fullest that fit together in one bag's worth: a bag input past it loses the excess.
+/// best band, so ordinary loot arriving between calls never keeps it waiting. Only bags made in the
+/// same rule and band are topped up (an average does not say which band made a bag), the fullest
+/// that fit together in one bag's worth: a bag input past it loses the excess.
 fn next_salvage_batch(waiting: &[Waiting], partial: &[Partial]) -> Option<Batch> {
     use std::cmp::Reverse;
     let turn = |w: &Waiting| {
         let band = bands::band_of(&w.bands, w.workmanship);
-        (Reverse(w.refused), band.1, band.0, Reverse(w.material))
+        (
+            Reverse(w.refused),
+            band.1,
+            band.0,
+            Reverse(w.material),
+            w.rule.clone(),
+        )
     };
     let first = waiting.iter().max_by_key(|w| turn(w))?;
     let key = turn(first);
@@ -104,7 +128,7 @@ fn next_salvage_batch(waiting: &[Waiting], partial: &[Partial]) -> Option<Batch>
     let mut fits: Vec<&Partial> = partial
         .iter()
         .filter(|b| b.material == first.material && b.units < b.holds)
-        .filter(|b| bands::band_of(&first.bands, b.workmanship) == band)
+        .filter(|b| b.rule == first.rule && b.band == band)
         .collect();
     fits.sort_by_key(|b| (Reverse(b.units), b.guid));
     let (mut bags, mut units) = (Vec::new(), 0);
@@ -116,6 +140,7 @@ fn next_salvage_batch(waiting: &[Waiting], partial: &[Partial]) -> Option<Batch>
     }
     Some(Batch {
         material: first.material,
+        rule: first.rule.clone(),
         band,
         bags,
         items,
@@ -183,58 +208,89 @@ impl Client {
         (items, unknown)
     }
 
-    /// The bands an item tagged for salvage is salvaged in: those of the rule that tagged it, or for
-    /// a tag written without one, of the salvage rule that would take it now; else all together.
-    fn salvage_bands(&self, profile: &crate::profile::Profile, guid: u32) -> Vec<Band> {
-        if let Some(rule) = self
+    /// The salvage rule an item tagged for salvage goes by, and its bands: the rule that tagged it,
+    /// or, for a tag written without one or a name two rules share, the salvage rule that would take
+    /// it now; else no rule, all together.
+    fn salvage_bands(&self, profile: &crate::profile::Profile, guid: u32) -> (String, Vec<Band>) {
+        use crate::autoplay::LootAction::Salvage;
+        let rule = self
             .autoplay
             .ledger
             .why(guid)
             .and_then(|r| profile.rule_named(r))
-        {
-            return rule.bands();
-        }
-        let Some(stats) = self.stats_of(guid) else {
-            return vec![bands::ALL];
-        };
-        profile
-            .decided_by(
-                &stats,
-                self.appraisals.get(&guid),
-                &self.wielder(),
-                &self.world.stats.name,
-                self.carried_besides(&stats),
-            )
-            .filter(|(_, r)| r.action == crate::autoplay::LootAction::Salvage)
-            .map_or_else(|| vec![bands::ALL], |(_, r)| r.bands())
+            .filter(|r| r.action == Salvage)
+            .or_else(|| {
+                let stats = self.stats_of(guid)?;
+                profile
+                    .decided_by(
+                        &stats,
+                        self.appraisals.get(&guid),
+                        &self.wielder(),
+                        &self.world.stats.name,
+                        self.carried_besides(&stats),
+                    )
+                    .map(|(_, r)| r)
+                    .filter(|r| r.action == Salvage)
+            });
+        rule.map_or_else(
+            || (String::new(), vec![bands::ALL]),
+            |r| (r.name.clone(), r.bands()),
+        )
     }
 
-    /// Carried salvage bags with room left that may be topped up: any not meant for a counter.
+    /// Write down which call made each salvage bag that has turned up since it went: the new bags of
+    /// its material, for its rule and band, the oldest call first. A call answered with none is
+    /// forgotten after [`MAKING_WAIT`].
+    fn note_bags_made(&mut self, now: Instant) {
+        let me = self.world.player_guid;
+        let mut making = std::mem::take(&mut self.autoplay.making);
+        making.retain(|m| {
+            let new: Vec<crate::items::ItemStats> = self
+                .world
+                .inventory()
+                .filter(|o| o.name.starts_with("Salvaged ") && o.material == m.material)
+                .filter(|o| o.wielder != me && !m.before.contains(&o.guid))
+                .filter_map(|o| self.stats_of(o.guid))
+                .filter(|st| self.autoplay.ledger.made_by(st).is_none())
+                .collect();
+            for st in &new {
+                self.autoplay.ledger.made(st, &m.rule, m.band);
+            }
+            new.is_empty() && now.duration_since(m.sent) < MAKING_WAIT
+        });
+        self.autoplay.making = making;
+    }
+
+    /// Carried salvage bags with room left that may be topped up: those a salvage of ours made, not
+    /// meant for a counter.
     fn partial_bags(&self) -> Vec<Partial> {
         let me = self.world.player_guid;
         self.world
             .inventory()
             .filter(|o| o.name.starts_with("Salvaged ") && o.material != 0 && o.wielder != me)
-            .filter(|o| {
-                let meant = self
-                    .stats_of(o.guid)
-                    .and_then(|st| self.autoplay.ledger.of(&st));
-                !matches!(
+            .filter_map(|o| {
+                let st = self.stats_of(o.guid)?;
+                let meant = self.autoplay.ledger.of(&st);
+                if matches!(
                     meant,
                     Some(crate::autoplay::LootAction::Sell | crate::autoplay::LootAction::Skip)
-                )
-            })
-            .map(|o| Partial {
-                guid: o.guid,
-                material: o.material,
-                workmanship: o.workmanship,
-                units: o.structure,
-                // MaxStructure 100 unless the bag says (Player_Crafting.cs:237-244).
-                holds: if o.max_structure > 0 {
-                    o.max_structure
-                } else {
-                    100
-                },
+                ) {
+                    return None;
+                }
+                let made = self.autoplay.ledger.made_by(&st)?;
+                Some(Partial {
+                    guid: o.guid,
+                    material: o.material,
+                    rule: made.rule.clone(),
+                    band: made.band,
+                    units: o.structure,
+                    // MaxStructure 100 unless the bag says (Player_Crafting.cs:237-244).
+                    holds: if o.max_structure > 0 {
+                        o.max_structure
+                    } else {
+                        100
+                    },
+                })
             })
             .filter(|b| b.units > 0 && b.units < b.holds)
             .collect()
@@ -247,6 +303,7 @@ impl Client {
             return false;
         }
         self.autoplay_tag_arrivals(now);
+        self.note_bags_made(now);
         let Some(profile) = self.loot_profile() else {
             return false;
         };
@@ -351,11 +408,13 @@ impl Client {
                 .iter()
                 .filter_map(|(g, _)| {
                     let o = self.world.objects.get(g)?;
+                    let (rule, bands) = self.salvage_bands(&profile, *g);
                     Some(Waiting {
                         guid: *g,
                         material: o.material,
                         workmanship: o.workmanship,
-                        bands: self.salvage_bands(&profile, *g),
+                        rule,
+                        bands,
                         refused: self.autoplay.refused.get(g).copied().unwrap_or(0),
                     })
                 })
@@ -364,9 +423,22 @@ impl Client {
                 return false;
             };
             let guids = batch.guids();
+            let before: Vec<u32> = self
+                .world
+                .inventory()
+                .filter(|o| o.name.starts_with("Salvaged ") && o.material == batch.material)
+                .map(|o| o.guid)
+                .collect();
             if !self.salvage(&guids) {
                 return false;
             }
+            self.autoplay.making.push(Making {
+                material: batch.material,
+                rule: batch.rule.clone(),
+                band: batch.band,
+                before,
+                sent: now,
+            });
             self.autoplay.salvaging = Some((guids, now));
             self.autoplay.last_salvage = Some(now);
             let material = ac_world::material::name(batch.material);

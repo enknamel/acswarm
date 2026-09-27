@@ -30,23 +30,26 @@ fn the_best_salvager_has_an_ust_and_the_highest_skill() {
 const STEEL: u32 = 0x40;
 const IRON: u32 = 0x3D;
 
-/// An item of `material` and `workmanship` tagged by a rule combining `bands`, refused `refused` times.
+/// An item of `material` and `workmanship` tagged by a rule combining `bands` (the rule is named
+/// after them), refused `refused` times.
 fn waiting(guid: u32, material: u32, workmanship: f32, bands: &str, refused: u8) -> Waiting {
     Waiting {
         guid,
         material,
         workmanship,
+        rule: bands.into(),
         bands: ac_loot::bands::parse(bands),
         refused,
     }
 }
 
-/// A salvage bag of `material` holding `units` of 100, of average `workmanship`.
-fn partial(guid: u32, material: u32, workmanship: f32, units: u32) -> Partial {
+/// A salvage bag of `material` holding `units` of 100, made in `band` of the rule named `rule`.
+fn partial(guid: u32, material: u32, rule: &str, band: Band, units: u32) -> Partial {
     Partial {
         guid,
         material,
-        workmanship,
+        rule: rule.into(),
+        band,
         units,
         holds: 100,
     }
@@ -124,10 +127,11 @@ fn a_partial_bag_of_the_band_is_topped_up_first() {
     let b = "1-7, 8, 9, 10";
     let items = [waiting(1, STEEL, 5.0, b, 0), waiting(2, STEEL, 7.0, b, 0)];
     let bags = [
-        partial(10, STEEL, 6.4, 40),
-        partial(11, STEEL, 9.0, 30),  // another band
-        partial(12, IRON, 6.0, 20),   // another material
-        partial(13, STEEL, 6.0, 100), // full
+        partial(10, STEEL, b, (1, 7), 40),
+        partial(11, STEEL, b, (9, 9), 30),   // another band
+        partial(12, IRON, b, (1, 7), 20),    // another material
+        partial(13, STEEL, b, (1, 7), 100),  // full
+        partial(14, STEEL, "", (1, 10), 30), // another rule
     ];
     let batch = next_salvage_batch(&items, &bags).unwrap();
     assert_eq!(batch.bags, vec![10]);
@@ -144,9 +148,9 @@ fn bags_topped_up_together_fit_in_one_bag() {
     // A bag put in past a bag's worth loses the excess (Player_Crafting.cs:283-289).
     let items = [waiting(1, STEEL, 5.0, "", 0)];
     let bags = [
-        partial(10, STEEL, 5.0, 50),
-        partial(11, STEEL, 5.0, 60),
-        partial(12, STEEL, 5.0, 30),
+        partial(10, STEEL, "", (1, 10), 50),
+        partial(11, STEEL, "", (1, 10), 60),
+        partial(12, STEEL, "", (1, 10), 30),
     ];
     let batch = next_salvage_batch(&items, &bags).unwrap();
     assert_eq!(batch.bags, vec![11, 12], "the fullest that fit: 60 and 30");
@@ -154,9 +158,21 @@ fn bags_topped_up_together_fit_in_one_bag() {
 }
 
 #[test]
+fn a_bag_made_in_one_rules_band_is_never_topped_up_by_another() {
+    // Two rules: weapons in "1-7, 8, 9, 10", armour all together. A pure 10 Steel bag the weapons
+    // made, topped up with the armour's workmanship 4, would have come out an 8.
+    let weapons = "1-7, 8, 9, 10";
+    let bags = [partial(10, STEEL, weapons, (10, 10), 40)];
+    let armour = [waiting(1, STEEL, 4.0, "", 0)];
+    assert!(next_salvage_batch(&armour, &bags).unwrap().bags.is_empty());
+    let sword = [waiting(2, STEEL, 10.0, weapons, 0)];
+    assert_eq!(next_salvage_batch(&sword, &bags).unwrap().bags, vec![10]);
+}
+
+#[test]
 fn nothing_tagged_sends_no_salvage() {
     assert_eq!(
-        next_salvage_batch(&[], &[partial(10, STEEL, 5.0, 50)]),
+        next_salvage_batch(&[], &[partial(10, STEEL, "", (1, 10), 50)]),
         None
     );
 }
@@ -341,4 +357,57 @@ fn what_is_worn_is_never_salvaged() {
     o.wielder = me;
     assert!(!c.autoplay_salvage(Instant::now()), "nothing to salvage");
     assert!(!c.salvage(&[worn]), "nor by hand");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_bag_a_salvage_made_is_topped_up_by_the_next_of_its_band_only() {
+    let mut c = a_salvager(game_data(), "salvage top up");
+    let me = c.world.player_guid;
+    let (six, bag, five, nine) = (0x8000_0151, 0x8000_0152, 0x8000_0153, 0x8000_0154);
+    a_mace_to_salvage(&mut c, six, 6.0, me);
+    let mut now = Instant::now();
+    assert!(c.autoplay_salvage(now));
+    assert_eq!(salvage_on_its_way(&c), Some(vec![six]));
+    // The server takes the mace and a bag of Iron turns up.
+    c.world.objects.remove(&six);
+    c.world.objects.insert(
+        bag,
+        ac_world::WorldObject {
+            guid: bag,
+            weenie_class_id: 20988,
+            name: "Salvaged Iron".into(),
+            material: IRON,
+            workmanship: 6.0,
+            structure: 5,
+            max_structure: 100,
+            container: me,
+            ..Default::default()
+        },
+    );
+    now += Duration::from_millis(100);
+    assert!(!c.autoplay_salvage(now), "nothing else to salvage");
+    let st = c.stats_of(bag).unwrap();
+    assert_eq!(
+        c.autoplay
+            .ledger
+            .made_by(&st)
+            .map(|m| (m.rule.as_str(), m.band)),
+        Some((MACES, (1, 8))),
+        "the bag is written down as the call's"
+    );
+    // A 5 of the same band tops it up, the bag first; a 9 does not.
+    a_mace_to_salvage(&mut c, five, 5.0, me);
+    a_mace_to_salvage(&mut c, nine, 9.0, me);
+    now += SALVAGE_EVERY;
+    assert!(c.autoplay_salvage(now));
+    assert_eq!(
+        salvage_on_its_way(&c),
+        Some(vec![nine]),
+        "the best band first, alone"
+    );
+    c.world.objects.remove(&nine);
+    now += Duration::from_millis(100);
+    assert!(c.autoplay_salvage(now));
+    assert_eq!(salvage_on_its_way(&c), Some(vec![bag, five]));
 }
