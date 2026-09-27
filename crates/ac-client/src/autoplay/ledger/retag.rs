@@ -66,9 +66,21 @@ pub fn arrival_tag(
     my_name: &str,
     held: u32,
 ) -> Option<LootAction> {
+    arrival_tag_why(stats, id, profile, me, my_name, held).map(|(a, _)| a)
+}
+
+/// [`arrival_tag`], with the rule that decided it.
+pub(crate) fn arrival_tag_why(
+    stats: &crate::items::ItemStats,
+    id: Option<&ac_net::messages::Appraisal>,
+    profile: Option<&crate::profile::Profile>,
+    me: &crate::weapons::Wielder,
+    my_name: &str,
+    held: u32,
+) -> Option<(LootAction, String)> {
     match judge_loot(stats, id, profile, me, my_name, held) {
         crate::profile::Verdict::Decided(LootAction::Skip, _) => None,
-        crate::profile::Verdict::Decided(a, _) => Some(a),
+        crate::profile::Verdict::Decided(a, rule) => Some((a, rule)),
         // Not judgeable yet, or nothing claimed it: nothing to write
         // down, and the pack keeps it either way.
         crate::profile::Verdict::NeedsId(_) | crate::profile::Verdict::None => None,
@@ -80,7 +92,17 @@ impl Autoplay {
     /// the inventory panel): what the salvage and vendor passes do with
     /// it from now on.
     pub fn tag(&mut self, stats: &crate::items::ItemStats, action: LootAction) {
-        self.ledger.remember(stats, action);
+        self.tag_why(stats, action, None);
+    }
+
+    /// [`tag`](Self::tag), with the rule that decided it: its settings go with the tag.
+    pub fn tag_why(
+        &mut self,
+        stats: &crate::items::ItemStats,
+        action: LootAction,
+        rule: Option<&str>,
+    ) {
+        self.ledger.remember_why(stats, action, rule);
         self.seen.insert(stats.guid);
     }
 
@@ -221,9 +243,11 @@ impl Client {
                     // an item with no entry is never sold.
                     self.autoplay.ledger.forget(guid);
                 }
-                crate::profile::Verdict::Decided(action, _) => {
-                    if self.autoplay.ledger.of(&stats) != Some(action) {
-                        self.autoplay.tag(&stats, action);
+                crate::profile::Verdict::Decided(action, rule) => {
+                    if self.autoplay.ledger.of(&stats) != Some(action)
+                        || self.autoplay.ledger.why(guid) != Some(rule.as_str())
+                    {
+                        self.autoplay.tag_why(&stats, action, Some(&rule));
                     }
                 }
                 // A rule wants it but cannot say so until the server has
@@ -252,7 +276,7 @@ impl Client {
     /// is judged afresh next time.
     pub fn tag_loot(&mut self, guid: u32) -> Option<LootAction> {
         let stats = self.stats_of(guid)?;
-        let action = arrival_tag(
+        let (action, rule) = arrival_tag_why(
             &stats,
             self.appraisals.get(&guid),
             self.loot_profile().as_deref(),
@@ -260,7 +284,7 @@ impl Client {
             &self.world.stats.name.clone(),
             self.already_carried(stats.wcid),
         )?;
-        self.autoplay.tag(&stats, action);
+        self.autoplay.tag_why(&stats, action, Some(&rule));
         Some(action)
     }
 
@@ -317,7 +341,7 @@ impl Client {
             // "keep up to four" was the fourth of four, over the cap,
             // and "the rest, to the counter" had it.
             let held = self.carried_besides(&stats);
-            if let Some(action) = arrival_tag(
+            if let Some((action, rule)) = arrival_tag_why(
                 &stats,
                 self.appraisals.get(&g),
                 profile.as_deref(),
@@ -325,11 +349,11 @@ impl Client {
                 &who,
                 held,
             ) {
-                let arrived = format!("{} arrived, tagged {}", stats.name, action.label());
+                let arrived = format!("{} arrived, tagged {} ({rule})", stats.name, action.label());
                 tracing::info!("autoplay: {arrived}");
                 // Every arrival, in telemetry too: what a purchase or a corpse really put in the pack.
                 self.events.push(crate::Event::Noted(arrived));
-                self.autoplay.tag(&stats, action);
+                self.autoplay.tag_why(&stats, action, Some(&rule));
             }
         }
     }

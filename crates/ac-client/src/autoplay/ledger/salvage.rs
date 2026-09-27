@@ -2,6 +2,7 @@ use std::time::{Duration, Instant};
 
 use crate::autoplay::{Doing, Mate, GIVE_REACH};
 use crate::Client;
+use ac_loot::bands::{self, Band};
 
 /// Least time between two hand-offs, and between two salvage batches
 /// when the first has not been seen to go: a batch whose items have
@@ -36,67 +37,90 @@ pub fn best_salvager<'a>(mates: impl Iterator<Item = &'a Mate>) -> Option<(Strin
         .map(|m| (m.name.clone(), m.guid))
 }
 
-/// Where an item stands for salvaging, by its workmanship.
-///
-/// The server puts everything of one material salvaged in one go into
-/// the same bag, and the bag's workmanship is the average of what went
-/// in (ACE `TryAddSalvage`); a bag already carried is never added to.
-/// So a workmanship 10 Iron mace salvaged beside a workmanship 6 one
-/// makes a bag of 8, and the 10 is wasted. Skill cannot make up for it:
-/// it decides how many units come out, never their workmanship. Below 9
-/// nobody minds the averaging and everything goes in together; a 9 is
-/// salvaged only with 9s, and a 10 only with 10s.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum SalvageGrade {
-    /// Below workmanship 9.
-    Common,
-    Nine,
-    Ten,
+/// An item tagged for salvage, as a salvage call is chosen from them.
+#[derive(Clone, Debug, PartialEq)]
+struct Waiting {
+    guid: u32,
+    material: u32,
+    workmanship: f32,
+    /// The bands of the rule that tagged it (`ac_loot::bands`).
+    bands: Vec<Band>,
+    /// Salvages of it that came to nothing.
+    refused: u8,
 }
 
-impl SalvageGrade {
-    fn of(workmanship: f32) -> Self {
-        if workmanship >= 10.0 {
-            Self::Ten
-        } else if workmanship >= 9.0 {
-            Self::Nine
-        } else {
-            Self::Common
-        }
+/// A carried salvage bag with room left: the units in it and how many it holds.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Partial {
+    guid: u32,
+    material: u32,
+    /// The header's: the average of what went in (WorldObject_Properties.cs:1560-1568).
+    workmanship: f32,
+    units: u32,
+    holds: u32,
+}
+
+/// One salvage call: every item of one material in one band, and the partial bags of that material
+/// in that band it tops up, sent first.
+#[derive(Clone, Debug, PartialEq)]
+struct Batch {
+    material: u32,
+    band: Band,
+    bags: Vec<u32>,
+    items: Vec<u32>,
+    /// Units in the bags topped up.
+    units: u32,
+}
+
+impl Batch {
+    /// The guids in the order the call sends them: a bag after an item overflows and its excess is
+    /// lost (TryAddSalvage, Player_Crafting.cs:283-289), so bags go first.
+    fn guids(&self) -> Vec<u32> {
+        self.bags.iter().chain(&self.items).copied().collect()
     }
 }
 
-/// One salvage's worth out of `items` (guid, workmanship, and how many
-/// times a salvage of it has come to nothing, in the order they are to
-/// go), and the grade they share. `None` with nothing to salvage.
+/// The next salvage call out of `waiting`, topping up bags from `partial`; `None` with nothing to
+/// salvage. ACE puts all of one material in one call into one bag and averages its workmanship
+/// (Player_Crafting.cs:251, 279), so a call holds one material in one band.
 ///
-/// What has come to nothing least goes first, and of that every 10 when
-/// there is one, else every 9, else the rest. The best go first, so that
-/// ordinary loot turning up between batches never keeps them waiting;
-/// each grade is a batch, and so a turn, of its own.
-///
-/// The refusals come before the grade because ACE skips some items
-/// without a word -- a Retained one, say. Chosen as the best grade every
-/// time, a 10 like that went out alone again after each timeout, and the
-/// 9s and everything below waited behind three of them, where a single
-/// salvage of everything used to take the rest at once.
-fn next_salvage_batch(
-    items: impl IntoIterator<Item = (u32, f32, u8)>,
-) -> Option<(SalvageGrade, Vec<u32>)> {
+/// What has come to nothing least goes first (ACE skips a Retained item without a word), then the
+/// best band, so ordinary loot arriving between calls never keeps it waiting. The bags taken are
+/// the fullest that fit together in one bag's worth: a bag input past it loses the excess.
+fn next_salvage_batch(waiting: &[Waiting], partial: &[Partial]) -> Option<Batch> {
     use std::cmp::Reverse;
-    let turns: Vec<(u32, (Reverse<u8>, SalvageGrade))> = items
-        .into_iter()
-        .map(|(guid, workmanship, refused)| {
-            (guid, (Reverse(refused), SalvageGrade::of(workmanship)))
-        })
+    let turn = |w: &Waiting| {
+        let band = bands::band_of(&w.bands, w.workmanship);
+        (Reverse(w.refused), band.1, band.0, Reverse(w.material))
+    };
+    let first = waiting.iter().max_by_key(|w| turn(w))?;
+    let key = turn(first);
+    let band = bands::band_of(&first.bands, first.workmanship);
+    let items: Vec<u32> = waiting
+        .iter()
+        .filter(|w| turn(w) == key)
+        .map(|w| w.guid)
         .collect();
-    let first = turns.iter().map(|(_, turn)| *turn).max()?;
-    let batch = turns
-        .into_iter()
-        .filter(|(_, turn)| *turn == first)
-        .map(|(guid, _)| guid)
+    let mut fits: Vec<&Partial> = partial
+        .iter()
+        .filter(|b| b.material == first.material && b.units < b.holds)
+        .filter(|b| bands::band_of(&first.bands, b.workmanship) == band)
         .collect();
-    Some((first.1, batch))
+    fits.sort_by_key(|b| (Reverse(b.units), b.guid));
+    let (mut bags, mut units) = (Vec::new(), 0);
+    for b in fits {
+        if units + b.units <= b.holds {
+            bags.push(b.guid);
+            units += b.units;
+        }
+    }
+    Some(Batch {
+        material: first.material,
+        band,
+        bags,
+        items,
+        units,
+    })
 }
 
 impl Client {
@@ -119,14 +143,14 @@ impl Client {
         best_salvager(std::iter::once(&me).chain(self.autoplay.team.mates.iter()))
     }
 
-    /// Carried items tagged for salvage that can go: not worn, not
-    /// wanted by a blank tag. `bags` says whether salvage bags count
-    /// (they are handed on, never salvaged again). Each comes with its
-    /// name, for the log, and its workmanship, which decides the batch
-    /// it is salvaged in (see `SalvageGrade`).
-    fn salvage_tagged(&self, bags: bool) -> Vec<(u32, String, f32)> {
+    /// Carried items tagged for salvage that can go: not worn, not refused too often, and
+    /// appraised and found not inscribed (never salvaged, the player's word; only an appraisal
+    /// says). `bags` says whether salvage bags tagged for it count, for the hand-off. Each comes
+    /// with its name, for the log; second, what is not yet appraised, to ask about.
+    fn salvage_tagged(&self, bags: bool) -> (Vec<(u32, String)>, Vec<u32>) {
         let me = self.world.player_guid;
-        let mut items: Vec<(u32, String, f32)> = self
+        let (mut items, mut unknown) = (Vec::new(), Vec::new());
+        for o in self
             .autoplay
             .ledger
             .for_salvage(crate::holdings::unix_now())
@@ -134,23 +158,86 @@ impl Client {
             .filter_map(|g| self.world.objects.get(&g))
             .filter(|o| o.wielder != me && self.world.is_carried(o.guid))
             .filter(|o| {
-                let bag = o.name.starts_with("Salvaged ");
-                if bag {
-                    bags
-                } else {
-                    o.material != 0 && o.workmanship > 0.0
-                }
-            })
-            .filter(|o| {
                 self.autoplay
                     .refused
                     .get(&o.guid)
                     .is_none_or(|n| *n < SALVAGE_TRIES)
             })
-            .map(|o| (o.guid, o.name.clone(), o.workmanship))
-            .collect();
+        {
+            if o.name.starts_with("Salvaged ") {
+                if bags {
+                    items.push((o.guid, o.name.clone()));
+                }
+                continue;
+            }
+            if o.material == 0 || o.workmanship <= 0.0 {
+                continue;
+            }
+            match self.stats_of(o.guid) {
+                Some(st) if st.appraised && !st.inscribed => items.push((o.guid, o.name.clone())),
+                Some(st) if st.appraised => {}
+                _ => unknown.push(o.guid),
+            }
+        }
         items.sort_by(|a, b| a.1.cmp(&b.1).then(a.0.cmp(&b.0)));
-        items
+        (items, unknown)
+    }
+
+    /// The bands an item tagged for salvage is salvaged in: those of the rule that tagged it, or for
+    /// a tag written without one, of the salvage rule that would take it now; else all together.
+    fn salvage_bands(&self, profile: &crate::profile::Profile, guid: u32) -> Vec<Band> {
+        if let Some(rule) = self
+            .autoplay
+            .ledger
+            .why(guid)
+            .and_then(|r| profile.rule_named(r))
+        {
+            return rule.bands();
+        }
+        let Some(stats) = self.stats_of(guid) else {
+            return vec![bands::ALL];
+        };
+        profile
+            .decided_by(
+                &stats,
+                self.appraisals.get(&guid),
+                &self.wielder(),
+                &self.world.stats.name,
+                self.carried_besides(&stats),
+            )
+            .filter(|(_, r)| r.action == crate::autoplay::LootAction::Salvage)
+            .map_or_else(|| vec![bands::ALL], |(_, r)| r.bands())
+    }
+
+    /// Carried salvage bags with room left that may be topped up: any not meant for a counter.
+    fn partial_bags(&self) -> Vec<Partial> {
+        let me = self.world.player_guid;
+        self.world
+            .inventory()
+            .filter(|o| o.name.starts_with("Salvaged ") && o.material != 0 && o.wielder != me)
+            .filter(|o| {
+                let meant = self
+                    .stats_of(o.guid)
+                    .and_then(|st| self.autoplay.ledger.of(&st));
+                !matches!(
+                    meant,
+                    Some(crate::autoplay::LootAction::Sell | crate::autoplay::LootAction::Skip)
+                )
+            })
+            .map(|o| Partial {
+                guid: o.guid,
+                material: o.material,
+                workmanship: o.workmanship,
+                units: o.structure,
+                // MaxStructure 100 unless the bag says (Player_Crafting.cs:237-244).
+                holds: if o.max_structure > 0 {
+                    o.max_structure
+                } else {
+                    100
+                },
+            })
+            .filter(|b| b.units > 0 && b.units < b.holds)
+            .collect()
     }
 
     /// Salvage what the rules tagged, or carry it to whoever salvages
@@ -226,7 +313,7 @@ impl Client {
             }
         }
         let Some((who, guid)) = self.best_salvager() else {
-            if !self.salvage_tagged(false).is_empty() {
+            if !self.salvage_tagged(false).0.is_empty() {
                 self.autoplay
                     .note("salvage waiting: nobody on the team carries an Ust", now);
             }
@@ -245,7 +332,11 @@ impl Client {
             if !cfg.salvage {
                 return false;
             }
-            let items = self.salvage_tagged(false);
+            let (items, unknown) = self.salvage_tagged(false);
+            // Asked about before anything goes: only an appraisal tells an inscribed item.
+            if !unknown.is_empty() {
+                self.appraise_many(unknown);
+            }
             if items.is_empty() || !rate_ok {
                 return false;
             }
@@ -254,35 +345,57 @@ impl Client {
                 self.toggle_combat();
                 return true;
             }
-            // A 9 or a 10 goes only with its own grade, and the rest wait
-            // their turn. What teammates handed over is batched the same
-            // way: it was tagged when it arrived, like anything looted.
-            let refused = |g: &u32| self.autoplay.refused.get(g).copied().unwrap_or(0);
-            let Some((grade, guids)) =
-                next_salvage_batch(items.iter().map(|(g, _, w)| (*g, *w, refused(g))))
-            else {
+            // One material in one band a call, the rule's own bands, bags of it topped up first.
+            // What teammates handed over is batched the same way: tagged when it arrived.
+            let waiting: Vec<Waiting> = items
+                .iter()
+                .filter_map(|(g, _)| {
+                    let o = self.world.objects.get(g)?;
+                    Some(Waiting {
+                        guid: *g,
+                        material: o.material,
+                        workmanship: o.workmanship,
+                        bands: self.salvage_bands(&profile, *g),
+                        refused: self.autoplay.refused.get(g).copied().unwrap_or(0),
+                    })
+                })
+                .collect();
+            let Some(batch) = next_salvage_batch(&waiting, &self.partial_bags()) else {
                 return false;
             };
+            let guids = batch.guids();
             if !self.salvage(&guids) {
                 return false;
             }
-            self.autoplay.salvaging = Some((guids.clone(), now));
+            self.autoplay.salvaging = Some((guids, now));
             self.autoplay.last_salvage = Some(now);
-            let apart = match grade {
-                SalvageGrade::Common => "",
-                SalvageGrade::Nine => " of workmanship 9, on their own",
-                SalvageGrade::Ten => " of workmanship 10, on their own",
+            let material = ac_world::material::name(batch.material);
+            let topping = if batch.bags.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    ", topping up {} bag(s) of {} units",
+                    batch.bags.len(),
+                    batch.units
+                )
             };
             self.autoplay.say(
                 Doing::Salvaging,
-                format!("salvaging {} item(s){apart}", guids.len()),
+                format!(
+                    "salvaging {} {material} item(s), workmanship {}{topping}",
+                    batch.items.len(),
+                    bands::tell(batch.band)
+                ),
             );
             return true;
         }
         if !cfg.hand_off {
             return false;
         }
-        let items = self.salvage_tagged(true);
+        let (items, unknown) = self.salvage_tagged(true);
+        if !unknown.is_empty() {
+            self.appraise_many(unknown);
+        }
         if items.is_empty() {
             return false;
         }
@@ -335,7 +448,7 @@ impl Client {
         }
         // One item at a time, so a hand-off never mixes grades: the
         // salvager batches what arrives like the rest of its own.
-        let (item, name, _) = items[0].clone();
+        let (item, name) = items[0].clone();
         if !self.give(guid, item, None) {
             return false;
         }

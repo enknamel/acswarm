@@ -209,8 +209,11 @@ impl ItemStats {
         if let Some(b) = a.int(5) {
             self.burden = b.max(0) as u32;
         }
+        // A salvage bag's 105 is the sum over the items that went in, 170 their count; the header's
+        // average is ItemWorkmanship / NumItemsInMaterial (WorldObject_Properties.cs:1560-1568).
         if let Some(w) = a.int(105) {
-            self.workmanship = w as f32;
+            let items = a.int(170).filter(|n| *n > 0).unwrap_or(1);
+            self.workmanship = w as f32 / items as f32;
         }
         if let Some(m) = a.int(131) {
             self.material = ac_world::material::name(m as u32);
@@ -450,7 +453,8 @@ impl ItemStats {
     }
 
     pub fn matches_term(&self, t: &Term) -> bool {
-        let has = |hay: &str, needle: &str| hay.to_lowercase().contains(needle);
+        // Either case, either side: the editor keeps "Steel" as typed, and "steel" never met it.
+        let has = |hay: &str, needle: &str| hay.to_lowercase().contains(&needle.to_lowercase());
         match t {
             Term::Word(w) => {
                 has(&self.name, w)
@@ -1188,6 +1192,45 @@ impl ItemStats {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_material_condition_matches_whatever_the_case() {
+        // The editor keeps "Steel" as typed, and a lower-cased item never met it.
+        let armour = ItemStats {
+            material: "Steel",
+            ..Default::default()
+        };
+        assert!(armour.matches_term(&Term::Material("Steel".into())));
+        assert!(armour.matches_term(&Term::Material("steel".into())));
+        assert!(!armour.matches_term(&Term::Material("Iron".into())));
+    }
+
+    #[test]
+    fn an_appraised_bag_reads_its_average_workmanship() {
+        // A bag's ItemWorkmanship is the sum over what went in; three items of 8 read 24.
+        let bag = ItemStats {
+            name: "Salvaged Steel".into(),
+            workmanship: 8.0,
+            ..Default::default()
+        };
+        let a = Appraisal {
+            success: true,
+            ints: vec![(105, 24), (170, 3)],
+            ..Default::default()
+        };
+        let read = bag.with_appraisal(&a, &|_| String::new(), &|_| String::new());
+        assert_eq!(read.workmanship, 8.0);
+        let mace = ItemStats::default().with_appraisal(
+            &Appraisal {
+                success: true,
+                ints: vec![(105, 6)],
+                ..Default::default()
+            },
+            &|_| String::new(),
+            &|_| String::new(),
+        );
+        assert_eq!(mace.workmanship, 6.0, "an item's own is itself");
+    }
 
     fn sword() -> ItemStats {
         ItemStats {

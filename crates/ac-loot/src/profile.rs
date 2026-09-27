@@ -358,6 +358,9 @@ pub struct Rule {
     pub all: Vec<Ask>,
     /// Stop once this many are carried. `None` means no limit.
     pub keep_up_to: Option<u32>,
+    /// A salvage rule's workmanship bands, "1-7, 8, 9, 10" (`crate::bands`); empty is all together.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub combine: String,
 }
 
 impl Default for Rule {
@@ -369,11 +372,17 @@ impl Default for Rule {
             action: LootAction::Keep,
             all: Vec::new(),
             keep_up_to: None,
+            combine: String::new(),
         }
     }
 }
 
 impl Rule {
+    /// Which workmanships its salvage combines (see `crate::bands`).
+    pub fn bands(&self) -> Vec<crate::bands::Band> {
+        crate::bands::parse(&self.combine)
+    }
+
     /// Whether judging this rule needs the item appraised.
     pub fn needs_id(&self) -> bool {
         self.all.iter().any(Ask::needs_id)
@@ -675,6 +684,11 @@ impl Profile {
         // Always and never are read before any rule, so they decide items too.
         (&self.looting.always, &self.looting.never).hash(&mut h);
         h.finish()
+    }
+
+    /// The rule called `name`, the reason the ledger keeps for a tag (`crate::ledger::Took::rule`).
+    pub fn rule_named(&self, name: &str) -> Option<&Rule> {
+        self.rules.iter().find(|r| r.name == name)
     }
 
     /// Whether any rule could ever ask for an appraisal. A profile that

@@ -267,3 +267,30 @@ fn nobody_is_sent_anything_when_no_rule_asks_about_a_skill_and_nobody_salvages()
     starter.rules.retain(|r| r.skill_asked().is_none());
     assert!(!starter.sends_to_the_best());
 }
+
+#[test]
+fn a_worn_item_a_salvage_rule_claims_is_kept() {
+    // "Never salvage any item that the player is wearing."
+    use crate::profile::Verdict;
+    let library = shelf(
+        "worn salvage",
+        vec![asks("salvage steel", "mat:steel", LootAction::Salvage)],
+    );
+    let steel = ItemStats {
+        material: "Steel",
+        ..item("Chainmail Hauberk", 50, 0)
+    };
+    assert_eq!(
+        judged(&steel, &library, "test"),
+        Verdict::Decided(LootAction::Salvage, "salvage steel".into())
+    );
+    let worn = ItemStats {
+        wielded: true,
+        ..steel
+    };
+    assert_eq!(
+        judged(&worn, &library, "test"),
+        Verdict::Decided(LootAction::Keep, super::WORN.into())
+    );
+    let _ = std::fs::remove_dir_all(library.dir());
+}

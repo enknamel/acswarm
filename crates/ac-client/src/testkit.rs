@@ -852,6 +852,7 @@ pub fn corpse_at_hand(guid: u32, item: u32) -> ac_loot::Open {
             name: "Dagger".into(),
             burden: 10,
             verdict: ac_loot::Verdict::Take(LootAction::Keep),
+            why: String::new(),
             needs_no_slot: false,
         }],
         slots_free: 20,

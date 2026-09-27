@@ -698,21 +698,28 @@ with `--heritage`, `--gender`, `--template`,
   guid, count, item guids). It skips items without a material or a
   workmanship (vendor stock) and retained ones, destroys the rest and
   merges them into salvage bags per material ("Salvaged Oak", one bag
-  per 100 units; `Structure` counts the units, `ItemWorkmanship` their
-  average), then answers SalvageOperationsResult 0x02B4 per skill used:
-  skill id, guids it could not salvage, (material, workmanship f64,
-  units) per material, augmentation bonus percent. Units per item are
+  per 100 units; `Structure` counts the units, `ItemWorkmanship` is the
+  sum over the items that went in and `NumItemsInMaterial` their count,
+  the header's workmanship the average of the two), then answers
+  SalvageOperationsResult 0x02B4 per skill used, and only for raw items:
+  skill id, a list of skipped guids ACE always leaves empty, (material,
+  workmanship f64, units) per material, augmentation bonus percent. Units per item are
   1 + floor(skill / 194 × workmanship), with the Salvaging skill or the
   best trained tinkering skill, whichever yields more (tinkering skills
   are capped at the workmanship). The item's material and workmanship
   travel in the WeenieDesc (flags 0x80000000 and 0x1000000), so the
   client knows what is salvageable without appraising. The bags are
   made afresh for each salvage: everything of one material salvaged
-  together shares a bag and its averaged workmanship, a bag already
-  carried is never added to, and skill changes only how many units come
-  out, never their workmanship. So a workmanship 9 or 10 item belongs
-  only in a salvage of its own workmanship; acswarm's autoplay salvages
-  everything below 9 together, then the 9s, then the 10s, a batch each.
+  together shares a bag and its averaged workmanship, and skill changes
+  only how many units come out, never their workmanship. A carried bag
+  put in the same salvage is merged: its units, workmanship sum and item
+  count go into the new bag, though units past 100 from a bag input are
+  lost (Player_Crafting.cs:247-289), so a bag goes first. Nothing on the
+  server checks inscription, attunement or bonding. acswarm's autoplay
+  salvages what the loot profile tagged, a material and a workmanship
+  band of the tagging rule's `combine` ("1-7, 8, 9, 10"; empty is all
+  together) a call, a partial bag of that band put in first, and never
+  what is worn or what an appraisal shows inscribed.
 * **Giving between players**: GiveObjectRequest 0x00CD hands a carried
   item (or part of a stack) to a player in use range. ACE refuses it
   unless the receiver's `CharacterOptions1.AllowGive` ("Let other

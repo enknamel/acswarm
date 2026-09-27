@@ -314,6 +314,7 @@ mod tests {
             name: name.into(),
             burden: 10,
             verdict,
+            why: String::new(),
             needs_no_slot: false,
         }
     }

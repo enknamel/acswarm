@@ -821,6 +821,20 @@ fn rule_editor(ui: &mut egui::Ui, salt: &str, rule: &mut Rule, editor: &mut Edit
             ui.add(egui::DragValue::new(cap).speed(1.0).range(1..=10_000));
         }
     });
+    if rule.action == LootAction::Salvage {
+        ui.horizontal(|ui| {
+            // Which workmanships salvage together, "1-7, 8, 9, 10", a bag each (`ac_loot::bands`).
+            caption(ui, "combine workmanship");
+            text_field(
+                ui,
+                &format!("{salt}.combine"),
+                &mut rule.combine,
+                "1-10",
+                120.0,
+            );
+            ui.weak("e.g. 1-7, 8, 9, 10; empty is all together");
+        });
+    }
     caption(ui, "every one of these must hold");
     let mut drop = None;
     for i in 0..rule.all.len() {
