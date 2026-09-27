@@ -72,6 +72,9 @@ fn command(name, args) {
             if who == "Scn Bow" && !bow { say("@ci 306"); }
             if who == "Scn Bow" && arrows < 200 { say("@ci 300 250"); }
             if who == "Scn Seller" { for i in 0..10 { say("@ci 297"); } }
+            // Its one buff lasts 30 min and outlives a logout: a run soon after the last found it up,
+            // cast nothing, and failed "buffs cast". Stripped, the check measures the buffing.
+            if who == "Scn Mage" { say("@dispel"); }
         }
     }
     // The tapers go before autoplay starts: a drop is refused while the character is busy casting
