@@ -886,6 +886,13 @@ impl Client {
             }
             fresh
         };
+        // Nowhere to walk (no clear spot, the target inside the stop already): throw it, and the
+        // server says; a burst is heard (`hear_burst`). Holding stood Blargerton 20 s beside a
+        // drudge his arcs were hitting (a_caster_beside_its_target_with_nowhere_to_walk_casts).
+        if !seen && spot.is_none() && at.distance(me) <= stop {
+            self.stop_approaching();
+            return false;
+        }
         if self.dodge.approaching != Some(target) {
             // Where we stand as well as how far off it is: a walk that
             // goes wrong from here can then be put on the map.
@@ -2085,5 +2092,39 @@ mod tests {
         c.world.objects.get_mut(&0x701F_6057).unwrap().physics_state |=
             ac_world::object::PHYSICS_STATE_ETHEREAL;
         assert!(c.shot_clears(rat.guid, how), "through it open");
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn a_caster_beside_its_target_with_nowhere_to_walk_casts() {
+        // Blargerton in 0x01F60230 stood 20 s "getting Drudge Servant in sight", the drudge 1.5 m
+        // north: no clear shot by our test, no spot with one, and the walk at the drudge done
+        // already. His arcs from there were landing.
+        let origin = ac_world::landblock_origin(0x01F6_0000);
+        let here = Vec3::new(229.8, 47212.8, 0.0) - origin;
+        let mut c = crate::testkit::standing_in_the_field(27, 0x01F6_0230, here);
+        let me = c.my_position().unwrap();
+        let drudge = crate::testkit::standing_by(&mut c, 0x8000_0001, "Drudge Servant", 0.0);
+        let at = me + Vec3::new(0.0, 1.5, 0.0);
+        c.world.objects.get_mut(&drudge.guid).unwrap().position = Some(
+            ac_world::object::Position::new_flat(0x01F6_0230, at - origin),
+        );
+        let (spell, _) = c
+            .assets
+            .spell_table()
+            .unwrap()
+            .find_by_name("Frost Arc III")
+            .map(|(id, sp)| (id, sp.clone()))
+            .expect("Frost Arc III");
+        let how = How::Spell(spell);
+        assert!(
+            !c.shot_clears(drudge.guid, how),
+            "the case: our test finds no clear shot"
+        );
+        assert!(
+            !c.autoplay_approach(drudge.guid, "Drudge Servant", how),
+            "the shot is thrown, not held for"
+        );
+        assert!(c.follow.is_none(), "and no walk is left standing");
     }
 }

@@ -64,6 +64,11 @@ priority; a live report starts from the telemetry (`tools/telemetry.py`, `--mark
 
 ## Fixed
 
+- **Stood 20 s beside a drudge "getting it in sight"** (this merge): Blargerton in 0x01F60230, the
+  drudge 1.5 m north. Our shot test found no clear shot and no spot with one, and the fallback walk
+  at the target was done already, so nothing moved until "no damage in a while"; his arcs from
+  there were landing. With nowhere to walk the shot is now thrown and the server decides.
+
 - **Cast at a drudge for 40 s and hit nothing** (this merge): Blargerton stood in 0x01F60230
   casting Frost Arc III every 3 s at a drudge 1.6 m off, no projectile flying, until a step of 2 m
   let one through. Our shot bursts as it leaves some spots; two bursts from one spot at an unhurt
