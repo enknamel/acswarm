@@ -78,6 +78,10 @@ impl Client {
                     action::CAST_TARGETED_SPELL,
                     &ac_net::messages::cast_targeted(t, spell),
                 );
+                // Its projectile is watched from here, whoever cast it (see `Client::note_fired`).
+                if self.spell_flies(spell) && Some(t) != self.world.player_guid {
+                    self.note_fired(spell, t, std::time::Instant::now());
+                }
                 // Keep the target's health bar moving (see query_health).
                 let creature = self
                     .world

@@ -582,6 +582,12 @@ impl Client {
         // A window a run stopped waiting for is closed when it comes,
         // autoplay on or off (see `Client::autoplay_close_unwanted_window`).
         self.autoplay_close_unwanted_window(now);
+        // Our shots, seen leaving and landing before any step can claim the tick (a flight timed a
+        // tick out lands a metre off), and whoever cast them: a hand's or a script's too.
+        if self.world.player_guid.is_some() {
+            self.learn_shot_speeds(now);
+            self.land_own_shots(now);
+        }
         if !self.autoplay.config.enabled || self.world.player_guid.is_none() {
             // The team rules a character keeps while its player steers
             // it: after the leader, and onto what the leader is hitting
@@ -611,10 +617,6 @@ impl Client {
         // while it was busy stayed for ever newly fallen (see
         // [`Client::autoplay_watch_the_ground`]).
         self.autoplay_watch_the_ground(now);
-        // Our shots, seen leaving and landing before any step can claim the tick: a flight timed a
-        // tick out lands a metre off.
-        self.learn_shot_speeds(now);
-        self.land_own_shots(now);
         // Everything from here is a table rather than a chain, so the
         // order can be read, logged and tested rather than only obeyed
         // (see `crate::steps` and `docs/agent.md`).
