@@ -50,14 +50,16 @@ struct Waiting {
     refused: u8,
 }
 
-/// A carried salvage bag with room left, made by a salvage written down (`ac_loot::ledger::Made`):
-/// the rule and band it was made in, the units in it and how many it holds.
+/// A carried salvage bag with room left: the rule and band a salvage of ours made it in, when that
+/// was written down (`ac_loot::ledger::Made`), its average workmanship, the units in it and how
+/// many it holds.
 #[derive(Clone, Debug, PartialEq)]
 struct Partial {
     guid: u32,
     material: u32,
-    rule: String,
-    band: Band,
+    made: Option<(String, Band)>,
+    /// The header's: the average of what went in (WorldObject_Properties.cs:1560-1568).
+    workmanship: f32,
     units: u32,
     holds: u32,
 }
@@ -102,8 +104,9 @@ impl Batch {
 /// (Player_Crafting.cs:251, 279), so a call holds one material in one band of one rule.
 ///
 /// What has come to nothing least goes first (ACE skips a Retained item without a word), then the
-/// best band, so ordinary loot arriving between calls never keeps it waiting. Only bags made in the
-/// same rule and band are topped up (an average does not say which band made a bag), the fullest
+/// best band, so ordinary loot arriving between calls never keeps it waiting. A bag a salvage of
+/// ours made is topped up only in its own rule and band; an older one, which says only its average,
+/// in the band its average falls in (the player's call: it is fine to include them); the fullest
 /// that fit together in one bag's worth: a bag input past it loses the excess.
 fn next_salvage_batch(waiting: &[Waiting], partial: &[Partial]) -> Option<Batch> {
     use std::cmp::Reverse;
@@ -128,7 +131,10 @@ fn next_salvage_batch(waiting: &[Waiting], partial: &[Partial]) -> Option<Batch>
     let mut fits: Vec<&Partial> = partial
         .iter()
         .filter(|b| b.material == first.material && b.units < b.holds)
-        .filter(|b| b.rule == first.rule && b.band == band)
+        .filter(|b| match &b.made {
+            Some((rule, made)) => *rule == first.rule && *made == band,
+            None => bands::band_of(&first.bands, b.workmanship) == band,
+        })
         .collect();
     fits.sort_by_key(|b| (Reverse(b.units), b.guid));
     let (mut bags, mut units) = (Vec::new(), 0);
@@ -261,8 +267,7 @@ impl Client {
         self.autoplay.making = making;
     }
 
-    /// Carried salvage bags with room left that may be topped up: those a salvage of ours made, not
-    /// meant for a counter.
+    /// Carried salvage bags with room left that may be topped up: any not meant for a counter.
     fn partial_bags(&self) -> Vec<Partial> {
         let me = self.world.player_guid;
         self.world
@@ -277,12 +282,15 @@ impl Client {
                 ) {
                     return None;
                 }
-                let made = self.autoplay.ledger.made_by(&st)?;
                 Some(Partial {
                     guid: o.guid,
                     material: o.material,
-                    rule: made.rule.clone(),
-                    band: made.band,
+                    made: self
+                        .autoplay
+                        .ledger
+                        .made_by(&st)
+                        .map(|m| (m.rule.clone(), m.band)),
+                    workmanship: o.workmanship,
                     units: o.structure,
                     // MaxStructure 100 unless the bag says (Player_Crafting.cs:237-244).
                     holds: if o.max_structure > 0 {

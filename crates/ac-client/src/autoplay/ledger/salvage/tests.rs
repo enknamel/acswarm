@@ -48,8 +48,20 @@ fn partial(guid: u32, material: u32, rule: &str, band: Band, units: u32) -> Part
     Partial {
         guid,
         material,
-        rule: rule.into(),
-        band,
+        made: Some((rule.into(), band)),
+        workmanship: band.0 as f32,
+        units,
+        holds: 100,
+    }
+}
+
+/// A bag of `material` from before bags were written down: only its average says anything.
+fn older(guid: u32, material: u32, workmanship: f32, units: u32) -> Partial {
+    Partial {
+        guid,
+        material,
+        made: None,
+        workmanship,
         units,
         holds: 100,
     }
@@ -167,6 +179,23 @@ fn a_bag_made_in_one_rules_band_is_never_topped_up_by_another() {
     assert!(next_salvage_batch(&armour, &bags).unwrap().bags.is_empty());
     let sword = [waiting(2, STEEL, 10.0, weapons, 0)];
     assert_eq!(next_salvage_batch(&sword, &bags).unwrap().bags, vec![10]);
+}
+
+#[test]
+fn an_older_bag_is_topped_up_in_the_band_its_average_falls_in() {
+    // "It's fine to include older bags": it says only its material and its average.
+    let b = "1-7, 8, 9, 10";
+    let bags = [
+        older(10, STEEL, 6.4, 40),
+        older(11, STEEL, 9.0, 30),
+        older(12, STEEL, 7.6, 20), // rounds down: 1-7, never up into the 8s
+    ];
+    let low = [waiting(1, STEEL, 5.0, b, 0)];
+    assert_eq!(next_salvage_batch(&low, &bags).unwrap().bags, vec![10, 12]);
+    let nine = [waiting(2, STEEL, 9.0, b, 0)];
+    assert_eq!(next_salvage_batch(&nine, &bags).unwrap().bags, vec![11]);
+    let eight = [waiting(3, STEEL, 8.0, b, 0)];
+    assert!(next_salvage_batch(&eight, &bags).unwrap().bags.is_empty());
 }
 
 #[test]
