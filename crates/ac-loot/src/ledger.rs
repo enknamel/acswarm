@@ -19,10 +19,23 @@ pub struct Took {
     /// For the log and the panel: which ring it was.
     #[serde(default)]
     pub name: String,
+    /// Why: the rule that decided it, whose settings go with the tag (a salvage rule's bands).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rule: Option<String>,
     /// Why what was decided could not be carried out; the decision itself stands, unchanged.
     /// A wait, not a grudge (`docs/agent.md`): it lapses after [`TRY_AGAIN_AFTER`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failed: Option<Failed>,
+}
+
+/// The salvage that made a bag: the rule whose bands it was salvaged in, and the band.
+/// A bag's average alone does not say it: a 10 bag rounds into any band holding 10.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Made {
+    /// Weenie class of the bag, as [`Took::wcid`]: a recycled guid will not match.
+    pub wcid: u32,
+    pub rule: String,
+    pub band: (u8, u8),
 }
 
 /// What went wrong, and when, so that it stops mattering.
@@ -65,6 +78,10 @@ impl Failed {
 pub struct Ledger {
     #[serde(default)]
     took: BTreeMap<u32, Took>,
+    /// Which salvage rule and band made each salvage bag carried, the only bags topped up since
+    /// only those are known to hold that band (see [`Made`]).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    bags: BTreeMap<u32, Made>,
     /// Changed since it was last written. Not part of the file.
     #[serde(skip)]
     dirty: bool,
@@ -115,6 +132,11 @@ impl Ledger {
     /// Write down what an item was taken for.
     /// A split stack is a new object with a new id: its half arrives with no entry, judged afresh.
     pub fn remember(&mut self, item: &ItemStats, action: LootAction) {
+        self.remember_why(item, action, None);
+    }
+
+    /// [`remember`](Self::remember), with the rule that decided it.
+    pub fn remember_why(&mut self, item: &ItemStats, action: LootAction, rule: Option<&str>) {
         self.changed();
         self.took.insert(
             item.guid,
@@ -122,9 +144,33 @@ impl Ledger {
                 action,
                 wcid: item.wcid,
                 name: item.name.clone(),
+                rule: rule.filter(|r| !r.is_empty()).map(str::to_string),
                 failed: None,
             },
         );
+    }
+
+    /// Write down that salvage under `rule`'s bands, in `band`, made `bag`.
+    pub fn made(&mut self, bag: &ItemStats, rule: &str, band: (u8, u8)) {
+        self.changed();
+        self.bags.insert(
+            bag.guid,
+            Made {
+                wcid: bag.wcid,
+                rule: rule.to_string(),
+                band,
+            },
+        );
+    }
+
+    /// What made `bag`, when it was written down and the guid still names that bag.
+    pub fn made_by(&self, bag: &ItemStats) -> Option<&Made> {
+        self.bags.get(&bag.guid).filter(|m| m.wcid == bag.wcid)
+    }
+
+    /// The rule that decided what `guid` was taken for, when one was written down.
+    pub fn why(&self, guid: u32) -> Option<&str> {
+        self.took.get(&guid)?.rule.as_deref()
     }
 
     /// What this item was taken for, when an entry for its guid still describes its kind.
@@ -159,9 +205,10 @@ impl Ledger {
     /// Runs every tick on every session, hence one pass of the pack into a set.
     pub fn forget_gone(&mut self, held: &[u32]) -> usize {
         let held: BTreeSet<u32> = held.iter().copied().collect();
-        let before = self.took.len();
+        let before = self.took.len() + self.bags.len();
         self.took.retain(|guid, _| held.contains(guid));
-        let gone = before - self.took.len();
+        self.bags.retain(|guid, _| held.contains(guid));
+        let gone = before - self.took.len() - self.bags.len();
         if gone > 0 {
             self.changed();
         }
@@ -181,13 +228,15 @@ impl Ledger {
     /// Call once the pour has landed, while both entries exist: a refused pour must settle nothing.
     /// `from`'s entry is left for [`Ledger::forget_gone`], once the server confirms it is gone.
     pub fn merged(&mut self, from: u32, to: u32) {
-        let Some(source) = self.took.get(&from).map(|t| t.action) else {
+        let Some((source, why)) = self.took.get(&from).map(|t| (t.action, t.rule.clone())) else {
             return;
         };
         if let Some(target) = self.took.get_mut(&to) {
             let settled = target.action.safer_of(source);
             if settled != target.action {
+                // The reason goes with the tag that stood.
                 target.action = settled;
+                target.rule = why;
                 self.changed();
             }
         }
@@ -407,6 +456,37 @@ mod tests {
             l.of(&pile(1, 691, "Prismatic Taper")),
             Some(LootAction::Salvage)
         );
+    }
+
+    #[test]
+    fn the_rule_that_decided_a_tag_is_kept_and_goes_with_it_through_a_pour() {
+        // "Remember why it was picked up": a salvage rule's bands go with the items it tagged.
+        let mut l = Ledger::new();
+        let (a, b) = (pile(1, 500, "Iron Mace"), pile(2, 500, "Iron Mace"));
+        l.remember_why(&a, LootAction::Salvage, Some("salvage iron"));
+        l.remember_why(&b, LootAction::Sell, Some("the rest, to the counter"));
+        assert_eq!(l.why(1), Some("salvage iron"));
+        l.merged(1, 2);
+        assert_eq!(l.of(&b), Some(LootAction::Salvage), "the safer tag stands");
+        assert_eq!(l.why(2), Some("salvage iron"), "and its reason with it");
+        l.remember(&a, LootAction::Keep);
+        assert_eq!(l.why(1), None, "a tag written without one has none");
+    }
+
+    #[test]
+    fn a_bag_knows_the_salvage_that_made_it_while_it_is_carried() {
+        let mut l = Ledger::new();
+        let bag = thing(7, 20993, "Salvaged Steel");
+        assert_eq!(
+            l.made_by(&bag),
+            None,
+            "a bag nobody wrote down is not topped up"
+        );
+        l.made(&bag, "salvage steel", (10, 10));
+        assert_eq!(l.made_by(&bag).map(|m| m.band), Some((10, 10)));
+        assert_eq!(l.made_by(&thing(7, 500, "Ring")), None, "a recycled guid");
+        l.forget_gone(&[]);
+        assert_eq!(l.made_by(&bag), None);
     }
 
     #[test]

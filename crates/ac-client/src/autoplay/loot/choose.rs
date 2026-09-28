@@ -300,6 +300,10 @@ impl Client {
                     &who,
                     held,
                 );
+                let why = match &judged {
+                    Judged::Decided(_, rule) => rule.clone(),
+                    Judged::NeedsId(_) | Judged::None => String::new(),
+                };
                 let verdict = if mine {
                     // Our own body: everything on it comes back, but
                     // what each thing is for is still what the rules
@@ -354,6 +358,7 @@ impl Client {
                     name: stats.name.clone(),
                     burden: stats.burden,
                     verdict,
+                    why,
                     needs_no_slot,
                 })
             })
@@ -607,9 +612,11 @@ impl Client {
                     // lid came up; it is not asked again here, because
                     // asking again is how the two answers came to
                     // differ.
-                    let took = at.items.iter().find(|i| i.guid == g).and_then(|i| i.took());
+                    let lying = at.items.iter().find(|i| i.guid == g);
+                    let took = lying.and_then(|i| i.took());
+                    let why = lying.map(|i| i.why.clone()).unwrap_or_default();
                     if let (Some(action), Some(stats)) = (took, self.stats_of(g)) {
-                        self.autoplay.tag(&stats, action);
+                        self.autoplay.tag_why(&stats, action, Some(&why));
                     }
                     self.take(g);
                     self.autoplay.say(Doing::Looting, next.saying);

@@ -821,6 +821,20 @@ fn rule_editor(ui: &mut egui::Ui, salt: &str, rule: &mut Rule, editor: &mut Edit
             ui.add(egui::DragValue::new(cap).speed(1.0).range(1..=10_000));
         }
     });
+    if rule.action == LootAction::Salvage {
+        ui.horizontal(|ui| {
+            // Which workmanships salvage together, "1-7, 8, 9, 10", a bag each (`ac_loot::bands`).
+            caption(ui, "combine workmanship");
+            text_field(
+                ui,
+                &format!("{salt}.combine"),
+                &mut rule.combine,
+                "1-10",
+                120.0,
+            );
+            ui.weak("e.g. 1-7, 8, 9, 10; empty is all together");
+        });
+    }
     caption(ui, "every one of these must hold");
     let mut drop = None;
     for i in 0..rule.all.len() {
@@ -1291,7 +1305,9 @@ fn rules(ui: &mut egui::Ui, p: &mut Profile, editor: &mut Editor) {
     }
     if let Some(i) = copy {
         let mut made = p.rules[i].clone();
-        made.name = format!("{} copy", made.name);
+        // Names are how a tag remembers its rule (`Ledger::why`): never two alike.
+        let names: Vec<String> = p.rules.iter().map(|r| r.name.clone()).collect();
+        made.name = unused_name(&names, &format!("{} copy", made.name));
         p.rules.insert(i + 1, made);
         editor.open_rule = Some(i + 1);
     }
@@ -1406,8 +1422,9 @@ pub(crate) fn draw(egui: &egui::Context, v: &ProfilesView, editor: &mut Editor) 
                     .on_hover_text("A new rule at the end, read last")
                     .clicked()
                 {
+                    let names: Vec<String> = p.rules.iter().map(|r| r.name.clone()).collect();
                     p.rules.push(Rule {
-                        name: format!("rule {}", p.rules.len() + 1),
+                        name: unused_name(&names, &format!("rule {}", p.rules.len() + 1)),
                         ..Default::default()
                     });
                     editor.open_rule = Some(p.rules.len() - 1);

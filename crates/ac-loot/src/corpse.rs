@@ -25,6 +25,8 @@ pub struct Lying {
     pub burden: u32,
     /// What the profile made of it.
     pub verdict: Verdict,
+    /// The rule that decided a take, for the ledger ([`crate::ledger::Took::rule`]); empty otherwise.
+    pub why: String,
     /// Fits whole on a carried stack (`ac_agent::room::how_to_take`): a full pack still takes it.
     pub needs_no_slot: bool,
 }
@@ -132,6 +134,7 @@ mod tests {
             name: format!("thing {guid}"),
             burden: 10,
             verdict,
+            why: String::new(),
             needs_no_slot: false,
         }
     }

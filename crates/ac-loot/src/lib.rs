@@ -4,6 +4,7 @@
 //! one corpse ([`Run::step`]), [`ledger`] remembers what each item was taken for, [`sale`] decides
 //! what goes over a counter, [`weapons`] picks what to fight with. No socket; callers pass the time.
 
+pub mod bands;
 pub mod corpse;
 pub mod items;
 pub mod ledger;

@@ -406,16 +406,20 @@ shows it). Between fights, the salvager salvages what it carries tagged
 and not fighting and hands its tagged items over, one every few
 seconds. The receiver runs the rules again on what arrives, so a handed
 item that matches a salvage rule is salvaged on the next pass.
-Everything below workmanship 9 goes in one salvage; the 9s and the 10s
-each go in a salvage of their own, the next as soon as the last is
-done, because the server gives a bag the average workmanship of
-everything of its material salvaged with it, and a 10 salvaged beside a
-6 makes a bag of 8. Salvage bags are never salvaged again and only
-handed on when a rule names them. A salvage that comes to nothing (ACE
-skips a Retained item without a word) is tried again once the grades
-not yet tried have gone. An item refused three times (the server would
-not take it, or would not salvage it) is kept instead, and the log says
-so.
+Each salvage is one material in one workmanship band: the bands are the
+tagging rule's `combine` ("1-7, 8, 9, 10"; empty is 1-10 together; a
+workmanship it does not name goes only with itself), because the server
+gives a bag the average workmanship of everything of its material
+salvaged with it, and a 10 salvaged beside a 6 makes a bag of 8. The
+ledger keeps which rule tagged each item, so its bands go with it; a
+minimum workmanship is a condition on the rule ("ws>=10"). A carried
+bag of the same material and band with room left goes in first and is
+topped up; one tagged `sell` never is. What is worn, and what an
+appraisal shows inscribed, is never salvaged, and an item not yet
+appraised is looked at first. A salvage that comes to nothing (ACE skips
+a Retained item without a word) is tried again once the bands not yet
+tried have gone; an item refused three times is set aside for an hour,
+its tag unchanged, and the log says so.
 
 The server only lets one player give another an item when the receiver
 has "Let other players give you items" on (ACE `AllowGive`); the team

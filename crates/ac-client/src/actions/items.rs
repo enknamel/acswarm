@@ -478,7 +478,8 @@ impl Client {
     }
 
     /// Carried, unwielded items the server would salvage: those with a
-    /// material and a workmanship (loot, not vendor stock).
+    /// material and a workmanship (loot, not vendor stock), and none an
+    /// appraisal showed inscribed.
     pub fn salvageable(&self) -> Vec<u32> {
         let me = self.world.player_guid;
         let mut items: Vec<&ac_world::WorldObject> = self
@@ -489,10 +490,16 @@ impl Client {
                     && o.material != 0
                     && o.workmanship > 0.0
                     && !o.name.starts_with("Salvaged ")
+                    && !self.is_inscribed(o.guid)
             })
             .collect();
         items.sort_by(|a, b| a.name.cmp(&b.name).then(a.guid.cmp(&b.guid)));
         items.into_iter().map(|o| o.guid).collect()
+    }
+
+    /// Whether an appraisal showed `guid` inscribed (string 7).
+    fn is_inscribed(&self, guid: u32) -> bool {
+        self.stats_of(guid).is_some_and(|st| st.inscribed)
     }
 
     /// Salvage carried items with the Ust (CreateTinkeringTool 0x027D:
@@ -503,18 +510,16 @@ impl Client {
         let Some(tool) = self.salvage_tool() else {
             return false;
         };
-        let me = self.world.player_guid;
         // Side packs count: the server looks for each item in them too
         // (ACE `GetInventoryItem`). Leaving them out sent nothing for a
         // batch that was all in a side pack, and the autoplay, which
         // salvages one workmanship grade at a time, was stuck on it.
+        // What is worn, or known inscribed, is never salvaged, whoever asks
+        // (the player's word; ACE checks neither, Player_Crafting.cs:150-177).
         let items: Vec<u32> = items
             .iter()
             .copied()
-            .filter(|g| {
-                self.world.is_carried(*g)
-                    || self.world.objects.get(g).is_some_and(|o| o.wielder == me)
-            })
+            .filter(|g| self.world.is_carried(*g) && !self.is_inscribed(*g))
             .collect();
         if items.is_empty() {
             return false;

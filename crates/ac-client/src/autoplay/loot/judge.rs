@@ -224,8 +224,17 @@ pub fn judge_loot(
     if stocked > 0 && held < stocked {
         return Verdict::Decided(LootAction::Keep, "kept stocked".into());
     }
-    p.judge(stats, id, me, my_name, held)
+    match p.judge(stats, id, me, my_name, held) {
+        // What the character wears is never salvaged, whatever a rule says (the player's word).
+        Verdict::Decided(LootAction::Salvage, _) if stats.wielded => {
+            Verdict::Decided(LootAction::Keep, WORN.into())
+        }
+        v => v,
+    }
 }
+
+/// Why a worn item a salvage rule claimed is kept instead.
+pub(crate) const WORN: &str = "worn, so never salvaged";
 
 impl Client {
     /// How many of the same weenie are already carried, for the rules

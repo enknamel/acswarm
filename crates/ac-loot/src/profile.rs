@@ -358,6 +358,9 @@ pub struct Rule {
     pub all: Vec<Ask>,
     /// Stop once this many are carried. `None` means no limit.
     pub keep_up_to: Option<u32>,
+    /// A salvage rule's workmanship bands, "1-7, 8, 9, 10" (`crate::bands`); empty is all together.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub combine: String,
 }
 
 impl Default for Rule {
@@ -369,11 +372,17 @@ impl Default for Rule {
             action: LootAction::Keep,
             all: Vec::new(),
             keep_up_to: None,
+            combine: String::new(),
         }
     }
 }
 
 impl Rule {
+    /// Which workmanships its salvage combines (see `crate::bands`).
+    pub fn bands(&self) -> Vec<crate::bands::Band> {
+        crate::bands::parse(&self.combine)
+    }
+
     /// Whether judging this rule needs the item appraised.
     pub fn needs_id(&self) -> bool {
         self.all.iter().any(Ask::needs_id)
@@ -664,7 +673,17 @@ impl Profile {
     pub fn fingerprint(&self) -> u64 {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        serde_json::to_string(&self.rules)
+        // A salvage rule's bands decide how it salvages, not what it takes: edited, they re-judge
+        // nothing, and an empty one is skipped, so every older fingerprint stands.
+        let rules: Vec<Rule> = self
+            .rules
+            .iter()
+            .map(|r| Rule {
+                combine: String::new(),
+                ..r.clone()
+            })
+            .collect();
+        serde_json::to_string(&rules)
             .unwrap_or_default()
             .hash(&mut h);
         // The buy list decides the undecided: stock is never offered to a counter unless a rule
@@ -675,6 +694,14 @@ impl Profile {
         // Always and never are read before any rule, so they decide items too.
         (&self.looting.always, &self.looting.never).hash(&mut h);
         h.finish()
+    }
+
+    /// The rule called `name`, the reason the ledger keeps for a tag (`crate::ledger::Took::rule`);
+    /// `None` when two rules share the name, since which one tagged it is not known.
+    pub fn rule_named(&self, name: &str) -> Option<&Rule> {
+        let mut named = self.rules.iter().filter(|r| r.name == name);
+        let rule = named.next()?;
+        named.next().is_none().then_some(rule)
     }
 
     /// Whether any rule could ever ask for an appraisal. A profile that
@@ -1084,6 +1111,10 @@ mod tests {
         assert_ne!(p.fingerprint(), was);
         p.rules[0].keep_up_to = None;
         assert_eq!(p.fingerprint(), was);
+        // A salvage rule's bands say how it salvages, not what it takes.
+        p.rules[0].combine = "1-7, 8, 9, 10".into();
+        assert_eq!(p.fingerprint(), was);
+        p.rules[0].combine.clear();
         // The buy list is a rule too: stock is never offered to a counter.
         p.buy.push(Buy {
             what: "Prismatic Taper".into(),

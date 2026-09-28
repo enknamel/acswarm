@@ -27,94 +27,154 @@ fn the_best_salvager_has_an_ust_and_the_highest_skill() {
     assert_eq!(best_salvager([mate("Nobody", 0, 999, true)].iter()), None);
 }
 
-/// `items` (guid and workmanship), none of them refused yet.
-fn never_refused(items: &[(u32, f32)]) -> Vec<(u32, f32, u8)> {
-    items.iter().map(|(g, w)| (*g, *w, 0)).collect()
+const STEEL: u32 = 0x40;
+const IRON: u32 = 0x3D;
+
+/// An item of `material` and `workmanship` tagged by a rule combining `bands` (the rule is named
+/// after them), refused `refused` times.
+fn waiting(guid: u32, material: u32, workmanship: f32, bands: &str, refused: u8) -> Waiting {
+    Waiting {
+        guid,
+        material,
+        workmanship,
+        rule: bands.into(),
+        bands: ac_loot::bands::parse(bands),
+        refused,
+    }
 }
 
-/// Every salvage sent for `items` (guid and workmanship), the server
-/// taking each batch before the next is chosen.
-fn salvages(items: &[(u32, f32)]) -> Vec<Vec<u32>> {
+/// A salvage bag of `material` holding `units` of 100, made in `band` of the rule named `rule`.
+fn partial(guid: u32, material: u32, rule: &str, band: Band, units: u32) -> Partial {
+    Partial {
+        guid,
+        material,
+        rule: rule.into(),
+        band,
+        units,
+        holds: 100,
+    }
+}
+
+/// Every call sent for `items`, the server taking each before the next is chosen.
+fn salvages(items: &[Waiting]) -> Vec<Vec<u32>> {
     let mut left = items.to_vec();
     let mut sent = Vec::new();
-    while let Some((_, batch)) = next_salvage_batch(never_refused(&left)) {
-        left.retain(|(g, _)| !batch.contains(g));
-        sent.push(batch);
+    while let Some(batch) = next_salvage_batch(&left, &[]) {
+        left.retain(|w| !batch.items.contains(&w.guid));
+        sent.push(batch.items);
     }
     sent
 }
 
 #[test]
-fn a_salvage_that_came_to_nothing_waits_behind_the_grades_not_yet_tried() {
-    // ACE skips a Retained item without a word. Chosen as the best
-    // grade every time, a 10 like that went out alone after each
-    // timeout, and everything below it waited behind all three.
-    let (ten, nine, six, five) = (1, 2, 3, 4);
-    assert_eq!(
-        next_salvage_batch([(ten, 10.0, 1), (nine, 9.0, 0), (six, 6.0, 0)]),
-        Some((SalvageGrade::Nine, vec![nine]))
-    );
-    assert_eq!(
-        next_salvage_batch([(ten, 10.0, 1), (six, 6.0, 0)]),
-        Some((SalvageGrade::Common, vec![six]))
-    );
-    // Once the rest are gone it is asked for again, still on its own.
-    assert_eq!(
-        next_salvage_batch([(ten, 10.0, 1)]),
-        Some((SalvageGrade::Ten, vec![ten]))
-    );
-    // Refused alike, the grades still keep apart.
-    assert_eq!(
-        next_salvage_batch([(six, 6.0, 1), (ten, 10.0, 1), (five, 5.0, 1)]),
-        Some((SalvageGrade::Ten, vec![ten]))
-    );
-    // And the one refused least goes first.
-    assert_eq!(
-        next_salvage_batch([(six, 6.0, 2), (five, 5.0, 1)]),
-        Some((SalvageGrade::Common, vec![five]))
-    );
-}
-
-#[test]
-fn a_workmanship_10_iron_mace_is_not_salvaged_with_a_6() {
-    // In one salvage both go into the same bag of Iron, and the bag
-    // comes out a workmanship 8.
-    let (six, ten) = (0x8000_0001, 0x8000_0002);
-    assert_eq!(
-        salvages(&[(six, 6.0), (ten, 10.0)]),
-        vec![vec![ten], vec![six]]
-    );
-}
-
-#[test]
-fn nines_and_tens_never_share_a_salvage() {
-    let items = [(1, 9.0), (2, 10.0), (3, 6.0), (4, 9.0), (5, 10.0), (6, 3.0)];
-    assert_eq!(
-        next_salvage_batch(never_refused(&items)),
-        Some((SalvageGrade::Ten, vec![2, 5]))
-    );
-    // The best first, each grade alone, in the order they were given.
-    assert_eq!(salvages(&items), vec![vec![2, 5], vec![1, 4], vec![3, 6]]);
-}
-
-#[test]
-fn everything_below_nine_goes_in_one_salvage() {
-    let items = [(1, 1.0), (2, 8.0), (3, 5.0), (4, 8.0)];
-    assert_eq!(
-        next_salvage_batch(never_refused(&items)),
-        Some((SalvageGrade::Common, vec![1, 2, 3, 4]))
-    );
+fn with_no_bands_one_material_goes_in_one_salvage() {
+    // "If no ranges specified then 1-10": everything of a material together.
+    let items = [
+        waiting(1, STEEL, 1.0, "", 0),
+        waiting(2, STEEL, 6.0, "", 0),
+        waiting(3, STEEL, 9.0, "", 0),
+        waiting(4, STEEL, 10.0, "", 0),
+    ];
     assert_eq!(salvages(&items), vec![vec![1, 2, 3, 4]]);
 }
 
 #[test]
-fn a_grade_with_nothing_in_it_sends_no_salvage() {
-    assert_eq!(next_salvage_batch([]), None);
-    assert_eq!(salvages(&[]), Vec::<Vec<u32>>::new());
-    // No 9s: the 10 and the rest, and no empty salvage between.
-    assert_eq!(salvages(&[(1, 6.0), (2, 10.0)]), vec![vec![2], vec![1]]);
-    // Only 9s: one salvage.
-    assert_eq!(salvages(&[(1, 9.0), (2, 9.0)]), vec![vec![1, 2]]);
+fn bands_keep_apart_what_they_name_the_best_first() {
+    // "Only combine workmanship 1-7, 8, 9, 10."
+    let b = "1-7, 8, 9, 10";
+    let items = [
+        waiting(1, STEEL, 9.0, b, 0),
+        waiting(2, STEEL, 10.0, b, 0),
+        waiting(3, STEEL, 6.0, b, 0),
+        waiting(4, STEEL, 8.0, b, 0),
+        waiting(5, STEEL, 10.0, b, 0),
+        waiting(6, STEEL, 3.0, b, 0),
+    ];
+    assert_eq!(
+        salvages(&items),
+        vec![vec![2, 5], vec![1], vec![4], vec![3, 6]]
+    );
+    let batch = next_salvage_batch(&items, &[]).unwrap();
+    assert_eq!((batch.material, batch.band), (STEEL, (10, 10)));
+}
+
+#[test]
+fn two_materials_never_share_a_salvage() {
+    let items = [waiting(1, STEEL, 6.0, "", 0), waiting(2, IRON, 6.0, "", 0)];
+    assert_eq!(salvages(&items).len(), 2);
+}
+
+#[test]
+fn a_salvage_that_came_to_nothing_waits_behind_those_not_yet_tried() {
+    // ACE skips a Retained item without a word. Chosen as the best band every time, a 10 like
+    // that went out alone after each timeout, and everything below it waited behind all three.
+    let b = "1-8, 9, 10";
+    let (ten, nine, six) = (1, 2, 3);
+    let items = [
+        waiting(ten, IRON, 10.0, b, 1),
+        waiting(nine, IRON, 9.0, b, 0),
+        waiting(six, IRON, 6.0, b, 0),
+    ];
+    assert_eq!(next_salvage_batch(&items, &[]).unwrap().items, vec![nine]);
+    assert_eq!(
+        next_salvage_batch(&items[..1], &[]).unwrap().items,
+        vec![ten]
+    );
+}
+
+#[test]
+fn a_partial_bag_of_the_band_is_topped_up_first() {
+    let b = "1-7, 8, 9, 10";
+    let items = [waiting(1, STEEL, 5.0, b, 0), waiting(2, STEEL, 7.0, b, 0)];
+    let bags = [
+        partial(10, STEEL, b, (1, 7), 40),
+        partial(11, STEEL, b, (9, 9), 30),   // another band
+        partial(12, IRON, b, (1, 7), 20),    // another material
+        partial(13, STEEL, b, (1, 7), 100),  // full
+        partial(14, STEEL, "", (1, 10), 30), // another rule
+    ];
+    let batch = next_salvage_batch(&items, &bags).unwrap();
+    assert_eq!(batch.bags, vec![10]);
+    assert_eq!(batch.units, 40);
+    assert_eq!(
+        batch.guids(),
+        vec![10, 1, 2],
+        "the bag first, or its excess is lost"
+    );
+}
+
+#[test]
+fn bags_topped_up_together_fit_in_one_bag() {
+    // A bag put in past a bag's worth loses the excess (Player_Crafting.cs:283-289).
+    let items = [waiting(1, STEEL, 5.0, "", 0)];
+    let bags = [
+        partial(10, STEEL, "", (1, 10), 50),
+        partial(11, STEEL, "", (1, 10), 60),
+        partial(12, STEEL, "", (1, 10), 30),
+    ];
+    let batch = next_salvage_batch(&items, &bags).unwrap();
+    assert_eq!(batch.bags, vec![11, 12], "the fullest that fit: 60 and 30");
+    assert_eq!(batch.units, 90);
+}
+
+#[test]
+fn a_bag_made_in_one_rules_band_is_never_topped_up_by_another() {
+    // Two rules: weapons in "1-7, 8, 9, 10", armour all together. A pure 10 Steel bag the weapons
+    // made, topped up with the armour's workmanship 4, would have come out an 8.
+    let weapons = "1-7, 8, 9, 10";
+    let bags = [partial(10, STEEL, weapons, (10, 10), 40)];
+    let armour = [waiting(1, STEEL, 4.0, "", 0)];
+    assert!(next_salvage_batch(&armour, &bags).unwrap().bags.is_empty());
+    let sword = [waiting(2, STEEL, 10.0, weapons, 0)];
+    assert_eq!(next_salvage_batch(&sword, &bags).unwrap().bags, vec![10]);
+}
+
+#[test]
+fn nothing_tagged_sends_no_salvage() {
+    assert_eq!(
+        next_salvage_batch(&[], &[partial(10, STEEL, "", (1, 10), 50)]),
+        None
+    );
 }
 
 /// A level 20 character that salvages for itself: an Ust in the pack,
@@ -122,6 +182,18 @@ fn a_grade_with_nothing_in_it_sends_no_salvage() {
 fn a_salvager(assets: std::rc::Rc<ac_scene::Assets>, profile: &str) -> Client {
     let mut c = character_of_level(assets, 20);
     a_loot_profile(&mut c, profile);
+    // The maces' rule: 1-8 together, 9 and 10 each alone.
+    let mut p = (*c.loot_profile().unwrap()).clone();
+    p.rules.insert(
+        0,
+        crate::profile::Rule {
+            name: MACES.into(),
+            action: LootAction::Salvage,
+            combine: "1-8, 9, 10".into(),
+            ..Default::default()
+        },
+    );
+    c.profiles.put(p).expect("saved");
     let ust = 0x8000_0100;
     c.world.objects.insert(
         ust,
@@ -136,21 +208,32 @@ fn a_salvager(assets: std::rc::Rc<ac_scene::Assets>, profile: &str) -> Client {
     c
 }
 
-/// An Iron mace of `workmanship` in `container`, tagged for salvage.
+/// The salvage rule the test maces were tagged by.
+const MACES: &str = "salvage maces";
+
+/// An Iron mace of `workmanship` in `container`, appraised (not inscribed) and tagged by [`MACES`].
 fn a_mace_to_salvage(c: &mut Client, guid: u32, workmanship: f32, container: Option<u32>) {
     c.world.objects.insert(
         guid,
         ac_world::WorldObject {
             guid,
             name: "Iron Mace".into(),
-            material: 0x3D,
+            material: IRON,
             workmanship,
             container,
             ..Default::default()
         },
     );
+    c.appraisals.insert(
+        guid,
+        ac_net::messages::Appraisal {
+            guid,
+            success: true,
+            ..Default::default()
+        },
+    );
     let stats = c.stats_of(guid).expect("carried");
-    c.autoplay.tag(&stats, LootAction::Salvage);
+    c.autoplay.tag_why(&stats, LootAction::Salvage, Some(MACES));
 }
 
 /// The salvage the salvager is waiting on.
@@ -160,7 +243,7 @@ fn salvage_on_its_way(c: &Client) -> Option<Vec<u32>> {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
-fn what_the_team_hands_the_salvager_is_salvaged_a_grade_at_a_time() {
+fn what_the_team_hands_the_salvager_is_salvaged_a_band_at_a_time() {
     // Teammates hand salvage over one item at a time, and the
     // salvager salvages it along with its own: that is where a 10
     // one teammate carried would meet another's 6.
@@ -206,7 +289,7 @@ fn what_the_team_hands_the_salvager_is_salvaged_a_grade_at_a_time() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
-fn a_ten_the_server_skips_holds_up_none_of_the_grades_below_it() {
+fn a_ten_the_server_skips_holds_up_none_of_the_bands_below_it() {
     // ACE skips a Retained item without a word, and its salvage times
     // out. Chosen again as the best grade, the 10 went out alone after
     // every timeout, and the 9 and the 6 waited behind all three.
@@ -240,4 +323,91 @@ fn a_ten_the_server_skips_holds_up_none_of_the_grades_below_it() {
     now += SALVAGE_TIMEOUT;
     assert!(!c.autoplay_salvage(now), "tried {SALVAGE_TRIES} times");
     assert_eq!(salvage_on_its_way(&c), None);
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn neither_an_inscribed_item_nor_one_not_yet_looked_at_is_salvaged() {
+    // "Never salvage any item that the player is wearing or is inscribed": only an appraisal says.
+    let mut c = a_salvager(game_data(), "salvage inscribed");
+    let me = c.world.player_guid;
+    let (plain, inscribed, unknown) = (0x8000_0131, 0x8000_0132, 0x8000_0133);
+    for g in [plain, inscribed, unknown] {
+        a_mace_to_salvage(&mut c, g, 6.0, me);
+    }
+    c.appraisals.get_mut(&inscribed).unwrap().strings = vec![(7, "For my dear Bryn".into())];
+    c.appraisals.remove(&unknown);
+    assert!(c.autoplay_salvage(Instant::now()));
+    assert_eq!(salvage_on_its_way(&c), Some(vec![plain]));
+    assert!(
+        c.appraise_queue.contains(&unknown),
+        "asked about before it goes"
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn what_is_worn_is_never_salvaged() {
+    let mut c = a_salvager(game_data(), "salvage worn");
+    let me = c.world.player_guid;
+    let worn = 0x8000_0141;
+    a_mace_to_salvage(&mut c, worn, 6.0, me);
+    let o = c.world.objects.get_mut(&worn).unwrap();
+    o.container = None;
+    o.wielder = me;
+    assert!(!c.autoplay_salvage(Instant::now()), "nothing to salvage");
+    assert!(!c.salvage(&[worn]), "nor by hand");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_bag_a_salvage_made_is_topped_up_by_the_next_of_its_band_only() {
+    let mut c = a_salvager(game_data(), "salvage top up");
+    let me = c.world.player_guid;
+    let (six, bag, five, nine) = (0x8000_0151, 0x8000_0152, 0x8000_0153, 0x8000_0154);
+    a_mace_to_salvage(&mut c, six, 6.0, me);
+    let mut now = Instant::now();
+    assert!(c.autoplay_salvage(now));
+    assert_eq!(salvage_on_its_way(&c), Some(vec![six]));
+    // The server takes the mace and a bag of Iron turns up.
+    c.world.objects.remove(&six);
+    c.world.objects.insert(
+        bag,
+        ac_world::WorldObject {
+            guid: bag,
+            weenie_class_id: 20988,
+            name: "Salvaged Iron".into(),
+            material: IRON,
+            workmanship: 6.0,
+            structure: 5,
+            max_structure: 100,
+            container: me,
+            ..Default::default()
+        },
+    );
+    now += Duration::from_millis(100);
+    assert!(!c.autoplay_salvage(now), "nothing else to salvage");
+    let st = c.stats_of(bag).unwrap();
+    assert_eq!(
+        c.autoplay
+            .ledger
+            .made_by(&st)
+            .map(|m| (m.rule.as_str(), m.band)),
+        Some((MACES, (1, 8))),
+        "the bag is written down as the call's"
+    );
+    // A 5 of the same band tops it up, the bag first; a 9 does not.
+    a_mace_to_salvage(&mut c, five, 5.0, me);
+    a_mace_to_salvage(&mut c, nine, 9.0, me);
+    now += SALVAGE_EVERY;
+    assert!(c.autoplay_salvage(now));
+    assert_eq!(
+        salvage_on_its_way(&c),
+        Some(vec![nine]),
+        "the best band first, alone"
+    );
+    c.world.objects.remove(&nine);
+    now += Duration::from_millis(100);
+    assert!(c.autoplay_salvage(now));
+    assert_eq!(salvage_on_its_way(&c), Some(vec![bag, five]));
 }
