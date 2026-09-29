@@ -359,7 +359,8 @@ impl Client {
         let Some(o) = self.world.objects.get(&guid) else {
             return false;
         };
-        if me.is_none() || (o.container != me && o.wielder != me) {
+        // A side pack's too: the server finds it there (ACE `FindObject`, SearchLocations.MyInventory).
+        if me.is_none() || !(self.world.is_carried(guid) || o.wielder == me) {
             return false;
         }
         tracing::info!("drop {} ({guid:#010x})", o.name);

@@ -67,3 +67,32 @@ fn a_use_of_something_in_the_world_reports_the_stop_before_the_use() {
         "the stop goes out before the use: {sent:x?}"
     );
 }
+
+#[test]
+fn a_thing_in_a_side_pack_can_be_dropped() {
+    // The server finds it there (Player_Inventory.cs:1380); refusing sent nothing, and a script's
+    // drop of fifteen caps in a side pack did nothing fifteen times.
+    use ac_net::messages::action::DROP_ITEM;
+    let mut c = crate::testkit::offline_client();
+    c.world.player_guid = Some(crate::testkit::ME);
+    let me = c.world.player_guid;
+    let (pack, cap, far) = (0x8000_0010, 0x8000_0011, 0x8000_0012);
+    for (guid, name, container) in [
+        (pack, "Pack", me),
+        (cap, "Leather Cap", Some(pack)),
+        (far, "Leather Cap", None),
+    ] {
+        c.world.objects.insert(
+            guid,
+            ac_world::WorldObject {
+                guid,
+                name: name.into(),
+                container,
+                ..Default::default()
+            },
+        );
+    }
+    assert!(c.drop_item(cap));
+    assert_eq!(actions_sent(&c), vec![DROP_ITEM]);
+    assert!(!c.drop_item(far), "not ours to drop");
+}
