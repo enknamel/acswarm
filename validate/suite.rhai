@@ -38,6 +38,8 @@ fn with_count(what, n) {
 }
 
 fn command(name, args) {
+    // A wait between steps: answered here, not sent to the server as a command it does not know.
+    if name == "nop" { return true; }
     // ---- the world we were given --------------------------------
     if name == "v_placed" {
         let m = me();
@@ -84,7 +86,17 @@ fn command(name, args) {
 
     // ---- merging ------------------------------------------------
     // 37 and 41 are made fresh for this: counts nothing else carries,
-    // so the check needs no memory of what was there before.
+    // so the check needs no memory of what was there before. The server
+    // pours a made stack into a partial one carried, and every run leaves
+    // a 13 and a 65, so the partial stacks go first.
+    if name == "v_merge_prep" {
+        for it in find_items("Prismatic Taper") {
+            if it.stack < it.max_stack { drop_item(it.guid); }
+        }
+        // Each made stack needs a free slot: a full pack loses them, and the checks below fail.
+        log("merge prep: " + inventory().len() + " things carried");
+        return true;
+    }
     if name == "v_merge_do" {
         let a = ();
         let b = ();
@@ -126,7 +138,10 @@ fn command(name, args) {
 
     // ---- walking ------------------------------------------------
     // The one check that needs memory: where we set off from, and
-    // where we were told to go. The shared board keeps it.
+    // where we were told to go. The shared board keeps it. It sets off
+    // from the same open ground every run (the teleport before it): the
+    // vendor checks leave the character upstairs in a shop, whose wall
+    // stood 10 m east of it.
     if name == "v_walk_do" {
         let m = me();
         let tx = m.x + 10.0;

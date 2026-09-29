@@ -3,6 +3,8 @@
 /v_placed
 /v_burden
 /v_maxstack
+/v_merge_prep
+/nop
 @ci 20631 37
 @ci 20631 41
 /nop
@@ -14,6 +16,10 @@
 /nop
 /nop
 /v_split_check
+@teleloc 0xA9B40019 84 7.1 94
+/nop
+/nop
+/nop
 /v_walk_do
 /nop
 /nop
