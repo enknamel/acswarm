@@ -587,6 +587,47 @@ fn a_character_put_back_on_its_feet_tells_the_server_at_once_standing_still() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
+fn where_a_server_walk_stops_is_told_the_server() {
+    // The server walks the character to a portal it was asked to use, and
+    // judges the use from where it was last told the character stands. No
+    // MoveToState goes while its walk is stood aside for, so the stop must
+    // go as a position of its own, or the use waits on a spot already reached.
+    let assets = assets();
+    let me = floor(&assets, ROOM);
+    let mut pl = stand(&assets, ROOM_CELL, me);
+    let mut session = Session::new(
+        Config {
+            account: String::new(),
+            password: String::new(),
+            dats: Vec::new(),
+            echo_interval: Duration::from_secs(5),
+            ack_interval: Duration::from_secs(1),
+        },
+        Instant::now(),
+    );
+    let run = Input {
+        forward: 1.0,
+        run: true,
+        ..Input::default()
+    };
+    let now = Instant::now();
+    for _ in 0..3 {
+        pl.update(&assets, &run, 1.0 / 30.0);
+        pl.report(&mut session, &run, now, true);
+    }
+    pl.take_sent();
+    pl.update(&assets, &Input::default(), 1.0 / 30.0);
+    assert!(pl.owes_position(), "the stop is not owed");
+    pl.report(&mut session, &Input::default(), now, true);
+    let (cell, local) = pl.take_sent().expect("the stop was never sent");
+    let sent = ac_world::landblock_origin(cell) + local;
+    let end = pl.world_position();
+    assert!(sent.distance(end) < 0.01, "sent {sent}, stopped at {end}");
+    assert!(sent.distance(me) > 0.1, "never walked: {sent}");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn the_stairs_down_from_an_upper_floor_are_found_and_walked() {
     let assets = assets();
     // Upstairs in a Holtburg house, on a floor reached on foot from the
