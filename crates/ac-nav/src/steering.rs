@@ -263,7 +263,7 @@ impl Steering {
         let far_goal = goal;
         // A goal in another block is aimed at where the line leaves this one, so this block's graph
         // still routes round what is in the way.
-        let leaves_block = goal_block & 0xFFFF_0000 != block;
+        let leaves_block = leaves_block(goal, goal_block, block);
         let following_wide = self.route_is_wide && self.route.is_some();
         let goal = match plan_goal(me, goal, block, leaves_block, following_wide) {
             Some(g) => g,
@@ -470,6 +470,14 @@ pub fn plan_goal(
     clip_to_block(me, goal, block)
 }
 
+/// Whether `goal`, named in `goal_block`, lies outside `block`'s square. One on the edge is the
+/// block's own: a journey's lattice points fall on block lines (test: a_goal_on_the_block_edge_is_planned_to).
+pub fn leaves_block(goal: Vec3, goal_block: u32, block: u32) -> bool {
+    let origin = ac_world::landblock_origin(block);
+    let on_block = (0..2).all(|a| (origin[a]..=origin[a] + 192.0).contains(&goal[a]));
+    goal_block & 0xFFFF_0000 != block && !on_block
+}
+
 /// Where the line from `me` to `goal` leaves `block`, pulled `INSIDE` back in; `None` when `me` is
 /// outside the block, the goal is inside it, or that point is not a stride ahead.
 pub fn clip_to_block(me: Vec3, goal: Vec3, block: u32) -> Option<Vec3> {
@@ -506,6 +514,21 @@ pub fn clip_to_block(me: Vec3, goal: Vec3, block: u32) -> Option<Vec3> {
 #[cfg(test)]
 mod route_tests {
     use super::*;
+
+    #[test]
+    fn a_goal_on_the_block_edge_is_planned_to() {
+        // Holtburg's A9B3 ends at x 32640, where a journey's first point out of a building lay,
+        // named in AAB3 beside it.
+        let (block, next) = (0xA9B3_0000, 0xAAB3_0000);
+        let edge = Vec3::new(32640.0, 34464.0, 116.0);
+        assert!(!leaves_block(edge, next, block));
+        assert!(leaves_block(
+            Vec3::new(32700.0, 34464.0, 116.0),
+            next,
+            block
+        ));
+        assert!(!leaves_block(edge, block, block));
+    }
 
     fn at(x: f32, y: f32, z: f32) -> Vec3 {
         Vec3::new(x, y, z)

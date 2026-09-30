@@ -1923,6 +1923,35 @@ mod tests {
 
     #[test]
     #[ignore = "needs AC_DATA_DIR"]
+    fn the_stairs_up_to_a_scrivener_are_walked_down_too() {
+        // Blargerton, upstairs by the Scrivener of Creature Magic in Holtburg, set off for Boddry's
+        // counter and stood: the graph had the stairs up and none down, and the journey's first two
+        // points lie on the block line, which the steering did not plan to.
+        let mut c =
+            crate::testkit::standing_in_the_field(30, 0xA9B3_0108, Vec3::new(185.5, 88.3, 119.6));
+        c.world.player_guid = Some(crate::testkit::ME);
+        let boddry = Vec2::new(32538.6, 34266.0);
+        assert!(c.travel_to(boddry));
+        let dt = 0.05;
+        let t0 = Instant::now();
+        for frame in 0..60 * 20 {
+            let now = t0 + Duration::from_secs_f32(frame as f32 * dt);
+            c.tick_player(crate::player::Input::default(), dt, now);
+            let at = c.player.as_ref().unwrap().world_position();
+            if frame == 10 * 20 {
+                assert!(at.z < 118.0, "still on the upper floor after 10 s at {at}");
+            }
+        }
+        let at = c.player.as_ref().unwrap().world_position().truncate();
+        assert!(
+            at.distance(boddry) <= 2.0 * ARRIVE,
+            "stopped {:.0} m short",
+            at.distance(boddry)
+        );
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_walk_out_of_a_shop_to_a_spot_outside_the_door_reaches_the_next_counter() {
         // Inside Archmage Cindrue's shop, where a scenario's mage stood four minutes: from indoors
         // the block's graph finds no way to Shopkeeper Renald 112 m off, but it does to a spot

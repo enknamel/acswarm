@@ -239,7 +239,9 @@ impl Ground<'_> {
         let mut left = flat(b - a).length();
         for _ in 0..(left / BODY_STEP).ceil() as usize + 4 {
             if left <= within {
-                return (p.z - b.z).abs() <= LEVEL_MERGE;
+                // A step from `b`'s floor is on it: down a stair, the ramp walked lies 0.33 m under the
+                // tread its node stands on (test: the_stairs_up_to_a_scrivener_are_walked_down_too).
+                return (p.z - b.z).abs() <= cap.step_up;
             }
             let d = flat(b - p);
             let step = d.normalize() * d.length().min(BODY_STEP);
