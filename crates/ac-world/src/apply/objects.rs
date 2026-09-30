@@ -11,7 +11,7 @@ impl World {
                 let previous = self
                     .objects
                     .remove(&oc.guid)
-                    .or_else(|| self.left_behind.remove(&oc.guid));
+                    .or_else(|| self.left_behind.remove(&oc.guid).map(|(o, _)| o));
                 if oc.object_desc_flags & object_desc_flags::PLAYER != 0 {
                     tracing::debug!(
                         "player object {} ({:#010x}): position {:?} setup {:#010x} no_draw {} parent {:?}",

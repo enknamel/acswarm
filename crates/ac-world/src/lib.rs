@@ -491,6 +491,10 @@ pub fn map_coord_str(p: &object::Position) -> String {
 /// it is a leftover from somewhere we no longer are.
 pub const OUT_OF_SIGHT: f32 = 300.0;
 
+/// How long ACE holds an object out of a client's sight as still known to it, after which it sends
+/// no delete when the object goes and describes it afresh if it stays: 25 s (ObjectMaint.cs:21).
+pub const FORGOTTEN_AFTER: std::time::Duration = std::time::Duration::from_secs(25);
+
 #[derive(Debug, Default)]
 pub struct World {
     pub objects: HashMap<u32, WorldObject>,
@@ -514,13 +518,13 @@ pub struct World {
     /// The landblock the server last placed us in: a change means we
     /// left a world behind (see `arrived_in`).
     player_landblock: Option<u16>,
-    /// What was set aside on leaving a world behind (see `arrived_in`),
+    /// What was set aside on leaving a world behind (see `arrived_in`), and when,
     /// until the server deletes it or we are back within sight of it. ACE
     /// never describes an object again while it thinks we know it, and it
     /// goes on thinking so when we come back inside twenty-five seconds:
     /// thrown away, the Holtburg Dungeon's portal was gone for good after
     /// a character who died just inside rose at the lifestone next door.
-    left_behind: HashMap<u32, WorldObject>,
+    left_behind: HashMap<u32, (WorldObject, std::time::Instant)>,
     /// Bumped whenever the set of drawable objects or a position changes.
     pub generation: u64,
     /// The player's character sheet.
@@ -754,8 +758,9 @@ impl World {
     /// Set aside, not forgotten: back within sight inside those
     /// twenty-five seconds and the server never let it go, so it never
     /// describes it again (see `left_behind`). Whatever was set aside is
-    /// brought back on coming within sight of it, or when the server
-    /// speaks of it, and dropped when the server deletes it.
+    /// brought back on coming within sight of it inside
+    /// [`FORGOTTEN_AFTER`], or when the server speaks of it, and dropped
+    /// when the server deletes it.
     ///
     /// Distance, not landblock, decides it: outdoor landblocks are
     /// visible across their borders, so walking from one into the next
@@ -770,13 +775,18 @@ impl World {
         let Some(here) = self.player().and_then(|o| o.world_pos()) else {
             return;
         };
+        let now = std::time::Instant::now();
+        // Past FORGOTTEN_AFTER the server describes afresh whatever is still there and never deletes
+        // what went meanwhile (test: what_was_set_aside_too_long_ago_stays_gone).
+        self.left_behind
+            .retain(|_, (_, at)| now.duration_since(*at) < FORGOTTEN_AFTER);
         let mine = self.player_guid;
         // Carried, or never placed, is not judged by distance.
         let far = |o: &WorldObject| o.world_pos().map(|p| (p - here).length() > OUT_OF_SIGHT);
         let back: Vec<u32> = self
             .left_behind
             .iter()
-            .filter(|(_, o)| far(o) == Some(false))
+            .filter(|(_, (o, _))| far(o) == Some(false))
             .map(|(guid, _)| *guid)
             .collect();
         for guid in &back {
@@ -790,7 +800,7 @@ impl World {
             .collect();
         for guid in &aside {
             if let Some(o) = self.objects.remove(guid) {
-                self.left_behind.insert(*guid, o);
+                self.left_behind.insert(*guid, (o, now));
             }
         }
         if !aside.is_empty() || !back.is_empty() {
@@ -806,7 +816,7 @@ impl World {
 
     /// Something set aside (see `arrived_in`) is in the world again.
     fn bring_back(&mut self, guid: u32) {
-        if let Some(o) = self.left_behind.remove(&guid) {
+        if let Some((o, _)) = self.left_behind.remove(&guid) {
             self.objects.insert(guid, o);
             self.generation += 1;
         }
@@ -1876,10 +1886,13 @@ mod tests {
         // Something set aside is forgotten too, and never comes back.
         world.left_behind.insert(
             9,
-            WorldObject {
-                guid: 9,
-                ..Default::default()
-            },
+            (
+                WorldObject {
+                    guid: 9,
+                    ..Default::default()
+                },
+                std::time::Instant::now(),
+            ),
         );
         assert!(!world.forget(9), "it was not in the world");
         assert!(world.left_behind.is_empty());
@@ -1906,12 +1919,15 @@ mod tests {
         );
         world.left_behind.insert(
             2,
-            WorldObject {
-                guid: 2,
-                name: "Holtburg Dungeon".into(),
-                position: Some(mouth),
-                ..Default::default()
-            },
+            (
+                WorldObject {
+                    guid: 2,
+                    name: "Holtburg Dungeon".into(),
+                    position: Some(mouth),
+                    ..Default::default()
+                },
+                std::time::Instant::now(),
+            ),
         );
         // Steps within the landblock: still out of sight.
         world.walked();
@@ -1922,6 +1938,58 @@ mod tests {
         world.walked();
         assert!(world.objects.contains_key(&2), "224 m off: in sight again");
         assert!(world.left_behind.is_empty());
+    }
+
+    #[test]
+    fn what_was_set_aside_too_long_ago_stays_gone() {
+        // Back into the Holtburg Dungeon after a town run: ACE let go of the
+        // corpses and creatures left in it long ago and sent no delete, so
+        // they are not brought back, while one left moments ago is.
+        let inside = Position::new_flat(0x01F6_0224, Vec3::new(217.5, -8.1, 0.0));
+        let beside = Position::new_flat(0x01F6_0224, Vec3::new(219.0, -8.0, 0.0));
+        let mut world = World {
+            player_guid: Some(ME),
+            player_landblock: Some(0xA8B5),
+            ..Default::default()
+        };
+        world.objects.insert(
+            ME,
+            WorldObject {
+                guid: ME,
+                position: Some(inside),
+                ..Default::default()
+            },
+        );
+        let now = std::time::Instant::now();
+        let set_aside = |name: &str, ago: u64| {
+            (
+                WorldObject {
+                    name: name.into(),
+                    position: Some(beside),
+                    ..Default::default()
+                },
+                now - std::time::Duration::from_secs(ago),
+            )
+        };
+        world
+            .left_behind
+            .insert(2, set_aside("Corpse of Drudge Slave", 3600));
+        world
+            .left_behind
+            .insert(3, set_aside("Spikey Armoredillo", 26));
+        world
+            .left_behind
+            .insert(4, set_aside("Holtburg Dungeon", 10));
+
+        world.arrived_in(inside.cell);
+
+        assert!(!world.objects.contains_key(&2), "an hour-old corpse");
+        assert!(
+            !world.objects.contains_key(&3),
+            "just past the server's 25 s"
+        );
+        assert!(world.objects.contains_key(&4), "left ten seconds ago");
+        assert!(world.left_behind.is_empty(), "the old ones are dropped");
     }
 
     #[test]
