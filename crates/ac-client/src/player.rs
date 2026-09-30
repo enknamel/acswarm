@@ -1404,12 +1404,18 @@ impl Player {
         let strides = ((reach / STRIDE).ceil() as usize).clamp(1, MAX_STRIDES);
         let share = 1.0 / strides as f32;
         let cap = self.step_cap;
+        let was_moving = self.moving;
         let mut moved = false;
         for _ in 0..strides {
             self.step_cap = cap.map(|c| c * share);
             moved |= self.step(assets, input, dt * share);
         }
         self.step_cap = cap;
+        // Where a walk ended is owed: no MoveToState tells it while a server walk is stood aside for,
+        // and ACE judges the use from the last report (Player_Move.cs:127), up to 250 ms short.
+        if was_moving && !moved && !asked {
+            self.owe_position = true;
+        }
         // Whether the frame moved the character, not whether its last
         // step did: a fall that lands part-way through a frame and stands
         // still for the rest of it has moved all the same.
