@@ -71,6 +71,14 @@ priority; a live report starts from the telemetry (`tools/telemetry.py`, `--mark
 
 ## Fixed
 
+- **Hour-old corpses and creatures after a portal trip** (fbefc18): back in the Holtburg Dungeon,
+  Blargerton asked corpses from earlier trips to open three times each, cast at a creature the
+  server no longer had ("Target not acquired"), and let a Spikey Armoredillo hit him meanwhile.
+  What was set aside on leaving now lapses after ACE's 25 s; live, a target left 40 s was described
+  again by the server.
+- **Stood on the portal re-using it** (fb7bef9): the stop of a server walk was never reported, so
+  ACE judged the use from a position up to 250 ms short. Live, a portal used from 11 m: 0 of 5
+  teleports before, 5 of 5 after.
 - **The shot test, checked against the server** (this merge): +Scn Mage cast Frost Arc III at a
   Wood Target Drudge (stands still) from 46 spots round three places in Blargerton's rooms of the
   Holtburg Dungeon. Predicted clear: 23, all did damage; predicted blocked: 23, none did. Every
