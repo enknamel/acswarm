@@ -71,6 +71,10 @@ priority; a live report starts from the telemetry (`tools/telemetry.py`, `--mark
 
 ## Fixed
 
+- **Stuck upstairs at the Scrivener's** (this merge): the graph had the stair up and none down (the
+  body walks down onto a ramp 0.33 m under the tread its node stands on), and a journey's points on
+  a block line were walked at straight. Offline from Blargerton's spot: at Boddry's counter in 22 s,
+  where he had stood; the dungeon explore sweep unchanged, 0 of 601 runs stalled bar the sealed rooms.
 - **Hour-old corpses and creatures after a portal trip** (fbefc18): back in the Holtburg Dungeon,
   Blargerton asked corpses from earlier trips to open three times each, cast at a creature the
   server no longer had ("Target not acquired"), and let a Spikey Armoredillo hit him meanwhile.
