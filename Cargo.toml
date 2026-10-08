@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/*", "bins/*", "examples/*", "xtask"]
 
 [workspace.package]
-version = "0.0.4"
+version = "0.0.5"
 edition = "2021"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/enknamel/acswarm"
