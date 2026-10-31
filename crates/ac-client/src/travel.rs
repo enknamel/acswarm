@@ -1923,6 +1923,37 @@ mod tests {
 
     #[test]
     #[ignore = "needs AC_DATA_DIR"]
+    fn the_facility_hub_is_walked_down_to_its_lower_portals() {
+        // Blargerton, on his way to the Tusker Barracks, landed in the Facility Hub and stood: the
+        // berths of the portals on its upper floor blanked out the corridors under them, and the
+        // graph had no way down to the Tusker portals 18 m below.
+        let o = ac_world::landblock_origin(0x8A02_0000);
+        let landed = Vec3::new(26558.4, 298.0, 6.0);
+        let mut c = crate::testkit::standing_in_the_field(31, 0x8A02_0212, landed - o);
+        c.world.player_guid = Some(crate::testkit::ME);
+        assert!(c.travel_to(Vec2::new(46257.1, 24399.7)));
+        let dt = 0.05;
+        let t0 = Instant::now();
+        let mut first = None;
+        for frame in 0..30 * 20 {
+            let now = t0 + Duration::from_secs_f32(frame as f32 * dt);
+            let goal = c.travel_goal(now).map(|g| g.0);
+            first = first.or(goal);
+            c.tick_player(crate::player::Input::default(), dt, now);
+            let at = c.player.as_ref().unwrap().world_position();
+            if goal == first && first.is_some_and(|g| at.distance(g) < 1.5) {
+                return;
+            }
+        }
+        let at = c.player.as_ref().unwrap().world_position() - o;
+        panic!(
+            "not at the first portal after 30 s: at {at}, it is at {:?}",
+            first.map(|g| g - o)
+        );
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn the_stairs_up_to_a_scrivener_are_walked_down_too() {
         // Blargerton, upstairs by the Scrivener of Creature Magic in Holtburg, set off for Boddry's
         // counter and stood: the graph had the stairs up and none down, and the journey's first two

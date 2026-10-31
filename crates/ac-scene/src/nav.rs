@@ -51,6 +51,16 @@ const BODY_CLOSING: f32 = 0.3;
 
 /// Where the ground is: static collision plus, outdoors, a terrain
 /// height function over world `(x, y)`.
+/// Metres above or below a portal's mouth its berth reaches: under a storey, so the floors over and
+/// under it stay walkable (the Facility Hub's stand 6 m apart, a Holtburg house's 3 m).
+pub const BERTH_HEIGHT: f32 = 2.5;
+
+/// Whether feet at `p` are within `berth` of the portal mouth `mouth`, on its floor
+/// (test: a_portal_berth_keeps_to_its_own_floor).
+pub fn in_berth(mouth: Vec3, p: Vec3, berth: f32) -> bool {
+    flat(p - mouth).length() < berth && (p.z - mouth.z).abs() < BERTH_HEIGHT
+}
+
 pub struct Ground<'a> {
     pub collision: &'a CollisionWorld,
     pub terrain: Option<&'a dyn Fn(f32, f32) -> Option<f32>>,
@@ -61,8 +71,8 @@ pub struct Ground<'a> {
     /// piers and bridges over water are still walked.
     pub sea: Option<&'a dyn Fn(f32, f32) -> bool>,
     /// Where nothing may stand at all, floor or no floor: the berth
-    /// around a portal that must not be touched.
-    pub no_go: Option<&'a dyn Fn(f32, f32) -> bool>,
+    /// around a portal that must not be touched, on its own floor ([`in_berth`]).
+    pub no_go: Option<&'a dyn Fn(Vec3) -> bool>,
     /// Keep out of buildings: interior floors are not walkable. For a
     /// walk from one outdoor spot to another, which should go over the
     /// hill rather than through the halls beneath it.
@@ -84,7 +94,7 @@ impl Ground<'_> {
     /// interior floor within step range, else the higher of an outdoor
     /// floor and the terrain (the rule `Player::update` walks by).
     pub fn surface_at(&self, p: Vec3, cap: &Capsule) -> Option<(f32, u32)> {
-        if self.no_go.is_some_and(|f| f(p.x, p.y)) {
+        if self.no_go.is_some_and(|f| f(p)) {
             return None;
         }
         let floor = self.collision.floor_at(p, cap.step_up, cap.step_down);
@@ -261,9 +271,7 @@ impl Ground<'_> {
             if self.outdoors_only && walk.floor.is_some_and(|(_, cell)| cell != 0) {
                 return false;
             }
-            if self.no_go.is_some_and(|f| f(next.x, next.y))
-                || self.sea.is_some_and(|f| f(next.x, next.y))
-            {
+            if self.no_go.is_some_and(|f| f(next)) || self.sea.is_some_and(|f| f(next.x, next.y)) {
                 return false;
             }
             // A step that closes little is sliding along a wall the hop runs into.
@@ -316,7 +324,7 @@ impl Ground<'_> {
             }
             // Where nothing may stand is no edge: a walk leaning on it
             // goes round, not down.
-            if self.no_go.is_some_and(|f| f(at.x, at.y)) {
+            if self.no_go.is_some_and(|f| f(at)) {
                 continue;
             }
             let z = match self.surface_at(at, cap) {
@@ -515,9 +523,6 @@ impl NavGraph {
             {
                 let x = gx as f32 * self.spacing;
                 let y = gy as f32 * self.spacing;
-                if ground.no_go.is_some_and(|f| f(x, y)) {
-                    continue;
-                }
                 let mut levels = ground.collision.floors_at_xy(x, y);
                 if ground.outdoors_only {
                     levels.retain(|(_, cell)| *cell == 0);
@@ -528,7 +533,9 @@ impl NavGraph {
                 levels.sort_by(|a, b| b.0.total_cmp(&a.0));
                 let mut placed: Vec<f32> = Vec::new();
                 for (z, _) in levels {
-                    if placed.iter().any(|&pz| (pz - z).abs() < LEVEL_MERGE) {
+                    if placed.iter().any(|&pz| (pz - z).abs() < LEVEL_MERGE)
+                        || ground.no_go.is_some_and(|f| f(Vec3::new(x, y, z)))
+                    {
                         continue;
                     }
                     let Some(node) = self.place(ground, Vec3::new(x, y, z), (gx, gy), &cap) else {
@@ -560,7 +567,7 @@ impl NavGraph {
             if !(self.gx.0..=self.gx.1).contains(&gx) || !(self.gy.0..=self.gy.1).contains(&gy) {
                 continue;
             }
-            if ground.no_go.is_some_and(|f| f(d.x, d.y)) {
+            if ground.no_go.is_some_and(|f| f(*d)) {
                 continue;
             }
             let Some(node) = self.place(ground, *d, (gx, gy), &cap) else {
@@ -1055,6 +1062,29 @@ mod tests {
             );
             from = p;
         }
+    }
+
+    #[test]
+    fn a_portal_berth_keeps_to_its_own_floor() {
+        // The Facility Hub's Stronghold portal stands on the floor at z 0, over a corridor 12 m
+        // below: its berth is on its own floor only.
+        let mouth = Vec3::new(80.0, -24.7, -0.1);
+        assert!(
+            in_berth(mouth, Vec3::new(81.0, -24.0, 0.0), 3.0),
+            "beside it"
+        );
+        assert!(
+            !in_berth(mouth, Vec3::new(81.0, -24.0, -12.0), 3.0),
+            "the corridor under it"
+        );
+        assert!(
+            !in_berth(mouth, Vec3::new(81.0, -24.0, 6.0), 3.0),
+            "the floor over it"
+        );
+        assert!(
+            !in_berth(mouth, Vec3::new(84.0, -24.7, 0.0), 3.0),
+            "past the berth"
+        );
     }
 
     #[test]

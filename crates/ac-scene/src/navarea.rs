@@ -83,7 +83,7 @@ pub struct Area {
     /// Spots to keep away from, and how far: the mouths of portals that
     /// are not the one being walked to. A portal takes whoever touches
     /// it, so a walk that brushes the wrong one ends somewhere else.
-    pub avoid: Vec<Vec2>,
+    pub avoid: Vec<Vec3>,
     pub berth: f32,
     /// Keep out of buildings (see `nav::Ground::outdoors_only`). Set
     /// for a walk between two outdoor spots; a walk that finds no way
@@ -240,10 +240,7 @@ impl Area {
         };
         // The berth around the portals we are not walking to: nowhere
         // to stand, floor or no floor, indoors or out.
-        let no_go = |x: f32, y: f32| -> bool {
-            let here = Vec2::new(x, y);
-            avoid.iter().any(|a| a.distance(here) < *berth)
-        };
+        let no_go = |p: Vec3| -> bool { avoid.iter().any(|a| crate::nav::in_berth(*a, p, *berth)) };
         let keep_off = *berth > 0.0 && !avoid.is_empty();
         let ground = Ground {
             collision,

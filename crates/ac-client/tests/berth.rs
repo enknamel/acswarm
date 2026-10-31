@@ -31,7 +31,7 @@ fn a_walk_through_the_hub_keeps_its_berth_from_the_other_portals() {
     assert!(
         avoid
             .iter()
-            .all(|m| m.distance(Vec2::new(to.x, to.y)) > PORTAL_BERTH),
+            .all(|m| m.truncate().distance(Vec2::new(to.x, to.y)) > PORTAL_BERTH),
         "the portal we are walking to is not kept off"
     );
     area.avoid = avoid.clone();
@@ -46,7 +46,9 @@ fn a_walk_through_the_hub_keeps_its_berth_from_the_other_portals() {
         for k in 0..=steps {
             let q = prev.lerp(*w, k as f32 / steps as f32);
             let q2 = Vec2::new(q.x, q.y);
-            let too_close = avoid.iter().find(|m| m.distance(q2) < PORTAL_BERTH - 0.6);
+            let too_close = avoid
+                .iter()
+                .find(|m| m.truncate().distance(q2) < PORTAL_BERTH - 0.6);
             assert!(too_close.is_none(), "the walk brushes a portal at {q:?}");
         }
         prev = *w;
