@@ -1226,11 +1226,10 @@ impl Player {
             .as_ref()
             .map(|c| c.doorways.clone())
             .unwrap_or_default();
-        let no_go = |x: f32, y: f32| {
-            let here = glam::Vec2::new(x, y);
+        let no_go = |p: Vec3| {
             avoid
                 .iter()
-                .any(|a| a.distance(here) < crate::pathfinder::PORTAL_BERTH)
+                .any(|a| ac_scene::nav::in_berth(*a, p, crate::pathfinder::PORTAL_BERTH))
         };
         let ground = Ground {
             collision,

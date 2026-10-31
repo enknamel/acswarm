@@ -357,13 +357,13 @@ pub const PORTAL_BERTH: f32 = 3.0;
 
 /// The mouths of the portals within reach of a walk from `from` to
 /// `to`, except any the walk is going to (within a stride of `to`).
-pub fn portal_mouths_to_avoid(from: Vec3, to: Vec3) -> Vec<glam::Vec2> {
+pub fn portal_mouths_to_avoid(from: Vec3, to: Vec3) -> Vec<Vec3> {
     let (f, t) = (glam::Vec2::new(from.x, from.y), glam::Vec2::new(to.x, to.y));
     let mid = (f + t) * 0.5;
     let reach = f.distance(t) * 0.5 + 200.0;
     ac_world::portals::near(mid, reach)
         .into_iter()
-        .map(|p| p.from_xy())
-        .filter(|m| m.distance(t) > PORTAL_BERTH + 1.5)
+        .filter(|p| p.from_xy().distance(t) > PORTAL_BERTH + 1.5)
+        .map(|p| p.from)
         .collect()
 }
