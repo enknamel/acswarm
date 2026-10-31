@@ -78,3 +78,46 @@ fn a_resist_or_an_evasion_got_there() {
     // Nothing thrown yet -- still walking to a clear shot -- is no miss.
     assert!(!nothing_arrived(None, now));
 }
+
+#[test]
+fn a_spell_of_ours_landing_is_read_for_its_damage() {
+    // The caster's line from ACE's SpellProjectile, with what may come before and after it.
+    assert_eq!(
+        spell_landed("You blast Drudge Slave for 23 points with Frost Arc III."),
+        Some(("Drudge Slave", 23, "Frost Arc III"))
+    );
+    assert_eq!(
+        spell_landed(
+            "Critical hit! You singe Drudge Servant for 41 points with Flame Bolt I. \
+             Your critical hit was avoided with their augmentation!"
+        ),
+        Some(("Drudge Servant", 41, "Flame Bolt I"))
+    );
+    // A spell landing on us, a kill and a drain are not our damage.
+    for line in [
+        "Drudge Shaman blasts you for 12 points with Flame Bolt I.",
+        "Your assault sends Drudge Slave to an icy death!",
+        "With Drain Stamina Other I you drain 5 points of stamina from Drudge Slave.",
+    ] {
+        assert_eq!(spell_landed(line), None, "{line}");
+    }
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_spell_landing_teaches_what_a_cast_of_it_is_worth() {
+    let mut c = crate::testkit::character_of_level(crate::testkit::game_data(), 30);
+    let table = c.assets.spell_table().unwrap();
+    let flame = table.find_by_name("Flame Bolt I").unwrap().0;
+    let frost = table.find_by_name("Frost Bolt I").unwrap().0;
+    assert_eq!(c.damage_per_cast(flame, None), None, "nothing landed yet");
+    c.hear_spell_landed("You singe Drudge Slave for 20 points with Flame Bolt I.");
+    c.hear_spell_landed("You blast Drudge Slave for 30 points with Flame Bolt I.");
+    assert_eq!(c.damage_per_cast(flame, None), Some(25.0));
+    // An Ice Golem takes nothing from cold: a cold hit on one teaches nothing, and the fire
+    // average is worth all of itself against it (ac_world::elements, weenie 196).
+    let golem = ac_world::elements::creature_by_id(196);
+    c.hear_spell_landed("You blast Ice Golem for 0 points with Frost Bolt I.");
+    assert_eq!(c.damage_per_cast(frost, golem), None);
+    assert_eq!(c.damage_per_cast(flame, golem), Some(25.0));
+}
