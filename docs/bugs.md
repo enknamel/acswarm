@@ -25,6 +25,10 @@ priority; a live report starts from the telemetry (`tools/telemetry.py`, `--mark
   held until the body stands on it (`Route::target`, ON_THE_SPOT) and it could not. Offline over the
   same static geometry the walk arrives, so something the map lacks was in the way (scn-shots).
 
+- **Flips between "closing on" and "getting in sight" of a creature below.** Blargerton on a hill
+  at AD7D0013 (33273.0 24068.1 47.7) alternated the two every frame (1048 times) for a minute at a
+  Drudge Lurker 58 m off and 18 m under him, standing still, until "no damage in a while".
+
 ## 2. Plays badly
 
 - **Experience goes to weapon skills with no weapon to use them** (Scn Blade raised Heavy Weapons
@@ -71,6 +75,9 @@ priority; a live report starts from the telemetry (`tools/telemetry.py`, `--mark
 
 ## Fixed
 
+- **Stood in the Facility Hub on the way to the Tusker Barracks** (this merge): a portal's berth
+  was tested on x and y alone, so the portals of the upper floor blanked out the corridors under
+  them. It keeps to its own floor now; offline from his landing spot, at the Tusker Abode portal in 12 s.
 - **Stuck upstairs at the Scrivener's** (this merge): the graph had the stair up and none down (the
   body walks down onto a ramp 0.33 m under the tread its node stands on), and a journey's points on
   a block line were walked at straight. Offline from Blargerton's spot: at Boddry's counter in 22 s,
