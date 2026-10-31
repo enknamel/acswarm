@@ -912,8 +912,15 @@ impl Client {
         let spot = if seen || matches!(how, How::Melee) {
             None
         } else {
+            // A spot found for a longer reach is looked for again once the reach is cut (nothing
+            // landing from there): kept, it stood the walk between it and closing in, every frame
+            // (test: a_spot_chosen_for_a_longer_reach_is_not_kept_once_the_reach_is_cut).
             let fresh = match self.dodge.vantage {
-                Some((g, was, spot)) if g == target && was.distance(at) <= VANTAGE_MOVED => {
+                Some((g, was, spot))
+                    if g == target
+                        && was.distance(at) <= VANTAGE_MOVED
+                        && spot.is_none_or(|s| s.distance(at) <= range * WITHIN) =>
+                {
                     // Got there and still no shot: the flight test was wrong here, so walk at it.
                     spot.filter(|s| s.distance(me) > 0.5)
                 }
@@ -2038,6 +2045,63 @@ mod tests {
             "the shot clears from {:?}",
             spot - origin
         );
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn a_spot_chosen_for_a_longer_reach_is_not_kept_once_the_reach_is_cut() {
+        // Blargerton on a hill by the Tusker Barracks (0xAD7D) at a Drudge Lurker 58 m off and 18 m
+        // below: his arcs struck the slope, the reach was cut to 29 m, and the spot up the hill found
+        // for the full reach was kept. He flipped every frame between it and closing in, 1048 times.
+        let block = 0xAD7D_0000u32;
+        let origin = ac_world::landblock_origin(block);
+        let me = Vec3::new(55.6, 71.8, 45.8);
+        let mut c =
+            crate::testkit::standing_in_the_field(31, ac_world::outdoor_cell(block, me), me);
+        c.world.player_guid = Some(crate::testkit::ME);
+        let below = Vec3::new(62.1, 125.5, 28.4);
+        const LURKER: u32 = 0x8000_0401;
+        let mut lurker = crate::testkit::creature(LURKER, "Drudge Lurker");
+        lurker.position = Some(ac_world::object::Position::new_flat(
+            ac_world::outdoor_cell(block, below),
+            below,
+        ));
+        c.world.objects.insert(LURKER, lurker);
+        let (spell, _) = c
+            .assets
+            .spell_table()
+            .unwrap()
+            .find_by_name("Flame Arc III")
+            .expect("Flame Arc III");
+        let how = How::Spell(spell);
+        let cap = 29.0;
+        c.autoplay.closing = Some((LURKER, cap));
+        let uphill = origin + Vec3::new(55.5, 70.5, 47.0);
+        c.dodge.vantage = Some((LURKER, origin + below, Some(uphill)));
+        let t0 = Instant::now();
+        let dt = 0.05;
+        let (mut flips, mut last) = (0, None);
+        let mut ready = false;
+        for frame in 0..10 * 20 {
+            let now = t0 + Duration::from_secs_f32(frame as f32 * dt);
+            ready = !c.autoplay_approach(LURKER, "Drudge Lurker", how);
+            c.tick_player(crate::player::Input::default(), dt, now);
+            let seen = c.autoplay.status.starts_with("closing");
+            flips += usize::from(last.is_some_and(|l| l != seen));
+            last = Some(seen);
+            if ready {
+                break;
+            }
+        }
+        let at = c.player.as_ref().unwrap().world_position();
+        assert!(ready, "still walking after 10 s, at {}", at - origin);
+        assert!(flips < 20, "{flips} flips");
+        assert!(
+            at.distance(origin + below) <= cap,
+            "{:.1} m off",
+            at.distance(origin + below)
+        );
+        assert!(c.shot_clears(LURKER, how), "no shot from {}", at - origin);
     }
 
     /// A shot of ours at `at` that burst as the client first heard of it: stopped and hidden.
