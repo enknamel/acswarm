@@ -601,6 +601,27 @@ Step 1, measured (`navcost.rs`, release; build ms, then plan ms over 20 node pai
 | 0x8A02 | 620 ms, plans 42.9 ms | 607 ms, plans 68.3 ms |
 | 0x0286 | 231 ms, plans 82.6 ms | 227 ms, plans 94.2 ms |
 
+Step 2, measured the same way. The collision commit (e92d306) made every query cheaper with
+the graph unchanged; the columns after it are the step's own commits, each over the last.
+
+| block | collision faster | body's step (hop) | drop edges | berths, labels |
+|---|---|---|---|---|
+| 0xA9B4 | 374 ms | 1173 ms | 1337 ms, 1305 drops | 1396 ms, plans 56.7 ms |
+| 0xF682 | 356 ms | 1116 ms | 1334 ms, 3387 drops | 1352 ms, plans 89.7 ms |
+| 0x8A02 | 322 ms | 796 ms | 811 ms, 172 drops | 810 ms, plans 195.5 ms |
+| 0x0286 | 157 ms | 285 ms | 362 ms, 88 drops | 360 ms, plans 129.0 ms |
+
+- Against step 1's 643 / 587 / 607 / 227 ms that is 2.2x, 2.3x, 1.3x and 1.6x: the two town
+  blocks are over the 2.0x budget. The open-ground fast path is exact and per step (`Swept`).
+  Reusing a plain forward walk for the way back saved nothing measurable and was dropped.
+- Drops are built but no phase-1 query takes one (`WalkQuery::drops`): the old steering runs off
+  a ledge at a run, and with drops in it stepped off a Holtburg upper floor instead of taking the
+  stairs (`the_stairs_down_from_an_upper_floor_are_found_and_walked`). The phase-2 follower asks.
+- `FLOOR_Z` (commit 6) waits for phase 2. With it the harness was unchanged, but
+  `every_sampled_edge_is_walked_by_the_body` found a drop edge the body does not walk:
+  0xA9B4 (32526.0, 34603.5, 102.0) to (32527.5, 34603.5, 94.0), a roof's edge the graph's
+  0.2 m step falls from and the body's walking step stands on.
+
 | risk | where | how it shows | what is done |
 |---|---|---|---|
 | The walk test makes the graph about 5 × slower to build | step 2 | `navcost.rs` ms over 2.0 × the baseline | the open-ground fast path (exact), then reuse of the reverse direction (§4). The builder thread means a slow build delays the first answer and never stalls a frame (step 3); `PLAN` ms in the harness shows that delay. |
