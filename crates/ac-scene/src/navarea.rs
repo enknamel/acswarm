@@ -29,6 +29,10 @@ use crate::{lbid, Assets, Result, BLOCK_SIZE};
 /// which covers any city and more than one travel leg.
 pub const MAX_SIDE: u32 = 3;
 
+/// A point this near (metres) a floor under or over it stands on that floor: the client's
+/// `GOAL_ON_FLOOR` for a goal on a roof.
+const ON_A_FLOOR: f32 = 0.6;
+
 /// The landblock a world position falls in.
 pub fn block_at(p: Vec3) -> u32 {
     let x = (p.x / BLOCK_SIZE).floor().clamp(0.0, 254.0) as u32;
@@ -331,6 +335,11 @@ impl Area {
     /// quietly grounded to the patch of floor three metres below her.
     pub fn grounded(&self, p: Vec3) -> Vec3 {
         if self.dungeon || self.collision.in_known_cell(p) {
+            return p;
+        }
+        // Nor on a floor of its own outdoors: a deck, a bridge, a roof
+        // (a_goal_standing_on_a_deck_is_planned_to_on_the_deck).
+        if self.collision.floor_at(p, ON_A_FLOOR, ON_A_FLOOR).is_some() {
             return p;
         }
         match self.terrain_at(p.x, p.y) {

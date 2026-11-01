@@ -247,3 +247,23 @@ fn a_route_goes_round_the_ocean_rather_than_across_it() {
         "no pair of shore points with water between them"
     );
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_goal_standing_on_a_deck_is_planned_to_on_the_deck() {
+    // Oolutanga's Refuge's Jeweler, 11.5 m over the ground on a deck: the goal was grounded to the
+    // spot beneath him, a one-step route there, and a character walked on the spot under him.
+    let dir = ac_dat::test_data_dir();
+    let assets = Assets::open(dir).unwrap();
+    let cap = capsule();
+    let block = 0xF682_0000;
+    let origin = lbid::world_origin(block);
+    let under = origin + Vec3::new(81.9, 28.56, 51.93);
+    let jeweler = origin + Vec3::new(81.9037, 28.5586, 63.4465);
+    let mut area = Area::build(&assets, &[block], &cap, block).unwrap();
+    assert_eq!(area.grounded(jeweler), jeweler, "he stands on the deck");
+    let path = area.path(under, jeweler).expect("the way up");
+    let end = *path.last().unwrap();
+    assert!((end.z - jeweler.z).abs() < 0.6, "ends at {end:?}");
+    assert!(path.len() > 3, "straight at him: {path:?}");
+}
