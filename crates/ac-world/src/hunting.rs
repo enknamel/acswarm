@@ -297,16 +297,6 @@ fn ranked_among<'a>(
     v
 }
 
-/// What a ground pays over a stay of [`STAY`] seconds once the journey there is counted: the
-/// journey is time not fighting.
-pub fn paid_over_stay(worth: f32, journey_seconds: f32) -> f32 {
-    worth * STAY / (STAY + journey_seconds.max(0.0))
-}
-
-/// How long a character hunts a ground between journeys, seconds: a guess at the time between
-/// town runs, not measured.
-pub const STAY: f32 = 1200.0;
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -398,15 +388,13 @@ mod tests {
     }
 
     #[test]
-    fn a_busy_ground_pays_more_and_a_journey_eats_into_a_stay() {
+    fn a_busy_ground_pays_more() {
         let thin = ground(1, 0.0, 5, 10, 10, 10);
         let busy = Ground {
             creatures: 80,
             ..thin.clone()
         };
         assert!(busy.worth() > 1.5 * thin.worth());
-        assert_eq!(paid_over_stay(10.0, 0.0), 10.0);
-        assert_eq!(paid_over_stay(10.0, STAY), 5.0);
     }
 
     #[test]
