@@ -23,6 +23,7 @@ pub mod nav;
 pub mod navarea;
 pub mod particles;
 pub mod scenery;
+pub mod stride;
 pub mod terrain;
 pub mod texmerge;
 pub mod wayfind;
