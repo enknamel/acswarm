@@ -38,7 +38,7 @@ const RETRACE_ARRIVE: f32 = 0.2;
 
 /// The route being followed.
 #[derive(Debug, Clone)]
-pub struct Route {
+pub struct Course {
     /// Goal the route was planned for.
     pub goal: Vec3,
     /// Waypoints in order; the last one is the goal.
@@ -50,9 +50,9 @@ pub struct Route {
     pub arrive: f32,
 }
 
-impl Route {
+impl Course {
     pub fn new(goal: Vec3, waypoints: Vec<Vec3>, now: Instant) -> Self {
-        Route {
+        Course {
             goal,
             waypoints,
             next: 0,
@@ -134,7 +134,7 @@ pub enum Aim {
 /// One character's route and the throttles and stuck detection around it.
 #[derive(Debug, Clone)]
 pub struct Steering {
-    pub route: Option<Route>,
+    pub route: Option<Course>,
     /// Next time the straight line is re-tested while no route exists.
     next_check: Instant,
     /// Where the character last made progress, and when.
@@ -307,7 +307,7 @@ impl Steering {
         }
         // A route from the neighbourhood planner, if one has come back.
         if let Some(waypoints) = ground.take_wide(me, far_goal) {
-            self.route = Some(Route::new(far_goal, waypoints, now));
+            self.route = Some(Course::new(far_goal, waypoints, now));
             self.route_is_wide = true;
             self.retracing = false;
             self.next_check = now + REPLAN_AFTER;
@@ -368,7 +368,7 @@ impl Steering {
                         waypoints.len(),
                         goal - origin
                     );
-                    self.route = Some(Route::new(goal, waypoints, now));
+                    self.route = Some(Course::new(goal, waypoints, now));
                     self.route_is_wide = false;
                     self.retracing = false;
                     self.no_way = false;
@@ -391,7 +391,7 @@ impl Steering {
                                 "route: no path from here; back the way it came, {} waypoints",
                                 way.len()
                             );
-                            let mut r = Route::new(goal, way, now);
+                            let mut r = Course::new(goal, way, now);
                             r.arrive = RETRACE_ARRIVE;
                             let aim =
                                 r.target(me, |from, to| !ground.line_blocked(block, from, to));
@@ -535,8 +535,8 @@ mod route_tests {
     }
 
     /// Up a staircase: two paces of floor, three waypoints climbing, the vendor on the landing.
-    fn stairs() -> Route {
-        Route::new(
+    fn stairs() -> Course {
+        Course::new(
             at(0.0, 6.0, 3.0),
             vec![
                 at(0.0, 1.0, 0.0),
