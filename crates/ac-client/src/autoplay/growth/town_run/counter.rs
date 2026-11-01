@@ -5,7 +5,7 @@ use glam::Vec2;
 use super::vendor::spot;
 use super::{
     Errand, Phase, Run, Turn, BUSY_ASKS, BUSY_REASK, COUNTER_REACH, SELLING_TIMEOUT, SETTLE,
-    STOPS_PER_RUN, VENDOR_OPEN_TIMEOUT, VENDOR_REACH, WALK_UP_LIMIT,
+    STOPS_PER_RUN, VENDOR_OPEN_TIMEOUT, VENDOR_REACH, WALK_UP_LIMIT, WALK_UP_PROGRESS,
 };
 use crate::autoplay::growth::road::{on_the_way, OnTheWay, WALK_ON_EVERY};
 use crate::autoplay::growth::{a_few, about, Growth};
@@ -153,8 +153,10 @@ impl Client {
                 let lately = run
                     .walked_on
                     .is_some_and(|t| now.duration_since(t) < WALK_ON_EVERY);
+                // Once walking up to the counter, the walk-up is the judge of getting there: the
+                // way up to one on a deck leaves its spot far behind round by the ramp.
                 match on_the_way(
-                    away <= VENDOR_REACH,
+                    away <= VENDOR_REACH || run.walking_up.is_some(),
                     self.journey_broken_off(),
                     busy,
                     lately,
@@ -214,9 +216,13 @@ impl Client {
                         // characters standing under corpses.
                         let where_it_is = self.world.objects.get(&guid).and_then(|o| o.world_pos());
                         if let Some(spot) = where_it_is {
-                            if Vec2::new(spot.x, spot.y).distance(me) > COUNTER_REACH {
-                                let since = *run.walking_up.get_or_insert(now);
-                                if now.saturating_duration_since(since) > WALK_UP_LIMIT {
+                            // Height and all: a counter on the deck above is not in reach.
+                            let me3 = self.my_position().unwrap_or(spot);
+                            if spot.distance(me3) > COUNTER_REACH {
+                                let (since, from) = *run.walking_up.get_or_insert((now, me3));
+                                if me3.distance(from) > WALK_UP_PROGRESS {
+                                    run.walking_up = Some((now, me3));
+                                } else if now.saturating_duration_since(since) > WALK_UP_LIMIT {
                                     self.autoplay
                                         .note(format!("could not walk up to {}", run.vendor), now);
                                     return Turn::after_stop(self.grow_run_next(
