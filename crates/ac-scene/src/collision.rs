@@ -30,7 +30,7 @@ pub const GRAVITY: f32 = 9.8;
 /// walking keeps the middle a radius off every wall.
 const EMBEDDED: f32 = 0.1;
 /// A body is held up by floor this far out from its middle, as a share of its radius.
-const FOOTING: f32 = 0.6;
+pub(crate) const FOOTING: f32 = 0.6;
 
 /// The vertical capsule that stands in for a character, feet at its
 /// position. `step_up`/`step_down` mirror a setup's `step_up_height` and
@@ -70,7 +70,7 @@ impl Default for Capsule {
 /// is an overlay the client's cell-by-cell physics never enters, and its floor lay over the ramp
 /// of the mine at ACB5 and walled it off (test: a_mine_is_walked_down_to_its_floor, in ac-client).
 /// A cell with no portals at all is kept: a teleport or spawn can put a body there.
-fn is_walked_into(
+pub(crate) fn is_walked_into(
     cell: &crate::interior::CellScene,
     entered: &std::collections::HashSet<u32>,
 ) -> bool {
@@ -212,6 +212,12 @@ impl CollisionWorld {
     /// must leave every triangle in place rather than discard them all.
     pub fn in_known_cell(&self, p: Vec3) -> bool {
         !self.cells.is_empty() && self.cells.contains(p)
+    }
+
+    /// The interior cell `p` is in, by the cells' own BSPs (see [`CellIndex::cell_at`]); `None`
+    /// outdoors, and in a world that knows of no cells.
+    pub fn cell_at(&self, p: Vec3) -> Option<u32> {
+        self.cells.cell_at(p)
     }
 
     /// Add a polygon set (physics polygons if present, else drawing

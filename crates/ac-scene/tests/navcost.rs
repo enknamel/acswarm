@@ -4,6 +4,8 @@
 
 use std::time::Instant;
 
+use ac_scene::nav::EdgeKind;
+use ac_scene::wayfind::{self, Search, WalkQuery};
 use ac_scene::{collision::Capsule, navarea::Area, Assets};
 
 /// The blocks measured: Holtburg, Oolutanga's Refuge, the Facility Hub, the Hea dungeon.
@@ -34,18 +36,18 @@ fn the_graph_of_each_measured_block_is_built_and_planned_on() {
         area.build_everything();
         let ms = started.elapsed().as_secs_f64() * 1e3;
         let nav = &area.nav;
-        let (mut walk, mut doorway) = (0, 0);
+        let (mut walk, mut drop, mut doorway) = (0, 0, 0);
         for i in 0..nav.len() as u32 {
-            for &j in nav.neighbours(i) {
-                if nav.nodes[i as usize].cell == nav.nodes[j as usize].cell {
-                    walk += 1;
-                } else {
-                    doorway += 1;
+            for e in nav.neighbours(i) {
+                match e.kind {
+                    EdgeKind::Walk => walk += 1,
+                    EdgeKind::Drop => drop += 1,
+                    EdgeKind::Doorway => doorway += 1,
                 }
             }
         }
         println!(
-            "COST {block:#010x} nodes {} edges {} walk/drop/doorway {walk}/0/{doorway} chunks {} ms {ms:.0}",
+            "COST {block:#010x} nodes {} edges {} walk/drop/doorway {walk}/{drop}/{doorway} chunks {} ms {ms:.0}",
             nav.len(),
             nav.edge_count(),
             nav.chunk_count()
@@ -56,9 +58,18 @@ fn the_graph_of_each_measured_block_is_built_and_planned_on() {
         for _ in 0..PAIRS {
             let n = area.nav.len();
             let (a, b) = (rng.below(n), rng.below(n));
-            let (from, to) = (area.nav.nodes[a].pos, area.nav.nodes[b].pos);
+            let (from, to) = (area.nav.nodes[a], area.nav.nodes[b]);
+            let q = WalkQuery {
+                from: (from.pos, from.cell),
+                goal: (to.pos, to.cell),
+                within: 0.5,
+                avoid: &[],
+                berth: 0.0,
+                indoors_too: true,
+            };
             let t = Instant::now();
-            found += usize::from(area.path(from, to).is_some());
+            let search = area.with_ground(|ground, nav| wayfind::search_building(ground, nav, &q));
+            found += usize::from(matches!(search, Search::Found(_)));
             total += t.elapsed().as_secs_f64() * 1e3;
         }
         println!("PLAN {block:#010x} pairs {PAIRS} routed {found} ms {total:.1}");

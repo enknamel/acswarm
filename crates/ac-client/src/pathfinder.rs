@@ -25,6 +25,7 @@ use std::time::{Duration, Instant};
 use ac_scene::collision::Capsule;
 use ac_scene::navarea::{self, Area};
 use ac_scene::{Assets, SharedArchives};
+use ac_world::Place;
 use glam::Vec3;
 
 /// Ask again no more often than this, answered or not. Without a floor
@@ -42,17 +43,6 @@ const ANSWER_GOAL: f32 = 3.0;
 /// theirs. Each is nine blocks of collision, about 15 MB.
 const AREAS: usize = 4;
 
-/// What is known about the two ends of a walk, which is what tells a
-/// point somebody stands on from a point picked off a map.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Ends {
-    /// Both ends are outdoors: the walk should stay out of buildings.
-    pub outdoors: bool,
-    /// The goal is where something actually stands, so its height is
-    /// the answer rather than a guess to be dropped onto the ground.
-    pub exact_to: bool,
-}
-
 /// A request for a walkable route.
 #[derive(Debug, Clone)]
 struct Ask {
@@ -60,19 +50,13 @@ struct Ask {
     who: u64,
     /// Where the answer goes.
     reply: Sender<Answer>,
-    from: Vec3,
-    to: Vec3,
+    /// Where the character stands. A dungeon's cells lie outside its landblock's square on the
+    /// map, so its block is read off its cell, not its position.
+    from: Place,
+    to: Place,
+    /// How near the goal is there (metres, 3D).
+    within: f32,
     capsule: Capsule,
-    /// The landblock the character stands in. A dungeon's cells lie
-    /// outside its landblock's square on the map, so the block cannot
-    /// be read off the position; the character knows it.
-    block: u32,
-    /// Both ends are outdoors: the walk should stay out of buildings.
-    outdoors: bool,
-    /// The goal is where something stands rather than a point picked
-    /// off a map, so its height is to be believed (see
-    /// `ac_scene::navarea::Area::path_to`).
-    exact_to: bool,
 }
 
 /// What the planner found.
@@ -80,8 +64,8 @@ struct Ask {
 pub struct Answer {
     pub from: Vec3,
     pub to: Vec3,
-    /// Waypoints ending at the goal, or `None` when nothing connects
-    /// the two.
+    /// Waypoints ending within reach of the goal, or `None` when nothing
+    /// connects the two.
     pub waypoints: Option<Vec<Vec3>>,
     pub took: Duration,
 }
@@ -161,18 +145,9 @@ impl Pathfinder {
         }
     }
 
-    /// Ask for a route from `from` to `to`, unless one is already on its
-    /// way. Cheap to call every frame.
-    pub fn ask(
-        &mut self,
-        from: Vec3,
-        to: Vec3,
-        capsule: Capsule,
-        block: u32,
-        ends: Ends,
-        now: Instant,
-    ) {
-        let Ends { outdoors, exact_to } = ends;
+    /// Ask for a route from `from` to within `within` of `to`, unless one is already on its way.
+    /// Cheap to call every frame.
+    pub fn ask(&mut self, from: Place, to: Place, within: f32, capsule: Capsule, now: Instant) {
         if self.dead {
             return;
         }
@@ -200,10 +175,8 @@ impl Pathfinder {
                 reply: reply.clone(),
                 from,
                 to,
+                within,
                 capsule,
-                block: block & 0xFFFF_0000,
-                outdoors,
-                exact_to,
             })
             .is_err()
         {
@@ -308,9 +281,10 @@ fn plan_forever(archives: SharedArchives, jobs: Receiver<Ask>) {
 
 fn plan(assets: &Assets, areas: &mut Vec<Area>, ask: &Ask) -> Answer {
     let started = Instant::now();
-    let here = ask.block;
+    let here = ask.from.cell & 0xFFFF_0000;
+    let (from, to) = (ask.from.at, ask.to.at);
     let found = areas.iter().position(|a| {
-        a.capsule().same(&ask.capsule) && a.blocks.contains(&here) && a.holds(ask.from, ask.to)
+        a.capsule().same(&ask.capsule) && a.blocks.contains(&here) && a.holds(from, to)
     });
     let area = match found {
         Some(i) => {
@@ -319,7 +293,7 @@ fn plan(assets: &Assets, areas: &mut Vec<Area>, ask: &Ask) -> Answer {
             areas.last_mut()
         }
         None => {
-            let want = navarea::blocks_for(ask.from, ask.to);
+            let want = navarea::blocks_for(from, to);
             match Area::build(assets, &want, &ask.capsule, here) {
                 Ok(a) => {
                     tracing::debug!(
@@ -341,30 +315,22 @@ fn plan(assets: &Assets, areas: &mut Vec<Area>, ask: &Ask) -> Answer {
             }
         }
     };
-    let waypoints = match area {
-        // A dungeon is planned on its own block: a goal outside it
-        // is reached through a portal, not by walking there.
-        Some(a) if a.dungeon && !a.blocks.contains(&navarea::block_at(ask.to)) => None,
-        Some(a) => {
-            // Keep a berth from every portal mouth about, save the
-            // one the walk is going to: a portal takes whoever
-            // touches it.
-            a.avoid = portal_mouths_to_avoid(ask.from, ask.to);
-            a.berth = PORTAL_BERTH;
-            if a.outdoors_only != ask.outdoors {
-                // The graph built so far was for the other rule.
-                a.outdoors_only = ask.outdoors;
-                let (lo, hi, spacing, cap) =
-                    (a.nav.min(), a.nav.max(), a.nav.spacing, a.nav.capsule);
-                a.nav = ac_scene::nav::NavGraph::new(lo, hi, spacing, &cap);
+    let waypoints = area.and_then(|a| {
+        // Keep a berth from every portal mouth about, save the one the walk is going to: a
+        // portal takes whoever touches it.
+        a.avoid = portal_mouths_to_avoid(from, to);
+        a.berth = PORTAL_BERTH;
+        match ac_nav::routing::plan(a, ask.from, ask.to, ask.within) {
+            Ok(route) => Some(route.points()),
+            Err(why) => {
+                tracing::debug!("pathfinder: no way: {why:?}");
+                None
             }
-            a.path_to(ask.from, ask.to, ask.exact_to)
         }
-        None => None,
-    };
+    });
     Answer {
-        from: ask.from,
-        to: ask.to,
+        from,
+        to,
         waypoints,
         took: started.elapsed(),
     }

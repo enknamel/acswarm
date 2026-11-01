@@ -41,7 +41,7 @@ const RETRACE_ARRIVE: f32 = 0.2;
 pub struct Course {
     /// Goal the route was planned for.
     pub goal: Vec3,
-    /// Waypoints in order; the last one is the goal.
+    /// Waypoints in order; the last is where the route ends, within reach of the goal.
     pub waypoints: Vec<Vec3>,
     /// Index of the waypoint being steered at.
     pub next: usize,
@@ -113,10 +113,18 @@ pub trait Ground {
     /// a floor and ends a storey under or over `to`; a ledge over a floor is no drop (it lands, walks on).
     /// Unlike `line_blocked`, a wall or a ledge over a floor is safe to lean on; the void is not.
     fn line_drops(&mut self, block: u32, from: Vec3, to: Vec3) -> bool;
-    /// A walkable route within one landblock, or `None` when the graph knows of none.
-    fn find_path(&mut self, block: u32, from: Vec3, to: Vec3, goal_cell: u32) -> Option<Vec<Vec3>>;
+    /// A walkable route within one landblock to within `within` (metres, 3D) of `to`, standing in
+    /// `goal_cell` (only its block when the low word is 0), or `None` when the graph knows of none.
+    fn find_path(
+        &mut self,
+        block: u32,
+        from: Vec3,
+        to: Vec3,
+        goal_cell: u32,
+        within: f32,
+    ) -> Option<Vec<Vec3>>;
     /// Ask the neighbourhood planner for a route that may leave this block; it answers via `take_wide`.
-    fn ask_wide(&mut self, from: Vec3, to: Vec3, block: u32, outdoors: bool, exact_to: bool);
+    fn ask_wide(&mut self, from: Vec3, to: Vec3, block: u32, goal_cell: u32, within: f32);
     /// A neighbourhood route that has come back, if one has.
     fn take_wide(&mut self, from: Vec3, to: Vec3) -> Option<Vec<Vec3>>;
 }
@@ -220,6 +228,7 @@ impl Steering {
         me: Vec3,
         goal: Vec3,
         goal_block: u32,
+        stop: f32,
     ) -> Option<Vec<Vec3>> {
         let back: Vec<Vec3> = self.trail.iter().rev().copied().collect();
         let here = (0..back.len())
@@ -231,7 +240,7 @@ impl Steering {
             .filter(|i| back[*i].distance(me) > 2.0 * ARRIVE)
             .take(RETRACE_TRIES)
             .find_map(|i| {
-                let on = ground.find_path(block, back[i], goal, goal_block)?;
+                let on = ground.find_path(block, back[i], goal, goal_block, stop)?;
                 let mut way: Vec<Vec3> = back[here..=i].to_vec();
                 way.extend(on);
                 Some(way)
@@ -247,7 +256,8 @@ impl Steering {
         self.retracing = false;
     }
 
-    /// Where to head this frame for `goal` (world space; `goal_block` its landblock, cell in the low word).
+    /// Where to head this frame for `goal` (world space; `goal_block` its landblock, cell in the low word),
+    /// stopping `stop` metres short: the reach a route is planned to.
     /// The block's graph answers at once but is blind past the edge; the neighbourhood planner (its own
     /// thread, what finds a city gate) is asked whenever the line is blocked or the goal leaves the block.
     /// No progress for `STUCK_AFTER` drops the route and distrusts the line for `AVOID_STRAIGHT`.
@@ -256,6 +266,7 @@ impl Steering {
         ground: &mut impl Ground,
         goal: Vec3,
         goal_block: u32,
+        stop: f32,
         now: Instant,
     ) -> Aim {
         let me = ground.at();
@@ -331,14 +342,7 @@ impl Steering {
                 now >= self.straight_blocked_until && !ground.line_blocked(block, me, goal);
             // Blocked, or a goal past the block edge: the way round may leave the block entirely.
             if !straight_ok || leaves_block {
-                ground.ask_wide(
-                    me,
-                    far_goal,
-                    block,
-                    ground.cell() & 0xFFFF < 0x100 && goal_block & 0xFFFF < 0x100,
-                    // An indoor goal's height is where something stands, not a guess to drop to the ground.
-                    goal_block & 0xFFFF >= 0x100,
-                );
+                ground.ask_wide(me, far_goal, block, goal_block, stop);
             }
             if straight_ok {
                 if self.route.take().is_some() {
@@ -349,7 +353,7 @@ impl Steering {
                 self.no_way = false;
                 return Aim::Go(goal);
             }
-            match ground.find_path(block, me, goal, goal_block) {
+            match ground.find_path(block, me, goal, goal_block, stop) {
                 Some(waypoints) => {
                     let origin = ac_world::landblock_origin(block);
                     let local: Vec<[f32; 3]> = waypoints
@@ -386,7 +390,7 @@ impl Steering {
                     // way the body came to where the graph finds a way on. The body walked in, so it
                     // can walk out (a_character_in_a_pocket_no_path_leaves_goes_back_the_way_it_came).
                     if now < self.straight_blocked_until {
-                        if let Some(way) = self.retrace(ground, block, me, goal, goal_block) {
+                        if let Some(way) = self.retrace(ground, block, me, goal, goal_block, stop) {
                             tracing::debug!(
                                 "route: no path from here; back the way it came, {} waypoints",
                                 way.len()
@@ -634,13 +638,14 @@ mod tests {
             from: Vec3,
             _to: Vec3,
             _goal_cell: u32,
+            _within: f32,
         ) -> Option<Vec<Vec3>> {
             match &self.path_from {
                 Some((at, path)) if at.distance(from) < 0.5 => Some(path.clone()),
                 _ => self.path.clone(),
             }
         }
-        fn ask_wide(&mut self, _f: Vec3, _t: Vec3, _b: u32, _o: bool, _e: bool) {
+        fn ask_wide(&mut self, _f: Vec3, _t: Vec3, _b: u32, _c: u32, _w: f32) {
             self.asked_wide = true;
         }
         fn take_wide(&mut self, _f: Vec3, _t: Vec3) -> Option<Vec<Vec3>> {
@@ -660,7 +665,7 @@ mod tests {
             ..Default::default()
         };
         let goal = Vec3::new(20.0, 10.0, 0.0);
-        match st.steer(&mut g, goal, 0, Instant::now()) {
+        match st.steer(&mut g, goal, 0, 0.5, Instant::now()) {
             Aim::Go(aim) => assert!(near(aim, goal), "{aim:?}"),
             Aim::NoWay => panic!("refused a clear walk"),
         }
@@ -677,7 +682,7 @@ mod tests {
             path: Some(vec![corner, goal]),
             ..Default::default()
         };
-        match st.steer(&mut g, goal, 0, Instant::now()) {
+        match st.steer(&mut g, goal, 0, 0.5, Instant::now()) {
             // The first waypoint, not the goal through the wall.
             Aim::Go(aim) => assert!(!near(aim, goal), "walked at the goal through a wall"),
             Aim::NoWay => panic!("refused a walk it had a route for"),
@@ -699,11 +704,11 @@ mod tests {
             path: Some(vec![corner, goal]),
             ..Default::default()
         };
-        assert_eq!(st.steer(&mut g, goal, 0, t0), Aim::Go(corner));
+        assert_eq!(st.steer(&mut g, goal, 0, 0.5, t0), Aim::Go(corner));
         st.reset();
         let soon = t0 + Duration::from_millis(100);
         assert_eq!(
-            st.steer(&mut g, goal, 0, soon),
+            st.steer(&mut g, goal, 0, 0.5, soon),
             Aim::Go(corner),
             "planned again, not straight"
         );
@@ -728,10 +733,10 @@ mod tests {
             ..Default::default()
         };
         // Leaning is tried first; getting nowhere by it, the way back.
-        assert_eq!(st.steer(&mut g, goal, 0, t0), Aim::Go(goal));
+        assert_eq!(st.steer(&mut g, goal, 0, 0.5, t0), Aim::Go(goal));
         let stuck = t0 + STUCK_AFTER + Duration::from_millis(100);
         assert_eq!(
-            st.steer(&mut g, goal, 0, stuck),
+            st.steer(&mut g, goal, 0, 0.5, stuck),
             Aim::Go(Vec3::new(5.0, 0.0, 0.0))
         );
         let way = st
@@ -744,7 +749,7 @@ mod tests {
         g.at = Vec3::new(5.0, 0.0, 0.0);
         let later = stuck + REPLAN_AFTER + Duration::from_millis(100);
         assert_eq!(
-            st.steer(&mut g, goal, 0, later),
+            st.steer(&mut g, goal, 0, 0.5, later),
             Aim::Go(Vec3::new(4.0, 0.0, 0.0))
         );
     }
@@ -761,7 +766,10 @@ mod tests {
             path: None,
             ..Default::default()
         };
-        assert_eq!(st.steer(&mut g, goal, 0, Instant::now()), Aim::Go(goal));
+        assert_eq!(
+            st.steer(&mut g, goal, 0, 0.5, Instant::now()),
+            Aim::Go(goal)
+        );
         assert!(!st.no_way());
     }
 
@@ -780,7 +788,7 @@ mod tests {
         // Thelnoth Cort the Healer, in Holtburg, thirty kilometres off.
         let goal = Vec3::new(32478.0, 34719.0, 42.0);
         assert_eq!(
-            st.steer(&mut g, goal, 0xA9B4_0111, Instant::now()),
+            st.steer(&mut g, goal, 0xA9B4_0111, 0.5, Instant::now()),
             Aim::NoWay
         );
         assert!(st.no_way(), "the caller must be able to ask");
@@ -800,6 +808,7 @@ mod tests {
             &mut g,
             Vec3::new(32_700.0, 34_600.0, 42.0),
             0xABB3_0000,
+            0.5,
             Instant::now(),
         );
         assert!(g.asked_wide, "never asked for a route out of the block");
@@ -818,7 +827,7 @@ mod tests {
             ..Default::default()
         };
         assert!(matches!(
-            st.steer(&mut g, goal, 0, Instant::now()),
+            st.steer(&mut g, goal, 0, 0.5, Instant::now()),
             Aim::Go(_)
         ));
         assert!(!st.no_way());
@@ -826,7 +835,7 @@ mod tests {
         g.blocked = false;
         st.reset();
         assert!(matches!(
-            st.steer(&mut g, goal, 0, Instant::now()),
+            st.steer(&mut g, goal, 0, 0.5, Instant::now()),
             Aim::Go(_)
         ));
         assert!(!st.no_way());
@@ -846,13 +855,13 @@ mod tests {
         };
         let town = Vec3::new(32_478.0, 34_719.0, 42.0);
         assert_eq!(
-            st.steer(&mut g, town, 0xA9B4_0111, Instant::now()),
+            st.steer(&mut g, town, 0xA9B4_0111, 0.5, Instant::now()),
             Aim::NoWay
         );
         let near_by = Vec3::new(290.0, 47_210.0, 0.0);
         st.reset();
         assert!(matches!(
-            st.steer(&mut g, near_by, 0x01F6_0290, Instant::now()),
+            st.steer(&mut g, near_by, 0x01F6_0290, 0.5, Instant::now()),
             Aim::Go(_)
         ));
     }
@@ -878,7 +887,7 @@ mod tests {
         let mut st = Steering::new(Instant::now());
         let (mut g, goal) = on_a_ledge(true);
         assert_eq!(
-            st.steer(&mut g, goal, 0x01F6_0000, Instant::now()),
+            st.steer(&mut g, goal, 0x01F6_0000, 0.5, Instant::now()),
             Aim::NoWay
         );
         assert!(st.no_way(), "the caller must be able to ask");
@@ -890,7 +899,7 @@ mod tests {
         let mut st = Steering::new(Instant::now());
         let (mut g, goal) = on_a_ledge(false);
         assert_eq!(
-            st.steer(&mut g, goal, 0x01F6_0000, Instant::now()),
+            st.steer(&mut g, goal, 0x01F6_0000, 0.5, Instant::now()),
             Aim::Go(goal)
         );
         assert!(!st.no_way());
@@ -910,14 +919,14 @@ mod tests {
         };
         let mut st = Steering::new(Instant::now());
         assert_eq!(
-            st.steer(&mut g, foot, 0x01F6_0000, Instant::now()),
+            st.steer(&mut g, foot, 0x01F6_0000, 0.5, Instant::now()),
             Aim::Go(foot),
             "a clear flight is walked straight"
         );
         g.blocked = true;
         st.reset();
         assert_eq!(
-            st.steer(&mut g, foot, 0x01F6_0000, Instant::now()),
+            st.steer(&mut g, foot, 0x01F6_0000, 0.5, Instant::now()),
             Aim::Go(foot)
         );
         assert!(!st.no_way());
@@ -930,15 +939,18 @@ mod tests {
         let start = Instant::now();
         let mut st = Steering::new(start);
         let (mut g, goal) = on_a_ledge(true);
-        assert_eq!(st.steer(&mut g, goal, 0x01F6_0000, start), Aim::NoWay);
+        assert_eq!(st.steer(&mut g, goal, 0x01F6_0000, 0.5, start), Aim::NoWay);
         let soon = start + Duration::from_millis(100);
         assert_eq!(
-            st.steer(&mut g, goal, 0x01F6_0000, soon),
+            st.steer(&mut g, goal, 0x01F6_0000, 0.5, soon),
             Aim::NoWay,
             "walked at the edge between looks"
         );
         g.drops = false;
         let later = start + REPLAN_AFTER + Duration::from_millis(100);
-        assert_eq!(st.steer(&mut g, goal, 0x01F6_0000, later), Aim::Go(goal));
+        assert_eq!(
+            st.steer(&mut g, goal, 0x01F6_0000, 0.5, later),
+            Aim::Go(goal)
+        );
     }
 }

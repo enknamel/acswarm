@@ -268,7 +268,10 @@ impl Client {
         spots.retain(|s| keep(*s));
         spots.sort_by(|a, b| a.distance(me).total_cmp(&b.distance(me)));
         spots.into_iter().take(PULL_LOOKS).find(|s| {
-            s.distance(me) <= AT_SPOT || pl.find_path(&assets, block, me, *s, block).is_some()
+            s.distance(me) <= AT_SPOT
+                || pl
+                    .find_path(&assets, block, me, *s, block, AT_SPOT)
+                    .is_some()
         })
     }
 }

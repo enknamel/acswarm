@@ -206,6 +206,14 @@ impl<'a> TerrainSampler<'a> {
         Some(-((p.y * n.y + p.x * n.x + d) / n.z))
     }
 
+    /// [`height_at`](Self::height_at) over the block's closed square: its far edges, whose vertex
+    /// rows the next blocks share, are its own as they are `TerrainMesh::height_at`'s.
+    pub fn height_in_square(&self, p: Vec3) -> Option<f32> {
+        let below = f32::from_bits(crate::BLOCK_SIZE.to_bits() - 1);
+        let inside = |v: f32| if v == crate::BLOCK_SIZE { below } else { v };
+        self.height_at(Vec3::new(inside(p.x), inside(p.y), p.z))
+    }
+
     fn road(&self, x: i32, y: i32) -> u16 {
         if x < 0 || y < 0 || x as usize >= VERTS_PER_SIDE || y as usize >= VERTS_PER_SIDE {
             return 0;

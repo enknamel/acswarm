@@ -25,6 +25,7 @@ pub mod particles;
 pub mod scenery;
 pub mod terrain;
 pub mod texmerge;
+pub mod wayfind;
 pub mod worldgrid;
 pub mod worldmap;
 pub mod worldroute;

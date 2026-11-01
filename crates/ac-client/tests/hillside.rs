@@ -42,8 +42,10 @@ fn walking_up_the_villas_hillside_stays_on_the_hill() {
     .unwrap();
     // Outdoors to outdoors: the planner keeps out of the buildings,
     // which is what keeps it out of the halls beneath the hill.
-    area.outdoors_only = true;
-    let mut route = area.path(origin + start, goal).expect("a way up the hill");
+    let place = |at: Vec3| ac_world::Place { at, cell: block };
+    let mut route = ac_nav::routing::plan(&mut area, place(origin + start), place(goal), 1.0)
+        .expect("a way up the hill")
+        .points();
     for w in &route {
         let t = area.terrain_at(w.x, w.y).expect("on the map");
         assert!(

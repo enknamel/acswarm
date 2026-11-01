@@ -44,7 +44,7 @@ impl Client {
         // `find_path` ends a route at its goal whether or not the node nearest reaches it (a
         // bookcase's top read as a way there): the last step is walked as the body takes it, as far
         // as the walk stops short (exploring_does_not_pace_between_two_rooms).
-        let Some(path) = pl.find_path(&assets, block, me, at, cell) else {
+        let Some(path) = pl.find_path(&assets, block, me, at, cell, within) else {
             return false;
         };
         let goal = *path.last().unwrap_or(&at);

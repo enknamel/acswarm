@@ -11,3 +11,6 @@ ac-scene = { path = "../ac-scene" }
 ac-world = { path = "../ac-world" }
 glam.workspace = true
 tracing.workspace = true
+
+[dev-dependencies]
+ac-dat = { path = "../ac-dat" }

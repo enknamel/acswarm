@@ -29,10 +29,6 @@ use crate::{lbid, Assets, Result, BLOCK_SIZE};
 /// which covers any city and more than one travel leg.
 pub const MAX_SIDE: u32 = 3;
 
-/// A point this near (metres) a floor under or over it stands on that floor: the client's
-/// `GOAL_ON_FLOOR` for a goal on a roof.
-const ON_A_FLOOR: f32 = 0.6;
-
 /// The landblock a world position falls in.
 pub fn block_at(p: Vec3) -> u32 {
     let x = (p.x / BLOCK_SIZE).floor().clamp(0.0, 254.0) as u32;
@@ -281,71 +277,6 @@ impl Area {
         let scene = self.scenes.get(&block_at(Vec3::new(x, y, 0.0)))?;
         let o = lbid::world_origin(scene.id);
         scene.terrain.height_at(Vec3::new(x - o.x, y - o.y, 0.0))
-    }
-
-    /// Waypoints from `from` to `to` around the area's geometry, ending
-    /// with `to` and not including `from`. `None` when the two are not
-    /// connected by anything the capsule can walk.
-    pub fn path(&mut self, from: Vec3, to: Vec3) -> Option<Vec<Vec3>> {
-        self.path_to(from, to, false)
-    }
-
-    /// The same, saying whether the goal's height is to be believed.
-    ///
-    /// `exact_to` is for a goal that is where something actually stands
-    /// -- a vendor on the first floor -- rather than a point picked off
-    /// a coarse map. Grounding one of those asks for the floor below it
-    /// and gets a route to the floor below it.
-    pub fn path_to(&mut self, from: Vec3, to: Vec3, exact_to: bool) -> Option<Vec<Vec3>> {
-        // A goal handed down from a coarser map floats above or below
-        // the ground it stands on -- the overland grid is 24 m wide and
-        // misses a hillside by a storey -- and a node is only found
-        // within a couple of metres of the height asked for. Put both
-        // ends on the ground first.
-        let from = self.grounded(from);
-        let to = if exact_to { to } else { self.grounded(to) };
-        let path = self.with_ground(|ground, nav| nav.find_path(ground, from, to));
-        if path.is_some() || !self.outdoors_only {
-            return path;
-        }
-        // No way outdoors: through the buildings then, on a graph of
-        // its own, since the nodes built so far left the interiors out.
-        let (lo, hi, spacing, cap) = {
-            let n = &self.nav;
-            (n.min(), n.max(), n.spacing, n.capsule)
-        };
-        self.nav = NavGraph::new(lo, hi, spacing, &cap);
-        self.outdoors_only = false;
-        let path = self.with_ground(|ground, nav| nav.find_path(ground, from, to));
-        self.outdoors_only = true;
-        self.nav = NavGraph::new(lo, hi, spacing, &cap);
-        path
-    }
-
-    /// `p` with its height taken from the terrain under it, outdoors,
-    /// when the height given is far from it. Indoors, and where there
-    /// is no terrain, the height given stands.
-    ///
-    /// Inside a building the height given is the whole of the answer,
-    /// and the cells say where that is. Asking the caller instead is
-    /// what sent a character to Asenala, who keeps a shop on the upper
-    /// floor of a house in Holtburg: the flag that means "believe this
-    /// height" was computed from a landblock id, whose low word is
-    /// always zero and so always read as outdoors, and the walk was
-    /// quietly grounded to the patch of floor three metres below her.
-    pub fn grounded(&self, p: Vec3) -> Vec3 {
-        if self.dungeon || self.collision.in_known_cell(p) {
-            return p;
-        }
-        // Nor on a floor of its own outdoors: a deck, a bridge, a roof
-        // (a_goal_standing_on_a_deck_is_planned_to_on_the_deck).
-        if self.collision.floor_at(p, ON_A_FLOOR, ON_A_FLOOR).is_some() {
-            return p;
-        }
-        match self.terrain_at(p.x, p.y) {
-            Some(z) if (z - p.z).abs() > 2.0 => Vec3::new(p.x, p.y, z),
-            _ => p,
-        }
     }
 
     /// Build every chunk of the graph now. For tools and tests: paths

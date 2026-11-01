@@ -36,10 +36,14 @@ fn a_walk_through_the_hub_keeps_its_berth_from_the_other_portals() {
     );
     area.avoid = avoid.clone();
     area.berth = PORTAL_BERTH;
-    // The hub floor is at z 0; the graph finds its own floors.
-    let path = area
-        .path(from + Vec3::Z * 0.1, to + Vec3::Z * 0.1)
-        .expect("a way to the Sanamar portal");
+    // The hub floor is at z 0; the graph finds its own floors, the cells by their BSPs.
+    let place = |at: Vec3| ac_world::Place {
+        at: at + Vec3::Z * 0.1,
+        cell: 0x0007_0000,
+    };
+    let path = ac_nav::routing::plan(&mut area, place(from), place(to), 1.0)
+        .expect("a way to the Sanamar portal")
+        .points();
     let mut prev = from;
     for w in &path {
         let steps = (prev.distance(*w) / 0.5).ceil().max(1.0) as i32;

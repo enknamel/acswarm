@@ -6,6 +6,7 @@ use ac_scene::{
     collision::{Capsule, CollisionWorld},
     landblock,
     nav::{Ground, NavGraph},
+    wayfind::{self, Search, WalkQuery},
     Assets,
 };
 use glam::Vec3;
@@ -44,16 +45,24 @@ fn academy_legs_are_walkable() {
         if let Some(prev) = from.filter(|_| !ramp) {
             let mut graph = NavGraph::for_scene(&scene, &collision, &cap);
             let t = std::time::Instant::now();
-            match graph.find_path(&ground, prev, here) {
-                Some(path) => eprintln!(
+            let q = WalkQuery {
+                from: (prev, wayfind::locate(&ground, prev)),
+                goal: (here, wayfind::locate(&ground, here)),
+                within: 0.5,
+                avoid: &[],
+                berth: 0.0,
+                indoors_too: true,
+            };
+            match wayfind::search_building(&ground, &mut graph, &q) {
+                Search::Found(path) => eprintln!(
                     "{:?} {}: {} waypoints in {:.0} ms",
                     step.kind,
                     step.target,
                     path.len(),
                     t.elapsed().as_secs_f64() * 1e3
                 ),
-                None => failures.push(format!(
-                    "{:?} {}: no path from {:?} to {:?}",
+                found => failures.push(format!(
+                    "{:?} {}: no path from {:?} to {:?}: {found:?}",
                     step.kind,
                     step.target,
                     prev - origin,

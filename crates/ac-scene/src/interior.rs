@@ -256,6 +256,10 @@ struct IndexedCell {
     inverse: Mat4,
     environment: Rc<ac_formats::environment::Environment>,
     structure: u16,
+    /// The cell's id.
+    id: u32,
+    /// A body can be in it: not an overlay no portal leads into (`collision::is_walked_into`).
+    walked: bool,
 }
 
 impl CellIndex {
@@ -263,6 +267,11 @@ impl CellIndex {
     /// environments are already in the asset cache.
     pub fn build(assets: &Assets, scene: &crate::landblock::LandblockScene) -> CellIndex {
         let mut cells = Vec::with_capacity(scene.cells.len());
+        let entered: std::collections::HashSet<u32> = scene
+            .cells
+            .iter()
+            .flat_map(|c| c.portal_cells.iter().copied())
+            .collect();
         for c in &scene.cells {
             let Ok(env) = assets.environment(c.environment_id) else {
                 continue;
@@ -289,6 +298,8 @@ impl CellIndex {
                 inverse: c.transform.inverse(),
                 environment: env,
                 structure: c.cell_structure,
+                id: c.cell_id,
+                walked: crate::collision::is_walked_into(c, &entered),
             });
         }
         let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
@@ -321,11 +332,23 @@ impl CellIndex {
 
     /// `p` (world space) is inside one of the cells.
     pub fn contains(&self, p: Vec3) -> bool {
-        if self.cells.is_empty() || !(p.cmpge(self.lo).all() && p.cmple(self.hi).all()) {
-            return false;
-        }
-        self.cells.iter().any(|c| {
-            p.cmpge(c.lo).all()
+        self.holding(p).next().is_some()
+    }
+
+    /// The cell a body at `p` (world space) is in: of the walked cells holding it, the smallest by
+    /// volume, as a doorway's cell sits inside the room's bounds. `None` outside every one.
+    pub fn cell_at(&self, p: Vec3) -> Option<u32> {
+        self.holding(p)
+            .filter(|c| c.walked)
+            .min_by(|a, b| a.volume().total_cmp(&b.volume()))
+            .map(|c| c.id)
+    }
+
+    /// The cells whose structure's own BSP holds `p` (world space).
+    fn holding(&self, p: Vec3) -> impl Iterator<Item = &IndexedCell> + '_ {
+        let near = !self.cells.is_empty() && p.cmpge(self.lo).all() && p.cmple(self.hi).all();
+        self.cells.iter().filter(move |c| {
+            near && p.cmpge(c.lo).all()
                 && p.cmple(c.hi).all()
                 && c.environment
                     .cells
@@ -333,5 +356,13 @@ impl CellIndex {
                     .find(|(k, _)| *k == c.structure as u32)
                     .is_some_and(|(_, s)| s.cell_bsp.contains_point(c.inverse.transform_point3(p)))
         })
+    }
+}
+
+impl IndexedCell {
+    /// The volume of its bounds (cubic metres).
+    fn volume(&self) -> f32 {
+        let d = self.hi - self.lo;
+        d.x * d.y * d.z
     }
 }

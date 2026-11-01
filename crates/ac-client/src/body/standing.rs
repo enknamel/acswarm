@@ -39,25 +39,32 @@ impl ac_nav::Ground for Standing<'_> {
         from: glam::Vec3,
         to: glam::Vec3,
         goal_cell: u32,
+        within: f32,
     ) -> Option<Vec<glam::Vec3>> {
         self.player
-            .find_path(self.assets, block, from, to, goal_cell)
+            .find_path(self.assets, block, from, to, goal_cell, within)
     }
 
     fn ask_wide(
         &mut self,
         from: glam::Vec3,
         to: glam::Vec3,
-        block: u32,
-        outdoors: bool,
-        exact_to: bool,
+        _block: u32,
+        goal_cell: u32,
+        within: f32,
     ) {
+        // The steering asks from where the body stands, in its own cell (and so its block).
         self.wide.ask(
-            from,
-            to,
+            ac_world::Place {
+                at: from,
+                cell: self.player.cell,
+            },
+            ac_world::Place {
+                at: to,
+                cell: goal_cell,
+            },
+            within,
             self.player.capsule(),
-            block,
-            pathfinder::Ends { outdoors, exact_to },
             std::time::Instant::now(),
         );
     }

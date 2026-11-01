@@ -301,6 +301,8 @@ const VANTAGE_LOOKS: usize = 48;
 const VANTAGE_WALKS: usize = 4;
 /// A target that has moved this far (metres) since its vantage was chosen gets a new one.
 const VANTAGE_MOVED: f32 = 2.0;
+/// Close enough to a vantage spot (metres) to be shooting from it.
+const AT_VANTAGE: f32 = 0.3;
 
 /// How far a spell with `base_constant` and `base_mod` reaches for a
 /// caster whose school skill (trained level, no buffs) is `skill`.
@@ -812,7 +814,7 @@ impl Client {
         clear.into_iter().find(|s| {
             self.player
                 .as_mut()
-                .and_then(|pl| pl.find_path(&assets, block, me, *s, block))
+                .and_then(|pl| pl.find_path(&assets, block, me, *s, block, AT_VANTAGE))
                 .is_some()
         })
     }
@@ -943,7 +945,7 @@ impl Client {
         // Closing on something to hit it is a goal like any other, so
         // it is named to the travel system and not steered by hand.
         match spot {
-            Some(s) => self.head_for(s, 0.3, name),
+            Some(s) => self.head_for(s, AT_VANTAGE, name),
             None => self.head_for(at, stop, name),
         };
         self.autoplay.say(

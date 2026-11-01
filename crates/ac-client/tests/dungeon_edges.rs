@@ -86,17 +86,26 @@ impl Ground for Standing<'_> {
     fn line_drops(&mut self, block: u32, from: Vec3, to: Vec3) -> bool {
         self.player.line_drops(self.assets, block, from, to)
     }
-    fn find_path(&mut self, block: u32, from: Vec3, to: Vec3, cell: u32) -> Option<Vec<Vec3>> {
-        self.player.find_path(self.assets, block, from, to, cell)
+    fn find_path(
+        &mut self,
+        block: u32,
+        from: Vec3,
+        to: Vec3,
+        cell: u32,
+        within: f32,
+    ) -> Option<Vec<Vec3>> {
+        self.player
+            .find_path(self.assets, block, from, to, cell, within)
     }
-    fn ask_wide(&mut self, from: Vec3, to: Vec3, block: u32, outdoors: bool, exact: bool) {
+    fn ask_wide(&mut self, from: Vec3, to: Vec3, _block: u32, cell: u32, within: f32) {
         let cap = self.player.capsule();
+        let me = ac_world::Place {
+            at: from,
+            cell: self.player.cell,
+        };
         if let Some(wide) = self.wide.as_deref_mut() {
-            let ends = ac_client::pathfinder::Ends {
-                outdoors,
-                exact_to: exact,
-            };
-            wide.ask(from, to, cap, block, ends, Instant::now());
+            let to = ac_world::Place { at: to, cell };
+            wide.ask(me, to, within, cap, Instant::now());
         }
     }
     fn take_wide(&mut self, from: Vec3, to: Vec3) -> Option<Vec<Vec3>> {
@@ -125,7 +134,7 @@ fn steer(assets: &Assets, pl: &mut Player, goal: Vec3) -> Aim {
         assets,
         wide: None,
     };
-    st.steer(&mut ground, goal, block, Instant::now())
+    st.steer(&mut ground, goal, block, 2.5, Instant::now())
 }
 
 /// Run at the goal the way the client does, frames of `dt` long, for
@@ -157,7 +166,7 @@ fn chase(
                     assets,
                     wide: wide.as_deref_mut(),
                 };
-                st.steer(&mut ground, goal, block, now)
+                st.steer(&mut ground, goal, block, 2.5, now)
             };
             if let Aim::Go(to) = aim {
                 let d = to - at;
@@ -200,7 +209,7 @@ fn a_straight_walk_off_a_ledge_onto_the_floor_below_is_leaned_on() {
     let mut pl = stand(&assets, LEDGE_CELL, ledge);
     assert!(pl.line_blocked(&assets, DUNGEON, ledge, goal));
     assert!(
-        pl.find_path(&assets, DUNGEON, ledge, goal, DUNGEON)
+        pl.find_path(&assets, DUNGEON, ledge, goal, DUNGEON, 0.5)
             .is_none(),
         "the ledge is an island: nothing leads down from it"
     );
@@ -226,7 +235,9 @@ fn a_straight_walk_from_the_floor_to_a_goal_up_on_a_ledge_is_refused() {
     assert!(goal.z > 9.0, "not up on the ledge: {goal}");
     let mut pl = stand(&assets, LEDGE_CELL, me);
     assert!(pl.line_blocked(&assets, DUNGEON, me, goal));
-    assert!(pl.find_path(&assets, DUNGEON, me, goal, DUNGEON).is_none());
+    assert!(pl
+        .find_path(&assets, DUNGEON, me, goal, DUNGEON, 0.5)
+        .is_none());
     // Nothing solid in the way and floor all the way to the spot under
     // the goal: leaning on that gets a character to stand beneath it
     // and push, for ever.
@@ -301,7 +312,7 @@ fn the_stair_corridor_is_walked_not_refused() {
                 assets: &assets,
                 wide: None,
             };
-            st.steer(&mut ground, foot, DUNGEON, now)
+            st.steer(&mut ground, foot, DUNGEON, 0.5, now)
         };
         let Aim::Go(to) = aim else {
             panic!("refused the stairs at {at}");
@@ -643,7 +654,7 @@ fn the_stairs_down_from_an_upper_floor_are_found_and_walked() {
     let mut pl = stand(&assets, 0xA9B4_0160, me);
     assert!(pl.line_blocked(&assets, HOLTBURG, me, goal));
     let route = pl
-        .find_path(&assets, HOLTBURG, me, goal, HOLTBURG)
+        .find_path(&assets, HOLTBURG, me, goal, HOLTBURG, 0.5)
         .expect("the stairs down");
     assert!(route.len() > 4, "not the stairs: {route:?}");
     assert!(!pl.line_drops(&assets, HOLTBURG, me, goal));

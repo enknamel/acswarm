@@ -159,7 +159,7 @@ impl Client {
                             assets: &self.assets,
                             wide: &mut self.pathfinder,
                         };
-                        let aim = self.steering.steer(&mut standing, g, goal_cell, now);
+                        let aim = self.steering.steer(&mut standing, g, goal_cell, stop, now);
                         tracing::trace!(
                             target: "steer",
                             "at {:?} goal {g:?} aim {aim:?}",

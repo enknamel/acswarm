@@ -5,6 +5,7 @@ use ac_scene::{
     collision::{Capsule, CollisionWorld},
     landblock, lbid,
     nav::{line_clear, Ground, NavGraph},
+    wayfind::{self, Search, WalkQuery},
     Assets,
 };
 use glam::Vec3;
@@ -59,9 +60,18 @@ fn academy_start_room_to_the_far_end() {
         // A fresh graph builds only the chunks the search reaches.
         let mut graph = NavGraph::for_scene(&scene, &collision, &cap);
         let t = std::time::Instant::now();
-        let path = graph
-            .find_path(&ground, start, goal)
-            .unwrap_or_else(|| panic!("no path to {target:#010x}"));
+        let q = WalkQuery {
+            from: (start, wayfind::locate(&ground, start)),
+            goal: (goal, target),
+            within: 0.0,
+            avoid: &[],
+            berth: 0.0,
+            indoors_too: true,
+        };
+        let path: Vec<Vec3> = match wayfind::search_building(&ground, &mut graph, &q) {
+            Search::Found(p) => p.into_iter().map(|(n, _)| n.pos).collect(),
+            other => panic!("no path to {target:#010x}: {other:?}"),
+        };
         eprintln!(
             "to {target:#010x}: {} waypoints in {:.1} ms; built {} nodes in {} chunks ({:.0} ms)",
             path.len(),

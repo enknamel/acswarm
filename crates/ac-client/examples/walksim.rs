@@ -145,7 +145,7 @@ fn main() {
                     assets: &assets,
                     wide: &mut wide,
                 };
-                steering.steer(&mut standing, g, gblock, now)
+                steering.steer(&mut standing, g, gblock, 1.0, now)
             };
             if let ac_nav::Aim::Go(at) = aim {
                 last_aim = Some(at);

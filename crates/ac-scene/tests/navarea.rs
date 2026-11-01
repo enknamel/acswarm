@@ -9,11 +9,34 @@
 use ac_scene::{
     collision::{Capsule, CollisionWorld},
     landblock, lbid,
-    nav::NavGraph,
+    nav::{Ground, NavGraph},
     navarea::{blocks_for, Area},
+    wayfind::{self, Search, WalkQuery},
     Assets,
 };
 use glam::Vec3;
+
+/// The walk from `from` to within `within` of `to` on `nav`, both ends located by the cells.
+fn route(
+    ground: &Ground,
+    nav: &mut NavGraph,
+    from: Vec3,
+    to: Vec3,
+    within: f32,
+) -> Option<Vec<Vec3>> {
+    let q = WalkQuery {
+        from: (from, wayfind::locate(ground, from)),
+        goal: (to, wayfind::locate(ground, to)),
+        within,
+        avoid: &[],
+        berth: 0.0,
+        indoors_too: true,
+    };
+    match wayfind::search_building(ground, nav, &q) {
+        Search::Found(p) => Some(p.into_iter().map(|(n, _)| n.pos).collect()),
+        _ => None,
+    }
+}
 
 fn capsule() -> Capsule {
     Capsule {
@@ -58,7 +81,9 @@ fn a_walk_into_sanamar_goes_round_the_walls_not_into_them() {
         !area.line_clear(from + Vec3::Z, square + Vec3::Z),
         "the wall should be between us and the square"
     );
-    let path = area.path(from, square).expect("a way in past the wall");
+    let path = area
+        .with_ground(|ground, nav| route(ground, nav, from, square, 0.5))
+        .expect("a way in past the wall");
     let end = *path.last().unwrap();
     assert!(
         end.distance(square) < 1.0,
@@ -97,7 +122,7 @@ fn a_walk_into_sanamar_goes_round_the_walls_not_into_them() {
         doorways: &[],
     };
     assert!(
-        one.find_path(&ground, from, square).is_none(),
+        route(&ground, &mut one, from, square, 0.5).is_none(),
         "one landblock alone should not be able to plan this walk"
     );
 }
@@ -142,10 +167,10 @@ fn a_dungeon_is_planned_on_its_own_and_its_stairs_connect_its_floors() {
             let z = area.nav.nodes[v as usize].pos.z;
             lo = lo.min(z);
             hi = hi.max(z);
-            for &w in area.nav.neighbours(v) {
-                if !seen[w as usize] {
-                    seen[w as usize] = true;
-                    stack.push(w);
+            for e in area.nav.neighbours(v) {
+                if !seen[e.to as usize] {
+                    seen[e.to as usize] = true;
+                    stack.push(e.to);
                 }
             }
         }
@@ -221,7 +246,7 @@ fn a_route_goes_round_the_ocean_rather_than_across_it() {
                 continue;
             };
             let (pa, pb) = (Vec3::new(a.0, a.1, za), Vec3::new(b.0, b.1, zb));
-            let Some(path) = area.path(pa, pb) else {
+            let Some(path) = area.with_ground(|ground, nav| route(ground, nav, pa, pb, 1.0)) else {
                 continue;
             };
             let mut prev = pa;
@@ -261,8 +286,17 @@ fn a_goal_standing_on_a_deck_is_planned_to_on_the_deck() {
     let under = origin + Vec3::new(81.9, 28.56, 51.93);
     let jeweler = origin + Vec3::new(81.9037, 28.5586, 63.4465);
     let mut area = Area::build(&assets, &[block], &cap, block).unwrap();
-    assert_eq!(area.grounded(jeweler), jeweler, "he stands on the deck");
-    let path = area.path(under, jeweler).expect("the way up");
+    let (on_deck, path) = area.with_ground(|ground, nav| {
+        let cell = wayfind::locate(ground, jeweler);
+        let on_deck = wayfind::floor_of(ground, jeweler, cell, &cap);
+        (on_deck, route(ground, nav, under, jeweler, 0.5))
+    });
+    let on_deck = on_deck.expect("he stands on a floor");
+    assert!(
+        (on_deck.z - jeweler.z).abs() < 0.05,
+        "he stands on the deck, not {on_deck}"
+    );
+    let path = path.expect("the way up");
     let end = *path.last().unwrap();
     assert!((end.z - jeweler.z).abs() < 0.6, "ends at {end:?}");
     assert!(path.len() > 3, "straight at him: {path:?}");

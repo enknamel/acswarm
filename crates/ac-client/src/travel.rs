@@ -1945,7 +1945,9 @@ mod tests {
                             assets: &c.assets,
                             wide: &mut c.pathfinder,
                         };
-                        if let ac_nav::Aim::Go(at) = c.steering.steer(&mut standing, g, cell, now) {
+                        if let ac_nav::Aim::Go(at) =
+                            c.steering.steer(&mut standing, g, cell, stop, now)
+                        {
                             let d = at - pl.world_position();
                             let flat = Vec2::new(d.x, d.y);
                             if flat.length() > 1e-3 {
@@ -2081,6 +2083,7 @@ mod tests {
     fn drive(c: &mut Client, target: Vec3, block: u32, steer: bool, seconds: f32) {
         use crate::player::Input;
         let dt = 1.0 / 20.0;
+        let stop = 0.5;
         let t0 = Instant::now();
         for frame in 0..(seconds / dt) as u32 {
             let now = t0 + Duration::from_secs_f32(frame as f32 * dt);
@@ -2091,7 +2094,7 @@ mod tests {
                     assets: &c.assets,
                     wide: &mut c.pathfinder,
                 };
-                c.steering.steer(&mut standing, target, block, now)
+                c.steering.steer(&mut standing, target, block, stop, now)
             } else {
                 ac_nav::Aim::Go(target)
             };
@@ -2102,7 +2105,7 @@ mod tests {
                 target.y - pl.world_position().y,
             )
             .length()
-                <= 0.5;
+                <= stop;
             if let (ac_nav::Aim::Go(at), false) = (aim, there) {
                 let d = at - pl.world_position();
                 let flat = Vec2::new(d.x, d.y);
@@ -2170,7 +2173,7 @@ mod tests {
             .player
             .as_mut()
             .unwrap()
-            .find_path(&assets, block, me, origin + corpse, block)
+            .find_path(&assets, block, me, origin + corpse, block, 0.5)
             .expect("a way round");
         assert!(
             path[0].x - origin.x > 34.87,
@@ -2198,11 +2201,13 @@ mod tests {
             c.has_way_to(origin + Vec3::new(36.0, -54.0, 0.0), 0x01F6_0233, 0.25),
             "round the bookcases"
         );
-        // On top of a bookcase, 1.9 m up: `find_path` ends its route there anyway.
+        // On top of a bookcase, 1.9 m up: the planner checks the last leg, so no route ends there.
         let top = origin + Vec3::new(34.68, -50.7, 1.915);
         let (me, assets) = (c.my_position().unwrap(), c.assets.clone());
         let pl = c.player.as_mut().unwrap();
-        assert!(pl.find_path(&assets, block, me, top, 0x01F6_0224).is_some());
+        assert!(pl
+            .find_path(&assets, block, me, top, 0x01F6_0224, 2.5)
+            .is_none());
         assert!(!c.has_way_to(top, 0x01F6_0224, 2.5), "on the bookcase");
         assert!(
             c.has_way_to(Vec3::new(10.0, 10.0, 0.0), 0x0101_0001, 0.25),
@@ -2254,7 +2259,7 @@ mod tests {
             .player
             .as_mut()
             .unwrap()
-            .find_path(&assets, block, me, roof, block)
+            .find_path(&assets, block, me, roof, block, 0.5)
             .expect("a way up");
         let before_the_end = path[path.len().saturating_sub(2)];
         assert!(
