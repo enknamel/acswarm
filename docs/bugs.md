@@ -25,9 +25,6 @@ priority; a live report starts from the telemetry (`tools/telemetry.py`, `--mark
   held until the body stands on it (`Route::target`, ON_THE_SPOT) and it could not. Offline over the
   same static geometry the walk arrives, so something the map lacks was in the way (scn-shots).
 
-- **Flips between "closing on" and "getting in sight" of a creature below.** Blargerton on a hill
-  at AD7D0013 (33273.0 24068.1 47.7) alternated the two every frame (1048 times) for a minute at a
-  Drudge Lurker 58 m off and 18 m under him, standing still, until "no damage in a while".
 
 ## 2. Plays badly
 
@@ -75,6 +72,14 @@ priority; a live report starts from the telemetry (`tools/telemetry.py`, `--mark
 
 ## Fixed
 
+- **Flipped between "closing on" and "getting in sight" of a creature below** (this merge):
+  Blargerton on a hill at AD7D0013 at a Drudge Lurker 58 m off and 18 m under him, 1048 times in a
+  minute. The spot to shoot from, found for the full reach, was kept after the reach was cut to 29 m
+  for shots striking the slope; now it is looked for again. Offline from his spot: 24 m off with a
+  clear shot in 2.5 s, where he had stood.
+- **Vulnerabilities only on creatures over a health setting** (this merge): cast now when a kill
+  would take more than two of the attack spell, by the damage his own hits of it read; the setting
+  is the floor only until a spell of his has landed.
 - **Stood in the Facility Hub on the way to the Tusker Barracks** (this merge): a portal's berth
   was tested on x and y alone, so the portals of the upper floor blanked out the corridors under
   them. It keeps to its own floor now; offline from his landing spot, at the Tusker Abode portal in 12 s.
