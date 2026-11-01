@@ -28,6 +28,7 @@ pub mod buffs;
 pub mod creation;
 pub mod daytime;
 pub mod dodge;
+pub mod doorway;
 pub mod emotes;
 pub mod explore;
 // The vocabulary every system speaks now lives below this crate, in
