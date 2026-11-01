@@ -704,6 +704,8 @@ pub struct NavGraph {
     pub nodes: Vec<NavNode>,
     /// Outgoing edges per node.
     edges: Vec<Vec<NavEdge>>,
+    /// Union-find over the edges of every kind, each way: nodes under different roots are apart.
+    roots: Vec<u32>,
     /// Nodes per grid column `(x / spacing, y / spacing)`.
     columns: HashMap<(i32, i32), Vec<u32>>,
     /// Chunks whose nodes and edges exist.
@@ -732,6 +734,7 @@ impl NavGraph {
             ),
             nodes: Vec::new(),
             edges: Vec::new(),
+            roots: Vec::new(),
             columns: HashMap::new(),
             built: HashSet::new(),
             drops_waiting: Vec::new(),
@@ -823,6 +826,7 @@ impl NavGraph {
                     let id = self.nodes.len() as u32;
                     self.nodes.push(node);
                     self.edges.push(Vec::new());
+                    self.roots.push(id);
                     self.columns.entry((gx, gy)).or_default().push(id);
                     fresh.push(id);
                 }
@@ -865,6 +869,7 @@ impl NavGraph {
             let id = self.nodes.len() as u32;
             self.nodes.push(node);
             self.edges.push(Vec::new());
+            self.roots.push(id);
             self.columns.entry((gx, gy)).or_default().push(id);
             fresh.push(id);
             seeded.push(id);
@@ -900,10 +905,10 @@ impl NavGraph {
                     let (fwd, back) =
                         ground.hop(&self.nodes[i as usize], &self.nodes[j as usize], &cap);
                     if let Some(kind) = fwd {
-                        self.edges[i as usize].push(NavEdge { to: j, kind });
+                        self.add_edge(i, j, kind);
                     }
                     if let Some(kind) = back {
-                        self.edges[j as usize].push(NavEdge { to: i, kind });
+                        self.add_edge(j, i, kind);
                     }
                 }
             }
@@ -922,12 +927,12 @@ impl NavGraph {
                 if let Some(kind) =
                     fwd.filter(|_| !self.edges[i as usize].iter().any(|e| e.to == j))
                 {
-                    self.edges[i as usize].push(NavEdge { to: j, kind });
+                    self.add_edge(i, j, kind);
                 }
                 if let Some(kind) =
                     back.filter(|_| !self.edges[j as usize].iter().any(|e| e.to == i))
                 {
-                    self.edges[j as usize].push(NavEdge { to: i, kind });
+                    self.add_edge(j, i, kind);
                 }
             }
         }
@@ -1000,10 +1005,7 @@ impl NavGraph {
             .find(|&id| ground.body_reaches(at, cell, self.nodes[id as usize].pos, cap));
         if let Some(to) = onto {
             if !self.edges[from as usize].iter().any(|e| e.to == to) {
-                self.edges[from as usize].push(NavEdge {
-                    to,
-                    kind: EdgeKind::Drop,
-                });
+                self.add_edge(from, to, EdgeKind::Drop);
             }
         }
     }
@@ -1099,6 +1101,44 @@ impl NavGraph {
 
     pub fn neighbours(&self, node: u32) -> &[NavEdge] {
         &self.edges[node as usize]
+    }
+
+    /// An edge from `from` to `to`, its ends joined in one component.
+    fn add_edge(&mut self, from: u32, to: u32, kind: EdgeKind) {
+        self.edges[from as usize].push(NavEdge { to, kind });
+        let (a, b) = (self.component_of(from), self.component_of(to));
+        if a != b {
+            self.roots[a.max(b) as usize] = a.min(b);
+        }
+    }
+
+    /// The component `node` is in: a root no edge of any kind leads out of, either way.
+    pub fn component_of(&mut self, node: u32) -> u32 {
+        let mut n = node;
+        while self.roots[n as usize] != n {
+            let up = self.roots[self.roots[n as usize] as usize];
+            self.roots[n as usize] = up;
+            n = up;
+        }
+        n
+    }
+
+    /// [`component_of`](Self::component_of) without shortening the way up, for a graph shared.
+    pub fn component(&self, node: u32) -> u32 {
+        let mut n = node;
+        while self.roots[n as usize] != n {
+            n = self.roots[n as usize];
+        }
+        n
+    }
+
+    /// Every chunk the graph covers is built, so its components are final.
+    pub fn is_complete(&self) -> bool {
+        let (lo, hi) = (
+            chunk_of(self.gx.0, self.gy.0),
+            chunk_of(self.gx.1, self.gy.1),
+        );
+        self.built.len() as i64 >= i64::from(hi.0 - lo.0 + 1) * i64::from(hi.1 - lo.1 + 1)
     }
 
     /// The chunks covering columns `gx0..=gx1` x `gy0..=gy1` inside the graph's range that are

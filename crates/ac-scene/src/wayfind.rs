@@ -212,6 +212,15 @@ fn route(
     if ends.is_empty() {
         return Err(NoWay::Unreached);
     }
+    // Built whole, the graph's components are final: in different ones there is no way at all.
+    let nav = l.nav();
+    if nav.is_complete()
+        && !sources
+            .iter()
+            .any(|&(a, _)| ends.keys().any(|&b| nav.component(a) == nav.component(b)))
+    {
+        return Err(NoWay::Apart);
+    }
     let path = astar(l, q, &berths, &sources, &ends, g)?;
     let nav = l.nav();
     let mut points: Vec<(NavNode, EdgeKind)> = Vec::with_capacity(path.len() + 1);
@@ -757,10 +766,7 @@ mod tests {
         let start = Vec3::new(1.0, 3.0, 0.0);
         let goal = Vec3::new(15.0, 3.0, 0.0);
         let found = ask(&ground, &mut g, (start, 1), (goal, 2), 0.0);
-        assert!(
-            matches!(found, Search::NoWay(NoWay::Unreached)),
-            "{found:?}"
-        );
+        assert!(matches!(found, Search::NoWay(NoWay::Apart)), "{found:?}");
         // Within one room the path is direct.
         let near = Vec3::new(7.0, -3.0, 0.0);
         let path = points(ask(&ground, &mut g, (start, 1), (near, 1), 0.0)).unwrap();
@@ -1085,5 +1091,41 @@ mod tests {
                 n.pos
             );
         }
+    }
+
+    #[test]
+    fn rooms_with_no_door_between_are_apart_once_built() {
+        let w = two_rooms(None);
+        let ground = inside(&w);
+        let (from, to) = (
+            (Vec3::new(2.0, 0.0, 0.0), 1),
+            (Vec3::new(14.0, 0.0, 0.0), 2),
+        );
+        // Built as the search goes, the rest may yet join them: only searched out.
+        let mut lazy = graph(Vec2::new(0.0, -4.0), Vec2::new(32.0, 4.0));
+        let found = ask(&ground, &mut lazy, from, to, 0.5);
+        assert!(
+            !lazy.is_complete(),
+            "the fixture is built whole by one search"
+        );
+        assert!(
+            matches!(found, Search::NoWay(NoWay::Unreached)),
+            "{found:?}"
+        );
+        // Built whole: apart before any search.
+        let mut whole = graph(Vec2::new(0.0, -4.0), Vec2::new(32.0, 4.0));
+        whole.build_all(&ground);
+        assert!(whole.is_complete());
+        let found = ask(&ground, &mut whole, from, to, 0.5);
+        assert!(matches!(found, Search::NoWay(NoWay::Apart)), "{found:?}");
+        // And the same room is one component.
+        let found = ask(
+            &ground,
+            &mut whole,
+            from,
+            (Vec3::new(6.0, 3.0, 0.0), 1),
+            0.5,
+        );
+        assert!(matches!(found, Search::Found(_)), "{found:?}");
     }
 }
