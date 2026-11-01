@@ -1,0 +1,29 @@
+# Quest flags earned by talking to someone: the portals that ask for them
+# let the character in afterwards.
+# flag,min_level,npc,cell,x,y,z
+# The cell is hex; x/y/z are local to its landblock. min_level is the
+# level the NPC checks before stamping the flag.
+# Regenerate with reference/scripts/data/unlocks.sh (reads the ACE world
+# database, the community's reconstruction of retail's server data).
+fachubfolthidportal_flag,10,Warden,8A0201DD,81.61,-73.66,0
+fachubglendenwoodportal_flag,10,Warden,8A0201DD,83.87,-68.32,0
+fachubmosswartcampportal_flag,10,Warden,8A0201DD,76.25,-71.54,0
+fachubcolierportal_flag,15,Warden,8A0201D4,78.53,-45.98,0
+fachubgreenmiregraveportal_flag,15,Warden,8A0201D4,76.16,-51.46,0
+fachubhallsofhelmportal_flag,15,Warden,8A0201D4,83.86,-48.52,0
+fachubdangerouscatacombsportal_flag,20,Mosswart Warden,8A0201FF,113.87,-68.39,0.01
+fachubhuntersleapportal_flag,20,Warden,8A0201FF,106.15,-71.37,0
+fachubtrothyrsrestportal_flag,20,Warden,8A0201FF,111.42,-73.93,0
+fachubcatacombsportal_flag,25,Warden,8A0201F7,113.84,-48.32,0
+fachubeasthamportals_flag,25,Warden,8A0201F7,108.34,-46.2,0
+fachubfledgemasterscampportal_flag,25,Warden,8A0201F7,106.09,-51.81,0
+fachubhauntedmansionportal_flag,30,Aun Warden,8A0201B0,35.97,-71.45,0
+fachubmitemazeportal_flag,30,Warden,8A0201B0,41.31,-73.87,0
+fachubmountainsewerportal_flag,30,Warden,8A0201B0,43.97,-68.74,0
+fachubbanderlingcampportal_flag,35,Warden,8A0201A7,38.7,-46.33,0
+fachubskeletonfortportal_flag,35,Warden,8A0201A7,43.91,-48.71,0
+fachubsuntikportal_flag,35,Warden,8A0201A7,36.31,-51.56,0
+fachubbelligportal_flag,40,Warden,8A02018D,13.95,-68.47,0
+fachubcastleportal_flag,40,Warden,8A02018D,11.13,-73.92,0
+fachubdryreachportal_flag,40,Warden,8A02018D,6.12,-71.43,0
+fachubblackmireportal_flag,45,Warden,8A020187,13.81,-48.47,0
