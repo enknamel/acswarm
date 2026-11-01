@@ -743,3 +743,34 @@ fn a_counter_reached_after_the_walks_clock_ran_out_is_still_asked() {
         "gave the counter up while standing at it"
     );
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_counter_with_no_way_up_to_it_is_given_up() {
+    // Scn Mage stood 480 s 4 m from Archmage Asaina al-Arqis in Zaikhal: the walk up had no way to
+    // her, and nothing ended it.
+    let now = Instant::now();
+    let mut c = standing_at(0xA9B4_0019, glam::Vec3::new(84.0, 7.1, 94.0));
+    c.world.player_guid = Some(0x5000_0001);
+    let cfg = Growth::default();
+    a_run_at_cindrue(&mut c, Phase::Going, now);
+    // She stands 5 m off, past the counter's reach, and the character never gets nearer.
+    let cindrue = 0x7a9b_4033;
+    c.world
+        .objects
+        .get_mut(&cindrue)
+        .unwrap()
+        .position
+        .as_mut()
+        .unwrap()
+        .local = glam::Vec3::new(89.0, 7.1, 94.0);
+    assert_eq!(c.grow_run_step(now, &cfg), Turn::Acted);
+    assert_eq!(c.autoplay.status, "walking up to Archmage Cindrue");
+    let later = now + WALK_UP_LIMIT + Duration::from_secs(1);
+    c.grow_run_step(later, &cfg);
+    assert_ne!(
+        c.autoplay.growth.run.as_ref().map(|r| r.vendor.as_str()),
+        Some("Archmage Cindrue"),
+        "still walking up to her"
+    );
+}
