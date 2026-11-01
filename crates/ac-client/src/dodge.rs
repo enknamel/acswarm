@@ -445,14 +445,14 @@ impl Client {
     }
 
     /// Whether the attack `how` flying along `path` is struck by nothing: the landblock, the
-    /// ground, a closed door, or for a spell or an arrow any doorway (see `crate::doorway`).
+    /// ground, or for a spell or an arrow a doorway (see `crate::doorway`; a swing goes through).
     fn shot_flies(&mut self, path: &[Vec3], how: How) -> bool {
         let assets = self.assets.clone();
         let clear = self
             .player
             .as_mut()
             .is_none_or(|pl| pl.flies_clear(&assets, path));
-        clear && self.door_across(path, !matches!(how, How::Melee)).is_none()
+        clear && (matches!(how, How::Melee) || self.door_across(path).is_none())
     }
 
     /// Whether `at` is a spot two of our shots burst at as they left (see `hear_burst`).
@@ -654,7 +654,7 @@ impl Client {
     /// Where a projectile flying `path` first meets static collision or the ground: the shot test
     /// (`Player::flies_clear`) with the place, for saying what a shot struck.
     fn first_hit(&mut self, path: &[Vec3]) -> Option<Vec3> {
-        let door = self.door_across(path, true).map(|(p, _)| p);
+        let door = self.door_across(path).map(|(p, _)| p);
         let assets = self.assets.clone();
         let pl = self.player.as_mut()?;
         let worlds = pl.collision_along(&assets, path);
@@ -790,9 +790,9 @@ impl Client {
             s.distance(at) <= reach && duds.iter().all(|d| d.distance(*s) >= DUD_CLEAR)
         });
         // A shot from here through a doorway is thrown from the target's room instead.
-        if let Some(from_here) = aim::flight(shot, self.body_of(mine, me), to) {
-            let doorway = self.door_across(&from_here, !matches!(how, How::Melee));
-            if let Some((_, door)) = doorway {
+        let from_here = aim::flight(shot, self.body_of(mine, me), to);
+        if let Some(from_here) = from_here.filter(|_| !matches!(how, How::Melee)) {
+            if let Some((_, door)) = self.door_across(&from_here) {
                 self.keep_past_doorway(&door, me, &mut spots);
             }
         }
@@ -843,8 +843,8 @@ impl Client {
         // collision lacks (see `hear_burst`).
         let seen =
             self.shot_clears(target, how) && (matches!(how, How::Melee) || !self.is_dud_spot(me));
-        // Standing in a doorway, it is waited for out of it rather than shot through the frame.
-        if !seen && !matches!(how, How::Melee) && self.pull_from_doorway(target, name, at) {
+        // A doorway either stands in: step out of it, or wait for the target to come out.
+        if !seen && !matches!(how, How::Melee) && self.clear_doorway(target, name, at) {
             return true;
         }
         let stop = if seen { range * WITHIN } else { NO_SIGHT_STOP };

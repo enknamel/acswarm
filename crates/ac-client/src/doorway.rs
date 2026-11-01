@@ -1,7 +1,7 @@
-//! Doorways and thrown attacks. A spell or an arrow is never thrown through a doorway, open door or
-//! shut: the frame stops it. The caster goes into the target's room instead, and a target standing
-//! in a doorway is waited for a few metres back on the caster's side until it comes through.
-//! A closed door also stops a swing's line; an open one does not (walks go straight through).
+//! Doorways and thrown attacks. A spell or an arrow is never thrown through, from or into a
+//! doorway, open door or shut: the frame stops it. The caster steps out of one into the target's
+//! room, throws from the target's room rather than across one, and waits a few metres back on its
+//! own side for a target standing in one to come through. A swing goes through doors.
 
 use std::time::{Duration, Instant};
 
@@ -16,11 +16,15 @@ use crate::Client;
 const DOOR_NEAR: f32 = 4.0;
 /// A doorway's box is widened by this (metres) for the projectile's own size.
 const SPELL_PAD: f32 = 0.3;
+/// A doorway reaches this far (metres) either side of its door: Blargerton's casts from within 2 m
+/// of a door in 0x0286 landed 4 times in 40, from further out 50 in 79 (live, 2026-11-01).
+const DOORWAY_DEPTH: f32 = 2.0;
 /// A target in a doorway is waited for at least this far back from it (metres).
 const PULL_BACK: f32 = 6.0;
-/// Waiting spots are looked for up to this much further out than [`PULL_BACK`].
+/// Waiting spots are looked for up to this much further out than [`PULL_BACK`]; stepping-out
+/// spots up to this much past the doorway's edge.
 const PULL_BAND: f32 = 4.0;
-/// Waiting spots tried for a path, nearest the character first.
+/// Spots tried for a path, nearest the character first.
 const PULL_LOOKS: usize = 24;
 /// A target that stays in its doorway this long is fought as any other.
 const PULL_WAIT: Duration = Duration::from_secs(15);
@@ -42,9 +46,22 @@ impl DoorBox {
         self.turn.inverse() * (q - self.at) / self.scale
     }
 
+    /// Whether the box's thin way, across the doorway, is its local x (else y).
+    fn thin_x(&self) -> bool {
+        let d = self.hi - self.lo;
+        d.x < d.y
+    }
+
+    /// The doorway: the door's box, [`DOORWAY_DEPTH`] deep either side and padded for the
+    /// projectile, in the door's own frame.
     fn padded(&self) -> (Vec3, Vec3) {
-        let pad = Vec3::splat(SPELL_PAD / self.scale);
-        (self.lo - pad, self.hi + pad)
+        let (pad, deep) = (SPELL_PAD / self.scale, DOORWAY_DEPTH / self.scale);
+        let p = if self.thin_x() {
+            Vec3::new(deep, pad, pad)
+        } else {
+            Vec3::new(pad, deep, pad)
+        };
+        (self.lo - p, self.hi + p)
     }
 
     /// Where the segment `a`-`b` first enters the doorway, as a fraction along it.
@@ -62,8 +79,8 @@ impl DoorBox {
 
     /// Which side of the doorway `p` is on: across the box's thin way.
     fn side(&self, p: Vec3) -> bool {
-        let (l, mid, d) = (self.local(p), (self.lo + self.hi) * 0.5, self.hi - self.lo);
-        if d.x < d.y {
+        let (l, mid) = (self.local(p), (self.lo + self.hi) * 0.5);
+        if self.thin_x() {
             l.x > mid.x
         } else {
             l.y > mid.y
@@ -72,18 +89,16 @@ impl DoorBox {
 }
 
 impl Client {
-    /// The doors within [`DOOR_NEAR`] of `path`: shut ones only, or open ones too (`open`). The
-    /// server flies a spell into a shut one, though it lets a walk through
-    /// (`ac_nav::obstacles::in_the_way`). A door fills its Setup's box, the doorway: its leaf's
-    /// closed place is an animation frame the default placement lacks.
-    fn doors_near(&mut self, path: &[Vec3], open: bool) -> Vec<DoorBox> {
-        use ac_world::{object, object_desc_flags};
+    /// The doors, open or shut, within [`DOOR_NEAR`] of `path`. The server flies a spell into a
+    /// doorway's frame, though it lets a walk through (`ac_nav::obstacles::in_the_way`). A door
+    /// fills its Setup's box: its leaf's closed place is an animation frame the default lacks.
+    fn doors_near(&mut self, path: &[Vec3]) -> Vec<DoorBox> {
+        use ac_world::object_desc_flags;
         let near: Vec<(u32, Vec3, glam::Quat, f32)> = self
             .world
             .objects
             .values()
             .filter(|o| o.object_desc_flags & object_desc_flags::DOOR != 0 && o.setup_id != 0)
-            .filter(|o| open || o.physics_state & object::PHYSICS_STATE_ETHEREAL == 0)
             .filter_map(|o| {
                 let p = o.position?;
                 let at = ac_world::landblock_origin(p.cell) + p.local;
@@ -114,10 +129,9 @@ impl Client {
             .collect()
     }
 
-    /// Where `path` first enters a door's doorway, and the door: shut doors only, or open ones
-    /// too (`open`, for a spell or an arrow).
-    pub(crate) fn door_across(&mut self, path: &[Vec3], open: bool) -> Option<(Vec3, DoorBox)> {
-        let doors = self.doors_near(path, open);
+    /// Where `path` first enters a doorway, and its door.
+    pub(crate) fn door_across(&mut self, path: &[Vec3]) -> Option<(Vec3, DoorBox)> {
+        let doors = self.doors_near(path);
         path.windows(2).find_map(|w| {
             doors
                 .iter()
@@ -127,27 +141,21 @@ impl Client {
         })
     }
 
-    /// Of `spots` to throw from, those on the far side of the doorway the shot from `me` crosses:
-    /// in the target's room, where the shot need not cross it.
+    /// Of `spots` to throw from, those on the far side of the doorway the shot from `me` crosses
+    /// and out of it: in the target's room, where the shot need not cross it.
     pub(crate) fn keep_past_doorway(&mut self, door: &DoorBox, me: Vec3, spots: &mut Vec<Vec3>) {
         let mine = door.side(me);
         spots.retain(|s| door.side(*s) != mine && !door.holds(*s));
     }
 
-    /// A target standing in a doorway at `at` is not shot through its frame: walk back to a spot
-    /// on our side, [`PULL_BACK`] out, and wait there for it to come through. True while doing
-    /// so; false when it is not in a doorway, has stayed in one past [`PULL_WAIT`], or there is
-    /// nowhere to wait (`a_target_in_a_doorway_is_waited_for_out_of_it`).
-    pub(crate) fn pull_from_doorway(&mut self, target: u32, name: &str, at: Vec3) -> bool {
+    /// A shot at `target` (at `at`) kept from flying by a doorway either stands in. The target in
+    /// one: walk back to a spot on our side, [`PULL_BACK`] out, and wait for it to come through
+    /// (`a_target_in_a_doorway_is_waited_for_out_of_it`). We in one: step out into the target's
+    /// room (`a_caster_in_a_doorway_steps_out_into_the_target_s_room`). True while doing either;
+    /// false when neither stands in one, the target has stayed in one past [`PULL_WAIT`], or
+    /// there is nowhere to go.
+    pub(crate) fn clear_doorway(&mut self, target: u32, name: &str, at: Vec3) -> bool {
         let now = Instant::now();
-        let Some(door) = self
-            .doors_near(&[at], true)
-            .into_iter()
-            .find(|d| d.holds(at))
-        else {
-            self.dodge.pulling = None;
-            return false;
-        };
         let Some((me, block)) = self
             .player
             .as_ref()
@@ -155,6 +163,36 @@ impl Client {
         else {
             return false;
         };
+        let doors = self.doors_near(&[me, at]);
+        if let Some(door) = doors.iter().find(|d| d.holds(at)).copied() {
+            return self.pull_from_doorway(target, name, &door, me, block, now);
+        }
+        self.dodge.pulling = None;
+        let Some(door) = doors.iter().find(|d| d.holds(me)).copied() else {
+            return false;
+        };
+        let Some(spot) = self.out_of_doorway(&door, me, at, block) else {
+            tracing::info!("range: standing in a doorway, with nowhere out of it toward {name}");
+            return false;
+        };
+        self.dodge.approaching = Some(target);
+        self.head_for(spot, 0.3, name);
+        self.autoplay.say(
+            Doing::Fighting,
+            format!("stepping out of the doorway to cast at {name}"),
+        );
+        true
+    }
+
+    fn pull_from_doorway(
+        &mut self,
+        target: u32,
+        name: &str,
+        door: &DoorBox,
+        me: Vec3,
+        block: u32,
+        now: Instant,
+    ) -> bool {
         let spot = match self.dodge.pulling {
             Some((g, since, spot)) if g == target => {
                 if now.duration_since(since) > PULL_WAIT {
@@ -163,7 +201,7 @@ impl Client {
                 spot
             }
             _ => {
-                let spot = self.waiting_spot(&door, me, block);
+                let spot = self.waiting_spot(door, me, block);
                 tracing::info!(
                     "range: {name} stands in a doorway; waiting for it {}",
                     spot.map_or("nowhere: no spot back from it".into(), |s| format!(
@@ -200,11 +238,34 @@ impl Client {
 
     /// The nearest place on our side of `door`, [`PULL_BACK`] out or more, that a path leads to.
     fn waiting_spot(&mut self, door: &DoorBox, me: Vec3, block: u32) -> Option<Vec3> {
+        let mine = door.side(me);
+        self.nearest_reached(door.at, PULL_BACK + PULL_BAND, me, block, |s| {
+            door.side(s) == mine && s.distance(door.at) >= PULL_BACK
+        })
+    }
+
+    /// The nearest place out of `door`'s doorway on the side `at` is on, that a path leads to.
+    fn out_of_doorway(&mut self, door: &DoorBox, me: Vec3, at: Vec3, block: u32) -> Option<Vec3> {
+        let theirs = door.side(at);
+        self.nearest_reached(door.at, DOORWAY_DEPTH + PULL_BAND, me, block, |s| {
+            door.side(s) == theirs && !door.holds(s)
+        })
+    }
+
+    /// The standing place within `radius` of `around` that passes `keep`, nearest `me` of the
+    /// first [`PULL_LOOKS`], that a path from `me` leads to.
+    fn nearest_reached(
+        &mut self,
+        around: Vec3,
+        radius: f32,
+        me: Vec3,
+        block: u32,
+        keep: impl Fn(Vec3) -> bool,
+    ) -> Option<Vec3> {
         let assets = self.assets.clone();
         let pl = self.player.as_mut()?;
-        let mine = door.side(me);
-        let mut spots = pl.standable_near(&assets, block, door.at, PULL_BACK + PULL_BAND);
-        spots.retain(|s| door.side(*s) == mine && s.distance(door.at) >= PULL_BACK);
+        let mut spots = pl.standable_near(&assets, block, around, radius);
+        spots.retain(|s| keep(*s));
         spots.sort_by(|a, b| a.distance(me).total_cmp(&b.distance(me)));
         spots.into_iter().take(PULL_LOOKS).find(|s| {
             s.distance(me) <= AT_SPOT || pl.find_path(&assets, block, me, *s, block).is_some()
