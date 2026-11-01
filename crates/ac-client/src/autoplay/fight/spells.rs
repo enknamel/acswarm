@@ -109,12 +109,6 @@ impl Client {
         if self.autoplay_plan_hard(guid, &name, now) {
             return true;
         }
-        // Something with a lot of health is worth softening first: one
-        // vulnerability for the element it is weakest to, then throw
-        // that element at it for the rest of the fight.
-        if self.autoplay_make_vulnerable(guid, &name, now) {
-            return true;
-        }
         // Of the spells that could be thrown this moment, the one this
         // creature is hurt most by. An Ice Golem takes nothing at all
         // from cold and full damage from fire, so the difference between
@@ -129,7 +123,13 @@ impl Client {
             .get(&guid)
             .map(|o| o.weenie_class_id)
             .unwrap_or(0);
-        if let Some((spell, worth)) = ac_world::elements::best_spell(wcid, &name, &ids) {
+        let best = ac_world::elements::best_spell(wcid, &name, &ids);
+        // Something that would take more than two of those is worth softening first: one
+        // vulnerability for the element it is weakest to, then that element for the rest.
+        if self.autoplay_make_vulnerable(guid, &name, best.map(|(id, _)| id), now) {
+            return true;
+        }
+        if let Some((spell, worth)) = best {
             let spell_name = ready
                 .iter()
                 .find(|(id, _)| *id == spell)

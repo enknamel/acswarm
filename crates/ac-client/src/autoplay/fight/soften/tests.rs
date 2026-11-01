@@ -50,3 +50,38 @@ fn a_softening_with_no_wand_to_be_had_lets_the_fight_go_ahead() {
     );
     assert_eq!(c.autoplay.pending_wield, None, "nothing was sent");
 }
+
+#[test]
+fn a_target_three_casts_from_dead_is_worth_a_vulnerability() {
+    assert!(
+        is_vuln_worth(Some(61.0), Some(30.0), 0, 2000),
+        "three casts, whatever the floor"
+    );
+}
+
+#[test]
+fn a_target_two_casts_kill_is_not_worth_one() {
+    assert!(
+        !is_vuln_worth(Some(60.0), Some(30.0), 5000, 200),
+        "two casts, though its full health is over the floor"
+    );
+    assert!(!is_vuln_worth(Some(12.0), Some(30.0), 0, 200), "one cast");
+}
+
+#[test]
+fn before_a_spell_has_landed_the_health_floor_decides() {
+    assert!(is_vuln_worth(Some(500.0), None, 2500, 2000));
+    assert!(!is_vuln_worth(Some(500.0), None, 1500, 2000));
+    assert!(
+        is_vuln_worth(None, Some(30.0), 2500, 2000),
+        "health unknown"
+    );
+    assert!(
+        !is_vuln_worth(None, None, 2500, 0),
+        "a floor of 0 never softens"
+    );
+    assert!(
+        is_vuln_worth(Some(90.0), Some(0.0), 2500, 2000),
+        "no damage measured on it"
+    );
+}

@@ -417,12 +417,14 @@ pub(crate) fn draw(
                             .speed(10.0)
                             .range(0..=20000),
                     );
-                    ui.label("health before casting a vulnerability");
+                    ui.label("health for a vulnerability, until spells have landed");
                 })
                 .response
                 .on_hover_text(
-                    "Soften anything with at least this much health with a \
-                     vulnerability for the element it is weakest to. 0 never does.",
+                    "A vulnerability for the element a target is weakest to is cast when killing \
+                     it would take more than two attack spells, judged by the damage they have \
+                     done. Until one has landed, anything with at least this much health is \
+                     softened. 0 never casts one.",
                 );
                 if matches!(cfg.fight.style, Style::Auto | Style::Magic) {
                     caption(ui, "attack spells, best first");

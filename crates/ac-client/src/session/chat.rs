@@ -409,6 +409,8 @@ impl Client {
             // no notification, only this line (see
             // `autoplay::spell_attacker`).
             self.hear_spell_attack(&line.text, Instant::now());
+            // And on one of ours landing: what a cast is worth (see `autoplay::spell_landed`).
+            self.hear_spell_landed(&line.text);
         }
         let text = match (op, line.sender.is_empty()) {
             _ if line.kind == ac_net::messages::turbine::KIND => {

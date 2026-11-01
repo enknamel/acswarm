@@ -232,10 +232,16 @@ impl Client {
             .max_by_key(|id| table.get(*id).map(|s| s.power).unwrap_or(0))
     }
 
-    /// Cast a vulnerability for the target's weakest element, once per
-    /// target and only on something with health enough for the spell to
-    /// pay for itself. True when a spell went out this tick.
-    pub(super) fn autoplay_make_vulnerable(&mut self, guid: u32, name: &str, now: Instant) -> bool {
+    /// Cast a vulnerability for the target's weakest element, once per target and only when it
+    /// pays (see [`is_vuln_worth`]) against `spell`, the attack the fight would throw next. True when a
+    /// spell went out this tick.
+    pub(super) fn autoplay_make_vulnerable(
+        &mut self,
+        guid: u32,
+        name: &str,
+        spell: Option<u32>,
+        now: Instant,
+    ) -> bool {
         let least = self.autoplay.config.fight.vuln_above_health;
         if least == 0 || self.autoplay.vulned.contains(&guid) || self.softened_by_anyone(guid) {
             return false;
@@ -246,7 +252,11 @@ impl Client {
             self.autoplay.vulned.drain(..32);
         }
         let known = self.creature_known(guid);
-        let Some(element) = crate::weapons::vulnerability_for(known, least) else {
+        let per_cast = spell.and_then(|s| self.damage_per_cast(s, known));
+        let full = known.map_or(0, |c| c.health);
+        let worth = is_vuln_worth(self.health_now(guid), per_cast, full, least);
+        let element = crate::weapons::vulnerability_for(known, 0).filter(|_| worth);
+        let Some(element) = element else {
             // Nothing worth softening: do not ask again for this one.
             self.autoplay.vulned.push(guid);
             return false;
@@ -284,6 +294,49 @@ impl Client {
         );
         self.autoplay.say(Doing::Debuffing, said);
         true
+    }
+}
+
+/// Casts of the attack spell a target may need before a vulnerability is worth its own cast.
+pub(crate) const VULN_AFTER_CASTS: f32 = 2.0;
+
+/// Whether a vulnerability pays on a target with `health` left that each cast of the attack takes
+/// `per_cast` off: when killing it needs more than [`VULN_AFTER_CASTS`]. With either unknown (no
+/// appraisal, the spell not yet landed), by `least`, the setting's floor on its `full` health.
+pub(crate) fn is_vuln_worth(
+    health: Option<f32>,
+    per_cast: Option<f32>,
+    full: u32,
+    least: u32,
+) -> bool {
+    match (health, per_cast) {
+        (Some(h), Some(d)) if d > 0.0 => (h / d).ceil() > VULN_AFTER_CASTS,
+        _ => least > 0 && full >= least,
+    }
+}
+
+impl Client {
+    /// The health `guid` has left: its full health, appraised or from the creature table, times
+    /// the fraction the server last sent (full when none has come). `None` with no full health.
+    pub(crate) fn health_now(&self, guid: u32) -> Option<f32> {
+        let full = self
+            .appraisals
+            .get(&guid)
+            .and_then(|a| a.creature.as_ref())
+            .map(|c| c.health_max)
+            .filter(|h| *h > 0)
+            .or_else(|| {
+                self.creature_known(guid)
+                    .map(|c| c.health)
+                    .filter(|h| *h > 0)
+            })?;
+        let fraction = self
+            .world
+            .objects
+            .get(&guid)
+            .and_then(|o| o.health)
+            .unwrap_or(1.0);
+        Some(full as f32 * fraction)
     }
 }
 
