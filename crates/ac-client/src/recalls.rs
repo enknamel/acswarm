@@ -25,6 +25,20 @@ use crate::Client;
 /// A lifestone or portal this close to the character is the one it
 /// just used or tied (the server's use radius is about as much).
 const NEXT_TO: f32 = 12.0;
+/// How long after a recall is asked for a teleport is taken for its landing: a cast and
+/// /lifestone's own wait come well inside it.
+const RECALL_LANDS: std::time::Duration = std::time::Duration::from_secs(60);
+/// Metres from where a recall was asked that a landing must be: less is a server correction.
+const RECALL_MOVES: f32 = 30.0;
+
+/// One learnt saved position as kept on disk between sessions; ACE sends only the last death's
+/// at login (GameEventPlayerDescription.cs:202-210), so the rest would be lost at every logoff.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct Kept {
+    kind: u32,
+    cell: u32,
+    local: [f32; 3],
+}
 
 impl Client {
     /// Send one of the free recalls. Answers in the same words a cast
@@ -36,6 +50,9 @@ impl Client {
             recalls::spell::FREE_MARKETPLACE => action::TELE_TO_MARKETPLACE,
             _ => return CastCheck::NotKnown,
         };
+        if spell == recalls::spell::FREE_LIFESTONE {
+            self.note_recall_sent(position_type::SANCTUARY);
+        }
         // The server refuses it in combat, so drop out first: the
         // refusal costs a round trip and says nothing useful.
         if self.combat {
@@ -164,6 +181,71 @@ impl Client {
             p.local
         );
         self.world.stats.set_recall_position(kind, p);
+        self.save_recall_positions();
+    }
+
+    /// Where this character's learnt saved positions are kept: beside its loot ledger, by server.
+    fn recalls_path(&self) -> Option<std::path::PathBuf> {
+        let name = self.world.stats.name.trim();
+        if name.is_empty() {
+            return None;
+        }
+        let beside = self.profiles.dir().parent()?.to_path_buf();
+        Some(
+            beside
+                .join("recalls")
+                .join(ac_store::file_safe(&self.config.host))
+                .join(format!("{}.json", ac_store::file_safe(name))),
+        )
+    }
+
+    /// Read back the saved positions learnt in earlier sessions, at login. One the server has
+    /// sent already is the server's.
+    pub(crate) fn load_recall_positions(&mut self) {
+        let Some(path) = self.recalls_path() else {
+            return;
+        };
+        let kept: Vec<Kept> = match ac_store::read_json(&path) {
+            Ok(Some(k)) => k,
+            Ok(None) => return,
+            Err(e) => {
+                tracing::warn!("recall: reading {}: {e}", path.display());
+                return;
+            }
+        };
+        for k in kept {
+            if self.world.stats.recall_position(k.kind).is_none() {
+                let p = Position::new_flat(k.cell, Vec3::from(k.local));
+                self.world.stats.set_recall_position(k.kind, p);
+                tracing::info!(
+                    "recall: position {} read back: {:#010x} {:?}",
+                    k.kind,
+                    k.cell,
+                    k.local
+                );
+            }
+        }
+    }
+
+    /// Write out every saved position known, so the next session plans with them.
+    fn save_recall_positions(&self) {
+        let Some(path) = self.recalls_path() else {
+            return;
+        };
+        let kept: Vec<Kept> = self
+            .world
+            .stats
+            .positions
+            .iter()
+            .map(|(kind, p)| Kept {
+                kind: *kind,
+                cell: p.cell,
+                local: p.local.to_array(),
+            })
+            .collect();
+        if let Err(e) = ac_store::write_json_atomic(&path, &kept, ac_store::Visibility::Normal) {
+            tracing::warn!("recall: writing {}: {e}", path.display());
+        }
     }
 
     /// A spell was sent: remember a tie, so the "successfully linked"
@@ -172,6 +254,37 @@ impl Client {
         if recalls::tie_sets(spell).is_some() {
             self.travel.last_tie = Some(spell);
         }
+        if let Some(kind) = recalls::dynamic(spell) {
+            self.note_recall_sent(kind);
+        }
+    }
+
+    /// A recall to the saved position `kind` was asked for, by a spell or `/lifestone`, from the
+    /// journey, a key or the chat box: where it lands is that position (see [`Self::recall_landed`]).
+    pub(crate) fn note_recall_sent(&mut self, kind: u32) {
+        if let Some(at) = self.my_position() {
+            self.travel.recall_sent = Some((kind, at, std::time::Instant::now()));
+        }
+    }
+
+    /// The server put us somewhere: if a recall was asked for lately and this is far from where it
+    /// was asked, it landed here, and that is where it goes from now on.
+    pub(crate) fn recall_landed(&mut self) {
+        let Some((kind, from, sent)) = self.travel.recall_sent else {
+            return;
+        };
+        if sent.elapsed() > RECALL_LANDS {
+            self.travel.recall_sent = None;
+            return;
+        }
+        let (Some(here), Some(at)) = (self.standing(), self.my_position()) else {
+            return;
+        };
+        if at.distance(from) < RECALL_MOVES {
+            return;
+        }
+        self.travel.recall_sent = None;
+        self.learn_recall_position(kind, here);
     }
 
     /// A line of chat from the server: the ones that mean a saved
@@ -179,6 +292,11 @@ impl Client {
     /// Lifestone Tie and the Portal Ties say the link succeeded.
     pub(crate) fn recall_notice(&mut self, text: &str) {
         let lower = text.to_lowercase();
+        // The server's word on a /lifestone however it was asked (retail's "is recalling to the
+        // lifestone"): where it lands is the lifestone.
+        if lower.contains("is recalling to the lifestone") && self.travel.recall_sent.is_none() {
+            self.note_recall_sent(position_type::SANCTUARY);
+        }
         if lower.contains("attuned your spirit") || lower.contains("resurrection point") {
             // Only next to a lifestone: the words alone could be anything.
             let Some(here) = self.standing() else {
@@ -234,6 +352,7 @@ impl Client {
         if let Some(kind) = kind {
             tracing::info!("recall: the server has no position {kind}; forgetting it");
             self.world.stats.clear_recall_position(kind);
+            self.save_recall_positions();
             self.travel_recall_refused();
         }
         // YourSpellFizzled: try again straight away rather than wait.
@@ -262,3 +381,6 @@ impl Client {
             })
     }
 }
+
+#[cfg(test)]
+mod tests;

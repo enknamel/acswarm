@@ -28,6 +28,7 @@ impl Client {
         if !self.ledger_loaded && !self.world.stats.name.trim().is_empty() {
             self.ledger_loaded = true;
             self.load_ledger();
+            self.load_recall_positions();
         }
         use ac_net::session::{Event, Port};
         let mut chat_pending: Vec<(u32, Vec<u8>)> = Vec::new();
@@ -109,6 +110,7 @@ impl Client {
                             }
                             self.steering.reset();
                             self.travel_displaced();
+                            self.recall_landed();
                         }
                         ac_world::Applied::PlayerMoveTo | ac_world::Applied::PlayerMotion => {
                             // A MoveTo aimed at us is ours to carry out; a plain

@@ -9,6 +9,7 @@ use super::{Outcome, Refused};
 use crate::Client;
 
 pub(super) fn lifestone(c: &mut Client) -> Outcome {
+    c.note_recall_sent(ac_world::recalls::position_type::SANCTUARY);
     c.session.send_action(action::TELE_TO_LIFESTONE, &[]);
     Ok(())
 }
