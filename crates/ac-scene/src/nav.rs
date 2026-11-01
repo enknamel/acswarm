@@ -1,16 +1,16 @@
 //! The walking graph of a rectangle (a block, an area): feet positions on a lattice over the
 //! static collision and the terrain, one node per level in a column, snapped out of walls. Edges
-//! are directed and checked by sampling the capsule every half metre (floor, walls, head room,
-//! chest ray), indoors by the body's own step too (`Ground::joins`). Chunks build on demand;
-//! routes are searched in [`crate::wayfind`].
+//! are directed, each walked by the body's own step ([`Ground::hop`], [`crate::stride`]). Chunks
+//! build on demand; routes are searched in [`crate::wayfind`].
 
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use glam::{Vec2, Vec3};
 
-use crate::collision::{Capsule, CollisionWorld};
+use crate::collision::{Capsule, CollisionWorld, Tri, Vertical, Walk};
 use crate::landblock::LandblockScene;
+use crate::stride::{stride, Stride, Underfoot};
 use crate::{lbid, BLOCK_SIZE};
 
 /// Grid spacing inside dungeons and buildings (metres).
@@ -34,12 +34,14 @@ const RAMP_FLOOR: f32 = 0.5;
 const RAMP_LEVEL: f32 = 0.97;
 /// A snapped node may move at most this fraction of the spacing.
 const SNAP_FRACTION: f32 = 0.6;
-/// How far one step of `body_reaches` goes (metres): a frame's run at 20 Hz.
+/// How far one step of the body's walk goes (metres): a frame's run at 20 Hz.
 const BODY_STEP: f32 = 0.2;
-/// How near `body_reaches` must come to the far node, flat (metres).
-const BODY_ARRIVE: f32 = 0.25;
-/// The least share of a step `body_reaches` must close on the far node; less is a wall.
+/// How near the body's step must come to the far node of an edge, flat (metres).
+pub const BODY_ARRIVE: f32 = 0.25;
+/// The least share of a step the body's walk must close on the far node; less is a wall.
 const BODY_CLOSING: f32 = 0.3;
+/// A walk this near its end (metres) is there: the float error of its last step.
+const TOUCHING: f32 = 0.01;
 
 /// Where the ground is: static collision plus, outdoors, a terrain
 /// height function over world `(x, y)`.
@@ -162,11 +164,8 @@ impl Ground<'_> {
         }
     }
 
-    /// Sample the walk from `a` to `b` (feet positions) every
-    /// `SUBSTEP`: the capsule must fit at every sample, the floor must
-    /// continue, and the chest ray between samples must be clear. Returns
-    /// whether the walk is possible from `a` to `b` and from `b` to `a`
-    /// (they differ by the step-up and step-down limits).
+    /// The old steering's straight check (`Player::line_blocked`), not an edge test: the walk from
+    /// `a` to `b` sampled every `SUBSTEP` (fits, floor, chest ray), each way.
     pub fn walkable(&self, a: Vec3, b: Vec3, cap: &Capsule) -> (bool, bool) {
         let d = b - a;
         let len = flat(d).length();
@@ -210,86 +209,122 @@ impl Ground<'_> {
         (forward, backward)
     }
 
-    /// [`walkable`](Self::walkable), and where it refuses between two nodes `indoors`, the body's
-    /// own step each way ([`body_reaches`](Self::body_reaches)): the test for a hop between
-    /// neighbours. Only indoors: the step knows no terrain, and tried on every refused hop outside
-    /// it made Holtburg's graph five times slower to build (92 -> 445 ms).
-    pub fn joins(&self, a: Vec3, b: Vec3, indoors: bool, cap: &Capsule) -> (bool, bool) {
-        let (fwd, back) = self.walkable(a, b, cap);
-        // A wall at chest height between them is not slid past: the step is for what the sampling
-        // over-counts, a door frame brushed or a landing's lip, never for a wall.
-        if !indoors || (fwd && back) || !line_clear(self.collision, a, b) {
-            return (fwd, back);
+    /// The edge test between two nodes, each way: the chest line clear ([`is_chest_clear`]) and
+    /// the body's own step ([`stride_toward`](Self::stride_toward)) to within [`BODY_ARRIVE`].
+    pub fn hop(
+        &self,
+        a: &NavNode,
+        b: &NavNode,
+        cap: &Capsule,
+    ) -> (Option<EdgeKind>, Option<EdgeKind>) {
+        if (a.pos.z - b.pos.z).abs() > MAX_EDGE_RISE
+            || !is_chest_clear(self.collision, a.pos, b.pos)
+        {
+            return (None, None);
         }
-        (
-            fwd || self.body_reaches(a, b, cap),
-            back || self.body_reaches(b, a, cap),
-        )
+        let swept = Swept::over(self, a.pos, b.pos, cap);
+        let one_way = |p: &NavNode, q: &NavNode| {
+            matches!(
+                self.stride_over(&swept, p.pos, p.cell, q.pos, BODY_ARRIVE, cap),
+                Reach::Reached { .. }
+            )
+            .then(|| walk_kind(p.cell, q.cell))
+        };
+        (one_way(a, b), one_way(b, a))
     }
 
-    /// Whether a route's leg from `a` to `b` (feet) is walked: the chest line clear and the edge
-    /// test one way ([`joins`](Self::joins)), `indoors` when both ends stand in interior cells.
-    pub fn can_walk(&self, a: Vec3, b: Vec3, indoors: bool, cap: &Capsule) -> bool {
-        line_clear(self.collision, a, b)
-            && (self.walkable(a, b, cap).0 || (indoors && self.body_reaches(a, b, cap)))
+    /// Whether a route's leg from `a` to `b` (feet, each with its cell) is walked: the chest line
+    /// clear and the body's step one way, as [`hop`](Self::hop) tests an edge.
+    pub fn can_walk(&self, a: (Vec3, u32), b: (Vec3, u32), cap: &Capsule) -> bool {
+        is_chest_clear(self.collision, a.0, b.0) && self.body_reaches(a.0, a.1, b.0, cap)
     }
 
-    /// Whether the body gets from `a` to `b` (feet, a hop of a node or two) by the step
-    /// `Player::update` takes: `walk` a fifth of a metre at a time, onto what is below within a
-    /// step down where a step leaves the floor, always closing on `b`. The sampled test refuses a
-    /// door frame the body slides past and the lip of a landing over a stair's top step, and so
-    /// found no way into a mine at ACB5 the body walks (test: a_mine_is_walked_down_to_its_floor).
-    pub fn body_reaches(&self, a: Vec3, b: Vec3, cap: &Capsule) -> bool {
-        self.body_comes_within(a, b, BODY_ARRIVE, cap)
+    /// Whether the body's step carries it from `a` (feet, in `cell`) to within [`BODY_ARRIVE`]
+    /// of `b`, whatever the chest line meets.
+    pub fn body_reaches(&self, a: Vec3, cell: u32, b: Vec3, cap: &Capsule) -> bool {
+        self.body_comes_within(a, cell, b, BODY_ARRIVE, cap)
     }
 
     /// [`body_reaches`](Self::body_reaches), but `within` metres of `b` (flat, on its floor) is
     /// there: a walk that stops short, as a corridor's aim by its wall is walked to.
-    pub fn body_comes_within(&self, a: Vec3, b: Vec3, within: f32, cap: &Capsule) -> bool {
-        self.body_stops_within(a, b, within, cap).is_some()
+    pub fn body_comes_within(
+        &self,
+        a: Vec3,
+        cell: u32,
+        b: Vec3,
+        within: f32,
+        cap: &Capsule,
+    ) -> bool {
+        self.body_stops_within(a, cell, b, within, cap).is_some()
     }
 
     /// Where the walk of [`body_comes_within`](Self::body_comes_within) stops, `within` of `b` on
     /// its floor; `None` when it does not get there.
-    pub fn body_stops_within(&self, a: Vec3, b: Vec3, within: f32, cap: &Capsule) -> Option<Vec3> {
-        let mut p = a;
+    pub fn body_stops_within(
+        &self,
+        a: Vec3,
+        cell: u32,
+        b: Vec3,
+        within: f32,
+        cap: &Capsule,
+    ) -> Option<Vec3> {
+        match self.stride_toward(a, cell, b, within, cap) {
+            Reach::Reached { at, .. } => Some(at),
+            _ => None,
+        }
+    }
+
+    /// Where the body's own step ([`stride`]) carries it from `a` (feet, in `cell`) toward `b`, a
+    /// fifth of a metre at a time and always closing on it, until `within` of `b` on its floor.
+    pub fn stride_toward(&self, a: Vec3, cell: u32, b: Vec3, within: f32, cap: &Capsule) -> Reach {
+        self.stride_over(&Swept::over(self, a, b, cap), a, cell, b, within, cap)
+    }
+
+    /// [`stride_toward`](Self::stride_toward) stepping on `u`.
+    fn stride_over(
+        &self,
+        u: &Swept,
+        a: Vec3,
+        cell: u32,
+        b: Vec3,
+        within: f32,
+        cap: &Capsule,
+    ) -> Reach {
+        let (mut p, mut cell) = (a, cell);
         let mut left = flat(b - a).length();
         for _ in 0..(left / BODY_STEP).ceil() as usize + 4 {
-            if left <= within {
+            if left <= within.max(TOUCHING) {
                 // A step from `b`'s floor is on it: down a stair, the ramp walked lies 0.33 m under the
                 // tread its node stands on (test: the_stairs_up_to_a_scrivener_are_walked_down_too).
-                return ((p.z - b.z).abs() <= cap.step_up).then_some(p);
+                return if (p.z - b.z).abs() <= cap.step_up {
+                    Reach::Reached { at: p, cell }
+                } else {
+                    Reach::Stopped
+                };
             }
             let d = flat(b - p);
             let step = d.normalize() * d.length().min(BODY_STEP);
-            let walk = self
-                .collision
-                .walk(p, Vec3::new(p.x + step.x, p.y + step.y, p.z), cap);
-            if walk.blocked {
-                return None;
+            let (next, next_cell) =
+                match stride(u, p, cell, Vec3::new(p.x + step.x, p.y + step.y, p.z), cap) {
+                    Stride::Stand { at, cell } => (at, cell),
+                    Stride::Falls { at } => return Reach::Falls { at },
+                    Stride::Blocked | Stride::Adrift { .. } => return Reach::Stopped,
+                };
+            if self.outdoors_only && next_cell != 0 {
+                return Reach::Stopped;
             }
-            let mut next = walk.pos;
-            if walk.floor.is_none() {
-                match self.collision.floor_at(next, 0.0, cap.step_down) {
-                    Some((z, _)) => next.z = z,
-                    None => return None,
-                }
-            }
-            if self.outdoors_only && walk.floor.is_some_and(|(_, cell)| cell != 0) {
-                return None;
-            }
-            if self.no_go.is_some_and(|f| f(next)) || self.sea.is_some_and(|f| f(next.x, next.y)) {
-                return None;
+            if self.no_go.is_some_and(|f| f(next)) {
+                return Reach::Stopped;
             }
             // A step that closes little is sliding along a wall the hop runs into.
             let now_left = flat(b - next).length();
             if now_left > left - BODY_STEP * BODY_CLOSING {
-                return None;
+                return Reach::Stopped;
             }
             left = now_left;
-            p = next;
+            (p, cell) = (next, next_cell);
         }
-        None
+        Reach::Stopped
     }
 
     /// Whether the straight walk from `a` to `b` (feet positions) runs
@@ -388,6 +423,173 @@ impl Ground<'_> {
     }
 }
 
+/// Where the body's step toward a point ends ([`Ground::stride_toward`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Reach {
+    /// Within reach of it, on its floor, standing in `cell` (0 outdoors).
+    Reached { at: Vec3, cell: u32 },
+    /// Off an edge at `at` on the way.
+    Falls { at: Vec3 },
+    /// Held by a wall, sliding along one, or off every floor.
+    Stopped,
+}
+
+impl Underfoot for Ground<'_> {
+    fn walk(&self, from: Vec3, to: Vec3, cap: &Capsule) -> Walk {
+        self.collision.walk(from, to, cap)
+    }
+
+    fn floor_over_feet(&self, at: Vec3, cap: &Capsule) -> bool {
+        self.collision
+            .floor_at(at, cap.height, 0.0)
+            .is_some_and(|(z, _)| z > at.z + cap.step_up)
+    }
+
+    fn floor_below(&self, at: Vec3, cap: &Capsule, depth: f32) -> Option<(f32, u32)> {
+        self.collision.floor_at(at, cap.step_up, depth)
+    }
+
+    /// The walkable terrain: none over open sea, so only what is built over it is stood on.
+    fn terrain_at(&self, x: f32, y: f32) -> Option<f32> {
+        self.terrain_under(x, y)
+    }
+
+    fn is_dungeon(&self) -> bool {
+        self.terrain.is_none()
+    }
+
+    fn vertical(&self, from: Vec3, dz: f32, cap: &Capsule) -> Vertical {
+        self.collision.vertical(from, dz, cap)
+    }
+
+    fn resolve_falling(&self, from: Vec3, to: Vec3, cap: &Capsule) -> Vec3 {
+        self.collision
+            .resolve_from(Some(from), to, cap.radius, cap.height, 0.0)
+    }
+
+    fn fits_falling(&self, at: Vec3, cap: &Capsule) -> bool {
+        self.collision
+            .ceiling_at(at, cap.radius)
+            .is_none_or(|cz| cz - at.z >= cap.height)
+    }
+}
+
+/// A [`Ground`] for one hop, with what near it can push a body or hang over it: a step that has
+/// none of those within its reach is its footing alone, which is all the full walk does there.
+struct Swept<'g, 'a> {
+    ground: &'g Ground<'a>,
+    /// The bounds of every wall, ceiling and two-sided floor near the hop.
+    pushers: Vec<(Vec3, Vec3)>,
+    /// Every floor near the hop, in the order the world holds them.
+    floors: Vec<&'g Tri>,
+    /// The box they were gathered in.
+    lo: Vec3,
+    hi: Vec3,
+}
+
+impl<'g, 'a> Swept<'g, 'a> {
+    fn over(ground: &'g Ground<'a>, a: Vec3, b: Vec3, cap: &Capsule) -> Self {
+        let reach = cap.radius + 1.0;
+        let lo = a.min(b) - Vec3::new(reach, reach, MAX_EDGE_RISE + cap.step_down + 0.1);
+        let hi = a.max(b) + Vec3::new(reach, reach, MAX_EDGE_RISE + cap.step_up + cap.height + 0.1);
+        let r = flat(b - a).length() * 0.5 + reach;
+        let pushers = ground
+            .collision
+            .around((a + b) * 0.5, r)
+            .map(|(_, t)| t)
+            .filter(|t| {
+                t.normal.z.abs() <= 0.6 || t.normal.z < -0.5 || (t.two_sided && t.normal.z > 0.5)
+            })
+            .map(|t| (t.a.min(t.b).min(t.c), t.a.max(t.b).max(t.c)))
+            .filter(|(tlo, thi)| tlo.cmple(hi).all() && thi.cmpge(lo).all())
+            .collect();
+        let mut ids: Vec<u32> = ground
+            .collision
+            .around((a + b) * 0.5, r)
+            .filter(|(_, t)| {
+                let (tlo, thi) = (t.a.min(t.b).min(t.c), t.a.max(t.b).max(t.c));
+                t.normal.z >= 0.5
+                    && flat(tlo).cmple(flat(hi)).all()
+                    && flat(thi).cmpge(flat(lo)).all()
+            })
+            .map(|(i, _)| i)
+            .collect();
+        ids.sort_unstable();
+        ids.dedup();
+        let floors = ground.collision.tris_at(&ids);
+        Swept {
+            ground,
+            pushers,
+            floors,
+            lo,
+            hi,
+        }
+    }
+
+    /// Whether a walking step from `from` to `to` can meet nothing that pushes or hangs over:
+    /// within a radius of its line, from a step down under its feet to a step and a height over.
+    fn is_clear(&self, from: Vec3, to: Vec3, cap: &Capsule) -> bool {
+        let m = cap.radius + 0.05;
+        let lo = from.min(to) - Vec3::new(m, m, cap.step_down + 0.05);
+        let hi = from.max(to) + Vec3::new(m, m, cap.step_up + cap.height + 0.05);
+        lo.cmpge(self.lo).all()
+            && hi.cmple(self.hi).all()
+            && !self
+                .pushers
+                .iter()
+                .any(|(tlo, thi)| tlo.cmple(hi).all() && thi.cmpge(lo).all())
+    }
+}
+
+impl Underfoot for Swept<'_, '_> {
+    fn walk(&self, from: Vec3, to: Vec3, cap: &Capsule) -> Walk {
+        if !self.is_clear(from, Vec3::new(to.x, to.y, from.z), cap) {
+            return self.ground.walk(from, to, cap);
+        }
+        let probe = Vec3::new(to.x, to.y, from.z);
+        let floor = self.ground.collision.footing_among(
+            &self.floors,
+            probe,
+            cap.radius,
+            cap.step_up,
+            cap.step_down,
+        );
+        Walk {
+            pos: Vec3::new(to.x, to.y, floor.map_or(from.z, |(z, _)| z)),
+            floor,
+            blocked: false,
+        }
+    }
+
+    fn floor_over_feet(&self, at: Vec3, cap: &Capsule) -> bool {
+        self.ground.floor_over_feet(at, cap)
+    }
+
+    fn floor_below(&self, at: Vec3, cap: &Capsule, depth: f32) -> Option<(f32, u32)> {
+        self.ground.floor_below(at, cap, depth)
+    }
+
+    fn terrain_at(&self, x: f32, y: f32) -> Option<f32> {
+        self.ground.terrain_at(x, y)
+    }
+
+    fn is_dungeon(&self) -> bool {
+        self.ground.is_dungeon()
+    }
+
+    fn vertical(&self, from: Vec3, dz: f32, cap: &Capsule) -> Vertical {
+        self.ground.vertical(from, dz, cap)
+    }
+
+    fn resolve_falling(&self, from: Vec3, to: Vec3, cap: &Capsule) -> Vec3 {
+        self.ground.resolve_falling(from, to, cap)
+    }
+
+    fn fits_falling(&self, at: Vec3, cap: &Capsule) -> bool {
+        self.ground.fits_falling(at, cap)
+    }
+}
+
 /// A straight walk from `a` to `b` has a clear ray at chest height:
 /// parallel to the ground, or level with the start when `b` is a drop
 /// (walking off a ledge is fine; the ray should not dip into its face).
@@ -399,6 +601,12 @@ pub fn line_clear(collision: &CollisionWorld, a: Vec3, b: Vec3) -> bool {
         b
     };
     collision.segment_hit(a + up, end + up).is_none()
+}
+
+/// The chest line between two feet positions, one line for both ways: clear when the ray from
+/// either end is ([`line_clear`] levels a ray that goes down), so a stair is climbed as walked down.
+pub fn is_chest_clear(collision: &CollisionWorld, a: Vec3, b: Vec3) -> bool {
+    line_clear(collision, a, b) || line_clear(collision, b, a)
 }
 
 pub(crate) fn flat(v: Vec3) -> Vec2 {
@@ -636,7 +844,6 @@ impl NavGraph {
             (-1, 1),
         ];
         for &i in &fresh {
-            let a = self.nodes[i as usize].pos;
             let (gx, gy) = self.nodes[i as usize].column;
             for (k, (dx, dy)) in DIRS.iter().enumerate() {
                 let col = (gx + dx, gy + dy);
@@ -654,31 +861,18 @@ impl NavGraph {
                     continue;
                 };
                 for j in others.clone() {
-                    let b = self.nodes[j as usize].pos;
-                    if (a.z - b.z).abs() > MAX_EDGE_RISE {
-                        continue;
+                    let (fwd, back) =
+                        ground.hop(&self.nodes[i as usize], &self.nodes[j as usize], &cap);
+                    if let Some(kind) = fwd {
+                        self.edges[i as usize].push(NavEdge { to: j, kind });
                     }
-                    let indoors =
-                        self.nodes[i as usize].cell != 0 && self.nodes[j as usize].cell != 0;
-                    let (fwd, back) = ground.joins(a, b, indoors, &cap);
-                    let (ci, cj) = (self.nodes[i as usize].cell, self.nodes[j as usize].cell);
-                    if fwd {
-                        self.edges[i as usize].push(NavEdge {
-                            to: j,
-                            kind: walk_kind(ci, cj),
-                        });
-                    }
-                    if back {
-                        self.edges[j as usize].push(NavEdge {
-                            to: i,
-                            kind: walk_kind(cj, ci),
-                        });
+                    if let Some(kind) = back {
+                        self.edges[j as usize].push(NavEdge { to: i, kind });
                     }
                 }
             }
         }
         for &i in &seeded {
-            let a = self.nodes[i as usize].pos;
             let col = self.nodes[i as usize].column;
             let Some(others) = self.columns.get(&col).cloned() else {
                 continue;
@@ -687,24 +881,17 @@ impl NavGraph {
                 if j == i {
                     continue;
                 }
-                let b = self.nodes[j as usize].pos;
-                if (a.z - b.z).abs() > MAX_EDGE_RISE {
-                    continue;
+                let (fwd, back) =
+                    ground.hop(&self.nodes[i as usize], &self.nodes[j as usize], &cap);
+                if let Some(kind) =
+                    fwd.filter(|_| !self.edges[i as usize].iter().any(|e| e.to == j))
+                {
+                    self.edges[i as usize].push(NavEdge { to: j, kind });
                 }
-                let indoors = self.nodes[i as usize].cell != 0 && self.nodes[j as usize].cell != 0;
-                let (fwd, back) = ground.joins(a, b, indoors, &cap);
-                let (ci, cj) = (self.nodes[i as usize].cell, self.nodes[j as usize].cell);
-                if fwd && !self.edges[i as usize].iter().any(|e| e.to == j) {
-                    self.edges[i as usize].push(NavEdge {
-                        to: j,
-                        kind: walk_kind(ci, cj),
-                    });
-                }
-                if back && !self.edges[j as usize].iter().any(|e| e.to == i) {
-                    self.edges[j as usize].push(NavEdge {
-                        to: i,
-                        kind: walk_kind(cj, ci),
-                    });
+                if let Some(kind) =
+                    back.filter(|_| !self.edges[j as usize].iter().any(|e| e.to == i))
+                {
+                    self.edges[j as usize].push(NavEdge { to: i, kind });
                 }
             }
         }
@@ -1108,5 +1295,88 @@ pub(crate) mod tests {
             &cap,
             FALL
         ));
+    }
+
+    fn node(x: f32, y: f32, z: f32, cell: u32) -> NavNode {
+        NavNode {
+            pos: Vec3::new(x, y, z),
+            cell,
+            column: (0, 0),
+        }
+    }
+
+    #[test]
+    fn a_door_frame_the_body_slides_past_is_an_edge() {
+        // A doorway a body's width and a hand wide, met at a slant: the sampled walk touches the
+        // jamb and refuses, the body is slid off it and walks through.
+        let w = two_rooms(Some(1.0));
+        let ground = inside(&w);
+        let cap = Capsule::default();
+        let (a, b) = (node(7.0, 0.6, 0.0, 1), node(9.0, 0.0, 0.0, 2));
+        assert!(
+            !ground.walkable(a.pos, b.pos, &cap).0,
+            "the sampler walks it"
+        );
+        assert_eq!(ground.hop(&a, &b, &cap).0, Some(EdgeKind::Doorway));
+    }
+
+    #[test]
+    fn a_low_overhang_beside_the_way_is_walked_as_the_body_walks_it() {
+        // A bracket at 1.2 m over the side of a corridor: the body is pushed out from under it.
+        let mut w = CollisionWorld::default();
+        floor(&mut w, 0.0, 8.0, -3.0, 3.0, 0.0, 1);
+        quad(
+            &mut w,
+            Vec3::new(2.0, 0.3, 1.2),
+            Vec3::new(2.0, 1.5, 1.2),
+            Vec3::new(6.0, 1.5, 1.2),
+            Vec3::new(6.0, 0.3, 1.2),
+            1,
+        );
+        let ground = inside(&w);
+        let cap = Capsule::default();
+        let (a, b) = (node(1.0, 0.0, 0.0, 1), node(7.0, 0.0, 0.0, 1));
+        assert!(
+            !ground.walkable(a.pos, b.pos, &cap).0,
+            "the sampler walks it"
+        );
+        assert_eq!(
+            ground.hop(&a, &b, &cap),
+            (Some(EdgeKind::Walk), Some(EdgeKind::Walk))
+        );
+    }
+
+    #[test]
+    fn the_fast_path_and_the_full_step_agree_on_open_ground() {
+        // Open terrain with a wall and a ledge in it: every step on the hop's swept ground is the
+        // step the full walk takes, near the wall and away from it.
+        let mut w = CollisionWorld::default();
+        wall_x(&mut w, 5.0, -1.0, 1.0, 0);
+        floor(&mut w, 7.0, 9.0, -2.0, 2.0, 0.4, 0);
+        let terrain = |x: f32, _y: f32| Some(x * 0.05);
+        let ground = Ground {
+            terrain: Some(&terrain),
+            ..inside(&w)
+        };
+        let cap = Capsule::default();
+        for (from, to) in [((0.0, -3.0), (10.0, -3.0)), ((0.0, 0.4), (10.0, 0.2))] {
+            let (a, b) = (Vec3::new(from.0, from.1, 0.0), Vec3::new(to.0, to.1, 0.5));
+            let swept = Swept::over(&ground, a, b, &cap);
+            let (mut p, mut cell) = (a, 0);
+            for _ in 0..50 {
+                let d = flat(b - p);
+                if d.length() < 0.05 {
+                    break;
+                }
+                let step = d.normalize() * d.length().min(BODY_STEP);
+                let to = Vec3::new(p.x + step.x, p.y + step.y, p.z);
+                let fast = stride(&swept, p, cell, to, &cap);
+                assert_eq!(fast, stride(&ground, p, cell, to, &cap), "at {p}");
+                match fast {
+                    Stride::Stand { at, cell: c } => (p, cell) = (at, c),
+                    _ => break,
+                }
+            }
+        }
     }
 }

@@ -516,6 +516,21 @@ impl CollisionWorld {
         footing_by(p, r, |q| self.floor_at(q, max_rise, max_drop))
     }
 
+    /// [`footing`](Self::footing) on the floors among `tris` alone, which must hold, in the order
+    /// they were added, every floor under the feet.
+    pub(crate) fn footing_among(
+        &self,
+        tris: &[&Tri],
+        p: Vec3,
+        r: f32,
+        max_rise: f32,
+        max_drop: f32,
+    ) -> Option<(f32, u32)> {
+        footing_by(p, r, |q| {
+            self.floor_among(tris.iter().copied(), q, max_rise, max_drop)
+        })
+    }
+
     /// Height of the highest floor triangle directly under `p` within
     /// `max_drop` below and `max_rise` above, with its cell id.
     pub fn floor_at(&self, p: Vec3, max_rise: f32, max_drop: f32) -> Option<(f32, u32)> {

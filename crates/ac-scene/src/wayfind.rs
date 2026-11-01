@@ -257,11 +257,11 @@ fn can_walk_leg(
     b: (Vec3, u32),
     cap: &Capsule,
 ) -> bool {
-    !is_through_berth(q, a.0, b.0) && ground.can_walk(a.0, b.0, a.1 != 0 && b.1 != 0, cap)
+    !is_through_berth(q, a.0, b.0) && ground.can_walk(a, b, cap)
 }
 
-/// A leg from where the body stands: walked as an edge is, or by the body's own step whatever the
-/// chest ray meets, since the body is there and its step is what it will do.
+/// A leg from where the body stands: the body's own step, whatever the chest ray meets, since the
+/// body is there and its step is what it will do.
 fn can_leave_start(
     ground: &Ground,
     q: &WalkQuery,
@@ -269,8 +269,7 @@ fn can_leave_start(
     b: (Vec3, u32),
     cap: &Capsule,
 ) -> bool {
-    can_walk_leg(ground, q, a, b, cap)
-        || (!is_through_berth(q, a.0, b.0) && ground.body_reaches(a.0, b.0, cap))
+    !is_through_berth(q, a.0, b.0) && ground.body_reaches(a.0, a.1, b.0, cap)
 }
 
 /// The nodes a route may begin at, each with the cost of the checked walk to it from the start;
@@ -364,20 +363,12 @@ fn ends(
         }
     }
     rest.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.total_cmp(&b.1)));
-    for (_, d, id) in rest.into_iter().take(JOIN_TRIES) {
+    for (_, _, id) in rest.into_iter().take(JOIN_TRIES) {
         let n = nav.nodes[id as usize];
         if is_through_berth(q, n.pos, g) {
             continue;
         }
-        if can_walk_leg(ground, q, (n.pos, n.cell), (g, cell), cap) {
-            ends.insert(
-                id,
-                End {
-                    cost: d,
-                    at: Some(g),
-                },
-            );
-        } else if let Some(p) = ground.body_stops_within(n.pos, g, q.within, cap) {
+        if let Some(p) = ground.body_stops_within(n.pos, n.cell, g, q.within, cap) {
             ends.insert(
                 id,
                 End {
@@ -514,7 +505,7 @@ fn smooth(
             .find(|&j| {
                 let p = points[j].0;
                 points[i..=j].iter().all(|w| w.1 != EdgeKind::Drop)
-                    && can_cut_to(ground, q, from, p.pos, &wide)
+                    && can_cut_to(ground, q, (from, from_cell), (p.pos, p.cell), cap, &wide)
             })
             .unwrap_or(i);
         let (n, kind) = points[best];
@@ -529,10 +520,17 @@ fn smooth(
     out
 }
 
-/// A smoothing shortcut: the sampled half of the walk test, clear of the berths. One refused only
-/// keeps the lattice's checked edges; the body's step on every one cost 5x (navcost, 8A02 pairs).
-fn can_cut_to(ground: &Ground, q: &WalkQuery, a: Vec3, b: Vec3, cap: &Capsule) -> bool {
-    !is_through_berth(q, a, b) && line_clear(ground.collision, a, b) && ground.walkable(a, b, cap).0
+/// A smoothing shortcut: the walk test of an edge for the body itself, and for one `wide` enough
+/// to keep off the walls; the wide one's feet bridge cracks the body falls through.
+fn can_cut_to(
+    ground: &Ground,
+    q: &WalkQuery,
+    a: (Vec3, u32),
+    b: (Vec3, u32),
+    cap: &Capsule,
+    wide: &Capsule,
+) -> bool {
+    can_walk_leg(ground, q, a, b, wide) && can_walk_leg(ground, q, a, b, cap)
 }
 
 #[cfg(test)]
@@ -572,15 +570,23 @@ mod tests {
         }
     }
 
-    fn assert_every_leg_walks(ground: &Ground, start: Vec3, path: &[Vec3], cap: &Capsule) {
+    fn assert_every_leg_walks(ground: &Ground, start: (Vec3, u32), path: &[Vec3], cap: &Capsule) {
         let mut from = start;
         for &p in path {
-            assert!(
-                ground.can_walk(from, p, true, cap),
-                "{from} -> {p} not walked"
-            );
-            from = p;
+            let to = (p, locate_floor(ground, p));
+            assert!(ground.can_walk(from, to, cap), "{from:?} -> {p} not walked");
+            from = to;
         }
+    }
+
+    /// The cell of the floor under a waypoint, from the floors' own cells.
+    fn locate_floor(ground: &Ground, p: Vec3) -> u32 {
+        ground
+            .collision
+            .floors_at_xy(p.x, p.y)
+            .into_iter()
+            .min_by(|a, b| (a.0 - p.z).abs().total_cmp(&(b.0 - p.z).abs()))
+            .map_or(0, |f| f.1)
     }
 
     /// A storey (cell 2, z 3, x 0 to 6) over a ground floor (cell 1, z 0, x 0 to 12, y -3 to 3), and
@@ -625,7 +631,7 @@ mod tests {
         assert!(!line_clear(&w, start, goal));
         let path = points(ask(&ground, &mut g, (start, 1), (goal, 2), 0.0))
             .expect("a path through the door");
-        assert_eq!(*path.last().unwrap(), goal);
+        assert!(path.last().unwrap().distance(goal) < 0.02, "{path:?}");
         // It passes through the doorway, not the wall.
         let chain: Vec<Vec3> = std::iter::once(start).chain(path.iter().copied()).collect();
         let crossing = chain
@@ -635,7 +641,7 @@ mod tests {
         let t = (8.0 - crossing[0].x) / (crossing[1].x - crossing[0].x);
         let y = crossing[0].y + (crossing[1].y - crossing[0].y) * t;
         assert!(y.abs() < 0.8, "crossed the wall at y = {y}: {path:?}");
-        assert_every_leg_walks(&ground, start, &path, &cap);
+        assert_every_leg_walks(&ground, (start, 1), &path, &cap);
         // Smoothing cut it down to a handful of turns.
         assert!(path.len() <= 4, "{} waypoints: {path:?}", path.len());
     }
@@ -658,7 +664,7 @@ mod tests {
             panic!("no route: {found:?}");
         };
         let path: Vec<Vec3> = route.iter().map(|(n, _)| n.pos).collect();
-        assert_every_leg_walks(&ground, start, &path, &cap);
+        assert_every_leg_walks(&ground, (start, 1), &path, &cap);
         // Into the other room is through its doorway.
         assert!(
             route.iter().any(|(_, k)| *k == EdgeKind::Doorway),
@@ -690,8 +696,8 @@ mod tests {
         .expect("no way out for a character leaning on a wall");
         let pushed = w.resolve_above(against, cap.radius, cap.height, cap.step_up);
         assert!(
-            ground.can_walk(against, path[0], true, &cap)
-                || ground.can_walk(pushed, path[0], true, &cap),
+            ground.body_reaches(against, 1, path[0], &cap)
+                || ground.can_walk((pushed, 1), (path[0], 1), &cap),
             "begins at {:?}, which it does not walk to",
             path[0]
         );
@@ -713,7 +719,8 @@ mod tests {
         // Within one room the path is direct.
         let near = Vec3::new(7.0, -3.0, 0.0);
         let path = points(ask(&ground, &mut g, (start, 1), (near, 1), 0.0)).unwrap();
-        assert_eq!(path, vec![near]);
+        assert_eq!(path.len(), 1, "{path:?}");
+        assert!(path[0].distance(near) < 0.02, "{path:?}");
     }
 
     #[test]
@@ -813,7 +820,7 @@ mod tests {
             "ends at {end} for the upper floor"
         );
         assert!(up.iter().any(|p| p.y > 4.0), "not by the ramp: {up:?}");
-        assert_every_leg_walks(&ground, start.0, &up, &cap);
+        assert_every_leg_walks(&ground, start, &up, &cap);
         let down = points(ask(
             &ground,
             &mut g,

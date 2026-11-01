@@ -2261,12 +2261,24 @@ mod tests {
             .unwrap()
             .find_path(&assets, block, me, roof, block, 0.5)
             .expect("a way up");
-        let before_the_end = path[path.len().saturating_sub(2)];
+        let shown = path.iter().map(|w| *w - origin).collect::<Vec<_>>();
+        let end = *path.last().unwrap();
         assert!(
-            before_the_end.z > 93.0,
-            "climbs to the roof rather than stopping under it: {:?}",
-            path.iter().map(|w| *w - origin).collect::<Vec<_>>()
+            end.distance(roof) <= 0.5,
+            "climbs to the roof rather than stopping under it: {shown:?}"
         );
+        // And the body walks every leg of the way up, the ramp included.
+        let pl = c.player.as_mut().unwrap();
+        let cap = pl.capsule();
+        let walked = pl.on_nav(&assets, block, me, roof, |_, ground| {
+            let mut from = (me, 0xBDAF_0103);
+            path.iter().all(|&p| {
+                let walks = ground.body_reaches(from.0, from.1, p, &cap);
+                from = (p, ac_scene::wayfind::locate(ground, p));
+                walks
+            })
+        });
+        assert_eq!(walked, Some(true), "{shown:?}");
     }
 
     #[test]

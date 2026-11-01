@@ -50,9 +50,11 @@ impl Client {
         let goal = *path.last().unwrap_or(&at);
         let last = path.len().checked_sub(2).map_or(me, |i| path[i]);
         let cap = pl.capsule();
+        // As near as the graph's own edges come, at the least.
+        let near = within.max(ac_scene::nav::BODY_ARRIVE);
         pl.on_nav(&assets, block, last, goal, |_, ground| {
-            ground.walkable(last, goal, &cap).0
-                || ground.body_comes_within(last, goal, within, &cap)
+            let cell = ac_scene::wayfind::locate(ground, last);
+            ground.body_comes_within(last, cell, goal, near, &cap)
         })
         .unwrap_or(true)
     }

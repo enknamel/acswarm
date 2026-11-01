@@ -39,6 +39,9 @@ pub enum Stride {
     Blocked,
     /// Off an edge at `at`, with a floor or the ground somewhere below.
     Falls { at: Vec3 },
+    /// Nothing under it at all (bad data, past the known terrain): the body keeps its height and
+    /// cell, and no route walks there.
+    Adrift { at: Vec3, cell: u32 },
 }
 
 /// Where a step in the air ends.
@@ -114,7 +117,7 @@ pub fn stride(u: &impl Underfoot, from: Vec3, cell: u32, to: Vec3, cap: &Capsule
                 Stride::Falls { at: world }
             } else {
                 world.z = from.z;
-                Stride::Stand { at: world, cell }
+                Stride::Adrift { at: world, cell }
             }
         }
         // Bare terrain: followed, unless it drops away by more than a step.
@@ -126,7 +129,7 @@ pub fn stride(u: &impl Underfoot, from: Vec3, cell: u32, to: Vec3, cap: &Capsule
             }
             None => {
                 world.z = from.z;
-                Stride::Stand { at: world, cell: 0 }
+                Stride::Adrift { at: world, cell: 0 }
             }
         },
     }

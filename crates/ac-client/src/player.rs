@@ -1601,7 +1601,7 @@ impl Player {
                         self.place(world, 0);
                     }
                 }
-                Stride::Stand { at, cell } => {
+                Stride::Stand { at, cell } | Stride::Adrift { at, cell } => {
                     if self.ground_velocity.length_squared() > 1e-6 {
                         self.wedged_for = 0;
                     }
