@@ -194,6 +194,9 @@ pub struct State {
     pub burst: Option<Burst>,
     /// Where two of our shots burst as they left, and when: not cast from for a minute (`DUD_KEPT`).
     pub dud_spots: Vec<(Vec3, Instant)>,
+    /// The target being waited for out of a doorway, since when, and where (see
+    /// `Client::pull_from_doorway`).
+    pub pulling: Option<(u32, Instant, Option<Vec3>)>,
     /// Each door Setup's box in its own frame (see `Client::doors_near`).
     pub door_boxes: HashMap<u32, Option<(Vec3, Vec3)>>,
     /// The sidestep in hand is a courtesy to a fellow rather than a
@@ -423,7 +426,7 @@ impl Client {
         let Some(path) = aim::flight(self.shot_for(how), from, to) else {
             return false;
         };
-        self.shot_flies(&path)
+        self.shot_flies(&path, how)
     }
 
     /// Where our shot test has `spell`, thrown from here at `target`, strike first: metres out
@@ -441,15 +444,15 @@ impl Client {
         self.first_hit(&path).map(|p| p.distance(path[0]))
     }
 
-    /// Whether a flight along `path` is struck by nothing: the landblock, the ground or a closed
-    /// door.
-    fn shot_flies(&mut self, path: &[Vec3]) -> bool {
+    /// Whether the attack `how` flying along `path` is struck by nothing: the landblock, the
+    /// ground, a closed door, or for a spell or an arrow any doorway (see `crate::doorway`).
+    fn shot_flies(&mut self, path: &[Vec3], how: How) -> bool {
         let assets = self.assets.clone();
         let clear = self
             .player
             .as_mut()
             .is_none_or(|pl| pl.flies_clear(&assets, path));
-        clear && self.door_across(path).is_none()
+        clear && self.door_across(path, !matches!(how, How::Melee)).is_none()
     }
 
     /// Whether `at` is a spot two of our shots burst at as they left (see `hear_burst`).
@@ -651,7 +654,7 @@ impl Client {
     /// Where a projectile flying `path` first meets static collision or the ground: the shot test
     /// (`Player::flies_clear`) with the place, for saying what a shot struck.
     fn first_hit(&mut self, path: &[Vec3]) -> Option<Vec3> {
-        let door = self.door_across(path);
+        let door = self.door_across(path, true).map(|(p, _)| p);
         let assets = self.assets.clone();
         let pl = self.player.as_mut()?;
         let worlds = pl.collision_along(&assets, path);
@@ -786,13 +789,20 @@ impl Client {
         spots.retain(|s| {
             s.distance(at) <= reach && duds.iter().all(|d| d.distance(*s) >= DUD_CLEAR)
         });
+        // A shot from here through a doorway is thrown from the target's room instead.
+        if let Some(from_here) = aim::flight(shot, self.body_of(mine, me), to) {
+            let doorway = self.door_across(&from_here, !matches!(how, How::Melee));
+            if let Some((_, door)) = doorway {
+                self.keep_past_doorway(&door, me, &mut spots);
+            }
+        }
         spots.sort_by(|a, b| a.distance(me).total_cmp(&b.distance(me)));
         let mut clear = Vec::new();
         for s in spots.into_iter().take(VANTAGE_LOOKS) {
             let Some(path) = aim::flight(shot, self.body_of(mine, s), to) else {
                 continue;
             };
-            if self.shot_flies(&path) {
+            if self.shot_flies(&path, how) {
                 clear.push(s);
                 if clear.len() == VANTAGE_WALKS {
                     break;
@@ -833,6 +843,10 @@ impl Client {
         // collision lacks (see `hear_burst`).
         let seen =
             self.shot_clears(target, how) && (matches!(how, How::Melee) || !self.is_dud_spot(me));
+        // Standing in a doorway, it is waited for out of it rather than shot through the frame.
+        if !seen && !matches!(how, How::Melee) && self.pull_from_doorway(target, name, at) {
+            return true;
+        }
         let stop = if seen { range * WITHIN } else { NO_SIGHT_STOP };
         if at.distance(me) <= stop && seen {
             self.stop_approaching();
@@ -2141,7 +2155,10 @@ mod tests {
         assert!(!c.shot_clears(rat.guid, how), "not through the shut door");
         c.world.objects.get_mut(&0x701F_6057).unwrap().physics_state |=
             ac_world::object::PHYSICS_STATE_ETHEREAL;
-        assert!(c.shot_clears(rat.guid, how), "through it open");
+        assert!(
+            !c.shot_clears(rat.guid, how),
+            "nor through its doorway open"
+        );
     }
 
     #[test]
