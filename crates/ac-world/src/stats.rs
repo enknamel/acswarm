@@ -613,7 +613,14 @@ impl PlayerStats {
         let key = (i as u32) * 2 + 1;
         let m = self.enchantment_multiplier(enchantment_type::SECOND_ATTRIBUTE, key);
         let a = self.enchantment_additive(enchantment_type::SECOND_ATTRIBUTE, key);
-        ((base as f32 * m).round() as i32 + a).max(0) as u32
+        // Multipliers and vitae scale it, additives come after; never under 5 (1 if
+        // the unbuffed value is under 5; 0 is a sheet not yet read). CreatureVital.cs:149-171.
+        let floor = match base {
+            0 => 0,
+            1..=4 => 1,
+            _ => 5,
+        };
+        ((base as f32 * m * self.vitae()).round() as i32 + a).max(floor) as u32
     }
 
     /// Current value of a PropertyAttribute id (1 Strength .. 6 Self).
@@ -2072,5 +2079,38 @@ mod tests {
         // And the unbuffed reading is untouched, which is what the
         // character sheet's own numbers are built from.
         assert_eq!(st.vital_max(0), plain);
+    }
+
+    #[test]
+    fn vitae_lowers_every_vital_maximum() {
+        // Rawrtherton at 40% vitae read 116/194 health, healed for 0 forever.
+        let mut st = PlayerStats::default();
+        st.attributes[1].base = 200; // Endurance
+        st.attributes[5].base = 200; // Self
+        st.vitals[0].base = 94; // health 94 + 100 = 194
+        st.enchantments.push(Enchantment {
+            spell_id: VITAE_SPELL,
+            stat_mod_value: 0.6,
+            duration: -1.0,
+            ..Default::default()
+        });
+        assert_eq!(st.vital_max_current(0), 116);
+        assert_eq!(st.vital_max_current(1), 120);
+        assert_eq!(st.vital_max_current(2), 120);
+        assert_eq!(
+            st.vital_max(0),
+            194,
+            "the unbuffed sheet value keeps no vitae"
+        );
+        // A Vitality's additive comes after the vitae, unscaled.
+        st.enchantments.push(Enchantment {
+            category: 2,
+            stat_mod_type: enchantment_type::SECOND_ATTRIBUTE | enchantment_type::ADDITIVE,
+            stat_mod_key: 1,
+            stat_mod_value: 40.0,
+            duration: -1.0,
+            ..Default::default()
+        });
+        assert_eq!(st.vital_max_current(0), 156);
     }
 }
