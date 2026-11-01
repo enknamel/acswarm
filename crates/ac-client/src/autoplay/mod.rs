@@ -166,6 +166,8 @@ pub struct Autoplay {
     /// Rooms that would not let us in: walked round, not through, until
     /// the dungeon is walked and everything is given another chance.
     pub rooms_shut: std::collections::HashSet<u32>,
+    /// When the dungeon was last started over (see `crate::explore::RESTART_EVERY`).
+    pub rooms_restarted: Option<Instant>,
     /// The room we set out from, the one we are walking into, and
     /// the point past its threshold we are aiming at.
     pub room_bound: Option<crate::explore::RoomWalk>,

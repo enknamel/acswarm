@@ -733,6 +733,23 @@ impl Client {
         let target_indoors = mouth_cell.is_some_and(|c| c & 0xFFFF >= 0x100);
         let same_block = self.travel.step_block == Some(pl_cell & 0xFFFF_0000);
         if (indoors && (underground || same_block)) || (target_indoors && same_block) {
+            // A portal in this dungeon the graph has no way to is dropped, as one out of reach
+            // over the terrain is (a_dungeon_portal_out_of_reach_is_not_walked_at).
+            if let Some(c) =
+                mouth_cell.filter(|c| underground && c & 0xFFFF_0000 == pl_cell & 0xFFFF_0000)
+            {
+                let z = self.travel.step_z.unwrap_or(me3.z);
+                if !self.has_way_to(target.extend(z), c, ARRIVE) {
+                    tracing::warn!(
+                        "travel: step {} ({label}): no way to it in here; going another way",
+                        self.travel.step
+                    );
+                    self.travel.refused.push(target);
+                    let goal = self.travel.goal;
+                    self.cancel_travel_keeping_refusals();
+                    return goal.is_some_and(|g| self.plan_trip(g));
+                }
+            }
             tracing::info!("travel: step {} ({label}) inside", self.travel.step);
             self.travel.route = Some(vec![me, target]);
             self.travel.next = 1;
@@ -1598,7 +1615,7 @@ impl Client {
 /// the Holtburg Archmage that sent a trip to a dungeon three hundred
 /// metres away through two portals and the hub. A building is planned
 /// from the outdoor cell under the character; underground keeps its own.
-fn planning_cell(cell: u32, at: Vec3, underground: bool) -> u32 {
+pub(crate) fn planning_cell(cell: u32, at: Vec3, underground: bool) -> u32 {
     if underground || cell & 0xFFFF < 0x100 {
         return cell;
     }

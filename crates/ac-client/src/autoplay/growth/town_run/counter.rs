@@ -5,7 +5,7 @@ use glam::Vec2;
 use super::vendor::spot;
 use super::{
     Errand, Phase, Run, Turn, BUSY_ASKS, BUSY_REASK, COUNTER_REACH, SELLING_TIMEOUT, SETTLE,
-    STOPS_PER_RUN, VENDOR_OPEN_TIMEOUT, VENDOR_REACH,
+    STOPS_PER_RUN, VENDOR_OPEN_TIMEOUT, VENDOR_REACH, WALK_UP_LIMIT,
 };
 use crate::autoplay::growth::road::{on_the_way, OnTheWay, WALK_ON_EVERY};
 use crate::autoplay::growth::{a_few, about, Growth};
@@ -215,6 +215,17 @@ impl Client {
                         let where_it_is = self.world.objects.get(&guid).and_then(|o| o.world_pos());
                         if let Some(spot) = where_it_is {
                             if Vec2::new(spot.x, spot.y).distance(me) > COUNTER_REACH {
+                                let since = *run.walking_up.get_or_insert(now);
+                                if now.saturating_duration_since(since) > WALK_UP_LIMIT {
+                                    self.autoplay
+                                        .note(format!("could not walk up to {}", run.vendor), now);
+                                    return Turn::after_stop(self.grow_run_next(
+                                        run,
+                                        now,
+                                        cfg,
+                                        Some("could not be got to"),
+                                    ));
+                                }
                                 self.head_for(spot, COUNTER_REACH / 2.0, &run.vendor);
                                 self.autoplay
                                     .say(Doing::Shopping, format!("walking up to {}", run.vendor));
@@ -647,6 +658,7 @@ impl Client {
                         visited,
                         walked_on: None,
                         walk_limit: self.planned_walk_limit(),
+                        walking_up: None,
                     });
                     return true;
                 }
@@ -714,7 +726,7 @@ impl Client {
         if let Some(lb) = self.autoplay.growth.hunting_at {
             if let Some(g) = ac_world::hunting::at(lb) {
                 let (at, name) = (g.at, g.name.clone());
-                if self.grow_travel(at, now) {
+                if self.grow_travel_in(at, g.cell(), now) {
                     self.autoplay.growth.bound = Some((lb, at, name.clone()));
                     self.autoplay.growth.bound_since = Some(now);
                     self.autoplay

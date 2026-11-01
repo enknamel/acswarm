@@ -197,7 +197,7 @@ fn an_errand_is_on_its_way_only_while_its_walk_is() {
     assert!(!c.on_its_way());
 
     // Stepping out of a shop first is the start of the walk.
-    c.autoplay.growth.after_out = Some(at);
+    c.autoplay.growth.after_out = Some((at, 0));
     assert!(c.on_its_way());
 }
 

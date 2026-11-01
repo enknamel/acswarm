@@ -26,6 +26,10 @@ use std::time::{Duration, Instant};
 /// this and something is in the way that more walking will not move.
 const GIVE_UP_ON_A_ROOM: Duration = Duration::from_secs(10);
 
+/// The least time between starting a dungeon over: walked round faster, it is a corner with no
+/// way on (Mountain Keep's landing, three rooms out of reach, went round every 7 s).
+pub const RESTART_EVERY: Duration = Duration::from_secs(60);
+
 /// How far past a threshold to aim. A threshold is the line between
 /// two rooms: walk to it exactly and the character stops standing in
 /// the room it started in, the server goes on describing that room and
@@ -247,6 +251,16 @@ impl Client {
         if cell & 0xFFFF < 0x100 || !pl.in_dungeon(&assets) {
             return false;
         }
+        // Nor a dungeon crossed on the way to a ground elsewhere: the ground's walk, a step below,
+        // is taken up again (a_dungeon_crossed_on_the_way_to_a_ground_is_not_explored_in_its_place).
+        if self
+            .autoplay
+            .growth
+            .bound_landblock()
+            .is_some_and(|lb| lb != cell >> 16)
+        {
+            return false;
+        }
         let me = pl.world_position();
         let facing = facing(pl.heading);
         // Outside the hunting area's dungeon there is nothing here to look
@@ -361,6 +375,16 @@ impl Client {
             &self.autoplay.rooms_shut,
         );
         if next.is_none() {
+            // Walked round again within the minute: a corner with no way on, where starting over
+            // only goes round the shut rooms on the spot. The rules below have the tick.
+            if self
+                .autoplay
+                .rooms_restarted
+                .is_some_and(|t| now.saturating_duration_since(t) < RESTART_EVERY)
+            {
+                return false;
+            }
+            self.autoplay.rooms_restarted = Some(now);
             // The whole dungeon walked. What we came for has respawned
             // behind us, so it is walked again rather than left, and the
             // rooms that would not open are given another chance.

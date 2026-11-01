@@ -151,7 +151,13 @@ pub(crate) struct Run {
     pub(super) walked_on: Option<Instant>,
     /// How long the walk there may take before it counts as stuck (see `road::walk_limit`).
     pub(super) walk_limit: Duration,
+    /// When the walk up to the counter itself began (see [`WALK_UP_LIMIT`]).
+    pub(super) walking_up: Option<Instant>,
 }
+
+/// The longest a walk up to a counter already in sight may take: Archmage Asaina al-Arqis in
+/// Zaikhal, 4 m off with no way to her, held a run 480 s (scenario 2026-11-01).
+pub(super) const WALK_UP_LIMIT: Duration = Duration::from_secs(20);
 
 /// What one turn of a run to town came to.
 ///
@@ -621,6 +627,7 @@ impl Client {
             visited: vec![at],
             walked_on: None,
             walk_limit,
+            walking_up: None,
         });
         self.autoplay.say(
             Doing::Shopping,

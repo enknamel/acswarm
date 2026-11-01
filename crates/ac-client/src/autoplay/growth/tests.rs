@@ -19,6 +19,7 @@ pub(super) fn run_to(at: Vec2, now: Instant) -> Run {
         visited: vec![at],
         walked_on: None,
         walk_limit: super::road::WALK_TIMEOUT,
+        walking_up: None,
     }
 }
 

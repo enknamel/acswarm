@@ -1,23 +1,18 @@
-//! Where the monsters are: the outdoor landblocks with creature spawns
-//! and the levels of what spawns there, so a character can pick a
-//! hunting ground that suits its level and go there.
+//! Where the monsters are: the landblocks with creature spawns, open ground and dungeons, with
+//! their levels and what a kill is worth, so a character can pick the ground that pays best.
 //!
-//! Like the portals and landmarks, spawns are server-side and so are
-//! not in the client's own data files; `data/hunting.csv` is a copy of
-//! the list (see `reference/scripts/data/hunting.sh`). One row per
-//! landblock: the average spawn point, how many spawn entries there are,
-//! the lowest and highest level among them, and the level and name of
-//! the creature that spawns most often, which is what a hunter meets.
+//! Spawns are server-side; `data/hunting.csv` is a copy (`reference/scripts/data/hunting.sh`).
+//! A dungeon's way in is the portal into it that asks no quest (`portals::all`).
 
 use glam::Vec2;
 use std::sync::OnceLock;
 
-/// The monsters of one outdoor landblock.
-#[derive(Clone, Debug, PartialEq)]
+/// The monsters of one landblock: its open ground, or the dungeon that is the whole of it.
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Ground {
     /// Landblock id (the high half of a cell id).
     pub landblock: u32,
-    /// World xy of the middle of the spawns.
+    /// World xy of the middle of the spawns; for a dungeon, where its portal lands.
     pub at: Vec2,
     /// How many spawn entries the block's generators hold: a rough
     /// measure of how busy it is.
@@ -28,7 +23,28 @@ pub struct Ground {
     pub level: u32,
     /// That creature's name.
     pub name: String,
+    /// The XP a kill awards, on average (XpOverride, Creature_Death.cs:193).
+    pub xp: u32,
+    /// Health a kill takes off, on average, over the creature's weakest resistance.
+    pub health: u32,
+    /// How many creatures the generators keep up at once.
+    pub creatures: u32,
+    /// A dungeon's way in; `None` for open ground.
+    pub entrance: Option<Entrance>,
 }
+
+/// The portal into a dungeon: the cell it lands in (at the ground's `at`) and who may take it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Entrance {
+    pub cell: u32,
+    /// The portal's level range, 0 for no limit.
+    pub min_level: u32,
+    pub max_level: u32,
+}
+
+/// Creatures at which a ground pays half its kill rate: thinner ones are walked between kills,
+/// busier ones keep a character fighting. A guess at the curve's knee, not measured.
+pub const HALF_BUSY: f32 = 10.0;
 
 /// A ground with fewer spawn entries than this is a stray, not a
 /// hunting ground: one chicken behind a house is not worth a journey.
@@ -142,6 +158,32 @@ impl Ground {
             && self.level <= high
             && self.min_level <= high
             && self.max_level <= level + 2 * margin
+            // A dungeon's rooms are walked through, not round: nothing in it may pass the margin.
+            && (!self.is_dungeon() || self.max_level <= high)
+    }
+
+    /// Whether this is a dungeon (entered by its portal) rather than open ground.
+    pub fn is_dungeon(&self) -> bool {
+        self.entrance.is_some()
+    }
+
+    /// The cell to travel to: a dungeon's landing cell, 0 for open ground (known by position).
+    pub fn cell(&self) -> u32 {
+        self.entrance.map_or(0, |e| e.cell)
+    }
+
+    /// Whether a character of `level` may take the way in.
+    pub fn can_enter(&self, level: u32) -> bool {
+        self.entrance.is_none_or(|e| {
+            (e.min_level == 0 || level >= e.min_level) && (e.max_level == 0 || level <= e.max_level)
+        })
+    }
+
+    /// What hunting here pays, in XP per point of health taken off, scaled by how busy it is
+    /// ([`HALF_BUSY`]). XP comes in level steps while health varies 2-5x within one.
+    pub fn worth(&self) -> f32 {
+        let c = self.creatures as f32;
+        self.xp as f32 / self.health.max(1) as f32 * c / (c + HALF_BUSY)
     }
 }
 
@@ -154,7 +196,7 @@ fn parse(text: &str) -> Vec<Ground> {
             continue;
         }
         let f: Vec<&str> = line.split(',').collect();
-        if f.len() != 8 {
+        if f.len() != 12 {
             continue;
         }
         let Ok(landblock) = u32::from_str_radix(f[0], 16) else {
@@ -170,6 +212,15 @@ fn parse(text: &str) -> Vec<Ground> {
         else {
             continue;
         };
+        let (Some(xp), Some(health), Some(creatures)) = (int(f[8]), int(f[9]), int(f[10])) else {
+            continue;
+        };
+        // A dungeon's way in is filled in from the portals (`with_entrances`).
+        let entrance = match f[11] {
+            "o" => None,
+            "d" => Some(Entrance::default()),
+            _ => continue,
+        };
         let origin = crate::landblock_origin(landblock << 16);
         out.push(Ground {
             landblock,
@@ -179,15 +230,44 @@ fn parse(text: &str) -> Vec<Ground> {
             max_level,
             level,
             name: f[7].to_string(),
+            xp,
+            health,
+            creatures,
+            entrance,
         });
     }
     out
 }
 
+/// Give each dungeon its way in: of the working portals into it that ask no quest, the one with
+/// the lowest level. A dungeon only a quest opens is dropped: nobody can be sent there.
+fn with_entrances(grounds: Vec<Ground>, portals: &[crate::portals::Portal]) -> Vec<Ground> {
+    grounds
+        .into_iter()
+        .filter_map(|mut g| {
+            if g.entrance.is_none() {
+                return Some(g);
+            }
+            let p = portals
+                .iter()
+                .filter(|p| p.works() && p.quest.is_empty() && !p.exit_outdoors())
+                .filter(|p| p.to_cell >> 16 == g.landblock)
+                .min_by_key(|p| p.min_level)?;
+            g.at = p.to.truncate();
+            g.entrance = Some(Entrance {
+                cell: p.to_cell,
+                min_level: p.min_level,
+                max_level: p.max_level,
+            });
+            Some(g)
+        })
+        .collect()
+}
+
 /// Every ground, parsed on first use.
 pub fn all() -> &'static [Ground] {
     static GROUNDS: OnceLock<Vec<Ground>> = OnceLock::new();
-    GROUNDS.get_or_init(|| parse(DATA))
+    GROUNDS.get_or_init(|| with_entrances(parse(DATA), crate::portals::all()))
 }
 
 /// The ground of a landblock, if it has monsters.
@@ -195,26 +275,37 @@ pub fn at(landblock: u32) -> Option<&'static Ground> {
     all().iter().find(|g| g.landblock == landblock)
 }
 
-/// The nearest ground to `from` that suits a character of `level` (see
-/// [`Ground::suits`]), leaving out the landblocks in `skip`: the one
-/// the character has just hunted out, and any it could not reach.
-pub fn nearest_for(level: u32, margin: u32, from: Vec2, skip: &[u32]) -> Option<&'static Ground> {
-    nearest_among(all(), level, margin, from, skip)
+/// The grounds that suit a character of `level` (see [`Ground::suits`]) and that it may enter,
+/// best paying first ([`Ground::worth`]), leaving out the landblocks in `skip`: the one just
+/// hunted out, one it could not reach, one it died on.
+pub fn ranked_for(level: u32, margin: u32, skip: &[u32]) -> Vec<&'static Ground> {
+    ranked_among(all(), level, margin, skip)
 }
 
-fn nearest_among<'a>(
+fn ranked_among<'a>(
     grounds: &'a [Ground],
     level: u32,
     margin: u32,
-    from: Vec2,
     skip: &[u32],
-) -> Option<&'a Ground> {
-    grounds
+) -> Vec<&'a Ground> {
+    let mut v: Vec<&Ground> = grounds
         .iter()
-        .filter(|g| g.suits(level, margin))
+        .filter(|g| g.suits(level, margin) && g.can_enter(level) && g.worth() > 0.0)
         .filter(|g| !skip.contains(&g.landblock))
-        .min_by(|a, b| a.at.distance(from).total_cmp(&b.at.distance(from)))
+        .collect();
+    v.sort_by(|a, b| b.worth().total_cmp(&a.worth()));
+    v
 }
+
+/// What a ground pays over a stay of [`STAY`] seconds once the journey there is counted: the
+/// journey is time not fighting.
+pub fn paid_over_stay(worth: f32, journey_seconds: f32) -> f32 {
+    worth * STAY / (STAY + journey_seconds.max(0.0))
+}
+
+/// How long a character hunts a ground between journeys, seconds: a guess at the time between
+/// town runs, not measured.
+pub const STAY: f32 = 1200.0;
 
 #[cfg(test)]
 mod tests {
@@ -229,6 +320,10 @@ mod tests {
             max_level: hi,
             level,
             name: "Thing".into(),
+            xp: 1000,
+            health: 100,
+            creatures: count,
+            entrance: None,
         }
     }
 
@@ -236,24 +331,27 @@ mod tests {
     fn the_table_reads_and_places_the_grounds() {
         let all = all();
         assert!(all.len() > 900, "{} grounds", all.len());
-        // Every ground is outdoors and stands where its landblock is.
+        // Open ground stands where its landblock is; a dungeon where its portal lands, inside it.
         for g in all {
-            let origin = crate::landblock_origin(g.landblock << 16);
-            assert!(g.at.x >= origin.x && g.at.x <= origin.x + 192.0, "{g:?}");
-            assert!(g.at.y >= origin.y && g.at.y <= origin.y + 192.0, "{g:?}");
             assert!(g.min_level <= g.level && g.level <= g.max_level, "{g:?}");
+            match g.entrance {
+                None => {
+                    let origin = crate::landblock_origin(g.landblock << 16);
+                    assert!(g.at.x >= origin.x && g.at.x <= origin.x + 192.0, "{g:?}");
+                    assert!(g.at.y >= origin.y && g.at.y <= origin.y + 192.0, "{g:?}");
+                }
+                Some(e) => {
+                    assert_eq!(e.cell >> 16, g.landblock, "{g:?}");
+                    assert!(e.cell & 0xFFFF >= 0x100, "lands indoors: {g:?}");
+                }
+            }
         }
-        // Drudges near Holtburg for a beginner.
-        let holtburg = crate::towns::find("Holtburg").unwrap().world_xy();
-        let g = nearest_for(2, 8, holtburg, &[]).expect("a ground for a level 2");
-        assert!(g.level <= 10, "{g:?}");
-        assert!(
-            g.at.distance(holtburg) < 2000.0,
-            "{g:?} is far from Holtburg"
-        );
-        // Something for the strong too.
-        assert!(nearest_for(150, 20, holtburg, &[]).is_some());
-        assert!(at(g.landblock).is_some());
+        assert!(all.iter().filter(|g| g.is_dungeon()).count() > 300);
+        // A beginner's ground, and something for the strong too.
+        let g = ranked_for(2, 8, &[]);
+        assert!(g.first().is_some_and(|g| g.level <= 10), "{:?}", g.first());
+        assert!(!ranked_for(150, 20, &[]).is_empty());
+        assert!(at(g[0].landblock).is_some());
     }
 
     #[test]
@@ -276,35 +374,76 @@ mod tests {
     }
 
     #[test]
-    fn the_nearest_suitable_ground_is_chosen_and_skips_are_honoured() {
+    fn the_best_paying_suitable_ground_comes_first_and_skips_are_honoured() {
+        let soft = Ground {
+            health: 50,
+            ..ground(0xB, 50.0, 5, 10, 10, 10)
+        };
         let grounds = vec![
             ground(0xA, 100.0, 5, 10, 10, 10),
-            ground(0xB, 50.0, 5, 10, 10, 10),
+            soft,
             ground(0xC, 10.0, 5, 50, 50, 50),
             ground(0xD, 20.0, 1, 10, 10, 10),
+            Ground {
+                xp: 0,
+                ..ground(0xE, 0.0, 5, 10, 10, 10)
+            },
         ];
-        let from = Vec2::ZERO;
-        assert_eq!(
-            nearest_among(&grounds, 10, 5, from, &[]).unwrap().landblock,
-            0xB
+        let ids = |v: Vec<&Ground>| v.iter().map(|g| g.landblock).collect::<Vec<_>>();
+        // Half the health for the same XP pays twice as well; a stray and a ground paying no XP
+        // are no grounds at all.
+        assert_eq!(ids(ranked_among(&grounds, 10, 5, &[])), vec![0xB, 0xA]);
+        assert_eq!(ids(ranked_among(&grounds, 10, 5, &[0xB])), vec![0xA]);
+        assert_eq!(ids(ranked_among(&grounds, 50, 5, &[])), vec![0xC]);
+    }
+
+    #[test]
+    fn a_busy_ground_pays_more_and_a_journey_eats_into_a_stay() {
+        let thin = ground(1, 0.0, 5, 10, 10, 10);
+        let busy = Ground {
+            creatures: 80,
+            ..thin.clone()
+        };
+        assert!(busy.worth() > 1.5 * thin.worth());
+        assert_eq!(paid_over_stay(10.0, 0.0), 10.0);
+        assert_eq!(paid_over_stay(10.0, STAY), 5.0);
+    }
+
+    #[test]
+    fn a_dungeon_is_entered_by_its_portal_and_only_at_its_level() {
+        // Tusker Cave, under the Facility Hub: 81 Tusker Crimsonbacks at level 30.
+        let cave = at(0x5B46).expect("Tusker Cave");
+        assert!(cave.is_dungeon());
+        assert_eq!(cave.cell() >> 16, 0x5B46);
+        assert_eq!((cave.level, cave.xp), (30, 5000));
+        assert!(cave.can_enter(35));
+        let barracks = Ground {
+            entrance: Some(Entrance {
+                cell: 0x5A48_01B5,
+                min_level: 40,
+                max_level: 0,
+            }),
+            ..cave.clone()
+        };
+        assert!(!barracks.can_enter(35) && barracks.can_enter(40));
+        // A level 35 is sent to a dungeon: the Tusker Cave pays more than any open ground.
+        let best = ranked_for(35, 8, &[]);
+        assert!(
+            best.first().is_some_and(|g| g.is_dungeon()),
+            "{:?}",
+            best.first()
         );
-        assert_eq!(
-            nearest_among(&grounds, 10, 5, from, &[0xB])
-                .unwrap()
-                .landblock,
-            0xA
-        );
-        assert!(nearest_among(&grounds, 10, 5, from, &[0xA, 0xB]).is_none());
-        assert_eq!(
-            nearest_among(&grounds, 50, 5, from, &[]).unwrap().landblock,
-            0xC
-        );
+        assert!(cave.worth() > at(0xA2BD).expect("Freshwater Armoredillos").worth());
     }
 
     #[test]
     fn bad_lines_are_skipped() {
-        let v = parse("# c\n\nnope\nA9B2,74,83,30,7,20,7,Blood Shrethlet\nZZ,1,1,1,1,1,1,x\n");
+        let v = parse(
+            "# c\n\nnope\nA9B2,74,83,30,7,20,7,Blood Shrethlet,1411,47,34,o\n\
+             ZZ,1,1,1,1,1,1,x,1,1,1,o\nA9B3,1,1,1,1,1,1,x,1,1,1,q\n",
+        );
         assert_eq!(v.len(), 1);
+        assert_eq!((v[0].xp, v[0].health, v[0].creatures), (1411, 47, 34));
         assert_eq!(v[0].name, "Blood Shrethlet");
         assert_eq!(v[0].landblock, 0xA9B2);
         assert_eq!(
@@ -322,6 +461,7 @@ mod tests {
             max_level: 10,
             level: 5,
             name: "Drudge".into(),
+            ..Default::default()
         };
         assert_eq!(busy.suggested_tactic(), Tactic::Camp);
         // A middling one needs covering on foot.
@@ -348,6 +488,7 @@ mod tests {
             max_level: 10,
             level: 5,
             name: "Drudge".into(),
+            ..Default::default()
         };
         assert_eq!(tactic_for(Tactic::Auto, Some(&busy)), Tactic::Camp);
         assert_eq!(tactic_for(Tactic::Patrol, Some(&busy)), Tactic::Patrol);

@@ -382,3 +382,159 @@ fn a_character_off_any_ground_goes_to_one_at_once() {
     assert!(c.grow_hunt(now, &cfg), "stood about in town");
     assert!(c.traveling());
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_level_35_in_holtburg_sets_off_for_a_dungeon_and_keeps_moving() {
+    // The easiest XP at 35 is a dungeon of Tuskers or Olthoi, 80-150 creatures at the step's XP,
+    // not the five Armoredillos two kilometres out that the nearest ground was.
+    let mut c =
+        crate::testkit::standing_in_the_field(35, 0xA9B4_0019, glam::Vec3::new(84.0, 7.1, 94.0));
+    let cfg = Growth::default();
+    let t0 = Instant::now();
+    c.autoplay.growth.quiet_since = Some(t0 - Duration::from_secs(1));
+    assert!(c.grow_hunt(t0, &cfg), "stood about in town");
+    let (lb, _, name) = c.autoplay.growth.bound.clone().expect("bound for a ground");
+    let g = ac_world::hunting::at(lb).expect("a ground");
+    println!(
+        "bound for {name} {lb:#06x}: {:?}",
+        c.travel_trip().map(|t| t.summary())
+    );
+    assert!(g.is_dungeon(), "{name} {lb:#06x} is open ground");
+    assert!(g.max_level <= 35 + cfg.level_margin, "{g:?}");
+    // And the journey is walked: never ten seconds in one place on the way to its first portal
+    // (offline, nothing takes the character through it).
+    let mouth = c
+        .travel_trip()
+        .and_then(|t| {
+            t.steps.iter().find_map(|s| match s {
+                ac_world::trip::Step::Portal { mouth, .. } => Some(*mouth),
+                _ => None,
+            })
+        })
+        .expect("a portal on the way");
+    let dt = 0.05;
+    let mut last = (c.my_position().unwrap(), t0);
+    for frame in 0..90 * 20 {
+        let now = t0 + Duration::from_secs_f32(frame as f32 * dt);
+        c.tick_player(crate::player::Input::default(), dt, now);
+        let at = c.my_position().unwrap();
+        if at.truncate().distance(mouth) < 2.0 {
+            return;
+        }
+        if at.distance(last.0) > 2.0 {
+            last = (at, now);
+        }
+        assert!(
+            now.duration_since(last.1) < Duration::from_secs(10),
+            "stood at {at} for 10 s, the portal at {mouth}"
+        );
+    }
+    panic!("not at the portal at {mouth} after 90 s");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_dungeon_ground_is_arrived_at_underground_and_walked_by_the_explorer() {
+    // Tusker Cave, where its portal lands. Arriving is being in the dungeon, not near its spot
+    // in world xy; and with it quiet the rooms are explored rather than a roam aimed at the
+    // surface above.
+    let cave = ac_world::hunting::at(0x5B46).expect("Tusker Cave");
+    let e = cave.entrance.expect("a way in");
+    let p = ac_world::portals::all()
+        .iter()
+        .find(|p| p.to_cell == e.cell)
+        .expect("the portal");
+    let o = ac_world::landblock_origin(e.cell);
+    let mut c = crate::testkit::standing_in_the_field(30, e.cell, p.to - o);
+    let cfg = Growth::default();
+    let now = Instant::now();
+    c.autoplay.growth.bound = Some((cave.landblock, cave.at, cave.name.clone()));
+    c.autoplay.growth.bound_since = Some(now);
+    assert!(c.underground(), "the landing is not in the dungeon");
+    assert!(!c.grow_hunt(now, &cfg));
+    assert_eq!(c.autoplay.growth.hunting_at, Some(0x5B46));
+    // The explorer, a step above the ground's, walks the rooms.
+    assert!(
+        c.autoplay_explore(now),
+        "the explorer does not walk Tusker Cave"
+    );
+    // And should the hunt rules be asked with it quiet past the patrol's ten seconds, no roam
+    // aims at the surface over the cave.
+    let mut c2 = crate::testkit::standing_in_the_field(30, e.cell, p.to - o);
+    c2.autoplay.growth.hunting_at = Some(0x5B46);
+    c2.autoplay.growth.quiet_since = Some(now - Duration::from_secs(30));
+    c2.grow_hunt(now, &cfg);
+    assert_ne!(
+        c2.autoplay.status,
+        "nothing in sight; looking about the ground"
+    );
+}
+
+/// Autoplay and the body, ticked together for `seconds`; the notes said on the way.
+fn play_noting(c: &mut Client, t0: Instant, seconds: u32) -> Vec<String> {
+    let dt = 0.05;
+    let mut notes = Vec::new();
+    for frame in 0..seconds * 20 {
+        let now = t0 + Duration::from_secs_f32(frame as f32 * dt);
+        c.tick_autoplay(now);
+        c.tick_player(crate::player::Input::default(), dt, now);
+        for e in std::mem::take(&mut c.autoplay.announced) {
+            if let crate::Event::Noted(n) = e {
+                notes.push(n);
+            }
+        }
+    }
+    notes
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_dungeon_crossed_on_the_way_to_a_ground_is_not_explored_in_its_place() {
+    // Blargerton, bound for the Hea Hunters of the Tumerok Cave through Mountain Keep, was drawn
+    // into a fight there; the journey ended, and the explorer, a step above the ground's, walked
+    // Mountain Keep instead of taking the walk up again, round three rooms with no way into them.
+    let mut c =
+        crate::testkit::standing_in_the_field(35, 0x01D2_0309, glam::Vec3::new(57.5, -70.0, 12.0));
+    c.autoplay.config.enabled = true;
+    c.autoplay.config.fight.enabled = true;
+    let cave = ac_world::hunting::at(0x0286).expect("the Tumerok Cave");
+    let t0 = Instant::now();
+    c.autoplay.growth.bound = Some((cave.landblock, cave.at, cave.name.clone()));
+    c.autoplay.growth.bound_since = Some(t0);
+    let notes = play_noting(&mut c, t0, 30);
+    let round = notes.iter().filter(|n| n.contains("no way into")).count();
+    println!(
+        "{notes:#?}\nstep {:?} status {:?} travelling {} bound {:?}",
+        c.autoplay.step_name(),
+        c.autoplay.status,
+        c.traveling(),
+        c.autoplay.growth.bound_landblock()
+    );
+    assert!(round <= 3, "went round Mountain Keep's rooms {round} times");
+    assert_ne!(c.autoplay.step_name(), Some("explore"));
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_dungeon_portal_out_of_reach_is_not_walked_at() {
+    // Blargerton, through Mountain Keep on the way to the Tumerok Cave, stood 20 s at its landing
+    // aiming at its "Holtburg" portal 18 m below, which the graph has no way to: the step inside a
+    // dungeon was aimed straight at its portal with no question asked.
+    let mut c =
+        crate::testkit::standing_in_the_field(35, 0x01D2_02F7, glam::Vec3::new(47.9, -69.9, 12.0));
+    let cave = ac_world::hunting::at(0x0286).expect("the Tumerok Cave");
+    assert!(c.travel_to_in(cave.at, cave.cell()), "no journey at all");
+    let t = c.travel_trip().expect("a journey");
+    println!("{}: {:?}", t.summary(), t.steps);
+    let o = ac_world::landblock_origin(0x01D2_0000);
+    let inner = (o + glam::Vec3::new(80.1, -57.5, -6.0)).truncate();
+    let first = t.steps.iter().find_map(|s| match s {
+        ac_world::trip::Step::Portal { mouth, .. } => Some(*mouth),
+        _ => None,
+    });
+    assert!(
+        first.is_none_or(|m| m.distance(inner) > 3.0),
+        "still bound for the portal out of reach"
+    );
+}
