@@ -117,6 +117,7 @@ fn search_on(area: &mut Area, from: (Vec3, u32), goal: (Vec3, u32), within: f32)
         avoid: &avoid,
         berth: area.berth,
         indoors_too: !area.outdoors_only,
+        drops: false,
     };
     area.with_ground(|ground, nav| wayfind::search_building(ground, nav, &q))
 }

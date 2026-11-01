@@ -66,6 +66,7 @@ fn the_graph_of_each_measured_block_is_built_and_planned_on() {
                 avoid: &[],
                 berth: 0.0,
                 indoors_too: true,
+                drops: false,
             };
             let t = Instant::now();
             let search = area.with_ground(|ground, nav| wayfind::search_building(ground, nav, &q));

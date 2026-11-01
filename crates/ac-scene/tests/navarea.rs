@@ -31,6 +31,7 @@ fn route(
         avoid: &[],
         berth: 0.0,
         indoors_too: true,
+        drops: false,
     };
     match wayfind::search_building(ground, nav, &q) {
         Search::Found(p) => Some(p.into_iter().map(|(n, _)| n.pos).collect()),

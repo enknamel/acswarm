@@ -52,6 +52,7 @@ fn academy_legs_are_walkable() {
                 avoid: &[],
                 berth: 0.0,
                 indoors_too: true,
+                drops: false,
             };
             match wayfind::search_building(&ground, &mut graph, &q) {
                 Search::Found(path) => eprintln!(

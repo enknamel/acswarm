@@ -52,6 +52,8 @@ pub struct WalkQuery<'a> {
     pub berth: f32,
     /// Interior nodes may be walked through.
     pub indoors_too: bool,
+    /// Drop edges may be taken: not by the old steering, which runs off a ledge at a run.
+    pub drops: bool,
 }
 
 /// What a search found: every waypoint after the start with the kind of edge into it, the last
@@ -450,7 +452,10 @@ fn astar(
         let here = nav.nodes[node as usize].pos;
         for e in nav.neighbours(node) {
             let next = nav.nodes[e.to as usize];
-            if closed.contains(&e.to) || !can_stand_on(q, &next) {
+            if closed.contains(&e.to)
+                || !can_stand_on(q, &next)
+                || (e.kind == EdgeKind::Drop && !q.drops)
+            {
                 continue;
             }
             let g2 = cost + here.distance(next.pos);
@@ -537,7 +542,7 @@ fn can_cut_to(
 mod tests {
     use super::*;
     use crate::collision::CollisionWorld;
-    use crate::nav::tests::{floor, inside, quad, two_rooms, wall_x};
+    use crate::nav::tests::{a_ledge_in_cells, floor, inside, quad, two_rooms, wall_x};
     use glam::Vec2;
 
     fn graph(min: Vec2, max: Vec2) -> NavGraph {
@@ -559,6 +564,7 @@ mod tests {
             avoid: &[],
             berth: 0.0,
             indoors_too: true,
+            drops: false,
         };
         search_building(ground, nav, &q)
     }
@@ -934,6 +940,7 @@ mod tests {
             avoid: &[],
             berth: 0.0,
             indoors_too: true,
+            drops: false,
         };
         let first = search(&ground, &g, &q);
         assert!(
@@ -943,5 +950,29 @@ mod tests {
         assert_eq!(g.chunk_count(), 0, "it built");
         g.build_all(&ground);
         assert!(matches!(search(&ground, &g, &q), Search::Found(_)));
+    }
+
+    #[test]
+    fn a_drop_is_taken_only_when_asked_for() {
+        // Off a ledge 3 m up to the floor past it: the only way down is the drop.
+        let w = a_ledge_in_cells(Some(3.0));
+        let ground = inside(&w);
+        let mut g = graph(Vec2::new(0.0, -2.0), Vec2::new(12.0, 2.0));
+        let mut q = WalkQuery {
+            from: (Vec3::new(1.0, 0.0, 3.0), 0x0101),
+            goal: (Vec3::new(10.0, 0.0, 0.0), 0x0102),
+            within: 0.5,
+            avoid: &[],
+            berth: 0.0,
+            indoors_too: true,
+            drops: false,
+        };
+        let refused = search_building(&ground, &mut g, &q);
+        assert!(matches!(refused, Search::NoWay(_)), "{refused:?}");
+        q.drops = true;
+        let Search::Found(route) = search_building(&ground, &mut g, &q) else {
+            panic!("no way down with drops allowed");
+        };
+        assert!(route.iter().any(|(_, k)| *k == EdgeKind::Drop), "{route:?}");
     }
 }

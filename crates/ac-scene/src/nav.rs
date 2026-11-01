@@ -10,7 +10,7 @@ use glam::{Vec2, Vec3};
 
 use crate::collision::{Capsule, CollisionWorld, Tri, Vertical, Walk};
 use crate::landblock::LandblockScene;
-use crate::stride::{stride, Stride, Underfoot};
+use crate::stride::{fall_step, stride, Air, Stride, Underfoot};
 use crate::{lbid, BLOCK_SIZE};
 
 /// Grid spacing inside dungeons and buildings (metres).
@@ -42,6 +42,14 @@ pub const BODY_ARRIVE: f32 = 0.25;
 const BODY_CLOSING: f32 = 0.3;
 /// A walk this near its end (metres) is there: the float error of its last step.
 const TOUCHING: f32 = 0.01;
+/// How fast a body steps off a ledge (m/s): the phase-2 follower's pace at a drop.
+const DROP_SPEED: f32 = 1.0;
+/// The deepest drop (metres): ACE hurts a landing over 11.25 + 4.5 m/s (Player_Move.cs:254-259).
+const DROP_MAX: f32 = 12.0;
+/// A fall still in the air this long (seconds) is over nothing: the highest jump's flight.
+const OVER_NOTHING: f32 = 2.8;
+/// The steps a fall is followed in (seconds): a frame at 20 Hz.
+const FALL_DT: f32 = 0.05;
 
 /// Where the ground is: static collision plus, outdoors, a terrain
 /// height function over world `(x, y)`.
@@ -272,6 +280,35 @@ impl Ground<'_> {
             Reach::Reached { at, .. } => Some(at),
             _ => None,
         }
+    }
+
+    /// Where a body going over an edge at `at` (feet, from `cell`) at `vel` lands, and in which
+    /// cell, followed as it falls ([`fall_step`]); `None` deeper than `DROP_MAX` or over nothing.
+    pub fn fall_from(&self, at: Vec3, vel: Vec3, cell: u32, cap: &Capsule) -> Option<(Vec3, u32)> {
+        let drift = at + vel * OVER_NOTHING - Vec3::new(0.0, 0.0, DROP_MAX);
+        let u = Swept::over(self, at, drift, cap);
+        let (mut p, mut vel, mut vz) = (at, vel, 0.0);
+        for _ in 0..(OVER_NOTHING / FALL_DT) as usize {
+            match fall_step(&u, p, p + vel * FALL_DT, vz, FALL_DT, cell, cap) {
+                Air::Landed { at: land, cell } => {
+                    return (at.z - land.z <= DROP_MAX).then_some((land, cell));
+                }
+                Air::Flying {
+                    at: next,
+                    vz: v,
+                    stopped,
+                } => {
+                    if stopped {
+                        vel = Vec3::ZERO;
+                    }
+                    (p, vz) = (next, v);
+                    if at.z - p.z > DROP_MAX {
+                        return None;
+                    }
+                }
+            }
+        }
+        None
     }
 
     /// Where the body's own step ([`stride`]) carries it from `a` (feet, in `cell`) toward `b`, a
@@ -526,6 +563,11 @@ impl<'g, 'a> Swept<'g, 'a> {
         }
     }
 
+    /// Whether `p` lies inside the box the floors were gathered in, on the flat.
+    fn holds(&self, p: Vec3) -> bool {
+        flat(p).cmpge(flat(self.lo)).all() && flat(p).cmple(flat(self.hi)).all()
+    }
+
     /// Whether a walking step from `from` to `to` can meet nothing that pushes or hangs over:
     /// within a radius of its line, from a step down under its feet to a step and a height over.
     fn is_clear(&self, from: Vec3, to: Vec3, cap: &Capsule) -> bool {
@@ -578,15 +620,33 @@ impl Underfoot for Swept<'_, '_> {
     }
 
     fn vertical(&self, from: Vec3, dz: f32, cap: &Capsule) -> Vertical {
+        let to = from + Vec3::new(0.0, 0.0, dz);
+        if dz < 0.0 && self.holds(from) {
+            let floors = self.floors.iter().copied();
+            return match self
+                .ground
+                .collision
+                .floor_among(floors, from, cap.step_up, -dz)
+            {
+                Some((z, cell)) => Vertical::Landed(Vec3::new(from.x, from.y, z), cell),
+                None => Vertical::Free(to),
+            };
+        }
+        if dz >= 0.0 && dz <= cap.step_up && self.is_clear(from, from, cap) {
+            return Vertical::Free(to);
+        }
         self.ground.vertical(from, dz, cap)
     }
 
     fn resolve_falling(&self, from: Vec3, to: Vec3, cap: &Capsule) -> Vec3 {
+        if self.is_clear(from, to, cap) {
+            return to;
+        }
         self.ground.resolve_falling(from, to, cap)
     }
 
     fn fits_falling(&self, at: Vec3, cap: &Capsule) -> bool {
-        self.ground.fits_falling(at, cap)
+        self.is_clear(at, at, cap) || self.ground.fits_falling(at, cap)
     }
 }
 
@@ -651,6 +711,9 @@ pub fn walk_kind(from_cell: u32, to_cell: u32) -> EdgeKind {
     }
 }
 
+/// Landing nodes tried for a drop, nearest first.
+const JOIN_TRIES: usize = 8;
+
 /// Columns per chunk side: chunks are built on demand, so a path only
 /// pays for the part of the block it crosses (24 m squares indoors).
 const CHUNK: i32 = 16;
@@ -668,6 +731,9 @@ pub struct NavGraph {
     columns: HashMap<(i32, i32), Vec<u32>>,
     /// Chunks whose nodes and edges exist.
     built: HashSet<(i32, i32)>,
+    /// Drops whose landing lies in a chunk not built yet: the node dropped from, where it lands
+    /// and in which cell.
+    drops_waiting: Vec<(u32, Vec3, u32)>,
     /// Time spent building so far.
     pub build_time: Duration,
 }
@@ -691,6 +757,7 @@ impl NavGraph {
             edges: Vec::new(),
             columns: HashMap::new(),
             built: HashSet::new(),
+            drops_waiting: Vec::new(),
             build_time: Duration::ZERO,
         }
     }
@@ -895,7 +962,81 @@ impl NavGraph {
                 }
             }
         }
+        for &i in &fresh {
+            self.drops_from(ground, i, &cap);
+        }
+        let waiting = std::mem::take(&mut self.drops_waiting);
+        for (from, at, cell) in waiting {
+            self.land(ground, from, at, cell, &cap);
+        }
         self.build_time += started.elapsed();
+    }
+
+    /// The drop edges out of `node`: toward each neighbouring column it has no edge into and whose
+    /// floor falls away, a walk that goes over the edge, followed down to where it lands.
+    fn drops_from(&mut self, ground: &Ground, node: u32, cap: &Capsule) {
+        let a = self.nodes[node as usize];
+        for k in 0..8 {
+            let angle = k as f32 * std::f32::consts::FRAC_PI_4;
+            let (dx, dy) = (angle.cos().round() as i32, angle.sin().round() as i32);
+            let col = (a.column.0 + dx, a.column.1 + dy);
+            let joined = self.edges[node as usize]
+                .iter()
+                .any(|e| self.nodes[e.to as usize].column == col);
+            if joined {
+                continue;
+            }
+            let toward = Vec3::new(col.0 as f32, col.1 as f32, 0.0) * self.spacing;
+            let toward = Vec3::new(toward.x, toward.y, a.pos.z);
+            // Only where the floor falls away: none at that column within a step of this one.
+            let within_step = |z: f32| z <= a.pos.z + cap.step_up && z >= a.pos.z - cap.step_down;
+            let level = ground
+                .collision
+                .floors_at_xy(toward.x, toward.y)
+                .into_iter()
+                .map(|f| f.0)
+                .chain(ground.terrain_under(toward.x, toward.y))
+                .any(within_step);
+            if level {
+                continue;
+            }
+            let Reach::Falls { at } = ground.stride_toward(a.pos, a.cell, toward, BODY_ARRIVE, cap)
+            else {
+                continue;
+            };
+            let dir = flat(toward - a.pos).normalize_or_zero() * DROP_SPEED;
+            let fell = ground.fall_from(at, Vec3::new(dir.x, dir.y, 0.0), a.cell, cap);
+            if let Some((land, cell)) = fell {
+                self.land(ground, node, land, cell, cap);
+            }
+        }
+    }
+
+    /// A drop from `from` landing at `at` (in `cell`) joined to the node on that floor within a
+    /// column the body walks to from there, or kept until the chunk it lands in is built.
+    fn land(&mut self, ground: &Ground, from: u32, at: Vec3, cell: u32, cap: &Capsule) {
+        let (gx, gy) = self.column_of(at);
+        if !self.built.contains(&chunk_of(gx, gy)) {
+            if (self.gx.0..=self.gx.1).contains(&gx) && (self.gy.0..=self.gy.1).contains(&gy) {
+                self.drops_waiting.push((from, at, cell));
+            }
+            return;
+        }
+        let onto = self
+            .near(at, 1)
+            .into_iter()
+            .map(|(_, id)| id)
+            .filter(|&id| id != from && (self.nodes[id as usize].pos.z - at.z).abs() <= cap.step_up)
+            .take(JOIN_TRIES)
+            .find(|&id| ground.body_reaches(at, cell, self.nodes[id as usize].pos, cap));
+        if let Some(to) = onto {
+            if !self.edges[from as usize].iter().any(|e| e.to == to) {
+                self.edges[from as usize].push(NavEdge {
+                    to,
+                    kind: EdgeKind::Drop,
+                });
+            }
+        }
     }
 
     /// Build the chunks covering the columns `gx0..=gx1` x `gy0..=gy1`.
@@ -1378,5 +1519,83 @@ pub(crate) mod tests {
                 }
             }
         }
+    }
+
+    /// An upper floor 3 m up from x = 0 to 4 (cell 0x0101) over, when `below` is some, a floor that
+    /// far under it from x = 0 to 12 (cell 0x0102), in a world with no terrain.
+    pub(crate) fn a_ledge_in_cells(below: Option<f32>) -> CollisionWorld {
+        let mut w = CollisionWorld::default();
+        floor(&mut w, 0.0, 4.0, -2.0, 2.0, 3.0, 0x0101);
+        if let Some(depth) = below {
+            floor(&mut w, 0.0, 12.0, -2.0, 2.0, 3.0 - depth, 0x0102);
+        }
+        w
+    }
+
+    /// The drop edges of the ledge's graph, as (from, to) heights.
+    fn drops(w: &CollisionWorld) -> Vec<(NavNode, NavNode)> {
+        let ground = inside(w);
+        let mut g = NavGraph::new(
+            Vec2::new(0.0, -2.0),
+            Vec2::new(12.0, 2.0),
+            1.0,
+            &Capsule::default(),
+        );
+        g.build_all(&ground);
+        let mut out = Vec::new();
+        for i in 0..g.len() as u32 {
+            for e in g.neighbours(i) {
+                if e.kind == EdgeKind::Drop {
+                    out.push((g.nodes[i as usize], g.nodes[e.to as usize]));
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn a_ledge_over_a_floor_is_a_drop_one_way() {
+        let w = a_ledge_in_cells(Some(3.0));
+        let found = drops(&w);
+        assert!(!found.is_empty(), "no drop off the ledge");
+        for (a, b) in &found {
+            assert!(
+                (a.pos.z - 3.0).abs() < 0.1 && b.pos.z.abs() < 0.1,
+                "{a:?} -> {b:?}"
+            );
+            assert_eq!(b.cell, 0x0102);
+        }
+        // Nothing climbs back: no edge of any kind from the floor up to the ledge.
+        let ground = inside(&w);
+        let mut g = NavGraph::new(
+            Vec2::new(0.0, -2.0),
+            Vec2::new(12.0, 2.0),
+            1.0,
+            &Capsule::default(),
+        );
+        g.build_all(&ground);
+        for i in 0..g.len() as u32 {
+            for e in g.neighbours(i) {
+                let (a, b) = (g.nodes[i as usize], g.nodes[e.to as usize]);
+                assert!(
+                    !(a.cell == 0x0102 && b.cell == 0x0101),
+                    "{a:?} -> {b:?} climbs"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_ledge_over_nothing_is_no_edge() {
+        assert!(drops(&a_ledge_in_cells(None)).is_empty());
+    }
+
+    #[test]
+    fn a_drop_deeper_than_falling_hurts_is_no_edge() {
+        assert!(drops(&a_ledge_in_cells(Some(15.0))).is_empty());
+        assert!(
+            !drops(&a_ledge_in_cells(Some(10.0))).is_empty(),
+            "10 m is a drop"
+        );
     }
 }

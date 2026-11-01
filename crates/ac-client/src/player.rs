@@ -1281,6 +1281,7 @@ impl Player {
                 avoid: &avoid,
                 berth: crate::pathfinder::PORTAL_BERTH,
                 indoors_too: true,
+                drops: false,
             };
             let found = wayfind::search_building(ground, nav, &q);
             if nav.chunk_count() != chunks {

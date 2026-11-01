@@ -67,6 +67,7 @@ fn academy_start_room_to_the_far_end() {
             avoid: &[],
             berth: 0.0,
             indoors_too: true,
+            drops: false,
         };
         let path: Vec<Vec3> = match wayfind::search_building(&ground, &mut graph, &q) {
             Search::Found(p) => p.into_iter().map(|(n, _)| n.pos).collect(),

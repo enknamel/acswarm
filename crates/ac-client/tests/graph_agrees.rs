@@ -1,6 +1,7 @@
 //! The walking graph against the body (docs/movement-phase1-design.md §4): seeded edges of two
 //! areas' graphs, each walked by a testkit body from its near end at its far end, frame by frame
-//! as the client walks. An edge the body does not walk is a route the follower cannot keep.
+//! as the client walks, a drop fallen and walked on from. An edge the body does not walk is a
+//! route the follower cannot keep.
 
 use ac_client::player::Player;
 use ac_client::testkit::human;
@@ -55,6 +56,11 @@ fn walked(assets: &Assets, a: &NavNode, b: &NavNode) -> Vec3 {
     for _ in 0..(LIMIT * HZ) as usize {
         let d = b.pos - pl.world_position();
         let left = Vec2::new(d.x, d.y).length();
+        // Off a drop it falls where it falls, and walks on to the node once down.
+        if pl.is_airborne() {
+            pl.update(assets, &ac_client::player::Input::default(), 1.0 / HZ);
+            continue;
+        }
         if left <= BODY_ARRIVE {
             break;
         }

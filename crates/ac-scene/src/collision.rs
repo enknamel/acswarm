@@ -12,6 +12,7 @@
 //! `step_up_height` higher and then steps down onto the walkable plane.
 
 use std::collections::HashMap;
+use std::hash::{BuildHasherDefault, Hasher};
 
 use ac_formats::gfxobj::{Polygon, Vertex};
 use glam::{Mat4, Vec3};
@@ -118,7 +119,7 @@ pub struct Tri {
 #[derive(Default)]
 pub struct CollisionWorld {
     pub tris: Vec<Tri>,
-    grid: HashMap<(i32, i32), Vec<u32>>,
+    grid: HashMap<(i32, i32), Vec<u32>, BuildHasherDefault<SquareHash>>,
     /// The interior cells the triangles came from, for
     /// [`inside_cell`](Self::inside_cell).
     cells: CellIndex,
@@ -147,6 +148,25 @@ fn ray_triangle(o: Vec3, d: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Option<f32> {
     }
     let t = e2.dot(qv) * inv;
     (t >= 0.0).then_some(t)
+}
+
+/// A grid square's hash: its two coordinates mixed by one multiply each, as std's keyed hash is
+/// for untrusted keys and these are not (most of a collision query was spent hashing).
+#[derive(Default)]
+struct SquareHash(u64);
+
+impl Hasher for SquareHash {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+    fn write(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.0 = (self.0.rotate_left(5) ^ u64::from(b)).wrapping_mul(0x517c_c1b7_2722_0a95);
+        }
+    }
+    fn write_i32(&mut self, i: i32) {
+        self.0 = (self.0.rotate_left(5) ^ u64::from(i as u32)).wrapping_mul(0x517c_c1b7_2722_0a95);
+    }
 }
 
 fn cell_of(p: Vec3) -> (i32, i32) {
@@ -539,7 +559,7 @@ impl CollisionWorld {
     }
 
     /// [`floor_at`](Self::floor_at) among `tris`, in the order they were added.
-    fn floor_among<'t>(
+    pub(crate) fn floor_among<'t>(
         &self,
         tris: impl Iterator<Item = &'t Tri>,
         p: Vec3,
@@ -616,6 +636,10 @@ impl CollisionWorld {
                 // Test the capsule at three heights against the triangle.
                 for dz in heights {
                     let c = pos + Vec3::new(0.0, 0.0, dz);
+                    // No nearer the triangle than its plane: a plane a radius off is no contact.
+                    if (c - t.a).dot(t.normal).abs() >= r {
+                        continue;
+                    }
                     let q = closest_point_on_tri(c, t);
                     let d = c - q;
                     let dist = d.length();
@@ -708,6 +732,9 @@ impl CollisionWorld {
             }
             for dz in heights {
                 let c = p + Vec3::new(0.0, 0.0, dz);
+                if (c - t.a).dot(t.normal).abs() >= r {
+                    continue;
+                }
                 let q = closest_point_on_tri(c, t);
                 if (c - q).length() >= r {
                     continue;
