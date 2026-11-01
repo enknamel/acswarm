@@ -1,8 +1,10 @@
 //! The route harness's trials (docs/movement-plan.md, phase 0): the stalls seen live and seeded
 //! random walks in the areas they came from, run offline through the real walk. It reports how
-//! each ended; `ROUTE_TRIALS=name` runs the trials whose names contain it.
+//! each ended and what the planner answered first; `ROUTE_TRIALS=name` runs those named so.
 
-use ac_client::walk_trial::{named, random_trials, run, Outcome, Spread, Trial};
+use ac_client::walk_trial::{
+    named, plan_first, random_trials, run, run_on, standing_at, Outcome, Spread, Trial,
+};
 use glam::Vec3;
 
 const LEVEL: i32 = 30;
@@ -125,16 +127,26 @@ fn areas() -> Vec<(&'static str, Vec3, u32)> {
 fn report(trials: &[Trial]) -> Vec<(String, Outcome)> {
     let only = std::env::var("ROUTE_TRIALS").ok();
     let mut out = Vec::new();
+    let mut agree = [0usize; 4];
     for t in trials
         .iter()
         .filter(|t| only.as_ref().is_none_or(|o| t.name.contains(o.as_str())))
     {
-        let o = run(LEVEL, t);
+        let mut c = standing_at(LEVEL, t);
+        let (planned, took) = plan_first(&mut c, t);
+        let o = run_on(&mut c, t);
+        let plan = match &planned {
+            Ok(n) => format!("route {n}"),
+            Err(why) => format!("no way {why:?}"),
+        };
+        let arrived = o.kind() == "arrived";
+        agree[usize::from(planned.is_err()) * 2 + usize::from(!arrived)] += 1;
         println!(
-            "TRIAL {:<44} {:>6.1} m  {:<13} {:?}",
+            "TRIAL {:<44} {:>6.1} m  {:<13} PLAN {plan} {:.0} ms  {:?}",
             t.name,
             t.start.distance(t.goal),
             o.kind(),
+            took.as_secs_f64() * 1e3,
             o
         );
         out.push((t.name.clone(), o));
@@ -148,7 +160,19 @@ fn report(trials: &[Trial]) -> Vec<(String, Outcome)> {
         count("gave up"),
         count("still pushing")
     );
+    println!(
+        "AGREE planned+arrived {}, planned+failed {}, no-way+arrived {}, no-way+failed {}",
+        agree[0], agree[1], agree[2], agree[3]
+    );
     out
+}
+
+/// The stall seen live named `name`.
+fn stall(name: &str) -> Trial {
+    known()
+        .into_iter()
+        .find(|t| t.name == name)
+        .unwrap_or_else(|| panic!("no stall named {name}"))
 }
 
 #[test]
@@ -172,4 +196,18 @@ fn random_walks_in_each_area() {
         trials.extend(random_trials(LEVEL, name, (at, cell), spread));
     }
     report(&trials);
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_corpse_on_the_floor_below_is_walked_down_to() {
+    let o = run(LEVEL, &stall("0286 corpse on the floor below"));
+    assert!(matches!(o, Outcome::Arrived { .. }), "{o:?}");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_jeweler_on_a_deck_is_walked_up_to() {
+    let o = run(LEVEL, &stall("F682 Jeweler on a deck"));
+    assert!(matches!(o, Outcome::Arrived { .. }), "{o:?}");
 }

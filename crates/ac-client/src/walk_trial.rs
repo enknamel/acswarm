@@ -6,6 +6,9 @@
 
 use std::time::{Duration, Instant};
 
+use ac_nav::routing::{self, NoWay};
+use ac_scene::navarea::{self, Area};
+use ac_world::Place;
 use glam::Vec3;
 
 use crate::Client;
@@ -29,8 +32,9 @@ pub struct Trial {
     /// The start, a world position on a floor, and the cell it stands in.
     pub start: Vec3,
     pub start_cell: u32,
-    /// The goal, a world position on a floor.
+    /// The goal, a world position on a floor, and the cell that floor is in.
     pub goal: Vec3,
+    pub goal_cell: u32,
     /// How near is near enough (metres): what the caller would ask for.
     pub stop: f32,
     /// How long it is given (seconds).
@@ -64,9 +68,38 @@ impl Outcome {
 
 /// Run one trial on a character of `level`.
 pub fn run(level: i32, t: &Trial) -> Outcome {
+    run_on(&mut standing_at(level, t), t)
+}
+
+/// A character of `level` standing at the trial's start.
+pub fn standing_at(level: i32, t: &Trial) -> Client {
     let origin = ac_world::landblock_origin(t.start_cell);
-    let mut c = crate::testkit::standing_in_the_field(level, t.start_cell, t.start - origin);
-    run_on(&mut c, t)
+    crate::testkit::standing_in_the_field(level, t.start_cell, t.start - origin)
+}
+
+/// What the planner answers for the trial from where `c` stands, on a fresh area as the planner
+/// thread would assemble it: the route's waypoints, or why there is none, and how long it took.
+pub fn plan_first(c: &mut Client, t: &Trial) -> (Result<usize, NoWay>, Duration) {
+    let started = Instant::now();
+    let (Some(pl), Some(at)) = (c.player.as_ref(), c.my_position()) else {
+        return (Err(NoWay::Stranded), started.elapsed());
+    };
+    let from = Place { at, cell: pl.cell };
+    let goal = Place {
+        at: t.goal,
+        cell: t.goal_cell,
+    };
+    let cap = pl.capsule();
+    let blocks = navarea::blocks_for(from.at, goal.at);
+    let planned = match Area::build(&c.assets, &blocks, &cap, from.cell) {
+        Ok(mut area) => {
+            area.avoid = crate::pathfinder::portal_mouths_to_avoid(from.at, goal.at);
+            area.berth = crate::pathfinder::PORTAL_BERTH;
+            routing::plan(&mut area, from, goal, t.stop).map(|r| r.waypoints.len())
+        }
+        Err(_) => Err(NoWay::OutOfRegion),
+    };
+    (planned, started.elapsed())
 }
 
 /// Run one trial on `c`, already standing at the trial's start.
@@ -233,7 +266,7 @@ pub fn random_trials(level: i32, name: &str, around: (Vec3, u32), s: Spread) -> 
         let Some((start, start_cell)) = standing_place(&mut c, around.0, s.radius, &mut rng) else {
             continue;
         };
-        let Some((goal, _)) = standing_place(&mut c, start, s.reach, &mut rng) else {
+        let Some((goal, goal_cell)) = standing_place(&mut c, start, s.reach, &mut rng) else {
             continue;
         };
         if goal.truncate().distance(start.truncate()) < s.least {
@@ -244,6 +277,7 @@ pub fn random_trials(level: i32, name: &str, around: (Vec3, u32), s: Spread) -> 
             start,
             start_cell,
             goal,
+            goal_cell,
             stop: 1.5,
             limit: 120.0,
         });
@@ -251,11 +285,12 @@ pub fn random_trials(level: i32, name: &str, around: (Vec3, u32), s: Spread) -> 
     out
 }
 
-/// `p` put on the floor (or terrain) at its x, y nearest its height, as `c` would stand there.
-pub fn on_floor(c: &mut Client, p: Vec3) -> Vec3 {
+/// `p` put on the floor (or terrain) at its x, y nearest its height, as `c` would stand there,
+/// and the cell of that floor.
+pub fn on_floor(c: &mut Client, p: Vec3) -> (Vec3, u32) {
     let assets = c.assets.clone();
     let Some(pl) = c.player.as_mut() else {
-        return p;
+        return (p, 0);
     };
     let dungeon = pl.is_indoors() && pl.in_dungeon(&assets);
     let block = if dungeon {
@@ -263,37 +298,41 @@ pub fn on_floor(c: &mut Client, p: Vec3) -> Vec3 {
     } else {
         crate::player::block_of(p)
     };
-    let mut levels: Vec<f32> = assets
+    let mut levels: Vec<(f32, u32)> = assets
         .block_collision(block)
-        .map(|bc| {
-            bc.world
-                .floors_at_xy(p.x, p.y)
-                .into_iter()
-                .map(|f| f.0)
-                .collect()
-        })
+        .map(|bc| bc.world.floors_at_xy(p.x, p.y))
         .unwrap_or_default();
     if !dungeon {
         pl.collision(&assets, block);
-        levels.extend(pl.terrain_height(p.x, p.y));
+        levels.extend(pl.terrain_height(p.x, p.y).map(|z| (z, 0)));
     }
-    levels
+    let Some((z, cell)) = levels
         .into_iter()
-        .min_by(|a, b| (a - p.z).abs().total_cmp(&(b - p.z).abs()))
-        .map_or(p, |z| Vec3::new(p.x, p.y, z))
+        .min_by(|a, b| (a.0 - p.z).abs().total_cmp(&(b.0 - p.z).abs()))
+    else {
+        return (p, block);
+    };
+    let at = Vec3::new(p.x, p.y, z);
+    let cell = if cell != 0 {
+        cell
+    } else {
+        ac_world::outdoor_cell(block, at - ac_world::landblock_origin(block))
+    };
+    (at, cell)
 }
 
 /// A trial between two places named by hand, both put on their floors.
 pub fn named(level: i32, name: &str, start: Vec3, start_cell: u32, goal: Vec3) -> Trial {
     let origin = ac_world::landblock_origin(start_cell);
     let mut c = crate::testkit::standing_in_the_field(level, start_cell, start - origin);
-    let start = on_floor(&mut c, start);
-    let goal = on_floor(&mut c, goal);
+    let (start, _) = on_floor(&mut c, start);
+    let (goal, goal_cell) = on_floor(&mut c, goal);
     Trial {
         name: name.into(),
         start,
         start_cell,
         goal,
+        goal_cell,
         stop: 1.5,
         limit: 120.0,
     }
