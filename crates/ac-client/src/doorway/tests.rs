@@ -88,9 +88,93 @@ fn a_target_in_a_doorway_is_waited_for_out_of_it() {
     assert_eq!(c.follow.map(|f| f.target), Some(spot), "walking there");
     // Come through to our side, it is shot at.
     let me = c.my_position().unwrap();
-    let out = me + Vec3::new(1.5, 0.0, 0.0) - ac_world::landblock_origin(0x01F6_01FA);
+    let out = me + Vec3::new(-2.0, 0.0, 0.0) - ac_world::landblock_origin(0x01F6_01FA);
     c.world.objects.get_mut(&rat.guid).unwrap().position =
         Some(ac_world::object::Position::new_flat(0x01F6_01FA, out));
     assert!(c.shot_clears(rat.guid, how), "out of the doorway");
-    assert!(!c.pull_from_doorway(rat.guid, "Swamp Rat", me + Vec3::new(1.5, 0.0, 0.0)));
+    assert!(!c.clear_doorway(rat.guid, "Swamp Rat", me + Vec3::new(-2.0, 0.0, 0.0)));
+}
+
+/// The door 0x028602F6 in dungeon 0x0286, open, where 15 of Blargerton's casts went nowhere: he
+/// stands at `me_y` across it (local y; the door is at y -95.25, x 70), a Shore Armoredillo at
+/// `it_y`.
+fn in_the_0286_doorway(me_y: f32, it_y: f32) -> (Client, u32, u32) {
+    let origin = ac_world::landblock_origin(0x0286_0000);
+    let rooms = crate::testkit::game_data()
+        .block_collision(0x0286_0000)
+        .unwrap();
+    let floor = |y: f32| {
+        let p = Vec3::new(70.0, y, 0.0);
+        let (_, cell) = rooms
+            .world
+            .floor_at(origin + p + Vec3::Z, 2.0, 3.0)
+            .expect("a floor");
+        (p, cell)
+    };
+    let (me, cell) = floor(me_y);
+    let mut c = crate::testkit::standing_in_the_field(37, cell, me);
+    let door = ac_world::WorldObject {
+        guid: 0x7028_62F6,
+        name: "Door".into(),
+        setup_id: 0x0200_024F,
+        object_desc_flags: ac_world::object_desc_flags::DOOR,
+        physics_state: 0x10018 | ac_world::object::PHYSICS_STATE_ETHEREAL,
+        position: Some(ac_world::object::Position {
+            cell: 0x0286_02F6,
+            local: Vec3::new(70.0, -95.25, 0.0),
+            rotation: glam::Quat::from_xyzw(0.0, 0.0, 0.0, -1.0),
+        }),
+        scale: 1.0,
+        ..Default::default()
+    };
+    c.world.objects.insert(door.guid, door);
+    let (it, it_cell) = floor(it_y);
+    let mut o = crate::testkit::standing_by(&mut c, 0x8000_0001, "Shore Armoredillo", 0.0);
+    o.position = Some(ac_world::object::Position::new_flat(it_cell, it));
+    c.world.objects.insert(o.guid, o);
+    let spell = c
+        .assets
+        .spell_table()
+        .unwrap()
+        .find_by_name("Force Arc III")
+        .map(|(id, _)| id)
+        .expect("Force Arc III");
+    (c, spell, 0x8000_0001)
+}
+
+fn past_the_0286_door(at: Vec3) -> f32 {
+    at.y - ac_world::landblock_origin(0x0286_0000).y + 95.25
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_caster_in_a_doorway_steps_out_into_the_target_s_room() {
+    // In the frame, the armoredillo 1.8 m off on the far side: it was thrown, and went nowhere.
+    let (mut c, spell, it) = in_the_0286_doorway(-95.55, -93.75);
+    let how = How::Spell(spell);
+    assert!(!c.shot_clears(it, how), "from the frame");
+    assert!(
+        c.autoplay_approach(it, "Shore Armoredillo", how),
+        "thrown from the frame"
+    );
+    let to = c.follow.map(|f| f.target).expect("walking out of it");
+    assert!(
+        past_the_0286_door(to) > DOORWAY_DEPTH,
+        "into its room: {to:?}"
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_spot_to_throw_from_is_out_of_the_doorway() {
+    // Just short of the frame, the armoredillo just past it: not thrown from beside the frame.
+    let (mut c, spell, it) = in_the_0286_doorway(-96.25, -94.45);
+    let how = How::Spell(spell);
+    assert!(c.autoplay_approach(it, "Shore Armoredillo", how));
+    let to = c.follow.map(|f| f.target).expect("walking");
+    assert!(
+        past_the_0286_door(to).abs() > DOORWAY_DEPTH,
+        "beside the frame: {:.2} m from the door",
+        past_the_0286_door(to)
+    );
 }
