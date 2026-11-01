@@ -22,8 +22,6 @@ fn academy_start_room_to_the_far_end() {
         collision: &collision,
         terrain: None,
         sea: None,
-        no_go: None,
-        outdoors_only: false,
         doorways: &[],
     };
     let cap = Capsule::default();

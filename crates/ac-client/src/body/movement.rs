@@ -52,7 +52,7 @@ impl Client {
         let cap = pl.capsule();
         // As near as the graph's own edges come, at the least.
         let near = within.max(ac_scene::nav::BODY_ARRIVE);
-        pl.on_nav(&assets, block, last, goal, |_, ground| {
+        pl.on_nav(&assets, block, |_, ground| {
             let cell = ac_scene::wayfind::locate(ground, last);
             ground.body_comes_within(last, cell, goal, near, &cap)
         })

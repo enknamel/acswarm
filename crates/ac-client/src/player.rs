@@ -963,8 +963,6 @@ impl Player {
             collision,
             terrain: (!b.dungeon).then_some(&terrain),
             sea: None,
-            no_go: None,
-            outdoors_only: false,
             doorways: &b
                 .collision
                 .as_ref()
@@ -1170,8 +1168,6 @@ impl Player {
             collision,
             terrain: (!b.dungeon).then_some(&terrain),
             sea: (!b.dungeon).then_some(&sea),
-            no_go: None,
-            outdoors_only: false,
             doorways: b
                 .collision
                 .as_ref()
@@ -1181,14 +1177,12 @@ impl Player {
         Some(f(&ground, &cap))
     }
 
-    /// Run `f` on landblock `block`'s navigation graph and the ground it is built over, for a walk
-    /// from `from` to `to` (the portals not on it are given a berth); `None` without collision.
+    /// Run `f` on landblock `block`'s navigation graph and the ground it is built over; `None`
+    /// without collision.
     pub(crate) fn on_nav<R>(
         &mut self,
         assets: &Assets,
         block: u32,
-        from: Vec3,
-        to: Vec3,
         f: impl FnOnce(&mut NavGraph, &Ground) -> R,
     ) -> Option<R> {
         let block = block & 0xFFFF_0000;
@@ -1212,8 +1206,6 @@ impl Player {
         let terrain =
             |x: f32, y: f32| sampler.height_in_square(Vec3::new(x - origin.x, y - origin.y, 0.0));
         let sea = |x: f32, y: f32| sea_at(&b.lb, &sea_types, x - origin.x, y - origin.y);
-        // A berth from the portals we are not walking to.
-        let avoid = ac_nav::routing::portal_mouths_to_avoid(from, to);
         // The block's doorways, so the graph stands a node in each
         // rather than leaving every building sealed.
         let doorways = b
@@ -1221,17 +1213,10 @@ impl Player {
             .as_ref()
             .map(|c| c.doorways.clone())
             .unwrap_or_default();
-        let no_go = |p: Vec3| {
-            avoid
-                .iter()
-                .any(|a| ac_scene::nav::in_berth(*a, p, ac_nav::routing::PORTAL_BERTH))
-        };
         let ground = Ground {
             collision,
             terrain: (!b.dungeon).then_some(&terrain),
             sea: (!b.dungeon).then_some(&sea),
-            no_go: (!avoid.is_empty()).then_some(&no_go),
-            outdoors_only: false,
             doorways: &doorways,
         };
         let mut nav = b.nav.as_ref()?.borrow_mut();
@@ -1247,7 +1232,7 @@ impl Player {
         p: Vec3,
         radius: f32,
     ) -> Vec<Vec3> {
-        self.on_nav(assets, block, p, p, |nav, ground| {
+        self.on_nav(assets, block, |nav, ground| {
             nav.standable_near(ground, p, radius)
         })
         .unwrap_or_default()
@@ -1270,7 +1255,7 @@ impl Player {
         let mine = from.distance(self.world_position()) < 1e-3;
         let from_cell = if mine { self.cell } else { block };
         let avoid = ac_nav::routing::portal_mouths_to_avoid(from, to);
-        self.on_nav(assets, block, from, to, |nav, ground| {
+        self.on_nav(assets, block, |nav, ground| {
             let (nodes, chunks) = (nav.len(), nav.chunk_count());
             let started = Instant::now();
             let place = |at: Vec3, cell: u32| ac_world::Place { at, cell };

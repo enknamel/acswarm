@@ -72,13 +72,6 @@ pub struct Ground<'a> {
     /// the terrain is ruled out, not the static geometry over it, so
     /// piers and bridges over water are still walked.
     pub sea: Option<&'a dyn Fn(f32, f32) -> bool>,
-    /// Where nothing may stand at all, floor or no floor: the berth
-    /// around a portal that must not be touched, on its own floor ([`in_berth`]).
-    pub no_go: Option<&'a dyn Fn(Vec3) -> bool>,
-    /// Keep out of buildings: interior floors are not walkable. For a
-    /// walk from one outdoor spot to another, which should go over the
-    /// hill rather than through the halls beneath it.
-    pub outdoors_only: bool,
     /// The middle of every opening between cells: doorways, arches, the
     /// gaps between rooms (see `interior::CellScene::doorways`).
     ///
@@ -96,9 +89,6 @@ impl Ground<'_> {
     /// interior floor within step range, else the higher of an outdoor
     /// floor and the terrain (the rule `Player::update` walks by).
     pub fn surface_at(&self, p: Vec3, cap: &Capsule) -> Option<(f32, u32)> {
-        if self.no_go.is_some_and(|f| f(p)) {
-            return None;
-        }
         let floor = self
             .collision
             .footing(p, cap.radius, cap.step_up, cap.step_down);
@@ -121,9 +111,7 @@ impl Ground<'_> {
                     && self
                         .terrain_under(p.x, p.y)
                         .is_some_and(|t| t > z + 0.5 && p.z >= t - cap.step_down);
-                if self.outdoors_only {
-                    // Not ours to stand on: only what is outside counts.
-                } else if !buried {
+                if !buried {
                     return Some((z, cell));
                 }
             }
@@ -347,12 +335,6 @@ impl Ground<'_> {
                     Stride::Falls { at } => return Reach::Falls { at },
                     Stride::Blocked | Stride::Adrift { .. } => return Reach::Stopped,
                 };
-            if self.outdoors_only && next_cell != 0 {
-                return Reach::Stopped;
-            }
-            if self.no_go.is_some_and(|f| f(next)) {
-                return Reach::Stopped;
-            }
             // A step that closes little is sliding along a wall the hop runs into.
             let now_left = flat(b - next).length();
             if now_left > left - BODY_STEP * BODY_CLOSING {
@@ -400,11 +382,6 @@ impl Ground<'_> {
             // nobody walking into the wall ever gets there to fall.
             if !self.fits(at, cap) || !line_clear(self.collision, prev, at) {
                 return false;
-            }
-            // Where nothing may stand is no edge: a walk leaning on it
-            // goes round, not down.
-            if self.no_go.is_some_and(|f| f(at)) {
-                continue;
             }
             let z = match self.surface_at(at, cap) {
                 Some((z, _)) => z,
@@ -824,18 +801,13 @@ impl NavGraph {
                 let x = gx as f32 * self.spacing;
                 let y = gy as f32 * self.spacing;
                 let mut levels = ground.collision.floors_at_xy(x, y);
-                if ground.outdoors_only {
-                    levels.retain(|(_, cell)| *cell == 0);
-                }
                 if let Some(t) = ground.terrain_under(x, y) {
                     levels.push((t, 0));
                 }
                 levels.sort_by(|a, b| b.0.total_cmp(&a.0));
                 let mut placed: Vec<f32> = Vec::new();
                 for (z, _) in levels {
-                    if placed.iter().any(|&pz| (pz - z).abs() < LEVEL_MERGE)
-                        || ground.no_go.is_some_and(|f| f(Vec3::new(x, y, z)))
-                    {
+                    if placed.iter().any(|&pz| (pz - z).abs() < LEVEL_MERGE) {
                         continue;
                     }
                     let Some(node) = self.place(ground, Vec3::new(x, y, z), (gx, gy), &cap) else {
@@ -874,9 +846,6 @@ impl NavGraph {
                 continue;
             }
             if !(self.gx.0..=self.gx.1).contains(&gx) || !(self.gy.0..=self.gy.1).contains(&gy) {
-                continue;
-            }
-            if ground.no_go.is_some_and(|f| f(*d)) {
                 continue;
             }
             let Some(node) = self.place(ground, *d, (gx, gy), &cap) else {
@@ -1349,8 +1318,6 @@ pub(crate) mod tests {
             collision: w,
             terrain: None,
             sea: None,
-            no_go: None,
-            outdoors_only: false,
             doorways: &[],
         }
     }
@@ -1425,8 +1392,6 @@ pub(crate) mod tests {
             collision: &w,
             terrain: Some(&terrain),
             sea: None,
-            no_go: None,
-            outdoors_only: false,
             doorways: &[],
         };
         let cap = Capsule::default();

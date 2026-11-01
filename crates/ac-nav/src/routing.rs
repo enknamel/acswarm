@@ -2,7 +2,7 @@
 //! graph, every waypoint with its cell and the kind of step into it, or why there is no way.
 //! Entry: [`plan`].
 
-use ac_scene::nav::{EdgeKind, Ground, NavGraph, NavNode};
+use ac_scene::nav::{EdgeKind, Ground, NavNode};
 use ac_scene::navarea::{block_at, Area};
 use ac_scene::wayfind::{self, Search, WalkQuery};
 use ac_world::Place;
@@ -72,8 +72,8 @@ pub fn place_of(n: &NavNode) -> Place {
 }
 
 /// The route from `from` to within `within` (metres, 3D) of `goal` on `area`, building the
-/// chunks it needs. A walk between two outdoor places keeps out of buildings unless only they
-/// lead there.
+/// chunks it needs, a berth kept from every portal not walked to. A walk between two outdoor
+/// places keeps out of buildings unless only they lead there.
 pub fn plan(area: &mut Area, from: Place, goal: Place, within: f32) -> Result<Route, NoWay> {
     let held = if area.dungeon {
         [from, goal]
@@ -87,21 +87,21 @@ pub fn plan(area: &mut Area, from: Place, goal: Place, within: f32) -> Result<Ro
     }
     let (f, g) = area.with_ground(|ground, _| (graph_end(ground, from), graph_end(ground, goal)));
     let outdoors = !area.dungeon && f.1 == 0 && g.1 == 0;
-    if area.outdoors_only != outdoors {
-        // The graph built so far was for the other rule.
-        area.outdoors_only = outdoors;
-        area.nav = fresh(&area.nav);
-    }
-    let mut found = search_on(area, f, g, within);
-    if matches!(found, Search::NoWay(NoWay::Unreached)) && area.outdoors_only {
-        // No way outdoors: through the buildings, on a graph of its own, since the one built so
-        // far left the interiors out.
-        let inside = fresh(&area.nav);
-        let outside = std::mem::replace(&mut area.nav, inside);
-        area.outdoors_only = false;
-        found = search_on(area, f, g, within);
-        area.outdoors_only = true;
-        area.nav = outside;
+    let avoid = portal_mouths_to_avoid(from.at, goal.at);
+    let mut q = WalkQuery {
+        from: f,
+        goal: g,
+        within,
+        avoid: &avoid,
+        berth: PORTAL_BERTH,
+        indoors_too: !outdoors,
+        drops: false,
+    };
+    let mut found = area.with_ground(|ground, nav| wayfind::search_building(ground, nav, &q));
+    if matches!(found, Search::NoWay(NoWay::Unreached)) && !q.indoors_too {
+        // No way outdoors: through the buildings, on the same graph.
+        q.indoors_too = true;
+        found = area.with_ground(|ground, nav| wayfind::search_building(ground, nav, &q));
     }
     match found {
         Search::Found(path) => Ok(Route {
@@ -117,25 +117,6 @@ pub fn plan(area: &mut Area, from: Place, goal: Place, within: f32) -> Result<Ro
         // Searched building, so nothing is left unbuilt.
         Search::Unbuilt(_) => Err(NoWay::Unreached),
     }
-}
-
-/// An empty graph over the same lattice as `nav`.
-fn fresh(nav: &NavGraph) -> NavGraph {
-    NavGraph::new(nav.min(), nav.max(), nav.spacing, &nav.capsule)
-}
-
-fn search_on(area: &mut Area, from: (Vec3, u32), goal: (Vec3, u32), within: f32) -> Search {
-    let avoid = area.avoid.clone();
-    let q = WalkQuery {
-        from,
-        goal,
-        within,
-        avoid: &avoid,
-        berth: area.berth,
-        indoors_too: !area.outdoors_only,
-        drops: false,
-    };
-    area.with_ground(|ground, nav| wayfind::search_building(ground, nav, &q))
 }
 
 #[cfg(test)]

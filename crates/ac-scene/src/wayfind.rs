@@ -206,12 +206,13 @@ fn route(
     // A start on no floor of its cell (in the air, a cell a step behind) is where the body is: its
     // first leg is walked from there like any other.
     let s = floor_of(ground, from_at, from_cell, &cap).unwrap_or(from_at);
-    let (start, sources) = sources(ground, l, q, s, from_cell, &cap)?;
-    let ends = ends(ground, l, q, g, goal_cell, &cap);
+    let berths = Berths::of(q, s);
+    let (start, sources) = sources(ground, l, q, &berths, s, from_cell, &cap)?;
+    let ends = ends(ground, l, q, &berths, g, goal_cell, &cap);
     if ends.is_empty() {
         return Err(NoWay::Unreached);
     }
-    let path = astar(l, q, &sources, &ends, g)?;
+    let path = astar(l, q, &berths, &sources, &ends, g)?;
     let nav = l.nav();
     let mut points: Vec<(NavNode, EdgeKind)> = Vec::with_capacity(path.len() + 1);
     let mut cell = from_cell;
@@ -230,48 +231,73 @@ fn route(
         };
         points.push((end, walk_kind(cell, goal_cell)));
     }
-    Ok(smooth(ground, q, start, from_cell, points, &cap))
+    Ok(smooth(ground, &berths, start, from_cell, points, &cap))
+}
+
+/// The portal mouths a walk keeps off, each with its berth: a berth the walk starts in shrinks to
+/// where it stands, so the body walks out of it and never nearer the mouth.
+struct Berths(Vec<(Vec3, f32)>);
+
+impl Berths {
+    fn of(q: &WalkQuery, start: Vec3) -> Self {
+        let keep = |m: &Vec3| {
+            let r = if in_berth(*m, start, q.berth) {
+                flat(start - *m).length()
+            } else {
+                q.berth
+            };
+            (*m, r)
+        };
+        Berths(if q.berth > 0.0 {
+            q.avoid.iter().map(keep).collect()
+        } else {
+            Vec::new()
+        })
+    }
+
+    /// Whether feet at `p` stand in a berth.
+    fn holds(&self, p: Vec3) -> bool {
+        self.0.iter().any(|&(m, r)| in_berth(m, p, r))
+    }
+
+    /// Whether the segment `a`..`b` passes through a berth that `a` does not already stand in.
+    fn crosses(&self, a: Vec3, b: Vec3) -> bool {
+        let len = flat(b - a).length();
+        let steps = (len / 0.5).ceil().max(1.0) as usize;
+        self.0.iter().any(|&(m, r)| {
+            flat(a - m).length() < r + len
+                && !in_berth(m, a, r)
+                && (1..=steps).any(|k| in_berth(m, a.lerp(b, k as f32 / steps as f32), r))
+        })
+    }
 }
 
 /// Whether a node may be stood on in this walk.
-fn can_stand_on(q: &WalkQuery, n: &NavNode) -> bool {
-    (q.indoors_too || n.cell == 0)
-        && !(q.berth > 0.0 && q.avoid.iter().any(|m| in_berth(*m, n.pos, q.berth)))
-}
-
-/// Whether the segment `a`..`b` passes through a berth that `a` does not already stand in.
-fn is_through_berth(q: &WalkQuery, a: Vec3, b: Vec3) -> bool {
-    if q.berth <= 0.0 {
-        return false;
-    }
-    let steps = (flat(b - a).length() / 0.5).ceil().max(1.0) as usize;
-    q.avoid.iter().any(|m| {
-        !in_berth(*m, a, q.berth)
-            && (1..=steps).any(|k| in_berth(*m, a.lerp(b, k as f32 / steps as f32), q.berth))
-    })
+fn can_stand_on(q: &WalkQuery, berths: &Berths, n: &NavNode) -> bool {
+    (q.indoors_too || n.cell == 0) && !berths.holds(n.pos)
 }
 
 /// A leg of a route walked by the body, clear of the berths.
 fn can_walk_leg(
     ground: &Ground,
-    q: &WalkQuery,
+    berths: &Berths,
     a: (Vec3, u32),
     b: (Vec3, u32),
     cap: &Capsule,
 ) -> bool {
-    !is_through_berth(q, a.0, b.0) && ground.can_walk(a, b, cap)
+    !berths.crosses(a.0, b.0) && ground.can_walk(a, b, cap)
 }
 
 /// A leg from where the body stands: the body's own step, whatever the chest ray meets, since the
 /// body is there and its step is what it will do.
 fn can_leave_start(
     ground: &Ground,
-    q: &WalkQuery,
+    berths: &Berths,
     a: (Vec3, u32),
     b: (Vec3, u32),
     cap: &Capsule,
 ) -> bool {
-    !is_through_berth(q, a.0, b.0) && ground.body_reaches(a.0, a.1, b.0, cap)
+    !berths.crosses(a.0, b.0) && ground.body_reaches(a.0, a.1, b.0, cap)
 }
 
 /// The nodes a route may begin at, each with the cost of the checked walk to it from the start;
@@ -280,6 +306,7 @@ fn sources(
     ground: &Ground,
     l: &mut impl Lattice,
     q: &WalkQuery,
+    berths: &Berths,
     s: Vec3,
     cell: u32,
     cap: &Capsule,
@@ -303,7 +330,9 @@ fn sources(
             .near(from, r)
             .into_iter()
             .map(|(_, id)| id)
-            .filter(|id| can_stand_on(q, &nav.nodes[*id as usize]) && !tried.contains(&(key, *id)))
+            .filter(|id| {
+                can_stand_on(q, berths, &nav.nodes[*id as usize]) && !tried.contains(&(key, *id))
+            })
             .map(|id| {
                 let n = nav.nodes[id as usize];
                 (n.cell != cell, n.pos.distance(from), id)
@@ -314,7 +343,7 @@ fn sources(
         for (_, d, id) in near.into_iter().take(JOIN_TRIES) {
             tried.insert((key, id));
             let n = nav.nodes[id as usize];
-            if can_leave_start(ground, q, (from, cell), (n.pos, n.cell), cap) {
+            if can_leave_start(ground, berths, (from, cell), (n.pos, n.cell), cap) {
                 kept.push((id, s.distance(from) + d));
             }
         }
@@ -331,6 +360,7 @@ fn ends(
     ground: &Ground,
     l: &mut impl Lattice,
     q: &WalkQuery,
+    berths: &Berths,
     g: Vec3,
     cell: u32,
     cap: &Capsule,
@@ -343,7 +373,7 @@ fn ends(
     let mut rest: Vec<(bool, f32, u32)> = Vec::new();
     for (_, id) in nav.near(g, r) {
         let n = nav.nodes[id as usize];
-        if !can_stand_on(q, &n) {
+        if !can_stand_on(q, berths, &n) {
             continue;
         }
         let d = n.pos.distance(g);
@@ -367,7 +397,7 @@ fn ends(
     rest.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.total_cmp(&b.1)));
     for (_, _, id) in rest.into_iter().take(JOIN_TRIES) {
         let n = nav.nodes[id as usize];
-        if is_through_berth(q, n.pos, g) {
+        if berths.crosses(n.pos, g) {
             continue;
         }
         if let Some(p) = ground.body_stops_within(n.pos, n.cell, g, q.within, cap) {
@@ -388,6 +418,7 @@ fn ends(
 fn astar(
     l: &mut impl Lattice,
     q: &WalkQuery,
+    berths: &Berths,
     sources: &[(u32, f32)],
     ends: &HashMap<u32, End>,
     g: Vec3,
@@ -453,7 +484,8 @@ fn astar(
         for e in nav.neighbours(node) {
             let next = nav.nodes[e.to as usize];
             if closed.contains(&e.to)
-                || !can_stand_on(q, &next)
+                || !can_stand_on(q, berths, &next)
+                || berths.crosses(here, next.pos)
                 || (e.kind == EdgeKind::Drop && !q.drops)
             {
                 continue;
@@ -478,7 +510,7 @@ fn astar(
 /// another cell than the one before it is a doorway.
 fn smooth(
     ground: &Ground,
-    q: &WalkQuery,
+    berths: &Berths,
     start: Vec3,
     start_cell: u32,
     mut points: Vec<(NavNode, EdgeKind)>,
@@ -510,7 +542,14 @@ fn smooth(
             .find(|&j| {
                 let p = points[j].0;
                 points[i..=j].iter().all(|w| w.1 != EdgeKind::Drop)
-                    && can_cut_to(ground, q, (from, from_cell), (p.pos, p.cell), cap, &wide)
+                    && can_cut_to(
+                        ground,
+                        berths,
+                        (from, from_cell),
+                        (p.pos, p.cell),
+                        cap,
+                        &wide,
+                    )
             })
             .unwrap_or(i);
         let (n, kind) = points[best];
@@ -529,13 +568,13 @@ fn smooth(
 /// to keep off the walls; the wide one's feet bridge cracks the body falls through.
 fn can_cut_to(
     ground: &Ground,
-    q: &WalkQuery,
+    berths: &Berths,
     a: (Vec3, u32),
     b: (Vec3, u32),
     cap: &Capsule,
     wide: &Capsule,
 ) -> bool {
-    can_walk_leg(ground, q, a, b, wide) && can_walk_leg(ground, q, a, b, cap)
+    can_walk_leg(ground, berths, a, b, wide) && can_walk_leg(ground, berths, a, b, cap)
 }
 
 #[cfg(test)]
@@ -974,5 +1013,77 @@ mod tests {
             panic!("no way down with drops allowed");
         };
         assert!(route.iter().any(|(_, k)| *k == EdgeKind::Drop), "{route:?}");
+    }
+
+    #[test]
+    fn a_berth_is_kept_per_walk_not_baked_into_the_graph() {
+        // One room with a portal's mouth in its middle: one graph, a walk keeping off it and a walk
+        // to it, each answered from the same nodes.
+        let mut w = CollisionWorld::default();
+        floor(&mut w, 0.0, 12.0, -4.0, 4.0, 0.0, 0x0101);
+        let ground = inside(&w);
+        let mut g = graph(Vec2::new(0.0, -4.0), Vec2::new(12.0, 4.0));
+        g.build_all(&ground);
+        let nodes = g.len();
+        let mouth = [Vec3::new(6.0, 0.0, 0.0)];
+        let mut q = WalkQuery {
+            from: (Vec3::new(1.0, 0.0, 0.0), 0x0101),
+            goal: (Vec3::new(11.0, 0.0, 0.0), 0x0101),
+            within: 0.5,
+            avoid: &mouth,
+            berth: 2.0,
+            indoors_too: true,
+            drops: false,
+        };
+        let Search::Found(round) = search_building(&ground, &mut g, &q) else {
+            panic!("no way round the berth");
+        };
+        let mut prev = q.from.0;
+        for (n, _) in &round {
+            for k in 0..=10 {
+                let p = prev.lerp(n.pos, k as f32 / 10.0);
+                assert!(!in_berth(mouth[0], p, 2.0), "into the berth at {p}");
+            }
+            prev = n.pos;
+        }
+        q.berth = 0.0;
+        let Search::Found(straight) = search_building(&ground, &mut g, &q) else {
+            panic!("no straight way");
+        };
+        assert!(
+            straight.len() < round.len(),
+            "{straight:?} against {round:?}"
+        );
+        assert_eq!(g.len(), nodes, "the berth was built into the graph");
+    }
+
+    #[test]
+    fn a_walk_from_inside_a_berth_leaves_it_and_comes_no_nearer() {
+        let mut w = CollisionWorld::default();
+        floor(&mut w, 0.0, 12.0, -4.0, 4.0, 0.0, 0x0101);
+        let ground = inside(&w);
+        let mut g = graph(Vec2::new(0.0, -4.0), Vec2::new(12.0, 4.0));
+        let mouth = [Vec3::new(6.0, 0.0, 0.0)];
+        let start = Vec3::new(5.0, 0.0, 0.0);
+        let q = WalkQuery {
+            from: (start, 0x0101),
+            goal: (Vec3::new(1.0, 3.0, 0.0), 0x0101),
+            within: 0.5,
+            avoid: &mouth,
+            berth: 3.0,
+            indoors_too: true,
+            drops: false,
+        };
+        let Search::Found(route) = search_building(&ground, &mut g, &q) else {
+            panic!("stranded in the berth");
+        };
+        let near = start.distance(mouth[0]);
+        for (n, _) in &route {
+            assert!(
+                n.pos.distance(mouth[0]) >= near - 1e-3,
+                "nearer the mouth at {:?}",
+                n.pos
+            );
+        }
     }
 }

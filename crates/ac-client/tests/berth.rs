@@ -34,8 +34,6 @@ fn a_walk_through_the_hub_keeps_its_berth_from_the_other_portals() {
             .all(|m| m.truncate().distance(Vec2::new(to.x, to.y)) > PORTAL_BERTH),
         "the portal we are walking to is not kept off"
     );
-    area.avoid = avoid.clone();
-    area.berth = PORTAL_BERTH;
     // The hub floor is at z 0; the graph finds its own floors, the cells by their BSPs.
     let place = |at: Vec3| ac_world::Place {
         at: at + Vec3::Z * 0.1,

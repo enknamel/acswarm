@@ -80,15 +80,6 @@ pub struct Area {
     pub nav: NavGraph,
     /// A dungeon area: no terrain under it, fine lattice.
     pub dungeon: bool,
-    /// Spots to keep away from, and how far: the mouths of portals that
-    /// are not the one being walked to. A portal takes whoever touches
-    /// it, so a walk that brushes the wrong one ends somewhere else.
-    pub avoid: Vec<Vec3>,
-    pub berth: f32,
-    /// Keep out of buildings (see `nav::Ground::outdoors_only`). Set
-    /// for a walk between two outdoor spots; a walk that finds no way
-    /// outdoors is tried again with it off.
-    pub outdoors_only: bool,
     /// Which of the region's terrain types are open sea, by index. A
     /// character cannot walk into the ocean -- the server refuses the
     /// move and it stops dead against nothing, which is what an
@@ -187,9 +178,6 @@ impl Area {
             doorways,
             nav,
             dungeon,
-            avoid: Vec::new(),
-            berth: 0.0,
-            outdoors_only: false,
             sea_types,
         })
     }
@@ -219,9 +207,6 @@ impl Area {
             nav,
             dungeon,
             sea_types,
-            avoid,
-            berth,
-            outdoors_only,
             ..
         } = self;
         let terrain = |x: f32, y: f32| -> Option<f32> {
@@ -238,16 +223,10 @@ impl Area {
                 None => false,
             }
         };
-        // The berth around the portals we are not walking to: nowhere
-        // to stand, floor or no floor, indoors or out.
-        let no_go = |p: Vec3| -> bool { avoid.iter().any(|a| crate::nav::in_berth(*a, p, *berth)) };
-        let keep_off = *berth > 0.0 && !avoid.is_empty();
         let ground = Ground {
             collision,
             terrain: (!*dungeon).then_some(&terrain),
             sea: (!*dungeon).then_some(&sea),
-            no_go: keep_off.then_some(&no_go),
-            outdoors_only: *outdoors_only && !*dungeon,
             doorways,
         };
         f(&ground, nav)

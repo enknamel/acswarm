@@ -23,8 +23,6 @@ fn academy_legs_are_walkable() {
         collision: &collision,
         terrain: None,
         sea: None,
-        no_go: None,
-        outdoors_only: false,
         doorways: &[],
     };
     let cap = Capsule::default();

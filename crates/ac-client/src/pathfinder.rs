@@ -315,19 +315,16 @@ fn plan(assets: &Assets, areas: &mut Vec<Area>, ask: &Ask) -> Answer {
             }
         }
     };
-    let waypoints = area.and_then(|a| {
-        // Keep a berth from every portal mouth about, save the one the walk is going to: a
-        // portal takes whoever touches it.
-        a.avoid = ac_nav::routing::portal_mouths_to_avoid(from, to);
-        a.berth = ac_nav::routing::PORTAL_BERTH;
-        match ac_nav::routing::plan(a, ask.from, ask.to, ask.within) {
-            Ok(route) => Some(route.points()),
-            Err(why) => {
-                tracing::debug!("pathfinder: no way: {why:?}");
-                None
-            }
-        }
-    });
+    let waypoints =
+        area.and_then(
+            |a| match ac_nav::routing::plan(a, ask.from, ask.to, ask.within) {
+                Ok(route) => Some(route.points()),
+                Err(why) => {
+                    tracing::debug!("pathfinder: no way: {why:?}");
+                    None
+                }
+            },
+        );
     Answer {
         from,
         to,
