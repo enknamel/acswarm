@@ -592,6 +592,15 @@ Tests:
 Baseline (main, release, `Area::build_everything`, one block): 0xA9B4 0.64 s, 0xF682 0.58 s,
 0x8A02 0.59 s, 0x0286 0.22 s. Step 1 re-measures these with `navcost.rs` and records them here.
 
+Step 1, measured (`navcost.rs`, release; build ms, then plan ms over 20 node pairs):
+
+| block | before step 1 | after step 1 |
+|---|---|---|
+| 0xA9B4 | 644 ms, plans 30.3 ms | 643 ms, plans 30.6 ms |
+| 0xF682 | 601 ms, plans 55.8 ms | 587 ms, plans 60.1 ms |
+| 0x8A02 | 620 ms, plans 42.9 ms | 607 ms, plans 68.3 ms |
+| 0x0286 | 231 ms, plans 82.6 ms | 227 ms, plans 94.2 ms |
+
 | risk | where | how it shows | what is done |
 |---|---|---|---|
 | The walk test makes the graph about 5 × slower to build | step 2 | `navcost.rs` ms over 2.0 × the baseline | the open-ground fast path (exact), then reuse of the reverse direction (§4). The builder thread means a slow build delays the first answer and never stalls a frame (step 3); `PLAN` ms in the harness shows that delay. |
