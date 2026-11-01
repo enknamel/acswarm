@@ -62,6 +62,7 @@ pub mod plan;
 pub mod player;
 pub mod position;
 pub mod profile;
+pub mod quest_flags;
 pub mod recalls;
 pub mod reconnect;
 pub mod recovery;

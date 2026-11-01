@@ -66,6 +66,7 @@ pub mod spawns;
 pub mod stats;
 pub mod towns;
 pub mod trip;
+pub mod unlocks;
 
 use std::collections::HashMap;
 

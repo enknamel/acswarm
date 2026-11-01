@@ -29,6 +29,7 @@ impl Client {
             self.ledger_loaded = true;
             self.load_ledger();
             self.load_recall_positions();
+            self.load_quest_flags();
         }
         use ac_net::session::{Event, Port};
         let mut chat_pending: Vec<(u32, Vec<u8>)> = Vec::new();

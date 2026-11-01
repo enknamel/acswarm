@@ -116,6 +116,7 @@ impl Client {
         }
         // What a server walk that runs out was walking to.
         self.visits.used(guid, Instant::now());
+        self.note_unlock_talk(guid);
     }
 
     /// Select an object (what the target bar and appraisal refer to).
