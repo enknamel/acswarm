@@ -456,16 +456,21 @@ pub fn best_any(
         })
 }
 
-/// The element worth a vulnerability on `target`: its weakest, when it has `least_health`.
-/// Anything weaker dies before the spell pays for itself.
-pub fn vulnerability_for(target: Option<&Creature>, least_health: u32) -> Option<Element> {
+/// The element to make `target` vulnerable to before throwing an attack of `attack`'s element:
+/// that element, never its weakest, since a vulnerability helps only the damage of its own type
+/// (a_vulnerability_is_for_the_element_of_the_attack). `None` when the target is not worth it
+/// (under `least_health`), takes nothing from that element, or the attack has none.
+pub fn vulnerability_for(
+    target: Option<&Creature>,
+    attack: Option<Element>,
+    least_health: u32,
+) -> Option<Element> {
     let c = target?;
     if c.health < least_health {
         return None;
     }
-    let weakest = c.weakest_to()?;
-    // Not worth casting when even its weakest element does nothing to it.
-    (c.takes_from(weakest) > 0.0).then_some(weakest)
+    let element = attack?;
+    (c.takes_from(element) > 0.0).then_some(element)
 }
 
 /// The spells that make a creature take more of `element`, as ids.
@@ -941,10 +946,14 @@ mod tests {
     }
 
     #[test]
-    fn a_vulnerability_is_only_worth_it_on_something_that_lasts() {
+    fn a_vulnerability_is_for_the_element_of_the_attack() {
         let skulker = elements::creature_by_id(7).expect("Drudge Skulker");
-        assert_eq!(vulnerability_for(Some(skulker), LONG_FIGHT_HEALTH), None);
-        let tough = Creature {
+        let pierce = Some(Element::Pierce);
+        assert_eq!(
+            vulnerability_for(Some(skulker), pierce, LONG_FIGHT_HEALTH),
+            None
+        );
+        let mut tough = Creature {
             wcid: 0,
             name: "Tough".into(),
             health: 5000,
@@ -962,13 +971,33 @@ mod tests {
                 None,
             ],
         };
+        // Thrown piercing, it is made vulnerable to piercing, not to the fire it is weakest to.
         assert_eq!(
-            vulnerability_for(Some(&tough), LONG_FIGHT_HEALTH),
+            vulnerability_for(Some(&tough), pierce, LONG_FIGHT_HEALTH),
+            pierce
+        );
+        assert_eq!(
+            vulnerability_for(Some(&tough), Some(Element::Fire), LONG_FIGHT_HEALTH),
             Some(Element::Fire)
         );
-        assert!(!vulnerability_spells(Element::Fire).is_empty());
-        assert_eq!(vulnerability_for(None, LONG_FIGHT_HEALTH), None);
+        assert!(!vulnerability_spells(Element::Pierce).is_empty());
+        // Nothing for an attack of no element, nor for one it takes nothing from.
+        assert_eq!(
+            vulnerability_for(Some(&tough), None, LONG_FIGHT_HEALTH),
+            None
+        );
+        let slot = elements::ALL
+            .iter()
+            .position(|e| *e == Element::Pierce)
+            .unwrap();
+        tough.takes[slot] = Some(0.0);
+        assert_eq!(
+            vulnerability_for(Some(&tough), pierce, LONG_FIGHT_HEALTH),
+            None
+        );
+        assert_eq!(vulnerability_for(None, pierce, LONG_FIGHT_HEALTH), None);
     }
+
     /// Sceptres differing only in what they deal and rend: against a drudge (slash 0.86, fire 1.42)
     /// the fiery one has to win.
     #[test]
