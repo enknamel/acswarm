@@ -1,7 +1,7 @@
 //! Static collision geometry for a landblock: world-space triangles from
 //! the physics polygons of buildings, statics, scenery and interior cells
 //! -- plus, for a model that has none, the cylinder its Setup collides by
-//! -- bucketed on a 4 m grid.
+//! -- bucketed on a 2 m grid.
 //!
 //! This is a deliberately simple first cut, not the client's BSP/sphere
 //! physics: a character is a vertical capsule; walls (steep triangles)
@@ -21,7 +21,8 @@ use crate::landblock::LandblockScene;
 use crate::model::{place, VertexTable};
 use crate::{Assets, Result};
 
-const GRID: f32 = 4.0;
+/// Bucket side (metres); 2 m, not 4: navcost built Holtburg's graph in 1.1 s, not 1.4 s.
+const GRID: f32 = 2.0;
 
 /// Gravity in world units (m/s²); the client's `PhysicsGlobals` uses -9.8.
 pub const GRAVITY: f32 = 9.8;
@@ -155,6 +156,11 @@ fn cell_of(p: Vec3) -> (i32, i32) {
 impl CollisionWorld {
     pub fn is_empty(&self) -> bool {
         self.tris.is_empty()
+    }
+
+    /// The triangles at `ids`, in the order given.
+    pub(crate) fn tris_at<'w>(&'w self, ids: &[u32]) -> Vec<&'w Tri> {
+        ids.iter().map(|&i| &self.tris[i as usize]).collect()
     }
 
     /// Add one triangle (mostly for tests; scenes use `from_scene`).
@@ -395,19 +401,57 @@ impl CollisionWorld {
         Ok(w)
     }
 
+    /// The triangles in the grid cells within `r` of `p` by index, one in several cells once for
+    /// each: for a question any one of them answers, without [`nearby`](Self::nearby)'s merge.
+    pub(crate) fn around(&self, p: Vec3, r: f32) -> impl Iterator<Item = (u32, &Tri)> + '_ {
+        let (x0, y0) = cell_of(p - Vec3::splat(r));
+        let (x1, y1) = cell_of(p + Vec3::splat(r));
+        (x0..=x1)
+            .flat_map(move |x| (y0..=y1).map(move |y| (x, y)))
+            .filter_map(|c| self.grid.get(&c))
+            .flatten()
+            .map(|&i| (i, &self.tris[i as usize]))
+    }
+
+    /// [`nearby`](Self::nearby) that `keep` keeps, in the same order: the few kept are sorted,
+    /// not every triangle in the cells merged.
+    fn near_where(&self, p: Vec3, r: f32, keep: impl Fn(&Tri) -> bool) -> Vec<&Tri> {
+        let mut ids: Vec<u32> = self
+            .around(p, r)
+            .filter(|(_, t)| keep(t))
+            .map(|(i, _)| i)
+            .collect();
+        ids.sort_unstable();
+        ids.dedup();
+        self.tris_at(&ids)
+    }
+
+    /// The triangles in the grid cells within `r` of `p`, each once, in the order they were added.
     pub fn nearby(&self, p: Vec3, r: f32) -> impl Iterator<Item = &Tri> + '_ {
         let (x0, y0) = cell_of(p - Vec3::splat(r));
         let (x1, y1) = cell_of(p + Vec3::splat(r));
-        let mut ids: Vec<u32> = Vec::new();
+        let mut lists: Vec<&[u32]> = Vec::new();
         for x in x0..=x1 {
             for y in y0..=y1 {
                 if let Some(v) = self.grid.get(&(x, y)) {
-                    ids.extend_from_slice(v);
+                    lists.push(v);
                 }
             }
         }
-        ids.sort_unstable();
-        ids.dedup();
+        // Each cell's list is in order with no repeats (tris are only appended): merged, not sorted.
+        let mut ids: Vec<u32> = Vec::with_capacity(lists.iter().map(|l| l.len()).sum());
+        if let [one] = lists[..] {
+            ids.extend_from_slice(one);
+        } else {
+            while let Some(least) = lists.iter().filter_map(|l| l.first()).min().copied() {
+                ids.push(least);
+                for l in &mut lists {
+                    if l.first() == Some(&least) {
+                        *l = &l[1..];
+                    }
+                }
+            }
+        }
         ids.into_iter().map(move |i| &self.tris[i as usize])
     }
 
@@ -422,7 +466,8 @@ impl CollisionWorld {
         }
         let mid = (from + to) * 0.5;
         let mut best: Option<f32> = None;
-        for t in self.nearby(mid, len * 0.5 + 0.1) {
+        // The nearest hit is the same whatever order the triangles come in.
+        for (_, t) in self.around(mid, len * 0.5 + 0.1) {
             if let Some(f) = ray_triangle(from, d, t.a, t.b, t.c) {
                 if f <= 1.0 && best.map(|b| f < b).unwrap_or(true) {
                     best = Some(f);
@@ -453,7 +498,7 @@ impl CollisionWorld {
     pub fn floors_at_xy(&self, x: f32, y: f32) -> Vec<(f32, u32)> {
         let p = Vec3::new(x, y, 0.0);
         let mut out: Vec<(f32, u32)> = Vec::new();
-        for t in self.nearby(p, 0.5) {
+        for t in self.near_where(p, 0.5, |t| t.normal.z >= 0.5) {
             if t.normal.z < 0.5 || !point_in_tri_xy(p, t) {
                 continue;
             }
@@ -468,21 +513,24 @@ impl CollisionWorld {
     /// under the rest of its feet. The body's step and the graph both stand on it, so a crack
     /// narrower than the body is crossed and an edge stood at by both (a_counter_on_a_deck_up_a_ramp_is_walked_up_to).
     pub fn footing(&self, p: Vec3, r: f32, max_rise: f32, max_drop: f32) -> Option<(f32, u32)> {
-        self.floor_at(p, max_rise, max_drop).or_else(|| {
-            let reach = r * FOOTING;
-            (0..8)
-                .filter_map(|k| {
-                    let a = k as f32 * std::f32::consts::FRAC_PI_4;
-                    let q = p + Vec3::new(a.cos() * reach, a.sin() * reach, 0.0);
-                    self.floor_at(q, max_rise, max_drop)
-                })
-                .max_by(|a, b| a.0.total_cmp(&b.0))
-        })
+        footing_by(p, r, |q| self.floor_at(q, max_rise, max_drop))
     }
 
     /// Height of the highest floor triangle directly under `p` within
     /// `max_drop` below and `max_rise` above, with its cell id.
     pub fn floor_at(&self, p: Vec3, max_rise: f32, max_drop: f32) -> Option<(f32, u32)> {
+        let under = self.near_where(p, 0.5, |t| t.normal.z >= 0.5 && point_in_tri_xy(p, t));
+        self.floor_among(under.into_iter(), p, max_rise, max_drop)
+    }
+
+    /// [`floor_at`](Self::floor_at) among `tris`, in the order they were added.
+    fn floor_among<'t>(
+        &self,
+        tris: impl Iterator<Item = &'t Tri>,
+        p: Vec3,
+        max_rise: f32,
+        max_drop: f32,
+    ) -> Option<(f32, u32)> {
         let mut best: Option<(f32, u32)> = None;
         // The best among interior geometry alone. A building's exterior
         // shell carries a solid first-floor slab across the stairwell
@@ -491,7 +539,7 @@ impl CollisionWorld {
         // stairs. The client never stands on it: inside a cell it tests
         // the cell's own geometry and the shell is not part of that.
         let mut indoors: Option<(f32, u32)> = None;
-        for t in self.nearby(p, 0.5) {
+        for t in tris {
             if t.normal.z < 0.5 {
                 continue;
             }
@@ -546,9 +594,9 @@ impl CollisionWorld {
         let heights = [lo, (lo + hi) * 0.5, hi];
         for _ in 0..3 {
             let mut moved = false;
-            for t in self.nearby(pos, r + 0.5) {
-                if t.normal.z.abs() > 0.6 {
-                    continue; // floor/ceiling
+            for t in self.near_where(pos, r + 0.5, |t| t.normal.z.abs() <= 0.6) {
+                if is_beyond(t, pos, r, lo, hi) {
+                    continue; // floor/ceiling, or out of reach
                 }
                 // Test the capsule at three heights against the triangle.
                 for dz in heights {
@@ -607,13 +655,16 @@ impl CollisionWorld {
             // width apart) can leave the capsule behind a wall it started
             // in front of. A one-sided face is never crossed from its
             // front: stay where the move began instead.
+            let faces: Vec<&Tri> = self
+                .around(pos, r + 0.5)
+                .chain(self.around(f, r + 0.5))
+                .map(|(_, t)| t)
+                .filter(|t| !t.two_sided && t.normal.z.abs() <= 0.6)
+                .collect();
             for dz in heights {
                 let start = f + Vec3::new(0.0, 0.0, dz);
                 let end = pos + Vec3::new(0.0, 0.0, dz);
-                for t in self.nearby(pos, r + 0.5).chain(self.nearby(f, r + 0.5)) {
-                    if t.two_sided || t.normal.z.abs() > 0.6 {
-                        continue;
-                    }
+                for &t in &faces {
                     // A face the middle already lies on does not hold it: a body that has come
                     // to be inside a paper-thin wall walks out of it either way (a_body_inside_a_paper_thin_wall_walks_out_of_it).
                     if (start - closest_point_on_tri(start, t)).length() < EMBEDDED {
@@ -636,8 +687,8 @@ impl CollisionWorld {
         let hi = h - r;
         let lo = (skirt + r).min(hi);
         let heights = [lo, (lo + hi) * 0.5, hi];
-        for t in self.nearby(p, r + 0.5) {
-            if t.normal.z.abs() > 0.6 {
+        for t in self.near_where(p, r + 0.5, |t| t.normal.z.abs() <= 0.6) {
+            if is_beyond(t, p, r, lo, hi) {
                 continue;
             }
             for dz in heights {
@@ -670,7 +721,7 @@ impl CollisionWorld {
         // same distinction here.
         let mut indoors: Option<f32> = None;
         let min_z = p.z + 0.2;
-        for t in self.nearby(p, r) {
+        for t in self.near_where(p, r, is_facing_down) {
             let facing_down = t.normal.z < -0.5 || (t.two_sided && t.normal.z > 0.5);
             if !facing_down {
                 continue;
@@ -787,7 +838,7 @@ impl CollisionWorld {
         // nowhere: pinned, while the route it was given was sound and
         // the merchant four metres away waited.
         let indoors = self.in_known_cell(p + Vec3::new(0.0, 0.0, 0.1));
-        for t in self.nearby(p, r) {
+        for t in self.near_where(p, r, is_facing_down) {
             if indoors && t.cell == 0 {
                 continue;
             }
@@ -847,6 +898,38 @@ impl CollisionWorld {
             }
         }
     }
+}
+
+/// The floor a body of radius `r` stands on at `p`, by `floor_at`: under its middle, else the
+/// highest under the rest of its feet ([`CollisionWorld::footing`]).
+fn footing_by(
+    p: Vec3,
+    r: f32,
+    floor_at: impl Fn(Vec3) -> Option<(f32, u32)>,
+) -> Option<(f32, u32)> {
+    floor_at(p).or_else(|| {
+        let reach = r * FOOTING;
+        (0..8)
+            .filter_map(|k| {
+                let a = k as f32 * std::f32::consts::FRAC_PI_4;
+                floor_at(p + Vec3::new(a.cos() * reach, a.sin() * reach, 0.0))
+            })
+            .max_by(|a, b| a.0.total_cmp(&b.0))
+    })
+}
+
+/// A down-facing triangle, or a two-sided floor: something a head meets from below.
+fn is_facing_down(t: &Tri) -> bool {
+    t.normal.z < -0.5 || (t.two_sided && t.normal.z > 0.5)
+}
+
+/// Whether every point of `t` is `r` or more from the axis of a capsule standing at `p`, between
+/// `lo` and `hi` over its feet: its bounding box is, the cheap half of a closest-point test.
+fn is_beyond(t: &Tri, p: Vec3, r: f32, lo: f32, hi: f32) -> bool {
+    let (tlo, thi) = (t.a.min(t.b).min(t.c), t.a.max(t.b).max(t.c));
+    let (alo, ahi) = (Vec3::new(p.x, p.y, p.z + lo), Vec3::new(p.x, p.y, p.z + hi));
+    let gap = (tlo - ahi).max(alo - thi).max(Vec3::ZERO);
+    gap.length_squared() >= r * r
 }
 
 /// Whether the segment `a`..`b` passes through triangle `t` from the side
