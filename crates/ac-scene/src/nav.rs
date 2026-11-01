@@ -38,6 +38,12 @@ const LEVEL_MERGE: f32 = 0.3;
 /// Largest height difference between two neighbouring nodes worth
 /// testing (stairs and ramps within one grid step).
 const MAX_EDGE_RISE: f32 = 2.0;
+/// Ramp points stand this far apart (metres), well under an edge's [`MAX_EDGE_RISE`] up a slope.
+const RAMP_STEP: f32 = 1.0;
+/// A floor sloping between these (its normal's z) is a ramp: steeper is a wall, flatter is level
+/// ground the lattice already covers (`CollisionWorld::floors_at_xy` takes 0.5 as a floor).
+const RAMP_FLOOR: f32 = 0.5;
+const RAMP_LEVEL: f32 = 0.97;
 /// A snapped node may move at most this fraction of the spacing.
 const SNAP_FRACTION: f32 = 0.6;
 /// Extra clearance a smoothed route keeps from walls (metres).
@@ -97,7 +103,9 @@ impl Ground<'_> {
         if self.no_go.is_some_and(|f| f(p)) {
             return None;
         }
-        let floor = self.collision.floor_at(p, cap.step_up, cap.step_down);
+        let floor = self
+            .collision
+            .footing(p, cap.radius, cap.step_up, cap.step_down);
         // Inside something: its floor is what we stand on -- unless the
         // ground runs above it, when it is a cellar or a dungeon under
         // a hill, and from up here the hill is the floor.
@@ -556,9 +564,18 @@ impl NavGraph {
                 }
             }
         }
-        // The openings the data names, wherever the lattice fell.
+        // The openings the data names, and points along every ramp, wherever the lattice fell:
+        // a ramp narrower than the lattice lies between its columns and joins nothing
+        // (a_counter_on_a_deck_up_a_ramp_is_walked_up_to, in ac-client).
+        let span = CHUNK as f32 * self.spacing;
+        let middle = Vec3::new((cx as f32 + 0.5) * span, (cy as f32 + 0.5) * span, 0.0);
+        let ramps: Vec<Vec3> = ground
+            .collision
+            .nearby(middle, span * 0.75)
+            .flat_map(|t| ramp_points(t, self.spacing))
+            .collect();
         let mut seeded: Vec<u32> = Vec::new();
-        for d in ground.doorways {
+        for d in ground.doorways.iter().chain(&ramps) {
             let gx = (d.x / self.spacing).round() as i32;
             let gy = (d.y / self.spacing).round() as i32;
             if chunk_of(gx, gy) != (cx, cy) {
@@ -969,6 +986,34 @@ impl NavGraph {
         }
         out
     }
+}
+
+/// Points a metre apart down a sloping floor `t` (a ramp) narrower than the lattice `spacing`: a
+/// line of them inside it along its longest side. None on a level, steep or wide one, which the
+/// lattice already stands on (a roof).
+fn ramp_points(t: &crate::collision::Tri, spacing: f32) -> Vec<Vec3> {
+    if !(RAMP_FLOOR..RAMP_LEVEL).contains(&t.normal.z) {
+        return Vec::new();
+    }
+    let sides = [(t.a, t.b, t.c), (t.b, t.c, t.a), (t.c, t.a, t.b)];
+    let Some(&(p, q, r)) = sides
+        .iter()
+        .max_by(|x, y| x.0.distance(x.1).total_cmp(&y.0.distance(y.1)))
+    else {
+        return Vec::new();
+    };
+    let long = p.distance(q);
+    let width = (q - p).cross(r - p).length() / long.max(1e-3);
+    if width >= spacing {
+        return Vec::new();
+    }
+    let n = (long / RAMP_STEP).ceil().max(1.0) as usize;
+    (0..n)
+        .map(|i| {
+            let base = p + (q - p) * ((i as f32 + 0.5) / n as f32);
+            base + (r - base) / 3.0
+        })
+        .collect()
 }
 
 fn chunk_of(gx: i32, gy: i32) -> (i32, i32) {

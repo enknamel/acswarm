@@ -2089,12 +2089,17 @@ mod tests {
     #[test]
     #[ignore = "needs AC_DATA_DIR"]
     fn a_body_inside_a_paper_thin_wall_walks_out_of_it() {
-        // 8A02015E at z -6.0, beside a Facility Hub stair: the middle lies between the two faces
-        // of its side, 0.05 m apart, and each pushed it out through the other.
+        // 8A02015E at z -6.0, either side of a Facility Hub stair: the middle lies between the two
+        // faces of its side, 0.05 m apart, and each pushed it out through the other.
         let o = ac_world::landblock_origin(0x8A02_0000);
-        let at = Vec3::new(26552.4, 342.5, -6.0);
         let dt = 0.05;
-        for k in 0..8 {
+        for (at, k) in [
+            o + Vec3::new(56.40039, -41.5, -6.0),
+            o + Vec3::new(63.61328, -41.519043, -6.0),
+        ]
+        .into_iter()
+        .flat_map(|a| (0..8).map(move |k| (a, k)))
+        {
             let mut c = crate::testkit::standing_in_the_field(20, 0x8A02_015E, at - o);
             c.player.as_mut().unwrap().heading = (k as f32 * 45.0).to_radians();
             let t0 = std::time::Instant::now();
@@ -2107,7 +2112,7 @@ mod tests {
                 c.tick_player(input, dt, now);
             }
             let moved = c.my_position().unwrap().distance(at);
-            assert!(moved > 1.0, "heading {}: moved {moved:.2} m", k * 45);
+            assert!(moved > 1.0, "{at:?} heading {}: moved {moved:.2} m", k * 45);
         }
     }
 

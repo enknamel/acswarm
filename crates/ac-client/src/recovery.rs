@@ -23,7 +23,7 @@
 
 use std::time::{Duration, Instant};
 
-use glam::Vec2;
+use glam::{Vec2, Vec3};
 
 use crate::autoplay::{Doing, Release};
 use crate::Client;
@@ -524,8 +524,8 @@ impl Client {
     }
 
     /// Our own corpse in view, nearest the death spot: its guid and how
-    /// far off it is from where we stand.
-    fn own_corpse(&self, me: Vec2, spot: Option<Vec2>) -> Option<(u32, f32)> {
+    /// far off it is from where we stand, height and all (a floor below is not beside us).
+    fn own_corpse(&self, me: Vec3, spot: Option<Vec2>) -> Option<(u32, f32)> {
         let name = self.world.stats.name.to_lowercase();
         if name.is_empty() {
             return None;
@@ -540,7 +540,7 @@ impl Client {
                 let p = o.world_pos()?;
                 let xy = Vec2::new(p.x, p.y);
                 let from_spot = spot.map_or(0.0, |s| s.distance(xy));
-                Some((from_spot, o.guid, xy.distance(me)))
+                Some((from_spot, o.guid, p.distance(me)))
             })
             .min_by(|a, b| a.0.total_cmp(&b.0))
             .map(|(_, g, d)| (g, d))
@@ -582,7 +582,7 @@ impl Client {
             xy,
             landblock: pl.cell >> 16,
             dungeon_cell: underground.then_some(pl.cell),
-            corpse: self.own_corpse(xy, rec.death_xy),
+            corpse: self.own_corpse(p, rec.death_xy),
             traveling: self.traveling(),
             open: self.world.open_container.as_ref().map(|c| c.0),
             carried,

@@ -774,3 +774,62 @@ fn a_counter_with_no_way_up_to_it_is_given_up() {
         "still walking up to her"
     );
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_counter_on_a_deck_up_a_ramp_is_walked_up_to() {
+    // Oolutanga's Refuge: the Jeweler stands on a deck 11.5 m over the ground, reached by a
+    // ramp 1.4 m wide 90 m off and the decks' bridges. A character under him used him from there.
+    use glam::Vec3;
+    let o = ac_world::landblock_origin(0xF682_0000);
+    let mut c =
+        crate::testkit::standing_in_the_field(37, 0xF682_001A, Vec3::new(81.9, 28.56, 51.93));
+    let jeweler = 0x7F68_2008;
+    crate::testkit::a_counter(
+        &mut c,
+        jeweler,
+        "Jeweler",
+        Vec3::new(81.9037, 28.5586, 63.4465),
+    );
+    c.world
+        .objects
+        .get_mut(&jeweler)
+        .unwrap()
+        .position
+        .as_mut()
+        .unwrap()
+        .cell = 0xF682_001A;
+    let at = o + Vec3::new(81.9037, 28.5586, 63.4465);
+    let t0 = Instant::now();
+    let mut run = crate::autoplay::growth::tests::run_to(at.truncate(), t0);
+    run.vendor = "Jeweler".into();
+    run.walk_limit = std::time::Duration::from_secs(600);
+    c.autoplay.growth.run = Some(run);
+    let cfg = crate::autoplay::growth::Growth::default();
+    let dt = 0.05;
+    for frame in 0..(90.0 / dt) as u32 {
+        let now = t0 + std::time::Duration::from_secs_f32(frame as f32 * dt);
+        if frame % 6 == 0 {
+            c.grow_town_run(now, &cfg);
+        }
+        c.tick_player(crate::player::Input::default(), dt, now);
+        let me = c.my_position().unwrap();
+        if let Some(used) = c.last_used {
+            assert_eq!(used, jeweler);
+            assert!(
+                me.distance(at) <= COUNTER_REACH,
+                "used from {:.1?}, {:.1} m off",
+                me - o,
+                me.distance(at)
+            );
+            return;
+        }
+    }
+    let me = c.my_position().unwrap();
+    panic!(
+        "never got to him: at {:.1?}, {:.1} m off; {}",
+        me - o,
+        me.distance(at),
+        c.autoplay.status
+    );
+}

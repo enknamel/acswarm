@@ -150,7 +150,7 @@ impl Client {
                 .get(&v.vendor)
                 .and_then(|o| o.world_pos()),
         ) {
-            (Some(me), Some(at)) => glam::Vec2::new(at.x - me.x, at.y - me.y).length(),
+            (Some(me), Some(at)) => at.distance(me),
             _ => 0.0,
         };
         Some(Counter {

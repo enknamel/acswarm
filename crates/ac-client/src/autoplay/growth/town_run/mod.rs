@@ -151,13 +151,17 @@ pub(crate) struct Run {
     pub(super) walked_on: Option<Instant>,
     /// How long the walk there may take before it counts as stuck (see `road::walk_limit`).
     pub(super) walk_limit: Duration,
-    /// When the walk up to the counter itself began (see [`WALK_UP_LIMIT`]).
-    pub(super) walking_up: Option<Instant>,
+    /// On the walk up to the counter itself: when the character last got anywhere, and where it
+    /// stood then (see [`WALK_UP_LIMIT`]).
+    pub(super) walking_up: Option<(Instant, glam::Vec3)>,
 }
 
-/// The longest a walk up to a counter already in sight may take: Archmage Asaina al-Arqis in
-/// Zaikhal, 4 m off with no way to her, held a run 480 s (scenario 2026-11-01).
+/// A walk up to a counter that gets nowhere for this long is given up: Archmage Asaina al-Arqis
+/// in Zaikhal, 4 m off with no way to her, held a run 480 s (scenario 2026-11-01). Getting
+/// anywhere, not arriving: the way up to a counter on a deck is 100 m round by its ramp.
 pub(super) const WALK_UP_LIMIT: Duration = Duration::from_secs(20);
+/// Moving this far (metres) on the walk up to a counter is getting somewhere.
+pub(super) const WALK_UP_PROGRESS: f32 = 2.0;
 
 /// What one turn of a run to town came to.
 ///
