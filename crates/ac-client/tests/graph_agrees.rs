@@ -61,7 +61,8 @@ fn walked(assets: &Assets, a: &NavNode, b: &NavNode) -> Vec3 {
             pl.update(assets, &ac_client::player::Input::default(), 1.0 / HZ);
             continue;
         }
-        if left <= BODY_ARRIVE {
+        // There once within reach on its floor; short of a drop's edge, walking on to it.
+        if left <= BODY_ARRIVE && (b.pos.z - pl.world_position().z).abs() <= pl.capsule().step_up {
             break;
         }
         pl.heading = (-d.x).atan2(d.y);
