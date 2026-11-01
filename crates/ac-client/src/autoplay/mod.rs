@@ -196,9 +196,6 @@ pub struct Autoplay {
     pub recovery: crate::recovery::Recovery,
     /// Targets already made vulnerable this fight.
     vulned: Vec<u32>,
-    /// Each attack spell's landed damage before resistance, as (sum, count): what a cast is worth
-    /// when judging a vulnerability (see `Client::hear_spell_landed`).
-    spell_hits: std::collections::HashMap<u32, (f32, u32)>,
     /// Hard targets being softened, and how far along: 0 the
     /// vulnerability still to cast, 1 the imperil.
     softening: Vec<(u32, u8)>,

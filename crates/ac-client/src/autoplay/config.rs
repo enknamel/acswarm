@@ -122,8 +122,8 @@ pub struct Fight {
     /// one whose element it takes most damage from, rending and
     /// criticals counted (see `crate::weapons`).
     pub pick_weapon: bool,
-    /// Before the attack spell has landed once (no damage to judge by), cast a vulnerability on
-    /// anything with at least this much full health; after, when a kill takes over two casts. 0 never does.
+    /// With no damage to judge by (health unknown, a spell with no damage row), cast a vulnerability
+    /// on anything with at least this much full health; else when a kill takes over two casts. 0 never does.
     pub vuln_above_health: u32,
     /// Only attack creatures whose name contains one of these; empty
     /// means anything that can be attacked.

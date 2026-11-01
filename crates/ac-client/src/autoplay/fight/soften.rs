@@ -302,7 +302,7 @@ pub(crate) const VULN_AFTER_CASTS: f32 = 2.0;
 
 /// Whether a vulnerability pays on a target with `health` left that each cast of the attack takes
 /// `per_cast` off: when killing it needs more than [`VULN_AFTER_CASTS`]. With either unknown (no
-/// appraisal, the spell not yet landed), by `least`, the setting's floor on its `full` health.
+/// health known, a spell with no damage row), by `least`, the setting's floor on its `full` health.
 pub(crate) fn is_vuln_worth(
     health: Option<f32>,
     per_cast: Option<f32>,
@@ -315,7 +315,58 @@ pub(crate) fn is_vuln_worth(
     }
 }
 
+/// What one cast takes off a target, crits aside (ACE SpellProjectile.cs:528-557): the mean of a
+/// roll from `min` to `max` (both ends, ThreadSafeRandom.cs:28-31), plus `min` times a thousandth of
+/// each point `skill` stands over the spell's `power`, times the wand's bonus and the target's `takes`.
+pub(crate) fn cast_damage(
+    min: u32,
+    max: u32,
+    skill: u32,
+    power: u32,
+    wand: f32,
+    takes: f32,
+) -> f32 {
+    let bonus = min as f32 * skill.saturating_sub(power) as f32 / 1000.0;
+    ((min + max) as f32 / 2.0 + bonus) * wand * takes
+}
+
 impl Client {
+    /// What a cast of `spell` is expected to take off `creature` (see [`cast_damage`]); `None` for
+    /// a spell with no damage row. The wand's bonus counts only on its own element
+    /// (WorldObject_Weapon.cs:382-400); enchantments on it are left out.
+    pub(crate) fn damage_per_cast(
+        &self,
+        spell: u32,
+        creature: Option<&ac_world::elements::Creature>,
+    ) -> Option<f32> {
+        let (min, max) = ac_world::elements::spell_damage(spell)?;
+        let table = self.assets.spell_table().ok();
+        let power = table
+            .as_ref()
+            .and_then(|t| t.get(spell))
+            .map_or(0, |sp| sp.power);
+        let element = ac_world::elements::spell_element(spell);
+        let wand = self
+            .wielded_caster()
+            .and_then(|g| self.stats_of(g))
+            .filter(|w| element.is_some_and(|e| w.damage_type_bits == e as u32))
+            .map(|w| w.elemental_damage)
+            .filter(|m| *m > 0.0)
+            .unwrap_or(1.0);
+        let takes = match (creature, element) {
+            (Some(c), Some(e)) => c.takes_from(e),
+            _ => 1.0,
+        };
+        Some(cast_damage(
+            min,
+            max,
+            self.casting_skill(spell),
+            power,
+            wand,
+            takes,
+        ))
+    }
+
     /// The health `guid` has left: its full health, appraised or from the creature table, times
     /// the fraction the server last sent (full when none has come). `None` with no full health.
     pub(crate) fn health_now(&self, guid: u32) -> Option<f32> {
