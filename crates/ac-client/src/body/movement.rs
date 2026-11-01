@@ -57,6 +57,14 @@ impl Client {
         .unwrap_or(true)
     }
 
+    /// The height of `cell`'s floor at `at`: a dungeon's levels stack, so a spot on the map alone
+    /// names no floor (a_walk_that_gets_nowhere_is_given_up). `None` when the cell has none there.
+    pub(crate) fn floor_in_cell(&self, at: Vec2, cell: u32) -> Option<f32> {
+        let rooms = self.assets.block_collision(cell & 0xFFFF_0000).ok()?;
+        let floors = rooms.world.floors_at_xy(at.x, at.y);
+        floors.into_iter().find(|f| f.1 == cell).map(|f| f.0)
+    }
+
     /// Let go of the walk (`head_for`) and the journey under way, saying `why`.
     pub(crate) fn drop_walk(&mut self, why: &str) {
         let walking = self.follow.take().is_some();

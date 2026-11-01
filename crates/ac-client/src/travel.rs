@@ -707,6 +707,15 @@ impl Client {
             Step::Portal { name, mouth, .. } => portal_mouth_height(name, *mouth),
             _ => None,
         };
+        // A walk to the journey's end in a dungeon cell is aimed at that cell's floor.
+        let end_cell = Some(self.travel.goal_cell).filter(|c| c & 0xFFFF >= 0x100);
+        if let Some(c) =
+            end_cell.filter(|_| self.travel.goal.is_some_and(|g| g.distance(target) < 1.0))
+        {
+            if let Some(z) = self.floor_in_cell(target, c) {
+                (self.travel.step_cell, self.travel.step_z) = (Some(c), Some(z));
+            }
+        }
         // Underground (a dungeon, the Town Network hub) there is no
         // terrain to route over, and inside a building the landblock's
         // own graph steers to anything in the same block. A building on
@@ -1361,15 +1370,25 @@ impl Client {
                 );
                 // A portal that could not be got near is left out of the
                 // new plan, or the plan would be the same one again.
+                let mut replans = 0;
                 if let Some((name, mouth)) = self.travel_portal() {
                     tracing::warn!(
                         "travel: could not get to the portal {name:?}; going another way"
                     );
                     self.travel.refused.push(mouth);
                     self.cancel_travel_keeping_refusals();
+                } else if self.travel.replans >= REPLANS {
+                    // Nothing to leave out, so each new plan is the same walk again
+                    // (`a_walk_that_gets_nowhere_is_given_up`).
+                    tracing::warn!("travel: step {} gets nowhere; giving up", self.travel.step);
+                    self.end_trip();
+                    return None;
+                } else {
+                    replans = self.travel.replans + 1;
                 }
                 self.travel.step_since = Some(now);
                 self.plan_trip(goal);
+                self.travel.replans = replans;
             }
             // The new plan starts next frame: planning again from inside
             // this call could go round for ever.
@@ -2301,6 +2320,49 @@ mod tests {
             );
             c.end_trip();
         }
+    }
+
+    /// Where Blargerton stood in 0x0286 on Coldeve, and his corpse on the floor below.
+    fn below_in_0286(c: &mut Client) -> (Vec2, u32) {
+        let rooms = c.assets.block_collision(0x0286_0000).unwrap();
+        let origin = ac_world::landblock_origin(0x0286_0000);
+        let start = Vec2::new(419.98, 25_673.98);
+        let corpse = Vec2::new(386.725, 25_627.996);
+        let (z, cell) = rooms
+            .world
+            .floor_at(start.extend(10.0), 10.0, 60.0)
+            .unwrap();
+        let below = rooms.world.floor_at(corpse.extend(z), 0.5, 60.0).unwrap();
+        assert!(below.0 < z - 3.0, "a floor below: {below:?}");
+        crate::testkit::stand(c, cell, (start - origin.truncate()).extend(z - origin.z));
+        c.steering.reset();
+        (corpse, below.1)
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn a_corpse_on_a_floor_below_in_a_dungeon_is_walked_to() {
+        let mut c = Client::offline(crate::testkit::game_data());
+        let (corpse, cell) = below_in_0286(&mut c);
+        assert!(c.plan_trip_in(corpse, cell), "no way to the corpse");
+        walk_the_journey(&mut c, 180.0);
+        let at = c.player.as_ref().unwrap().world_position().truncate();
+        assert!(
+            at.distance(corpse) <= 2.0 * ARRIVE,
+            "{:.1} m short",
+            at.distance(corpse)
+        );
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn a_walk_that_gets_nowhere_is_given_up() {
+        // Bound for no cell, the walk is aimed at the corpse's spot on the character's own floor.
+        let mut c = Client::offline(crate::testkit::game_data());
+        let (corpse, _) = below_in_0286(&mut c);
+        assert!(c.plan_trip_in(corpse, 0), "no way to the corpse");
+        walk_the_journey(&mut c, 600.0);
+        assert!(!c.traveling(), "still walking at it after 10 min");
     }
 
     #[test]
