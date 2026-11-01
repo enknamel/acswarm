@@ -603,6 +603,7 @@ impl Client {
             return false;
         };
         let was = self.autoplay.recovery.phase;
+        let corpse_spot = self.autoplay.recovery.death_xy;
         let action = self.autoplay.recovery.step(&view);
         let phase = self.autoplay.recovery.phase;
         if was == Phase::None && phase == Phase::Dead {
@@ -722,6 +723,11 @@ impl Client {
                 true
             }
             Action::Finish { trip } => {
+                // A walk back to a corpse given up on would hold every other rule up.
+                let to_corpse = self.travel_goal_xy().zip(corpse_spot);
+                if to_corpse.is_some_and(|(g, s)| g.distance(s) <= 1.0) {
+                    self.cancel_travel();
+                }
                 // Not for a follower, whose way is its leader's: a trip handed back outlives a stop.
                 if let Some(goal) = trip.filter(|_| !self.is_led()) {
                     self.autoplay.resume_trip = Some(goal);
