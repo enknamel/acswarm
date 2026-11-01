@@ -72,6 +72,10 @@ priority; a live report starts from the telemetry (`tools/telemetry.py`, `--mark
 
 ## Fixed
 
+- **Healed for 0 forever under vitae** (this merge): with a 40% vitae penalty the client read his
+  health as 116/194 while the server's max was 116, so he cast Heal Self I over and over and
+  restored 0. Vital maximums now count vitae (after multipliers, before additives). Live after a
+  restart: 116/116, rising as the penalty wore off.
 - **Flipped between "closing on" and "getting in sight" of a creature below** (this merge):
   Blargerton on a hill at AD7D0013 at a Drudge Lurker 58 m off and 18 m under him, 1048 times in a
   minute. The spot to shoot from, found for the full reach, was kept after the reach was cut to 29 m
