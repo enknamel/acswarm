@@ -194,6 +194,9 @@ pub struct State {
     pub burst: Option<Burst>,
     /// Where two of our shots burst as they left, and when: not cast from for a minute (`DUD_KEPT`).
     pub dud_spots: Vec<(Vec3, Instant)>,
+    /// The target being waited for out of a doorway, since when, and where (see
+    /// `Client::pull_from_doorway`).
+    pub pulling: Option<(u32, Instant, Option<Vec3>)>,
     /// Each door Setup's box in its own frame (see `Client::doors_near`).
     pub door_boxes: HashMap<u32, Option<(Vec3, Vec3)>>,
     /// The sidestep in hand is a courtesy to a fellow rather than a
@@ -224,9 +227,6 @@ const DUD_CLEAR: f32 = 1.5;
 const DUD_KEPT: Duration = Duration::from_secs(60);
 /// A burst pairs with the one before it only within this.
 const BURST_PAIRED: Duration = Duration::from_secs(15);
-/// Doors further than this (metres) from every point of a flight are not looked at: a point is
-/// within [`aim::PIECE`] of the next and a doorway is some three metres across.
-const DOOR_NEAR: f32 = 4.0;
 
 /// One of our shots that burst as it left: where we stood, and at what, with its health then.
 #[derive(Debug, Clone, Copy)]
@@ -235,15 +235,6 @@ pub struct Burst {
     pub target: Option<u32>,
     pub health: Option<f32>,
     pub when: Instant,
-}
-
-/// A closed door by a flight: where it stands, its turn and scale, and its Setup's box.
-struct DoorBox {
-    at: Vec3,
-    turn: glam::Quat,
-    scale: f32,
-    lo: Vec3,
-    hi: Vec3,
 }
 
 /// One of our own projectiles, from when it left to when it lands.
@@ -435,7 +426,7 @@ impl Client {
         let Some(path) = aim::flight(self.shot_for(how), from, to) else {
             return false;
         };
-        self.shot_flies(&path)
+        self.shot_flies(&path, how)
     }
 
     /// Where our shot test has `spell`, thrown from here at `target`, strike first: metres out
@@ -453,71 +444,15 @@ impl Client {
         self.first_hit(&path).map(|p| p.distance(path[0]))
     }
 
-    /// Whether a flight along `path` is struck by nothing: the landblock, the ground or a closed
-    /// door.
-    fn shot_flies(&mut self, path: &[Vec3]) -> bool {
+    /// Whether the attack `how` flying along `path` is struck by nothing: the landblock, the
+    /// ground, a closed door, or for a spell or an arrow any doorway (see `crate::doorway`).
+    fn shot_flies(&mut self, path: &[Vec3], how: How) -> bool {
         let assets = self.assets.clone();
         let clear = self
             .player
             .as_mut()
             .is_none_or(|pl| pl.flies_clear(&assets, path));
-        clear && self.door_across(path).is_none()
-    }
-
-    /// The closed doors within [`DOOR_NEAR`] of `path`. The server flies a spell into one, though
-    /// it lets a walk through (`ac_nav::obstacles::in_the_way`). A door fills its Setup's box, the
-    /// doorway: its leaf's closed place is an animation frame the default placement lacks.
-    fn doors_near(&mut self, path: &[Vec3]) -> Vec<DoorBox> {
-        use ac_world::{object, object_desc_flags};
-        let near: Vec<(u32, Vec3, glam::Quat, f32)> = self
-            .world
-            .objects
-            .values()
-            .filter(|o| o.object_desc_flags & object_desc_flags::DOOR != 0)
-            .filter(|o| o.physics_state & object::PHYSICS_STATE_ETHEREAL == 0 && o.setup_id != 0)
-            .filter_map(|o| {
-                let p = o.position?;
-                let at = ac_world::landblock_origin(p.cell) + p.local;
-                path.iter().any(|q| q.distance(at) < DOOR_NEAR).then_some((
-                    o.setup_id,
-                    at,
-                    p.rotation,
-                    o.scale.max(1e-3),
-                ))
-            })
-            .collect();
-        let assets = self.assets.clone();
-        near.into_iter()
-            .filter_map(|(setup, at, turn, scale)| {
-                let (lo, hi) = (*self.dodge.door_boxes.entry(setup).or_insert_with(|| {
-                    ac_scene::collision::from_model(&assets, setup, glam::Mat4::IDENTITY)
-                        .ok()?
-                        .bounds()
-                }))?;
-                Some(DoorBox {
-                    at,
-                    turn,
-                    scale,
-                    lo,
-                    hi,
-                })
-            })
-            .collect()
-    }
-
-    /// Where `path` first enters a closed door, if it does.
-    fn door_across(&mut self, path: &[Vec3]) -> Option<Vec3> {
-        let doors = self.doors_near(path);
-        path.windows(2).find_map(|w| {
-            doors
-                .iter()
-                .filter_map(|d| {
-                    let local = |q: Vec3| d.turn.inverse() * (q - d.at) / d.scale;
-                    aim::segment_box(local(w[0]), local(w[1]), d.lo, d.hi)
-                })
-                .min_by(|a, b| a.total_cmp(b))
-                .map(|t| w[0] + (w[1] - w[0]) * t)
-        })
+        clear && self.door_across(path, !matches!(how, How::Melee)).is_none()
     }
 
     /// Whether `at` is a spot two of our shots burst at as they left (see `hear_burst`).
@@ -719,7 +654,7 @@ impl Client {
     /// Where a projectile flying `path` first meets static collision or the ground: the shot test
     /// (`Player::flies_clear`) with the place, for saying what a shot struck.
     fn first_hit(&mut self, path: &[Vec3]) -> Option<Vec3> {
-        let door = self.door_across(path);
+        let door = self.door_across(path, true).map(|(p, _)| p);
         let assets = self.assets.clone();
         let pl = self.player.as_mut()?;
         let worlds = pl.collision_along(&assets, path);
@@ -854,13 +789,20 @@ impl Client {
         spots.retain(|s| {
             s.distance(at) <= reach && duds.iter().all(|d| d.distance(*s) >= DUD_CLEAR)
         });
+        // A shot from here through a doorway is thrown from the target's room instead.
+        if let Some(from_here) = aim::flight(shot, self.body_of(mine, me), to) {
+            let doorway = self.door_across(&from_here, !matches!(how, How::Melee));
+            if let Some((_, door)) = doorway {
+                self.keep_past_doorway(&door, me, &mut spots);
+            }
+        }
         spots.sort_by(|a, b| a.distance(me).total_cmp(&b.distance(me)));
         let mut clear = Vec::new();
         for s in spots.into_iter().take(VANTAGE_LOOKS) {
             let Some(path) = aim::flight(shot, self.body_of(mine, s), to) else {
                 continue;
             };
-            if self.shot_flies(&path) {
+            if self.shot_flies(&path, how) {
                 clear.push(s);
                 if clear.len() == VANTAGE_WALKS {
                     break;
@@ -901,6 +843,10 @@ impl Client {
         // collision lacks (see `hear_burst`).
         let seen =
             self.shot_clears(target, how) && (matches!(how, How::Melee) || !self.is_dud_spot(me));
+        // Standing in a doorway, it is waited for out of it rather than shot through the frame.
+        if !seen && !matches!(how, How::Melee) && self.pull_from_doorway(target, name, at) {
+            return true;
+        }
         let stop = if seen { range * WITHIN } else { NO_SIGHT_STOP };
         if at.distance(me) <= stop && seen {
             self.stop_approaching();
@@ -2209,7 +2155,10 @@ mod tests {
         assert!(!c.shot_clears(rat.guid, how), "not through the shut door");
         c.world.objects.get_mut(&0x701F_6057).unwrap().physics_state |=
             ac_world::object::PHYSICS_STATE_ETHEREAL;
-        assert!(c.shot_clears(rat.guid, how), "through it open");
+        assert!(
+            !c.shot_clears(rat.guid, how),
+            "nor through its doorway open"
+        );
     }
 
     #[test]
