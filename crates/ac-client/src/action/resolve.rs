@@ -61,7 +61,7 @@ pub fn last_corpse(c: &Client) -> Option<u32> {
 
 /// The place `name` means on the map (`ac_world::towns`: case-insensitive,
 /// prefix or substring).
-pub fn place(name: &str) -> Option<&'static ac_world::towns::Place> {
+pub fn place(name: &str) -> Option<&'static ac_world::towns::Town> {
     ac_world::towns::find(name)
 }
 
