@@ -538,3 +538,29 @@ fn a_dungeon_portal_out_of_reach_is_not_walked_at() {
         "still bound for the portal out of reach"
     );
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_better_ground_further_off_is_chosen() {
+    // A level 37 by the Hea dungeon's portal: the Tusker Minions under the Facility Hub pay more,
+    // and a journey of minutes against a stay of hours is not worth less XP an hour.
+    let mut c = crate::testkit::standing_in_the_field(
+        37,
+        0x17B2_0038,
+        glam::Vec3::new(4465.6 - 4416.0, 34254.7 - 34176.0, 0.0),
+    );
+    let cfg = Growth::default();
+    let ranked = ac_world::hunting::ranked_for(37, cfg.level_margin, &[]);
+    let best = c.best_ground(37, cfg.level_margin, &[]).expect("a ground");
+    let reachable_better = ranked
+        .iter()
+        .take_while(|g| g.landblock != best.landblock)
+        .map(|g| format!("{} {:#06x}", g.name, g.landblock))
+        .collect::<Vec<_>>();
+    println!(
+        "chose {} {:#06x}; passed over {reachable_better:?}",
+        best.name, best.landblock
+    );
+    assert_ne!(best.landblock, 0x0286, "the nearer Hea dungeon");
+    assert!(best.worth() >= ranked[1].worth(), "{best:?}");
+}

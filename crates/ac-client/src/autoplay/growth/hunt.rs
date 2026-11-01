@@ -22,8 +22,8 @@ const ROAM: f32 = 70.0;
 
 const ROAMS: u32 = 3;
 
-/// The best-paying grounds a journey is planned to before one is chosen: planning is a search
-/// over every portal, so only the few that could win are asked about.
+/// The best-paying grounds a journey is planned to, best first, before giving up: planning is a
+/// search over every portal.
 const CANDIDATES: usize = 6;
 
 /// The longest a character inside a hunting area stands on a quiet spot
@@ -447,8 +447,8 @@ impl Client {
 }
 
 impl Client {
-    /// Of the grounds that suit `level` and pay best, the one paying most over a stay once the
-    /// journey there is counted (`paid_over_stay`); one no journey reaches is passed over.
+    /// The best-paying ground that suits `level` and that a journey reaches: a journey is short
+    /// and a stay long, so the time there buys nothing (a_better_ground_further_off_is_chosen).
     fn best_ground(
         &mut self,
         level: u32,
@@ -456,23 +456,16 @@ impl Client {
         skip: &[u32],
     ) -> Option<&'static ac_world::hunting::Ground> {
         let ranked = ac_world::hunting::ranked_for(level, margin, skip);
-        let mut best: Option<(&ac_world::hunting::Ground, f32)> = None;
-        for g in ranked.into_iter().take(CANDIDATES) {
-            let Some(secs) = self.journey_seconds(g.at, g.cell()) else {
-                continue;
-            };
-            let paid = ac_world::hunting::paid_over_stay(g.worth(), secs);
+        ranked.into_iter().take(CANDIDATES).find(|g| {
+            let secs = self.journey_seconds(g.at, g.cell());
             tracing::debug!(
-                "ground: {} {:#06x} worth {:.0}, {secs:.0} s away",
+                "ground: {} {:#06x} worth {:.0}, journey {secs:?} s",
                 g.name,
                 g.landblock,
                 g.worth()
             );
-            if best.is_none_or(|(_, b)| paid > b) {
-                best = Some((g, paid));
-            }
-        }
-        best.map(|(g, _)| g)
+            secs.is_some()
+        })
     }
 
     /// How long a journey from here to `goal` (in `goal_cell`, 0 for a place known by position)
