@@ -324,6 +324,7 @@ impl Client {
                         .unwrap_or(0);
                     tracing::info!("weenie error {code:#x}");
                     self.recall_error(code);
+                    self.portal_quest_error(code);
                     // A counter turns a Use away as too busy while a
                     // cast of ours is in the air: ours to wait out,
                     // not the counter refusing (see `growth::on_opening`).

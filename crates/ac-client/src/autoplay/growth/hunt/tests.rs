@@ -392,6 +392,10 @@ fn a_level_35_in_holtburg_sets_off_for_a_dungeon_and_keeps_moving() {
         crate::testkit::standing_in_the_field(35, 0xA9B4_0019, glam::Vec3::new(84.0, 7.1, 94.0));
     let cfg = Growth::default();
     let t0 = Instant::now();
+    // The Facility Hub's portal flags already earned (otherwise the Wardens come first).
+    for u in ac_world::unlocks::earnable(35, &[]) {
+        c.travel.quests_done.push(u.flag.clone());
+    }
     c.autoplay.growth.quiet_since = Some(t0 - Duration::from_secs(1));
     assert!(c.grow_hunt(t0, &cfg), "stood about in town");
     let (lb, _, name) = c.autoplay.growth.bound.clone().expect("bound for a ground");
@@ -536,5 +540,38 @@ fn a_dungeon_portal_out_of_reach_is_not_walked_at() {
     assert!(
         first.is_none_or(|m| m.distance(inner) > 3.0),
         "still bound for the portal out of reach"
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_character_choosing_a_ground_goes_to_the_warden_its_level_earns_first() {
+    let mut c = crate::quest_flags::tests::beside_the_warden(20);
+    let cfg = Growth::default();
+    let now = Instant::now();
+    c.autoplay.growth.quiet_since = Some(now - std::time::Duration::from_secs(1));
+    assert!(c.grow_hunt(now, &cfg));
+    assert!(
+        c.autoplay.status.contains("Warden"),
+        "{}",
+        c.autoplay.status
+    );
+    // Standing beside him, the visit is over in the frame it starts: he was talked to.
+    assert!(
+        c.visiting().is_some() || c.holds_quest_flag("fachubhuntersleapportal_flag"),
+        "neither on the way to the Warden nor flagged"
+    );
+    // Every flag the level earns held: on to a ground.
+    let mut c = crate::quest_flags::tests::beside_the_warden(20);
+    for u in ac_world::unlocks::earnable(20, &[]) {
+        c.travel.quests_done.push(u.flag.clone());
+    }
+    c.autoplay.growth.quiet_since = Some(now - std::time::Duration::from_secs(1));
+    assert!(c.grow_hunt(now, &cfg));
+    assert!(c.visiting().is_none());
+    assert!(
+        c.autoplay.growth.bound_landblock().is_some(),
+        "{}",
+        c.autoplay.status
     );
 }

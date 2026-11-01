@@ -22,6 +22,9 @@ const ROAM: f32 = 70.0;
 
 const ROAMS: u32 = 3;
 
+/// A visit to a portal flag's NPC that did not earn it is not made again for this long.
+const UNLOCK_RETRY: Duration = Duration::from_secs(30 * 60);
+
 /// The best-paying grounds a journey is planned to before one is chosen: planning is a search
 /// over every portal, so only the few that could win are asked about.
 const CANDIDATES: usize = 6;
@@ -403,6 +406,20 @@ impl Client {
         if !goes_looking {
             return false;
         }
+        // A portal flag the level now earns is fetched first: the portals it opens are new ways to
+        // grounds (the Facility Hub Wardens, `ac_world::unlocks`).
+        if self.visiting().is_some() {
+            return true;
+        }
+        self.autoplay.growth.unlock_tried.expire(now, UNLOCK_RETRY);
+        if let Some(u) = self.unlock_to_earn(&self.autoplay.growth.unlock_tried) {
+            self.autoplay.growth.unlock_tried.mark(u.flag.clone(), now);
+            if self.visit_unlock(u) {
+                self.autoplay
+                    .say(Doing::Traveling, format!("to the {} for a portal", u.npc));
+                return true;
+            }
+        }
         let Some(g) = self.best_ground(level as u32, cfg.level_margin, &skip) else {
             self.autoplay.note(
                 format!(
@@ -491,6 +508,7 @@ impl Client {
             Vec::new()
         };
         let far = ac_world::trip::Prefs::far();
+        let quests = self.travel.quests_done.clone();
         let plan = |p| {
             ac_world::trip::plan_with_recalls_and_gems(
                 me.truncate(),
@@ -498,7 +516,7 @@ impl Client {
                 goal,
                 goal_cell,
                 level,
-                &[],
+                &quests,
                 &[],
                 &recalls,
                 &gems,

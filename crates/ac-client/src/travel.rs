@@ -172,6 +172,8 @@ pub struct Travel {
     /// Gems that did not take us anywhere *on this journey*: left out of
     /// the next plan, like `refused_recalls`.
     refused_gems: Vec<u32>,
+    /// The quest flags the character holds that a portal asks for (`crate::quest_flags`).
+    pub(crate) quests_done: Vec<String>,
     /// The last tie spell cast (Lifestone Tie, a Portal Tie), so the
     /// "successfully linked" that follows is filed under its position.
     pub(crate) last_tie: Option<u32>,
@@ -454,6 +456,7 @@ impl Client {
         // setting off and, when a portal cannot be reached from where
         // the step before it leaves the character, plan again without
         // that one. This holds for the journey being planned only.
+        let quests = self.travel.quests_done.clone();
         let mut planned = None;
         for _ in 0..3 {
             let Some(t) = trip::plan_with_recalls_and_gems(
@@ -462,7 +465,7 @@ impl Client {
                 goal,
                 goal_cell,
                 level,
-                &[],
+                &quests,
                 &refused,
                 &recalls,
                 &gems,
@@ -516,7 +519,7 @@ impl Client {
                 goal,
                 goal_cell,
                 level,
-                &[],
+                &quests,
                 &refused,
                 &recalls,
                 &gems,
@@ -978,7 +981,7 @@ impl Client {
     }
 
     /// The portal the current step is aimed at: its name and its mouth.
-    fn travel_portal(&self) -> Option<(String, Vec2)> {
+    pub(crate) fn travel_portal(&self) -> Option<(String, Vec2)> {
         match self.travel.trip.as_ref()?.steps.get(self.travel.step)? {
             Step::Portal { name, mouth, .. } => Some((name.clone(), *mouth)),
             Step::Walk(_) | Step::Recall { .. } | Step::Gem { .. } => None,
