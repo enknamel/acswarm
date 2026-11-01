@@ -20,6 +20,18 @@ priority; a live report starts from the telemetry (`tools/telemetry.py`, `--mark
 - **No walk out of the ACB5 mine to the open ground.** Scn Blade in 0xACB501C6 stood 77 s on a
   journey step "walk inside" to a point 63 m off outdoors, no route in the block and the steering
   straight at the mine's wall; replanning gave the same step (scn-duds, 18:35:14).
+- **Wedged in the Facility Hub floor.** Scn Taper on a town run stood 75 s at 8A02015E (26552.4
+  342.5 -6.0): placed at exactly -6.0 the body moves in no heading, from -5.5 it settles and walks
+  (offline repro in the scenario 2026-11-01; same class as B2A10022 above).
+- **No aim at a block edge on the coast.** Scn Bow on its way to a Black Rat ground stood 88 s at
+  2CB50003 (8448.6 34823.9 0.0), on the 2B/2C block line, the steering answering no way to a goal
+  24 m east; the body walks by hand. Travel's no-progress check takes about 40 s (10 s plus three
+  replans) before it gives up a step the steering has no way along.
+- **A creature on the floor above, in a dungeon.** Scn Bow in a Tusker dungeon (5C49013A) stood
+  91 s "getting Female Tusker in sight", the Tusker 6 m up; dungeons' floors meet this more often
+  than the open ground did (the "same unreachable creature" above).
+- **Stepping out of a counter's building at Nanto.** Scn Mage, after Archmage Yuzai Zhen
+  (E6320103), stood 124 s aimed straight at a point 120 m outdoors with no route out of the room.
 - **Held 0.42 m from a corner waypoint.** A new character on a platform in 0xA9B2 (78.2 85.9 97.5)
   stood 124 s "getting Black Rabbit in sight", 0.42 m from its route's first waypoint: a corner is
   held until the body stands on it (`Route::target`, ON_THE_SPOT) and it could not. Offline over the
@@ -72,6 +84,16 @@ priority; a live report starts from the telemetry (`tools/telemetry.py`, `--mark
 
 ## Fixed
 
+- **The nearest ground, however little it paid** (this merge): a level 35 went to five
+  Armoredillos 2 km out. Grounds, dungeons among them, are ranked by XP per health point and how
+  busy they are, and the best of six over a 20-minute stay, journey counted, is gone to.
+- **Explored Mountain Keep on the way through it** (this merge): Blargerton, bound for the Tumerok
+  Cave, was drawn into a fight in Mountain Keep; the explorer took the dungeon for the ground and
+  went round three rooms out of reach every 7 s. A dungeon crossed on the way is not explored, the
+  explorer starts over at most once a minute, and a portal inside a dungeon its graph has no way
+  to is dropped from the journey.
+- **480 s at a counter with no way up to it** (this merge): Scn Mage, 4 m from Archmage Asaina
+  al-Arqis in Zaikhal (on main as well). A walk up past 20 s gives the counter up.
 - **Healed for 0 forever under vitae** (this merge): with a 40% vitae penalty the client read his
   health as 116/194 while the server's max was 116, so he cast Heal Self I over and over and
   restored 0. Vital maximums now count vitae (after multipliers, before additives). Live after a
