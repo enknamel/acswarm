@@ -10,6 +10,22 @@ use glam::Vec3;
 
 pub use ac_scene::wayfind::NoWay;
 
+/// How close a walk may come to a portal it is not going to.
+pub const PORTAL_BERTH: f32 = 3.0;
+
+/// The mouths of the portals within reach of a walk from `from` to
+/// `to`, except any the walk is going to (within a stride of `to`).
+pub fn portal_mouths_to_avoid(from: Vec3, to: Vec3) -> Vec<Vec3> {
+    let (f, t) = (glam::Vec2::new(from.x, from.y), glam::Vec2::new(to.x, to.y));
+    let mid = (f + t) * 0.5;
+    let reach = f.distance(t) * 0.5 + 200.0;
+    ac_world::portals::near(mid, reach)
+        .into_iter()
+        .filter(|p| p.from_xy().distance(t) > PORTAL_BERTH + 1.5)
+        .map(|p| p.from)
+        .collect()
+}
+
 /// One point of a route: where it is, and the kind of edge that leads there.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Waypoint {

@@ -318,8 +318,8 @@ fn plan(assets: &Assets, areas: &mut Vec<Area>, ask: &Ask) -> Answer {
     let waypoints = area.and_then(|a| {
         // Keep a berth from every portal mouth about, save the one the walk is going to: a
         // portal takes whoever touches it.
-        a.avoid = portal_mouths_to_avoid(from, to);
-        a.berth = PORTAL_BERTH;
+        a.avoid = ac_nav::routing::portal_mouths_to_avoid(from, to);
+        a.berth = ac_nav::routing::PORTAL_BERTH;
         match ac_nav::routing::plan(a, ask.from, ask.to, ask.within) {
             Ok(route) => Some(route.points()),
             Err(why) => {
@@ -334,20 +334,4 @@ fn plan(assets: &Assets, areas: &mut Vec<Area>, ask: &Ask) -> Answer {
         waypoints,
         took: started.elapsed(),
     }
-}
-
-/// How close a walk may come to a portal it is not going to.
-pub const PORTAL_BERTH: f32 = 3.0;
-
-/// The mouths of the portals within reach of a walk from `from` to
-/// `to`, except any the walk is going to (within a stride of `to`).
-pub fn portal_mouths_to_avoid(from: Vec3, to: Vec3) -> Vec<Vec3> {
-    let (f, t) = (glam::Vec2::new(from.x, from.y), glam::Vec2::new(to.x, to.y));
-    let mid = (f + t) * 0.5;
-    let reach = f.distance(t) * 0.5 + 200.0;
-    ac_world::portals::near(mid, reach)
-        .into_iter()
-        .filter(|p| p.from_xy().distance(t) > PORTAL_BERTH + 1.5)
-        .map(|p| p.from)
-        .collect()
 }

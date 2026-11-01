@@ -1213,7 +1213,7 @@ impl Player {
             |x: f32, y: f32| sampler.height_in_square(Vec3::new(x - origin.x, y - origin.y, 0.0));
         let sea = |x: f32, y: f32| sea_at(&b.lb, &sea_types, x - origin.x, y - origin.y);
         // A berth from the portals we are not walking to.
-        let avoid = crate::pathfinder::portal_mouths_to_avoid(from, to);
+        let avoid = ac_nav::routing::portal_mouths_to_avoid(from, to);
         // The block's doorways, so the graph stands a node in each
         // rather than leaving every building sealed.
         let doorways = b
@@ -1224,7 +1224,7 @@ impl Player {
         let no_go = |p: Vec3| {
             avoid
                 .iter()
-                .any(|a| ac_scene::nav::in_berth(*a, p, crate::pathfinder::PORTAL_BERTH))
+                .any(|a| ac_scene::nav::in_berth(*a, p, ac_nav::routing::PORTAL_BERTH))
         };
         let ground = Ground {
             collision,
@@ -1269,7 +1269,7 @@ impl Player {
         let block = block & 0xFFFF_0000;
         let mine = from.distance(self.world_position()) < 1e-3;
         let from_cell = if mine { self.cell } else { block };
-        let avoid = crate::pathfinder::portal_mouths_to_avoid(from, to);
+        let avoid = ac_nav::routing::portal_mouths_to_avoid(from, to);
         self.on_nav(assets, block, from, to, |nav, ground| {
             let (nodes, chunks) = (nav.len(), nav.chunk_count());
             let started = Instant::now();
@@ -1279,7 +1279,7 @@ impl Player {
                 goal: ac_nav::routing::graph_end(ground, place(to, to_cell)),
                 within,
                 avoid: &avoid,
-                berth: crate::pathfinder::PORTAL_BERTH,
+                berth: ac_nav::routing::PORTAL_BERTH,
                 indoors_too: true,
                 drops: false,
             };

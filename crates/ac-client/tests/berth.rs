@@ -1,7 +1,7 @@
 //! Walking to one portal in the Town Network hub must not brush another:
 //! a portal takes whoever touches it. Needs AC_DATA_DIR.
 
-use ac_client::pathfinder::{portal_mouths_to_avoid, PORTAL_BERTH};
+use ac_nav::routing::{portal_mouths_to_avoid, PORTAL_BERTH};
 use ac_scene::collision::Capsule;
 use ac_scene::navarea::Area;
 use ac_scene::Assets;

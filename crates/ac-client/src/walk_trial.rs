@@ -93,8 +93,8 @@ pub fn plan_first(c: &mut Client, t: &Trial) -> (Result<usize, NoWay>, Duration)
     let blocks = navarea::blocks_for(from.at, goal.at);
     let planned = match Area::build(&c.assets, &blocks, &cap, from.cell) {
         Ok(mut area) => {
-            area.avoid = crate::pathfinder::portal_mouths_to_avoid(from.at, goal.at);
-            area.berth = crate::pathfinder::PORTAL_BERTH;
+            area.avoid = routing::portal_mouths_to_avoid(from.at, goal.at);
+            area.berth = routing::PORTAL_BERTH;
             routing::plan(&mut area, from, goal, t.stop).map(|r| r.waypoints.len())
         }
         Err(_) => Err(NoWay::OutOfRegion),
