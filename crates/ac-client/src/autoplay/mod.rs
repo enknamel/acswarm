@@ -284,7 +284,7 @@ pub struct Autoplay {
     /// A target not being hurt from where the character stands, and how
     /// near to fight it from now: a spell or an arrow the sight check
     /// lets through and something on the way stops.
-    closing: Option<(u32, f32)>,
+    pub(crate) closing: Option<(u32, f32)>,
     /// Targets let go, and when, so they are left alone for a while.
     given_up: Recent<u32>,
     /// When ammunition was last made.
