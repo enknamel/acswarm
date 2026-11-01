@@ -175,6 +175,9 @@ pub struct Travel {
     /// The last tie spell cast (Lifestone Tie, a Portal Tie), so the
     /// "successfully linked" that follows is filed under its position.
     pub(crate) last_tie: Option<u32>,
+    /// A recall asked for that goes to a saved position: that position's kind, where we stood and
+    /// when. Where it lands is learnt as the position (see `Client::recall_landed`).
+    pub(crate) recall_sent: Option<(u32, Vec3, Instant)>,
     /// Where the journey is bound, to replan around a refusal.
     goal: Option<Vec2>,
     /// The cell it is bound for, when known (see `plan_trip_in`).
@@ -1919,6 +1922,32 @@ mod tests {
             }
             pl.update(&c.assets, &input, dt);
         }
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn a_lifestone_known_is_the_way_to_a_far_counter() {
+        // Rawrtherton, south of Holtburg at 0xA87C0006 with an Arcanum Broker to sell to, walked
+        // 8.5 km for 33 minutes: he had logged in, and the client had not kept where his
+        // lifestone was. With it known, /lifestone and the Town Network make it a short trip.
+        let mut c =
+            crate::testkit::standing_in_the_field(31, 0xA87C_0006, Vec3::new(23.8, 140.4, 26.3));
+        c.world.player_guid = Some(crate::testkit::ME);
+        let holtburg = ac_world::landmarks::nearest_lifestone(Vec2::new(32532.0, 34567.0))
+            .expect("Holtburg's lifestone");
+        let at = holtburg.at;
+        c.world.stats.set_recall_position(
+            ac_world::recalls::position_type::SANCTUARY,
+            ac_world::object::Position::new_flat(
+                holtburg.cell,
+                at - ac_world::landblock_origin(holtburg.cell),
+            ),
+        );
+        assert!(c.travel_to(Vec2::new(36064.7, 30639.0)));
+        let trip = c.travel.trip.as_ref().expect("a trip");
+        let first = format!("{:?}", trip.steps.first());
+        assert!(first.contains("/lifestone"), "first step {first}");
+        assert!(trip.seconds < 600.0, "{:.0} s", trip.seconds);
     }
 
     #[test]
