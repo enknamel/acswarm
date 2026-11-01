@@ -69,7 +69,8 @@ fn a_target_two_casts_kill_is_not_worth_one() {
 }
 
 #[test]
-fn before_a_spell_has_landed_the_health_floor_decides() {
+fn with_no_damage_to_judge_by_the_health_floor_decides() {
+    // A spell with no damage row, or a target whose health is not known.
     assert!(is_vuln_worth(Some(500.0), None, 2500, 2000));
     assert!(!is_vuln_worth(Some(500.0), None, 1500, 2000));
     assert!(
@@ -82,6 +83,41 @@ fn before_a_spell_has_landed_the_health_floor_decides() {
     );
     assert!(
         is_vuln_worth(Some(90.0), Some(0.0), 2500, 2000),
-        "no damage measured on it"
+        "a spell it takes nothing from"
     );
+}
+
+#[test]
+fn force_arc_iii_needs_four_casts_on_two_hundred_health_and_two_on_a_hundred() {
+    // Force Arc III rolls 42 to 84 (data/spell_damage.csv): 63 a cast with no skill over its power.
+    let per_cast = cast_damage(42, 84, 0, 200, 1.0, 1.0);
+    assert_eq!(per_cast, 63.0);
+    assert!(
+        is_vuln_worth(Some(200.0), Some(per_cast), 0, 2000),
+        "four casts"
+    );
+    assert!(
+        !is_vuln_worth(Some(100.0), Some(per_cast), 0, 2000),
+        "two casts"
+    );
+}
+
+#[test]
+fn skill_over_the_spell_power_the_wand_and_the_target_all_count() {
+    // 150 points of War Magic over the spell's power add 15% of the roll's minimum.
+    assert!((cast_damage(42, 84, 350, 200, 1.0, 1.0) - 69.3).abs() < 1e-4);
+    // Skill under the power adds nothing; a 10% wand and a target taking half scale the rest.
+    assert!((cast_damage(42, 84, 100, 200, 1.1, 0.5) - 34.65).abs() < 1e-4);
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_cast_is_worth_what_the_spell_table_says_it_rolls() {
+    let c = crate::testkit::character_of_level(game_data(), 30);
+    // No War Magic and no wand: the mean of Force Arc III's roll, and nothing for an unknown spell.
+    assert_eq!(c.damage_per_cast(2720, None), Some(63.0));
+    assert_eq!(c.damage_per_cast(24, None), None, "Armor Self I deals none");
+    // An Ice Golem takes nothing from cold (data/creatures.csv, weenie 196).
+    let golem = ac_world::elements::creature_by_id(196);
+    assert_eq!(c.damage_per_cast(2727, golem), Some(0.0), "Frost Arc III");
 }

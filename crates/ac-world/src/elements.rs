@@ -213,6 +213,7 @@ impl Creature {
 
 const CREATURES: &str = include_str!("../data/creatures.csv");
 const SPELLS: &str = include_str!("../data/spell_elements.csv");
+const DAMAGE: &str = include_str!("../data/spell_damage.csv");
 
 fn parse_creatures(text: &str) -> Vec<Creature> {
     let mut out = Vec::with_capacity(6500);
@@ -288,6 +289,21 @@ fn parse_spells(text: &str) -> Vec<(u32, Role, Element)> {
     out
 }
 
+fn parse_damage(text: &str) -> Vec<(u32, u32, u32)> {
+    let mut out = Vec::with_capacity(800);
+    for line in text.lines() {
+        if line.starts_with('#') || line.is_empty() {
+            continue;
+        }
+        let mut f = line.split(',').map(|v| v.trim().parse::<u32>());
+        if let (Some(Ok(id)), Some(Ok(min)), Some(Ok(max))) = (f.next(), f.next(), f.next()) {
+            out.push((id, min, max));
+        }
+    }
+    out.sort_by_key(|(id, _, _)| *id);
+    out
+}
+
 pub fn creatures() -> &'static [Creature] {
     static ALL_CREATURES: OnceLock<Vec<Creature>> = OnceLock::new();
     ALL_CREATURES.get_or_init(|| parse_creatures(CREATURES))
@@ -343,6 +359,16 @@ pub fn spell_element(spell_id: u32) -> Option<Element> {
         Some((Role::Attack, e)) => Some(e),
         _ => None,
     }
+}
+
+/// What a cast of `spell_id` rolls before anything multiplies it, `(min, max)` (ACE MinDamage and
+/// MaxDamage, SpellProperties.cs:262-271); `None` for a spell that deals none.
+pub fn spell_damage(spell_id: u32) -> Option<(u32, u32)> {
+    static ALL_DAMAGE: OnceLock<Vec<(u32, u32, u32)>> = OnceLock::new();
+    let all = ALL_DAMAGE.get_or_init(|| parse_damage(DAMAGE));
+    all.binary_search_by_key(&spell_id, |(id, _, _)| *id)
+        .ok()
+        .map(|i| (all[i].1, all[i].2))
 }
 
 /// What a spell does about an element, and which.
@@ -410,6 +436,13 @@ mod tests {
         );
         // Nothing at all is not an error.
         assert!(creature("Nothing In Particular").is_none());
+    }
+
+    #[test]
+    fn spells_know_what_they_do_before_anything_multiplies_it() {
+        assert_eq!(spell_damage(2720), Some((42, 84)), "Force Arc III");
+        assert_eq!(spell_damage(64), Some((16, 31)), "Shock Wave I");
+        assert_eq!(spell_damage(24), None, "Armor Self I deals none");
     }
 
     #[test]

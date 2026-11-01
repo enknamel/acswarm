@@ -417,14 +417,14 @@ pub(crate) fn draw(
                             .speed(10.0)
                             .range(0..=20000),
                     );
-                    ui.label("health for a vulnerability, until spells have landed");
+                    ui.label("health for a vulnerability, when the casts cannot be counted");
                 })
                 .response
                 .on_hover_text(
                     "A vulnerability for the element a target is weakest to is cast when killing \
-                     it would take more than two attack spells, judged by the damage they have \
-                     done. Until one has landed, anything with at least this much health is \
-                     softened. 0 never casts one.",
+                     it would take more than two attack spells, judged by the spell's own damage, \
+                     the caster's skill and wand, and what the target resists. When its health is \
+                     not known, anything with at least this much is softened. 0 never casts one.",
                 );
                 if matches!(cfg.fight.style, Style::Auto | Style::Magic) {
                     caption(ui, "attack spells, best first");
