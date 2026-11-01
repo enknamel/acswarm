@@ -719,7 +719,7 @@ impl CollisionWorld {
             let probe = Vec3::new(pos.x, pos.y, from.z);
             let floor = self.footing(probe, cap.radius, cap.step_up, cap.step_down);
             let feet = Vec3::new(pos.x, pos.y, floor.map(|(z, _)| z).unwrap_or(from.z));
-            match self.overhang_escape(feet, cap.radius, cap.height) {
+            match self.overhang_escape(feet, cap.radius, cap.height, cap.step_up) {
                 None => {
                     overhead = true;
                     break;
@@ -751,7 +751,10 @@ impl CollisionWorld {
             let probe = Vec3::new(pos.x, pos.y, from.z);
             let floor = self.footing(probe, cap.radius, cap.step_up, cap.step_down);
             let feet = Vec3::new(pos.x, pos.y, floor.map(|(z, _)| z).unwrap_or(from.z));
-            if self.overhang_escape(feet, cap.radius, cap.height).is_some() {
+            if self
+                .overhang_escape(feet, cap.radius, cap.height, cap.step_up)
+                .is_some()
+            {
                 return Walk {
                     pos: feet,
                     floor,
@@ -766,11 +769,9 @@ impl CollisionWorld {
         }
     }
 
-    /// How a capsule (feet at `p`, radius `r`, height `h`) gets out from
-    /// under a ceiling lower than its height: the horizontal push that
-    /// clears every offending triangle (zero when none is too low), or
-    /// `None` when one is directly overhead.
-    pub fn overhang_escape(&self, p: Vec3, r: f32, h: f32) -> Option<glam::Vec2> {
+    /// The push out from under what hangs below a capsule's head at `p` (zero: none; `None`: overhead).
+    /// An edge within `step` of the feet is climbed (a_landing_a_step_up_is_climbed_not_ducked).
+    pub fn overhang_escape(&self, p: Vec3, r: f32, h: f32, step: f32) -> Option<glam::Vec2> {
         let min_z = p.z + 0.2;
         let mut push = glam::Vec2::ZERO;
         // Standing inside a building, the ground outside is not a
@@ -806,7 +807,7 @@ impl CollisionWorld {
             let q = closest_point_on_tri(Vec3::new(p.x, p.y, top), t);
             let away = glam::Vec2::new(p.x - q.x, p.y - q.y);
             let d = away.length();
-            if d >= r || q.z < min_z || q.z - p.z >= h {
+            if d >= r || q.z <= p.z + step.max(0.2) || q.z - p.z >= h {
                 continue;
             }
             let dir = if d > 1e-4 {
@@ -965,7 +966,8 @@ mod tests {
         // so it genuinely is within head height -- which is why the
         // naive reading refuses.
         assert!(
-            w.overhang_escape(inside, cap.radius, cap.height).is_some(),
+            w.overhang_escape(inside, cap.radius, cap.height, cap.step_up)
+                .is_some(),
             "the street was taken for a ceiling"
         );
     }
@@ -979,7 +981,8 @@ mod tests {
         let cap = Capsule::default();
         let inside = Vec3::new(5.0, 5.0, 0.0);
         assert!(
-            w.overhang_escape(inside, cap.radius, cap.height).is_none(),
+            w.overhang_escape(inside, cap.radius, cap.height, cap.step_up)
+                .is_none(),
             "walked through a ceiling a metre over its head"
         );
     }
@@ -995,5 +998,26 @@ mod tests {
         let walk = w.walk(from, to, &cap);
         assert!(!walk.blocked, "a step across the room was refused");
         assert!(walk.pos.distance(from) > 1.0, "it did not move");
+    }
+
+    #[test]
+    fn a_landing_a_step_up_is_climbed_not_ducked() {
+        // A stair's top tread, and a two-sided landing slab 0.45 m over it, as at the Facility
+        // Hub's stairs: the slab's edge is no ceiling to duck out from under, it is the next step.
+        let mut w = CollisionWorld::default();
+        slab(&mut w, 0.0, 4.0, 0.0, 5.0, 0.0, 0x0111);
+        slab(&mut w, 0.0, 4.0, 5.0, 10.0, 0.45, 0x0112);
+        // Its underside, the ceiling of the room below.
+        let p = |x: f32, y: f32| Vec3::new(x, y, 0.45);
+        w.add_tri(p(0.0, 5.0), p(4.0, 10.0), p(4.0, 5.0), 0x0113, true);
+        let cap = Capsule::default();
+        let mut at = Vec3::new(2.0, 4.0, 0.0);
+        for _ in 0..15 {
+            let w = w.walk(at, at + Vec3::new(0.0, 0.2, 0.0), &cap);
+            assert!(!w.blocked, "blocked at {at}");
+            at = w.pos;
+        }
+        assert!(at.y > 6.0, "held at the landing's edge, at {at}");
+        assert!((at.z - 0.45).abs() < 1e-3, "not up on the landing: {at}");
     }
 }
