@@ -194,7 +194,7 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 | `buffs.rs` | which buffs a character should wear, from its skills and spells |
 | `hunt.rs` | hunting areas drawn on the map |
 | `position.rs` | `my_position()`: the character's world position |
-| `testkit.rs` | test-only: `Client::offline` sessions over `no_data()` or `game_data()`, `standing_at()`, `creature()`, `corpse()`, `mate()` builders |
+| `testkit.rs`, `walk_trial.rs` | test-only: `Client::offline` sessions over `no_data()` or `game_data()`, `standing_at()`, `creature()`, `corpse()`, `mate()` builders; the route harness (`walk_trial::run`, `tests/route_harness.rs`) |
 
 Unit tests sit in each file's `mod tests`; tests that read the archives are
 `#[ignore = "needs AC_DATA_DIR"]` and run with `cargo test-data`.

@@ -1024,7 +1024,11 @@ impl Player {
         self.capsule
     }
 
-    fn collision(&mut self, assets: &Assets, block_id: u32) -> Option<Rc<BlockCollision>> {
+    pub(crate) fn collision(
+        &mut self,
+        assets: &Assets,
+        block_id: u32,
+    ) -> Option<Rc<BlockCollision>> {
         let block_id = block_id & 0xFFFF_0000;
         self.block(assets, block_id)?;
         let b = self.blocks.get_mut(&block_id)?;

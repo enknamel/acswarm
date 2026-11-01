@@ -75,6 +75,8 @@ pub mod tally;
 pub mod testkit;
 pub mod travel;
 pub mod visit;
+#[cfg(any(test, feature = "testkit"))]
+pub mod walk_trial;
 pub mod weapons;
 
 use std::time::{Duration, Instant};

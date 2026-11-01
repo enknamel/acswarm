@@ -206,6 +206,24 @@ The general case is tested, not spots.
 
 The harness runs on main first, so every phase has a baseline to beat.
 
+## Baseline (phase 0, 2026-11-01, main's movement code)
+
+`AC_DATA_DIR=... cargo test --release -p ac-client --test route_harness -- --ignored --nocapture
+--test-threads 1` (`ROUTE_TRIALS=name` for some). Each phase is measured against the last.
+
+| trials | arrived | refused | gave up | still pushing |
+|---|---|---|---|---|
+| the stalls seen live (9) | 7 | 1 (2CB5 coast edge) | 0 | 1 (9722 Jeweler from inside) |
+| random walks, 8 areas x 15 (120) | 108 | 5 | 0 | 7 |
+
+- **Facility Hub (8A02):** 1 refused, 4 still pushing.
+- **0286:** 3 refused, 2 still pushing.
+- **Holtburg Dungeon (01F6):** 1 refused, 1 still pushing.
+- **Every outdoor area:** all arrived (Holtburg, Oolutanga's Refuge, Qalaba'r, B2A1, A9B2).
+
+"Refused" is not yet known to be wrong: the points are drawn from collision floors, some of them
+sealed off. "Still pushing" is always wrong.
+
 ## Phases (each merged alone, each measured against the last)
 
 0. **Baseline.** The harness, random pairs, the known spots, and the numbers on current main.

@@ -141,6 +141,8 @@ pub struct Pathfinder {
     waiting: bool,
     /// The planner could not be started.
     dead: bool,
+    /// An answer already taken off the line by [`Pathfinder::settle`], for the next `take`.
+    held: Option<Answer>,
 }
 
 impl Pathfinder {
@@ -155,6 +157,7 @@ impl Pathfinder {
             asked: None,
             waiting: false,
             dead: false,
+            held: None,
         }
     }
 
@@ -218,7 +221,7 @@ impl Pathfinder {
     /// far away, or for a goal that has moved on, are dropped here.
     pub fn take(&mut self, me: Vec3, goal: Vec3) -> Option<Vec<Vec3>> {
         let (_, _, answers) = self.line.as_ref()?;
-        let mut newest: Option<Answer> = None;
+        let mut newest: Option<Answer> = self.held.take();
         // We hold a sender ourselves, so the channel never closes; a
         // planner that stopped shows up on the next ask.
         while let Ok(a) = answers.try_recv() {
@@ -256,6 +259,21 @@ impl Pathfinder {
     /// An ask is outstanding.
     pub fn busy(&self) -> bool {
         self.waiting
+    }
+
+    /// Wait up to `within` for the outstanding ask's answer, so an offline run sees it as soon as
+    /// a live frame would rather than many simulated seconds later (`crate::walk_trial`).
+    #[cfg(any(test, feature = "testkit"))]
+    pub fn settle(&mut self, within: Duration) {
+        if !self.waiting {
+            return;
+        }
+        let Some((_, _, answers)) = self.line.as_ref() else {
+            return;
+        };
+        if let Ok(a) = answers.recv_timeout(within) {
+            self.held = Some(a);
+        }
     }
 
     /// Forget any outstanding ask (the goal went away).
