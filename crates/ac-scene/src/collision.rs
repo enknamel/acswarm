@@ -29,6 +29,8 @@ pub const GRAVITY: f32 = 9.8;
 /// A body whose middle is this close to a wall's face (metres) is in it, not in front of it:
 /// walking keeps the middle a radius off every wall.
 const EMBEDDED: f32 = 0.1;
+/// A body is held up by floor this far out from its middle, as a share of its radius.
+const FOOTING: f32 = 0.6;
 
 /// The vertical capsule that stands in for a character, feet at its
 /// position. `step_up`/`step_down` mirror a setup's `step_up_height` and
@@ -456,6 +458,22 @@ impl CollisionWorld {
         out
     }
 
+    /// The floor a body of radius `r` stands on at `p`: the one under its middle, else the highest
+    /// under the rest of its feet. The body's step and the graph both stand on it, so a crack
+    /// narrower than the body is crossed and an edge stood at by both (a_counter_on_a_deck_up_a_ramp_is_walked_up_to).
+    pub fn footing(&self, p: Vec3, r: f32, max_rise: f32, max_drop: f32) -> Option<(f32, u32)> {
+        self.floor_at(p, max_rise, max_drop).or_else(|| {
+            let reach = r * FOOTING;
+            (0..8)
+                .filter_map(|k| {
+                    let a = k as f32 * std::f32::consts::FRAC_PI_4;
+                    let q = p + Vec3::new(a.cos() * reach, a.sin() * reach, 0.0);
+                    self.floor_at(q, max_rise, max_drop)
+                })
+                .max_by(|a, b| a.0.total_cmp(&b.0))
+        })
+    }
+
     /// Height of the highest floor triangle directly under `p` within
     /// `max_drop` below and `max_rise` above, with its cell id.
     pub fn floor_at(&self, p: Vec3, max_rise: f32, max_drop: f32) -> Option<(f32, u32)> {
@@ -693,7 +711,7 @@ impl CollisionWorld {
         for _ in 0..3 {
             let pos = self.resolve_from(Some(from), target, cap.radius, cap.height, cap.step_up);
             let probe = Vec3::new(pos.x, pos.y, from.z);
-            let floor = self.floor_at(probe, cap.step_up, cap.step_down);
+            let floor = self.footing(probe, cap.radius, cap.step_up, cap.step_down);
             let feet = Vec3::new(pos.x, pos.y, floor.map(|(z, _)| z).unwrap_or(from.z));
             match self.overhang_escape(feet, cap.radius, cap.height) {
                 None => {
@@ -725,7 +743,7 @@ impl CollisionWorld {
             // every other step.
             let pos = self.resolve_from(Some(from), to, cap.radius, cap.height, cap.step_up);
             let probe = Vec3::new(pos.x, pos.y, from.z);
-            let floor = self.floor_at(probe, cap.step_up, cap.step_down);
+            let floor = self.footing(probe, cap.radius, cap.step_up, cap.step_down);
             let feet = Vec3::new(pos.x, pos.y, floor.map(|(z, _)| z).unwrap_or(from.z));
             if self.overhang_escape(feet, cap.radius, cap.height).is_some() {
                 return Walk {
@@ -737,7 +755,7 @@ impl CollisionWorld {
         }
         Walk {
             pos: from,
-            floor: self.floor_at(from, cap.step_up, cap.step_down),
+            floor: self.footing(from, cap.radius, cap.step_up, cap.step_down),
             blocked: true,
         }
     }
