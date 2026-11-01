@@ -619,6 +619,7 @@ impl Client {
             // (`FailCast(false)`, Player_Death.cs:173).
             self.let_go(Release::Fight);
             self.autoplay.resume_trip = None;
+            self.autoplay.growth.leave_deadly_ground(now);
             // And so is a visit to a counter: the run past its walk is
             // stopped and the window closed, or the buffs that go back
             // up below would wait for a counter across the town (see

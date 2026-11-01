@@ -714,7 +714,7 @@ impl Client {
         if let Some(lb) = self.autoplay.growth.hunting_at {
             if let Some(g) = ac_world::hunting::at(lb) {
                 let (at, name) = (g.at, g.name.clone());
-                if self.grow_travel(at, now) {
+                if self.grow_travel_in(at, g.cell(), now) {
                     self.autoplay.growth.bound = Some((lb, at, name.clone()));
                     self.autoplay.growth.bound_since = Some(now);
                     self.autoplay

@@ -216,7 +216,7 @@ pub struct State {
     outdoors_mark: Option<Vec2>,
     outdoors_back: Option<Vec2>,
     /// The journey to make once outside.
-    after_out: Option<Vec2>,
+    after_out: Option<(Vec2, u32)>,
     /// What the character was short of when the run began, for the
     /// stops after the first.
     needs: Vec<Need>,
@@ -285,6 +285,18 @@ impl State {
         self.bound_since = None;
         self.bound_limit = None;
         self.after_out = None;
+    }
+
+    /// The landblock of the ground being walked to, if the growth rules are on the way to one.
+    pub(crate) fn bound_landblock(&self) -> Option<u32> {
+        self.bound.as_ref().map(|b| b.0)
+    }
+
+    /// Died: the ground hunted is not gone back to, and not chosen again for a while.
+    pub(crate) fn leave_deadly_ground(&mut self, now: Instant) {
+        if let Some(h) = self.hunting_at.take() {
+            self.skip.mark(h, now);
+        }
     }
 
     /// Let go of the walk to a ground, and of the step outside before it unless a town run under

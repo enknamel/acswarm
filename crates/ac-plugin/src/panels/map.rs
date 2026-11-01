@@ -884,7 +884,8 @@ fn draw_spawns(
 ) {
     let mut marks: Vec<(egui::Pos2, u32, Vec<String>)> = Vec::new();
     if world_tab {
-        for g in ac_world::hunting::all() {
+        // A dungeon's spot is underground, off the surface map.
+        for g in ac_world::hunting::all().iter().filter(|g| !g.is_dungeon()) {
             let sp = to_screen(rect, center, s, g.at);
             if rect.contains(sp) {
                 marks.push((

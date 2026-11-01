@@ -22,6 +22,10 @@ const ROAM: f32 = 70.0;
 
 const ROAMS: u32 = 3;
 
+/// The best-paying grounds a journey is planned to before one is chosen: planning is a search
+/// over every portal, so only the few that could win are asked about.
+const CANDIDATES: usize = 6;
+
 /// The longest a character inside a hunting area stands on a quiet spot
 /// before walking to another part of it, seconds.
 ///
@@ -168,7 +172,10 @@ impl Client {
             // a creature for a moment after it dies (see
             // `steps::worth_fighting`), and a body is no reason to wait.
             let away = at.distance(me);
-            let there = here == lb || away <= GROUND_REACH;
+            let there = match ac_world::hunting::at(lb).filter(|g| g.is_dungeon()) {
+                Some(_) => here == lb && self.underground(),
+                None => here == lb || away <= GROUND_REACH,
+            };
             let busy = [self.attack_target, self.autoplay.casting_at()]
                 .into_iter()
                 .flatten()
@@ -186,7 +193,7 @@ impl Client {
             match on_the_way(there, self.journey_broken_off(), busy, lately) {
                 OnTheWay::Wait => return true,
                 OnTheWay::WalkOn => {
-                    if self.grow_travel(at, now) {
+                    if self.grow_travel_in(at, ground_cell(lb), now) {
                         self.autoplay.growth.bound_walked_on = Some(now);
                         self.autoplay.note(
                             format!("on the way to the {name} ground again ({away:.0} m)"),
@@ -305,7 +312,8 @@ impl Client {
         // With nothing in sight a ground is looked about: a camp once its quiet minute says nothing
         // is coming after all (a_camp_nothing_comes_to_is_looked_about), a patrol always, a thin
         // ground a few times before it is left.
-        if goes_looking && roams_left {
+        // Underground the explorer walks the rooms (`autoplay_explore`); a roam aims at the surface.
+        if goes_looking && roams_left && !(indoors && self.underground()) {
             let n = self.autoplay.growth.roams % ROAMS;
             let angle = (n as f32 + 0.5) * std::f32::consts::TAU / ROAMS as f32;
             let origin = ac_world::landblock_origin(cell);
@@ -352,7 +360,7 @@ impl Client {
         let named = pinned.is_some();
         if let Some((lb, at, name)) = pinned.or_else(|| self.party_ground()) {
             if self.autoplay.growth.hunting_at != Some(lb) {
-                if self.grow_travel(at, now) {
+                if self.grow_travel_in(at, ground_cell(lb), now) {
                     let limit = self.planned_walk_limit();
                     let st = &mut self.autoplay.growth;
                     st.bound = Some((lb, at, name.clone()));
@@ -395,8 +403,7 @@ impl Client {
         if !goes_looking {
             return false;
         }
-        let Some(g) = ac_world::hunting::nearest_for(level as u32, cfg.level_margin, me, &skip)
-        else {
+        let Some(g) = self.best_ground(level as u32, cfg.level_margin, &skip) else {
             self.autoplay.note(
                 format!(
                     "no hunting ground suits level {level} within {} levels",
@@ -408,8 +415,8 @@ impl Client {
             return false;
         };
         let (lb, at, name) = (g.landblock, g.at, g.name.clone());
-        let (glo, ghi) = (g.min_level, g.max_level);
-        if self.grow_travel(at, now) {
+        let (glo, ghi, cell) = (g.min_level, g.max_level, g.cell());
+        if self.grow_travel_in(at, cell, now) {
             let limit = self.planned_walk_limit();
             let st = &mut self.autoplay.growth;
             st.bound = Some((lb, at, name.clone()));
@@ -437,6 +444,82 @@ impl Client {
             false
         }
     }
+}
+
+impl Client {
+    /// Of the grounds that suit `level` and pay best, the one paying most over a stay once the
+    /// journey there is counted (`paid_over_stay`); one no journey reaches is passed over.
+    fn best_ground(
+        &mut self,
+        level: u32,
+        margin: u32,
+        skip: &[u32],
+    ) -> Option<&'static ac_world::hunting::Ground> {
+        let ranked = ac_world::hunting::ranked_for(level, margin, skip);
+        let mut best: Option<(&ac_world::hunting::Ground, f32)> = None;
+        for g in ranked.into_iter().take(CANDIDATES) {
+            let Some(secs) = self.journey_seconds(g.at, g.cell()) else {
+                continue;
+            };
+            let paid = ac_world::hunting::paid_over_stay(g.worth(), secs);
+            tracing::debug!(
+                "ground: {} {:#06x} worth {:.0}, {secs:.0} s away",
+                g.name,
+                g.landblock,
+                g.worth()
+            );
+            if best.is_none_or(|(_, b)| paid > b) {
+                best = Some((g, paid));
+            }
+        }
+        best.map(|(g, _)| g)
+    }
+
+    /// How long a journey from here to `goal` (in `goal_cell`, 0 for a place known by position)
+    /// would take, seconds, planned as `plan_trip_in` plans it but not set off on.
+    fn journey_seconds(&mut self, goal: Vec2, goal_cell: u32) -> Option<f32> {
+        let pl = self.player.as_ref()?;
+        let (me, cell) = (pl.world_position(), pl.cell);
+        let underground = self.underground();
+        let prefs = self.travel_prefs().in_dungeon(underground);
+        let cell = crate::travel::planning_cell(cell, me, underground);
+        let level = self.world.stats.level.max(1) as u32;
+        let gems = self.carried_gems();
+        let recalls = if prefs.use_recalls {
+            self.castable_recalls()
+        } else {
+            Vec::new()
+        };
+        let far = ac_world::trip::Prefs::far();
+        let plan = |p| {
+            ac_world::trip::plan_with_recalls_and_gems(
+                me.truncate(),
+                cell,
+                goal,
+                goal_cell,
+                level,
+                &[],
+                &[],
+                &recalls,
+                &gems,
+                p,
+            )
+        };
+        plan(prefs)
+            .or_else(|| {
+                plan(ac_world::trip::Prefs {
+                    walk_reach: far.walk_reach,
+                    portal_reach: far.portal_reach,
+                    ..prefs
+                })
+            })
+            .map(|t| t.seconds)
+    }
+}
+
+/// The cell a journey to the ground of `lb` is bound for: a dungeon's landing, else 0.
+pub(super) fn ground_cell(lb: u32) -> u32 {
+    ac_world::hunting::at(lb).map_or(0, |g| g.cell())
 }
 
 #[cfg(test)]
