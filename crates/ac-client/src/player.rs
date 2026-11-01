@@ -2087,6 +2087,31 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn a_body_inside_a_paper_thin_wall_walks_out_of_it() {
+        // 8A02015E at z -6.0, beside a Facility Hub stair: the middle lies between the two faces
+        // of its side, 0.05 m apart, and each pushed it out through the other.
+        let o = ac_world::landblock_origin(0x8A02_0000);
+        let at = Vec3::new(26552.4, 342.5, -6.0);
+        let dt = 0.05;
+        for k in 0..8 {
+            let mut c = crate::testkit::standing_in_the_field(20, 0x8A02_015E, at - o);
+            c.player.as_mut().unwrap().heading = (k as f32 * 45.0).to_radians();
+            let t0 = std::time::Instant::now();
+            for frame in 0..40 {
+                let now = t0 + std::time::Duration::from_secs_f32(frame as f32 * dt);
+                let input = Input {
+                    forward: 1.0,
+                    ..Default::default()
+                };
+                c.tick_player(input, dt, now);
+            }
+            let moved = c.my_position().unwrap().distance(at);
+            assert!(moved > 1.0, "heading {}: moved {moved:.2} m", k * 45);
+        }
+    }
+
+    #[test]
     fn the_run_rate_follows_the_run_skill() {
         assert!((run_rate(0) - 1.0).abs() < 1e-6);
         assert!((run_rate(200) - 2.375).abs() < 1e-6);

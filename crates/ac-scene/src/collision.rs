@@ -26,6 +26,10 @@ const GRID: f32 = 4.0;
 /// Gravity in world units (m/s²); the client's `PhysicsGlobals` uses -9.8.
 pub const GRAVITY: f32 = 9.8;
 
+/// A body whose middle is this close to a wall's face (metres) is in it, not in front of it:
+/// walking keeps the middle a radius off every wall.
+const EMBEDDED: f32 = 0.1;
+
 /// The vertical capsule that stands in for a character, feet at its
 /// position. `step_up`/`step_down` mirror a setup's `step_up_height` and
 /// `step_down_height` (0.6 m and 1.5 m for the human setups).
@@ -584,6 +588,11 @@ impl CollisionWorld {
                 let end = pos + Vec3::new(0.0, 0.0, dz);
                 for t in self.nearby(pos, r + 0.5).chain(self.nearby(f, r + 0.5)) {
                     if t.two_sided || t.normal.z.abs() > 0.6 {
+                        continue;
+                    }
+                    // A face the middle already lies on does not hold it: a body that has come
+                    // to be inside a paper-thin wall walks out of it either way (a_body_inside_a_paper_thin_wall_walks_out_of_it).
+                    if (start - closest_point_on_tri(start, t)).length() < EMBEDDED {
                         continue;
                     }
                     if crosses_front_to_back(start, end, t) {
