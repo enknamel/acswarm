@@ -42,7 +42,7 @@ const BODY_CLOSING: f32 = 0.3;
 const SWEPT_SPAN: f32 = 4.0;
 /// A walk this near its end (metres) is there: the float error of its last step.
 const TOUCHING: f32 = 0.01;
-/// How fast a body steps off a ledge (m/s): the phase-2 follower's pace at a drop.
+/// How fast a body steps off a ledge (m/s): the follower's pace on a drop leg.
 pub const DROP_SPEED: f32 = 1.0;
 /// The deepest drop (metres): ACE hurts a landing over 11.25 + 4.5 m/s (Player_Move.cs:254-259).
 const DROP_MAX: f32 = 12.0;
@@ -160,7 +160,7 @@ impl<'a> Ground<'a> {
         }
     }
 
-    /// The old steering's straight check (`Player::line_blocked`), not an edge test: the walk from
+    /// The dodge sidestep's room check (`Player::line_blocked`), not an edge test: the walk from
     /// `a` to `b` sampled every `SUBSTEP` (fits, floor, chest ray), each way.
     pub fn walkable(&self, a: Vec3, b: Vec3, cap: &Capsule) -> (bool, bool) {
         let d = b - a;

@@ -242,7 +242,7 @@ fn a_jeweler_on_a_deck_is_walked_up_to() {
 #[ignore = "needs AC_DATA_DIR"]
 fn a_walk_inside_a_building_is_planned_on_the_region_not_the_block() {
     // The steering's plan is the region's: a route checked to its end, or why there is none. The
-    // walk is reported, not asserted, while the old steering still owns it.
+    // walk is reported here; the stalls' trial asserts it.
     let t = stall("9722 Jeweler from inside a building");
     let mut c = standing_at(LEVEL, &t);
     let pl = c.player.as_ref().expect("a body");

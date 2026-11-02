@@ -47,7 +47,7 @@ dir gives false compile errors); check `df -g /` first, stop below 15 GB free, d
 | ac-net | wire protocol, sans-IO: packets, ISAAC, messages, session state machine; the caller owns the socket | `session::Session` | - |
 | ac-world | object table and character sheet built from server messages; world data (shops, spawns, portals, trips) | `World::apply` | formats, net |
 | ac-agent | vocabulary every system shares: outcomes and retry, weenie errors, refusals in words, pack arithmetic | `did::Did`, `did::Patience`, `refusals::refused` | - |
-| ac-nav | getting somewhere: steering per landblock, walk or portals, obstacles, dungeon doorways; answers `Aim::NoWay` instead of walking at a wall | `Steering`, `how_to_get_there`, `routing::plan` | formats, scene, world |
+| ac-nav | getting somewhere: a follower of one planned route, walk or portals, obstacles, dungeon doorways; answers `Aim::NoWay` instead of walking at a wall | `Steering`, `how_to_get_there`, `routing::plan` | formats, scene, world |
 | ac-loot | item vocabulary and search language, loot profiles, ledger, emptying a corpse, sale fate, weapon choice | `Profile`, `Run::step`, `Ledger` | agent, net, world |
 | ac-vendor | the town run at a counter, decided from a snapshot with no server | `Run::step`, `Snapshot` | agent, loot |
 | ac-client | one headless game session: socket, world, body, manual actions, autoplay | `Client::tick` | agent, formats, loot, nav, net, scene, vendor, world |

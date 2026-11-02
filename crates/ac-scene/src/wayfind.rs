@@ -56,7 +56,7 @@ pub struct WalkQuery<'a> {
     pub indoors_too: bool,
     /// With `indoors_too`, a way kept out of buildings is taken over one through them, if any.
     pub outdoors_first: bool,
-    /// Drop edges may be taken: not by the old steering, which runs off a ledge at a run.
+    /// Drop edges may be taken: the follower walks them at [`crate::nav::DROP_SPEED`].
     pub drops: bool,
 }
 
@@ -569,9 +569,8 @@ fn sources(
     Err(NoWay::Stranded)
 }
 
-/// The [`JOIN_TRIES`] nodes within `r` columns of `from` that `keep` lets by (in order), those in
-/// `cell` first, nearest first, each with its distance: within an edge's rise of `from`, or when
-/// `below`, any lower down.
+/// The [`JOIN_TRIES`] nodes within `r` columns of `from` that `keep` lets by, in `cell` and nearest
+/// first, with their distance: within an edge's rise of `from`, or any lower down when `below`.
 fn nearest_from(
     l: &mut impl Lattice,
     from: Vec3,

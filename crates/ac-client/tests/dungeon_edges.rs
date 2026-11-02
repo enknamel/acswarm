@@ -17,7 +17,7 @@
 //! the air past the end of the floor below.
 //!
 //! In 0x01F6026C a ledge stands four metres over the room's floor,
-//! unrailed on its west side, with nothing in the graph joining the two.
+//! unrailed on its west side: no walk joins the two, the drop off it does.
 //! (The vault ribs over 0x01F6022C were the ledge these tests first
 //! stood on: seven metres up, and floor only because the ribs' drawing
 //! polygons were built as collision. The retail client never collided

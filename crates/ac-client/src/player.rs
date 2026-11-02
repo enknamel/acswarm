@@ -1094,8 +1094,8 @@ impl Player {
 
     /// Whether the straight walk from `from` to `to` is blocked: static
     /// geometry of landblock `block` (or of the blocks under either end)
-    /// crosses the chest-height line, or the capsule cannot walk it. The
-    /// test that decides between walking straight and planning a route.
+    /// crosses the chest-height line, or the capsule cannot walk it: the
+    /// dodge sidestep's room check.
     pub fn line_blocked(&mut self, assets: &Assets, block: u32, from: Vec3, to: Vec3) -> bool {
         let mut blocks = vec![block & 0xFFFF_0000];
         for b in [block_of(from), block_of(to)] {

@@ -7,9 +7,9 @@ use crate::{pathfinder, player};
 /// The client answering what the steering asks of the world.
 ///
 /// The steering itself is in `ac-nav` and knows nothing of packets,
-/// physics or landblocks; this is the half that does. Eight questions,
-/// which in a test are answered with a few rectangles and here with
-/// the character's own collision and the region planner.
+/// physics or landblocks; this is the half that does. Six questions,
+/// which in a test are answered by hand and here with the character's
+/// own body and the region planner.
 pub struct Standing<'a> {
     pub player: &'a mut player::Player,
     pub pathfinder: &'a mut pathfinder::Pathfinder,
