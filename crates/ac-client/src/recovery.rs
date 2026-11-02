@@ -41,8 +41,6 @@ const ALIVE_SETTLE: Duration = Duration::from_secs(8);
 const LANDED_SETTLE: Duration = Duration::from_secs(3);
 /// Buffing before the walk back is given at most this long.
 const REBUFF_CAP: Duration = Duration::from_secs(120);
-/// Journeys back are planned at most this often.
-const PLAN_EVERY: Duration = Duration::from_secs(3);
 /// Standing this near the death spot counts as arrived.
 const NEAR: f32 = 12.0;
 /// A corpse within this can be opened (the server walks us the rest).
@@ -60,8 +58,6 @@ const CORPSE_GONE: Duration = Duration::from_secs(3);
 const REWIELD_CAP: Duration = Duration::from_secs(20);
 /// One wield order at a time, this far apart.
 const WIELD_EVERY: Duration = Duration::from_millis(1000);
-/// Journeys back that end short of the spot before giving up.
-const MAX_REPLANS: u32 = 4;
 /// Dying this many times over one corpse means it is not worth it.
 const MAX_DEATHS: u32 = 2;
 /// The server's word that nothing was dropped counts for a death within
@@ -179,9 +175,6 @@ pub struct Recovery {
     alive_since: Option<Instant>,
     /// The buff rule found nothing more to cast.
     buffs_done: bool,
-    /// Journeys back planned so far, and when the last was.
-    replans: u32,
-    last_plan: Option<Instant>,
     /// When the corpse was last asked to open.
     last_open: Option<Instant>,
     /// When a wield order last went out.
@@ -206,8 +199,6 @@ impl Default for Recovery {
             started: None,
             alive_since: None,
             buffs_done: false,
-            replans: 0,
-            last_plan: None,
             last_open: None,
             last_wield: None,
             abandoned: false,
@@ -298,8 +289,6 @@ impl Recovery {
         self.corpse = None;
         self.alive_since = None;
         self.buffs_done = false;
-        self.replans = 0;
-        self.last_plan = None;
         self.last_open = None;
         self.started = None;
         if self.deaths >= MAX_DEATHS {
@@ -405,22 +394,8 @@ impl Recovery {
             self.go(Phase::Looting, now);
             return self.step_looting(v);
         }
-        // The walk there is asked for again while it goes (a walk ends when its step stops asking).
-        if v.walking {
-            return Action::Travel(death);
-        }
-        if self.replans >= MAX_REPLANS {
-            tracing::info!("recovery: the way back keeps ending short, leaving the corpse");
-            return self.finish(now);
-        }
-        if self
-            .last_plan
-            .is_some_and(|t| now.duration_since(t) < PLAN_EVERY)
-        {
-            return Action::Wait;
-        }
-        self.replans += 1;
-        self.last_plan = Some(now);
+        // Asked for again each tick, a journey put down for its row included: a walk ends when its
+        // step stops asking, and the slot's GIVE_UP_AFTER and `v.limit` are the give-ups.
         Action::Travel(death)
     }
 
@@ -1078,26 +1053,21 @@ mod tests {
     }
 
     #[test]
-    fn replans_a_journey_that_ends_short_then_gives_up() {
+    fn a_journey_back_put_down_is_set_off_again() {
         let t0 = Instant::now();
         let mut r = Recovery::default();
         let mut v = die_and_land(&mut r, t0);
         r.step(&v);
         r.buffs_done();
-        let mut t = 10.0;
-        let mut plans = 0;
-        for _ in 0..12 {
-            v.now = after(t0, t);
-            match r.step(&v) {
-                Action::Travel(_) => plans += 1,
-                Action::Finish { .. } => break,
-                Action::Wait => {}
-                other => panic!("unexpected {other:?}"),
-            }
-            t += 4.0;
+        for k in 0..6 {
+            v.traveling = false;
+            v.now = after(t0, 10.0 + 4.0 * k as f32);
+            assert!(matches!(r.step(&v), Action::Travel(_)), "round {k}");
+            v.traveling = true;
+            v.now = after(t0, 12.0 + 4.0 * k as f32);
+            assert_eq!(r.step(&v), Action::Wait);
         }
-        assert_eq!(plans, MAX_REPLANS);
-        assert!(!r.active());
+        assert!(r.active(), "given up on a journey that was put down");
     }
 
     #[test]
