@@ -41,6 +41,7 @@ impl Client {
         if let Some(pl) = self.player.as_mut() {
             let mut input = input;
             self.walk_frame = None;
+            self.travel.leg_refused = false;
             pl.pace_cap = None;
             // Server-driven MoveTo (using something out of reach): run toward
             // the target until close enough, unless the user takes over.
@@ -181,6 +182,7 @@ impl Client {
                         // actually stops the character, and clutter
                         // must not send a walk to them.
                         let steered = aim;
+                        self.travel.leg_refused = source == "journey" && aim == ac_nav::Aim::NoWay;
                         let aim = match aim {
                             ac_nav::Aim::Go(at) => {
                                 let me = pl.world_position();

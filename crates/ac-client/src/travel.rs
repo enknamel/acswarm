@@ -173,6 +173,8 @@ pub struct Travel {
     next: usize,
     /// End of the leg the local move-to is aimed at right now.
     leg: Option<Vec2>,
+    /// Last frame's steer for this journey's own leg answered no way (set by `tick_player`).
+    pub(crate) leg_refused: bool,
     /// Closest the character has been to the current waypoint, and when
     /// that last improved.
     best: f32,
@@ -1348,7 +1350,7 @@ impl Client {
             .travel
             .step_since
             .is_some_and(|t| now.duration_since(t) > STEP_GIVE_UP)
-            || (indoor_leg && self.steering.no_way())
+            || (indoor_leg && self.travel.leg_refused)
         {
             if let Some(goal) = self.travel.goal {
                 tracing::warn!(
@@ -1559,7 +1561,7 @@ impl Client {
             }
             match self.travel.last_progress {
                 Some(t) if d >= self.travel.best - PROGRESS => {
-                    if now.duration_since(t) >= STUCK_AFTER || self.steering.no_way() {
+                    if now.duration_since(t) >= STUCK_AFTER || self.travel.leg_refused {
                         // The last waypoint is where the step ends; not
                         // reaching it is not arriving. Plan the journey
                         // again from here, a few times, before giving up.
@@ -1840,6 +1842,7 @@ mod tests {
             if goal.is_none() && !c.traveling() {
                 return;
             }
+            c.travel.leg_refused = false;
             let pl = c.player.as_mut().unwrap();
             let mut input = Input::default();
             pl.step_cap = None;
@@ -1852,8 +1855,9 @@ mod tests {
                             pathfinder: &mut c.pathfinder,
                         };
                         let to = ac_world::Place { at: g, cell };
-                        if let ac_nav::Aim::Go(at) = c.steering.steer(&mut standing, to, stop, now)
-                        {
+                        let aim = c.steering.steer(&mut standing, to, stop, now);
+                        c.travel.leg_refused = aim == ac_nav::Aim::NoWay;
+                        if let ac_nav::Aim::Go(at) = aim {
                             let d = at - pl.world_position();
                             let flat = Vec2::new(d.x, d.y);
                             if flat.length() > 1e-3 {
