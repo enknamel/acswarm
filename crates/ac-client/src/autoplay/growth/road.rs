@@ -1,7 +1,6 @@
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use ac_world::Place;
-use glam::Vec2;
 
 use crate::{Client, Goal};
 
@@ -25,10 +24,6 @@ impl Client {
         walk_limit(self.travel_trip().map(|t| t.seconds))
     }
 }
-
-/// How far apart the spots kept on the way into a building are (metres): the walk back out aims at
-/// one 5-10 m outside the door, where arriving means standing outdoors.
-pub(super) const CLEAR_OF_DOOR: f32 = 5.0;
 
 /// After a journey that could not be planned, the next place is not
 /// tried for this long.
@@ -121,8 +116,7 @@ impl Client {
     /// the monster standing over it. `run` spans the counters as well,
     /// where there is no road. A walk broken off by a corpse or a fight is
     /// still the walk, since its errand takes it up again (see
-    /// `Client::journey_broken_off`), and so is stepping out of a shop
-    /// before it.
+    /// `Client::journey_broken_off`).
     ///
     /// A follower is on its leader's way. It keeps up through the follow
     /// step, which sets no errand of its own, so read off its own errands
@@ -144,8 +138,7 @@ impl Client {
     /// follower's own catching up are the only walks about the ground.
     pub fn on_its_way(&self) -> bool {
         let st = &self.autoplay.growth;
-        let walking = st.has_an_errand()
-            && (self.traveling() || self.journey_broken_off() || st.after_out.is_some());
+        let walking = st.has_an_errand() && (self.traveling() || self.journey_broken_off());
         walking
             || road_under_way(
                 self.traveling().then_some(self.travel_about_the_ground()),
@@ -165,56 +158,10 @@ impl Client {
             && (self.is_own_journey() || self.keep_journey_to(goal) || self.journey_row().is_none())
     }
 
-    /// Set off for `goal`. From inside a building the planner sees no
-    /// way out but a portal, so the walk begins with the spot the
-    /// character last stood outdoors, and the journey proper follows
-    /// (see [`Self::grow_travel_on`]). False when no way was found.
-    pub(super) fn grow_travel(&mut self, goal: Place, within: f32, now: Instant) -> bool {
-        self.autoplay.growth.after_out = None;
-        let Some(pl) = self.player.as_ref() else {
-            return false;
-        };
-        // The shortcut below is for buildings. A dungeon has no door to
-        // step out of -- the way out is its exit portal or a recall --
-        // and walking at the last outdoor spot from underground is
-        // walking at rock.
-        if pl.is_indoors() && !self.autoplay.growth.in_dungeon {
-            let me = pl.world_position();
-            let block = pl.cell & 0xFFFF_0000;
-            let same_block =
-                |p: Vec2| (((p.x / 192.0) as u32) << 24) | (((p.y / 192.0) as u32) << 16) == block;
-            let st = &self.autoplay.growth;
-            if let Some(out) = st.outdoors_back.or(st.outdoors_mark).or(st.last_outdoors) {
-                if same_block(out)
-                    && out.distance(Vec2::new(me.x, me.y)) < 150.0
-                    && self.travel_to(out)
-                {
-                    self.autoplay.growth.after_out = Some(Goal::At {
-                        place: goal,
-                        within,
-                    });
-                    self.autoplay.note("stepping outside first", now);
-                    return true;
-                }
-            }
-        }
+    /// Set off for `goal`, to within `within`, for the running row; from inside a building the
+    /// journey's first stretch walks out of the door. False when no way was found.
+    pub(super) fn grow_travel(&mut self, goal: Place, within: f32) -> bool {
         self.journey_to(goal, within)
-    }
-
-    /// The second leg of a journey begun indoors: once the walk out has
-    /// ended, the journey proper. True when one was started.
-    pub(super) fn grow_travel_on(&mut self) -> bool {
-        if self.traveling() {
-            return false;
-        }
-        let Some(Goal::At { place, within }) = self.autoplay.growth.after_out.take() else {
-            return false;
-        };
-        if self.journey_to(place, within) {
-            return true;
-        }
-        tracing::info!("growth: no way on to {:?} from outside either", place.at);
-        false
     }
 }
 

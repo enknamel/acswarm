@@ -313,7 +313,7 @@ fn a_due_run_leaves_the_walk_to_a_ground_for_town() {
     let me = c.player.as_ref().unwrap().world_position();
     let ground = Vec2::new(me.x + 200.0, me.y);
     assert!(
-        c.grow_travel(ac_world::Place::on_map(ground), crate::travel::ARRIVE, now),
+        c.grow_travel(ac_world::Place::on_map(ground), crate::travel::ARRIVE),
         "no walk to the ground"
     );
     c.autoplay.growth.bound = Some((holtburg, ground, "the field".into()));

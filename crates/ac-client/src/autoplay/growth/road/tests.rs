@@ -1,3 +1,7 @@
+use std::time::{Duration, Instant};
+
+use glam::Vec2;
+
 use super::*;
 use crate::autoplay::growth::tests::run_to;
 use crate::autoplay::growth::town_run::VENDOR_REACH;
@@ -87,8 +91,7 @@ fn what_stands_on_the_road_is_walked_past_and_what_swings_at_us_is_not() {
     let ground = (0xA9B2, Vec2::new(32_580.0, 34_570.0), "Drudge".to_string());
     assert!(c.grow_travel(
         ac_world::Place::on_map(Vec2::new(me.x + 250.0, me.y)),
-        crate::travel::ARRIVE,
-        now
+        crate::travel::ARRIVE
     ));
     c.autoplay.growth.bound = Some(ground.clone());
     // Hits are judged by the wall's clock, and setting off plans the first walk: seconds offline.
@@ -181,7 +184,7 @@ fn an_errand_is_on_its_way_only_while_its_walk_is() {
 
     // Bound, and walking there.
     assert!(
-        c.grow_travel(ac_world::Place::on_map(at), crate::travel::ARRIVE, now),
+        c.grow_travel(ac_world::Place::on_map(at), crate::travel::ARRIVE),
         "no way to the ground"
     );
     c.autoplay.growth.bound = Some((lb, at, "Drudge".into()));
@@ -194,23 +197,50 @@ fn an_errand_is_on_its_way_only_while_its_walk_is() {
     assert!(!c.would_fight(&it, &fight, false, now));
 
     // Arrived: fighting again that tick, whatever `bound` still says.
-    assert!(c.grow_travel(ac_world::Place::on_map(at), crate::travel::ARRIVE, now));
+    assert!(c.grow_travel(ac_world::Place::on_map(at), crate::travel::ARRIVE));
     c.end_trip();
     assert!(c.autoplay.growth.bound.is_some(), "not noticed yet");
     assert!(!c.on_its_way(), "arrived, and still walking past");
     assert!(c.would_fight(&it, &fight, false, now));
 
     // Cancelled -- the player took the keys -- is no walk either.
-    assert!(c.grow_travel(ac_world::Place::on_map(at), crate::travel::ARRIVE, now));
+    assert!(c.grow_travel(ac_world::Place::on_map(at), crate::travel::ARRIVE));
     c.cancel_travel();
     assert!(!c.on_its_way());
+}
 
-    // Stepping out of a shop first is the start of the walk.
-    c.autoplay.growth.after_out = Some(crate::Goal::At {
-        place: ac_world::Place::on_map(at),
-        within: crate::travel::ARRIVE,
-    });
-    assert!(c.on_its_way());
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_walk_out_of_a_shop_is_the_journeys_first_walk() {
+    // From Archmage Cindrue's upstairs (0xA9B4011B) to the A9B2 platform 440 m off: no walk to a
+    // spot outside first. The first stretch is routed from the room, and walks down and out.
+    let mut c =
+        crate::testkit::standing_in_the_field(20, 0xA9B4_011B, glam::Vec3::new(152.3, 132.5, 69.0));
+    let me = c.my_position().expect("on its feet");
+    let ground = ac_world::Place::on_map(Vec2::new(32_526.2, 34_261.9));
+    c.autoplay.running = Some("grow");
+    assert!(c.grow_travel(ground, crate::autoplay::growth::hunt::GROUND_REACH));
+    c.autoplay.running = None;
+    let stretch = c.going.as_ref().filter(|g| g.journey).map(|g| g.owner);
+    assert_eq!(
+        stretch,
+        Some(crate::Owner::Step("grow")),
+        "no first stretch"
+    );
+    assert!(
+        c.steering.remaining(me).is_some(),
+        "not routed from the room"
+    );
+    let t0 = Instant::now();
+    for frame in 0..1200 {
+        let now = t0 + Duration::from_millis(50 * frame);
+        c.tick_player(crate::player::Input::default(), 0.05, now);
+        if c.player.as_ref().is_some_and(|p| !p.is_indoors()) {
+            assert!(c.traveling(), "the journey ended at the door");
+            return;
+        }
+    }
+    panic!("still indoors after 60 s at {:?}", c.my_position());
 }
 
 #[test]
@@ -270,7 +300,7 @@ fn a_party_on_the_road_walks_past_together_and_stops_together() {
     // debuffer turns the character round for it.
     c.autoplay.config.team.follow = false;
     let counter = Vec2::new(me.x + 250.0, me.y);
-    assert!(c.grow_travel(ac_world::Place::on_map(counter), crate::travel::ARRIVE, now));
+    assert!(c.grow_travel(ac_world::Place::on_map(counter), crate::travel::ARRIVE));
     c.autoplay.growth.run = Some(run_to(counter, now));
     c.autoplay.team.mates = vec![leader(false, Some(drudge.guid))];
     assert!(c.on_its_way());

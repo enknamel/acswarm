@@ -260,7 +260,7 @@ fn a_walk_to_a_ground_broken_off_by_a_corpse_is_walked_on() {
     let at = Vec2::new(me.x + 250.0, me.y);
     let lb = (((at.x / 192.0) as u32) << 8) | (at.y / 192.0) as u32;
     assert!(
-        c.grow_travel(ac_world::Place::on_map(at), crate::travel::ARRIVE, now),
+        c.grow_travel(ac_world::Place::on_map(at), crate::travel::ARRIVE),
         "no way to the ground"
     );
     c.autoplay.growth.bound = Some((lb, at, "Drudge".into()));

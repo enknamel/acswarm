@@ -185,7 +185,7 @@ impl Client {
                     now,
                 );
                 self.cancel_travel();
-            } else if self.is_errand_journey(ground) || self.grow_travel_on() {
+            } else if self.is_errand_journey(ground) {
                 self.autoplay.say(
                     Doing::Traveling,
                     format!("going to hunt {name} ({})", about(at.distance(me))),
@@ -227,7 +227,7 @@ impl Client {
             match on_the_way(there, broken_off, busy, lately) {
                 OnTheWay::Wait => return true,
                 OnTheWay::WalkOn => {
-                    if self.grow_travel(ground_place(lb, at), GROUND_REACH, now) {
+                    if self.grow_travel(ground_place(lb, at), GROUND_REACH) {
                         self.autoplay.growth.bound_walked_on = Some(now);
                         self.autoplay.note(
                             format!("on the way to the {name} ground again ({away:.0} m)"),
@@ -366,9 +366,9 @@ impl Client {
             );
             self.autoplay.growth.roams += 1;
             self.autoplay.growth.quiet_since = Some(now);
-            // From inside a building the walk steps out first, as a town run's does.
+            // From inside a building a journey, whose first stretch walks out of the door.
             let set_off = if indoors {
-                self.grow_travel(Place::on_map(goal), crate::travel::ARRIVE, now) && {
+                self.grow_travel(Place::on_map(goal), crate::travel::ARRIVE) && {
                     self.mark_ground_walk();
                     true
                 }
@@ -405,7 +405,7 @@ impl Client {
         let named = pinned.is_some();
         if let Some((lb, at, name)) = pinned.or_else(|| self.party_ground()) {
             if self.autoplay.growth.hunting_at != Some(lb) {
-                if self.grow_travel(ground_place(lb, at), GROUND_REACH, now) {
+                if self.grow_travel(ground_place(lb, at), GROUND_REACH) {
                     let limit = self.planned_walk_limit();
                     let st = &mut self.autoplay.growth;
                     st.bound = Some((lb, at, name.clone()));
@@ -475,7 +475,7 @@ impl Client {
         };
         let (lb, at, name) = (g.landblock, g.at, g.name.clone());
         let (glo, ghi, place) = (g.min_level, g.max_level, g.place());
-        if self.grow_travel(place, GROUND_REACH, now) {
+        if self.grow_travel(place, GROUND_REACH) {
             let limit = self.planned_walk_limit();
             let st = &mut self.autoplay.growth;
             st.bound = Some((lb, at, name.clone()));

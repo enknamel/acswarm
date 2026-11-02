@@ -274,7 +274,6 @@ impl Client {
         };
         st.by_hand = false;
         st.needs.clear();
-        st.after_out = None;
         st.shop = ac_vendor::Run::new();
         st.last_run = Some(now);
         self.window_no_longer_wanted(&run);

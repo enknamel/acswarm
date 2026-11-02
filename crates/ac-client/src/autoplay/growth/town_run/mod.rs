@@ -586,7 +586,7 @@ impl Client {
             st.run_was_futile = true;
             return Err(why);
         }
-        if !self.grow_travel(vendor::counter_place(at), VENDOR_REACH, now) {
+        if !self.grow_travel(vendor::counter_place(at), VENDOR_REACH) {
             // Not the next one straight away: a character somewhere no
             // journey can start from would try every vendor in the
             // world, one a frame.

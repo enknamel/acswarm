@@ -211,16 +211,6 @@ pub struct State {
     next_run: Option<Instant>,
     /// No ground is chosen before this, for the same reason.
     next_hunt: Option<Instant>,
-    /// Where the character last stood outdoors. A journey out of a
-    /// building begins with a walk back to this spot, since the
-    /// planner cannot see out of a shop.
-    last_outdoors: Option<Vec2>,
-    /// A spot on the way in every `road::CLEAR_OF_DOOR` metres, and the one before it: the walk out
-    /// ends there, since the threshold itself is within `travel::ARRIVE` of a character inside.
-    outdoors_mark: Option<Vec2>,
-    outdoors_back: Option<Vec2>,
-    /// The journey to make once outside.
-    after_out: Option<crate::Goal>,
     /// What the character was short of when the run began, for the
     /// stops after the first.
     needs: Vec<Need>,
@@ -288,7 +278,6 @@ impl State {
         self.bound = None;
         self.bound_since = None;
         self.bound_limit = None;
-        self.after_out = None;
         self.looking_to = None;
     }
 
@@ -304,15 +293,11 @@ impl State {
         }
     }
 
-    /// Let go of the walk to a ground, and of the step outside before it unless a town run under
-    /// way is taking that step: [`State::let_go`] less what would strand a run.
+    /// Let go of the walk to a ground: [`State::let_go`] less what would strand a run.
     pub(crate) fn drop_ground_walk(&mut self) {
         self.bound = None;
         self.bound_since = None;
         self.bound_limit = None;
-        if self.run.is_none() {
-            self.after_out = None;
-        }
     }
 
     /// Whether a run to town is under way, from setting off to the last
@@ -422,8 +407,8 @@ impl Client {
     }
 
     /// What the growth rules read off the world once a tick, whichever of their steps runs first:
-    /// where the character last stood outdoors, whether it is underground, the errands whose
-    /// setting was turned off, and the party's mode, which it answers.
+    /// whether it is underground, the errands whose setting was turned off, and the party's mode,
+    /// which it answers.
     pub(super) fn grow_settle(
         &mut self,
         now: Instant,
@@ -433,21 +418,6 @@ impl Client {
             return self.autoplay.growth.mode;
         }
         self.autoplay.growth.settled_at = Some(now);
-        if let Some(pl) = self.player.as_ref() {
-            if !pl.is_indoors() {
-                let p = pl.world_position();
-                let p = Vec2::new(p.x, p.y);
-                let st = &mut self.autoplay.growth;
-                st.last_outdoors = Some(p);
-                if st
-                    .outdoors_mark
-                    .is_none_or(|m| m.distance(p) >= road::CLEAR_OF_DOOR)
-                {
-                    st.outdoors_back = st.outdoors_mark;
-                    st.outdoors_mark = Some(p);
-                }
-            }
-        }
         // Whether we are underground decides what a journey may be made
         // of. Knowing needs the block's collision, which loads lazily,
         // so it is settled here once a tick rather than asked for in
