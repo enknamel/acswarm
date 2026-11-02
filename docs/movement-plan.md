@@ -235,6 +235,9 @@ sealed off. "Still pushing" is always wrong.
   pair that fails was answered "no way" before a step.
 - The 7 still pushing are all among the 12 no-way pairs: the old steering walks at what the
   planner refused. Phase 2's follower stops there.
+- After review (floors of overlapping cells, walk components, smoothing that halves, the old
+  steering waiting for its plan; `docs/movement-phase1-design.md` §7): the same, outcome for
+  outcome, and 0 frames waited for the planner offline.
 
 ## Phases (each merged alone, each measured against the last)
 

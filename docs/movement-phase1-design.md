@@ -662,6 +662,43 @@ outcome; one walk arrives 0.1 s sooner.
 - `standable_near` answers none while a chunk it looks at is unbuilt, and queues those chunks
   (a `Chunks` job), rather than answering from part of the graph.
 
+After review, each fix its own commit. `navcost.rs` now plans 40 seeded pairs per area on what
+is built, as a frame plans, and also on the nine blocks round each town (`PLAN9`). Plan ms over
+the 40 pairs, then build ms, before (74bbf2c) and after:
+
+| area | plans before | plans after | build before | build after |
+|---|---|---|---|---|
+| 0xA9B4 | 147.4 | 92.9 | 1426 | 1390 |
+| 0xF682 | 163.8 | 93.8 | 1420 | 1345 |
+| 0x8A02 | 373.6 | 204.0 | 834 | 826 |
+| 0x0286 | 292.1 | 261.1 | 373 | 365 |
+| 0xA9B4, 9 blocks | 250.5 | 227.4 | 2971 | 2782 |
+| 0xF682, 9 blocks | 367.0 | 266.8 | 4035 | 3854 |
+
+- **Overlapping cells.** The portal data and the server name a cell whose BSP holds a point
+  whose floor is tagged with a neighbour's cell. `floor_of` now takes, failing the cell's own,
+  a floor a body on would be in that cell or in the floor's cell. 43 of the Facility Hub's 55
+  mouths had been `OffFloor` (`a_portal_mouth_on_a_neighbouring_cells_floor_is_planned_to`).
+- **No way, cheaply.** `Apart` is judged on components of walks and doorways only
+  (`walk_component`), since no phase-1 walk takes a drop. The outdoors-first preference moved
+  into `wayfind`: on a graph that cannot lack chunks the way anywhere is searched first, so a
+  walk with no way costs one search, not two (the 9-block F682 one: 130.5 to 65.3 ms).
+- **Walk tests read what is near.** A long walk test gathers 4 m at a time (`SWEPT_SPAN`), the
+  chest ray reads only the grid cells it crosses, and a shortcut's chest ray is cast once. The
+  graphs are the same node for node and plans answer for answer.
+- **Smoothing halves.** The furthest shortcut is tried, then the rest halved, instead of trying
+  every point ahead (`smooth`): 8A02 330 to 204 ms. 0286 rose 226 to 261 ms, where halving stops
+  short and keeps more points. Every shortcut is still walk-tested; the harness is unchanged.
+- **Not known yet is not "no way".** The old steering stands still while its plan answers
+  `Building` (`Steering::is_waiting`) instead of leaning on a blocked line
+  (`a_blocked_line_waits_for_the_planner_rather_than_leaning`). The harness counts those frames
+  (`WAITED`): 0 offline, where a plan builds on the asking thread, so it cannot show the live
+  delay. `has_way_to` still lets a `Building` walk start; the walk then waits for its plan.
+- **Still over budget.** Builds are 2.2x (0xA9B4) and 2.3x (0xF682) main's 631 and 580 ms. Most
+  of what is left is the body's own step (`resolve_from` and `closest_point_on_tri`, about half
+  the samples). The next exact cut is to hand each step's wall resolution the walls the hop
+  already gathered, not the grid's. 0x8A02 plans are still about 2.6x main's.
+
 | risk | where | how it shows | what is done |
 |---|---|---|---|
 | The walk test makes the graph about 5 × slower to build | step 2 | `navcost.rs` ms over 2.0 × the baseline | the open-ground fast path (exact), then reuse of the reverse direction (§4). The builder thread means a slow build delays the first answer and never stalls a frame (step 3); `PLAN` ms in the harness shows that delay. |
@@ -671,6 +708,6 @@ outcome; one walk arrives 0.1 s sooner.
 | `FLOOR_Z` turns ramps between 0.5 and 0.66 into walls | step 2, last commit | data tests (the deck ramp `a_counter_on_a_deck_up_a_ramp_is_walked_up_to`) and the harness | the commit is not made. The ramp becomes a harness case and the slope rule waits for phase 2. The constant is never moved. |
 | `try_read` contention, or a long frame query | step 3 | `a_plan_never_waits_on_the_builder`; `PLAN` ms over 5 ms at p95 | `apply` only appends. A slow query (long smoothing) moves to the thread and answers the next frame, still a full route or `NoWay`. |
 | Memory: shared areas plus the body's block cache | step 3 | `tools/load-test.sh` own footprint, 32 MB per process today | the per-block graphs go in step 4, offsetting it. `AREAS` stays at 4 until measured otherwise. |
-| `Building` reads as "no route", so the old steering walks straight for those frames | steps 3-4 | harness frames spent `Building` (counted by `walk_trial`) | accepted for phase 1: it is the old steering's fallback, deleted in phase 2. The harness's `settle` waits for the builder, so the planner itself is measured. |
+| `Building` reads as "no route", so the old steering walks straight for those frames | steps 3-4 | harness frames spent waiting (`WAITED`, counted by `walk_trial`) | the old steering stands still until its plan is answered (`Steering::is_waiting`). Offline a plan builds on the asking thread, so the count is 0 there and the live delay is not measured. |
 | `player.rs` past its 2,100-line ceiling | step 2 | `file_length.rs` | the `stride.rs` move takes about 200 lines out before anything is added |
 | Name gates (`naming.rs`, one type name with one meaning) | all | the gates | the new production fns (`locate`, `floor_of`, `plan`, `plan_built`, `hop`, `stride`, `fall_step`, `build_chunk`, `apply`, `cell_at`, `is_complete`) have no articles and four words or fewer; the three renames in §1 come first |
