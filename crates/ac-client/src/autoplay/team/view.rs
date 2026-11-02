@@ -344,6 +344,25 @@ impl TeamView {
 }
 
 impl Client {
+    /// The walk to `mate`, to within `within`: where the world shows it, else where the team says
+    /// (its cell, or the block under it when the team names none).
+    pub(crate) fn mate_goal(&self, mate: &Mate, within: f32) -> crate::Goal {
+        if self.world.objects.contains_key(&mate.guid) {
+            return crate::Goal::Near {
+                guid: mate.guid,
+                within,
+            };
+        }
+        let place = match mate.cell {
+            0 => self.place_at(mate.world),
+            cell => ac_world::Place {
+                at: mate.world,
+                cell,
+            },
+        };
+        crate::Goal::At { place, within }
+    }
+
     /// This character's skills that its loot rules ask about, for the
     /// others to judge a body on its behalf (see [`Mate::skills`]).
     pub fn skills_its_rules_ask_about(&self) -> Vec<(u32, u32, u32, u32)> {

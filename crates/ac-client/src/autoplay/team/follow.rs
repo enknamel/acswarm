@@ -4,7 +4,7 @@ use super::view::Mate;
 use crate::autoplay::{Doing, Release};
 use crate::did::Did;
 use crate::travel::WALKABLE;
-use crate::{Client, Goal, Owner};
+use crate::{Client, Owner};
 
 /// A leader further off than twice the following distance (and at least
 /// this) is followed before anything else, a fight included; nearer,
@@ -116,7 +116,7 @@ impl Client {
                 if self.autoplay.follow_trip.take().is_some() && self.traveling() {
                     self.cancel_travel();
                 }
-                match self.go(self.step_owner(), self.leader_goal(&leader, keep), now) {
+                match self.go(self.step_owner(), self.mate_goal(&leader, keep), now) {
                     Did::Done if level => {
                         self.stop_at_leader();
                         return false;
@@ -180,28 +180,6 @@ impl Client {
         self.stop_going(Some(self.step_owner()), "beside the leader");
         if self.autoplay.follow_trip.take().is_some() && self.traveling() {
             self.cancel_travel();
-        }
-    }
-
-    /// The walk to `leader`, to within `keep`: where the world shows it, else where the team says
-    /// (its cell, or the block under it when the team names none).
-    fn leader_goal(&self, leader: &Mate, keep: f32) -> Goal {
-        if self.world.objects.contains_key(&leader.guid) {
-            return Goal::Near {
-                guid: leader.guid,
-                within: keep,
-            };
-        }
-        let place = match leader.cell {
-            0 => self.place_at(leader.world),
-            cell => ac_world::Place {
-                at: leader.world,
-                cell,
-            },
-        };
-        Goal::At {
-            place,
-            within: keep,
         }
     }
 
