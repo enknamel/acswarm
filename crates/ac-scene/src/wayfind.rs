@@ -139,17 +139,21 @@ pub fn search(ground: &Ground, nav: &NavGraph, q: &WalkQuery) -> Search {
     }
 }
 
-/// The nodes within `radius` (metres, flat) of `around` on the chunks built so far; once the graph
-/// is built whole, only those joined to a node the body at `from` walks to.
+/// The nodes within `radius` (metres, flat) of `around`; once the graph is built whole, only those
+/// joined to a node the body at `from` walks to. `Err` names the chunks to build first.
 pub fn standable_near(
     ground: &Ground,
     nav: &NavGraph,
     from: (Vec3, u32),
     around: Vec3,
     radius: f32,
-) -> Vec<NavNode> {
+) -> Result<Vec<NavNode>, Vec<(i32, i32)>> {
     let r = (radius / nav.spacing).ceil() as i32;
     let (gx, gy) = nav.column_of(around);
+    let missing = nav.unbuilt(gx - r, gx + r, gy - r, gy + r);
+    if !missing.is_empty() {
+        return Err(missing);
+    }
     let mut out: Vec<u32> = Vec::new();
     for dx in -r..=r {
         for dy in -r..=r {
@@ -181,7 +185,7 @@ pub fn standable_near(
             .unwrap_or_default();
         out.retain(|&id| roots.contains(&nav.component(id)));
     }
-    out.iter().map(|&id| nav.nodes[id as usize]).collect()
+    Ok(out.iter().map(|&id| nav.nodes[id as usize]).collect())
 }
 
 /// The graph a search runs on, and what it does on reaching columns not built yet.

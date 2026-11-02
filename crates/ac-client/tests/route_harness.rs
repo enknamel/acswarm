@@ -5,6 +5,8 @@
 use ac_client::walk_trial::{
     named, plan_first, random_trials, run, run_on, standing_at, Outcome, Spread, Trial,
 };
+use ac_nav::routing::Planned;
+use ac_world::Place;
 use glam::Vec3;
 
 const LEVEL: i32 = 30;
@@ -210,4 +212,32 @@ fn a_corpse_on_the_floor_below_is_walked_down_to() {
 fn a_jeweler_on_a_deck_is_walked_up_to() {
     let o = run(LEVEL, &stall("F682 Jeweler on a deck"));
     assert!(matches!(o, Outcome::Arrived { .. }), "{o:?}");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_walk_inside_a_building_is_planned_on_the_region_not_the_block() {
+    // The steering's plan is the region's: a route checked to its end, or why there is none. The
+    // walk is reported, not asserted, while the old steering still owns it.
+    let t = stall("9722 Jeweler from inside a building");
+    let mut c = standing_at(LEVEL, &t);
+    let pl = c.player.as_ref().expect("a body");
+    let me = Place {
+        at: pl.world_position(),
+        cell: pl.cell,
+    };
+    let cap = pl.capsule();
+    let goal = Place {
+        at: t.goal,
+        cell: t.goal_cell,
+    };
+    match c.pathfinder.plan(me, goal, t.stop, cap) {
+        Planned::Route(r) => {
+            let end = r.waypoints.last().expect("a route has an end").place.at;
+            assert!(end.distance(t.goal) <= t.stop, "ends at {end:?}");
+        }
+        Planned::NoWay(why) => println!("PLAN no way {why:?}"),
+        Planned::Building(_) => panic!("an offline plan answers once built"),
+    }
+    println!("WALK {:?}", run_on(&mut c, &t));
 }

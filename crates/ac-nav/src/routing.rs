@@ -167,15 +167,18 @@ pub fn plan_built(area: &Area, from: Place, goal: Place, within: f32) -> Planned
     }
 }
 
-/// Where a character can stand within `radius` (metres, flat) of `around`, from the chunks built
-/// so far; once the area is built whole, only where the body at `from` has a way to.
-pub fn standable_near(area: &Area, from: Place, around: Place, radius: f32) -> Vec<Place> {
+/// Where a character can stand within `radius` (metres, flat) of `around`; once the area is built
+/// whole, only where the body at `from` has a way to. `Err` names the chunks to build first.
+pub fn standable_near(
+    area: &Area,
+    from: Place,
+    around: Place,
+    radius: f32,
+) -> Result<Vec<Place>, Vec<(i32, i32)>> {
     area.read_ground(|ground, nav| {
         let start = graph_end(ground, from);
-        wayfind::standable_near(ground, nav, start, around.at, radius)
-            .iter()
-            .map(place_of)
-            .collect()
+        let spots = wayfind::standable_near(ground, nav, start, around.at, radius)?;
+        Ok(spots.iter().map(place_of).collect())
     })
 }
 

@@ -69,6 +69,16 @@ fn can_assemble(from: Place, goal: Place, capsule: &Capsule) -> bool {
         && routing::is_held(&navarea::blocks_for(from.at, goal.at), false, from, goal)
 }
 
+/// What became of a job handed on (see `Pathfinder::dispatch`).
+enum Done {
+    /// Sent to the builder, or held back by [`ASK_EVERY`].
+    Queued,
+    /// Done on the asking thread, on this region.
+    Here(Arc<Region>),
+    /// Done on the asking thread, and no area could be assembled for it.
+    Failed,
+}
+
 /// The builder's answer to a walk asked: the job's number and the plan.
 type Answer = (u64, Planned);
 
@@ -93,12 +103,14 @@ enum Job {
     Assemble(Walk),
     /// Build what a walk on an assembled area needs.
     Build(Arc<Region>, Walk),
+    /// Build these chunks of an assembled area: what a look round the walk's goal needs.
+    Chunks(Arc<Region>, Vec<(i32, i32)>, Walk),
 }
 
 impl Job {
     fn walk(&self) -> &Walk {
         match self {
-            Job::Assemble(w) | Job::Build(_, w) => w,
+            Job::Assemble(w) | Job::Build(_, w) | Job::Chunks(_, _, w) => w,
         }
     }
 }
@@ -202,9 +214,9 @@ impl Pathfinder {
     /// The route from `from` to within `within` (metres, 3D) of `goal` for a body of `capsule`, on
     /// what is built now; `Building` when the area or its chunks are not, which are then queued.
     pub fn plan(&mut self, from: Place, goal: Place, within: f32, capsule: Capsule) -> Planned {
-        let mut tries = 0;
+        let (mut tries, mut held) = (0, None);
         loop {
-            let region = region_for(from, goal, &capsule);
+            let region = held.take().or_else(|| region_for(from, goal, &capsule));
             let planned = match &region {
                 Some(r) => self.read(r).map_or(Planned::Building(Vec::new()), |area| {
                     routing::plan_built(&area, from, goal, within)
@@ -220,14 +232,17 @@ impl Pathfinder {
                 Some(r) => Job::Build(r, w),
                 None => Job::Assemble(w),
             };
-            if !self.dispatch(job, from, goal, within, capsule) {
-                return planned;
+            match self.dispatch(job, from, goal, within, capsule) {
+                Done::Queued => return planned,
+                Done::Here(r) => held = Some(r),
+                Done::Failed => return Planned::NoWay(NoWay::OutOfRegion),
             }
         }
     }
 
     /// Where a character can stand within `radius` (metres, flat) of `around`, from what is built
-    /// (see [`routing::standable_near`]); none while the area is not assembled.
+    /// (see [`routing::standable_near`]); none while the chunks it looks at are not, which are
+    /// then queued.
     pub fn standable_near(
         &mut self,
         from: Place,
@@ -235,17 +250,34 @@ impl Pathfinder {
         radius: f32,
         capsule: Capsule,
     ) -> Vec<Place> {
-        let Some(region) = region_for(from, around, &capsule) else {
-            if can_assemble(from, around, &capsule) {
-                self.send(Job::Assemble, from, around, radius, capsule);
+        let (mut tries, mut held) = (0, None);
+        loop {
+            let region = held.take().or_else(|| region_for(from, around, &capsule));
+            let looked = match &region {
+                Some(r) => self
+                    .read(r)
+                    .map(|area| routing::standable_near(&area, from, around, radius)),
+                None if can_assemble(from, around, &capsule) => None,
+                None => return Vec::new(),
+            };
+            let missing = match looked {
+                Some(Ok(spots)) => return spots,
+                Some(Err(chunks)) => chunks,
+                None => Vec::new(),
+            };
+            if tries == OWN_TRIES {
+                return Vec::new();
             }
-            return Vec::new();
-        };
-        let found = region
-            .area
-            .try_read()
-            .map(|area| routing::standable_near(&area, from, around, radius));
-        found.unwrap_or_default()
+            tries += 1;
+            let job = move |w| match region {
+                Some(r) => Job::Chunks(r, missing, w),
+                None => Job::Assemble(w),
+            };
+            match self.dispatch(job, from, around, radius, capsule) {
+                Done::Here(r) => held = Some(r),
+                Done::Queued | Done::Failed => return Vec::new(),
+            }
+        }
     }
 
     /// A region's area to plan on: waited for by a handle that builds for itself, else `None`
@@ -259,7 +291,7 @@ impl Pathfinder {
     }
 
     /// Have a job done for a walk: here and now by a handle that builds for itself, else queued
-    /// for the builder (see [`send`](Self::send)). Whether it is done.
+    /// for the builder (see [`send`](Self::send)).
     fn dispatch(
         &mut self,
         job: impl FnOnce(Walk) -> Job,
@@ -267,10 +299,10 @@ impl Pathfinder {
         goal: Place,
         within: f32,
         capsule: Capsule,
-    ) -> bool {
+    ) -> Done {
         if !self.builds_itself {
             self.send(job, from, goal, within, capsule);
-            return false;
+            return Done::Queued;
         }
         let walk = Walk {
             who: self.id,
@@ -285,8 +317,8 @@ impl Pathfinder {
         let assets = self
             .own
             .get_or_insert_with(|| Assets::with_archives(archives.clone()));
-        run(assets, job(walk));
-        true
+        // The region built on is kept, not found again: other walks may push it out meanwhile.
+        run(assets, job(walk), true).map_or(Done::Failed, Done::Here)
     }
 
     /// Queue a job for a walk, unless one went out within [`ASK_EVERY`].
@@ -466,7 +498,7 @@ fn build_forever(archives: SharedArchives, jobs: Receiver<Job>) {
         let last = batch.iter().map(|j| j.walk().number).max().unwrap_or(0);
         for job in batch {
             let number = job.walk().number;
-            run(&assets, job);
+            let _ = run(&assets, job, false);
             DONE.fetch_max(number, Ordering::Release);
         }
         // The jobs dropped for newer ones are done with too.
@@ -475,10 +507,16 @@ fn build_forever(archives: SharedArchives, jobs: Receiver<Job>) {
 }
 
 /// Build what a walk needs, planning on what is built and building what that names, until it
-/// names nothing more.
-fn run(assets: &Assets, job: Job) {
+/// names nothing more; the region built on, if one was assembled. `hold`: see [`build_chunk`].
+fn run(assets: &Assets, job: Job, hold: bool) -> Option<Arc<Region>> {
     let (region, walk) = match job {
         Job::Build(region, walk) => (region, walk),
+        Job::Chunks(region, chunks, _) => {
+            for &c in &chunks {
+                build_chunk(&region, c, hold);
+            }
+            return Some(region);
+        }
         Job::Assemble(walk) => {
             let found = region_for(walk.from, walk.goal, &walk.capsule);
             let can = || can_assemble(walk.from, walk.goal, &walk.capsule);
@@ -486,7 +524,7 @@ fn run(assets: &Assets, job: Job) {
                 Some(region) => (region, walk),
                 None => {
                     answer(&walk, Planned::NoWay(NoWay::OutOfRegion));
-                    return;
+                    return None;
                 }
             }
         }
@@ -496,12 +534,15 @@ fn run(assets: &Assets, job: Job) {
     let planned = loop {
         let planned = match region.area.read() {
             Ok(area) => routing::plan_built(&area, walk.from, walk.goal, walk.within),
-            Err(_) => return,
+            Err(_) => return None,
         };
         let Planned::Building(chunks) = &planned else {
             break planned;
         };
-        let fresh = chunks.iter().filter(|&&c| build_chunk(&region, c)).count();
+        let fresh = chunks
+            .iter()
+            .filter(|&&c| build_chunk(&region, c, hold))
+            .count();
         if fresh == 0 {
             break planned;
         }
@@ -512,6 +553,7 @@ fn run(assets: &Assets, job: Job) {
         started.elapsed()
     );
     answer(&walk, planned);
+    Some(region)
 }
 
 /// Send a walk asked its answer. A handle that has gone is nobody's loss.
@@ -554,8 +596,20 @@ fn assemble(assets: &Assets, walk: &Walk) -> Option<Arc<Region>> {
 }
 
 /// Build chunk `c` of a region: made under a read lock, so frames plan on meanwhile, and added
-/// under a write lock. Whether it was new.
-fn build_chunk(region: &Region, c: (i32, i32)) -> bool {
+/// under a write lock; with `hold`, made under the write lock too, so no other builder's chunk
+/// voids it (a handle that builds for itself must answer now). Whether it was new.
+fn build_chunk(region: &Region, c: (i32, i32), hold: bool) -> bool {
+    if hold {
+        let Ok(mut area) = region.area.write() else {
+            return false;
+        };
+        let before = area.nav.chunk_count();
+        area.with_ground(|ground, nav| {
+            let built = nav.build_chunk(ground, c);
+            nav.apply(built);
+        });
+        return area.nav.chunk_count() > before;
+    }
     let built = match region.area.read() {
         Ok(area) => area.read_ground(|ground, nav| nav.build_chunk(ground, c)),
         Err(_) => return false,
@@ -584,5 +638,5 @@ fn build_idle() -> bool {
         Ok(area) => area.nav.next_unbuilt(),
         Err(_) => None,
     };
-    next.is_some_and(|c| build_chunk(&region, c))
+    next.is_some_and(|c| build_chunk(&region, c, false))
 }
