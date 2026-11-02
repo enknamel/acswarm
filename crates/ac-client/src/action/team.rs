@@ -33,7 +33,7 @@ pub(super) fn role(c: &mut Client, role: Role) -> Outcome {
 pub(super) fn follow(c: &mut Client, on: bool) -> Outcome {
     c.autoplay.config.team.follow = on;
     if !on {
-        c.stop_going(None, "follow off");
+        c.stop_following();
     }
     Ok(())
 }

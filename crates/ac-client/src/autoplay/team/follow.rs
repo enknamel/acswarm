@@ -2,8 +2,9 @@ use std::time::{Duration, Instant};
 
 use super::view::Mate;
 use crate::autoplay::{Doing, Release};
+use crate::did::Did;
 use crate::travel::WALKABLE;
-use crate::Client;
+use crate::{Client, Goal, Owner};
 
 /// A leader further off than twice the following distance (and at least
 /// this) is followed before anything else, a fight included; nearer,
@@ -20,6 +21,9 @@ pub fn follow_break(keep: f32) -> f32 {
 /// the steering find the way; further (the leader took a portal) a
 /// journey is planned.
 const FOLLOW_WALK: f32 = 120.0;
+
+/// The STEPS rows that follow a leader, whose walks are following's (`Owner::Step`).
+pub(crate) const FOLLOW_ROWS: [&str; 2] = ["catch up", "follow"];
 
 impl Client {
     /// The mate this character takes its lead from: the team is on, this
@@ -92,54 +96,61 @@ impl Client {
         }
         let level = !leader.flying || (leader.world.z - me.z).abs() < 2.0;
         if flat <= keep && level {
-            if self.going.take().is_some() {
-                self.steering.reset();
-            }
-            self.autoplay.follow_walk = None;
-            if self.autoplay.follow_trip.take().is_some() && self.traveling() {
-                self.cancel_travel();
-            }
+            self.stop_at_leader();
             return false;
         }
         if far {
             // Whatever we were fighting is not worth losing the leader.
             self.let_go(Release::Targets);
         }
-        // Only as far as `head_for` walks: past `WALKABLE` it plans a
-        // journey of its own, which the record below would not name.
+        let goal = glam::Vec2::new(leader.world.x, leader.world.y);
+        let mut refused = None;
         if flat < FOLLOW_WALK || (leader.flying && flat <= WALKABLE) {
-            // Straight after it: the steering finds the way round
-            // walls, and flight has nothing in the way.
-            if self.autoplay.follow_trip.take().is_some() && self.traveling() {
-                self.cancel_travel();
+            // A journey after it planned for a refused walk is kept while it is bound for it.
+            let on_the_way = self.is_follow_journey()
+                && self
+                    .autoplay
+                    .follow_trip
+                    .is_some_and(|g| g.distance(goal) <= 30.0);
+            if !on_the_way {
+                if self.autoplay.follow_trip.take().is_some() && self.traveling() {
+                    self.cancel_travel();
+                }
+                match self.go(self.step_owner(), self.leader_goal(&leader, keep), now) {
+                    Did::Done if level => {
+                        self.stop_at_leader();
+                        return false;
+                    }
+                    // Flown, a walk goes straight there whatever the planner says.
+                    Did::Blocked(why) if !self.noclip() => refused = Some(why.what),
+                    _ => {
+                        // Past the region the slot set off on a journey: following's, for a stop.
+                        if self.traveling() {
+                            self.autoplay.follow_trip = self.travel_goal_xy();
+                        }
+                    }
+                }
             }
-            self.head_for(leader.world, keep, "the leader");
-            // What a stop takes back, while it is still this walk (see
-            // `Client::stop_following`).
-            let planted = self.going.as_ref().is_some_and(|g| g.is_to(leader.world));
-            self.autoplay.follow_walk = planted.then_some(leader.world);
-        } else {
-            // Out of sight (through a portal, say): a journey there,
-            // planned again once it has moved on. Not while it stands
-            // somewhere a journey cannot end -- inside the Town Network
-            // hub, or a dungeon -- in another landblock: it will come
-            // out, and its last position outside is followed meanwhile.
-            self.going = None;
-            self.autoplay.follow_walk = None;
+        }
+        if refused.is_some() || flat >= FOLLOW_WALK && !(leader.flying && flat <= WALKABLE) {
+            // Out of sight (through a portal, say), or no walk there: a journey, planned again once
+            // it has moved on. Not while it stands where a journey cannot end -- inside the Town
+            // Network hub, or a dungeon -- in another landblock: it will come out.
             let indoors = leader.cell & 0xFFFF >= 0x100;
             let my_block = self.player.as_ref().map(|p| p.landblock());
             if indoors && my_block != Some(leader.cell & 0xFFFF_0000) {
+                self.stop_going(Some(self.step_owner()), "the leader is indoors elsewhere");
                 self.autoplay
                     .say(Doing::Following, "waiting for the leader to come out");
                 return false;
             }
-            let goal = glam::Vec2::new(leader.world.x, leader.world.y);
             let stale = self
                 .autoplay
                 .follow_trip
                 .is_none_or(|g| g.distance(goal) > 30.0);
             let due = self.autoplay.next_follow_plan.is_none_or(|t| now >= t);
             if (stale || !self.traveling()) && due {
+                self.stop_going(Some(self.step_owner()), "a journey after the leader");
                 // On the leader's way, whatever the leader is on (see
                 // `Client::on_its_way`): not a road of its own.
                 let planned = self.travel_about(goal);
@@ -153,22 +164,55 @@ impl Client {
                 let wait = if planned { 3 } else { 10 };
                 self.autoplay.next_follow_plan = Some(now + Duration::from_secs(wait));
             }
+            if let Some(why) = refused.filter(|_| !self.traveling()) {
+                self.autoplay
+                    .note(format!("no way to {} ({why})", leader.name), now);
+                return false;
+            }
         }
         self.autoplay
             .say(Doing::Following, format!("following {}", leader.name));
         true
     }
 
-    /// Let go of the walk and the journey following planted, each only while it is still following's
-    /// (`Client.going` is shared with looting, visits and town runs); what others planted stays.
-    pub(crate) fn stop_following(&mut self) {
+    /// Standing beside the leader: following's walk and its journey after it end.
+    fn stop_at_leader(&mut self) {
+        self.stop_going(Some(self.step_owner()), "beside the leader");
+        if self.autoplay.follow_trip.take().is_some() && self.traveling() {
+            self.cancel_travel();
+        }
+    }
+
+    /// The walk to `leader`, to within `keep`: where the world shows it, else where the team says
+    /// (its cell, or the block under it when the team names none).
+    fn leader_goal(&self, leader: &Mate, keep: f32) -> Goal {
+        if self.world.objects.contains_key(&leader.guid) {
+            return Goal::Near {
+                guid: leader.guid,
+                within: keep,
+            };
+        }
+        let place = match leader.cell {
+            0 => self.place_at(leader.world),
+            cell => ac_world::Place {
+                at: leader.world,
+                cell,
+            },
+        };
+        Goal::At {
+            place,
+            within: keep,
+        }
+    }
+
+    /// Let go of following's walk (its rows' own, `FOLLOW_ROWS`) and the journey it planned while
+    /// still following's; what others planted stays.
+    pub fn stop_following(&mut self) {
         let mut let_go = false;
-        if let Some(at) = self.autoplay.follow_walk.take() {
-            if self.going.as_ref().is_some_and(|g| g.is_to(at)) {
-                self.going = None;
-                self.steering.reset();
-                let_go = true;
-            }
+        let owner = self.going.as_ref().map(|g| g.owner);
+        if let Some(o) = owner.filter(|o| FOLLOW_ROWS.iter().any(|r| *o == Owner::Step(r))) {
+            self.stop_going(Some(o), "no leader followed");
+            let_go = true;
         }
         // The trip alone: a visit riding on it is its own, and plans
         // again once the trip is gone.

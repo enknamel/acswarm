@@ -10,6 +10,13 @@ const LEADER: u32 = 0x5000_0002;
 const HOLTBURG: u32 = 0xA9B4_0019;
 
 #[test]
+fn following_rows_are_rows_of_the_table() {
+    for row in FOLLOW_ROWS {
+        assert!(crate::steps::named(row).is_some(), "{row} is no STEPS row");
+    }
+}
+
+#[test]
 fn a_follower_strays_no_further_than_twice_its_distance() {
     assert_eq!(follow_break(4.0), 10.0);
     assert_eq!(follow_break(8.0), 16.0);
@@ -187,26 +194,62 @@ fn every_way_following_ends_lets_the_leader_go() {
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
 fn a_walk_another_goal_planted_after_following_outlives_the_stop() {
-    // The walk is shared: looting, visits and town runs plant it too. Following planted first,
-    // so the stop has a record to act on, and a corpse walk replaced it.
+    // The slot is shared: looting, visits and town runs walk in it too. Following walked first,
+    // and a walk by another owner took the slot from it; a stop ends following's only.
     let mut c = following_over(testkit::game_data(), 30.0);
     c.autoplay.config.enabled = false;
     let now = Instant::now();
     c.tick_autoplay(now);
     assert!(
-        c.autoplay.follow_walk.is_some(),
-        "following recorded no walk"
+        matches!(
+            c.going.as_ref().map(|g| g.owner),
+            Some(crate::Owner::Step(_))
+        ),
+        "following walked nowhere"
     );
     let me = c.my_position().expect("on its feet");
     let corpse = me + Vec3::new(0.0, 12.0, 0.0);
-    assert!(c.head_for(corpse, 1.0, "a corpse").acting());
+    let goal = crate::Goal::At {
+        place: c.place_at(corpse),
+        within: 1.0,
+    };
+    assert!(c.go(crate::Owner::Hand, goal, now).acting());
     c.autoplay.config.team.follow = false;
     c.tick_autoplay(now + Duration::from_millis(100));
-    assert_eq!(c.autoplay.follow_walk, None, "the record outlived the stop");
     assert!(
         c.going.as_ref().is_some_and(|g| g.is_to(corpse)),
         "the stop took the walk to the corpse"
     );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_follower_with_no_walk_to_its_leader_plans_a_journey() {
+    // The leader up on the Tusker ground's ledge (0x5C49), which no walk reaches: the follower is
+    // told so on its first ask and sets off on a journey after it instead, following's own.
+    let (mut c, ledge) = testkit::under_the_ledge(20);
+    c.autoplay.config.enabled = true;
+    let team = &mut c.autoplay.config.team;
+    team.enabled = true;
+    team.follow = true;
+    team.lead = false;
+    c.autoplay.team = testkit::view_of(vec![Mate {
+        health: 1.0,
+        world: ledge.at,
+        cell: ledge.cell,
+        leader: true,
+        leads: true,
+        ..testkit::mate(LEADER, "Verity")
+    }]);
+    let now = Instant::now();
+    assert!(c.autoplay_follow(now, false), "it gave the leader up");
+    assert!(!c.is_walking(), "the slot walks at the ledge");
+    assert!(c.is_follow_journey(), "no journey after the leader");
+    // Asked again, the journey is kept: no walk is asked for, so nothing ends it.
+    let plans = c.pathfinder.plans;
+    assert!(c.autoplay_follow(now + Duration::from_millis(100), false));
+    assert!(c.is_follow_journey(), "the journey was ended");
+    assert_eq!(c.pathfinder.plans, plans, "the walk was planned again");
 }
 
 #[test]
@@ -233,7 +276,7 @@ fn a_journey_another_goal_planned_after_following_outlives_the_stop() {
 
 #[test]
 fn a_flying_leader_past_a_walk_is_followed_by_a_journey_a_stop_ends() {
-    // `head_for` plans a journey of its own past `WALKABLE`, which no record named.
+    // The slot plans a journey of its own past the region: following's for a stop.
     let mut c = following(WALKABLE + 50.0);
     c.autoplay.team.mates[0].flying = true;
     let now = Instant::now();
@@ -386,10 +429,11 @@ fn a_follower_takes_up_no_journey_of_its_own_beside_its_leader() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_journey_broken_off_while_following_is_not_taken_up_after_a_stop() {
     // Nothing is put aside while led: a journey another planted -- a script's, say -- that a fight
     // breaks off while "follow" (50) has every tick would be walked off on once following stopped.
-    let mut c = following(8.0);
+    let mut c = following_over(testkit::game_data(), 8.0);
     let t = ticks(&mut c, Instant::now(), 1);
     let me = c.my_position().expect("on its feet").truncate();
     let away = me + Vec2::new(0.0, 300.0);

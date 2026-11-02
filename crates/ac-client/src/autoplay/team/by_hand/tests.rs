@@ -44,7 +44,12 @@ fn tick(c: &mut Client) -> u32 {
 /// A character on its feet in the Holtburg field, autoplay off, with a
 /// leader `away` metres east.
 fn played_by_hand(away: f32) -> Client {
-    let mut c = testkit::offline_client();
+    played_by_hand_over(testkit::no_data(), away)
+}
+
+/// [`played_by_hand`] over `assets`: the game's, for a walk the region planner must hold.
+fn played_by_hand_over(assets: std::rc::Rc<ac_scene::Assets>, away: f32) -> Client {
+    let mut c = Client::offline(assets);
     testkit::stand(&mut c, 0xA9B4_0019, Vec3::new(84.0, 84.0, 94.0));
     c.world.player_guid = Some(testkit::ME);
     c.autoplay.config.enabled = false;
@@ -53,8 +58,9 @@ fn played_by_hand(away: f32) -> Client {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_character_played_by_hand_still_follows_its_leader() {
-    let mut c = played_by_hand(30.0);
+    let mut c = played_by_hand_over(testkit::game_data(), 30.0);
     assert!(c.going.is_none(), "nothing to walk to yet");
     c.tick_autoplay(Instant::now());
     assert!(
@@ -248,9 +254,16 @@ fn no_errand_of_its_own_is_started_while_the_player_plays() {
         !c.autoplay.growth.town_run_under_way(),
         "it set off on a town run"
     );
-    assert!(!c.traveling(), "it set off somewhere of its own");
+    // A journey is following's when no walk reaches the leader (offline, or in the rock).
+    assert!(
+        !c.traveling() || c.is_follow_journey(),
+        "it set off somewhere of its own"
+    );
     assert_eq!(c.autoplay.step, None, "a step of the table claimed a tick");
-    assert!(c.going.is_some(), "and yet it did keep up with its leader");
+    assert!(
+        c.going.is_some() || c.is_follow_journey(),
+        "and yet it did keep up with its leader"
+    );
     // The control: the same character, the same moment, the rules on.
     // The table had a row worth running all along, so the count above is
     // worth something.
@@ -286,9 +299,16 @@ fn its_player_keeps_the_legs_and_the_hands() {
         "the rules sent the server something while the player was playing"
     );
     assert!(c.hunting_ground().is_none(), "it chose a hunting ground");
-    assert!(!c.traveling(), "it set off somewhere of its own");
+    // A journey is following's when no walk reaches the leader (offline, or in the rock).
+    assert!(
+        !c.traveling() || c.is_follow_journey(),
+        "it set off somewhere of its own"
+    );
     assert_eq!(c.autoplay.step, None, "a step of the table claimed a tick");
-    assert!(c.going.is_some(), "and yet it did keep up with its leader");
+    assert!(
+        c.going.is_some() || c.is_follow_journey(),
+        "and yet it did keep up with its leader"
+    );
     // The same character with the rules on: they were live all along and
     // had plenty to do, which is what the count above is worth.
     c.autoplay.config.enabled = true;

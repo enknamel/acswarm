@@ -437,7 +437,7 @@ impl Api for CtxApi<'_, '_> {
         let c = self.client();
         c.autoplay.config.team.follow = on;
         if !on {
-            c.stop_going(None, "follow off");
+            c.stop_following();
         }
         on
     }
