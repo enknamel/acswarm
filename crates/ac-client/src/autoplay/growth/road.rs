@@ -158,6 +158,13 @@ impl Client {
 
     // ---- journeys -------------------------------------------------
 
+    /// Whether the journey under way is an errand's walk to `goal`: the running row's own, one to
+    /// that goal (taken over), or one no row owns, which walks on by itself and is waited out.
+    pub(super) fn is_errand_journey(&mut self, goal: Goal) -> bool {
+        self.traveling()
+            && (self.is_own_journey() || self.keep_journey_to(goal) || self.journey_row().is_none())
+    }
+
     /// Set off for `goal`. From inside a building the planner sees no
     /// way out but a portal, so the walk begins with the spot the
     /// character last stood outdoors, and the journey proper follows

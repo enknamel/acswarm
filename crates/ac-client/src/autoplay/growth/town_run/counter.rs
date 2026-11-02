@@ -133,7 +133,11 @@ impl Client {
                         Some("was too long a walk"),
                     ));
                 }
-                if self.traveling() || self.grow_travel_on() {
+                let counter = crate::Goal::At {
+                    place: counter_place(run.at),
+                    within: VENDOR_REACH,
+                };
+                if self.is_errand_journey(counter) || self.grow_travel_on() {
                     self.autoplay.say(
                         Doing::Shopping,
                         format!(
@@ -155,9 +159,10 @@ impl Client {
                     .walked_on
                     .is_some_and(|t| now.duration_since(t) < WALK_ON_EVERY);
                 // Once walking up to the counter, the walk-up is the judge of getting there.
+                // Another row's journey elsewhere is no walk to the counter: this one is walked on.
                 match on_the_way(
                     away <= VENDOR_REACH || run.walking_up,
-                    self.journey_broken_off(),
+                    self.journey_broken_off() || self.traveling(),
                     busy,
                     lately,
                 ) {

@@ -172,6 +172,10 @@ impl Client {
         let here = cell >> 16;
         // On the way: keep going, and notice arriving.
         if let Some((lb, at, name)) = self.autoplay.growth.bound.clone() {
+            let ground = crate::Goal::At {
+                place: ground_place(lb, at),
+                within: GROUND_REACH,
+            };
             let too_long = self.autoplay.growth.bound_since.is_some_and(|t| {
                 now.duration_since(t) > self.autoplay.growth.bound_limit.unwrap_or(WALK_TIMEOUT)
             });
@@ -181,7 +185,7 @@ impl Client {
                     now,
                 );
                 self.cancel_travel();
-            } else if self.traveling() || self.grow_travel_on() {
+            } else if self.is_errand_journey(ground) || self.grow_travel_on() {
                 self.autoplay.say(
                     Doing::Traveling,
                     format!("going to hunt {name} ({})", about(at.distance(me))),
@@ -218,7 +222,9 @@ impl Client {
                 .growth
                 .bound_walked_on
                 .is_some_and(|t| now.duration_since(t) < WALK_ON_EVERY);
-            match on_the_way(there, self.journey_broken_off(), busy, lately) {
+            // Another row's journey elsewhere is no walk to the ground: this one is walked on.
+            let broken_off = self.journey_broken_off() || self.traveling();
+            match on_the_way(there, broken_off, busy, lately) {
                 OnTheWay::Wait => return true,
                 OnTheWay::WalkOn => {
                     if self.grow_travel(ground_place(lb, at), GROUND_REACH, now) {
@@ -269,9 +275,16 @@ impl Client {
             }
             self.autoplay.growth.looking_to = None;
         }
-        // A walk already under way is the looking about: it is not cut
-        // short to start another.
+        // A walk of its own already under way is the looking about: it is not cut short to start
+        // another. Another row's is that row's.
         if self.traveling() {
+            if self.is_own_journey() {
+                self.autoplay.say(
+                    Doing::Traveling,
+                    "nothing in sight; looking about the ground",
+                );
+                return true;
+            }
             return false;
         }
         let area = self.autoplay.config.fight.area.clone();

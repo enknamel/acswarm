@@ -124,7 +124,8 @@ pub struct Travel {
     pub(crate) recall_sent: Option<(u32, Vec3, Instant)>,
     /// Where the journey is bound (always `Goal::At`), to replan around a refusal.
     goal: Option<Goal>,
-    /// Who set the journey off: a journey refused is kept refused for it (`Client.refusals`).
+    /// Whose journey it is: the STEPS row that set it off or took it over, whose stretches the slot
+    /// walks (`Client::journey_owner`); a journey refused is kept refused for it (`Client.refusals`).
     owner: Option<Owner>,
     /// A step was left out: the next frame plans the journey again from where the body stands.
     pub(crate) replan_due: bool,
@@ -219,9 +220,13 @@ impl Client {
         self.journey_to_goal(Goal::At { place, within })
     }
 
-    /// [`journey_to`](Self::journey_to) a goal: a place and how near, set off for the running row.
+    /// [`journey_to`](Self::journey_to) a goal: a place and how near, set off for the running row;
+    /// the journey under way to it is taken over, not planned again.
     fn journey_to_goal(&mut self, goal: Goal) -> bool {
         self.drop_visit("travelling somewhere else");
+        if self.keep_journey_to(goal) {
+            return true;
+        }
         let owner = self.step_owner();
         // The frame's clock, or the wall's when no frame has run since it was set.
         let now = self.frame_at.max(Instant::now());
@@ -541,6 +546,54 @@ impl Client {
     /// The journey's goal: its place, in its cell, and how near.
     pub fn journey_goal(&self) -> Option<Goal> {
         self.travel.goal
+    }
+
+    /// The STEPS row whose journey is under way; `None` for one no row owns (a script's, a visit's).
+    pub(crate) fn journey_row(&self) -> Option<&'static str> {
+        match self.travel.owner.filter(|_| self.traveling())? {
+            Owner::Step(row) => Some(row),
+            Owner::Journey | Owner::Visit | Owner::Script | Owner::Hand => None,
+        }
+    }
+
+    /// Who the journey's stretches are walked for: its row, else `Owner::Journey`.
+    pub(crate) fn journey_owner(&self) -> Owner {
+        self.journey_row().map_or(Owner::Journey, Owner::Step)
+    }
+
+    /// Whether the journey under way is the running row's (outside any row, one of no row).
+    pub(crate) fn is_own_journey(&self) -> bool {
+        self.traveling() && self.journey_row() == self.autoplay.running
+    }
+
+    /// Take the journey under way for the running row: its stretches are walked for that row.
+    pub(crate) fn keep_journey(&mut self) {
+        self.take_journey(self.step_owner());
+    }
+
+    /// Take the journey under way for `owner`, if one is, saying so when its row changes.
+    pub(crate) fn take_journey(&mut self, owner: Owner) {
+        if !self.traveling() {
+            return;
+        }
+        let was = self.journey_owner();
+        self.travel.owner = Some(owner);
+        if self.journey_owner() != was {
+            tracing::info!(
+                "travel: {} takes the journey from {}",
+                self.journey_owner().label(),
+                was.label()
+            );
+        }
+    }
+
+    /// Whether a journey to `goal` is under way, taken over for the running row if so.
+    pub(crate) fn keep_journey_to(&mut self, goal: Goal) -> bool {
+        let bound = self.traveling() && self.travel.goal.is_some_and(|g| g.is_same(goal));
+        if bound {
+            self.keep_journey();
+        }
+        bound
     }
 
     /// The place the trip planner is told for `goal`: a building's room is planned as the

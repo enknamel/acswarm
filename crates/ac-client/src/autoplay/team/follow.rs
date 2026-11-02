@@ -88,6 +88,10 @@ impl Client {
         if urgent && !far {
             return false;
         }
+        // Following's journey is walked for whichever of its rows runs now.
+        if self.is_follow_journey() {
+            self.keep_journey();
+        }
         let level = !leader.flying || (leader.world.z - me.z).abs() < 2.0;
         if flat <= keep && level {
             self.stop_at_leader();

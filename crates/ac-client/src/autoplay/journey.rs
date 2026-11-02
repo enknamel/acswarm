@@ -19,14 +19,19 @@ impl Client {
     /// Pick the journey up again after a fight, once there is nothing
     /// else to do.
     pub(crate) fn autoplay_resume_journey(&mut self) -> bool {
-        let Some(goal) = self.autoplay.resume_trip else {
-            return false;
-        };
         // A follower's way is its leader's: one left from before (its own town run's) is let go.
         if self.is_led() {
             self.autoplay.resume_trip = None;
             return false;
         }
+        // Picked up, it is this row's to walk until it ends.
+        if self.is_own_journey() {
+            self.autoplay.say(Doing::Traveling, "back on the road");
+            return true;
+        }
+        let Some(goal) = self.autoplay.resume_trip else {
+            return false;
+        };
         if self.traveling() || self.attack_target.is_some() || self.autoplay.casting_at.is_some() {
             return false;
         }

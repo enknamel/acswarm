@@ -273,6 +273,31 @@ fn a_follower_with_no_walk_to_its_leader_is_refused_a_journey_too() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_journey_carried_by_another_row_is_claimed() {
+    // Catch up sets off after a leader 400 m off; the follow row, running next, takes the journey
+    // over, and its stretches are walked for "follow".
+    let mut c = following_over(testkit::game_data(), 400.0);
+    c.autoplay.running = Some("catch up");
+    assert!(c.autoplay_follow(Instant::now(), true), "no catching up");
+    assert_eq!(c.journey_row(), Some("catch up"));
+    c.autoplay.running = Some("follow");
+    assert!(c.autoplay_follow(Instant::now(), false), "no following");
+    c.autoplay.running = None;
+    assert_eq!(c.journey_row(), Some("follow"), "not claimed");
+    let start = c.my_position().expect("on its feet");
+    let t0 = Instant::now();
+    for frame in 0..100 {
+        let now = t0 + Duration::from_millis(50 * frame);
+        c.tick_player(crate::player::Input::default(), 0.05, now);
+    }
+    let stretch = c.going.as_ref().filter(|g| g.journey).map(|g| g.owner);
+    assert_eq!(stretch, Some(crate::Owner::Step("follow")));
+    let moved = c.my_position().expect("on its feet").distance(start);
+    assert!(moved > 10.0, "walked {moved:.1} m in 5 s");
+}
+
+#[test]
 fn a_journey_another_goal_planned_after_following_outlives_the_stop() {
     // A town run's journey, say, planned over the one after the leader.
     let mut c = following(400.0);
