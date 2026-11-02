@@ -354,7 +354,7 @@ impl<'a> Ground<'a> {
     }
 
     /// [`stride_toward`](Self::stride_toward) stepping on `u`, gathered again [`SWEPT_SPAN`] on
-    /// whenever a step leaves it (each scans only what lies near it); each stood on goes to `track`.
+    /// whenever a step leaves it (each scans only what lies near it); each step goes to `track`.
     #[allow(clippy::too_many_arguments)] // the walk test's own inputs, and where its steps go
     fn stride_over<'g>(
         &'g self,

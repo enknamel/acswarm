@@ -65,7 +65,7 @@ impl Course {
     }
 
     /// How far `p` lies off leg `i` (into waypoint `i`) on the flat, when it is within the leg's
-    /// half-width (the graph's spacing at its end) and on the floor walked; a drop's is either end's.
+    /// half-width (the graph's spacing at its end) and on the floor walked (a drop's: either end's).
     fn off_leg(&self, i: usize, p: Vec3) -> Option<f32> {
         let w = self.waypoints.get(i)?;
         let a = if i == 0 {
@@ -333,7 +333,7 @@ impl Steering {
                     {
                         return self.refuse(goal, Unreachable::Stalled);
                     } else {
-                        // Planned again for a moved goal, the clock runs on: chasing it is not progress.
+                        // Planned again for a moved goal the clock runs on: chasing is no progress.
                         if let (Replan::Moved, Some(old)) = (why, self.route.as_ref()) {
                             c.since = old.since;
                         }
@@ -362,8 +362,8 @@ impl Steering {
         }
     }
 
-    /// Ask for a first plan; again when the goal moved (the course kept), or pushed off the corridor,
-    /// at an end out of reach or stalled (the course dropped). `true` for a stall seen before.
+    /// Ask for a first plan; again when the goal moved (the course kept), or off the corridor, at
+    /// an end out of reach or stalled (the course dropped). `true` for a stall seen before.
     fn notice(&mut self, goal: Place, within: f32, me: Vec3, airborne: bool, now: Instant) -> bool {
         let Some(c) = self.route.as_mut() else {
             self.asking.get_or_insert(Replan::Start);

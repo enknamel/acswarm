@@ -452,8 +452,8 @@ impl Pathfinder {
         });
     }
 
-    /// Whether a walk asked is the last one again (from its start to its goal, within [`ASK_EVERY`])
-    /// or one whose answer, still being planned, will do from here.
+    /// Whether a walk asked is the last one again (its start and goal, within [`ASK_EVERY`]) or
+    /// one whose answer, still being planned, will do from here.
     fn is_repeat(&self, from: Vec3, goal: Vec3, now: Instant) -> bool {
         let pending = self.busy()
             && self.asked.as_ref().is_some_and(|a| {
