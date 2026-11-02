@@ -31,6 +31,7 @@ use serde::{Deserialize, Serialize};
 pub use ac_world::academy::{skip_steps, steps, Kind, Step, LANDBLOCK};
 
 use crate::autoplay::{Doing, Release, CORPSE_REACH};
+use crate::body::server_walk::reached;
 use crate::did::Did;
 use crate::{Client, Goal};
 
@@ -328,11 +329,10 @@ impl State {
         self.stuck = true;
     }
 
-    /// Walk toward `target`: `None` once within `stop` of it (or its walk refused, to act from
-    /// here), else the approach to make.
+    /// Walk toward `target`: `None` once within `stop` of it on its floor (or its walk refused,
+    /// to act from here), else the approach to make.
     fn approach(&mut self, v: &View, target: Vec3, stop: f32, status: String) -> Option<Action> {
-        let flat = glam::Vec2::new(target.x - v.pos.x, target.y - v.pos.y).length();
-        if flat <= stop || self.stuck {
+        if reached(v.pos, target, stop) || self.stuck {
             return None;
         }
         Some(Action::Approach {
@@ -1195,12 +1195,11 @@ impl Client {
             return;
         }
         // Nothing to fight: to the spot, then wait for them to appear.
-        let flat = glam::Vec2::new(centre.x - pos.x, centre.y - pos.y).length();
         let goal = Goal::At {
             place: self.place_at(centre),
             within: REACH,
         };
-        let walking = if flat > REACH {
+        let walking = if !reached(pos, centre, REACH) {
             // No walk there: they are waited for where the character stands.
             !matches!(self.go(self.step_owner(), goal, now), Did::Blocked(_))
         } else {
