@@ -87,7 +87,7 @@ pub(crate) const CORPSE_URGENT: Duration = Duration::from_secs(75);
 /// ever, which is what every corpse that "did not open" turned out to
 /// be. Two and a half metres is inside the use radius of everything
 /// that leaves a body.
-pub(super) const CORPSE_REACH: f32 = 2.5;
+pub(crate) const CORPSE_REACH: f32 = 2.5;
 
 impl Autoplay {
     /// Start on a corpse: asked to open just now, with `allow` for it

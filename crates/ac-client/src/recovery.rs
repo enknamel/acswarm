@@ -25,8 +25,9 @@ use std::time::{Duration, Instant};
 
 use glam::{Vec2, Vec3};
 
-use crate::autoplay::{Doing, Release};
-use crate::Client;
+use crate::autoplay::{Doing, Release, CORPSE_REACH};
+use crate::did::Did;
+use crate::{Client, Goal};
 
 /// A lifestone further than this from the death spot means the
 /// teleport has happened.
@@ -116,6 +117,8 @@ pub struct View {
     pub corpse: Option<(u32, f32)>,
     /// A journey is under way.
     pub traveling: bool,
+    /// The slot follows the recovery's own walk (`Client::go`): it is asked for again each tick.
+    pub walking: bool,
     /// The container open right now, if any.
     pub open: Option<u32>,
     /// Of the items that were wielded at death, the ones now carried in
@@ -240,9 +243,14 @@ impl Recovery {
         self.buffs_done = true;
     }
 
-    /// The driver could plan no way to the spot.
+    /// The driver could plan no way to the spot, or to the corpse.
     pub fn no_way(&mut self) {
         self.abandoned = true;
+    }
+
+    /// The driver sent the open, at `now`: the next waits [`OPEN_EVERY`].
+    pub fn open_sent(&mut self, now: Instant) {
+        self.last_open = Some(now);
     }
 
     /// A line from the server. "You have retained all your items. You do
@@ -405,6 +413,10 @@ impl Recovery {
             self.go(Phase::Looting, now);
             return self.step_looting(v);
         }
+        // The walk there is asked for again while it goes (a walk ends when its step stops asking).
+        if v.walking {
+            return Action::Travel(spot);
+        }
         if self.replans >= MAX_REPLANS {
             tracing::info!("recovery: the way back keeps ending short, leaving the corpse");
             return self.finish(now);
@@ -422,6 +434,11 @@ impl Recovery {
 
     fn step_looting(&mut self, v: &View) -> Action {
         let now = v.now;
+        if self.abandoned {
+            tracing::info!("recovery: no way to the corpse, carrying on without it");
+            self.go(Phase::Rewielding, now);
+            return self.step_rewielding(v);
+        }
         let Some((guid, d)) = v.corpse else {
             // Not in sight: give it a moment to appear, then take it
             // as gone (decayed, or already emptied). One that was seen
@@ -449,6 +466,10 @@ impl Recovery {
             // Seen from further off than it can be opened: walk over.
             self.go(Phase::Returning, now);
             return self.step_returning(v);
+        }
+        // The walk up to it is asked for again while it goes; the open itself waits its turn.
+        if v.walking {
+            return Action::Open(guid);
         }
         if self
             .last_open
@@ -586,6 +607,11 @@ impl Client {
             dungeon_cell: underground.then_some(pl.cell),
             corpse: self.own_corpse(p, rec.death_xy),
             traveling: self.traveling(),
+            walking: self.is_walking()
+                && self
+                    .going
+                    .as_ref()
+                    .is_some_and(|g| g.owner == self.step_owner()),
             open: self.world.open_container.as_ref().map(|c| c.0),
             carried,
             wielded,
@@ -672,12 +698,9 @@ impl Client {
                 if self.combat {
                     self.toggle_combat();
                 }
-                let way = match self.autoplay.recovery.death_cell {
-                    Some(cell) => self.travel_to_in(spot, cell),
-                    None => self.travel_to(spot),
-                };
-                if !way {
-                    tracing::info!("recovery: no way back to the death spot");
+                let goal = self.way_back(spot);
+                if let Did::Blocked(why) = self.go(self.step_owner(), goal, now) {
+                    tracing::info!("recovery: no way back to the death spot: {}", why.what);
                     self.autoplay.recovery.no_way();
                 }
                 true
@@ -688,7 +711,23 @@ impl Client {
                 if self.combat {
                     self.toggle_combat();
                 }
-                self.interact(guid);
+                // Walked to first, to within the use radius (`CORPSE_REACH`), then opened.
+                let goal = Goal::Near {
+                    guid,
+                    within: CORPSE_REACH / 2.0,
+                };
+                match self.go(self.step_owner(), goal, now) {
+                    Did::Done => {
+                        self.stop_going(Some(self.step_owner()), "at the corpse");
+                        self.interact(guid);
+                        self.autoplay.recovery.open_sent(now);
+                    }
+                    Did::Blocked(why) => {
+                        tracing::info!("recovery: no way to the corpse: {}", why.what);
+                        self.autoplay.recovery.no_way();
+                    }
+                    _ => {}
+                }
                 true
             }
             Action::Empty(guid) => {
@@ -741,6 +780,36 @@ impl Client {
         }
     }
 
+    /// The walk back for the corpse: to it when in view (it may lie on another floor), else to the
+    /// death spot on its floor (its dungeon cell's, or the ground there), within [`NEAR`].
+    fn way_back(&mut self, spot: Vec2) -> Goal {
+        let me = self.my_position().unwrap_or_else(|| spot.extend(0.0));
+        if let Some((guid, _)) = self.own_corpse(me, Some(spot)) {
+            return Goal::Near {
+                guid,
+                within: CORPSE_REACH / 2.0,
+            };
+        }
+        let cell = self.autoplay.recovery.death_cell;
+        let assets = self.assets.clone();
+        let z = match cell {
+            Some(c) => self.floor_in_cell(spot, c),
+            None => self
+                .player
+                .as_mut()
+                .and_then(|p| p.ground_height(&assets, spot.x, spot.y, me.z)),
+        };
+        let at = spot.extend(z.unwrap_or(me.z));
+        let place = match cell {
+            Some(cell) => ac_world::Place { at, cell },
+            None => self.place_at(at),
+        };
+        Goal::At {
+            place,
+            within: NEAR,
+        }
+    }
+
     /// Whether the buff rule has nothing left it could usefully do
     /// before the walk back: nothing due, or a wand it cannot wield.
     /// The rule itself pauses between casts, so one quiet tick is not
@@ -790,6 +859,7 @@ mod tests {
             dungeon_cell: None,
             corpse: None,
             traveling: false,
+            walking: false,
             open: None,
             carried: Vec::new(),
             wielded: vec![0x8000_0001, 0x8000_0002],
@@ -1132,6 +1202,46 @@ mod tests {
         v.now = after(t0, 20.0);
         assert_eq!(r.step(&v), Action::Travel(Vec2::new(1000.0, 1000.0)));
         assert_eq!(r.phase, Phase::Returning);
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn a_corpse_is_walked_to_before_it_is_opened() {
+        // Back at the spot, its own corpse 8 m off on the Holtburg field: opened only from within
+        // the use radius, after the slot's walk there.
+        let mut c = crate::testkit::standing_at(0xA9B4_0019, Vec3::new(84.0, 7.1, 94.0));
+        c.world.player_guid = Some(crate::testkit::ME);
+        c.world.stats.name = "Bryn".into();
+        c.autoplay.config.enabled = true;
+        let me = c.my_position().expect("standing");
+        let at = me + Vec3::new(8.0, 0.0, 0.0);
+        let body = 0xC000_0001;
+        let mut o = crate::testkit::corpse(body, "Corpse of Bryn");
+        o.position = crate::testkit::placed(0xA9B4_0019, at);
+        c.world.objects.insert(body, o);
+        let t0 = Instant::now();
+        let r = &mut c.autoplay.recovery;
+        r.phase = Phase::Returning;
+        r.since = t0;
+        r.started = Some(t0);
+        r.death_xy = Some(at.truncate());
+        let dt = 0.05;
+        for frame in 0..(10.0 / dt) as u32 {
+            let now = t0 + Duration::from_secs_f32(frame as f32 * dt);
+            c.tick_autoplay(now);
+            if c.last_used == Some(body) {
+                let me = c.my_position().unwrap();
+                assert!(
+                    me.distance(at) <= CORPSE_REACH,
+                    "opened from {:.1} m",
+                    me.distance(at)
+                );
+                assert!(frame > 0, "opened before any walk");
+                return;
+            }
+            c.tick_player(crate::player::Input::default(), dt, now);
+        }
+        panic!("never opened: {}", c.autoplay.status);
     }
 
     #[test]
