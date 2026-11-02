@@ -57,12 +57,14 @@ fn a_spell_is_not_thrown_through_an_open_doorway_but_a_swing_goes_through() {
 fn a_target_past_a_doorway_is_shot_at_from_its_own_room() {
     let (mut c, spell) = by_the_open_door();
     let rat = crate::testkit::standing_by(&mut c, 0x8000_0001, "Swamp Rat", 7.0);
-    assert!(c.autoplay_approach(rat.guid, "Swamp Rat", How::Spell(spell)));
+    let did = c.autoplay_approach(rat.guid, "Swamp Rat", How::Spell(spell));
+    assert_eq!(did, Did::Acting);
     let spot = c
         .dodge
         .vantage
         .and_then(|(_, _, s)| s)
-        .expect("somewhere to throw from");
+        .expect("somewhere to throw from")
+        .at;
     assert!(!west_of_the_door(spot), "in the rat's room: {spot:?}");
 }
 
@@ -73,12 +75,13 @@ fn a_target_in_a_doorway_is_waited_for_out_of_it() {
     let rat = crate::testkit::standing_by(&mut c, 0x8000_0001, "Swamp Rat", 3.75);
     let how = How::Spell(spell);
     assert!(!c.shot_clears(rat.guid, how), "it stands in the frame");
-    assert!(
+    assert_eq!(
         c.autoplay_approach(rat.guid, "Swamp Rat", how),
+        Did::Acting,
         "waiting for it"
     );
     let (_, _, spot) = c.dodge.pulling.expect("waiting for it");
-    let spot = spot.expect("a spot to wait at");
+    let spot = spot.expect("a spot to wait at").at;
     let door = ac_world::landblock_origin(0x01F6_0000) + Vec3::new(94.75, -60.0, -6.0);
     assert!(west_of_the_door(spot), "on our own side: {spot:?}");
     assert!(
@@ -157,8 +160,9 @@ fn a_caster_in_a_doorway_steps_out_into_the_target_s_room() {
     let (mut c, spell, it) = in_the_0286_doorway(-95.55, -93.75);
     let how = How::Spell(spell);
     assert!(!c.shot_clears(it, how), "from the frame");
-    assert!(
+    assert_eq!(
         c.autoplay_approach(it, "Shore Armoredillo", how),
+        Did::Acting,
         "thrown from the frame"
     );
     let to = c
@@ -179,7 +183,10 @@ fn a_spot_to_throw_from_is_out_of_the_doorway() {
     // Just short of the frame, the armoredillo just past it: not thrown from beside the frame.
     let (mut c, spell, it) = in_the_0286_doorway(-96.25, -94.45);
     let how = How::Spell(spell);
-    assert!(c.autoplay_approach(it, "Shore Armoredillo", how));
+    assert_eq!(
+        c.autoplay_approach(it, "Shore Armoredillo", how),
+        Did::Acting
+    );
     let to = c
         .going
         .as_ref()

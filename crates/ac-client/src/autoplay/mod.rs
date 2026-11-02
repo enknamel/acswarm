@@ -253,8 +253,6 @@ pub struct Autoplay {
     /// last seen to drop: a target that takes no damage for a while is
     /// out of reach, and is let go.
     engaged: Option<(u32, Instant, f32)>,
-    /// The nearest the walk up to the engaged target has come to it.
-    approach_best: Option<(u32, f32)>,
     /// The summoning rules' own state (see `crate::summoning`).
     pub summoning: crate::summoning::State,
     /// Who has attacked the character lately, by name, and when each

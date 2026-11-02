@@ -4,14 +4,12 @@ use super::road_fight_over;
 #[cfg(doc)]
 use crate::autoplay::hear::arrived_unharmed;
 use crate::autoplay::{Autoplay, Doing, Fight, Release};
+use crate::did::Did;
 use crate::refusals;
 use crate::{Client, Stance};
 
 /// A target that takes no damage for this long is let go.
 const STALL_AFTER: Duration = Duration::from_secs(20);
-/// Walking up to a target is working on it while each stretch brings the
-/// character this much nearer than it has been (see [`came_nearer`]).
-const APPROACH_PROGRESS: f32 = 1.0;
 /// And left alone for this long afterwards.
 pub(super) const GIVE_UP_FOR: Duration = refusals::ATTACK_AGAIN;
 /// How far off a creature that has stopped attacking can stand before a
@@ -31,13 +29,6 @@ const MIN_STAND_OFF: f32 = 6.0;
 /// nothing missed.
 pub(crate) fn nothing_arrived(thrown: Option<Instant>, now: Instant) -> bool {
     thrown.is_some_and(|t| now.duration_since(t) > CLOSE_IN_AFTER)
-}
-
-/// Whether the walk up to `guid`, now `distance` off, has come nearer
-/// than the nearest yet (`best`, for whichever target it was) by
-/// [`APPROACH_PROGRESS`].
-fn came_nearer(best: Option<(u32, f32)>, guid: u32, distance: f32) -> bool {
-    best.is_none_or(|(g, d)| g != guid || distance < d - APPROACH_PROGRESS)
 }
 
 /// How near to fight from after nothing has landed from `distance`: half
@@ -177,7 +168,9 @@ impl Client {
                         .say(Doing::Fighting, format!("changing weapon for {name}"));
                     return true;
                 }
-                if missile && self.autoplay_approach(guid, &name, crate::dodge::How::Missile) {
+                if missile
+                    && self.autoplay_approach(guid, &name, crate::dodge::How::Missile) != Did::Done
+                {
                     return true;
                 }
                 self.enter_combat();
@@ -213,7 +206,7 @@ impl Client {
         // A bow refused for range shoots nothing: close in first (see
         // `crate::dodge`). A swing from too far the server walks us
         // in for.
-        if missile && self.autoplay_approach(guid, &name, crate::dodge::How::Missile) {
+        if missile && self.autoplay_approach(guid, &name, crate::dodge::How::Missile) != Did::Done {
             return true;
         }
         self.enter_combat();
@@ -249,11 +242,8 @@ impl Client {
                     self.autoplay.engaged = Some((guid, now, health));
                     self.autoplay.thrown = None;
                     false
-                } else if self.dodge.approaching == Some(guid) && self.walking_nearer(guid) {
-                    // Walking up to it, and getting nearer: not stalled.
-                    // The clock ran through the walk, and a target across a
-                    // few of a dungeon's rooms was given up before the first
-                    // spell went at it.
+                } else if self.dodge.approaching == Some(guid) && self.is_walking() {
+                    // Walking up to it: not stalled. The walk's own give-up is the slot's.
                     self.autoplay.engaged = Some((guid, now, health));
                     false
                 } else if nothing_arrived(
@@ -278,7 +268,6 @@ impl Client {
             _ => {
                 self.autoplay.engaged = Some((guid, now, health));
                 self.autoplay.closing = self.autoplay.closing.filter(|(g, _)| *g == guid);
-                self.autoplay.approach_best = None;
                 false
             }
         }
@@ -341,23 +330,6 @@ impl Client {
             );
         }
         over
-    }
-
-    /// Whether the walk up to `guid` has brought the character nearer to
-    /// it than it has been in this fight (see [`came_nearer`]).
-    fn walking_nearer(&mut self, guid: u32) -> bool {
-        let Some(me) = self.my_position() else {
-            return false;
-        };
-        let Some(at) = self.world.objects.get(&guid).and_then(|o| o.world_pos()) else {
-            return false;
-        };
-        let distance = me.distance(at);
-        if !came_nearer(self.autoplay.approach_best, guid, distance) {
-            return false;
-        }
-        self.autoplay.approach_best = Some((guid, distance));
-        true
     }
 
     /// Nothing is landing on `guid` from where a ranged attacker stands:

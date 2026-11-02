@@ -265,6 +265,13 @@ impl Client {
         }
     }
 
+    /// Whether the slot holds a walk being followed: neither refused nor given up.
+    pub(crate) fn is_walking(&self) -> bool {
+        self.going
+            .as_ref()
+            .is_some_and(|g| g.refused.is_none() && !g.given_up)
+    }
+
     /// The running STEPS row as an owner (`Autoplay.running`); outside a step, `Owner::Hand`.
     pub(crate) fn step_owner(&self) -> Owner {
         self.autoplay.running.map_or(Owner::Hand, Owner::Step)

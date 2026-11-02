@@ -138,7 +138,9 @@ impl Client {
             // From too far off the server refuses the cast outright, and
             // from behind a wall or a rise the bolt strikes that instead:
             // close in first (see `crate::dodge`, `crate::aim`).
-            if self.autoplay_approach(guid, &name, crate::dodge::How::Spell(spell)) {
+            if self.autoplay_approach(guid, &name, crate::dodge::How::Spell(spell))
+                != crate::did::Did::Done
+            {
                 return true;
             }
             // Only what went out is recorded: a cast the client

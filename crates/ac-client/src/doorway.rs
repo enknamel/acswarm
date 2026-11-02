@@ -8,10 +8,12 @@ use std::time::{Duration, Instant};
 use glam::Vec3;
 
 use ac_nav::routing::Planned;
+use ac_world::Place;
 
 use crate::aim;
 use crate::autoplay::Doing;
-use crate::Client;
+use crate::did::Did;
+use crate::{Client, Goal};
 
 /// Doors further than this (metres) from every point of a flight are not looked at: a point is
 /// within [`aim::PIECE`] of the next and a doorway is some three metres across.
@@ -32,6 +34,8 @@ const PULL_LOOKS: usize = 24;
 const PULL_WAIT: Duration = Duration::from_secs(15);
 /// Within this of the waiting spot is standing at it (metres).
 const AT_SPOT: f32 = 1.0;
+/// A walk to a spot by a doorway stops this near it (metres).
+const AT_SPOT_STOP: f32 = 0.3;
 
 /// A door by a flight: where it stands, its turn and scale, and its Setup's box (the doorway).
 #[derive(Debug, Clone, Copy)]
@@ -173,8 +177,10 @@ impl Client {
             tracing::info!("range: standing in a doorway, with nowhere out of it toward {name}");
             return false;
         };
+        if !self.walk_to_spot(spot) {
+            return false;
+        }
         self.dodge.approaching = Some(target);
-        self.head_for(spot, 0.3, name);
         self.autoplay.say(
             Doing::Fighting,
             format!("stepping out of the doorway to cast at {name}"),
@@ -203,10 +209,10 @@ impl Client {
                     "range: {name} stands in a doorway; waiting for it {}",
                     spot.map_or("nowhere: no spot back from it".into(), |s| format!(
                         "at {:.1} {:.1} {:.1}, {:.1} m off",
-                        s.x,
-                        s.y,
-                        s.z,
-                        s.distance(me)
+                        s.at.x,
+                        s.at.y,
+                        s.at.z,
+                        s.at.distance(me)
                     ))
                 );
                 self.dodge.pulling = Some((target, now, spot));
@@ -216,15 +222,17 @@ impl Client {
         let Some(spot) = spot else {
             return false;
         };
-        self.dodge.approaching = Some(target);
-        if spot.distance(me) <= AT_SPOT {
-            self.going = None;
+        if spot.at.distance(me) <= AT_SPOT {
+            self.dodge.approaching = Some(target);
             self.autoplay.say(
                 Doing::Fighting,
                 format!("waiting for {name} to come out of the doorway"),
             );
         } else {
-            self.head_for(spot, 0.3, name);
+            if !self.walk_to_spot(spot) {
+                return false;
+            }
+            self.dodge.approaching = Some(target);
             self.autoplay.say(
                 Doing::Fighting,
                 format!("backing away for {name} to come out of the doorway"),
@@ -233,8 +241,20 @@ impl Client {
         true
     }
 
+    /// Walk to `spot` by the slot for the step running: false when no walk gets there.
+    fn walk_to_spot(&mut self, spot: Place) -> bool {
+        let goal = Goal::At {
+            place: spot,
+            within: AT_SPOT_STOP,
+        };
+        !matches!(
+            self.go(self.step_owner(), goal, self.frame_at),
+            Did::Blocked(_)
+        )
+    }
+
     /// The nearest place on our side of `door`, [`PULL_BACK`] out or more, that a path leads to.
-    fn waiting_spot(&mut self, door: &DoorBox, me: Vec3) -> Option<Vec3> {
+    fn waiting_spot(&mut self, door: &DoorBox, me: Vec3) -> Option<Place> {
         let mine = door.side(me);
         self.nearest_reached(door.at, PULL_BACK + PULL_BAND, me, |s| {
             door.side(s) == mine && s.distance(door.at) >= PULL_BACK
@@ -242,7 +262,7 @@ impl Client {
     }
 
     /// The nearest place out of `door`'s doorway on the side `at` is on, that a path leads to.
-    fn out_of_doorway(&mut self, door: &DoorBox, me: Vec3, at: Vec3) -> Option<Vec3> {
+    fn out_of_doorway(&mut self, door: &DoorBox, me: Vec3, at: Vec3) -> Option<Place> {
         let theirs = door.side(at);
         self.nearest_reached(door.at, DOORWAY_DEPTH + PULL_BAND, me, |s| {
             door.side(s) == theirs && !door.holds(s)
@@ -257,14 +277,13 @@ impl Client {
         radius: f32,
         me: Vec3,
         keep: impl Fn(Vec3) -> bool,
-    ) -> Option<Vec3> {
+    ) -> Option<Place> {
         let mut spots = self.standable_near(around, radius);
         spots.retain(|s| keep(s.at));
         spots.sort_by(|a, b| a.at.distance(me).total_cmp(&b.at.distance(me)));
-        let spot = spots.into_iter().take(PULL_LOOKS).find(|s| {
+        spots.into_iter().take(PULL_LOOKS).find(|s| {
             s.at.distance(me) <= AT_SPOT || matches!(self.plan_walk(*s, AT_SPOT), Planned::Route(_))
-        });
-        spot.map(|s| s.at)
+        })
     }
 }
 
