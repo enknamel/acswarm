@@ -645,8 +645,8 @@ fn astar(
 }
 
 /// String-pulling: from each kept point, on to the furthest of the next [`LOOKAHEAD`] that a
-/// [`can_cut_to`] with [`SMOOTH_MARGIN`] to spare reaches, never across a drop. A waypoint into
-/// another cell than the one before it is a doorway.
+/// halving search finds a [`can_cut_to`] with [`SMOOTH_MARGIN`] to spare reaches, never across a
+/// drop. A waypoint into another cell than the one before it is a doorway.
 fn smooth(
     ground: &Ground,
     berths: &Berths,
@@ -676,21 +676,34 @@ fn smooth(
     let mut i = 0;
     while i < points.len() {
         let last = (i + LOOKAHEAD).min(points.len() - 1);
-        let best = (i + 1..=last)
-            .rev()
-            .find(|&j| {
-                let p = points[j].0;
-                points[i..=j].iter().all(|w| w.1 != EdgeKind::Drop)
-                    && can_cut_to(
-                        ground,
-                        berths,
-                        (from, from_cell),
-                        (p.pos, p.cell),
-                        cap,
-                        &wide,
-                    )
-            })
-            .unwrap_or(i);
+        let cuts = |j: usize| {
+            let p = points[j].0;
+            points[i..=j].iter().all(|w| w.1 != EdgeKind::Drop)
+                && can_cut_to(
+                    ground,
+                    berths,
+                    (from, from_cell),
+                    (p.pos, p.cell),
+                    cap,
+                    &wide,
+                )
+        };
+        // The furthest point is tried, then halved toward the nearest: a few walk tests a point,
+        // not one per point ahead, and every shortcut taken is still walked.
+        let best = if last > i && cuts(last) {
+            last
+        } else {
+            let (mut lo, mut hi) = (i, last);
+            while hi - lo > 1 {
+                let mid = (lo + hi) / 2;
+                if cuts(mid) {
+                    lo = mid;
+                } else {
+                    hi = mid;
+                }
+            }
+            lo
+        };
         let (n, kind) = points[best];
         let kind = match kind {
             EdgeKind::Drop if best == i => EdgeKind::Drop,
