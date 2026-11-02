@@ -22,7 +22,6 @@ impl Client {
     ) -> PlayerFrame {
         self.held_run = input.run;
         self.frame_at = now;
-        self.drop_stale_walk();
         // The user taking the controls ends an overland trip.
         let manual = input.forward != 0.0 || input.strafe != 0.0;
         if manual && (self.traveling() || self.visiting().is_some()) {

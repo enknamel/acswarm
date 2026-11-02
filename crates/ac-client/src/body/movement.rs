@@ -86,18 +86,6 @@ impl Client {
         }
     }
 
-    /// A walk whose goal a teleport, recall or portal left out of the region is let go: walked at,
-    /// it was a dungeon spot 34 km from the Holtburg lifestone (a_walk_left_behind_by_a_recall_is_let_go).
-    pub(crate) fn drop_stale_walk(&mut self) {
-        let Some(place) = self.going.as_ref().and_then(|g| g.goal.place()) else {
-            return;
-        };
-        if self.player.is_some() && !self.is_in_region(place) {
-            self.stop_going(None, "left out of the region");
-            tracing::info!("travel: the walk's goal was left behind; letting go of it");
-        }
-    }
-
     /// Jump on the next tick with `power` 0..=1 (a script's or bot's
     /// jump; the window charges one by holding the key). Capped by the
     /// stamina left; nothing happens in the air.

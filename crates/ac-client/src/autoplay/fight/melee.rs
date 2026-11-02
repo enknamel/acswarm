@@ -319,13 +319,14 @@ impl Client {
     /// thirty-four kilometres away, "closing" on it by halves.
     ///
     /// Or gone out of the hunting area, and not hitting us: let it go.
-    pub(crate) fn fight_target_gone(&self, guid: u32, underground: bool) -> bool {
-        self.world
+    pub(crate) fn fight_target_gone(&mut self, guid: u32, underground: bool) -> bool {
+        let place = self
+            .world
             .objects
             .get(&guid)
-            .and_then(|o| o.world_pos())
-            .zip(self.my_position())
-            .is_some_and(|(at, me)| at.distance(me) > crate::travel::WALKABLE)
+            .and_then(|o| o.position.as_ref())
+            .map(ac_world::Place::of_position);
+        place.is_some_and(|p| self.player.is_some() && !self.is_in_region(p))
             || !self.area_allows_guid(guid, underground)
     }
 

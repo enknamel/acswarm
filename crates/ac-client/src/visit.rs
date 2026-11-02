@@ -38,7 +38,6 @@ use ac_world::WorldObject;
 use glam::Vec3;
 
 use crate::did::Did;
-use crate::travel::WALKABLE;
 use crate::{Client, Goal, Owner, SAME_FLOOR};
 
 /// Within this far of the person (metres, in three dimensions) and on
@@ -214,10 +213,10 @@ pub enum Next {
 }
 
 /// Decide it from where the character stands (`me`), where the visit
-/// goes, whether a journey is under way and whether one was set off on.
-pub fn next(me: Vec3, goal: Vec3, traveling: bool, journeyed: bool) -> Next {
-    let flat = me.truncate().distance(goal.truncate());
-    if flat > WALKABLE {
+/// goes, whether the region planned on holds both (`held`, see
+/// `Client::is_in_region`), whether a journey is under way and whether one was set off on.
+pub fn next(me: Vec3, goal: Vec3, held: bool, traveling: bool, journeyed: bool) -> Next {
+    if !held {
         return if traveling {
             Next::OnTheWay
         } else if journeyed {
@@ -372,7 +371,11 @@ impl Client {
             v.cell = cell;
         }
         let traveling = self.traveling();
-        match next(me, v.goal, traveling, v.journeyed) {
+        let held = self.is_in_region(ac_world::Place {
+            at: v.goal,
+            cell: v.cell,
+        });
+        match next(me, v.goal, held, traveling, v.journeyed) {
             Next::OnTheWay => {}
             Next::Journey => {
                 v.journeyed = true;
@@ -625,25 +628,25 @@ mod tests {
     fn far_is_a_journey_near_is_a_walk_and_her_floor_is_the_use() {
         let her = cindrue().at;
         let far = her + Vec3::new(2000.0, 0.0, -3.0);
-        assert_eq!(next(far, her, false, false), Next::Journey);
-        assert_eq!(next(far, her, true, true), Next::OnTheWay);
+        assert_eq!(next(far, her, false, false, false), Next::Journey);
+        assert_eq!(next(far, her, false, true, true), Next::OnTheWay);
         // The journey is over and she is still far: it ended short.
-        assert_eq!(next(far, her, false, true), Next::GiveUp);
+        assert_eq!(next(far, her, false, false, true), Next::GiveUp);
         // Across the town: walk, even with the journey's last step still
         // being made -- the walk knows her height and the journey does not.
         let street = her + Vec3::new(140.0, 0.0, -3.0);
-        assert_eq!(next(street, her, false, false), Next::Walk);
-        assert_eq!(next(street, her, true, true), Next::Walk);
+        assert_eq!(next(street, her, true, false, false), Next::Walk);
+        assert_eq!(next(street, her, true, true, true), Next::Walk);
         // Inside the door, right under her: close on the map, a floor
         // below. Keep walking; a use from here would never climb.
         let under = her - Vec3::new(0.5, 0.0, 3.0);
-        assert_eq!(next(under, her, false, true), Next::Walk);
+        assert_eq!(next(under, her, true, false, true), Next::Walk);
         // Up the stairs and beside her.
         let beside = her + Vec3::new(1.2, 0.8, 0.1);
-        assert_eq!(next(beside, her, false, true), Next::Arrived);
+        assert_eq!(next(beside, her, true, false, true), Next::Arrived);
         // On her floor but across the room: not yet.
         let across = her + Vec3::new(6.0, 0.0, 0.0);
-        assert_eq!(next(across, her, false, true), Next::Walk);
+        assert_eq!(next(across, her, true, false, true), Next::Walk);
     }
 
     #[test]

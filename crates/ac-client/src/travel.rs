@@ -32,11 +32,6 @@ pub const ARRIVE: f32 = 3.0;
 /// Longest leg handed to the local move-to (metres).
 pub const LEG: f32 = 60.0;
 
-/// How far a goal may be and still be walked to directly. One landblock
-/// across: beyond that the way there is a journey, not a stroll, and
-/// the steering has no business trying.
-pub const WALKABLE: f32 = 192.0;
-
 /// The leg is cut this far short of the landblock edge so its end lies in
 /// the block the character stands in.
 const EDGE_MARGIN: f32 = 2.0;
@@ -235,45 +230,6 @@ impl Client {
             }
         }
         Some((self.travel.grid.clone()?, self.travel.region.clone()?))
-    }
-
-    /// Walk to within `stop` of `goal` for the step running ([`Client::go`]); `why` names the goal
-    /// to a visit it ends. Its callers read arrival themselves until each moves to `go`.
-    pub fn head_for(&mut self, goal: glam::Vec3, stop: f32, why: &str) -> crate::did::Did {
-        self.drop_visit(why);
-        let owner = self.step_owner();
-        self.head_as(owner, goal, stop)
-    }
-
-    /// `go` to the place at `goal`, walking on through a walk taken and an arrival, as head_for did.
-    fn head_as(&mut self, owner: crate::Owner, goal: glam::Vec3, stop: f32) -> crate::did::Did {
-        use crate::did::Did;
-        // The walk's own place while it is the same walk: its cell is found once.
-        let held = self
-            .going
-            .as_ref()
-            .filter(|g| g.owner == owner)
-            .and_then(|g| g.goal.place());
-        let place = match held {
-            Some(p) if p.at.distance(goal) <= ac_nav::steering::REPLAN_DISTANCE => {
-                ac_world::Place { at: goal, ..p }
-            }
-            _ => self.place_at(goal),
-        };
-        let goal = crate::Goal::At {
-            place,
-            within: stop,
-        };
-        let now = self.frame_at;
-        let did = match self.go(owner, goal, now) {
-            Did::Waiting(_) => self.go(owner, goal, now),
-            did => did,
-        };
-        if did == Did::Done {
-            Did::Acting
-        } else {
-            did
-        }
     }
 
     /// Plan a journey from where the character stands to `goal` (world
@@ -1716,7 +1672,7 @@ mod tests {
             within: 1.0,
         };
         c.go(crate::Owner::Hand, near, now);
-        c.drop_stale_walk();
+        c.going_to();
         assert_eq!(
             c.going.as_ref().map(|g| g.goal),
             Some(near),
@@ -1731,7 +1687,7 @@ mod tests {
             },
             within: 1.0,
         };
-        c.drop_stale_walk();
+        c.going_to();
         assert!(c.going.is_none());
     }
 

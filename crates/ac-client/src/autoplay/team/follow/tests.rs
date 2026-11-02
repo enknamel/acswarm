@@ -277,7 +277,7 @@ fn a_journey_another_goal_planned_after_following_outlives_the_stop() {
 #[test]
 fn a_flying_leader_past_a_walk_is_followed_by_a_journey_a_stop_ends() {
     // The slot plans a journey of its own past the region: following's for a stop.
-    let mut c = following(WALKABLE + 50.0);
+    let mut c = following(400.0);
     c.autoplay.team.mates[0].flying = true;
     let now = Instant::now();
     c.tick_autoplay(now);

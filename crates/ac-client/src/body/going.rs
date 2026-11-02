@@ -338,12 +338,17 @@ impl Client {
     }
 
     /// Where the slot's walk is to this frame: the place, how near, and its cell (`tick_player`);
-    /// none once given up. The walk's progress is kept from the follower's on the way.
+    /// none once given up, or once a teleport left its place out of the region, which lets it go
+    /// (a_walk_left_behind_by_a_recall_is_let_go). Progress is kept from the follower's on the way.
     pub(crate) fn going_to(&mut self) -> Option<(Vec3, f32, u32)> {
         let progress = self.steering.last_progress();
         let g = self.going.as_mut().filter(|g| !g.given_up)?;
         g.progressed = progress.map_or(g.progressed, |p| p.max(g.progressed));
         let goal = g.goal;
+        if self.player.is_some() && goal.place().is_some_and(|p| !self.is_in_region(p)) {
+            self.stop_going(None, "left out of the region");
+            return None;
+        }
         let place = self.goal_place(goal)?;
         Some((place.at, goal.within(), place.cell))
     }

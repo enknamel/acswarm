@@ -3,7 +3,6 @@ use std::time::{Duration, Instant};
 use super::view::Mate;
 use crate::autoplay::{Doing, Release};
 use crate::did::Did;
-use crate::travel::WALKABLE;
 use crate::{Client, Owner};
 
 /// A leader further off than twice the following distance (and at least
@@ -105,7 +104,18 @@ impl Client {
         }
         let goal = glam::Vec2::new(leader.world.x, leader.world.y);
         let mut refused = None;
-        if flat < FOLLOW_WALK || (leader.flying && flat <= WALKABLE) {
+        // Flown, the leader is flown at anywhere the region holds.
+        let flown = leader.flying && {
+            let place = match leader.cell {
+                0 => self.place_at(leader.world),
+                cell => ac_world::Place {
+                    at: leader.world,
+                    cell,
+                },
+            };
+            self.is_in_region(place)
+        };
+        if flat < FOLLOW_WALK || flown {
             // A journey after it planned for a refused walk is kept while it is bound for it.
             let on_the_way = self.is_follow_journey()
                 && self
@@ -132,7 +142,7 @@ impl Client {
                 }
             }
         }
-        if refused.is_some() || flat >= FOLLOW_WALK && !(leader.flying && flat <= WALKABLE) {
+        if refused.is_some() || flat >= FOLLOW_WALK && !flown {
             // Out of sight (through a portal, say), or no walk there: a journey, planned again once
             // it has moved on. Not while it stands where a journey cannot end -- inside the Town
             // Network hub, or a dungeon -- in another landblock: it will come out.
