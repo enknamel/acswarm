@@ -5,14 +5,21 @@ Status: built, 2026-11-02 (branch `phase3`, steps 0-4), for phase 3 of `docs/mov
 Where the build departed from this design:
 - `go` takes the caller's clock (`go(owner, goal, now)`); callers with none use `go_to` on the
   frame's (`Client.frame_at`). `step_owner` has no `debug_assert`: scripts and tests ask outside a step.
-- A refusal is kept in `Going` (where the body stood, why); a give-up stands the body
-  (`going_to` is `None`); the same owner asking within 2 m follows a moving goal without a plan.
+- A refusal is kept per owner and goal in `Client.refusals` (where the body and the goal stood,
+  why) and answered again with no plan while both stand within 2 m, whatever holds the slot; a
+  give-up stands the body (`going_to` is `None`); the same owner within 2 m follows a moving goal.
+- An ask already arrived (`Done`) or refused at once leaves the slot as it was; "taken by" is told
+  only to a walk still followed, and a journey's leg waits only for one. Flown, nothing is planned.
+- A goal past the region is `Acting` only while the journey under way is to it (within 2 m).
 - The loot walk picks the next corpse in the same tick; the approach returns a `Did`, and a refused
   vantage goes in `State.vantage_refused`; the academy hears a refusal by `State::walk_refused()`,
   not a `View.walk_refused` flag; the counter keeps `Run.walking_up` as a bool.
-- Following runs as the rows "catch up" and "follow" (`FOLLOW_ROWS`), and keeps `FOLLOW_WALK`
-  as its own walk-or-journey rate. A journey's leg is asked by `walk_leg` while the slot is free
-  or the journey's, and a journey set off (`travel_to`, `travel_to_in`) frees the slot.
+- Following runs as the rows "catch up" and "follow" (`FOLLOW_ROWS`); a leader the region holds
+  is walked to, past it a journey (`FOLLOW_WALK` went). A journey's leg is asked by `walk_leg`, and
+  a journey set off (`travel_to`, `travel_to_in`, a visit's) frees the slot.
+- A roam and a patrol (`growth::State.looking_to`) and a map double-click ask `go_to_point`; the
+  walk out of a building at a journey's start stays a journey (phase 4). The academy walks to a
+  corpse before opening it. A creature given up that attacks within `STICKY_REACH` is fought.
 - `drop_stale_walk` is folded into `going_to`; `has_way_to` stays for the journey engine's dungeon
   portal check (phase 5); ac-nav's unused `how_to_get_there` went with `WALKABLE`.
 
