@@ -2,7 +2,8 @@
 //! graph, every waypoint with its cell and the kind of step into it, or why there is no way.
 //! Entry: [`plan`].
 
-use ac_scene::nav::{EdgeKind, Ground, NavNode};
+use ac_scene::collision::Capsule;
+use ac_scene::nav::{EdgeKind, Ground, NavNode, LEG_SAMPLES};
 use ac_scene::navarea::{block_at, Area};
 use ac_scene::wayfind::{self, Search, WalkQuery};
 use ac_world::Place;
@@ -31,6 +32,24 @@ pub fn portal_mouths_to_avoid(from: Vec3, to: Vec3) -> Vec<Vec3> {
 pub struct Waypoint {
     pub place: Place,
     pub kind: EdgeKind,
+    /// The floor walked into it ([`Ground::floor_along`]); `None` for a drop, or a leg not walked.
+    pub floor: Option<[f32; LEG_SAMPLES]>,
+}
+
+impl Waypoint {
+    /// The floor's height a share `t` (0..=1) of the way along the leg from `from`: the walk's
+    /// where it was walked, else the straight line between the ends.
+    pub fn floor_at(&self, from: Vec3, t: f32) -> f32 {
+        let t = t.clamp(0.0, 1.0);
+        match &self.floor {
+            Some(h) => {
+                let x = t * (LEG_SAMPLES - 1) as f32;
+                let i = (x.floor() as usize).min(LEG_SAMPLES - 2);
+                h[i] + (h[i + 1] - h[i]) * (x - i as f32)
+            }
+            None => from.z + (self.place.at.z - from.z) * t,
+        }
+    }
 }
 
 /// A planned walk: every waypoint from the first step to the end, the last within reach of the
@@ -115,14 +134,27 @@ fn query_for<'a>(
     })
 }
 
-/// The route a search found.
-fn route_of(path: &[(NavNode, EdgeKind)]) -> Route {
+/// The route a search found from `start` (the graph's end), each walked leg's floor kept.
+fn route_of(
+    ground: &Ground,
+    start: (Vec3, u32),
+    path: &[(NavNode, EdgeKind)],
+    cap: &Capsule,
+) -> Route {
+    let mut from = start;
     Route {
         waypoints: path
             .iter()
-            .map(|(n, kind)| Waypoint {
-                place: place_of(n),
-                kind: *kind,
+            .map(|(n, kind)| {
+                let floor = (*kind != EdgeKind::Drop)
+                    .then(|| ground.floor_along(from.0, from.1, n.pos, cap))
+                    .flatten();
+                from = (n.pos, n.cell);
+                Waypoint {
+                    place: place_of(n),
+                    kind: *kind,
+                    floor,
+                }
             })
             .collect(),
     }
@@ -134,12 +166,15 @@ fn route_of(path: &[(NavNode, EdgeKind)]) -> Route {
 pub fn plan(area: &mut Area, from: Place, goal: Place, within: f32) -> Result<Route, NoWay> {
     let avoid = portal_mouths_to_avoid(from.at, goal.at);
     let q = query_for(area, from, goal, within, &avoid)?;
-    match area.with_ground(|ground, nav| wayfind::search_building(ground, nav, &q)) {
-        Search::Found(path) => Ok(route_of(&path)),
-        Search::NoWay(why) => Err(why),
-        // Searched building, so nothing is left unbuilt.
-        Search::Unbuilt(_) => Err(NoWay::Unreached),
-    }
+    let cap = area.capsule();
+    area.with_ground(
+        |ground, nav| match wayfind::search_building(ground, nav, &q) {
+            Search::Found(path) => Ok(route_of(ground, q.from, &path, &cap)),
+            Search::NoWay(why) => Err(why),
+            // Searched building, so nothing is left unbuilt.
+            Search::Unbuilt(_) => Err(NoWay::Unreached),
+        },
+    )
 }
 
 /// [`plan`] on the chunks built so far, building none: `Building` names the chunks it needs
@@ -150,11 +185,12 @@ pub fn plan_built(area: &Area, from: Place, goal: Place, within: f32) -> Planned
         Ok(q) => q,
         Err(why) => return Planned::NoWay(why),
     };
-    match area.read_ground(|ground, nav| wayfind::search(ground, nav, &q)) {
-        Search::Found(path) => Planned::Route(route_of(&path)),
+    let cap = area.capsule();
+    area.read_ground(|ground, nav| match wayfind::search(ground, nav, &q) {
+        Search::Found(path) => Planned::Route(route_of(ground, q.from, &path, &cap)),
         Search::NoWay(why) => Planned::NoWay(why),
         Search::Unbuilt(chunks) => Planned::Building(chunks),
-    }
+    })
 }
 
 /// Whether the walk test every edge passed carries the body from `from` to `to` on `area`: how a

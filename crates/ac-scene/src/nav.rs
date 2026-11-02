@@ -50,6 +50,8 @@ const DROP_MAX: f32 = 12.0;
 const OVER_NOTHING: f32 = 2.8;
 /// The steps a fall is followed in (seconds): a frame at 20 Hz.
 const FALL_DT: f32 = 0.05;
+/// Heights a leg's floor is kept at ([`Ground::floor_along`]), its two ends included.
+pub const LEG_SAMPLES: usize = 9;
 
 /// Where the ground is: static collision plus, outdoors, a terrain
 /// height function over world `(x, y)`.
@@ -221,7 +223,7 @@ impl<'a> Ground<'a> {
         let mut swept = Swept::over(self, a.pos, b.pos, cap);
         let mut one_way = |p: &NavNode, q: &NavNode| {
             matches!(
-                self.stride_over(&mut swept, p.pos, p.cell, q.pos, BODY_ARRIVE, cap),
+                self.stride_over(&mut swept, p.pos, p.cell, q.pos, BODY_ARRIVE, cap, None),
                 Reach::Reached { .. }
             )
             .then(|| walk_kind(p.cell, q.cell))
@@ -234,6 +236,43 @@ impl<'a> Ground<'a> {
     /// clear and the body's step one way, as [`hop`](Self::hop) tests an edge.
     pub fn can_walk(&self, a: (Vec3, u32), b: (Vec3, u32), cap: &Capsule) -> bool {
         is_chest_clear(self.collision, a.0, b.0) && self.body_reaches(a.0, a.1, b.0, cap)
+    }
+
+    /// The height of the body's own step from `a` (feet, in `cell`) to `b` at [`LEG_SAMPLES`] even
+    /// shares of the leg's flat length: the floor its follower walks, not the line; `None` short.
+    pub fn floor_along(
+        &self,
+        a: Vec3,
+        cell: u32,
+        b: Vec3,
+        cap: &Capsule,
+    ) -> Option<[f32; LEG_SAMPLES]> {
+        let mut track = vec![a];
+        let near = a + (b - a).clamp_length_max(SWEPT_SPAN);
+        let mut u = Swept::over(self, a, near, cap);
+        let reach = self.stride_over(&mut u, a, cell, b, BODY_ARRIVE, cap, Some(&mut track));
+        if !matches!(reach, Reach::Reached { .. }) {
+            return None;
+        }
+        track.push(b);
+        let ab = flat(b - a);
+        let share = |p: &Vec3| {
+            let len2 = ab.length_squared();
+            if len2 > 1e-6 {
+                flat(*p - a).dot(ab) / len2
+            } else {
+                0.0
+            }
+        };
+        let mut heights = [b.z; LEG_SAMPLES];
+        for (k, z) in heights.iter_mut().enumerate() {
+            let t = k as f32 / (LEG_SAMPLES - 1) as f32;
+            let nearest = track
+                .iter()
+                .min_by(|p, q| (share(p) - t).abs().total_cmp(&(share(q) - t).abs()));
+            *z = nearest.map_or(b.z, |p| p.z);
+        }
+        Some(heights)
     }
 
     /// Whether the body's step carries it from `a` (feet, in `cell`) to within [`BODY_ARRIVE`]
@@ -310,11 +349,13 @@ impl<'a> Ground<'a> {
             b,
             within,
             cap,
+            None,
         )
     }
 
     /// [`stride_toward`](Self::stride_toward) stepping on `u`, gathered again [`SWEPT_SPAN`] on
-    /// whenever a step leaves it: the same steps, each scanning only what lies near it.
+    /// whenever a step leaves it (each scans only what lies near it); each stood on goes to `track`.
+    #[allow(clippy::too_many_arguments)] // the walk test's own inputs, and where its steps go
     fn stride_over<'g>(
         &'g self,
         u: &mut Swept<'g, 'a>,
@@ -323,6 +364,7 @@ impl<'a> Ground<'a> {
         b: Vec3,
         within: f32,
         cap: &Capsule,
+        mut track: Option<&mut Vec<Vec3>>,
     ) -> Reach {
         let (mut p, mut cell) = (a, cell);
         let mut left = flat(b - a).length();
@@ -355,6 +397,9 @@ impl<'a> Ground<'a> {
             }
             left = now_left;
             (p, cell) = (next, next_cell);
+            if let Some(t) = track.as_mut() {
+                t.push(p);
+            }
         }
         Reach::Stopped
     }
@@ -1634,5 +1679,30 @@ pub(crate) mod tests {
             !drops(&a_ledge_in_cells(Some(10.0))).is_empty(),
             "10 m is a drop"
         );
+    }
+
+    #[test]
+    fn a_legs_floor_is_the_one_the_body_walks_not_the_line() {
+        // Level for 2 m, down 2 m over the next 6, then level: the line runs a metre over it.
+        let mut w = CollisionWorld::default();
+        floor(&mut w, -1.0, 2.0, -3.0, 3.0, 0.0, 1);
+        quad(
+            &mut w,
+            Vec3::new(2.0, -3.0, 0.0),
+            Vec3::new(8.0, -3.0, -2.0),
+            Vec3::new(8.0, 3.0, -2.0),
+            Vec3::new(2.0, 3.0, 0.0),
+            1,
+        );
+        floor(&mut w, 8.0, 21.0, -3.0, 3.0, -2.0, 1);
+        let g = inside(&w);
+        let (a, b) = (Vec3::new(0.0, 0.0, 0.0), Vec3::new(20.0, 0.0, -2.0));
+        let h = g.floor_along(a, 1, b, &Capsule::default()).expect("walked");
+        assert!(
+            h[0].abs() < 0.05 && (h[LEG_SAMPLES - 1] + 2.0).abs() < 0.05,
+            "{h:?}"
+        );
+        // Half way, at x = 10: the floor is down at -2, the line at -1.
+        assert!((h[LEG_SAMPLES / 2] + 2.0).abs() < 0.1, "{h:?}");
     }
 }

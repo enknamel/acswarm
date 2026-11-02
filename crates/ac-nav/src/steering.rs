@@ -65,7 +65,7 @@ impl Course {
     }
 
     /// How far `p` lies off leg `i` (into waypoint `i`) on the flat, when it is within the leg's
-    /// half-width (the graph's spacing at its end) and on its floor; a drop's floor is either end's.
+    /// half-width (the graph's spacing at its end) and on the floor walked; a drop's is either end's.
     fn off_leg(&self, i: usize, p: Vec3) -> Option<f32> {
         let w = self.waypoints.get(i)?;
         let a = if i == 0 {
@@ -88,7 +88,7 @@ impl Course {
         };
         let on_floor = match w.kind {
             EdgeKind::Drop => p.z >= a.z.min(b.z) - END_FLOOR && p.z <= a.z.max(b.z) + END_FLOOR,
-            _ => (p.z - (a.z + (b.z - a.z) * t)).abs() <= END_FLOOR,
+            _ => (p.z - w.floor_at(a, t)).abs() <= END_FLOOR,
         };
         (off <= half && on_floor).then_some(off)
     }
@@ -432,6 +432,7 @@ impl Steering {
 #[cfg(test)]
 mod route_tests {
     use super::*;
+    use ac_scene::nav::LEG_SAMPLES;
 
     fn at(x: f32, y: f32, z: f32) -> Vec3 {
         Vec3::new(x, y, z)
@@ -442,6 +443,7 @@ mod route_tests {
         Waypoint {
             place: Place { at: p, cell: 0 },
             kind: EdgeKind::Walk,
+            floor: None,
         }
     }
 
@@ -522,6 +524,32 @@ mod route_tests {
         // At the walk test's own arrival it is passed whatever the test says.
         let mut r = course(at(0.0, 0.0, 0.0), &[corner, on]);
         assert_eq!(r.target(at(9.9, 0.0, 0.0), |_, _| false), on);
+    }
+
+    #[test]
+    fn a_leg_whose_floor_falls_ahead_of_the_line_holds_a_body_on_it() {
+        // 26 m falling 5 m, the ground dropping early: two thirds of the way down by a third along.
+        let mut r = course(at(0.0, 0.0, 5.0), &[at(26.0, 0.0, 0.0)]);
+        let mut floor = [0.0; LEG_SAMPLES];
+        for (k, z) in floor.iter_mut().enumerate() {
+            *z = 5.0 * (1.0 - (k as f32 * 2.0 / (LEG_SAMPLES - 1) as f32).min(1.0)).powi(2);
+        }
+        r.waypoints[0].floor = Some(floor);
+        let on = at(
+            8.0,
+            0.0,
+            r.waypoints[0].floor_at(at(0.0, 0.0, 5.0), 8.0 / 26.0),
+        );
+        assert!(
+            on.z < 5.0 - 8.0 / 26.0 * 5.0 - END_FLOOR,
+            "off the line: {on:?}"
+        );
+        assert!(r.is_in_corridor(on), "on the floor walked");
+        assert!(
+            !r.is_in_corridor(on + at(0.0, 0.0, 3.0)),
+            "a storey over it"
+        );
+        assert!(r.join(on));
     }
 
     #[test]
@@ -612,6 +640,7 @@ mod tests {
                 .map(|p| Waypoint {
                     place: Place { at: *p, cell: 0 },
                     kind: EdgeKind::Walk,
+                    floor: None,
                 })
                 .collect(),
         }
