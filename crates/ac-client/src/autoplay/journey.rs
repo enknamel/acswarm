@@ -1,10 +1,12 @@
+//! The resume-the-journey row: a journey of no row broken off for a fight keeps its goal
+//! (`Autoplay.resume_trip`), set off again for this row once nothing else acts.
+
 use super::Doing;
 use crate::Client;
 
 impl Client {
-    /// A swing cancels the journey (the move-to and the trip cannot both
-    /// steer). Note where it was going, so it is taken up again once
-    /// the fight is over; a row's journey is held for its row instead.
+    /// Keep the goal of a journey of no row that a swing, a heal or a corpse breaks off (a move-to
+    /// and a trip cannot both steer), to take up after; a row's journey is held for its own row.
     pub(crate) fn remember_journey(&mut self) {
         // Not following's own journey (following plans it again), nor any while led: a copy would
         // outlive a stop (`a_stop_leaves_no_old_aim_behind_when_a_fight_broke_the_journey_off`).
@@ -17,8 +19,8 @@ impl Client {
         }
     }
 
-    /// Pick the journey up again after a fight, once there is nothing
-    /// else to do.
+    /// Set the kept journey off again, as this row's, once nothing else acts; acting while that
+    /// journey runs, so it is never held or ended for standing aside.
     pub(crate) fn autoplay_resume_journey(&mut self) -> bool {
         // A follower's way is its leader's: one left from before (its own town run's) is let go.
         if self.is_led() {

@@ -24,9 +24,10 @@ system's entry fns are written in the files its own row names.
 - with autoplay off, `autoplay_by_hand()`: the team rules a player keeps, and then it returns, as
   it does with no character in the world
 - `autoplay_watch_the_ground()`, whose clocks are wound before any step can claim the tick
-- every `steps::HOUSEKEEPING` row; `steps::reflexes()` in table order; goals from `steps::weigh()`,
-  best first. The first step that acts sets `Autoplay.step` and ends the tick.
-- Each reflex runs once a tick and only from the table: nothing calls one ahead of it.
+- every `steps::HOUSEKEEPING` row; `steps::reflexes()` in table order, each once and only from the
+  table; goals from `steps::weigh()`, best first. The first step that acts sets `Autoplay.step`.
+- then `settle_going()`: a row's walk it did not ask for ends, and `settle_journey()` holds a row's
+  journey while another row acts and ends it once its own row stands aside
 
 ## Steps
 
@@ -95,7 +96,7 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 | supplies and sale | `grow_needs_with`, `supplies`, `sell_policy`, `offers_for_sale`, `burns` | `autoplay/growth/needs.rs`, `autoplay/growth/policy.rs`, `autoplay/growth/sale.rs`, `autoplay/growth/supplies.rs`, `crates/ac-loot/src/sale.rs` | `growth::State.needs`, `Growth.ammo_keep` | counter | autoplay::growth | need, sale |
 | XP spending | `autoplay_spend_xp`, `grow_spend_xp`, `raise_offers`, `batch_raise` | `autoplay/growth/xp.rs`, `autoplay/growth/raise.rs`, `advance.rs` | `growth::State.pending`, `growth::State.sulking` | experience | autoplay::growth::xp | raise |
 | hunting ground and area | `autoplay_grow`, `grow_hunt`, `autoplay_watch_the_ground`, `autoplay_keep_to_area` | `autoplay/growth/mod.rs`, `autoplay/growth/hunt.rs`, `hunt.rs` | `growth::State.bound`, `growth::State.quiet_since`, `Fight.area` | ground | autoplay::growth::hunt | ground, area |
-| travel | `travel_to`, `travel_about`, `set_off`, `autoplay_resume_journey` | `travel.rs`, `gem_room.rs`, `pathfinder.rs`, `recalls.rs`, `autoplay/journey.rs`, `crates/ac-nav/src/steering.rs` | `Client.travel`, `Client.steering`, `Autoplay.resume_trip` | travel | travel | journey |
+| travel | `travel_to`, `travel_about`, `set_off`, `walk_journey`, `keep_journey`, `settle_journey`, `autoplay_resume_journey` | `travel.rs`, `travel/overland.rs`, `body/going.rs`, `gem_room.rs`, `pathfinder.rs`, `recalls.rs`, `autoplay/journey.rs`, `crates/ac-nav/src/steering.rs` | `Client.travel`, `Client.going`, `Client.steering`, `Autoplay.resume_trip` | travel | travel | journey |
 | visits | `visit_landmark`, `tick_visit`, `visit_person` | `visit.rs` | `Client.visits` | visit | visit | visit |
 | dungeon explore | `autoplay_explore`, `aim_on_floor`, `past_the_door` | `explore.rs`, `crates/ac-nav/src/explore.rs` | `Autoplay.room_bound`, `Autoplay.rooms_seen` | explore | explore | explore |
 | dodge | `autoplay_dodge`, `autoplay_approach`, `sidestep`, `threat` | `dodge.rs`, `aim.rs`, `doorway.rs` | `Client.dodge`, `Client.dodge_to` | dodge | dodge | dodge |
@@ -115,7 +116,7 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 | road | a walk on the way somewhere (a ground, a counter, a script's goal); on it only what attacks is fought | way |
 | ground | the hunting spot growth chose; walking about it is not a road | spot, field |
 | area | a hunting area a player drew on the map (`HuntArea`) | zone |
-| journey | a planned trip of walks, portals and recalls (`Travel`); each walk one the slot follows (`Going`) | route, travel plan |
+| journey | a planned trip of walks, portals and recalls (`Travel`), owned by the row that set it off or took it over; held while another row acts, ended when its row stands aside; each walk a stretch the slot follows (`Going`) | route, travel plan |
 | mate | another character on the team board (`Mate`), in the fellowship or not | teammate, member |
 | fellow | a member of the server's fellowship | - |
 | recruit | invite a mate into the fellowship | invite, ask |
@@ -196,5 +197,4 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 | `position.rs` | `my_position()`: the character's world position |
 | `testkit.rs`, `walk_trial.rs` | test-only: `Client::offline` sessions over `no_data()` or `game_data()`, `standing_at()`, `creature()`, `corpse()`, `mate()` builders; the route harness (`walk_trial::run`, `tests/route_harness.rs`) |
 
-Unit tests sit in each file's `mod tests`; tests that read the archives are
-`#[ignore = "needs AC_DATA_DIR"]` and run with `cargo test-data`.
+Unit tests sit in each file's `mod tests`; those reading the archives are ignored (`cargo test-data`).
