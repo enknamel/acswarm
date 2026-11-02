@@ -434,3 +434,112 @@ fn the_terrain_sampler_agrees_with_the_drawn_mesh() {
         assert!(checked > 1500, "{block:#010x}: only {checked} points");
     }
 }
+
+/// A one-sided wall in the plane y = 0 over x0..x1, 3 m tall, its normal along `sign` y.
+fn wall_y(w: &mut CollisionWorld, x0: f32, x1: f32, sign: f32) {
+    let a = Vec3::new(x0, 0.0, 0.0);
+    let b = Vec3::new(x1, 0.0, 0.0);
+    let c = Vec3::new(x1, 0.0, 3.0);
+    let d = Vec3::new(x0, 0.0, 3.0);
+    let n = w.tris.len();
+    quad(w, a, b, c, d, 0, false);
+    if w.tris[n].normal.y * sign < 0.0 {
+        w.tris.truncate(n);
+        quad(w, d, c, b, a, 0, false);
+    }
+}
+
+#[test]
+fn a_doorway_beside_a_wall_end_is_walked_into() {
+    // A room at y < 0, its wall facing -y with a door 1.9 m wide in it, and the door's jamb at
+    // x = 0.95 facing into the opening. A step past the wall's end, its middle over the plane
+    // but beside the wall, is in the doorway: the wall's plane does not shove it back.
+    let mut w = CollisionWorld::default();
+    floor(&mut w, -5.0, 5.0, 0.0, 0);
+    wall_y(&mut w, 0.95, 5.0, -1.0);
+    wall_y(&mut w, -5.0, -0.95, -1.0);
+    let jamb = w.tris.len();
+    quad(
+        &mut w,
+        Vec3::new(0.95, 0.3, 0.0),
+        Vec3::new(0.95, 0.0, 0.0),
+        Vec3::new(0.95, 0.0, 3.0),
+        Vec3::new(0.95, 0.3, 3.0),
+        0,
+        false,
+    );
+    assert!(w.tris[jamb].normal.x < -0.99);
+    let cap = Capsule::default();
+    let s = w.walk(Vec3::new(0.35, -0.2, 0.0), Vec3::new(0.6, 0.15, 0.0), &cap);
+    assert!(!s.blocked);
+    assert!(s.pos.y > 0.1, "shoved back into the room to {}", s.pos);
+    assert!(
+        s.pos.x <= 0.95 - cap.radius + 1e-3,
+        "into the jamb: {}",
+        s.pos
+    );
+    // A step through the wall itself is still held in front of it.
+    let s = w.walk(Vec3::new(2.0, -0.6, 0.0), Vec3::new(2.0, 0.1, 0.0), &cap);
+    assert!(
+        s.pos.y <= -cap.radius + 1e-3,
+        "through the wall to {}",
+        s.pos
+    );
+    // Past the top of a face too tall to step up (0.9 m): over it, not beside it, so still held.
+    let mut w = CollisionWorld::default();
+    floor(&mut w, -5.0, 3.0, 0.0, 0);
+    floor(&mut w, 3.0, 5.0, 0.9, 0);
+    riser(&mut w, 3.0, 0.0, 0.9);
+    let mut p = Vec3::new(2.0, 0.0, 0.0);
+    for _ in 0..20 {
+        p = w.walk(p, p + Vec3::new(0.2, 0.0, 0.0), &cap).pos;
+    }
+    assert!(p.x < 3.0, "walked into the ledge to {p}");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_shop_door_is_walked_out_of_from_anywhere_on_its_threshold() {
+    // Magus Guthima's shop at C6A8: its north wall at y = 88.6 in the block, the door in it from
+    // x = 64.8 to 66.7, the threshold's node at (66.0, 88.5). Walked out at every stride the body
+    // takes from spots about that node, out past the wall's end to (67.5, 90.0).
+    let assets = Assets::open(ac_dat::test_data_dir()).unwrap();
+    let bc = assets.block_collision(0xC6A8_0000).unwrap();
+    let at = |x: f32, y: f32| ac_world_origin(0xC6A8_0000) + Vec3::new(x, y, 42.0);
+    let cap = Capsule::default();
+    let held = step_by(&bc.world, at(67.2, 88.0), glam::Vec2::new(0.0, 0.4), &cap);
+    assert!(
+        held.y <= at(0.0, 88.6 - cap.radius).y + 1e-2,
+        "no wall: {held}"
+    );
+    let out = at(67.5, 90.0);
+    let mut failed = Vec::new();
+    for (dx, dy) in [
+        (0.0, 0.0),
+        (0.09, -0.07),
+        (0.05, 0.0),
+        (0.0, -0.05),
+        (0.23, 0.01),
+    ] {
+        for stride in [0.2, 0.3, 0.4, 0.5] {
+            let mut p = at(66.0 + dx, 88.5 + dy);
+            for _ in 0..40 {
+                let d = (out - p).truncate();
+                if d.length() < 0.05 {
+                    break;
+                }
+                let step = d.normalize() * d.length().min(stride);
+                p = step_by(&bc.world, p, step, &cap);
+            }
+            if (out - p).truncate().length() > 0.05 {
+                failed.push(((dx, dy, stride), p - at(0.0, 0.0)));
+            }
+        }
+    }
+    assert!(failed.is_empty(), "held in the shop: {failed:?}");
+}
+
+/// One walking step by `step` on the flat from `p`.
+fn step_by(w: &CollisionWorld, p: Vec3, step: glam::Vec2, cap: &Capsule) -> Vec3 {
+    w.walk(p, p + step.extend(0.0), cap).pos
+}

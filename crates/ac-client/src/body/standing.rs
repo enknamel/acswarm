@@ -1,19 +1,32 @@
+use ac_nav::routing::Planned;
+use ac_world::Place;
+use glam::Vec3;
+
 use crate::{pathfinder, player};
 
 /// The client answering what the steering asks of the world.
 ///
 /// The steering itself is in `ac-nav` and knows nothing of packets,
-/// physics or landblocks; this is the half that does. Seven questions,
-/// which in a test are answered with a few rectangles and here with
-/// the character's own collision and the planner on its thread.
+/// physics or landblocks; this is the half that does. Six questions,
+/// which in a test are answered by hand and here with the character's
+/// own body and the region planner.
 pub struct Standing<'a> {
     pub player: &'a mut player::Player,
-    pub assets: &'a ac_scene::Assets,
-    pub wide: &'a mut pathfinder::Pathfinder,
+    pub pathfinder: &'a mut pathfinder::Pathfinder,
+}
+
+/// Where a walk test from `at` starts: the body's own place where it stands, else `at` in its
+/// block, located by the cells' BSPs.
+pub(crate) fn walk_start(pl: &player::Player, at: Vec3) -> Place {
+    let mine = at.distance(pl.world_position()) < 1e-3;
+    Place {
+        at,
+        cell: if mine { pl.cell } else { pl.cell & 0xFFFF_0000 },
+    }
 }
 
 impl ac_nav::Ground for Standing<'_> {
-    fn at(&self) -> glam::Vec3 {
+    fn at(&self) -> Vec3 {
         self.player.world_position()
     }
 
@@ -21,48 +34,25 @@ impl ac_nav::Ground for Standing<'_> {
         self.player.cell
     }
 
-    fn block(&self) -> u32 {
-        self.player.landblock()
+    fn is_airborne(&self) -> bool {
+        self.player.is_airborne()
     }
 
-    fn line_blocked(&mut self, block: u32, from: glam::Vec3, to: glam::Vec3) -> bool {
-        self.player.line_blocked(self.assets, block, from, to)
+    fn ask(&mut self, goal: Place, within: f32, now: std::time::Instant) {
+        let me = Place {
+            at: self.player.world_position(),
+            cell: self.player.cell,
+        };
+        let cap = self.player.capsule();
+        self.pathfinder.ask(me, goal, within, cap, now);
     }
 
-    fn line_drops(&mut self, block: u32, from: glam::Vec3, to: glam::Vec3) -> bool {
-        self.player.line_drops(self.assets, block, from, to)
+    fn answer(&mut self, goal: Place) -> Option<(Place, Planned)> {
+        self.pathfinder.take(self.player.world_position(), goal.at)
     }
 
-    fn find_path(
-        &mut self,
-        block: u32,
-        from: glam::Vec3,
-        to: glam::Vec3,
-        goal_cell: u32,
-    ) -> Option<Vec<glam::Vec3>> {
-        self.player
-            .find_path(self.assets, block, from, to, goal_cell)
-    }
-
-    fn ask_wide(
-        &mut self,
-        from: glam::Vec3,
-        to: glam::Vec3,
-        block: u32,
-        outdoors: bool,
-        exact_to: bool,
-    ) {
-        self.wide.ask(
-            from,
-            to,
-            self.player.capsule(),
-            block,
-            pathfinder::Ends { outdoors, exact_to },
-            std::time::Instant::now(),
-        );
-    }
-
-    fn take_wide(&mut self, from: glam::Vec3, to: glam::Vec3) -> Option<Vec<glam::Vec3>> {
-        self.wide.take(from, to)
+    fn can_walk(&mut self, from: Vec3, to: Vec3) -> bool {
+        let start = walk_start(self.player, from);
+        self.pathfinder.can_walk(start, to, self.player.capsule())
     }
 }

@@ -7,13 +7,38 @@
 //! planned on one block at a time could not see it.
 
 use ac_scene::{
-    collision::{Capsule, CollisionWorld},
-    landblock, lbid,
-    nav::NavGraph,
+    collision::Capsule,
+    lbid,
+    nav::{Ground, NavGraph},
     navarea::{blocks_for, Area},
+    wayfind::{self, Search, WalkQuery},
     Assets,
 };
 use glam::Vec3;
+
+/// The walk from `from` to within `within` of `to` on `nav`, both ends located by the cells.
+fn route(
+    ground: &Ground,
+    nav: &mut NavGraph,
+    from: Vec3,
+    to: Vec3,
+    within: f32,
+) -> Option<Vec<Vec3>> {
+    let q = WalkQuery {
+        from: (from, wayfind::locate(ground, from)),
+        goal: (to, wayfind::locate(ground, to)),
+        within,
+        avoid: &[],
+        berth: 0.0,
+        indoors_too: true,
+        outdoors_first: false,
+        drops: false,
+    };
+    match wayfind::search_building(ground, nav, &q) {
+        Search::Found(p) => Some(p.into_iter().map(|(n, _)| n.pos).collect()),
+        _ => None,
+    }
+}
 
 fn capsule() -> Capsule {
     Capsule {
@@ -58,7 +83,9 @@ fn a_walk_into_sanamar_goes_round_the_walls_not_into_them() {
         !area.line_clear(from + Vec3::Z, square + Vec3::Z),
         "the wall should be between us and the square"
     );
-    let path = area.path(from, square).expect("a way in past the wall");
+    let path = area
+        .with_ground(|ground, nav| route(ground, nav, from, square, 0.5))
+        .expect("a way in past the wall");
     let end = *path.last().unwrap();
     assert!(
         end.distance(square) < 1.0,
@@ -80,24 +107,10 @@ fn a_walk_into_sanamar_goes_round_the_walls_not_into_them() {
     // The same walk planned on the goal's landblock alone: the start is
     // outside that block, so the single-block planner has nothing to
     // stand on and cannot answer at all.
-    let scene = landblock::load(&assets, block).unwrap();
-    let collision = CollisionWorld::from_scene(&assets, &scene).unwrap();
-    let mut one = NavGraph::for_scene(&scene, &collision, &cap);
-    let sampler = |x: f32, y: f32| {
-        scene
-            .terrain
-            .height_at(Vec3::new(x - origin.x, y - origin.y, 0.0))
-    };
-    let ground = ac_scene::nav::Ground {
-        collision: &collision,
-        terrain: Some(&sampler),
-        sea: None,
-        no_go: None,
-        outdoors_only: false,
-        doorways: &[],
-    };
+    let mut one = Area::build(&assets, &[block], &cap, block).unwrap();
     assert!(
-        one.find_path(&ground, from, square).is_none(),
+        one.with_ground(|ground, nav| route(ground, nav, from, square, 0.5))
+            .is_none(),
         "one landblock alone should not be able to plan this walk"
     );
 }
@@ -142,10 +155,10 @@ fn a_dungeon_is_planned_on_its_own_and_its_stairs_connect_its_floors() {
             let z = area.nav.nodes[v as usize].pos.z;
             lo = lo.min(z);
             hi = hi.max(z);
-            for &w in area.nav.neighbours(v) {
-                if !seen[w as usize] {
-                    seen[w as usize] = true;
-                    stack.push(w);
+            for e in area.nav.neighbours(v) {
+                if !seen[e.to as usize] {
+                    seen[e.to as usize] = true;
+                    stack.push(e.to);
                 }
             }
         }
@@ -221,7 +234,7 @@ fn a_route_goes_round_the_ocean_rather_than_across_it() {
                 continue;
             };
             let (pa, pb) = (Vec3::new(a.0, a.1, za), Vec3::new(b.0, b.1, zb));
-            let Some(path) = area.path(pa, pb) else {
+            let Some(path) = area.with_ground(|ground, nav| route(ground, nav, pa, pb, 1.0)) else {
                 continue;
             };
             let mut prev = pa;
@@ -261,9 +274,58 @@ fn a_goal_standing_on_a_deck_is_planned_to_on_the_deck() {
     let under = origin + Vec3::new(81.9, 28.56, 51.93);
     let jeweler = origin + Vec3::new(81.9037, 28.5586, 63.4465);
     let mut area = Area::build(&assets, &[block], &cap, block).unwrap();
-    assert_eq!(area.grounded(jeweler), jeweler, "he stands on the deck");
-    let path = area.path(under, jeweler).expect("the way up");
+    let (on_deck, path) = area.with_ground(|ground, nav| {
+        let cell = wayfind::locate(ground, jeweler);
+        let on_deck = wayfind::floor_of(ground, jeweler, cell, &cap).map(|f| f.0);
+        (on_deck, route(ground, nav, under, jeweler, 0.5))
+    });
+    let on_deck = on_deck.expect("he stands on a floor");
+    assert!(
+        (on_deck.z - jeweler.z).abs() < 0.05,
+        "he stands on the deck, not {on_deck}"
+    );
+    let path = path.expect("the way up");
     let end = *path.last().unwrap();
     assert!((end.z - jeweler.z).abs() < 0.6, "ends at {end:?}");
     assert!(path.len() > 3, "straight at him: {path:?}");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn the_stairs_from_an_upper_floor_are_found_without_its_drop() {
+    // Upstairs in a Holtburg house, the goal in the room under it 2.5 m down over the edge: a walk
+    // that takes drops may step off, and one that takes none still finds the stairs.
+    let assets = Assets::open(ac_dat::test_data_dir()).unwrap();
+    let cap = Capsule::default();
+    let block = 0xA9B4_0000;
+    let me = Vec3::new(32_553.0, 34_594.5, 97.5);
+    let goal = Vec3::new(32_550.17, 34_597.33, 94.0);
+    let mut area = Area::build(&assets, &[block], &cap, block).unwrap();
+    let path = area
+        .with_ground(|ground, nav| route(ground, nav, me, goal, 0.5))
+        .expect("the stairs down");
+    assert!(path.len() > 4, "not the stairs: {path:?}");
+    let end = *path.last().unwrap();
+    assert!((end.z - goal.z).abs() < 0.6, "ends at {end:?}");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_hillside_steeper_than_a_stair_is_joined_on_the_outdoor_lattice() {
+    // A canyon wall at the corner of F884, F885, F984 and F985: its ground climbs 2.3 m and more
+    // between nodes 4 m apart, under ACE's walkable slope; down it and up the hill are both walks.
+    let assets = Assets::open(ac_dat::test_data_dir()).unwrap();
+    let cap = Capsule::default();
+    let corner = Vec3::new(47_808.0, 25_536.05, 63.98);
+    for goal in [
+        Vec3::new(47_808.0, 25_476.05, 63.03),
+        Vec3::new(47_786.5, 25_480.0, 103.88),
+        Vec3::new(47_778.2, 25_484.0, 112.27),
+    ] {
+        let mut area = Area::build(&assets, &blocks_for(corner, goal), &cap, 0xF985_0000).unwrap();
+        let path = area.with_ground(|ground, nav| route(ground, nav, corner, goal, 1.5));
+        let path = path.unwrap_or_else(|| panic!("no way from the corner to {goal}"));
+        let end = *path.last().unwrap();
+        assert!(end.distance(goal) <= 1.5 + 0.6, "ends at {end} for {goal}");
+    }
 }

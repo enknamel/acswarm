@@ -382,6 +382,33 @@ pub fn landblock_origin(cell: u32) -> Vec3 {
     Vec3::new(bx * 192.0, by * 192.0, 0.0)
 }
 
+/// Where something stands: a world position and the cell it is in (interior >= 0x100, else outdoor).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Place {
+    pub at: Vec3,
+    pub cell: u32,
+}
+
+impl Place {
+    /// In an interior cell: a building's room or a dungeon's.
+    pub fn is_indoors(&self) -> bool {
+        self.cell & 0xFFFF >= 0x100
+    }
+
+    /// A real cell, not only its landblock (whose low word is 0).
+    pub fn is_located(&self) -> bool {
+        self.cell & 0xFFFF != 0
+    }
+
+    /// The place of a server position.
+    pub fn of_position(p: &Position) -> Place {
+        Place {
+            at: landblock_origin(p.cell) + p.local,
+            cell: p.cell,
+        }
+    }
+}
+
 /// Decide what to do with a server position echo for our own character:
 /// `true` means take it (resync to where the server has us), `false`
 /// means keep our own prediction. `gap` is how far the server's position
@@ -962,6 +989,29 @@ mod coord_tests {
         let inside = object::Position::new_flat(0x7200_018C, Vec3::ZERO);
         assert_eq!(map_coord_str(&inside), "indoors");
         assert!(map_coords(&inside).is_none());
+    }
+
+    #[test]
+    fn a_place_tells_a_room_from_the_open_and_a_block_from_a_cell() {
+        let room = Place::of_position(&object::Position::new_flat(
+            0x01F6_0289,
+            Vec3::new(1.0, 2.0, 3.0),
+        ));
+        assert_eq!(
+            room.at,
+            landblock_origin(0x01F6_0000) + Vec3::new(1.0, 2.0, 3.0)
+        );
+        assert!(room.is_indoors() && room.is_located());
+        let field = Place {
+            at: Vec3::ZERO,
+            cell: 0xA9B4_0019,
+        };
+        assert!(!field.is_indoors() && field.is_located());
+        let block = Place {
+            at: Vec3::ZERO,
+            cell: 0xA9B4_0000,
+        };
+        assert!(!block.is_indoors() && !block.is_located());
     }
 }
 

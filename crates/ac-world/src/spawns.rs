@@ -47,13 +47,13 @@ impl Spawn {
 /// The creatures of one cell, gathered: where the cell's generators stand
 /// on average, and what they make. One of these is a mark on the map.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Place<'a> {
+pub struct SpawnCell<'a> {
     pub cell: u32,
     pub at: Vec3,
     pub spawns: Vec<&'a Spawn>,
 }
 
-impl Place<'_> {
+impl SpawnCell<'_> {
     /// The lowest and highest level of what spawns here.
     pub fn levels(&self) -> (u32, u32) {
         let lo = self.spawns.iter().map(|s| s.level).min().unwrap_or(0);
@@ -146,12 +146,12 @@ pub fn in_block(landblock: u32) -> &'static [Spawn] {
 
 /// `spawns` gathered one place to a cell, in the order given (a
 /// landblock's rows come sorted by cell).
-pub fn by_cell(spawns: &[Spawn]) -> Vec<Place<'_>> {
-    let mut out: Vec<Place> = Vec::new();
+pub fn by_cell(spawns: &[Spawn]) -> Vec<SpawnCell<'_>> {
+    let mut out: Vec<SpawnCell> = Vec::new();
     for s in spawns {
         match out.last_mut() {
             Some(p) if p.cell == s.cell => p.spawns.push(s),
-            _ => out.push(Place {
+            _ => out.push(SpawnCell {
                 cell: s.cell,
                 at: s.at,
                 spawns: vec![s],

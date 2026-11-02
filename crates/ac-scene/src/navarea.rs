@@ -15,23 +15,18 @@
 //! than the first.
 
 use std::collections::HashMap;
-use std::rc::Rc;
 
 use glam::{Vec2, Vec3};
 
 use crate::collision::{Capsule, CollisionWorld};
-use crate::landblock::LandblockScene;
 use crate::nav::{self, Ground, NavGraph, INDOOR_SPACING, OUTDOOR_SPACING};
+use crate::terrain::TerrainMesh;
 use crate::worldroute::{water_kind, Water};
 use crate::{lbid, Assets, Result, BLOCK_SIZE};
 
 /// Most blocks on a side of an area. Nine blocks is about 600 m across,
 /// which covers any city and more than one travel leg.
 pub const MAX_SIDE: u32 = 3;
-
-/// A point this near (metres) a floor under or over it stands on that floor: the client's
-/// `GOAL_ON_FLOOR` for a goal on a roof.
-const ON_A_FLOOR: f32 = 0.6;
 
 /// The landblock a world position falls in.
 pub fn block_at(p: Vec3) -> u32 {
@@ -76,23 +71,14 @@ pub struct Area {
     pub blocks: Vec<u32>,
     /// Their static geometry, merged.
     pub collision: CollisionWorld,
-    /// The scenes, kept for their terrain.
-    scenes: HashMap<u32, Rc<LandblockScene>>,
+    /// Each block's terrain, by block id: plain data, so an area can be shared across threads.
+    terrain: HashMap<u32, TerrainMesh>,
     /// The middle of every opening between interior cells, in world
     /// space: the graph puts a node in each (see `nav::Ground`).
     pub doorways: Vec<Vec3>,
     pub nav: NavGraph,
     /// A dungeon area: no terrain under it, fine lattice.
     pub dungeon: bool,
-    /// Spots to keep away from, and how far: the mouths of portals that
-    /// are not the one being walked to. A portal takes whoever touches
-    /// it, so a walk that brushes the wrong one ends somewhere else.
-    pub avoid: Vec<Vec3>,
-    pub berth: f32,
-    /// Keep out of buildings (see `nav::Ground::outdoors_only`). Set
-    /// for a walk between two outdoor spots; a walk that finds no way
-    /// outdoors is tried again with it off.
-    pub outdoors_only: bool,
     /// Which of the region's terrain types are open sea, by index. A
     /// character cannot walk into the ocean -- the server refuses the
     /// move and it stops dead against nothing, which is what an
@@ -118,7 +104,9 @@ impl Area {
             v.dedup();
             v
         };
-        let mut scenes: HashMap<u32, Rc<LandblockScene>> = HashMap::new();
+        let mut terrain: HashMap<u32, TerrainMesh> = HashMap::new();
+        let mut indoors = false;
+        let mut doorways: Vec<Vec3> = Vec::new();
         let mut collision = CollisionWorld::default();
         for &id in &wanted {
             let scene = if id == centre {
@@ -139,10 +127,14 @@ impl Area {
             if let Ok(w) = CollisionWorld::from_scene(assets, &scene) {
                 collision.absorb(&w);
             }
-            scenes.insert(id, scene);
+            indoors |= !scene.cells.is_empty();
+            // Every opening the cell data names, so the graph can put a
+            // node in each rather than hope the lattice lands on one.
+            doorways.extend(scene.cells.iter().flat_map(|c| c.doorways.iter().copied()));
+            terrain.insert(id, scene.terrain.clone());
         }
         let blocks: Vec<u32> = {
-            let mut v: Vec<u32> = scenes.keys().copied().collect();
+            let mut v: Vec<u32> = terrain.keys().copied().collect();
             v.sort_unstable();
             v
         };
@@ -158,14 +150,8 @@ impl Area {
                 hi = hi.max(Vec2::new(chi.x, chi.y));
             }
         }
-        // The fine lattice wherever there are interiors to walk, the
-        // coarse one over open country -- the rule
-        // [`NavGraph::for_scene`] already states, which this
-        // constructor used to contradict by giving every surface block
-        // the 4 m lattice. A 4 m lattice puts about one node in a room:
-        // Holtburg's houses came out as a node or two per storey with
-        // nothing joining them, so a vendor upstairs was unreachable.
-        let indoors = scenes.values().any(|s| !s.cells.is_empty());
+        // The fine lattice wherever there are interiors to walk, the coarse one over open country:
+        // a 4 m lattice puts about one node in a room, so a storey has a node or two, unjoined.
         let spacing = if dungeon || indoors {
             INDOOR_SPACING
         } else {
@@ -178,22 +164,13 @@ impl Area {
                 .collect(),
             Err(_) => Vec::new(),
         };
-        // Every opening the cell data names, so the graph can put a
-        // node in each rather than hope the lattice lands on one.
-        let doorways: Vec<Vec3> = scenes
-            .values()
-            .flat_map(|s| s.cells.iter().flat_map(|c| c.doorways.iter().copied()))
-            .collect();
         Ok(Area {
             blocks,
             collision,
-            scenes,
+            terrain,
             doorways,
             nav,
             dungeon,
-            avoid: Vec::new(),
-            berth: 0.0,
-            outdoors_only: false,
             sea_types,
         })
     }
@@ -202,13 +179,7 @@ impl Area {
     /// falls in is a sea type. A cell with a corner ashore is the beach,
     /// which can be waded, so only water all the way round counts.
     pub fn is_sea(&self, x: f32, y: f32) -> bool {
-        if self.dungeon || self.sea_types.is_empty() {
-            return false;
-        }
-        match self.scenes.get(&block_at(Vec3::new(x, y, 0.0))) {
-            Some(s) => sea_at(&s.terrain, &self.sea_types, x, y, s.id),
-            None => false,
-        }
+        !self.dungeon && seas(&self.terrain, &self.sea_types)(x, y)
     }
 
     /// Run something against the area's ground: its merged collision,
@@ -218,43 +189,33 @@ impl Area {
     pub fn with_ground<R>(&mut self, f: impl FnOnce(&Ground, &mut NavGraph) -> R) -> R {
         let Area {
             collision,
-            scenes,
+            terrain,
             doorways,
             nav,
             dungeon,
             sea_types,
-            avoid,
-            berth,
-            outdoors_only,
             ..
         } = self;
-        let terrain = |x: f32, y: f32| -> Option<f32> {
-            let scene = scenes.get(&block_at(Vec3::new(x, y, 0.0)))?;
-            let o = lbid::world_origin(scene.id);
-            scene.terrain.height_at(Vec3::new(x - o.x, y - o.y, 0.0))
-        };
-        let sea = |x: f32, y: f32| -> bool {
-            if sea_types.is_empty() {
-                return false;
-            }
-            match scenes.get(&block_at(Vec3::new(x, y, 0.0))) {
-                Some(s) => sea_at(&s.terrain, sea_types, x, y, s.id),
-                None => false,
-            }
-        };
-        // The berth around the portals we are not walking to: nowhere
-        // to stand, floor or no floor, indoors or out.
-        let no_go = |p: Vec3| -> bool { avoid.iter().any(|a| crate::nav::in_berth(*a, p, *berth)) };
-        let keep_off = *berth > 0.0 && !avoid.is_empty();
+        let (height, sea) = (heights(terrain), seas(terrain, sea_types));
         let ground = Ground {
             collision,
-            terrain: (!*dungeon).then_some(&terrain),
+            terrain: (!*dungeon).then_some(&height),
             sea: (!*dungeon).then_some(&sea),
-            no_go: keep_off.then_some(&no_go),
-            outdoors_only: *outdoors_only && !*dungeon,
             doorways,
         };
         f(&ground, nav)
+    }
+
+    /// [`with_ground`](Self::with_ground) with the graph only read, for an area shared.
+    pub fn read_ground<R>(&self, f: impl FnOnce(&Ground, &NavGraph) -> R) -> R {
+        let (height, sea) = (heights(&self.terrain), seas(&self.terrain, &self.sea_types));
+        let ground = Ground {
+            collision: &self.collision,
+            terrain: (!self.dungeon).then_some(&height),
+            sea: (!self.dungeon).then_some(&sea),
+            doorways: &self.doorways,
+        };
+        f(&ground, &self.nav)
     }
 
     /// This area can plan a walk from `from` to `to`. A dungeon holds
@@ -278,74 +239,7 @@ impl Area {
         if self.dungeon {
             return None;
         }
-        let scene = self.scenes.get(&block_at(Vec3::new(x, y, 0.0)))?;
-        let o = lbid::world_origin(scene.id);
-        scene.terrain.height_at(Vec3::new(x - o.x, y - o.y, 0.0))
-    }
-
-    /// Waypoints from `from` to `to` around the area's geometry, ending
-    /// with `to` and not including `from`. `None` when the two are not
-    /// connected by anything the capsule can walk.
-    pub fn path(&mut self, from: Vec3, to: Vec3) -> Option<Vec<Vec3>> {
-        self.path_to(from, to, false)
-    }
-
-    /// The same, saying whether the goal's height is to be believed.
-    ///
-    /// `exact_to` is for a goal that is where something actually stands
-    /// -- a vendor on the first floor -- rather than a point picked off
-    /// a coarse map. Grounding one of those asks for the floor below it
-    /// and gets a route to the floor below it.
-    pub fn path_to(&mut self, from: Vec3, to: Vec3, exact_to: bool) -> Option<Vec<Vec3>> {
-        // A goal handed down from a coarser map floats above or below
-        // the ground it stands on -- the overland grid is 24 m wide and
-        // misses a hillside by a storey -- and a node is only found
-        // within a couple of metres of the height asked for. Put both
-        // ends on the ground first.
-        let from = self.grounded(from);
-        let to = if exact_to { to } else { self.grounded(to) };
-        let path = self.with_ground(|ground, nav| nav.find_path(ground, from, to));
-        if path.is_some() || !self.outdoors_only {
-            return path;
-        }
-        // No way outdoors: through the buildings then, on a graph of
-        // its own, since the nodes built so far left the interiors out.
-        let (lo, hi, spacing, cap) = {
-            let n = &self.nav;
-            (n.min(), n.max(), n.spacing, n.capsule)
-        };
-        self.nav = NavGraph::new(lo, hi, spacing, &cap);
-        self.outdoors_only = false;
-        let path = self.with_ground(|ground, nav| nav.find_path(ground, from, to));
-        self.outdoors_only = true;
-        self.nav = NavGraph::new(lo, hi, spacing, &cap);
-        path
-    }
-
-    /// `p` with its height taken from the terrain under it, outdoors,
-    /// when the height given is far from it. Indoors, and where there
-    /// is no terrain, the height given stands.
-    ///
-    /// Inside a building the height given is the whole of the answer,
-    /// and the cells say where that is. Asking the caller instead is
-    /// what sent a character to Asenala, who keeps a shop on the upper
-    /// floor of a house in Holtburg: the flag that means "believe this
-    /// height" was computed from a landblock id, whose low word is
-    /// always zero and so always read as outdoors, and the walk was
-    /// quietly grounded to the patch of floor three metres below her.
-    pub fn grounded(&self, p: Vec3) -> Vec3 {
-        if self.dungeon || self.collision.in_known_cell(p) {
-            return p;
-        }
-        // Nor on a floor of its own outdoors: a deck, a bridge, a roof
-        // (a_goal_standing_on_a_deck_is_planned_to_on_the_deck).
-        if self.collision.floor_at(p, ON_A_FLOOR, ON_A_FLOOR).is_some() {
-            return p;
-        }
-        match self.terrain_at(p.x, p.y) {
-            Some(z) if (z - p.z).abs() > 2.0 => Vec3::new(p.x, p.y, z),
-            _ => p,
-        }
+        heights(&self.terrain)(x, y)
     }
 
     /// Build every chunk of the graph now. For tools and tests: paths
@@ -358,6 +252,31 @@ impl Area {
     /// points: the test that decides a route is not needed at all.
     pub fn line_clear(&self, from: Vec3, to: Vec3) -> bool {
         nav::line_clear(&self.collision, from, to)
+    }
+}
+
+/// The terrain height at a world `(x, y)`, from whichever block of `terrain` it falls in.
+fn heights(terrain: &HashMap<u32, TerrainMesh>) -> impl Fn(f32, f32) -> Option<f32> + '_ {
+    move |x, y| {
+        let id = block_at(Vec3::new(x, y, 0.0));
+        let o = lbid::world_origin(id);
+        terrain
+            .get(&id)?
+            .height_at(Vec3::new(x - o.x, y - o.y, 0.0))
+    }
+}
+
+/// Whether a world `(x, y)` is open sea, by [`sea_at`]; never when the sea types are unknown.
+fn seas<'a>(
+    terrain: &'a HashMap<u32, TerrainMesh>,
+    sea_types: &'a [bool],
+) -> impl Fn(f32, f32) -> bool + 'a {
+    move |x, y| {
+        let id = block_at(Vec3::new(x, y, 0.0));
+        !sea_types.is_empty()
+            && terrain
+                .get(&id)
+                .is_some_and(|t| sea_at(t, sea_types, x, y, id))
     }
 }
 
@@ -405,6 +324,12 @@ mod tests {
         let blocks = blocks_for(o(corner), o(corner));
         assert_eq!(blocks.len(), 4);
         assert!(blocks.contains(&corner));
+    }
+
+    #[test]
+    fn an_area_is_shared_across_threads() {
+        fn is_shared<T: Send + Sync>() {}
+        is_shared::<Area>();
     }
 
     #[test]

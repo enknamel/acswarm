@@ -24,6 +24,7 @@ use ac_scene::worldroute;
 use ac_world::trip::{self, Prefs, Step, Trip};
 use glam::{Vec2, Vec3};
 
+use crate::gem_room::{clear_heading, gem_next, GemNext};
 use crate::Client;
 
 /// A waypoint counts as reached within this distance (metres, flat).
@@ -52,22 +53,6 @@ const RECALL_SETTLE: Duration = Duration::from_millis(800);
 /// the journey is planned again without that spell.
 pub const RECALL_GIVE_UP: Duration = Duration::from_secs(15);
 const RECALL_TRIES: u32 = 2;
-/// A gem still in the pack this long after it was used was not taken:
-/// the server refuses a use while the character is busy -- mid-cast,
-/// say -- and leaves the gem where it was. It is used again.
-const GEM_RETRY: Duration = Duration::from_secs(3);
-/// How many times a gem is used before the journey goes another way.
-const GEM_TRIES: u32 = 4;
-/// A gem that was taken but has put no portal in front of the character,
-/// or carried it nowhere, in this long is given up on. The summon is a
-/// cast of a couple of seconds; a portal that has not appeared well after
-/// that is one the server could not find room for.
-const GEM_GIVE_UP: Duration = Duration::from_secs(8);
-/// A summoned portal is used again this long after a use that did not
-/// carry the character off.
-const SUMMONED_USE_EVERY: Duration = Duration::from_secs(3);
-/// How many times a summoned portal is used before it is given up on.
-const SUMMONED_TRIES: u32 = 4;
 /// How far off the portal a gem summoned may stand. ACE puts it three
 /// metres in front of whoever used the gem.
 const SUMMONED_REACH: f32 = 8.0;
@@ -102,9 +87,6 @@ pub const STUCK_AFTER: Duration = Duration::from_secs(10);
 const REPLANS: u32 = 3;
 /// Getting closer to the waypoint by less than this is not progress.
 const PROGRESS: f32 = 1.0;
-/// The character stops this close to the end of a leg (the local move-to's
-/// stop distance); legs are replaced before that, at [`ARRIVE`].
-const LEG_STOP: f32 = 1.0;
 
 /// The journey being made, and the terrain data it needs.
 #[derive(Default)]
@@ -191,6 +173,8 @@ pub struct Travel {
     next: usize,
     /// End of the leg the local move-to is aimed at right now.
     leg: Option<Vec2>,
+    /// Last frame's steer for this journey's own leg answered no way (set by `tick_player`).
+    pub(crate) leg_refused: bool,
     /// Closest the character has been to the current waypoint, and when
     /// that last improved.
     best: f32,
@@ -317,8 +301,7 @@ impl Client {
             if self.traveling() {
                 self.end_trip();
             }
-            self.follow = Some(crate::Follow { target: goal, stop });
-            return Did::Acting;
+            return self.walk_toward(goal, stop);
         }
         // Already on the way there.
         if self.traveling() {
@@ -1349,11 +1332,11 @@ impl Client {
                 return self.travel_gem_wait(guid, &name, summons, now);
             }
         }
-        // Coming no closer to this step's target for a long while: plan
-        // again from where the character actually stands. This comes
-        // before the indoor walk below, which hands back its leg and
-        // returns: after it, a character standing still inside a hall
-        // was never noticed and walked at a portal for four minutes.
+        // Coming no closer to this step's target for a long while, or no way
+        // on the indoor leg below (its steering refused): plan again from
+        // where the character stands. This comes before the indoor walk,
+        // which hands back its leg and returns, so a character standing
+        // still inside a hall is noticed.
         if let Some(target) = self.travel.step_target {
             let d = me.distance(target);
             if d < self.travel.step_best - STEP_PROGRESS {
@@ -1361,10 +1344,13 @@ impl Client {
                 self.travel.step_since = Some(now);
             }
         }
+        let target_indoors = self.travel.step_cell.is_some_and(|c| c & 0xFFFF >= 0x100);
+        let indoor_leg = (indoors || target_indoors) && self.travel.step_block == Some(block);
         if self
             .travel
             .step_since
             .is_some_and(|t| now.duration_since(t) > STEP_GIVE_UP)
+            || (indoor_leg && self.travel.leg_refused)
         {
             if let Some(goal) = self.travel.goal {
                 tracing::warn!(
@@ -1406,8 +1392,7 @@ impl Client {
         // landblock's own graph steer. Inside a *building* on the way,
         // with the target elsewhere, keep to the overland legs so the
         // character walks back out instead of pressing against a wall.
-        let target_indoors = self.travel.step_cell.is_some_and(|c| c & 0xFFFF >= 0x100);
-        if (indoors || target_indoors) && self.travel.step_block == Some(block) {
+        if indoor_leg {
             let target = *self.travel.route.as_ref()?.last()?;
             if me.distance(target) > ARRIVE {
                 // At the height of what is aimed at when that is known --
@@ -1424,7 +1409,7 @@ impl Client {
                     .step_cell
                     .filter(|c| c & 0xFFFF >= 0x100)
                     .unwrap_or(block);
-                return Some((Vec3::new(target.x, target.y, z), LEG_STOP, cell));
+                return Some((Vec3::new(target.x, target.y, z), ARRIVE, cell));
             }
             // At the target. A walk is done; a portal's mouth is waited
             // at below, like outdoors: jumped into, and given up on when
@@ -1576,7 +1561,7 @@ impl Client {
             }
             match self.travel.last_progress {
                 Some(t) if d >= self.travel.best - PROGRESS => {
-                    if now.duration_since(t) >= STUCK_AFTER {
+                    if now.duration_since(t) >= STUCK_AFTER || self.travel.leg_refused {
                         // The last waypoint is where the step ends; not
                         // reaching it is not arriving. Plan the journey
                         // again from here, a few times, before giving up.
@@ -1621,7 +1606,7 @@ impl Client {
             let z = leg_height(self.travel.grid.as_deref(), leg, me3, underground);
             return Some((
                 Vec3::new(leg.x, leg.y, z),
-                LEG_STOP,
+                ARRIVE,
                 steering_block(leg, block, underground),
             ));
         }
@@ -1719,82 +1704,6 @@ pub fn leg_end(me: Vec2, wp: Vec2) -> Vec2 {
         clipped
     } else {
         far
-    }
-}
-
-/// The way to face to use a gem: the way the character already faces
-/// when that is clear, else the nearest clear heading to it, turning a
-/// twelfth of the circle at a time either side. `None` when nowhere is.
-fn clear_heading(forward: Vec2, mut clear: impl FnMut(Vec2) -> bool) -> Option<Vec2> {
-    const STEPS: i32 = 6;
-    let turn = std::f32::consts::PI / STEPS as f32;
-    let mut tried = vec![0];
-    for k in 1..STEPS {
-        tried.push(k);
-        tried.push(-k);
-    }
-    tried.push(STEPS);
-    tried
-        .into_iter()
-        .map(|k| Vec2::from_angle(turn * k as f32).rotate(forward))
-        .find(|d| clear(*d))
-}
-
-/// What a gem step does next, standing where the gem was used.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum GemNext {
-    /// Nothing yet: stand still.
-    Wait,
-    /// The server did not take the gem: use it again.
-    UseGem,
-    /// Use this portal, the one the gem summoned. A summoned portal is
-    /// used, not walked into.
-    UsePortal(u32),
-    /// It is not working: go another way.
-    GiveUp,
-}
-
-/// Decide it from what can be seen: whether the gem is still carried,
-/// whether it is the kind that summons a portal, how long since it was
-/// last used and how often, and the summoned portal if one is in reach,
-/// with how long since that was last used and how often.
-///
-/// The server takes a gem only when a use gets through, so a gem still
-/// in the pack is the plain sign of a refusal -- which a busy character
-/// gets, and which says so in no other way the journey can see.
-fn gem_next(
-    carried: bool,
-    summons: bool,
-    since_use: Duration,
-    uses: u32,
-    portal: Option<u32>,
-    since_portal: Option<Duration>,
-    portal_uses: u32,
-) -> GemNext {
-    if carried {
-        return if since_use < GEM_RETRY {
-            GemNext::Wait
-        } else if uses < GEM_TRIES {
-            GemNext::UseGem
-        } else {
-            GemNext::GiveUp
-        };
-    }
-    let waited_out = if since_use < GEM_GIVE_UP {
-        GemNext::Wait
-    } else {
-        GemNext::GiveUp
-    };
-    // The rare gem that carries the character off itself: the arrival
-    // ends the step, and there is nothing to use.
-    if !summons {
-        return waited_out;
-    }
-    match portal {
-        None => waited_out,
-        Some(_) if since_portal.is_some_and(|d| d < SUMMONED_USE_EVERY) => GemNext::Wait,
-        Some(_) if portal_uses >= SUMMONED_TRIES => GemNext::GiveUp,
-        Some(guid) => GemNext::UsePortal(guid),
     }
 }
 
@@ -1933,6 +1842,7 @@ mod tests {
             if goal.is_none() && !c.traveling() {
                 return;
             }
+            c.travel.leg_refused = false;
             let pl = c.player.as_mut().unwrap();
             let mut input = Input::default();
             pl.step_cap = None;
@@ -1942,16 +1852,19 @@ mod tests {
                     if Vec2::new(d.x, d.y).length() > stop {
                         let mut standing = crate::Standing {
                             player: pl,
-                            assets: &c.assets,
-                            wide: &mut c.pathfinder,
+                            pathfinder: &mut c.pathfinder,
                         };
-                        if let ac_nav::Aim::Go(at) = c.steering.steer(&mut standing, g, cell, now) {
+                        let to = ac_world::Place { at: g, cell };
+                        let aim = c.steering.steer(&mut standing, to, stop, now);
+                        c.travel.leg_refused = aim == ac_nav::Aim::NoWay;
+                        if let ac_nav::Aim::Go(at) = aim {
                             let d = at - pl.world_position();
                             let flat = Vec2::new(d.x, d.y);
                             if flat.length() > 1e-3 {
                                 pl.heading = (-flat.x).atan2(flat.y);
                             }
                             pl.step_cap = Some(flat.length());
+                            pl.pace_cap = c.steering.pace();
                             input.forward = 1.0;
                             input.run = true;
                         }
@@ -2076,11 +1989,11 @@ mod tests {
         );
     }
 
-    /// Walk `c` at `target` for `seconds`, steered or straight, feeding the steering's trail as
-    /// `tick_player` does.
+    /// Walk `c` at `target` for `seconds`, steered or straight, as `tick_player` does.
     fn drive(c: &mut Client, target: Vec3, block: u32, steer: bool, seconds: f32) {
         use crate::player::Input;
         let dt = 1.0 / 20.0;
+        let stop = 0.5;
         let t0 = Instant::now();
         for frame in 0..(seconds / dt) as u32 {
             let now = t0 + Duration::from_secs_f32(frame as f32 * dt);
@@ -2088,10 +2001,13 @@ mod tests {
             let aim = if steer {
                 let mut standing = crate::Standing {
                     player: pl,
-                    assets: &c.assets,
-                    wide: &mut c.pathfinder,
+                    pathfinder: &mut c.pathfinder,
                 };
-                c.steering.steer(&mut standing, target, block, now)
+                let to = ac_world::Place {
+                    at: target,
+                    cell: block,
+                };
+                c.steering.steer(&mut standing, to, stop, now)
             } else {
                 ac_nav::Aim::Go(target)
             };
@@ -2102,7 +2018,7 @@ mod tests {
                 target.y - pl.world_position().y,
             )
             .length()
-                <= 0.5;
+                <= stop;
             if let (ac_nav::Aim::Go(at), false) = (aim, there) {
                 let d = at - pl.world_position();
                 let flat = Vec2::new(d.x, d.y);
@@ -2110,20 +2026,19 @@ mod tests {
                     pl.heading = (-flat.x).atan2(flat.y);
                 }
                 pl.step_cap = Some(flat.length());
+                pl.pace_cap = if steer { c.steering.pace() } else { None };
                 input.forward = 1.0;
                 input.run = true;
             }
             pl.update(&c.assets, &input, dt);
-            c.steering.walked(pl.world_position());
         }
     }
 
     #[test]
     #[ignore = "needs AC_DATA_DIR"]
-    fn a_character_in_a_pocket_no_path_leaves_goes_back_the_way_it_came() {
-        // Two pockets among props that scenario characters walked into and stood in: at the
-        // Mosswart ground (61 s, run E) and beside the Academy spawn (53-388 s). From inside, the
-        // block's graph finds no path anywhere; the way in is still walkable.
+    fn a_character_in_a_pocket_among_props_is_planned_out_of_it() {
+        // Two pockets among props, at the Mosswart ground and beside the Academy spawn: the body
+        // walked in, so a walk-tested start exists and the plan from inside leads out.
         for (block, cell, from, pocket, goal) in [
             (
                 0xBAAD_0000u32,
@@ -2144,6 +2059,15 @@ mod tests {
             let mut c = crate::testkit::standing_in_the_field(20, cell, from);
             drive(&mut c, origin + pocket, block, false, 4.0);
             c.steering.reset();
+            let to = ac_world::Place {
+                at: origin + goal,
+                cell: block,
+            };
+            let plan = c.plan_walk(to, 0.5);
+            assert!(
+                matches!(plan, ac_nav::routing::Planned::Route(_)),
+                "no plan out of the pocket in {block:#010x}: {plan:?}"
+            );
             drive(&mut c, origin + goal, block, true, 30.0);
             let at = c.player.as_ref().unwrap().world_position() - origin;
             assert!(
@@ -2164,14 +2088,14 @@ mod tests {
         let from = Vec3::new(35.3157, -51.0781, 0.0);
         let corpse = Vec3::new(30.3719, -51.8906, 0.0042);
         let mut c = crate::testkit::standing_in_the_field(25, 0x01F6_0233, from);
-        let me = c.my_position().unwrap();
-        let assets = c.assets.clone();
-        let path = c
-            .player
-            .as_mut()
-            .unwrap()
-            .find_path(&assets, block, me, origin + corpse, block)
-            .expect("a way round");
+        let to = ac_world::Place {
+            at: origin + corpse,
+            cell: block,
+        };
+        let path = match c.plan_walk(to, 0.5) {
+            ac_nav::routing::Planned::Route(r) => r.points(),
+            other => panic!("no way round: {other:?}"),
+        };
         assert!(
             path[0].x - origin.x > 34.87,
             "starts behind the bookcases: {path:?}"
@@ -2186,7 +2110,7 @@ mod tests {
 
     #[test]
     #[ignore = "needs AC_DATA_DIR"]
-    fn a_spot_no_path_reaches_is_known_before_walking_at_it() {
+    fn has_way_to_answers_from_the_region() {
         // "If there's no path to the corpse, don't bother": asked once as the walk sets off. In the
         // Holtburg Dungeon, beside the bookcases, the room round them is reachable and the top of a
         // bookcase is not.
@@ -2198,11 +2122,17 @@ mod tests {
             c.has_way_to(origin + Vec3::new(36.0, -54.0, 0.0), 0x01F6_0233, 0.25),
             "round the bookcases"
         );
-        // On top of a bookcase, 1.9 m up: `find_path` ends its route there anyway.
+        // On top of a bookcase, 1.9 m up: the planner checks the last leg, so no route ends there.
         let top = origin + Vec3::new(34.68, -50.7, 1.915);
-        let (me, assets) = (c.my_position().unwrap(), c.assets.clone());
-        let pl = c.player.as_mut().unwrap();
-        assert!(pl.find_path(&assets, block, me, top, 0x01F6_0224).is_some());
+        let on_top = ac_world::Place {
+            at: top,
+            cell: 0x01F6_0224,
+        };
+        let planned = c.plan_walk(on_top, 2.5);
+        assert!(
+            matches!(planned, ac_nav::routing::Planned::NoWay(_)),
+            "{planned:?}"
+        );
         assert!(!c.has_way_to(top, 0x01F6_0224, 2.5), "on the bookcase");
         assert!(
             c.has_way_to(Vec3::new(10.0, 10.0, 0.0), 0x0101_0001, 0.25),
@@ -2250,18 +2180,34 @@ mod tests {
         let roof = origin + Vec3::new(181.0, 129.6, 96.4);
         let me = c.my_position().unwrap();
         let assets = c.assets.clone();
-        let path = c
-            .player
-            .as_mut()
-            .unwrap()
-            .find_path(&assets, block, me, roof, block)
-            .expect("a way up");
-        let before_the_end = path[path.len().saturating_sub(2)];
+        let path = match c.plan_walk(
+            ac_world::Place {
+                at: roof,
+                cell: block,
+            },
+            0.5,
+        ) {
+            ac_nav::routing::Planned::Route(r) => r.points(),
+            other => panic!("no way up: {other:?}"),
+        };
+        let shown = path.iter().map(|w| *w - origin).collect::<Vec<_>>();
+        let end = *path.last().unwrap();
         assert!(
-            before_the_end.z > 93.0,
-            "climbs to the roof rather than stopping under it: {:?}",
-            path.iter().map(|w| *w - origin).collect::<Vec<_>>()
+            end.distance(roof) <= 0.5,
+            "climbs to the roof rather than stopping under it: {shown:?}"
         );
+        // And the body walks every leg of the way up, the ramp included.
+        let pl = c.player.as_mut().unwrap();
+        let cap = pl.capsule();
+        let walked = pl.on_ground(&assets, block, |ground, _| {
+            let mut from = (me, 0xBDAF_0103);
+            path.iter().all(|&p| {
+                let walks = ground.body_reaches(from.0, from.1, p, &cap);
+                from = (p, ac_scene::wayfind::locate(ground, p));
+                walks
+            })
+        });
+        assert_eq!(walked, Some(true), "{shown:?}");
     }
 
     #[test]
@@ -2369,6 +2315,35 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn a_journey_leg_with_no_way_is_planned_again_at_once() {
+        // From a Holtburg Dungeon room to a ledge 9.5 m up that nothing climbs to.
+        let mut c = Client::offline(crate::testkit::game_data());
+        let rooms = c.assets.block_collision(0x01F6_0000).unwrap();
+        let origin = ac_world::landblock_origin(0x01F6_0000);
+        let start = Vec3::new(223.5, 47_158.5, 0.0);
+        let (z, cell) = rooms.world.floor_at(start, 0.6, 1.5).unwrap();
+        let ledge = Vec3::new(262.0, 47_182.0, 9.5);
+        let (high, ledge_cell) = rooms.world.floor_at(ledge, 0.6, 1.5).unwrap();
+        crate::testkit::stand(&mut c, cell, start.with_z(z) - origin);
+        c.steering.reset();
+        assert!(c.plan_trip_in(ledge.truncate(), ledge_cell), "no journey");
+        // Each of the REPLANS plans again is refused once its ask is let through (ASK_EVERY, 1.5 s).
+        walk_the_journey(&mut c, STUCK_AFTER.as_secs_f32());
+        assert!(!c.traveling(), "the no way waited for a clock");
+        let refusal = c.steering.unreachable(ledge.with_z(high));
+        assert!(
+            matches!(refusal, Some(ac_nav::steering::Unreachable::Planner(_))),
+            "{refusal:?}"
+        );
+        let me = c.my_position().unwrap();
+        assert!(
+            me.distance(start.with_z(z)) < 1.0,
+            "walked at the refused leg to {me}"
+        );
+    }
+
+    #[test]
     fn a_portal_in_a_hall_is_aimed_at_on_its_own_floor() {
         let hall = ac_world::portals::named("Holtburg Meeting Hall Portal")
             .into_iter()
@@ -2380,83 +2355,6 @@ mod tests {
         assert_eq!(
             portal_mouth_height("Portal to Nowhere", hall.from_xy()),
             None
-        );
-    }
-
-    #[test]
-    fn a_gem_is_used_facing_the_nearest_open_ground() {
-        let north = Vec2::Y;
-        // Room straight ahead: that way, no turning.
-        assert_eq!(clear_heading(north, |_| true), Some(north));
-        // A wall ahead and to the right: the nearest clear heading, just
-        // to the left, not the far side of the circle.
-        let d = clear_heading(north, |d| d.x < -0.4).unwrap();
-        assert!(d.x < -0.4 && d.y > 0.8, "{d:?}");
-        // Boxed in: nowhere, so the gem is not spent.
-        assert_eq!(clear_heading(north, |_| false), None);
-        // Only straight behind is clear: still found.
-        let back = clear_heading(north, |d| d.y < -0.99).unwrap();
-        assert!(back.y < -0.99, "{back:?}");
-        // Every heading is tried exactly once.
-        let mut n = 0;
-        clear_heading(north, |_| {
-            n += 1;
-            false
-        });
-        assert_eq!(n, 12);
-    }
-
-    #[test]
-    fn a_gem_is_used_again_until_the_server_takes_it() {
-        let s = Duration::from_secs;
-        // Just used: give the server a moment to take it.
-        assert_eq!(gem_next(true, true, s(1), 1, None, None, 0), GemNext::Wait);
-        // Still in the pack a while later: refused, most likely because
-        // the character was mid-cast. Use it again.
-        assert_eq!(
-            gem_next(true, true, s(4), 1, None, None, 0),
-            GemNext::UseGem
-        );
-        // Refused every time: go another way rather than stand here.
-        assert_eq!(
-            gem_next(true, true, s(4), GEM_TRIES, None, None, 0),
-            GemNext::GiveUp
-        );
-    }
-
-    #[test]
-    fn a_summoned_portal_is_used_not_walked_into() {
-        let s = Duration::from_secs;
-        // Taken, and the portal is up: use it.
-        assert_eq!(
-            gem_next(false, true, s(1), 1, Some(7), None, 0),
-            GemNext::UsePortal(7)
-        );
-        // Just used: give the server time to carry us off.
-        assert_eq!(
-            gem_next(false, true, s(2), 1, Some(7), Some(s(1)), 1),
-            GemNext::Wait
-        );
-        // Still here after that: use it again, and in the end give up.
-        assert_eq!(
-            gem_next(false, true, s(9), 1, Some(7), Some(s(4)), 1),
-            GemNext::UsePortal(7)
-        );
-        assert_eq!(
-            gem_next(false, true, s(20), 1, Some(7), Some(s(4)), SUMMONED_TRIES),
-            GemNext::GiveUp
-        );
-        // Taken, but nothing has appeared yet: wait, and not for ever.
-        assert_eq!(gem_next(false, true, s(2), 1, None, None, 0), GemNext::Wait);
-        assert_eq!(
-            gem_next(false, true, GEM_GIVE_UP, 1, None, None, 0),
-            GemNext::GiveUp
-        );
-        // A gem that carries the character off itself has nothing to
-        // use, whatever portal happens to be standing nearby.
-        assert_eq!(
-            gem_next(false, false, s(2), 1, Some(7), None, 0),
-            GemNext::Wait
         );
     }
 

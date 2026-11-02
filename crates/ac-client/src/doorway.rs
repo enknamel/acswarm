@@ -7,6 +7,8 @@ use std::time::{Duration, Instant};
 
 use glam::Vec3;
 
+use ac_nav::routing::Planned;
+
 use crate::aim;
 use crate::autoplay::Doing;
 use crate::Client;
@@ -156,22 +158,18 @@ impl Client {
     /// there is nowhere to go.
     pub(crate) fn clear_doorway(&mut self, target: u32, name: &str, at: Vec3) -> bool {
         let now = Instant::now();
-        let Some((me, block)) = self
-            .player
-            .as_ref()
-            .map(|p| (p.world_position(), p.cell & 0xFFFF_0000))
-        else {
+        let Some(me) = self.my_position() else {
             return false;
         };
         let doors = self.doors_near(&[me, at]);
         if let Some(door) = doors.iter().find(|d| d.holds(at)).copied() {
-            return self.pull_from_doorway(target, name, &door, me, block, now);
+            return self.pull_from_doorway(target, name, &door, me, now);
         }
         self.dodge.pulling = None;
         let Some(door) = doors.iter().find(|d| d.holds(me)).copied() else {
             return false;
         };
-        let Some(spot) = self.out_of_doorway(&door, me, at, block) else {
+        let Some(spot) = self.out_of_doorway(&door, me, at) else {
             tracing::info!("range: standing in a doorway, with nowhere out of it toward {name}");
             return false;
         };
@@ -190,7 +188,6 @@ impl Client {
         name: &str,
         door: &DoorBox,
         me: Vec3,
-        block: u32,
         now: Instant,
     ) -> bool {
         let spot = match self.dodge.pulling {
@@ -201,7 +198,7 @@ impl Client {
                 spot
             }
             _ => {
-                let spot = self.waiting_spot(door, me, block);
+                let spot = self.waiting_spot(door, me);
                 tracing::info!(
                     "range: {name} stands in a doorway; waiting for it {}",
                     spot.map_or("nowhere: no spot back from it".into(), |s| format!(
@@ -237,17 +234,17 @@ impl Client {
     }
 
     /// The nearest place on our side of `door`, [`PULL_BACK`] out or more, that a path leads to.
-    fn waiting_spot(&mut self, door: &DoorBox, me: Vec3, block: u32) -> Option<Vec3> {
+    fn waiting_spot(&mut self, door: &DoorBox, me: Vec3) -> Option<Vec3> {
         let mine = door.side(me);
-        self.nearest_reached(door.at, PULL_BACK + PULL_BAND, me, block, |s| {
+        self.nearest_reached(door.at, PULL_BACK + PULL_BAND, me, |s| {
             door.side(s) == mine && s.distance(door.at) >= PULL_BACK
         })
     }
 
     /// The nearest place out of `door`'s doorway on the side `at` is on, that a path leads to.
-    fn out_of_doorway(&mut self, door: &DoorBox, me: Vec3, at: Vec3, block: u32) -> Option<Vec3> {
+    fn out_of_doorway(&mut self, door: &DoorBox, me: Vec3, at: Vec3) -> Option<Vec3> {
         let theirs = door.side(at);
-        self.nearest_reached(door.at, DOORWAY_DEPTH + PULL_BAND, me, block, |s| {
+        self.nearest_reached(door.at, DOORWAY_DEPTH + PULL_BAND, me, |s| {
             door.side(s) == theirs && !door.holds(s)
         })
     }
@@ -259,17 +256,15 @@ impl Client {
         around: Vec3,
         radius: f32,
         me: Vec3,
-        block: u32,
         keep: impl Fn(Vec3) -> bool,
     ) -> Option<Vec3> {
-        let assets = self.assets.clone();
-        let pl = self.player.as_mut()?;
-        let mut spots = pl.standable_near(&assets, block, around, radius);
-        spots.retain(|s| keep(*s));
-        spots.sort_by(|a, b| a.distance(me).total_cmp(&b.distance(me)));
-        spots.into_iter().take(PULL_LOOKS).find(|s| {
-            s.distance(me) <= AT_SPOT || pl.find_path(&assets, block, me, *s, block).is_some()
-        })
+        let mut spots = self.standable_near(around, radius);
+        spots.retain(|s| keep(s.at));
+        spots.sort_by(|a, b| a.at.distance(me).total_cmp(&b.at.distance(me)));
+        let spot = spots.into_iter().take(PULL_LOOKS).find(|s| {
+            s.at.distance(me) <= AT_SPOT || matches!(self.plan_walk(*s, AT_SPOT), Planned::Route(_))
+        });
+        spot.map(|s| s.at)
     }
 }
 

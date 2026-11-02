@@ -15,7 +15,7 @@ pub struct WalkFrame {
     pub goal_cell: u32,
     /// Who set the goal: "server walk", "journey" or "follow".
     pub source: &'static str,
-    /// Where the steering aimed; `None` when it found no way (`ac_nav::Aim::NoWay`).
+    /// Where the steering aimed; `None` when it stands (`ac_nav::Aim::NoWay` or `Wait`).
     pub aim: Option<Vec3>,
     /// The leg turned aside for a server-placed object on it (`ac_nav::obstacles::detour`).
     pub detoured: bool,
@@ -23,8 +23,8 @@ pub struct WalkFrame {
     pub route: Option<(usize, usize)>,
     /// Pressed against geometry and going nowhere ([`crate::player::Player::wedged`]).
     pub wedged: bool,
-    /// Walking back the way it came, out of somewhere the graph finds no path from.
-    pub retracing: bool,
+    /// Standing for the planner's answer ([`ac_nav::Steering::is_waiting`]).
+    pub waiting: bool,
 }
 
 /// Blows traded since the session began, counted off the server's attack notices (0x01B1-0x01B4).

@@ -17,7 +17,7 @@
 //! the air past the end of the floor below.
 //!
 //! In 0x01F6026C a ledge stands four metres over the room's floor,
-//! unrailed on its west side, with nothing in the graph joining the two.
+//! unrailed on its west side: no walk joins the two, the drop off it does.
 //! (The vault ribs over 0x01F6022C were the ledge these tests first
 //! stood on: seven metres up, and floor only because the ribs' drawing
 //! polygons were built as collision. The retail client never collided
@@ -26,9 +26,12 @@
 use ac_client::pathfinder::Pathfinder;
 use ac_client::player::{Input, MovementLimits, Player};
 use ac_client::testkit::human;
+use ac_nav::routing::Planned;
 use ac_nav::{Aim, Ground, Steering};
 use ac_net::session::{Config, Session};
+use ac_scene::nav::EdgeKind;
 use ac_scene::Assets;
+use ac_world::Place;
 use glam::{Quat, Vec2, Vec3};
 use std::time::{Duration, Instant};
 
@@ -60,14 +63,32 @@ fn stand(assets: &Assets, cell: u32, at: Vec3) -> Player {
     human(assets, cell, local, Quat::IDENTITY)
 }
 
-/// The steering's questions answered as the client answers them, from
-/// the character's own collision and, when there is one, the planner on
-/// its thread -- waited for, so that its route is taken on the very next
-/// frame, the soonest the client could take it.
+/// A region planner that builds what a plan needs before it answers, as an offline client's does.
+fn planner(assets: &Assets) -> Pathfinder {
+    let mut p = Pathfinder::new(assets);
+    p.build_when_planning();
+    p
+}
+
+/// The region planner's answer from where `pl` stands to within `within` of `goal` (named by its
+/// block only), as the steering asks it.
+fn plan(assets: &Assets, pl: &Player, goal: Vec3, within: f32) -> Planned {
+    let me = ac_world::Place {
+        at: pl.world_position(),
+        cell: pl.cell,
+    };
+    let to = ac_world::Place {
+        at: goal,
+        cell: pl.landblock(),
+    };
+    planner(assets).plan(me, to, within, pl.capsule())
+}
+
+/// The steering's questions answered as the client answers them, from the character's own body
+/// and the region planner, which offline answers an ask at once.
 struct Standing<'a> {
     player: &'a mut Player,
-    assets: &'a Assets,
-    wide: Option<&'a mut Pathfinder>,
+    planner: &'a mut Pathfinder,
 }
 
 impl Ground for Standing<'_> {
@@ -77,40 +98,37 @@ impl Ground for Standing<'_> {
     fn cell(&self) -> u32 {
         self.player.cell
     }
-    fn block(&self) -> u32 {
-        self.player.landblock()
+    fn is_airborne(&self) -> bool {
+        self.player.is_airborne()
     }
-    fn line_blocked(&mut self, block: u32, from: Vec3, to: Vec3) -> bool {
-        self.player.line_blocked(self.assets, block, from, to)
-    }
-    fn line_drops(&mut self, block: u32, from: Vec3, to: Vec3) -> bool {
-        self.player.line_drops(self.assets, block, from, to)
-    }
-    fn find_path(&mut self, block: u32, from: Vec3, to: Vec3, cell: u32) -> Option<Vec<Vec3>> {
-        self.player.find_path(self.assets, block, from, to, cell)
-    }
-    fn ask_wide(&mut self, from: Vec3, to: Vec3, block: u32, outdoors: bool, exact: bool) {
+    fn ask(&mut self, goal: Place, within: f32, now: Instant) {
+        let me = Place {
+            at: self.player.world_position(),
+            cell: self.player.cell,
+        };
         let cap = self.player.capsule();
-        if let Some(wide) = self.wide.as_deref_mut() {
-            let ends = ac_client::pathfinder::Ends {
-                outdoors,
-                exact_to: exact,
-            };
-            wide.ask(from, to, cap, block, ends, Instant::now());
-        }
+        self.planner.ask(me, goal, within, cap, now);
     }
-    fn take_wide(&mut self, from: Vec3, to: Vec3) -> Option<Vec<Vec3>> {
-        let wide = self.wide.as_deref_mut()?;
-        for _ in 0..2000 {
-            if let Some(route) = wide.take(from, to) {
-                return Some(route);
-            }
-            if !wide.busy() {
-                return None;
-            }
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        None
+    fn answer(&mut self, goal: Place) -> Option<(Place, Planned)> {
+        self.planner.take(self.player.world_position(), goal.at)
+    }
+    fn can_walk(&mut self, from: Vec3, to: Vec3) -> bool {
+        let mine = from.distance(self.player.world_position()) < 1e-3;
+        let cell = if mine {
+            self.player.cell
+        } else {
+            self.player.landblock()
+        };
+        let cap = self.player.capsule();
+        self.planner.can_walk(Place { at: from, cell }, to, cap)
+    }
+}
+
+/// The goal as the client names it indoors: by the block the character stands in.
+fn goal_in_block(pl: &Player, goal: Vec3) -> Place {
+    Place {
+        at: goal,
+        cell: pl.landblock(),
     }
 }
 
@@ -118,30 +136,30 @@ impl Ground for Standing<'_> {
 /// way the client asks it indoors: the goal named by the block the
 /// character stands in.
 fn steer(assets: &Assets, pl: &mut Player, goal: Vec3) -> Aim {
-    let block = pl.landblock();
-    let mut st = Steering::new(Instant::now());
+    let to = goal_in_block(pl, goal);
+    let mut st = Steering::default();
+    let mut planner = planner(assets);
     let mut ground = Standing {
         player: pl,
-        assets,
-        wide: None,
+        planner: &mut planner,
     };
-    st.steer(&mut ground, goal, block, Instant::now())
+    st.steer(&mut ground, to, 2.5, Instant::now())
 }
 
-/// Run at the goal the way the client does, frames of `dt` long, for
-/// `secs`: steered toward it while further off than the autoplay stops
-/// short of, standing still on a refusal. Every frame's position, and
-/// whether the character was in the air at it.
-fn chase(
-    assets: &Assets,
-    pl: &mut Player,
-    wide: Option<&mut Pathfinder>,
-    goal: Vec3,
-    dt: f32,
-    secs: f32,
-) -> Vec<(Vec3, bool)> {
-    let mut st = Steering::new(Instant::now());
-    let mut wide = wide;
+/// One frame of a chase: where the body was, whether in the air, and whether the leg it walked
+/// is one the route marks a drop.
+#[derive(Clone, Copy, Debug)]
+struct Frame {
+    at: Vec3,
+    air: bool,
+    on_drop: bool,
+}
+
+/// Run at the goal as the client does, frames of `dt` for `secs`, steered while further off than
+/// the autoplay stops short of, standing on a wait or a refusal.
+fn chase(assets: &Assets, pl: &mut Player, goal: Vec3, dt: f32, secs: f32) -> Vec<Frame> {
+    let mut st = Steering::default();
+    let mut planner = planner(assets);
     let mut now = Instant::now();
     let mut frames = Vec::new();
     for _ in 0..(secs / dt).ceil() as usize {
@@ -149,26 +167,36 @@ fn chase(
         let d = goal - at;
         let mut input = Input::default();
         pl.step_cap = None;
+        pl.pace_cap = None;
         if Vec2::new(d.x, d.y).length() > 2.5 || d.z.abs() > 2.0 {
-            let block = pl.landblock();
+            let to = goal_in_block(pl, goal);
             let aim = {
                 let mut ground = Standing {
                     player: pl,
-                    assets,
-                    wide: wide.as_deref_mut(),
+                    planner: &mut planner,
                 };
-                st.steer(&mut ground, goal, block, now)
+                st.steer(&mut ground, to, 2.5, now)
             };
             if let Aim::Go(to) = aim {
                 let d = to - at;
                 pl.heading = (-d.x).atan2(d.y);
                 pl.step_cap = Some(Vec2::new(d.x, d.y).length());
+                pl.pace_cap = st.pace();
                 input.forward = 1.0;
                 input.run = true;
             }
         }
         pl.update(assets, &input, dt);
-        frames.push((pl.world_position(), pl.is_airborne()));
+        let on_drop = st
+            .route
+            .as_ref()
+            .and_then(|c| c.waypoints.get(c.next))
+            .is_some_and(|w| w.kind == EdgeKind::Drop);
+        frames.push(Frame {
+            at: pl.world_position(),
+            air: pl.is_airborne(),
+            on_drop,
+        });
         now += Duration::from_secs_f32(dt);
     }
     frames
@@ -192,45 +220,45 @@ const ROOM_CELL: u32 = 0x01F6_022C;
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
-fn a_straight_walk_off_a_ledge_onto_the_floor_below_is_leaned_on() {
+fn a_ledge_with_no_stairs_down_is_left_by_its_planned_drop() {
     let assets = assets();
     let ledge = floor(&assets, LEDGE);
     assert!(ledge.z > 3.0, "not up on the ledge: {ledge}");
     let goal = floor(&assets, BELOW);
     let mut pl = stand(&assets, LEDGE_CELL, ledge);
-    assert!(pl.line_blocked(&assets, DUNGEON, ledge, goal));
+    // Nothing walks down from the ledge: the way off it is the drop the graph simulated.
+    match plan(&assets, &pl, goal, 0.5) {
+        Planned::Route(r) => assert!(
+            r.waypoints.iter().any(|w| w.kind == EdgeKind::Drop),
+            "no drop on the way down: {r:?}"
+        ),
+        other => panic!("no way off the ledge: {other:?}"),
+    }
+    let frames = chase(&assets, &mut pl, goal, 1.0 / 30.0, 8.0);
+    let end = *frames.last().unwrap();
     assert!(
-        pl.find_path(&assets, DUNGEON, ledge, goal, DUNGEON)
-            .is_none(),
-        "the ledge is an island: nothing leads down from it"
+        !end.air
+            && end.at.z.abs() < 0.5
+            && Vec2::new(goal.x - end.at.x, goal.y - end.at.y).length() < 3.0,
+        "left the ledge and came to {}",
+        end.at
     );
-    // Off the edge onto the room's floor is the only way down there is,
-    // and a fall that lands. Refused, the character stood on the ledge
-    // for as long as what it wanted stayed below.
-    assert!(!pl.line_drops(&assets, DUNGEON, ledge, goal));
-    assert_eq!(steer(&assets, &mut pl, goal), Aim::Go(goal));
-    let frames = chase(&assets, &mut pl, None, goal, 1.0 / 30.0, 4.0);
-    let (end, air) = *frames.last().unwrap();
     assert!(
-        !air && end.z.abs() < 0.5 && Vec2::new(goal.x - end.x, goal.y - end.y).length() < 3.0,
-        "leaned off the ledge and came to {end}"
+        frames.iter().all(|f| !f.air || f.on_drop),
+        "fell where the plan has no drop"
     );
 }
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
-fn a_straight_walk_from_the_floor_to_a_goal_up_on_a_ledge_is_refused() {
+fn a_goal_up_on_a_ledge_nothing_climbs_to_is_refused() {
     let assets = assets();
     let me = floor(&assets, UNDER);
     let goal = floor(&assets, HIGH_LEDGE);
     assert!(goal.z > 9.0, "not up on the ledge: {goal}");
     let mut pl = stand(&assets, LEDGE_CELL, me);
-    assert!(pl.line_blocked(&assets, DUNGEON, me, goal));
-    assert!(pl.find_path(&assets, DUNGEON, me, goal, DUNGEON).is_none());
-    // Nothing solid in the way and floor all the way to the spot under
-    // the goal: leaning on that gets a character to stand beneath it
-    // and push, for ever.
-    assert!(pl.line_drops(&assets, DUNGEON, me, goal));
+    let planned = plan(&assets, &pl, goal, 0.5);
+    assert!(matches!(planned, Planned::NoWay(_)), "{planned:?}");
     assert_eq!(steer(&assets, &mut pl, goal), Aim::NoWay);
 }
 
@@ -239,18 +267,14 @@ fn a_straight_walk_from_the_floor_to_a_goal_up_on_a_ledge_is_refused() {
 fn a_goal_on_the_storey_above_is_climbed_to_by_the_stairs_not_pushed_under() {
     let assets = assets();
     // The lower storey under 0x01F6021D, with the goal on the room's
-    // floor six metres straight up: the walk there keeps the lower
-    // floor all the way and ends a storey under the goal, and the
-    // graph knows the stairs.
+    // floor six metres straight up: the graph knows the stairs.
     let me = floor(&assets, Vec3::new(216.0, 47_152.0, -6.0));
     let goal = floor(&assets, Vec3::new(216.0, 47_152.0, 0.0));
     assert!(goal.z - me.z > 5.0, "{me} is not a storey under {goal}");
     let mut pl = stand(&assets, 0x01F6_01B6, me);
-    assert!(pl.line_blocked(&assets, DUNGEON, me, goal));
-    assert!(pl.line_drops(&assets, DUNGEON, me, goal));
     match steer(&assets, &mut pl, goal) {
         Aim::Go(to) => assert!(to.distance(goal) > 1.0, "ran straight at the storey above"),
-        Aim::NoWay => panic!("refused a goal the stairs lead to"),
+        other => panic!("refused a goal the stairs lead to: {other:?}"),
     }
 }
 
@@ -262,7 +286,6 @@ fn a_walk_across_the_room_is_still_a_walk() {
     // Into the next room south, 0x01F6022D, on the same floor.
     let goal = floor(&assets, Vec3::new(222.0, 47_150.0, 0.0));
     let mut pl = stand(&assets, ROOM_CELL, me);
-    assert!(!pl.line_drops(&assets, DUNGEON, me, goal));
     assert!(matches!(steer(&assets, &mut pl, goal), Aim::Go(_)));
 }
 
@@ -277,12 +300,11 @@ fn the_stair_corridor_is_walked_not_refused() {
     let foot = floor(&assets, Vec3::new(296.5, 47_152.0, -6.0));
     assert!(top.z - foot.z > 10.0, "{top} to {foot}");
     let mut pl = stand(&assets, 0x01F6_02A3, top);
-    assert!(!pl.line_drops(&assets, DUNGEON, top, foot), "down");
-    assert!(!pl.line_drops(&assets, DUNGEON, foot, top), "up");
     assert!(matches!(steer(&assets, &mut pl, foot), Aim::Go(_)));
 
     // And walked, all the way down, feet on the stairs.
-    let mut st = Steering::new(Instant::now());
+    let mut st = Steering::default();
+    let mut planner = planner(&assets);
     let mut now = Instant::now();
     let dt = 1.0 / 30.0;
     let run = Input {
@@ -295,16 +317,19 @@ fn the_stair_corridor_is_walked_not_refused() {
         if Vec2::new(foot.x - at.x, foot.y - at.y).length() < 0.5 {
             break;
         }
+        let to = goal_in_block(&pl, foot);
         let aim = {
             let mut ground = Standing {
                 player: &mut pl,
-                assets: &assets,
-                wide: None,
+                planner: &mut planner,
             };
-            st.steer(&mut ground, foot, DUNGEON, now)
+            st.steer(&mut ground, to, 0.5, now)
         };
-        let Aim::Go(to) = aim else {
-            panic!("refused the stairs at {at}");
+        now += Duration::from_secs_f32(dt);
+        let to = match aim {
+            Aim::Go(to) => to,
+            Aim::Wait => continue,
+            Aim::NoWay => panic!("refused the stairs at {at}"),
         };
         let d = to - at;
         pl.heading = (-d.x).atan2(d.y);
@@ -315,7 +340,6 @@ fn the_stair_corridor_is_walked_not_refused() {
             "left the stairs at {}",
             pl.world_position()
         );
-        now += Duration::from_secs_f32(dt);
     }
     let end = pl.world_position();
     assert!(
@@ -496,20 +520,18 @@ fn the_walk_that_fell_keeps_to_the_floor_at_a_headless_frame() {
     let me = floor(&assets, Vec3::new(274.0, 47_152.0, 4.5));
     let goal = floor(&assets, Vec3::new(246.0, 47_152.0, -6.0));
     assert!((me.distance(goal) - 29.1).abs() < 1.0, "{me} to {goal}");
-    let mut wide = Pathfinder::new(&assets);
     for dt in [0.1, HEADLESS_FRAME] {
         let mut pl = stand(&assets, 0x01F6_029F, me);
         pl.run_rate = RUN_RATE;
-        wide.reset();
-        let frames = chase(&assets, &mut pl, Some(&mut wide), goal, dt, 8.0);
-        if let Some((at, _)) = frames.iter().find(|(_, air)| *air) {
-            panic!("at {dt} s a frame, left the floor at {at}");
+        let frames = chase(&assets, &mut pl, goal, dt, 8.0);
+        if let Some(f) = frames.iter().find(|f| f.air) {
+            panic!("at {dt} s a frame, left the floor at {}", f.at);
         }
         // Down on the storey it was after. A quarter of a second is
         // nearly four metres at a run, more than the distance the walk
         // stops short at, so how close it comes at that pace is left to
         // the shorter frame.
-        let (end, _) = *frames.last().unwrap();
+        let end = frames.last().unwrap().at;
         assert!(
             (goal.z - end.z).abs() < 2.0,
             "at {dt} s a frame, never got down to {goal}: {end}"
@@ -628,39 +650,29 @@ fn where_a_server_walk_stops_is_told_the_server() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
-fn the_stairs_down_from_an_upper_floor_are_found_and_walked() {
+fn the_way_down_from_an_upper_floor_is_planned_and_walked() {
     let assets = assets();
-    // Upstairs in a Holtburg house, on a floor reached on foot from the
-    // lifestone; the goal in the room under it, two and a half metres
-    // down over the edge. The graph used to stand a single node down
-    // there with no way to it, and the character stepped off the edge:
-    // the stairs were walled off by the drawing polygons of a banister
-    // the client never collided with. Built by the client's own rule
-    // they are stairs, the graph finds them, and the way down is walked.
+    // Upstairs in a Holtburg house, the goal in the room 2.5 m under it: the stairs or the drop
+    // off the edge, whichever the plan takes, is walked, and the body falls only where it said.
     const HOLTBURG: u32 = 0xA9B4_0000;
     let me = Vec3::new(32_553.0, 34_594.5, 97.5);
     let goal = Vec3::new(32_550.17, 34_597.33, 94.0);
     let mut pl = stand(&assets, 0xA9B4_0160, me);
-    assert!(pl.line_blocked(&assets, HOLTBURG, me, goal));
-    let route = pl
-        .find_path(&assets, HOLTBURG, me, goal, HOLTBURG)
-        .expect("the stairs down");
-    assert!(route.len() > 4, "not the stairs: {route:?}");
-    assert!(!pl.line_drops(&assets, HOLTBURG, me, goal));
-    match steer(&assets, &mut pl, goal) {
-        Aim::Go(to) => assert!(to.distance(goal) > 1.0, "stepped off the edge instead"),
-        Aim::NoWay => panic!("refused the stairs"),
-    }
-    let frames = chase(&assets, &mut pl, None, goal, 1.0 / 30.0, 12.0);
-    let (end, air) = *frames.last().unwrap();
+    assert_eq!(pl.landblock(), HOLTBURG);
+    let planned = plan(&assets, &pl, goal, 0.5);
+    assert!(matches!(planned, Planned::Route(_)), "{planned:?}");
+    let frames = chase(&assets, &mut pl, goal, 1.0 / 30.0, 12.0);
+    let end = *frames.last().unwrap();
     assert!(
-        !air && (end.z - goal.z).abs() < 0.5
-            && Vec2::new(goal.x - end.x, goal.y - end.y).length() < 3.0,
-        "walked the stairs toward {goal} and came to {end}"
+        !end.air
+            && (end.at.z - goal.z).abs() < 0.5
+            && Vec2::new(goal.x - end.at.x, goal.y - end.at.y).length() < 3.0,
+        "walked down toward {goal} and came to {}",
+        end.at
     );
     assert!(
-        frames.iter().all(|(_, air)| !air),
-        "left the stairs on the way down"
+        frames.iter().all(|f| !f.air || f.on_drop),
+        "fell where the plan has no drop"
     );
 }
 
@@ -712,8 +724,8 @@ fn the_way_into_a_corridor_is_through_its_door_not_into_its_wall() {
     let me = floor(&assets, JAMB_215);
     let goal = floor(&assets, aim);
     let mut pl = stand(&assets, JAMB_CELL, me);
-    let frames = chase(&assets, &mut pl, None, goal, 0.05, 3.0);
-    let (end, _) = frames.last().unwrap();
+    let frames = chase(&assets, &mut pl, goal, 0.05, 3.0);
+    let end = frames.last().unwrap().at;
     let left = Vec2::new(goal.x - end.x, goal.y - end.y).length();
     assert!(
         left < 2.6,

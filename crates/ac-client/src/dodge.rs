@@ -68,6 +68,7 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
+use ac_nav::routing::Planned;
 use glam::{Vec2, Vec3};
 
 use crate::aim::{self, Shot};
@@ -301,6 +302,8 @@ const VANTAGE_LOOKS: usize = 48;
 const VANTAGE_WALKS: usize = 4;
 /// A target that has moved this far (metres) since its vantage was chosen gets a new one.
 const VANTAGE_MOVED: f32 = 2.0;
+/// Close enough to a vantage spot (metres) to be shooting from it.
+const AT_VANTAGE: f32 = 0.3;
 
 /// How far a spell with `base_constant` and `base_mod` reaches for a
 /// caster whose school skill (trained level, no buffs) is `skill`.
@@ -776,15 +779,11 @@ impl Client {
     /// leads to. A creature on a roof is fought from the ground in sight of it, not from under it.
     fn vantage(&mut self, target: u32, at: Vec3, reach: f32, how: How) -> Option<Vec3> {
         let me = self.my_position()?;
-        let block = self.player.as_ref()?.cell & 0xFFFF_0000;
-        let assets = self.assets.clone();
         let mine = self.world.player().map_or(0, |o| o.guid);
         let shot = self.shot_for(how);
         let to = self.body_of(target, at);
-        let mut spots = self
-            .player
-            .as_mut()?
-            .standable_near(&assets, block, at, reach);
+        let places = self.standable_near(at, reach);
+        let mut spots: Vec<Vec3> = places.iter().map(|p| p.at).collect();
         let duds: Vec<Vec3> = self.dodge.dud_spots.iter().map(|(d, _)| *d).collect();
         spots.retain(|s| {
             s.distance(at) <= reach && duds.iter().all(|d| d.distance(*s) >= DUD_CLEAR)
@@ -810,10 +809,10 @@ impl Client {
             }
         }
         clear.into_iter().find(|s| {
-            self.player
-                .as_mut()
-                .and_then(|pl| pl.find_path(&assets, block, me, *s, block))
-                .is_some()
+            places
+                .iter()
+                .find(|p| p.at == *s)
+                .is_some_and(|&p| matches!(self.plan_walk(p, AT_VANTAGE), Planned::Route(_)))
         })
     }
 
@@ -943,7 +942,7 @@ impl Client {
         // Closing on something to hit it is a goal like any other, so
         // it is named to the travel system and not steered by hand.
         match spot {
-            Some(s) => self.head_for(s, 0.3, name),
+            Some(s) => self.head_for(s, AT_VANTAGE, name),
             None => self.head_for(at, stop, name),
         };
         self.autoplay.say(
@@ -1948,18 +1947,17 @@ mod tests {
         assert!(!c.dodge.tracks[&friendly].dodged);
     }
 
-    #[test]
-    #[ignore = "needs AC_DATA_DIR"]
-    fn a_caster_under_a_creature_on_a_roof_walks_out_to_where_it_is_in_sight() {
-        // A scenario caster stood inside a building in 0xBDAF under a Mite Sentry on its roof,
-        // 4.3 m up, "getting Mite Sentry in sight" for 30 s: the walk went to the creature's
-        // position and the graph put that on the floor beneath it.
+    /// The Mite Sentry on the roof of a building in 0xBDAF.
+    const MITE: u32 = 0x8000_0301;
+
+    /// A caster inside that building, 4.3 m under the mite, which stands at the returned point:
+    /// the client, that point, the spell and its reach.
+    fn under_a_mite_on_a_roof() -> (Client, Vec3, How, f32) {
         let block = 0xBDAF_0000u32;
         let origin = ac_world::landblock_origin(block);
         let mut c =
             crate::testkit::standing_in_the_field(20, 0xBDAF_0103, Vec3::new(181.0, 129.6, 92.1));
         let roof = Vec3::new(181.0, 129.6, 96.4);
-        const MITE: u32 = 0x8000_0301;
         let mut mite = crate::testkit::creature(MITE, "Mite Sentry");
         mite.position = Some(ac_world::object::Position::new_flat(
             ac_world::outdoor_cell(block, roof),
@@ -1973,10 +1971,19 @@ mod tests {
             .find_by_name("Shock Wave I")
             .map(|(id, sp)| (id, sp.clone()))
             .expect("Shock Wave I");
-        let how = How::Spell(spell);
-        let at = origin + roof;
-        assert!(!c.shot_clears(MITE, how), "no shot through the ceiling");
         let reach = spell_range(sp.base_range_constant, sp.base_range_mod, 0).max(6.0) * WITHIN;
+        (c, origin + roof, How::Spell(spell), reach)
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn a_caster_under_a_creature_on_a_roof_walks_out_to_where_it_is_in_sight() {
+        // A scenario caster stood under the mite "getting Mite Sentry in sight" for 30 s: the walk
+        // went to the creature's position and the graph put that on the floor beneath it.
+        let (mut c, at, how, reach) = under_a_mite_on_a_roof();
+        let block = 0xBDAF_0000u32;
+        let origin = ac_world::landblock_origin(block);
+        assert!(!c.shot_clears(MITE, how), "no shot through the ceiling");
         let spot = c
             .vantage(MITE, at, reach, how)
             .expect("somewhere in sight of the roof");
@@ -1991,6 +1998,29 @@ mod tests {
             "the shot clears from {:?}",
             spot - origin
         );
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn a_vantage_is_chosen_only_where_the_planner_has_a_way() {
+        let (mut c, at, how, reach) = under_a_mite_on_a_roof();
+        let spot = c
+            .vantage(MITE, at, reach, how)
+            .expect("somewhere in sight of the roof");
+        let to = ac_world::Place {
+            at: spot,
+            cell: 0xBDAF_0000,
+        };
+        match c.plan_walk(to, AT_VANTAGE) {
+            Planned::Route(r) => {
+                let end = r.waypoints.last().expect("a route has an end").place.at;
+                assert!(
+                    end.distance(spot) <= AT_VANTAGE,
+                    "ends at {end:?}, not {spot:?}"
+                );
+            }
+            other => panic!("chose {spot:?}, which the planner has no way to: {other:?}"),
+        }
     }
 
     #[test]

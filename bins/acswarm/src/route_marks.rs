@@ -92,7 +92,7 @@ pub fn quads(client: &mut Client, now: f32) -> Vec<Quad> {
     // whatever is left of the overland leg past its end.
     let mut points: Vec<Vec3> = Vec::new();
     if let Some(route) = &client.steering.route {
-        points.extend(route.waypoints.iter().skip(route.next).copied());
+        points.extend(route.waypoints.iter().skip(route.next).map(|w| w.place.at));
     }
     let tail_from = points.last().copied().unwrap_or(me);
     if let Some(overland) = client.travel_route() {

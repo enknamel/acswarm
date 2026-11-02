@@ -1,3 +1,5 @@
+use ac_nav::routing::{NoWay, Planned};
+use ac_world::Place;
 use glam::{Vec2, Vec3};
 
 use crate::travel::WALKABLE;
@@ -26,35 +28,59 @@ pub struct Follow {
 pub(crate) const SAME_FLOOR: f32 = 2.0;
 
 impl Client {
-    /// Whether a walk can get from the character to within `within` metres of `at` (standing in
-    /// `cell`): false only when both are in one landblock and its graph finds no path; anything
-    /// further is the journey planner's.
-    pub(crate) fn has_way_to(&mut self, at: Vec3, cell: u32, within: f32) -> bool {
-        let Some(me) = self.my_position() else {
-            return true;
+    /// The region planner's walk from where the character stands to within `within` (metres, 3D)
+    /// of `to` (see [`Pathfinder::plan`](crate::pathfinder::Pathfinder::plan)).
+    pub(crate) fn plan_walk(&mut self, to: Place, within: f32) -> Planned {
+        let Some(pl) = self.player.as_ref() else {
+            return Planned::NoWay(NoWay::Stranded);
         };
-        let assets = self.assets.clone();
-        let Some(pl) = self.player.as_mut() else {
-            return true;
+        let me = Place {
+            at: pl.world_position(),
+            cell: pl.cell,
         };
-        let block = pl.landblock();
-        if cell & 0xFFFF_0000 != block {
-            return true;
-        }
-        // `find_path` ends a route at its goal whether or not the node nearest reaches it (a
-        // bookcase's top read as a way there): the last step is walked as the body takes it, as far
-        // as the walk stops short (exploring_does_not_pace_between_two_rooms).
-        let Some(path) = pl.find_path(&assets, block, me, at, cell) else {
-            return false;
-        };
-        let goal = *path.last().unwrap_or(&at);
-        let last = path.len().checked_sub(2).map_or(me, |i| path[i]);
         let cap = pl.capsule();
-        pl.on_nav(&assets, block, last, goal, |_, ground| {
-            ground.walkable(last, goal, &cap).0
-                || ground.body_comes_within(last, goal, within, &cap)
-        })
-        .unwrap_or(true)
+        self.pathfinder.plan(me, to, within, cap)
+    }
+
+    /// Walk to within `stop` of `goal` along a planned route (the follow slot, set): `Blocked` while
+    /// the steering's refusal stands for it, so a no way reaches the caller and is never pushed.
+    pub(crate) fn walk_toward(&mut self, goal: Vec3, stop: f32) -> crate::did::Did {
+        self.follow = Some(Follow { target: goal, stop });
+        match self.steering.unreachable(goal) {
+            Some(why) => crate::did::Did::blocked(format!("no way there: {why:?}")),
+            None => crate::did::Did::Acting,
+        }
+    }
+
+    /// Where the character can stand within `radius` (metres, flat) of `around`, by the region
+    /// planner (see [`Pathfinder::standable_near`](crate::pathfinder::Pathfinder::standable_near)).
+    pub(crate) fn standable_near(&mut self, around: Vec3, radius: f32) -> Vec<Place> {
+        let Some(pl) = self.player.as_ref() else {
+            return Vec::new();
+        };
+        let me = Place {
+            at: pl.world_position(),
+            cell: pl.cell,
+        };
+        let around = Place {
+            at: around,
+            cell: pl.landblock(),
+        };
+        let cap = pl.capsule();
+        self.pathfinder.standable_near(me, around, radius, cap)
+    }
+
+    /// Whether a walk can get from the character to within `within` metres of `at` (standing in
+    /// `cell`), by the region planner, whose route checks its last leg too: false only on its "no
+    /// way"; one past the region is the journey planner's, and one still being built is let be.
+    pub(crate) fn has_way_to(&mut self, at: Vec3, cell: u32, within: f32) -> bool {
+        match self.plan_walk(Place { at, cell }, within) {
+            Planned::Route(_) | Planned::Building(_) | Planned::NoWay(NoWay::OutOfRegion) => true,
+            Planned::NoWay(why) => {
+                tracing::debug!("travel: no way to {at:?}: {why:?}");
+                false
+            }
+        }
     }
 
     /// The height of `cell`'s floor at `at`: a dungeon's levels stack, so a spot on the map alone

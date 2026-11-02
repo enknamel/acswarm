@@ -62,7 +62,7 @@ fn main() {
         println!("  {:#010x} ({:.1}, {:.1})", b, l.x, l.y);
     }
 
-    let mut steering = Steering::new(Instant::now());
+    let mut steering = Steering::default();
     let mut wide = Pathfinder::new(&assets);
     let dt = 1.0 / 20.0;
     let t0 = Instant::now();
@@ -142,10 +142,13 @@ fn main() {
             let aim = {
                 let mut standing = ac_client::Standing {
                     player: &mut pl,
-                    assets: &assets,
-                    wide: &mut wide,
+                    pathfinder: &mut wide,
                 };
-                steering.steer(&mut standing, g, gblock, now)
+                let to = ac_world::Place {
+                    at: g,
+                    cell: gblock,
+                };
+                steering.steer(&mut standing, to, 1.0, now)
             };
             if let ac_nav::Aim::Go(at) = aim {
                 last_aim = Some(at);
@@ -154,6 +157,7 @@ fn main() {
                 if flat.length() > 1e-3 {
                     pl.heading = (-flat.x).atan2(flat.y);
                 }
+                pl.pace_cap = steering.pace();
                 input.forward = 1.0;
                 input.run = true;
             }

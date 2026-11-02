@@ -317,7 +317,7 @@ impl Client {
                     .unwrap_or(at);
                 if let Some(further) = way_into(&scene.cells, room, me, facing, PAST_THE_DOOR * 2.0)
                     .map(|p| self.on_a_floor(cell & 0xFFFF_0000, room, sill, p))
-                    .filter(|p| self.has_way_to(*p, room, STOP))
+                    .filter(|p| self.has_way_to(*p, room & 0xFFFF_0000, STOP))
                 {
                     tracing::info!("explore: at the sill of {room:#010x} and not in it; aiming further, at {further:?}");
                     self.autoplay.room_bound = Some(RoomWalk {
@@ -412,8 +412,9 @@ impl Client {
         // A room is gone into only when a walk gets there. The doorway of 0x01F60296 opens 6 m up
         // a wall of the room with the bookcases: no path, the steering leant on the line to it,
         // and the bookcases were on the line
-        // (exploring_the_holtburg_dungeon_does_not_stand_at_the_bookcases).
-        if !self.has_way_to(at, room, STOP) {
+        // (exploring_the_holtburg_dungeon_does_not_stand_at_the_bookcases). The aim may fall past
+        // a narrow room into the next, so its cell is located from the point, not taken as `room`.
+        if !self.has_way_to(at, room & 0xFFFF_0000, STOP) {
             self.autoplay.rooms_shut.insert(room);
             self.autoplay
                 .note(format!("no way into {room:#06x}; going round"), now);

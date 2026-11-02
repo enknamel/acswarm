@@ -13,9 +13,10 @@ use ac_net::messages::{self, action, motion, RawMotion, WirePosition};
 use ac_net::session::Session;
 use ac_scene::anim::AnimPlayer;
 use ac_scene::blockcache::BlockCollision;
-use ac_scene::collision::{Capsule, Vertical, GRAVITY};
-use ac_scene::nav::{self, Ground, NavGraph};
+use ac_scene::collision::{Capsule, Vertical, Walk, GRAVITY};
+use ac_scene::nav::{self, Ground};
 use ac_scene::scenery::TerrainSampler;
+use ac_scene::stride::{self, Air, Stride, Underfoot, FALL_SEARCH};
 use ac_scene::Assets;
 use glam::{Quat, Vec2, Vec3};
 
@@ -63,25 +64,18 @@ pub struct Jump {
 /// `MotionCommand::Falling`, the airborne cycle.
 const FALLING: u32 = 0x4000_0015;
 
-/// A landblock the character stands in or near. The collision and the
-/// graph are the process's (`Assets::block_collision`), shared with
-/// every other character there; this only keeps the `Rc`s so that the
-/// walk does not look them up every frame.
+/// A landblock the character stands in or near. The collision is the
+/// process's (`Assets::block_collision`), shared with every other
+/// character there; this only keeps the `Rc` so that the walk does not
+/// look it up every frame.
 struct Block {
     lb: CellLandblock,
     /// Static collision geometry, fetched from the shared cache on
     /// first use.
     collision: Option<Rc<BlockCollision>>,
-    /// Navigation graph over the collision for our capsule, built chunk
-    /// by chunk as paths are planned (by us or anyone else sharing it).
-    nav: Option<Rc<RefCell<NavGraph>>>,
     /// A dungeon block: no terrain to walk on.
     dungeon: bool,
 }
-
-/// A walk's goal this close (metres, up or down) to a floor of the geometry stands on it, and is
-/// not dropped to the terrain as a goal floating off a hillside is.
-const GOAL_ON_FLOOR: f32 = 0.6;
 
 /// How many blocked steps in a row count as wedged. At twenty a second
 /// this is about half of one: long enough that squeezing past furniture
@@ -145,6 +139,8 @@ pub struct Player {
     /// ground: the distance to whatever it is walking to. Cleared by
     /// whoever is not steering it. See the walk.
     pub step_cap: Option<f32>,
+    /// The fastest the steering lets the body go (m/s): a drop is stepped off at its graph's pace.
+    pub pace_cap: Option<f32>,
     /// Terrain types that are open sea, read from the region on first
     /// use (see `sea_types`).
     sea_types: Option<Vec<bool>>,
@@ -225,13 +221,6 @@ const CLIMB_RATE: f32 = 0.6;
 /// and puts it back where it was; this stays under that.
 pub const MAX_JUMP_HEIGHT: f32 = 9.5;
 
-/// How far below itself a character stepping off an interior ledge
-/// looks for a floor to fall to (the walk stays put when there is none
-/// within it), and so the deepest fall anywhere there is no ground: one
-/// that has gone further than this without landing has missed whatever
-/// it was falling to.
-const FALL_SEARCH: f32 = 200.0;
-
 /// How long a character may be in the air with nothing at all below it
 /// before it counts as lost: the whole flight of the highest jump there
 /// is ([`MAX_JUMP_HEIGHT`], up and back down, `2 * sqrt(2h / g)`, a
@@ -241,22 +230,9 @@ const FALL_SEARCH: f32 = 200.0;
 /// word for where it is, follows it tens of kilometres down.
 const OVER_NOTHING: f32 = 2.8;
 
-/// The longest step the walk takes in one go: a longer frame is walked a
-/// step this long at a time.
-///
-/// A step looks for its floor where it ends, within a step up or down of
-/// where it began, and up a ramp what it finds turns on how long the step
-/// is. The stairs out of the Holtburg dungeon's 0x01F6028E rise six
-/// tenths of a metre in a metre, so a step of a metre ended with the
-/// stairs over the feet: no floor within reach, the storey under the
-/// stairs found instead, and the character fell through them and on past
-/// the end of that storey for ever. A headless client ticks ten or twenty
-/// times a second, a frame that builds a piece of the navigation graph
-/// takes longer, and at a run those were steps of one to four metres.
-///
-/// Half a metre is what the navigation graph samples its own walks at,
-/// so a walk it passed is walked the way it was checked.
-const STRIDE: f32 = 0.5;
+/// The longest step a frame is cut into (metres): the walk test's own, so a leg the graph passed
+/// is walked as checked, stairs too (a_long_frame_running_up_the_stairs_out_of_028e_keeps_its_feet).
+const STRIDE: f32 = ac_scene::nav::BODY_STEP;
 
 /// The most steps one frame is cut into: enough for the longest frame
 /// the headless client allows, a quarter of a second, at the fastest
@@ -463,6 +439,7 @@ impl Player {
             wedged_dir: Vec3::ZERO,
             wedged_rest: 0,
             step_cap: None,
+            pace_cap: None,
             sea_types: None,
             vz: 0.0,
             airborne: false,
@@ -916,7 +893,6 @@ impl Player {
                 Block {
                     lb,
                     collision: None,
-                    nav: None,
                     dungeon: false,
                 },
             );
@@ -967,13 +943,11 @@ impl Player {
         let sampler = TerrainSampler::new(&b.lb, &height_table);
         let origin = ac_world::landblock_origin(block);
         let terrain =
-            |x: f32, y: f32| sampler.height_at(Vec3::new(x - origin.x, y - origin.y, 0.0));
+            |x: f32, y: f32| sampler.height_in_square(Vec3::new(x - origin.x, y - origin.y, 0.0));
         let ground = Ground {
             collision,
             terrain: (!b.dungeon).then_some(&terrain),
             sea: None,
-            no_go: None,
-            outdoors_only: false,
             doorways: &b
                 .collision
                 .as_ref()
@@ -1024,7 +998,11 @@ impl Player {
         self.capsule
     }
 
-    fn collision(&mut self, assets: &Assets, block_id: u32) -> Option<Rc<BlockCollision>> {
+    pub(crate) fn collision(
+        &mut self,
+        assets: &Assets,
+        block_id: u32,
+    ) -> Option<Rc<BlockCollision>> {
         let block_id = block_id & 0xFFFF_0000;
         self.block(assets, block_id)?;
         let b = self.blocks.get_mut(&block_id)?;
@@ -1103,8 +1081,8 @@ impl Player {
 
     /// Whether the straight walk from `from` to `to` is blocked: static
     /// geometry of landblock `block` (or of the blocks under either end)
-    /// crosses the chest-height line, or the capsule cannot walk it. The
-    /// test that decides between walking straight and planning a route.
+    /// crosses the chest-height line, or the capsule cannot walk it: the
+    /// dodge sidestep's room check.
     pub fn line_blocked(&mut self, assets: &Assets, block: u32, from: Vec3, to: Vec3) -> bool {
         let mut blocks = vec![block & 0xFFFF_0000];
         for b in [block_of(from), block_of(to)] {
@@ -1132,28 +1110,11 @@ impl Player {
         })
     }
 
-    /// Whether the straight walk from `from` to `to` over landblock
-    /// `block`'s geometry runs off an edge with nothing under it before
-    /// anything solid stops it, or ends under a `to` standing a storey up
-    /// (see `nav::Ground::drops_along`). A floor within the depth a fall
-    /// is looked for (`FALL_SEARCH`) is where the walk comes down, and
-    /// it goes on from there. The steering asks this before it leans on
-    /// whatever is in the way: leaning on a wall gets nowhere, leaning
-    /// over a ledge lands on the floor below it, and leaning over the
-    /// edge of everything walks on into the void. False when the block
-    /// has no collision: there is nothing known to fall from.
-    pub fn line_drops(&mut self, assets: &Assets, block: u32, from: Vec3, to: Vec3) -> bool {
-        self.on_ground(assets, block, |ground, cap| {
-            ground.drops_along(from, to, cap, FALL_SEARCH)
-        })
-        .unwrap_or(false)
-    }
-
     /// Ask `f` about landblock `block`'s ground as the walking code sees
     /// it -- its collision, and outside a dungeon its terrain and sea --
     /// for this character's capsule; `None` when the block has no
     /// collision.
-    fn on_ground<R>(
+    pub(crate) fn on_ground<R>(
         &mut self,
         assets: &Assets,
         block: u32,
@@ -1169,14 +1130,12 @@ impl Player {
         let sampler = TerrainSampler::new(&b.lb, &height_table);
         let origin = ac_world::landblock_origin(block);
         let terrain =
-            |x: f32, y: f32| sampler.height_at(Vec3::new(x - origin.x, y - origin.y, 0.0));
+            |x: f32, y: f32| sampler.height_in_square(Vec3::new(x - origin.x, y - origin.y, 0.0));
         let sea = |x: f32, y: f32| sea_at(&b.lb, &sea_types, x - origin.x, y - origin.y);
         let ground = Ground {
             collision,
             terrain: (!b.dungeon).then_some(&terrain),
             sea: (!b.dungeon).then_some(&sea),
-            no_go: None,
-            outdoors_only: false,
             doorways: b
                 .collision
                 .as_ref()
@@ -1184,142 +1143,6 @@ impl Player {
                 .unwrap_or(&[]),
         };
         Some(f(&ground, &cap))
-    }
-
-    /// Run `f` on landblock `block`'s navigation graph and the ground it is built over, for a walk
-    /// from `from` to `to` (the portals not on it are given a berth); `None` without collision.
-    pub(crate) fn on_nav<R>(
-        &mut self,
-        assets: &Assets,
-        block: u32,
-        from: Vec3,
-        to: Vec3,
-        f: impl FnOnce(&mut NavGraph, &Ground) -> R,
-    ) -> Option<R> {
-        let block = block & 0xFFFF_0000;
-        self.collision(assets, block)?;
-        let cap = self.capsule;
-        let height_table = self.height_table.clone();
-        let sea_types = self.sea_types(assets).to_vec();
-        let b = self.blocks.get_mut(&block)?;
-        if b.nav
-            .as_ref()
-            .is_some_and(|n| !n.borrow().capsule.same(&cap))
-        {
-            b.nav = None;
-        }
-        if b.nav.is_none() {
-            b.nav = Some(b.collision.as_ref()?.nav(assets, &cap).ok()?);
-        }
-        let collision = &b.collision.as_ref()?.world;
-        let sampler = TerrainSampler::new(&b.lb, &height_table);
-        let origin = ac_world::landblock_origin(block);
-        let terrain =
-            |x: f32, y: f32| sampler.height_at(Vec3::new(x - origin.x, y - origin.y, 0.0));
-        let sea = |x: f32, y: f32| sea_at(&b.lb, &sea_types, x - origin.x, y - origin.y);
-        // A berth from the portals we are not walking to.
-        let avoid = crate::pathfinder::portal_mouths_to_avoid(from, to);
-        // The block's doorways, so the graph stands a node in each
-        // rather than leaving every building sealed.
-        let doorways = b
-            .collision
-            .as_ref()
-            .map(|c| c.doorways.clone())
-            .unwrap_or_default();
-        let no_go = |p: Vec3| {
-            avoid
-                .iter()
-                .any(|a| ac_scene::nav::in_berth(*a, p, crate::pathfinder::PORTAL_BERTH))
-        };
-        let ground = Ground {
-            collision,
-            terrain: (!b.dungeon).then_some(&terrain),
-            sea: (!b.dungeon).then_some(&sea),
-            no_go: (!avoid.is_empty()).then_some(&no_go),
-            outdoors_only: false,
-            doorways: &doorways,
-        };
-        let mut nav = b.nav.as_ref()?.borrow_mut();
-        Some(f(&mut nav, &ground))
-    }
-
-    /// Where a character can stand within `radius` (metres, flat) of `p` in landblock `block`:
-    /// the navigation graph's own places, empty without collision.
-    pub fn standable_near(
-        &mut self,
-        assets: &Assets,
-        block: u32,
-        p: Vec3,
-        radius: f32,
-    ) -> Vec<Vec3> {
-        self.on_nav(assets, block, p, p, |nav, ground| {
-            nav.standable_near(ground, p, radius)
-        })
-        .unwrap_or_default()
-    }
-
-    /// A walkable route from `from` to `to` (world positions, both in
-    /// landblock `block`) around the block's static geometry: waypoints
-    /// ending with `to`, or `None` when the graph does not connect them.
-    /// The graph is built around the search on first use and kept with
-    /// the block's collision.
-    pub fn find_path(
-        &mut self,
-        assets: &Assets,
-        block: u32,
-        from: Vec3,
-        to: Vec3,
-        to_cell: u32,
-    ) -> Option<Vec<Vec3>> {
-        let block = block & 0xFFFF_0000;
-        self.on_nav(assets, block, from, to, |nav, ground| {
-            let (nodes, chunks) = (nav.len(), nav.chunk_count());
-            let started = Instant::now();
-            // A goal from the overland grid may float a storey off the
-            // hillside; the graph only finds nodes near the height asked,
-            // so such a goal is dropped onto the ground under it.
-            //
-            // Only such a goal. A goal inside a building was not guessed
-            // from a grid -- it is where something actually stands -- and
-            // its height is the whole of the answer. Dropping that one asks
-            // the graph for the ground floor and gets a route to the ground
-            // floor: the character walks in, stands under the vendor on the
-            // storey above, and stops.
-            //
-            // Whether it is inside is a question for the geometry, not for
-            // the caller. The caller's `to_cell` is a *landblock* whenever
-            // the goal came through `Follow`, and a landblock's low word is
-            // zero, which reads here as "outdoors" -- which is how a walk to
-            // Asenala, who keeps a shop on the upper floor of a house in
-            // Holtburg, was quietly rewritten as a walk to the patch of
-            // ground three metres beneath her.
-            let indoors = to_cell & 0xFFFF >= 0x100 || ground.collision.in_known_cell(to);
-            // Nor a goal standing on something: a roof, a bridge, a dock has its floor right under
-            // it, and dropped to the ground below, a caster walked in under a Mite Sentry on a roof
-            // and stood there (a_goal_on_a_roof_is_walked_to_on_the_roof).
-            let on_a_floor = ground
-                .collision
-                .floor_at(to, GOAL_ON_FLOOR, GOAL_ON_FLOOR)
-                .is_some();
-            let terrain = ground.terrain.and_then(|t| t(to.x, to.y));
-            let to = match (ground.terrain.is_none(), indoors || on_a_floor, terrain) {
-                (false, false, Some(z)) if (z - to.z).abs() > 2.0 => Vec3::new(to.x, to.y, z),
-                _ => to,
-            };
-            let path = nav.find_path(ground, from, to);
-            if nav.chunk_count() != chunks {
-                tracing::debug!(
-                    "nav {block:#010x}: {} nodes in {} chunks (+{} nodes, {} chunks, {:.0} ms this search)",
-                    nav.len(),
-                    nav.chunk_count(),
-                    nav.len() - nodes,
-                    nav.chunk_count() - chunks,
-                    started.elapsed().as_secs_f64() * 1e3
-                );
-            }
-            path
-        })
-        .flatten()
     }
 
     /// Fraction along `from`..`to` where static geometry first blocks the
@@ -1425,24 +1248,12 @@ impl Player {
 
     /// How fast the input asks the character to go on its feet.
     fn pace(&self, input: &Input) -> f32 {
-        if input.run {
+        let pace = if input.run {
             self.run_speed * self.run_rate * self.limits.clamp_speed_boost(self.speed_boost)
         } else {
             self.walk_speed
-        }
-    }
-
-    /// A floor over the feet at `at`, higher than a step and lower than
-    /// the head: ground rising faster than the step that got here could
-    /// climb, with the feet inside it. That is something solid in the
-    /// way, not an edge, and whatever lies under it is not the floor.
-    fn floor_over_feet(&mut self, assets: &Assets, blocks: &[u32], at: Vec3) -> bool {
-        let cap = self.capsule;
-        blocks.iter().any(|&blk| {
-            self.collision(assets, blk)
-                .and_then(|c| c.floor_at(at, cap.height, 0.0))
-                .is_some_and(|(z, _)| z > at.z + cap.step_up)
-        })
+        };
+        self.pace_cap.map_or(pace, |cap| pace.min(cap))
     }
 
     /// Remember where the character is as the floor it last stood on,
@@ -1583,164 +1394,73 @@ impl Player {
             blocks.push(self.landblock());
         }
         let cap = self.capsule;
+        let cell = self.cell;
         let indoors = self.is_indoors();
         let dungeon = indoors && self.in_dungeon(assets);
+        let cols: Vec<Rc<BlockCollision>> = blocks
+            .iter()
+            .filter_map(|&blk| self.collision(assets, blk))
+            .collect();
         let mut world = target;
         if !self.airborne {
             // Walking: walls push, ledges up to step_up are climbed, drops
             // up to step_down are walked down, ceilings block.
-            let mut floor: Option<(f32, u32)> = None;
-            let mut blocked = false;
-            for &blk in &blocks {
-                if let Some(c) = self.collision(assets, blk) {
-                    // Where the step began: walls we start in front of
-                    // hold us, ledges are measured from our feet.
-                    let w = c.walk(old, world, &cap);
-                    tracing::trace!(
-                        "walk {blk:#010x}: {:?} -> {:?} gives {:?}, floor {:?}, blocked {}",
-                        old - ac_world::landblock_origin(blk),
-                        world - ac_world::landblock_origin(blk),
-                        w.pos - ac_world::landblock_origin(blk),
-                        w.floor,
-                        w.blocked
-                    );
-                    if w.blocked {
-                        blocked = true;
-                        break;
+            let walked = stride::stride(
+                &BodyFloor::new(self, assets, &cols, dungeon),
+                old,
+                cell,
+                target,
+                &cap,
+            );
+            match walked {
+                Stride::Blocked => {
+                    // Pressed against something and going nowhere.
+                    //
+                    // This counts, and once it has counted long enough the
+                    // character stops pressing. It is the last guard rather
+                    // than the first: every other one has to be put at the
+                    // place that chose the goal, and there turned out to be
+                    // ten of those -- a corpse, a counter, a teammate, a
+                    // door, a thing to hit -- so fixing them one at a time
+                    // meant the next report was always about the one still
+                    // missed. Nothing reaches the wall except through here.
+                    self.wedged_for += 1;
+                    if self.wedged_for == WEDGED_STEPS {
+                        // Remember which way we were pushing, and how long
+                        // to leave it before pushing that way again.
+                        self.wedged_dir = self.ground_velocity.normalize_or_zero();
+                        self.wedged_rest = WEDGED_REST;
                     }
-                    world.x = w.pos.x;
-                    world.y = w.pos.y;
-                    if let Some(f) = w.floor {
-                        if floor.map(|(z, _)| f.0 > z).unwrap_or(true) {
-                            floor = Some(f);
-                        }
-                    }
-                }
-            }
-            // No floor within a step where the step ends, and one over the
-            // feet: the ground rises faster than this step could climb.
-            // That is solid, and pushed against like a wall. Taken for an
-            // edge, the floor looked for below it was the storey under
-            // the stairs, and the character fell through them.
-            if !blocked
-                && floor.is_none()
-                && indoors
-                && self.floor_over_feet(assets, &blocks, world)
-            {
-                blocked = true;
-            }
-            if blocked {
-                world = old;
-                floor = Some((old.z, self.cell));
-                if !indoors {
-                    floor = Some((old.z, 0));
-                }
-                // Pressed against something and going nowhere.
-                //
-                // This counts, and once it has counted long enough the
-                // character stops pressing. It is the last guard rather
-                // than the first: every other one has to be put at the
-                // place that chose the goal, and there turned out to be
-                // ten of those -- a corpse, a counter, a teammate, a
-                // door, a thing to hit -- so fixing them one at a time
-                // meant the next report was always about the one still
-                // missed. Nothing reaches the wall except through here.
-                self.wedged_for += 1;
-                if self.wedged_for == WEDGED_STEPS {
-                    // Remember which way we were pushing, and how long
-                    // to leave it before pushing that way again.
-                    self.wedged_dir = self.ground_velocity.normalize_or_zero();
-                    self.wedged_rest = WEDGED_REST;
-                }
-            } else if self.ground_velocity.length_squared() > 1e-6 {
-                self.wedged_for = 0;
-            }
-            // An interior floor under the ground we walk on -- a cellar,
-            // a dungeon beneath a hill -- is not ours to stand on from
-            // outside; the hill is. Without this a character walking up a
-            // hillside over the Halls of Metos dropped onto the halls'
-            // floor and carried on under the mountain.
-            if let Some((z, cell)) = floor {
-                if cell != 0 && !indoors {
-                    if let Some(t) = self.terrain_at(assets, world) {
-                        if t > z + 0.5 {
-                            floor = Some((t, 0));
-                        }
-                    }
-                }
-            }
-            match floor {
-                Some((z, cell)) if cell != 0 => {
-                    // Standing on an interior cell's floor: that cell owns us.
-                    world.z = z;
-                    self.place(world, cell);
-                }
-                Some((z, _)) if dungeon => {
-                    // Untagged geometry inside a dungeon (a placed object
-                    // without a cell): stand on it but stay in our cell; a
-                    // dungeon has no outside to walk into.
-                    world.z = z;
-                    let cell = self.cell;
-                    self.place(world, cell);
-                }
-                Some((z, _)) if !indoors || z > old.z - 0.5 => {
-                    // An outdoor floor (dock, bridge, building step): stand on
-                    // it if it is at least as high as the terrain.
-                    let terrain = self.terrain_at(assets, world);
-                    world.z = terrain.map(|t| t.max(z)).unwrap_or(z);
-                    self.place(world, 0);
-                }
-                _ if indoors => {
-                    // Nothing within step range in the interior. Where
-                    // the ground outside is a step away, this is the way
-                    // out of a building whose door opens onto bare
-                    // terrain (a villa's grounds): go outdoors. Without
-                    // this the character kept the cell and walked a
-                    // kilometre "inside" it, and the server, sent a cell
-                    // and a position that no longer matched, refused
-                    // every move from then on.
-                    let ground = if dungeon {
-                        None
+                    // Where it was; outdoors, on the terrain should that be over the feet.
+                    world = old;
+                    if indoors {
+                        self.place(world, cell);
                     } else {
-                        self.terrain_at(assets, world)
-                            .filter(|&t| t <= old.z + cap.step_up && t >= old.z - cap.step_down)
-                    };
-                    if let Some(t) = ground {
-                        world.z = t;
+                        if let Some(t) = self.terrain_at(assets, old) {
+                            world.z = t.max(old.z);
+                        }
                         self.place(world, 0);
-                    } else {
-                        // Fall if there is a floor somewhere below, else
-                        // stay put (bad collision data).
-                        let deep = blocks
-                            .iter()
-                            .filter_map(|&blk| {
-                                self.collision(assets, blk)
-                                    .and_then(|c| c.floor_at(world, cap.step_up, 200.0))
-                            })
-                            .next();
-                        if deep.is_some() {
-                            self.airborne = true;
-                            self.vz = 0.0;
-                            self.air_velocity = self.ground_velocity;
-                        } else {
-                            world.z = old.z;
-                        }
-                        self.local = world - ac_world::landblock_origin(self.landblock());
                     }
                 }
-                _ => {
-                    // Outdoors on bare terrain: follow it, unless it drops
-                    // away by more than a step.
-                    match self.terrain_at(assets, world) {
-                        Some(t) if t < old.z - cap.step_down => {
-                            self.airborne = true;
-                            self.vz = 0.0;
-                            self.air_velocity = self.ground_velocity;
-                        }
-                        Some(t) => world.z = t,
-                        None => world.z = old.z,
+                Stride::Stand { at, cell } | Stride::Adrift { at, cell } => {
+                    if self.ground_velocity.length_squared() > 1e-6 {
+                        self.wedged_for = 0;
                     }
-                    self.place(world, 0);
+                    self.place(at, cell);
+                }
+                Stride::Falls { at } => {
+                    if self.ground_velocity.length_squared() > 1e-6 {
+                        self.wedged_for = 0;
+                    }
+                    world = at;
+                    self.airborne = true;
+                    self.vz = 0.0;
+                    self.air_velocity = self.ground_velocity;
+                    if indoors {
+                        self.local = world - ac_world::landblock_origin(self.landblock());
+                    } else {
+                        self.place(world, 0);
+                    }
                 }
             }
         }
@@ -1748,90 +1468,38 @@ impl Player {
             // In the air: walls push the whole capsule; gravity integrates
             // the vertical speed; land on the first floor, or bump the
             // ceiling.
-            for &blk in &blocks {
-                if let Some(c) = self.collision(assets, blk) {
-                    world = c.resolve_from(Some(old), world, cap.radius, cap.height, 0.0);
-                }
-            }
-            // The capsule must fit where it is drifting to: no sliding
-            // under a porch slab or a staircase while falling past it.
-            let fits = blocks.iter().all(|&blk| {
-                self.collision(assets, blk)
-                    .and_then(|c| c.ceiling_at(world, cap.radius))
-                    .is_none_or(|cz| cz - world.z >= cap.height)
-            });
-            if !fits {
-                world.x = old.x;
-                world.y = old.y;
-                self.air_velocity = Vec3::ZERO;
-            }
-            self.vz -= GRAVITY * dt;
-            let dz = self.vz * dt;
-            let mut landed: Option<(Vec3, u32)> = None;
-            let mut ceiling: Option<Vec3> = None;
-            for &blk in &blocks {
-                if let Some(c) = self.collision(assets, blk) {
-                    match c.vertical(world, dz, &cap) {
-                        Vertical::Landed(p, cell) => {
-                            if landed.map(|(l, _)| p.z > l.z).unwrap_or(true) {
-                                landed = Some((p, cell));
-                            }
-                        }
-                        Vertical::Ceiling(p) => {
-                            if ceiling.map(|c| p.z < c.z).unwrap_or(true) {
-                                ceiling = Some(p);
-                            }
-                        }
-                        Vertical::Free(_) => {}
-                    }
-                }
-            }
-            // Terrain catches us outdoors (or when the floor we would land
-            // on is outdoor geometry below the ground).
-            // Terrain is the last resort outside a dungeon: it catches us
-            // when we are not in an interior cell, when the floor we would
-            // land on is outdoor geometry, and when there is no floor at
-            // all. That last case is a character who walked out of a
-            // building (still carrying its cell id) and jumped: with only
-            // the first two rules nothing caught them and they fell
-            // through the ground for ever. A cellar's own floor still wins,
-            // so being under the terrain indoors is unaffected.
-            if dz < 0.0 && !dungeon && (!indoors || landed.is_none_or(|(_, c)| c == 0)) {
-                if let Some(t) = self.terrain_at(assets, world) {
-                    let above_landing = landed.map(|(l, _)| t > l.z).unwrap_or(true);
-                    if t >= world.z + dz && above_landing {
-                        landed = Some((Vec3::new(world.x, world.y, t), 0));
-                    }
-                }
-            }
-            if let Some((p, cell)) = landed {
-                world = p;
-                self.airborne = false;
-                // Where it came down is news to the server, which has the
-                // last report from the air.
-                self.owe_position = true;
-                self.vz = 0.0;
-                // Landing on untagged geometry in a dungeon keeps our cell.
-                let cell = if cell == 0 && dungeon {
-                    self.cell
-                } else {
-                    cell
-                };
-                self.place(world, cell);
-            } else {
-                if let Some(p) = ceiling {
-                    world = p;
+            let vz = self.vz;
+            let flown = stride::fall_step(
+                &BodyFloor::new(self, assets, &cols, dungeon),
+                old,
+                world,
+                vz,
+                dt,
+                cell,
+                &cap,
+            );
+            match flown {
+                Air::Landed { at, cell } => {
+                    self.airborne = false;
+                    // Where it came down is news to the server, which has the
+                    // last report from the air.
+                    self.owe_position = true;
                     self.vz = 0.0;
-                } else {
-                    world.z += dz;
+                    self.place(at, cell);
                 }
-                if indoors {
-                    self.local = world - ac_world::landblock_origin(self.landblock());
-                } else {
-                    self.place(world, 0);
-                }
-                if self.fall_is_lost(assets, &blocks, world, dungeon, dt) {
-                    self.back_to_footing(world);
+                Air::Flying { at, vz, stopped } => {
+                    if stopped {
+                        self.air_velocity = Vec3::ZERO;
+                    }
+                    self.vz = vz;
+                    if indoors {
+                        self.local = at - ac_world::landblock_origin(self.landblock());
+                    } else {
+                        self.place(at, 0);
+                    }
+                    if self.fall_is_lost(assets, &blocks, at, dungeon, dt) {
+                        self.back_to_footing(at);
+                    }
                 }
             }
         }
@@ -2046,6 +1714,129 @@ impl Player {
 /// vertex, nine to a side, so a cell's four corners are the four
 /// vertices around it. A cell with a corner ashore is the beach, which
 /// can be waded, so only water all the way round counts.
+/// What the body steps on: the collision of its one or two blocks in turn, and the terrain of
+/// whichever block a point is in, loaded as the body asks.
+struct BodyFloor<'a> {
+    cols: &'a [Rc<BlockCollision>],
+    body: RefCell<&'a mut Player>,
+    assets: &'a Assets,
+    dungeon: bool,
+}
+
+impl<'a> BodyFloor<'a> {
+    fn new(
+        body: &'a mut Player,
+        assets: &'a Assets,
+        cols: &'a [Rc<BlockCollision>],
+        dungeon: bool,
+    ) -> Self {
+        BodyFloor {
+            cols,
+            body: RefCell::new(body),
+            assets,
+            dungeon,
+        }
+    }
+}
+
+impl Underfoot for BodyFloor<'_> {
+    fn walk(&self, from: Vec3, to: Vec3, cap: &Capsule) -> Walk {
+        let mut at = to;
+        let mut floor: Option<(f32, u32)> = None;
+        for c in self.cols {
+            // Where the step began: walls we start in front of hold us,
+            // ledges are measured from our feet.
+            let w = c.walk(from, at, cap);
+            let origin = ac_world::landblock_origin(c.block);
+            tracing::trace!(
+                "walk {:#010x}: {:?} -> {:?} gives {:?}, floor {:?}, blocked {}",
+                c.block,
+                from - origin,
+                at - origin,
+                w.pos - origin,
+                w.floor,
+                w.blocked
+            );
+            if w.blocked {
+                return w;
+            }
+            at.x = w.pos.x;
+            at.y = w.pos.y;
+            if let Some(f) = w.floor {
+                if floor.is_none_or(|(z, _)| f.0 > z) {
+                    floor = Some(f);
+                }
+            }
+        }
+        Walk {
+            pos: at,
+            floor,
+            blocked: false,
+        }
+    }
+
+    fn floor_over_feet(&self, at: Vec3, cap: &Capsule) -> bool {
+        self.cols.iter().any(|c| {
+            c.floor_at(at, cap.height, 0.0)
+                .is_some_and(|(z, _)| z > at.z + cap.step_up)
+        })
+    }
+
+    fn floor_below(&self, at: Vec3, cap: &Capsule, depth: f32) -> Option<(f32, u32)> {
+        self.cols
+            .iter()
+            .find_map(|c| c.floor_at(at, cap.step_up, depth))
+    }
+
+    fn terrain_at(&self, x: f32, y: f32) -> Option<f32> {
+        self.body
+            .borrow_mut()
+            .terrain_at(self.assets, Vec3::new(x, y, 0.0))
+    }
+
+    fn is_dungeon(&self) -> bool {
+        self.dungeon
+    }
+
+    fn vertical(&self, from: Vec3, dz: f32, cap: &Capsule) -> Vertical {
+        let mut landed: Option<(Vec3, u32)> = None;
+        let mut ceiling: Option<Vec3> = None;
+        for c in self.cols {
+            match c.vertical(from, dz, cap) {
+                Vertical::Landed(p, cell) => {
+                    if landed.is_none_or(|(l, _)| p.z > l.z) {
+                        landed = Some((p, cell));
+                    }
+                }
+                Vertical::Ceiling(p) => {
+                    if ceiling.is_none_or(|c| p.z < c.z) {
+                        ceiling = Some(p);
+                    }
+                }
+                Vertical::Free(_) => {}
+            }
+        }
+        match (landed, ceiling) {
+            (Some((p, cell)), _) => Vertical::Landed(p, cell),
+            (None, Some(p)) => Vertical::Ceiling(p),
+            (None, None) => Vertical::Free(from + Vec3::new(0.0, 0.0, dz)),
+        }
+    }
+
+    fn resolve_falling(&self, from: Vec3, to: Vec3, cap: &Capsule) -> Vec3 {
+        self.cols.iter().fold(to, |at, c| {
+            c.resolve_from(Some(from), at, cap.radius, cap.height, 0.0)
+        })
+    }
+
+    fn fits_falling(&self, at: Vec3, cap: &Capsule) -> bool {
+        self.cols.iter().all(|c| {
+            c.ceiling_at(at, cap.radius)
+                .is_none_or(|cz| cz - at.z >= cap.height)
+        })
+    }
+}
+
 fn sea_at(lb: &CellLandblock, sea_types: &[bool], x: f32, y: f32) -> bool {
     if sea_types.is_empty() {
         return false;
@@ -2114,6 +1905,33 @@ mod tests {
             let moved = c.my_position().unwrap().distance(at);
             assert!(moved > 1.0, "{at:?} heading {}: moved {moved:.2} m", k * 45);
         }
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn a_pace_cap_holds_the_body_to_it() {
+        // Open ground in Holtburg, run at for a second with the cap and without it.
+        let o = ac_world::landblock_origin(0xA9B4_0000);
+        let at = o + Vec3::new(84.0, 7.1, 94.0);
+        let run = Input {
+            forward: 1.0,
+            run: true,
+            ..Default::default()
+        };
+        let walked = |cap: Option<f32>| {
+            let mut c = crate::testkit::standing_in_the_field(20, 0xA9B4_0019, at - o);
+            let assets = c.assets.clone();
+            let pl = c.player.as_mut().unwrap();
+            let start = pl.world_position();
+            pl.pace_cap = cap;
+            for _ in 0..20 {
+                pl.update(&assets, &run, 0.05);
+            }
+            (pl.world_position() - start).truncate().length()
+        };
+        let capped = walked(Some(1.0));
+        assert!((0.8..=1.05).contains(&capped), "{capped:.2} m in 1 s");
+        assert!(walked(None) > 2.0 * capped, "the cap is all that held it");
     }
 
     #[test]

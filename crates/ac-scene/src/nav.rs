@@ -1,29 +1,15 @@
-//! Navigation for one landblock: walkable points sampled on a grid over
-//! the static collision (and the terrain outdoors), joined where a
-//! capsule can walk between them, searched with A*.
-//!
-//! The graph is built lazily and cached by whoever owns the collision
-//! world (the client's `Player`). Nodes are feet positions on a floor,
-//! snapped away from walls the way the walking code pushes a capsule
-//! out; a column of the grid holds one node per level, so stacked
-//! dungeon floors do not merge. Edges are directed (a ledge you can walk
-//! off is not one you can climb) and validated by sampling the capsule
-//! every half metre along the segment: floor continuity within the
-//! capsule's step limits, no wall contact, head room, and a clear ray at
-//! chest height; indoors, a hop that fails that but that the body's own
-//! step walks is an edge too (`Ground::joins`). `find_path` runs A* between the nodes nearest the two
-//! endpoints and then string-pulls the result with the same edge check,
-//! so every consecutive pair of waypoints is walkable in a straight line.
+//! The walking graph of a rectangle (a block, an area): feet positions on a lattice over the
+//! static collision and the terrain, one node per level in a column, snapped out of walls. Edges
+//! are directed, each walked by the body's own step ([`Ground::hop`], [`crate::stride`]). Chunks
+//! build on demand; routes are searched in [`crate::wayfind`].
 
-use std::cmp::Ordering;
-use std::collections::{BinaryHeap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use glam::{Vec2, Vec3};
 
-use crate::collision::{Capsule, CollisionWorld};
-use crate::landblock::LandblockScene;
-use crate::{lbid, BLOCK_SIZE};
+use crate::collision::{Capsule, CollisionWorld, Tri, Vertical, Walk};
+use crate::stride::{fall_step, stride, Air, Stride, Underfoot};
 
 /// Grid spacing inside dungeons and buildings (metres).
 pub const INDOOR_SPACING: f32 = 1.5;
@@ -38,6 +24,8 @@ const LEVEL_MERGE: f32 = 0.3;
 /// Largest height difference between two neighbouring nodes worth
 /// testing (stairs and ramps within one grid step).
 const MAX_EDGE_RISE: f32 = 2.0;
+/// Steepest ground stood on (rise over run), a normal z of `FloorZ` 0.66417 (PhysicsGlobals.cs:50).
+const WALKABLE_SLOPE: f32 = 1.1256;
 /// Ramp points stand this far apart (metres), well under an edge's [`MAX_EDGE_RISE`] up a slope.
 const RAMP_STEP: f32 = 1.0;
 /// A floor sloping between these (its normal's z) is a ramp: steeper is a wall, flatter is level
@@ -46,14 +34,28 @@ const RAMP_FLOOR: f32 = 0.5;
 const RAMP_LEVEL: f32 = 0.97;
 /// A snapped node may move at most this fraction of the spacing.
 const SNAP_FRACTION: f32 = 0.6;
-/// Extra clearance a smoothed route keeps from walls (metres).
-const SMOOTH_MARGIN: f32 = 0.3;
-/// How far one step of `body_reaches` goes (metres): a frame's run at 20 Hz.
-const BODY_STEP: f32 = 0.2;
-/// How near `body_reaches` must come to the far node, flat (metres).
-const BODY_ARRIVE: f32 = 0.25;
-/// The least share of a step `body_reaches` must close on the far node; less is a wall.
+/// How far one step of the body's walk goes (metres): the walk test's and the body's own stride.
+pub const BODY_STEP: f32 = 0.2;
+/// How near the body's step must come to the far node of an edge, flat (metres).
+pub const BODY_ARRIVE: f32 = 0.25;
+/// The least share of a step the body's walk must close on the far node; less is a wall.
 const BODY_CLOSING: f32 = 0.3;
+/// How far ahead (metres) a walk test gathers what it may step on at once: every step scans it.
+const SWEPT_SPAN: f32 = 4.0;
+/// A walk this near its end (metres) is there: the float error of its last step.
+const TOUCHING: f32 = 0.01;
+/// How fast a body steps off a ledge (m/s): the follower's pace on a drop leg.
+pub const DROP_SPEED: f32 = 1.0;
+/// The body's step at [`DROP_SPEED`] (metres), a frame at 20 Hz: where a drop is walked off.
+const DROP_STEP: f32 = DROP_SPEED * FALL_DT;
+/// The deepest drop (metres): ACE hurts a landing over 11.25 + 4.5 m/s (Player_Move.cs:254-259).
+const DROP_MAX: f32 = 12.0;
+/// A fall still in the air this long (seconds) is over nothing: the highest jump's flight.
+const OVER_NOTHING: f32 = 2.8;
+/// The steps a fall is followed in (seconds): a frame at 20 Hz.
+const FALL_DT: f32 = 0.05;
+/// Heights a leg's floor is kept at ([`Ground::floor_along`]), its two ends included.
+pub const LEG_SAMPLES: usize = 9;
 
 /// Where the ground is: static collision plus, outdoors, a terrain
 /// height function over world `(x, y)`.
@@ -76,13 +78,6 @@ pub struct Ground<'a> {
     /// the terrain is ruled out, not the static geometry over it, so
     /// piers and bridges over water are still walked.
     pub sea: Option<&'a dyn Fn(f32, f32) -> bool>,
-    /// Where nothing may stand at all, floor or no floor: the berth
-    /// around a portal that must not be touched, on its own floor ([`in_berth`]).
-    pub no_go: Option<&'a dyn Fn(Vec3) -> bool>,
-    /// Keep out of buildings: interior floors are not walkable. For a
-    /// walk from one outdoor spot to another, which should go over the
-    /// hill rather than through the halls beneath it.
-    pub outdoors_only: bool,
     /// The middle of every opening between cells: doorways, arches, the
     /// gaps between rooms (see `interior::CellScene::doorways`).
     ///
@@ -95,14 +90,11 @@ pub struct Ground<'a> {
     pub doorways: &'a [Vec3],
 }
 
-impl Ground<'_> {
+impl<'a> Ground<'a> {
     /// The surface a capsule with its feet at `p` stands on: the highest
     /// interior floor within step range, else the higher of an outdoor
     /// floor and the terrain (the rule `Player::update` walks by).
     pub fn surface_at(&self, p: Vec3, cap: &Capsule) -> Option<(f32, u32)> {
-        if self.no_go.is_some_and(|f| f(p)) {
-            return None;
-        }
         let floor = self
             .collision
             .footing(p, cap.radius, cap.step_up, cap.step_down);
@@ -125,9 +117,7 @@ impl Ground<'_> {
                     && self
                         .terrain_under(p.x, p.y)
                         .is_some_and(|t| t > z + 0.5 && p.z >= t - cap.step_down);
-                if self.outdoors_only {
-                    // Not ours to stand on: only what is outside counts.
-                } else if !buried {
+                if !buried {
                     return Some((z, cell));
                 }
             }
@@ -176,11 +166,8 @@ impl Ground<'_> {
         }
     }
 
-    /// Sample the walk from `a` to `b` (feet positions) every
-    /// `SUBSTEP`: the capsule must fit at every sample, the floor must
-    /// continue, and the chest ray between samples must be clear. Returns
-    /// whether the walk is possible from `a` to `b` and from `b` to `a`
-    /// (they differ by the step-up and step-down limits).
+    /// The dodge sidestep's room check (`Player::line_blocked`), not an edge test: the walk from
+    /// `a` to `b` sampled every `SUBSTEP` (fits, floor, chest ray), each way.
     pub fn walkable(&self, a: Vec3, b: Vec3, cap: &Capsule) -> (bool, bool) {
         let d = b - a;
         let len = flat(d).length();
@@ -224,168 +211,439 @@ impl Ground<'_> {
         (forward, backward)
     }
 
-    /// [`walkable`](Self::walkable), and where it refuses between two nodes `indoors`, the body's
-    /// own step each way ([`body_reaches`](Self::body_reaches)): the test for a hop between
-    /// neighbours. Only indoors: the step knows no terrain, and tried on every refused hop outside
-    /// it made Holtburg's graph five times slower to build (92 -> 445 ms).
-    pub fn joins(&self, a: Vec3, b: Vec3, indoors: bool, cap: &Capsule) -> (bool, bool) {
-        let (fwd, back) = self.walkable(a, b, cap);
-        // A wall at chest height between them is not slid past: the step is for what the sampling
-        // over-counts, a door frame brushed or a landing's lip, never for a wall.
-        if !indoors || (fwd && back) || !line_clear(self.collision, a, b) {
-            return (fwd, back);
+    /// The edge test between two nodes, each way: the chest line clear ([`is_chest_clear`]) and
+    /// the body's own step ([`stride_toward`](Self::stride_toward)) to within [`BODY_ARRIVE`].
+    pub fn hop(
+        &self,
+        a: &NavNode,
+        b: &NavNode,
+        cap: &Capsule,
+    ) -> (Option<EdgeKind>, Option<EdgeKind>) {
+        if (a.pos.z - b.pos.z).abs() > edge_rise(a.pos, b.pos)
+            || !is_chest_clear(self.collision, a.pos, b.pos)
+        {
+            return (None, None);
         }
-        (
-            fwd || self.body_reaches(a, b, cap),
-            back || self.body_reaches(b, a, cap),
+        let mut swept = Swept::over(self, a.pos, b.pos, cap);
+        let mut one_way = |p: &NavNode, q: &NavNode| {
+            matches!(
+                self.stride_over(
+                    &mut swept,
+                    p.pos,
+                    p.cell,
+                    q.pos,
+                    BODY_ARRIVE,
+                    BODY_STEP,
+                    cap,
+                    None
+                ),
+                Reach::Reached { .. }
+            )
+            .then(|| walk_kind(p.cell, q.cell))
+        };
+        let there = one_way(a, b);
+        (there, one_way(b, a))
+    }
+
+    /// Whether a route's leg from `a` to `b` (feet, each with its cell) is walked: the chest line
+    /// clear and the body's step one way, as [`hop`](Self::hop) tests an edge.
+    pub fn can_walk(&self, a: (Vec3, u32), b: (Vec3, u32), cap: &Capsule) -> bool {
+        is_chest_clear(self.collision, a.0, b.0) && self.body_reaches(a.0, a.1, b.0, cap)
+    }
+
+    /// The height of the body's own step from `a` (feet, in `cell`) to `b` at [`LEG_SAMPLES`] even
+    /// shares of the leg's flat length: the floor its follower walks, not the line; `None` short.
+    pub fn floor_along(
+        &self,
+        a: Vec3,
+        cell: u32,
+        b: Vec3,
+        cap: &Capsule,
+    ) -> Option<[f32; LEG_SAMPLES]> {
+        let mut track = vec![a];
+        let near = a + (b - a).clamp_length_max(SWEPT_SPAN);
+        let mut u = Swept::over(self, a, near, cap);
+        let reach = self.stride_over(
+            &mut u,
+            a,
+            cell,
+            b,
+            BODY_ARRIVE,
+            BODY_STEP,
+            cap,
+            Some(&mut track),
+        );
+        if !matches!(reach, Reach::Reached { .. }) {
+            return None;
+        }
+        track.push(b);
+        let ab = flat(b - a);
+        let share = |p: &Vec3| {
+            let len2 = ab.length_squared();
+            if len2 > 1e-6 {
+                flat(*p - a).dot(ab) / len2
+            } else {
+                0.0
+            }
+        };
+        let mut heights = [b.z; LEG_SAMPLES];
+        for (k, z) in heights.iter_mut().enumerate() {
+            let t = k as f32 / (LEG_SAMPLES - 1) as f32;
+            let nearest = track
+                .iter()
+                .min_by(|p, q| (share(p) - t).abs().total_cmp(&(share(q) - t).abs()));
+            *z = nearest.map_or(b.z, |p| p.z);
+        }
+        Some(heights)
+    }
+
+    /// Whether the body's step carries it from `a` (feet, in `cell`) to within [`BODY_ARRIVE`]
+    /// of `b`, whatever the chest line meets.
+    pub fn body_reaches(&self, a: Vec3, cell: u32, b: Vec3, cap: &Capsule) -> bool {
+        self.body_stops_within(a, cell, b, BODY_ARRIVE, cap)
+            .is_some()
+    }
+
+    /// Where the walk of [`body_reaches`](Self::body_reaches) stops when `within` metres of `b`
+    /// (flat, on its floor) is there, as a corridor's aim by its wall is walked to; `None` short.
+    pub fn body_stops_within(
+        &self,
+        a: Vec3,
+        cell: u32,
+        b: Vec3,
+        within: f32,
+        cap: &Capsule,
+    ) -> Option<Vec3> {
+        match self.stride_toward(a, cell, b, within, cap) {
+            Reach::Reached { at, .. } => Some(at),
+            _ => None,
+        }
+    }
+
+    /// Where the body's step from `a` (feet, in `cell`) toward `b`, level, goes over an edge and lands,
+    /// and in which cell, stepping off at [`DROP_SPEED`] as every drop edge is simulated; else `None`.
+    pub fn drop_toward(&self, a: Vec3, cell: u32, b: Vec3, cap: &Capsule) -> Option<(Vec3, u32)> {
+        let level = Vec3::new(b.x, b.y, a.z);
+        let near = a + (level - a).clamp_length_max(SWEPT_SPAN);
+        let mut u = Swept::over(self, a, near, cap);
+        let off = self.stride_over(&mut u, a, cell, level, BODY_ARRIVE, BODY_STEP, cap, None);
+        let Reach::Falls { from, cell: c, .. } = off else {
+            return None;
+        };
+        // The last stride again at the body's own step at that pace, which is where it steps off.
+        let off = self.stride_over(&mut u, from, c, level, BODY_ARRIVE, DROP_STEP, cap, None);
+        let Reach::Falls { from, at, .. } = off else {
+            return None;
+        };
+        let dir = flat(b - a).normalize_or_zero() * DROP_SPEED;
+        self.fall_from(from, at, Vec3::new(dir.x, dir.y, 0.0), cell, cap)
+    }
+
+    /// Where a body stepping from `from` off an edge at `at` (feet, from `cell`) at `vel` lands, in
+    /// which cell, fallen as the body falls ([`fall_step`]); `None` past `DROP_MAX` or over nothing.
+    pub fn fall_from(
+        &self,
+        from: Vec3,
+        at: Vec3,
+        vel: Vec3,
+        cell: u32,
+        cap: &Capsule,
+    ) -> Option<(Vec3, u32)> {
+        let drift = at + vel * OVER_NOTHING - Vec3::new(0.0, 0.0, DROP_MAX);
+        let u = Swept::over(self, from, drift, cap);
+        let (mut p, mut to, mut vel, mut vz) = (from, at, vel, 0.0);
+        for _ in 0..(OVER_NOTHING / FALL_DT) as usize {
+            match fall_step(&u, p, to, vz, FALL_DT, cell, cap) {
+                Air::Landed { at: land, cell } => {
+                    return (at.z - land.z <= DROP_MAX).then_some((land, cell));
+                }
+                Air::Flying {
+                    at: next,
+                    vz: v,
+                    stopped,
+                } => {
+                    if stopped {
+                        vel = Vec3::ZERO;
+                    }
+                    (p, vz) = (next, v);
+                    to = p + vel * FALL_DT;
+                    if at.z - p.z > DROP_MAX {
+                        return None;
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Where the body's own step ([`stride`]) carries it from `a` (feet, in `cell`) toward `b`, a
+    /// fifth of a metre at a time and always closing on it, until `within` of `b` on its floor.
+    pub fn stride_toward(&self, a: Vec3, cell: u32, b: Vec3, within: f32, cap: &Capsule) -> Reach {
+        let near = a + (b - a).clamp_length_max(SWEPT_SPAN);
+        self.stride_over(
+            &mut Swept::over(self, a, near, cap),
+            a,
+            cell,
+            b,
+            within,
+            BODY_STEP,
+            cap,
+            None,
         )
     }
 
-    /// Whether the body gets from `a` to `b` (feet, a hop of a node or two) by the step
-    /// `Player::update` takes: `walk` a fifth of a metre at a time, onto what is below within a
-    /// step down where a step leaves the floor, always closing on `b`. The sampled test refuses a
-    /// door frame the body slides past and the lip of a landing over a stair's top step, and so
-    /// found no way into a mine at ACB5 the body walks (test: a_mine_is_walked_down_to_its_floor).
-    pub fn body_reaches(&self, a: Vec3, b: Vec3, cap: &Capsule) -> bool {
-        self.body_comes_within(a, b, BODY_ARRIVE, cap)
-    }
-
-    /// [`body_reaches`](Self::body_reaches), but `within` metres of `b` (flat, on its floor) is
-    /// there: a walk that stops short, as a corridor's aim by its wall is walked to.
-    pub fn body_comes_within(&self, a: Vec3, b: Vec3, within: f32, cap: &Capsule) -> bool {
-        let mut p = a;
+    /// [`stride_toward`](Self::stride_toward) by steps of `stride_len` on `u`, gathered again
+    /// [`SWEPT_SPAN`] on whenever a step leaves it; each step goes to `track`.
+    #[allow(clippy::too_many_arguments)] // the walk test's own inputs, and where its steps go
+    fn stride_over<'g>(
+        &'g self,
+        u: &mut Swept<'g, 'a>,
+        a: Vec3,
+        cell: u32,
+        b: Vec3,
+        within: f32,
+        stride_len: f32,
+        cap: &Capsule,
+        mut track: Option<&mut Vec<Vec3>>,
+    ) -> Reach {
+        let (mut p, mut cell) = (a, cell);
         let mut left = flat(b - a).length();
-        for _ in 0..(left / BODY_STEP).ceil() as usize + 4 {
-            if left <= within {
+        for _ in 0..(left / stride_len).ceil() as usize + 4 {
+            if left <= within.max(TOUCHING) {
                 // A step from `b`'s floor is on it: down a stair, the ramp walked lies 0.33 m under the
                 // tread its node stands on (test: the_stairs_up_to_a_scrivener_are_walked_down_too).
-                return (p.z - b.z).abs() <= cap.step_up;
+                return if (p.z - b.z).abs() <= cap.step_up {
+                    Reach::Reached { at: p, cell }
+                } else {
+                    Reach::Stopped
+                };
             }
             let d = flat(b - p);
-            let step = d.normalize() * d.length().min(BODY_STEP);
-            let walk = self
-                .collision
-                .walk(p, Vec3::new(p.x + step.x, p.y + step.y, p.z), cap);
-            if walk.blocked {
-                return false;
+            let step = d.normalize() * d.length().min(stride_len);
+            let to = Vec3::new(p.x + step.x, p.y + step.y, p.z);
+            if !u.covers(p, to, cap) {
+                let ahead = Vec3::new(b.x, b.y, p.z) - p;
+                *u = Swept::over(self, p, p + ahead.clamp_length_max(SWEPT_SPAN), cap);
             }
-            let mut next = walk.pos;
-            if walk.floor.is_none() {
-                match self.collision.floor_at(next, 0.0, cap.step_down) {
-                    Some((z, _)) => next.z = z,
-                    None => return false,
-                }
-            }
-            if self.outdoors_only && walk.floor.is_some_and(|(_, cell)| cell != 0) {
-                return false;
-            }
-            if self.no_go.is_some_and(|f| f(next)) || self.sea.is_some_and(|f| f(next.x, next.y)) {
-                return false;
-            }
+            let (next, next_cell) = match stride(&*u, p, cell, to, cap) {
+                Stride::Stand { at, cell } => (at, cell),
+                Stride::Falls { at } => return Reach::Falls { from: p, cell, at },
+                Stride::Blocked | Stride::Adrift { .. } => return Reach::Stopped,
+            };
             // A step that closes little is sliding along a wall the hop runs into.
             let now_left = flat(b - next).length();
-            if now_left > left - BODY_STEP * BODY_CLOSING {
-                return false;
+            if now_left > left - stride_len * BODY_CLOSING {
+                return Reach::Stopped;
             }
             left = now_left;
-            p = next;
+            (p, cell) = (next, next_cell);
+            if let Some(t) = track.as_mut() {
+                t.push(p);
+            }
         }
-        false
+        Reach::Stopped
+    }
+}
+
+/// Where the body's step toward a point ends ([`Ground::stride_toward`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Reach {
+    /// Within reach of it, on its floor, standing in `cell` (0 outdoors).
+    Reached { at: Vec3, cell: u32 },
+    /// Off an edge at `at` on the way, by the step from `from` in `cell`.
+    Falls { from: Vec3, cell: u32, at: Vec3 },
+    /// Held by a wall, sliding along one, or off every floor.
+    Stopped,
+}
+
+impl Underfoot for Ground<'_> {
+    fn walk(&self, from: Vec3, to: Vec3, cap: &Capsule) -> Walk {
+        self.collision.walk(from, to, cap)
     }
 
-    /// Whether the straight walk from `a` to `b` (feet positions) runs
-    /// off an edge with nothing under it before anything solid stops it,
-    /// or keeps a floor all the way and ends under (or over) a `b` that
-    /// stands a storey away, at the foot of an edge it never crosses.
-    ///
-    /// The walk is sampled every `SUBSTEP` as in
-    /// [`walkable`](Self::walkable), and followed the way the walking
-    /// code would follow it. Something solid first -- the capsule does
-    /// not fit, the chest ray is blocked, or the ground rises over the
-    /// feet faster than a step climbs -- and the walk ends there: a
-    /// character leaning on it stays on its own side, and what lies
-    /// beyond does not matter. No floor within a step, and the walk goes
-    /// over the edge: down onto the highest floor within `depth` under
-    /// it, as `Player::update` falls to one, and on from there. Only an
-    /// edge with nothing under it within `depth` is a drop.
-    ///
-    /// A ledge over a floor is not refused. Stepping off is how a
-    /// character upstairs in a house comes down when the graph finds no
-    /// way, and how one stranded on a ledge in a dungeon gets back to
-    /// the room it looks over; refusing it left both standing there. The
-    /// edge of everything is another matter: past it the walking code
-    /// has nothing to come down on and carries the character on through
-    /// the void at the height it left.
-    pub fn drops_along(&self, a: Vec3, b: Vec3, cap: &Capsule, depth: f32) -> bool {
-        let d = b - a;
-        let len = flat(d).length();
-        let steps = (len / SUBSTEP).ceil().max(1.0) as usize;
-        let mut prev = a;
-        for i in 1..=steps {
-            let t = i as f32 / steps as f32;
-            let at = Vec3::new(a.x + d.x * t, a.y + d.y * t, prev.z);
-            // The wall before the floor. Under a wall there is often no
-            // floor at all, only the sealed gap between two rooms, and
-            // nobody walking into the wall ever gets there to fall.
-            if !self.fits(at, cap) || !line_clear(self.collision, prev, at) {
-                return false;
-            }
-            // Where nothing may stand is no edge: a walk leaning on it
-            // goes round, not down.
-            if self.no_go.is_some_and(|f| f(at)) {
-                continue;
-            }
-            let z = match self.surface_at(at, cap) {
-                Some((z, _)) => z,
-                // Ground over the feet: a slope steeper than a step, a
-                // ledge too tall. Solid, like a wall -- and the storey
-                // that is likely under it is no floor of this walk's.
-                None if self.rises_over(at, cap) => return false,
-                None => match self.landing_under(at, cap, depth) {
-                    Some(z) => z,
-                    None => return true,
-                },
-            };
-            prev = Vec3::new(at.x, at.y, z);
-        }
-        // Along a floor all the way, but whose? Something standing on
-        // the top of a vault rib is reached, on the flat, by walking in
-        // underneath it: no edge is crossed on the way, and it is eight
-        // metres up all the same. Only a `b` with a floor of its own
-        // under it is judged so. One with none is not standing anywhere
-        // -- a point off the overland grid, floating over a hillside --
-        // and the walk to the ground under it is the walk wanted.
-        match self.surface_at(b, cap) {
-            Some((z, _)) => z - prev.z > cap.step_up || prev.z - z > cap.step_down,
-            None => false,
-        }
-    }
-
-    /// Ground over the feet at `at`: a floor, or outdoors the terrain,
-    /// higher than a step and (for a floor) lower than the head.
-    fn rises_over(&self, at: Vec3, cap: &Capsule) -> bool {
-        let over = at.z + cap.step_up;
+    fn floor_over_feet(&self, at: Vec3, cap: &Capsule) -> bool {
         self.collision
             .floor_at(at, cap.height, 0.0)
-            .is_some_and(|(z, _)| z > over)
-            || self.terrain_under(at.x, at.y).is_some_and(|t| t > over)
+            .is_some_and(|(z, _)| z > at.z + cap.step_up)
     }
 
-    /// Where a character going over an edge at `at` comes down: the
-    /// highest floor, or outdoors the ground, from a step over its feet
-    /// to `depth` under them. `None` when there is nothing.
-    fn landing_under(&self, at: Vec3, cap: &Capsule, depth: f32) -> Option<f32> {
-        let floor = self
+    fn floor_below(&self, at: Vec3, cap: &Capsule, depth: f32) -> Option<(f32, u32)> {
+        self.collision.floor_at(at, cap.step_up, depth)
+    }
+
+    /// The walkable terrain: none over open sea, so only what is built over it is stood on.
+    fn terrain_at(&self, x: f32, y: f32) -> Option<f32> {
+        self.terrain_under(x, y)
+    }
+
+    fn is_dungeon(&self) -> bool {
+        self.terrain.is_none()
+    }
+
+    fn vertical(&self, from: Vec3, dz: f32, cap: &Capsule) -> Vertical {
+        self.collision.vertical(from, dz, cap)
+    }
+
+    fn resolve_falling(&self, from: Vec3, to: Vec3, cap: &Capsule) -> Vec3 {
+        self.collision
+            .resolve_from(Some(from), to, cap.radius, cap.height, 0.0)
+    }
+
+    fn fits_falling(&self, at: Vec3, cap: &Capsule) -> bool {
+        self.collision
+            .ceiling_at(at, cap.radius)
+            .is_none_or(|cz| cz - at.z >= cap.height)
+    }
+}
+
+/// A [`Ground`] for one hop, with what near it can push a body or hang over it: a step that has
+/// none of those within its reach is its footing alone, which is all the full walk does there.
+struct Swept<'g, 'a> {
+    ground: &'g Ground<'a>,
+    /// The bounds of every wall, ceiling and two-sided floor near the hop.
+    pushers: Vec<(Vec3, Vec3)>,
+    /// Every floor near the hop, in the order the world holds them.
+    floors: Vec<&'g Tri>,
+    /// The box they were gathered in.
+    lo: Vec3,
+    hi: Vec3,
+}
+
+impl<'g, 'a> Swept<'g, 'a> {
+    fn over(ground: &'g Ground<'a>, a: Vec3, b: Vec3, cap: &Capsule) -> Self {
+        let reach = cap.radius + 1.0;
+        let lo = a.min(b) - Vec3::new(reach, reach, MAX_EDGE_RISE + cap.step_down + 0.1);
+        let hi = a.max(b) + Vec3::new(reach, reach, MAX_EDGE_RISE + cap.step_up + cap.height + 0.1);
+        let r = flat(b - a).length() * 0.5 + reach;
+        let pushers = ground
             .collision
-            .floor_at(at, cap.step_up, depth)
-            .map(|(z, _)| z);
-        let ground = self
-            .terrain_under(at.x, at.y)
-            .filter(|&t| t <= at.z + cap.step_up && t >= at.z - depth);
-        match (floor, ground) {
-            (Some(f), Some(g)) => Some(f.max(g)),
-            (f, g) => f.or(g),
+            .around((a + b) * 0.5, r)
+            .map(|(_, t)| t)
+            .filter(|t| {
+                t.normal.z.abs() <= 0.6 || t.normal.z < -0.5 || (t.two_sided && t.normal.z > 0.5)
+            })
+            .map(|t| (t.a.min(t.b).min(t.c), t.a.max(t.b).max(t.c)))
+            .filter(|(tlo, thi)| tlo.cmple(hi).all() && thi.cmpge(lo).all())
+            .collect();
+        let mut ids: Vec<u32> = ground
+            .collision
+            .around((a + b) * 0.5, r)
+            .filter(|(_, t)| {
+                let (tlo, thi) = (t.a.min(t.b).min(t.c), t.a.max(t.b).max(t.c));
+                t.normal.z >= 0.5
+                    && flat(tlo).cmple(flat(hi)).all()
+                    && flat(thi).cmpge(flat(lo)).all()
+            })
+            .map(|(i, _)| i)
+            .collect();
+        ids.sort_unstable();
+        ids.dedup();
+        let floors = ground.collision.tris_at(&ids);
+        Swept {
+            ground,
+            pushers,
+            floors,
+            lo,
+            hi,
         }
+    }
+
+    /// Whether `p` lies inside the box the floors were gathered in, on the flat.
+    fn holds(&self, p: Vec3) -> bool {
+        flat(p).cmpge(flat(self.lo)).all() && flat(p).cmple(flat(self.hi)).all()
+    }
+
+    /// The box a walking step from `from` to `to` may meet anything in: within a radius of its
+    /// line, from a step down under its feet to a step and a height over.
+    fn step_box(from: Vec3, to: Vec3, cap: &Capsule) -> (Vec3, Vec3) {
+        let m = cap.radius + 0.05;
+        let lo = from.min(to) - Vec3::new(m, m, cap.step_down + 0.05);
+        let hi = from.max(to) + Vec3::new(m, m, cap.step_up + cap.height + 0.05);
+        (lo, hi)
+    }
+
+    /// Whether the step from `from` to `to` lies inside what was gathered, so its fast answer holds.
+    fn covers(&self, from: Vec3, to: Vec3, cap: &Capsule) -> bool {
+        let (lo, hi) = Self::step_box(from, to, cap);
+        lo.cmpge(self.lo).all() && hi.cmple(self.hi).all()
+    }
+
+    /// Whether a walking step from `from` to `to` can meet nothing that pushes or hangs over.
+    fn is_clear(&self, from: Vec3, to: Vec3, cap: &Capsule) -> bool {
+        let (lo, hi) = Self::step_box(from, to, cap);
+        lo.cmpge(self.lo).all()
+            && hi.cmple(self.hi).all()
+            && !self
+                .pushers
+                .iter()
+                .any(|(tlo, thi)| tlo.cmple(hi).all() && thi.cmpge(lo).all())
+    }
+}
+
+impl Underfoot for Swept<'_, '_> {
+    fn walk(&self, from: Vec3, to: Vec3, cap: &Capsule) -> Walk {
+        if !self.is_clear(from, Vec3::new(to.x, to.y, from.z), cap) {
+            return self.ground.walk(from, to, cap);
+        }
+        let probe = Vec3::new(to.x, to.y, from.z);
+        let floor = self.ground.collision.footing_among(
+            &self.floors,
+            probe,
+            cap.radius,
+            cap.step_up,
+            cap.step_down,
+        );
+        Walk {
+            pos: Vec3::new(to.x, to.y, floor.map_or(from.z, |(z, _)| z)),
+            floor,
+            blocked: false,
+        }
+    }
+
+    fn floor_over_feet(&self, at: Vec3, cap: &Capsule) -> bool {
+        self.ground.floor_over_feet(at, cap)
+    }
+
+    fn floor_below(&self, at: Vec3, cap: &Capsule, depth: f32) -> Option<(f32, u32)> {
+        self.ground.floor_below(at, cap, depth)
+    }
+
+    fn terrain_at(&self, x: f32, y: f32) -> Option<f32> {
+        self.ground.terrain_at(x, y)
+    }
+
+    fn is_dungeon(&self) -> bool {
+        self.ground.is_dungeon()
+    }
+
+    fn vertical(&self, from: Vec3, dz: f32, cap: &Capsule) -> Vertical {
+        let to = from + Vec3::new(0.0, 0.0, dz);
+        if dz < 0.0 && self.holds(from) {
+            let floors = self.floors.iter().copied();
+            return match self
+                .ground
+                .collision
+                .floor_among(floors, from, cap.step_up, -dz)
+            {
+                Some((z, cell)) => Vertical::Landed(Vec3::new(from.x, from.y, z), cell),
+                None => Vertical::Free(to),
+            };
+        }
+        if dz >= 0.0 && dz <= cap.step_up && self.is_clear(from, from, cap) {
+            return Vertical::Free(to);
+        }
+        self.ground.vertical(from, dz, cap)
+    }
+
+    fn resolve_falling(&self, from: Vec3, to: Vec3, cap: &Capsule) -> Vec3 {
+        if self.is_clear(from, to, cap) {
+            return to;
+        }
+        self.ground.resolve_falling(from, to, cap)
+    }
+
+    fn fits_falling(&self, at: Vec3, cap: &Capsule) -> bool {
+        self.is_clear(at, at, cap) || self.ground.fits_falling(at, cap)
     }
 }
 
@@ -402,7 +660,19 @@ pub fn line_clear(collision: &CollisionWorld, a: Vec3, b: Vec3) -> bool {
     collision.segment_hit(a + up, end + up).is_none()
 }
 
-fn flat(v: Vec3) -> Vec2 {
+/// The chest line between two feet positions, one line for both ways: clear when the ray from
+/// either end is ([`line_clear`] levels a ray that goes down), so a stair is climbed as walked down.
+pub fn is_chest_clear(collision: &CollisionWorld, a: Vec3, b: Vec3) -> bool {
+    line_clear(collision, a, b) || line_clear(collision, b, a)
+}
+
+/// The most two nodes `a`, `b` may differ in height and still be tested as an edge: a stair's
+/// rise, or the steepest ground stood on over their flat distance (a 4 m lattice's hillsides).
+fn edge_rise(a: Vec3, b: Vec3) -> f32 {
+    MAX_EDGE_RISE.max(flat(b - a).length() * WALKABLE_SLOPE)
+}
+
+pub(crate) fn flat(v: Vec3) -> Vec2 {
     Vec2::new(v.x, v.y)
 }
 
@@ -417,18 +687,67 @@ pub struct NavNode {
     pub column: (i32, i32),
 }
 
+/// How a route steps from one node to the next.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EdgeKind {
+    /// Along one cell's floor, or outdoors.
+    Walk,
+    /// Off a ledge onto a floor below: one way.
+    Drop,
+    /// From one cell into another, walked straight through.
+    Doorway,
+}
+
+/// An edge out of a node: the node it leads to, and how.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NavEdge {
+    pub to: u32,
+    pub kind: EdgeKind,
+}
+
+/// The kind of a walk between two floors' cells (0 outdoors).
+pub fn walk_kind(from_cell: u32, to_cell: u32) -> EdgeKind {
+    if from_cell == to_cell {
+        EdgeKind::Walk
+    } else {
+        EdgeKind::Doorway
+    }
+}
+
+/// Landing nodes tried for a drop, nearest first.
+const JOIN_TRIES: usize = 8;
+
+/// Join the sets of `a` and `b` in a union-find, halving the way up as it goes.
+fn unite(roots: &mut [u32], a: u32, b: u32) {
+    let (a, b) = (find_root(roots, a), find_root(roots, b));
+    if a != b {
+        roots[a.max(b) as usize] = a.min(b);
+    }
+}
+
+/// The root of `node`'s set, halving the way up.
+fn find_root(roots: &mut [u32], node: u32) -> u32 {
+    let mut n = node;
+    while roots[n as usize] != n {
+        let up = roots[roots[n as usize] as usize];
+        roots[n as usize] = up;
+        n = up;
+    }
+    n
+}
+
+/// The root of `node`'s set, read only, for a graph shared.
+fn root_of(roots: &[u32], node: u32) -> u32 {
+    let mut n = node;
+    while roots[n as usize] != n {
+        n = roots[n as usize];
+    }
+    n
+}
+
 /// Columns per chunk side: chunks are built on demand, so a path only
 /// pays for the part of the block it crosses (24 m squares indoors).
 const CHUNK: i32 = 16;
-/// How far `nearest` looks around a point, in columns.
-const NEAREST_REACH: i32 = 2;
-/// How far it looks when that found nothing at all: a character with no
-/// node within three metres is stranded -- almost always because it is
-/// leaning on something -- and needs the way back to the walkable
-/// world, however far that is.
-const STRANDED_REACH: i32 = 8;
-/// How many of the nearest nodes `nearest_joined` tries a straight walk to before settling.
-const JOIN_TRIES: usize = 8;
 
 pub struct NavGraph {
     pub spacing: f32,
@@ -437,12 +756,19 @@ pub struct NavGraph {
     gx: (i32, i32),
     gy: (i32, i32),
     pub nodes: Vec<NavNode>,
-    /// Outgoing neighbours per node.
-    edges: Vec<Vec<u32>>,
+    /// Outgoing edges per node.
+    edges: Vec<Vec<NavEdge>>,
+    /// Union-find over the edges of every kind, each way: nodes under different roots are apart.
+    roots: Vec<u32>,
+    /// The same over walks and doorways only, for a walk that takes no drop.
+    walk_roots: Vec<u32>,
     /// Nodes per grid column `(x / spacing, y / spacing)`.
     columns: HashMap<(i32, i32), Vec<u32>>,
     /// Chunks whose nodes and edges exist.
     built: HashSet<(i32, i32)>,
+    /// Drops whose landing lies in a chunk not built yet: the node dropped from, where it lands
+    /// and in which cell.
+    drops_waiting: Vec<(u32, Vec3, u32)>,
     /// Time spent building so far.
     pub build_time: Duration,
 }
@@ -464,38 +790,12 @@ impl NavGraph {
             ),
             nodes: Vec::new(),
             edges: Vec::new(),
+            roots: Vec::new(),
+            walk_roots: Vec::new(),
             columns: HashMap::new(),
             built: HashSet::new(),
+            drops_waiting: Vec::new(),
             build_time: Duration::ZERO,
-        }
-    }
-
-    /// The graph of an assembled landblock: the fine lattice in dungeons
-    /// and blocks with buildings, the coarse one over open terrain. The
-    /// `Ground` passed to the other methods must describe the same block
-    /// (its collision world and, unless it is a dungeon, its terrain).
-    pub fn for_scene(scene: &LandblockScene, collision: &CollisionWorld, cap: &Capsule) -> Self {
-        let origin = lbid::world_origin(scene.id);
-        let square = (
-            Vec2::new(origin.x, origin.y),
-            Vec2::new(origin.x + BLOCK_SIZE, origin.y + BLOCK_SIZE),
-        );
-        let hull = collision
-            .bounds()
-            .map(|(lo, hi)| (flat(lo), flat(hi)))
-            .unwrap_or(square);
-        if scene.is_dungeon {
-            NavGraph::new(hull.0, hull.1, INDOOR_SPACING, cap)
-        } else {
-            let margin = Vec2::splat(2.0 * OUTDOOR_SPACING);
-            let min = square.0.min(hull.0).max(square.0 - margin);
-            let max = square.1.max(hull.1).min(square.1 + margin);
-            let spacing = if scene.cells.is_empty() {
-                OUTDOOR_SPACING
-            } else {
-                INDOOR_SPACING
-            };
-            NavGraph::new(min, max, spacing, cap)
         }
     }
 
@@ -510,178 +810,83 @@ impl NavGraph {
         }
     }
 
-    /// Nodes and edges of one chunk, if not there yet. Edges to nodes in
-    /// neighbouring chunks are added when the second of the two chunks is
-    /// built, so each pair is tested once.
+    /// Nodes and edges of one chunk, if not there yet.
     fn ensure_chunk(&mut self, ground: &Ground, cx: i32, cy: i32) {
-        if self.built.contains(&(cx, cy)) {
-            return;
+        if !self.built.contains(&(cx, cy)) && self.covers_chunk((cx, cy)) {
+            let built = self.build_chunk(ground, (cx, cy));
+            self.apply(built);
         }
-        let (cx0, cy0) = chunk_of(self.gx.0, self.gy.0);
-        let (cx1, cy1) = chunk_of(self.gx.1, self.gy.1);
-        if cx < cx0 || cx > cx1 || cy < cy0 || cy > cy1 {
-            return;
-        }
+    }
+
+    /// The chunk `c` lies inside the graph's range.
+    fn covers_chunk(&self, c: (i32, i32)) -> bool {
+        let (lo, hi) = (
+            chunk_of(self.gx.0, self.gy.0),
+            chunk_of(self.gx.1, self.gy.1),
+        );
+        (lo.0..=hi.0).contains(&c.0) && (lo.1..=hi.1).contains(&c.1)
+    }
+
+    /// What building chunk `c` adds, the graph only read: its nodes, their edges to each other and
+    /// to built chunks (each pair tested once, by the second chunk built), and its drops.
+    pub fn build_chunk(&self, ground: &Ground, c: (i32, i32)) -> ChunkBuilt {
         let started = Instant::now();
-        self.built.insert((cx, cy));
-        let cap = self.capsule;
-        let mut fresh: Vec<u32> = Vec::new();
-        for gx in (cx * CHUNK..(cx + 1) * CHUNK).filter(|x| (self.gx.0..=self.gx.1).contains(x)) {
-            for gy in (cy * CHUNK..(cy + 1) * CHUNK).filter(|y| (self.gy.0..=self.gy.1).contains(y))
-            {
-                let x = gx as f32 * self.spacing;
-                let y = gy as f32 * self.spacing;
-                let mut levels = ground.collision.floors_at_xy(x, y);
-                if ground.outdoors_only {
-                    levels.retain(|(_, cell)| *cell == 0);
-                }
-                if let Some(t) = ground.terrain_under(x, y) {
-                    levels.push((t, 0));
-                }
-                levels.sort_by(|a, b| b.0.total_cmp(&a.0));
-                let mut placed: Vec<f32> = Vec::new();
-                for (z, _) in levels {
-                    if placed.iter().any(|&pz| (pz - z).abs() < LEVEL_MERGE)
-                        || ground.no_go.is_some_and(|f| f(Vec3::new(x, y, z)))
-                    {
-                        continue;
-                    }
-                    let Some(node) = self.place(ground, Vec3::new(x, y, z), (gx, gy), &cap) else {
-                        continue;
-                    };
-                    if placed
-                        .iter()
-                        .any(|&pz| (pz - node.pos.z).abs() < LEVEL_MERGE)
-                    {
-                        continue;
-                    }
-                    placed.push(node.pos.z);
-                    let id = self.nodes.len() as u32;
-                    self.nodes.push(node);
-                    self.edges.push(Vec::new());
-                    self.columns.entry((gx, gy)).or_default().push(id);
-                    fresh.push(id);
-                }
-            }
+        let mut d = Draft {
+            nav: self,
+            chunk: c,
+            nodes: Vec::new(),
+            columns: HashMap::new(),
+            edges: Vec::new(),
+            out: HashMap::new(),
+            waiting: self.drops_waiting.clone(),
+        };
+        if !self.built.contains(&c) && self.covers_chunk(c) {
+            d.fill(ground);
         }
-        // The openings the data names, and points along every ramp, wherever the lattice fell:
-        // a ramp narrower than the lattice lies between its columns and joins nothing
-        // (a_counter_on_a_deck_up_a_ramp_is_walked_up_to, in ac-client).
-        let span = CHUNK as f32 * self.spacing;
-        let middle = Vec3::new((cx as f32 + 0.5) * span, (cy as f32 + 0.5) * span, 0.0);
-        let ramps: Vec<Vec3> = ground
-            .collision
-            .nearby(middle, span * 0.75)
-            .flat_map(|t| ramp_points(t, self.spacing))
-            .collect();
-        let mut seeded: Vec<u32> = Vec::new();
-        for d in ground.doorways.iter().chain(&ramps) {
-            let gx = (d.x / self.spacing).round() as i32;
-            let gy = (d.y / self.spacing).round() as i32;
-            if chunk_of(gx, gy) != (cx, cy) {
-                continue;
-            }
-            if !(self.gx.0..=self.gx.1).contains(&gx) || !(self.gy.0..=self.gy.1).contains(&gy) {
-                continue;
-            }
-            if ground.no_go.is_some_and(|f| f(*d)) {
-                continue;
-            }
-            let Some(node) = self.place(ground, *d, (gx, gy), &cap) else {
-                continue;
-            };
-            // One per opening per floor: a doorway sampled twice is two
-            // nodes a hand's breadth apart and nothing gained.
-            if self.columns.get(&(gx, gy)).is_some_and(|ids| {
-                ids.iter().any(|&j| {
-                    let p = self.nodes[j as usize].pos;
-                    (p.z - node.pos.z).abs() < LEVEL_MERGE
-                        && flat(p - node.pos).length() < self.spacing * 0.25
-                })
-            }) {
-                continue;
-            }
+        ChunkBuilt {
+            chunk: c,
+            base: self.nodes.len(),
+            nodes: d.nodes,
+            edges: d.edges,
+            waiting: d.waiting,
+            took: started.elapsed(),
+        }
+    }
+
+    /// Add a chunk [`build_chunk`](Self::build_chunk) made: appends only, so it is quick under a
+    /// write lock. A chunk built meanwhile, or against another graph state, is dropped.
+    pub fn apply(&mut self, b: ChunkBuilt) {
+        if self.built.contains(&b.chunk)
+            || !self.covers_chunk(b.chunk)
+            || b.base != self.nodes.len()
+        {
+            return;
+        }
+        self.built.insert(b.chunk);
+        for node in b.nodes {
             let id = self.nodes.len() as u32;
+            self.columns.entry(node.column).or_default().push(id);
             self.nodes.push(node);
             self.edges.push(Vec::new());
-            self.columns.entry((gx, gy)).or_default().push(id);
-            fresh.push(id);
-            seeded.push(id);
+            self.roots.push(id);
+            self.walk_roots.push(id);
         }
-        const DIRS: [(i32, i32); 8] = [
-            (1, 0),
-            (0, 1),
-            (1, 1),
-            (1, -1),
-            (-1, 0),
-            (0, -1),
-            (-1, -1),
-            (-1, 1),
-        ];
-        for &i in &fresh {
-            let a = self.nodes[i as usize].pos;
-            let (gx, gy) = self.nodes[i as usize].column;
-            for (k, (dx, dy)) in DIRS.iter().enumerate() {
-                let col = (gx + dx, gy + dy);
-                let other = chunk_of(col.0, col.1);
-                // Inside the chunk, the four forward directions cover
-                // every pair; toward an older chunk, all eight.
-                if other == (cx, cy) {
-                    if k >= 4 {
-                        continue;
-                    }
-                } else if !self.built.contains(&other) {
-                    continue;
-                }
-                let Some(others) = self.columns.get(&col) else {
-                    continue;
-                };
-                for j in others.clone() {
-                    let b = self.nodes[j as usize].pos;
-                    if (a.z - b.z).abs() > MAX_EDGE_RISE {
-                        continue;
-                    }
-                    let indoors =
-                        self.nodes[i as usize].cell != 0 && self.nodes[j as usize].cell != 0;
-                    let (fwd, back) = ground.joins(a, b, indoors, &cap);
-                    if fwd {
-                        self.edges[i as usize].push(j);
-                    }
-                    if back {
-                        self.edges[j as usize].push(i);
-                    }
-                }
-            }
+        for (from, e) in b.edges {
+            self.add_edge(from, e.to, e.kind);
         }
-        for &i in &seeded {
-            let a = self.nodes[i as usize].pos;
-            let col = self.nodes[i as usize].column;
-            let Some(others) = self.columns.get(&col).cloned() else {
-                continue;
-            };
-            for j in others {
-                if j == i {
-                    continue;
-                }
-                let b = self.nodes[j as usize].pos;
-                if (a.z - b.z).abs() > MAX_EDGE_RISE {
-                    continue;
-                }
-                let indoors = self.nodes[i as usize].cell != 0 && self.nodes[j as usize].cell != 0;
-                let (fwd, back) = ground.joins(a, b, indoors, &cap);
-                if fwd && !self.edges[i as usize].contains(&j) {
-                    self.edges[i as usize].push(j);
-                }
-                if back && !self.edges[j as usize].contains(&i) {
-                    self.edges[j as usize].push(i);
-                }
-            }
-        }
-        self.build_time += started.elapsed();
+        self.drops_waiting = b.waiting;
+        self.build_time += b.took;
     }
 
     /// Build the chunks covering the columns `gx0..=gx1` x `gy0..=gy1`.
-    fn ensure_columns(&mut self, ground: &Ground, gx0: i32, gx1: i32, gy0: i32, gy1: i32) {
+    pub(crate) fn ensure_columns(
+        &mut self,
+        ground: &Ground,
+        gx0: i32,
+        gx1: i32,
+        gy0: i32,
+        gy1: i32,
+    ) {
         let (cx0, cy0) = chunk_of(gx0, gy0);
         let (cx1, cy1) = chunk_of(gx1, gy1);
         for cx in cx0..=cx1 {
@@ -693,7 +898,7 @@ impl NavGraph {
 
     /// Make sure every neighbour column of `node` lies in a built chunk,
     /// so its edge list is complete.
-    fn ensure_neighbours(&mut self, ground: &Ground, node: u32) {
+    pub(crate) fn ensure_neighbours(&mut self, ground: &Ground, node: u32) {
         let (gx, gy) = self.nodes[node as usize].column;
         let here = chunk_of(gx, gy);
         if chunk_of(gx - 1, gy - 1) == here && chunk_of(gx + 1, gy + 1) == here {
@@ -762,230 +967,399 @@ impl NavGraph {
         self.built.len()
     }
 
-    pub fn neighbours(&self, node: u32) -> &[u32] {
+    pub fn neighbours(&self, node: u32) -> &[NavEdge] {
         &self.edges[node as usize]
     }
 
-    /// Where a character can stand within `radius` (metres, flat) of `p`, building what it looks
-    /// at: the choice for a caller picking where to stand near something, as a caster does to see
-    /// onto a roof.
-    pub fn standable_near(&mut self, ground: &Ground, p: Vec3, radius: f32) -> Vec<Vec3> {
-        let r = (radius / self.spacing).ceil() as i32;
-        let gx = (p.x / self.spacing).round() as i32;
-        let gy = (p.y / self.spacing).round() as i32;
-        self.ensure_columns(ground, gx - r, gx + r, gy - r, gy + r);
+    /// An edge from `from` to `to`, its ends joined in one component (of walks too, unless a drop).
+    fn add_edge(&mut self, from: u32, to: u32, kind: EdgeKind) {
+        self.edges[from as usize].push(NavEdge { to, kind });
+        unite(&mut self.roots, from, to);
+        if kind != EdgeKind::Drop {
+            unite(&mut self.walk_roots, from, to);
+        }
+    }
+
+    /// The component `node` is in: a root no edge of any kind leads out of, either way.
+    pub fn component(&self, node: u32) -> u32 {
+        root_of(&self.roots, node)
+    }
+
+    /// The component `node` is in over walks and doorways alone, for a walk that takes no drop.
+    pub fn walk_component(&self, node: u32) -> u32 {
+        root_of(&self.walk_roots, node)
+    }
+
+    /// Every chunk the graph covers is built, so its components are final.
+    pub fn is_complete(&self) -> bool {
+        let (lo, hi) = (
+            chunk_of(self.gx.0, self.gy.0),
+            chunk_of(self.gx.1, self.gy.1),
+        );
+        self.built.len() as i64 >= i64::from(hi.0 - lo.0 + 1) * i64::from(hi.1 - lo.1 + 1)
+    }
+
+    /// A chunk inside the graph's range not built yet, if any is left.
+    pub fn next_unbuilt(&self) -> Option<(i32, i32)> {
+        if self.is_complete() {
+            return None;
+        }
+        self.unbuilt(self.gx.0, self.gx.1, self.gy.0, self.gy.1)
+            .into_iter()
+            .next()
+    }
+
+    /// The chunks covering columns `gx0..=gx1` x `gy0..=gy1` inside the graph's range that are
+    /// not built yet.
+    pub(crate) fn unbuilt(&self, gx0: i32, gx1: i32, gy0: i32, gy1: i32) -> Vec<(i32, i32)> {
+        let (lo, hi) = (
+            chunk_of(self.gx.0, self.gy.0),
+            chunk_of(self.gx.1, self.gy.1),
+        );
+        let (cx0, cy0) = chunk_of(gx0.max(self.gx.0), gy0.max(self.gy.0));
+        let (cx1, cy1) = chunk_of(gx1.min(self.gx.1), gy1.min(self.gy.1));
         let mut out = Vec::new();
-        for dx in -r..=r {
-            for dy in -r..=r {
-                for &id in self.columns.get(&(gx + dx, gy + dy)).into_iter().flatten() {
-                    let q = self.nodes[id as usize].pos;
-                    if flat(q - p).length() <= radius {
-                        out.push(q);
-                    }
+        for cx in cx0.max(lo.0)..=cx1.min(hi.0) {
+            for cy in cy0.max(lo.1)..=cy1.min(hi.1) {
+                if !self.built.contains(&(cx, cy)) {
+                    out.push((cx, cy));
                 }
             }
         }
         out
     }
 
-    /// The node nearest `p` within a few grid steps, preferring the same
-    /// level (height differences count triple). Builds what it looks at.
-    pub fn nearest(&mut self, ground: &Ground, p: Vec3) -> Option<u32> {
-        // Close by first, and further only if that finds nothing.
-        //
-        // Nothing nearby is the state a character gets into by walking
-        // into a wall: a node is only placed where the capsule fits
-        // clear of everything, so the moment it is leaning on the wall
-        // there is no node where it stands -- and with no node there is
-        // no path, with no path the steering heads straight for the
-        // goal, and straight for the goal is the wall it is already
-        // touching. It cannot get off the wall by any means it has.
-        //
-        // Somewhere standable is never far: a pace back down the
-        // corridor. Looking that far costs a few more chunks, and only
-        // in the rare case where the close look failed.
-        self.nearest_within(ground, p, NEAREST_REACH)
-            .or_else(|| self.nearest_within(ground, p, STRANDED_REACH))
+    /// The nodes sampled in lattice column `col`, built so far.
+    pub(crate) fn column_ids(&self, col: (i32, i32)) -> &[u32] {
+        self.columns.get(&col).map_or(&[][..], Vec::as_slice)
     }
 
-    fn nearest_within(&mut self, ground: &Ground, p: Vec3, r: i32) -> Option<u32> {
-        self.near(ground, p, r).first().map(|&(_, id)| id)
+    /// The lattice column holding a world point.
+    pub(crate) fn column_of(&self, p: Vec3) -> (i32, i32) {
+        (
+            (p.x / self.spacing).round() as i32,
+            (p.y / self.spacing).round() as i32,
+        )
     }
 
-    /// The nodes within `r` columns of `p`, nearest first by `nearest`'s score.
-    fn near(&mut self, ground: &Ground, p: Vec3, r: i32) -> Vec<(f32, u32)> {
-        let gx = (p.x / self.spacing).round() as i32;
-        let gy = (p.y / self.spacing).round() as i32;
-        self.ensure_columns(ground, gx - r, gx + r, gy - r, gy + r);
-        let mut out = Vec::new();
-        for dx in -r..=r {
-            for dy in -r..=r {
-                let Some(ids) = self.columns.get(&(gx + dx, gy + dy)) else {
+    /// The nodes within `r` columns of `p` and [`MAX_EDGE_RISE`] of its height, nearest first
+    /// (height counting triple), from the chunks built so far.
+    pub(crate) fn near(&self, p: Vec3, r: i32) -> Vec<(f32, u32)> {
+        near_in(
+            self.column_of(p),
+            p,
+            r,
+            |col| self.column_ids(col),
+            |id| self.nodes[id as usize].pos,
+        )
+    }
+}
+
+/// [`NavGraph::near`] over any columns: `ids` of a column, `pos` of a node.
+fn near_in<'c>(
+    (gx, gy): (i32, i32),
+    p: Vec3,
+    r: i32,
+    ids: impl Fn((i32, i32)) -> &'c [u32],
+    pos: impl Fn(u32) -> Vec3,
+) -> Vec<(f32, u32)> {
+    let mut out = Vec::new();
+    for dx in -r..=r {
+        for dy in -r..=r {
+            for &id in ids((gx + dx, gy + dy)) {
+                let d = pos(id) - p;
+                if d.z.abs() > MAX_EDGE_RISE {
                     continue;
-                };
-                for &id in ids {
-                    let d = self.nodes[id as usize].pos - p;
-                    if d.z.abs() > MAX_EDGE_RISE {
+                }
+                out.push((flat(d).length_squared() + (3.0 * d.z).powi(2), id));
+            }
+        }
+    }
+    out.sort_by(|a, b| a.0.total_cmp(&b.0));
+    out
+}
+
+/// What one chunk adds to a [`NavGraph`]: made by [`NavGraph::build_chunk`] while others read the
+/// graph, added by [`NavGraph::apply`].
+pub struct ChunkBuilt {
+    chunk: (i32, i32),
+    /// The graph's node count when built: the new nodes' ids start there.
+    base: usize,
+    nodes: Vec<NavNode>,
+    edges: Vec<(u32, NavEdge)>,
+    /// Every drop still waiting for its landing's chunk, this one's included.
+    waiting: Vec<(u32, Vec3, u32)>,
+    took: Duration,
+}
+
+/// A chunk being built over a graph only read: its new nodes numbered after the graph's, and the
+/// edges added so far, in the order [`NavGraph::apply`] adds them.
+struct Draft<'g> {
+    nav: &'g NavGraph,
+    chunk: (i32, i32),
+    nodes: Vec<NavNode>,
+    /// The chunk's own columns: every node in them is new.
+    columns: HashMap<(i32, i32), Vec<u32>>,
+    edges: Vec<(u32, NavEdge)>,
+    /// The new edges by the node they leave.
+    out: HashMap<u32, Vec<NavEdge>>,
+    waiting: Vec<(u32, Vec3, u32)>,
+}
+
+impl Draft<'_> {
+    fn node(&self, id: u32) -> NavNode {
+        match (id as usize).checked_sub(self.nav.nodes.len()) {
+            Some(i) => self.nodes[i],
+            None => self.nav.nodes[id as usize],
+        }
+    }
+
+    /// The nodes of column `col`: new in this chunk, else the graph's.
+    fn ids(&self, col: (i32, i32)) -> &[u32] {
+        if chunk_of(col.0, col.1) == self.chunk {
+            self.columns.get(&col).map_or(&[][..], Vec::as_slice)
+        } else {
+            self.nav.column_ids(col)
+        }
+    }
+
+    fn is_built(&self, c: (i32, i32)) -> bool {
+        c == self.chunk || self.nav.built.contains(&c)
+    }
+
+    /// The edges out of `from`, the graph's and the new ones.
+    fn edges_of(&self, from: u32) -> impl Iterator<Item = &NavEdge> {
+        let old = self
+            .nav
+            .edges
+            .get(from as usize)
+            .map_or(&[][..], Vec::as_slice);
+        old.iter().chain(self.out.get(&from).into_iter().flatten())
+    }
+
+    fn has_edge(&self, from: u32, to: u32) -> bool {
+        self.edges_of(from).any(|e| e.to == to)
+    }
+
+    fn add_edge(&mut self, from: u32, to: u32, kind: EdgeKind) {
+        let e = NavEdge { to, kind };
+        self.edges.push((from, e));
+        self.out.entry(from).or_default().push(e);
+    }
+
+    fn push_node(&mut self, node: NavNode) -> u32 {
+        let id = (self.nav.nodes.len() + self.nodes.len()) as u32;
+        self.columns.entry(node.column).or_default().push(id);
+        self.nodes.push(node);
+        id
+    }
+
+    fn near(&self, p: Vec3, r: i32) -> Vec<(f32, u32)> {
+        near_in(
+            self.nav.column_of(p),
+            p,
+            r,
+            |col| self.ids(col),
+            |id| self.node(id).pos,
+        )
+    }
+
+    /// The chunk's nodes, their edges and drops, and the drops waiting on it.
+    fn fill(&mut self, ground: &Ground) {
+        let nav = self.nav;
+        let (cx, cy) = self.chunk;
+        let cap = nav.capsule;
+        let mut fresh: Vec<u32> = Vec::new();
+        for gx in (cx * CHUNK..(cx + 1) * CHUNK).filter(|x| (nav.gx.0..=nav.gx.1).contains(x)) {
+            for gy in (cy * CHUNK..(cy + 1) * CHUNK).filter(|y| (nav.gy.0..=nav.gy.1).contains(y)) {
+                let x = gx as f32 * nav.spacing;
+                let y = gy as f32 * nav.spacing;
+                let mut levels = ground.collision.floors_at_xy(x, y);
+                if let Some(t) = ground.terrain_under(x, y) {
+                    levels.push((t, 0));
+                }
+                levels.sort_by(|a, b| b.0.total_cmp(&a.0));
+                let mut placed: Vec<f32> = Vec::new();
+                for (z, _) in levels {
+                    if placed.iter().any(|&pz| (pz - z).abs() < LEVEL_MERGE) {
                         continue;
                     }
-                    out.push((flat(d).length_squared() + (3.0 * d.z).powi(2), id));
+                    let Some(node) = nav.place(ground, Vec3::new(x, y, z), (gx, gy), &cap) else {
+                        continue;
+                    };
+                    if placed
+                        .iter()
+                        .any(|&pz| (pz - node.pos.z).abs() < LEVEL_MERGE)
+                    {
+                        continue;
+                    }
+                    placed.push(node.pos.z);
+                    fresh.push(self.push_node(node));
                 }
             }
         }
-        out.sort_by(|a, b| a.0.total_cmp(&b.0));
-        out
-    }
-
-    /// The node nearest `p` that a straight walk from `p` reaches, else `nearest`: the nearest can
-    /// be a lattice point snapped out to a bookcase's far side, and a route starting there aims
-    /// through it for good (test: a_character_against_a_bookcase_walks_round_it, in ac-client).
-    /// The close look only, and the start only: a goal no node walks to (a spot overhead, a
-    /// creature against a wall) cost every replan eight failed walks.
-    fn nearest_joined(&mut self, ground: &Ground, p: Vec3) -> Option<u32> {
-        let cap = self.capsule;
-        for (_, id) in self
-            .near(ground, p, NEAREST_REACH)
-            .into_iter()
-            .take(JOIN_TRIES)
-        {
-            let q = self.nodes[id as usize].pos;
-            if ground.walkable(p, q, &cap).0 && line_clear(ground.collision, p, q) {
-                return Some(id);
-            }
-        }
-        self.nearest(ground, p)
-    }
-
-    /// A* over the nodes from the one nearest `start` to the one nearest
-    /// `goal`, building chunks as the search reaches them. The returned
-    /// waypoints end with `goal` itself; the start is not included.
-    /// `None` when either end has no node nearby or the two are not
-    /// connected. A start inside a wall or a post (a spawn point in a
-    /// marker) is first pushed out, as the walking code would.
-    pub fn find_path(&mut self, ground: &Ground, start: Vec3, goal: Vec3) -> Option<Vec<Vec3>> {
-        let cap = self.capsule;
-        let start = ground
+        // The openings the data names, and points along every ramp, wherever the lattice fell:
+        // a ramp narrower than the lattice lies between its columns and joins nothing
+        // (a_counter_on_a_deck_up_a_ramp_is_walked_up_to, in ac-client).
+        let span = CHUNK as f32 * nav.spacing;
+        let middle = Vec3::new((cx as f32 + 0.5) * span, (cy as f32 + 0.5) * span, 0.0);
+        let ramps: Vec<Vec3> = ground
             .collision
-            .resolve_above(start, cap.radius, cap.height, cap.step_up);
-        let s = self.nearest_joined(ground, start)?;
-        let g = self.nearest(ground, goal)?;
-        let nodes = self.astar(ground, s, g)?;
-        let mut points: Vec<Vec3> = nodes.iter().map(|&n| self.nodes[n as usize].pos).collect();
-        points.push(goal);
-        Some(self.smooth(ground, start, points))
-    }
-
-    fn astar(&mut self, ground: &Ground, start: u32, goal: u32) -> Option<Vec<u32>> {
-        #[derive(PartialEq)]
-        struct Open {
-            f: f32,
-            node: u32,
-        }
-        impl Eq for Open {}
-        impl PartialOrd for Open {
-            fn partial_cmp(&self, o: &Self) -> Option<Ordering> {
-                Some(self.cmp(o))
-            }
-        }
-        impl Ord for Open {
-            fn cmp(&self, o: &Self) -> Ordering {
-                o.f.total_cmp(&self.f)
-            }
-        }
-        let goal_pos = self.nodes[goal as usize].pos;
-        // Nodes appear as chunks get built; the maps grow with them.
-        let mut best: HashMap<u32, f32> = HashMap::new();
-        let mut came: HashMap<u32, u32> = HashMap::new();
-        let mut closed: HashSet<u32> = HashSet::new();
-        let mut open = BinaryHeap::new();
-        best.insert(start, 0.0);
-        open.push(Open {
-            f: self.nodes[start as usize].pos.distance(goal_pos),
-            node: start,
-        });
-        while let Some(Open { node, .. }) = open.pop() {
-            if node == goal {
-                let mut path = vec![goal];
-                let mut cur = goal;
-                while cur != start {
-                    cur = came[&cur];
-                    path.push(cur);
-                }
-                path.reverse();
-                return Some(path);
-            }
-            if !closed.insert(node) {
+            .nearby(middle, span * 0.75)
+            .flat_map(|t| ramp_points(t, nav.spacing))
+            .collect();
+        let mut seeded: Vec<u32> = Vec::new();
+        for d in ground.doorways.iter().chain(&ramps) {
+            let gx = (d.x / nav.spacing).round() as i32;
+            let gy = (d.y / nav.spacing).round() as i32;
+            if chunk_of(gx, gy) != (cx, cy) {
                 continue;
             }
-            self.ensure_neighbours(ground, node);
-            let here = self.nodes[node as usize].pos;
-            let cost = best[&node];
-            for &next in &self.edges[node as usize] {
-                if closed.contains(&next) {
+            if !(nav.gx.0..=nav.gx.1).contains(&gx) || !(nav.gy.0..=nav.gy.1).contains(&gy) {
+                continue;
+            }
+            let Some(node) = nav.place(ground, *d, (gx, gy), &cap) else {
+                continue;
+            };
+            // One per opening per floor: a doorway sampled twice is two
+            // nodes a hand's breadth apart and nothing gained.
+            if self.ids((gx, gy)).iter().any(|&j| {
+                let p = self.node(j).pos;
+                (p.z - node.pos.z).abs() < LEVEL_MERGE
+                    && flat(p - node.pos).length() < nav.spacing * 0.25
+            }) {
+                continue;
+            }
+            let id = self.push_node(node);
+            fresh.push(id);
+            seeded.push(id);
+        }
+        const DIRS: [(i32, i32); 8] = [
+            (1, 0),
+            (0, 1),
+            (1, 1),
+            (1, -1),
+            (-1, 0),
+            (0, -1),
+            (-1, -1),
+            (-1, 1),
+        ];
+        for &i in &fresh {
+            let (gx, gy) = self.node(i).column;
+            for (k, (dx, dy)) in DIRS.iter().enumerate() {
+                let col = (gx + dx, gy + dy);
+                let other = chunk_of(col.0, col.1);
+                // Inside the chunk, the four forward directions cover
+                // every pair; toward an older chunk, all eight.
+                if other == (cx, cy) {
+                    if k >= 4 {
+                        continue;
+                    }
+                } else if !nav.built.contains(&other) {
                     continue;
                 }
-                let np = self.nodes[next as usize].pos;
-                let g = cost + here.distance(np);
-                if best.get(&next).map(|&b| g < b).unwrap_or(true) {
-                    best.insert(next, g);
-                    came.insert(next, node);
-                    open.push(Open {
-                        f: g + np.distance(goal_pos),
-                        node: next,
-                    });
+                for j in self.ids(col).to_vec() {
+                    let (fwd, back) = ground.hop(&self.node(i), &self.node(j), &cap);
+                    if let Some(kind) = fwd {
+                        self.add_edge(i, j, kind);
+                    }
+                    if let Some(kind) = back {
+                        self.add_edge(j, i, kind);
+                    }
                 }
             }
         }
-        None
+        for &i in &seeded {
+            let col = self.node(i).column;
+            for j in self.ids(col).to_vec() {
+                if j == i {
+                    continue;
+                }
+                let (fwd, back) = ground.hop(&self.node(i), &self.node(j), &cap);
+                if let Some(kind) = fwd.filter(|_| !self.has_edge(i, j)) {
+                    self.add_edge(i, j, kind);
+                }
+                if let Some(kind) = back.filter(|_| !self.has_edge(j, i)) {
+                    self.add_edge(j, i, kind);
+                }
+            }
+        }
+        for &i in &fresh {
+            self.drops_from(ground, i, &cap);
+        }
+        let waiting = std::mem::take(&mut self.waiting);
+        for (from, at, cell) in waiting {
+            self.land(ground, from, at, cell, &cap);
+        }
     }
 
-    /// String-pulling: from each kept point, skip ahead to the furthest
-    /// point (within a bounded lookahead) still reachable by a straight
-    /// walk. Every consecutive pair of the result passes `walkable` and
-    /// `line_clear`.
-    fn smooth(&self, ground: &Ground, start: Vec3, points: Vec<Vec3>) -> Vec<Vec3> {
-        const LOOKAHEAD: usize = 12;
-        // Pulled tight, a route brushes every corner it turns, and the
-        // walker (who does not follow it to the centimetre) catches on
-        // them. Shortcuts are taken with a little room to spare; where
-        // there is none, the lattice points stay, since they were placed
-        // with the true radius and still pass a doorway a body wide.
-        let cap = &Capsule {
-            radius: self.capsule.radius + SMOOTH_MARGIN,
-            ..self.capsule
-        };
-        // The lattice node nearest the goal and the goal itself can be
-        // all but the same point; keep the later of any such pair.
-        let mut points = points;
-        let mut k = 0;
-        while k + 1 < points.len() {
-            let near_next = points[k].distance(points[k + 1]) < 0.1;
-            let near_start = k == 0 && points[k].distance(start) < 0.1;
-            if near_next || near_start {
-                points.remove(k);
-            } else {
-                k += 1;
+    /// The drop edges out of `node`: toward each neighbouring column it has no edge into and whose
+    /// floor falls away, a walk that goes over the edge, followed down to where it lands.
+    fn drops_from(&mut self, ground: &Ground, node: u32, cap: &Capsule) {
+        let a = self.node(node);
+        let spacing = self.nav.spacing;
+        for k in 0..8 {
+            let angle = k as f32 * std::f32::consts::FRAC_PI_4;
+            let (dx, dy) = (angle.cos().round() as i32, angle.sin().round() as i32);
+            let col = (a.column.0 + dx, a.column.1 + dy);
+            if self.edges_of(node).any(|e| self.node(e.to).column == col) {
+                continue;
+            }
+            let toward = Vec3::new(col.0 as f32, col.1 as f32, 0.0) * spacing;
+            let toward = Vec3::new(toward.x, toward.y, a.pos.z);
+            // Only where the floor falls away: none at that column within a step of this one.
+            let within_step = |z: f32| z <= a.pos.z + cap.step_up && z >= a.pos.z - cap.step_down;
+            let level = ground
+                .collision
+                .floors_at_xy(toward.x, toward.y)
+                .into_iter()
+                .map(|f| f.0)
+                .chain(ground.terrain_under(toward.x, toward.y))
+                .any(within_step);
+            if level {
+                continue;
+            }
+            if let Some((land, cell)) = ground.drop_toward(a.pos, a.cell, toward, cap) {
+                self.land(ground, node, land, cell, cap);
             }
         }
-        let mut out = Vec::with_capacity(points.len());
-        let mut from = start;
-        let mut i = 0;
-        while i < points.len() {
-            let mut best = i;
-            let last = (i + LOOKAHEAD).min(points.len() - 1);
-            for j in (i + 1..=last).rev() {
-                let (fwd, _) = ground.walkable(from, points[j], cap);
-                if fwd && line_clear(ground.collision, from, points[j]) {
-                    best = j;
-                    break;
-                }
-            }
-            out.push(points[best]);
-            from = points[best];
-            i = best + 1;
-        }
-        out
     }
+
+    /// A drop from `from` landing at `at` (in `cell`) joined to the node on that floor within a
+    /// column the body walks to from there, or kept until the chunk it lands in is built.
+    fn land(&mut self, ground: &Ground, from: u32, at: Vec3, cell: u32, cap: &Capsule) {
+        let nav = self.nav;
+        let (gx, gy) = nav.column_of(at);
+        if !self.is_built(chunk_of(gx, gy)) {
+            if (nav.gx.0..=nav.gx.1).contains(&gx) && (nav.gy.0..=nav.gy.1).contains(&gy) {
+                self.waiting.push((from, at, cell));
+            }
+            return;
+        }
+        let onto = self
+            .near(at, 1)
+            .into_iter()
+            .map(|(_, id)| id)
+            .filter(|&id| id != from && (self.node(id).pos.z - at.z).abs() <= cap.step_up)
+            .take(JOIN_TRIES)
+            .find(|&id| {
+                let (a, b) = (self.node(from), self.node(id));
+                ground.body_reaches(at, cell, b.pos, cap) && is_dropped_to(ground, a, b, cap)
+            });
+        if let Some(to) = onto {
+            if !self.has_edge(from, to) {
+                self.add_edge(from, to, EdgeKind::Drop);
+            }
+        }
+    }
+}
+
+/// Whether the follower's walk of a drop, at node `b` from node `a` at [`DROP_SPEED`], goes over
+/// the edge and lands where the body walks on to `b`: the walk the drop edge stands for.
+fn is_dropped_to(ground: &Ground, a: NavNode, b: NavNode, cap: &Capsule) -> bool {
+    ground
+        .drop_toward(a.pos, a.cell, b.pos, cap)
+        .is_some_and(|(land, cell)| ground.body_reaches(land, cell, b.pos, cap))
 }
 
 /// Points a metre apart down a sloping floor `t` (a ramp) narrower than the lattice `spacing`: a
@@ -1021,16 +1395,24 @@ fn chunk_of(gx: i32, gy: i32) -> (i32, i32) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     /// A quad `a b c d`, counter-clockwise seen from its normal's side.
-    fn quad(w: &mut CollisionWorld, a: Vec3, b: Vec3, c: Vec3, d: Vec3, cell: u32) {
+    pub(crate) fn quad(w: &mut CollisionWorld, a: Vec3, b: Vec3, c: Vec3, d: Vec3, cell: u32) {
         w.add_tri(a, b, c, cell, false);
         w.add_tri(a, c, d, cell, false);
     }
 
-    fn floor(w: &mut CollisionWorld, x0: f32, x1: f32, y0: f32, y1: f32, z: f32, cell: u32) {
+    pub(crate) fn floor(
+        w: &mut CollisionWorld,
+        x0: f32,
+        x1: f32,
+        y0: f32,
+        y1: f32,
+        z: f32,
+        cell: u32,
+    ) {
         quad(
             w,
             Vec3::new(x0, y0, z),
@@ -1042,7 +1424,7 @@ mod tests {
     }
 
     /// A wall along the y axis at `x` from `y0` to `y1`, 3 m tall, facing -x.
-    fn wall_x(w: &mut CollisionWorld, x: f32, y0: f32, y1: f32, cell: u32) {
+    pub(crate) fn wall_x(w: &mut CollisionWorld, x: f32, y0: f32, y1: f32, cell: u32) {
         w.add_tri(
             Vec3::new(x, y0, 0.0),
             Vec3::new(x, y0, 3.0),
@@ -1061,7 +1443,7 @@ mod tests {
 
     /// Two 8 m rooms side by side along x, sharing the wall at x = 8 with
     /// a doorway `door` wide centred on y = 0 (or none).
-    fn two_rooms(door: Option<f32>) -> CollisionWorld {
+    pub(crate) fn two_rooms(door: Option<f32>) -> CollisionWorld {
         let mut w = CollisionWorld::default();
         floor(&mut w, 0.0, 8.0, -4.0, 4.0, 0.0, 1);
         floor(&mut w, 8.0, 16.0, -4.0, 4.0, 0.0, 2);
@@ -1094,21 +1476,6 @@ mod tests {
         w
     }
 
-    fn assert_walkable_chain(ground: &Ground, start: Vec3, path: &[Vec3], cap: &Capsule) {
-        let mut from = start;
-        for &p in path {
-            assert!(
-                ground.walkable(from, p, cap).0,
-                "{from} -> {p} not walkable"
-            );
-            assert!(
-                line_clear(ground.collision, from, p),
-                "{from} -> {p} not clear"
-            );
-            from = p;
-        }
-    }
-
     #[test]
     fn a_portal_berth_keeps_to_its_own_floor() {
         // The Facility Hub's Stronghold portal stands on the floor at z 0, over a corridor 12 m
@@ -1133,298 +1500,255 @@ mod tests {
     }
 
     #[test]
-    fn two_rooms_joined_by_a_door() {
-        let w = two_rooms(Some(1.6));
-        let ground = Ground {
-            collision: &w,
-            terrain: None,
-            sea: None,
-            no_go: None,
-            outdoors_only: false,
-            doorways: &[],
-        };
-        let cap = Capsule::default();
-        let mut g = NavGraph::new(Vec2::new(0.0, -4.0), Vec2::new(16.0, 4.0), 1.0, &cap);
-        g.build_all(&ground);
-        assert!(g.len() > 50, "{} nodes", g.len());
-        assert!(g.edge_count() > g.len(), "{} edges", g.edge_count());
-        // Nodes hug the walls no closer than the capsule's radius.
-        for n in &g.nodes {
-            assert!(
-                n.pos.x >= 0.4 - 1e-3 && n.pos.x <= 16.0 - 0.4 + 1e-3,
-                "{n:?}"
-            );
-            assert!(n.pos.y.abs() <= 4.0 - 0.4 + 1e-3, "{n:?}");
-        }
-        let start = Vec3::new(1.0, 3.0, 0.0);
-        let goal = Vec3::new(15.0, 3.0, 0.0);
-        // The straight line crosses the wall.
-        assert!(!line_clear(&w, start, goal));
-        let path = g
-            .find_path(&ground, start, goal)
-            .expect("a path through the door");
-        assert_eq!(*path.last().unwrap(), goal);
-        // It passes through the doorway, not the wall.
-        let chain: Vec<Vec3> = std::iter::once(start).chain(path.iter().copied()).collect();
-        let crossing = chain
-            .windows(2)
-            .find(|s| (s[0].x - 8.0) * (s[1].x - 8.0) <= 0.0)
-            .expect("crosses x = 8");
-        let t = (8.0 - crossing[0].x) / (crossing[1].x - crossing[0].x);
-        let y = crossing[0].y + (crossing[1].y - crossing[0].y) * t;
-        assert!(y.abs() < 0.8, "crossed the wall at y = {y}: {path:?}");
-        assert_walkable_chain(&ground, start, &path, &cap);
-        // Smoothing cut it down to a handful of turns.
-        assert!(path.len() <= 4, "{} waypoints: {path:?}", path.len());
-    }
-
-    #[test]
-    fn a_character_pressed_against_a_wall_can_still_be_routed() {
-        // The trap that cost a day. A node is only placed where the
-        // capsule fits clear of everything, so the moment a character
-        // is leaning on a wall there is no node where it stands. With
-        // no node there is no path; with no path the steering heads
-        // straight for the goal; and straight for the goal is the wall
-        // it is already touching. It cannot get off by any means it
-        // has.
-        //
-        // Somewhere standable is never far -- a pace back down the room
-        // -- so `nearest` must find it.
-        let w = two_rooms(Some(1.6));
-        let ground = Ground {
-            collision: &w,
-            terrain: None,
-            sea: None,
-            no_go: None,
-            outdoors_only: false,
-            doorways: &[],
-        };
-        let cap = Capsule::default();
-        let mut g = NavGraph::new(Vec2::new(0.0, -4.0), Vec2::new(16.0, 4.0), 1.0, &cap);
-        g.build_all(&ground);
-        // Hard against the outer wall at x = 0, where nothing fits.
-        let against = Vec3::new(cap.radius * 0.5, 0.0, 0.0);
-        assert!(
-            !ground.fits_here(against, &cap),
-            "the fixture is wrong: the capsule fits here"
-        );
-        assert!(
-            g.nearest(&ground, against).is_some(),
-            "a character on the wall has nowhere to start from"
-        );
-        // And it can be routed out of the room it is stuck in.
-        assert!(
-            g.find_path(&ground, against, Vec3::new(12.0, 0.0, 0.0))
-                .is_some(),
-            "no way out for a character leaning on a wall"
-        );
-    }
-
-    #[test]
-    fn no_path_through_a_solid_wall() {
-        let w = two_rooms(None);
-        let ground = Ground {
-            collision: &w,
-            terrain: None,
-            sea: None,
-            no_go: None,
-            outdoors_only: false,
-            doorways: &[],
-        };
-        let cap = Capsule::default();
-        let mut g = NavGraph::new(Vec2::new(0.0, -4.0), Vec2::new(16.0, 4.0), 1.0, &cap);
-        g.build_all(&ground);
-        let start = Vec3::new(1.0, 3.0, 0.0);
-        let goal = Vec3::new(15.0, 3.0, 0.0);
-        assert!(g.find_path(&ground, start, goal).is_none());
-        // Within one room the path is direct.
-        let near = Vec3::new(7.0, -3.0, 0.0);
-        let path = g.find_path(&ground, start, near).unwrap();
-        assert_eq!(path, vec![near]);
-    }
-
-    #[test]
-    fn a_door_too_narrow_for_the_capsule_is_closed() {
-        let w = two_rooms(Some(0.6));
-        let ground = Ground {
-            collision: &w,
-            terrain: None,
-            sea: None,
-            no_go: None,
-            outdoors_only: false,
-            doorways: &[],
-        };
-        let cap = Capsule::default();
-        let mut g = NavGraph::new(Vec2::new(0.0, -4.0), Vec2::new(16.0, 4.0), 1.0, &cap);
-        g.build_all(&ground);
-        let start = Vec3::new(1.0, 3.0, 0.0);
-        let goal = Vec3::new(15.0, 3.0, 0.0);
-        let path = g.find_path(&ground, start, goal);
-        assert!(path.is_none(), "{path:?}");
-    }
-
-    #[test]
-    fn ledges_are_one_way_and_levels_stay_apart() {
-        // A low floor and a 1 m higher shelf next to it: walk off the
-        // shelf, but not up onto it. A second floor 3 m up is a separate
-        // level with its own nodes.
+    fn a_chunk_built_against_an_older_graph_is_dropped_not_added() {
+        // Three chunks along x at the indoor lattice.
         let mut w = CollisionWorld::default();
-        floor(&mut w, 0.0, 6.0, -3.0, 3.0, 0.0, 1);
-        floor(&mut w, 6.0, 12.0, -3.0, 3.0, 1.0, 1);
-        floor(&mut w, 0.0, 12.0, -3.0, 3.0, 3.5, 2);
-        let ground = Ground {
-            collision: &w,
-            terrain: None,
-            sea: None,
-            no_go: None,
-            outdoors_only: false,
-            doorways: &[],
-        };
+        floor(&mut w, 0.0, 70.0, 0.0, 6.0, 0.0, 1);
+        let ground = inside(&w);
         let cap = Capsule::default();
-        let mut g = NavGraph::new(Vec2::new(0.0, -3.0), Vec2::new(12.0, 3.0), 1.0, &cap);
-        g.build_all(&ground);
-        let low = Vec3::new(3.0, 0.0, 0.0);
-        let high = Vec3::new(9.0, 0.0, 1.0);
-        let upstairs = Vec3::new(3.0, 0.0, 3.5);
-        assert!(
-            g.find_path(&ground, high, low).is_some(),
-            "walk off the shelf"
-        );
-        assert!(g.find_path(&ground, low, high).is_none(), "climb the shelf");
-        assert!(
-            g.find_path(&ground, low, upstairs).is_none(),
-            "levels joined"
-        );
-        assert!(g
-            .find_path(&ground, upstairs, Vec3::new(9.0, 0.0, 3.5))
-            .is_some());
-        let levels = g
-            .nodes
-            .iter()
-            .filter(|n| (n.pos.x - 3.0).abs() < 0.1 && n.pos.y.abs() < 0.1)
-            .count();
-        assert_eq!(levels, 2, "one node per level in a column");
-    }
-
-    #[test]
-    fn terrain_fills_in_outdoors_and_steep_slopes_do_not_connect() {
-        let w = CollisionWorld::default();
-        // A cliff: flat up to x = 10, then rising 2 m per metre.
-        let terrain = |x: f32, _y: f32| Some(if x < 10.0 { 0.0 } else { (x - 10.0) * 2.0 });
-        let ground = Ground {
-            collision: &w,
-            terrain: Some(&terrain),
-            sea: None,
-            no_go: None,
-            outdoors_only: false,
-            doorways: &[],
-        };
-        let cap = Capsule::default();
-        let mut g = NavGraph::new(Vec2::new(0.0, 0.0), Vec2::new(20.0, 8.0), 2.0, &cap);
-        g.build_all(&ground);
-        assert!(g.len() > 40);
-        let flat_a = Vec3::new(1.0, 1.0, 0.0);
-        let flat_b = Vec3::new(9.0, 7.0, 0.0);
-        assert!(g.find_path(&ground, flat_a, flat_b).is_some());
-        let top = Vec3::new(18.0, 4.0, 16.0);
-        assert!(
-            g.find_path(&ground, flat_a, top).is_none(),
-            "climbed the cliff"
-        );
+        let (lo, hi) = (Vec2::new(0.0, 0.0), Vec2::new(70.0, 6.0));
+        let mut whole = NavGraph::new(lo, hi, INDOOR_SPACING, &cap);
+        whole.build_all(&ground);
+        let mut shared = NavGraph::new(lo, hi, INDOOR_SPACING, &cap);
+        let first = shared.build_chunk(&ground, (0, 0));
+        let stale = shared.build_chunk(&ground, (1, 0));
+        shared.apply(first);
+        shared.apply(stale);
+        assert_eq!(shared.chunk_count(), 1, "built before the first was added");
+        for c in [(1, 0), (2, 0)] {
+            let built = shared.build_chunk(&ground, c);
+            shared.apply(built);
+        }
+        assert_eq!(shared.chunk_count(), whole.chunk_count());
+        assert_eq!(shared.len(), whole.len());
+        assert_eq!(shared.edge_count(), whole.edge_count());
+        assert!(shared.is_complete());
     }
 
     /// Inside, with nothing but `w` to stand on.
-    fn inside(w: &CollisionWorld) -> Ground<'_> {
+    pub(crate) fn inside(w: &CollisionWorld) -> Ground<'_> {
         Ground {
             collision: w,
             terrain: None,
             sea: None,
-            no_go: None,
-            outdoors_only: false,
             doorways: &[],
         }
     }
 
-    /// An upper floor three metres up from x = 0 to 4, and under it and
-    /// on past its edge, when `below`, the floor of the room.
-    fn a_ledge(below: bool) -> CollisionWorld {
+    fn node(x: f32, y: f32, z: f32, cell: u32) -> NavNode {
+        NavNode {
+            pos: Vec3::new(x, y, z),
+            cell,
+            column: (0, 0),
+        }
+    }
+
+    #[test]
+    fn a_door_frame_the_body_slides_past_is_an_edge() {
+        // A doorway a body's width and a hand wide, met at a slant: the sampled walk touches the
+        // jamb and refuses, the body is slid off it and walks through.
+        let w = two_rooms(Some(1.0));
+        let ground = inside(&w);
+        let cap = Capsule::default();
+        let (a, b) = (node(7.0, 0.6, 0.0, 1), node(9.0, 0.0, 0.0, 2));
+        assert!(
+            !ground.walkable(a.pos, b.pos, &cap).0,
+            "the sampler walks it"
+        );
+        assert_eq!(ground.hop(&a, &b, &cap).0, Some(EdgeKind::Doorway));
+    }
+
+    #[test]
+    fn a_low_overhang_beside_the_way_is_walked_as_the_body_walks_it() {
+        // A bracket at 1.2 m over the side of a corridor: the body is pushed out from under it.
         let mut w = CollisionWorld::default();
-        floor(&mut w, 0.0, 4.0, -2.0, 2.0, 3.0, 1);
-        if below {
-            floor(&mut w, 0.0, 12.0, -2.0, 2.0, 0.0, 2);
+        floor(&mut w, 0.0, 8.0, -3.0, 3.0, 0.0, 1);
+        quad(
+            &mut w,
+            Vec3::new(2.0, 0.3, 1.2),
+            Vec3::new(2.0, 1.5, 1.2),
+            Vec3::new(6.0, 1.5, 1.2),
+            Vec3::new(6.0, 0.3, 1.2),
+            1,
+        );
+        let ground = inside(&w);
+        let cap = Capsule::default();
+        let (a, b) = (node(1.0, 0.0, 0.0, 1), node(7.0, 0.0, 0.0, 1));
+        assert!(
+            !ground.walkable(a.pos, b.pos, &cap).0,
+            "the sampler walks it"
+        );
+        assert_eq!(
+            ground.hop(&a, &b, &cap),
+            (Some(EdgeKind::Walk), Some(EdgeKind::Walk))
+        );
+    }
+
+    #[test]
+    fn the_fast_path_and_the_full_step_agree_on_open_ground() {
+        // Open terrain with a wall and a ledge in it: every step on the hop's swept ground is the
+        // step the full walk takes, near the wall and away from it.
+        let mut w = CollisionWorld::default();
+        wall_x(&mut w, 5.0, -1.0, 1.0, 0);
+        floor(&mut w, 7.0, 9.0, -2.0, 2.0, 0.4, 0);
+        let terrain = |x: f32, _y: f32| Some(x * 0.05);
+        let ground = Ground {
+            terrain: Some(&terrain),
+            ..inside(&w)
+        };
+        let cap = Capsule::default();
+        for (from, to) in [((0.0, -3.0), (10.0, -3.0)), ((0.0, 0.4), (10.0, 0.2))] {
+            let (a, b) = (Vec3::new(from.0, from.1, 0.0), Vec3::new(to.0, to.1, 0.5));
+            let swept = Swept::over(&ground, a, b, &cap);
+            let (mut p, mut cell) = (a, 0);
+            for _ in 0..50 {
+                let d = flat(b - p);
+                if d.length() < 0.05 {
+                    break;
+                }
+                let step = d.normalize() * d.length().min(BODY_STEP);
+                let to = Vec3::new(p.x + step.x, p.y + step.y, p.z);
+                let fast = stride(&swept, p, cell, to, &cap);
+                assert_eq!(fast, stride(&ground, p, cell, to, &cap), "at {p}");
+                match fast {
+                    Stride::Stand { at, cell: c } => (p, cell) = (at, c),
+                    _ => break,
+                }
+            }
+        }
+    }
+
+    /// An upper floor 3 m up from x = 0 to 4 (cell 0x0101) over, when `below` is some, a floor that
+    /// far under it from x = 0 to 12 (cell 0x0102), in a world with no terrain.
+    pub(crate) fn a_ledge_in_cells(below: Option<f32>) -> CollisionWorld {
+        let mut w = CollisionWorld::default();
+        floor(&mut w, 0.0, 4.0, -2.0, 2.0, 3.0, 0x0101);
+        if let Some(depth) = below {
+            floor(&mut w, 0.0, 12.0, -2.0, 2.0, 3.0 - depth, 0x0102);
         }
         w
     }
 
-    /// The deepest a fall is looked for, as the walking code looks.
-    const FALL: f32 = 200.0;
-
-    #[test]
-    fn a_walk_off_a_ledge_onto_the_floor_below_is_no_drop() {
-        let w = a_ledge(true);
-        let ground = inside(&w);
-        let cap = Capsule::default();
-        let (from, to) = (Vec3::new(1.0, 0.0, 3.0), Vec3::new(9.0, 0.0, 0.0));
-        assert!(
-            !ground.walkable(from, to, &cap).0,
-            "a three-metre drop walked"
+    /// The drop edges of the ledge's graph, as (from, to) heights.
+    fn drops(w: &CollisionWorld) -> Vec<(NavNode, NavNode)> {
+        let ground = inside(w);
+        let mut g = NavGraph::new(
+            Vec2::new(0.0, -2.0),
+            Vec2::new(12.0, 2.0),
+            1.0,
+            &Capsule::default(),
         );
-        assert!(!ground.drops_along(from, to, &cap, FALL));
+        g.build_all(&ground);
+        let mut out = Vec::new();
+        for i in 0..g.len() as u32 {
+            for e in g.neighbours(i) {
+                if e.kind == EdgeKind::Drop {
+                    out.push((g.nodes[i as usize], g.nodes[e.to as usize]));
+                }
+            }
+        }
+        out
     }
 
     #[test]
-    fn a_walk_off_an_edge_with_nothing_under_it_is_a_drop() {
-        let cap = Capsule::default();
-        let (from, to) = (Vec3::new(1.0, 0.0, 3.0), Vec3::new(9.0, 0.0, 3.0));
-        let w = a_ledge(false);
-        assert!(inside(&w).drops_along(from, to, &cap, FALL));
-        // A floor further down than a fall is looked for is no floor to
-        // come down on.
-        let mut deep = a_ledge(false);
-        floor(&mut deep, 0.0, 12.0, -2.0, 2.0, -250.0, 2);
-        assert!(inside(&deep).drops_along(from, to, &cap, FALL));
-    }
-
-    #[test]
-    fn a_ledge_too_tall_for_a_step_is_solid_not_an_edge_over_the_storey_below() {
-        // A floor to x = 2, then a platform a metre up with no face to
-        // its edge -- only its top, which the walls never count -- and
-        // under it all, the storey twelve metres down.
-        let mut w = CollisionWorld::default();
-        floor(&mut w, 0.0, 2.0, -2.0, 2.0, 0.0, 1);
-        floor(&mut w, 2.0, 6.0, -2.0, 2.0, 1.0, 1);
-        floor(&mut w, 0.0, 12.0, -2.0, 2.0, -12.0, 2);
+    fn a_drop_is_joined_only_where_the_walk_at_its_far_node_lands() {
+        // The follower walks a drop at its far node: a node straight under the rim is landed near
+        // by a fall off it, but walking at it from the rim steps nowhere.
+        let w = a_ledge_in_cells(Some(3.0));
         let ground = inside(&w);
         let cap = Capsule::default();
-        // Nothing holds the capsule back where the platform is over its
-        // feet: only the height does.
-        assert!(ground.fits_here(Vec3::new(2.5, 0.0, 0.0), &cap));
-        assert!(!ground.drops_along(
-            Vec3::new(0.5, 0.0, 0.0),
-            Vec3::new(5.0, 0.0, 1.0),
-            &cap,
-            FALL
-        ));
+        let mut g = NavGraph::new(Vec2::new(0.0, -2.0), Vec2::new(12.0, 2.0), 1.0, &cap);
+        g.build_all(&ground);
+        let at = |x: f32, z: f32| {
+            *g.nodes
+                .iter()
+                .find(|n| {
+                    (n.pos.x - x).abs() < 0.3 && n.pos.y.abs() < 0.3 && (n.pos.z - z).abs() < 0.3
+                })
+                .unwrap_or_else(|| panic!("no node at x {x}, z {z}"))
+        };
+        let rim = at(4.0, 3.0);
+        assert!(
+            !is_dropped_to(&ground, rim, at(4.0, 0.0), &cap),
+            "under the rim"
+        );
+        assert!(
+            is_dropped_to(&ground, rim, at(6.0, 0.0), &cap),
+            "past the edge"
+        );
+        for (a, b) in drops(&w) {
+            assert!(is_dropped_to(&ground, a, b, &cap), "{a:?} -> {b:?}");
+        }
     }
 
     #[test]
-    fn a_hillside_too_steep_to_climb_is_not_an_edge() {
-        let w = CollisionWorld::default();
-        let terrain = |x: f32, _y: f32| Some(if x < 10.0 { 0.0 } else { (x - 10.0) * 2.0 });
-        let ground = Ground {
-            collision: &w,
-            terrain: Some(&terrain),
-            sea: None,
-            no_go: None,
-            outdoors_only: false,
-            doorways: &[],
-        };
-        let cap = Capsule::default();
-        assert!(!ground.drops_along(
-            Vec3::new(8.0, 0.0, 0.0),
-            Vec3::new(14.0, 0.0, 8.0),
-            &cap,
-            FALL
-        ));
+    fn a_ledge_over_a_floor_is_a_drop_one_way() {
+        let w = a_ledge_in_cells(Some(3.0));
+        let found = drops(&w);
+        assert!(!found.is_empty(), "no drop off the ledge");
+        for (a, b) in &found {
+            assert!(
+                (a.pos.z - 3.0).abs() < 0.1 && b.pos.z.abs() < 0.1,
+                "{a:?} -> {b:?}"
+            );
+            assert_eq!(b.cell, 0x0102);
+        }
+        // Nothing climbs back: no edge of any kind from the floor up to the ledge.
+        let ground = inside(&w);
+        let mut g = NavGraph::new(
+            Vec2::new(0.0, -2.0),
+            Vec2::new(12.0, 2.0),
+            1.0,
+            &Capsule::default(),
+        );
+        g.build_all(&ground);
+        for i in 0..g.len() as u32 {
+            for e in g.neighbours(i) {
+                let (a, b) = (g.nodes[i as usize], g.nodes[e.to as usize]);
+                assert!(
+                    !(a.cell == 0x0102 && b.cell == 0x0101),
+                    "{a:?} -> {b:?} climbs"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_ledge_over_nothing_is_no_edge() {
+        assert!(drops(&a_ledge_in_cells(None)).is_empty());
+    }
+
+    #[test]
+    fn a_drop_deeper_than_falling_hurts_is_no_edge() {
+        assert!(drops(&a_ledge_in_cells(Some(15.0))).is_empty());
+        assert!(
+            !drops(&a_ledge_in_cells(Some(10.0))).is_empty(),
+            "10 m is a drop"
+        );
+    }
+
+    #[test]
+    fn a_legs_floor_is_the_one_the_body_walks_not_the_line() {
+        // Level for 2 m, down 2 m over the next 6, then level: the line runs a metre over it.
+        let mut w = CollisionWorld::default();
+        floor(&mut w, -1.0, 2.0, -3.0, 3.0, 0.0, 1);
+        quad(
+            &mut w,
+            Vec3::new(2.0, -3.0, 0.0),
+            Vec3::new(8.0, -3.0, -2.0),
+            Vec3::new(8.0, 3.0, -2.0),
+            Vec3::new(2.0, 3.0, 0.0),
+            1,
+        );
+        floor(&mut w, 8.0, 21.0, -3.0, 3.0, -2.0, 1);
+        let g = inside(&w);
+        let (a, b) = (Vec3::new(0.0, 0.0, 0.0), Vec3::new(20.0, 0.0, -2.0));
+        let h = g.floor_along(a, 1, b, &Capsule::default()).expect("walked");
+        assert!(
+            h[0].abs() < 0.05 && (h[LEG_SAMPLES - 1] + 2.0).abs() < 0.05,
+            "{h:?}"
+        );
+        // Half way, at x = 10: the floor is down at -2, the line at -1.
+        assert!((h[LEG_SAMPLES / 2] + 2.0).abs() < 0.1, "{h:?}");
     }
 }

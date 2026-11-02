@@ -6,9 +6,8 @@
 //! (`Client::connect` to a port nobody listens on, so no packet is
 //! answered), stands each character in `BLOCK` (Holtburg by default),
 //! and makes each one do the things that allocate: walk into a wall
-//! (the block's collision), plan a path around it (the block's nav
-//! graph), plan a journey (the world grid), and ask the wide planner
-//! for a route (the pathfinder thread and its neighbourhood). After
+//! (the block's collision), plan a journey (the world grid), and ask
+//! the region planner for a route (the builder thread and its area). After
 //! every phase it prints the process RSS and the share of the growth
 //! that each session accounts for.
 //!
@@ -156,15 +155,6 @@ fn main() {
             m.phase(&format!("{label}: block collision (line_blocked)"));
         }
 
-        for c in clients.iter_mut() {
-            let pl = c.player.as_mut().unwrap();
-            let me = pl.world_position();
-            let _ = pl.find_path(&assets, block, me, far, block);
-        }
-        if loud {
-            m.phase(&format!("{label}: block nav graph (find_path)"));
-        }
-
         let goal = Vec2::new(far.x, far.y) + Vec2::new(0.0, 900.0);
         for c in clients.iter_mut() {
             c.travel_to(goal);
@@ -176,18 +166,16 @@ fn main() {
         let cap = clients[0].player.as_ref().unwrap().capsule();
         let now = Instant::now();
         for c in clients.iter_mut() {
-            let me = c.player.as_ref().unwrap().world_position();
-            c.pathfinder.ask(
-                me,
-                far,
-                cap,
-                block,
-                ac_client::pathfinder::Ends {
-                    outdoors: true,
-                    exact_to: false,
-                },
-                now,
-            );
+            let pl = c.player.as_ref().unwrap();
+            let me = ac_world::Place {
+                at: pl.world_position(),
+                cell: pl.cell,
+            };
+            let to = ac_world::Place {
+                at: far,
+                cell: block,
+            };
+            c.pathfinder.ask(me, to, 1.5, cap, now);
         }
         let deadline = Instant::now() + Duration::from_secs(60);
         let mut answered = vec![false; clients.len()];

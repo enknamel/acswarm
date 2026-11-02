@@ -102,6 +102,7 @@ dependencies = [
 name = "ac-nav"
 version = "0.0.5"
 dependencies = [
+ "ac-dat",
  "ac-formats",
  "ac-scene",
  "ac-world",

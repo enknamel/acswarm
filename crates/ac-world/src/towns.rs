@@ -12,7 +12,7 @@ use glam::Vec2;
 
 /// A named place on the surface of Dereth.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Place {
+pub struct Town {
     pub name: &'static str,
     /// North positive, south negative.
     pub ns: f32,
@@ -20,7 +20,7 @@ pub struct Place {
     pub ew: f32,
 }
 
-impl Place {
+impl Town {
     /// World xy of the place (see [`world_xy`]).
     pub fn world_xy(&self) -> Vec2 {
         world_xy(self.ns, self.ew)
@@ -29,77 +29,77 @@ impl Place {
 
 /// Every known town and outpost, alphabetical.
 #[rustfmt::skip]
-pub const PLACES: &[Place] = &[
-    Place { name: "Ahurenga", ns: 47.0, ew: -90.3 },
-    Place { name: "Al-Arqas", ns: -31.2, ew: 13.7 },
-    Place { name: "Al-Jalima", ns: 7.4, ew: 4.8 },
-    Place { name: "Arwic", ns: 33.6, ew: 56.8 },
-    Place { name: "Ayan Baqur", ns: -60.0, ew: -88.0 },
-    Place { name: "Baishi", ns: -49.3, ew: 62.9 },
-    Place { name: "Bandit Castle", ns: 66.5, ew: 49.9 },
-    Place { name: "Beach Fort", ns: 76.0, ew: -49.1 },
-    Place { name: "Bluespire", ns: 39.4, ew: -75.4 },
-    Place { name: "Candeth Keep", ns: -87.5, ew: -67.1 },
-    Place { name: "Cragstone", ns: 25.5, ew: 49.7 },
-    Place { name: "Crater Lake Village", ns: 65.0, ew: 13.6 },
-    Place { name: "Danby's Outpost", ns: 23.4, ew: -28.7 },
-    Place { name: "Dryreach", ns: -8.1, ew: 73.0 },
-    Place { name: "Eastham", ns: 17.5, ew: 63.4 },
-    Place { name: "Eastwatch", ns: 90.3, ew: -43.1 },
-    Place { name: "Fiun Outpost", ns: 95.9, ew: -56.8 },
-    Place { name: "Fort Tethana", ns: 1.5, ew: -71.8 },
-    Place { name: "Glenden Wood", ns: 29.6, ew: 27.2 },
-    Place { name: "Greenspire", ns: 42.9, ew: -66.9 },
-    Place { name: "Hebian-To", ns: -39.1, ew: 83.2 },
-    Place { name: "Holtburg", ns: 42.3, ew: 33.7 },
-    Place { name: "Kara", ns: -83.3, ew: 47.1 },
-    Place { name: "Khayyaban", ns: -47.6, ew: 24.7 },
-    Place { name: "Kor-Gursha", ns: 67.4, ew: 30.5 },
-    Place { name: "Kryst", ns: -74.6, ew: 84.5 },
-    Place { name: "Lin", ns: -54.5, ew: 73.1 },
-    Place { name: "Linvak Tukal", ns: -77.8, ew: 28.0 },
-    Place { name: "Lytelthorpe", ns: 0.9, ew: 51.1 },
-    Place { name: "MacNiall's Freehold", ns: -74.2, ew: 92.3 },
-    Place { name: "Mar'uun", ns: -10.6, ew: 17.1 },
-    Place { name: "Martine's Retreat", ns: 10.6, ew: 58.3 },
-    Place { name: "Mayoi", ns: -61.6, ew: 81.9 },
-    Place { name: "Merwart Village", ns: 79.9, ew: 59.0 },
-    Place { name: "Nanto", ns: -52.5, ew: 82.1 },
-    Place { name: "Neydisa Castle", ns: 69.9, ew: 17.6 },
-    Place { name: "Oolutanga's Refuge", ns: 2.3, ew: 95.4 },
-    Place { name: "Plateau Village", ns: 44.2, ew: -43.4 },
-    Place { name: "Qalaba'r", ns: -74.4, ew: 19.3 },
-    Place { name: "Redspire", ns: 40.8, ew: -83.1 },
-    Place { name: "Rithwic", ns: 10.8, ew: 58.7 },
-    Place { name: "Samsur", ns: -2.8, ew: 19.4 },
-    Place { name: "Sanamar", ns: 71.8, ew: -60.8 },
-    Place { name: "Sawato", ns: -28.7, ew: 59.3 },
-    Place { name: "Shoushi", ns: -33.5, ew: 72.8 },
-    Place { name: "Silyun", ns: 87.4, ew: -70.5 },
-    Place { name: "Stonehold", ns: 68.8, ew: -21.6 },
-    Place { name: "Timaru", ns: 44.2, ew: -78.0 },
-    Place { name: "Tou-Tou", ns: -28.0, ew: 95.7 },
-    Place { name: "Tufa", ns: -13.9, ew: 5.0 },
-    Place { name: "Underground City", ns: 21.3, ew: 53.9 },
-    Place { name: "Uziz", ns: -25.2, ew: 28.3 },
-    Place { name: "Wai Jhou", ns: -62.0, ew: -51.4 },
-    Place { name: "Westwatch", ns: 72.8, ew: -61.3 },
+pub const PLACES: &[Town] = &[
+    Town { name: "Ahurenga", ns: 47.0, ew: -90.3 },
+    Town { name: "Al-Arqas", ns: -31.2, ew: 13.7 },
+    Town { name: "Al-Jalima", ns: 7.4, ew: 4.8 },
+    Town { name: "Arwic", ns: 33.6, ew: 56.8 },
+    Town { name: "Ayan Baqur", ns: -60.0, ew: -88.0 },
+    Town { name: "Baishi", ns: -49.3, ew: 62.9 },
+    Town { name: "Bandit Castle", ns: 66.5, ew: 49.9 },
+    Town { name: "Beach Fort", ns: 76.0, ew: -49.1 },
+    Town { name: "Bluespire", ns: 39.4, ew: -75.4 },
+    Town { name: "Candeth Keep", ns: -87.5, ew: -67.1 },
+    Town { name: "Cragstone", ns: 25.5, ew: 49.7 },
+    Town { name: "Crater Lake Village", ns: 65.0, ew: 13.6 },
+    Town { name: "Danby's Outpost", ns: 23.4, ew: -28.7 },
+    Town { name: "Dryreach", ns: -8.1, ew: 73.0 },
+    Town { name: "Eastham", ns: 17.5, ew: 63.4 },
+    Town { name: "Eastwatch", ns: 90.3, ew: -43.1 },
+    Town { name: "Fiun Outpost", ns: 95.9, ew: -56.8 },
+    Town { name: "Fort Tethana", ns: 1.5, ew: -71.8 },
+    Town { name: "Glenden Wood", ns: 29.6, ew: 27.2 },
+    Town { name: "Greenspire", ns: 42.9, ew: -66.9 },
+    Town { name: "Hebian-To", ns: -39.1, ew: 83.2 },
+    Town { name: "Holtburg", ns: 42.3, ew: 33.7 },
+    Town { name: "Kara", ns: -83.3, ew: 47.1 },
+    Town { name: "Khayyaban", ns: -47.6, ew: 24.7 },
+    Town { name: "Kor-Gursha", ns: 67.4, ew: 30.5 },
+    Town { name: "Kryst", ns: -74.6, ew: 84.5 },
+    Town { name: "Lin", ns: -54.5, ew: 73.1 },
+    Town { name: "Linvak Tukal", ns: -77.8, ew: 28.0 },
+    Town { name: "Lytelthorpe", ns: 0.9, ew: 51.1 },
+    Town { name: "MacNiall's Freehold", ns: -74.2, ew: 92.3 },
+    Town { name: "Mar'uun", ns: -10.6, ew: 17.1 },
+    Town { name: "Martine's Retreat", ns: 10.6, ew: 58.3 },
+    Town { name: "Mayoi", ns: -61.6, ew: 81.9 },
+    Town { name: "Merwart Village", ns: 79.9, ew: 59.0 },
+    Town { name: "Nanto", ns: -52.5, ew: 82.1 },
+    Town { name: "Neydisa Castle", ns: 69.9, ew: 17.6 },
+    Town { name: "Oolutanga's Refuge", ns: 2.3, ew: 95.4 },
+    Town { name: "Plateau Village", ns: 44.2, ew: -43.4 },
+    Town { name: "Qalaba'r", ns: -74.4, ew: 19.3 },
+    Town { name: "Redspire", ns: 40.8, ew: -83.1 },
+    Town { name: "Rithwic", ns: 10.8, ew: 58.7 },
+    Town { name: "Samsur", ns: -2.8, ew: 19.4 },
+    Town { name: "Sanamar", ns: 71.8, ew: -60.8 },
+    Town { name: "Sawato", ns: -28.7, ew: 59.3 },
+    Town { name: "Shoushi", ns: -33.5, ew: 72.8 },
+    Town { name: "Silyun", ns: 87.4, ew: -70.5 },
+    Town { name: "Stonehold", ns: 68.8, ew: -21.6 },
+    Town { name: "Timaru", ns: 44.2, ew: -78.0 },
+    Town { name: "Tou-Tou", ns: -28.0, ew: 95.7 },
+    Town { name: "Tufa", ns: -13.9, ew: 5.0 },
+    Town { name: "Underground City", ns: 21.3, ew: 53.9 },
+    Town { name: "Uziz", ns: -25.2, ew: 28.3 },
+    Town { name: "Wai Jhou", ns: -62.0, ew: -51.4 },
+    Town { name: "Westwatch", ns: 72.8, ew: -61.3 },
     // Town Network arrival point (the page has no map pin).
-    Place { name: "Xarabydun", ns: -41.9, ew: 16.1 },
-    Place { name: "Yanshi", ns: -12.1, ew: 42.4 },
-    Place { name: "Yaraq", ns: -21.6, ew: -1.7 },
-    Place { name: "Zaikhal", ns: 13.7, ew: 0.6 },
+    Town { name: "Xarabydun", ns: -41.9, ew: 16.1 },
+    Town { name: "Yanshi", ns: -12.1, ew: 42.4 },
+    Town { name: "Yaraq", ns: -21.6, ew: -1.7 },
+    Town { name: "Zaikhal", ns: 13.7, ew: 0.6 },
 ];
 
 /// The place named `name`, case-insensitive: an exact match first, then
 /// the first place whose name starts with it, then the first containing
 /// it. Empty names match nothing.
-pub fn find(name: &str) -> Option<&'static Place> {
+pub fn find(name: &str) -> Option<&'static Town> {
     let want = name.trim().to_lowercase();
     if want.is_empty() {
         return None;
     }
-    let lower = |p: &&Place| p.name.to_lowercase();
+    let lower = |p: &&Town| p.name.to_lowercase();
     PLACES
         .iter()
         .find(|p| lower(p) == want)
