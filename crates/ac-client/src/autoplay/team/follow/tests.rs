@@ -31,7 +31,12 @@ fn leader_off(c: &Client, away: f32) -> Mate {
 /// A level-20 character playing on its own in the Holtburg field, following a leader `away`
 /// metres east.
 fn following(away: f32) -> Client {
-    let mut c = testkit::character_of_level(testkit::no_data(), 20);
+    following_over(testkit::no_data(), away)
+}
+
+/// [`following`] over `assets`: the game's, for a walk the region planner must hold.
+fn following_over(assets: std::rc::Rc<ac_scene::Assets>, away: f32) -> Client {
+    let mut c = testkit::character_of_level(assets, 20);
     testkit::stand(&mut c, HOLTBURG, Vec3::new(84.0, 84.0, 94.0));
     c.autoplay.config.enabled = true;
     let team = &mut c.autoplay.config.team;
@@ -180,10 +185,11 @@ fn every_way_following_ends_lets_the_leader_go() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_walk_another_goal_planted_after_following_outlives_the_stop() {
     // The walk is shared: looting, visits and town runs plant it too. Following planted first,
     // so the stop has a record to act on, and a corpse walk replaced it.
-    let mut c = following(30.0);
+    let mut c = following_over(testkit::game_data(), 30.0);
     c.autoplay.config.enabled = false;
     let now = Instant::now();
     c.tick_autoplay(now);
