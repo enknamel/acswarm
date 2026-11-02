@@ -171,7 +171,6 @@ pub struct Autoplay {
     /// The room we set out from, the one we are walking into, and
     /// the point past its threshold we are aiming at.
     pub room_bound: Option<crate::explore::RoomWalk>,
-    pub room_since: Option<Instant>,
     /// A line for the panel: "fighting Drudge Skulker".
     pub status: String,
     /// `Event::Autoplay`s not yet handed out, one per change of `doing` or `status`, and

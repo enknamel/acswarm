@@ -15,16 +15,12 @@
 //! travel system like every other destination.
 
 use crate::autoplay::Doing;
-use crate::Client;
+use crate::did::Did;
+use crate::{Client, Goal};
 use ac_nav::explore::{next_step, Doors};
 use ac_scene::interior::CellScene;
 use glam::Vec3;
 use std::time::{Duration, Instant};
-
-/// How long to spend getting through one doorway before writing the
-/// room beyond it off. The next room is a few metres away; longer than
-/// this and something is in the way that more walking will not move.
-const GIVE_UP_ON_A_ROOM: Duration = Duration::from_secs(10);
 
 /// The least time between starting a dungeon over: walked round faster, it is a corner with no
 /// way on (Mountain Keep's landing, three rooms out of reach, went round every 7 s).
@@ -286,6 +282,7 @@ impl Client {
         let new_here = self.autoplay.rooms_seen.insert(cell);
         self.autoplay.rooms_shut.remove(&cell);
 
+        let block = cell & 0xFFFF_0000;
         if let Some(RoomWalk {
             from,
             room,
@@ -296,28 +293,20 @@ impl Client {
             // Arriving is the server putting us in the room, or in one not walked yet (progress, the
             // next doorway chosen from there); a walked room on the route is not, or 0x21A and 0x216
             // took turns (exploring_does_not_pace_between_two_rooms).
-            let arrived = cell == room || (cell != from && new_here);
-            let too_long = self
-                .autoplay
-                .room_since
-                .is_some_and(|t| now.duration_since(t) > GIVE_UP_ON_A_ROOM);
-            if arrived {
+            if cell == room || (cell != from && new_here) {
                 self.autoplay.rooms_seen.insert(room);
-                self.forget_the_room();
+                self.autoplay.room_bound = None;
                 return true;
             }
-            // Standing at the point aimed at, and still in the room we
-            // set out from: the point was not far enough in. Once, it
-            // is pushed the same way again; waiting out the clock here
-            // was a ten-second stand at every doorway this happened at.
-            let there = glam::Vec2::new(at.x - me.x, at.y - me.y).length() <= STOP;
-            if there && !pushed {
+            let mut did = self.walk_into(block, at, now);
+            // At the aim and still in the room set out from: the aim was not far enough in, and is
+            // pushed the same way once.
+            if did == Did::Done && !pushed {
                 let sill = nearest_door(&scene.cells, room, me)
                     .map(|d| d.0)
                     .unwrap_or(at);
                 if let Some(further) = way_into(&scene.cells, room, me, facing, PAST_THE_DOOR * 2.0)
-                    .map(|p| self.on_a_floor(cell & 0xFFFF_0000, room, sill, p))
-                    .filter(|p| self.has_way_to(*p, room & 0xFFFF_0000, STOP))
+                    .map(|p| self.on_a_floor(block, room, sill, p))
                 {
                     tracing::info!("explore: at the sill of {room:#010x} and not in it; aiming further, at {further:?}");
                     self.autoplay.room_bound = Some(RoomWalk {
@@ -326,28 +315,19 @@ impl Client {
                         at: further,
                         pushed: true,
                     });
-                    self.head_for(further, STOP, "the next room");
-                    return true;
+                    did = self.walk_into(block, further, now);
                 }
             }
-            if too_long || (there && pushed) {
-                // Not a room to keep trying: shut for now, and the way
-                // on is planned round it.
-                self.autoplay.rooms_shut.insert(room);
-                self.forget_the_room();
-                self.autoplay
-                    .note(format!("cannot get into {room:#06x}; going round"), now);
-                return true;
-            }
-            let did = self.head_for(at, STOP, "the next room");
-            if did.acting() {
+            if !matches!(did, Did::Done | Did::Blocked(_)) {
                 self.autoplay
                     .say(Doing::Traveling, "looking for something to fight");
                 return true;
             }
+            // Not a room to keep trying: shut for now, and the way on is planned round it.
             self.autoplay.rooms_shut.insert(room);
-            self.forget_the_room();
-            return true;
+            self.autoplay.room_bound = None;
+            self.autoplay
+                .note(format!("cannot get into {room:#06x}; going round"), now);
         }
 
         let rooms = Rooms(&scene.cells);
@@ -368,74 +348,82 @@ impl Client {
         let seen = |s: &std::collections::HashSet<u32>| -> std::collections::HashSet<u32> {
             s.union(&outside_area).copied().collect()
         };
-        let mut next = next_step(
-            cell,
-            &rooms,
-            &seen(&self.autoplay.rooms_seen),
-            &self.autoplay.rooms_shut,
-        );
-        if next.is_none() {
-            // Walked round again within the minute: a corner with no way on, where starting over
-            // only goes round the shut rooms on the spot. The rules below have the tick.
-            if self
-                .autoplay
-                .rooms_restarted
-                .is_some_and(|t| now.saturating_duration_since(t) < RESTART_EVERY)
-            {
-                return false;
-            }
-            self.autoplay.rooms_restarted = Some(now);
-            // The whole dungeon walked. What we came for has respawned
-            // behind us, so it is walked again rather than left, and the
-            // rooms that would not open are given another chance.
-            self.autoplay.rooms_seen.clear();
-            self.autoplay.rooms_shut.clear();
-            self.autoplay.rooms_seen.insert(cell);
-            next = next_step(
+        // A room no walk gets into is shut and the next chosen in the same tick; each pass shuts
+        // one, so the rooms run out.
+        loop {
+            let mut next = next_step(
                 cell,
                 &rooms,
                 &seen(&self.autoplay.rooms_seen),
                 &self.autoplay.rooms_shut,
             );
-        }
-        let Some(room) = next else {
-            return false;
-        };
-        let Some(at) = way_into(&scene.cells, room, me, facing, PAST_THE_DOOR) else {
-            self.autoplay.rooms_shut.insert(room);
-            return true;
-        };
-        let sill = nearest_door(&scene.cells, room, me)
-            .map(|d| d.0)
-            .unwrap_or(at);
-        let at = self.on_a_floor(cell & 0xFFFF_0000, room, sill, at);
-        // A room is gone into only when a walk gets there. The doorway of 0x01F60296 opens 6 m up
-        // a wall of the room with the bookcases: no path, the steering leant on the line to it,
-        // and the bookcases were on the line
-        // (exploring_the_holtburg_dungeon_does_not_stand_at_the_bookcases). The aim may fall past
-        // a narrow room into the next, so its cell is located from the point, not taken as `room`.
-        if !self.has_way_to(at, room & 0xFFFF_0000, STOP) {
-            self.autoplay.rooms_shut.insert(room);
+            if next.is_none() {
+                // Walked round again within the minute: a corner with no way on, where starting
+                // over only goes round the shut rooms on the spot. The rules below have the tick.
+                if self
+                    .autoplay
+                    .rooms_restarted
+                    .is_some_and(|t| now.saturating_duration_since(t) < RESTART_EVERY)
+                {
+                    return false;
+                }
+                self.autoplay.rooms_restarted = Some(now);
+                // The whole dungeon walked. What we came for has respawned
+                // behind us, so it is walked again rather than left, and the
+                // rooms that would not open are given another chance.
+                self.autoplay.rooms_seen.clear();
+                self.autoplay.rooms_shut.clear();
+                self.autoplay.rooms_seen.insert(cell);
+                next = next_step(
+                    cell,
+                    &rooms,
+                    &seen(&self.autoplay.rooms_seen),
+                    &self.autoplay.rooms_shut,
+                );
+            }
+            let Some(room) = next else {
+                return false;
+            };
+            let Some(at) = way_into(&scene.cells, room, me, facing, PAST_THE_DOOR) else {
+                self.autoplay.rooms_shut.insert(room);
+                continue;
+            };
+            let sill = nearest_door(&scene.cells, room, me)
+                .map(|d| d.0)
+                .unwrap_or(at);
+            let at = self.on_a_floor(block, room, sill, at);
+            // A room is gone into only when a walk gets there: the doorway of 0x01F60296 opens 6 m
+            // up a wall (exploring_the_holtburg_dungeon_does_not_stand_at_the_bookcases).
+            if let Did::Blocked(why) = self.walk_into(block, at, now) {
+                self.autoplay.rooms_shut.insert(room);
+                self.autoplay.note(
+                    format!("no way into {room:#06x} ({}); going round", why.what),
+                    now,
+                );
+                continue;
+            }
+            tracing::info!("explore: {cell:#010x} -> {room:#010x} at {at:?}");
+            self.autoplay.room_bound = Some(RoomWalk {
+                from: cell,
+                room,
+                at,
+                pushed: false,
+            });
             self.autoplay
-                .note(format!("no way into {room:#06x}; going round"), now);
+                .say(Doing::Traveling, "looking for something to fight");
             return true;
         }
-        tracing::info!("explore: {cell:#010x} -> {room:#010x} at {at:?}");
-        self.autoplay.room_bound = Some(RoomWalk {
-            from: cell,
-            room,
-            at,
-            pushed: false,
-        });
-        self.autoplay.room_since = Some(now);
-        self.autoplay
-            .say(Doing::Traveling, "looking for something to fight");
-        self.head_for(at, STOP, "the next room").acting()
     }
 
-    fn forget_the_room(&mut self) {
-        self.autoplay.room_bound = None;
-        self.autoplay.room_since = None;
+    /// Walk to the aim `at` past a threshold of the dungeon `block`, located by the region (the aim
+    /// may fall past a narrow room into the next, so its cell is not taken as the room's).
+    fn walk_into(&mut self, block: u32, at: Vec3, now: Instant) -> Did {
+        let place = ac_world::Place { at, cell: block };
+        let goal = Goal::At {
+            place,
+            within: STOP,
+        };
+        self.go(self.step_owner(), goal, now)
     }
 }
 
