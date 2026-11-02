@@ -342,8 +342,7 @@ fn a_road_is_a_road_whoever_planned_it() {
     c.cancel_travel();
     assert!(c.travel_to(at));
     c.autoplay.resume_trip = None;
-    let spot = glam::Vec3::new(me.x + 30.0, me.y, me.z);
-    c.walk_to_corpse(0x8000_0002, "Corpse of Drudge", spot, 30.0, now);
+    c.walk_to_corpse(0x8000_0002, "Corpse of Drudge", 30.0, now);
     assert!(!c.traveling());
     assert_eq!(c.autoplay.resume_trip, Some(at));
     assert!(c.on_its_way(), "a road put down for a body was lost");

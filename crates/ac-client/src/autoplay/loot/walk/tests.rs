@@ -1,5 +1,5 @@
 use super::*;
-use crate::autoplay::loot::choose::LOOT_NEAR;
+use crate::autoplay::loot::choose::{CORPSE_LIFE, LOOT_NEAR};
 use crate::autoplay::team::turns::SAME_MOMENT;
 use crate::autoplay::{Autoplay, Room};
 use crate::testkit::{a_loot_profile, corpses_seen, looter, standing_in_the_field};
@@ -24,60 +24,88 @@ fn a_body_a_step_or_two_off_is_walked_back_to_and_not_let_go_of() {
 }
 
 #[test]
-fn a_walk_to_a_corpse_that_cannot_arrive_is_given_up_and_the_corpse_set_aside() {
-    // Blargerton walked every tick at bodies through a floor or
-    // behind a wall. Nothing timed the walk, so the looting, and the
-    // fight waiting on the body, held until it rotted.
+fn a_corpse_set_aside_is_not_written_off_and_is_tried_again_later() {
+    // What `autoplay_loot` does with a corpse no walk reaches: set aside, not written off, and
+    // neither the looting nor the next fight waits on it meanwhile.
     let t0 = Instant::now();
     let s = Duration::from_secs;
     let guid = 0x8000_3001;
-
-    // A long walk that keeps getting nearer goes on however long it
-    // takes.
-    let mut walk = CorpseWalk::new(guid, 40.0, t0);
-    for i in 1..=30 {
-        assert!(walk.goes_on(40.0 - i as f32 * 1.2, false, t0 + s(i)));
-    }
-
-    // Pressed against a wall and no nearer: given up once that has
-    // gone on too long, and not before.
-    let mut walk = CorpseWalk::new(guid, 12.0, t0);
-    for i in 1..=REACH_GIVE_UP.as_secs() {
-        assert!(walk.goes_on(11.5, false, t0 + s(i)), "gave up at {i} s");
-    }
-    let gave_up = t0 + REACH_GIVE_UP + s(1);
-    assert!(!walk.goes_on(11.5, false, gave_up));
-
-    // The steering finding no way there is given up on sooner, but
-    // not at the first word of it.
-    let mut walk = CorpseWalk::new(guid, 12.0, t0);
-    assert!(walk.goes_on(12.0, true, t0 + s(1)));
-    assert!(walk.goes_on(12.0, false, t0 + s(2)), "a way was found");
-    let said = t0 + s(3);
-    for i in 3..3 + NO_WAY_FOR.as_secs() {
-        assert!(walk.goes_on(12.0, true, t0 + s(i)), "gave up at {i} s");
-    }
-    assert!(!walk.goes_on(12.0, true, said + NO_WAY_FOR));
-
-    // A walk broken off for a fight is a new walk when it is taken
-    // up again.
-    let mut walk = CorpseWalk::new(guid, 12.0, t0);
-    assert!(walk.goes_on(12.0, false, t0 + s(1)));
-    assert!(walk.goes_on(12.0, false, t0 + s(40)));
-
-    // What `autoplay_loot` does with a walk given up: the body is set
-    // aside, not written off, and neither the looting nor the next
-    // fight waits on it meanwhile.
     let mut ap = Autoplay::default();
     let (me, at) = (glam::Vec3::ZERO, glam::Vec3::new(12.0, 0.0, 0.0));
     let room = Room::PLENTY;
-    assert!(ap.corpse_owed(guid, at, me, gave_up, room));
-    ap.set_aside_out_of_reach(guid, gave_up);
+    assert!(ap.corpse_owed(guid, at, me, t0, room));
+    ap.set_aside_out_of_reach(guid, t0);
     assert!(!ap.looted.contains(&guid), "written off for good");
-    assert!(!ap.corpse_owed(guid, at, me, gave_up, room), "still owed");
+    assert!(!ap.corpse_owed(guid, at, me, t0, room), "still owed");
     assert!(
-        ap.corpse_owed(guid, at, me, gave_up + s(60), room),
+        ap.corpse_owed(guid, at, me, t0 + s(60), room),
         "never tried again"
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_corpse_up_on_a_ledge_is_set_aside_at_once() {
+    // The Tusker ground (0x5C49): a Female Tusker shot dead on its ledge 6 m up the wall, which
+    // no walk reaches, and another dead on the floor. The ledge one is nearer rotting, so first.
+    let t = crate::walk_trial::named(
+        20,
+        "5C49 Tusker on a ledge over the room",
+        glam::Vec3::new(17_744.8, 13_910.7, 0.0),
+        0x5C49_012A,
+        glam::Vec3::new(17_754.0, 13_929.0, 6.0),
+    );
+    let mut c = crate::walk_trial::standing_at(20, &t);
+    c.world.player_guid = Some(crate::testkit::ME);
+    c.autoplay.config.enabled = true;
+    a_loot_profile(&mut c, "ledge test");
+    let me = c.my_position().expect("standing");
+    let t0 = Instant::now();
+    let (ledge, floor) = (0x8000_0101, 0x8000_0102);
+    let on_floor = c
+        .standable_near(me, 8.0)
+        .into_iter()
+        .find(|p| p.at.distance(me) > 4.0 && (p.at.z - me.z).abs() < 0.5)
+        .expect("a floor spot near the start");
+    for (guid, place) in [
+        (
+            ledge,
+            ac_world::Place {
+                at: t.goal,
+                cell: t.goal_cell,
+            },
+        ),
+        (floor, on_floor),
+    ] {
+        let mut body = crate::testkit::corpse(guid, "Corpse of Female Tusker");
+        body.position = crate::testkit::placed(place.cell, place.at);
+        c.world.objects.insert(guid, body);
+        c.autoplay.kill_spots.push((place.at, t0));
+    }
+    let long_ago = t0 - (CORPSE_LIFE - Duration::from_secs(30));
+    c.autoplay.corpse_seen = corpses_seen([(ledge, long_ago), (floor, t0)]);
+
+    let dt = 0.05;
+    let mut now = t0;
+    while now < t0 + Duration::from_secs(2) && c.autoplay.corpse.is_none() {
+        c.tick_autoplay(now);
+        c.tick_player(crate::player::Input::default(), dt, now);
+        assert!(
+            c.walk_frame
+                .as_ref()
+                .is_none_or(|w| w.goal.distance(t.goal) > 0.5),
+            "walked at the ledge"
+        );
+        now += Duration::from_secs_f32(dt);
+    }
+    assert_eq!(
+        c.autoplay.corpse.map(|(g, ..)| g),
+        Some(floor),
+        "the floor one opened"
+    );
+    assert!(
+        c.autoplay.shelved.held(&ledge, now),
+        "the ledge one not set aside"
     );
 }
 
@@ -140,7 +168,10 @@ fn a_walk_to_a_body_this_character_has_given_up_on_is_let_go_of() {
     c.autoplay.corpse_seen = corpses_seen([(body, now)]);
     // Walking to it, seven metres off, and a mate says it claimed
     // the same body well before we did.
-    c.autoplay.walking_to = Some(CorpseWalk::new(body, 7.0, now));
+    c.autoplay.walking_to = Some(CorpseWalk {
+        guid: body,
+        started: now,
+    });
     c.autoplay.team.mates = vec![looter(
         0x5000_0002,
         me,
