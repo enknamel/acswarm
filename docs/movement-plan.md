@@ -273,6 +273,24 @@ sealed off. "Still pushing" is always wrong.
 - A journey's leg the steering refuses is planned again at once (`REPLANS` times, then given up),
   not after `STUCK_AFTER` or `STEP_GIVE_UP` (`a_journey_leg_with_no_way_is_planned_again_at_once`).
 
+**Phase 3** (branch `phase3`, the slot: `Client::go` with owners, `docs/movement-phase3-design.md`;
+the stalls gain the 5C49 ledge and the random areas the Tusker ground, 0x5C49):
+
+| trials | arrived | refused | gave up | still pushing | AGREE planned+arrived, planned+failed, no-way+arrived, no-way+failed |
+|---|---|---|---|---|---|
+| the stalls seen live (12) | 10 | 2 (2CB5 coast edge; the 5C49 ledge) | 0 | 0 | 10, 0, 0, 2 |
+| random walks, 9 areas x 15 (135) | 122 | 13 | 0 | 0 | 122, 0, 0, 13 |
+
+- `SUMMARY 12 trials: 10 arrived, 2 refused, 0 gave up, 0 still pushing` and `SUMMARY 135 trials:
+  122 arrived, 13 refused, 0 gave up, 0 still pushing`; WAITED 0 on both; INVARIANT
+  planned-must-arrive 10 of 10 and 122 of 122.
+- Each step's run was outcome for outcome and arrival time for arrival time the same as the one
+  before it. 5C49 is 14 of 15 arrived, and #4 is refused, ending on a Tusker ledge (no graph gap:
+  §1 of the design).
+- Every walk is a `go` from an owner, a journey's leg included (`Owner::Journey`, `walk_leg`).
+  `head_for`, `head_toward`, `walk_toward`, the `follow` slot, `drop_stale_walk` and the 192 m
+  `WALKABLE` split are gone; the region the planner holds is the one boundary.
+
 ## Phases (each merged alone, each measured against the last)
 
 0. **Baseline.** The harness, random pairs, the known spots, and the numbers on current main.

@@ -1,8 +1,20 @@
 # Movement phase 3 design: the slot
 
-Status: design, 2026-11-02, for phase 3 of `docs/movement-plan.md` ("One movement slot with one
-owner"). Line anchors are on `432d294` (main, phases 0-2 merged). Nothing here is built yet,
-except step 0 (the Tusker ground in the harness), whose findings are in §1.
+Status: built, 2026-11-02 (branch `phase3`, steps 0-4), for phase 3 of `docs/movement-plan.md`
+("One movement slot with one owner"). Line anchors are on `432d294` (main, phases 0-2 merged).
+Where the build departed from this design:
+- `go` takes the caller's clock (`go(owner, goal, now)`); callers with none use `go_to` on the
+  frame's (`Client.frame_at`). `step_owner` has no `debug_assert`: scripts and tests ask outside a step.
+- A refusal is kept in `Going` (where the body stood, why); a give-up stands the body
+  (`going_to` is `None`); the same owner asking within 2 m follows a moving goal without a plan.
+- The loot walk picks the next corpse in the same tick; the approach returns a `Did`, and a refused
+  vantage goes in `State.vantage_refused`; the academy hears a refusal by `State::walk_refused()`,
+  not a `View.walk_refused` flag; the counter keeps `Run.walking_up` as a bool.
+- Following runs as the rows "catch up" and "follow" (`FOLLOW_ROWS`), and keeps `FOLLOW_WALK`
+  as its own walk-or-journey rate. A journey's leg is asked by `walk_leg` while the slot is free
+  or the journey's, and a journey set off (`travel_to`, `travel_to_in`) frees the slot.
+- `drop_stale_walk` is folded into `going_to`; `has_way_to` stays for the journey engine's dungeon
+  portal check (phase 5); ac-nav's unused `how_to_get_there` went with `WALKABLE`.
 
 Phase 3 makes every walk a request from a named owner, answered truthfully. `Client::go(owner,
 goal) -> Did` replaces `head_for`, `head_toward`, the `follow` slot, `walk_toward` and the 192 m
