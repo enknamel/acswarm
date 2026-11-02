@@ -187,7 +187,7 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 | `daytime.rs`, `augmentations.rs` | Dereth's time of day; augmentation gems |
 | `advance.rs` | experience costs and raise messages |
 | `recalls.rs`, `quest_flags.rs` | recall spells the journey planner can use; the portal quest flags it may plan through, earned by talking to whoever stamps one |
-| `pathfinder.rs` | neighbourhood route planning off the frame thread |
+| `pathfinder.rs` | region graphs built off the frame thread and planned on from it |
 | `shopping.rs` | reads the pack into `ac_vendor`'s snapshot and carries out its act |
 | `aim.rs` | whether a projectile clears walls and hills on the way to its target |
 | `logistics.rs` | the party's mode (hunting or restocking) and money sharing, the same on every session |
