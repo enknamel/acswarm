@@ -437,8 +437,8 @@ impl Pathfinder {
         });
     }
 
-    /// Whether a walk asked is the last one again (the same goal, from its start, within
-    /// [`ASK_EVERY`]) or one whose answer, still being planned, will do from here.
+    /// Whether a walk asked is the last one again (from its start to its goal, within [`ASK_EVERY`])
+    /// or one whose answer, still being planned, will do from here.
     fn is_repeat(&self, from: Vec3, goal: Vec3, now: Instant) -> bool {
         let pending = self.busy()
             && self.asked.as_ref().is_some_and(|a| {
@@ -447,7 +447,7 @@ impl Pathfinder {
         pending
             || self.asked_at.is_some_and(|(t, f, g)| {
                 now.duration_since(t) < ASK_EVERY
-                    && g.distance(goal) <= ANSWER_GOAL
+                    && g.distance(goal) <= ac_nav::steering::ARRIVE
                     && f.distance(from) <= ac_nav::steering::ARRIVE
             })
     }
@@ -750,6 +750,12 @@ mod tests {
         assert!(c.pathfinder.take(me.at, goal.at).is_none(), "a repeat");
         c.pathfinder.ask(me, other, 0.25, cap, soon);
         assert!(c.pathfinder.take(me.at, other.at).is_some(), "another goal");
+        let nudged = there(Vec3::new(26.0, -50.89, 0.0), DUNGEON);
+        c.pathfinder.ask(me, nudged, 0.25, cap, soon);
+        assert!(
+            c.pathfinder.take(me.at, nudged.at).is_some(),
+            "a goal a metre on is another walk"
+        );
         let moved = Place {
             at: me.at + Vec3::new(-2.0, 0.0, 0.0),
             ..me

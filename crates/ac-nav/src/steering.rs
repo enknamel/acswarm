@@ -146,6 +146,15 @@ impl Course {
         (w.kind == EdgeKind::Drop).then_some(DROP_SPEED)
     }
 
+    /// Whether `me` stands at the route's end and the goal has moved since it was planned, out of
+    /// reach of that end: walked whole, the route brings the body no nearer.
+    fn is_spent(&self, me: Vec3, goal: Vec3, within: f32) -> bool {
+        self.waypoints.last().is_some_and(|w| {
+            let end = w.place.at;
+            is_same_spot(me, end) && goal != self.goal.at && !is_in_reach(end, goal, within)
+        })
+    }
+
     /// The waypoints still to walk.
     fn left(&self) -> Vec<Vec3> {
         let from = self.next.min(self.waypoints.len());
@@ -213,6 +222,11 @@ struct Stall {
 /// Within [`ARRIVE`] on the flat and on the same floor: two points the follower cannot tell apart.
 fn is_same_spot(a: Vec3, b: Vec3) -> bool {
     flat(a - b).length() <= ARRIVE && (a.z - b.z).abs() <= END_FLOOR
+}
+
+/// Within `within` of `goal` on the flat and on its floor: as near as the planner's last leg comes.
+fn is_in_reach(at: Vec3, goal: Vec3, within: f32) -> bool {
+    flat(goal - at).length() <= within && (goal.z - at.z).abs() <= END_FLOOR
 }
 
 impl Stall {
@@ -297,7 +311,7 @@ impl Steering {
         }
         self.stalls
             .retain(|s| s.goal.distance(goal.at) <= REPLAN_DISTANCE);
-        if self.notice(goal, me, ground.is_airborne(), now) {
+        if self.notice(goal, within, me, ground.is_airborne(), now) {
             return self.refuse(goal, Unreachable::Stalled);
         }
         if let Some(why) = self.asking {
@@ -339,9 +353,9 @@ impl Steering {
         }
     }
 
-    /// The triggers: ask for a first plan, or again when the goal moved (the course kept), when
-    /// pushed off the corridor or stalled (the course dropped). `true` for a stall seen before.
-    fn notice(&mut self, goal: Place, me: Vec3, airborne: bool, now: Instant) -> bool {
+    /// Ask for a first plan; again when the goal moved (the course kept), or pushed off the corridor,
+    /// at an end out of reach or stalled (the course dropped). `true` for a stall seen before.
+    fn notice(&mut self, goal: Place, within: f32, me: Vec3, airborne: bool, now: Instant) -> bool {
         let Some(c) = self.route.as_mut() else {
             self.asking.get_or_insert(Replan::Start);
             return false;
@@ -354,6 +368,15 @@ impl Steering {
             tracing::debug!("route: off the corridor at {me:?}; planning again");
             self.route = None;
             self.asking = Some(Replan::OffCorridor);
+            return false;
+        }
+        if c.is_spent(me, goal.at, within) {
+            tracing::debug!(
+                "route: walked to its end, out of reach of {:?}; planning again",
+                goal.at
+            );
+            self.route = None;
+            self.asking = Some(Replan::Moved);
             return false;
         }
         if stalled {
@@ -785,6 +808,32 @@ mod tests {
             Aim::Go(corner)
         );
         assert_eq!(st.route.as_ref().map(|c| c.goal.at), Some(moved));
+    }
+
+    #[test]
+    fn a_goal_drifted_out_of_reach_of_the_routes_end_is_planned_again_not_refused() {
+        let t0 = Instant::now();
+        let mut st = Steering::default();
+        let goal = Vec3::new(41.9, 68.2, 0.0);
+        let mut g = Fake::standing(Vec3::new(34.0, 68.2, 0.0));
+        let end = Vec3::new(40.9, 68.2, 0.0);
+        g.route(&[end]);
+        assert_eq!(st.steer(&mut g, place(goal), 1.0, t0), Aim::Go(end));
+        // Stood at the end in reach, the target steps 1.14 m off: under two metres, out of reach.
+        g.at = end;
+        let drifted = goal + Vec3::new(1.14, 0.0, 0.0);
+        assert_eq!(
+            st.steer(&mut g, place(drifted), 1.0, secs(t0, 1.0)),
+            Aim::Wait,
+            "planned again, not walked at its own feet"
+        );
+        let nearer = drifted - Vec3::new(0.9, 0.0, 0.0);
+        g.route(&[nearer]);
+        assert_eq!(
+            st.steer(&mut g, place(drifted), 1.0, secs(t0, 1.05)),
+            Aim::Go(nearer)
+        );
+        assert!(!st.no_way());
     }
 
     #[test]
