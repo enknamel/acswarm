@@ -384,6 +384,8 @@ impl Client {
                     self.let_go_of(&v);
                     return;
                 }
+                // Set off, the journey's leg has the slot, as any journey set off does.
+                self.stop_going(None, "a visit's journey sets off");
             }
             Next::GiveUp => {
                 tracing::warn!("visit: the journey to {} ended short of it", v.label);
@@ -674,6 +676,27 @@ mod tests {
             Some(Owner::Step("loot")),
             "the visit took the walk back"
         );
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn a_visit_far_off_sets_off_whatever_walk_was_in_the_slot() {
+        // A script's walk is under way on the Holtburg field; a lifestone 700 m east is visited.
+        let mut c = crate::testkit::standing_at(0xA9B4_0019, Vec3::new(84.0, 7.1, 94.0));
+        c.world.player_guid = Some(crate::testkit::ME);
+        let me = c.my_position().expect("standing");
+        assert!(c.go_to(Owner::Script, me + Vec3::X * 10.0, 1.0).acting());
+        let stone = Landmark {
+            kind: ac_world::landmarks::Kind::Lifestone,
+            name: "a lifestone".into(),
+            cell: 0,
+            at: me + Vec3::X * 700.0,
+        };
+        assert!(c.visit_landmark(&stone), "no visit");
+        assert!(c.traveling(), "no journey");
+        let leg = c.walk_leg(Instant::now());
+        assert!(leg.as_ref().is_some_and(Did::fine), "{leg:?}");
+        assert_eq!(c.going.as_ref().map(|g| g.owner), Some(Owner::Journey));
     }
 
     #[test]

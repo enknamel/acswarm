@@ -306,3 +306,18 @@ fn a_flown_walk_goes_straight_whatever_the_planner_says() {
     assert_eq!(c.go(Owner::Hand, goal, later), Did::Acting);
     assert_eq!(c.going_to().map(|(at, ..)| at), Some(ledge.at));
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn an_arrived_walk_holds_no_journey_back() {
+    // A script's walk 10 m east, arrived at and never let go; a journey planned from inside.
+    let mut c = at_holtburg();
+    let me = c.my_position().expect("standing");
+    assert!(c.go_to(Owner::Script, me + Vec3::X * 10.0, 1.0).acting());
+    testkit::stand(&mut c, 0xA9B4_0019, Vec3::new(94.0, 7.1, 94.0));
+    assert!(c.plan_trip(me.truncate() + glam::Vec2::X * 150.0));
+    assert_eq!(c.going.as_ref().map(|g| g.owner), Some(Owner::Script));
+    let leg = c.walk_leg(Instant::now());
+    assert!(leg.as_ref().is_some_and(Did::fine), "{leg:?}");
+    assert_eq!(c.going.as_ref().map(|g| g.owner), Some(Owner::Journey));
+}
