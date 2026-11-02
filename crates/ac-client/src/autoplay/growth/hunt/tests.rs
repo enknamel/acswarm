@@ -475,8 +475,9 @@ fn a_dungeon_ground_is_arrived_at_underground_and_walked_by_the_explorer() {
     );
 }
 
-/// Autoplay and the body, ticked together for `seconds`; the notes said on the way.
-fn play_noting(c: &mut Client, t0: Instant, seconds: u32) -> Vec<String> {
+/// Autoplay and the body, ticked together for up to `seconds` until a journey is under way; the
+/// notes said on the way.
+fn play_noting_till_travelling(c: &mut Client, t0: Instant, seconds: u32) -> Vec<String> {
     let dt = 0.05;
     let mut notes = Vec::new();
     for frame in 0..seconds * 20 {
@@ -487,6 +488,9 @@ fn play_noting(c: &mut Client, t0: Instant, seconds: u32) -> Vec<String> {
             if let crate::Event::Noted(n) = e {
                 notes.push(n);
             }
+        }
+        if c.traveling() {
+            break;
         }
     }
     notes
@@ -506,7 +510,9 @@ fn a_dungeon_crossed_on_the_way_to_a_ground_is_not_explored_in_its_place() {
     let t0 = Instant::now();
     c.autoplay.growth.bound = Some((cave.landblock, cave.at, cave.name.clone()));
     c.autoplay.growth.bound_since = Some(t0);
-    let notes = play_noting(&mut c, t0, 30);
+    // Until the walk is taken up: offline no portal takes the character on, and one reached
+    // down the drops leaves it below with only the explorer's rooms to walk.
+    let notes = play_noting_till_travelling(&mut c, t0, 30);
     let round = notes.iter().filter(|n| n.contains("no way into")).count();
     println!(
         "{notes:#?}\nstep {:?} status {:?} travelling {} bound {:?}",
@@ -516,31 +522,48 @@ fn a_dungeon_crossed_on_the_way_to_a_ground_is_not_explored_in_its_place() {
         c.autoplay.growth.bound_landblock()
     );
     assert!(round <= 3, "went round Mountain Keep's rooms {round} times");
-    assert_ne!(c.autoplay.step_name(), Some("explore"));
+    assert!(c.traveling(), "the walk was never taken up again");
 }
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
-fn a_dungeon_portal_out_of_reach_is_not_walked_at() {
-    // Blargerton, through Mountain Keep on the way to the Tumerok Cave, stood 20 s at its landing
-    // aiming at its "Holtburg" portal 18 m below, which the graph has no way to: the step inside a
-    // dungeon was aimed straight at its portal with no question asked.
+fn a_dungeon_portal_below_its_landing_is_walked_down_to_by_its_drops() {
+    // Mountain Keep's "Holtburg" portal, 18 m under its landing: no stairs lead down, the drops
+    // off its ledges do. The journey takes it along that plan only, and the walk arrives.
     let mut c =
         crate::testkit::standing_in_the_field(35, 0x01D2_02F7, glam::Vec3::new(47.9, -69.9, 12.0));
     let cave = ac_world::hunting::at(0x0286).expect("the Tumerok Cave");
     assert!(c.travel_to_in(cave.at, cave.cell()), "no journey at all");
-    let t = c.travel_trip().expect("a journey");
-    println!("{}: {:?}", t.summary(), t.steps);
     let o = ac_world::landblock_origin(0x01D2_0000);
-    let inner = (o + glam::Vec3::new(80.1, -57.5, -6.0)).truncate();
-    let first = t.steps.iter().find_map(|s| match s {
-        ac_world::trip::Step::Portal { mouth, .. } => Some(*mouth),
-        _ => None,
+    let inner = o + glam::Vec3::new(80.1, -57.5, -6.0);
+    let first = c.travel_trip().and_then(|t| {
+        t.steps.iter().find_map(|s| match s {
+            ac_world::trip::Step::Portal { mouth, .. } => Some(*mouth),
+            _ => None,
+        })
     });
     assert!(
-        first.is_none_or(|m| m.distance(inner) > 3.0),
-        "still bound for the portal out of reach"
+        first.is_some_and(|m| m.distance(inner.truncate()) < 3.0),
+        "not bound for the portal below: {first:?}"
     );
+    let dt = 0.05;
+    let mut dropped = false;
+    for frame in 0..30 * 20 {
+        let now = Instant::now() + Duration::from_secs_f32(frame as f32 * dt);
+        c.tick_player(crate::player::Input::default(), dt, now);
+        dropped |= c.steering.route.as_ref().is_some_and(|r| {
+            r.waypoints
+                .iter()
+                .any(|w| w.kind == ac_scene::nav::EdgeKind::Drop)
+        });
+        let at = c.player.as_ref().unwrap().world_position();
+        if at.distance(inner) < 1.5 {
+            assert!(dropped, "came down by no planned drop");
+            return;
+        }
+    }
+    let at = c.player.as_ref().unwrap().world_position() - o;
+    panic!("not at the portal below after 30 s: at {at}");
 }
 
 #[test]
