@@ -77,21 +77,9 @@ struct Block {
     dungeon: bool,
 }
 
-/// How many blocked steps in a row count as wedged. At twenty a second
-/// this is about half of one: long enough that squeezing past furniture
-/// is not mistaken for a wall, short enough that nobody watching would
-/// call it running at one.
+/// Blocked steps in a row that count as wedged: about half a second at twenty a second, so a
+/// squeeze past furniture is not mistaken for a wall.
 const WEDGED_STEPS: u32 = 10;
-
-/// How many frames to stop pushing before trying the same way again.
-/// A second or so: long enough that a character against a wall is not
-/// grinding at it, short enough that a door opening is noticed.
-const WEDGED_REST: u32 = 20;
-
-/// How far the asked-for direction has to turn for the wall we were
-/// leaning on to be someone else's problem: the cosine of about thirty
-/// degrees.
-const WEDGE_TURN: f32 = 0.87;
 
 /// Blocks further than this many landblocks from the character (in
 /// either axis) are let go of: they are still in the process cache for
@@ -128,13 +116,8 @@ pub struct Player {
     current_motion: u32,
     pub n_parts: usize,
     capsule: Capsule,
-    /// How many steps running the character has spent leaning on
-    /// something without moving (see the walk below).
+    /// Blocked steps in a row, cleared by any ground covered.
     wedged_for: u32,
-    /// The way it was pushing when it wedged, and how many frames are
-    /// left of not pushing that way again.
-    wedged_dir: Vec3,
-    wedged_rest: u32,
     /// The furthest this frame may carry the character along the
     /// ground: the distance to whatever it is walking to. Cleared by
     /// whoever is not steering it. See the walk.
@@ -436,8 +419,6 @@ impl Player {
             n_parts: 0,
             capsule: Capsule::default(),
             wedged_for: 0,
-            wedged_dir: Vec3::ZERO,
-            wedged_rest: 0,
             step_cap: None,
             pace_cap: None,
             sea_types: None,
@@ -978,13 +959,8 @@ impl Player {
 
     /// The shape the character walks as, for planners that work on a
     /// copy of the world.
-    /// The character has been leaning on something and going nowhere.
-    ///
-    /// True once it has spent about half a second pressed against
-    /// geometry while still asking to move. Whoever set the goal can
-    /// read this and do something about it -- open the door in the way,
-    /// or choose another way round -- rather than leave it standing
-    /// there.
+    /// Pressed against geometry for [`WEDGED_STEPS`] while still asking to move (telemetry's
+    /// `wedged`); the follower's own no-progress replan is what answers it.
     pub fn wedged(&self) -> bool {
         self.wedged_for >= WEDGED_STEPS
     }
@@ -1279,45 +1255,6 @@ impl Player {
             // bottom.
             self.stand_here();
         }
-        // Leaning on something and getting nowhere: stop leaning.
-        //
-        // Whatever asked for this -- a shop, a corpse, a teammate, a
-        // thing to hit, a sidestep out of an arrow's way -- the answer
-        // when the wall will not move is the same, and it belongs here,
-        // where every one of them ends up, rather than at each of the
-        // ten places that set a goal. A character that has pushed at
-        // the same spot for half a second is not walking anywhere.
-        //
-        // It resets the moment real ground is covered, so a slow squeeze
-        // past a crate is untouched; only a genuine wall holds it.
-        //
-        // And it lets go again, which it did not use to. The line that
-        // cleared the count sits below, in the walk; returning here
-        // skipped it, so nothing ever moved and nothing ever cleared,
-        // and a character that leaned on one doorframe on its way
-        // upstairs was frozen for the rest of the session -- for that
-        // errand and every errand after it.
-        //
-        // Two ways out, and both of them have to be here rather than in
-        // the ten places that set a goal. Asked to go somewhere else,
-        // it is not leaning on anything any more and is free at once.
-        // Asked the same way again, it rests a moment and then tries
-        // again, because the world moves: the door opens, whatever it
-        // was leaning on walks away.
-        if steering && self.wedged_for >= WEDGED_STEPS {
-            let asked = dir.normalize_or_zero();
-            if asked.dot(self.wedged_dir) < WEDGE_TURN {
-                self.wedged_for = 0;
-                self.wedged_rest = 0;
-            } else if self.wedged_rest > 0 {
-                self.wedged_rest -= 1;
-                self.ground_velocity = Vec3::ZERO;
-                self.moving = false;
-                return false;
-            } else {
-                self.wedged_for = 0;
-            }
-        }
         if !self.airborne {
             self.ground_velocity = if steering {
                 dir.normalize() * speed
@@ -1409,23 +1346,7 @@ impl Player {
             );
             match walked {
                 Stride::Blocked => {
-                    // Pressed against something and going nowhere.
-                    //
-                    // This counts, and once it has counted long enough the
-                    // character stops pressing. It is the last guard rather
-                    // than the first: every other one has to be put at the
-                    // place that chose the goal, and there turned out to be
-                    // ten of those -- a corpse, a counter, a teammate, a
-                    // door, a thing to hit -- so fixing them one at a time
-                    // meant the next report was always about the one still
-                    // missed. Nothing reaches the wall except through here.
-                    self.wedged_for += 1;
-                    if self.wedged_for == WEDGED_STEPS {
-                        // Remember which way we were pushing, and how long
-                        // to leave it before pushing that way again.
-                        self.wedged_dir = self.ground_velocity.normalize_or_zero();
-                        self.wedged_rest = WEDGED_REST;
-                    }
+                    self.wedged_for = self.wedged_for.saturating_add(1);
                     // Where it was; outdoors, on the terrain should that be over the feet.
                     world = old;
                     if indoors {

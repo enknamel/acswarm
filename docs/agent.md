@@ -276,9 +276,10 @@ below on the ground floor. The rules that came of it:
   Building a chunk of the navigation graph takes a couple of hundred
   milliseconds, and a walk charged all of it at running speed crossed
   the bottom step and back for ever.
-- **A wedge lets go.** The rule that stops a character leaning on a wall
-  clears the moment it is sent somewhere else, and otherwise rests a
-  second and tries again: doors open and what was leaned on walks away.
+- **A wedge is reported, not rested.** A body pressed against geometry
+  reads as `wedged` in telemetry; the follower answers it, planning the
+  walk again once the route stops shortening (`ac_nav::steering`,
+  `NO_PROGRESS`), and the walk's slot gives up once (`GIVE_UP_AFTER`).
 - **What the server puts in the room is not in the ground.** The
   collision world and its graph are built from the DAT files and shared
   by every character in the process; a chest, a hook or a cart arrives
