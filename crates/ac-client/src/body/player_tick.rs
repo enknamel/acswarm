@@ -192,7 +192,7 @@ impl Client {
                                     |a, b| !pl.line_blocked(&self.assets, block, a, b),
                                 ))
                             }
-                            ac_nav::Aim::NoWay => ac_nav::Aim::NoWay,
+                            standing => standing,
                         };
                         self.walk_frame = Some(crate::tally::WalkFrame {
                             at: now,
@@ -201,7 +201,7 @@ impl Client {
                             source,
                             aim: match aim {
                                 ac_nav::Aim::Go(at) => Some(at),
-                                ac_nav::Aim::NoWay => None,
+                                ac_nav::Aim::NoWay | ac_nav::Aim::Wait => None,
                             },
                             detoured: aim != steered,
                             route: self
@@ -226,7 +226,7 @@ impl Client {
                         // decided was in the way, and only the stuck
                         // detector ever stopped it.
                         match aim {
-                            ac_nav::Aim::NoWay => input.forward = 0.0,
+                            ac_nav::Aim::NoWay | ac_nav::Aim::Wait => input.forward = 0.0,
                             ac_nav::Aim::Go(at) => {
                                 let d = at - pl.world_position();
                                 let flat = glam::Vec2::new(d.x, d.y);

@@ -296,7 +296,7 @@ fn a_goal_on_the_storey_above_is_climbed_to_by_the_stairs_not_pushed_under() {
     assert!(pl.line_drops(&assets, DUNGEON, me, goal));
     match steer(&assets, &mut pl, goal) {
         Aim::Go(to) => assert!(to.distance(goal) > 1.0, "ran straight at the storey above"),
-        Aim::NoWay => panic!("refused a goal the stairs lead to"),
+        other => panic!("refused a goal the stairs lead to: {other:?}"),
     }
 }
 
@@ -695,7 +695,7 @@ fn the_stairs_down_from_an_upper_floor_are_found_and_walked() {
     assert!(!pl.line_drops(&assets, HOLTBURG, me, goal));
     match steer(&assets, &mut pl, goal) {
         Aim::Go(to) => assert!(to.distance(goal) > 1.0, "stepped off the edge instead"),
-        Aim::NoWay => panic!("refused the stairs"),
+        other => panic!("refused the stairs: {other:?}"),
     }
     let frames = chase(&assets, &mut pl, None, goal, 1.0 / 30.0, 12.0);
     let (end, air) = *frames.last().unwrap();

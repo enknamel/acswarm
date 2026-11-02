@@ -138,6 +138,8 @@ pub trait Ground {
 pub enum Aim {
     /// Walk at this point: the goal or the next waypoint.
     Go(Vec3),
+    /// Stand: the plan has not come back yet. Not "no way", and never a lean at the old heading.
+    Wait,
     /// No way there from here: stand still and let whoever set the goal choose another; heading for
     /// the goal anyway never arrives (no_route_to_somewhere_far_is_refused_rather_than_walked_at).
     NoWay,
@@ -406,7 +408,7 @@ impl Steering {
                     self.route_is_wide = false;
                     self.no_way = false;
                     self.waiting = true;
-                    return Aim::Go(me);
+                    return Aim::Wait;
                 }
                 None => {
                     // No path and a blocked line, and leaning on it has already got nowhere: back the
@@ -695,7 +697,7 @@ mod tests {
         let goal = Vec3::new(20.0, 10.0, 0.0);
         match st.steer(&mut g, goal, 0, 0.5, Instant::now()) {
             Aim::Go(aim) => assert!(near(aim, goal), "{aim:?}"),
-            Aim::NoWay => panic!("refused a clear walk"),
+            other => panic!("refused a clear walk: {other:?}"),
         }
     }
 
@@ -713,7 +715,7 @@ mod tests {
         match st.steer(&mut g, goal, 0, 0.5, Instant::now()) {
             // The first waypoint, not the goal through the wall.
             Aim::Go(aim) => assert!(!near(aim, goal), "walked at the goal through a wall"),
-            Aim::NoWay => panic!("refused a walk it had a route for"),
+            other => panic!("refused a walk it had a route for: {other:?}"),
         }
     }
 
@@ -730,10 +732,7 @@ mod tests {
             planning: true,
             ..Default::default()
         };
-        match st.steer(&mut g, goal, 0, 0.5, t0) {
-            Aim::Go(aim) => assert!(near(aim, me), "leaned at {aim:?} with no plan"),
-            Aim::NoWay => panic!("not known yet was taken for no way"),
-        }
+        assert_eq!(st.steer(&mut g, goal, 0, 0.5, t0), Aim::Wait);
         assert!(st.is_waiting() && !st.no_way());
         // Answered, the route is walked.
         g.planning = false;
@@ -741,7 +740,7 @@ mod tests {
         let later = t0 + Duration::from_secs(1);
         match st.steer(&mut g, goal, 0, 0.5, later) {
             Aim::Go(aim) => assert!(near(aim, corner), "{aim:?}"),
-            Aim::NoWay => panic!("refused a walk it had a route for"),
+            other => panic!("refused a walk it had a route for: {other:?}"),
         }
         assert!(!st.is_waiting());
     }
