@@ -369,14 +369,13 @@ impl Client {
         (spare > 0).then_some((purse.0, spare))
     }
 
-    /// Walk to `mate` until close enough to hand something over: `Done` once in reach (the walk
-    /// ended), else what the slot answers.
+    /// Walk to `mate` until close enough to hand something over: `Done` once in reach on its floor
+    /// (the walk ended), else what the slot answers.
     fn walk_into_reach(&mut self, mate: &crate::autoplay::Mate, now: Instant) -> Did {
         let Some(me) = self.my_position() else {
             return Did::waiting("not in the world yet");
         };
-        let flat = glam::Vec2::new(mate.world.x - me.x, mate.world.y - me.y).length();
-        let did = if flat <= Self::REACH {
+        let did = if crate::body::server_walk::reached(me, mate.world, Self::REACH) {
             Did::Done
         } else {
             let goal = self.mate_goal(mate, Self::REACH * 0.6);
