@@ -127,11 +127,13 @@ fn areas() -> Vec<(&'static str, Vec3, u32)> {
     ]
 }
 
-fn report(trials: &[Trial]) -> Vec<(String, Outcome)> {
+/// Run and print each trial; the names of those the planner called reachable that did not arrive.
+fn report(trials: &[Trial]) -> Vec<String> {
     let only = std::env::var("ROUTE_TRIALS").ok();
     let mut out = Vec::new();
     let mut agree = [0usize; 4];
     let mut waited = 0;
+    let mut broken = Vec::new();
     for t in trials
         .iter()
         .filter(|t| only.as_ref().is_none_or(|o| t.name.contains(o.as_str())))
@@ -146,6 +148,9 @@ fn report(trials: &[Trial]) -> Vec<(String, Outcome)> {
         };
         let arrived = o.kind() == "arrived";
         agree[usize::from(planned.is_err()) * 2 + usize::from(!arrived)] += 1;
+        if planned.is_ok() && !arrived {
+            broken.push(t.name.clone());
+        }
         println!(
             "TRIAL {:<44} {:>6.1} m  {:<13} PLAN {plan} {:.0} ms  WAITED {waits}  {:?}",
             t.name,
@@ -170,7 +175,12 @@ fn report(trials: &[Trial]) -> Vec<(String, Outcome)> {
         agree[0], agree[1], agree[2], agree[3]
     );
     println!("WAITED {waited} frames standing for the planner to build");
-    out
+    println!(
+        "INVARIANT planned-must-arrive: {} of {} arrived; failed: {broken:?}",
+        agree[0],
+        agree[0] + agree[1]
+    );
+    broken
 }
 
 /// The stall seen live named `name`.
@@ -184,7 +194,8 @@ fn stall(name: &str) -> Trial {
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
 fn the_stalls_seen_live() {
-    report(&known());
+    let broken = report(&known());
+    assert!(broken.is_empty(), "planned and not arrived: {broken:?}");
 }
 
 #[test]
@@ -201,7 +212,8 @@ fn random_walks_in_each_area() {
         };
         trials.extend(random_trials(LEVEL, name, (at, cell), spread));
     }
-    report(&trials);
+    let broken = report(&trials);
+    assert!(broken.is_empty(), "planned and not arrived: {broken:?}");
 }
 
 #[test]

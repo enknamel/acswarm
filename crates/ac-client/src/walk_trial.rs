@@ -21,6 +21,9 @@ const ASK_EVERY: f32 = 0.3;
 const ARRIVED_SLACK: f32 = 1.0;
 /// The steering saying "no way" this long (seconds) is giving up.
 const NO_WAY_FOR: f32 = 3.0;
+/// A walk turned down within this (seconds) of being asked is refused, not given up: the
+/// answer reaches `head_for` on a later ask.
+const REFUSED_WITHIN: f32 = 1.0;
 /// The planner's answer is waited for this long each frame (the live planner answers in a frame
 /// or two once its area is built; building one takes up to a second).
 const PLANNER_WAIT: Duration = Duration::from_secs(5);
@@ -133,7 +136,7 @@ fn walk(c: &mut Client, t: &Trial, waits: &mut u32) -> Outcome {
             let again = c.head_for(t.goal, t.stop, &t.name);
             if !again.acting() {
                 let left = c.my_position().map_or(f32::NAN, |p| p.distance(t.goal));
-                return if frame == 0 {
+                return if secs < REFUSED_WITHIN {
                     Outcome::Refused {
                         why: format!("{again:?}"),
                     }
@@ -157,7 +160,7 @@ fn walk(c: &mut Client, t: &Trial, waits: &mut u32) -> Outcome {
         if c.steering.no_way() {
             let since = *no_way_since.get_or_insert(secs);
             if secs - since >= NO_WAY_FOR {
-                return if since < 1.0 {
+                return if since < REFUSED_WITHIN {
                     Outcome::Refused {
                         why: "the steering has no way".into(),
                     }
