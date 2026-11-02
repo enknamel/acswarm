@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 
 use ac_nav::routing::{self, NoWay};
 use ac_scene::navarea::{self, Area};
+use ac_world::trip::Step;
 use ac_world::Place;
 use glam::Vec3;
 
@@ -28,6 +29,11 @@ const REFUSED_WITHIN: f32 = 1.0;
 /// The planner's answer is waited for this long each frame (the live planner answers in a frame
 /// or two once its area is built; building one takes up to a second).
 const PLANNER_WAIT: Duration = Duration::from_secs(5);
+/// A journey's portal carries the body off within this (metres, flat, on the same floor) of its
+/// mouth: the harness's stand-in for the server's collision with the mouth.
+const PORTAL_TOUCH: f32 = 1.0;
+/// How long a journey across regions is given (seconds).
+const JOURNEY_LIMIT: f32 = 300.0;
 
 /// Where a character is put down and where it is sent.
 #[derive(Clone, Debug)]
@@ -160,6 +166,7 @@ fn walk(c: &mut Client, t: &Trial, waits: &mut u32) -> Outcome {
             }
         }
         c.tick_player(crate::player::Input::default(), dt, now);
+        carry_through_portal(c);
         *waits += u32::from(c.steering.is_waiting());
         c.pathfinder.settle(PLANNER_WAIT);
         let Some(me) = c.my_position() else {
@@ -194,6 +201,29 @@ fn walk(c: &mut Client, t: &Trial, waits: &mut u32) -> Outcome {
         left: me.distance(t.goal),
         moved: me.distance(start),
     }
+}
+
+/// Set the body down at the exit of the portal the journey walks into once it touches the mouth
+/// ([`PORTAL_TOUCH`]), as the server would; offline nothing else carries it.
+fn carry_through_portal(c: &mut Client) {
+    let Some((step, _)) = c.travel_progress() else {
+        return;
+    };
+    let Some(Step::Portal { mouth, exit, .. }) =
+        c.travel_trip().and_then(|t| t.steps.get(step)).cloned()
+    else {
+        return;
+    };
+    let Some(me) = c.my_position() else {
+        return;
+    };
+    let d = me - mouth.at;
+    if d.truncate().length() > PORTAL_TOUCH || d.z.abs() > crate::SAME_FLOOR {
+        return;
+    }
+    let origin = ac_world::landblock_origin(exit.cell);
+    crate::testkit::stand(c, exit.cell, exit.at - origin);
+    c.steering.reset();
 }
 
 /// A seeded generator, so a list of random trials is the same list every run.
@@ -360,5 +390,26 @@ pub fn named(level: i32, name: &str, start: Vec3, start_cell: u32, goal: Vec3) -
         goal_cell,
         stop: 1.5,
         limit: 120.0,
+    }
+}
+
+/// A journey between two places in different regions, each put on its floor by a body standing
+/// there, given [`JOURNEY_LIMIT`].
+pub fn journey(level: i32, name: &str, start: (Vec3, u32), goal: (Vec3, u32)) -> Trial {
+    let floor = |(at, cell): (Vec3, u32)| {
+        let origin = ac_world::landblock_origin(cell);
+        let mut c = crate::testkit::standing_in_the_field(level, cell, at - origin);
+        let (at, found) = on_floor(&mut c, at);
+        (at, if cell & 0xFFFF >= 0x100 { cell } else { found })
+    };
+    let ((start, start_cell), (goal, goal_cell)) = (floor(start), floor(goal));
+    Trial {
+        name: name.into(),
+        start,
+        start_cell,
+        goal,
+        goal_cell,
+        stop: 1.5,
+        limit: JOURNEY_LIMIT,
     }
 }

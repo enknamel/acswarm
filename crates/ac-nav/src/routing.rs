@@ -81,13 +81,32 @@ pub fn graph_end(ground: &Ground, p: Place) -> (Vec3, u32) {
 
 /// The place of a graph node: its interior cell, or the outdoor cell under it.
 pub fn place_of(n: &NavNode) -> Place {
-    let cell = if n.cell != 0 {
-        n.cell
+    place_in(n.pos, n.cell)
+}
+
+/// The place at `at` in the graph's `cell`: an interior cell, or 0 for the outdoor cell under it.
+fn place_in(at: Vec3, cell: u32) -> Place {
+    let cell = if cell != 0 {
+        cell
     } else {
-        let block = block_at(n.pos);
-        ac_world::outdoor_cell(block, n.pos - ac_world::landblock_origin(block))
+        let block = block_at(at);
+        ac_world::outdoor_cell(block, at - ac_world::landblock_origin(block))
     };
-    Place { at: n.pos, cell }
+    Place { at, cell }
+}
+
+/// `place` on its cell's floor, by the rule a planned walk's end is resolved by
+/// ([`wayfind::floor_of`]): a map point takes the terrain's height. `OffFloor` when there is none.
+pub fn put_on_floor(area: &Area, from: Place, place: Place) -> Result<Place, NoWay> {
+    if !is_held(&area.blocks, area.dungeon, from, place) {
+        return Err(NoWay::OutOfRegion);
+    }
+    let cap = area.capsule();
+    area.read_ground(|ground, _| {
+        let (at, cell) = graph_end(ground, place);
+        let (at, of) = wayfind::floor_of(ground, at, cell, &cap).ok_or(NoWay::OffFloor)?;
+        Ok(place_in(at, of))
+    })
 }
 
 /// A plan on an area only read: a route, no way, or the chunks to build before it can answer.

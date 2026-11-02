@@ -3,8 +3,8 @@
 //! each ended and what the planner answered first; `ROUTE_TRIALS=name` runs those named so.
 
 use ac_client::walk_trial::{
-    named, plan_first, random_trials, run, run_on, run_with_waits, standing_at, Outcome, Spread,
-    Trial,
+    journey, named, plan_first, random_trials, run, run_on, run_with_waits, standing_at, Outcome,
+    Spread, Trial,
 };
 use ac_nav::routing::Planned;
 use ac_scene::nav::EdgeKind;
@@ -99,6 +99,60 @@ fn known() -> Vec<Trial> {
             Vec3::new(17_744.8, 13_910.7, 0.0),
             0x5C49_012A,
             Vec3::new(17_754.0, 13_929.0, 6.0),
+        ),
+    ]
+}
+
+/// A world position `local` in `cell`'s block, with that cell.
+fn at(cell: u32, local: Vec3) -> (Vec3, u32) {
+    (ac_world::landblock_origin(cell) + local, cell)
+}
+
+/// Open ground at world `xy` (the builders' pick, on the terrain), in the outdoor cell under it.
+fn open_ground(x: f32, y: f32) -> (Vec3, u32) {
+    let p = Place::on_map(glam::Vec2::new(x, y));
+    (p.at, p.cell)
+}
+
+/// Journeys from one region to another, through portals or overland (docs/movement-phase4-design.md
+/// §8): the Warden visit seen live, a walk into a building and upstairs, two walks out of one.
+fn journeys() -> Vec<Trial> {
+    let rooms = ac_client::testkit::game_data()
+        .block_collision(0x01F6_0000)
+        .expect("the Holtburg Dungeon");
+    let ledge = Vec3::new(262.0, 47_182.0, 9.5);
+    let (_, ledge_cell) = rooms.world.floor_at(ledge, 0.6, 1.5).expect("the ledge");
+    let lifestone = at(0xA9B4_0019, Vec3::new(84.0, 7.1, 94.0));
+    vec![
+        journey(
+            LEVEL,
+            "A9B4 Holtburg to a Facility Hub Warden",
+            (Vec3::new(32_532.0, 34_567.1, 94.0), 0xA9B4_0019),
+            at(0x8A02_01F7, Vec3::new(108.34, -46.2, 0.0)),
+        ),
+        journey(
+            LEVEL,
+            "A9B2 platform to Archmage Cindrue upstairs",
+            (Vec3::new(32_526.2, 34_261.9, 97.5), 0xA9B2_0000),
+            at(0xA9B4_011B, Vec3::new(152.3, 132.5, 69.0)),
+        ),
+        journey(
+            LEVEL,
+            "E632 out of Archmage Yuzai Zhen's",
+            at(0xE632_0103, Vec3::new(112.1, 131.0, 30.1)),
+            open_ground(44_272.1, 9_331.0),
+        ),
+        journey(
+            LEVEL,
+            "ACB5 mine floor to the open ground",
+            at(0xACB5_01E2, Vec3::new(125.5, 134.1, 40.4)),
+            open_ground(33_549.5, 34_886.1),
+        ),
+        journey(
+            LEVEL,
+            "A9B4 Holtburg to the 01F6 ledge",
+            lifestone,
+            (ledge, ledge_cell),
         ),
     ]
 }
@@ -247,6 +301,14 @@ fn random_walks_in_each_area() {
         trials.extend(random_trials(LEVEL, name, (at, cell), spread));
     }
     let (broken, pushing) = report(&trials);
+    assert!(broken.is_empty(), "planned and not arrived: {broken:?}");
+    assert!(pushing.is_empty(), "still pushing: {pushing:?}");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn journeys_across_regions() {
+    let (broken, pushing) = report(&journeys());
     assert!(broken.is_empty(), "planned and not arrived: {broken:?}");
     assert!(pushing.is_empty(), "still pushing: {pushing:?}");
 }

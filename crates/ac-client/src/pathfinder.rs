@@ -304,6 +304,40 @@ impl Pathfinder {
         }
     }
 
+    /// `place` on its cell's floor as a walk from `from` would end there (see
+    /// [`routing::put_on_floor`]); `None` while the area holding both is assembled.
+    pub fn put_on_floor(
+        &mut self,
+        from: Place,
+        place: Place,
+        capsule: Capsule,
+    ) -> Result<Option<Place>, NoWay> {
+        let (mut tries, mut held) = (0, None);
+        loop {
+            let region = held.take().or_else(|| region_for(from, place, &capsule));
+            self.hold(&region);
+            match &region {
+                Some(r) => {
+                    return self
+                        .read(r)
+                        .map(|area| routing::put_on_floor(&area, from, place))
+                        .transpose()
+                }
+                None if can_assemble(from, place, &capsule) => {}
+                None => return Err(NoWay::OutOfRegion),
+            }
+            if tries == OWN_TRIES {
+                return Ok(None);
+            }
+            tries += 1;
+            match self.dispatch(Job::Assemble, from, place, 0.0, capsule) {
+                Done::Here(r) => held = Some(r),
+                Done::Queued => return Ok(None),
+                Done::Failed => return Err(NoWay::OutOfRegion),
+            }
+        }
+    }
+
     /// Keep `region` as the one this session is on, if any.
     fn hold(&mut self, region: &Option<Arc<Region>>) {
         if let Some(r) = region {
@@ -829,5 +863,53 @@ mod tests {
         assert!(walks(Vec3::new(26.0, -51.89, 0.0)), "across the room");
         // The top of a bookcase, 1.9 m up.
         assert!(!walks(Vec3::new(34.68, -50.7, 1.915)), "onto the bookcase");
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn a_place_is_put_on_its_own_floor() {
+        // A map point on the Holtburg field takes the terrain's height.
+        let mut c =
+            crate::testkit::standing_in_the_field(20, 0xA9B4_0019, Vec3::new(84.0, 84.0, 94.0));
+        let assets = c.assets.clone();
+        let pl = c.player.as_mut().expect("a body");
+        let me = Place {
+            at: pl.world_position(),
+            cell: pl.cell,
+        };
+        let cap = pl.capsule();
+        let field = Place::on_map(me.at.truncate() + glam::Vec2::new(20.0, 5.0));
+        pl.collision(&assets, field.cell & 0xFFFF_0000);
+        let ground = pl.terrain_height(field.at.x, field.at.y).expect("terrain");
+        let on = c.pathfinder.put_on_floor(me, field, cap);
+        let on = on.expect("a floor").expect("assembled");
+        assert!(
+            (on.at.z - ground).abs() < 0.05,
+            "{on:?} over ground {ground}"
+        );
+        assert_eq!(on.cell, field.cell);
+        // In the Holtburg Dungeon, a ledge 9.5 m over the room: on its own cell's floor.
+        let rooms = c.assets.block_collision(DUNGEON).unwrap();
+        let start = Vec3::new(223.5, 47_158.5, 0.0);
+        let (z, cell) = rooms.world.floor_at(start, 0.6, 1.5).unwrap();
+        let ledge = Vec3::new(262.0, 47_182.0, 9.5);
+        let (high, ledge_cell) = rooms.world.floor_at(ledge, 0.6, 1.5).unwrap();
+        crate::testkit::stand(
+            &mut c,
+            cell,
+            start.with_z(z) - ac_world::landblock_origin(DUNGEON),
+        );
+        let me = Place {
+            at: start.with_z(z),
+            cell,
+        };
+        let up = Place {
+            at: ledge.with_z(high + 0.8),
+            cell: ledge_cell,
+        };
+        let on = c.pathfinder.put_on_floor(me, up, cap);
+        let on = on.expect("a floor").expect("assembled");
+        assert_eq!(on.cell, ledge_cell);
+        assert!((on.at.z - high).abs() < 0.05, "{on:?}, the ledge at {high}");
     }
 }
