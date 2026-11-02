@@ -252,8 +252,19 @@ impl Client {
             // And so is whatever stands about while it is on its way
             // somewhere: the trip is the errand, not the road.
             && !self.passing_by(o, cfg)
-            // And one there is no getting to is not a fight on offer.
-            && !self.autoplay.given_up.within(&o.guid, now, GIVE_UP_FOR)
+            // And one there is no getting to is not a fight on offer, till it comes and attacks.
+            && (!self.autoplay.given_up.within(&o.guid, now, GIVE_UP_FOR)
+                || self.is_attacking_in_reach(o))
+    }
+
+    /// Whether `o` has come to the character: of a name that attacked it lately, and within a
+    /// swing's reach (`STICKY_REACH`, 3D), which a refused walk's goal up a wall or a ledge is not.
+    fn is_attacking_in_reach(&self, o: &ac_world::WorldObject) -> bool {
+        let near = |me: glam::Vec3| {
+            o.world_pos()
+                .is_some_and(|p| p.distance(me) <= crate::dodge::STICKY_REACH)
+        };
+        self.hit_lately_by(&o.name) && self.my_position().is_some_and(near)
     }
 
     /// [`Self::would_join`] asked of `guid`: the one gate a target the team proposes -- the leader's

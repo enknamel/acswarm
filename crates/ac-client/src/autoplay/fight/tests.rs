@@ -283,6 +283,32 @@ fn a_target_on_a_ledge_nothing_walks_to_is_given_up_at_once() {
     );
 }
 
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_target_given_up_that_comes_down_and_attacks_is_fought() {
+    // The ledge one is given up; it drops beside the character and hits it: it is fought.
+    let now = Instant::now();
+    let (mut c, on_ledge, on_floor) = tuskers_on_the_ledge_and_the_floor(now);
+    let cfg = c.autoplay.config.fight.clone();
+    c.give_up_target(on_ledge, "no way to it", now);
+    assert_eq!(c.pick_target(&cfg, now), Some(on_floor));
+    let me = c.my_position().expect("standing");
+    let cell = c.player.as_ref().map(|p| p.cell).expect("standing");
+    if let Some(t) = c.world.objects.get_mut(&on_ledge) {
+        t.position = crate::testkit::placed(cell, me + glam::Vec3::X);
+    }
+    c.autoplay.attacked_by("Female Tusker", Instant::now());
+    assert!(c.can_take_on(on_ledge, &cfg, true, now));
+    c.world.objects.remove(&on_floor);
+    assert_eq!(c.pick_target(&cfg, now), Some(on_ledge));
+    // Still up on its ledge, hit by another of its name: still given up.
+    let (mut c, on_ledge, on_floor) = tuskers_on_the_ledge_and_the_floor(now);
+    c.give_up_target(on_ledge, "no way to it", now);
+    c.autoplay.attacked_by("Female Tusker", Instant::now());
+    assert!(!c.can_take_on(on_ledge, &cfg, true, now));
+    assert_eq!(c.pick_target(&cfg, now), Some(on_floor));
+}
+
 /// [`tuskers_on_the_ledge_and_the_floor`] for a character with a mace in hand.
 fn with_a_mace(c: &mut Client) {
     let me = 0x5000_0001;
