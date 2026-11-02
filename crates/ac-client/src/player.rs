@@ -139,6 +139,8 @@ pub struct Player {
     /// ground: the distance to whatever it is walking to. Cleared by
     /// whoever is not steering it. See the walk.
     pub step_cap: Option<f32>,
+    /// The fastest the steering lets the body go (m/s): a drop is stepped off at its graph's pace.
+    pub pace_cap: Option<f32>,
     /// Terrain types that are open sea, read from the region on first
     /// use (see `sea_types`).
     sea_types: Option<Vec<bool>>,
@@ -450,6 +452,7 @@ impl Player {
             wedged_dir: Vec3::ZERO,
             wedged_rest: 0,
             step_cap: None,
+            pace_cap: None,
             sea_types: None,
             vz: 0.0,
             airborne: false,
@@ -1275,11 +1278,12 @@ impl Player {
 
     /// How fast the input asks the character to go on its feet.
     fn pace(&self, input: &Input) -> f32 {
-        if input.run {
+        let pace = if input.run {
             self.run_speed * self.run_rate * self.limits.clamp_speed_boost(self.speed_boost)
         } else {
             self.walk_speed
-        }
+        };
+        self.pace_cap.map_or(pace, |cap| pace.min(cap))
     }
 
     /// Remember where the character is as the floor it last stood on,
@@ -1931,6 +1935,33 @@ mod tests {
             let moved = c.my_position().unwrap().distance(at);
             assert!(moved > 1.0, "{at:?} heading {}: moved {moved:.2} m", k * 45);
         }
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn a_pace_cap_holds_the_body_to_it() {
+        // Open ground in Holtburg, run at for a second with the cap and without it.
+        let o = ac_world::landblock_origin(0xA9B4_0000);
+        let at = o + Vec3::new(84.0, 7.1, 94.0);
+        let run = Input {
+            forward: 1.0,
+            run: true,
+            ..Default::default()
+        };
+        let walked = |cap: Option<f32>| {
+            let mut c = crate::testkit::standing_in_the_field(20, 0xA9B4_0019, at - o);
+            let assets = c.assets.clone();
+            let pl = c.player.as_mut().unwrap();
+            let start = pl.world_position();
+            pl.pace_cap = cap;
+            for _ in 0..20 {
+                pl.update(&assets, &run, 0.05);
+            }
+            (pl.world_position() - start).truncate().length()
+        };
+        let capped = walked(Some(1.0));
+        assert!((0.8..=1.05).contains(&capped), "{capped:.2} m in 1 s");
+        assert!(walked(None) > 2.0 * capped, "the cap is all that held it");
     }
 
     #[test]
