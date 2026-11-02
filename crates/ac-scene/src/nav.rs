@@ -148,12 +148,7 @@ impl<'a> Ground<'a> {
     }
 
     /// The capsule fits at `feet`: touching no wall, head room above.
-    pub fn fits_here(&self, feet: Vec3, cap: &Capsule) -> bool {
-        self.fits(feet, cap)
-    }
-
-    /// The capsule fits at `feet`: touching no wall, head room above.
-    fn fits(&self, feet: Vec3, cap: &Capsule) -> bool {
+    pub(crate) fn fits(&self, feet: Vec3, cap: &Capsule) -> bool {
         if self
             .collision
             .wall_contact(feet, cap.radius, cap.height, cap.step_up)

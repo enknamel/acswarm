@@ -997,7 +997,7 @@ mod tests {
         g.build_all(&ground);
         let against = Vec3::new(cap.radius * 0.5, 0.0, 0.0);
         assert!(
-            !ground.fits_here(against, &cap),
+            !ground.fits(against, &cap),
             "the fixture is wrong: the capsule fits here"
         );
         let path = points(ask(
@@ -1179,7 +1179,7 @@ mod tests {
             "ends at the goal itself, in the wall"
         );
         assert!(
-            ground.fits_here(end, &cap) || end.x <= 8.0 - cap.radius + 0.05,
+            ground.fits(end, &cap) || end.x <= 8.0 - cap.radius + 0.05,
             "{end}"
         );
         // Nearer than the body comes is no way at all.

@@ -80,7 +80,7 @@ fn a_walk_into_sanamar_goes_round_the_walls_not_into_them() {
     let from = square + Vec3::new(130.0 * bearing.cos(), 130.0 * bearing.sin(), 0.0);
     let from = Vec3::new(from.x, from.y, area.terrain_at(from.x, from.y).unwrap());
     assert!(
-        !area.line_clear(from + Vec3::Z, square + Vec3::Z),
+        !ac_scene::nav::line_clear(&area.collision, from + Vec3::Z, square + Vec3::Z),
         "the wall should be between us and the square"
     );
     let path = area
