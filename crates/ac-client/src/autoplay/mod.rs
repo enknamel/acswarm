@@ -424,9 +424,6 @@ pub struct Autoplay {
     /// and the server answers in its own time; this is what stops the
     /// asking from running away.
     give_tries: crate::did::Patience<u32>,
-    /// The spot being walked to, how close it has been got to, and when
-    /// that last improved. See `Client::reaching_too_long`.
-    reaching: Option<(glam::Vec3, f32, Instant)>,
     pub(crate) last_merge: Option<Instant>,
     /// The pour asked for and not yet answered, and when it went out.
     /// Until the server has said, the counts the next pour would be

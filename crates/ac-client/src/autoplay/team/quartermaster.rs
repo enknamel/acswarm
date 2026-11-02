@@ -1,8 +1,8 @@
 use std::time::{Duration, Instant};
 
 use crate::autoplay::loot::choose::WILL_NOT_SPLIT;
-use crate::autoplay::loot::take::{REACH_GIVE_UP, REACH_PROGRESS};
 use crate::autoplay::{Doing, LootAction};
+use crate::did::Did;
 use crate::growth::Growth;
 use crate::Client;
 
@@ -152,18 +152,22 @@ impl Client {
             self.autoplay.growth.handed_over = true;
             return false;
         }
-        if !self.step_into_reach(mate.world) {
-            if self.reaching_too_long(mate.world, now) {
-                // Cannot get to them -- a wall, a different building,
-                // a floor above. The party is not held up over it.
+        match self.walk_into_reach(&mate, now) {
+            Did::Done => {}
+            // No walk there: a wall, another building, a floor above. The party is not held up.
+            Did::Blocked(why) => {
                 self.autoplay.growth.handed_over = true;
-                self.autoplay
-                    .note(format!("cannot get to {runner} to hand over"), now);
+                self.autoplay.note(
+                    format!("cannot get to {runner} to hand over ({})", why.what),
+                    now,
+                );
                 return false;
             }
-            self.autoplay
-                .say(Doing::Helping, format!("taking the loot to {runner}"));
-            return true;
+            _ => {
+                self.autoplay
+                    .say(Doing::Helping, format!("taking the loot to {runner}"));
+                return true;
+            }
         }
         if let Some((purse, amount)) = coin {
             // Part of a stack cannot be handed over as it stands: the
@@ -308,15 +312,20 @@ impl Client {
                 else {
                     continue;
                 };
-                if !self.step_into_reach(mate.world) {
-                    if self.reaching_too_long(mate.world, now) {
-                        self.autoplay
-                            .note(format!("cannot get to {who} to hand out"), now);
+                match self.walk_into_reach(&mate, now) {
+                    Did::Done => {}
+                    Did::Blocked(why) => {
+                        self.autoplay.note(
+                            format!("cannot get to {who} to hand out ({})", why.what),
+                            now,
+                        );
                         continue;
                     }
-                    self.autoplay
-                        .say(Doing::Helping, format!("taking {who} their supplies"));
-                    return true;
+                    _ => {
+                        self.autoplay
+                            .say(Doing::Helping, format!("taking {who} their supplies"));
+                        return true;
+                    }
                 }
                 let (guid, stack, name) = carried[0].clone();
                 let share = share.min(stack);
@@ -360,53 +369,23 @@ impl Client {
         (spare > 0).then_some((purse.0, spare))
     }
 
-    /// Walk towards a spot until close enough to hand something over.
-    /// True once in reach.
-    fn step_into_reach(&mut self, spot: glam::Vec3) -> bool {
+    /// Walk to `mate` until close enough to hand something over: `Done` once in reach (the walk
+    /// ended), else what the slot answers.
+    fn walk_into_reach(&mut self, mate: &crate::autoplay::Mate, now: Instant) -> Did {
         let Some(me) = self.my_position() else {
-            return false;
+            return Did::waiting("not in the world yet");
         };
-        if glam::Vec2::new(spot.x - me.x, spot.y - me.y).length() <= Self::REACH {
-            self.autoplay.reaching = None;
-            if self.going.take().is_some() {
-                self.steering.reset();
-            }
-            return true;
-        }
-        self.head_for(spot, Self::REACH * 0.6, "the spot");
-        false
-    }
-
-    /// Whether walking to `spot` has gone on too long to be walking any
-    /// more. Indoors a counter can stand behind a wall the steering
-    /// cannot get round, and a teammate can be in the next building;
-    /// without this the character presses towards it for ever.
-    ///
-    /// The clock starts when a new spot is aimed at and is reset by any
-    /// real progress towards it, so a long walk is fine and a stopped
-    /// one is not.
-    fn reaching_too_long(&mut self, spot: glam::Vec3, now: Instant) -> bool {
-        let Some(me) = self.my_position() else {
-            return false;
+        let flat = glam::Vec2::new(mate.world.x - me.x, mate.world.y - me.y).length();
+        let did = if flat <= Self::REACH {
+            Did::Done
+        } else {
+            let goal = self.mate_goal(mate, Self::REACH * 0.6);
+            self.go(self.step_owner(), goal, now)
         };
-        let away = glam::Vec2::new(spot.x - me.x, spot.y - me.y).length();
-        match self.autoplay.reaching {
-            Some((at, best, since)) if at.distance(spot) < 1.0 => {
-                if away < best - REACH_PROGRESS {
-                    self.autoplay.reaching = Some((spot, away, now));
-                    return false;
-                }
-                if now.duration_since(since) > REACH_GIVE_UP {
-                    self.autoplay.reaching = None;
-                    return true;
-                }
-                false
-            }
-            _ => {
-                self.autoplay.reaching = Some((spot, away, now));
-                false
-            }
+        if did == Did::Done {
+            self.stop_going(Some(self.step_owner()), "in reach to hand over");
         }
+        did
     }
 }
 
