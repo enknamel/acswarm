@@ -931,7 +931,7 @@ fn back_from_the_dead(c: &mut Client, t: Instant) -> Instant {
     let rec = &mut c.autoplay.recovery;
     rec.phase = crate::recovery::Phase::Landed;
     rec.since = t;
-    rec.death_xy = None;
+    rec.death = None;
     let t = t + Duration::from_secs(5);
     c.tick_autoplay(t);
     assert!(!c.autoplay.recovery.active(), "the recovery did not finish");

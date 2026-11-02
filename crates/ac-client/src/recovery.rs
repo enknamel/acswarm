@@ -26,6 +26,7 @@ use std::time::{Duration, Instant};
 use glam::{Vec2, Vec3};
 
 use crate::autoplay::{Doing, Release, CORPSE_REACH};
+use crate::body::server_walk::reached;
 use crate::did::Did;
 use crate::{Client, Goal};
 use ac_world::Place;
@@ -107,9 +108,6 @@ pub struct View {
     pub now: Instant,
     /// Health at zero, with a character sheet to say so.
     pub dead: bool,
-    /// Where the character stands (world xy) and its landblock.
-    pub xy: Vec2,
-    pub landblock: u32,
     /// Where the character stands, in its cell and on its floor: a corpse is gone back for there.
     pub place: Place,
     /// Our own corpse in view: its guid and how far off it is.
@@ -144,8 +142,8 @@ pub enum Action {
     Wait,
     /// Run the buff rule (the driver reports back when nothing is due).
     Buff,
-    /// Plan and start a journey to the spot.
-    Travel(Vec2),
+    /// Plan and start a journey to the place of the death.
+    Travel(Place),
     /// Open this corpse.
     Open(u32),
     /// Take everything out of this open corpse and close it.
@@ -162,9 +160,6 @@ pub struct Recovery {
     pub phase: Phase,
     /// When the phase began.
     pub since: Instant,
-    /// Where the character died (world xy) and in which landblock.
-    pub death_xy: Option<Vec2>,
-    pub death_block: u32,
     /// The place of the death, cell and floor ([`View::place`]).
     pub death: Option<Place>,
     /// The corpse being gone back for, once seen.
@@ -202,8 +197,6 @@ impl Default for Recovery {
         Recovery {
             phase: Phase::None,
             since: Instant::now(),
-            death_xy: None,
-            death_block: 0,
             death: None,
             corpse: None,
             wielded: Vec::new(),
@@ -280,8 +273,6 @@ impl Recovery {
         // death dropped what was left. Both lie at the death spot, so
         // the spot is the newer one, and the hands are remembered
         // across both.
-        self.death_xy = Some(v.xy);
-        self.death_block = v.landblock;
         self.death = Some(v.place);
         for g in &v.wielded {
             if !self.wielded.contains(g) {
@@ -351,8 +342,10 @@ impl Recovery {
                     return Action::Wait;
                 }
                 let alive = *self.alive_since.get_or_insert(now);
-                let moved = self.death_xy.is_some_and(|d| d.distance(v.xy) > TELEPORTED)
-                    || v.landblock != self.death_block;
+                let moved = self.death.is_some_and(|d| {
+                    d.at.truncate().distance(v.place.at.truncate()) > TELEPORTED
+                        || d.cell >> 16 != v.place.cell >> 16
+                });
                 if moved || now.duration_since(alive) >= ALIVE_SETTLE {
                     self.go(Phase::Landed, now);
                 }
@@ -362,7 +355,7 @@ impl Recovery {
                 if now.duration_since(self.since) < LANDED_SETTLE {
                     return Action::Wait;
                 }
-                if !v.recover || self.abandoned || self.death_xy.is_none() {
+                if !v.recover || self.abandoned || self.death.is_none() {
                     return self.finish(now);
                 }
                 self.buffs_done = false;
@@ -385,7 +378,7 @@ impl Recovery {
 
     fn step_returning(&mut self, v: &View) -> Action {
         let now = v.now;
-        let Some(spot) = self.death_xy else {
+        let Some(death) = self.death else {
             return self.finish(now);
         };
         if self.abandoned {
@@ -408,13 +401,13 @@ impl Recovery {
         }
         // A corpse in sight but out of reach is walked to, though its spot is near on the
         // flat: it lies on another floor (`a_corpse_on_another_floor_is_walked_to`).
-        if v.corpse.is_none() && spot.distance(v.xy) <= NEAR {
+        if v.corpse.is_none() && reached(v.place.at, death.at, NEAR) {
             self.go(Phase::Looting, now);
             return self.step_looting(v);
         }
         // The walk there is asked for again while it goes (a walk ends when its step stops asking).
         if v.walking {
-            return Action::Travel(spot);
+            return Action::Travel(death);
         }
         if self.replans >= MAX_REPLANS {
             tracing::info!("recovery: the way back keeps ending short, leaving the corpse");
@@ -428,7 +421,7 @@ impl Recovery {
         }
         self.replans += 1;
         self.last_plan = Some(now);
-        Action::Travel(spot)
+        Action::Travel(death)
     }
 
     fn step_looting(&mut self, v: &View) -> Action {
@@ -571,7 +564,6 @@ impl Client {
     fn recovery_view(&self, now: Instant) -> Option<View> {
         let pl = self.player.as_ref()?;
         let p = pl.world_position();
-        let xy = Vec2::new(p.x, p.y);
         let rec = &self.autoplay.recovery;
         let carried: Vec<u32> = rec
             .wielded
@@ -601,13 +593,11 @@ impl Client {
         Some(View {
             now,
             dead: self.is_dead(),
-            xy,
-            landblock: pl.cell >> 16,
             place: Place {
                 at: p,
                 cell: pl.cell,
             },
-            corpse: self.own_corpse(p, rec.death_xy),
+            corpse: self.own_corpse(p, rec.death.map(|d| d.at.truncate())),
             traveling: self.traveling(),
             walking: self.is_walking()
                 && self
@@ -632,7 +622,7 @@ impl Client {
             return false;
         };
         let was = self.autoplay.recovery.phase;
-        let corpse_spot = self.autoplay.recovery.death_xy;
+        let corpse_spot = self.autoplay.recovery.death.map(|d| d.at.truncate());
         let action = self.autoplay.recovery.step(&view);
         let phase = self.autoplay.recovery.phase;
         if was == Phase::None && phase == Phase::Dead {
@@ -655,7 +645,12 @@ impl Client {
             // up below would wait for a counter across the town (see
             // `Client::counter_left_behind`).
             self.counter_left_behind(now);
-            let spot = self.autoplay.recovery.death_xy.unwrap_or_default();
+            let spot = self
+                .autoplay
+                .recovery
+                .death
+                .map(|d| d.at)
+                .unwrap_or_default();
             tracing::info!(
                 "recovery: died at ({:.0}, {:.0}) with {} item(s) wielded",
                 spot.x,
@@ -693,13 +688,13 @@ impl Client {
                 }
                 true
             }
-            Action::Travel(spot) => {
+            Action::Travel(death) => {
                 let s = status(self);
                 self.autoplay.say(Doing::Recovering, s);
                 if self.combat {
                     self.toggle_combat();
                 }
-                let goal = self.way_back(spot);
+                let goal = self.way_back(death);
                 if let Did::Blocked(why) = self.go(self.step_owner(), goal, now) {
                     tracing::info!("recovery: no way back to the death spot: {}", why.what);
                     self.autoplay.recovery.no_way();
@@ -783,21 +778,16 @@ impl Client {
 
     /// The walk back for the corpse: to it when in view (it may lie on another floor), else to the
     /// place of the death, cell and floor, within [`NEAR`].
-    fn way_back(&mut self, spot: Vec2) -> Goal {
-        let me = self.my_position().unwrap_or_else(|| spot.extend(0.0));
-        if let Some((guid, _)) = self.own_corpse(me, Some(spot)) {
+    fn way_back(&mut self, death: Place) -> Goal {
+        let me = self.my_position().unwrap_or(death.at);
+        if let Some((guid, _)) = self.own_corpse(me, Some(death.at.truncate())) {
             return Goal::Near {
                 guid,
                 within: CORPSE_REACH / 2.0,
             };
         }
-        let place = self
-            .autoplay
-            .recovery
-            .death
-            .unwrap_or_else(|| self.place_at(spot.extend(me.z)));
         Goal::At {
-            place,
+            place: death,
             within: NEAR,
         }
     }
@@ -854,8 +844,6 @@ mod tests {
         View {
             now,
             dead: false,
-            xy: Vec2::new(1000.0, 1000.0),
-            landblock: 0xA9B4,
             place: Place::on_map(Vec2::new(1000.0, 1000.0)),
             corpse: None,
             traveling: false,
@@ -880,7 +868,7 @@ mod tests {
         v.dead = true;
         assert_eq!(r.step(&v), Action::Wait);
         assert_eq!(r.phase, Phase::Dead);
-        assert_eq!(r.death_xy, Some(Vec2::new(1000.0, 1000.0)));
+        assert_eq!(r.death, Some(Place::on_map(Vec2::new(1000.0, 1000.0))));
         assert_eq!(r.wielded, vec![0x8000_0001, 0x8000_0002]);
         assert_eq!(r.killer.as_deref(), Some("Drudge Slinker"));
         // Still dead a moment later.
@@ -888,7 +876,7 @@ mod tests {
         assert_eq!(r.step(&v), Action::Wait);
         // Alive at the lifestone, well away.
         v.dead = false;
-        v.xy = Vec2::new(1400.0, 1300.0);
+        v.place = Place::on_map(Vec2::new(1400.0, 1300.0));
         v.now = after(t0, 5.0);
         assert_eq!(r.step(&v), Action::Wait);
         assert_eq!(r.phase, Phase::Landed);
@@ -917,14 +905,17 @@ mod tests {
         r.buffs_done();
         v.now = after(t0, 14.0);
         // Off to the spot.
-        assert_eq!(r.step(&v), Action::Travel(Vec2::new(1000.0, 1000.0)));
+        assert_eq!(
+            r.step(&v),
+            Action::Travel(Place::on_map(Vec2::new(1000.0, 1000.0)))
+        );
         assert_eq!(r.phase, Phase::Returning);
         v.traveling = true;
         v.now = after(t0, 20.0);
         assert_eq!(r.step(&v), Action::Wait);
         // Arrived: the corpse is in view.
         v.traveling = false;
-        v.xy = Vec2::new(1003.0, 998.0);
+        v.place = Place::on_map(Vec2::new(1003.0, 998.0));
         v.corpse = Some((0xC000_0001, 4.0));
         v.now = after(t0, 60.0);
         assert_eq!(r.step(&v), Action::Open(0xC000_0001));
@@ -1029,8 +1020,7 @@ mod tests {
             cell: 0xA9B4_011B,
         };
         c.autoplay.recovery.death = Some(upstairs);
-        c.autoplay.recovery.death_xy = Some(upstairs.at.truncate());
-        let goal = c.way_back(upstairs.at.truncate());
+        let goal = c.way_back(upstairs);
         assert_eq!(
             goal,
             Goal::At {
@@ -1134,7 +1124,7 @@ mod tests {
         v.now = after(t0, 10.0);
         r.step(&v);
         // Arrived at the spot, nothing there.
-        v.xy = Vec2::new(1002.0, 1001.0);
+        v.place = Place::on_map(Vec2::new(1002.0, 1001.0));
         v.now = after(t0, 30.0);
         assert_eq!(r.step(&v), Action::Wait);
         assert_eq!(r.phase, Phase::Looting);
@@ -1153,7 +1143,7 @@ mod tests {
         r.step(&v);
         r.buffs_done();
         v.now = after(t0, 10.0);
-        v.xy = Vec2::new(1002.0, 1001.0);
+        v.place = Place::on_map(Vec2::new(1002.0, 1001.0));
         v.corpse = Some((0xC000_0001, 3.0));
         assert_eq!(r.step(&v), Action::Open(0xC000_0001));
         v.corpse = None;
@@ -1174,13 +1164,13 @@ mod tests {
         r.step(&v);
         // Killed again on the way.
         v.dead = true;
-        v.xy = Vec2::new(1010.0, 1005.0);
+        v.place = Place::on_map(Vec2::new(1010.0, 1005.0));
         v.now = after(t0, 40.0);
         assert_eq!(r.step(&v), Action::Wait);
         assert_eq!(r.phase, Phase::Dead);
         assert_eq!(r.deaths, 2);
         v.dead = false;
-        v.xy = Vec2::new(1400.0, 1300.0);
+        v.place = Place::on_map(Vec2::new(1400.0, 1300.0));
         v.now = after(t0, 45.0);
         r.step(&v);
         assert_eq!(r.phase, Phase::Landed);
@@ -1220,10 +1210,32 @@ mod tests {
         r.step(&v);
         r.buffs_done();
         // Back over the spot on the flat, the corpse a floor away.
-        v.xy = Vec2::new(1000.0, 1000.0);
+        v.place = Place::on_map(Vec2::new(1000.0, 1000.0));
         v.corpse = Some((0xC000_0001, 25.0));
         v.now = after(t0, 20.0);
-        assert_eq!(r.step(&v), Action::Travel(Vec2::new(1000.0, 1000.0)));
+        assert_eq!(
+            r.step(&v),
+            Action::Travel(Place::on_map(Vec2::new(1000.0, 1000.0)))
+        );
+        assert_eq!(r.phase, Phase::Returning);
+    }
+
+    #[test]
+    fn a_death_spot_a_floor_up_is_not_arrived_at_from_under_it() {
+        // Under the spot on the flat, a storey below it and no corpse in view: walked back up.
+        let t0 = Instant::now();
+        let mut r = Recovery::default();
+        let mut v = die_and_land(&mut r, t0);
+        let up = Place::on_map(Vec2::new(1000.0, 1000.0));
+        r.death = Some(Place {
+            at: up.at + Vec3::new(0.0, 0.0, 6.0),
+            ..up
+        });
+        r.step(&v);
+        r.buffs_done();
+        v.place = up;
+        v.now = after(t0, 20.0);
+        assert!(matches!(r.step(&v), Action::Travel(_)));
         assert_eq!(r.phase, Phase::Returning);
     }
 
@@ -1247,7 +1259,10 @@ mod tests {
         r.phase = Phase::Returning;
         r.since = t0;
         r.started = Some(t0);
-        r.death_xy = Some(at.truncate());
+        r.death = Some(Place {
+            at,
+            cell: 0xA9B4_0019,
+        });
         let dt = 0.05;
         for frame in 0..(10.0 / dt) as u32 {
             let now = t0 + Duration::from_secs_f32(frame as f32 * dt);
