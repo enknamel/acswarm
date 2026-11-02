@@ -932,3 +932,144 @@ fn a_journey_put_down_for_a_fight_is_resumed_to_its_place() {
     let end = c.travel_trip().and_then(|t| t.steps.last().cloned());
     assert_eq!(end, Some(Step::Walk(upstairs)));
 }
+
+/// The end of an autoplay tick in which `row` acted, as `tick_autoplay` closes one.
+fn tick_as(c: &mut Client, row: &'static str, now: Instant) {
+    c.autoplay.tick += 1;
+    c.frame_at = now;
+    c.autoplay.step = Some(row);
+    c.settle_going();
+}
+
+/// `n` frames of the body (`tick_player`) from `now`, a twentieth of a second apart, each waiting
+/// out the planner's thread as a frame's real time would; the clock after.
+fn frames(c: &mut Client, now: Instant, n: u32) -> Instant {
+    let mut t = now;
+    for _ in 0..n {
+        c.tick_player(crate::player::Input::default(), 0.05, t);
+        c.pathfinder.settle(Duration::from_secs(5));
+        t += Duration::from_millis(50);
+    }
+    t
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_journey_stands_while_its_row_stands_aside() {
+    // Grow's journey 250 m east of the Holtburg lifestone. While the fight row acts the stretch
+    // leaves the slot and the body stands, trip and step kept; grow acts again and it walks on.
+    let mut c = crate::testkit::standing_in_the_field(20, 0xA9B4_0019, Vec3::new(84.0, 7.1, 94.0));
+    c.autoplay.config.enabled = true;
+    let me = c.my_position().expect("on its feet");
+    c.autoplay.running = Some("grow");
+    let east = Place::on_map(me.truncate() + Vec2::new(250.0, 0.0));
+    c.frame_at = Instant::now();
+    assert!(c.journey_to(east, ARRIVE), "no way east");
+    c.autoplay.running = None;
+    let mut now = c.frame_at;
+    for _ in 0..10 {
+        tick_as(&mut c, "grow", now);
+        now = frames(&mut c, now, 2);
+    }
+    let walked = c.my_position().expect("on its feet");
+    assert!(walked.distance(me) > 2.0, "never walked");
+    let (trip, step) = (c.travel_trip().cloned(), c.travel_progress());
+    tick_as(&mut c, "fight", now);
+    now = frames(&mut c, now, 2);
+    let stood = c.my_position().expect("on its feet");
+    for _ in 0..20 {
+        tick_as(&mut c, "fight", now);
+        now = frames(&mut c, now, 2);
+        assert!(
+            c.going.as_ref().is_none_or(|g| !g.journey),
+            "a stretch walked"
+        );
+    }
+    let here = c.my_position().expect("on its feet");
+    assert!(
+        here.distance(stood) < 0.1,
+        "walked {:.1} m",
+        here.distance(stood)
+    );
+    assert!(c.traveling(), "the journey ended");
+    assert_eq!(
+        (c.travel_trip().cloned(), c.travel_progress()),
+        (trip, step)
+    );
+    let plans = c.pathfinder.plans;
+    for _ in 0..10 {
+        tick_as(&mut c, "grow", now);
+        now = frames(&mut c, now, 2);
+    }
+    let stretch = c.going.as_ref().filter(|g| g.journey).map(|g| g.owner);
+    assert_eq!(stretch, Some(crate::Owner::Step("grow")));
+    assert_eq!(c.pathfinder.plans, plans + 1, "not one stretch planned");
+    let on = c.my_position().expect("on its feet");
+    assert!(on.distance(here) > 2.0, "stood on after grow acted");
+}
+
+#[test]
+fn a_journey_of_no_row_says_travelling() {
+    // A script's journey, autoplay on and no row acting: the status says where it goes.
+    let mut c = crate::testkit::character_of_level(crate::testkit::no_data(), 20);
+    crate::testkit::stand(&mut c, 0xA9B4_0019, Vec3::new(84.0, 7.1, 94.0));
+    c.autoplay.config.enabled = true;
+    let me = c.my_position().expect("on its feet");
+    // Past the region, under way whatever the planner answers: offline there is no terrain.
+    c.travel_to(me.truncate() + Vec2::new(400.0, 0.0));
+    assert!(c.traveling(), "no journey");
+    c.tick_autoplay(Instant::now());
+    assert_eq!(c.autoplay.step, None, "a row acted");
+    assert_eq!(c.autoplay.doing, crate::autoplay::Doing::Traveling);
+    assert!(
+        c.autoplay.status.starts_with("travelling to"),
+        "{}",
+        c.autoplay.status
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_journey_put_down_for_a_fight_arrives_at_its_place() {
+    // A script's journey from the Holtburg lifestone to Archmage Cindrue upstairs; a swing breaks
+    // it off 5 s in, and the resume row walks it to her floor's cell.
+    let mut c = crate::testkit::standing_in_the_field(20, 0xA9B4_0019, Vec3::new(84.0, 7.1, 94.0));
+    c.autoplay.config.enabled = true;
+    let upstairs = Place {
+        at: ac_world::landblock_origin(0xA9B4_011B) + Vec3::new(152.3, 132.5, 69.0),
+        cell: 0xA9B4_011B,
+    };
+    c.frame_at = Instant::now();
+    assert!(c.journey_to(upstairs, ARRIVE), "no way upstairs");
+    let start = c.my_position().expect("on its feet");
+    let set_off = c.frame_at;
+    let mut now = frames(&mut c, set_off, 100);
+    assert!(
+        c.my_position().expect("on its feet").distance(start) > 5.0,
+        "never walked"
+    );
+    c.autoplay.running = Some("fight");
+    c.remember_journey();
+    c.interrupt_travel("attacking");
+    c.autoplay.running = None;
+    tick_as(&mut c, "fight", now);
+    assert!(!c.traveling(), "the swing left the journey under way");
+    for _ in 0..600 {
+        c.autoplay.running = Some("resume the journey");
+        let acted = c.autoplay_resume_journey();
+        c.autoplay.running = None;
+        if !acted {
+            break;
+        }
+        tick_as(&mut c, "resume the journey", now);
+        now = frames(&mut c, now, 2);
+    }
+    let pl = c.player.as_ref().expect("on its feet");
+    let me = pl.world_position();
+    assert!(!c.traveling(), "still travelling at {me}");
+    assert_eq!(pl.cell, 0xA9B4_011B, "ended at {me}");
+    assert!(
+        crate::body::server_walk::reached(me, upstairs.at, ARRIVE),
+        "{me}"
+    );
+}

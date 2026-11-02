@@ -733,6 +733,8 @@ impl Client {
             if let Some(g) = ac_world::hunting::at(lb) {
                 let (at, name) = (g.at, g.name.clone());
                 if self.grow_travel(g.place(), crate::autoplay::growth::hunt::GROUND_REACH) {
+                    // The walk to a ground is the grow row's errand, walked while it acts.
+                    self.take_journey(crate::Owner::Step(crate::autoplay::growth::GROW_ROW));
                     self.autoplay.growth.bound = Some((lb, at, name.clone()));
                     self.autoplay
                         .say(Doing::Traveling, format!("back to hunt {name}"));

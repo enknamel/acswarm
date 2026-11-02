@@ -4,11 +4,12 @@ use crate::Client;
 impl Client {
     /// A swing cancels the journey (the move-to and the trip cannot both
     /// steer). Note where it was going, so it is taken up again once
-    /// the fight is over.
+    /// the fight is over; a row's journey is held for its row instead.
     pub(crate) fn remember_journey(&mut self) {
         // Not following's own journey (following plans it again), nor any while led: a copy would
         // outlive a stop (`a_stop_leaves_no_old_aim_behind_when_a_fight_broke_the_journey_off`).
-        if self.traveling() && !self.is_follow_journey() && !self.is_led() {
+        let no_row = self.journey_row().is_none();
+        if self.traveling() && no_row && !self.is_follow_journey() && !self.is_led() {
             if let Some(goal) = self.journey_goal() {
                 self.autoplay.resume_trip = Some(goal);
                 self.autoplay.resume_about_the_ground = self.travel_about_the_ground();

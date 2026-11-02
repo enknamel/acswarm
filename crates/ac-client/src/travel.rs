@@ -129,6 +129,10 @@ pub struct Travel {
     owner: Option<Owner>,
     /// A step was left out: the next frame plans the journey again from where the body stands.
     pub(crate) replan_due: bool,
+    /// Its row did not act last tick: the stretch is let go and the body stands, trip and step kept.
+    held: bool,
+    /// Its row ran this tick and stood aside: unless a row takes it over, it ends at the tick's end.
+    row_aside: bool,
     /// Why the last journey was refused, for [`Client::set_off`] to answer with.
     why_refused: Option<String>,
     /// The last journey was broken off by something else the character
@@ -402,6 +406,8 @@ impl Client {
         self.travel.owner = Some(owner);
         self.travel.broken_off = false;
         self.travel.replan_due = false;
+        self.travel.held = false;
+        self.travel.row_aside = false;
         self.travel.why_refused = None;
         self.travel.last_seen = self.my_position().map(Vec3::truncate);
         self.travel_start_step();
@@ -519,7 +525,12 @@ impl Client {
     /// something else. A visit's own use takes the visit out first.
     pub(crate) fn interrupt_travel(&mut self, what: &str) {
         self.drop_visit(what);
-        if self.traveling() {
+        // Another row's journey is held while this row acts (`settle_journey`), not broken off.
+        let theirs = self
+            .autoplay
+            .running
+            .is_some_and(|r| self.journey_row().is_some_and(|j| j != r));
+        if self.traveling() && !theirs {
             tracing::info!("travel: stopped, {what}");
             self.end_trip();
             self.travel.broken_off = true;
@@ -578,6 +589,7 @@ impl Client {
         }
         let was = self.journey_owner();
         self.travel.owner = Some(owner);
+        self.travel.row_aside = false;
         if self.journey_owner() != was {
             tracing::info!(
                 "travel: {} takes the journey from {}",
@@ -585,6 +597,48 @@ impl Client {
                 was.label()
             );
         }
+    }
+
+    /// `row` ran and stood aside this tick: its journey ends at the tick's end unless taken over.
+    pub(crate) fn journey_row_aside(&mut self, row: &'static str) {
+        if self.journey_row() == Some(row) {
+            self.travel.row_aside = true;
+        }
+    }
+
+    /// End of a tick (`settle_going`): a row's journey walks on while its row acts, ends once its
+    /// row stood aside, and is held, its stretch let go and the body standing, while another acts.
+    pub(crate) fn settle_journey(&mut self) {
+        let aside = std::mem::take(&mut self.travel.row_aside);
+        let ticked = self.autoplay.config.enabled && self.world.player_guid.is_some();
+        let Some(row) = self.journey_row().filter(|_| ticked) else {
+            self.travel.held = false;
+            return;
+        };
+        if self.autoplay.step == Some(row) {
+            if std::mem::take(&mut self.travel.held) {
+                tracing::info!("travel: {row} acts again; its journey walks on");
+            }
+            return;
+        }
+        if aside {
+            tracing::info!("travel: {row} stood aside; its journey ends");
+            self.end_trip();
+            return;
+        }
+        if !self.travel.held {
+            let acting = self.autoplay.step.unwrap_or("nothing");
+            tracing::info!("travel: {row}'s journey held while {acting} acts");
+        }
+        self.travel.held = true;
+        // Standing at a mouth while held is not the portal refusing us.
+        self.travel.state.portal_since = None;
+        self.stop_stretch("held");
+    }
+
+    /// Whether the journey under way is held while a row other than its own acts.
+    pub(crate) fn is_journey_held(&self) -> bool {
+        self.traveling() && self.travel.held
     }
 
     /// Whether a journey to `goal` is under way, taken over for the running row if so.
@@ -658,6 +712,8 @@ impl Client {
         self.travel.goal = None;
         self.travel.owner = None;
         self.travel.replan_due = false;
+        self.travel.held = false;
+        self.travel.row_aside = false;
     }
 
     /// The portal the current step is aimed at: its name and its mouth.

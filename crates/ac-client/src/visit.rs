@@ -370,7 +370,8 @@ impl Client {
             v.goal = at;
             v.cell = cell;
         }
-        let traveling = self.traveling();
+        // A row's journey is not the visit's: the visit's own replaces it.
+        let traveling = self.traveling() && self.journey_row().is_none();
         let held = self.is_in_region(ac_world::Place {
             at: v.goal,
             cell: v.cell,

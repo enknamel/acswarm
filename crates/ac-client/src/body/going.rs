@@ -246,7 +246,9 @@ impl Client {
             return Did::blocked(why);
         }
         self.replace_walk(owner, me.at);
-        if !journey && self.traveling() {
+        // The journey's own owner wants something else; another row's journey is held meanwhile.
+        let ends = self.journey_row().is_none() || self.journey_owner() == owner;
+        if !journey && self.traveling() && ends {
             self.end_trip();
         }
         self.going = Some(Going {
@@ -334,6 +336,10 @@ impl Client {
     /// while the slot is free or the journey's; a step left out is planned again first, and with
     /// nothing to walk the stretch ends.
     pub(crate) fn walk_journey(&mut self, now: Instant) -> Option<Did> {
+        if self.is_journey_held() {
+            self.stop_stretch("held");
+            return None;
+        }
         if std::mem::take(&mut self.travel.replan_due) {
             return Some(self.plan_again(now));
         }
@@ -431,7 +437,7 @@ impl Client {
     }
 
     /// End a step's walk its row did not ask for this tick (end of `tick_autoplay`); a journey's
-    /// stretch is the journey's.
+    /// stretch is the journey's, settled by [`Client::settle_journey`].
     pub(crate) fn settle_going(&mut self) {
         let tick = self.autoplay.tick;
         if let Some(g) = self
@@ -441,6 +447,7 @@ impl Client {
             self.steering.reset();
             tracing::debug!("walk: {} stopped asking", g.owner.label());
         }
+        self.settle_journey();
     }
 
     /// Where the slot's walk is to this frame: the place, how near, and its cell (`tick_player`);

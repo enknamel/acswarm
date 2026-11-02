@@ -36,6 +36,11 @@ pub(super) fn need(kind: NeedKind, want: u32) -> Need {
 }
 
 #[test]
+fn the_grow_row_is_a_row_of_the_table() {
+    assert!(crate::steps::named(GROW_ROW).is_some());
+}
+
+#[test]
 fn a_long_list_is_cut_short() {
     assert_eq!(a_few(&[]), "nothing");
     assert_eq!(a_few(&["Myrrh"]), "Myrrh");

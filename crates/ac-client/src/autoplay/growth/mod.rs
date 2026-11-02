@@ -267,6 +267,9 @@ pub use ac_loot::sale::{
     fate, never_sell, never_sell_because, never_sell_carried, offer_to_vendor, Fate,
 };
 
+/// The STEPS row that hunts (`steps::STEPS`): the walk to a ground is its errand, whoever set it off.
+pub(crate) const GROW_ROW: &str = "grow";
+
 impl State {
     /// Let go of any journey the growth rules were part-way through.
     /// Used when the player takes the character back (see

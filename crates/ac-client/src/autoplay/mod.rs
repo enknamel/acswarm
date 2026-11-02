@@ -642,6 +642,7 @@ impl Client {
                 self.autoplay.step = Some(step.name);
                 return;
             }
+            self.journey_row_aside(step.name);
             self.aside(step.name, &did, now);
         }
         // The goals are weighed. Most say nothing and take their place
@@ -657,9 +658,17 @@ impl Client {
                 self.autoplay.step = Some(step.name);
                 return;
             }
+            self.journey_row_aside(step.name);
             self.aside(step.name, &did, now);
         }
         self.autoplay.step = None;
+        // A journey no row owns walks on by itself: said, not "waiting".
+        let no_row = self.traveling() && self.journey_row().is_none();
+        if let Some(to) = self.travel_goal_xy().filter(|_| no_row) {
+            let to = format!("travelling to {:.0}, {:.0}", to.x, to.y);
+            self.autoplay.say(Doing::Traveling, to);
+            return;
+        }
         let doing = self.autoplay.doing;
         if doing != Doing::Idle {
             self.autoplay.say(Doing::Idle, "waiting");
