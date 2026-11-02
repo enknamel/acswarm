@@ -308,3 +308,24 @@ fn the_stairs_from_an_upper_floor_are_found_without_its_drop() {
     let end = *path.last().unwrap();
     assert!((end.z - goal.z).abs() < 0.6, "ends at {end:?}");
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_hillside_steeper_than_a_stair_is_joined_on_the_outdoor_lattice() {
+    // A canyon wall at the corner of F884, F885, F984 and F985: its ground climbs 2.3 m and more
+    // between nodes 4 m apart, under ACE's walkable slope; down it and up the hill are both walks.
+    let assets = Assets::open(ac_dat::test_data_dir()).unwrap();
+    let cap = Capsule::default();
+    let corner = Vec3::new(47_808.0, 25_536.05, 63.98);
+    for goal in [
+        Vec3::new(47_808.0, 25_476.05, 63.03),
+        Vec3::new(47_786.5, 25_480.0, 103.88),
+        Vec3::new(47_778.2, 25_484.0, 112.27),
+    ] {
+        let mut area = Area::build(&assets, &blocks_for(corner, goal), &cap, 0xF985_0000).unwrap();
+        let path = area.with_ground(|ground, nav| route(ground, nav, corner, goal, 1.5));
+        let path = path.unwrap_or_else(|| panic!("no way from the corner to {goal}"));
+        let end = *path.last().unwrap();
+        assert!(end.distance(goal) <= 1.5 + 0.6, "ends at {end} for {goal}");
+    }
+}

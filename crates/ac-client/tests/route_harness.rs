@@ -80,6 +80,13 @@ fn known() -> Vec<Trial> {
         ),
         named(
             LEVEL,
+            "F985 from a four-block corner",
+            Vec3::new(47_808.0, 25_536.05, 64.0),
+            0xF985_0001,
+            Vec3::new(47_808.0, 25_476.05, 63.0),
+        ),
+        named(
+            LEVEL,
             "2CB5 coast block edge",
             Vec3::new(8_448.6, 34_823.9, 0.0),
             0x2CB5_0003,

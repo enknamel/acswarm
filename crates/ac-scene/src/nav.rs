@@ -24,6 +24,8 @@ const LEVEL_MERGE: f32 = 0.3;
 /// Largest height difference between two neighbouring nodes worth
 /// testing (stairs and ramps within one grid step).
 const MAX_EDGE_RISE: f32 = 2.0;
+/// Steepest ground stood on (rise over run), a normal z of `FloorZ` 0.66417 (PhysicsGlobals.cs:50).
+const WALKABLE_SLOPE: f32 = 1.1256;
 /// Ramp points stand this far apart (metres), well under an edge's [`MAX_EDGE_RISE`] up a slope.
 const RAMP_STEP: f32 = 1.0;
 /// A floor sloping between these (its normal's z) is a ramp: steeper is a wall, flatter is level
@@ -217,7 +219,7 @@ impl<'a> Ground<'a> {
         b: &NavNode,
         cap: &Capsule,
     ) -> (Option<EdgeKind>, Option<EdgeKind>) {
-        if (a.pos.z - b.pos.z).abs() > MAX_EDGE_RISE
+        if (a.pos.z - b.pos.z).abs() > edge_rise(a.pos, b.pos)
             || !is_chest_clear(self.collision, a.pos, b.pos)
         {
             return (None, None);
@@ -662,6 +664,12 @@ pub fn line_clear(collision: &CollisionWorld, a: Vec3, b: Vec3) -> bool {
 /// either end is ([`line_clear`] levels a ray that goes down), so a stair is climbed as walked down.
 pub fn is_chest_clear(collision: &CollisionWorld, a: Vec3, b: Vec3) -> bool {
     line_clear(collision, a, b) || line_clear(collision, b, a)
+}
+
+/// The most two nodes `a`, `b` may differ in height and still be tested as an edge: a stair's
+/// rise, or the steepest ground stood on over their flat distance (a 4 m lattice's hillsides).
+fn edge_rise(a: Vec3, b: Vec3) -> f32 {
+    MAX_EDGE_RISE.max(flat(b - a).length() * WALKABLE_SLOPE)
 }
 
 pub(crate) fn flat(v: Vec3) -> Vec2 {
