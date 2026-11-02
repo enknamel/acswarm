@@ -233,3 +233,73 @@ fn a_journey_set_off_frees_the_slot_for_its_leg() {
     assert!(leg.as_ref().is_some_and(Did::fine), "{leg:?}");
     assert_eq!(c.going.as_ref().map(|g| g.owner), Some(Owner::Journey));
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_refusal_stands_while_another_goal_holds_the_slot() {
+    // Each tick the salvager under the ledge is refused, and the fight's walk on the floor goes on.
+    let (mut c, ledge) = under_the_ledge();
+    let now = Instant::now();
+    let (salvage, fight) = (Owner::Step("salvage"), Owner::Step("fight"));
+    let up = Goal::At {
+        place: ledge,
+        within: 1.5,
+    };
+    let me = c.my_position().expect("standing");
+    let place = c
+        .standable_near(me, 8.0)
+        .into_iter()
+        .find(|p| p.at.distance(me) > 3.0)
+        .expect("floor round the start");
+    let floor = Goal::At { place, within: 1.0 };
+    let mut plans = None;
+    for tick in 0..6 {
+        c.autoplay.tick = tick;
+        assert!(matches!(c.go(salvage, up, now), Did::Blocked(_)));
+        assert_eq!(c.go(fight, floor, now), Did::Acting, "tick {tick}");
+        assert_eq!(c.going.as_ref().map(|g| g.owner), Some(fight));
+        assert_eq!(*plans.get_or_insert(c.pathfinder.plans), c.pathfinder.plans);
+    }
+    // One owner asking for both, as the quartermaster's hand-out round does: planned once each.
+    let qm = Owner::Step("quartermaster");
+    for tick in 6..12 {
+        c.autoplay.tick = tick;
+        assert!(matches!(c.go(qm, up, now), Did::Blocked(_)));
+        assert_eq!(c.go(qm, floor, now), Did::Acting, "tick {tick}");
+    }
+    assert_eq!(c.pathfinder.plans, plans.unwrap_or(0) + 2);
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_walk_already_arrived_leaves_the_slot_alone() {
+    // Back at the way in already: the explorer's walk is not taken, so it is not told so.
+    let mut c = at_holtburg();
+    let now = Instant::now();
+    let (keep, explore) = (Owner::Step("keep to the area"), Owner::Step("explore"));
+    let room = east(&c, 20.0);
+    let here = east(&c, 0.0);
+    for tick in 0..4 {
+        c.autoplay.tick = tick;
+        assert_eq!(c.go(keep, here, now), Did::Done);
+        assert_eq!(c.go(explore, room, now), Did::Acting, "tick {tick}");
+    }
+    assert_eq!(c.going.as_ref().map(|g| g.owner), Some(explore));
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_flown_walk_goes_straight_whatever_the_planner_says() {
+    let (mut c, ledge) = under_the_ledge();
+    if let Some(p) = c.player.as_mut() {
+        p.noclip = true;
+    }
+    let goal = Goal::At {
+        place: ledge,
+        within: 1.5,
+    };
+    let later = Instant::now() + GIVE_UP_AFTER * 2;
+    assert_eq!(c.go(Owner::Hand, goal, Instant::now()), Did::Acting);
+    assert_eq!(c.go(Owner::Hand, goal, later), Did::Acting);
+    assert_eq!(c.going_to().map(|(at, ..)| at), Some(ledge.at));
+}

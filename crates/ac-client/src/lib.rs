@@ -355,6 +355,8 @@ pub struct Client {
     pub going: Option<Going>,
     /// The owner whose walk was taken, and who took it: told once, on its next ask.
     taken: Option<(Owner, Owner)>,
+    /// The walks lately answered no way, by owner and goal (see `body::going::Refusal`).
+    refusals: Vec<body::going::Refusal>,
     /// The thing a server walk was for that the follower found no way to (see `tick_player`).
     pub server_walk_refused: Option<u32>,
     /// The time of the frame under way (`tick_autoplay`, `tick_player`): the walk clock of a caller

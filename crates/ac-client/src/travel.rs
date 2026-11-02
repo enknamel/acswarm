@@ -1637,12 +1637,12 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn autoplays_walk_ends_when_autoplay_is_switched_off() {
         // Blargerton, autoplay switched off in the Holtburg Dungeon: the walk it had set stayed on
         // the body and walked him on after the recall, then stood 25 min on "no way".
         let now = Instant::now();
-        let mut c = crate::testkit::offline_client();
-        crate::testkit::stand(&mut c, 0xA9B4_0019, Vec3::new(84.0, 84.0, 94.0));
+        let mut c = crate::testkit::standing_at(0xA9B4_0019, Vec3::new(84.0, 84.0, 94.0));
         c.world.player_guid = Some(crate::testkit::ME);
         c.autoplay.config.enabled = true;
         c.tick_autoplay(now);
@@ -1662,10 +1662,10 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_walk_left_behind_by_a_recall_is_let_go() {
         let now = Instant::now();
-        let mut c = crate::testkit::offline_client();
-        crate::testkit::stand(&mut c, 0xA9B4_0019, Vec3::new(84.0, 84.0, 94.0));
+        let mut c = crate::testkit::standing_at(0xA9B4_0019, Vec3::new(84.0, 84.0, 94.0));
         let me = c.my_position().unwrap();
         let near = crate::Goal::At {
             place: c.place_at(me + Vec3::new(30.0, 0.0, 0.0)),

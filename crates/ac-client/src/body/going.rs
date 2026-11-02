@@ -1,7 +1,7 @@
 //! The slot: the one walk the body follows, asked for by one owner ([`Client::go`]) and answered
-//! truthfully. A new walk is planned whole on the asking frame and handed to the follower; a
-//! step's walk ends the tick its step stops asking; [`GIVE_UP_AFTER`] is the one give-up. A
-//! journey's leg is walked here too (`walk_leg`), while no other owner holds the slot.
+//! truthfully. A new walk is planned whole on the asking frame and handed to the follower, and a
+//! refusal is kept per owner and goal; a step's walk ends the tick its step stops asking;
+//! [`GIVE_UP_AFTER`] is the one give-up. A journey's leg is walked here while no other walk is.
 
 use std::time::{Duration, Instant};
 
@@ -18,6 +18,19 @@ use crate::Client;
 /// A walk making no progress along any route for this long is given up: the one give-up, where
 /// the loot walk, counter, explore, fight approach, quartermaster, academy and visit kept clocks.
 pub const GIVE_UP_AFTER: Duration = Duration::from_secs(20);
+
+/// The refusals kept (`Client.refusals`): more than the goals one tick asks for, a mate each.
+const REFUSALS_KEPT: usize = 16;
+
+/// A goal answered no way for an owner, from where the body stood and where the goal was then.
+#[derive(Clone, Debug)]
+pub(crate) struct Refusal {
+    owner: Owner,
+    goal: Goal,
+    from: Vec3,
+    there: Vec3,
+    why: String,
+}
 
 /// Who asked for a walk: a STEPS row, or something outside the step table.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -101,8 +114,8 @@ pub struct Going {
     asked: u64,
     /// When the walk last made progress along any of its routes, or began.
     progressed: Instant,
-    /// Where the body stood when the walk was answered no way, and why: it stands while it does.
-    refused: Option<(Vec3, String)>,
+    /// Why the walk was answered no way (kept in `Client.refusals` too): the body stands.
+    refused: Option<String>,
     /// Given up ([`GIVE_UP_AFTER`]): the body stands.
     given_up: bool,
 }
@@ -134,14 +147,22 @@ impl Client {
         let Some(place) = self.goal_place(goal) else {
             return Did::blocked("not in view");
         };
-        let tick = self.autoplay.tick;
-        if let Some(g) = self.going.as_mut().filter(|g| {
-            g.owner == owner
-                && g.goal.is_same(goal)
-                && g.refused
-                    .as_ref()
-                    .is_none_or(|(at, _)| at.distance(me.at) <= REPLAN_DISTANCE)
+        // A refusal stands while the body and the goal stand where they were, whatever took the slot.
+        self.refusals
+            .retain(|r| r.from.distance(me.at) <= REPLAN_DISTANCE);
+        if let Some(r) = self.refusals.iter().find(|r| {
+            r.owner == owner
+                && r.goal.is_same(goal)
+                && r.there.distance(place.at) <= REPLAN_DISTANCE
         }) {
+            return Did::blocked(r.why.clone());
+        }
+        let tick = self.autoplay.tick;
+        if let Some(g) = self
+            .going
+            .as_mut()
+            .filter(|g| g.owner == owner && g.goal.is_same(goal) && g.refused.is_none())
+        {
             g.goal = goal;
             g.asked = tick;
             return self.answer_going(me.at, place, now);
@@ -149,8 +170,24 @@ impl Client {
         self.start_going(owner, goal, me, place, now)
     }
 
-    /// A new walk for `owner`, planned here and handed to the follower. It ends a journey without
-    /// breaking it off: a detour that comes back (corpse, fight, use) says so with `interrupt_travel`.
+    /// Keep `owner`'s refusal of `goal` (`Client.refusals`), in place of an older one for it.
+    fn refuse(&mut self, owner: Owner, goal: Goal, from: Vec3, there: Vec3, why: &str) {
+        self.refusals
+            .retain(|r| !(r.owner == owner && r.goal.is_same(goal)));
+        if self.refusals.len() >= REFUSALS_KEPT {
+            self.refusals.remove(0);
+        }
+        self.refusals.push(Refusal {
+            owner,
+            goal,
+            from,
+            there,
+            why: why.to_string(),
+        });
+    }
+
+    /// A new walk for `owner`, planned here and handed to the follower; arrived or refused, the slot
+    /// is left as it was. A walk ends a journey without breaking it off (`interrupt_travel` does).
     fn start_going(
         &mut self,
         owner: Owner,
@@ -160,21 +197,23 @@ impl Client {
         now: Instant,
     ) -> Did {
         // A journey's leg is the planner's to refuse; any other goal past the region is a journey,
-        // whose leg keeps the slot while it is under way.
+        // whose leg takes the slot.
         if owner != Owner::Journey && !self.is_in_region(place) {
-            if self.has_walk_besides(Owner::Journey) {
-                self.replace_walk(owner);
-            }
-            if self.traveling() {
-                return Did::Acting;
-            }
             let xy = place.at.truncate();
-            let planned = if place.is_indoors() {
-                self.plan_trip_in(xy, place.cell)
-            } else {
-                self.plan_trip(xy)
-            };
+            let planned = self.traveling()
+                || if place.is_indoors() {
+                    self.plan_trip_in(xy, place.cell)
+                } else {
+                    self.plan_trip(xy)
+                };
             if planned {
+                if self
+                    .going
+                    .as_ref()
+                    .is_some_and(|g| g.owner != Owner::Journey)
+                {
+                    self.replace_walk(owner, me.at);
+                }
                 return Did::Acting;
             }
             tracing::info!(
@@ -182,9 +221,25 @@ impl Client {
                 owner.label(),
                 place.at
             );
-            return Did::blocked("no way there from here");
+            let why = "no way there from here";
+            self.refuse(owner, goal, me.at, place.at, why);
+            return Did::blocked(why);
         }
-        self.replace_walk(owner);
+        let within = goal.within();
+        if reached(me.at, place.at, within) {
+            return Did::Done;
+        }
+        // Flown, the body goes straight there (`tick_player`): nothing is planned.
+        let planned = (!self.noclip()).then(|| self.plan_walk(place, within));
+        if let Some(Planned::NoWay(why)) = planned {
+            let why = format!(
+                "no way there: {:?}",
+                ac_nav::steering::Unreachable::Planner(why)
+            );
+            self.refuse(owner, goal, me.at, place.at, &why);
+            return Did::blocked(why);
+        }
+        self.replace_walk(owner, me.at);
         if owner != Owner::Journey && self.traveling() {
             self.end_trip();
         }
@@ -196,22 +251,9 @@ impl Client {
             refused: None,
             given_up: false,
         });
-        let within = goal.within();
-        if reached(me.at, place.at, within) {
-            return Did::Done;
-        }
-        let planned = self.plan_walk(place, within);
-        if self.move_to.is_none() {
+        // While the server walks, the follower is its; the slot's walk is steered once it is done.
+        if let Some(planned) = planned.filter(|_| self.move_to.is_none()) {
             self.steering.adopt(me.at, me, place, within, planned, now);
-        } else if let Planned::NoWay(why) = planned {
-            // The server's walk has the follower; the refusal is kept here until it is done.
-            let why = format!(
-                "no way there: {:?}",
-                ac_nav::steering::Unreachable::Planner(why)
-            );
-            if let Some(g) = self.going.as_mut() {
-                g.refused = Some((me.at, why));
-            }
         }
         self.answer_going(me.at, place, now)
     }
@@ -220,41 +262,49 @@ impl Client {
     fn answer_going(&mut self, me: Vec3, place: Place, now: Instant) -> Did {
         let unreachable = self.steering.unreachable(place.at);
         let progress = self.steering.last_progress();
+        let flown = self.noclip();
         let Some(g) = self.going.as_mut() else {
             return Did::Acting;
         };
         if reached(me, place.at, g.goal.within()) {
             return Did::Done;
         }
-        if g.refused.is_none() {
-            if let Some(why) = unreachable {
-                g.refused = Some((me, format!("no way there: {why:?}")));
-            }
+        // Flown, there is no route to refuse or to make progress along.
+        if flown {
+            return Did::Acting;
         }
-        if let Some((_, why)) = &g.refused {
-            return Did::blocked(why.clone());
+        let (owner, goal) = (g.owner, g.goal);
+        if let Some(why) = unreachable {
+            let why = format!("no way there: {why:?}");
+            g.refused = Some(why.clone());
+            self.refuse(owner, goal, me, place.at, &why);
+            return Did::blocked(why);
         }
         g.progressed = progress.map_or(g.progressed, |p| p.max(g.progressed));
         if now.saturating_duration_since(g.progressed) >= GIVE_UP_AFTER {
             tracing::info!(
                 "walk: {} given up, no progress for {GIVE_UP_AFTER:?}",
-                g.owner.label()
+                owner.label()
             );
+            let why = "no way there: no progress";
             g.given_up = true;
-            g.refused = Some((me, "no way there: no progress".into()));
-            return Did::blocked("no way there: no progress");
+            g.refused = Some(why.into());
+            self.refuse(owner, goal, me, place.at, why);
+            return Did::blocked(why);
         }
         Did::Acting
     }
 
-    /// End the walk in the slot for `owner`'s new one, logged and told to its owner when another's.
-    fn replace_walk(&mut self, owner: Owner) {
+    /// End the walk in the slot for `owner`'s new one. A walk still followed is told, once, who
+    /// took it (logged); one arrived, refused or given up has nothing left to lose.
+    fn replace_walk(&mut self, owner: Owner, me: Vec3) {
+        let followed = self.going.as_ref().is_some_and(|g| self.is_followed(g, me));
         let Some(old) = self.going.take() else {
             return;
         };
         self.steering.reset();
         // A journey's leg asks again only once the slot is free: nothing to tell it.
-        if old.owner != owner && old.owner != Owner::Journey {
+        if old.owner != owner && old.owner != Owner::Journey && followed {
             tracing::info!(
                 "walk: {} takes the walk from {}",
                 owner.label(),
@@ -262,6 +312,15 @@ impl Client {
             );
             self.taken = Some((old.owner, owner));
         }
+    }
+
+    /// Whether `g` is still being followed from `me`: not refused, given up or arrived.
+    fn is_followed(&self, g: &Going, me: Vec3) -> bool {
+        g.refused.is_none()
+            && !g.given_up
+            && self
+                .goal_place(g.goal)
+                .is_some_and(|p| !reached(me, p.at, g.goal.within()))
     }
 
     /// The journey's leg asked of the slot while it is free or the journey's (`tick_player`), and
@@ -273,7 +332,7 @@ impl Client {
             self.stop_going(Some(Owner::Journey), "no leg to walk");
             return None;
         };
-        if self.has_walk_besides(Owner::Journey) {
+        if self.holds_walk_besides(Owner::Journey) {
             return None;
         }
         let goal = Goal::At {
@@ -294,9 +353,14 @@ impl Client {
         }
     }
 
-    /// Whether the slot holds a walk of an owner other than `owner`.
-    fn has_walk_besides(&self, owner: Owner) -> bool {
-        self.going.as_ref().is_some_and(|g| g.owner != owner)
+    /// Whether the slot holds a walk of an owner other than `owner` still being followed.
+    fn holds_walk_besides(&self, owner: Owner) -> bool {
+        let Some(me) = self.my_position() else {
+            return false;
+        };
+        self.going
+            .as_ref()
+            .is_some_and(|g| g.owner != owner && self.is_followed(g, me))
     }
 
     /// Whether the slot holds a walk being followed: neither refused nor given up.

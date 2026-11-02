@@ -109,12 +109,13 @@ fn stopping_following_ends_the_journey_after_the_leader() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_stop_leaves_no_old_aim_behind_when_a_fight_broke_the_journey_off() {
     // The round-3 failure. A fight breaks the journey after a far leader off and puts it aside for
     // "resume the journey"; following, above that row, re-aims at the leader's new spot; the
     // player stops following. The copy put aside named where the leader had been, a stop keyed
     // on the new aim missed it, and the character set off for the old spot.
-    let mut c = following(400.0);
+    let mut c = following_over(testkit::game_data(), 400.0);
     let now = Instant::now();
     c.tick_autoplay(now);
     let first = leader_xy(&c);

@@ -153,6 +153,7 @@ impl Client {
             pending_jump: None,
             going: None,
             taken: None,
+            refusals: Vec::new(),
             server_walk_refused: None,
             frame_at: Instant::now(),
             dodge_to: None,
