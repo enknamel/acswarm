@@ -123,7 +123,7 @@ impl Client {
         }) else {
             return Did::waiting("not in the world yet");
         };
-        if owner != Owner::Visit {
+        if !matches!(owner, Owner::Visit | Owner::Journey) {
             self.drop_visit(owner.label());
         }
         if let Some((_, by)) = self.taken.filter(|(was, _)| *was == owner) {
@@ -158,8 +158,12 @@ impl Client {
         place: Place,
         now: Instant,
     ) -> Did {
-        self.replace_walk(owner);
-        if !self.is_in_region(place) {
+        // A journey's leg is the planner's to refuse; any other goal past the region is a journey,
+        // whose leg keeps the slot while it is under way.
+        if owner != Owner::Journey && !self.is_in_region(place) {
+            if self.has_walk_besides(Owner::Journey) {
+                self.replace_walk(owner);
+            }
             if self.traveling() {
                 return Did::Acting;
             }
@@ -179,7 +183,8 @@ impl Client {
             );
             return Did::blocked("no way there from here");
         }
-        if self.traveling() {
+        self.replace_walk(owner);
+        if owner != Owner::Journey && self.traveling() {
             self.end_trip();
         }
         self.going = Some(Going {
@@ -247,7 +252,8 @@ impl Client {
             return;
         };
         self.steering.reset();
-        if old.owner != owner {
+        // A journey's leg asks again only once the slot is free: nothing to tell it.
+        if old.owner != owner && old.owner != Owner::Journey {
             tracing::info!(
                 "walk: {} takes the walk from {}",
                 owner.label(),
@@ -257,12 +263,39 @@ impl Client {
         }
     }
 
+    /// The journey's leg asked of the slot while it is free or the journey's (`tick_player`), and
+    /// refused when the slot refuses it; the journey's walk ends when it has no leg.
+    pub(crate) fn walk_leg(&mut self, now: Instant) -> Option<Did> {
+        let leg = self.travel_goal(now);
+        self.travel.leg_refused = false;
+        let Some((at, within, cell)) = leg else {
+            self.stop_going(Some(Owner::Journey), "no leg to walk");
+            return None;
+        };
+        if self.has_walk_besides(Owner::Journey) {
+            return None;
+        }
+        let goal = Goal::At {
+            place: Place { at, cell },
+            within,
+        };
+        let did = self.go(Owner::Journey, goal, now);
+        // Flown, a leg goes straight there whatever the planner says.
+        self.travel.leg_refused = matches!(did, Did::Blocked(_)) && !self.noclip();
+        Some(did)
+    }
+
     /// End `owner`'s walk, if the slot holds it (any owner's with `None`), saying `why`.
     pub fn stop_going(&mut self, owner: Option<Owner>, why: &str) {
         if let Some(g) = self.going.take_if(|g| owner.is_none_or(|o| g.owner == o)) {
             self.steering.reset();
             tracing::debug!("walk: {}'s let go: {why}", g.owner.label());
         }
+    }
+
+    /// Whether the slot holds a walk of an owner other than `owner`.
+    fn has_walk_besides(&self, owner: Owner) -> bool {
+        self.going.as_ref().is_some_and(|g| g.owner != owner)
     }
 
     /// Whether the slot holds a walk being followed: neither refused nor given up.

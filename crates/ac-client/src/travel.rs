@@ -282,10 +282,9 @@ impl Client {
     /// right now (`castable_recalls`) unless the journey's `Prefs` say
     /// `use_recalls: false`. False when nothing reaches the goal.
     ///
-    /// A journey asked for from outside ends any visit being made.
+    /// A journey asked for from outside ends any visit being made, and the walk in the slot.
     pub fn travel_to(&mut self, goal: Vec2) -> bool {
-        self.drop_visit("travelling somewhere else");
-        self.plan_trip(goal)
+        self.travel_to_in(goal, 0)
     }
 
     /// [`travel_to`](Self::travel_to) somewhere about the character's own
@@ -322,7 +321,15 @@ impl Client {
     /// `plan_trip_in`.
     pub fn travel_to_in(&mut self, goal: Vec2, cell: u32) -> bool {
         self.drop_visit("travelling somewhere else");
-        self.plan_trip_in(goal, cell)
+        let planned = if cell == 0 {
+            self.plan_trip(goal)
+        } else {
+            self.plan_trip_in(goal, cell)
+        };
+        if planned {
+            self.stop_going(None, "a journey sets off");
+        }
+        planned
     }
 
     /// [`travel_to`](Self::travel_to) from inside: planning the way again
@@ -1799,21 +1806,21 @@ mod tests {
         assert_eq!(leg_height(None, next_door, me, false), 0.0);
     }
 
-    /// Walk the journey the client is on for up to `seconds` of game
-    /// time, frame by frame the way `tick_player` does: the journey's leg,
-    /// the steering toward it, the player's own physics. Stops when the
-    /// journey ends.
-    fn walk_the_journey(c: &mut Client, seconds: f32) {
+    /// Walk the journey the client is on for up to `seconds` of game time, frame by frame the way
+    /// `tick_player` does: the leg asked of the slot, the steering toward it, the player's own
+    /// physics. Stops when the journey ends; the last answer the slot gave its leg.
+    fn walk_the_journey(c: &mut Client, seconds: f32) -> Option<crate::did::Did> {
         use crate::player::Input;
         let dt = 1.0 / 20.0;
         let t0 = Instant::now();
+        let mut last = None;
         for frame in 0..(seconds / dt) as u32 {
             let now = t0 + Duration::from_secs_f32(frame as f32 * dt);
-            let goal = c.travel_goal(now);
-            if goal.is_none() && !c.traveling() {
-                return;
+            if !c.traveling() {
+                return last;
             }
-            c.travel.leg_refused = false;
+            last = c.walk_leg(now).or(last);
+            let goal = c.going_to();
             let pl = c.player.as_mut().unwrap();
             let mut input = Input::default();
             pl.step_cap = None;
@@ -1827,7 +1834,6 @@ mod tests {
                         };
                         let to = ac_world::Place { at: g, cell };
                         let aim = c.steering.steer(&mut standing, to, stop, now);
-                        c.travel.leg_refused = aim == ac_nav::Aim::NoWay;
                         if let ac_nav::Aim::Go(at) = aim {
                             let d = at - pl.world_position();
                             let flat = Vec2::new(d.x, d.y);
@@ -1845,6 +1851,7 @@ mod tests {
             }
             pl.update(&c.assets, &input, dt);
         }
+        last
     }
 
     #[test]
@@ -2299,13 +2306,17 @@ mod tests {
         crate::testkit::stand(&mut c, cell, start.with_z(z) - origin);
         c.steering.reset();
         assert!(c.plan_trip_in(ledge.truncate(), ledge_cell), "no journey");
-        // Each of the REPLANS plans again is refused once its ask is let through (ASK_EVERY, 1.5 s).
-        walk_the_journey(&mut c, STUCK_AFTER.as_secs_f32());
+        // Each of the REPLANS plans again is refused by the slot on the frame it is asked.
+        let last = walk_the_journey(&mut c, STUCK_AFTER.as_secs_f32());
         assert!(!c.traveling(), "the no way waited for a clock");
-        let refusal = c.steering.unreachable(ledge.with_z(high));
+        let refusal = last
+            .as_ref()
+            .and_then(|d| d.because())
+            .map(|b| b.what.clone());
         assert!(
-            matches!(refusal, Some(ac_nav::steering::Unreachable::Planner(_))),
-            "{refusal:?}"
+            refusal.as_ref().is_some_and(|why| why.contains("Planner")),
+            "{refusal:?} to {:?}",
+            ledge.with_z(high)
         );
         let me = c.my_position().unwrap();
         assert!(
