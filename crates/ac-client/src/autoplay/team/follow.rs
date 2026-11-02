@@ -2,6 +2,7 @@ use std::time::{Duration, Instant};
 
 use super::view::Mate;
 use crate::autoplay::{Doing, Release};
+use crate::body::server_walk::reached;
 use crate::did::Did;
 use crate::{Client, Owner};
 
@@ -95,8 +96,8 @@ impl Client {
         if self.is_follow_journey() {
             self.keep_journey();
         }
-        let level = !leader.flying || (leader.world.z - me.z).abs() < 2.0;
-        if flat <= keep && level {
+        // Beside it on its floor; a leader on the floor above is walked up to, not stood under.
+        if reached(me, leader.world, keep) {
             self.stop_at_leader();
             return false;
         }
@@ -127,7 +128,7 @@ impl Client {
                     self.cancel_travel();
                 }
                 match self.go(self.step_owner(), self.mate_goal(&leader, keep), now) {
-                    Did::Done if level => {
+                    Did::Done => {
                         self.stop_at_leader();
                         return false;
                     }

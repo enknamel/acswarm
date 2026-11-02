@@ -561,3 +561,50 @@ fn a_follower_in_a_dungeon_keeps_to_its_leader_rather_than_exploring() {
         "it walked off to a room"
     );
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_leader_on_the_floor_above_is_walked_up_to_not_stood_under() {
+    // The jeweler's deck at F682 stands 11.5 m over the ground below it, the same spot on the map:
+    // a leader up there is not beside a follower standing under it.
+    let t = crate::walk_trial::named(
+        20,
+        "under the F682 deck",
+        Vec3::new(47_313.9, 24_988.56, 51.93),
+        0xF682_001A,
+        Vec3::new(47_313.904, 24_988.559, 63.4465),
+    );
+    let mut c = crate::walk_trial::standing_at(20, &t);
+    c.autoplay.config.enabled = true;
+    let team = &mut c.autoplay.config.team;
+    team.enabled = true;
+    team.follow = true;
+    team.lead = false;
+    let leader = Mate {
+        health: 1.0,
+        world: t.goal,
+        cell: t.goal_cell,
+        leader: true,
+        leads: true,
+        ..testkit::mate(LEADER, "Verity")
+    };
+    c.autoplay.team = testkit::view_of(vec![leader]);
+    let t0 = Instant::now();
+    c.tick_autoplay(t0);
+    assert!(c.going.is_some(), "it stood under its leader");
+    let dt = Duration::from_millis(50);
+    let mut now = t0;
+    // Ticked a while past arriving: it stays up beside its leader.
+    while now < t0 + Duration::from_secs(40) {
+        now += dt;
+        c.tick_autoplay(now);
+        c.tick_player(crate::player::Input::default(), dt.as_secs_f32(), now);
+        c.pathfinder.settle(Duration::from_secs(5));
+    }
+    let me = c.my_position().expect("on its feet");
+    assert!(
+        crate::body::server_walk::reached(me, t.goal, 4.0),
+        "not up beside its leader: at {me}, the leader at {}",
+        t.goal
+    );
+}
