@@ -1123,23 +1123,6 @@ impl Player {
         })
     }
 
-    /// Whether the straight walk from `from` to `to` over landblock
-    /// `block`'s geometry runs off an edge with nothing under it before
-    /// anything solid stops it, or ends under a `to` standing a storey up
-    /// (see `nav::Ground::drops_along`). A floor within the depth a fall
-    /// is looked for (`FALL_SEARCH`) is where the walk comes down, and
-    /// it goes on from there. The steering asks this before it leans on
-    /// whatever is in the way: leaning on a wall gets nowhere, leaning
-    /// over a ledge lands on the floor below it, and leaning over the
-    /// edge of everything walks on into the void. False when the block
-    /// has no collision: there is nothing known to fall from.
-    pub fn line_drops(&mut self, assets: &Assets, block: u32, from: Vec3, to: Vec3) -> bool {
-        self.on_ground(assets, block, |ground, cap| {
-            ground.drops_along(from, to, cap, FALL_SEARCH)
-        })
-        .unwrap_or(false)
-    }
-
     /// Ask `f` about landblock `block`'s ground as the walking code sees
     /// it -- its collision, and outside a dungeon its terrain and sea --
     /// for this character's capsule; `None` when the block has no
