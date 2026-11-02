@@ -183,7 +183,9 @@ fn a_goal_out_of_the_region_is_a_journey() {
     assert_eq!(c.go(Owner::Hand, goal, now), Did::Acting);
     assert!(c.traveling(), "a journey");
     assert_eq!(c.travel_goal_xy(), Some(corpse.at.truncate()));
-    assert!(c.going.is_none(), "not a walk");
+    // The slot walks the journey's first stretch, not the hand's goal.
+    let owner = c.going.as_ref().map(|g| g.owner);
+    assert!(owner.is_none_or(|o| o == Owner::Journey), "{owner:?}");
     // A goal on the next block is a walk.
     let next = c.place_at(c.my_position().expect("standing") + Vec3::new(200.0, 0.0, 0.0));
     assert!(c.is_in_region(next));
@@ -230,9 +232,14 @@ fn a_journey_set_off_frees_the_slot_for_its_leg() {
     let mut c = at_holtburg();
     let me = c.my_position().expect("standing");
     assert_eq!(c.go_to(Owner::Script, me, 1.0), Did::Done);
+    c.frame_at = Instant::now();
     assert!(c.travel_to(me.truncate() + glam::Vec2::new(150.0, 0.0)));
-    assert!(c.going.is_none(), "the arrived walk held the journey back");
-    let leg = c.walk_leg(Instant::now());
+    assert_eq!(
+        c.going.as_ref().map(|g| g.owner),
+        Some(Owner::Journey),
+        "the arrived walk held the journey back"
+    );
+    let leg = c.walk_journey(c.frame_at);
     assert!(leg.as_ref().is_some_and(Did::fine), "{leg:?}");
     assert_eq!(c.going.as_ref().map(|g| g.owner), Some(Owner::Journey));
 }
@@ -316,12 +323,15 @@ fn an_arrived_walk_holds_no_journey_back() {
     assert!(c.go_to(Owner::Script, me + Vec3::X * 10.0, 1.0).acting());
     testkit::stand(&mut c, 0xA9B4_0019, Vec3::new(94.0, 7.1, 94.0));
     let far = ac_world::Place::on_map(me.truncate() + glam::Vec2::X * 150.0);
-    assert!(c.plan_trip(Goal::At {
+    let far = Goal::At {
         place: far,
-        within: crate::travel::ARRIVE
-    }));
-    assert_eq!(c.going.as_ref().map(|g| g.owner), Some(Owner::Script));
-    let leg = c.walk_leg(Instant::now());
+        within: crate::travel::ARRIVE,
+    };
+    let now = Instant::now();
+    assert_eq!(c.set_off(Owner::Hand, far, now), Did::Acting);
+    // Set off, its first stretch took the slot from the arrived walk.
+    assert_eq!(c.going.as_ref().map(|g| g.owner), Some(Owner::Journey));
+    let leg = c.walk_journey(now);
     assert!(leg.as_ref().is_some_and(Did::fine), "{leg:?}");
     assert_eq!(c.going.as_ref().map(|g| g.owner), Some(Owner::Journey));
 }

@@ -473,16 +473,16 @@ fn a_follower_beside_its_leader_fights_back_at_what_hits_it_from_past_the_leader
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn past_the_break_catching_up_still_comes_before_fighting_back() {
     // The user's call: a follower more than `follow_break` from its leader rejoins it first,
-    // attacker or not (catch up, 120, over the fight, 80).
-    let mut c = in_the_field();
+    // attacker or not (catch up, 120, over the fight, 80). A walk to the leader is planned first.
+    let mut c = in_the_field_over(testkit::game_data());
     following_a_leader(&mut c, 40.0);
     hit_by_a_revenant(&mut c, 5.0);
     c.tick_autoplay(Instant::now());
     assert_eq!(c.autoplay.step, Some("catch up"));
     assert_eq!(c.attack_target, None);
-    // Offline no walk reaches the leader, and the way back is following's journey.
     assert!(
         c.going.is_some() || c.is_follow_journey(),
         "not on its way back to the leader"

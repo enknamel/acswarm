@@ -70,7 +70,7 @@ pub(super) fn standing_aside(
 
 /// Whether a character at `me` has reached a goal at `at`: within `stop`
 /// of it on the flat, and on its floor. Where the steering stops.
-pub(super) fn reached(me: glam::Vec3, at: glam::Vec3, stop: f32) -> bool {
+pub(crate) fn reached(me: glam::Vec3, at: glam::Vec3, stop: f32) -> bool {
     let d = at - me;
     glam::Vec2::new(d.x, d.y).length() <= stop && d.z.abs() <= SAME_FLOOR
 }

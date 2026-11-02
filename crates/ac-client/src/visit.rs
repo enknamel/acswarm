@@ -383,16 +383,15 @@ impl Client {
                     at: v.goal,
                     cell: v.cell,
                 };
-                if !self.plan_trip(crate::Goal::At {
+                let goal = Goal::At {
                     place,
                     within: REACH,
-                }) {
-                    tracing::warn!("visit: no way to {} from here", v.label);
+                };
+                if let Did::Blocked(why) = self.set_off(Owner::Visit, goal, now) {
+                    tracing::warn!("visit: no way to {} from here: {}", v.label, why.what);
                     self.let_go_of(&v);
                     return;
                 }
-                // Set off, the journey's leg has the slot, as any journey set off does.
-                self.stop_going(None, "a visit's journey sets off");
             }
             Next::GiveUp => {
                 tracing::warn!("visit: the journey to {} ended short of it", v.label);
@@ -609,6 +608,50 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn a_visit_to_a_warden_arrives_at_the_warden() {
+        // Come out of the Facility Hub portal (0x8A020212), the visit walks the hub to the Warden
+        // in 0x8A0201F7 and uses him on his own floor.
+        let u = ac_world::unlocks::all()
+            .iter()
+            .find(|u| u.flag == "fachubeasthamportals_flag")
+            .expect("the Warden's unlock");
+        let exit = ac_world::portals::all()
+            .iter()
+            .find(|p| p.to_cell == 0x8A02_0212)
+            .expect("the Facility Hub portal");
+        let origin = ac_world::landblock_origin(0x8A02_0000);
+        let mut c = crate::testkit::standing_in_the_field(25, 0x8A02_0212, exit.to - origin);
+        let warden = WorldObject {
+            guid: 0x7000_0001,
+            name: u.npc.clone(),
+            item_type: ac_world::item_type::CREATURE,
+            object_desc_flags: ac_world::object_desc_flags::STUCK,
+            position: crate::testkit::placed(0x8A02_01F7, u.at),
+            ..Default::default()
+        };
+        c.world.objects.insert(warden.guid, warden);
+        // The clock the visit's first walk is planned on: offline, planning takes seconds.
+        let t0 = Instant::now();
+        assert!(c.visit_unlock(u), "no way to the Warden");
+        assert!(!c.traveling(), "a journey inside the hub");
+        for frame in 0..60 * 20 {
+            let now = t0 + Duration::from_millis(50 * frame);
+            c.tick_player(crate::player::Input::default(), 0.05, now);
+            if c.visiting().is_none() {
+                break;
+            }
+        }
+        let me = c.my_position().expect("standing");
+        assert!(c.visits.finished, "the visit did not finish, at {me}");
+        assert!(
+            arrived(me, u.at),
+            "finished at {me}, the Warden at {}",
+            u.at
+        );
+    }
+
+    #[test]
     fn a_portal_visit_goes_to_its_mouth_and_takes_it() {
         let p = ac_world::portals::named("Holtburg Dungeon")
             .into_iter()
@@ -714,7 +757,8 @@ mod tests {
     #[test]
     #[ignore = "needs AC_DATA_DIR"]
     fn a_visit_far_off_sets_off_whatever_walk_was_in_the_slot() {
-        // A script's walk is under way on the Holtburg field; a lifestone 700 m east is visited.
+        // A script's walk is under way on the Holtburg field; a lifestone 700 m east, over the
+        // river, is visited.
         let mut c = crate::testkit::standing_at(0xA9B4_0019, Vec3::new(84.0, 7.1, 94.0));
         c.world.player_guid = Some(crate::testkit::ME);
         let me = c.my_position().expect("standing");
@@ -723,11 +767,11 @@ mod tests {
             kind: ac_world::landmarks::Kind::Lifestone,
             name: "a lifestone".into(),
             cell: 0,
-            at: me + Vec3::X * 700.0,
+            at: me + Vec3::new(700.0, 100.0, 0.0),
         };
         assert!(c.visit_landmark(&stone), "no visit");
         assert!(c.traveling(), "no journey");
-        let leg = c.walk_leg(Instant::now());
+        let leg = c.walk_journey(Instant::now());
         assert!(leg.as_ref().is_some_and(Did::fine), "{leg:?}");
         assert_eq!(c.going.as_ref().map(|g| g.owner), Some(Owner::Journey));
     }

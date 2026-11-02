@@ -145,19 +145,20 @@ fn a_walk_underground_is_steered_in_the_dungeon_it_is_in() {
 }
 
 /// Walk the journey the client is on for up to `seconds` of game time, frame by frame the way
-/// `tick_player` does: the leg asked of the slot, the steering toward it, the player's own
-/// physics. Stops when the journey ends; the last answer the slot gave its leg.
+/// `tick_player` does: the stretch asked of the slot, the steering along it, the player's own
+/// physics. Stops when the journey ends; the last answer the slot gave its stretch. The clock
+/// starts at `Client.frame_at`, which the test sets as it sets off: offline, planning takes seconds.
 fn walk_the_journey(c: &mut Client, seconds: f32) -> Option<crate::did::Did> {
     use crate::player::Input;
     let dt = 1.0 / 20.0;
-    let t0 = Instant::now();
+    let t0 = c.frame_at;
     let mut last = None;
     for frame in 0..(seconds / dt) as u32 {
         let now = t0 + Duration::from_secs_f32(frame as f32 * dt);
         if !c.traveling() {
             return last;
         }
-        last = c.walk_leg(now).or(last);
+        last = c.walk_journey(now).or(last);
         let goal = c.going_to();
         let pl = c.player.as_mut().unwrap();
         let mut input = Input::default();
@@ -228,13 +229,13 @@ fn the_facility_hub_is_walked_down_to_its_lower_portals() {
     let landed = Vec3::new(26558.4, 298.0, 6.0);
     let mut c = crate::testkit::standing_in_the_field(31, 0x8A02_0212, landed - o);
     c.world.player_guid = Some(crate::testkit::ME);
+    let t0 = Instant::now();
     assert!(c.travel_to(Vec2::new(46257.1, 24399.7)));
     let dt = 0.05;
-    let t0 = Instant::now();
     let mut first = None;
     for frame in 0..30 * 20 {
         let now = t0 + Duration::from_secs_f32(frame as f32 * dt);
-        let goal = c.travel_goal(now).map(|g| g.0);
+        let goal = c.step_goal(now).and_then(Goal::place).map(|p| p.at);
         first = first.or(goal);
         c.tick_player(crate::player::Input::default(), dt, now);
         let at = c.player.as_ref().unwrap().world_position();
@@ -259,9 +260,9 @@ fn the_stairs_up_to_a_scrivener_are_walked_down_too() {
         crate::testkit::standing_in_the_field(30, 0xA9B3_0108, Vec3::new(185.5, 88.3, 119.6));
     c.world.player_guid = Some(crate::testkit::ME);
     let boddry = Vec2::new(32538.6, 34266.0);
+    let t0 = Instant::now();
     assert!(c.travel_to(boddry));
     let dt = 0.05;
-    let t0 = Instant::now();
     for frame in 0..60 * 20 {
         let now = t0 + Duration::from_secs_f32(frame as f32 * dt);
         c.tick_player(crate::player::Input::default(), dt, now);
@@ -287,6 +288,7 @@ fn a_walk_out_of_a_shop_to_a_spot_outside_the_door_reaches_the_next_counter() {
     let mut c =
         crate::testkit::standing_in_the_field(20, 0xA9B4_0117, Vec3::new(151.8, 129.8, 66.0));
     let renald = Vec2::new(32587.2, 34578.3);
+    c.frame_at = Instant::now();
     assert!(
         c.travel_to(Vec2::new(32588.0, 34691.0)),
         "8 m out, on the way in"
@@ -295,6 +297,7 @@ fn a_walk_out_of_a_shop_to_a_spot_outside_the_door_reaches_the_next_counter() {
     let cell = c.player.as_ref().unwrap().cell;
     assert!(cell & 0xFFFF < 0x100, "outdoors, not {cell:#010x}");
     c.end_trip();
+    c.frame_at = Instant::now();
     assert!(c.travel_to(renald));
     walk_the_journey(&mut c, 90.0);
     let at = c.player.as_ref().unwrap().world_position().truncate();
@@ -426,7 +429,7 @@ fn a_character_against_a_bookcase_walks_round_it() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
-fn has_way_to_answers_from_the_region() {
+fn the_planner_answers_from_the_region() {
     // "If there's no path to the corpse, don't bother": asked once as the walk sets off. In the
     // Holtburg Dungeon, beside the bookcases, the room round them is reachable and the top of a
     // bookcase is not.
@@ -434,14 +437,18 @@ fn has_way_to_answers_from_the_region() {
     let origin = ac_world::landblock_origin(block);
     let mut c =
         crate::testkit::standing_in_the_field(25, 0x01F6_0224, Vec3::new(30.37, -51.89, 0.0));
+    let round = Place {
+        at: origin + Vec3::new(36.0, -54.0, 0.0),
+        cell: 0x01F6_0233,
+    };
+    let planned = c.plan_walk(round, 0.25);
     assert!(
-        c.has_way_to(origin + Vec3::new(36.0, -54.0, 0.0), 0x01F6_0233, 0.25),
-        "round the bookcases"
+        matches!(planned, ac_nav::routing::Planned::Route(_)),
+        "round the bookcases: {planned:?}"
     );
     // On top of a bookcase, 1.9 m up: the planner checks the last leg, so no route ends there.
-    let top = origin + Vec3::new(34.68, -50.7, 1.915);
-    let on_top = ac_world::Place {
-        at: top,
+    let on_top = Place {
+        at: origin + Vec3::new(34.68, -50.7, 1.915),
         cell: 0x01F6_0224,
     };
     let planned = c.plan_walk(on_top, 2.5);
@@ -449,10 +456,15 @@ fn has_way_to_answers_from_the_region() {
         matches!(planned, ac_nav::routing::Planned::NoWay(_)),
         "{planned:?}"
     );
-    assert!(!c.has_way_to(top, 0x01F6_0224, 2.5), "on the bookcase");
-    assert!(
-        c.has_way_to(Vec3::new(10.0, 10.0, 0.0), 0x0101_0001, 0.25),
-        "another block is the planner's"
+    // Another block is past the region: the journey planner's.
+    let far = Place {
+        at: Vec3::new(10.0, 10.0, 0.0),
+        cell: 0x0101_0001,
+    };
+    let planned = c.plan_walk(far, 0.25);
+    assert_eq!(
+        planned,
+        ac_nav::routing::Planned::NoWay(ac_nav::routing::NoWay::OutOfRegion)
     );
 }
 
@@ -535,7 +547,7 @@ fn a_ground_reached_through_a_one_way_portal_has_a_way_home_on_foot() {
         crate::testkit::standing_in_the_field(20, 0xBAAD_0017, Vec3::new(65.4, 144.0, 88.0));
     for goal in [Vec2::new(32532.0, 34567.1), Vec2::new(38076.7, 32340.6)] {
         c.travel = Default::default();
-        assert!(c.plan_trip(on_map(goal)), "no way to {goal:?}");
+        assert!(set_off(&mut c, on_map(goal)).fine(), "no way to {goal:?}");
         let steps = c.travel_trip().map(|t| t.steps.clone());
         assert_eq!(
             steps,
@@ -573,7 +585,10 @@ fn a_corpse_in_the_holtburg_dungeon_is_walked_to_from_its_portal() {
             at: corpse.extend(floor),
             cell,
         };
-        assert!(c.plan_trip(within_reach(place)), "no way to {corpse:?}");
+        assert!(
+            set_off(&mut c, within_reach(place)).fine(),
+            "no way to {corpse:?}"
+        );
         assert_eq!(
             c.travel_trip().map(|t| t.steps.clone()),
             Some(vec![Step::Walk(place)])
@@ -621,7 +636,10 @@ fn a_corpse_on_a_floor_below_in_a_dungeon_is_walked_to() {
     let mut c = Client::offline(crate::testkit::game_data());
     let below = below_in_0286(&mut c);
     let corpse = below.at.truncate();
-    assert!(c.plan_trip(within_reach(below)), "no way to the corpse");
+    assert!(
+        set_off(&mut c, within_reach(below)).fine(),
+        "no way to the corpse"
+    );
     walk_the_journey(&mut c, 180.0);
     let at = c.player.as_ref().unwrap().world_position().truncate();
     assert!(
@@ -631,77 +649,118 @@ fn a_corpse_on_a_floor_below_in_a_dungeon_is_walked_to() {
     );
 }
 
-#[test]
-#[ignore = "needs AC_DATA_DIR"]
-fn a_walk_that_gets_nowhere_is_given_up() {
-    // Bound for no cell, the walk is aimed at the corpse's spot on the character's own floor.
-    let mut c = Client::offline(crate::testkit::game_data());
-    let corpse = below_in_0286(&mut c).at.truncate();
-    assert!(c.plan_trip(on_map(corpse)), "no way to the corpse");
-    walk_the_journey(&mut c, 600.0);
-    assert!(!c.traveling(), "still walking at it after 10 min");
-}
-
-#[test]
-#[ignore = "needs AC_DATA_DIR"]
-fn a_journey_leg_with_no_way_is_planned_again_at_once() {
-    // From a Holtburg Dungeon room to a ledge 9.5 m up that nothing climbs to.
-    let mut c = Client::offline(crate::testkit::game_data());
+/// A Holtburg Dungeon room, where `c` is set down, and the ledge 9.5 m over it that nothing
+/// climbs to: where it stands, and the ledge's place.
+fn under_the_01f6_ledge(c: &mut Client) -> (Vec3, Place) {
     let rooms = c.assets.block_collision(0x01F6_0000).unwrap();
     let origin = ac_world::landblock_origin(0x01F6_0000);
     let start = Vec3::new(223.5, 47_158.5, 0.0);
     let (z, cell) = rooms.world.floor_at(start, 0.6, 1.5).unwrap();
     let ledge = Vec3::new(262.0, 47_182.0, 9.5);
     let (high, ledge_cell) = rooms.world.floor_at(ledge, 0.6, 1.5).unwrap();
-    crate::testkit::stand(&mut c, cell, start.with_z(z) - origin);
+    crate::testkit::stand(c, cell, start.with_z(z) - origin);
     c.steering.reset();
     let place = Place {
         at: ledge.with_z(high),
         cell: ledge_cell,
     };
-    assert!(c.plan_trip(within_reach(place)), "no journey");
-    // Each of the REPLANS plans again is refused by the slot on the frame it is asked.
-    let last = walk_the_journey(&mut c, STUCK_AFTER.as_secs_f32());
-    assert!(!c.traveling(), "the no way waited for a clock");
-    let refusal = last
-        .as_ref()
-        .and_then(|d| d.because())
-        .map(|b| b.what.clone());
+    (start.with_z(z), place)
+}
+
+/// [`Client::set_off`] as the hand would, the frame's clock set to now.
+fn set_off(c: &mut Client, goal: Goal) -> crate::did::Did {
+    c.frame_at = Instant::now();
+    c.set_off(crate::Owner::Hand, goal, c.frame_at)
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_journey_whose_first_walk_has_no_way_is_refused_at_once() {
+    // From the room to the ledge: the first walk is planned as the journey sets off, and refused.
+    let mut c = Client::offline(crate::testkit::game_data());
+    let (start, ledge) = under_the_01f6_ledge(&mut c);
+    let did = set_off(&mut c, within_reach(ledge));
+    let why = did.because().map(|b| b.what.clone());
     assert!(
-        refusal.as_ref().is_some_and(|why| why.contains("Planner")),
-        "{refusal:?} to {:?}",
-        ledge.with_z(high)
+        why.as_ref().is_some_and(|w| w.contains("Planner")),
+        "{did:?}"
     );
+    assert!(!c.traveling(), "still travelling");
+    assert!(c.going.is_none(), "a walk was left in the slot");
+    assert!(!c.journey_to(ledge, ARRIVE), "set off the second time");
     let me = c.my_position().unwrap();
+    assert!(me.distance(start) < 0.01, "walked to {me}");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_journey_that_loses_a_step_is_planned_again_without_it() {
+    // Handed a trip whose next portal stands on the ledge, as if just arrived in the room: the
+    // mouth is refused on the first frame, the trip planned again has no step at it, and the
+    // journey arrives at its goal.
+    let mut c = Client::offline(crate::testkit::game_data());
+    let (start, ledge) = under_the_01f6_ledge(&mut c);
+    let goal = c
+        .standable_near(start, 10.0)
+        .into_iter()
+        .find(|p| p.at.distance(start) > 6.0)
+        .expect("floor round the start");
+    let trip = Trip {
+        steps: vec![
+            Step::Portal {
+                name: "a portal on the ledge".into(),
+                mouth: ledge,
+                exit: Place::on_map(Vec2::new(32_532.0, 34_567.1)),
+            },
+            Step::Walk(goal),
+        ],
+        seconds: 60.0,
+    };
+    crate::testkit::set_out_on(&mut c, trip, within_reach(goal));
+    c.frame_at = Instant::now();
+    let first = c.walk_journey(c.frame_at);
     assert!(
-        me.distance(start.with_z(z)) < 1.0,
-        "walked at the refused leg to {me}"
+        matches!(first, Some(crate::did::Did::Blocked(_))),
+        "{first:?}"
+    );
+    let again = c.walk_journey(c.frame_at);
+    assert!(
+        again.as_ref().is_some_and(crate::did::Did::fine),
+        "{again:?}"
+    );
+    let steps = c.travel_trip().map(|t| t.steps.clone());
+    assert_eq!(steps, Some(vec![Step::Walk(goal)]), "planned again");
+    walk_the_journey(&mut c, 30.0);
+    let me = c.my_position().unwrap();
+    assert!(!c.traveling(), "still travelling at {me}");
+    assert!(
+        me.distance(goal.at) <= ARRIVE,
+        "stopped at {me}, short of {goal:?}"
     );
 }
 
 #[test]
-fn a_portal_in_a_hall_is_aimed_at_on_its_own_floor() {
+#[ignore = "needs AC_DATA_DIR"]
+fn a_portal_in_a_hall_is_walked_to_on_its_own_floor() {
+    // From Archmage Cindrue's first floor at 69, the Holtburg Meeting Hall Portal's mouth at 96:
+    // the stretch is the mouth on its own floor and in its own cell.
     let hall = ac_world::portals::named("Holtburg Meeting Hall Portal")
         .into_iter()
         .find(|p| p.from_cell == 0xA9B4_017A)
         .expect("the Holtburg meeting hall portal is in the data");
-    // Planned from beside it in the hall to where it comes out, the step carries its mouth.
-    let from = Place {
-        at: hall.from + Vec3::X,
-        cell: hall.from_cell,
-    };
+    let mut c =
+        crate::testkit::standing_in_the_field(20, 0xA9B4_011B, Vec3::new(152.3, 132.5, 69.0));
     let exit = Place {
         at: hall.to,
         cell: hall.to_cell,
     };
-    let trip = trip::plan(from, exit).expect("a way through it");
-    let mouth = trip.steps.iter().find_map(|s| match s {
-        Step::Portal { mouth, .. } => Some(*mouth),
-        _ => None,
-    });
-    let mouth = mouth.expect("a portal step");
-    assert_eq!(mouth.cell, 0xA9B4_017A);
-    assert!((mouth.at.z - 96.0).abs() < 0.01, "{mouth:?}");
+    assert!(c.journey_to(exit, ARRIVE), "no way through the hall");
+    let first = c.travel_trip().and_then(|t| t.steps.first().cloned());
+    assert!(matches!(first, Some(Step::Portal { .. })), "{first:?}");
+    let stretch = c.going.as_ref().and_then(|g| g.goal.place());
+    let stretch = stretch.expect("no stretch in the slot");
+    assert_eq!(stretch.cell, 0xA9B4_017A);
+    assert!((stretch.at.z - 96.0).abs() < 0.01, "{stretch:?}");
 }
 
 #[test]

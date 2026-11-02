@@ -243,9 +243,10 @@ fn a_leader_the_region_holds_is_walked_to_however_far() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
-fn a_follower_with_no_walk_to_its_leader_plans_a_journey() {
+fn a_follower_with_no_walk_to_its_leader_is_refused_a_journey_too() {
     // The leader up on the Tusker ground's ledge (0x5C49), which no walk reaches: the follower is
-    // told so on its first ask and sets off on a journey after it instead, following's own.
+    // told so on its first ask, and the journey it tries instead is refused as it sets off, its
+    // first walk planned whole. Nothing walks at the wall.
     let (mut c, ledge) = testkit::under_the_ledge(20);
     c.autoplay.config.enabled = true;
     let team = &mut c.autoplay.config.team;
@@ -261,13 +262,13 @@ fn a_follower_with_no_walk_to_its_leader_plans_a_journey() {
         ..testkit::mate(LEADER, "Verity")
     }]);
     let now = Instant::now();
-    assert!(c.autoplay_follow(now, false), "it gave the leader up");
+    assert!(!c.autoplay_follow(now, false), "it walks at the leader");
     assert!(!c.is_walking(), "the slot walks at the ledge");
-    assert!(c.is_follow_journey(), "no journey after the leader");
-    // Asked again, the journey is kept: no walk is asked for, so nothing ends it.
+    assert!(!c.traveling(), "a journey at the ledge");
+    // Asked again, both refusals stand: nothing is planned.
     let plans = c.pathfinder.plans;
-    assert!(c.autoplay_follow(now + Duration::from_millis(100), false));
-    assert!(c.is_follow_journey(), "the journey was ended");
+    assert!(!c.autoplay_follow(now + Duration::from_millis(100), false));
+    assert!(!c.traveling());
     assert_eq!(c.pathfinder.plans, plans, "the walk was planned again");
 }
 

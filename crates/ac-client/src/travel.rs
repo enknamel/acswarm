@@ -25,8 +25,10 @@ use ac_world::trip::{self, Prefs, Step, Trip};
 use ac_world::Place;
 use glam::{Vec2, Vec3};
 
+use crate::body::server_walk::reached;
+use crate::did::Did;
 use crate::gem_room::{clear_heading, gem_next, GemNext};
-use crate::{Client, Goal};
+use crate::{Client, Goal, Owner};
 
 /// A waypoint counts as reached within this distance (metres, flat).
 pub const ARRIVE: f32 = 3.0;
@@ -65,24 +67,67 @@ const SUMMON_STEP: f32 = 1.5;
 const SUMMON_ROOM: f32 = 2.0;
 /// The step taken to face open ground before using a gem.
 const FACE_STEP: f32 = 1.5;
-/// A step to face open ground that has not been finished in this long is
-/// finished where the character stands.
-const FACE_GIVE_UP: Duration = Duration::from_secs(4);
-/// A step that has come no closer to its target in this long is planned
-/// again from where the character stands.
-pub const STEP_GIVE_UP: Duration = Duration::from_secs(30);
-/// Coming this much closer to the step's target counts as progress.
-const STEP_PROGRESS: f32 = 5.0;
+/// That step is walked to within this (metres, 3D): the heading is what it is for.
+const FACE_REACH: f32 = 0.3;
 /// No progress toward the current waypoint for this long: skip it.
 /// Progress is measured along the route the steering is following
 /// where there is one, since a detour around a wall walks away from the
 /// waypoint for a good while before it comes back.
 pub const STUCK_AFTER: Duration = Duration::from_secs(10);
-/// How many times a step whose end cannot be reached is planned again
-/// before the journey is given up.
-const REPLANS: u32 = 3;
 /// Getting closer to the waypoint by less than this is not progress.
 const PROGRESS: f32 = 1.0;
+
+/// What the step being made keeps, replaced whole as a step begins: nothing of one step reaches
+/// the next.
+#[derive(Default)]
+struct StepState {
+    /// The landblock stood in as a portal, recall or gem step began; done once somewhere else.
+    portal_from: Option<u32>,
+    /// When the character first stood at the portal's mouth.
+    portal_since: Option<Instant>,
+    /// When we last tried jumping into a portal that has not taken us.
+    last_hop: Option<Instant>,
+    /// When the recall step's spell was last sent (or the step began), and how many times.
+    recall_since: Option<Instant>,
+    recall_casts: u32,
+    /// The character was in peace mode before the cast: back to it once the recall has landed.
+    recall_leave_combat: bool,
+    /// When the gem step's gem was last used, and how many times.
+    gem_used: Option<Instant>,
+    gem_uses: u32,
+    /// The open ground walked to before the gem is used, and whether that walk is over.
+    gem_spot: Option<Place>,
+    faced: bool,
+    /// When the portal the gem summoned was last used, and how many times.
+    summoned_used: Option<Instant>,
+    summoned_uses: u32,
+    /// The step's walk end on its floor, once the region holds it.
+    end: Option<Place>,
+    /// The stretch asked this frame is an overland leg.
+    on_leg: bool,
+    /// World xy waypoints of the overland route, start and end included.
+    route: Option<Vec<Vec2>>,
+    /// Index of the waypoint being walked to.
+    next: usize,
+    /// End of the leg the local move-to is aimed at right now.
+    leg: Option<Vec2>,
+    /// Closest the character has been to the current waypoint, and when
+    /// that last improved.
+    best: f32,
+    last_progress: Option<Instant>,
+    /// When the route that distance was last measured along was planned:
+    /// a new route is a new yardstick.
+    measured_on: Option<Instant>,
+}
+
+impl StepState {
+    fn restart_waypoint(&mut self) {
+        self.leg = None;
+        self.best = f32::INFINITY;
+        self.last_progress = None;
+        self.measured_on = None;
+    }
+}
 
 /// The journey being made, and the terrain data it needs.
 #[derive(Default)]
@@ -92,33 +137,11 @@ pub struct Travel {
     /// The whole journey, portals included, and the step being made.
     trip: Option<Trip>,
     step: usize,
-    /// The landblock the character was in when a portal step began, and
-    /// when it began; the step is done when they are somewhere else, and
-    /// given up on when the portal will not take them.
-    portal_from: Option<u32>,
-    portal_since: Option<Instant>,
-    /// The landblock the current step is aimed into, and when the step
-    /// began: a step that gets nowhere is planned again from where the
-    /// character actually stands.
-    step_block: Option<u32>,
-    /// The cell the step is aimed at, so an indoor target is recognised
-    /// even when the character stands outdoors in the same landblock.
-    step_cell: Option<u32>,
-    /// The height the step is aimed at, when the data says: a portal's
-    /// mouth stands on its own floor, which is not always the floor the
-    /// character is on or the ground under it.
-    step_z: Option<f32>,
-    step_since: Option<Instant>,
-    /// Closest the character has come to the step's target: the step is
-    /// only "going nowhere" when this stops improving.
-    step_best: f32,
-    /// Where the step is aimed, to measure that.
-    step_target: Option<Vec2>,
+    /// What the step being made keeps.
+    state: StepState,
     /// Where the character stood last frame, to notice a portal that
     /// took them somewhere the journey did not ask for.
     last_seen: Option<Vec2>,
-    /// When we last tried jumping into a portal that has not taken us.
-    last_hop: Option<Instant>,
     /// How journeys are chosen: the quickest chain, or fewer hops.
     pub prefs: Prefs,
     /// The mouths of portals that would not take us *on this journey*:
@@ -130,23 +153,6 @@ pub struct Travel {
     /// server refused them, or they fizzled twice): left out of the
     /// next plan, forgotten with a new destination.
     refused_recalls: Vec<u32>,
-    /// When the recall step began or its spell was last sent, and how
-    /// many times it has been sent.
-    recall_since: Option<Instant>,
-    recall_casts: u32,
-    /// The character was in peace mode before the cast: drop back to it
-    /// once the recall has landed.
-    recall_leave_combat: bool,
-    /// When the gem step's gem was last used, and how many times.
-    gem_used: Option<Instant>,
-    gem_uses: u32,
-    /// The spot walked to so that the gem is used facing open ground, and
-    /// when that walk began.
-    gem_spot: Option<(Vec2, Instant)>,
-    /// When the portal that gem summoned was last used, and how many
-    /// times.
-    summoned_used: Option<Instant>,
-    summoned_uses: u32,
     /// Gems that did not take us anywhere *on this journey*: left out of
     /// the next plan, like `refused_recalls`.
     refused_gems: Vec<u32>,
@@ -160,25 +166,14 @@ pub struct Travel {
     pub(crate) recall_sent: Option<(u32, Vec3, Instant)>,
     /// Where the journey is bound (always `Goal::At`), to replan around a refusal.
     goal: Option<Goal>,
-    /// World xy waypoints of the step being walked, start and goal
-    /// included.
-    route: Option<Vec<Vec2>>,
-    /// Index of the waypoint being walked to.
-    next: usize,
-    /// End of the leg the local move-to is aimed at right now.
-    leg: Option<Vec2>,
-    /// Last frame's steer for this journey's own leg answered no way (set by `tick_player`).
-    pub(crate) leg_refused: bool,
-    /// Closest the character has been to the current waypoint, and when
-    /// that last improved.
-    best: f32,
-    last_progress: Option<Instant>,
-    /// When the route that distance was last measured along was planned:
-    /// a new route is a new yardstick.
-    measured_on: Option<Instant>,
-    /// Times the end of a step could not be reached and the journey was
-    /// planned again from where the character stood.
-    replans: u32,
+    /// Who set the journey off: a journey refused is kept refused for it (`Client.refusals`).
+    owner: Option<Owner>,
+    /// A step was left out: the next frame plans the journey again from where the body stands.
+    pub(crate) replan_due: bool,
+    /// Why the last journey was refused, for [`Client::set_off`] to answer with.
+    why_refused: Option<String>,
+    /// Last frame's overland leg was refused by the slot.
+    leg_refused: bool,
     /// The last journey was broken off by something else the character
     /// went to do -- a corpse to open, a fight, a dodge -- rather than
     /// arriving, giving up or being cancelled. Cleared when the next one
@@ -190,15 +185,6 @@ pub struct Travel {
     /// [`Client::travel_about`]). Kept through a replan of the same
     /// journey, and let go with a new destination.
     about_the_ground: bool,
-}
-
-impl Travel {
-    fn restart_waypoint(&mut self) {
-        self.leg = None;
-        self.best = f32::INFINITY;
-        self.last_progress = None;
-        self.measured_on = None;
-    }
 }
 
 impl Client {
@@ -277,26 +263,47 @@ impl Client {
         self.journey_to_goal(Goal::At { place, within })
     }
 
-    /// [`journey_to`](Self::journey_to) a goal: a place and how near.
+    /// [`journey_to`](Self::journey_to) a goal: a place and how near, set off for the running row.
     fn journey_to_goal(&mut self, goal: Goal) -> bool {
         self.drop_visit("travelling somewhere else");
-        let planned = self.plan_trip(goal);
-        if planned {
-            self.stop_going(None, "a journey sets off");
-        }
-        planned
+        let owner = self.step_owner();
+        // The frame's clock, or the wall's when no frame has run since it was set.
+        let now = self.frame_at.max(Instant::now());
+        self.set_off(owner, goal, now).fine()
     }
 
-    /// Plan a journey to `goal` and start it, from inside: planning the way again after a
-    /// refusal, or a visit setting off, neither of which is a new destination to a visit.
-    pub(crate) fn plan_trip(&mut self, goal: Goal) -> bool {
+    /// Plan a journey to `goal` for `owner` and set off on it: the trip from where the body stands,
+    /// then its first stretch asked of the slot at once, so a first walk with no way refuses it
+    /// before a step (a_journey_whose_first_walk_has_no_way_is_refused_at_once).
+    pub(crate) fn set_off(&mut self, owner: Owner, goal: Goal, now: Instant) -> Did {
+        let trip = match self.plan_journey(goal) {
+            Ok(trip) => trip,
+            Err(why) => return Did::blocked(why),
+        };
+        if let Some(me) = self.my_position() {
+            self.replace_walk(owner, me);
+        }
+        self.start_trip(owner, trip, goal);
+        self.walk_journey(now);
+        if self.traveling() {
+            return Did::Acting;
+        }
+        match self.travel.why_refused.take() {
+            Some(why) => Did::blocked(why),
+            None => Did::Done,
+        }
+    }
+
+    /// The trip to `goal` from where the character stands, leaving out what this goal's journey
+    /// was refused; why not, said in chat, when nothing reaches it.
+    fn plan_journey(&mut self, goal: Goal) -> Result<Trip, String> {
         let Some(place) = goal.place() else {
-            return false;
+            return Err("not a place".into());
         };
         let xy = place.at.truncate();
         let Some(pl) = self.player.as_ref() else {
             tracing::warn!("travel: the character is not in the world");
-            return false;
+            return Err("not in the world yet".into());
         };
         let me = pl.world_position();
         let cell = pl.cell;
@@ -307,13 +314,12 @@ impl Client {
             self.travel.refused.clear();
             self.travel.refused_recalls.clear();
             self.travel.refused_gems.clear();
-            self.travel.replans = 0;
             // A new journey is a road until whoever planned it says
             // otherwise (see `travel_about`).
             self.travel.about_the_ground = false;
         }
         let level = self.world.stats.level.max(1) as u32;
-        let mut refused = self.travel.refused.clone();
+        let refused = self.travel.refused.clone();
         // Underground, there is no walking out. A dungeon shares its
         // landblock number with the ground above it, so without saying
         // so the planner reads a vendor a hundred metres up as a
@@ -349,52 +355,12 @@ impl Client {
         } else {
             Vec::new()
         };
-        // The planner prices a leg on foot by the straight line between
-        // its ends, so it can pick a portal that stands across water or
-        // up a cliff. Walk the plan through the terrain router before
-        // setting off and, when a portal cannot be reached from where
-        // the step before it leaves the character, plan again without
-        // that one. This holds for the journey being planned only.
         let quests = self.travel.quests_done.clone();
         let from = Place { at: me, cell };
         let to = self.planning_place(place);
-        let mut planned = None;
-        for _ in 0..3 {
-            let Some(t) = trip::plan_with_recalls_and_gems(
-                from, to, level, &quests, &refused, &recalls, &gems, prefs,
-            ) else {
-                break;
-            };
-            // Only the first portal is checked here. Checking every one
-            // meant a route search for each, and a search over the world
-            // is slow enough that the client stopped answering while it
-            // thought. The rest are caught as they come: a step that
-            // cannot be walked plans the way again from where we stand.
-            let here = Vec2::new(me.x, me.y);
-            let outdoors = cell & 0xFFFF < 0x100;
-            let bad = match t.steps.first() {
-                Some(trip::Step::Portal { mouth, .. })
-                    if outdoors
-                        && !mouth.is_indoors()
-                        && !self.travel_can_reach(here, mouth.at.truncate()) =>
-                {
-                    Some(mouth.at.truncate())
-                }
-                _ => None,
-            };
-            match bad {
-                Some(mouth) => {
-                    tracing::info!(
-                        "travel: no way on foot to the portal at {mouth:?}; another way"
-                    );
-                    refused.push(mouth);
-                }
-                None => {
-                    planned = Some(t);
-                    break;
-                }
-            }
-        }
+        let mut planned = trip::plan_with_recalls_and_gems(
+            from, to, level, &quests, &refused, &recalls, &gems, prefs,
+        );
         // Nothing within a believable walk or a portal: walk the whole way, as the last resort.
         // A ground reached by a one-way portal has no way back otherwise, and the character was
         // left there (a_ground_reached_through_a_one_way_portal_has_a_way_home_on_foot).
@@ -448,10 +414,12 @@ impl Client {
                 "travel: {why} (to {xy:?} in {:#010x} from {cell:#010x} at {me:?}, level {level})",
                 place.cell
             )));
-            self.events.push(crate::Event::Chat { text: why, kind: 1 });
-            return false;
+            self.events.push(crate::Event::Chat {
+                text: why.clone(),
+                kind: 1,
+            });
+            return Err(why);
         };
-        self.travel.refused = refused;
         // Planned to the ground outside a building, the walk still ends at the goal itself.
         if let Some(Step::Walk(end)) = trip.steps.last_mut() {
             *end = place;
@@ -462,271 +430,79 @@ impl Client {
             trip.steps.len(),
             t0.elapsed()
         );
+        Ok(trip)
+    }
+
+    /// Take `trip` to `goal`, set off by `owner`, as the journey under way, at its first step.
+    pub(crate) fn start_trip(&mut self, owner: Owner, trip: Trip, goal: Goal) {
         self.travel.trip = Some(trip);
-        self.travel.broken_off = false;
         self.travel.step = 0;
-        self.travel.route = None;
-        self.travel.portal_from = None;
-        self.travel.portal_since = None;
         self.travel.goal = Some(goal);
-        self.travel.restart_waypoint();
-        self.travel_start_step()
+        self.travel.owner = Some(owner);
+        self.travel.broken_off = false;
+        self.travel.replan_due = false;
+        self.travel.why_refused = None;
+        self.travel.last_seen = self.my_position().map(Vec3::truncate);
+        self.travel_start_step();
     }
 
-    /// Whether the terrain router can get from `me` to `target`, or to
-    /// somewhere just beside it.
-    /// One route query, and only one: this runs on the frame the player
-    /// asked to travel, and a search over the world takes long enough
-    /// that a handful of them is a visible freeze.
-    fn travel_can_reach(&mut self, me: Vec2, target: Vec2) -> bool {
-        let Some((grid, region)) = self.travel_terrain() else {
-            return true;
-        };
-        worldroute::find(&grid, &region, me, target).is_some()
-    }
-
-    /// Build the route for the step the trip is on. False when the step
-    /// cannot be routed (and the journey is given up).
+    /// Begin the step the trip is on, its state afresh. False when the trip is done (arrived).
     fn travel_start_step(&mut self) -> bool {
-        let Some(t) = self.travel.trip.as_ref() else {
-            return false;
-        };
-        let Some(step) = t.steps.get(self.travel.step).cloned() else {
+        self.travel.state = StepState::default();
+        let Some(step) = self.travel_step().cloned() else {
             tracing::info!("travel: arrived");
             // The journey's own end, not the player's: a visit it was
             // made for carries on from here.
             self.end_trip();
             return false;
         };
-        let Some(pl) = self.player.as_ref() else {
+        let Some(block) = self.player.as_ref().map(|p| p.cell & 0xFFFF_0000) else {
             return false;
         };
-        let me3 = pl.world_position();
-        let me = Vec2::new(me3.x, me3.y);
-        let indoors = pl.is_indoors();
-        let pl_cell = pl.cell;
-        // A recall step has nowhere to walk: stand still, cast, and wait
-        // to be carried off, which `travel_goal` sees to. Like a portal
-        // step it is done when the character is where the spell lands.
-        if let Step::Recall { name, spell, .. } = &step {
-            tracing::info!(
-                "travel: step {} (recall {name:?}, spell {spell})",
-                self.travel.step
-            );
-            self.travel.portal_from = Some(pl_cell & 0xFFFF_0000);
-            self.travel.portal_since = None;
-            self.travel.last_hop = None;
-            self.travel.step_since = None;
-            self.travel.step_best = f32::INFINITY;
-            self.travel.step_target = None;
-            self.travel.step_cell = None;
-            self.travel.step_z = None;
-            self.travel.step_block = None;
-            self.travel.route = None;
-            self.travel.recall_since = Some(Instant::now());
-            self.travel.recall_casts = 0;
-            self.travel.recall_leave_combat = !self.combat && !self.magic;
-            self.travel.restart_waypoint();
-            return true;
-        }
-        // A gem is used where it stands. The usual kind puts a portal
-        // in front of the character, which the next step walks into;
-        // the rare kind carries them off itself. Either way the step is
-        // done once they are somewhere else, the same as a recall.
-        if let Step::Gem { name, summons, .. } = &step {
-            let (name, summons) = (name.clone(), *summons);
-            tracing::info!(
-                "travel: step {} ({name:?}, {})",
-                self.travel.step,
-                if summons {
+        let n = self.travel.step;
+        match &step {
+            // A recall step has nowhere to walk: stand still, cast, and wait to be carried off,
+            // which `step_goal` sees to; done when the character is where the spell lands.
+            Step::Recall { name, spell, .. } => {
+                tracing::info!("travel: step {n} (recall {name:?}, spell {spell})");
+                self.travel.state.portal_from = Some(block);
+                self.travel.state.recall_leave_combat = !self.combat && !self.magic;
+            }
+            // A gem is used where it stands: the usual kind puts a portal in front of the
+            // character, the rare kind carries them off itself; done once somewhere else.
+            Step::Gem { name, summons, .. } => {
+                let does = if *summons {
                     "summons a portal"
                 } else {
                     "carries us off"
-                }
-            );
-            self.travel.portal_from = Some(pl_cell & 0xFFFF_0000);
-            self.travel.portal_since = None;
-            self.travel.last_hop = None;
-            self.travel.step_since = Some(Instant::now());
-            self.travel.step_best = f32::INFINITY;
-            self.travel.step_target = None;
-            self.travel.step_cell = None;
-            self.travel.step_z = None;
-            self.travel.step_block = None;
-            self.travel.route = None;
-            self.travel.restart_waypoint();
-            // Not used yet: a summoned portal needs room to stand in,
-            // and a gem used where there is none is spent for nothing.
-            // The step finds the room first (see `travel_gem_wait`).
-            self.travel.gem_used = None;
-            self.travel.gem_uses = 0;
-            self.travel.gem_spot = None;
-            self.travel.summoned_used = None;
-            self.travel.summoned_uses = 0;
-            return true;
-        }
-        let (target, label, mouth_cell) = match &step {
-            Step::Walk(p) => (p.at.truncate(), "walk".to_string(), None),
-            Step::Portal { name, mouth, .. } => (
-                mouth.at.truncate(),
-                format!("portal {name:?}"),
-                Some(mouth.cell),
-            ),
-            // A recall is cast, and a gem is used, by the step driver
-            // rather than walked to: nothing to aim at.
-            Step::Recall { .. } | Step::Gem { .. } => return true,
-        };
-        self.travel.portal_from = mouth_cell.map(|_| pl_cell & 0xFFFF_0000);
-        self.travel.portal_since = None;
-        self.travel.last_hop = None;
-        self.travel.step_since = Some(Instant::now());
-        self.travel.step_best = f32::INFINITY;
-        self.travel.step_target = Some(target);
-        self.travel.step_cell = mouth_cell;
-        self.travel.step_z = match &step {
-            Step::Portal { mouth, .. } => Some(mouth.at.z),
-            _ => None,
-        };
-        // A walk to the journey's end in a dungeon cell is aimed at that cell's floor.
-        let end = self.travel.goal.and_then(Goal::place);
-        if let Some(c) = end
-            .filter(|p| p.is_indoors() && p.at.truncate().distance(target) < 1.0)
-            .map(|p| p.cell)
-        {
-            if let Some(z) = self.floor_in_cell(target, c) {
-                (self.travel.step_cell, self.travel.step_z) = (Some(c), Some(z));
+                };
+                tracing::info!("travel: step {n} ({name:?}, {does})");
+                self.travel.state.portal_from = Some(block);
             }
-        }
-        // Underground (a dungeon, the Town Network hub) there is no
-        // terrain to route over, and inside a building the landblock's
-        // own graph steers to anything in the same block. A building on
-        // the way somewhere else is walked out of and routed over the
-        // terrain like any other start.
-        let underground = indoors && {
-            let assets = self.assets.clone();
-            self.player
-                .as_mut()
-                .is_some_and(|pl| pl.in_dungeon(&assets))
-        };
-        // A walk underground ends in the dungeon the character stands
-        // in, whichever block its end reads as on the map.
-        self.travel.step_block = Some(match mouth_cell {
-            Some(c) => c & 0xFFFF_0000,
-            None => steering_block(target, pl_cell, underground),
-        });
-        // Inside a landblock -- the character in it, or the target in one
-        // of its interior cells -- the terrain grid says nothing. Aim
-        // straight at the target and let the landblock's own navigation
-        // graph steer. A dungeon's exit portal stands in an interior cell
-        // of the block the character walks out into, so the target being
-        // indoors matters as much as the character being indoors.
-        let target_indoors = mouth_cell.is_some_and(|c| c & 0xFFFF >= 0x100);
-        let same_block = self.travel.step_block == Some(pl_cell & 0xFFFF_0000);
-        if (indoors && (underground || same_block)) || (target_indoors && same_block) {
-            // A portal in this dungeon the graph has no way to is dropped, as one out of reach
-            // over the terrain is (a_dungeon_portal_out_of_reach_is_not_walked_at).
-            if let Some(c) =
-                mouth_cell.filter(|c| underground && c & 0xFFFF_0000 == pl_cell & 0xFFFF_0000)
-            {
-                let z = self.travel.step_z.unwrap_or(me3.z);
-                if !self.has_way_to(target.extend(z), c, ARRIVE) {
-                    tracing::warn!(
-                        "travel: step {} ({label}): no way to it in here; going another way",
-                        self.travel.step
-                    );
-                    self.travel.refused.push(target);
-                    let goal = self.travel.goal;
-                    self.cancel_travel_keeping_refusals();
-                    return goal.is_some_and(|g| self.plan_trip(g));
-                }
-            }
-            tracing::info!("travel: step {} ({label}) inside", self.travel.step);
-            self.travel.route = Some(vec![me, target]);
-            self.travel.next = 1;
-            self.travel.restart_waypoint();
-            return true;
-        }
-        let Some((grid, region)) = self.travel_terrain() else {
-            return false;
-        };
-        // The terrain router can fail on the last few metres to a portal
-        // that stands against a cliff or inside a doorway. Walking to
-        // just beside it is as good: the local move-to covers the rest.
-        // Every other portal near the way is a trap: walking into one
-        // takes the character wherever it leads. Give them a wide berth.
-        let keep = mouth_cell.map(|_| target);
-        let mid = (me + target) * 0.5;
-        let reach = me.distance(target) * 0.5 + 200.0;
-        let avoid: Vec<Vec2> = ac_world::portals::near(mid, reach)
-            .into_iter()
-            .filter(|p| p.mouth_outdoors())
-            .map(|p| p.from_xy())
-            .filter(|m| keep.is_none_or(|k| k.distance(*m) > 5.0))
-            .collect();
-        let route = worldroute::find_avoiding(&grid, &region, me, target, &avoid).or_else(|| {
-            [8.0f32, 16.0, 28.0].into_iter().find_map(|r| {
-                (0..8).find_map(|i| {
-                    let a = i as f32 * std::f32::consts::TAU / 8.0;
-                    let near = target + Vec2::new(a.cos(), a.sin()) * r;
-                    worldroute::find_avoiding(&grid, &region, me, near, &avoid)
-                })
-            })
-        });
-        match route {
-            Some(route) => {
-                let len: f32 = route.windows(2).map(|w| w[0].distance(w[1])).sum();
+            Step::Portal { name, mouth, .. } => {
                 tracing::info!(
-                    "travel: step {} ({label}): {} waypoints, {len:.0} m",
-                    self.travel.step,
-                    route.len()
+                    "travel: step {n} (portal {name:?} at {:?} in {:#010x})",
+                    mouth.at,
+                    mouth.cell
                 );
-                self.travel.route = Some(route);
-                self.travel.next = 0;
-                self.travel.restart_waypoint();
-                true
+                self.travel.state.portal_from = Some(block);
             }
-            None => {
-                // A portal we cannot walk to is no use, whatever the
-                // straight line said: drop it and find another way.
-                if let Some((_, mouth)) = self.travel_portal() {
-                    let step = self.travel.step;
-                    let target_cell = self.travel.step_cell.unwrap_or(0);
-                    tracing::warn!(
-                        "travel: step {step} ({label}): no way there on foot; going another way \
-                         (me cell {pl_cell:#010x} indoors {indoors}, target {target:?} \
-                         cell {target_cell:#010x}, same block {same_block})"
-                    );
-                    self.travel.refused.push(mouth);
-                    let goal = self.travel.goal;
-                    self.cancel_travel_keeping_refusals();
-                    return goal.is_some_and(|g| self.plan_trip(g));
-                }
-                tracing::warn!(
-                    "travel: step {} ({label}): no route to {target:?}, giving up",
-                    self.travel.step
-                );
-                self.end_trip();
-                false
+            Step::Walk(p) => {
+                tracing::info!("travel: step {n} (walk to {:?} in {:#010x})", p.at, p.cell);
             }
         }
+        true
     }
 
     /// The step is done: move to the next one.
     fn travel_next_step(&mut self) -> bool {
         self.travel.step += 1;
-        self.travel.replans = 0;
-        self.travel.step_since = None;
-        self.travel.step_cell = None;
-        self.travel.step_z = None;
-        self.travel.step_target = None;
-        self.travel.step_best = f32::INFINITY;
-        self.travel.route = None;
-        self.travel.portal_from = None;
-        self.travel.portal_since = None;
-        self.travel.recall_since = None;
-        self.travel.recall_casts = 0;
-        self.travel.restart_waypoint();
         self.travel_start_step()
+    }
+
+    /// The step the trip is on.
+    fn travel_step(&self) -> Option<&Step> {
+        self.travel.trip.as_ref()?.steps.get(self.travel.step)
     }
 
     /// [`travel_to`](Self::travel_to) a place of the gazetteer by name
@@ -742,7 +518,7 @@ impl Client {
 
     /// The route being walked (world xy waypoints), for a map to draw.
     pub fn travel_route(&self) -> Option<&[Vec2]> {
-        self.travel.route.as_deref()
+        self.travel.state.route.as_deref()
     }
 
     /// `(step being made, steps in the journey)` while travelling.
@@ -865,27 +641,20 @@ impl Client {
         if self.travel.trip.take().is_some() {
             tracing::info!("travel: cancelled");
         }
-        self.travel.route = None;
         self.travel.step = 0;
-        self.travel.portal_from = None;
-        self.travel.portal_since = None;
-        self.travel.recall_since = None;
-        self.travel.recall_casts = 0;
-        self.travel.gem_used = None;
-        self.travel.gem_uses = 0;
-        self.travel.gem_spot = None;
-        self.travel.summoned_used = None;
-        self.travel.summoned_uses = 0;
+        self.travel.state = StepState::default();
         self.travel.refused.clear();
         self.travel.refused_recalls.clear();
         self.travel.refused_gems.clear();
         self.travel.goal = None;
-        self.travel.restart_waypoint();
+        self.travel.owner = None;
+        self.travel.replan_due = false;
+        self.travel.leg_refused = false;
     }
 
     /// The portal the current step is aimed at: its name and its mouth.
     pub(crate) fn travel_portal(&self) -> Option<(String, Vec2)> {
-        match self.travel.trip.as_ref()?.steps.get(self.travel.step)? {
+        match self.travel_step()? {
             Step::Portal { name, mouth, .. } => Some((name.clone(), mouth.at.truncate())),
             Step::Walk(_) | Step::Recall { .. } | Step::Gem { .. } => None,
         }
@@ -893,7 +662,7 @@ impl Client {
 
     /// The recall spell the current step is casting, while it is one.
     pub(crate) fn travel_recall_spell(&self) -> Option<u32> {
-        match self.travel.trip.as_ref()?.steps.get(self.travel.step)? {
+        match self.travel_step()? {
             Step::Recall { spell, .. } => Some(*spell),
             Step::Walk(_) | Step::Portal { .. } | Step::Gem { .. } => None,
         }
@@ -908,59 +677,59 @@ impl Client {
         };
         tracing::warn!("travel: recall spell {spell} did not carry us off; going another way");
         self.travel.refused_recalls.push(spell);
-        if self.travel.recall_leave_combat {
+        if self.travel.state.recall_leave_combat {
             self.leave_combat();
         }
-        let goal = self.travel.goal;
-        self.cancel_travel_keeping_refusals();
-        if let Some(goal) = goal {
-            self.plan_trip(goal);
-        }
+        self.travel.replan_due = true;
     }
 
     /// A gem step, a frame at a time: find room for the portal the gem
     /// summons, use the gem, use it again when the server did not take
     /// it, use the portal it put in front of the character, and go
     /// another way when none of that works. The one walk it asks for is a
-    /// short step to face open ground, returned as the leg to walk.
+    /// short step to face open ground, returned as the stretch to walk.
     fn travel_gem_wait(
         &mut self,
         guid: u32,
         name: &str,
         summons: bool,
         now: Instant,
-    ) -> Option<(Vec3, f32, u32)> {
-        if self.travel.gem_used.is_none() {
+    ) -> Option<Goal> {
+        if self.travel.state.gem_used.is_none() {
             return self.travel_gem_first_use(guid, name, summons, now);
         }
-        let since_use = now.duration_since(self.travel.gem_used.unwrap_or(now));
+        let since_use = now.duration_since(self.travel.state.gem_used.unwrap_or(now));
         let portal = if summons {
             self.summoned_portal()
         } else {
             None
         };
-        let since_portal = self.travel.summoned_used.map(|t| now.duration_since(t));
+        let since_portal = self
+            .travel
+            .state
+            .summoned_used
+            .map(|t| now.duration_since(t));
         match gem_next(
             self.world.is_carried(guid),
             summons,
             since_use,
-            self.travel.gem_uses,
+            self.travel.state.gem_uses,
             portal,
             since_portal,
-            self.travel.summoned_uses,
+            self.travel.state.summoned_uses,
         ) {
             GemNext::Wait => {}
             GemNext::UseGem if self.autoplay.cast_in_flight(now) => {}
             GemNext::UseGem => {
                 tracing::info!("travel: {name} was not taken; using it again");
-                self.travel.gem_uses += 1;
-                self.travel.gem_used = Some(now);
+                self.travel.state.gem_uses += 1;
+                self.travel.state.gem_used = Some(now);
                 self.interact(guid);
             }
             GemNext::UsePortal(portal) => {
                 tracing::info!("travel: using the portal {name} summoned");
-                self.travel.summoned_uses += 1;
-                self.travel.summoned_used = Some(now);
+                self.travel.state.summoned_uses += 1;
+                self.travel.state.summoned_used = Some(now);
                 // Sent straight to the server. Using something in the
                 // world through `interact` stops the journey first, so
                 // it does not walk us away afterwards -- and this use
@@ -983,41 +752,41 @@ impl Client {
         name: &str,
         summons: bool,
         now: Instant,
-    ) -> Option<(Vec3, f32, u32)> {
-        let (me3, block, forward) = {
+    ) -> Option<Goal> {
+        let (me3, forward) = {
             let pl = self.player.as_ref()?;
-            (
-                pl.world_position(),
-                pl.cell & 0xFFFF_0000,
-                pl.forward().truncate(),
-            )
+            (pl.world_position(), pl.forward().truncate())
         };
-        let me = me3.truncate();
-        let walked_there = match self.travel.gem_spot {
-            Some((spot, since)) => {
-                me.distance(spot) <= ARRIVE.min(1.0) || now.duration_since(since) > FACE_GIVE_UP
+        if summons && !self.travel.state.faced {
+            // The step to open ground is the slot's walk; arrived or refused, the gem is used.
+            if let Some(place) = self.travel.state.gem_spot {
+                let within = FACE_REACH;
+                return Some(Goal::At { place, within });
             }
-            None => false,
-        };
-        if summons && !walked_there {
-            if let Some((spot, _)) = self.travel.gem_spot {
-                return Some((Vec3::new(spot.x, spot.y, me3.z), 0.3, block));
-            }
-            match clear_heading(forward.normalize_or(Vec2::Y), |dir| {
-                self.room_to_summon(dir)
-            }) {
+            let ahead = forward.normalize_or(Vec2::Y);
+            match clear_heading(ahead, |dir| self.room_to_summon(dir)) {
                 None => {
                     self.travel_gem_refused(guid, name, "has no room to summon its portal here");
                     return None;
                 }
-                Some(dir) if dir.dot(forward.normalize_or(Vec2::Y)) < 0.99 => {
-                    let spot = me + dir * FACE_STEP;
-                    tracing::info!("travel: stepping to open ground to use {name}");
-                    self.travel.gem_spot = Some((spot, now));
-                    return Some((Vec3::new(spot.x, spot.y, me3.z), 0.3, block));
+                Some(dir) if dir.dot(ahead) < 0.99 => {
+                    let spot = me3.truncate() + dir * FACE_STEP;
+                    let assets = self.assets.clone();
+                    let floor = self
+                        .player
+                        .as_mut()
+                        .and_then(|pl| pl.ground_height(&assets, spot.x, spot.y, me3.z));
+                    if let Some(z) = floor {
+                        tracing::info!("travel: stepping to open ground to use {name}");
+                        let place = self.place_at(spot.extend(z));
+                        self.travel.state.gem_spot = Some(place);
+                        let within = FACE_REACH;
+                        return Some(Goal::At { place, within });
+                    }
                 }
                 Some(_) => {}
             }
+            self.travel.state.faced = true;
         }
         if self.autoplay.cast_in_flight(now) {
             // A spell is still on its way, and the use would be turned
@@ -1025,9 +794,9 @@ impl Client {
             return None;
         }
         tracing::info!("travel: using {name}");
-        self.travel.gem_spot = None;
-        self.travel.gem_used = Some(now);
-        self.travel.gem_uses = 1;
+        self.travel.state.gem_spot = None;
+        self.travel.state.gem_used = Some(now);
+        self.travel.state.gem_uses = 1;
         self.interact(guid);
         None
     }
@@ -1070,15 +839,11 @@ impl Client {
     }
 
     /// A gem that will not do its part on this journey: leave it out and
-    /// plan the rest of the way without it.
+    /// plan the rest of the way without it, next frame.
     fn travel_gem_refused(&mut self, guid: u32, name: &str, why: &str) {
         tracing::warn!("travel: {name} {why}; going another way");
         self.travel.refused_gems.push(guid);
-        let goal = self.travel.goal;
-        self.cancel_travel_keeping_refusals();
-        if let Some(goal) = goal {
-            self.plan_trip(goal);
-        }
+        self.travel.replan_due = true;
     }
 
     /// The portal a gem has just put in front of the character: the
@@ -1102,8 +867,8 @@ impl Client {
     /// The recall being cast fizzled: cast again as soon as the
     /// character has settled rather than wait out the whole timeout.
     pub(crate) fn travel_recall_fizzled(&mut self) {
-        if self.travel_recall_spell().is_some() && self.travel.recall_casts > 0 {
-            self.travel.recall_since = Some(
+        if self.travel_recall_spell().is_some() && self.travel.state.recall_casts > 0 {
+            self.travel.state.recall_since = Some(
                 Instant::now()
                     .checked_sub(RECALL_GIVE_UP)
                     .unwrap_or_else(Instant::now),
@@ -1117,48 +882,110 @@ impl Client {
         let refused = std::mem::take(&mut self.travel.refused);
         let refused_recalls = std::mem::take(&mut self.travel.refused_recalls);
         let refused_gems = std::mem::take(&mut self.travel.refused_gems);
-        let goal = self.travel.goal;
+        let (goal, owner) = (self.travel.goal, self.travel.owner);
         self.end_trip();
         self.travel.refused = refused;
         self.travel.refused_recalls = refused_recalls;
         self.travel.refused_gems = refused_gems;
         self.travel.goal = goal;
+        self.travel.owner = owner;
     }
 
     /// The route no longer starts where the character stands (a teleport
     /// or server correction): aim the next leg afresh.
     pub(crate) fn travel_displaced(&mut self) {
-        self.travel.leg = None;
+        self.travel.state.leg = None;
     }
 
-    /// Per frame while travelling: advance past reached waypoints, skip
-    /// one the character cannot get closer to, and return the end of the
-    /// current leg for the local move-to as `(world position, stop
-    /// distance, cell)`. `None` when the route is done (or none is set).
-    pub(crate) fn travel_goal(&mut self, now: Instant) -> Option<(Vec3, f32, u32)> {
-        self.travel.trip.as_ref()?;
-        let (me3, block, indoors) = {
-            let pl = self.player.as_ref()?;
-            (pl.world_position(), pl.cell & 0xFFFF_0000, pl.is_indoors())
+    /// Plan the journey again from where the body stands, leaving out what it was refused, and set
+    /// off; with no way left it is refused, and kept refused for whoever set it off.
+    pub(crate) fn plan_again(&mut self, now: Instant) -> Did {
+        let (Some(goal), Some(owner)) = (self.travel.goal, self.travel.owner) else {
+            self.end_trip();
+            return Did::blocked("no journey to plan again");
         };
-        let me = Vec2::new(me3.x, me3.y);
+        self.cancel_travel_keeping_refusals();
+        let did = self.set_off(owner, goal, now);
+        if let (Did::Blocked(why), Some(me), Some(p)) = (&did, self.my_position(), goal.place()) {
+            self.refuse(owner, goal, me, p.at, &why.what);
+            self.end_trip();
+        }
+        did
+    }
+
+    /// The step's walk has no way: a portal is left out and the journey planned again next frame;
+    /// the journey's own end refuses the journey.
+    fn refuse_step(&mut self, why: &str) {
+        match self.travel_step().cloned() {
+            Some(Step::Portal { name, mouth, .. }) => {
+                tracing::warn!(
+                    "travel: step {} (portal {name:?}): {why}; going another way",
+                    self.travel.step
+                );
+                self.travel.refused.push(mouth.at.truncate());
+                self.travel.replan_due = true;
+            }
+            _ => self.refuse_journey(why),
+        }
+    }
+
+    /// No way to the journey's end from here: it ends, kept refused for whoever set it off.
+    fn refuse_journey(&mut self, why: &str) {
+        tracing::warn!(
+            "travel: step {}: {why}; the journey is refused",
+            self.travel.step
+        );
+        let (goal, owner, me) = (self.travel.goal, self.travel.owner, self.my_position());
+        if let (Some(goal), Some(owner), Some(me)) = (goal, owner, me) {
+            if let Some(p) = goal.place() {
+                self.refuse(owner, goal, me, p.at, why);
+            }
+        }
+        self.end_trip();
+        self.travel.why_refused = Some(why.to_string());
+    }
+
+    /// What the slot answered the step's stretch: the walk's end reached is the next step; a leg
+    /// refused is skipped; any other refusal leaves the step out; the step to open ground is over.
+    pub(crate) fn stretch_answered(&mut self, did: &Did) {
+        let gem = matches!(self.travel_step(), Some(Step::Gem { .. }));
+        let portal = self.travel_portal().is_some();
+        let leg = self.travel.state.on_leg;
+        match did {
+            Did::Done | Did::Blocked(_) if gem => self.travel.state.faced = true,
+            Did::Done if !portal && !leg => {
+                self.travel_next_step();
+            }
+            Did::Blocked(_) if leg => self.travel.leg_refused = true,
+            Did::Blocked(why) => self.refuse_step(&why.what),
+            _ => {}
+        }
+    }
+
+    /// The stretch of the step under way to walk this frame (`walk_journey`): the step's whole walk
+    /// when the region holds its end, else the overland leg. Before it, portal, recall and gem
+    /// arrivals and clocks; `None` when the step walks nowhere this frame.
+    pub(crate) fn step_goal(&mut self, now: Instant) -> Option<Goal> {
+        self.travel.trip.as_ref()?;
+        let (me3, block) = {
+            let pl = self.player.as_ref()?;
+            (pl.world_position(), pl.cell & 0xFFFF_0000)
+        };
+        let me = me3.truncate();
+        self.travel.leg_refused = std::mem::take(&mut self.travel.state.on_leg)
+            && std::mem::take(&mut self.travel.leg_refused);
         // A portal step is over when the character is where the portal
         // comes out. Merely being in another landblock is not enough:
         // walking to a portal often crosses a boundary, and counting
         // that as having gone through skipped the rest of the journey.
-        if let Some(from) = self.travel.portal_from {
-            let step = self
-                .travel
-                .trip
-                .as_ref()
-                .and_then(|t| t.steps.get(self.travel.step))
-                .cloned();
+        if let Some(from) = self.travel.state.portal_from {
+            let step = self.travel_step().cloned();
             let exit = step.as_ref().and_then(|s| s.exit());
             let arrived = match (exit, &step) {
                 // A recall can land in the landblock we are already in,
                 // so only the spot counts, and only once a cast is out.
                 (Some(exit), Some(Step::Recall { .. })) => {
-                    self.travel.recall_casts > 0 && me.distance(exit.at.truncate()) < 30.0
+                    self.travel.state.recall_casts > 0 && me.distance(exit.at.truncate()) < 30.0
                 }
                 (Some(exit), _) => {
                     block == exit.cell & 0xFFFF_0000 || me.distance(exit.at.truncate()) < 30.0
@@ -1172,7 +999,7 @@ impl Client {
                 match step {
                     Some(Step::Recall { name, .. }) => {
                         tracing::info!("travel: {name} carried us off");
-                        if self.travel.recall_leave_combat {
+                        if self.travel.state.recall_leave_combat {
                             self.leave_combat();
                         }
                     }
@@ -1192,53 +1019,13 @@ impl Client {
                         }
                     }
                 }
+                // The next step's walk is planned on the region arrived in, this frame.
                 if !self.travel_next_step() {
                     return None;
                 }
             } else if let Some(Step::Recall { spell, name, .. }) = step {
-                // Standing still, casting, and waiting to be carried
-                // off. The cast is sent once the character has settled,
-                // again when the first has not worked in a while, and
-                // after that the journey goes another way.
-                let since = *self.travel.recall_since.get_or_insert(now);
-                let waited = now.duration_since(since);
-                let casts = self.travel.recall_casts;
-                let due = if casts == 0 {
-                    waited >= RECALL_SETTLE
-                } else {
-                    waited >= RECALL_GIVE_UP
-                };
-                if due && casts < RECALL_TRIES {
-                    // `/lifestone` is not a spell: the server has its
-                    // own action for it and asks for no skill,
-                    // components or casting at all. It is planned
-                    // beside the spells and sent quite differently.
-                    let sent = if ac_world::recalls::spell::is_free(spell) {
-                        self.send_free_recall(spell)
-                    } else {
-                        // On ourselves, whatever is selected: a few
-                        // recalls are written as targeted spells.
-                        match self.world.player_guid {
-                            Some(me) => self.cast_at(spell, me),
-                            None => self.try_cast(spell),
-                        }
-                    };
-                    match sent {
-                        crate::magic::CastCheck::Ok => {
-                            tracing::info!("travel: casting {name} ({})", casts + 1);
-                            self.travel.recall_casts = casts + 1;
-                            self.travel.recall_since = Some(now);
-                        }
-                        why => {
-                            tracing::warn!("travel: cannot cast {name}: {why:?}");
-                            self.travel_recall_refused();
-                        }
-                    }
-                } else if due {
-                    self.travel_recall_refused();
-                }
-                // Nothing to walk to: the move-to is left idle so the
-                // character stands still for the cast.
+                self.travel_recall_wait(spell, &name, now);
+                // Nothing to walk to: the character stands still for the cast.
                 return None;
             } else if let Some(Step::Gem {
                 guid,
@@ -1252,104 +1039,13 @@ impl Client {
                 return self.travel_gem_wait(guid, &name, summons, now);
             }
         }
-        // Coming no closer to this step's target for a long while, or no way
-        // on the indoor leg below (its steering refused): plan again from
-        // where the character stands. This comes before the indoor walk,
-        // which hands back its leg and returns, so a character standing
-        // still inside a hall is noticed.
-        if let Some(target) = self.travel.step_target {
-            let d = me.distance(target);
-            if d < self.travel.step_best - STEP_PROGRESS {
-                self.travel.step_best = d;
-                self.travel.step_since = Some(now);
-            }
-        }
-        let target_indoors = self.travel.step_cell.is_some_and(|c| c & 0xFFFF >= 0x100);
-        let indoor_leg = (indoors || target_indoors) && self.travel.step_block == Some(block);
-        if self
-            .travel
-            .step_since
-            .is_some_and(|t| now.duration_since(t) > STEP_GIVE_UP)
-            || (indoor_leg && self.travel.leg_refused)
-        {
-            if let Some(goal) = self.travel.goal {
-                tracing::warn!(
-                    "travel: step {} is going nowhere; planning again",
-                    self.travel.step
-                );
-                // A portal that could not be got near is left out of the
-                // new plan, or the plan would be the same one again.
-                let mut replans = 0;
-                if let Some((name, mouth)) = self.travel_portal() {
-                    tracing::warn!(
-                        "travel: could not get to the portal {name:?}; going another way"
-                    );
-                    self.travel.refused.push(mouth);
-                    self.cancel_travel_keeping_refusals();
-                } else if self.travel.replans >= REPLANS {
-                    // Nothing to leave out, so each new plan is the same walk again
-                    // (`a_walk_that_gets_nowhere_is_given_up`).
-                    tracing::warn!("travel: step {} gets nowhere; giving up", self.travel.step);
-                    self.end_trip();
-                    return None;
-                } else {
-                    replans = self.travel.replans + 1;
-                }
-                self.travel.step_since = Some(now);
-                self.plan_trip(goal);
-                self.travel.replans = replans;
-            }
-            // The new plan starts next frame: planning again from inside
-            // this call could go round for ever.
-            return None;
-        }
-        // Indoors (the Town Network hub, a dungeon) the world grid says
-        // nothing and a landblock's cells can lie outside its own square,
-        // so the leg is aimed straight at the target in the character's
-        // own landblock and the landblock's navigation graph steers.
-        // Inside the landblock the step is aimed into (the Town Network
-        // hub, a dungeon), walk straight at the target and let the
-        // landblock's own graph steer. Inside a *building* on the way,
-        // with the target elsewhere, keep to the overland legs so the
-        // character walks back out instead of pressing against a wall.
-        if indoor_leg {
-            let target = *self.travel.route.as_ref()?.last()?;
-            if me.distance(target) > ARRIVE {
-                // At the height of what is aimed at when that is known --
-                // a portal's mouth in a hall up a hill -- and in its own
-                // cell, so the steering takes the height as the answer
-                // rather than dropping it to the ground. Aimed at the
-                // character's own floor instead, from the Archmage's
-                // first floor at 69 to the Holtburg Meeting Hall Portal at
-                // 96, the planner found nothing there and the character
-                // walked into the wall for half a minute.
-                let z = self.travel.step_z.unwrap_or(me3.z);
-                let cell = self
-                    .travel
-                    .step_cell
-                    .filter(|c| c & 0xFFFF >= 0x100)
-                    .unwrap_or(block);
-                return Some((Vec3::new(target.x, target.y, z), ARRIVE, cell));
-            }
-            // At the target. A walk is done; a portal's mouth is waited
-            // at below, like outdoors: jumped into, and given up on when
-            // it will not take us. Aiming at the mouth for ever from on
-            // top of it left a character standing on a dungeon's exit
-            // portal that never fired.
-            if self.travel.portal_from.is_none() && !self.travel_next_step() {
-                return None;
-            }
-        }
         // A portal takes whoever touches it, so the character can be
         // carried off mid-walk by one the journey never meant to use.
         // Wherever they have landed, plan again from there.
         if let Some(last) = self.travel.last_seen {
             let jumped = me.distance(last) > 60.0;
             let expected = self
-                .travel
-                .trip
-                .as_ref()
-                .and_then(|t| t.steps.get(self.travel.step))
+                .travel_step()
                 .and_then(|s| s.exit())
                 .is_some_and(|exit| me.distance(exit.at.truncate()) < 60.0);
             if jumped && !expected {
@@ -1358,177 +1054,248 @@ impl Client {
                 // not refused: refusing it once shut the way off the
                 // continent. The route already pays to pass near one, and
                 // the plan from here takes the new position as it is.
-                if let Some(goal) = self.travel.goal {
-                    tracing::info!("travel: carried off to {me:?}; planning again from here");
-                    self.plan_trip(goal);
-                }
-                // Whatever the new plan is, it starts next frame: planning
-                // again from inside this call could go round for ever.
+                tracing::info!("travel: carried off to {me:?}; planning again from here");
+                self.travel.replan_due = true;
                 return None;
             }
         }
         self.travel.last_seen = Some(me);
-        // Underground, a leg is in the dungeon's own block and on the
-        // character's own floor, whatever the map says (see
-        // `steering_block`).
+        let step = self.travel_step()?.clone();
+        let end = step.walk_end()?;
+        let portal = matches!(step, Step::Portal { .. });
+        if portal && reached(me3, end.at, ARRIVE) && !self.wait_at_mouth(now) {
+            return None;
+        }
+        if self.is_in_region(end) {
+            // A mouth is walked into on its own floor; the journey's end is put on its floor.
+            let (place, within) = match portal {
+                true => (end, 0.0),
+                false => (
+                    self.end_on_floor(end)?,
+                    self.travel.goal.map_or(ARRIVE, Goal::within),
+                ),
+            };
+            return Some(Goal::At { place, within });
+        }
+        self.travel.state.on_leg = true;
+        self.overland_goal(end.at.truncate(), now)
+    }
+
+    /// Standing at the portal's mouth and still here: jump into it after a while, and after
+    /// [`PORTAL_GIVE_UP`] leave it out. False once it is left out.
+    fn wait_at_mouth(&mut self, now: Instant) -> bool {
+        let since = *self.travel.state.portal_since.get_or_insert(now);
+        if now.duration_since(since) > PORTAL_GIVE_UP {
+            if let Some((name, mouth)) = self.travel_portal() {
+                let level = self.world.stats.level.max(1) as u32;
+                let why = ac_world::portals::near(mouth, 3.0)
+                    .first()
+                    .and_then(|p| p.refusal(level))
+                    .unwrap_or_else(|| "would not take us".into());
+                tracing::warn!("travel: the portal {name:?} {why}; going another way");
+                self.travel.refused.push(mouth);
+            }
+            self.travel.replan_due = true;
+            return false;
+        }
+        // A few portals sit above the ground and have to be jumped into; try that while we wait.
+        let hop_due = self
+            .travel
+            .state
+            .last_hop
+            .is_none_or(|t| now.duration_since(t) > Duration::from_secs(2));
+        if now.duration_since(since) > Duration::from_secs(3) && hop_due {
+            self.travel.state.last_hop = Some(now);
+            tracing::info!("travel: jumping into the portal");
+            self.jump(1.0);
+        }
+        true
+    }
+
+    /// The recall step, standing still: the cast sent once the character has settled, again when
+    /// the first has not worked in a while, and after that the journey goes another way.
+    fn travel_recall_wait(&mut self, spell: u32, name: &str, now: Instant) {
+        let since = *self.travel.state.recall_since.get_or_insert(now);
+        let waited = now.duration_since(since);
+        let casts = self.travel.state.recall_casts;
+        let due = if casts == 0 {
+            waited >= RECALL_SETTLE
+        } else {
+            waited >= RECALL_GIVE_UP
+        };
+        if !due {
+            return;
+        }
+        if casts >= RECALL_TRIES {
+            self.travel_recall_refused();
+            return;
+        }
+        // `/lifestone` is not a spell: the server has its own action for it and asks for no
+        // skill, components or casting at all. It is planned beside the spells and sent quite
+        // differently.
+        let sent = if ac_world::recalls::spell::is_free(spell) {
+            self.send_free_recall(spell)
+        } else {
+            // On ourselves, whatever is selected: a few recalls are written as targeted spells.
+            match self.world.player_guid {
+                Some(me) => self.cast_at(spell, me),
+                None => self.try_cast(spell),
+            }
+        };
+        match sent {
+            crate::magic::CastCheck::Ok => {
+                tracing::info!("travel: casting {name} ({})", casts + 1);
+                self.travel.state.recall_casts = casts + 1;
+                self.travel.state.recall_since = Some(now);
+            }
+            why => {
+                tracing::warn!("travel: cannot cast {name}: {why:?}");
+                self.travel_recall_refused();
+            }
+        }
+    }
+
+    /// `end` on its floor by the planner's rule, kept for the step; `None` while its area is
+    /// assembled. A place with no floor is handed on as it is, and the planner says why not.
+    fn end_on_floor(&mut self, end: Place) -> Option<Place> {
+        if let Some(p) = self.travel.state.end {
+            return Some(p);
+        }
+        let pl = self.player.as_ref()?;
+        let me = Place {
+            at: pl.world_position(),
+            cell: pl.cell,
+        };
+        let cap = pl.capsule();
+        let on = match self.pathfinder.put_on_floor(me, end, cap) {
+            Ok(Some(p)) => p,
+            Ok(None) => return None,
+            Err(_) => end,
+        };
+        self.travel.state.end = Some(on);
+        Some(on)
+    }
+
+    /// The overland leg toward `target` (world xy) past the region: along a terrain route
+    /// (`worldroute`), a waypoint skipped when no progress is made toward it.
+    fn overland_goal(&mut self, target: Vec2, now: Instant) -> Option<Goal> {
+        let (me3, block, indoors) = {
+            let pl = self.player.as_ref()?;
+            (pl.world_position(), pl.cell & 0xFFFF_0000, pl.is_indoors())
+        };
+        let me = me3.truncate();
         let underground = indoors && {
             let assets = self.assets.clone();
             self.player
                 .as_mut()
                 .is_some_and(|pl| pl.in_dungeon(&assets))
         };
+        // Underground there is no terrain to walk: only a portal leaves a dungeon.
+        if underground {
+            self.refuse_step("not in this dungeon");
+            return None;
+        }
+        if self.travel.state.route.is_none() {
+            let (grid, region) = self.travel_terrain()?;
+            // Every other portal near the way is a trap: walking into one takes the character
+            // wherever it leads. Give them a wide berth.
+            let keep = self.travel_portal().map(|(_, m)| m);
+            let mid = (me + target) * 0.5;
+            let reach = me.distance(target) * 0.5 + 200.0;
+            let avoid: Vec<Vec2> = ac_world::portals::near(mid, reach)
+                .into_iter()
+                .filter(|p| p.mouth_outdoors())
+                .map(|p| p.from_xy())
+                .filter(|m| keep.is_none_or(|k| k.distance(*m) > 5.0))
+                .collect();
+            let Some(route) = worldroute::find_avoiding(&grid, &region, me, target, &avoid) else {
+                self.refuse_step("no way there over the terrain");
+                return None;
+            };
+            let len: f32 = route.windows(2).map(|w| w[0].distance(w[1])).sum();
+            tracing::info!(
+                "travel: step {}: {} waypoints, {len:.0} m",
+                self.travel.step,
+                route.len()
+            );
+            self.travel.state.route = Some(route);
+            self.travel.state.next = 0;
+            self.travel.state.restart_waypoint();
+        }
+        let route = self.travel.state.route.clone()?;
+        let n = route.len();
         loop {
-            let n = self.travel.route.as_ref()?.len();
-            let waypoint = |t: &Travel, i: usize| t.route.as_ref().map(|r| r[i]);
-            let mut next = self.travel.next;
-            while next < n && waypoint(&self.travel, next).is_some_and(|w| me.distance(w) <= ARRIVE)
-            {
+            let mut next = self.travel.state.next;
+            while next < n && me.distance(route[next]) <= ARRIVE {
                 next += 1;
             }
-            if next != self.travel.next {
-                self.travel.next = next;
-                self.travel.restart_waypoint();
-                // Reaching a waypoint is progress even when the detour
-                // it is on leads away from the step's target for a while
-                // (all the way round a town wall).
-                self.travel.step_since = Some(now);
+            if next != self.travel.state.next {
+                self.travel.state.next = next;
+                self.travel.state.restart_waypoint();
             }
             if next >= n {
-                // The step's route is walked. A portal step is not done
-                // until the character has actually gone through, so wait
-                // at its mouth rather than give up.
-                if self.travel.portal_from.is_some() {
-                    // The clock starts when we reach the mouth, not when
-                    // the step began: the walk there can be long.
-                    if self.travel.portal_since.is_none() {
-                        self.travel.portal_since = Some(now);
-                    }
-                    // Standing at its mouth and still here: it will not
-                    // take us. Plan the rest of the way without it.
-                    if self
-                        .travel
-                        .portal_since
-                        .is_some_and(|t| now.duration_since(t) > PORTAL_GIVE_UP)
-                    {
-                        if let Some((name, mouth)) = self.travel_portal() {
-                            let level = self.world.stats.level.max(1) as u32;
-                            let why = ac_world::portals::near(mouth, 3.0)
-                                .first()
-                                .and_then(|p| p.refusal(level))
-                                .unwrap_or_else(|| "would not take us".into());
-                            tracing::warn!("travel: the portal {name:?} {why}; going another way");
-                            self.travel.refused.push(mouth);
-                        }
-                        let goal = self.travel.goal;
-                        self.cancel_travel_keeping_refusals();
-                        if let Some(goal) = goal {
-                            self.plan_trip(goal);
-                        }
-                        // Next frame walks the new plan: replanning and
-                        // carrying on inside one call risks going round.
-                        return None;
-                    }
-                    // A few portals sit above the ground and have to be
-                    // jumped into; try that while we wait.
-                    if self
-                        .travel
-                        .portal_since
-                        .is_some_and(|t| now.duration_since(t) > Duration::from_secs(3))
-                        && self
-                            .travel
-                            .last_hop
-                            .is_none_or(|t| now.duration_since(t) > Duration::from_secs(2))
-                    {
-                        self.travel.last_hop = Some(now);
-                        tracing::info!("travel: jumping into the portal");
-                        self.jump(1.0);
-                    }
-                    let mouth = waypoint(&self.travel, n - 1)?;
-                    // On its own floor and in its own cell when the data
-                    // says: a mouth indoors is not on the ground under it.
-                    let z = self.travel.step_z.unwrap_or_else(|| {
-                        leg_height(self.travel.grid.as_deref(), mouth, me3, underground)
-                    });
-                    let cell = self
-                        .travel
-                        .step_cell
-                        .filter(|c| c & 0xFFFF >= 0x100)
-                        .unwrap_or_else(|| steering_block(mouth, block, underground));
-                    return Some((Vec3::new(mouth.x, mouth.y, z), 0.0, cell));
-                }
-                if !self.travel_next_step() {
-                    return None;
-                }
-                continue;
+                // Walked to the route's end and the region still does not hold the step's.
+                self.refuse_step("the terrain route ends short of it");
+                return None;
             }
-            let wp = waypoint(&self.travel, next)?;
+            let wp = route[next];
             // How far there is still to go: along the route being steered
             // (and from its end on to the waypoint) while there is one,
             // as the crow flies otherwise.
             let (d, plan) = match self.steering.remaining(me3) {
-                Some((along, end, planned)) => {
-                    (along + Vec2::new(end.x, end.y).distance(wp), Some(planned))
-                }
+                Some((along, end, planned)) => (along + end.truncate().distance(wp), Some(planned)),
                 None => (me.distance(wp), None),
             };
             // A different route is a different yardstick: progress is
             // measured from here on, but the clock keeps running, so a
             // character that is not moving is still caught.
-            if plan != self.travel.measured_on {
-                self.travel.measured_on = plan;
-                self.travel.best = d;
-                self.travel.last_progress.get_or_insert(now);
+            let s = &mut self.travel.state;
+            if plan != s.measured_on {
+                s.measured_on = plan;
+                s.best = d;
+                s.last_progress.get_or_insert(now);
             }
-            match self.travel.last_progress {
-                Some(t) if d >= self.travel.best - PROGRESS => {
+            match s.last_progress {
+                Some(t) if d >= s.best - PROGRESS => {
                     if now.duration_since(t) >= STUCK_AFTER || self.travel.leg_refused {
-                        // The last waypoint is where the step ends; not
-                        // reaching it is not arriving. Plan the journey
-                        // again from here, a few times, before giving up.
-                        if next + 1 >= n && me.distance(wp) > 2.0 * ARRIVE {
-                            if self.travel.replans >= REPLANS {
-                                tracing::warn!("travel: cannot reach {wp:?} from here; giving up");
-                                self.end_trip();
-                                return None;
-                            }
-                            tracing::warn!(
-                                "travel: no way to the end of the step at {wp:?}; planning again from here"
-                            );
-                            let replans = self.travel.replans + 1;
-                            if let Some(goal) = self.travel.goal {
-                                self.plan_trip(goal);
-                            }
-                            self.travel.replans = replans;
+                        // The last waypoint is where the step ends; not reaching it leaves the
+                        // step out.
+                        if next + 1 >= n {
+                            self.refuse_step("no way to the end of the terrain route");
                             return None;
                         }
                         tracing::warn!(
                             "travel: no progress toward waypoint {next}/{n} at {wp:?} for {:?}, skipping it",
                             STUCK_AFTER
                         );
-                        self.travel.next = next + 1;
-                        self.travel.restart_waypoint();
+                        self.travel.leg_refused = false;
+                        self.travel.state.next = next + 1;
+                        self.travel.state.restart_waypoint();
                         continue;
                     }
                 }
                 _ => {
-                    self.travel.best = d;
-                    self.travel.last_progress = Some(now);
+                    s.best = d;
+                    s.last_progress = Some(now);
                 }
             }
-            let leg = match self.travel.leg {
+            let leg = match self.travel.state.leg {
                 Some(l) if me.distance(l) > ARRIVE && me.distance(l) <= 2.0 * LEG => l,
                 _ => {
                     let l = leg_end(me, wp);
-                    self.travel.leg = Some(l);
+                    self.travel.state.leg = Some(l);
                     l
                 }
             };
-            let z = leg_height(self.travel.grid.as_deref(), leg, me3, underground);
-            return Some((
-                Vec3::new(leg.x, leg.y, z),
-                ARRIVE,
-                steering_block(leg, block, underground),
-            ));
+            let z = leg_height(self.travel.grid.as_deref(), leg, me3, false);
+            let place = Place {
+                at: leg.extend(z),
+                cell: steering_block(leg, block, false),
+            };
+            return Some(Goal::At {
+                place,
+                within: ARRIVE,
+            });
         }
     }
 }

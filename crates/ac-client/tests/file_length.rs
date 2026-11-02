@@ -32,11 +32,6 @@ const LONG_FILES: &[(&str, usize, &str)] = &[
         "one wgpu device with the buffers, pipelines and passes whose layouts must match",
     ),
     (
-        "crates/ac-client/src/travel.rs",
-        1_700,
-        "one journey end to end: trip, route, steering and the legs handed between them",
-    ),
-    (
         "crates/ac-plugin/src/panels/loot_profiles.rs",
         1_800,
         "the profile editor, one widget per rule field, over an ordered list that is the policy",

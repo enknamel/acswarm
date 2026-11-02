@@ -171,7 +171,7 @@ impl Client {
     }
 
     /// Keep `owner`'s refusal of `goal` (`Client.refusals`), in place of an older one for it.
-    fn refuse(&mut self, owner: Owner, goal: Goal, from: Vec3, there: Vec3, why: &str) {
+    pub(crate) fn refuse(&mut self, owner: Owner, goal: Goal, from: Vec3, there: Vec3, why: &str) {
         self.refusals
             .retain(|r| !(r.owner == owner && r.goal.is_same(goal)));
         if self.refusals.len() >= REFUSALS_KEPT {
@@ -205,9 +205,7 @@ impl Client {
                 && self
                     .travel_goal_xy()
                     .is_some_and(|g| g.distance(xy) <= REPLAN_DISTANCE);
-            let within = goal.within();
-            let planned = bound || self.plan_trip(Goal::At { place, within });
-            if planned {
+            if bound {
                 if self
                     .going
                     .as_ref()
@@ -217,14 +215,18 @@ impl Client {
                 }
                 return Did::Acting;
             }
-            tracing::info!(
-                "travel: no way for {} to {:?} from here",
-                owner.label(),
-                place.at
-            );
-            let why = "no way there from here";
-            self.refuse(owner, goal, me.at, place.at, why);
-            return Did::blocked(why);
+            let within = goal.within();
+            let did = self.set_off(owner, Goal::At { place, within }, now);
+            if let Did::Blocked(why) = &did {
+                tracing::info!(
+                    "travel: no way for {} to {:?} from here: {}",
+                    owner.label(),
+                    place.at,
+                    why.what
+                );
+                self.refuse(owner, goal, me.at, place.at, &why.what);
+            }
+            return did;
         }
         let within = goal.within();
         if reached(me.at, place.at, within) {
@@ -298,7 +300,7 @@ impl Client {
 
     /// End the walk in the slot for `owner`'s new one. A walk still followed is told, once, who
     /// took it (logged); one arrived, refused or given up has nothing left to lose.
-    fn replace_walk(&mut self, owner: Owner, me: Vec3) {
+    pub(crate) fn replace_walk(&mut self, owner: Owner, me: Vec3) {
         let followed = self.going.as_ref().is_some_and(|g| self.is_followed(g, me));
         let Some(old) = self.going.take() else {
             return;
@@ -324,25 +326,25 @@ impl Client {
                 .is_some_and(|p| !reached(me, p.at, g.goal.within()))
     }
 
-    /// The journey's leg asked of the slot while it is free or the journey's (`tick_player`), and
-    /// refused when the slot refuses it; the journey's walk ends when it has no leg.
-    pub(crate) fn walk_leg(&mut self, now: Instant) -> Option<Did> {
-        let leg = self.travel_goal(now);
-        self.travel.leg_refused = false;
-        let Some((at, within, cell)) = leg else {
-            self.stop_going(Some(Owner::Journey), "no leg to walk");
+    /// The journey's stretch asked of the slot each frame (`tick_player`) while it is free or the
+    /// journey's; a step left out is planned again first, and with nothing to walk the walk ends.
+    pub(crate) fn walk_journey(&mut self, now: Instant) -> Option<Did> {
+        if std::mem::take(&mut self.travel.replan_due) {
+            return Some(self.plan_again(now));
+        }
+        if !self.traveling() {
+            self.stop_going(Some(Owner::Journey), "no journey");
+            return None;
+        }
+        let Some(goal) = self.step_goal(now) else {
+            self.stop_going(Some(Owner::Journey), "no stretch to walk");
             return None;
         };
         if self.holds_walk_besides(Owner::Journey) {
             return None;
         }
-        let goal = Goal::At {
-            place: Place { at, cell },
-            within,
-        };
         let did = self.go(Owner::Journey, goal, now);
-        // Flown, a leg goes straight there whatever the planner says.
-        self.travel.leg_refused = matches!(did, Did::Blocked(_)) && !self.noclip();
+        self.stretch_answered(&did);
         Some(did)
     }
 
@@ -355,7 +357,7 @@ impl Client {
     }
 
     /// Whether the slot holds a walk of an owner other than `owner` still being followed.
-    fn holds_walk_besides(&self, owner: Owner) -> bool {
+    pub(crate) fn holds_walk_besides(&self, owner: Owner) -> bool {
         let Some(me) = self.my_position() else {
             return false;
         };

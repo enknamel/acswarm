@@ -514,7 +514,7 @@ impl Client {
         })
     }
 
-    /// How long a journey from here to `goal` would take, seconds, planned as `plan_trip` plans
+    /// How long a journey from here to `goal` would take, seconds, planned as `set_off` plans
     /// it but not set off on.
     fn journey_seconds(&mut self, goal: Place) -> Option<f32> {
         let pl = self.player.as_ref()?;

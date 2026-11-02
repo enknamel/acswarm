@@ -542,6 +542,8 @@ fn a_dungeon_portal_below_its_landing_is_walked_down_to_by_its_drops() {
     let mut c =
         crate::testkit::standing_in_the_field(35, 0x01D2_02F7, glam::Vec3::new(47.9, -69.9, 12.0));
     let cave = ac_world::hunting::at(0x0286).expect("the Tumerok Cave");
+    // The clock the first walk is planned on: offline, planning takes seconds.
+    let t0 = Instant::now();
     assert!(
         c.journey_to(cave.place(), crate::travel::ARRIVE),
         "no journey at all"
@@ -561,7 +563,7 @@ fn a_dungeon_portal_below_its_landing_is_walked_down_to_by_its_drops() {
     let dt = 0.05;
     let mut dropped = false;
     for frame in 0..30 * 20 {
-        let now = Instant::now() + Duration::from_secs_f32(frame as f32 * dt);
+        let now = t0 + Duration::from_secs_f32(frame as f32 * dt);
         c.tick_player(crate::player::Input::default(), dt, now);
         dropped |= c.steering.route.as_ref().is_some_and(|r| {
             r.waypoints

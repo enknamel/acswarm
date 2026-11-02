@@ -91,6 +91,8 @@ fn what_stands_on_the_road_is_walked_past_and_what_swings_at_us_is_not() {
         now
     ));
     c.autoplay.growth.bound = Some(ground.clone());
+    // Hits are judged by the wall's clock, and setting off plans the first walk: seconds offline.
+    let now = Instant::now();
     assert!(c.passing_by(&it, &fight));
     assert!(!c.would_fight(&it, &fight, false, now));
 

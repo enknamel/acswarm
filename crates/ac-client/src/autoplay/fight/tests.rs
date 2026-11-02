@@ -157,6 +157,8 @@ fn a_fight_on_the_road_ends_when_the_creature_stops_following() {
         c.travel_to(glam::Vec2::new(me.x + 250.0, me.y)),
         "no way there"
     );
+    // Hits are judged by the wall's clock, and setting off plans the first walk: seconds offline.
+    let now = Instant::now();
     assert!(c.on_its_way());
     assert!(c.left_behind_on_the_road(guid, now), "it fell behind");
     c.autoplay.attacked_by("Drudge Skulker", now);
