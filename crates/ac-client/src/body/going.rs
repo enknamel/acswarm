@@ -332,20 +332,28 @@ impl Client {
         if std::mem::take(&mut self.travel.replan_due) {
             return Some(self.plan_again(now));
         }
-        if !self.traveling() {
-            self.stop_going(Some(Owner::Journey), "no journey");
-            return None;
+        // A corridor stretch arrived at asks the next on the same frame, once.
+        let mut answered = None;
+        for _ in 0..2 {
+            if !self.traveling() {
+                self.stop_going(Some(Owner::Journey), "no journey");
+                return answered;
+            }
+            let Some(goal) = self.step_goal(now) else {
+                self.stop_going(Some(Owner::Journey), "no stretch to walk");
+                return answered;
+            };
+            if self.holds_walk_besides(Owner::Journey) {
+                return answered;
+            }
+            let did = self.go(Owner::Journey, goal, now);
+            let again = self.stretch_answered(&did);
+            answered = Some(did);
+            if !again {
+                break;
+            }
         }
-        let Some(goal) = self.step_goal(now) else {
-            self.stop_going(Some(Owner::Journey), "no stretch to walk");
-            return None;
-        };
-        if self.holds_walk_besides(Owner::Journey) {
-            return None;
-        }
-        let did = self.go(Owner::Journey, goal, now);
-        self.stretch_answered(&did);
-        Some(did)
+        answered
     }
 
     /// End `owner`'s walk, if the slot holds it (any owner's with `None`), saying `why`.
