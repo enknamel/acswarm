@@ -27,7 +27,7 @@ system's entry fns are written in the files its own row names.
 - every `steps::HOUSEKEEPING` row; `steps::reflexes()` in table order, each once and only from the
   table; goals from `steps::weigh()`, best first. The first step that acts sets `Autoplay.step`.
 - then `settle_going()`: a row's walk it did not ask for ends, and `settle_journey()` holds a row's
-  journey while another row acts and ends it once its own row stands aside
+  journey while another row acts and puts it down (broken off) once its row stands aside
 
 ## Steps
 
@@ -116,7 +116,7 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 | road | a walk on the way somewhere (a ground, a counter, a script's goal); on it only what attacks is fought | way |
 | ground | the hunting spot growth chose; walking about it is not a road | spot, field |
 | area | a hunting area a player drew on the map (`HuntArea`) | zone |
-| journey | a planned trip of walks, portals and recalls (`Travel`), owned by the row that set it off or took it over; held while another row acts, ended when its row stands aside; each walk a stretch the slot follows (`Going`) | route, travel plan |
+| journey | a planned trip of walks, portals and recalls (`Travel`), owned by the row that set it off or took it over; held while another row acts, put down when its row stands aside; each walk a stretch the slot follows (`Going`) | route, travel plan |
 | mate | another character on the team board (`Mate`), in the fellowship or not | teammate, member |
 | fellow | a member of the server's fellowship | - |
 | recruit | invite a mate into the fellowship | invite, ask |
