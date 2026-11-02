@@ -43,6 +43,17 @@ fn gem_ways(gems: &[ac_world::trip::Gem]) -> Vec<(Vec2, String)> {
     out
 }
 
+/// Where the counter at `at` stands: its shop's own place (`shops`), else the map point.
+pub(super) fn counter_place(at: Vec2) -> ac_world::Place {
+    ac_world::shops::all()
+        .iter()
+        .find(|s| s.xy().distance(at) < 1.0)
+        .map_or(ac_world::Place::on_map(at), |s| ac_world::Place {
+            at: s.at,
+            cell: s.cell,
+        })
+}
+
 /// Which way out leaves the character nearest `at`, how far that is,
 /// and what it is called.
 pub(super) fn nearest_way(ways: &[(Vec2, String)], at: Vec2) -> (Vec2, f32, String) {

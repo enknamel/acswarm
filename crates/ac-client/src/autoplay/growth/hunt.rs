@@ -8,9 +8,10 @@ use crate::autoplay::{Doing, CORPSE_LIFE};
 use crate::did::Did;
 use crate::Client;
 use ac_world::object_desc_flags;
+use ac_world::Place;
 
 /// Standing this close to a ground's middle counts as being there.
-const GROUND_REACH: f32 = 30.0;
+pub(super) const GROUND_REACH: f32 = 30.0;
 
 /// A ground the character has just left is not gone back to for this
 /// long; one it could not reach, the same.
@@ -220,7 +221,7 @@ impl Client {
             match on_the_way(there, self.journey_broken_off(), busy, lately) {
                 OnTheWay::Wait => return true,
                 OnTheWay::WalkOn => {
-                    if self.grow_travel_in(at, ground_cell(lb), now) {
+                    if self.grow_travel(ground_place(lb, at), GROUND_REACH, now) {
                         self.autoplay.growth.bound_walked_on = Some(now);
                         self.autoplay.note(
                             format!("on the way to the {name} ground again ({away:.0} m)"),
@@ -354,7 +355,7 @@ impl Client {
             self.autoplay.growth.quiet_since = Some(now);
             // From inside a building the walk steps out first, as a town run's does.
             let set_off = if indoors {
-                self.grow_travel(goal, now) && {
+                self.grow_travel(Place::on_map(goal), crate::travel::ARRIVE, now) && {
                     self.mark_ground_walk();
                     true
                 }
@@ -391,7 +392,7 @@ impl Client {
         let named = pinned.is_some();
         if let Some((lb, at, name)) = pinned.or_else(|| self.party_ground()) {
             if self.autoplay.growth.hunting_at != Some(lb) {
-                if self.grow_travel_in(at, ground_cell(lb), now) {
+                if self.grow_travel(ground_place(lb, at), GROUND_REACH, now) {
                     let limit = self.planned_walk_limit();
                     let st = &mut self.autoplay.growth;
                     st.bound = Some((lb, at, name.clone()));
@@ -460,8 +461,8 @@ impl Client {
             return false;
         };
         let (lb, at, name) = (g.landblock, g.at, g.name.clone());
-        let (glo, ghi, cell) = (g.min_level, g.max_level, g.cell());
-        if self.grow_travel_in(at, cell, now) {
+        let (glo, ghi, place) = (g.min_level, g.max_level, g.place());
+        if self.grow_travel(place, GROUND_REACH, now) {
             let limit = self.planned_walk_limit();
             let st = &mut self.autoplay.growth;
             st.bound = Some((lb, at, name.clone()));
@@ -502,7 +503,7 @@ impl Client {
     ) -> Option<&'static ac_world::hunting::Ground> {
         let ranked = ac_world::hunting::ranked_for(level, margin, skip);
         ranked.into_iter().take(CANDIDATES).find(|g| {
-            let secs = self.journey_seconds(g.at, g.cell());
+            let secs = self.journey_seconds(g.place());
             tracing::debug!(
                 "ground: {} {:#06x} worth {:.0}, journey {secs:?} s",
                 g.name,
@@ -513,9 +514,9 @@ impl Client {
         })
     }
 
-    /// How long a journey from here to `goal` (in `goal_cell`, 0 for a place known by position)
-    /// would take, seconds, planned as `plan_trip_in` plans it but not set off on.
-    fn journey_seconds(&mut self, goal: Vec2, goal_cell: u32) -> Option<f32> {
+    /// How long a journey from here to `goal` would take, seconds, planned as `plan_trip` plans
+    /// it but not set off on.
+    fn journey_seconds(&mut self, goal: Place) -> Option<f32> {
         let pl = self.player.as_ref()?;
         let (me, cell) = (pl.world_position(), pl.cell);
         let underground = self.underground();
@@ -531,7 +532,7 @@ impl Client {
         let far = ac_world::trip::Prefs::far();
         let quests = self.travel.quests_done.clone();
         let from = ac_world::Place { at: me, cell };
-        let goal = crate::travel::journey_place(goal, goal_cell);
+        let goal = self.planning_place(goal);
         let plan = |p| {
             ac_world::trip::plan_with_recalls_and_gems(
                 from,
@@ -556,9 +557,9 @@ impl Client {
     }
 }
 
-/// The cell a journey to the ground of `lb` is bound for: a dungeon's landing, else 0.
-pub(super) fn ground_cell(lb: u32) -> u32 {
-    ac_world::hunting::at(lb).map_or(0, |g| g.cell())
+/// Where a journey to the ground of `lb` (its spawns' middle at `at`) ends (`Ground::place`).
+pub(super) fn ground_place(lb: u32, at: Vec2) -> Place {
+    ac_world::hunting::at(lb).map_or(Place::on_map(at), |g| g.place())
 }
 
 #[cfg(test)]

@@ -85,7 +85,11 @@ fn what_stands_on_the_road_is_walked_past_and_what_swings_at_us_is_not() {
     // Bound for a hunting ground and walking there: walked past, and
     // the fight rules have nothing to pick.
     let ground = (0xA9B2, Vec2::new(32_580.0, 34_570.0), "Drudge".to_string());
-    assert!(c.grow_travel(Vec2::new(me.x + 250.0, me.y), now));
+    assert!(c.grow_travel(
+        ac_world::Place::on_map(Vec2::new(me.x + 250.0, me.y)),
+        crate::travel::ARRIVE,
+        now
+    ));
     c.autoplay.growth.bound = Some(ground.clone());
     assert!(c.passing_by(&it, &fight));
     assert!(!c.would_fight(&it, &fight, false, now));
@@ -174,7 +178,10 @@ fn an_errand_is_on_its_way_only_while_its_walk_is() {
     let lb = (((at.x / 192.0) as u32) << 8) | (at.y / 192.0) as u32;
 
     // Bound, and walking there.
-    assert!(c.grow_travel(at, now), "no way to the ground");
+    assert!(
+        c.grow_travel(ac_world::Place::on_map(at), crate::travel::ARRIVE, now),
+        "no way to the ground"
+    );
     c.autoplay.growth.bound = Some((lb, at, "Drudge".into()));
     assert!(c.on_its_way());
     assert!(!c.would_fight(&it, &fight, false, now));
@@ -185,19 +192,22 @@ fn an_errand_is_on_its_way_only_while_its_walk_is() {
     assert!(!c.would_fight(&it, &fight, false, now));
 
     // Arrived: fighting again that tick, whatever `bound` still says.
-    assert!(c.grow_travel(at, now));
+    assert!(c.grow_travel(ac_world::Place::on_map(at), crate::travel::ARRIVE, now));
     c.end_trip();
     assert!(c.autoplay.growth.bound.is_some(), "not noticed yet");
     assert!(!c.on_its_way(), "arrived, and still walking past");
     assert!(c.would_fight(&it, &fight, false, now));
 
     // Cancelled -- the player took the keys -- is no walk either.
-    assert!(c.grow_travel(at, now));
+    assert!(c.grow_travel(ac_world::Place::on_map(at), crate::travel::ARRIVE, now));
     c.cancel_travel();
     assert!(!c.on_its_way());
 
     // Stepping out of a shop first is the start of the walk.
-    c.autoplay.growth.after_out = Some((at, 0));
+    c.autoplay.growth.after_out = Some(crate::Goal::At {
+        place: ac_world::Place::on_map(at),
+        within: crate::travel::ARRIVE,
+    });
     assert!(c.on_its_way());
 }
 
@@ -258,7 +268,7 @@ fn a_party_on_the_road_walks_past_together_and_stops_together() {
     // debuffer turns the character round for it.
     c.autoplay.config.team.follow = false;
     let counter = Vec2::new(me.x + 250.0, me.y);
-    assert!(c.grow_travel(counter, now));
+    assert!(c.grow_travel(ac_world::Place::on_map(counter), crate::travel::ARRIVE, now));
     c.autoplay.growth.run = Some(run_to(counter, now));
     c.autoplay.team.mates = vec![leader(false, Some(drudge.guid))];
     assert!(c.on_its_way());
@@ -327,7 +337,10 @@ fn a_road_is_a_road_whoever_planned_it() {
     // A roam about the ground is not a road, and is not one after a
     // fight has put it down either: what stands about the ground is
     // what the character came for.
-    assert!(c.travel_about(at));
+    assert!(c.travel_about(crate::Goal::At {
+        place: ac_world::Place::on_map(at),
+        within: crate::travel::ARRIVE,
+    }));
     assert!(!c.on_its_way(), "a roam walked past the ground");
     assert!(c.would_fight(&it, &fight, false, now));
     c.remember_journey();
@@ -344,7 +357,10 @@ fn a_road_is_a_road_whoever_planned_it() {
     c.autoplay.resume_trip = None;
     c.walk_to_corpse(0x8000_0002, "Corpse of Drudge", 30.0, now);
     assert!(!c.traveling());
-    assert_eq!(c.autoplay.resume_trip, Some(at));
+    assert_eq!(
+        c.autoplay.resume_trip.and_then(crate::Goal::place),
+        Some(ac_world::Place::on_map(at))
+    );
     assert!(c.on_its_way(), "a road put down for a body was lost");
 }
 

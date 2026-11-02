@@ -9,7 +9,7 @@ impl Client {
         // Not following's own journey (following plans it again), nor any while led: a copy would
         // outlive a stop (`a_stop_leaves_no_old_aim_behind_when_a_fight_broke_the_journey_off`).
         if self.traveling() && !self.is_follow_journey() && !self.is_led() {
-            if let Some(goal) = self.travel_goal_xy() {
+            if let Some(goal) = self.journey_goal() {
                 self.autoplay.resume_trip = Some(goal);
                 self.autoplay.resume_about_the_ground = self.travel_about_the_ground();
             }
@@ -34,7 +34,8 @@ impl Client {
         let resumed = if self.autoplay.resume_about_the_ground {
             self.travel_about(goal)
         } else {
-            self.travel_to(goal)
+            goal.place()
+                .is_some_and(|p| self.journey_to(p, goal.within()))
         };
         if resumed {
             self.autoplay.say(Doing::Traveling, "back on the road");

@@ -70,7 +70,7 @@ pub enum Goal {
 }
 
 impl Goal {
-    fn within(self) -> f32 {
+    pub(crate) fn within(self) -> f32 {
         match self {
             Goal::At { within, .. } | Goal::Near { within, .. } => within,
         }
@@ -205,12 +205,8 @@ impl Client {
                 && self
                     .travel_goal_xy()
                     .is_some_and(|g| g.distance(xy) <= REPLAN_DISTANCE);
-            let planned = bound
-                || if place.is_indoors() {
-                    self.plan_trip_in(xy, place.cell)
-                } else {
-                    self.plan_trip(xy)
-                };
+            let within = goal.within();
+            let planned = bound || self.plan_trip(Goal::At { place, within });
             if planned {
                 if self
                     .going

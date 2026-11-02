@@ -242,7 +242,7 @@ pub struct Autoplay {
     /// leave each one alone (see `Client::hold_off_wield`).
     pub(crate) wield_refused: crate::did::Patience<u32>,
     /// A journey put down for a fight, to be picked up again after it.
-    pub(crate) resume_trip: Option<glam::Vec2>,
+    pub(crate) resume_trip: Option<crate::Goal>,
     /// Whether that journey was a walk about the character's own ground
     /// rather than a road (see `Client::travel_about`): it is picked up
     /// again as what it was, and the walk past the road reads it while

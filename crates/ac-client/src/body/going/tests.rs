@@ -315,7 +315,11 @@ fn an_arrived_walk_holds_no_journey_back() {
     let me = c.my_position().expect("standing");
     assert!(c.go_to(Owner::Script, me + Vec3::X * 10.0, 1.0).acting());
     testkit::stand(&mut c, 0xA9B4_0019, Vec3::new(94.0, 7.1, 94.0));
-    assert!(c.plan_trip(me.truncate() + glam::Vec2::X * 150.0));
+    let far = ac_world::Place::on_map(me.truncate() + glam::Vec2::X * 150.0);
+    assert!(c.plan_trip(Goal::At {
+        place: far,
+        within: crate::travel::ARRIVE
+    }));
     assert_eq!(c.going.as_ref().map(|g| g.owner), Some(Owner::Script));
     let leg = c.walk_leg(Instant::now());
     assert!(leg.as_ref().is_some_and(Did::fine), "{leg:?}");

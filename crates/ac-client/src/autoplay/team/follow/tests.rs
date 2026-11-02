@@ -418,7 +418,11 @@ fn a_journey_put_aside_before_following_is_not_taken_up_after_a_stop() {
     c.travel_to(away);
     c.remember_journey();
     c.interrupt_travel("a fight");
-    assert_eq!(c.autoplay.resume_trip, Some(away), "nothing was put aside");
+    assert_eq!(
+        c.autoplay.resume_trip.and_then(crate::Goal::place),
+        Some(ac_world::Place::on_map(away)),
+        "nothing was put aside"
+    );
     c.autoplay.config.team.enabled = true;
     let now = Instant::now();
     let t = ticks(&mut c, now, 3);
@@ -441,7 +445,10 @@ fn a_follower_takes_up_no_journey_of_its_own_beside_its_leader() {
     let t = ticks(&mut c, now, 1);
     let me = c.my_position().expect("on its feet").truncate();
     let away = me + Vec2::new(0.0, 300.0);
-    c.autoplay.resume_trip = Some(away);
+    c.autoplay.resume_trip = Some(crate::Goal::At {
+        place: ac_world::Place::on_map(away),
+        within: crate::travel::ARRIVE,
+    });
     ticks(&mut c, t, 3);
     assert!(!makes_for(&c, away), "it set off on a journey of its own");
     assert_eq!(c.autoplay.resume_trip, None);
@@ -483,7 +490,10 @@ fn a_follower_back_from_the_dead_takes_up_no_trip_it_had() {
     let rec = &mut c.autoplay.recovery;
     rec.phase = crate::recovery::Phase::Landed;
     rec.since = t;
-    rec.trip = Some(away);
+    rec.trip = Some(crate::Goal::At {
+        place: ac_world::Place::on_map(away),
+        within: crate::travel::ARRIVE,
+    });
     let t = ticks(&mut c, t + Duration::from_secs(5), 1);
     assert!(!c.autoplay.recovery.active(), "the recovery did not finish");
     assert_eq!(c.autoplay.resume_trip, None, "the trip was handed back");

@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use glam::Vec2;
 
-use super::vendor::spot;
+use super::vendor::{counter_place, spot};
 use super::{
     Errand, Phase, Run, Turn, BUSY_ASKS, BUSY_REASK, COUNTER_REACH, SELLING_TIMEOUT, SETTLE,
     STOPS_PER_RUN, VENDOR_OPEN_TIMEOUT, VENDOR_REACH,
@@ -167,7 +167,7 @@ impl Client {
                         return Turn::Waited;
                     }
                     OnTheWay::WalkOn => {
-                        if !self.grow_travel(run.at, now) {
+                        if !self.grow_travel(counter_place(run.at), VENDOR_REACH, now) {
                             self.autoplay.note(
                                 format!(
                                     "no way on to {} from here ({away:.0} m short)",
@@ -644,7 +644,9 @@ impl Client {
             let errands = self.errands_for(cfg, &needs);
             let picked = self.choose_stop(cfg, &needs, &ways, &errands, &run.visited, now);
             if let Some((errand, vendor, at, look)) = picked {
-                if (still_full || look.worth_going()) && self.grow_travel(at, now) {
+                if (still_full || look.worth_going())
+                    && self.grow_travel(counter_place(at), VENDOR_REACH, now)
+                {
                     let what = if still_full || more_to_sell {
                         "the rest of the loot"
                     } else {
@@ -741,7 +743,7 @@ impl Client {
         if let Some(lb) = self.autoplay.growth.hunting_at {
             if let Some(g) = ac_world::hunting::at(lb) {
                 let (at, name) = (g.at, g.name.clone());
-                if self.grow_travel_in(at, g.cell(), now) {
+                if self.grow_travel(g.place(), crate::autoplay::growth::hunt::GROUND_REACH, now) {
                     self.autoplay.growth.bound = Some((lb, at, name.clone()));
                     self.autoplay.growth.bound_since = Some(now);
                     self.autoplay

@@ -379,7 +379,14 @@ impl Client {
             Next::OnTheWay => {}
             Next::Journey => {
                 v.journeyed = true;
-                if !self.plan_trip(v.goal.truncate()) {
+                let place = ac_world::Place {
+                    at: v.goal,
+                    cell: v.cell,
+                };
+                if !self.plan_trip(crate::Goal::At {
+                    place,
+                    within: REACH,
+                }) {
                     tracing::warn!("visit: no way to {} from here", v.label);
                     self.let_go_of(&v);
                     return;
@@ -573,6 +580,32 @@ mod tests {
             ..cindrue()
         };
         assert_eq!(Visit::landmark(&stone).person, None);
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn a_visit_to_a_warden_is_planned_through_the_facility_hub() {
+        // The Warden of fachubeasthamportals_flag, from the Holtburg lifestone: its cell sends the
+        // trip through the Town Network and the Facility Hub, not round by Qalaba'r.
+        let mut c =
+            crate::testkit::standing_in_the_field(25, 0xA9B4_0019, Vec3::new(84.0, 7.1, 94.0));
+        let u = ac_world::unlocks::all()
+            .iter()
+            .find(|u| u.flag == "fachubeasthamportals_flag")
+            .expect("the Warden's unlock");
+        assert!(c.visit_unlock(u), "no way to the Warden");
+        let trip = c.travel_trip().expect("a journey").clone();
+        assert_eq!(trip.portals(), 2, "{trip:?}");
+        assert!(
+            matches!(&trip.steps[1], ac_world::trip::Step::Portal { exit, .. } if exit.cell == 0x8A02_0212),
+            "not through the Facility Hub portal: {trip:?}"
+        );
+        let warden = ac_world::Place {
+            at: u.at,
+            cell: 0x8A02_01F7,
+        };
+        assert_eq!(trip.steps.last(), Some(&ac_world::trip::Step::Walk(warden)));
+        assert_eq!(c.journey_goal().and_then(crate::Goal::place), Some(warden));
     }
 
     #[test]

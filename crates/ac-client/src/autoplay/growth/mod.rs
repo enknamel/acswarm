@@ -220,7 +220,7 @@ pub struct State {
     outdoors_mark: Option<Vec2>,
     outdoors_back: Option<Vec2>,
     /// The journey to make once outside.
-    after_out: Option<(Vec2, u32)>,
+    after_out: Option<crate::Goal>,
     /// What the character was short of when the run began, for the
     /// stops after the first.
     needs: Vec<Need>,

@@ -1,8 +1,9 @@
 use std::time::{Duration, Instant};
 
+use ac_world::Place;
 use glam::Vec2;
 
-use crate::Client;
+use crate::{Client, Goal};
 
 /// A walk to a vendor, or to a hunting ground, that has taken longer
 /// than this is stuck somewhere: the place is given up on.
@@ -161,12 +162,7 @@ impl Client {
     /// way out but a portal, so the walk begins with the spot the
     /// character last stood outdoors, and the journey proper follows
     /// (see [`Self::grow_travel_on`]). False when no way was found.
-    pub(super) fn grow_travel(&mut self, goal: Vec2, now: Instant) -> bool {
-        self.grow_travel_in(goal, 0, now)
-    }
-
-    /// [`Self::grow_travel`] to a goal in a known cell (0 for one known by position): a dungeon's.
-    pub(super) fn grow_travel_in(&mut self, goal: Vec2, cell: u32, now: Instant) -> bool {
+    pub(super) fn grow_travel(&mut self, goal: Place, within: f32, now: Instant) -> bool {
         self.autoplay.growth.after_out = None;
         let Some(pl) = self.player.as_ref() else {
             return false;
@@ -186,13 +182,16 @@ impl Client {
                     && out.distance(Vec2::new(me.x, me.y)) < 150.0
                     && self.travel_to(out)
                 {
-                    self.autoplay.growth.after_out = Some((goal, cell));
+                    self.autoplay.growth.after_out = Some(Goal::At {
+                        place: goal,
+                        within,
+                    });
                     self.autoplay.note("stepping outside first", now);
                     return true;
                 }
             }
         }
-        self.travel_to_in(goal, cell)
+        self.journey_to(goal, within)
     }
 
     /// The second leg of a journey begun indoors: once the walk out has
@@ -201,13 +200,13 @@ impl Client {
         if self.traveling() {
             return false;
         }
-        let Some((goal, cell)) = self.autoplay.growth.after_out.take() else {
+        let Some(Goal::At { place, within }) = self.autoplay.growth.after_out.take() else {
             return false;
         };
-        if self.travel_to_in(goal, cell) {
+        if self.journey_to(place, within) {
             return true;
         }
-        tracing::info!("growth: no way on to {goal:?} from outside either");
+        tracing::info!("growth: no way on to {:?} from outside either", place.at);
         false
     }
 }

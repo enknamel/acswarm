@@ -34,7 +34,10 @@ fn a_follower_on_its_own_town_run_is_not_pulled_back_to_its_leader() {
     let cfg = c.autoplay.config.growth.clone();
     let now = Instant::now();
     let counter = Vec2::new(me.x + 250.0, me.y);
-    assert!(c.grow_travel(counter, now), "no way to the counter");
+    assert!(
+        c.grow_travel(ac_world::Place::on_map(counter), crate::travel::ARRIVE, now),
+        "no way to the counter"
+    );
     c.autoplay.growth.run = Some(run_to(counter, now));
 
     // The leader walks off and stops, and walks off again: the
@@ -89,7 +92,10 @@ fn a_followers_own_town_run_goes_on_through_following_and_a_fight() {
     let me = c.player.as_ref().unwrap().world_position();
     let now = Instant::now();
     let counter = Vec2::new(me.x + 250.0, me.y);
-    assert!(c.grow_travel(counter, now), "no way to the counter");
+    assert!(
+        c.grow_travel(ac_world::Place::on_map(counter), crate::travel::ARRIVE, now),
+        "no way to the counter"
+    );
     c.autoplay.growth.run = Some(run_to(counter, now));
     let bound_for = |c: &Client| c.traveling() && c.travel_goal_xy() == Some(counter);
     // Following begins, the leader thirty metres the other way.

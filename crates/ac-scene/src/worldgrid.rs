@@ -191,6 +191,15 @@ impl WorldGrid {
         let by = (world.y / (SPACING * 8.0)).floor().clamp(0.0, 254.0) as u32;
         (bx << 24) | (by << 16)
     }
+
+    /// Whether the landblock of `cell` is a dungeon's: in the archive and flat at zero, as
+    /// `landblock::load` reads `is_dungeon`; edge vertices are left out, the next block's here.
+    pub fn is_dungeon_block(&self, cell: u32) -> bool {
+        let (bx, by) = ((cell >> 24) as usize, ((cell >> 16) & 0xFF) as usize);
+        let at = |x: usize, y: usize| self.heights[(bx * 8 + x) * SIDE + by * 8 + y];
+        let flat = (1..8).all(|x| (1..8).all(|y| at(x, y) == 0));
+        self.has_block(bx, by) && flat
+    }
 }
 
 #[cfg(test)]
@@ -222,5 +231,12 @@ mod tests {
         assert_eq!(WorldGrid::vertex_world(8, 8), Vec2::new(192.0, 192.0));
         assert_eq!(WorldGrid::block_of(Vec2::new(192.0, 384.0)), 0x0102_0000);
         assert!(WorldGrid::from_bytes(b"nope").is_none());
+        // Block (1, 1) raised at vertex (9, 9) is ground; its edge vertices (8, 8) and (9, 8)
+        // are shared with the blocks beside it and say nothing.
+        g.heights[(9 * SIDE) + 9] = 1;
+        assert!(!g.is_dungeon_block(0x0101_0100));
+        g.heights[(9 * SIDE) + 9] = 0;
+        assert!(g.is_dungeon_block(0x0101_0100));
+        assert!(!g.is_dungeon_block(0x0000_0100), "not in the archive");
     }
 }

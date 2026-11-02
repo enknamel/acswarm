@@ -259,7 +259,10 @@ fn a_walk_to_a_ground_broken_off_by_a_corpse_is_walked_on() {
     let cfg = Growth::default();
     let at = Vec2::new(me.x + 250.0, me.y);
     let lb = (((at.x / 192.0) as u32) << 8) | (at.y / 192.0) as u32;
-    assert!(c.grow_travel(at, now), "no way to the ground");
+    assert!(
+        c.grow_travel(ac_world::Place::on_map(at), crate::travel::ARRIVE, now),
+        "no way to the ground"
+    );
     c.autoplay.growth.bound = Some((lb, at, "Drudge".into()));
     c.autoplay.growth.bound_since = Some(now);
 
@@ -539,7 +542,10 @@ fn a_dungeon_portal_below_its_landing_is_walked_down_to_by_its_drops() {
     let mut c =
         crate::testkit::standing_in_the_field(35, 0x01D2_02F7, glam::Vec3::new(47.9, -69.9, 12.0));
     let cave = ac_world::hunting::at(0x0286).expect("the Tumerok Cave");
-    assert!(c.travel_to_in(cave.at, cave.cell()), "no journey at all");
+    assert!(
+        c.journey_to(cave.place(), crate::travel::ARRIVE),
+        "no journey at all"
+    );
     let o = ac_world::landblock_origin(0x01D2_0000);
     let inner = o + glam::Vec3::new(80.1, -57.5, -6.0);
     let first = c.travel_trip().and_then(|t| {
