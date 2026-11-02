@@ -160,7 +160,7 @@ impl Client {
                     visited: vec![at],
                     walked_on: None,
                     walk_limit: crate::autoplay::growth::road::WALK_TIMEOUT,
-                    walking_up: None,
+                    walking_up: false,
                 });
                 self.autoplay
                     .say(Doing::Shopping, format!("{reason}: at {vendor}"));
@@ -284,7 +284,7 @@ impl Client {
         self.cancel_travel();
         // The last few metres to a counter are a walk after it, not a
         // journey (see `do_vendor_act`).
-        if self.follow.take().is_some() {
+        if self.going.take().is_some() {
             self.steering.reset();
         }
         self.autoplay

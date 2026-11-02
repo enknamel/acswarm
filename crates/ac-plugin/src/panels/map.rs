@@ -36,7 +36,7 @@
 //!   the map, rooms shaded on the dungeon's floor plan -- and kept under
 //!   `hunt.areas`.
 //! * On the world map a double-click asks for a route there and the
-//!   character walks it (see `ac_client::Client::travel_to`); a place
+//!   character walks it (see `ac_client::Client::go_to_point`); a place
 //!   name typed into "travel to" does the same by the gazetteer. The
 //!   route is drawn as a line; Cancel stops it.
 //!
@@ -374,9 +374,15 @@ pub(crate) fn view(c: &Client) -> Option<MapView> {
         coords,
         objects,
         route: c.travel_route().map(|r| r.to_vec()).unwrap_or_default(),
-        // A visit walking its last stretch has no journey to show, and
+        // A visit walking its last stretch, or a walk asked here, has no journey to show, and
         // still wants a Cancel.
-        travel: c.travel_progress().or_else(|| c.visiting().map(|_| (1, 1))),
+        travel: c.travel_progress().or_else(|| {
+            let by_hand = c
+                .going
+                .as_ref()
+                .is_some_and(|g| g.owner == ac_client::Owner::Hand);
+            (c.visiting().is_some() || by_hand).then_some((1, 1))
+        }),
         places: ac_world::towns::PLACES
             .iter()
             .map(|p| (p.name, p.world_xy()))
@@ -1597,7 +1603,9 @@ impl Plugin for Map {
                 c.interact(g);
             }
             if let Some(w) = actions.travel_to {
-                if c.travel_to(w) {
+                // A walk the region holds, else a journey: the slot's answer either way.
+                let arrive = ac_client::travel::ARRIVE;
+                if c.go_to_point(ac_client::Owner::Hand, w, arrive).fine() {
                     lines.push(format!("travelling to {}", coords_of(w)));
                 } else {
                     lines.push(format!("no route to {}", coords_of(w)));
@@ -1626,6 +1634,7 @@ impl Plugin for Map {
             }
             if actions.cancel_travel {
                 c.cancel_travel();
+                c.stop_going(Some(ac_client::Owner::Hand), "cancelled on the map");
             }
         }
         for l in lines {

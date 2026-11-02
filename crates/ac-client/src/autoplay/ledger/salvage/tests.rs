@@ -440,3 +440,40 @@ fn a_bag_a_salvage_made_is_topped_up_by_the_next_of_its_band_only() {
     assert!(c.autoplay_salvage(now));
     assert_eq!(salvage_on_its_way(&c), Some(vec![bag, five]));
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_mate_no_walk_reaches_is_not_walked_at() {
+    // The team's salvager up on the Tusker ground's ledge (0x5C49), 20 m off and in hand-off
+    // range: no walk reaches it, so the salvage stays, the tick is given up and nothing walks.
+    let (mut c, ledge) = crate::testkit::under_the_ledge(20);
+    a_loot_profile(&mut c, "salvage hand-off");
+    let mut p = (*c.loot_profile().unwrap()).clone();
+    p.rules.insert(
+        0,
+        crate::profile::Rule {
+            name: MACES.into(),
+            action: LootAction::Salvage,
+            ..Default::default()
+        },
+    );
+    c.profiles.put(p).expect("saved");
+    let me = c.world.player_guid;
+    a_mace_to_salvage(&mut c, 0x8000_0131, 9.0, me);
+    c.autoplay.team = crate::testkit::view_of(vec![Mate {
+        world: ledge.at,
+        cell: ledge.cell,
+        has_ust: true,
+        salvaging: 300,
+        ..crate::testkit::mate(0x5000_0002, "Salvager")
+    }]);
+    assert!(!c.autoplay_salvage(Instant::now()), "it claimed the tick");
+    assert!(!c.is_walking(), "it walks at the ledge");
+    assert!(c.autoplay.handing.is_none(), "it handed it over from below");
+    assert!(
+        c.autoplay.announced.iter().any(
+            |e| matches!(e, crate::Event::Noted(t) if t.starts_with("cannot get to Salvager"))
+        ),
+        "the refusal was not said"
+    );
+}

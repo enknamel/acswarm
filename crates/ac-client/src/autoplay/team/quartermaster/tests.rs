@@ -45,3 +45,26 @@ fn supplies_are_handed_over_from_the_stack_that_is_leaving_anyway() {
     );
     assert_eq!(c.spare_for("lead scarab"), None);
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_mate_no_walk_reaches_is_not_walked_at() {
+    // The runner up on the Tusker ground's ledge (0x5C49): the money for it stays, the hand-over
+    // is set aside at once and nothing walks at the ledge.
+    let (mut c, ledge) = crate::testkit::under_the_ledge(20);
+    c.autoplay.config.team.restock.share_money = true;
+    c.autoplay.config.team.restock.float = 0;
+    crate::testkit::coin_in_the_pack(&mut c, 0x8000_0201, 5_000);
+    c.autoplay.team = crate::testkit::view_of(vec![crate::autoplay::Mate {
+        world: ledge.at,
+        cell: ledge.cell,
+        ..crate::testkit::mate(0x5000_0002, "Runner")
+    }]);
+    let growth = crate::growth::Growth::default();
+    let now = Instant::now();
+    let sent = c.session.actions_sent();
+    assert!(!c.load_the_quartermaster("Runner", &growth, now));
+    assert!(c.autoplay.growth.handed_over, "the party is held up");
+    assert!(!c.is_walking(), "it walks at the ledge");
+    assert_eq!(c.session.actions_sent(), sent, "it handed over from below");
+}

@@ -69,11 +69,14 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use ac_nav::routing::Planned;
+use ac_nav::steering::REPLAN_DISTANCE;
+use ac_world::Place;
 use glam::{Vec2, Vec3};
 
 use crate::aim::{self, Shot};
 use crate::autoplay::Doing;
-use crate::Client;
+use crate::did::Did;
+use crate::{Client, Goal};
 
 /// A projectile arriving later than this is left for a later tick: it
 /// may yet be for someone else, and there is time.
@@ -170,13 +173,14 @@ impl Track {
 pub struct State {
     /// Missiles in view, by guid.
     pub tracks: HashMap<u32, Track>,
-    /// The target being closed on for an attack (see
-    /// `Client::autoplay_approach`), whose `follow` goal is ours to
-    /// clear.
+    /// The target being closed on for an attack (see `Client::autoplay_approach`), whose walk
+    /// is ours to end.
     pub approaching: Option<u32>,
     /// Where to shoot the target from when the shot does not clear from where the character
     /// stands: the target, where it stood when chosen, and the spot (`None`: none found).
-    pub vantage: Option<(u32, Vec3, Option<Vec3>)>,
+    pub vantage: Option<(u32, Vec3, Option<Place>)>,
+    /// Spots to shoot a target from whose walk the slot refused, by target: not chosen again.
+    pub vantage_refused: Vec<(u32, Vec3)>,
     /// How fast this character's own spells have been seen to fly, by
     /// spell: an arc's height depends on it (see `crate::aim`).
     pub shot_speeds: HashMap<u32, f32>,
@@ -197,7 +201,7 @@ pub struct State {
     pub dud_spots: Vec<(Vec3, Instant)>,
     /// The target being waited for out of a doorway, since when, and where (see
     /// `Client::pull_from_doorway`).
-    pub pulling: Option<(u32, Instant, Option<Vec3>)>,
+    pub pulling: Option<(u32, Instant, Option<Place>)>,
     /// Each door Setup's box in its own frame (see `Client::doors_near`).
     pub door_boxes: HashMap<u32, Option<(Vec3, Vec3)>>,
     /// The sidestep in hand is a courtesy to a fellow rather than a
@@ -776,8 +780,9 @@ impl Client {
 
     /// Where to shoot `target` (standing at `at`) from when the shot does not clear from here: the
     /// nearest place the feet can stand, within `reach`, that the shot clears from and a path
-    /// leads to. A creature on a roof is fought from the ground in sight of it, not from under it.
-    fn vantage(&mut self, target: u32, at: Vec3, reach: f32, how: How) -> Option<Vec3> {
+    /// leads to, past the spots the slot refused. A creature on a roof is fought from the ground
+    /// in sight of it, not from under it.
+    fn vantage(&mut self, target: u32, at: Vec3, reach: f32, how: How) -> Option<Place> {
         let me = self.my_position()?;
         let mine = self.world.player().map_or(0, |o| o.guid);
         let shot = self.shot_for(how);
@@ -785,8 +790,13 @@ impl Client {
         let places = self.standable_near(at, reach);
         let mut spots: Vec<Vec3> = places.iter().map(|p| p.at).collect();
         let duds: Vec<Vec3> = self.dodge.dud_spots.iter().map(|(d, _)| *d).collect();
+        self.dodge.vantage_refused.retain(|(g, _)| *g == target);
+        let refused: Vec<Vec3> = self.dodge.vantage_refused.iter().map(|(_, s)| *s).collect();
+        // A spot within REPLAN_DISTANCE of a refused one is the same goal to the slot.
         spots.retain(|s| {
-            s.distance(at) <= reach && duds.iter().all(|d| d.distance(*s) >= DUD_CLEAR)
+            s.distance(at) <= reach
+                && duds.iter().all(|d| d.distance(*s) >= DUD_CLEAR)
+                && refused.iter().all(|r| r.distance(*s) > REPLAN_DISTANCE)
         });
         // A shot from here through a doorway is thrown from the target's room instead.
         let from_here = aim::flight(shot, self.body_of(mine, me), to);
@@ -808,26 +818,30 @@ impl Client {
                 }
             }
         }
-        clear.into_iter().find(|s| {
-            places
-                .iter()
-                .find(|p| p.at == *s)
-                .is_some_and(|&p| matches!(self.plan_walk(p, AT_VANTAGE), Planned::Route(_)))
+        clear.into_iter().find_map(|s| {
+            let p = *places.iter().find(|p| p.at == s)?;
+            matches!(self.plan_walk(p, AT_VANTAGE), Planned::Route(_)).then_some(p)
         })
     }
 
-    /// Close on `target` until it is within [`WITHIN`] of the reach of
-    /// `how` and the shot is clear, walking after it like a leader. True
-    /// while still too far, when the attack has to wait; false once in
-    /// reach (or with nowhere to go), the walk called off.
-    pub(crate) fn autoplay_approach(&mut self, target: u32, name: &str, how: How) -> bool {
+    /// Close on `target` until it is within [`WITHIN`] of the reach of `how` and the shot is
+    /// clear, by the slot's walk: `Done` to attack from here, `Acting` while the attack waits on
+    /// the walk, `Blocked` when no walk gets it in reach and the target is given up.
+    pub(crate) fn autoplay_approach(&mut self, target: u32, name: &str, how: How) -> Did {
         let Some((me, cell)) = self.player.as_ref().map(|p| (p.world_position(), p.cell)) else {
-            return false;
+            return Did::Done;
         };
-        let Some(at) = self.world.objects.get(&target).and_then(|o| o.world_pos()) else {
+        let there = self
+            .world
+            .objects
+            .get(&target)
+            .and_then(|o| o.display.or(o.position))
+            .map(|p| Place::of_position(&p));
+        let Some(there) = there else {
             self.stop_approaching();
-            return false;
+            return Did::Done;
         };
+        let at = there.at;
         // Nearer than its reach, when nothing landed from further off.
         let range = self.attack_range(how);
         let range = self
@@ -844,12 +858,12 @@ impl Client {
             self.shot_clears(target, how) && (matches!(how, How::Melee) || !self.is_dud_spot(me));
         // A doorway either stands in: step out of it, or wait for the target to come out.
         if !seen && !matches!(how, How::Melee) && self.clear_doorway(target, name, at) {
-            return true;
+            return Did::Acting;
         }
         let stop = if seen { range * WITHIN } else { NO_SIGHT_STOP };
         if at.distance(me) <= stop && seen {
             self.stop_approaching();
-            return false;
+            return Did::Done;
         }
         // No clear shot from here: a spell or an arrow is thrown from wherever it clears, so the
         // walk is to the nearest such place the feet can get to, not at the target, which may
@@ -864,14 +878,14 @@ impl Client {
                 Some((g, was, spot))
                     if g == target
                         && was.distance(at) <= VANTAGE_MOVED
-                        && spot.is_none_or(|s| s.distance(at) <= range * WITHIN) =>
+                        && spot.is_none_or(|s| s.at.distance(at) <= range * WITHIN) =>
                 {
                     // Got there and still no shot: the flight test was wrong here, so walk at it.
-                    spot.filter(|s| s.distance(me) > 0.5)
+                    spot.filter(|s| s.at.distance(me) > 0.5)
                 }
                 _ => {
                     let spot = self.vantage(target, at, range * WITHIN, how);
-                    if let Some(s) = spot {
+                    if let Some(s) = spot.map(|p| p.at) {
                         tracing::info!(
                             "range: no clear shot at {name}; shooting from {:.1} {:.1} {:.1}, {:.1} m off",
                             s.x,
@@ -896,7 +910,18 @@ impl Client {
         // drudge his arcs were hitting (a_caster_beside_its_target_with_nowhere_to_walk_casts).
         if !seen && spot.is_none() && at.distance(me) <= stop {
             self.stop_approaching();
-            return false;
+            return Did::Done;
+        }
+        // Nothing to hit is ever a journey away: a target out of the region is an object left
+        // over from somewhere the character has since left (the Academy's, most often).
+        if !self.is_in_region(there) {
+            tracing::info!(
+                "range: {name} is not here any more ({:.0} m off)",
+                at.distance(me)
+            );
+            self.stop_approaching();
+            self.give_up_target(target, "not here any more", self.frame_at);
+            return Did::blocked("not here any more");
         }
         if self.dodge.approaching != Some(target) {
             // Where we stand as well as how far off it is: a walk that
@@ -919,32 +944,44 @@ impl Client {
                 );
             }
             self.interrupt_travel("closing on a target");
-            self.steering.reset();
-        }
-        // Nothing to hit is ever a journey away.
-        //
-        // A fight is with what is in front of the character. Something
-        // named as a target from half a world away is not there at all:
-        // it is an object left over from somewhere the character has
-        // since left -- the Academy, most often, whose creatures stay
-        // in the world model after the way back has closed -- and a
-        // character that sets off for one spends its life planning a
-        // trip it can never make.
-        if at.distance(me) > crate::travel::WALKABLE {
-            tracing::info!(
-                "range: {name} is not here any more ({:.0} m off)",
-                at.distance(me)
-            );
-            self.stop_approaching();
-            return false;
         }
         self.dodge.approaching = Some(target);
-        // Closing on something to hit it is a goal like any other, so
-        // it is named to the travel system and not steered by hand.
-        match spot {
-            Some(s) => self.head_for(s, AT_VANTAGE, name),
-            None => self.head_for(at, stop, name),
+        let goal = match spot {
+            Some(place) => Goal::At {
+                place,
+                within: AT_VANTAGE,
+            },
+            None => Goal::Near {
+                guid: target,
+                within: stop,
+            },
         };
+        let did = self.go(self.step_owner(), goal, self.frame_at);
+        match (did, spot) {
+            // At a spot with still no shot: the next ask walks at the target.
+            (Did::Done, Some(_)) if !seen => {}
+            (Did::Done, _) => {
+                self.stop_approaching();
+                return Did::Done;
+            }
+            (Did::Blocked(_), Some(place)) => {
+                tracing::info!("range: no way to the spot to shoot {name} from; trying another");
+                self.dodge.vantage_refused.push((target, place.at));
+                self.dodge.vantage = None;
+            }
+            // In full reach with a clear shot: thrown from here, the server allows it.
+            (Did::Blocked(_), None) if seen && at.distance(me) <= range => {
+                self.stop_approaching();
+                return Did::Done;
+            }
+            (Did::Blocked(why), None) => {
+                tracing::info!("range: no way to {name}: {}", why.what);
+                self.stop_approaching();
+                self.give_up_target(target, "no way to it", self.frame_at);
+                return Did::Blocked(why);
+            }
+            _ => {}
+        }
         self.autoplay.say(
             Doing::Fighting,
             if seen {
@@ -953,14 +990,13 @@ impl Client {
                 format!("getting {name} in sight")
             },
         );
-        true
+        Did::Acting
     }
 
-    /// Done closing on a target: the walk it set is taken back.
+    /// Done closing on a target: the walk it set is ended.
     fn stop_approaching(&mut self) {
         if self.dodge.approaching.take().is_some() {
-            self.follow = None;
-            self.steering.reset();
+            self.stop_going(Some(self.step_owner()), "done closing in");
         }
     }
 }
@@ -1986,7 +2022,8 @@ mod tests {
         assert!(!c.shot_clears(MITE, how), "no shot through the ceiling");
         let spot = c
             .vantage(MITE, at, reach, how)
-            .expect("somewhere in sight of the roof");
+            .expect("somewhere in sight of the roof")
+            .at;
         assert!(spot.distance(at) <= reach, "within reach: {spot:?}");
         crate::testkit::stand(
             &mut c,
@@ -2004,13 +2041,10 @@ mod tests {
     #[ignore = "needs AC_DATA_DIR"]
     fn a_vantage_is_chosen_only_where_the_planner_has_a_way() {
         let (mut c, at, how, reach) = under_a_mite_on_a_roof();
-        let spot = c
+        let to = c
             .vantage(MITE, at, reach, how)
             .expect("somewhere in sight of the roof");
-        let to = ac_world::Place {
-            at: spot,
-            cell: 0xBDAF_0000,
-        };
+        let spot = to.at;
         match c.plan_walk(to, AT_VANTAGE) {
             Planned::Route(r) => {
                 let end = r.waypoints.last().expect("a route has an end").place.at;
@@ -2021,6 +2055,33 @@ mod tests {
             }
             other => panic!("chose {spot:?}, which the planner has no way to: {other:?}"),
         }
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn a_refused_vantage_is_passed_for_the_next() {
+        // The walk to the spot chosen to shoot the mite from gets nowhere for the slot's
+        // give-up: that spot alone is passed, and the next ask walks to another.
+        let (mut c, _, how, _) = under_a_mite_on_a_roof();
+        let t0 = Instant::now();
+        c.frame_at = t0;
+        assert_eq!(c.autoplay_approach(MITE, "Mite Sentry", how), Did::Acting);
+        let first = c.dodge.vantage.and_then(|(_, _, s)| s).expect("a spot");
+        c.frame_at = t0 + crate::GIVE_UP_AFTER + Duration::from_secs(1);
+        assert_eq!(c.autoplay_approach(MITE, "Mite Sentry", how), Did::Acting);
+        assert_eq!(c.dodge.vantage_refused, vec![(MITE, first.at)]);
+        assert_eq!(c.autoplay_approach(MITE, "Mite Sentry", how), Did::Acting);
+        let next = c
+            .dodge
+            .vantage
+            .and_then(|(_, _, s)| s)
+            .expect("another spot");
+        assert!(next.at.distance(first.at) > REPLAN_DISTANCE, "{next:?}");
+        assert_eq!(
+            c.going.as_ref().and_then(|g| g.goal.place()),
+            Some(next),
+            "walking to it"
+        );
     }
 
     #[test]
@@ -2052,7 +2113,11 @@ mod tests {
         let how = How::Spell(spell);
         let cap = 29.0;
         c.autoplay.closing = Some((LURKER, cap));
-        let uphill = origin + Vec3::new(55.5, 70.5, 47.0);
+        let uphill = Vec3::new(55.5, 70.5, 47.0);
+        let uphill = Place {
+            at: origin + uphill,
+            cell: ac_world::outdoor_cell(block, uphill),
+        };
         c.dodge.vantage = Some((LURKER, origin + below, Some(uphill)));
         let t0 = Instant::now();
         let dt = 0.05;
@@ -2060,7 +2125,7 @@ mod tests {
         let mut ready = false;
         for frame in 0..10 * 20 {
             let now = t0 + Duration::from_secs_f32(frame as f32 * dt);
-            ready = !c.autoplay_approach(LURKER, "Drudge Lurker", how);
+            ready = c.autoplay_approach(LURKER, "Drudge Lurker", how) == Did::Done;
             c.tick_player(crate::player::Input::default(), dt, now);
             let seen = c.autoplay.status.starts_with("closing");
             flips += usize::from(last.is_some_and(|l| l != seen));
@@ -2218,10 +2283,11 @@ mod tests {
             !c.shot_clears(drudge.guid, how),
             "the case: our test finds no clear shot"
         );
-        assert!(
-            !c.autoplay_approach(drudge.guid, "Drudge Servant", how),
+        assert_eq!(
+            c.autoplay_approach(drudge.guid, "Drudge Servant", how),
+            Did::Done,
             "the shot is thrown, not held for"
         );
-        assert!(c.follow.is_none(), "and no walk is left standing");
+        assert!(c.going.is_none(), "and no walk is left standing");
     }
 }

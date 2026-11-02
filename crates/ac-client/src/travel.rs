@@ -32,11 +32,6 @@ pub const ARRIVE: f32 = 3.0;
 /// Longest leg handed to the local move-to (metres).
 pub const LEG: f32 = 60.0;
 
-/// How far a goal may be and still be walked to directly. One landblock
-/// across: beyond that the way there is a journey, not a stroll, and
-/// the steering has no business trying.
-pub const WALKABLE: f32 = 192.0;
-
 /// The leg is cut this far short of the landblock edge so its end lies in
 /// the block the character stands in.
 const EDGE_MARGIN: f32 = 2.0;
@@ -237,93 +232,15 @@ impl Client {
         Some((self.travel.grid.clone()?, self.travel.region.clone()?))
     }
 
-    /// Go there. The one way anything asks for movement.
-    ///
-    /// Everything that wants a character to be somewhere else says so
-    /// here, and this decides *how*: a walk the steering can find its
-    /// own way through, or a journey of portals, recalls and gems. The
-    /// caller names a place and is told what came of it; it does not
-    /// choose the means, and it does not touch `follow`.
-    ///
-    /// There used to be three ways to ask -- a server-driven walk, a
-    /// journey, and a raw point handed straight to the steering -- and
-    /// nine places that took the third. Each behaved differently when
-    /// the way was blocked, so a fault fixed in one was still there in
-    /// the others: a character was taught not to walk into a wall on
-    /// its way to a corpse and went on doing it on its way to a shop.
-    ///
-    /// Within a landblock this is a walk: the steering knows how to get
-    /// round what is in the way, and a goal it cannot reach it now
-    /// refuses rather than leans on. Beyond one -- or out of a dungeon,
-    /// where the feet lead nowhere at all -- it is a journey, planned
-    /// with whatever the character can cast or carry.
-    ///
-    /// Asking for movement this way ends any visit being made
-    /// (`visit`): whoever asks has taken the character somewhere else.
-    ///
-    /// A walk near at hand ends the journey under way too, but it does not
-    /// break the journey off: following a leader, exploring, going back to
-    /// the hunting area are somewhere else to be, not a detour to come back
-    /// from. What does come back (a corpse, a fight, a use) says so with
-    /// `interrupt_travel`. Counting every walk as
-    /// a break-off had a follower on a party's town run pulled back to its
-    /// leader, its walk to the counter planned again, and pulled back
-    /// again, each time it closed to the following distance.
-    pub fn head_for(&mut self, goal: glam::Vec3, stop: f32, why: &str) -> crate::did::Did {
-        self.drop_visit(why);
-        self.head_toward(goal, stop, why)
-    }
-
-    /// [`head_for`](Self::head_for) for a visit's own last stretch: the
-    /// same walk or journey, without ending the visit that asked for it.
-    pub(crate) fn head_toward(
-        &mut self,
-        goal: glam::Vec3,
-        stop: f32,
-        why: &str,
-    ) -> crate::did::Did {
-        use crate::did::Did;
-        let Some(me) = self.my_position() else {
-            return Did::waiting("not in the world yet");
-        };
-        let away = Vec2::new(goal.x - me.x, goal.y - me.y).length();
-        // Near enough to walk to.
-        //
-        // Being underground does not make the rest of the dungeon
-        // unwalkable -- a monster across the room is a walk like any
-        // other, and ruling that out left a character unable to reach
-        // anything it was fighting. It is only the way *out* that the
-        // feet cannot manage, and that needs no special case here: a
-        // dungeon keeps its own corner of the world, tens of thousands
-        // of metres from the town above it, so anywhere outside is far
-        // past `WALKABLE` and goes to the planner anyway.
-        if away <= WALKABLE {
-            if self.traveling() {
-                self.end_trip();
-            }
-            return self.walk_toward(goal, stop);
-        }
-        // Already on the way there.
-        if self.traveling() {
-            return Did::Acting;
-        }
-        if self.plan_trip(Vec2::new(goal.x, goal.y)) {
-            return Did::Acting;
-        }
-        tracing::info!("travel: no way to {why} from here");
-        Did::blocked("no way there from here")
-    }
-
     /// Plan a journey from where the character stands to `goal` (world
     /// xy) and start it. Portals are used when they are quicker than
     /// walking, and so are the recall spells the character can cast
     /// right now (`castable_recalls`) unless the journey's `Prefs` say
     /// `use_recalls: false`. False when nothing reaches the goal.
     ///
-    /// A journey asked for from outside ends any visit being made.
+    /// A journey asked for from outside ends any visit being made, and the walk in the slot.
     pub fn travel_to(&mut self, goal: Vec2) -> bool {
-        self.drop_visit("travelling somewhere else");
-        self.plan_trip(goal)
+        self.travel_to_in(goal, 0)
     }
 
     /// [`travel_to`](Self::travel_to) somewhere about the character's own
@@ -360,7 +277,15 @@ impl Client {
     /// `plan_trip_in`.
     pub fn travel_to_in(&mut self, goal: Vec2, cell: u32) -> bool {
         self.drop_visit("travelling somewhere else");
-        self.plan_trip_in(goal, cell)
+        let planned = if cell == 0 {
+            self.plan_trip(goal)
+        } else {
+            self.plan_trip_in(goal, cell)
+        };
+        if planned {
+            self.stop_going(None, "a journey sets off");
+        }
+        planned
     }
 
     /// [`travel_to`](Self::travel_to) from inside: planning the way again
@@ -919,9 +844,9 @@ impl Client {
     /// does nothing.
     pub fn stop_moving_by_itself(&mut self) {
         let was_busy =
-            self.travel.trip.is_some() || self.follow.is_some() || self.visits.current.is_some();
+            self.travel.trip.is_some() || self.going.is_some() || self.visits.current.is_some();
         self.cancel_travel();
-        if self.follow.take().is_some() {
+        if self.going.take().is_some() {
             self.steering.reset();
         }
         self.autoplay.growth.let_go();
@@ -1712,49 +1637,58 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn autoplays_walk_ends_when_autoplay_is_switched_off() {
         // Blargerton, autoplay switched off in the Holtburg Dungeon: the walk it had set stayed on
         // the body and walked him on after the recall, then stood 25 min on "no way".
         let now = Instant::now();
-        let mut c = crate::testkit::offline_client();
-        crate::testkit::stand(&mut c, 0xA9B4_0019, Vec3::new(84.0, 84.0, 94.0));
+        let mut c = crate::testkit::standing_at(0xA9B4_0019, Vec3::new(84.0, 84.0, 94.0));
         c.world.player_guid = Some(crate::testkit::ME);
         c.autoplay.config.enabled = true;
         c.tick_autoplay(now);
         let me = c.my_position().unwrap();
-        let walk = crate::Follow {
-            target: me + Vec3::new(10.0, 0.0, 0.0),
-            stop: 1.0,
+        let walk = crate::Goal::At {
+            place: c.place_at(me + Vec3::new(10.0, 0.0, 0.0)),
+            within: 1.0,
         };
-        c.follow = Some(walk);
+        c.go(crate::Owner::Script, walk, now);
         c.autoplay.config.enabled = false;
         c.tick_autoplay(now);
-        assert!(c.follow.is_none(), "walked on with autoplay off");
+        assert!(c.going.is_none(), "walked on with autoplay off");
         // A walk set with it off is the player's or a script's, and stays.
-        c.follow = Some(walk);
+        c.go(crate::Owner::Script, walk, now);
         c.tick_autoplay(now);
-        assert_eq!(c.follow, Some(walk));
+        assert_eq!(c.going.map(|g| g.goal), Some(walk));
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_walk_left_behind_by_a_recall_is_let_go() {
-        let mut c = crate::testkit::offline_client();
-        crate::testkit::stand(&mut c, 0xA9B4_0019, Vec3::new(84.0, 84.0, 94.0));
+        let now = Instant::now();
+        let mut c = crate::testkit::standing_at(0xA9B4_0019, Vec3::new(84.0, 84.0, 94.0));
         let me = c.my_position().unwrap();
-        let near = crate::Follow {
-            target: me + Vec3::new(30.0, 0.0, 0.0),
-            stop: 1.0,
+        let near = crate::Goal::At {
+            place: c.place_at(me + Vec3::new(30.0, 0.0, 0.0)),
+            within: 1.0,
         };
-        c.follow = Some(near);
-        c.drop_stale_walk();
-        assert_eq!(c.follow, Some(near), "a walk in reach is kept");
+        c.go(crate::Owner::Hand, near, now);
+        c.going_to();
+        assert_eq!(
+            c.going.as_ref().map(|g| g.goal),
+            Some(near),
+            "a walk in reach is kept"
+        );
         // The dungeon spot the recall left behind, 34 km from the Holtburg lifestone.
-        c.follow = Some(crate::Follow {
-            target: Vec3::new(264.5, 47182.0, 0.1),
-            stop: 1.0,
-        });
-        c.drop_stale_walk();
-        assert!(c.follow.is_none());
+        let walk = c.going.as_mut().expect("walking");
+        walk.goal = crate::Goal::At {
+            place: ac_world::Place {
+                at: Vec3::new(264.5, 47182.0, 0.1),
+                cell: 0x01F6_0000,
+            },
+            within: 1.0,
+        };
+        c.going_to();
+        assert!(c.going.is_none());
     }
 
     #[test]
@@ -1828,21 +1762,21 @@ mod tests {
         assert_eq!(leg_height(None, next_door, me, false), 0.0);
     }
 
-    /// Walk the journey the client is on for up to `seconds` of game
-    /// time, frame by frame the way `tick_player` does: the journey's leg,
-    /// the steering toward it, the player's own physics. Stops when the
-    /// journey ends.
-    fn walk_the_journey(c: &mut Client, seconds: f32) {
+    /// Walk the journey the client is on for up to `seconds` of game time, frame by frame the way
+    /// `tick_player` does: the leg asked of the slot, the steering toward it, the player's own
+    /// physics. Stops when the journey ends; the last answer the slot gave its leg.
+    fn walk_the_journey(c: &mut Client, seconds: f32) -> Option<crate::did::Did> {
         use crate::player::Input;
         let dt = 1.0 / 20.0;
         let t0 = Instant::now();
+        let mut last = None;
         for frame in 0..(seconds / dt) as u32 {
             let now = t0 + Duration::from_secs_f32(frame as f32 * dt);
-            let goal = c.travel_goal(now);
-            if goal.is_none() && !c.traveling() {
-                return;
+            if !c.traveling() {
+                return last;
             }
-            c.travel.leg_refused = false;
+            last = c.walk_leg(now).or(last);
+            let goal = c.going_to();
             let pl = c.player.as_mut().unwrap();
             let mut input = Input::default();
             pl.step_cap = None;
@@ -1856,7 +1790,6 @@ mod tests {
                         };
                         let to = ac_world::Place { at: g, cell };
                         let aim = c.steering.steer(&mut standing, to, stop, now);
-                        c.travel.leg_refused = aim == ac_nav::Aim::NoWay;
                         if let ac_nav::Aim::Go(at) = aim {
                             let d = at - pl.world_position();
                             let flat = Vec2::new(d.x, d.y);
@@ -1874,6 +1807,7 @@ mod tests {
             }
             pl.update(&c.assets, &input, dt);
         }
+        last
     }
 
     #[test]
@@ -2328,13 +2262,17 @@ mod tests {
         crate::testkit::stand(&mut c, cell, start.with_z(z) - origin);
         c.steering.reset();
         assert!(c.plan_trip_in(ledge.truncate(), ledge_cell), "no journey");
-        // Each of the REPLANS plans again is refused once its ask is let through (ASK_EVERY, 1.5 s).
-        walk_the_journey(&mut c, STUCK_AFTER.as_secs_f32());
+        // Each of the REPLANS plans again is refused by the slot on the frame it is asked.
+        let last = walk_the_journey(&mut c, STUCK_AFTER.as_secs_f32());
         assert!(!c.traveling(), "the no way waited for a clock");
-        let refusal = c.steering.unreachable(ledge.with_z(high));
+        let refusal = last
+            .as_ref()
+            .and_then(|d| d.because())
+            .map(|b| b.what.clone());
         assert!(
-            matches!(refusal, Some(ac_nav::steering::Unreachable::Planner(_))),
-            "{refusal:?}"
+            refusal.as_ref().is_some_and(|why| why.contains("Planner")),
+            "{refusal:?} to {:?}",
+            ledge.with_z(high)
         );
         let me = c.my_position().unwrap();
         assert!(

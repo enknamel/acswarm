@@ -1,5 +1,5 @@
 //! The route harness (docs/movement-plan.md, phase 0): a character set down at a start and sent to
-//! a goal the way every system sends it (`Client::head_for`), with the real steering, planners and
+//! a goal the way every system sends it (`Client::go`), with the real steering, planners and
 //! body run at 20 Hz until it arrives, is refused, gives up, or runs out of time still pushing.
 //! Trials come from places named by hand (the stalls seen live) and from seeded random points on
 //! the collision's floors, not the walking graph's, whose holes are what is being measured.
@@ -11,7 +11,8 @@ use ac_scene::navarea::{self, Area};
 use ac_world::Place;
 use glam::Vec3;
 
-use crate::Client;
+use crate::did::Did;
+use crate::{Client, Goal, Owner};
 
 /// Frames a second the harness runs the body at, as the headless client does.
 const HZ: f32 = 20.0;
@@ -22,7 +23,7 @@ const ARRIVED_SLACK: f32 = 1.0;
 /// The steering saying "no way" this long (seconds) is giving up.
 const NO_WAY_FOR: f32 = 3.0;
 /// A walk turned down within this (seconds) of being asked is refused, not given up: the
-/// answer reaches `head_for` on a later ask.
+/// follower's answer reaches `go` on a later ask.
 const REFUSED_WITHIN: f32 = 1.0;
 /// The planner's answer is waited for this long each frame (the live planner answers in a frame
 /// or two once its area is built; building one takes up to a second).
@@ -117,7 +118,17 @@ fn walk(c: &mut Client, t: &Trial, waits: &mut u32) -> Outcome {
     let dt = 1.0 / HZ;
     let t0 = Instant::now();
     let start = c.my_position().unwrap_or(t.start);
-    let first = c.head_for(t.goal, t.stop, &t.name);
+    let goal = Goal::At {
+        place: Place {
+            at: t.goal,
+            cell: t.goal_cell,
+        },
+        within: t.stop,
+    };
+    let first = c.go(Owner::Hand, goal, t0);
+    if first == Did::Done {
+        return Outcome::Arrived { secs: 0.0 };
+    }
     if !first.acting() {
         return Outcome::Refused {
             why: first
@@ -133,7 +144,10 @@ fn walk(c: &mut Client, t: &Trial, waits: &mut u32) -> Outcome {
         let now = t0 + Duration::from_secs_f32(secs);
         if secs - asked >= ASK_EVERY {
             asked = secs;
-            let again = c.head_for(t.goal, t.stop, &t.name);
+            let again = c.go(Owner::Hand, goal, now);
+            if again == Did::Done {
+                return Outcome::Arrived { secs };
+            }
             if !again.acting() {
                 let left = c.my_position().map_or(f32::NAN, |p| p.distance(t.goal));
                 return if secs < REFUSED_WITHIN {

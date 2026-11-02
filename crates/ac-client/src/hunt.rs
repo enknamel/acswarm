@@ -18,7 +18,8 @@ use glam::{Vec2, Vec3};
 use serde::{Deserialize, Serialize};
 
 use crate::autoplay::Doing;
-use crate::Client;
+use crate::did::Did;
+use crate::{Client, Goal};
 
 /// Something hitting the character is fought if it stands this near,
 /// wherever that is: an area says where to look for fights, not which
@@ -264,14 +265,29 @@ impl Client {
                 if corners.len() < LEAST_CORNERS {
                     return false;
                 }
-                let goal = way_in(&corners);
-                if !self
-                    .head_for(goal.extend(me.z), BACK_IN, &area.name)
-                    .acting()
-                {
-                    self.autoplay
-                        .note(format!("no way back to {} from here", area.name), now);
-                    return false;
+                // On the ground there (the terrain, or a floor over it), as the walk is planned.
+                let xy = way_in(&corners);
+                let assets = self.assets.clone();
+                let z = self
+                    .player
+                    .as_mut()
+                    .and_then(|p| p.ground_height(&assets, xy.x, xy.y, me.z))
+                    .unwrap_or(me.z);
+                let goal = Goal::At {
+                    place: self.place_at(xy.extend(z)),
+                    within: BACK_IN,
+                };
+                match self.go(self.step_owner(), goal, now) {
+                    Did::Blocked(why) => {
+                        self.autoplay.note(
+                            format!("no way back to {} from here ({})", area.name, why.what),
+                            now,
+                        );
+                        return false;
+                    }
+                    // At the way in: nothing nearer to walk to.
+                    Did::Done => return false,
+                    _ => {}
                 }
                 self.autoplay
                     .say(Doing::Traveling, format!("back to {}", area.name));

@@ -1,6 +1,7 @@
 use std::time::{Duration, Instant};
 
 use crate::autoplay::{Doing, Mate, GIVE_REACH};
+use crate::did::Did;
 use crate::Client;
 use ac_loot::bands::{self, Band};
 
@@ -508,21 +509,22 @@ impl Client {
             return false;
         }
         if distance > GIVE_REACH {
-            if self
-                .follow
-                .is_none_or(|f| f.target.distance(mate.world) > 1.0)
-            {
-                self.interrupt_travel("taking salvage to the salvager");
-                self.steering.reset();
+            let goal = self.mate_goal(&mate, GIVE_REACH * 0.8);
+            match self.go(self.step_owner(), goal, now) {
+                Did::Blocked(why) => {
+                    self.autoplay
+                        .note(format!("cannot get to {who} ({})", why.what), now);
+                    return false;
+                }
+                Did::Done => {}
+                _ => {
+                    self.autoplay
+                        .say(Doing::Salvaging, format!("taking salvage to {who}"));
+                    return true;
+                }
             }
-            self.head_for(mate.world, GIVE_REACH * 0.8, &who);
-            self.autoplay
-                .say(Doing::Salvaging, format!("taking salvage to {who}"));
-            return true;
         }
-        if self.follow.take().is_some() {
-            self.steering.reset();
-        }
+        self.stop_going(Some(self.step_owner()), "in reach of the salvager");
         if !rate_ok {
             return true;
         }

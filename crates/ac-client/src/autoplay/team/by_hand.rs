@@ -35,12 +35,21 @@ impl Client {
         // A leader that has got well away is caught up with and nothing
         // else: a swing sent after that is a swing at something standing
         // where the leader no longer is.
-        if self.autoplay_follow(now, true) {
+        let [catch_up, follow] = super::follow::FOLLOW_ROWS;
+        if self.follow_as(catch_up, now, true) {
             return true;
         }
         let helping = self.autoplay_assist();
-        let following = self.autoplay_follow(now, false);
+        let following = self.follow_as(follow, now, false);
         helping || following
+    }
+
+    /// [`Client::autoplay_follow`] as the STEPS row `row` (its walk's owner, ended when not asked).
+    fn follow_as(&mut self, row: &'static str, now: Instant, urgent: bool) -> bool {
+        self.autoplay.running = Some(row);
+        let on = self.autoplay_follow(now, urgent);
+        self.autoplay.running = None;
+        on
     }
 
     /// Hit what the leader is hitting, and nothing else. True while on

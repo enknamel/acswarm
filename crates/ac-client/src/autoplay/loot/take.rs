@@ -1,13 +1,4 @@
-use std::time::Duration;
-
 use crate::Client;
-
-/// Coming this much closer (metres) counts as getting somewhere.
-pub(crate) const REACH_PROGRESS: f32 = 1.0;
-
-/// Walking towards something for this long without getting closer is
-/// not walking towards it any more.
-pub(crate) const REACH_GIVE_UP: Duration = Duration::from_secs(20);
 
 /// A pessimistic walking speed for pricing that walk, metres a second:
 /// the way round a dungeon corner is longer than the line to it.

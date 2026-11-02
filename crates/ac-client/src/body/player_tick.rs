@@ -21,7 +21,7 @@ impl Client {
         now: Instant,
     ) -> PlayerFrame {
         self.held_run = input.run;
-        self.drop_stale_walk();
+        self.frame_at = now;
         // The user taking the controls ends an overland trip.
         let manual = input.forward != 0.0 || input.strafe != 0.0;
         if manual && (self.traveling() || self.visiting().is_some()) {
@@ -34,20 +34,20 @@ impl Client {
         if !manual {
             self.tick_visit(now);
         }
-        // The next leg of the overland route, if one is being walked.
-        let travel_goal = self.travel_goal(now);
+        // The next leg of the journey, if one is being made, walked by the slot.
+        self.walk_leg(now);
         let travelling = self.traveling();
+        let going = self.going_to();
+        let walk_source = self.going.as_ref().map_or("hand", |g| g.owner.label());
         // Player movement, camera, and reporting.
         if let Some(pl) = self.player.as_mut() {
             let mut input = input;
             self.walk_frame = None;
-            self.travel.leg_refused = false;
             pl.pace_cap = None;
             // Server-driven MoveTo (using something out of reach): run toward
             // the target until close enough, unless the user takes over.
-            // Without one, the current leg of the overland route.
-            if (self.move_to.is_none() && travel_goal.is_none() && self.follow.is_none()) || manual
-            {
+            // Without one, the walk in the slot.
+            if (self.move_to.is_none() && going.is_none()) || manual {
                 self.steering.reset();
             }
             // A sidestep out of a spell's way comes before every other
@@ -80,10 +80,9 @@ impl Client {
                     input.run = true;
                     None
                 } else {
-                    source = match (self.move_to, travel_goal) {
-                        (Some(_), _) => "server walk",
-                        (None, Some(_)) => "journey",
-                        (None, None) => "follow",
+                    source = match self.move_to {
+                        Some(_) => "server walk",
+                        None => walk_source,
                     };
                     match self.move_to {
                         Some(ac_world::object::MoveTarget::Object(g)) => self
@@ -95,24 +94,7 @@ impl Client {
                         Some(ac_world::object::MoveTarget::Position { cell, local }) => {
                             Some((ac_world::landblock_origin(cell) + local, 0.3, cell))
                         }
-                        None => travel_goal.or_else(|| {
-                            self.follow.map(|f| {
-                                // Indoors the goal is in the block we
-                                // stand in: a dungeon's cells run past
-                                // its outdoor square (the academy's lie
-                                // at negative local y), so the world
-                                // coordinates would name the wrong one
-                                // and the steering would never plan.
-                                let block = if pl.is_indoors() {
-                                    pl.landblock()
-                                } else {
-                                    let bx = (f.target.x / 192.0).floor().clamp(0.0, 255.0) as u32;
-                                    let by = (f.target.y / 192.0).floor().clamp(0.0, 255.0) as u32;
-                                    (bx << 24) | (by << 16)
-                                };
-                                (f.target, f.stop, block)
-                            })
-                        }),
+                        None => going,
                     }
                 };
                 tracing::trace!(
@@ -182,7 +164,18 @@ impl Client {
                         // actually stops the character, and clutter
                         // must not send a walk to them.
                         let steered = aim;
-                        self.travel.leg_refused = source == "journey" && aim == ac_nav::Aim::NoWay;
+                        // A server walk with no way there is let go, so the next report calls
+                        // the use off; whoever wanted it reads what it was for.
+                        if source == "server walk" && aim == ac_nav::Aim::NoWay {
+                            self.server_walk_refused = match self.move_to.take() {
+                                Some(ac_world::object::MoveTarget::Object(g)) => Some(g),
+                                Some(ac_world::object::MoveTarget::Position { .. }) => {
+                                    self.last_used
+                                }
+                                None => None,
+                            };
+                            tracing::info!("server move-to let go: no way to it");
+                        }
                         let aim = match aim {
                             ac_nav::Aim::Go(at) => {
                                 let me = pl.world_position();

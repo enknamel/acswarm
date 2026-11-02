@@ -6,6 +6,7 @@ use super::take::only_so_often;
 use super::take::refused_item;
 use super::walk::{loot_wait, still_holding_at};
 use crate::autoplay::{shut_line, Autoplay, Doing, Release, ShutFor};
+use crate::did::Did;
 #[cfg(test)]
 use crate::refusals::refused;
 use crate::refusals::{self, Answer, OpenRefusal, Refusal};
@@ -86,7 +87,7 @@ pub(crate) const CORPSE_URGENT: Duration = Duration::from_secs(75);
 /// ever, which is what every corpse that "did not open" turned out to
 /// be. Two and a half metres is inside the use radius of everything
 /// that leaves a body.
-pub(super) const CORPSE_REACH: f32 = 2.5;
+pub(crate) const CORPSE_REACH: f32 = 2.5;
 
 impl Autoplay {
     /// Start on a corpse: asked to open just now, with `allow` for it
@@ -461,6 +462,15 @@ impl Client {
             // asked for -- a Drudge pack fought off in between counted
             // too -- and wrote the body off for good with its loot still
             // on it, so the rules' own close could never be reached.
+            // The server's walk to it has no way there (`server_walk_refused`): set aside at once.
+            if !opened && self.server_walk_refused == Some(guid) {
+                self.server_walk_refused = None;
+                tracing::info!("autoplay: no way to corpse {guid:#010x}; leaving it");
+                self.autoplay.let_go_of_corpse();
+                self.stop_walking_to_loot();
+                self.autoplay.set_aside_out_of_reach(guid, now);
+                return false;
+            }
             if !opened && now.duration_since(since) > allow && self.autoplay.cast_in_flight(now) {
                 // A spell went out meanwhile, and the use was most likely
                 // turned away as too busy: that is not the corpse refusing.
@@ -572,12 +582,12 @@ impl Client {
                     // So walk back still holding it, and put it down
                     // only once the character has really gone
                     // ([`HOLD_ON_WITHIN`]) or the walk cannot arrive.
-                    let spot = self.world.objects.get(&guid).and_then(|o| o.world_pos());
                     let setting_off = self.autoplay.walking_to.map(|w| w.guid) != Some(guid);
                     let going_back = still_holding_at(at.away)
-                        && spot.is_some_and(|spot| {
-                            self.walk_to_corpse(guid, &at.name, spot, at.away, now)
-                        });
+                        && !matches!(
+                            self.walk_to_corpse(guid, &at.name, at.away, now),
+                            Did::Blocked(_)
+                        );
                     if going_back {
                         if setting_off {
                             tracing::info!(
@@ -724,10 +734,75 @@ impl Client {
         // [`Client::autoplay_watch_the_ground`]): a body this character
         // is standing off from never reaches this step, and a body it
         // never noted is for ever newly fallen.
-        let seen_at = self.autoplay.corpse_seen.clone();
+        // A corpse no walk reaches is set aside and the next one picked, this tick.
+        loop {
+            let Some((left, away, guid, name)) = self.corpse_to_open(me, now) else {
+                // Nothing left to go to, so any walk that was going to one is over: left
+                // standing, it went on being said as a claim on a body given up on.
+                self.stop_walking_to_loot();
+                // A body stood off from only because it is one of the others' turn says so:
+                // one character opens it while the rest stand by, and without a word that
+                // reads as a hang.
+                let room = self.room_for_loot();
+                if let Some((corpse, who)) = self.turn_of_another(me, now, room) {
+                    self.autoplay.note(format!("{corpse} is {who}'s turn"), now);
+                }
+                return false;
+            };
+            // Never mid-cast, unless the body will not be there when the
+            // spell lands.
+            if pressed && left > CORPSE_URGENT {
+                return false;
+            }
+            // Breaking off a fight means breaking it off. The server marks
+            // a character swinging or shooting as busy and refuses to open
+            // anything for it, so letting the attack run while walking to a
+            // corpse buys "You're too busy" and nothing else -- the target
+            // goes first, then the combat stance.
+            self.let_go(Release::Targets);
+            self.autoplay.armed_for = None;
+            if self.combat {
+                self.toggle_combat();
+            }
+            // Stand over it first (see [`CORPSE_REACH`]).
+            if away > CORPSE_REACH {
+                match self.walk_to_corpse(guid, &name, away, now) {
+                    Did::Done => {}
+                    Did::Blocked(why) => {
+                        tracing::info!(
+                            "autoplay: no way to corpse {guid:#010x} ({}); leaving it",
+                            why.what
+                        );
+                        self.stop_walking_to_loot();
+                        self.autoplay.set_aside_out_of_reach(guid, now);
+                        self.autoplay
+                            .say(Doing::Looting, format!("no way to {name}; leaving it"));
+                        continue;
+                    }
+                    _ => return true,
+                }
+            }
+            // Not while a spell is on its way: the server turns the use away
+            // as too busy.
+            if self.autoplay.cast_in_flight(now) {
+                return true;
+            }
+            self.stop_walking_to_loot();
+            // Opening a corpse is "using something", which ends a journey.
+            self.remember_journey();
+            self.interact(guid);
+            self.autoplay.take_up_corpse(guid, now, loot_wait(away));
+            self.autoplay.say(Doing::Looting, format!("looting {name}"));
+            return true;
+        }
+    }
+
+    /// The corpse to open next and how long it has left, how far off it is and its name: the one
+    /// closest to rotting first, and among the ones in no danger, the nearest.
+    fn corpse_to_open(&self, me: glam::Vec3, now: Instant) -> Option<(Duration, f32, u32, String)> {
+        let seen_at = &self.autoplay.corpse_seen;
         let room = self.room_for_loot();
-        let corpse = self
-            .world
+        self.world
             .objects
             .values()
             // Not emptied, not set aside, something there is room for,
@@ -738,102 +813,17 @@ impl Client {
             // cannot come apart (see [`Client::corpse_for_us`]).
             .filter(|o| self.corpse_for_us(o, me, now, room))
             .filter_map(|o| Some((o.world_pos()?.distance(me), o)))
-            .map(|(d, o)| (d, o.guid, o.name.clone()))
-            .map(|(d, guid, name)| {
-                let seen = seen_at.since(&guid).unwrap_or(now);
+            .map(|(d, o)| {
+                let seen = seen_at.since(&o.guid).unwrap_or(now);
                 let left = CORPSE_LIFE.saturating_sub(now.duration_since(seen));
-                (left, d, guid, name)
+                (left, d, o.guid, o.name.clone())
             })
             .min_by(|a, b| {
-                // The one closest to rotting first, and among the ones
-                // in no danger, the nearest.
                 let urgent = |l: Duration| l <= CORPSE_URGENT;
                 urgent(b.0)
                     .cmp(&urgent(a.0))
                     .then_with(|| a.1.total_cmp(&b.1))
-            });
-        let Some((left, away, guid, name)) = corpse else {
-            // Nothing left to go to, so any walk that was going to one
-            // is over. Left standing, that walk went on being said as a
-            // claim on a body this character had just given up on, and
-            // it kept the looting's own worth up (see `crate::steps`)
-            // for a body it would never open.
-            self.stop_walking_to_loot();
-            // A body stood off from only because it is one of the others'
-            // turn says so: one character opens it while the rest stand
-            // by, and without a word that reads as a hang.
-            if let Some((corpse, who)) = self.turn_of_another(me, now, room) {
-                self.autoplay.note(format!("{corpse} is {who}'s turn"), now);
-            }
-            return false;
-        };
-        // Never mid-cast, unless the body will not be there when the
-        // spell lands.
-        if pressed && left > CORPSE_URGENT {
-            return false;
-        }
-        // Breaking off a fight means breaking it off. The server marks
-        // a character swinging or shooting as busy and refuses to open
-        // anything for it, so letting the attack run while walking to a
-        // corpse buys "You're too busy" and nothing else -- the target
-        // goes first, then the combat stance.
-        self.let_go(Release::Targets);
-        self.autoplay.armed_for = None;
-        if self.combat {
-            self.toggle_combat();
-        }
-        // Stand over it first (see [`CORPSE_REACH`]).
-        if away > CORPSE_REACH {
-            let spot = self
-                .world
-                .objects
-                .get(&guid)
-                .and_then(|o| Some((o.world_pos()?, o.position?.cell)));
-            if let Some((at, cell)) = spot {
-                // No path there, no walk: set aside at once rather than after five seconds of
-                // "no way" at it. Asked once, as the walk sets off.
-                let setting_off = self.autoplay.walking_to.map(|w| w.guid) != Some(guid);
-                if setting_off && !self.has_way_to(at, cell, CORPSE_REACH) {
-                    tracing::info!("autoplay: no way to corpse {guid:#010x}; leaving it");
-                    self.autoplay.set_aside_out_of_reach(guid, now);
-                    self.autoplay
-                        .say(Doing::Looting, format!("no way to {name}; leaving it"));
-                    return false;
-                }
-                if !self.walk_to_corpse(guid, &name, at, away, now) {
-                    // Through a floor or behind a wall, the walk never
-                    // ends by itself, and it held the looting and the
-                    // next fight until the body rotted. Set it aside and
-                    // get on; it is tried again once the wait is up.
-                    let walked = self
-                        .autoplay
-                        .walking_to
-                        .map_or(0, |w| now.duration_since(w.started).as_secs());
-                    tracing::info!(
-                        "autoplay: cannot reach corpse {guid:#010x} after {walked} s; \
-                         trying again later"
-                    );
-                    self.stop_walking_to_loot();
-                    self.autoplay.set_aside_out_of_reach(guid, now);
-                    self.autoplay
-                        .say(Doing::Looting, format!("cannot reach {name}; leaving it"));
-                    return false;
-                }
-                return true;
-            }
-        }
-        // Not while a spell is on its way: the server turns the use away
-        // as too busy.
-        if self.autoplay.cast_in_flight(now) {
-            return true;
-        }
-        self.stop_walking_to_loot();
-        // Opening a corpse is "using something", which ends a journey.
-        self.remember_journey();
-        self.interact(guid);
-        self.autoplay.take_up_corpse(guid, now, loot_wait(away));
-        self.autoplay.say(Doing::Looting, format!("looting {name}"));
-        true
+            })
     }
 }
 

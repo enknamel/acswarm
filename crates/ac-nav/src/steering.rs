@@ -265,6 +265,8 @@ pub struct Steering {
     refused: Option<(Vec3, Unreachable)>,
     /// The last steer stood still for the planner.
     waiting: bool,
+    /// When the route left last fell by `PROGRESS` (see [`last_progress`](Self::last_progress)).
+    progressed: Option<Instant>,
 }
 
 impl Steering {
@@ -321,35 +323,10 @@ impl Steering {
         }
         if let Some(why) = self.asking {
             ground.ask(goal, within, now);
-            match ground.answer(goal) {
-                Some((from, Planned::Route(r))) => {
-                    let mut c = Course::new(from, goal, within, r, now);
-                    if !c.join(me) {
-                        tracing::debug!("route: the plan from {:?} does not pass here", from.at);
-                        self.route = None;
-                        self.asking = Some(Replan::OffCorridor);
-                    } else if why == Replan::NoProgress
-                        && self.stalls.last().is_some_and(|s| s.is_route(&c))
-                    {
-                        return self.refuse(goal, Unreachable::Stalled);
-                    } else {
-                        // Planned again for a moved goal the clock runs on: chasing is no progress.
-                        if let (Replan::Moved, Some(old)) = (why, self.route.as_ref()) {
-                            c.since = old.since;
-                        }
-                        tracing::debug!(
-                            "route: {} waypoints to {:?} ({why:?})",
-                            c.waypoints.len(),
-                            goal.at
-                        );
-                        self.route = Some(c);
-                        self.asking = None;
-                    }
+            if let Some((from, planned)) = ground.answer(goal) {
+                if self.answered(why, me, from, goal, within, planned, now) == Aim::NoWay {
+                    return Aim::NoWay;
                 }
-                Some((_, Planned::NoWay(no))) => {
-                    return self.refuse(goal, Unreachable::Planner(no));
-                }
-                Some((_, Planned::Building(_))) | None => {}
             }
         }
         match self.route.as_mut() {
@@ -362,6 +339,71 @@ impl Steering {
         }
     }
 
+    /// Follow a walk the caller planned itself from `from` (`me` now), as an answer [`steer`](Self::steer)
+    /// asked for: a route is walked and a no way stands, neither asked again; `Building` is asked.
+    pub fn adopt(
+        &mut self,
+        me: Vec3,
+        from: Place,
+        goal: Place,
+        within: f32,
+        planned: Planned,
+        now: Instant,
+    ) -> Aim {
+        self.reset();
+        self.asking = Some(Replan::Start);
+        self.answered(Replan::Start, me, from, goal, within, planned, now)
+    }
+
+    /// When the route left last fell by `PROGRESS` (0.1 m) on a course to this goal, across replans.
+    pub fn last_progress(&self) -> Option<Instant> {
+        self.progressed
+    }
+
+    /// Take the planner's answer to a walk asked for `why`: the course joined where `me` stands,
+    /// the refusal, or (`Wait`) still to be asked.
+    #[allow(clippy::too_many_arguments)] // reason: the answer and the walk it answers, in full
+    fn answered(
+        &mut self,
+        why: Replan,
+        me: Vec3,
+        from: Place,
+        goal: Place,
+        within: f32,
+        planned: Planned,
+        now: Instant,
+    ) -> Aim {
+        match planned {
+            Planned::Route(r) => {
+                let mut c = Course::new(from, goal, within, r, now);
+                if !c.join(me) {
+                    tracing::debug!("route: the plan from {:?} does not pass here", from.at);
+                    self.route = None;
+                    self.asking = Some(Replan::OffCorridor);
+                    return Aim::Wait;
+                }
+                if why == Replan::NoProgress && self.stalls.last().is_some_and(|s| s.is_route(&c)) {
+                    return self.refuse(goal, Unreachable::Stalled);
+                }
+                // Planned again for a moved goal the clock runs on: chasing is no progress.
+                if let (Replan::Moved, Some(old)) = (why, self.route.as_ref()) {
+                    c.since = old.since;
+                }
+                tracing::debug!(
+                    "route: {} waypoints to {:?} ({why:?})",
+                    c.waypoints.len(),
+                    goal.at
+                );
+                let aim = c.aim();
+                self.route = Some(c);
+                self.asking = None;
+                Aim::Go(aim)
+            }
+            Planned::NoWay(no) => self.refuse(goal, Unreachable::Planner(no)),
+            Planned::Building(_) => Aim::Wait,
+        }
+    }
+
     /// Ask for a first plan; again when the goal moved (the course kept), or off the corridor, at
     /// an end out of reach or stalled (the course dropped). `true` for a stall seen before.
     fn notice(&mut self, goal: Place, within: f32, me: Vec3, airborne: bool, now: Instant) -> bool {
@@ -369,7 +411,13 @@ impl Steering {
             self.asking.get_or_insert(Replan::Start);
             return false;
         };
+        let best = c.best;
         let stalled = c.is_stalled(me, now);
+        // Nearer along the course but carried off it is not progress.
+        let gained = c.best < best && best.is_finite();
+        if gained && (airborne || c.is_in_corridor(me)) {
+            self.progressed = Some(now);
+        }
         if airborne {
             return false;
         }
@@ -993,6 +1041,74 @@ mod tests {
             Aim::NoWay
         );
         assert_eq!(st.unreachable(goal), Some(Unreachable::Stalled));
+    }
+
+    #[test]
+    fn an_adopted_route_is_followed_without_asking() {
+        let t0 = Instant::now();
+        let mut st = Steering::default();
+        let corner = Vec3::new(10.0, 20.0, 0.0);
+        let goal = Vec3::new(20.0, 20.0, 0.0);
+        let mut g = Fake::standing(Vec3::new(10.0, 10.0, 0.0));
+        let planned = Planned::Route(route(&[corner, goal]));
+        let aim = st.adopt(g.at, place(g.at), place(goal), 0.5, planned, t0);
+        assert_eq!(aim, Aim::Go(corner));
+        assert_eq!(
+            st.steer(&mut g, place(goal), 0.5, secs(t0, 0.05)),
+            Aim::Go(corner)
+        );
+        assert!(
+            g.asks.is_empty(),
+            "planned once, by the caller: {:?}",
+            g.asks
+        );
+    }
+
+    #[test]
+    fn an_adopted_no_way_is_refused_without_asking() {
+        let t0 = Instant::now();
+        let mut st = Steering::default();
+        let goal = Vec3::new(20.0, 10.0, 0.0);
+        let mut g = Fake::standing(Vec3::new(10.0, 10.0, 0.0));
+        let planned = Planned::NoWay(NoWay::Unreached);
+        let aim = st.adopt(g.at, place(g.at), place(goal), 0.5, planned, t0);
+        assert_eq!(aim, Aim::NoWay);
+        assert_eq!(
+            st.steer(&mut g, place(goal), 0.5, secs(t0, 0.05)),
+            Aim::NoWay
+        );
+        assert!(g.asks.is_empty());
+        assert_eq!(
+            st.unreachable(goal),
+            Some(Unreachable::Planner(NoWay::Unreached))
+        );
+    }
+
+    #[test]
+    fn progress_is_kept_across_a_replan() {
+        let t0 = Instant::now();
+        let mut st = Steering::default();
+        let goal = Vec3::new(30.0, 10.0, 0.0);
+        let mut g = Fake::standing(Vec3::new(10.0, 10.0, 0.0));
+        g.route(&[goal]);
+        st.steer(&mut g, place(goal), 0.5, t0);
+        assert_eq!(st.last_progress(), None, "a new course is no progress");
+        g.at.x += 1.0;
+        st.steer(&mut g, place(goal), 0.5, secs(t0, 0.5));
+        assert_eq!(st.last_progress(), Some(secs(t0, 0.5)));
+        // Carried off the corridor: planned again, and the new course walks nothing yet.
+        g.at = Vec3::new(15.0, 20.0, 0.0);
+        g.route(&[goal]);
+        st.steer(&mut g, place(goal), 0.5, secs(t0, 1.0));
+        st.steer(&mut g, place(goal), 0.5, secs(t0, 1.1));
+        assert!(st.route.is_some(), "walking the new course");
+        assert_eq!(
+            st.last_progress(),
+            Some(secs(t0, 0.5)),
+            "kept, not restarted"
+        );
+        st.reset();
+        assert_eq!(st.last_progress(), None);
     }
 
     #[test]

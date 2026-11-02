@@ -192,19 +192,16 @@ impl Client {
     pub fn do_vendor_act(&mut self, act: &Act, saying: &str) -> bool {
         match act {
             Act::Approach { guid } => {
-                let Some(at) = self.world.objects.get(guid).and_then(|o| o.world_pos()) else {
-                    return false;
+                let goal = crate::Goal::Near {
+                    guid: *guid,
+                    within: crate::growth::COUNTER_REACH / 2.0,
                 };
-                // Named, not steered: the travel system decides
-                // whether that is a walk across the room or a journey.
-                let did = self.head_for(at, crate::growth::COUNTER_REACH / 2.0, "the counter");
+                let did = self.go(self.step_owner(), goal, self.frame_at);
                 self.autoplay.say(Doing::Shopping, saying.to_string());
-                did.fine()
+                !matches!(did, crate::did::Did::Blocked(_))
             }
             Act::Open { guid } => {
-                if self.follow.take().is_some() {
-                    self.steering.reset();
-                }
+                self.stop_going(Some(self.step_owner()), "at the counter");
                 self.use_object(*guid);
                 self.autoplay.say(Doing::Shopping, saying.to_string());
                 true

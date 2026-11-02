@@ -14,7 +14,7 @@ pub mod aim;
 pub mod augmentations;
 pub mod autoplay;
 mod body;
-pub use body::movement::Follow;
+pub use body::going::{Goal, Going, Owner, GIVE_UP_AFTER};
 pub(crate) use body::movement::SAME_FLOOR;
 pub use body::player_tick::PlayerFrame;
 #[cfg(doc)]
@@ -351,9 +351,17 @@ pub struct Client {
     pub salvage_open: bool,
     /// A jump asked for by a script or the bot, done on the next tick.
     pub pending_jump: Option<f32>,
-    /// Someone being kept up with (a team's leader): where they are and
-    /// how close to stop. Walked or flown to like a journey's leg.
-    pub follow: Option<Follow>,
+    /// The walk the body follows for one owner (see [`Client::go`]).
+    pub going: Option<Going>,
+    /// The owner whose walk was taken, and who took it: told once, on its next ask.
+    taken: Option<(Owner, Owner)>,
+    /// The walks lately answered no way, by owner and goal (see `body::going::Refusal`).
+    refusals: Vec<body::going::Refusal>,
+    /// The thing a server walk was for that the follower found no way to (see `tick_player`).
+    pub server_walk_refused: Option<u32>,
+    /// The time of the frame under way (`tick_autoplay`, `tick_player`): the walk clock of a caller
+    /// that names none (`go_to`).
+    pub(crate) frame_at: Instant,
     /// A sidestep out of a spell's way (see `dodge`): where to, and
     /// until when. Outranks every other movement goal while it lasts.
     pub dodge_to: Option<(glam::Vec3, Instant)>,

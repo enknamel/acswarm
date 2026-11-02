@@ -189,7 +189,10 @@ fn only_the_one_leading_walks_the_area_looking_for_a_fight() {
     c.autoplay.team.mates.clear();
     c.autoplay.team.leader = true;
     assert!(c.grow_hunt(now, &cfg), "the leader stayed put");
-    assert!(c.traveling());
+    assert!(
+        c.is_walking() || c.traveling(),
+        "the leader's patrol does not move"
+    );
 }
 
 #[test]
@@ -349,7 +352,10 @@ fn a_camp_nothing_comes_to_is_looked_about() {
         c.grow_hunt(later, &cfg),
         "stood on at a camp nothing came to"
     );
-    assert!(c.traveling());
+    assert!(
+        c.is_walking() || c.traveling(),
+        "the look about does not move"
+    );
 }
 
 #[test]

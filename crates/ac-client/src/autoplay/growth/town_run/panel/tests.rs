@@ -61,7 +61,7 @@ fn a_run_asked_for_from_the_panel_chooses_a_counter_and_sets_off() {
     c.town_run_stop(now);
     assert_eq!(c.town_run_driver(), None);
     assert!(!c.traveling());
-    assert!(c.follow.is_none());
+    assert!(c.going.is_none());
     assert!(c.world.open_vendor.is_none());
     assert_eq!(c.autoplay.growth.shop.phase, ac_vendor::Phase::Walking);
     // And autoplay, now running town runs, does not set straight
@@ -174,7 +174,7 @@ fn a_hand_run_with_town_runs_off_keeps_the_hunting_off_the_counter() {
         !c.autoplay.growth.town_run_under_way(),
         "kept with town runs off"
     );
-    assert!(c.traveling(), "the hunting did not move");
+    assert!(c.is_walking() || c.traveling(), "the hunting did not move");
 }
 
 #[test]

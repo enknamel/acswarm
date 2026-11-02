@@ -188,6 +188,8 @@ pub struct Pathfinder {
     building: bool,
     /// The area our last plan or ask was on, held so no other session's area pushes it out.
     region: Option<Arc<Region>>,
+    /// Calls of [`plan`](Self::plan), for the tests that count them.
+    pub plans: u32,
 }
 
 impl Pathfinder {
@@ -208,6 +210,7 @@ impl Pathfinder {
             own: None,
             building: false,
             region: None,
+            plans: 0,
         }
     }
 
@@ -221,6 +224,7 @@ impl Pathfinder {
     /// The route from `from` to within `within` (metres, 3D) of `goal` for a body of `capsule`, on
     /// what is built now; `Building` when the area or its chunks are not, which are then queued.
     pub fn plan(&mut self, from: Place, goal: Place, within: f32, capsule: Capsule) -> Planned {
+        self.plans += 1;
         let planned = self.plan_now(from, goal, within, capsule);
         self.building = matches!(planned, Planned::Building(_));
         planned

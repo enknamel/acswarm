@@ -7,6 +7,7 @@ use ac_client::walk_trial::{
     Trial,
 };
 use ac_nav::routing::Planned;
+use ac_scene::nav::EdgeKind;
 use ac_world::Place;
 use glam::Vec3;
 
@@ -92,6 +93,13 @@ fn known() -> Vec<Trial> {
             0x2CB5_0003,
             Vec3::new(8_472.6, 34_823.9, 0.0),
         ),
+        named(
+            LEVEL,
+            "5C49 Tusker on a ledge over the room",
+            Vec3::new(17_744.8, 13_910.7, 0.0),
+            0x5C49_012A,
+            Vec3::new(17_754.0, 13_929.0, 6.0),
+        ),
     ]
 }
 
@@ -137,6 +145,11 @@ fn areas() -> Vec<(&'static str, Vec3, u32)> {
             "A9B2 platform",
             Vec3::new(32_526.2, 34_261.9, 97.5),
             0xA9B2_0000,
+        ),
+        (
+            "5C49 Tusker ground",
+            Vec3::new(17_744.8, 13_910.7, 0.0),
+            0x5C49_012A,
         ),
     ]
 }
@@ -250,6 +263,34 @@ fn a_corpse_on_the_floor_below_is_walked_down_to() {
 fn a_jeweler_on_a_deck_is_walked_up_to() {
     let o = run(LEVEL, &stall("F682 Jeweler on a deck"));
     assert!(matches!(o, Outcome::Arrived { .. }), "{o:?}");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_ledge_opening_only_onto_air_is_refused_and_dropped_from() {
+    // The Tuskers' alcoves 6 m up open only onto the floorless upper half of the room below.
+    let t = stall("5C49 Tusker on a ledge over the room");
+    let o = run(LEVEL, &t);
+    assert!(matches!(o, Outcome::Refused { .. }), "{o:?}");
+    let mut c = standing_at(LEVEL, &t);
+    let pl = c.player.as_ref().expect("a body");
+    let me = Place {
+        at: pl.world_position(),
+        cell: pl.cell,
+    };
+    let cap = pl.capsule();
+    let ledge = Place {
+        at: t.goal,
+        cell: t.goal_cell,
+    };
+    let down = c.pathfinder.plan(ledge, me, t.stop, cap);
+    let Planned::Route(r) = down else {
+        panic!("no way down: {down:?}")
+    };
+    assert!(
+        r.waypoints.iter().any(|w| w.kind == EdgeKind::Drop),
+        "{r:?}"
+    );
 }
 
 #[test]

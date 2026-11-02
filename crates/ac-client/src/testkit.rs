@@ -283,6 +283,15 @@ pub fn a_weapon(c: &mut Client, guid: u32, kind: u32, name: &str, in_hand: bool)
     );
 }
 
+/// What the fight went for: the swing's target, else the creature the slot's walk is to (a swing
+/// is sent from within reach, so the walk up comes first).
+pub fn went_for(c: &Client) -> Option<u32> {
+    c.attack_target.or_else(|| match c.going.as_ref()?.goal {
+        crate::Goal::Near { guid, .. } => Some(guid),
+        crate::Goal::At { .. } => None,
+    })
+}
+
 /// A character with a mace in hand, a wand in the pack, and a
 /// creature it is swinging at.
 pub fn mid_fight(assets: std::rc::Rc<ac_scene::Assets>) -> (Client, u32) {
@@ -764,6 +773,25 @@ pub fn window_stocked_as(vendor: u32, name: &str) -> ac_world::object::ApproachV
         })
         .collect();
     window
+}
+
+/// A character of `level` on the Tusker ground's floor (0x5C49), and a Female Tusker's ledge 6 m
+/// up the wall above it that no walk reaches (route harness `5C49 Tusker on a ledge over the room`).
+pub fn under_the_ledge(level: i32) -> (Client, ac_world::Place) {
+    let t = crate::walk_trial::named(
+        level,
+        "5C49 Tusker on a ledge over the room",
+        Vec3::new(17_744.8, 13_910.7, 0.0),
+        0x5C49_012A,
+        Vec3::new(17_754.0, 13_929.0, 6.0),
+    );
+    let mut c = crate::walk_trial::standing_at(level, &t);
+    c.world.player_guid = Some(ME);
+    let ledge = ac_world::Place {
+        at: t.goal,
+        cell: t.goal_cell,
+    };
+    (c, ledge)
 }
 
 /// A counter in view at `at`.

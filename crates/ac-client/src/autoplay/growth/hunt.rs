@@ -5,6 +5,7 @@ use glam::Vec2;
 use super::road::{on_the_way, OnTheWay, RETRY_AFTER, WALK_ON_EVERY, WALK_TIMEOUT};
 use super::{about, Growth};
 use crate::autoplay::{Doing, CORPSE_LIFE};
+use crate::did::Did;
 use crate::Client;
 use ac_world::object_desc_flags;
 
@@ -51,6 +52,29 @@ fn quiet_before_move(cfg: &Growth, looking_about: bool) -> f32 {
 }
 
 impl Client {
+    /// Walk to the roam's or patrol's point (`growth::State.looking_to`) by the slot: true while
+    /// on the way; let go once there or refused. Past the region the journey is about the ground.
+    fn look_about(&mut self) -> bool {
+        let Some((goal, status)) = self.autoplay.growth.looking_to.clone() else {
+            return false;
+        };
+        match self.go_to_point(self.step_owner(), goal, crate::travel::ARRIVE) {
+            Did::Done => {}
+            Did::Blocked(why) => {
+                tracing::info!("growth: no way to look about at {goal:?}: {}", why.what);
+            }
+            _ => {
+                if self.traveling() {
+                    self.mark_ground_walk();
+                }
+                self.autoplay.say(Doing::Traveling, status);
+                return true;
+            }
+        }
+        self.autoplay.growth.looking_to = None;
+        false
+    }
+
     // ---- hunting grounds ------------------------------------------
 
     /// The hunting ground this character is on or heading for.
@@ -237,6 +261,13 @@ impl Client {
         let Some(since) = self.autoplay.growth.quiet_since else {
             return false;
         };
+        // A roam or patrol under way is asked for each tick until it arrives or is refused.
+        if self.autoplay.growth.looking_to.is_some() {
+            if self.followed_leader().is_none() && self.look_about() {
+                return true;
+            }
+            self.autoplay.growth.looking_to = None;
+        }
         // A walk already under way is the looking about: it is not cut
         // short to start another.
         if self.traveling() {
@@ -303,14 +334,9 @@ impl Client {
             self.autoplay.growth.roams = n.wrapping_add(1);
             self.autoplay.growth.quiet_since = Some(now);
             let goal = crate::hunt::patrol_point(&corners, n);
-            if self.travel_about(goal) {
-                self.autoplay.say(
-                    Doing::Traveling,
-                    format!("nothing in sight; looking about {}", area.name),
-                );
-                return true;
-            }
-            return false;
+            let status = format!("nothing in sight; looking about {}", area.name);
+            self.autoplay.growth.looking_to = Some((goal, status));
+            return self.look_about();
         }
         // With nothing in sight a ground is looked about: a camp once its quiet minute says nothing
         // is coming after all (a_camp_nothing_comes_to_is_looked_about), a patrol always, a thin
@@ -333,7 +359,9 @@ impl Client {
                     true
                 }
             } else {
-                self.travel_about(goal)
+                let status = "nothing in sight; looking about the ground".to_string();
+                self.autoplay.growth.looking_to = Some((goal, status));
+                self.look_about()
             };
             if set_off {
                 self.autoplay.say(

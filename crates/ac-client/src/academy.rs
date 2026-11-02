@@ -30,8 +30,9 @@ use serde::{Deserialize, Serialize};
 
 pub use ac_world::academy::{skip_steps, steps, Kind, Step, LANDBLOCK};
 
-use crate::autoplay::{Doing, Release};
-use crate::Client;
+use crate::autoplay::{Doing, Release, CORPSE_REACH};
+use crate::did::Did;
+use crate::{Client, Goal};
 
 /// The settings.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -75,10 +76,6 @@ const SPEECH_SETTLE: Duration = Duration::from_millis(1500);
 const RIDE_WAIT: Duration = Duration::from_secs(15);
 /// After an agent's first line, its later lines are given this long.
 const MORE_LINES: Duration = Duration::from_secs(3);
-/// No progress on a walk for this long counts as stuck.
-const STUCK_AFTER: Duration = Duration::from_secs(15);
-/// Movement below this is not progress.
-const PROGRESS: f32 = 0.5;
 /// How often a portal is stepped into again.
 const PORTAL_RETRY: Duration = Duration::from_secs(5);
 /// Corpses this near are emptied while hunting.
@@ -214,9 +211,7 @@ pub struct State {
     tries: u32,
     /// A key was used on the door; the door is opened next.
     unlocked: bool,
-    /// Where the walk last made progress, and when.
-    progress: Option<(Vec3, Instant)>,
-    /// The walk is not getting anywhere: act from here.
+    /// The step's walk was refused (`State::walk_refused`): act from here.
     stuck: bool,
     /// Where the character was last tick, for the teleport check.
     last_pos: Option<Vec3>,
@@ -279,7 +274,6 @@ impl State {
         self.first_line = None;
         self.tries = 0;
         self.unlocked = false;
-        self.progress = None;
         self.stuck = false;
     }
 
@@ -325,24 +319,21 @@ impl State {
                 .any(|h| h.text.to_lowercase().contains(&phrase.to_lowercase()))
     }
 
-    /// Walk toward `target`: `None` once within `stop` of it (or stuck
-    /// and told to act from here), else the approach to make.
+    /// The walk of the step's last [`Action::Approach`] was refused (no way, or given up): the
+    /// step acts from where the character stands.
+    pub fn walk_refused(&mut self) {
+        if !self.stuck {
+            tracing::info!("academy: no walk there, acting from here");
+        }
+        self.stuck = true;
+    }
+
+    /// Walk toward `target`: `None` once within `stop` of it (or its walk refused, to act from
+    /// here), else the approach to make.
     fn approach(&mut self, v: &View, target: Vec3, stop: f32, status: String) -> Option<Action> {
         let flat = glam::Vec2::new(target.x - v.pos.x, target.y - v.pos.y).length();
         if flat <= stop || self.stuck {
             return None;
-        }
-        match self.progress {
-            Some((p, since)) if p.distance(v.pos) < PROGRESS => {
-                if v.now.duration_since(since) >= STUCK_AFTER {
-                    tracing::info!(
-                        "academy: stuck {flat:.0} m short of the goal, acting from here"
-                    );
-                    self.stuck = true;
-                    return None;
-                }
-            }
-            _ => self.progress = Some((v.pos, v.now)),
         }
         Some(Action::Approach {
             target,
@@ -871,10 +862,8 @@ impl Client {
         };
         let action = self.autoplay.academy.step(&view, cfg.skip);
         // A walk goal belongs to the step that set it.
-        if !matches!(action, Action::Approach { .. } | Action::Hunt { .. })
-            && self.follow.take().is_some()
-        {
-            self.steering.reset();
+        if !matches!(action, Action::Approach { .. } | Action::Hunt { .. }) {
+            self.stop_going(Some(self.step_owner()), "the academy step acts");
         }
         let progress = self.autoplay.academy.progress();
         match action {
@@ -901,7 +890,14 @@ impl Client {
                 status,
             } => {
                 self.academy_leave_fight();
-                self.head_for(target, stop, "the way on");
+                let goal = Goal::At {
+                    place: self.place_at(target),
+                    within: stop,
+                };
+                if let Did::Blocked(why) = self.go(self.step_owner(), goal, now) {
+                    tracing::info!("academy: {status}: {}", why.what);
+                    self.autoplay.academy.walk_refused();
+                }
                 self.autoplay
                     .say(Doing::Training, format!("{progress}: {status}"));
                 true
@@ -1148,9 +1144,25 @@ impl Client {
                 let (guid, cname) = (c.guid, c.name.clone());
                 self.academy_peace();
                 self.let_go(Release::Engagement);
-                if self.follow.take().is_some() {
-                    self.steering.reset();
+                // Walked to first, to within the use radius, then opened; one no walk reaches is passed.
+                let goal = Goal::Near {
+                    guid,
+                    within: CORPSE_REACH / 2.0,
+                };
+                match self.go(self.step_owner(), goal, now) {
+                    Did::Done => {}
+                    Did::Blocked(why) => {
+                        tracing::info!("academy: {cname} set aside: {}", why.what);
+                        self.autoplay.looted.push(guid, now);
+                        return;
+                    }
+                    _ => {
+                        self.autoplay
+                            .say(Doing::Training, format!("{progress}: walking to {cname}"));
+                        return;
+                    }
                 }
+                self.stop_going(Some(self.step_owner()), "at the corpse");
                 self.interact(guid);
                 self.autoplay.academy_corpse = Some((guid, now));
                 self.autoplay
@@ -1184,14 +1196,21 @@ impl Client {
         }
         // Nothing to fight: to the spot, then wait for them to appear.
         let flat = glam::Vec2::new(centre.x - pos.x, centre.y - pos.y).length();
-        if flat > REACH {
-            self.head_for(centre, REACH, name);
+        let goal = Goal::At {
+            place: self.place_at(centre),
+            within: REACH,
+        };
+        let walking = if flat > REACH {
+            // No walk there: they are waited for where the character stands.
+            !matches!(self.go(self.step_owner(), goal, now), Did::Blocked(_))
+        } else {
+            self.stop_going(Some(self.step_owner()), "at the hunt");
+            false
+        };
+        if walking {
             self.autoplay
                 .say(Doing::Training, format!("{progress}: going after {name}"));
         } else {
-            if self.follow.take().is_some() {
-                self.steering.reset();
-            }
             self.autoplay.say(
                 Doing::Training,
                 format!("{progress}: waiting for {name} to appear"),
@@ -1271,40 +1290,81 @@ mod tests {
         assert!(through_portal("Central Courtyard").is_done("token"));
     }
 
+    /// A level-20 character at the wasps' hunt (`academy.csv`), with a corpse of one `off` metres
+    /// away in the world and in the hunt's view.
+    fn wasp_corpse(off: Vec3) -> (crate::Client, Seen, Vec3) {
+        let at = origin() + Vec3::new(5.0, -68.0, 0.0);
+        let cell = crate::testkit::game_data()
+            .block_collision(LANDBLOCK)
+            .ok()
+            .and_then(|b| b.world.cell_at(at + Vec3::Z * 0.5))
+            .expect("the wasps' room");
+        let mut c = crate::testkit::standing_in_the_field(20, cell, at - origin());
+        let me = c.my_position().expect("standing");
+        let seen = Seen {
+            guid: 0x8000_4079,
+            name: "Corpse of Carpenter Wasp".into(),
+            corpse: true,
+            pos: me + off,
+            ..Default::default()
+        };
+        let mut corpse = crate::testkit::corpse(seen.guid, &seen.name);
+        corpse.position = crate::testkit::placed(cell, seen.pos);
+        c.world.objects.insert(seen.guid, corpse);
+        (c, seen, me)
+    }
+
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_corpse_is_opened_once_the_killing_spell_has_landed() {
         // Opened into the spell's recoil the use was turned away without a word, the corpse
         // was written off, and a caster hunted wasps for the item on one without end.
         let now = Instant::now();
-        let mut c = crate::Client::offline(crate::testkit::no_data());
-        let corpse = Seen {
-            guid: 0x8000_4079,
-            name: "Corpse of Carpenter Wasp".into(),
-            corpse: true,
-            pos: origin() + Vec3::new(40.0, -70.0, 0.0),
-            ..Default::default()
+        let (mut c, corpse, pos) = wasp_corpse(Vec3::new(1.0, 0.0, 0.0));
+        let hunt = |c: &mut crate::Client| {
+            c.academy_hunt(
+                "Carpenter Wasp",
+                pos,
+                std::slice::from_ref(&corpse),
+                pos,
+                now,
+                "step",
+            )
         };
-        let pos = origin() + Vec3::new(38.0, -70.0, 0.0);
         c.autoplay.cast_sent = Some(now);
-        c.academy_hunt(
-            "Carpenter Wasp",
-            pos,
-            std::slice::from_ref(&corpse),
-            pos,
-            now,
-            "step",
-        );
+        hunt(&mut c);
         assert_eq!(c.autoplay.academy_corpse, None, "opened into the cast");
         c.autoplay.cast_sent = None;
-        c.academy_hunt(
-            "Carpenter Wasp",
-            pos,
-            std::slice::from_ref(&corpse),
-            pos,
-            now,
-            "step",
-        );
+        hunt(&mut c);
         assert_eq!(c.autoplay.academy_corpse.map(|(g, _)| g), Some(corpse.guid));
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn a_corpse_is_walked_to_before_it_is_opened() {
+        let now = Instant::now();
+        let (mut c, _, me) = wasp_corpse(Vec3::ZERO);
+        let floor = c
+            .standable_near(me, 8.0)
+            .into_iter()
+            .find(|p| p.at.distance(me) > 4.0)
+            .expect("floor round the hunt");
+        let (mut c, corpse, pos) = wasp_corpse(floor.at - me);
+        let seen = std::slice::from_ref(&corpse);
+        c.academy_hunt("Carpenter Wasp", pos, seen, pos, now, "step");
+        assert_eq!(
+            c.autoplay.academy_corpse,
+            None,
+            "opened from {:.1} m",
+            floor.at.distance(me)
+        );
+        assert!(c.is_walking(), "not walked to");
+        // Six metres up the air over the hunt: no walk gets there, and it is passed.
+        let (mut c, corpse, pos) = wasp_corpse(Vec3::Z * 6.0);
+        let seen = std::slice::from_ref(&corpse);
+        c.academy_hunt("Carpenter Wasp", pos, seen, pos, now, "step");
+        assert_eq!(c.autoplay.academy_corpse, None);
+        assert!(c.autoplay.looted.contains(&corpse.guid), "not passed");
     }
 
     #[test]
@@ -1657,7 +1717,7 @@ mod tests {
     }
 
     #[test]
-    fn a_stuck_walk_acts_from_where_it_is() {
+    fn a_refused_walk_acts_from_where_it_stands() {
         let t0 = Instant::now();
         let mut st = State::default();
         let samuel = npc("Samuel", Vec3::new(21.9, -30.6, 0.0));
@@ -1669,8 +1729,8 @@ mod tests {
         let v = view(t0, here, &objs, &[]);
         st.step(&v, false); // give skipped
         assert!(matches!(st.step(&v, false), Action::Approach { .. }));
-        // Not a step of progress for a good while: use him from here.
-        let v = view(t0 + STUCK_AFTER + Duration::from_secs(1), here, &objs, &[]);
+        // The walk is refused: use him from here.
+        st.walk_refused();
         assert_eq!(st.step(&v, false), Action::Use(samuel.guid));
     }
 }

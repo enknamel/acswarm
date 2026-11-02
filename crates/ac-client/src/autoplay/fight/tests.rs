@@ -208,3 +208,161 @@ fn a_second_attacker_does_not_silence_the_first() {
         ["Drudge Robber"]
     );
 }
+
+/// A caster on the Tusker ground's floor (0x5C49) with Flame Bolt I, a Female Tusker on its ledge
+/// 6 m up the wall (no walk reaches it) and another on the floor a little further off.
+fn tuskers_on_the_ledge_and_the_floor(now: Instant) -> (Client, u32, u32) {
+    let t = crate::walk_trial::named(
+        20,
+        "5C49 Tusker on a ledge over the room",
+        glam::Vec3::new(17_744.8, 13_910.7, 0.0),
+        0x5C49_012A,
+        glam::Vec3::new(17_754.0, 13_929.0, 6.0),
+    );
+    let (mut c, _) = crate::testkit::a_caster_knowing(now, &["Flame Bolt I"]);
+    let origin = ac_world::landblock_origin(t.start_cell);
+    crate::testkit::stand(&mut c, t.start_cell, t.start - origin);
+    let me = c.my_position().expect("standing");
+    let ledge_away = me.distance(t.goal);
+    let floor = c
+        .standable_near(me, 25.0)
+        .into_iter()
+        .filter(|p| (p.at.z - me.z).abs() < 0.5)
+        .filter(|p| (ledge_away + 1.0..24.0).contains(&p.at.distance(me)))
+        .find(|p| matches!(c.plan_walk(*p, 1.0), ac_nav::routing::Planned::Route(_)))
+        .expect("a floor spot further off than the ledge");
+    let (on_ledge, on_floor) = (0x8000_0501, 0x8000_0502);
+    for (guid, place) in [
+        (
+            on_ledge,
+            ac_world::Place {
+                at: t.goal,
+                cell: t.goal_cell,
+            },
+        ),
+        (on_floor, floor),
+    ] {
+        let mut tusker = crate::testkit::creature(guid, "Female Tusker");
+        tusker.object_desc_flags |= ac_world::object_desc_flags::ATTACKABLE;
+        tusker.position = crate::testkit::placed(place.cell, place.at);
+        c.world.objects.insert(guid, tusker);
+        appraised_as(&mut c, guid, Some(10), 50);
+    }
+    c.autoplay.config.fight.enabled = true;
+    (c, on_ledge, on_floor)
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_target_on_a_ledge_nothing_walks_to_is_given_up_at_once() {
+    let t0 = Instant::now();
+    let (mut c, on_ledge, on_floor) = tuskers_on_the_ledge_and_the_floor(t0);
+    let cfg = c.autoplay.config.fight.clone();
+    // The fight is on the ledge one (it was the one in sight, or hitting us).
+    c.autoplay.casting_at = Some(on_ledge);
+    let dt = 0.05;
+    let mut now = t0;
+    let mut given_up_at = None;
+    while now < t0 + Duration::from_secs(3) {
+        c.autoplay_fight_with_spells(now, &cfg);
+        c.tick_player(crate::player::Input::default(), dt, now);
+        if given_up_at.is_none() && c.autoplay.given_up.since(&on_ledge).is_some() {
+            given_up_at = Some(now - t0);
+        }
+        now += Duration::from_secs_f32(dt);
+    }
+    let given_up_at = given_up_at.expect("the ledge one was never given up");
+    assert!(
+        given_up_at <= Duration::from_secs(1),
+        "stood {given_up_at:?} at it"
+    );
+    assert_eq!(
+        c.autoplay.casting_at,
+        Some(on_floor),
+        "the floor one fought"
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_target_given_up_that_comes_down_and_attacks_is_fought() {
+    // The ledge one is given up; it drops beside the character and hits it: it is fought.
+    let now = Instant::now();
+    let (mut c, on_ledge, on_floor) = tuskers_on_the_ledge_and_the_floor(now);
+    let cfg = c.autoplay.config.fight.clone();
+    c.give_up_target(on_ledge, "no way to it", now);
+    assert_eq!(c.pick_target(&cfg, now), Some(on_floor));
+    let me = c.my_position().expect("standing");
+    let cell = c.player.as_ref().map(|p| p.cell).expect("standing");
+    if let Some(t) = c.world.objects.get_mut(&on_ledge) {
+        t.position = crate::testkit::placed(cell, me + glam::Vec3::X);
+    }
+    c.autoplay.attacked_by("Female Tusker", Instant::now());
+    assert!(c.can_take_on(on_ledge, &cfg, true, now));
+    c.world.objects.remove(&on_floor);
+    assert_eq!(c.pick_target(&cfg, now), Some(on_ledge));
+    // Still up on its ledge, hit by another of its name: still given up.
+    let (mut c, on_ledge, on_floor) = tuskers_on_the_ledge_and_the_floor(now);
+    c.give_up_target(on_ledge, "no way to it", now);
+    c.autoplay.attacked_by("Female Tusker", Instant::now());
+    assert!(!c.can_take_on(on_ledge, &cfg, true, now));
+    assert_eq!(c.pick_target(&cfg, now), Some(on_floor));
+}
+
+/// [`tuskers_on_the_ledge_and_the_floor`] for a character with a mace in hand.
+fn with_a_mace(c: &mut Client) {
+    let me = 0x5000_0001;
+    c.world.player_guid = Some(me);
+    for o in c.world.objects.values_mut() {
+        if o.item_type & ac_world::item_type::CASTER != 0 {
+            o.wielder = None;
+            o.container = Some(me);
+        }
+    }
+    crate::testkit::a_weapon(
+        c,
+        0x8000_0601,
+        ac_world::item_type::MELEE_WEAPON,
+        "Mace",
+        true,
+    );
+}
+
+/// Fight rounds at 20 Hz for `secs`, the body walking: whether a swing went out at `guid`.
+fn swings_at(c: &mut Client, guid: u32, t0: Instant, secs: u64) -> bool {
+    let dt = 0.05;
+    let mut now = t0;
+    let mut swung = false;
+    while now < t0 + Duration::from_secs(secs) {
+        c.autoplay_fight(now);
+        c.tick_player(crate::player::Input::default(), dt, now);
+        swung |= c.attacked == Some(guid);
+        now += Duration::from_secs_f32(dt);
+    }
+    swung
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_swing_is_not_sent_at_a_creature_no_walk_reaches() {
+    let t0 = Instant::now();
+    let (mut c, on_ledge, on_floor) = tuskers_on_the_ledge_and_the_floor(t0);
+    with_a_mace(&mut c);
+    assert_eq!(c.combat_stance(), crate::Stance::Melee, "the case: a swing");
+    // With both: the ledge one is never swung at, the floor one is.
+    assert!(!swings_at(&mut c, on_ledge, t0, 6), "swung at the ledge");
+    assert_eq!(c.attack_target, Some(on_floor), "the floor one fought");
+
+    // Alone with the ledge one: given up at once, and the character stands.
+    let (mut c, on_ledge, on_floor) = tuskers_on_the_ledge_and_the_floor(t0);
+    with_a_mace(&mut c);
+    c.world.objects.remove(&on_floor);
+    let me = c.my_position().expect("standing");
+    assert!(!swings_at(&mut c, on_ledge, t0, 2), "swung at the ledge");
+    assert!(
+        c.autoplay.given_up.since(&on_ledge).is_some(),
+        "not given up"
+    );
+    let moved = c.my_position().expect("standing").distance(me);
+    assert!(moved < 0.5, "walked {moved:.1} m");
+}

@@ -30,18 +30,6 @@ fn a_target_left_half_a_world_away_is_not_fought_by_spell_either() {
 }
 
 #[test]
-fn walking_up_to_a_target_is_working_on_it_while_it_gets_nearer() {
-    // The first stretch of the walk, and a new target, both count.
-    assert!(came_nearer(None, 7, 40.0));
-    assert!(came_nearer(Some((8, 5.0)), 7, 40.0));
-    // Nearer by a pace and more: still closing.
-    assert!(came_nearer(Some((7, 40.0)), 7, 38.5));
-    // Shuffling on the spot, or backing off round a wall, is not.
-    assert!(!came_nearer(Some((7, 40.0)), 7, 39.5));
-    assert!(!came_nearer(Some((7, 40.0)), 7, 45.0));
-}
-
-#[test]
 fn a_ranged_attacker_closes_in_before_it_gives_up() {
     // Nothing landing from forty metres: try from twenty, then ten,
     // then as near as is worth being -- and only then give up.

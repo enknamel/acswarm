@@ -41,7 +41,6 @@ const NARRATIVE: &[&str] = &[
     "fall_is_lost",
     "for_a_take",
     "forget_the_departed",
-    "forget_the_room",
     "frees_the_cast_slot",
     "has_an_errand",
     "held_by_an_errand",

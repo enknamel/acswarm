@@ -4,14 +4,13 @@ use super::road_fight_over;
 #[cfg(doc)]
 use crate::autoplay::hear::arrived_unharmed;
 use crate::autoplay::{Autoplay, Doing, Fight, Release};
+use crate::did::Did;
+use crate::dodge::{How, WITHIN};
 use crate::refusals;
-use crate::{Client, Stance};
+use crate::{Client, Goal, Stance};
 
 /// A target that takes no damage for this long is let go.
 const STALL_AFTER: Duration = Duration::from_secs(20);
-/// Walking up to a target is working on it while each stretch brings the
-/// character this much nearer than it has been (see [`came_nearer`]).
-const APPROACH_PROGRESS: f32 = 1.0;
 /// And left alone for this long afterwards.
 pub(super) const GIVE_UP_FOR: Duration = refusals::ATTACK_AGAIN;
 /// How far off a creature that has stopped attacking can stand before a
@@ -31,13 +30,6 @@ const MIN_STAND_OFF: f32 = 6.0;
 /// nothing missed.
 pub(crate) fn nothing_arrived(thrown: Option<Instant>, now: Instant) -> bool {
     thrown.is_some_and(|t| now.duration_since(t) > CLOSE_IN_AFTER)
-}
-
-/// Whether the walk up to `guid`, now `distance` off, has come nearer
-/// than the nearest yet (`best`, for whichever target it was) by
-/// [`APPROACH_PROGRESS`].
-fn came_nearer(best: Option<(u32, f32)>, guid: u32, distance: f32) -> bool {
-    best.is_none_or(|(g, d)| g != guid || distance < d - APPROACH_PROGRESS)
 }
 
 /// How near to fight from after nothing has landed from `distance`: half
@@ -177,7 +169,12 @@ impl Client {
                         .say(Doing::Fighting, format!("changing weapon for {name}"));
                     return true;
                 }
-                if missile && self.autoplay_approach(guid, &name, crate::dodge::How::Missile) {
+                if missile
+                    && self.autoplay_approach(guid, &name, crate::dodge::How::Missile) != Did::Done
+                {
+                    return true;
+                }
+                if !missile && self.close_for_swing(guid, &name, now) != Did::Done {
                     return true;
                 }
                 self.enter_combat();
@@ -211,9 +208,11 @@ impl Client {
             return true;
         }
         // A bow refused for range shoots nothing: close in first (see
-        // `crate::dodge`). A swing from too far the server walks us
-        // in for.
-        if missile && self.autoplay_approach(guid, &name, crate::dodge::How::Missile) {
+        // `crate::dodge`). A swing is sent from within its reach.
+        if missile && self.autoplay_approach(guid, &name, crate::dodge::How::Missile) != Did::Done {
+            return true;
+        }
+        if !missile && self.close_for_swing(guid, &name, now) != Did::Done {
             return true;
         }
         self.enter_combat();
@@ -237,6 +236,12 @@ impl Client {
     /// damage for too long and should be let go: it is out of reach,
     /// behind something, or not what it seems.
     pub(super) fn stalled_on(&mut self, guid: u32, now: Instant) -> bool {
+        // The server's walk to it (a swing from out of reach) has no way there.
+        if self.server_walk_refused == Some(guid) {
+            self.server_walk_refused = None;
+            self.give_up_target(guid, "no way to it", now);
+            return true;
+        }
         let health = self
             .world
             .objects
@@ -249,11 +254,8 @@ impl Client {
                     self.autoplay.engaged = Some((guid, now, health));
                     self.autoplay.thrown = None;
                     false
-                } else if self.dodge.approaching == Some(guid) && self.walking_nearer(guid) {
-                    // Walking up to it, and getting nearer: not stalled.
-                    // The clock ran through the walk, and a target across a
-                    // few of a dungeon's rooms was given up before the first
-                    // spell went at it.
+                } else if self.dodge.approaching == Some(guid) && self.is_walking() {
+                    // Walking up to it: not stalled. The walk's own give-up is the slot's.
                     self.autoplay.engaged = Some((guid, now, health));
                     false
                 } else if nothing_arrived(
@@ -278,10 +280,28 @@ impl Client {
             _ => {
                 self.autoplay.engaged = Some((guid, now, health));
                 self.autoplay.closing = self.autoplay.closing.filter(|(g, _)| *g == guid);
-                self.autoplay.approach_best = None;
                 false
             }
         }
+    }
+
+    /// Walk within a swing of `guid` (`name`) before the swing is sent: `Done` to swing, else the
+    /// tick is spent; one no walk reaches is given up (a_swing_is_not_sent_at_a_creature_no_walk_reaches).
+    fn close_for_swing(&mut self, guid: u32, name: &str, now: Instant) -> Did {
+        self.interrupt_travel("closing on a target");
+        let within = self.attack_range(How::Melee) * WITHIN;
+        let did = self.go(self.step_owner(), Goal::Near { guid, within }, now);
+        match &did {
+            Did::Done => {}
+            Did::Blocked(why) => {
+                tracing::info!("range: no way to {name}: {}", why.what);
+                self.give_up_target(guid, "no way to it", now);
+            }
+            _ => self
+                .autoplay
+                .say(Doing::Fighting, format!("closing on {name}")),
+        }
+        did
     }
 
     /// Whether `guid`, the creature being fought, is not there to fight
@@ -299,13 +319,14 @@ impl Client {
     /// thirty-four kilometres away, "closing" on it by halves.
     ///
     /// Or gone out of the hunting area, and not hitting us: let it go.
-    pub(crate) fn fight_target_gone(&self, guid: u32, underground: bool) -> bool {
-        self.world
+    pub(crate) fn fight_target_gone(&mut self, guid: u32, underground: bool) -> bool {
+        let place = self
+            .world
             .objects
             .get(&guid)
-            .and_then(|o| o.world_pos())
-            .zip(self.my_position())
-            .is_some_and(|(at, me)| at.distance(me) > crate::travel::WALKABLE)
+            .and_then(|o| o.position.as_ref())
+            .map(ac_world::Place::of_position);
+        place.is_some_and(|p| self.player.is_some() && !self.is_in_region(p))
             || !self.area_allows_guid(guid, underground)
     }
 
@@ -341,23 +362,6 @@ impl Client {
             );
         }
         over
-    }
-
-    /// Whether the walk up to `guid` has brought the character nearer to
-    /// it than it has been in this fight (see [`came_nearer`]).
-    fn walking_nearer(&mut self, guid: u32) -> bool {
-        let Some(me) = self.my_position() else {
-            return false;
-        };
-        let Some(at) = self.world.objects.get(&guid).and_then(|o| o.world_pos()) else {
-            return false;
-        };
-        let distance = me.distance(at);
-        if !came_nearer(self.autoplay.approach_best, guid, distance) {
-            return false;
-        }
-        self.autoplay.approach_best = Some((guid, distance));
-        true
     }
 
     /// Nothing is landing on `guid` from where a ranged attacker stands:
