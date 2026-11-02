@@ -1009,6 +1009,26 @@ fn a_journey_stands_while_its_row_stands_aside() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_journey_whose_row_is_passed_over_is_put_down() {
+    // The town run's journey 250 m east, then town runs switched off: the row is weighed worth
+    // nothing, so its journey is put down on the next tick, not held with the body standing.
+    let mut c = crate::testkit::standing_in_the_field(20, 0xA9B4_0019, Vec3::new(84.0, 7.1, 94.0));
+    c.autoplay.config.enabled = true;
+    let me = c.my_position().expect("on its feet");
+    c.autoplay.running = Some("town run");
+    let east = Place::on_map(me.truncate() + Vec2::new(250.0, 0.0));
+    c.frame_at = Instant::now();
+    assert!(c.journey_to(east, ARRIVE), "no way east");
+    c.autoplay.running = None;
+    c.autoplay.config.growth.town_runs = false;
+    c.tick_autoplay(c.frame_at);
+    assert_ne!(c.autoplay.step, Some("town run"));
+    assert!(!c.traveling(), "held for a row that is never run");
+    assert!(c.journey_broken_off(), "put down reads as refused");
+}
+
+#[test]
 fn a_journey_of_no_row_says_travelling() {
     // A script's journey, autoplay on and no row acting: the status says where it goes.
     let mut c = crate::testkit::character_of_level(crate::testkit::no_data(), 20);

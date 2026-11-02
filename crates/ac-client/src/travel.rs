@@ -129,16 +129,15 @@ pub struct Travel {
     owner: Option<Owner>,
     /// A step was left out: the next frame plans the journey again from where the body stands.
     pub(crate) replan_due: bool,
-    /// Its row did not act last tick: the stretch is let go and the body stands, trip and step kept.
+    /// Another row acted last tick: the stretch is let go and the body stands, trip and step kept.
     held: bool,
-    /// Its row ran this tick and stood aside: unless a row takes it over, it ends at the tick's end.
+    /// Its row stood aside or was passed over this tick: unless taken over, put down at its end.
     row_aside: bool,
     /// Why the last journey was refused, for [`Client::set_off`] to answer with.
     why_refused: Option<String>,
-    /// The last journey was broken off by something else the character
-    /// went to do -- a corpse to open, a fight, a dodge -- rather than
-    /// arriving, giving up or being cancelled. Cleared when the next one
-    /// sets off (see [`Client::journey_broken_off`]).
+    /// The last journey was broken off by something else the character went to do -- a corpse,
+    /// a fight, a dodge -- or put down as its row stood aside, rather than arriving, giving up or
+    /// being cancelled. Cleared when the next one sets off (see [`Client::journey_broken_off`]).
     broken_off: bool,
     /// The journey under way is about the character's own hunting
     /// ground -- a roam, a patrol, a follower keeping up with its leader
@@ -537,12 +536,9 @@ impl Client {
         }
     }
 
-    /// Whether the character is between journeys because the last one was
-    /// broken off by something else it went to do: using something, a
-    /// fight, a walk to a corpse. Such a journey was never going to end
-    /// by itself, and whatever set it off can plan it again once the
-    /// character is free. One that arrived, gave up or was cancelled
-    /// answers no.
+    /// Whether the character is between journeys because the last one was broken off by something
+    /// else it went to do (a use, a fight, a corpse) or put down as its row stood aside: whatever
+    /// set it off plans it again once free. One that arrived, gave up or was cancelled answers no.
     pub(crate) fn journey_broken_off(&self) -> bool {
         !self.traveling() && self.travel.broken_off
     }
@@ -599,15 +595,15 @@ impl Client {
         }
     }
 
-    /// `row` ran and stood aside this tick: its journey ends at the tick's end unless taken over.
+    /// `row` stood aside or was passed over this tick: its journey is put down unless taken over.
     pub(crate) fn journey_row_aside(&mut self, row: &'static str) {
         if self.journey_row() == Some(row) {
             self.travel.row_aside = true;
         }
     }
 
-    /// End of a tick (`settle_going`): a row's journey walks on while its row acts, ends once its
-    /// row stood aside, and is held, its stretch let go and the body standing, while another acts.
+    /// End of a tick (`settle_going`): a row's journey walks on while its row acts, is held (its
+    /// stretch let go, the body standing) while another acts, else is put down for its row.
     pub(crate) fn settle_journey(&mut self) {
         let aside = std::mem::take(&mut self.travel.row_aside);
         let ticked = self.autoplay.config.enabled && self.world.player_guid.is_some();
@@ -621,13 +617,14 @@ impl Client {
             }
             return;
         }
-        if aside {
-            tracing::info!("travel: {row} stood aside; its journey ends");
+        // Put down, not refused: its row reads a journey broken off and walks it on when it acts.
+        let Some(acting) = self.autoplay.step.filter(|_| !aside) else {
+            tracing::info!("travel: {row} stood aside; its journey is put down");
             self.end_trip();
+            self.travel.broken_off = true;
             return;
-        }
+        };
         if !self.travel.held {
-            let acting = self.autoplay.step.unwrap_or("nothing");
             tracing::info!("travel: {row}'s journey held while {acting} acts");
         }
         self.travel.held = true;

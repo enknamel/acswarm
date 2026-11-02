@@ -650,6 +650,12 @@ impl Client {
         // opinion can say that a corpse about to rot is worth more than
         // the next fight (see `crate::steps`).
         let mut goals = crate::steps::weigh(self, now);
+        // A goal weighed worth nothing is passed over: its journey is put down as if it stood aside.
+        if let Some(row) = self.journey_row().filter(|r| !goals.has_row(r)) {
+            if crate::steps::named(row).is_some_and(|s| s.layer == crate::steps::Layer::Goal) {
+                self.journey_row_aside(row);
+            }
+        }
         while let Some((step, _)) = goals.next(self, now) {
             self.autoplay.running = Some(step.name);
             let did = step.run(self, now);
