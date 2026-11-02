@@ -248,7 +248,7 @@ impl Recovery {
         self.abandoned = true;
     }
 
-    /// The driver sent the open, at `now`: the next waits [`OPEN_EVERY`].
+    /// The driver sent the open, at `now`: the next waits `OPEN_EVERY`.
     pub fn open_sent(&mut self, now: Instant) {
         self.last_open = Some(now);
     }

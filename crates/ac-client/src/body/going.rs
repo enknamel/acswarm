@@ -14,8 +14,8 @@ use super::server_walk::reached;
 use crate::did::Did;
 use crate::Client;
 
-/// A walk making no progress along any route for this long is given up: the walk clock the loot
-/// walk, counter, fight approach and quartermaster each kept (`take.rs` `REACH_GIVE_UP`).
+/// A walk making no progress along any route for this long is given up: the one give-up, where
+/// the loot walk, counter, explore, fight approach, quartermaster, academy and visit kept clocks.
 pub const GIVE_UP_AFTER: Duration = Duration::from_secs(20);
 
 /// Who asked for a walk: a STEPS row, or something outside the step table.
