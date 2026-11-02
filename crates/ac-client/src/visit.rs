@@ -714,6 +714,53 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn grows_visit_across_the_facility_hub_is_not_taken_exploring() {
+        // The hub reads as a dungeon with nothing in it; with autoplay on, the visit grow set off
+        // walks to the Warden instead of the explore row taking the tick room after room.
+        let u = ac_world::unlocks::all()
+            .iter()
+            .find(|u| u.flag == "fachubeasthamportals_flag")
+            .expect("the Warden's unlock");
+        let exit = ac_world::portals::all()
+            .iter()
+            .find(|p| p.to_cell == 0x8A02_0212)
+            .expect("the Facility Hub portal");
+        let origin = ac_world::landblock_origin(0x8A02_0000);
+        let mut c = crate::testkit::standing_in_the_field(25, 0x8A02_0212, exit.to - origin);
+        c.autoplay.config.enabled = true;
+        let warden = WorldObject {
+            guid: 0x7000_0001,
+            name: u.npc.clone(),
+            item_type: ac_world::item_type::CREATURE,
+            object_desc_flags: ac_world::object_desc_flags::STUCK,
+            position: crate::testkit::placed(0x8A02_01F7, u.at),
+            ..Default::default()
+        };
+        c.world.objects.insert(warden.guid, warden);
+        // The clock the visit's first walk is planned on: offline, planning takes seconds.
+        let t0 = Instant::now();
+        c.autoplay.running = Some(crate::autoplay::growth::GROW_ROW);
+        assert!(c.visit_unlock(u), "no way to the Warden");
+        c.autoplay.running = None;
+        for frame in 0..90 * 20 {
+            let now = t0 + Duration::from_millis(50 * frame);
+            c.tick_autoplay(now);
+            c.tick_player(crate::player::Input::default(), 0.05, now);
+            if c.visiting().is_none() {
+                break;
+            }
+            assert_ne!(
+                c.autoplay.step,
+                Some("explore"),
+                "explored the hub mid-visit"
+            );
+        }
+        let me = c.my_position().expect("standing");
+        assert!(c.visits.finished, "the visit did not finish, at {me}");
+    }
+
+    #[test]
     fn a_portal_visit_goes_to_its_mouth_and_takes_it() {
         let p = ac_world::portals::named("Holtburg Dungeon")
             .into_iter()

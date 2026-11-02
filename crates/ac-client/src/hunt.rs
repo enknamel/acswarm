@@ -236,8 +236,10 @@ impl Client {
         // counter, or between journeys once a corpse or a fight on the way
         // has ended one, a walk back to the area would take the character
         // off its run, and the run's own step, ranked below this one, would
-        // never see it again.
-        if self.autoplay.growth.town_run_under_way() {
+        // never see it again. Nor on another row's visit.
+        if self.autoplay.growth.town_run_under_way()
+            || (self.visiting().is_some() && !self.is_own_visit())
+        {
             return false;
         }
         // Never in the middle of a fight: something hitting the character
