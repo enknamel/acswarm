@@ -98,7 +98,7 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 | hunting ground and area | `autoplay_grow`, `grow_hunt`, `autoplay_watch_the_ground`, `autoplay_keep_to_area` | `autoplay/growth/mod.rs`, `autoplay/growth/hunt.rs`, `hunt.rs` | `growth::State.bound`, `growth::State.quiet_since`, `Fight.area` | ground | autoplay::growth::hunt | ground, area |
 | travel | `travel_to`, `travel_about`, `set_off`, `walk_journey`, `keep_journey`, `settle_journey`, `autoplay_resume_journey` | `travel.rs`, `travel/overland.rs`, `body/going.rs`, `gem_room.rs`, `pathfinder.rs`, `recalls.rs`, `autoplay/journey.rs`, `crates/ac-nav/src/steering.rs` | `Client.travel`, `Client.going`, `Client.steering`, `Autoplay.resume_trip` | travel | travel | journey |
 | visits | `visit_landmark`, `tick_visit`, `visit_person` | `visit.rs` | `Client.visits` | visit | visit | visit |
-| dungeon explore | `autoplay_explore`, `aim_on_floor`, `past_the_door` | `explore.rs`, `crates/ac-nav/src/explore.rs` | `Autoplay.room_bound`, `Autoplay.rooms_seen` | explore | explore | explore |
+| dungeon explore | `autoplay_explore`, `spot_in_room`, `past_the_door` | `explore.rs`, `crates/ac-nav/src/explore.rs` | `Autoplay.room_bound`, `Autoplay.rooms_seen` | explore | explore | explore |
 | dodge | `autoplay_dodge`, `autoplay_approach`, `sidestep`, `threat` | `dodge.rs`, `aim.rs`, `doorway.rs` | `Client.dodge`, `Client.dodge_to` | dodge | dodge | dodge |
 | recovery | `autoplay_recover`, `recovery_view`, `is_dead` | `recovery.rs` | `Autoplay.recovery` | recovery:: | recovery | recovery |
 | academy | `autoplay_academy` | `academy.rs`, `tests/academy_route.rs` | `Autoplay.academy`, `Autoplay.academy_corpse`, `Autoplay.academy_armed` | academy | academy | academy |

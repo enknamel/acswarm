@@ -701,20 +701,31 @@ fn the_way_into_a_corridor_is_through_its_door_not_into_its_wall() {
         n.x.abs() < 0.05 && n.y.abs() > 0.99,
         "through the wall along y: {n:?}"
     );
-    // Where the old rule aimed there is no floor, and nor is there
-    // straight through: the corridor beyond runs north-east from its
-    // door. The floor rule turns the aim into it.
+    // No floor along the diagonal approach, nor straight through: the corridor beyond runs
+    // north-east from its door. The walk ends on the corridor's own floor nearest the aim.
     let coll = assets.block_collision(DUNGEON).unwrap();
     let has_floor = |p: Vec3| coll.world.floor_at(p, 0.6, 1.5).is_some();
     assert!(!has_floor(Vec3::new(200.32, 47_178.85, 0.1)));
     let straight = Vec3::new(202.0, 47_179.5, 0.1);
     assert!(!has_floor(straight));
-    let aim = ac_client::explore::aim_on_floor(JAMB_SILL, straight, |p| {
-        coll.world.floor_at(p, 0.6, 1.5).map(|f| f.0)
-    });
+    let cap = ac_scene::collision::Capsule::default();
+    let mut area = ac_scene::navarea::Area::build(&assets, &[DUNGEON], &cap, DUNGEON).unwrap();
+    area.build_everything();
+    let from = Place {
+        at: floor(&assets, JAMB_215),
+        cell: JAMB_CELL,
+    };
+    let around = Place {
+        at: straight,
+        cell: DUNGEON,
+    };
+    let spots = ac_nav::routing::standable_near(&area, from, around, 2.5).expect("built");
+    let aim = ac_client::explore::spot_in_room(&spots, JAMB_CELL, straight)
+        .expect("a spot in the corridor")
+        .at;
     assert!(has_floor(aim), "{aim:?}");
     assert!(
-        aim.x > 203.0 && aim.y > 47_178.0,
+        aim.x > JAMB_SILL.x && aim.y > JAMB_SILL.y,
         "into the corridor: {aim:?}"
     );
     // And from the jamb, a walk to it arrives.
