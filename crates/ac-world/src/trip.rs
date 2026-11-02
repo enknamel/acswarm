@@ -38,8 +38,6 @@ pub const RECALL_SECONDS: f32 = 10.0;
 pub const WALK_REACH: f32 = 1200.0;
 /// Portals this far from a spot are candidates for the next hop.
 pub const PORTAL_REACH: f32 = 900.0;
-/// Close enough to the goal to stop (metres).
-pub const ARRIVED: f32 = 15.0;
 /// A walk refused from a spot is refused from a node this near it (metres, flat): where a portal
 /// leaves the character is counted as arrived within 30 m (`ac-client` `travel.rs`).
 const NO_WALK_NEAR: f32 = 30.0;
