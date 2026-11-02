@@ -100,6 +100,17 @@ pub fn plan_first(c: &mut Client, t: &Trial) -> (Result<usize, NoWay>, Duration)
 
 /// Run one trial on `c`, already standing at the trial's start.
 pub fn run_on(c: &mut Client, t: &Trial) -> Outcome {
+    run_with_waits(c, t).0
+}
+
+/// [`run_on`], and the frames the steering stood waiting for the planner to build.
+pub fn run_with_waits(c: &mut Client, t: &Trial) -> (Outcome, u32) {
+    let mut waits = 0;
+    let o = walk(c, t, &mut waits);
+    (o, waits)
+}
+
+fn walk(c: &mut Client, t: &Trial, waits: &mut u32) -> Outcome {
     let dt = 1.0 / HZ;
     let t0 = Instant::now();
     let start = c.my_position().unwrap_or(t.start);
@@ -132,6 +143,7 @@ pub fn run_on(c: &mut Client, t: &Trial) -> Outcome {
             }
         }
         c.tick_player(crate::player::Input::default(), dt, now);
+        *waits += u32::from(c.steering.is_waiting());
         c.pathfinder.settle(PLANNER_WAIT);
         let Some(me) = c.my_position() else {
             return Outcome::GaveUp {

@@ -5,7 +5,7 @@ use crate::{pathfinder, player};
 /// The client answering what the steering asks of the world.
 ///
 /// The steering itself is in `ac-nav` and knows nothing of packets,
-/// physics or landblocks; this is the half that does. Seven questions,
+/// physics or landblocks; this is the half that does. Eight questions,
 /// which in a test are answered with a few rectangles and here with
 /// the character's own collision and the region planner.
 pub struct Standing<'a> {
@@ -93,5 +93,9 @@ impl ac_nav::Ground for Standing<'_> {
 
     fn take_wide(&mut self, from: glam::Vec3, to: glam::Vec3) -> Option<Vec<glam::Vec3>> {
         self.wide.take(from, to)
+    }
+
+    fn is_planning(&self) -> bool {
+        self.wide.is_building()
     }
 }

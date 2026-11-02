@@ -3,7 +3,8 @@
 //! each ended and what the planner answered first; `ROUTE_TRIALS=name` runs those named so.
 
 use ac_client::walk_trial::{
-    named, plan_first, random_trials, run, run_on, standing_at, Outcome, Spread, Trial,
+    named, plan_first, random_trials, run, run_on, run_with_waits, standing_at, Outcome, Spread,
+    Trial,
 };
 use ac_nav::routing::Planned;
 use ac_world::Place;
@@ -130,13 +131,15 @@ fn report(trials: &[Trial]) -> Vec<(String, Outcome)> {
     let only = std::env::var("ROUTE_TRIALS").ok();
     let mut out = Vec::new();
     let mut agree = [0usize; 4];
+    let mut waited = 0;
     for t in trials
         .iter()
         .filter(|t| only.as_ref().is_none_or(|o| t.name.contains(o.as_str())))
     {
         let mut c = standing_at(LEVEL, t);
         let (planned, took) = plan_first(&mut c, t);
-        let o = run_on(&mut c, t);
+        let (o, waits) = run_with_waits(&mut c, t);
+        waited += waits;
         let plan = match &planned {
             Ok(n) => format!("route {n}"),
             Err(why) => format!("no way {why:?}"),
@@ -144,7 +147,7 @@ fn report(trials: &[Trial]) -> Vec<(String, Outcome)> {
         let arrived = o.kind() == "arrived";
         agree[usize::from(planned.is_err()) * 2 + usize::from(!arrived)] += 1;
         println!(
-            "TRIAL {:<44} {:>6.1} m  {:<13} PLAN {plan} {:.0} ms  {:?}",
+            "TRIAL {:<44} {:>6.1} m  {:<13} PLAN {plan} {:.0} ms  WAITED {waits}  {:?}",
             t.name,
             t.start.distance(t.goal),
             o.kind(),
@@ -166,6 +169,7 @@ fn report(trials: &[Trial]) -> Vec<(String, Outcome)> {
         "AGREE planned+arrived {}, planned+failed {}, no-way+arrived {}, no-way+failed {}",
         agree[0], agree[1], agree[2], agree[3]
     );
+    println!("WAITED {waited} frames standing for the planner to build");
     out
 }
 

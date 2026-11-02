@@ -127,6 +127,10 @@ pub trait Ground {
     fn ask_wide(&mut self, from: Vec3, to: Vec3, block: u32, goal_cell: u32, within: f32);
     /// A neighbourhood route that has come back, if one has.
     fn take_wide(&mut self, from: Vec3, to: Vec3) -> Option<Vec<Vec3>>;
+    /// The last `find_path` is not answered yet: what it plans on is still being built.
+    fn is_planning(&self) -> bool {
+        false
+    }
 }
 
 /// Where to head this frame.
@@ -158,6 +162,8 @@ pub struct Steering {
     trail: VecDeque<Vec3>,
     /// The route is the way back along the trail (see [`Steering::walked`]): kept until walked.
     retracing: bool,
+    /// The last steer stood still for the planner (see [`Ground::is_planning`]).
+    waiting: bool,
 }
 
 impl Steering {
@@ -165,6 +171,11 @@ impl Steering {
     /// since that walk will not improve and a recall, portal or other shop beats a timeout.
     pub fn no_way(&self) -> bool {
         self.no_way
+    }
+
+    /// Whether the last steer stood still while the planner built what the way is planned on.
+    pub fn is_waiting(&self) -> bool {
+        self.waiting
     }
 }
 
@@ -190,6 +201,7 @@ impl Steering {
             no_way: false,
             trail: VecDeque::new(),
             retracing: false,
+            waiting: false,
         }
     }
 
@@ -269,6 +281,7 @@ impl Steering {
         stop: f32,
         now: Instant,
     ) -> Aim {
+        self.waiting = false;
         let me = ground.at();
         let block = ground.block();
         let far_goal = goal;
@@ -384,6 +397,16 @@ impl Steering {
                     if let Some(r) = self.route.as_mut() {
                         r.planned = now;
                     }
+                }
+                None if ground.is_planning() => {
+                    // Not known yet is not "no way": stand until the planner answers, never leaning on
+                    // the line meanwhile (a_blocked_line_waits_for_the_planner_rather_than_leaning).
+                    tracing::debug!("route: the way to {goal:?} is still being planned; waiting");
+                    self.route = None;
+                    self.route_is_wide = false;
+                    self.no_way = false;
+                    self.waiting = true;
+                    return Aim::Go(me);
                 }
                 None => {
                     // No path and a blocked line, and leaning on it has already got nowhere: back the
@@ -614,6 +637,8 @@ mod tests {
         /// What the neighbourhood planner answers with.
         wide: Option<Vec<Vec3>>,
         asked_wide: bool,
+        /// The graph's answer is still being built.
+        planning: bool,
     }
 
     impl Ground for Fake {
@@ -651,6 +676,9 @@ mod tests {
         fn take_wide(&mut self, _f: Vec3, _t: Vec3) -> Option<Vec<Vec3>> {
             self.wide.take()
         }
+        fn is_planning(&self) -> bool {
+            self.planning
+        }
     }
 
     fn near(a: Vec3, b: Vec3) -> bool {
@@ -687,6 +715,35 @@ mod tests {
             Aim::Go(aim) => assert!(!near(aim, goal), "walked at the goal through a wall"),
             Aim::NoWay => panic!("refused a walk it had a route for"),
         }
+    }
+
+    #[test]
+    fn a_blocked_line_waits_for_the_planner_rather_than_leaning() {
+        let t0 = Instant::now();
+        let mut st = Steering::new(t0);
+        let me = Vec3::new(10.0, 10.0, 0.0);
+        let corner = Vec3::new(10.0, 20.0, 0.0);
+        let goal = Vec3::new(20.0, 20.0, 0.0);
+        let mut g = Fake {
+            at: me,
+            blocked: true,
+            planning: true,
+            ..Default::default()
+        };
+        match st.steer(&mut g, goal, 0, 0.5, t0) {
+            Aim::Go(aim) => assert!(near(aim, me), "leaned at {aim:?} with no plan"),
+            Aim::NoWay => panic!("not known yet was taken for no way"),
+        }
+        assert!(st.is_waiting() && !st.no_way());
+        // Answered, the route is walked.
+        g.planning = false;
+        g.path = Some(vec![corner, goal]);
+        let later = t0 + Duration::from_secs(1);
+        match st.steer(&mut g, goal, 0, 0.5, later) {
+            Aim::Go(aim) => assert!(near(aim, corner), "{aim:?}"),
+            Aim::NoWay => panic!("refused a walk it had a route for"),
+        }
+        assert!(!st.is_waiting());
     }
 
     #[test]

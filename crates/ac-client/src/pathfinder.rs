@@ -183,6 +183,8 @@ pub struct Pathfinder {
     builds_itself: bool,
     /// The assets a handle that builds for itself builds with, opened on first use.
     own: Option<Assets>,
+    /// The last plan answered `Building`.
+    building: bool,
 }
 
 impl Pathfinder {
@@ -201,6 +203,7 @@ impl Pathfinder {
             asked: None,
             builds_itself: false,
             own: None,
+            building: false,
         }
     }
 
@@ -214,6 +217,17 @@ impl Pathfinder {
     /// The route from `from` to within `within` (metres, 3D) of `goal` for a body of `capsule`, on
     /// what is built now; `Building` when the area or its chunks are not, which are then queued.
     pub fn plan(&mut self, from: Place, goal: Place, within: f32, capsule: Capsule) -> Planned {
+        let planned = self.plan_now(from, goal, within, capsule);
+        self.building = matches!(planned, Planned::Building(_));
+        planned
+    }
+
+    /// Whether the last [`plan`](Self::plan) answered `Building`: no answer yet, not "no way".
+    pub fn is_building(&self) -> bool {
+        self.building
+    }
+
+    fn plan_now(&mut self, from: Place, goal: Place, within: f32, capsule: Capsule) -> Planned {
         let (mut tries, mut held) = (0, None);
         loop {
             let region = held.take().or_else(|| region_for(from, goal, &capsule));
