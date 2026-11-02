@@ -31,6 +31,7 @@ pub mod dodge;
 pub mod doorway;
 pub mod emotes;
 pub mod explore;
+mod gem_room;
 // The vocabulary every system speaks now lives below this crate, in
 // `ac-agent`. Re-exported under its old names so that nothing which
 // says `crate::did` or `crate::pack` has to care where it went.
