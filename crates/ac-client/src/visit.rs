@@ -11,7 +11,7 @@
 //! A visit carries on from there. Far away, the journey is made the way
 //! any journey is (portals, recalls, gems). Within walking distance the
 //! last stretch goes to the steering with her real height
-//! (`Client::head_toward`), which takes the character through the
+//! (`Client::go` for `Owner::Visit`), which takes the character through the
 //! doorway and up the stairs. Only once the character stands on her
 //! floor, close by, is she used.
 //!
@@ -37,8 +37,9 @@ use ac_world::portals::Portal;
 use ac_world::WorldObject;
 use glam::Vec3;
 
+use crate::did::Did;
 use crate::travel::WALKABLE;
-use crate::{Client, Owner, SAME_FLOOR};
+use crate::{Client, Goal, Owner, SAME_FLOOR};
 
 /// Within this far of the person (metres, in three dimensions) and on
 /// their floor, the use is sent. Inside the server's own reach for
@@ -47,15 +48,6 @@ pub const REACH: f32 = 3.0;
 /// How close to the person the walk stops (flat): well inside
 /// [`REACH`], so arriving is arriving in reach.
 const STOP: f32 = 1.5;
-/// A visit that has come no nearer in this long is given up. A journey
-/// under way does not count against it: travel keeps its own clocks for
-/// a portal that will not take the character, a recall that fizzles and
-/// a step that goes nowhere, each ending in another plan or in giving
-/// up, and a second coarser clock over them would cut an honest walk to
-/// a distant portal short.
-pub const GIVE_UP: Duration = Duration::from_secs(60);
-/// Coming this much nearer counts as progress.
-const PROGRESS: f32 = 1.0;
 /// Someone found by name must stand this near where the visit is bound
 /// to be the one it is bound for: the gazetteer names the same
 /// shopkeeper in more than one town.
@@ -111,9 +103,6 @@ pub struct Visit {
     /// The goal last handed to the steering, to tell our walk from
     /// someone else's.
     walking: Option<Vec3>,
-    /// Nearest the character has come, and when that last improved.
-    best: f32,
-    since: Option<Instant>,
 }
 
 impl Visit {
@@ -164,24 +153,7 @@ impl Visit {
             arrived_at: None,
             journeyed: false,
             walking: None,
-            best: f32::INFINITY,
-            since: None,
         }
-    }
-
-    /// Whether the visit has come no nearer (`away`, metres) for
-    /// [`GIVE_UP`]. A journey under way is progress: see [`GIVE_UP`].
-    fn stalled(&mut self, away: f32, traveling: bool, now: Instant) -> bool {
-        if traveling {
-            self.best = f32::INFINITY;
-            self.since = Some(now);
-            return false;
-        }
-        if away < self.best - PROGRESS {
-            self.best = away;
-            self.since = Some(now);
-        }
-        now.duration_since(*self.since.get_or_insert(now)) > GIVE_UP
     }
 }
 
@@ -365,10 +337,8 @@ impl Client {
     /// visit that is gone would keep pulling the character along with
     /// nothing to show for it and no Cancel to stop it.
     fn let_go_of(&mut self, v: &Visit) {
-        let ours = v.walking.is_some();
-        if ours && self.going.as_ref().is_some_and(|g| g.owner == Owner::Visit) {
-            self.going = None;
-            self.steering.reset();
+        if v.walking.is_some() {
+            self.stop_going(Some(Owner::Visit), "the visit ends");
         }
     }
 
@@ -402,15 +372,6 @@ impl Client {
             v.cell = cell;
         }
         let traveling = self.traveling();
-        if v.stalled(me.distance(v.goal), traveling, now) {
-            tracing::warn!(
-                "visit: no nearer to {} in {GIVE_UP:?}; giving up ({:.1} m away)",
-                v.label,
-                me.distance(v.goal)
-            );
-            self.let_go_of(&v);
-            return;
-        }
         match next(me, v.goal, traveling, v.journeyed) {
             Next::OnTheWay => {}
             Next::Journey => {
@@ -432,18 +393,30 @@ impl Client {
                     tracing::info!("visit: {} dropped: something else is steering", v.label);
                     return;
                 }
-                // Walked afresh when nothing is (a sidestep out of a
-                // spell's way lets go of the walk) or when the person
-                // has moved.
-                let moved = v.walking.is_none_or(|w| w.distance(v.goal) > 0.5);
-                if self.going.is_none() || moved {
-                    let did = self.head_toward(v.goal, STOP);
-                    if !did.fine() {
-                        tracing::warn!("visit: cannot walk to {}", v.label);
+                // Asked every frame: the same goal plans nothing, and a person who moved is followed.
+                let goal = Goal::At {
+                    place: ac_world::Place {
+                        at: v.goal,
+                        cell: v.cell,
+                    },
+                    within: STOP,
+                };
+                v.walking = Some(v.goal);
+                match self.go(Owner::Visit, goal, now) {
+                    Did::Blocked(why) => {
+                        tracing::warn!("visit: no way to {}: {}", v.label, why.what);
                         self.let_go_of(&v);
                         return;
                     }
-                    v.walking = Some(v.goal);
+                    Did::Waiting(why) => {
+                        tracing::info!("visit: {} dropped: {}", v.label, why.what);
+                        return;
+                    }
+                    Did::Done => {
+                        self.finish_visit(v);
+                        return;
+                    }
+                    _ => {}
                 }
             }
             Next::Arrived => {
@@ -674,24 +647,30 @@ mod tests {
     }
 
     #[test]
-    fn a_visit_that_comes_no_nearer_is_given_up() {
-        let t0 = Instant::now();
-        let s = Duration::from_secs;
-        let mut v = Visit::landmark(&cindrue());
-        assert!(!v.stalled(50.0, false, t0));
-        // Nearer: the clock starts again.
-        assert!(!v.stalled(30.0, false, t0 + s(50)));
-        assert!(!v.stalled(30.0, false, t0 + s(100)));
-        // A pace to and fro is not progress.
-        assert!(!v.stalled(29.5, false, t0 + s(105)));
-        assert!(v.stalled(29.5, false, t0 + s(111)));
-        // A journey under way is never stalled, and its end starts afresh.
-        let mut v = Visit::landmark(&cindrue());
-        assert!(!v.stalled(3000.0, true, t0));
-        assert!(!v.stalled(3000.0, true, t0 + s(500)));
-        assert!(!v.stalled(3000.0, false, t0 + s(501)));
-        assert!(!v.stalled(3000.0, false, t0 + s(560)));
-        assert!(v.stalled(3000.0, false, t0 + s(562)));
+    #[ignore = "needs AC_DATA_DIR"]
+    fn a_visit_taken_by_a_step_is_dropped() {
+        // A visit walks its last stretch on the Holtburg field; a step's walk takes the slot from
+        // it: the visit is over, and the frames after it leave the step's walk alone.
+        let mut c = crate::testkit::standing_at(0xA9B4_0019, Vec3::new(84.0, 7.1, 94.0));
+        c.world.player_guid = Some(crate::testkit::ME);
+        let me = c.my_position().expect("standing");
+        let spot = me + Vec3::new(30.0, 0.0, 0.0);
+        let v = Visit::new("a spot".into(), spot, c.place_at(spot).cell, None, None);
+        assert!(c.start_visit(v), "no visit");
+        assert_eq!(c.going.as_ref().map(|g| g.owner), Some(Owner::Visit));
+        let now = Instant::now();
+        let other = Goal::At {
+            place: c.place_at(me + Vec3::new(0.0, 20.0, 0.0)),
+            within: 1.0,
+        };
+        assert!(c.go(Owner::Step("loot"), other, now).acting());
+        assert_eq!(c.visiting(), None, "the visit goes on");
+        c.tick_visit(now + Duration::from_millis(50));
+        assert_eq!(
+            c.going.as_ref().map(|g| g.owner),
+            Some(Owner::Step("loot")),
+            "the visit took the walk back"
+        );
     }
 
     #[test]

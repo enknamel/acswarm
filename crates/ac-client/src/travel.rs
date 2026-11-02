@@ -245,11 +245,6 @@ impl Client {
         self.head_as(owner, goal, stop)
     }
 
-    /// [`head_for`](Self::head_for) for a visit's own last stretch, which it does not end.
-    pub(crate) fn head_toward(&mut self, goal: glam::Vec3, stop: f32) -> crate::did::Did {
-        self.head_as(crate::Owner::Visit, goal, stop)
-    }
-
     /// `go` to the place at `goal`, walking on through a walk taken and an arrival, as head_for did.
     fn head_as(&mut self, owner: crate::Owner, goal: glam::Vec3, stop: f32) -> crate::did::Did {
         use crate::did::Did;
