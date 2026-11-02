@@ -775,6 +775,25 @@ pub fn window_stocked_as(vendor: u32, name: &str) -> ac_world::object::ApproachV
     window
 }
 
+/// A character of `level` on the Tusker ground's floor (0x5C49), and a Female Tusker's ledge 6 m
+/// up the wall above it that no walk reaches (route harness `5C49 Tusker on a ledge over the room`).
+pub fn under_the_ledge(level: i32) -> (Client, ac_world::Place) {
+    let t = crate::walk_trial::named(
+        level,
+        "5C49 Tusker on a ledge over the room",
+        Vec3::new(17_744.8, 13_910.7, 0.0),
+        0x5C49_012A,
+        Vec3::new(17_754.0, 13_929.0, 6.0),
+    );
+    let mut c = crate::walk_trial::standing_at(level, &t);
+    c.world.player_guid = Some(ME);
+    let ledge = ac_world::Place {
+        at: t.goal,
+        cell: t.goal_cell,
+    };
+    (c, ledge)
+}
+
 /// A counter in view at `at`.
 pub fn a_counter(c: &mut Client, guid: u32, name: &str, at: glam::Vec3) {
     let mut o = ac_world::WorldObject {

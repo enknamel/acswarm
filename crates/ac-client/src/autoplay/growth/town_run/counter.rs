@@ -5,12 +5,13 @@ use glam::Vec2;
 use super::vendor::spot;
 use super::{
     Errand, Phase, Run, Turn, BUSY_ASKS, BUSY_REASK, COUNTER_REACH, SELLING_TIMEOUT, SETTLE,
-    STOPS_PER_RUN, VENDOR_OPEN_TIMEOUT, VENDOR_REACH, WALK_UP_LIMIT, WALK_UP_PROGRESS,
+    STOPS_PER_RUN, VENDOR_OPEN_TIMEOUT, VENDOR_REACH,
 };
 use crate::autoplay::growth::road::{on_the_way, OnTheWay, WALK_ON_EVERY};
 use crate::autoplay::growth::{a_few, about, Growth};
 use crate::autoplay::Doing;
-use crate::Client;
+use crate::did::Did;
+use crate::{Client, Goal};
 
 /// How long a counter whose window bought none of the pack is left out of the choice: a shelf
 /// list does not change between runs, and runs follow each other with no wait.
@@ -153,10 +154,9 @@ impl Client {
                 let lately = run
                     .walked_on
                     .is_some_and(|t| now.duration_since(t) < WALK_ON_EVERY);
-                // Once walking up to the counter, the walk-up is the judge of getting there: the
-                // way up to one on a deck leaves its spot far behind round by the ramp.
+                // Once walking up to the counter, the walk-up is the judge of getting there.
                 match on_the_way(
-                    away <= VENDOR_REACH || run.walking_up.is_some(),
+                    away <= VENDOR_REACH || run.walking_up,
                     self.journey_broken_off(),
                     busy,
                     lately,
@@ -219,12 +219,19 @@ impl Client {
                             // Height and all: a counter on the deck above is not in reach.
                             let me3 = self.my_position().unwrap_or(spot);
                             if spot.distance(me3) > COUNTER_REACH {
-                                let (since, from) = *run.walking_up.get_or_insert((now, me3));
-                                if me3.distance(from) > WALK_UP_PROGRESS {
-                                    run.walking_up = Some((now, me3));
-                                } else if now.saturating_duration_since(since) > WALK_UP_LIMIT {
-                                    self.autoplay
-                                        .note(format!("could not walk up to {}", run.vendor), now);
+                                let goal = Goal::Near {
+                                    guid,
+                                    within: COUNTER_REACH / 2.0,
+                                };
+                                let did = self.go(self.step_owner(), goal, now);
+                                if let Did::Blocked(why) = &did {
+                                    self.autoplay.note(
+                                        format!(
+                                            "could not walk up to {}: {}",
+                                            run.vendor, why.what
+                                        ),
+                                        now,
+                                    );
                                     return Turn::after_stop(self.grow_run_next(
                                         run,
                                         now,
@@ -232,11 +239,15 @@ impl Client {
                                         Some("could not be got to"),
                                     ));
                                 }
-                                self.head_for(spot, COUNTER_REACH / 2.0, &run.vendor);
-                                self.autoplay
-                                    .say(Doing::Shopping, format!("walking up to {}", run.vendor));
-                                self.autoplay.growth.run = Some(run);
-                                return Turn::Acted;
+                                if did != Did::Done {
+                                    run.walking_up = true;
+                                    self.autoplay.say(
+                                        Doing::Shopping,
+                                        format!("walking up to {}", run.vendor),
+                                    );
+                                    self.autoplay.growth.run = Some(run);
+                                    return Turn::Acted;
+                                }
                             }
                         }
                         // A cast of ours still in the air -- a
@@ -260,9 +271,7 @@ impl Client {
                             self.autoplay.growth.run = Some(run);
                             return Turn::Waited;
                         }
-                        if self.going.take().is_some() {
-                            self.steering.reset();
-                        }
+                        self.stop_going(Some(self.step_owner()), "at the counter");
                         self.use_object(guid);
                         run.phase = Phase::Opening {
                             guid,
@@ -664,7 +673,7 @@ impl Client {
                         visited,
                         walked_on: None,
                         walk_limit: self.planned_walk_limit(),
-                        walking_up: None,
+                        walking_up: false,
                     });
                     return true;
                 }

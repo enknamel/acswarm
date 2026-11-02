@@ -747,8 +747,7 @@ fn a_counter_reached_after_the_walks_clock_ran_out_is_still_asked() {
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
 fn a_counter_with_no_way_up_to_it_is_given_up() {
-    // Scn Mage stood 480 s 4 m from Archmage Asaina al-Arqis in Zaikhal: the walk up had no way to
-    // her, and nothing ended it.
+    // A walk up that gets nowhere is given up by the slot's one clock, and the run goes on.
     let now = Instant::now();
     let mut c = standing_at(0xA9B4_0019, glam::Vec3::new(84.0, 7.1, 94.0));
     c.world.player_guid = Some(0x5000_0001);
@@ -766,12 +765,40 @@ fn a_counter_with_no_way_up_to_it_is_given_up() {
         .local = glam::Vec3::new(89.0, 7.1, 94.0);
     assert_eq!(c.grow_run_step(now, &cfg), Turn::Acted);
     assert_eq!(c.autoplay.status, "walking up to Archmage Cindrue");
-    let later = now + WALK_UP_LIMIT + Duration::from_secs(1);
+    let later = now + crate::GIVE_UP_AFTER + Duration::from_secs(1);
     c.grow_run_step(later, &cfg);
     assert_ne!(
         c.autoplay.growth.run.as_ref().map(|r| r.vendor.as_str()),
         Some("Archmage Cindrue"),
         "still walking up to her"
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_counter_no_walk_reaches_is_passed_at_once() {
+    // A counter up on the Tusker ground's ledge, which no walk reaches: refused on the first ask,
+    // and the run goes on to its next counter in the same tick.
+    let now = Instant::now();
+    let (mut c, ledge) = crate::testkit::under_the_ledge(20);
+    let cfg = Growth::default();
+    let vendor = 0x7a9b_4099;
+    crate::testkit::a_counter(&mut c, vendor, "Ledge Trader", ledge.at);
+    c.world.objects.get_mut(&vendor).unwrap().position =
+        crate::testkit::placed(ledge.cell, ledge.at);
+    let mut run = crate::autoplay::growth::tests::run_to(ledge.at.truncate(), now);
+    run.vendor = "Ledge Trader".into();
+    c.autoplay.growth.run = Some(run);
+    c.grow_run_step(now, &cfg);
+    assert_ne!(
+        c.autoplay.growth.run.as_ref().map(|r| r.vendor.as_str()),
+        Some("Ledge Trader"),
+        "still on the walk up: {}",
+        c.autoplay.status
+    );
+    assert!(
+        c.walk_frame.is_none() && !c.is_walking(),
+        "walked at the ledge"
     );
 }
 
