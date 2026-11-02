@@ -244,6 +244,15 @@ impl Client {
             }
             return false;
         }
+        // Its own visit (a Warden for a portal flag) is its errand: ticked here, its journey walks.
+        if self.is_own_visit() {
+            self.tick_visit(now);
+            if let Some(to) = self.visiting().map(str::to_string) {
+                self.autoplay
+                    .say(Doing::Traveling, format!("to the {to} for a portal"));
+                return true;
+            }
+        }
         let level = self.world.stats.level;
         if level <= 0 {
             return false;
