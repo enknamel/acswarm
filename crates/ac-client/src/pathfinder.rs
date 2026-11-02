@@ -23,7 +23,8 @@ const ASK_EVERY: Duration = Duration::from_millis(1500);
 const ANSWER_REACH: f32 = 15.0;
 /// An answer to a goal this far (metres) from the one we now want is not ours.
 const ANSWER_GOAL: f32 = 3.0;
-/// Areas the process keeps, most recently used last; each is nine blocks of collision, about 15 MB.
+/// Areas the process keeps, most recently used last, beyond those a session stands in (never
+/// dropped); each is nine blocks of collision, about 15 MB.
 const AREAS: usize = 4;
 /// Jobs a handle that builds for itself runs for one answer before it says `Building`.
 const OWN_TRIES: usize = 4;
@@ -185,6 +186,8 @@ pub struct Pathfinder {
     own: Option<Assets>,
     /// The last plan answered `Building`.
     building: bool,
+    /// The area our last plan or ask was on, held so no other session's area pushes it out.
+    region: Option<Arc<Region>>,
 }
 
 impl Pathfinder {
@@ -204,6 +207,7 @@ impl Pathfinder {
             builds_itself: false,
             own: None,
             building: false,
+            region: None,
         }
     }
 
@@ -231,6 +235,7 @@ impl Pathfinder {
         let (mut tries, mut held) = (0, None);
         loop {
             let region = held.take().or_else(|| region_for(from, goal, &capsule));
+            self.hold(&region);
             let planned = match &region {
                 Some(r) => self.read(r).map_or(Planned::Building(Vec::new()), |area| {
                     routing::plan_built(&area, from, goal, within)
@@ -267,6 +272,7 @@ impl Pathfinder {
         let (mut tries, mut held) = (0, None);
         loop {
             let region = held.take().or_else(|| region_for(from, around, &capsule));
+            self.hold(&region);
             let looked = match &region {
                 Some(r) => self
                     .read(r)
@@ -291,6 +297,13 @@ impl Pathfinder {
                 Done::Here(r) => held = Some(r),
                 Done::Queued | Done::Failed => return Vec::new(),
             }
+        }
+    }
+
+    /// Keep `region` as the one this session is on, if any.
+    fn hold(&mut self, region: &Option<Arc<Region>>) {
+        if let Some(r) = region {
+            self.region = Some(r.clone());
         }
     }
 
@@ -412,7 +425,9 @@ impl Pathfinder {
             return;
         }
         let reply = Some(self.answers.0.clone());
-        let number = match region_for(from, to, &capsule) {
+        let found = region_for(from, to, &capsule);
+        self.hold(&found);
+        let number = match found {
             Some(region) => {
                 self.send_now(|w| Job::Build(region, w), from, to, within, capsule, reply)
             }
@@ -636,11 +651,20 @@ fn assemble(assets: &Assets, walk: &Walk) -> Option<Arc<Region>> {
         area: RwLock::new(area),
     });
     let mut regions = REGIONS.lock().unwrap_or_else(|e| e.into_inner());
-    while regions.len() >= AREAS {
-        regions.remove(0);
-    }
+    make_room(&mut regions);
     regions.push(region.clone());
     Some(region)
+}
+
+/// Drop the areas used longest ago until fewer than [`AREAS`] are kept, skipping any a session or
+/// a job still holds: planned cold again, every walk there would stand waiting on the builder.
+fn make_room<T>(kept: &mut Vec<Arc<T>>) {
+    while kept.len() >= AREAS {
+        let Some(i) = kept.iter().position(|r| Arc::strong_count(r) == 1) else {
+            return;
+        };
+        kept.remove(i);
+    }
 }
 
 /// Build chunk `c` of a region: made under a read lock, so frames plan on meanwhile, and added
@@ -718,6 +742,22 @@ mod tests {
     /// Somewhere round the bookcases, in the next cell.
     fn round_them() -> Place {
         there(Vec3::new(36.0, -54.0, 0.0), 0x01F6_0233)
+    }
+
+    #[test]
+    fn an_area_a_session_holds_is_never_pushed_out() {
+        let held: Vec<Arc<usize>> = (0..AREAS + 2).map(Arc::new).collect();
+        let mut kept = held.clone();
+        make_room(&mut kept);
+        assert_eq!(kept.len(), AREAS + 2, "all held, none dropped");
+        let mut kept: Vec<Arc<usize>> = (0..AREAS).map(Arc::new).collect();
+        let oldest = kept[0].clone();
+        make_room(&mut kept);
+        let left: Vec<usize> = kept.iter().map(|a| **a).collect();
+        let mut want: Vec<usize> = (2..AREAS).collect();
+        want.insert(0, 0);
+        assert_eq!(left, want, "the oldest held kept, the next went");
+        drop(oldest);
     }
 
     #[test]
