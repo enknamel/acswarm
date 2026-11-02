@@ -730,23 +730,36 @@ fn a_swing_in_the_air_does_not_hold_the_ask() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
-fn a_counter_reached_after_the_walks_clock_ran_out_is_still_asked() {
-    // The walk's clock was read before the arrival: a character standing at
-    // the counter four minutes and a second in gave it up as too long a walk.
+fn a_counter_no_journey_reaches_is_passed_at_once() {
+    // On the way to a counter, the journey's last walk (up to the Tusker ledge, which no walk
+    // reaches) is refused on its first frame: the run goes on past it on the next turn, with no
+    // walk clock.
     let now = Instant::now();
-    let mut c = standing_at(0xA9B4_0019, glam::Vec3::new(84.0, 7.1, 94.0));
-    c.world.player_guid = Some(0x5000_0001);
+    let (mut c, ledge) = crate::testkit::under_the_ledge(20);
     let cfg = Growth::default();
-    a_run_at_cindrue(&mut c, Phase::Going, now);
-    let late =
-        now + crate::autoplay::growth::road::WALK_TIMEOUT + std::time::Duration::from_secs(1);
-    assert_eq!(c.grow_run_step(late, &cfg), Turn::Acted);
-    assert!(
-        matches!(
-            c.autoplay.growth.run.as_ref().unwrap().phase,
-            Phase::Opening { .. }
-        ),
-        "gave the counter up while standing at it"
+    let far = ledge.at.truncate() + Vec2::new(2_000.0, 0.0);
+    let mut run = crate::autoplay::growth::tests::run_to(far, now);
+    run.vendor = "Far Trader".into();
+    c.autoplay.growth.run = Some(run);
+    let trip = ac_world::trip::Trip {
+        steps: vec![ac_world::trip::Step::Walk(ledge)],
+        seconds: 5.0,
+    };
+    let goal = crate::Goal::At {
+        place: ledge,
+        within: 1.5,
+    };
+    c.start_trip(crate::Owner::Step("town run"), trip, goal);
+    let walked = c.walk_journey(now);
+    assert!(matches!(walked, Some(Did::Blocked(_))), "{walked:?}");
+    assert!(!c.traveling(), "the journey was not refused");
+    c.autoplay.running = Some("town run");
+    c.grow_run_step(now, &cfg);
+    assert_ne!(
+        c.autoplay.growth.run.as_ref().map(|r| r.vendor.as_str()),
+        Some("Far Trader"),
+        "still on the way: {}",
+        c.autoplay.status
     );
 }
 
@@ -836,7 +849,6 @@ fn a_counter_on_a_deck_up_a_ramp_is_walked_up_to() {
     let t0 = Instant::now();
     let mut run = crate::autoplay::growth::tests::run_to(at.truncate(), t0);
     run.vendor = "Jeweler".into();
-    run.walk_limit = std::time::Duration::from_secs(600);
     c.autoplay.growth.run = Some(run);
     let cfg = crate::autoplay::growth::Growth::default();
     let dt = 0.05;

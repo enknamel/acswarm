@@ -119,20 +119,6 @@ impl Client {
         let elapsed = now.duration_since(run.since);
         match run.phase.clone() {
             Phase::Going => {
-                // Out of time only while still short of it: one that got there is not walked away.
-                if elapsed > run.walk_limit && run.at.distance(me) > VENDOR_REACH {
-                    self.autoplay.note(
-                        format!("the walk to {} is taking too long", run.vendor),
-                        now,
-                    );
-                    self.cancel_travel();
-                    return Turn::after_stop(self.grow_run_next(
-                        run,
-                        now,
-                        cfg,
-                        Some("was too long a walk"),
-                    ));
-                }
                 let counter = crate::Goal::At {
                     place: counter_place(run.at),
                     within: VENDOR_REACH,
@@ -679,7 +665,6 @@ impl Client {
                         errand,
                         visited,
                         walked_on: None,
-                        walk_limit: self.planned_walk_limit(),
                         walking_up: false,
                     });
                     return true;
@@ -737,7 +722,6 @@ impl Client {
             self.autoplay.growth.stopped_in_town = true;
             self.autoplay.growth.stopped_looked = Some(now);
             self.autoplay.growth.bound = None;
-            self.autoplay.growth.bound_since = None;
             self.autoplay.say(
                 Doing::Shopping,
                 format!("out of money and short of {short} -- stopping in town"),
@@ -750,7 +734,6 @@ impl Client {
                 let (at, name) = (g.at, g.name.clone());
                 if self.grow_travel(g.place(), crate::autoplay::growth::hunt::GROUND_REACH) {
                     self.autoplay.growth.bound = Some((lb, at, name.clone()));
-                    self.autoplay.growth.bound_since = Some(now);
                     self.autoplay
                         .say(Doing::Traveling, format!("back to hunt {name}"));
                     return true;

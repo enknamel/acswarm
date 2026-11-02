@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use glam::Vec2;
 
-use super::road::{on_the_way, OnTheWay, RETRY_AFTER, WALK_ON_EVERY, WALK_TIMEOUT};
+use super::road::{on_the_way, OnTheWay, RETRY_AFTER, WALK_ON_EVERY};
 use super::{about, Growth};
 use crate::autoplay::{Doing, CORPSE_LIFE};
 use crate::did::Did;
@@ -176,16 +176,7 @@ impl Client {
                 place: ground_place(lb, at),
                 within: GROUND_REACH,
             };
-            let too_long = self.autoplay.growth.bound_since.is_some_and(|t| {
-                now.duration_since(t) > self.autoplay.growth.bound_limit.unwrap_or(WALK_TIMEOUT)
-            });
-            if too_long {
-                self.autoplay.note(
-                    format!("the walk to the {name} ground is taking too long"),
-                    now,
-                );
-                self.cancel_travel();
-            } else if self.is_errand_journey(ground) {
+            if self.is_errand_journey(ground) {
                 self.autoplay.say(
                     Doing::Traveling,
                     format!("going to hunt {name} ({})", about(at.distance(me))),
@@ -197,8 +188,8 @@ impl Client {
             // character is free, as the run takes up its walk to the
             // counter, and not one that could not get there: read that way,
             // every body looted on the road put the ground on the skip list
-            // and sent the character off to another. A walk that took too
-            // long was cancelled above, which is not breaking it off.
+            // and sent the character off to another. A journey refused is
+            // not broken off: the ground is skipped at once.
             //
             // Busy is a target still alive. `attack_target` can go on naming
             // a creature for a moment after it dies (see
@@ -406,11 +397,8 @@ impl Client {
         if let Some((lb, at, name)) = pinned.or_else(|| self.party_ground()) {
             if self.autoplay.growth.hunting_at != Some(lb) {
                 if self.grow_travel(ground_place(lb, at), GROUND_REACH) {
-                    let limit = self.planned_walk_limit();
                     let st = &mut self.autoplay.growth;
                     st.bound = Some((lb, at, name.clone()));
-                    st.bound_since = Some(now);
-                    st.bound_limit = Some(limit);
                     st.quiet_since = None;
                     self.autoplay
                         .say(Doing::Traveling, format!("on the way to {name}"));
@@ -476,11 +464,8 @@ impl Client {
         let (lb, at, name) = (g.landblock, g.at, g.name.clone());
         let (glo, ghi, place) = (g.min_level, g.max_level, g.place());
         if self.grow_travel(place, GROUND_REACH) {
-            let limit = self.planned_walk_limit();
             let st = &mut self.autoplay.growth;
             st.bound = Some((lb, at, name.clone()));
-            st.bound_since = Some(now);
-            st.bound_limit = Some(limit);
             st.quiet_since = None;
             if let Some(h) = st.hunting_at.take() {
                 st.skip.mark(h, now);

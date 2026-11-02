@@ -4,27 +4,6 @@ use ac_world::Place;
 
 use crate::{Client, Goal};
 
-/// A walk to a vendor, or to a hunting ground, that has taken longer
-/// than this is stuck somewhere: the place is given up on.
-pub(super) const WALK_TIMEOUT: Duration = Duration::from_secs(4 * 60);
-
-/// How long a walk may take before it counts as stuck: [`WALK_TIMEOUT`], or twice the journey
-/// planned (`Trip::seconds`) when that is longer, as the last-resort walk home from a far ground is.
-pub(super) fn walk_limit(planned_seconds: Option<f32>) -> Duration {
-    planned_seconds
-        .filter(|s| s.is_finite() && *s > 0.0)
-        .map_or(WALK_TIMEOUT, |s| {
-            Duration::from_secs_f32(2.0 * s).max(WALK_TIMEOUT)
-        })
-}
-
-impl Client {
-    /// [`walk_limit`] for the journey just planned.
-    pub(super) fn planned_walk_limit(&self) -> Duration {
-        walk_limit(self.travel_trip().map(|t| t.seconds))
-    }
-}
-
 /// After a journey that could not be planned, the next place is not
 /// tried for this long.
 pub(super) const RETRY_AFTER: Duration = Duration::from_secs(30);
@@ -51,8 +30,8 @@ pub(super) const WALK_ON_EVERY: Duration = Duration::from_secs(5);
 /// the last journey was ended by something else the character went to do
 /// (see `Client::journey_broken_off`), `busy` that it is still doing it,
 /// and `lately` that the walk was planned again less than
-/// [`WALK_ON_EVERY`] ago. How long the walk may take is the errand's own
-/// clock, and is asked before this.
+/// [`WALK_ON_EVERY`] ago. A journey ends arrived or refused: there is no
+/// clock on how long the walk may take.
 ///
 /// Any journey not under way used to be one that could not get there.
 /// +Verity set off to sell, a corpse took her a second later -- walking

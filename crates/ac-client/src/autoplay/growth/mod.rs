@@ -162,11 +162,8 @@ pub struct State {
     /// Since when there has been nothing here to fight, `None` while
     /// there is (see `Client::autoplay_watch_the_ground`).
     quiet_since: Option<Instant>,
-    /// The ground being travelled to, and since when.
+    /// The ground being travelled to.
     bound: Option<(u32, Vec2, String)>,
-    bound_since: Option<Instant>,
-    /// How long that walk may take before it counts as stuck (see `road::walk_limit`).
-    bound_limit: Option<std::time::Duration>,
     /// When the walk to that ground was last planned again after
     /// something else broke it off (see [`on_the_way`]).
     bound_walked_on: Option<Instant>,
@@ -276,8 +273,6 @@ impl State {
     /// `Client::stop_moving_by_itself`).
     pub fn let_go(&mut self) {
         self.bound = None;
-        self.bound_since = None;
-        self.bound_limit = None;
         self.looking_to = None;
     }
 
@@ -296,8 +291,6 @@ impl State {
     /// Let go of the walk to a ground: [`State::let_go`] less what would strand a run.
     pub(crate) fn drop_ground_walk(&mut self) {
         self.bound = None;
-        self.bound_since = None;
-        self.bound_limit = None;
     }
 
     /// Whether a run to town is under way, from setting off to the last
@@ -364,9 +357,6 @@ impl State {
         }
         if !grounds {
             self.bound = None;
-            self.bound_since = None;
-            self.bound_limit = None;
-            self.bound_limit = None;
         }
         dropped
     }

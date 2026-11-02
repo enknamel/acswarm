@@ -264,7 +264,6 @@ fn a_walk_to_a_ground_broken_off_by_a_corpse_is_walked_on() {
         "no way to the ground"
     );
     c.autoplay.growth.bound = Some((lb, at, "Drudge".into()));
-    c.autoplay.growth.bound_since = Some(now);
 
     c.interrupt_travel("walking to a corpse");
     assert!(c.grow_hunt(now, &cfg), "gave the walk up after a corpse");
@@ -305,7 +304,6 @@ fn a_walk_to_its_own_ground_is_let_go_once_it_follows() {
         "south".to_string(),
     );
     c.autoplay.growth.bound = Some(ground.clone());
-    c.autoplay.growth.bound_since = Some(now);
     let team = &mut c.autoplay.config.team;
     team.enabled = true;
     team.follow = true;
@@ -463,7 +461,6 @@ fn a_dungeon_ground_is_arrived_at_underground_and_walked_by_the_explorer() {
     let cfg = Growth::default();
     let now = Instant::now();
     c.autoplay.growth.bound = Some((cave.landblock, cave.at, cave.name.clone()));
-    c.autoplay.growth.bound_since = Some(now);
     assert!(c.underground(), "the landing is not in the dungeon");
     assert!(!c.grow_hunt(now, &cfg));
     assert_eq!(c.autoplay.growth.hunting_at, Some(0x5B46));
@@ -518,7 +515,6 @@ fn a_dungeon_crossed_on_the_way_to_a_ground_is_not_explored_in_its_place() {
     let cave = ac_world::hunting::at(0x0286).expect("the Tumerok Cave");
     let t0 = Instant::now();
     c.autoplay.growth.bound = Some((cave.landblock, cave.at, cave.name.clone()));
-    c.autoplay.growth.bound_since = Some(t0);
     // Until the walk is taken up: offline no portal takes the character on, and one reached
     // down the drops leaves it below with only the explorer's rooms to walk.
     let notes = play_noting_till_travelling(&mut c, t0, 30);
