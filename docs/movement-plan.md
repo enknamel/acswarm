@@ -224,6 +224,18 @@ The harness runs on main first, so every phase has a baseline to beat.
 "Refused" is not yet known to be wrong: the points are drawn from collision floors, some of them
 sealed off. "Still pushing" is always wrong.
 
+**Phase 1** (branch `phase1`, the old steering asking the region planner, step 4):
+
+| trials | arrived | refused | gave up | still pushing | AGREE planned+arrived, planned+failed, no-way+arrived, no-way+failed |
+|---|---|---|---|---|---|
+| the stalls seen live (9) | 8 | 1 (2CB5 coast edge) | 0 | 0 | 8, 0, 0, 1 |
+| random walks (120) | 108 | 5 | 0 | 7 | 108, 0, 0, 12 |
+
+- The planner and the body never disagree on a route: every planned pair arrives, and every
+  pair that fails was answered "no way" before a step.
+- The 7 still pushing are all among the 12 no-way pairs: the old steering walks at what the
+  planner refused. Phase 2's follower stops there.
+
 ## Phases (each merged alone, each measured against the last)
 
 0. **Baseline.** The harness, random pairs, the known spots, and the numbers on current main.

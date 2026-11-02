@@ -644,6 +644,24 @@ building a chunk by `build_chunk` then `apply` costs what building it in place d
   cannot hold it every ask.
 - `tools/load-test.sh` needs the live server, so it was not run: phase 1 is measured offline.
 
+Step 4, measured the same way. No edge or node rule changed: 1409 / 1371 / 814 / 364 ms, plans
+57.9 / 90.0 / 197.4 / 130.4 ms, the graphs as at step 3. The harness is unchanged outcome for
+outcome; one walk arrives 0.1 s sooner.
+
+- Every plan the client makes is `Pathfinder::plan` on the shared region: the steering's
+  `find_path`, `has_way_to`, doorway spots and vantages (`Client::plan_walk`). The per-block
+  graph is deleted. A steering `find_path` still plans on the frame (p95 21 ms at step 3), but
+  only on a blocked line every `LINE_CHECK`, and never builds a chunk there, as the per-block
+  graph did.
+- An offline client builds what a plan needs on the asking thread before it answers
+  (`Pathfinder::build_when_planning`), under the write lock and on the region it built, so no
+  test or harness walk depends on the builder thread's timing or on another test evicting its
+  area. Live, a plan never builds and answers `Building`.
+- `has_way_to` answers for any place the region holds, not only the character's own block;
+  `OutOfRegion` stays the journey planner's question and answers true.
+- `standable_near` answers none while a chunk it looks at is unbuilt, and queues those chunks
+  (a `Chunks` job), rather than answering from part of the graph.
+
 | risk | where | how it shows | what is done |
 |---|---|---|---|
 | The walk test makes the graph about 5 × slower to build | step 2 | `navcost.rs` ms over 2.0 × the baseline | the open-ground fast path (exact), then reuse of the reverse direction (§4). The builder thread means a slow build delays the first answer and never stalls a frame (step 3); `PLAN` ms in the harness shows that delay. |
