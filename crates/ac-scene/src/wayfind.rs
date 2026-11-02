@@ -73,42 +73,52 @@ pub fn locate(ground: &Ground, at: Vec3) -> u32 {
         .unwrap_or(0)
 }
 
-/// `at` on its cell's own floor: that cell's floor (outdoors, the open floors and the terrain)
-/// nearest its height within [`END_FLOOR`], under the middle, else under the rest of the feet;
-/// outdoors the terrain is the floor of last resort. `None` when the cell has no floor there.
-pub fn floor_of(ground: &Ground, at: Vec3, cell: u32, cap: &Capsule) -> Option<Vec3> {
-    let level = |x: f32, y: f32| -> Option<f32> {
-        let mut levels: Vec<f32> = ground
-            .collision
-            .floors_at_xy(x, y)
-            .into_iter()
-            .filter(|f| f.1 == cell)
-            .map(|f| f.0)
-            .collect();
-        if cell == 0 {
-            levels.extend(ground.terrain_under(x, y));
-        }
+/// `at` on its cell's floor within [`END_FLOOR`] under the middle, else the feet (outdoors, else
+/// the terrain), and the floor's cell: cells overlap, so failing its own, a floor a body on would be in it or in the floor's cell by BSP (a_portal_mouth_on_a_neighbouring_cells_floor_is_planned_to).
+pub fn floor_of(ground: &Ground, at: Vec3, cell: u32, cap: &Capsule) -> Option<(Vec3, u32)> {
+    let nearest = |levels: Vec<(f32, u32)>| {
         levels
             .into_iter()
-            .filter(|z| (z - at.z).abs() <= END_FLOOR)
-            .min_by(|a, b| (a - at.z).abs().total_cmp(&(b - at.z).abs()))
+            .filter(|f| (f.0 - at.z).abs() <= END_FLOOR)
+            .min_by(|a, b| (a.0 - at.z).abs().total_cmp(&(b.0 - at.z).abs()))
+    };
+    let own = |x: f32, y: f32| -> Option<(f32, u32)> {
+        let mut levels = ground.collision.floors_at_xy(x, y);
+        levels.retain(|f| f.1 == cell);
+        if cell == 0 {
+            levels.extend(ground.terrain_under(x, y).map(|z| (z, 0)));
+        }
+        nearest(levels)
+    };
+    let held = |x: f32, y: f32| -> Option<(f32, u32)> {
+        let mut levels = ground.collision.floors_at_xy(x, y);
+        levels.retain(|f| {
+            let on = Vec3::new(x, y, f.0 + 0.1);
+            f.1 != cell
+                && (ground.collision.cell_holds(cell, on)
+                    || (f.1 != 0 && ground.collision.cell_holds(f.1, on)))
+        });
+        nearest(levels)
     };
     let reach = cap.radius * FOOTING;
-    let z = level(at.x, at.y)
-        .or_else(|| {
+    let under_feet = |level: &dyn Fn(f32, f32) -> Option<(f32, u32)>| {
+        level(at.x, at.y).or_else(|| {
             (0..8)
                 .filter_map(|k| {
                     let a = k as f32 * std::f32::consts::FRAC_PI_4;
                     level(at.x + a.cos() * reach, at.y + a.sin() * reach)
                 })
-                .min_by(|a, b| (a - at.z).abs().total_cmp(&(b - at.z).abs()))
+                .min_by(|a, b| (a.0 - at.z).abs().total_cmp(&(b.0 - at.z).abs()))
         })
+    };
+    let (z, of) = under_feet(&own)
+        .or_else(|| (cell != 0).then(|| under_feet(&held)).flatten())
         .or_else(|| {
             (cell == 0)
-                .then(|| ground.terrain_under(at.x, at.y))
+                .then(|| ground.terrain_under(at.x, at.y).map(|z| (z, 0)))
                 .flatten()
         })?;
-    Some(Vec3::new(at.x, at.y, z))
+    Some((Vec3::new(at.x, at.y, z), of))
 }
 
 /// A route for `q`, building every chunk the search reaches.
@@ -175,7 +185,7 @@ pub fn standable_near(
             drops: false,
         };
         let cap = nav.capsule;
-        let s = floor_of(ground, from.0, from.1, &cap).unwrap_or(from.0);
+        let s = floor_of(ground, from.0, from.1, &cap).map_or(from.0, |f| f.0);
         let mut l = Built {
             nav,
             missing: Vec::new(),
@@ -250,12 +260,10 @@ fn route(
     q: &WalkQuery,
 ) -> Result<Vec<(NavNode, EdgeKind)>, NoWay> {
     let cap = l.nav().capsule;
-    let (goal_at, goal_cell) = q.goal;
-    let g = floor_of(ground, goal_at, goal_cell, &cap).ok_or(NoWay::OffFloor)?;
-    let (from_at, from_cell) = q.from;
+    let (g, goal_cell) = floor_of(ground, q.goal.0, q.goal.1, &cap).ok_or(NoWay::OffFloor)?;
     // A start on no floor of its cell (in the air, a cell a step behind) is where the body is: its
     // first leg is walked from there like any other.
-    let s = floor_of(ground, from_at, from_cell, &cap).unwrap_or(from_at);
+    let (s, from_cell) = floor_of(ground, q.from.0, q.from.1, &cap).unwrap_or(q.from);
     let berths = Berths::of(q, s);
     let (start, sources) = sources(ground, l, q, &berths, s, from_cell, &cap)?;
     let ends = ends(ground, l, q, &berths, g, goal_cell, &cap);

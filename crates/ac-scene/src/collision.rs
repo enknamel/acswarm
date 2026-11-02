@@ -246,6 +246,11 @@ impl CollisionWorld {
         self.cells.cell_at(p)
     }
 
+    /// Whether interior cell `cell`, a body can be in, holds `p` by its own BSP.
+    pub fn cell_holds(&self, cell: u32, p: Vec3) -> bool {
+        self.cells.holds(cell, p)
+    }
+
     /// Add a polygon set (physics polygons if present, else drawing
     /// polygons) transformed by `t`.
     fn add_polys(&mut self, verts: &[(u16, Vertex)], polys: &[(u16, Polygon)], t: Mat4, cell: u32) {

@@ -275,7 +275,7 @@ fn a_goal_standing_on_a_deck_is_planned_to_on_the_deck() {
     let mut area = Area::build(&assets, &[block], &cap, block).unwrap();
     let (on_deck, path) = area.with_ground(|ground, nav| {
         let cell = wayfind::locate(ground, jeweler);
-        let on_deck = wayfind::floor_of(ground, jeweler, cell, &cap);
+        let on_deck = wayfind::floor_of(ground, jeweler, cell, &cap).map(|f| f.0);
         (on_deck, route(ground, nav, under, jeweler, 0.5))
     });
     let on_deck = on_deck.expect("he stands on a floor");

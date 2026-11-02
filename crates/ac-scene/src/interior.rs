@@ -348,6 +348,11 @@ impl CellIndex {
             .map(|c| c.id)
     }
 
+    /// Whether walked cell `cell`'s own BSP holds `p` (world space).
+    pub fn holds(&self, cell: u32, p: Vec3) -> bool {
+        self.holding(p).any(|c| c.walked && c.id == cell)
+    }
+
     /// The cells whose structure's own BSP holds `p` (world space).
     fn holding(&self, p: Vec3) -> impl Iterator<Item = &IndexedCell> + '_ {
         let near = !self.cells.is_empty() && p.cmpge(self.lo).all() && p.cmple(self.hi).all();

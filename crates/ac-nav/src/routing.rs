@@ -190,6 +190,48 @@ mod tests {
 
     #[test]
     #[ignore = "needs AC_DATA_DIR"]
+    fn a_portal_mouth_on_a_neighbouring_cells_floor_is_planned_to() {
+        // The Facility Hub's portal data names, for most mouths, a cell whose BSP holds the mouth
+        // while the floor under it is a neighbouring cell's.
+        let assets = Assets::open(ac_dat::test_data_dir()).unwrap();
+        let block = 0x018A_0000;
+        let mut area = Area::build(&assets, &[block], &Capsule::default(), block).unwrap();
+        let mouths: Vec<_> = ac_world::portals::all()
+            .iter()
+            .filter(|p| p.from_cell & 0xFFFF_0000 == block)
+            .collect();
+        let start = mouths
+            .iter()
+            .find(|p| p.from_cell == 0x018A_0101)
+            .expect("the Portal to Redspire");
+        let from = Place {
+            at: start.from,
+            cell: start.from_cell,
+        };
+        let failed: Vec<(String, NoWay)> = mouths
+            .iter()
+            .filter(|p| p.from.distance(start.from) > PORTAL_BERTH)
+            .filter_map(|p| {
+                let goal = Place {
+                    at: p.from,
+                    cell: p.from_cell,
+                };
+                plan(&mut area, from, goal, PORTAL_BERTH)
+                    .err()
+                    .map(|why| (format!("{} {:#010x}", p.name, p.from_cell), why))
+            })
+            .collect();
+        assert!(mouths.len() > 40, "{} mouths", mouths.len());
+        assert!(
+            failed.is_empty(),
+            "{} of {}: {failed:?}",
+            failed.len(),
+            mouths.len()
+        );
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn a_corpse_on_the_floor_below_is_planned_to_on_that_floor() {
         // The route harness's "0286 corpse on the floor below": the corpse lies a storey under
         // the character's own floor, named only by its block, as a follow names it.
@@ -208,7 +250,10 @@ mod tests {
         let cap = area.capsule();
         let (cell, floor) = area.with_ground(|ground, _| {
             let cell = wayfind::locate(ground, corpse);
-            (cell, wayfind::floor_of(ground, corpse, cell, &cap))
+            (
+                cell,
+                wayfind::floor_of(ground, corpse, cell, &cap).map(|f| f.0),
+            )
         });
         assert!(
             cell & 0xFFFF >= 0x100,
