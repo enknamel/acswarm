@@ -265,7 +265,7 @@ pub struct Steering {
     refused: Option<(Vec3, Unreachable)>,
     /// The last steer stood still for the planner.
     waiting: bool,
-    /// When the route left last fell by [`PROGRESS`] (see [`last_progress`](Self::last_progress)).
+    /// When the route left last fell by `PROGRESS` (see [`last_progress`](Self::last_progress)).
     progressed: Option<Instant>,
 }
 
@@ -355,7 +355,7 @@ impl Steering {
         self.answered(Replan::Start, me, from, goal, within, planned, now)
     }
 
-    /// When the route left last fell by [`PROGRESS`] on a course to this goal, across replans.
+    /// When the route left last fell by `PROGRESS` (0.1 m) on a course to this goal, across replans.
     pub fn last_progress(&self) -> Option<Instant> {
         self.progressed
     }
