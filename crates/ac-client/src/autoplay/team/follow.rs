@@ -16,11 +16,6 @@ pub fn follow_break(keep: f32) -> f32 {
     (2.0 * keep).max(FOLLOW_BREAK)
 }
 
-/// Up to this far the follower walks straight for the leader, letting
-/// the steering find the way; further (the leader took a portal) a
-/// journey is planned.
-const FOLLOW_WALK: f32 = 120.0;
-
 /// The STEPS rows that follow a leader, whose walks are following's (`Owner::Step`).
 pub(crate) const FOLLOW_ROWS: [&str; 2] = ["catch up", "follow"];
 
@@ -104,18 +99,16 @@ impl Client {
         }
         let goal = glam::Vec2::new(leader.world.x, leader.world.y);
         let mut refused = None;
-        // Flown, the leader is flown at anywhere the region holds.
-        let flown = leader.flying && {
-            let place = match leader.cell {
-                0 => self.place_at(leader.world),
-                cell => ac_world::Place {
-                    at: leader.world,
-                    cell,
-                },
-            };
-            self.is_in_region(place)
+        // A leader the region holds is walked (or flown) to; past it (a portal taken) a journey.
+        let place = match leader.cell {
+            0 => self.place_at(leader.world),
+            cell => ac_world::Place {
+                at: leader.world,
+                cell,
+            },
         };
-        if flat < FOLLOW_WALK || flown {
+        let held = self.is_in_region(place);
+        if held {
             // A journey after it planned for a refused walk is kept while it is bound for it.
             let on_the_way = self.is_follow_journey()
                 && self
@@ -142,7 +135,7 @@ impl Client {
                 }
             }
         }
-        if refused.is_some() || flat >= FOLLOW_WALK && !flown {
+        if refused.is_some() || !held {
             // Out of sight (through a portal, say), or no walk there: a journey, planned again once
             // it has moved on. Not while it stands where a journey cannot end -- inside the Town
             // Network hub, or a dungeon -- in another landblock: it will come out.

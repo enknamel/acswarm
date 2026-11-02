@@ -225,6 +225,24 @@ fn a_walk_another_goal_planted_after_following_outlives_the_stop() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
+fn a_leader_the_region_holds_is_walked_to_however_far() {
+    // 150 m east, over the next block: a walk of following's own, not a journey.
+    let mut c = following_over(testkit::game_data(), 150.0);
+    c.autoplay.team.mates[0].cell = 0;
+    c.tick_autoplay(Instant::now());
+    assert!(
+        matches!(
+            c.going.as_ref().map(|g| g.owner),
+            Some(crate::Owner::Step(row)) if FOLLOW_ROWS.contains(&row)
+        ),
+        "not walked: {:?}",
+        c.going.as_ref().map(|g| g.owner)
+    );
+    assert!(!c.traveling(), "a journey after a leader the region holds");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_follower_with_no_walk_to_its_leader_plans_a_journey() {
     // The leader up on the Tusker ground's ledge (0x5C49), which no walk reaches: the follower is
     // told so on its first ask and sets off on a journey after it instead, following's own.
