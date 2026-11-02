@@ -43,7 +43,7 @@ const SWEPT_SPAN: f32 = 4.0;
 /// A walk this near its end (metres) is there: the float error of its last step.
 const TOUCHING: f32 = 0.01;
 /// How fast a body steps off a ledge (m/s): the phase-2 follower's pace at a drop.
-const DROP_SPEED: f32 = 1.0;
+pub const DROP_SPEED: f32 = 1.0;
 /// The deepest drop (metres): ACE hurts a landing over 11.25 + 4.5 m/s (Player_Move.cs:254-259).
 const DROP_MAX: f32 = 12.0;
 /// A fall still in the air this long (seconds) is over nothing: the highest jump's flight.

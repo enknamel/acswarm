@@ -176,8 +176,8 @@ pub struct Pathfinder {
     job: Option<u64>,
     /// The builder could not be started.
     dead: bool,
-    /// When the steering last asked.
-    asked_at: Option<Instant>,
+    /// When the steering last asked, from where, and for what goal.
+    asked_at: Option<(Instant, Vec3, Vec3)>,
     asked: Option<Asked>,
     /// Offline runs: each plan builds what it needs on the asking thread before it answers.
     builds_itself: bool,
@@ -394,17 +394,23 @@ impl Pathfinder {
         self.job.is_none_or(|n| DONE.load(Ordering::Acquire) >= n)
     }
 
-    /// Have the builder plan the steering's walk to within `within` of `to`, at most once per
-    /// `ASK_EVERY`, so no search holds up a frame; [`take`](Self::take) picks the answer up.
+    /// Have the builder plan the steering's walk to within `within` of `to`, so no search holds up
+    /// a frame; [`take`](Self::take) picks the answer up. A handle that builds for itself answers now.
     pub fn ask(&mut self, from: Place, to: Place, within: f32, capsule: Capsule, now: Instant) {
-        if self.dead
-            || self
-                .asked_at
-                .is_some_and(|t| now.duration_since(t) < ASK_EVERY)
-        {
+        if self.dead || self.is_repeat(from.at, to.at, now) {
             return;
         }
-        self.asked_at = Some(now);
+        self.asked_at = Some((now, from.at, to.at));
+        if self.builds_itself {
+            let answer = self.plan_now(from, to, within, capsule);
+            self.asked = Some(Asked {
+                number: 0,
+                from,
+                goal: to,
+                answer: Some(answer),
+            });
+            return;
+        }
         let reply = Some(self.answers.0.clone());
         let number = match region_for(from, to, &capsule) {
             Some(region) => {
@@ -431,9 +437,19 @@ impl Pathfinder {
         });
     }
 
-    /// The answer to the walk asked, once it is back: its waypoints, or `None` with no way.
-    /// Dropped when planned from too far back, or for a goal moved on.
-    pub fn take(&mut self, me: Vec3, goal: Vec3) -> Option<Vec<Vec3>> {
+    /// Whether a walk asked is the last one again, sent within [`ASK_EVERY`]: the same goal, from
+    /// where that one was asked. Another walk, or this one from elsewhere, goes at once.
+    fn is_repeat(&self, from: Vec3, goal: Vec3, now: Instant) -> bool {
+        self.asked_at.is_some_and(|(t, f, g)| {
+            now.duration_since(t) < ASK_EVERY
+                && g.distance(goal) <= ANSWER_GOAL
+                && f.distance(from) <= ac_nav::steering::ARRIVE
+        })
+    }
+
+    /// The answer to the walk asked, once it is back: the place it was planned from, and the plan,
+    /// a no way with its reason. Dropped when planned from too far back, or for a goal moved on.
+    pub fn take(&mut self, me: Vec3, goal: Vec3) -> Option<(Place, Planned)> {
         while let Ok((number, planned)) = self.answers.1.try_recv() {
             if let Some(a) = self.asked.as_mut().filter(|a| a.number == number) {
                 a.answer = Some(planned);
@@ -452,14 +468,27 @@ impl Pathfinder {
             );
             return None;
         }
-        match a.answer? {
-            Planned::Route(r) => Some(r.points()),
-            Planned::NoWay(why) => {
-                tracing::debug!("pathfinder: no way: {why:?}");
-                None
-            }
-            Planned::Building(_) => None,
+        let planned = a.answer?;
+        if let Planned::NoWay(why) = &planned {
+            tracing::debug!("pathfinder: no way: {why:?}");
         }
+        Some((a.from, planned))
+    }
+
+    /// Whether the walk test passes from `from` to `to` for a body of `capsule`, on the region
+    /// holding it (see [`routing::can_walk`]): `false` with none, or while the builder writes to it.
+    pub fn can_walk(&self, from: Place, to: Vec3, capsule: Capsule) -> bool {
+        let goal = Place {
+            at: to,
+            cell: from.cell & 0xFFFF_0000,
+        };
+        let Some(region) = region_for(from, goal, &capsule) else {
+            return false;
+        };
+        let walks = self
+            .read(&region)
+            .is_some_and(|area| routing::can_walk(&area, from, to));
+        walks
     }
 
     /// A walk asked waits on the builder.
@@ -653,4 +682,97 @@ fn build_idle() -> bool {
         Err(_) => None,
     };
     next.is_some_and(|c| build_chunk(&region, c, false))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Client;
+
+    const DUNGEON: u32 = 0x01F6_0000;
+
+    /// A character beside the bookcases in the Holtburg Dungeon, and where it stands.
+    fn by_the_bookcases() -> (Client, Place) {
+        let c =
+            crate::testkit::standing_in_the_field(25, 0x01F6_0224, Vec3::new(30.37, -51.89, 0.0));
+        let pl = c.player.as_ref().expect("a body");
+        let me = Place {
+            at: pl.world_position(),
+            cell: pl.cell,
+        };
+        (c, me)
+    }
+
+    fn there(local: Vec3, cell: u32) -> Place {
+        Place {
+            at: ac_world::landblock_origin(DUNGEON) + local,
+            cell,
+        }
+    }
+
+    /// Somewhere round the bookcases, in the next cell.
+    fn round_them() -> Place {
+        there(Vec3::new(36.0, -54.0, 0.0), 0x01F6_0233)
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn an_offline_ask_is_answered_before_the_next_frame() {
+        let (mut c, me) = by_the_bookcases();
+        let cap = c.player.as_ref().unwrap().capsule();
+        let goal = round_them();
+        c.pathfinder.ask(me, goal, 0.25, cap, Instant::now());
+        match c.pathfinder.take(me.at, goal.at) {
+            Some((from, Planned::Route(r))) => {
+                assert_eq!(from, me);
+                assert!(!r.waypoints.is_empty());
+            }
+            other => panic!("not answered at once: {other:?}"),
+        }
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn a_new_walk_is_asked_at_once_and_a_repeat_waits() {
+        let (mut c, me) = by_the_bookcases();
+        let cap = c.player.as_ref().unwrap().capsule();
+        let (goal, other) = (round_them(), there(Vec3::new(26.0, -51.89, 0.0), DUNGEON));
+        let t0 = Instant::now();
+        let soon = t0 + Duration::from_millis(100);
+        c.pathfinder.ask(me, goal, 0.25, cap, t0);
+        assert!(c.pathfinder.take(me.at, goal.at).is_some(), "asked");
+        c.pathfinder.ask(me, goal, 0.25, cap, soon);
+        assert!(c.pathfinder.take(me.at, goal.at).is_none(), "a repeat");
+        c.pathfinder.ask(me, other, 0.25, cap, soon);
+        assert!(c.pathfinder.take(me.at, other.at).is_some(), "another goal");
+        let moved = Place {
+            at: me.at + Vec3::new(-2.0, 0.0, 0.0),
+            ..me
+        };
+        c.pathfinder.ask(moved, other, 0.25, cap, soon);
+        assert!(
+            c.pathfinder.take(moved.at, other.at).is_some(),
+            "the same goal from elsewhere"
+        );
+        c.pathfinder.ask(moved, other, 0.25, cap, soon + ASK_EVERY);
+        assert!(
+            c.pathfinder.take(moved.at, other.at).is_some(),
+            "a repeat once the throttle is past"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn can_walk_answers_the_walk_test_on_the_region() {
+        let (mut c, me) = by_the_bookcases();
+        let cap = c.player.as_ref().unwrap().capsule();
+        // Planned first each time, so the region is there: other tests' areas may push it out.
+        let mut walks = |to: Vec3| {
+            assert!(matches!(c.plan_walk(round_them(), 0.25), Planned::Route(_)));
+            c.pathfinder.can_walk(me, there(to, DUNGEON).at, cap)
+        };
+        assert!(walks(Vec3::new(26.0, -51.89, 0.0)), "across the room");
+        // The top of a bookcase, 1.9 m up.
+        assert!(!walks(Vec3::new(34.68, -50.7, 1.915)), "onto the bookcase");
+    }
 }

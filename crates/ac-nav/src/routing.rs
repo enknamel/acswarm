@@ -157,6 +157,22 @@ pub fn plan_built(area: &Area, from: Place, goal: Place, within: f32) -> Planned
     }
 }
 
+/// Whether the walk test every edge passed carries the body from `from` to `to` on `area`: how a
+/// follower judges a corner cut or a turn aside. `false` for a walk the area does not hold.
+pub fn can_walk(area: &Area, from: Place, to: Vec3) -> bool {
+    let to = Place {
+        at: to,
+        cell: from.cell & 0xFFFF_0000,
+    };
+    if !is_held(&area.blocks, area.dungeon, from, to) {
+        return false;
+    }
+    let cap = area.capsule();
+    area.read_ground(|ground, _| {
+        ground.can_walk(graph_end(ground, from), graph_end(ground, to), &cap)
+    })
+}
+
 /// Where a character can stand within `radius` (metres, flat) of `around`; once the area is built
 /// whole, only where the body at `from` has a way to. `Err` names the chunks to build first.
 pub fn standable_near(

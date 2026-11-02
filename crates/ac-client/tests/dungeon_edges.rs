@@ -145,8 +145,11 @@ impl Ground for Standing<'_> {
     fn take_wide(&mut self, from: Vec3, to: Vec3) -> Option<Vec<Vec3>> {
         let wide = self.wide.as_deref_mut()?;
         for _ in 0..2000 {
-            if let Some(route) = wide.take(from, to) {
-                return Some(route);
+            if let Some((_, planned)) = wide.take(from, to) {
+                return match planned {
+                    Planned::Route(r) => Some(r.points()),
+                    _ => None,
+                };
             }
             if !wide.busy() {
                 return None;

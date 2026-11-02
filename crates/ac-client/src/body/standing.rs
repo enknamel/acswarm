@@ -92,7 +92,10 @@ impl ac_nav::Ground for Standing<'_> {
     }
 
     fn take_wide(&mut self, from: glam::Vec3, to: glam::Vec3) -> Option<Vec<glam::Vec3>> {
-        self.wide.take(from, to)
+        match self.wide.take(from, to)?.1 {
+            Planned::Route(r) => Some(r.points()),
+            Planned::NoWay(_) | Planned::Building(_) => None,
+        }
     }
 
     fn is_planning(&self) -> bool {
