@@ -174,7 +174,7 @@ fn a_hand_run_with_town_runs_off_keeps_the_hunting_off_the_counter() {
         !c.autoplay.growth.town_run_under_way(),
         "kept with town runs off"
     );
-    assert!(c.traveling(), "the hunting did not move");
+    assert!(c.is_walking() || c.traveling(), "the hunting did not move");
 }
 
 #[test]

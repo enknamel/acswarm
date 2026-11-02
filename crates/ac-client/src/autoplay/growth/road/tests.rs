@@ -352,8 +352,8 @@ fn a_road_is_a_road_whoever_planned_it() {
 #[ignore = "needs AC_DATA_DIR"]
 fn walking_the_hunting_ground_is_not_being_on_the_way_to_it() {
     // The trap this rule had to be kept out of. A patrol of the
-    // hunting area, and the roam around a ground, both travel --
-    // `traveling()` is true for a character doing the very thing it
+    // hunting area, and the roam around a ground, both walk (a journey
+    // past the region) while the character does the very thing it
     // came here for. Keyed on that, a character would have stood in
     // its own hunting ground refusing to fight. Both paths set off
     // and return before `bound` is ever set, and that is the whole
@@ -382,7 +382,7 @@ fn walking_the_hunting_ground_is_not_being_on_the_way_to_it() {
     // Quiet long enough to walk the area, and it walks it.
     c.autoplay.growth.quiet_since = Some(now - Duration::from_secs(600));
     assert!(c.grow_hunt(now, &cfg), "the patrol stayed put");
-    assert!(c.traveling(), "the patrol is a journey like any other");
+    assert!(c.is_walking(), "the patrol walks");
     assert_eq!(c.autoplay.growth.bound, None, "the patrol is not an errand");
     assert!(!c.on_its_way());
 

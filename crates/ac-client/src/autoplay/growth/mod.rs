@@ -157,6 +157,8 @@ pub struct State {
     /// How many times the character has walked about the ground it is
     /// on looking for something to fight.
     roams: u32,
+    /// The point a roam or patrol walks to (world xy), and what it says meanwhile.
+    looking_to: Option<(Vec2, String)>,
     /// Since when there has been nothing here to fight, `None` while
     /// there is (see `Client::autoplay_watch_the_ground`).
     quiet_since: Option<Instant>,
@@ -287,6 +289,7 @@ impl State {
         self.bound_since = None;
         self.bound_limit = None;
         self.after_out = None;
+        self.looking_to = None;
     }
 
     /// The landblock of the ground being walked to, if the growth rules are on the way to one.

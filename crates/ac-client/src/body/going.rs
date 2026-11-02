@@ -9,7 +9,7 @@ use ac_nav::routing::{self, Planned};
 use ac_nav::steering::REPLAN_DISTANCE;
 use ac_scene::navarea;
 use ac_world::Place;
-use glam::Vec3;
+use glam::{Vec2, Vec3};
 
 use super::server_walk::reached;
 use crate::did::Did;
@@ -393,6 +393,19 @@ impl Client {
             _ => self.place_at(at),
         };
         self.go(owner, Goal::At { place, within }, self.frame_at)
+    }
+
+    /// [`Client::go_to`] a map point (world xy), on the floor under it nearest the body's height.
+    pub fn go_to_point(&mut self, owner: Owner, xy: Vec2, within: f32) -> Did {
+        let assets = self.assets.clone();
+        let Some(pl) = self.player.as_mut() else {
+            return Did::waiting("not in the world yet");
+        };
+        let below = pl.world_position().z;
+        let z = pl
+            .ground_height(&assets, xy.x, xy.y, below)
+            .unwrap_or(below);
+        self.go_to(owner, xy.extend(z), within)
     }
 
     /// End a step's walk its row did not ask for this tick (end of `tick_autoplay`).
