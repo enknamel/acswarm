@@ -200,7 +200,12 @@ impl Client {
         // whose leg takes the slot.
         if owner != Owner::Journey && !self.is_in_region(place) {
             let xy = place.at.truncate();
-            let planned = self.traveling()
+            // Acting while it travels to this goal; a journey elsewhere is replaced.
+            let bound = self.traveling()
+                && self
+                    .travel_goal_xy()
+                    .is_some_and(|g| g.distance(xy) <= REPLAN_DISTANCE);
+            let planned = bound
                 || if place.is_indoors() {
                     self.plan_trip_in(xy, place.cell)
                 } else {

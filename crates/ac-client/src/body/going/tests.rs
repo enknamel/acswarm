@@ -178,8 +178,11 @@ fn a_goal_out_of_the_region_is_a_journey() {
         place: corpse,
         within: 1.0,
     };
+    // A journey under way to somewhere else is not this one.
+    assert!(c.travel_to(c.my_position().expect("standing").truncate() + glam::Vec2::X * 150.0));
     assert_eq!(c.go(Owner::Hand, goal, now), Did::Acting);
     assert!(c.traveling(), "a journey");
+    assert_eq!(c.travel_goal_xy(), Some(corpse.at.truncate()));
     assert!(c.going.is_none(), "not a walk");
     // A goal on the next block is a walk.
     let next = c.place_at(c.my_position().expect("standing") + Vec3::new(200.0, 0.0, 0.0));
