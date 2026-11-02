@@ -418,7 +418,7 @@ fn a_level_35_in_holtburg_sets_off_for_a_dungeon_and_keeps_moving() {
         .travel_trip()
         .and_then(|t| {
             t.steps.iter().find_map(|s| match s {
-                ac_world::trip::Step::Portal { mouth, .. } => Some(*mouth),
+                ac_world::trip::Step::Portal { mouth, .. } => Some(mouth.at.truncate()),
                 _ => None,
             })
         })
@@ -544,7 +544,7 @@ fn a_dungeon_portal_below_its_landing_is_walked_down_to_by_its_drops() {
     let inner = o + glam::Vec3::new(80.1, -57.5, -6.0);
     let first = c.travel_trip().and_then(|t| {
         t.steps.iter().find_map(|s| match s {
-            ac_world::trip::Step::Portal { mouth, .. } => Some(*mouth),
+            ac_world::trip::Step::Portal { mouth, .. } => Some(mouth.at.truncate()),
             _ => None,
         })
     });

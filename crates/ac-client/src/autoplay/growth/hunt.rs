@@ -530,12 +530,12 @@ impl Client {
         };
         let far = ac_world::trip::Prefs::far();
         let quests = self.travel.quests_done.clone();
+        let from = ac_world::Place { at: me, cell };
+        let goal = crate::travel::journey_place(goal, goal_cell);
         let plan = |p| {
             ac_world::trip::plan_with_recalls_and_gems(
-                me.truncate(),
-                cell,
+                from,
                 goal,
-                goal_cell,
                 level,
                 &quests,
                 &[],

@@ -19,33 +19,34 @@ fn main() {
     } else {
         ac_world::trip::Prefs::quick()
     };
-    let trip = ac_world::trip::plan_with(from_xy, 0, to.world_xy(), level, &[], &[], prefs);
+    let (from, goal) = (
+        ac_world::Place::on_map(from_xy),
+        ac_world::Place::on_map(to.world_xy()),
+    );
+    let trip = ac_world::trip::plan_with(from, goal, level, &[], &[], prefs);
     println!(
         "{:?} -> {} at level {level}, planned in {:?}",
         a[0],
         to.name,
         t0.elapsed()
     );
+    let map = |p: &ac_world::Place| ac_world::towns::map_of(p.at.truncate());
     match trip {
         Some(t) => {
             println!("{} ({:.0} s)", t.summary(), t.seconds);
             for s in &t.steps {
                 match s {
                     ac_world::trip::Step::Walk(p) => {
-                        println!("  walk to {}", ac_world::towns::map_of(*p).0)
+                        println!("  walk to {}", map(p).0)
                     }
                     ac_world::trip::Step::Gem { name, exit, .. } => {
-                        println!("  use {name:?} -> {:?}", ac_world::towns::map_of(*exit))
+                        println!("  use {name:?} -> {:?}", map(exit))
                     }
                     ac_world::trip::Step::Portal {
                         name, mouth, exit, ..
-                    } => println!(
-                        "  portal {name:?} at {:?} -> {:?}",
-                        ac_world::towns::map_of(*mouth),
-                        ac_world::towns::map_of(*exit)
-                    ),
+                    } => println!("  portal {name:?} at {:?} -> {:?}", map(mouth), map(exit)),
                     ac_world::trip::Step::Recall { name, exit, .. } => {
-                        println!("  cast {name:?} -> {:?}", ac_world::towns::map_of(*exit))
+                        println!("  cast {name:?} -> {:?}", map(exit))
                     }
                 }
             }

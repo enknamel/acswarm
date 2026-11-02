@@ -79,12 +79,10 @@ impl Client {
         // Where /lifestone puts the character: the lifestone last
         // attuned, which is what the server calls the sanctuary.
         if let Some(p) = self.world.stats.recall_position(position_type::SANCTUARY) {
-            let at = ac_world::landblock_origin(p.cell) + p.local;
             out.push(Recall {
                 spell: recalls::spell::FREE_LIFESTONE,
                 name: "/lifestone".to_string(),
-                exit: glam::Vec2::new(at.x, at.y),
-                exit_cell: p.cell,
+                exit: ac_world::Place::of_position(&p),
             });
         }
         // `/marketplace` is the same kind of thing and lands among a
@@ -101,14 +99,17 @@ impl Client {
     pub fn castable_recalls(&self) -> Vec<Recall> {
         let mut out = self.free_recalls();
         for &id in &self.world.stats.spells {
-            let (name, exit, exit_cell) = if let Some(kind) = recalls::dynamic(id) {
+            let (name, exit) = if let Some(kind) = recalls::dynamic(id) {
                 let Some(p) = self.world.stats.recall_position(kind) else {
                     continue;
                 };
-                let at = ac_world::landblock_origin(p.cell) + p.local;
-                (self.recall_name(id), at, p.cell)
+                (self.recall_name(id), ac_world::Place::of_position(&p))
             } else if let Some(r) = recalls::fixed(id) {
-                (r.name.clone(), r.at, r.cell)
+                let exit = ac_world::Place {
+                    at: r.at,
+                    cell: r.cell,
+                };
+                (r.name.clone(), exit)
             } else {
                 continue;
             };
@@ -118,8 +119,7 @@ impl Client {
             out.push(Recall {
                 spell: id,
                 name,
-                exit: exit.truncate(),
-                exit_cell,
+                exit,
             });
         }
         out
@@ -139,8 +139,10 @@ impl Client {
                 Some(ac_world::trip::Gem {
                     guid: o.guid,
                     name: g.name.clone(),
-                    exit: g.xy(),
-                    exit_cell: g.cell,
+                    exit: ac_world::Place {
+                        at: g.at,
+                        cell: g.cell,
+                    },
                     summons: g.how() == ac_world::gems::Use::Summons,
                 })
             })

@@ -49,7 +49,7 @@ fn a_flag_held_opens_its_portal_and_a_refusal_closes_it() {
         c.travel_trip().is_some_and(|t| {
             t.steps.iter().any(|s| {
                 matches!(s, ac_world::trip::Step::Portal { mouth, .. }
-                    if mouth.distance(p.from_xy()) < 1.0)
+                    if mouth.at.truncate().distance(p.from_xy()) < 1.0)
             })
         })
     };

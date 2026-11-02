@@ -22,6 +22,7 @@ use ac_formats::region::Region;
 use ac_scene::worldgrid::WorldGrid;
 use ac_scene::worldroute;
 use ac_world::trip::{self, Prefs, Step, Trip};
+use ac_world::Place;
 use glam::{Vec2, Vec3};
 
 use crate::gem_room::{clear_heading, gem_next, GemNext};
@@ -365,19 +366,12 @@ impl Client {
         // the step before it leaves the character, plan again without
         // that one. This holds for the journey being planned only.
         let quests = self.travel.quests_done.clone();
+        let from = Place { at: me, cell };
+        let to = journey_place(goal, goal_cell);
         let mut planned = None;
         for _ in 0..3 {
             let Some(t) = trip::plan_with_recalls_and_gems(
-                Vec2::new(me.x, me.y),
-                cell,
-                goal,
-                goal_cell,
-                level,
-                &quests,
-                &refused,
-                &recalls,
-                &gems,
-                prefs,
+                from, to, level, &quests, &refused, &recalls, &gems, prefs,
             ) else {
                 break;
             };
@@ -389,13 +383,12 @@ impl Client {
             let here = Vec2::new(me.x, me.y);
             let outdoors = cell & 0xFFFF < 0x100;
             let bad = match t.steps.first() {
-                Some(trip::Step::Portal {
-                    mouth, mouth_cell, ..
-                }) if outdoors
-                    && mouth_cell & 0xFFFF < 0x100
-                    && !self.travel_can_reach(here, *mouth) =>
+                Some(trip::Step::Portal { mouth, .. })
+                    if outdoors
+                        && !mouth.is_indoors()
+                        && !self.travel_can_reach(here, mouth.at.truncate()) =>
                 {
-                    Some(*mouth)
+                    Some(mouth.at.truncate())
                 }
                 _ => None,
             };
@@ -422,16 +415,7 @@ impl Client {
                 ..prefs
             };
             planned = trip::plan_with_recalls_and_gems(
-                Vec2::new(me.x, me.y),
-                cell,
-                goal,
-                goal_cell,
-                level,
-                &quests,
-                &refused,
-                &recalls,
-                &gems,
-                far,
+                from, to, level, &quests, &refused, &recalls, &gems, far,
             );
             if let Some(t) = &planned {
                 tracing::info!("travel: no shorter way; the long walk, {:.0} s", t.seconds);
@@ -441,15 +425,7 @@ impl Client {
             // Say why. Often there is a way, but not one this character
             // may take yet: every chain to the far continents runs
             // through a portal with a level on it.
-            let anyone = trip::plan_with(
-                Vec2::new(me.x, me.y),
-                cell,
-                goal,
-                0,
-                &[],
-                &[],
-                trip::Prefs::far(),
-            );
+            let anyone = trip::plan_with(from, to, 0, &[], &[], trip::Prefs::far());
             let why = match anyone {
                 Some(t) => {
                     let asks = t
@@ -457,7 +433,7 @@ impl Client {
                         .iter()
                         .filter_map(|s| match s {
                             Step::Portal { mouth, name, .. } => {
-                                ac_world::portals::near(*mouth, 3.0)
+                                ac_world::portals::near(mouth.at.truncate(), 3.0)
                                     .first()
                                     .and_then(|p| p.refusal(level))
                                     .map(|r| format!("{name} {r}"))
@@ -596,13 +572,12 @@ impl Client {
             return true;
         }
         let (target, label, mouth_cell) = match &step {
-            Step::Walk(p) => (*p, "walk".to_string(), None),
-            Step::Portal {
-                name,
-                mouth,
-                mouth_cell,
-                ..
-            } => (*mouth, format!("portal {name:?}"), Some(*mouth_cell)),
+            Step::Walk(p) => (p.at.truncate(), "walk".to_string(), None),
+            Step::Portal { name, mouth, .. } => (
+                mouth.at.truncate(),
+                format!("portal {name:?}"),
+                Some(mouth.cell),
+            ),
             // A recall is cast, and a gem is used, by the step driver
             // rather than walked to: nothing to aim at.
             Step::Recall { .. } | Step::Gem { .. } => return true,
@@ -615,7 +590,7 @@ impl Client {
         self.travel.step_target = Some(target);
         self.travel.step_cell = mouth_cell;
         self.travel.step_z = match &step {
-            Step::Portal { name, mouth, .. } => portal_mouth_height(name, *mouth),
+            Step::Portal { mouth, .. } => Some(mouth.at.z),
             _ => None,
         };
         // A walk to the journey's end in a dungeon cell is aimed at that cell's floor.
@@ -891,7 +866,7 @@ impl Client {
     /// The portal the current step is aimed at: its name and its mouth.
     pub(crate) fn travel_portal(&self) -> Option<(String, Vec2)> {
         match self.travel.trip.as_ref()?.steps.get(self.travel.step)? {
-            Step::Portal { name, mouth, .. } => Some((name.clone(), *mouth)),
+            Step::Portal { name, mouth, .. } => Some((name.clone(), mouth.at.truncate())),
             Step::Walk(_) | Step::Recall { .. } | Step::Gem { .. } => None,
         }
     }
@@ -1162,11 +1137,11 @@ impl Client {
             let arrived = match (exit, &step) {
                 // A recall can land in the landblock we are already in,
                 // so only the spot counts, and only once a cast is out.
-                (Some((exit, _)), Some(Step::Recall { .. })) => {
-                    self.travel.recall_casts > 0 && me.distance(exit) < 30.0
+                (Some(exit), Some(Step::Recall { .. })) => {
+                    self.travel.recall_casts > 0 && me.distance(exit.at.truncate()) < 30.0
                 }
-                (Some((exit, exit_cell)), _) => {
-                    block == exit_cell & 0xFFFF_0000 || me.distance(exit) < 30.0
+                (Some(exit), _) => {
+                    block == exit.cell & 0xFFFF_0000 || me.distance(exit.at.truncate()) < 30.0
                 }
                 (None, _) => block != from,
             };
@@ -1356,7 +1331,7 @@ impl Client {
                 .as_ref()
                 .and_then(|t| t.steps.get(self.travel.step))
                 .and_then(|s| s.exit())
-                .is_some_and(|(exit, _)| me.distance(exit) < 60.0);
+                .is_some_and(|exit| me.distance(exit.at.truncate()) < 60.0);
             if jumped && !expected {
                 self.travel.last_seen = Some(me);
                 // Whatever swept us up can still be walked into, so it is
@@ -1538,6 +1513,18 @@ impl Client {
     }
 }
 
+/// The place a journey to `goal` in `cell` is bound for: on the map alone when the cell is 0.
+pub(crate) fn journey_place(goal: Vec2, cell: u32) -> Place {
+    if cell == 0 {
+        Place::on_map(goal)
+    } else {
+        Place {
+            at: goal.extend(0.0),
+            cell,
+        }
+    }
+}
+
 /// The cell a journey is planned from, for a character in `cell` at world
 /// position `at`.
 ///
@@ -1584,16 +1571,6 @@ fn leg_height(grid: Option<&WorldGrid>, at: Vec2, me: Vec3, underground: bool) -
         Some(g) => g.height_at(at),
         None => 0.0,
     }
-}
-
-/// The height the mouth of the portal called `name` at `mouth` stands at,
-/// from the portal data. Steps carry only where a mouth is on the map and
-/// the cell it is in; a walk to one in a building has to aim at its floor.
-fn portal_mouth_height(name: &str, mouth: Vec2) -> Option<f32> {
-    ac_world::portals::near(mouth, 3.0)
-        .into_iter()
-        .find(|p| p.name == name)
-        .map(|p| p.from.z)
 }
 
 /// Where the next leg from `me` toward `wp` ends: at most [`LEG`] away,
@@ -1711,7 +1688,8 @@ mod tests {
         let dungeon =
             (ac_world::landblock_origin(0xA8B5_0000) + Vec3::new(126.6, 173.4, 0.0)).truncate();
         let walks = |cell| {
-            trip::plan_with(at.truncate(), cell, dungeon, 0, &[], &[], Prefs::quick())
+            let from = Place { at, cell };
+            trip::plan_with(from, Place::on_map(dungeon), 0, &[], &[], Prefs::quick())
                 .is_some_and(|t| t.portals() == 0)
         };
         // Planned from the shop's own cell, the door was not a way out.
@@ -1728,10 +1706,14 @@ mod tests {
         // Its position alone reads as the landblock next door (the rooms
         // reach below the dungeon's square); its cell says where it is.
         let trip = trip::plan_with_recalls_and_gems(
-            lifestone.truncate(),
-            0xA9B4_0019,
-            corpse,
-            0x01F6_0215,
+            Place {
+                at: lifestone,
+                cell: 0xA9B4_0019,
+            },
+            Place {
+                at: corpse.extend(0.0),
+                cell: 0x01F6_0215,
+            },
             5,
             &[],
             &[],
@@ -2155,7 +2137,11 @@ mod tests {
             c.travel = Default::default();
             assert!(c.plan_trip(goal), "no way to {goal:?}");
             let steps = c.travel_trip().map(|t| t.steps.clone());
-            assert_eq!(steps, Some(vec![Step::Walk(goal)]), "the whole way on foot");
+            assert_eq!(
+                steps,
+                Some(vec![Step::Walk(Place::on_map(goal))]),
+                "the whole way on foot"
+            );
             assert!(
                 c.travel_route().is_some_and(|r| r.len() > 2),
                 "routed over the terrain"
@@ -2186,7 +2172,7 @@ mod tests {
             assert!(c.plan_trip_in(corpse, cell), "no way to {corpse:?}");
             assert_eq!(
                 c.travel_trip().map(|t| t.steps.clone()),
-                Some(vec![Step::Walk(corpse)])
+                Some(vec![Step::Walk(journey_place(corpse, cell))])
             );
             walk_the_journey(&mut c, 180.0);
             let pl = c.player.as_ref().unwrap();
@@ -2287,13 +2273,23 @@ mod tests {
             .into_iter()
             .find(|p| p.from_cell == 0xA9B4_017A)
             .expect("the Holtburg meeting hall portal is in the data");
-        let z = portal_mouth_height(&hall.name, hall.from_xy()).expect("a height");
-        assert!((z - 96.0).abs() < 0.01, "{z}");
-        // Another portal's name at the same spot says nothing.
-        assert_eq!(
-            portal_mouth_height("Portal to Nowhere", hall.from_xy()),
-            None
-        );
+        // Planned from beside it in the hall to where it comes out, the step carries its mouth.
+        let from = Place {
+            at: hall.from + Vec3::X,
+            cell: hall.from_cell,
+        };
+        let exit = Place {
+            at: hall.to,
+            cell: hall.to_cell,
+        };
+        let trip = trip::plan(from, exit).expect("a way through it");
+        let mouth = trip.steps.iter().find_map(|s| match s {
+            Step::Portal { mouth, .. } => Some(*mouth),
+            _ => None,
+        });
+        let mouth = mouth.expect("a portal step");
+        assert_eq!(mouth.cell, 0xA9B4_017A);
+        assert!((mouth.at.z - 96.0).abs() < 0.01, "{mouth:?}");
     }
 
     #[test]

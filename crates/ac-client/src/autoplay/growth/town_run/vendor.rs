@@ -32,11 +32,11 @@ pub(super) struct Stop<'a> {
 fn gem_ways(gems: &[ac_world::trip::Gem]) -> Vec<(Vec2, String)> {
     let mut out = Vec::new();
     for g in gems {
-        out.push((g.exit, g.name.clone()));
-        if g.exit_cell & 0xFFFF < 0x100 {
+        out.push((g.exit.at.truncate(), g.name.clone()));
+        if !g.exit.is_indoors() {
             continue;
         }
-        for p in ac_world::portals::out_of(g.exit_cell) {
+        for p in ac_world::portals::out_of(g.exit.cell) {
             out.push((p.to_xy(), format!("{}, then {}", g.name, p.name)));
         }
     }
