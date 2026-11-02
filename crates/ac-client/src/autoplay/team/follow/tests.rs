@@ -218,7 +218,7 @@ fn a_walk_another_goal_planted_after_following_outlives_the_stop() {
     c.autoplay.config.team.follow = false;
     c.tick_autoplay(now + Duration::from_millis(100));
     assert!(
-        c.going.as_ref().is_some_and(|g| g.is_to(corpse)),
+        c.going.as_ref().and_then(|g| g.goal.place()).map(|p| p.at) == Some(corpse),
         "the stop took the walk to the corpse"
     );
 }

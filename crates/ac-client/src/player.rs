@@ -915,11 +915,6 @@ impl Player {
             .retain(|&blk, _| here.iter().any(|&h| near(h, blk)));
     }
 
-    /// How many landblocks the character holds on to.
-    pub fn blocks_held(&self) -> usize {
-        self.blocks.len()
-    }
-
     /// Collision world for a landblock, from the process's shared cache
     /// (built from the assembled scene on first use, ~0.5 s once).
     /// Whether the block we stand in is a dungeon: there is no terrain

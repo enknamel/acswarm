@@ -184,8 +184,6 @@ pub struct Pathfinder {
     builds_itself: bool,
     /// The assets a handle that builds for itself builds with, opened on first use.
     own: Option<Assets>,
-    /// The last plan answered `Building`.
-    building: bool,
     /// The area our last plan or ask was on, held so no other session's area pushes it out.
     region: Option<Arc<Region>>,
     /// Calls of [`plan`](Self::plan), for the tests that count them.
@@ -208,7 +206,6 @@ impl Pathfinder {
             asked: None,
             builds_itself: false,
             own: None,
-            building: false,
             region: None,
             plans: 0,
         }
@@ -225,14 +222,7 @@ impl Pathfinder {
     /// what is built now; `Building` when the area or its chunks are not, which are then queued.
     pub fn plan(&mut self, from: Place, goal: Place, within: f32, capsule: Capsule) -> Planned {
         self.plans += 1;
-        let planned = self.plan_now(from, goal, within, capsule);
-        self.building = matches!(planned, Planned::Building(_));
-        planned
-    }
-
-    /// Whether the last [`plan`](Self::plan) answered `Building`: no answer yet, not "no way".
-    pub fn is_building(&self) -> bool {
-        self.building
+        self.plan_now(from, goal, within, capsule)
     }
 
     fn plan_now(&mut self, from: Place, goal: Place, within: f32, capsule: Capsule) -> Planned {
