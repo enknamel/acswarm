@@ -6,9 +6,8 @@
 //! (`Client::connect` to a port nobody listens on, so no packet is
 //! answered), stands each character in `BLOCK` (Holtburg by default),
 //! and makes each one do the things that allocate: walk into a wall
-//! (the block's collision), plan a path around it (the block's nav
-//! graph), plan a journey (the world grid), and ask the wide planner
-//! for a route (the pathfinder thread and its neighbourhood). After
+//! (the block's collision), plan a journey (the world grid), and ask
+//! the region planner for a route (the builder thread and its area). After
 //! every phase it prints the process RSS and the share of the growth
 //! that each session accounts for.
 //!
@@ -154,15 +153,6 @@ fn main() {
         }
         if loud {
             m.phase(&format!("{label}: block collision (line_blocked)"));
-        }
-
-        for c in clients.iter_mut() {
-            let pl = c.player.as_mut().unwrap();
-            let me = pl.world_position();
-            let _ = pl.find_path(&assets, block, me, far, block, 1.5);
-        }
-        if loud {
-            m.phase(&format!("{label}: block nav graph (find_path)"));
         }
 
         let goal = Vec2::new(far.x, far.y) + Vec2::new(0.0, 900.0);

@@ -2167,14 +2167,14 @@ mod tests {
         let from = Vec3::new(35.3157, -51.0781, 0.0);
         let corpse = Vec3::new(30.3719, -51.8906, 0.0042);
         let mut c = crate::testkit::standing_in_the_field(25, 0x01F6_0233, from);
-        let me = c.my_position().unwrap();
-        let assets = c.assets.clone();
-        let path = c
-            .player
-            .as_mut()
-            .unwrap()
-            .find_path(&assets, block, me, origin + corpse, block, 0.5)
-            .expect("a way round");
+        let to = ac_world::Place {
+            at: origin + corpse,
+            cell: block,
+        };
+        let path = match c.plan_walk(to, 0.5) {
+            ac_nav::routing::Planned::Route(r) => r.points(),
+            other => panic!("no way round: {other:?}"),
+        };
         assert!(
             path[0].x - origin.x > 34.87,
             "starts behind the bookcases: {path:?}"
@@ -2189,7 +2189,7 @@ mod tests {
 
     #[test]
     #[ignore = "needs AC_DATA_DIR"]
-    fn a_spot_no_path_reaches_is_known_before_walking_at_it() {
+    fn has_way_to_answers_from_the_region() {
         // "If there's no path to the corpse, don't bother": asked once as the walk sets off. In the
         // Holtburg Dungeon, beside the bookcases, the room round them is reachable and the top of a
         // bookcase is not.
@@ -2203,11 +2203,15 @@ mod tests {
         );
         // On top of a bookcase, 1.9 m up: the planner checks the last leg, so no route ends there.
         let top = origin + Vec3::new(34.68, -50.7, 1.915);
-        let (me, assets) = (c.my_position().unwrap(), c.assets.clone());
-        let pl = c.player.as_mut().unwrap();
-        assert!(pl
-            .find_path(&assets, block, me, top, 0x01F6_0224, 2.5)
-            .is_none());
+        let on_top = ac_world::Place {
+            at: top,
+            cell: 0x01F6_0224,
+        };
+        let planned = c.plan_walk(on_top, 2.5);
+        assert!(
+            matches!(planned, ac_nav::routing::Planned::NoWay(_)),
+            "{planned:?}"
+        );
         assert!(!c.has_way_to(top, 0x01F6_0224, 2.5), "on the bookcase");
         assert!(
             c.has_way_to(Vec3::new(10.0, 10.0, 0.0), 0x0101_0001, 0.25),
@@ -2255,12 +2259,16 @@ mod tests {
         let roof = origin + Vec3::new(181.0, 129.6, 96.4);
         let me = c.my_position().unwrap();
         let assets = c.assets.clone();
-        let path = c
-            .player
-            .as_mut()
-            .unwrap()
-            .find_path(&assets, block, me, roof, block, 0.5)
-            .expect("a way up");
+        let path = match c.plan_walk(
+            ac_world::Place {
+                at: roof,
+                cell: block,
+            },
+            0.5,
+        ) {
+            ac_nav::routing::Planned::Route(r) => r.points(),
+            other => panic!("no way up: {other:?}"),
+        };
         let shown = path.iter().map(|w| *w - origin).collect::<Vec<_>>();
         let end = *path.last().unwrap();
         assert!(
@@ -2270,7 +2278,7 @@ mod tests {
         // And the body walks every leg of the way up, the ramp included.
         let pl = c.player.as_mut().unwrap();
         let cap = pl.capsule();
-        let walked = pl.on_nav(&assets, block, |_, ground| {
+        let walked = pl.on_ground(&assets, block, |ground, _| {
             let mut from = (me, 0xBDAF_0103);
             path.iter().all(|&p| {
                 let walks = ground.body_reaches(from.0, from.1, p, &cap);

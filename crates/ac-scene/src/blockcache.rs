@@ -1,21 +1,13 @@
-//! Per-landblock collision and navigation, shared by every character in
-//! the process.
-//!
-//! A character walking a block needs its static geometry as a
-//! [`CollisionWorld`] (about 1.5 MB for a town block) and, once it has
-//! to plan around a wall, a [`NavGraph`] over it. Neither depends on who
-//! is walking, apart from the graph's capsule, so twenty followers in
-//! Holtburg should hold one of each, not twenty. [`Assets`] owns one
-//! [`BlockCache`]; characters keep `Rc`s to what they stand on and let
-//! go of blocks they have left, so the cache's own bound (the most
-//! recent [`KEEP`] blocks) is the process's bound.
+//! Per-landblock collision, shared by every character in the process: a block's static geometry
+//! as a [`CollisionWorld`] (about 1.5 MB for a town block) is the same whoever walks it.
+//! [`Assets`] owns one [`BlockCache`]; characters keep `Rc`s to what they stand on and let go of
+//! blocks they have left, so the cache's bound (the most recent [`KEEP`] blocks) is the process's.
 
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 
-use crate::collision::{Capsule, CollisionWorld};
-use crate::nav::NavGraph;
+use crate::collision::CollisionWorld;
 use crate::{Assets, Result};
 use glam::Vec3;
 
@@ -24,8 +16,7 @@ use glam::Vec3;
 /// blocks rebuild the ones that fell out, at ~0.5 s each.
 pub const KEEP: usize = 48;
 
-/// One block's static geometry and the graphs built over it, one per
-/// capsule that has planned on it.
+/// One block's static geometry.
 pub struct BlockCollision {
     /// The landblock id (`xxyy0000`).
     pub block: u32,
@@ -36,33 +27,12 @@ pub struct BlockCollision {
     /// at the threshold, in world space. The navigation graph stands a
     /// node in each: see `nav::Ground::doorways`.
     pub doorways: Vec<Vec3>,
-    navs: RefCell<Vec<(Capsule, Rc<RefCell<NavGraph>>)>>,
 }
 
 impl std::ops::Deref for BlockCollision {
     type Target = CollisionWorld;
     fn deref(&self) -> &CollisionWorld {
         &self.world
-    }
-}
-
-impl BlockCollision {
-    /// The navigation graph over this block for characters shaped like
-    /// `cap`, built (empty; it fills in as paths are planned) on first
-    /// use. Shared: whoever plans on it grows it for everyone.
-    pub fn nav(&self, assets: &Assets, cap: &Capsule) -> Result<Rc<RefCell<NavGraph>>> {
-        if let Some((_, n)) = self.navs.borrow().iter().find(|(c, _)| c.same(cap)) {
-            return Ok(n.clone());
-        }
-        let scene = assets.landblock(self.block)?;
-        let n = Rc::new(RefCell::new(NavGraph::for_scene(&scene, &self.world, cap)));
-        self.navs.borrow_mut().push((*cap, n.clone()));
-        Ok(n)
-    }
-
-    /// How many graphs (capsules) this block carries.
-    pub fn nav_count(&self) -> usize {
-        self.navs.borrow().len()
     }
 }
 
@@ -93,7 +63,6 @@ impl BlockCache {
                 .iter()
                 .flat_map(|c| c.doorways.iter().copied())
                 .collect(),
-            navs: Default::default(),
         });
         let mut blocks = self.blocks.borrow_mut();
         let mut order = self.order.borrow_mut();

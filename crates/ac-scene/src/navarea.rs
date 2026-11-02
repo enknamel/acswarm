@@ -150,13 +150,8 @@ impl Area {
                 hi = hi.max(Vec2::new(chi.x, chi.y));
             }
         }
-        // The fine lattice wherever there are interiors to walk, the
-        // coarse one over open country -- the rule
-        // [`NavGraph::for_scene`] already states, which this
-        // constructor used to contradict by giving every surface block
-        // the 4 m lattice. A 4 m lattice puts about one node in a room:
-        // Holtburg's houses came out as a node or two per storey with
-        // nothing joining them, so a vendor upstairs was unreachable.
+        // The fine lattice wherever there are interiors to walk, the coarse one over open country:
+        // a 4 m lattice puts about one node in a room, so a storey has a node or two, unjoined.
         let spacing = if dungeon || indoors {
             INDOOR_SPACING
         } else {

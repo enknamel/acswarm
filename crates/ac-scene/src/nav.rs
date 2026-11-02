@@ -9,9 +9,7 @@ use std::time::{Duration, Instant};
 use glam::{Vec2, Vec3};
 
 use crate::collision::{Capsule, CollisionWorld, Tri, Vertical, Walk};
-use crate::landblock::LandblockScene;
 use crate::stride::{fall_step, stride, Air, Stride, Underfoot};
-use crate::{lbid, BLOCK_SIZE};
 
 /// Grid spacing inside dungeons and buildings (metres).
 pub const INDOOR_SPACING: f32 = 1.5;
@@ -238,24 +236,12 @@ impl Ground<'_> {
     /// Whether the body's step carries it from `a` (feet, in `cell`) to within [`BODY_ARRIVE`]
     /// of `b`, whatever the chest line meets.
     pub fn body_reaches(&self, a: Vec3, cell: u32, b: Vec3, cap: &Capsule) -> bool {
-        self.body_comes_within(a, cell, b, BODY_ARRIVE, cap)
+        self.body_stops_within(a, cell, b, BODY_ARRIVE, cap)
+            .is_some()
     }
 
-    /// [`body_reaches`](Self::body_reaches), but `within` metres of `b` (flat, on its floor) is
-    /// there: a walk that stops short, as a corridor's aim by its wall is walked to.
-    pub fn body_comes_within(
-        &self,
-        a: Vec3,
-        cell: u32,
-        b: Vec3,
-        within: f32,
-        cap: &Capsule,
-    ) -> bool {
-        self.body_stops_within(a, cell, b, within, cap).is_some()
-    }
-
-    /// Where the walk of [`body_comes_within`](Self::body_comes_within) stops, `within` of `b` on
-    /// its floor; `None` when it does not get there.
+    /// Where the walk of [`body_reaches`](Self::body_reaches) stops when `within` metres of `b`
+    /// (flat, on its floor) is there, as a corridor's aim by its wall is walked to; `None` short.
     pub fn body_stops_within(
         &self,
         a: Vec3,
@@ -742,35 +728,6 @@ impl NavGraph {
         }
     }
 
-    /// The graph of an assembled landblock: the fine lattice in dungeons
-    /// and blocks with buildings, the coarse one over open terrain. The
-    /// `Ground` passed to the other methods must describe the same block
-    /// (its collision world and, unless it is a dungeon, its terrain).
-    pub fn for_scene(scene: &LandblockScene, collision: &CollisionWorld, cap: &Capsule) -> Self {
-        let origin = lbid::world_origin(scene.id);
-        let square = (
-            Vec2::new(origin.x, origin.y),
-            Vec2::new(origin.x + BLOCK_SIZE, origin.y + BLOCK_SIZE),
-        );
-        let hull = collision
-            .bounds()
-            .map(|(lo, hi)| (flat(lo), flat(hi)))
-            .unwrap_or(square);
-        if scene.is_dungeon {
-            NavGraph::new(hull.0, hull.1, INDOOR_SPACING, cap)
-        } else {
-            let margin = Vec2::splat(2.0 * OUTDOOR_SPACING);
-            let min = square.0.min(hull.0).max(square.0 - margin);
-            let max = square.1.max(hull.1).min(square.1 + margin);
-            let spacing = if scene.cells.is_empty() {
-                OUTDOOR_SPACING
-            } else {
-                INDOOR_SPACING
-            };
-            NavGraph::new(min, max, spacing, cap)
-        }
-    }
-
     /// Build every chunk now (tests and benchmarks; paths build lazily).
     pub fn build_all(&mut self, ground: &Ground) {
         let (cx0, cy0) = chunk_of(self.gx.0, self.gy.0);
@@ -1021,28 +978,6 @@ impl NavGraph {
             (p.x / self.spacing).round() as i32,
             (p.y / self.spacing).round() as i32,
         )
-    }
-
-    /// Where a character can stand within `radius` (metres, flat) of `p`, building what it looks
-    /// at: the choice for a caller picking where to stand near something, as a caster does to see
-    /// onto a roof.
-    pub fn standable_near(&mut self, ground: &Ground, p: Vec3, radius: f32) -> Vec<Vec3> {
-        let r = (radius / self.spacing).ceil() as i32;
-        let gx = (p.x / self.spacing).round() as i32;
-        let gy = (p.y / self.spacing).round() as i32;
-        self.ensure_columns(ground, gx - r, gx + r, gy - r, gy + r);
-        let mut out = Vec::new();
-        for dx in -r..=r {
-            for dy in -r..=r {
-                for &id in self.columns.get(&(gx + dx, gy + dy)).into_iter().flatten() {
-                    let q = self.nodes[id as usize].pos;
-                    if flat(q - p).length() <= radius {
-                        out.push(q);
-                    }
-                }
-            }
-        }
-        out
     }
 
     /// The nodes within `r` columns of `p` and [`MAX_EDGE_RISE`] of its height, nearest first

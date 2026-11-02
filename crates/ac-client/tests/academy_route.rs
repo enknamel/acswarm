@@ -1,11 +1,9 @@
 //! The Training Academy tutorial's legs are walkable on the academy
-//! landblock's own navigation graph (see `ac_client::academy`). Needs
-//! AC_DATA_DIR.
+//! landblock's own area (see `ac_client::academy`). Needs AC_DATA_DIR.
 
 use ac_scene::{
-    collision::{Capsule, CollisionWorld},
-    landblock,
-    nav::{Ground, NavGraph},
+    collision::Capsule,
+    navarea::Area,
     wayfind::{self, Search, WalkQuery},
     Assets,
 };
@@ -17,15 +15,8 @@ fn academy_legs_are_walkable() {
     let dir = ac_dat::test_data_dir();
     let assets = Assets::open(dir).unwrap();
     let block = ac_client::academy::LANDBLOCK;
-    let scene = landblock::load(&assets, block).unwrap();
-    let collision = CollisionWorld::from_scene(&assets, &scene).unwrap();
-    let ground = Ground {
-        collision: &collision,
-        terrain: None,
-        sea: None,
-        doorways: &[],
-    };
     let cap = Capsule::default();
+    let mut area = Area::build(&assets, &[block], &cap, block).unwrap();
     let origin = ac_world::landblock_origin(block);
     // Every walk within one leg of the tutorial (a leg ends at a
     // portal, which the graph cannot follow) must find a path from the
@@ -41,18 +32,20 @@ fn academy_legs_are_walkable() {
         // physics; the table says so in the step's name.
         let ramp = step.kind == ac_client::academy::Kind::Walk && step.target.contains("ramp top");
         if let Some(prev) = from.filter(|_| !ramp) {
-            let mut graph = NavGraph::for_scene(&scene, &collision, &cap);
             let t = std::time::Instant::now();
-            let q = WalkQuery {
-                from: (prev, wayfind::locate(&ground, prev)),
-                goal: (here, wayfind::locate(&ground, here)),
-                within: 0.5,
-                avoid: &[],
-                berth: 0.0,
-                indoors_too: true,
-                drops: false,
-            };
-            match wayfind::search_building(&ground, &mut graph, &q) {
+            let found = area.with_ground(|ground, graph| {
+                let q = WalkQuery {
+                    from: (prev, wayfind::locate(ground, prev)),
+                    goal: (here, wayfind::locate(ground, here)),
+                    within: 0.5,
+                    avoid: &[],
+                    berth: 0.0,
+                    indoors_too: true,
+                    drops: false,
+                };
+                wayfind::search_building(ground, graph, &q)
+            });
+            match found {
                 Search::Found(path) => eprintln!(
                     "{:?} {}: {} waypoints in {:.0} ms",
                     step.kind,

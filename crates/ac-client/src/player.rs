@@ -14,10 +14,9 @@ use ac_net::session::Session;
 use ac_scene::anim::AnimPlayer;
 use ac_scene::blockcache::BlockCollision;
 use ac_scene::collision::{Capsule, Vertical, Walk, GRAVITY};
-use ac_scene::nav::{self, Ground, NavGraph};
+use ac_scene::nav::{self, Ground};
 use ac_scene::scenery::TerrainSampler;
 use ac_scene::stride::{self, Air, Stride, Underfoot, FALL_SEARCH};
-use ac_scene::wayfind::{self, Search, WalkQuery};
 use ac_scene::Assets;
 use glam::{Quat, Vec2, Vec3};
 
@@ -65,18 +64,15 @@ pub struct Jump {
 /// `MotionCommand::Falling`, the airborne cycle.
 const FALLING: u32 = 0x4000_0015;
 
-/// A landblock the character stands in or near. The collision and the
-/// graph are the process's (`Assets::block_collision`), shared with
-/// every other character there; this only keeps the `Rc`s so that the
-/// walk does not look them up every frame.
+/// A landblock the character stands in or near. The collision is the
+/// process's (`Assets::block_collision`), shared with every other
+/// character there; this only keeps the `Rc` so that the walk does not
+/// look it up every frame.
 struct Block {
     lb: CellLandblock,
     /// Static collision geometry, fetched from the shared cache on
     /// first use.
     collision: Option<Rc<BlockCollision>>,
-    /// Navigation graph over the collision for our capsule, built chunk
-    /// by chunk as paths are planned (by us or anyone else sharing it).
-    nav: Option<Rc<RefCell<NavGraph>>>,
     /// A dungeon block: no terrain to walk on.
     dungeon: bool,
 }
@@ -907,7 +903,6 @@ impl Player {
                 Block {
                     lb,
                     collision: None,
-                    nav: None,
                     dungeon: false,
                 },
             );
@@ -1146,7 +1141,7 @@ impl Player {
     /// it -- its collision, and outside a dungeon its terrain and sea --
     /// for this character's capsule; `None` when the block has no
     /// collision.
-    fn on_ground<R>(
+    pub(crate) fn on_ground<R>(
         &mut self,
         assets: &Assets,
         block: u32,
@@ -1175,120 +1170,6 @@ impl Player {
                 .unwrap_or(&[]),
         };
         Some(f(&ground, &cap))
-    }
-
-    /// Run `f` on landblock `block`'s navigation graph and the ground it is built over; `None`
-    /// without collision.
-    pub(crate) fn on_nav<R>(
-        &mut self,
-        assets: &Assets,
-        block: u32,
-        f: impl FnOnce(&mut NavGraph, &Ground) -> R,
-    ) -> Option<R> {
-        let block = block & 0xFFFF_0000;
-        self.collision(assets, block)?;
-        let cap = self.capsule;
-        let height_table = self.height_table.clone();
-        let sea_types = self.sea_types(assets).to_vec();
-        let b = self.blocks.get_mut(&block)?;
-        if b.nav
-            .as_ref()
-            .is_some_and(|n| !n.borrow().capsule.same(&cap))
-        {
-            b.nav = None;
-        }
-        if b.nav.is_none() {
-            b.nav = Some(b.collision.as_ref()?.nav(assets, &cap).ok()?);
-        }
-        let collision = &b.collision.as_ref()?.world;
-        let sampler = TerrainSampler::new(&b.lb, &height_table);
-        let origin = ac_world::landblock_origin(block);
-        let terrain =
-            |x: f32, y: f32| sampler.height_in_square(Vec3::new(x - origin.x, y - origin.y, 0.0));
-        let sea = |x: f32, y: f32| sea_at(&b.lb, &sea_types, x - origin.x, y - origin.y);
-        // The block's doorways, so the graph stands a node in each
-        // rather than leaving every building sealed.
-        let doorways = b
-            .collision
-            .as_ref()
-            .map(|c| c.doorways.clone())
-            .unwrap_or_default();
-        let ground = Ground {
-            collision,
-            terrain: (!b.dungeon).then_some(&terrain),
-            sea: (!b.dungeon).then_some(&sea),
-            doorways: &doorways,
-        };
-        let mut nav = b.nav.as_ref()?.borrow_mut();
-        Some(f(&mut nav, &ground))
-    }
-
-    /// Where a character can stand within `radius` (metres, flat) of `p` in landblock `block`:
-    /// the navigation graph's own places, empty without collision.
-    pub fn standable_near(
-        &mut self,
-        assets: &Assets,
-        block: u32,
-        p: Vec3,
-        radius: f32,
-    ) -> Vec<Vec3> {
-        self.on_nav(assets, block, |nav, ground| {
-            nav.standable_near(ground, p, radius)
-        })
-        .unwrap_or_default()
-    }
-
-    /// A walkable route from `from` to within `within` (metres, 3D) of `to`, standing in `to_cell`
-    /// (only its block when the low word is 0), over landblock `block`'s graph (`wayfind`): the
-    /// waypoints after `from`, or `None` when there is no way. `from` is in this body's cell when
-    /// it is where the body stands, else located by the cells.
-    pub fn find_path(
-        &mut self,
-        assets: &Assets,
-        block: u32,
-        from: Vec3,
-        to: Vec3,
-        to_cell: u32,
-        within: f32,
-    ) -> Option<Vec<Vec3>> {
-        let block = block & 0xFFFF_0000;
-        let mine = from.distance(self.world_position()) < 1e-3;
-        let from_cell = if mine { self.cell } else { block };
-        let avoid = ac_nav::routing::portal_mouths_to_avoid(from, to);
-        self.on_nav(assets, block, |nav, ground| {
-            let (nodes, chunks) = (nav.len(), nav.chunk_count());
-            let started = Instant::now();
-            let place = |at: Vec3, cell: u32| ac_world::Place { at, cell };
-            let q = WalkQuery {
-                from: ac_nav::routing::graph_end(ground, place(from, from_cell)),
-                goal: ac_nav::routing::graph_end(ground, place(to, to_cell)),
-                within,
-                avoid: &avoid,
-                berth: ac_nav::routing::PORTAL_BERTH,
-                indoors_too: true,
-                drops: false,
-            };
-            let found = wayfind::search_building(ground, nav, &q);
-            if nav.chunk_count() != chunks {
-                tracing::debug!(
-                    "nav {block:#010x}: {} nodes in {} chunks (+{} nodes, {} chunks, {:.0} ms this search)",
-                    nav.len(),
-                    nav.chunk_count(),
-                    nav.len() - nodes,
-                    nav.chunk_count() - chunks,
-                    started.elapsed().as_secs_f64() * 1e3
-                );
-            }
-            match found {
-                Search::Found(path) => Some(path.into_iter().map(|(n, _)| n.pos).collect()),
-                Search::NoWay(why) => {
-                    tracing::debug!("nav {block:#010x}: no way to {to:?}: {why:?}");
-                    None
-                }
-                Search::Unbuilt(_) => None,
-            }
-        })
-        .flatten()
     }
 
     /// Fraction along `from`..`to` where static geometry first blocks the

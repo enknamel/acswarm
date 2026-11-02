@@ -26,6 +26,7 @@
 use ac_client::pathfinder::Pathfinder;
 use ac_client::player::{Input, MovementLimits, Player};
 use ac_client::testkit::human;
+use ac_nav::routing::Planned;
 use ac_nav::{Aim, Ground, Steering};
 use ac_net::session::{Config, Session};
 use ac_scene::Assets;
@@ -60,13 +61,38 @@ fn stand(assets: &Assets, cell: u32, at: Vec3) -> Player {
     human(assets, cell, local, Quat::IDENTITY)
 }
 
+/// A region planner that builds what a plan needs before it answers, as an offline client's does.
+fn planner(assets: &Assets) -> Pathfinder {
+    let mut p = Pathfinder::new(assets);
+    p.build_when_planning();
+    p
+}
+
+/// The region planner's route from where `pl` stands to within `within` of `goal` (named by
+/// its block only), as the steering asks it.
+fn plan(assets: &Assets, pl: &Player, goal: Vec3, within: f32) -> Option<Vec<Vec3>> {
+    let me = ac_world::Place {
+        at: pl.world_position(),
+        cell: pl.cell,
+    };
+    let to = ac_world::Place {
+        at: goal,
+        cell: pl.landblock(),
+    };
+    match planner(assets).plan(me, to, within, pl.capsule()) {
+        Planned::Route(r) => Some(r.points()),
+        _ => None,
+    }
+}
+
 /// The steering's questions answered as the client answers them, from
-/// the character's own collision and, when there is one, the planner on
-/// its thread -- waited for, so that its route is taken on the very next
-/// frame, the soonest the client could take it.
+/// the character's own collision and the region planner, and, when there
+/// is one, the wide planner on its thread -- waited for, so that its route
+/// is taken on the very next frame, the soonest the client could take it.
 struct Standing<'a> {
     player: &'a mut Player,
     assets: &'a Assets,
+    planner: &'a mut Pathfinder,
     wide: Option<&'a mut Pathfinder>,
 }
 
@@ -94,8 +120,16 @@ impl Ground for Standing<'_> {
         cell: u32,
         within: f32,
     ) -> Option<Vec<Vec3>> {
-        self.player
-            .find_path(self.assets, block, from, to, cell, within)
+        let mine = from.distance(self.player.world_position()) < 1e-3;
+        let from = ac_world::Place {
+            at: from,
+            cell: if mine { self.player.cell } else { block },
+        };
+        let to = ac_world::Place { at: to, cell };
+        match self.planner.plan(from, to, within, self.player.capsule()) {
+            Planned::Route(r) => Some(r.points()),
+            _ => None,
+        }
     }
     fn ask_wide(&mut self, from: Vec3, to: Vec3, _block: u32, cell: u32, within: f32) {
         let cap = self.player.capsule();
@@ -129,9 +163,11 @@ impl Ground for Standing<'_> {
 fn steer(assets: &Assets, pl: &mut Player, goal: Vec3) -> Aim {
     let block = pl.landblock();
     let mut st = Steering::new(Instant::now());
+    let mut planner = planner(assets);
     let mut ground = Standing {
         player: pl,
         assets,
+        planner: &mut planner,
         wide: None,
     };
     st.steer(&mut ground, goal, block, 2.5, Instant::now())
@@ -150,6 +186,7 @@ fn chase(
     secs: f32,
 ) -> Vec<(Vec3, bool)> {
     let mut st = Steering::new(Instant::now());
+    let mut planner = planner(assets);
     let mut wide = wide;
     let mut now = Instant::now();
     let mut frames = Vec::new();
@@ -164,6 +201,7 @@ fn chase(
                 let mut ground = Standing {
                     player: pl,
                     assets,
+                    planner: &mut planner,
                     wide: wide.as_deref_mut(),
                 };
                 st.steer(&mut ground, goal, block, 2.5, now)
@@ -209,8 +247,7 @@ fn a_straight_walk_off_a_ledge_onto_the_floor_below_is_leaned_on() {
     let mut pl = stand(&assets, LEDGE_CELL, ledge);
     assert!(pl.line_blocked(&assets, DUNGEON, ledge, goal));
     assert!(
-        pl.find_path(&assets, DUNGEON, ledge, goal, DUNGEON, 0.5)
-            .is_none(),
+        plan(&assets, &pl, goal, 0.5).is_none(),
         "the ledge is an island: nothing leads down from it"
     );
     // Off the edge onto the room's floor is the only way down there is,
@@ -235,9 +272,7 @@ fn a_straight_walk_from_the_floor_to_a_goal_up_on_a_ledge_is_refused() {
     assert!(goal.z > 9.0, "not up on the ledge: {goal}");
     let mut pl = stand(&assets, LEDGE_CELL, me);
     assert!(pl.line_blocked(&assets, DUNGEON, me, goal));
-    assert!(pl
-        .find_path(&assets, DUNGEON, me, goal, DUNGEON, 0.5)
-        .is_none());
+    assert!(plan(&assets, &pl, goal, 0.5).is_none());
     // Nothing solid in the way and floor all the way to the spot under
     // the goal: leaning on that gets a character to stand beneath it
     // and push, for ever.
@@ -294,6 +329,7 @@ fn the_stair_corridor_is_walked_not_refused() {
 
     // And walked, all the way down, feet on the stairs.
     let mut st = Steering::new(Instant::now());
+    let mut planner = planner(&assets);
     let mut now = Instant::now();
     let dt = 1.0 / 30.0;
     let run = Input {
@@ -310,6 +346,7 @@ fn the_stair_corridor_is_walked_not_refused() {
             let mut ground = Standing {
                 player: &mut pl,
                 assets: &assets,
+                planner: &mut planner,
                 wide: None,
             };
             st.steer(&mut ground, foot, DUNGEON, 0.5, now)
@@ -653,9 +690,7 @@ fn the_stairs_down_from_an_upper_floor_are_found_and_walked() {
     let goal = Vec3::new(32_550.17, 34_597.33, 94.0);
     let mut pl = stand(&assets, 0xA9B4_0160, me);
     assert!(pl.line_blocked(&assets, HOLTBURG, me, goal));
-    let route = pl
-        .find_path(&assets, HOLTBURG, me, goal, HOLTBURG, 0.5)
-        .expect("the stairs down");
+    let route = plan(&assets, &pl, goal, 0.5).expect("the stairs down");
     assert!(route.len() > 4, "not the stairs: {route:?}");
     assert!(!pl.line_drops(&assets, HOLTBURG, me, goal));
     match steer(&assets, &mut pl, goal) {

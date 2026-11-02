@@ -7,8 +7,8 @@
 //! planned on one block at a time could not see it.
 
 use ac_scene::{
-    collision::{Capsule, CollisionWorld},
-    landblock, lbid,
+    collision::Capsule,
+    lbid,
     nav::{Ground, NavGraph},
     navarea::{blocks_for, Area},
     wayfind::{self, Search, WalkQuery},
@@ -106,22 +106,10 @@ fn a_walk_into_sanamar_goes_round_the_walls_not_into_them() {
     // The same walk planned on the goal's landblock alone: the start is
     // outside that block, so the single-block planner has nothing to
     // stand on and cannot answer at all.
-    let scene = landblock::load(&assets, block).unwrap();
-    let collision = CollisionWorld::from_scene(&assets, &scene).unwrap();
-    let mut one = NavGraph::for_scene(&scene, &collision, &cap);
-    let sampler = |x: f32, y: f32| {
-        scene
-            .terrain
-            .height_at(Vec3::new(x - origin.x, y - origin.y, 0.0))
-    };
-    let ground = ac_scene::nav::Ground {
-        collision: &collision,
-        terrain: Some(&sampler),
-        sea: None,
-        doorways: &[],
-    };
+    let mut one = Area::build(&assets, &[block], &cap, block).unwrap();
     assert!(
-        route(&ground, &mut one, from, square, 0.5).is_none(),
+        one.with_ground(|ground, nav| route(ground, nav, from, square, 0.5))
+            .is_none(),
         "one landblock alone should not be able to plan this walk"
     );
 }
