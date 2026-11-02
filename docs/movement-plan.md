@@ -1,6 +1,7 @@
 # Movement: plan the whole route, then follow it
 
-Status: proposed 2026-11-01; phases 1 and 2 built on branches `phase1` and `phase2`, not merged.
+Status: proposed 2026-11-01; phases 0-3 merged (main `0db2f2f`); phase 4 built on branch `phase4`,
+not merged.
 Replaces spot fixes to walking with one design.
 
 ## The rule
@@ -290,6 +291,36 @@ the stalls gain the 5C49 ledge and the random areas the Tusker ground, 0x5C49):
 - Every walk is a `go` from an owner, a journey's leg included (`Owner::Journey`, `walk_leg`).
   `head_for`, `head_toward`, `walk_toward`, the `follow` slot, `drop_stale_walk` and the 192 m
   `WALKABLE` split are gone; the region the planner holds is the one boundary.
+
+**Phase 4** (branch `phase4`, journeys: `docs/movement-phase4-design.md`; the harness gains
+`journeys_across_regions`, five trials from one region into another):
+
+| trials | arrived | refused | gave up | still pushing | AGREE planned+arrived, planned+failed, no-way+arrived, no-way+failed |
+|---|---|---|---|---|---|
+| the stalls seen live (12) | 10 | 2 (2CB5 coast edge; the 5C49 ledge) | 0 | 0 | 10, 0, 0, 2 |
+| random walks, 9 areas x 15 (135) | 122 | 13 | 0 | 0 | 122, 0, 0, 13 |
+| journeys (5), on the legs | 3 | 0 | 1 | 1 | - |
+| journeys (5), phase 4 | 4 | 0 | 1 | 0 | - |
+
+- `SUMMARY 12 trials: 10 arrived, 2 refused, 0 gave up, 0 still pushing`, `SUMMARY 135 trials:
+  122 arrived, 13 refused, 0 gave up, 0 still pushing` and `SUMMARY 5 trials: 4 arrived, 0
+  refused, 1 gave up, 0 still pushing`; WAITED 0 on all three (on the legs, 4518 at E632);
+  INVARIANT planned-must-arrive 10 of 10 and 122 of 122. Stalls and random walks are outcome for
+  outcome and time for time phase 3's at every code commit.
+- Journeys, legs then phase 4: the Holtburg to Facility Hub Warden visit (into 0x8A0201F7) 19.3 s
+  then 18.6 s; the A9B2 platform to Archmage Cindrue upstairs (0xA9B4011B) 41.9 s then 42.0 s;
+  out of Archmage Yuzai Zhen's at Nanto (E632) still pushing, 400.8 m left, then arrived 36.6 s;
+  the ACB5 mine floor to open ground 38.3 s then 37.9 s; Holtburg to the 01F6 ledge given up
+  at 39.4 s, then refused on arriving in the dungeon at 34.4 s (the harness counts a refusal
+  after its first second as "gave up").
+- Each step carries its `Place`; each walk is planned whole before a step, a stretch along a
+  `worldroute` corridor past the region; a step with no walk is left out and the trip planned
+  again; the slot's `GIVE_UP_AFTER` is the one clock. A journey is its row's (a visit's too):
+  held while another row acts, put down for its row to walk on when it stands aside or is passed
+  over. After a hop a walk with no way is left out and the trip planned again. `floor_in_cell`
+  and `has_way_to` went here.
+- The review fixes (`d512833`, `fede9ea`, `5e01c0c`) change no trial: the ledge's last walk, left
+  out on arriving, is planned again and refused at 34.4 s, nothing else reaching it.
 
 ## Phases (each merged alone, each measured against the last)
 

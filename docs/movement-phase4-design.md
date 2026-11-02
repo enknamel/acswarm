@@ -1,7 +1,46 @@
 # Movement phase 4 design: journeys
 
-Status: design, 2026-11-02, for phase 4 of `docs/movement-plan.md` ("Journeys plan every walk
-too"). Line anchors are on `0db2f2f` (main, phases 0-3 merged). Nothing here is built yet.
+Status: built, 2026-11-02 (branch `phase4`, steps 1-4), for phase 4 of `docs/movement-plan.md`
+("Journeys plan every walk too"). Line anchors are on `0db2f2f` (main, phases 0-3 merged); the
+measures are in the plan's "Phase 4". Where the build departed from this design:
+- A goal in a surface building's room (a counter, a shopkeeper upstairs) is handed to the trip
+  planner as the ground outside it (`Client::planning_place`, the goal's `planning_cell`), and the
+  trip's last walk is put back to the room: an indoor cell is walkable only in its own block, so
+  as it is every counter in another block would have been "not a walk". A dungeon block is known
+  by `WorldGrid::is_dungeon_block` (flat at zero, as `landblock::load` reads it).
+- `plan_trip` became `set_off(owner, goal, now) -> Did` in step 2, not 1; the journey's owner is
+  `Travel.owner: Option<Owner>` (not `Travel.row`), read through `journey_row()`, and taking a
+  journey over is `keep_journey()` for the running row or `take_journey(owner)`; a refusal is
+  told to `set_off`'s caller through `Travel.why_refused`. `travel.rs` fell under 1,500 lines in
+  step 2's first engine commit, which took its `LONG_FILES` row.
+- A journey ends within its goal's `within` (the legs ignored it): the town run's `VENDOR_REACH`
+  (35 m) counts the Holtburg lifestone, 31.8 m from a counter, as there, so four panel tests start
+  45 m off on the green. A follower whose leader stands on the 5C49 ledge is refused its journey
+  as it sets off. With no ring of guesses round a target, a spot in the river east of Holtburg
+  has no walk, and `a_visit_far_off_...` moved its spot 100 m north.
+- Setting off plans a walk on the frame, seconds offline: tests run their clocks from the set-off
+  (`Client.frame_at`), and the journey test driver arrives by `server_walk::reached` in 3D. With
+  no terrain loaded (offline, no data) an overland step stands, refused by nothing.
+- §5.2's holding: a row's journey is held only while another row acts. It is put down
+  (`broken_off`, so the row's errand reads it as broken off, not short) when its row stood aside
+  this tick (`Travel.row_aside`, set beside `aside()` in `run_steps`) unless a later row takes it
+  over, when its goal row was weighed worth nothing (passed over: `Weighed::has_row`), or when no
+  row acted. Ended without `broken_off`, grow skipped its own ground; held whenever its row did not
+  act, a journey of a row never run again (town runs switched off) stood for ever.
+- The town run's walk back to its ground is handed to the grow row
+  (`take_journey(Owner::Step(growth::GROW_ROW))`), whose errand it is. In a party restocking
+  together grow stands aside, so a mate done shopping waits in town and walks back once the party
+  hunts (logistics: nobody goes back until everybody is ready); main walked it home alone.
+- A visit keeps whose it is (`Visit.owner`: the running row as it starts, else `Owner::Visit`)
+  and sets off its journey for that owner; a row's visit whose journey was put down waits and is
+  set off again only from its row, and grow ticks its own visit first (`is_own_visit`).
+- §4.5's final `Walk`: once the journey has been carried into another region (`Travel.hopped`), a
+  walk with no way is left out like a mouth (`ac_world::trip::NoWalk`, `Travel.refused_walks`: no
+  walk to that end from within 30 m of where the body stood) and the trip planned again; only the
+  walk from where the journey set off refuses it at once.
+- `growth::State.bound_since` went with the errands' clocks, its only reader. `cargo test-data
+  -p X filter` cannot filter (the alias has `--workspace`): targeted runs were `cargo test -p
+  ac-client --lib -- --include-ignored FILTER`.
 
 The trip planner keeps choosing portals, recalls and gems. What changes is how a journey walks:
 each step carries the `Place` it walks to, the walk through each region is planned whole by the one
