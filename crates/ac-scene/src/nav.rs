@@ -32,8 +32,8 @@ const RAMP_FLOOR: f32 = 0.5;
 const RAMP_LEVEL: f32 = 0.97;
 /// A snapped node may move at most this fraction of the spacing.
 const SNAP_FRACTION: f32 = 0.6;
-/// How far one step of the body's walk goes (metres): a frame's run at 20 Hz.
-const BODY_STEP: f32 = 0.2;
+/// How far one step of the body's walk goes (metres): the walk test's and the body's own stride.
+pub const BODY_STEP: f32 = 0.2;
 /// How near the body's step must come to the far node of an edge, flat (metres).
 pub const BODY_ARRIVE: f32 = 0.25;
 /// The least share of a step the body's walk must close on the far node; less is a wall.
@@ -44,6 +44,8 @@ const SWEPT_SPAN: f32 = 4.0;
 const TOUCHING: f32 = 0.01;
 /// How fast a body steps off a ledge (m/s): the follower's pace on a drop leg.
 pub const DROP_SPEED: f32 = 1.0;
+/// The body's step at [`DROP_SPEED`] (metres), a frame at 20 Hz: where a drop is walked off.
+const DROP_STEP: f32 = DROP_SPEED * FALL_DT;
 /// The deepest drop (metres): ACE hurts a landing over 11.25 + 4.5 m/s (Player_Move.cs:254-259).
 const DROP_MAX: f32 = 12.0;
 /// A fall still in the air this long (seconds) is over nothing: the highest jump's flight.
@@ -223,7 +225,16 @@ impl<'a> Ground<'a> {
         let mut swept = Swept::over(self, a.pos, b.pos, cap);
         let mut one_way = |p: &NavNode, q: &NavNode| {
             matches!(
-                self.stride_over(&mut swept, p.pos, p.cell, q.pos, BODY_ARRIVE, cap, None),
+                self.stride_over(
+                    &mut swept,
+                    p.pos,
+                    p.cell,
+                    q.pos,
+                    BODY_ARRIVE,
+                    BODY_STEP,
+                    cap,
+                    None
+                ),
                 Reach::Reached { .. }
             )
             .then(|| walk_kind(p.cell, q.cell))
@@ -250,7 +261,16 @@ impl<'a> Ground<'a> {
         let mut track = vec![a];
         let near = a + (b - a).clamp_length_max(SWEPT_SPAN);
         let mut u = Swept::over(self, a, near, cap);
-        let reach = self.stride_over(&mut u, a, cell, b, BODY_ARRIVE, cap, Some(&mut track));
+        let reach = self.stride_over(
+            &mut u,
+            a,
+            cell,
+            b,
+            BODY_ARRIVE,
+            BODY_STEP,
+            cap,
+            Some(&mut track),
+        );
         if !matches!(reach, Reach::Reached { .. }) {
             return None;
         }
@@ -302,21 +322,36 @@ impl<'a> Ground<'a> {
     /// and in which cell, stepping off at [`DROP_SPEED`] as every drop edge is simulated; else `None`.
     pub fn drop_toward(&self, a: Vec3, cell: u32, b: Vec3, cap: &Capsule) -> Option<(Vec3, u32)> {
         let level = Vec3::new(b.x, b.y, a.z);
-        let Reach::Falls { at } = self.stride_toward(a, cell, level, BODY_ARRIVE, cap) else {
+        let near = a + (level - a).clamp_length_max(SWEPT_SPAN);
+        let mut u = Swept::over(self, a, near, cap);
+        let off = self.stride_over(&mut u, a, cell, level, BODY_ARRIVE, BODY_STEP, cap, None);
+        let Reach::Falls { from, cell: c, .. } = off else {
+            return None;
+        };
+        // The last stride again at the body's own step at that pace, which is where it steps off.
+        let off = self.stride_over(&mut u, from, c, level, BODY_ARRIVE, DROP_STEP, cap, None);
+        let Reach::Falls { from, at, .. } = off else {
             return None;
         };
         let dir = flat(b - a).normalize_or_zero() * DROP_SPEED;
-        self.fall_from(at, Vec3::new(dir.x, dir.y, 0.0), cell, cap)
+        self.fall_from(from, at, Vec3::new(dir.x, dir.y, 0.0), cell, cap)
     }
 
-    /// Where a body going over an edge at `at` (feet, from `cell`) at `vel` lands, and in which
-    /// cell, followed as it falls ([`fall_step`]); `None` deeper than `DROP_MAX` or over nothing.
-    pub fn fall_from(&self, at: Vec3, vel: Vec3, cell: u32, cap: &Capsule) -> Option<(Vec3, u32)> {
+    /// Where a body stepping from `from` off an edge at `at` (feet, from `cell`) at `vel` lands, in
+    /// which cell, fallen as the body falls ([`fall_step`]); `None` past `DROP_MAX` or over nothing.
+    pub fn fall_from(
+        &self,
+        from: Vec3,
+        at: Vec3,
+        vel: Vec3,
+        cell: u32,
+        cap: &Capsule,
+    ) -> Option<(Vec3, u32)> {
         let drift = at + vel * OVER_NOTHING - Vec3::new(0.0, 0.0, DROP_MAX);
-        let u = Swept::over(self, at, drift, cap);
-        let (mut p, mut vel, mut vz) = (at, vel, 0.0);
+        let u = Swept::over(self, from, drift, cap);
+        let (mut p, mut to, mut vel, mut vz) = (from, at, vel, 0.0);
         for _ in 0..(OVER_NOTHING / FALL_DT) as usize {
-            match fall_step(&u, p, p + vel * FALL_DT, vz, FALL_DT, cell, cap) {
+            match fall_step(&u, p, to, vz, FALL_DT, cell, cap) {
                 Air::Landed { at: land, cell } => {
                     return (at.z - land.z <= DROP_MAX).then_some((land, cell));
                 }
@@ -329,6 +364,7 @@ impl<'a> Ground<'a> {
                         vel = Vec3::ZERO;
                     }
                     (p, vz) = (next, v);
+                    to = p + vel * FALL_DT;
                     if at.z - p.z > DROP_MAX {
                         return None;
                     }
@@ -348,13 +384,14 @@ impl<'a> Ground<'a> {
             cell,
             b,
             within,
+            BODY_STEP,
             cap,
             None,
         )
     }
 
-    /// [`stride_toward`](Self::stride_toward) stepping on `u`, gathered again [`SWEPT_SPAN`] on
-    /// whenever a step leaves it (each scans only what lies near it); each step goes to `track`.
+    /// [`stride_toward`](Self::stride_toward) by steps of `stride_len` on `u`, gathered again
+    /// [`SWEPT_SPAN`] on whenever a step leaves it; each step goes to `track`.
     #[allow(clippy::too_many_arguments)] // the walk test's own inputs, and where its steps go
     fn stride_over<'g>(
         &'g self,
@@ -363,12 +400,13 @@ impl<'a> Ground<'a> {
         cell: u32,
         b: Vec3,
         within: f32,
+        stride_len: f32,
         cap: &Capsule,
         mut track: Option<&mut Vec<Vec3>>,
     ) -> Reach {
         let (mut p, mut cell) = (a, cell);
         let mut left = flat(b - a).length();
-        for _ in 0..(left / BODY_STEP).ceil() as usize + 4 {
+        for _ in 0..(left / stride_len).ceil() as usize + 4 {
             if left <= within.max(TOUCHING) {
                 // A step from `b`'s floor is on it: down a stair, the ramp walked lies 0.33 m under the
                 // tread its node stands on (test: the_stairs_up_to_a_scrivener_are_walked_down_too).
@@ -379,7 +417,7 @@ impl<'a> Ground<'a> {
                 };
             }
             let d = flat(b - p);
-            let step = d.normalize() * d.length().min(BODY_STEP);
+            let step = d.normalize() * d.length().min(stride_len);
             let to = Vec3::new(p.x + step.x, p.y + step.y, p.z);
             if !u.covers(p, to, cap) {
                 let ahead = Vec3::new(b.x, b.y, p.z) - p;
@@ -387,12 +425,12 @@ impl<'a> Ground<'a> {
             }
             let (next, next_cell) = match stride(&*u, p, cell, to, cap) {
                 Stride::Stand { at, cell } => (at, cell),
-                Stride::Falls { at } => return Reach::Falls { at },
+                Stride::Falls { at } => return Reach::Falls { from: p, cell, at },
                 Stride::Blocked | Stride::Adrift { .. } => return Reach::Stopped,
             };
             // A step that closes little is sliding along a wall the hop runs into.
             let now_left = flat(b - next).length();
-            if now_left > left - BODY_STEP * BODY_CLOSING {
+            if now_left > left - stride_len * BODY_CLOSING {
                 return Reach::Stopped;
             }
             left = now_left;
@@ -410,8 +448,8 @@ impl<'a> Ground<'a> {
 pub enum Reach {
     /// Within reach of it, on its floor, standing in `cell` (0 outdoors).
     Reached { at: Vec3, cell: u32 },
-    /// Off an edge at `at` on the way.
-    Falls { at: Vec3 },
+    /// Off an edge at `at` on the way, by the step from `from` in `cell`.
+    Falls { from: Vec3, cell: u32, at: Vec3 },
     /// Held by a wall, sliding along one, or off every floor.
     Stopped,
 }

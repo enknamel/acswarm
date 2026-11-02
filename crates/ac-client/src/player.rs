@@ -230,22 +230,9 @@ pub const MAX_JUMP_HEIGHT: f32 = 9.5;
 /// word for where it is, follows it tens of kilometres down.
 const OVER_NOTHING: f32 = 2.8;
 
-/// The longest step the walk takes in one go: a longer frame is walked a
-/// step this long at a time.
-///
-/// A step looks for its floor where it ends, within a step up or down of
-/// where it began, and up a ramp what it finds turns on how long the step
-/// is. The stairs out of the Holtburg dungeon's 0x01F6028E rise six
-/// tenths of a metre in a metre, so a step of a metre ended with the
-/// stairs over the feet: no floor within reach, the storey under the
-/// stairs found instead, and the character fell through them and on past
-/// the end of that storey for ever. A headless client ticks ten or twenty
-/// times a second, a frame that builds a piece of the navigation graph
-/// takes longer, and at a run those were steps of one to four metres.
-///
-/// Half a metre is what the navigation graph samples its own walks at,
-/// so a walk it passed is walked the way it was checked.
-const STRIDE: f32 = 0.5;
+/// The longest step a frame is cut into (metres): the walk test's own, so a leg the graph passed
+/// is walked as checked, stairs too (a_long_frame_running_up_the_stairs_out_of_028e_keeps_its_feet).
+const STRIDE: f32 = ac_scene::nav::BODY_STEP;
 
 /// The most steps one frame is cut into: enough for the longest frame
 /// the headless client allows, a quarter of a second, at the fastest
