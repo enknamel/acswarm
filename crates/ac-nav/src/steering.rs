@@ -230,14 +230,19 @@ fn is_in_reach(at: Vec3, goal: Vec3, within: f32) -> bool {
 }
 
 impl Stall {
-    /// Whether `c`, joined, walks the waypoints this stall still had.
+    /// Whether `c`, joined, walks the waypoints this stall still had, its end where the goal has
+    /// carried the stalled one: a goal that moves moves the end, not the way.
     fn is_route(&self, c: &Course) -> bool {
         let fresh = c.left();
-        fresh.len() == self.left.len()
-            && fresh
-                .iter()
-                .zip(&self.left)
-                .all(|(a, b)| is_same_spot(*a, *b))
+        let n = fresh.len();
+        n == self.left.len()
+            && fresh.iter().zip(&self.left).enumerate().all(|(i, (a, b))| {
+                if i + 1 == n {
+                    is_same_spot(*a - c.goal.at, *b - self.goal)
+                } else {
+                    is_same_spot(*a, *b)
+                }
+            })
     }
 }
 
@@ -328,6 +333,10 @@ impl Steering {
                     {
                         return self.refuse(goal, Unreachable::Stalled);
                     } else {
+                        // Planned again for a moved goal, the clock runs on: chasing it is not progress.
+                        if let (Replan::Moved, Some(old)) = (why, self.route.as_ref()) {
+                            c.since = old.since;
+                        }
                         tracing::debug!(
                             "route: {} waypoints to {:?} ({why:?})",
                             c.waypoints.len(),
@@ -834,6 +843,46 @@ mod tests {
             Aim::Go(nearer)
         );
         assert!(!st.no_way());
+    }
+
+    #[test]
+    fn a_body_held_still_chasing_a_moving_goal_is_refused() {
+        let t0 = Instant::now();
+        let mut st = Steering::default();
+        let mut g = Fake::standing(Vec3::new(10.0, 10.0, 0.0));
+        let mut refused = None;
+        for frame in 0..80 {
+            let t = frame as f32 * 0.05;
+            // The goal runs on 3.5 m a second; the body, held, never moves.
+            let goal = Vec3::new(20.0 + 3.5 * t.floor(), 10.0, 0.0);
+            g.answers.clear();
+            g.route(&[goal]);
+            if st.steer(&mut g, place(goal), 0.5, secs(t0, t)) == Aim::NoWay {
+                refused = Some(t);
+                break;
+            }
+        }
+        assert!(refused.is_some_and(|t| t <= 2.0), "refused at {refused:?}");
+        assert_eq!(
+            st.unreachable(g.asks.last().unwrap().1.at),
+            Some(Unreachable::Stalled)
+        );
+    }
+
+    #[test]
+    fn a_body_running_after_a_faster_goal_is_never_refused() {
+        let t0 = Instant::now();
+        let mut st = Steering::default();
+        let mut g = Fake::standing(Vec3::new(10.0, 10.0, 0.0));
+        for frame in 0..80 {
+            let t = frame as f32 * 0.05;
+            let goal = Vec3::new(20.0 + 5.0 * t.floor(), 10.0, 0.0);
+            g.answers.clear();
+            g.route(&[goal]);
+            let aim = st.steer(&mut g, place(goal), 0.5, secs(t0, t));
+            assert_ne!(aim, Aim::NoWay, "refused at {t}");
+            g.at.x += 0.2;
+        }
     }
 
     #[test]
