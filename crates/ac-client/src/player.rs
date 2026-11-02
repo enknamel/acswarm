@@ -957,14 +957,13 @@ impl Player {
         self.sea_types.as_deref().unwrap_or(&[])
     }
 
-    /// The shape the character walks as, for planners that work on a
-    /// copy of the world.
-    /// Pressed against geometry for [`WEDGED_STEPS`] while still asking to move (telemetry's
+    /// Pressed against geometry for `WEDGED_STEPS` steps while still asking to move (telemetry's
     /// `wedged`); the follower's own no-progress replan is what answers it.
     pub fn wedged(&self) -> bool {
         self.wedged_for >= WEDGED_STEPS
     }
 
+    /// The shape the character walks as, for planners that work on a copy of the world.
     pub fn capsule(&self) -> Capsule {
         self.capsule
     }
