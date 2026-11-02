@@ -1,6 +1,6 @@
 use ac_nav::routing::{NoWay, Planned};
 use ac_world::Place;
-use glam::{Vec2, Vec3};
+use glam::Vec3;
 
 use crate::{player, Client};
 
@@ -49,27 +49,6 @@ impl Client {
         };
         let cap = pl.capsule();
         self.pathfinder.standable_near(me, around, radius, cap)
-    }
-
-    /// Whether a walk can get from the character to within `within` metres of `at` (standing in
-    /// `cell`), by the region planner, whose route checks its last leg too: false only on its "no
-    /// way"; one past the region is the journey planner's, and one still being built is let be.
-    pub(crate) fn has_way_to(&mut self, at: Vec3, cell: u32, within: f32) -> bool {
-        match self.plan_walk(Place { at, cell }, within) {
-            Planned::Route(_) | Planned::Building(_) | Planned::NoWay(NoWay::OutOfRegion) => true,
-            Planned::NoWay(why) => {
-                tracing::debug!("travel: no way to {at:?}: {why:?}");
-                false
-            }
-        }
-    }
-
-    /// The height of `cell`'s floor at `at`: a dungeon's levels stack, so a spot on the map alone
-    /// names no floor (a_walk_that_gets_nowhere_is_given_up). `None` when the cell has none there.
-    pub(crate) fn floor_in_cell(&self, at: Vec2, cell: u32) -> Option<f32> {
-        let rooms = self.assets.block_collision(cell & 0xFFFF_0000).ok()?;
-        let floors = rooms.world.floors_at_xy(at.x, at.y);
-        floors.into_iter().find(|f| f.1 == cell).map(|f| f.0)
     }
 
     /// Let go of the walk in the slot and the journey under way, saying `why`.

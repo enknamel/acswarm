@@ -407,6 +407,18 @@ impl Place {
             cell: p.cell,
         }
     }
+
+    /// A map point known by position alone: the outdoor cell under `xy`, height 0 until a region
+    /// puts it on its floor.
+    pub fn on_map(xy: glam::Vec2) -> Place {
+        let block = (((xy.x / 192.0).floor().clamp(0.0, 255.0) as u32) << 24)
+            | (((xy.y / 192.0).floor().clamp(0.0, 255.0) as u32) << 16);
+        let at = xy.extend(0.0);
+        Place {
+            at,
+            cell: outdoor_cell(block, at - landblock_origin(block)),
+        }
+    }
 }
 
 /// Decide what to do with a server position echo for our own character:

@@ -236,8 +236,10 @@ impl Client {
         // counter, or between journeys once a corpse or a fight on the way
         // has ended one, a walk back to the area would take the character
         // off its run, and the run's own step, ranked below this one, would
-        // never see it again.
-        if self.autoplay.growth.town_run_under_way() {
+        // never see it again. Nor on another row's visit.
+        if self.autoplay.growth.town_run_under_way()
+            || (self.visiting().is_some() && !self.is_own_visit())
+        {
             return false;
         }
         // Never in the middle of a fight: something hitting the character
@@ -255,8 +257,11 @@ impl Client {
         if area.contains(me, cell, underground) {
             return false;
         }
-        // Already on the way: travel and visits see it through.
+        // Already on the way: travel and visits see it through, a row's journey taken over.
         if self.traveling() || self.visiting().is_some() {
+            if self.journey_row().is_some() {
+                self.keep_journey();
+            }
             return true;
         }
         match &area.shape {

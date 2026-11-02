@@ -242,7 +242,7 @@ pub struct Autoplay {
     /// leave each one alone (see `Client::hold_off_wield`).
     pub(crate) wield_refused: crate::did::Patience<u32>,
     /// A journey put down for a fight, to be picked up again after it.
-    pub(crate) resume_trip: Option<glam::Vec2>,
+    pub(crate) resume_trip: Option<crate::Goal>,
     /// Whether that journey was a walk about the character's own ground
     /// rather than a road (see `Client::travel_about`): it is picked up
     /// again as what it was, and the walk past the road reads it while
@@ -642,6 +642,7 @@ impl Client {
                 self.autoplay.step = Some(step.name);
                 return;
             }
+            self.journey_row_aside(step.name);
             self.aside(step.name, &did, now);
         }
         // The goals are weighed. Most say nothing and take their place
@@ -649,6 +650,12 @@ impl Client {
         // opinion can say that a corpse about to rot is worth more than
         // the next fight (see `crate::steps`).
         let mut goals = crate::steps::weigh(self, now);
+        // A goal weighed worth nothing is passed over: its journey is put down as if it stood aside.
+        if let Some(row) = self.journey_row().filter(|r| !goals.has_row(r)) {
+            if crate::steps::named(row).is_some_and(|s| s.layer == crate::steps::Layer::Goal) {
+                self.journey_row_aside(row);
+            }
+        }
         while let Some((step, _)) = goals.next(self, now) {
             self.autoplay.running = Some(step.name);
             let did = step.run(self, now);
@@ -657,9 +664,17 @@ impl Client {
                 self.autoplay.step = Some(step.name);
                 return;
             }
+            self.journey_row_aside(step.name);
             self.aside(step.name, &did, now);
         }
         self.autoplay.step = None;
+        // A journey no row owns walks on by itself: said, not "waiting".
+        let no_row = self.traveling() && self.journey_row().is_none();
+        if let Some(to) = self.travel_goal_xy().filter(|_| no_row) {
+            let to = format!("travelling to {:.0}, {:.0}", to.x, to.y);
+            self.autoplay.say(Doing::Traveling, to);
+            return;
+        }
         let doing = self.autoplay.doing;
         if doing != Doing::Idle {
             self.autoplay.say(Doing::Idle, "waiting");

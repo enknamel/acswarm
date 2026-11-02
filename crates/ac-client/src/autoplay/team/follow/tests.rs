@@ -243,9 +243,10 @@ fn a_leader_the_region_holds_is_walked_to_however_far() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
-fn a_follower_with_no_walk_to_its_leader_plans_a_journey() {
+fn a_follower_with_no_walk_to_its_leader_is_refused_a_journey_too() {
     // The leader up on the Tusker ground's ledge (0x5C49), which no walk reaches: the follower is
-    // told so on its first ask and sets off on a journey after it instead, following's own.
+    // told so on its first ask, and the journey it tries instead is refused as it sets off, its
+    // first walk planned whole. Nothing walks at the wall.
     let (mut c, ledge) = testkit::under_the_ledge(20);
     c.autoplay.config.enabled = true;
     let team = &mut c.autoplay.config.team;
@@ -261,14 +262,39 @@ fn a_follower_with_no_walk_to_its_leader_plans_a_journey() {
         ..testkit::mate(LEADER, "Verity")
     }]);
     let now = Instant::now();
-    assert!(c.autoplay_follow(now, false), "it gave the leader up");
+    assert!(!c.autoplay_follow(now, false), "it walks at the leader");
     assert!(!c.is_walking(), "the slot walks at the ledge");
-    assert!(c.is_follow_journey(), "no journey after the leader");
-    // Asked again, the journey is kept: no walk is asked for, so nothing ends it.
+    assert!(!c.traveling(), "a journey at the ledge");
+    // Asked again, both refusals stand: nothing is planned.
     let plans = c.pathfinder.plans;
-    assert!(c.autoplay_follow(now + Duration::from_millis(100), false));
-    assert!(c.is_follow_journey(), "the journey was ended");
+    assert!(!c.autoplay_follow(now + Duration::from_millis(100), false));
+    assert!(!c.traveling());
     assert_eq!(c.pathfinder.plans, plans, "the walk was planned again");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_journey_carried_by_another_row_is_claimed() {
+    // Catch up sets off after a leader 400 m off; the follow row, running next, takes the journey
+    // over, and its stretches are walked for "follow".
+    let mut c = following_over(testkit::game_data(), 400.0);
+    c.autoplay.running = Some("catch up");
+    assert!(c.autoplay_follow(Instant::now(), true), "no catching up");
+    assert_eq!(c.journey_row(), Some("catch up"));
+    c.autoplay.running = Some("follow");
+    assert!(c.autoplay_follow(Instant::now(), false), "no following");
+    c.autoplay.running = None;
+    assert_eq!(c.journey_row(), Some("follow"), "not claimed");
+    let start = c.my_position().expect("on its feet");
+    let t0 = Instant::now();
+    for frame in 0..100 {
+        let now = t0 + Duration::from_millis(50 * frame);
+        c.tick_player(crate::player::Input::default(), 0.05, now);
+    }
+    let stretch = c.going.as_ref().filter(|g| g.journey).map(|g| g.owner);
+    assert_eq!(stretch, Some(crate::Owner::Step("follow")));
+    let moved = c.my_position().expect("on its feet").distance(start);
+    assert!(moved > 10.0, "walked {moved:.1} m in 5 s");
 }
 
 #[test]
@@ -418,7 +444,11 @@ fn a_journey_put_aside_before_following_is_not_taken_up_after_a_stop() {
     c.travel_to(away);
     c.remember_journey();
     c.interrupt_travel("a fight");
-    assert_eq!(c.autoplay.resume_trip, Some(away), "nothing was put aside");
+    assert_eq!(
+        c.autoplay.resume_trip.and_then(crate::Goal::place),
+        Some(ac_world::Place::on_map(away)),
+        "nothing was put aside"
+    );
     c.autoplay.config.team.enabled = true;
     let now = Instant::now();
     let t = ticks(&mut c, now, 3);
@@ -441,7 +471,10 @@ fn a_follower_takes_up_no_journey_of_its_own_beside_its_leader() {
     let t = ticks(&mut c, now, 1);
     let me = c.my_position().expect("on its feet").truncate();
     let away = me + Vec2::new(0.0, 300.0);
-    c.autoplay.resume_trip = Some(away);
+    c.autoplay.resume_trip = Some(crate::Goal::At {
+        place: ac_world::Place::on_map(away),
+        within: crate::travel::ARRIVE,
+    });
     ticks(&mut c, t, 3);
     assert!(!makes_for(&c, away), "it set off on a journey of its own");
     assert_eq!(c.autoplay.resume_trip, None);
@@ -483,7 +516,10 @@ fn a_follower_back_from_the_dead_takes_up_no_trip_it_had() {
     let rec = &mut c.autoplay.recovery;
     rec.phase = crate::recovery::Phase::Landed;
     rec.since = t;
-    rec.trip = Some(away);
+    rec.trip = Some(crate::Goal::At {
+        place: ac_world::Place::on_map(away),
+        within: crate::travel::ARRIVE,
+    });
     let t = ticks(&mut c, t + Duration::from_secs(5), 1);
     assert!(!c.autoplay.recovery.active(), "the recovery did not finish");
     assert_eq!(c.autoplay.resume_trip, None, "the trip was handed back");

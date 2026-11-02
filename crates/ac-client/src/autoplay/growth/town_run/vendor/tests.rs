@@ -7,8 +7,10 @@ fn a_gem_into_the_hub_puts_the_towns_within_reach() {
     let gem = |g: &ac_world::gems::Gem| ac_world::trip::Gem {
         guid: 1,
         name: g.name.clone(),
-        exit: g.xy(),
-        exit_cell: g.cell,
+        exit: ac_world::Place {
+            at: g.at,
+            cell: g.cell,
+        },
         summons: true,
     };
     let named = |n: &str| {

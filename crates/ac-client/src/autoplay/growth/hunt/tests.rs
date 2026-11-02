@@ -259,9 +259,11 @@ fn a_walk_to_a_ground_broken_off_by_a_corpse_is_walked_on() {
     let cfg = Growth::default();
     let at = Vec2::new(me.x + 250.0, me.y);
     let lb = (((at.x / 192.0) as u32) << 8) | (at.y / 192.0) as u32;
-    assert!(c.grow_travel(at, now), "no way to the ground");
+    assert!(
+        c.grow_travel(ac_world::Place::on_map(at), crate::travel::ARRIVE),
+        "no way to the ground"
+    );
     c.autoplay.growth.bound = Some((lb, at, "Drudge".into()));
-    c.autoplay.growth.bound_since = Some(now);
 
     c.interrupt_travel("walking to a corpse");
     assert!(c.grow_hunt(now, &cfg), "gave the walk up after a corpse");
@@ -286,6 +288,44 @@ fn a_walk_to_a_ground_broken_off_by_a_corpse_is_walked_on() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_walk_to_a_ground_put_down_while_grow_stands_aside_is_walked_on() {
+    // Grow stands aside (the party restocking, a creature in sight) and its journey is put down;
+    // when grow looks again the walk is taken up, not read as a ground it could not reach.
+    let holtburg = 0xA9B4_0019;
+    let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
+    c.world.stats.level = 20;
+    c.world.player_guid = Some(0x5000_0001);
+    c.autoplay.config.enabled = true;
+    let me = c.player.as_ref().unwrap().world_position();
+    let now = Instant::now();
+    let cfg = Growth::default();
+    let at = Vec2::new(me.x + 250.0, me.y);
+    let lb = (((at.x / 192.0) as u32) << 8) | (at.y / 192.0) as u32;
+    c.autoplay.running = Some(crate::autoplay::growth::GROW_ROW);
+    assert!(
+        c.grow_travel(ac_world::Place::on_map(at), crate::travel::ARRIVE),
+        "no way to the ground"
+    );
+    c.autoplay.running = None;
+    c.autoplay.growth.bound = Some((lb, at, "Drudge".into()));
+
+    c.autoplay.tick += 1;
+    c.journey_row_aside(crate::autoplay::growth::GROW_ROW);
+    c.autoplay.step = None;
+    c.settle_going();
+    assert!(
+        !c.traveling(),
+        "the journey outlived its row standing aside"
+    );
+    c.autoplay.running = Some(crate::autoplay::growth::GROW_ROW);
+    assert!(c.grow_hunt(now, &cfg), "gave the walk up");
+    c.autoplay.running = None;
+    assert!(c.traveling(), "and did not walk on");
+    assert!(c.autoplay.growth.skip.is_empty(), "the ground was skipped");
+}
+
+#[test]
 fn a_walk_to_its_own_ground_is_let_go_once_it_follows() {
     // Going with the leader: a follower has no ground of its own to walk to. One it was bound for
     // goes when following begins, and one set while it follows (a town run ends with one) goes
@@ -302,7 +342,6 @@ fn a_walk_to_its_own_ground_is_let_go_once_it_follows() {
         "south".to_string(),
     );
     c.autoplay.growth.bound = Some(ground.clone());
-    c.autoplay.growth.bound_since = Some(now);
     let team = &mut c.autoplay.config.team;
     team.enabled = true;
     team.follow = true;
@@ -418,7 +457,7 @@ fn a_level_35_in_holtburg_sets_off_for_a_dungeon_and_keeps_moving() {
         .travel_trip()
         .and_then(|t| {
             t.steps.iter().find_map(|s| match s {
-                ac_world::trip::Step::Portal { mouth, .. } => Some(*mouth),
+                ac_world::trip::Step::Portal { mouth, .. } => Some(mouth.at.truncate()),
                 _ => None,
             })
         })
@@ -460,7 +499,6 @@ fn a_dungeon_ground_is_arrived_at_underground_and_walked_by_the_explorer() {
     let cfg = Growth::default();
     let now = Instant::now();
     c.autoplay.growth.bound = Some((cave.landblock, cave.at, cave.name.clone()));
-    c.autoplay.growth.bound_since = Some(now);
     assert!(c.underground(), "the landing is not in the dungeon");
     assert!(!c.grow_hunt(now, &cfg));
     assert_eq!(c.autoplay.growth.hunting_at, Some(0x5B46));
@@ -515,7 +553,6 @@ fn a_dungeon_crossed_on_the_way_to_a_ground_is_not_explored_in_its_place() {
     let cave = ac_world::hunting::at(0x0286).expect("the Tumerok Cave");
     let t0 = Instant::now();
     c.autoplay.growth.bound = Some((cave.landblock, cave.at, cave.name.clone()));
-    c.autoplay.growth.bound_since = Some(t0);
     // Until the walk is taken up: offline no portal takes the character on, and one reached
     // down the drops leaves it below with only the explorer's rooms to walk.
     let notes = play_noting_till_travelling(&mut c, t0, 30);
@@ -539,12 +576,17 @@ fn a_dungeon_portal_below_its_landing_is_walked_down_to_by_its_drops() {
     let mut c =
         crate::testkit::standing_in_the_field(35, 0x01D2_02F7, glam::Vec3::new(47.9, -69.9, 12.0));
     let cave = ac_world::hunting::at(0x0286).expect("the Tumerok Cave");
-    assert!(c.travel_to_in(cave.at, cave.cell()), "no journey at all");
+    // The clock the first walk is planned on: offline, planning takes seconds.
+    let t0 = Instant::now();
+    assert!(
+        c.journey_to(cave.place(), crate::travel::ARRIVE),
+        "no journey at all"
+    );
     let o = ac_world::landblock_origin(0x01D2_0000);
     let inner = o + glam::Vec3::new(80.1, -57.5, -6.0);
     let first = c.travel_trip().and_then(|t| {
         t.steps.iter().find_map(|s| match s {
-            ac_world::trip::Step::Portal { mouth, .. } => Some(*mouth),
+            ac_world::trip::Step::Portal { mouth, .. } => Some(mouth.at.truncate()),
             _ => None,
         })
     });
@@ -555,7 +597,7 @@ fn a_dungeon_portal_below_its_landing_is_walked_down_to_by_its_drops() {
     let dt = 0.05;
     let mut dropped = false;
     for frame in 0..30 * 20 {
-        let now = Instant::now() + Duration::from_secs_f32(frame as f32 * dt);
+        let now = t0 + Duration::from_secs_f32(frame as f32 * dt);
         c.tick_player(crate::player::Input::default(), dt, now);
         dropped |= c.steering.route.as_ref().is_some_and(|r| {
             r.waypoints

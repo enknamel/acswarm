@@ -64,6 +64,12 @@ pub fn stand(c: &mut Client, cell: u32, local: Vec3) {
     c.player = Some(human(&c.assets, cell, local, Quat::IDENTITY));
 }
 
+/// Hand `c`'s journey engine `trip` to `goal` as the journey under way, at its first step, as if
+/// it had just set off or arrived where it stands.
+pub fn set_out_on(c: &mut Client, trip: ac_world::trip::Trip, goal: crate::Goal) {
+    c.start_trip(crate::Owner::Hand, trip, goal);
+}
+
 /// A session over the game's archives whose character stands at `local`
 /// in `cell`, with no guid of its own yet.
 pub fn standing_at(cell: u32, local: Vec3) -> Client {

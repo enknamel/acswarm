@@ -172,6 +172,18 @@ impl Ground {
         self.entrance.map_or(0, |e| e.cell)
     }
 
+    /// Where a journey to the ground ends: a dungeon's entrance portal's exit, else the map point.
+    pub fn place(&self) -> crate::Place {
+        let Some(e) = self.entrance else {
+            return crate::Place::on_map(self.at);
+        };
+        let landing = crate::portals::all().iter().find(|p| p.to_cell == e.cell);
+        crate::Place {
+            at: landing.map_or(self.at.extend(0.0), |p| p.to),
+            cell: e.cell,
+        }
+    }
+
     /// Whether a character of `level` may take the way in.
     pub fn can_enter(&self, level: u32) -> bool {
         self.entrance.is_none_or(|e| {

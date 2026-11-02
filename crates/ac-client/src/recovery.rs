@@ -28,6 +28,7 @@ use glam::{Vec2, Vec3};
 use crate::autoplay::{Doing, Release, CORPSE_REACH};
 use crate::did::Did;
 use crate::{Client, Goal};
+use ac_world::Place;
 
 /// A lifestone further than this from the death spot means the
 /// teleport has happened.
@@ -109,10 +110,8 @@ pub struct View {
     /// Where the character stands (world xy) and its landblock.
     pub xy: Vec2,
     pub landblock: u32,
-    /// The cell, when it is a dungeon's: a corpse down there is gone back
-    /// for by its cell as well as its position (see
-    /// `Client::travel_to_in`).
-    pub dungeon_cell: Option<u32>,
+    /// Where the character stands, in its cell and on its floor: a corpse is gone back for there.
+    pub place: Place,
     /// Our own corpse in view: its guid and how far off it is.
     pub corpse: Option<(u32, f32)>,
     /// A journey is under way.
@@ -127,7 +126,7 @@ pub struct View {
     /// Everything wielded right now, for remembering at death.
     pub wielded: Vec<u32>,
     /// Where a journey was bound, for picking it up again.
-    pub trip: Option<Vec2>,
+    pub trip: Option<Goal>,
     /// What we were fighting, by name.
     pub fighting: Option<String>,
     /// Whether the corpse is to be gone back for at all.
@@ -154,7 +153,7 @@ pub enum Action {
     /// Wield this item.
     Wield(u32),
     /// Done: hand back to the rules, resuming this journey if any.
-    Finish { trip: Option<Vec2> },
+    Finish { trip: Option<Goal> },
 }
 
 /// The recovery in progress.
@@ -166,14 +165,14 @@ pub struct Recovery {
     /// Where the character died (world xy) and in which landblock.
     pub death_xy: Option<Vec2>,
     pub death_block: u32,
-    /// The cell of a death in a dungeon (see [`View::dungeon_cell`]).
-    pub death_cell: Option<u32>,
+    /// The place of the death, cell and floor ([`View::place`]).
+    pub death: Option<Place>,
     /// The corpse being gone back for, once seen.
     pub corpse: Option<u32>,
     /// What was in the hands at death.
     pub wielded: Vec<u32>,
     /// Where the journey was bound at death.
-    pub trip: Option<Vec2>,
+    pub trip: Option<Goal>,
     /// What killed us, by name (what we were fighting).
     pub killer: Option<String>,
     /// Deaths since the recovery began, this one included.
@@ -205,7 +204,7 @@ impl Default for Recovery {
             since: Instant::now(),
             death_xy: None,
             death_block: 0,
-            death_cell: None,
+            death: None,
             corpse: None,
             wielded: Vec::new(),
             trip: None,
@@ -283,7 +282,7 @@ impl Recovery {
         // across both.
         self.death_xy = Some(v.xy);
         self.death_block = v.landblock;
-        self.death_cell = v.dungeon_cell;
+        self.death = Some(v.place);
         for g in &v.wielded {
             if !self.wielded.contains(g) {
                 self.wielded.push(*g);
@@ -569,7 +568,7 @@ impl Client {
             .map(|(_, g, d)| (g, d))
     }
 
-    fn recovery_view(&self, now: Instant, underground: bool) -> Option<View> {
+    fn recovery_view(&self, now: Instant) -> Option<View> {
         let pl = self.player.as_ref()?;
         let p = pl.world_position();
         let xy = Vec2::new(p.x, p.y);
@@ -595,7 +594,7 @@ impl Client {
         // Following's own journey is not kept for afterwards: following plans it again itself. Nor
         // anything while led, a failed replan's goal after the leader included (it outlives a stop).
         let own_trip = self
-            .travel_goal_xy()
+            .journey_goal()
             .filter(|_| !self.is_follow_journey() && !self.is_led());
         let trip = self.autoplay.resume_trip.or(own_trip);
         let cfg = &self.autoplay.config.survive;
@@ -604,7 +603,10 @@ impl Client {
             dead: self.is_dead(),
             xy,
             landblock: pl.cell >> 16,
-            dungeon_cell: underground.then_some(pl.cell),
+            place: Place {
+                at: p,
+                cell: pl.cell,
+            },
             corpse: self.own_corpse(p, rec.death_xy),
             traveling: self.traveling(),
             walking: self.is_walking()
@@ -626,8 +628,7 @@ impl Client {
     /// rest of the rules wait. The third reflex, after "stay alive" and
     /// the sidestep.
     pub fn autoplay_recover(&mut self, now: Instant) -> bool {
-        let underground = self.underground();
-        let Some(view) = self.recovery_view(now, underground) else {
+        let Some(view) = self.recovery_view(now) else {
             return false;
         };
         let was = self.autoplay.recovery.phase;
@@ -781,7 +782,7 @@ impl Client {
     }
 
     /// The walk back for the corpse: to it when in view (it may lie on another floor), else to the
-    /// death spot on its floor (its dungeon cell's, or the ground there), within [`NEAR`].
+    /// place of the death, cell and floor, within [`NEAR`].
     fn way_back(&mut self, spot: Vec2) -> Goal {
         let me = self.my_position().unwrap_or_else(|| spot.extend(0.0));
         if let Some((guid, _)) = self.own_corpse(me, Some(spot)) {
@@ -790,20 +791,11 @@ impl Client {
                 within: CORPSE_REACH / 2.0,
             };
         }
-        let cell = self.autoplay.recovery.death_cell;
-        let assets = self.assets.clone();
-        let z = match cell {
-            Some(c) => self.floor_in_cell(spot, c),
-            None => self
-                .player
-                .as_mut()
-                .and_then(|p| p.ground_height(&assets, spot.x, spot.y, me.z)),
-        };
-        let at = spot.extend(z.unwrap_or(me.z));
-        let place = match cell {
-            Some(cell) => ac_world::Place { at, cell },
-            None => self.place_at(at),
-        };
+        let place = self
+            .autoplay
+            .recovery
+            .death
+            .unwrap_or_else(|| self.place_at(spot.extend(me.z)));
         Goal::At {
             place,
             within: NEAR,
@@ -850,20 +842,28 @@ impl Client {
 mod tests {
     use super::*;
 
+    /// The journey under way at death: somewhere far off.
+    fn far_off() -> Goal {
+        Goal::At {
+            place: Place::on_map(Vec2::new(5000.0, 5000.0)),
+            within: 3.0,
+        }
+    }
+
     fn view(now: Instant) -> View {
         View {
             now,
             dead: false,
             xy: Vec2::new(1000.0, 1000.0),
             landblock: 0xA9B4,
-            dungeon_cell: None,
+            place: Place::on_map(Vec2::new(1000.0, 1000.0)),
             corpse: None,
             traveling: false,
             walking: false,
             open: None,
             carried: Vec::new(),
             wielded: vec![0x8000_0001, 0x8000_0002],
-            trip: Some(Vec2::new(5000.0, 5000.0)),
+            trip: Some(far_off()),
             fighting: Some("Drudge Slinker".into()),
             recover: true,
             limit: Duration::from_secs(600),
@@ -952,7 +952,7 @@ mod tests {
         assert_eq!(
             r.step(&v),
             Action::Finish {
-                trip: Some(Vec2::new(5000.0, 5000.0))
+                trip: Some(far_off())
             }
         );
         assert_eq!(r.phase, Phase::None);
@@ -994,27 +994,50 @@ mod tests {
         assert_eq!(
             r.step(&v),
             Action::Finish {
-                trip: Some(Vec2::new(5000.0, 5000.0))
+                trip: Some(far_off())
             }
         );
     }
 
     #[test]
-    fn a_death_in_a_dungeon_keeps_its_cell() {
+    fn a_death_keeps_its_place() {
         let t0 = Instant::now();
-        // Killed in the Holtburg Dungeon's armoredillo rooms.
+        // Killed in the Holtburg Dungeon's armoredillo rooms: its cell and floor are kept.
         let mut r = Recovery::default();
         let mut v = view(t0);
         v.dead = true;
-        v.dungeon_cell = Some(0x01F6_0215);
+        v.place = Place {
+            at: Vec3::new(220.8, 47_190.0, -6.0),
+            cell: 0x01F6_0215,
+        };
         r.step(&v);
-        assert_eq!(r.death_cell, Some(0x01F6_0215));
-        // Killed out in the open: the position is enough.
+        assert_eq!(r.death, Some(v.place));
+        // Killed out in the open: the place there.
         let mut r = Recovery::default();
         let mut v = view(t0);
         v.dead = true;
         r.step(&v);
-        assert_eq!(r.death_cell, None);
+        assert_eq!(r.death, Some(v.place));
+    }
+
+    #[test]
+    fn a_death_upstairs_is_walked_back_to_upstairs() {
+        // Upstairs beside Archmage Cindrue, no corpse in view: the way back is that floor's cell.
+        let mut c = crate::testkit::offline_client();
+        let upstairs = Place {
+            at: ac_world::landblock_origin(0xA9B4_011B) + Vec3::new(152.3, 132.5, 69.0),
+            cell: 0xA9B4_011B,
+        };
+        c.autoplay.recovery.death = Some(upstairs);
+        c.autoplay.recovery.death_xy = Some(upstairs.at.truncate());
+        let goal = c.way_back(upstairs.at.truncate());
+        assert_eq!(
+            goal,
+            Goal::At {
+                place: upstairs,
+                within: NEAR
+            }
+        );
     }
 
     #[test]
@@ -1022,7 +1045,7 @@ mod tests {
         let t0 = Instant::now();
         let kept = "You have retained all your items. You do not need to recover your corpse!";
         let resume = Action::Finish {
-            trip: Some(Vec2::new(5000.0, 5000.0)),
+            trip: Some(far_off()),
         };
         // The server's word a moment after the death: done on landing.
         let mut r = Recovery::default();

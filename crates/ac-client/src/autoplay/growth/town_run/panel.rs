@@ -126,7 +126,6 @@ impl Client {
             self.cancel_travel();
         }
         self.autoplay.growth.bound = None;
-        self.autoplay.growth.bound_since = None;
         let cfg = self.autoplay.config.growth.clone();
         let needs = self.needs_now(now, &cfg);
         let reason = "asked for from the panel".to_string();
@@ -159,7 +158,6 @@ impl Client {
                     errand: Errand::Buy,
                     visited: vec![at],
                     walked_on: None,
-                    walk_limit: crate::autoplay::growth::road::WALK_TIMEOUT,
                     walking_up: false,
                 });
                 self.autoplay
@@ -274,7 +272,6 @@ impl Client {
         };
         st.by_hand = false;
         st.needs.clear();
-        st.after_out = None;
         st.shop = ac_vendor::Run::new();
         st.last_run = Some(now);
         self.window_no_longer_wanted(&run);

@@ -18,7 +18,6 @@ pub(super) fn run_to(at: Vec2, now: Instant) -> Run {
         errand: Errand::Sell,
         visited: vec![at],
         walked_on: None,
-        walk_limit: super::road::WALK_TIMEOUT,
         walking_up: false,
     }
 }
@@ -34,6 +33,11 @@ pub(super) fn need(kind: NeedKind, want: u32) -> Need {
         from: None,
         kind,
     }
+}
+
+#[test]
+fn the_grow_row_is_a_row_of_the_table() {
+    assert!(crate::steps::named(GROW_ROW).is_some());
 }
 
 #[test]
@@ -171,17 +175,35 @@ fn the_spells_cast_are_kept_a_second_and_worked_out_again_when_one_is_learned() 
 }
 
 #[test]
-fn a_long_planned_walk_is_given_twice_its_time_and_a_short_one_the_fixed_four_minutes() {
-    use super::road::{walk_limit, WALK_TIMEOUT};
-    assert_eq!(walk_limit(None), WALK_TIMEOUT);
-    assert_eq!(walk_limit(Some(30.0)), WALK_TIMEOUT);
-    assert_eq!(
-        walk_limit(Some(654.0)),
-        std::time::Duration::from_secs(1308)
+#[ignore = "needs AC_DATA_DIR"]
+fn a_ground_no_journey_reaches_is_skipped_at_once() {
+    // Bound for a ground, the journey's last walk (up to the Tusker ledge, which no walk reaches)
+    // is refused on its first frame: the ground is skipped on the next turn, with no walk clock.
+    let (mut c, ledge) = crate::testkit::under_the_ledge(20);
+    let ground = ac_world::hunting::all()
+        .iter()
+        .find(|g| g.landblock != 0x5C49 && !g.is_dungeon())
+        .expect("a ground on the surface");
+    let lb = ground.landblock;
+    c.autoplay.growth.bound = Some((lb, ground.at, ground.name.clone()));
+    let trip = ac_world::trip::Trip {
+        steps: vec![ac_world::trip::Step::Walk(ledge)],
+        seconds: 5.0,
+    };
+    let goal = crate::Goal::At {
+        place: ledge,
+        within: 1.5,
+    };
+    c.start_trip(crate::Owner::Step("grow"), trip, goal);
+    let now = Instant::now();
+    let walked = c.walk_journey(now);
+    assert!(
+        matches!(walked, Some(crate::did::Did::Blocked(_))),
+        "{walked:?}"
     );
-    assert_eq!(
-        walk_limit(Some(f32::INFINITY)),
-        WALK_TIMEOUT,
-        "a planner's nonsense is not believed"
-    );
+    assert!(!c.traveling(), "the journey was not refused");
+    c.autoplay.running = Some("grow");
+    c.grow_hunt(now, &Growth::default());
+    assert_eq!(c.autoplay.growth.bound, None, "still bound for it");
+    assert!(c.autoplay.growth.skip.since(&lb).is_some(), "not skipped");
 }

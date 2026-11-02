@@ -229,8 +229,12 @@ impl Client {
         // the way ends the run's journey, and a room chosen then would keep
         // the tick from the run's own step for good, round every room and
         // back again: its walk never planned again, its clock never read,
-        // and the character exploring and filling up and never selling.
-        if self.traveling() || self.autoplay.growth.town_run_under_way() {
+        // and the character exploring and filling up and never selling. Another row's visit is one
+        // too (`grows_visit_across_the_facility_hub_is_not_taken_exploring`).
+        if self.traveling()
+            || (self.visiting().is_some() && !self.is_own_visit())
+            || self.autoplay.growth.town_run_under_way()
+        {
             return false;
         }
         // Nor for a follower: its leader walks the rooms, and it keeps up.

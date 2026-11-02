@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use glam::Vec2;
 
-use super::vendor::spot;
+use super::vendor::{counter_place, spot};
 use super::{
     Errand, Phase, Run, Turn, BUSY_ASKS, BUSY_REASK, COUNTER_REACH, SELLING_TIMEOUT, SETTLE,
     STOPS_PER_RUN, VENDOR_OPEN_TIMEOUT, VENDOR_REACH,
@@ -119,21 +119,11 @@ impl Client {
         let elapsed = now.duration_since(run.since);
         match run.phase.clone() {
             Phase::Going => {
-                // Out of time only while still short of it: one that got there is not walked away.
-                if elapsed > run.walk_limit && run.at.distance(me) > VENDOR_REACH {
-                    self.autoplay.note(
-                        format!("the walk to {} is taking too long", run.vendor),
-                        now,
-                    );
-                    self.cancel_travel();
-                    return Turn::after_stop(self.grow_run_next(
-                        run,
-                        now,
-                        cfg,
-                        Some("was too long a walk"),
-                    ));
-                }
-                if self.traveling() || self.grow_travel_on() {
+                let counter = crate::Goal::At {
+                    place: counter_place(run.at),
+                    within: VENDOR_REACH,
+                };
+                if self.is_errand_journey(counter) {
                     self.autoplay.say(
                         Doing::Shopping,
                         format!(
@@ -155,9 +145,10 @@ impl Client {
                     .walked_on
                     .is_some_and(|t| now.duration_since(t) < WALK_ON_EVERY);
                 // Once walking up to the counter, the walk-up is the judge of getting there.
+                // Another row's journey elsewhere is no walk to the counter: this one is walked on.
                 match on_the_way(
                     away <= VENDOR_REACH || run.walking_up,
-                    self.journey_broken_off(),
+                    self.journey_broken_off() || self.traveling(),
                     busy,
                     lately,
                 ) {
@@ -167,7 +158,7 @@ impl Client {
                         return Turn::Waited;
                     }
                     OnTheWay::WalkOn => {
-                        if !self.grow_travel(run.at, now) {
+                        if !self.grow_travel(counter_place(run.at), VENDOR_REACH) {
                             self.autoplay.note(
                                 format!(
                                     "no way on to {} from here ({away:.0} m short)",
@@ -644,7 +635,9 @@ impl Client {
             let errands = self.errands_for(cfg, &needs);
             let picked = self.choose_stop(cfg, &needs, &ways, &errands, &run.visited, now);
             if let Some((errand, vendor, at, look)) = picked {
-                if (still_full || look.worth_going()) && self.grow_travel(at, now) {
+                if (still_full || look.worth_going())
+                    && self.grow_travel(counter_place(at), VENDOR_REACH)
+                {
                     let what = if still_full || more_to_sell {
                         "the rest of the loot"
                     } else {
@@ -672,7 +665,6 @@ impl Client {
                         errand,
                         visited,
                         walked_on: None,
-                        walk_limit: self.planned_walk_limit(),
                         walking_up: false,
                     });
                     return true;
@@ -730,7 +722,6 @@ impl Client {
             self.autoplay.growth.stopped_in_town = true;
             self.autoplay.growth.stopped_looked = Some(now);
             self.autoplay.growth.bound = None;
-            self.autoplay.growth.bound_since = None;
             self.autoplay.say(
                 Doing::Shopping,
                 format!("out of money and short of {short} -- stopping in town"),
@@ -741,9 +732,10 @@ impl Client {
         if let Some(lb) = self.autoplay.growth.hunting_at {
             if let Some(g) = ac_world::hunting::at(lb) {
                 let (at, name) = (g.at, g.name.clone());
-                if self.grow_travel_in(at, g.cell(), now) {
+                if self.grow_travel(g.place(), crate::autoplay::growth::hunt::GROUND_REACH) {
+                    // The walk to a ground is the grow row's errand, walked while it acts.
+                    self.take_journey(crate::Owner::Step(crate::autoplay::growth::GROW_ROW));
                     self.autoplay.growth.bound = Some((lb, at, name.clone()));
-                    self.autoplay.growth.bound_since = Some(now);
                     self.autoplay
                         .say(Doing::Traveling, format!("back to hunt {name}"));
                     return true;

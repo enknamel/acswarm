@@ -312,7 +312,10 @@ fn a_due_run_leaves_the_walk_to_a_ground_for_town() {
     let now = Instant::now();
     let me = c.player.as_ref().unwrap().world_position();
     let ground = Vec2::new(me.x + 200.0, me.y);
-    assert!(c.grow_travel(ground, now), "no walk to the ground");
+    assert!(
+        c.grow_travel(ac_world::Place::on_map(ground), crate::travel::ARRIVE),
+        "no walk to the ground"
+    );
     c.autoplay.growth.bound = Some((holtburg, ground, "the field".into()));
 
     let it = crate::testkit::standing_by(&mut c, 0x8000_0001, "Drudge Skulker", 3.0);

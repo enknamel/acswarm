@@ -102,6 +102,8 @@ pub struct Visit {
     /// The goal last handed to the steering, to tell our walk from
     /// someone else's.
     walking: Option<Vec3>,
+    /// Whose journey it sets off: the STEPS row that asked for the visit, else `Owner::Visit`.
+    owner: Owner,
 }
 
 impl Visit {
@@ -152,6 +154,7 @@ impl Visit {
             arrived_at: None,
             journeyed: false,
             walking: None,
+            owner: Owner::Visit,
         }
     }
 }
@@ -298,7 +301,7 @@ impl Client {
         self.visits.current.as_ref().map(|v| v.label.as_str())
     }
 
-    fn start_visit(&mut self, v: Visit) -> bool {
+    fn start_visit(&mut self, mut v: Visit) -> bool {
         if self.player.is_none() {
             tracing::warn!("visit: the character is not in the world");
             return false;
@@ -308,6 +311,7 @@ impl Client {
             return true;
         }
         self.drop_visit("another visit");
+        v.owner = self.autoplay.running.map_or(Owner::Visit, Owner::Step);
         tracing::info!(
             "visit: going to {} at {:?} in {:#010x}",
             v.label,
@@ -370,22 +374,33 @@ impl Client {
             v.goal = at;
             v.cell = cell;
         }
-        let traveling = self.traveling();
+        // Another row's journey is not the visit's: the visit's own replaces it.
+        let mine = self.journey_row().is_none() || self.journey_owner() == v.owner;
+        let traveling = self.traveling() && mine;
         let held = self.is_in_region(ac_world::Place {
             at: v.goal,
             cell: v.cell,
         });
-        match next(me, v.goal, held, traveling, v.journeyed) {
+        // Put down as its row stood aside: set off again once that row acts and ticks the visit.
+        let journeyed = v.journeyed && !self.journey_broken_off();
+        match next(me, v.goal, held, traveling, journeyed) {
             Next::OnTheWay => {}
+            Next::Journey if !self.is_visit_owner_running(v.owner) => {}
             Next::Journey => {
                 v.journeyed = true;
-                if !self.plan_trip(v.goal.truncate()) {
-                    tracing::warn!("visit: no way to {} from here", v.label);
+                let place = ac_world::Place {
+                    at: v.goal,
+                    cell: v.cell,
+                };
+                let goal = Goal::At {
+                    place,
+                    within: REACH,
+                };
+                if let Did::Blocked(why) = self.set_off(v.owner, goal, now) {
+                    tracing::warn!("visit: no way to {} from here: {}", v.label, why.what);
                     self.let_go_of(&v);
                     return;
                 }
-                // Set off, the journey's leg has the slot, as any journey set off does.
-                self.stop_going(None, "a visit's journey sets off");
             }
             Next::GiveUp => {
                 tracing::warn!("visit: the journey to {} ended short of it", v.label);
@@ -440,6 +455,23 @@ impl Client {
             }
         }
         self.visits.current = Some(v);
+    }
+
+    /// Whether `owner` may set the visit's journey off now: a row only while it runs.
+    fn is_visit_owner_running(&self, owner: Owner) -> bool {
+        match owner {
+            Owner::Step(row) => self.autoplay.running == Some(row),
+            Owner::Journey | Owner::Visit | Owner::Script | Owner::Hand => true,
+        }
+    }
+
+    /// Whether the visit being made was asked for by the running row: its errand, ticked by it.
+    pub(crate) fn is_own_visit(&self) -> bool {
+        let running = self.autoplay.running.map(Owner::Step);
+        self.visits
+            .current
+            .as_ref()
+            .is_some_and(|v| running == Some(v.owner))
     }
 
     /// On their floor and close: stop, and use them.
@@ -576,6 +608,159 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn a_visit_to_a_warden_is_planned_through_the_facility_hub() {
+        // The Warden of fachubeasthamportals_flag, from the Holtburg lifestone: its cell sends the
+        // trip through the Town Network and the Facility Hub, not round by Qalaba'r.
+        let mut c =
+            crate::testkit::standing_in_the_field(25, 0xA9B4_0019, Vec3::new(84.0, 7.1, 94.0));
+        let u = ac_world::unlocks::all()
+            .iter()
+            .find(|u| u.flag == "fachubeasthamportals_flag")
+            .expect("the Warden's unlock");
+        assert!(c.visit_unlock(u), "no way to the Warden");
+        let trip = c.travel_trip().expect("a journey").clone();
+        assert_eq!(trip.portals(), 2, "{trip:?}");
+        assert!(
+            matches!(&trip.steps[1], ac_world::trip::Step::Portal { exit, .. } if exit.cell == 0x8A02_0212),
+            "not through the Facility Hub portal: {trip:?}"
+        );
+        let warden = ac_world::Place {
+            at: u.at,
+            cell: 0x8A02_01F7,
+        };
+        assert_eq!(trip.steps.last(), Some(&ac_world::trip::Step::Walk(warden)));
+        assert_eq!(c.journey_goal().and_then(crate::Goal::place), Some(warden));
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn a_visit_grow_asks_for_walks_as_grows_journey() {
+        // Grow asks for the Warden from the Holtburg lifestone: the journey is grow's, held while
+        // the fight row acts, put down as grow stands aside, and set off again as grow looks again.
+        let mut c =
+            crate::testkit::standing_in_the_field(25, 0xA9B4_0019, Vec3::new(84.0, 7.1, 94.0));
+        c.autoplay.config.enabled = true;
+        let u = ac_world::unlocks::all()
+            .iter()
+            .find(|u| u.flag == "fachubeasthamportals_flag")
+            .expect("the Warden's unlock");
+        let grow = crate::autoplay::growth::GROW_ROW;
+        c.autoplay.running = Some(grow);
+        assert!(c.visit_unlock(u), "no way to the Warden");
+        c.autoplay.running = None;
+        assert_eq!(c.journey_row(), Some(grow));
+        let now = Instant::now();
+        c.autoplay.tick += 1;
+        c.autoplay.step = Some("fight");
+        c.settle_going();
+        assert!(c.is_journey_held(), "walked on while the fight row acted");
+        c.autoplay.tick += 1;
+        c.journey_row_aside(grow);
+        c.autoplay.step = None;
+        c.settle_going();
+        assert!(!c.traveling(), "walked on after grow stood aside");
+        c.tick_visit(now);
+        assert!(c.visiting().is_some(), "the visit was dropped");
+        assert!(!c.traveling(), "set off outside its row");
+        c.autoplay.running = Some(grow);
+        c.tick_visit(now);
+        c.autoplay.running = None;
+        assert_eq!(c.journey_row(), Some(grow), "not set off again for grow");
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn a_visit_to_a_warden_arrives_at_the_warden() {
+        // Come out of the Facility Hub portal (0x8A020212), the visit walks the hub to the Warden
+        // in 0x8A0201F7 and uses him on his own floor.
+        let u = ac_world::unlocks::all()
+            .iter()
+            .find(|u| u.flag == "fachubeasthamportals_flag")
+            .expect("the Warden's unlock");
+        let exit = ac_world::portals::all()
+            .iter()
+            .find(|p| p.to_cell == 0x8A02_0212)
+            .expect("the Facility Hub portal");
+        let origin = ac_world::landblock_origin(0x8A02_0000);
+        let mut c = crate::testkit::standing_in_the_field(25, 0x8A02_0212, exit.to - origin);
+        let warden = WorldObject {
+            guid: 0x7000_0001,
+            name: u.npc.clone(),
+            item_type: ac_world::item_type::CREATURE,
+            object_desc_flags: ac_world::object_desc_flags::STUCK,
+            position: crate::testkit::placed(0x8A02_01F7, u.at),
+            ..Default::default()
+        };
+        c.world.objects.insert(warden.guid, warden);
+        // The clock the visit's first walk is planned on: offline, planning takes seconds.
+        let t0 = Instant::now();
+        assert!(c.visit_unlock(u), "no way to the Warden");
+        assert!(!c.traveling(), "a journey inside the hub");
+        for frame in 0..60 * 20 {
+            let now = t0 + Duration::from_millis(50 * frame);
+            c.tick_player(crate::player::Input::default(), 0.05, now);
+            if c.visiting().is_none() {
+                break;
+            }
+        }
+        let me = c.my_position().expect("standing");
+        assert!(c.visits.finished, "the visit did not finish, at {me}");
+        assert!(
+            arrived(me, u.at),
+            "finished at {me}, the Warden at {}",
+            u.at
+        );
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn grows_visit_across_the_facility_hub_is_not_taken_exploring() {
+        // The hub reads as a dungeon with nothing in it; with autoplay on, the visit grow set off
+        // walks to the Warden instead of the explore row taking the tick room after room.
+        let u = ac_world::unlocks::all()
+            .iter()
+            .find(|u| u.flag == "fachubeasthamportals_flag")
+            .expect("the Warden's unlock");
+        let exit = ac_world::portals::all()
+            .iter()
+            .find(|p| p.to_cell == 0x8A02_0212)
+            .expect("the Facility Hub portal");
+        let origin = ac_world::landblock_origin(0x8A02_0000);
+        let mut c = crate::testkit::standing_in_the_field(25, 0x8A02_0212, exit.to - origin);
+        c.autoplay.config.enabled = true;
+        let warden = WorldObject {
+            guid: 0x7000_0001,
+            name: u.npc.clone(),
+            item_type: ac_world::item_type::CREATURE,
+            object_desc_flags: ac_world::object_desc_flags::STUCK,
+            position: crate::testkit::placed(0x8A02_01F7, u.at),
+            ..Default::default()
+        };
+        c.world.objects.insert(warden.guid, warden);
+        // The clock the visit's first walk is planned on: offline, planning takes seconds.
+        let t0 = Instant::now();
+        c.autoplay.running = Some(crate::autoplay::growth::GROW_ROW);
+        assert!(c.visit_unlock(u), "no way to the Warden");
+        c.autoplay.running = None;
+        for frame in 0..90 * 20 {
+            let now = t0 + Duration::from_millis(50 * frame);
+            c.tick_autoplay(now);
+            c.tick_player(crate::player::Input::default(), 0.05, now);
+            if c.visiting().is_none() {
+                break;
+            }
+            assert_ne!(
+                c.autoplay.step,
+                Some("explore"),
+                "explored the hub mid-visit"
+            );
+        }
+        let me = c.my_position().expect("standing");
+        assert!(c.visits.finished, "the visit did not finish, at {me}");
+    }
+
+    #[test]
     fn a_portal_visit_goes_to_its_mouth_and_takes_it() {
         let p = ac_world::portals::named("Holtburg Dungeon")
             .into_iter()
@@ -681,7 +866,8 @@ mod tests {
     #[test]
     #[ignore = "needs AC_DATA_DIR"]
     fn a_visit_far_off_sets_off_whatever_walk_was_in_the_slot() {
-        // A script's walk is under way on the Holtburg field; a lifestone 700 m east is visited.
+        // A script's walk is under way on the Holtburg field; a lifestone 700 m east, over the
+        // river, is visited.
         let mut c = crate::testkit::standing_at(0xA9B4_0019, Vec3::new(84.0, 7.1, 94.0));
         c.world.player_guid = Some(crate::testkit::ME);
         let me = c.my_position().expect("standing");
@@ -690,11 +876,13 @@ mod tests {
             kind: ac_world::landmarks::Kind::Lifestone,
             name: "a lifestone".into(),
             cell: 0,
-            at: me + Vec3::X * 700.0,
+            at: me + Vec3::new(700.0, 100.0, 0.0),
         };
+        // The clock the journey's first walk is planned on: offline, planning takes seconds.
+        let now = Instant::now();
         assert!(c.visit_landmark(&stone), "no visit");
         assert!(c.traveling(), "no journey");
-        let leg = c.walk_leg(Instant::now());
+        let leg = c.walk_journey(now);
         assert!(leg.as_ref().is_some_and(Did::fine), "{leg:?}");
         assert_eq!(c.going.as_ref().map(|g| g.owner), Some(Owner::Journey));
     }

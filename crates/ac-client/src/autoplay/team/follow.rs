@@ -88,6 +88,10 @@ impl Client {
         if urgent && !far {
             return false;
         }
+        // Following's journey is walked for whichever of its rows runs now.
+        if self.is_follow_journey() {
+            self.keep_journey();
+        }
         let level = !leader.flying || (leader.world.z - me.z).abs() < 2.0;
         if flat <= keep && level {
             self.stop_at_leader();
@@ -156,7 +160,10 @@ impl Client {
                 self.stop_going(Some(self.step_owner()), "a journey after the leader");
                 // On the leader's way, whatever the leader is on (see
                 // `Client::on_its_way`): not a road of its own.
-                let planned = self.travel_about(goal);
+                let planned = self.travel_about(crate::Goal::At {
+                    place,
+                    within: keep,
+                });
                 // Recorded by what is under way, not by the answer: a journey can start and still
                 // answer no, and a plan that failed leaves the one before it running.
                 if self.traveling() && self.travel_goal_xy() == Some(goal) {

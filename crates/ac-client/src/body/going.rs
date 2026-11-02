@@ -1,13 +1,14 @@
 //! The slot: the one walk the body follows, asked for by one owner ([`Client::go`]) and answered
 //! truthfully. A new walk is planned whole on the asking frame and handed to the follower, and a
 //! refusal is kept per owner and goal; a step's walk ends the tick its step stops asking;
-//! [`GIVE_UP_AFTER`] is the one give-up. A journey's leg is walked here while no other walk is.
+//! [`GIVE_UP_AFTER`] is the one give-up. A journey's stretch is walked here while no other is.
 
 use std::time::{Duration, Instant};
 
 use ac_nav::routing::{self, Planned};
 use ac_nav::steering::REPLAN_DISTANCE;
 use ac_scene::navarea;
+use ac_scene::wayfind::NoWay;
 use ac_world::Place;
 use glam::{Vec2, Vec3};
 
@@ -30,6 +31,8 @@ pub(crate) struct Refusal {
     from: Vec3,
     there: Vec3,
     why: String,
+    /// The planner's answer, when it was the planner that refused.
+    no_way: Option<NoWay>,
 }
 
 /// Who asked for a walk: a STEPS row, or something outside the step table.
@@ -37,7 +40,7 @@ pub(crate) struct Refusal {
 pub enum Owner {
     /// The row running when it asked (`steps::Step::name`); its walk ends when it stops asking.
     Step(&'static str),
-    /// The leg of the journey under way (`Travel`).
+    /// The stretch of a journey no STEPS row owns (`Travel`), asked by `walk_journey`.
     Journey,
     /// A visit's last stretch (`visit.rs`).
     Visit,
@@ -70,7 +73,7 @@ pub enum Goal {
 }
 
 impl Goal {
-    fn within(self) -> f32 {
+    pub(crate) fn within(self) -> f32 {
         match self {
             Goal::At { within, .. } | Goal::Near { within, .. } => within,
         }
@@ -85,7 +88,7 @@ impl Goal {
     }
 
     /// The same walk: a place moved less than [`REPLAN_DISTANCE`], or the same object, as near.
-    fn is_same(self, other: Goal) -> bool {
+    pub(crate) fn is_same(self, other: Goal) -> bool {
         match (self, other) {
             (
                 Goal::At {
@@ -110,6 +113,8 @@ impl Goal {
 pub struct Going {
     pub owner: Owner,
     pub goal: Goal,
+    /// The journey's stretch: let go by the journey, not by its owner's asking.
+    pub journey: bool,
     /// The autoplay tick (`Autoplay.tick`) of the owner's last ask.
     asked: u64,
     /// When the walk last made progress along any of its routes, or began.
@@ -131,16 +136,22 @@ impl Client {
     /// Walk to `goal` for `owner`: the one way anything asks the body to move, ending a visit unless
     /// the visit asks. Past the region it is a journey; asked again, the same goal plans nothing.
     pub fn go(&mut self, owner: Owner, goal: Goal, now: Instant) -> Did {
+        self.ask_slot(owner, goal, now, false)
+    }
+
+    /// [`Client::go`], or with `journey` the journey's stretch for its owner: planned the same,
+    /// it leaves the visit and the journey alone and is never a journey of its own.
+    fn ask_slot(&mut self, owner: Owner, goal: Goal, now: Instant, journey: bool) -> Did {
         let Some(me) = self.player.as_ref().map(|p| Place {
             at: p.world_position(),
             cell: p.cell,
         }) else {
             return Did::waiting("not in the world yet");
         };
-        if !matches!(owner, Owner::Visit | Owner::Journey) {
+        if !journey && !matches!(owner, Owner::Visit | Owner::Journey) {
             self.drop_visit(owner.label());
         }
-        if let Some((_, by)) = self.taken.filter(|(was, _)| *was == owner) {
+        if let Some((_, by)) = self.taken.filter(|(was, _)| *was == owner && !journey) {
             self.taken = None;
             return Did::waiting(format!("taken by {}", by.label()));
         }
@@ -158,20 +169,30 @@ impl Client {
             return Did::blocked(r.why.clone());
         }
         let tick = self.autoplay.tick;
-        if let Some(g) = self
-            .going
-            .as_mut()
-            .filter(|g| g.owner == owner && g.goal.is_same(goal) && g.refused.is_none())
-        {
+        if let Some(g) = self.going.as_mut().filter(|g| {
+            g.owner == owner && g.journey == journey && g.goal.is_same(goal) && g.refused.is_none()
+        }) {
             g.goal = goal;
             g.asked = tick;
             return self.answer_going(me.at, place, now);
         }
-        self.start_going(owner, goal, me, place, now)
+        self.start_going(owner, goal, (me, place), now, journey)
     }
 
     /// Keep `owner`'s refusal of `goal` (`Client.refusals`), in place of an older one for it.
-    fn refuse(&mut self, owner: Owner, goal: Goal, from: Vec3, there: Vec3, why: &str) {
+    pub(crate) fn refuse(&mut self, owner: Owner, goal: Goal, from: Vec3, there: Vec3, why: &str) {
+        self.refuse_for(owner, goal, (from, there), why, None);
+    }
+
+    /// [`refuse`](Self::refuse), keeping the planner's answer when it was the planner's.
+    fn refuse_for(
+        &mut self,
+        owner: Owner,
+        goal: Goal,
+        (from, there): (Vec3, Vec3),
+        why: &str,
+        no_way: Option<NoWay>,
+    ) {
         self.refusals
             .retain(|r| !(r.owner == owner && r.goal.is_same(goal)));
         if self.refusals.len() >= REFUSALS_KEPT {
@@ -183,7 +204,15 @@ impl Client {
             from,
             there,
             why: why.to_string(),
+            no_way,
         });
+    }
+
+    /// Whether a walk to `there` was refused because no floor of its cell holds it.
+    pub(crate) fn is_refused_off_floor(&self, there: Vec3) -> bool {
+        self.refusals.iter().any(|r| {
+            r.no_way == Some(NoWay::OffFloor) && r.there.distance(there) <= REPLAN_DISTANCE
+        })
     }
 
     /// A new walk for `owner`, planned here and handed to the follower; arrived or refused, the slot
@@ -192,43 +221,38 @@ impl Client {
         &mut self,
         owner: Owner,
         goal: Goal,
-        me: Place,
-        place: Place,
+        (me, place): (Place, Place),
         now: Instant,
+        journey: bool,
     ) -> Did {
-        // A journey's leg is the planner's to refuse; any other goal past the region is a journey,
-        // whose leg takes the slot.
-        if owner != Owner::Journey && !self.is_in_region(place) {
+        // A journey's stretch is the planner's to refuse; any other goal past the region is a
+        // journey, whose stretch takes the slot.
+        if !journey && !self.is_in_region(place) {
             let xy = place.at.truncate();
-            // Acting while it travels to this goal; a journey elsewhere is replaced.
+            // Acting while it travels to this goal, taken over for `owner`; one elsewhere is replaced.
             let bound = self.traveling()
                 && self
                     .travel_goal_xy()
                     .is_some_and(|g| g.distance(xy) <= REPLAN_DISTANCE);
-            let planned = bound
-                || if place.is_indoors() {
-                    self.plan_trip_in(xy, place.cell)
-                } else {
-                    self.plan_trip(xy)
-                };
-            if planned {
-                if self
-                    .going
-                    .as_ref()
-                    .is_some_and(|g| g.owner != Owner::Journey)
-                {
+            if bound {
+                if self.going.as_ref().is_some_and(|g| !g.journey) {
                     self.replace_walk(owner, me.at);
                 }
+                self.take_journey(owner);
                 return Did::Acting;
             }
-            tracing::info!(
-                "travel: no way for {} to {:?} from here",
-                owner.label(),
-                place.at
-            );
-            let why = "no way there from here";
-            self.refuse(owner, goal, me.at, place.at, why);
-            return Did::blocked(why);
+            let within = goal.within();
+            let did = self.set_off(owner, Goal::At { place, within }, now);
+            if let Did::Blocked(why) = &did {
+                tracing::info!(
+                    "travel: no way for {} to {:?} from here: {}",
+                    owner.label(),
+                    place.at,
+                    why.what
+                );
+                self.refuse(owner, goal, me.at, place.at, &why.what);
+            }
+            return did;
         }
         let within = goal.within();
         if reached(me.at, place.at, within) {
@@ -236,21 +260,24 @@ impl Client {
         }
         // Flown, the body goes straight there (`tick_player`): nothing is planned.
         let planned = (!self.noclip()).then(|| self.plan_walk(place, within));
-        if let Some(Planned::NoWay(why)) = planned {
+        if let Some(Planned::NoWay(no)) = planned {
             let why = format!(
                 "no way there: {:?}",
-                ac_nav::steering::Unreachable::Planner(why)
+                ac_nav::steering::Unreachable::Planner(no)
             );
-            self.refuse(owner, goal, me.at, place.at, &why);
+            self.refuse_for(owner, goal, (me.at, place.at), &why, Some(no));
             return Did::blocked(why);
         }
         self.replace_walk(owner, me.at);
-        if owner != Owner::Journey && self.traveling() {
+        // The journey's own owner wants something else; another row's journey is held meanwhile.
+        let ends = self.journey_row().is_none() || self.journey_owner() == owner;
+        if !journey && self.traveling() && ends {
             self.end_trip();
         }
         self.going = Some(Going {
             owner,
             goal,
+            journey,
             asked: self.autoplay.tick,
             progressed: now,
             refused: None,
@@ -279,10 +306,14 @@ impl Client {
             return Did::Acting;
         }
         let (owner, goal) = (g.owner, g.goal);
-        if let Some(why) = unreachable {
-            let why = format!("no way there: {why:?}");
+        if let Some(no) = unreachable {
+            let why = format!("no way there: {no:?}");
             g.refused = Some(why.clone());
-            self.refuse(owner, goal, me, place.at, &why);
+            let planner = match no {
+                ac_nav::steering::Unreachable::Planner(p) => Some(p),
+                ac_nav::steering::Unreachable::Stalled => None,
+            };
+            self.refuse_for(owner, goal, (me, place.at), &why, planner);
             return Did::blocked(why);
         }
         g.progressed = progress.map_or(g.progressed, |p| p.max(g.progressed));
@@ -302,14 +333,14 @@ impl Client {
 
     /// End the walk in the slot for `owner`'s new one. A walk still followed is told, once, who
     /// took it (logged); one arrived, refused or given up has nothing left to lose.
-    fn replace_walk(&mut self, owner: Owner, me: Vec3) {
+    pub(crate) fn replace_walk(&mut self, owner: Owner, me: Vec3) {
         let followed = self.going.as_ref().is_some_and(|g| self.is_followed(g, me));
         let Some(old) = self.going.take() else {
             return;
         };
         self.steering.reset();
-        // A journey's leg asks again only once the slot is free: nothing to tell it.
-        if old.owner != owner && old.owner != Owner::Journey && followed {
+        // A journey's stretch asks again only once the slot is free: nothing to tell it.
+        if old.owner != owner && !old.journey && followed {
             tracing::info!(
                 "walk: {} takes the walk from {}",
                 owner.label(),
@@ -328,44 +359,68 @@ impl Client {
                 .is_some_and(|p| !reached(me, p.at, g.goal.within()))
     }
 
-    /// The journey's leg asked of the slot while it is free or the journey's (`tick_player`), and
-    /// refused when the slot refuses it; the journey's walk ends when it has no leg.
-    pub(crate) fn walk_leg(&mut self, now: Instant) -> Option<Did> {
-        let leg = self.travel_goal(now);
-        self.travel.leg_refused = false;
-        let Some((at, within, cell)) = leg else {
-            self.stop_going(Some(Owner::Journey), "no leg to walk");
-            return None;
-        };
-        if self.holds_walk_besides(Owner::Journey) {
+    /// The journey's stretch asked of the slot each frame (`tick_player`) for the journey's owner
+    /// while the slot is free or the journey's; a step left out is planned again first, and with
+    /// nothing to walk the stretch ends.
+    pub(crate) fn walk_journey(&mut self, now: Instant) -> Option<Did> {
+        if self.is_journey_held() {
+            self.stop_stretch("held");
             return None;
         }
-        let goal = Goal::At {
-            place: Place { at, cell },
-            within,
-        };
-        let did = self.go(Owner::Journey, goal, now);
-        // Flown, a leg goes straight there whatever the planner says.
-        self.travel.leg_refused = matches!(did, Did::Blocked(_)) && !self.noclip();
-        Some(did)
+        if std::mem::take(&mut self.travel.replan_due) {
+            return Some(self.plan_again(now));
+        }
+        // A corridor stretch arrived at asks the next on the same frame, once.
+        let mut answered = None;
+        for _ in 0..2 {
+            if !self.traveling() {
+                self.stop_stretch("no journey");
+                return answered;
+            }
+            let Some(goal) = self.step_goal(now) else {
+                self.stop_stretch("no stretch to walk");
+                return answered;
+            };
+            if self.holds_walk_besides_journey() {
+                return answered;
+            }
+            let owner = self.journey_owner();
+            let did = self.ask_slot(owner, goal, now, true);
+            let again = self.stretch_answered(&did);
+            answered = Some(did);
+            if !again {
+                break;
+            }
+        }
+        answered
     }
 
-    /// End `owner`'s walk, if the slot holds it (any owner's with `None`), saying `why`.
+    /// End `owner`'s own walk, if the slot holds it (any walk with `None`), saying `why`; a
+    /// journey's stretch is the journey's to end.
     pub fn stop_going(&mut self, owner: Option<Owner>, why: &str) {
-        if let Some(g) = self.going.take_if(|g| owner.is_none_or(|o| g.owner == o)) {
+        let mine = |g: &mut Going| owner.is_none_or(|o| g.owner == o && !g.journey);
+        if let Some(g) = self.going.take_if(mine) {
             self.steering.reset();
             tracing::debug!("walk: {}'s let go: {why}", g.owner.label());
         }
     }
 
-    /// Whether the slot holds a walk of an owner other than `owner` still being followed.
-    fn holds_walk_besides(&self, owner: Owner) -> bool {
+    /// End the journey's stretch, if the slot holds it, saying `why`.
+    pub(crate) fn stop_stretch(&mut self, why: &str) {
+        if let Some(g) = self.going.take_if(|g| g.journey) {
+            self.steering.reset();
+            tracing::debug!("walk: {}'s stretch let go: {why}", g.owner.label());
+        }
+    }
+
+    /// Whether the slot holds a walk other than the journey's stretch still being followed.
+    pub(crate) fn holds_walk_besides_journey(&self) -> bool {
         let Some(me) = self.my_position() else {
             return false;
         };
         self.going
             .as_ref()
-            .is_some_and(|g| g.owner != owner && self.is_followed(g, me))
+            .is_some_and(|g| !g.journey && self.is_followed(g, me))
     }
 
     /// Whether the slot holds a walk being followed: neither refused nor given up.
@@ -408,16 +463,18 @@ impl Client {
         self.go_to(owner, xy.extend(z), within)
     }
 
-    /// End a step's walk its row did not ask for this tick (end of `tick_autoplay`).
+    /// End a step's walk its row did not ask for this tick (end of `tick_autoplay`); a journey's
+    /// stretch is the journey's, settled by [`Client::settle_journey`].
     pub(crate) fn settle_going(&mut self) {
         let tick = self.autoplay.tick;
         if let Some(g) = self
             .going
-            .take_if(|g| matches!(g.owner, Owner::Step(_)) && g.asked != tick)
+            .take_if(|g| matches!(g.owner, Owner::Step(_)) && !g.journey && g.asked != tick)
         {
             self.steering.reset();
             tracing::debug!("walk: {} stopped asking", g.owner.label());
         }
+        self.settle_journey();
     }
 
     /// Where the slot's walk is to this frame: the place, how near, and its cell (`tick_player`);

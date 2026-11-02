@@ -610,6 +610,13 @@ impl Weighed {
         None
     }
 
+    /// Whether the row called `name` was weighed worth doing this tick.
+    pub fn has_row(&self, name: &str) -> bool {
+        self.order
+            .iter()
+            .any(|&(place, _)| STEPS[place].name == name)
+    }
+
     /// What was weighed, worth most first, for the log and the panel.
     pub fn ranking(&self) -> Vec<(&'static str, f32)> {
         self.order

@@ -44,21 +44,24 @@ fn a_flag_held_opens_its_portal_and_a_refusal_closes_it() {
         .iter()
         .find(|p| p.quest.eq_ignore_ascii_case(LEAP))
         .expect("the Hunter's Leap portal");
-    let goal = p.to.truncate();
+    let goal = ac_world::Place {
+        at: p.to,
+        cell: p.to_cell,
+    };
     let through_leap = |c: &Client| {
         c.travel_trip().is_some_and(|t| {
             t.steps.iter().any(|s| {
                 matches!(s, ac_world::trip::Step::Portal { mouth, .. }
-                    if mouth.distance(p.from_xy()) < 1.0)
+                    if mouth.at.truncate().distance(p.from_xy()) < 1.0)
             })
         })
     };
     let mut c = beside_the_warden(20);
-    c.travel_to_in(goal, p.to_cell);
+    c.journey_to(goal, crate::travel::ARRIVE);
     assert!(!through_leap(&c), "planned through a portal not open to it");
     c.cancel_travel();
     c.note_unlock_talk(0x7A02_0001);
-    assert!(c.travel_to_in(goal, p.to_cell));
+    assert!(c.journey_to(goal, crate::travel::ARRIVE));
     assert!(
         through_leap(&c),
         "{:?}",

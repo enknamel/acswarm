@@ -17,8 +17,8 @@ fn a_run_asked_for_from_the_panel_chooses_a_counter_and_sets_off() {
     // doing nothing once a window was opened. Now they start the
     // run autoplay would start: a counter is chosen and the walk
     // to it begins, with autoplay off and none of its throttles.
-    let holtburg = 0xA9B4_0019;
-    let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
+    // On the Holtburg green, 45 m from the nearest counter: past VENDOR_REACH, so a walk.
+    let mut c = standing_at(0xA9B4_001C, glam::Vec3::new(84.0, 84.0, 94.0));
     c.world.stats.level = 20;
     c.world.player_guid = Some(0x5000_0001);
     let now = Instant::now();
@@ -76,8 +76,8 @@ fn a_run_started_under_autoplay_is_autoplays_to_step() {
     // With autoplay on and running town runs, Run from the panel
     // starts the run now, and autoplay's tick takes it from there:
     // the panel shows it and does not step it too.
-    let holtburg = 0xA9B4_0019;
-    let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
+    // On the Holtburg green, 45 m from the nearest counter: past VENDOR_REACH, so a walk.
+    let mut c = standing_at(0xA9B4_001C, glam::Vec3::new(84.0, 84.0, 94.0));
     c.world.stats.level = 20;
     c.world.player_guid = Some(0x5000_0001);
     c.autoplay.config.enabled = true;
@@ -100,8 +100,8 @@ fn a_hand_run_left_held_is_autoplays_again_once_it_runs_town_runs() {
     // the road with a blank status line. A run nothing has stepped
     // for a moment is autoplay's to carry on, when it runs town
     // runs.
-    let holtburg = 0xA9B4_0019;
-    let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
+    // On the Holtburg green, 45 m from the nearest counter: past VENDOR_REACH, so a walk.
+    let mut c = standing_at(0xA9B4_001C, glam::Vec3::new(84.0, 84.0, 94.0));
     c.world.stats.level = 20;
     c.world.player_guid = Some(0x5000_0001);
     let now = Instant::now();
@@ -208,8 +208,10 @@ fn run_pressed_at_a_counter_the_player_opened_sells_there() {
     assert!(c.world.open_vendor.is_some(), "the window was closed");
 
     // A window left open from across the town is not a counter at
-    // hand: the run chooses one and sets off, as it always did.
+    // hand: the run chooses one and sets off, as it always did. From
+    // the green, 45 m from the nearest counter (past VENDOR_REACH).
     c.town_run_stop(now);
+    crate::testkit::stand(&mut c, 0xA9B4_001C, glam::Vec3::new(84.0, 84.0, 94.0));
     vendor_beside(
         &mut c,
         rakk,

@@ -5,7 +5,7 @@
 //! into it. This lays a line of marks along the ground from the
 //! character to where it is heading: the steering route first (the
 //! waypoints actually being walked, which is what goes round obstacles),
-//! then the rest of the overland leg beyond it.
+//! then the rest of the journey's overland corridor beyond it.
 //!
 //! The marks are the particle system's quads with the flat flag set, so
 //! they lie in the world's x/y plane rather than turning to face the
@@ -89,14 +89,14 @@ pub fn quads(client: &mut Client, now: f32) -> Vec<Quad> {
     };
     let me = player.world_position();
     // The waypoints still to walk: the steering route we are on, then
-    // whatever is left of the overland leg past its end.
+    // whatever is left of the overland corridor past its end.
     let mut points: Vec<Vec3> = Vec::new();
     if let Some(route) = &client.steering.route {
         points.extend(route.waypoints.iter().skip(route.next).map(|w| w.place.at));
     }
     let tail_from = points.last().copied().unwrap_or(me);
     if let Some(overland) = client.travel_route() {
-        // The overland route is the whole leg, including the part
+        // The overland corridor is the whole step, including the part
         // already walked, and it is flat: heights come from the ground.
         // Start after the waypoint nearest where the trail so far ends,
         // or nothing would stop the line being drawn back the way we

@@ -137,9 +137,8 @@ impl Client {
     /// object like the door is. And anything that could get in the way
     /// and matter is aggressive, which means it attacks -- the first
     /// override, and the character turns and fights it. If some ground
-    /// proves otherwise, the walk's own four-minute timeout
-    /// (`growth::WALK_TIMEOUT`) still ends it and another ground is
-    /// chosen.
+    /// proves otherwise, the slot's give-up (`GIVE_UP_AFTER`) leaves that
+    /// stretch out and the journey goes another way or is refused.
     pub(crate) fn passing_by(&self, o: &ac_world::WorldObject, cfg: &Fight) -> bool {
         if !cfg.walk_past_on_the_way || !self.on_its_way() {
             return false;

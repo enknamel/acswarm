@@ -32,15 +32,26 @@ pub(super) struct Stop<'a> {
 fn gem_ways(gems: &[ac_world::trip::Gem]) -> Vec<(Vec2, String)> {
     let mut out = Vec::new();
     for g in gems {
-        out.push((g.exit, g.name.clone()));
-        if g.exit_cell & 0xFFFF < 0x100 {
+        out.push((g.exit.at.truncate(), g.name.clone()));
+        if !g.exit.is_indoors() {
             continue;
         }
-        for p in ac_world::portals::out_of(g.exit_cell) {
+        for p in ac_world::portals::out_of(g.exit.cell) {
             out.push((p.to_xy(), format!("{}, then {}", g.name, p.name)));
         }
     }
     out
+}
+
+/// Where the counter at `at` stands: its shop's own place (`shops`), else the map point.
+pub(super) fn counter_place(at: Vec2) -> ac_world::Place {
+    ac_world::shops::all()
+        .iter()
+        .find(|s| s.xy().distance(at) < 1.0)
+        .map_or(ac_world::Place::on_map(at), |s| ac_world::Place {
+            at: s.at,
+            cell: s.cell,
+        })
 }
 
 /// Which way out leaves the character nearest `at`, how far that is,

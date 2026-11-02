@@ -29,13 +29,13 @@ impl Client {
             self.cancel_travel();
         }
         // A visit: the journey there, the walk up to the person, the use.
-        // Before the journey's leg is read, so a visit that takes over
+        // Before the journey's stretch is read, so a visit that takes over
         // from its journey walks this frame.
         if !manual {
             self.tick_visit(now);
         }
-        // The next leg of the journey, if one is being made, walked by the slot.
-        self.walk_leg(now);
+        // The stretch of the journey, if one is being made, walked by the slot.
+        self.walk_journey(now);
         let travelling = self.traveling();
         let going = self.going_to();
         let walk_source = self.going.as_ref().map_or("hand", |g| g.owner.label());
