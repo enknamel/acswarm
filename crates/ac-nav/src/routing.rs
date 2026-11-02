@@ -109,7 +109,8 @@ fn query_for<'a>(
         within,
         avoid,
         berth: PORTAL_BERTH,
-        indoors_too: area.dungeon || f.1 != 0 || g.1 != 0,
+        indoors_too: true,
+        outdoors_first: !area.dungeon && f.1 == 0 && g.1 == 0,
         drops: false,
     })
 }
@@ -132,14 +133,8 @@ fn route_of(path: &[(NavNode, EdgeKind)]) -> Route {
 /// places keeps out of buildings unless only they lead there.
 pub fn plan(area: &mut Area, from: Place, goal: Place, within: f32) -> Result<Route, NoWay> {
     let avoid = portal_mouths_to_avoid(from.at, goal.at);
-    let mut q = query_for(area, from, goal, within, &avoid)?;
-    let mut found = area.with_ground(|ground, nav| wayfind::search_building(ground, nav, &q));
-    if matches!(found, Search::NoWay(NoWay::Unreached)) && !q.indoors_too {
-        // No way outdoors: through the buildings, on the same graph.
-        q.indoors_too = true;
-        found = area.with_ground(|ground, nav| wayfind::search_building(ground, nav, &q));
-    }
-    match found {
+    let q = query_for(area, from, goal, within, &avoid)?;
+    match area.with_ground(|ground, nav| wayfind::search_building(ground, nav, &q)) {
         Search::Found(path) => Ok(route_of(&path)),
         Search::NoWay(why) => Err(why),
         // Searched building, so nothing is left unbuilt.
@@ -151,16 +146,11 @@ pub fn plan(area: &mut Area, from: Place, goal: Place, within: f32) -> Result<Ro
 /// first, and is never a partial route or a guess.
 pub fn plan_built(area: &Area, from: Place, goal: Place, within: f32) -> Planned {
     let avoid = portal_mouths_to_avoid(from.at, goal.at);
-    let mut q = match query_for(area, from, goal, within, &avoid) {
+    let q = match query_for(area, from, goal, within, &avoid) {
         Ok(q) => q,
         Err(why) => return Planned::NoWay(why),
     };
-    let mut found = area.read_ground(|ground, nav| wayfind::search(ground, nav, &q));
-    if matches!(found, Search::NoWay(NoWay::Unreached)) && !q.indoors_too {
-        q.indoors_too = true;
-        found = area.read_ground(|ground, nav| wayfind::search(ground, nav, &q));
-    }
-    match found {
+    match area.read_ground(|ground, nav| wayfind::search(ground, nav, &q)) {
         Search::Found(path) => Planned::Route(route_of(&path)),
         Search::NoWay(why) => Planned::NoWay(why),
         Search::Unbuilt(chunks) => Planned::Building(chunks),

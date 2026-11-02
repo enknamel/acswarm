@@ -52,6 +52,8 @@ pub struct WalkQuery<'a> {
     pub berth: f32,
     /// Interior nodes may be walked through.
     pub indoors_too: bool,
+    /// With `indoors_too`, a way kept out of buildings is taken over one through them, if any.
+    pub outdoors_first: bool,
     /// Drop edges may be taken: not by the old steering, which runs off a ledge at a run.
     pub drops: bool,
 }
@@ -182,6 +184,7 @@ pub fn standable_near(
             avoid: &[],
             berth: 0.0,
             indoors_too: true,
+            outdoors_first: false,
             drops: false,
         };
         let cap = nav.capsule;
@@ -191,9 +194,9 @@ pub fn standable_near(
             missing: Vec::new(),
         };
         let roots: Vec<u32> = sources(ground, &mut l, &q, &Berths(Vec::new()), s, from.1, &cap)
-            .map(|(_, ids)| ids.iter().map(|&(id, _)| nav.component(id)).collect())
+            .map(|(_, ids)| ids.iter().map(|&(id, _)| nav.walk_component(id)).collect())
             .unwrap_or_default();
-        out.retain(|&id| roots.contains(&nav.component(id)));
+        out.retain(|&id| roots.contains(&nav.walk_component(id)));
     }
     Ok(out.iter().map(|&id| nav.nodes[id as usize]).collect())
 }
@@ -205,6 +208,8 @@ trait Lattice {
     fn reach(&mut self, p: Vec3, r: i32);
     /// The columns round `node`, so its edges are all there, built or noted.
     fn expand(&mut self, node: u32);
+    /// No search on it meets a chunk not built: it builds them, or all are.
+    fn is_whole(&self) -> bool;
 }
 
 struct Building<'g, 'a> {
@@ -223,6 +228,9 @@ impl Lattice for Building<'_, '_> {
     }
     fn expand(&mut self, node: u32) {
         self.nav.ensure_neighbours(self.ground, node);
+    }
+    fn is_whole(&self) -> bool {
+        true
     }
 }
 
@@ -245,6 +253,9 @@ impl Lattice for Built<'_> {
         let more = self.nav.unbuilt(gx - 1, gx + 1, gy - 1, gy + 1);
         self.missing.extend(more);
     }
+    fn is_whole(&self) -> bool {
+        self.nav.is_complete()
+    }
 }
 
 /// Where a route ends from a goal node: at the node, or where a walk from it to the goal stops.
@@ -260,6 +271,62 @@ fn route(
     q: &WalkQuery,
 ) -> Result<Vec<(NavNode, EdgeKind)>, NoWay> {
     let cap = l.nav().capsule;
+    let way = if q.outdoors_first && q.indoors_too {
+        outdoors_first(ground, l, q)?
+    } else {
+        lattice_way(ground, l, q)?
+    };
+    Ok(smooth(
+        ground,
+        &way.berths,
+        way.start,
+        way.start_cell,
+        way.points,
+        &cap,
+    ))
+}
+
+/// A route between two outdoor places kept out of buildings if one is. On a graph that cannot be
+/// short of chunks the way anywhere is searched first, so a walk with none costs one search, and
+/// one that keeps outdoors already is the way outdoors.
+fn outdoors_first(ground: &Ground, l: &mut impl Lattice, q: &WalkQuery) -> Result<Way, NoWay> {
+    let outdoors = WalkQuery {
+        indoors_too: false,
+        outdoors_first: false,
+        ..*q
+    };
+    let anywhere = WalkQuery {
+        outdoors_first: false,
+        ..*q
+    };
+    if !l.is_whole() {
+        return match lattice_way(ground, l, &outdoors) {
+            Err(NoWay::Unreached) => lattice_way(ground, l, &anywhere),
+            way => way,
+        };
+    }
+    let way = lattice_way(ground, l, &anywhere)?;
+    if !way.is_indoors {
+        return Ok(way);
+    }
+    match lattice_way(ground, l, &outdoors) {
+        Err(NoWay::Unreached) => Ok(way),
+        out => out,
+    }
+}
+
+/// A route on the lattice before smoothing: the start its first leg leaves, and every point.
+struct Way {
+    berths: Berths,
+    start: Vec3,
+    start_cell: u32,
+    points: Vec<(NavNode, EdgeKind)>,
+    /// Some node of it is an interior one.
+    is_indoors: bool,
+}
+
+fn lattice_way(ground: &Ground, l: &mut impl Lattice, q: &WalkQuery) -> Result<Way, NoWay> {
+    let cap = l.nav().capsule;
     let (g, goal_cell) = floor_of(ground, q.goal.0, q.goal.1, &cap).ok_or(NoWay::OffFloor)?;
     // A start on no floor of its cell (in the air, a cell a step behind) is where the body is: its
     // first leg is walked from there like any other.
@@ -272,10 +339,17 @@ fn route(
     }
     // Built whole, the graph's components are final: in different ones there is no way at all.
     let nav = l.nav();
+    let component = |id: u32| {
+        if q.drops {
+            nav.component(id)
+        } else {
+            nav.walk_component(id)
+        }
+    };
     if nav.is_complete()
         && !sources
             .iter()
-            .any(|&(a, _)| ends.keys().any(|&b| nav.component(a) == nav.component(b)))
+            .any(|&(a, _)| ends.keys().any(|&b| component(a) == component(b)))
     {
         return Err(NoWay::Apart);
     }
@@ -298,7 +372,14 @@ fn route(
         };
         points.push((end, walk_kind(cell, goal_cell)));
     }
-    Ok(smooth(ground, &berths, start, from_cell, points, &cap))
+    let is_indoors = points.iter().any(|(n, _)| n.cell != 0);
+    Ok(Way {
+        berths,
+        start,
+        start_cell: from_cell,
+        points,
+        is_indoors,
+    })
 }
 
 /// The portal mouths a walk keeps off, each with its berth: a berth the walk starts in shrinks to
@@ -670,6 +751,7 @@ mod tests {
             avoid: &[],
             berth: 0.0,
             indoors_too: true,
+            outdoors_first: false,
             drops: false,
         };
         search_building(ground, nav, &q)
@@ -1043,6 +1125,7 @@ mod tests {
             avoid: &[],
             berth: 0.0,
             indoors_too: true,
+            outdoors_first: false,
             drops: false,
         };
         let first = search(&ground, &g, &q);
@@ -1069,6 +1152,7 @@ mod tests {
             avoid: &[],
             berth: 0.0,
             indoors_too: true,
+            outdoors_first: false,
             drops: false,
         };
         let mut whole = graph(Vec2::new(0.0, 0.0), Vec2::new(70.0, 6.0));
@@ -1106,6 +1190,7 @@ mod tests {
             avoid: &[],
             berth: 0.0,
             indoors_too: true,
+            outdoors_first: false,
             drops: false,
         };
         let refused = search_building(&ground, &mut g, &q);
@@ -1115,6 +1200,33 @@ mod tests {
             panic!("no way down with drops allowed");
         };
         assert!(route.iter().any(|(_, k)| *k == EdgeKind::Drop), "{route:?}");
+    }
+
+    #[test]
+    fn a_ledge_joined_only_by_drops_is_apart_for_a_walk_that_takes_none() {
+        let w = a_ledge_in_cells(Some(3.0));
+        let ground = inside(&w);
+        let mut g = graph(Vec2::new(0.0, -2.0), Vec2::new(12.0, 2.0));
+        g.build_all(&ground);
+        let mut q = WalkQuery {
+            from: (Vec3::new(10.0, 0.0, 0.0), 0x0102),
+            goal: (Vec3::new(1.0, 0.0, 3.0), 0x0101),
+            within: 0.5,
+            avoid: &[],
+            berth: 0.0,
+            indoors_too: true,
+            outdoors_first: false,
+            drops: false,
+        };
+        let up = search(&ground, &g, &q);
+        assert!(matches!(up, Search::NoWay(NoWay::Apart)), "{up:?}");
+        (q.from, q.goal) = (q.goal, q.from);
+        let down = search(&ground, &g, &q);
+        assert!(matches!(down, Search::NoWay(NoWay::Apart)), "{down:?}");
+        // Taking drops, the two are one component and the way down is searched for and found.
+        q.drops = true;
+        let down = search(&ground, &g, &q);
+        assert!(matches!(down, Search::Found(_)), "{down:?}");
     }
 
     #[test]
@@ -1135,6 +1247,7 @@ mod tests {
             avoid: &mouth,
             berth: 2.0,
             indoors_too: true,
+            outdoors_first: false,
             drops: false,
         };
         let Search::Found(round) = search_building(&ground, &mut g, &q) else {
@@ -1174,6 +1287,7 @@ mod tests {
             avoid: &mouth,
             berth: 3.0,
             indoors_too: true,
+            outdoors_first: false,
             drops: false,
         };
         let Search::Found(route) = search_building(&ground, &mut g, &q) else {

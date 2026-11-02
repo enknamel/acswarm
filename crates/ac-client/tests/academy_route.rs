@@ -41,6 +41,7 @@ fn academy_legs_are_walkable() {
                     avoid: &[],
                     berth: 0.0,
                     indoors_too: true,
+                    outdoors_first: false,
                     drops: false,
                 };
                 wayfind::search_building(ground, graph, &q)

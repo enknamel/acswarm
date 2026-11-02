@@ -31,6 +31,7 @@ fn route(
         avoid: &[],
         berth: 0.0,
         indoors_too: true,
+        outdoors_first: false,
         drops: false,
     };
     match wayfind::search_building(ground, nav, &q) {

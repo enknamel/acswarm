@@ -677,6 +677,34 @@ pub fn walk_kind(from_cell: u32, to_cell: u32) -> EdgeKind {
 /// Landing nodes tried for a drop, nearest first.
 const JOIN_TRIES: usize = 8;
 
+/// Join the sets of `a` and `b` in a union-find, halving the way up as it goes.
+fn unite(roots: &mut [u32], a: u32, b: u32) {
+    let (a, b) = (find_root(roots, a), find_root(roots, b));
+    if a != b {
+        roots[a.max(b) as usize] = a.min(b);
+    }
+}
+
+/// The root of `node`'s set, halving the way up.
+fn find_root(roots: &mut [u32], node: u32) -> u32 {
+    let mut n = node;
+    while roots[n as usize] != n {
+        let up = roots[roots[n as usize] as usize];
+        roots[n as usize] = up;
+        n = up;
+    }
+    n
+}
+
+/// The root of `node`'s set, read only, for a graph shared.
+fn root_of(roots: &[u32], node: u32) -> u32 {
+    let mut n = node;
+    while roots[n as usize] != n {
+        n = roots[n as usize];
+    }
+    n
+}
+
 /// Columns per chunk side: chunks are built on demand, so a path only
 /// pays for the part of the block it crosses (24 m squares indoors).
 const CHUNK: i32 = 16;
@@ -692,6 +720,8 @@ pub struct NavGraph {
     edges: Vec<Vec<NavEdge>>,
     /// Union-find over the edges of every kind, each way: nodes under different roots are apart.
     roots: Vec<u32>,
+    /// The same over walks and doorways only, for a walk that takes no drop.
+    walk_roots: Vec<u32>,
     /// Nodes per grid column `(x / spacing, y / spacing)`.
     columns: HashMap<(i32, i32), Vec<u32>>,
     /// Chunks whose nodes and edges exist.
@@ -721,6 +751,7 @@ impl NavGraph {
             nodes: Vec::new(),
             edges: Vec::new(),
             roots: Vec::new(),
+            walk_roots: Vec::new(),
             columns: HashMap::new(),
             built: HashSet::new(),
             drops_waiting: Vec::new(),
@@ -798,6 +829,7 @@ impl NavGraph {
             self.nodes.push(node);
             self.edges.push(Vec::new());
             self.roots.push(id);
+            self.walk_roots.push(id);
         }
         for (from, e) in b.edges {
             self.add_edge(from, e.to, e.kind);
@@ -899,33 +931,23 @@ impl NavGraph {
         &self.edges[node as usize]
     }
 
-    /// An edge from `from` to `to`, its ends joined in one component.
+    /// An edge from `from` to `to`, its ends joined in one component (of walks too, unless a drop).
     fn add_edge(&mut self, from: u32, to: u32, kind: EdgeKind) {
         self.edges[from as usize].push(NavEdge { to, kind });
-        let (a, b) = (self.component_of(from), self.component_of(to));
-        if a != b {
-            self.roots[a.max(b) as usize] = a.min(b);
+        unite(&mut self.roots, from, to);
+        if kind != EdgeKind::Drop {
+            unite(&mut self.walk_roots, from, to);
         }
     }
 
     /// The component `node` is in: a root no edge of any kind leads out of, either way.
-    pub fn component_of(&mut self, node: u32) -> u32 {
-        let mut n = node;
-        while self.roots[n as usize] != n {
-            let up = self.roots[self.roots[n as usize] as usize];
-            self.roots[n as usize] = up;
-            n = up;
-        }
-        n
+    pub fn component(&self, node: u32) -> u32 {
+        root_of(&self.roots, node)
     }
 
-    /// [`component_of`](Self::component_of) without shortening the way up, for a graph shared.
-    pub fn component(&self, node: u32) -> u32 {
-        let mut n = node;
-        while self.roots[n as usize] != n {
-            n = self.roots[n as usize];
-        }
-        n
+    /// The component `node` is in over walks and doorways alone, for a walk that takes no drop.
+    pub fn walk_component(&self, node: u32) -> u32 {
+        root_of(&self.walk_roots, node)
     }
 
     /// Every chunk the graph covers is built, so its components are final.
