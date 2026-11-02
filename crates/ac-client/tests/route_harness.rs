@@ -73,6 +73,13 @@ fn known() -> Vec<Trial> {
         ),
         named(
             LEVEL,
+            "C6A8 out of Magus Guthima's shop",
+            Vec3::new(38_083.2, 32_344.1, 42.0),
+            0xC6A8_0101,
+            Vec3::new(38_088.0, 32_352.0, 42.0),
+        ),
+        named(
+            LEVEL,
             "2CB5 coast block edge",
             Vec3::new(8_448.6, 34_823.9, 0.0),
             0x2CB5_0003,

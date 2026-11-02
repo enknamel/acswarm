@@ -702,6 +702,12 @@ impl CollisionWorld {
                                 continue;
                             }
                         }
+                        let level = t.a.z.min(t.b.z).min(t.c.z)..=t.a.z.max(t.b.z).max(t.c.z);
+                        if from.is_some() && sd <= 0.0 && dist > 1e-4 - sd && level.contains(&c.z) {
+                            // Moved behind it beside it, at its height: round its end into a
+                            // doorway, not through it (a_doorway_beside_a_wall_end_is_walked_into).
+                            continue;
+                        }
                         if sd > 0.0 && dist > sd + 1e-4 {
                             // The nearest point is on the triangle's edge:
                             // the capsule is beside the face, not in front
