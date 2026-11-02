@@ -71,32 +71,68 @@ pub fn place_of(n: &NavNode) -> Place {
     Place { at: n.pos, cell }
 }
 
+/// A plan on an area only read: a route, no way, or the chunks to build before it can answer.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Planned {
+    Route(Route),
+    NoWay(NoWay),
+    Building(Vec<(i32, i32)>),
+}
+
+/// An area of `blocks` (a dungeon's, when `dungeon`) holds a walk from `from` to `goal`: a
+/// dungeon by the places' cells, whose positions keep to no block square; outdoors by position.
+pub fn is_held(blocks: &[u32], dungeon: bool, from: Place, goal: Place) -> bool {
+    let within = |b: u32| blocks.contains(&b);
+    if dungeon {
+        within(from.cell & 0xFFFF_0000) && within(goal.cell & 0xFFFF_0000)
+    } else {
+        within(block_at(from.at)) && within(block_at(goal.at))
+    }
+}
+
+/// The query for a walk on `area`, a berth kept from every portal not walked to; between two
+/// outdoor places it first keeps out of buildings.
+fn query_for<'a>(
+    area: &Area,
+    from: Place,
+    goal: Place,
+    within: f32,
+    avoid: &'a [Vec3],
+) -> Result<WalkQuery<'a>, NoWay> {
+    if !is_held(&area.blocks, area.dungeon, from, goal) {
+        return Err(NoWay::OutOfRegion);
+    }
+    let (f, g) = area.read_ground(|ground, _| (graph_end(ground, from), graph_end(ground, goal)));
+    Ok(WalkQuery {
+        from: f,
+        goal: g,
+        within,
+        avoid,
+        berth: PORTAL_BERTH,
+        indoors_too: area.dungeon || f.1 != 0 || g.1 != 0,
+        drops: false,
+    })
+}
+
+/// The route a search found.
+fn route_of(path: &[(NavNode, EdgeKind)]) -> Route {
+    Route {
+        waypoints: path
+            .iter()
+            .map(|(n, kind)| Waypoint {
+                place: place_of(n),
+                kind: *kind,
+            })
+            .collect(),
+    }
+}
+
 /// The route from `from` to within `within` (metres, 3D) of `goal` on `area`, building the
 /// chunks it needs, a berth kept from every portal not walked to. A walk between two outdoor
 /// places keeps out of buildings unless only they lead there.
 pub fn plan(area: &mut Area, from: Place, goal: Place, within: f32) -> Result<Route, NoWay> {
-    let held = if area.dungeon {
-        [from, goal]
-            .iter()
-            .all(|p| area.blocks.contains(&(p.cell & 0xFFFF_0000)))
-    } else {
-        area.holds(from.at, goal.at)
-    };
-    if !held {
-        return Err(NoWay::OutOfRegion);
-    }
-    let (f, g) = area.with_ground(|ground, _| (graph_end(ground, from), graph_end(ground, goal)));
-    let outdoors = !area.dungeon && f.1 == 0 && g.1 == 0;
     let avoid = portal_mouths_to_avoid(from.at, goal.at);
-    let mut q = WalkQuery {
-        from: f,
-        goal: g,
-        within,
-        avoid: &avoid,
-        berth: PORTAL_BERTH,
-        indoors_too: !outdoors,
-        drops: false,
-    };
+    let mut q = query_for(area, from, goal, within, &avoid)?;
     let mut found = area.with_ground(|ground, nav| wayfind::search_building(ground, nav, &q));
     if matches!(found, Search::NoWay(NoWay::Unreached)) && !q.indoors_too {
         // No way outdoors: through the buildings, on the same graph.
@@ -104,19 +140,43 @@ pub fn plan(area: &mut Area, from: Place, goal: Place, within: f32) -> Result<Ro
         found = area.with_ground(|ground, nav| wayfind::search_building(ground, nav, &q));
     }
     match found {
-        Search::Found(path) => Ok(Route {
-            waypoints: path
-                .iter()
-                .map(|(n, kind)| Waypoint {
-                    place: place_of(n),
-                    kind: *kind,
-                })
-                .collect(),
-        }),
+        Search::Found(path) => Ok(route_of(&path)),
         Search::NoWay(why) => Err(why),
         // Searched building, so nothing is left unbuilt.
         Search::Unbuilt(_) => Err(NoWay::Unreached),
     }
+}
+
+/// [`plan`] on the chunks built so far, building none: `Building` names the chunks it needs
+/// first, and is never a partial route or a guess.
+pub fn plan_built(area: &Area, from: Place, goal: Place, within: f32) -> Planned {
+    let avoid = portal_mouths_to_avoid(from.at, goal.at);
+    let mut q = match query_for(area, from, goal, within, &avoid) {
+        Ok(q) => q,
+        Err(why) => return Planned::NoWay(why),
+    };
+    let mut found = area.read_ground(|ground, nav| wayfind::search(ground, nav, &q));
+    if matches!(found, Search::NoWay(NoWay::Unreached)) && !q.indoors_too {
+        q.indoors_too = true;
+        found = area.read_ground(|ground, nav| wayfind::search(ground, nav, &q));
+    }
+    match found {
+        Search::Found(path) => Planned::Route(route_of(&path)),
+        Search::NoWay(why) => Planned::NoWay(why),
+        Search::Unbuilt(chunks) => Planned::Building(chunks),
+    }
+}
+
+/// Where a character can stand within `radius` (metres, flat) of `around`, from the chunks built
+/// so far; once the area is built whole, only where the body at `from` has a way to.
+pub fn standable_near(area: &Area, from: Place, around: Place, radius: f32) -> Vec<Place> {
+    area.read_ground(|ground, nav| {
+        let start = graph_end(ground, from);
+        wayfind::standable_near(ground, nav, start, around.at, radius)
+            .iter()
+            .map(place_of)
+            .collect()
+    })
 }
 
 #[cfg(test)]

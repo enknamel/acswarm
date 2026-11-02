@@ -120,7 +120,8 @@ pub fn search_building(ground: &Ground, nav: &mut NavGraph, q: &WalkQuery) -> Se
     }
 }
 
-/// A route for `q` on the chunks built so far; `Unbuilt` when it found none and needed more.
+/// A route for `q` on the chunks built so far; `Unbuilt` whenever it reached one not built, so a
+/// route is only ever the one [`search_building`] gives, never a way round what is missing.
 pub fn search(ground: &Ground, nav: &NavGraph, q: &WalkQuery) -> Search {
     let mut l = Built {
         nav,
@@ -131,9 +132,9 @@ pub fn search(ground: &Ground, nav: &NavGraph, q: &WalkQuery) -> Search {
     missing.sort_unstable();
     missing.dedup();
     match found {
-        Ok(path) => Search::Found(path),
         Err(NoWay::OffFloor) => Search::NoWay(NoWay::OffFloor),
-        Err(_) if !missing.is_empty() => Search::Unbuilt(missing),
+        _ if !missing.is_empty() => Search::Unbuilt(missing),
+        Ok(path) => Search::Found(path),
         Err(why) => Search::NoWay(why),
     }
 }
@@ -1040,6 +1041,44 @@ mod tests {
         assert_eq!(g.chunk_count(), 0, "it built");
         g.build_all(&ground);
         assert!(matches!(search(&ground, &g, &q), Search::Found(_)));
+    }
+
+    #[test]
+    fn a_route_on_part_of_a_graph_waits_for_the_chunks_its_search_reached() {
+        // One long room, three chunks along x; only the first is built, and the goal stands on
+        // its last column, so the search reaches the next chunk before it finds the goal.
+        let mut w = CollisionWorld::default();
+        floor(&mut w, 0.0, 70.0, 0.0, 6.0, 0.0, 1);
+        let ground = inside(&w);
+        let q = WalkQuery {
+            from: (Vec3::new(2.0, 3.0, 0.0), 1),
+            goal: (Vec3::new(22.5, 3.0, 0.0), 1),
+            within: 0.5,
+            avoid: &[],
+            berth: 0.0,
+            indoors_too: true,
+            drops: false,
+        };
+        let mut whole = graph(Vec2::new(0.0, 0.0), Vec2::new(70.0, 6.0));
+        let Search::Found(want) = search_building(&ground, &mut whole, &q) else {
+            panic!("the room is walked across");
+        };
+        let mut part = graph(Vec2::new(0.0, 0.0), Vec2::new(70.0, 6.0));
+        let built = part.build_chunk(&ground, (0, 0));
+        part.apply(built);
+        let first = search(&ground, &part, &q);
+        let Search::Unbuilt(chunks) = first else {
+            panic!("a route round the chunk not built yet: {first:?}");
+        };
+        for c in chunks {
+            let built = part.build_chunk(&ground, c);
+            part.apply(built);
+        }
+        let Search::Found(got) = search(&ground, &part, &q) else {
+            panic!("built, the room is walked across");
+        };
+        let at = |p: &[(NavNode, EdgeKind)]| p.iter().map(|(n, _)| n.pos).collect::<Vec<_>>();
+        assert_eq!(at(&got), at(&want), "the route the whole graph gives");
     }
 
     #[test]
