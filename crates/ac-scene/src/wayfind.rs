@@ -196,7 +196,12 @@ pub fn standable_near(
             missing: Vec::new(),
         };
         let roots: Vec<u32> = sources(ground, &mut l, &q, &Berths(Vec::new()), s, from.1, &cap)
-            .map(|(_, ids)| ids.iter().map(|&(id, _)| nav.walk_component(id)).collect())
+            .map(|f| {
+                f.ids
+                    .iter()
+                    .map(|&(id, _)| nav.walk_component(id))
+                    .collect()
+            })
             .unwrap_or_default();
         out.retain(|&id| roots.contains(&nav.walk_component(id)));
     }
@@ -334,7 +339,11 @@ fn lattice_way(ground: &Ground, l: &mut impl Lattice, q: &WalkQuery) -> Result<W
     // first leg is walked from there like any other.
     let (s, from_cell) = floor_of(ground, q.from.0, q.from.1, &cap).unwrap_or(q.from);
     let berths = Berths::of(q, s);
-    let (start, sources) = sources(ground, l, q, &berths, s, from_cell, &cap)?;
+    let Sources {
+        from: start,
+        ids: sources,
+        dropped,
+    } = sources(ground, l, q, &berths, s, from_cell, &cap)?;
     let ends = ends(ground, l, q, &berths, g, goal_cell, &cap);
     if ends.is_empty() {
         return Err(NoWay::Unreached);
@@ -364,6 +373,9 @@ fn lattice_way(ground: &Ground, l: &mut impl Lattice, q: &WalkQuery) -> Result<W
         let kind = kind.unwrap_or_else(|| walk_kind(cell, n.cell));
         points.push((n, kind));
         cell = n.cell;
+    }
+    if let Some(first) = points.first_mut().filter(|_| dropped) {
+        first.1 = EdgeKind::Drop;
     }
     let last = path.last().map(|&(id, _)| id).ok_or(NoWay::Unreached)?;
     if let Some(at) = ends[&last].at {
@@ -439,8 +451,16 @@ fn can_leave_start(
     !berths.crosses(a.0, b.0) && ground.body_reaches(a.0, a.1, b.0, cap)
 }
 
-/// The nodes a route may begin at, each with the cost of the checked walk to it from the start;
-/// the start pushed out of a wall when nothing nearer is walked to.
+/// Where a route's first leg leaves from, the nodes it may begin at with the cost of the checked
+/// leg to each, and whether that leg is a drop.
+struct Sources {
+    from: Vec3,
+    ids: Vec<(u32, f32)>,
+    dropped: bool,
+}
+
+/// The nodes a route may begin at; the start pushed out of a wall when nothing nearer is walked
+/// to. Failing a walk, one that takes drops leaves by the drop it takes.
 fn sources(
     ground: &Ground,
     l: &mut impl Lattice,
@@ -449,48 +469,100 @@ fn sources(
     s: Vec3,
     cell: u32,
     cap: &Capsule,
-) -> Result<(Vec3, Vec<(u32, f32)>), NoWay> {
+) -> Result<Sources, NoWay> {
     let pushed = ground
         .collision
         .resolve_above(s, cap.radius, cap.height, cap.step_up);
-    let mut tried: HashSet<(u32, u32)> = HashSet::new();
-    for (look, (from, r)) in [
+    let walks = [
         (s, NEAREST_REACH),
         (s, STRANDED_REACH),
         (pushed, STRANDED_REACH),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        l.reach(from, r);
-        let nav = l.nav();
+    ];
+    let mut tried: HashSet<(u32, u32)> = HashSet::new();
+    for (look, (from, r)) in walks.into_iter().enumerate() {
         let key = u32::from(look == 2);
-        let mut near: Vec<(bool, f32, u32)> = nav
-            .near(from, r)
+        let near = nearest_from(l, from, r, cell, false, |id, n| {
+            can_stand_on(q, berths, n) && tried.insert((key, id))
+        });
+        let nav = l.nav();
+        let kept: Vec<(u32, f32)> = near
             .into_iter()
-            .map(|(_, id)| id)
-            .filter(|id| {
-                can_stand_on(q, berths, &nav.nodes[*id as usize]) && !tried.contains(&(key, *id))
-            })
-            .map(|id| {
+            .filter(|&(id, _)| {
                 let n = nav.nodes[id as usize];
-                (n.cell != cell, n.pos.distance(from), id)
+                can_leave_start(ground, berths, (from, cell), (n.pos, n.cell), cap)
             })
+            .map(|(id, d)| (id, s.distance(from) + d))
             .collect();
-        near.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.total_cmp(&b.1)));
-        let mut kept = Vec::new();
-        for (_, d, id) in near.into_iter().take(JOIN_TRIES) {
-            tried.insert((key, id));
-            let n = nav.nodes[id as usize];
-            if can_leave_start(ground, berths, (from, cell), (n.pos, n.cell), cap) {
-                kept.push((id, s.distance(from) + d));
-            }
-        }
         if !kept.is_empty() {
-            return Ok((from, kept));
+            return Ok(Sources {
+                from,
+                ids: kept,
+                dropped: false,
+            });
+        }
+    }
+    if q.drops {
+        for r in [NEAREST_REACH, STRANDED_REACH] {
+            let near = nearest_from(l, s, r, cell, true, |_, n| can_stand_on(q, berths, n));
+            let nav = l.nav();
+            let kept: Vec<(u32, f32)> = near
+                .into_iter()
+                .filter(|&(id, _)| {
+                    let n = nav.nodes[id as usize];
+                    !berths.crosses(s, n.pos)
+                        && ground
+                            .drop_toward(s, cell, n.pos, cap)
+                            .is_some_and(|(land, at)| ground.body_reaches(land, at, n.pos, cap))
+                })
+                .collect();
+            if !kept.is_empty() {
+                return Ok(Sources {
+                    from: s,
+                    ids: kept,
+                    dropped: true,
+                });
+            }
         }
     }
     Err(NoWay::Stranded)
+}
+
+/// The [`JOIN_TRIES`] nodes within `r` columns of `from` that `keep` lets by (in order), those in
+/// `cell` first, nearest first, each with its distance: within an edge's rise of `from`, or when
+/// `below`, any lower down.
+fn nearest_from(
+    l: &mut impl Lattice,
+    from: Vec3,
+    r: i32,
+    cell: u32,
+    below: bool,
+    mut keep: impl FnMut(u32, &NavNode) -> bool,
+) -> Vec<(u32, f32)> {
+    l.reach(from, r);
+    let nav = l.nav();
+    let ids: Vec<u32> = if below {
+        let (gx, gy) = nav.column_of(from);
+        (-r..=r)
+            .flat_map(|dx| (-r..=r).map(move |dy| (gx + dx, gy + dy)))
+            .flat_map(|col| nav.column_ids(col).iter().copied())
+            .filter(|&id| nav.nodes[id as usize].pos.z < from.z)
+            .collect()
+    } else {
+        nav.near(from, r).into_iter().map(|(_, id)| id).collect()
+    };
+    let mut near: Vec<(bool, f32, u32)> = ids
+        .into_iter()
+        .map(|id| {
+            let n = nav.nodes[id as usize];
+            (n.cell != cell, n.pos.distance(from), id)
+        })
+        .collect();
+    near.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.total_cmp(&b.1)));
+    near.into_iter()
+        .filter(|&(_, _, id)| keep(id, &nav.nodes[id as usize]))
+        .take(JOIN_TRIES)
+        .map(|(_, d, id)| (id, d))
+        .collect()
 }
 
 /// The goal set: nodes within `within` of `g` on its floor in sight of it, and nodes from which
@@ -1207,6 +1279,47 @@ mod tests {
             panic!("no way down with drops allowed");
         };
         assert!(route.iter().any(|(_, k)| *k == EdgeKind::Drop), "{route:?}");
+    }
+
+    #[test]
+    fn a_start_on_a_beam_no_node_stands_on_leaves_by_the_drop_it_takes() {
+        // A beam 0.4 m wide, 3 m over a room's floor: too narrow for the lattice, wide enough to
+        // stand on. Walking, nothing leads off it; taking drops, the step off it is the first leg.
+        let mut w = CollisionWorld::default();
+        floor(&mut w, 0.0, 4.0, 0.3, 0.7, 3.0, 0x0101);
+        floor(&mut w, -2.0, 8.0, -3.0, 3.0, 0.0, 0x0102);
+        let ground = inside(&w);
+        let mut g = graph(Vec2::new(-2.0, -3.0), Vec2::new(8.0, 3.0));
+        g.build_all(&ground);
+        assert!(
+            g.nodes.iter().all(|n| n.pos.z < 1.0),
+            "a node on the beam: the lattice stands on it"
+        );
+        let mut q = WalkQuery {
+            from: (Vec3::new(2.0, 0.5, 3.0), 0x0101),
+            goal: (Vec3::new(6.0, -2.0, 0.0), 0x0102),
+            within: 0.5,
+            avoid: &[],
+            berth: 0.0,
+            indoors_too: true,
+            outdoors_first: false,
+            drops: false,
+        };
+        let walked = search(&ground, &g, &q);
+        assert!(
+            matches!(walked, Search::NoWay(NoWay::Stranded)),
+            "{walked:?}"
+        );
+        q.drops = true;
+        let found = search(&ground, &g, &q);
+        let Search::Found(route) = found else {
+            panic!("no way off the beam with drops allowed: {found:?}");
+        };
+        assert_eq!(route[0].1, EdgeKind::Drop, "{route:?}");
+        assert!(
+            route[0].0.pos.z.abs() < 0.1,
+            "lands on the floor: {route:?}"
+        );
     }
 
     #[test]
