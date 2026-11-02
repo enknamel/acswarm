@@ -1344,11 +1344,8 @@ impl Api for CtxApi<'_, '_> {
         use ac_client::{did::Did, Owner};
         let target = glam::Vec3::new(x as f32, y as f32, z as f32);
         let stop = if stop > 0.0 { stop as f32 } else { 0.5 };
-        // Through the travel system, like everything else. Setting the
-        // steering goal here by hand made this binding the one way to
-        // move that ignored portals, recalls and whether the way was
-        // possible at all -- which also made every test written with it
-        // prove nothing about what the character actually does.
+        // Through the slot, like every walk: planned whole, a journey past the region, and refused
+        // when there is no way, so a test written with it proves what the character does.
         let c = self.client();
         // A walk another owner took is asked for again at once, as the script asked last.
         match c.go_to(Owner::Script, target, stop) {

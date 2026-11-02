@@ -115,7 +115,7 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 | road | a walk on the way somewhere (a ground, a counter, a script's goal); on it only what attacks is fought | way |
 | ground | the hunting spot growth chose; walking about it is not a road | spot, field |
 | area | a hunting area a player drew on the map (`HuntArea`) | zone |
-| journey | a planned trip of walks, portals and recalls (`Travel`) | route, travel plan |
+| journey | a planned trip of walks, portals and recalls (`Travel`); each walk one the slot follows (`Going`) | route, travel plan |
 | mate | another character on the team board (`Mate`), in the fellowship or not | teammate, member |
 | fellow | a member of the server's fellowship | - |
 | recruit | invite a mate into the fellowship | invite, ask |

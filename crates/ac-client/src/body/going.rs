@@ -1,6 +1,7 @@
 //! The slot: the one walk the body follows, asked for by one owner ([`Client::go`]) and answered
 //! truthfully. A new walk is planned whole on the asking frame and handed to the follower; a
-//! step's walk ends the tick its step stops asking; [`GIVE_UP_AFTER`] is the one give-up.
+//! step's walk ends the tick its step stops asking; [`GIVE_UP_AFTER`] is the one give-up. A
+//! journey's leg is walked here too (`walk_leg`), while no other owner holds the slot.
 
 use std::time::{Duration, Instant};
 

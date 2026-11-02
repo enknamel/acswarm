@@ -358,7 +358,7 @@ pub struct Client {
     /// The thing a server walk was for that the follower found no way to (see `tick_player`).
     pub server_walk_refused: Option<u32>,
     /// The time of the frame under way (`tick_autoplay`, `tick_player`): the walk clock of a caller
-    /// that names none (`head_for`).
+    /// that names none (`go_to`).
     pub(crate) frame_at: Instant,
     /// A sidestep out of a spell's way (see `dodge`): where to, and
     /// until when. Outranks every other movement goal while it lasts.

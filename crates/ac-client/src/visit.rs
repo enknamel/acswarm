@@ -199,11 +199,11 @@ impl Visits {
 /// What a visit does next.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Next {
-    /// Too far to walk: set off on a journey.
+    /// Past the region: set off on a journey.
     Journey,
-    /// Too far to walk, and the journey is under way.
+    /// Past the region, and the journey is under way.
     OnTheWay,
-    /// Too far to walk, and the journey is over: it ended short.
+    /// Past the region, and the journey is over: it ended short.
     GiveUp,
     /// Walk the rest: through the door and up the stairs, if that is
     /// where they are.

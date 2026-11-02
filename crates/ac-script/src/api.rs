@@ -316,7 +316,7 @@ pub trait Api {
     /// Walk to a world position, stopping within `stop` metres of it
     /// (0 for a sensible default). The steering and the route planner
     /// do the work, so this goes round what is in the way rather than
-    /// into it. `walk_stop()` gives up the walk.
+    /// into it. `walk_stop()` gives up the walk. False when the planner has no way there.
     fn walk_to(&mut self, x: f64, y: f64, z: f64, stop: f64) -> bool;
     fn walk_stop(&mut self);
     /// Queue everything in the open container; returns how many.
