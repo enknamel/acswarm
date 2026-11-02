@@ -119,6 +119,7 @@ fn a_corpse_in_the_holtburg_dungeon_is_reached_through_its_portal() {
         &[],
         &[],
         &[],
+        &[],
         Prefs::quick(),
     );
     assert!(trip.as_ref().is_some_and(|t| t.portals() == 1), "{trip:?}");
@@ -726,6 +727,40 @@ fn a_journey_that_loses_a_step_is_planned_again_without_it() {
         me.distance(goal.at) <= ARRIVE,
         "stopped at {me}, short of {goal:?}"
     );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_walk_with_no_way_after_a_hop_is_left_out_and_the_journey_planned_again() {
+    // As if just come into the Holtburg Dungeon room by a portal, the ledge the trip's last walk:
+    // the walk is refused on the first frame and the journey planned again from here without it
+    // (refused when nothing else reaches the ledge), never walked from here again.
+    let mut c = Client::offline(crate::testkit::game_data());
+    let (start, ledge) = under_the_01f6_ledge(&mut c);
+    let trip = Trip {
+        steps: vec![Step::Walk(ledge)],
+        seconds: 10.0,
+    };
+    crate::testkit::set_out_on(&mut c, trip, within_reach(ledge));
+    c.travel.hopped = true;
+    c.frame_at = Instant::now();
+    let first = c.walk_journey(c.frame_at);
+    assert!(
+        matches!(first, Some(crate::did::Did::Blocked(_))),
+        "{first:?}"
+    );
+    assert!(c.traveling(), "refused, not planned again");
+    assert_eq!(c.travel.refused_walks.len(), 1);
+    let again = c.walk_journey(c.frame_at);
+    let me = c.my_position().expect("on its feet");
+    assert!(me.distance(start) < 0.01, "walked to {me}");
+    match c.travel_trip() {
+        Some(t) => assert_ne!(t.steps.first(), Some(&Step::Walk(ledge)), "{t:?}"),
+        None => assert!(
+            matches!(again, Some(crate::did::Did::Blocked(_))),
+            "{again:?}"
+        ),
+    }
 }
 
 #[test]

@@ -40,6 +40,29 @@ pub const WALK_REACH: f32 = 1200.0;
 pub const PORTAL_REACH: f32 = 900.0;
 /// Close enough to the goal to stop (metres).
 pub const ARRIVED: f32 = 15.0;
+/// A walk refused from a spot is refused from a node this near it (metres, flat): where a portal
+/// leaves the character is counted as arrived within 30 m (`ac-client` `travel.rs`).
+const NO_WALK_NEAR: f32 = 30.0;
+
+/// A walk the caller's region planner found no way for, from where the character stood to its
+/// end: the next plan walks there from nowhere near `from`, in its block and inside or not alike.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NoWalk {
+    pub from: Place,
+    pub to: Place,
+}
+
+impl NoWalk {
+    /// Whether this refusal rules out walking from `a` to `b`.
+    fn is_walk(&self, a: Place, b: Place) -> bool {
+        let near = |p: Place, q: Place, metres: f32| {
+            p.cell & 0xFFFF_0000 == q.cell & 0xFFFF_0000
+                && p.is_indoors() == q.is_indoors()
+                && p.at.truncate().distance(q.at.truncate()) <= metres
+        };
+        near(a, self.from, NO_WALK_NEAR) && near(b, self.to, 2.0)
+    }
+}
 
 /// A recall spell the character can cast right now, and where it lands:
 /// what the caller hands the planner. The destination of a named
@@ -374,7 +397,17 @@ pub fn plan_with_recalls(
     recalls: &[Recall],
     prefs: Prefs,
 ) -> Option<Trip> {
-    plan_with_recalls_and_gems(from, goal, level, quests_done, avoid, recalls, &[], prefs)
+    plan_with_recalls_and_gems(
+        from,
+        goal,
+        level,
+        quests_done,
+        avoid,
+        &[],
+        recalls,
+        &[],
+        prefs,
+    )
 }
 
 /// [`plan_with_recalls`] for a character also carrying portal gems. A
@@ -385,6 +418,7 @@ pub fn plan_with_recalls(
 /// The goal's cell says which block it lies in: a dungeon's rooms reach outside the square of
 /// its landblock, so a position alone can name the block next door (a corpse in the Holtburg
 /// Dungeon's armoredillo rooms read as 0x01F5, and there was no way back to it).
+/// The walks in `no_walks` are left out, as the mouths at `avoid` are.
 #[allow(clippy::too_many_arguments)]
 pub fn plan_with_recalls_and_gems(
     from: Place,
@@ -392,14 +426,18 @@ pub fn plan_with_recalls_and_gems(
     level: u32,
     quests_done: &[String],
     avoid: &[Vec2],
+    no_walks: &[NoWalk],
     recalls: &[Recall],
     gems: &[Gem],
     prefs: Prefs,
 ) -> Option<Trip> {
     let recalls: &[Recall] = if prefs.use_recalls { recalls } else { &[] };
+    let can_walk = |a: Place, b: Place, stuck: bool| {
+        can_walk_from(a, b, prefs.walk_reach, stuck) && !no_walks.iter().any(|n| n.is_walk(a, b))
+    };
     // Straight there, when that is a believable walk and there is no
     // spell that might be quicker.
-    if recalls.is_empty() && can_walk_from(from, goal, prefs.walk_reach, prefs.in_dungeon) {
+    if recalls.is_empty() && can_walk(from, goal, prefs.in_dungeon) {
         return Some(Trip {
             steps: vec![Step::Walk(goal)],
             seconds: walk_seconds(from, goal),
@@ -456,7 +494,7 @@ pub fn plan_with_recalls_and_gems(
         // came out.
         let stuck =
             prefs.in_dungeon && node.at.truncate() == from.at.truncate() && node.cell == from.cell;
-        if can_walk_from(node, goal, prefs.walk_reach, stuck) {
+        if can_walk(node, goal, stuck) {
             let total = q.cost + walk_seconds(node, goal);
             if best.map(|(b, _)| total < b).unwrap_or(true) {
                 best = Some((total, q.idx));
@@ -518,7 +556,7 @@ pub fn plan_with_recalls_and_gems(
                 continue;
             }
             let mouth = mouth_of(p);
-            if !can_walk_from(node, mouth, prefs.walk_reach, stuck) {
+            if !can_walk(node, mouth, stuck) {
                 continue;
             }
             let far = node.at.truncate().distance(p.from_xy()) > prefs.portal_reach;
@@ -725,6 +763,54 @@ mod tests {
         }
     }
 
+    #[test]
+    fn a_walk_refused_from_a_spot_is_planned_from_nowhere_near_it() {
+        let from = holtburg();
+        let goal = place("Arwic");
+        let plan_without = |no_walks: &[NoWalk]| {
+            plan_with_recalls_and_gems(
+                from,
+                goal,
+                20,
+                &[],
+                &[],
+                no_walks,
+                &[],
+                &[],
+                Prefs::default(),
+            )
+        };
+        let trip = plan_without(&[]).expect("no trip");
+        let last_exit = trip.steps.iter().rev().find_map(Step::exit).expect("a hop");
+        // The last walk refused from where the last portal leaves us: no plan walks it from there.
+        let refused = NoWalk {
+            from: last_exit,
+            to: goal,
+        };
+        if let Some(t) = plan_without(&[refused]) {
+            let exit = t.steps.iter().rev().find_map(Step::exit).expect("a hop");
+            assert!(!refused.is_walk(exit, goal), "walked from {exit:?} again");
+        }
+        // A short hop refused from the start is not walked from there.
+        let near = walk_by(from, Vec2::new(120.0, 60.0));
+        let refused = NoWalk { from, to: near };
+        let t = plan_with_recalls_and_gems(
+            from,
+            near,
+            0,
+            &[],
+            &[],
+            &[refused],
+            &[],
+            &[],
+            Prefs::default(),
+        );
+        assert!(
+            t.is_none_or(|t| t.steps != vec![Step::Walk(near)]),
+            "walked again"
+        );
+    }
+
     fn recall_to(name: &str, spell: u32, exit: Place) -> Recall {
         Recall {
             spell,
@@ -881,6 +967,7 @@ mod tests {
             &[],
             &[],
             &[],
+            &[],
             std::slice::from_ref(&gem),
             Prefs::default(),
         )
@@ -920,6 +1007,7 @@ mod tests {
             &[],
             &[],
             &[],
+            &[],
             std::slice::from_ref(&gem),
             Prefs::default(),
         )
@@ -951,6 +1039,7 @@ mod tests {
                 far,
                 goal,
                 275,
+                &[],
                 &[],
                 &[],
                 &[],

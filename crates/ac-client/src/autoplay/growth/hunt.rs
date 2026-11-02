@@ -547,6 +547,7 @@ impl Client {
                 level,
                 &quests,
                 &[],
+                &[],
                 &recalls,
                 &gems,
                 p,

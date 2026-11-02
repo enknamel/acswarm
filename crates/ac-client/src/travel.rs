@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use ac_formats::region::Region;
 use ac_scene::worldgrid::WorldGrid;
-use ac_world::trip::{self, Prefs, Step, Trip};
+use ac_world::trip::{self, NoWalk, Prefs, Step, Trip};
 use ac_world::Place;
 use glam::{Vec2, Vec3};
 
@@ -114,6 +114,11 @@ pub struct Travel {
     /// Gems that did not take us anywhere *on this journey*: left out of
     /// the next plan, like `refused_recalls`.
     refused_gems: Vec<u32>,
+    /// Walks the region planner found no way for *on this journey*, like `refused_recalls`.
+    refused_walks: Vec<NoWalk>,
+    /// This journey has been carried into another region (a portal, recall or gem): a walk with
+    /// no way there is left out and the journey planned again, not refused.
+    hopped: bool,
     /// The quest flags the character holds that a portal asks for (`crate::quest_flags`).
     pub(crate) quests_done: Vec<String>,
     /// The last tie spell cast (Lifestone Tie, a Portal Tie), so the
@@ -265,12 +270,11 @@ impl Client {
             return Err("not a place".into());
         };
         let xy = place.at.truncate();
-        let Some(pl) = self.player.as_ref() else {
+        let Some((from, underground)) = self.planning_from() else {
             tracing::warn!("travel: the character is not in the world");
             return Err("not in the world yet".into());
         };
-        let me = pl.world_position();
-        let cell = pl.cell;
+        let (me, cell) = (from.at, from.cell);
         let t0 = Instant::now();
         // A new destination starts afresh: what turned us away on the
         // last journey says nothing about this one.
@@ -278,30 +282,20 @@ impl Client {
             self.travel.refused.clear();
             self.travel.refused_recalls.clear();
             self.travel.refused_gems.clear();
+            self.travel.refused_walks.clear();
+            self.travel.hopped = false;
             // A new journey is a road until whoever planned it says
             // otherwise (see `travel_about`).
             self.travel.about_the_ground = false;
         }
         let level = self.world.stats.level.max(1) as u32;
         let refused = self.travel.refused.clone();
-        // Underground, there is no walking out. A dungeon shares its
-        // landblock number with the ground above it, so without saying
-        // so the planner reads a vendor a hundred metres up as a
-        // hundred-metre stroll -- which is a character setting off into
-        // the nearest wall, saying it is going to the shops.
-        let underground = {
-            let assets = self.assets.clone();
-            self.player
-                .as_mut()
-                .map(|pl| pl.is_indoors() && pl.in_dungeon(&assets))
-                .unwrap_or(false)
-        };
+        let no_walks = self.travel.refused_walks.clone();
         let prefs = self.travel.prefs.in_dungeon(underground);
         tracing::info!(
             "travel: planning to {xy:?} in {:#010x} from {cell:#010x}, underground {underground}",
             place.cell
         );
-        let cell = planning_cell(cell, me, underground);
         // Portal gems in the pack are ways to get somewhere too, and
         // unlike a recall they need no skill or components: carrying one
         // is the whole requirement.
@@ -320,10 +314,9 @@ impl Client {
             Vec::new()
         };
         let quests = self.travel.quests_done.clone();
-        let from = Place { at: me, cell };
         let to = self.planning_place(place);
         let mut planned = trip::plan_with_recalls_and_gems(
-            from, to, level, &quests, &refused, &recalls, &gems, prefs,
+            from, to, level, &quests, &refused, &no_walks, &recalls, &gems, prefs,
         );
         // Nothing within a believable walk or a portal: walk the whole way, as the last resort.
         // A ground reached by a one-way portal has no way back otherwise, and the character was
@@ -335,7 +328,7 @@ impl Client {
                 ..prefs
             };
             planned = trip::plan_with_recalls_and_gems(
-                from, to, level, &quests, &refused, &recalls, &gems, far,
+                from, to, level, &quests, &refused, &no_walks, &recalls, &gems, far,
             );
             if let Some(t) = &planned {
                 tracing::info!("travel: no shorter way; the long walk, {:.0} s", t.seconds);
@@ -395,6 +388,18 @@ impl Client {
             t0.elapsed()
         );
         Ok(trip)
+    }
+
+    /// Where the body stands as the trip planner is told it (see [`planning_cell`]), and whether
+    /// underground: a dungeon shares its landblock number with the ground above, and without saying
+    /// so a vendor a hundred metres up reads as a hundred-metre stroll into the nearest wall.
+    fn planning_from(&mut self) -> Option<(Place, bool)> {
+        let assets = self.assets.clone();
+        let pl = self.player.as_mut()?;
+        let at = pl.world_position();
+        let underground = pl.is_indoors() && pl.in_dungeon(&assets);
+        let cell = planning_cell(pl.cell, at, underground);
+        Some((Place { at, cell }, underground))
     }
 
     /// Take `trip` to `goal`, set off by `owner`, as the journey under way, at its first step.
@@ -706,6 +711,8 @@ impl Client {
         self.travel.refused.clear();
         self.travel.refused_recalls.clear();
         self.travel.refused_gems.clear();
+        self.travel.refused_walks.clear();
+        self.travel.hopped = false;
         self.travel.goal = None;
         self.travel.owner = None;
         self.travel.replan_due = false;
@@ -943,11 +950,14 @@ impl Client {
         let refused = std::mem::take(&mut self.travel.refused);
         let refused_recalls = std::mem::take(&mut self.travel.refused_recalls);
         let refused_gems = std::mem::take(&mut self.travel.refused_gems);
-        let (goal, owner) = (self.travel.goal, self.travel.owner);
+        let refused_walks = std::mem::take(&mut self.travel.refused_walks);
+        let (goal, owner, hopped) = (self.travel.goal, self.travel.owner, self.travel.hopped);
         self.end_trip();
         self.travel.refused = refused;
         self.travel.refused_recalls = refused_recalls;
         self.travel.refused_gems = refused_gems;
+        self.travel.refused_walks = refused_walks;
+        self.travel.hopped = hopped;
         self.travel.goal = goal;
         self.travel.owner = owner;
     }
@@ -968,16 +978,26 @@ impl Client {
         did
     }
 
-    /// The step's walk has no way: a portal is left out and the journey planned again next frame;
-    /// the journey's own end refuses the journey.
+    /// The step's walk has no way: a portal is left out and the journey planned again next frame,
+    /// and so is the walk to its end once carried into this region; else the journey is refused.
     fn refuse_step(&mut self, why: &str) {
+        let n = self.travel.step;
         match self.travel_step().cloned() {
             Some(Step::Portal { name, mouth, .. }) => {
-                tracing::warn!(
-                    "travel: step {} (portal {name:?}): {why}; going another way",
-                    self.travel.step
-                );
+                tracing::warn!("travel: step {n} (portal {name:?}): {why}; going another way");
                 self.travel.refused.push(mouth.at.truncate());
+                self.travel.replan_due = true;
+            }
+            Some(Step::Walk(to)) if self.travel.hopped => {
+                let Some((from, _)) = self.planning_from() else {
+                    return self.refuse_journey(why);
+                };
+                tracing::warn!(
+                    "travel: step {n} (walk to {:?}): {why}; going another way",
+                    to.at
+                );
+                let to = self.planning_place(to);
+                self.travel.refused_walks.push(NoWalk { from, to });
                 self.travel.replan_due = true;
             }
             _ => self.refuse_journey(why),
@@ -1066,6 +1086,7 @@ impl Client {
                 // The jump was the portal's (or the spell's) doing, not
                 // a stray one.
                 self.travel.last_seen = Some(me);
+                self.travel.hopped = true;
                 match step {
                     Some(Step::Recall { name, .. }) => {
                         tracing::info!("travel: {name} carried us off");
@@ -1125,6 +1146,7 @@ impl Client {
                 // continent. The route already pays to pass near one, and
                 // the plan from here takes the new position as it is.
                 tracing::info!("travel: carried off to {me:?}; planning again from here");
+                self.travel.hopped = true;
                 self.travel.replan_due = true;
                 return None;
             }
