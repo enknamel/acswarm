@@ -20,7 +20,6 @@ use std::time::{Duration, Instant};
 
 use ac_formats::region::Region;
 use ac_scene::worldgrid::WorldGrid;
-use ac_scene::worldroute;
 use ac_world::trip::{self, Prefs, Step, Trip};
 use ac_world::Place;
 use glam::{Vec2, Vec3};
@@ -29,15 +28,12 @@ use crate::body::server_walk::reached;
 use crate::did::Did;
 use crate::gem_room::{clear_heading, gem_next, GemNext};
 use crate::{Client, Goal, Owner};
+use overland::{Corridor, EXIT_REACH};
+
+mod overland;
 
 /// A waypoint counts as reached within this distance (metres, flat).
 pub const ARRIVE: f32 = 3.0;
-/// Longest leg handed to the local move-to (metres).
-pub const LEG: f32 = 60.0;
-
-/// The leg is cut this far short of the landblock edge so its end lies in
-/// the block the character stands in.
-const EDGE_MARGIN: f32 = 2.0;
 /// A portal that has not taken us in this long is one we cannot use
 /// (a level range, an unfinished quest, or it simply is not there): the
 /// journey is planned again without it.
@@ -69,13 +65,6 @@ const SUMMON_ROOM: f32 = 2.0;
 const FACE_STEP: f32 = 1.5;
 /// That step is walked to within this (metres, 3D): the heading is what it is for.
 const FACE_REACH: f32 = 0.3;
-/// No progress toward the current waypoint for this long: skip it.
-/// Progress is measured along the route the steering is following
-/// where there is one, since a detour around a wall walks away from the
-/// waypoint for a good while before it comes back.
-pub const STUCK_AFTER: Duration = Duration::from_secs(10);
-/// Getting closer to the waypoint by less than this is not progress.
-const PROGRESS: f32 = 1.0;
 
 /// What the step being made keeps, replaced whole as a step begins: nothing of one step reaches
 /// the next.
@@ -103,30 +92,10 @@ struct StepState {
     summoned_uses: u32,
     /// The step's walk end on its floor, once the region holds it.
     end: Option<Place>,
-    /// The stretch asked this frame is an overland leg.
-    on_leg: bool,
-    /// World xy waypoints of the overland route, start and end included.
-    route: Option<Vec<Vec2>>,
-    /// Index of the waypoint being walked to.
-    next: usize,
-    /// End of the leg the local move-to is aimed at right now.
-    leg: Option<Vec2>,
-    /// Closest the character has been to the current waypoint, and when
-    /// that last improved.
-    best: f32,
-    last_progress: Option<Instant>,
-    /// When the route that distance was last measured along was planned:
-    /// a new route is a new yardstick.
-    measured_on: Option<Instant>,
-}
-
-impl StepState {
-    fn restart_waypoint(&mut self) {
-        self.leg = None;
-        self.best = f32::INFINITY;
-        self.last_progress = None;
-        self.measured_on = None;
-    }
+    /// The overland corridor, while the region does not hold the walk end.
+    corridor: Option<Corridor>,
+    /// The corridor stretch being walked: where it leaves the region, on its floor.
+    stretch: Option<Place>,
 }
 
 /// The journey being made, and the terrain data it needs.
@@ -172,8 +141,6 @@ pub struct Travel {
     pub(crate) replan_due: bool,
     /// Why the last journey was refused, for [`Client::set_off`] to answer with.
     why_refused: Option<String>,
-    /// Last frame's overland leg was refused by the slot.
-    leg_refused: bool,
     /// The last journey was broken off by something else the character
     /// went to do -- a corpse to open, a fight, a dodge -- rather than
     /// arriving, giving up or being cancelled. Cleared when the next one
@@ -518,7 +485,7 @@ impl Client {
 
     /// The route being walked (world xy waypoints), for a map to draw.
     pub fn travel_route(&self) -> Option<&[Vec2]> {
-        self.travel.state.route.as_deref()
+        self.travel.state.corridor.as_ref().map(Corridor::points)
     }
 
     /// `(step being made, steps in the journey)` while travelling.
@@ -649,7 +616,6 @@ impl Client {
         self.travel.goal = None;
         self.travel.owner = None;
         self.travel.replan_due = false;
-        self.travel.leg_refused = false;
     }
 
     /// The portal the current step is aimed at: its name and its mouth.
@@ -891,12 +857,6 @@ impl Client {
         self.travel.owner = owner;
     }
 
-    /// The route no longer starts where the character stands (a teleport
-    /// or server correction): aim the next leg afresh.
-    pub(crate) fn travel_displaced(&mut self) {
-        self.travel.state.leg = None;
-    }
-
     /// Plan the journey again from where the body stands, leaving out what it was refused, and set
     /// off; with no way left it is refused, and kept refused for whoever set it off.
     pub(crate) fn plan_again(&mut self, now: Instant) -> Did {
@@ -945,21 +905,38 @@ impl Client {
         self.travel.why_refused = Some(why.to_string());
     }
 
-    /// What the slot answered the step's stretch: the walk's end reached is the next step; a leg
-    /// refused is skipped; any other refusal leaves the step out; the step to open ground is over.
-    pub(crate) fn stretch_answered(&mut self, did: &Did) {
+    /// What the slot answered the step's stretch: the walk's end reached is the next step, a
+    /// corridor stretch's the next stretch (true: asked on this frame); a corridor stretch refused
+    /// is kept clear of; any other refusal leaves the step out; the step to open ground is over.
+    pub(crate) fn stretch_answered(&mut self, did: &Did) -> bool {
         let gem = matches!(self.travel_step(), Some(Step::Gem { .. }));
         let portal = self.travel_portal().is_some();
-        let leg = self.travel.state.on_leg;
-        match did {
-            Did::Done | Did::Blocked(_) if gem => self.travel.state.faced = true,
-            Did::Done if !portal && !leg => {
+        let stretch = self.travel.state.stretch;
+        match (did, stretch) {
+            (Did::Done | Did::Blocked(_), _) if gem => self.travel.state.faced = true,
+            (Did::Done, Some(_)) => {
+                self.travel.state.stretch = None;
+                return true;
+            }
+            (Did::Done, None) if !portal => {
                 self.travel_next_step();
             }
-            Did::Blocked(_) if leg => self.travel.leg_refused = true,
-            Did::Blocked(why) => self.refuse_step(&why.what),
+            (Did::Blocked(why), Some(exit)) => {
+                tracing::info!(
+                    "travel: step {}: no way to {:?} on the terrain route ({}); round it",
+                    self.travel.step,
+                    exit.at,
+                    why.what
+                );
+                self.travel.state.stretch = None;
+                if let Some(c) = self.travel.state.corridor.as_mut() {
+                    c.refuse(exit.at.truncate());
+                }
+            }
+            (Did::Blocked(why), None) => self.refuse_step(&why.what),
             _ => {}
         }
+        false
     }
 
     /// The stretch of the step under way to walk this frame (`walk_journey`): the step's whole walk
@@ -972,8 +949,6 @@ impl Client {
             (pl.world_position(), pl.cell & 0xFFFF_0000)
         };
         let me = me3.truncate();
-        self.travel.leg_refused = std::mem::take(&mut self.travel.state.on_leg)
-            && std::mem::take(&mut self.travel.leg_refused);
         // A portal step is over when the character is where the portal
         // comes out. Merely being in another landblock is not enough:
         // walking to a portal often crosses a boundary, and counting
@@ -1067,6 +1042,7 @@ impl Client {
             return None;
         }
         if self.is_in_region(end) {
+            self.travel.state.stretch = None;
             // A mouth is walked into on its own floor; the journey's end is put on its floor.
             let (place, within) = match portal {
                 true => (end, 0.0),
@@ -1077,8 +1053,7 @@ impl Client {
             };
             return Some(Goal::At { place, within });
         }
-        self.travel.state.on_leg = true;
-        self.overland_goal(end.at.truncate(), now)
+        self.overland_goal(end.at.truncate())
     }
 
     /// Standing at the portal's mouth and still here: jump into it after a while, and after
@@ -1155,35 +1130,40 @@ impl Client {
         }
     }
 
-    /// `end` on its floor by the planner's rule, kept for the step; `None` while its area is
-    /// assembled. A place with no floor is handed on as it is, and the planner says why not.
+    /// `end` on its floor, kept for the step (see [`Self::on_floor`]).
     fn end_on_floor(&mut self, end: Place) -> Option<Place> {
         if let Some(p) = self.travel.state.end {
             return Some(p);
         }
+        let on = self.on_floor(end)?;
+        self.travel.state.end = Some(on);
+        Some(on)
+    }
+
+    /// `place` on its floor by the planner's rule; `None` while its area is assembled. A place
+    /// with no floor is handed on as it is, and the planner says why not when walked to.
+    fn on_floor(&mut self, place: Place) -> Option<Place> {
         let pl = self.player.as_ref()?;
         let me = Place {
             at: pl.world_position(),
             cell: pl.cell,
         };
         let cap = pl.capsule();
-        let on = match self.pathfinder.put_on_floor(me, end, cap) {
-            Ok(Some(p)) => p,
-            Ok(None) => return None,
-            Err(_) => end,
-        };
-        self.travel.state.end = Some(on);
-        Some(on)
+        match self.pathfinder.put_on_floor(me, place, cap) {
+            Ok(Some(p)) => Some(p),
+            Ok(None) => None,
+            Err(_) => Some(place),
+        }
     }
 
-    /// The overland leg toward `target` (world xy) past the region: along a terrain route
-    /// (`worldroute`), a waypoint skipped when no progress is made toward it.
-    fn overland_goal(&mut self, target: Vec2, now: Instant) -> Option<Goal> {
-        let (me3, block, indoors) = {
+    /// The corridor stretch toward `target` (world xy) past the region: to where the corridor
+    /// leaves the blocks round the body, on its floor; planned again off the corridor or round a
+    /// stretch refused, and the step left out when the terrain has no way or only a refused one.
+    fn overland_goal(&mut self, target: Vec2) -> Option<Goal> {
+        let (me, indoors) = {
             let pl = self.player.as_ref()?;
-            (pl.world_position(), pl.cell & 0xFFFF_0000, pl.is_indoors())
+            (pl.world_position().truncate(), pl.is_indoors())
         };
-        let me = me3.truncate();
         let underground = indoors && {
             let assets = self.assets.clone();
             self.player
@@ -1195,108 +1175,67 @@ impl Client {
             self.refuse_step("not in this dungeon");
             return None;
         }
-        if self.travel.state.route.is_none() {
-            let (grid, region) = self.travel_terrain()?;
-            // Every other portal near the way is a trap: walking into one takes the character
-            // wherever it leads. Give them a wide berth.
-            let keep = self.travel_portal().map(|(_, m)| m);
-            let mid = (me + target) * 0.5;
-            let reach = me.distance(target) * 0.5 + 200.0;
-            let avoid: Vec<Vec2> = ac_world::portals::near(mid, reach)
-                .into_iter()
-                .filter(|p| p.mouth_outdoors())
-                .map(|p| p.from_xy())
-                .filter(|m| keep.is_none_or(|k| k.distance(*m) > 5.0))
-                .collect();
-            let Some(route) = worldroute::find_avoiding(&grid, &region, me, target, &avoid) else {
-                self.refuse_step("no way there over the terrain");
-                return None;
-            };
-            let len: f32 = route.windows(2).map(|w| w[0].distance(w[1])).sum();
-            tracing::info!(
-                "travel: step {}: {} waypoints, {len:.0} m",
-                self.travel.step,
-                route.len()
-            );
-            self.travel.state.route = Some(route);
-            self.travel.state.next = 0;
-            self.travel.state.restart_waypoint();
+        if let Some(place) = self.travel.state.stretch.filter(|p| self.is_in_region(*p)) {
+            let within = EXIT_REACH;
+            return Some(Goal::At { place, within });
         }
-        let route = self.travel.state.route.clone()?;
-        let n = route.len();
-        loop {
-            let mut next = self.travel.state.next;
-            while next < n && me.distance(route[next]) <= ARRIVE {
-                next += 1;
+        let corridor = self.travel.state.corridor.take();
+        let exit = corridor.as_ref().and_then(|c| c.exit_from(me));
+        let (corridor, exit) = match (corridor, exit) {
+            (Some(c), Some(exit)) => (c, exit),
+            (old, _) => {
+                let refused = old.map(|c| c.refused()).unwrap_or_default();
+                // No terrain to plan over (no game data): the step stands, refused by nothing.
+                let (grid, region) = self.travel_terrain()?;
+                let Some(c) = self.plan_corridor(&grid, &region, (me, target), refused) else {
+                    self.refuse_step("no way there over the terrain");
+                    return None;
+                };
+                let Some(exit) = c.exit_from(me) else {
+                    self.refuse_step("the terrain route leaves the region at once");
+                    return None;
+                };
+                (c, exit)
             }
-            if next != self.travel.state.next {
-                self.travel.state.next = next;
-                self.travel.state.restart_waypoint();
-            }
-            if next >= n {
-                // Walked to the route's end and the region still does not hold the step's.
-                self.refuse_step("the terrain route ends short of it");
-                return None;
-            }
-            let wp = route[next];
-            // How far there is still to go: along the route being steered
-            // (and from its end on to the waypoint) while there is one,
-            // as the crow flies otherwise.
-            let (d, plan) = match self.steering.remaining(me3) {
-                Some((along, end, planned)) => (along + end.truncate().distance(wp), Some(planned)),
-                None => (me.distance(wp), None),
-            };
-            // A different route is a different yardstick: progress is
-            // measured from here on, but the clock keeps running, so a
-            // character that is not moving is still caught.
-            let s = &mut self.travel.state;
-            if plan != s.measured_on {
-                s.measured_on = plan;
-                s.best = d;
-                s.last_progress.get_or_insert(now);
-            }
-            match s.last_progress {
-                Some(t) if d >= s.best - PROGRESS => {
-                    if now.duration_since(t) >= STUCK_AFTER || self.travel.leg_refused {
-                        // The last waypoint is where the step ends; not reaching it leaves the
-                        // step out.
-                        if next + 1 >= n {
-                            self.refuse_step("no way to the end of the terrain route");
-                            return None;
-                        }
-                        tracing::warn!(
-                            "travel: no progress toward waypoint {next}/{n} at {wp:?} for {:?}, skipping it",
-                            STUCK_AFTER
-                        );
-                        self.travel.leg_refused = false;
-                        self.travel.state.next = next + 1;
-                        self.travel.state.restart_waypoint();
-                        continue;
-                    }
-                }
-                _ => {
-                    s.best = d;
-                    s.last_progress = Some(now);
-                }
-            }
-            let leg = match self.travel.state.leg {
-                Some(l) if me.distance(l) > ARRIVE && me.distance(l) <= 2.0 * LEG => l,
-                _ => {
-                    let l = leg_end(me, wp);
-                    self.travel.state.leg = Some(l);
-                    l
-                }
-            };
-            let z = leg_height(self.travel.grid.as_deref(), leg, me3, false);
-            let place = Place {
-                at: leg.extend(z),
-                cell: steering_block(leg, block, false),
-            };
-            return Some(Goal::At {
-                place,
-                within: ARRIVE,
-            });
+        };
+        let refused = corridor.is_refused_near(exit);
+        self.travel.state.corridor = Some(corridor);
+        if refused {
+            self.refuse_step("no way along the terrain route");
+            return None;
         }
+        let place = self.on_floor(Place::on_map(exit))?;
+        self.travel.state.stretch = Some(place);
+        let within = EXIT_REACH;
+        Some(Goal::At { place, within })
+    }
+
+    /// The step's corridor from `me` to `target`: off every outdoor portal mouth but the step's
+    /// own (walking into one takes the character wherever it leads), and the `refused` ends.
+    fn plan_corridor(
+        &self,
+        grid: &WorldGrid,
+        region: &Region,
+        (me, target): (Vec2, Vec2),
+        refused: Vec<Vec2>,
+    ) -> Option<Corridor> {
+        let keep = self.travel_portal().map(|(_, m)| m);
+        let mid = (me + target) * 0.5;
+        let reach = me.distance(target) * 0.5 + 200.0;
+        let avoid: Vec<Vec2> = ac_world::portals::near(mid, reach)
+            .into_iter()
+            .filter(|p| p.mouth_outdoors())
+            .map(|p| p.from_xy())
+            .filter(|m| keep.is_none_or(|k| k.distance(*m) > 5.0))
+            .collect();
+        let c = Corridor::plan(grid, region, (me, target), &avoid, refused)?;
+        let len: f32 = c.points().windows(2).map(|w| w[0].distance(w[1])).sum();
+        tracing::info!(
+            "travel: step {}: a corridor of {} points, {len:.0} m",
+            self.travel.step,
+            c.points().len()
+        );
+        Some(c)
     }
 }
 
@@ -1314,74 +1253,6 @@ pub(crate) fn planning_cell(cell: u32, at: Vec3, underground: bool) -> u32 {
         return cell;
     }
     ac_world::outdoor_cell(cell, at - ac_world::landblock_origin(cell))
-}
-
-/// The landblock the steering is told a leg ending at `at` lies in, for
-/// a character standing in `cell`.
-///
-/// On the surface a position names its landblock. Underground it need
-/// not: a dungeon's rooms reach outside its landblock's square -- the
-/// Holtburg Dungeon's lie at negative local y -- and there a position
-/// names the block next door. Told that a corpse in those rooms lay in
-/// 0x01F5, the steering had no graph to plan the way through them on,
-/// ran at the walls of the room the dungeon's portal drops you in, and
-/// recovery gave up sixty metres from the corpse. Only a portal leaves a
-/// dungeon, so every walk in one ends in the block the character stands
-/// in.
-fn steering_block(at: Vec2, cell: u32, underground: bool) -> u32 {
-    if underground {
-        cell & 0xFFFF_0000
-    } else {
-        WorldGrid::block_of(at)
-    }
-}
-
-/// The height a leg ending at `at` is aimed at, for a character at `me`:
-/// the ground there by the world grid, or underground the character's own
-/// floor -- the grid knows only the surface, and off the side of a
-/// dungeon's square only the surface of the block next door.
-fn leg_height(grid: Option<&WorldGrid>, at: Vec2, me: Vec3, underground: bool) -> f32 {
-    match grid {
-        _ if underground => me.z,
-        Some(g) => g.height_at(at),
-        None => 0.0,
-    }
-}
-
-/// Where the next leg from `me` toward `wp` ends: at most [`LEG`] away,
-/// and inside the landblock `me` is in (cut short of its edge) unless
-/// that would leave nothing to walk, in which case the leg crosses the
-/// edge straight and the next one is planned in the new block.
-pub fn leg_end(me: Vec2, wp: Vec2) -> Vec2 {
-    let d = wp - me;
-    let dist = d.length();
-    if dist < 1e-3 {
-        return wp;
-    }
-    let dir = d / dist;
-    let far = if dist <= LEG { wp } else { me + dir * LEG };
-    let block = 192.0;
-    let lo = (me / block).floor() * block;
-    let hi = lo + Vec2::splat(block);
-    // Parametric distance along the leg to the block boundary.
-    let mut t_exit = f32::INFINITY;
-    for axis in 0..2 {
-        let (p, v) = (me[axis], (far - me)[axis]);
-        if v > 1e-6 {
-            t_exit = t_exit.min((hi[axis] - p) / v);
-        } else if v < -1e-6 {
-            t_exit = t_exit.min((lo[axis] - p) / v);
-        }
-    }
-    if t_exit >= 1.0 {
-        return far;
-    }
-    let clipped = me + (far - me) * t_exit - dir * EDGE_MARGIN;
-    if me.distance(clipped) > ARRIVE + 1.0 {
-        clipped
-    } else {
-        far
-    }
 }
 
 #[cfg(test)]

@@ -124,31 +124,20 @@ fn a_corpse_in_the_holtburg_dungeon_is_reached_through_its_portal() {
     assert!(trip.as_ref().is_some_and(|t| t.portals() == 1), "{trip:?}");
 }
 
-#[test]
-fn a_walk_underground_is_steered_in_the_dungeon_it_is_in() {
-    // The room the Holtburg Dungeon's portal drops you in, and a
-    // corpse in its rooms: both below the dungeon's square, where a
-    // position alone reads as the block next door.
-    let arrival = 0x01F6_0285;
-    let corpse = Vec2::new(220.832_12, 47_190.047);
-    assert_eq!(WorldGrid::block_of(corpse), 0x01F5_0000);
-    assert_eq!(steering_block(corpse, arrival, true), 0x01F6_0000);
-    let me = Vec3::new(285.6, 47_217.1, -6.0);
-    assert_eq!(leg_height(None, corpse, me, true), -6.0);
-    // On the surface -- outdoors, or in a building on the way out --
-    // the leg's own position names its block, as it always has.
-    let holtburg = ac_world::landblock_origin(0xA9B4_0000).truncate();
-    let next_door = holtburg + Vec2::new(250.0, 100.0);
-    assert_eq!(steering_block(next_door, 0xA9B4_0019, false), 0xAAB4_0000);
-    assert_eq!(steering_block(next_door, 0xA9B4_011B, false), 0xAAB4_0000);
-    assert_eq!(leg_height(None, next_door, me, false), 0.0);
-}
-
 /// Walk the journey the client is on for up to `seconds` of game time, frame by frame the way
 /// `tick_player` does: the stretch asked of the slot, the steering along it, the player's own
 /// physics. Stops when the journey ends; the last answer the slot gave its stretch. The clock
 /// starts at `Client.frame_at`, which the test sets as it sets off: offline, planning takes seconds.
 fn walk_the_journey(c: &mut Client, seconds: f32) -> Option<crate::did::Did> {
+    walk_watching(c, seconds, |_, _| {})
+}
+
+/// [`walk_the_journey`], `each` shown the client after the slot is asked, every frame.
+fn walk_watching(
+    c: &mut Client,
+    seconds: f32,
+    mut each: impl FnMut(&mut Client, Instant),
+) -> Option<crate::did::Did> {
     use crate::player::Input;
     let dt = 1.0 / 20.0;
     let t0 = c.frame_at;
@@ -159,14 +148,14 @@ fn walk_the_journey(c: &mut Client, seconds: f32) -> Option<crate::did::Did> {
             return last;
         }
         last = c.walk_journey(now).or(last);
+        each(c, now);
         let goal = c.going_to();
         let pl = c.player.as_mut().unwrap();
         let mut input = Input::default();
         pl.step_cap = None;
         match goal {
             Some((g, stop, cell)) => {
-                let d = g - pl.world_position();
-                if Vec2::new(d.x, d.y).length() > stop {
+                if !crate::body::server_walk::reached(pl.world_position(), g, stop) {
                     let mut standing = crate::Standing {
                         player: pl,
                         pathfinder: &mut c.pathfinder,
@@ -764,30 +753,75 @@ fn a_portal_in_a_hall_is_walked_to_on_its_own_floor() {
 }
 
 #[test]
-fn legs_are_short_and_stay_in_the_block() {
-    // Mid-block, far goal along +x: a LEG-long leg.
-    let me = Vec2::new(192.0 * 10.0 + 20.0, 192.0 * 10.0 + 96.0);
-    let wp = me + Vec2::new(1000.0, 0.0);
-    let l = leg_end(me, wp);
-    assert!((l - (me + Vec2::new(LEG, 0.0))).length() < 1e-3, "{l:?}");
-    // Near the block's east edge with the goal beyond it: cut short
-    // of the edge...
-    let me = Vec2::new(192.0 * 11.0 - 30.0, 192.0 * 10.0 + 96.0);
-    let l = leg_end(me, wp);
-    assert!((l.x - (192.0 * 11.0 - EDGE_MARGIN)).abs() < 1e-3, "{l:?}");
-    assert_eq!(WorldGrid::block_of(l), WorldGrid::block_of(me));
-    // ...unless that leaves nothing to walk: then straight across.
-    let me = Vec2::new(192.0 * 11.0 - 3.0, 192.0 * 10.0 + 96.0);
-    let l = leg_end(me, wp);
-    assert!(l.x > 192.0 * 11.0, "{l:?}");
-    // A close goal is the leg's end.
-    let wp = me + Vec2::new(0.0, -10.0);
-    assert_eq!(leg_end(me, wp), wp);
-    // Diagonal toward the north-west corner: the nearer edge cuts.
-    let me = Vec2::new(192.0 * 10.0 + 10.0, 192.0 * 11.0 - 40.0);
-    let l = leg_end(me, me + Vec2::new(-100.0, 100.0));
-    assert_eq!(WorldGrid::block_of(l), WorldGrid::block_of(me));
-    assert!(l.x > 192.0 * 10.0 && l.y < 192.0 * 11.0, "{l:?}");
+#[ignore = "needs AC_DATA_DIR"]
+fn a_journey_to_an_indoor_goal_arrives_in_its_cell() {
+    // From the A9B2 platform to Archmage Cindrue upstairs (0xA9B4011B), 440 m: a corridor
+    // stretch, then into the house and up the stairs, ending in that cell on that floor.
+    let local = Vec3::new(78.2, 85.9, 97.5);
+    let cell = ac_world::outdoor_cell(0xA9B2_0000, local);
+    let mut c = crate::testkit::standing_in_the_field(20, cell, local);
+    let upstairs = Place {
+        at: ac_world::landblock_origin(0xA9B4_011B) + Vec3::new(152.3, 132.5, 69.0),
+        cell: 0xA9B4_011B,
+    };
+    assert!(
+        set_off(&mut c, within_reach(upstairs)).fine(),
+        "no way upstairs"
+    );
+    assert!(c.travel_route().is_some(), "not walked by a corridor");
+    walk_the_journey(&mut c, 120.0);
+    let pl = c.player.as_ref().unwrap();
+    let me = pl.world_position();
+    assert!(!c.traveling(), "still travelling at {me}");
+    assert_eq!(pl.cell, 0xA9B4_011B, "ended at {me}");
+    let d = me - upstairs.at;
+    assert!(
+        d.truncate().length() <= ARRIVE && d.z.abs() <= crate::SAME_FLOOR,
+        "{me}"
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn an_overland_walk_is_planned_a_region_at_a_time() {
+    // The Mosswart ground toward Holtburg, 3.5 km on foot: each stretch ends inside the blocks
+    // round where it was asked, is routed before a step, and the body keeps moving.
+    let mut c =
+        crate::testkit::standing_in_the_field(20, 0xBAAD_0017, Vec3::new(65.4, 144.0, 88.0));
+    let holtburg = Vec2::new(32_532.0, 34_567.1);
+    assert!(set_off(&mut c, on_map(holtburg)).fine(), "no way home");
+    let mut stretches = Vec::new();
+    let mut at = Vec::new();
+    let mut last = None;
+    walk_watching(&mut c, 90.0, |c, now| {
+        let me = c.my_position().unwrap();
+        let stretch = c.going.as_ref().and_then(|g| g.goal.place());
+        if let Some(s) = stretch.filter(|_| stretch != last) {
+            let (block, there) = (
+                (me.truncate() / 192.0).floor(),
+                (s.at.truncate() / 192.0).floor(),
+            );
+            assert!(
+                (block - there).abs().max_element() <= 1.0,
+                "{s:?} from {me}"
+            );
+            assert!(
+                c.steering.remaining(me).is_some(),
+                "not routed to {s:?} from {me}"
+            );
+            stretches.push(s);
+        }
+        last = stretch;
+        if at
+            .last()
+            .is_none_or(|(t, _)| now.duration_since(*t) >= Duration::from_secs(10))
+        {
+            at.push((now, me));
+        }
+    });
+    assert!(stretches.len() >= 2, "{stretches:?}");
+    let moved: Vec<f32> = at.windows(2).map(|w| w[0].1.distance(w[1].1)).collect();
+    assert!(moved.iter().all(|m| *m > 20.0), "stood: {moved:?}");
 }
 
 /// A level-20 follower in the Holtburg field on its journey after a leader 400 m east, the

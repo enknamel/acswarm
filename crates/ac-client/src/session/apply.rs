@@ -110,7 +110,6 @@ impl Client {
                                 pl.dirty = true;
                             }
                             self.steering.reset();
-                            self.travel_displaced();
                             self.recall_landed();
                         }
                         ac_world::Applied::PlayerMoveTo | ac_world::Applied::PlayerMotion => {

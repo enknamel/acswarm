@@ -769,9 +769,11 @@ mod tests {
             cell: 0,
             at: me + Vec3::new(700.0, 100.0, 0.0),
         };
+        // The clock the journey's first walk is planned on: offline, planning takes seconds.
+        let now = Instant::now();
         assert!(c.visit_landmark(&stone), "no visit");
         assert!(c.traveling(), "no journey");
-        let leg = c.walk_journey(Instant::now());
+        let leg = c.walk_journey(now);
         assert!(leg.as_ref().is_some_and(Did::fine), "{leg:?}");
         assert_eq!(c.going.as_ref().map(|g| g.owner), Some(Owner::Journey));
     }
