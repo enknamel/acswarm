@@ -622,6 +622,28 @@ the graph unchanged; the columns after it are the step's own commits, each over 
   0xA9B4 (32526.0, 34603.5, 102.0) to (32527.5, 34603.5, 94.0), a roof's edge the graph's
   0.2 m step falls from and the body's walking step stands on.
 
+Step 3, measured the same way. The graphs are unchanged, node for node and edge for edge, and
+building a chunk by `build_chunk` then `apply` costs what building it in place did: 1414 / 1377
+/ 819 / 367 ms against 1414 / 1371 / 822 / 367 ms. The harness is unchanged outcome for outcome.
+
+- The steering's wide answers come from the shared region, planned on the builder thread
+  (`Pathfinder::ask`). Planned on the frame, as §2 had it, they took 0.4 ms at the median, but
+  21 ms at p95 and 74 ms at worst over the harness's 115 asks. That is past the 5 ms the risk
+  table allows, so its answer (the slow query moves to the thread) is taken for every ask.
+  `Pathfinder::plan` stays synchronous, for step 4's callers.
+- A `Build` job carries the walk, not only its chunks. The builder plans on what is built and
+  builds what that names until the walk is answered, so an answer takes one job, not one round
+  trip per ring of chunks.
+- `search` (no building) answers `Unbuilt` whenever it reached an unbuilt chunk, not only when
+  it found no route, as §3 had it. A route found round the chunks not yet built is not the
+  route the whole graph gives: `the_walk_that_fell_keeps_to_the_floor_at_a_headless_frame`
+  (`crates/ac-client/tests/dungeon_edges.rs`) took such a route and never got down. With the
+  rule, every harness walk arrives in the same simulated time as at step 2.
+- A walk no area could hold answers `OutOfRegion` at once (a dungeon already assembled without
+  the goal, or a goal past the blocks `blocks_for` covers), instead of assembling an area that
+  cannot hold it every ask.
+- `tools/load-test.sh` needs the live server, so it was not run: phase 1 is measured offline.
+
 | risk | where | how it shows | what is done |
 |---|---|---|---|
 | The walk test makes the graph about 5 × slower to build | step 2 | `navcost.rs` ms over 2.0 × the baseline | the open-ground fast path (exact), then reuse of the reverse direction (§4). The builder thread means a slow build delays the first answer and never stalls a frame (step 3); `PLAN` ms in the harness shows that delay. |
