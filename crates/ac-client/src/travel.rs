@@ -1345,11 +1345,11 @@ impl Client {
                 return self.travel_gem_wait(guid, &name, summons, now);
             }
         }
-        // Coming no closer to this step's target for a long while: plan
-        // again from where the character actually stands. This comes
-        // before the indoor walk below, which hands back its leg and
-        // returns: after it, a character standing still inside a hall
-        // was never noticed and walked at a portal for four minutes.
+        // Coming no closer to this step's target for a long while, or no way
+        // on the indoor leg below (its steering refused): plan again from
+        // where the character stands. This comes before the indoor walk,
+        // which hands back its leg and returns, so a character standing
+        // still inside a hall is noticed.
         if let Some(target) = self.travel.step_target {
             let d = me.distance(target);
             if d < self.travel.step_best - STEP_PROGRESS {
@@ -1357,10 +1357,13 @@ impl Client {
                 self.travel.step_since = Some(now);
             }
         }
+        let target_indoors = self.travel.step_cell.is_some_and(|c| c & 0xFFFF >= 0x100);
+        let indoor_leg = (indoors || target_indoors) && self.travel.step_block == Some(block);
         if self
             .travel
             .step_since
             .is_some_and(|t| now.duration_since(t) > STEP_GIVE_UP)
+            || (indoor_leg && self.steering.no_way())
         {
             if let Some(goal) = self.travel.goal {
                 tracing::warn!(
@@ -1402,8 +1405,7 @@ impl Client {
         // landblock's own graph steer. Inside a *building* on the way,
         // with the target elsewhere, keep to the overland legs so the
         // character walks back out instead of pressing against a wall.
-        let target_indoors = self.travel.step_cell.is_some_and(|c| c & 0xFFFF >= 0x100);
-        if (indoors || target_indoors) && self.travel.step_block == Some(block) {
+        if indoor_leg {
             let target = *self.travel.route.as_ref()?.last()?;
             if me.distance(target) > ARRIVE {
                 // At the height of what is aimed at when that is known --
@@ -1572,7 +1574,7 @@ impl Client {
             }
             match self.travel.last_progress {
                 Some(t) if d >= self.travel.best - PROGRESS => {
-                    if now.duration_since(t) >= STUCK_AFTER {
+                    if now.duration_since(t) >= STUCK_AFTER || self.steering.no_way() {
                         // The last waypoint is where the step ends; not
                         // reaching it is not arriving. Plan the journey
                         // again from here, a few times, before giving up.
@@ -2397,6 +2399,35 @@ mod tests {
         assert!(c.plan_trip_in(corpse, 0), "no way to the corpse");
         walk_the_journey(&mut c, 600.0);
         assert!(!c.traveling(), "still walking at it after 10 min");
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn a_journey_leg_with_no_way_is_planned_again_at_once() {
+        // From a Holtburg Dungeon room to a ledge 9.5 m up that nothing climbs to.
+        let mut c = Client::offline(crate::testkit::game_data());
+        let rooms = c.assets.block_collision(0x01F6_0000).unwrap();
+        let origin = ac_world::landblock_origin(0x01F6_0000);
+        let start = Vec3::new(223.5, 47_158.5, 0.0);
+        let (z, cell) = rooms.world.floor_at(start, 0.6, 1.5).unwrap();
+        let ledge = Vec3::new(262.0, 47_182.0, 9.5);
+        let (high, ledge_cell) = rooms.world.floor_at(ledge, 0.6, 1.5).unwrap();
+        crate::testkit::stand(&mut c, cell, start.with_z(z) - origin);
+        c.steering.reset();
+        assert!(c.plan_trip_in(ledge.truncate(), ledge_cell), "no journey");
+        // Each of the REPLANS plans again is refused once its ask is let through (ASK_EVERY, 1.5 s).
+        walk_the_journey(&mut c, STUCK_AFTER.as_secs_f32());
+        assert!(!c.traveling(), "the no way waited for a clock");
+        let refusal = c.steering.unreachable(ledge.with_z(high));
+        assert!(
+            matches!(refusal, Some(ac_nav::steering::Unreachable::Planner(_))),
+            "{refusal:?}"
+        );
+        let me = c.my_position().unwrap();
+        assert!(
+            me.distance(start.with_z(z)) < 1.0,
+            "walked at the refused leg to {me}"
+        );
     }
 
     #[test]
