@@ -177,8 +177,6 @@ impl Course {
 pub trait Ground {
     /// Where the body stands (world space, metres).
     fn at(&self) -> Vec3;
-    /// The cell it stands in (indoors when the low word is 0x100 or more).
-    fn cell(&self) -> u32;
     /// Off its feet: on a drop or a fall.
     fn is_airborne(&self) -> bool;
     /// Have the planner plan the whole walk from where the body stands to within `within` of `goal`.
@@ -663,9 +661,6 @@ mod tests {
     impl Ground for Fake {
         fn at(&self) -> Vec3 {
             self.at
-        }
-        fn cell(&self) -> u32 {
-            self.cell
         }
         fn is_airborne(&self) -> bool {
             self.airborne

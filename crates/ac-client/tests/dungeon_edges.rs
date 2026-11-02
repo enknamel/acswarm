@@ -95,9 +95,6 @@ impl Ground for Standing<'_> {
     fn at(&self) -> Vec3 {
         self.player.world_position()
     }
-    fn cell(&self) -> u32 {
-        self.player.cell
-    }
     fn is_airborne(&self) -> bool {
         self.player.is_airborne()
     }
