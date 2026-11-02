@@ -399,7 +399,9 @@ impl Recovery {
         if v.traveling {
             return Action::Wait;
         }
-        if spot.distance(v.xy) <= NEAR {
+        // A corpse in sight but out of reach is walked to, though its spot is near on the
+        // flat: it lies on another floor (`a_corpse_on_another_floor_is_walked_to`).
+        if v.corpse.is_none() && spot.distance(v.xy) <= NEAR {
             self.go(Phase::Looting, now);
             return self.step_looting(v);
         }
@@ -1115,6 +1117,21 @@ mod tests {
         v.corpse = Some((0xC000_0001, 15.0));
         v.now = after(t0, 25.0);
         assert_eq!(r.step(&v), Action::Open(0xC000_0001));
+    }
+
+    #[test]
+    fn a_corpse_on_another_floor_is_walked_to() {
+        let t0 = Instant::now();
+        let mut r = Recovery::default();
+        let mut v = die_and_land(&mut r, t0);
+        r.step(&v);
+        r.buffs_done();
+        // Back over the spot on the flat, the corpse a floor away.
+        v.xy = Vec2::new(1000.0, 1000.0);
+        v.corpse = Some((0xC000_0001, 25.0));
+        v.now = after(t0, 20.0);
+        assert_eq!(r.step(&v), Action::Travel(Vec2::new(1000.0, 1000.0)));
+        assert_eq!(r.phase, Phase::Returning);
     }
 
     #[test]
