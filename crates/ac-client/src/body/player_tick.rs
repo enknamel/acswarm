@@ -1,6 +1,7 @@
 use std::time::Instant;
 
 use super::server_walk::{reached, server_walk_over, standing_aside};
+use super::standing::walk_start;
 use crate::{dodge, player, Client, Standing};
 
 /// What the character did this frame, for whoever draws it.
@@ -40,6 +41,7 @@ impl Client {
         if let Some(pl) = self.player.as_mut() {
             let mut input = input;
             self.walk_frame = None;
+            pl.pace_cap = None;
             // Server-driven MoveTo (using something out of reach): run toward
             // the target until close enough, unless the user takes over.
             // Without one, the current leg of the overland route.
@@ -152,14 +154,17 @@ impl Client {
                             0.0
                         };
                     } else if !manual && !reached(pl.world_position(), g, stop) {
-                        // Straight at the goal while nothing is in the
-                        // way; through the waypoints of a route otherwise.
+                        // Along the planned route only: the steering follows it, standing while
+                        // it is planned and refusing when there is no way.
+                        let goal_place = ac_world::Place {
+                            at: g,
+                            cell: goal_cell,
+                        };
                         let mut standing = Standing {
                             player: pl,
-                            assets: &self.assets,
-                            wide: &mut self.pathfinder,
+                            pathfinder: &mut self.pathfinder,
                         };
-                        let aim = self.steering.steer(&mut standing, g, goal_cell, stop, now);
+                        let aim = self.steering.steer(&mut standing, goal_place, stop, now);
                         tracing::trace!(
                             target: "steer",
                             "at {:?} goal {g:?} aim {aim:?}",
@@ -179,17 +184,23 @@ impl Client {
                         let aim = match aim {
                             ac_nav::Aim::Go(at) => {
                                 let me = pl.world_position();
-                                let block = pl.landblock();
                                 let cap = pl.capsule();
                                 let clutter = self
                                     .clutter
                                     .refresh(&self.world, me, |id| self.assets.setup(id).ok());
+                                let course = self.steering.route.as_ref();
+                                let pathfinder = &self.pathfinder;
+                                let body: &player::Player = pl;
                                 ac_nav::Aim::Go(ac_nav::obstacles::detour(
                                     clutter,
                                     me,
                                     at,
                                     &cap,
-                                    |a, b| !pl.line_blocked(&self.assets, block, a, b),
+                                    |a, b| {
+                                        course.is_some_and(|c| {
+                                            c.is_in_corridor(a) && c.is_in_corridor(b)
+                                        }) && pathfinder.can_walk(walk_start(body, a), b, cap)
+                                    },
                                 ))
                             }
                             standing => standing,
@@ -210,21 +221,10 @@ impl Client {
                                 .as_ref()
                                 .map(|r| (r.next, r.waypoints.len())),
                             wedged: pl.wedged(),
-                            retracing: self.steering.retracing(),
+                            waiting: self.steering.is_waiting(),
                         });
-                        // No way there at all: the line is blocked and
-                        // no route was found. Standing still is the
-                        // whole of the answer.
-                        //
-                        // This is where every "it ran straight at the
-                        // wall" actually came from. The steering had
-                        // already been taught to say "nowhere to go" --
-                        // but saying it means aiming at one's own feet,
-                        // and the mover set off forward whatever the
-                        // aim was, keeping the heading it had. So the
-                        // character leaned on the wall it had just
-                        // decided was in the way, and only the stuck
-                        // detector ever stopped it.
+                        // Standing is the whole of the answer to a wait or a no way: the mover
+                        // sets off forward whatever the aim, keeping its old heading.
                         match aim {
                             ac_nav::Aim::NoWay | ac_nav::Aim::Wait => input.forward = 0.0,
                             ac_nav::Aim::Go(at) => {
@@ -232,10 +232,11 @@ impl Client {
                                 let flat = glam::Vec2::new(d.x, d.y);
                                 if flat.length() > 1e-3 {
                                     pl.heading = (-flat.x).atan2(flat.y);
+                                    pl.step_cap = Some(flat.length());
+                                    pl.pace_cap = self.steering.pace();
+                                    input.forward = 1.0;
+                                    input.run = true;
                                 }
-                                pl.step_cap = Some(flat.length());
-                                input.forward = 1.0;
-                                input.run = true;
                             }
                         }
                     }
@@ -267,8 +268,6 @@ impl Client {
                 }
             }
             pl.update(&self.assets, &input, dt);
-            // Every step the body takes, walked or pushed: the way back out of a pocket.
-            self.steering.walked(pl.world_position());
             if let Some(j) = pl.last_jump.take() {
                 tracing::info!("jump power {:.2} velocity {:?}", j.power, j.velocity);
                 self.session.send_action(

@@ -437,14 +437,19 @@ impl Pathfinder {
         });
     }
 
-    /// Whether a walk asked is the last one again, sent within [`ASK_EVERY`]: the same goal, from
-    /// where that one was asked. Another walk, or this one from elsewhere, goes at once.
+    /// Whether a walk asked is the last one again (the same goal, from its start, within
+    /// [`ASK_EVERY`]) or one whose answer, still being planned, will do from here.
     fn is_repeat(&self, from: Vec3, goal: Vec3, now: Instant) -> bool {
-        self.asked_at.is_some_and(|(t, f, g)| {
-            now.duration_since(t) < ASK_EVERY
-                && g.distance(goal) <= ANSWER_GOAL
-                && f.distance(from) <= ac_nav::steering::ARRIVE
-        })
+        let pending = self.busy()
+            && self.asked.as_ref().is_some_and(|a| {
+                a.goal.at.distance(goal) <= ANSWER_GOAL && a.from.at.distance(from) <= ANSWER_REACH
+            });
+        pending
+            || self.asked_at.is_some_and(|(t, f, g)| {
+                now.duration_since(t) < ASK_EVERY
+                    && g.distance(goal) <= ANSWER_GOAL
+                    && f.distance(from) <= ac_nav::steering::ARRIVE
+            })
     }
 
     /// The answer to the walk asked, once it is back: the place it was planned from, and the plan,

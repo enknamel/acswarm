@@ -314,8 +314,7 @@ impl Client {
             if self.traveling() {
                 self.end_trip();
             }
-            self.follow = Some(crate::Follow { target: goal, stop });
-            return Did::Acting;
+            return self.walk_toward(goal, stop);
         }
         // Already on the way there.
         if self.traveling() {
@@ -1939,11 +1938,10 @@ mod tests {
                     if Vec2::new(d.x, d.y).length() > stop {
                         let mut standing = crate::Standing {
                             player: pl,
-                            assets: &c.assets,
-                            wide: &mut c.pathfinder,
+                            pathfinder: &mut c.pathfinder,
                         };
-                        if let ac_nav::Aim::Go(at) =
-                            c.steering.steer(&mut standing, g, cell, stop, now)
+                        let to = ac_world::Place { at: g, cell };
+                        if let ac_nav::Aim::Go(at) = c.steering.steer(&mut standing, to, stop, now)
                         {
                             let d = at - pl.world_position();
                             let flat = Vec2::new(d.x, d.y);
@@ -1951,6 +1949,7 @@ mod tests {
                                 pl.heading = (-flat.x).atan2(flat.y);
                             }
                             pl.step_cap = Some(flat.length());
+                            pl.pace_cap = c.steering.pace();
                             input.forward = 1.0;
                             input.run = true;
                         }
@@ -2075,8 +2074,7 @@ mod tests {
         );
     }
 
-    /// Walk `c` at `target` for `seconds`, steered or straight, feeding the steering's trail as
-    /// `tick_player` does.
+    /// Walk `c` at `target` for `seconds`, steered or straight, as `tick_player` does.
     fn drive(c: &mut Client, target: Vec3, block: u32, steer: bool, seconds: f32) {
         use crate::player::Input;
         let dt = 1.0 / 20.0;
@@ -2088,10 +2086,13 @@ mod tests {
             let aim = if steer {
                 let mut standing = crate::Standing {
                     player: pl,
-                    assets: &c.assets,
-                    wide: &mut c.pathfinder,
+                    pathfinder: &mut c.pathfinder,
                 };
-                c.steering.steer(&mut standing, target, block, stop, now)
+                let to = ac_world::Place {
+                    at: target,
+                    cell: block,
+                };
+                c.steering.steer(&mut standing, to, stop, now)
             } else {
                 ac_nav::Aim::Go(target)
             };
@@ -2110,20 +2111,19 @@ mod tests {
                     pl.heading = (-flat.x).atan2(flat.y);
                 }
                 pl.step_cap = Some(flat.length());
+                pl.pace_cap = if steer { c.steering.pace() } else { None };
                 input.forward = 1.0;
                 input.run = true;
             }
             pl.update(&c.assets, &input, dt);
-            c.steering.walked(pl.world_position());
         }
     }
 
     #[test]
     #[ignore = "needs AC_DATA_DIR"]
-    fn a_character_in_a_pocket_no_path_leaves_goes_back_the_way_it_came() {
-        // Two pockets among props that scenario characters walked into and stood in: at the
-        // Mosswart ground (61 s, run E) and beside the Academy spawn (53-388 s). From inside, the
-        // block's graph finds no path anywhere; the way in is still walkable.
+    fn a_character_in_a_pocket_among_props_is_planned_out_of_it() {
+        // Two pockets among props, at the Mosswart ground and beside the Academy spawn: the body
+        // walked in, so a walk-tested start exists and the plan from inside leads out.
         for (block, cell, from, pocket, goal) in [
             (
                 0xBAAD_0000u32,
@@ -2144,6 +2144,15 @@ mod tests {
             let mut c = crate::testkit::standing_in_the_field(20, cell, from);
             drive(&mut c, origin + pocket, block, false, 4.0);
             c.steering.reset();
+            let to = ac_world::Place {
+                at: origin + goal,
+                cell: block,
+            };
+            let plan = c.plan_walk(to, 0.5);
+            assert!(
+                matches!(plan, ac_nav::routing::Planned::Route(_)),
+                "no plan out of the pocket in {block:#010x}: {plan:?}"
+            );
             drive(&mut c, origin + goal, block, true, 30.0);
             let at = c.player.as_ref().unwrap().world_position() - origin;
             assert!(

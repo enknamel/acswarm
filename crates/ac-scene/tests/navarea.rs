@@ -289,3 +289,22 @@ fn a_goal_standing_on_a_deck_is_planned_to_on_the_deck() {
     assert!((end.z - jeweler.z).abs() < 0.6, "ends at {end:?}");
     assert!(path.len() > 3, "straight at him: {path:?}");
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn the_stairs_from_an_upper_floor_are_found_without_its_drop() {
+    // Upstairs in a Holtburg house, the goal in the room under it 2.5 m down over the edge: a walk
+    // that takes drops may step off, and one that takes none still finds the stairs.
+    let assets = Assets::open(ac_dat::test_data_dir()).unwrap();
+    let cap = Capsule::default();
+    let block = 0xA9B4_0000;
+    let me = Vec3::new(32_553.0, 34_594.5, 97.5);
+    let goal = Vec3::new(32_550.17, 34_597.33, 94.0);
+    let mut area = Area::build(&assets, &[block], &cap, block).unwrap();
+    let path = area
+        .with_ground(|ground, nav| route(ground, nav, me, goal, 0.5))
+        .expect("the stairs down");
+    assert!(path.len() > 4, "not the stairs: {path:?}");
+    let end = *path.last().unwrap();
+    assert!((end.z - goal.z).abs() < 0.6, "ends at {end:?}");
+}

@@ -42,6 +42,16 @@ impl Client {
         self.pathfinder.plan(me, to, within, cap)
     }
 
+    /// Walk to within `stop` of `goal` along a planned route (the follow slot, set): `Blocked` while
+    /// the steering's refusal stands for it, so a no way reaches the caller and is never pushed.
+    pub(crate) fn walk_toward(&mut self, goal: Vec3, stop: f32) -> crate::did::Did {
+        self.follow = Some(Follow { target: goal, stop });
+        match self.steering.unreachable(goal) {
+            Some(why) => crate::did::Did::blocked(format!("no way there: {why:?}")),
+            None => crate::did::Did::Acting,
+        }
+    }
+
     /// Where the character can stand within `radius` (metres, flat) of `around`, by the region
     /// planner (see [`Pathfinder::standable_near`](crate::pathfinder::Pathfinder::standable_near)).
     pub(crate) fn standable_near(&mut self, around: Vec3, radius: f32) -> Vec<Place> {

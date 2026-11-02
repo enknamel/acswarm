@@ -127,8 +127,9 @@ fn areas() -> Vec<(&'static str, Vec3, u32)> {
     ]
 }
 
-/// Run and print each trial; the names of those the planner called reachable that did not arrive.
-fn report(trials: &[Trial]) -> Vec<String> {
+/// Run and print each trial: the names of those the planner called reachable that did not
+/// arrive, and of those still pushing at the limit.
+fn report(trials: &[Trial]) -> (Vec<String>, Vec<String>) {
     let only = std::env::var("ROUTE_TRIALS").ok();
     let mut out = Vec::new();
     let mut agree = [0usize; 4];
@@ -161,6 +162,11 @@ fn report(trials: &[Trial]) -> Vec<String> {
         );
         out.push((t.name.clone(), o));
     }
+    let pushing: Vec<String> = out
+        .iter()
+        .filter(|(_, o)| o.kind() == "still pushing")
+        .map(|(n, _)| n.clone())
+        .collect();
     let count = |k: &str| out.iter().filter(|(_, o)| o.kind() == k).count();
     println!(
         "SUMMARY {} trials: {} arrived, {} refused, {} gave up, {} still pushing",
@@ -180,7 +186,7 @@ fn report(trials: &[Trial]) -> Vec<String> {
         agree[0],
         agree[0] + agree[1]
     );
-    broken
+    (broken, pushing)
 }
 
 /// The stall seen live named `name`.
@@ -194,8 +200,9 @@ fn stall(name: &str) -> Trial {
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
 fn the_stalls_seen_live() {
-    let broken = report(&known());
+    let (broken, pushing) = report(&known());
     assert!(broken.is_empty(), "planned and not arrived: {broken:?}");
+    assert!(pushing.is_empty(), "still pushing: {pushing:?}");
 }
 
 #[test]
@@ -212,8 +219,9 @@ fn random_walks_in_each_area() {
         };
         trials.extend(random_trials(LEVEL, name, (at, cell), spread));
     }
-    let broken = report(&trials);
+    let (broken, pushing) = report(&trials);
     assert!(broken.is_empty(), "planned and not arrived: {broken:?}");
+    assert!(pushing.is_empty(), "still pushing: {pushing:?}");
 }
 
 #[test]

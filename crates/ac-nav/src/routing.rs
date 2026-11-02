@@ -111,7 +111,7 @@ fn query_for<'a>(
         berth: PORTAL_BERTH,
         indoors_too: true,
         outdoors_first: !area.dungeon && f.1 == 0 && g.1 == 0,
-        drops: false,
+        drops: true,
     })
 }
 

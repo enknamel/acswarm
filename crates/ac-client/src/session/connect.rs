@@ -110,7 +110,7 @@ impl Client {
             move_refused: std::collections::HashMap::new(),
             use_done: None,
             told: None,
-            steering: route::Steering::new(Instant::now()),
+            steering: route::Steering::default(),
             clutter: Default::default(),
             walk_frame: None,
             blows: Default::default(),

@@ -88,7 +88,7 @@ impl Telemetry {
 }
 
 /// How a walk is steered, for spotting the frame it changes: a goal (to the metre), and whether the
-/// steering walks the straight line, a route, or finds no way.
+/// steering walks a route, waits for its plan, or finds no way.
 #[derive(Clone, Copy, PartialEq)]
 struct Steered {
     goal: [i32; 3],
@@ -99,10 +99,9 @@ struct Steered {
 
 fn steered(w: &ac_client::tally::WalkFrame) -> Steered {
     let way = match (w.aim, w.route) {
+        (None, _) if w.waiting => "waiting for its plan",
         (None, _) => "no way",
-        (Some(_), Some(_)) if w.retracing => "back the way it came",
-        (Some(_), Some(_)) => "route",
-        (Some(_), None) => "straight",
+        (Some(_), _) => "route",
     };
     Steered {
         goal: w.goal.to_array().map(|v| v.round() as i32),
