@@ -259,6 +259,17 @@ impl<'a> Ground<'a> {
         }
     }
 
+    /// Where the body's step from `a` (feet, in `cell`) toward `b`, level, goes over an edge and lands,
+    /// and in which cell, stepping off at [`DROP_SPEED`] as every drop edge is simulated; else `None`.
+    pub fn drop_toward(&self, a: Vec3, cell: u32, b: Vec3, cap: &Capsule) -> Option<(Vec3, u32)> {
+        let level = Vec3::new(b.x, b.y, a.z);
+        let Reach::Falls { at } = self.stride_toward(a, cell, level, BODY_ARRIVE, cap) else {
+            return None;
+        };
+        let dir = flat(b - a).normalize_or_zero() * DROP_SPEED;
+        self.fall_from(at, Vec3::new(dir.x, dir.y, 0.0), cell, cap)
+    }
+
     /// Where a body going over an edge at `at` (feet, from `cell`) at `vel` lands, and in which
     /// cell, followed as it falls ([`fall_step`]); `None` deeper than `DROP_MAX` or over nothing.
     pub fn fall_from(&self, at: Vec3, vel: Vec3, cell: u32, cap: &Capsule) -> Option<(Vec3, u32)> {
@@ -1307,13 +1318,7 @@ impl Draft<'_> {
             if level {
                 continue;
             }
-            let Reach::Falls { at } = ground.stride_toward(a.pos, a.cell, toward, BODY_ARRIVE, cap)
-            else {
-                continue;
-            };
-            let dir = flat(toward - a.pos).normalize_or_zero() * DROP_SPEED;
-            let fell = ground.fall_from(at, Vec3::new(dir.x, dir.y, 0.0), a.cell, cap);
-            if let Some((land, cell)) = fell {
+            if let Some((land, cell)) = ground.drop_toward(a.pos, a.cell, toward, cap) {
                 self.land(ground, node, land, cell, cap);
             }
         }
@@ -1336,13 +1341,24 @@ impl Draft<'_> {
             .map(|(_, id)| id)
             .filter(|&id| id != from && (self.node(id).pos.z - at.z).abs() <= cap.step_up)
             .take(JOIN_TRIES)
-            .find(|&id| ground.body_reaches(at, cell, self.node(id).pos, cap));
+            .find(|&id| {
+                let (a, b) = (self.node(from), self.node(id));
+                ground.body_reaches(at, cell, b.pos, cap) && is_dropped_to(ground, a, b, cap)
+            });
         if let Some(to) = onto {
             if !self.has_edge(from, to) {
                 self.add_edge(from, to, EdgeKind::Drop);
             }
         }
     }
+}
+
+/// Whether the follower's walk of a drop, at node `b` from node `a` at [`DROP_SPEED`], goes over
+/// the edge and lands where the body walks on to `b`: the walk the drop edge stands for.
+fn is_dropped_to(ground: &Ground, a: NavNode, b: NavNode, cap: &Capsule) -> bool {
+    ground
+        .drop_toward(a.pos, a.cell, b.pos, cap)
+        .is_some_and(|(land, cell)| ground.body_reaches(land, cell, b.pos, cap))
 }
 
 /// Points a metre apart down a sloping floor `t` (a ramp) narrower than the lattice `spacing`: a
@@ -1712,6 +1728,37 @@ pub(crate) mod tests {
             }
         }
         out
+    }
+
+    #[test]
+    fn a_drop_is_joined_only_where_the_walk_at_its_far_node_lands() {
+        // The follower walks a drop at its far node: a node straight under the rim is landed near
+        // by a fall off it, but walking at it from the rim steps nowhere.
+        let w = a_ledge_in_cells(Some(3.0));
+        let ground = inside(&w);
+        let cap = Capsule::default();
+        let mut g = NavGraph::new(Vec2::new(0.0, -2.0), Vec2::new(12.0, 2.0), 1.0, &cap);
+        g.build_all(&ground);
+        let at = |x: f32, z: f32| {
+            *g.nodes
+                .iter()
+                .find(|n| {
+                    (n.pos.x - x).abs() < 0.3 && n.pos.y.abs() < 0.3 && (n.pos.z - z).abs() < 0.3
+                })
+                .unwrap_or_else(|| panic!("no node at x {x}, z {z}"))
+        };
+        let rim = at(4.0, 3.0);
+        assert!(
+            !is_dropped_to(&ground, rim, at(4.0, 0.0), &cap),
+            "under the rim"
+        );
+        assert!(
+            is_dropped_to(&ground, rim, at(6.0, 0.0), &cap),
+            "past the edge"
+        );
+        for (a, b) in drops(&w) {
+            assert!(is_dropped_to(&ground, a, b, &cap), "{a:?} -> {b:?}");
+        }
     }
 
     #[test]
