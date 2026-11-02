@@ -1,19 +1,8 @@
-//! Travel: "take me to Arwic". The journey is planned first as a trip
-//! (`ac_world::trip`), which decides which portals to take: from
-//! Holtburg to Arwic that is the Town Network, in through the town's
-//! portal and out of the hub's. Each step of the trip is then walked
-//! with a route on the world terrain grid (`ac_scene::worldroute`:
-//! slopes, water and roads; no buildings), followed waypoint by
-//! waypoint through the per-landblock move-to (`route::Steering`), which
-//! steers around the buildings and fences on the way. Each leg handed to
-//! the local planner is short and stays inside the current landblock, so
-//! the landblock navigation graph can plan it. A portal step is walked
-//! the same way, into the portal's mouth, and is done when the character
-//! comes out somewhere else.
-//!
-//! The grid takes a few seconds to load the first time (and a few hundred
-//! milliseconds from its cache after that); it is loaded on the first
-//! travel request and kept.
+//! Journeys: a trip (`ac_world::trip`) of walks, portals, recalls and gems, set off on by
+//! `Client::set_off`. Each step's walk is planned whole by the region planner before a step:
+//! to its end when the region holds it, else a stretch along an overland corridor
+//! (`overland`), walked by the slot (`Client::walk_journey`). A step with no walk is left out and
+//! the journey planned again; the journey's own end with none refuses the journey.
 
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -32,7 +21,7 @@ use overland::{Corridor, EXIT_REACH};
 
 mod overland;
 
-/// A waypoint counts as reached within this distance (metres, flat).
+/// A map point, or a portal's mouth stood at, is reached within this (metres, 3D).
 pub const ARRIVE: f32 = 3.0;
 /// A portal that has not taken us in this long is one we cannot use
 /// (a level range, an unfinished quest, or it simply is not there): the

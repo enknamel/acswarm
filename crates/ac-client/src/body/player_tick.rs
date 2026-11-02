@@ -29,7 +29,7 @@ impl Client {
             self.cancel_travel();
         }
         // A visit: the journey there, the walk up to the person, the use.
-        // Before the journey's leg is read, so a visit that takes over
+        // Before the journey's stretch is read, so a visit that takes over
         // from its journey walks this frame.
         if !manual {
             self.tick_visit(now);

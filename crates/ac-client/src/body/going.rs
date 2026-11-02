@@ -1,7 +1,7 @@
 //! The slot: the one walk the body follows, asked for by one owner ([`Client::go`]) and answered
 //! truthfully. A new walk is planned whole on the asking frame and handed to the follower, and a
 //! refusal is kept per owner and goal; a step's walk ends the tick its step stops asking;
-//! [`GIVE_UP_AFTER`] is the one give-up. A journey's leg is walked here while no other walk is.
+//! [`GIVE_UP_AFTER`] is the one give-up. A journey's stretch is walked here while no other is.
 
 use std::time::{Duration, Instant};
 
@@ -37,7 +37,7 @@ pub(crate) struct Refusal {
 pub enum Owner {
     /// The row running when it asked (`steps::Step::name`); its walk ends when it stops asking.
     Step(&'static str),
-    /// The leg of the journey under way (`Travel`).
+    /// The stretch of the journey under way (`Travel`), asked by `walk_journey`.
     Journey,
     /// A visit's last stretch (`visit.rs`).
     Visit,
@@ -196,8 +196,8 @@ impl Client {
         place: Place,
         now: Instant,
     ) -> Did {
-        // A journey's leg is the planner's to refuse; any other goal past the region is a journey,
-        // whose leg takes the slot.
+        // A journey's stretch is the planner's to refuse; any other goal past the region is a
+        // journey, whose stretch takes the slot.
         if owner != Owner::Journey && !self.is_in_region(place) {
             let xy = place.at.truncate();
             // Acting while it travels to this goal; a journey elsewhere is replaced.
@@ -306,7 +306,7 @@ impl Client {
             return;
         };
         self.steering.reset();
-        // A journey's leg asks again only once the slot is free: nothing to tell it.
+        // A journey's stretch asks again only once the slot is free: nothing to tell it.
         if old.owner != owner && old.owner != Owner::Journey && followed {
             tracing::info!(
                 "walk: {} takes the walk from {}",

@@ -963,9 +963,10 @@ with `--heritage`, `--gender`, `--template`,
   is still caught), reaching a waypoint counts as progress for the
   step, and a step whose last waypoint cannot be reached is planned
   again from where the character stands rather than called arrived.
-  `cargo run --release -p ac-client --example walksim BLOCK x y g
-  GOAL_BLOCK gx gy` walks a character offline with the real steering
-  and physics (no server) and reproduces these in under a minute.
+  The route harness (`cargo test --release -p ac-client --test
+  route_harness -- --ignored --nocapture`, `ROUTE_TRIALS=name` for one)
+  walks characters offline with the real planner, follower and physics
+  (no server), journeys across regions included.
 * **Never aim at a point behind the walker.** A leg that crosses a
   landblock boundary is steered at the point where it leaves the block,
   pulled 3 m back inside so the block's graph has somewhere to stand. A
