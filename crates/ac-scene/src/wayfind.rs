@@ -138,6 +138,51 @@ pub fn search(ground: &Ground, nav: &NavGraph, q: &WalkQuery) -> Search {
     }
 }
 
+/// The nodes within `radius` (metres, flat) of `around` on the chunks built so far; once the graph
+/// is built whole, only those joined to a node the body at `from` walks to.
+pub fn standable_near(
+    ground: &Ground,
+    nav: &NavGraph,
+    from: (Vec3, u32),
+    around: Vec3,
+    radius: f32,
+) -> Vec<NavNode> {
+    let r = (radius / nav.spacing).ceil() as i32;
+    let (gx, gy) = nav.column_of(around);
+    let mut out: Vec<u32> = Vec::new();
+    for dx in -r..=r {
+        for dy in -r..=r {
+            out.extend(
+                nav.column_ids((gx + dx, gy + dy))
+                    .iter()
+                    .filter(|&&id| flat(nav.nodes[id as usize].pos - around).length() <= radius),
+            );
+        }
+    }
+    if nav.is_complete() {
+        let q = WalkQuery {
+            from,
+            goal: from,
+            within: 0.0,
+            avoid: &[],
+            berth: 0.0,
+            indoors_too: true,
+            drops: false,
+        };
+        let cap = nav.capsule;
+        let s = floor_of(ground, from.0, from.1, &cap).unwrap_or(from.0);
+        let mut l = Built {
+            nav,
+            missing: Vec::new(),
+        };
+        let roots: Vec<u32> = sources(ground, &mut l, &q, &Berths(Vec::new()), s, from.1, &cap)
+            .map(|(_, ids)| ids.iter().map(|&(id, _)| nav.component(id)).collect())
+            .unwrap_or_default();
+        out.retain(|&id| roots.contains(&nav.component(id)));
+    }
+    out.iter().map(|&id| nav.nodes[id as usize]).collect()
+}
+
 /// The graph a search runs on, and what it does on reaching columns not built yet.
 trait Lattice {
     fn nav(&self) -> &NavGraph;
