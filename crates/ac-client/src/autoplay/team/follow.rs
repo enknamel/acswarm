@@ -10,6 +10,9 @@ use crate::{Client, Owner};
 /// the fight comes first. Following is the follower's job.
 const FOLLOW_BREAK: f32 = 10.0;
 
+/// A leader this far from the journey's goal has moved on (metres): the journey is planned again.
+const FOLLOW_TRIP_MOVED: f32 = 30.0;
+
 /// How far from its leader a follower keeping `keep` metres may stray
 /// before following comes before everything else.
 pub fn follow_break(keep: f32) -> f32 {
@@ -118,7 +121,7 @@ impl Client {
                 && self
                     .autoplay
                     .follow_trip
-                    .is_some_and(|g| g.distance(goal) <= 30.0);
+                    .is_some_and(|g| g.distance(goal) <= FOLLOW_TRIP_MOVED);
             if !on_the_way {
                 if self.autoplay.follow_trip.take().is_some() && self.traveling() {
                     self.cancel_travel();
@@ -154,7 +157,7 @@ impl Client {
             let stale = self
                 .autoplay
                 .follow_trip
-                .is_none_or(|g| g.distance(goal) > 30.0);
+                .is_none_or(|g| g.distance(goal) > FOLLOW_TRIP_MOVED);
             let due = self.autoplay.next_follow_plan.is_none_or(|t| now >= t);
             if (stale || !self.traveling()) && due {
                 self.stop_going(Some(self.step_owner()), "a journey after the leader");
