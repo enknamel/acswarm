@@ -102,9 +102,6 @@ pub const STUCK_AFTER: Duration = Duration::from_secs(10);
 const REPLANS: u32 = 3;
 /// Getting closer to the waypoint by less than this is not progress.
 const PROGRESS: f32 = 1.0;
-/// The character stops this close to the end of a leg (the local move-to's
-/// stop distance); legs are replaced before that, at [`ARRIVE`].
-const LEG_STOP: f32 = 1.0;
 
 /// The journey being made, and the terrain data it needs.
 #[derive(Default)]
@@ -1424,7 +1421,7 @@ impl Client {
                     .step_cell
                     .filter(|c| c & 0xFFFF >= 0x100)
                     .unwrap_or(block);
-                return Some((Vec3::new(target.x, target.y, z), LEG_STOP, cell));
+                return Some((Vec3::new(target.x, target.y, z), ARRIVE, cell));
             }
             // At the target. A walk is done; a portal's mouth is waited
             // at below, like outdoors: jumped into, and given up on when
@@ -1621,7 +1618,7 @@ impl Client {
             let z = leg_height(self.travel.grid.as_deref(), leg, me3, underground);
             return Some((
                 Vec3::new(leg.x, leg.y, z),
-                LEG_STOP,
+                ARRIVE,
                 steering_block(leg, block, underground),
             ));
         }
