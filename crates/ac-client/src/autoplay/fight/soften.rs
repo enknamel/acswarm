@@ -232,9 +232,8 @@ impl Client {
             .max_by_key(|id| table.get(*id).map(|s| s.power).unwrap_or(0))
     }
 
-    /// Cast a vulnerability for the target's weakest element, once per target and only when it
-    /// pays (see [`is_vuln_worth`]) against `spell`, the attack the fight would throw next. True when a
-    /// spell went out this tick.
+    /// Cast a vulnerability for the element of `spell`, the attack the fight would throw next, once
+    /// per target and only when it pays (see [`is_vuln_worth`]). True when a spell went out this tick.
     pub(super) fn autoplay_make_vulnerable(
         &mut self,
         guid: u32,
@@ -255,7 +254,8 @@ impl Client {
         let per_cast = spell.and_then(|s| self.damage_per_cast(s, known));
         let full = known.map_or(0, |c| c.health);
         let worth = is_vuln_worth(self.health_now(guid), per_cast, full, least);
-        let element = crate::weapons::vulnerability_for(known, 0).filter(|_| worth);
+        let attack = spell.and_then(ac_world::elements::spell_element);
+        let element = crate::weapons::vulnerability_for(known, attack, 0).filter(|_| worth);
         let Some(element) = element else {
             // Nothing worth softening: do not ask again for this one.
             self.autoplay.vulned.push(guid);
