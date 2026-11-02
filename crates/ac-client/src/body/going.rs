@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 use ac_nav::routing::{self, Planned};
 use ac_nav::steering::REPLAN_DISTANCE;
 use ac_scene::navarea;
+use ac_scene::wayfind::NoWay;
 use ac_world::Place;
 use glam::{Vec2, Vec3};
 
@@ -30,6 +31,8 @@ pub(crate) struct Refusal {
     from: Vec3,
     there: Vec3,
     why: String,
+    /// The planner's answer, when it was the planner that refused.
+    no_way: Option<NoWay>,
 }
 
 /// Who asked for a walk: a STEPS row, or something outside the step table.
@@ -178,6 +181,18 @@ impl Client {
 
     /// Keep `owner`'s refusal of `goal` (`Client.refusals`), in place of an older one for it.
     pub(crate) fn refuse(&mut self, owner: Owner, goal: Goal, from: Vec3, there: Vec3, why: &str) {
+        self.refuse_for(owner, goal, (from, there), why, None);
+    }
+
+    /// [`refuse`](Self::refuse), keeping the planner's answer when it was the planner's.
+    fn refuse_for(
+        &mut self,
+        owner: Owner,
+        goal: Goal,
+        (from, there): (Vec3, Vec3),
+        why: &str,
+        no_way: Option<NoWay>,
+    ) {
         self.refusals
             .retain(|r| !(r.owner == owner && r.goal.is_same(goal)));
         if self.refusals.len() >= REFUSALS_KEPT {
@@ -189,7 +204,15 @@ impl Client {
             from,
             there,
             why: why.to_string(),
+            no_way,
         });
+    }
+
+    /// Whether a walk to `there` was refused because no floor of its cell holds it.
+    pub(crate) fn is_refused_off_floor(&self, there: Vec3) -> bool {
+        self.refusals.iter().any(|r| {
+            r.no_way == Some(NoWay::OffFloor) && r.there.distance(there) <= REPLAN_DISTANCE
+        })
     }
 
     /// A new walk for `owner`, planned here and handed to the follower; arrived or refused, the slot
@@ -237,12 +260,12 @@ impl Client {
         }
         // Flown, the body goes straight there (`tick_player`): nothing is planned.
         let planned = (!self.noclip()).then(|| self.plan_walk(place, within));
-        if let Some(Planned::NoWay(why)) = planned {
+        if let Some(Planned::NoWay(no)) = planned {
             let why = format!(
                 "no way there: {:?}",
-                ac_nav::steering::Unreachable::Planner(why)
+                ac_nav::steering::Unreachable::Planner(no)
             );
-            self.refuse(owner, goal, me.at, place.at, &why);
+            self.refuse_for(owner, goal, (me.at, place.at), &why, Some(no));
             return Did::blocked(why);
         }
         self.replace_walk(owner, me.at);
@@ -283,10 +306,14 @@ impl Client {
             return Did::Acting;
         }
         let (owner, goal) = (g.owner, g.goal);
-        if let Some(why) = unreachable {
-            let why = format!("no way there: {why:?}");
+        if let Some(no) = unreachable {
+            let why = format!("no way there: {no:?}");
             g.refused = Some(why.clone());
-            self.refuse(owner, goal, me, place.at, &why);
+            let planner = match no {
+                ac_nav::steering::Unreachable::Planner(p) => Some(p),
+                ac_nav::steering::Unreachable::Stalled => None,
+            };
+            self.refuse_for(owner, goal, (me, place.at), &why, planner);
             return Did::blocked(why);
         }
         g.progressed = progress.map_or(g.progressed, |p| p.max(g.progressed));

@@ -988,6 +988,8 @@ impl Client {
                 self.travel.refused.push(mouth.at.truncate());
                 self.travel.replan_due = true;
             }
+            // An end no floor of its cell holds is the goal's fault, not the way's: no plan helps.
+            Some(Step::Walk(to)) if self.is_refused_off_floor(to.at) => self.refuse_journey(why),
             Some(Step::Walk(to)) if self.travel.hopped => {
                 let Some((from, _)) = self.planning_from() else {
                     return self.refuse_journey(why);

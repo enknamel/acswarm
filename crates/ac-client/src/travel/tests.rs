@@ -765,6 +765,37 @@ fn a_walk_with_no_way_after_a_hop_is_left_out_and_the_journey_planned_again() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
+fn a_journey_whose_end_stands_on_no_floor_is_refused_not_planned_again() {
+    // A goal its own cell holds no floor under (Ketnan's counter, 0xF784039F, lies two blocks off
+    // its block): every way there ends in that one walk, so after a hop it refuses the journey.
+    let mut c = Client::offline(crate::testkit::game_data());
+    let (start, ledge) = under_the_01f6_ledge(&mut c);
+    let nowhere = Place {
+        at: ledge.at - Vec3::new(0.0, 0.0, 5.0),
+        cell: ledge.cell,
+    };
+    let trip = Trip {
+        steps: vec![Step::Walk(nowhere)],
+        seconds: 10.0,
+    };
+    crate::testkit::set_out_on(&mut c, trip, within_reach(nowhere));
+    c.travel.hopped = true;
+    c.frame_at = Instant::now();
+    let first = c.walk_journey(c.frame_at);
+    assert!(
+        matches!(first, Some(crate::did::Did::Blocked(_))),
+        "{first:?}"
+    );
+    assert!(
+        !c.traveling(),
+        "planned again round a goal no floor holds: {first:?}"
+    );
+    let me = c.my_position().expect("on its feet");
+    assert!(me.distance(start) < 0.01, "walked to {me}");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_portal_in_a_hall_is_walked_to_on_its_own_floor() {
     // From Archmage Cindrue's first floor at 69, the Holtburg Meeting Hall Portal's mouth at 96:
     // the stretch is the mouth on its own floor and in its own cell.
