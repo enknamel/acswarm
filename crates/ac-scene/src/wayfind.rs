@@ -195,14 +195,24 @@ pub fn standable_near(
             nav,
             missing: Vec::new(),
         };
-        let roots: Vec<u32> = sources(ground, &mut l, &q, &Berths(Vec::new()), s, from.1, &cap)
-            .map(|f| {
-                f.ids
-                    .iter()
-                    .map(|&(id, _)| nav.walk_component(id))
-                    .collect()
-            })
-            .unwrap_or_default();
+        let none = HashSet::new();
+        let roots: Vec<u32> = sources(
+            ground,
+            &mut l,
+            &q,
+            &Berths(Vec::new()),
+            s,
+            from.1,
+            &cap,
+            &none,
+        )
+        .map(|f| {
+            f.ids
+                .iter()
+                .map(|&(id, _)| nav.walk_component(id))
+                .collect()
+        })
+        .unwrap_or_default();
         out.retain(|&id| roots.contains(&nav.walk_component(id)));
     }
     Ok(out.iter().map(|&id| nav.nodes[id as usize]).collect())
@@ -339,32 +349,36 @@ fn lattice_way(ground: &Ground, l: &mut impl Lattice, q: &WalkQuery) -> Result<W
     // first leg is walked from there like any other.
     let (s, from_cell) = floor_of(ground, q.from.0, q.from.1, &cap).unwrap_or(q.from);
     let berths = Berths::of(q, s);
-    let Sources {
-        from: start,
-        ids: sources,
-        dropped,
-    } = sources(ground, l, q, &berths, s, from_cell, &cap)?;
+    // Nodes a search from earlier sources reached in vain: the next look starts past them.
+    let mut searched: HashSet<u32> = HashSet::new();
+    let mut found = sources(ground, l, q, &berths, s, from_cell, &cap, &searched)?;
     let ends = ends(ground, l, q, &berths, g, goal_cell, &cap);
     if ends.is_empty() {
         return Err(NoWay::Unreached);
     }
-    // Built whole, the graph's components are final: in different ones there is no way at all.
-    let nav = l.nav();
-    let component = |id: u32| {
-        if q.drops {
-            nav.component(id)
-        } else {
-            nav.walk_component(id)
+    let (found, path) = loop {
+        let why = match apart_from(l.nav(), q, &found.ids, &ends) {
+            Some(part) => {
+                searched.extend(part);
+                NoWay::Apart
+            }
+            None => match astar(l, q, &berths, &found.ids, &ends, g, &mut searched) {
+                Ok(path) => break (found, path),
+                Err(why) => why,
+            },
+        };
+        // The nodes nearest the start are a pocket of the graph (among props): the start's walk
+        // to nodes past them, if any, is the way out (a_start_in_a_pocket_walks_out_past_it).
+        match sources(ground, l, q, &berths, s, from_cell, &cap, &searched) {
+            Ok(next) => found = next,
+            Err(_) => return Err(why),
         }
     };
-    if nav.is_complete()
-        && !sources
-            .iter()
-            .any(|&(a, _)| ends.keys().any(|&b| component(a) == component(b)))
-    {
-        return Err(NoWay::Apart);
-    }
-    let path = astar(l, q, &berths, &sources, &ends, g)?;
+    let Sources {
+        from: start,
+        dropped,
+        ..
+    } = found;
     let nav = l.nav();
     let mut points: Vec<(NavNode, EdgeKind)> = Vec::with_capacity(path.len() + 1);
     let mut cell = from_cell;
@@ -451,6 +465,30 @@ fn can_leave_start(
     !berths.crosses(a.0, b.0) && ground.body_reaches(a.0, a.1, b.0, cap)
 }
 
+/// On a graph built whole, the nodes of the parts `sources` lie in when no end lies in one: there
+/// is no way from them at all. `None` while a way may be.
+fn apart_from(
+    nav: &NavGraph,
+    q: &WalkQuery,
+    sources: &[(u32, f32)],
+    ends: &HashMap<u32, End>,
+) -> Option<Vec<u32>> {
+    let component = |id: u32| {
+        if q.drops {
+            nav.component(id)
+        } else {
+            nav.walk_component(id)
+        }
+    };
+    let parts: HashSet<u32> = sources.iter().map(|&(a, _)| component(a)).collect();
+    let apart = nav.is_complete() && !ends.keys().any(|&b| parts.contains(&component(b)));
+    apart.then(|| {
+        (0..nav.len() as u32)
+            .filter(|&id| parts.contains(&component(id)))
+            .collect()
+    })
+}
+
 /// Where a route's first leg leaves from, the nodes it may begin at with the cost of the checked
 /// leg to each, and whether that leg is a drop.
 struct Sources {
@@ -459,8 +497,9 @@ struct Sources {
     dropped: bool,
 }
 
-/// The nodes a route may begin at; the start pushed out of a wall when nothing nearer is walked
-/// to. Failing a walk, one that takes drops leaves by the drop it takes.
+/// The nodes a route may begin at, none `searched`; the start pushed out of a wall when nothing
+/// nearer is walked to. Failing a walk, one that takes drops leaves by the drop it takes.
+#[allow(clippy::too_many_arguments)] // the walk's own parts, and what earlier looks searched
 fn sources(
     ground: &Ground,
     l: &mut impl Lattice,
@@ -469,6 +508,7 @@ fn sources(
     s: Vec3,
     cell: u32,
     cap: &Capsule,
+    searched: &HashSet<u32>,
 ) -> Result<Sources, NoWay> {
     let pushed = ground
         .collision
@@ -482,7 +522,7 @@ fn sources(
     for (look, (from, r)) in walks.into_iter().enumerate() {
         let key = u32::from(look == 2);
         let near = nearest_from(l, from, r, cell, false, |id, n| {
-            can_stand_on(q, berths, n) && tried.insert((key, id))
+            can_stand_on(q, berths, n) && !searched.contains(&id) && tried.insert((key, id))
         });
         let nav = l.nav();
         let kept: Vec<(u32, f32)> = near
@@ -503,7 +543,9 @@ fn sources(
     }
     if q.drops {
         for r in [NEAREST_REACH, STRANDED_REACH] {
-            let near = nearest_from(l, s, r, cell, true, |_, n| can_stand_on(q, berths, n));
+            let near = nearest_from(l, s, r, cell, true, |id, n| {
+                can_stand_on(q, berths, n) && !searched.contains(&id)
+            });
             let nav = l.nav();
             let kept: Vec<(u32, f32)> = near
                 .into_iter()
@@ -633,6 +675,7 @@ fn astar(
     sources: &[(u32, f32)],
     ends: &HashMap<u32, End>,
     g: Vec3,
+    closed: &mut HashSet<u32>,
 ) -> Result<Vec<(u32, Option<EdgeKind>)>, NoWay> {
     #[derive(PartialEq)]
     struct Open {
@@ -654,7 +697,6 @@ fn astar(
     let h = |p: Vec3| (p.distance(g) - q.within).max(0.0);
     let mut best: HashMap<u32, f32> = HashMap::new();
     let mut came: HashMap<u32, (u32, EdgeKind)> = HashMap::new();
-    let mut closed: HashSet<u32> = HashSet::new();
     let mut open = BinaryHeap::new();
     for &(id, cost) in sources {
         if best.get(&id).is_none_or(|&b| cost < b) {
@@ -1279,6 +1321,39 @@ mod tests {
             panic!("no way down with drops allowed");
         };
         assert!(route.iter().any(|(_, k)| *k == EdgeKind::Drop), "{route:?}");
+    }
+
+    #[test]
+    fn a_start_in_a_pocket_walks_out_past_it() {
+        // At the end of a beam over a pit: the nodes nearest are down in the pit, a pocket no
+        // walk climbs out of, and the way on is along the beam to the floor past it.
+        let mut w = CollisionWorld::default();
+        floor(&mut w, 0.0, 6.0, 0.0, 6.0, 0.0, 0x0101);
+        floor(&mut w, 3.3, 3.7, 5.5, 9.5, 1.0, 0x0101);
+        floor(&mut w, 0.0, 6.0, 9.0, 15.0, 1.0, 0x0101);
+        let ground = inside(&w);
+        let mut g = graph(Vec2::new(0.0, 0.0), Vec2::new(6.0, 15.0));
+        g.build_all(&ground);
+        let beam = |n: &NavNode| n.pos.z > 0.5 && n.pos.y > 5.0 && n.pos.y < 9.0;
+        assert!(!g.nodes.iter().any(beam), "a node on the beam");
+        let q = WalkQuery {
+            from: (Vec3::new(3.5, 6.3, 1.0), 0x0101),
+            goal: (Vec3::new(3.0, 13.0, 1.0), 0x0101),
+            within: 0.5,
+            avoid: &[],
+            berth: 0.0,
+            indoors_too: true,
+            outdoors_first: false,
+            drops: false,
+        };
+        let found = search(&ground, &g, &q);
+        let Search::Found(route) = found else {
+            panic!("no way out of the pocket: {found:?}");
+        };
+        assert!(
+            route.iter().all(|(n, _)| n.pos.z > 0.5),
+            "down into the pit: {route:?}"
+        );
     }
 
     #[test]
