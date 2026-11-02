@@ -15,9 +15,7 @@ use crate::stride::{fall_step, stride, Air, Stride, Underfoot};
 pub const INDOOR_SPACING: f32 = 1.5;
 /// Grid spacing over open terrain.
 pub const OUTDOOR_SPACING: f32 = 4.0;
-/// How far apart the capsule is sampled along an edge.
-const SUBSTEP: f32 = 0.5;
-/// Height above the feet of the ray that must be clear between samples.
+/// Height above the feet of the ray a walk keeps clear ([`line_clear`]), metres.
 const CHEST: f32 = 1.0;
 /// Levels closer than this in one column are one floor.
 const LEVEL_MERGE: f32 = 0.3;
@@ -159,51 +157,6 @@ impl<'a> Ground<'a> {
             Some(cz) => cz - feet.z >= cap.height,
             None => true,
         }
-    }
-
-    /// The dodge sidestep's room check (`Player::line_blocked`), not an edge test: the walk from
-    /// `a` to `b` sampled every `SUBSTEP` (fits, floor, chest ray), each way.
-    pub fn walkable(&self, a: Vec3, b: Vec3, cap: &Capsule) -> (bool, bool) {
-        let d = b - a;
-        let len = flat(d).length();
-        let steps = (len / SUBSTEP).ceil().max(1.0) as usize;
-        // Track the floor with the wider of the two limits both ways and
-        // judge the profile per direction afterwards.
-        let range = cap.step_up.max(cap.step_down);
-        let probe = Capsule {
-            step_up: range,
-            step_down: range,
-            ..*cap
-        };
-        let (mut forward, mut backward) = (true, true);
-        let mut prev = a;
-        for i in 1..=steps {
-            let t = i as f32 / steps as f32;
-            let at = Vec3::new(a.x + d.x * t, a.y + d.y * t, prev.z);
-            let Some((z, _)) = self.surface_at(at, &probe) else {
-                return (false, false);
-            };
-            let here = Vec3::new(at.x, at.y, z);
-            if !self.fits(here, cap) || !line_clear(self.collision, prev, here) {
-                return (false, false);
-            }
-            let dz = here.z - prev.z;
-            if dz > cap.step_up || dz < -cap.step_down {
-                forward = false;
-            }
-            if -dz > cap.step_up || -dz < -cap.step_down {
-                backward = false;
-            }
-            if !forward && !backward {
-                return (false, false);
-            }
-            prev = here;
-        }
-        // We must have arrived on b's floor, not one above or below it.
-        if (prev.z - b.z).abs() > LEVEL_MERGE {
-            return (false, false);
-        }
-        (forward, backward)
     }
 
     /// The edge test between two nodes, each way: the chest line clear ([`is_chest_clear`]) and
@@ -1540,16 +1493,13 @@ pub(crate) mod tests {
 
     #[test]
     fn a_door_frame_the_body_slides_past_is_an_edge() {
-        // A doorway a body's width and a hand wide, met at a slant: the sampled walk touches the
-        // jamb and refuses, the body is slid off it and walks through.
+        // A doorway a body's width and a hand wide, met at a slant: the body is slid off the jamb
+        // and walks through.
         let w = two_rooms(Some(1.0));
         let ground = inside(&w);
         let cap = Capsule::default();
         let (a, b) = (node(7.0, 0.6, 0.0, 1), node(9.0, 0.0, 0.0, 2));
-        assert!(
-            !ground.walkable(a.pos, b.pos, &cap).0,
-            "the sampler walks it"
-        );
+        assert!(ground.can_walk((a.pos, a.cell), (b.pos, b.cell), &cap));
         assert_eq!(ground.hop(&a, &b, &cap).0, Some(EdgeKind::Doorway));
     }
 
@@ -1569,10 +1519,7 @@ pub(crate) mod tests {
         let ground = inside(&w);
         let cap = Capsule::default();
         let (a, b) = (node(1.0, 0.0, 0.0, 1), node(7.0, 0.0, 0.0, 1));
-        assert!(
-            !ground.walkable(a.pos, b.pos, &cap).0,
-            "the sampler walks it"
-        );
+        assert!(ground.can_walk((a.pos, a.cell), (b.pos, b.cell), &cap));
         assert_eq!(
             ground.hop(&a, &b, &cap),
             (Some(EdgeKind::Walk), Some(EdgeKind::Walk))

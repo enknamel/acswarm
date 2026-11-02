@@ -1050,12 +1050,10 @@ impl Player {
         ))
     }
 
-    /// Whether the straight walk from `from` to `to` is blocked: static
-    /// geometry of landblock `block` (or of the blocks under either end)
-    /// crosses the chest-height line, or the capsule cannot walk it: the
-    /// dodge sidestep's room check.
-    pub fn line_blocked(&mut self, assets: &Assets, block: u32, from: Vec3, to: Vec3) -> bool {
-        let mut blocks = vec![block & 0xFFFF_0000];
+    /// Whether the straight walk from `from` (feet, in `cell`) to `to` is blocked: the dodge
+    /// sidestep's room check, the chest line over the blocks under it and then the body's own step.
+    pub fn line_blocked(&mut self, assets: &Assets, cell: u32, from: Vec3, to: Vec3) -> bool {
+        let mut blocks = vec![cell & 0xFFFF_0000];
         for b in [block_of(from), block_of(to)] {
             if !blocks.contains(&b) {
                 blocks.push(b);
@@ -1067,18 +1065,12 @@ impl Player {
         }) {
             return true;
         }
-        // The ray misses, but the capsule may still not fit (door jambs,
-        // benches, a corridor that bends less than a body width).
-        self.walkable(assets, block, from, to) == Some(false)
-    }
-
-    /// Whether the capsule can walk the straight line from `from` to `to`
-    /// over landblock `block`'s geometry (see `nav::Ground::walkable`);
-    /// `None` when the block has no collision.
-    fn walkable(&mut self, assets: &Assets, block: u32, from: Vec3, to: Vec3) -> Option<bool> {
-        self.on_ground(assets, block, |ground, cap| {
-            ground.walkable(from, to, cap).0
-        })
+        // The ray misses, but the body may still not pass (door jambs, benches, a bend).
+        let start = ac_world::Place { at: from, cell };
+        self.on_ground(assets, cell, |ground, cap| {
+            let from = ac_nav::routing::graph_end(ground, start);
+            !ground.can_walk(from, (to, 0), cap)
+        }) == Some(true)
     }
 
     /// Ask `f` about landblock `block`'s ground as the walking code sees
