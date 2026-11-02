@@ -40,7 +40,11 @@ impl Client {
             auto_enter: true,
         };
         let nowhere = std::net::SocketAddr::from(([127, 0, 0, 1], 1));
-        Self::start(config, assets, None, nowhere)
+        #[allow(unused_mut)] // mutated only where the testkit is compiled in
+        let mut c = Self::start(config, assets, None, nowhere);
+        #[cfg(any(test, feature = "testkit"))]
+        c.pathfinder.build_when_planning();
+        c
     }
 
     /// The one place a session is put together, with or without a

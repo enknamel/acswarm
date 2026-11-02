@@ -25,6 +25,8 @@ const ANSWER_REACH: f32 = 15.0;
 const ANSWER_GOAL: f32 = 3.0;
 /// Areas the process keeps, most recently used last; each is nine blocks of collision, about 15 MB.
 const AREAS: usize = 4;
+/// Jobs a handle that builds for itself runs for one answer before it says `Building`.
+const OWN_TRIES: usize = 4;
 
 /// An area in the registry, with what says which walks it holds, read without its lock.
 struct Region {
@@ -165,6 +167,10 @@ pub struct Pathfinder {
     /// When the steering last asked.
     asked_at: Option<Instant>,
     asked: Option<Asked>,
+    /// Offline runs: each plan builds what it needs on the asking thread before it answers.
+    builds_itself: bool,
+    /// The assets a handle that builds for itself builds with, opened on first use.
+    own: Option<Assets>,
 }
 
 impl Pathfinder {
@@ -181,28 +187,43 @@ impl Pathfinder {
             dead: false,
             asked_at: None,
             asked: None,
+            builds_itself: false,
+            own: None,
         }
+    }
+
+    /// Offline runs only: plans build what they need on the asking thread before they answer, as
+    /// a live frame has its answer a frame or two later, so no test hangs on the builder's timing.
+    #[cfg(any(test, feature = "testkit"))]
+    pub fn build_when_planning(&mut self) {
+        self.builds_itself = true;
     }
 
     /// The route from `from` to within `within` (metres, 3D) of `goal` for a body of `capsule`, on
     /// what is built now; `Building` when the area or its chunks are not, which are then queued.
     pub fn plan(&mut self, from: Place, goal: Place, within: f32, capsule: Capsule) -> Planned {
-        let Some(region) = region_for(from, goal, &capsule) else {
-            if !can_assemble(from, goal, &capsule) {
-                return Planned::NoWay(NoWay::OutOfRegion);
+        let mut tries = 0;
+        loop {
+            let region = region_for(from, goal, &capsule);
+            let planned = match &region {
+                Some(r) => self.read(r).map_or(Planned::Building(Vec::new()), |area| {
+                    routing::plan_built(&area, from, goal, within)
+                }),
+                None if can_assemble(from, goal, &capsule) => Planned::Building(Vec::new()),
+                None => return Planned::NoWay(NoWay::OutOfRegion),
+            };
+            if !matches!(planned, Planned::Building(_)) || tries == OWN_TRIES {
+                return planned;
             }
-            self.send(Job::Assemble, from, goal, within, capsule);
-            return Planned::Building(Vec::new());
-        };
-        // Fails only while the builder adds a chunk, which takes microseconds.
-        let planned = match region.area.try_read() {
-            Ok(area) => routing::plan_built(&area, from, goal, within),
-            Err(_) => Planned::Building(Vec::new()),
-        };
-        if matches!(planned, Planned::Building(_)) {
-            self.send(|w| Job::Build(region, w), from, goal, within, capsule);
+            tries += 1;
+            let job = move |w| match region {
+                Some(r) => Job::Build(r, w),
+                None => Job::Assemble(w),
+            };
+            if !self.dispatch(job, from, goal, within, capsule) {
+                return planned;
+            }
         }
-        planned
     }
 
     /// Where a character can stand within `radius` (metres, flat) of `around`, from what is built
@@ -225,6 +246,47 @@ impl Pathfinder {
             .try_read()
             .map(|area| routing::standable_near(&area, from, around, radius));
         found.unwrap_or_default()
+    }
+
+    /// A region's area to plan on: waited for by a handle that builds for itself, else `None`
+    /// while the builder adds a chunk, which takes microseconds.
+    fn read<'r>(&self, region: &'r Region) -> Option<std::sync::RwLockReadGuard<'r, Area>> {
+        if self.builds_itself {
+            region.area.read().ok()
+        } else {
+            region.area.try_read().ok()
+        }
+    }
+
+    /// Have a job done for a walk: here and now by a handle that builds for itself, else queued
+    /// for the builder (see [`send`](Self::send)). Whether it is done.
+    fn dispatch(
+        &mut self,
+        job: impl FnOnce(Walk) -> Job,
+        from: Place,
+        goal: Place,
+        within: f32,
+        capsule: Capsule,
+    ) -> bool {
+        if !self.builds_itself {
+            self.send(job, from, goal, within, capsule);
+            return false;
+        }
+        let walk = Walk {
+            who: self.id,
+            number: 0,
+            from,
+            goal,
+            within,
+            capsule,
+            reply: None,
+        };
+        let archives = &self.archives;
+        let assets = self
+            .own
+            .get_or_insert_with(|| Assets::with_archives(archives.clone()));
+        run(assets, job(walk));
+        true
     }
 
     /// Queue a job for a walk, unless one went out within [`ASK_EVERY`].

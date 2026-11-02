@@ -1,3 +1,5 @@
+use ac_nav::routing::Planned;
+
 use crate::{pathfinder, player};
 
 /// The client answering what the steering asks of the world.
@@ -5,7 +7,7 @@ use crate::{pathfinder, player};
 /// The steering itself is in `ac-nav` and knows nothing of packets,
 /// physics or landblocks; this is the half that does. Seven questions,
 /// which in a test are answered with a few rectangles and here with
-/// the character's own collision and the planner on its thread.
+/// the character's own collision and the region planner.
 pub struct Standing<'a> {
     pub player: &'a mut player::Player,
     pub assets: &'a ac_scene::Assets,
@@ -41,8 +43,28 @@ impl ac_nav::Ground for Standing<'_> {
         goal_cell: u32,
         within: f32,
     ) -> Option<Vec<glam::Vec3>> {
-        self.player
-            .find_path(self.assets, block, from, to, goal_cell, within)
+        // From where the body stands, in its own cell; from anywhere else, located by the cells.
+        let mine = from.distance(self.player.world_position()) < 1e-3;
+        let from = ac_world::Place {
+            at: from,
+            cell: if mine {
+                self.player.cell
+            } else {
+                block & 0xFFFF_0000
+            },
+        };
+        let to = ac_world::Place {
+            at: to,
+            cell: goal_cell,
+        };
+        match self.wide.plan(from, to, within, self.player.capsule()) {
+            Planned::Route(r) => Some(r.points()),
+            Planned::NoWay(why) => {
+                tracing::debug!("nav: no way to {:?}: {why:?}", to.at);
+                None
+            }
+            Planned::Building(_) => None,
+        }
     }
 
     fn ask_wide(
