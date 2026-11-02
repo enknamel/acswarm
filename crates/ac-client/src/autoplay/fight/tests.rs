@@ -282,3 +282,61 @@ fn a_target_on_a_ledge_nothing_walks_to_is_given_up_at_once() {
         "the floor one fought"
     );
 }
+
+/// [`tuskers_on_the_ledge_and_the_floor`] for a character with a mace in hand.
+fn with_a_mace(c: &mut Client) {
+    let me = 0x5000_0001;
+    c.world.player_guid = Some(me);
+    for o in c.world.objects.values_mut() {
+        if o.item_type & ac_world::item_type::CASTER != 0 {
+            o.wielder = None;
+            o.container = Some(me);
+        }
+    }
+    crate::testkit::a_weapon(
+        c,
+        0x8000_0601,
+        ac_world::item_type::MELEE_WEAPON,
+        "Mace",
+        true,
+    );
+}
+
+/// Fight rounds at 20 Hz for `secs`, the body walking: whether a swing went out at `guid`.
+fn swings_at(c: &mut Client, guid: u32, t0: Instant, secs: u64) -> bool {
+    let dt = 0.05;
+    let mut now = t0;
+    let mut swung = false;
+    while now < t0 + Duration::from_secs(secs) {
+        c.autoplay_fight(now);
+        c.tick_player(crate::player::Input::default(), dt, now);
+        swung |= c.attacked == Some(guid);
+        now += Duration::from_secs_f32(dt);
+    }
+    swung
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_swing_is_not_sent_at_a_creature_no_walk_reaches() {
+    let t0 = Instant::now();
+    let (mut c, on_ledge, on_floor) = tuskers_on_the_ledge_and_the_floor(t0);
+    with_a_mace(&mut c);
+    assert_eq!(c.combat_stance(), crate::Stance::Melee, "the case: a swing");
+    // With both: the ledge one is never swung at, the floor one is.
+    assert!(!swings_at(&mut c, on_ledge, t0, 6), "swung at the ledge");
+    assert_eq!(c.attack_target, Some(on_floor), "the floor one fought");
+
+    // Alone with the ledge one: given up at once, and the character stands.
+    let (mut c, on_ledge, on_floor) = tuskers_on_the_ledge_and_the_floor(t0);
+    with_a_mace(&mut c);
+    c.world.objects.remove(&on_floor);
+    let me = c.my_position().expect("standing");
+    assert!(!swings_at(&mut c, on_ledge, t0, 2), "swung at the ledge");
+    assert!(
+        c.autoplay.given_up.since(&on_ledge).is_some(),
+        "not given up"
+    );
+    let moved = c.my_position().expect("standing").distance(me);
+    assert!(moved < 0.5, "walked {moved:.1} m");
+}

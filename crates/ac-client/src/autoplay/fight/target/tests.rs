@@ -307,8 +307,13 @@ fn a_caster_with_nothing_to_throw_names_no_attack() {
 /// A level-20 character on its feet in the Holtburg field, on nobody's
 /// team: the block the fleet is measured in.
 fn in_the_field() -> Client {
+    in_the_field_over(testkit::no_data())
+}
+
+/// [`in_the_field`] over `assets`: the game's, for a fight that walks up to swing.
+fn in_the_field_over(assets: std::rc::Rc<ac_scene::Assets>) -> Client {
     const HOLTBURG: u32 = 0xA9B4_0019;
-    let mut c = testkit::character_of_level(testkit::no_data(), 20);
+    let mut c = testkit::character_of_level(assets, 20);
     testkit::stand(&mut c, HOLTBURG, glam::vec3(84.0, 108.0, 94.0));
     c
 }
@@ -326,6 +331,7 @@ fn following_a_leader(c: &mut Client, metres: f32) {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn the_swing_and_the_spell_pick_the_same_creature() {
     // The melee and missile path scanned inline in `autoplay_fight_as`
     // for the plain nearest creature inside `Fight::radius`, with
@@ -336,16 +342,16 @@ fn the_swing_and_the_spell_pick_the_same_creature() {
     let cfg = Fight::default();
 
     // Alone, the nearest is the pick, and the swing goes at it.
-    let mut c = in_the_field();
+    let mut c = in_the_field_over(testkit::game_data());
     let it = testkit::standing_by(&mut c, 0x8000_0001, "Revenant", 5.0).guid;
     assert_eq!(c.pick_target(&cfg, now), Some(it));
     assert!(c.autoplay_fight_as(now, &cfg));
-    assert_eq!(c.attack_target, Some(it));
+    assert_eq!(testkit::went_for(&c), Some(it));
 
     // The same creature with a leader forty metres off stands
     // thirty-five from it, outside the team's twenty-five metre fight
     // radius: both paths pick nothing.
-    let mut c = in_the_field();
+    let mut c = in_the_field_over(testkit::game_data());
     following_a_leader(&mut c, 40.0);
     testkit::standing_by(&mut c, 0x8000_0001, "Revenant", 5.0);
     assert_eq!(c.pick_target(&cfg, now), None);
@@ -353,12 +359,12 @@ fn the_swing_and_the_spell_pick_the_same_creature() {
     assert_eq!(c.attack_target, None);
 
     // And beside its leader it fights it again.
-    let mut c = in_the_field();
+    let mut c = in_the_field_over(testkit::game_data());
     following_a_leader(&mut c, 3.0);
     let it = testkit::standing_by(&mut c, 0x8000_0001, "Revenant", 5.0).guid;
     assert_eq!(c.pick_target(&cfg, now), Some(it));
     assert!(c.autoplay_fight_as(now, &cfg));
-    assert_eq!(c.attack_target, Some(it));
+    assert_eq!(testkit::went_for(&c), Some(it));
 }
 
 #[test]
@@ -394,6 +400,7 @@ fn a_follower_out_of_reach_of_its_leader_picks_nothing_not_the_nearest() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn something_hitting_the_follower_is_fought_though_the_leader_is_a_field_away() {
     // Every other walk-past rule yields to a creature already hitting
     // the character -- the hunting area (`area_allows`), the road
@@ -402,7 +409,7 @@ fn something_hitting_the_follower_is_fought_though_the_leader_is_a_field_away() 
     // alone: in the table, catching up still comes first (below).
     let now = Instant::now();
     let cfg = Fight::default();
-    let mut c = in_the_field();
+    let mut c = in_the_field_over(testkit::game_data());
     following_a_leader(&mut c, 40.0);
     let it = testkit::standing_by(&mut c, 0x8000_0001, "Revenant", 5.0).guid;
     assert_eq!(c.pick_target(&cfg, now), None, "nothing beside the leader");
@@ -414,16 +421,17 @@ fn something_hitting_the_follower_is_fought_though_the_leader_is_a_field_away() 
     c.autoplay.attacked_by("Revenant", Instant::now());
     assert_eq!(c.pick_target(&cfg, now), Some(it));
     assert!(c.autoplay_fight_as(now, &cfg), "it swings back");
-    assert_eq!(c.attack_target, Some(it));
+    assert_eq!(testkit::went_for(&c), Some(it));
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_follower_in_the_academy_fights_its_task_wherever_the_leader_is() {
     // The academy (a reflex) runs before catching up, so a new follower does its tasks away from a
     // leader already out; the Sparring Golem is passive (creatures.csv tolerance 64) and never
     // hits it, and with the leader's radius asked the task waited for it to appear for ever.
     let now = Instant::now();
-    let mut c = testkit::character_of_level(testkit::no_data(), 5);
+    let mut c = testkit::character_of_level(testkit::game_data(), 5);
     testkit::stand(&mut c, 0xA9B4_0019, glam::vec3(84.0, 108.0, 94.0));
     following_a_leader(&mut c, 500.0);
     let golem = testkit::standing_by(&mut c, 0x8000_0001, "Sparring Golem", 4.0).guid;
@@ -436,7 +444,7 @@ fn a_follower_in_the_academy_fights_its_task_wherever_the_leader_is() {
     assert_eq!(c.pick_target(&task, now), None, "outside, beside no leader");
     c.autoplay.academy.active = true;
     assert!(c.autoplay_fight_as(now, &task), "no swing at the task");
-    assert_eq!(c.attack_target, Some(golem));
+    assert_eq!(testkit::went_for(&c), Some(golem));
 }
 
 /// `c` playing on its own with a Revenant `metres` east that has just attacked it.
@@ -448,16 +456,17 @@ fn hit_by_a_revenant(c: &mut Client, metres: f32) -> u32 {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_follower_beside_its_leader_fights_back_at_what_hits_it_from_past_the_leaders_radius() {
     // The leader eight metres east, inside the catch-up break; the Revenant twenty west, so
     // twenty-eight from the leader and outside its radius. The fight has the tick, not `follow`.
-    let mut c = in_the_field();
+    let mut c = in_the_field_over(testkit::game_data());
     following_a_leader(&mut c, 8.0);
     let it = hit_by_a_revenant(&mut c, -20.0);
     c.tick_autoplay(Instant::now());
     assert_eq!(c.autoplay.step, Some("fight"));
     assert_eq!(
-        c.attack_target,
+        testkit::went_for(&c),
         Some(it),
         "it walked back to its leader under attack"
     );

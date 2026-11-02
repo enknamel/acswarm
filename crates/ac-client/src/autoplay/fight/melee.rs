@@ -5,8 +5,9 @@ use super::road_fight_over;
 use crate::autoplay::hear::arrived_unharmed;
 use crate::autoplay::{Autoplay, Doing, Fight, Release};
 use crate::did::Did;
+use crate::dodge::{How, WITHIN};
 use crate::refusals;
-use crate::{Client, Stance};
+use crate::{Client, Goal, Stance};
 
 /// A target that takes no damage for this long is let go.
 const STALL_AFTER: Duration = Duration::from_secs(20);
@@ -173,6 +174,9 @@ impl Client {
                 {
                     return true;
                 }
+                if !missile && self.close_for_swing(guid, &name, now) != Did::Done {
+                    return true;
+                }
                 self.enter_combat();
                 self.attack(guid);
                 self.autoplay.last_attack = Some(now);
@@ -204,9 +208,11 @@ impl Client {
             return true;
         }
         // A bow refused for range shoots nothing: close in first (see
-        // `crate::dodge`). A swing from too far the server walks us
-        // in for.
+        // `crate::dodge`). A swing is sent from within its reach.
         if missile && self.autoplay_approach(guid, &name, crate::dodge::How::Missile) != Did::Done {
+            return true;
+        }
+        if !missile && self.close_for_swing(guid, &name, now) != Did::Done {
             return true;
         }
         self.enter_combat();
@@ -230,6 +236,12 @@ impl Client {
     /// damage for too long and should be let go: it is out of reach,
     /// behind something, or not what it seems.
     pub(super) fn stalled_on(&mut self, guid: u32, now: Instant) -> bool {
+        // The server's walk to it (a swing from out of reach) has no way there.
+        if self.server_walk_refused == Some(guid) {
+            self.server_walk_refused = None;
+            self.give_up_target(guid, "no way to it", now);
+            return true;
+        }
         let health = self
             .world
             .objects
@@ -271,6 +283,25 @@ impl Client {
                 false
             }
         }
+    }
+
+    /// Walk within a swing of `guid` (`name`) before the swing is sent: `Done` to swing, else the
+    /// tick is spent; one no walk reaches is given up (a_swing_is_not_sent_at_a_creature_no_walk_reaches).
+    fn close_for_swing(&mut self, guid: u32, name: &str, now: Instant) -> Did {
+        self.interrupt_travel("closing on a target");
+        let within = self.attack_range(How::Melee) * WITHIN;
+        let did = self.go(self.step_owner(), Goal::Near { guid, within }, now);
+        match &did {
+            Did::Done => {}
+            Did::Blocked(why) => {
+                tracing::info!("range: no way to {name}: {}", why.what);
+                self.give_up_target(guid, "no way to it", now);
+            }
+            _ => self
+                .autoplay
+                .say(Doing::Fighting, format!("closing on {name}")),
+        }
+        did
     }
 
     /// Whether `guid`, the creature being fought, is not there to fight

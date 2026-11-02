@@ -283,6 +283,15 @@ pub fn a_weapon(c: &mut Client, guid: u32, kind: u32, name: &str, in_hand: bool)
     );
 }
 
+/// What the fight went for: the swing's target, else the creature the slot's walk is to (a swing
+/// is sent from within reach, so the walk up comes first).
+pub fn went_for(c: &Client) -> Option<u32> {
+    c.attack_target.or_else(|| match c.going.as_ref()?.goal {
+        crate::Goal::Near { guid, .. } => Some(guid),
+        crate::Goal::At { .. } => None,
+    })
+}
+
 /// A character with a mace in hand, a wand in the pack, and a
 /// creature it is swinging at.
 pub fn mid_fight(assets: std::rc::Rc<ac_scene::Assets>) -> (Client, u32) {
