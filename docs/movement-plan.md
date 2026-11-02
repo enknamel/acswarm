@@ -1,6 +1,7 @@
 # Movement: plan the whole route, then follow it
 
-Status: proposed 2026-11-01, not started. Replaces spot fixes to walking with one design.
+Status: proposed 2026-11-01; phases 1 and 2 built on branches `phase1` and `phase2`, not merged.
+Replaces spot fixes to walking with one design.
 
 ## The rule
 
@@ -238,6 +239,39 @@ sealed off. "Still pushing" is always wrong.
 - After review (floors of overlapping cells, walk components, smoothing that halves, the old
   steering waiting for its plan; `docs/movement-phase1-design.md` §7): the same, outcome for
   outcome, and 0 frames waited for the planner offline.
+
+**Phase 2** (branch `phase2`, the follower of one planned route, `docs/movement-phase2-design.md`):
+
+| trials | arrived | refused | gave up | still pushing | AGREE planned+arrived, planned+failed, no-way+arrived, no-way+failed |
+|---|---|---|---|---|---|
+| the stalls seen live (9) | 8 | 1 (2CB5 coast edge) | 0 | 0 | 8, 0, 0, 1 |
+| random walks (120) | 108 | 12 | 0 | 0 | 108, 0, 0, 12 |
+
+- WAITED 0 on both; INVARIANT planned-must-arrive 8 of 8 and 108 of 108. The harness asserts the
+  invariant and 0 still pushing, so its exit code is the gate.
+- The 7 still pushing became refused. No pair that arrived before refuses now: the 12 are the
+  pairs phase 1's planner refused, and none arrived under phase 0's lean either.
+- The refused pairs, the planner's reason first (`plan_first`, a fresh area by cell), then the
+  follower's (the follow slot names the goal by block):
+
+| pair | planner | follower | phase 0 |
+|---|---|---|---|
+| 01F6 Holtburg Dungeon #6 | Unreached | OffFloor | pushing, 28.8 m left |
+| 01F6 Holtburg Dungeon #10 | Stranded | Stranded | refused |
+| 8A02 Facility Hub #1 | Unreached | OffFloor | pushing, 51.9 m left |
+| 8A02 Facility Hub #3 | Unreached | OffFloor | pushing, 20.2 m left |
+| 8A02 Facility Hub #8 | Stranded | Stranded | refused |
+| 8A02 Facility Hub #11 | Unreached | OffFloor | pushing, 21.7 m left |
+| 8A02 Facility Hub #14 | Unreached | OffFloor | pushing, 35.3 m left |
+| 0286 Hea dungeon #0 | Stranded | OffFloor | refused |
+| 0286 Hea dungeon #2 | Stranded | Stranded | pushing, 19.9 m left |
+| 0286 Hea dungeon #3 | Stranded | Stranded | refused |
+| 0286 Hea dungeon #6 | Unreached | Unreached | pushing, 28.7 m left |
+| 0286 Hea dungeon #13 | Unreached | OffFloor | refused |
+| 2CB5 coast block edge (stalls) | OffFloor | OffFloor | refused |
+
+- A journey's leg the steering refuses is planned again at once (`REPLANS` times, then given up),
+  not after `STUCK_AFTER` or `STEP_GIVE_UP` (`a_journey_leg_with_no_way_is_planned_again_at_once`).
 
 ## Phases (each merged alone, each measured against the last)
 

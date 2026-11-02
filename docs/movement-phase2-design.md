@@ -1,7 +1,36 @@
 # Movement phase 2 design: the follower
 
-Status: design, 2026-11-01, for phase 2 of `docs/movement-plan.md` ("The follower"). Nothing here is
-built yet. Line anchors are on `92a9d9a` (branch `phase2`, phase 1 plus its review).
+Status: built, 2026-11-01, on branch `phase2` (steps 1-3, `b35b4ce`..`56c82e2`), for phase 2 of
+`docs/movement-plan.md` ("The follower"). Line anchors are on `92a9d9a` (phase 1 plus its review).
+The harness row is in `docs/movement-plan.md` ("Phase 2"). The bar's AGREE below is 108, 0, 0, 12
+on phase 1's tip, as the plan's post-review row says, not 106, 0, 2, 12.
+
+What departed from this design:
+- `Pathfinder::can_walk` takes `&self`: nothing in it mutates.
+- `Steering::new(now)` is `Steering::default()`, and `asking` holds only the `Replan`: each
+  frame's ask uses the goal steered for.
+- `Pathfinder::ask` also holds back an ask whose answer is still being planned (same goal, within
+  `ANSWER_REACH`), or a kept course re-sent its ask every 0.7 m and a slow plan never came back.
+- The corridor's height band on a drop leg spans both ends ± `END_FLOOR`, not an interpolation.
+- `player_tick` stands on a `Go` less than 1 mm away, so a zero `step_cap` is never dropped.
+- Step 2 began with three graph fixes the follower's tests showed (drop edges landed at the
+  follower's own walk; a start on a floor no node stands on leaves by its drop; a start whose
+  nearest nodes are a pocket looks past them), and a journey's leg asks to come within `ARRIVE`,
+  not `LEG_STOP` (travel.rs, unforeseen here).
+- With drops in every plan, Mountain Keep's portal below its landing is reachable, so the two hunt
+  tests that said it was not now walk down to it by its drops.
+- Step 3 found no pair that arrived before and now refuses, so it has no graph-gap commits. The
+  12 refused pairs were all refused by the planner in phase 1 too, and none arrived under phase 0's
+  lean either: 5 were refused, and 7 pushed to the time limit and stood 20-52 m short.
+- Step 3's two edits read `Travel::leg_refused`, not `steering.no_way()`: `tick_player` sets it
+  when the goal it steered was the journey's leg and the answer was `NoWay`. `no_way()` holds a
+  refusal for any goal, so an explore walk's stall ended every journey planned after it at once
+  (`exploring_the_holtburg_dungeon_does_not_stand_at_the_bookcases`).
+- The indoor edit is scoped to the indoor leg: the `STEP_GIVE_UP` test comes before the indoor
+  branch, so unscoped it would take every overland refusal ahead of the waypoint skip.
+- travel.rs had no room for the edits, so a pure move took the gem step's decisions
+  (`clear_heading`, `gem_next`, their constants and tests) to `gem_room.rs`, as §7 allowed.
+- A journey's replan after a refusal waits `ASK_EVERY` (1.5 s) for its repeat ask to go out.
 
 Phase 2 makes steering a follower of one planned route, and deletes every straight fallback. It
 does not add `Client::go` or owners (phase 3), and does not touch journeys' legs (phase 4).
