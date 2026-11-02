@@ -173,6 +173,27 @@ fn cell_of(p: Vec3) -> (i32, i32) {
     ((p.x / GRID).floor() as i32, (p.y / GRID).floor() as i32)
 }
 
+/// Whether the segment `a`..`b`, on the flat, passes within a hand's breadth of grid cell `c`.
+fn crosses_square(a: Vec3, b: Vec3, c: (i32, i32)) -> bool {
+    let lo = glam::Vec2::new(c.0 as f32, c.1 as f32) * GRID - glam::Vec2::splat(0.1);
+    let hi = lo + glam::Vec2::splat(GRID + 0.2);
+    let (p, d) = (a.truncate(), (b - a).truncate());
+    // Slab clipping: the part of the segment inside the square's x and y ranges both.
+    let (mut t0, mut t1) = (0.0_f32, 1.0_f32);
+    for k in 0..2 {
+        if d[k].abs() < 1e-9 {
+            if p[k] < lo[k] || p[k] > hi[k] {
+                return false;
+            }
+            continue;
+        }
+        let (u, v) = ((lo[k] - p[k]) / d[k], (hi[k] - p[k]) / d[k]);
+        t0 = t0.max(u.min(v));
+        t1 = t1.min(u.max(v));
+    }
+    t0 <= t1
+}
+
 impl CollisionWorld {
     pub fn is_empty(&self) -> bool {
         self.tris.is_empty()
@@ -489,13 +510,23 @@ impl CollisionWorld {
         if len < 1e-4 {
             return None;
         }
-        let mid = (from + to) * 0.5;
         let mut best: Option<f32> = None;
-        // The nearest hit is the same whatever order the triangles come in.
-        for (_, t) in self.around(mid, len * 0.5 + 0.1) {
-            if let Some(f) = ray_triangle(from, d, t.a, t.b, t.c) {
-                if f <= 1.0 && best.map(|b| f < b).unwrap_or(true) {
-                    best = Some(f);
+        // The nearest hit is the same whatever order the triangles come in. A triangle the segment
+        // meets is listed in the grid cell of the meeting point, so only cells it crosses are read.
+        let (x0, y0) = cell_of(from.min(to) - Vec3::splat(0.1));
+        let (x1, y1) = cell_of(from.max(to) + Vec3::splat(0.1));
+        for x in x0..=x1 {
+            for y in y0..=y1 {
+                if !crosses_square(from, to, (x, y)) {
+                    continue;
+                }
+                for &i in self.grid.get(&(x, y)).map_or(&[][..], Vec::as_slice) {
+                    let t = &self.tris[i as usize];
+                    if let Some(f) = ray_triangle(from, d, t.a, t.b, t.c) {
+                        if f <= 1.0 && best.map(|b| f < b).unwrap_or(true) {
+                            best = Some(f);
+                        }
+                    }
                 }
             }
         }

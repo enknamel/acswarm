@@ -8,7 +8,9 @@ use std::collections::{BinaryHeap, HashMap, HashSet};
 use glam::Vec3;
 
 use crate::collision::{Capsule, FOOTING};
-use crate::nav::{flat, in_berth, line_clear, walk_kind, EdgeKind, Ground, NavGraph, NavNode};
+use crate::nav::{
+    flat, in_berth, is_chest_clear, line_clear, walk_kind, EdgeKind, Ground, NavGraph, NavNode,
+};
 
 /// A point further than this (metres) over or under a floor is not standing on it: the capsule's
 /// step down.
@@ -425,17 +427,6 @@ fn can_stand_on(q: &WalkQuery, berths: &Berths, n: &NavNode) -> bool {
     (q.indoors_too || n.cell == 0) && !berths.holds(n.pos)
 }
 
-/// A leg of a route walked by the body, clear of the berths.
-fn can_walk_leg(
-    ground: &Ground,
-    berths: &Berths,
-    a: (Vec3, u32),
-    b: (Vec3, u32),
-    cap: &Capsule,
-) -> bool {
-    !berths.crosses(a.0, b.0) && ground.can_walk(a, b, cap)
-}
-
 /// A leg from where the body stands: the body's own step, whatever the chest ray meets, since the
 /// body is there and its step is what it will do.
 fn can_leave_start(
@@ -722,7 +713,10 @@ fn can_cut_to(
     cap: &Capsule,
     wide: &Capsule,
 ) -> bool {
-    can_walk_leg(ground, berths, a, b, wide) && can_walk_leg(ground, berths, a, b, cap)
+    !berths.crosses(a.0, b.0)
+        && is_chest_clear(ground.collision, a.0, b.0)
+        && ground.body_reaches(a.0, a.1, b.0, wide)
+        && ground.body_reaches(a.0, a.1, b.0, cap)
 }
 
 #[cfg(test)]

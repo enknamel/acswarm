@@ -38,6 +38,8 @@ const BODY_STEP: f32 = 0.2;
 pub const BODY_ARRIVE: f32 = 0.25;
 /// The least share of a step the body's walk must close on the far node; less is a wall.
 const BODY_CLOSING: f32 = 0.3;
+/// How far ahead (metres) a walk test gathers what it may step on at once: every step scans it.
+const SWEPT_SPAN: f32 = 4.0;
 /// A walk this near its end (metres) is there: the float error of its last step.
 const TOUCHING: f32 = 0.01;
 /// How fast a body steps off a ledge (m/s): the phase-2 follower's pace at a drop.
@@ -82,7 +84,7 @@ pub struct Ground<'a> {
     pub doorways: &'a [Vec3],
 }
 
-impl Ground<'_> {
+impl<'a> Ground<'a> {
     /// The surface a capsule with its feet at `p` stands on: the highest
     /// interior floor within step range, else the higher of an outdoor
     /// floor and the terrain (the rule `Player::update` walks by).
@@ -216,15 +218,16 @@ impl Ground<'_> {
         {
             return (None, None);
         }
-        let swept = Swept::over(self, a.pos, b.pos, cap);
-        let one_way = |p: &NavNode, q: &NavNode| {
+        let mut swept = Swept::over(self, a.pos, b.pos, cap);
+        let mut one_way = |p: &NavNode, q: &NavNode| {
             matches!(
-                self.stride_over(&swept, p.pos, p.cell, q.pos, BODY_ARRIVE, cap),
+                self.stride_over(&mut swept, p.pos, p.cell, q.pos, BODY_ARRIVE, cap),
                 Reach::Reached { .. }
             )
             .then(|| walk_kind(p.cell, q.cell))
         };
-        (one_way(a, b), one_way(b, a))
+        let there = one_way(a, b);
+        (there, one_way(b, a))
     }
 
     /// Whether a route's leg from `a` to `b` (feet, each with its cell) is walked: the chest line
@@ -288,13 +291,22 @@ impl Ground<'_> {
     /// Where the body's own step ([`stride`]) carries it from `a` (feet, in `cell`) toward `b`, a
     /// fifth of a metre at a time and always closing on it, until `within` of `b` on its floor.
     pub fn stride_toward(&self, a: Vec3, cell: u32, b: Vec3, within: f32, cap: &Capsule) -> Reach {
-        self.stride_over(&Swept::over(self, a, b, cap), a, cell, b, within, cap)
+        let near = a + (b - a).clamp_length_max(SWEPT_SPAN);
+        self.stride_over(
+            &mut Swept::over(self, a, near, cap),
+            a,
+            cell,
+            b,
+            within,
+            cap,
+        )
     }
 
-    /// [`stride_toward`](Self::stride_toward) stepping on `u`.
-    fn stride_over(
-        &self,
-        u: &Swept,
+    /// [`stride_toward`](Self::stride_toward) stepping on `u`, gathered again [`SWEPT_SPAN`] on
+    /// whenever a step leaves it: the same steps, each scanning only what lies near it.
+    fn stride_over<'g>(
+        &'g self,
+        u: &mut Swept<'g, 'a>,
         a: Vec3,
         cell: u32,
         b: Vec3,
@@ -315,12 +327,16 @@ impl Ground<'_> {
             }
             let d = flat(b - p);
             let step = d.normalize() * d.length().min(BODY_STEP);
-            let (next, next_cell) =
-                match stride(u, p, cell, Vec3::new(p.x + step.x, p.y + step.y, p.z), cap) {
-                    Stride::Stand { at, cell } => (at, cell),
-                    Stride::Falls { at } => return Reach::Falls { at },
-                    Stride::Blocked | Stride::Adrift { .. } => return Reach::Stopped,
-                };
+            let to = Vec3::new(p.x + step.x, p.y + step.y, p.z);
+            if !u.covers(p, to, cap) {
+                let ahead = Vec3::new(b.x, b.y, p.z) - p;
+                *u = Swept::over(self, p, p + ahead.clamp_length_max(SWEPT_SPAN), cap);
+            }
+            let (next, next_cell) = match stride(&*u, p, cell, to, cap) {
+                Stride::Stand { at, cell } => (at, cell),
+                Stride::Falls { at } => return Reach::Falls { at },
+                Stride::Blocked | Stride::Adrift { .. } => return Reach::Stopped,
+            };
             // A step that closes little is sliding along a wall the hop runs into.
             let now_left = flat(b - next).length();
             if now_left > left - BODY_STEP * BODY_CLOSING {
@@ -531,12 +547,24 @@ impl<'g, 'a> Swept<'g, 'a> {
         flat(p).cmpge(flat(self.lo)).all() && flat(p).cmple(flat(self.hi)).all()
     }
 
-    /// Whether a walking step from `from` to `to` can meet nothing that pushes or hangs over:
-    /// within a radius of its line, from a step down under its feet to a step and a height over.
-    fn is_clear(&self, from: Vec3, to: Vec3, cap: &Capsule) -> bool {
+    /// The box a walking step from `from` to `to` may meet anything in: within a radius of its
+    /// line, from a step down under its feet to a step and a height over.
+    fn step_box(from: Vec3, to: Vec3, cap: &Capsule) -> (Vec3, Vec3) {
         let m = cap.radius + 0.05;
         let lo = from.min(to) - Vec3::new(m, m, cap.step_down + 0.05);
         let hi = from.max(to) + Vec3::new(m, m, cap.step_up + cap.height + 0.05);
+        (lo, hi)
+    }
+
+    /// Whether the step from `from` to `to` lies inside what was gathered, so its fast answer holds.
+    fn covers(&self, from: Vec3, to: Vec3, cap: &Capsule) -> bool {
+        let (lo, hi) = Self::step_box(from, to, cap);
+        lo.cmpge(self.lo).all() && hi.cmple(self.hi).all()
+    }
+
+    /// Whether a walking step from `from` to `to` can meet nothing that pushes or hangs over.
+    fn is_clear(&self, from: Vec3, to: Vec3, cap: &Capsule) -> bool {
+        let (lo, hi) = Self::step_box(from, to, cap);
         lo.cmpge(self.lo).all()
             && hi.cmple(self.hi).all()
             && !self
