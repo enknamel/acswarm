@@ -202,3 +202,34 @@ fn a_refused_server_walk_is_let_go_at_once() {
     assert_eq!(c.move_to, None, "the server walk is let go");
     assert_eq!(c.server_walk_refused, Some(guid));
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_scripts_walk_is_its_own_and_its_stop_ends_only_that() {
+    let mut c = at_holtburg();
+    let me = c.my_position().expect("standing");
+    let there = me + Vec3::new(10.0, 0.0, 0.0);
+    assert!(c.go_to(Owner::Script, there, 1.0).acting());
+    assert_eq!(c.going.as_ref().map(|g| g.owner), Some(Owner::Script));
+    c.stop_going(Some(Owner::Hand), "not the script's");
+    assert!(
+        c.going.is_some(),
+        "another owner's stop ended the script's walk"
+    );
+    c.stop_going(Some(Owner::Script), "walk_stop");
+    assert!(c.going.is_none());
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_journey_set_off_frees_the_slot_for_its_leg() {
+    // A script's walk arrived is kept in the slot until let go; a journey asked for takes the slot.
+    let mut c = at_holtburg();
+    let me = c.my_position().expect("standing");
+    assert_eq!(c.go_to(Owner::Script, me, 1.0), Did::Done);
+    assert!(c.travel_to(me.truncate() + glam::Vec2::new(150.0, 0.0)));
+    assert!(c.going.is_none(), "the arrived walk held the journey back");
+    let leg = c.walk_leg(Instant::now());
+    assert!(leg.as_ref().is_some_and(Did::fine), "{leg:?}");
+    assert_eq!(c.going.as_ref().map(|g| g.owner), Some(Owner::Journey));
+}

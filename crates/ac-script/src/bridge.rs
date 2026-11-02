@@ -1341,6 +1341,7 @@ impl Api for CtxApi<'_, '_> {
     }
 
     fn walk_to(&mut self, x: f64, y: f64, z: f64, stop: f64) -> bool {
+        use ac_client::{did::Did, Owner};
         let target = glam::Vec3::new(x as f32, y as f32, z as f32);
         let stop = if stop > 0.0 { stop as f32 } else { 0.5 };
         // Through the travel system, like everything else. Setting the
@@ -1348,11 +1349,18 @@ impl Api for CtxApi<'_, '_> {
         // move that ignored portals, recalls and whether the way was
         // possible at all -- which also made every test written with it
         // prove nothing about what the character actually does.
-        self.client().head_for(target, stop, "there").fine()
+        let c = self.client();
+        // A walk another owner took is asked for again at once, as the script asked last.
+        match c.go_to(Owner::Script, target, stop) {
+            Did::Waiting(_) => c.go_to(Owner::Script, target, stop),
+            did => did,
+        }
+        .fine()
     }
 
     fn walk_stop(&mut self) {
-        self.client().stop_going(None, "walk_stop");
+        self.client()
+            .stop_going(Some(ac_client::Owner::Script), "walk_stop");
     }
 
     fn burden(&mut self) -> Map {

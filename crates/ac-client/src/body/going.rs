@@ -310,6 +310,21 @@ impl Client {
         self.autoplay.running.map_or(Owner::Hand, Owner::Step)
     }
 
+    /// [`Client::go`] for `owner` to within `within` of the point `at`, on the frame's clock: the
+    /// point named by its block ([`Client::place_at`]) once, then kept while it is the same walk.
+    pub fn go_to(&mut self, owner: Owner, at: Vec3, within: f32) -> Did {
+        let held = self
+            .going
+            .as_ref()
+            .filter(|g| g.owner == owner)
+            .and_then(|g| g.goal.place());
+        let place = match held {
+            Some(p) if p.at.distance(at) <= REPLAN_DISTANCE => Place { at, ..p },
+            _ => self.place_at(at),
+        };
+        self.go(owner, Goal::At { place, within }, self.frame_at)
+    }
+
     /// End a step's walk its row did not ask for this tick (end of `tick_autoplay`).
     pub(crate) fn settle_going(&mut self) {
         let tick = self.autoplay.tick;
@@ -346,7 +361,7 @@ impl Client {
 
     /// The place at `at` as a walk names it by its block: indoors, the block stood in when `at`
     /// lies within its cells' bounds (a dungeon's run past its block's square), else the one under it.
-    pub(crate) fn place_at(&self, at: Vec3) -> Place {
+    pub fn place_at(&self, at: Vec3) -> Place {
         let inside = self
             .player
             .as_ref()
