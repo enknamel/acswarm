@@ -31,7 +31,8 @@ use serde::{Deserialize, Serialize};
 pub use ac_world::academy::{skip_steps, steps, Kind, Step, LANDBLOCK};
 
 use crate::autoplay::{Doing, Release};
-use crate::Client;
+use crate::did::Did;
+use crate::{Client, Goal};
 
 /// The settings.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -75,10 +76,6 @@ const SPEECH_SETTLE: Duration = Duration::from_millis(1500);
 const RIDE_WAIT: Duration = Duration::from_secs(15);
 /// After an agent's first line, its later lines are given this long.
 const MORE_LINES: Duration = Duration::from_secs(3);
-/// No progress on a walk for this long counts as stuck.
-const STUCK_AFTER: Duration = Duration::from_secs(15);
-/// Movement below this is not progress.
-const PROGRESS: f32 = 0.5;
 /// How often a portal is stepped into again.
 const PORTAL_RETRY: Duration = Duration::from_secs(5);
 /// Corpses this near are emptied while hunting.
@@ -214,9 +211,7 @@ pub struct State {
     tries: u32,
     /// A key was used on the door; the door is opened next.
     unlocked: bool,
-    /// Where the walk last made progress, and when.
-    progress: Option<(Vec3, Instant)>,
-    /// The walk is not getting anywhere: act from here.
+    /// The step's walk was refused (`State::walk_refused`): act from here.
     stuck: bool,
     /// Where the character was last tick, for the teleport check.
     last_pos: Option<Vec3>,
@@ -279,7 +274,6 @@ impl State {
         self.first_line = None;
         self.tries = 0;
         self.unlocked = false;
-        self.progress = None;
         self.stuck = false;
     }
 
@@ -325,24 +319,21 @@ impl State {
                 .any(|h| h.text.to_lowercase().contains(&phrase.to_lowercase()))
     }
 
-    /// Walk toward `target`: `None` once within `stop` of it (or stuck
-    /// and told to act from here), else the approach to make.
+    /// The walk of the step's last [`Action::Approach`] was refused (no way, or given up): the
+    /// step acts from where the character stands.
+    pub fn walk_refused(&mut self) {
+        if !self.stuck {
+            tracing::info!("academy: no walk there, acting from here");
+        }
+        self.stuck = true;
+    }
+
+    /// Walk toward `target`: `None` once within `stop` of it (or its walk refused, to act from
+    /// here), else the approach to make.
     fn approach(&mut self, v: &View, target: Vec3, stop: f32, status: String) -> Option<Action> {
         let flat = glam::Vec2::new(target.x - v.pos.x, target.y - v.pos.y).length();
         if flat <= stop || self.stuck {
             return None;
-        }
-        match self.progress {
-            Some((p, since)) if p.distance(v.pos) < PROGRESS => {
-                if v.now.duration_since(since) >= STUCK_AFTER {
-                    tracing::info!(
-                        "academy: stuck {flat:.0} m short of the goal, acting from here"
-                    );
-                    self.stuck = true;
-                    return None;
-                }
-            }
-            _ => self.progress = Some((v.pos, v.now)),
         }
         Some(Action::Approach {
             target,
@@ -871,10 +862,8 @@ impl Client {
         };
         let action = self.autoplay.academy.step(&view, cfg.skip);
         // A walk goal belongs to the step that set it.
-        if !matches!(action, Action::Approach { .. } | Action::Hunt { .. })
-            && self.going.take().is_some()
-        {
-            self.steering.reset();
+        if !matches!(action, Action::Approach { .. } | Action::Hunt { .. }) {
+            self.stop_going(Some(self.step_owner()), "the academy step acts");
         }
         let progress = self.autoplay.academy.progress();
         match action {
@@ -901,7 +890,14 @@ impl Client {
                 status,
             } => {
                 self.academy_leave_fight();
-                self.head_for(target, stop, "the way on");
+                let goal = Goal::At {
+                    place: self.place_at(target),
+                    within: stop,
+                };
+                if let Did::Blocked(why) = self.go(self.step_owner(), goal, now) {
+                    tracing::info!("academy: {status}: {}", why.what);
+                    self.autoplay.academy.walk_refused();
+                }
                 self.autoplay
                     .say(Doing::Training, format!("{progress}: {status}"));
                 true
@@ -1184,14 +1180,21 @@ impl Client {
         }
         // Nothing to fight: to the spot, then wait for them to appear.
         let flat = glam::Vec2::new(centre.x - pos.x, centre.y - pos.y).length();
-        if flat > REACH {
-            self.head_for(centre, REACH, name);
+        let goal = Goal::At {
+            place: self.place_at(centre),
+            within: REACH,
+        };
+        let walking = if flat > REACH {
+            // No walk there: they are waited for where the character stands.
+            !matches!(self.go(self.step_owner(), goal, now), Did::Blocked(_))
+        } else {
+            self.stop_going(Some(self.step_owner()), "at the hunt");
+            false
+        };
+        if walking {
             self.autoplay
                 .say(Doing::Training, format!("{progress}: going after {name}"));
         } else {
-            if self.going.take().is_some() {
-                self.steering.reset();
-            }
             self.autoplay.say(
                 Doing::Training,
                 format!("{progress}: waiting for {name} to appear"),
@@ -1657,7 +1660,7 @@ mod tests {
     }
 
     #[test]
-    fn a_stuck_walk_acts_from_where_it_is() {
+    fn a_refused_walk_acts_from_where_it_stands() {
         let t0 = Instant::now();
         let mut st = State::default();
         let samuel = npc("Samuel", Vec3::new(21.9, -30.6, 0.0));
@@ -1669,8 +1672,8 @@ mod tests {
         let v = view(t0, here, &objs, &[]);
         st.step(&v, false); // give skipped
         assert!(matches!(st.step(&v, false), Action::Approach { .. }));
-        // Not a step of progress for a good while: use him from here.
-        let v = view(t0 + STUCK_AFTER + Duration::from_secs(1), here, &objs, &[]);
+        // The walk is refused: use him from here.
+        st.walk_refused();
         assert_eq!(st.step(&v, false), Action::Use(samuel.guid));
     }
 }
