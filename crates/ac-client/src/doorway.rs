@@ -218,7 +218,7 @@ impl Client {
         };
         self.dodge.approaching = Some(target);
         if spot.distance(me) <= AT_SPOT {
-            self.follow = None;
+            self.going = None;
             self.autoplay.say(
                 Doing::Fighting,
                 format!("waiting for {name} to come out of the doorway"),

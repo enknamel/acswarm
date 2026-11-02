@@ -92,7 +92,7 @@ impl Client {
         }
         let level = !leader.flying || (leader.world.z - me.z).abs() < 2.0;
         if flat <= keep && level {
-            if self.follow.take().is_some() {
+            if self.going.take().is_some() {
                 self.steering.reset();
             }
             self.autoplay.follow_walk = None;
@@ -116,7 +116,7 @@ impl Client {
             self.head_for(leader.world, keep, "the leader");
             // What a stop takes back, while it is still this walk (see
             // `Client::stop_following`).
-            let planted = self.follow.is_some_and(|f| f.target == leader.world);
+            let planted = self.going.as_ref().is_some_and(|g| g.is_to(leader.world));
             self.autoplay.follow_walk = planted.then_some(leader.world);
         } else {
             // Out of sight (through a portal, say): a journey there,
@@ -124,7 +124,7 @@ impl Client {
             // somewhere a journey cannot end -- inside the Town Network
             // hub, or a dungeon -- in another landblock: it will come
             // out, and its last position outside is followed meanwhile.
-            self.follow = None;
+            self.going = None;
             self.autoplay.follow_walk = None;
             let indoors = leader.cell & 0xFFFF >= 0x100;
             let my_block = self.player.as_ref().map(|p| p.landblock());
@@ -160,12 +160,12 @@ impl Client {
     }
 
     /// Let go of the walk and the journey following planted, each only while it is still following's
-    /// (`Client.follow` is shared with looting, visits and town runs); what others planted stays.
+    /// (`Client.going` is shared with looting, visits and town runs); what others planted stays.
     pub(crate) fn stop_following(&mut self) {
         let mut let_go = false;
         if let Some(at) = self.autoplay.follow_walk.take() {
-            if self.follow.is_some_and(|f| f.target == at) {
-                self.follow = None;
+            if self.going.as_ref().is_some_and(|g| g.is_to(at)) {
+                self.going = None;
                 self.steering.reset();
                 let_go = true;
             }

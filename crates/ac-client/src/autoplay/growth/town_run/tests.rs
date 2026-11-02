@@ -23,7 +23,7 @@ fn a_town_run_between_journeys_is_not_taken_exploring_or_back_to_the_area() {
     c.autoplay.growth.run = Some(run_to(renald, now));
     assert!(!c.traveling());
     assert!(!c.autoplay_explore(now), "went exploring on a run to town");
-    assert!(c.follow.is_none());
+    assert!(c.going.is_none());
     // With no run, the same dungeon is explored.
     c.autoplay.growth.run = None;
     assert!(c.autoplay_explore(now));
@@ -45,7 +45,7 @@ fn a_town_run_between_journeys_is_not_taken_exploring_or_back_to_the_area() {
         !c.autoplay_keep_to_area(now),
         "walked back to the area on a run to town"
     );
-    assert!(c.follow.is_none());
+    assert!(c.going.is_none());
     // With no run, outside the field, it goes back to it.
     c.autoplay.growth.run = None;
     assert!(c.autoplay_keep_to_area(now));

@@ -143,7 +143,7 @@ impl Client {
     /// running would carry the character off to a body it has already
     /// finished with.
     pub(crate) fn stop_walking_to_loot(&mut self) {
-        if self.autoplay.walking_to.take().is_some() && self.follow.take().is_some() {
+        if self.autoplay.walking_to.take().is_some() && self.going.take().is_some() {
             self.steering.reset();
         }
     }

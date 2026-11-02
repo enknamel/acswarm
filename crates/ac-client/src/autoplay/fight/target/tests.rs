@@ -473,7 +473,7 @@ fn past_the_break_catching_up_still_comes_before_fighting_back() {
     c.tick_autoplay(Instant::now());
     assert_eq!(c.autoplay.step, Some("catch up"));
     assert_eq!(c.attack_target, None);
-    assert!(c.follow.is_some(), "not on its way back to the leader");
+    assert!(c.going.is_some(), "not on its way back to the leader");
 }
 
 #[test]

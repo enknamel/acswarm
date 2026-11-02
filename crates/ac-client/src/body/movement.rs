@@ -2,16 +2,7 @@ use ac_nav::routing::{NoWay, Planned};
 use ac_world::Place;
 use glam::{Vec2, Vec3};
 
-use crate::travel::WALKABLE;
 use crate::{player, Client};
-
-/// Where a follower is heading and how close it stops (see
-/// `Client::follow`).
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Follow {
-    pub target: glam::Vec3,
-    pub stop: f32,
-}
 
 /// How far above or below a goal still counts as standing at it.
 ///
@@ -40,16 +31,6 @@ impl Client {
         };
         let cap = pl.capsule();
         self.pathfinder.plan(me, to, within, cap)
-    }
-
-    /// Walk to within `stop` of `goal` along a planned route (the follow slot, set): `Blocked` while
-    /// the steering's refusal stands for it, so a no way reaches the caller and is never pushed.
-    pub(crate) fn walk_toward(&mut self, goal: Vec3, stop: f32) -> crate::did::Did {
-        self.follow = Some(Follow { target: goal, stop });
-        match self.steering.unreachable(goal) {
-            Some(why) => crate::did::Did::blocked(format!("no way there: {why:?}")),
-            None => crate::did::Did::Acting,
-        }
     }
 
     /// Where the character can stand within `radius` (metres, flat) of `around`, by the region
@@ -91,12 +72,10 @@ impl Client {
         floors.into_iter().find(|f| f.1 == cell).map(|f| f.0)
     }
 
-    /// Let go of the walk (`head_for`) and the journey under way, saying `why`.
+    /// Let go of the walk in the slot and the journey under way, saying `why`.
     pub(crate) fn drop_walk(&mut self, why: &str) {
-        let walking = self.follow.take().is_some();
-        if walking {
-            self.steering.reset();
-        }
+        let walking = self.going.is_some();
+        self.stop_going(None, why);
         let journey = self.traveling() || self.travel_goal_xy().is_some();
         if journey {
             self.end_trip();
@@ -107,16 +86,14 @@ impl Client {
         }
     }
 
-    /// A walk's goal further off than a walk goes ([`WALKABLE`]) was left behind by a teleport, a
-    /// recall or a portal: walked at, it was a dungeon spot 34 km from the Holtburg lifestone
-    /// (test: a_walk_left_behind_by_a_recall_is_let_go).
+    /// A walk whose goal a teleport, recall or portal left out of the region is let go: walked at,
+    /// it was a dungeon spot 34 km from the Holtburg lifestone (a_walk_left_behind_by_a_recall_is_let_go).
     pub(crate) fn drop_stale_walk(&mut self) {
-        let (Some(f), Some(me)) = (self.follow, self.my_position()) else {
+        let Some(place) = self.going.as_ref().and_then(|g| g.goal.place()) else {
             return;
         };
-        if Vec2::new(f.target.x - me.x, f.target.y - me.y).length() > WALKABLE {
-            self.follow = None;
-            self.steering.reset();
+        if self.player.is_some() && !self.is_in_region(place) {
+            self.stop_going(None, "left out of the region");
             tracing::info!("travel: the walk's goal was left behind; letting go of it");
         }
     }

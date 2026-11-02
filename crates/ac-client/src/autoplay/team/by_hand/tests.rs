@@ -55,10 +55,10 @@ fn played_by_hand(away: f32) -> Client {
 #[test]
 fn a_character_played_by_hand_still_follows_its_leader() {
     let mut c = played_by_hand(30.0);
-    assert!(c.follow.is_none(), "nothing to walk to yet");
+    assert!(c.going.is_none(), "nothing to walk to yet");
     c.tick_autoplay(Instant::now());
     assert!(
-        c.follow.is_some(),
+        c.going.is_some(),
         "following needs no autoplay: the player asked for a leader, not for the rules"
     );
     assert_eq!(c.autoplay.doing, Doing::Following);
@@ -115,7 +115,7 @@ fn following_is_off_with_the_team_off_or_the_following_off() {
             _ => c.autoplay.config.team.follow = false,
         }
         c.tick_autoplay(Instant::now());
-        assert!(c.follow.is_none(), "{off} off and it walked anyway");
+        assert!(c.going.is_none(), "{off} off and it walked anyway");
         assert!(c.autoplay.status.is_empty(), "{off} off and it said things");
     }
 }
@@ -127,7 +127,7 @@ fn with_everything_off_it_does_nothing_at_all() {
     c.autoplay.config.team.follow = false;
     c.autoplay.config.team.focus_fire = false;
     assert_eq!(tick(&mut c), 0, "something went to the server");
-    assert!(c.follow.is_none());
+    assert!(c.going.is_none());
     assert_eq!(c.attack_target, None);
     assert_eq!(c.autoplay.doing, Doing::Idle);
     assert!(c.autoplay.status.is_empty());
@@ -250,7 +250,7 @@ fn no_errand_of_its_own_is_started_while_the_player_plays() {
     );
     assert!(!c.traveling(), "it set off somewhere of its own");
     assert_eq!(c.autoplay.step, None, "a step of the table claimed a tick");
-    assert!(c.follow.is_some(), "and yet it did keep up with its leader");
+    assert!(c.going.is_some(), "and yet it did keep up with its leader");
     // The control: the same character, the same moment, the rules on.
     // The table had a row worth running all along, so the count above is
     // worth something.
@@ -288,7 +288,7 @@ fn its_player_keeps_the_legs_and_the_hands() {
     assert!(c.hunting_ground().is_none(), "it chose a hunting ground");
     assert!(!c.traveling(), "it set off somewhere of its own");
     assert_eq!(c.autoplay.step, None, "a step of the table claimed a tick");
-    assert!(c.follow.is_some(), "and yet it did keep up with its leader");
+    assert!(c.going.is_some(), "and yet it did keep up with its leader");
     // The same character with the rules on: they were live all along and
     // had plenty to do, which is what the count above is worth.
     c.autoplay.config.enabled = true;

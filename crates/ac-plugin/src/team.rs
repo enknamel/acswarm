@@ -250,7 +250,7 @@ impl Request {
             Request::Stop => {
                 cfg.enabled = false;
                 client.let_go(Release::Stop);
-                client.follow = None;
+                client.stop_going(None, "stopped");
                 if client.traveling() || client.visiting().is_some() {
                     client.cancel_travel();
                 }

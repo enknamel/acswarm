@@ -237,81 +237,48 @@ impl Client {
         Some((self.travel.grid.clone()?, self.travel.region.clone()?))
     }
 
-    /// Go there. The one way anything asks for movement.
-    ///
-    /// Everything that wants a character to be somewhere else says so
-    /// here, and this decides *how*: a walk the steering can find its
-    /// own way through, or a journey of portals, recalls and gems. The
-    /// caller names a place and is told what came of it; it does not
-    /// choose the means, and it does not touch `follow`.
-    ///
-    /// There used to be three ways to ask -- a server-driven walk, a
-    /// journey, and a raw point handed straight to the steering -- and
-    /// nine places that took the third. Each behaved differently when
-    /// the way was blocked, so a fault fixed in one was still there in
-    /// the others: a character was taught not to walk into a wall on
-    /// its way to a corpse and went on doing it on its way to a shop.
-    ///
-    /// Within a landblock this is a walk: the steering knows how to get
-    /// round what is in the way, and a goal it cannot reach it now
-    /// refuses rather than leans on. Beyond one -- or out of a dungeon,
-    /// where the feet lead nowhere at all -- it is a journey, planned
-    /// with whatever the character can cast or carry.
-    ///
-    /// Asking for movement this way ends any visit being made
-    /// (`visit`): whoever asks has taken the character somewhere else.
-    ///
-    /// A walk near at hand ends the journey under way too, but it does not
-    /// break the journey off: following a leader, exploring, going back to
-    /// the hunting area are somewhere else to be, not a detour to come back
-    /// from. What does come back (a corpse, a fight, a use) says so with
-    /// `interrupt_travel`. Counting every walk as
-    /// a break-off had a follower on a party's town run pulled back to its
-    /// leader, its walk to the counter planned again, and pulled back
-    /// again, each time it closed to the following distance.
+    /// Walk to within `stop` of `goal` for the step running ([`Client::go`]); `why` names the goal
+    /// to a visit it ends. Its callers read arrival themselves until each moves to `go`.
     pub fn head_for(&mut self, goal: glam::Vec3, stop: f32, why: &str) -> crate::did::Did {
         self.drop_visit(why);
-        self.head_toward(goal, stop, why)
+        let owner = self.step_owner();
+        self.head_as(owner, goal, stop)
     }
 
-    /// [`head_for`](Self::head_for) for a visit's own last stretch: the
-    /// same walk or journey, without ending the visit that asked for it.
-    pub(crate) fn head_toward(
-        &mut self,
-        goal: glam::Vec3,
-        stop: f32,
-        why: &str,
-    ) -> crate::did::Did {
+    /// [`head_for`](Self::head_for) for a visit's own last stretch, which it does not end.
+    pub(crate) fn head_toward(&mut self, goal: glam::Vec3, stop: f32) -> crate::did::Did {
+        self.head_as(crate::Owner::Visit, goal, stop)
+    }
+
+    /// `go` to the place at `goal`, walking on through a walk taken and an arrival, as head_for did.
+    fn head_as(&mut self, owner: crate::Owner, goal: glam::Vec3, stop: f32) -> crate::did::Did {
         use crate::did::Did;
-        let Some(me) = self.my_position() else {
-            return Did::waiting("not in the world yet");
-        };
-        let away = Vec2::new(goal.x - me.x, goal.y - me.y).length();
-        // Near enough to walk to.
-        //
-        // Being underground does not make the rest of the dungeon
-        // unwalkable -- a monster across the room is a walk like any
-        // other, and ruling that out left a character unable to reach
-        // anything it was fighting. It is only the way *out* that the
-        // feet cannot manage, and that needs no special case here: a
-        // dungeon keeps its own corner of the world, tens of thousands
-        // of metres from the town above it, so anywhere outside is far
-        // past `WALKABLE` and goes to the planner anyway.
-        if away <= WALKABLE {
-            if self.traveling() {
-                self.end_trip();
+        // The walk's own place while it is the same walk: its cell is found once.
+        let held = self
+            .going
+            .as_ref()
+            .filter(|g| g.owner == owner)
+            .and_then(|g| g.goal.place());
+        let place = match held {
+            Some(p) if p.at.distance(goal) <= ac_nav::steering::REPLAN_DISTANCE => {
+                ac_world::Place { at: goal, ..p }
             }
-            return self.walk_toward(goal, stop);
+            _ => self.place_at(goal),
+        };
+        let goal = crate::Goal::At {
+            place,
+            within: stop,
+        };
+        let now = self.frame_at;
+        let did = match self.go(owner, goal, now) {
+            Did::Waiting(_) => self.go(owner, goal, now),
+            did => did,
+        };
+        if did == Did::Done {
+            Did::Acting
+        } else {
+            did
         }
-        // Already on the way there.
-        if self.traveling() {
-            return Did::Acting;
-        }
-        if self.plan_trip(Vec2::new(goal.x, goal.y)) {
-            return Did::Acting;
-        }
-        tracing::info!("travel: no way to {why} from here");
-        Did::blocked("no way there from here")
     }
 
     /// Plan a journey from where the character stands to `goal` (world
@@ -919,9 +886,9 @@ impl Client {
     /// does nothing.
     pub fn stop_moving_by_itself(&mut self) {
         let was_busy =
-            self.travel.trip.is_some() || self.follow.is_some() || self.visits.current.is_some();
+            self.travel.trip.is_some() || self.going.is_some() || self.visits.current.is_some();
         self.cancel_travel();
-        if self.follow.take().is_some() {
+        if self.going.take().is_some() {
             self.steering.reset();
         }
         self.autoplay.growth.let_go();
@@ -1722,39 +1689,48 @@ mod tests {
         c.autoplay.config.enabled = true;
         c.tick_autoplay(now);
         let me = c.my_position().unwrap();
-        let walk = crate::Follow {
-            target: me + Vec3::new(10.0, 0.0, 0.0),
-            stop: 1.0,
+        let walk = crate::Goal::At {
+            place: c.place_at(me + Vec3::new(10.0, 0.0, 0.0)),
+            within: 1.0,
         };
-        c.follow = Some(walk);
+        c.go(crate::Owner::Script, walk, now);
         c.autoplay.config.enabled = false;
         c.tick_autoplay(now);
-        assert!(c.follow.is_none(), "walked on with autoplay off");
+        assert!(c.going.is_none(), "walked on with autoplay off");
         // A walk set with it off is the player's or a script's, and stays.
-        c.follow = Some(walk);
+        c.go(crate::Owner::Script, walk, now);
         c.tick_autoplay(now);
-        assert_eq!(c.follow, Some(walk));
+        assert_eq!(c.going.map(|g| g.goal), Some(walk));
     }
 
     #[test]
     fn a_walk_left_behind_by_a_recall_is_let_go() {
+        let now = Instant::now();
         let mut c = crate::testkit::offline_client();
         crate::testkit::stand(&mut c, 0xA9B4_0019, Vec3::new(84.0, 84.0, 94.0));
         let me = c.my_position().unwrap();
-        let near = crate::Follow {
-            target: me + Vec3::new(30.0, 0.0, 0.0),
-            stop: 1.0,
+        let near = crate::Goal::At {
+            place: c.place_at(me + Vec3::new(30.0, 0.0, 0.0)),
+            within: 1.0,
         };
-        c.follow = Some(near);
+        c.go(crate::Owner::Hand, near, now);
         c.drop_stale_walk();
-        assert_eq!(c.follow, Some(near), "a walk in reach is kept");
+        assert_eq!(
+            c.going.as_ref().map(|g| g.goal),
+            Some(near),
+            "a walk in reach is kept"
+        );
         // The dungeon spot the recall left behind, 34 km from the Holtburg lifestone.
-        c.follow = Some(crate::Follow {
-            target: Vec3::new(264.5, 47182.0, 0.1),
-            stop: 1.0,
-        });
+        let walk = c.going.as_mut().expect("walking");
+        walk.goal = crate::Goal::At {
+            place: ac_world::Place {
+                at: Vec3::new(264.5, 47182.0, 0.1),
+                cell: 0x01F6_0000,
+            },
+            within: 1.0,
+        };
         c.drop_stale_walk();
-        assert!(c.follow.is_none());
+        assert!(c.going.is_none());
     }
 
     #[test]

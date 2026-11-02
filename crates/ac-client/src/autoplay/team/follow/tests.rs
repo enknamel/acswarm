@@ -61,8 +61,10 @@ fn ticks(c: &mut Client, now: Instant, n: u32) -> Instant {
 /// Whether the character still makes for `at`: a walk there, or a journey there under way.
 fn makes_for(c: &Client, at: Vec2) -> bool {
     let walk = c
-        .follow
-        .is_some_and(|f| f.target.truncate().distance(at) < 0.5);
+        .going
+        .as_ref()
+        .and_then(|g| g.goal.place())
+        .is_some_and(|p| p.at.truncate().distance(at) < 0.5);
     let trip = c.traveling() && c.travel_goal_xy().is_some_and(|g| g.distance(at) < 0.5);
     walk || trip
 }
@@ -76,7 +78,7 @@ fn stopping_following_ends_the_walk_after_the_leader() {
     assert!(makes_for(&c, at), "it never set off after its leader");
     c.autoplay.config.team.follow = false;
     ticks(&mut c, now, 5);
-    assert!(c.follow.is_none(), "it walked on after it was stopped");
+    assert!(c.going.is_none(), "it walked on after it was stopped");
     assert!(!c.traveling());
 }
 
@@ -121,7 +123,7 @@ fn a_stop_leaves_no_old_aim_behind_when_a_fight_broke_the_journey_off() {
     c.autoplay.config.team.follow = false;
     let t = ticks(&mut c, t, 1);
     assert!(
-        c.follow.is_none() && !c.traveling(),
+        c.going.is_none() && !c.traveling(),
         "it went on after the stop"
     );
     ticks(&mut c, t, 20);
@@ -129,7 +131,7 @@ fn a_stop_leaves_no_old_aim_behind_when_a_fight_broke_the_journey_off() {
         !makes_for(&c, first),
         "it set off for where the leader had been"
     );
-    assert!(c.follow.is_none() && !c.traveling());
+    assert!(c.going.is_none() && !c.traveling());
 }
 
 #[test]
@@ -196,7 +198,7 @@ fn a_walk_another_goal_planted_after_following_outlives_the_stop() {
     c.tick_autoplay(now + Duration::from_millis(100));
     assert_eq!(c.autoplay.follow_walk, None, "the record outlived the stop");
     assert!(
-        c.follow.is_some_and(|f| f.target == corpse),
+        c.going.as_ref().is_some_and(|g| g.is_to(corpse)),
         "the stop took the walk to the corpse"
     );
 }
@@ -284,7 +286,7 @@ fn a_follower_does_not_walk_back_into_its_area_away_from_its_leader() {
     c.autoplay.team.mates[0].world = me + Vec3::new(2.0, 0.0, 0.0);
     ticks(&mut c, now, 3);
     assert!(
-        c.follow.is_none() && !c.traveling(),
+        c.going.is_none() && !c.traveling(),
         "it walked off to its area"
     );
 }
@@ -450,7 +452,7 @@ fn a_follower_in_a_dungeon_keeps_to_its_leader_rather_than_exploring() {
     ticks(&mut c, now, 3);
     assert_ne!(c.autoplay.step, Some("explore"));
     assert!(
-        c.follow.is_none() && !c.traveling(),
+        c.going.is_none() && !c.traveling(),
         "it walked off to a room"
     );
 }

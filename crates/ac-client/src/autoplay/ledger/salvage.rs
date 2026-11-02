@@ -509,8 +509,10 @@ impl Client {
         }
         if distance > GIVE_REACH {
             if self
-                .follow
-                .is_none_or(|f| f.target.distance(mate.world) > 1.0)
+                .going
+                .as_ref()
+                .and_then(|g| g.goal.place())
+                .is_none_or(|p| p.at.distance(mate.world) > 1.0)
             {
                 self.interrupt_travel("taking salvage to the salvager");
                 self.steering.reset();
@@ -520,7 +522,7 @@ impl Client {
                 .say(Doing::Salvaging, format!("taking salvage to {who}"));
             return true;
         }
-        if self.follow.take().is_some() {
+        if self.going.take().is_some() {
             self.steering.reset();
         }
         if !rate_ok {

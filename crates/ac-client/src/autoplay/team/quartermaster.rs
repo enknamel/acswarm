@@ -368,7 +368,7 @@ impl Client {
         };
         if glam::Vec2::new(spot.x - me.x, spot.y - me.y).length() <= Self::REACH {
             self.autoplay.reaching = None;
-            if self.follow.take().is_some() {
+            if self.going.take().is_some() {
                 self.steering.reset();
             }
             return true;

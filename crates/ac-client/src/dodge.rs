@@ -959,7 +959,7 @@ impl Client {
     /// Done closing on a target: the walk it set is taken back.
     fn stop_approaching(&mut self) {
         if self.dodge.approaching.take().is_some() {
-            self.follow = None;
+            self.going = None;
             self.steering.reset();
         }
     }
@@ -2222,6 +2222,6 @@ mod tests {
             !c.autoplay_approach(drudge.guid, "Drudge Servant", how),
             "the shot is thrown, not held for"
         );
-        assert!(c.follow.is_none(), "and no walk is left standing");
+        assert!(c.going.is_none(), "and no walk is left standing");
     }
 }

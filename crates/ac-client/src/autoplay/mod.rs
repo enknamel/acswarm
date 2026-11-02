@@ -493,12 +493,16 @@ pub struct Autoplay {
     /// Where the journey after a far-off leader was bound, to plan
     /// again once it has moved on.
     follow_trip: Option<glam::Vec2>,
-    /// Where following last aimed `Client.follow`: a stop clears that walk only while it aims here.
+    /// Where following last aimed `Client.going`: a stop clears that walk only while it aims here.
     follow_walk: Option<glam::Vec3>,
     /// Whether a leader was followed last tick, so the tick following begins is known.
     followed: bool,
     /// Whether autoplay was on last tick, so the tick it is switched off is known.
     was_on: bool,
+    /// The STEPS row running now, the owner of any walk it asks for (`Client::step_owner`).
+    pub(crate) running: Option<&'static str>,
+    /// Calls of `tick_autoplay`: a step's walk not asked for on this one ends with it.
+    pub(crate) tick: u64,
     /// No journey after the leader is planned before this: planning
     /// costs a search, and one that found no way is not tried again for
     /// a while.
@@ -551,6 +555,14 @@ impl Client {
     /// Run the rules for this moment. Call it once a frame; it does at
     /// most one thing.
     pub fn tick_autoplay(&mut self, now: Instant) {
+        self.autoplay.tick += 1;
+        self.frame_at = now;
+        self.run_steps(now);
+        self.settle_going();
+    }
+
+    /// The rules of one tick (see [`tick_autoplay`](Self::tick_autoplay)).
+    fn run_steps(&mut self, now: Instant) {
         // Whatever ended the following -- a switch, a front end, the board -- and autoplay on or off:
         // the switches only flip, and this is where the way after the leader is let go.
         let planted = self.autoplay.follow_walk.is_some()
@@ -632,7 +644,9 @@ impl Client {
         // order the table does not say. Nothing is weighed against a
         // spell already in the air.
         for step in crate::steps::reflexes() {
+            self.autoplay.running = Some(step.name);
             let did = step.run(self, now);
+            self.autoplay.running = None;
             if did.acting() {
                 self.autoplay.step = Some(step.name);
                 return;
@@ -645,7 +659,9 @@ impl Client {
         // the next fight (see `crate::steps`).
         let mut goals = crate::steps::weigh(self, now);
         while let Some((step, _)) = goals.next(self, now) {
+            self.autoplay.running = Some(step.name);
             let did = step.run(self, now);
+            self.autoplay.running = None;
             if did.acting() {
                 self.autoplay.step = Some(step.name);
                 return;

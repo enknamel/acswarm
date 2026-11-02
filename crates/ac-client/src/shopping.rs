@@ -202,7 +202,7 @@ impl Client {
                 did.fine()
             }
             Act::Open { guid } => {
-                if self.follow.take().is_some() {
+                if self.going.take().is_some() {
                     self.steering.reset();
                 }
                 self.use_object(*guid);

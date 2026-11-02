@@ -33,7 +33,7 @@ const LONG_FILES: &[(&str, usize, &str)] = &[
     ),
     (
         "crates/ac-client/src/travel.rs",
-        1_800,
+        1_700,
         "one journey end to end: trip, route, steering and the legs handed between them",
     ),
     (

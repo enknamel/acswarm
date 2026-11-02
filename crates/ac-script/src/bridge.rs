@@ -437,7 +437,7 @@ impl Api for CtxApi<'_, '_> {
         let c = self.client();
         c.autoplay.config.team.follow = on;
         if !on {
-            c.follow = None;
+            c.stop_going(None, "follow off");
         }
         on
     }
@@ -1352,9 +1352,7 @@ impl Api for CtxApi<'_, '_> {
     }
 
     fn walk_stop(&mut self) {
-        let c = self.client();
-        c.follow = None;
-        c.steering.reset();
+        self.client().stop_going(None, "walk_stop");
     }
 
     fn burden(&mut self) -> Map {

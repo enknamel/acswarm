@@ -85,7 +85,11 @@ fn a_target_in_a_doorway_is_waited_for_out_of_it() {
         spot.distance(door) >= PULL_BACK - 0.01,
         "back from it: {spot:?}"
     );
-    assert_eq!(c.follow.map(|f| f.target), Some(spot), "walking there");
+    assert_eq!(
+        c.going.as_ref().and_then(|g| g.goal.place()).map(|p| p.at),
+        Some(spot),
+        "walking there"
+    );
     // Come through to our side, it is shot at.
     let me = c.my_position().unwrap();
     let out = me + Vec3::new(-2.0, 0.0, 0.0) - ac_world::landblock_origin(0x01F6_01FA);
@@ -157,7 +161,12 @@ fn a_caster_in_a_doorway_steps_out_into_the_target_s_room() {
         c.autoplay_approach(it, "Shore Armoredillo", how),
         "thrown from the frame"
     );
-    let to = c.follow.map(|f| f.target).expect("walking out of it");
+    let to = c
+        .going
+        .as_ref()
+        .and_then(|g| g.goal.place())
+        .map(|p| p.at)
+        .expect("walking out of it");
     assert!(
         past_the_0286_door(to) > DOORWAY_DEPTH,
         "into its room: {to:?}"
@@ -171,7 +180,12 @@ fn a_spot_to_throw_from_is_out_of_the_doorway() {
     let (mut c, spell, it) = in_the_0286_doorway(-96.25, -94.45);
     let how = How::Spell(spell);
     assert!(c.autoplay_approach(it, "Shore Armoredillo", how));
-    let to = c.follow.map(|f| f.target).expect("walking");
+    let to = c
+        .going
+        .as_ref()
+        .and_then(|g| g.goal.place())
+        .map(|p| p.at)
+        .expect("walking");
     assert!(
         past_the_0286_door(to).abs() > DOORWAY_DEPTH,
         "beside the frame: {:.2} m from the door",

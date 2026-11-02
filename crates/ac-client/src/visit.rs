@@ -38,7 +38,7 @@ use ac_world::WorldObject;
 use glam::Vec3;
 
 use crate::travel::WALKABLE;
-use crate::{Client, Follow, SAME_FLOOR};
+use crate::{Client, Owner, SAME_FLOOR};
 
 /// Within this far of the person (metres, in three dimensions) and on
 /// their floor, the use is sent. Inside the server's own reach for
@@ -365,9 +365,9 @@ impl Client {
     /// visit that is gone would keep pulling the character along with
     /// nothing to show for it and no Cancel to stop it.
     fn let_go_of(&mut self, v: &Visit) {
-        let ours = v.walking.map(|target| Follow { target, stop: STOP });
-        if ours.is_some() && self.follow == ours {
-            self.follow = None;
+        let ours = v.walking.is_some();
+        if ours && self.going.as_ref().is_some_and(|g| g.owner == Owner::Visit) {
+            self.going = None;
             self.steering.reset();
         }
     }
@@ -427,8 +427,8 @@ impl Client {
                 return;
             }
             Next::Walk => {
-                let ours = v.walking.map(|target| Follow { target, stop: STOP });
-                if ours.is_some() && self.follow.is_some() && self.follow != ours {
+                let theirs = self.going.as_ref().is_some_and(|g| g.owner != Owner::Visit);
+                if v.walking.is_some() && theirs {
                     tracing::info!("visit: {} dropped: something else is steering", v.label);
                     return;
                 }
@@ -436,8 +436,8 @@ impl Client {
                 // spell's way lets go of the walk) or when the person
                 // has moved.
                 let moved = v.walking.is_none_or(|w| w.distance(v.goal) > 0.5);
-                if self.follow.is_none() || moved {
-                    let did = self.head_toward(v.goal, STOP, &v.label);
+                if self.going.is_none() || moved {
+                    let did = self.head_toward(v.goal, STOP);
                     if !did.fine() {
                         tracing::warn!("visit: cannot walk to {}", v.label);
                         self.let_go_of(&v);

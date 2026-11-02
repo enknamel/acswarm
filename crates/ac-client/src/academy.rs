@@ -872,7 +872,7 @@ impl Client {
         let action = self.autoplay.academy.step(&view, cfg.skip);
         // A walk goal belongs to the step that set it.
         if !matches!(action, Action::Approach { .. } | Action::Hunt { .. })
-            && self.follow.take().is_some()
+            && self.going.take().is_some()
         {
             self.steering.reset();
         }
@@ -1148,7 +1148,7 @@ impl Client {
                 let (guid, cname) = (c.guid, c.name.clone());
                 self.academy_peace();
                 self.let_go(Release::Engagement);
-                if self.follow.take().is_some() {
+                if self.going.take().is_some() {
                     self.steering.reset();
                 }
                 self.interact(guid);
@@ -1189,7 +1189,7 @@ impl Client {
             self.autoplay
                 .say(Doing::Training, format!("{progress}: going after {name}"));
         } else {
-            if self.follow.take().is_some() {
+            if self.going.take().is_some() {
                 self.steering.reset();
             }
             self.autoplay.say(
