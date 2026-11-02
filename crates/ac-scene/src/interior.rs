@@ -5,7 +5,8 @@ use ac_formats::gfxobj::{CullMode, Polygon};
 use ac_formats::landblock::{env_cell_flags, EnvCell};
 use ac_formats::surface::SurfaceBase;
 use glam::{Mat4, Vec3};
-use std::rc::Rc;
+use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::lighting::{cell_lights, CellLight};
 use crate::model::{
@@ -254,8 +255,8 @@ struct IndexedCell {
     hi: Vec3,
     /// World space to cell space.
     inverse: Mat4,
-    environment: Rc<ac_formats::environment::Environment>,
-    structure: u16,
+    /// The cell structure's own BSP, shared by every cell of that structure.
+    bsp: Arc<ac_formats::gfxobj::BspNode>,
     /// The cell's id.
     id: u32,
     /// A body can be in it: not an overlay no portal leads into (`collision::is_walked_into`).
@@ -267,6 +268,7 @@ impl CellIndex {
     /// environments are already in the asset cache.
     pub fn build(assets: &Assets, scene: &crate::landblock::LandblockScene) -> CellIndex {
         let mut cells = Vec::with_capacity(scene.cells.len());
+        let mut bsps: HashMap<(u32, u16), Arc<ac_formats::gfxobj::BspNode>> = HashMap::new();
         let entered: std::collections::HashSet<u32> = scene
             .cells
             .iter()
@@ -296,8 +298,10 @@ impl CellIndex {
                 lo,
                 hi,
                 inverse: c.transform.inverse(),
-                environment: env,
-                structure: c.cell_structure,
+                bsp: bsps
+                    .entry((c.environment_id, c.cell_structure))
+                    .or_insert_with(|| Arc::new(cs.cell_bsp.clone()))
+                    .clone(),
                 id: c.cell_id,
                 walked: crate::collision::is_walked_into(c, &entered),
             });
@@ -350,11 +354,7 @@ impl CellIndex {
         self.cells.iter().filter(move |c| {
             near && p.cmpge(c.lo).all()
                 && p.cmple(c.hi).all()
-                && c.environment
-                    .cells
-                    .iter()
-                    .find(|(k, _)| *k == c.structure as u32)
-                    .is_some_and(|(_, s)| s.cell_bsp.contains_point(c.inverse.transform_point3(p)))
+                && c.bsp.contains_point(c.inverse.transform_point3(p))
         })
     }
 }
