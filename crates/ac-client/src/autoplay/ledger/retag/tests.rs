@@ -143,3 +143,104 @@ fn what_an_item_was_taken_for_is_written_down() {
     assert_eq!(ap.tags().get(&ring.guid), Some(&LootAction::Salvage));
     assert_eq!(Doing::Salvaging.label(), "salvaging");
 }
+
+/// A quest wanting ten Piles of Gearknight Parts (timed, so ten and no more), the only quest on.
+const PARTS_QUEST: &str = "gearknightpartscollectionwait_0513";
+const PARTS: u32 = 51266;
+
+/// A character carrying `piles` single Piles of Gearknight Parts, its profile the quest rule
+/// above "the rest, sold", with only [`PARTS_QUEST`] switched on.
+fn carrying_parts(piles: u32) -> Client {
+    let mut c = character_of_level(crate::testkit::no_data(), 20);
+    c.world.stats.name = "Bryn".into();
+    let library = shelf(
+        "quest-retag",
+        vec![
+            crate::profile::quest_rule(),
+            asks("the rest", "value>=0", LootAction::Sell),
+        ],
+    );
+    c.profiles = std::sync::Arc::new(library);
+    c.autoplay.config.loot.profile = "test".into();
+    c.autoplay.config.quests.on = true;
+    c.autoplay.config.quests.off = ac_world::quests::all()
+        .iter()
+        .map(|r| r.id.clone())
+        .filter(|id| id != PARTS_QUEST)
+        .collect();
+    c.autoplay.config.quests.off.dedup();
+    let me = c.world.player_guid.unwrap();
+    for i in 0..piles {
+        let guid = 0x8000_0100 + i;
+        let pile = ac_world::WorldObject {
+            guid,
+            name: "Pile of Gearknight Parts".into(),
+            weenie_class_id: PARTS,
+            item_type: ac_world::item_type::MISC,
+            stack_size: 1,
+            container: Some(me),
+            ..Default::default()
+        };
+        c.world.objects.insert(guid, pile);
+    }
+    c
+}
+
+/// Each carried pile's tag and the rule that wrote it, oldest first.
+fn tags_of(c: &Client) -> Vec<(Option<LootAction>, Option<String>)> {
+    let mut guids: Vec<u32> = c.world.inventory().map(|o| o.guid).collect();
+    guids.sort_unstable();
+    guids
+        .into_iter()
+        .map(|g| {
+            let stats = c.stats_of(g).unwrap();
+            (
+                c.autoplay.ledger.of(&stats),
+                c.autoplay.ledger.why(g).map(str::to_string),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn the_quest_rule_keeps_what_the_quest_needs_and_the_rest_goes_to_the_rules_below() {
+    let mut c = carrying_parts(12);
+    let t0 = Instant::now();
+    c.tick_retag(t0);
+    assert!(
+        tags_of(&c).iter().all(|(a, _)| a.is_none()),
+        "no board yet, nothing judged"
+    );
+    c.refresh_quests(t0);
+    c.tick_retag(t0);
+    assert_eq!(
+        c.quest_wants,
+        [ac_loot::QuestWant {
+            wcid: PARTS,
+            need: Some(10)
+        }]
+    );
+    let keep = (Some(LootAction::Keep), Some("quest items".to_string()));
+    let sell = (Some(LootAction::Sell), Some("the rest".to_string()));
+    let tags = tags_of(&c);
+    assert_eq!(
+        tags[..10],
+        vec![keep; 10][..],
+        "the first ten, in arrival order"
+    );
+    assert_eq!(
+        tags[10..],
+        vec![sell.clone(); 2][..],
+        "enough carried: the rest are sold"
+    );
+    assert_eq!(c.wielder().quest_wants, c.quest_wants);
+
+    // Switched off, the quest wants nothing, and its items fall to the rules below.
+    c.autoplay.config.quests.off.push(PARTS_QUEST.into());
+    let t1 = t0 + crate::quest_log::QUEST_BOARD_EVERY;
+    c.refresh_quests(t1);
+    c.tick_retag(t1);
+    assert!(c.quest_wants.is_empty());
+    assert_eq!(tags_of(&c), vec![sell; 12]);
+    let _ = std::fs::remove_dir_all(c.profiles.dir());
+}

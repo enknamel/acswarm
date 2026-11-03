@@ -122,6 +122,8 @@ impl Client {
             quest_board_at: None,
             quest_board_for: None,
             quests_unsuited: Default::default(),
+            quest_wants: Vec::new(),
+            quest_wants_at: None,
             quest_asked: None,
             combat: false,
             magic: false,

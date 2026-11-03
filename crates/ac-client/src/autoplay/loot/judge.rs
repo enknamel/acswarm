@@ -14,6 +14,8 @@ pub enum Calling {
     /// (see [`best_salvager`]). Everyone has Salvaging, so a salvage rule
     /// asks about it without saying so.
     Salvage,
+    /// The rule keeps what an active quest wants: it is for a taker whose quests want it.
+    Quest,
 }
 
 /// One rule's claim on a thing for one character (see [`claim_on`]).
@@ -34,8 +36,9 @@ pub struct Claim {
 /// Read as [`judge_loot`] reads it, the player's never and always lists
 /// first. What those lists take is nobody's in particular, nor is what a
 /// rule takes that asks nothing of the character. A salvage rule calls for
-/// the salvager while the salvager salvages (`Looting::salvage`); any other
-/// rule that asks about a skill calls for the best at the first it names.
+/// the salvager while the salvager salvages (`Looting::salvage`); a quest
+/// rule calls for one whose quests want it; any other rule that asks about a
+/// skill calls for the best at the first it names.
 pub fn claim_on(
     stats: &crate::items::ItemStats,
     id: Option<&ac_net::messages::Appraisal>,
@@ -59,6 +62,8 @@ pub fn claim_on(
     }
     let calling = if rule.action == LootAction::Salvage && profile.looting.salvage {
         Some(Calling::Salvage)
+    } else if rule.all.contains(&crate::profile::Ask::Quest) {
+        Some(Calling::Quest)
     } else {
         rule.skill_asked().map(Calling::Skill)
     };
@@ -140,6 +145,10 @@ pub fn called_to(
                     .cmp(&b.sheet.skill(skill))
                     .then_with(|| b.name.cmp(a.name))
             })
+            .map(|t| t.guid),
+        // Only a taker whose quests want it claims it under the quest rule; ties by name.
+        Calling::Quest => claimed_for
+            .min_by(|a, b| a.name.cmp(b.name))
             .map(|t| t.guid),
     }
 }
@@ -234,7 +243,7 @@ pub fn judge_loot(
 }
 
 /// The rule that sells, salvages or skips a quest's item ahead of the quest rule, as the looting
-/// would judge it (design §3.3), or `None` while the rules keep it. Seam: the loot builder fills it.
+/// would judge it (design §3.3), or `None` while the rules keep it, or with no profile to read.
 pub fn quest_item_blocked(
     profile: Option<&crate::profile::Profile>,
     item: &ac_world::quests::Item,
@@ -242,9 +251,34 @@ pub fn quest_item_blocked(
     my_name: &str,
     held: u32,
 ) -> Option<(String, LootAction)> {
-    let _ = (profile, item, me, my_name, held);
-    None
+    use crate::profile::Verdict;
+    let profile = profile?;
+    // Appraised with no appraisal: a rule that needs one cannot claim what nobody has seen.
+    let stats = crate::items::ItemStats {
+        wcid: item.wcid,
+        name: item.name.clone(),
+        item_type: item.item_type,
+        kind: crate::items::kind_name(item.item_type),
+        value: item.value,
+        stack: 1,
+        appraised: true,
+        ..Default::default()
+    };
+    // Judged as the quest wanting one more, whatever the last board said it wanted.
+    let mut me = me.clone();
+    me.quest_wants.push(ac_loot::QuestWant {
+        wcid: item.wcid,
+        need: None,
+    });
+    match judge_loot(&stats, None, Some(profile), &me, my_name, held) {
+        Verdict::Decided(LootAction::Keep, _) => None,
+        Verdict::Decided(does, rule) => Some((rule, does)),
+        Verdict::NeedsId(_) | Verdict::None => Some((NO_RULE_KEEPS.into(), LootAction::Skip)),
+    }
 }
+
+/// What the cross-check names when no rule claims a quest's item.
+pub(crate) const NO_RULE_KEEPS: &str = "no rule keeps it";
 
 /// Why a worn item a salvage rule claimed is kept instead.
 pub(crate) const WORN: &str = "worn, so never salvaged";

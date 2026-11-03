@@ -51,7 +51,9 @@ stop is a `Place` with its cell, so a giver in a dungeon is as reachable as a co
 
 1. `quests.csv` bundled; the quest list and states shown (no behaviour change). Built: data on
    `quests`, the states, the Quests section and the kill count on `quests-list`.
-2. The rule condition, the default rule, the profile cross-check.
+2. The rule condition, the default rule, the profile cross-check. Built (branch `quests-loot`):
+   `Ask::Quest`, the starter's "quest items" rule first, the wants re-judging the pack, the
+   cross-check naming the blocking rule, a mate's wants calling a body's item to it.
 3. Kill and talk quests: the reward in the ground picker; the giver as a stop.
 4. Item turn-ins and the errand run with many stops.
 

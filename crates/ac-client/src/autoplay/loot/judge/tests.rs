@@ -257,7 +257,7 @@ fn nobody_is_sent_anything_when_no_rule_asks_about_a_skill_and_nobody_salvages()
         );
     }
     // Nor under the starter while its salvager does not salvage, but for its kits, kept only by
-    // a character trained in Healing.
+    // a character trained in Healing, and its quest items, kept by one whose quests want them.
     let mut starter = crate::profile::Profile::starter();
     starter.looting.salvage = false;
     assert!(
@@ -265,6 +265,10 @@ fn nobody_is_sent_anything_when_no_rule_asks_about_a_skill_and_nobody_salvages()
         "kits go to whoever heals with them"
     );
     starter.rules.retain(|r| r.skill_asked().is_none());
+    assert!(starter.sends_to_the_best(), "quest items go to the quester");
+    starter
+        .rules
+        .retain(|r| !r.all.contains(&crate::profile::Ask::Quest));
     assert!(!starter.sends_to_the_best());
 }
 
@@ -293,4 +297,132 @@ fn a_worn_item_a_salvage_rule_claims_is_kept() {
         Verdict::Decided(LootAction::Keep, super::WORN.into())
     );
     let _ = std::fs::remove_dir_all(library.dir());
+}
+
+/// A Red Rat Tail as quests.csv has it.
+fn red_rat_tail() -> ac_world::quests::Item {
+    ac_world::quests::rows_of("give:3684")
+        .find_map(|r| r.item.clone())
+        .expect("the Collectors' row names its item")
+}
+
+fn profile_of(rules: Vec<crate::profile::Rule>) -> crate::profile::Profile {
+    crate::profile::Profile {
+        rules,
+        ..Default::default()
+    }
+}
+
+#[test]
+fn the_cross_check_names_the_rule_above_the_quest_rule_that_would_lose_a_quest_item() {
+    let cheap = asks("nothing cheap", "value<=250", LootAction::Skip);
+    let quest = crate::profile::quest_rule();
+    let me = crate::weapons::Wielder::default();
+    let check =
+        |p: &crate::profile::Profile| quest_item_blocked(Some(p), &red_rat_tail(), &me, "Bryn", 0);
+    assert_eq!(check(&profile_of(vec![quest.clone(), cheap.clone()])), None);
+    assert_eq!(
+        check(&profile_of(vec![cheap.clone(), quest.clone()])),
+        Some(("nothing cheap".into(), LootAction::Skip))
+    );
+    let sell = asks("tails to sell", "tail", LootAction::Sell);
+    assert_eq!(
+        check(&profile_of(vec![sell, quest.clone()])),
+        Some(("tails to sell".into(), LootAction::Sell))
+    );
+    // A mule whose saved profile predates the rule: nothing claims a trophy worth 2.
+    let mule = profile_of(vec![asks("the rest", "value>=1000", LootAction::Sell)]);
+    assert_eq!(check(&mule), Some((NO_RULE_KEEPS.into(), LootAction::Skip)));
+    let mut never = profile_of(vec![quest.clone()]);
+    never.looting.never = vec!["Red Rat".into()];
+    assert_eq!(
+        check(&never),
+        Some(("never take these".into(), LootAction::Skip))
+    );
+    // Any keeping rule above it keeps the tail just as well.
+    let keep = asks("tails", "tail", LootAction::Keep);
+    assert_eq!(check(&profile_of(vec![keep, cheap])), None);
+    assert_eq!(
+        quest_item_blocked(None, &red_rat_tail(), &me, "Bryn", 0),
+        None
+    );
+}
+
+#[test]
+fn the_board_says_a_quest_wont_complete_and_names_the_rule() {
+    use crate::quest_log::{quest_board, QuestFacts, QuestState};
+    let rows: Vec<_> = ac_world::quests::rows_of("give:3684").cloned().collect();
+    let cheap = asks("nothing cheap", "value<=250", LootAction::Skip);
+    let mut facts = QuestFacts {
+        level: 20,
+        config: crate::autoplay::Quests {
+            on: true,
+            off: Vec::new(),
+        },
+        profile: Some(std::sync::Arc::new(profile_of(vec![
+            cheap.clone(),
+            crate::profile::quest_rule(),
+        ]))),
+        ..QuestFacts::default()
+    };
+    let state = |f: &QuestFacts| quest_board(&rows, f)[0].state.clone();
+    assert_eq!(
+        state(&facts),
+        QuestState::WontComplete {
+            rule: "nothing cheap".into(),
+            does: LootAction::Skip
+        }
+    );
+    // Still wanted while blocked, so the line can name the rule and the rule may be moved.
+    assert_eq!(
+        crate::quest_log::quest_wants(&quest_board(&rows, &facts)).len(),
+        1
+    );
+    facts.profile = Some(std::sync::Arc::new(profile_of(vec![
+        crate::profile::quest_rule(),
+        cheap,
+    ])));
+    assert!(matches!(state(&facts), QuestState::Needs { more: 1, .. }));
+}
+
+#[test]
+fn a_tail_on_a_body_is_called_to_the_one_whose_quest_wants_it() {
+    let profile = crate::profile::Profile::starter();
+    let tail = ItemStats {
+        wcid: 3684,
+        item_type: ac_world::item_type::MISC,
+        kind: "misc",
+        ..item("Red Rat Tail", 2, 0)
+    };
+    let idle = crate::weapons::Wielder::default();
+    let questing = crate::weapons::Wielder {
+        quest_wants: vec![ac_loot::QuestWant {
+            wcid: 3684,
+            need: None,
+        }],
+        ..Default::default()
+    };
+    let taker = |guid, name, sheet| Taker {
+        guid,
+        name,
+        sheet,
+        held: 0,
+    };
+    // The opener has no quest for it; the mate has, so the body's tail is the mate's.
+    let takers = [taker(1, "Bryn01", &idle), taker(2, "Bryn02", &questing)];
+    assert_eq!(called_to(&tail, None, &profile, &takers, None), Some(2));
+    let both = [taker(1, "Bryn01", &questing), taker(2, "Bryn02", &questing)];
+    assert_eq!(
+        called_to(&tail, None, &profile, &both, None),
+        Some(1),
+        "ties by name"
+    );
+    let neither = [taker(1, "Bryn01", &idle), taker(2, "Bryn02", &idle)];
+    assert_eq!(called_to(&tail, None, &profile, &neither, None), None);
+    // What a mate says of itself carries its wants to the judging.
+    let mate = crate::autoplay::Mate {
+        quest_wants: questing.quest_wants.clone(),
+        ..Default::default()
+    };
+    assert_eq!(mate.wielder().quest_wants, questing.quest_wants);
 }
