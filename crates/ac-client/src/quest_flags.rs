@@ -115,7 +115,8 @@ impl Client {
         ok
     }
 
-    fn quest_flags_path(&self) -> Option<std::path::PathBuf> {
+    /// This character's file `<name><suffix>` under `quests/<host>/`, beside the loot profiles.
+    pub(crate) fn quest_file(&self, suffix: &str) -> Option<std::path::PathBuf> {
         let name = self.world.stats.name.trim();
         if name.is_empty() {
             return None;
@@ -125,8 +126,12 @@ impl Client {
             beside
                 .join("quests")
                 .join(ac_store::file_safe(&self.config.host))
-                .join(format!("{}.json", ac_store::file_safe(name))),
+                .join(format!("{}{suffix}", ac_store::file_safe(name))),
         )
+    }
+
+    fn quest_flags_path(&self) -> Option<std::path::PathBuf> {
+        self.quest_file(".json")
     }
 
     /// Read back the flags earned in earlier sessions, at login.

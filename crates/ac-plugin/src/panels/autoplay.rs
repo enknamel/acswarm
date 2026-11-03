@@ -871,6 +871,7 @@ impl Autoplay {
             },
             growth: Default::default(),
             academy: Default::default(),
+            quests: Default::default(),
         };
         // What the three searches would take out of the demo pack.
         Autoplay {

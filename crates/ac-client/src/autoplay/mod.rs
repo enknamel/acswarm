@@ -61,7 +61,7 @@ mod tidy;
 mod vitals;
 
 pub use cast::cast_problem;
-pub use config::{Buffs, Config, Fight, Loot, Role, Style, Survive, Team};
+pub use config::{Buffs, Config, Fight, Loot, Quests, Role, Style, Survive, Team};
 #[cfg(any(test, feature = "testkit"))]
 pub(crate) use fight::critter::CREATURE_LEVEL;
 pub use fight::critter::{critter, Critter, Hint, Seen};
@@ -76,7 +76,8 @@ pub use ledger::salvage::best_salvager;
 use loot::choose::answered_with_nothing;
 pub(crate) use loot::choose::{CORPSE_LIFE, CORPSE_REACH, CORPSE_URGENT};
 pub use loot::judge::{
-    called_to, claim_on, judge_loot, skills_asked_of, Calling, Claim, Left, Taker,
+    called_to, claim_on, judge_loot, quest_item_blocked, skills_asked_of, Calling, Claim, Left,
+    Taker,
 };
 use loot::owed::{corpse_within_reach, killed_by_us, whose_to_ask, Whose, KILL_SPOT};
 pub(crate) use loot::room::Room;

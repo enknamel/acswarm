@@ -107,6 +107,7 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 | summoning | `autoplay_summon`, `autoplay_claim_pet_kills`, `hear_summoning` | `autoplay/summoning.rs`, `autoplay/mod.rs` | `Autoplay.summoning` | summon | autoplay::summoning | summon, pet |
 | refusals | `hear_refusal`, `refused`, `answer` | `refused.rs`, `crates/ac-agent/src/refusals.rs` | the waiting system's own wait, e.g. `Autoplay.shelved` | refus | refused | refusal |
 | server chat | `chat_message`, `hear_arrival`, `hear_spell_attack` | `session/chat.rs`, `autoplay/hear.rs` | `Autoplay.hit_by` | arriv | session::chat | heard |
+| quests | `refresh_quests`, `quest_board`, `quest_wants`, `visit_giver` | `quest_log.rs`, `crates/ac-world/src/quests.rs` | `Client.quest_board`, `Client.quest_log`, `Autoplay.config.quests` | quest_log | quest_log | quest |
 
 ## Glossary
 
@@ -133,6 +134,7 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 | refusal | the server's no, by weenie error or in words | error, rejection |
 | plan, order | the leader's plan for the party, and one character's part in it | - |
 | assist | hit what the leader is hitting, picking nothing | help, support |
+| quest, giver, hand_in | a quest in `ac_world::quests`, its rows sharing an id; the NPC who rewards it; giving it the items, or talking, for the reward | task, npc, turn-in |
 
 ## Domain rules
 
@@ -185,16 +187,14 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 | `profile.rs`, `weapons.rs`, `daytime.rs`, `augmentations.rs` | shims re-exporting `ac_loot::profile` and `ac_loot::weapons`; Dereth's time of day; augmentation gems |
 | `holdings.rs` | every character's inventory snapshots, for the Items window |
 | `reconnect.rs`, `logoff.rs` | whether and when a dropped session logs back in; logging every session off on exit |
-| `options.rs`, `emotes.rs` | character option bits; soul emotes |
+| `options.rs`, `emotes.rs`, `position.rs` | character option bits; soul emotes; `my_position()`: the character's world position |
 | `tally.rs` | what the character did lately, for telemetry: this frame's walk (`WalkFrame`), blows traded (`Blows`), supplies short (`SupplyLine`) |
 | `advance.rs` | experience costs and raise messages |
-| `recalls.rs`, `quest_flags.rs` | recall spells the journey planner can use; the portal quest flags it may plan through, earned by talking to whoever stamps one |
+| `recalls.rs`, `quest_flags.rs`, `quest_log.rs` | recall spells the journey planner can use; the portal quest flags it may plan through, earned by talking to whoever stamps one; each character's quest log |
 | `shopping.rs` | reads the pack into `ac_vendor`'s snapshot and carries out its act |
 | `aim.rs` | whether a projectile clears walls and hills on the way to its target |
 | `logistics.rs` | the party's mode (hunting or restocking) and money sharing, the same on every session |
-| `buffs.rs` | which buffs a character should wear, from its skills and spells |
-| `hunt.rs` | hunting areas drawn on the map |
-| `position.rs` | `my_position()`: the character's world position |
+| `buffs.rs`, `hunt.rs` | which buffs a character should wear, from its skills and spells; hunting areas drawn on the map |
 | `testkit.rs`, `walk_trial.rs` | test-only: `Client::offline` sessions over `no_data()` or `game_data()`, `standing_at()`, `creature()`, `corpse()`, `mate()` builders; the route harness (`walk_trial::run`, `tests/route_harness.rs`) |
 
 Unit tests sit in each file's `mod tests`; those reading the archives are ignored (`cargo test-data`).

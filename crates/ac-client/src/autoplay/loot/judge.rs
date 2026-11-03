@@ -233,6 +233,19 @@ pub fn judge_loot(
     }
 }
 
+/// The rule that sells, salvages or skips a quest's item ahead of the quest rule, as the looting
+/// would judge it (design §3.3), or `None` while the rules keep it. Seam: the loot builder fills it.
+pub fn quest_item_blocked(
+    profile: Option<&crate::profile::Profile>,
+    item: &ac_world::quests::Item,
+    me: &crate::weapons::Wielder,
+    my_name: &str,
+    held: u32,
+) -> Option<(String, LootAction)> {
+    let _ = (profile, item, me, my_name, held);
+    None
+}
+
 /// Why a worn item a salvage rule claimed is kept instead.
 pub(crate) const WORN: &str = "worn, so never salvaged";
 

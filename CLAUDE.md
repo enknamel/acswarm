@@ -48,7 +48,7 @@ dir gives false compile errors); check `df -g /` first, stop below 15 GB free, d
 | ac-world | object table and character sheet built from server messages; world data (shops, spawns, portals, trips, quests) | `World::apply` | formats, net |
 | ac-agent | vocabulary every system shares: outcomes and retry, weenie errors, refusals in words, pack arithmetic | `did::Did`, `did::Patience`, `refusals::refused` | - |
 | ac-nav | getting somewhere: one planner's whole walks (`routing::plan`), the follower of a planned route, objects in the way, dungeon doorways; answers `Aim::NoWay` instead of walking at a wall | `Steering`, `routing::plan`, `obstacles::detour` | formats, scene, world |
-| ac-loot | item vocabulary and search language, loot profiles, ledger, emptying a corpse, sale fate, weapon choice | `Profile`, `Run::step`, `Ledger` | agent, net, world |
+| ac-loot | item vocabulary and search language, loot profiles, ledger, emptying a corpse, sale fate, weapon choice, quest wants | `Profile`, `Run::step`, `Ledger` | agent, net, world |
 | ac-vendor | the town run at a counter, decided from a snapshot with no server | `Run::step`, `Snapshot` | agent, loot |
 | ac-client | one headless game session: socket, world, body, manual actions, autoplay | `Client::tick` | agent, formats, loot, nav, net, scene, vendor, world |
 | ac-bus | cross-process bus: JSON lines over loopback TCP, hosted by the first process | `BusServer`, `BusClient` | - |

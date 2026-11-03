@@ -33,3 +33,20 @@ fn config_round_trips_through_json() {
     assert!(before.fight.skip_critters);
     assert!(before.fight.walk_past_on_the_way);
 }
+
+#[test]
+fn a_config_saved_before_quests_loads_with_them_off_and_quests_round_trip() {
+    let old: Config = serde_json::from_str(r#"{"enabled":true,"fight":{"radius":30.0}}"#).unwrap();
+    assert_eq!(old.quests, Quests::default());
+    assert!(
+        !old.quests.is_on("give:3684"),
+        "off until the player ticks it"
+    );
+    let mut c = Config::default();
+    c.quests.on = true;
+    c.quests.off = vec!["killtaskbloodshreth".into()];
+    let back: Config = serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
+    assert_eq!(back.quests, c.quests);
+    assert!(back.quests.is_on("give:3684"));
+    assert!(!back.quests.is_on("killtaskbloodshreth"));
+}

@@ -30,6 +30,7 @@ impl Client {
             self.load_ledger();
             self.load_recall_positions();
             self.load_quest_flags();
+            self.load_quest_log();
         }
         use ac_net::session::{Event, Port};
         let mut chat_pending: Vec<(u32, Vec<u8>)> = Vec::new();
@@ -551,6 +552,8 @@ impl Client {
         // The rules may have changed under the decisions already made.
         // Before the ledger is written out, not after.
         self.tick_retag(now);
+        // Each quest's state, for the panel and the rules that read it; it sends nothing.
+        self.refresh_quests(now);
         // What each item was taken for, written out when it changes.
         // Not on the way out: the thing this is defending against is a
         // client that does not get a way out.

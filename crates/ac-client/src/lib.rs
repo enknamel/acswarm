@@ -64,6 +64,7 @@ pub mod player;
 pub mod position;
 pub mod profile;
 pub mod quest_flags;
+pub mod quest_log;
 pub mod recalls;
 pub mod reconnect;
 pub mod recovery;
@@ -251,6 +252,13 @@ pub struct Client {
     pub travel: travel::Travel,
     /// Going to see someone, and the last use sent by hand (see `visit`).
     pub visits: visit::Visits,
+    /// What this character did of its quests (see `quest_log`).
+    pub quest_log: quest_log::QuestLog,
+    /// Each quest's state for this character, worked out by `refresh_quests`.
+    pub quest_board: Vec<quest_log::QuestLine>,
+    pub(crate) quest_board_at: Option<Instant>,
+    /// The giver asked last, while its answer is awaited.
+    pub quest_asked: Option<quest_log::Asked>,
     /// Melee combat mode is on.
     pub combat: bool,
     /// Magic combat mode is on.

@@ -1,0 +1,394 @@
+//! Quests from one character's side: its log (kills counted, quests done, waits running), kept
+//! between sessions because the server never sends the registry, and the board of each quest's
+//! state ([`quest_board`]), worked out every [`QUEST_BOARD_EVERY`]. It sends nothing and decides
+//! nothing; docs/quests-design.md's Seams section says which builder fills which part.
+
+use std::collections::BTreeMap;
+use std::time::{Duration, Instant};
+
+use ac_loot::quest_wants::QuestWant;
+use ac_world::quests::{Kind, Repeat, Row, Want};
+use glam::Vec3;
+use serde::{Deserialize, Serialize};
+
+use crate::autoplay::{LootAction, Quests};
+use crate::Client;
+
+/// How often the board is worked out again (design §2.3, guess).
+pub const QUEST_BOARD_EVERY: Duration = Duration::from_secs(2);
+/// A leg this short joins a run without its XP paying for it (seconds, design §5.3, guess).
+pub const SHORT_LEG: f32 = 60.0;
+
+/// One quest done: when last (Unix seconds) and how many times.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Done {
+    pub at: u64,
+    pub times: u32,
+}
+
+/// What this character has done of its quests, as far as the client saw it.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct QuestLog {
+    /// Kills so far, by the counter of a kill task taken up.
+    pub kills: BTreeMap<String, u32>,
+    /// Quests done, by id.
+    pub done: BTreeMap<String, Done>,
+    /// Unix seconds a quest may be done again, by its timer.
+    pub waits: BTreeMap<String, u64>,
+}
+
+impl QuestLog {
+    /// A kill task taken up: its counter starts at nothing (ACE's SetQuestCompletions 0).
+    pub fn note_taken(&mut self, counter: &str) {
+        self.kills.entry(counter.to_string()).or_insert(0);
+    }
+
+    /// The server's count for `counter` ("You have killed 7 ...").
+    pub fn note_kills(&mut self, counter: &str, done: u32) {
+        self.kills.insert(counter.to_string(), done);
+    }
+
+    /// `row` was completed at `now`: its wait starts and a kill counter is forgotten (ACE erased it).
+    pub fn note_done(&mut self, row: &Row, now: u64) {
+        let d = self.done.entry(row.id.clone()).or_default();
+        d.at = now;
+        d.times += 1;
+        if let (Repeat::After(s), false) = (row.repeat, row.timer.is_empty()) {
+            self.waits.insert(row.timer.clone(), now + u64::from(s));
+        }
+        if let Want::Kill(counter) = &row.want {
+            self.kills.remove(counter);
+        }
+    }
+
+    /// The giver said the quest under `timer` may be done again at `until` (Unix seconds).
+    pub fn note_wait(&mut self, timer: &str, until: u64) {
+        self.waits.insert(timer.to_string(), until);
+    }
+
+    /// When a quest kept under `timer` may be done again, if that is after `now`.
+    pub fn wait_until(&self, timer: &str, now: u64) -> Option<u64> {
+        self.waits.get(timer).copied().filter(|&t| t > now)
+    }
+}
+
+/// Why a quest can't be done yet.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Blocked {
+    /// No giver's band holds the character's level.
+    Level { min: u32, max: u32 },
+    /// The easiest source creature is this level, too far above the character's.
+    TooHard { level: u32 },
+    /// Every giver stands behind a portal asking this flag.
+    Locked { flag: String },
+    /// Another quest, not a start talk, stamps what this one needs.
+    NeedsFirst { title: String },
+}
+
+/// Where one quest stands for one character.
+#[derive(Clone, Debug, PartialEq)]
+pub enum QuestState {
+    /// Switched off, or quests off.
+    Off,
+    /// Hand in now: items carried, kills done, or a talk open.
+    Ready,
+    /// `more` to go of `of` (an item or a creature, by name).
+    Needs {
+        more: u32,
+        of: String,
+    },
+    /// Not taken up yet: talk to `from` first.
+    NotTaken {
+        from: String,
+    },
+    /// A loot rule above the quest rule does this to the item.
+    WontComplete {
+        rule: String,
+        does: LootAction,
+    },
+    CantYet(Blocked),
+    /// Done; may be done again at this Unix second.
+    Waiting {
+        until: u64,
+    },
+    /// A once-quest done.
+    Done,
+}
+
+/// One line of the board: a quest and its state for this character.
+#[derive(Clone, Debug, PartialEq)]
+pub struct QuestLine {
+    pub id: String,
+    pub title: String,
+    pub kind: Kind,
+    pub state: QuestState,
+    /// The reward at the character's level.
+    pub xp: u64,
+    /// Giver placements that complete it.
+    pub givers: usize,
+    /// The nearest giver's name, by straight distance.
+    pub giver: String,
+    pub on: bool,
+}
+
+/// What the board is worked out from, so [`quest_board`] runs with no `Client`.
+#[derive(Clone, Debug, Default)]
+pub struct QuestFacts {
+    pub level: u32,
+    /// XP from the character's level to the next (`XpTable::xp_to_next_level`).
+    pub to_next: u64,
+    /// Quest flags held (`Travel::quests_done`).
+    pub held: Vec<String>,
+    pub log: QuestLog,
+    /// Items carried, by weenie class.
+    pub carried: BTreeMap<u32, u32>,
+    /// `Growth::level_margin`.
+    pub margin: u32,
+    pub config: Quests,
+    /// Unix seconds.
+    pub now: u64,
+    /// Where the character stands, for the nearest giver.
+    pub me: Option<Vec3>,
+    pub profile: Option<std::sync::Arc<crate::profile::Profile>>,
+    pub wielder: crate::weapons::Wielder,
+    pub name: String,
+}
+
+/// The state of every quest in `rows`, one line per id, in the data's order.
+pub fn quest_board(rows: &[Row], facts: &QuestFacts) -> Vec<QuestLine> {
+    let mut ids: Vec<&str> = Vec::new();
+    let mut by_id: BTreeMap<&str, Vec<&Row>> = BTreeMap::new();
+    for r in rows {
+        if !by_id.contains_key(r.id.as_str()) {
+            ids.push(&r.id);
+        }
+        by_id.entry(&r.id).or_default().push(r);
+    }
+    ids.into_iter()
+        .filter_map(|id| {
+            let all = &by_id[id];
+            let doing: Vec<&Row> = all
+                .iter()
+                .copied()
+                .filter(|r| r.kind != Kind::Start)
+                .collect();
+            let first = *doing.first()?;
+            let near = |r: &&Row| facts.me.map_or(0.0, |m| r.place.at.distance(m));
+            let giver = doing.iter().min_by(|a, b| near(a).total_cmp(&near(b)))?;
+            let on = facts.config.is_on(id);
+            Some(QuestLine {
+                id: id.to_string(),
+                title: first.title.clone(),
+                kind: first.kind,
+                state: if on {
+                    state_of(all, &doing, facts)
+                } else {
+                    QuestState::Off
+                },
+                xp: doing.iter().map(|r| r.reward.xp_at(facts.to_next)).max()?,
+                givers: doing.len(),
+                giver: giver.giver.clone(),
+                on,
+            })
+        })
+        .collect()
+}
+
+/// One switched-on quest's state. Seam (list builder): `CantYet` and level bands are not read yet.
+fn state_of(all: &[&Row], doing: &[&Row], facts: &QuestFacts) -> QuestState {
+    let first = doing[0];
+    if let Some(until) = facts.log.wait_until(&first.timer, facts.now) {
+        return QuestState::Waiting { until };
+    }
+    if first.repeat == Repeat::Once && facts.log.done.contains_key(&first.id) {
+        return QuestState::Done;
+    }
+    match &first.want {
+        Want::Kill(counter) => match facts.log.kills.get(counter) {
+            None => QuestState::NotTaken {
+                from: all
+                    .iter()
+                    .find(|r| r.kind == Kind::Start)
+                    .map_or_else(|| first.giver.clone(), |r| r.giver.clone()),
+            },
+            Some(&n) if n < first.count => QuestState::Needs {
+                more: first.count - n,
+                of: ac_world::quests::sources_of(&first.want)
+                    .next()
+                    .map_or_else(|| counter.clone(), |s| s.name.clone()),
+            },
+            Some(_) => QuestState::Ready,
+        },
+        Want::Item(wcid) => {
+            let held = facts.carried.get(wcid).copied().unwrap_or(0);
+            let item = first.item.as_ref();
+            let blocked = item.and_then(|i| {
+                crate::autoplay::quest_item_blocked(
+                    facts.profile.as_deref(),
+                    i,
+                    &facts.wielder,
+                    &facts.name,
+                    held,
+                )
+            });
+            let need = doing.iter().map(|r| r.count).min().unwrap_or(1);
+            match blocked {
+                Some((rule, does)) => QuestState::WontComplete { rule, does },
+                None if held >= need => QuestState::Ready,
+                None => QuestState::Needs {
+                    more: need - held,
+                    of: item.map_or_else(String::new, |i| i.name.clone()),
+                },
+            }
+        }
+        Want::Nothing => QuestState::Ready,
+    }
+}
+
+/// What the board's item quests want carried, for the loot rule: a quest ready, needing more,
+/// or blocked by a rule (which may be moved) wants its item; every one when it repeats any time.
+pub fn quest_wants(board: &[QuestLine]) -> Vec<QuestWant> {
+    let mut wants: BTreeMap<u32, Option<u32>> = BTreeMap::new();
+    for line in board {
+        let wanting = matches!(
+            line.state,
+            QuestState::Ready | QuestState::Needs { .. } | QuestState::WontComplete { .. }
+        );
+        if !wanting || line.kind != Kind::Item {
+            continue;
+        }
+        let rows: Vec<&Row> = ac_world::quests::rows_of(&line.id)
+            .filter(|r| r.kind == Kind::Item)
+            .collect();
+        let Some(Want::Item(wcid)) = rows.first().map(|r| r.want.clone()) else {
+            continue;
+        };
+        let need = if rows.iter().any(|r| r.repeat == Repeat::Any) {
+            None
+        } else {
+            rows.iter().map(|r| r.count).max()
+        };
+        let sum = wants.entry(wcid).or_insert(Some(0));
+        *sum = sum.zip(need).map(|(a, b)| a + b);
+    }
+    wants
+        .into_iter()
+        .map(|(wcid, need)| QuestWant { wcid, need })
+        .collect()
+}
+
+/// Whether a call whose detour costs `detour` seconds pays for itself at `xp_per_hour` (design
+/// §5.3's second rule). Unmeasured, it never does: only the short-leg rule applies.
+pub fn worth_detour(xp: u64, detour: f32, xp_per_hour: Option<f32>) -> bool {
+    xp_per_hour.is_some_and(|rate| xp as f32 >= detour.max(0.0) * rate / 3600.0)
+}
+
+/// A giver the client asked, waiting for the answer (design §4.3; the hunt builder reads it).
+#[derive(Clone, Debug)]
+pub struct Asked {
+    pub row: &'static Row,
+    pub at: Instant,
+    /// Total XP when asked: a rise is the reward.
+    pub xp_before: i64,
+}
+
+impl Client {
+    /// The quest ids autoplay considers: quests on, and each not switched off.
+    pub fn quests_on(&self) -> Vec<&'static str> {
+        let cfg = &self.autoplay.config.quests;
+        let mut ids: Vec<&'static str> = Vec::new();
+        for r in ac_world::quests::all() {
+            if r.kind != Kind::Start && cfg.is_on(&r.id) && ids.last() != Some(&r.id.as_str()) {
+                ids.push(&r.id);
+            }
+        }
+        ids
+    }
+
+    /// The board's inputs, as this character stands now.
+    pub fn quest_facts(&self) -> QuestFacts {
+        let stats = &self.world.stats;
+        let level = stats.level.max(0) as u32;
+        let mut carried = BTreeMap::new();
+        for o in self.world.inventory() {
+            *carried.entry(o.weenie_class_id).or_insert(0) += o.stack_size.max(1);
+        }
+        QuestFacts {
+            level,
+            to_next: self
+                .assets
+                .xp_table()
+                .ok()
+                .and_then(|t| t.xp_to_next_level(level))
+                .unwrap_or(0),
+            held: self.travel.quests_done.clone(),
+            log: self.quest_log.clone(),
+            carried,
+            margin: self.autoplay.config.growth.level_margin,
+            config: self.autoplay.config.quests.clone(),
+            now: crate::holdings::unix_now(),
+            me: self.my_position(),
+            profile: self.loot_profile(),
+            wielder: self.wielder(),
+            name: stats.name.clone(),
+        }
+    }
+
+    /// Work the board out again when [`QUEST_BOARD_EVERY`] has passed, into `quest_board`.
+    pub fn refresh_quests(&mut self, now: Instant) {
+        let due = self
+            .quest_board_at
+            .is_none_or(|at| now.duration_since(at) >= QUEST_BOARD_EVERY);
+        let settled = !self.quest_board.is_empty() && !self.quest_board.iter().any(|l| l.on);
+        if !due || (!self.autoplay.config.quests.on && settled) {
+            return;
+        }
+        self.quest_board_at = Some(now);
+        self.quest_board = quest_board(ac_world::quests::all(), &self.quest_facts());
+    }
+
+    /// Go and see `row`'s giver: a visit, journey and all. False when there is no way.
+    pub fn visit_giver(&mut self, row: &Row) -> bool {
+        let l = ac_world::landmarks::Landmark {
+            kind: ac_world::landmarks::Kind::Npc,
+            name: row.giver.clone(),
+            cell: row.place.cell,
+            at: row.place.at,
+        };
+        let ok = self.visit_landmark(&l);
+        tracing::info!("quest: to {} for {} ({ok})", row.giver, row.id);
+        ok
+    }
+
+    /// The character's XP per hour lately; `None` until measured. Seam: the hunt builder fills it.
+    pub fn xp_per_hour(&self) -> Option<f32> {
+        None
+    }
+
+    /// Read back the quest log of earlier sessions, at login.
+    pub(crate) fn load_quest_log(&mut self) {
+        let Some(path) = self.quest_file(".log.json") else {
+            return;
+        };
+        match ac_store::read_json::<QuestLog>(&path) {
+            Ok(Some(log)) => self.quest_log = log,
+            Ok(None) => {}
+            Err(e) => tracing::warn!("quest: reading {}: {e}", path.display()),
+        }
+    }
+
+    /// Write the quest log out, after a change to it.
+    pub fn save_quest_log(&self) {
+        let Some(path) = self.quest_file(".log.json") else {
+            return;
+        };
+        let visible = ac_store::Visibility::Normal;
+        if let Err(e) = ac_store::write_json_atomic(&path, &self.quest_log, visible) {
+            tracing::warn!("quest: writing {}: {e}", path.display());
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests;
