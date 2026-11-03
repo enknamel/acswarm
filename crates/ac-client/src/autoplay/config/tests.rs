@@ -133,3 +133,17 @@ fn a_pursued_quest_has_every_way_worked_as_one_chosen() {
     let rows = crate::quest_log::considered_rows(&q);
     assert!(rows.iter().any(|r| std::ptr::eq(*r, fiun)));
 }
+
+#[test]
+fn a_pursued_quest_is_on_with_quests_off() {
+    let mut q = Quests::default();
+    let fiun = "augmentationprovinggroundaccess";
+    assert!(!q.is_on(fiun) && !q.is_on("engorgedeaterjaw"));
+    q.pursue_quest(fiun, true, 0);
+    assert!(q.is_on(fiun), "pursued, it is worked with quests off");
+    assert!(!q.is_on("engorgedeaterjaw"), "and nothing else is");
+    q.switch_off(fiun);
+    assert!(q.is_on(fiun), "pursuit outranks the switch");
+    q.stop_pursuing(fiun);
+    assert!(!q.is_on(fiun));
+}

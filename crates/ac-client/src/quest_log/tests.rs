@@ -452,3 +452,42 @@ fn the_browse_board_lists_every_quest_as_if_chosen_whatever_the_switches() {
         .unwrap();
     assert_eq!(fiun.state, QuestState::Ready, "the jaw carried");
 }
+
+/// Quest `id` pursued at `level`, quests otherwise off.
+fn pursued_at(id: &str, level: u32) -> QuestFacts {
+    let mut facts = at_level(level);
+    facts.config.on = false;
+    facts.config.pursue_quest(id, false, 0);
+    facts
+}
+
+#[test]
+fn a_pursued_quest_above_the_margin_is_still_wanted() {
+    // The jaw's Engorged Eater is level 80, past 50 + 2 * 8: asked for, the jaw is kept all the same.
+    let id = "engorgedeaterjaw";
+    assert_eq!(
+        state(id, &at_level(50)),
+        QuestState::CantYet(Blocked::TooHard { level: 80 })
+    );
+    let facts = pursued_at(id, 50);
+    let board = quest_board(&rows(id), &facts);
+    assert_eq!(
+        board[0].state,
+        QuestState::Needs {
+            more: 1,
+            of: "Engorged Eater Jaw".into()
+        }
+    );
+    assert!(board[0].on, "pursued with quests off");
+    assert!(quest_wants(&board).iter().any(|w| w.wcid == 28725));
+}
+
+#[test]
+fn a_pursued_quest_outside_the_givers_band_stays_out() {
+    // Fergal the Dire takes the Dire Mattekar task from level 20.
+    let id = "diremattekarkillcount";
+    assert_eq!(
+        state(id, &pursued_at(id, 15)),
+        QuestState::CantYet(Blocked::Level { min: 20, max: 0 })
+    );
+}

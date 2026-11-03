@@ -160,6 +160,7 @@ impl Client {
                     walked_on: None,
                     walking_up: false,
                     calls: Vec::new(),
+                    for_quest: false,
                 });
                 self.autoplay
                     .say(Doing::Shopping, format!("{reason}: at {vendor}"));

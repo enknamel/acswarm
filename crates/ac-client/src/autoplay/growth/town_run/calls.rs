@@ -14,11 +14,11 @@ use super::vendor::counter_place;
 use super::{Errand, Phase, Run, Turn, VENDOR_REACH};
 use crate::autoplay::growth::Growth;
 use crate::autoplay::Doing;
-use crate::quest_log::{worth_detour, QuestState, SHORT_LEG};
+use crate::quest_log::{worth_detour, QuestLine, QuestState, SHORT_LEG};
 use crate::Client;
 
 /// A giver no journey reached is planned to again after this (a Warden's wait, hunt.rs).
-const GIVER_RETRY: Duration = Duration::from_secs(30 * 60);
+pub(crate) const GIVER_RETRY: Duration = Duration::from_secs(30 * 60);
 /// A give not answered in this long counts as unanswered (design §5.1, guess).
 const GIVE_PAUSE: Duration = Duration::from_secs(3);
 /// Unanswered gives before the call ends: ACE turns a give away while the giver emotes
@@ -52,6 +52,55 @@ pub(crate) struct HandIn {
     pub(super) row: &'static Row,
     pub(super) at: Place,
     pub(super) xp: u64,
+    /// For a pursued quest: taken on any run, whatever the detour.
+    pub(super) pursued: bool,
+}
+
+/// What a giver's placement is chosen on, as one character stands.
+pub(crate) struct Asking<'a> {
+    pub(crate) level: u32,
+    /// Quest flags held: a door shut behind one not held keeps a giver out of reach.
+    pub(crate) held: &'a [String],
+    /// Items carried, by weenie class, worn ones left out.
+    pub(crate) carried: &'a dyn Fn(u32) -> u32,
+    /// The giver at that placement was refused lately.
+    pub(crate) refused: &'a dyn Fn(&Row, &Place) -> bool,
+    /// How far a placement is, by the caller's measure: the nearest is asked.
+    pub(crate) away: &'a dyn Fn(&Place) -> f32,
+}
+
+impl Asking<'_> {
+    /// `row`'s nearest placement it can be asked at: an open door, not lately refused.
+    fn open_at(&self, row: &'static Row) -> Option<(f32, &'static Row, Place)> {
+        row.places
+            .iter()
+            .filter(|p| ac_world::quests::locked_at(p, self.held).is_none())
+            .filter(|p| !(self.refused)(row, p))
+            .map(|p| ((self.away)(p), row, *p))
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+    }
+
+    /// The nearest talk taking a quest up from `from` in the level band, and how far.
+    pub(crate) fn take_up_at(&self, from: &str) -> Option<(f32, &'static Row, Place)> {
+        ac_world::quests::all()
+            .iter()
+            .filter(|r| r.kind == Kind::Start && r.giver == from)
+            .filter(|r| r.fits_level(self.level))
+            .filter_map(|r| self.open_at(r))
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+    }
+
+    /// The nearest way to hand `line`'s quest in now, its items carried, and how far.
+    pub(crate) fn hand_in_at(&self, line: &QuestLine) -> Option<(f32, &'static Row, Place)> {
+        crate::quest_log::worked_rows(line)
+            .filter(|r| r.kind == line.kind && r.fits_level(self.level))
+            .filter(|r| match r.want {
+                Want::Item(w) => (self.carried)(w) >= r.count.max(1),
+                _ => true,
+            })
+            .filter_map(|r| self.open_at(r))
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+    }
 }
 
 /// What planning a run's calls came to.
@@ -64,7 +113,7 @@ pub(crate) struct CallPlan {
 }
 
 /// Which hand-ins join a run calling at `counters` (the legs' first calls), and every call's order:
-/// best XP a second of detour first, each tried on the tour as it stands, to [`EVERY_ORDER`] calls.
+/// pursued then best XP a second of detour first, each tried on the tour, to [`EVERY_ORDER`] calls.
 pub(crate) fn plan_calls(
     legs: &Legs,
     counters: &[Place],
@@ -106,7 +155,9 @@ pub(crate) fn plan_calls(
         let detour = base.map_or(w, |b| (w - b).max(0.0));
         tried.push((g, h.xp as f32 / detour.max(1.0)));
     }
-    tried.sort_by(|a, b| b.1.total_cmp(&a.1));
+    // A pursued quest's hand-in goes first, whatever it pays: the player asked for it.
+    let pursued = |g: usize| hand_ins[g - n].pursued;
+    tried.sort_by(|a, b| pursued(b.0).cmp(&pursued(a.0)).then(b.1.total_cmp(&a.1)));
     for (g, _) in tried {
         if taken.len() >= EVERY_ORDER {
             break;
@@ -116,7 +167,8 @@ pub(crate) fn plan_calls(
             continue;
         };
         let detour = base.map_or(w, |b| (w - b).max(0.0));
-        if on_the_round(g, detour) || worth_detour(hand_ins[g - n].xp, detour, xp_per_hour) {
+        let worth = worth_detour(hand_ins[g - n].xp, detour, xp_per_hour);
+        if pursued(g) || on_the_round(g, detour) || worth {
             taken = with;
             base = Some(w);
         }
@@ -130,60 +182,45 @@ impl Client {
     /// giver nearest the first of `near` it can be asked at (level band, open door, not lately
     /// refused), nearest first, at most `most`.
     pub(super) fn ready_hand_ins(&self, near: &[Vec2], most: usize, now: Instant) -> Vec<HandIn> {
-        let level = self.world.stats.level.max(0) as u32;
-        let held = &self.travel.quests_done;
         let refused = &self.autoplay.growth.givers_refused;
+        let carried = |w| self.carried_count(w);
+        let refused =
+            |r: &Row, p: &Place| refused.within(&(r.giver_wcid, p.cell), now, GIVER_RETRY);
         let away = |p: &Place| {
             near.iter()
                 .map(|n| n.distance(p.at.truncate()))
                 .fold(f32::MAX, f32::min)
         };
-        // A row's nearest placement it can be asked at: an open door, not lately refused.
-        let open_at = |r: &'static Row| {
-            r.places
-                .iter()
-                .filter(|p| ac_world::quests::locked_at(p, held).is_none())
-                .filter(|p| !refused.within(&(r.giver_wcid, p.cell), now, GIVER_RETRY))
-                .min_by(|a, b| away(a).total_cmp(&away(b)))
-                .map(|p| (away(p), r, *p))
+        let asking = Asking {
+            level: self.world.stats.level.max(0) as u32,
+            held: &self.travel.quests_done,
+            carried: &carried,
+            refused: &refused,
+            away: &away,
         };
-        let nearest = |a: &(f32, &Row, Place), b: &(f32, &Row, Place)| a.0.total_cmp(&b.0);
+        let pursued = |id: &str| self.pursuit.iter().any(|l| l.id == id);
         let mut out: Vec<(f32, HandIn)> = Vec::new();
         for line in &self.quest_board {
             // Not taken up: a talk to whoever starts it, the quest's own XP its worth.
             if let (true, QuestState::NotTaken { from }) = (line.on, &line.state) {
-                let start = ac_world::quests::all()
-                    .iter()
-                    .filter(|r| r.kind == Kind::Start && r.giver == *from)
-                    .filter(|r| r.fits_level(level))
-                    .filter_map(open_at)
-                    .min_by(nearest);
+                let start = asking.take_up_at(from);
                 if let Some((d, row, at)) =
                     start.filter(|(_, r, _)| !out.iter().any(|(_, h)| std::ptr::eq(h.row, *r)))
                 {
-                    out.push((
-                        d,
-                        HandIn {
-                            row,
-                            at,
-                            xp: line.xp,
-                        },
-                    ));
+                    let hand_in = HandIn {
+                        row,
+                        at,
+                        xp: line.xp,
+                        pursued: pursued(&line.id),
+                    };
+                    out.push((d, hand_in));
                 }
                 continue;
             }
             if !line.on || line.state != QuestState::Ready || line.kind == Kind::Start {
                 continue;
             }
-            let found = crate::quest_log::worked_rows(line)
-                .filter(|r| r.kind == line.kind && r.fits_level(level))
-                .filter(|r| match r.want {
-                    Want::Item(w) => self.carried_count(w) >= r.count.max(1),
-                    _ => true,
-                })
-                .filter_map(open_at)
-                .min_by(nearest);
-            let Some((d, row, at)) = found else {
+            let Some((d, row, at)) = asking.hand_in_at(line) else {
                 continue;
             };
             // A hand-in that repeats any time pays for each one carried (the Collectors).
@@ -193,14 +230,13 @@ impl Client {
                 }
                 _ => 1,
             };
-            out.push((
-                d,
-                HandIn {
-                    row,
-                    at,
-                    xp: line.xp * u64::from(times),
-                },
-            ));
+            let hand_in = HandIn {
+                row,
+                at,
+                xp: line.xp * u64::from(times),
+                pursued: pursued(&line.id),
+            };
+            out.push((d, hand_in));
         }
         out.sort_by(|a, b| a.0.total_cmp(&b.0));
         out.into_iter().take(most).map(|(_, h)| h).collect()
@@ -293,7 +329,8 @@ impl Client {
     /// The run that just set off for its counter takes the ready hand-ins that pay, every call
     /// put in the fastest order; the first may be a giver, the counter then waiting its turn.
     pub(super) fn add_hand_ins(&mut self, now: Instant) {
-        if !self.autoplay.config.quests.on {
+        let quests = &self.autoplay.config.quests;
+        if !quests.on && quests.pursue.is_empty() {
             return;
         }
         let Some(run) = self.autoplay.growth.run.as_ref() else {
@@ -356,6 +393,39 @@ impl Client {
             let full = self.pack_low_on_room();
             self.end_run(run, now, &cfg, &needs, full, None);
         }
+    }
+
+    /// A run of one call on `row`'s giver at `at`, for a pursued quest: started at once, town runs
+    /// on or off, and never futile (`Run::for_quest`). False when there is no way to the giver.
+    pub(crate) fn start_quest_call(&mut self, row: &'static Row, at: Place, now: Instant) -> bool {
+        let spot = at.at.truncate();
+        let mut run = Run {
+            vendor: row.giver.to_string(),
+            at: spot,
+            phase: Phase::Going,
+            since: now,
+            last_sell: None,
+            town: spot,
+            stops: 0,
+            sold: 0,
+            reason: format!("for {}", row.title.trim()),
+            errand: Errand::Sell,
+            visited: Vec::new(),
+            walked_on: None,
+            walking_up: false,
+            calls: Vec::new(),
+            for_quest: true,
+        };
+        if !self.make_call(&mut run, giver_call(row, at), now) {
+            return false;
+        }
+        let st = &mut self.autoplay.growth;
+        st.drop_ground_walk();
+        st.needs.clear();
+        st.by_hand = false;
+        st.window_unwanted = None;
+        st.run = Some(run);
+        true
     }
 
     /// Make `call` the run's call in hand and set off for it. False when there is no way.

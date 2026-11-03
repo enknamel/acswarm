@@ -425,6 +425,26 @@ impl Api for CtxApi<'_, '_> {
         on
     }
 
+    fn pursue_quest(&mut self, id: &str, again: bool) -> bool {
+        if ac_world::quests::rows_of(id).next().is_none() {
+            return false;
+        }
+        let now = ac_client::holdings::unix_now();
+        let c = self.client();
+        c.autoplay.config.quests.pursue_quest(id, again, now);
+        true
+    }
+
+    fn stop_pursuing(&mut self, id: &str) {
+        self.client().autoplay.config.quests.stop_pursuing(id);
+    }
+
+    fn quest_pursuit(&mut self) -> String {
+        let now = ac_client::holdings::unix_now();
+        let lines = self.client().pursuit.iter().map(|l| l.words(now));
+        lines.collect::<Vec<_>>().join("\n")
+    }
+
     fn follow_distances(&mut self, keep: f64, fight: f64) -> f64 {
         let c = self.client();
         let t = &mut c.autoplay.config.team;
@@ -1659,6 +1679,40 @@ mod tests {
             (false, false, false, false),
             "swing, spell, engagement and closing walk all let go"
         );
+    }
+
+    #[test]
+    fn a_script_pursues_a_quest_and_reads_its_step() {
+        let mut client = ac_client::testkit::offline_client();
+        let jaw = ac_world::quests::rows_of("engorgedeaterjaw")
+            .next()
+            .unwrap();
+        client.pursuit = vec![ac_client::autoplay::PursuitLine {
+            id: jaw.id.into(),
+            title: "Engorged Eater Jaw".into(),
+            step: ac_client::autoplay::PursuitStep::HandIn {
+                row: jaw,
+                at: jaw.places[0],
+            },
+            working: true,
+            via: None,
+        }];
+        let mut board = ac_plugin::Blackboard::default();
+        let mut settings = ac_plugin::Settings::new();
+        let mut icons = ac_plugin::IconCache::default();
+        let mut cx = ctx(&mut client, &mut board, &mut settings, &mut icons);
+        let mut api = CtxApi { cx: &mut cx };
+        assert!(!api.pursue_quest("no such quest", false));
+        assert!(api.pursue_quest("engorgedeaterjaw", true));
+        assert!(api.pursue_quest("ginsword", false));
+        assert_eq!(
+            api.quest_pursuit(),
+            "Engorged Eater Jaw: working: hand it in to Clemenza"
+        );
+        api.stop_pursuing("ginsword");
+        let pursue = &client.autoplay.config.quests.pursue;
+        let ids: Vec<(&str, bool)> = pursue.iter().map(|p| (p.id.as_str(), p.again)).collect();
+        assert_eq!(ids, [("engorgedeaterjaw", true)]);
     }
 
     #[test]
