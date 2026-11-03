@@ -1,7 +1,20 @@
 # Movement phase 5 design: clean-up
 
-Status: design, 2026-11-02, for phase 5 of `docs/movement-plan.md` ("Clean-up"). Nothing here is
-built yet. Line anchors are on `da6468f` (main, phases 0-4 merged).
+Status: built, 2026-11-02 (branch `phase5`, steps 1-3), for phase 5 of `docs/movement-plan.md`
+("Clean-up"). Line anchors are on `da6468f` (main, phases 0-4 merged); the measures are in the
+plan's "Phase 5". All of P1-P6 went, none kept; §3's "Considered and kept" stand. Where the build
+departed from this design:
+- P2: `line_blocked`'s parameter `block` is `cell`, the player's cell found by `routing::graph_end`.
+- P3 (recovery): `View.xy` and `View.landblock` went too, for `View.place`.
+- P5: while the chunks round the aim are not built yet (live, before the builder thread reaches
+  them), `standable_near` answers `None` and explore asks again next tick, neither guessing a goal
+  nor shutting the room; offline the graph builds itself. `tests/dungeon_edges`' corridor test is
+  rewritten on `spot_in_room`, and the file-length ceiling of `player.rs` comes down to 1800.
+- Step 3: `walk_journey` moves to the walk row with `body/going.rs`. Item 4 of the tick path took
+  three lines, so the reconnect and logoff rows merge too, and the `pathfinder.rs` row goes (the
+  walk row names the file). The comment pass also compressed the module docs of `worldroute`
+  (it named the per-landblock move-to), `trip`, `academy` (it named `Client::follow`) and
+  `recovery`.
 
 Phase 5 deletes what nothing calls, removes the walk patches whose cause phases 1-4 took away,
 and brings the code maps up to date. No behaviour changes except a patch going, and each patch

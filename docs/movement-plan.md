@@ -1,6 +1,6 @@
 # Movement: plan the whole route, then follow it
 
-Status: proposed 2026-11-01; phases 0-3 merged (main `0db2f2f`); phase 4 built on branch `phase4`,
+Status: proposed 2026-11-01; phases 0-4 merged (main `da6468f`); phase 5 built on branch `phase5`,
 not merged.
 Replaces spot fixes to walking with one design.
 
@@ -322,6 +322,49 @@ the stalls gain the 5C49 ledge and the random areas the Tusker ground, 0x5C49):
 - The review fixes (`d512833`, `fede9ea`, `5e01c0c`) change no trial: the ledge's last walk, left
   out on arriving, is planned again and refused at 34.4 s, nothing else reaching it.
 
+**Phase 5** (branch `phase5`, clean-up: `docs/movement-phase5-design.md`, steps 1-3):
+
+| trials | arrived | refused | gave up | still pushing |
+|---|---|---|---|---|
+| the stalls seen live (12) | 10 | 2 (2CB5 coast edge; the 5C49 ledge) | 0 | 0 |
+| random walks, 9 areas x 15 (135) | 122 | 13 | 0 | 0 |
+| journeys (5) | 4 | 0 | 1 (the 01F6 ledge, 34.4 s) | 0 |
+
+- `SUMMARY 12 trials: 10 arrived, 2 refused, 0 gave up, 0 still pushing`, `SUMMARY 135 trials:
+  122 arrived, 13 refused, 0 gave up, 0 still pushing` and `SUMMARY 5 trials: 4 arrived, 0
+  refused, 1 gave up, 0 still pushing`; WAITED 0 on all three; INVARIANT planned-must-arrive 10 of
+  10 and 122 of 122.
+- All 152 trial lines are phase 4's, outcome for outcome and arrival time for arrival time (only
+  the planner's ms differ): at the end of each step, and in step 2 after P1, P2, the last P3
+  commit, P4 and P5. No removal changed a trial, so none was put back.
+- Deleted, nothing calling them (step 1): `Pathfinder::is_building`, `Player::blocks_held`,
+  `Going::is_to`, `ac_nav::Ground::cell`, `Area::holds`, `Area::line_clear`,
+  `nav::Ground::fits_here`, `trip::ARRIVED`.
+- Patches removed (step 2; the design's §3 by number):
+  - P1, the wedge rest: phase 2's no-progress replan and phase 3's one give-up answer a wedged
+    body. `wedged()` stays for telemetry.
+  - P2, the `walkable` sampler: the dodge sidestep's room check is the body's own step from its
+    cell (phase 1's one walk test).
+  - P3, flat arrivals: the academy, follow, quartermaster and recovery arrive in 3D
+    (`server_walk::reached`), and recovery's death is a `Place`. A leader on the floor above is
+    walked up to (`a_leader_on_the_floor_above_is_walked_up_to_not_stood_under`).
+  - P4, recovery's replans (`MAX_REPLANS`, `PLAN_EVERY`): phase 4's journey ends arrived, refused
+    or put down, and the way back is asked for each tick.
+  - P5, explore's ring of aim guesses (`aim_on_floor`, `STAIRS`, the second push): the goal is the
+    room's own standable spot nearest the aim (`spot_in_room`), a room with none shut; not built
+    round the aim yet, it is asked again next tick. Phase 2 refuses an aim off any floor, and
+    phase 1 resolves ends by cell.
+  - P6: follow's literal 30 m is `FOLLOW_TRIP_MOVED`.
+- Kept, each with its reason in the design's §3: the dodge sidestep walked straight, the server's
+  MoveTo, noclip flight, the use-reach margins, `HOLD_ON_WITHIN`, the planning-cost throttles
+  (`WALK_ON_EVERY`, `next_follow_plan`), `place_at`'s block-only places, `is_held`, `SAME_FLOOR`
+  beside `END_FLOOR`, `RESTART_EVERY`, the doorway, gem-room and visit constants, and
+  `Pathfinder::ask`/`take` (a replan on the frame cost 21 ms at p95).
+- Step 3 is comments and maps only (`xtask same-code` on each comment commit): module docs within
+  five lines and no history, and a walk row and glossary term in `crates/ac-client/CLAUDE.md`.
+- The review fix (`a2a59be`) changes no trial: unbuilt round the aim, `standable_near` answers
+  `None` and explore asks again, where P5 had walked at a guess named in the room's cell.
+
 ## Phases (each merged alone, each measured against the last)
 
 0. **Baseline.** The harness, random pairs, the known spots, and the numbers on current main.
@@ -342,11 +385,13 @@ the stalls gain the 5C49 ledge and the random areas the Tusker ground, 0x5C49):
    - `Step::Walk(Place)`, `resume_trip` with a place, the current region's walk planned at the
      start of a journey.
    - Legs and their height and cell guesses deleted; one give-up.
-5. **Clean-up.**
-   - Delete what nothing calls: the per-block planner entry, the wide pathfinder thread, retrace,
-     `floor_in_cell`, `has_way_to` as a separate check.
-   - Remove the patches whose cause is gone, each removal checked against the known-spots list.
-   - Update the code maps in CLAUDE.md.
+5. **Clean-up** (built; "Phase 5" above).
+   - The deletions this list named went in phases 1-4: the per-block planner entry and the wide
+     pathfinder thread in phase 1, retrace in phase 2, `floor_in_cell` and `has_way_to` in
+     phase 4. Phase 5 deleted what else nothing called.
+   - The walk patches whose cause phases 1-4 removed went, one commit each, each checked against
+     the harness trial for trial. The rest stand, each with its reason.
+   - The code maps in CLAUDE.md name the walk: the region planner, the follower, the slot.
 
 ## Risks
 
