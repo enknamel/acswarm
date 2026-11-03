@@ -153,8 +153,9 @@ approached on, a character coming at a door from the corner of the
 room before it was sent into the corridor's side wall, and aimed from
 the sill itself it was sent nowhere and stood ten seconds for the room
 to be written off. And on a floor: the Holtburg Dungeon's corridors run
-diagonally from their doors, so an aim with nothing to stand on is
-turned forty-five degrees either way, then drawn in (`aim_on_floor`).
+diagonally from their doors, so the walk goes to the standable spot in
+the room's own cell nearest the aim (`spot_in_room`), and a room with
+none is shut.
 
 **The world you leave stays in the object table.** ACE holds an object
 that has dropped out of sight for twenty-five seconds before it sends
