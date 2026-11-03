@@ -107,7 +107,7 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 | summoning | `autoplay_summon`, `autoplay_claim_pet_kills`, `hear_summoning` | `autoplay/summoning.rs`, `autoplay/mod.rs` | `Autoplay.summoning` | summon | autoplay::summoning | summon, pet |
 | refusals | `hear_refusal`, `refused`, `answer` | `refused.rs`, `crates/ac-agent/src/refusals.rs` | the waiting system's own wait, e.g. `Autoplay.shelved` | refus | refused | refusal |
 | server chat | `chat_message`, `hear_arrival`, `hear_spell_attack` | `session/chat.rs`, `autoplay/hear.rs` | `Autoplay.hit_by` | arriv | session::chat | heard |
-| quests | `refresh_quests`, `quest_board`, `quest_wants`, `visit_giver` | `quest_log.rs`, `crates/ac-world/src/quests.rs` | `Client.quest_board`, `Client.quest_log`, `Autoplay.config.quests` | quest_log | quest_log | quest |
+| quests | `refresh_quests`, `quest_board`, `quest_wants`, `visit_giver`, `watch_quest_answer` | `quest_log.rs`, `crates/ac-world/src/quests.rs` | `Client.quest_board`, `Client.quest_log`, `Autoplay.config.quests` | quest_log | quest_log | quest |
 
 ## Glossary
 
