@@ -7,7 +7,7 @@ use crate::{pathfinder, player};
 /// The client answering what the steering asks of the world.
 ///
 /// The steering itself is in `ac-nav` and knows nothing of packets,
-/// physics or landblocks; this is the half that does. Six questions,
+/// physics or landblocks; this is the half that does. Five questions,
 /// which in a test are answered by hand and here with the character's
 /// own body and the region planner.
 pub struct Standing<'a> {
@@ -28,10 +28,6 @@ pub(crate) fn walk_start(pl: &player::Player, at: Vec3) -> Place {
 impl ac_nav::Ground for Standing<'_> {
     fn at(&self) -> Vec3 {
         self.player.world_position()
-    }
-
-    fn cell(&self) -> u32 {
-        self.player.cell
     }
 
     fn is_airborne(&self) -> bool {

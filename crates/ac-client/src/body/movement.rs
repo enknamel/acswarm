@@ -4,18 +4,8 @@ use glam::Vec3;
 
 use crate::{player, Client};
 
-/// How far above or below a goal still counts as standing at it.
-///
-/// A goal is a point on a floor, and arriving was judged on the flat:
-/// how far away it was on the map, height ignored. Sent to Asenala, who
-/// keeps a shop on the upper floor of a house in Holtburg, a character
-/// walked a hundred and forty metres, stopped six millimetres from her
-/// on the map and three metres below her on the ground floor, and stood
-/// there. It had arrived, by the only test it had.
-///
-/// A doorsill, a slope or a step puts a pace of height between two
-/// places on the same floor, so the tolerance has to allow that; a
-/// storey is three metres and must not pass.
+/// A goal's floor reaches this far over or under it (metres): a sill, slope or step is within
+/// it, a storey (3 m) is not.
 pub(crate) const SAME_FLOOR: f32 = 2.0;
 
 impl Client {
@@ -33,11 +23,11 @@ impl Client {
         self.pathfinder.plan(me, to, within, cap)
     }
 
-    /// Where the character can stand within `radius` (metres, flat) of `around`, by the region
-    /// planner (see [`Pathfinder::standable_near`](crate::pathfinder::Pathfinder::standable_near)).
-    pub(crate) fn standable_near(&mut self, around: Vec3, radius: f32) -> Vec<Place> {
+    /// Where the character can stand within `radius` (metres, flat) of `around`; `None` while the
+    /// region planner builds it (see [`Pathfinder::standable_near`](crate::pathfinder::Pathfinder::standable_near)).
+    pub(crate) fn standable_near(&mut self, around: Vec3, radius: f32) -> Option<Vec<Place>> {
         let Some(pl) = self.player.as_ref() else {
-            return Vec::new();
+            return Some(Vec::new());
         };
         let me = Place {
             at: pl.world_position(),

@@ -125,13 +125,6 @@ pub struct Going {
     given_up: bool,
 }
 
-impl Going {
-    /// Whether this is the walk to the place `at`.
-    pub fn is_to(&self, at: Vec3) -> bool {
-        self.goal.place().is_some_and(|p| p.at == at)
-    }
-}
-
 impl Client {
     /// Walk to `goal` for `owner`: the one way anything asks the body to move, ending a visit unless
     /// the visit asks. Past the region it is a journey; asked again, the same goal plans nothing.

@@ -52,7 +52,6 @@ const NARRATIVE: &[&str] = &[
     "left_behind_on_the_road",
     "load_the_quartermaster",
     "near_a_kill",
-    "on_a_floor",
     "on_its_way",
     "on_the_way",
     "outranks_our_claim",

@@ -13,8 +13,9 @@ system's entry fns are written in the files its own row names.
 2. manual-play timers: `tick_combat()`, `tick_loot()`, `tick_store()`, `tick_appraise()`
 3. `tick_autoplay()` (`autoplay/mod.rs`), then `tick_retag()` (`autoplay/ledger/retag.rs`) and
    `save_ledger()` (`autoplay/ledger/store.rs`)
-4. `tick_player()` (`body/player_tick.rs`) moves the body (`player.rs`) and runs `tick_visit()`
-   (`visit.rs`)
+4. `tick_player()` (`body/player_tick.rs`) runs `tick_visit()` (`visit.rs`), walks the journey's
+   stretch (`walk_journey()`), steers the slot's walk along its planned route (`body/standing.rs`,
+   `ac_nav::Steering`) and moves the body (`player.rs`)
 
 `tick_autoplay()`, in order:
 - once no leader is followed, whatever switched it off: `stop_following()`, which lets go of only
@@ -96,9 +97,10 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 | supplies and sale | `grow_needs_with`, `supplies`, `sell_policy`, `offers_for_sale`, `burns` | `autoplay/growth/needs.rs`, `autoplay/growth/policy.rs`, `autoplay/growth/sale.rs`, `autoplay/growth/supplies.rs`, `crates/ac-loot/src/sale.rs` | `growth::State.needs`, `Growth.ammo_keep` | counter | autoplay::growth | need, sale |
 | XP spending | `autoplay_spend_xp`, `grow_spend_xp`, `raise_offers`, `batch_raise` | `autoplay/growth/xp.rs`, `autoplay/growth/raise.rs`, `advance.rs` | `growth::State.pending`, `growth::State.sulking` | experience | autoplay::growth::xp | raise |
 | hunting ground and area | `autoplay_grow`, `grow_hunt`, `autoplay_watch_the_ground`, `autoplay_keep_to_area` | `autoplay/growth/mod.rs`, `autoplay/growth/hunt.rs`, `hunt.rs` | `growth::State.bound`, `growth::State.quiet_since`, `Fight.area` | ground | autoplay::growth::hunt | ground, area |
-| travel | `travel_to`, `travel_about`, `set_off`, `walk_journey`, `keep_journey`, `settle_journey`, `autoplay_resume_journey` | `travel.rs`, `travel/overland.rs`, `body/going.rs`, `gem_room.rs`, `pathfinder.rs`, `recalls.rs`, `autoplay/journey.rs`, `crates/ac-nav/src/steering.rs` | `Client.travel`, `Client.going`, `Client.steering`, `Autoplay.resume_trip` | travel | travel | journey |
+| walk | `go`, `go_to`, `stop_going`, `settle_going`, `walk_journey` | `body/going.rs`, `body/player_tick.rs`, `body/standing.rs`, `pathfinder.rs`, `crates/ac-nav/src/steering.rs`, `crates/ac-nav/src/routing.rs` | `Client.going`, `Client.steering`, `Client.refusals` | going | body::going | walk |
+| travel | `travel_to`, `travel_about`, `set_off`, `keep_journey`, `settle_journey`, `autoplay_resume_journey` | `travel.rs`, `travel/overland.rs`, `gem_room.rs`, `recalls.rs`, `autoplay/journey.rs` | `Client.travel`, `Autoplay.resume_trip` | travel | travel | journey |
 | visits | `visit_landmark`, `tick_visit`, `visit_person` | `visit.rs` | `Client.visits` | visit | visit | visit |
-| dungeon explore | `autoplay_explore`, `aim_on_floor`, `past_the_door` | `explore.rs`, `crates/ac-nav/src/explore.rs` | `Autoplay.room_bound`, `Autoplay.rooms_seen` | explore | explore | explore |
+| dungeon explore | `autoplay_explore`, `spot_in_room`, `past_the_door` | `explore.rs`, `crates/ac-nav/src/explore.rs` | `Autoplay.room_bound`, `Autoplay.rooms_seen` | explore | explore | explore |
 | dodge | `autoplay_dodge`, `autoplay_approach`, `sidestep`, `threat` | `dodge.rs`, `aim.rs`, `doorway.rs` | `Client.dodge`, `Client.dodge_to` | dodge | dodge | dodge |
 | recovery | `autoplay_recover`, `recovery_view`, `is_dead` | `recovery.rs` | `Autoplay.recovery` | recovery:: | recovery | recovery |
 | academy | `autoplay_academy` | `academy.rs`, `tests/academy_route.rs` | `Autoplay.academy`, `Autoplay.academy_corpse`, `Autoplay.academy_armed` | academy | academy | academy |
@@ -116,6 +118,7 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 | road | a walk on the way somewhere (a ground, a counter, a script's goal); on it only what attacks is fought | way |
 | ground | the hunting spot growth chose; walking about it is not a road | spot, field |
 | area | a hunting area a player drew on the map (`HuntArea`) | zone |
+| walk | the one movement the slot follows (`Going`), planned whole by the region planner, owned by the row that asked it | leg, path, head_for |
 | journey | a planned trip of walks, portals and recalls (`Travel`), owned by the row that set it off or took it over; held while another row acts, put down when its row stands aside; each walk a stretch the slot follows (`Going`) | route, travel plan |
 | mate | another character on the team board (`Mate`), in the fellowship or not | teammate, member |
 | fellow | a member of the server's fellowship | - |
@@ -174,21 +177,18 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 | `action/mod.rs` | one vocabulary for what a front end asks: `Action`, `Client::act`, the retail command table (`RETAIL`, `PENDING`) with the `chat_line()` router over it, and a file per family (`action/allegiance.rs`, `action/chat.rs`, `action/combat.rs`, `action/consent.rs`, `action/fellow.rs`, `action/help.rs`, `action/item.rs`, `action/magic.rs`, `action/recall.rs`, `action/status.rs`, `action/team.rs`, `action/trade.rs`); `action/resolve.rs` is the one place a name becomes a spell, a pack item, a ware, an object, the last corpse or a place. External intent only: autoplay and every read call `Client` directly |
 | `actions/mod.rs` | what a player, script or panel can ask for: `actions/combat.rs` (casting, attacking, what is wielded), `actions/items.rs` (using, taking, packing, splitting, salvaging), `actions/social.rs` (emotes, fellowship, friends, housing, allegiance, chat), `actions/trade_vendor.rs` (trade windows and counters), `actions/ui.rs` (`interact`, selection) |
 | `session/mod.rs` | the connection and what arrives on it: `session/connect.rs` (connect, offline, disconnect, log off), `session/net.rs` (sending), `session/apply.rs` (`Client::tick` and the message match), `session/lobby.rs` (the character list), `session/chat.rs` (server chat and sounds) |
-| `body/mod.rs` | where the character is and how it gets there: `body/player_tick.rs` (`tick_player`, `PlayerFrame`), `body/going.rs` (`Client::go`, `Going`: the one walk, its owner and give-up), `body/movement.rs` (speed, jumps, noclip), `body/server_walk.rs` (walks the server makes for us), `body/standing.rs` (`Standing`, the client's answers to `ac_nav::Ground`, from the region planner) |
+| `body/mod.rs` | where the character is and how it gets there; the walk row holds the slot, its follower and `pathfinder.rs` (region graphs built off the frame, planned on from it): `body/movement.rs` (speed, jumps, noclip, `SAME_FLOOR`), `body/server_walk.rs` (walks the server makes for us, `reached` in 3D) |
 | `player.rs` | body physics: walking, floors, ledges, falls, jumps, cell tracking |
 | `creation.rs` | character creation rules and create-if-missing |
 | `magic.rs` | spellbook, spell bars, enchantments, components, cast checks |
 | `items.rs` | appraisal requests and answers; the item vocabulary is `ac_loot::items` |
-| `profile.rs`, `weapons.rs` | shims re-exporting `ac_loot::profile` and `ac_loot::weapons` |
+| `profile.rs`, `weapons.rs`, `daytime.rs`, `augmentations.rs` | shims re-exporting `ac_loot::profile` and `ac_loot::weapons`; Dereth's time of day; augmentation gems |
 | `holdings.rs` | every character's inventory snapshots, for the Items window |
-| `reconnect.rs` | whether and when a dropped session logs back in |
-| `logoff.rs` | logging every session off on exit |
+| `reconnect.rs`, `logoff.rs` | whether and when a dropped session logs back in; logging every session off on exit |
 | `options.rs`, `emotes.rs` | character option bits; soul emotes |
 | `tally.rs` | what the character did lately, for telemetry: this frame's walk (`WalkFrame`), blows traded (`Blows`), supplies short (`SupplyLine`) |
-| `daytime.rs`, `augmentations.rs` | Dereth's time of day; augmentation gems |
 | `advance.rs` | experience costs and raise messages |
 | `recalls.rs`, `quest_flags.rs` | recall spells the journey planner can use; the portal quest flags it may plan through, earned by talking to whoever stamps one |
-| `pathfinder.rs` | region graphs built off the frame thread and planned on from it |
 | `shopping.rs` | reads the pack into `ac_vendor`'s snapshot and carries out its act |
 | `aim.rs` | whether a projectile clears walls and hills on the way to its target |
 | `logistics.rs` | the party's mode (hunting or restocking) and money sharing, the same on every session |

@@ -1,45 +1,27 @@
-//! Planning a journey that uses portals as well as legs on foot: the
-//! Town Network from a town to the hub and out again, a dungeon's
-//! "Surface" portal, a town's own portal.
-//!
-//! The search works on positions, not on the landscape: walking between
-//! two spots is priced by the straight line between them (with a detour
-//! factor), which is enough to choose *which* portals to take. The exact
-//! path of each leg on foot is planned by the caller when it walks it,
-//! on the terrain grid or the landblock's own navigation graph.
-//!
-//! Only portals whose mouth can be walked to are considered, and a leg
-//! on foot is only believed within [`WALK_REACH`]; the character cannot
-//! walk between continents, so a trip across the sea has to be portals
-//! all the way.
-//!
-//! A recall spell the character can cast (see [`Recall`] and
-//! `crate::recalls`) is a hop from wherever it stands straight to the
-//! spell's destination, costing only the cast. The caller says which
-//! ones it can cast right now; the planner takes one when it beats the
-//! walk or the portals, and a journey can go on from where it lands.
+//! A journey of walks, portals (the Town Network, a dungeon's "Surface" portal, a town's own) and
+//! recalls the character can cast ([`Recall`], `crate::recalls`: a hop from anywhere for the cast),
+//! searched on positions: a walk is priced by its straight line times [`DETOUR`], enough to pick
+//! *which* portals; the caller's region planner plans each walk whole. Only a portal whose mouth
+//! can be walked to counts, a walk only within [`WALK_REACH`]: across the sea is all portals.
 
 use crate::portals::{self, Portal};
 use crate::Place;
 use glam::Vec2;
 use std::collections::BinaryHeap;
 
-/// How fast the character covers ground (m/s), for pricing legs on foot.
+/// How fast the character covers ground (m/s), for pricing walks.
 pub const WALK_SPEED: f32 = 5.0;
-/// A leg on foot is longer than the straight line between its ends.
+/// A walk is longer than the straight line between its ends.
 pub const DETOUR: f32 = 1.3;
 /// Taking a portal costs this many seconds (walking into it, the load).
 pub const PORTAL_SECONDS: f32 = 20.0;
 /// Casting a recall costs this many seconds: coming to a stop, the cast
 /// itself, the server's two-second pause before the teleport, the load.
 pub const RECALL_SECONDS: f32 = 10.0;
-/// The farthest a single leg on foot is believed (metres). Longer than
-/// this and the trip has to find a portal.
+/// The farthest one walk is believed (metres); longer, and the trip has to find a portal.
 pub const WALK_REACH: f32 = 1200.0;
 /// Portals this far from a spot are candidates for the next hop.
 pub const PORTAL_REACH: f32 = 900.0;
-/// Close enough to the goal to stop (metres).
-pub const ARRIVED: f32 = 15.0;
 /// A walk refused from a spot is refused from a node this near it (metres, flat): where a portal
 /// leaves the character is counted as arrived within 30 m (`ac-client` `travel.rs`).
 const NO_WALK_NEAR: f32 = 30.0;

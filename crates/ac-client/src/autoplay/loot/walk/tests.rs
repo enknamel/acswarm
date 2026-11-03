@@ -64,6 +64,7 @@ fn a_corpse_up_on_a_ledge_is_set_aside_at_once() {
     let (ledge, floor) = (0x8000_0101, 0x8000_0102);
     let on_floor = c
         .standable_near(me, 8.0)
+        .expect("built offline")
         .into_iter()
         .find(|p| p.at.distance(me) > 4.0 && (p.at.z - me.z).abs() < 0.5)
         .expect("a floor spot near the start");

@@ -278,7 +278,7 @@ impl Client {
         me: Vec3,
         keep: impl Fn(Vec3) -> bool,
     ) -> Option<Place> {
-        let mut spots = self.standable_near(around, radius);
+        let mut spots = self.standable_near(around, radius).unwrap_or_default();
         spots.retain(|s| keep(s.at));
         spots.sort_by(|a, b| a.at.distance(me).total_cmp(&b.at.distance(me)));
         spots.into_iter().take(PULL_LOOKS).find(|s| {

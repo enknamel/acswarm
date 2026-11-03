@@ -90,7 +90,7 @@ impl Client {
     }
 
     /// Walk to the corpse `guid`, called `name` and `away` metres off, to well inside
-    /// [`CORPSE_REACH`] (the last metre of a walk wanders). What the slot answers is the caller's.
+    /// [`CORPSE_REACH`], the reach the use is sent from. What the slot answers is the caller's.
     pub(crate) fn walk_to_corpse(&mut self, guid: u32, name: &str, away: f32, now: Instant) -> Did {
         // A detour the character comes back from: a town run picks its walk to the counter up
         // again once the body is dealt with (`Client::journey_broken_off`).

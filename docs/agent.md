@@ -153,8 +153,9 @@ approached on, a character coming at a door from the corner of the
 room before it was sent into the corridor's side wall, and aimed from
 the sill itself it was sent nowhere and stood ten seconds for the room
 to be written off. And on a floor: the Holtburg Dungeon's corridors run
-diagonally from their doors, so an aim with nothing to stand on is
-turned forty-five degrees either way, then drawn in (`aim_on_floor`).
+diagonally from their doors, so the walk goes to the standable spot in
+the room's own cell nearest the aim (`spot_in_room`), and a room with
+none is shut.
 
 **The world you leave stays in the object table.** ACE holds an object
 that has dropped out of sight for twenty-five seconds before it sends
@@ -276,9 +277,10 @@ below on the ground floor. The rules that came of it:
   Building a chunk of the navigation graph takes a couple of hundred
   milliseconds, and a walk charged all of it at running speed crossed
   the bottom step and back for ever.
-- **A wedge lets go.** The rule that stops a character leaning on a wall
-  clears the moment it is sent somewhere else, and otherwise rests a
-  second and tries again: doors open and what was leaned on walks away.
+- **A wedge is reported, not rested.** A body pressed against geometry
+  reads as `wedged` in telemetry; the follower answers it, planning the
+  walk again once the route stops shortening (`ac_nav::steering`,
+  `NO_PROGRESS`), and the walk's slot gives up once (`GIVE_UP_AFTER`).
 - **What the server puts in the room is not in the ground.** The
   collision world and its graph are built from the DAT files and shared
   by every character in the process; a chest, a hook or a cart arrives

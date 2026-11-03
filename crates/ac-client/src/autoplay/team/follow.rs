@@ -2,6 +2,7 @@ use std::time::{Duration, Instant};
 
 use super::view::Mate;
 use crate::autoplay::{Doing, Release};
+use crate::body::server_walk::reached;
 use crate::did::Did;
 use crate::{Client, Owner};
 
@@ -9,6 +10,9 @@ use crate::{Client, Owner};
 /// this) is followed before anything else, a fight included; nearer,
 /// the fight comes first. Following is the follower's job.
 const FOLLOW_BREAK: f32 = 10.0;
+
+/// A leader this far from the journey's goal has moved on (metres): the journey is planned again.
+const FOLLOW_TRIP_MOVED: f32 = 30.0;
 
 /// How far from its leader a follower keeping `keep` metres may stray
 /// before following comes before everything else.
@@ -92,8 +96,8 @@ impl Client {
         if self.is_follow_journey() {
             self.keep_journey();
         }
-        let level = !leader.flying || (leader.world.z - me.z).abs() < 2.0;
-        if flat <= keep && level {
+        // Beside it on its floor; a leader on the floor above is walked up to, not stood under.
+        if reached(me, leader.world, keep) {
             self.stop_at_leader();
             return false;
         }
@@ -118,13 +122,13 @@ impl Client {
                 && self
                     .autoplay
                     .follow_trip
-                    .is_some_and(|g| g.distance(goal) <= 30.0);
+                    .is_some_and(|g| g.distance(goal) <= FOLLOW_TRIP_MOVED);
             if !on_the_way {
                 if self.autoplay.follow_trip.take().is_some() && self.traveling() {
                     self.cancel_travel();
                 }
                 match self.go(self.step_owner(), self.mate_goal(&leader, keep), now) {
-                    Did::Done if level => {
+                    Did::Done => {
                         self.stop_at_leader();
                         return false;
                     }
@@ -154,7 +158,7 @@ impl Client {
             let stale = self
                 .autoplay
                 .follow_trip
-                .is_none_or(|g| g.distance(goal) > 30.0);
+                .is_none_or(|g| g.distance(goal) > FOLLOW_TRIP_MOVED);
             let due = self.autoplay.next_follow_plan.is_none_or(|t| now >= t);
             if (stale || !self.traveling()) && due {
                 self.stop_going(Some(self.step_owner()), "a journey after the leader");

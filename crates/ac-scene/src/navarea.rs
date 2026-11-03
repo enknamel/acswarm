@@ -1,25 +1,15 @@
-//! Navigation over a neighbourhood of landblocks.
-//!
-//! [`crate::nav::NavGraph`] works on any rectangle, but the client has
-//! so far only ever given it one landblock, which is why a character
-//! walking towards a goal in the next block would run at a city wall:
-//! the only route around it goes through a gate the single-block graph
-//! could not see past. An [`Area`] assembles several neighbouring
-//! blocks into one collision world with one terrain function over all
-//! of them, so a path can leave the block it started in and come back.
-//!
-//! Areas are meant to be built off the frame thread: assembling nine
-//! blocks costs tens of milliseconds and a long search across them
-//! costs a hundred more. The graph fills in chunk by chunk as searches
-//! reach it, so a second path through the same streets is much cheaper
-//! than the first.
+//! The region the one planner plans on, an [`Area`]: a dungeon whole, or the blocks round a walk
+//! ([`blocks_for`], at most [`MAX_SIDE`] a side) with their buildings, as one collision world with
+//! one terrain over all, so a route leaves its block and comes back (a gate past a city wall).
+//! Assembling nine blocks costs tens of ms, a long search a hundred more: built off the frame and
+//! shared by every session (`ac-client` `pathfinder.rs`), its graph filling chunk by chunk.
 
 use std::collections::HashMap;
 
 use glam::{Vec2, Vec3};
 
 use crate::collision::{Capsule, CollisionWorld};
-use crate::nav::{self, Ground, NavGraph, INDOOR_SPACING, OUTDOOR_SPACING};
+use crate::nav::{Ground, NavGraph, INDOOR_SPACING, OUTDOOR_SPACING};
 use crate::terrain::TerrainMesh;
 use crate::worldroute::{water_kind, Water};
 use crate::{lbid, Assets, Result, BLOCK_SIZE};
@@ -218,16 +208,6 @@ impl Area {
         f(&ground, &self.nav)
     }
 
-    /// This area can plan a walk from `from` to `to`. A dungeon holds
-    /// whatever is inside it: its cells do not keep to the landblock's
-    /// square on the map, so positions in it are not judged by block.
-    pub fn holds(&self, from: Vec3, to: Vec3) -> bool {
-        if self.dungeon {
-            return true;
-        }
-        self.blocks.contains(&block_at(from)) && self.blocks.contains(&block_at(to))
-    }
-
     /// The capsule the graph was built for.
     pub fn capsule(&self) -> Capsule {
         self.nav.capsule
@@ -246,12 +226,6 @@ impl Area {
     /// build only what they cross.
     pub fn build_everything(&mut self) {
         self.with_ground(|ground, nav| nav.build_all(ground));
-    }
-
-    /// Nothing in the area crosses the chest-height line between the two
-    /// points: the test that decides a route is not needed at all.
-    pub fn line_clear(&self, from: Vec3, to: Vec3) -> bool {
-        nav::line_clear(&self.collision, from, to)
     }
 }
 

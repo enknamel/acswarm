@@ -1,26 +1,8 @@
-//! Getting a new character through the Training Academy.
-//!
-//! Every character ACE creates starts in the academy (landblock 0x8602)
-//! and its exit portal wants the Sentry's quest done, so a character
-//! played by the rules -- a follower made from the fleet panel, say --
-//! would stand in the first room for ever. This rule runs whenever the
-//! character is in that landblock: it walks the tutorial's steps
-//! (`ac_world::academy`), talking to the agents, fighting what they ask
-//! for, handing over what they want and walking into the portals, and
-//! stops the moment the character is anywhere else.
-//!
-//! The decisions live in [`State`], a step machine fed a [`View`] of the
-//! world each tick and answering with one [`Action`]; it touches no
-//! client state, so the transitions are tested without a server. The
-//! [`Client`] side gathers the view and carries the action out with the
-//! ordinary means: a walk goal (`Client::follow`), `use_object`, `give`,
-//! `pick_up`, and the fight rule pointed at the creatures a step names.
-//!
-//! What the agents say is the only word on the quests (the server keeps
-//! the stamps to itself), so every talk listens: an agent's "already
-//! done" line skips the rest of its quest, which is how a character
-//! coming back from a death, or a restarted client, picks up where it
-//! was. A portal that works is proof of the quest before it too.
+//! The Training Academy (landblock 0x8602), where ACE starts every character and whose exit portal
+//! wants the Sentry's quest: while there, its steps (`ac_world::academy`) are walked. [`State`]
+//! decides from a [`View`], one [`Action`] a tick, with no client state; [`Client`] acts by `go`,
+//! `use_object`, `give`, `pick_up` and the fight rule. An agent's "already done" skips its quest
+//! (the server keeps the stamps), so a death or restart resumes; a portal that works proves it too.
 
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
@@ -31,6 +13,7 @@ use serde::{Deserialize, Serialize};
 pub use ac_world::academy::{skip_steps, steps, Kind, Step, LANDBLOCK};
 
 use crate::autoplay::{Doing, Release, CORPSE_REACH};
+use crate::body::server_walk::reached;
 use crate::did::Did;
 use crate::{Client, Goal};
 
@@ -328,11 +311,10 @@ impl State {
         self.stuck = true;
     }
 
-    /// Walk toward `target`: `None` once within `stop` of it (or its walk refused, to act from
-    /// here), else the approach to make.
+    /// Walk toward `target`: `None` once within `stop` of it on its floor (or its walk refused,
+    /// to act from here), else the approach to make.
     fn approach(&mut self, v: &View, target: Vec3, stop: f32, status: String) -> Option<Action> {
-        let flat = glam::Vec2::new(target.x - v.pos.x, target.y - v.pos.y).length();
-        if flat <= stop || self.stuck {
+        if reached(v.pos, target, stop) || self.stuck {
             return None;
         }
         Some(Action::Approach {
@@ -1195,12 +1177,11 @@ impl Client {
             return;
         }
         // Nothing to fight: to the spot, then wait for them to appear.
-        let flat = glam::Vec2::new(centre.x - pos.x, centre.y - pos.y).length();
         let goal = Goal::At {
             place: self.place_at(centre),
             within: REACH,
         };
-        let walking = if flat > REACH {
+        let walking = if !reached(pos, centre, REACH) {
             // No walk there: they are waited for where the character stands.
             !matches!(self.go(self.step_owner(), goal, now), Did::Blocked(_))
         } else {
@@ -1346,6 +1327,7 @@ mod tests {
         let (mut c, _, me) = wasp_corpse(Vec3::ZERO);
         let floor = c
             .standable_near(me, 8.0)
+            .expect("built offline")
             .into_iter()
             .find(|p| p.at.distance(me) > 4.0)
             .expect("floor round the hunt");

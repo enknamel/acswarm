@@ -258,6 +258,7 @@ fn a_refusal_stands_while_another_goal_holds_the_slot() {
     let me = c.my_position().expect("standing");
     let place = c
         .standable_near(me, 8.0)
+        .expect("built offline")
         .into_iter()
         .find(|p| p.at.distance(me) > 3.0)
         .expect("floor round the start");

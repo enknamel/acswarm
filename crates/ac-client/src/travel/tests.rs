@@ -692,6 +692,7 @@ fn a_journey_that_loses_a_step_is_planned_again_without_it() {
     let (start, ledge) = under_the_01f6_ledge(&mut c);
     let goal = c
         .standable_near(start, 10.0)
+        .expect("built offline")
         .into_iter()
         .find(|p| p.at.distance(start) > 6.0)
         .expect("floor round the start");
@@ -931,7 +932,7 @@ fn back_from_the_dead(c: &mut Client, t: Instant) -> Instant {
     let rec = &mut c.autoplay.recovery;
     rec.phase = crate::recovery::Phase::Landed;
     rec.since = t;
-    rec.death_xy = None;
+    rec.death = None;
     let t = t + Duration::from_secs(5);
     c.tick_autoplay(t);
     assert!(!c.autoplay.recovery.active(), "the recovery did not finish");

@@ -40,12 +40,10 @@ use glam::Vec3;
 use crate::did::Did;
 use crate::{Client, Goal, Owner, SAME_FLOOR};
 
-/// Within this far of the person (metres, in three dimensions) and on
-/// their floor, the use is sent. Inside the server's own reach for
-/// talking to someone, so the use needs no walk of the server's.
+/// The use is sent within this of the person (metres, 3D): inside the server's talking reach,
+/// so the use needs no server walk.
 pub const REACH: f32 = 3.0;
-/// How close to the person the walk stops (flat): well inside
-/// [`REACH`], so arriving is arriving in reach.
+/// The walk to the person ends within this (metres, 3D): well inside [`REACH`].
 const STOP: f32 = 1.5;
 /// Someone found by name must stand this near where the visit is bound
 /// to be the one it is bound for: the gazetteer names the same

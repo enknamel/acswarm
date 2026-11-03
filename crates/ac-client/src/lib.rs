@@ -236,8 +236,7 @@ pub struct Client {
     /// answered, since a tick's words cannot be an answer to that same
     /// tick's ask.
     pub(crate) told: Option<Instant>,
-    /// Route steering toward `move_to` when the straight line to it is
-    /// blocked (see `route`).
+    /// The follower of the slot's planned route, or a server walk's (see `route`).
     pub steering: route::Steering,
     /// The server's objects standing round the character, which a
     /// walk goes round (see `ac_nav::obstacles`).
@@ -246,8 +245,7 @@ pub struct Client {
     pub walk_frame: Option<tally::WalkFrame>,
     /// Blows traded this session: for telemetry.
     pub blows: tally::Blows,
-    /// Planner for routes that leave the landblock we stand in, run on a
-    /// thread of its own (see `pathfinder`).
+    /// The region planner: graphs built on a thread, planned on from the frame (see `pathfinder`).
     pub pathfinder: pathfinder::Pathfinder,
     /// The overland route being walked, if any (see `travel`).
     pub travel: travel::Travel,
