@@ -98,12 +98,18 @@ class Data:
             return "random"
         return found[0]
 
+    def outcomes(self, obj, cats, message):
+        """Every set of `obj` keyed on `message`, in `cats` (None: any reply category)."""
+        key = message.lower()
+        return [s for s in self.by_obj[obj] if s["quest"] == key
+                and (s["cat"] in cats if cats else s["cat"] not in (REFUSE, GIVE, USE))]
+
     def level(self, wcid):
         return self.ints[wcid].get(25, 0)
 
 
 def walk(data, root):
-    """Every path from `root`: (branches, effects), or (None, why) for one the client cannot know."""
+    """Every path from `root`: (branches, effects); a branch the client cannot read is (t, why, a)."""
     out = []
     obj = root["obj"]
 
@@ -121,7 +127,10 @@ def walk(data, root):
             if t == GOTO:
                 nxt = data.outcome(obj, GOTO_SET, a["msg"])
                 if nxt == "random":
-                    out.append((None, "random"))
+                    for alt in data.outcomes(obj, (GOTO_SET,), a["msg"]):
+                        if alt["id"] not in seen and len(stack) < DEPTH:
+                            go(stack + [(alt, 0)], branches + [(t, "a random reply", a)],
+                               effects, seen | {alt["id"]})
                     return
                 if nxt is not None and nxt["id"] not in seen and len(stack) < DEPTH:
                     stack = stack + [(nxt, 0)]
@@ -133,12 +142,23 @@ def walk(data, root):
                 elif t in (INQ_INT, INQ_OWNS):
                     cats = ((TEST_OK, True), (TEST_NO, False))
                 else:
-                    out.append((None, "other branches"))
+                    # A check the client cannot read: every reply keyed on it is a path.
+                    alts = [x for x in data.outcomes(obj, None, a["msg"]) if x["id"] not in seen]
+                    why = "a check of type %d" % t
+                    if not alts or len(stack) >= DEPTH:
+                        go(stack, branches + [(t, why, a)], effects, seen)
+                    for alt in alts if len(stack) < DEPTH else []:
+                        go(stack + [(alt, 0)], branches + [(t, why, a)], effects,
+                           seen | {alt["id"]})
                     return
                 for cat, ok in cats:
                     nxt = data.outcome(obj, cat, a["msg"])
                     if nxt == "random":
-                        out.append((None, "random"))
+                        for alt in data.outcomes(obj, (cat,), a["msg"]):
+                            if alt["id"] not in seen and len(stack) < DEPTH:
+                                go(stack + [(alt, 0)],
+                                   branches + [(t, ok, a), (t, "a random reply", a)],
+                                   effects, seen | {alt["id"]})
                         continue
                     b = branches + [(t, ok, a)]
                     if nxt is None or nxt["id"] in seen or len(stack) >= DEPTH:
@@ -189,16 +209,20 @@ def read_path(data, root, branches, effects, never):
     `never`: flags no row of the file stamps, so never held; None on the first pass."""
     stamped = stamps_of(effects)
     r = {"band": [0, 0], "timer": "", "repeat": 0, "kill": None, "items": [], "needs": [],
-         "start": None, "unneeds": []}
+         "start": None, "unneeds": [], "unread": []}
     if root["cat"] in (GIVE, REFUSE):
         r["items"].append((root["wcid"], 1))
     for t, ok, a in branches:
+        if isinstance(ok, str):
+            r["unread"].append(ok)
+            continue
         q = qname(a["msg"])
         quest = data.quest.get(q)
         counter = q in data.counter_of
         if t == INQ_INT:
             if num(a["stat"]) != LEVEL_STAT:
-                return "other branches"
+                r["unread"].append("a check of stat %d" % int(num(a["stat"])))
+                continue
             lo, hi = int(num(a["min"])), int(num(a["max"], MAX_LEVEL))
             at_lo, at_hi = r["band"][0], r["band"][1] or MAX_LEVEL
             if ok:
@@ -208,17 +232,21 @@ def read_path(data, root, branches, effects, never):
             elif hi >= at_hi:
                 at_hi = min(at_hi, lo - 1)
             else:
-                return "other branches"  # outside a band in the middle: two bands
+                r["unread"].append("two level bands")  # outside a band in the middle
+                continue
             if at_lo > at_hi:
-                return "other branches"
+                r["unread"].append("an empty level band")
+                continue
             r["band"] = [at_lo, at_hi]
         elif t == INQ_OWNS:
             if not ok:
-                return "other branches"
+                r["unread"].append("not carrying %s" % data.name.get(int(num(a["wcid"])), a["wcid"]))
+                continue
             r["items"].append((int(num(a["wcid"])), max(int(num(a["stack"], 1)), 1)))
         elif t == INQ_QUEST and counter:
             if quest is None or quest[1] < 1:
-                return "counters not fed by kills"
+                r["unread"].append("counters not fed by kills")
+                continue
             if ok:
                 r["kill"] = (q, quest[1])  # held at max_Solves: the count reached
             # else not reached yet: the way to the start talk or the "keep going" reply
@@ -233,24 +261,30 @@ def read_path(data, root, branches, effects, never):
             elif not ok and lo >= 2:
                 pass  # not reached yet
             else:
-                return "solve-count ranges"
+                r["unread"].append("solve-count ranges")
+                continue
         elif t == INQ_QUEST and quest is not None and quest[0] > 0:
             if ok:
-                return "another quest's wait"
+                r["waiting"] = True  # the giver's reply during the wait: the same quest
+                continue
             if r["timer"] and r["timer"] != q:
-                return "another quest's wait"
+                r["unread"].append("another quest's wait")
+                continue
             r["timer"], r["repeat"] = q, quest[0]
         elif t in (INQ_QUEST, INQ_SOLVES):
             # A flag: held or not (InqQuest: QuestManager.cs:266-280, 334-363).
             lo = int(num(a["min"], 1)) if t == INQ_SOLVES else 1
             if t == INQ_SOLVES and (lo < 1 or not open_max(a["max"])):
-                return "solve-count ranges"
+                r["unread"].append("solve-count ranges")
+                continue
             if t == INQ_QUEST and quest is not None and quest[1] == -1:
                 if ok:
-                    return "other branches"  # never held and unsolvable: no path
+                    r["unread"].append("a flag never held: %s" % q)  # unsolvable: never held
+                    continue
                 continue  # always solvable: the branch asks nothing
             if t == INQ_QUEST and quest is not None and quest[1] > 1:
-                return "solve-count ranges"
+                r["unread"].append("solve-count ranges")
+                continue
             if not ok and q in stamped:
                 if not r["timer"]:
                     r["timer"], r["repeat"] = q, -1
@@ -263,9 +297,11 @@ def read_path(data, root, branches, effects, never):
             elif not ok:
                 r["unneeds"].append(q)  # kept only where holding it pays the same (main)
             else:
-                return "needs a quest or flag not in scope"
+                r["unread"].append("asks a flag it stamps itself: %s" % q)
+                continue
         else:
-            return "other branches"
+            r["unread"].append("a check of type %d" % t)
+            continue
     if r["band"][1] >= MAX_LEVEL:
         r["band"][1] = 0
     return r
@@ -287,10 +323,32 @@ def same_pay(q):
             tuple(sorted(q["gives"])), tuple(sorted(q["stamps"])))
 
 
+# Effect types that change nothing for the character: talk, motion, sound, looks, broadcasts
+# (EmoteType.cs). A path with any other effect, or one handing an item over, is a quest row.
+COSMETIC = {1, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 23, 24, 25, 26, 52, 64, 65, 68,
+            72, 77, 78, 87, 88, 91, 92, 93, 94, 95, 96, 97, 98, 116, 117}
+# What a path does, for the `does` column: effect types by word.
+DOES = (("xp", {2, 49, 62}), ("item", {3, 56}), ("flag", {20, 22, 31, 32, 33, 60, 61, 70,
+        106, 107, 108, 109}), ("spell", {14, 19, 27, 73}), ("skill", {28, 29, 47, 50, 110, 111}),
+        ("luminance", {112, 113}), ("title", {34}), ("teleport", {99}), ("takes", {74}),
+        ("stat", {53, 54, 55, 69, 115, 118, 57, 63, 90, 48}), ("contract", {119, 120}),
+        ("enlightenment", {9001}))
+
+
+def does_of(root, effects):
+    types = {a["type"] for a in effects}
+    out = [w for w, ts in DOES if types & ts]
+    if root["cat"] in (GIVE, REFUSE) and "takes" not in out:
+        out.append("takes")
+    other = sorted(t for t in types if t not in COSMETIC and not any(t in ts for _, ts in DOES))
+    return out + ["type %d" % t for t in other]
+
+
 def build(data, never):
-    """The rows and sources of both files, and why paths are out; `never` as for read_path."""
+    """The rows and sources of both files, and counts of what the walk could not read; `never`
+    as for read_path. Every path that does something for the character is a row."""
     reasons = defaultdict(int)
-    xp_paths, starts, npc_gives = [], [], defaultdict(set)
+    paths, starts, npc_gives = [], [], defaultdict(set)
     for obj in sorted(data.placed):
         if data.wtype[obj] not in (10, 12):
             continue
@@ -298,57 +356,60 @@ def build(data, never):
         roots = []
         uses = [s for s in sets if s["cat"] == USE]
         if uses:
-            roots.append("random" if any(s["p"] < 1 for s in uses) else uses[0])
+            chance = any(s["p"] < 1 for s in uses)
+            roots += [(s, chance) for s in (uses if chance else uses[:1])]
         for wcid in sorted({s["wcid"] for s in sets if s["cat"] in (GIVE, REFUSE)}):
             for cat in (REFUSE, GIVE):
                 if cat == GIVE and obj not in data.allow_give:
                     break  # Player_Inventory.cs:3439
                 keyed = [s for s in sets if s["cat"] == cat and s["wcid"] == wcid]
                 if keyed:
-                    roots.append("random" if any(s["p"] < 1 for s in keyed) else keyed[0])
+                    chance = any(s["p"] < 1 for s in keyed)
+                    roots += [(s, chance) for s in (keyed if chance else keyed[:1])]
                     break
-        for root in roots:
-            if root == "random":
-                continue
-            for branches, effects in walk(data, root):
-                if branches is None:
-                    continue
+        for root, chance in roots:
+            found = walk(data, root)
+            if len(found) >= MAX_PATHS:
+                reasons["roots past %d paths (the rest unwalked)" % MAX_PATHS] += 1
+            for branches, effects in found:
+                does = does_of(root, effects)
+                if not does:
+                    continue  # talk only: no quest
                 fixed, scaled, share = xp_of(effects)
                 r = read_path(data, root, branches, effects, never)
-                if isinstance(r, str):
-                    if fixed or scaled:
-                        reasons[r] += 1
-                    continue
+                if r.get("waiting"):
+                    continue  # the same quest's reply during its wait
+                if chance:
+                    r["unread"].insert(0, "a random reply")
                 r.update(obj=obj, root=root, fixed=fixed, scaled=scaled, share=share,
-                         stamps=stamps_of(effects),
+                         stamps=stamps_of(effects), does=does,
                          gives=[(int(num(a["wcid"])), max(int(num(a["stack"], 1)), 1))
                                 for a in effects if a["type"] == GIVE_ITEM and a["wcid"]])
                 if root["cat"] == USE and not r["items"]:
                     for wcid, _ in r["gives"]:
                         npc_gives[wcid].add(obj)
-                if fixed or scaled:
-                    xp_paths.append(r)
-                elif root["cat"] == USE and r["stamps"] and not r["items"] and not r["kill"]:
+                if (root["cat"] == USE and does == ["flag"] and r["stamps"] and not r["items"]
+                        and not r["kill"] and not r["unread"]):
                     starts.append(r)
+                else:
+                    paths.append(r)
+                for u in r["unread"]:
+                    reasons[u.split(":")[0]] += 1
 
-    quests = []
-    for r in xp_paths:
+    def quest_of(r, kind_hint=None):
         items = sorted(set(r["items"]))
-        if len({w for w, _ in items}) > 1:
-            reasons["two items"] += 1
-            continue
-        if r["kill"] and items:
-            reasons["two items"] += 1
-            continue
-        if r["start"]:
-            reasons["other branches"] += 1
-            continue
+        unread = list(r["unread"])
+        for w, _ in items[1:]:
+            if w != items[0][0]:
+                unread.append("also asks for %s" % data.name.get(w, w))
         item = None
         if items:
             wcid = items[0][0]
-            count = max(n for _, n in items)
-            item = (wcid, count)
+            item = (wcid, max(n for w, n in items if w == wcid))
         if r["kill"]:
+            if item:
+                unread.append("also asks for %s" % data.name.get(item[0], item[0]))
+                item = None
             kind, want, count = "kill", r["kill"][0], r["kill"][1]
             needs = r["needs"] + [r["kill"][0]]
             qid = r["kill"][0]
@@ -360,6 +421,8 @@ def build(data, never):
             kind, want, count = "talk", "", 0
             needs = r["needs"]
             qid = r["timer"] or (r["stamps"][0] if r["stamps"] else "talk:%d" % r["obj"])
+        if r["start"]:
+            unread.append("a kill task not taken up: %s" % r["start"])
         timer, repeat = r["timer"], r["repeat"]
         if item:
             # A pickup limit on the item limits the quest: one looted per wait, or one ever.
@@ -370,10 +433,13 @@ def build(data, never):
                 timer, repeat = timer or data.pickup[item[0]], -1
             if item[0] in data.restrict:
                 needs = needs + [data.restrict[item[0]]]
-        quests.append(dict(r, id=qid, kind=kind, want=want, count=count, needs=needs,
-                           item=item, timer=timer, repeat=repeat))
+        return dict(r, id=qid, kind=kind, want=want, count=count, needs=needs, item=item,
+                    timer=timer, repeat=repeat, unread=unread)
 
-    # A path asking a flag not held stays only where the path asking it held pays the same.
+    quests = [quest_of(r) for r in paths]
+
+    # A path asking a flag not held is the same row as the path asking it held when both pay
+    # the same; else it stays, saying which flag it asks to be without.
     by_pay = defaultdict(list)
     for q in quests:
         if not q["unneeds"]:
@@ -385,64 +451,45 @@ def build(data, never):
             continue
         held = sorted(q["needs"] + q["unneeds"])
         twin = [o for o in by_pay[same_pay(q)] if sorted(o["needs"]) == held]
-        if not twin:
-            reasons["needs a quest or flag not in scope"] += 1
         for o in twin:
             o["needs"] = list(q["needs"])
+        if not twin:
+            q["unread"] = q["unread"] + ["only without %s" % f for f in q["unneeds"]]
+            plain.append(q)
     quests = plain
 
-    def sources_of(q):
-        if q["kind"] == "kill":
-            return [w for w in data.counter_of[q["want"]] if data.spawns.get(w)]
-        if q["kind"] == "item":
-            w = q["item"][0]
-            return [c for c, _ in data.drops.get(w, []) if data.spawns.get(c)] + \
-                sorted(npc_gives.get(w, ()))
-        return [True]
-
-    kept = []
-    for q in quests:
-        if not sources_of(q):
-            reasons["nothing drops or gives it" if q["kind"] == "item" else "nothing spawns"] += 1
-            continue
-        kept.append(q)
-
-    # Start talks: a no-XP talk stamping what a kept quest needs (a kill task's counter).
-    while True:
-        stamped = {s for q in kept for s in q["stamps"]}
-        needed = {n for q in kept for n in q["needs"]}
-        start_rows = []
-        for s in starts:
-            for flag in s["stamps"]:
-                if flag in needed and flag not in stamped:
-                    for q in kept:
-                        if flag in q["needs"]:
-                            # The start talk's own wait is the quest's when its reward asks none.
-                            if s["repeat"] > 0 and not q["timer"]:
-                                q["timer"], q["repeat"] = s["timer"], s["repeat"]
-                            start_rows.append(dict(s, id=q["id"], kind="start", want="",
-                                                   count=0, needs=[n for n in s["needs"]
-                                                                   if n != flag],
-                                                   item=None, timer="", repeat=0,
-                                                   stamps=[flag], fixed=0, scaled=None,
-                                                   share="none", gives=[]))
-                            break
-        both = kept + start_rows
-        have = {f for q in both for f in q["stamps"]}
-        left = [q for q in both if all(n in have for n in q["needs"])]
-        if len(left) == len(both):
-            break
-        reasons["needs a quest or flag not in scope"] += len(kept) - len(
-            [q for q in left if q["kind"] != "start"])
-        kept = [q for q in left if q["kind"] != "start"]
-        starts = [s for s in starts if all(n in have for n in s["needs"])]
+    # Start talks: a talk stamping only what another row needs (a kill task's counter) is that
+    # quest's start row; any other is a talk quest of its own.
+    stamped = {s for q in quests for s in q["stamps"]}
+    needed = {n for q in quests for n in q["needs"]}
+    start_rows, used = [], set()
+    for i, s in enumerate(starts):
+        for flag in s["stamps"]:
+            if flag in needed and flag not in stamped:
+                for q in quests:
+                    if flag in q["needs"]:
+                        # The start talk's own wait is the quest's when its reward asks none.
+                        if s["repeat"] > 0 and not q["timer"]:
+                            q["timer"], q["repeat"] = s["timer"], s["repeat"]
+                        start_rows.append(dict(s, id=q["id"], kind="start", want="",
+                                               count=0, needs=[n for n in s["needs"]
+                                                               if n != flag],
+                                               item=None, timer="", repeat=0,
+                                               stamps=[flag], fixed=0, scaled=None,
+                                               share="none", gives=[]))
+                        used.add(i)
+                        break
+    quests += [quest_of(s) for i, s in enumerate(starts) if i not in used]
+    kept = quests
 
     rows_out = []
-    seen = set()
+    seen = {}
     for q in kept + start_rows:
         title = data.quest.get(q["id"], (0, 0, ""))[2]
         if q["id"].startswith("give:"):
-            title = data.name.get(q["item"][0], q["id"])
+            title = data.name.get(int(q["id"][5:]), q["id"])
+        elif q["id"].startswith("talk:"):
+            title = "Talk to %s" % data.name.get(q["obj"], q["id"])
         title = (title or q["id"]).replace(",", ";")
         pct, lo, hi = q["scaled"] or (0, 0, 0)
         hand = "give" if q["root"]["cat"] in (GIVE, REFUSE) else "talk"
@@ -457,10 +504,16 @@ def build(data, never):
                    str(hi), q["share"] or "none",
                    ";".join("%d:%d" % g for g in q["gives"]), ";".join(q["stamps"]),
                    str(q["repeat"]), q["timer"], ";".join(q["needs"]), it_name, it_type,
-                   it_value)
-            if row not in seen:
-                seen.add(row)
+                   it_value, ";".join(q["does"]),
+                   "|".join(u.replace(",", ";") for u in dict.fromkeys(q["unread"])))
+            key = row[:-1]  # rows differing only in what was unread are one row
+            if key not in seen:
+                seen[key] = len(rows_out)
                 rows_out.append(row)
+            elif row[-1]:
+                i = seen[key]
+                both = [u for u in rows_out[i][-1].split("|") if u] + row[-1].split("|")
+                rows_out[i] = key + ("|".join(dict.fromkeys(both)),)
     kind_order = {"start": 0, "talk": 1, "kill": 2, "item": 3}
     rows_out.sort(key=lambda r: (r[0], kind_order[r[1]], int(r[3]), r[5], r[12]))
 
@@ -515,8 +568,9 @@ def main():
 
 
 QUESTS_HEADER = """\
-# Quests an NPC rewards with XP: one row per way to complete one (giver placement x level band).
-# id,kind,title,giver_wcid,giver,cell,x,y,z,hand,want,count,min_level,max_level,xp,xp_level,xp_min,xp_max,share,gives,stamps,repeat,timer,needs,item,item_type,item_value
+# Every quest a placed NPC holds: each Use, Give or Refuse path that does anything for the
+# character, one row per way to complete one (giver placement x level band).
+# id,kind,title,giver_wcid,giver,cell,x,y,z,hand,want,count,min_level,max_level,xp,xp_level,xp_min,xp_max,share,gives,stamps,repeat,timer,needs,item,item_type,item_value,does,unread
 # Rows sharing an id are alternatives. kind: kill, item, talk, or start (the talk that takes a
 # quest up: it stamps what the quest's rows need). cell is hex, x/y/z local to its landblock.
 # hand: give (hand the item over) or talk. want: the item wcid, or the kill counter. count: items
@@ -524,7 +578,9 @@ QUESTS_HEADER = """\
 # the next level, clamped to xp_min/xp_max when not 0. share: all, none or allegiance. gives:
 # wcid:count;... stamps and needs: quest flags. repeat: seconds before another solve, 0 any time,
 # -1 once; timer: the quest its wait is kept under. item, item_type (hex), item_value: the wanted
-# item. Regenerate with reference/scripts/data/quests.sh (reads the ACE world database, the
+# item. does: what the path does (xp, item, flag, spell, skill, luminance, title, teleport,
+# takes, stat, contract, enlightenment, type N). unread: conditions the client cannot check,
+# |-separated. Regenerate with reference/scripts/data/quests.sh (reads the ACE world database, the
 # community's reconstruction of retail's server data).
 """
 
