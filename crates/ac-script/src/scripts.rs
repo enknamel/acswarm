@@ -675,6 +675,39 @@ mod tests {
         );
     }
 
+    #[test]
+    fn quest_pursuit_functions_reach_the_api() {
+        let dir = script_dir();
+        write(
+            &dir,
+            "q.rhai",
+            r#"
+            fn command(name, args) {
+                if name != "q" { return false; }
+                if pursue_quest(args, true) { log("pursued"); }
+                log("lines " + quest_pursuit());
+                stop_pursuing(args);
+                true
+            }
+            "#,
+        );
+        let mut scripts = Scripts::new(&dir);
+        let mut rec = Recorder::new();
+        {
+            let _bound = Bound::new(&mut rec);
+            scripts.rescan();
+            assert!(scripts.command(0, "q", "engorgedeaterjaw"));
+        }
+        assert_eq!(
+            rec.calls,
+            [
+                "[0] pursue_quest engorgedeaterjaw true",
+                "[0] quest_pursuit",
+                "[0] stop_pursuing engorgedeaterjaw"
+            ]
+        );
+    }
+
     fn examples_dir() -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/examples")
     }

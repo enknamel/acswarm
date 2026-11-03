@@ -14,11 +14,11 @@ use super::vendor::counter_place;
 use super::{Errand, Phase, Run, Turn, VENDOR_REACH};
 use crate::autoplay::growth::Growth;
 use crate::autoplay::Doing;
-use crate::quest_log::{worth_detour, QuestState, SHORT_LEG};
+use crate::quest_log::{worth_detour, QuestLine, QuestState, SHORT_LEG};
 use crate::Client;
 
 /// A giver no journey reached is planned to again after this (a Warden's wait, hunt.rs).
-const GIVER_RETRY: Duration = Duration::from_secs(30 * 60);
+pub(crate) const GIVER_RETRY: Duration = Duration::from_secs(30 * 60);
 /// A give not answered in this long counts as unanswered (design §5.1, guess).
 const GIVE_PAUSE: Duration = Duration::from_secs(3);
 /// Unanswered gives before the call ends: ACE turns a give away while the giver emotes
@@ -45,11 +45,64 @@ pub(crate) enum CallOn {
     Giver { row: &'static Row },
 }
 
-/// A ready hand-in a run may take: the giver's row and the XP of every hand-in carried.
+/// A ready hand-in a run may take: the giver's row, the placement called at, and the XP of
+/// every hand-in carried.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct HandIn {
     pub(super) row: &'static Row,
+    pub(super) at: Place,
     pub(super) xp: u64,
+    /// For a pursued quest: taken on any run, whatever the detour.
+    pub(super) pursued: bool,
+}
+
+/// What a giver's placement is chosen on, as one character stands.
+pub(crate) struct Asking<'a> {
+    pub(crate) level: u32,
+    /// Quest flags held: a door shut behind one not held keeps a giver out of reach.
+    pub(crate) held: &'a [String],
+    /// Items carried, by weenie class, worn ones left out.
+    pub(crate) carried: &'a dyn Fn(u32) -> u32,
+    /// The giver at that placement was refused lately.
+    pub(crate) refused: &'a dyn Fn(&Row, &Place) -> bool,
+    /// How far a placement is, by the caller's measure: the nearest is asked.
+    pub(crate) away: &'a dyn Fn(&Place) -> f32,
+}
+
+impl Asking<'_> {
+    /// `row`'s nearest placement it can be asked at: an open door, not lately refused.
+    fn open_at(&self, row: &'static Row) -> Option<(f32, &'static Row, Place)> {
+        row.places
+            .iter()
+            .filter(|p| ac_world::quests::locked_at(p, self.held).is_none())
+            .filter(|p| !(self.refused)(row, p))
+            .map(|p| ((self.away)(p), row, *p))
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+    }
+
+    /// The nearest talk with `from` in the level band stamping `flag`, and how far: matched by
+    /// the flag too, as givers share names.
+    pub(crate) fn take_up_at(&self, from: &str, flag: &str) -> Option<(f32, &'static Row, Place)> {
+        let stamps = |r: &Row| r.stamps.iter().any(|s| s.eq_ignore_ascii_case(flag));
+        ac_world::quests::all()
+            .iter()
+            .filter(|r| r.kind == Kind::Start && r.giver == from && stamps(r))
+            .filter(|r| r.fits_level(self.level))
+            .filter_map(|r| self.open_at(r))
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+    }
+
+    /// The nearest way to hand `line`'s quest in now, its items carried, and how far.
+    pub(crate) fn hand_in_at(&self, line: &QuestLine) -> Option<(f32, &'static Row, Place)> {
+        crate::quest_log::worked_rows(line)
+            .filter(|r| r.kind == line.kind && r.fits_level(self.level))
+            .filter(|r| match r.want {
+                Want::Item(w) => (self.carried)(w) >= r.count.max(1),
+                _ => true,
+            })
+            .filter_map(|r| self.open_at(r))
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+    }
 }
 
 /// What planning a run's calls came to.
@@ -62,7 +115,7 @@ pub(crate) struct CallPlan {
 }
 
 /// Which hand-ins join a run calling at `counters` (the legs' first calls), and every call's order:
-/// best XP a second of detour first, each tried on the tour as it stands, to [`EVERY_ORDER`] calls.
+/// pursued then best XP a second of detour first, each tried on the tour, to [`EVERY_ORDER`] calls.
 pub(crate) fn plan_calls(
     legs: &Legs,
     counters: &[Place],
@@ -79,7 +132,7 @@ pub(crate) fn plan_calls(
     // In a counter's town or a short leg out from one, and no more than there and back out of
     // the way: a cheap recall home makes no giver near.
     let on_the_round = |g: usize, detour: f32| {
-        let block = hand_ins[g - n].row.place.cell >> 16;
+        let block = hand_ins[g - n].at.cell >> 16;
         detour <= 2.0 * SHORT_LEG
             && counters
                 .iter()
@@ -104,7 +157,9 @@ pub(crate) fn plan_calls(
         let detour = base.map_or(w, |b| (w - b).max(0.0));
         tried.push((g, h.xp as f32 / detour.max(1.0)));
     }
-    tried.sort_by(|a, b| b.1.total_cmp(&a.1));
+    // A pursued quest's hand-in goes first, whatever it pays: the player asked for it.
+    let pursued = |g: usize| hand_ins[g - n].pursued;
+    tried.sort_by(|a, b| pursued(b.0).cmp(&pursued(a.0)).then(b.1.total_cmp(&a.1)));
     for (g, _) in tried {
         if taken.len() >= EVERY_ORDER {
             break;
@@ -114,7 +169,8 @@ pub(crate) fn plan_calls(
             continue;
         };
         let detour = base.map_or(w, |b| (w - b).max(0.0));
-        if on_the_round(g, detour) || worth_detour(hand_ins[g - n].xp, detour, xp_per_hour) {
+        let worth = worth_detour(hand_ins[g - n].xp, detour, xp_per_hour);
+        if pursued(g) || on_the_round(g, detour) || worth {
             taken = with;
             base = Some(w);
         }
@@ -128,48 +184,45 @@ impl Client {
     /// giver nearest the first of `near` it can be asked at (level band, open door, not lately
     /// refused), nearest first, at most `most`.
     pub(super) fn ready_hand_ins(&self, near: &[Vec2], most: usize, now: Instant) -> Vec<HandIn> {
-        let level = self.world.stats.level.max(0) as u32;
-        let held = &self.travel.quests_done;
         let refused = &self.autoplay.growth.givers_refused;
-        let away = |r: &Row| {
+        let carried = |w| self.carried_count(w);
+        let refused =
+            |r: &Row, p: &Place| refused.within(&(r.giver_wcid, p.cell), now, GIVER_RETRY);
+        let away = |p: &Place| {
             near.iter()
-                .map(|p| p.distance(r.place.at.truncate()))
+                .map(|n| n.distance(p.at.truncate()))
                 .fold(f32::MAX, f32::min)
         };
-        let open = |r: &&'static Row| {
-            r.fits_level(level)
-                && r.locked_by(held).is_none()
-                && !refused.within(&(r.giver_wcid, r.place.cell), now, GIVER_RETRY)
+        let asking = Asking {
+            level: self.world.stats.level.max(0) as u32,
+            held: &self.travel.quests_done,
+            carried: &carried,
+            refused: &refused,
+            away: &away,
         };
+        let pursued = |id: &str| self.pursuit.iter().any(|l| l.id == id);
         let mut out: Vec<(f32, HandIn)> = Vec::new();
         for line in &self.quest_board {
             // Not taken up: a talk to whoever starts it, the quest's own XP its worth.
-            if let (true, QuestState::NotTaken { from }) = (line.on, &line.state) {
-                let start = ac_world::quests::all()
-                    .iter()
-                    .filter(|r| r.kind == Kind::Start && r.giver == *from)
-                    .filter(open)
-                    .min_by(|a, b| away(a).total_cmp(&away(b)));
-                if let Some(row) =
-                    start.filter(|r| !out.iter().any(|(_, h)| std::ptr::eq(h.row, *r)))
+            if let (true, QuestState::NotTaken { from, flag }) = (line.on, &line.state) {
+                let start = asking.take_up_at(from, flag);
+                if let Some((d, row, at)) =
+                    start.filter(|(_, r, _)| !out.iter().any(|(_, h)| std::ptr::eq(h.row, *r)))
                 {
-                    out.push((away(row), HandIn { row, xp: line.xp }));
+                    let hand_in = HandIn {
+                        row,
+                        at,
+                        xp: line.xp,
+                        pursued: pursued(&line.id),
+                    };
+                    out.push((d, hand_in));
                 }
                 continue;
             }
             if !line.on || line.state != QuestState::Ready || line.kind == Kind::Start {
                 continue;
             }
-            let row = ac_world::quests::rows_of(&line.id)
-                .filter(|r| r.kind == line.kind && r.fits_level(level))
-                .filter(|r| match r.want {
-                    Want::Item(w) => self.carried_count(w) >= r.count.max(1),
-                    _ => true,
-                })
-                .filter(|r| r.locked_by(held).is_none())
-                .filter(|r| !refused.within(&(r.giver_wcid, r.place.cell), now, GIVER_RETRY))
-                .min_by(|a, b| away(a).total_cmp(&away(b)));
-            let Some(row) = row else {
+            let Some((d, row, at)) = asking.hand_in_at(line) else {
                 continue;
             };
             // A hand-in that repeats any time pays for each one carried (the Collectors).
@@ -179,13 +232,13 @@ impl Client {
                 }
                 _ => 1,
             };
-            out.push((
-                away(row),
-                HandIn {
-                    row,
-                    xp: line.xp * u64::from(times),
-                },
-            ));
+            let hand_in = HandIn {
+                row,
+                at,
+                xp: line.xp * u64::from(times),
+                pursued: pursued(&line.id),
+            };
+            out.push((d, hand_in));
         }
         out.sort_by(|a, b| a.0.total_cmp(&b.0));
         out.into_iter().take(most).map(|(_, h)| h).collect()
@@ -256,12 +309,12 @@ impl Client {
     /// Givers no journey reaches, refused when the run is planned: not asked again for a while.
     fn refuse_givers(&mut self, hand_ins: &[HandIn], refused: &[usize], now: Instant) {
         for &k in refused {
-            let row = hand_ins[k].row;
-            self.refuse_giver(row, &format!("no way to {}", row.giver), now);
+            let HandIn { row, at, .. } = hand_ins[k];
+            self.refuse_giver(row, at, &format!("no way to {}", row.giver), now);
         }
     }
 
-    fn refuse_giver(&mut self, row: &Row, why: &str, now: Instant) {
+    fn refuse_giver(&mut self, row: &Row, at: Place, why: &str, now: Instant) {
         // Not asked after all: no answer is waited for.
         if self
             .quest_asked
@@ -270,7 +323,7 @@ impl Client {
         {
             self.quest_asked = None;
         }
-        let key = (row.giver_wcid, row.place.cell);
+        let key = (row.giver_wcid, at.cell);
         self.autoplay.growth.givers_refused.mark(key, now);
         self.autoplay.note(format!("{why} for {}", row.title), now);
     }
@@ -278,7 +331,8 @@ impl Client {
     /// The run that just set off for its counter takes the ready hand-ins that pay, every call
     /// put in the fastest order; the first may be a giver, the counter then waiting its turn.
     pub(super) fn add_hand_ins(&mut self, now: Instant) {
-        if !self.autoplay.config.quests.on {
+        let quests = &self.autoplay.config.quests;
+        if !quests.on && quests.pursue.is_empty() {
             return;
         }
         let Some(run) = self.autoplay.growth.run.as_ref() else {
@@ -297,7 +351,7 @@ impl Client {
             return;
         }
         let mut places = vec![counter.at];
-        places.extend(hand_ins.iter().map(|h| h.row.place));
+        places.extend(hand_ins.iter().map(|h| h.at));
         let Some(legs) = self.plan_legs(&places) else {
             return;
         };
@@ -308,7 +362,7 @@ impl Client {
             .iter()
             .map(|&i| match i {
                 0 => counter.clone(),
-                g => giver_call(hand_ins[g - 1].row),
+                g => giver_call(hand_ins[g - 1].row, hand_ins[g - 1].at),
             })
             .collect();
         if calls.len() <= 1 {
@@ -322,7 +376,7 @@ impl Client {
         let givers: Vec<&str> = std::iter::once(&first)
             .chain(&run.calls)
             .filter_map(|c| match &c.on {
-                CallOn::Giver { row } => Some(row.giver.as_str()),
+                CallOn::Giver { row } => Some(row.giver),
                 CallOn::Counter { .. } => None,
             })
             .collect();
@@ -341,6 +395,39 @@ impl Client {
             let full = self.pack_low_on_room();
             self.end_run(run, now, &cfg, &needs, full, None);
         }
+    }
+
+    /// A run of one call on `row`'s giver at `at`, for a pursued quest: started at once, town runs
+    /// on or off, and never futile (`Run::for_quest`). False when there is no way to the giver.
+    pub(crate) fn start_quest_call(&mut self, row: &'static Row, at: Place, now: Instant) -> bool {
+        let spot = at.at.truncate();
+        let mut run = Run {
+            vendor: row.giver.to_string(),
+            at: spot,
+            phase: Phase::Going,
+            since: now,
+            last_sell: None,
+            town: spot,
+            stops: 0,
+            sold: 0,
+            reason: format!("for {}", row.title.trim()),
+            errand: Errand::Sell,
+            visited: Vec::new(),
+            walked_on: None,
+            walking_up: false,
+            calls: Vec::new(),
+            for_quest: true,
+        };
+        if !self.make_call(&mut run, giver_call(row, at), now) {
+            return false;
+        }
+        let st = &mut self.autoplay.growth;
+        st.drop_ground_walk();
+        st.needs.clear();
+        st.by_hand = false;
+        st.window_unwanted = None;
+        st.run = Some(run);
+        true
     }
 
     /// Make `call` the run's call in hand and set off for it. False when there is no way.
@@ -367,16 +454,17 @@ impl Client {
                 ok
             }
             CallOn::Giver { row } => {
-                run.vendor = row.giver.clone();
-                run.phase = Phase::ToGiver { row, tries: 1 };
-                let ok = self.visit_giver(row);
+                let at = call.at;
+                run.vendor = row.giver.to_string();
+                run.phase = Phase::ToGiver { row, at, tries: 1 };
+                let ok = self.visit_giver(row, at);
                 if ok {
                     self.autoplay.say(
                         Doing::Shopping,
                         format!("{}: to {} for {}", run.reason, row.giver, row.title),
                     );
                 } else {
-                    self.refuse_giver(row, &format!("no way to {}", row.giver), now);
+                    self.refuse_giver(row, at, &format!("no way to {}", row.giver), now);
                 }
                 ok
             }
@@ -422,11 +510,11 @@ impl Client {
     /// One turn of a call on a giver: the visit there, then the hand-in.
     pub(super) fn giver_step(&mut self, mut run: Run, now: Instant, cfg: &Growth) -> Turn {
         match run.phase.clone() {
-            Phase::ToGiver { row, tries } => {
+            Phase::ToGiver { row, at, tries } => {
                 if self.visits.current.is_some() {
                     // Asked again each frame in reach, so the XP before the visit's use is kept.
                     if self.giver_in_reach(row).is_some() {
-                        self.ask_giver(row, now);
+                        self.ask_giver(row, at, now);
                     }
                     self.autoplay.say(
                         Doing::Shopping,
@@ -443,7 +531,7 @@ impl Client {
                             .as_ref()
                             .is_some_and(|a| std::ptr::eq(a.row, row))
                         {
-                            self.ask_giver(row, now);
+                            self.ask_giver(row, at, now);
                         }
                         self.autoplay
                             .note(format!("talked to {} for {}", row.giver, row.title), now);
@@ -451,6 +539,7 @@ impl Client {
                     }
                     run.phase = Phase::HandingIn {
                         row,
+                        at,
                         giver,
                         taken: 0,
                         last: None,
@@ -465,12 +554,13 @@ impl Client {
                     self.autoplay.growth.run = Some(run);
                     return Turn::Waited;
                 }
-                if tries >= GIVER_TRIES || !self.visit_giver(row) {
-                    self.refuse_giver(row, &format!("could not get to {}", row.giver), now);
+                if tries >= GIVER_TRIES || !self.visit_giver(row, at) {
+                    self.refuse_giver(row, at, &format!("could not get to {}", row.giver), now);
                     return self.giver_done(run, now, cfg);
                 }
                 run.phase = Phase::ToGiver {
                     row,
+                    at,
                     tries: tries + 1,
                 };
                 self.autoplay.growth.run = Some(run);
@@ -478,11 +568,12 @@ impl Client {
             }
             Phase::HandingIn {
                 row,
+                at,
                 giver,
                 taken,
                 last,
                 stalls,
-            } => self.hand_in(run, (row, giver, taken, last, stalls), now, cfg),
+            } => self.hand_in(run, (row, at, giver, taken, last, stalls), now, cfg),
             _ => {
                 self.autoplay.growth.run = Some(run);
                 Turn::Waited
@@ -495,11 +586,11 @@ impl Client {
     fn hand_in(
         &mut self,
         mut run: Run,
-        state: (&'static Row, u32, u32, Option<(Instant, u32)>, u32),
+        state: (&'static Row, Place, u32, u32, Option<(Instant, u32)>, u32),
         now: Instant,
         cfg: &Growth,
     ) -> Turn {
-        let (row, giver, mut taken, last, mut stalls) = state;
+        let (row, at, giver, mut taken, last, mut stalls) = state;
         let Want::Item(wcid) = row.want else {
             return self.giver_done(run, now, cfg);
         };
@@ -519,7 +610,7 @@ impl Client {
         let waits = !row.timer.is_empty()
             && self
                 .quest_log
-                .wait_until(&row.timer, crate::holdings::unix_now())
+                .wait_until(row.timer, crate::holdings::unix_now())
                 .is_some();
         let more = row.repeat == Repeat::Any || taken == 0;
         let item = self
@@ -530,7 +621,7 @@ impl Client {
         let ends = !more || waits || stalls >= GIVE_STALLS || carried < row.count.max(1);
         let Some(item) = item.filter(|_| !ends) else {
             if taken == 0 && stalls >= GIVE_STALLS {
-                self.refuse_giver(row, &format!("{} would not take it", row.giver), now);
+                self.refuse_giver(row, at, &format!("{} would not take it", row.giver), now);
             }
             self.autoplay.note(
                 format!("handed {taken} {} to {}", item_name(row), row.giver),
@@ -541,13 +632,14 @@ impl Client {
         if !self.give(giver, item, Some(1)) {
             return self.giver_done(run, now, cfg);
         }
-        self.ask_giver(row, now);
+        self.ask_giver(row, at, now);
         self.autoplay.say(
             Doing::Shopping,
             format!("handing {} to {}", item_name(row), row.giver),
         );
         run.phase = Phase::HandingIn {
             row,
+            at,
             giver,
             taken,
             last: Some((now, carried)),
@@ -558,16 +650,16 @@ impl Client {
     }
 }
 
-/// A call on `row`'s giver, at its place and cell.
-fn giver_call(row: &'static Row) -> Call {
+/// A call on `row`'s giver, at its placement `at`.
+fn giver_call(row: &'static Row, at: Place) -> Call {
     Call {
-        at: row.place,
+        at,
         on: CallOn::Giver { row },
     }
 }
 
 fn item_name(row: &Row) -> &str {
-    row.item.as_ref().map_or("the item", |i| i.name.as_str())
+    row.item.as_ref().map_or("the item", |i| i.name)
 }
 
 #[cfg(test)]

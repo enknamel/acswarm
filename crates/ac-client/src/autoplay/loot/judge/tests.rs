@@ -301,7 +301,7 @@ fn a_worn_item_a_salvage_rule_claims_is_kept() {
 
 /// A Red Rat Tail as quests.csv has it.
 fn red_rat_tail() -> ac_world::quests::Item {
-    ac_world::quests::rows_of("give:3684")
+    ac_world::quests::rows_of("give:3684:2470")
         .find_map(|r| r.item.clone())
         .expect("the Collectors' row names its item")
 }
@@ -351,13 +351,16 @@ fn the_cross_check_names_the_rule_above_the_quest_rule_that_would_lose_a_quest_i
 #[test]
 fn the_board_says_a_quest_wont_complete_and_names_the_rule() {
     use crate::quest_log::{quest_board, QuestFacts, QuestState};
-    let rows: Vec<_> = ac_world::quests::rows_of("give:3684").cloned().collect();
+    let rows: Vec<_> = ac_world::quests::rows_of("give:3684:2470")
+        .cloned()
+        .collect();
     let cheap = asks("nothing cheap", "value<=250", LootAction::Skip);
     let mut facts = QuestFacts {
         level: 20,
         config: crate::autoplay::Quests {
             on: true,
             off: Vec::new(),
+            ..Default::default()
         },
         profile: Some(std::sync::Arc::new(profile_of(vec![
             cheap.clone(),

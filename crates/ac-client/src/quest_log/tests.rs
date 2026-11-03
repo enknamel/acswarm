@@ -10,6 +10,7 @@ fn on() -> QuestFacts {
         config: Quests {
             on: true,
             off: Vec::new(),
+            ..Default::default()
         },
         now: 1_000_000,
         ..QuestFacts::default()
@@ -30,7 +31,8 @@ fn a_kill_task_is_taken_up_counted_then_ready_and_waits_once_handed_in() {
     assert_eq!(
         state(id, &facts),
         QuestState::NotTaken {
-            from: "San Ming".into()
+            from: "San Ming".into(),
+            flag: "killtaskbloodshreth".into(),
         }
     );
     facts.log.note_taken(id);
@@ -59,14 +61,14 @@ fn a_kill_task_is_taken_up_counted_then_ready_and_waits_once_handed_in() {
 fn an_item_quest_needs_its_item_carried_and_one_done_by_talk_stays_done() {
     let mut facts = on();
     assert_eq!(
-        state("give:3684", &facts),
+        state("give:3684:2470", &facts),
         QuestState::Needs {
             more: 1,
             of: "Red Rat Tail".into()
         }
     );
     facts.carried.insert(3684, 1);
-    assert_eq!(state("give:3684", &facts), QuestState::Ready);
+    assert_eq!(state("give:3684:2470", &facts), QuestState::Ready);
     assert_eq!(state("tothebarkeep", &facts), QuestState::Ready);
     let alcott = rows("tothebarkeep").remove(0);
     facts.log.note_done(&alcott, facts.now);
@@ -76,8 +78,8 @@ fn an_item_quest_needs_its_item_carried_and_one_done_by_talk_stays_done() {
 #[test]
 fn the_board_wants_a_few_of_an_any_time_hand_in_and_nothing_once_switched_off() {
     let mut facts = on();
-    let board = quest_board(&rows("give:3684"), &facts);
-    assert_eq!(board[0].givers, 12);
+    let board = quest_board(&rows("give:3684:2470"), &facts);
+    assert_eq!(board[0].givers, 11);
     assert_eq!(
         quest_wants(&board),
         [QuestWant {
@@ -85,8 +87,8 @@ fn the_board_wants_a_few_of_an_any_time_hand_in_and_nothing_once_switched_off() 
             need: Some(ANY_HAND_INS)
         }]
     );
-    facts.config.off.push("give:3684".into());
-    let board = quest_board(&rows("give:3684"), &facts);
+    facts.config.off.push("give:3684:2470".into());
+    let board = quest_board(&rows("give:3684:2470"), &facts);
     assert!(!board[0].on);
     assert!(quest_wants(&board).is_empty());
 }
@@ -124,7 +126,8 @@ fn a_kill_task_waits_for_the_level_its_giver_asks_and_its_creatures_suit() {
     assert_eq!(
         state(id, &at_level(25)),
         QuestState::NotTaken {
-            from: "Fergal the Dire".into()
+            from: "Fergal the Dire".into(),
+            flag: "diremattekarkillcount".into(),
         }
     );
     let mut off = at_level(15);
@@ -141,18 +144,39 @@ fn a_kill_task_waits_for_the_level_its_giver_asks_and_its_creatures_suit() {
 fn a_talk_that_needs_another_quest_first_names_it_until_that_one_is_done() {
     let id = "pathwardenfound1111";
     let mut facts = at_level(5);
+    // The Pathwarden Token's hand-in pays the same XP and asks no flag.
     assert_eq!(
         state(id, &facts),
+        QuestState::Needs {
+            more: 1,
+            of: "Pathwarden Token".into()
+        }
+    );
+    // Thorolf's talk asks ToPathwarden, a way only without pathwardencomplete (unread): read
+    // alone with that taken as so, it is the talk the XP-only data had.
+    let mut talk = rows(id).into_iter().find(|r| r.kind == Kind::Talk).unwrap();
+    talk.unread.clear();
+    let talk_state = |facts: &QuestFacts| {
+        quest_board(std::slice::from_ref(&talk), facts)[0]
+            .state
+            .clone()
+    };
+    assert_eq!(
+        talk_state(&facts),
         QuestState::CantYet(Blocked::NeedsFirst {
             title: "Sent to the Pathwarden".into()
         })
     );
     let buckminster = rows("topathwarden").remove(0);
     facts.log.note_done(&buckminster, facts.now);
-    assert_eq!(state(id, &facts), QuestState::Ready, "the log's own stamp");
+    assert_eq!(talk_state(&facts), QuestState::Ready, "the log's own stamp");
     let mut flagged = at_level(5);
     flagged.held.push("ToPathwarden".into());
-    assert_eq!(state(id, &flagged), QuestState::Ready, "a flag in any case");
+    assert_eq!(
+        talk_state(&flagged),
+        QuestState::Ready,
+        "a flag in any case"
+    );
 }
 
 #[test]
@@ -209,7 +233,8 @@ fn the_board_is_worked_out_again_at_once_when_quests_are_switched_on_or_the_leve
     assert_eq!(
         line(&c, "diremattekarkillcount"),
         QuestState::NotTaken {
-            from: "Fergal the Dire".into()
+            from: "Fergal the Dire".into(),
+            flag: "diremattekarkillcount".into(),
         }
     );
     assert!(!c.quests_unsuited.contains("diremattekarkillcount"));
@@ -271,7 +296,7 @@ fn a_giver_that_pays_marks_the_quest_done_and_one_that_takes_nothing_is_let_be()
     let alcott = ac_world::quests::rows_of("tothebarkeep")
         .find(|r| r.giver == "Alcott")
         .unwrap();
-    c.ask_giver(alcott, t0);
+    c.ask_giver(alcott, alcott.places[0], t0);
     c.watch_quest_answer(t0 + Duration::from_secs(1));
     assert!(c.quest_asked.is_some(), "no answer yet: still watched");
     c.world.stats.total_xp += 7_000;
@@ -284,17 +309,17 @@ fn a_giver_that_pays_marks_the_quest_done_and_one_that_takes_nothing_is_let_be()
     assert_eq!(line.map(|l| l.state.clone()), Some(QuestState::Done));
 
     // A Collector handed a tail it never took: no XP, the tail still carried.
-    let tail = ac_world::quests::rows_of("give:3684").next().unwrap();
+    let tail = ac_world::quests::rows_of("give:3684:2470").next().unwrap();
     crate::testkit::thing_in_the_pack(&mut c, 0x8000_0100, "Red Rat Tail", 1);
     c.world
         .objects
         .get_mut(&0x8000_0100)
         .unwrap()
         .weenie_class_id = 3684;
-    c.ask_giver(tail, t0);
+    c.ask_giver(tail, tail.places[0], t0);
     c.watch_quest_answer(t0 + XP_WATCH);
-    assert!(!c.quest_log.done.contains_key("give:3684"));
-    let key = (tail.giver_wcid, tail.place.cell);
+    assert!(!c.quest_log.done.contains_key("give:3684:2470"));
+    let key = (tail.giver_wcid, tail.places[0].cell);
     assert!(c.autoplay.growth.givers_refused.since(&key).is_some());
 }
 
@@ -346,4 +371,168 @@ fn a_mate_is_told_only_what_is_still_wanted_beyond_what_is_carried() {
             need: Some(5)
         }]
     );
+}
+
+#[test]
+fn a_quest_paying_no_xp_is_wanted_and_ready_only_once_chosen() {
+    // Fiun Rehlyun stamps the Augmentation Realm flag for an Insatiable Eater Jaw: no XP.
+    let id = "augmentationprovinggroundaccess";
+    let mut facts = at_level(150);
+    facts.carried.insert(28719, 1);
+    let board = quest_board(&rows(id), &facts);
+    assert!(board.is_empty(), "not considered: {board:?}");
+    assert!(quest_wants(&board).is_empty(), "nothing kept for it");
+    facts.config.switch_on(id);
+    let board = quest_board(&rows(id), &facts);
+    assert_eq!(board[0].state, QuestState::Ready);
+    assert!(board[0].every_way);
+    let wants = quest_wants(&board);
+    assert_eq!(wants.iter().map(|w| w.wcid).collect::<Vec<_>>(), [28719]);
+}
+
+#[test]
+fn a_way_asking_what_the_client_cannot_check_is_worked_only_once_chosen() {
+    // Thorolf's talk pays 12,500 XP only without pathwardencomplete, which nothing shows: on
+    // its own, autoplay works the Pathwarden Token's hand-in instead.
+    let id = "pathwardenfound1111";
+    let mut facts = at_level(5);
+    facts.held.push("ToPathwarden".into());
+    assert!(rows(id)
+        .iter()
+        .any(|r| r.kind == Kind::Talk && r.has_unread()));
+    assert_eq!(
+        state(id, &facts),
+        QuestState::Needs {
+            more: 1,
+            of: "Pathwarden Token".into()
+        }
+    );
+    facts.config.switch_on(id);
+    assert_eq!(state(id, &facts), QuestState::Ready, "the talk, chosen");
+}
+
+#[test]
+fn the_board_is_worked_out_over_the_quests_autoplay_considers_alone() {
+    let fiun = "augmentationprovinggroundaccess";
+    let mut cfg = Quests {
+        on: true,
+        ..Quests::default()
+    };
+    let ids = |cfg: &Quests| {
+        let mut ids: Vec<&str> = considered_rows(cfg).iter().map(|r| r.id).collect();
+        ids.dedup();
+        ids
+    };
+    let automatic = ids(&cfg);
+    assert!(automatic.contains(&"killtaskbloodshreth"));
+    assert!(!automatic.contains(&fiun), "pays no XP");
+    assert!(
+        automatic.windows(2).all(|w| w[0] < w[1]),
+        "in id order, once each"
+    );
+    cfg.switch_on(fiun);
+    let chosen = considered_rows(&cfg);
+    assert_eq!(
+        chosen.iter().filter(|r| r.id == fiun).count(),
+        rows(fiun).len(),
+        "every row of a chosen quest"
+    );
+    assert_eq!(ids(&cfg).len(), automatic.len() + 1);
+}
+
+#[test]
+fn the_browse_board_lists_every_quest_as_if_chosen_whatever_the_switches() {
+    let mut facts = at_level(150);
+    facts.config.on = false;
+    facts.carried.insert(28719, 1);
+    let board = browse_board(&facts);
+    let ids: BTreeSet<&str> = ac_world::quests::all().iter().map(|r| r.id).collect();
+    assert_eq!(board.len(), ids.len());
+    assert!(board.iter().all(|l| l.on && l.every_way));
+    let fiun = board
+        .iter()
+        .find(|l| l.id == "augmentationprovinggroundaccess")
+        .unwrap();
+    assert_eq!(fiun.state, QuestState::Ready, "the jaw carried");
+}
+
+/// Quest `id` pursued at `level`, quests otherwise off.
+fn pursued_at(id: &str, level: u32) -> QuestFacts {
+    let mut facts = at_level(level);
+    facts.config.on = false;
+    facts.config.pursue_quest(id, false, 0);
+    facts
+}
+
+#[test]
+fn a_pursued_quest_above_the_margin_is_still_wanted() {
+    // The jaw's Engorged Eater is level 80, past 50 + 2 * 8: asked for, the jaw is kept all the same.
+    let id = "engorgedeaterjaw";
+    assert_eq!(
+        state(id, &at_level(50)),
+        QuestState::CantYet(Blocked::TooHard { level: 80 })
+    );
+    let facts = pursued_at(id, 50);
+    let board = quest_board(&rows(id), &facts);
+    assert_eq!(
+        board[0].state,
+        QuestState::Needs {
+            more: 1,
+            of: "Engorged Eater Jaw".into()
+        }
+    );
+    assert!(board[0].on, "pursued with quests off");
+    assert!(quest_wants(&board).iter().any(|w| w.wcid == 28725));
+}
+
+#[test]
+fn a_pursued_quest_outside_the_givers_band_stays_out() {
+    // Fergal the Dire takes the Dire Mattekar task from level 20.
+    let id = "diremattekarkillcount";
+    assert_eq!(
+        state(id, &pursued_at(id, 15)),
+        QuestState::CantYet(Blocked::Level { min: 20, max: 0 })
+    );
+}
+
+#[test]
+fn a_pursuit_asked_for_once_comes_off_the_list_when_done_and_one_asked_again_stays() {
+    let mut c = crate::testkit::character_of_level(crate::testkit::no_data(), 5);
+    let quests = &mut c.autoplay.config.quests;
+    quests.pursue_quest("tothebarkeep", false, 0);
+    quests.pursue_quest("give:3684:2470", true, 0);
+    let alcott = ac_world::quests::rows_of("tothebarkeep").next().unwrap();
+    c.quest_log.note_done(alcott, crate::holdings::unix_now());
+    c.refresh_quests(Instant::now());
+    let ids: Vec<&str> = c
+        .autoplay
+        .config
+        .quests
+        .pursue
+        .iter()
+        .map(|p| p.id.as_str())
+        .collect();
+    assert_eq!(ids, ["give:3684:2470"]);
+}
+
+#[test]
+fn an_unpaid_talk_the_client_cannot_check_is_not_done_and_a_flag_refused_unlearns_its_quest() {
+    let mut c = crate::testkit::character_of_level(crate::testkit::no_data(), 5);
+    let t0 = Instant::now();
+    let talk = ac_world::quests::all()
+        .iter()
+        .find(|r| r.kind == Kind::Talk && r.has_unread() && !r.has_xp() && r.repeat != Repeat::Any)
+        .expect("a talk on an unread condition");
+    c.ask_giver(talk, talk.places[0], t0);
+    c.watch_quest_answer(t0 + XP_WATCH);
+    assert!(!c.quest_log.done.contains_key(talk.id), "{}", talk.id);
+    let key = (talk.giver_wcid, talk.places[0].cell);
+    assert!(c.autoplay.growth.givers_refused.since(&key).is_some());
+
+    // Done in the log, its stamp reads held; a portal refusing the flag says it is not.
+    let alcott = ac_world::quests::rows_of("tothebarkeep").next().unwrap();
+    c.quest_log.note_done(alcott, 1);
+    assert!(holds(&c.quest_facts(), "ToTheBarkeep"));
+    c.drop_quest_flag("ToTheBarkeep");
+    assert!(!holds(&c.quest_facts(), "ToTheBarkeep"));
 }

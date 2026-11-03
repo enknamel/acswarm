@@ -184,7 +184,9 @@ fn fight_worth(engaged: bool, owes_a_body: bool, nearest: f32) -> f32 {
 /// due (`grow_town_run`).
 fn worth_town_run(client: &Client, now: Instant) -> f32 {
     let growth = &client.autoplay.growth;
-    if !client.autoplay.config.growth.town_runs && !growth.run_by_hand() {
+    // A pursued quest's call on its giver goes with town runs off.
+    let for_quest = client.pursuit_call().is_some() || growth.is_quest_run();
+    if !client.autoplay.config.growth.town_runs && !growth.run_by_hand() && !for_quest {
         return 0.0;
     }
     if client.in_a_fight() {

@@ -118,14 +118,16 @@ pub(super) enum Phase {
     /// left the pack -- nothing else is remembered, because what there
     /// is to sell is asked of the pack afresh every turn.
     Selling { sent: Vec<u32> },
-    /// On the way to a quest giver (a visit), the `tries`th time.
+    /// On the way to a quest giver at `at` (a visit), the `tries`th time.
     ToGiver {
         row: &'static ac_world::quests::Row,
+        at: ac_world::Place,
         tries: u32,
     },
     /// Handing the giver its items: `taken` so far, the last give with the count carried then.
     HandingIn {
         row: &'static ac_world::quests::Row,
+        at: ac_world::Place,
         giver: u32,
         taken: u32,
         last: Option<(Instant, u32)>,
@@ -163,6 +165,9 @@ pub(crate) struct Run {
     pub(super) walking_up: bool,
     /// The calls still to make after this one, in the order planned (see [`calls`]).
     pub(super) calls: Vec<calls::Call>,
+    /// A pursued quest's call on its giver (`Client::start_quest_call`): kept with town runs
+    /// off, and never futile.
+    pub(super) for_quest: bool,
 }
 
 /// What one turn of a run to town came to.
@@ -260,7 +265,9 @@ impl Client {
                 now,
             );
         }
-        cfg.town_runs && self.grow_town_run(now, &cfg)
+        // A pursued quest's call on its giver goes with town runs off (`start_quest_call`).
+        let for_quest = self.pursuit_call().is_some() || self.autoplay.growth.is_quest_run();
+        (cfg.town_runs || for_quest) && self.grow_town_run(now, &cfg)
     }
 
     /// The order a stop's counter is looked for in, the first stop and every one after: a supply
@@ -374,6 +381,22 @@ impl Client {
         }
         if self.traveling() && !own_walk {
             return self.held_back("on a journey growth did not plan");
+        }
+        // A pursued quest's giver is called on at once, ahead of the waits between runs.
+        if let Some((row, at)) = self.pursuit_call() {
+            if self.start_quest_call(row, at, now) {
+                return true;
+            }
+            let id = self
+                .pursuit
+                .iter()
+                .find(|l| l.working)
+                .map(|l| l.id.clone());
+            let why = format!("no way to {}", row.giver);
+            self.hold_pursuit(&id.unwrap_or_default(), why, now);
+        }
+        if !cfg.town_runs {
+            return false;
         }
         // After a run that came back with nothing, a wait: without it a character that cannot buy
         // what it needs walks between counters for ever.
@@ -605,6 +628,7 @@ impl Client {
             walked_on: None,
             walking_up: false,
             calls: Vec::new(),
+            for_quest: false,
         });
         self.autoplay.say(
             Doing::Shopping,

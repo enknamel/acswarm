@@ -12,7 +12,8 @@ The plan's rules this design keeps:
 - The profile decides. The quest rule is one rule among the others: moved, turned off, or
   overruled by a rule above it. No guard anywhere skips the profile for a quest item.
 - The data ships with acswarm, generated from ACE's world database like portals and hunting.
-- Players switch quests on and off; autoplay considers only quests that are on and not blocked,
+- Players switch quests on and off (a quest paying XP starts on, any other only when chosen by
+  hand); autoplay considers only quests that are on and not blocked,
   and a blocked one says why (the rule to move, the level, the locked area).
 - Turn-ins may be anywhere: every giver is a `Place` with its cell, and the run that hands in is
   the town run with more calls, planned on phase 4's journeys.
@@ -65,50 +66,44 @@ wait, InqQuestSolves on the counter; with no solves, a Tell and SetQuestCompleti
 sends "You have killed {n} {plural}! You must kill {N} to complete your task." or "... Your task is
 complete!" (QuestManager.cs:619-624).
 
-### 1.2 Scope: the quests a character can actually do
+### 1.2 Scope: every quest a placed NPC holds
 
-A quest is in `quests.csv` when all of these hold:
-- Its giver is placed: a `landblock_instance` row, of weenie type Creature (10) or Vendor (12)
-  (ACE.Entity/Enum/WeenieType.cs). Switches, chests and portals are out.
-- A reward path, walked from the giver's Use, Give or Refuse set (§1.4), awards XP (2, 49 or 62).
-  Quests whose only reward is an item or a flag are out (most are swaps: Aun Ngationa trades a bow
-  for a bow); flags a portal needs stay phase 1's `unlocks.csv`.
-- Every branch on that path is one the client can know: the giver's Level band, the quest's own
-  wait, its own once-flag, a kill counter, items owned, or a flag stamped by another row of the
-  file (a start talk or an earlier quest). The random sets (probability < 1) are out.
-- It asks one kind of thing: kill N of a counter's creatures, bring one item (wcid, count), or talk.
-  Four quests asking two different items at once are out.
-- What it asks can be had: some spawning creature drops the item, or a placed NPC's talk path
-  gives it (a delivery); a kill counter's creatures are spawned by some generator.
-- Rows whose needed flag nobody in the file stamps are pruned until none is left.
+A quest is in `quests.csv` when its giver is placed (a `landblock_instance` row of weenie type
+Creature (10) or Vendor (12), ACE.Entity/Enum/WeenieType.cs; switches, chests and portals are out)
+and a path walked from its Use, Give or Refuse set (§1.4) does anything for the character: XP, an
+item, a flag, a spell, a skill, luminance, a title, a teleport, an item taken, a stat, a contract,
+enlightenment (the `does` column). A path that only talks or moves is no quest. Nothing else is
+dropped:
+- a path paying no XP stays (Fiun Rehlyun's jaw for `AugmentationProvingGroundAccess`, the Blank
+  Augmentation Gem trainers, Sir Ginazio's `eaterpit` stamp);
+- a branch the client cannot know (stats, society rank, quest bits, events, another quest's wait,
+  solve-count ranges, two items asked, a random reply) stays, named in the `unread` column;
+  autoplay hands such a row in only for a quest the player switched on by hand or pursues;
+- a want nothing known drops still stays; it has no `quest_sources.csv` row.
 
-Measured:
+Rows that differ only in the giver's placement are one row; the placements are
+`quest_givers.csv`. A random reply's sets (probability < 1) that differ only in what they give are
+one row whose `gives` lists every alternative.
+
+Measured (2026-11-03, on the database below):
 
 | what | count |
 |---|---|
-| `quest` table rows; KillQuest strings on creatures (distinct counters) | 4,237; 627 (181) |
-| placed weenies with a Refuse, Give or Use set (placements) | 2,509 (3,817) |
-| reward paths awarding XP from placed objects (on NPCs) | 3,567 (693) |
-| of them, every branch derivable | 2,153 |
-| out: quest bits (102-105) / needs a quest or flag not in scope / another quest's wait running / solve-count ranges / other branches (items not owned, UpdateQuest, stats, society rank, events, fellows) / random / counters not fed by kills | 394 / 359 / 237 / 146 / 222 / 33 / 23 (1,414 in all) |
-| out after the walk: item hand-ins whose item no creature drops and no NPC gives (chests, the ground, other quests' rewards; per giver, before grouping) / kill tasks whose creatures nothing spawns | 749 / 17 |
-| **quests in the file** | **499: 400 item, 91 kill, 8 talk** (and 92 start talks) |
-| distinct items wanted | 399 |
-| rows (one per way to complete: giver placement x level band) | 2,078: 1,853 item, 105 kill, 14 talk, 106 start |
-| givers (placements; indoors) | 277 NPCs (410; 274) |
-| repeat, by row: any time / 20 h / 7 d / once | 1,702 / 194 / 20 / 56 |
-| XP, by row: fixed / level-scaled | 1,741 / 231 |
-| rows with a Level band; rows asking more than one of an item; item hand-ins made by talking | 88; 38; 3 |
-| quests by the easiest source's level: 1-20 / 21-50 / 51-100 / 101+ | 101 / 64 / 118 / 216 |
-| `quest_sources.csv` rows: drop / kill / npc; median drop chance | 1,752 / 384 / 11; 0.03 |
-| file size, plain text (shipped like `hunting.csv`) | quests 310 KB, sources 185 KB |
-| timed quests whose wait reply uses the `%tqt` template words | 84 of 149 |
+| quests (ids): item / talk / kill | 5,185: 4,172 / 864 / 149 |
+| of them paying XP on some row | 1,301 |
+| rows: item / talk / start / kill | 16,023: 13,533 / 2,104 / 199 / 187 |
+| rows with an `unread` condition; of them a random reply; rows with alternative gives | 5,904; 1,562; 634 |
+| rows by `does`: takes / item / flag / xp / spell / title / luminance / skill / stat / teleport | 13,565 / 8,660 / 5,206 / 3,005 / 842 / 603 / 400 / 223 / 164 / 158 |
+| givers (placements; indoors) | 2,179 NPCs (3,058; 2,103) |
+| repeat, by row: any time / 20 h / once / 6 d | 11,635 / 3,136 / 700 / 217 |
+| `quest_sources.csv` rows: drop / kill / npc | 5,493: 4,718 / 430 / 345 |
+| file size, plain text | quests 2.7 MB, givers 147 KB, sources 418 KB |
 
 ### 1.3 Generating it
 
 `reference/scripts/data/quests.sh` (one script for both files, as `hunting.sh` is for one), usage
-`reference/scripts/data/quests.sh crates/ac-world/data` writing `quests.csv` and
-`quest_sources.csv` there. It runs the bounded SELECTs below through
+`reference/scripts/data/quests.sh crates/ac-world/data` writing `quests.csv`, `quest_givers.csv`
+and `quest_sources.csv` there. It runs the bounded SELECTs below through
 `docker exec ace-db sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -N --batch ace_world -e "..."'`
 into a `mktemp -d` directory, each beginning `SET SESSION max_execution_time=20000;`, and pipes
 them to `python3 -I reference/scripts/data/quests_walk.py DIR OUT` (stdlib only; the walk of §1.4
@@ -162,8 +157,8 @@ For every placed giver and every root set (Use; Give and Refuse per item wcid), 
 order to depth 8, never re-entering a set: a branching action (21, 30, 36, 76, 67, and the other
 Inq types) continues once into its success set and once into its failure set, carrying the branch
 taken; other actions are the path's effects. ACE runs the actions after a branch too; the 24 sets
-of placed objects that have any are walked as if they belonged to both outcomes. Each path with an
-XP award is read:
+of placed objects that have any are walked as if they belonged to both outcomes. Each path that
+does anything (§1.2) is read:
 
 | branch on the path | read as |
 |---|---|
@@ -181,38 +176,46 @@ XP award is read:
 | the wanted item's `QuestRestriction` (37) | `needs` that flag (Player_Inventory.cs:1207-1211) |
 | a start talk's wait (InqQuest on a timed quest, failure) | the quest's `timer` and `repeat` when its reward asks none |
 | InqOwnsItems success | the item and count asked (with TakeItems on the path) |
-| anything else | the path is out (§1.2's table) |
+| anything else | the row stays, the branch named in `unread` |
 
 Paths are grouped into quests by `id`: the kill counter, else the wait's quest, else the once-flag,
 else the first stamped flag, all lowercased; a hand-in with none of these (the trophy collectors)
-is `give:<item wcid>`, so one quest is "hand in a Red Rat Tail to any of the twelve Collectors".
+is `give:<item wcid>`, so one quest is "hand in a Red Rat Tail to any of the Collectors". When its
+givers reward it differently it is one quest per reward, `give:<item>:<first reward wcid>` (or
+`:none`), so the player chooses: each augmentation trainer's Blank Augmentation Gem is its own.
 A quest's rows are alternatives: any one completes it. The `title` is the `quest` table's `message`
-("Blood Shreth Kill Task", "Sent to the Barkeep"), or the item's name for a `give:` quest.
+("Blood Shreth Kill Task", "Sent to the Barkeep"), or the item's name for a `give:` quest, with
+"for <reward>" once split ("Red Rat Tail for Stamina Elixir").
 
 ### 1.5 `quests.csv` columns
 
-One row per giver placement and level band. Commas in names become `;` (as `vendors.sh`).
+One row per way to complete a quest: giver and level band. Commas in names become `;` (as
+`vendors.sh`).
 
 | # | column | meaning |
 |---|---|---|
 | 1 | `id` | the quest (§1.4); rows sharing it are alternatives |
 | 2 | `kind` | `kill`, `item`, `talk`, or `start` (the talk that takes a quest up: stamps what a row `needs`) |
 | 3 | `title` | what the list shows |
-| 4-5 | `giver_wcid`, `giver` | the NPC and its name |
-| 6-9 | `cell`, `x`, `y`, `z` | hex cell; x/y/z local to its landblock (`unlocks.csv`'s convention) |
-| 10 | `hand` | `give`: hand the item over; `talk`: use the giver |
-| 11 | `want` | item wcid (`item`), the counter (`kill`), empty |
-| 12 | `count` | items one hand-in takes (a Give takes one per item handed), or kills |
-| 13-14 | `min_level`, `max_level` | the giver's Level band, 0 for open |
-| 15 | `xp` | fixed XP, 0 when scaled |
-| 16-18 | `xp_level`, `xp_min`, `xp_max` | AwardLevelProportionalXP's percent (of the XP to the next level) and clamps, 0 for none |
-| 19 | `share` | `all` (fellowship), `none`, `allegiance` |
-| 20 | `gives` | reward items, `wcid:count;...` |
-| 21 | `stamps` | flags the reward stamps, `;`-joined |
-| 22 | `repeat` | seconds before it may be done again; 0 any time; -1 once |
-| 23 | `timer` | the quest-table name its wait or once-flag is kept under |
-| 24 | `needs` | flags held first, `;`-joined; a kill row needs its own counter, which its start row stamps |
-| 25-27 | `item`, `item_type`, `item_value` | the wanted item's name, hex ItemType and value: what the loot rules read |
+| 4 | `giver_wcid` | the NPC; its name and placements are in `quest_givers.csv` |
+| 5 | `hand` | `give`: hand the item over; `talk`: use the giver |
+| 6 | `want` | item wcid (`item`), the counter (`kill`), empty |
+| 7 | `count` | items one hand-in takes (a Give takes one per item handed), or kills |
+| 8-9 | `min_level`, `max_level` | the giver's Level band, 0 for open |
+| 10 | `xp` | fixed XP, 0 when scaled |
+| 11-13 | `xp_level`, `xp_min`, `xp_max` | AwardLevelProportionalXP's percent (of the XP to the next level) and clamps, 0 for none |
+| 14 | `share` | `all` (fellowship), `none`, `allegiance` |
+| 15 | `gives` | reward items, `wcid:count;...`; a random reply's alternatives `\|`-separated, an empty one giving nothing |
+| 16 | `stamps` | flags the reward stamps, `;`-joined |
+| 17 | `repeat` | seconds before it may be done again; 0 any time; -1 once |
+| 18 | `timer` | the quest-table name its wait or once-flag is kept under |
+| 19 | `needs` | flags held first, `;`-joined; a kill row needs its own counter, which its start row stamps |
+| 20-22 | `item`, `item_type`, `item_value` | the wanted item's name, hex ItemType and value: what the loot rules read |
+| 23 | `does` | what the path does: `xp`, `item`, `flag`, `spell`, `skill`, `luminance`, `title`, `teleport`, `takes`, `stat`, `contract`, `enlightenment`, `type N` |
+| 24 | `unread` | conditions the client cannot check, `\|`-separated (`a random reply` among them) |
+
+`quest_givers.csv`: `giver_wcid,giver,cell,x,y,z`, one row per placement: hex cell, x/y/z local to
+its landblock (`unlocks.csv`'s convention).
 
 `quest_sources.csv`: `want,kind,wcid,name,level,chance,landblocks`. `want` is an item wcid or a
 counter; `kind` is `drop` (corpse create list, `chance` per kill), `kill` (a creature carrying the
@@ -294,8 +297,10 @@ every saved config loads):
 pub struct Quests {
     /// Autoplay considers quests at all; off, the quest rule wants nothing.
     pub on: bool,
-    /// Quests switched off, by `ac_world::quests` id; a quest the data adds later starts on.
+    /// Quests switched off, by `ac_world::quests` id; one paying XP the data adds later starts on.
     pub off: Vec<String>,
+    /// Quests switched on by hand: every way to complete one is worked, XP or not, unread or not.
+    pub chosen: Vec<String>,
 }
 ```
 Off by default, so a saved config and a new one keep today's behaviour until the player ticks it.
@@ -548,8 +553,9 @@ A ready hand-in joins the run when either:
   with it less the tour without it.
 Hand-ins are tried best `xp / detour` first, each against the tour as it stands, until 6 calls.
 One left out waits: its items stay kept (the want holds), and the next run that passes takes it.
-Hand-ins never start a run: a town run is made only for a full pack, too much weight or supplies
-to buy, and a run that sold and bought nothing waits `FUTILE_RUN_WAIT` whatever it handed in.
+Hand-ins never start a run, except a pursued quest's own call (`start_quest_call`): a town run is
+made only for a full pack, too much weight or supplies to buy, and a run that sold and bought
+nothing waits `FUTILE_RUN_WAIT` whatever it handed in (a pursued quest's call never does).
 Until the rate is measured, only the first rule applies, and "a short leg" also needs the detour
 to be at most `2 * SHORT_LEG`, so a cheap recall back makes no far giver near.
 
@@ -599,7 +605,8 @@ builder needs another's code. Builders: **list** (step 1: 1b states, 1c panel, 1
 **loot** (step 2), **hunt** (step 3), **errand** (step 4). The generated data differs a little from
 §1.2's prototype counts: 1,961 rows (1,779 item, 79 kill, 19 talk, 84 start), 471 quests (386
 item, 75 kill, 10 talk), 264 givers; `quest_sources.csv` 1,932 rows (1,620 drop, 301 kill, 11 npc).
-`quests_walk.py` prints its counts and the reasons paths are out on every run.
+Those were the XP-only files; §1.2 now counts every quest. `quests_walk.py` prints its counts and
+what it could not read on every run.
 
 | seam | file | state | filled by |
 |---|---|---|---|

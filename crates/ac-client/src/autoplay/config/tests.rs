@@ -39,7 +39,7 @@ fn a_config_saved_before_quests_loads_with_them_off_and_quests_round_trip() {
     let old: Config = serde_json::from_str(r#"{"enabled":true,"fight":{"radius":30.0}}"#).unwrap();
     assert_eq!(old.quests, Quests::default());
     assert!(
-        !old.quests.is_on("give:3684"),
+        !old.quests.is_on("give:3684:2470"),
         "off until the player ticks it"
     );
     let mut c = Config::default();
@@ -47,6 +47,103 @@ fn a_config_saved_before_quests_loads_with_them_off_and_quests_round_trip() {
     c.quests.off = vec!["killtaskbloodshreth".into()];
     let back: Config = serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
     assert_eq!(back.quests, c.quests);
-    assert!(back.quests.is_on("give:3684"));
+    assert!(back.quests.is_on("give:3684:2470"));
     assert!(!back.quests.is_on("killtaskbloodshreth"));
+}
+
+#[test]
+fn quests_saved_before_the_chosen_list_load_with_nothing_chosen() {
+    let old: Config =
+        serde_json::from_str(r#"{"quests":{"on":true,"off":["killtaskbloodshreth"]}}"#).unwrap();
+    assert!(old.quests.chosen.is_empty());
+    assert_eq!(old.quests.off, ["killtaskbloodshreth"]);
+    assert!(old.quests.is_on("give:3684:2470"));
+}
+
+#[test]
+fn a_quest_paying_xp_starts_on_and_one_paying_none_only_once_chosen() {
+    let mut q = Quests {
+        on: true,
+        ..Quests::default()
+    };
+    assert!(q.is_on("killtaskbloodshreth"), "XP: on until switched off");
+    // Fiun Rehlyun's jaw for the Augmentation Realm flag pays no XP.
+    let fiun = "augmentationprovinggroundaccess";
+    assert!(!q.is_on(fiun));
+    q.switch_on(fiun);
+    assert!(q.is_on(fiun) && q.is_chosen(fiun));
+    q.switch_off(fiun);
+    assert!(!q.is_on(fiun) && !q.is_chosen(fiun));
+    q.switch_off("killtaskbloodshreth");
+    assert!(!q.is_on("killtaskbloodshreth"));
+    q.switch_on("killtaskbloodshreth");
+    assert!(q.is_on("killtaskbloodshreth") && q.off == [fiun]);
+}
+
+#[test]
+fn quests_saved_before_the_pursuit_list_load_with_nothing_pursued() {
+    let old: Config =
+        serde_json::from_str(r#"{"quests":{"on":true,"chosen":["ginsword"]}}"#).unwrap();
+    assert!(old.quests.pursue.is_empty());
+    assert_eq!(old.quests.chosen, ["ginsword"]);
+}
+
+#[test]
+fn doing_a_quest_puts_it_first_and_whenever_ready_last() {
+    let mut q = Quests::default();
+    q.pursue_quest("engorgedeaterjaw", true, 10);
+    q.pursue_quest("ginsword", false, 20);
+    q.pursue_quest("augmentationprovinggroundaccess", false, 30);
+    let ids = |q: &Quests| q.pursue.iter().map(|p| p.id.clone()).collect::<Vec<_>>();
+    assert_eq!(
+        ids(&q),
+        [
+            "augmentationprovinggroundaccess",
+            "ginsword",
+            "engorgedeaterjaw"
+        ]
+    );
+    q.move_pursuit("engorgedeaterjaw", true);
+    assert_eq!(ids(&q)[1], "engorgedeaterjaw");
+    q.move_pursuit("augmentationprovinggroundaccess", true);
+    assert_eq!(
+        ids(&q)[0],
+        "augmentationprovinggroundaccess",
+        "first stays first"
+    );
+    // Asked again, it moves and its time is the new one.
+    q.pursue_quest("ginsword", false, 40);
+    assert_eq!((ids(&q)[0].as_str(), q.pursue[0].since), ("ginsword", 40));
+    q.stop_pursuing("ginsword");
+    assert!(!q.is_pursued("ginsword") && q.pursue.len() == 2);
+}
+
+#[test]
+fn a_pursued_quest_has_every_way_worked_as_one_chosen() {
+    let fiun = ac_world::quests::rows_of("augmentationprovinggroundaccess")
+        .find(|r| r.kind == ac_world::quests::Kind::Item)
+        .unwrap();
+    let mut q = Quests {
+        on: true,
+        ..Quests::default()
+    };
+    assert!(!q.is_worked(fiun));
+    q.pursue_quest(fiun.id, false, 0);
+    assert!(q.is_worked(fiun));
+    let rows = crate::quest_log::considered_rows(&q);
+    assert!(rows.iter().any(|r| std::ptr::eq(*r, fiun)));
+}
+
+#[test]
+fn a_pursued_quest_is_on_with_quests_off() {
+    let mut q = Quests::default();
+    let fiun = "augmentationprovinggroundaccess";
+    assert!(!q.is_on(fiun) && !q.is_on("engorgedeaterjaw"));
+    q.pursue_quest(fiun, true, 0);
+    assert!(q.is_on(fiun), "pursued, it is worked with quests off");
+    assert!(!q.is_on("engorgedeaterjaw"), "and nothing else is");
+    q.switch_off(fiun);
+    assert!(q.is_on(fiun), "pursuit outranks the switch");
+    q.stop_pursuing(fiun);
+    assert!(!q.is_on(fiun));
 }

@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 
 use ac_loot::quest_wants::QuestWant;
 use ac_world::quests::{Kind, Repeat, Row, Want, Yield};
+use ac_world::Place;
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
 
@@ -57,11 +58,11 @@ impl QuestLog {
 
     /// `row` was completed at `now`: its wait starts and a kill counter is forgotten (ACE erased it).
     pub fn note_done(&mut self, row: &Row, now: u64) {
-        let d = self.done.entry(row.id.clone()).or_default();
+        let d = self.done.entry(row.id.to_string()).or_default();
         d.at = now;
         d.times += 1;
         if let (Repeat::After(s), false) = (row.repeat, row.timer.is_empty()) {
-            self.waits.insert(row.timer.clone(), now + u64::from(s));
+            self.waits.insert(row.timer.to_string(), now + u64::from(s));
         }
         if let Want::Kill(counter) = &row.want {
             self.kills.remove(counter);
@@ -104,9 +105,10 @@ pub enum QuestState {
         more: u32,
         of: String,
     },
-    /// Not taken up yet: talk to `from` first.
+    /// Not taken up yet: talk to `from` first, whose talk stamps `flag`.
     NotTaken {
         from: String,
+        flag: String,
     },
     /// A loot rule above the quest rule does this to the item.
     WontComplete {
@@ -136,6 +138,9 @@ pub struct QuestLine {
     /// The nearest giver's name, by straight distance.
     pub giver: String,
     pub on: bool,
+    /// Chosen by hand or pursued: every way to complete it is worked, not only those paying XP
+    /// that ask nothing unread ([`worked_rows`]).
+    pub every_way: bool,
 }
 
 /// What a board was worked out for: a change to any of it works the board out at once.
@@ -172,36 +177,148 @@ pub struct QuestFacts {
     pub name: String,
 }
 
+/// Whether autoplay works `row` on its own: a talk that takes a quest up, or a way to complete one
+/// that pays XP and asks nothing the client cannot check. Any other waits to be chosen.
+pub fn is_automatic(row: &Row) -> bool {
+    row.kind == Kind::Start || (row.has_xp() && !row.has_unread())
+}
+
+/// Whether quest `id` has a way to complete it autoplay works on its own: it starts on.
+pub fn is_automatic_quest(id: &str) -> bool {
+    static IDS: OnceLock<BTreeSet<&'static str>> = OnceLock::new();
+    let ids = IDS.get_or_init(|| {
+        let rows = ac_world::quests::all().iter();
+        rows.filter(|r| r.kind != Kind::Start && is_automatic(r))
+            .map(|r| r.id)
+            .collect()
+    });
+    ids.contains(id)
+}
+
+/// The rows of `line`'s quest autoplay works: every one when it was chosen, else its own.
+pub fn worked_rows(line: &QuestLine) -> impl Iterator<Item = &'static Row> + '_ {
+    ac_world::quests::rows_of(&line.id).filter(|r| line.every_way || is_automatic(r))
+}
+
+/// The rows autoplay works for the quests it considers, in id order: each quest starting on has
+/// its automatic rows, a chosen or pursued one every row. The board is worked out over these alone.
+pub fn considered_rows(cfg: &Quests) -> Vec<&'static Row> {
+    static AUTOMATIC: OnceLock<Vec<&'static Row>> = OnceLock::new();
+    let automatic = AUTOMATIC.get_or_init(|| {
+        let rows = ac_world::quests::all().iter();
+        rows.filter(|r| is_automatic(r) && is_automatic_quest(r.id))
+            .collect()
+    });
+    if cfg.chosen.is_empty() && cfg.pursue.is_empty() {
+        return automatic.clone();
+    }
+    let pursued = cfg.pursue.iter().map(|p| p.id.as_str());
+    let chosen: BTreeSet<&str> = cfg
+        .chosen
+        .iter()
+        .map(String::as_str)
+        .chain(pursued)
+        .collect();
+    let mut rows: Vec<&'static Row> = automatic
+        .iter()
+        .copied()
+        .filter(|r| !chosen.contains(r.id))
+        .collect();
+    for id in &chosen {
+        rows.extend(ac_world::quests::rows_of(id));
+    }
+    rows.sort_by_key(|r| r.id);
+    rows
+}
+
 /// The state of every quest in `rows`, one line per id, in the data's order.
-pub fn quest_board(rows: &[Row], facts: &QuestFacts) -> Vec<QuestLine> {
-    board_of(rows, facts).0
+pub fn quest_board<'r>(
+    rows: impl IntoIterator<Item = &'r Row>,
+    facts: &QuestFacts,
+) -> Vec<QuestLine> {
+    board_of(rows, facts, &Pick::of(&facts.config)).0
+}
+
+/// Every quest in the data as if chosen: each on and every way worked, whatever the config. The
+/// Quests window's list, worked out only while it is open.
+pub fn browse_board(facts: &QuestFacts) -> Vec<QuestLine> {
+    let mut pick = Pick::of(&facts.config);
+    pick.every = true;
+    board_of(ac_world::quests::all(), facts, &pick).0
 }
 
 /// The quests in `rows` no giver's band or easiest source suits at the character's level,
 /// whether switched on or not: what the list's "for my level" leaves out.
-pub fn unsuited_quests(rows: &[Row], facts: &QuestFacts) -> BTreeSet<String> {
-    board_of(rows, facts).1
+pub fn unsuited_quests<'r>(
+    rows: impl IntoIterator<Item = &'r Row>,
+    facts: &QuestFacts,
+) -> BTreeSet<String> {
+    board_of(rows, facts, &Pick::of(&facts.config)).1
+}
+
+/// [`Quests`]' switches read once for a board: which quests are on and which rows are worked.
+struct Pick<'f> {
+    on: bool,
+    off: BTreeSet<&'f str>,
+    chosen: BTreeSet<&'f str>,
+    pursued: BTreeSet<&'f str>,
+    /// Every quest on and every row worked: the browse board.
+    every: bool,
+}
+
+impl<'f> Pick<'f> {
+    fn of(cfg: &'f Quests) -> Self {
+        Pick {
+            on: cfg.on,
+            off: cfg.off.iter().map(String::as_str).collect(),
+            chosen: cfg.chosen.iter().map(String::as_str).collect(),
+            pursued: cfg.pursue.iter().map(|p| p.id.as_str()).collect(),
+            every: false,
+        }
+    }
+
+    /// As [`Quests::is_on`].
+    fn is_on(&self, id: &str) -> bool {
+        self.every
+            || self.pursued.contains(id)
+            || (self.on
+                && (self.chosen.contains(id) || (is_automatic_quest(id) && !self.off.contains(id))))
+    }
+
+    /// As [`Quests::is_worked`].
+    fn is_worked(&self, row: &Row) -> bool {
+        self.every || is_automatic(row) || self.is_every_way(row.id)
+    }
+
+    /// Chosen or pursued: every way to complete it is worked.
+    fn is_every_way(&self, id: &str) -> bool {
+        self.chosen.contains(id) || self.pursued.contains(id)
+    }
 }
 
 /// [`quest_board`] and [`unsuited_quests`] in one pass over the rows.
-fn board_of(rows: &[Row], facts: &QuestFacts) -> (Vec<QuestLine>, BTreeSet<String>) {
+fn board_of<'r>(
+    rows: impl IntoIterator<Item = &'r Row>,
+    facts: &QuestFacts,
+    pick: &Pick,
+) -> (Vec<QuestLine>, BTreeSet<String>) {
     let mut locks = Locks::default();
     let mut unsuited = BTreeSet::new();
     let mut board = Vec::new();
-    for (id, doing) in by_quest(rows) {
+    for (id, doing) in by_quest(rows, pick) {
         let (Some(first), Some(giver)) = (doing.first(), nearest(&doing, facts.me)) else {
             continue;
         };
         if beyond_level(&doing, facts).is_some() {
             unsuited.insert(id.to_string());
         }
-        let on = facts.config.is_on(id);
+        let on = pick.is_on(id);
         board.push(QuestLine {
             id: id.to_string(),
-            title: first.title.clone(),
+            title: first.title.to_string(),
             kind: first.kind,
             state: if on {
-                state_of(&doing, facts, &mut locks)
+                state_of(&doing, facts, &mut locks, pick.pursued.contains(id))
             } else {
                 QuestState::Off
             },
@@ -210,35 +327,42 @@ fn board_of(rows: &[Row], facts: &QuestFacts) -> (Vec<QuestLine>, BTreeSet<Strin
                 .map(|r| r.reward.xp_at(facts.to_next))
                 .max()
                 .unwrap_or(0),
-            givers: doing.len(),
-            giver: giver.giver.clone(),
+            givers: doing.iter().map(|r| r.places.len()).sum(),
+            giver: giver.giver.to_string(),
             on,
+            every_way: pick.every || pick.is_every_way(id),
         });
     }
     (board, unsuited)
 }
 
-/// Each quest's rows that complete it (start rows left out), by id in the data's order.
-fn by_quest(rows: &[Row]) -> Vec<(&str, Vec<&Row>)> {
-    let mut ids: Vec<&str> = Vec::new();
-    let mut by_id: BTreeMap<&str, Vec<&Row>> = BTreeMap::new();
-    for r in rows {
-        if !by_id.contains_key(r.id.as_str()) {
-            ids.push(&r.id);
-        }
-        let doing = by_id.entry(&r.id).or_default();
+/// Each quest's rows autoplay works that complete it (start rows left out), by id in the data's
+/// order.
+fn by_quest<'r>(
+    rows: impl IntoIterator<Item = &'r Row>,
+    pick: &Pick,
+) -> Vec<(&'r str, Vec<&'r Row>)> {
+    let mut quests: Vec<(&'r str, Vec<&'r Row>)> = Vec::new();
+    // Rows come in id order (the data's, `considered_rows`'), so most join the last quest.
+    let mut at: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for r in rows.into_iter().filter(|r| pick.is_worked(r)) {
+        let i = match quests.last() {
+            Some((id, _)) if *id == r.id => quests.len() - 1,
+            _ => *at.entry(r.id).or_insert_with(|| {
+                quests.push((r.id, Vec::new()));
+                quests.len() - 1
+            }),
+        };
         if r.kind != Kind::Start {
-            doing.push(r);
+            quests[i].1.push(r);
         }
     }
-    ids.into_iter()
-        .map(|id| (id, by_id.remove(id).unwrap_or_default()))
-        .collect()
+    quests
 }
 
 /// The row whose giver stands nearest `me` by straight distance; the first with no position.
 fn nearest<'r>(rows: &[&'r Row], me: Option<Vec3>) -> Option<&'r Row> {
-    let near = |r: &&Row| me.map_or(0.0, |m| r.place.at.distance(m));
+    let near = |r: &&Row| me.map_or(0.0, |m| r.distance_to(m));
     rows.iter()
         .copied()
         .min_by(|a, b| near(a).total_cmp(&near(b)))
@@ -249,22 +373,41 @@ fn nearest<'r>(rows: &[&'r Row], me: Option<Vec3>) -> Option<&'r Row> {
 struct Locks(BTreeMap<u32, Option<&'static str>>);
 
 impl Locks {
-    /// Only a landblock locked with no flag held can be locked with some held, so the few of
-    /// those, found once, are all `Row::locked_by` is asked about.
+    /// The flag every placement of `row`'s giver is locked behind; `None` when one is open.
     fn of(&mut self, row: &Row, held: &[String]) -> Option<&'static str> {
+        let mut flag = None;
+        for p in row.places {
+            let f = self.at(p, held)?;
+            flag.get_or_insert(f);
+        }
+        flag
+    }
+
+    /// Only a landblock locked with no flag held can be locked with some held, so the few of
+    /// those, found once, are all `quests::locked_at` is asked about.
+    fn at(&mut self, place: &Place, held: &[String]) -> Option<&'static str> {
         static MAYBE: OnceLock<BTreeSet<u32>> = OnceLock::new();
         let maybe = MAYBE.get_or_init(|| {
-            let quests = ac_world::quests::all().iter();
-            quests
-                .filter(|r| r.locked_by(&[]).is_some())
-                .map(|r| r.place.cell >> 16)
+            // One indoor placement per landblock: the lock is the landblock's.
+            let mut blocks: BTreeMap<u32, Place> = BTreeMap::new();
+            let places = ac_world::quests::all().iter().flat_map(|r| r.places);
+            for p in places.filter(|p| p.is_indoors()) {
+                blocks.entry(p.cell >> 16).or_insert(*p);
+            }
+            blocks
+                .into_iter()
+                .filter(|(_, p)| ac_world::quests::locked_at(p, &[]).is_some())
+                .map(|(block, _)| block)
                 .collect()
         });
-        let block = row.place.cell >> 16;
-        if !row.place.is_indoors() || !maybe.contains(&block) {
+        let block = place.cell >> 16;
+        if !place.is_indoors() || !maybe.contains(&block) {
             return None;
         }
-        *self.0.entry(block).or_insert_with(|| row.locked_by(held))
+        *self
+            .0
+            .entry(block)
+            .or_insert_with(|| ac_world::quests::locked_at(place, held))
     }
 }
 
@@ -299,14 +442,22 @@ fn stampers(flag: &str) -> &'static [&'static Row] {
         .map_or(&[], Vec::as_slice)
 }
 
+/// The kill counter `flag` is, as a kill row names it, when it is one.
+fn kill_counter(flag: &str) -> Option<&'static str> {
+    ac_world::quests::all().iter().find_map(|r| match &r.want {
+        Want::Kill(c) if c.eq_ignore_ascii_case(flag) => Some(c.as_str()),
+        _ => None,
+    })
+}
+
 /// Whether the character holds `flag`: a quest flag, a kill task's counter taken up, or a stamp
 /// of a quest the log has done.
-fn holds(facts: &QuestFacts, flag: &str) -> bool {
+pub(crate) fn holds(facts: &QuestFacts, flag: &str) -> bool {
     facts.held.iter().any(|h| h.eq_ignore_ascii_case(flag))
         || facts.log.kills.contains_key(&flag.to_ascii_lowercase())
         || stampers(flag)
             .iter()
-            .any(|r| r.kind != Kind::Start && facts.log.done.contains_key(&r.id))
+            .any(|r| r.kind != Kind::Start && facts.log.done.contains_key(r.id))
 }
 
 /// The band `rows` cover between them: the lowest minimum, the highest maximum (0 for open).
@@ -339,7 +490,7 @@ fn see_first(flag: &str, facts: &QuestFacts, locks: &mut Locks, depth: u32) -> Q
         .filter(|r| r.kind == Kind::Start)
         .collect();
     if starts.is_empty() {
-        let title = by.first().map_or(flag, |r| r.title.as_str());
+        let title = by.first().map_or(flag, |r| r.title);
         return QuestState::CantYet(Blocked::NeedsFirst {
             title: title.to_string(),
         });
@@ -365,34 +516,37 @@ fn see_first(flag: &str, facts: &QuestFacts, locks: &mut Locks, depth: u32) -> Q
                 .to_string(),
         });
     }
-    let near = |r: &&Row| facts.me.map_or(0.0, |m| r.place.at.distance(m));
+    let near = |r: &&Row| facts.me.map_or(0.0, |m| r.distance_to(m));
     open.sort_by(|a, b| near(a).total_cmp(&near(b)));
     let unmet = |r: &Row| r.needs.iter().find(|n| !holds(facts, n)).cloned();
     if let Some(r) = open.iter().find(|r| unmet(r).is_none()) {
         return QuestState::NotTaken {
-            from: r.giver.clone(),
+            from: r.giver.to_string(),
+            flag: flag.to_string(),
         };
     }
     match unmet(open[0]) {
         Some(need) if depth < 3 => see_first(&need, facts, locks, depth + 1),
         _ => QuestState::CantYet(Blocked::NeedsFirst {
-            title: open[0].title.clone(),
+            title: open[0].title.to_string(),
         }),
     }
 }
 
-/// One switched-on quest's state: done or waiting, then what rules it out, then what is left.
-fn state_of(doing: &[&Row], facts: &QuestFacts, locks: &mut Locks) -> QuestState {
+/// One switched-on quest's state: done or waiting, then what rules it out, then what is left. A
+/// `pursued` one is not ruled out for its source's level: the player asked for it.
+fn state_of(doing: &[&Row], facts: &QuestFacts, locks: &mut Locks, pursued: bool) -> QuestState {
     let first = doing[0];
-    if let Some(until) = facts.log.wait_until(&first.timer, facts.now) {
+    if let Some(until) = facts.log.wait_until(first.timer, facts.now) {
         return QuestState::Waiting { until };
     }
     // A once-quest's own flag held is done too: stamped before the log was kept.
-    let flagged = !first.timer.is_empty() && holds(facts, &first.timer);
-    if first.repeat == Repeat::Once && (facts.log.done.contains_key(&first.id) || flagged) {
+    let flagged = !first.timer.is_empty() && holds(facts, first.timer);
+    if first.repeat == Repeat::Once && (facts.log.done.contains_key(first.id) || flagged) {
         return QuestState::Done;
     }
-    if let Some(why) = beyond_level(doing, facts) {
+    let asked = |why: &Blocked| !(pursued && matches!(why, Blocked::TooHard { .. }));
+    if let Some(why) = beyond_level(doing, facts).filter(asked) {
         return QuestState::CantYet(why);
     }
     let fit: Vec<&Row> = doing
@@ -477,7 +631,7 @@ fn item_state(taken: &[&Row], facts: &QuestFacts) -> QuestState {
             None => {
                 nearest = Some((
                     need - held,
-                    item.map_or_else(String::new, |i| i.name.clone()),
+                    item.map_or_else(String::new, |i| i.name.to_string()),
                 ))
             }
         }
@@ -504,9 +658,7 @@ pub fn quest_wants(board: &[QuestLine]) -> Vec<QuestWant> {
         if !wanting || line.kind != Kind::Item {
             continue;
         }
-        let rows: Vec<&Row> = ac_world::quests::rows_of(&line.id)
-            .filter(|r| r.kind == Kind::Item)
-            .collect();
+        let rows: Vec<&Row> = worked_rows(line).filter(|r| r.kind == Kind::Item).collect();
         for wcid in items_of(rows.iter().copied()) {
             let of = rows.iter().filter(|r| r.want == Want::Item(wcid));
             let count = of.clone().map(|r| r.count.max(1)).max().unwrap_or(1);
@@ -574,6 +726,8 @@ pub fn worth_detour(xp: u64, detour: f32, xp_per_hour: Option<f32>) -> bool {
 #[derive(Clone, Debug)]
 pub struct Asked {
     pub row: &'static Row,
+    /// The giver's placement asked at.
+    pub place: Place,
     pub at: Instant,
     /// Total XP when asked: a rise is the reward.
     pub xp_before: i64,
@@ -591,16 +745,32 @@ impl Client {
             .is_some_and(|f| f.name == name)
     }
 
-    /// The quest ids autoplay considers: quests on, and each not switched off.
+    /// The quest ids autoplay considers: pursued, or quests on and chosen or paying XP and not off.
     pub fn quests_on(&self) -> Vec<&'static str> {
         let cfg = &self.autoplay.config.quests;
+        let pick = Pick::of(cfg);
         let mut ids: Vec<&'static str> = Vec::new();
-        for r in ac_world::quests::all() {
-            if r.kind != Kind::Start && cfg.is_on(&r.id) && ids.last() != Some(&r.id.as_str()) {
-                ids.push(&r.id);
+        for r in considered_rows(cfg) {
+            if r.kind != Kind::Start && pick.is_on(r.id) && ids.last() != Some(&r.id) {
+                ids.push(r.id);
             }
         }
         ids
+    }
+
+    /// The server says `flag` is not held: the quests logged done that stamp it are not done
+    /// either, else [`holds`] would read it held from them.
+    pub(crate) fn forget_stampers(&mut self, flag: &str) {
+        let done = &mut self.quest_log.done;
+        let before = done.len();
+        done.retain(|id, _| {
+            !stampers(flag)
+                .iter()
+                .any(|r| r.kind != Kind::Start && r.id == id)
+        });
+        if done.len() != before {
+            self.save_quest_log();
+        }
     }
 
     /// The board's inputs, as this character stands now.
@@ -639,6 +809,8 @@ impl Client {
         if !self.ledger_loaded && !name.is_empty() {
             return;
         }
+        self.finish_pursuits(now);
+        let name = self.world.stats.name.trim();
         let cfg = &self.autoplay.config.quests;
         let level = self.world.stats.level.max(0) as u32;
         let changed = self.quest_board_for.as_ref().is_none_or(|f| {
@@ -652,7 +824,7 @@ impl Client {
             .quest_board_at
             .is_none_or(|at| now.duration_since(at) >= QUEST_BOARD_EVERY);
         let settled = !self.quest_board.is_empty() && !self.quest_board.iter().any(|l| l.on);
-        if !changed && (!due || (!cfg.on && settled)) {
+        if !changed && (!due || (!cfg.on && cfg.pursue.is_empty() && settled)) {
             return;
         }
         self.quest_board_for = Some(BoardFor {
@@ -663,12 +835,45 @@ impl Client {
             name: name.to_string(),
         });
         self.quest_board_at = Some(now);
+        let mut facts = self.quest_facts();
+        // The quests stamping a flag a pursued one asks are worked first, as if pursued too.
+        let chains = crate::autoplay::growth::pursuit::ChainData;
+        let holds_flag = |flag: &str| holds(&facts, flag);
+        let chained = crate::autoplay::growth::pursuit::with_chain(
+            &facts.config.pursue,
+            &holds_flag,
+            &chains,
+        );
+        facts.config.pursue = chained.iter().map(|c| c.pursuit.clone()).collect();
+        let pick = Pick::of(&facts.config);
         (self.quest_board, self.quests_unsuited) =
-            board_of(ac_world::quests::all(), &self.quest_facts());
+            board_of(considered_rows(&facts.config), &facts, &pick);
+        self.refresh_pursuit(&facts, &chained, now);
     }
 
-    /// `row`'s giver was asked: its answer is watched for, and one asked before is answered now.
-    pub(crate) fn ask_giver(&mut self, row: &'static Row, now: Instant) {
+    /// A pursuit asked for once whose quest the log has done since is taken off the list: else it
+    /// would keep the quest on, every way to it worked, with "do quests" off.
+    fn finish_pursuits(&mut self, now: Instant) {
+        let done = &self.quest_log.done;
+        let finished: Vec<String> = self
+            .autoplay
+            .config
+            .quests
+            .pursue
+            .iter()
+            .filter(|p| !p.again && done.get(&p.id).is_some_and(|d| d.at >= p.since))
+            .map(|p| p.id.clone())
+            .collect();
+        for id in finished {
+            tracing::info!("pursuit: {id} finished");
+            self.autoplay.note(format!("pursuit finished: {id}"), now);
+            self.autoplay.config.quests.stop_pursuing(&id);
+        }
+    }
+
+    /// `row`'s giver at `place` was asked: its answer is watched for, and one asked before is
+    /// answered now.
+    pub(crate) fn ask_giver(&mut self, row: &'static Row, place: Place, now: Instant) {
         if let Some(old) = self.quest_asked.take() {
             let rose = self.world.stats.total_xp > old.xp_before;
             if rose || !std::ptr::eq(old.row, row) {
@@ -677,6 +882,7 @@ impl Client {
         }
         self.quest_asked = Some(Asked {
             row,
+            place,
             at: now,
             xp_before: self.world.stats.total_xp,
             carried: match row.want {
@@ -710,14 +916,21 @@ impl Client {
             self.autoplay
                 .note(format!("took up {} from {}", row.title, row.giver), now);
             self.hold_quest_flags(&row.stamps);
+            // A kill task's counter starts at nothing: the board reads it from the log.
+            for counter in row.stamps.iter().filter_map(|s| kill_counter(s)) {
+                self.quest_log.note_taken(counter);
+            }
+            self.save_quest_log();
             return;
         }
+        // Unpaid, a talk asking what the client cannot read may have taken the server's other
+        // branch: it is not counted done on the giver's word.
         let taken = match row.want {
             Want::Item(wcid) => self.carried_count(wcid) < asked.carried,
-            _ => true,
+            _ => !row.has_unread(),
         };
         if !rose && (!taken || row.repeat == Repeat::Any) {
-            let key = (row.giver_wcid, row.place.cell);
+            let key = (row.giver_wcid, asked.place.cell);
             self.autoplay.growth.givers_refused.mark(key, now);
             let why = format!("{} gave nothing for {}", row.giver, row.title);
             self.autoplay.note(why, now);
@@ -751,13 +964,13 @@ impl Client {
             .sum()
     }
 
-    /// Go and see `row`'s giver: a visit, journey and all. False when there is no way.
-    pub fn visit_giver(&mut self, row: &Row) -> bool {
+    /// Go and see `row`'s giver at `place`: a visit, journey and all. False when there is no way.
+    pub fn visit_giver(&mut self, row: &Row, place: Place) -> bool {
         let l = ac_world::landmarks::Landmark {
             kind: ac_world::landmarks::Kind::Npc,
-            name: row.giver.clone(),
-            cell: row.place.cell,
-            at: row.place.at,
+            name: row.giver.to_string(),
+            cell: place.cell,
+            at: place.at,
         };
         let ok = self.visit_landmark(&l);
         tracing::info!("quest: to {} for {} ({ok})", row.giver, row.id);

@@ -305,7 +305,10 @@ plaque), `appraisal` (shows the last thing assessed, and never opens by
 itself), `salvage`
 (opens when the Ust is used), `confirm` (the
 server's Yes/No questions), `options`, `combat` (the height/power bar),
-`autoplay` (see below), `fleet` (every character being played, in this
+`autoplay` (see below), `quests` (every quest in the data, drawn by the autoplay plugin:
+search by item, creature, place, giver, reward or flag, filters for level, kind, state, repeat
+and what a quest does, a quest's chain in words, its on switch, and "Do this quest" for
+autoplay to work it first), `fleet` (every character being played, in this
 process and on the bus, with autoplay/follow/regroup/stop controls; see
 `docs/multi-session.md`, "Fleet view"), `holdings` ("Items": every
 character's inventory on every account, online or not, searched with

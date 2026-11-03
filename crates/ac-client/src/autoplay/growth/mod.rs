@@ -53,6 +53,7 @@ mod config;
 mod hunt;
 mod needs;
 mod policy;
+pub mod pursuit;
 mod quest_bonus;
 mod raise;
 mod road;
@@ -205,6 +206,12 @@ pub struct State {
     needs: Vec<Need>,
     /// Quest givers no journey reached, by giver class and cell, and since when.
     pub(crate) givers_refused: Recent<(u32, u32)>,
+    /// Pursued quests passed over, by id: why, and since when (`Client::hold_pursuit`).
+    pursuit_held: std::collections::BTreeMap<String, (String, Instant)>,
+    /// The working pursued hunt's grounds, best first: landblock and where a journey ends.
+    pursuit_grounds: Vec<(u32, ac_world::Place)>,
+    /// The working pursued hunt's creatures, by weenie class: picked before a nearer namesake.
+    pub(crate) pursuit_sought: Vec<u32>,
 }
 
 /// A few names, and how many more there are. A caster short of every
@@ -323,6 +330,11 @@ impl State {
         self.by_hand && self.run.is_some()
     }
 
+    /// Whether the run under way is a pursued quest's call on its giver.
+    pub(crate) fn is_quest_run(&self) -> bool {
+        self.run.as_ref().is_some_and(|r| r.for_quest)
+    }
+
     /// Whether the growth rules have somewhere to be: a hunting ground to
     /// reach (`bound`) or counters to go round (`run`). That says why the
     /// character would be travelling, and nothing about whether it still
@@ -346,7 +358,7 @@ impl State {
         // runs being off is exactly when the panel is the thing running
         // one.
         let mut dropped = None;
-        if !town_runs && !self.by_hand {
+        if !town_runs && !self.by_hand && !self.is_quest_run() {
             dropped = self.run.take();
             if dropped.is_some() {
                 self.needs.clear();
@@ -387,7 +399,7 @@ impl Client {
         // off, a character that had cleared the Holtburg field it was
         // given stood in the middle of it for good.
         let roams_an_area = self.autoplay.config.fight.area.is_some();
-        (cfg.hunt_grounds || roams_an_area)
+        (cfg.hunt_grounds || roams_an_area || self.is_pursuing())
             && mode.hunting()
             && !self.autoplay.growth.stopped_in_town
             && self.grow_hunt(now, &cfg)
@@ -417,11 +429,11 @@ impl Client {
             .unwrap_or(false);
         // An errand whose setting was turned off part-way is carried on by
         // nothing below, so it is let go here.
-        let roams_an_area = self.autoplay.config.fight.area.is_some();
+        let grounds = cfg.hunt_grounds || self.autoplay.config.fight.area.is_some();
         let dropped = self
             .autoplay
             .growth
-            .drop_what_is_turned_off(cfg.town_runs, cfg.hunt_grounds || roams_an_area);
+            .drop_what_is_turned_off(cfg.town_runs, grounds || self.is_pursuing());
         // A run let go at its counter leaves its window behind, and the
         // window is ours: the server keeps none, so nothing closes it
         // but this client, and with town runs off no later run would.

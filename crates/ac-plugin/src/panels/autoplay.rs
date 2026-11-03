@@ -26,7 +26,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::quest_list::{self, QuestFilter};
+use super::quest_book::{self, BookState, BookView, Me};
 use super::{caption, title, title_bar, window, Source};
 use crate::{egui, Client, Ctx, Plugin, Settings};
 use ac_client::autoplay::{Buffs, Config, Fight, Loot, Role, Style, Survive};
@@ -57,6 +57,8 @@ pub(crate) struct AutoplayView {
     pub quests: Vec<ac_client::quest_log::QuestLine>,
     /// Quests its level rules out, switched on or not (`Client.quests_unsuited`).
     pub quests_unsuited: BTreeSet<String>,
+    /// Each pursued quest's step (`Client.pursuit`).
+    pub pursuit: Vec<ac_client::autoplay::PursuitLine>,
 }
 
 /// The line under the checkbox: what it is doing and the engine's own
@@ -187,7 +189,7 @@ pub(crate) fn draw(
     v: &AutoplayView,
     x: f32,
     drafts: &mut Drafts,
-    quests: &mut QuestFilter,
+    open_book: &mut bool,
 ) -> Option<Config> {
     let mut cfg = v.config.clone();
     window(
@@ -512,12 +514,11 @@ pub(crate) fn draw(
                 );
                 ui.add_space(6.0);
 
-                quest_list::section(
+                *open_book |= quest_book::summary(
                     ui,
                     &mut cfg.quests,
                     &v.quests,
-                    &v.quests_unsuited,
-                    quests,
+                    &v.pursuit,
                     ac_client::holdings::unix_now(),
                 );
                 ui.add_space(6.0);
@@ -843,6 +844,7 @@ pub(crate) fn view(c: &Client) -> AutoplayView {
         looting: c.autoplay.loot_tally.line(),
         quests: c.quest_board.clone(),
         quests_unsuited: c.quests_unsuited.clone(),
+        pursuit: c.pursuit.clone(),
         at: c
             .player
             .as_ref()
@@ -864,8 +866,14 @@ pub(crate) struct Autoplay {
     /// Sessions already given the saved rules, by index.
     applied: BTreeSet<usize>,
     drafts: Drafts,
-    /// The Quests list's search and picker.
-    quest_filter: QuestFilter,
+    /// The Quests window is open (its key or the menu toggles it). Starts closed.
+    pub show_quests: bool,
+    /// The Quests window's filter, order, selection and browse board.
+    book: BookState,
+    /// The Quests window's sample quests, for `--demo-ui`.
+    demo_book: Option<quest_book::Demo>,
+    /// The section's "Open the Quests window" was pressed.
+    open_book: bool,
 }
 
 impl Default for Autoplay {
@@ -876,7 +884,10 @@ impl Default for Autoplay {
             saved: Config::default(),
             applied: BTreeSet::new(),
             drafts: Drafts::default(),
-            quest_filter: QuestFilter::default(),
+            show_quests: false,
+            book: BookState::default(),
+            demo_book: None,
+            open_book: false,
         }
     }
 }
@@ -909,8 +920,22 @@ impl Autoplay {
             quests: ac_client::autoplay::Quests {
                 on: true,
                 off: vec!["killtaskbloodshreth".into()],
+                pursue: vec![
+                    ac_client::autoplay::Pursuit {
+                        id: "augmentationprovinggroundaccess".into(),
+                        again: false,
+                        since: 0,
+                    },
+                    ac_client::autoplay::Pursuit {
+                        id: "engorgedeaterjaw".into(),
+                        again: true,
+                        since: 0,
+                    },
+                ],
+                ..Default::default()
             },
         };
+        let book = quest_book::demo(ac_client::holdings::unix_now());
         // What the three searches would take out of the demo pack.
         Autoplay {
             source: Source::Demo(AutoplayView {
@@ -929,13 +954,142 @@ impl Autoplay {
                 looting: "this session: 14 corpse(s) opened, 22 thing(s) taken".into(),
                 quests: demo_quests(),
                 quests_unsuited: ["give:35407".to_string()].into(),
+                pursuit: book.pursuit.clone(),
                 at: glam::Vec2::ZERO,
             }),
             show: true,
             saved: config,
             applied: BTreeSet::new(),
             drafts: Drafts::default(),
-            quest_filter: QuestFilter::default(),
+            show_quests: false,
+            book: BookState::showing("augmentationprovinggroundaccess"),
+            demo_book: Some(book),
+            open_book: false,
+        }
+    }
+
+    /// Draw the rules window; the rules when edited this frame.
+    fn draw_rules(&mut self, cx: &mut Ctx, egui: &egui::Context) -> Option<Config> {
+        let v = match &self.source {
+            Source::Demo(d) => Some(d.clone()),
+            Source::Live => cx.try_client().map(|c| view(c)),
+        };
+        let mut v = v?;
+        // The hunting areas drawn on the map, as the map last wrote them.
+        v.hunt_areas = cx
+            .settings
+            .get::<Vec<ac_client::hunt::HuntArea>>("hunt.areas")
+            .unwrap_or_default();
+        // An area hunted in and since redrawn is hunted as it is now.
+        let fresh = self.saved.fight.area.as_ref().and_then(|chosen| {
+            v.hunt_areas
+                .iter()
+                .find(|a| a.name == chosen.name && *a != chosen)
+                .cloned()
+        });
+        if let (Some(fresh), Source::Live) = (fresh, &self.source) {
+            self.saved.fight.area = Some(fresh.clone());
+            v.config.fight.area = Some(fresh.clone());
+            if let Some(c) = cx.try_client() {
+                c.autoplay.config.fight.area = Some(fresh);
+            }
+        }
+        // Sits beside the other left-column panels when they are open.
+        let open = |key: &str| cx.board.get(key).and_then(|v| v.as_bool()).unwrap_or(false);
+        let mut x = 8.0;
+        if open(super::skills::OPEN_KEY) {
+            x += 372.0;
+        }
+        if open(super::spellbook::OPEN_KEY) {
+            x += 384.0;
+        }
+        if open(super::components::OPEN_KEY) {
+            x += 268.0;
+        }
+        let edited = draw(egui, &v, x, &mut self.drafts, &mut self.open_book);
+        if super::closed("autoplay") {
+            self.show = false;
+        }
+        edited
+    }
+
+    /// Draw the Quests window over `quests`; the switches when edited this frame.
+    fn draw_book(
+        &mut self,
+        cx: &mut Ctx,
+        egui: &egui::Context,
+        quests: &ac_client::autoplay::Quests,
+    ) -> Option<ac_client::autoplay::Quests> {
+        let now = ac_client::holdings::unix_now();
+        let at = cx.now;
+        let chain = ac_world::quest_chain::chain_of;
+        let place = ac_world::quest_chain::place_name;
+        match &self.source {
+            Source::Demo(d) => {
+                let demo = self.demo_book.as_ref()?;
+                if self.book.browse.is_empty() {
+                    self.book.browse.set(demo.browse.clone(), at);
+                }
+                let log = ac_client::quest_log::QuestLog::default();
+                let v = BookView {
+                    cards: &demo.cards,
+                    cfg: quests,
+                    acting: &d.quests,
+                    pursuit: &demo.pursuit,
+                    me: Me {
+                        level: 85,
+                        margin: d.config.growth.level_margin,
+                    },
+                    held: &[],
+                    log: &log,
+                    now,
+                    chain: &chain,
+                    place: &place,
+                };
+                quest_book::draw(egui, &v, &mut self.book)
+            }
+            Source::Live => {
+                let c = cx.try_client()?;
+                self.book.browse.refresh(c, at);
+                let v = BookView {
+                    cards: ac_world::quest_chain::quest_cards(),
+                    cfg: quests,
+                    acting: &c.quest_board,
+                    pursuit: &c.pursuit,
+                    me: Me {
+                        level: c.world.stats.level.max(0) as u32,
+                        margin: c.autoplay.config.growth.level_margin,
+                    },
+                    held: c.quest_flags(),
+                    log: &c.quest_log,
+                    now,
+                    chain: &chain,
+                    place: &place,
+                };
+                quest_book::draw(egui, &v, &mut self.book)
+            }
+        }
+    }
+
+    /// Put `edited` on the active session and in the saved rules, `was` the rules before it.
+    fn apply_edit(&mut self, cx: &mut Ctx, was: &Config, edited: Config) {
+        match &mut self.source {
+            // The demo panel is live enough to click through offline.
+            Source::Demo(d) => {
+                d.config = edited;
+            }
+            Source::Live => {
+                // Unticking "pick fights" is the rules' own stop: the
+                // config alone leaves the fight held (`Client::let_go`).
+                let stopped = was.fight.enabled && !edited.fight.enabled;
+                self.saved = edited.clone();
+                if let Some(c) = cx.try_client() {
+                    c.autoplay.config = edited;
+                    if stopped {
+                        c.let_go(ac_client::autoplay::Release::Stop);
+                    }
+                }
+            }
         }
     }
 }
@@ -954,10 +1108,11 @@ fn demo_quests() -> Vec<ac_client::quest_log::QuestLine> {
         givers,
         giver: giver.into(),
         on: id != "killtaskbloodshreth",
+        every_way: false,
     };
     vec![
         line(
-            "give:3684",
+            "give:3684:2470",
             "Red Rat Tail",
             Kind::Item,
             "Yukara Miko the Collector",
@@ -1037,6 +1192,9 @@ impl Plugin for Autoplay {
         if let Some(v) = settings.get("autoplay.show") {
             self.show = v;
         }
+        if let Some(v) = settings.get("quests.show") {
+            self.show_quests = v;
+        }
         if let Some(c) = settings.get::<Config>("autoplay.config") {
             self.saved = c;
         }
@@ -1044,6 +1202,7 @@ impl Plugin for Autoplay {
 
     fn save(&self, settings: &mut Settings) {
         settings.set("autoplay.show", self.show);
+        settings.set("quests.show", self.show_quests);
         settings.set("autoplay.config", &self.saved);
     }
 
@@ -1083,78 +1242,53 @@ impl Plugin for Autoplay {
         if let Some(ask) = super::take_open(cx.board, "autoplay") {
             self.show = ask.apply(self.show);
         }
-        if !self.show {
+        if let Some(ask) = super::take_open(cx.board, quest_book::ID) {
+            self.show_quests = ask.apply(self.show_quests);
+        }
+        if !self.show && !self.show_quests {
             return;
         }
-        let v = match &self.source {
-            Source::Demo(d) => Some(d.clone()),
-            Source::Live => cx.try_client().map(|c| view(c)),
+        let was = match &self.source {
+            Source::Demo(d) => Some(d.config.clone()),
+            Source::Live => cx.try_client().map(|c| c.autoplay.config.clone()),
         };
-        let Some(mut v) = v else { return };
-        // The hunting areas drawn on the map, as the map last wrote them.
-        v.hunt_areas = cx
-            .settings
-            .get::<Vec<ac_client::hunt::HuntArea>>("hunt.areas")
-            .unwrap_or_default();
-        // An area hunted in and since redrawn is hunted as it is now.
-        let fresh = self.saved.fight.area.as_ref().and_then(|chosen| {
-            v.hunt_areas
-                .iter()
-                .find(|a| a.name == chosen.name && *a != chosen)
-                .cloned()
-        });
-        if let (Some(fresh), Source::Live) = (fresh, &self.source) {
-            self.saved.fight.area = Some(fresh.clone());
-            v.config.fight.area = Some(fresh.clone());
-            if let Some(c) = cx.try_client() {
-                c.autoplay.config.fight.area = Some(fresh);
+        let Some(was) = was else { return };
+        let mut edited = if self.show {
+            self.draw_rules(cx, egui)
+        } else {
+            None
+        };
+        if std::mem::take(&mut self.open_book) {
+            self.show_quests = true;
+        }
+        if self.show_quests {
+            let base = edited.as_ref().unwrap_or(&was);
+            if let Some(quests) = self.draw_book(cx, egui, &base.quests) {
+                let mut with = base.clone();
+                with.quests = quests;
+                edited = Some(with);
+            }
+            if super::closed(quest_book::ID) {
+                self.show_quests = false;
             }
         }
-        // Sits beside the other left-column panels when they are open.
-        let open = |key: &str| cx.board.get(key).and_then(|v| v.as_bool()).unwrap_or(false);
-        let mut x = 8.0;
-        if open(super::skills::OPEN_KEY) {
-            x += 372.0;
-        }
-        if open(super::spellbook::OPEN_KEY) {
-            x += 384.0;
-        }
-        if open(super::components::OPEN_KEY) {
-            x += 268.0;
-        }
-        let edited = draw(egui, &v, x, &mut self.drafts, &mut self.quest_filter);
-        if super::closed("autoplay") {
-            self.show = false;
-        }
-        if std::mem::take(&mut self.quest_filter.add_rule) {
+        if std::mem::take(&mut self.book.add_rule) {
             if let (Source::Live, Some(c)) = (&self.source, cx.try_client()) {
                 add_quest_rule(c);
             }
         }
-        let Some(edited) = edited else { return };
-        match &mut self.source {
-            // The demo panel is live enough to click through offline.
-            Source::Demo(d) => {
-                d.config = edited;
-            }
-            Source::Live => {
-                // Unticking "pick fights" is the rules' own stop: the
-                // config alone leaves the fight held (`Client::let_go`).
-                let stopped = v.config.fight.enabled && !edited.fight.enabled;
-                self.saved = edited.clone();
-                if let Some(c) = cx.try_client() {
-                    c.autoplay.config = edited;
-                    if stopped {
-                        c.let_go(ac_client::autoplay::Release::Stop);
-                    }
-                }
-            }
+        if let Some(edited) = edited {
+            self.apply_edit(cx, &was, edited);
         }
     }
 
     fn key(&mut self, _cx: &mut Ctx, key: egui::Key, pressed: bool) -> bool {
         if pressed && crate::keys::bound("autoplay", key) {
             self.show = !self.show;
+            return true;
+        }
+        if pressed && crate::keys::bound(quest_book::ID, key) {
+            self.show_quests = !self.show_quests;
             return true;
         }
         false
@@ -1384,7 +1518,7 @@ mod tests {
         let mut back = Autoplay::default();
         back.load(&settings);
         assert_eq!(back.saved.quests, p.saved.quests);
-        assert!(back.saved.quests.is_on("give:3684"));
+        assert!(back.saved.quests.is_on("give:3684:2470"));
         assert!(!back.saved.quests.is_on("killtaskbloodshreth"));
     }
 
@@ -1406,7 +1540,7 @@ mod tests {
         let said: Vec<String> = v
             .quests
             .iter()
-            .map(|l| quest_list::words(&l.state, true, 0))
+            .map(|l| super::super::quest_list::words(&l.state, true, 0))
             .collect();
         for words in ["ready", "won't complete", "can't do yet", "needs", "done"] {
             assert!(
@@ -1414,5 +1548,96 @@ mod tests {
                 "{words}: {said:?}"
             );
         }
+    }
+
+    /// Run `f` with a frame's plugin context and no session.
+    fn in_a_frame(p: &mut Autoplay, board: &mut crate::Blackboard) {
+        let mut settings = Settings::new();
+        let mut icons = crate::IconCache::default();
+        let mut cx = Ctx {
+            clients: Vec::new(),
+            index: 0,
+            board,
+            settings: &mut settings,
+            icons: &mut icons,
+            dt: 0.05,
+            now: std::time::Instant::now(),
+            chat: Vec::new(),
+            activate: None,
+            quit: false,
+            pick_data_dir: false,
+            start_sessions: Vec::new(),
+            stop_sessions: Vec::new(),
+        };
+        let egui = egui::Context::default();
+        let mut out = egui.run_ui(Default::default(), |_| p.ui(&mut cx, &egui));
+        out.textures_delta.clear();
+    }
+
+    #[test]
+    fn the_quests_window_opens_from_the_menu_and_from_autoplay() {
+        let mut p = Autoplay::demo();
+        let mut board = crate::Blackboard::default();
+        assert!(crate::keys::ACTIONS.iter().any(|a| a.id == quest_book::ID));
+        super::super::request_open(&mut board, quest_book::ID, super::super::Ask::Toggle);
+        in_a_frame(&mut p, &mut board);
+        assert!(p.show_quests, "the menu's row opens it");
+        super::super::request_open(&mut board, quest_book::ID, super::super::Ask::Close);
+        in_a_frame(&mut p, &mut board);
+        assert!(!p.show_quests);
+        p.open_book = true;
+        in_a_frame(&mut p, &mut board);
+        assert!(p.show_quests, "the autoplay window's button opens it");
+        assert!(p.show, "and the autoplay window stays open");
+    }
+
+    #[test]
+    fn do_this_quest_is_saved_and_survives_a_restart() {
+        let mut p = Autoplay::default();
+        let was = p.saved.clone();
+        let mut edited = was.clone();
+        edited
+            .quests
+            .pursue_quest("augmentationprovinggroundaccess", false, 100);
+        edited.quests.pursue_quest("engorgedeaterjaw", true, 200);
+        let mut board = crate::Blackboard::default();
+        let mut settings = Settings::new();
+        let mut icons = crate::IconCache::default();
+        let mut cx = Ctx {
+            clients: Vec::new(),
+            index: 0,
+            board: &mut board,
+            settings: &mut settings,
+            icons: &mut icons,
+            dt: 0.05,
+            now: std::time::Instant::now(),
+            chat: Vec::new(),
+            activate: None,
+            quit: false,
+            pick_data_dir: false,
+            start_sessions: Vec::new(),
+            stop_sessions: Vec::new(),
+        };
+        p.apply_edit(&mut cx, &was, edited);
+        p.show_quests = true;
+        let mut saved = Settings::new();
+        p.save(&mut saved);
+        let mut back = Autoplay::default();
+        back.load(&saved);
+        let pursued: Vec<(&str, bool, u64)> = back
+            .saved
+            .quests
+            .pursue
+            .iter()
+            .map(|q| (q.id.as_str(), q.again, q.since))
+            .collect();
+        assert_eq!(
+            pursued,
+            [
+                ("augmentationprovinggroundaccess", false, 100),
+                ("engorgedeaterjaw", true, 200)
+            ]
+        );
+        assert!(back.show_quests, "the window opens where it was left");
     }
 }
