@@ -1,3 +1,4 @@
+pub(super) mod calls;
 pub(super) mod counter;
 pub(super) mod panel;
 pub(super) mod vendor;
@@ -122,6 +123,19 @@ pub(super) enum Phase {
     /// left the pack -- nothing else is remembered, because what there
     /// is to sell is asked of the pack afresh every turn.
     Selling { sent: Vec<u32> },
+    /// On the way to a quest giver (a visit), the `tries`th time.
+    ToGiver {
+        row: &'static ac_world::quests::Row,
+        tries: u32,
+    },
+    /// Handing the giver its items: `taken` so far, the last give with the count carried then.
+    HandingIn {
+        row: &'static ac_world::quests::Row,
+        giver: u32,
+        taken: u32,
+        last: Option<(Instant, u32)>,
+        stalls: u32,
+    },
 }
 
 /// A run to town in progress.
@@ -152,6 +166,10 @@ pub(crate) struct Run {
     /// On the walk up to the counter itself, which then judges getting there: the way up to one
     /// on a deck leaves its spot far behind round by the ramp.
     pub(super) walking_up: bool,
+    /// The calls still to make after this one, in the order planned (see [`calls`]).
+    pub(super) calls: Vec<calls::Call>,
+    /// Hand-ins the givers took on this run.
+    pub(super) handed: u32,
 }
 
 /// What one turn of a run to town came to.
@@ -249,7 +267,7 @@ impl Client {
                 now,
             );
         }
-        cfg.town_runs && self.grow_town_run(now, &cfg)
+        cfg.town_runs && (self.grow_town_run(now, &cfg) || self.grow_hand_in_run(now))
     }
 
     /// The order a stop's counter is looked for in, the first stop and every one after: a supply
@@ -508,7 +526,10 @@ impl Client {
         let go_anyway = full || self.stranded(&needs, cfg);
         let errands = self.errands_for(cfg, &needs);
         match self.start_town_run(now, cfg, needs, reason, &errands, go_anyway) {
-            Ok(()) => true,
+            Ok(()) => {
+                self.add_hand_ins(now);
+                true
+            }
             Err(why) => self.held_back(why),
         }
     }
@@ -621,6 +642,8 @@ impl Client {
             visited: vec![at],
             walked_on: None,
             walking_up: false,
+            calls: Vec::new(),
+            handed: 0,
         });
         self.autoplay.say(
             Doing::Shopping,

@@ -159,6 +159,8 @@ impl Client {
                     visited: vec![at],
                     walked_on: None,
                     walking_up: false,
+                    calls: Vec::new(),
+                    handed: 0,
                 });
                 self.autoplay
                     .say(Doing::Shopping, format!("{reason}: at {vendor}"));
@@ -365,6 +367,16 @@ impl Client {
                 "Appraising",
                 None,
                 "looking over the pack, then putting stacks together".to_string(),
+            ),
+            Phase::ToGiver { row, .. } => (
+                "Going",
+                None,
+                format!("going to {} for {}", row.giver, row.title),
+            ),
+            Phase::HandingIn { row, taken, .. } => (
+                "Handing in",
+                None,
+                format!("handing {} to {} ({taken} taken)", row.title, row.giver),
             ),
             Phase::Selling { .. } => {
                 let cfg = &self.autoplay.config.growth;
