@@ -748,13 +748,14 @@ impl Profile {
     }
 
     /// Whether a rule that is on takes things for one member rather than whoever opens the body.
-    /// It asks a skill or, while [`Looting::salvage`], salvages: every character has Salvaging.
+    /// It asks a skill or a quest's want or, while [`Looting::salvage`], salvages.
     pub fn sends_to_the_best(&self) -> bool {
         self.rules
             .iter()
             .filter(|r| r.on && r.action.takes())
             .any(|r| {
                 r.skill_asked().is_some()
+                    || r.all.contains(&Ask::Quest)
                     || (self.looting.salvage && r.action == LootAction::Salvage)
             })
     }

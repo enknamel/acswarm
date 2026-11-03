@@ -110,6 +110,8 @@ pub struct Mate {
     /// what another character needs to judge a body on its behalf (see
     /// [`Mate::wielder`]). Empty when its rules ask about none.
     pub skills: Vec<(u32, u32, u32, u32)>,
+    /// What its active quests want carried (`Client.quest_wants`), for a quest rule judged for it.
+    pub quest_wants: Vec<ac_loot::QuestWant>,
     /// The bodies it shut lately as emptied, and what each is for the
     /// others (see [`Shut`], [`Autoplay::shuts_to_say`]).
     pub shut: Vec<Shut>,
@@ -156,13 +158,13 @@ impl Mate {
             .is_some_and(|t| t.room && corpse_within_reach(t.world, at))
     }
 
-    /// The mate as a loot rule sees the character reading it: its level
-    /// and the skills it said its rules ask about. A rule asks nothing
-    /// else of the character but its name (see `ac_loot::profile::Mine`).
+    /// The mate as a loot rule sees the character reading it: its level, the skills
+    /// it said its rules ask about and its quests' wants; else only its name is asked.
     pub fn wielder(&self) -> crate::weapons::Wielder {
         crate::weapons::Wielder {
             level: self.level.max(0) as u32,
             skills: self.skills.clone(),
+            quest_wants: self.quest_wants.clone(),
             ..Default::default()
         }
     }
