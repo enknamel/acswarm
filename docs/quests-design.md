@@ -299,7 +299,7 @@ setting is. Saved as part of `autoplay.config`; no rename, so no alias.
 
 The server never sends the registry (`quest_flags.rs`'s doc), so the client keeps its own:
 `crates/ac-client/src/quest_log.rs` (leaf unique), `QuestLog { kills: BTreeMap<String, u32>,
-done: BTreeMap<String, Done { at: u64, times: u32 }>, waits: BTreeMap<String, u64> }` keyed by
+done: BTreeMap<String, Solved { at: u64, times: u32 }>, waits: BTreeMap<String, u64> }` keyed by
 quest id or timer, Unix seconds. Saved beside the phase 1 flags as
 `quests/<host>/<character>.log.json` (`ac_store::write_json_atomic`, Visibility::Normal), read at
 login with `load_quest_flags`. Flags a quest stamps go to `Travel::quests_done` through
@@ -594,7 +594,7 @@ item, 75 kill, 8 talk), 253 givers; `quest_sources.csv` 1,927 rows (1,616 drop, 
 | `Row`, `Kind`, `Handing`, `Want`, `Repeat`, `Share`, `Reward::xp_at`, `Item`, `Source`, `Yield`, `all`, `sources`, `rows_of`, `sources_of`, `stamped_by`, `Row::fits_level`, `Row::locked_by` | `crates/ac-world/src/quests.rs` | built, tested | - (read by all) |
 | `autoplay::Quests { on, off }`, `Quests::is_on`, `Config.quests` | `crates/ac-client/src/autoplay/config.rs` | built, tested | - |
 | `QuestWant { wcid, need }`, `wanted()` | `crates/ac-loot/src/quest_wants.rs` | built, tested | loot adds `Wielder.quest_wants`, `Ask::Quest`, the starter rule |
-| `QuestLog` (`note_taken`, `note_kills`, `note_done`, `note_wait`, `wait_until`), `Done`; `load_quest_log`, `Client::save_quest_log` | `crates/ac-client/src/quest_log.rs` | built, tested | list (1d) writes kills; hunt and errand write done and waits (§4.3) |
+| `QuestLog` (`note_taken`, `note_kills`, `note_done`, `note_wait`, `wait_until`), `Solved`; `load_quest_log`, `Client::save_quest_log` | `crates/ac-client/src/quest_log.rs` | built, tested | list (1d) writes kills; hunt and errand write done and waits (§4.3) |
 | `QuestState`, `Blocked`, `QuestLine`, `QuestFacts`, `quest_board()` | `crates/ac-client/src/quest_log.rs` | Off, Ready, Needs, NotTaken, Waiting, Done | list: `CantYet` (level band, too hard, locked, needs first), refresh on a change (§2.3) |
 | `Client::quest_facts`, `Client::refresh_quests` (every `QUEST_BOARD_EVERY` from `Client::tick`), `Client.quest_board`, `Client.quest_log` | `crates/ac-client/src/quest_log.rs`, `crates/ac-client/src/session/apply.rs` | built | list (refresh triggers), loot (profile into the facts is there already) |
 | `Client::quests_on()`: the ids autoplay considers | `crates/ac-client/src/quest_log.rs` | built | - |

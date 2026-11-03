@@ -27,7 +27,7 @@ pub const XP_WATCH: Duration = Duration::from_secs(10);
 
 /// One quest done: when last (Unix seconds) and how many times.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Done {
+pub struct Solved {
     pub at: u64,
     pub times: u32,
 }
@@ -39,7 +39,7 @@ pub struct QuestLog {
     /// Kills so far, by the counter of a kill task taken up.
     pub kills: BTreeMap<String, u32>,
     /// Quests done, by id.
-    pub done: BTreeMap<String, Done>,
+    pub done: BTreeMap<String, Solved>,
     /// Unix seconds a quest may be done again, by its timer.
     pub waits: BTreeMap<String, u64>,
 }

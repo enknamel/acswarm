@@ -54,7 +54,7 @@ pub(crate) struct HandIn {
 
 /// What planning a run's calls came to.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub(crate) struct Planned {
+pub(crate) struct CallPlan {
     /// Calls in the order made: the counters' indices, then each hand-in's at counters + its own.
     pub(super) order: Vec<usize>,
     /// Hand-ins no journey from the start or a counter reaches, by index.
@@ -69,7 +69,7 @@ pub(crate) fn plan_calls(
     counters: &[Place],
     hand_ins: &[HandIn],
     xp_per_hour: Option<f32>,
-) -> Planned {
+) -> CallPlan {
     let n = counters.len();
     let leg = |a: Stop, b: Stop| legs.leg(a, b);
     let reached = |g: usize| {
@@ -121,7 +121,7 @@ pub(crate) fn plan_calls(
         }
     }
     let order = legs.tour(&taken).map_or(taken, |(o, _)| o);
-    Planned { order, refused }
+    CallPlan { order, refused }
 }
 
 impl Client {
