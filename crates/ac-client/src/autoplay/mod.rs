@@ -77,7 +77,7 @@ use loot::choose::answered_with_nothing;
 pub(crate) use loot::choose::{CORPSE_LIFE, CORPSE_REACH, CORPSE_URGENT};
 pub use loot::judge::{
     called_to, claim_on, judge_loot, quest_item_blocked, skills_asked_of, Calling, Claim, Left,
-    Taker,
+    Taker, NO_RULE_KEEPS,
 };
 use loot::owed::{corpse_within_reach, killed_by_us, whose_to_ask, Whose, KILL_SPOT};
 pub(crate) use loot::room::Room;

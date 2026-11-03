@@ -5,7 +5,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
 
-use ac_client::autoplay::{LootAction, Quests};
+use ac_client::autoplay::{LootAction, Quests, NO_RULE_KEEPS};
 use ac_client::quest_log::{Blocked, QuestLine, QuestState};
 
 use super::{caption, title};
@@ -39,6 +39,8 @@ impl Show {
 pub(crate) struct Filter {
     pub search: String,
     pub show: Show,
+    /// "add the quest rule" was pressed: the window puts it in the character's profile.
+    pub add_rule: bool,
 }
 
 /// The wanted item's name by quest id, for the search: a line names only its title and giver.
@@ -99,8 +101,8 @@ pub(crate) fn words(state: &QuestState, quests_on: bool, now: u64) -> String {
         QuestState::Ready => "ready to hand in".into(),
         QuestState::Needs { more, of } => format!("needs {more} more {of}"),
         QuestState::NotTaken { from } => format!("not taken up: talk to {from} first"),
-        QuestState::WontComplete { rule, .. } if rule == "no rule keeps it" => {
-            "won't complete: no rule keeps it".into()
+        QuestState::WontComplete { rule, .. } if rule == NO_RULE_KEEPS => {
+            format!("won't complete: {NO_RULE_KEEPS}; add the quest rule")
         }
         QuestState::WontComplete { rule, does: d } => format!(
             "won't complete: '{rule}' {} it; move the quest rule above it",
@@ -167,6 +169,18 @@ pub(crate) fn section(
          wants nothing and its items go to the rules below it",
     );
     caption(ui, count_line(lines));
+    let unkept = |l: &&QuestLine| matches!(&l.state, QuestState::WontComplete { rule, .. } if rule == NO_RULE_KEEPS);
+    if lines.iter().any(|l| unkept(&l))
+        && ui
+            .button("add the quest rule at the top")
+            .on_hover_text(
+                "The profile has no rule keeping quest items: put \"quest items\" (Keep, wanted \
+                 by an active quest) first in it",
+            )
+            .clicked()
+    {
+        filter.add_rule = true;
+    }
     ui.horizontal(|ui| {
         ui.add(
             egui::TextEdit::singleline(&mut filter.search)
@@ -267,6 +281,14 @@ mod tests {
         };
         assert_eq!(words(&wait, true, now), "done; again in 3h 20m");
         assert_eq!(words(&QuestState::Off, false, now), "do quests is off");
+        let unkept = QuestState::WontComplete {
+            rule: NO_RULE_KEEPS.into(),
+            does: LootAction::Skip,
+        };
+        assert_eq!(
+            words(&unkept, true, now),
+            "won't complete: no rule keeps it; add the quest rule"
+        );
     }
 
     #[test]

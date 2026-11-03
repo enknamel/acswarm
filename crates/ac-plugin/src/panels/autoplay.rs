@@ -815,6 +815,20 @@ pub(crate) fn draw(
     (cfg != v.config).then_some(cfg)
 }
 
+/// The quest rule put first in the character's loot profile, for one saved before there was one.
+fn add_quest_rule(c: &Client) {
+    let Some(profile) = c.profiles.get(&c.autoplay.config.loot.profile) else {
+        return;
+    };
+    let mut profile = (*profile).clone();
+    if !profile.add_quest_rule() {
+        return;
+    }
+    if let Err(e) = c.profiles.put(profile) {
+        tracing::warn!("adding the quest rule: {e}");
+    }
+}
+
 /// The settings and what the character is doing. What it takes and what
 /// it does with it is the loot profile's business now, and has its own
 /// window.
@@ -1111,6 +1125,11 @@ impl Plugin for Autoplay {
         let edited = draw(egui, &v, x, &mut self.drafts, &mut self.quest_filter);
         if super::closed("autoplay") {
             self.show = false;
+        }
+        if std::mem::take(&mut self.quest_filter.add_rule) {
+            if let (Source::Live, Some(c)) = (&self.source, cx.try_client()) {
+                add_quest_rule(c);
+            }
         }
         let Some(edited) = edited else { return };
         match &mut self.source {

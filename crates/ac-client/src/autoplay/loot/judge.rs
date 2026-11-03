@@ -278,7 +278,7 @@ pub fn quest_item_blocked(
 }
 
 /// What the cross-check names when no rule claims a quest's item.
-pub(crate) const NO_RULE_KEEPS: &str = "no rule keeps it";
+pub const NO_RULE_KEEPS: &str = "no rule keeps it";
 
 /// Why a worn item a salvage rule claimed is kept instead.
 pub(crate) const WORN: &str = "worn, so never salvaged";

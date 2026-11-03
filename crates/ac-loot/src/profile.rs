@@ -1009,6 +1009,18 @@ pub fn quest_rule() -> Rule {
     }
 }
 
+impl Profile {
+    /// Put [`quest_rule`] first, for a profile saved before there was one; false when a rule
+    /// already asks for quest items, wherever the player put it.
+    pub fn add_quest_rule(&mut self) -> bool {
+        if self.rules.iter().any(|r| r.all.contains(&Ask::Quest)) {
+            return false;
+        }
+        self.rules.insert(0, quest_rule());
+        true
+    }
+}
+
 /// A name safe as a file name: what a player types, less the characters a path cannot hold.
 /// Not `ac_store::file_safe`: this one writes `-` and falls back to "profile", and changing that
 /// would write a second file beside the one a player's profile already lives in.
@@ -2118,6 +2130,17 @@ mod tests {
         let back: Profile =
             serde_json::from_str(&serde_json::to_string(&Profile::starter()).unwrap()).unwrap();
         assert_eq!(back.rules[0], quest_rule());
+    }
+
+    #[test]
+    fn the_quest_rule_is_added_first_to_a_profile_without_one_and_only_once() {
+        let mut old = quest_then_cheap(Vec::new());
+        old.rules.retain(|r| !r.all.contains(&Ask::Quest));
+        let cheap = old.rules[0].clone();
+        assert!(old.add_quest_rule());
+        assert_eq!(old.rules, [quest_rule(), cheap]);
+        assert!(!old.add_quest_rule(), "a second time");
+        assert_eq!(old.rules.len(), 2);
     }
 }
 
