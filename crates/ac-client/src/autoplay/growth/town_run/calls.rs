@@ -124,8 +124,9 @@ pub(crate) fn plan_calls(
 }
 
 impl Client {
-    /// The hand-ins ready on the board, each at the giver nearest the first of `near` it can be
-    /// asked at (level band, open door, not lately refused), nearest first, at most `most`.
+    /// The hand-ins ready on the board, and the talks that take a switched-on quest up, each at the
+    /// giver nearest the first of `near` it can be asked at (level band, open door, not lately
+    /// refused), nearest first, at most `most`.
     pub(super) fn ready_hand_ins(&self, near: &[Vec2], most: usize, now: Instant) -> Vec<HandIn> {
         let level = self.world.stats.level.max(0) as u32;
         let held = &self.travel.quests_done;
@@ -135,8 +136,27 @@ impl Client {
                 .map(|p| p.distance(r.place.at.truncate()))
                 .fold(f32::MAX, f32::min)
         };
+        let open = |r: &&'static Row| {
+            r.fits_level(level)
+                && r.locked_by(held).is_none()
+                && !refused.within(&(r.giver_wcid, r.place.cell), now, GIVER_RETRY)
+        };
         let mut out: Vec<(f32, HandIn)> = Vec::new();
         for line in &self.quest_board {
+            // Not taken up: a talk to whoever starts it, the quest's own XP its worth.
+            if let (true, QuestState::NotTaken { from }) = (line.on, &line.state) {
+                let start = ac_world::quests::all()
+                    .iter()
+                    .filter(|r| r.kind == Kind::Start && r.giver == *from)
+                    .filter(open)
+                    .min_by(|a, b| away(a).total_cmp(&away(b)));
+                if let Some(row) =
+                    start.filter(|r| !out.iter().any(|(_, h)| std::ptr::eq(h.row, *r)))
+                {
+                    out.push((away(row), HandIn { row, xp: line.xp }));
+                }
+                continue;
+            }
             if !line.on || line.state != QuestState::Ready || line.kind == Kind::Start {
                 continue;
             }

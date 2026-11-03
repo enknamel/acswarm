@@ -704,6 +704,14 @@ impl Client {
     /// safe side): done, its wait begun and its flags held. Else the giver is let be a while.
     fn quest_answered(&mut self, asked: &Asked, rose: bool, now: Instant) {
         let row = asked.row;
+        // A talk that takes a quest up pays nothing: heard, its flags are held, the quest begun.
+        if row.kind == Kind::Start {
+            tracing::info!("quest: took up {} at {}", row.id, row.giver);
+            self.autoplay
+                .note(format!("took up {} from {}", row.title, row.giver), now);
+            self.hold_quest_flags(&row.stamps);
+            return;
+        }
         let taken = match row.want {
             Want::Item(wcid) => self.carried_count(wcid) < asked.carried,
             _ => true,

@@ -265,3 +265,48 @@ fn a_ready_talk_in_the_counters_town_joins_the_run_and_one_switched_off_does_not
     c.autoplay.running = None;
     assert!(c.autoplay.growth.run.as_ref().unwrap().calls.is_empty());
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_quest_not_taken_up_is_a_talk_to_whoever_starts_it_and_once_heard_it_is_begun() {
+    // Lieutenant Grenlin starts the Bronze Gauntlet Trooper kill count: a talk that pays nothing
+    // and stamps its counter, from level 30. Not taken up, the kills never count.
+    let cell = 0x8755_0016;
+    let mut c =
+        crate::testkit::standing_in_the_field(35, cell, glam::Vec3::new(60.0, 124.0, 10.01));
+    c.autoplay.config.quests.on = true;
+    c.quest_board = vec![crate::quest_log::QuestLine {
+        id: "bronzegauntlettrooperkilltask".into(),
+        title: "Bronze Gauntlet Trooper kill task".into(),
+        kind: Kind::Kill,
+        state: QuestState::NotTaken {
+            from: "Lieutenant Grenlin".into(),
+        },
+        xp: 20_000,
+        givers: 1,
+        giver: "Lieutenant Grenlin".into(),
+        on: true,
+    }];
+    let now = Instant::now();
+    let me = c.my_position().unwrap().truncate();
+    let calls = c.ready_hand_ins(&[me], 5, now);
+    let start = calls.first().expect("a talk to take it up").row;
+    assert_eq!(
+        (start.kind, start.giver.as_str()),
+        (Kind::Start, "Lieutenant Grenlin")
+    );
+    assert_eq!(calls[0].xp, 20_000);
+    // Switched off, nothing is offered.
+    c.quest_board[0].on = false;
+    assert!(c.ready_hand_ins(&[me], 5, now).is_empty());
+    // Heard with no XP: the counter is held, and the giver is not taken for refusing.
+    c.ask_giver(start, now);
+    c.watch_quest_answer(now + Duration::from_secs(11));
+    assert!(c.holds_quest_flag("bronzegauntlettrooperkillcount"));
+    let key = (start.giver_wcid, start.place.cell);
+    assert!(!c
+        .autoplay
+        .growth
+        .givers_refused
+        .within(&key, now, GIVER_RETRY));
+}
