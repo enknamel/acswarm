@@ -23,11 +23,11 @@ impl Client {
         self.pathfinder.plan(me, to, within, cap)
     }
 
-    /// Where the character can stand within `radius` (metres, flat) of `around`, by the region
-    /// planner (see [`Pathfinder::standable_near`](crate::pathfinder::Pathfinder::standable_near)).
-    pub(crate) fn standable_near(&mut self, around: Vec3, radius: f32) -> Vec<Place> {
+    /// Where the character can stand within `radius` (metres, flat) of `around`; `None` while the
+    /// region planner builds it (see [`Pathfinder::standable_near`](crate::pathfinder::Pathfinder::standable_near)).
+    pub(crate) fn standable_near(&mut self, around: Vec3, radius: f32) -> Option<Vec<Place>> {
         let Some(pl) = self.player.as_ref() else {
-            return Vec::new();
+            return Some(Vec::new());
         };
         let me = Place {
             at: pl.world_position(),

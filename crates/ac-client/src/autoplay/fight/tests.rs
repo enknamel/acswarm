@@ -228,6 +228,7 @@ fn tuskers_on_the_ledge_and_the_floor(now: Instant) -> (Client, u32, u32) {
     let ledge_away = me.distance(t.goal);
     let floor = c
         .standable_near(me, 25.0)
+        .expect("built offline")
         .into_iter()
         .filter(|p| (p.at.z - me.z).abs() < 0.5)
         .filter(|p| (ledge_away + 1.0..24.0).contains(&p.at.distance(me)))

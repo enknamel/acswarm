@@ -787,7 +787,7 @@ impl Client {
         let mine = self.world.player().map_or(0, |o| o.guid);
         let shot = self.shot_for(how);
         let to = self.body_of(target, at);
-        let places = self.standable_near(at, reach);
+        let places = self.standable_near(at, reach).unwrap_or_default();
         let mut spots: Vec<Vec3> = places.iter().map(|p| p.at).collect();
         let duds: Vec<Vec3> = self.dodge.dud_spots.iter().map(|(d, _)| *d).collect();
         self.dodge.vantage_refused.retain(|(g, _)| *g == target);

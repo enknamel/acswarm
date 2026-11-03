@@ -692,6 +692,7 @@ fn a_journey_that_loses_a_step_is_planned_again_without_it() {
     let (start, ledge) = under_the_01f6_ledge(&mut c);
     let goal = c
         .standable_near(start, 10.0)
+        .expect("built offline")
         .into_iter()
         .find(|p| p.at.distance(start) > 6.0)
         .expect("floor round the start");

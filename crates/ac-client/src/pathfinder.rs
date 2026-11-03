@@ -254,15 +254,14 @@ impl Pathfinder {
     }
 
     /// Where a character can stand within `radius` (metres, flat) of `around`, from what is built
-    /// (see [`routing::standable_near`]); none while the chunks it looks at are not, which are
-    /// then queued.
+    /// (see [`routing::standable_near`]); `None` while the chunks it looks at are not, then queued.
     pub fn standable_near(
         &mut self,
         from: Place,
         around: Place,
         radius: f32,
         capsule: Capsule,
-    ) -> Vec<Place> {
+    ) -> Option<Vec<Place>> {
         let (mut tries, mut held) = (0, None);
         loop {
             let region = held.take().or_else(|| region_for(from, around, &capsule));
@@ -272,15 +271,15 @@ impl Pathfinder {
                     .read(r)
                     .map(|area| routing::standable_near(&area, from, around, radius)),
                 None if can_assemble(from, around, &capsule) => None,
-                None => return Vec::new(),
+                None => return Some(Vec::new()),
             };
             let missing = match looked {
-                Some(Ok(spots)) => return spots,
+                Some(Ok(spots)) => return Some(spots),
                 Some(Err(chunks)) => chunks,
                 None => Vec::new(),
             };
             if tries == OWN_TRIES {
-                return Vec::new();
+                return None;
             }
             tries += 1;
             let job = move |w| match region {
@@ -289,7 +288,8 @@ impl Pathfinder {
             };
             match self.dispatch(job, from, around, radius, capsule) {
                 Done::Here(r) => held = Some(r),
-                Done::Queued | Done::Failed => return Vec::new(),
+                Done::Queued => return None,
+                Done::Failed => return Some(Vec::new()),
             }
         }
     }
@@ -838,6 +838,20 @@ mod tests {
             c.pathfinder.take(moved.at, other.at).is_some(),
             "a repeat once the throttle is past"
         );
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn standing_room_not_built_yet_is_not_an_empty_answer() {
+        // A handle with a builder thread, live: the area is queued, not answered as having none.
+        let assets = Assets::open(ac_dat::test_data_dir()).expect("the DATs");
+        let mut live = Pathfinder::new(&assets);
+        let at = Place::on_map(glam::Vec2::new(
+            0xE7 as f32 * 192.0 + 96.0,
+            0x4E as f32 * 192.0 + 96.0,
+        ));
+        let spots = live.standable_near(at, at, 2.5, Capsule::default());
+        assert_eq!(spots, None, "queued for the builder");
     }
 
     #[test]

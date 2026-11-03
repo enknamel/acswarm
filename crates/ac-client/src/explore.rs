@@ -133,16 +133,6 @@ fn facing(heading: f32) -> glam::Vec2 {
 }
 
 impl Client {
-    /// Where a walk into `room` ends for `aim`: [`spot_in_room`] within [`PAST_THE_DOOR`], else
-    /// (none built there yet) `aim` in the room's cell, which the planner floors or refuses.
-    fn room_goal(&mut self, room: u32, aim: Vec3) -> Place {
-        let spots = self.standable_near(aim, PAST_THE_DOOR);
-        spot_in_room(&spots, room, aim).unwrap_or(Place {
-            at: aim,
-            cell: room,
-        })
-    }
-
     /// Underground with nothing to fight or loot: walk into a room not yet stood in. Claims the
     /// tick while it has somewhere to go.
     pub fn autoplay_explore(&mut self, now: Instant) -> bool {
@@ -278,7 +268,21 @@ impl Client {
                 self.autoplay.rooms_shut.insert(room);
                 continue;
             };
-            let at = self.room_goal(room, aim);
+            // Not built round the aim yet: asked again next tick, the room neither guessed at nor
+            // shut. Built, a room with no standing spot of its own past the sill is shut.
+            let Some(spots) = self.standable_near(aim, PAST_THE_DOOR) else {
+                self.autoplay
+                    .say(Doing::Traveling, "looking for something to fight");
+                return true;
+            };
+            let Some(at) = spot_in_room(&spots, room, aim) else {
+                self.autoplay.rooms_shut.insert(room);
+                self.autoplay.note(
+                    format!("no floor past the door of {room:#06x}; going round"),
+                    now,
+                );
+                continue;
+            };
             // A room is gone into only when a walk gets there: the doorway of 0x01F60296 opens 6 m
             // up a wall (exploring_the_holtburg_dungeon_does_not_stand_at_the_bookcases).
             if let Did::Blocked(why) = self.walk_into(at, now) {

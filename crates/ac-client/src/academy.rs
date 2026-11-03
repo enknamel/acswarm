@@ -1327,6 +1327,7 @@ mod tests {
         let (mut c, _, me) = wasp_corpse(Vec3::ZERO);
         let floor = c
             .standable_near(me, 8.0)
+            .expect("built offline")
             .into_iter()
             .find(|p| p.at.distance(me) > 4.0)
             .expect("floor round the hunt");
