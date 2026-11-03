@@ -448,3 +448,16 @@ fn a_chained_quest_already_pursued_keeps_its_own_terms_ahead_of_the_one_needing_
         ]
     );
 }
+
+#[test]
+fn a_quest_worked_first_waits_while_the_one_it_is_for_waits() {
+    // Fiun's wait running and the Eater Pit's flag lost: Sir Ginazio is not talked to till it is due.
+    let fake = fiun_behind_the_pit();
+    let fiun = "augmentationprovinggroundaccess";
+    let mut f = facts(150, &[(fiun, true)]);
+    f.log.waits.insert(fiun.into(), NOW + 600);
+    let p = work(&f, &fake, None);
+    assert_eq!(p.lines[0].id, "ginsword");
+    assert_eq!(p.lines[0].step, PursuitStep::Waiting { until: NOW + 600 });
+    assert!(!p.lines.iter().any(|l| l.working), "{p:?}");
+}

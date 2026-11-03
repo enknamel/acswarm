@@ -234,9 +234,9 @@ pub(crate) struct Ask<'a> {
 }
 
 /// Each line's step, worked out with the `board` the chained list's facts gave; the first that
-/// can go on is the one worked.
+/// can go on is the one worked. One worked first waits while the quest it is for is not due.
 pub(crate) fn pursuit_of(board: &[QuestLine], chained: &[Chained], ask: &Ask) -> Pursued {
-    let mut out = Pursued::default();
+    let mut lines: Vec<(PursuitLine, Option<Hunting>)> = Vec::new();
     for c in chained {
         let id = c.pursuit.id.as_str();
         let line = board.iter().find(|l| l.id == id);
@@ -264,18 +264,47 @@ pub(crate) fn pursuit_of(board: &[QuestLine], chained: &[Chained], ask: &Ask) ->
         } else {
             stuck("no way to do it is known".to_string())
         };
-        let working = step.can_progress() && !out.lines.iter().any(|l| l.working);
-        if let (true, Some((grounds, sought))) = (working, hunt) {
-            out.grounds = grounds;
-            out.sought = sought;
-        }
-        out.lines.push(PursuitLine {
+        let line = PursuitLine {
             id: id.to_string(),
             title: title.trim().to_string(),
             step,
-            working,
+            working: false,
             via: c.via.clone(),
-        });
+        };
+        lines.push((line, hunt));
+    }
+    // The quest a line is worked first for comes after it: its step is known only now.
+    for i in 0..lines.len() {
+        let Some(via) = lines[i].0.via.clone() else {
+            continue;
+        };
+        let after = lines
+            .iter()
+            .find(|(l, _)| l.id == via)
+            .map(|(l, _)| &l.step);
+        let rests = match after {
+            Some(PursuitStep::Waiting { until }) => Some(PursuitStep::Waiting { until: *until }),
+            Some(PursuitStep::Finished) => Some(PursuitStep::Finished),
+            _ => None,
+        };
+        if let Some(step) = rests {
+            lines[i] = (
+                PursuitLine {
+                    step,
+                    ..lines[i].0.clone()
+                },
+                None,
+            );
+        }
+    }
+    let mut out = Pursued::default();
+    for (mut line, hunt) in lines {
+        line.working = line.step.can_progress() && !out.lines.iter().any(|l| l.working);
+        if let (true, Some((grounds, sought))) = (line.working, hunt) {
+            out.grounds = grounds;
+            out.sought = sought;
+        }
+        out.lines.push(line);
     }
     out
 }
