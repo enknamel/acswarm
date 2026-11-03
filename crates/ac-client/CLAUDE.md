@@ -61,7 +61,7 @@ read. The fixed curves are placed against those numbers: `LOOT_AT_REST` (45) sit
 | 19 | grow | goal | 10 | `autoplay_grow` |
 
 Housekeeping, every tick and never claiming it: `autoplay_pending_wield`, `autoplay_shield`,
-`autoplay_rearm`, `autoplay_stock`, `autoplay_claim_pet_kills`, `autoplay_tidy`, `autoplay_spend_xp`.
+`autoplay_rearm`, `autoplay_stock`, `autoplay_claim_pet_kills`, `autoplay_tidy`, `autoplay_learn_scrolls`, `autoplay_spend_xp`.
 
 ## Systems
 

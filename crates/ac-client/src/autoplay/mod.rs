@@ -54,6 +54,7 @@ mod hear;
 mod journey;
 mod ledger;
 mod loot;
+mod scrolls;
 pub mod steps;
 pub mod summoning;
 mod team;
@@ -440,6 +441,8 @@ pub struct Autoplay {
     /// is worth pouring copies every stack's name, and the answer
     /// cannot change faster than the server answers.
     pub(crate) tidy_looked: Option<Instant>,
+    /// The spells a scroll could teach, and the scrolls read lately.
+    pub(crate) learnable: scrolls::Learnable,
     /// Tidying left alone until then, because weight is all that stands
     /// in its way ([`TIDY_LADEN_WAIT`]).
     pub(crate) tidy_laden_until: Option<Instant>,

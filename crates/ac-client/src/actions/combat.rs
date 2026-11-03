@@ -293,6 +293,7 @@ impl Client {
             vitals,
             no_attack_spells: false,
             quest_wants: self.quest_wants.clone(),
+            learnable: self.learnable_spells(),
         }
     }
 

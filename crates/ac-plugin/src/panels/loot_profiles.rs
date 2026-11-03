@@ -1057,6 +1057,11 @@ fn looting(ui: &mut egui::Ui, p: &mut Profile, drafts: &mut super::autoplay::Dra
              slots are not wasted on change",
             );
     });
+    ui.checkbox(&mut l.learn_scrolls, "learn spell scrolls")
+        .on_hover_text(
+            "Take a spell scroll this character does not know and has the skill to learn, \
+         ahead of the rules, and read it when no fight or journey is on",
+        );
     ui.horizontal(|ui| {
         ui.label("carry up to");
         ui.add(

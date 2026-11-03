@@ -42,6 +42,8 @@ pub struct Wielder {
     pub no_attack_spells: bool,
     /// What its active quests want carried, for the loot condition `Ask::Quest`.
     pub quest_wants: Vec<crate::quest_wants::QuestWant>,
+    /// Spells it does not know and could learn from a scroll now (`Looting::learn_scrolls`).
+    pub learnable: std::sync::Arc<std::collections::BTreeSet<u32>>,
 }
 
 impl Wielder {
@@ -494,6 +496,7 @@ mod tests {
             vitals: [1000; 3],
             no_attack_spells: false,
             quest_wants: Vec::new(),
+            learnable: Default::default(),
         }
     }
 
@@ -595,6 +598,7 @@ mod tests {
             vitals: [300; 3],
             no_attack_spells: false,
             quest_wants: Vec::new(),
+            learnable: Default::default(),
         };
         let pick = best(&carried, Stance::Melee, Some(&firefly), &weak).expect("a sword");
         assert_eq!(pick.guid, 2, "{pick:?}");
@@ -678,6 +682,7 @@ mod tests {
             vitals: [200; 3],
             no_attack_spells: false,
             quest_wants: Vec::new(),
+            learnable: Default::default(),
         };
         assert_eq!(best_shield(&carried, &untrained).unwrap().guid, 2);
         let trained = Wielder {
@@ -789,6 +794,7 @@ mod tests {
             vitals: [200; 3],
             no_attack_spells: false,
             quest_wants: Vec::new(),
+            learnable: Default::default(),
         };
         let pick = best(&carried, Stance::Magic, None, &novice).expect("the plain one");
         assert_eq!(pick.guid, 2, "the great wand is out of reach");
@@ -846,6 +852,7 @@ mod tests {
             vitals: [500; 3],
             no_attack_spells: false,
             quest_wants: Vec::new(),
+            learnable: Default::default(),
         };
         let (stance, pick) = best_any(&carried, None, &mage).expect("something to hold");
         assert_eq!(stance, Stance::Magic, "{pick:?}");

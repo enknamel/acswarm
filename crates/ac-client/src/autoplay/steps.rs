@@ -549,6 +549,12 @@ pub const HOUSEKEEPING: &[Housekeeping] = &[
         run: Client::autoplay_tidy,
     },
     Housekeeping {
+        name: "learn spell scrolls",
+        // Keeps the learnable spells the loot rules read current, fight or no fight; a scroll
+        // is read only in a quiet moment.
+        run: Client::autoplay_learn_scrolls,
+    },
+    Housekeeping {
         name: "spend experience",
         // A rank is one message the server takes on the spot, fight or
         // no fight. It was the first thing the last goal did, and the
