@@ -90,6 +90,11 @@ pub(crate) const CORPSE_URGENT: Duration = Duration::from_secs(75);
 pub(crate) const CORPSE_REACH: f32 = 2.5;
 
 impl Autoplay {
+    /// Whether the loot rules have the corpse `guid` in hand, opening or emptying it.
+    pub(crate) fn is_at_corpse(&self, guid: u32) -> bool {
+        self.corpse.is_some_and(|(g, ..)| g == guid)
+    }
+
     /// Start on a corpse: asked to open just now, with `allow` for it
     /// to do so. The loot rules start afresh with it.
     pub(crate) fn take_up_corpse(&mut self, guid: u32, now: Instant, allow: Duration) {
@@ -203,6 +208,17 @@ impl Autoplay {
 }
 
 impl Client {
+    /// Whether `guid` is this character's own corpse ("Corpse of" its name).
+    pub(crate) fn is_own_corpse(&self, guid: u32) -> bool {
+        let me = self.world.stats.name.to_lowercase();
+        !me.is_empty()
+            && self
+                .world
+                .objects
+                .get(&guid)
+                .is_some_and(|o| o.name.to_lowercase() == format!("corpse of {me}"))
+    }
+
     /// The corpse `guid` holding `items`, asked to open at `asked`, and
     /// the character standing over it, as the loot rules see them.
     pub(crate) fn corpse_now(
@@ -229,10 +245,7 @@ impl Client {
             .unwrap_or_else(|| "the corpse".to_string());
         // Our own body: everything on it is ours, and the wand and the
         // components are what the character needs to fight again.
-        let mine = {
-            let me = self.world.stats.name.to_lowercase();
-            !me.is_empty() && name.to_lowercase() == format!("corpse of {me}")
-        };
+        let mine = self.is_own_corpse(guid);
         let wielder = self.wielder();
         let who = self.world.stats.name.clone();
         let my_guid = self.world.player_guid.unwrap_or(0);
@@ -287,8 +300,8 @@ impl Client {
                         )
                 });
                 // A kind the server has lately said cannot be had yet
-                // is left alone for a while (see `loot_refused`).
-                if self.refused_lately(stats.wcid, now) {
+                // is left alone for a while (see `loot_refused`); never off our own body.
+                if !mine && self.refused_lately(stats.wcid, now) {
                     return None;
                 }
                 let held = self.already_carried(stats.wcid) + claimed.of(stats.wcid);
@@ -372,8 +385,18 @@ impl Client {
             items: lying,
             slots_free: self.free_space(),
             room_anywhere: self.room_anywhere(),
-            keep_free: self.autoplay.config.team.restock.keep_slots,
-            carry_room: self.carry_room(&self.autoplay.config.growth),
+            // Off our own body everything comes back: no slots kept for coin, no loot weight limit,
+            // only what the server itself turns down stays.
+            keep_free: if mine {
+                0
+            } else {
+                self.autoplay.config.team.restock.keep_slots
+            },
+            carry_room: if mine {
+                u32::MAX
+            } else {
+                self.carry_room(&self.autoplay.config.growth)
+            },
             may_ask: profile.looting.appraise,
             asking: self.appraise_inflight.iter().map(|(g, _)| *g).collect(),
             // What the server has turned down since the corpse was asked
@@ -438,8 +461,15 @@ impl Client {
     /// Open the corpse of something we killed and take what is worth
     /// taking. True while looting.
     pub(crate) fn autoplay_loot(&mut self, now: Instant) -> bool {
-        // No profile, no looting: it is what says what to take.
-        let Some(profile) = self.loot_profile() else {
+        // No profile, no looting: it is what says what to take. Our own body needs none.
+        let own = self
+            .autoplay
+            .corpse
+            .is_some_and(|(g, ..)| self.is_own_corpse(g));
+        let Some(profile) = self
+            .loot_profile()
+            .or_else(|| own.then(|| std::sync::Arc::new(crate::profile::Profile::default())))
+        else {
             return false;
         };
         // Already at one: wait for its contents, then empty it.
