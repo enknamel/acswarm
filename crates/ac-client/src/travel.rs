@@ -45,6 +45,9 @@ const RECALL_SETTLE: Duration = Duration::from_millis(800);
 /// before the teleport) is cast again, and after `RECALL_TRIES` casts
 /// the journey is planned again without that spell.
 pub const RECALL_GIVE_UP: Duration = Duration::from_secs(15);
+/// The same for `/lifestone`, whose teleport waits out the LifestoneRecall animation
+/// (Player_Location.cs:180), 15.2 s on Coldeve: sent again at 15 s, a second recall began.
+const LIFESTONE_GIVE_UP: Duration = Duration::from_secs(25);
 const RECALL_TRIES: u32 = 2;
 /// How far off the portal a gem summoned may stand. ACE puts it three
 /// metres in front of whoever used the gem.
@@ -499,6 +502,15 @@ impl Client {
     }
 
     /// The step the trip is on.
+    /// Whether the journey's step under way is a portal's or a gem's: a teleport now is theirs.
+    pub(crate) fn is_portal_step(&self) -> bool {
+        self.traveling()
+            && matches!(
+                self.travel_step(),
+                Some(Step::Portal { .. } | Step::Gem { .. })
+            )
+    }
+
     fn travel_step(&self) -> Option<&Step> {
         self.travel.trip.as_ref()?.steps.get(self.travel.step)
     }
@@ -965,7 +977,7 @@ impl Client {
         if self.travel_recall_spell().is_some() && self.travel.state.recall_casts > 0 {
             self.travel.state.recall_since = Some(
                 Instant::now()
-                    .checked_sub(RECALL_GIVE_UP)
+                    .checked_sub(LIFESTONE_GIVE_UP)
                     .unwrap_or_else(Instant::now),
             );
         }
@@ -1312,10 +1324,15 @@ impl Client {
         let since = *self.travel.state.recall_since.get_or_insert(now);
         let waited = now.duration_since(since);
         let casts = self.travel.state.recall_casts;
+        let give_up = if ac_world::recalls::spell::is_free(spell) {
+            LIFESTONE_GIVE_UP
+        } else {
+            RECALL_GIVE_UP
+        };
         let due = if casts == 0 {
             waited >= RECALL_SETTLE
         } else {
-            waited >= RECALL_GIVE_UP
+            waited >= give_up
         };
         if !due {
             return;

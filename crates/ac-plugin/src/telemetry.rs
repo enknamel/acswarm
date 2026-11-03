@@ -171,6 +171,8 @@ fn sample(client: &Client) -> Value {
         "needs": client.supplies_seen(Instant::now()).map(|(age, lines)| json!([age.round(), lines])),
         // Something the fight rules would take on this near: "waiting" beside it is idle for no reason.
         "fight_near": client.fight_in_reach(),
+        // The creature closed on or attacked: [name, cell, [x, y, z]], to put a fight's walk offline.
+        "foe": client.foe_place().map(|(name, cell, at)| json!([name, format!("{cell:08X}"), at.to_array()])),
         "walk": walk,
         "trip": client.travel_progress(),
         "wield": wield,

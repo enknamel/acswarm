@@ -1253,3 +1253,40 @@ fn a_portal_walked_into_again_after_too_recently_is_not_refused_as_stalled() {
     assert!(c.travel.refused.is_empty(), "the mouth was left out");
     assert!(again, "never walked back into the mouth");
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn lifestone_is_not_sent_again_while_its_first_is_still_under_way() {
+    // ACE's /lifestone waits out its animation, 15.2 s on Coldeve, before the teleport: sent
+    // again at 15 s, the second began in Holtburg as the first landed there.
+    let mut c = crate::testkit::standing_in_the_field(40, 0x8F68_0014, Vec3::new(50.0, 50.0, 14.0));
+    let exit = Place {
+        at: Vec3::new(32532.0, 34567.0, 94.0),
+        cell: 0xA9B4_0019,
+    };
+    let trip = ac_world::trip::Trip {
+        steps: vec![
+            ac_world::trip::Step::Recall {
+                spell: ac_world::recalls::spell::FREE_LIFESTONE,
+                name: "/lifestone".into(),
+                exit,
+            },
+            ac_world::trip::Step::Walk(exit),
+        ],
+        seconds: 60.0,
+    };
+    let goal = crate::Goal::At {
+        place: exit,
+        within: 5.0,
+    };
+    crate::testkit::set_out_on(&mut c, trip, goal);
+    let t0 = std::time::Instant::now();
+    let at = |s: f32| t0 + std::time::Duration::from_secs_f32(s);
+    c.step_goal(at(0.0));
+    c.step_goal(at(1.0));
+    assert_eq!(c.travel.state.recall_casts, 1, "the first /lifestone");
+    c.step_goal(at(17.0));
+    assert_eq!(c.travel.state.recall_casts, 1, "sent again at 16 s");
+    c.step_goal(at(27.0));
+    assert_eq!(c.travel.state.recall_casts, 2, "never sent again");
+}
