@@ -684,7 +684,7 @@ fn a_kill_task_taken_up_sends_the_character_to_hunt_its_creature() {
     let plain = c.best_ground(15, cfg.level_margin, &[]).expect("a ground");
     let mut off: Vec<String> = ac_world::quests::all()
         .iter()
-        .map(|r| r.id.clone())
+        .map(|r| r.id.to_string())
         .collect();
     off.retain(|id| id != shreth);
     off.dedup();

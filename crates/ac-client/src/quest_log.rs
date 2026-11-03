@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 
 use ac_loot::quest_wants::QuestWant;
 use ac_world::quests::{Kind, Repeat, Row, Want, Yield};
+use ac_world::Place;
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
 
@@ -57,11 +58,11 @@ impl QuestLog {
 
     /// `row` was completed at `now`: its wait starts and a kill counter is forgotten (ACE erased it).
     pub fn note_done(&mut self, row: &Row, now: u64) {
-        let d = self.done.entry(row.id.clone()).or_default();
+        let d = self.done.entry(row.id.to_string()).or_default();
         d.at = now;
         d.times += 1;
         if let (Repeat::After(s), false) = (row.repeat, row.timer.is_empty()) {
-            self.waits.insert(row.timer.clone(), now + u64::from(s));
+            self.waits.insert(row.timer.to_string(), now + u64::from(s));
         }
         if let Want::Kill(counter) = &row.want {
             self.kills.remove(counter);
@@ -172,6 +173,12 @@ pub struct QuestFacts {
     pub name: String,
 }
 
+/// Whether autoplay works `row` on its own: a talk that takes a quest up, or a way to complete one
+/// that pays XP and asks nothing the client cannot check.
+pub fn is_automatic(row: &Row) -> bool {
+    row.kind == Kind::Start || (row.has_xp() && !row.has_unread())
+}
+
 /// The state of every quest in `rows`, one line per id, in the data's order.
 pub fn quest_board(rows: &[Row], facts: &QuestFacts) -> Vec<QuestLine> {
     board_of(rows, facts).0
@@ -198,7 +205,7 @@ fn board_of(rows: &[Row], facts: &QuestFacts) -> (Vec<QuestLine>, BTreeSet<Strin
         let on = facts.config.is_on(id);
         board.push(QuestLine {
             id: id.to_string(),
-            title: first.title.clone(),
+            title: first.title.to_string(),
             kind: first.kind,
             state: if on {
                 state_of(&doing, facts, &mut locks)
@@ -210,23 +217,24 @@ fn board_of(rows: &[Row], facts: &QuestFacts) -> (Vec<QuestLine>, BTreeSet<Strin
                 .map(|r| r.reward.xp_at(facts.to_next))
                 .max()
                 .unwrap_or(0),
-            givers: doing.len(),
-            giver: giver.giver.clone(),
+            givers: doing.iter().map(|r| r.places.len()).sum(),
+            giver: giver.giver.to_string(),
             on,
         });
     }
     (board, unsuited)
 }
 
-/// Each quest's rows that complete it (start rows left out), by id in the data's order.
+/// Each quest's rows autoplay works that complete it (start rows left out), by id in the data's
+/// order.
 fn by_quest(rows: &[Row]) -> Vec<(&str, Vec<&Row>)> {
     let mut ids: Vec<&str> = Vec::new();
     let mut by_id: BTreeMap<&str, Vec<&Row>> = BTreeMap::new();
-    for r in rows {
-        if !by_id.contains_key(r.id.as_str()) {
-            ids.push(&r.id);
+    for r in rows.iter().filter(|r| is_automatic(r)) {
+        if !by_id.contains_key(r.id) {
+            ids.push(r.id);
         }
-        let doing = by_id.entry(&r.id).or_default();
+        let doing = by_id.entry(r.id).or_default();
         if r.kind != Kind::Start {
             doing.push(r);
         }
@@ -238,7 +246,7 @@ fn by_quest(rows: &[Row]) -> Vec<(&str, Vec<&Row>)> {
 
 /// The row whose giver stands nearest `me` by straight distance; the first with no position.
 fn nearest<'r>(rows: &[&'r Row], me: Option<Vec3>) -> Option<&'r Row> {
-    let near = |r: &&Row| me.map_or(0.0, |m| r.place.at.distance(m));
+    let near = |r: &&Row| me.map_or(0.0, |m| r.distance_to(m));
     rows.iter()
         .copied()
         .min_by(|a, b| near(a).total_cmp(&near(b)))
@@ -249,22 +257,35 @@ fn nearest<'r>(rows: &[&'r Row], me: Option<Vec3>) -> Option<&'r Row> {
 struct Locks(BTreeMap<u32, Option<&'static str>>);
 
 impl Locks {
-    /// Only a landblock locked with no flag held can be locked with some held, so the few of
-    /// those, found once, are all `Row::locked_by` is asked about.
+    /// The flag every placement of `row`'s giver is locked behind; `None` when one is open.
     fn of(&mut self, row: &Row, held: &[String]) -> Option<&'static str> {
+        let mut flag = None;
+        for p in row.places {
+            let f = self.at(p, held)?;
+            flag.get_or_insert(f);
+        }
+        flag
+    }
+
+    /// Only a landblock locked with no flag held can be locked with some held, so the few of
+    /// those, found once, are all `quests::locked_at` is asked about.
+    fn at(&mut self, place: &Place, held: &[String]) -> Option<&'static str> {
         static MAYBE: OnceLock<BTreeSet<u32>> = OnceLock::new();
         let maybe = MAYBE.get_or_init(|| {
-            let quests = ac_world::quests::all().iter();
-            quests
-                .filter(|r| r.locked_by(&[]).is_some())
-                .map(|r| r.place.cell >> 16)
+            let places = ac_world::quests::all().iter().flat_map(|r| r.places);
+            places
+                .filter(|p| ac_world::quests::locked_at(p, &[]).is_some())
+                .map(|p| p.cell >> 16)
                 .collect()
         });
-        let block = row.place.cell >> 16;
-        if !row.place.is_indoors() || !maybe.contains(&block) {
+        let block = place.cell >> 16;
+        if !place.is_indoors() || !maybe.contains(&block) {
             return None;
         }
-        *self.0.entry(block).or_insert_with(|| row.locked_by(held))
+        *self
+            .0
+            .entry(block)
+            .or_insert_with(|| ac_world::quests::locked_at(place, held))
     }
 }
 
@@ -306,7 +327,7 @@ fn holds(facts: &QuestFacts, flag: &str) -> bool {
         || facts.log.kills.contains_key(&flag.to_ascii_lowercase())
         || stampers(flag)
             .iter()
-            .any(|r| r.kind != Kind::Start && facts.log.done.contains_key(&r.id))
+            .any(|r| r.kind != Kind::Start && facts.log.done.contains_key(r.id))
 }
 
 /// The band `rows` cover between them: the lowest minimum, the highest maximum (0 for open).
@@ -339,7 +360,7 @@ fn see_first(flag: &str, facts: &QuestFacts, locks: &mut Locks, depth: u32) -> Q
         .filter(|r| r.kind == Kind::Start)
         .collect();
     if starts.is_empty() {
-        let title = by.first().map_or(flag, |r| r.title.as_str());
+        let title = by.first().map_or(flag, |r| r.title);
         return QuestState::CantYet(Blocked::NeedsFirst {
             title: title.to_string(),
         });
@@ -365,18 +386,18 @@ fn see_first(flag: &str, facts: &QuestFacts, locks: &mut Locks, depth: u32) -> Q
                 .to_string(),
         });
     }
-    let near = |r: &&Row| facts.me.map_or(0.0, |m| r.place.at.distance(m));
+    let near = |r: &&Row| facts.me.map_or(0.0, |m| r.distance_to(m));
     open.sort_by(|a, b| near(a).total_cmp(&near(b)));
     let unmet = |r: &Row| r.needs.iter().find(|n| !holds(facts, n)).cloned();
     if let Some(r) = open.iter().find(|r| unmet(r).is_none()) {
         return QuestState::NotTaken {
-            from: r.giver.clone(),
+            from: r.giver.to_string(),
         };
     }
     match unmet(open[0]) {
         Some(need) if depth < 3 => see_first(&need, facts, locks, depth + 1),
         _ => QuestState::CantYet(Blocked::NeedsFirst {
-            title: open[0].title.clone(),
+            title: open[0].title.to_string(),
         }),
     }
 }
@@ -384,12 +405,12 @@ fn see_first(flag: &str, facts: &QuestFacts, locks: &mut Locks, depth: u32) -> Q
 /// One switched-on quest's state: done or waiting, then what rules it out, then what is left.
 fn state_of(doing: &[&Row], facts: &QuestFacts, locks: &mut Locks) -> QuestState {
     let first = doing[0];
-    if let Some(until) = facts.log.wait_until(&first.timer, facts.now) {
+    if let Some(until) = facts.log.wait_until(first.timer, facts.now) {
         return QuestState::Waiting { until };
     }
     // A once-quest's own flag held is done too: stamped before the log was kept.
-    let flagged = !first.timer.is_empty() && holds(facts, &first.timer);
-    if first.repeat == Repeat::Once && (facts.log.done.contains_key(&first.id) || flagged) {
+    let flagged = !first.timer.is_empty() && holds(facts, first.timer);
+    if first.repeat == Repeat::Once && (facts.log.done.contains_key(first.id) || flagged) {
         return QuestState::Done;
     }
     if let Some(why) = beyond_level(doing, facts) {
@@ -477,7 +498,7 @@ fn item_state(taken: &[&Row], facts: &QuestFacts) -> QuestState {
             None => {
                 nearest = Some((
                     need - held,
-                    item.map_or_else(String::new, |i| i.name.clone()),
+                    item.map_or_else(String::new, |i| i.name.to_string()),
                 ))
             }
         }
@@ -505,7 +526,7 @@ pub fn quest_wants(board: &[QuestLine]) -> Vec<QuestWant> {
             continue;
         }
         let rows: Vec<&Row> = ac_world::quests::rows_of(&line.id)
-            .filter(|r| r.kind == Kind::Item)
+            .filter(|r| r.kind == Kind::Item && is_automatic(r))
             .collect();
         for wcid in items_of(rows.iter().copied()) {
             let of = rows.iter().filter(|r| r.want == Want::Item(wcid));
@@ -574,6 +595,8 @@ pub fn worth_detour(xp: u64, detour: f32, xp_per_hour: Option<f32>) -> bool {
 #[derive(Clone, Debug)]
 pub struct Asked {
     pub row: &'static Row,
+    /// The giver's placement asked at.
+    pub place: Place,
     pub at: Instant,
     /// Total XP when asked: a rise is the reward.
     pub xp_before: i64,
@@ -596,8 +619,8 @@ impl Client {
         let cfg = &self.autoplay.config.quests;
         let mut ids: Vec<&'static str> = Vec::new();
         for r in ac_world::quests::all() {
-            if r.kind != Kind::Start && cfg.is_on(&r.id) && ids.last() != Some(&r.id.as_str()) {
-                ids.push(&r.id);
+            if r.kind != Kind::Start && cfg.is_on(r.id) && ids.last() != Some(&r.id) {
+                ids.push(r.id);
             }
         }
         ids
@@ -667,8 +690,9 @@ impl Client {
             board_of(ac_world::quests::all(), &self.quest_facts());
     }
 
-    /// `row`'s giver was asked: its answer is watched for, and one asked before is answered now.
-    pub(crate) fn ask_giver(&mut self, row: &'static Row, now: Instant) {
+    /// `row`'s giver at `place` was asked: its answer is watched for, and one asked before is
+    /// answered now.
+    pub(crate) fn ask_giver(&mut self, row: &'static Row, place: Place, now: Instant) {
         if let Some(old) = self.quest_asked.take() {
             let rose = self.world.stats.total_xp > old.xp_before;
             if rose || !std::ptr::eq(old.row, row) {
@@ -677,6 +701,7 @@ impl Client {
         }
         self.quest_asked = Some(Asked {
             row,
+            place,
             at: now,
             xp_before: self.world.stats.total_xp,
             carried: match row.want {
@@ -717,7 +742,7 @@ impl Client {
             _ => true,
         };
         if !rose && (!taken || row.repeat == Repeat::Any) {
-            let key = (row.giver_wcid, row.place.cell);
+            let key = (row.giver_wcid, asked.place.cell);
             self.autoplay.growth.givers_refused.mark(key, now);
             let why = format!("{} gave nothing for {}", row.giver, row.title);
             self.autoplay.note(why, now);
@@ -751,13 +776,13 @@ impl Client {
             .sum()
     }
 
-    /// Go and see `row`'s giver: a visit, journey and all. False when there is no way.
-    pub fn visit_giver(&mut self, row: &Row) -> bool {
+    /// Go and see `row`'s giver at `place`: a visit, journey and all. False when there is no way.
+    pub fn visit_giver(&mut self, row: &Row, place: Place) -> bool {
         let l = ac_world::landmarks::Landmark {
             kind: ac_world::landmarks::Kind::Npc,
-            name: row.giver.clone(),
-            cell: row.place.cell,
-            at: row.place.at,
+            name: row.giver.to_string(),
+            cell: place.cell,
+            at: place.at,
         };
         let ok = self.visit_landmark(&l);
         tracing::info!("quest: to {} for {} ({ok})", row.giver, row.id);

@@ -6,16 +6,13 @@ const HOLTBURG: u32 = 0xA9B4_0019;
 
 /// A Red Rat Tail hand-in to a giver standing in `cell`, worth `xp`.
 fn tail_to(cell: u32, xp: u64) -> HandIn {
-    let mut row = ac_world::quests::rows_of("give:3684")
-        .next()
-        .unwrap()
-        .clone();
-    row.place = Place {
-        at: ac_world::landblock_origin(cell),
-        cell,
-    };
+    let row = ac_world::quests::rows_of("give:3684").next().unwrap();
     HandIn {
-        row: Box::leak(Box::new(row)),
+        row,
+        at: Place {
+            at: ac_world::landblock_origin(cell),
+            cell,
+        },
         xp,
     }
 }
@@ -99,7 +96,7 @@ fn at_a_collector(tails: u32, now: Instant) -> (Client, &'static Row) {
         giver,
         ac_world::WorldObject {
             guid: giver,
-            name: row.giver.clone(),
+            name: row.giver.to_string(),
             item_type: ac_world::item_type::CREATURE,
             position: Some(ac_world::object::Position::new_flat(
                 HOLTBURG,
@@ -116,9 +113,11 @@ fn at_a_collector(tails: u32, now: Instant) -> (Client, &'static Row) {
             .unwrap()
             .weenie_class_id = 3684;
     }
-    let mut run = run_to(row.place.at.truncate(), now);
+    let at = row.places[0];
+    let mut run = run_to(at.at.truncate(), now);
     run.phase = Phase::HandingIn {
         row,
+        at,
         giver,
         taken: 0,
         last: None,
@@ -186,7 +185,7 @@ fn a_giver_that_never_takes_the_item_is_not_called_on_again_for_a_while() {
         t += GIVE_PAUSE;
     }
     assert!(c.autoplay.growth.run.is_none(), "the call never ended");
-    let key = (row.giver_wcid, row.place.cell);
+    let key = (row.giver_wcid, row.places[0].cell);
     assert!(c
         .autoplay
         .growth
@@ -203,22 +202,27 @@ fn a_giver_in_a_dungeon_is_priced_and_called_on_with_its_cell() {
     let row = ac_world::quests::rows_of("fachubfolthid")
         .find(|r| r.kind == Kind::Item)
         .unwrap();
-    assert!(row.place.is_indoors());
-    let legs = c.plan_legs(&[row.place]).unwrap();
+    let at = row.places[0];
+    assert!(at.is_indoors());
+    let legs = c.plan_legs(&[at]).unwrap();
     assert!(
         legs.leg(Stop::Start, Stop::Call(0)).is_some(),
         "no journey to the Warden"
     );
-    let hand_in = [HandIn { row, xp: 100_000 }];
+    let hand_in = [HandIn {
+        row,
+        at,
+        xp: 100_000,
+    }];
     assert_eq!(plan_calls(&legs, &[], &hand_in, Some(1.0)).order, [0]);
     let now = Instant::now();
     let mut run = run_to(Vec2::new(32_587.2, 34_578.3), now);
     c.autoplay.running = Some("town run");
-    assert!(c.make_call(&mut run, giver_call(row), now));
+    assert!(c.make_call(&mut run, giver_call(row, at), now));
     c.autoplay.running = None;
-    assert_eq!(run.phase, Phase::ToGiver { row, tries: 1 });
+    assert_eq!(run.phase, Phase::ToGiver { row, at, tries: 1 });
     let goal = c.journey_goal().and_then(crate::Goal::place);
-    assert_eq!(goal.map(|p| p.cell), Some(row.place.cell), "{goal:?}");
+    assert_eq!(goal.map(|p| p.cell), Some(at.cell), "{goal:?}");
 }
 
 #[test]
@@ -248,7 +252,7 @@ fn a_ready_talk_in_the_counters_town_joins_the_run_and_one_switched_off_does_not
     let givers: Vec<&str> = std::iter::once(&run.vendor)
         .map(String::as_str)
         .chain(run.calls.iter().filter_map(|k| match &k.on {
-            CallOn::Giver { row } => Some(row.giver.as_str()),
+            CallOn::Giver { row } => Some(row.giver),
             CallOn::Counter { .. } => None,
         }))
         .filter(|n| *n == "Alcott")
@@ -290,9 +294,9 @@ fn a_quest_not_taken_up_is_a_talk_to_whoever_starts_it_and_once_heard_it_is_begu
     let now = Instant::now();
     let me = c.my_position().unwrap().truncate();
     let calls = c.ready_hand_ins(&[me], 5, now);
-    let start = calls.first().expect("a talk to take it up").row;
+    let HandIn { row: start, at, .. } = calls.first().expect("a talk to take it up").clone();
     assert_eq!(
-        (start.kind, start.giver.as_str()),
+        (start.kind, start.giver),
         (Kind::Start, "Lieutenant Grenlin")
     );
     assert_eq!(calls[0].xp, 20_000);
@@ -300,10 +304,10 @@ fn a_quest_not_taken_up_is_a_talk_to_whoever_starts_it_and_once_heard_it_is_begu
     c.quest_board[0].on = false;
     assert!(c.ready_hand_ins(&[me], 5, now).is_empty());
     // Heard with no XP: the counter is held, and the giver is not taken for refusing.
-    c.ask_giver(start, now);
+    c.ask_giver(start, at, now);
     c.watch_quest_answer(now + Duration::from_secs(11));
     assert!(c.holds_quest_flag("bronzegauntlettrooperkillcount"));
-    let key = (start.giver_wcid, start.place.cell);
+    let key = (start.giver_wcid, at.cell);
     assert!(!c
         .autoplay
         .growth

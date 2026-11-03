@@ -118,14 +118,16 @@ pub(super) enum Phase {
     /// left the pack -- nothing else is remembered, because what there
     /// is to sell is asked of the pack afresh every turn.
     Selling { sent: Vec<u32> },
-    /// On the way to a quest giver (a visit), the `tries`th time.
+    /// On the way to a quest giver at `at` (a visit), the `tries`th time.
     ToGiver {
         row: &'static ac_world::quests::Row,
+        at: ac_world::Place,
         tries: u32,
     },
     /// Handing the giver its items: `taken` so far, the last give with the count carried then.
     HandingIn {
         row: &'static ac_world::quests::Row,
+        at: ac_world::Place,
         giver: u32,
         taken: u32,
         last: Option<(Instant, u32)>,

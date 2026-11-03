@@ -48,7 +48,7 @@ fn item_names() -> &'static BTreeMap<&'static str, &'static str> {
     static NAMES: OnceLock<BTreeMap<&'static str, &'static str>> = OnceLock::new();
     NAMES.get_or_init(|| {
         let rows = ac_world::quests::all().iter();
-        rows.filter_map(|r| Some((r.id.as_str(), r.item.as_ref()?.name.as_str())))
+        rows.filter_map(|r| Some((r.id, r.item.as_ref()?.name)))
             .collect()
     })
 }

@@ -1,5 +1,9 @@
 use super::*;
 
+fn cells(r: &Row) -> Vec<u32> {
+    r.places.iter().map(|p| p.cell).collect()
+}
+
 fn row(id: &str, kind: Kind, giver: &str) -> &'static Row {
     rows_of(id)
         .find(|r| r.kind == kind && r.giver == giver)
@@ -13,7 +17,7 @@ fn san_mings_blood_shreth_kill_task_loads_as_the_design_works_it() {
     assert_eq!(start.reward.xp_at(1_000_000), 0);
     let kill = row("killtaskbloodshreth", Kind::Kill, "San Ming");
     assert_eq!(kill.title, "Blood Shreth Kill Task");
-    assert_eq!((kill.giver_wcid, kill.place.cell), (31641, 0xDA55_001D));
+    assert_eq!((kill.giver_wcid, cells(kill)), (31641, vec![0xDA55_001D]));
     assert_eq!(kill.want, Want::Kill("killtaskbloodshreth".into()));
     assert_eq!(kill.count, 10);
     assert_eq!(kill.repeat, Repeat::After(72_000));
@@ -33,10 +37,12 @@ fn san_mings_blood_shreth_kill_task_loads_as_the_design_works_it() {
 
 #[test]
 fn a_red_rat_tail_is_one_quest_for_any_of_twelve_givers() {
+    // Nine Collector weenies, one row each, standing in twelve places between them.
     let rows: Vec<&Row> = rows_of("give:3684").collect();
-    assert_eq!(rows.len(), 12);
+    assert_eq!(rows.len(), 9);
+    assert_eq!(rows.iter().map(|r| r.places.len()).sum::<usize>(), 12);
     let yukara = row("give:3684", Kind::Item, "Yukara Miko the Collector");
-    assert_eq!(yukara.place.cell, 0x2B11_0112);
+    assert_eq!(cells(yukara), [0x2B11_0112]);
     assert_eq!(yukara.hand, Handing::Give);
     assert_eq!((yukara.want.clone(), yukara.count), (Want::Item(3684), 1));
     assert_eq!(yukara.reward.xp_at(5_000_000), 1_000);
@@ -45,7 +51,7 @@ fn a_red_rat_tail_is_one_quest_for_any_of_twelve_givers() {
     assert_eq!(yukara.repeat, Repeat::Any);
     let tail = yukara.item.as_ref().expect("the wanted item");
     assert_eq!(
-        (tail.name.as_str(), tail.item_type, tail.value),
+        (tail.name, tail.item_type, tail.value),
         ("Red Rat Tail", 0x80, 2)
     );
     let rat = sources_of(&Want::Item(3684))
@@ -57,7 +63,7 @@ fn a_red_rat_tail_is_one_quest_for_any_of_twelve_givers() {
 #[test]
 fn holtburgs_barkeep_and_pathwarden_talks_chain() {
     let alcott = row("tothebarkeep", Kind::Talk, "Alcott");
-    assert_eq!(alcott.place.cell, 0xA9B4_0019);
+    assert_eq!(cells(alcott), [0xA9B4_0019]);
     assert_eq!(alcott.reward.xp_at(0), 7_000);
     assert_eq!(alcott.repeat, Repeat::Once);
     assert_eq!(alcott.stamps, ["lifestonefound1111", "tothebarkeep"]);
@@ -75,50 +81,86 @@ fn holtburgs_barkeep_and_pathwarden_talks_chain() {
 }
 
 #[test]
-fn every_need_is_stamped_and_every_ask_has_a_source() {
-    assert!(all().len() > 1_500, "{} rows", all().len());
+fn every_row_says_what_it_does_and_asks_its_own_kind_of_thing() {
+    // Every quest is in, XP or not: a need nobody stamps or an item nothing drops stays a row
+    // (the board says it can't yet), so only the row's own shape is checked.
+    assert!(all().len() > 10_000, "{} rows", all().len());
     for r in all() {
-        for n in &r.needs {
-            assert!(
-                stamped_by(n).next().is_some(),
-                "{}: nobody stamps {n}",
-                r.id
-            );
-        }
-        match r.kind {
-            Kind::Kill => {
-                assert!(
-                    rows_of(&r.id).any(|s| s.kind == Kind::Start),
-                    "{}: no start",
-                    r.id
-                );
-                assert!(
-                    sources_of(&r.want).next().is_some(),
-                    "{}: no creature",
-                    r.id
-                );
-            }
-            Kind::Item => {
-                assert!(sources_of(&r.want).next().is_some(), "{}: no source", r.id);
-                assert!(r.item.is_some(), "{}: no item", r.id);
-            }
-            Kind::Talk | Kind::Start => assert_eq!(r.want, Want::Nothing),
-        }
+        assert!(!r.does.is_empty(), "{}: does nothing", r.id);
+        let fits = match r.kind {
+            Kind::Kill => matches!(r.want, Want::Kill(_)),
+            Kind::Item => matches!(r.want, Want::Item(_)),
+            Kind::Talk | Kind::Start => r.want == Want::Nothing,
+        };
+        assert!(fits, "{}: {:?} asks {:?}", r.id, r.kind, r.want);
+        assert_eq!(r.random, r.unread.contains(&"a random reply") && r.random);
     }
+}
+
+#[test]
+fn sir_ginazio_stamps_the_eater_pit_flag() {
+    let gin = stamped_by("Eaterpit")
+        .find(|r| r.giver == "Sir Ginazio")
+        .expect("Sir Ginazio stamps eaterpit");
+    assert_eq!(
+        (gin.id, gin.kind, gin.giver_wcid),
+        ("ginsword", Kind::Talk, 29488)
+    );
+    assert_eq!(cells(gin), [0x2AEE_002C]);
+    assert!(!gin.has_xp());
+}
+
+#[test]
+fn fiun_rehlyun_takes_the_insatiable_jaw_for_augmentation_access() {
+    let fiun = row(
+        "augmentationprovinggroundaccess",
+        Kind::Item,
+        "Fiun Rehlyun",
+    );
+    assert_eq!(
+        (fiun.want.clone(), fiun.hand),
+        (Want::Item(28719), Handing::Give)
+    );
+    assert_eq!(fiun.stamps, ["augmentationprovinggroundaccess"]);
+    assert!(!fiun.has_xp() && !fiun.has_unread());
+    assert_eq!(fiun.does, ["flag", "takes"]);
+    assert!(sources_of(&Want::Item(28719)).any(|s| s.wcid == 28848));
+    // The Blank Augmentation Gem goes to the augmentation trainers for their gems, and to
+    // Nalicana for luminance on a check the client cannot read.
+    let gem: Vec<&Row> = rows_of("give:29295").collect();
+    let trainers = gem.iter().filter(|r| r.does.contains(&"item")).count();
+    assert!(trainers > 20, "{trainers} trainers");
+    assert!(gem
+        .iter()
+        .any(|r| r.does.contains(&"luminance") && r.has_unread()));
+}
+
+#[test]
+fn a_random_reply_is_one_row_listing_every_reward() {
+    let r = all()
+        .iter()
+        .find(|r| r.random && r.gives.len() > 3)
+        .expect("a random reply with several rewards");
+    assert!(r.unread.contains(&"a random reply"), "{}", r.id);
+    assert!(!r.has_xp() || r.has_unread());
 }
 
 #[test]
 fn every_line_of_both_files_parses_and_givers_stand_in_the_world() {
     assert_eq!(lines(QUESTS).count(), all().len());
+    assert_eq!(lines(GIVERS).count(), givers().places.len());
     assert_eq!(lines(SOURCES).count(), sources().len());
     for r in all() {
-        let (x, y) = (r.place.cell >> 24, (r.place.cell >> 16) & 0xFF);
-        assert!(x < 0xFF && y < 0xFF, "{}: cell {:08X}", r.id, r.place.cell);
-        let local = r.place.at - crate::landblock_origin(r.place.cell);
+        assert!(!r.places.is_empty(), "{}: nowhere", r.id);
+    }
+    for p in &givers().places {
+        let (x, y) = (p.cell >> 24, (p.cell >> 16) & 0xFF);
+        assert!(x < 0xFF && y < 0xFF, "cell {:08X}", p.cell);
+        let local = p.at - crate::landblock_origin(p.cell);
         assert!(
-            r.place.is_indoors() || (0.0..=192.0).contains(&local.x),
-            "{}",
-            r.id
+            p.is_indoors() || (0.0..=192.0).contains(&local.x),
+            "{:08X}",
+            p.cell
         );
     }
 }
@@ -161,10 +203,13 @@ fn an_items_own_pickup_limit_and_a_level_ladder_are_read_into_the_rows() {
     assert_eq!(ufet.timer, "southerntumerokinsignia");
     // Carpenter Wasp Wing: CarpWing allows one pickup ever.
     assert!(rows_of("waspwingdone").all(|r| r.repeat == Repeat::Once));
-    // Rat King's Tail asks a flag no row stamps (QuestRestriction), so the quest is out.
-    assert!(rows_of("ratcatcherquestcompleted").next().is_none());
+    // Rat King's Tail asks the flag its pickup is restricted to (QuestRestriction).
+    let tail = row("ratcatcherquestcompleted", Kind::Item, "Lo Raen");
+    assert!(tail.needs.contains(&"ratcatcherquestacquired".to_string()));
     // Syltyn Rillon's bands, each read from the failure of the one before (sets 48828-48837).
+    // Her talk that hands the sword over (no XP, another quest's wait unread) is a row too.
     let bands: Vec<(u32, u32)> = rows_of("gotfrozenfuryaward")
+        .filter(|r| r.kind == Kind::Item)
         .map(|r| (r.min_level, r.max_level))
         .collect();
     assert_eq!(bands, [(1, 49), (50, 64), (65, 79), (80, 0)]);

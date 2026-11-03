@@ -165,7 +165,7 @@ fn carrying_parts(piles: u32, shelf_name: &str) -> Client {
     c.autoplay.config.quests.on = true;
     c.autoplay.config.quests.off = ac_world::quests::all()
         .iter()
-        .map(|r| r.id.clone())
+        .map(|r| r.id.to_string())
         .filter(|id| id != PARTS_QUEST)
         .collect();
     c.autoplay.config.quests.off.dedup();

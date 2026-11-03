@@ -256,7 +256,7 @@ pub fn quest_item_blocked(
     // Appraised with no appraisal: a rule that needs one cannot claim what nobody has seen.
     let stats = crate::items::ItemStats {
         wcid: item.wcid,
-        name: item.name.clone(),
+        name: item.name.to_string(),
         item_type: item.item_type,
         kind: crate::items::kind_name(item.item_type),
         value: item.value,

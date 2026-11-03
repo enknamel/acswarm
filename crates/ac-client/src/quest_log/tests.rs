@@ -141,18 +141,39 @@ fn a_kill_task_waits_for_the_level_its_giver_asks_and_its_creatures_suit() {
 fn a_talk_that_needs_another_quest_first_names_it_until_that_one_is_done() {
     let id = "pathwardenfound1111";
     let mut facts = at_level(5);
+    // The Pathwarden Token's hand-in pays the same XP and asks no flag.
     assert_eq!(
         state(id, &facts),
+        QuestState::Needs {
+            more: 1,
+            of: "Pathwarden Token".into()
+        }
+    );
+    // Thorolf's talk asks ToPathwarden, a way only without pathwardencomplete (unread): read
+    // alone with that taken as so, it is the talk the XP-only data had.
+    let mut talk = rows(id).into_iter().find(|r| r.kind == Kind::Talk).unwrap();
+    talk.unread.clear();
+    let talk_state = |facts: &QuestFacts| {
+        quest_board(std::slice::from_ref(&talk), facts)[0]
+            .state
+            .clone()
+    };
+    assert_eq!(
+        talk_state(&facts),
         QuestState::CantYet(Blocked::NeedsFirst {
             title: "Sent to the Pathwarden".into()
         })
     );
     let buckminster = rows("topathwarden").remove(0);
     facts.log.note_done(&buckminster, facts.now);
-    assert_eq!(state(id, &facts), QuestState::Ready, "the log's own stamp");
+    assert_eq!(talk_state(&facts), QuestState::Ready, "the log's own stamp");
     let mut flagged = at_level(5);
     flagged.held.push("ToPathwarden".into());
-    assert_eq!(state(id, &flagged), QuestState::Ready, "a flag in any case");
+    assert_eq!(
+        talk_state(&flagged),
+        QuestState::Ready,
+        "a flag in any case"
+    );
 }
 
 #[test]
@@ -271,7 +292,7 @@ fn a_giver_that_pays_marks_the_quest_done_and_one_that_takes_nothing_is_let_be()
     let alcott = ac_world::quests::rows_of("tothebarkeep")
         .find(|r| r.giver == "Alcott")
         .unwrap();
-    c.ask_giver(alcott, t0);
+    c.ask_giver(alcott, alcott.places[0], t0);
     c.watch_quest_answer(t0 + Duration::from_secs(1));
     assert!(c.quest_asked.is_some(), "no answer yet: still watched");
     c.world.stats.total_xp += 7_000;
@@ -291,10 +312,10 @@ fn a_giver_that_pays_marks_the_quest_done_and_one_that_takes_nothing_is_let_be()
         .get_mut(&0x8000_0100)
         .unwrap()
         .weenie_class_id = 3684;
-    c.ask_giver(tail, t0);
+    c.ask_giver(tail, tail.places[0], t0);
     c.watch_quest_answer(t0 + XP_WATCH);
     assert!(!c.quest_log.done.contains_key("give:3684"));
-    let key = (tail.giver_wcid, tail.place.cell);
+    let key = (tail.giver_wcid, tail.places[0].cell);
     assert!(c.autoplay.growth.givers_refused.since(&key).is_some());
 }
 

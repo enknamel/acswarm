@@ -1,10 +1,14 @@
-//! Quests an NPC rewards with XP: who gives each, what it asks (kills, an item, a talk), the
-//! reward and how soon it repeats, and where what it asks comes from.
+//! Every quest a placed NPC holds, XP or not: who gives each and where they stand, what it asks
+//! (kills, an item, a talk), what it does and what the client cannot check, how soon it repeats,
+//! and where what it asks comes from.
 //!
-//! Server data (emote sets), copied in `data/quests.csv` and `data/quest_sources.csv`
+//! Server data (emote sets), in `data/quests.csv`, `quest_givers.csv` and `quest_sources.csv`
 //! (`reference/scripts/data/quests.sh`); rows sharing an id are alternative ways to one quest.
 
+use std::collections::BTreeMap;
 use std::sync::OnceLock;
+
+use glam::Vec3;
 
 use crate::Place;
 
@@ -89,22 +93,24 @@ impl Reward {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Item {
     pub wcid: u32,
-    pub name: String,
+    pub name: &'static str,
     /// ItemType bits (PropertyInt 1).
     pub item_type: u32,
     pub value: u32,
 }
 
-/// One way to complete a quest (or to take it up): a giver placement and level band.
+/// One way to complete a quest (or to take it up): a giver, at any of its placements, and a level
+/// band. Strings borrow the bundled text.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Row {
     /// The quest; rows sharing it are alternatives.
-    pub id: String,
+    pub id: &'static str,
     pub kind: Kind,
-    pub title: String,
+    pub title: &'static str,
     pub giver_wcid: u32,
-    pub giver: String,
-    pub place: Place,
+    pub giver: &'static str,
+    /// Every placement of the giver, never empty (`quest_givers.csv`).
+    pub places: &'static [Place],
     pub hand: Handing,
     pub want: Want,
     /// Items one hand-in takes, or kills.
@@ -113,16 +119,22 @@ pub struct Row {
     pub min_level: u32,
     pub max_level: u32,
     pub reward: Reward,
-    /// Reward items, `(wcid, count)`.
+    /// Reward items, `(wcid, count)`; with `random`, every alternative's items.
     pub gives: Vec<(u32, u32)>,
+    /// A random reply: one of its alternatives' items is given, drawn by chance.
+    pub random: bool,
     /// Quest flags the reward stamps, lowercased.
     pub stamps: Vec<String>,
     pub repeat: Repeat,
     /// The quest the wait or once-flag is kept under; empty when it repeats any time.
-    pub timer: String,
+    pub timer: &'static str,
     /// Flags held first; a kill row needs its own counter, which its start row stamps.
     pub needs: Vec<String>,
     pub item: Option<Item>,
+    /// What the path does, in the data's words (`xp`, `item`, `flag`, `luminance`, `type N`...).
+    pub does: Vec<&'static str>,
+    /// Conditions the client cannot check, in words ("a random reply", "a check of stat 134").
+    pub unread: Vec<&'static str>,
 }
 
 impl Row {
@@ -131,33 +143,75 @@ impl Row {
         level >= self.min_level && (self.max_level == 0 || level <= self.max_level)
     }
 
-    /// The flag a giver in a dungeon is shut behind: every working portal into its landblock
-    /// asks a flag not in `held`. `None` for a giver a walk or an open portal reaches.
-    pub fn locked_by(&self, held: &[String]) -> Option<&'static str> {
-        if !self.place.is_indoors() {
-            return None;
-        }
-        let block = self.place.cell >> 16;
-        let portals = crate::portals::all();
-        let touches_surface = portals.iter().any(|p| {
-            (p.from_cell >> 16 == block && p.mouth_outdoors())
-                || (p.to_cell >> 16 == block && p.exit_outdoors())
-        });
-        if touches_surface {
-            return None;
-        }
-        let into: Vec<&crate::portals::Portal> = portals
-            .iter()
-            .filter(|p| p.works() && p.to_cell >> 16 == block && p.from_cell >> 16 != block)
-            .collect();
-        let shut = |p: &&crate::portals::Portal| {
-            !p.quest.is_empty() && !held.iter().any(|h| h.eq_ignore_ascii_case(&p.quest))
-        };
-        if into.is_empty() || !into.iter().all(shut) {
-            return None;
-        }
-        into.first().map(|p| p.quest.as_str())
+    /// Whether the row awards XP, fixed or level-scaled.
+    pub fn has_xp(&self) -> bool {
+        self.reward.xp > 0 || self.reward.xp_level > 0.0
     }
+
+    /// Whether the row asks something the client cannot check (`unread`).
+    pub fn has_unread(&self) -> bool {
+        !self.unread.is_empty()
+    }
+
+    /// The giver's placement nearest `me` by straight distance; the first with no position.
+    pub fn nearest(&self, me: Option<Vec3>) -> Place {
+        let away = |p: &&Place| me.map_or(0.0, |m| p.at.distance(m));
+        self.places
+            .iter()
+            .min_by(|a, b| away(a).total_cmp(&away(b)))
+            .copied()
+            .unwrap_or(Place {
+                at: Vec3::ZERO,
+                cell: 0,
+            })
+    }
+
+    /// The straight distance from `me` to the giver's nearest placement.
+    pub fn distance_to(&self, me: Vec3) -> f32 {
+        self.places
+            .iter()
+            .map(|p| p.at.distance(me))
+            .fold(f32::MAX, f32::min)
+    }
+
+    /// The flag the giver is shut behind: every placement is in a dungeon whose working portals
+    /// in all ask a flag not in `held` ([`locked_at`]). `None` when one placement is open.
+    pub fn locked_by(&self, held: &[String]) -> Option<&'static str> {
+        let mut flag = None;
+        for p in self.places {
+            let f = locked_at(p, held)?;
+            flag.get_or_insert(f);
+        }
+        flag
+    }
+}
+
+/// The flag a placement in a dungeon is shut behind: every working portal into its landblock
+/// asks a flag not in `held`. `None` for a place a walk or an open portal reaches.
+pub fn locked_at(place: &Place, held: &[String]) -> Option<&'static str> {
+    if !place.is_indoors() {
+        return None;
+    }
+    let block = place.cell >> 16;
+    let portals = crate::portals::all();
+    let touches_surface = portals.iter().any(|p| {
+        (p.from_cell >> 16 == block && p.mouth_outdoors())
+            || (p.to_cell >> 16 == block && p.exit_outdoors())
+    });
+    if touches_surface {
+        return None;
+    }
+    let into: Vec<&crate::portals::Portal> = portals
+        .iter()
+        .filter(|p| p.works() && p.to_cell >> 16 == block && p.from_cell >> 16 != block)
+        .collect();
+    let shut = |p: &&crate::portals::Portal| {
+        !p.quest.is_empty() && !held.iter().any(|h| h.eq_ignore_ascii_case(&p.quest))
+    };
+    if into.is_empty() || !into.iter().all(shut) {
+        return None;
+    }
+    into.first().map(|p| p.quest.as_str())
 }
 
 /// How a source yields what a quest wants.
@@ -187,6 +241,7 @@ pub struct Source {
 }
 
 const QUESTS: &str = include_str!("../data/quests.csv");
+const GIVERS: &str = include_str!("../data/quest_givers.csv");
 const SOURCES: &str = include_str!("../data/quest_sources.csv");
 
 fn words(s: &str) -> Vec<String> {
@@ -194,6 +249,45 @@ fn words(s: &str) -> Vec<String> {
         .filter(|w| !w.is_empty())
         .map(str::to_string)
         .collect()
+}
+
+fn split_on(s: &'static str, sep: char) -> Vec<&'static str> {
+    s.split(sep).filter(|w| !w.is_empty()).collect()
+}
+
+/// Each giver's placements, grouped by wcid, and its name and range into them.
+struct Givers {
+    places: Vec<Place>,
+    by_wcid: BTreeMap<u32, (&'static str, std::ops::Range<usize>)>,
+}
+
+fn parse_giver(line: &'static str) -> Option<(u32, &'static str, Place)> {
+    let f: Vec<&'static str> = line.split(',').collect();
+    if f.len() != 6 {
+        return None;
+    }
+    let cell = u32::from_str_radix(f[2], 16).ok()?;
+    let local = Vec3::new(f[3].parse().ok()?, f[4].parse().ok()?, f[5].parse().ok()?);
+    let at = crate::landblock_origin(cell) + local;
+    Some((f[0].parse().ok()?, f[1], Place { at, cell }))
+}
+
+fn givers() -> &'static Givers {
+    static PARSED: OnceLock<Givers> = OnceLock::new();
+    PARSED.get_or_init(|| {
+        let mut all: Vec<(u32, &'static str, Place)> =
+            lines(GIVERS).filter_map(parse_giver).collect();
+        all.sort_by_key(|g| g.0);
+        let mut by_wcid = BTreeMap::new();
+        for (i, &(wcid, name, _)) in all.iter().enumerate() {
+            let e = by_wcid.entry(wcid).or_insert((name, i..i));
+            e.1.end = i + 1;
+        }
+        Givers {
+            places: all.into_iter().map(|g| g.2).collect(),
+            by_wcid,
+        }
+    })
 }
 
 fn pairs(s: &str, radix: u32) -> Option<Vec<(u32, u32)>> {
@@ -214,9 +308,9 @@ fn want_of(kind: Kind, s: &str) -> Option<Want> {
     })
 }
 
-fn parse_row(line: &str) -> Option<Row> {
-    let f: Vec<&str> = line.split(',').collect();
-    if f.len() != 27 {
+fn parse_row(line: &'static str) -> Option<Row> {
+    let f: Vec<&'static str> = line.split(',').collect();
+    if f.len() != 24 {
         return None;
     }
     let kind = match f[1] {
@@ -226,58 +320,67 @@ fn parse_row(line: &str) -> Option<Row> {
         "start" => Kind::Start,
         _ => return None,
     };
-    let cell = u32::from_str_radix(f[5], 16).ok()?;
-    let local = glam::Vec3::new(f[6].parse().ok()?, f[7].parse().ok()?, f[8].parse().ok()?);
-    let repeat = match f[21].parse::<i64>().ok()? {
+    let repeat = match f[16].parse::<i64>().ok()? {
         0 => Repeat::Any,
         -1 => Repeat::Once,
         s => Repeat::After(u32::try_from(s).ok()?),
     };
-    let item = match f[24] {
+    let item = match f[19] {
         "" => None,
         name => Some(Item {
-            wcid: f[10].parse().ok()?,
-            name: name.to_string(),
-            item_type: u32::from_str_radix(f[25], 16).ok()?,
-            value: f[26].parse().ok()?,
+            wcid: f[5].parse().ok()?,
+            name,
+            item_type: u32::from_str_radix(f[20], 16).ok()?,
+            value: f[21].parse().ok()?,
         }),
     };
+    let giver_wcid = f[3].parse().ok()?;
+    let table = givers();
+    let (giver, range) = table.by_wcid.get(&giver_wcid)?;
+    let mut gives: Vec<(u32, u32)> = Vec::new();
+    for alt in f[14].split('|') {
+        for g in pairs(alt, 10)? {
+            if !gives.contains(&g) {
+                gives.push(g);
+            }
+        }
+    }
     Some(Row {
-        id: f[0].to_string(),
+        id: f[0],
         kind,
-        title: f[2].to_string(),
-        giver_wcid: f[3].parse().ok()?,
-        giver: f[4].to_string(),
-        place: Place {
-            at: crate::landblock_origin(cell) + local,
-            cell,
-        },
-        hand: if f[9] == "give" {
+        title: f[2],
+        giver_wcid,
+        giver,
+        places: &table.places[range.clone()],
+        hand: if f[4] == "give" {
             Handing::Give
         } else {
             Handing::Talk
         },
-        want: want_of(kind, f[10])?,
-        count: f[11].parse().ok()?,
-        min_level: f[12].parse().ok()?,
-        max_level: f[13].parse().ok()?,
+        want: want_of(kind, f[5])?,
+        count: f[6].parse().ok()?,
+        min_level: f[7].parse().ok()?,
+        max_level: f[8].parse().ok()?,
         reward: Reward {
-            xp: f[14].parse().ok()?,
-            xp_level: f[15].parse().ok()?,
-            xp_min: f[16].parse().ok()?,
-            xp_max: f[17].parse().ok()?,
-            share: match f[18] {
+            xp: f[9].parse().ok()?,
+            xp_level: f[10].parse().ok()?,
+            xp_min: f[11].parse().ok()?,
+            xp_max: f[12].parse().ok()?,
+            share: match f[13] {
                 "all" => Share::All,
                 "allegiance" => Share::Allegiance,
                 _ => Share::None,
             },
         },
-        gives: pairs(f[19], 10)?,
-        stamps: words(f[20]),
+        gives,
+        random: f[14].contains('|'),
+        stamps: words(f[15]),
         repeat,
-        timer: f[22].to_string(),
-        needs: words(f[23]),
+        timer: f[17],
+        needs: words(f[18]),
         item,
+        does: split_on(f[22], ';'),
+        unread: split_on(f[23], '|'),
     })
 }
 
@@ -307,15 +410,19 @@ fn parse_source(line: &str) -> Option<Source> {
     })
 }
 
-fn lines(text: &str) -> impl Iterator<Item = &str> {
+fn lines(text: &'static str) -> impl Iterator<Item = &'static str> {
     text.lines()
         .filter(|l| !l.starts_with('#') && !l.is_empty())
 }
 
-/// Every row, parsed on first use.
+/// Every row, parsed on first use, in id order (the file's).
 pub fn all() -> &'static [Row] {
     static ROWS: OnceLock<Vec<Row>> = OnceLock::new();
-    ROWS.get_or_init(|| lines(QUESTS).filter_map(parse_row).collect())
+    ROWS.get_or_init(|| {
+        let mut rows: Vec<Row> = lines(QUESTS).filter_map(parse_row).collect();
+        rows.sort_by_key(|r| r.id);
+        rows
+    })
 }
 
 /// Every source, parsed on first use.
@@ -326,12 +433,29 @@ pub fn sources() -> &'static [Source] {
 
 /// The rows of one quest, its start rows among them.
 pub fn rows_of(id: &str) -> impl Iterator<Item = &'static Row> + '_ {
-    all().iter().filter(move |r| r.id == id)
+    static BY_ID: OnceLock<BTreeMap<&'static str, std::ops::Range<usize>>> = OnceLock::new();
+    let by_id = BY_ID.get_or_init(|| {
+        let mut m: BTreeMap<&'static str, std::ops::Range<usize>> = BTreeMap::new();
+        for (i, r) in all().iter().enumerate() {
+            m.entry(r.id).or_insert(i..i).end = i + 1;
+        }
+        m
+    });
+    let range = by_id.get(id).cloned().unwrap_or(0..0);
+    all()[range].iter()
 }
 
 /// Where what `want` asks for comes from.
 pub fn sources_of(want: &Want) -> impl Iterator<Item = &'static Source> + '_ {
-    sources().iter().filter(move |s| &s.want == want)
+    static BY_WANT: OnceLock<BTreeMap<&'static Want, Vec<&'static Source>>> = OnceLock::new();
+    let by_want = BY_WANT.get_or_init(|| {
+        let mut m: BTreeMap<&'static Want, Vec<&'static Source>> = BTreeMap::new();
+        for s in sources() {
+            m.entry(&s.want).or_default().push(s);
+        }
+        m
+    });
+    by_want.get(want).into_iter().flatten().copied()
 }
 
 /// The rows whose reward or talk stamps `flag`.
