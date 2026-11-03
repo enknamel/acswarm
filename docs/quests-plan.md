@@ -20,6 +20,10 @@ portals, unlocks, hunting grounds and creatures already are. Players need no ACE
   quest rule sells, salvages or skips its item, named); can't do yet (drop or kill too high level,
   the giver's area locked).
 - Autoplay takes on only quests that are on and not blocked. A blocked one says which rule to move.
+- A quest paying XP is on until switched off. Any other (a flag, an item swap, an augmentation
+  gem) is off until the player chooses it by hand; only a chosen quest has its ways that pay no XP
+  or ask what the client cannot check (`unread`) worked, so nothing is handed over for a quest the
+  player did not choose (`Quests.chosen`, `quest_log::is_automatic`).
 
 ## The loot profile keeps what an active quest wants
 

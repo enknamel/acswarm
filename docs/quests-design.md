@@ -12,7 +12,8 @@ The plan's rules this design keeps:
 - The profile decides. The quest rule is one rule among the others: moved, turned off, or
   overruled by a rule above it. No guard anywhere skips the profile for a quest item.
 - The data ships with acswarm, generated from ACE's world database like portals and hunting.
-- Players switch quests on and off; autoplay considers only quests that are on and not blocked,
+- Players switch quests on and off (a quest paying XP starts on, any other only when chosen by
+  hand); autoplay considers only quests that are on and not blocked,
   and a blocked one says why (the rule to move, the level, the locked area).
 - Turn-ins may be anywhere: every giver is a `Place` with its cell, and the run that hands in is
   the town run with more calls, planned on phase 4's journeys.
@@ -293,8 +294,10 @@ every saved config loads):
 pub struct Quests {
     /// Autoplay considers quests at all; off, the quest rule wants nothing.
     pub on: bool,
-    /// Quests switched off, by `ac_world::quests` id; a quest the data adds later starts on.
+    /// Quests switched off, by `ac_world::quests` id; one paying XP the data adds later starts on.
     pub off: Vec<String>,
+    /// Quests switched on by hand: every way to complete one is worked, XP or not, unread or not.
+    pub chosen: Vec<String>,
 }
 ```
 Off by default, so a saved config and a new one keep today's behaviour until the player ticks it.
