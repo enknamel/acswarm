@@ -292,7 +292,7 @@ impl Client {
             attributes_current,
             vitals,
             no_attack_spells: false,
-            quest_wants: Vec::new(),
+            quest_wants: self.quest_wants.clone(),
         }
     }
 

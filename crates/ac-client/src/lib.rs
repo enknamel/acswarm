@@ -257,6 +257,10 @@ pub struct Client {
     /// Each quest's state for this character, worked out by `refresh_quests`.
     pub quest_board: Vec<quest_log::QuestLine>,
     pub(crate) quest_board_at: Option<Instant>,
+    /// What the board wants carried, for the loot rule (`quest_log::quest_wants`).
+    pub quest_wants: Vec<ac_loot::QuestWant>,
+    /// The board those wants were read from, by when it was worked out.
+    pub(crate) quest_wants_at: Option<Instant>,
     /// The giver asked last, while its answer is awaited.
     pub quest_asked: Option<quest_log::Asked>,
     /// Melee combat mode is on.

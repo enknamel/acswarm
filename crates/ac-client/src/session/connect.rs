@@ -120,6 +120,8 @@ impl Client {
             quest_log: Default::default(),
             quest_board: Vec::new(),
             quest_board_at: None,
+            quest_wants: Vec::new(),
+            quest_wants_at: None,
             quest_asked: None,
             combat: false,
             magic: false,

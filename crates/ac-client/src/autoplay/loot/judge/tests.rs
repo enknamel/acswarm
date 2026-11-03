@@ -294,3 +294,89 @@ fn a_worn_item_a_salvage_rule_claims_is_kept() {
     );
     let _ = std::fs::remove_dir_all(library.dir());
 }
+
+/// A Red Rat Tail as quests.csv has it.
+fn red_rat_tail() -> ac_world::quests::Item {
+    ac_world::quests::rows_of("give:3684")
+        .find_map(|r| r.item.clone())
+        .expect("the Collectors' row names its item")
+}
+
+fn profile_of(rules: Vec<crate::profile::Rule>) -> crate::profile::Profile {
+    crate::profile::Profile {
+        rules,
+        ..Default::default()
+    }
+}
+
+#[test]
+fn the_cross_check_names_the_rule_above_the_quest_rule_that_would_lose_a_quest_item() {
+    let cheap = asks("nothing cheap", "value<=250", LootAction::Skip);
+    let quest = crate::profile::quest_rule();
+    let me = crate::weapons::Wielder::default();
+    let check =
+        |p: &crate::profile::Profile| quest_item_blocked(Some(p), &red_rat_tail(), &me, "Bryn", 0);
+    assert_eq!(check(&profile_of(vec![quest.clone(), cheap.clone()])), None);
+    assert_eq!(
+        check(&profile_of(vec![cheap.clone(), quest.clone()])),
+        Some(("nothing cheap".into(), LootAction::Skip))
+    );
+    let sell = asks("tails to sell", "tail", LootAction::Sell);
+    assert_eq!(
+        check(&profile_of(vec![sell, quest.clone()])),
+        Some(("tails to sell".into(), LootAction::Sell))
+    );
+    // A mule whose saved profile predates the rule: nothing claims a trophy worth 2.
+    let mule = profile_of(vec![asks("the rest", "value>=1000", LootAction::Sell)]);
+    assert_eq!(check(&mule), Some((NO_RULE_KEEPS.into(), LootAction::Skip)));
+    let mut never = profile_of(vec![quest.clone()]);
+    never.looting.never = vec!["Red Rat".into()];
+    assert_eq!(
+        check(&never),
+        Some(("never take these".into(), LootAction::Skip))
+    );
+    // Any keeping rule above it keeps the tail just as well.
+    let keep = asks("tails", "tail", LootAction::Keep);
+    assert_eq!(check(&profile_of(vec![keep, cheap])), None);
+    assert_eq!(
+        quest_item_blocked(None, &red_rat_tail(), &me, "Bryn", 0),
+        None
+    );
+}
+
+#[test]
+fn the_board_says_a_quest_wont_complete_and_names_the_rule() {
+    use crate::quest_log::{quest_board, QuestFacts, QuestState};
+    let rows: Vec<_> = ac_world::quests::rows_of("give:3684").cloned().collect();
+    let cheap = asks("nothing cheap", "value<=250", LootAction::Skip);
+    let mut facts = QuestFacts {
+        level: 20,
+        config: crate::autoplay::Quests {
+            on: true,
+            off: Vec::new(),
+        },
+        profile: Some(std::sync::Arc::new(profile_of(vec![
+            cheap.clone(),
+            crate::profile::quest_rule(),
+        ]))),
+        ..QuestFacts::default()
+    };
+    let state = |f: &QuestFacts| quest_board(&rows, f)[0].state.clone();
+    assert_eq!(
+        state(&facts),
+        QuestState::WontComplete {
+            rule: "nothing cheap".into(),
+            does: LootAction::Skip
+        }
+    );
+    // Still wanted while blocked, so the line can name the rule and the rule may be moved.
+    assert_eq!(
+        crate::quest_log::quest_wants(&quest_board(&rows, &facts)).len(),
+        1
+    );
+    facts.profile = Some(std::sync::Arc::new(profile_of(vec![
+        crate::profile::quest_rule(),
+        cheap,
+    ])));
+    assert!(matches!(state(&facts), QuestState::Needs { more: 1, .. }));
+}

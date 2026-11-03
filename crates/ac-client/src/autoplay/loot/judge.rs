@@ -234,7 +234,7 @@ pub fn judge_loot(
 }
 
 /// The rule that sells, salvages or skips a quest's item ahead of the quest rule, as the looting
-/// would judge it (design §3.3), or `None` while the rules keep it. Seam: the loot builder fills it.
+/// would judge it (design §3.3), or `None` while the rules keep it, or with no profile to read.
 pub fn quest_item_blocked(
     profile: Option<&crate::profile::Profile>,
     item: &ac_world::quests::Item,
@@ -242,9 +242,34 @@ pub fn quest_item_blocked(
     my_name: &str,
     held: u32,
 ) -> Option<(String, LootAction)> {
-    let _ = (profile, item, me, my_name, held);
-    None
+    use crate::profile::Verdict;
+    let profile = profile?;
+    // Appraised with no appraisal: a rule that needs one cannot claim what nobody has seen.
+    let stats = crate::items::ItemStats {
+        wcid: item.wcid,
+        name: item.name.clone(),
+        item_type: item.item_type,
+        kind: crate::items::kind_name(item.item_type),
+        value: item.value,
+        stack: 1,
+        appraised: true,
+        ..Default::default()
+    };
+    // Judged as the quest wanting one more, whatever the last board said it wanted.
+    let mut me = me.clone();
+    me.quest_wants.push(ac_loot::QuestWant {
+        wcid: item.wcid,
+        need: None,
+    });
+    match judge_loot(&stats, None, Some(profile), &me, my_name, held) {
+        Verdict::Decided(LootAction::Keep, _) => None,
+        Verdict::Decided(does, rule) => Some((rule, does)),
+        Verdict::NeedsId(_) | Verdict::None => Some((NO_RULE_KEEPS.into(), LootAction::Skip)),
+    }
 }
+
+/// What the cross-check names when no rule claims a quest's item.
+pub(crate) const NO_RULE_KEEPS: &str = "no rule keeps it";
 
 /// Why a worn item a salvage rule claimed is kept instead.
 pub(crate) const WORN: &str = "worn, so never salvaged";
