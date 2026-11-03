@@ -212,6 +212,8 @@
 28212,drop,72790,Emergent Azure Gromnus,220,0.03,3150:46;8954:7
 28213,drop,72791,Emergent Ivory Gromnus,220,0.03,3150:46;8954:7
 28214,drop,72792,Emergent Rust Gromnus,220,0.03,3150:46;8954:7
+28488,drop,27661,Morgluuk,200,1,278:1;6249:1
+28488,drop,28445,Morgluuk,200,1,278:1
 28718,drop,28847,Ravenous Eater,135,1,39D:5
 28725,drop,28849,Engorged Eater,80,1,1:4
 28726,drop,28850,Voracious Eater,100,1,194:8
@@ -437,6 +439,7 @@
 29900,drop,11488,Marsh Siraluun,8,0.05,259D:3
 29901,drop,11489,Strand Siraluun,60,0.05,28E:19
 29902,drop,11490,Tidal Siraluun,8,0.05,28E:1
+30055,npc,28701,Elena Du Furza,4,1,33D9000A:1
 30474,drop,30448,Southern Overseer,134,1,5:3
 30475,drop,30449,Western Overseer,185,1,6:3
 30476,drop,30450,Northern Overseer,104,1,4:3
@@ -861,6 +864,7 @@
 3703,drop,12,Red Phyntos Wasp,8,0.15,151:2;1B7:10;1DA:2;1E7:2;1FC:9;5756:2;5764:1;5771:1;584D:1;5856:1;5862:1;5863:1;5866:1;5867:1;586C:1;586D:1;586E:1;586F:1;5870:1;5874:1;5875:1;5876:1;5877:5;5951:1;5952:1;5954:1;654D:1;665E:1;6757:1;7E6E:5;825F:4;8954:1;8C03:1;8F5C:1;905D:1;9302:1;947C:3;9D7B:3;A9B2:1;ABB3:2;ADB0:5;B46E:4;C6A9:6;CC8E:2
 3703,drop,12017,Red Phyntos Drone,8,0.65,5756:2;5764:1;5771:1;584D:1;5856:1;5862:1;5863:1;5866:1;5867:1;586C:1;586D:1;586E:1;586F:1;5870:1;5874:1;5875:1;5876:1;5877:5;5951:1;5952:1;5954:1;654D:1;665E:1;6757:1;8954:1;8C03:1;9302:1;A9B2:1;C6A9:6
 3703,drop,19435,Red Phyntos Wasp,6,0.15,65DE:1;67DE:1
+38042,drop,38030,Falatacot Blood Prophetess,200,1,DA:1
 38158,drop,38144,Siabot the Deranged,160,1,C5:1
 38159,drop,38145,Lorfne the Unhinged,160,1,C6:1
 38160,drop,38146,Ves the Mad,80,1,C1:1
@@ -970,6 +974,9 @@
 44267,drop,44091,Bak'tshay Servant,220,0.2,5756:5
 44267,drop,44092,Bak'tshay Servant,220,0.2,5756:5
 44298,drop,44297,Cracked Stone Tablet,1,1,8764:6;8765:8;8766:9;8864:5;8866:7;8964:6;8965:5;8966:6
+45019,drop,45016,Frozen Wight High Acolyte,240,1,8B04:1
+45020,drop,45016,Frozen Wight High Acolyte,240,1,8B04:1
+45021,drop,45016,Frozen Wight High Acolyte,240,1,8B04:1
 45193,drop,45153,Guardian Statue,220,0.8,5764:20
 45193,drop,45155,Pyre Champion,265,0.8,5764:20
 45193,drop,45156,Pyre Skeleton,220,0.8,5764:20
@@ -1361,7 +1368,6 @@
 73001,drop,70376,Kierien the Watcher,85,1,8852:1
 73002,drop,70377,Warmaster Lurgiss,85,1,8852:1
 73052,drop,73051,Andrilos,135,1,65:1
-73087,drop,32727,Rat King,40,1,D756:1
 73198,drop,73195,Controlled Tusker,115,0.35,F173:1
 73198,drop,73196,Restrained Tusker,135,0.35,F173:1
 73198,drop,73197,Virindi Subjugator,160,0.35,F173:1

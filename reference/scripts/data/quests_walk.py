@@ -80,6 +80,10 @@ class Data:
         for obj, t, v in rows(dump, "ints"):
             self.ints[int(obj)][int(t)] = int(v)
         self.allow_give = {int(o) for (o,) in rows(dump, "allowgive")}
+        # An item's own pickup limit and the flag its pickup asks (Player_Inventory.cs:1207-1262).
+        self.pickup, self.restrict = {}, {}
+        for obj, t, v in rows(dump, "itemq"):
+            (self.pickup if t == "33" else self.restrict)[int(obj)] = qname(v)
         self.spawns = defaultdict(list)
         for wcid, lb, n in rows(dump, "spawns"):
             self.spawns[int(wcid)].append((int(lb, 16), int(n)))
@@ -180,11 +184,12 @@ def open_max(v, at_least=2147483647):
     return v == "" or num(v) >= at_least
 
 
-def read_path(data, root, branches, effects):
-    """A path read into a quest's terms (design §1.4's table), or a string saying why it is out."""
+def read_path(data, root, branches, effects, never):
+    """A path read into a quest's terms (design §1.4's table), or a string saying why it is out.
+    `never`: flags no row of the file stamps, so never held; None on the first pass."""
     stamped = stamps_of(effects)
     r = {"band": [0, 0], "timer": "", "repeat": 0, "kill": None, "items": [], "needs": [],
-         "start": None}
+         "start": None, "unneeds": []}
     if root["cat"] in (GIVE, REFUSE):
         r["items"].append((root["wcid"], 1))
     for t, ok, a in branches:
@@ -192,10 +197,21 @@ def read_path(data, root, branches, effects):
         quest = data.quest.get(q)
         counter = q in data.counter_of
         if t == INQ_INT:
-            if num(a["stat"]) != LEVEL_STAT or not ok:
+            if num(a["stat"]) != LEVEL_STAT:
                 return "other branches"
             lo, hi = int(num(a["min"])), int(num(a["max"], MAX_LEVEL))
-            r["band"] = [max(r["band"][0], lo), min(r["band"][1] or MAX_LEVEL, hi)]
+            at_lo, at_hi = r["band"][0], r["band"][1] or MAX_LEVEL
+            if ok:
+                at_lo, at_hi = max(at_lo, lo), min(at_hi, hi)
+            elif lo <= max(at_lo, 1):
+                at_lo = max(at_lo, hi + 1)  # a ladder: failing "1-49" is 50 and up
+            elif hi >= at_hi:
+                at_hi = min(at_hi, lo - 1)
+            else:
+                return "other branches"  # outside a band in the middle: two bands
+            if at_lo > at_hi:
+                return "other branches"
+            r["band"] = [at_lo, at_hi]
         elif t == INQ_OWNS:
             if not ok:
                 return "other branches"
@@ -242,6 +258,10 @@ def read_path(data, root, branches, effects):
                     r["repeat"] = -1
             elif ok and q not in stamped:
                 r["needs"].append(q)
+            elif not ok and never is not None and q in never:
+                continue  # no row stamps it: never held, so the branch asks nothing
+            elif not ok:
+                r["unneeds"].append(q)  # kept only where holding it pays the same (main)
             else:
                 return "needs a quest or flag not in scope"
         else:
@@ -257,9 +277,18 @@ def write_rows(f, out):
         f.write(",".join(row) + "\n")
 
 
-def main():
-    dump, out_dir = sys.argv[1], sys.argv[2]
-    data = Data(dump)
+# What must match for a path asking a flag not held to pay as one asking it held: then the flag
+# does not matter (Buckminster pays the same with ToTheBarkeep or without).
+SAME_PAY = ("obj", "kind", "want", "count", "fixed", "scaled", "timer", "repeat")
+
+
+def same_pay(q):
+    return (tuple(q[k] for k in SAME_PAY), q["root"]["id"], tuple(q["band"]),
+            tuple(sorted(q["gives"])), tuple(sorted(q["stamps"])))
+
+
+def build(data, never):
+    """The rows and sources of both files, and why paths are out; `never` as for read_path."""
     reasons = defaultdict(int)
     xp_paths, starts, npc_gives = [], [], defaultdict(set)
     for obj in sorted(data.placed):
@@ -285,7 +314,7 @@ def main():
                 if branches is None:
                     continue
                 fixed, scaled, share = xp_of(effects)
-                r = read_path(data, root, branches, effects)
+                r = read_path(data, root, branches, effects, never)
                 if isinstance(r, str):
                     if fixed or scaled:
                         reasons[r] += 1
@@ -331,8 +360,36 @@ def main():
             kind, want, count = "talk", "", 0
             needs = r["needs"]
             qid = r["timer"] or (r["stamps"][0] if r["stamps"] else "talk:%d" % r["obj"])
+        timer, repeat = r["timer"], r["repeat"]
+        if item:
+            # A pickup limit on the item limits the quest: one looted per wait, or one ever.
+            delta, solves, _ = data.quest.get(data.pickup.get(item[0], ""), (0, 0, ""))
+            if repeat != -1 and delta > 0:
+                timer, repeat = timer or data.pickup[item[0]], max(repeat, delta)
+            elif repeat != -1 and solves == 1:
+                timer, repeat = timer or data.pickup[item[0]], -1
+            if item[0] in data.restrict:
+                needs = needs + [data.restrict[item[0]]]
         quests.append(dict(r, id=qid, kind=kind, want=want, count=count, needs=needs,
-                           item=item))
+                           item=item, timer=timer, repeat=repeat))
+
+    # A path asking a flag not held stays only where the path asking it held pays the same.
+    by_pay = defaultdict(list)
+    for q in quests:
+        if not q["unneeds"]:
+            by_pay[same_pay(q)].append(q)
+    plain = []
+    for q in quests:
+        if not q["unneeds"]:
+            plain.append(q)
+            continue
+        held = sorted(q["needs"] + q["unneeds"])
+        twin = [o for o in by_pay[same_pay(q)] if sorted(o["needs"]) == held]
+        if not twin:
+            reasons["needs a quest or flag not in scope"] += 1
+        for o in twin:
+            o["needs"] = list(q["needs"])
+    quests = plain
 
     def sources_of(q):
         if q["kind"] == "kill":
@@ -360,6 +417,9 @@ def main():
                 if flag in needed and flag not in stamped:
                     for q in kept:
                         if flag in q["needs"]:
+                            # The start talk's own wait is the quest's when its reward asks none.
+                            if s["repeat"] > 0 and not q["timer"]:
+                                q["timer"], q["repeat"] = s["timer"], s["repeat"]
                             start_rows.append(dict(s, id=q["id"], kind="start", want="",
                                                    count=0, needs=[n for n in s["needs"]
                                                                    if n != flag],
@@ -428,7 +488,17 @@ def main():
             where = ";".join("%X:%d" % lb for lb in sorted(data.spawns[c]))
         src_out.append((want, kind, str(c), data.name.get(c, ""), str(data.level(c)),
                         "%g" % round(p, 4), where))
+    return rows_out, src_out, reasons
 
+
+def main():
+    dump, out_dir = sys.argv[1], sys.argv[2]
+    data = Data(dump)
+    rows_out, _, _ = build(data, None)
+    stamped = {f for r in rows_out for f in r[20].split(";") if f}
+    asked = {qname(a["msg"]) for s in data.sets.values() for a in s["acts"]
+             if a["type"] in (INQ_QUEST, INQ_SOLVES) and a["msg"]}
+    rows_out, src_out, reasons = build(data, asked - stamped)
     with open(os.path.join(out_dir, "quests.csv"), "w", encoding="utf-8", newline="") as f:
         f.write(QUESTS_HEADER)
         write_rows(f, rows_out)

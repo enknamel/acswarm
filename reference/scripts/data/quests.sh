@@ -10,7 +10,8 @@
 # walk through those sets is a graph search, done by quests_walk.py
 # (stdlib Python) on tables read out here: placed objects with a Refuse,
 # Give or Use set, their sets and actions, the quest table, kill counters
-# on creatures (PropertyString 45, 49, 50), who takes a gift (AllowGive,
+# on creatures (PropertyString 45, 49, 50), a wanted item's pickup limit and
+# the flag its pickup asks (33, 37), who takes a gift (AllowGive,
 # PropertyBool 8: Player_Inventory.cs:3439), corpse create lists (Contain,
 # or Treasure without Wield: Creature_Death.cs:688-693), names, levels,
 # item types and values, and spawn entries per creature and landblock
@@ -71,6 +72,10 @@ order by cl.object_Id, cl.id;'
 
 q names 'select object_Id, value from weenie_properties_string where type = 1;'
 
+# An item's own pickup limit (Quest 33) and the flag picking it up asks (QuestRestriction 37):
+# Player_Inventory.cs:1207-1211, 1249-1262.
+q itemq 'select object_Id, type, value from weenie_properties_string where type in (33, 37);'
+
 q allowgive 'select object_Id from weenie_properties_bool where type = 8 and value = 1;'
 
 q ints 'select object_Id, type, value from weenie_properties_int where type in (1, 19, 25);'
@@ -100,7 +105,7 @@ select m.wcid, hex(m.lb), count(*) from mon m
 where m.kind = "o" or m.lb not in (select lb from surface)
 group by m.wcid, m.lb;'
 
-for t in placed emote action quest killq drops names allowgive ints spawns; do
+for t in placed emote action quest killq itemq drops names allowgive ints spawns; do
   [ -s "$TMP/$t.tsv" ] || { echo "quests.sh: the $t query returned nothing" >&2; exit 1; }
 done
 

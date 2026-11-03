@@ -66,8 +66,12 @@ fn holtburgs_barkeep_and_pathwarden_talks_chain() {
     assert_eq!(buck.title, "Sent to the Pathwarden");
     assert_eq!(buck.reward.xp_at(0), 9_300);
     assert_eq!(buck.gives, [(273, 500)]);
-    assert_eq!(buck.needs, ["tothebarkeep"]);
-    assert!(stamped_by("ToTheBarkeep").any(|r| r.giver == "Alcott"));
+    // Buckminster pays with ToTheBarkeep held or not (sets 62063 and 62066), so it asks nothing.
+    assert!(buck.needs.is_empty());
+    let thorolf = row("pathwardenfound1111", Kind::Talk, "Pathwarden Thorolf");
+    assert_eq!(thorolf.reward.xp_at(0), 12_500);
+    assert_eq!(thorolf.needs, ["topathwarden"]);
+    assert!(stamped_by("ToPathwarden").any(|r| r.giver == "Buckminster"));
 }
 
 #[test]
@@ -147,4 +151,24 @@ fn a_giver_in_a_quest_only_dungeon_is_locked_until_the_flag_is_held() {
         row("tothebarkeep", Kind::Talk, "Alcott").locked_by(&[]),
         None
     );
+}
+
+#[test]
+fn an_items_own_pickup_limit_and_a_level_ladder_are_read_into_the_rows() {
+    // Southern Tumerok Insignia: one looted a 20 h wait (Player_Inventory.cs:1249-1262).
+    let ufet = rows_of("give:43419").next().expect("Ufet's insignia");
+    assert_eq!(ufet.repeat, Repeat::After(72_000));
+    assert_eq!(ufet.timer, "southerntumerokinsignia");
+    // Carpenter Wasp Wing: CarpWing allows one pickup ever.
+    assert!(rows_of("waspwingdone").all(|r| r.repeat == Repeat::Once));
+    // Rat King's Tail asks a flag no row stamps (QuestRestriction), so the quest is out.
+    assert!(rows_of("ratcatcherquestcompleted").next().is_none());
+    // Syltyn Rillon's bands, each read from the failure of the one before (sets 48828-48837).
+    let bands: Vec<(u32, u32)> = rows_of("gotfrozenfuryaward")
+        .map(|r| (r.min_level, r.max_level))
+        .collect();
+    assert_eq!(bands, [(1, 49), (50, 64), (65, 79), (80, 0)]);
+    // Archmage Ichihiri's start talk asks her 20 h wait; the hand-in carries it.
+    let blood = row("tuskerbloodcollectionwait", Kind::Item, "Archmage Ichihiri");
+    assert_eq!(blood.repeat, Repeat::After(72_000));
 }

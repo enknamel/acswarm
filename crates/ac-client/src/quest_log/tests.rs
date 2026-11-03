@@ -139,19 +139,19 @@ fn a_kill_task_waits_for_the_level_its_giver_asks_and_its_creatures_suit() {
 
 #[test]
 fn a_talk_that_needs_another_quest_first_names_it_until_that_one_is_done() {
-    let id = "topathwarden";
+    let id = "pathwardenfound1111";
     let mut facts = at_level(5);
     assert_eq!(
         state(id, &facts),
         QuestState::CantYet(Blocked::NeedsFirst {
-            title: "Sent to the Barkeep".into()
+            title: "Sent to the Pathwarden".into()
         })
     );
-    let alcott = rows("tothebarkeep").remove(0);
-    facts.log.note_done(&alcott, facts.now);
+    let buckminster = rows("topathwarden").remove(0);
+    facts.log.note_done(&buckminster, facts.now);
     assert_eq!(state(id, &facts), QuestState::Ready, "the log's own stamp");
     let mut flagged = at_level(5);
-    flagged.held.push("ToTheBarkeep".into());
+    flagged.held.push("ToPathwarden".into());
     assert_eq!(state(id, &flagged), QuestState::Ready, "a flag in any case");
 }
 
