@@ -497,28 +497,30 @@ def build(data, never):
         it_name = data.name.get(item[0], "") if item else ""
         it_type = "%X" % (data.ints[item[0]].get(1, 0) & 0xFFFFFFFF) if item else ""
         it_value = str(data.ints[item[0]].get(19, 0)) if item else ""
-        for cell, x, y, z in data.placed[q["obj"]]:
-            row = (q["id"], q["kind"], title, str(q["obj"]), data.name.get(q["obj"], ""),
-                   "%08X" % cell, x, y, z, hand, q["want"], str(q["count"]),
-                   str(q["band"][0]), str(q["band"][1]), str(q["fixed"]), "%g" % pct, str(lo),
-                   str(hi), q["share"] or "none",
-                   ";".join("%d:%d" % g for g in q["gives"]), ";".join(q["stamps"]),
-                   str(q["repeat"]), q["timer"], ";".join(q["needs"]), it_name, it_type,
-                   it_value, ";".join(q["does"]),
-                   "|".join(u.replace(",", ";") for u in dict.fromkeys(q["unread"])))
-            key = row[:-1]  # rows differing only in what was unread are one row
-            if key not in seen:
-                seen[key] = len(rows_out)
-                rows_out.append(row)
-            elif row[-1]:
-                i = seen[key]
-                both = [u for u in rows_out[i][-1].split("|") if u] + row[-1].split("|")
-                rows_out[i] = key + ("|".join(dict.fromkeys(both)),)
+        row = (q["id"], q["kind"], title, str(q["obj"]), hand, q["want"], str(q["count"]),
+               str(q["band"][0]), str(q["band"][1]), str(q["fixed"]), "%g" % pct, str(lo),
+               str(hi), q["share"] or "none", ";".join("%d:%d" % g for g in q["gives"]),
+               ";".join(q["stamps"]), str(q["repeat"]), q["timer"], ";".join(q["needs"]),
+               it_name, it_type, it_value, ";".join(q["does"]),
+               "|".join(u.replace(",", ";") for u in dict.fromkeys(q["unread"])))
+        key = row[:-1]  # rows differing only in what was unread are one row
+        if key not in seen:
+            seen[key] = len(rows_out)
+            rows_out.append(row)
+        elif row[-1]:
+            i = seen[key]
+            both = [u for u in rows_out[i][-1].split("|") if u] + row[-1].split("|")
+            rows_out[i] = key + ("|".join(dict.fromkeys(both)),)
+    rows_out = merge_random(rows_out)
     kind_order = {"start": 0, "talk": 1, "kill": 2, "item": 3}
-    rows_out.sort(key=lambda r: (r[0], kind_order[r[1]], int(r[3]), r[5], r[12]))
+    rows_out.sort(key=lambda r: (r[0], kind_order[r[1]], int(r[3]), int(r[7])))
+    givers_out = sorted({(int(r[3]), cell, x, y, z) for r in rows_out
+                         for cell, x, y, z in data.placed[int(r[3])]})
+    givers_out = [(str(w), data.name.get(w, ""), "%08X" % cell, x, y, z)
+                  for w, cell, x, y, z in givers_out]
 
     src = []
-    for want in sorted({r[10] for r in rows_out if r[1] in ("kill", "item")}):
+    for want in sorted({r[5] for r in rows_out if r[1] in ("kill", "item")}):
         if want.isdigit():
             w = int(want)
             chance = defaultdict(float)
@@ -541,20 +543,50 @@ def build(data, never):
             where = ";".join("%X:%d" % lb for lb in sorted(data.spawns[c]))
         src_out.append((want, kind, str(c), data.name.get(c, ""), str(data.level(c)),
                         "%g" % round(p, 4), where))
-    return rows_out, src_out, reasons
+    return rows_out, givers_out, src_out, reasons
+
+
+# Columns of a quests.csv row a random reply's alternatives may differ in and still be one row.
+COL_GIVES, COL_DOES, COL_UNREAD = 14, 22, 23
+
+
+def merge_random(rows_out):
+    """Rows of one random reply differing only in what it gives are one row listing every
+    alternative, |-separated (an empty one gives nothing), and what any of them does."""
+    out, at = [], {}
+    for row in rows_out:
+        if "a random reply" not in row[COL_UNREAD].split("|"):
+            out.append(row)
+            continue
+        key = row[:COL_GIVES] + row[COL_GIVES + 1:COL_DOES] + row[COL_DOES + 1:]
+        if key not in at:
+            at[key] = len(out)
+            out.append(row)
+            continue
+        was = out[at[key]]
+        gives = "|".join(dict.fromkeys(was[COL_GIVES].split("|") + [row[COL_GIVES]]))
+        words = was[COL_DOES].split(";") + row[COL_DOES].split(";")
+        does = ";".join(dict.fromkeys(w for w in words if w))
+        out[at[key]] = (was[:COL_GIVES] + (gives,) + was[COL_GIVES + 1:COL_DOES] + (does,)
+                        + was[COL_DOES + 1:])
+    return out
 
 
 def main():
     dump, out_dir = sys.argv[1], sys.argv[2]
     data = Data(dump)
-    rows_out, _, _ = build(data, None)
-    stamped = {f for r in rows_out for f in r[20].split(";") if f}
+    rows_out, _, _, _ = build(data, None)
+    stamped = {f for r in rows_out for f in r[15].split(";") if f}
     asked = {qname(a["msg"]) for s in data.sets.values() for a in s["acts"]
              if a["type"] in (INQ_QUEST, INQ_SOLVES) and a["msg"]}
-    rows_out, src_out, reasons = build(data, asked - stamped)
+    rows_out, givers_out, src_out, reasons = build(data, asked - stamped)
     with open(os.path.join(out_dir, "quests.csv"), "w", encoding="utf-8", newline="") as f:
         f.write(QUESTS_HEADER)
         write_rows(f, rows_out)
+    with open(os.path.join(out_dir, "quest_givers.csv"), "w", encoding="utf-8",
+              newline="") as f:
+        f.write(GIVERS_HEADER)
+        write_rows(f, givers_out)
     with open(os.path.join(out_dir, "quest_sources.csv"), "w", encoding="utf-8",
               newline="") as f:
         f.write(SOURCES_HEADER)
@@ -562,26 +594,34 @@ def main():
     by_kind = defaultdict(set)
     for r in rows_out:
         by_kind[r[1]].add(r[0])
-    print("quests: %d rows; %s; out: %s" % (
-        len(rows_out), ", ".join("%s %d" % (k, len(v)) for k, v in sorted(by_kind.items())),
+    print("quests: %d rows, %d giver placements; %s; out: %s" % (
+        len(rows_out), len(givers_out), ", ".join("%s %d" % (k, len(v)) for k, v in sorted(by_kind.items())),
         dict(sorted(reasons.items()))), file=sys.stderr)
 
 
 QUESTS_HEADER = """\
 # Every quest a placed NPC holds: each Use, Give or Refuse path that does anything for the
-# character, one row per way to complete one (giver placement x level band).
-# id,kind,title,giver_wcid,giver,cell,x,y,z,hand,want,count,min_level,max_level,xp,xp_level,xp_min,xp_max,share,gives,stamps,repeat,timer,needs,item,item_type,item_value,does,unread
+# character, XP or not, one row per way to complete one (giver and level band); the giver's
+# placements are in quest_givers.csv.
+# id,kind,title,giver_wcid,hand,want,count,min_level,max_level,xp,xp_level,xp_min,xp_max,share,gives,stamps,repeat,timer,needs,item,item_type,item_value,does,unread
 # Rows sharing an id are alternatives. kind: kill, item, talk, or start (the talk that takes a
-# quest up: it stamps what the quest's rows need). cell is hex, x/y/z local to its landblock.
-# hand: give (hand the item over) or talk. want: the item wcid, or the kill counter. count: items
-# one hand-in takes, or kills. Levels 0 are open. xp is fixed; xp_level is a share of the XP to
-# the next level, clamped to xp_min/xp_max when not 0. share: all, none or allegiance. gives:
-# wcid:count;... stamps and needs: quest flags. repeat: seconds before another solve, 0 any time,
-# -1 once; timer: the quest its wait is kept under. item, item_type (hex), item_value: the wanted
-# item. does: what the path does (xp, item, flag, spell, skill, luminance, title, teleport,
-# takes, stat, contract, enlightenment, type N). unread: conditions the client cannot check,
-# |-separated. Regenerate with reference/scripts/data/quests.sh (reads the ACE world database, the
-# community's reconstruction of retail's server data).
+# quest up: it stamps what the quest's rows need). hand: give (hand the item over) or talk.
+# want: the item wcid, or the kill counter. count: items one hand-in takes, or kills. Levels 0
+# are open. xp is fixed; xp_level is a share of the XP to the next level, clamped to
+# xp_min/xp_max when not 0. share: all, none or allegiance. gives: wcid:count;..., and for a
+# random reply every alternative |-separated (an empty one gives nothing). stamps and needs:
+# quest flags. repeat: seconds before another solve, 0 any time, -1 once; timer: the quest its
+# wait is kept under. item, item_type (hex), item_value: the wanted item. does: what the path
+# does (xp, item, flag, spell, skill, luminance, title, teleport, takes, stat, contract,
+# enlightenment, type N). unread: conditions the client cannot check, |-separated ("a random
+# reply" among them). Regenerate with reference/scripts/data/quests.sh (reads the ACE world
+# database, the community's reconstruction of retail's server data).
+"""
+
+GIVERS_HEADER = """\
+# Where each quest giver in quests.csv stands: one row per placement.
+# giver_wcid,giver,cell,x,y,z
+# cell is hex, x/y/z local to its landblock. Regenerate with reference/scripts/data/quests.sh.
 """
 
 SOURCES_HEADER = """\
