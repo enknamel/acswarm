@@ -61,12 +61,13 @@ mod tidy;
 mod vitals;
 
 pub use cast::cast_problem;
-pub use config::{Buffs, Config, Fight, Loot, Quests, Role, Style, Survive, Team};
+pub use config::{Buffs, Config, Fight, Loot, Pursuit, Quests, Role, Style, Survive, Team};
 #[cfg(any(test, feature = "testkit"))]
 pub(crate) use fight::critter::CREATURE_LEVEL;
 pub use fight::critter::{critter, Critter, Hint, Seen};
 pub use fight::road_fight_over;
 pub use fight::target::{name_matches, wanted_target, Release};
+pub use growth::pursuit::{PursuitLine, PursuitStep};
 pub use hands::ammo::choose_recipe;
 pub use ledger::retag::arrival_tag;
 #[cfg(doc)]

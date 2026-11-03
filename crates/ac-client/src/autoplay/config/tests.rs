@@ -79,3 +79,57 @@ fn a_quest_paying_xp_starts_on_and_one_paying_none_only_once_chosen() {
     q.switch_on("killtaskbloodshreth");
     assert!(q.is_on("killtaskbloodshreth") && q.off == [fiun]);
 }
+
+#[test]
+fn quests_saved_before_the_pursuit_list_load_with_nothing_pursued() {
+    let old: Config =
+        serde_json::from_str(r#"{"quests":{"on":true,"chosen":["ginsword"]}}"#).unwrap();
+    assert!(old.quests.pursue.is_empty());
+    assert_eq!(old.quests.chosen, ["ginsword"]);
+}
+
+#[test]
+fn doing_a_quest_puts_it_first_and_whenever_ready_last() {
+    let mut q = Quests::default();
+    q.pursue_quest("engorgedeaterjaw", true, 10);
+    q.pursue_quest("ginsword", false, 20);
+    q.pursue_quest("augmentationprovinggroundaccess", false, 30);
+    let ids = |q: &Quests| q.pursue.iter().map(|p| p.id.clone()).collect::<Vec<_>>();
+    assert_eq!(
+        ids(&q),
+        [
+            "augmentationprovinggroundaccess",
+            "ginsword",
+            "engorgedeaterjaw"
+        ]
+    );
+    q.move_pursuit("engorgedeaterjaw", true);
+    assert_eq!(ids(&q)[1], "engorgedeaterjaw");
+    q.move_pursuit("augmentationprovinggroundaccess", true);
+    assert_eq!(
+        ids(&q)[0],
+        "augmentationprovinggroundaccess",
+        "first stays first"
+    );
+    // Asked again, it moves and its time is the new one.
+    q.pursue_quest("ginsword", false, 40);
+    assert_eq!((ids(&q)[0].as_str(), q.pursue[0].since), ("ginsword", 40));
+    q.stop_pursuing("ginsword");
+    assert!(!q.is_pursued("ginsword") && q.pursue.len() == 2);
+}
+
+#[test]
+fn a_pursued_quest_has_every_way_worked_as_one_chosen() {
+    let fiun = ac_world::quests::rows_of("augmentationprovinggroundaccess")
+        .find(|r| r.kind == ac_world::quests::Kind::Item)
+        .unwrap();
+    let mut q = Quests {
+        on: true,
+        ..Quests::default()
+    };
+    assert!(!q.is_worked(fiun));
+    q.pursue_quest(fiun.id, false, 0);
+    assert!(q.is_worked(fiun));
+    let rows = crate::quest_log::considered_rows(&q);
+    assert!(rows.iter().any(|r| std::ptr::eq(*r, fiun)));
+}

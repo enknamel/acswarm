@@ -137,8 +137,8 @@ pub struct QuestLine {
     /// The nearest giver's name, by straight distance.
     pub giver: String,
     pub on: bool,
-    /// Chosen by hand: every way to complete it is worked, not only those paying XP that ask
-    /// nothing unread ([`worked_rows`]).
+    /// Chosen by hand or pursued: every way to complete it is worked, not only those paying XP
+    /// that ask nothing unread ([`worked_rows`]).
     pub every_way: bool,
 }
 
@@ -200,7 +200,7 @@ pub fn worked_rows(line: &QuestLine) -> impl Iterator<Item = &'static Row> + '_ 
 }
 
 /// The rows autoplay works for the quests it considers, in id order: each quest starting on has
-/// its automatic rows, a chosen one every row. The board is worked out over these alone.
+/// its automatic rows, a chosen or pursued one every row. The board is worked out over these alone.
 pub fn considered_rows(cfg: &Quests) -> Vec<&'static Row> {
     static AUTOMATIC: OnceLock<Vec<&'static Row>> = OnceLock::new();
     let automatic = AUTOMATIC.get_or_init(|| {
@@ -208,10 +208,16 @@ pub fn considered_rows(cfg: &Quests) -> Vec<&'static Row> {
         rows.filter(|r| is_automatic(r) && is_automatic_quest(r.id))
             .collect()
     });
-    if cfg.chosen.is_empty() {
+    if cfg.chosen.is_empty() && cfg.pursue.is_empty() {
         return automatic.clone();
     }
-    let chosen: BTreeSet<&str> = cfg.chosen.iter().map(String::as_str).collect();
+    let pursued = cfg.pursue.iter().map(|p| p.id.as_str());
+    let chosen: BTreeSet<&str> = cfg
+        .chosen
+        .iter()
+        .map(String::as_str)
+        .chain(pursued)
+        .collect();
     let mut rows: Vec<&'static Row> = automatic
         .iter()
         .copied()
@@ -254,6 +260,7 @@ struct Pick<'f> {
     on: bool,
     off: BTreeSet<&'f str>,
     chosen: BTreeSet<&'f str>,
+    pursued: BTreeSet<&'f str>,
     /// Every quest on and every row worked: the browse board.
     every: bool,
 }
@@ -264,6 +271,7 @@ impl<'f> Pick<'f> {
             on: cfg.on,
             off: cfg.off.iter().map(String::as_str).collect(),
             chosen: cfg.chosen.iter().map(String::as_str).collect(),
+            pursued: cfg.pursue.iter().map(|p| p.id.as_str()).collect(),
             every: false,
         }
     }
@@ -275,14 +283,14 @@ impl<'f> Pick<'f> {
                 && (self.chosen.contains(id) || (is_automatic_quest(id) && !self.off.contains(id))))
     }
 
-    /// As [`Quests::is_chosen`].
-    fn is_chosen(&self, id: &str) -> bool {
-        self.chosen.contains(id)
-    }
-
     /// As [`Quests::is_worked`].
     fn is_worked(&self, row: &Row) -> bool {
-        self.every || is_automatic(row) || self.chosen.contains(row.id)
+        self.every || is_automatic(row) || self.is_every_way(row.id)
+    }
+
+    /// Chosen or pursued: every way to complete it is worked.
+    fn is_every_way(&self, id: &str) -> bool {
+        self.chosen.contains(id) || self.pursued.contains(id)
     }
 }
 
@@ -320,7 +328,7 @@ fn board_of<'r>(
             givers: doing.iter().map(|r| r.places.len()).sum(),
             giver: giver.giver.to_string(),
             on,
-            every_way: pick.every || pick.is_chosen(id),
+            every_way: pick.every || pick.is_every_way(id),
         });
     }
     (board, unsuited)

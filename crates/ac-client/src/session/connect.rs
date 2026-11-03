@@ -125,6 +125,7 @@ impl Client {
             quest_wants: Vec::new(),
             quest_wants_at: None,
             quest_asked: None,
+            pursuit: Vec::new(),
             combat: false,
             magic: false,
             missile: false,
