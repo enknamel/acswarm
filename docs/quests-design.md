@@ -579,3 +579,38 @@ Items picked up off the ground (chests, generators' items: 749 hand-ins wait for
 two-item quests; yes/no confirmations (InqYesNo, 2 quests); quests gated by quest bits, society
 rank or skills; a Rhai call reading the board (it would migrate scripts, validate and the plugin
 template, and none is needed for steps 1-4).
+
+## 7. Seams (built on branch `quests` before the four builders start)
+
+The foundation (`675944a` data, `de9a2de` seams) built what more than one builder reads, so no
+builder needs another's code. Builders: **list** (step 1: 1b states, 1c panel, 1d kill line),
+**loot** (step 2), **hunt** (step 3), **errand** (step 4). The generated data differs a little from
+§1.2's prototype counts: 1,942 rows (1,765 item, 79 kill, 14 talk, 84 start), 465 quests (381
+item, 75 kill, 8 talk), 253 givers; `quest_sources.csv` 1,927 rows (1,616 drop, 301 kill, 10 npc).
+`quests_walk.py` prints its counts and the reasons paths are out on every run.
+
+| seam | file | state | filled by |
+|---|---|---|---|
+| `Row`, `Kind`, `Hand`, `Want`, `Repeat`, `Share`, `Reward::xp_at`, `Item`, `Source`, `Yield`, `all`, `sources`, `rows_of`, `sources_of`, `stamped_by`, `Row::fits_level`, `Row::locked_by` | `crates/ac-world/src/quests.rs` | built, tested | - (read by all) |
+| `autoplay::Quests { on, off }`, `Quests::is_on`, `Config.quests` | `crates/ac-client/src/autoplay/config.rs` | built, tested | - |
+| `QuestWant { wcid, need }`, `wanted()` | `crates/ac-loot/src/quest_wants.rs` | built, tested | loot adds `Wielder.quest_wants`, `Ask::Quest`, the starter rule |
+| `QuestLog` (`note_taken`, `note_kills`, `note_done`, `note_wait`, `wait_until`), `Done`; `load_quest_log`, `Client::save_quest_log` | `crates/ac-client/src/quest_log.rs` | built, tested | list (1d) writes kills; hunt and errand write done and waits (§4.3) |
+| `QuestState`, `Blocked`, `QuestLine`, `QuestFacts`, `quest_board()` | `crates/ac-client/src/quest_log.rs` | Off, Ready, Needs, NotTaken, Waiting, Done | list: `CantYet` (level band, too hard, locked, needs first), refresh on a change (§2.3) |
+| `Client::quest_facts`, `Client::refresh_quests` (every `QUEST_BOARD_EVERY` from `Client::tick`), `Client.quest_board`, `Client.quest_log` | `crates/ac-client/src/quest_log.rs`, `crates/ac-client/src/session/apply.rs` | built | list (refresh triggers), loot (profile into the facts is there already) |
+| `Client::quests_on()`: the ids autoplay considers | `crates/ac-client/src/quest_log.rs` | built | - |
+| `quest_item_blocked(profile, item, me, name, held) -> Option<(rule, LootAction)>`: the cross-check, called by `quest_board` for every item quest on | `crates/ac-client/src/autoplay/loot/judge.rs` | returns `None` | loot (§3.3) |
+| `quest_wants(board) -> Vec<QuestWant>`: what the board wants carried (§3.1) | `crates/ac-client/src/quest_log.rs` | built, tested | loot wires it into `wielder()`, `rules_fingerprint`, `Mate` |
+| `Client::visit_giver(&Row)`: a visit to a giver, journey and all | `crates/ac-client/src/quest_log.rs` | built | hunt (start talks, ready talks and kill tasks), errand (hand-in calls) |
+| `Client.quest_asked: Option<Asked { row, at, xp_before }>`: the giver asked, awaiting its answer | `crates/ac-client/src/lib.rs`, `crates/ac-client/src/quest_log.rs` | field only | hunt sets it and watches the answer (§4.3); errand sets it at a hand-in |
+| `Client::xp_per_hour()` | `crates/ac-client/src/quest_log.rs` | returns `None` | hunt (§5.3's 30-minute samples) |
+| `worth_detour(xp, detour, xp_per_hour)`, `SHORT_LEG` | `crates/ac-client/src/quest_log.rs` | built, tested | - (hunt §4.2, errand §5.3) |
+| "you must wait" refusal row and its hand-off to `quest_asked` | `crates/ac-agent/src/refusals.rs`, `crates/ac-client/src/refused.rs` | not built | hunt (§5.4); errand relies on it |
+| kill line `kill_count()` | `crates/ac-agent/src/refusals.rs`, `crates/ac-client/src/session/chat.rs` | not built | list (1d) |
+| Quests section, `AutoplayView.quests`, demo lines | `crates/ac-plugin/src/panels/quest_list.rs`, `crates/ac-plugin/src/panels/autoplay.rs` | not built | list (1c) |
+| `Ground::worth_with`, `ranked_for`'s bonus, the per-landblock sum | `crates/ac-world/src/hunting.rs`, `crates/ac-client/src/autoplay/growth/hunt.rs` | not built | hunt |
+| `tour()`, `Call`, `CallOn`, `Phase::HandingIn` | `crates/ac-world/src/tour.rs`, `crates/ac-client/src/autoplay/growth/town_run/mod.rs` | not built | errand |
+
+Maps: the client map already has the `quests` systems row, `quest_log.rs` in the
+`recalls.rs`, `quest_flags.rs` row and the `quest, giver, hand_in` glossary row; the root map's
+ac-world and ac-loot rows say quests. A builder adding a file adds only its own row (the town run
+row names `tour.rs`; ac-plugin has no module map).
