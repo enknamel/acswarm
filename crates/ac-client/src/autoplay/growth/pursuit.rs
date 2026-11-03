@@ -1,7 +1,7 @@
 //! Quests the player asked for, worked before hunting for XP: each pursued quest's step for this
 //! character, worked out with the board; the town run calls on givers, `grow_hunt` hunts sources.
 //! A flag a way on asks is earned first: from an unlock NPC, or by the quest stamping it, worked
-//! ahead of the one that needs it ([`with_chain`]).
+//! ahead of the one that needs it (`with_chain`).
 
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
