@@ -12,12 +12,9 @@ fn growth_config_has_defaults_and_round_trips() {
     assert!(!partial.auto_xp);
     assert_eq!(partial.level_margin, 3);
     assert!(partial.town_runs);
-    // A config saved before the sale rules had thresholds reads
-    // with the defaults, and the defaults are on.
-    assert_eq!(partial.sell_run_value, 5_000);
-    assert_eq!(partial.sell_run_count, 8);
-    assert_eq!(partial.sell_run_patience, 15.0 * 60.0);
-    let set: Growth = serde_json::from_str(r#"{"sell_run_value":0,"sell_run_count":3}"#).unwrap();
-    assert_eq!(set.sell_run_value, 0);
-    assert_eq!(set.sell_run_count, 3);
+    // A config saved while loot alone could send a character to town still reads.
+    let old: Growth =
+        serde_json::from_str(r#"{"sell_run_value":0,"sell_run_count":3,"town_runs":false}"#)
+            .unwrap();
+    assert!(!old.town_runs);
 }

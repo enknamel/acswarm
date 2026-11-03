@@ -1,64 +1,10 @@
 use std::collections::BTreeMap;
-use std::time::Duration;
 
 use super::{fate, never_sell, never_sell_carried, offer_to_vendor, Fate, Growth};
 use crate::autoplay::LootAction;
 use crate::items::ItemStats;
 use crate::Client;
 use ac_world::{equip, item_type};
-
-/// Whether what the pack holds for a counter is reason enough for a
-/// run to town, and the reason if it is.
-///
-/// A run used to be made for a full pack, a heavy one or a supply run
-/// short, and for nothing else: what the loot rules had tagged for a
-/// counter never came into it, so two peas taken to sell sat in a
-/// roomy pack for ever and the character never went. The ledger says
-/// why each thing was taken; this is where "to sell" is acted on.
-///
-/// `sale` is what the selling rules would let go today (see
-/// [`Client::salables`]), and `carried_for` how long any of it has
-/// been in the pack. Three rules, any one enough: it is worth
-/// `sell_run_value` at face, there are `sell_run_count` things, or it
-/// has been carried for `sell_run_patience`. Each is off at 0.
-///
-/// This is only the reason. The waits between runs and after a futile
-/// one are the caller's ([`Client::grow_town_run`]), which is what
-/// keeps a lone character from wearing a path to town for one pea.
-pub(super) fn worth_a_sale_run(
-    sale: &[Salable],
-    carried_for: Option<Duration>,
-    cfg: &Growth,
-) -> Option<String> {
-    if sale.is_empty() {
-        return None;
-    }
-    let worth: u32 = sale.iter().fold(0u32, |sum, s| sum.saturating_add(s.value));
-    let count = sale.len() as u32;
-    if cfg.sell_run_value > 0 && worth >= cfg.sell_run_value {
-        return Some(format!(
-            "carrying {worth} pyreals' worth for a counter ({count} thing(s))"
-        ));
-    }
-    if cfg.sell_run_count > 0 && count >= cfg.sell_run_count {
-        return Some(format!("carrying {count} things for a counter"));
-    }
-    // The config is hand-edited JSON: a patience no Duration can hold
-    // (1e20, say) reads as the rule being off, not as a panic on every
-    // frame a run could start.
-    if let Some(patience) = Some(cfg.sell_run_patience)
-        .filter(|p| *p > 0.0)
-        .and_then(|p| Duration::try_from_secs_f32(p).ok())
-    {
-        if let Some(d) = carried_for.filter(|d| *d >= patience) {
-            return Some(format!(
-                "{count} thing(s) for a counter carried {} min",
-                d.as_secs() / 60
-            ));
-        }
-    }
-    None
-}
 
 /// Something in the pack the rules allow to be sold, before any one
 /// counter's tastes are applied to it.

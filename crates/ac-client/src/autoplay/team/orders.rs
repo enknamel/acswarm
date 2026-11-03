@@ -82,7 +82,7 @@ impl Client {
         let mine = self.my_position();
         let mut hands = Vec::with_capacity(self.autoplay.team.mates.len() + 1);
         if let Some(mine) = mine.filter(|_| me != 0 && with_me) {
-            let supplies = self.supplies(&self.autoplay.config.growth, now);
+            let supplies = self.supplies(&self.autoplay.config.growth);
             hands.push(crate::plan::Hand {
                 guid: me,
                 name: self.world.stats.name.clone(),
