@@ -23,7 +23,7 @@ const LONG_FILES: &[(&str, usize, &str)] = &[
     ),
     (
         "crates/ac-client/src/player.rs",
-        1_900,
+        1_800,
         "body physics in one frame of reference: floors, ledges, falls and jumps agree or fail",
     ),
     (
