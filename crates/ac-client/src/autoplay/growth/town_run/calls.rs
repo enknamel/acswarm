@@ -61,9 +61,8 @@ pub(crate) struct CallPlan {
     pub(super) refused: Vec<usize>,
 }
 
-/// Which hand-ins join a run calling at `counters` (the legs' first calls, the hand-ins after)
-/// and the order of every call: best XP per second of detour first, each against the tour as it
-/// stands, until [`EVERY_ORDER`] calls (design §5.3).
+/// Which hand-ins join a run calling at `counters` (the legs' first calls), and every call's order:
+/// best XP a second of detour first, each tried on the tour as it stands, to [`EVERY_ORDER`] calls.
 pub(crate) fn plan_calls(
     legs: &Legs,
     counters: &[Place],

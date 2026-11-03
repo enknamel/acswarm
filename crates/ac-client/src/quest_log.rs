@@ -1,7 +1,7 @@
 //! Quests from one character's side: its log (kills counted, quests done, waits running), kept
-//! between sessions because the server never sends the registry, and the board of each quest's
-//! state ([`quest_board`]), worked out every [`QUEST_BOARD_EVERY`]. It sends nothing and decides
-//! nothing; docs/quests-design.md's Seams section says which builder fills which part.
+//! between sessions because the server never sends the registry; the board of each quest's
+//! state ([`quest_board`]), worked out every [`QUEST_BOARD_EVERY`]; and what a giver's answer
+//! came to ([`Client::watch_quest_answer`]). The visit to a giver is the town run's to make.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
@@ -523,9 +523,8 @@ pub fn quest_wants(board: &[QuestLine]) -> Vec<QuestWant> {
         .collect()
 }
 
-/// The kill task a count is for, as the line names only the creature: the counters whose
-/// creatures the plural begins with (less the name's last letter, for "Harpies"), the longest
-/// name only, then those asking the count, then those taken up; none named, the only one taken.
+/// The kill task a count is for: counters whose creature's name, less its last letter ("Harpies"),
+/// begins the plural, longest only, then those asking the count, then taken up; else the one taken.
 fn counter_for(k: &crate::refusals::KillCount, log: &QuestLog) -> Option<String> {
     let mut named: Vec<(&str, usize)> = Vec::new();
     for s in ac_world::quests::sources() {
@@ -757,7 +756,7 @@ impl Client {
         ok
     }
 
-    /// The character's XP per hour lately; `None` until measured. Seam: the hunt builder fills it.
+    /// The character's XP per hour lately; `None` until measured (not built: design §5.3).
     pub fn xp_per_hour(&self) -> Option<f32> {
         None
     }
