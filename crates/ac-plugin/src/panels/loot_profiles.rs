@@ -268,10 +268,12 @@ pub(crate) enum AskKind {
     /// A whole search line, for the `or` and `not` that a list of
     /// conditions cannot say.
     Search,
+    /// Wanted by an active quest; no fields, the quests list says which.
+    Quest,
 }
 
 impl AskKind {
-    pub(crate) const ALL: [AskKind; 15] = [
+    pub(crate) const ALL: [AskKind; 16] = [
         AskKind::Name,
         AskKind::Kind,
         AskKind::Material,
@@ -287,6 +289,7 @@ impl AskKind {
         AskKind::TextProp,
         AskKind::Spell,
         AskKind::Search,
+        AskKind::Quest,
     ];
 
     pub(crate) fn label(self) -> &'static str {
@@ -306,6 +309,7 @@ impl AskKind {
             AskKind::TextProp => "text property",
             AskKind::Spell => "a spell matching",
             AskKind::Search => "a search line",
+            AskKind::Quest => "wanted by a quest",
         }
     }
 
@@ -331,6 +335,10 @@ impl AskKind {
                 "A search in the inventory's own language, for the `or` and `not` \
                  a list of conditions cannot say"
             }
+            AskKind::Quest => {
+                "A quest switched on in autoplay's Quests list wants it, and fewer \
+                 are carried than it needs"
+            }
         }
     }
 
@@ -352,6 +360,7 @@ impl AskKind {
             Ask::Prop { .. } => AskKind::Prop,
             Ask::Text { .. } => AskKind::TextProp,
             Ask::Spell { .. } => AskKind::Spell,
+            Ask::Quest => AskKind::Quest,
         }
     }
 
@@ -390,6 +399,7 @@ impl AskKind {
                 op: TextOp::Like,
                 value: String::new(),
             },
+            AskKind::Quest => Ask::Quest,
         }
     }
 }
@@ -785,6 +795,7 @@ fn ask_row(ui: &mut egui::Ui, salt: &str, ask: &mut Ask, editor: &mut Editor) {
                     180.0,
                 );
             }
+            Ask::Quest => {}
         }
         if ask.needs_id() {
             id_marker(ui);
@@ -1797,6 +1808,7 @@ mod tests {
         assert!(!AskKind::Me.blank().needs_id());
         assert!(AskKind::Prop.blank().needs_id());
         assert!(AskKind::Spell.blank().needs_id());
+        assert!(!AskKind::Quest.blank().needs_id());
     }
 
     #[test]

@@ -40,6 +40,8 @@ pub struct Wielder {
     pub vitals: [u32; 3],
     /// Knows no attack spell, so a caster is no weapon to it.
     pub no_attack_spells: bool,
+    /// What its active quests want carried, for the loot condition `Ask::Quest`.
+    pub quest_wants: Vec<crate::quest_wants::QuestWant>,
 }
 
 impl Wielder {
@@ -491,6 +493,7 @@ mod tests {
             attributes_current: [300; 6],
             vitals: [1000; 3],
             no_attack_spells: false,
+            quest_wants: Vec::new(),
         }
     }
 
@@ -591,6 +594,7 @@ mod tests {
             attributes_current: [150; 6],
             vitals: [300; 3],
             no_attack_spells: false,
+            quest_wants: Vec::new(),
         };
         let pick = best(&carried, Stance::Melee, Some(&firefly), &weak).expect("a sword");
         assert_eq!(pick.guid, 2, "{pick:?}");
@@ -673,6 +677,7 @@ mod tests {
             attributes_current: [100; 6],
             vitals: [200; 3],
             no_attack_spells: false,
+            quest_wants: Vec::new(),
         };
         assert_eq!(best_shield(&carried, &untrained).unwrap().guid, 2);
         let trained = Wielder {
@@ -783,6 +788,7 @@ mod tests {
             attributes_current: [100; 6],
             vitals: [200; 3],
             no_attack_spells: false,
+            quest_wants: Vec::new(),
         };
         let pick = best(&carried, Stance::Magic, None, &novice).expect("the plain one");
         assert_eq!(pick.guid, 2, "the great wand is out of reach");
@@ -839,6 +845,7 @@ mod tests {
             attributes_current: [200; 6],
             vitals: [500; 3],
             no_attack_spells: false,
+            quest_wants: Vec::new(),
         };
         let (stance, pick) = best_any(&carried, None, &mage).expect("something to hold");
         assert_eq!(stance, Stance::Magic, "{pick:?}");
