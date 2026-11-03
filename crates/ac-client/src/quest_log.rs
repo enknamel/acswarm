@@ -279,6 +279,7 @@ impl<'f> Pick<'f> {
     /// As [`Quests::is_on`].
     fn is_on(&self, id: &str) -> bool {
         self.every
+            || self.pursued.contains(id)
             || (self.on
                 && (self.chosen.contains(id) || (is_automatic_quest(id) && !self.off.contains(id))))
     }
@@ -316,7 +317,7 @@ fn board_of<'r>(
             title: first.title.to_string(),
             kind: first.kind,
             state: if on {
-                state_of(&doing, facts, &mut locks)
+                state_of(&doing, facts, &mut locks, pick.pursued.contains(id))
             } else {
                 QuestState::Off
             },
@@ -442,7 +443,7 @@ fn stampers(flag: &str) -> &'static [&'static Row] {
 
 /// Whether the character holds `flag`: a quest flag, a kill task's counter taken up, or a stamp
 /// of a quest the log has done.
-fn holds(facts: &QuestFacts, flag: &str) -> bool {
+pub(crate) fn holds(facts: &QuestFacts, flag: &str) -> bool {
     facts.held.iter().any(|h| h.eq_ignore_ascii_case(flag))
         || facts.log.kills.contains_key(&flag.to_ascii_lowercase())
         || stampers(flag)
@@ -522,8 +523,9 @@ fn see_first(flag: &str, facts: &QuestFacts, locks: &mut Locks, depth: u32) -> Q
     }
 }
 
-/// One switched-on quest's state: done or waiting, then what rules it out, then what is left.
-fn state_of(doing: &[&Row], facts: &QuestFacts, locks: &mut Locks) -> QuestState {
+/// One switched-on quest's state: done or waiting, then what rules it out, then what is left. A
+/// `pursued` one is not ruled out for its source's level: the player asked for it.
+fn state_of(doing: &[&Row], facts: &QuestFacts, locks: &mut Locks, pursued: bool) -> QuestState {
     let first = doing[0];
     if let Some(until) = facts.log.wait_until(first.timer, facts.now) {
         return QuestState::Waiting { until };
@@ -533,7 +535,8 @@ fn state_of(doing: &[&Row], facts: &QuestFacts, locks: &mut Locks) -> QuestState
     if first.repeat == Repeat::Once && (facts.log.done.contains_key(first.id) || flagged) {
         return QuestState::Done;
     }
-    if let Some(why) = beyond_level(doing, facts) {
+    let asked = |why: &Blocked| !(pursued && matches!(why, Blocked::TooHard { .. }));
+    if let Some(why) = beyond_level(doing, facts).filter(asked) {
         return QuestState::CantYet(why);
     }
     let fit: Vec<&Row> = doing
@@ -732,7 +735,7 @@ impl Client {
             .is_some_and(|f| f.name == name)
     }
 
-    /// The quest ids autoplay considers: quests on, chosen, or paying XP and not switched off.
+    /// The quest ids autoplay considers: pursued, or quests on and chosen or paying XP and not off.
     pub fn quests_on(&self) -> Vec<&'static str> {
         let cfg = &self.autoplay.config.quests;
         let pick = Pick::of(cfg);
@@ -794,7 +797,7 @@ impl Client {
             .quest_board_at
             .is_none_or(|at| now.duration_since(at) >= QUEST_BOARD_EVERY);
         let settled = !self.quest_board.is_empty() && !self.quest_board.iter().any(|l| l.on);
-        if !changed && (!due || (!cfg.on && settled)) {
+        if !changed && (!due || (!cfg.on && cfg.pursue.is_empty() && settled)) {
             return;
         }
         self.quest_board_for = Some(BoardFor {
@@ -805,10 +808,20 @@ impl Client {
             name: name.to_string(),
         });
         self.quest_board_at = Some(now);
-        let facts = self.quest_facts();
+        let mut facts = self.quest_facts();
+        // The quests stamping a flag a pursued one asks are worked first, as if pursued too.
+        let chains = crate::autoplay::growth::pursuit::ChainData;
+        let holds_flag = |flag: &str| holds(&facts, flag);
+        let chained = crate::autoplay::growth::pursuit::with_chain(
+            &facts.config.pursue,
+            &holds_flag,
+            &chains,
+        );
+        facts.config.pursue = chained.iter().map(|c| c.pursuit.clone()).collect();
         let pick = Pick::of(&facts.config);
         (self.quest_board, self.quests_unsuited) =
             board_of(considered_rows(&facts.config), &facts, &pick);
+        self.refresh_pursuit(&facts, &chained, now);
     }
 
     /// `row`'s giver at `place` was asked: its answer is watched for, and one asked before is

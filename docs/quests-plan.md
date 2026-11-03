@@ -49,9 +49,28 @@ stop is a `Place` with its cell, so a giver in a dungeon is as reachable as a co
   the items are kept, and the next run that passes takes it.
 - A repeat wait comes from the data; the server's "you must wait" refusal is a row in
   `ac_agent::refusals` and the giver is not asked again until it is over.
-- Hand-ins ride a run; they never start one. A town run is made only for a full pack, too much
-  weight or supplies to buy, and one that sold and bought nothing counts as futile.
+- Hand-ins ride a run; they never start one, except a pursued quest's (below). A town run is made
+  only for a full pack, too much weight or supplies to buy, and one that sold and bought nothing
+  counts as futile.
 - A giver no route reaches is refused when the run is planned, not found out on arrival.
+
+## Quests window and pursuit (phase 5)
+
+The player can ask autoplay to do a quest (`Quests.pursue`): once, put first, or whenever it is
+ready, put last. Autoplay works the first pursued quest that can go on before hunting for XP;
+recovery, a full pack, buffs and fights still come first.
+- It takes the quest up, earns a flag a way on asks, hunts where the item or kill comes from (any
+  level: the player asked), keeps the item, and calls on the giver at once, town runs on or off
+  (`start_quest_call`). A pursued hand-in rides any run, whatever its detour.
+- A flag comes from an unlock NPC (a visit) or from the quest that stamps it, worked first
+  (`pursuit::with_chain`): Sir Ginazio's talk for the Eater Pit's eaterpit, Fiun Rehlyun's jaw for
+  the Augmentation Realm's portals.
+- Done once, it is finished; whenever ready, it waits out its wait and starts again. A step that
+  cannot go on says why in words, and the next pursued quest takes its turn; one that failed is
+  passed over for ten minutes. A follower pursues nothing: it goes with its leader.
+- A pursued quest is on with "do quests" off, every way to complete it worked; its creatures are
+  fought before their namesakes, and a drawn hunting area stands aside while it is worked.
+- Scripts: `pursue_quest(id, again)`, `stop_pursuing(id)`, `quest_pursuit()`.
 
 ## Steps
 

@@ -188,6 +188,10 @@ impl Client {
         let Some(area) = &self.autoplay.config.fight.area else {
             return true;
         };
+        // A pursued quest's creatures are fought where they are found.
+        if self.is_pursuing() {
+            return true;
+        }
         let Some(p) = o.position else {
             return false;
         };
@@ -240,6 +244,10 @@ impl Client {
         if self.autoplay.growth.town_run_under_way()
             || (self.visiting().is_some() && !self.is_own_visit())
         {
+            return false;
+        }
+        // Nor while a pursued quest is worked: its giver or its source lies where it lies.
+        if self.is_pursuing() {
             return false;
         }
         // Never in the middle of a fight: something hitting the character
@@ -438,5 +446,44 @@ mod tests {
         assert!(json.contains("\"kind\":\"outline\""), "{json}");
         let back: HuntArea = serde_json::from_str(&json).unwrap();
         assert_eq!(back, a);
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn a_drawn_area_stands_aside_while_pursuing() {
+        // Outdoors by the Holtburg lifestone, a field drawn 40 m off.
+        let now = std::time::Instant::now();
+        let mut c = crate::testkit::standing_at(0xA9B4_0019, glam::Vec3::new(84.0, 7.1, 94.0));
+        let me = c.my_position().unwrap();
+        let (x, y) = (me.x + 40.0, me.y);
+        let fight = &mut c.autoplay.config.fight;
+        fight.enabled = true;
+        fight.area = Some(HuntArea {
+            name: "the field".into(),
+            shape: Shape::Outline {
+                points: vec![[x, y], [x + 30.0, y], [x + 30.0, y + 30.0], [x, y + 30.0]],
+            },
+        });
+        let it = crate::testkit::standing_by(&mut c, 0x8000_0001, "Engorged Eater", 3.0);
+        assert!(!c.area_allows(&it, false), "fought outside the area");
+        let jaw = ac_world::quests::rows_of("engorgedeaterjaw")
+            .next()
+            .unwrap();
+        c.pursuit = vec![crate::autoplay::PursuitLine {
+            id: jaw.id.into(),
+            title: jaw.title.into(),
+            step: crate::autoplay::PursuitStep::HandIn {
+                row: jaw,
+                at: jaw.places[0],
+            },
+            working: true,
+            via: None,
+        }];
+        assert!(!c.autoplay_keep_to_area(now), "walked back to the area");
+        assert!(c.going.is_none());
+        assert!(c.area_allows(&it, false));
+        // Nothing pursued: back to the field.
+        c.pursuit.clear();
+        assert!(c.autoplay_keep_to_area(now));
     }
 }

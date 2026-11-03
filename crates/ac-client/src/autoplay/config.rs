@@ -370,11 +370,14 @@ pub struct Quests {
 }
 
 impl Quests {
-    /// Whether the quest `id` is one autoplay considers: chosen, or paying XP and not off.
+    /// Whether the quest `id` is one autoplay considers: pursued, quests off or on; else chosen, or
+    /// paying XP and not off.
     pub fn is_on(&self, id: &str) -> bool {
-        self.on
-            && (self.is_chosen(id)
-                || (crate::quest_log::is_automatic_quest(id) && !self.off.iter().any(|o| o == id)))
+        self.is_pursued(id)
+            || (self.on
+                && (self.is_chosen(id)
+                    || (crate::quest_log::is_automatic_quest(id)
+                        && !self.off.iter().any(|o| o == id))))
     }
 
     /// Whether `id` was switched on by hand.

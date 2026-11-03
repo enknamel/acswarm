@@ -125,6 +125,17 @@ impl Api for Recorder {
         self.record(format!("fight {on}"));
         on
     }
+    fn pursue_quest(&mut self, id: &str, again: bool) -> bool {
+        self.record(format!("pursue_quest {id} {again}"));
+        true
+    }
+    fn stop_pursuing(&mut self, id: &str) {
+        self.record(format!("stop_pursuing {id}"));
+    }
+    fn quest_pursuit(&mut self) -> String {
+        self.record("quest_pursuit");
+        String::new()
+    }
     fn follow_distances(&mut self, keep: f64, fight: f64) -> f64 {
         self.record(format!("follow_distances {keep} {fight}"));
         fight

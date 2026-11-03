@@ -91,6 +91,13 @@ pub trait Api {
     /// The fight rules (pick a creature and attack it) on or off. Off
     /// lets the fight go, swing and spell; heals, buffs and loots stay.
     fn fight(&mut self, on: bool) -> bool;
+    /// Have autoplay work the quest `id` (an `ac_world::quests` id) before hunting for XP: once,
+    /// put first, or `again` whenever its wait is over, put last. False for an unknown id.
+    fn pursue_quest(&mut self, id: &str, again: bool) -> bool;
+    /// Take the quest `id` off the pursuit list.
+    fn stop_pursuing(&mut self, id: &str);
+    /// Each pursued quest's step in words, a line each ("" when nothing is pursued).
+    fn quest_pursuit(&mut self) -> String;
     /// The teammates heard from, as maps of `name`, `guid`, `health`,
     /// `role`, `target`, `target_name`, `leader`, `in_fellowship`; plus
     /// the key `me_leader` on a first map for whether this one leads.
@@ -539,6 +546,13 @@ pub fn register(engine: &mut Engine) {
     });
     engine.register_fn("growth", |on: bool| with_api(|a| a.growth(on)));
     engine.register_fn("fight", |on: bool| with_api(|a| a.fight(on)));
+    engine.register_fn("pursue_quest", |id: &str, again: bool| {
+        with_api(|a| a.pursue_quest(id, again))
+    });
+    engine.register_fn("stop_pursuing", |id: &str| {
+        with_api(|a| a.stop_pursuing(id))
+    });
+    engine.register_fn("quest_pursuit", || with_api(|a| a.quest_pursuit()));
     engine.register_fn("teammates", || with_api(|a| a.teammates()));
     engine.register_fn("travel_style", |style: &str| {
         with_api(|a| a.travel_style(style))

@@ -616,3 +616,19 @@ fn the_answer_that_frees_the_slot_ends_the_fights_own_cast_too() {
     assert_eq!(c.autoplay.cast_sent, None);
     assert_eq!(c.autoplay.fight_cast, None, "a spent cast cannot linger");
 }
+
+#[test]
+fn a_pursued_source_is_picked_before_a_nearer_namesake() {
+    // The jaw drops from Engorged Eater 28849 alone; the common one, 28642, has its name.
+    let now = Instant::now();
+    let cfg = Fight::default();
+    let mut c = in_the_field();
+    let near = testkit::standing_by(&mut c, 0x8000_0001, "Engorged Eater", 3.0).guid;
+    let far = testkit::standing_by(&mut c, 0x8000_0002, "Engorged Eater", 12.0).guid;
+    for (guid, wcid) in [(near, 28642), (far, 28849)] {
+        c.world.objects.get_mut(&guid).unwrap().weenie_class_id = wcid;
+    }
+    assert_eq!(c.pick_target(&cfg, now), Some(near));
+    c.autoplay.growth.pursuit_sought = vec![28849];
+    assert_eq!(c.pick_target(&cfg, now), Some(far), "the jaw's eater first");
+}

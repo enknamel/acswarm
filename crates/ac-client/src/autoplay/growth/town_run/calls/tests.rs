@@ -14,6 +14,7 @@ fn tail_to(cell: u32, xp: u64) -> HandIn {
             cell,
         },
         xp,
+        pursued: false,
     }
 }
 
@@ -213,6 +214,7 @@ fn a_giver_in_a_dungeon_is_priced_and_called_on_with_its_cell() {
         row,
         at,
         xp: 100_000,
+        pursued: false,
     }];
     assert_eq!(plan_calls(&legs, &[], &hand_in, Some(1.0)).order, [0]);
     let now = Instant::now();
@@ -346,4 +348,85 @@ fn a_jaw_for_a_quest_paying_no_xp_is_handed_in_only_once_chosen() {
     c.autoplay.config.quests.switch_on(id);
     c.refresh_quests(now + Duration::from_millis(1));
     assert_eq!(to_fiun(&c), 1, "{:?}", c.quest_board);
+}
+
+#[test]
+fn a_pursued_hand_in_rides_an_ordinary_run() {
+    // 9,600 seconds out of the way for no XP: a pursued quest's giver is called on all the same.
+    let legs = legs_on_a_line(0.0, &[100.0, 5_000.0], 200.0, None);
+    let mut far = [tail_to(0x1234_0001, 0)];
+    let counter = [counter_in(HOLTBURG)];
+    assert_eq!(plan_calls(&legs, &counter, &far, Some(3_600.0)).order, [0]);
+    far[0].pursued = true;
+    assert_eq!(
+        plan_calls(&legs, &counter, &far, Some(3_600.0)).order,
+        [0, 1]
+    );
+}
+
+/// Beside Clemenza with the Engorged Eater Jaw, its quest pursued and town runs off.
+fn beside_clemenza_with_the_jaw() -> (Client, &'static Row) {
+    let row = ac_world::quests::rows_of("engorgedeaterjaw")
+        .next()
+        .unwrap();
+    let at = row.places[0];
+    let mut c = character_of_level(no_data(), 85);
+    with_a_pack(&mut c, 50);
+    stand(&mut c, at.cell, at.at - ac_world::landblock_origin(at.cell));
+    thing_in_the_pack(&mut c, 0x8000_0100, "Engorged Eater Jaw", 1);
+    c.world
+        .objects
+        .get_mut(&0x8000_0100)
+        .unwrap()
+        .weenie_class_id = 28725;
+    c.autoplay.config.growth.town_runs = false;
+    c.autoplay.config.quests.pursue_quest(row.id, true, 0);
+    c.pursuit = vec![crate::autoplay::PursuitLine {
+        id: row.id.into(),
+        title: row.title.into(),
+        step: crate::autoplay::PursuitStep::HandIn { row, at },
+        working: true,
+        via: None,
+    }];
+    (c, row)
+}
+
+#[test]
+fn a_pursued_jaw_carried_starts_a_call_on_its_giver_at_once() {
+    let (mut c, row) = beside_clemenza_with_the_jaw();
+    let now = Instant::now();
+    // A futile run just now would hold an ordinary run back five minutes.
+    c.autoplay.growth.last_run = Some(now);
+    c.autoplay.growth.run_was_futile = true;
+    c.autoplay.running = Some("town run");
+    assert!(c.autoplay_town_run(now), "{}", c.autoplay.status);
+    c.autoplay.running = None;
+    let run = c.autoplay.growth.run.clone().expect("a call on Clemenza");
+    assert!(run.for_quest);
+    assert!(
+        matches!(run.phase, Phase::ToGiver { row: r, .. } if std::ptr::eq(r, row)),
+        "{:?}",
+        run.phase
+    );
+    assert_eq!(run.reason, "for Engorged Eater Jaw");
+}
+
+#[test]
+fn a_quest_call_is_kept_with_town_runs_off_and_is_not_futile() {
+    let (mut c, row) = beside_clemenza_with_the_jaw();
+    let now = Instant::now();
+    assert!(c.start_quest_call(row, row.places[0], now));
+    assert!(c.autoplay.growth.is_quest_run());
+    // Town runs off: an ordinary run is let go, this one kept.
+    assert!(c
+        .autoplay
+        .growth
+        .drop_what_is_turned_off(false, false)
+        .is_none());
+    assert!(c.autoplay.growth.run.is_some());
+    // Over with nothing sold or bought, the next run need not wait.
+    let run = c.autoplay.growth.run.take().unwrap();
+    let cfg = c.autoplay.config.growth.clone();
+    c.end_run(run, now, &cfg, &[], false, None);
+    assert!(!c.autoplay.growth.run_was_futile);
 }

@@ -220,8 +220,8 @@ impl Client {
         !self.fight_target_gone(guid, underground) && !self.left_behind_on_the_road(guid, now)
     }
 
-    /// The nearest [`Self::would_fight`] allows inside `cfg.radius`, preferring one the attack in
-    /// hand reaches; a follower's is beside its leader or hitting it, else none (`follow` fetches it).
+    /// The nearest [`Self::would_fight`] allows in `cfg.radius`, one the attack reaches, then a
+    /// pursued quest's; a follower's is by its leader or hitting it, else none (`follow` gets it).
     pub(super) fn pick_target(&mut self, cfg: &Fight, now: Instant) -> Option<u32> {
         let underground = self.underground();
         let me = self.my_position()?;
@@ -275,7 +275,13 @@ impl Client {
                 // and then the nearest is as good an answer as any.
                 let how = self.attack_kind(stance, &ready, guid);
                 let seen = how.is_none_or(|how| self.shot_clears(guid, how));
-                ((!seen) as u8, at.distance(me), guid)
+                // A pursued quest's creature before a nearer namesake: the jaw's Engorged Eater
+                // (28849) shares its name with the common one (28642).
+                let sought = self.world.objects.get(&guid).is_some_and(|o| {
+                    let wanted = &self.autoplay.growth.pursuit_sought;
+                    wanted.contains(&o.weenie_class_id)
+                });
+                (((!seen) as u8, (!sought) as u8), at.distance(me), guid)
             })
             .min_by(|a, b| a.0.cmp(&b.0).then(a.1.total_cmp(&b.1)))
             .map(|(_, _, g)| g)
