@@ -601,8 +601,12 @@ impl Player {
         }
         let old = self.world_position();
         let world = old + vel * dt;
-        let blk = block_of(world);
         let dungeon = self.is_indoors() && self.in_dungeon(assets);
+        let blk = if dungeon {
+            self.landblock()
+        } else {
+            block_of(world)
+        };
         let cap = self.capsule;
         let floor = self
             .collision(assets, blk)
@@ -1310,16 +1314,20 @@ impl Player {
             }
         }
         let target = old + step;
-        // Static geometry of the block we're moving into and the one we're
-        // leaving, at a boundary.
-        let mut blocks = vec![block_of(target)];
-        if self.landblock() != blocks[0] {
-            blocks.push(self.landblock());
-        }
         let cap = self.capsule;
         let cell = self.cell;
         let indoors = self.is_indoors();
         let dungeon = indoors && self.in_dungeon(assets);
+        // Static geometry of the block we're moving into and the one we're leaving, at a boundary.
+        // A dungeon's cells lie past its block's square, over another dungeon's: only its own.
+        let mut blocks = vec![if dungeon {
+            self.landblock()
+        } else {
+            block_of(target)
+        }];
+        if self.landblock() != blocks[0] {
+            blocks.push(self.landblock());
+        }
         let cols: Vec<Rc<BlockCollision>> = blocks
             .iter()
             .filter_map(|&blk| self.collision(assets, blk))

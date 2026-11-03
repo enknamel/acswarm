@@ -154,6 +154,12 @@ fn journeys() -> Vec<Trial> {
             lifestone,
             (ledge, ledge_cell),
         ),
+        journey(
+            LEVEL,
+            "0101 Murk Warrens arrival to its Surface Portal",
+            (Vec3::new(232.0, -68.0, 0.0), 0x0101_0121),
+            (Vec3::new(202.0, -38.0, 24.0), 0x0101_0465),
+        ),
     ]
 }
 
