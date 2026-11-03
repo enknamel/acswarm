@@ -168,12 +168,18 @@ XP award is read:
 | branch on the path | read as |
 |---|---|
 | InqIntStat Level, success | the row's `min_level`/`max_level` |
+| InqIntStat Level, failure, on a band's low or high end | the band past it: failing 1-49 is 50 and up (a ladder) |
 | InqQuest on a quest with `min_Delta` > 0, failure | the quest's wait (`timer`, `repeat` = its `min_Delta`) |
 | the same, success | the wait reply: not a reward path |
 | InqQuest `counter@...` success, or InqQuestSolves on a counter with min >= 2 | kill N: N = that min, else the counter's `max_Solves` |
 | InqQuestSolves on a counter, min 1, failure | not taken up yet: the start talk's path (a `start` row, no XP) |
 | InqQuest or InqQuestSolves (min >= 1, open max) on a flag the same path stamps, failure | once (`repeat` = -1, `timer` = the flag) |
 | the same on a flag another row stamps, success | `needs` that flag |
+| the same, failure (not held) | kept only where the held path pays the same: then the flag is not a need |
+| the same on a flag no row of the file stamps, failure | asks nothing (never held; the walk's second pass) |
+| the wanted item's own `Quest` string (PropertyString 33) | the quest repeats no sooner than that quest's `min_Delta`, or once at `max_Solves` 1 (Player_Inventory.cs:1249-1262) |
+| the wanted item's `QuestRestriction` (37) | `needs` that flag (Player_Inventory.cs:1207-1211) |
+| a start talk's wait (InqQuest on a timed quest, failure) | the quest's `timer` and `repeat` when its reward asks none |
 | InqOwnsItems success | the item and count asked (with TakeItems on the path) |
 | anything else | the path is out (§1.2's table) |
 
@@ -239,19 +245,20 @@ give:3684,item,Red Rat Tail,24573,Yukara Miko the Collector,2B110112,39.96,163.4
 ```
 (and eleven more rows, one per Collector placement)
 ```
-3684,drop,949,Red Rat,15,0.15,118:6;161:2;1C4:17;1D3:5;1D9:4;1DD:4;1F9:2;3FE:4;7D62:1;8C44:5;934B:2;96D6:1;D756:3
+3684,drop,949,Red Rat,15,0.15,118:6;161:2;1C4:17;1D3:5;1D9:4;1DD:4;1F9:2;3FE:4;7D62:1;8C44:5;D756:3
 ```
 
 **A talk chain: Sent to the Barkeep, then Sent to the Pathwarden (Holtburg).** Alcott (44895,
 A9B40019) on Use: InqQuest `ToTheBarkeep` (`max_Solves` 1); not held: Tells, StampQuest
 `LifestoneFound1111`, AddContract, AwardNoShareXP 7,000, StampQuest `ToTheBarkeep`. Buckminster
-(44891, A9B40163): InqQuest `ToTheBarkeep` success, then `ToPathwarden@BarkeepFlagCheck` failure:
-StampQuest `BartenderFound1111`, AwardNoShareXP 9,300, Give 500 pyreals, StampQuest `ToPathwarden`.
+(44891, A9B40163): InqQuest `ToTheBarkeep`, held (62063, then 62068) or not (62066, then 62067),
+then `ToPathwarden@BarkeepFlagCheck` failure: StampQuest `BartenderFound1111`, AwardNoShareXP
+9,300, Give 500 pyreals, StampQuest `ToPathwarden`. Both ways pay the same, so the row needs nothing.
 The same pair stands in each starter town (Rufina and Fiorella 33D9, Ghaziyah 7D64, Eiichi and
 Benjirou DA55).
 ```
 tothebarkeep,talk,Sent to the Barkeep,44895,Alcott,A9B40019,83.3,14.04,94,talk,,0,0,0,7000,0,0,0,none,,lifestonefound1111;tothebarkeep,-1,tothebarkeep,,,,
-topathwarden,talk,Sent to the Pathwarden,44891,Buckminster,A9B40163,104.41,35.19,94,talk,,0,0,0,9300,0,0,0,none,273:500,bartenderfound1111;topathwarden,-1,topathwarden,tothebarkeep,,,
+topathwarden,talk,Sent to the Pathwarden,44891,Buckminster,A9B40163,104.41,35.19,94,talk,,0,0,0,9300,0,0,0,none,273:500,bartenderfound1111;topathwarden,-1,topathwarden,,,,
 ```
 
 ### 1.7 `ac_world::quests`
@@ -398,8 +405,10 @@ not a search `Term`. It stays a pure function of what is handed in:
   `tell` "wanted by an active quest". `held` is already what `judge` passes for capped rules, so
   `holds` and `cheap_half_holds` take `held` too.
 - The wants come from the board: every item quest whose state is `Ready`, `Needs` or
-  `WontComplete` (on, not blocked, not waiting or done). `need` = `count` for a timed or once quest,
-  `None` for `Repeat::Any` (each hand-in pays: the Collectors). Summed per wcid; `None` wins.
+  `WontComplete` (on, not blocked, not waiting or done), one want per item its rows take. `need` =
+  `count` for a timed or once quest, `count * ANY_HAND_INS` (5) for `Repeat::Any`: each trophy is a
+  slot and a giver is met only on a run that passes. Summed per wcid. A mate is told the wants less
+  what is carried (`Client::quest_wants_left`).
   `Client::wielder()` (actions/combat.rs:262) fills it from `Client.quest_board`.
 - A quest switched off, or quests off, wants nothing: its items fall to the rules below.
 - Old profiles carry no `Quest` ask and load unchanged; a profile saved with one does not load in
@@ -489,13 +498,15 @@ like a counter.
 
 ### 4.3 What the use came to
 
-The use is sent by the visit; `quest_log` watches `XP_WATCH` (10 s, guess) for the answer:
+Built as `Client::watch_quest_answer`. The use is sent by the visit; `quest_log` watches
+`XP_WATCH` (10 s, guess) for the answer (the start talk and the words are not built):
 - the total XP rises: done; `done[id]`, `waits[timer] = now + repeat` (timed), the row's `stamps`
   into `quests_done`; a kill counter is forgotten (ACE erased it);
 - a start talk: the counter is taken up (`kills[counter] = 0`), and the first kill line confirms it;
 - "You may complete this quest again in 19h 59m." (§5.4): `waits[timer]` from the words;
 - nothing: the giver gave its "done" reply in its own words (65 of 149 timed quests), so a once
-  quest is `Done` and a timed one waits its whole `repeat` from now (the safe side).
+  quest is `Done` and a timed one waits its whole `repeat` from now (the safe side); an item the
+  giver did not take, or an any-time quest unpaid, leaves the giver alone for `GIVER_RETRY`.
 
 ## 5. Step 4: item hand-ins and the run with many calls
 
@@ -537,9 +548,10 @@ A ready hand-in joins the run when either:
   with it less the tour without it.
 Hand-ins are tried best `xp / detour` first, each against the tour as it stands, until 6 calls.
 One left out waits: its items stay kept (the want holds), and the next run that passes takes it.
-Ready hand-ins alone start a run when their XP beats the round trip from the ground by the same
-rule (`worth_town_run`, steps.rs:185, gains the term). Until the rate is measured, only the first
-rule applies.
+Hand-ins never start a run: a town run is made only for a full pack, too much weight or supplies
+to buy, and a run that sold and bought nothing waits `FUTILE_RUN_WAIT` whatever it handed in.
+Until the rate is measured, only the first rule applies, and "a short leg" also needs the detour
+to be at most `2 * SHORT_LEG`, so a cheap recall back makes no far giver near.
 
 `xp_per_hour`: `growth::State` keeps the total XP sampled every minute for the last 30 minutes
 (the fleet window works its rate the same way, `panels/fleet.rs:666`); none until 10 minutes are
@@ -585,8 +597,8 @@ template, and none is needed for steps 1-4).
 The foundation (`675944a` data, `de9a2de` seams) built what more than one builder reads, so no
 builder needs another's code. Builders: **list** (step 1: 1b states, 1c panel, 1d kill line),
 **loot** (step 2), **hunt** (step 3), **errand** (step 4). The generated data differs a little from
-§1.2's prototype counts: 1,942 rows (1,765 item, 79 kill, 14 talk, 84 start), 465 quests (381
-item, 75 kill, 8 talk), 253 givers; `quest_sources.csv` 1,927 rows (1,616 drop, 301 kill, 10 npc).
+§1.2's prototype counts: 1,961 rows (1,779 item, 79 kill, 19 talk, 84 start), 471 quests (386
+item, 75 kill, 10 talk), 264 givers; `quest_sources.csv` 1,932 rows (1,620 drop, 301 kill, 11 npc).
 `quests_walk.py` prints its counts and the reasons paths are out on every run.
 
 | seam | file | state | filled by |
@@ -601,7 +613,7 @@ item, 75 kill, 8 talk), 253 givers; `quest_sources.csv` 1,927 rows (1,616 drop, 
 | `quest_item_blocked(profile, item, me, name, held) -> Option<(rule, LootAction)>`: the cross-check, called by `quest_board` for every item quest on | `crates/ac-client/src/autoplay/loot/judge.rs` | returns `None` | loot (§3.3) |
 | `quest_wants(board) -> Vec<QuestWant>`: what the board wants carried (§3.1) | `crates/ac-client/src/quest_log.rs` | built, tested | loot wires it into `wielder()`, `rules_fingerprint`, `Mate` |
 | `Client::visit_giver(&Row)`: a visit to a giver, journey and all | `crates/ac-client/src/quest_log.rs` | built | hunt (start talks, ready talks and kill tasks), errand (hand-in calls) |
-| `Client.quest_asked: Option<Asked { row, at, xp_before }>`: the giver asked, awaiting its answer | `crates/ac-client/src/lib.rs`, `crates/ac-client/src/quest_log.rs` | field only | hunt sets it and watches the answer (§4.3); errand sets it at a hand-in |
+| `Client.quest_asked: Option<Asked { row, at, xp_before, carried }>`: the giver asked, awaiting its answer | `crates/ac-client/src/lib.rs`, `crates/ac-client/src/quest_log.rs` | built: `ask_giver`, `watch_quest_answer` | the town run's calls set it in reach of a giver and at each give |
 | `Client::xp_per_hour()` | `crates/ac-client/src/quest_log.rs` | returns `None` | hunt (§5.3's 30-minute samples) |
 | `worth_detour(xp, detour, xp_per_hour)`, `SHORT_LEG` | `crates/ac-client/src/quest_log.rs` | built, tested | - (hunt §4.2, errand §5.3) |
 | "you must wait" refusal row and its hand-off to `quest_asked` | `crates/ac-agent/src/refusals.rs`, `crates/ac-client/src/refused.rs` | not built | hunt (§5.4); errand relies on it |
