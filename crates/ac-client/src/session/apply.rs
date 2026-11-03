@@ -17,6 +17,16 @@ fn frees_the_cast_slot(err: u32) -> bool {
 }
 
 impl Client {
+    /// Read back what this character kept between sessions, once its name is known: the ledger,
+    /// recall spots, quest flags and quest log.
+    pub(crate) fn load_saved(&mut self) {
+        self.ledger_loaded = true;
+        self.load_ledger();
+        self.load_recall_positions();
+        self.load_quest_flags();
+        self.load_quest_log();
+    }
+
     /// Pump the network, apply the server's messages, run the gameplay
     /// timers, and once the character is placed run its physics with
     /// `input` (None for a session nobody is steering). Returns what the
@@ -26,11 +36,7 @@ impl Client {
         // Read back what this character was carrying things for, once
         // the server has said which character it is.
         if !self.ledger_loaded && !self.world.stats.name.trim().is_empty() {
-            self.ledger_loaded = true;
-            self.load_ledger();
-            self.load_recall_positions();
-            self.load_quest_flags();
-            self.load_quest_log();
+            self.load_saved();
         }
         use ac_net::session::{Event, Port};
         let mut chat_pending: Vec<(u32, Vec<u8>)> = Vec::new();

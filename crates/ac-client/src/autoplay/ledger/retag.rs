@@ -136,8 +136,7 @@ impl Client {
     /// should not be telling somebody their mule is holding things for
     /// a rule they deleted.
     pub(crate) fn tick_retag(&mut self, now: Instant) {
-        // With quests on, a pack judged before the first board would lose its quest items' tags.
-        if self.autoplay.config.quests.on && self.quest_board_at.is_none() {
+        if self.autoplay.config.quests.on && !self.is_board_current() {
             return;
         }
         self.read_quest_wants();

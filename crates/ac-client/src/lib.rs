@@ -257,8 +257,8 @@ pub struct Client {
     /// Each quest's state for this character, worked out by `refresh_quests`.
     pub quest_board: Vec<quest_log::QuestLine>,
     pub(crate) quest_board_at: Option<Instant>,
-    /// What the board was last worked out for: quests switched on, level, log.
-    pub(crate) quest_board_for: Option<(autoplay::Quests, u32, quest_log::QuestLog)>,
+    /// What the board was last worked out for (see `quest_log::BoardFor`).
+    pub(crate) quest_board_for: Option<quest_log::BoardFor>,
     /// Quests no giver's band or easiest source suits at this level, switched on or not.
     pub quests_unsuited: std::collections::BTreeSet<String>,
     /// What the board wants carried, for the loot rule (`quest_log::quest_wants`).

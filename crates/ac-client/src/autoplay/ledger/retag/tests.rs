@@ -148,14 +148,13 @@ fn what_an_item_was_taken_for_is_written_down() {
 const PARTS_QUEST: &str = "gearknightpartscollectionwait_0513";
 const PARTS: u32 = 51266;
 
-/// A character carrying `piles` single Piles of Gearknight Parts, its profile the quest rule
-/// above "the rest, sold", with only [`PARTS_QUEST`] switched on. Level 150: the parts' easiest
-/// drop is level 135, so a lower character reads the quest as too hard and wants none.
-fn carrying_parts(piles: u32) -> Client {
+/// A level-150 character (the parts' easiest drop is 135) carrying `piles` Piles of Gearknight
+/// Parts, its profile on its own shelf the quest rule above "the rest, sold", [`PARTS_QUEST`] on.
+fn carrying_parts(piles: u32, shelf_name: &str) -> Client {
     let mut c = character_of_level(crate::testkit::no_data(), 150);
     c.world.stats.name = "Bryn".into();
     let library = shelf(
-        "quest-retag",
+        shelf_name,
         vec![
             crate::profile::quest_rule(),
             asks("the rest", "value>=0", LootAction::Sell),
@@ -170,6 +169,7 @@ fn carrying_parts(piles: u32) -> Client {
         .filter(|id| id != PARTS_QUEST)
         .collect();
     c.autoplay.config.quests.off.dedup();
+    c.load_saved();
     let me = c.world.player_guid.unwrap();
     for i in 0..piles {
         let guid = 0x8000_0100 + i;
@@ -205,7 +205,7 @@ fn tags_of(c: &Client) -> Vec<(Option<LootAction>, Option<String>)> {
 
 #[test]
 fn the_quest_rule_keeps_what_the_quest_needs_and_the_rest_goes_to_the_rules_below() {
-    let mut c = carrying_parts(12);
+    let mut c = carrying_parts(12, "quest-retag");
     let t0 = Instant::now();
     c.tick_retag(t0);
     assert!(
@@ -243,5 +243,32 @@ fn the_quest_rule_keeps_what_the_quest_needs_and_the_rest_goes_to_the_rules_belo
     c.tick_retag(t1);
     assert!(c.quest_wants.is_empty());
     assert_eq!(tags_of(&c), vec![sell; 12]);
+    let _ = std::fs::remove_dir_all(c.profiles.dir());
+}
+
+#[test]
+fn a_pack_is_not_judged_on_a_board_worked_out_before_the_character_was_known() {
+    let mut c = carrying_parts(12, "quest-retag-lobby");
+    let (name, level) = (std::mem::take(&mut c.world.stats.name), c.world.stats.level);
+    c.world.stats.level = 0;
+    c.ledger_loaded = false;
+    let t0 = Instant::now();
+    // In the lobby: a board for nobody.
+    c.tick_retag(t0);
+    c.refresh_quests(t0);
+    // The name and level come; the saved log is read on the next tick.
+    (c.world.stats.name, c.world.stats.level) = (name, level);
+    c.tick_retag(t0);
+    c.refresh_quests(t0);
+    assert!(
+        tags_of(&c).iter().all(|(a, _)| a.is_none()),
+        "judged on the lobby's board"
+    );
+    c.load_saved();
+    c.tick_retag(t0);
+    c.refresh_quests(t0);
+    c.tick_retag(t0);
+    let keep = (Some(LootAction::Keep), Some("quest items".to_string()));
+    assert_eq!(tags_of(&c)[..10], vec![keep; 10][..]);
     let _ = std::fs::remove_dir_all(c.profiles.dir());
 }

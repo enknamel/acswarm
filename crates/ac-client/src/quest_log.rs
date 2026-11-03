@@ -138,6 +138,17 @@ pub struct QuestLine {
     pub on: bool,
 }
 
+/// What a board was worked out for: a change to any of it works the board out at once.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct BoardFor {
+    pub(crate) quests: Quests,
+    pub(crate) level: u32,
+    pub(crate) log: QuestLog,
+    /// Quest flags held.
+    pub(crate) held: Vec<String>,
+    pub(crate) name: String,
+}
+
 /// What the board is worked out from, so [`quest_board`] runs with no `Client`.
 #[derive(Clone, Debug, Default)]
 pub struct QuestFacts {
@@ -572,6 +583,15 @@ pub struct Asked {
 }
 
 impl Client {
+    /// Whether the board was worked out for this character, its saved log read: before then a
+    /// pack judged would lose its quest items' tags.
+    pub(crate) fn is_board_current(&self) -> bool {
+        let name = self.world.stats.name.trim();
+        self.quest_board_for
+            .as_ref()
+            .is_some_and(|f| f.name == name)
+    }
+
     /// The quest ids autoplay considers: quests on, and each not switched off.
     pub fn quests_on(&self) -> Vec<&'static str> {
         let cfg = &self.autoplay.config.quests;
@@ -613,15 +633,22 @@ impl Client {
         }
     }
 
-    /// Work the board out again when [`QUEST_BOARD_EVERY`] has passed, or at once when the
-    /// quests switched on, the level or the log changed, into `quest_board`.
+    /// Work the board out again when [`QUEST_BOARD_EVERY`] has passed, or at once when what it
+    /// was worked out for changed, into `quest_board`. A character named waits for its log.
     pub fn refresh_quests(&mut self, now: Instant) {
+        let name = self.world.stats.name.trim();
+        if !self.ledger_loaded && !name.is_empty() {
+            return;
+        }
         let cfg = &self.autoplay.config.quests;
         let level = self.world.stats.level.max(0) as u32;
-        let changed = self
-            .quest_board_for
-            .as_ref()
-            .is_none_or(|(q, l, log)| q != cfg || *l != level || *log != self.quest_log);
+        let changed = self.quest_board_for.as_ref().is_none_or(|f| {
+            f.quests != *cfg
+                || f.level != level
+                || f.log != self.quest_log
+                || f.held != self.travel.quests_done
+                || f.name != name
+        });
         let due = self
             .quest_board_at
             .is_none_or(|at| now.duration_since(at) >= QUEST_BOARD_EVERY);
@@ -629,7 +656,13 @@ impl Client {
         if !changed && (!due || (!cfg.on && settled)) {
             return;
         }
-        self.quest_board_for = Some((cfg.clone(), level, self.quest_log.clone()));
+        self.quest_board_for = Some(BoardFor {
+            quests: cfg.clone(),
+            level,
+            log: self.quest_log.clone(),
+            held: self.travel.quests_done.clone(),
+            name: name.to_string(),
+        });
         self.quest_board_at = Some(now);
         (self.quest_board, self.quests_unsuited) =
             board_of(ac_world::quests::all(), &self.quest_facts());
