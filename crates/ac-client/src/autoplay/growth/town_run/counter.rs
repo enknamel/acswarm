@@ -681,6 +681,20 @@ impl Client {
                 );
             }
         }
+        self.end_run(run, now, cfg, &needs, still_full, left)
+    }
+
+    /// The run is over: what it came to is noted, and the character stays in town when stranded
+    /// or goes back to its ground. `left` is the last counter's reason. True while it goes on.
+    pub(super) fn end_run(
+        &mut self,
+        run: Run,
+        now: Instant,
+        cfg: &Growth,
+        needs: &[crate::autoplay::growth::needs::Need],
+        still_full: bool,
+        left: Option<String>,
+    ) -> bool {
         // A trip that neither bought nor sold anything achieved
         // nothing, and starting another at once achieves nothing again:
         // that is the running back and forth between vendors for ever.
@@ -712,7 +726,7 @@ impl Client {
         // up looks like: stay in town. Walking back to the hunting
         // ground without the supplies to work it would only mean
         // walking straight back again.
-        if self.stranded(&needs, cfg) {
+        if self.stranded(needs, cfg) {
             let short: Vec<&str> = needs
                 .iter()
                 .filter(|n| n.urgent)
