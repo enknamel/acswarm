@@ -1160,3 +1160,42 @@ fn a_journey_put_down_for_a_fight_arrives_at_its_place() {
         "{me}"
     );
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_portal_that_says_too_recently_is_stepped_back_from_and_walked_into_again() {
+    // The Town Network passes portal to portal faster than ACE's 3.5 s allows: weenie error
+    // 0x04A7. Standing in the mouth never takes the character, and waited out it was left out.
+    let holtburg = 0xA9B4_0019;
+    let mut c = crate::testkit::standing_at(holtburg, Vec3::new(84.0, 7.1, 94.0));
+    let me = c.my_position().unwrap();
+    let mouth = c.place_at(me);
+    let trip = Trip {
+        steps: vec![Step::Portal {
+            name: "Portal to Town Network".into(),
+            mouth,
+            exit: Place::on_map(Vec2::new(44_170.4, 9_636.1)),
+        }],
+        seconds: 10.0,
+    };
+    let exit = Place::on_map(Vec2::new(44_170.4, 9_636.1));
+    crate::testkit::set_out_on(&mut c, trip, within_reach(exit));
+    let now = Instant::now();
+    c.portal_too_soon(0x0474, now);
+    assert!(
+        c.travel.state.too_soon.is_none(),
+        "another error is not this one"
+    );
+    c.portal_too_soon(0x04A7, now);
+    let back = match c.step_goal(now) {
+        Some(Goal::At { place, .. }) => place,
+        other => panic!("{other:?}"),
+    };
+    let off = back.at.distance(me);
+    assert!((2.0..=3.5).contains(&off), "stepped back {off:.1} m");
+    match c.step_goal(now + PORTAL_COOLDOWN + Duration::from_millis(100)) {
+        Some(Goal::At { place, .. }) => assert_eq!(place.at, mouth.at, "walked back in"),
+        other => panic!("{other:?}"),
+    }
+    assert!(c.travel.state.too_soon.is_none() && c.traveling());
+}
