@@ -550,8 +550,9 @@ A ready hand-in joins the run when either:
   with it less the tour without it.
 Hand-ins are tried best `xp / detour` first, each against the tour as it stands, until 6 calls.
 One left out waits: its items stay kept (the want holds), and the next run that passes takes it.
-Hand-ins never start a run: a town run is made only for a full pack, too much weight or supplies
-to buy, and a run that sold and bought nothing waits `FUTILE_RUN_WAIT` whatever it handed in.
+Hand-ins never start a run, except a pursued quest's own call (`start_quest_call`): a town run is
+made only for a full pack, too much weight or supplies to buy, and a run that sold and bought
+nothing waits `FUTILE_RUN_WAIT` whatever it handed in (a pursued quest's call never does).
 Until the rate is measured, only the first rule applies, and "a short leg" also needs the detour
 to be at most `2 * SHORT_LEG`, so a cheap recall back makes no far giver near.
 
