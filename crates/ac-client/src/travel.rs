@@ -35,6 +35,8 @@ const PORTAL_COOLDOWN: Duration = Duration::from_secs(4);
 /// The step back off the mouth meanwhile (metres): a portal takes whoever walks into it, not
 /// whoever stands in it.
 const PORTAL_STEP_BACK: f32 = 3.0;
+/// The spots of a portal step's walk kept for the step back (at most), a metre apart.
+const TRAIL_KEEP: usize = 8;
 /// A recall step waits this long after the step begins before casting,
 /// so the character has come to a stop (moving disrupts the cast).
 const RECALL_SETTLE: Duration = Duration::from_millis(800);
@@ -75,6 +77,8 @@ struct StepState {
     last_hop: Option<Instant>,
     /// Turned away as teleported too recently: when to walk back in, and where to stand till then.
     too_soon: Option<(Instant, Place)>,
+    /// Where the portal step's walk stood, a metre apart, newest last: floor the step back holds.
+    trail: Vec<Place>,
     /// When the recall step's spell was last sent (or the step began), and how many times.
     recall_since: Option<Instant>,
     recall_casts: u32,
@@ -1077,6 +1081,8 @@ impl Client {
                     c.refuse(exit.at.truncate());
                 }
             }
+            // Stood in the mouth, the wait there (`wait_at_mouth`) gives up on the portal, not a stall.
+            (Did::Blocked(_), None) if portal && self.travel.state.portal_since.is_some() => {}
             (Did::Blocked(why), None) => self.refuse_step(&why.what),
             _ => {}
         }
@@ -1088,11 +1094,18 @@ impl Client {
     /// arrivals and clocks; `None` when the step walks nowhere this frame.
     pub(crate) fn step_goal(&mut self, now: Instant) -> Option<Goal> {
         self.travel.trip.as_ref()?;
-        let (me3, block) = {
+        let (me3, block, cell) = {
             let pl = self.player.as_ref()?;
-            (pl.world_position(), pl.cell & 0xFFFF_0000)
+            (pl.world_position(), pl.cell & 0xFFFF_0000, pl.cell)
         };
         let me = me3.truncate();
+        let trail = &mut self.travel.state.trail;
+        if trail.last().is_none_or(|p| p.at.distance(me3) >= 1.0) {
+            trail.push(Place { at: me3, cell });
+            if trail.len() > TRAIL_KEEP {
+                trail.remove(0);
+            }
+        }
         // A portal step is over when the character is where the portal
         // comes out. Merely being in another landblock is not enough:
         // walking to a portal often crosses a boundary, and counting
@@ -1193,6 +1206,7 @@ impl Client {
             }
             self.travel.state.too_soon = None;
             self.travel.state.portal_since = None;
+            self.walk_afresh();
         }
         if portal && reached(me3, end.at, ARRIVE) && !self.wait_at_mouth(now) {
             return None;
@@ -1212,8 +1226,9 @@ impl Client {
         self.overland_goal(end.at.truncate())
     }
 
-    /// A portal turned the journey away as teleported too recently: step back off its mouth and
-    /// walk in again once the server's wait is over, the give-up clock started afresh.
+    /// A portal turned the journey away as teleported too recently: step back off its mouth, to
+    /// where the walk in last stood, and walk in again once the server's wait is over, the
+    /// give-up clock started afresh.
     pub(crate) fn portal_too_soon(&mut self, code: u32, now: Instant) {
         if code != TELEPORTED_TOO_RECENTLY || self.travel_portal().is_none() {
             return;
@@ -1225,16 +1240,39 @@ impl Client {
         else {
             return;
         };
-        let spot = me.truncate() - forward.normalize_or(Vec2::Y) * PORTAL_STEP_BACK;
-        let assets = self.assets.clone();
-        let floor = self
-            .player
-            .as_mut()
-            .and_then(|pl| pl.ground_height(&assets, spot.x, spot.y, me.z));
-        let back = self.place_at(floor.map_or(me, |z| spot.extend(z)));
+        let trail = &self.travel.state.trail;
+        let walked = trail
+            .iter()
+            .rev()
+            .find(|p| p.at.distance(me) >= PORTAL_STEP_BACK);
+        let back = match walked
+            .or(trail.first())
+            .filter(|p| p.at.distance(me) >= 1.0)
+        {
+            Some(p) => *p,
+            None => {
+                let spot = me.truncate() - forward.normalize_or(Vec2::Y) * PORTAL_STEP_BACK;
+                let assets = self.assets.clone();
+                let floor = self
+                    .player
+                    .as_mut()
+                    .and_then(|pl| pl.ground_height(&assets, spot.x, spot.y, me.z));
+                self.place_at(floor.map_or(me, |z| spot.extend(z)))
+            }
+        };
         tracing::info!("travel: teleported too recently; stepping back to try again");
         self.travel.state.too_soon = Some((now + PORTAL_COOLDOWN, back));
         self.travel.state.portal_since = None;
+        self.walk_afresh();
+    }
+
+    /// Drop the stretch's walk and the steering's memory of it: the step back and the walk in
+    /// again are walks of their own, no stall or refusal of one counted against the other.
+    fn walk_afresh(&mut self) {
+        if self.going.as_ref().is_some_and(|g| g.journey) {
+            self.going = None;
+        }
+        self.steering.reset();
     }
 
     /// Standing at the portal's mouth and still here: jump into it after a while, and after
