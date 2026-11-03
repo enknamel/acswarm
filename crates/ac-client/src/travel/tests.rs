@@ -1199,3 +1199,57 @@ fn a_portal_that_says_too_recently_is_stepped_back_from_and_walked_into_again() 
     }
     assert!(c.travel.state.too_soon.is_none() && c.traveling());
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_portal_walked_into_again_after_too_recently_is_not_refused_as_stalled() {
+    // Blargerton in the Town Network, off the Holtburg portal and into the Facility Hub's: turned
+    // away, it stood in the mouth and the walk back in was refused, the Warden given up.
+    let arrival = 0x0007_0145;
+    let mut c = crate::testkit::standing_in_the_field(40, arrival, Vec3::new(70.0, -80.0, 0.0));
+    let mouth = Place {
+        at: Vec3::new(53.6, 1244.0, -0.1),
+        cell: 0x0007_0126,
+    };
+    let exit = Place::on_map(Vec2::new(26_502.1, 312.6));
+    let trip = Trip {
+        steps: vec![Step::Portal {
+            name: "Portal to Facility Hub".into(),
+            mouth,
+            exit,
+        }],
+        seconds: 10.0,
+    };
+    crate::testkit::set_out_on(&mut c, trip, within_reach(exit));
+    let mut now = Instant::now();
+    let mut walked = false;
+    for _ in 0..200 {
+        now = frames(&mut c, now, 1);
+        let at = c.my_position().expect("on its feet");
+        if at.truncate().distance(mouth.at.truncate()) < 0.3 {
+            walked = true;
+            break;
+        }
+    }
+    assert!(walked, "never reached the mouth");
+    // The server answers a second later, as live.
+    now = frames(&mut c, now, 20);
+    c.portal_too_soon(0x04A7, now);
+    now = frames(&mut c, now, 40);
+    let back = c.my_position().expect("on its feet");
+    let off = back.truncate().distance(mouth.at.truncate());
+    assert!(off >= 2.0, "stood {off:.1} m off the mouth while it waited");
+    let mut again = false;
+    for _ in 0..80 {
+        now = frames(&mut c, now, 1);
+        let at = c.my_position().expect("on its feet");
+        again |= at.truncate().distance(mouth.at.truncate()) < 0.3;
+    }
+    assert!(
+        c.traveling(),
+        "the journey ended: {:?}",
+        c.travel.why_refused
+    );
+    assert!(c.travel.refused.is_empty(), "the mouth was left out");
+    assert!(again, "never walked back into the mouth");
+}
