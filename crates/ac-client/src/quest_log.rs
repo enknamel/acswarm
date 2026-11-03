@@ -1,7 +1,7 @@
 //! Quests from one character's side: its log (kills counted, quests done, waits running), kept
 //! between sessions because the server never sends the registry; the board of each quest's
 //! state ([`quest_board`]), worked out every [`QUEST_BOARD_EVERY`]; and what a giver's answer
-//! came to ([`Client::watch_quest_answer`]). The visit to a giver is the town run's to make.
+//! came to (`Client::watch_quest_answer`). The visit to a giver is the town run's to make.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
