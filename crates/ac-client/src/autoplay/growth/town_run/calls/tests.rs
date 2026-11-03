@@ -241,6 +241,7 @@ fn a_ready_talk_in_the_counters_town_joins_the_run_and_one_switched_off_does_not
         givers: 1,
         giver: "Alcott".into(),
         on: true,
+        every_way: false,
     };
     c.quest_board = vec![line.clone()];
     let now = Instant::now();
@@ -290,6 +291,7 @@ fn a_quest_not_taken_up_is_a_talk_to_whoever_starts_it_and_once_heard_it_is_begu
         givers: 1,
         giver: "Lieutenant Grenlin".into(),
         on: true,
+        every_way: false,
     }];
     let now = Instant::now();
     let me = c.my_position().unwrap().truncate();
@@ -313,4 +315,35 @@ fn a_quest_not_taken_up_is_a_talk_to_whoever_starts_it_and_once_heard_it_is_begu
         .growth
         .givers_refused
         .within(&key, now, GIVER_RETRY));
+}
+
+#[test]
+fn a_jaw_for_a_quest_paying_no_xp_is_handed_in_only_once_chosen() {
+    // Fiun Rehlyun (Fiun Outpost, outdoors) takes the Insatiable Eater Jaw for a flag, no XP.
+    let id = "augmentationprovinggroundaccess";
+    let fiun = ac_world::quests::rows_of(id)
+        .find(|r| r.kind == Kind::Item)
+        .unwrap();
+    let at = fiun.places[0];
+    let mut c = character_of_level(no_data(), 150);
+    with_a_pack(&mut c, 50);
+    stand(&mut c, at.cell, at.at - ac_world::landblock_origin(at.cell));
+    thing_in_the_pack(&mut c, 0x8000_0100, "Insatiable Eater Jaw", 1);
+    c.world
+        .objects
+        .get_mut(&0x8000_0100)
+        .unwrap()
+        .weenie_class_id = 28719;
+    c.autoplay.config.quests.on = true;
+    let now = Instant::now();
+    let me = c.my_position().unwrap().truncate();
+    let to_fiun = |c: &Client| {
+        let calls = c.ready_hand_ins(&[me], 5, now);
+        calls.iter().filter(|h| h.row.id == id).count()
+    };
+    c.refresh_quests(now);
+    assert_eq!(to_fiun(&c), 0, "never offered unchosen");
+    c.autoplay.config.quests.switch_on(id);
+    c.refresh_quests(now + Duration::from_millis(1));
+    assert_eq!(to_fiun(&c), 1, "{:?}", c.quest_board);
 }

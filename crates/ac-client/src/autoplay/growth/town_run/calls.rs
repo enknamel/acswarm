@@ -14,7 +14,7 @@ use super::vendor::counter_place;
 use super::{Errand, Phase, Run, Turn, VENDOR_REACH};
 use crate::autoplay::growth::Growth;
 use crate::autoplay::Doing;
-use crate::quest_log::{is_automatic, worth_detour, QuestState, SHORT_LEG};
+use crate::quest_log::{worth_detour, QuestState, SHORT_LEG};
 use crate::Client;
 
 /// A giver no journey reached is planned to again after this (a Warden's wait, hunt.rs).
@@ -175,8 +175,8 @@ impl Client {
             if !line.on || line.state != QuestState::Ready || line.kind == Kind::Start {
                 continue;
             }
-            let found = ac_world::quests::rows_of(&line.id)
-                .filter(|r| r.kind == line.kind && r.fits_level(level) && is_automatic(r))
+            let found = crate::quest_log::worked_rows(line)
+                .filter(|r| r.kind == line.kind && r.fits_level(level))
                 .filter(|r| match r.want {
                     Want::Item(w) => self.carried_count(w) >= r.count.max(1),
                     _ => true,

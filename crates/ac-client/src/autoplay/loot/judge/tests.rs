@@ -358,6 +358,7 @@ fn the_board_says_a_quest_wont_complete_and_names_the_rule() {
         config: crate::autoplay::Quests {
             on: true,
             off: Vec::new(),
+            ..Default::default()
         },
         profile: Some(std::sync::Arc::new(profile_of(vec![
             cheap.clone(),

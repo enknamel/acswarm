@@ -50,3 +50,32 @@ fn a_config_saved_before_quests_loads_with_them_off_and_quests_round_trip() {
     assert!(back.quests.is_on("give:3684"));
     assert!(!back.quests.is_on("killtaskbloodshreth"));
 }
+
+#[test]
+fn quests_saved_before_the_chosen_list_load_with_nothing_chosen() {
+    let old: Config =
+        serde_json::from_str(r#"{"quests":{"on":true,"off":["killtaskbloodshreth"]}}"#).unwrap();
+    assert!(old.quests.chosen.is_empty());
+    assert_eq!(old.quests.off, ["killtaskbloodshreth"]);
+    assert!(old.quests.is_on("give:3684"));
+}
+
+#[test]
+fn a_quest_paying_xp_starts_on_and_one_paying_none_only_once_chosen() {
+    let mut q = Quests {
+        on: true,
+        ..Quests::default()
+    };
+    assert!(q.is_on("killtaskbloodshreth"), "XP: on until switched off");
+    // Fiun Rehlyun's jaw for the Augmentation Realm flag pays no XP.
+    let fiun = "augmentationprovinggroundaccess";
+    assert!(!q.is_on(fiun));
+    q.switch_on(fiun);
+    assert!(q.is_on(fiun) && q.is_chosen(fiun));
+    q.switch_off(fiun);
+    assert!(!q.is_on(fiun) && !q.is_chosen(fiun));
+    q.switch_off("killtaskbloodshreth");
+    assert!(!q.is_on("killtaskbloodshreth"));
+    q.switch_on("killtaskbloodshreth");
+    assert!(q.is_on("killtaskbloodshreth") && q.off == [fiun]);
+}

@@ -688,7 +688,11 @@ fn a_kill_task_taken_up_sends_the_character_to_hunt_its_creature() {
         .collect();
     off.retain(|id| id != shreth);
     off.dedup();
-    c.autoplay.config.quests = crate::autoplay::Quests { on: true, off };
+    c.autoplay.config.quests = crate::autoplay::Quests {
+        on: true,
+        off,
+        ..Default::default()
+    };
     c.quest_log.note_kills(shreth, 0);
     c.refresh_quests(Instant::now());
     let drawn = c.best_ground(15, cfg.level_margin, &[]).expect("a ground");

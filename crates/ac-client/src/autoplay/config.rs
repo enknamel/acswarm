@@ -342,19 +342,51 @@ impl Default for Team {
 }
 
 /// The quests autoplay considers (`crate::quest_log`); off, the quest rule wants nothing.
+/// A quest paying XP is on until switched off; any other is off until switched on by hand.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Quests {
     /// Autoplay considers quests at all.
     pub on: bool,
-    /// Quests switched off, by `ac_world::quests` id; a quest the data adds later starts on.
+    /// Quests switched off, by `ac_world::quests` id; one paying XP the data adds later starts on.
     pub off: Vec<String>,
+    /// Quests switched on by hand: every way to complete one is worked, XP or not, unread or not.
+    pub chosen: Vec<String>,
 }
 
 impl Quests {
-    /// Whether the quest `id` is one autoplay considers.
+    /// Whether the quest `id` is one autoplay considers: chosen, or paying XP and not off.
     pub fn is_on(&self, id: &str) -> bool {
-        self.on && !self.off.iter().any(|o| o == id)
+        self.on
+            && (self.is_chosen(id)
+                || (crate::quest_log::is_automatic_quest(id) && !self.off.iter().any(|o| o == id)))
+    }
+
+    /// Whether `id` was switched on by hand.
+    pub fn is_chosen(&self, id: &str) -> bool {
+        self.chosen.iter().any(|c| c == id)
+    }
+
+    /// Whether autoplay works `row` of a quest it considers: any row of one chosen, else only
+    /// one it works on its own ([`crate::quest_log::is_automatic`]).
+    pub fn is_worked(&self, row: &ac_world::quests::Row) -> bool {
+        crate::quest_log::is_automatic(row) || self.is_chosen(row.id)
+    }
+
+    /// Switch `id` on by hand: every way to complete it is worked.
+    pub fn switch_on(&mut self, id: &str) {
+        self.off.retain(|o| o != id);
+        if !self.is_chosen(id) {
+            self.chosen.push(id.to_string());
+        }
+    }
+
+    /// Switch `id` off, chosen or not.
+    pub fn switch_off(&mut self, id: &str) {
+        self.chosen.retain(|c| c != id);
+        if !self.off.iter().any(|o| o == id) {
+            self.off.push(id.to_string());
+        }
     }
 }
 

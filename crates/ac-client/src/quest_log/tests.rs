@@ -10,6 +10,7 @@ fn on() -> QuestFacts {
         config: Quests {
             on: true,
             off: Vec::new(),
+            ..Default::default()
         },
         now: 1_000_000,
         ..QuestFacts::default()
@@ -367,4 +368,42 @@ fn a_mate_is_told_only_what_is_still_wanted_beyond_what_is_carried() {
             need: Some(5)
         }]
     );
+}
+
+#[test]
+fn a_quest_paying_no_xp_is_wanted_and_ready_only_once_chosen() {
+    // Fiun Rehlyun stamps the Augmentation Realm flag for an Insatiable Eater Jaw: no XP.
+    let id = "augmentationprovinggroundaccess";
+    let mut facts = at_level(150);
+    facts.carried.insert(28719, 1);
+    let board = quest_board(&rows(id), &facts);
+    assert!(board.is_empty(), "not considered: {board:?}");
+    assert!(quest_wants(&board).is_empty(), "nothing kept for it");
+    facts.config.switch_on(id);
+    let board = quest_board(&rows(id), &facts);
+    assert_eq!(board[0].state, QuestState::Ready);
+    assert!(board[0].every_way);
+    let wants = quest_wants(&board);
+    assert_eq!(wants.iter().map(|w| w.wcid).collect::<Vec<_>>(), [28719]);
+}
+
+#[test]
+fn a_way_asking_what_the_client_cannot_check_is_worked_only_once_chosen() {
+    // Thorolf's talk pays 12,500 XP only without pathwardencomplete, which nothing shows: on
+    // its own, autoplay works the Pathwarden Token's hand-in instead.
+    let id = "pathwardenfound1111";
+    let mut facts = at_level(5);
+    facts.held.push("ToPathwarden".into());
+    assert!(rows(id)
+        .iter()
+        .any(|r| r.kind == Kind::Talk && r.has_unread()));
+    assert_eq!(
+        state(id, &facts),
+        QuestState::Needs {
+            more: 1,
+            of: "Pathwarden Token".into()
+        }
+    );
+    facts.config.switch_on(id);
+    assert_eq!(state(id, &facts), QuestState::Ready, "the talk, chosen");
 }

@@ -909,6 +909,7 @@ impl Autoplay {
             quests: ac_client::autoplay::Quests {
                 on: true,
                 off: vec!["killtaskbloodshreth".into()],
+                ..Default::default()
             },
         };
         // What the three searches would take out of the demo pack.
@@ -954,6 +955,7 @@ fn demo_quests() -> Vec<ac_client::quest_log::QuestLine> {
         givers,
         giver: giver.into(),
         on: id != "killtaskbloodshreth",
+        every_way: false,
     };
     vec![
         line(

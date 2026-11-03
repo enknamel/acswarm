@@ -137,6 +137,9 @@ pub struct QuestLine {
     /// The nearest giver's name, by straight distance.
     pub giver: String,
     pub on: bool,
+    /// Chosen by hand: every way to complete it is worked, not only those paying XP that ask
+    /// nothing unread ([`worked_rows`]).
+    pub every_way: bool,
 }
 
 /// What a board was worked out for: a change to any of it works the board out at once.
@@ -174,9 +177,26 @@ pub struct QuestFacts {
 }
 
 /// Whether autoplay works `row` on its own: a talk that takes a quest up, or a way to complete one
-/// that pays XP and asks nothing the client cannot check.
+/// that pays XP and asks nothing the client cannot check. Any other waits to be chosen.
 pub fn is_automatic(row: &Row) -> bool {
     row.kind == Kind::Start || (row.has_xp() && !row.has_unread())
+}
+
+/// Whether quest `id` has a way to complete it autoplay works on its own: it starts on.
+pub fn is_automatic_quest(id: &str) -> bool {
+    static IDS: OnceLock<BTreeSet<&'static str>> = OnceLock::new();
+    let ids = IDS.get_or_init(|| {
+        let rows = ac_world::quests::all().iter();
+        rows.filter(|r| r.kind != Kind::Start && is_automatic(r))
+            .map(|r| r.id)
+            .collect()
+    });
+    ids.contains(id)
+}
+
+/// The rows of `line`'s quest autoplay works: every one when it was chosen, else its own.
+pub fn worked_rows(line: &QuestLine) -> impl Iterator<Item = &'static Row> + '_ {
+    ac_world::quests::rows_of(&line.id).filter(|r| line.every_way || is_automatic(r))
 }
 
 /// The state of every quest in `rows`, one line per id, in the data's order.
@@ -195,7 +215,7 @@ fn board_of(rows: &[Row], facts: &QuestFacts) -> (Vec<QuestLine>, BTreeSet<Strin
     let mut locks = Locks::default();
     let mut unsuited = BTreeSet::new();
     let mut board = Vec::new();
-    for (id, doing) in by_quest(rows) {
+    for (id, doing) in by_quest(rows, &facts.config) {
         let (Some(first), Some(giver)) = (doing.first(), nearest(&doing, facts.me)) else {
             continue;
         };
@@ -220,6 +240,7 @@ fn board_of(rows: &[Row], facts: &QuestFacts) -> (Vec<QuestLine>, BTreeSet<Strin
             givers: doing.iter().map(|r| r.places.len()).sum(),
             giver: giver.giver.to_string(),
             on,
+            every_way: facts.config.is_chosen(id),
         });
     }
     (board, unsuited)
@@ -227,10 +248,10 @@ fn board_of(rows: &[Row], facts: &QuestFacts) -> (Vec<QuestLine>, BTreeSet<Strin
 
 /// Each quest's rows autoplay works that complete it (start rows left out), by id in the data's
 /// order.
-fn by_quest(rows: &[Row]) -> Vec<(&str, Vec<&Row>)> {
+fn by_quest<'r>(rows: &'r [Row], cfg: &Quests) -> Vec<(&'r str, Vec<&'r Row>)> {
     let mut ids: Vec<&str> = Vec::new();
     let mut by_id: BTreeMap<&str, Vec<&Row>> = BTreeMap::new();
-    for r in rows.iter().filter(|r| is_automatic(r)) {
+    for r in rows.iter().filter(|r| cfg.is_worked(r)) {
         if !by_id.contains_key(r.id) {
             ids.push(r.id);
         }
@@ -525,9 +546,7 @@ pub fn quest_wants(board: &[QuestLine]) -> Vec<QuestWant> {
         if !wanting || line.kind != Kind::Item {
             continue;
         }
-        let rows: Vec<&Row> = ac_world::quests::rows_of(&line.id)
-            .filter(|r| r.kind == Kind::Item && is_automatic(r))
-            .collect();
+        let rows: Vec<&Row> = worked_rows(line).filter(|r| r.kind == Kind::Item).collect();
         for wcid in items_of(rows.iter().copied()) {
             let of = rows.iter().filter(|r| r.want == Want::Item(wcid));
             let count = of.clone().map(|r| r.count.max(1)).max().unwrap_or(1);
@@ -614,7 +633,7 @@ impl Client {
             .is_some_and(|f| f.name == name)
     }
 
-    /// The quest ids autoplay considers: quests on, and each not switched off.
+    /// The quest ids autoplay considers: quests on, chosen, or paying XP and not switched off.
     pub fn quests_on(&self) -> Vec<&'static str> {
         let cfg = &self.autoplay.config.quests;
         let mut ids: Vec<&'static str> = Vec::new();

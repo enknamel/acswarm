@@ -210,7 +210,7 @@ pub(crate) fn section(
         .max_height(LIST_HEIGHT)
         .show_rows(ui, row, shown.len(), |ui, range| {
             for line in &shown[range] {
-                let mut on = !cfg.off.contains(&line.id);
+                let mut on = cfg.is_chosen(&line.id) || !cfg.off.contains(&line.id);
                 let said = words(&line.state, cfg.on, now);
                 let hover = format!("{}\n{} XP now\n{said}", to_whom(line), line.xp);
                 if ui
@@ -218,9 +218,13 @@ pub(crate) fn section(
                     .on_hover_text(hover)
                     .changed()
                 {
-                    cfg.off.retain(|o| o != &line.id);
+                    // Ticked back, a quest paying XP works as it starts; any other is chosen.
                     if !on {
-                        cfg.off.push(line.id.clone());
+                        cfg.switch_off(&line.id);
+                    } else if ac_client::quest_log::is_automatic_quest(&line.id) {
+                        cfg.off.retain(|o| o != &line.id);
+                    } else {
+                        cfg.switch_on(&line.id);
                     }
                 }
                 let detail = format!(
@@ -252,6 +256,7 @@ mod tests {
             givers: 1,
             giver: "San Ming".into(),
             on: true,
+            every_way: false,
         }
     }
 
@@ -305,6 +310,7 @@ mod tests {
         let mut cfg = Quests {
             on: true,
             off: vec!["give:3684".into()],
+            ..Default::default()
         };
         let mut f = QuestFilter::default();
         let shown = |cfg: &Quests, f: &QuestFilter| -> Vec<&str> {
@@ -332,6 +338,7 @@ mod tests {
         let mut cfg = Quests {
             on: true,
             off: Vec::new(),
+            ..Default::default()
         };
         let mut f = QuestFilter::default();
         let ctx = egui::Context::default();
@@ -343,7 +350,8 @@ mod tests {
             cfg,
             Quests {
                 on: true,
-                off: Vec::new()
+                off: Vec::new(),
+                ..Default::default()
             }
         );
     }

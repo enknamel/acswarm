@@ -8,7 +8,7 @@ use ac_loot::quest_wants::{wanted, QuestWant};
 use ac_world::hunting::Ground;
 use ac_world::quests::{Kind, Want, Yield};
 
-use crate::quest_log::{is_automatic, QuestLine, QuestState};
+use crate::quest_log::{QuestLine, QuestState};
 
 /// Quest XP a kill earns times its creature's spawn entries, summed per landblock: divided by a
 /// ground's own `count` ([`ground_bonus`]) it is the quest XP a kill there earns on average.
@@ -22,12 +22,12 @@ pub(super) fn quest_pay(
     // Per want, the best quest's XP for one more kill or item: one item serves one hand-in.
     let mut per_unit: BTreeMap<&'static Want, f32> = BTreeMap::new();
     for line in board.iter().filter(|l| is_paying(l)) {
-        for r in ac_world::quests::rows_of(&line.id) {
+        for r in crate::quest_log::worked_rows(line) {
             let more = match r.want {
                 Want::Item(w) => wanted(left, w, 0),
                 _ => true,
             };
-            if r.kind == Kind::Start || !is_automatic(r) || !r.fits_level(level) || !more {
+            if r.kind == Kind::Start || !r.fits_level(level) || !more {
                 continue;
             }
             let xp = r.reward.xp_at(to_next) as f32 / r.count.max(1) as f32;
@@ -85,6 +85,7 @@ mod tests {
             config: Quests {
                 on: true,
                 off: Vec::new(),
+                ..Default::default()
             },
             now: 1_000_000,
             ..QuestFacts::default()
