@@ -458,21 +458,11 @@ impl Client {
         if !goes_looking {
             return false;
         }
-        // A portal flag the level now earns is fetched first: the portals it opens are new ways to
-        // grounds (the Facility Hub Wardens, `ac_world::unlocks`).
+        // A Warden visit under way is the ground's own first step: let it walk.
         if self.visiting().is_some() {
             return true;
         }
-        self.autoplay.growth.unlock_tried.expire(now, UNLOCK_RETRY);
-        if let Some(u) = self.unlock_to_earn(&self.autoplay.growth.unlock_tried) {
-            self.autoplay.growth.unlock_tried.mark(u.flag.clone(), now);
-            if self.visit_unlock(u) {
-                self.autoplay
-                    .say(Doing::Traveling, format!("to the {} for a portal", u.npc));
-                return true;
-            }
-        }
-        let Some(g) = self.best_ground(level as u32, cfg.level_margin, &skip) else {
+        let Some((g, earn)) = self.best_ground(level as u32, cfg.level_margin, &skip, now) else {
             self.autoplay.note(
                 format!(
                     "no hunting ground suits level {level} within {} levels",
@@ -485,6 +475,22 @@ impl Client {
         };
         let (lb, at, name) = (g.landblock, g.at, g.name.clone());
         let (glo, ghi, place) = (g.min_level, g.max_level, g.place());
+        // The only way there runs through a portal behind a flag a Warden gives: earn it first.
+        if let Some(u) = earn {
+            self.autoplay.growth.unlock_tried.mark(u.flag.clone(), now);
+            if self.visit_unlock(u) {
+                self.autoplay.say(
+                    Doing::Traveling,
+                    format!("to the {} for the portal on the way to {name}", u.npc),
+                );
+                return true;
+            }
+            self.autoplay.growth.skip.mark(lb, now);
+            self.autoplay.growth.next_hunt = Some(now + RETRY_AFTER);
+            self.autoplay
+                .note(format!("no way to the {} for {name}'s portal", u.npc), now);
+            return false;
+        }
         if self.grow_travel(place, GROUND_REACH) {
             let st = &mut self.autoplay.growth;
             st.bound = Some((lb, at, name.clone()));
@@ -520,7 +526,11 @@ impl Client {
         level: u32,
         margin: u32,
         skip: &[u32],
-    ) -> Option<&'static ac_world::hunting::Ground> {
+        now: Instant,
+    ) -> Option<(
+        &'static ac_world::hunting::Ground,
+        Option<&'static ac_world::unlocks::Unlock>,
+    )> {
         let to_next = self
             .assets
             .xp_table()
@@ -529,22 +539,65 @@ impl Client {
             .unwrap_or(0);
         let pay = quest_pay(&self.quest_board, &self.quest_wants_left(), level, to_next);
         let ranked = ac_world::hunting::ranked_with(level, margin, skip, |g| ground_bonus(&pay, g));
-        ranked.into_iter().take(CANDIDATES).find(|g| {
-            let secs = self.journey_seconds(g.place());
+        self.autoplay.growth.unlock_tried.expire(now, UNLOCK_RETRY);
+        ranked.into_iter().take(CANDIDATES).find_map(|g| {
+            let way = self.journey_way(g.place());
             let bonus = ground_bonus(&pay, g);
             tracing::debug!(
-                "ground: {} {:#06x} worth {:.0} (quests {bonus:.0} XP a kill), journey {secs:?} s",
+                "ground: {} {:#06x} worth {:.0} (quests {bonus:.0} XP a kill), journey {:?} s",
                 g.name,
                 g.landblock,
-                g.worth_with(bonus)
+                g.worth_with(bonus),
+                way.map(|w| w.0)
             );
-            secs.is_some()
+            way.map(|(_, earn)| (g, earn))
         })
     }
 
-    /// How long a journey from here to `goal` would take, seconds, planned as `set_off` plans
-    /// it but not set off on.
-    fn journey_seconds(&mut self, goal: Place) -> Option<f32> {
+    /// How a journey from here to `goal` would go, planned as `set_off` plans it but not set off
+    /// on: its seconds, and the unlock to earn first when the only way runs through a portal
+    /// behind a flag that a Warden gives at this level (`ac_world::unlocks`).
+    fn journey_way(
+        &mut self,
+        goal: Place,
+    ) -> Option<(f32, Option<&'static ac_world::unlocks::Unlock>)> {
+        let held = self.travel.quests_done.clone();
+        if let Some(t) = self.journey_plan(goal, &held) {
+            return Some((t.seconds, None));
+        }
+        let level = self.world.stats.level.max(0) as u32;
+        let tried = &self.autoplay.growth.unlock_tried;
+        let earn: Vec<&'static ac_world::unlocks::Unlock> =
+            ac_world::unlocks::earnable(level, &held)
+                .into_iter()
+                .filter(|u| tried.since(&u.flag).is_none())
+                .collect();
+        if earn.is_empty() {
+            return None;
+        }
+        let with: Vec<String> = held
+            .into_iter()
+            .chain(earn.iter().map(|u| u.flag.clone()))
+            .collect();
+        let t = self.journey_plan(goal, &with)?;
+        // The first portal on the way whose flag is not held; a second one is earned on the next pick.
+        let u = t.steps.iter().find_map(|s| match s {
+            ac_world::trip::Step::Portal { mouth, .. } => {
+                ac_world::portals::near(mouth.at.truncate(), 3.0)
+                    .into_iter()
+                    .find_map(|p| {
+                        earn.iter()
+                            .find(|u| u.flag.eq_ignore_ascii_case(&p.quest))
+                            .copied()
+                    })
+            }
+            _ => None,
+        })?;
+        Some((t.seconds, Some(u)))
+    }
+
+    /// A journey from here to `goal` with the quest flags `quests`, planned but not set off on.
+    fn journey_plan(&mut self, goal: Place, quests: &[String]) -> Option<ac_world::trip::Trip> {
         let pl = self.player.as_ref()?;
         let (me, cell) = (pl.world_position(), pl.cell);
         let underground = self.underground();
@@ -558,7 +611,6 @@ impl Client {
             Vec::new()
         };
         let far = ac_world::trip::Prefs::far();
-        let quests = self.travel.quests_done.clone();
         let from = ac_world::Place { at: me, cell };
         let goal = self.planning_place(goal);
         let plan = |p| {
@@ -566,7 +618,7 @@ impl Client {
                 from,
                 goal,
                 level,
-                &quests,
+                quests,
                 &[],
                 &[],
                 &recalls,
@@ -574,15 +626,13 @@ impl Client {
                 p,
             )
         };
-        plan(prefs)
-            .or_else(|| {
-                plan(ac_world::trip::Prefs {
-                    walk_reach: far.walk_reach,
-                    portal_reach: far.portal_reach,
-                    ..prefs
-                })
+        plan(prefs).or_else(|| {
+            plan(ac_world::trip::Prefs {
+                walk_reach: far.walk_reach,
+                portal_reach: far.portal_reach,
+                ..prefs
             })
-            .map(|t| t.seconds)
+        })
     }
 }
 

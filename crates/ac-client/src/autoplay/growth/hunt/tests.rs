@@ -437,7 +437,7 @@ fn a_level_35_in_holtburg_sets_off_for_a_dungeon_and_keeps_moving() {
         crate::testkit::standing_in_the_field(35, 0xA9B4_0019, glam::Vec3::new(84.0, 7.1, 94.0));
     let cfg = Growth::default();
     let t0 = Instant::now();
-    // The Facility Hub's portal flags already earned (otherwise the Wardens come first).
+    // The Facility Hub's portal flags already earned, so a ground behind one plans straight.
     for u in ac_world::unlocks::earnable(35, &[]) {
         c.travel.quests_done.push(u.flag.clone());
     }
@@ -626,7 +626,9 @@ fn a_better_ground_further_off_is_chosen() {
     );
     let cfg = Growth::default();
     let ranked = ac_world::hunting::ranked_for(37, cfg.level_margin, &[]);
-    let best = c.best_ground(37, cfg.level_margin, &[]).expect("a ground");
+    let (best, _) = c
+        .best_ground(37, cfg.level_margin, &[], Instant::now())
+        .expect("a ground");
     let reachable_better = ranked
         .iter()
         .take_while(|g| g.landblock != best.landblock)
@@ -642,30 +644,20 @@ fn a_better_ground_further_off_is_chosen() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
-fn a_character_choosing_a_ground_goes_to_the_warden_its_level_earns_first() {
+fn a_character_beside_a_warden_takes_no_flag_its_ground_does_not_need() {
+    // Hunter's Leap's Warden is in reach at a level his flag is earned, but the ground chosen
+    // needs none: the character goes to hunt and is not flagged.
     let mut c = crate::quest_flags::tests::beside_the_warden(20);
     let cfg = Growth::default();
     let now = Instant::now();
     c.autoplay.growth.quiet_since = Some(now - std::time::Duration::from_secs(1));
+    let (g, earn) = c
+        .best_ground(20, cfg.level_margin, &[], now)
+        .expect("a ground");
+    assert!(earn.is_none(), "{} asks for {earn:?}", g.name);
     assert!(c.grow_hunt(now, &cfg));
-    assert!(
-        c.autoplay.status.contains("Warden"),
-        "{}",
-        c.autoplay.status
-    );
-    // Standing beside him, the visit is over in the frame it starts: he was talked to.
-    assert!(
-        c.visiting().is_some() || c.holds_quest_flag("fachubhuntersleapportal_flag"),
-        "neither on the way to the Warden nor flagged"
-    );
-    // Every flag the level earns held: on to a ground.
-    let mut c = crate::quest_flags::tests::beside_the_warden(20);
-    for u in ac_world::unlocks::earnable(20, &[]) {
-        c.travel.quests_done.push(u.flag.clone());
-    }
-    c.autoplay.growth.quiet_since = Some(now - std::time::Duration::from_secs(1));
-    assert!(c.grow_hunt(now, &cfg));
-    assert!(c.visiting().is_none());
+    assert!(c.visiting().is_none(), "{}", c.autoplay.status);
+    assert!(!c.holds_quest_flag("fachubhuntersleapportal_flag"));
     assert!(
         c.autoplay.growth.bound_landblock().is_some(),
         "{}",
@@ -681,7 +673,9 @@ fn a_kill_task_taken_up_sends_the_character_to_hunt_its_creature() {
     let mut c =
         crate::testkit::standing_in_the_field(15, 0xA9B4_0019, glam::Vec3::new(83.3, 14.04, 94.0));
     let cfg = Growth::default();
-    let plain = c.best_ground(15, cfg.level_margin, &[]).expect("a ground");
+    let (plain, _) = c
+        .best_ground(15, cfg.level_margin, &[], Instant::now())
+        .expect("a ground");
     let mut off: Vec<String> = ac_world::quests::all()
         .iter()
         .map(|r| r.id.to_string())
@@ -695,7 +689,9 @@ fn a_kill_task_taken_up_sends_the_character_to_hunt_its_creature() {
     };
     c.quest_log.note_kills(shreth, 0);
     c.refresh_quests(Instant::now());
-    let drawn = c.best_ground(15, cfg.level_margin, &[]).expect("a ground");
+    let (drawn, _) = c
+        .best_ground(15, cfg.level_margin, &[], Instant::now())
+        .expect("a ground");
     let want = ac_world::quests::Want::Kill(shreth.into());
     let spawns_shreth = ac_world::quests::sources_of(&want)
         .any(|s| s.landblocks.iter().any(|&(lb, _)| lb == drawn.landblock));
@@ -723,6 +719,22 @@ fn pursuing_the_jaw(c: &mut Client, lb: u32, place: Place) {
     }];
     c.autoplay.growth.pursuit_grounds = vec![(lb, place)];
     c.autoplay.growth.pursuit_sought = vec![28849];
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_ground_reached_only_through_a_warden_flag_earns_that_flag_first() {
+    // From Holtburg at 45, the Banderling Blade dungeon (0x018B) is reached only by the Facility
+    // Hub's Dangerous Cave portal, which asks for the Mosswart Warden's flag.
+    let mut c =
+        crate::testkit::standing_in_the_field(45, 0xA9B4_0019, glam::Vec3::new(84.0, 7.1, 94.0));
+    let g = ac_world::hunting::at(0x018B).expect("the Banderling Blade ground");
+    let (_, earn) = c.journey_way(g.place()).expect("a way there");
+    let u = earn.expect("no Warden asked for");
+    assert_eq!(u.flag, "fachubdangerouscatacombsportal_flag");
+    c.travel.quests_done.push(u.flag.clone());
+    let (_, earn) = c.journey_way(g.place()).expect("a way there");
+    assert!(earn.is_none(), "{earn:?} asked for with the flag held");
 }
 
 #[test]
@@ -790,4 +802,24 @@ fn no_way_to_any_source_holds_the_pursuit_with_its_reason() {
         c.quest_board_at.is_none(),
         "the board is not worked out again"
     );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_level_40_whose_ground_needs_no_flag_visits_no_warden() {
+    // Holding no Facility Hub flag, a quiet level 40 in Holtburg goes straight to its ground: a
+    // Warden is visited only when the way to the ground chosen runs through the portal of one.
+    let mut c =
+        crate::testkit::standing_in_the_field(40, 0xA9B4_0019, glam::Vec3::new(84.0, 7.1, 94.0));
+    let cfg = Growth::default();
+    let t0 = Instant::now();
+    c.autoplay.growth.quiet_since = Some(t0 - Duration::from_secs(1));
+    let (g, earn) = c
+        .best_ground(40, cfg.level_margin, &[], t0)
+        .expect("a ground");
+    assert!(earn.is_none(), "{} asks for {earn:?}", g.name);
+    assert!(c.grow_hunt(t0, &cfg), "stood about in town");
+    assert_eq!(c.visiting(), None, "off to a Warden for {}", g.name);
+    let (lb, _, _) = c.autoplay.growth.bound.clone().expect("bound for a ground");
+    assert_eq!(lb, g.landblock);
 }

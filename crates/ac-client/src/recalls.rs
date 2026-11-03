@@ -279,6 +279,11 @@ impl Client {
             self.travel.recall_sent = None;
             return;
         }
+        // A teleport while the journey goes through a portal or a gem is theirs, not the recall's
+        // (a_portal_taken_while_a_recall_is_under_way_is_not_where_it_lands).
+        if self.is_portal_step() {
+            return;
+        }
         let (Some(here), Some(at)) = (self.standing(), self.my_position()) else {
             return;
         };
@@ -296,7 +301,13 @@ impl Client {
         let lower = text.to_lowercase();
         // The server's word on a /lifestone however it was asked (retail's "is recalling to the
         // lifestone"): where it lands is the lifestone.
-        if lower.contains("is recalling to the lifestone") && self.travel.recall_sent.is_none() {
+        // Anyone in range is told of a recall (Player_Location.cs:169): only our own counts.
+        let me = self.world.stats.name.to_lowercase();
+        let ours = !me.is_empty() && lower.starts_with(&format!("{me} is recalling"));
+        if ours
+            && lower.contains("is recalling to the lifestone")
+            && self.travel.recall_sent.is_none()
+        {
             self.note_recall_sent(position_type::SANCTUARY);
         }
         if lower.contains("attuned your spirit") || lower.contains("resurrection point") {
@@ -356,6 +367,10 @@ impl Client {
             self.world.stats.clear_recall_position(kind);
             self.save_recall_positions();
             self.travel_recall_refused();
+        }
+        // YouHaveMovedTooFar (Player_Location.cs:187): the recall was called off, nothing lands.
+        if code == 0x0498 {
+            self.travel.recall_sent = None;
         }
         // YourSpellFizzled: try again straight away rather than wait.
         if code == 0x0402 {

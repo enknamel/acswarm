@@ -716,6 +716,19 @@ impl Client {
         self.autoplay.nearest_fight
     }
 
+    /// The creature being closed on or attacked: name, cell and world position, for telemetry to
+    /// replay a fight's walk offline.
+    pub fn foe_place(&self) -> Option<(&str, u32, glam::Vec3)> {
+        let guid = self.dodge.approaching.or(self.attack_target)?;
+        let o = self.world.objects.get(&guid)?;
+        let p = o.display.or(o.position)?;
+        Some((
+            o.name.as_str(),
+            p.cell,
+            ac_world::landblock_origin(p.cell) + p.local,
+        ))
+    }
+
     /// A skill as it stands right now, 0 when the sheet lacks it.
     fn skill_now(&self, id: u32) -> u32 {
         let stats = &self.world.stats;
