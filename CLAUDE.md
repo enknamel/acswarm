@@ -42,12 +42,12 @@ dir gives false compile errors); check `df -g /` first, stop below 15 GB free, d
 | ac-store | the files kept between runs: config, cache and script directories, whole-file JSON reads and writes, owner-only (0600) for the ones holding passwords | `read_json`, `write_json_atomic`, `file_safe` | - |
 | ac-dat | DAT container: block chains, B-tree directory, file by id; knows nothing of contents | `DatArchive` | - |
 | ac-formats | one decoder module per asset type; every `parse` consumes its bytes exactly | `gfxobj`, `setup`, `spell_table` | dat |
-| ac-scene | GPU-free assembly: memoizing loader, terrain, landblocks, interiors, collision, nav graph, particles, chargen | `Assets` | dat, formats |
+| ac-scene | GPU-free assembly: memoizing loader, terrain, landblocks, interiors, collision, walking graphs of a region and their search (`navarea`, `wayfind`, `stride`), particles, chargen | `Assets` | dat, formats |
 | ac-audio | plays decoded waves on kira; sound-table lookup | `Audio` | dat, formats |
 | ac-net | wire protocol, sans-IO: packets, ISAAC, messages, session state machine; the caller owns the socket | `session::Session` | - |
 | ac-world | object table and character sheet built from server messages; world data (shops, spawns, portals, trips) | `World::apply` | formats, net |
 | ac-agent | vocabulary every system shares: outcomes and retry, weenie errors, refusals in words, pack arithmetic | `did::Did`, `did::Patience`, `refusals::refused` | - |
-| ac-nav | getting somewhere: a follower of one planned route, walk or portals, obstacles, dungeon doorways; answers `Aim::NoWay` instead of walking at a wall | `Steering`, `routing::plan` | formats, scene, world |
+| ac-nav | getting somewhere: one planner's whole walks (`routing::plan`), the follower of a planned route, objects in the way, dungeon doorways; answers `Aim::NoWay` instead of walking at a wall | `Steering`, `routing::plan`, `obstacles::detour` | formats, scene, world |
 | ac-loot | item vocabulary and search language, loot profiles, ledger, emptying a corpse, sale fate, weapon choice | `Profile`, `Run::step`, `Ledger` | agent, net, world |
 | ac-vendor | the town run at a counter, decided from a snapshot with no server | `Run::step`, `Snapshot` | agent, loot |
 | ac-client | one headless game session: socket, world, body, manual actions, autoplay | `Client::tick` | agent, formats, loot, nav, net, scene, vendor, world |
@@ -66,7 +66,7 @@ dir gives false compile errors); check `df -g /` first, stop below 15 GB free, d
 
 ```
 client_*.dat -> ac-dat -> ac-formats -> ac-scene::Assets   (opened once per process, Rc-shared by sessions)
-                                            |-> collision, nav graph -> ac-nav -> ac-client body and walks
+                                            |-> collision, region graphs (built off the frame) -> ac-nav -> ac-client body and walks
                                             '-> acswarm GPU batches          (the active session only)
 UDP <-> ac-net::Session <-> ac-client::Client::tick <-> ac-world::World::apply
                                     |-> autoplay rules, deciding through ac-agent, ac-loot, ac-vendor, ac-nav
