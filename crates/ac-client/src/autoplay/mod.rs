@@ -74,7 +74,7 @@ use ledger::retag::{RETAG_EVERY, TAG_TIMEOUT};
 pub use ledger::salvage::best_salvager;
 #[cfg(doc)]
 use loot::choose::answered_with_nothing;
-pub(crate) use loot::choose::{CORPSE_LIFE, CORPSE_REACH, CORPSE_URGENT};
+pub(crate) use loot::choose::{CORPSE_LIFE, CORPSE_REACH, CORPSE_URGENT, LOOT_TIMEOUT};
 pub use loot::judge::{
     called_to, claim_on, judge_loot, skills_asked_of, Calling, Claim, Left, Taker,
 };
