@@ -1,6 +1,8 @@
 #!/bin/sh
-# Regenerate crates/ac-world/data/quests.csv and quest_sources.csv: the
-# quests an NPC rewards with XP, what each asks, and where what it asks
+# Regenerate crates/ac-world/data/quests.csv, quest_givers.csv and
+# quest_sources.csv: every quest a placed NPC holds, XP or not (each path
+# that does anything for the character), what each asks and does, what
+# the client cannot check, where its givers stand, and where what it asks
 # comes from.
 #
 # Quest logic is server-side, in emote sets (weenie_properties_emote) and
