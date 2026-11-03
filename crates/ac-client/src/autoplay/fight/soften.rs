@@ -193,7 +193,9 @@ impl Client {
                     return true;
                 }
                 self.select(Some(guid));
-                self.cast_paced(spell, now);
+                if self.cast_paced(spell, now) {
+                    self.autoplay.debuff_sent = Some((guid, stage));
+                }
                 let what = if stage == 0 {
                     "vulnerability"
                 } else {
@@ -285,7 +287,9 @@ impl Client {
             self.autoplay.vulned.push(guid);
             return false;
         };
-        self.cast_paced(spell, now);
+        if self.cast_paced(spell, now) {
+            self.autoplay.debuff_sent = Some((guid, 0));
+        }
         self.autoplay.vulned.push(guid);
         self.autoplay.last_vuln = Some(now);
         let said = format!(

@@ -3,8 +3,8 @@ use std::time::Instant;
 use super::*;
 use crate::autoplay::tidy::Unpoured;
 use crate::testkit::{
-    as_a_war_mage, at_cindrues_counter, component_in_the_pack, component_named, salable,
-    standing_at, tagged_by_the_profile, tapers_in_the_pack, the_rest_to_the_counter, with_a_pack,
+    as_a_war_mage, at_cindrues_counter, component_in_the_pack, component_named, standing_at,
+    tagged_by_the_profile, tapers_in_the_pack, the_rest_to_the_counter, with_a_pack,
     with_a_profile, word_rule,
 };
 
@@ -54,59 +54,6 @@ fn a_stack_worth_more_than_the_counter_allows_is_sold_in_pieces() {
         !chaff.taken_by(item_type::MISC, 100, 0),
         "ten is under the floor"
     );
-}
-
-#[test]
-fn loot_for_a_counter_is_reason_enough_for_a_run() {
-    // An Iron Pea and a Lead Pea, taken to sell, in a pack with room
-    // to spare. The ledger said what they were for and nothing read
-    // it: a run was made for a full pack, a heavy one or a supply
-    // short, and the peas were carried about for ever.
-    use ac_world::item_type::{ARMOR, GEM, SPELL_COMPONENTS};
-    let cfg = Growth::default();
-    let minutes = |m: u64| Some(Duration::from_secs(m * 60));
-    let two_peas = [
-        salable(1, SPELL_COMPONENTS, 2_500, 1),
-        salable(2, SPELL_COMPONENTS, 500, 1),
-    ];
-    // Three thousand at face is not worth the walk on its own...
-    assert_eq!(worth_a_sale_run(&two_peas, None, &cfg), None);
-    assert_eq!(worth_a_sale_run(&two_peas, minutes(5), &cfg), None);
-    // ...but it is not carried about all afternoon either.
-    let why = worth_a_sale_run(&two_peas, minutes(15), &cfg).expect("a quarter of an hour");
-    assert!(why.contains("carried 15 min"), "{why}");
-    // Worth enough is reason at once, and a stack is worth the lot.
-    let gem = [salable(3, GEM, 5_000, 1)];
-    let why = worth_a_sale_run(&gem, None, &cfg).expect("five thousand");
-    assert!(why.contains("5000 pyreals"), "{why}");
-    let peas = [salable(4, SPELL_COMPONENTS, 10 * 500, 10)];
-    assert!(worth_a_sale_run(&peas, None, &cfg).is_some());
-    // So is an armful, however cheap: the slots are going.
-    let junk: Vec<Salable> = (0..8).map(|i| salable(10 + i, ARMOR, 50, 1)).collect();
-    let why = worth_a_sale_run(&junk, None, &cfg).expect("an armful");
-    assert!(why.contains("8 things"), "{why}");
-    assert_eq!(worth_a_sale_run(&junk[..7], None, &cfg), None);
-    // The count is of stacks -- the slots going -- not of things: a
-    // stack of eight cheap things is one, and seven singles and a
-    // stack are eight.
-    assert_eq!(
-        worth_a_sale_run(&[salable(5, ARMOR, 400, 8)], None, &cfg),
-        None
-    );
-    let mut seven_and_a_stack = junk[..7].to_vec();
-    seven_and_a_stack.push(salable(20, ARMOR, 50, 10));
-    assert!(worth_a_sale_run(&seven_and_a_stack, None, &cfg).is_some());
-    // Nothing for a counter is no reason, however long since.
-    assert_eq!(worth_a_sale_run(&[], minutes(60), &cfg), None);
-    // Each rule is off at zero.
-    let off = Growth {
-        sell_run_value: 0,
-        sell_run_count: 0,
-        sell_run_patience: 0.0,
-        ..cfg
-    };
-    assert_eq!(worth_a_sale_run(&junk, minutes(60), &off), None);
-    assert_eq!(worth_a_sale_run(&gem, minutes(60), &off), None);
 }
 
 #[test]
@@ -312,22 +259,5 @@ fn a_stack_to_sell_beside_one_to_keep_goes_whole_and_is_not_poured_into_it() {
         }),
         "{}",
         next.saying
-    );
-}
-
-#[test]
-fn a_patience_too_large_for_a_duration_turns_the_rule_off() {
-    // The config is hand-edited JSON, and 1e20 is a finite f32 that
-    // no Duration holds: it used to panic on the first frame a run
-    // could start with anything for a counter in the pack.
-    use ac_world::item_type::SPELL_COMPONENTS;
-    let cfg = Growth {
-        sell_run_patience: 1e20,
-        ..Growth::default()
-    };
-    let pea = [salable(1, SPELL_COMPONENTS, 500, 1)];
-    assert_eq!(
-        worth_a_sale_run(&pea, Some(Duration::from_secs(60 * 60)), &cfg),
-        None
     );
 }

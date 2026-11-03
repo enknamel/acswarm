@@ -1,6 +1,5 @@
 use std::time::Instant;
 
-use super::sale::worth_a_sale_run;
 use super::Growth;
 use crate::logistics::{self, Stage, Supplies};
 use crate::Client;
@@ -43,7 +42,7 @@ impl Client {
             .iter()
             .map(|m| m.supplies.clone())
             .collect();
-        party.push(self.supplies(cfg, now));
+        party.push(self.supplies(cfg));
         let was = self.autoplay.growth.mode;
         // A trip that has dragged on has failed at something no rule
         // here can see: a vendor out of tapers, a purse that ran dry, a
@@ -99,17 +98,8 @@ impl Client {
     /// The level is the worst supply line, not the average. A mage with
     /// a full load of scarabs and no tapers cannot cast, and averaging
     /// the two would hide that.
-    pub fn supplies(&self, cfg: &Growth, now: Instant) -> Supplies {
+    pub fn supplies(&self, cfg: &Growth) -> Supplies {
         let needs = self.grow_needs(cfg);
-        // Loot for a counter worth a trip by this character's own rules
-        // (see [`worth_a_sale_run`]), said to the party as one word.
-        let salables = self.salables(cfg);
-        let carried_for = self
-            .autoplay
-            .growth
-            .sale_since
-            .map(|t| now.duration_since(t));
-        let sale = worth_a_sale_run(&salables, carried_for, cfg).is_some();
         // The worst line the party can do anything about. A Void mage
         // is permanently out of Nightshade -- no counter in Dereth
         // sells it -- and counting that would hold the level at nought
@@ -144,7 +134,6 @@ impl Client {
             // What it can be handed: a gift is created in the pack by
             // the server, which spills into the side packs.
             free_space: self.room_anywhere(),
-            sale,
             order: needs
                 .iter()
                 .filter(|n| n.want > 0 && n.buyable)
@@ -155,7 +144,7 @@ impl Client {
 
     /// The party as everyone has last described itself, this character
     /// included. What every shared decision is worked out from.
-    pub fn party_supplies(&self, cfg: &Growth, now: Instant) -> Vec<Supplies> {
+    pub fn party_supplies(&self, cfg: &Growth) -> Vec<Supplies> {
         let mut party: Vec<Supplies> = self
             .autoplay
             .team
@@ -163,7 +152,7 @@ impl Client {
             .iter()
             .map(|m| m.supplies.clone())
             .collect();
-        party.push(self.supplies(cfg, now));
+        party.push(self.supplies(cfg));
         party
     }
 }

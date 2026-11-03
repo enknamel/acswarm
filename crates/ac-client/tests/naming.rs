@@ -73,7 +73,6 @@ const NARRATIVE: &[&str] = &[
     "waits_for_them",
     "why_it_was_picked",
     "window_is_unwanted",
-    "worth_a_sale_run",
     "xp_for_specialized_skill_point",
     "xp_for_specialized_skill_points",
     "xp_for_trained_skill_point",

@@ -77,83 +77,43 @@ fn a_run_that_could_not_get_there_is_tried_again_once_its_wait_is_up() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
-fn peas_for_a_counter_send_a_roomy_pack_to_town_once_the_waits_are_up() {
-    // The user's report: two peas tagged to sell, room in the pack,
-    // nothing short, and no run was ever made. Now the peas are the
-    // reason, with no wait but the one after a futile run.
+fn loot_for_a_counter_alone_never_sends_a_roomy_pack_to_town() {
+    // The user's rule: a run is for a full pack, too much weight or supplies to buy. Ten
+    // thousand pyreals of peas in a roomy pack, nothing short, an hour on: still hunting.
     let holtburg = 0xA9B4_0019;
     let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
     c.world.stats.level = 20;
     with_a_pack(&mut c, 50);
-    pea_in_the_pack(&mut c, 0x8000_0010, "Iron Pea", 8328, 2_500);
-    pea_in_the_pack(&mut c, 0x8000_0011, "Iron Pea", 8328, 2_500);
+    for (k, guid) in (0x8000_0010..0x8000_0014).enumerate() {
+        pea_in_the_pack(&mut c, guid, "Iron Pea", 8328, 2_500 + k as u32);
+    }
     let cfg = c.autoplay.config.growth.clone();
-    assert!(!c.pack_low_on_room() && !c.laden(&cfg), "the old reasons");
+    assert!(!c.pack_low_on_room() && !c.laden(&cfg));
     let now = Instant::now();
-
-    // Just back from a futile run: its wait holds.
-    c.autoplay.growth.last_run = Some(now);
-    c.autoplay.growth.run_was_futile = true;
-    let soon = now + FUTILE_RUN_WAIT - Duration::from_secs(1);
-    assert!(!c.grow_town_run(soon, &cfg));
+    for later in [now, now + Duration::from_secs(60 * 60)] {
+        assert!(!c.grow_town_run(later, &cfg));
+        assert!(
+            c.autoplay
+                .growth
+                .held_back
+                .contains("4 thing(s) for a counter, sold on the next run"),
+            "{}",
+            c.autoplay.growth.held_back
+        );
+    }
+    // The pack running low on room is a reason, and the peas go with it.
+    let keep = c.autoplay.config.team.restock.keep_slots;
+    with_a_pack(&mut c, 4 + keep);
+    assert!(c.pack_low_on_room());
     assert!(
-        c.autoplay
-            .growth
-            .held_back
-            .contains("to wait since the last run"),
-        "{}",
-        c.autoplay.growth.held_back
-    );
-    // Back from one that sold something, a sale that merely adds up still waits its while.
-    c.autoplay.growth.run_was_futile = false;
-    assert!(!c.grow_town_run(soon, &cfg));
-    assert!(
-        c.autoplay.growth.held_back.contains("a sale waits"),
-        "{}",
-        c.autoplay.growth.held_back
-    );
-    // Then off, five thousand at face in the pack, to the one counter in town that buys peas.
-    let later = now + SALE_RUN_EVERY;
-    assert!(
-        c.grow_town_run(later, &cfg),
+        c.grow_town_run(now, &cfg),
         "{}",
         c.autoplay.growth.held_back
     );
     let run = c.autoplay.growth.run.as_ref().expect("no run");
     assert_eq!(run.errand, Errand::Sell);
-    assert!(run.reason.contains("5000 pyreals' worth"), "{}", run.reason);
+    assert_eq!(run.reason, "the pack is full");
     assert_eq!(run.vendor, "Archmage Cindrue");
-    assert!(c.traveling());
-
-    // One Lead Pea is not worth the trip on its own...
-    c.town_run_stop(later);
-    c.world.objects.remove(&0x8000_0010);
-    c.world.objects.remove(&0x8000_0011);
-    pea_in_the_pack(&mut c, 0x8000_0012, "Lead Pea", 8329, 500);
-    let again = later + FUTILE_RUN_WAIT;
-    assert!(!c.grow_town_run(again, &cfg));
-    assert!(
-        c.autoplay
-            .growth
-            .held_back
-            .contains("1 thing(s) for a counter, not yet worth the trip"),
-        "{}",
-        c.autoplay.growth.held_back
-    );
-    // ...until it has been carried a quarter of an hour.
-    let patience = Duration::from_secs_f32(cfg.sell_run_patience);
-    assert!(!c.grow_town_run(again + patience / 2, &cfg));
-    assert!(
-        c.grow_town_run(again + patience, &cfg),
-        "{}",
-        c.autoplay.growth.held_back
-    );
-    let run = c.autoplay.growth.run.as_ref().expect("no run");
-    assert!(run.reason.contains("carried 15 min"), "{}", run.reason);
-    assert_eq!(run.vendor, "Archmage Cindrue");
-    // Setting off put the clock back: what comes home unsold is
-    // counted afresh.
-    assert_eq!(c.autoplay.growth.sale_since, None);
 }
 
 #[test]
@@ -299,13 +259,14 @@ fn a_supply_run_goes_straight_after_the_last_one() {
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
 fn a_due_run_leaves_the_walk_to_a_ground_for_town() {
-    // Five thousand at face in peas, on the walk out to a hunting ground: that walk held the run
-    // back as "busy" until the ground was reached. Only a fight in hand does now.
+    // A pack low on room, on the walk out to a hunting ground: that walk held the run back as
+    // "busy" until the ground was reached. Only a fight in hand does now.
     let holtburg = 0xA9B4_0019;
     let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
     c.world.player_guid = Some(crate::testkit::ME);
     c.world.stats.level = 20;
-    with_a_pack(&mut c, 50);
+    let keep = c.autoplay.config.team.restock.keep_slots;
+    with_a_pack(&mut c, 2 + keep);
     pea_in_the_pack(&mut c, 0x8000_0010, "Iron Pea", 8328, 2_500);
     pea_in_the_pack(&mut c, 0x8000_0011, "Iron Pea", 8328, 2_500);
     let cfg = c.autoplay.config.growth.clone();
@@ -341,20 +302,19 @@ fn a_due_run_leaves_the_walk_to_a_ground_for_town() {
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
 fn a_run_to_sell_goes_to_whoever_buys_however_far() {
-    // One Lead Pea, carried a quarter of an hour, with nobody in the town buying it: a recall
-    // makes any trip, so the run goes to a counter that does.
+    // A pack low on room, its loot a Lead Pea nobody in the town buys: a recall makes any trip,
+    // so the run goes to a counter that does.
     let holtburg = 0xA9B4_0019;
     let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
     c.world.stats.level = 20;
-    with_a_pack(&mut c, 50);
+    let keep = c.autoplay.config.team.restock.keep_slots;
+    with_a_pack(&mut c, 1 + keep);
     pea_in_the_pack(&mut c, 0x8000_0010, "Lead Pea", 8329, 500);
     with_a_buy_list(&mut c, &[]);
     let cfg = c.autoplay.config.growth.clone();
     let now = Instant::now();
     let town = 600.0;
     assert!(nobody_near_buys_peas(&mut c, town, now) > 0);
-    let patience = Duration::from_secs_f32(cfg.sell_run_patience);
-    c.autoplay.growth.sale_since = Some(now - patience);
     assert!(
         c.grow_town_run(now, &cfg),
         "{}",
@@ -394,8 +354,8 @@ fn a_party_run_sells_what_this_character_carries_first() {
     }];
     let cfg = c.autoplay.config.growth.clone();
     let now = Instant::now();
-    // What it tells the party: loot enough for a trip.
-    assert!(c.supplies(&cfg, now).sale);
+    // Loot alone is nothing to tell the party: the mate's full pack is the reason.
+    assert!(!c.supplies(&cfg).pack_full);
     c.autoplay.growth.mode = logistics::GroupMode::Restocking(Stage::Shopping);
     c.autoplay.growth.mode_because = "+Brynith's pack is full".into();
     assert!(

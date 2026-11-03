@@ -65,6 +65,8 @@ impl Client {
     pub(crate) fn cast_paced(&mut self, spell: u32, now: Instant) -> bool {
         if matches!(self.try_cast(spell), crate::magic::CastCheck::Ok) {
             self.autoplay.cast_sent = Some(now);
+            // A debuff is not a projectile: its resist comes before the next cast goes out.
+            self.autoplay.debuff_sent = None;
             return true;
         }
         false
