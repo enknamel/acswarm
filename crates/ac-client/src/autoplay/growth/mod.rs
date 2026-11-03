@@ -53,6 +53,7 @@ mod config;
 mod hunt;
 mod needs;
 mod policy;
+mod quest_bonus;
 mod raise;
 mod road;
 mod sale;
