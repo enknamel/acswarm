@@ -444,14 +444,16 @@ impl Client {
     /// Hand a carried item (or `amount` of a stack; the whole stack when
     /// None) to an NPC or another player (GiveObjectRequest 0x00CD). The
     /// target must be in reach; NPCs answer with an emote, players must
-    /// allow gifts in their options.
+    /// allow gifts in their options. A side pack's item counts: ACE looks in
+    /// the whole inventory and what is worn (Player_Inventory.cs:3262).
     pub fn give(&mut self, target: u32, item: u32, amount: Option<u32>) -> bool {
         use ac_net::messages::action;
         let me = self.world.player_guid;
+        let carried = self.world.is_carried(item);
         let Some(o) = self.world.objects.get(&item) else {
             return false;
         };
-        if me.is_none() || (o.container != me && o.wielder != me) || Some(target) == me {
+        if me.is_none() || (!carried && o.wielder != me) || Some(target) == me {
             return false;
         }
         let amount = amount.unwrap_or(o.stack_size.max(1)).max(1);

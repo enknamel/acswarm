@@ -212,6 +212,10 @@ pub struct State {
     /// What the character was short of when the run began, for the
     /// stops after the first.
     needs: Vec<Need>,
+    /// Quest givers no journey reached, by giver class and cell, and since when.
+    pub(crate) givers_refused: Recent<(u32, u32)>,
+    /// When ready hand-ins were last looked at for a run of their own.
+    hand_ins_looked: Option<Instant>,
 }
 
 /// A few names, and how many more there are. A caster short of every

@@ -65,6 +65,7 @@ pub mod shops;
 pub mod social;
 pub mod spawns;
 pub mod stats;
+pub mod tour;
 pub mod towns;
 pub mod trip;
 pub mod unlocks;
