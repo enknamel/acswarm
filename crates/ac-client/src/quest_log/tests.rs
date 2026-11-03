@@ -74,7 +74,7 @@ fn an_item_quest_needs_its_item_carried_and_one_done_by_talk_stays_done() {
 }
 
 #[test]
-fn the_board_wants_an_any_time_hand_in_every_one_and_nothing_once_switched_off() {
+fn the_board_wants_a_few_of_an_any_time_hand_in_and_nothing_once_switched_off() {
     let mut facts = on();
     let board = quest_board(&rows("give:3684"), &facts);
     assert_eq!(board[0].givers, 12);
@@ -82,7 +82,7 @@ fn the_board_wants_an_any_time_hand_in_every_one_and_nothing_once_switched_off()
         quest_wants(&board),
         [QuestWant {
             wcid: 3684,
-            need: None
+            need: Some(ANY_HAND_INS)
         }]
     );
     facts.config.off.push("give:3684".into());
@@ -304,4 +304,46 @@ fn a_once_quest_whose_flag_is_held_from_before_the_log_is_done() {
     assert_eq!(state("tothebarkeep", &facts), QuestState::Ready);
     facts.held.push("ToTheBarkeep".into());
     assert_eq!(state("tothebarkeep", &facts), QuestState::Done);
+}
+
+#[test]
+fn a_quest_taking_any_of_several_items_is_ready_with_any_one_and_wants_each() {
+    // Aun Mareura takes any one of five items for aunkiller.
+    let id = "aunkiller";
+    let mut facts = at_level(200);
+    facts.carried.insert(7604, 1);
+    assert_eq!(state(id, &facts), QuestState::Ready, "a Yellow Jewel");
+    let wants = quest_wants(&quest_board(&rows(id), &facts));
+    let wcids: Vec<u32> = wants.iter().map(|w| w.wcid).collect();
+    for w in [3679, 7604, 9292, 11341, 11353] {
+        assert!(wcids.contains(&w), "{w} not wanted: {wants:?}");
+    }
+}
+
+#[test]
+fn a_mate_is_told_only_what_is_still_wanted_beyond_what_is_carried() {
+    let mut c = crate::testkit::character_of_level(crate::testkit::no_data(), 20);
+    c.quest_wants = vec![
+        QuestWant {
+            wcid: 19209,
+            need: Some(1),
+        },
+        QuestWant {
+            wcid: 3684,
+            need: Some(5),
+        },
+    ];
+    crate::testkit::thing_in_the_pack(&mut c, 0x8000_0100, "Coil", 1);
+    c.world
+        .objects
+        .get_mut(&0x8000_0100)
+        .unwrap()
+        .weenie_class_id = 19209;
+    assert_eq!(
+        c.quest_wants_left(),
+        [QuestWant {
+            wcid: 3684,
+            need: Some(5)
+        }]
+    );
 }

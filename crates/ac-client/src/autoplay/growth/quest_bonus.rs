@@ -4,19 +4,30 @@
 
 use std::collections::BTreeMap;
 
+use ac_loot::quest_wants::{wanted, QuestWant};
 use ac_world::hunting::Ground;
-use ac_world::quests::{Kind, Repeat, Want, Yield};
+use ac_world::quests::{Kind, Want, Yield};
 
 use crate::quest_log::{QuestLine, QuestState};
 
 /// Quest XP a kill earns times its creature's spawn entries, summed per landblock: divided by a
 /// ground's own `count` ([`ground_bonus`]) it is the quest XP a kill there earns on average.
-pub(super) fn quest_pay(board: &[QuestLine], level: u32, to_next: u64) -> BTreeMap<u32, f32> {
+/// `left`: the items still wanted beyond those carried (`Client::quest_wants_left`).
+pub(super) fn quest_pay(
+    board: &[QuestLine],
+    left: &[QuestWant],
+    level: u32,
+    to_next: u64,
+) -> BTreeMap<u32, f32> {
     // Per want, the best quest's XP for one more kill or item: one item serves one hand-in.
     let mut per_unit: BTreeMap<&'static Want, f32> = BTreeMap::new();
     for line in board.iter().filter(|l| is_paying(l)) {
         for r in ac_world::quests::rows_of(&line.id) {
-            if r.kind == Kind::Start || !r.fits_level(level) {
+            let more = match r.want {
+                Want::Item(w) => wanted(left, w, 0),
+                _ => true,
+            };
+            if r.kind == Kind::Start || !r.fits_level(level) || !more {
                 continue;
             }
             let xp = r.reward.xp_at(to_next) as f32 / r.count.max(1) as f32;
@@ -44,23 +55,22 @@ pub(super) fn ground_bonus(pay: &BTreeMap<u32, f32>, g: &Ground) -> f32 {
         .map_or(0.0, |p| p / g.count.max(1) as f32)
 }
 
-/// Whether a kill or a drop brings the quest nearer: a kill task taken up with kills to go (one
-/// not taken up counts nothing, QuestManager.cs:606-607), an item still short or always paid.
+/// Whether a kill or a drop may bring the quest nearer: a kill task taken up with kills to go
+/// (one not taken up counts nothing, QuestManager.cs:606-607), an item quest open; [`quest_pay`]
+/// then counts only the items still wanted.
 fn is_paying(line: &QuestLine) -> bool {
-    match (&line.state, line.kind) {
-        (QuestState::Needs { .. }, Kind::Kill | Kind::Item) => true,
-        (QuestState::Ready, Kind::Item) => {
-            ac_world::quests::rows_of(&line.id).any(|r| r.repeat == Repeat::Any)
-        }
-        _ => false,
-    }
+    matches!(
+        (&line.state, line.kind),
+        (QuestState::Needs { .. }, Kind::Kill)
+            | (QuestState::Needs { .. } | QuestState::Ready, Kind::Item)
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::autoplay::{LootAction, Quests};
-    use crate::quest_log::{quest_board, QuestFacts};
+    use crate::quest_log::{quest_board, quest_wants, QuestFacts, ANY_HAND_INS};
 
     const TAIL: &str = "give:3684";
     const SHRETH: &str = "killtaskbloodshreth";
@@ -84,6 +94,21 @@ mod tests {
         quest_board(&rows, &f)
     }
 
+    /// [`quest_pay`] with the board's wants less `held` tails carried.
+    fn pay_of(lines: &[QuestLine], held: u32) -> BTreeMap<u32, f32> {
+        let left: Vec<QuestWant> = quest_wants(lines)
+            .into_iter()
+            .map(|w| QuestWant {
+                need: w
+                    .need
+                    .map(|n| n.saturating_sub(if w.wcid == 3684 { held } else { 0 })),
+                ..w
+            })
+            .filter(|w| w.need != Some(0))
+            .collect();
+        quest_pay(lines, &left, 15, TO_NEXT)
+    }
+
     fn rat_ground() -> Ground {
         ac_world::hunting::at(0x1C4)
             .expect("the Red Rat ground")
@@ -97,7 +122,7 @@ mod tests {
             matches!(lines[0].state, QuestState::Needs { .. }),
             "{lines:?}"
         );
-        let pay = quest_pay(&lines, 15, TO_NEXT);
+        let pay = pay_of(&lines, 0);
         let rats = rat_ground();
         // 1,000 XP at 0.15 a Red Rat, 17 of the ground's 57 spawn entries.
         let bonus = ground_bonus(&pay, &rats);
@@ -118,16 +143,21 @@ mod tests {
             f.carried.insert(3684, 1);
         });
         assert_eq!(carrying[0].state, QuestState::Ready);
-        assert_eq!(quest_pay(&carrying, 15, TO_NEXT), pay);
+        assert_eq!(pay_of(&carrying, 1), pay);
+        // Enough kept for the hand-ins a run takes: another tail pays nothing yet.
+        let full = board(TAIL, |f| {
+            f.carried.insert(3684, ANY_HAND_INS);
+        });
+        assert!(pay_of(&full, ANY_HAND_INS).is_empty());
     }
 
     #[test]
     fn a_quest_switched_off_adds_nothing() {
         let off = board(TAIL, |f| f.config.off.push(TAIL.into()));
         assert_eq!(off[0].state, QuestState::Off);
-        assert!(quest_pay(&off, 15, TO_NEXT).is_empty());
+        assert!(pay_of(&off, 0).is_empty());
         let quests_off = board(TAIL, |f| f.config.on = false);
-        assert!(quest_pay(&quests_off, 15, TO_NEXT).is_empty());
+        assert!(pay_of(&quests_off, 0).is_empty());
     }
 
     #[test]
@@ -137,15 +167,15 @@ mod tests {
             rule: "nothing cheap".into(),
             does: LootAction::Skip,
         };
-        assert!(quest_pay(&lines, 15, TO_NEXT).is_empty());
+        assert!(pay_of(&lines, 0).is_empty());
     }
 
     #[test]
     fn a_kill_task_pays_its_reward_over_its_kills_only_while_taken_up_with_kills_to_go() {
         // Not taken up: the server counts no kill for it.
-        assert!(quest_pay(&board(SHRETH, |_| {}), 15, TO_NEXT).is_empty());
+        assert!(pay_of(&board(SHRETH, |_| {}), 0).is_empty());
         let taken = board(SHRETH, |f| f.log.note_kills(SHRETH, 3));
-        let pay = quest_pay(&taken, 15, TO_NEXT);
+        let pay = pay_of(&taken, 0);
         // 1.33 of the level's XP over 10 kills, 17 Blood Shreth of the 37 entries in 0x0162.
         let g = ac_world::hunting::at(0x162).expect("a Blood Shreth ground");
         let each = (1.33 * TO_NEXT as f64).round() as f32 / 10.0;
@@ -154,13 +184,13 @@ mod tests {
         // Its kills done, it waits for the hand-in, not for more kills.
         let done = board(SHRETH, |f| f.log.note_kills(SHRETH, 10));
         assert_eq!(done[0].state, QuestState::Ready);
-        assert!(quest_pay(&done, 15, TO_NEXT).is_empty());
+        assert!(pay_of(&done, 0).is_empty());
     }
 
     #[test]
     fn a_kill_task_taken_up_draws_the_picker_to_where_its_creature_spawns() {
         let taken = board(SHRETH, |f| f.log.note_kills(SHRETH, 0));
-        let pay = quest_pay(&taken, 15, TO_NEXT);
+        let pay = pay_of(&taken, 0);
         let plain = ac_world::hunting::ranked_for(15, 8, &[]);
         let drawn = ac_world::hunting::ranked_with(15, 8, &[], |g| ground_bonus(&pay, g));
         let first = drawn.first().expect("a ground");

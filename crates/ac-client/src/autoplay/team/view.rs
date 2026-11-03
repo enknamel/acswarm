@@ -110,7 +110,7 @@ pub struct Mate {
     /// what another character needs to judge a body on its behalf (see
     /// [`Mate::wielder`]). Empty when its rules ask about none.
     pub skills: Vec<(u32, u32, u32, u32)>,
-    /// What its active quests want carried (`Client.quest_wants`), for a quest rule judged for it.
+    /// What its active quests still want, less what it carries (`Client::quest_wants_left`).
     pub quest_wants: Vec<ac_loot::QuestWant>,
     /// The bodies it shut lately as emptied, and what each is for the
     /// others (see [`Shut`], [`Autoplay::shuts_to_say`]).

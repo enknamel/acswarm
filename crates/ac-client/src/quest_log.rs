@@ -19,6 +19,9 @@ use crate::Client;
 pub const QUEST_BOARD_EVERY: Duration = Duration::from_secs(2);
 /// A leg this short joins a run without its XP paying for it (seconds, design §5.3, guess).
 pub const SHORT_LEG: f32 = 60.0;
+/// Hand-ins of a quest repeated any time kept at once: each takes a slot, and a giver is met
+/// only on a run that passes (guess).
+pub const ANY_HAND_INS: u32 = 5;
 /// A giver's reward is waited for this long after the use or give (design §4.3, guess).
 pub const XP_WATCH: Duration = Duration::from_secs(10);
 
@@ -178,7 +181,7 @@ fn board_of(rows: &[Row], facts: &QuestFacts) -> (Vec<QuestLine>, BTreeSet<Strin
         let (Some(first), Some(giver)) = (doing.first(), nearest(&doing, facts.me)) else {
             continue;
         };
-        if beyond_level(&doing, &first.want, facts).is_some() {
+        if beyond_level(&doing, facts).is_some() {
             unsuited.insert(id.to_string());
         }
         let on = facts.config.is_on(id);
@@ -307,12 +310,12 @@ fn band(rows: &[&Row]) -> Blocked {
 }
 
 /// Why the character's level rules the quest out: no giver's band holds it, or the easiest
-/// source is past `level + 2 * margin` (the bound `Ground::suits` puts on a ground's strays).
-fn beyond_level(doing: &[&Row], want: &Want, facts: &QuestFacts) -> Option<Blocked> {
+/// source of anything it asks is past `level + 2 * margin` (`Ground::suits`' bound on strays).
+fn beyond_level(doing: &[&Row], facts: &QuestFacts) -> Option<Blocked> {
     if !doing.iter().any(|r| r.fits_level(facts.level)) {
         return Some(band(doing));
     }
-    let level = easiest(want)?;
+    let level = doing.iter().filter_map(|r| easiest(&r.want)).min()?;
     (level > facts.level + 2 * facts.margin).then_some(Blocked::TooHard { level })
 }
 
@@ -378,7 +381,7 @@ fn state_of(doing: &[&Row], facts: &QuestFacts, locks: &mut Locks) -> QuestState
     if first.repeat == Repeat::Once && (facts.log.done.contains_key(&first.id) || flagged) {
         return QuestState::Done;
     }
-    if let Some(why) = beyond_level(doing, &first.want, facts) {
+    if let Some(why) = beyond_level(doing, facts) {
         return QuestState::CantYet(why);
     }
     let fit: Vec<&Row> = doing
@@ -417,36 +420,71 @@ fn state_of(doing: &[&Row], facts: &QuestFacts, locks: &mut Locks) -> QuestState
             },
             Some(_) => QuestState::Ready,
         },
-        Want::Item(wcid) => {
-            let held = facts.carried.get(wcid).copied().unwrap_or(0);
-            let item = row.item.as_ref();
-            let blocked = item.and_then(|i| {
-                crate::autoplay::quest_item_blocked(
-                    facts.profile.as_deref(),
-                    i,
-                    &facts.wielder,
-                    &facts.name,
-                    held,
-                )
-            });
-            let need = taken.iter().map(|r| r.count).min().unwrap_or(1);
-            match blocked {
-                Some((rule, does)) => QuestState::WontComplete { rule, does },
-                None if held >= need => QuestState::Ready,
-                None => QuestState::Needs {
-                    more: need - held,
-                    of: item.map_or_else(String::new, |i| i.name.clone()),
-                },
-            }
-        }
+        Want::Item(_) => item_state(&taken, facts),
         Want::Nothing => QuestState::Ready,
     }
 }
 
+/// Each item the rows take, once, in the rows' order: any one handed in completes the quest.
+fn items_of<'r>(rows: impl IntoIterator<Item = &'r Row>) -> Vec<u32> {
+    let mut wcids = Vec::new();
+    for r in rows {
+        if let Want::Item(w) = r.want {
+            if !wcids.contains(&w) {
+                wcids.push(w);
+            }
+        }
+    }
+    wcids
+}
+
+/// An item quest's state: ready with any one item carried, else the item nearest done, else the
+/// rule that blocks the first.
+fn item_state(taken: &[&Row], facts: &QuestFacts) -> QuestState {
+    let mut nearest: Option<(u32, String)> = None;
+    let mut blocked: Option<(String, LootAction)> = None;
+    for wcid in items_of(taken.iter().copied()) {
+        let rows = || taken.iter().filter(move |r| r.want == Want::Item(wcid));
+        let need = rows().map(|r| r.count).min().unwrap_or(1);
+        let held = facts.carried.get(&wcid).copied().unwrap_or(0);
+        let item = rows().find_map(|r| r.item.as_ref());
+        let block = item.and_then(|i| {
+            crate::autoplay::quest_item_blocked(
+                facts.profile.as_deref(),
+                i,
+                &facts.wielder,
+                &facts.name,
+                held,
+            )
+        });
+        match block {
+            Some(b) => {
+                blocked.get_or_insert(b);
+            }
+            None if held >= need => return QuestState::Ready,
+            None if nearest.as_ref().is_some_and(|(m, _)| *m <= need - held) => {}
+            None => {
+                nearest = Some((
+                    need - held,
+                    item.map_or_else(String::new, |i| i.name.clone()),
+                ))
+            }
+        }
+    }
+    match (nearest, blocked) {
+        (Some((more, of)), _) => QuestState::Needs { more, of },
+        (None, Some((rule, does))) => QuestState::WontComplete { rule, does },
+        (None, None) => QuestState::Needs {
+            more: 1,
+            of: String::new(),
+        },
+    }
+}
+
 /// What the board's item quests want carried, for the loot rule: a quest ready, needing more,
-/// or blocked by a rule (which may be moved) wants its item; every one when it repeats any time.
+/// or blocked by a rule (which may be moved) wants each of its items; [`ANY_HAND_INS`] at most.
 pub fn quest_wants(board: &[QuestLine]) -> Vec<QuestWant> {
-    let mut wants: BTreeMap<u32, Option<u32>> = BTreeMap::new();
+    let mut wants: BTreeMap<u32, u32> = BTreeMap::new();
     for line in board {
         let wanting = matches!(
             line.state,
@@ -458,20 +496,19 @@ pub fn quest_wants(board: &[QuestLine]) -> Vec<QuestWant> {
         let rows: Vec<&Row> = ac_world::quests::rows_of(&line.id)
             .filter(|r| r.kind == Kind::Item)
             .collect();
-        let Some(Want::Item(wcid)) = rows.first().map(|r| r.want.clone()) else {
-            continue;
-        };
-        let need = if rows.iter().any(|r| r.repeat == Repeat::Any) {
-            None
-        } else {
-            rows.iter().map(|r| r.count).max()
-        };
-        let sum = wants.entry(wcid).or_insert(Some(0));
-        *sum = sum.zip(need).map(|(a, b)| a + b);
+        for wcid in items_of(rows.iter().copied()) {
+            let of = rows.iter().filter(|r| r.want == Want::Item(wcid));
+            let count = of.clone().map(|r| r.count.max(1)).max().unwrap_or(1);
+            let any = of.clone().any(|r| r.repeat == Repeat::Any);
+            *wants.entry(wcid).or_insert(0) += if any { count * ANY_HAND_INS } else { count };
+        }
     }
     wants
         .into_iter()
-        .map(|(wcid, need)| QuestWant { wcid, need })
+        .map(|(wcid, need)| QuestWant {
+            wcid,
+            need: Some(need),
+        })
         .collect()
 }
 
@@ -650,6 +687,19 @@ impl Client {
         self.quest_log.note_done(row, crate::holdings::unix_now());
         self.save_quest_log();
         self.hold_quest_flags(&row.stamps);
+    }
+
+    /// The board's wants less what is carried: what a mate may take for this character.
+    pub fn quest_wants_left(&self) -> Vec<QuestWant> {
+        let left = |w: &QuestWant| w.need.map(|n| n.saturating_sub(self.carried_count(w.wcid)));
+        self.quest_wants
+            .iter()
+            .map(|w| QuestWant {
+                wcid: w.wcid,
+                need: left(w),
+            })
+            .filter(|w| w.need != Some(0))
+            .collect()
     }
 
     /// How many of the items of weenie class `wcid` the packs hold, worn ones left out.

@@ -515,7 +515,7 @@ impl Client {
             .ok()
             .and_then(|t| t.xp_to_next_level(level))
             .unwrap_or(0);
-        let pay = quest_pay(&self.quest_board, level, to_next);
+        let pay = quest_pay(&self.quest_board, &self.quest_wants_left(), level, to_next);
         let ranked = ac_world::hunting::ranked_with(level, margin, skip, |g| ground_bonus(&pay, g));
         ranked.into_iter().take(CANDIDATES).find(|g| {
             let secs = self.journey_seconds(g.place());

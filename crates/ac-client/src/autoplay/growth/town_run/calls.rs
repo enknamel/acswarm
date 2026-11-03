@@ -141,6 +141,10 @@ impl Client {
             }
             let row = ac_world::quests::rows_of(&line.id)
                 .filter(|r| r.kind == line.kind && r.fits_level(level))
+                .filter(|r| match r.want {
+                    Want::Item(w) => self.carried_count(w) >= r.count.max(1),
+                    _ => true,
+                })
                 .filter(|r| r.locked_by(held).is_none())
                 .filter(|r| !refused.within(&(r.giver_wcid, r.place.cell), now, GIVER_RETRY))
                 .min_by(|a, b| away(a).total_cmp(&away(b)));
