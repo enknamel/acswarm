@@ -201,6 +201,11 @@ pub struct Autoplay {
     /// vulnerability still to cast, 1 the imperil.
     softening: Vec<(u32, u8)>,
     last_vuln: Option<Instant>,
+    /// The debuff last sent and still unanswered: its target and its softening stage (0 the
+    /// vulnerability, 1 the imperil). A resist of it re-arms it (`Client::hear_arrival`).
+    debuff_sent: Option<(u32, u8)>,
+    /// Resists heard per target of its debuffs; at `DEBUFF_TRIES` it is fought as it is.
+    debuff_resists: Vec<(u32, u8)>,
     last_buff: Option<Instant>,
     /// The buff pass has said it is waiting for the counter this
     /// visit, so it is not said again every tick (see
