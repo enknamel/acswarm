@@ -6,7 +6,7 @@ const HOLTBURG: u32 = 0xA9B4_0019;
 
 /// A Red Rat Tail hand-in to a giver standing in `cell`, worth `xp`.
 fn tail_to(cell: u32, xp: u64) -> HandIn {
-    let row = ac_world::quests::rows_of("give:3684").next().unwrap();
+    let row = ac_world::quests::rows_of("give:3684:2470").next().unwrap();
     HandIn {
         row,
         at: Place {
@@ -90,7 +90,7 @@ fn at_a_collector(tails: u32, now: Instant) -> (Client, &'static Row) {
     let mut c = character_of_level(no_data(), 20);
     with_a_pack(&mut c, 50);
     stand(&mut c, HOLTBURG, glam::Vec3::new(84.0, 7.1, 94.0));
-    let row = ac_world::quests::rows_of("give:3684").next().unwrap();
+    let row = ac_world::quests::rows_of("give:3684:2470").next().unwrap();
     let giver = 0x7000_0001;
     let me = c.player.as_ref().unwrap().world_position();
     c.world.objects.insert(
@@ -288,6 +288,7 @@ fn a_quest_not_taken_up_is_a_talk_to_whoever_starts_it_and_once_heard_it_is_begu
         kind: Kind::Kill,
         state: QuestState::NotTaken {
             from: "Lieutenant Grenlin".into(),
+            flag: "bronzegauntlettrooperkillcount".into(),
         },
         xp: 20_000,
         givers: 1,
@@ -304,6 +305,11 @@ fn a_quest_not_taken_up_is_a_talk_to_whoever_starts_it_and_once_heard_it_is_begu
         (Kind::Start, "Lieutenant Grenlin")
     );
     assert_eq!(calls[0].xp, 20_000);
+    // Givers share names: a talk is the one stamping the quest's flag, else none.
+    if let QuestState::NotTaken { flag, .. } = &mut c.quest_board[0].state {
+        *flag = "nosuchflag".into();
+    }
+    assert!(c.ready_hand_ins(&[me], 5, now).is_empty());
     // Switched off, nothing is offered.
     c.quest_board[0].on = false;
     assert!(c.ready_hand_ins(&[me], 5, now).is_empty());
@@ -311,6 +317,17 @@ fn a_quest_not_taken_up_is_a_talk_to_whoever_starts_it_and_once_heard_it_is_begu
     c.ask_giver(start, at, now);
     c.watch_quest_answer(now + Duration::from_secs(11));
     assert!(c.holds_quest_flag("bronzegauntlettrooperkillcount"));
+    // Its kills count from nothing: the board hunts it, and does not send it back to talk.
+    let counter = "bronzegauntlettrooperkillcount";
+    assert_eq!(c.quest_log.kills.get(counter), Some(&0));
+    let mut facts = c.quest_facts();
+    facts.level = 80; // the Troopers' own, so only the counter decides
+    let board = crate::quest_log::quest_board(ac_world::quests::rows_of(counter), &facts);
+    assert!(
+        matches!(board[0].state, QuestState::Needs { .. }),
+        "{:?}",
+        board[0].state
+    );
     let key = (start.giver_wcid, at.cell);
     assert!(!c
         .autoplay

@@ -224,8 +224,8 @@ pub(crate) struct Pursued {
 pub(crate) struct Ask<'a> {
     pub(crate) facts: &'a QuestFacts,
     pub(crate) asking: &'a Asking<'a>,
-    /// An unlock NPC was set off to lately for this flag.
-    pub(crate) tried: &'a dyn Fn(&str) -> bool,
+    /// This unlock NPC was set off to lately for its flag, and is not being walked to now.
+    pub(crate) tried: &'a dyn Fn(&Unlock) -> bool,
     /// Quests passed over lately, by id, and why.
     pub(crate) held: &'a BTreeMap<String, String>,
     /// The leader a follower goes with: it works nothing of its own.
@@ -328,7 +328,7 @@ impl Ask<'_> {
                 Some((_, row, at)) => PursuitStep::HandIn { row, at },
                 None => stuck(format!("{} cannot be asked now", line.giver)),
             },
-            QuestState::NotTaken { from } => match self.asking.take_up_at(from) {
+            QuestState::NotTaken { from, flag } => match self.asking.take_up_at(from, flag) {
                 Some((_, row, at)) => PursuitStep::TakeUp { row, at },
                 None => stuck(format!("{from} cannot be asked now")),
             },
@@ -367,9 +367,13 @@ impl Ask<'_> {
         let grounds: Vec<SourceGround> =
             wants.iter().flat_map(|w| self.chains.grounds(w)).collect();
         let holds = |flag: &str| self.facts.held.iter().any(|h| h.eq_ignore_ascii_case(flag));
+        // A source past the margin strays allow (`Ground::suits`) kills the character each try.
+        let beatable = |g: &SourceGround| g.source.level <= level + 2 * self.facts.margin;
         let level_fits = |g: &SourceGround| {
-            g.way_in
-                .is_none_or(|p| level >= p.min_level && (p.max_level == 0 || level <= p.max_level))
+            beatable(g)
+                && g.way_in.is_none_or(|p| {
+                    level >= p.min_level && (p.max_level == 0 || level <= p.max_level)
+                })
         };
         let flag_held = |g: &SourceGround| {
             g.way_in
@@ -408,6 +412,11 @@ impl Ask<'_> {
         if let Some(p) = shut.filter_map(|g| g.way_in).find(|p| !p.quest.is_empty()) {
             return (self.flag_step(&p.quest), None);
         }
+        let easiest = grounds.iter().map(|g| g.source.level).min();
+        if let Some(l) = easiest.filter(|_| !grounds.iter().any(beatable)) {
+            let why = format!("its easiest source is level {l}; this character is {level}");
+            return (stuck(why), None);
+        }
         let lowest = grounds
             .iter()
             .filter_map(|g| g.way_in)
@@ -443,7 +452,7 @@ impl Ask<'_> {
             })
         };
         if let Some(u) = unlocks().find(|u| u.min_level <= self.facts.level) {
-            if (self.tried)(&u.flag) {
+            if (self.tried)(u) {
                 return stuck(format!(
                     "{} was set off to lately for the {flag} flag",
                     u.npc
@@ -514,7 +523,11 @@ impl Client {
             refused: &refused,
             away: &away,
         };
-        let tried = |flag: &str| st.unlock_tried.since(&flag.to_string()).is_some();
+        // The visit set off on is the step still: it is not passed over while it walks.
+        let visiting = self.visiting();
+        let tried = |u: &Unlock| {
+            st.unlock_tried.since(&u.flag).is_some() && visiting != Some(u.npc.as_str())
+        };
         let leader = self
             .is_led()
             .then(|| self.followed_leader().map(|m| m.name.clone()))

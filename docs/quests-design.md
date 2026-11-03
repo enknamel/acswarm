@@ -180,9 +180,12 @@ does anything (§1.2) is read:
 
 Paths are grouped into quests by `id`: the kill counter, else the wait's quest, else the once-flag,
 else the first stamped flag, all lowercased; a hand-in with none of these (the trophy collectors)
-is `give:<item wcid>`, so one quest is "hand in a Red Rat Tail to any of the twelve Collectors".
+is `give:<item wcid>`, so one quest is "hand in a Red Rat Tail to any of the Collectors". When its
+givers reward it differently it is one quest per reward, `give:<item>:<first reward wcid>` (or
+`:none`), so the player chooses: each augmentation trainer's Blank Augmentation Gem is its own.
 A quest's rows are alternatives: any one completes it. The `title` is the `quest` table's `message`
-("Blood Shreth Kill Task", "Sent to the Barkeep"), or the item's name for a `give:` quest.
+("Blood Shreth Kill Task", "Sent to the Barkeep"), or the item's name for a `give:` quest, with
+"for <reward>" once split ("Red Rat Tail for Stamina Elixir").
 
 ### 1.5 `quests.csv` columns
 

@@ -36,12 +36,19 @@ fn san_mings_blood_shreth_kill_task_loads_as_the_design_works_it() {
 }
 
 #[test]
-fn a_red_rat_tail_is_one_quest_for_any_of_twelve_givers() {
-    // Nine Collector weenies, one row each, standing in twelve places between them.
-    let rows: Vec<&Row> = rows_of("give:3684").collect();
-    assert_eq!(rows.len(), 9);
-    assert_eq!(rows.iter().map(|r| r.places.len()).sum::<usize>(), 12);
-    let yukara = row("give:3684", Kind::Item, "Yukara Miko the Collector");
+fn a_red_rat_tail_is_one_quest_per_reward_for_any_of_its_givers() {
+    // Eight Collector weenies, one row each, in eleven places give Stamina Elixirs; Wa Shi Pyreals.
+    let rows: Vec<&Row> = rows_of("give:3684:2470").collect();
+    assert_eq!(rows.len(), 8);
+    assert_eq!(rows.iter().map(|r| r.places.len()).sum::<usize>(), 11);
+    assert!(rows
+        .iter()
+        .all(|r| r.title == "Red Rat Tail for Stamina Elixir"));
+    assert_eq!(
+        row("give:3684:273", Kind::Item, "Wa Shi").gives,
+        [(273, 900)]
+    );
+    let yukara = row("give:3684:2470", Kind::Item, "Yukara Miko the Collector");
     assert_eq!(cells(yukara), [0x2B11_0112]);
     assert_eq!(yukara.hand, Handing::Give);
     assert_eq!((yukara.want.clone(), yukara.count), (Want::Item(3684), 1));
@@ -125,14 +132,19 @@ fn fiun_rehlyun_takes_the_insatiable_jaw_for_augmentation_access() {
     assert!(!fiun.has_xp() && !fiun.has_unread());
     assert_eq!(fiun.does, ["flag", "takes"]);
     assert!(sources_of(&Want::Item(28719)).any(|s| s.wcid == 28848));
-    // The Blank Augmentation Gem goes to the augmentation trainers for their gems, and to
-    // Nalicana for luminance on a check the client cannot read.
-    let gem: Vec<&Row> = rows_of("give:29295").collect();
-    let trainers = gem.iter().filter(|r| r.does.contains(&"item")).count();
-    assert!(trainers > 20, "{trainers} trainers");
-    assert!(gem
-        .iter()
-        .any(|r| r.does.contains(&"luminance") && r.has_unread()));
+    // The Blank Augmentation Gem is one quest per trainer's gem, the player's choice, and one
+    // for Nalicana's luminance on a check the client cannot read.
+    let mut gems: Vec<&str> = all().iter().map(|r| r.id).collect();
+    gems.retain(|id| id.starts_with("give:29295:"));
+    gems.dedup();
+    assert!(gems.len() > 20, "{} gems", gems.len());
+    let piersanti = row("give:29295:29269", Kind::Item, "Piersanti Linante");
+    assert_eq!(
+        piersanti.title,
+        "Blank Augmentation Gem for Critical Protection"
+    );
+    assert_eq!(rows_of("give:29295:29269").count(), 1);
+    assert!(rows_of("give:29295:none").any(|r| r.does.contains(&"luminance") && r.has_unread()));
 }
 
 #[test]

@@ -32,6 +32,8 @@ pub(crate) fn demo_card(
         title: title.into(),
         kind,
         item: item.map(str::to_string),
+        items: item.into_iter().map(str::to_string).collect(),
+        kinds: vec![kind],
         givers: vec![(giver.0.into(), giver.1.into())],
         creatures: creature
             .iter()
@@ -88,7 +90,7 @@ pub(crate) fn demo(now: u64) -> Demo {
             Repeat::Once,
         ),
         demo_card(
-            "give:3684",
+            "give:3684:2470",
             "Red Rat Tail",
             Kind::Item,
             Some("Red Rat Tail"),
@@ -156,7 +158,7 @@ pub(crate) fn demo(now: u64) -> Demo {
             QuestState::Done,
         ),
         line(
-            "give:3684",
+            "give:3684:2470",
             "Red Rat Tail",
             Kind::Item,
             "Yukara Miko the Collector",
@@ -171,6 +173,7 @@ pub(crate) fn demo(now: u64) -> Demo {
             70_000_000,
             QuestState::NotTaken {
                 from: "Xun Yu".into(),
+                flag: "repugeaterkillcount".into(),
             },
         ),
     ];

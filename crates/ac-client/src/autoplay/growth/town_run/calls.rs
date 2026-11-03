@@ -80,11 +80,13 @@ impl Asking<'_> {
             .min_by(|a, b| a.0.total_cmp(&b.0))
     }
 
-    /// The nearest talk taking a quest up from `from` in the level band, and how far.
-    pub(crate) fn take_up_at(&self, from: &str) -> Option<(f32, &'static Row, Place)> {
+    /// The nearest talk with `from` in the level band stamping `flag`, and how far: matched by
+    /// the flag too, as givers share names.
+    pub(crate) fn take_up_at(&self, from: &str, flag: &str) -> Option<(f32, &'static Row, Place)> {
+        let stamps = |r: &Row| r.stamps.iter().any(|s| s.eq_ignore_ascii_case(flag));
         ac_world::quests::all()
             .iter()
-            .filter(|r| r.kind == Kind::Start && r.giver == from)
+            .filter(|r| r.kind == Kind::Start && r.giver == from && stamps(r))
             .filter(|r| r.fits_level(self.level))
             .filter_map(|r| self.open_at(r))
             .min_by(|a, b| a.0.total_cmp(&b.0))
@@ -202,8 +204,8 @@ impl Client {
         let mut out: Vec<(f32, HandIn)> = Vec::new();
         for line in &self.quest_board {
             // Not taken up: a talk to whoever starts it, the quest's own XP its worth.
-            if let (true, QuestState::NotTaken { from }) = (line.on, &line.state) {
-                let start = asking.take_up_at(from);
+            if let (true, QuestState::NotTaken { from, flag }) = (line.on, &line.state) {
+                let start = asking.take_up_at(from, flag);
                 if let Some((d, row, at)) =
                     start.filter(|(_, r, _)| !out.iter().any(|(_, h)| std::ptr::eq(h.row, *r)))
                 {

@@ -32,7 +32,7 @@ pub(crate) fn words(state: &QuestState, quests_on: bool, now: u64) -> String {
         QuestState::Off => "do quests is off".into(),
         QuestState::Ready => "ready to hand in".into(),
         QuestState::Needs { more, of } => format!("needs {more} more {of}"),
-        QuestState::NotTaken { from } => format!("not taken up: talk to {from} first"),
+        QuestState::NotTaken { from, .. } => format!("not taken up: talk to {from} first"),
         QuestState::WontComplete { rule, .. } if rule == NO_RULE_KEEPS => {
             format!("won't complete: {NO_RULE_KEEPS}; add the quest rule")
         }
@@ -144,7 +144,7 @@ mod tests {
     #[test]
     fn the_count_reads_on_ready_and_unkept_and_a_line_names_its_givers() {
         let mut lines = [
-            line("give:3684", "Red Rat Tail", QuestState::Ready),
+            line("give:3684:2470", "Red Rat Tail", QuestState::Ready),
             line(
                 "killtaskbloodshreth",
                 "Blood Shreth Kill Task",

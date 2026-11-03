@@ -1112,7 +1112,7 @@ fn demo_quests() -> Vec<ac_client::quest_log::QuestLine> {
     };
     vec![
         line(
-            "give:3684",
+            "give:3684:2470",
             "Red Rat Tail",
             Kind::Item,
             "Yukara Miko the Collector",
@@ -1518,7 +1518,7 @@ mod tests {
         let mut back = Autoplay::default();
         back.load(&settings);
         assert_eq!(back.saved.quests, p.saved.quests);
-        assert!(back.saved.quests.is_on("give:3684"));
+        assert!(back.saved.quests.is_on("give:3684:2470"));
         assert!(!back.saved.quests.is_on("killtaskbloodshreth"));
     }
 

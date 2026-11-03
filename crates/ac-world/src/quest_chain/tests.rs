@@ -209,7 +209,7 @@ fn the_augmentation_realm_portal_flag_names_fiuns_quest_as_its_stamper() {
 
 #[test]
 fn a_blank_augmentation_gem_is_hunted_behind_fiuns_flag_and_given_to_a_trainer() {
-    let chain = chain_of("give:29295");
+    let chain = chain_of("give:29295:29269");
     assert_eq!(shape(&chain), ["flag", "hunt", "hand in"], "{chain:?}");
     let ChainLink::Flag { flag, by, portal } = &chain[0] else {
         unreachable!()
@@ -221,9 +221,10 @@ fn a_blank_augmentation_gem_is_hunted_behind_fiuns_flag_and_given_to_a_trainer()
         .any(|(_, giver)| *giver == "Fiun Rehlyun"));
     assert_eq!(hunts(&chain)[0].source.name, "Sir Bellas");
     let trainers = hand_ins(&chain);
-    assert!(trainers.iter().any(|r| r.giver == "Piersanti Linante"));
+    assert!(trainers.iter().all(|r| r.giver == "Piersanti Linante"));
     assert!(trainers.iter().all(|r| r.want == Want::Item(29295)));
-    let gem = card("give:29295");
+    let gem = card("give:29295:29269");
+    assert_eq!(gem.title, "Blank Augmentation Gem for Critical Protection");
     assert!(gem.flags.iter().any(|f| f.eq_ignore_ascii_case(flag)));
 }
 
@@ -270,4 +271,13 @@ fn trade_notes_are_named_from_the_shops() {
         .iter()
         .all(|g| g.starts_with("Trade Note (")));
     assert_eq!(rows_of("engorgedeaterjaw").count(), 1);
+}
+
+#[test]
+fn a_card_lists_every_item_its_quest_takes() {
+    // aunkiller's givers take any of 35 items: the item filter sees each, not the first alone.
+    let aun = card("aunkiller");
+    assert_eq!(aun.items.len(), 35, "{:?}", aun.items);
+    assert!(aun.items.iter().any(|i| i == "Aun Pendant"));
+    assert_eq!(aun.item.as_ref(), aun.items.first());
 }

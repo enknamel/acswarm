@@ -31,7 +31,8 @@ fn a_kill_task_is_taken_up_counted_then_ready_and_waits_once_handed_in() {
     assert_eq!(
         state(id, &facts),
         QuestState::NotTaken {
-            from: "San Ming".into()
+            from: "San Ming".into(),
+            flag: "killtaskbloodshreth".into(),
         }
     );
     facts.log.note_taken(id);
@@ -60,14 +61,14 @@ fn a_kill_task_is_taken_up_counted_then_ready_and_waits_once_handed_in() {
 fn an_item_quest_needs_its_item_carried_and_one_done_by_talk_stays_done() {
     let mut facts = on();
     assert_eq!(
-        state("give:3684", &facts),
+        state("give:3684:2470", &facts),
         QuestState::Needs {
             more: 1,
             of: "Red Rat Tail".into()
         }
     );
     facts.carried.insert(3684, 1);
-    assert_eq!(state("give:3684", &facts), QuestState::Ready);
+    assert_eq!(state("give:3684:2470", &facts), QuestState::Ready);
     assert_eq!(state("tothebarkeep", &facts), QuestState::Ready);
     let alcott = rows("tothebarkeep").remove(0);
     facts.log.note_done(&alcott, facts.now);
@@ -77,8 +78,8 @@ fn an_item_quest_needs_its_item_carried_and_one_done_by_talk_stays_done() {
 #[test]
 fn the_board_wants_a_few_of_an_any_time_hand_in_and_nothing_once_switched_off() {
     let mut facts = on();
-    let board = quest_board(&rows("give:3684"), &facts);
-    assert_eq!(board[0].givers, 12);
+    let board = quest_board(&rows("give:3684:2470"), &facts);
+    assert_eq!(board[0].givers, 11);
     assert_eq!(
         quest_wants(&board),
         [QuestWant {
@@ -86,8 +87,8 @@ fn the_board_wants_a_few_of_an_any_time_hand_in_and_nothing_once_switched_off() 
             need: Some(ANY_HAND_INS)
         }]
     );
-    facts.config.off.push("give:3684".into());
-    let board = quest_board(&rows("give:3684"), &facts);
+    facts.config.off.push("give:3684:2470".into());
+    let board = quest_board(&rows("give:3684:2470"), &facts);
     assert!(!board[0].on);
     assert!(quest_wants(&board).is_empty());
 }
@@ -125,7 +126,8 @@ fn a_kill_task_waits_for_the_level_its_giver_asks_and_its_creatures_suit() {
     assert_eq!(
         state(id, &at_level(25)),
         QuestState::NotTaken {
-            from: "Fergal the Dire".into()
+            from: "Fergal the Dire".into(),
+            flag: "diremattekarkillcount".into(),
         }
     );
     let mut off = at_level(15);
@@ -231,7 +233,8 @@ fn the_board_is_worked_out_again_at_once_when_quests_are_switched_on_or_the_leve
     assert_eq!(
         line(&c, "diremattekarkillcount"),
         QuestState::NotTaken {
-            from: "Fergal the Dire".into()
+            from: "Fergal the Dire".into(),
+            flag: "diremattekarkillcount".into(),
         }
     );
     assert!(!c.quests_unsuited.contains("diremattekarkillcount"));
@@ -306,7 +309,7 @@ fn a_giver_that_pays_marks_the_quest_done_and_one_that_takes_nothing_is_let_be()
     assert_eq!(line.map(|l| l.state.clone()), Some(QuestState::Done));
 
     // A Collector handed a tail it never took: no XP, the tail still carried.
-    let tail = ac_world::quests::rows_of("give:3684").next().unwrap();
+    let tail = ac_world::quests::rows_of("give:3684:2470").next().unwrap();
     crate::testkit::thing_in_the_pack(&mut c, 0x8000_0100, "Red Rat Tail", 1);
     c.world
         .objects
@@ -315,7 +318,7 @@ fn a_giver_that_pays_marks_the_quest_done_and_one_that_takes_nothing_is_let_be()
         .weenie_class_id = 3684;
     c.ask_giver(tail, tail.places[0], t0);
     c.watch_quest_answer(t0 + XP_WATCH);
-    assert!(!c.quest_log.done.contains_key("give:3684"));
+    assert!(!c.quest_log.done.contains_key("give:3684:2470"));
     let key = (tail.giver_wcid, tail.places[0].cell);
     assert!(c.autoplay.growth.givers_refused.since(&key).is_some());
 }
@@ -490,4 +493,46 @@ fn a_pursued_quest_outside_the_givers_band_stays_out() {
         state(id, &pursued_at(id, 15)),
         QuestState::CantYet(Blocked::Level { min: 20, max: 0 })
     );
+}
+
+#[test]
+fn a_pursuit_asked_for_once_comes_off_the_list_when_done_and_one_asked_again_stays() {
+    let mut c = crate::testkit::character_of_level(crate::testkit::no_data(), 5);
+    let quests = &mut c.autoplay.config.quests;
+    quests.pursue_quest("tothebarkeep", false, 0);
+    quests.pursue_quest("give:3684:2470", true, 0);
+    let alcott = ac_world::quests::rows_of("tothebarkeep").next().unwrap();
+    c.quest_log.note_done(alcott, crate::holdings::unix_now());
+    c.refresh_quests(Instant::now());
+    let ids: Vec<&str> = c
+        .autoplay
+        .config
+        .quests
+        .pursue
+        .iter()
+        .map(|p| p.id.as_str())
+        .collect();
+    assert_eq!(ids, ["give:3684:2470"]);
+}
+
+#[test]
+fn an_unpaid_talk_the_client_cannot_check_is_not_done_and_a_flag_refused_unlearns_its_quest() {
+    let mut c = crate::testkit::character_of_level(crate::testkit::no_data(), 5);
+    let t0 = Instant::now();
+    let talk = ac_world::quests::all()
+        .iter()
+        .find(|r| r.kind == Kind::Talk && r.has_unread() && !r.has_xp() && r.repeat != Repeat::Any)
+        .expect("a talk on an unread condition");
+    c.ask_giver(talk, talk.places[0], t0);
+    c.watch_quest_answer(t0 + XP_WATCH);
+    assert!(!c.quest_log.done.contains_key(talk.id), "{}", talk.id);
+    let key = (talk.giver_wcid, talk.places[0].cell);
+    assert!(c.autoplay.growth.givers_refused.since(&key).is_some());
+
+    // Done in the log, its stamp reads held; a portal refusing the flag says it is not.
+    let alcott = ac_world::quests::rows_of("tothebarkeep").next().unwrap();
+    c.quest_log.note_done(alcott, 1);
+    assert!(holds(&c.quest_facts(), "ToTheBarkeep"));
+    c.drop_quest_flag("ToTheBarkeep");
+    assert!(!holds(&c.quest_facts(), "ToTheBarkeep"));
 }

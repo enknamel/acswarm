@@ -104,7 +104,7 @@ pub(crate) fn has_any<'s>(mut list: impl Iterator<Item = &'s str>, word: &str) -
 
 /// Whether the card has `word` in `facet` (anywhere for [`Facet::Any`]).
 pub(crate) fn has_term(card: &QuestCard, facet: Facet, word: &str) -> bool {
-    let item = || card.item.iter().map(String::as_str);
+    let item = || card.items.iter().map(String::as_str);
     let creatures = || card.creatures.iter().map(|c| c.0.as_str());
     let givers = || card.givers.iter().map(|g| g.0.as_str());
     let places = || {
@@ -368,7 +368,8 @@ pub(crate) fn is_listed(
         && (hi == 0 || level <= hi);
     shown
         && in_band
-        && f.kind.is_none_or(|k| card.kind == k)
+        && f.kind
+            .is_none_or(|k| card.kinds.contains(&k) || card.kind == k)
         && f.repeat.is_kept(card.repeat)
         && f.does.is_none_or(|w| has_deed(card, w))
         && f.state.is_kept(line.map(|l| &l.state))

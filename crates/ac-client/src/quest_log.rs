@@ -105,9 +105,10 @@ pub enum QuestState {
         more: u32,
         of: String,
     },
-    /// Not taken up yet: talk to `from` first.
+    /// Not taken up yet: talk to `from` first, whose talk stamps `flag`.
     NotTaken {
         from: String,
+        flag: String,
     },
     /// A loot rule above the quest rule does this to the item.
     WontComplete {
@@ -441,6 +442,14 @@ fn stampers(flag: &str) -> &'static [&'static Row] {
         .map_or(&[], Vec::as_slice)
 }
 
+/// The kill counter `flag` is, as a kill row names it, when it is one.
+fn kill_counter(flag: &str) -> Option<&'static str> {
+    ac_world::quests::all().iter().find_map(|r| match &r.want {
+        Want::Kill(c) if c.eq_ignore_ascii_case(flag) => Some(c.as_str()),
+        _ => None,
+    })
+}
+
 /// Whether the character holds `flag`: a quest flag, a kill task's counter taken up, or a stamp
 /// of a quest the log has done.
 pub(crate) fn holds(facts: &QuestFacts, flag: &str) -> bool {
@@ -513,6 +522,7 @@ fn see_first(flag: &str, facts: &QuestFacts, locks: &mut Locks, depth: u32) -> Q
     if let Some(r) = open.iter().find(|r| unmet(r).is_none()) {
         return QuestState::NotTaken {
             from: r.giver.to_string(),
+            flag: flag.to_string(),
         };
     }
     match unmet(open[0]) {
@@ -748,6 +758,21 @@ impl Client {
         ids
     }
 
+    /// The server says `flag` is not held: the quests logged done that stamp it are not done
+    /// either, else [`holds`] would read it held from them.
+    pub(crate) fn forget_stampers(&mut self, flag: &str) {
+        let done = &mut self.quest_log.done;
+        let before = done.len();
+        done.retain(|id, _| {
+            !stampers(flag)
+                .iter()
+                .any(|r| r.kind != Kind::Start && r.id == id)
+        });
+        if done.len() != before {
+            self.save_quest_log();
+        }
+    }
+
     /// The board's inputs, as this character stands now.
     pub fn quest_facts(&self) -> QuestFacts {
         let stats = &self.world.stats;
@@ -784,6 +809,8 @@ impl Client {
         if !self.ledger_loaded && !name.is_empty() {
             return;
         }
+        self.finish_pursuits(now);
+        let name = self.world.stats.name.trim();
         let cfg = &self.autoplay.config.quests;
         let level = self.world.stats.level.max(0) as u32;
         let changed = self.quest_board_for.as_ref().is_none_or(|f| {
@@ -822,6 +849,26 @@ impl Client {
         (self.quest_board, self.quests_unsuited) =
             board_of(considered_rows(&facts.config), &facts, &pick);
         self.refresh_pursuit(&facts, &chained, now);
+    }
+
+    /// A pursuit asked for once whose quest the log has done since is taken off the list: else it
+    /// would keep the quest on, every way to it worked, with "do quests" off.
+    fn finish_pursuits(&mut self, now: Instant) {
+        let done = &self.quest_log.done;
+        let finished: Vec<String> = self
+            .autoplay
+            .config
+            .quests
+            .pursue
+            .iter()
+            .filter(|p| !p.again && done.get(&p.id).is_some_and(|d| d.at >= p.since))
+            .map(|p| p.id.clone())
+            .collect();
+        for id in finished {
+            tracing::info!("pursuit: {id} finished");
+            self.autoplay.note(format!("pursuit finished: {id}"), now);
+            self.autoplay.config.quests.stop_pursuing(&id);
+        }
     }
 
     /// `row`'s giver at `place` was asked: its answer is watched for, and one asked before is
@@ -869,11 +916,18 @@ impl Client {
             self.autoplay
                 .note(format!("took up {} from {}", row.title, row.giver), now);
             self.hold_quest_flags(&row.stamps);
+            // A kill task's counter starts at nothing: the board reads it from the log.
+            for counter in row.stamps.iter().filter_map(|s| kill_counter(s)) {
+                self.quest_log.note_taken(counter);
+            }
+            self.save_quest_log();
             return;
         }
+        // Unpaid, a talk asking what the client cannot read may have taken the server's other
+        // branch: it is not counted done on the giver's word.
         let taken = match row.want {
             Want::Item(wcid) => self.carried_count(wcid) < asked.carried,
-            _ => true,
+            _ => !row.has_unread(),
         };
         if !rose && (!taken || row.repeat == Repeat::Any) {
             let key = (row.giver_wcid, asked.place.cell);

@@ -39,7 +39,7 @@ fn a_config_saved_before_quests_loads_with_them_off_and_quests_round_trip() {
     let old: Config = serde_json::from_str(r#"{"enabled":true,"fight":{"radius":30.0}}"#).unwrap();
     assert_eq!(old.quests, Quests::default());
     assert!(
-        !old.quests.is_on("give:3684"),
+        !old.quests.is_on("give:3684:2470"),
         "off until the player ticks it"
     );
     let mut c = Config::default();
@@ -47,7 +47,7 @@ fn a_config_saved_before_quests_loads_with_them_off_and_quests_round_trip() {
     c.quests.off = vec!["killtaskbloodshreth".into()];
     let back: Config = serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
     assert_eq!(back.quests, c.quests);
-    assert!(back.quests.is_on("give:3684"));
+    assert!(back.quests.is_on("give:3684:2470"));
     assert!(!back.quests.is_on("killtaskbloodshreth"));
 }
 
@@ -57,7 +57,7 @@ fn quests_saved_before_the_chosen_list_load_with_nothing_chosen() {
         serde_json::from_str(r#"{"quests":{"on":true,"off":["killtaskbloodshreth"]}}"#).unwrap();
     assert!(old.quests.chosen.is_empty());
     assert_eq!(old.quests.off, ["killtaskbloodshreth"]);
-    assert!(old.quests.is_on("give:3684"));
+    assert!(old.quests.is_on("give:3684:2470"));
 }
 
 #[test]

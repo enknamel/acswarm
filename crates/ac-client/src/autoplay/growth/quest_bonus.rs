@@ -72,7 +72,7 @@ mod tests {
     use crate::autoplay::{LootAction, Quests};
     use crate::quest_log::{quest_board, quest_wants, QuestFacts, ANY_HAND_INS};
 
-    const TAIL: &str = "give:3684";
+    const TAIL: &str = "give:3684:2470";
     const SHRETH: &str = "killtaskbloodshreth";
     /// XP from level 15 to 16 is not read here: any number scales the level-proportional part.
     const TO_NEXT: u64 = 50_000;

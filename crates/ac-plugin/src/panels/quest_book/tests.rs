@@ -10,6 +10,8 @@ fn card(id: &str, title: &str, item: Option<&str>, giver: (&str, &str)) -> Quest
         title: title.into(),
         kind: Kind::Item,
         item: item.map(str::to_string),
+        items: item.into_iter().map(str::to_string).collect(),
+        kinds: vec![Kind::Item],
         givers: vec![(giver.0.into(), giver.1.into())],
         creatures: Vec::new(),
         places: Vec::new(),
@@ -53,7 +55,7 @@ fn cards() -> Vec<QuestCard> {
     insatiable.entry = 125;
     insatiable.does = vec!["flag".into(), "takes".into()];
     let mut tail = card(
-        "give:3684",
+        "give:3684:2470",
         "Red Rat Tail",
         Some("Red Rat Tail"),
         ("Yukara Miko the Collector", "Shoushi"),
@@ -189,7 +191,7 @@ fn the_weekly_chip_keeps_seven_day_quests() {
     );
     assert_eq!(
         listed(&cards, &f(RepeatChip::AnyTime), 0),
-        ["augmentationprovinggroundaccess", "give:3684"]
+        ["augmentationprovinggroundaccess", "give:3684:2470"]
     );
     assert!(listed(&cards, &f(RepeatChip::Once), 0).is_empty());
 }
@@ -216,7 +218,7 @@ fn the_kind_and_does_filters_keep_their_own() {
     };
     assert_eq!(
         listed(&cards, &other, 0),
-        ["give:3684"],
+        ["give:3684:2470"],
         "type 75 is a type"
     );
 }
@@ -232,18 +234,18 @@ fn the_level_band_hides_quests_outside_it() {
         listed(&cards, &band(70, 100), 0),
         ["engorgedeaterjaw", "repugeaterkillcount"]
     );
-    assert_eq!(listed(&cards, &band(0, 10), 0), ["give:3684"]);
+    assert_eq!(listed(&cards, &band(0, 10), 0), ["give:3684:2470"]);
     assert_eq!(listed(&cards, &band(0, 0), 0).len(), 4, "0 is open");
     // For my level: the giver's band, and the easiest source within twice the margin above.
     let mine = Filter::default();
     assert_eq!(
         listed(&cards, &mine, 75),
-        ["engorgedeaterjaw", "give:3684"],
+        ["engorgedeaterjaw", "give:3684:2470"],
         "the kill task's Repugnant Eater (95) is beyond 75 + 2 x 10"
     );
     assert_eq!(
         listed(&cards, &mine, 50),
-        ["give:3684"],
+        ["give:3684:2470"],
         "the Engorged Eater (80) is beyond 50 + 2 x 10"
     );
 }
@@ -266,7 +268,7 @@ fn the_state_chip_reads_the_browse_board() {
     browse.set(
         vec![
             line("engorgedeaterjaw", QuestState::Ready),
-            line("give:3684", QuestState::Done),
+            line("give:3684:2470", QuestState::Done),
         ],
         std::time::Instant::now(),
     );
@@ -302,7 +304,7 @@ fn sorting_by_xp_puts_the_best_first() {
         [
             "repugeaterkillcount",
             "engorgedeaterjaw",
-            "give:3684",
+            "give:3684:2470",
             "augmentationprovinggroundaccess"
         ]
     );
@@ -536,4 +538,27 @@ fn a_frame_of_the_quest_book_draws_and_changes_nothing_unclicked() {
     assert_eq!(st.listed(&v).len(), demo.cards.len(), "all shown");
     st.filter.search = "giver:clemenza".into();
     assert_eq!(st.listed(&v).len(), 1, "a new search lists again");
+}
+
+#[test]
+fn the_item_filter_sees_every_item_a_quest_takes_and_the_kind_filter_every_kind() {
+    let mut c = card(
+        "aunkiller",
+        "Aun Killer",
+        Some("First Item"),
+        ("Aun Mareura", "Here"),
+    );
+    c.items.push("Second Item".into());
+    c.kinds.push(Kind::Kill);
+    assert!(quest_filter::has_term(
+        &c,
+        quest_filter::Facet::Item,
+        "second"
+    ));
+    assert!(!quest_filter::has_term(
+        &c,
+        quest_filter::Facet::Item,
+        "third"
+    ));
+    assert!(c.kinds.contains(&Kind::Kill));
 }

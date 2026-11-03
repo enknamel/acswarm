@@ -113,7 +113,7 @@ fn facts(level: u32, pursue: &[(&str, bool)]) -> QuestFacts {
 }
 
 /// The pursuit list worked out as `refresh_quests` and `refresh_pursuit` do, with `fake`'s chains.
-fn work(facts: &QuestFacts, fake: &Fake, led: Option<&str>) -> Pursued {
+fn work(facts: &QuestFacts, fake: &dyn Chains, led: Option<&str>) -> Pursued {
     let holds = |f: &str| crate::quest_log::holds(facts, f);
     let chained = with_chain(&facts.config.pursue, &holds, fake);
     let mut f = facts.clone();
@@ -131,7 +131,7 @@ fn work(facts: &QuestFacts, fake: &Fake, led: Option<&str>) -> Pursued {
     let ask = Ask {
         facts: &f,
         asking: &asking,
-        tried: &|_| false,
+        tried: &|_: &Unlock| false,
         held: &held,
         led,
         chains: fake,
@@ -153,8 +153,14 @@ fn why(step: &PursuitStep) -> &str {
 
 #[test]
 fn a_jaw_not_carried_is_hunted_where_it_drops() {
-    // Level 50 is below the Engorged Eater's 80 by more than twice the margin: asked for, it goes.
+    // Level 50 is below the Engorged Eater's 80 by more than twice the margin: it would die
+    // there each try, so it is passed over saying why; 75 is within it and goes.
     let p = work(&facts(50, &[("engorgedeaterjaw", false)]), &jaws(), None);
+    assert_eq!(
+        why(&p.lines[0].step),
+        "its easiest source is level 80; this character is 50"
+    );
+    let p = work(&facts(75, &[("engorgedeaterjaw", false)]), &jaws(), None);
     match steps(&p)[..] {
         [(
             "engorgedeaterjaw",
@@ -301,7 +307,8 @@ fn ginazio() -> &'static Row {
     rows.find(|r| r.kind == Kind::Talk).unwrap()
 }
 
-/// Fiun Rehlyun's jaw quest with its way in behind the Eater Pit's flag, Sir Ginazio giving it.
+/// Fiun Rehlyun's jaw quest with a made-up way in behind the Eater Pit's flag, Sir Ginazio giving
+/// it: a chain of three for the mechanics. The bundled data has none (see the test after).
 fn fiun_behind_the_pit() -> Fake {
     let insatiable = dropper(Want::Item(28719), 28848, "Insatiable Eater", 160);
     let pit = way_in("Eater Pit", 0x0096, 125, "Eaterpit");
@@ -349,8 +356,8 @@ fn a_follower_pursues_nothing() {
 }
 
 #[test]
-fn the_augmentation_chain_walks_from_its_flag_to_the_jaw_and_round_again_each_wait() {
-    // The player's chain: flagged by Sir Ginazio, the jaw from the Insatiable Eaters, handed to
+fn a_flagged_chain_walks_from_its_flag_to_the_jaw_and_round_again_each_wait() {
+    // The made-up chain: flagged by Sir Ginazio, the jaw from the Insatiable Eaters, handed to
     // Fiun Rehlyun, whose wait is six days; asked for whenever it is ready.
     let fake = fiun_behind_the_pit();
     let fiun = "augmentationprovinggroundaccess";
@@ -460,4 +467,24 @@ fn a_quest_worked_first_waits_while_the_one_it_is_for_waits() {
     assert_eq!(p.lines[0].id, "ginsword");
     assert_eq!(p.lines[0].step, PursuitStep::Waiting { until: NOW + 600 });
     assert!(!p.lines.iter().any(|l| l.working), "{p:?}");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn fiuns_jaw_on_the_bundled_data_is_hunted_with_no_quest_first() {
+    // The Insatiable Eaters' dungeon (0x0096) is entered by the Insatiable Vault, level 125 and
+    // no flag: pursuing Fiun's quest hunts the jaw at once, Sir Ginazio not involved.
+    let fiun = "augmentationprovinggroundaccess";
+    let p = work(&facts(150, &[(fiun, true)]), &ChainData, None);
+    let ids: Vec<&str> = p.lines.iter().map(|l| l.id.as_str()).collect();
+    assert_eq!(ids, [fiun], "{p:?}");
+    assert!(
+        matches!(&p.lines[0].step, PursuitStep::Hunt { creature, .. } if creature == "Insatiable Eater"),
+        "{p:?}"
+    );
+    assert!(p.lines[0].working);
+    assert!(p.sought.contains(&28848), "{:?}", p.sought);
+    // Below the vault's level the reason is said.
+    let p = work(&facts(110, &[(fiun, true)]), &ChainData, None);
+    assert!(!p.lines[0].step.can_progress(), "{p:?}");
 }

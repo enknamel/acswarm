@@ -71,6 +71,7 @@ impl Client {
             tracing::info!("quest: {flag} is not held after all");
             self.save_quest_flags();
         }
+        self.forget_stampers(flag);
     }
 
     /// A weenie error came in: a portal refusing for its quest flag (Portal.cs:246-258, sent by

@@ -60,7 +60,11 @@ pub struct QuestCard {
     /// The title, or the wanted item's name when the title is internal.
     pub title: String,
     pub kind: Kind,
+    /// The first wanted item: it names a quest whose title is internal.
     pub item: Option<String>,
+    /// Every wanted item and every kind of its rows (start talks left out), for the filters.
+    pub items: Vec<String>,
+    pub kinds: Vec<Kind>,
     /// Giver names with their places in words, one per placement.
     pub givers: Vec<(String, String)>,
     /// Source creatures or NPCs: name, level, chance per kill.
@@ -594,6 +598,13 @@ fn card_of(rows: &'static [Row]) -> QuestCard {
         .find_map(|r| r.item.as_ref())
         .map(|i| i.name.trim().replace(';', ","));
     let (mut givers, mut wants) = (Vec::new(), Vec::new());
+    let (mut items, mut kinds) = (Vec::new(), Vec::new());
+    for r in &doing {
+        if let Some(i) = &r.item {
+            push_new(&mut items, i.name.trim().replace(';', ","));
+        }
+        push_new(&mut kinds, r.kind);
+    }
     let (mut gives, mut does, mut unread) = (Vec::new(), Vec::new(), Vec::new());
     // Rows of one giver repeat its placements: each is named once.
     let mut placed: BTreeSet<(u32, u32)> = BTreeSet::new();
@@ -635,6 +646,8 @@ fn card_of(rows: &'static [Row]) -> QuestCard {
         title: card_title(main, item.as_deref()),
         kind: main.kind,
         item,
+        items,
+        kinds,
         givers,
         creatures: src.creatures,
         places: src.places,

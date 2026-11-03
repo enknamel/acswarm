@@ -512,6 +512,7 @@ def build(data, never):
             both = [u for u in rows_out[i][-1].split("|") if u] + row[-1].split("|")
             rows_out[i] = key + ("|".join(dict.fromkeys(both)),)
     rows_out = merge_random(rows_out)
+    rows_out = split_by_reward(rows_out, data)
     kind_order = {"start": 0, "talk": 1, "kill": 2, "item": 3}
     rows_out.sort(key=lambda r: (r[0], kind_order[r[1]], int(r[3]), int(r[7])))
     givers_out = sorted({(int(r[3]), cell, x, y, z) for r in rows_out
@@ -569,6 +570,51 @@ def merge_random(rows_out):
         does = ";".join(dict.fromkeys(w for w in words if w))
         out[at[key]] = (was[:COL_GIVES] + (gives,) + was[COL_GIVES + 1:COL_DOES] + (does,)
                         + was[COL_DOES + 1:])
+    return out
+
+
+def split_by_reward(rows_out, data):
+    """A handed item's quest whose givers reward it differently (the augmentation trainers each
+    trade a Blank Augmentation Gem for their own gem) is one quest per reward, so the player
+    chooses which: id give:ITEM:REWARD, the title naming the reward."""
+    rewards, does = defaultdict(set), {}
+    for r in rows_out:
+        if r[0].startswith("give:") and r[1] != "start":
+            rewards[r[0]].add(r[COL_GIVES])
+            words = does.setdefault((r[0], r[COL_GIVES]), {})
+            words.update(dict.fromkeys(r[COL_DOES].split(";")))
+    suffix = {}
+    for qid, gives in rewards.items():
+        if len(gives) < 2:
+            continue
+        taken = set()
+        for g in sorted(gives):
+            first = g.split("|")[0].split(";")[0].split(":")[0] or "none"
+            s, n = first, 2
+            while s in taken:
+                s, n = "%s-%d" % (first, n), n + 1
+            taken.add(s)
+            if first.isdigit():
+                name = data.name.get(int(first), first)
+            else:
+                # No item: the reward is what the path does ("luminance", "xp").
+                words = [{"xp": "XP"}.get(w, w) for w in does[(qid, g)]
+                         if w not in ("", "takes")]
+                name = " and ".join(words) or "nothing"
+            suffix[(qid, g)] = (s, name.replace(",", ";"))
+    out = []
+    for r in rows_out:
+        if r[1] == "start" and len(rewards.get(r[0], ())) > 1:
+            # A start talk takes up every reward's quest.
+            for (qid, _), (s, name) in sorted(suffix.items()):
+                if qid == r[0]:
+                    out.append(("%s:%s" % (qid, s), r[1], "%s for %s" % (r[2], name)) + r[3:])
+            continue
+        s = suffix.get((r[0], r[COL_GIVES]))
+        if s is None:
+            out.append(r)
+            continue
+        out.append(("%s:%s" % (r[0], s[0]), r[1], "%s for %s" % (r[2], s[1])) + r[3:])
     return out
 
 
