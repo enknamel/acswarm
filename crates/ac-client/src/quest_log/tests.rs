@@ -407,3 +407,48 @@ fn a_way_asking_what_the_client_cannot_check_is_worked_only_once_chosen() {
     facts.config.switch_on(id);
     assert_eq!(state(id, &facts), QuestState::Ready, "the talk, chosen");
 }
+
+#[test]
+fn the_board_is_worked_out_over_the_quests_autoplay_considers_alone() {
+    let fiun = "augmentationprovinggroundaccess";
+    let mut cfg = Quests {
+        on: true,
+        ..Quests::default()
+    };
+    let ids = |cfg: &Quests| {
+        let mut ids: Vec<&str> = considered_rows(cfg).iter().map(|r| r.id).collect();
+        ids.dedup();
+        ids
+    };
+    let automatic = ids(&cfg);
+    assert!(automatic.contains(&"killtaskbloodshreth"));
+    assert!(!automatic.contains(&fiun), "pays no XP");
+    assert!(
+        automatic.windows(2).all(|w| w[0] < w[1]),
+        "in id order, once each"
+    );
+    cfg.switch_on(fiun);
+    let chosen = considered_rows(&cfg);
+    assert_eq!(
+        chosen.iter().filter(|r| r.id == fiun).count(),
+        rows(fiun).len(),
+        "every row of a chosen quest"
+    );
+    assert_eq!(ids(&cfg).len(), automatic.len() + 1);
+}
+
+#[test]
+fn the_browse_board_lists_every_quest_as_if_chosen_whatever_the_switches() {
+    let mut facts = at_level(150);
+    facts.config.on = false;
+    facts.carried.insert(28719, 1);
+    let board = browse_board(&facts);
+    let ids: BTreeSet<&str> = ac_world::quests::all().iter().map(|r| r.id).collect();
+    assert_eq!(board.len(), ids.len());
+    assert!(board.iter().all(|l| l.on && l.every_way));
+    let fiun = board
+        .iter()
+        .find(|l| l.id == "augmentationprovinggroundaccess")
+        .unwrap();
+    assert_eq!(fiun.state, QuestState::Ready, "the jaw carried");
+}

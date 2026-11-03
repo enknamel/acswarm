@@ -199,30 +199,110 @@ pub fn worked_rows(line: &QuestLine) -> impl Iterator<Item = &'static Row> + '_ 
     ac_world::quests::rows_of(&line.id).filter(|r| line.every_way || is_automatic(r))
 }
 
+/// The rows autoplay works for the quests it considers, in id order: each quest starting on has
+/// its automatic rows, a chosen one every row. The board is worked out over these alone.
+pub fn considered_rows(cfg: &Quests) -> Vec<&'static Row> {
+    static AUTOMATIC: OnceLock<Vec<&'static Row>> = OnceLock::new();
+    let automatic = AUTOMATIC.get_or_init(|| {
+        let rows = ac_world::quests::all().iter();
+        rows.filter(|r| is_automatic(r) && is_automatic_quest(r.id))
+            .collect()
+    });
+    if cfg.chosen.is_empty() {
+        return automatic.clone();
+    }
+    let chosen: BTreeSet<&str> = cfg.chosen.iter().map(String::as_str).collect();
+    let mut rows: Vec<&'static Row> = automatic
+        .iter()
+        .copied()
+        .filter(|r| !chosen.contains(r.id))
+        .collect();
+    for id in &chosen {
+        rows.extend(ac_world::quests::rows_of(id));
+    }
+    rows.sort_by_key(|r| r.id);
+    rows
+}
+
 /// The state of every quest in `rows`, one line per id, in the data's order.
-pub fn quest_board(rows: &[Row], facts: &QuestFacts) -> Vec<QuestLine> {
-    board_of(rows, facts).0
+pub fn quest_board<'r>(
+    rows: impl IntoIterator<Item = &'r Row>,
+    facts: &QuestFacts,
+) -> Vec<QuestLine> {
+    board_of(rows, facts, &Pick::of(&facts.config)).0
+}
+
+/// Every quest in the data as if chosen: each on and every way worked, whatever the config. The
+/// Quests window's list, worked out only while it is open.
+pub fn browse_board(facts: &QuestFacts) -> Vec<QuestLine> {
+    let mut pick = Pick::of(&facts.config);
+    pick.every = true;
+    board_of(ac_world::quests::all(), facts, &pick).0
 }
 
 /// The quests in `rows` no giver's band or easiest source suits at the character's level,
 /// whether switched on or not: what the list's "for my level" leaves out.
-pub fn unsuited_quests(rows: &[Row], facts: &QuestFacts) -> BTreeSet<String> {
-    board_of(rows, facts).1
+pub fn unsuited_quests<'r>(
+    rows: impl IntoIterator<Item = &'r Row>,
+    facts: &QuestFacts,
+) -> BTreeSet<String> {
+    board_of(rows, facts, &Pick::of(&facts.config)).1
+}
+
+/// [`Quests`]' switches read once for a board: which quests are on and which rows are worked.
+struct Pick<'f> {
+    on: bool,
+    off: BTreeSet<&'f str>,
+    chosen: BTreeSet<&'f str>,
+    /// Every quest on and every row worked: the browse board.
+    every: bool,
+}
+
+impl<'f> Pick<'f> {
+    fn of(cfg: &'f Quests) -> Self {
+        Pick {
+            on: cfg.on,
+            off: cfg.off.iter().map(String::as_str).collect(),
+            chosen: cfg.chosen.iter().map(String::as_str).collect(),
+            every: false,
+        }
+    }
+
+    /// As [`Quests::is_on`].
+    fn is_on(&self, id: &str) -> bool {
+        self.every
+            || (self.on
+                && (self.chosen.contains(id) || (is_automatic_quest(id) && !self.off.contains(id))))
+    }
+
+    /// As [`Quests::is_chosen`].
+    fn is_chosen(&self, id: &str) -> bool {
+        self.chosen.contains(id)
+    }
+
+    /// As [`Quests::is_worked`].
+    fn is_worked(&self, row: &Row) -> bool {
+        self.every || is_automatic(row) || self.chosen.contains(row.id)
+    }
 }
 
 /// [`quest_board`] and [`unsuited_quests`] in one pass over the rows.
-fn board_of(rows: &[Row], facts: &QuestFacts) -> (Vec<QuestLine>, BTreeSet<String>) {
+fn board_of<'r>(
+    rows: impl IntoIterator<Item = &'r Row>,
+    facts: &QuestFacts,
+    pick: &Pick,
+) -> (Vec<QuestLine>, BTreeSet<String>) {
     let mut locks = Locks::default();
     let mut unsuited = BTreeSet::new();
     let mut board = Vec::new();
-    for (id, doing) in by_quest(rows, &facts.config) {
+    for (id, doing) in by_quest(rows, pick) {
         let (Some(first), Some(giver)) = (doing.first(), nearest(&doing, facts.me)) else {
             continue;
         };
         if beyond_level(&doing, facts).is_some() {
             unsuited.insert(id.to_string());
         }
-        let on = facts.config.is_on(id);
+        let on = pick.is_on(id);
         board.push(QuestLine {
             id: id.to_string(),
             title: first.title.to_string(),
@@ -240,7 +320,7 @@ fn board_of(rows: &[Row], facts: &QuestFacts) -> (Vec<QuestLine>, BTreeSet<Strin
             givers: doing.iter().map(|r| r.places.len()).sum(),
             giver: giver.giver.to_string(),
             on,
-            every_way: facts.config.is_chosen(id),
+            every_way: pick.every || pick.is_chosen(id),
         });
     }
     (board, unsuited)
@@ -248,21 +328,26 @@ fn board_of(rows: &[Row], facts: &QuestFacts) -> (Vec<QuestLine>, BTreeSet<Strin
 
 /// Each quest's rows autoplay works that complete it (start rows left out), by id in the data's
 /// order.
-fn by_quest<'r>(rows: &'r [Row], cfg: &Quests) -> Vec<(&'r str, Vec<&'r Row>)> {
-    let mut ids: Vec<&str> = Vec::new();
-    let mut by_id: BTreeMap<&str, Vec<&Row>> = BTreeMap::new();
-    for r in rows.iter().filter(|r| cfg.is_worked(r)) {
-        if !by_id.contains_key(r.id) {
-            ids.push(r.id);
-        }
-        let doing = by_id.entry(r.id).or_default();
+fn by_quest<'r>(
+    rows: impl IntoIterator<Item = &'r Row>,
+    pick: &Pick,
+) -> Vec<(&'r str, Vec<&'r Row>)> {
+    let mut quests: Vec<(&'r str, Vec<&'r Row>)> = Vec::new();
+    // Rows come in id order (the data's, `considered_rows`'), so most join the last quest.
+    let mut at: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for r in rows.into_iter().filter(|r| pick.is_worked(r)) {
+        let i = match quests.last() {
+            Some((id, _)) if *id == r.id => quests.len() - 1,
+            _ => *at.entry(r.id).or_insert_with(|| {
+                quests.push((r.id, Vec::new()));
+                quests.len() - 1
+            }),
+        };
         if r.kind != Kind::Start {
-            doing.push(r);
+            quests[i].1.push(r);
         }
     }
-    ids.into_iter()
-        .map(|id| (id, by_id.remove(id).unwrap_or_default()))
-        .collect()
+    quests
 }
 
 /// The row whose giver stands nearest `me` by straight distance; the first with no position.
@@ -293,10 +378,16 @@ impl Locks {
     fn at(&mut self, place: &Place, held: &[String]) -> Option<&'static str> {
         static MAYBE: OnceLock<BTreeSet<u32>> = OnceLock::new();
         let maybe = MAYBE.get_or_init(|| {
+            // One indoor placement per landblock: the lock is the landblock's.
+            let mut blocks: BTreeMap<u32, Place> = BTreeMap::new();
             let places = ac_world::quests::all().iter().flat_map(|r| r.places);
-            places
-                .filter(|p| ac_world::quests::locked_at(p, &[]).is_some())
-                .map(|p| p.cell >> 16)
+            for p in places.filter(|p| p.is_indoors()) {
+                blocks.entry(p.cell >> 16).or_insert(*p);
+            }
+            blocks
+                .into_iter()
+                .filter(|(_, p)| ac_world::quests::locked_at(p, &[]).is_some())
+                .map(|(block, _)| block)
                 .collect()
         });
         let block = place.cell >> 16;
@@ -636,9 +727,10 @@ impl Client {
     /// The quest ids autoplay considers: quests on, chosen, or paying XP and not switched off.
     pub fn quests_on(&self) -> Vec<&'static str> {
         let cfg = &self.autoplay.config.quests;
+        let pick = Pick::of(cfg);
         let mut ids: Vec<&'static str> = Vec::new();
-        for r in ac_world::quests::all() {
-            if r.kind != Kind::Start && cfg.is_on(r.id) && ids.last() != Some(&r.id) {
+        for r in considered_rows(cfg) {
+            if r.kind != Kind::Start && pick.is_on(r.id) && ids.last() != Some(&r.id) {
                 ids.push(r.id);
             }
         }
@@ -705,8 +797,10 @@ impl Client {
             name: name.to_string(),
         });
         self.quest_board_at = Some(now);
+        let facts = self.quest_facts();
+        let pick = Pick::of(&facts.config);
         (self.quest_board, self.quests_unsuited) =
-            board_of(ac_world::quests::all(), &self.quest_facts());
+            board_of(considered_rows(&facts.config), &facts, &pick);
     }
 
     /// `row`'s giver at `place` was asked: its answer is watched for, and one asked before is
