@@ -5,8 +5,6 @@
 //! The server never sends a character's quest registry; a flag is held from the use of its NPC in
 //! reach at its level, and let go when a portal asking for it turns the character away.
 
-use ac_agent::recent::Recent;
-
 use crate::Client;
 
 /// Someone this near an unlock's listed spot is its NPC (metres): the data places each one.
@@ -100,21 +98,6 @@ impl Client {
             .quests_done
             .iter()
             .any(|f| f.eq_ignore_ascii_case(flag))
-    }
-
-    /// The nearest NPC whose flag this character's level earns and it does not hold, to visit
-    /// before choosing a ground: the portals it opens are new ways to grounds. `None` once all are
-    /// held, or while a visit to one has lately failed (`skip`).
-    pub(crate) fn unlock_to_earn(
-        &self,
-        skip: &Recent<String>,
-    ) -> Option<&'static ac_world::unlocks::Unlock> {
-        let me = self.my_position()?;
-        let level = self.world.stats.level.max(0) as u32;
-        ac_world::unlocks::earnable(level, &self.travel.quests_done)
-            .into_iter()
-            .filter(|u| skip.since(&u.flag).is_none())
-            .min_by(|a, b| a.at.distance(me).total_cmp(&b.at.distance(me)))
     }
 
     /// Go and talk to `u`'s NPC: a visit, journey and all. False when there is no way.
