@@ -66,6 +66,19 @@ fn a_far_giver_waits_for_a_run_that_passes_unless_its_xp_beats_the_detour() {
 }
 
 #[test]
+fn a_giver_a_long_way_out_is_not_on_the_round_however_cheap_the_way_back() {
+    // From the counter 900 s out; from the giver anywhere 30 s, a recall.
+    let legs = Legs::plan(0.0, &[100.0, 1_000.0], Some(200.0), |a: f32, b: f32| {
+        Some(if a == 1_000.0 { 30.0 } else { (a - b).abs() })
+    });
+    let far = [tail_to(0x1234_0001, 1_000)];
+    assert_eq!(
+        plan_calls(&legs, &[counter_in(HOLTBURG)], &far, None).order,
+        [0]
+    );
+}
+
+#[test]
 fn a_giver_no_journey_reaches_is_refused_when_the_run_is_planned() {
     let legs = legs_on_a_line(0.0, &[100.0, 90.0, 400.0], 200.0, Some(400.0));
     let hand_ins = [tail_to(HOLTBURG, 1_000), tail_to(0x1234_0001, 1_000_000)];

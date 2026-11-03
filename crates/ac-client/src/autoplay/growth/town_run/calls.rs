@@ -77,13 +77,15 @@ pub(crate) fn plan_calls(
             || (0..n).any(|c| leg(Stop::Call(c), Stop::Call(g)).is_some())
     };
     let short = |s: Option<f32>| s.is_some_and(|s| s <= SHORT_LEG);
-    let on_the_round = |g: usize| {
+    // In a counter's town or a short leg out from one, and no more than there and back out of
+    // the way: a cheap recall home makes no giver near.
+    let on_the_round = |g: usize, detour: f32| {
         let block = hand_ins[g - n].row.place.cell >> 16;
-        counters.iter().enumerate().any(|(c, p)| {
-            p.cell >> 16 == block
-                || short(leg(Stop::Call(c), Stop::Call(g)))
-                || short(leg(Stop::Call(g), Stop::Call(c)))
-        })
+        detour <= 2.0 * SHORT_LEG
+            && counters
+                .iter()
+                .enumerate()
+                .any(|(c, p)| p.cell >> 16 == block || short(leg(Stop::Call(c), Stop::Call(g))))
     };
     let secs = |calls: &[usize]| legs.tour(calls).map(|(_, s)| s);
     let mut taken: Vec<usize> = (0..n).collect();
@@ -113,7 +115,7 @@ pub(crate) fn plan_calls(
             continue;
         };
         let detour = base.map_or(w, |b| (w - b).max(0.0));
-        if on_the_round(g) || worth_detour(hand_ins[g - n].xp, detour, xp_per_hour) {
+        if on_the_round(g, detour) || worth_detour(hand_ins[g - n].xp, detour, xp_per_hour) {
             taken = with;
             base = Some(w);
         }
