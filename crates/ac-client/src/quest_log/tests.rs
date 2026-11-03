@@ -100,3 +100,117 @@ fn a_detour_pays_only_once_the_rate_is_measured() {
         "16,667 XP of hunting lost"
     );
 }
+
+fn at_level(level: u32) -> QuestFacts {
+    QuestFacts {
+        level,
+        margin: 8,
+        ..on()
+    }
+}
+
+#[test]
+fn a_kill_task_waits_for_the_level_its_giver_asks_and_its_creatures_suit() {
+    let id = "diremattekarkillcount";
+    assert_eq!(
+        state(id, &at_level(15)),
+        QuestState::CantYet(Blocked::Level { min: 20, max: 0 })
+    );
+    assert_eq!(
+        state(id, &at_level(20)),
+        QuestState::CantYet(Blocked::TooHard { level: 40 }),
+        "Dire Mattekar are level 40, past 20 + 2 * 8"
+    );
+    assert_eq!(
+        state(id, &at_level(25)),
+        QuestState::NotTaken {
+            from: "Fergal the Dire".into()
+        }
+    );
+    let mut off = at_level(15);
+    off.config.on = false;
+    assert!(
+        unsuited_quests(&rows(id), &off).contains(id),
+        "switched off too"
+    );
+    assert!(unsuited_quests(&rows(id), &at_level(20)).contains(id));
+    assert!(unsuited_quests(&rows(id), &at_level(25)).is_empty());
+}
+
+#[test]
+fn a_talk_that_needs_another_quest_first_names_it_until_that_one_is_done() {
+    let id = "topathwarden";
+    let mut facts = at_level(5);
+    assert_eq!(
+        state(id, &facts),
+        QuestState::CantYet(Blocked::NeedsFirst {
+            title: "Sent to the Barkeep".into()
+        })
+    );
+    let alcott = rows("tothebarkeep").remove(0);
+    facts.log.note_done(&alcott, facts.now);
+    assert_eq!(state(id, &facts), QuestState::Ready, "the log's own stamp");
+    let mut flagged = at_level(5);
+    flagged.held.push("ToTheBarkeep".into());
+    assert_eq!(state(id, &flagged), QuestState::Ready, "a flag in any case");
+}
+
+#[test]
+fn a_hand_in_that_needs_a_first_one_names_it_and_its_dropper_rules_out_low_levels() {
+    let id = "give:35407";
+    assert_eq!(
+        state(id, &at_level(20)),
+        QuestState::CantYet(Blocked::TooHard { level: 135 }),
+        "only Captain Burnja drops the board"
+    );
+    assert_eq!(
+        state(id, &at_level(150)),
+        QuestState::CantYet(Blocked::NeedsFirst {
+            title: "Player has already turned in 1 Burnjas Board with nails".into()
+        })
+    );
+}
+
+#[test]
+fn a_giver_behind_a_flagged_portal_is_locked_until_the_flag_is_held() {
+    let id = "tanadahouseoffirecompleted";
+    let mut facts = at_level(100);
+    assert_eq!(
+        state(id, &facts),
+        QuestState::CantYet(Blocked::Locked {
+            flag: "TanadaHouseofFireStarted".into()
+        })
+    );
+    facts.held.push("tanadahouseoffirestarted".into());
+    assert_eq!(state(id, &facts), QuestState::Ready);
+}
+
+#[test]
+fn the_board_is_worked_out_again_at_once_when_quests_are_switched_on_or_the_level_changes() {
+    let mut c = crate::testkit::character_of_level(crate::testkit::no_data(), 15);
+    let t0 = Instant::now();
+    c.refresh_quests(t0);
+    assert!(!c.quest_board.is_empty());
+    assert!(c.quest_board.iter().all(|l| l.state == QuestState::Off));
+    assert!(c.quests_unsuited.contains("diremattekarkillcount"));
+    let soon = t0 + Duration::from_millis(100);
+    c.autoplay.config.quests.on = true;
+    c.refresh_quests(soon);
+    let line = |c: &Client, id: &str| {
+        let l = c.quest_board.iter().find(|l| l.id == id).cloned();
+        l.unwrap().state
+    };
+    assert_eq!(
+        line(&c, "diremattekarkillcount"),
+        QuestState::CantYet(Blocked::Level { min: 20, max: 0 })
+    );
+    c.world.stats.level = 26;
+    c.refresh_quests(soon + Duration::from_millis(100));
+    assert_eq!(
+        line(&c, "diremattekarkillcount"),
+        QuestState::NotTaken {
+            from: "Fergal the Dire".into()
+        }
+    );
+    assert!(!c.quests_unsuited.contains("diremattekarkillcount"));
+}

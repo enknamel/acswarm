@@ -257,6 +257,10 @@ pub struct Client {
     /// Each quest's state for this character, worked out by `refresh_quests`.
     pub quest_board: Vec<quest_log::QuestLine>,
     pub(crate) quest_board_at: Option<Instant>,
+    /// What the board was last worked out for: quests switched on, level, log.
+    pub(crate) quest_board_for: Option<(autoplay::Quests, u32, quest_log::QuestLog)>,
+    /// Quests no giver's band or easiest source suits at this level, switched on or not.
+    pub quests_unsuited: std::collections::BTreeSet<String>,
     /// The giver asked last, while its answer is awaited.
     pub quest_asked: Option<quest_log::Asked>,
     /// Melee combat mode is on.

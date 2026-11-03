@@ -3,11 +3,12 @@
 //! state ([`quest_board`]), worked out every [`QUEST_BOARD_EVERY`]. It sends nothing and decides
 //! nothing; docs/quests-design.md's Seams section says which builder fills which part.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use ac_loot::quest_wants::QuestWant;
-use ac_world::quests::{Kind, Repeat, Row, Want};
+use ac_world::quests::{Kind, Repeat, Row, Want, Yield};
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
 
@@ -157,46 +158,215 @@ pub struct QuestFacts {
 
 /// The state of every quest in `rows`, one line per id, in the data's order.
 pub fn quest_board(rows: &[Row], facts: &QuestFacts) -> Vec<QuestLine> {
+    board_of(rows, facts).0
+}
+
+/// The quests in `rows` no giver's band or easiest source suits at the character's level,
+/// whether switched on or not: what the list's "for my level" leaves out.
+pub fn unsuited_quests(rows: &[Row], facts: &QuestFacts) -> BTreeSet<String> {
+    board_of(rows, facts).1
+}
+
+/// [`quest_board`] and [`unsuited_quests`] in one pass over the rows.
+fn board_of(rows: &[Row], facts: &QuestFacts) -> (Vec<QuestLine>, BTreeSet<String>) {
+    let mut locks = Locks::default();
+    let mut unsuited = BTreeSet::new();
+    let mut board = Vec::new();
+    for (id, doing) in by_quest(rows) {
+        let (Some(first), Some(giver)) = (doing.first(), nearest(&doing, facts.me)) else {
+            continue;
+        };
+        if beyond_level(&doing, &first.want, facts).is_some() {
+            unsuited.insert(id.to_string());
+        }
+        let on = facts.config.is_on(id);
+        board.push(QuestLine {
+            id: id.to_string(),
+            title: first.title.clone(),
+            kind: first.kind,
+            state: if on {
+                state_of(&doing, facts, &mut locks)
+            } else {
+                QuestState::Off
+            },
+            xp: doing
+                .iter()
+                .map(|r| r.reward.xp_at(facts.to_next))
+                .max()
+                .unwrap_or(0),
+            givers: doing.len(),
+            giver: giver.giver.clone(),
+            on,
+        });
+    }
+    (board, unsuited)
+}
+
+/// Each quest's rows that complete it (start rows left out), by id in the data's order.
+fn by_quest(rows: &[Row]) -> Vec<(&str, Vec<&Row>)> {
     let mut ids: Vec<&str> = Vec::new();
     let mut by_id: BTreeMap<&str, Vec<&Row>> = BTreeMap::new();
     for r in rows {
         if !by_id.contains_key(r.id.as_str()) {
             ids.push(&r.id);
         }
-        by_id.entry(&r.id).or_default().push(r);
+        let doing = by_id.entry(&r.id).or_default();
+        if r.kind != Kind::Start {
+            doing.push(r);
+        }
     }
     ids.into_iter()
-        .filter_map(|id| {
-            let all = &by_id[id];
-            let doing: Vec<&Row> = all
-                .iter()
-                .copied()
-                .filter(|r| r.kind != Kind::Start)
-                .collect();
-            let first = *doing.first()?;
-            let near = |r: &&Row| facts.me.map_or(0.0, |m| r.place.at.distance(m));
-            let giver = doing.iter().min_by(|a, b| near(a).total_cmp(&near(b)))?;
-            let on = facts.config.is_on(id);
-            Some(QuestLine {
-                id: id.to_string(),
-                title: first.title.clone(),
-                kind: first.kind,
-                state: if on {
-                    state_of(all, &doing, facts)
-                } else {
-                    QuestState::Off
-                },
-                xp: doing.iter().map(|r| r.reward.xp_at(facts.to_next)).max()?,
-                givers: doing.len(),
-                giver: giver.giver.clone(),
-                on,
-            })
-        })
+        .map(|id| (id, by_id.remove(id).unwrap_or_default()))
         .collect()
 }
 
-/// One switched-on quest's state. Seam (list builder): `CantYet` and level bands are not read yet.
-fn state_of(all: &[&Row], doing: &[&Row], facts: &QuestFacts) -> QuestState {
+/// The row whose giver stands nearest `me` by straight distance; the first with no position.
+fn nearest<'r>(rows: &[&'r Row], me: Option<Vec3>) -> Option<&'r Row> {
+    let near = |r: &&Row| me.map_or(0.0, |m| r.place.at.distance(m));
+    rows.iter()
+        .copied()
+        .min_by(|a, b| near(a).total_cmp(&near(b)))
+}
+
+/// The flag each dungeon landblock's givers are locked behind, worked out once a board.
+#[derive(Default)]
+struct Locks(BTreeMap<u32, Option<&'static str>>);
+
+impl Locks {
+    /// Only a landblock locked with no flag held can be locked with some held, so the few of
+    /// those, found once, are all `Row::locked_by` is asked about.
+    fn of(&mut self, row: &Row, held: &[String]) -> Option<&'static str> {
+        static MAYBE: OnceLock<BTreeSet<u32>> = OnceLock::new();
+        let maybe = MAYBE.get_or_init(|| {
+            let quests = ac_world::quests::all().iter();
+            quests
+                .filter(|r| r.locked_by(&[]).is_some())
+                .map(|r| r.place.cell >> 16)
+                .collect()
+        });
+        let block = row.place.cell >> 16;
+        if !row.place.is_indoors() || !maybe.contains(&block) {
+            return None;
+        }
+        *self.0.entry(block).or_insert_with(|| row.locked_by(held))
+    }
+}
+
+/// The level of the easiest creature yielding `want`: 0 when a placed NPC gives it.
+fn easiest(want: &Want) -> Option<u32> {
+    static EASIEST: OnceLock<BTreeMap<Want, u32>> = OnceLock::new();
+    let map = EASIEST.get_or_init(|| {
+        let mut m: BTreeMap<Want, u32> = BTreeMap::new();
+        for s in ac_world::quests::sources() {
+            let level = if s.kind == Yield::Npc { 0 } else { s.level };
+            let l = m.entry(s.want.clone()).or_insert(level);
+            *l = (*l).min(level);
+        }
+        m
+    });
+    map.get(want).copied()
+}
+
+/// The rows of every quest stamping a flag, by the flag lowercased.
+fn stampers(flag: &str) -> &'static [&'static Row] {
+    static STAMPERS: OnceLock<BTreeMap<String, Vec<&'static Row>>> = OnceLock::new();
+    let map = STAMPERS.get_or_init(|| {
+        let mut m: BTreeMap<String, Vec<&'static Row>> = BTreeMap::new();
+        for r in ac_world::quests::all() {
+            for s in &r.stamps {
+                m.entry(s.to_ascii_lowercase()).or_default().push(r);
+            }
+        }
+        m
+    });
+    map.get(&flag.to_ascii_lowercase())
+        .map_or(&[], Vec::as_slice)
+}
+
+/// Whether the character holds `flag`: a quest flag, a kill task's counter taken up, or a stamp
+/// of a quest the log has done.
+fn holds(facts: &QuestFacts, flag: &str) -> bool {
+    facts.held.iter().any(|h| h.eq_ignore_ascii_case(flag))
+        || facts.log.kills.contains_key(&flag.to_ascii_lowercase())
+        || stampers(flag)
+            .iter()
+            .any(|r| r.kind != Kind::Start && facts.log.done.contains_key(&r.id))
+}
+
+/// The band `rows` cover between them: the lowest minimum, the highest maximum (0 for open).
+fn band(rows: &[&Row]) -> Blocked {
+    let min = rows.iter().map(|r| r.min_level).min().unwrap_or(0);
+    let max = if rows.iter().any(|r| r.max_level == 0) {
+        0
+    } else {
+        rows.iter().map(|r| r.max_level).max().unwrap_or(0)
+    };
+    Blocked::Level { min, max }
+}
+
+/// Why the character's level rules the quest out: no giver's band holds it, or the easiest
+/// source is past `level + 2 * margin` (the bound `Ground::suits` puts on a ground's strays).
+fn beyond_level(doing: &[&Row], want: &Want, facts: &QuestFacts) -> Option<Blocked> {
+    if !doing.iter().any(|r| r.fits_level(facts.level)) {
+        return Some(band(doing));
+    }
+    let level = easiest(want)?;
+    (level > facts.level + 2 * facts.margin).then_some(Blocked::TooHard { level })
+}
+
+/// The giver to talk to first for `flag`, nearest first, or why the character can't yet.
+fn see_first(flag: &str, facts: &QuestFacts, locks: &mut Locks, depth: u32) -> QuestState {
+    let by = stampers(flag);
+    let starts: Vec<&Row> = by
+        .iter()
+        .copied()
+        .filter(|r| r.kind == Kind::Start)
+        .collect();
+    if starts.is_empty() {
+        let title = by.first().map_or(flag, |r| r.title.as_str());
+        return QuestState::CantYet(Blocked::NeedsFirst {
+            title: title.to_string(),
+        });
+    }
+    let fit: Vec<&Row> = starts
+        .iter()
+        .copied()
+        .filter(|r| r.fits_level(facts.level))
+        .collect();
+    if fit.is_empty() {
+        return QuestState::CantYet(band(&starts));
+    }
+    let mut open: Vec<&Row> = fit
+        .iter()
+        .copied()
+        .filter(|r| locks.of(r, &facts.held).is_none())
+        .collect();
+    if open.is_empty() {
+        return QuestState::CantYet(Blocked::Locked {
+            flag: locks
+                .of(fit[0], &facts.held)
+                .unwrap_or_default()
+                .to_string(),
+        });
+    }
+    let near = |r: &&Row| facts.me.map_or(0.0, |m| r.place.at.distance(m));
+    open.sort_by(|a, b| near(a).total_cmp(&near(b)));
+    let unmet = |r: &Row| r.needs.iter().find(|n| !holds(facts, n)).cloned();
+    if let Some(r) = open.iter().find(|r| unmet(r).is_none()) {
+        return QuestState::NotTaken {
+            from: r.giver.clone(),
+        };
+    }
+    match unmet(open[0]) {
+        Some(need) if depth < 3 => see_first(&need, facts, locks, depth + 1),
+        _ => QuestState::CantYet(Blocked::NeedsFirst {
+            title: open[0].title.clone(),
+        }),
+    }
+}
+
+/// One switched-on quest's state: done or waiting, then what rules it out, then what is left.
+fn state_of(doing: &[&Row], facts: &QuestFacts, locks: &mut Locks) -> QuestState {
     let first = doing[0];
     if let Some(until) = facts.log.wait_until(&first.timer, facts.now) {
         return QuestState::Waiting { until };
@@ -204,17 +374,40 @@ fn state_of(all: &[&Row], doing: &[&Row], facts: &QuestFacts) -> QuestState {
     if first.repeat == Repeat::Once && facts.log.done.contains_key(&first.id) {
         return QuestState::Done;
     }
-    match &first.want {
+    if let Some(why) = beyond_level(doing, &first.want, facts) {
+        return QuestState::CantYet(why);
+    }
+    let fit: Vec<&Row> = doing
+        .iter()
+        .copied()
+        .filter(|r| r.fits_level(facts.level))
+        .collect();
+    let open: Vec<&Row> = fit
+        .iter()
+        .copied()
+        .filter(|r| locks.of(r, &facts.held).is_none())
+        .collect();
+    if open.is_empty() {
+        let flag = locks.of(fit[0], &facts.held).unwrap_or_default();
+        return QuestState::CantYet(Blocked::Locked {
+            flag: flag.to_string(),
+        });
+    }
+    let taken: Vec<&Row> = open
+        .iter()
+        .copied()
+        .filter(|r| r.needs.iter().all(|n| holds(facts, n)))
+        .collect();
+    let Some(&row) = taken.first() else {
+        let need = open[0].needs.iter().find(|n| !holds(facts, n));
+        return see_first(need.map_or("", String::as_str), facts, locks, 0);
+    };
+    match &row.want {
         Want::Kill(counter) => match facts.log.kills.get(counter) {
-            None => QuestState::NotTaken {
-                from: all
-                    .iter()
-                    .find(|r| r.kind == Kind::Start)
-                    .map_or_else(|| first.giver.clone(), |r| r.giver.clone()),
-            },
-            Some(&n) if n < first.count => QuestState::Needs {
-                more: first.count - n,
-                of: ac_world::quests::sources_of(&first.want)
+            None => see_first(counter, facts, locks, 0),
+            Some(&n) if n < row.count => QuestState::Needs {
+                more: row.count - n,
+                of: ac_world::quests::sources_of(&row.want)
                     .next()
                     .map_or_else(|| counter.clone(), |s| s.name.clone()),
             },
@@ -222,7 +415,7 @@ fn state_of(all: &[&Row], doing: &[&Row], facts: &QuestFacts) -> QuestState {
         },
         Want::Item(wcid) => {
             let held = facts.carried.get(wcid).copied().unwrap_or(0);
-            let item = first.item.as_ref();
+            let item = row.item.as_ref();
             let blocked = item.and_then(|i| {
                 crate::autoplay::quest_item_blocked(
                     facts.profile.as_deref(),
@@ -232,7 +425,7 @@ fn state_of(all: &[&Row], doing: &[&Row], facts: &QuestFacts) -> QuestState {
                     held,
                 )
             });
-            let need = doing.iter().map(|r| r.count).min().unwrap_or(1);
+            let need = taken.iter().map(|r| r.count).min().unwrap_or(1);
             match blocked {
                 Some((rule, does)) => QuestState::WontComplete { rule, does },
                 None if held >= need => QuestState::Ready,
@@ -335,17 +528,26 @@ impl Client {
         }
     }
 
-    /// Work the board out again when [`QUEST_BOARD_EVERY`] has passed, into `quest_board`.
+    /// Work the board out again when [`QUEST_BOARD_EVERY`] has passed, or at once when the
+    /// quests switched on, the level or the log changed, into `quest_board`.
     pub fn refresh_quests(&mut self, now: Instant) {
+        let cfg = &self.autoplay.config.quests;
+        let level = self.world.stats.level.max(0) as u32;
+        let changed = self
+            .quest_board_for
+            .as_ref()
+            .is_none_or(|(q, l, log)| q != cfg || *l != level || *log != self.quest_log);
         let due = self
             .quest_board_at
             .is_none_or(|at| now.duration_since(at) >= QUEST_BOARD_EVERY);
         let settled = !self.quest_board.is_empty() && !self.quest_board.iter().any(|l| l.on);
-        if !due || (!self.autoplay.config.quests.on && settled) {
+        if !changed && (!due || (!cfg.on && settled)) {
             return;
         }
+        self.quest_board_for = Some((cfg.clone(), level, self.quest_log.clone()));
         self.quest_board_at = Some(now);
-        self.quest_board = quest_board(ac_world::quests::all(), &self.quest_facts());
+        (self.quest_board, self.quests_unsuited) =
+            board_of(ac_world::quests::all(), &self.quest_facts());
     }
 
     /// Go and see `row`'s giver: a visit, journey and all. False when there is no way.
