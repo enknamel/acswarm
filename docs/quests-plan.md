@@ -58,8 +58,9 @@ stop is a `Place` with its cell, so a giver in a dungeon is as reachable as a co
    built (`autoplay/growth/quest_bonus.rs`, `hunting::ranked_with`); a ready kill or talk quest's
    giver is a town run call (step 4); going to a giver to take a quest up is not built.
 4. Item turn-ins and the errand run with many stops. Built (branch `quests-errand`): `ac_world::tour`,
-   the run's calls and hand-ins (`town_run/calls.rs`); the "you must wait" row is step 3's.
-   `Client::xp_per_hour` is still `None`, so only the short-leg rule adds a call.
+   the run's calls and hand-ins (`town_run/calls.rs`). Not built: the "you must wait" refusal
+   row (the wait comes from the data only); `Client::xp_per_hour` is `None`, so only the short-leg
+   rule adds a call.
 
 Later: items picked up off the ground rather than from corpses. Starts after movement phase 4
 merges: the errand run is built on phase 4's journeys, whose steps keep their cells.
