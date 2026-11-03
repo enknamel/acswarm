@@ -151,8 +151,8 @@ fn a_collector_is_handed_every_tail_one_at_a_time_and_the_run_ends_when_none_is_
     assert_eq!(c.grow_run_step(now, &cfg), Turn::Over);
     assert!(c.autoplay.growth.run.is_none());
     assert!(
-        !c.autoplay.growth.run_was_futile,
-        "a run that handed in is not futile"
+        c.autoplay.growth.run_was_futile,
+        "handing in sells and buys nothing: the next run waits as after any futile one"
     );
 }
 

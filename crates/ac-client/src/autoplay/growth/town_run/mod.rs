@@ -168,8 +168,6 @@ pub(crate) struct Run {
     pub(super) walking_up: bool,
     /// The calls still to make after this one, in the order planned (see [`calls`]).
     pub(super) calls: Vec<calls::Call>,
-    /// Hand-ins the givers took on this run.
-    pub(super) handed: u32,
 }
 
 /// What one turn of a run to town came to.
@@ -267,7 +265,7 @@ impl Client {
                 now,
             );
         }
-        cfg.town_runs && (self.grow_town_run(now, &cfg) || self.grow_hand_in_run(now))
+        cfg.town_runs && self.grow_town_run(now, &cfg)
     }
 
     /// The order a stop's counter is looked for in, the first stop and every one after: a supply
@@ -643,7 +641,6 @@ impl Client {
             walked_on: None,
             walking_up: false,
             calls: Vec::new(),
-            handed: 0,
         });
         self.autoplay.say(
             Doing::Shopping,

@@ -26,8 +26,6 @@ const GIVE_PAUSE: Duration = Duration::from_secs(3);
 const GIVE_STALLS: u32 = 3;
 /// Visits begun to one giver on one call before it is given up.
 const GIVER_TRIES: u32 = 3;
-/// How often ready hand-ins are looked at for a run of their own.
-const HAND_IN_LOOK_EVERY: Duration = Duration::from_secs(60);
 /// A giver this near (metres, 3D) is in reach of a give: the visit's talking reach, with slack.
 const GIVER_REACH: f32 = crate::visit::REACH + 1.0;
 
@@ -321,73 +319,6 @@ impl Client {
         }
     }
 
-    /// A run made only to hand in, when ready hand-ins pay for the round trip at the character's
-    /// XP per hour (design §5.3). True when one set off.
-    pub(super) fn grow_hand_in_run(&mut self, now: Instant) -> bool {
-        let st = &self.autoplay.growth;
-        let due = st
-            .hand_ins_looked
-            .is_none_or(|t| now.duration_since(t) >= HAND_IN_LOOK_EVERY);
-        if !self.autoplay.config.quests.on || st.run.is_some() || st.stopped_in_town || !due {
-            return false;
-        }
-        let Some(rate) = self.xp_per_hour() else {
-            return false;
-        };
-        let own_walk = st.bound.is_some() || self.travel_about_the_ground();
-        if self.in_a_fight() || (self.traveling() && !own_walk) {
-            return false;
-        }
-        self.autoplay.growth.hand_ins_looked = Some(now);
-        let Some(me) = self.my_position() else {
-            return false;
-        };
-        let hand_ins = self.ready_hand_ins(&[me.truncate()], EVERY_ORDER, now);
-        if hand_ins.is_empty() {
-            return false;
-        }
-        let places: Vec<Place> = hand_ins.iter().map(|h| h.row.place).collect();
-        let Some(legs) = self.plan_legs(&places) else {
-            return false;
-        };
-        let planned = plan_calls(&legs, &[], &hand_ins, Some(rate));
-        self.refuse_givers(&hand_ins, &planned.refused, now);
-        let mut calls: Vec<Call> = planned
-            .order
-            .iter()
-            .map(|&g| giver_call(hand_ins[g].row))
-            .collect();
-        if calls.is_empty() {
-            return false;
-        }
-        let first = calls.remove(0);
-        let mut run = Run {
-            vendor: String::new(),
-            at: first.at.at.truncate(),
-            phase: Phase::Going,
-            since: now,
-            last_sell: None,
-            town: first.at.at.truncate(),
-            stops: 0,
-            sold: 0,
-            reason: "hand-ins worth the trip".to_string(),
-            errand: Errand::Buy,
-            visited: Vec::new(),
-            walked_on: None,
-            walking_up: false,
-            calls,
-            handed: 0,
-        };
-        let st = &mut self.autoplay.growth;
-        st.drop_ground_walk();
-        st.by_hand = false;
-        if !self.make_call(&mut run, first, now) {
-            return self.next_call(run, now).is_none();
-        }
-        self.autoplay.growth.run = Some(run);
-        true
-    }
-
     /// Make `call` the run's call in hand and set off for it. False when there is no way.
     fn make_call(&mut self, run: &mut Run, call: Call, now: Instant) -> bool {
         run.since = now;
@@ -480,7 +411,6 @@ impl Client {
                     if row.hand == Hand::Talk {
                         // The visit's use was the hand-in: kills done, a talk, items it takes.
                         self.ask_giver(row, now);
-                        run.handed += 1;
                         self.autoplay
                             .note(format!("talked to {} for {}", row.giver, row.title), now);
                         return self.giver_done(run, now, cfg);
@@ -543,7 +473,6 @@ impl Client {
         if let Some((at, before)) = last {
             if carried < before {
                 taken += 1;
-                run.handed += 1;
                 stalls = 0;
             } else if now.duration_since(at) < GIVE_PAUSE {
                 self.autoplay.growth.run = Some(run);

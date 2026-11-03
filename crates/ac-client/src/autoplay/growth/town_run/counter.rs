@@ -668,7 +668,6 @@ impl Client {
                         walked_on: None,
                         walking_up: false,
                         calls: run.calls,
-                        handed: run.handed,
                     });
                     return true;
                 }
@@ -705,7 +704,7 @@ impl Client {
         // A trip that neither bought nor sold anything achieved
         // nothing, and starting another at once achieves nothing again:
         // that is the running back and forth between vendors for ever.
-        let futile = run.sold == 0 && run.handed == 0 && !self.autoplay.growth.bought_anything;
+        let futile = run.sold == 0 && !self.autoplay.growth.bought_anything;
         let st = &mut self.autoplay.growth;
         st.run_was_futile = futile;
         st.bought_anything = false;
