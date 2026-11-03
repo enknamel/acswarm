@@ -1,25 +1,8 @@
-//! Coming back from a death.
-//!
-//! A character that dies wakes at its lifestone with its buffs purged, a
-//! vitae penalty, and its best gear lying on a corpse where it fell.
-//! Left to the other rules it would stand there, or worse, walk off to
-//! hunt with nothing in its hands. This module is the rule that runs
-//! first after "stay alive": it notices the death, waits out the
-//! respawn, puts the buffs back, walks to the corpse, empties it, wields
-//! what was wielded, and hands the character back to whatever it was
-//! doing.
-//!
-//! The decisions live in [`Recovery`], a state machine fed a [`View`] of
-//! the world each tick and answering with one [`Action`]; it touches no
-//! client state, so the transitions are tested without a server. The
-//! [`Client`] side gathers the view and carries out the action.
-//!
-//! Two things are given up on rather than waited for forever: a corpse
-//! that cannot be reached within `Survive::corpse_minutes`, and one that
-//! has killed the character again on the way back. Vitae is not waited
-//! out (it wears off with experience, not time); instead, while it is
-//! over `Survive::vitae_above` the fight rules leave the hard targets
-//! and the killer alone (see [`Client::shy_of`]).
+//! Coming back from a death (at the lifestone, buffs purged, vitae, gear on the corpse): first
+//! after "survive", it waits out the respawn, rebuffs, walks to the corpse, empties it, rewields
+//! and hands back. [`Recovery`] decides from a [`View`], one [`Action`] a tick, no client state.
+//! Given up: a corpse not reached in `Survive::corpse_minutes`, or one that killed again. Vitae
+//! (worn off by experience) is not waited out: past `Survive::vitae_above`, see [`Client::shy_of`].
 
 use std::time::{Duration, Instant};
 

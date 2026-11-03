@@ -1,18 +1,8 @@
-//! Walking a dungeon to find the fight in it.
-//!
-//! The server describes a dungeon a room at a time: the creatures in
-//! the cell the character stands in and in the cells that one can see,
-//! and nothing else. Holtburg Dungeon holds fifty-eight creatures
-//! across seventy-four rooms and the room its portal drops you in holds
-//! none of them -- only two monster generators, which are server-side
-//! and never described to anybody. A character that arrives and waits
-//! for something to fight therefore waits for ever and reports an empty
-//! dungeon. It was never empty; it was never walked.
-//!
-//! Which doorway to take is [`ac_nav::explore::next_step`] and is
-//! tested there. This is the part that needs a world: which cells there
-//! are, where their thresholds lie, and handing the one we pick to the
-//! travel system like every other destination.
+//! Walking a dungeon to find the fight in it: the server describes only the cell the character
+//! stands in and the cells visible from it (Holtburg Dungeon: 58 creatures in 74 rooms, none in its
+//! portal room, whose two generators are server-side and never described), so waiting finds none.
+//! Which doorway is [`ac_nav::explore::next_step`]; this half reads the cells and their thresholds
+//! and walks into the room chosen, to [`spot_in_room`].
 
 use crate::autoplay::Doing;
 use crate::did::Did;
@@ -27,13 +17,11 @@ use std::time::{Duration, Instant};
 /// way on (Mountain Keep's landing, three rooms out of reach, went round every 7 s).
 pub const RESTART_EVERY: Duration = Duration::from_secs(60);
 
-/// How far past a threshold to aim. A threshold is the line between
-/// two rooms: walk to it exactly and the character stops standing in
-/// the room it started in, the server goes on describing that room and
-/// no other, and the dungeon stays as empty as it looked.
+/// How far past a threshold to aim (metres): stood on the line itself, the server goes on
+/// describing the room the character came from, and no other.
 const PAST_THE_DOOR: f32 = 2.5;
 
-/// How close to the aiming point counts as being there.
+/// The walk into a room ends within this of its spot (metres, 3D).
 const STOP: f32 = 1.0;
 
 /// The dungeon's rooms and what opens on to what.
@@ -44,9 +32,8 @@ impl Doors for Rooms<'_> {
         let Some(room) = self.0.iter().find(|c| c.cell_id == cell) else {
             return Vec::new();
         };
-        // Only openings into other rooms of this dungeon. A portal to
-        // the outdoors is the way out, not somewhere to explore, and it
-        // names a cell that is not in this list.
+        // Only openings into this dungeon's rooms: a portal outdoors is the way out, and names a
+        // cell not in this list.
         room.portal_cells
             .iter()
             .copied()
@@ -63,22 +50,8 @@ pub struct RoomWalk {
     pub at: Place,
 }
 
-/// The point to aim at to be through a doorway whose sill is at `sill`
-/// and whose wall stands across `normal` (a unit vector on the map,
-/// pointing either way through it), coming from `from` and facing
-/// `facing`: `past` metres beyond the sill, straight through the wall,
-/// on the far side from where we came.
-///
-/// Straight through, not along the line we approached on: a character
-/// coming at a corridor's door from the corner of the room before it
-/// was sent two and a half metres past the sill on that diagonal, into
-/// the corridor's side wall, where there was no floor to reach and every
-/// step was a centimetre of jitter for ten seconds. Which side is the
-/// far side is read off where we stand; standing on the sill itself
-/// there is no side, and the way we face -- the way we were walking --
-/// says. Aiming at the sill from the sill was the other stall: the walk
-/// had arrived by its own measure while the server still had the
-/// character in the room it started in.
+/// `past` metres beyond `sill` along the wall's `normal` (on the map, either sign), on the far side
+/// from `from`, else (on the sill) the way `facing` points: through the wall, not on the approach.
 fn past_the_door(sill: Vec3, normal: Vec3, from: Vec3, facing: glam::Vec2, past: f32) -> Vec3 {
     let across = glam::Vec2::new(sill.x - from.x, sill.y - from.y);
     let n = glam::Vec2::new(normal.x, normal.y);
@@ -120,10 +93,8 @@ fn nearest_door(cells: &[CellScene], room: u32, from: Vec3) -> Option<(Vec3, Vec
     Some((sill, normal))
 }
 
-/// Where to walk to to be in `room`: through the opening between us and
-/// it, and a couple of paces beyond, so that the character ends up
-/// inside rather than standing in the doorway. `facing` is the way the
-/// character is pointing, for when it stands on the sill already.
+/// Where to walk to be in `room`: [`past_the_door`] of its doorway nearest `from` (`facing` decides
+/// on the sill), or the middle of the cell when the data has no opening.
 fn way_into(
     cells: &[CellScene],
     room: u32,
@@ -162,9 +133,8 @@ fn facing(heading: f32) -> glam::Vec2 {
 }
 
 impl Client {
-    /// The place a walk into `room` aims for past its sill, at `aim`: [`spot_in_room`] of what
-    /// stands within [`PAST_THE_DOOR`], else (none built there yet) `aim` in the room's cell,
-    /// which the planner puts on the room's floor or refuses.
+    /// Where a walk into `room` ends for `aim`: [`spot_in_room`] within [`PAST_THE_DOOR`], else
+    /// (none built there yet) `aim` in the room's cell, which the planner floors or refuses.
     fn room_goal(&mut self, room: u32, aim: Vec3) -> Place {
         let spots = self.standable_near(aim, PAST_THE_DOOR);
         spot_in_room(&spots, room, aim).unwrap_or(Place {
@@ -173,23 +143,11 @@ impl Client {
         })
     }
 
-    /// With nothing to fight and nothing to loot, and underground: step
-    /// into a room we have not been in. Claims the tick while it has
-    /// somewhere to go.
+    /// Underground with nothing to fight or loot: walk into a room not yet stood in. Claims the
+    /// tick while it has somewhere to go.
     pub fn autoplay_explore(&mut self, now: Instant) -> bool {
-        // A journey that passes through somewhere enclosed -- the Town
-        // Network hub reads as a dungeon, and so does a dungeon crossed
-        // on the way out -- is not an invitation to explore it. Walking
-        // to the next room hands the steering a nearby goal, and a
-        // nearby goal ends the journey outright: that is how a run to
-        // town came through the hub and never left it.
-        //
-        // Nor is a run to town between journeys an invitation. A corpse on
-        // the way ends the run's journey, and a room chosen then would keep
-        // the tick from the run's own step for good, round every room and
-        // back again: its walk never planned again, its clock never read,
-        // and the character exploring and filling up and never selling. Another row's visit is one
-        // too (`grows_visit_across_the_facility_hub_is_not_taken_exploring`).
+        // Not on a journey (the hub, a dungeon crossed), another row's visit or a town run: a
+        // room takes that row's tick (grows_visit_across_the_facility_hub_is_not_taken_exploring).
         if self.traveling()
             || (self.visiting().is_some() && !self.is_own_visit())
             || self.autoplay.growth.town_run_under_way()
@@ -222,11 +180,8 @@ impl Client {
         }
         let me = pl.world_position();
         let facing = facing(pl.heading);
-        // Outside the hunting area's dungeon there is nothing here to look
-        // for: keeping to the area takes the character back to it. Inside
-        // it, a room that is not one of the area's own is walked through
-        // on the way to one that is -- bailing out there put the character
-        // back in the room it had just left, and round again.
+        // Outside the area's dungeon, keeping to the area takes it back; inside, a room not the
+        // area's own is walked through to one that is (stopping there went back and round again).
         let elsewhere = match self.autoplay.config.fight.area.as_ref().map(|a| &a.shape) {
             None => false,
             Some(crate::hunt::Shape::Dungeon { landblock, .. }) => {
@@ -246,9 +201,8 @@ impl Client {
         self.autoplay.rooms_shut.remove(&cell);
 
         if let Some(RoomWalk { from, room, at }) = self.autoplay.room_bound {
-            // Arriving is the server putting us in the room, or in one not walked yet (progress, the
-            // next doorway chosen from there); a walked room on the route is not, or 0x21A and 0x216
-            // took turns (exploring_does_not_pace_between_two_rooms).
+            // Arrived: in the room, or in one not walked yet, where the next doorway is chosen; not
+            // in a walked room on the way (exploring_does_not_pace_between_two_rooms).
             if cell == room || (cell != from && new_here) {
                 self.autoplay.rooms_seen.insert(room);
                 self.autoplay.room_bound = None;
@@ -305,9 +259,8 @@ impl Client {
                     return false;
                 }
                 self.autoplay.rooms_restarted = Some(now);
-                // The whole dungeon walked. What we came for has respawned
-                // behind us, so it is walked again rather than left, and the
-                // rooms that would not open are given another chance.
+                // The whole dungeon walked: what we came for has respawned behind us, so it is
+                // walked again, and the rooms that would not open are tried again.
                 self.autoplay.rooms_seen.clear();
                 self.autoplay.rooms_shut.clear();
                 self.autoplay.rooms_seen.insert(cell);

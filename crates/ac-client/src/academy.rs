@@ -1,26 +1,8 @@
-//! Getting a new character through the Training Academy.
-//!
-//! Every character ACE creates starts in the academy (landblock 0x8602)
-//! and its exit portal wants the Sentry's quest done, so a character
-//! played by the rules -- a follower made from the fleet panel, say --
-//! would stand in the first room for ever. This rule runs whenever the
-//! character is in that landblock: it walks the tutorial's steps
-//! (`ac_world::academy`), talking to the agents, fighting what they ask
-//! for, handing over what they want and walking into the portals, and
-//! stops the moment the character is anywhere else.
-//!
-//! The decisions live in [`State`], a step machine fed a [`View`] of the
-//! world each tick and answering with one [`Action`]; it touches no
-//! client state, so the transitions are tested without a server. The
-//! [`Client`] side gathers the view and carries the action out with the
-//! ordinary means: a walk goal (`Client::follow`), `use_object`, `give`,
-//! `pick_up`, and the fight rule pointed at the creatures a step names.
-//!
-//! What the agents say is the only word on the quests (the server keeps
-//! the stamps to itself), so every talk listens: an agent's "already
-//! done" line skips the rest of its quest, which is how a character
-//! coming back from a death, or a restarted client, picks up where it
-//! was. A portal that works is proof of the quest before it too.
+//! The Training Academy (landblock 0x8602), where ACE starts every character and whose exit portal
+//! wants the Sentry's quest: while there, its steps (`ac_world::academy`) are walked. [`State`]
+//! decides from a [`View`], one [`Action`] a tick, with no client state; [`Client`] acts by `go`,
+//! `use_object`, `give`, `pick_up` and the fight rule. An agent's "already done" skips its quest
+//! (the server keeps the stamps), so a death or restart resumes; a portal that works proves it too.
 
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
