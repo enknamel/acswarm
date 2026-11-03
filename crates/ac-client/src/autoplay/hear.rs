@@ -6,6 +6,10 @@ use super::KILL_SPOT;
 use crate::refusals::OpenRefusal;
 use crate::Client;
 
+/// Resists of a target's debuff before it is fought as it is: a high magic defence is not a
+/// reason to spend a character's mana on one creature.
+const DEBUFF_TRIES: u8 = 3;
+
 /// The creature a line says was reached and not hurt: "X resists your
 /// spell" (ACE `TryResistSpell`, projectile or not) or "X evades your
 /// attack.". Either way the shot got there.
@@ -123,6 +127,7 @@ impl Client {
             .into_iter()
             .flatten()
             .find(|g| self.world.objects.get(g).is_some_and(|o| o.name == name));
+        self.hear_debuff_resisted(name);
         if let Some(g) = target {
             self.autoplay.thrown = self.autoplay.thrown.filter(|(t, _)| *t != g);
             // Resisted or evaded, it still got there: the target is in
@@ -135,6 +140,48 @@ impl Client {
                 }
             }
         }
+    }
+
+    /// `name` resisted a spell: when it is the debuff last sent, it is cast again, up to
+    /// `DEBUFF_TRIES` resists, whenever the fight still finds it worth casting.
+    fn hear_debuff_resisted(&mut self, name: &str) {
+        let Some((g, stage)) = self.autoplay.debuff_sent else {
+            return;
+        };
+        if self.world.objects.get(&g).is_none_or(|o| o.name != name) {
+            return;
+        }
+        self.autoplay.debuff_sent = None;
+        let resists = &mut self.autoplay.debuff_resists;
+        let n = match resists.iter_mut().find(|(t, _)| *t == g) {
+            Some((_, n)) => {
+                *n += 1;
+                *n
+            }
+            None => {
+                if resists.len() > 64 {
+                    resists.drain(..32);
+                }
+                resists.push((g, 1));
+                1
+            }
+        };
+        if n >= DEBUFF_TRIES {
+            return;
+        }
+        let a = &mut self.autoplay;
+        if stage == 0 {
+            a.vulned.retain(|t| *t != g);
+        } else {
+            a.debuffed.retain(|t| *t != g);
+        }
+        // Softening steps back to the stage resisted; a vuln cast on its own has no entry.
+        match a.softening.iter_mut().find(|(t, _)| *t == g) {
+            Some(entry) => entry.1 = stage,
+            None if stage == 1 => a.softening.push((g, 1)),
+            None => {}
+        }
+        tracing::info!("{name} resisted the debuff ({n} of {DEBUFF_TRIES}); casting it again");
     }
 
     /// A shot has gone out at `guid`: the clock on it getting there

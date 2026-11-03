@@ -355,3 +355,46 @@ fn every_body_opened_is_counted_for_the_panel_however_it_was_let_go() {
         }
     );
 }
+
+#[test]
+fn everything_on_our_own_body_is_taken_whatever_the_room_rules_say() {
+    // Off our own corpse every item comes back: no loot weight limit, no slots kept for a
+    // counter's coin, only the server's own refusal leaves one there.
+    let now = Instant::now();
+    let mut c = crate::testkit::offline_client();
+    c.world.stats.name = "Verity".into();
+    let (own, theirs, item) = (0x8000_3001, 0x8000_3002, 0x8000_3003);
+    let body = |guid: u32, name: &str| ac_world::WorldObject {
+        guid,
+        name: name.into(),
+        object_desc_flags: ac_world::object_desc_flags::CORPSE,
+        ..Default::default()
+    };
+    c.world.objects.insert(own, body(own, "Corpse of Verity"));
+    c.world
+        .objects
+        .insert(theirs, body(theirs, "Corpse of Drudge Slave"));
+    c.world.objects.insert(
+        item,
+        ac_world::WorldObject {
+            guid: item,
+            name: "Dinner Plate".into(),
+            container: Some(own),
+            ..Default::default()
+        },
+    );
+    let profile = crate::profile::Profile::default();
+    assert!(c.is_own_corpse(own) && !c.is_own_corpse(theirs));
+    let at = c.corpse_now(own, &[item], &profile, now, now);
+    assert_eq!((at.carry_room, at.keep_free), (u32::MAX, 0));
+    assert_eq!(at.items.len(), 1, "arriving: {:?}", at.arriving);
+    assert!(
+        at.items
+            .iter()
+            .all(|i| matches!(i.verdict, ac_loot::Verdict::Take(_))),
+        "{:?}",
+        at.items
+    );
+    let at = c.corpse_now(theirs, &[], &profile, now, now);
+    assert_eq!(at.keep_free, c.autoplay.config.team.restock.keep_slots);
+}

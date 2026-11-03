@@ -37,20 +37,6 @@ pub struct Growth {
     /// than a walk to a door that will not open. Society membership is
     /// not listed here: the character carries that itself.
     pub gates_open: Vec<String>,
-    /// Loot taken for a counter is reason enough for a run to town on
-    /// its own -- the pack need not be full nor a supply short -- once
-    /// it is worth this much at face value, in pyreals. 0 turns the
-    /// rule off. See `worth_a_sale_run`.
-    pub sell_run_value: u32,
-    /// The same, once this many things are being carried for a
-    /// counter, whatever they are worth: they are slots as well as
-    /// money. 0 turns the rule off.
-    pub sell_run_count: u32,
-    /// The same, once anything has been carried for a counter this
-    /// long, in seconds, however little it is: one Lead Pea is not
-    /// worth a trip, but it is not worth carrying about all afternoon
-    /// either. 0 turns the rule off.
-    pub sell_run_patience: f32,
 }
 
 impl Default for Growth {
@@ -65,21 +51,6 @@ impl Default for Growth {
             town_runs: true,
             ammo_keep: 250,
             gates_open: Vec::new(),
-            // Five thousand at face is a few thousand in hand at any
-            // counter's rate: minutes of hunting at the levels a
-            // character first carries loot, and worth the minutes the
-            // walk costs. An Iron Pea and a Lead Pea, three thousand
-            // between them, are not -- they go on the count or the
-            // patience.
-            sell_run_value: 5_000,
-            // Eight things for a counter is an armful: slots are going,
-            // and it is well short of the pack filling by itself.
-            sell_run_count: 8,
-            // A quarter of an hour, near twice the least wait between
-            // runs (`RUN_EVERY`): a character with one pea to sell goes
-            // at most once in that while, and is not still carrying it
-            // at dinner.
-            sell_run_patience: 15.0 * 60.0,
         }
     }
 }

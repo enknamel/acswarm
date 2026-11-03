@@ -381,7 +381,7 @@ fn describe_as(client: &ac_client::Client, session: usize, with_supplies: bool) 
         salvaging: client.salvaging(),
         has_ust: client.salvage_tool().is_some(),
         supplies: if with_supplies {
-            client.supplies(&client.autoplay.config.growth, Instant::now())
+            client.supplies(&client.autoplay.config.growth)
         } else {
             Default::default()
         },

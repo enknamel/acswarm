@@ -601,8 +601,12 @@ impl Player {
         }
         let old = self.world_position();
         let world = old + vel * dt;
-        let blk = block_of(world);
         let dungeon = self.is_indoors() && self.in_dungeon(assets);
+        let blk = if dungeon {
+            self.landblock()
+        } else {
+            block_of(world)
+        };
         let cap = self.capsule;
         let floor = self
             .collision(assets, blk)
@@ -991,16 +995,27 @@ impl Player {
     pub fn sees(&mut self, assets: &Assets, from: Vec3, to: Vec3) -> bool {
         let eyes = from + Vec3::new(0.0, 0.0, 1.4);
         let chest = to + Vec3::new(0.0, 0.0, 1.0);
-        let mut blocks = vec![self.landblock()];
-        for b in [block_of(from), block_of(to)] {
-            if !blocks.contains(&b) {
-                blocks.push(b);
-            }
-        }
+        let blocks = self.solid_blocks(assets, self.landblock(), &[from, to]);
         !blocks.iter().any(|&blk| {
             self.collision(assets, blk)
                 .is_some_and(|c| c.world.segment_hit(eyes, chest).is_some())
         })
+    }
+
+    /// The blocks whose geometry stands between `points` for a body in `own`'s block: that block
+    /// and those under the points, or in a dungeon only its own (its cells overlap other dungeons).
+    fn solid_blocks(&mut self, assets: &Assets, own: u32, points: &[Vec3]) -> Vec<u32> {
+        let own = own & 0xFFFF_0000;
+        let mut blocks = vec![own];
+        if self.collision(assets, own).is_some_and(|c| c.dungeon) {
+            return blocks;
+        }
+        for b in points.iter().map(|p| block_of(*p)) {
+            if !blocks.contains(&b) {
+                blocks.push(b);
+            }
+        }
+        blocks
     }
 
     /// Whether a projectile flying `path` (world points in order, as
@@ -1022,11 +1037,7 @@ impl Player {
         assets: &Assets,
         path: &[Vec3],
     ) -> Vec<Rc<BlockCollision>> {
-        let mut blocks: Vec<u32> = path.iter().map(|p| block_of(*p)).collect();
-        blocks.push(self.landblock());
-        blocks.sort_unstable();
-        blocks.dedup();
-        blocks
+        self.solid_blocks(assets, self.landblock(), path)
             .iter()
             .filter_map(|&b| self.collision(assets, b))
             .collect()
@@ -1052,12 +1063,7 @@ impl Player {
     /// Whether the straight walk from `from` (feet, in `cell`) to `to` is blocked: the dodge
     /// sidestep's room check, the chest line over the blocks under it and then the body's own step.
     pub fn line_blocked(&mut self, assets: &Assets, cell: u32, from: Vec3, to: Vec3) -> bool {
-        let mut blocks = vec![cell & 0xFFFF_0000];
-        for b in [block_of(from), block_of(to)] {
-            if !blocks.contains(&b) {
-                blocks.push(b);
-            }
-        }
+        let blocks = self.solid_blocks(assets, cell, &[from, to]);
         if blocks.iter().any(|&blk| {
             self.collision(assets, blk)
                 .is_some_and(|c| !nav::line_clear(&c.world, from, to))
@@ -1110,10 +1116,7 @@ impl Player {
     /// Fraction along `from`..`to` where static geometry first blocks the
     /// segment, if it does.
     pub fn first_wall(&mut self, assets: &Assets, from: Vec3, to: Vec3) -> Option<f32> {
-        let mut blocks = vec![block_of(from)];
-        if block_of(to) != blocks[0] {
-            blocks.push(block_of(to));
-        }
+        let blocks = self.solid_blocks(assets, self.landblock(), &[from, to]);
         let mut best: Option<f32> = None;
         for blk in blocks {
             if let Some(c) = self.collision(assets, blk) {
@@ -1310,16 +1313,20 @@ impl Player {
             }
         }
         let target = old + step;
-        // Static geometry of the block we're moving into and the one we're
-        // leaving, at a boundary.
-        let mut blocks = vec![block_of(target)];
-        if self.landblock() != blocks[0] {
-            blocks.push(self.landblock());
-        }
         let cap = self.capsule;
         let cell = self.cell;
         let indoors = self.is_indoors();
         let dungeon = indoors && self.in_dungeon(assets);
+        // Static geometry of the block we're moving into and the one we're leaving, at a boundary.
+        // A dungeon's cells lie past its block's square, over another dungeon's: only its own.
+        let mut blocks = vec![if dungeon {
+            self.landblock()
+        } else {
+            block_of(target)
+        }];
+        if self.landblock() != blocks[0] {
+            blocks.push(self.landblock());
+        }
         let cols: Vec<Rc<BlockCollision>> = blocks
             .iter()
             .filter_map(|&blk| self.collision(assets, blk))
@@ -1783,6 +1790,25 @@ mod jump_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn a_shot_in_a_dungeon_is_not_blocked_by_the_dungeon_overlapping_it() {
+        // Murk Warrens (0x0101) at z 18: its own walls leave this line clear; 0x0100's, laid over
+        // the same world square, cross it.
+        let (from, to) = (Vec3::new(231.0, -97.0, 18.0), Vec3::new(239.0, -97.0, 18.0));
+        let o = ac_world::landblock_origin(0x0101_0000);
+        let mut c = crate::testkit::standing_in_the_field(20, 0x0101_02FD, from - o);
+        let assets = c.assets.clone();
+        let p = c.player.as_mut().unwrap();
+        assert!(p.sees(&assets, from, to));
+        let path = [from + Vec3::Z * 1.4, to + Vec3::Z];
+        assert!(p.flies_clear(&assets, &path));
+        assert_eq!(
+            p.solid_blocks(&assets, p.landblock(), &path),
+            vec![0x0101_0000]
+        );
+    }
 
     #[test]
     #[ignore = "needs AC_DATA_DIR"]

@@ -67,8 +67,6 @@ use raise::Pending;
 pub use raise::{batch_raise, choose_raise, Batch, Climb, Offer, Raise};
 #[cfg(doc)]
 use road::on_the_way;
-#[cfg(doc)]
-use sale::worth_a_sale_run;
 pub use sale::Salable;
 #[cfg(doc)]
 use town_run::counter::on_opening;
@@ -136,13 +134,6 @@ pub struct State {
     held_back: String,
     /// The tick `grow_settle` last read the world on: the town-run and grow steps share one reading.
     settled_at: Option<Instant>,
-    /// Since when the pack has held loot for a counter, `None` while
-    /// it holds none -- the clock the patience in [`worth_a_sale_run`]
-    /// reads. Read on the frames a run could start, so it starts once
-    /// the waits after the last run are up, and it is put back when a
-    /// run sets off: what a counter would not take is counted afresh
-    /// from then, not carried over into the next run's reason.
-    sale_since: Option<Instant>,
     last_raise: Option<Instant>,
     /// The raise last sent, until the server answers it or it is given up
     /// on.

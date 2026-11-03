@@ -16,7 +16,6 @@ use crate::autoplay::growth::policy::restocks_as_a_party;
 #[cfg(doc)]
 use crate::autoplay::growth::road::on_the_way;
 use crate::autoplay::growth::road::RETRY_AFTER;
-use crate::autoplay::growth::sale::worth_a_sale_run;
 use crate::autoplay::growth::{a_few, about, Growth};
 use crate::autoplay::Doing;
 use crate::logistics::Stage;
@@ -69,10 +68,6 @@ const FUTILE_RUN_WAIT: Duration = Duration::from_secs(300);
 /// How often a character that has stopped in town looks to see whether
 /// its luck has changed.
 const STOPPED_LOOK_EVERY: Duration = Duration::from_secs(5);
-
-/// Least time between runs made only to sell loot that adds up (`worth_a_sale_run`); a supply
-/// short, a full pack or as much loot as it means to carry go at once.
-const SALE_RUN_EVERY: Duration = Duration::from_secs(8 * 60);
 
 /// Most vendors visited in one run.
 const STOPS_PER_RUN: u32 = 3;
@@ -423,19 +418,8 @@ impl Client {
         // nothing to sell.
         let laden = self.laden(cfg);
         let needs = self.needs_now(now, cfg);
-        // What the loot rules tagged for a counter, and since when. The
-        // ledger says why each thing was taken, and "to sell" is a
-        // reason to go and sell it: without this the list was read only
-        // once a counter was open, and a pack with room in it never
-        // got one open.
+        // Loot for a counter is sold on a run made for one of those reasons, never a run of its own.
         let salables = self.salables(cfg);
-        let st = &mut self.autoplay.growth;
-        if salables.is_empty() {
-            st.sale_since = None;
-        } else if st.sale_since.is_none() {
-            st.sale_since = Some(now);
-        }
-        let carried_for = st.sale_since.map(|t| now.duration_since(t));
         // On a team that restocks together, the party's mode decides:
         // one character does not walk off to a vendor while the rest
         // are fighting, and none of them stays behind when the party
@@ -448,7 +432,6 @@ impl Client {
         let together =
             restocks_as_a_party(&self.autoplay.config.team, self.autoplay.team.mates.len());
         let urgent: Vec<&Need> = needs.iter().filter(|n| n.urgent).collect();
-        let sale = worth_a_sale_run(&salables, carried_for, cfg);
         // Why the run is made; which counter it goes to is `errands_for`'s, the same for every
         // stop. Any counter will do, however far: a recall makes the trip.
         let reason = if together {
@@ -459,7 +442,7 @@ impl Client {
                 Some(Stage::HandOver | Stage::Away | Stage::HandOut)
                     if self.autoplay.config.team.restock.plan
                         == crate::logistics::Plan::Quartermaster
-                        && !self.is_quartermaster(cfg, now) =>
+                        && !self.is_quartermaster(cfg) =>
                 {
                     return self.held_back("the quartermaster is doing the shopping")
                 }
@@ -488,27 +471,11 @@ impl Client {
                 .map(|n| n.name.as_str())
                 .collect();
             format!("short of {}", a_few(&short))
-        } else if let Some(why) = sale {
-            // Loot that merely adds up is no reason to stop hunting every minute: 5,000 pyreals'
-            // worth came every minute on the Holtburg grounds and took a third of the time.
-            if let Some(t) = self
-                .autoplay
-                .growth
-                .last_run
-                .filter(|t| now.duration_since(*t) < SALE_RUN_EVERY)
-            {
-                let left = SALE_RUN_EVERY.saturating_sub(now.duration_since(t));
-                return self.held_back(format!(
-                    "{why}: a sale waits {} s more since the last run",
-                    left.as_secs()
-                ));
-            }
-            why
         } else {
             let short: Vec<&str> = needs.iter().map(|n| n.name.as_str()).collect();
             let sale = match salables.len() {
                 0 => String::new(),
-                n => format!("; {n} thing(s) for a counter, not yet worth the trip"),
+                n => format!("; {n} thing(s) for a counter, sold on the next run"),
             };
             return self.held_back(format!("nothing urgent (short of {}{sale})", a_few(&short)));
         };
@@ -623,9 +590,6 @@ impl Client {
         st.needs = needs;
         st.by_hand = false;
         st.window_unwanted = None;
-        // The loot for a counter is on its way to one: what comes home
-        // unsold is counted from when it is next seen.
-        st.sale_since = None;
         st.run = Some(Run {
             vendor: vendor.clone(),
             at,

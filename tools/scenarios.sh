@@ -7,7 +7,7 @@
 #
 #   fight    Scn Mage, Scn Blade, Scn Bow hunt: kills, corpses opened, buffs, no deaths
 #   restock  Scn Taper starts each run with no tapers at the Mosswart ground, 2.5 km out: it buys some
-#   sell     Scn Seller starts each run with ten rings: a town run sells them
+#   sell     Scn Seller starts each run with ten rings, too heavy for its profile: a run sells them
 #   academy  a new character each run leaves the Training Academy
 #   (all)    no stall: never stands still for long while meaning to walk
 #
@@ -36,6 +36,11 @@ keep = [{"name": f"our {w}", "on": True, "action": "keep", "all": [{"Item": {"Wo
         for w in ("Battle Axe", "Longbow", "Arrow")]
 profile["rules"] = keep + profile["rules"]
 json.dump(profile, open(sys.argv[2], "w"), indent=1)
+# Scn Seller's own: a run is made only for a full pack, too much weight or supplies short, so its
+# ten rings (15 burden each) are too much weight at 0.005 x capacity, and a run sells them.
+seller = dict(profile, name="CheckSeller")
+seller["looting"] = dict(profile.get("looting", {}), carry_up_to=0.005)
+json.dump(seller, open(sys.argv[2].replace("Check.json", "CheckSeller.json"), "w"), indent=1)
 PY2
 cat > "${out}/scripts/scenario.rhai" <<'RHAI'
 // Sets each character up for its scenario, asked every twenty seconds: every step looks before it
@@ -91,7 +96,7 @@ fn command(name, args) {
             return true;
         }
     }
-    set_loot_profile("Check");
+    set_loot_profile(if who == "Scn Seller" { "CheckSeller" } else { "Check" });
     growth(true);
     fight(true);
     autoplay(true);

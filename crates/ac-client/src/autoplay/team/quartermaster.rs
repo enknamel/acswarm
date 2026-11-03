@@ -103,7 +103,7 @@ impl Client {
             return matches!(stage, Stage::HandOver | Stage::HandOut);
         }
         let growth = self.autoplay.config.growth.clone();
-        let Some(runner) = self.quartermaster_name(&growth, now) else {
+        let Some(runner) = self.quartermaster_name(&growth) else {
             return false;
         };
         let am_runner = runner == self.world.stats.name;
@@ -283,7 +283,7 @@ impl Client {
 
     /// Give everyone what they ordered.
     fn unload_the_quartermaster(&mut self, growth: &crate::growth::Growth, now: Instant) -> bool {
-        let party = self.party_supplies(growth, now);
+        let party = self.party_supplies(growth);
         // Work the whole party's split out for each thing carried, so
         // that a short run is shared rather than filling the first
         // order and leaving the last character with nothing.
@@ -419,17 +419,17 @@ impl Client {
 
     /// Who is doing the party's shopping, when it sends one character
     /// rather than all going.
-    pub fn quartermaster_name(&self, cfg: &Growth, now: Instant) -> Option<String> {
+    pub fn quartermaster_name(&self, cfg: &Growth) -> Option<String> {
         if self.autoplay.config.team.restock.plan != crate::logistics::Plan::Quartermaster {
             return None;
         }
-        crate::logistics::quartermaster(&self.party_supplies(cfg, now)).map(|m| m.name.clone())
+        crate::logistics::quartermaster(&self.party_supplies(cfg)).map(|m| m.name.clone())
     }
 
     /// Whether this character is the one doing the shopping.
-    pub fn is_quartermaster(&self, cfg: &Growth, now: Instant) -> bool {
+    pub fn is_quartermaster(&self, cfg: &Growth) -> bool {
         let me = self.world.stats.name.as_str();
-        !me.is_empty() && self.quartermaster_name(cfg, now).as_deref() == Some(me)
+        !me.is_empty() && self.quartermaster_name(cfg).as_deref() == Some(me)
     }
 }
 

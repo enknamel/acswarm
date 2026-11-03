@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use glam::{Vec2, Vec3};
 
-use crate::autoplay::{Doing, Release, CORPSE_REACH};
+use crate::autoplay::{Doing, Release, CORPSE_REACH, LOOT_TIMEOUT};
 use crate::body::server_walk::reached;
 use crate::did::Did;
 use crate::{Client, Goal};
@@ -41,8 +41,6 @@ const CORPSE_GONE: Duration = Duration::from_secs(3);
 const REWIELD_CAP: Duration = Duration::from_secs(20);
 /// One wield order at a time, this far apart.
 const WIELD_EVERY: Duration = Duration::from_millis(1000);
-/// Dying this many times over one corpse means it is not worth it.
-const MAX_DEATHS: u32 = 2;
 /// The server's word that nothing was dropped counts for a death within
 /// this long of it.
 const RETAINED_FOR: Duration = Duration::from_secs(30);
@@ -97,6 +95,10 @@ pub struct View {
     pub walking: bool,
     /// The container open right now, if any.
     pub open: Option<u32>,
+    /// The loot rules have our corpse in hand, opening or emptying it.
+    pub emptying: bool,
+    /// Our corpse has been emptied.
+    pub emptied: bool,
     /// Of the items that were wielded at death, the ones now carried in
     /// a pack rather than wielded.
     pub carried: Vec<u32>,
@@ -125,7 +127,7 @@ pub enum Action {
     Travel(Place),
     /// Open this corpse.
     Open(u32),
-    /// Take everything out of this open corpse and close it.
+    /// Empty this corpse of everything on it, by the loot rules' paced run, which closes it.
     Empty(u32),
     /// Wield this item.
     Wield(u32),
@@ -274,13 +276,6 @@ impl Recovery {
         self.buffs_done = false;
         self.last_open = None;
         self.started = None;
-        if self.deaths >= MAX_DEATHS {
-            tracing::info!(
-                "recovery: died {} times over this corpse, leaving it",
-                self.deaths
-            );
-            self.abandoned = true;
-        }
         self.go(Phase::Dead, v.now);
     }
 
@@ -408,8 +403,11 @@ impl Recovery {
             return Action::Wait;
         };
         self.corpse = Some(guid);
-        if v.open == Some(guid) {
+        if v.emptied {
             self.go(Phase::Rewielding, now);
+            return self.step_rewielding(v);
+        }
+        if v.open == Some(guid) || v.emptying {
             return Action::Empty(guid);
         }
         if d > OPEN_RANGE {
@@ -548,6 +546,7 @@ impl Client {
             .filter(|_| !self.is_follow_journey() && !self.is_led());
         let trip = self.autoplay.resume_trip.or(own_trip);
         let cfg = &self.autoplay.config.survive;
+        let corpse = self.own_corpse(p, rec.death.map(|d| d.at.truncate()));
         Some(View {
             now,
             dead: self.is_dead(),
@@ -555,7 +554,7 @@ impl Client {
                 at: p,
                 cell: pl.cell,
             },
-            corpse: self.own_corpse(p, rec.death.map(|d| d.at.truncate())),
+            corpse,
             traveling: self.traveling(),
             walking: self.is_walking()
                 && self
@@ -563,6 +562,8 @@ impl Client {
                     .as_ref()
                     .is_some_and(|g| g.owner == self.step_owner()),
             open: self.world.open_container.as_ref().map(|c| c.0),
+            emptying: corpse.is_some_and(|(g, _)| self.autoplay.is_at_corpse(g)),
+            emptied: corpse.is_some_and(|(g, _)| self.autoplay.looted.contains(&g)),
             carried,
             wielded,
             trip,
@@ -675,6 +676,8 @@ impl Client {
                         self.stop_going(Some(self.step_owner()), "at the corpse");
                         self.interact(guid);
                         self.autoplay.recovery.open_sent(now);
+                        // The loot rules' run empties it, paced by the server, whatever the profile.
+                        self.autoplay.take_up_corpse(guid, now, LOOT_TIMEOUT);
                     }
                     Did::Blocked(why) => {
                         tracing::info!("recovery: no way to the corpse: {}", why.what);
@@ -684,30 +687,12 @@ impl Client {
                 }
                 true
             }
-            Action::Empty(guid) => {
-                let items: Vec<u32> = self
-                    .world
-                    .open_container
-                    .as_ref()
-                    .filter(|c| c.0 == guid)
-                    .map(|c| c.1.clone())
-                    .unwrap_or_default();
-                let mut took = 0;
-                for g in items {
-                    if self.pack_full() {
-                        tracing::info!("recovery: pack full, leaving the rest on the corpse");
-                        break;
-                    }
-                    self.take(g);
-                    took += 1;
+            Action::Empty(_) => {
+                // Every item comes back (`corpse_now` on our own body); the run closes it.
+                if !self.autoplay_loot(now) {
+                    self.autoplay
+                        .say(Doing::Recovering, "emptying the corpse".to_string());
                 }
-                self.close_container();
-                // The loot rule need not open it again.
-                self.autoplay.looted.push(guid, std::time::Instant::now());
-                self.autoplay.say(
-                    Doing::Recovering,
-                    format!("took {took} item(s) back from the corpse"),
-                );
                 true
             }
             Action::Wield(guid) => {
@@ -807,6 +792,8 @@ mod tests {
             traveling: false,
             walking: false,
             open: None,
+            emptying: false,
+            emptied: false,
             carried: Vec::new(),
             wielded: vec![0x8000_0001, 0x8000_0002],
             trip: Some(far_off()),
@@ -881,13 +868,18 @@ mod tests {
         // Asked once; not again straight away.
         v.now = after(t0, 61.0);
         assert_eq!(r.step(&v), Action::Wait);
-        // It opened: empty it.
+        // It opened: the loot rules' run empties it, all of it, at the server's pace.
         v.open = Some(0xC000_0001);
+        v.emptying = true;
         v.now = after(t0, 62.0);
         assert_eq!(r.step(&v), Action::Empty(0xC000_0001));
-        assert_eq!(r.phase, Phase::Rewielding);
-        // The gear is back in the pack: one wield at a time.
+        assert_eq!(r.phase, Phase::Looting);
         v.open = None;
+        v.now = after(t0, 62.5);
+        assert_eq!(r.step(&v), Action::Empty(0xC000_0001), "still emptying");
+        // Emptied: the gear is back in the pack, one wield at a time.
+        v.emptying = false;
+        v.emptied = true;
         v.carried = vec![0x8000_0002, 0x8000_0001];
         v.now = after(t0, 63.0);
         assert_eq!(r.step(&v), Action::Wield(0x8000_0002));
@@ -1107,7 +1099,7 @@ mod tests {
     }
 
     #[test]
-    fn a_second_death_over_the_corpse_abandons_it() {
+    fn a_second_death_over_the_corpse_still_goes_back_for_it() {
         let t0 = Instant::now();
         let mut r = Recovery::default();
         let mut v = die_and_land(&mut r, t0);
@@ -1127,10 +1119,16 @@ mod tests {
         v.now = after(t0, 45.0);
         r.step(&v);
         assert_eq!(r.phase, Phase::Landed);
+        // Both corpses lie at the spot, and everything on them comes back.
         v.now = after(t0, 50.0);
+        let a = r.step(&v);
+        r.buffs_done();
+        v.now = after(t0, 51.0);
+        let b = r.step(&v);
         assert!(
-            matches!(r.step(&v), Action::Finish { .. }),
-            "not worth a third corpse"
+            matches!(b, Action::Travel(_)),
+            "gone back for, however many deaths: {a:?} then {b:?} in {:?}",
+            r.phase
         );
     }
 
