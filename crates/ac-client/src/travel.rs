@@ -27,6 +27,14 @@ pub const ARRIVE: f32 = 3.0;
 /// (a level range, an unfinished quest, or it simply is not there): the
 /// journey is planned again without it.
 pub const PORTAL_GIVE_UP: Duration = Duration::from_secs(12);
+/// Weenie error 0x04A7, "You have been teleported too recently" (`Portal.cs:155`).
+const TELEPORTED_TOO_RECENTLY: u32 = 0x04A7;
+/// Wait before walking back into a portal that said so: ACE's 3.5 s between portals
+/// (`Portal.cs:120`), within which it turns a second try away without a word (`Portal.cs:145-150`).
+const PORTAL_COOLDOWN: Duration = Duration::from_secs(4);
+/// The step back off the mouth meanwhile (metres): a portal takes whoever walks into it, not
+/// whoever stands in it.
+const PORTAL_STEP_BACK: f32 = 3.0;
 /// A recall step waits this long after the step begins before casting,
 /// so the character has come to a stop (moving disrupts the cast).
 const RECALL_SETTLE: Duration = Duration::from_millis(800);
@@ -65,6 +73,8 @@ struct StepState {
     portal_since: Option<Instant>,
     /// When we last tried jumping into a portal that has not taken us.
     last_hop: Option<Instant>,
+    /// Turned away as teleported too recently: when to walk back in, and where to stand till then.
+    too_soon: Option<(Instant, Place)>,
     /// When the recall step's spell was last sent (or the step began), and how many times.
     recall_since: Option<Instant>,
     recall_casts: u32,
@@ -1026,6 +1036,10 @@ impl Client {
     /// corridor stretch's the next stretch (true: asked on this frame); a corridor stretch refused
     /// is kept clear of; any other refusal leaves the step out; the step to open ground is over.
     pub(crate) fn stretch_answered(&mut self, did: &Did) -> bool {
+        // The step back off a portal that said "too recently" is no answer about the way.
+        if self.travel.state.too_soon.is_some() {
+            return false;
+        }
         let gem = matches!(self.travel_step(), Some(Step::Gem { .. }));
         let portal = self.travel_portal().is_some();
         let stretch = self.travel.state.stretch;
@@ -1157,6 +1171,16 @@ impl Client {
         let step = self.travel_step()?.clone();
         let end = step.walk_end()?;
         let portal = matches!(step, Step::Portal { .. });
+        if let Some((until, back)) = self.travel.state.too_soon.filter(|_| portal) {
+            if now < until {
+                return Some(Goal::At {
+                    place: back,
+                    within: 0.5,
+                });
+            }
+            self.travel.state.too_soon = None;
+            self.travel.state.portal_since = None;
+        }
         if portal && reached(me3, end.at, ARRIVE) && !self.wait_at_mouth(now) {
             return None;
         }
@@ -1173,6 +1197,31 @@ impl Client {
             return Some(Goal::At { place, within });
         }
         self.overland_goal(end.at.truncate())
+    }
+
+    /// A portal turned the journey away as teleported too recently: step back off its mouth and
+    /// walk in again once the server's wait is over, the give-up clock started afresh.
+    pub(crate) fn portal_too_soon(&mut self, code: u32, now: Instant) {
+        if code != TELEPORTED_TOO_RECENTLY || self.travel_portal().is_none() {
+            return;
+        }
+        let Some((me, forward)) = self
+            .player
+            .as_ref()
+            .map(|pl| (pl.world_position(), pl.forward().truncate()))
+        else {
+            return;
+        };
+        let spot = me.truncate() - forward.normalize_or(Vec2::Y) * PORTAL_STEP_BACK;
+        let assets = self.assets.clone();
+        let floor = self
+            .player
+            .as_mut()
+            .and_then(|pl| pl.ground_height(&assets, spot.x, spot.y, me.z));
+        let back = self.place_at(floor.map_or(me, |z| spot.extend(z)));
+        tracing::info!("travel: teleported too recently; stepping back to try again");
+        self.travel.state.too_soon = Some((now + PORTAL_COOLDOWN, back));
+        self.travel.state.portal_since = None;
     }
 
     /// Standing at the portal's mouth and still here: jump into it after a while, and after
