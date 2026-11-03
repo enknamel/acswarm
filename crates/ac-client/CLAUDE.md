@@ -61,7 +61,7 @@ read. The fixed curves are placed against those numbers: `LOOT_AT_REST` (45) sit
 | 19 | grow | goal | 10 | `autoplay_grow` |
 
 Housekeeping, every tick and never claiming it: `autoplay_pending_wield`, `autoplay_shield`,
-`autoplay_rearm`, `autoplay_stock`, `autoplay_claim_pet_kills`, `autoplay_tidy`, `autoplay_spend_xp`.
+`autoplay_rearm`, `autoplay_stock`, `autoplay_claim_pet_kills`, `autoplay_tidy`, `autoplay_learn_scrolls`, `autoplay_spend_xp`.
 
 ## Systems
 
@@ -107,7 +107,7 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 | summoning | `autoplay_summon`, `autoplay_claim_pet_kills`, `hear_summoning` | `autoplay/summoning.rs`, `autoplay/mod.rs` | `Autoplay.summoning` | summon | autoplay::summoning | summon, pet |
 | refusals | `hear_refusal`, `refused`, `answer` | `refused.rs`, `crates/ac-agent/src/refusals.rs` | the waiting system's own wait, e.g. `Autoplay.shelved` | refus | refused | refusal |
 | server chat | `chat_message`, `hear_arrival`, `hear_spell_attack` | `session/chat.rs`, `autoplay/hear.rs` | `Autoplay.hit_by` | arriv | session::chat | heard |
-| quests | `refresh_quests`, `quest_board`, `quest_wants`, `visit_giver`, `watch_quest_answer` | `quest_log.rs`, `crates/ac-world/src/quests.rs` | `Client.quest_board`, `Client.quest_log`, `Autoplay.config.quests` | quest_log | quest_log | quest |
+| quests | `refresh_quests`, `quest_board`, `quest_wants`, `visit_giver`, `watch_quest_answer`, `refresh_pursuit`, `start_quest_call` | `quest_log.rs`, `crates/ac-world/src/quests.rs`, `autoplay/growth/pursuit.rs`, `autoplay/growth/town_run/calls.rs` | `Client.quest_board`, `Client.quest_log`, `Client.pursuit`, `Autoplay.config.quests` | quest_log | quest_log | quest, pursuit |
 
 ## Glossary
 
@@ -134,7 +134,7 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 | refusal | the server's no, by weenie error or in words | error, rejection |
 | plan, order | the leader's plan for the party, and one character's part in it | - |
 | assist | hit what the leader is hitting, picking nothing | help, support |
-| quest, giver, hand_in | a quest in `ac_world::quests`, its rows sharing an id; the NPC who rewards it; giving it the items, or talking, for the reward | task, npc, turn-in |
+| quest, giver, hand_in, pursuit | a quest in `ac_world::quests`, its rows sharing an id; the NPC who rewards it; giving it the items, or talking, for the reward; a quest the player asked autoplay to work before hunting for XP (`Quests.pursue`) | task, npc, turn-in, goal, order |
 
 ## Domain rules
 
@@ -156,7 +156,7 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 - One target picker. Swing, shot and spell all call `pick_target()`: the nearest of what
   `would_fight()` allows inside `cfg.radius`, within the leader's `team.fight_radius` while following
   one (not in the academy) unless it is hitting the character (`hit_lately_by()`), and preferring one
-  the attack in hand gets to: `attack_kind()` reads the hands, never `Client::missile`, and names the
+  the attack in hand gets to, then a pursued quest's creature (`pursuit_sought`): `attack_kind()` reads the hands, never `Client::missile`, and names the
   spell per creature by the cast's own `best_spell()`, so the flight tested is the flight thrown.
   Nothing beside the leader, nothing is picked (`follow` fetches it; past `follow_break()` catch up
   outranks the fight). A team proposal outranks the pick only through `can_take_on()` (less the

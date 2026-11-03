@@ -6,17 +6,15 @@ const HOLTBURG: u32 = 0xA9B4_0019;
 
 /// A Red Rat Tail hand-in to a giver standing in `cell`, worth `xp`.
 fn tail_to(cell: u32, xp: u64) -> HandIn {
-    let mut row = ac_world::quests::rows_of("give:3684")
-        .next()
-        .unwrap()
-        .clone();
-    row.place = Place {
-        at: ac_world::landblock_origin(cell),
-        cell,
-    };
+    let row = ac_world::quests::rows_of("give:3684:2470").next().unwrap();
     HandIn {
-        row: Box::leak(Box::new(row)),
+        row,
+        at: Place {
+            at: ac_world::landblock_origin(cell),
+            cell,
+        },
         xp,
+        pursued: false,
     }
 }
 
@@ -92,14 +90,14 @@ fn at_a_collector(tails: u32, now: Instant) -> (Client, &'static Row) {
     let mut c = character_of_level(no_data(), 20);
     with_a_pack(&mut c, 50);
     stand(&mut c, HOLTBURG, glam::Vec3::new(84.0, 7.1, 94.0));
-    let row = ac_world::quests::rows_of("give:3684").next().unwrap();
+    let row = ac_world::quests::rows_of("give:3684:2470").next().unwrap();
     let giver = 0x7000_0001;
     let me = c.player.as_ref().unwrap().world_position();
     c.world.objects.insert(
         giver,
         ac_world::WorldObject {
             guid: giver,
-            name: row.giver.clone(),
+            name: row.giver.to_string(),
             item_type: ac_world::item_type::CREATURE,
             position: Some(ac_world::object::Position::new_flat(
                 HOLTBURG,
@@ -116,9 +114,11 @@ fn at_a_collector(tails: u32, now: Instant) -> (Client, &'static Row) {
             .unwrap()
             .weenie_class_id = 3684;
     }
-    let mut run = run_to(row.place.at.truncate(), now);
+    let at = row.places[0];
+    let mut run = run_to(at.at.truncate(), now);
     run.phase = Phase::HandingIn {
         row,
+        at,
         giver,
         taken: 0,
         last: None,
@@ -186,7 +186,7 @@ fn a_giver_that_never_takes_the_item_is_not_called_on_again_for_a_while() {
         t += GIVE_PAUSE;
     }
     assert!(c.autoplay.growth.run.is_none(), "the call never ended");
-    let key = (row.giver_wcid, row.place.cell);
+    let key = (row.giver_wcid, row.places[0].cell);
     assert!(c
         .autoplay
         .growth
@@ -203,22 +203,28 @@ fn a_giver_in_a_dungeon_is_priced_and_called_on_with_its_cell() {
     let row = ac_world::quests::rows_of("fachubfolthid")
         .find(|r| r.kind == Kind::Item)
         .unwrap();
-    assert!(row.place.is_indoors());
-    let legs = c.plan_legs(&[row.place]).unwrap();
+    let at = row.places[0];
+    assert!(at.is_indoors());
+    let legs = c.plan_legs(&[at]).unwrap();
     assert!(
         legs.leg(Stop::Start, Stop::Call(0)).is_some(),
         "no journey to the Warden"
     );
-    let hand_in = [HandIn { row, xp: 100_000 }];
+    let hand_in = [HandIn {
+        row,
+        at,
+        xp: 100_000,
+        pursued: false,
+    }];
     assert_eq!(plan_calls(&legs, &[], &hand_in, Some(1.0)).order, [0]);
     let now = Instant::now();
     let mut run = run_to(Vec2::new(32_587.2, 34_578.3), now);
     c.autoplay.running = Some("town run");
-    assert!(c.make_call(&mut run, giver_call(row), now));
+    assert!(c.make_call(&mut run, giver_call(row, at), now));
     c.autoplay.running = None;
-    assert_eq!(run.phase, Phase::ToGiver { row, tries: 1 });
+    assert_eq!(run.phase, Phase::ToGiver { row, at, tries: 1 });
     let goal = c.journey_goal().and_then(crate::Goal::place);
-    assert_eq!(goal.map(|p| p.cell), Some(row.place.cell), "{goal:?}");
+    assert_eq!(goal.map(|p| p.cell), Some(at.cell), "{goal:?}");
 }
 
 #[test]
@@ -237,6 +243,7 @@ fn a_ready_talk_in_the_counters_town_joins_the_run_and_one_switched_off_does_not
         givers: 1,
         giver: "Alcott".into(),
         on: true,
+        every_way: false,
     };
     c.quest_board = vec![line.clone()];
     let now = Instant::now();
@@ -248,7 +255,7 @@ fn a_ready_talk_in_the_counters_town_joins_the_run_and_one_switched_off_does_not
     let givers: Vec<&str> = std::iter::once(&run.vendor)
         .map(String::as_str)
         .chain(run.calls.iter().filter_map(|k| match &k.on {
-            CallOn::Giver { row } => Some(row.giver.as_str()),
+            CallOn::Giver { row } => Some(row.giver),
             CallOn::Counter { .. } => None,
         }))
         .filter(|n| *n == "Alcott")
@@ -281,32 +288,162 @@ fn a_quest_not_taken_up_is_a_talk_to_whoever_starts_it_and_once_heard_it_is_begu
         kind: Kind::Kill,
         state: QuestState::NotTaken {
             from: "Lieutenant Grenlin".into(),
+            flag: "bronzegauntlettrooperkillcount".into(),
         },
         xp: 20_000,
         givers: 1,
         giver: "Lieutenant Grenlin".into(),
         on: true,
+        every_way: false,
     }];
     let now = Instant::now();
     let me = c.my_position().unwrap().truncate();
     let calls = c.ready_hand_ins(&[me], 5, now);
-    let start = calls.first().expect("a talk to take it up").row;
+    let HandIn { row: start, at, .. } = calls.first().expect("a talk to take it up").clone();
     assert_eq!(
-        (start.kind, start.giver.as_str()),
+        (start.kind, start.giver),
         (Kind::Start, "Lieutenant Grenlin")
     );
     assert_eq!(calls[0].xp, 20_000);
+    // Givers share names: a talk is the one stamping the quest's flag, else none.
+    if let QuestState::NotTaken { flag, .. } = &mut c.quest_board[0].state {
+        *flag = "nosuchflag".into();
+    }
+    assert!(c.ready_hand_ins(&[me], 5, now).is_empty());
     // Switched off, nothing is offered.
     c.quest_board[0].on = false;
     assert!(c.ready_hand_ins(&[me], 5, now).is_empty());
     // Heard with no XP: the counter is held, and the giver is not taken for refusing.
-    c.ask_giver(start, now);
+    c.ask_giver(start, at, now);
     c.watch_quest_answer(now + Duration::from_secs(11));
     assert!(c.holds_quest_flag("bronzegauntlettrooperkillcount"));
-    let key = (start.giver_wcid, start.place.cell);
+    // Its kills count from nothing: the board hunts it, and does not send it back to talk.
+    let counter = "bronzegauntlettrooperkillcount";
+    assert_eq!(c.quest_log.kills.get(counter), Some(&0));
+    let mut facts = c.quest_facts();
+    facts.level = 80; // the Troopers' own, so only the counter decides
+    let board = crate::quest_log::quest_board(ac_world::quests::rows_of(counter), &facts);
+    assert!(
+        matches!(board[0].state, QuestState::Needs { .. }),
+        "{:?}",
+        board[0].state
+    );
+    let key = (start.giver_wcid, at.cell);
     assert!(!c
         .autoplay
         .growth
         .givers_refused
         .within(&key, now, GIVER_RETRY));
+}
+
+#[test]
+fn a_jaw_for_a_quest_paying_no_xp_is_handed_in_only_once_chosen() {
+    // Fiun Rehlyun (Fiun Outpost, outdoors) takes the Insatiable Eater Jaw for a flag, no XP.
+    let id = "augmentationprovinggroundaccess";
+    let fiun = ac_world::quests::rows_of(id)
+        .find(|r| r.kind == Kind::Item)
+        .unwrap();
+    let at = fiun.places[0];
+    let mut c = character_of_level(no_data(), 150);
+    with_a_pack(&mut c, 50);
+    stand(&mut c, at.cell, at.at - ac_world::landblock_origin(at.cell));
+    thing_in_the_pack(&mut c, 0x8000_0100, "Insatiable Eater Jaw", 1);
+    c.world
+        .objects
+        .get_mut(&0x8000_0100)
+        .unwrap()
+        .weenie_class_id = 28719;
+    c.autoplay.config.quests.on = true;
+    let now = Instant::now();
+    let me = c.my_position().unwrap().truncate();
+    let to_fiun = |c: &Client| {
+        let calls = c.ready_hand_ins(&[me], 5, now);
+        calls.iter().filter(|h| h.row.id == id).count()
+    };
+    c.refresh_quests(now);
+    assert_eq!(to_fiun(&c), 0, "never offered unchosen");
+    c.autoplay.config.quests.switch_on(id);
+    c.refresh_quests(now + Duration::from_millis(1));
+    assert_eq!(to_fiun(&c), 1, "{:?}", c.quest_board);
+}
+
+#[test]
+fn a_pursued_hand_in_rides_an_ordinary_run() {
+    // 9,600 seconds out of the way for no XP: a pursued quest's giver is called on all the same.
+    let legs = legs_on_a_line(0.0, &[100.0, 5_000.0], 200.0, None);
+    let mut far = [tail_to(0x1234_0001, 0)];
+    let counter = [counter_in(HOLTBURG)];
+    assert_eq!(plan_calls(&legs, &counter, &far, Some(3_600.0)).order, [0]);
+    far[0].pursued = true;
+    assert_eq!(
+        plan_calls(&legs, &counter, &far, Some(3_600.0)).order,
+        [0, 1]
+    );
+}
+
+/// Beside Clemenza with the Engorged Eater Jaw, its quest pursued and town runs off.
+fn beside_clemenza_with_the_jaw() -> (Client, &'static Row) {
+    let row = ac_world::quests::rows_of("engorgedeaterjaw")
+        .next()
+        .unwrap();
+    let at = row.places[0];
+    let mut c = character_of_level(no_data(), 85);
+    with_a_pack(&mut c, 50);
+    stand(&mut c, at.cell, at.at - ac_world::landblock_origin(at.cell));
+    thing_in_the_pack(&mut c, 0x8000_0100, "Engorged Eater Jaw", 1);
+    c.world
+        .objects
+        .get_mut(&0x8000_0100)
+        .unwrap()
+        .weenie_class_id = 28725;
+    c.autoplay.config.growth.town_runs = false;
+    c.autoplay.config.quests.pursue_quest(row.id, true, 0);
+    c.pursuit = vec![crate::autoplay::PursuitLine {
+        id: row.id.into(),
+        title: row.title.into(),
+        step: crate::autoplay::PursuitStep::HandIn { row, at },
+        working: true,
+        via: None,
+    }];
+    (c, row)
+}
+
+#[test]
+fn a_pursued_jaw_carried_starts_a_call_on_its_giver_at_once() {
+    let (mut c, row) = beside_clemenza_with_the_jaw();
+    let now = Instant::now();
+    // A futile run just now would hold an ordinary run back five minutes.
+    c.autoplay.growth.last_run = Some(now);
+    c.autoplay.growth.run_was_futile = true;
+    c.autoplay.running = Some("town run");
+    assert!(c.autoplay_town_run(now), "{}", c.autoplay.status);
+    c.autoplay.running = None;
+    let run = c.autoplay.growth.run.clone().expect("a call on Clemenza");
+    assert!(run.for_quest);
+    assert!(
+        matches!(run.phase, Phase::ToGiver { row: r, .. } if std::ptr::eq(r, row)),
+        "{:?}",
+        run.phase
+    );
+    assert_eq!(run.reason, "for Engorged Eater Jaw");
+}
+
+#[test]
+fn a_quest_call_is_kept_with_town_runs_off_and_is_not_futile() {
+    let (mut c, row) = beside_clemenza_with_the_jaw();
+    let now = Instant::now();
+    assert!(c.start_quest_call(row, row.places[0], now));
+    assert!(c.autoplay.growth.is_quest_run());
+    // Town runs off: an ordinary run is let go, this one kept.
+    assert!(c
+        .autoplay
+        .growth
+        .drop_what_is_turned_off(false, false)
+        .is_none());
+    assert!(c.autoplay.growth.run.is_some());
+    // Over with nothing sold or bought, the next run need not wait.
+    let run = c.autoplay.growth.run.take().unwrap();
+    let cfg = c.autoplay.config.growth.clone();
+    c.end_run(run, now, &cfg, &[], false, None);
+    assert!(!c.autoplay.growth.run_was_futile);
 }

@@ -282,6 +282,36 @@ fn a_town_run_gives_way_to_a_fight_in_hand() {
     assert_eq!(row.worth(&c, now), 0.0, "town runs off");
 }
 
+#[test]
+fn a_due_quest_call_is_worth_a_run_with_town_runs_off() {
+    let mut c = in_the_field();
+    c.autoplay.config.growth.town_runs = false;
+    let now = Instant::now();
+    let row = named("town run").expect("row");
+    assert_eq!(row.worth(&c, now), 0.0, "town runs off");
+    let jaw = ac_world::quests::rows_of("engorgedeaterjaw")
+        .next()
+        .unwrap();
+    c.pursuit = vec![crate::autoplay::PursuitLine {
+        id: jaw.id.into(),
+        title: jaw.title.into(),
+        step: crate::autoplay::PursuitStep::HandIn {
+            row: jaw,
+            at: jaw.places[0],
+        },
+        working: true,
+        via: None,
+    }];
+    assert_eq!(
+        row.worth(&c, now),
+        TOWN_RUN,
+        "the giver is called on at once"
+    );
+    let it = crate::testkit::standing_by(&mut c, 0x8000_0001, "Drudge Skulker", 3.0);
+    c.attack_target = Some(it.guid);
+    assert_eq!(row.worth(&c, now), 0.0, "the fight is finished first");
+}
+
 /// A character on its feet in the Holtburg field, level 20, with the
 /// fight rules at their defaults and nothing about it.
 fn in_the_field() -> Client {

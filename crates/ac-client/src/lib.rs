@@ -267,6 +267,8 @@ pub struct Client {
     pub(crate) quest_wants_at: Option<Instant>,
     /// The giver asked last, while its answer is awaited.
     pub quest_asked: Option<quest_log::Asked>,
+    /// Each pursued quest's step, worked out with the board (`autoplay::growth::pursuit`).
+    pub pursuit: Vec<crate::autoplay::PursuitLine>,
     /// Melee combat mode is on.
     pub combat: bool,
     /// Magic combat mode is on.

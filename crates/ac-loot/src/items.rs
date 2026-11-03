@@ -98,6 +98,8 @@ pub struct ItemStats {
     pub shield: u32,
     /// Spell names on the item (cast on use, or on wield).
     pub spells: Vec<String>,
+    /// The spell the item carries in its header (a scroll's to learn), 0 for none.
+    pub spell_id: u32,
     /// Skill and level needed to wield it, in words.
     pub wield_skill: String,
     pub wield_level: u32,
@@ -170,9 +172,16 @@ impl ItemStats {
             max_structure: o.max_structure,
             ammo_type: o.ammo_type,
             combat_use: o.combat_use,
+            spell_id: o.spell_id,
             ..Default::default()
         }
         .with_launcher_guess()
+    }
+
+    /// A spell scroll: Writable with a spell in its header (ACE `Scroll`, WeenieType 34; a book
+    /// carries none).
+    pub fn is_scroll(&self) -> bool {
+        self.item_type & ac_world::item_type::WRITABLE != 0 && self.spell_id != 0
     }
 
     /// What a bow, crossbow or atlatl shoots, from its skill or name, when the server did not say.
@@ -1177,6 +1186,7 @@ impl ItemStats {
             workmanship: d.workmanship,
             ammo_type: d.ammo_type,
             combat_use: d.combat_use,
+            spell_id: d.spell_id,
             material: if d.material != 0 {
                 ac_world::material::name(d.material)
             } else {

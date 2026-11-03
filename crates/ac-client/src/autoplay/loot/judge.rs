@@ -50,7 +50,7 @@ pub fn claim_on(
     if name_matches(&stats.name, &profile.looting.never) {
         return None;
     }
-    if name_matches(&stats.name, &profile.looting.always) {
+    if name_matches(&stats.name, &profile.looting.always) || is_learnable(stats, profile, me) {
         return Some(Claim {
             order: 0,
             calling: None,
@@ -194,6 +194,19 @@ pub(crate) fn would_take(
     }
 }
 
+/// The tag reason a scroll to learn is kept under.
+pub(crate) const LEARNABLE: &str = "a scroll it can learn";
+
+/// A scroll whose spell `me` does not know and can learn, the profile reading them
+/// (`Looting::learn_scrolls`).
+pub(crate) fn is_learnable(
+    stats: &crate::items::ItemStats,
+    p: &crate::profile::Profile,
+    me: &crate::weapons::Wielder,
+) -> bool {
+    p.looting.learn_scrolls && stats.is_scroll() && me.learnable.contains(&stats.spell_id)
+}
+
 /// What the loot rules make of an item, and whether they can say yet.
 ///
 /// The character's loot profile decides; with none, nothing is taken.
@@ -218,6 +231,9 @@ pub fn judge_loot(
     }
     if name_matches(&stats.name, &p.looting.always) {
         return Verdict::Decided(LootAction::Keep, "always take these".into());
+    }
+    if is_learnable(stats, p, me) {
+        return Verdict::Decided(LootAction::Keep, LEARNABLE.into());
     }
     // The buy list is the player's word too: a line on it says "keep
     // this many of these stocked", and up to that many of the thing
@@ -256,7 +272,7 @@ pub fn quest_item_blocked(
     // Appraised with no appraisal: a rule that needs one cannot claim what nobody has seen.
     let stats = crate::items::ItemStats {
         wcid: item.wcid,
-        name: item.name.clone(),
+        name: item.name.to_string(),
         item_type: item.item_type,
         kind: crate::items::kind_name(item.item_type),
         value: item.value,

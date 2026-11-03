@@ -580,6 +580,8 @@ pub struct Looting {
     pub hand_off: bool,
     /// Pour loose stacks of one thing together, so change from buying and looting wastes no slot.
     pub tidy_pack: bool,
+    /// Take and read a spell scroll the character does not know and can learn, ahead of the rules.
+    pub learn_scrolls: bool,
     /// Loot to take on before going to sell, in multiples of carrying capacity (150 x Strength).
     /// At 1x comfortable; 2x slow, no Melee or Missile Defense; 3x cannot pick up, merge or move.
     /// Counts only what sell rules hand a counter: no sale takes off worn, wielded or kept things.
@@ -598,6 +600,7 @@ impl Default for Looting {
             salvage: true,
             hand_off: true,
             tidy_pack: true,
+            learn_scrolls: true,
             carry_up_to: 1.5,
         }
     }
@@ -712,6 +715,10 @@ impl Profile {
             .hash(&mut h);
         // Always and never are read before any rule, so they decide items too.
         (&self.looting.always, &self.looting.never).hash(&mut h);
+        // Scrolls are judged ahead of the rules too; on, the default, every older fingerprint stands.
+        if !self.looting.learn_scrolls {
+            "no scrolls".hash(&mut h);
+        }
         h.finish()
     }
 

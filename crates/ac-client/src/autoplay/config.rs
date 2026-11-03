@@ -341,20 +341,110 @@ impl Default for Team {
     }
 }
 
+/// A quest autoplay works before hunting for XP (`crate::autoplay::growth::pursuit`).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Pursuit {
+    /// The `ac_world::quests` id.
+    pub id: String,
+    /// Kept after a hand-in and done again whenever its wait is over.
+    pub again: bool,
+    /// Unix second it was asked for: a hand-in at or after it finishes a pursuit not `again`.
+    pub since: u64,
+}
+
 /// The quests autoplay considers (`crate::quest_log`); off, the quest rule wants nothing.
+/// A quest paying XP is on until switched off; any other is off until switched on by hand.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Quests {
     /// Autoplay considers quests at all.
     pub on: bool,
-    /// Quests switched off, by `ac_world::quests` id; a quest the data adds later starts on.
+    /// Quests switched off, by `ac_world::quests` id; one paying XP the data adds later starts on.
     pub off: Vec<String>,
+    /// Quests switched on by hand: every way to complete one is worked, XP or not, unread or not.
+    pub chosen: Vec<String>,
+    /// Quests worked before hunting for XP, first first (the Quests window, `pursue_quest`);
+    /// every way to complete one is worked, as for one chosen.
+    pub pursue: Vec<Pursuit>,
 }
 
 impl Quests {
-    /// Whether the quest `id` is one autoplay considers.
+    /// Whether the quest `id` is one autoplay considers: pursued, quests off or on; else chosen, or
+    /// paying XP and not off.
     pub fn is_on(&self, id: &str) -> bool {
-        self.on && !self.off.iter().any(|o| o == id)
+        self.is_pursued(id)
+            || (self.on
+                && (self.is_chosen(id)
+                    || (crate::quest_log::is_automatic_quest(id)
+                        && !self.off.iter().any(|o| o == id))))
+    }
+
+    /// Whether `id` was switched on by hand.
+    pub fn is_chosen(&self, id: &str) -> bool {
+        self.chosen.iter().any(|c| c == id)
+    }
+
+    /// Whether autoplay works `row` of a quest it considers: any row of one chosen or pursued,
+    /// else only one it works on its own ([`crate::quest_log::is_automatic`]).
+    pub fn is_worked(&self, row: &ac_world::quests::Row) -> bool {
+        crate::quest_log::is_automatic(row) || self.is_chosen(row.id) || self.is_pursued(row.id)
+    }
+
+    /// Whether `id` is on the pursuit list.
+    pub fn is_pursued(&self, id: &str) -> bool {
+        self.pursue.iter().any(|p| p.id == id)
+    }
+
+    /// Pursue `id` from `now`: once goes first, again goes last; one already listed moves.
+    pub fn pursue_quest(&mut self, id: &str, again: bool, now: u64) {
+        self.stop_pursuing(id);
+        let p = Pursuit {
+            id: id.to_string(),
+            again,
+            since: now,
+        };
+        if again {
+            self.pursue.push(p);
+        } else {
+            self.pursue.insert(0, p);
+        }
+    }
+
+    /// Take `id` off the pursuit list.
+    pub fn stop_pursuing(&mut self, id: &str) {
+        self.pursue.retain(|p| p.id != id);
+    }
+
+    /// Move `id` one place up (`up`) or down the pursuit list.
+    pub fn move_pursuit(&mut self, id: &str, up: bool) {
+        let Some(i) = self.pursue.iter().position(|p| p.id == id) else {
+            return;
+        };
+        let j = if up {
+            i.checked_sub(1)
+        } else {
+            Some(i + 1).filter(|&j| j < self.pursue.len())
+        };
+        if let Some(j) = j {
+            self.pursue.swap(i, j);
+        }
+    }
+
+    /// Switch `id` on by hand: every way to complete it is worked.
+    pub fn switch_on(&mut self, id: &str) {
+        self.off.retain(|o| o != id);
+        if !self.is_chosen(id) {
+            self.chosen.push(id.to_string());
+        }
+    }
+
+    /// Switch `id` off, chosen or not.
+    pub fn switch_off(&mut self, id: &str) {
+        self.chosen.retain(|c| c != id);
+        if !self.off.iter().any(|o| o == id) {
+            self.off.push(id.to_string());
+        }
     }
 }
 

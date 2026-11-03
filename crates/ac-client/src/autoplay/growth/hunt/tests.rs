@@ -678,11 +678,15 @@ fn a_kill_task_taken_up_sends_the_character_to_hunt_its_creature() {
         .expect("a ground");
     let mut off: Vec<String> = ac_world::quests::all()
         .iter()
-        .map(|r| r.id.clone())
+        .map(|r| r.id.to_string())
         .collect();
     off.retain(|id| id != shreth);
     off.dedup();
-    c.autoplay.config.quests = crate::autoplay::Quests { on: true, off };
+    c.autoplay.config.quests = crate::autoplay::Quests {
+        on: true,
+        off,
+        ..Default::default()
+    };
     c.quest_log.note_kills(shreth, 0);
     c.refresh_quests(Instant::now());
     let (drawn, _) = c
@@ -699,6 +703,24 @@ fn a_kill_task_taken_up_sends_the_character_to_hunt_its_creature() {
     assert_ne!(drawn.landblock, plain.landblock);
 }
 
+/// `c` pursuing the Engorged Eater Jaw, its hunt worked at `lb`, a journey ending at `place`.
+fn pursuing_the_jaw(c: &mut Client, lb: u32, place: Place) {
+    c.pursuit = vec![crate::autoplay::PursuitLine {
+        id: "engorgedeaterjaw".into(),
+        title: "Engorged Eater Jaw".into(),
+        step: crate::autoplay::PursuitStep::Hunt {
+            landblock: lb,
+            creature: "Engorged Eater".into(),
+            place: "Remote Empyrean Vault".into(),
+            more: 1,
+        },
+        working: true,
+        via: None,
+    }];
+    c.autoplay.growth.pursuit_grounds = vec![(lb, place)];
+    c.autoplay.growth.pursuit_sought = vec![28849];
+}
+
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
 fn a_ground_reached_only_through_a_warden_flag_earns_that_flag_first() {
@@ -713,6 +735,73 @@ fn a_ground_reached_only_through_a_warden_flag_earns_that_flag_first() {
     c.travel.quests_done.push(u.flag.clone());
     let (_, earn) = c.journey_way(g.place()).expect("a way there");
     assert!(earn.is_none(), "{earn:?} asked for with the flag held");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_pursued_jaw_sends_the_character_to_its_dungeon_with_grounds_off() {
+    // The jaw's Engorged Eaters are in the Remote Empyrean Vault (0x0001), level 80 against 85.
+    let mut c =
+        crate::testkit::standing_in_the_field(85, 0xA9B4_0019, glam::Vec3::new(84.0, 7.1, 94.0));
+    c.autoplay.config.growth.hunt_grounds = false;
+    let vault = ac_world::hunting::at(0x0001).expect("the vault's ground");
+    let now = Instant::now();
+    assert!(!c.autoplay_grow(now), "grounds off, nothing pursued");
+    pursuing_the_jaw(&mut c, 0x0001, vault.place());
+    assert!(c.autoplay_grow(now), "{}", c.autoplay.status);
+    assert_eq!(c.autoplay.growth.bound_landblock(), Some(0x0001));
+    assert!(c.traveling());
+    assert!(
+        c.autoplay.status.contains("for Engorged Eater Jaw"),
+        "{}",
+        c.autoplay.status
+    );
+}
+
+#[test]
+fn on_the_pursued_ground_the_character_stays() {
+    let holtburg = 0xA9B4_0019;
+    let mut c = crate::testkit::character_of_level(crate::testkit::no_data(), 85);
+    crate::testkit::stand(&mut c, holtburg, glam::Vec3::new(84.0, 84.0, 94.0));
+    let here = Place {
+        at: c.my_position().unwrap(),
+        cell: holtburg,
+    };
+    pursuing_the_jaw(&mut c, holtburg >> 16, here);
+    let cfg = Growth::default();
+    let now = Instant::now();
+    c.autoplay.growth.quiet_since = Some(now - Duration::from_secs(3_600));
+    c.autoplay.growth.roams = u32::MAX;
+    assert!(!c.grow_hunt(now, &cfg), "{}", c.autoplay.status);
+    assert_eq!(c.autoplay.growth.hunting_at, Some(holtburg >> 16));
+    assert_eq!(
+        c.autoplay.growth.bound_landblock(),
+        None,
+        "left for another ground"
+    );
+}
+
+#[test]
+fn no_way_to_any_source_holds_the_pursuit_with_its_reason() {
+    // Nothing leads into 0x0003 (no portal in `portals.csv`): no journey ends there.
+    let mut c = crate::testkit::character_of_level(crate::testkit::no_data(), 85);
+    crate::testkit::stand(&mut c, 0xA9B4_0019, glam::Vec3::new(84.0, 84.0, 94.0));
+    let nowhere = Place {
+        at: ac_world::landblock_origin(0x0003_0100),
+        cell: 0x0003_0100,
+    };
+    pursuing_the_jaw(&mut c, 0x0003, nowhere);
+    let now = Instant::now();
+    assert!(!c.grow_hunt(now, &Growth::default()));
+    let held = c.autoplay.growth.pursuit_held.get("engorgedeaterjaw");
+    assert_eq!(
+        held.map(|(why, _)| why.as_str()),
+        Some("no journey reaches any place Engorged Eater is found")
+    );
+    assert!(
+        c.quest_board_at.is_none(),
+        "the board is not worked out again"
+    );
 }
 
 #[test]

@@ -54,6 +54,7 @@ mod hear;
 mod journey;
 mod ledger;
 mod loot;
+mod scrolls;
 pub mod steps;
 pub mod summoning;
 mod team;
@@ -61,12 +62,13 @@ mod tidy;
 mod vitals;
 
 pub use cast::cast_problem;
-pub use config::{Buffs, Config, Fight, Loot, Quests, Role, Style, Survive, Team};
+pub use config::{Buffs, Config, Fight, Loot, Pursuit, Quests, Role, Style, Survive, Team};
 #[cfg(any(test, feature = "testkit"))]
 pub(crate) use fight::critter::CREATURE_LEVEL;
 pub use fight::critter::{critter, Critter, Hint, Seen};
 pub use fight::road_fight_over;
 pub use fight::target::{name_matches, wanted_target, Release};
+pub use growth::pursuit::{PursuitLine, PursuitStep};
 pub use hands::ammo::choose_recipe;
 pub use ledger::retag::arrival_tag;
 #[cfg(doc)]
@@ -440,6 +442,8 @@ pub struct Autoplay {
     /// is worth pouring copies every stack's name, and the answer
     /// cannot change faster than the server answers.
     pub(crate) tidy_looked: Option<Instant>,
+    /// The spells a scroll could teach, and the scrolls read lately.
+    pub(crate) learnable: scrolls::Learnable,
     /// Tidying left alone until then, because weight is all that stands
     /// in its way ([`TIDY_LADEN_WAIT`]).
     pub(crate) tidy_laden_until: Option<Instant>,

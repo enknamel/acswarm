@@ -16,7 +16,7 @@ pub(super) const GROUND_REACH: f32 = 30.0;
 
 /// A ground the character has just left is not gone back to for this
 /// long; one it could not reach, the same.
-const SKIP_GROUND_FOR: Duration = Duration::from_secs(20 * 60);
+pub(super) const SKIP_GROUND_FOR: Duration = Duration::from_secs(20 * 60);
 
 /// At a ground with nothing in sight, the character walks this far to
 /// look, this many times, before it moves on: the spawns of a block
@@ -26,7 +26,7 @@ const ROAM: f32 = 70.0;
 const ROAMS: u32 = 3;
 
 /// A visit to a portal flag's NPC that did not earn it is not made again for this long.
-const UNLOCK_RETRY: Duration = Duration::from_secs(30 * 60);
+pub(super) const UNLOCK_RETRY: Duration = Duration::from_secs(30 * 60);
 
 /// The best-paying grounds a journey is planned to, best first, before giving up: planning is a
 /// search over every portal.
@@ -173,8 +173,12 @@ impl Client {
         let here = cell >> 16;
         // On the way: keep going, and notice arriving.
         if let Some((lb, at, name)) = self.autoplay.growth.bound.clone() {
+            // A pursued quest's ground may be a dungeon no `hunting::Ground` names.
+            let place = self
+                .pursued_place(lb)
+                .unwrap_or_else(|| ground_place(lb, at));
             let ground = crate::Goal::At {
-                place: ground_place(lb, at),
+                place,
                 within: GROUND_REACH,
             };
             if self.is_errand_journey(ground) {
@@ -219,7 +223,7 @@ impl Client {
             match on_the_way(there, broken_off, busy, lately) {
                 OnTheWay::Wait => return true,
                 OnTheWay::WalkOn => {
-                    if self.grow_travel(ground_place(lb, at), GROUND_REACH) {
+                    if self.grow_travel(place, GROUND_REACH) {
                         self.autoplay.growth.bound_walked_on = Some(now);
                         self.autoplay.note(
                             format!("on the way to the {name} ground again ({away:.0} m)"),
@@ -253,6 +257,10 @@ impl Client {
                     .say(Doing::Traveling, format!("to the {to} for a portal"));
                 return true;
             }
+        }
+        // A pursued quest's flag or hunt comes before any ground, a named one too.
+        if let Some(acted) = self.grow_pursuit(now) {
+            return acted;
         }
         let level = self.world.stats.level;
         if level <= 0 {
@@ -385,6 +393,10 @@ impl Client {
                 );
                 return true;
             }
+        }
+        // On a pursued quest's ground: it is hunted until the quest has what it asks.
+        if self.pursued_place(here).is_some() {
+            return false;
         }
         let st = &mut self.autoplay.growth;
         st.skip.expire(now, SKIP_GROUND_FOR);
