@@ -552,7 +552,8 @@ impl Client {
         // The rules may have changed under the decisions already made.
         // Before the ledger is written out, not after.
         self.tick_retag(now);
-        // Each quest's state, for the panel and the rules that read it; it sends nothing.
+        // What the giver asked last answered, then each quest's state; neither sends anything.
+        self.watch_quest_answer(now);
         self.refresh_quests(now);
         // What each item was taken for, written out when it changes.
         // Not on the way out: the thing this is defending against is a

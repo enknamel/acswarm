@@ -262,3 +262,46 @@ fn a_kill_tasks_count_heard_goes_into_the_log_under_its_counter() {
         "a plural no creature's name starts: the only task taken up"
     );
 }
+
+#[test]
+fn a_giver_that_pays_marks_the_quest_done_and_one_that_takes_nothing_is_let_be() {
+    let mut c = crate::testkit::character_of_level(crate::testkit::no_data(), 5);
+    c.autoplay.config.quests.on = true;
+    let t0 = Instant::now();
+    let alcott = ac_world::quests::rows_of("tothebarkeep")
+        .find(|r| r.giver == "Alcott")
+        .unwrap();
+    c.ask_giver(alcott, t0);
+    c.watch_quest_answer(t0 + Duration::from_secs(1));
+    assert!(c.quest_asked.is_some(), "no answer yet: still watched");
+    c.world.stats.total_xp += 7_000;
+    c.watch_quest_answer(t0 + Duration::from_secs(2));
+    assert!(c.quest_asked.is_none());
+    assert!(c.quest_log.done.contains_key("tothebarkeep"));
+    assert!(c.holds_quest_flag("ToTheBarkeep") && c.holds_quest_flag("LifestoneFound1111"));
+    c.refresh_quests(t0 + Duration::from_secs(3));
+    let line = c.quest_board.iter().find(|l| l.id == "tothebarkeep");
+    assert_eq!(line.map(|l| l.state.clone()), Some(QuestState::Done));
+
+    // A Collector handed a tail it never took: no XP, the tail still carried.
+    let tail = ac_world::quests::rows_of("give:3684").next().unwrap();
+    crate::testkit::thing_in_the_pack(&mut c, 0x8000_0100, "Red Rat Tail", 1);
+    c.world
+        .objects
+        .get_mut(&0x8000_0100)
+        .unwrap()
+        .weenie_class_id = 3684;
+    c.ask_giver(tail, t0);
+    c.watch_quest_answer(t0 + XP_WATCH);
+    assert!(!c.quest_log.done.contains_key("give:3684"));
+    let key = (tail.giver_wcid, tail.place.cell);
+    assert!(c.autoplay.growth.givers_refused.since(&key).is_some());
+}
+
+#[test]
+fn a_once_quest_whose_flag_is_held_from_before_the_log_is_done() {
+    let mut facts = at_level(5);
+    assert_eq!(state("tothebarkeep", &facts), QuestState::Ready);
+    facts.held.push("ToTheBarkeep".into());
+    assert_eq!(state("tothebarkeep", &facts), QuestState::Done);
+}

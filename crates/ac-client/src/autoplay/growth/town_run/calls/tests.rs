@@ -74,8 +74,8 @@ fn a_giver_no_journey_reaches_is_refused_when_the_run_is_planned() {
     assert_eq!(planned.order, [1, 0], "the reachable giver still goes");
 }
 
-#[test]
-fn a_collector_is_handed_every_tail_one_at_a_time_and_the_run_ends_when_none_is_left() {
+/// A character beside a Collector, `tails` Red Rat Tails in its pack, on a run handing them in.
+fn at_a_collector(tails: u32, now: Instant) -> (Client, &'static Row) {
     let mut c = character_of_level(no_data(), 20);
     with_a_pack(&mut c, 50);
     stand(&mut c, HOLTBURG, glam::Vec3::new(84.0, 7.1, 94.0));
@@ -95,7 +95,7 @@ fn a_collector_is_handed_every_tail_one_at_a_time_and_the_run_ends_when_none_is_
             ..Default::default()
         },
     );
-    for k in 0..2 {
+    for k in 0..tails {
         thing_in_the_pack(&mut c, 0x8000_0100 + k, "Red Rat Tail", 1);
         c.world
             .objects
@@ -103,7 +103,6 @@ fn a_collector_is_handed_every_tail_one_at_a_time_and_the_run_ends_when_none_is_
             .unwrap()
             .weenie_class_id = 3684;
     }
-    let now = Instant::now();
     let mut run = run_to(row.place.at.truncate(), now);
     run.phase = Phase::HandingIn {
         row,
@@ -113,6 +112,13 @@ fn a_collector_is_handed_every_tail_one_at_a_time_and_the_run_ends_when_none_is_
         stalls: 0,
     };
     c.autoplay.growth.run = Some(run);
+    (c, row)
+}
+
+#[test]
+fn a_collector_is_handed_every_tail_one_at_a_time_and_the_run_ends_when_none_is_left() {
+    let now = Instant::now();
+    let (mut c, _) = at_a_collector(2, now);
     let cfg = c.autoplay.config.growth.clone();
     let phase = |c: &Client| c.autoplay.growth.run.as_ref().map(|r| r.phase.clone());
 
@@ -154,6 +160,25 @@ fn a_collector_is_handed_every_tail_one_at_a_time_and_the_run_ends_when_none_is_
         c.autoplay.growth.run_was_futile,
         "handing in sells and buys nothing: the next run waits as after any futile one"
     );
+}
+
+#[test]
+fn a_giver_that_never_takes_the_item_is_not_called_on_again_for_a_while() {
+    let now = Instant::now();
+    let (mut c, row) = at_a_collector(1, now);
+    let cfg = c.autoplay.config.growth.clone();
+    let mut t = now;
+    while c.autoplay.growth.run.is_some() && t < now + Duration::from_secs(60) {
+        c.grow_run_step(t, &cfg);
+        t += GIVE_PAUSE;
+    }
+    assert!(c.autoplay.growth.run.is_none(), "the call never ended");
+    let key = (row.giver_wcid, row.place.cell);
+    assert!(c
+        .autoplay
+        .growth
+        .givers_refused
+        .within(&key, t, GIVER_RETRY));
 }
 
 #[test]

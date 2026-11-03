@@ -19,6 +19,8 @@ use crate::Client;
 pub const QUEST_BOARD_EVERY: Duration = Duration::from_secs(2);
 /// A leg this short joins a run without its XP paying for it (seconds, design §5.3, guess).
 pub const SHORT_LEG: f32 = 60.0;
+/// A giver's reward is waited for this long after the use or give (design §4.3, guess).
+pub const XP_WATCH: Duration = Duration::from_secs(10);
 
 /// One quest done: when last (Unix seconds) and how many times.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -371,7 +373,9 @@ fn state_of(doing: &[&Row], facts: &QuestFacts, locks: &mut Locks) -> QuestState
     if let Some(until) = facts.log.wait_until(&first.timer, facts.now) {
         return QuestState::Waiting { until };
     }
-    if first.repeat == Repeat::Once && facts.log.done.contains_key(&first.id) {
+    // A once-quest's own flag held is done too: stamped before the log was kept.
+    let flagged = !first.timer.is_empty() && holds(facts, &first.timer);
+    if first.repeat == Repeat::Once && (facts.log.done.contains_key(&first.id) || flagged) {
         return QuestState::Done;
     }
     if let Some(why) = beyond_level(doing, &first.want, facts) {
@@ -519,13 +523,15 @@ pub fn worth_detour(xp: u64, detour: f32, xp_per_hour: Option<f32>) -> bool {
     xp_per_hour.is_some_and(|rate| xp as f32 >= detour.max(0.0) * rate / 3600.0)
 }
 
-/// A giver the client asked, waiting for the answer (design §4.3; the hunt builder reads it).
+/// A giver the client asked, waiting for the answer (design §4.3).
 #[derive(Clone, Debug)]
 pub struct Asked {
     pub row: &'static Row,
     pub at: Instant,
     /// Total XP when asked: a rise is the reward.
     pub xp_before: i64,
+    /// The wanted item carried when asked, 0 for a talk: fewer after is a give taken.
+    pub carried: u32,
 }
 
 impl Client {
@@ -590,6 +596,69 @@ impl Client {
         self.quest_board_at = Some(now);
         (self.quest_board, self.quests_unsuited) =
             board_of(ac_world::quests::all(), &self.quest_facts());
+    }
+
+    /// `row`'s giver was asked: its answer is watched for, and one asked before is answered now.
+    pub(crate) fn ask_giver(&mut self, row: &'static Row, now: Instant) {
+        if let Some(old) = self.quest_asked.take() {
+            let rose = self.world.stats.total_xp > old.xp_before;
+            if rose || !std::ptr::eq(old.row, row) {
+                self.quest_answered(&old, rose, now);
+            }
+        }
+        self.quest_asked = Some(Asked {
+            row,
+            at: now,
+            xp_before: self.world.stats.total_xp,
+            carried: match row.want {
+                Want::Item(wcid) => self.carried_count(wcid),
+                _ => 0,
+            },
+        });
+    }
+
+    /// The answer to the giver asked: XP came, or [`XP_WATCH`] passed without it.
+    pub(crate) fn watch_quest_answer(&mut self, now: Instant) {
+        let Some(asked) = &self.quest_asked else {
+            return;
+        };
+        let rose = self.world.stats.total_xp > asked.xp_before;
+        if !rose && now.duration_since(asked.at) < XP_WATCH {
+            return;
+        }
+        if let Some(asked) = self.quest_asked.take() {
+            self.quest_answered(&asked, rose, now);
+        }
+    }
+
+    /// Paid, or unpaid with the item taken or the talk heard (the giver's own "done" reply, the
+    /// safe side): done, its wait begun and its flags held. Else the giver is let be a while.
+    fn quest_answered(&mut self, asked: &Asked, rose: bool, now: Instant) {
+        let row = asked.row;
+        let taken = match row.want {
+            Want::Item(wcid) => self.carried_count(wcid) < asked.carried,
+            _ => true,
+        };
+        if !rose && (!taken || row.repeat == Repeat::Any) {
+            let key = (row.giver_wcid, row.place.cell);
+            self.autoplay.growth.givers_refused.mark(key, now);
+            let why = format!("{} gave nothing for {}", row.giver, row.title);
+            self.autoplay.note(why, now);
+            return;
+        }
+        tracing::info!("quest: {} done at {} (paid: {rose})", row.id, row.giver);
+        self.quest_log.note_done(row, crate::holdings::unix_now());
+        self.save_quest_log();
+        self.hold_quest_flags(&row.stamps);
+    }
+
+    /// How many of the items of weenie class `wcid` the packs hold, worn ones left out.
+    pub(crate) fn carried_count(&self, wcid: u32) -> u32 {
+        self.world
+            .inventory()
+            .filter(|o| o.weenie_class_id == wcid && o.wielder.is_none())
+            .map(|o| o.stack_size.max(1))
+            .sum()
     }
 
     /// Go and see `row`'s giver: a visit, journey and all. False when there is no way.

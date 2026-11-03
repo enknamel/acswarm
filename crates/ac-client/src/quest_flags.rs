@@ -48,6 +48,21 @@ impl Client {
         self.save_quest_flags();
     }
 
+    /// A quest done stamped `flags`: held from now on, and saved.
+    pub(crate) fn hold_quest_flags(&mut self, flags: &[String]) {
+        let new: Vec<String> = flags
+            .iter()
+            .filter(|f| !self.holds_quest_flag(f))
+            .cloned()
+            .collect();
+        if new.is_empty() {
+            return;
+        }
+        tracing::info!("quest: flagged for {new:?}");
+        self.travel.quests_done.extend(new);
+        self.save_quest_flags();
+    }
+
     /// A portal asking for `flag` turned the character away: it is not held after all.
     pub(crate) fn drop_quest_flag(&mut self, flag: &str) {
         let before = self.travel.quests_done.len();

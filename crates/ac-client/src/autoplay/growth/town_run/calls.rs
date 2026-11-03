@@ -14,7 +14,7 @@ use super::vendor::counter_place;
 use super::{Errand, Phase, Run, Turn, VENDOR_REACH};
 use crate::autoplay::growth::Growth;
 use crate::autoplay::Doing;
-use crate::quest_log::{worth_detour, Asked, QuestState, SHORT_LEG};
+use crate::quest_log::{worth_detour, QuestState, SHORT_LEG};
 use crate::Client;
 
 /// A giver no journey reached is planned to again after this (a Warden's wait, hunt.rs).
@@ -150,7 +150,7 @@ impl Client {
             // A hand-in that repeats any time pays for each one carried (the Collectors).
             let times = match (&row.want, row.repeat) {
                 (Want::Item(wcid), Repeat::Any) => {
-                    (self.carried_of(*wcid) / row.count.max(1)).max(1)
+                    (self.carried_count(*wcid) / row.count.max(1)).max(1)
                 }
                 _ => 1,
             };
@@ -164,15 +164,6 @@ impl Client {
         }
         out.sort_by(|a, b| a.0.total_cmp(&b.0));
         out.into_iter().take(most).map(|(_, h)| h).collect()
-    }
-
-    /// How many of the items of weenie class `wcid` the packs hold.
-    fn carried_of(&self, wcid: u32) -> u32 {
-        self.world
-            .inventory()
-            .filter(|o| o.weenie_class_id == wcid && o.wielder.is_none())
-            .map(|o| o.stack_size.max(1))
-            .sum()
     }
 
     /// Where the run sets off from, as the journey planner is told it.
@@ -246,6 +237,14 @@ impl Client {
     }
 
     fn refuse_giver(&mut self, row: &Row, why: &str, now: Instant) {
+        // Not asked after all: no answer is waited for.
+        if self
+            .quest_asked
+            .as_ref()
+            .is_some_and(|a| std::ptr::eq(a.row, row))
+        {
+            self.quest_asked = None;
+        }
         let key = (row.giver_wcid, row.place.cell);
         self.autoplay.growth.givers_refused.mark(key, now);
         self.autoplay.note(format!("{why} for {}", row.title), now);
@@ -400,6 +399,10 @@ impl Client {
         match run.phase.clone() {
             Phase::ToGiver { row, tries } => {
                 if self.visits.current.is_some() {
+                    // Asked again each frame in reach, so the XP before the visit's use is kept.
+                    if self.giver_in_reach(row).is_some() {
+                        self.ask_giver(row, now);
+                    }
                     self.autoplay.say(
                         Doing::Shopping,
                         format!("{}: going to {} for {}", run.reason, row.giver, row.title),
@@ -410,7 +413,13 @@ impl Client {
                 if let Some(giver) = self.giver_in_reach(row).filter(|_| self.visits.finished) {
                     if row.hand == Hand::Talk {
                         // The visit's use was the hand-in: kills done, a talk, items it takes.
-                        self.ask_giver(row, now);
+                        if !self
+                            .quest_asked
+                            .as_ref()
+                            .is_some_and(|a| std::ptr::eq(a.row, row))
+                        {
+                            self.ask_giver(row, now);
+                        }
                         self.autoplay
                             .note(format!("talked to {} for {}", row.giver, row.title), now);
                         return self.giver_done(run, now, cfg);
@@ -469,7 +478,7 @@ impl Client {
         let Want::Item(wcid) = row.want else {
             return self.giver_done(run, now, cfg);
         };
-        let carried = self.carried_of(wcid);
+        let carried = self.carried_count(wcid);
         if let Some((at, before)) = last {
             if carried < before {
                 taken += 1;
@@ -495,6 +504,9 @@ impl Client {
             .map(|o| o.guid);
         let ends = !more || waits || stalls >= GIVE_STALLS || carried < row.count.max(1);
         let Some(item) = item.filter(|_| !ends) else {
+            if taken == 0 && stalls >= GIVE_STALLS {
+                self.refuse_giver(row, &format!("{} would not take it", row.giver), now);
+            }
             self.autoplay.note(
                 format!("handed {taken} {} to {}", item_name(row), row.giver),
                 now,
@@ -518,15 +530,6 @@ impl Client {
         };
         self.autoplay.growth.run = Some(run);
         Turn::Acted
-    }
-
-    /// The giver was asked: its answer is watched for (`Client.quest_asked`, design §4.3).
-    fn ask_giver(&mut self, row: &'static Row, now: Instant) {
-        self.quest_asked = Some(Asked {
-            row,
-            at: now,
-            xp_before: self.world.stats.total_xp,
-        });
     }
 }
 
