@@ -182,6 +182,10 @@ pub struct Pathfinder {
     asked: Option<Asked>,
     /// Offline runs: each plan builds what it needs on the asking thread before it answers.
     builds_itself: bool,
+    /// The handle the arrival prefetches go out as, so the walk's own jobs never replace one.
+    ahead_id: u64,
+    /// The walk last prepared for, asked once.
+    prepared: Option<(Place, Place)>,
     /// The assets a handle that builds for itself builds with, opened on first use.
     own: Option<Assets>,
     /// The area our last plan or ask was on, held so no other session's area pushes it out.
@@ -205,6 +209,8 @@ impl Pathfinder {
             asked_at: None,
             asked: None,
             builds_itself: false,
+            ahead_id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
+            prepared: None,
             own: None,
             region: None,
             plans: 0,
@@ -433,6 +439,44 @@ impl Pathfinder {
     /// Our last job is finished, or there is none.
     fn is_job_done(&self) -> bool {
         self.job.is_none_or(|n| DONE.load(Ordering::Acquire) >= n)
+    }
+
+    /// Have the builder assemble, ahead of time, the area a walk from `from` to `goal` will want (or
+    /// round `from` alone when that cannot hold both): a portal's far side, ready on arrival.
+    pub fn prepare(&mut self, from: Place, goal: Place, capsule: Capsule) {
+        let goal = if can_assemble(from, goal, &capsule) {
+            goal
+        } else {
+            from
+        };
+        if self.builds_itself || self.dead || self.prepared == Some((from, goal)) {
+            return;
+        }
+        self.prepared = Some((from, goal));
+        let held = REGIONS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .any(|r| r.is_holding(from, goal, &capsule));
+        if held || !can_assemble(from, goal, &capsule) {
+            return;
+        }
+        if self.line.is_none() {
+            self.line = builder(&self.archives);
+        }
+        let Some((_, jobs)) = self.line.as_ref() else {
+            return;
+        };
+        let walk = Walk {
+            who: self.ahead_id,
+            number: NEXT_JOB.fetch_add(1, Ordering::Relaxed),
+            from,
+            goal,
+            within: 1.0,
+            capsule,
+            reply: None,
+        };
+        let _ = jobs.send(Job::Assemble(walk));
     }
 
     /// Have the builder plan the steering's walk to within `within` of `to`, so no search holds up
@@ -852,6 +896,34 @@ mod tests {
         ));
         let spots = live.standable_near(at, at, 2.5, Capsule::default());
         assert_eq!(spots, None, "queued for the builder");
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn a_portal_exit_prepared_ahead_is_assembled_before_anyone_plans_there() {
+        // A live handle, as a journey's portal step begins: the far side is queued as its own job,
+        // and is there to plan on when the character arrives.
+        let assets = Assets::open(ac_dat::test_data_dir()).expect("the DATs");
+        let mut live = Pathfinder::new(&assets);
+        let exit = Place::on_map(glam::Vec2::new(
+            0xC9 as f32 * 192.0 + 96.0,
+            0x8B as f32 * 192.0 + 96.0,
+        ));
+        let next = Place::on_map(exit.at.truncate() + glam::Vec2::new(40.0, 20.0));
+        let cap = Capsule::default();
+        assert!(region_for(exit, next, &cap).is_none(), "not assembled yet");
+        live.prepare(exit, next, cap);
+        let until = Instant::now() + Duration::from_secs(60);
+        while region_for(exit, next, &cap).is_none() && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(
+            region_for(exit, next, &cap).is_some(),
+            "the builder never assembled it"
+        );
+        // Asked twice, it is queued once.
+        live.prepare(exit, next, cap);
+        assert_eq!(live.prepared, Some((exit, next)));
     }
 
     #[test]

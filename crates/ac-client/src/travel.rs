@@ -441,6 +441,19 @@ impl Client {
             return false;
         };
         let n = self.travel.step;
+        // The far side's graph is built while the character walks to the portal or casts.
+        if let (Some(exit), Some(capsule)) =
+            (step.exit(), self.player.as_ref().map(|p| p.capsule()))
+        {
+            let next = self
+                .travel
+                .trip
+                .as_ref()
+                .and_then(|t| t.steps.get(n + 1))
+                .and_then(Step::walk_end)
+                .unwrap_or(exit);
+            self.pathfinder.prepare(exit, next, capsule);
+        }
         match &step {
             // A recall step has nowhere to walk: stand still, cast, and wait to be carried off,
             // which `step_goal` sees to; done when the character is where the spell lands.
