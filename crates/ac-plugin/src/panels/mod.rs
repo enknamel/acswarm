@@ -43,6 +43,7 @@ mod map;
 mod menu;
 pub mod nameplates;
 pub mod options;
+mod quest_list;
 pub(crate) mod radar;
 mod salvage;
 pub mod skills;

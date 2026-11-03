@@ -2,6 +2,7 @@ use std::time::{Duration, Instant};
 
 use glam::Vec2;
 
+use super::quest_bonus::{ground_bonus, quest_pay};
 use super::road::{on_the_way, OnTheWay, RETRY_AFTER, WALK_ON_EVERY};
 use super::{about, Growth};
 use crate::autoplay::{Doing, CORPSE_LIFE};
@@ -500,7 +501,7 @@ impl Client {
 }
 
 impl Client {
-    /// The best-paying ground that suits `level` and that a journey reaches: a journey is short
+    /// The best-paying ground for `level` a journey reaches, quests' XP added: a journey is short
     /// and a stay long, so the time there buys nothing (a_better_ground_further_off_is_chosen).
     fn best_ground(
         &mut self,
@@ -508,14 +509,22 @@ impl Client {
         margin: u32,
         skip: &[u32],
     ) -> Option<&'static ac_world::hunting::Ground> {
-        let ranked = ac_world::hunting::ranked_for(level, margin, skip);
+        let to_next = self
+            .assets
+            .xp_table()
+            .ok()
+            .and_then(|t| t.xp_to_next_level(level))
+            .unwrap_or(0);
+        let pay = quest_pay(&self.quest_board, &self.quest_wants_left(), level, to_next);
+        let ranked = ac_world::hunting::ranked_with(level, margin, skip, |g| ground_bonus(&pay, g));
         ranked.into_iter().take(CANDIDATES).find(|g| {
             let secs = self.journey_seconds(g.place());
+            let bonus = ground_bonus(&pay, g);
             tracing::debug!(
-                "ground: {} {:#06x} worth {:.0}, journey {secs:?} s",
+                "ground: {} {:#06x} worth {:.0} (quests {bonus:.0} XP a kill), journey {secs:?} s",
                 g.name,
                 g.landblock,
-                g.worth()
+                g.worth_with(bonus)
             );
             secs.is_some()
         })

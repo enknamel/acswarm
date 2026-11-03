@@ -93,10 +93,10 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 | follow | `autoplay_follow`, `stop_following`, `followed_leader`, `is_led`, `team_leader`, `follow_break` | `autoplay/team/follow.rs` | `Autoplay.follow_trip`, `Autoplay.followed`, `Team.follow`, `Client.going` (`FOLLOW_ROWS`' walks) | follow | autoplay::team::follow | follow |
 | played by hand | `autoplay_by_hand`, `autoplay_assist` | `autoplay/team/by_hand.rs` | `Team.follow`, `Team.focus_fire` | by_hand | autoplay::team::by_hand | assist |
 | quartermaster | `autoplay_quartermaster`, `autoplay_stock`, `decide`, `quartermaster`, `hand_out` | `autoplay/team/quartermaster.rs`, `logistics.rs`, `autoplay/growth/policy.rs` | `growth::State.mode`, `Team.restock` | quartermaster | autoplay::team::quartermaster | quartermaster |
-| town run | `autoplay_town_run`, `grow_town_run`, `start_town_run`, `grow_run_step`, `grow_run_next`, `choose_stop`, `pick_vendor` | `autoplay/growth/town_run/mod.rs`, `autoplay/growth/town_run/counter.rs`, `autoplay/growth/town_run/vendor.rs`, `autoplay/growth/town_run/panel.rs`, `shopping.rs`, `crates/ac-vendor/src/run.rs` | `growth::State.run`, `growth::State.shop` | counter | autoplay::growth::town_run | town_run, counter |
+| town run | `autoplay_town_run`, `grow_town_run`, `start_town_run`, `grow_run_step`, `grow_run_next`, `choose_stop`, `pick_vendor`, `plan_calls`, `giver_step` | `autoplay/growth/town_run/mod.rs`, `autoplay/growth/town_run/counter.rs`, `autoplay/growth/town_run/vendor.rs`, `autoplay/growth/town_run/panel.rs`, `autoplay/growth/town_run/calls.rs`, `crates/ac-world/src/tour.rs`, `shopping.rs`, `crates/ac-vendor/src/run.rs` | `growth::State.run`, `growth::State.shop` | counter | autoplay::growth::town_run | town_run, counter |
 | supplies and sale | `grow_needs_with`, `supplies`, `sell_policy`, `offers_for_sale`, `burns` | `autoplay/growth/needs.rs`, `autoplay/growth/policy.rs`, `autoplay/growth/sale.rs`, `autoplay/growth/supplies.rs`, `crates/ac-loot/src/sale.rs` | `growth::State.needs`, `Growth.ammo_keep` | counter | autoplay::growth | need, sale |
 | XP spending | `autoplay_spend_xp`, `grow_spend_xp`, `raise_offers`, `batch_raise` | `autoplay/growth/xp.rs`, `autoplay/growth/raise.rs`, `advance.rs` | `growth::State.pending`, `growth::State.sulking` | experience | autoplay::growth::xp | raise |
-| hunting ground and area | `autoplay_grow`, `grow_hunt`, `autoplay_watch_the_ground`, `autoplay_keep_to_area` | `autoplay/growth/mod.rs`, `autoplay/growth/hunt.rs`, `hunt.rs` | `growth::State.bound`, `growth::State.quiet_since`, `Fight.area` | ground | autoplay::growth::hunt | ground, area |
+| hunting ground and area | `autoplay_grow`, `grow_hunt`, `autoplay_watch_the_ground`, `autoplay_keep_to_area` | `autoplay/growth/mod.rs`, `autoplay/growth/hunt.rs`, `autoplay/growth/quest_bonus.rs`, `hunt.rs` | `growth::State.bound`, `growth::State.quiet_since`, `Fight.area` | ground | autoplay::growth::hunt | ground, area |
 | walk | `go`, `go_to`, `stop_going`, `settle_going`, `walk_journey` | `body/going.rs`, `body/player_tick.rs`, `body/standing.rs`, `pathfinder.rs`, `crates/ac-nav/src/steering.rs`, `crates/ac-nav/src/routing.rs` | `Client.going`, `Client.steering`, `Client.refusals` | going | body::going | walk |
 | travel | `travel_to`, `travel_about`, `set_off`, `keep_journey`, `settle_journey`, `autoplay_resume_journey` | `travel.rs`, `travel/overland.rs`, `gem_room.rs`, `recalls.rs`, `autoplay/journey.rs` | `Client.travel`, `Autoplay.resume_trip` | travel | travel | journey |
 | visits | `visit_landmark`, `tick_visit`, `visit_person` | `visit.rs` | `Client.visits` | visit | visit | visit |
@@ -107,13 +107,14 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 | summoning | `autoplay_summon`, `autoplay_claim_pet_kills`, `hear_summoning` | `autoplay/summoning.rs`, `autoplay/mod.rs` | `Autoplay.summoning` | summon | autoplay::summoning | summon, pet |
 | refusals | `hear_refusal`, `refused`, `answer` | `refused.rs`, `crates/ac-agent/src/refusals.rs` | the waiting system's own wait, e.g. `Autoplay.shelved` | refus | refused | refusal |
 | server chat | `chat_message`, `hear_arrival`, `hear_spell_attack` | `session/chat.rs`, `autoplay/hear.rs` | `Autoplay.hit_by` | arriv | session::chat | heard |
+| quests | `refresh_quests`, `quest_board`, `quest_wants`, `visit_giver`, `watch_quest_answer` | `quest_log.rs`, `crates/ac-world/src/quests.rs` | `Client.quest_board`, `Client.quest_log`, `Autoplay.config.quests` | quest_log | quest_log | quest |
 
 ## Glossary
 
 | term | means | not |
 |---|---|---|
 | corpse | a dead creature's container that autoplay opens and empties | body, remains |
-| town_run | a trip to sell loot and restock at counters | errand, sale run, trip |
+| town_run, call | a trip to sell loot and restock at counters, handing in at quest givers on the way; each stop a call | errand, sale run, trip |
 | counter | a vendor's shop the town run stands at | shop, store |
 | road | a walk on the way somewhere (a ground, a counter, a script's goal); on it only what attacks is fought | way |
 | ground | the hunting spot growth chose; walking about it is not a road | spot, field |
@@ -133,6 +134,7 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 | refusal | the server's no, by weenie error or in words | error, rejection |
 | plan, order | the leader's plan for the party, and one character's part in it | - |
 | assist | hit what the leader is hitting, picking nothing | help, support |
+| quest, giver, hand_in | a quest in `ac_world::quests`, its rows sharing an id; the NPC who rewards it; giving it the items, or talking, for the reward | task, npc, turn-in |
 
 ## Domain rules
 
@@ -185,16 +187,14 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 | `profile.rs`, `weapons.rs`, `daytime.rs`, `augmentations.rs` | shims re-exporting `ac_loot::profile` and `ac_loot::weapons`; Dereth's time of day; augmentation gems |
 | `holdings.rs` | every character's inventory snapshots, for the Items window |
 | `reconnect.rs`, `logoff.rs` | whether and when a dropped session logs back in; logging every session off on exit |
-| `options.rs`, `emotes.rs` | character option bits; soul emotes |
+| `options.rs`, `emotes.rs`, `position.rs` | character option bits; soul emotes; `my_position()`: the character's world position |
 | `tally.rs` | what the character did lately, for telemetry: this frame's walk (`WalkFrame`), blows traded (`Blows`), supplies short (`SupplyLine`) |
 | `advance.rs` | experience costs and raise messages |
-| `recalls.rs`, `quest_flags.rs` | recall spells the journey planner can use; the portal quest flags it may plan through, earned by talking to whoever stamps one |
+| `recalls.rs`, `quest_flags.rs`, `quest_log.rs` | recall spells the journey planner can use; the portal quest flags it may plan through, earned by talking to whoever stamps one; each character's quest log |
 | `shopping.rs` | reads the pack into `ac_vendor`'s snapshot and carries out its act |
 | `aim.rs` | whether a projectile clears walls and hills on the way to its target |
 | `logistics.rs` | the party's mode (hunting or restocking) and money sharing, the same on every session |
-| `buffs.rs` | which buffs a character should wear, from its skills and spells |
-| `hunt.rs` | hunting areas drawn on the map |
-| `position.rs` | `my_position()`: the character's world position |
+| `buffs.rs`, `hunt.rs` | which buffs a character should wear, from its skills and spells; hunting areas drawn on the map |
 | `testkit.rs`, `walk_trial.rs` | test-only: `Client::offline` sessions over `no_data()` or `game_data()`, `standing_at()`, `creature()`, `corpse()`, `mate()` builders; the route harness (`walk_trial::run`, `tests/route_harness.rs`) |
 
 Unit tests sit in each file's `mod tests`; those reading the archives are ignored (`cargo test-data`).

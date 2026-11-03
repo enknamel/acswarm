@@ -218,6 +218,9 @@ pub enum Ask {
     /// Any spell on the item whose name answers this.
     /// `Like` `^Legendary ` asks for any legendary cantrip; no list of spell names keeps up.
     Spell { op: TextOp, value: String },
+    /// Wanted by an active quest: one switched on wants it and fewer are carried than it needs
+    /// ([`Wielder::quest_wants`], filled from the client's quest board).
+    Quest,
 }
 
 /// Which bag of an identify a property lives in. A mirror of
@@ -291,7 +294,7 @@ impl Ask {
     /// Not for the character, nor the item's name, kind, worth or workmanship, which come with it.
     pub fn needs_id(&self) -> bool {
         let term = match self {
-            Ask::Me(_) => return false,
+            Ask::Me(_) | Ask::Quest => return false,
             Ask::Prop { .. } | Ask::Text { .. } | Ask::Spell { .. } => return true,
             Ask::Search(line) => return Query::parse(line).needs_appraisal(),
             Ask::Item(t) => t,
@@ -327,6 +330,7 @@ impl Ask {
                 op.word()
             ),
             Ask::Spell { op, value } => format!("a spell {} \"{value}\"", op.word()),
+            Ask::Quest => "wanted by an active quest".to_string(),
         }
     }
 }
@@ -399,16 +403,23 @@ impl Rule {
 
     /// Whether every condition judgeable without an appraisal holds.
     /// A rule failing one is out whatever the server would say, which saves the round trip.
-    fn cheap_half_holds(&self, item: &ItemStats, me: &Wielder, name: &str) -> bool {
+    fn cheap_half_holds(&self, item: &ItemStats, me: &Wielder, name: &str, held: u32) -> bool {
         self.all
             .iter()
             .filter(|a| !a.needs_id())
-            .all(|a| holds(a, item, None, me, name))
+            .all(|a| holds(a, item, None, me, name, held))
     }
 
-    /// Whether the whole rule holds.
-    fn holds(&self, item: &ItemStats, id: Option<&Appraisal>, me: &Wielder, name: &str) -> bool {
-        self.all.iter().all(|a| holds(a, item, id, me, name))
+    /// Whether the whole rule holds; `held` is how many are carried, for the quest condition.
+    fn holds(
+        &self,
+        item: &ItemStats,
+        id: Option<&Appraisal>,
+        me: &Wielder,
+        name: &str,
+        held: u32,
+    ) -> bool {
+        self.all.iter().all(|a| holds(a, item, id, me, name, held))
     }
 
     /// The rule in words, for the editor's summary line.
@@ -424,7 +435,14 @@ impl Rule {
     }
 }
 
-fn holds(ask: &Ask, item: &ItemStats, id: Option<&Appraisal>, me: &Wielder, name: &str) -> bool {
+fn holds(
+    ask: &Ask,
+    item: &ItemStats,
+    id: Option<&Appraisal>,
+    me: &Wielder,
+    name: &str,
+    held: u32,
+) -> bool {
     match ask {
         // A name condition is a whole word: "pea" is not in "Spear"
         // (`the_starter_profile_is_one_a_player_would_recognise`). A search line, like
@@ -464,6 +482,7 @@ fn holds(ask: &Ask, item: &ItemStats, id: Option<&Appraisal>, me: &Wielder, name
             TextOp::HasNot => !item.spells.iter().any(|s| TextOp::Has.holds(s, value)),
             TextOp::Unlike => !item.spells.iter().any(|s| TextOp::Like.holds(s, value)),
         },
+        Ask::Quest => crate::quest_wants::wanted(&me.quest_wants, item.wcid, held),
     }
 }
 
@@ -654,13 +673,13 @@ impl Profile {
             if rule.keep_up_to.is_some_and(|cap| held >= cap) {
                 continue;
             }
-            if !rule.cheap_half_holds(item, me, name) {
+            if !rule.cheap_half_holds(item, me, name, held) {
                 continue;
             }
             if rule.needs_id() && !item.appraised {
                 return Some((at, rule, true));
             }
-            if rule.holds(item, id, me, name) {
+            if rule.holds(item, id, me, name, held) {
                 return Some((at, rule, false));
             }
         }
@@ -729,13 +748,14 @@ impl Profile {
     }
 
     /// Whether a rule that is on takes things for one member rather than whoever opens the body.
-    /// It asks a skill or, while [`Looting::salvage`], salvages: every character has Salvaging.
+    /// It asks a skill or a quest's want or, while [`Looting::salvage`], salvages.
     pub fn sends_to_the_best(&self) -> bool {
         self.rules
             .iter()
             .filter(|r| r.on && r.action.takes())
             .any(|r| {
                 r.skill_asked().is_some()
+                    || r.all.contains(&Ask::Quest)
                     || (self.looting.salvage && r.action == LootAction::Salvage)
             })
     }
@@ -858,10 +878,12 @@ impl Profile {
         };
         Profile {
             name: "Starter".into(),
-            note: "A place to start: money and components kept, vendor \
+            note: "A place to start: quest items, money and components kept, vendor \
                    trash sold, the good things looked over."
                 .into(),
             rules: vec![
+                // First: a trophy is worth next to nothing, and "nothing cheap" would skip it.
+                quest_rule(),
                 Rule {
                     name: "money".into(),
                     action: LootAction::Keep,
@@ -973,6 +995,29 @@ impl Profile {
             sell_to: SellTo::Best,
             looting: Looting::default(),
         }
+    }
+}
+
+/// The rule that keeps what an active quest wants: an ordinary rule, moved or overruled like any.
+pub fn quest_rule() -> Rule {
+    Rule {
+        name: "quest items".into(),
+        group: "Quests".into(),
+        action: LootAction::Keep,
+        all: vec![Ask::Quest],
+        ..Default::default()
+    }
+}
+
+impl Profile {
+    /// Put [`quest_rule`] first, for a profile saved before there was one; false when a rule
+    /// already asks for quest items, wherever the player put it.
+    pub fn add_quest_rule(&mut self) -> bool {
+        if self.rules.iter().any(|r| r.all.contains(&Ask::Quest)) {
+            return false;
+        }
+        self.rules.insert(0, quest_rule());
+        true
     }
 }
 
@@ -1981,6 +2026,121 @@ mod tests {
         assert_eq!(tidy_name("mage/archer"), "mage-archer");
         assert_eq!(tidy_name("   "), "profile");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A Red Rat Tail as quests.csv has it: wcid 3684, Misc, worth 2.
+    fn tail() -> ItemStats {
+        ItemStats {
+            wcid: 3684,
+            ..item("Red Rat Tail", item_type::MISC, 2)
+        }
+    }
+
+    fn questing(need: Option<u32>) -> Wielder {
+        Wielder {
+            quest_wants: vec![crate::quest_wants::QuestWant { wcid: 3684, need }],
+            ..me(10, &[])
+        }
+    }
+
+    fn quest_then_cheap(above: Vec<Rule>) -> Profile {
+        let cheap = rule(
+            "nothing cheap",
+            LootAction::Skip,
+            vec![Ask::Item(Term::Num(NumKey::Value, Op::Le, 250.0))],
+        );
+        Profile {
+            rules: above.into_iter().chain([quest_rule(), cheap]).collect(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn the_quest_rule_keeps_while_fewer_are_carried_than_the_quest_needs() {
+        let p = quest_then_cheap(Vec::new());
+        let keep = Verdict::Decided(LootAction::Keep, "quest items".into());
+        let skip = Verdict::Decided(LootAction::Skip, "nothing cheap".into());
+        assert_eq!(p.judge_test(&tail(), &questing(Some(5)), "Bryn", 4), keep);
+        assert_eq!(
+            p.judge_test(&tail(), &questing(Some(5)), "Bryn", 5),
+            skip,
+            "enough carried: the rules below decide the rest"
+        );
+        assert_eq!(p.judge_test(&tail(), &questing(None), "Bryn", 900), keep);
+        assert!(!Ask::Quest.needs_id(), "the wcid comes with the item");
+        assert_eq!(Ask::Quest.tell(), "wanted by an active quest");
+    }
+
+    #[test]
+    fn a_quest_switched_off_lets_its_items_fall_to_the_rules_below() {
+        let p = quest_then_cheap(Vec::new());
+        let skip = Verdict::Decided(LootAction::Skip, "nothing cheap".into());
+        assert_eq!(p.judge_test(&tail(), &me(10, &[]), "Bryn", 0), skip);
+        let other = Wielder {
+            quest_wants: vec![crate::quest_wants::QuestWant {
+                wcid: 1,
+                need: None,
+            }],
+            ..me(10, &[])
+        };
+        assert_eq!(p.judge_test(&tail(), &other, "Bryn", 0), skip);
+    }
+
+    #[test]
+    fn a_rule_above_the_quest_rule_decides_a_quest_item() {
+        let sell = rule(
+            "tails to sell",
+            LootAction::Sell,
+            vec![Ask::Item(Term::Word("tail".into()))],
+        );
+        let p = quest_then_cheap(vec![sell]);
+        assert_eq!(
+            p.judge_test(&tail(), &questing(None), "Bryn", 0),
+            Verdict::Decided(LootAction::Sell, "tails to sell".into()),
+            "the profile decides: no guard skips it for a quest"
+        );
+    }
+
+    #[test]
+    fn the_starter_keeps_a_quest_trophy_and_still_skips_a_cheap_rag() {
+        let p = Profile::starter();
+        assert_eq!(p.rules[0], quest_rule());
+        assert_eq!(p.rules[0].group, "Quests");
+        assert_eq!(
+            p.judge_test(&tail(), &questing(None), "Bryn", 0),
+            Verdict::Decided(LootAction::Keep, "quest items".into())
+        );
+        let rag = item("Rag", item_type::MISC, 5);
+        assert_eq!(
+            p.judge_test(&rag, &questing(None), "Bryn", 0),
+            Verdict::Decided(LootAction::Skip, "nothing cheap".into())
+        );
+        assert_eq!(
+            p.judge_test(&tail(), &me(10, &[]), "Bryn", 0),
+            Verdict::Decided(LootAction::Skip, "nothing cheap".into()),
+            "no quest on: the tail is junk again"
+        );
+    }
+
+    #[test]
+    fn a_profile_saved_before_quests_loads_and_one_with_the_rule_reads_back() {
+        let text = r#"{"name":"old","rules":[{"name":"r","action":"keep","all":[{"Item":{"Word":"pea"}}]}]}"#;
+        let old: Profile = serde_json::from_str(text).expect("an old profile loads");
+        assert!(!old.rules[0].all.contains(&Ask::Quest));
+        let back: Profile =
+            serde_json::from_str(&serde_json::to_string(&Profile::starter()).unwrap()).unwrap();
+        assert_eq!(back.rules[0], quest_rule());
+    }
+
+    #[test]
+    fn the_quest_rule_is_added_first_to_a_profile_without_one_and_only_once() {
+        let mut old = quest_then_cheap(Vec::new());
+        old.rules.retain(|r| !r.all.contains(&Ask::Quest));
+        let cheap = old.rules[0].clone();
+        assert!(old.add_quest_rule());
+        assert_eq!(old.rules, [quest_rule(), cheap]);
+        assert!(!old.add_quest_rule(), "a second time");
+        assert_eq!(old.rules.len(), 2);
     }
 }
 

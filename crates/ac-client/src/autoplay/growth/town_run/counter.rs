@@ -86,7 +86,7 @@ pub(crate) fn on_opening(
 /// casts that can wait do (see `Client::counter_holding_casts`).
 pub(super) fn counter_asked(phase: Option<&Phase>, window: Option<u32>) -> Option<u32> {
     match phase {
-        Some(Phase::Going) => None,
+        Some(Phase::Going | Phase::ToGiver { .. } | Phase::HandingIn { .. }) => None,
         Some(Phase::Opening { guid, .. }) => Some(*guid),
         Some(Phase::Appraising | Phase::Selling { .. }) | None => window,
     }
@@ -118,6 +118,7 @@ impl Client {
         let me = Vec2::new(me.x, me.y);
         let elapsed = now.duration_since(run.since);
         match run.phase.clone() {
+            Phase::ToGiver { .. } | Phase::HandingIn { .. } => self.giver_step(run, now, cfg),
             Phase::Going => {
                 let counter = crate::Goal::At {
                     place: counter_place(run.at),
@@ -666,6 +667,7 @@ impl Client {
                         visited,
                         walked_on: None,
                         walking_up: false,
+                        calls: run.calls,
                     });
                     return true;
                 }
@@ -681,6 +683,24 @@ impl Client {
                 );
             }
         }
+        // The givers planned after this counter come next.
+        let Some(run) = self.next_call(run, now) else {
+            return true;
+        };
+        self.end_run(run, now, cfg, &needs, still_full, left)
+    }
+
+    /// The run is over: what it came to is noted, and the character stays in town when stranded
+    /// or goes back to its ground. `left` is the last counter's reason. True while it goes on.
+    pub(super) fn end_run(
+        &mut self,
+        run: Run,
+        now: Instant,
+        cfg: &Growth,
+        needs: &[crate::autoplay::growth::needs::Need],
+        still_full: bool,
+        left: Option<String>,
+    ) -> bool {
         // A trip that neither bought nor sold anything achieved
         // nothing, and starting another at once achieves nothing again:
         // that is the running back and forth between vendors for ever.
@@ -712,7 +732,7 @@ impl Client {
         // up looks like: stay in town. Walking back to the hunting
         // ground without the supplies to work it would only mean
         // walking straight back again.
-        if self.stranded(&needs, cfg) {
+        if self.stranded(needs, cfg) {
             let short: Vec<&str> = needs
                 .iter()
                 .filter(|n| n.urgent)

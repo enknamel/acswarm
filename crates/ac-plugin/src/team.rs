@@ -388,6 +388,7 @@ fn describe_as(client: &ac_client::Client, session: usize, with_supplies: bool) 
         ground: client.hunting_ground(),
         on_its_way: client.on_its_way(),
         skills: client.skills_its_rules_ask_about(),
+        quest_wants: client.quest_wants_left(),
         shut: client.autoplay.shuts_to_say(Instant::now()),
         opened_first: client.autoplay.opened_first(Instant::now()),
         opens_bodies: client.opens_bodies(),

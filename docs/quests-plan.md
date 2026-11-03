@@ -45,14 +45,27 @@ stop is a `Place` with its cell, so a giver in a dungeon is as reachable as a co
   the items are kept, and the next run that passes takes it.
 - A repeat wait comes from the data; the server's "you must wait" refusal is a row in
   `ac_agent::refusals` and the giver is not asked again until it is over.
+- Hand-ins ride a run; they never start one. A town run is made only for a full pack, too much
+  weight or supplies to buy, and one that sold and bought nothing counts as futile.
 - A giver no route reaches is refused when the run is planned, not found out on arrival.
 
 ## Steps
 
-1. `quests.csv` bundled; the quest list and states shown (no behaviour change).
-2. The rule condition, the default rule, the profile cross-check.
-3. Kill and talk quests: the reward in the ground picker; the giver as a stop.
-4. Item turn-ins and the errand run with many stops.
+1. `quests.csv` bundled; the quest list and states shown (no behaviour change). Built: data on
+   `quests`, the states, the Quests section and the kill count on `quests-list`.
+2. The rule condition, the default rule, the profile cross-check. Built (branch `quests-loot`):
+   `Ask::Quest`, the starter's "quest items" rule first, the wants re-judging the pack, the
+   cross-check naming the blocking rule, "add the quest rule at the top" for a saved profile, a
+   mate's wants (less what it carries) calling a body's item to it.
+3. Kill and talk quests: the reward in the ground picker; the giver as a stop. Ground picker
+   built (`autoplay/growth/quest_bonus.rs`, `hunting::ranked_with`); a ready kill or talk quest's
+   giver is a town run call (step 4), and so is the talk that takes a quest up.
+4. Item turn-ins and the errand run with many stops. Built (branch `quests-errand`): `ac_world::tour`,
+   the run's calls and hand-ins (`town_run/calls.rs`), and the giver's answer watched
+   (`Client::watch_quest_answer`): XP marks the quest done, starts its data wait and holds its
+   flags; no XP, a talk or an item taken is done on the safe side, else the giver is let be. Not
+   built: the "you must wait" refusal row (a wait read from the server's words);
+   `Client::xp_per_hour` is `None`, so only the short-leg rule adds a call.
 
 Later: items picked up off the ground rather than from corpses. Starts after movement phase 4
 merges: the errand run is built on phase 4's journeys, whose steps keep their cells.

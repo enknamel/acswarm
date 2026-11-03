@@ -672,3 +672,33 @@ fn a_character_choosing_a_ground_goes_to_the_warden_its_level_earns_first() {
         c.autoplay.status
     );
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_kill_task_taken_up_sends_the_character_to_hunt_its_creature() {
+    // A level 15 in Holtburg with San Ming's Blood Shreth task taken up, every other quest off.
+    let shreth = "killtaskbloodshreth";
+    let mut c =
+        crate::testkit::standing_in_the_field(15, 0xA9B4_0019, glam::Vec3::new(83.3, 14.04, 94.0));
+    let cfg = Growth::default();
+    let plain = c.best_ground(15, cfg.level_margin, &[]).expect("a ground");
+    let mut off: Vec<String> = ac_world::quests::all()
+        .iter()
+        .map(|r| r.id.clone())
+        .collect();
+    off.retain(|id| id != shreth);
+    off.dedup();
+    c.autoplay.config.quests = crate::autoplay::Quests { on: true, off };
+    c.quest_log.note_kills(shreth, 0);
+    c.refresh_quests(Instant::now());
+    let drawn = c.best_ground(15, cfg.level_margin, &[]).expect("a ground");
+    let want = ac_world::quests::Want::Kill(shreth.into());
+    let spawns_shreth = ac_world::quests::sources_of(&want)
+        .any(|s| s.landblocks.iter().any(|&(lb, _)| lb == drawn.landblock));
+    println!(
+        "chose {} {:#06x}, not {} {:#06x}",
+        drawn.name, drawn.landblock, plain.name, plain.landblock
+    );
+    assert!(spawns_shreth, "{drawn:?}");
+    assert_ne!(drawn.landblock, plain.landblock);
+}

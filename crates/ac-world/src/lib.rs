@@ -19,6 +19,7 @@ pub mod motion;
 pub mod object;
 pub mod portals;
 pub mod properties;
+pub mod quests;
 pub mod recalls;
 /// What takes up one of the character's pack slots.
 ///
@@ -64,6 +65,7 @@ pub mod shops;
 pub mod social;
 pub mod spawns;
 pub mod stats;
+pub mod tour;
 pub mod towns;
 pub mod trip;
 pub mod unlocks;

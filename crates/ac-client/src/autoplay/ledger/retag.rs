@@ -136,6 +136,10 @@ impl Client {
     /// should not be telling somebody their mule is holding things for
     /// a rule they deleted.
     pub(crate) fn tick_retag(&mut self, now: Instant) {
+        if self.autoplay.config.quests.on && !self.is_board_current() {
+            return;
+        }
+        self.read_quest_wants();
         let profile = self.loot_profile();
         // The cheap half, run every frame: has the shelf handed out a
         // different profile? It replaces the whole profile on every edit,
@@ -196,7 +200,24 @@ impl Client {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
         profile.map(|p| p.fingerprint()).hash(&mut h);
+        // Sorted by wcid; none wanted hashes nothing, so a fingerprint from before quests stands.
+        for w in &self.quest_wants {
+            (w.wcid, w.need).hash(&mut h);
+        }
         h.finish()
+    }
+
+    /// Take the board's wants once per board; a change has the pack's fingerprint read again.
+    fn read_quest_wants(&mut self) {
+        if self.quest_wants_at == self.quest_board_at {
+            return;
+        }
+        self.quest_wants_at = self.quest_board_at;
+        let wants = crate::quest_log::quest_wants(&self.quest_board);
+        if wants != self.quest_wants {
+            self.quest_wants = wants;
+            self.autoplay.judged_under = None;
+        }
     }
 
     /// Judge everything carried against the rules as they stand now and

@@ -48,6 +48,21 @@ impl Client {
         self.save_quest_flags();
     }
 
+    /// A quest done stamped `flags`: held from now on, and saved.
+    pub(crate) fn hold_quest_flags(&mut self, flags: &[String]) {
+        let new: Vec<String> = flags
+            .iter()
+            .filter(|f| !self.holds_quest_flag(f))
+            .cloned()
+            .collect();
+        if new.is_empty() {
+            return;
+        }
+        tracing::info!("quest: flagged for {new:?}");
+        self.travel.quests_done.extend(new);
+        self.save_quest_flags();
+    }
+
     /// A portal asking for `flag` turned the character away: it is not held after all.
     pub(crate) fn drop_quest_flag(&mut self, flag: &str) {
         let before = self.travel.quests_done.len();
@@ -115,7 +130,8 @@ impl Client {
         ok
     }
 
-    fn quest_flags_path(&self) -> Option<std::path::PathBuf> {
+    /// This character's file `<name><suffix>` under `quests/<host>/`, beside the loot profiles.
+    pub(crate) fn quest_file(&self, suffix: &str) -> Option<std::path::PathBuf> {
         let name = self.world.stats.name.trim();
         if name.is_empty() {
             return None;
@@ -125,8 +141,12 @@ impl Client {
             beside
                 .join("quests")
                 .join(ac_store::file_safe(&self.config.host))
-                .join(format!("{}.json", ac_store::file_safe(name))),
+                .join(format!("{}{suffix}", ac_store::file_safe(name))),
         )
+    }
+
+    fn quest_flags_path(&self) -> Option<std::path::PathBuf> {
+        self.quest_file(".json")
     }
 
     /// Read back the flags earned in earlier sessions, at login.

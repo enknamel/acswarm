@@ -341,6 +341,23 @@ impl Default for Team {
     }
 }
 
+/// The quests autoplay considers (`crate::quest_log`); off, the quest rule wants nothing.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Quests {
+    /// Autoplay considers quests at all.
+    pub on: bool,
+    /// Quests switched off, by `ac_world::quests` id; a quest the data adds later starts on.
+    pub off: Vec<String>,
+}
+
+impl Quests {
+    /// Whether the quest `id` is one autoplay considers.
+    pub fn is_on(&self, id: &str) -> bool {
+        self.on && !self.off.iter().any(|o| o == id)
+    }
+}
+
 /// Everything the character does on its own.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -356,6 +373,8 @@ pub struct Config {
     /// Getting a new character through the Training Academy (see
     /// `crate::academy`).
     pub academy: crate::academy::Academy,
+    /// Quests to do, and which are switched off.
+    pub quests: Quests,
 }
 
 #[cfg(test)]

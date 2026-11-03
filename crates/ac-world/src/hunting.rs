@@ -194,8 +194,13 @@ impl Ground {
     /// What hunting here pays, in XP per point of health taken off, scaled by how busy it is
     /// ([`HALF_BUSY`]). XP comes in level steps while health varies 2-5x within one.
     pub fn worth(&self) -> f32 {
+        self.worth_with(0.0)
+    }
+
+    /// [`Ground::worth`] with `extra` XP a kill on top: what an active quest pays per kill here.
+    pub fn worth_with(&self, extra: f32) -> f32 {
         let c = self.creatures as f32;
-        self.xp as f32 / self.health.max(1) as f32 * c / (c + HALF_BUSY)
+        (self.xp as f32 + extra) / self.health.max(1) as f32 * c / (c + HALF_BUSY)
     }
 }
 
@@ -291,7 +296,17 @@ pub fn at(landblock: u32) -> Option<&'static Ground> {
 /// best paying first ([`Ground::worth`]), leaving out the landblocks in `skip`: the one just
 /// hunted out, one it could not reach, one it died on.
 pub fn ranked_for(level: u32, margin: u32, skip: &[u32]) -> Vec<&'static Ground> {
-    ranked_among(all(), level, margin, skip)
+    ranked_with(level, margin, skip, |_| 0.0)
+}
+
+/// [`ranked_for`], each ground's kills worth `bonus(ground)` XP more ([`Ground::worth_with`]).
+pub fn ranked_with(
+    level: u32,
+    margin: u32,
+    skip: &[u32],
+    bonus: impl Fn(&Ground) -> f32,
+) -> Vec<&'static Ground> {
+    ranked_among(all(), level, margin, skip, bonus)
 }
 
 fn ranked_among<'a>(
@@ -299,14 +314,17 @@ fn ranked_among<'a>(
     level: u32,
     margin: u32,
     skip: &[u32],
+    bonus: impl Fn(&Ground) -> f32,
 ) -> Vec<&'a Ground> {
-    let mut v: Vec<&Ground> = grounds
+    let mut v: Vec<(&Ground, f32)> = grounds
         .iter()
-        .filter(|g| g.suits(level, margin) && g.can_enter(level) && g.worth() > 0.0)
+        .filter(|g| g.suits(level, margin) && g.can_enter(level))
         .filter(|g| !skip.contains(&g.landblock))
+        .map(|g| (g, g.worth_with(bonus(g))))
+        .filter(|(_, w)| *w > 0.0)
         .collect();
-    v.sort_by(|a, b| b.worth().total_cmp(&a.worth()));
-    v
+    v.sort_by(|a, b| b.1.total_cmp(&a.1));
+    v.into_iter().map(|(g, _)| g).collect()
 }
 
 #[cfg(test)]
@@ -394,9 +412,42 @@ mod tests {
         let ids = |v: Vec<&Ground>| v.iter().map(|g| g.landblock).collect::<Vec<_>>();
         // Half the health for the same XP pays twice as well; a stray and a ground paying no XP
         // are no grounds at all.
-        assert_eq!(ids(ranked_among(&grounds, 10, 5, &[])), vec![0xB, 0xA]);
-        assert_eq!(ids(ranked_among(&grounds, 10, 5, &[0xB])), vec![0xA]);
-        assert_eq!(ids(ranked_among(&grounds, 50, 5, &[])), vec![0xC]);
+        let none = |_: &Ground| 0.0;
+        assert_eq!(
+            ids(ranked_among(&grounds, 10, 5, &[], none)),
+            vec![0xB, 0xA]
+        );
+        assert_eq!(ids(ranked_among(&grounds, 10, 5, &[0xB], none)), vec![0xA]);
+        assert_eq!(ids(ranked_among(&grounds, 50, 5, &[], none)), vec![0xC]);
+    }
+
+    #[test]
+    fn a_bonus_on_a_ground_lifts_it_over_a_slightly_better_one() {
+        let plain = ground(0xA, 0.0, 5, 10, 10, 10);
+        let better = Ground {
+            xp: 1050,
+            ..ground(0xB, 0.0, 5, 10, 10, 10)
+        };
+        let grounds = vec![plain, better];
+        let ids = |v: Vec<&Ground>| v.iter().map(|g| g.landblock).collect::<Vec<_>>();
+        assert_eq!(
+            ids(ranked_among(&grounds, 10, 5, &[], |_| 0.0)),
+            vec![0xB, 0xA]
+        );
+        let on_a = |g: &Ground| if g.landblock == 0xA { 100.0 } else { 0.0 };
+        assert_eq!(
+            ids(ranked_among(&grounds, 10, 5, &[], on_a)),
+            vec![0xA, 0xB]
+        );
+        // A ground paying no XP of its own is one while a quest pays for its kills.
+        let bare = Ground {
+            xp: 0,
+            ..ground(0xE, 0.0, 5, 10, 10, 10)
+        };
+        let lone = [bare];
+        assert!(ranked_among(&lone, 10, 5, &[], |_| 0.0).is_empty());
+        assert_eq!(ranked_among(&lone, 10, 5, &[], |_| 10.0).len(), 1);
+        assert_eq!(lone[0].worth_with(0.0), lone[0].worth());
     }
 
     #[test]

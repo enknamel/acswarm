@@ -19,6 +19,7 @@ pub(super) fn run_to(at: Vec2, now: Instant) -> Run {
         visited: vec![at],
         walked_on: None,
         walking_up: false,
+        calls: Vec::new(),
     }
 }
 
