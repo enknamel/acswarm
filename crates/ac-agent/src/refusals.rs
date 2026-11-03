@@ -387,6 +387,45 @@ pub fn refused(text: &str) -> Option<Refusal<'_>> {
     None
 }
 
+/// A kill task's count, out of the line each kill of one of its creatures sends.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct KillCount<'a> {
+    /// Kills so far.
+    pub done: u32,
+    /// Kills the task asks; `None` once the line says it is complete.
+    pub of: Option<u32>,
+    /// The creature's plural name, as the server wrote it.
+    pub plural: &'a str,
+}
+
+/// A kill task's progress line: not a refusal, read here so the server's English is matched in
+/// one file. The server sends it only to a character holding the task.
+pub fn kill_count(text: &str) -> Option<KillCount<'_>> {
+    // Managers/QuestManager.cs:619-624
+    //   $"You have killed {NumTimesCompleted} {GetPluralName()}!" followed by
+    //   " Your task is complete!" at max solves, else $" You must kill {MaxSolves} to complete your task."
+    let (done, rest) = text
+        .trim()
+        .strip_prefix("You have killed ")?
+        .split_once(' ')?;
+    let done = done.parse().ok()?;
+    if let Some(plural) = rest.strip_suffix("! Your task is complete!") {
+        return Some(KillCount {
+            done,
+            of: None,
+            plural,
+        });
+    }
+    let (plural, of) = rest
+        .strip_suffix(" to complete your task.")?
+        .rsplit_once("! You must kill ")?;
+    Some(KillCount {
+        done,
+        of: Some(of.parse().ok()?),
+        plural,
+    })
+}
+
 /// What to do about a refusal, by its kind alone.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Answer {
@@ -787,6 +826,31 @@ mod tests {
         assert_eq!(
             answer(&Refusal::Attack { name: "Town Crier" }),
             Answer::Again(ATTACK_AGAIN)
+        );
+    }
+
+    #[test]
+    fn a_kill_tasks_count_is_read_in_the_servers_words() {
+        assert_eq!(
+            kill_count("You have killed 7 Blood Shreth! You must kill 10 to complete your task."),
+            Some(KillCount {
+                done: 7,
+                of: Some(10),
+                plural: "Blood Shreth"
+            })
+        );
+        assert_eq!(
+            kill_count("You have killed 20 Harpies! Your task is complete!"),
+            Some(KillCount {
+                done: 20,
+                of: None,
+                plural: "Harpies"
+            })
+        );
+        assert_eq!(kill_count("You have killed the Drudge Skulker!"), None);
+        assert_eq!(
+            refused("You have killed 7 Blood Shreth! Your task is complete!"),
+            None
         );
     }
 }

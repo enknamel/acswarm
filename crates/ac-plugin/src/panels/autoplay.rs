@@ -26,6 +26,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use super::quest_list::{self, Filter};
 use super::{caption, title, title_bar, window, Source};
 use crate::{egui, Client, Ctx, Plugin, Settings};
 use ac_client::autoplay::{Buffs, Config, Fight, Loot, Role, Style, Survive};
@@ -52,6 +53,10 @@ pub(crate) struct AutoplayView {
     /// `autoplay.loot_tally.line()`: "this session: 14 corpse(s) opened,
     /// 22 thing(s) taken".
     pub looting: String,
+    /// Each quest's state for the character (`Client.quest_board`).
+    pub quests: Vec<ac_client::quest_log::QuestLine>,
+    /// Quests its level rules out, switched on or not (`Client.quests_unsuited`).
+    pub quests_unsuited: BTreeSet<String>,
 }
 
 /// The line under the checkbox: what it is doing and the engine's own
@@ -182,6 +187,7 @@ pub(crate) fn draw(
     v: &AutoplayView,
     x: f32,
     drafts: &mut Drafts,
+    quests: &mut Filter,
 ) -> Option<Config> {
     let mut cfg = v.config.clone();
     window(
@@ -506,6 +512,16 @@ pub(crate) fn draw(
                 );
                 ui.add_space(6.0);
 
+                quest_list::section(
+                    ui,
+                    &mut cfg.quests,
+                    &v.quests,
+                    &v.quests_unsuited,
+                    quests,
+                    ac_client::holdings::unix_now(),
+                );
+                ui.add_space(6.0);
+
                 title(ui, "Team");
                 ui.checkbox(&mut cfg.team.enabled, "hunt with the others")
                     .on_hover_text(
@@ -811,6 +827,8 @@ pub(crate) fn view(c: &Client) -> AutoplayView {
         profiles: c.profiles.names(),
         hunt_areas: Vec::new(),
         looting: c.autoplay.loot_tally.line(),
+        quests: c.quest_board.clone(),
+        quests_unsuited: c.quests_unsuited.clone(),
         at: c
             .player
             .as_ref()
@@ -832,6 +850,8 @@ pub(crate) struct Autoplay {
     /// Sessions already given the saved rules, by index.
     applied: BTreeSet<usize>,
     drafts: Drafts,
+    /// The Quests list's search and picker.
+    quest_filter: Filter,
 }
 
 impl Default for Autoplay {
@@ -842,6 +862,7 @@ impl Default for Autoplay {
             saved: Config::default(),
             applied: BTreeSet::new(),
             drafts: Drafts::default(),
+            quest_filter: Filter::default(),
         }
     }
 }
@@ -871,7 +892,10 @@ impl Autoplay {
             },
             growth: Default::default(),
             academy: Default::default(),
-            quests: Default::default(),
+            quests: ac_client::autoplay::Quests {
+                on: true,
+                off: vec!["killtaskbloodshreth".into()],
+            },
         };
         // What the three searches would take out of the demo pack.
         Autoplay {
@@ -889,14 +913,105 @@ impl Autoplay {
                     },
                 }],
                 looting: "this session: 14 corpse(s) opened, 22 thing(s) taken".into(),
+                quests: demo_quests(),
+                quests_unsuited: ["give:35407".to_string()].into(),
                 at: glam::Vec2::ZERO,
             }),
             show: true,
             saved: config,
             applied: BTreeSet::new(),
             drafts: Drafts::default(),
+            quest_filter: Filter::default(),
         }
     }
+}
+
+/// A few quests in each state, for the demo window.
+fn demo_quests() -> Vec<ac_client::quest_log::QuestLine> {
+    use ac_client::autoplay::LootAction;
+    use ac_client::quest_log::{Blocked, QuestLine, QuestState};
+    use ac_world::quests::Kind;
+    let line = |id: &str, title: &str, kind, giver: &str, givers, xp, state| QuestLine {
+        id: id.into(),
+        title: title.into(),
+        kind,
+        state,
+        xp,
+        givers,
+        giver: giver.into(),
+        on: id != "killtaskbloodshreth",
+    };
+    vec![
+        line(
+            "give:3684",
+            "Red Rat Tail",
+            Kind::Item,
+            "Yukara Miko the Collector",
+            12,
+            1_000,
+            QuestState::Ready,
+        ),
+        line(
+            "tothebarkeep",
+            "Sent to the Barkeep",
+            Kind::Talk,
+            "Alcott",
+            4,
+            7_000,
+            QuestState::Done,
+        ),
+        line(
+            "topathwarden",
+            "Sent to the Pathwarden",
+            Kind::Talk,
+            "Buckminster",
+            4,
+            9_300,
+            QuestState::Ready,
+        ),
+        line(
+            "give:3681",
+            "Black Rat Tail",
+            Kind::Item,
+            "Collector",
+            12,
+            1_000,
+            QuestState::WontComplete {
+                rule: "nothing cheap".into(),
+                does: LootAction::Skip,
+            },
+        ),
+        line(
+            "killtaskbloodshreth",
+            "Blood Shreth Kill Task",
+            Kind::Kill,
+            "San Ming",
+            1,
+            120_000,
+            QuestState::Off,
+        ),
+        line(
+            "diremattekarkillcount",
+            "Dire Mattekar Kill Counter",
+            Kind::Kill,
+            "Fergal the Dire",
+            1,
+            2_000_000,
+            QuestState::Needs {
+                more: 7,
+                of: "Dire Mattekar".into(),
+            },
+        ),
+        line(
+            "give:35407",
+            "Burnja's Board with Nails",
+            Kind::Item,
+            "Jarvis Hammerstone",
+            1,
+            1_839_776,
+            QuestState::CantYet(Blocked::TooHard { level: 135 }),
+        ),
+    ]
 }
 
 impl Plugin for Autoplay {
@@ -993,7 +1108,7 @@ impl Plugin for Autoplay {
         if open(super::components::OPEN_KEY) {
             x += 268.0;
         }
-        let edited = draw(egui, &v, x, &mut self.drafts);
+        let edited = draw(egui, &v, x, &mut self.drafts, &mut self.quest_filter);
         if super::closed("autoplay") {
             self.show = false;
         }
@@ -1238,5 +1353,47 @@ mod tests {
         let mut back = Autoplay::default();
         back.load(&settings);
         assert_eq!(back.saved.team.restock, Config::default().team.restock);
+    }
+
+    #[test]
+    fn the_quests_switched_on_and_off_survive_a_restart() {
+        let mut p = Autoplay::default();
+        p.saved.quests.on = true;
+        p.saved.quests.off = vec!["killtaskbloodshreth".into()];
+        let mut settings = Settings::new();
+        p.save(&mut settings);
+        let mut back = Autoplay::default();
+        back.load(&settings);
+        assert_eq!(back.saved.quests, p.saved.quests);
+        assert!(back.saved.quests.is_on("give:3684"));
+        assert!(!back.saved.quests.is_on("killtaskbloodshreth"));
+    }
+
+    #[test]
+    fn a_settings_file_from_before_quests_loads_with_them_off() {
+        let mut settings = Settings::new();
+        settings.set("autoplay.config", serde_json::json!({"enabled": true}));
+        let mut back = Autoplay::default();
+        back.load(&settings);
+        assert!(back.saved.enabled);
+        assert!(!back.saved.quests.on, "nothing changes until it is ticked");
+        assert!(back.saved.quests.off.is_empty());
+    }
+
+    #[test]
+    fn the_demo_lists_quests_in_each_state() {
+        let v = demo_view();
+        assert!(v.config.quests.on);
+        let said: Vec<String> = v
+            .quests
+            .iter()
+            .map(|l| quest_list::words(&l.state, true, 0))
+            .collect();
+        for words in ["ready", "won't complete", "can't do yet", "needs", "done"] {
+            assert!(
+                said.iter().any(|s| s.starts_with(words)),
+                "{words}: {said:?}"
+            );
+        }
     }
 }
