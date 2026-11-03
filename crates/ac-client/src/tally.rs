@@ -13,13 +13,14 @@ pub struct WalkFrame {
     pub goal: Vec3,
     /// The cell or landblock the goal was said to lie in, which decides what the steering plans on.
     pub goal_cell: u32,
-    /// Who set the goal: "server walk", "journey" or "follow".
+    /// Who set the goal: the walk's owner (`Owner::label`), or "server walk".
     pub source: &'static str,
     /// Where the steering aimed; `None` when it stands (`ac_nav::Aim::NoWay` or `Wait`).
     pub aim: Option<Vec3>,
     /// The leg turned aside for a server-placed object on it (`ac_nav::obstacles::detour`).
     pub detoured: bool,
-    /// The route's waypoint being walked at and how many it has; `None` on the straight line.
+    /// The route's waypoint being walked at and how many it has; `None` with no route (standing
+    /// for a plan, or refused).
     pub route: Option<(usize, usize)>,
     /// Pressed against geometry and going nowhere ([`crate::player::Player::wedged`]).
     pub wedged: bool,

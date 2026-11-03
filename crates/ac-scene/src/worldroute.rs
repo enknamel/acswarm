@@ -1,22 +1,8 @@
-//! Overland routing: A* over the [`WorldGrid`] lattice (24 m spacing,
-//! 8-connected), for walking from one town to another across Dereth.
-//!
-//! An edge costs its length, more on a slope and less on a road, and is
-//! impassable when it climbs steeper than a character can walk, when
-//! either end is sea (the region names the water terrain types; the
-//! renderer draws water by the same rule), or when either end lies in a
-//! landblock the archive does not have (the sea beyond the map). Fresh
-//! water (rivers, lakes) can be crossed at a steep price: the bridges
-//! and fords of Dereth are static objects over water terrain, invisible
-//! to a terrain grid, and the rivers cut the continent, so a route
-//! crosses a river in the shortest span it can find (the road leads to
-//! the bridge) but never travels along one. The search is confined to a
-//! window around the two endpoints so a route across the continent
-//! costs well under a second.
-//!
-//! Terrain only: buildings, fences and portals are not considered. The
-//! client's per-landblock move-to steers around the static geometry on
-//! the way from one waypoint to the next.
+//! An overland walk's corridor over Dereth: A* over the [`WorldGrid`] lattice (24 m, 8-connected),
+//! terrain only (buildings, fences and portals are the region planner's). An edge costs its length,
+//! more on a slope, less on a road; shut past [`MAX_GRADE`], at sea, in a block the archive lacks.
+//! Rivers cut the continent, and bridges and fords are statics no grid sees: fresh water is crossed
+//! at its shortest span, never followed. A window round the ends keeps any route under a second.
 
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;

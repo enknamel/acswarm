@@ -153,16 +153,8 @@ impl Client {
                             "at {:?} goal {g:?} aim {aim:?}",
                             standing.player.world_position()
                         );
-                        // What the server has put in the room -- a
-                        // chest, a hook, a cart -- is not in the block's
-                        // geometry, and the physics walks straight
-                        // through it; the retail client did not. The
-                        // leg to wherever the steering aims is walked
-                        // round the first such thing on it, a frame at
-                        // a time, once the steering has had its say:
-                        // the graph and the planner are for what
-                        // actually stops the character, and clutter
-                        // must not send a walk to them.
+                        // A server object is not in the geometry: physics walks through it;
+                        // retail went round, so the aim goes round it in the corridor (`detour`).
                         let steered = aim;
                         // A server walk with no way there is let go, so the next report calls
                         // the use off; whoever wanted it reads what it was for.

@@ -1,18 +1,8 @@
-//! Navigation over a neighbourhood of landblocks.
-//!
-//! [`crate::nav::NavGraph`] works on any rectangle, but the client has
-//! so far only ever given it one landblock, which is why a character
-//! walking towards a goal in the next block would run at a city wall:
-//! the only route around it goes through a gate the single-block graph
-//! could not see past. An [`Area`] assembles several neighbouring
-//! blocks into one collision world with one terrain function over all
-//! of them, so a path can leave the block it started in and come back.
-//!
-//! Areas are meant to be built off the frame thread: assembling nine
-//! blocks costs tens of milliseconds and a long search across them
-//! costs a hundred more. The graph fills in chunk by chunk as searches
-//! reach it, so a second path through the same streets is much cheaper
-//! than the first.
+//! The region the one planner plans on, an [`Area`]: a dungeon whole, or the blocks round a walk
+//! ([`blocks_for`], at most [`MAX_SIDE`] a side) with their buildings, as one collision world with
+//! one terrain over all, so a route leaves its block and comes back (a gate past a city wall).
+//! Assembling nine blocks costs tens of ms, a long search a hundred more: built off the frame and
+//! shared by every session (`ac-client` `pathfinder.rs`), its graph filling chunk by chunk.
 
 use std::collections::HashMap;
 
