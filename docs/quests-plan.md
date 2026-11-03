@@ -59,7 +59,7 @@ stop is a `Place` with its cell, so a giver in a dungeon is as reachable as a co
    mate's wants (less what it carries) calling a body's item to it.
 3. Kill and talk quests: the reward in the ground picker; the giver as a stop. Ground picker
    built (`autoplay/growth/quest_bonus.rs`, `hunting::ranked_with`); a ready kill or talk quest's
-   giver is a town run call (step 4); going to a giver to take a quest up is not built.
+   giver is a town run call (step 4), and so is the talk that takes a quest up.
 4. Item turn-ins and the errand run with many stops. Built (branch `quests-errand`): `ac_world::tour`,
    the run's calls and hand-ins (`town_run/calls.rs`), and the giver's answer watched
    (`Client::watch_quest_answer`): XP marks the quest done, starts its data wait and holds its
