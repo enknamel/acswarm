@@ -214,3 +214,51 @@ fn the_board_is_worked_out_again_at_once_when_quests_are_switched_on_or_the_leve
     );
     assert!(!c.quests_unsuited.contains("diremattekarkillcount"));
 }
+
+fn server_says(c: &mut Client, text: &str) {
+    let mut w = ac_net::wire::Writer::new();
+    w.string16(text).u32(0x11);
+    c.chat_message(ac_net::messages::opcode::SERVER_MESSAGE, &w.finish());
+}
+
+#[test]
+fn a_kill_tasks_count_heard_goes_into_the_log_under_its_counter() {
+    let mut c = crate::testkit::character_of_level(crate::testkit::no_data(), 20);
+    server_says(
+        &mut c,
+        "You have killed 7 Blood Shreth! You must kill 10 to complete your task.",
+    );
+    assert_eq!(c.quest_log.kills.get("killtaskbloodshreth"), Some(&7));
+    let counter = ac_world::quests::sources()
+        .iter()
+        .find(|s| s.name == "Guruk Monstrosity" && s.kind == Yield::Kill)
+        .map(|s| s.want.clone());
+    let Some(Want::Kill(counter)) = counter else {
+        panic!("a counter for Guruk Monstrosity");
+    };
+    let done = rows(&counter)
+        .iter()
+        .find(|r| r.kind == Kind::Kill)
+        .unwrap()
+        .count;
+    server_says(
+        &mut c,
+        &format!("You have killed {done} Guruk Monstrosities! Your task is complete!"),
+    );
+    assert_eq!(c.quest_log.kills.get(&counter), Some(&done), "the plural");
+    assert_eq!(c.quest_log.kills.len(), 2);
+    server_says(&mut c, "You have killed 3 Nobodies! Your task is complete!");
+    assert_eq!(c.quest_log.kills.len(), 2, "two taken up: whose is unknown");
+
+    let mut one = crate::testkit::character_of_level(crate::testkit::no_data(), 20);
+    one.quest_log.note_taken("killtaskbloodshreth");
+    server_says(
+        &mut one,
+        "You have killed 2 Zzyzx Beasts! You must kill 10 to complete your task.",
+    );
+    assert_eq!(
+        one.quest_log.kills.get("killtaskbloodshreth"),
+        Some(&2),
+        "a plural no creature's name starts: the only task taken up"
+    );
+}

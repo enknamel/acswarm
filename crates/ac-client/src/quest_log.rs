@@ -471,6 +471,48 @@ pub fn quest_wants(board: &[QuestLine]) -> Vec<QuestWant> {
         .collect()
 }
 
+/// The kill task a count is for, as the line names only the creature: the counters whose
+/// creatures the plural begins with (less the name's last letter, for "Harpies"), the longest
+/// name only, then those asking the count, then those taken up; none named, the only one taken.
+fn counter_for(k: &crate::refusals::KillCount, log: &QuestLog) -> Option<String> {
+    let mut named: Vec<(&str, usize)> = Vec::new();
+    for s in ac_world::quests::sources() {
+        let (Yield::Kill, Want::Kill(counter)) = (s.kind, &s.want) else {
+            continue;
+        };
+        let mut stem = s.name.chars();
+        stem.next_back();
+        let stem = stem.as_str();
+        if !stem.is_empty() && k.plural.starts_with(stem) {
+            named.push((counter, stem.len()));
+        }
+    }
+    let longest = named.iter().map(|&(_, n)| n).max().unwrap_or(0);
+    let mut counters: Vec<&str> = named
+        .into_iter()
+        .filter(|&(_, n)| n == longest)
+        .map(|(c, _)| c)
+        .collect();
+    counters.sort_unstable();
+    counters.dedup();
+    if counters.is_empty() && log.kills.len() == 1 {
+        return log.kills.keys().next().cloned();
+    }
+    let asks = k.of.unwrap_or(k.done);
+    let asking =
+        |c: &&str| ac_world::quests::rows_of(c).any(|r| r.kind == Kind::Kill && r.count == asks);
+    if counters.len() > 1 && counters.iter().any(asking) {
+        counters.retain(asking);
+    }
+    if counters.len() > 1 {
+        counters.retain(|c| log.kills.contains_key(*c));
+    }
+    match counters.as_slice() {
+        [one] => Some(one.to_string()),
+        _ => None,
+    }
+}
+
 /// Whether a call whose detour costs `detour` seconds pays for itself at `xp_per_hour` (design
 /// §5.3's second rule). Unmeasured, it never does: only the short-leg rule applies.
 pub fn worth_detour(xp: u64, detour: f32, xp_per_hour: Option<f32>) -> bool {
@@ -566,6 +608,23 @@ impl Client {
     /// The character's XP per hour lately; `None` until measured. Seam: the hunt builder fills it.
     pub fn xp_per_hour(&self) -> Option<f32> {
         None
+    }
+
+    /// A kill task's count heard (the server sends it only for a task held): into the log
+    /// under its counter, and saved. It only observes.
+    pub(crate) fn hear_kill_count(&mut self, text: &str) {
+        let Some(k) = crate::refusals::kill_count(text) else {
+            return;
+        };
+        let Some(counter) = counter_for(&k, &self.quest_log) else {
+            tracing::info!("quest: no one kill task counts {}", k.plural);
+            return;
+        };
+        if self.quest_log.kills.get(&counter) != Some(&k.done) {
+            tracing::info!("quest: {counter} at {} kills", k.done);
+            self.quest_log.note_kills(&counter, k.done);
+            self.save_quest_log();
+        }
     }
 
     /// Read back the quest log of earlier sessions, at login.
