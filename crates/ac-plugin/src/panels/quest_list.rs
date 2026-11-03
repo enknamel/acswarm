@@ -36,7 +36,7 @@ impl Show {
 
 /// The list's search and picker, kept by the window between frames.
 #[derive(Clone, Debug, Default)]
-pub(crate) struct Filter {
+pub(crate) struct QuestFilter {
     pub search: String,
     pub show: Show,
     /// "add the quest rule" was pressed: the window puts it in the character's profile.
@@ -58,7 +58,7 @@ pub(crate) fn is_shown(
     line: &QuestLine,
     cfg: &Quests,
     unsuited: &BTreeSet<String>,
-    f: &Filter,
+    f: &QuestFilter,
 ) -> bool {
     let shown = match f.show {
         Show::ForLevel => !unsuited.contains(&line.id),
@@ -160,7 +160,7 @@ pub(crate) fn section(
     cfg: &mut Quests,
     lines: &[QuestLine],
     unsuited: &BTreeSet<String>,
-    filter: &mut Filter,
+    filter: &mut QuestFilter,
     now: u64,
 ) {
     title(ui, "Quests");
@@ -306,8 +306,8 @@ mod tests {
             on: true,
             off: vec!["give:3684".into()],
         };
-        let mut f = Filter::default();
-        let shown = |cfg: &Quests, f: &Filter| -> Vec<&str> {
+        let mut f = QuestFilter::default();
+        let shown = |cfg: &Quests, f: &QuestFilter| -> Vec<&str> {
             let lines = lines.iter().filter(|l| is_shown(l, cfg, &unsuited, f));
             lines.map(|l| l.id.as_str()).collect()
         };
@@ -333,7 +333,7 @@ mod tests {
             on: true,
             off: Vec::new(),
         };
-        let mut f = Filter::default();
+        let mut f = QuestFilter::default();
         let ctx = egui::Context::default();
         let mut out = ctx.run_ui(Default::default(), |ui| {
             section(ui, &mut cfg, &lines, &BTreeSet::new(), &mut f, 0);

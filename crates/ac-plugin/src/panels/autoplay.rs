@@ -26,7 +26,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::quest_list::{self, Filter};
+use super::quest_list::{self, QuestFilter};
 use super::{caption, title, title_bar, window, Source};
 use crate::{egui, Client, Ctx, Plugin, Settings};
 use ac_client::autoplay::{Buffs, Config, Fight, Loot, Role, Style, Survive};
@@ -187,7 +187,7 @@ pub(crate) fn draw(
     v: &AutoplayView,
     x: f32,
     drafts: &mut Drafts,
-    quests: &mut Filter,
+    quests: &mut QuestFilter,
 ) -> Option<Config> {
     let mut cfg = v.config.clone();
     window(
@@ -865,7 +865,7 @@ pub(crate) struct Autoplay {
     applied: BTreeSet<usize>,
     drafts: Drafts,
     /// The Quests list's search and picker.
-    quest_filter: Filter,
+    quest_filter: QuestFilter,
 }
 
 impl Default for Autoplay {
@@ -876,7 +876,7 @@ impl Default for Autoplay {
             saved: Config::default(),
             applied: BTreeSet::new(),
             drafts: Drafts::default(),
-            quest_filter: Filter::default(),
+            quest_filter: QuestFilter::default(),
         }
     }
 }
@@ -935,7 +935,7 @@ impl Autoplay {
             saved: config,
             applied: BTreeSet::new(),
             drafts: Drafts::default(),
-            quest_filter: Filter::default(),
+            quest_filter: QuestFilter::default(),
         }
     }
 }
