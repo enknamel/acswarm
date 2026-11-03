@@ -258,7 +258,7 @@ topathwarden,talk,Sent to the Pathwarden,44891,Buckminster,A9B40163,104.41,35.19
 
 `crates/ac-world/src/quests.rs` (leaf name unique), `include_str!` of both files, parsed once
 (`OnceLock`) like `unlocks.rs`:
-- `Row { id, kind: Kind, title, giver_wcid, giver, place: Place, hand: Hand, want: Want, count,
+- `Row { id, kind: Kind, title, giver_wcid, giver, place: Place, hand: Handing, want: Want, count,
   min_level, max_level, reward: Reward, gives: Vec<(u32, u32)>, stamps, repeat: Repeat, timer,
   needs, item: Option<Item> }`; `Want::{Item(u32), Kill(String), Nothing}`;
   `Repeat::{Any, After(u32), Once}`; `Item { wcid, name, item_type, value }`.
@@ -591,7 +591,7 @@ item, 75 kill, 8 talk), 253 givers; `quest_sources.csv` 1,927 rows (1,616 drop, 
 
 | seam | file | state | filled by |
 |---|---|---|---|
-| `Row`, `Kind`, `Hand`, `Want`, `Repeat`, `Share`, `Reward::xp_at`, `Item`, `Source`, `Yield`, `all`, `sources`, `rows_of`, `sources_of`, `stamped_by`, `Row::fits_level`, `Row::locked_by` | `crates/ac-world/src/quests.rs` | built, tested | - (read by all) |
+| `Row`, `Kind`, `Handing`, `Want`, `Repeat`, `Share`, `Reward::xp_at`, `Item`, `Source`, `Yield`, `all`, `sources`, `rows_of`, `sources_of`, `stamped_by`, `Row::fits_level`, `Row::locked_by` | `crates/ac-world/src/quests.rs` | built, tested | - (read by all) |
 | `autoplay::Quests { on, off }`, `Quests::is_on`, `Config.quests` | `crates/ac-client/src/autoplay/config.rs` | built, tested | - |
 | `QuestWant { wcid, need }`, `wanted()` | `crates/ac-loot/src/quest_wants.rs` | built, tested | loot adds `Wielder.quest_wants`, `Ask::Quest`, the starter rule |
 | `QuestLog` (`note_taken`, `note_kills`, `note_done`, `note_wait`, `wait_until`), `Done`; `load_quest_log`, `Client::save_quest_log` | `crates/ac-client/src/quest_log.rs` | built, tested | list (1d) writes kills; hunt and errand write done and waits (§4.3) |

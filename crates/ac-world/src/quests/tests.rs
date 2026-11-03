@@ -37,7 +37,7 @@ fn a_red_rat_tail_is_one_quest_for_any_of_twelve_givers() {
     assert_eq!(rows.len(), 12);
     let yukara = row("give:3684", Kind::Item, "Yukara Miko the Collector");
     assert_eq!(yukara.place.cell, 0x2B11_0112);
-    assert_eq!(yukara.hand, Hand::Give);
+    assert_eq!(yukara.hand, Handing::Give);
     assert_eq!((yukara.want.clone(), yukara.count), (Want::Item(3684), 1));
     assert_eq!(yukara.reward.xp_at(5_000_000), 1_000);
     assert_eq!(yukara.reward.share, Share::None);

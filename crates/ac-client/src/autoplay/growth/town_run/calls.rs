@@ -5,7 +5,7 @@
 
 use std::time::{Duration, Instant};
 
-use ac_world::quests::{Hand, Kind, Repeat, Row, Want};
+use ac_world::quests::{Handing, Kind, Repeat, Row, Want};
 use ac_world::tour::{Legs, Stop, EVERY_ORDER};
 use ac_world::Place;
 use glam::Vec2;
@@ -417,7 +417,7 @@ impl Client {
                     return Turn::Waited;
                 }
                 if let Some(giver) = self.giver_in_reach(row).filter(|_| self.visits.finished) {
-                    if row.hand == Hand::Talk {
+                    if row.hand == Handing::Talk {
                         // The visit's use was the hand-in: kills done, a talk, items it takes.
                         if !self
                             .quest_asked

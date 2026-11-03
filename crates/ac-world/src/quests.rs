@@ -20,7 +20,7 @@ pub enum Kind {
 
 /// How the giver is approached: handed the item, or used (talked to).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Hand {
+pub enum Handing {
     Give,
     Talk,
 }
@@ -105,7 +105,7 @@ pub struct Row {
     pub giver_wcid: u32,
     pub giver: String,
     pub place: Place,
-    pub hand: Hand,
+    pub hand: Handing,
     pub want: Want,
     /// Items one hand-in takes, or kills.
     pub count: u32,
@@ -253,9 +253,9 @@ fn parse_row(line: &str) -> Option<Row> {
             cell,
         },
         hand: if f[9] == "give" {
-            Hand::Give
+            Handing::Give
         } else {
-            Hand::Talk
+            Handing::Talk
         },
         want: want_of(kind, f[10])?,
         count: f[11].parse().ok()?,
