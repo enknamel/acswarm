@@ -149,9 +149,10 @@ const PARTS_QUEST: &str = "gearknightpartscollectionwait_0513";
 const PARTS: u32 = 51266;
 
 /// A character carrying `piles` single Piles of Gearknight Parts, its profile the quest rule
-/// above "the rest, sold", with only [`PARTS_QUEST`] switched on.
+/// above "the rest, sold", with only [`PARTS_QUEST`] switched on. Level 150: the parts' easiest
+/// drop is level 135, so a lower character reads the quest as too hard and wants none.
 fn carrying_parts(piles: u32) -> Client {
-    let mut c = character_of_level(crate::testkit::no_data(), 20);
+    let mut c = character_of_level(crate::testkit::no_data(), 150);
     c.world.stats.name = "Bryn".into();
     let library = shelf(
         "quest-retag",
