@@ -52,7 +52,8 @@ stop is a `Place` with its cell, so a giver in a dungeon is as reachable as a co
 1. `quests.csv` bundled; the quest list and states shown (no behaviour change).
 2. The rule condition, the default rule, the profile cross-check.
 3. Kill and talk quests: the reward in the ground picker; the giver as a stop.
-4. Item turn-ins and the errand run with many stops.
+4. Item turn-ins and the errand run with many stops. Built (branch `quests-errand`): `ac_world::tour`,
+   the run's calls and hand-ins (`town_run/calls.rs`); the "you must wait" row is step 3's.
 
 Later: items picked up off the ground rather than from corpses. Starts after movement phase 4
 merges: the errand run is built on phase 4's journeys, whose steps keep their cells.
