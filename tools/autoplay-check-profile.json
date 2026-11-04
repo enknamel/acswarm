@@ -224,6 +224,19 @@
           }
         }
       ]
+    },
+    {
+      "what": "Ammunition",
+      "keep": 250,
+      "on": true,
+      "when": [
+        {
+          "Trained": {
+            "skill": 47,
+            "at_least": 2
+          }
+        }
+      ]
     }
   ],
   "sell_to": "Best"
