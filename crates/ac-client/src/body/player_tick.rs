@@ -22,11 +22,18 @@ impl Client {
     ) -> PlayerFrame {
         self.held_run = input.run;
         self.frame_at = now;
-        // The user taking the controls ends an overland trip.
+        // The user taking the controls ends an overland trip. Autoplay on, its journey is put
+        // down for its row to walk on once the keys are let go, not read as no way there
+        // (a_journey_put_down_while_the_player_steers_is_walked_on_once_the_keys_are_let_go).
         let manual = input.forward != 0.0 || input.strafe != 0.0;
+        self.hand_on_keys = manual;
         if manual && (self.traveling() || self.visiting().is_some()) {
-            tracing::info!("travel: cancelled, the user took over");
-            self.cancel_travel();
+            if self.autoplay.config.enabled {
+                self.interrupt_travel("the player is steering");
+            } else {
+                tracing::info!("travel: cancelled, the user took over");
+                self.cancel_travel();
+            }
         }
         // A visit: the journey there, the walk up to the person, the use.
         // Before the journey's stretch is read, so a visit that takes over

@@ -660,6 +660,12 @@ impl Client {
             self.journey_row_aside(step.name);
             self.aside(step.name, &did, now);
         }
+        // A hand on the movement keys steers: no goal sets a walk off under it.
+        if self.hand_on_keys {
+            self.autoplay.step = None;
+            self.autoplay.say(Doing::Idle, "the player is steering");
+            return;
+        }
         // The goals are weighed. Most say nothing and take their place
         // in the table, which is the order they had; the ones with an
         // opinion can say that a corpse about to rot is worth more than

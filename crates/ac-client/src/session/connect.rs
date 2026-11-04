@@ -107,6 +107,7 @@ impl Client {
             move_to_answered: false,
             last_used: None,
             held_run: false,
+            hand_on_keys: false,
             move_refused: std::collections::HashMap::new(),
             use_done: None,
             told: None,
