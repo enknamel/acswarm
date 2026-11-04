@@ -189,10 +189,7 @@ impl Client {
         let st = &self.autoplay.growth;
         st.givers_refused
             .within(&(row.giver_wcid, p.cell), now, GIVER_RETRY)
-            || (row.hand == Handing::Talk
-                && st
-                    .talked
-                    .within(&(row.id.to_string(), row.giver_wcid), now, TALK_AGAIN))
+            || (row.hand == Handing::Talk && st.talked.within(&talk_key(row), now, TALK_AGAIN))
     }
 
     /// The hand-ins ready on the board, and the talks that take a switched-on quest up, each at the
@@ -546,8 +543,7 @@ impl Client {
                         {
                             self.ask_giver(row, at, now);
                         }
-                        let key = (row.id.to_string(), row.giver_wcid);
-                        self.autoplay.growth.talked.mark(key, now);
+                        self.autoplay.growth.talked.mark(talk_key(row), now);
                         // A talk taking a quest up pays nothing: there is no XP to wait for.
                         if row.kind == Kind::Start {
                             self.answer_take_up(now);
@@ -667,6 +663,11 @@ impl Client {
         self.autoplay.growth.run = Some(run);
         Turn::Acted
     }
+}
+
+/// What a talk made is remembered by (`growth::State::talked`).
+fn talk_key(row: &Row) -> (String, u32, bool) {
+    (row.id.to_string(), row.giver_wcid, row.kind == Kind::Start)
 }
 
 /// A call on `row`'s giver, at its placement `at`.

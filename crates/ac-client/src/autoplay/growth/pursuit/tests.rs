@@ -488,3 +488,44 @@ fn fiuns_jaw_on_the_bundled_data_is_hunted_with_no_quest_first() {
     let p = work(&facts(110, &[(fiun, true)]), &ChainData, None);
     assert!(!p.lines[0].step.can_progress(), "{p:?}");
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn the_blood_shreth_kill_task_is_taken_up_hunted_handed_in_and_waits_on_the_bundled_data() {
+    // Blargerton's: level 41, San Ming's ten Blood Shreth (level 8), twenty hours between.
+    let id = "killtaskbloodshreth";
+    let mut f = facts(41, &[(id, true)]);
+    let p = work(&f, &ChainData, None);
+    let PursuitStep::TakeUp { row, .. } = &p.lines[0].step else {
+        panic!("{p:?}");
+    };
+    assert_eq!(row.giver, "San Ming");
+
+    // Taken up (`quest_answered`): the counter held and at nothing. Blood Shreth are hunted.
+    f.held.push(id.into());
+    f.log.note_taken(id);
+    let p = work(&f, &ChainData, None);
+    assert!(
+        matches!(&p.lines[0].step, PursuitStep::Hunt { creature, more: 10, .. } if creature == "Blood Shreth"),
+        "{p:?}"
+    );
+    assert!(!p.grounds.is_empty() && p.sought.contains(&4110), "{p:?}");
+
+    // Ten counted (`hear_kill_count`): handed in to San Ming.
+    f.log.note_kills(id, 10);
+    let p = work(&f, &ChainData, None);
+    let PursuitStep::HandIn { row, .. } = &p.lines[0].step else {
+        panic!("{p:?}");
+    };
+    assert_eq!((row.giver, row.kind), ("San Ming", Kind::Kill));
+
+    // Handed in: the counter gone and twenty hours to wait.
+    f.log.note_done(row, NOW);
+    let p = work(&f, &ChainData, None);
+    assert_eq!(
+        p.lines[0].step,
+        PursuitStep::Waiting {
+            until: NOW + 72_000
+        }
+    );
+}

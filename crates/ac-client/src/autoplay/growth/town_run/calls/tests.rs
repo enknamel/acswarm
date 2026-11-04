@@ -473,4 +473,9 @@ fn a_talk_taking_a_quest_up_is_heard_once_made_and_not_made_again_however_soon_i
     assert!(c.quest_asked.is_none());
     assert!(c.is_giver_refused(start, &at, now + Duration::from_millis(50)));
     assert!(!c.is_giver_refused(start, &at, now + TALK_AGAIN));
+    // The hand-in to the same giver is another talk, not held back by this one.
+    let hand_in = ac_world::quests::rows_of("killtaskbloodshreth")
+        .find(|r| r.kind == Kind::Kill)
+        .unwrap();
+    assert!(!c.is_giver_refused(hand_in, &at, now));
 }

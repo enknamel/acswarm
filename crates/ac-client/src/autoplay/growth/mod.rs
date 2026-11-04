@@ -206,9 +206,9 @@ pub struct State {
     needs: Vec<Need>,
     /// Quest givers no journey reached, by giver class and cell, and since when.
     pub(crate) givers_refused: Recent<(u32, u32)>,
-    /// Talks made to quest givers lately (a hand-in by talk, or one taking a quest up): by quest
-    /// id and giver class.
-    pub(crate) talked: Recent<(String, u32)>,
+    /// Talks made to quest givers lately: by quest id, giver class, and whether it took the quest
+    /// up (the hand-in to the same giver is another talk).
+    pub(crate) talked: Recent<(String, u32, bool)>,
     /// Pursued quests passed over, by id: why, and since when (`Client::hold_pursuit`).
     pursuit_held: std::collections::BTreeMap<String, (String, Instant)>,
     /// The working pursued hunt's grounds, best first: landblock and where a journey ends.
