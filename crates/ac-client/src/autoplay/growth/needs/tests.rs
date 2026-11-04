@@ -438,14 +438,8 @@ fn a_scarab_sold_at_the_counter_is_not_bought_straight_back() {
     );
 }
 
-#[test]
-#[ignore = "needs AC_DATA_DIR"]
-fn arrows_the_player_said_to_sell_are_not_counted_as_the_launchers_stock() {
-    // Three hundred arrows in the pack and a bow in hand. Tagged to
-    // sell, they are loot in the ammunition slot, not stock: the
-    // launcher is short by the whole of what it keeps, and a
-    // forecast that counted the arrows as stock would set off to
-    // town for what it was about to sell -- or not set off at all.
+/// A level-20 archer in the Holtburg field with a bow in hand and `arrows` arrows in the pack.
+fn an_archer_with_arrows(arrows: u32) -> Client {
     use ac_world::fletching::ammo_type;
     let holtburg = 0xA9B4_0019;
     let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
@@ -474,14 +468,27 @@ fn arrows_the_player_said_to_sell_are_not_counted_as_the_launchers_stock() {
             item_type: item_type::MISSILE_WEAPON,
             valid_locations: equip::MISSILE_AMMO,
             value: 300,
-            stack_size: 300,
+            stack_size: arrows,
             max_stack_size: 1_000,
             container: Some(me),
             ..Default::default()
         },
     );
-    let mut cfg = c.autoplay.config.growth.clone();
-    cfg.ammo_keep = 250;
+    c
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn arrows_the_player_said_to_sell_are_not_counted_as_the_launchers_stock() {
+    // Three hundred arrows in the pack and a bow in hand. Tagged to
+    // sell, they are loot in the ammunition slot, not stock: the
+    // launcher is short by the whole of what it keeps, and a
+    // forecast that counted the arrows as stock would set off to
+    // town for what it was about to sell -- or not set off at all.
+    use ac_world::fletching::ammo_type;
+    let mut c = an_archer_with_arrows(300);
+    with_a_buy_list(&mut c, &[("Ammunition", 250, 62)]);
+    let cfg = c.autoplay.config.growth.clone();
     let needs = c.grow_needs(&cfg);
     assert!(
         !needs
@@ -497,6 +504,97 @@ fn arrows_the_player_said_to_sell_are_not_counted_as_the_launchers_stock() {
         .find(|n| n.kind == NeedKind::Ammo(ammo_type::ARROW))
         .unwrap_or_else(|| panic!("the arrows it will be short of: {needs:?}"));
     assert_eq!((arrows.have, arrows.want), (0, 250));
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn an_archer_short_of_arrows_buys_them_by_the_profiles_ammunition_line() {
+    // The launcher's rounds are a line on the buy list like any other ("ALL purchasing decisions
+    // must be controlled by the loot profile"): counted and bought as the bow's kind, not by name,
+    // so an arrowhead on the same shelf is never taken for them.
+    use ac_world::fletching::ammo_type;
+    let mut c = an_archer_with_arrows(40);
+    with_a_buy_list(&mut c, &[("Ammunition", 250, 62)]);
+    let cfg = c.autoplay.config.growth.clone();
+    let needs = c.grow_needs(&cfg);
+    let arrows = needs
+        .iter()
+        .find(|n| n.kind == NeedKind::Ammo(ammo_type::ARROW))
+        .unwrap_or_else(|| panic!("the arrows it is short of: {needs:?}"));
+    assert_eq!(
+        (arrows.name.as_str(), arrows.have, arrows.want),
+        ("arrows", 40, 210)
+    );
+    assert!(arrows.urgent, "forty is under the line's sixty-two");
+    assert!(
+        !needs.iter().any(|n| n.name == "Ammunition"),
+        "the line is no named want: {needs:?}"
+    );
+    let ware = |wcid: u32, name: &str| ac_vendor::counter::Ware {
+        wcid,
+        name: name.into(),
+        price: 2,
+        stock: None,
+        burden: 1,
+        value: 0,
+        sell_rate: 0.0,
+    };
+    let shelf = [ware(5_000, "Arrowhead"), ware(300, "Arrow")];
+    let wants = c.vendor_shortfall_at(&cfg, &c.item_stats(), &shelf);
+    assert_eq!(
+        wants.iter().map(|w| (w.wcid, w.short)).collect::<Vec<_>>(),
+        [(300, 210)]
+    );
+    // The party is not asked for them by name: "arrow" names an arrowhead too.
+    c.autoplay.config.team.enabled = true;
+    c.autoplay_stock();
+    assert!(c.autoplay.wants.is_empty(), "{:?}", c.autoplay.wants);
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_bow_in_hand_buys_no_arrows_without_the_profiles_ammunition_line() {
+    use ac_world::fletching::ammo_type;
+    let mut c = an_archer_with_arrows(0);
+    with_a_buy_list(&mut c, &[("Prismatic Taper", 100, 25)]);
+    let cfg = c.autoplay.config.growth.clone();
+    let needs = c.grow_needs(&cfg);
+    assert!(
+        !needs
+            .iter()
+            .any(|n| n.kind == NeedKind::Ammo(ammo_type::ARROW)),
+        "{needs:?}"
+    );
+}
+
+#[test]
+fn an_old_configs_ammo_count_becomes_the_profiles_ammunition_line() {
+    // Saved before buying moved to the profile: read once, never written back, and folded into
+    // the character's profile as its Ammunition line unless it has one.
+    let old: crate::autoplay::growth::Growth =
+        serde_json::from_str(r#"{"ammo_keep":500}"#).expect("an old config loads");
+    assert_eq!(old.ammo_keep_moved, Some(500));
+    let written = serde_json::to_string(&old).unwrap();
+    assert!(!written.contains("ammo_keep"), "{written}");
+
+    let mut c = crate::testkit::offline_client();
+    with_a_buy_list(&mut c, &[("Prismatic Taper", 100, 25)]);
+    c.autoplay.config.growth = old.clone();
+    c.fold_ammo_keep();
+    let lines = |c: &Client| -> Vec<(String, u32)> {
+        let p = c.loot_profile().expect("the profile");
+        p.buy.iter().map(|b| (b.what.clone(), b.keep)).collect()
+    };
+    let moved = vec![
+        ("Prismatic Taper".to_string(), 100),
+        ("Ammunition".to_string(), 500),
+    ];
+    assert_eq!(lines(&c), moved);
+    assert_eq!(c.autoplay.config.growth.ammo_keep_moved, None);
+    // The same old file read again: the line is there, nothing is added.
+    c.autoplay.config.growth = old;
+    c.fold_ammo_keep();
+    assert_eq!(lines(&c), moved);
 }
 
 #[test]

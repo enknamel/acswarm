@@ -22,10 +22,10 @@ pub struct Growth {
     pub idle_before_move: f32,
     /// Walk to a vendor when the pack is full or supplies are short.
     pub town_runs: bool,
-    /// How much ammunition to carry for a bow or crossbow. A run to
-    /// town is made when a quarter of this is left and none can be
-    /// made from what is carried.
-    pub ammo_keep: u32,
+    /// A saved config's own ammunition count, read once and moved to the loot profile's
+    /// Ammunition buy line (`fold_ammo_keep`); never written back.
+    #[serde(alias = "ammo_keep", skip_serializing)]
+    pub ammo_keep_moved: Option<u32>,
     /// Quest flags this character has earned, for the counters that
     /// ask for one (the Rossu Morta and Whispering Blade chapter
     /// houses, the Academy stores, and so on -- see
@@ -49,7 +49,7 @@ impl Default for Growth {
             tactic: ac_world::hunting::Tactic::default(),
             idle_before_move: 60.0,
             town_runs: true,
-            ammo_keep: 250,
+            ammo_keep_moved: None,
             gates_open: Vec::new(),
         }
     }

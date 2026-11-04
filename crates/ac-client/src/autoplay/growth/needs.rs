@@ -69,22 +69,16 @@ impl Client {
     /// The same, over a pack already read: the counter's snapshot reads
     /// it once for the sale and once more here, every tick of the
     /// shopping loop, and the second reading is the same pack.
-    fn grow_needs_with(&self, cfg: &Growth, stats: &[ItemStats]) -> Vec<Need> {
+    fn grow_needs_with(&self, _cfg: &Growth, stats: &[ItemStats]) -> Vec<Need> {
         let mut needs = Vec::new();
         let leaving = self.leaving_of(stats);
-        // What is held as stock: what is carried, less what is on its
-        // way out. Both the character and the party read this count
-        // (see `autoplay_stock`), so they agree on what is short.
-        let stock = |what: &str| self.carried_named(what).saturating_sub(leaving.named(what));
+        let ammo = self.ammo_carried();
+        // What is held as stock: what is carried, less what is on its way out (both the character
+        // and the party read it: `held_stock`). The ammunition line counts the launcher's rounds.
+        let stock = |what: &str| self.held_stock(what, &leaving, ammo);
         let (me, my_name) = (self.wielder(), &self.world.stats.name);
-        // The profile's buy list first: it is where a player says what
-        // to keep stocked now, and it is the same list that makes those
-        // things unsellable. `keep_stocked` is what it grew out of and
-        // is still read, so nobody's settings go quiet.
-        // The profile's buy list, through the profile's own reckoning
-        // of what is short. `grow_needs` used to re-implement that
-        // filter, which is two statements of one rule and the way they
-        // come to disagree.
+        // The profile's buy list, through the profile's own reckoning of what is short: the whole
+        // of what is bought.
         let named: Vec<(String, u32, u32, Option<String>, bool)> = self
             .profiles
             .get(&self.autoplay.config.loot.profile)
@@ -107,6 +101,22 @@ impl Client {
             if name.trim().is_empty() || least == 0 {
                 continue;
             }
+            // The launcher's ammunition: of its kind, and nothing without a launcher in hand.
+            if name.trim().eq_ignore_ascii_case(crate::profile::AMMUNITION) {
+                if let Some((kind, _)) = ammo.filter(|_| have < least) {
+                    needs.push(Need {
+                        name: ac_world::fletching::ammo_type::name(kind).to_string(),
+                        want: least - have,
+                        have,
+                        keep: least,
+                        urgent,
+                        buyable: true,
+                        from,
+                        kind: NeedKind::Ammo(kind),
+                    });
+                }
+                continue;
+            }
             if have < least
                 && !needs
                     .iter()
@@ -126,27 +136,8 @@ impl Client {
                 });
             }
         }
-        if let Some((kind, carried)) = self.ammo_carried() {
-            // Less the rounds the player said to sell: ammunition the
-            // profile is selling out of is loot in the ammunition
-            // slot, not stock, and it goes over the counter. The
-            // launcher is still short by what is left after it does.
-            let have = carried.saturating_sub(leaving.ammo);
-            if have < cfg.ammo_keep {
-                needs.push(Need {
-                    name: ac_world::fletching::ammo_type::name(kind).to_string(),
-                    want: cfg.ammo_keep - have,
-                    have,
-                    keep: cfg.ammo_keep,
-                    urgent: have < cfg.ammo_keep / 4 && !self.can_craft_ammo(kind),
-                    buyable: true,
-                    from: None,
-                    kind: NeedKind::Ammo(kind),
-                });
-            }
-        }
         // Nothing else is bought: the profile's buy list is the whole of what to stock, components
-        // included (test: only_the_profiles_buy_list_is_shopped_for).
+        // and ammunition included (test: only_the_profiles_buy_list_is_shopped_for).
         needs
     }
 

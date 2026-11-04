@@ -11,8 +11,7 @@ const SPELLS_CAST_EVERY: Duration = Duration::from_secs(1);
 impl Client {
     // ---- town runs ------------------------------------------------
 
-    /// How many of a named thing are carried (name contains, as the
-    /// team's `keep_stocked` counts).
+    /// How many of a named thing are carried (name contains, as a buy line counts).
     pub(crate) fn carried_named(&self, name: &str) -> u32 {
         let want = name.trim().to_lowercase();
         self.world
@@ -20,6 +19,49 @@ impl Client {
             .filter(|o| o.name.to_lowercase().contains(&want))
             .map(|o| o.stack_size.max(1))
             .sum()
+    }
+
+    /// A saved config's ammunition count, moved once to the loot profile as its Ammunition buy
+    /// line when the profile has none: buying is the profile's alone
+    /// (test: an_old_configs_ammo_count_becomes_the_profiles_ammunition_line).
+    pub(crate) fn fold_ammo_keep(&mut self) {
+        let Some(keep) = self.autoplay.config.growth.ammo_keep_moved.take() else {
+            return;
+        };
+        let Some(profile) = self.loot_profile().filter(|_| keep > 0) else {
+            return;
+        };
+        if profile.buy.iter().any(|b| b.is_ammunition()) {
+            return;
+        }
+        let mut moved = (*profile).clone();
+        moved.buy.push(crate::profile::Buy {
+            what: crate::profile::AMMUNITION.into(),
+            keep,
+            on: true,
+            ..Default::default()
+        });
+        tracing::info!(
+            "profile {}: ammunition {keep} moved from the autoplay settings",
+            moved.name
+        );
+        if let Err(e) = self.profiles.put(moved) {
+            tracing::warn!("profile: saving the ammunition line: {e}");
+        }
+    }
+
+    /// How many of what the buy line `what` names are held as stock: carried less `leaving`. The
+    /// [`crate::profile::AMMUNITION`] line counts the launcher's rounds (`ammo`: `ammo_carried`).
+    pub(crate) fn held_stock(
+        &self,
+        what: &str,
+        leaving: &super::sale::Leaving,
+        ammo: Option<(u32, u32)>,
+    ) -> u32 {
+        if what.trim().eq_ignore_ascii_case(crate::profile::AMMUNITION) {
+            return ammo.map_or(0, |(_, n)| n.saturating_sub(leaving.ammo));
+        }
+        self.carried_named(what).saturating_sub(leaving.named(what))
     }
 
     /// Pyreals carried.

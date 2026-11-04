@@ -203,17 +203,6 @@ impl Client {
             .sum();
         Some((launcher.ammo_type, count))
     }
-
-    /// Whether more ammunition of `kind` could be made from what is
-    /// carried (see `autoplay::Fight::craft_ammo`).
-    pub(crate) fn can_craft_ammo(&self, kind: u32) -> bool {
-        if !self.autoplay.config.fight.craft_ammo {
-            return false;
-        }
-        let carried: Vec<u32> = self.world.inventory().map(|o| o.weenie_class_id).collect();
-        ac_world::fletching::making(kind)
-            .any(|r| carried.contains(&r.source) && carried.contains(&r.target))
-    }
 }
 
 #[cfg(test)]

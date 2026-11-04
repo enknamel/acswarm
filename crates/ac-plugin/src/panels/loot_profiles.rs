@@ -1130,7 +1130,8 @@ fn buy_conditions(ui: &mut egui::Ui, line: usize, when: &mut Vec<Mine>) {
 fn shopping(ui: &mut egui::Ui, p: &mut Profile) {
     caption(
         ui,
-        "keep stocked: what the character buys -- and so never sells",
+        "keep stocked: what the character buys, and nothing else is bought -- \
+         and so never sells",
     );
     let mut drop = None;
     egui::Grid::new("loot_profiles.buy")
@@ -1149,7 +1150,9 @@ fn shopping(ui: &mut egui::Ui, p: &mut Profile) {
                 .on_hover_text(
                     "The name the counter lists it under. Be specific: healing \
                      kits have levels and arrowheads have elements, and each \
-                     level is a different item at a different price.",
+                     level is a different item at a different price. \
+                     \"Ammunition\" is the launcher's rounds, whatever kind it \
+                     fires.",
                 );
                 ui.add(
                     egui::DragValue::new(&mut b.keep)

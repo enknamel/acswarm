@@ -716,19 +716,10 @@ pub(crate) fn draw(
                     .on_hover_text("Sell the loot, buy what is short, when the pack fills up");
                 caption(
                     ui,
-                    "how many Prismatic Tapers to carry is a line on the loot \
-                     profile's buy list; everything else a caster burns is scaled \
-                     to it",
+                    "what to buy and how many is the loot profile's buy list, and \
+                     nothing else: tapers, kits, scarabs, and a line called \
+                     Ammunition for the launcher's rounds",
                 );
-                ui.horizontal(|ui| {
-                    ui.label("carry");
-                    ui.add(
-                        egui::DragValue::new(&mut cfg.growth.ammo_keep)
-                            .speed(5.0)
-                            .range(0..=1000)
-                            .suffix(" arrows or quarrels"),
-                    );
-                });
 
                 ui.add_space(6.0);
                 title(ui, "Restocking");
@@ -1486,7 +1477,6 @@ mod tests {
         p.saved.team.restock.plan = Plan::Quartermaster;
         p.saved.team.restock.go_at = 0.5;
         p.saved.team.restock.share_money = false;
-        p.saved.growth.ammo_keep = 500;
         let mut settings = Settings::new();
         p.save(&mut settings);
         let mut back = Autoplay::default();
@@ -1494,7 +1484,6 @@ mod tests {
         assert_eq!(back.saved.team.restock.plan, Plan::Quartermaster);
         assert_eq!(back.saved.team.restock.go_at, 0.5);
         assert!(!back.saved.team.restock.share_money);
-        assert_eq!(back.saved.growth.ammo_keep, 500);
     }
 
     #[test]

@@ -290,8 +290,6 @@ pub struct Team {
     pub debuffs: Vec<String>,
     /// Hand a teammate standing next to us what they are short of.
     pub share_supplies: bool,
-    /// Ask for more when fewer than this many are carried (by name).
-    pub keep_stocked: Vec<(String, u32)>,
     /// A creature with at least this much health is a hard fight, and
     /// hard fights are planned: the teammate with the highest Life
     /// Magic softens it with a vulnerability and an imperil, and the
@@ -315,7 +313,7 @@ pub struct Team {
     pub fight_radius: f32,
     /// When the party stops hunting to restock, how it makes the trip,
     /// and what it does about money. How much of each thing to carry
-    /// lives in `growth::Growth`.
+    /// is the loot profile's buy list.
     pub restock: crate::logistics::Restock,
 }
 
@@ -329,7 +327,6 @@ impl Default for Team {
             fellowship_name: "acswarm".into(),
             debuffs: Vec::new(),
             share_supplies: true,
-            keep_stocked: vec![("Healing Kit".into(), 1)],
             hard_fight_health: 400,
             wait_for_debuff: false,
             lead: false,

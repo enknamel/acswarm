@@ -559,6 +559,7 @@ impl Client {
     pub fn tick_autoplay(&mut self, now: Instant) {
         self.autoplay.tick += 1;
         self.frame_at = now;
+        self.fold_ammo_keep();
         self.run_steps(now);
         self.settle_going();
     }

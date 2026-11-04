@@ -525,7 +525,16 @@ fn yes() -> bool {
     true
 }
 
+/// The buy line's word for the wielded launcher's ammunition, whatever its kind (arrows, quarrels,
+/// darts): counted and bought as that kind, never by name.
+pub const AMMUNITION: &str = "Ammunition";
+
 impl Buy {
+    /// Whether this line is the launcher's ammunition ([`AMMUNITION`]).
+    pub fn is_ammunition(&self) -> bool {
+        self.what.trim().eq_ignore_ascii_case(AMMUNITION)
+    }
+
     /// The count at or below which this line is worth a trip to town.
     pub fn low_mark(&self) -> u32 {
         self.restock_at.unwrap_or(self.keep / 4)
@@ -883,6 +892,10 @@ impl Profile {
             skill: ac_world::stats::skill::HEALING,
             at_least: ac_world::stats::sac::TRAINED,
         };
+        let trained_in_missile = Mine::Trained {
+            skill: ac_world::stats::skill::MISSILE_WEAPONS,
+            at_least: ac_world::stats::sac::TRAINED,
+        };
         Profile {
             name: "Starter".into(),
             note: "A place to start: quest items, money and components kept, vendor \
@@ -977,8 +990,8 @@ impl Profile {
                     ..Default::default()
                 },
             ],
-            // A caster's components scale from the taper, which every cast burns; kits go by name.
-            // Everything listed is used, so none reaches a counter unless its loot tag says sell.
+            // Only what is listed is bought. Everything listed is used, so none reaches a counter
+            // unless its loot tag says sell.
             buy: vec![
                 Buy {
                     what: "Prismatic Taper".into(),
@@ -997,6 +1010,14 @@ impl Profile {
                     from: None,
                     on: true,
                     when: vec![trained_in_healing.clone()],
+                },
+                Buy {
+                    what: AMMUNITION.into(),
+                    keep: 250,
+                    restock_at: None,
+                    from: None,
+                    on: true,
+                    when: vec![trained_in_missile],
                 },
             ],
             sell_to: SellTo::Best,
@@ -1493,6 +1514,26 @@ mod tests {
             starter.judge_test(&kit, &untrained, "Blargerton", 0),
             Verdict::Decided(LootAction::Keep, _)
         ));
+    }
+
+    #[test]
+    fn the_starters_ammunition_line_holds_only_for_trained_missile_weapons() {
+        let starter = Profile::starter();
+        let line = starter
+            .buy
+            .iter()
+            .find(|b| b.is_ammunition())
+            .expect("the ammunition line");
+        assert_eq!(line.keep, 250);
+        let archer = me(25, &[(skill::MISSILE_WEAPONS, 50, sac::TRAINED)]);
+        assert!(line.holds_for(&archer, "Aldric"));
+        let mage = me(25, &[(skill::MISSILE_WEAPONS, 10, sac::UNTRAINED)]);
+        assert!(!line.holds_for(&mage, "Blargerton"));
+        assert!(Buy {
+            what: " ammunition ".into(),
+            ..Default::default()
+        }
+        .is_ammunition());
     }
 
     #[test]

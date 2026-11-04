@@ -59,12 +59,15 @@ impl Client {
         let profile = self.profiles.get(&self.autoplay.config.loot.profile);
         let leaving = self.leaving_of(&self.item_stats());
         let (me, my_name) = (self.wielder(), &self.world.stats.name);
+        // The ammunition line is left out: a mate gives by name (`spare_for`), and the launcher's
+        // rounds are a kind, not a name ("arrow" is an arrowhead's name too).
+        let ammo = self.ammo_carried();
         self.autoplay.wants = profile
             .map(|p| {
-                let held =
-                    |what: &str| self.carried_named(what).saturating_sub(leaving.named(what));
+                let held = |what: &str| self.held_stock(what, &leaving, ammo);
                 p.shortfall(held, &me, my_name)
                     .into_iter()
+                    .filter(|s| !s.want.is_ammunition())
                     .map(|s| s.want.what.clone())
                     .collect()
             })
