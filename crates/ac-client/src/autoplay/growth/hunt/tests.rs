@@ -831,3 +831,42 @@ fn a_level_40_whose_ground_needs_no_flag_visits_no_warden() {
     let (lb, _, _) = c.autoplay.growth.bound.clone().expect("bound for a ground");
     assert_eq!(lb, g.landblock);
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_journey_put_down_while_the_player_steers_is_walked_on_once_the_keys_are_let_go() {
+    // Live (Blargerton, 0x9BE0, autoplay on): a movement key held cancelled each journey the
+    // tick it was planned, every row read that as no way, and nine grounds were skipped 20 min.
+    use ac_world::object::Position;
+    use ac_world::recalls::position_type;
+    let cell = 0x9BE0_0012;
+    let at = glam::Vec3::new(29_808.307, 43_045.4, 145.142);
+    let mut c =
+        crate::testkit::standing_in_the_field(41, cell, at - ac_world::landblock_origin(cell));
+    let lifestone = Position::new_flat(0xA9B4_0019, glam::Vec3::new(84.0, 7.1, 94.0));
+    c.learn_recall_position(position_type::SANCTUARY, lifestone);
+    c.autoplay.config.enabled = true;
+    let t0 = Instant::now();
+    c.autoplay.growth.quiet_since = Some(t0 - Duration::from_secs(600));
+    let keys = crate::player::Input {
+        forward: 1.0,
+        run: true,
+        ..Default::default()
+    };
+    let mut t = t0;
+    for frame in 0..40 {
+        t += Duration::from_millis(50);
+        c.tick_autoplay(t);
+        let input = if frame < 20 { keys } else { Default::default() };
+        let _ = c.tick_player(input, 0.05, t);
+    }
+    let skipped: Vec<u32> = c.autoplay.growth.skip.iter().map(|(g, _)| *g).collect();
+    assert!(
+        skipped.is_empty(),
+        "grounds skipped as unreachable: {skipped:x?}"
+    );
+    assert!(
+        c.autoplay.growth.bound.is_some() && c.traveling(),
+        "not walked on"
+    );
+}

@@ -219,6 +219,8 @@ pub struct Client {
     /// Whether the run key was held on the last tick: what a stop
     /// reported ahead of a use says, so the next report agrees with it.
     held_run: bool,
+    /// Whether a movement key was held on the last tick: autoplay's goals start no walk meanwhile.
+    hand_on_keys: bool,
     /// The server refusing to move, merge or split an item. It answers
     /// InventoryServerSaveFailed with the item's guid and, where it has
     /// one, a reason; without reading that, a step cannot tell a

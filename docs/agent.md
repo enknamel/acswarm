@@ -308,7 +308,8 @@ These are settled and are not up for redesign by a later stage.
 - **Nothing is given up on for good** except by an explicit `Refused`.
   A session can run for days; a daily limit is a wait, not a grudge.
 - **The player's hands win.** Any manual input stops the character
-  steering itself unless autoplay is on.
+  steering itself. With autoplay on, a journey under way is put down
+  while the keys are held, not refused, and walked on once they are let go.
 - **A profile is shared, live.** A rule switched off is off for every
   character reading that profile, at once.
 - **A road is walked, not fought.** On its way somewhere -- a hunting
