@@ -229,3 +229,16 @@ fn an_items_own_pickup_limit_and_a_level_ladder_are_read_into_the_rows() {
     let blood = row("tuskerbloodcollectionwait", Kind::Item, "Archmage Ichihiri");
     assert_eq!(blood.repeat, Repeat::After(72_000));
 }
+
+#[test]
+fn a_chests_guardians_spawn_nowhere() {
+    // Arwic's Legendary Chests (0xC6A9) hold a generator put in them (where_Create Contain): the
+    // creatures it lists come only for whoever opens one, so Arwic is no Blood Shreth spawn.
+    assert!(crate::hunting::at(0xC6A9).is_none(), "a ground in Arwic");
+    let shreth = Want::Kill("killtaskbloodshreth".into());
+    let at: Vec<u32> = sources_of(&shreth)
+        .flat_map(|s| s.landblocks.iter().map(|&(lb, _)| lb))
+        .collect();
+    assert!(!at.contains(&0xC6A9), "{at:x?}");
+    assert!(at.contains(&0xCE4E), "{at:x?}");
+}

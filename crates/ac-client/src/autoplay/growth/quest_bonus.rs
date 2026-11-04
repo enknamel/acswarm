@@ -177,11 +177,11 @@ mod tests {
         assert!(pay_of(&board(SHRETH, |_| {}), 0).is_empty());
         let taken = board(SHRETH, |f| f.log.note_kills(SHRETH, 3));
         let pay = pay_of(&taken, 0);
-        // 1.33 of the level's XP over 10 kills, 17 Blood Shreth of the 37 entries in 0x0162.
+        // 1.33 of the level's XP over 10 kills, 17 Blood Shreth of the 36 entries in 0x0162.
         let g = ac_world::hunting::at(0x162).expect("a Blood Shreth ground");
         let each = (1.33 * TO_NEXT as f64).round() as f32 / 10.0;
         let bonus = ground_bonus(&pay, g);
-        assert!((bonus - each * 17.0 / 37.0).abs() < 0.01, "{bonus}");
+        assert!((bonus - each * 17.0 / 36.0).abs() < 0.01, "{bonus}");
         // Its kills done, it waits for the hand-in, not for more kills.
         let done = board(SHRETH, |f| f.log.note_kills(SHRETH, 10));
         assert_eq!(done[0].state, QuestState::Ready);

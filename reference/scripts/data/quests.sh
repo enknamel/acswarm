@@ -88,6 +88,9 @@ q spawns 'with recursive spawn(inst, wcid, depth) as (
   select s.inst, g.weenie_Class_Id, s.depth + 1 from spawn s
   join weenie_properties_generator g on g.object_Id = s.wcid
   where s.depth < 4
+    -- an entry put in a container, a hand or a shop (where_Create Contain, Wield, Shop:
+    -- RegenLocationType.cs:12-16) puts nothing in the world, as the guardians a chest holds
+    and (g.where_Create & 56) = 0
 ),
 surface as (
   select distinct obj_Cell_Id >> 16 lb from landblock_instance

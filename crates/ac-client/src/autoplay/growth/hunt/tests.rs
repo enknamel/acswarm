@@ -370,14 +370,18 @@ fn a_walk_to_its_own_ground_is_let_go_once_it_follows() {
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
 fn a_camp_nothing_comes_to_is_looked_about() {
-    // The Blood Shrethlet ground in 0xA9B2 has thirty spawn entries, so it is held rather than
-    // walked; held for good, a character stood at it doing nothing while none came.
-    let block = 0xA9B2_0000;
-    let ground = ac_world::hunting::at(block >> 16).expect("the Blood Shrethlet ground");
-    assert_eq!(ground.suggested_tactic(), ac_world::hunting::Tactic::Camp);
-    let outside = glam::Vec3::new(60.0, 60.0, 94.0);
+    // An outdoor ground crowded enough to be held rather than walked; held for good, a character
+    // stood at it doing nothing while none came.
+    let ground = ac_world::hunting::all()
+        .iter()
+        .find(|g| g.entrance.is_none() && g.suggested_tactic() == ac_world::hunting::Tactic::Camp)
+        .expect("an outdoor camp");
+    let block = ground.landblock << 16;
+    let origin = ac_world::landblock_origin(block).truncate();
+    let local = ground.at - origin;
+    let outside = glam::Vec3::new(local.x, local.y, 0.0);
     let mut c = standing_at(ac_world::outdoor_cell(block, outside), outside);
-    c.world.stats.level = 7;
+    c.world.stats.level = ground.level as i32;
     c.autoplay.growth.hunting_at = Some(block >> 16);
     let cfg = Growth::default();
     let now = Instant::now();
@@ -389,7 +393,11 @@ fn a_camp_nothing_comes_to_is_looked_about() {
     let later = now + Duration::from_secs(40);
     assert!(
         c.grow_hunt(later, &cfg),
-        "stood on at a camp nothing came to"
+        "stood on at a camp nothing came to: {} {:#x} {:?}: {}",
+        ground.name,
+        ground.landblock,
+        ground.at,
+        c.autoplay.status
     );
     assert!(
         c.is_walking() || c.traveling(),
