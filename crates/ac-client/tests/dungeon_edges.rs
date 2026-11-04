@@ -720,7 +720,7 @@ fn the_way_into_a_corridor_is_through_its_door_not_into_its_wall() {
         cell: DUNGEON,
     };
     let spots = ac_nav::routing::standable_near(&area, from, around, 2.5).expect("built");
-    let aim = ac_client::explore::spot_in_room(&spots, JAMB_CELL, straight)
+    let aim = ac_client::explore::spot_in_room(&spots, JAMB_CELL, straight, from.at)
         .expect("a spot in the corridor")
         .at;
     assert!(has_floor(aim), "{aim:?}");

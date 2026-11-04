@@ -51,15 +51,24 @@ pub struct RoomWalk {
 }
 
 /// `past` metres beyond `sill` along the wall's `normal` (on the map, either sign), on the far side
-/// from `from`, else (on the sill) the way `facing` points: through the wall, not on the approach.
-fn past_the_door(sill: Vec3, normal: Vec3, from: Vec3, facing: glam::Vec2, past: f32) -> Vec3 {
+/// from `from`, else (on the sill) the side `room_at` lies on, else the way `facing` points.
+fn past_the_door(
+    sill: Vec3,
+    normal: Vec3,
+    from: Vec3,
+    (room_at, facing): (Vec3, glam::Vec2),
+    past: f32,
+) -> Vec3 {
     let across = glam::Vec2::new(sill.x - from.x, sill.y - from.y);
     let n = glam::Vec2::new(normal.x, normal.y);
     let through = if n.length() > 0.5 {
         let side = across.dot(n);
+        let room = (room_at - sill).truncate().dot(n);
         let ahead = facing.dot(n);
         if side.abs() >= STOP * 0.5 {
             n * side.signum()
+        } else if room.abs() > STOP * 0.5 {
+            n * room.signum()
         } else if ahead.abs() > 0.1 {
             n * ahead.signum()
         } else {
@@ -93,8 +102,8 @@ fn nearest_door(cells: &[CellScene], room: u32, from: Vec3) -> Option<(Vec3, Vec
     Some((sill, normal))
 }
 
-/// Where to walk to be in `room`: [`past_the_door`] of its doorway nearest `from` (`facing` decides
-/// on the sill), or the middle of the cell when the data has no opening.
+/// Where to walk to be in `room`: [`past_the_door`] of its doorway nearest `from` (the room's
+/// middle, else `facing`, decides on the sill), or the middle of the cell when the data has no opening.
 fn way_into(
     cells: &[CellScene],
     room: u32,
@@ -103,25 +112,23 @@ fn way_into(
     past: f32,
 ) -> Option<Vec3> {
     let (sill, normal) = nearest_door(cells, room, from)?;
-    if normal == Vec3::ZERO
-        && cells
-            .iter()
-            .any(|c| c.cell_id == room && c.doorways.is_empty())
-    {
+    let cell = cells.iter().find(|c| c.cell_id == room)?;
+    if normal == Vec3::ZERO && cell.doorways.is_empty() {
         // No opening in the data: the middle of the cell structure is
         // the best guess there is.
         return Some(sill);
     }
-    Some(past_the_door(sill, normal, from, facing, past))
+    let middle = cell.transform.transform_point3(Vec3::ZERO);
+    Some(past_the_door(sill, normal, from, (middle, facing), past))
 }
 
-/// Of `spots`, the one in `room`'s own cell nearest `aim` on the map: where a walk into the room
-/// ends, on the room's floor however a stair climbs from its sill.
-pub fn spot_in_room(spots: &[Place], room: u32, aim: Vec3) -> Option<Place> {
+/// Of `spots`, the one in `room`'s own cell nearest `aim` on the map (on its floor however a stair
+/// climbs), never within `STOP` of `from`: that walk arrives unwalked, still on the sill.
+pub fn spot_in_room(spots: &[Place], room: u32, aim: Vec3, from: Vec3) -> Option<Place> {
     let off = |p: &Place| p.at.truncate().distance(aim.truncate());
     spots
         .iter()
-        .filter(|p| p.cell == room)
+        .filter(|p| p.cell == room && p.at.distance(from) > STOP)
         .min_by(|a, b| off(a).total_cmp(&off(b)))
         .copied()
 }
@@ -275,7 +282,7 @@ impl Client {
                     .say(Doing::Traveling, "looking for something to fight");
                 return true;
             };
-            let Some(at) = spot_in_room(&spots, room, aim) else {
+            let Some(at) = spot_in_room(&spots, room, aim, me) else {
                 self.autoplay.rooms_shut.insert(room);
                 self.autoplay.note(
                     format!("no floor past the door of {room:#06x}; going round"),
@@ -362,6 +369,31 @@ mod tests {
         assert_keeps_going(&c, &stood);
     }
 
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn exploring_the_gredaline_consulate_leaves_its_arrival_room() {
+        // Blargerton, through the Gredaline Consulate portal for its Tusker Guards: the journey
+        // ended in 0x029A01F1, explore walked to 0x1F2, and the server set it down on their sill.
+        // Aimed the way it faced, back into 0x1F2, the room ahead was shut and it stood an hour.
+        let mut c = crate::testkit::standing_in_the_field(
+            41,
+            0x029A_01F1,
+            glam::Vec3::new(169.97, -220.48, 0.0),
+        );
+        c.world.player_guid = Some(crate::testkit::ME);
+        c.autoplay.config.enabled = true;
+        c.autoplay.config.fight.enabled = true;
+        play(&mut c, 1);
+        crate::testkit::stand(&mut c, 0x029A_01F2, glam::Vec3::new(169.63, -225.29, 0.0));
+        play(&mut c, 60);
+        let seen = c.autoplay.rooms_seen.len();
+        assert!(
+            seen >= 10,
+            "explored {seen} rooms, shut {:x?}",
+            c.autoplay.rooms_shut
+        );
+    }
+
     /// In every twenty seconds of `stood` (a place a second), the character gets six metres from
     /// where it began them: neither standing nor pacing between two doorways, which a
     /// ten-seconds-in-one-place test let through.
@@ -432,7 +464,7 @@ mod tests {
         // aim along the approach was (200.3, 47178.85), inside the
         // corridor's west wall, and the walk jittered there ten seconds.
         let corner = Vec3::new(205.04, 47173.55, 0.0);
-        let at = past_the_door(SILL, THROUGH, corner, Vec2::new(-0.7, 0.7), 2.5);
+        let at = past_the_door(SILL, THROUGH, corner, (SILL, Vec2::new(-0.7, 0.7)), 2.5);
         assert_eq!(at, Vec3::new(202.0, 47179.5, 0.1));
         // And back the other way from the far side, whichever way the
         // normal happens to point.
@@ -440,7 +472,7 @@ mod tests {
             SILL,
             -THROUGH,
             Vec3::new(199.0, 47180.0, 0.0),
-            Vec2::ZERO,
+            (SILL, Vec2::ZERO),
             2.5,
         );
         assert_eq!(at, Vec3::new(202.0, 47174.5, 0.1));
@@ -452,10 +484,20 @@ mod tests {
         // sill: "reached" at once, and ten seconds for the room to be
         // written off.
         let on_it = Vec3::new(201.43, 47177.42, 0.0);
-        let at = past_the_door(SILL, THROUGH, on_it, Vec2::new(-0.7, 0.7), 2.5);
+        let at = past_the_door(SILL, THROUGH, on_it, (SILL, Vec2::new(-0.7, 0.7)), 2.5);
         assert_eq!(at, Vec3::new(202.0, 47179.5, 0.1));
-        let at = past_the_door(SILL, THROUGH, on_it, Vec2::new(0.3, -0.95), 2.5);
+        let at = past_the_door(SILL, THROUGH, on_it, (SILL, Vec2::new(0.3, -0.95)), 2.5);
         assert_eq!(at, Vec3::new(202.0, 47174.5, 0.1));
+    }
+
+    #[test]
+    fn standing_on_the_sill_the_way_through_is_the_side_the_room_is_on() {
+        // Set down by a portal on the sill facing back the way it had come, the aim was the room
+        // stood in, and the room ahead was shut (exploring_the_gredaline_consulate_leaves_its_arrival_room).
+        let on_it = Vec3::new(201.43, 47177.42, 0.0);
+        let room = Vec3::new(202.0, 47182.0, 0.0);
+        let at = past_the_door(SILL, THROUGH, on_it, (room, Vec2::new(0.3, -0.95)), 2.5);
+        assert_eq!(at, Vec3::new(202.0, 47179.5, 0.1));
     }
 
     #[test]
@@ -464,7 +506,7 @@ mod tests {
             SILL,
             Vec3::ZERO,
             Vec3::new(202.0, 47167.0, 0.0),
-            Vec2::X,
+            (SILL, Vec2::X),
             2.5,
         );
         assert_eq!(far, Vec3::new(202.0, 47179.5, 0.1));
@@ -472,7 +514,7 @@ mod tests {
             SILL,
             Vec3::ZERO,
             Vec3::new(202.0, 47177.3, 0.0),
-            Vec2::Y,
+            (SILL, Vec2::Y),
             2.5,
         );
         assert!(
