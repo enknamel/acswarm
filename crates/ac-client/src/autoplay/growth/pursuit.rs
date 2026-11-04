@@ -344,9 +344,6 @@ impl Ask<'_> {
                 };
                 stuck(format!("its givers take {band}; this character is {level}"))
             }
-            QuestState::CantYet(Blocked::TooHard { level: l }) => {
-                stuck(format!("its easiest source is level {l}"))
-            }
             QuestState::CantYet(Blocked::Locked { flag }) => self.flag_step(flag),
             QuestState::CantYet(Blocked::NeedsFirst { title }) => {
                 stuck(format!("{} comes first", title.trim()))
@@ -367,13 +364,10 @@ impl Ask<'_> {
         let grounds: Vec<SourceGround> =
             wants.iter().flat_map(|w| self.chains.grounds(w)).collect();
         let holds = |flag: &str| self.facts.held.iter().any(|h| h.eq_ignore_ascii_case(flag));
-        // A source past the margin strays allow (`Ground::suits`) kills the character each try.
-        let beatable = |g: &SourceGround| g.source.level <= level + 2 * self.facts.margin;
+        // Only the game's rules shut a ground: its way in's level band, never its creatures' level.
         let level_fits = |g: &SourceGround| {
-            beatable(g)
-                && g.way_in.is_none_or(|p| {
-                    level >= p.min_level && (p.max_level == 0 || level <= p.max_level)
-                })
+            g.way_in
+                .is_none_or(|p| level >= p.min_level && (p.max_level == 0 || level <= p.max_level))
         };
         let flag_held = |g: &SourceGround| {
             g.way_in
@@ -411,11 +405,6 @@ impl Ask<'_> {
             .filter(|g| g.place.is_some() && level_fits(g));
         if let Some(p) = shut.filter_map(|g| g.way_in).find(|p| !p.quest.is_empty()) {
             return (self.flag_step(&p.quest), None);
-        }
-        let easiest = grounds.iter().map(|g| g.source.level).min();
-        if let Some(l) = easiest.filter(|_| !grounds.iter().any(beatable)) {
-            let why = format!("its easiest source is level {l}; this character is {level}");
-            return (stuck(why), None);
         }
         let lowest = grounds
             .iter()

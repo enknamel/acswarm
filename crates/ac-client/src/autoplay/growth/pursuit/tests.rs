@@ -105,7 +105,6 @@ fn facts(level: u32, pursue: &[(&str, bool)]) -> QuestFacts {
     }
     QuestFacts {
         level,
-        margin: 5,
         config,
         now: NOW,
         ..QuestFacts::default()
@@ -153,14 +152,8 @@ fn why(step: &PursuitStep) -> &str {
 
 #[test]
 fn a_jaw_not_carried_is_hunted_where_it_drops() {
-    // Level 50 is below the Engorged Eater's 80 by more than twice the margin: it would die
-    // there each try, so it is passed over saying why; 75 is within it and goes.
+    // The Engorged Eater is level 80: a level 50 hunts it all the same, the game allowing it.
     let p = work(&facts(50, &[("engorgedeaterjaw", false)]), &jaws(), None);
-    assert_eq!(
-        why(&p.lines[0].step),
-        "its easiest source is level 80; this character is 50"
-    );
-    let p = work(&facts(75, &[("engorgedeaterjaw", false)]), &jaws(), None);
     match steps(&p)[..] {
         [(
             "engorgedeaterjaw",

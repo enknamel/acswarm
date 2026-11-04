@@ -236,17 +236,16 @@ fn the_level_band_hides_quests_outside_it() {
     );
     assert_eq!(listed(&cards, &band(0, 10), 0), ["give:3684:2470"]);
     assert_eq!(listed(&cards, &band(0, 0), 0).len(), 4, "0 is open");
-    // For my level: the giver's band, and the easiest source within twice the margin above.
+    // For my level: the game's rules alone (the giver's band, the way in), never a creature's level.
     let mine = Filter::default();
     assert_eq!(
         listed(&cards, &mine, 75),
-        ["engorgedeaterjaw", "give:3684:2470"],
-        "the kill task's Repugnant Eater (95) is beyond 75 + 2 x 10"
+        ["engorgedeaterjaw", "give:3684:2470"]
     );
     assert_eq!(
         listed(&cards, &mine, 50),
-        ["give:3684:2470"],
-        "the Engorged Eater (80) is beyond 50 + 2 x 10"
+        ["engorgedeaterjaw", "give:3684:2470"],
+        "the Engorged Eater (80) is no game rule against a level 50"
     );
 }
 
@@ -570,7 +569,6 @@ fn every_bundled_quest_draws_in_the_quest_book_list_and_details() {
     let cards = ac_world::quest_chain::quest_cards();
     let facts = ac_client::quest_log::QuestFacts {
         level: 41,
-        margin: 10,
         ..Default::default()
     };
     let browse = ac_client::quest_log::browse_board(&facts);

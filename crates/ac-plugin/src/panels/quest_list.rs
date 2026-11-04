@@ -45,7 +45,6 @@ pub(crate) fn words(state: &QuestState, quests_on: bool, now: u64) -> String {
             match why {
                 Blocked::Level { min, max: 0 } => format!("for level {min} and up"),
                 Blocked::Level { min, max } => format!("for levels {min} to {max}"),
-                Blocked::TooHard { level } => format!("its easiest creature is level {level}"),
                 Blocked::Locked { flag } => format!("its giver is behind a portal asking {flag}"),
                 Blocked::NeedsFirst { title } => format!("do '{title}' first"),
             }

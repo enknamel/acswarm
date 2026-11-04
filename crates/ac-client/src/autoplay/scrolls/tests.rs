@@ -62,8 +62,20 @@ fn a_scroll_the_character_can_learn_is_kept_and_read_once_nothing_is_fought() {
         )
     );
 
-    // The fight over: the bolt is read, once, and the heal never.
+    // The fight over, but on the way to a giver: a read would leave the server busy at its use.
     c.attack_target = None;
+    let giver = ac_world::landmarks::Landmark {
+        kind: ac_world::landmarks::Kind::Npc,
+        name: "San Ming".into(),
+        cell: 0xA9B4_0019,
+        at: glam::Vec3::ZERO,
+    };
+    c.visits.current = Some(crate::visit::Visit::landmark(&giver));
+    c.autoplay_learn_scrolls(now);
+    assert_eq!(c.last_used, None, "read on the way to a giver");
+    c.visits.current = None;
+
+    // Nothing on: the bolt is read, once, and the heal never.
     c.autoplay_learn_scrolls(now);
     assert_eq!(c.last_used, Some(0x8000_0500));
     c.last_used = None;

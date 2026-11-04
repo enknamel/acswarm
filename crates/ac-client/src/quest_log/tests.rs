@@ -104,27 +104,19 @@ fn a_detour_pays_only_once_the_rate_is_measured() {
 }
 
 fn at_level(level: u32) -> QuestFacts {
-    QuestFacts {
-        level,
-        margin: 8,
-        ..on()
-    }
+    QuestFacts { level, ..on() }
 }
 
 #[test]
-fn a_kill_task_waits_for_the_level_its_giver_asks_and_its_creatures_suit() {
+fn a_kill_task_waits_for_the_level_its_giver_asks_and_never_for_its_creatures() {
     let id = "diremattekarkillcount";
     assert_eq!(
         state(id, &at_level(15)),
         QuestState::CantYet(Blocked::Level { min: 20, max: 0 })
     );
+    // Dire Mattekar are level 40: the game lets a level 20 take the task, so it is doable.
     assert_eq!(
         state(id, &at_level(20)),
-        QuestState::CantYet(Blocked::TooHard { level: 40 }),
-        "Dire Mattekar are level 40, past 20 + 2 * 8"
-    );
-    assert_eq!(
-        state(id, &at_level(25)),
         QuestState::NotTaken {
             from: "Fergal the Dire".into(),
             flag: "diremattekarkillcount".into(),
@@ -136,8 +128,7 @@ fn a_kill_task_waits_for_the_level_its_giver_asks_and_its_creatures_suit() {
         unsuited_quests(&rows(id), &off).contains(id),
         "switched off too"
     );
-    assert!(unsuited_quests(&rows(id), &at_level(20)).contains(id));
-    assert!(unsuited_quests(&rows(id), &at_level(25)).is_empty());
+    assert!(unsuited_quests(&rows(id), &at_level(20)).is_empty());
 }
 
 #[test]
@@ -180,15 +171,11 @@ fn a_talk_that_needs_another_quest_first_names_it_until_that_one_is_done() {
 }
 
 #[test]
-fn a_hand_in_that_needs_a_first_one_names_it_and_its_dropper_rules_out_low_levels() {
+fn a_hand_in_that_needs_a_first_one_names_it_at_any_level_its_dropper_is() {
+    // Only Captain Burnja (level 135) drops the board: no game rule keeps a level 20 from it.
     let id = "give:35407";
     assert_eq!(
         state(id, &at_level(20)),
-        QuestState::CantYet(Blocked::TooHard { level: 135 }),
-        "only Captain Burnja drops the board"
-    );
-    assert_eq!(
-        state(id, &at_level(150)),
         QuestState::CantYet(Blocked::NeedsFirst {
             title: "Player has already turned in 1 Burnjas Board with nails".into()
         })
@@ -465,13 +452,14 @@ fn pursued_at(id: &str, level: u32) -> QuestFacts {
 }
 
 #[test]
-fn a_pursued_quest_above_the_margin_is_still_wanted() {
-    // The jaw's Engorged Eater is level 80, past 50 + 2 * 8: asked for, the jaw is kept all the same.
+fn a_quest_whose_creatures_are_far_above_the_character_is_wanted() {
+    // The jaw's Engorged Eater is level 80: at 50 the jaw is wanted, on or pursued.
     let id = "engorgedeaterjaw";
-    assert_eq!(
-        state(id, &at_level(50)),
-        QuestState::CantYet(Blocked::TooHard { level: 80 })
-    );
+    let needs = QuestState::Needs {
+        more: 1,
+        of: "Engorged Eater Jaw".into(),
+    };
+    assert_eq!(state(id, &at_level(50)), needs);
     let facts = pursued_at(id, 50);
     let board = quest_board(&rows(id), &facts);
     assert_eq!(
@@ -535,4 +523,19 @@ fn an_unpaid_talk_the_client_cannot_check_is_not_done_and_a_flag_refused_unlearn
     assert!(holds(&c.quest_facts(), "ToTheBarkeep"));
     c.drop_quest_flag("ToTheBarkeep");
     assert!(!holds(&c.quest_facts(), "ToTheBarkeep"));
+}
+
+#[test]
+fn a_kill_task_handed_in_short_and_unpaid_is_not_done_and_starts_no_wait() {
+    let mut c = crate::testkit::character_of_level(crate::testkit::no_data(), 41);
+    let t0 = Instant::now();
+    let kill = ac_world::quests::rows_of("killtaskbloodshreth")
+        .find(|r| r.kind == Kind::Kill)
+        .unwrap();
+    c.quest_log.note_taken("killtaskbloodshreth");
+    c.ask_giver(kill, kill.places[0], t0);
+    c.watch_quest_answer(t0 + XP_WATCH);
+    assert!(!c.quest_log.done.contains_key(kill.id));
+    assert!(c.quest_log.waits.is_empty(), "{:?}", c.quest_log.waits);
+    assert_eq!(c.quest_log.kills.get("killtaskbloodshreth"), Some(&0));
 }

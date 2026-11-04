@@ -332,15 +332,13 @@ pub enum QuestState {
     Waiting { until: u64 },                  // done; may be done again then
     Done,                                    // a once-quest done
 }
-pub enum Blocked { Level { min: u32, max: u32 }, TooHard { level: u32 },
-                   Locked { flag: String }, NeedsFirst { title: String } }
+pub enum Blocked { Level { min: u32, max: u32 }, Locked { flag: String },
+                   NeedsFirst { title: String } }
 ```
 `QuestLine { id, title, kind, state, xp: u64 (at the character's level), givers: usize, giver:
 String (nearest by straight distance), on: bool }`. Read, for one character:
 - `Off` unless `config.quests.on` and the id is not in `off`.
-- `CantYet`: no row's Level band holds the level (`Level`); the easiest source creature is above
-  `level + 2 * growth.level_margin` (`TooHard`, the bound `Ground::suits` uses for a stray); every
-  row's giver is `locked_by` the held flags (`Locked`); a `needs` flag is not held and is stamped
+- `CantYet`: no row's Level band holds the level (`Level`); every row's giver is `locked_by` the held flags (`Locked`); a `needs` flag is not held and is stamped
   only by a quest that is not a start row (`NeedsFirst`, naming it).
 - `Done` / `Waiting` from the log: a once-quest done; `waits[timer]` in the future.
 - `NotTaken`: a `needs` flag a start row stamps is not held (a kill task's counter is not in
@@ -348,7 +346,7 @@ String (nearest by straight distance), on: bool }`. Read, for one character:
 - item: `already_carried(wcid)` (autoplay/loot/judge.rs:242) against `count`; talk: `Ready`.
 
 States are worked out by a pure fn, `quest_board(rows, &Snapshot) -> Vec<QuestLine>`, whose
-`Snapshot` holds level, XP to the next level, held flags, the log, carried counts by wcid, margin,
+`Snapshot` holds level, XP to the next level, held flags, the log, carried counts by wcid,
 config (and in step 2 the profile): testable offline with no `Client`. `Client::refresh_quests(now)`
 runs it into `Client.quest_board` every `QUEST_BOARD_EVERY` (2 s) and at once when
 `config.quests`, the level or the log changes, called from `Client::tick` beside `tick_retag()`
@@ -361,7 +359,8 @@ A **Quests** section in the autoplay window (`crates/ac-plugin/src/panels/autopl
 autoplay.rs stays short. `AutoplayView` gains `quests: Vec<QuestLine>` (from `c.quest_board`).
 - "do quests" checkbox (`cfg.quests.on`), hover: keep what the quests switched on want and hand it in.
 - A search box (title, giver, item) and a show-picker: "for my level" (default: not `CantYet` by
-  level or too hard), "switched on", "all".
+  level), "switched on", "all". Only the game's rules block a quest: a giver's band, a portal's
+  level or flag. How strong its creatures are is never one.
 - One line per quest in a scroll area (about 220 px): its on/off box (writes `cfg.quests.off`), the
   title, "to San Ming" or "any of 12 Collectors", the XP now, and the state in words, coloured:
   ready green, won't complete orange (the rule named), can't do yet and waiting grey.
@@ -614,7 +613,7 @@ what it could not read on every run.
 | `autoplay::Quests { on, off }`, `Quests::is_on`, `Config.quests` | `crates/ac-client/src/autoplay/config.rs` | built, tested | - |
 | `QuestWant { wcid, need }`, `wanted()` | `crates/ac-loot/src/quest_wants.rs` | built, tested | loot adds `Wielder.quest_wants`, `Ask::Quest`, the starter rule |
 | `QuestLog` (`note_taken`, `note_kills`, `note_done`, `note_wait`, `wait_until`), `Solved`; `load_quest_log`, `Client::save_quest_log` | `crates/ac-client/src/quest_log.rs` | built, tested | list (1d) writes kills; hunt and errand write done and waits (§4.3) |
-| `QuestState`, `Blocked`, `QuestLine`, `QuestFacts`, `quest_board()` | `crates/ac-client/src/quest_log.rs` | Off, Ready, Needs, NotTaken, Waiting, Done | list: `CantYet` (level band, too hard, locked, needs first), refresh on a change (§2.3) |
+| `QuestState`, `Blocked`, `QuestLine`, `QuestFacts`, `quest_board()` | `crates/ac-client/src/quest_log.rs` | Off, Ready, Needs, NotTaken, Waiting, Done | list: `CantYet` (level band, locked, needs first), refresh on a change (§2.3) |
 | `Client::quest_facts`, `Client::refresh_quests` (every `QUEST_BOARD_EVERY` from `Client::tick`), `Client.quest_board`, `Client.quest_log` | `crates/ac-client/src/quest_log.rs`, `crates/ac-client/src/session/apply.rs` | built | list (refresh triggers), loot (profile into the facts is there already) |
 | `Client::quests_on()`: the ids autoplay considers | `crates/ac-client/src/quest_log.rs` | built | - |
 | `quest_item_blocked(profile, item, me, name, held) -> Option<(rule, LootAction)>`: the cross-check, called by `quest_board` for every item quest on | `crates/ac-client/src/autoplay/loot/judge.rs` | returns `None` | loot (§3.3) |

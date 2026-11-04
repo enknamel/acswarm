@@ -97,9 +97,12 @@ impl Client {
         let busy = st
             .read_at
             .is_some_and(|t| now.duration_since(t) < READ_TAKES);
+        // A read keeps the server busy READ_TAKES: a use of a giver or a counter then is dropped.
         let quiet = self.attack_target.is_none()
             && self.autoplay.nearest_fight.is_none()
             && !self.traveling()
+            && self.visits.current.is_none()
+            && !self.autoplay.growth.town_run_under_way()
             && !self.is_dead();
         if busy || !quiet {
             return;

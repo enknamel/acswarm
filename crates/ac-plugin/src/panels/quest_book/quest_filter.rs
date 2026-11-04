@@ -319,13 +319,12 @@ pub(crate) fn quest_level(card: &QuestCard) -> u32 {
     card.levels.0.max(card.easiest.unwrap_or(0)).max(card.entry)
 }
 
-/// Whether the giver's band holds the level and the easiest source is within twice the margin
-/// above it, as the board's `Blocked::TooHard` judges.
+/// Whether the game lets the character do it at its level: the giver's band holds it and the
+/// way in takes no more. Its creatures' level is never a rule.
 pub(crate) fn is_suited(card: &QuestCard, me: Me) -> bool {
     let (min, max) = card.levels;
     let band = me.level >= min && (max == 0 || me.level <= max);
-    let source = card.easiest.is_none_or(|e| e <= me.level + 2 * me.margin);
-    band && source && card.entry <= me.level
+    band && card.entry <= me.level
 }
 
 /// Whether `id` is on for autoplay: chosen by hand, or paying XP with nothing unread and not off.

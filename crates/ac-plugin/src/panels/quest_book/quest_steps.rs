@@ -191,7 +191,7 @@ pub(crate) fn hunt_step(g: &SourceGround, k: &Known) -> Step {
         step = step.say(format!(" (have {have})"));
     }
     let above = s.level.saturating_sub(k.me.level);
-    if k.me.level > 0 && s.level > k.me.level + 2 * k.me.margin {
+    if k.me.level > 0 && s.level > k.me.level {
         step = step.say(format!(" - {above} levels above you"));
     }
     if g.place.is_none() {

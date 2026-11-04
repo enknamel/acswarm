@@ -85,8 +85,6 @@ impl QuestLog {
 pub enum Blocked {
     /// No giver's band holds the character's level.
     Level { min: u32, max: u32 },
-    /// The easiest source creature is this level, too far above the character's.
-    TooHard { level: u32 },
     /// Every giver stands behind a portal asking this flag.
     Locked { flag: String },
     /// Another quest, not a start talk, stamps what this one needs.
@@ -165,8 +163,6 @@ pub struct QuestFacts {
     pub log: QuestLog,
     /// Items carried, by weenie class.
     pub carried: BTreeMap<u32, u32>,
-    /// `Growth::level_margin`.
-    pub margin: u32,
     pub config: Quests,
     /// Unix seconds.
     pub now: u64,
@@ -318,7 +314,7 @@ fn board_of<'r>(
             title: first.title.to_string(),
             kind: first.kind,
             state: if on {
-                state_of(&doing, facts, &mut locks, pick.pursued.contains(id))
+                state_of(&doing, facts, &mut locks)
             } else {
                 QuestState::Off
             },
@@ -411,21 +407,6 @@ impl Locks {
     }
 }
 
-/// The level of the easiest creature yielding `want`: 0 when a placed NPC gives it.
-fn easiest(want: &Want) -> Option<u32> {
-    static EASIEST: OnceLock<BTreeMap<Want, u32>> = OnceLock::new();
-    let map = EASIEST.get_or_init(|| {
-        let mut m: BTreeMap<Want, u32> = BTreeMap::new();
-        for s in ac_world::quests::sources() {
-            let level = if s.kind == Yield::Npc { 0 } else { s.level };
-            let l = m.entry(s.want.clone()).or_insert(level);
-            *l = (*l).min(level);
-        }
-        m
-    });
-    map.get(want).copied()
-}
-
 /// The rows of every quest stamping a flag, by the flag lowercased.
 fn stampers(flag: &str) -> &'static [&'static Row] {
     static STAMPERS: OnceLock<BTreeMap<String, Vec<&'static Row>>> = OnceLock::new();
@@ -471,14 +452,10 @@ fn band(rows: &[&Row]) -> Blocked {
     Blocked::Level { min, max }
 }
 
-/// Why the character's level rules the quest out: no giver's band holds it, or the easiest
-/// source of anything it asks is past `level + 2 * margin` (`Ground::suits`' bound on strays).
+/// Why the character's level rules the quest out: no giver's band holds it. Only the game's
+/// rules decide what can be done; how hard its creatures are is never one.
 fn beyond_level(doing: &[&Row], facts: &QuestFacts) -> Option<Blocked> {
-    if !doing.iter().any(|r| r.fits_level(facts.level)) {
-        return Some(band(doing));
-    }
-    let level = doing.iter().filter_map(|r| easiest(&r.want)).min()?;
-    (level > facts.level + 2 * facts.margin).then_some(Blocked::TooHard { level })
+    (!doing.iter().any(|r| r.fits_level(facts.level))).then(|| band(doing))
 }
 
 /// The giver to talk to first for `flag`, nearest first, or why the character can't yet.
@@ -533,9 +510,8 @@ fn see_first(flag: &str, facts: &QuestFacts, locks: &mut Locks, depth: u32) -> Q
     }
 }
 
-/// One switched-on quest's state: done or waiting, then what rules it out, then what is left. A
-/// `pursued` one is not ruled out for its source's level: the player asked for it.
-fn state_of(doing: &[&Row], facts: &QuestFacts, locks: &mut Locks, pursued: bool) -> QuestState {
+/// One switched-on quest's state: done or waiting, then what rules it out, then what is left.
+fn state_of(doing: &[&Row], facts: &QuestFacts, locks: &mut Locks) -> QuestState {
     let first = doing[0];
     if let Some(until) = facts.log.wait_until(first.timer, facts.now) {
         return QuestState::Waiting { until };
@@ -545,8 +521,7 @@ fn state_of(doing: &[&Row], facts: &QuestFacts, locks: &mut Locks, pursued: bool
     if first.repeat == Repeat::Once && (facts.log.done.contains_key(first.id) || flagged) {
         return QuestState::Done;
     }
-    let asked = |why: &Blocked| !(pursued && matches!(why, Blocked::TooHard { .. }));
-    if let Some(why) = beyond_level(doing, facts).filter(asked) {
+    if let Some(why) = beyond_level(doing, facts) {
         return QuestState::CantYet(why);
     }
     let fit: Vec<&Row> = doing
@@ -792,7 +767,6 @@ impl Client {
             held: self.travel.quests_done.clone(),
             log: self.quest_log.clone(),
             carried,
-            margin: self.autoplay.config.growth.level_margin,
             config: self.autoplay.config.quests.clone(),
             now: crate::holdings::unix_now(),
             me: self.my_position(),
@@ -931,11 +905,11 @@ impl Client {
             self.save_quest_log();
             return;
         }
-        // Unpaid, a talk asking what the client cannot read may have taken the server's other
-        // branch: it is not counted done on the giver's word.
+        // Unpaid, a talk asking what the client cannot read, or one whose reward is XP, took the
+        // server's other branch (a kill task handed in short): it is not counted done.
         let taken = match row.want {
             Want::Item(wcid) => self.carried_count(wcid) < asked.carried,
-            _ => !row.has_unread(),
+            _ => !row.has_unread() && !row.has_xp(),
         };
         if !rose && (!taken || row.repeat == Repeat::Any) {
             let key = (row.giver_wcid, asked.place.cell);
