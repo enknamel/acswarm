@@ -427,6 +427,7 @@ impl Client {
             walking_up: false,
             calls: Vec::new(),
             for_quest: true,
+            short_with: None,
         };
         if !self.make_call(&mut run, giver_call(row, at), now) {
             return false;

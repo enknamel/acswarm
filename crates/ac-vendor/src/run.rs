@@ -96,6 +96,8 @@ pub struct Run {
     wont_sell: Patience<u32>,
     /// Why the first ware still wanted was not bought here, for the visit to say.
     unbought: Option<String>,
+    /// The purse a wanted ware on this shelf cost more than: the order was short of coin.
+    pub short_with: Option<u32>,
 }
 
 impl Run {
@@ -401,6 +403,9 @@ impl Run {
             };
             if ware.price == 0 || ware.price > purse {
                 skip(format!("{} each, {purse} in coin", ware.price));
+                if ware.price > 0 {
+                    self.short_with = Some(purse);
+                }
                 continue;
             }
             let afford = ware.affordable(purse);
@@ -1258,5 +1263,26 @@ mod tests {
             next.saying
         );
         let _ = COIN;
+    }
+
+    #[test]
+    fn a_ware_on_the_shelf_dearer_than_the_purse_is_the_order_short_of_coin() {
+        let mut run = Run::new();
+        let mut s = snap(Vec::new());
+        s.coin = 12;
+        s.wants = vec![Want {
+            wcid: NOTE,
+            name: "Mayoi Trade Note".into(),
+            short: 1,
+            urgent: true,
+        }];
+        let next = run.step(&s, Instant::now());
+        assert_eq!(next.act, Some(Act::Close), "{}", next.saying);
+        assert_eq!(run.short_with, Some(12));
+        // Not on the shelf at all is no shortage of coin.
+        let mut run = Run::new();
+        s.wants[0].wcid = 20631;
+        run.step(&s, Instant::now());
+        assert_eq!(run.short_with, None);
     }
 }

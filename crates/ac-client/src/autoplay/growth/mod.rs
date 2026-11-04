@@ -117,7 +117,7 @@ pub struct State {
     /// the block's collision, which is loaded lazily) and read by the
     /// rules that must not plan a walk out of a dungeon.
     pub in_dungeon: bool,
-    /// The last run to town ended without buying or selling anything.
+    /// The last run to town ended without buying or selling anything, or short of coin.
     /// Another one straight away would do the same, so it waits.
     pub run_was_futile: bool,
     /// The character has given up, in town. Out of money, with nothing

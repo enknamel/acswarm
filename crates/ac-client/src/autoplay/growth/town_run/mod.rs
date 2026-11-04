@@ -168,6 +168,9 @@ pub(crate) struct Run {
     /// A pursued quest's call on its giver (`Client::start_quest_call`): kept with town runs
     /// off, and never futile.
     pub(super) for_quest: bool,
+    /// The purse a counter on this run could not pay for a wanted ware from: the run buys on
+    /// only with more, else it ends and the character hunts.
+    pub(super) short_with: Option<u32>,
 }
 
 /// What one turn of a run to town came to.
@@ -629,6 +632,7 @@ impl Client {
             walking_up: false,
             calls: Vec::new(),
             for_quest: false,
+            short_with: None,
         });
         self.autoplay.say(
             Doing::Shopping,

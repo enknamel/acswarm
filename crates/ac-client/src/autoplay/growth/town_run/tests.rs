@@ -368,3 +368,44 @@ fn a_party_run_sells_what_this_character_carries_first() {
     assert_eq!(run.errand, Errand::Sell);
     assert_eq!(run.vendor, "Archmage Cindrue");
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_run_short_of_coin_goes_hunting_not_round_the_shops() {
+    // A fresh mage with 12 coins and Lead to Copper Scarabs on its list bought one Lead Scarab
+    // at an archmage, then walked 12 km to the next for the rest, and the next: it died twice.
+    let holtburg = 0xA9B4_0019;
+    let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
+    c.world.stats.level = 5;
+    with_a_pack(&mut c, 50);
+    coin_in_the_pack(&mut c, 0x8000_0030, 12);
+    with_a_buy_list(
+        &mut c,
+        &[("Lead Scarab", 50, 10), ("Copper Scarab", 50, 10)],
+    );
+    let cfg = c.autoplay.config.growth.clone();
+    let now = Instant::now();
+    assert!(
+        c.grow_town_run(now, &cfg),
+        "{}",
+        c.autoplay.growth.held_back
+    );
+    let mut run = c.autoplay.growth.run.take().expect("no run");
+    // The counter had both and the purse paid for neither in full.
+    run.short_with = Some(12);
+    c.cancel_travel();
+    c.grow_run_next(run.clone(), now, &cfg, None);
+    assert!(c.autoplay.growth.run.is_none(), "went on round the shops");
+    assert!(
+        c.autoplay.growth.run_was_futile,
+        "the next run went at once"
+    );
+    // With more coin since (loot sold on the way), the buying goes on.
+    coin_in_the_pack(&mut c, 0x8000_0031, 5_000);
+    c.autoplay.growth.run_was_futile = false;
+    c.cancel_travel();
+    assert!(
+        c.grow_run_next(run, now, &cfg, None),
+        "went home with coin to spend"
+    );
+}

@@ -560,6 +560,7 @@ impl Client {
         // Added to, not set: the run's count is for all its counters,
         // and the rules count one at a time.
         run.sold += self.autoplay.growth.shop.sold;
+        run.short_with = self.autoplay.growth.shop.short_with.or(run.short_with);
         self.close_vendor();
         self.autoplay.growth.shop = ac_vendor::Run::new();
         self.grow_run_next(run, now, cfg, left)
@@ -610,9 +611,12 @@ impl Client {
         let more_to_buy = run.errand == Errand::Sell
             && needs.iter().any(|n| n.want > 0 && n.buyable)
             && self.spendable() > 0;
+        // Short of coin at a counter that had it, the buying goes on only with more coin since:
+        // can't restock in full, go and hunt (a_run_short_of_coin_goes_hunting_not_round_the_shops).
+        let can_pay_more = run.short_with.is_none_or(|was| self.spendable() > was);
+        let buying = can_pay_more && (needs.iter().any(|n| n.urgent) || more_to_buy);
         // With no slot at all the next counter could not pay out either.
-        let wanting = self.room_anywhere() > 0
-            && (needs.iter().any(|n| n.urgent) || still_full || more_to_sell || more_to_buy);
+        let wanting = self.room_anywhere() > 0 && (buying || still_full || more_to_sell);
         if wanting && run.stops < STOPS_PER_RUN {
             // The next counter is chosen by what is still on the list,
             // not by what is closest -- and only when there is reason to
@@ -669,6 +673,7 @@ impl Client {
                         walking_up: false,
                         calls: run.calls,
                         for_quest: run.for_quest,
+                        short_with: run.short_with,
                     });
                     return true;
                 }
@@ -707,8 +712,10 @@ impl Client {
         // that is the running back and forth between vendors for ever.
         // A pursued quest's call is for its giver alone.
         let futile = !run.for_quest && run.sold == 0 && !self.autoplay.growth.bought_anything;
+        // Ended short of coin, the next run waits the same: it would find the same prices.
+        let short = !run.for_quest && run.short_with.is_some_and(|was| self.spendable() <= was);
         let st = &mut self.autoplay.growth;
-        st.run_was_futile = futile;
+        st.run_was_futile = futile || short;
         st.bought_anything = false;
         st.last_run = Some(now);
         st.run = None;
