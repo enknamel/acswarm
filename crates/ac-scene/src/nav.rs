@@ -870,7 +870,7 @@ impl NavGraph {
         if flat(q - p).length() > SNAP_FRACTION * self.spacing {
             return None;
         }
-        let (z, cell) = ground.surface_at(Vec3::new(q.x, q.y, p.z), cap)?;
+        let (z, mut cell) = ground.surface_at(Vec3::new(q.x, q.y, p.z), cap)?;
         let feet = Vec3::new(q.x, q.y, z);
         // Standing on interior geometry means standing in a cell. The
         // probe is a hand's breadth up: a point exactly on the floor
@@ -880,7 +880,15 @@ impl NavGraph {
                 .collision
                 .inside_cell(feet + Vec3::new(0.0, 0.0, 0.1))
         {
-            return None;
+            // A sill onto the outside: the floor runs past its cell, flush with the ground, and is
+            // stood on outdoors (a_building_whose_sill_meets_the_ground_is_walked_into, ac-client).
+            let flush = ground
+                .terrain_under(feet.x, feet.y)
+                .is_some_and(|t| (t - z).abs() <= cap.step_up);
+            if !flush {
+                return None;
+            }
+            cell = 0;
         }
         ground.fits(feet, cap).then_some(NavNode {
             pos: feet,

@@ -18,6 +18,13 @@ fn known() -> Vec<Trial> {
     vec![
         named(
             LEVEL,
+            "DA3B Shoichi indoors in Lin from the road east",
+            Vec3::new(42_239.613, 11_472.488, 20.0),
+            0xDA3B_0116,
+            Vec3::new(41_966.64, 11_405.92, 6.8),
+        ),
+        named(
+            LEVEL,
             "0286 corpse on the floor below",
             Vec3::new(419.98, 25_673.98, 0.0),
             0x0286_02BF,
@@ -330,6 +337,17 @@ fn a_corpse_on_the_floor_below_is_walked_down_to() {
 #[ignore = "needs AC_DATA_DIR"]
 fn a_jeweler_on_a_deck_is_walked_up_to() {
     let o = run(LEVEL, &stall("F682 Jeweler on a deck"));
+    assert!(matches!(o, Outcome::Arrived { .. }), "{o:?}");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_building_whose_sill_meets_the_ground_is_walked_into() {
+    // Lin's floor runs past its cell onto ground of the same height: the sill is stood on outdoors.
+    let o = run(
+        LEVEL,
+        &stall("DA3B Shoichi indoors in Lin from the road east"),
+    );
     assert!(matches!(o, Outcome::Arrived { .. }), "{o:?}");
 }
 
