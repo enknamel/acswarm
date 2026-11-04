@@ -549,6 +549,39 @@ fn blargertons_saved_blood_shreth_task_is_hunted_at_login() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
+fn a_ground_journey_set_off_before_the_quest_was_taken_up_gives_way_to_its_hunt() {
+    // Live: the tick Shoichi's task was taken up, the board still said "take it up" and the XP
+    // ground picker sent Blargerton toward the Viamontians; that walk was kept to its portal.
+    let arwic = 0xC6A9_0016;
+    let mut c =
+        crate::testkit::standing_in_the_field(41, arwic, glam::Vec3::new(52.5, 126.0, 42.0));
+    c.autoplay.config.quests.on = true;
+    c.autoplay
+        .config
+        .quests
+        .pursue_quest("killtaskbloodshreth", true, 0);
+    c.travel.quests_done.push("killtaskbloodshreth".into());
+    c.quest_log.note_taken("killtaskbloodshreth");
+    let now = std::time::Instant::now();
+    c.refresh_quests(now);
+    let viamontians = (
+        0x02EB,
+        glam::Vec2::new(384.0, 45_100.0),
+        "Viamontian Executioner".into(),
+    );
+    c.autoplay.growth.bound = Some(viamontians);
+    let cfg = c.autoplay.config.growth.clone();
+    assert!(c.grow_hunt(now, &cfg));
+    let lb = c.autoplay.growth.bound.as_ref().map(|b| b.0);
+    assert!(
+        lb.is_some_and(|lb| c.pursued_place(lb).is_some()),
+        "bound for {lb:x?}, the task's grounds {:x?}",
+        c.autoplay.growth.pursuit_grounds
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_character_not_yet_placed_works_no_pursuit_and_holds_none() {
     // Live, at login: the board still from before the saved log, the body not yet placed, the
     // call on San Ming failed, and the task was passed over ten minutes for "no way to San Ming".
@@ -569,4 +602,36 @@ fn a_character_not_yet_placed_works_no_pursuit_and_holds_none() {
         c.autoplay.growth.pursuit_held
     );
     assert!(c.visiting().is_none());
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_kill_task_is_hunted_on_the_ground_reached_soonest_not_the_one_with_most_spawns() {
+    // Live, from Lin: the Black Spawn Den (64 Tusker Guards, 75 minutes away) was set off for;
+    // the Tusker Barracks (49, about 3 minutes) is the soonest.
+    let lin = 0xDA3B_0035;
+    let mut c = crate::testkit::standing_in_the_field(41, lin, glam::Vec3::new(40.0, 120.0, 20.0));
+    c.autoplay.config.quests.on = true;
+    c.autoplay
+        .config
+        .quests
+        .pursue_quest("tuskergkillcount", true, 0);
+    c.travel.quests_done.push("tuskergkillcount".into());
+    c.quest_log.note_taken("tuskergkillcount");
+    let now = std::time::Instant::now();
+    c.refresh_quests(now);
+    let quests = c.travel.quests_done.clone();
+    let soonest = c
+        .autoplay
+        .growth
+        .pursuit_grounds
+        .clone()
+        .into_iter()
+        .filter_map(|(lb, at)| c.journey_plan(at, &quests).map(|t| (t.seconds, lb)))
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, lb)| lb);
+    assert_eq!(soonest, Some(0x5A48), "the Tusker Barracks");
+    let cfg = c.autoplay.config.growth.clone();
+    assert!(c.grow_hunt(now, &cfg));
+    assert_eq!(c.autoplay.growth.bound.as_ref().map(|b| b.0), soonest);
 }

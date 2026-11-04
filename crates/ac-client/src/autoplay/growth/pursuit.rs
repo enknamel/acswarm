@@ -538,6 +538,12 @@ impl Client {
         self.pursuit.iter().find(|l| l.working)
     }
 
+    /// Whether the working pursued quest's step is a hunt.
+    pub(super) fn is_pursued_hunt(&self) -> bool {
+        self.working_pursuit()
+            .is_some_and(|l| matches!(l.step, PursuitStep::Hunt { .. }))
+    }
+
     /// Whether a pursued quest is being worked: its step outranks the ground and the area.
     pub fn is_pursuing(&self) -> bool {
         self.working_pursuit().is_some()
@@ -582,12 +588,22 @@ impl Client {
                 creature, place, ..
             } => {
                 let here = self.player.as_ref()?.cell >> 16;
-                let grounds = self.autoplay.growth.pursuit_grounds.clone();
+                let mut grounds = self.autoplay.growth.pursuit_grounds.clone();
                 if grounds.iter().any(|(lb, _)| *lb == here) {
                     self.autoplay.growth.hunting_at = Some(here);
                     return None;
                 }
-                for (lb, at) in grounds {
+                // The ground reached soonest first: the most spawns may be a 75-minute road away.
+                let quests = self.travel.quests_done.clone();
+                let mut secs: Vec<(f32, (u32, Place))> = Vec::new();
+                for g in grounds.drain(..) {
+                    let t = self
+                        .journey_plan(g.1, &quests)
+                        .map_or(f32::MAX, |t| t.seconds);
+                    secs.push((t, g));
+                }
+                secs.sort_by(|a, b| a.0.total_cmp(&b.0));
+                for (lb, at) in secs.into_iter().map(|(_, g)| g) {
                     let st = &mut self.autoplay.growth;
                     st.skip.expire(now, SKIP_GROUND_FOR);
                     if st.skip.since(&lb).is_some() {

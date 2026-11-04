@@ -171,6 +171,13 @@ impl Client {
         };
         let me = Vec2::new(me.x, me.y);
         let here = cell >> 16;
+        // A pursued hunt elsewhere, known only once this ground's journey set off (a quest taken
+        // up that tick), takes the journey over now rather than at its next portal.
+        if let Some((lb, ..)) = self.autoplay.growth.bound {
+            if self.is_pursued_hunt() && self.pursued_place(lb).is_none() {
+                self.autoplay.growth.drop_ground_walk();
+            }
+        }
         // On the way: keep going, and notice arriving.
         if let Some((lb, at, name)) = self.autoplay.growth.bound.clone() {
             // A pursued quest's ground may be a dungeon no `hunting::Ground` names.
@@ -597,7 +604,11 @@ impl Client {
     }
 
     /// A journey from here to `goal` with the quest flags `quests`, planned but not set off on.
-    fn journey_plan(&mut self, goal: Place, quests: &[String]) -> Option<ac_world::trip::Trip> {
+    pub(super) fn journey_plan(
+        &mut self,
+        goal: Place,
+        quests: &[String],
+    ) -> Option<ac_world::trip::Trip> {
         let pl = self.player.as_ref()?;
         let (me, cell) = (pl.world_position(), pl.cell);
         let underground = self.underground();
