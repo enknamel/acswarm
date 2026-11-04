@@ -7,6 +7,7 @@ use crate::testkit::{
     tagged_by_the_profile, tapers_in_the_pack, the_rest_to_the_counter, with_a_pack,
     with_a_profile, word_rule,
 };
+use ac_world::item_type;
 
 #[test]
 fn a_stack_worth_more_than_the_counter_allows_is_sold_in_pieces() {

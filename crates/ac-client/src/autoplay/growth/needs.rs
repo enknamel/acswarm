@@ -4,7 +4,6 @@ use super::town_run::vendor::answers_need;
 use super::Growth;
 use crate::items::ItemStats;
 use crate::Client;
-use ac_world::item_type;
 
 /// What the character is short of is worked out at most this often
 /// while it waits for something to do.
@@ -59,16 +58,6 @@ pub(super) enum NeedKind {
     Named(String),
     /// Ammunition of this kind (`ac_world::fletching::ammo_type`).
     Ammo(u32),
-    /// A spell component, by the weenie class of the item.
-    Component(u32),
-}
-
-/// The count at or below which a component kept at `keep` is worth a trip: the taper line's
-/// minimum as a share of its keep, rounded up and at least one, so a line of two scarabs beside
-/// a hundred tapers is not left to run out (test: a_component_is_restocked_before_the_last_one).
-fn component_low(keep: u32, tapers: &crate::profile::Buy) -> u32 {
-    let share = tapers.low_mark() as f32 / tapers.keep.max(1) as f32;
-    ((keep as f32 * share).ceil() as u32).max(1)
 }
 
 impl Client {
@@ -156,101 +145,8 @@ impl Client {
                 });
             }
         }
-        // Components: for a character with spells and a wand. Those it
-        // carries, and those its buffs ask for that it has run out of.
-        // How many tapers to carry, from the buy list. Everything else
-        // a caster burns is scaled to it (see `component_targets`),
-        // which is why one number buys forty kinds of thing.
-        let taper_line = self
-            .profiles
-            .get(&self.autoplay.config.loot.profile)
-            .and_then(|p| p.stocked_line("Prismatic Taper", &me, my_name).cloned());
-        let tapers = taper_line.as_ref().map_or(0, |b| b.keep);
-        if tapers > 0 && !self.world.stats.spells.is_empty() {
-            let has_wand = self.wielded_caster().is_some()
-                || self
-                    .world
-                    .inventory()
-                    .any(|o| o.item_type & item_type::CASTER != 0);
-            if has_wand {
-                if let Ok(mapper) = self.assets.spell_component_ids() {
-                    let targets = self.component_targets(tapers);
-                    // Every component the spells this character casts
-                    // will burn, and nothing else.
-                    //
-                    // The targets are what matters. Asking only what is
-                    // in the pack, as this once did, leaves a caster
-                    // that has run right out of something unable to
-                    // notice: with none of it carried there is nothing
-                    // to count, so nothing is short, so it never goes
-                    // to town for more.
-                    //
-                    // And what is carried is not asked at all. It used
-                    // to be added to the targets, at the taper count
-                    // for want of a burn rate, and the peas a mage
-                    // loots sit in the component table too (seventy-odd
-                    // of them, at 113-186, 189 and 191): each became a
-                    // need for ninety-nine more. A thing no cast burns
-                    // is not stock, whatever table it is in, and the
-                    // formulas already say which things are burnt. The
-                    // spells autoplay casts, not every spell in the
-                    // book, so nothing is bought for a spell that is
-                    // never cast.
-                    //
-                    // That is a rule about what to stock, and it is not
-                    // what keeps the player's loot off this list. The
-                    // profile does: a stack tagged to sell is not
-                    // counted as stock even when a spell burns it, and
-                    // a kind the rules would tag to sell the moment it
-                    // was bought is not bought, because a need for it
-                    // would only buy back at markup what the counter
-                    // was just handed, to be sold again next trip.
-                    let carried = self.components();
-                    for (&id, &keep) in &targets {
-                        let Some(wcid) = mapper.component_wcid(id) else {
-                            continue;
-                        };
-                        // What this one burns at, not what a taper does.
-                        let c = carried.iter().find(|c| c.component_id == id);
-                        let have = c.map_or(0, |c| c.count).saturating_sub(leaving.of(wcid));
-                        let buyable = ac_world::shops::sold_anywhere(wcid);
-                        if have < keep {
-                            // What it is called in the client's own
-                            // component table, which is what a vendor
-                            // and a person both call it. The enum name
-                            // is the last resort: "LeadScarab" is a
-                            // symbol, not a thing you can ask for.
-                            let name = c
-                                .map(|c| c.name.clone())
-                                .or_else(|| {
-                                    self.assets
-                                        .spell_components()
-                                        .ok()
-                                        .and_then(|t| t.get(id).map(|c| c.name.clone()))
-                                })
-                                .or_else(|| mapper.name_of(id).map(str::to_string))
-                                .unwrap_or_else(|| format!("component {id}"));
-                            if self.bought_to_sell(wcid, &name, keep - have, have) {
-                                continue;
-                            }
-                            needs.push(Need {
-                                name,
-                                want: keep - have,
-                                have,
-                                keep,
-                                urgent: taper_line
-                                    .as_ref()
-                                    .is_some_and(|t| have <= component_low(keep, t))
-                                    && buyable,
-                                buyable,
-                                from: None,
-                                kind: NeedKind::Component(wcid),
-                            });
-                        }
-                    }
-                }
-            }
-        }
+        // Nothing else is bought: the profile's buy list is the whole of what to stock, components
+        // included (test: only_the_profiles_buy_list_is_shopped_for).
         needs
     }
 
@@ -327,20 +223,15 @@ impl Client {
             .into_iter()
             .filter(|n| n.buyable && n.want > 0)
             .filter_map(|n| {
-                let wcid = match &n.kind {
-                    NeedKind::Component(wcid) => *wcid,
-                    kind => {
-                        let needle = match kind {
-                            NeedKind::Named(t) => t.trim().to_lowercase(),
-                            _ => String::new(),
-                        };
-                        wares
-                            .iter()
-                            .filter(|w| answers_need(kind, &w.name, w.wcid, &needle))
-                            .min_by_key(|w| w.price)?
-                            .wcid
-                    }
+                let needle = match &n.kind {
+                    NeedKind::Named(t) => t.trim().to_lowercase(),
+                    NeedKind::Ammo(_) => String::new(),
                 };
+                let wcid = wares
+                    .iter()
+                    .filter(|w| answers_need(&n.kind, &w.name, &needle))
+                    .min_by_key(|w| w.price)?
+                    .wcid;
                 Some(ac_vendor::counter::Want {
                     wcid,
                     name: n.name,

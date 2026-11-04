@@ -137,12 +137,12 @@ fn distance_only_settles_what_pay_and_stock_leave_even() {
 
 #[test]
 fn a_trip_is_judged_before_it_is_walked() {
-    let mut tapers = need(NeedKind::Component(691), 100);
+    let mut tapers = need(NeedKind::Named("Prismatic Taper".into()), 100);
     tapers.name = "Prismatic Taper".into();
-    let mut scarabs = need(NeedKind::Component(690), 20);
+    let mut scarabs = need(NeedKind::Named("Lead Scarab".into()), 20);
     scarabs.name = "Lead Scarab".into();
     let needs = [tapers, scarabs];
-    let wants: Vec<(&Need, String)> = needs.iter().map(|n| (n, String::new())).collect();
+    let wants: Vec<(&Need, String)> = needs.iter().map(|n| (n, n.name.to_lowercase())).collect();
 
     let mage = shop(
         "Archmage",

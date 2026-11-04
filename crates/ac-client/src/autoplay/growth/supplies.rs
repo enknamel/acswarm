@@ -43,9 +43,8 @@ impl Client {
         self.purse().saturating_add(notes)
     }
 
-    /// Every spell autoplay casts, in one list: what the restock list
-    /// stocks components for, and what the counter's component guard
-    /// keeps.
+    /// Every spell autoplay casts, in one list: what the counter's component guard keeps
+    /// (`burns`). Nothing is bought for them: the profile's buy list is the whole shopping list.
     ///
     /// All of them, not only the buffs and the bolts. The list once
     /// held those two alone, and a caster's heal, its vulnerabilities
@@ -167,7 +166,8 @@ impl Client {
         out
     }
 
-    /// How many of each spell component to carry, keyed by component id.
+    /// Each spell component the cast spells burn, keyed by component id, sized against
+    /// `tapers_keep` tapers; `burns` reads only which, and nothing is bought from it.
     ///
     /// A taper is the yardstick: it is what a caster runs out of, and
     /// it is the one number a player sets. Everything else is scaled to

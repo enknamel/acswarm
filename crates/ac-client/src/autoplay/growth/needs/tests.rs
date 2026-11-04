@@ -6,7 +6,7 @@ use crate::testkit::{
     standing_at, tagged_by_the_profile, tapers_in_the_pack, the_rest_to_the_counter, vendor_beside,
     window_of, with_a_buy_list, with_a_pack, with_a_profile, word_rule,
 };
-use ac_world::equip;
+use ac_world::{equip, item_type};
 
 #[test]
 fn a_want_that_names_its_counter_is_only_filled_there() {
@@ -25,28 +25,8 @@ fn a_want_that_names_its_counter_is_only_filled_there() {
 
     // A line that names nobody is bought wherever it is sold, which
     // is every line a character has unless it says otherwise.
-    let anywhere = need(NeedKind::Component(691), 1000);
+    let anywhere = need(NeedKind::Named("Prismatic Taper".into()), 1000);
     assert!(anywhere.may_buy_at("Anyone At All"));
-}
-
-#[test]
-fn a_component_is_restocked_before_the_last_one() {
-    // A hundred tapers, back to town at five: the scarabs sized from them (two) were urgent below
-    // a quarter of two, which is never, so a caster ran out of them and stayed out.
-    let line = |keep, restock_at| crate::profile::Buy {
-        what: "Prismatic Taper".into(),
-        keep,
-        restock_at,
-        on: true,
-        ..Default::default()
-    };
-    let blargerton = line(100, Some(5));
-    assert_eq!(component_low(2, &blargerton), 1, "the last scarab");
-    assert_eq!(component_low(40, &blargerton), 2, "five in the hundred");
-    assert_eq!(component_low(1, &blargerton), 1);
-    // With no minimum given, a quarter, as the taper line itself.
-    let starter = line(1000, None);
-    assert_eq!(component_low(20, &starter), 5);
 }
 
 #[test]
@@ -98,14 +78,14 @@ fn a_casters_peas_are_loot_to_sell_and_not_stock_to_buy() {
     with_a_buy_list(&mut c, &[("Prismatic Taper", 100, 25)]);
     let cfg = c.autoplay.config.growth.clone();
 
-    // The gate is open: the tapers are stock, scaled from the line.
+    // The tapers are stock: the buy list names them.
     let needs = c.grow_needs(&cfg);
     let taper = needs
         .iter()
-        .find(|n| n.kind == NeedKind::Component(20631))
+        .find(|n| n.kind == NeedKind::Named("Prismatic Taper".into()))
         .expect("the tapers it is short of");
     assert_eq!((taper.have, taper.keep, taper.want), (78, 100, 22));
-    // And a pea is not: no cast burns one.
+    // And a pea is not: the buy list does not.
     let pea = needs.iter().find(|n| n.name.contains("Pea"));
     assert!(pea.is_none(), "a pea is stock: {pea:?}");
     let wants = c.vendor_shortfall(&cfg);
@@ -113,7 +93,6 @@ fn a_casters_peas_are_loot_to_sell_and_not_stock_to_buy() {
         wants.iter().all(|w| w.wcid != 8328 && w.wcid != 8329),
         "a pea on the shopping list: {wants:?}"
     );
-    assert!(wants.iter().any(|w| w.wcid == 20631), "{wants:?}");
 
     // At a counter that buys components, the peas go and the
     // tapers stay.
@@ -192,10 +171,12 @@ fn a_scarab_the_player_said_to_sell_goes_though_its_own_spells_burn_it() {
     // tapers, which the player keeps, still are.
     let needs = c.grow_needs(&cfg);
     assert!(
-        !needs.iter().any(|n| n.kind == NeedKind::Component(scarab)),
+        !needs.iter().any(|n| n.name.contains("Lead Scarab")),
         "a need for what is being sold: {needs:?}"
     );
-    assert!(needs.iter().any(|n| n.kind == NeedKind::Component(20631)));
+    assert!(needs
+        .iter()
+        .any(|n| n.kind == NeedKind::Named("Prismatic Taper".into())));
     let wants = c.vendor_shortfall(&cfg);
     assert!(wants.iter().all(|w| w.wcid != scarab), "{wants:?}");
 
@@ -214,47 +195,42 @@ fn a_scarab_the_player_said_to_sell_goes_though_its_own_spells_burn_it() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
-fn a_kind_the_rules_would_sell_on_arrival_is_not_bought() {
-    // Whether to buy more of a thing is a question about the kind,
-    // and the profile answers it the way it will answer for the
-    // purchase when it arrives. Under "the rest, to the counter"
-    // a bought scarab is tagged to sell as it lands and sold on
-    // the next trip, so it is not bought, however low the pack is
-    // and whatever the spells burn. Under the starter's rules,
-    // which keep components, it is.
+fn only_the_profiles_buy_list_is_shopped_for() {
+    // "ALL purchasing decisions must be controlled by the loot profile" -- the player, after
+    // Blargerton bought Gold, Pyreal and Platinum Scarabs nobody listed: the restock list had
+    // sized every component his spells burn off the taper line.
+    const HEAL_SELF_V: u32 = 1160;
     let holtburg = 0xA9B4_0019;
     let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
     c.world.stats.level = 20;
     with_a_pack(&mut c, 20);
     as_a_war_mage(&mut c);
+    c.world.stats.spells.push(HEAL_SELF_V);
     let scarab = component_named(&c, "Lead Scarab");
     tapers_in_the_pack(&mut c, 0x8000_0012, 78);
     component_in_the_pack(&mut c, 0x8000_0013, "Lead Scarab", scarab, 1);
-    with_a_profile(
-        &mut c,
-        "sells-the-rest",
-        vec![the_rest_to_the_counter()],
-        &[("Prismatic Taper", 100, 25)],
-    );
+    with_a_buy_list(&mut c, &[("Prismatic Taper", 100, 25)]);
     let cfg = c.autoplay.config.growth.clone();
     let needs = c.grow_needs(&cfg);
-    assert!(
-        !needs.iter().any(|n| n.kind == NeedKind::Component(scarab)),
-        "bought to be sold: {needs:?}"
+    let names: Vec<&str> = needs.iter().map(|n| n.name.as_str()).collect();
+    assert_eq!(
+        names,
+        ["Prismatic Taper"],
+        "the spells burn more: {needs:?}"
     );
-    // The tapers are on the buy list, which is the player's word
-    // that they are stock: still a need, whatever the rules say.
-    assert!(needs.iter().any(|n| n.kind == NeedKind::Component(20631)));
+    assert!(c.vendor_shortfall(&cfg).iter().all(|w| w.wcid != scarab));
 
-    with_a_buy_list(&mut c, &[("Prismatic Taper", 100, 25)]);
+    // Listed by the player, the scarab is bought.
+    with_a_buy_list(
+        &mut c,
+        &[("Prismatic Taper", 100, 25), ("Lead Scarab", 5, 1)],
+    );
     let needs = c.grow_needs(&cfg);
     let need = needs
         .iter()
-        .find(|n| n.kind == NeedKind::Component(scarab))
-        .unwrap_or_else(|| panic!("the scarabs it is short of: {needs:?}"));
-    assert_eq!(need.have, 1);
-    assert!(need.want > 0);
-    assert!(c.vendor_shortfall(&cfg).iter().any(|w| w.wcid == scarab));
+        .find(|n| n.kind == NeedKind::Named("Lead Scarab".into()))
+        .unwrap_or_else(|| panic!("the listed scarabs: {needs:?}"));
+    assert_eq!((need.have, need.want), (1, 4));
 }
 
 #[test]
@@ -295,12 +271,12 @@ fn tapers_taken_to_keep_are_neither_sold_nor_wanted() {
 
     // Short of the line, still kept, and still bought.
     c.world.objects.get_mut(&0x8000_0012).unwrap().stack_size = 78;
-    let wants = c.vendor_shortfall(&cfg);
-    let taper = wants
+    let needs = c.grow_needs(&cfg);
+    let taper = needs
         .iter()
-        .find(|w| w.wcid == 20631)
-        .unwrap_or_else(|| panic!("the tapers it is short of: {wants:?}"));
-    assert_eq!(taper.short, 22);
+        .find(|n| n.kind == NeedKind::Named("Prismatic Taper".into()))
+        .unwrap_or_else(|| panic!("the tapers it is short of: {needs:?}"));
+    assert_eq!(taper.want, 22);
     let snap = c.vendor_snapshot(&cfg);
     assert!(snap.items.iter().filter(|i| snap.offers(i)).count() == 0);
 }
@@ -339,7 +315,7 @@ fn a_stack_on_its_way_out_does_not_hide_the_shortfall_of_the_one_that_stays() {
     let needs = c.grow_needs(&cfg);
     let taper = needs
         .iter()
-        .find(|n| n.kind == NeedKind::Component(20631))
+        .find(|n| n.kind == NeedKind::Named("Prismatic Taper".into()))
         .unwrap_or_else(|| panic!("the tapers it is short of: {needs:?}"));
     assert_eq!((taper.have, taper.want), (78, 22));
     let line = needs
@@ -357,7 +333,7 @@ fn a_stack_on_its_way_out_does_not_hide_the_shortfall_of_the_one_that_stays() {
     let needs = c.grow_needs(&cfg);
     let taper = needs
         .iter()
-        .find(|n| n.kind == NeedKind::Component(20631))
+        .find(|n| n.kind == NeedKind::Named("Prismatic Taper".into()))
         .unwrap();
     assert_eq!((taper.have, taper.want), (78, 22));
 }
@@ -460,48 +436,6 @@ fn a_scarab_sold_at_the_counter_is_not_bought_straight_back() {
         next.saying,
         next.act
     );
-}
-
-#[test]
-#[ignore = "needs AC_DATA_DIR"]
-fn a_casters_heal_is_stocked_for_though_no_bolt_shares_its_herb() {
-    // Heal Self V burns an herb, a powder, a potion and a talisman
-    // (7, 26, 41, 61 in the dat) that no bolt or buff burns, and a
-    // caster without a Life focus needs every one of them. The
-    // restock list once stocked for the buffs and the bolts alone,
-    // so when the pack ran out the heal stopped casting and nobody
-    // went to town for it.
-    const HEAL_SELF_V: u32 = 1160;
-    const HERB: u32 = 7;
-    let holtburg = 0xA9B4_0019;
-    let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
-    c.world.stats.level = 20;
-    with_a_pack(&mut c, 20);
-    as_a_war_mage(&mut c);
-    tapers_in_the_pack(&mut c, 0x8000_0012, 100);
-    with_a_buy_list(&mut c, &[("Prismatic Taper", 100, 25)]);
-    let herb = c
-        .assets
-        .spell_component_ids()
-        .unwrap()
-        .component_wcid(HERB)
-        .expect("the herb's weenie");
-    let cfg = c.autoplay.config.growth.clone();
-    let needs = c.grow_needs(&cfg);
-    assert!(
-        !needs.iter().any(|n| n.kind == NeedKind::Component(herb)),
-        "no spell of a war mage's burns the herb: {needs:?}"
-    );
-
-    c.world.stats.spells.push(HEAL_SELF_V);
-    assert!(c.spells_cast().contains(&HEAL_SELF_V));
-    let needs = c.grow_needs(&cfg);
-    let need = needs
-        .iter()
-        .find(|n| n.kind == NeedKind::Component(herb))
-        .unwrap_or_else(|| panic!("the heal's herb: {needs:?}"));
-    assert_eq!(need.have, 0);
-    assert!(need.want > 0);
 }
 
 #[test]

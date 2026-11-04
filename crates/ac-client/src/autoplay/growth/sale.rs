@@ -4,7 +4,7 @@ use super::{fate, never_sell, never_sell_carried, offer_to_vendor, Fate, Growth}
 use crate::autoplay::LootAction;
 use crate::items::ItemStats;
 use crate::Client;
-use ac_world::{equip, item_type};
+use ac_world::equip;
 
 /// Something in the pack the rules allow to be sold, before any one
 /// counter's tastes are applied to it.
@@ -74,11 +74,6 @@ pub(crate) struct Leaving {
 }
 
 impl Leaving {
-    /// How many of this weenie class are leaving.
-    pub(super) fn of(&self, wcid: u32) -> u32 {
-        self.by_wcid.get(&wcid).copied().unwrap_or(0)
-    }
-
     /// How many of what a buy-list line names are leaving.
     pub(crate) fn named(&self, line: &str) -> u32 {
         let want = line.trim().to_lowercase();
@@ -112,10 +107,6 @@ impl Client {
     /// short. A thing that is leaving is not stock, whatever else says
     /// it is -- the buy list, the component table, the formulas of the
     /// spells this character casts -- because the player decided it.
-    /// It is not the whole of the answer, though: what leaves is
-    /// forgotten with it, and whether more of the kind should then be
-    /// bought is a question about the kind, which the profile answers
-    /// (see [`Client::bought_to_sell`]).
     pub(crate) fn leaving_of(&self, stats: &[ItemStats]) -> Leaving {
         let mut out = Leaving::default();
         for s in stats {
@@ -130,73 +121,6 @@ impl Client {
             }
         }
         out
-    }
-
-    /// Whether `count` of this spell component, bought at a counter,
-    /// would be written down as loot to sell the moment they arrived
-    /// -- in which case buying them is a round trip at the counter's
-    /// markup, and they are not stock.
-    ///
-    /// Asked of the profile the way the arrival pass will ask it
-    /// (`autoplay_tag_arrivals`): the same rules, over the thing a
-    /// purchase arrives as. A verdict about the *kind* rather than
-    /// about a stack in the pack, which is what the restock list
-    /// needs: the moment a tagged stack goes over the counter its tag
-    /// is forgotten with it, and a list that only asked "is any of
-    /// this leaving?" bought the scarabs straight back in the same
-    /// visit, the arrival pass tagged them to sell, and the next trip
-    /// sold them again.
-    ///
-    /// `held` is what will be held when the purchase arrives, less
-    /// anything leaving: the count a `keep_up_to` rule, or the buy
-    /// list's own line, is judged against.
-    pub(super) fn bought_to_sell(&self, wcid: u32, name: &str, count: u32, held: u32) -> bool {
-        let Some(profile) = self.loot_profile() else {
-            return false;
-        };
-        // Worth what a counter lists it at: the one in front of the
-        // character, else the world's shops. A rule that sells by value
-        // is asked about the stack a purchase makes.
-        let each = self
-            .world
-            .open_vendor
-            .as_ref()
-            .and_then(|v| {
-                v.items
-                    .iter()
-                    .find(|w| w.desc.weenie_class_id == wcid)
-                    .map(|w| w.desc.value)
-            })
-            .or_else(|| {
-                ac_world::shops::all()
-                    .iter()
-                    .flat_map(|s| &s.sells)
-                    .find(|w| w.wcid == wcid)
-                    .map(|w| w.value)
-            })
-            .unwrap_or(0);
-        let count = count.max(1);
-        let arrives = ItemStats {
-            name: name.to_string(),
-            wcid,
-            item_type: item_type::SPELL_COMPONENTS,
-            kind: crate::items::kind_name(item_type::SPELL_COMPONENTS),
-            stack: count,
-            max_stack: 1_000,
-            value: each.saturating_mul(count),
-            ..Default::default()
-        };
-        matches!(
-            crate::autoplay::judge_loot(
-                &arrives,
-                None,
-                Some(&profile),
-                &self.wielder(),
-                &self.world.stats.name,
-                held,
-            ),
-            crate::profile::Verdict::Decided(LootAction::Sell, _)
-        )
     }
 
     /// Everything the character is carrying that the rules would sell,

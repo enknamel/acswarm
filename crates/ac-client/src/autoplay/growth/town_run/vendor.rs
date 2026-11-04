@@ -171,17 +171,16 @@ fn shop_ware<'a>(
 ) -> Option<&'a ac_world::shops::Ware> {
     shop.sells
         .iter()
-        .filter(|w| answers_need(&need.kind, &w.name, w.wcid, needle))
+        .filter(|w| answers_need(&need.kind, &w.name, needle))
         .min_by_key(|w| w.value)
 }
 
-/// Whether a ware called `name` (weenie `wcid`) answers a need of `kind`: the one rule the trip
-/// planner picks a shop by and the counter buys by. `needle` is a named need's words, lowercased.
-pub(crate) fn answers_need(kind: &NeedKind, name: &str, wcid: u32, needle: &str) -> bool {
+/// Whether a ware called `name` answers a need of `kind`: the one rule the trip planner picks a
+/// shop by and the counter buys by. `needle` is a named need's words, lowercased.
+pub(crate) fn answers_need(kind: &NeedKind, name: &str, needle: &str) -> bool {
     match kind {
         NeedKind::Named(_) => contains_fold(name, needle),
         NeedKind::Ammo(kind) => ammo_stock(name, *kind),
-        NeedKind::Component(want) => wcid == *want,
     }
 }
 
