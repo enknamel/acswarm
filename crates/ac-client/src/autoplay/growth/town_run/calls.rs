@@ -19,6 +19,9 @@ use crate::Client;
 
 /// A giver no journey reached is planned to again after this (a Warden's wait, hunt.rs).
 pub(crate) const GIVER_RETRY: Duration = Duration::from_secs(30 * 60);
+/// A talk to a giver for a quest is not made again for this long, whatever the board says
+/// (guess): a board wrong about it would otherwise call on the giver every tick.
+pub(crate) const TALK_AGAIN: Duration = Duration::from_secs(5 * 60);
 /// A give not answered in this long counts as unanswered (design §5.1, guess).
 const GIVE_PAUSE: Duration = Duration::from_secs(3);
 /// Unanswered gives before the call ends: ACE turns a give away while the giver emotes
@@ -180,14 +183,24 @@ pub(crate) fn plan_calls(
 }
 
 impl Client {
+    /// Whether `row`'s giver at `p` is let be: refused or unreached lately, or, for a hand-in by
+    /// talk, that talk made lately.
+    pub(crate) fn is_giver_refused(&self, row: &Row, p: &Place, now: Instant) -> bool {
+        let st = &self.autoplay.growth;
+        st.givers_refused
+            .within(&(row.giver_wcid, p.cell), now, GIVER_RETRY)
+            || (row.hand == Handing::Talk
+                && st
+                    .talked
+                    .within(&(row.id.to_string(), row.giver_wcid), now, TALK_AGAIN))
+    }
+
     /// The hand-ins ready on the board, and the talks that take a switched-on quest up, each at the
     /// giver nearest the first of `near` it can be asked at (level band, open door, not lately
     /// refused), nearest first, at most `most`.
     pub(super) fn ready_hand_ins(&self, near: &[Vec2], most: usize, now: Instant) -> Vec<HandIn> {
-        let refused = &self.autoplay.growth.givers_refused;
         let carried = |w| self.carried_count(w);
-        let refused =
-            |r: &Row, p: &Place| refused.within(&(r.giver_wcid, p.cell), now, GIVER_RETRY);
+        let refused = |r: &Row, p: &Place| self.is_giver_refused(r, p, now);
         let away = |p: &Place| {
             near.iter()
                 .map(|n| n.distance(p.at.truncate()))
@@ -532,6 +545,12 @@ impl Client {
                             .is_some_and(|a| std::ptr::eq(a.row, row))
                         {
                             self.ask_giver(row, at, now);
+                        }
+                        let key = (row.id.to_string(), row.giver_wcid);
+                        self.autoplay.growth.talked.mark(key, now);
+                        // A talk taking a quest up pays nothing: there is no XP to wait for.
+                        if row.kind == Kind::Start {
+                            self.answer_take_up(now);
                         }
                         self.autoplay
                             .note(format!("talked to {} for {}", row.giver, row.title), now);

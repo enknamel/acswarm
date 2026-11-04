@@ -12,7 +12,7 @@ use ac_world::unlocks::Unlock;
 use ac_world::Place;
 
 use super::hunt::{GROUND_REACH, SKIP_GROUND_FOR, UNLOCK_RETRY};
-use super::town_run::calls::{Asking, GIVER_RETRY};
+use super::town_run::calls::Asking;
 use crate::autoplay::{Doing, Pursuit};
 use crate::quest_log::{Blocked, QuestFacts, QuestLine, QuestState};
 use crate::Client;
@@ -511,10 +511,7 @@ impl Client {
             .collect();
         let me = facts.me;
         let carried = |w| self.carried_count(w);
-        let refused = |r: &Row, p: &Place| {
-            st.givers_refused
-                .within(&(r.giver_wcid, p.cell), now, GIVER_RETRY)
-        };
+        let refused = |r: &Row, p: &Place| self.is_giver_refused(r, p, now);
         let away = |p: &Place| me.map_or(0.0, |m| p.at.distance(m));
         let asking = Asking {
             level: facts.level,

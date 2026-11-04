@@ -892,6 +892,14 @@ impl Client {
         });
     }
 
+    /// The talk taking a quest up just made is heard now: it pays no XP to wait for, and asked
+    /// again before [`XP_WATCH`] it would never be answered.
+    pub(crate) fn answer_take_up(&mut self, now: Instant) {
+        if let Some(asked) = self.quest_asked.take_if(|a| a.row.kind == Kind::Start) {
+            self.quest_answered(&asked, false, now);
+        }
+    }
+
     /// The answer to the giver asked: XP came, or [`XP_WATCH`] passed without it.
     pub(crate) fn watch_quest_answer(&mut self, now: Instant) {
         let Some(asked) = &self.quest_asked else {

@@ -447,3 +447,30 @@ fn a_quest_call_is_kept_with_town_runs_off_and_is_not_futile() {
     c.end_run(run, now, &cfg, &[], false, None);
     assert!(!c.autoplay.growth.run_was_futile);
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_talk_taking_a_quest_up_is_heard_once_made_and_not_made_again_however_soon_it_is_called_for() {
+    // Live (Blargerton, San Ming): each new call on the giver re-asked within the ten seconds an
+    // answer is waited for, so the talk was never heard and San Ming was used 516 times in 50 s.
+    let start = ac_world::quests::rows_of("killtaskbloodshreth")
+        .find(|r| r.kind == Kind::Start)
+        .expect("San Ming's talk");
+    let at = start.places[0];
+    let local = at.at - ac_world::landblock_origin(at.cell);
+    let mut c =
+        crate::testkit::standing_in_the_field(30, at.cell, local + glam::Vec3::new(1.0, 0.0, 0.0));
+    crate::testkit::standing_by(&mut c, 0x8000_0900, start.giver, 1.0);
+    let now = Instant::now();
+    assert!(c.start_quest_call(start, at, now));
+    let run = c.autoplay.growth.run.take().expect("a call on San Ming");
+    c.visits.current = None;
+    c.visits.finished = true;
+    let cfg = c.autoplay.config.growth.clone();
+    c.giver_step(run, now, &cfg);
+    // Heard at once: the counter starts, and the talk is let be however soon it is called for.
+    assert_eq!(c.quest_log.kills.get("killtaskbloodshreth"), Some(&0));
+    assert!(c.quest_asked.is_none());
+    assert!(c.is_giver_refused(start, &at, now + Duration::from_millis(50)));
+    assert!(!c.is_giver_refused(start, &at, now + TALK_AGAIN));
+}
