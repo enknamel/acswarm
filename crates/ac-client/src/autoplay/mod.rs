@@ -605,7 +605,12 @@ impl Client {
             self.learn_shot_speeds(now);
             self.land_own_shots(now);
         }
-        if !self.autoplay.config.enabled || self.world.player_guid.is_none() {
+        // A character known but not yet placed in the world has nowhere to go from: a visit
+        // set off then fails, and its "no way" held a pursued quest ten minutes at every login.
+        if !self.autoplay.config.enabled
+            || self.world.player_guid.is_none()
+            || self.player.is_none()
+        {
             // The team rules a character keeps while its player steers
             // it: after the leader, and onto what the leader is hitting
             // (see [`Client::autoplay_by_hand`]). None of the rest runs:

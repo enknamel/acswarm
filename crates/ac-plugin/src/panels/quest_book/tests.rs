@@ -562,3 +562,64 @@ fn the_item_filter_sees_every_item_a_quest_takes_and_the_kind_filter_every_kind(
     ));
     assert!(c.kinds.contains(&Kind::Kill));
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn every_bundled_quest_draws_in_the_quest_book_list_and_details() {
+    // The live window over the bundled data, each quest's details drawn in turn: none panics.
+    let cards = ac_world::quest_chain::quest_cards();
+    let facts = ac_client::quest_log::QuestFacts {
+        level: 41,
+        margin: 10,
+        ..Default::default()
+    };
+    let browse = ac_client::quest_log::browse_board(&facts);
+    let cfg = Quests {
+        on: true,
+        ..Default::default()
+    };
+    let log = QuestLog::default();
+    let chain = ac_world::quest_chain::chain_of;
+    let place = ac_world::quest_chain::place_name;
+    let v = BookView {
+        cards,
+        cfg: &cfg,
+        acting: &browse,
+        pursuit: &[],
+        me: Me {
+            level: 41,
+            margin: 10,
+        },
+        held: &[],
+        log: &log,
+        now: 1_000,
+        chain: &chain,
+        place: &place,
+    };
+    let ctx = egui::Context::default();
+    let mut failed = Vec::new();
+    for card in cards {
+        let mut st = BookState::showing(&card.id);
+        st.browse.set(browse.clone(), std::time::Instant::now());
+        let drawn = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut out = ctx.run_ui(Default::default(), |_| {
+                draw(&ctx, &v, &mut st);
+            });
+            out.textures_delta.clear();
+        }));
+        if let Err(e) = drawn {
+            let why = e
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| e.downcast_ref::<&str>().map(|s| s.to_string()))
+                .unwrap_or_default();
+            failed.push(format!("{}: {why}", card.id));
+        }
+    }
+    assert!(
+        failed.is_empty(),
+        "{} panicked: {:?}",
+        failed.len(),
+        &failed[..failed.len().min(10)]
+    );
+}

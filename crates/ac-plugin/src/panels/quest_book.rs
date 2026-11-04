@@ -787,15 +787,16 @@ fn controls(ui: &mut egui::Ui, v: &BookView, cfg: &mut Quests, card: &QuestCard)
     }
     ui.horizontal(|ui| match cfg.pursue.iter().position(|p| p.id == id) {
         Some(i) => {
-            if ui
+            let stop = ui
                 .button("Stop")
                 .on_hover_text("Take it off the pursued list")
-                .clicked()
-            {
-                cfg.stop_pursuing(id);
-            }
+                .clicked();
             ui.checkbox(&mut cfg.pursue[i].again, "again whenever it's ready")
                 .on_hover_text("Off, it is done once more and then left");
+            // Taken off after its checkbox drew: the list is one shorter once it goes.
+            if stop {
+                cfg.stop_pursuing(id);
+            }
         }
         None => {
             if ui

@@ -529,3 +529,51 @@ fn the_blood_shreth_kill_task_is_taken_up_hunted_handed_in_and_waits_on_the_bund
         }
     );
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn blargertons_saved_blood_shreth_task_is_hunted_at_login() {
+    // His files at the crash: the counter held and at nothing, the task pursued again.
+    let arwic = 0xC6A9_0016;
+    let mut c =
+        crate::testkit::standing_in_the_field(41, arwic, glam::Vec3::new(52.5, 126.0, 42.0));
+    c.autoplay.config.quests.on = true;
+    c.autoplay
+        .config
+        .quests
+        .pursue_quest("killtaskbloodshreth", true, 0);
+    c.travel.quests_done.push("killtaskbloodshreth".into());
+    c.quest_log.note_taken("killtaskbloodshreth");
+    c.refresh_quests(std::time::Instant::now());
+    let line = c.pursuit.first().expect("the task pursued");
+    assert!(
+        matches!(line.step, PursuitStep::Hunt { .. }),
+        "{:?} / board {:?}",
+        line.step,
+        c.quest_board.iter().find(|l| l.id == "killtaskbloodshreth")
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_character_not_yet_placed_works_no_pursuit_and_holds_none() {
+    // Live, at login: the board still from before the saved log, the body not yet placed, the
+    // call on San Ming failed, and the task was passed over ten minutes for "no way to San Ming".
+    let mut c = crate::testkit::character_of_level(crate::testkit::game_data(), 41);
+    assert!(c.player.is_none() && c.world.player_guid.is_some());
+    c.autoplay.config.enabled = true;
+    c.autoplay.config.quests.on = true;
+    c.autoplay
+        .config
+        .quests
+        .pursue_quest("killtaskbloodshreth", true, 0);
+    c.refresh_quests(std::time::Instant::now());
+    assert!(c.pursuit_call().is_some(), "{:?}", c.pursuit);
+    c.tick_autoplay(std::time::Instant::now());
+    assert!(
+        c.autoplay.growth.pursuit_held.is_empty(),
+        "{:?}",
+        c.autoplay.growth.pursuit_held
+    );
+    assert!(c.visiting().is_none());
+}
