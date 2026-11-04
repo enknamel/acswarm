@@ -1097,7 +1097,7 @@ impl Autoplay {
 /// A few quests in each state, for the demo window.
 fn demo_quests() -> Vec<ac_client::quest_log::QuestLine> {
     use ac_client::autoplay::LootAction;
-    use ac_client::quest_log::{QuestLine, QuestState};
+    use ac_client::quest_log::{Blocked, QuestLine, QuestState};
     use ac_world::quests::Kind;
     let line = |id: &str, title: &str, kind, giver: &str, givers, xp, state| QuestLine {
         id: id.into(),
@@ -1178,10 +1178,9 @@ fn demo_quests() -> Vec<ac_client::quest_log::QuestLine> {
             "Jarvis Hammerstone",
             1,
             1_839_776,
-            QuestState::Needs {
-                more: 1,
-                of: "Burnja's Board with Nails".into(),
-            },
+            QuestState::CantYet(Blocked::NeedsFirst {
+                title: "the first Burnja's Board turned in".into(),
+            }),
         ),
     ]
 }
