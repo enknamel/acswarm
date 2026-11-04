@@ -23,8 +23,8 @@ const UNDER_ATTACK: Duration = Duration::from_secs(4);
 /// nobody on the road is fighting it, and it stands `away` metres off,
 /// beyond a swing's reach (`ROAD_REACH`).
 ///
-/// On the road a character takes on only what attacks it (see
-/// `Client::passing_by`), and a creature that swung once and then fell
+/// On the road a character picks no fight (see `Client::passing_by`); one in hand as the road
+/// begins, of a creature that swung once and then fell
 /// behind -- the party outran it, it lost interest, it was never going
 /// to keep up -- was chased until it died or until twenty seconds
 /// without a hit gave it up (`STALL_AFTER`), the road forgotten
@@ -98,52 +98,11 @@ impl Client {
             .any(|(who, when)| who == name && when.elapsed() < UNDER_ATTACK)
     }
 
-    /// Whether `o` is a creature to walk past because the character is
-    /// on its way somewhere (see [`Self::on_its_way`]).
-    ///
-    /// Going somewhere is an errand of its own. The fighting is what the
-    /// ground at the far end is for, and a character that stops for
-    /// every drudge between here and there arrives an hour late or not
-    /// at all. It answers what the character is *doing*, which is why it
-    /// is a rule of its own rather than another clause in
-    /// [`Self::a_critter`]: that one answers what a creature *is*, and
-    /// the same Drudge is worth fighting once the walk is over.
-    ///
-    /// Two things outrank it, and in both the fight is already happening:
-    /// the creature is attacking the character, with a swing or a spell,
-    /// or one of the party on the road with it is fighting it (see
-    /// [`Self::a_mate_on_the_road_is_on`]). The road does not get to decide
-    /// either. Nothing has to be undone at the end of the road: the rule
-    /// ends with the walk, and the character is fighting again the tick it
-    /// arrives.
-    ///
-    /// `a_critter`'s other overrides are not this rule's. A name in
-    /// "only these" says which kind to hunt, not where: every creature the
-    /// pickers could choose already matches it, so as an override it
-    /// switched the walking past off for anyone who kept the list, and a
-    /// Drudge hunter stopped for every Drudge on the road to the Drudge
-    /// ground. And a summoned creature picks its own fights. ACE's combat
-    /// pet goes for the nearest monster it can see, whether or not that one
-    /// is doing anything, so taking its target for a fight already on had
-    /// the character stop for each creature its pet went for in turn --
-    /// the very walk this rule is for.
-    ///
-    /// A creature standing in the character's path is not carved out,
-    /// and that is a decision rather than an oversight. Nothing this
-    /// client walks with can be stopped by one: its own physics collides
-    /// with the landblock's static geometry and with nothing else, which
-    /// is why a character walks straight through a closed door, and the
-    /// steering plans its way round that same geometry. A creature is an
-    /// object like the door is. And anything that could get in the way
-    /// and matter is aggressive, which means it attacks -- the first
-    /// override, and the character turns and fights it. If some ground
-    /// proves otherwise, the slot's give-up (`GIVE_UP_AFTER`) leaves that
-    /// stretch out and the journey goes another way or is refused.
-    pub(crate) fn passing_by(&self, o: &ac_world::WorldObject, cfg: &Fight) -> bool {
-        if !cfg.walk_past_on_the_way || !self.on_its_way() {
-            return false;
-        }
-        !(self.hit_lately_by(&o.name) || self.a_mate_on_the_road_is_on(o.guid))
+    /// Whether `o` is a creature to walk past because the character is on its way somewhere (see
+    /// [`Self::on_its_way`]): every one, attacking or not. On the road it runs and heals; a fight
+    /// there only made it late or dead (test: a_creature_hitting_the_character_on_the_road_is_run_past).
+    pub(crate) fn passing_by(&self, _o: &ac_world::WorldObject, cfg: &Fight) -> bool {
+        cfg.walk_past_on_the_way && self.on_its_way()
     }
 
     /// Say what the character is walking past on its way somewhere: the

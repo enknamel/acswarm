@@ -69,7 +69,7 @@ fn a_walk_broken_off_again_as_soon_as_it_is_planned_waits_before_the_next_plan()
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
-fn what_stands_on_the_road_is_walked_past_and_what_swings_at_us_is_not() {
+fn a_creature_hitting_the_character_on_the_road_is_run_past() {
     // "Traveling to the hunting ground shouldn't have much fighting,
     // more ignoring the monsters on the way so you can get to the
     // hunting ground" -- the player, and the reason for the rule.
@@ -99,11 +99,10 @@ fn what_stands_on_the_road_is_walked_past_and_what_swings_at_us_is_not() {
     assert!(c.passing_by(&it, &fight));
     assert!(!c.would_fight(&it, &fight, false, now));
 
-    // Unless it swings: the road does not get to decide that.
+    // Swinging at it too: "Dont fight back. Just run." -- the player. It heals and runs on.
     c.autoplay.attacked_by("Revenant", now);
-    assert!(!c.passing_by(&it, &fight));
-    assert!(c.would_fight(&it, &fight, false, now));
-    // Which says nothing about the one standing next to it.
+    assert!(c.passing_by(&it, &fight));
+    assert!(!c.would_fight(&it, &fight, false, now));
     let other = standing_by(&mut c, 0x8000_0002, "Drudge Skulker", 6.0);
     assert!(c.passing_by(&other, &fight));
     c.autoplay.last_hit_us = None;
@@ -245,7 +244,7 @@ fn a_walk_out_of_a_shop_is_the_journeys_first_walk() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
-fn a_party_on_the_road_walks_past_together_and_stops_together() {
+fn a_party_on_the_road_walks_past_together_even_what_its_leader_targets() {
     // The leader, bound for a new ground, walked past a Drudge. Its
     // followers keep up through the follow step, which sets no errand,
     // so they stopped and fought it; the leader walked on, they were
@@ -286,12 +285,10 @@ fn a_party_on_the_road_walks_past_together_and_stops_together() {
     assert!(!c.would_fight(&drudge, &fight, false, now));
     assert!(!c.joins_the_team_on(drudge.guid, &fight));
 
-    // Something attacks the leader on the road and it turns to fight:
-    // the follower turns with it and joins on it, but not on the one
-    // standing by.
+    // A leader on the road with a target is no fight either: the whole party runs on.
     c.autoplay.team.mates = vec![leader(true, Some(drudge.guid))];
-    assert!(c.would_fight(&drudge, &fight, false, now));
-    assert!(c.joins_the_team_on(drudge.guid, &fight));
+    assert!(!c.would_fight(&drudge, &fight, false, now));
+    assert!(!c.joins_the_team_on(drudge.guid, &fight));
     assert!(!c.would_fight(&other, &fight, false, now));
     assert!(!c.joins_the_team_on(other.guid, &fight));
 
@@ -308,9 +305,9 @@ fn a_party_on_the_road_walks_past_together_and_stops_together() {
         !c.joins_the_team_on(drudge.guid, &fight),
         "turned back for the party"
     );
-    // Until the Drudge attacks the character itself.
+    // Nor once the Drudge attacks the character itself: it runs on.
     c.autoplay.attacked_by("Drudge Skulker", Instant::now());
-    assert!(c.joins_the_team_on(drudge.guid, &fight));
+    assert!(!c.joins_the_team_on(drudge.guid, &fight));
 }
 
 #[test]

@@ -313,9 +313,8 @@ These are settled and are not up for redesign by a later stage.
   character reading that profile, at once.
 - **A road is walked, not fought.** On its way somewhere -- a hunting
   ground, a counter, wherever a script or a hunting area's portal sends
-  it -- a character fights only what attacks it, walks at it or a mate,
-  or is fighting one of the party on the road, and lets a creature go
-  once it stops following. The fighting is what the far end is for. A
+  it -- a character fights nothing, not even what attacks it: it runs on
+  and heals as it needs, dodging what it can. The fighting is what the far end is for. A
   road is a road whoever planned it; only a roam or a patrol about the
   character's own ground is not one (`Client::on_its_way`,
   `Client::travel_about`).
