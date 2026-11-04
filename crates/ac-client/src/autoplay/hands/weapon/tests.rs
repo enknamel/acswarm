@@ -485,3 +485,41 @@ fn a_caster_with_no_attack_spells_takes_up_a_carried_weapon() {
         .or(c.autoplay.pending_wield);
     assert_eq!(asked, Some(AXE), "the axe is taken up");
 }
+
+#[test]
+fn an_archer_out_of_arrows_takes_up_a_carried_axe() {
+    // Scn Blade shot its last arrow and held the empty War Bow for a whole scenario run, 0 kills,
+    // with its Battle Axe in the pack: the bow was judged as if it still had arrows.
+    const BOW: u32 = 0x8000_0201;
+    const AXE: u32 = 0x8000_0202;
+    let mut c = crate::testkit::character_of_level(no_data(), 20);
+    a_weapon(
+        &mut c,
+        BOW,
+        ac_world::item_type::MISSILE_WEAPON,
+        "War Bow",
+        true,
+    );
+    let bow = c.world.objects.get_mut(&BOW).unwrap();
+    bow.ammo_type = ac_world::fletching::ammo_type::ARROW;
+    bow.combat_use = ac_world::fletching::combat_use::LAUNCHER;
+    a_weapon(
+        &mut c,
+        AXE,
+        ac_world::item_type::MELEE_WEAPON,
+        "Battle Axe",
+        false,
+    );
+    assert_eq!(
+        c.ammo_carried().map(|(_, n)| n),
+        Some(0),
+        "an empty bow in hand"
+    );
+    c.fighting_stance_as(crate::autoplay::Style::Auto);
+    let asked = c
+        .autoplay
+        .wield_asked
+        .map(|(g, _)| g)
+        .or(c.autoplay.pending_wield);
+    assert_eq!(asked, Some(AXE), "the axe is taken up");
+}

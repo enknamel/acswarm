@@ -154,7 +154,12 @@ impl Client {
                 // A caster in hand is no way to fight without an attack spell: a weapon carried is
                 // taken up instead, which `arm_for` can then better (regression test
                 // a_caster_with_no_attack_spells_takes_up_a_carried_weapon).
-                if self.combat_stance() == Stance::Magic && self.attack_spells_known().is_empty() {
+                let spells = !self.attack_spells_known().is_empty();
+                let wandless = self.combat_stance() == Stance::Magic && !spells;
+                // A launcher with nothing to shoot is no way to fight either (regression test
+                // an_archer_out_of_arrows_takes_up_a_carried_axe).
+                let unloaded = self.ammo_carried().is_some_and(|(_, n)| n == 0);
+                if wandless || unloaded {
                     let now = Instant::now();
                     if self
                         .autoplay
@@ -162,7 +167,9 @@ impl Client {
                         .is_none_or(|t| now.duration_since(t) >= REWIELD_EVERY)
                     {
                         self.autoplay.last_rewield = Some(now);
-                        let _ = self.wield_for(Stance::Melee) || self.wield_for(Stance::Missile);
+                        let _ = self.wield_for(Stance::Melee)
+                            || (wandless && self.wield_for(Stance::Missile))
+                            || (unloaded && spells && self.wield_for(Stance::Magic));
                     }
                 }
                 return self.combat_stance();
@@ -275,7 +282,15 @@ impl Client {
         // Swapping costs nothing worth counting, so take the best there
         // is: anything better than what is in hand wins. Equal keeps
         // what is held, so a tie cannot set it swapping back and forth.
+        // A launcher with nothing for it to shoot is worth nothing, however good the bow.
+        let loaded = |i: &crate::items::ItemStats| {
+            !crate::weapons::is_launcher(i)
+                || carried.iter().any(|a| {
+                    crate::weapons::is_ammo(a) && a.ammo_type == i.ammo_type && a.stack > 0
+                })
+        };
         let now_worth = held
+            .filter(|i| loaded(i))
             .map(|i| crate::weapons::score(i, Some(known), &wielder))
             .unwrap_or(0.0);
         tracing::debug!(
