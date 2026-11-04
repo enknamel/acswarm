@@ -896,6 +896,20 @@ impl Profile {
             skill: ac_world::stats::skill::MISSILE_WEAPONS,
             at_least: ac_world::stats::sac::TRAINED,
         };
+        let trained_in_war = Mine::Trained {
+            skill: ac_world::stats::skill::WAR_MAGIC,
+            at_least: ac_world::stats::sac::TRAINED,
+        };
+        // A spell of level I..IV burns a Lead, Iron, Copper or Silver Scarab, tapers or not: what
+        // the mage shops sell. Without them a caster is down to level I, or to nothing.
+        let scarab = |what: &str, keep: u32, restock_at: u32| Buy {
+            what: what.into(),
+            keep,
+            restock_at: Some(restock_at),
+            from: None,
+            on: true,
+            when: vec![trained_in_war.clone()],
+        };
         Profile {
             name: "Starter".into(),
             note: "A place to start: quest items, money and components kept, vendor \
@@ -1011,6 +1025,10 @@ impl Profile {
                     on: true,
                     when: vec![trained_in_healing.clone()],
                 },
+                scarab("Lead Scarab", 50, 10),
+                scarab("Iron Scarab", 50, 10),
+                scarab("Copper Scarab", 50, 10),
+                scarab("Silver Scarab", 20, 5),
                 Buy {
                     what: AMMUNITION.into(),
                     keep: 250,
@@ -1534,6 +1552,25 @@ mod tests {
             ..Default::default()
         }
         .is_ammunition());
+    }
+
+    #[test]
+    fn the_starter_buys_a_war_mage_the_scarabs_of_spell_levels_one_to_four() {
+        // Blargerton ran out of Copper Scarabs with only tapers listed: no Stamina to Mana III,
+        // no Revitalize III, and every fight down to Force Bolt I.
+        let starter = Profile::starter();
+        let mage = me(41, &[(skill::WAR_MAGIC, 200, sac::SPECIALIZED)]);
+        let fighter = me(41, &[(skill::WAR_MAGIC, 10, sac::UNTRAINED)]);
+        for what in [
+            "Lead Scarab",
+            "Iron Scarab",
+            "Copper Scarab",
+            "Silver Scarab",
+        ] {
+            let line = starter.buy.iter().find(|b| b.what == what).expect(what);
+            assert!(line.holds_for(&mage, "Blargerton"), "{what}");
+            assert!(!line.holds_for(&fighter, "Aldric"), "{what}");
+        }
     }
 
     #[test]

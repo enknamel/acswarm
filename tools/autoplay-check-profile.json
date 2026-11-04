@@ -237,6 +237,62 @@
           }
         }
       ]
+    },
+    {
+      "what": "Lead Scarab",
+      "keep": 50,
+      "restock_at": 10,
+      "on": true,
+      "when": [
+        {
+          "Trained": {
+            "skill": 34,
+            "at_least": 2
+          }
+        }
+      ]
+    },
+    {
+      "what": "Iron Scarab",
+      "keep": 50,
+      "restock_at": 10,
+      "on": true,
+      "when": [
+        {
+          "Trained": {
+            "skill": 34,
+            "at_least": 2
+          }
+        }
+      ]
+    },
+    {
+      "what": "Copper Scarab",
+      "keep": 50,
+      "restock_at": 10,
+      "on": true,
+      "when": [
+        {
+          "Trained": {
+            "skill": 34,
+            "at_least": 2
+          }
+        }
+      ]
+    },
+    {
+      "what": "Silver Scarab",
+      "keep": 20,
+      "restock_at": 5,
+      "on": true,
+      "when": [
+        {
+          "Trained": {
+            "skill": 34,
+            "at_least": 2
+          }
+        }
+      ]
     }
   ],
   "sell_to": "Best"
