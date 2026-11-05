@@ -220,8 +220,9 @@ pub struct Autoplay {
     item_buffs: Vec<(u32, u32, Instant, f32)>,
     /// When the worn pieces were last appraised for the enchantments on them (`look_at_armour`).
     armour_looked: Option<Instant>,
-    /// The item buff whose answer is awaited, `(item, category)`: a refusal takes its entry back.
-    item_buff_sent: Option<(u32, u32)>,
+    /// The item buff cast and not yet answered, `(item, category, when, seconds it lasts, fizzled)`:
+    /// kept as up only once the cast ends unrefused and unfizzled (`hear_buff_answer`).
+    item_buff_sent: Option<(u32, u32, Instant, f32, bool)>,
     /// The last note logged and when (see `note`).
     /// Notes said lately and when, so that two alternating notes are
     /// each said once per `NOTE_EVERY` rather than every frame.

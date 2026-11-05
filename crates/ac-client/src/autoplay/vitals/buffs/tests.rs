@@ -310,11 +310,43 @@ fn an_item_buff_from_before_login_is_cast_again_and_a_weaker_one_not_under_a_str
     // Cast, and turned away busy as Blargerton's were just after login: still due.
     c.autoplay.cast_sent = None;
     assert!(c.autoplay_buff(later, false), "the bane is cast");
-    assert_eq!(c.due_buff(300.0, later), None, "up once cast");
+    assert_eq!(
+        c.due_buff(300.0, later),
+        None,
+        "not cast twice while in the air"
+    );
     c.hear_buff_answer(0x1D);
     assert_eq!(
         c.due_buff(300.0, later).map(|d| d.0),
         Some(vi),
         "refused, so due again"
+    );
+    // Cast again and fizzled: the fizzle comes ahead of a plain UseDone, and it is due again.
+    let again = later + BUFF_EVERY;
+    c.autoplay.cast_sent = None;
+    assert!(c.autoplay_buff(again, false), "cast again");
+    c.hear_buff_error(SPELL_FIZZLED);
+    c.hear_buff_answer(0);
+    assert_eq!(
+        c.due_buff(300.0, again).map(|d| d.0),
+        Some(vi),
+        "fizzled, so due again"
+    );
+    // Landed: up for its duration.
+    let third = again + BUFF_EVERY;
+    c.autoplay.cast_sent = None;
+    assert!(c.autoplay_buff(third, false), "cast a third time");
+    c.hear_buff_answer(0);
+    assert_eq!(c.due_buff(300.0, third), None, "landed, so up");
+    // Unanswered past ITEM_BUFF_ANSWER: never landed, due.
+    let mut lost = c.autoplay.item_buffs.clone();
+    lost.clear();
+    c.autoplay.item_buffs = lost;
+    c.autoplay.item_buff_sent = Some((me, c.spell(vi).unwrap().category, third, 2700.0, false));
+    assert_eq!(c.due_buff(300.0, third), None, "awaited");
+    assert_eq!(
+        c.due_buff(300.0, third + ITEM_BUFF_ANSWER).map(|d| d.0),
+        Some(vi),
+        "no answer, so due"
     );
 }

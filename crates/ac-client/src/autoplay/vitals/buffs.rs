@@ -47,6 +47,10 @@ const ARMOUR_LOOKS: Duration = Duration::from_secs(300);
 const ARMOUR_ANSWERS: Duration = Duration::from_secs(3);
 /// The bit ACE sets on a spell book entry that is an enchantment on the item (AppraiseInfo.cs:21).
 const ENCHANTMENT_BIT: u32 = 0x8000_0000;
+/// An item buff unanswered this long is taken for one that never landed, and cast again.
+const ITEM_BUFF_ANSWER: Duration = Duration::from_secs(10);
+/// WeenieError YourSpellFizzled: sent ahead of the cast's plain UseDone (Player_Magic.cs:916-918).
+const SPELL_FIZZLED: u32 = 0x0402;
 
 impl Client {
     /// Seconds left on the enchantment of a spell family, if any is up.
@@ -117,6 +121,16 @@ impl Client {
         if cast.is_some() {
             return cast;
         }
+        // Cast and not yet answered: neither up nor due until the server says which.
+        let awaited = self
+            .autoplay
+            .item_buff_sent
+            .is_some_and(|(g, c, when, _, _)| {
+                g == item && c == category && now.duration_since(when) < ITEM_BUFF_ANSWER
+            });
+        if awaited {
+            return Some(f32::INFINITY);
+        }
         // The answers to a look just sent are still on their way: nothing is due until they land.
         let answering = self
             .autoplay
@@ -136,16 +150,35 @@ impl Client {
             .collect()
     }
 
-    /// The server's answer `err` to the last cast: a refused item buff (too busy just after login,
-    /// 0x1D) never went on, so it is not remembered as up for its whole duration.
+    /// The server's answer `err` to the last cast: an item buff is up from when it was cast only
+    /// if it ended unrefused (too busy just after login is 0x1D) and unfizzled; else it is due.
     pub(crate) fn hear_buff_answer(&mut self, err: u32) {
-        let Some((g, category)) = self.autoplay.item_buff_sent.take() else {
+        let Some((g, category, when, lasts, fizzled)) = self.autoplay.item_buff_sent.take() else {
             return;
         };
-        if err != 0 {
-            self.autoplay
-                .item_buffs
-                .retain(|(i, c, _, _)| !(*i == g && *c == category));
+        self.autoplay
+            .item_buffs
+            .retain(|(i, c, _, _)| !(*i == g && *c == category));
+        if err == 0 && !fizzled {
+            self.autoplay.item_buffs.push((g, category, when, lasts));
+        } else {
+            tracing::info!(
+                "buff: the item buff (category {category}) did not land ({}); due again",
+                if fizzled {
+                    "fizzled".to_string()
+                } else {
+                    format!("error {err:#x}")
+                }
+            );
+        }
+    }
+
+    /// A weenie error `code`: a fizzle marks the item buff in the air as not landed.
+    pub(crate) fn hear_buff_error(&mut self, code: u32) {
+        if code == SPELL_FIZZLED {
+            if let Some(sent) = self.autoplay.item_buff_sent.as_mut() {
+                sent.4 = true;
+            }
         }
     }
 
@@ -461,11 +494,8 @@ impl Client {
             }
             Target::Item(g) => {
                 self.cast_at(spell, g);
-                self.autoplay
-                    .item_buffs
-                    .retain(|(i, c, _, _)| !(*i == g && *c == category));
-                self.autoplay.item_buffs.push((g, category, now, lasts));
-                self.autoplay.item_buff_sent = Some((g, category));
+                // Up only once the server answers it landed (`hear_buff_answer`).
+                self.autoplay.item_buff_sent = Some((g, category, now, lasts, false));
                 let on = self.world.name_of(g).unwrap_or_default().to_string();
                 self.autoplay
                     .say(Doing::Buffing, format!("casting {name} on {on}"));
