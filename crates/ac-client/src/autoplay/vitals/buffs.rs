@@ -101,8 +101,9 @@ impl Client {
     }
 
     /// Seconds left on an enchantment of `category` at `power` or more on an item: from when we
-    /// cast it and how long the spell lasts, else, put on before this session, as long as an
-    /// appraisal of a worn piece lists it (`look_at_armour` asks again every [`ARMOUR_LOOKS`]).
+    /// cast it and how long the spell lasts. An appraisal lists an item's enchantments with no time
+    /// left on them (AppraiseInfo.cs:494-502), so one put on before this session is due; only a
+    /// stronger one listed keeps a weaker cast off, which it would "surpass" for nothing.
     fn item_buff_left(&self, item: u32, category: u32, power: u32, now: Instant) -> Option<f32> {
         let cast = self
             .autoplay
@@ -121,7 +122,7 @@ impl Client {
             .autoplay
             .armour_looked
             .is_some_and(|t| now.duration_since(t) < ARMOUR_ANSWERS);
-        (answering || self.is_worn_with(category, power)).then_some(f32::INFINITY)
+        (answering || self.is_worn_above(category, power)).then_some(f32::INFINITY)
     }
 
     /// The pieces worn that item buffs cast at the character land on: its armour and clothing
@@ -148,9 +149,9 @@ impl Client {
         }
     }
 
-    /// Whether an appraisal of a worn piece lists an enchantment of `category` at `power` or more:
+    /// Whether an appraisal of a worn piece lists an enchantment of `category` above `power`:
     /// ACE puts each one on an item in its spell book with the top bit set (AppraiseInfo.cs:494-502).
-    fn is_worn_with(&self, category: u32, power: u32) -> bool {
+    fn is_worn_above(&self, category: u32, power: u32) -> bool {
         let Ok(table) = self.assets.spell_table() else {
             return false;
         };
@@ -160,13 +161,13 @@ impl Client {
                     .iter()
                     .filter(|id| *id & ENCHANTMENT_BIT != 0)
                     .filter_map(|id| table.get(*id & !ENCHANTMENT_BIT))
-                    .any(|sp| sp.category == category && sp.power >= power)
+                    .any(|sp| sp.category == category && sp.power > power)
             })
         })
     }
 
-    /// Appraise the worn pieces, for the enchantments on them, every [`ARMOUR_LOOKS`]: at login
-    /// those put on before are known only so, and recast they are "surpassed" for nothing.
+    /// Appraise the worn pieces, for the enchantments on them, every [`ARMOUR_LOOKS`]: a stronger
+    /// one put on before is known only so, and a weaker cast under it is "surpassed" for nothing.
     fn look_at_armour(&mut self, now: Instant) {
         if self
             .autoplay

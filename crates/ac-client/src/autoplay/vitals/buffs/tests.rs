@@ -251,11 +251,11 @@ fn a_buff_weaker_than_one_still_up_is_not_cast() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
-fn a_bane_put_on_before_login_is_read_off_the_armour_not_cast_again() {
-    // Blargerton logged in under Frost Bane VI on every piece and cast Frost Bane I: "surpassed"
-    // seven times. Item enchantments come only in an appraisal of each piece.
+fn an_item_buff_from_before_login_is_cast_again_and_a_weaker_one_not_under_a_stronger() {
+    // Item enchantments come only in an appraisal of each piece, with no time left on them:
+    // Blargerton logged in under last night's Frost Bane VI and never put it back up.
     let now = Instant::now();
-    let (mut c, ids) = crate::testkit::a_caster_knowing(now, &["Frost Bane I"]);
+    let (mut c, ids) = crate::testkit::a_caster_knowing(now, &["Frost Bane VI", "Frost Bane I"]);
     let me = c.world.player_guid.unwrap();
     const HELM: u32 = 0x8000_0600;
     crate::testkit::thing_in_the_pack(&mut c, HELM, "Pathwarden Helm", 1);
@@ -264,11 +264,10 @@ fn a_bane_put_on_before_login_is_read_off_the_armour_not_cast_again() {
     // Worn: on the body, in no pack.
     helm.container = None;
     helm.wielder = Some(me);
-    let table = c.assets.spell_table().unwrap();
-    let (vi, _) = table.find_by_name("Frost Bane VI").expect("Frost Bane VI");
+    let (vi, i) = (ids[0], ids[1]);
     let wants = c.wanted_buffs();
     assert!(
-        wants.iter().any(|w| w.spell == ids[0]),
+        wants.iter().any(|w| w.spell == vi),
         "the bane is wanted: {wants:?}"
     );
 
@@ -278,7 +277,7 @@ fn a_bane_put_on_before_login_is_read_off_the_armour_not_cast_again() {
         "cast before the armour answered"
     );
     assert_eq!(c.autoplay.armour_looked, Some(now));
-    // Frost Bane VI on the helm: the bane is up, and Frost Bane I is not cast under it.
+    // Frost Bane VI listed on the helm, for how long unknown: cast again.
     let mut a = ac_net::messages::Appraisal {
         guid: HELM,
         success: true,
@@ -287,10 +286,26 @@ fn a_bane_put_on_before_login_is_read_off_the_armour_not_cast_again() {
     a.spells = vec![vi | ENCHANTMENT_BIT];
     c.appraisals.insert(HELM, a);
     let later = now + ARMOUR_ANSWERS;
-    assert_eq!(c.due_buff(300.0, later), None, "cast under Frost Bane VI");
-    // Gone from the helm at the next look: due.
-    c.appraisals.get_mut(&HELM).unwrap().spells.clear();
-    assert_eq!(c.due_buff(300.0, later).map(|d| d.0), Some(ids[0]));
+    assert_eq!(
+        c.due_buff(300.0, later).map(|d| d.0),
+        Some(vi),
+        "VI not put back"
+    );
+    // Short of what VI burns, I is all there is: under VI it would be surpassed for nothing.
+    assert_eq!(
+        c.due_buff_among(
+            &[crate::buffs::Want {
+                spell: i,
+                category: c.spell(i).unwrap().category,
+                power: c.spell(i).unwrap().power,
+                target: crate::buffs::Target::Item(me),
+            }],
+            300.0,
+            later
+        ),
+        None,
+        "Frost Bane I cast under Frost Bane VI"
+    );
 
     // Cast, and turned away busy as Blargerton's were just after login: still due.
     c.autoplay.cast_sent = None;
@@ -299,7 +314,7 @@ fn a_bane_put_on_before_login_is_read_off_the_armour_not_cast_again() {
     c.hear_buff_answer(0x1D);
     assert_eq!(
         c.due_buff(300.0, later).map(|d| d.0),
-        Some(ids[0]),
+        Some(vi),
         "refused, so due again"
     );
 }
