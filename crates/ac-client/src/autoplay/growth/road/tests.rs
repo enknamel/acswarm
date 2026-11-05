@@ -435,3 +435,20 @@ fn walking_the_hunting_ground_is_not_being_on_the_way_to_it() {
     assert!(!c.passing_by(&it, &fight));
     assert!(c.would_fight(&it, &fight, false, now));
 }
+
+#[test]
+fn a_run_under_way_walks_on_while_hit() {
+    // Blargerton, on his way to Archmage Moldurg, was cast at by Banderlings he was walking past:
+    // the run weighed nothing in a fight, the fight passes all by on the road, and he stood.
+    let now = Instant::now();
+    let mut c = crate::testkit::offline_client();
+    c.world.player_guid = Some(crate::testkit::ME);
+    crate::testkit::stand(&mut c, 0xA9B4_0019, glam::vec3(84.0, 84.0, 94.0));
+    c.autoplay.config.growth.town_runs = true;
+    let row = crate::autoplay::steps::named("town run").expect("row");
+    c.autoplay.last_hit_us = Some(now);
+    assert!(c.in_a_fight(), "hit");
+    assert_eq!(row.worth(&c, now), 0.0, "no new run in a fight");
+    c.autoplay.growth.run = Some(run_to(Vec2::new(32_500.0, 34_500.0), now));
+    assert!(row.worth(&c, now) > 0.0, "the run under way walks on");
+}

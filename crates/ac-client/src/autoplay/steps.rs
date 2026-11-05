@@ -179,9 +179,9 @@ fn fight_worth(engaged: bool, owes_a_body: bool, nearest: f32) -> f32 {
     }
 }
 
-/// What a town run is worth: nothing in a fight in hand (the road fights only what attacks), just
-/// under looting while bodies of ours wait, and its place otherwise; the step says whether one is
-/// due (`grow_town_run`).
+/// What a town run is worth: one under way its place, hit or not; a new one nothing in a fight,
+/// just under looting while bodies of ours wait, and its place otherwise; the step says whether
+/// one is due (`grow_town_run`).
 fn worth_town_run(client: &Client, now: Instant) -> f32 {
     let growth = &client.autoplay.growth;
     // A pursued quest's call on its giver goes with town runs off.
@@ -189,14 +189,15 @@ fn worth_town_run(client: &Client, now: Instant) -> f32 {
     if !client.autoplay.config.growth.town_runs && !growth.run_by_hand() && !for_quest {
         return 0.0;
     }
-    if client.in_a_fight() {
-        return 0.0;
-    }
-    // Starting one is what outranks a fight; one under way is carried on where the grow step
-    // carried it, so buffs go up on the walk and a leader is followed (test:
-    // a_run_under_way_keeps_its_old_place).
+    // One under way is carried on where the grow step carried it, so buffs go up on the walk and
+    // a leader is followed (test: a_run_under_way_keeps_its_old_place). Hit on the road, it walks
+    // on: the fight passes everything by there, and nothing else moves the legs
+    // (a_run_under_way_walks_on_while_hit).
     if growth.town_run_under_way() {
         return RUN_UNDER_WAY;
+    }
+    if client.in_a_fight() {
+        return 0.0;
     }
     town_run_worth(worth_looting(client, now))
 }
