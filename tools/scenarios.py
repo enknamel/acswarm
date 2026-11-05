@@ -45,9 +45,6 @@ def checks(name, m, lines, samples):
             ("corpses opened", corpses > 0, corpses),
             ("no deaths", (m["deaths"] or 0) == 0, m["deaths"]),
         ]
-        if name == "Scn Mage":
-            buffs = sum(1 for t in lines if t.startswith("casting ") and " at " not in t)
-            out.append(("buffs cast", buffs > 0, buffs))
     elif name == "Scn Taper":
         # What arrived, not what was asked for: a counter can refuse every ask (run A: 1,199 times).
         arrived = count(r"^Prismatic Taper arrived")

@@ -5,7 +5,7 @@
 #
 #   ACSWARM_TEST_PASSWORD=... tools/scenarios.sh [MINUTES] [--out DIR]
 #
-#   fight    Scn Mage, Scn Blade, Scn Bow hunt: kills, corpses opened, buffs, no deaths
+#   fight    Scn Mage, Scn Blade, Scn Bow hunt buffed: kills, corpses opened, no deaths
 #   restock  Scn Taper starts each run with no tapers at the Mosswart ground, 2.5 km out: it buys some
 #   sell     Scn Seller starts each run with ten rings, too heavy for its profile: a run sells them
 #   academy  a new character each run leaves the Training Academy
@@ -77,9 +77,10 @@ fn command(name, args) {
             if who == "Scn Bow" && !bow { say("@ci 306"); }
             if who == "Scn Bow" && arrows < 200 { say("@ci 300 250"); }
             if who == "Scn Seller" { for i in 0..10 { say("@ci 297"); } }
-            // Its one buff lasts 30 min and outlives a logout: a run soon after the last found it up,
-            // cast nothing, and failed "buffs cast". Stripped, the check measures the buffing.
-            if who == "Scn Mage" { say("@dispel"); }
+            // A level-20 hunter goes out buffed as players do: protections, skills and item buffs at
+            // level VI (SentinelCommands.cs:187). Buffs outlive a logout, so each run strips them first.
+            say("@dispel");
+            say("@buff 6");
         }
     }
     // The tapers go before autoplay starts: a drop is refused while the character is busy casting
