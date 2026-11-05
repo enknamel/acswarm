@@ -163,3 +163,32 @@ fn a_caster_really_does_know_stamina_to_health() {
         "Revitalize Self VI restores stamina"
     );
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_restore_that_mostly_fizzles_gives_way_to_one_that_lands() {
+    // Blargerton learned Robustification (Revitalize Self VII) from a scroll and cast it ten
+    // times in a row at a Life Magic it fizzles at, with Revitalize Self IV in the book.
+    let now = std::time::Instant::now();
+    let (mut c, known) =
+        crate::testkit::a_caster_knowing(now, &["Revitalize Self IV", "Robustification"]);
+    let life = |c: &mut crate::Client, level: u32| {
+        let s = c
+            .world
+            .stats
+            .skills
+            .iter_mut()
+            .find(|s| s.id == 33)
+            .unwrap();
+        s.init_level = level;
+    };
+    life(&mut c, 180);
+    assert!(c.cast_chance(known[1]) < 0.2, "{}", c.cast_chance(known[1]));
+    assert_eq!(c.best_boost(vital::STAMINA), Some(known[0]), "the fizzle");
+    life(&mut c, 500);
+    assert_eq!(
+        c.best_boost(vital::STAMINA),
+        Some(known[1]),
+        "skill enough for VII"
+    );
+}

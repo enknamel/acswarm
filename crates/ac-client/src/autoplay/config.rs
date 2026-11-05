@@ -62,10 +62,9 @@ pub struct Buffs {
     /// the Item auras for the way it fights, and the armour spells on
     /// each piece worn; the highest level of each (see `crate::buffs`).
     pub auto: bool,
-    /// The lowest chance of a cast landing that is still worth the
-    /// mana: a level that fizzles more often than this is passed over
-    /// for the one below it. Half is the point where the school's skill
-    /// equals the spell's power.
+    /// The lowest chance of a cast landing that is still worth the mana, for every spell autoplay
+    /// casts (`can_cast_well`): one that fizzles more often is passed over for one below it. Half
+    /// is the point where the school's skill equals the spell's power.
     pub least_chance: f32,
     /// Spell names to keep on the character as well, by hand.
     pub spells: Vec<String>,

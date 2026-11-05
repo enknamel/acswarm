@@ -68,6 +68,8 @@ pub struct Mate {
     pub life_magic: u32,
     /// It knows a vulnerability or an imperil it can cast right now.
     pub can_soften: bool,
+    /// It fights with a weapon, which an imperil helps; spells ignore armour.
+    pub hits_with_weapons: bool,
     /// It asked to lead (see `Team::lead`).
     pub leads: bool,
     /// It is flying (no-clip); followers fly too.

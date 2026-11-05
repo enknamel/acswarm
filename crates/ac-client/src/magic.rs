@@ -354,6 +354,37 @@ impl Client {
         self.can_cast_from(spell, None)
     }
 
+    /// `can_cast` for autoplay's own choices: a spell less likely to land than the buffs'
+    /// `least_chance` is `TooHard` too, so every rule passes it over for one that lands.
+    pub(crate) fn can_cast_well(&self, spell: u32) -> CastCheck {
+        self.can_cast_well_from(spell, None)
+    }
+
+    /// `can_cast_well`, against `carried` when the caller holds `components()` already.
+    pub(crate) fn can_cast_well_from(
+        &self,
+        spell: u32,
+        carried: Option<&[ComponentCount]>,
+    ) -> CastCheck {
+        let check = self.can_cast_from(spell, carried);
+        if !matches!(check, CastCheck::Ok | CastCheck::NoCaster) {
+            return check;
+        }
+        if self.cast_chance(spell) < self.autoplay.config.buffs.least_chance {
+            let power = self
+                .assets
+                .spell_table()
+                .ok()
+                .and_then(|t| t.get(spell).map(|s| s.power))
+                .unwrap_or(0);
+            return CastCheck::TooHard {
+                power,
+                skill: self.casting_skill(spell),
+            };
+        }
+        check
+    }
+
     /// `can_cast`, against `carried` when the caller holds `components()` already.
     pub(crate) fn can_cast_from(
         &self,

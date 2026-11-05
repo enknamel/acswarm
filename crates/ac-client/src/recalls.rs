@@ -113,7 +113,7 @@ impl Client {
             } else {
                 continue;
             };
-            if !matches!(self.can_cast(id), CastCheck::Ok) {
+            if !matches!(self.can_cast_well(id), CastCheck::Ok) {
                 continue;
             }
             out.push(Recall {

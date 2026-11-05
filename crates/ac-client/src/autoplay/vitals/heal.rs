@@ -129,9 +129,9 @@ impl Client {
         stats.vitals[0].current as f32 / max as f32
     }
 
-    /// The strongest known boost of a vital that can be cast right now,
-    /// whatever it is called: Heal Self VI and Adja's Intervention are
-    /// both health boosts, and the table says so where a name would not.
+    /// The known boost of a vital castable right now that gives the most on average, its roll
+    /// times its chance to land (Robustification fizzling nine casts in ten loses to Revitalize Self
+    /// IV), whatever it is called: the table says Adja's Intervention heals where a name would not.
     fn best_boost(&self, vital: u32) -> Option<u32> {
         let table = self.assets.spell_table().ok()?;
         ac_world::vitals::boosts_of(vital)
@@ -140,16 +140,21 @@ impl Client {
             .filter(|b| table.get(b.spell).is_some_and(|s| s.is_self_targeted()))
             .filter(|b| {
                 matches!(
-                    self.can_cast(b.spell),
+                    self.can_cast_well(b.spell),
                     crate::magic::CastCheck::Ok | crate::magic::CastCheck::NoCaster
                 )
             })
-            .max_by_key(|b| table.get(b.spell).map(|s| s.power).unwrap_or(0))
+            .max_by(|a, b| {
+                let gives = |x: &ac_world::vitals::Boost| {
+                    (x.low + x.high) as f32 / 2.0 * self.cast_chance(x.spell)
+                };
+                gives(a).total_cmp(&gives(b))
+            })
             .map(|b| b.spell)
     }
 
-    /// The strongest known self transfer from one vital into another
-    /// that can be cast right now.
+    /// The known self transfer from one vital into another castable right now that moves the most
+    /// on average: its share less its loss, times its chance to land.
     fn best_transfer(&self, from: u32, to: u32) -> Option<u32> {
         let table = self.assets.spell_table().ok()?;
         ac_world::vitals::transfers_between(from, to)
@@ -158,11 +163,16 @@ impl Client {
             .filter(|t| table.get(t.spell).is_some_and(|s| s.is_self_targeted()))
             .filter(|t| {
                 matches!(
-                    self.can_cast(t.spell),
+                    self.can_cast_well(t.spell),
                     crate::magic::CastCheck::Ok | crate::magic::CastCheck::NoCaster
                 )
             })
-            .max_by_key(|t| table.get(t.spell).map(|s| s.power).unwrap_or(0))
+            .max_by(|a, b| {
+                let moves = |x: &ac_world::vitals::Transfer| {
+                    x.proportion * (1.0 - x.loss) * self.cast_chance(x.spell)
+                };
+                moves(a).total_cmp(&moves(b))
+            })
             .map(|t| t.spell)
     }
 
@@ -206,7 +216,9 @@ impl Client {
             return None;
         }
         let sp = self.spell(spell)?;
-        if !sp.is_self_targeted() || !matches!(self.can_cast(spell), crate::magic::CastCheck::Ok) {
+        if !sp.is_self_targeted()
+            || !matches!(self.can_cast_well(spell), crate::magic::CastCheck::Ok)
+        {
             return None;
         }
         let mana = self.mana_cost(&sp);
@@ -246,7 +258,10 @@ impl Client {
             .filter(|(_, s)| s.is_self_targeted())
             .min_by_key(|(_, s)| s.power)
             .map(|(id, s)| (id, s.name.clone()))?;
-        Some(format!("{name} {}", cast_problem(&self.can_cast(spell))))
+        Some(format!(
+            "{name} {}",
+            cast_problem(&self.can_cast_well(spell))
+        ))
     }
 
     /// Keep mana and stamina up the way a caster does: stamina poured
@@ -281,7 +296,7 @@ impl Client {
         // cheap next to what a transfer of a full bar returns.
         if stamina < cfg.stamina_below {
             if let Some(spell) = self.best_boost(vital::STAMINA) {
-                if matches!(self.can_cast(spell), crate::magic::CastCheck::Ok) {
+                if matches!(self.can_cast_well(spell), crate::magic::CastCheck::Ok) {
                     self.cast_paced(spell, now);
                     self.autoplay.last_vital = Some(now);
                     self.autoplay.say(
@@ -294,7 +309,7 @@ impl Client {
         }
         if mana < cfg.mana_below && stamina >= cfg.stamina_below.max(0.5) {
             if let Some(spell) = self.best_transfer(vital::STAMINA, vital::MANA) {
-                if matches!(self.can_cast(spell), crate::magic::CastCheck::Ok) {
+                if matches!(self.can_cast_well(spell), crate::magic::CastCheck::Ok) {
                     self.cast_paced(spell, now);
                     self.autoplay.last_vital = Some(now);
                     self.autoplay.say(

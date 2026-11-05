@@ -221,3 +221,30 @@ fn a_fighter_with_no_buff_due_is_not_held_back_between_swings() {
         "a swing was held back for a buff that was never due"
     );
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_buff_weaker_than_one_still_up_is_not_cast() {
+    // Blargerton topped up Aura of Spirit Drinker Self IV under a Buffbot's Other VII with four
+    // minutes left: "surpassed", and two tapers gone each time.
+    let now = Instant::now();
+    let (mut c, spell) = crate::testkit::a_caster_with_a_buff_due(now);
+    let sp = c.assets.spell_table().unwrap().get(spell).unwrap().clone();
+    let up = |power: u32| ac_world::stats::Enchantment {
+        spell_id: 1,
+        category: sp.category as u16,
+        power,
+        start_time: 0.0,
+        duration: 100.0,
+        received: Some(1000.0),
+        ..Default::default()
+    };
+    c.world.stats.enchantments = vec![up(sp.power + 100)];
+    assert_eq!(c.due_buff(300.0, now), None, "cast under a stronger one");
+    c.world.stats.enchantments = vec![up(sp.power)];
+    assert_eq!(
+        c.due_buff(300.0, now).map(|d| d.0),
+        Some(spell),
+        "its own level running out is topped up"
+    );
+}

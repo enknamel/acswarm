@@ -178,7 +178,7 @@ impl Client {
                 .next()
         };
         let why = first
-            .map(|(n, id)| format!("{n}: {}", cast_problem(&self.can_cast(id))))
+            .map(|(n, id)| format!("{n}: {}", cast_problem(&self.can_cast_well(id))))
             .unwrap_or_else(|| "none of the attack spells is known".into());
         self.autoplay
             .say(Doing::Fighting, format!("cannot cast at {name} ({why})"));
@@ -221,7 +221,7 @@ impl Client {
     pub(super) fn ready_spells(&self, cfg: &Fight) -> Vec<(u32, String)> {
         self.offered_spells(cfg)
             .into_iter()
-            .filter(|(id, _)| matches!(self.can_cast(*id), crate::magic::CastCheck::Ok))
+            .filter(|(id, _)| matches!(self.can_cast_well(*id), crate::magic::CastCheck::Ok))
             .collect()
     }
 

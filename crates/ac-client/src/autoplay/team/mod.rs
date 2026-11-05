@@ -67,7 +67,7 @@ impl Client {
             if let Some(hurt) = hurt {
                 let spell = self
                     .spell_by_name("Heal Other")
-                    .filter(|s| matches!(self.can_cast(*s), crate::magic::CastCheck::Ok));
+                    .filter(|s| matches!(self.can_cast_well(*s), crate::magic::CastCheck::Ok));
                 if let Some(spell) = spell {
                     self.select(Some(hurt.guid));
                     self.cast(spell);
@@ -113,7 +113,7 @@ impl Client {
                         let Some(spell) = self.spell_by_name(spell_name) else {
                             continue;
                         };
-                        if !matches!(self.can_cast(spell), crate::magic::CastCheck::Ok) {
+                        if !matches!(self.can_cast_well(spell), crate::magic::CastCheck::Ok) {
                             continue;
                         }
                         self.select(Some(guid));

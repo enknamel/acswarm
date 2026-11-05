@@ -298,6 +298,17 @@ pub fn went_for(c: &Client) -> Option<u32> {
     })
 }
 
+/// `skill` trained at `level` on `c`, replacing what was there.
+pub fn trained_in(c: &mut Client, skill: u32, level: u32) {
+    c.world.stats.skills.retain(|s| s.id != skill);
+    c.world.stats.skills.push(ac_world::stats::Skill {
+        id: skill,
+        advancement: ac_world::stats::sac::TRAINED,
+        init_level: level,
+        ..Default::default()
+    });
+}
+
 /// A character with a mace in hand, a wand in the pack, and a
 /// creature it is swinging at.
 pub fn mid_fight(assets: std::rc::Rc<ac_scene::Assets>) -> (Client, u32) {
@@ -458,6 +469,8 @@ pub fn as_a_war_mage(c: &mut Client) {
     const FOCI_OF_STRIFE: u32 = 15271;
     let me = c.world.player_guid.unwrap();
     c.world.stats.spells = vec![FLAME_BOLT_I];
+    // Enough War Magic that a level-one spell lands: autoplay casts nothing it would fizzle.
+    trained_in(c, ac_world::stats::skill::WAR_MAGIC, 100);
     c.world.objects.insert(
         0x8000_0040,
         ac_world::WorldObject {

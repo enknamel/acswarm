@@ -60,7 +60,7 @@ impl Client {
     pub fn can_soften(&self) -> bool {
         let castable = |id: &u32| {
             matches!(
-                self.can_cast(*id),
+                self.can_cast_well(*id),
                 crate::magic::CastCheck::Ok | crate::magic::CastCheck::NoCaster
             )
         };
@@ -70,6 +70,29 @@ impl Client {
                 .flat_map(ac_world::elements::vulnerabilities)
                 .filter(|id| self.world.stats.spells.contains(id))
                 .any(|id| castable(&id))
+    }
+
+    /// Whether this character fights with a weapon: an imperil lowers armour, which spells ignore.
+    /// Told to fight with whatever suits, a war mage is one with attack spells and no weapon in hand.
+    pub fn hits_with_weapons(&self) -> bool {
+        match self.autoplay.config.fight.style {
+            crate::autoplay::Style::Melee | crate::autoplay::Style::Missile => true,
+            crate::autoplay::Style::Magic => false,
+            crate::autoplay::Style::Auto => {
+                self.combat_stance() != Stance::Magic || self.attack_spells_known().is_empty()
+            }
+        }
+    }
+
+    /// Whether an imperil on `guid` helps anyone: this character or a mate on it hits with a weapon.
+    fn imperil_helps(&self, guid: u32) -> bool {
+        self.hits_with_weapons()
+            || self
+                .autoplay
+                .team
+                .mates
+                .iter()
+                .any(|m| m.hits_with_weapons && (m.target == Some(guid) || m.in_fellowship))
     }
 
     /// The imperils known: spells cast on another that lower its
@@ -151,14 +174,14 @@ impl Client {
             .get(&guid)
             .map(|o| o.weenie_class_id)
             .unwrap_or(0);
-        let known = ac_world::elements::known(wcid, name);
         let candidates: Vec<u32> = if stage == 0 {
-            known
-                .and_then(|c| c.weakest_to())
+            self.vuln_element(guid, wcid, name)
                 .map(ac_world::elements::vulnerabilities)
                 .unwrap_or_default()
-        } else {
+        } else if self.imperil_helps(guid) {
             self.imperil_spells()
+        } else {
+            Vec::new()
         };
         let spell = self.strongest_castable(&candidates);
         let advance = |this: &mut Self| {
@@ -212,9 +235,28 @@ impl Client {
             None => {
                 // Nothing for this stage: on to the next, or done.
                 advance(self);
-                stage == 0 && !self.imperil_spells().is_empty()
+                stage == 0 && self.imperil_helps(guid) && !self.imperil_spells().is_empty()
             }
         }
+    }
+
+    /// The element a vulnerability on `guid` should be for: a caster's, that of the spell it will
+    /// throw (`best_spell`, as the fight picks it); a weapon's, what the creature is weakest to.
+    fn vuln_element(
+        &self,
+        guid: u32,
+        wcid: u32,
+        name: &str,
+    ) -> Option<ac_world::elements::Element> {
+        let known = ac_world::elements::known(wcid, name);
+        if self.hits_with_weapons() {
+            return known.and_then(|c| c.weakest_to());
+        }
+        let cfg = self.autoplay.config.fight.clone();
+        let ids: Vec<u32> = self.ready_spells(&cfg).iter().map(|(id, _)| *id).collect();
+        let attack = ac_world::elements::best_spell(wcid, name, &ids)
+            .and_then(|(id, _)| ac_world::elements::spell_element(id));
+        crate::weapons::vulnerability_for(self.creature_known(guid), attack, 0)
     }
 
     /// Of `ids`, the strongest this character knows, can cast, and
@@ -227,7 +269,7 @@ impl Client {
             .filter(|id| table.get(*id).is_some_and(|s| s.needs_target()))
             .filter(|id| {
                 matches!(
-                    self.can_cast(*id),
+                    self.can_cast_well(*id),
                     crate::magic::CastCheck::Ok | crate::magic::CastCheck::NoCaster
                 )
             })
@@ -281,7 +323,7 @@ impl Client {
         known_spells.sort_by_key(|(_, level)| std::cmp::Reverse(*level));
         let castable = known_spells
             .into_iter()
-            .find(|(id, _)| matches!(self.can_cast(*id), crate::magic::CastCheck::Ok));
+            .find(|(id, _)| matches!(self.can_cast_well(*id), crate::magic::CastCheck::Ok));
         let Some((spell, level)) = castable else {
             // Cannot do it now; do not keep trying every cast.
             self.autoplay.vulned.push(guid);

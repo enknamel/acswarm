@@ -65,6 +65,13 @@ impl Client {
         self.longest_left(|e| e.category as u32 == category && e.power >= power)
     }
 
+    /// Whether a stronger enchantment of `category` than `power` is still up: a cast of the weaker
+    /// is then "surpassed" and spends its components for nothing.
+    fn is_surpassed(&self, category: u32, power: u32) -> bool {
+        self.longest_left(|e| e.category as u32 == category && e.power > power)
+            .is_some_and(|left| left > 0.0)
+    }
+
     /// The longest any enchantment passing `keep` has left. A quest or
     /// item enchantment with no end has a duration below zero and is
     /// worth infinity here: treating it as run out had a character
@@ -108,7 +115,7 @@ impl Client {
         let carried = self.components();
         self.wanted_buffs_if(|id| {
             matches!(
-                self.can_cast_from(id, Some(&carried)),
+                self.can_cast_well_from(id, Some(&carried)),
                 crate::magic::CastCheck::Ok | crate::magic::CastCheck::NoCaster
             )
         })
@@ -352,7 +359,7 @@ impl Client {
             self.autoplay.last_buff = Some(now);
             return true;
         }
-        if !matches!(self.can_cast(spell), crate::magic::CastCheck::Ok) {
+        if !matches!(self.can_cast_well(spell), crate::magic::CastCheck::Ok) {
             return false;
         }
         // Casting a low level of something we know a better version of
@@ -417,7 +424,7 @@ impl Client {
             if sp.category != mine.category || sp.power <= mine.power {
                 continue;
             }
-            let check = self.can_cast(id);
+            let check = self.can_cast_well(id);
             if matches!(check, CastCheck::Ok) {
                 continue;
             }
@@ -447,7 +454,7 @@ impl Client {
             if left.is_some_and(|l| l > top_up) {
                 continue;
             }
-            let check = self.can_cast(want.spell);
+            let check = self.can_cast_well(want.spell);
             if matches!(check, CastCheck::Ok | CastCheck::NoCaster) {
                 continue;
             }
@@ -518,7 +525,7 @@ impl Client {
             // One that cannot be cast must not stand in front of the
             // rest: short of components or mana it is passed over. No
             // wand is different, since wielding one is the cure.
-            match self.can_cast(spell) {
+            match self.can_cast_well(spell) {
                 crate::magic::CastCheck::Ok | crate::magic::CastCheck::NoCaster => {}
                 _ => return,
             }
@@ -532,6 +539,9 @@ impl Client {
             due = Some((rank, left, spell, target, category, name, lasts));
         };
         for want in wants {
+            if want.target == Target::Me && self.is_surpassed(want.category, want.power) {
+                continue;
+            }
             let left = match want.target {
                 Target::Me => self.category_left(want.category, want.power),
                 Target::Item(g) => self.item_buff_left(g, want.category, now),
@@ -542,11 +552,13 @@ impl Client {
             let Some(spell) = self.spell_by_name(name) else {
                 continue;
             };
-            let category = table
+            let (category, power) = table
                 .as_ref()
                 .and_then(|t| t.get(spell))
-                .map(|s| s.category)
-                .unwrap_or(0);
+                .map_or((0, 0), |s| (s.category, s.power));
+            if self.is_surpassed(category, power) {
+                continue;
+            }
             offer(self.buff_left(spell), spell, Target::Me, category);
         }
         due.map(|(_, _, spell, target, category, name, lasts)| {

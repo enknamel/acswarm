@@ -368,6 +368,7 @@ fn describe_as(client: &ac_client::Client, session: usize, with_supplies: bool) 
         leader: false,
         life_magic: client.life_magic(),
         can_soften: client.can_soften(),
+        hits_with_weapons: client.hits_with_weapons(),
         leads: cfg.lead,
         flying: client.noclip(),
         cell: player.cell,
