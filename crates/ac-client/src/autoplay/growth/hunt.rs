@@ -189,9 +189,14 @@ impl Client {
                 within: GROUND_REACH,
             };
             if self.is_errand_journey(ground) {
+                // Through portals the metres are to a dungeon's cells, which lie nowhere near it.
+                let how_far = match self.travel_progress() {
+                    Some((step, steps)) if steps > 1 => format!("step {} of {steps}", step + 1),
+                    _ => about(at.distance(me)),
+                };
                 self.autoplay.say(
                     Doing::Traveling,
-                    format!("going to hunt {name} ({})", about(at.distance(me))),
+                    format!("going to hunt {name} ({how_far})"),
                 );
                 return true;
             }

@@ -65,6 +65,10 @@ const SETTLE: Duration = Duration::from_secs(5);
 /// needs goes back to earning instead of shuttling between counters.
 const FUTILE_RUN_WAIT: Duration = Duration::from_secs(300);
 
+/// How long a counter in reach but not yet seen is waited for before it is "not here" (seconds):
+/// out of a portal the server describes the objects round the landing over the next moments.
+pub(super) const DESCRIBED_WITHIN: Duration = Duration::from_secs(10);
+
 /// How often a character that has stopped in town looks to see whether
 /// its luck has changed.
 const STOPPED_LOOK_EVERY: Duration = Duration::from_secs(5);
@@ -171,6 +175,9 @@ pub(crate) struct Run {
     /// The purse a counter on this run could not pay for a wanted ware from: the run buys on
     /// only with more, else it ends and the character hunts.
     pub(super) short_with: Option<u32>,
+    /// When the counter was first looked for in reach: absent then, it is waited for
+    /// [`DESCRIBED_WITHIN`], as the server describes what stands round a teleport's landing.
+    pub(super) looked_from: Option<Instant>,
 }
 
 /// What one turn of a run to town came to.
@@ -321,6 +328,15 @@ impl Client {
     /// Say, once, why no run to town is being started, and answer that
     /// none is. There is nothing to see when a character stands about
     /// doing nothing, so this is how it explains itself.
+    /// The last run achieved nothing: the next waits `FUTILE_RUN_WAIT`, or until there is more coin.
+    fn mark_run_futile(&mut self, now: Instant) {
+        let purse = self.spendable();
+        let st = &mut self.autoplay.growth;
+        st.last_run = Some(now);
+        st.run_was_futile = true;
+        st.futile_purse = purse;
+    }
+
     fn held_back(&mut self, why: impl Into<String>) -> bool {
         let why = why.into();
         if self.autoplay.growth.held_back != why {
@@ -402,7 +418,16 @@ impl Client {
             return false;
         }
         // After a run that came back with nothing, a wait: without it a character that cannot buy
-        // what it needs walks between counters for ever.
+        // what it needs walks between counters for ever. More coin than it had then ends the wait.
+        if self.autoplay.growth.run_was_futile
+            && self.spendable() > self.autoplay.growth.futile_purse
+        {
+            let st = &mut self.autoplay.growth;
+            st.run_was_futile = false;
+            st.last_run = None;
+            self.autoplay
+                .note("more coin than the last run had: shopping", now);
+        }
         let wait = wait_between_runs(self.autoplay.growth.run_was_futile);
         if let Some(t) = self
             .autoplay
@@ -567,9 +592,7 @@ impl Client {
             };
             self.autoplay.note(why.clone(), now);
             // Futile, so the next look waits `FUTILE_RUN_WAIT` rather than searching every tick.
-            let st = &mut self.autoplay.growth;
-            st.last_run = Some(now);
-            st.run_was_futile = true;
+            self.mark_run_futile(now);
             return Err(why);
         };
         // Why this counter and not another, in the log. The choice is a
@@ -588,12 +611,10 @@ impl Client {
         if !go_anyway && !look.worth_going() {
             let why = format!("not worth a trip to {vendor}: {}", look.tell());
             self.autoplay.note(why.clone(), now);
-            let st = &mut self.autoplay.growth;
-            st.last_run = Some(now);
             // Nothing to buy and nothing to sell is exactly what a
             // futile run comes home with, and the party reads it the
             // same way: this one is broke, carry on without it.
-            st.run_was_futile = true;
+            self.mark_run_futile(now);
             return Err(why);
         }
         if !self.grow_travel(vendor::counter_place(at), VENDOR_REACH) {
@@ -633,6 +654,7 @@ impl Client {
             calls: Vec::new(),
             for_quest: false,
             short_with: None,
+            looked_from: None,
         });
         self.autoplay.say(
             Doing::Shopping,

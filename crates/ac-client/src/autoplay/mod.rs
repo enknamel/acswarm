@@ -586,6 +586,8 @@ impl Client {
         let on = self.autoplay.config.enabled;
         if self.autoplay.was_on && !on {
             self.drop_walk("autoplay switched off");
+            // The ground goes too: found with no journey later, it was struck off as unreachable.
+            self.autoplay.growth.drop_ground_walk();
         }
         self.autoplay.was_on = on;
         // The team's housekeeping runs whether or not the character

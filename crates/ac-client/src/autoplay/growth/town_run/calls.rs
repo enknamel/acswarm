@@ -428,6 +428,7 @@ impl Client {
             calls: Vec::new(),
             for_quest: true,
             short_with: None,
+            looked_from: None,
         };
         if !self.make_call(&mut run, giver_call(row, at), now) {
             return false;

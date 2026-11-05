@@ -409,3 +409,31 @@ fn a_run_short_of_coin_goes_hunting_not_round_the_shops() {
         "went home with coin to spend"
     );
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn coin_given_after_a_futile_run_ends_the_wait() {
+    // Blargerton, with 1 coin and nothing to sell, found the trip not worth it and waited; handed
+    // 181,000 coins, he still walked off to hunt with no Copper Scarabs, waiting out the clock.
+    let holtburg = 0xA9B4_0019;
+    let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
+    c.world.stats.level = 5;
+    with_a_pack(&mut c, 50);
+    coin_in_the_pack(&mut c, 0x8000_0030, 1);
+    with_a_buy_list(&mut c, &[("Copper Scarab", 50, 10)]);
+    let cfg = c.autoplay.config.growth.clone();
+    let now = Instant::now();
+    assert!(!c.grow_town_run(now, &cfg), "set off with 1 coin");
+    assert!(
+        c.autoplay.growth.run_was_futile,
+        "no wait after a futile look"
+    );
+    let later = now + Duration::from_secs(10);
+    assert!(!c.grow_town_run(later, &cfg), "the wait did not hold");
+    coin_in_the_pack(&mut c, 0x8000_0031, 181_000);
+    assert!(
+        c.grow_town_run(later, &cfg),
+        "{}",
+        c.autoplay.growth.held_back
+    );
+}

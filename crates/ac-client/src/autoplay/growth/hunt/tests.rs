@@ -870,3 +870,42 @@ fn a_journey_put_down_while_the_player_steers_is_walked_on_once_the_keys_are_let
         "not walked on"
     );
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_pursued_ground_left_by_switching_autoplay_off_is_gone_back_to() {
+    // Blargerton, set off for Tusker Barracks (2 min, 54 Tusker Guards), was switched off a second
+    // later: the journey went, the ground was struck off as unreachable, and on again he set off
+    // for one 13 min away.
+    let mut c =
+        crate::testkit::standing_in_the_field(85, 0xA9B4_0019, glam::Vec3::new(84.0, 7.1, 94.0));
+    c.autoplay.config.growth.hunt_grounds = false;
+    let vault = ac_world::hunting::at(0x0001).expect("the vault's ground");
+    pursuing_the_jaw(&mut c, 0x0001, vault.place());
+    let now = Instant::now();
+    assert!(c.autoplay_grow(now), "{}", c.autoplay.status);
+    assert!(
+        c.autoplay.status.contains("Remote Empyrean Vault"),
+        "{}",
+        c.autoplay.status
+    );
+    assert!(c.autoplay_grow(now), "{}", c.autoplay.status);
+    assert!(
+        c.autoplay.status.contains("step 1 of"),
+        "metres to a dungeon's cells: {}",
+        c.autoplay.status
+    );
+    c.autoplay.was_on = true;
+    c.autoplay.config.enabled = false;
+    c.tick_autoplay(now);
+    assert!(!c.traveling(), "travelled on with autoplay off");
+    c.autoplay.config.enabled = true;
+    let later = now + Duration::from_secs(2);
+    c.autoplay_grow(later);
+    assert!(
+        c.autoplay.growth.skip.since(&0x0001).is_none(),
+        "struck off as unreachable"
+    );
+    assert!(c.autoplay_grow(later), "{}", c.autoplay.status);
+    assert_eq!(c.autoplay.growth.bound_landblock(), Some(0x0001));
+}

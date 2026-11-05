@@ -584,9 +584,7 @@ impl Client {
                 self.hold_pursuit(&line.id, why, now);
                 Some(false)
             }
-            PursuitStep::Hunt {
-                creature, place, ..
-            } => {
+            PursuitStep::Hunt { creature, .. } => {
                 let here = self.player.as_ref()?.cell >> 16;
                 let mut grounds = self.autoplay.growth.pursuit_grounds.clone();
                 if grounds.iter().any(|(lb, _)| *lb == here) {
@@ -613,10 +611,10 @@ impl Client {
                         let st = &mut self.autoplay.growth;
                         st.bound = Some((lb, at.at.truncate(), creature.clone()));
                         st.quiet_since = None;
-                        let why = format!(
-                            "for {}: on the way to hunt {creature} in {place}",
-                            line.title
-                        );
+                        // The ground taken, which need not be the step's first.
+                        let to = ac_world::quest_chain::place_name(at.cell);
+                        let why =
+                            format!("for {}: on the way to hunt {creature} in {to}", line.title);
                         self.autoplay.say(Doing::Traveling, why);
                         return Some(true);
                     }

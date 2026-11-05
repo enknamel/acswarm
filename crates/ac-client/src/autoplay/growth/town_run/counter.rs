@@ -4,8 +4,8 @@ use glam::Vec2;
 
 use super::vendor::{counter_place, spot};
 use super::{
-    Errand, Phase, Run, Turn, BUSY_ASKS, BUSY_REASK, COUNTER_REACH, SELLING_TIMEOUT, SETTLE,
-    STOPS_PER_RUN, VENDOR_OPEN_TIMEOUT, VENDOR_REACH,
+    Errand, Phase, Run, Turn, BUSY_ASKS, BUSY_REASK, COUNTER_REACH, DESCRIBED_WITHIN,
+    SELLING_TIMEOUT, SETTLE, STOPS_PER_RUN, VENDOR_OPEN_TIMEOUT, VENDOR_REACH,
 };
 use crate::autoplay::growth::road::{on_the_way, OnTheWay, WALK_ON_EVERY};
 use crate::autoplay::growth::{a_few, about, Growth};
@@ -278,6 +278,15 @@ impl Client {
                         Turn::Acted
                     }
                     None => {
+                        // Still on the journey's last walk in, or just out of a portal with the
+                        // landing not yet described: looked for again, not given up on.
+                        let looked = *run.looked_from.get_or_insert(now);
+                        if self.traveling() || now.duration_since(looked) < DESCRIBED_WITHIN {
+                            self.autoplay
+                                .say(Doing::Shopping, format!("looking for {}", run.vendor));
+                            self.autoplay.growth.run = Some(run);
+                            return Turn::Waited;
+                        }
                         self.autoplay.note(
                             format!("{} is not here (indoors, or gone)", run.vendor),
                             now,
@@ -674,6 +683,7 @@ impl Client {
                         calls: run.calls,
                         for_quest: run.for_quest,
                         short_with: run.short_with,
+                        looked_from: None,
                     });
                     return true;
                 }
@@ -714,8 +724,10 @@ impl Client {
         let futile = !run.for_quest && run.sold == 0 && !self.autoplay.growth.bought_anything;
         // Ended short of coin, the next run waits the same: it would find the same prices.
         let short = !run.for_quest && run.short_with.is_some_and(|was| self.spendable() <= was);
+        let purse = self.spendable();
         let st = &mut self.autoplay.growth;
         st.run_was_futile = futile || short;
+        st.futile_purse = purse;
         st.bought_anything = false;
         st.last_run = Some(now);
         st.run = None;

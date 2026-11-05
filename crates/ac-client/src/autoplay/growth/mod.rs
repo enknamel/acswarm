@@ -120,6 +120,8 @@ pub struct State {
     /// The last run to town ended without buying or selling anything, or short of coin.
     /// Another one straight away would do the same, so it waits.
     pub run_was_futile: bool,
+    /// The spendable coin when `run_was_futile` was set: more than this ends the wait.
+    pub futile_purse: u32,
     /// The character has given up, in town. Out of money, with nothing
     /// left to sell and too short of supplies to go on hunting, it
     /// stops where the shops are -- which is where the money and the

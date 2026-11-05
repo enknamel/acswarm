@@ -878,3 +878,39 @@ fn a_counter_on_a_deck_up_a_ramp_is_walked_up_to() {
         c.autoplay.status
     );
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_counter_not_yet_seen_on_arrival_is_waited_for_before_it_is_not_here() {
+    // Blargerton came out of a portal by Archmage Philomon, the one with Pyreal Scarabs: 0.2 s
+    // later, nothing described round the landing yet, the run called him "not here" and ended.
+    let holtburg = 0xA9B4_0019;
+    let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
+    let me = c.my_position().unwrap();
+    let cfg = c.autoplay.config.growth.clone();
+    let now = Instant::now();
+    let mut run = run_to(Vec2::new(me.x + 5.0, me.y), now);
+    run.vendor = "Archmage Philomon".into();
+    c.autoplay.growth.run = Some(run);
+    assert_eq!(c.grow_run_step(now, &cfg), Turn::Waited);
+    let waits = |c: &Client| {
+        c.autoplay
+            .growth
+            .run
+            .as_ref()
+            .is_some_and(|r| r.vendor == "Archmage Philomon")
+    };
+    assert!(waits(&c), "not here at once");
+    let soon = now + Duration::from_secs(5);
+    assert_eq!(c.grow_run_step(soon, &cfg), Turn::Waited);
+    assert!(waits(&c), "not here in 5 s");
+    let later = now + DESCRIBED_WITHIN + Duration::from_secs(1);
+    c.grow_run_step(later, &cfg);
+    let gone = c
+        .autoplay
+        .growth
+        .run
+        .as_ref()
+        .is_none_or(|r| r.vendor != "Archmage Philomon");
+    assert!(gone, "waited for ever for a counter that is not there");
+}

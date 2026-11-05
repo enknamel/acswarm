@@ -22,6 +22,7 @@ pub(super) fn run_to(at: Vec2, now: Instant) -> Run {
         calls: Vec::new(),
         for_quest: false,
         short_with: None,
+        looked_from: None,
     }
 }
 
