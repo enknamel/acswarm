@@ -21,8 +21,12 @@ pub const RESTART_EVERY: Duration = Duration::from_secs(60);
 /// describing the room the character came from, and no other.
 const PAST_THE_DOOR: f32 = 2.5;
 
-/// The walk into a room ends within this of its spot (metres, 3D).
+/// The walk into a room ends within this of its spot (metres, 3D), or within half the spot's depth
+/// past the sill when that is less ([`within_room`]).
 const STOP: f32 = 1.0;
+
+/// The least a walk into a room ends within (metres): a steady stop, not an orbit of the spot.
+const STOP_AT_LEAST: f32 = 0.25;
 
 /// The dungeon's rooms and what opens on to what.
 struct Rooms<'a>(&'a [CellScene]);
@@ -48,6 +52,8 @@ pub struct RoomWalk {
     pub from: u32,
     pub room: u32,
     pub at: Place,
+    /// How near `at` the walk ends: inside the room, past the sill (`within_room`).
+    pub within: f32,
 }
 
 /// `past` metres beyond `sill` along the wall's `normal` (on the map, either sign), on the far side
@@ -102,24 +108,42 @@ fn nearest_door(cells: &[CellScene], room: u32, from: Vec3) -> Option<(Vec3, Vec
     Some((sill, normal))
 }
 
-/// Where to walk to be in `room`: [`past_the_door`] of its doorway nearest `from` (the room's
-/// middle, else `facing`, decides on the sill), or the middle of the cell when the data has no opening.
+/// Where to walk to be in `room`, and the sill crossed: [`past_the_door`] of its doorway nearest
+/// `from` (the room's middle, else `facing`, decides on the sill), or the middle of the cell, as both,
+/// when the data has no opening.
 fn way_into(
     cells: &[CellScene],
     room: u32,
     from: Vec3,
     facing: glam::Vec2,
     past: f32,
-) -> Option<Vec3> {
+) -> Option<(Vec3, Vec3)> {
     let (sill, normal) = nearest_door(cells, room, from)?;
     let cell = cells.iter().find(|c| c.cell_id == room)?;
     if normal == Vec3::ZERO && cell.doorways.is_empty() {
         // No opening in the data: the middle of the cell structure is
         // the best guess there is.
-        return Some(sill);
+        return Some((sill, sill));
     }
     let middle = cell.transform.transform_point3(Vec3::ZERO);
-    Some(past_the_door(sill, normal, from, (middle, facing), past))
+    Some((
+        past_the_door(sill, normal, from, (middle, facing), past),
+        sill,
+    ))
+}
+
+/// How near `spot` a walk through `sill` toward `aim` ends so it ends in the room: [`STOP`], or half
+/// the spot's depth past the sill (a 2.5 m room's only spot may be 0.5 m in), at least `STOP_AT_LEAST`.
+fn within_room(sill: Vec3, aim: Vec3, spot: Vec3) -> f32 {
+    let inward = (aim - sill).truncate();
+    if inward.length() < 0.1 {
+        return STOP;
+    }
+    let depth = (spot - sill).truncate().dot(inward.normalize());
+    if depth <= 0.0 {
+        return STOP;
+    }
+    (depth * 0.5).clamp(STOP_AT_LEAST, STOP)
 }
 
 /// Of `spots`, the one in `room`'s own cell nearest `aim` on the map (on its floor however a stair
@@ -197,7 +221,13 @@ impl Client {
         let new_here = self.autoplay.rooms_seen.insert(cell);
         self.autoplay.rooms_shut.remove(&cell);
 
-        if let Some(RoomWalk { from, room, at }) = self.autoplay.room_bound {
+        if let Some(RoomWalk {
+            from,
+            room,
+            at,
+            within,
+        }) = self.autoplay.room_bound
+        {
             // Arrived: in the room, or in one not walked yet, where the next doorway is chosen; not
             // in a walked room on the way (exploring_does_not_pace_between_two_rooms).
             if cell == room || (cell != from && new_here) {
@@ -205,7 +235,7 @@ impl Client {
                 self.autoplay.room_bound = None;
                 return true;
             }
-            let did = self.walk_into(at, now);
+            let did = self.walk_into(at, within, now);
             if !matches!(did, Did::Done | Did::Blocked(_)) {
                 self.autoplay
                     .say(Doing::Traveling, "looking for something to fight");
@@ -271,7 +301,7 @@ impl Client {
             let Some(room) = next else {
                 return false;
             };
-            let Some(aim) = way_into(&scene.cells, room, me, facing, PAST_THE_DOOR) else {
+            let Some((aim, sill)) = way_into(&scene.cells, room, me, facing, PAST_THE_DOOR) else {
                 self.autoplay.rooms_shut.insert(room);
                 continue;
             };
@@ -292,7 +322,8 @@ impl Client {
             };
             // A room is gone into only when a walk gets there: the doorway of 0x01F60296 opens 6 m
             // up a wall (exploring_the_holtburg_dungeon_does_not_stand_at_the_bookcases).
-            if let Did::Blocked(why) = self.walk_into(at, now) {
+            let within = within_room(sill, aim, at.at);
+            if let Did::Blocked(why) = self.walk_into(at, within, now) {
                 self.autoplay.rooms_shut.insert(room);
                 self.autoplay.note(
                     format!("no way into {room:#06x} ({}); going round", why.what),
@@ -305,6 +336,7 @@ impl Client {
                 from: cell,
                 room,
                 at,
+                within,
             });
             self.autoplay
                 .say(Doing::Traveling, "looking for something to fight");
@@ -312,12 +344,9 @@ impl Client {
         }
     }
 
-    /// Walk to `place`, in the room past a threshold, to within [`STOP`].
-    fn walk_into(&mut self, place: Place, now: Instant) -> Did {
-        let goal = Goal::At {
-            place,
-            within: STOP,
-        };
+    /// Walk to `place`, in the room past a threshold, to `within` (see [`within_room`]).
+    fn walk_into(&mut self, place: Place, within: f32, now: Instant) -> Did {
+        let goal = Goal::At { place, within };
         self.go(self.step_owner(), goal, now)
     }
 }
@@ -392,6 +421,39 @@ mod tests {
             "explored {seen} rooms, shut {:x?}",
             c.autoplay.rooms_shut
         );
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn exploring_the_black_spawn_den_goes_on_past_its_first_rooms() {
+        // Blargerton, at the Black Spawn Den for its Tusker Guards: after a Tusker Slave, every
+        // room round 0x0104_0378 was "cannot get into" or "no floor past the door", and it stood.
+        let mut c = crate::testkit::standing_in_the_field(
+            41,
+            0x0104_0378,
+            glam::Vec3::new(109.26, -143.77, 0.0),
+        );
+        c.world.player_guid = Some(crate::testkit::ME);
+        c.autoplay.config.enabled = true;
+        c.autoplay.config.fight.enabled = true;
+        play(&mut c, 60);
+        let seen = c.autoplay.rooms_seen.len();
+        assert!(
+            seen >= 10,
+            "explored {seen} rooms, shut {:x?}",
+            c.autoplay.rooms_shut
+        );
+    }
+
+    #[test]
+    fn a_walk_into_a_shallow_room_ends_past_its_sill() {
+        let sill = Vec3::new(110.0, -145.0, 0.0);
+        let aim = Vec3::new(110.0, -147.5, 0.0);
+        // The Black Spawn Den's 2.5 m rooms: the one spot in 0x037C is 0.5 m past the sill.
+        let shallow = within_room(sill, aim, Vec3::new(109.5, -145.5, 0.0));
+        assert!(shallow < 0.5, "{shallow} lets the walk stop on the sill");
+        assert_eq!(within_room(sill, aim, Vec3::new(110.0, -148.0, 0.0)), STOP);
+        assert_eq!(within_room(sill, sill, Vec3::new(110.0, -146.0, 0.0)), STOP);
     }
 
     /// In every twenty seconds of `stood` (a place a second), the character gets six metres from
