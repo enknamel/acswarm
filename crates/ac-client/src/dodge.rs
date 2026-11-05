@@ -405,7 +405,7 @@ impl Client {
 
     /// The shape of object `guid` standing at `feet`: its Setup's height
     /// and radius at its scale, a person's when that is not known.
-    fn body_of(&self, guid: u32, feet: Vec3) -> aim::Body {
+    pub(crate) fn body_of(&self, guid: u32, feet: Vec3) -> aim::Body {
         let (height, radius) = self
             .world
             .objects
@@ -453,7 +453,7 @@ impl Client {
 
     /// Whether the attack `how` flying along `path` is struck by nothing: the landblock, the
     /// ground, or for a spell or an arrow a doorway (see `crate::doorway`; a swing goes through).
-    fn shot_flies(&mut self, path: &[Vec3], how: How) -> bool {
+    pub(crate) fn shot_flies(&mut self, path: &[Vec3], how: How) -> bool {
         let assets = self.assets.clone();
         let clear = self
             .player
@@ -857,7 +857,7 @@ impl Client {
         let seen =
             self.shot_clears(target, how) && (matches!(how, How::Melee) || !self.is_dud_spot(me));
         // A doorway either stands in: step out of it, or wait for the target to come out.
-        if !seen && !matches!(how, How::Melee) && self.clear_doorway(target, name, at) {
+        if !seen && !matches!(how, How::Melee) && self.clear_doorway(target, name, at, how) {
             return Did::Acting;
         }
         let stop = if seen { range * WITHIN } else { NO_SIGHT_STOP };

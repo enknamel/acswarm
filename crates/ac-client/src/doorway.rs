@@ -160,7 +160,13 @@ impl Client {
     /// room (`a_caster_in_a_doorway_steps_out_into_the_target_s_room`). True while doing either;
     /// false when neither stands in one, the target has stayed in one past [`PULL_WAIT`], or
     /// there is nowhere to go.
-    pub(crate) fn clear_doorway(&mut self, target: u32, name: &str, at: Vec3) -> bool {
+    pub(crate) fn clear_doorway(
+        &mut self,
+        target: u32,
+        name: &str,
+        at: Vec3,
+        how: crate::dodge::How,
+    ) -> bool {
         let now = Instant::now();
         let Some(me) = self.my_position() else {
             return false;
@@ -173,7 +179,7 @@ impl Client {
         let Some(door) = doors.iter().find(|d| d.holds(me)).copied() else {
             return false;
         };
-        let Some(spot) = self.out_of_doorway(&door, me, at) else {
+        let Some(spot) = self.out_of_doorway(&door, me, (target, at), how) else {
             tracing::info!("range: standing in a doorway, with nowhere out of it toward {name}");
             return false;
         };
@@ -261,12 +267,38 @@ impl Client {
         })
     }
 
-    /// The nearest place out of `door`'s doorway on the side `at` is on, that a path leads to.
-    fn out_of_doorway(&mut self, door: &DoorBox, me: Vec3, at: Vec3) -> Option<Place> {
+    /// The nearest place out of `door`'s doorway on the side `target` (at `at`) is on, that the
+    /// shot `how` flies from and a path leads to: from none, the doorway is not what stops it
+    /// (a_caster_in_a_doorway_with_its_target_past_the_walls_is_not_held_at_the_door).
+    fn out_of_doorway(
+        &mut self,
+        door: &DoorBox,
+        me: Vec3,
+        (target, at): (u32, Vec3),
+        how: crate::dodge::How,
+    ) -> Option<Place> {
         let theirs = door.side(at);
-        self.nearest_reached(door.at, DOORWAY_DEPTH + PULL_BAND, me, |s| {
-            door.side(s) == theirs && !door.holds(s)
-        })
+        let mut spots = self
+            .standable_near(door.at, DOORWAY_DEPTH + PULL_BAND)
+            .unwrap_or_default();
+        spots.retain(|s| door.side(s.at) == theirs && !door.holds(s.at));
+        spots.sort_by(|a, b| a.at.distance(me).total_cmp(&b.at.distance(me)));
+        let mine = self.world.player().map_or(0, |o| o.guid);
+        let (shot, to) = (self.shot_for(how), self.body_of(target, at));
+        for s in spots.into_iter().take(PULL_LOOKS) {
+            let Some(path) = aim::flight(shot, self.body_of(mine, s.at), to) else {
+                continue;
+            };
+            if !self.shot_flies(&path, how) {
+                continue;
+            }
+            if s.at.distance(me) <= AT_SPOT
+                || matches!(self.plan_walk(s, AT_SPOT), Planned::Route(_))
+            {
+                return Some(s);
+            }
+        }
+        None
     }
 
     /// The standing place within `radius` of `around` that passes `keep`, nearest `me` of the

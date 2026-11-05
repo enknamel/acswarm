@@ -99,7 +99,7 @@ fn a_target_in_a_doorway_is_waited_for_out_of_it() {
     c.world.objects.get_mut(&rat.guid).unwrap().position =
         Some(ac_world::object::Position::new_flat(0x01F6_01FA, out));
     assert!(c.shot_clears(rat.guid, how), "out of the doorway");
-    assert!(!c.clear_doorway(rat.guid, "Swamp Rat", me + Vec3::new(-2.0, 0.0, 0.0)));
+    assert!(!c.clear_doorway(rat.guid, "Swamp Rat", me + Vec3::new(-2.0, 0.0, 0.0), how));
 }
 
 /// The door 0x028602F6 in dungeon 0x0286, open, where 15 of Blargerton's casts went nowhere: he
@@ -198,4 +198,62 @@ fn a_spot_to_throw_from_is_out_of_the_doorway() {
         "beside the frame: {:.2} m from the door",
         past_the_0286_door(to)
     );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_caster_in_a_doorway_with_its_target_past_the_walls_is_not_held_at_the_door() {
+    // Blargerton by Archmage Philomon's door in 0x95D6, Relic Bones 59 m off outside: he stepped
+    // "out of the doorway" to a spot still in no sight of it, walked back for sight, and flipped
+    // between the two every frame until the server dropped him (live, 2026-11-05).
+    let origin = ac_world::landblock_origin(0x95D6_0000);
+    let mut c =
+        crate::testkit::standing_in_the_field(42, 0x95D6_0132, Vec3::new(85.875, 100.617, 100.0));
+    let door = ac_world::WorldObject {
+        guid: 0x795D_6001,
+        name: "Door".into(),
+        setup_id: 0x0200_19FF,
+        object_desc_flags: ac_world::object_desc_flags::DOOR,
+        physics_state: 0x10018,
+        position: crate::testkit::placed(0x95D6_0138, origin + Vec3::new(87.36, 99.2242, 100.002)),
+        scale: 1.0,
+        ..Default::default()
+    };
+    c.world.objects.insert(door.guid, door);
+    const BONES: u32 = 0x8000_0002;
+    let mut bones = crate::testkit::creature(BONES, "Relic Bones");
+    bones.object_desc_flags |= ac_world::object_desc_flags::ATTACKABLE;
+    bones.position =
+        crate::testkit::placed(0x95D6_0027, origin + Vec3::new(119.375, 148.39, 91.27));
+    c.world.objects.insert(BONES, bones);
+    let spell = c
+        .assets
+        .spell_table()
+        .unwrap()
+        .find_by_name("Flame Bolt VI")
+        .map(|(id, _)| id)
+        .expect("Flame Bolt VI");
+    let how = How::Spell(spell);
+    let (t0, dt) = (Instant::now(), 0.033);
+    let mut now = t0;
+    let mut flips = 0;
+    let mut said = String::new();
+    while now < t0 + Duration::from_secs(20) {
+        if c.autoplay_approach(BONES, "Relic Bones", how) == Did::Done {
+            break;
+        }
+        if c.autoplay.status != said {
+            flips += 1;
+            said = c.autoplay.status.clone();
+        }
+        c.tick_player(crate::player::Input::default(), dt, now);
+        now += Duration::from_secs_f32(dt);
+    }
+    assert!(
+        c.shot_clears(BONES, how),
+        "no shot after {:?}, at {:?}, saying {said:?}",
+        now - t0,
+        c.my_position().map(|p| p - origin)
+    );
+    assert!(flips <= 3, "{flips} changes of mind on the way");
 }
