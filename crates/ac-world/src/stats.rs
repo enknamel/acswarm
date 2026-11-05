@@ -714,6 +714,56 @@ impl PlayerStats {
         ((total * m * self.vitae()).round() as i32 + a).max(0) as u32
     }
 
+    /// `skill_current` taken apart, for the log: each attribute base and current, the creation
+    /// bonus, ranks, multiplier, additive and vitae, and the enchantments that touch any of them.
+    pub fn skill_parts(&self, skill: &Skill, base: Option<&SkillBase>) -> String {
+        let f = base.map(|b| &b.formula);
+        let attrs: Vec<u32> = f
+            .map(|f| [f.attr1, f.attr2].into_iter().filter(|a| *a != 0).collect())
+            .unwrap_or_default();
+        let shown: Vec<String> = attrs
+            .iter()
+            .map(|a| {
+                format!(
+                    "attr {a} {}->{}",
+                    self.attribute_value(*a),
+                    self.attribute_current(*a)
+                )
+            })
+            .collect();
+        let touching: Vec<String> = self
+            .enchantments
+            .iter()
+            .filter(|e| {
+                (e.stat_mod_type & enchantment_type::SKILL != 0 && e.stat_mod_key == skill.id)
+                    || (e.stat_mod_type & enchantment_type::ATTRIBUTE != 0
+                        && attrs.contains(&e.stat_mod_key))
+            })
+            .map(|e| {
+                format!(
+                    "{}:{:#x}/{}={}",
+                    e.spell_id, e.stat_mod_type, e.stat_mod_key, e.stat_mod_value
+                )
+            })
+            .collect();
+        format!(
+            "skill {} = {} [{} / {}, usable {}; init {} ranks {} sac {}; x{} +{} vitae {}; {} enchantments, these: {}]",
+            skill.id,
+            self.skill_current(skill, base),
+            shown.join(", "),
+            f.map_or(0, |f| f.divisor),
+            base.is_some_and(|b| b.usable_at(skill.advancement)),
+            skill.init_level,
+            skill.ranks,
+            skill.advancement,
+            self.enchantment_multiplier(enchantment_type::SKILL, skill.id),
+            self.enchantment_additive(enchantment_type::SKILL, skill.id),
+            self.vitae(),
+            self.enchantments.len(),
+            touching.join(" "),
+        )
+    }
+
     fn skill_mut(&mut self, id: u32) -> &mut Skill {
         match self.skills.iter().position(|s| s.id == id) {
             Some(i) => &mut self.skills[i],

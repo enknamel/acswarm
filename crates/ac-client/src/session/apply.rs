@@ -575,6 +575,14 @@ impl Client {
                     p.cell,
                     p.local
                 );
+                // The magic skills as worked out here, against the fizzle rates the log shows.
+                let skills = self.assets.skill_table().ok();
+                for id in [31, 32, 33, 34] {
+                    if let Some(sk) = self.world.stats.skill(id) {
+                        let base = skills.as_ref().and_then(|t| t.get(id));
+                        tracing::info!("{}", self.world.stats.skill_parts(sk, base));
+                    }
+                }
                 self.player_setup = self
                     .world
                     .player()
