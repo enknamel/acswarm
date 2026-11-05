@@ -87,7 +87,8 @@ impl Client {
     }
 
     /// Housekeeping: keep the learnable spells current, and read one scroll the pack holds whose
-    /// spell is among them while nothing is fought or travelled (a use breaks a journey off).
+    /// spell is among them while nothing is fought or walked: a read stands the reader still in peace
+    /// mode (Scroll.cs:68-76), and a use breaks a journey off.
     pub(crate) fn autoplay_learn_scrolls(&mut self, now: Instant) {
         self.refresh_learnable();
         if !self.loot_profile().is_some_and(|p| p.looting.learn_scrolls) {
@@ -101,6 +102,7 @@ impl Client {
         let quiet = self.attack_target.is_none()
             && self.autoplay.nearest_fight.is_none()
             && !self.traveling()
+            && self.going.is_none()
             && self.visits.current.is_none()
             && !self.autoplay.growth.town_run_under_way()
             && !self.is_dead();

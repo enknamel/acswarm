@@ -75,6 +75,18 @@ fn a_scroll_the_character_can_learn_is_kept_and_read_once_nothing_is_fought() {
     assert_eq!(c.last_used, None, "read on the way to a giver");
     c.visits.current = None;
 
+    // Walking into the next room of a dungeon: a read would stand it still on the way.
+    let me_at = c.my_position().unwrap();
+    let ahead = crate::Goal::At {
+        place: c.place_at(me_at + glam::Vec3::new(10.0, 0.0, 0.0)),
+        within: 1.0,
+    };
+    c.go(crate::Owner::Script, ahead, now);
+    assert!(c.going.is_some(), "no walk set");
+    c.autoplay_learn_scrolls(now);
+    assert_eq!(c.last_used, None, "read mid-walk");
+    c.going = None;
+
     // Nothing on: the bolt is read, once, and the heal never.
     c.autoplay_learn_scrolls(now);
     assert_eq!(c.last_used, Some(0x8000_0500));
