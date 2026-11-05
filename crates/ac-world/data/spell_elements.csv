@@ -1,967 +1,969 @@
 # Which element each spell is about.
-# spell_id,role,element,name
+# spell_id,role,element,mod,name
 # role is "attack" (deals that element) or "vuln" (makes whoever it is
 # cast on take more of it: the client only uses the ones that take a
 # target, so it never casts one on itself). The element is a DamageType bit: 1 slash, 2 pierce,
 # 4 bludgeon, 8 cold, 16 fire, 32 acid, 64 electric, 128 health,
-# 256 stamina, 512 mana, 1024 nether. The name is there to read by; the
+# 256 stamina, 512 mana, 1024 nether. mod is what a vuln multiplies the
+# target's resistance by (ACE stat_Mod_Val; the top one of its kind on a
+# target counts, EnchantmentManager.cs:925-940), 1 for an attack. The name is there to read by; the
 # client matches on the id.
 # Regenerate with reference/scripts/data/spell_elements.sh (reads the
 # ACE world database, the community's reconstruction of retail's server
 # data; the client's SpellTable does not carry the element).
-21,vuln,16,Fire Vulnerability Other I
-22,vuln,16,Fire Vulnerability Self I
-27,attack,16,Flame Bolt I
-28,attack,8,Frost Bolt I
-57,attack,2,Magic Bolt
-58,attack,32,Acid Stream I
-59,attack,32,Acid Stream II
-60,attack,32,Acid Stream III
-61,attack,32,Acid Stream IV
-62,attack,32,Acid Stream V
-63,attack,32,Acid Stream VI
-64,attack,4,Shock Wave I
-65,attack,4,Shock Wave II
-66,attack,4,Shock Wave III
-67,attack,4,Shock Wave IV
-68,attack,4,Shock Wave V
-69,attack,4,Shock Wave VI
-70,attack,8,Frost Bolt II
-71,attack,8,Frost Bolt III
-72,attack,8,Frost Bolt IV
-73,attack,8,Frost Bolt V
-74,attack,8,Frost Bolt VI
-75,attack,64,Lightning Bolt I
-76,attack,64,Lightning Bolt II
-77,attack,64,Lightning Bolt III
-78,attack,64,Lightning Bolt IV
-79,attack,64,Lightning Bolt V
-80,attack,64,Lightning Bolt VI
-81,attack,16,Flame Bolt II
-82,attack,16,Flame Bolt III
-83,attack,16,Flame Bolt IV
-84,attack,16,Flame Bolt V
-85,attack,16,Flame Bolt VI
-86,attack,2,Force Bolt I
-87,attack,2,Force Bolt II
-88,attack,2,Force Bolt III
-89,attack,2,Force Bolt IV
-90,attack,2,Force Bolt V
-91,attack,2,Force Bolt VI
-92,attack,1,Whirling Blade I
-93,attack,1,Whirling Blade II
-94,attack,1,Whirling Blade III
-95,attack,1,Whirling Blade IV
-96,attack,1,Whirling Blade V
-97,attack,1,Whirling Blade VI
-99,attack,32,Acid Blast III
-100,attack,32,Acid Blast IV
-101,attack,32,Acid Blast V
-102,attack,32,Acid Blast VI
-103,attack,4,Shock Blast III
-104,attack,4,Shock Blast IV
-105,attack,4,Shock Blast V
-106,attack,4,Shock Blast VI
-107,attack,8,Frost Blast III
-108,attack,8,Frost Blast IV
-109,attack,8,Frost Blast V
-110,attack,8,Frost Blast VI
-111,attack,64,Lightning Blast III
-112,attack,64,Lightning Blast IV
-113,attack,64,Lightning Blast V
-114,attack,64,Lightning Blast VI
-115,attack,16,Flame Blast III
-116,attack,16,Flame Blast IV
-117,attack,16,Flame Blast V
-118,attack,16,Flame Blast VI
-119,attack,2,Force Blast III
-120,attack,2,Force Blast IV
-121,attack,2,Force Blast V
-122,attack,2,Force Blast VI
-123,attack,1,Blade Blast III
-124,attack,1,Blade Blast IV
-125,attack,1,Blade Blast V
-126,attack,1,Blade Blast VI
-127,attack,32,Acid Volley III
-128,attack,32,Acid Volley IV
-129,attack,32,Acid Volley V
-130,attack,32,Acid Volley VI
-131,attack,4,Bludgeoning Volley III
-132,attack,4,Bludgeoning Volley IV
-133,attack,4,Bludgeoning Volley V
-134,attack,4,Bludgeoning Volley VI
-135,attack,8,Frost Volley III
-136,attack,8,Frost Volley IV
-137,attack,8,Frost Volley V
-138,attack,8,Frost Volley VI
-139,attack,64,Lightning Volley III
-140,attack,64,Lightning Volley IV
-141,attack,64,Lightning Volley V
-142,attack,64,Lightning Volley VI
-143,attack,16,Flame Volley III
-144,attack,16,Flame Volley IV
-145,attack,16,Flame Volley V
-146,attack,16,Flame Volley VI
-147,attack,2,Force Volley III
-148,attack,2,Force Volley IV
-149,attack,2,Force Volley V
-150,attack,2,Force Volley VI
-151,attack,1,Blade Volley III
-152,attack,1,Blade Volley IV
-153,attack,1,Blade Volley V
-154,attack,1,Blade Volley VI
-521,vuln,32,Acid Vulnerability Other I
-522,vuln,32,Acid Vulnerability Other II
-523,vuln,32,Acid Vulnerability Other III
-524,vuln,32,Acid Vulnerability Other IV
-525,vuln,32,Acid Vulnerability Other V
-526,vuln,32,Acid Vulnerability Other VI
-527,vuln,32,Acid Vulnerability Self I
-528,vuln,32,Acid Vulnerability Self II
-529,vuln,32,Acid Vulnerability Self III
-530,vuln,32,Acid Vulnerability Self IV
-531,vuln,32,Acid Vulnerability Self V
-532,vuln,32,Acid Vulnerability Self VI
-1042,vuln,4,Bludgeoning Vulnerability Self I
-1043,vuln,4,Bludgeoning Vulnerability Self II
-1044,vuln,4,Bludgeoning Vulnerability Self III
-1045,vuln,4,Bludgeoning Vulnerability Self IV
-1046,vuln,4,Bludgeoning Vulnerability Self V
-1047,vuln,4,Bludgeoning Vulnerability Self VI
-1048,vuln,4,Bludgeoning Vulnerability Other I
-1049,vuln,4,Bludgeoning Vulnerability Other II
-1050,vuln,4,Bludgeoning Vulnerability Other III
-1051,vuln,4,Bludgeoning Vulnerability Other IV
-1052,vuln,4,Bludgeoning Vulnerability Other V
-1053,vuln,4,Bludgeoning Vulnerability Other VI
-1054,vuln,8,Cold Vulnerability Self I
-1055,vuln,8,Cold Vulnerability Self II
-1056,vuln,8,Cold Vulnerability Self III
-1057,vuln,8,Cold Vulnerability Self IV
-1058,vuln,8,Cold Vulnerability Self V
-1059,vuln,8,Cold Vulnerability Self VI
-1060,vuln,8,Cold Vulnerability Other I
-1061,vuln,8,Cold Vulnerability Other II
-1062,vuln,8,Cold Vulnerability Other III
-1063,vuln,8,Cold Vulnerability Other IV
-1064,vuln,8,Cold Vulnerability Other V
-1065,vuln,8,Cold Vulnerability Other VI
-1078,vuln,64,Lightning Vulnerability Self I
-1079,vuln,64,Lightning Vulnerability Self II
-1080,vuln,64,Lightning Vulnerability Self III
-1081,vuln,64,Lightning Vulnerability Self IV
-1082,vuln,64,Lightning Vulnerability Self V
-1083,vuln,64,Lightning Vulnerability Self VI
-1084,vuln,64,Lightning Vulnerability Other I
-1085,vuln,64,Lightning Vulnerability Other II
-1086,vuln,64,Lightning Vulnerability Other III
-1087,vuln,64,Lightning Vulnerability Other IV
-1088,vuln,64,Lightning Vulnerability Other V
-1089,vuln,64,Lightning Vulnerability Other VI
-1097,attack,2,Flaming Missile
-1098,vuln,16,Fire Vulnerability Self II
-1099,vuln,16,Fire Vulnerability Self III
-1100,vuln,16,Fire Vulnerability Self IV
-1101,vuln,16,Fire Vulnerability Self V
-1102,vuln,16,Fire Vulnerability Self VI
-1104,vuln,16,Fire Vulnerability Other II
-1105,vuln,16,Fire Vulnerability Other III
-1106,vuln,16,Fire Vulnerability Other IV
-1107,vuln,16,Fire Vulnerability Other V
-1108,vuln,16,Fire Vulnerability Other VI
-1121,vuln,1,Blade Vulnerability Self I
-1122,vuln,1,Blade Vulnerability Self II
-1123,vuln,1,Blade Vulnerability Self III
-1124,vuln,1,Blade Vulnerability Self IV
-1125,vuln,1,Blade Vulnerability Self V
-1126,vuln,1,Blade Vulnerability Self VI
-1127,vuln,1,Blade Vulnerability Other I
-1128,vuln,1,Blade Vulnerability Other II
-1129,vuln,1,Blade Vulnerability Other III
-1130,vuln,1,Blade Vulnerability Other IV
-1131,vuln,1,Blade Vulnerability Other V
-1132,vuln,1,Blade Vulnerability Other VI
-1145,vuln,2,Piercing Vulnerability Self I
-1146,vuln,2,Piercing Vulnerability Self II
-1147,vuln,2,Piercing Vulnerability Self III
-1148,vuln,2,Piercing Vulnerability Self IV
-1149,vuln,2,Piercing Vulnerability Self V
-1150,vuln,2,Piercing Vulnerability Self VI
-1151,vuln,2,Piercing Vulnerability Other I
-1152,vuln,2,Piercing Vulnerability Other II
-1153,vuln,2,Piercing Vulnerability Other III
-1154,vuln,2,Piercing Vulnerability Other IV
-1155,vuln,2,Piercing Vulnerability Other V
-1156,vuln,2,Piercing Vulnerability Other VI
-1481,attack,2,Flaming Missile Volley
-1781,attack,16,Exploding Magma
-1783,attack,32,Searing Disc
-1784,attack,1,Horizon's Blades
-1785,attack,16,Cassius' Ring of Fire
-1786,attack,2,Nuhmudira's Spines
-1787,attack,8,Halo of Frost
-1788,attack,64,Eye of the Storm
-1789,attack,4,Tectonic Rifts
-1790,attack,32,Acid Streak I
-1791,attack,32,Acid Streak II
-1792,attack,32,Acid Streak III
-1793,attack,32,Acid Streak IV
-1794,attack,32,Acid Streak V
-1795,attack,32,Acid Streak VI
-1796,attack,16,Flame Streak I
-1797,attack,16,Flame Streak II
-1798,attack,16,Flame Streak III
-1799,attack,16,Flame Streak IV
-1800,attack,16,Flame Streak V
-1801,attack,16,Flame Streak VI
-1802,attack,2,Force Streak I
-1803,attack,2,Force Streak II
-1804,attack,2,Force Streak III
-1805,attack,2,Force Streak IV
-1806,attack,2,Force Streak V
-1807,attack,2,Force Streak VI
-1808,attack,8,Frost Streak I
-1809,attack,8,Frost Streak II
-1810,attack,8,Frost Streak III
-1811,attack,8,Frost Streak IV
-1812,attack,8,Frost Streak V
-1813,attack,8,Frost Streak VI
-1814,attack,64,Lightning Streak I
-1815,attack,64,Lightning Streak II
-1816,attack,64,Lightning Streak III
-1817,attack,64,Lightning Streak IV
-1818,attack,64,Lightning Streak V
-1819,attack,64,Lightning Streak VI
-1820,attack,4,Shock Wave Streak I
-1821,attack,4,Shock Wave Streak II
-1822,attack,4,Shock Wave Streak III
-1823,attack,4,Shock Wave Streak IV
-1824,attack,4,Shock Wave Streak V
-1825,attack,4,Shock Wave Streak VI
-1826,attack,1,Whirling Blade Streak I
-1827,attack,1,Whirling Blade Streak II
-1828,attack,1,Whirling Blade Streak III
-1829,attack,1,Whirling Blade Streak IV
-1830,attack,1,Whirling Blade Streak V
-1831,attack,1,Whirling Blade Streak VI
-1832,attack,32,Torrential Acid
-1833,attack,1,Squall of Swords
-1834,attack,16,Firestorm
-1835,attack,2,Splinterfall
-1836,attack,8,Avalanche
-1837,attack,64,Lightning Barrage
-1838,attack,4,Stone Fists
-1839,attack,32,Blistering Creeper
-1840,attack,1,Bed of Blades
-1841,attack,16,Slithering Flames
-1842,attack,2,Spike Strafe
-1843,attack,8,Foon-Ki's Glacial Floe
-1844,attack,64,Os' Wall
-1845,attack,4,Hammering Crawler
-2019,attack,4,The sundering of the crystal
-2030,attack,16,Flaming Blaze
-2031,attack,2,Steel Thorns
-2032,attack,64,Electric Blaze
-2033,attack,32,Acidic Spray
-2034,attack,16,Exploding Fury
-2035,attack,64,Electric Discharge
-2036,attack,32,Fuming Acid
-2037,attack,16,Flaming Irruption
-2038,attack,8,Exploding Ice
-2039,attack,64,Sparking Fury
-2042,attack,16,Demon's Tongues
-2045,attack,4,Demon Fists
-2120,attack,32,Dissolving Vortex
-2121,attack,32,Corrosive Flash
-2122,attack,32,Disintegration
-2123,attack,32,Celdiseth's Searing
-2124,attack,1,Sau Kolin's Sword
-2125,attack,1,Flensing Wings
-2126,attack,4,Thousand Fists
-2127,attack,16,Silencia's Scorn
-2128,attack,16,Ilservian's Flame
-2129,attack,16,Sizzling Fury
-2130,attack,16,Infernae
-2131,attack,2,Stinging Needles
-2132,attack,2,The Spike
-2133,attack,2,Outlander's Insolence
-2134,attack,2,Fusillade
-2135,attack,8,Winter's Embrace
-2136,attack,8,Icy Torment
-2137,attack,8,Sudden Frost
-2138,attack,8,Blizzard
-2139,attack,64,Luminous Wrath
-2140,attack,64,Alset's Coil
-2141,attack,64,Lhen's Flare
-2142,attack,64,Tempest
-2143,attack,4,Pummeling Storm
-2144,attack,4,Crushing Shame
-2145,attack,4,Cameron's Curse
-2146,attack,1,Evisceration
-2147,attack,1,Rending Wind
-2162,vuln,32,Olthoi's Gift
-2163,vuln,32,Acid Vulnerability Self VII
-2164,vuln,1,Swordsman's Gift
-2165,vuln,1,Blade Vulnerability Self VII
-2166,vuln,4,Tusker's Gift
-2167,vuln,4,Bludgeoning Vulnerability Self VII
-2168,vuln,8,Gelidite's Gift
-2169,vuln,8,Cold Vulnerability Self VII
-2170,vuln,16,Inferno's Gift
-2171,vuln,16,Fire Vulnerability Self VII
-2172,vuln,64,Astyrrian's Gift
-2173,vuln,64,Lightning Vulnerability Self VII
-2174,vuln,2,Archer's Gift
-2175,vuln,2,Piercing Vulnerability Self VII
-2366,attack,4,Bovine Intervention
-2370,vuln,32,Gift of Rotting Flesh
-2371,vuln,16,Curse of Mortal Flesh
-2383,attack,16,Dark Flame
-2637,attack,16,Invoking Aun Tanua
-2672,attack,4,Ring of True Pain
-2673,attack,4,Ring of Unspeakable Agony
-2674,attack,2,Vicious Rebuke
-2699,attack,64,Auroric Whip
-2700,attack,32,Corrosive Cloud
-2701,attack,16,Elemental Fury
-2702,attack,8,Elemental Fury
-2703,attack,32,Elemental Fury
-2704,attack,64,Elemental Fury
-2710,attack,16,Volcanic Blast
-2711,attack,32,Acid Arc I
-2712,attack,32,Acid Arc II
-2713,attack,32,Acid Arc III
-2714,attack,32,Acid Arc IV
-2715,attack,32,Acid Arc V
-2716,attack,32,Acid Arc VI
-2717,attack,32,Acid Arc VII
-2718,attack,2,Force Arc I
-2719,attack,2,Force Arc II
-2720,attack,2,Force Arc III
-2721,attack,2,Force Arc IV
-2722,attack,2,Force Arc V
-2723,attack,2,Force Arc VI
-2724,attack,2,Force Arc VII
-2725,attack,8,Frost Arc I
-2726,attack,8,Frost Arc II
-2727,attack,8,Frost Arc III
-2728,attack,8,Frost Arc IV
-2729,attack,8,Frost Arc V
-2730,attack,8,Frost Arc VI
-2731,attack,8,Frost Arc VII
-2732,attack,64,Lightning Arc I
-2733,attack,64,Lightning Arc II
-2734,attack,64,Lightning Arc III
-2735,attack,64,Lightning Arc IV
-2736,attack,64,Lightning Arc V
-2737,attack,64,Lightning Arc VI
-2738,attack,64,Lightning Arc VII
-2739,attack,16,Flame Arc I
-2740,attack,16,Flame Arc II
-2741,attack,16,Flame Arc III
-2742,attack,16,Flame Arc IV
-2743,attack,16,Flame Arc V
-2744,attack,16,Flame Arc VI
-2745,attack,16,Flame Arc VII
-2746,attack,4,Shock Arc I
-2747,attack,4,Shock Arc II
-2748,attack,4,Shock Arc III
-2749,attack,4,Shock Arc IV
-2750,attack,4,Shock Arc V
-2751,attack,4,Shock Arc VI
-2752,attack,4,Shock Arc VII
-2753,attack,1,Blade Arc I
-2754,attack,1,Blade Arc II
-2755,attack,1,Blade Arc III
-2756,attack,1,Blade Arc IV
-2757,attack,1,Blade Arc V
-2758,attack,1,Blade Arc VI
-2759,attack,1,Blade Arc VII
-2760,attack,128,Martyr's Hecatomb I
-2761,attack,128,Martyr's Hecatomb II
-2762,attack,128,Martyr's Hecatomb III
-2763,attack,128,Martyr's Hecatomb IV
-2764,attack,128,Martyr's Hecatomb V
-2765,attack,128,Martyr's Hecatomb VI
-2766,attack,128,Martyr's Hecatomb VII
-2767,attack,256,Martyr's Tenacity I
-2768,attack,256,Martyr's Tenacity II
-2769,attack,256,Martyr's Tenacity III
-2770,attack,256,Martyr's Tenacity IV
-2771,attack,256,Martyr's Tenacity V
-2772,attack,256,Martyr's Tenacity VI
-2773,attack,256,Martyr's Tenacity VII
-2774,attack,512,Martyr's Blight I
-2775,attack,512,Martyr's Blight II
-2776,attack,512,Martyr's Blight III
-2777,attack,512,Martyr's Blight IV
-2778,attack,512,Martyr's Blight V
-2779,attack,512,Martyr's Blight VI
-2780,attack,512,Martyr's Blight VII
-2781,attack,32,Lesser Elemental Fury
-2782,attack,16,Lesser Elemental Fury
-2783,attack,8,Lesser Elemental Fury
-2784,attack,64,Lesser Elemental Fury
-2791,attack,32,Rolling Death
-2792,attack,16,Rolling Death
-2793,attack,8,Rolling Death
-2794,attack,64,Rolling Death
-2814,attack,2,Priest's Curse
-2815,attack,2,Boom Black Firework OUT
-2816,attack,2,Big Boom Black Firework OUT
-2817,attack,2,Shockwave Black Firework OUT
-2818,attack,2,Spiral Black Firework OUT
-2819,attack,2,Sparkle Black Firework OUT
-2820,attack,2,Blossom Black Firework OUT
-2821,attack,2,Ring Black Firework OUT
-2822,attack,2,Boom Blue Firework OUT
-2823,attack,2,Big Boom Blue Firework OUT
-2824,attack,2,Shockwave Blue Firework OUT
-2825,attack,2,Spiral Blue Firework OUT
-2826,attack,2,Sparkle Blue Firework OUT
-2827,attack,2,Blossom Blue Firework OUT
-2828,attack,2,Ring Blue Firework OUT
-2829,attack,2,Boom Green Firework OUT
-2830,attack,2,Big Boom Green Firework OUT
-2831,attack,2,Shockwave Green Firework OUT
-2832,attack,2,Spiral Green Firework OUT
-2833,attack,2,Sparkle Green Firework OUT
-2834,attack,2,Blossom Green Firework OUT
-2835,attack,2,Ring Green Firework OUT
-2836,attack,2,Boom Orange Firework OUT
-2837,attack,2,Big Boom Orange Firework OUT
-2838,attack,2,Shockwave Orange Firework OUT
-2839,attack,2,Spiral Orange Firework OUT
-2840,attack,2,Sparkle Orange Firework OUT
-2841,attack,2,Blossom Orange Firework OUT
-2842,attack,2,Ring Orange Firework OUT
-2843,attack,2,Boom Purple Firework OUT
-2844,attack,2,Big Boom Purple Firework OUT
-2845,attack,2,Shockwave Purple Firework OUT
-2846,attack,2,Spiral Purple Firework OUT
-2847,attack,2,Sparkle Purple Firework OUT
-2848,attack,2,Blossom Purple Firework OUT
-2849,attack,2,Ring Purple Firework OUT
-2850,attack,2,Boom Red Firework OUT
-2851,attack,2,Big Boom Red Firework OUT
-2852,attack,2,Shockwave Red Firework OUT
-2853,attack,2,Spiral Red Firework OUT
-2854,attack,2,Sparkle Red Firework OUT
-2855,attack,2,Blossom Red Firework OUT
-2856,attack,2,Ring Red Firework OUT
-2857,attack,2,Boom White Firework OUT
-2858,attack,2,Big Boom White Firework OUT
-2859,attack,2,Shockwave White Firework OUT
-2860,attack,2,Spiral White Firework OUT
-2861,attack,2,Sparkle White Firework OUT
-2862,attack,2,Blossom White Firework OUT
-2863,attack,2,Ring White Firework OUT
-2864,attack,2,Boom Yellow Firework OUT
-2865,attack,2,Big Boom Yellow Firework OUT
-2866,attack,2,Shockwave Yellow Firework OUT
-2867,attack,2,Spiral Yellow Firework OUT
-2868,attack,2,Sparkle Yellow Firework OUT
-2869,attack,2,Blossom Yellow Firework OUT
-2870,attack,2,Ring Yellow Firework OUT
-2871,attack,2,Boom Black Firework UP
-2872,attack,2,Big Boom Black Firework UP
-2873,attack,2,Shockwave Black Firework UP
-2874,attack,2,Spiral Black Firework UP
-2875,attack,2,Sparkle Black Firework UP
-2876,attack,2,Blossom Black Firework UP
-2877,attack,2,Ring Black Firework UP
-2878,attack,2,Boom Blue Firework UP
-2879,attack,2,Big Boom Blue Firework UP
-2880,attack,2,Shockwave Blue Firework UP
-2881,attack,2,Spiral Blue Firework UP
-2882,attack,2,Sparkle Blue Firework UP
-2883,attack,2,Blossom Blue Firework UP
-2884,attack,2,Ring Blue Firework UP
-2885,attack,2,Boom Green Firework UP
-2886,attack,2,Big Boom Green Firework UP
-2887,attack,2,Shockwave Green Firework UP
-2888,attack,2,Spiral Green Firework UP
-2889,attack,2,Sparkle Green Firework UP
-2890,attack,2,Blossom Green Firework UP
-2891,attack,2,Ring Green Firework UP
-2892,attack,2,Boom Orange Firework UP
-2893,attack,2,Big Boom Orange Firework UP
-2894,attack,2,Shockwave Orange Firework UP
-2895,attack,2,Spiral Orange Firework UP
-2896,attack,2,Sparkle Orange Firework UP
-2897,attack,2,Blossom Orange Firework UP
-2898,attack,2,Ring Orange Firework UP
-2899,attack,2,Boom Purple Firework UP
-2900,attack,2,Big Boom Purple Firework UP
-2901,attack,2,Shockwave Purple Firework UP
-2902,attack,2,Spiral Purple Firework UP
-2903,attack,2,Sparkle Purple Firework UP
-2904,attack,2,Blossom Purple Firework UP
-2905,attack,2,Ring Purple Firework UP
-2906,attack,2,Boom Red Firework UP
-2907,attack,2,Big Boom Red Firework UP
-2908,attack,2,Shockwave Red Firework UP
-2909,attack,2,Spiral Red Firework UP
-2910,attack,2,Sparkle Red Firework UP
-2911,attack,2,Blossom Red Firework UP
-2912,attack,2,Ring Red Firework UP
-2913,attack,2,Boom White Firework UP
-2914,attack,2,Big Boom White Firework UP
-2915,attack,2,Shockwave White Firework UP
-2916,attack,2,Spiral White Firework UP
-2917,attack,2,Sparkle White Firework UP
-2918,attack,2,Blossom White Firework UP
-2919,attack,2,Ring White Firework UP
-2920,attack,2,Boom Yellow Firework UP
-2921,attack,2,Big Boom Yellow Firework UP
-2922,attack,2,Shockwave Yellow Firework UP
-2923,attack,2,Spiral Yellow Firework UP
-2924,attack,2,Sparkle Yellow Firework UP
-2925,attack,2,Blossom Yellow Firework UP
-2926,attack,2,Ring Yellow Firework UP
-2934,attack,4,Tusker Fists
-2970,attack,1,Hunter's Lash
-2976,attack,32,Acid Spray
-2998,attack,16,Wrath of the Puppeteer
-3025,attack,4,Shriek
-3074,vuln,4,Bruised Flesh
-3075,vuln,1,Flesh of Cloth
-3076,vuln,32,Exposed Flesh
-3077,vuln,16,Flesh of Flint
-3078,vuln,2,Weaken Flesh
-3080,vuln,4,Bruised Flesh
-3081,vuln,1,Flesh of Cloth
-3082,vuln,32,Exposed Flesh
-3083,vuln,16,Flesh of Flint
-3084,vuln,2,Weaken Flesh
-3085,vuln,4,Bruised Flesh
-3086,vuln,1,Flesh of Cloth
-3087,vuln,32,Exposed Flesh
-3088,vuln,16,Flesh of Flint
-3089,vuln,2,Weaken Flesh
-3107,attack,1,Flay Soul
-3108,attack,1,Flay Soul
-3109,attack,32,Liquefy Flesh
-3110,attack,16,Sear Flesh
-3111,attack,4,Soul Hammer
-3112,attack,2,Soul Spike
-3113,attack,1,Flay Soul
-3114,attack,32,Liquefy Flesh
-3115,attack,16,Sear Flesh
-3116,attack,4,Soul Hammer
-3117,attack,2,Soul Spike
-3118,attack,32,Liquefy Flesh
-3119,attack,16,Sear Flesh
-3120,attack,4,Soul Hammer
-3121,attack,2,Soul Spike
-3122,attack,2,Sacrificial Edge
-3123,attack,2,Sacrificial Edges
-3241,attack,16,Flame Burst
-3426,attack,32,Greater Withering
-3427,attack,32,Lesser Withering
-3428,attack,32,Withering
-3451,attack,4,Concussive Belch
-3452,attack,4,Concussive Wail
-3453,attack,16,Feelun Blight
-3454,attack,16,Wrath of the Feelun
-3455,attack,8,Koruu Cloud
-3456,attack,8,Koruu's Wrath
-3457,attack,8,Mana Bolt
-3458,attack,8,Mana Purge
-3459,attack,32,Mucor Cloud
-3460,attack,32,Dissolving Vortex
-3461,vuln,4,Batter Flesh
-3462,vuln,32,Canker Flesh
-3463,vuln,16,Char Flesh
-3464,vuln,8,Numb Flesh
-3653,attack,32,Acid Blast III
-3654,attack,32,Acid Volley I
-3655,attack,32,Acid Volley II
-3656,attack,1,Blade Blast III
-3657,attack,1,Blade Blast IV
-3658,attack,1,Blade Volley I
-3659,attack,1,Blade Volley II
-3660,attack,4,Bludgeoning Volley I
-3661,attack,4,Bludgeoning Volley II
-3662,attack,16,Flame Blast I
-3663,attack,16,Flame Volley III
-3664,attack,16,Flame Volley IV
-3665,attack,2,Force Blast III
-3666,attack,2,Force Blast IV
-3667,attack,2,Force Volley III
-3668,attack,2,Force Volley IV
-3669,attack,8,Frost Blast III
-3670,attack,8,Frost Blast IV
-3671,attack,8,Frost Volley III
-3672,attack,8,Frost Volley IV
-3673,attack,64,Lightning Blast III
-3674,attack,64,Lightning Blast IV
-3675,attack,64,Lightning Volley III
-3676,attack,64,Lightning Volley IV
-3677,attack,4,Shock Blast III
-3678,attack,4,Shock Blast IV
-3805,attack,32,Acid Ring
-3806,attack,16,Flame Ring
-3807,attack,2,Force Ring
-3808,attack,64,Lightning Ring
-3818,attack,128,Curse of Raven Fury
-3836,attack,8,Breath of the Deep
-3857,attack,8,Pumpkin Rain
-3858,attack,16,Pumpkin Ring
-3859,attack,16,Pumpkin Wall
-3875,vuln,32,Acidic Curse
-3876,vuln,1,Curse of the Blades
-3877,attack,32,Corrosive Strike
-3878,attack,16,Incendiary Strike
-3879,attack,8,Glacial Strike
-3880,attack,64,Galvanic Strike
-3881,attack,32,Corrosive Ring
-3882,attack,16,Incendiary Ring
-3883,attack,16,Pyroclastic Explosion
-3884,attack,8,Glacial Ring
-3885,attack,64,Galvanic Ring
-3892,attack,16,Summon Flame Seekers
-3893,attack,16,Summon Burning Haze
-3901,attack,16,Egg Bomb
-3902,attack,1,Ring around the Rabbit
-3903,attack,4,Whirlwind
-3904,attack,32,Essence's Fury
-3905,attack,32,Essence's Fury
-3906,attack,32,Essence's Fury
-3907,attack,32,Essence's Fury
-3908,attack,4,Mana Blast
-3911,attack,4,Spiral of Souls
-3914,attack,128,Dark Vortex
-3917,vuln,8,Numbing Chill
-3918,vuln,16,Flammable
-3919,vuln,64,Lightning Rod
-3926,attack,16,Harbinger's Fiery Touch
-3927,vuln,64,Charge Flesh
-3931,attack,128,Dark Vortex
-3933,attack,2,Black Spear Strike
-3934,attack,32,Heavy Acid Ring
-3935,attack,1,Heavy Blade Ring
-3936,attack,16,Fire Bomb
-3937,attack,2,Heavy Force Ring
-3938,attack,8,Heavy Frost Ring
-3939,attack,64,Thaumic Bleed
-3940,attack,128,Exsanguinating Wave
-3941,attack,64,Heavy Lightning Ring
-3942,attack,4,Heavy Shock Ring
-3943,attack,16,Burning Earth
-3944,attack,2,Rain of Spears
-3945,attack,64,Raging Storm
-3946,attack,32,Acid Wave
-3947,attack,1,Blade Wave
-3948,attack,16,Flame Wave
-3949,attack,2,Force Wave
-3950,attack,8,Frost Wave
-3951,attack,64,Lightning Wave
-3952,attack,4,Shock Waves
-3969,attack,32,Acid Bomb
-3970,attack,1,Blade Bomb
-3971,attack,16,Fire Bomb
-3972,attack,2,Force Bomb
-3973,attack,8,Frost Bomb
-3974,attack,64,Lightning Bomb
-3975,attack,4,Shock Bomb
-3986,attack,4,Rock Fall
-3987,attack,2,Black Spear Strike
-3988,attack,2,Black Spear Strike
-3989,attack,64,Dark Lightning
-3990,attack,8,Heavy Frost Ring
-3991,attack,64,Thaumic Bleed
-3992,attack,32,Heavy Acid Ring
-3993,attack,1,Heavy Blade Ring
-3994,attack,16,Fire Bomb
-3995,attack,2,Heavy Force Ring
-3996,attack,8,Heavy Frost Ring
-3997,attack,64,Heavy Lightning Ring
-3998,attack,128,Dark Vortex
-3999,attack,128,Exsanguinating Wave
-4000,attack,4,Heavy Shock Ring
-4001,attack,16,Burning Earth
-4002,attack,16,Burning Earth
-4003,attack,2,Wall of Spears
-4004,attack,2,Wall of Spears
-4005,attack,32,Acid Wave
-4006,attack,1,Blade Wave
-4007,attack,16,Flame Wave
-4008,attack,2,Force Wave
-4009,attack,8,Frost Wave
-4010,attack,64,Lightning Wave
-4011,attack,4,Shock Waves
-4021,attack,1,Flurry of Stars
-4028,attack,8,Snowball
-4044,attack,32,Acid Ball
-4045,attack,16,Flame Ball
-4046,attack,64,Lightning Ball
-4067,attack,4,Mucor Bolt
-4078,attack,4,Egg
-4081,attack,64,Eye of the Tempest
-4082,attack,16,Big Fire
-4091,attack,2,Spear
-4092,attack,16,Flame Grenade
-4096,attack,16,Flame Chain
-4097,attack,64,Violet Rain
-4113,attack,4,FoulRing
-4124,attack,1,Dark Nanners
-4125,attack,2,Dark Nanners
-4126,attack,2,Rain of Nanners
-4181,attack,32,Essence Bolt
-4182,attack,64,Ball Lightning
-4183,attack,32,Corrosive Veil
-4184,attack,16,Essence Bolt
-4185,attack,8,Essence Bolt
-4186,attack,8,Hoar Frost
-4187,attack,64,Essence Bolt
-4188,attack,16,Shadowed Flame
-4201,vuln,8,Numbing Chill
-4202,attack,16,Trevor's Zombie Strike
-4208,attack,8,Spectral Flame
-4216,attack,8,Frost Wave
-4239,attack,4,Ring of Death
-4246,attack,64,MeteorStrike
-4264,attack,2,Arcane Death
-4265,attack,2,Arcane Pyramid
-4266,attack,128,Blood Bolt
-4267,attack,4,Cow
-4268,attack,16,Fireworks
-4269,attack,1,Present
-4270,attack,2,Table
-4271,attack,32,Acid Whip
-4272,attack,1,Razor Whip
-4273,attack,4,Spray of Coins
-4274,attack,16,Flame Whip
-4275,attack,64,Electric Whip
-4282,attack,2,Arcane Death
-4283,attack,2,Arcane Death
-4375,attack,2,Incantation of Blossom Black Firework OUT
-4376,attack,2,Incantation of Blossom Blue Firework OUT
-4377,attack,2,Incantation of Blossom Green Firework OUT
-4378,attack,2,Incantation of Blossom Orange Firework OUT
-4379,attack,2,Incantation of Blossom Purple Firework OUT
-4380,attack,2,Incantation of Blossom Red Firework OUT
-4381,attack,2,Incantation of Blossom White Firework OUT
-4382,attack,2,Incantation of Blossom Yellow Firework OUT
-4383,attack,2,Incantation of Blossom Black Firework UP
-4384,attack,2,Incantation of Blossom Blue Firework UP
-4385,attack,2,Incantation of Blossom Green Firework UP
-4386,attack,2,Incantation of Blossom Orange Firework UP
-4387,attack,2,Incantation of Blossom Purple Firework UP
-4388,attack,2,Incantation of Blossom Red Firework UP
-4389,attack,2,Incantation of Blossom White Firework UP
-4390,attack,2,Incantation of Blossom Yellow Firework UP
-4421,attack,32,Incantation of Acid Arc
-4422,attack,1,Incantation of Blade Arc
-4423,attack,16,Incantation of Flame Arc
-4424,attack,2,Incantation of Force Arc
-4425,attack,8,Incantation of Frost Arc
-4426,attack,64,Incantation of Lightning Arc
-4427,attack,4,Incantation of Shock Arc
-4428,attack,128,Incantation of Martyr's Hecatomb
-4429,attack,512,Incantation of Martyr's Blight
-4430,attack,256,Incantation of Martyr's Tenacity
-4431,attack,32,Incantation of Acid Blast
-4432,attack,32,Incantation of Acid Streak
-4433,attack,32,Incantation of Acid Stream
-4434,attack,32,Incantation of Acid Volley
-4435,attack,1,Incantation of Blade Blast
-4436,attack,1,Incantation of Blade Volley
-4437,attack,4,Incantation of Bludgeoning Volley
-4438,attack,16,Incantation of Flame Blast
-4439,attack,16,Incantation of Flame Bolt
-4440,attack,16,Incantation of Flame Streak
-4441,attack,16,Incantation of Flame Volley
-4442,attack,2,Incantation of Force Blast
-4443,attack,2,Incantation of Force Bolt
-4444,attack,2,Incantation of Force Streak
-4445,attack,2,Incantation of Force Volley
-4446,attack,8,Incantation of Frost Blast
-4447,attack,8,Incantation of Frost Bolt
-4448,attack,8,Incantation of Frost Streak
-4449,attack,8,Incantation of Frost Volley
-4450,attack,64,Incantation of Lightning Blast
-4451,attack,64,Incantation of Lightning Bolt
-4452,attack,64,Incantation of Lightning Streak
-4453,attack,64,Incantation of Lightning Volley
-4454,attack,4,Incantation of Shock Blast
-4455,attack,4,Incantation of Shock Wave
-4456,attack,4,Incantation of Shock Wave Streak
-4457,attack,1,Incantation of Whirling Blade
-4458,attack,1,Incantation of Whirling Blade Streak
-4473,vuln,32,Incantation of Acid Vulnerability Other
-4474,vuln,32,Incantation of Acid Vulnerability Self
-4475,vuln,1,Incantation of Blade Vulnerability Other
-4476,vuln,1,Incantation of Blade Vulnerability Self
-4477,vuln,4,Incantation of Bludgeoning Vulnerability Other
-4478,vuln,4,Incantation of Bludgeoning Vulnerability Self
-4479,vuln,8,Incantation of Cold Vulnerability Other
-4480,vuln,8,Incantation of Cold Vulnerability Self
-4481,vuln,16,Incantation of Fire Vulnerability Other
-4482,vuln,16,Incantation of Fire Vulnerability Self
-4483,vuln,64,Incantation of Lightning Vulnerability Other
-4484,vuln,64,Incantation of Lightning Vulnerability Self
-4485,vuln,2,Incantation of Piercing Vulnerability Other
-4486,vuln,2,Incantation of Piercing Vulnerability Self
-4927,attack,32,Incantation of Acid Stream with 300 Spellpower
-4928,attack,32,Incantation of Acid Stream with 350 Spellpower
-4930,attack,16,Flame Bolt I
-4931,attack,16,Mini Fireball
-4932,attack,16,Mini Fireball
-4936,attack,16,Flame Bolt I
-4937,attack,16,Flame Bolt I
-4938,attack,16,Flame Bolt I
-4939,attack,16,Mini Uber
-4940,attack,2,Mini Ring
-4941,attack,2,Mini Ring
-4942,attack,2,Mini Ring
-4943,attack,16,Mini Fireball
-4945,attack,16,Flame Bolt I
-4946,attack,2,Mini Ring
-4967,attack,16,Cleansing Ring of Fire
-4987,attack,32,Olthoi Spit
-5166,attack,16,Flaming Skull
-5331,attack,64,Clouded Soul
-5332,attack,1024,Bael'zharon's Nether Streak
-5333,attack,1024,Bael'zharon's Nether Arc
-5337,attack,1024,Destructive Curse VII
-5338,attack,1024,Incantation of Destructive Curse
-5339,attack,1024,Destructive Curse I
-5340,attack,1024,Destructive Curse II
-5341,attack,1024,Destructive Curse III
-5342,attack,1024,Destructive Curse IV
-5343,attack,1024,Destructive Curse V
-5344,attack,1024,Destructive Curse VI
-5345,attack,1024,Nether Streak V
-5346,attack,1024,Nether Streak VI
-5347,attack,1024,Nether Streak VII
-5348,attack,1024,Incantation of Nether Streak
-5349,attack,1024,Nether Bolt I
-5350,attack,1024,Nether Bolt II
-5351,attack,1024,Nether Bolt III
-5352,attack,1024,Nether Bolt IV
-5353,attack,1024,Nether Bolt V
-5354,attack,1024,Nether Bolt VI
-5355,attack,1024,Nether Bolt VII
-5356,attack,1024,Incantation of Nether Bolt
-5357,attack,1024,Nether Streak I
-5358,attack,1024,Nether Streak II
-5359,attack,1024,Nether Streak III
-5360,attack,1024,Nether Streak IV
-5361,attack,1024,Clouded Soul
-5362,attack,1024,Nether Arc II
-5363,attack,1024,Nether Arc III
-5364,attack,1024,Nether Arc IV
-5365,attack,1024,Nether Arc V
-5366,attack,1024,Nether Arc VI
-5367,attack,1024,Nether Arc VII
-5368,attack,1024,Incantation of Nether Arc
-5369,attack,1024,Nether Arc I
-5370,attack,1024,Incantation of Nether Streak
-5371,attack,1024,Festering Curse I
-5372,attack,1024,Festering Curse II
-5373,attack,1024,Festering Curse III
-5374,attack,1024,Festering Curse IV
-5375,attack,1024,Festering Curse V
-5376,attack,1024,Festering Curse VI
-5377,attack,1024,Festering Curse VII
-5378,attack,1024,Incantation of Festering Curse
-5379,attack,1024,Weakening Curse I
-5380,attack,1024,Weakening Curse II
-5381,attack,1024,Weakening Curse III
-5382,attack,1024,Weakening Curse IV
-5383,attack,1024,Weakening Curse V
-5384,attack,1024,Weakening Curse VI
-5385,attack,1024,Weakening Curse VII
-5386,attack,1024,Incantation of Weakening Curse
-5387,attack,1024,Corrosion I
-5388,attack,1024,Corrosion II
-5389,attack,1024,Corrosion III
-5390,attack,1024,Corrosion IV
-5391,attack,1024,Corrosion V
-5392,attack,1024,Corrosion VI
-5393,attack,1024,Corrosion VII
-5394,attack,1024,Incantation of Corrosion
-5395,attack,1024,Corruption I
-5396,attack,1024,Corruption II
-5397,attack,1024,Corruption III
-5398,attack,1024,Corruption IV
-5399,attack,1024,Corruption V
-5400,attack,1024,Corruption VI
-5401,attack,1024,Corruption VII
-5402,attack,1024,Incantation of Corruption
-5439,attack,32,Acid Spit Streak 1
-5440,attack,32,Acid Spit 1
-5441,attack,32,Acid Spit 2
-5442,attack,32,Acid Spit Arc 1
-5443,attack,32,Acid Spit Arc 2
-5444,attack,32,Acid Spit Blast 1
-5445,attack,32,Acid Spit Blast 2
-5446,attack,32,Acid Spit Volley 1
-5447,attack,32,Acid Spit Volley 2
-5448,attack,32,Acid Spit Streak
-5522,vuln,32,Acid Spit Vulnerability 1
-5523,vuln,32,Acid Spit Vulnerability 2
-5524,attack,2,Falling stalactite
-5525,attack,128,Bloodstone Bolt I
-5526,attack,128,Bloodstone Bolt II
-5527,attack,128,Bloodstone Bolt III
-5528,attack,128,Bloodstone Bolt IV
-5529,attack,128,Bloodstone Bolt V
-5530,attack,128,Bloodstone Bolt VI
-5531,attack,128,Bloodstone Bolt VII
-5532,attack,128,Incantation of Bloodstone Bolt
-5535,attack,32,Acidic Blood
-5536,attack,32,Acidic Blood
-5537,attack,32,Acidic Blood
-5544,attack,1024,Nether Blast I
-5545,attack,1024,Nether Blast II
-5546,attack,1024,Nether Blast III
-5547,attack,1024,Nether Blast IV
-5548,attack,1024,Nether Blast V
-5549,attack,1024,Nether Blast VI
-5550,attack,1024,Nether Blast VII
-5551,attack,1024,Incantation of Nether Blast
-5754,attack,1,Shroud of Darkness (Magic)
-5755,attack,1,Shroud of Darkness (Melee)
-5756,attack,1,Shroud of Darkness (Missile)
-5762,attack,8,Rolling Death
-5967,attack,64,Galvanic Arc
-5968,attack,64,Galvanic Blast
-5969,attack,64,Galvanic Strike
-5970,attack,64,Galvanic Streak
-5971,attack,64,Galvanic Volley
-5972,attack,64,Galvanic Bomb
-6151,attack,64,Crimson Storm
-6152,attack,4,Rocky Shrapnel
-6155,attack,4,Earthen Stomp
-6156,attack,4,Viridian Ring
-6157,attack,4,Withering Ring
-6158,attack,4,Poison Breath
-6159,attack,2,Thorn Volley
-6160,attack,2,Thorns
-6161,attack,32,Acidic Thorns
-6162,attack,2,Thorn Arc
-6163,attack,2,Ring of Thorns
-6164,attack,2,Deadly Ring of Thorns
-6165,attack,2,Deadly Thorn Volley
-6168,attack,64,Deadly Ring of Lightning
-6169,attack,64,Deadly Lightning Volley
-6181,attack,16,Singeing Flames
-6186,attack,4,Deafening Wail
-6187,attack,2,Screeching Howl
-6188,attack,4,Earthquake
-6189,attack,32,Searing Disc II
-6190,attack,1,Horizon's Blades II
-6191,attack,16,Cassius' Ring of Fire II
-6192,attack,2,Nuhmudira's Spines II
-6193,attack,8,Halo of Frost II
-6194,attack,64,Eye of the Storm II
-6195,attack,1024,Clouded Soul II
-6196,attack,4,Tectonic Rifts II
-6197,attack,64,Eye of the Storm II
-6198,attack,64,Incantation of Lightning Bolt
-6199,attack,64,Incantation of Lightning Arc
-6320,attack,1024,Ring of Skulls II
-6324,vuln,16,Gauntlet Vulnerability Self
+21,vuln,16,1.1,Fire Vulnerability Other I
+22,vuln,16,1.1,Fire Vulnerability Self I
+27,attack,16,1,Flame Bolt I
+28,attack,8,1,Frost Bolt I
+57,attack,2,1,Magic Bolt
+58,attack,32,1,Acid Stream I
+59,attack,32,1,Acid Stream II
+60,attack,32,1,Acid Stream III
+61,attack,32,1,Acid Stream IV
+62,attack,32,1,Acid Stream V
+63,attack,32,1,Acid Stream VI
+64,attack,4,1,Shock Wave I
+65,attack,4,1,Shock Wave II
+66,attack,4,1,Shock Wave III
+67,attack,4,1,Shock Wave IV
+68,attack,4,1,Shock Wave V
+69,attack,4,1,Shock Wave VI
+70,attack,8,1,Frost Bolt II
+71,attack,8,1,Frost Bolt III
+72,attack,8,1,Frost Bolt IV
+73,attack,8,1,Frost Bolt V
+74,attack,8,1,Frost Bolt VI
+75,attack,64,1,Lightning Bolt I
+76,attack,64,1,Lightning Bolt II
+77,attack,64,1,Lightning Bolt III
+78,attack,64,1,Lightning Bolt IV
+79,attack,64,1,Lightning Bolt V
+80,attack,64,1,Lightning Bolt VI
+81,attack,16,1,Flame Bolt II
+82,attack,16,1,Flame Bolt III
+83,attack,16,1,Flame Bolt IV
+84,attack,16,1,Flame Bolt V
+85,attack,16,1,Flame Bolt VI
+86,attack,2,1,Force Bolt I
+87,attack,2,1,Force Bolt II
+88,attack,2,1,Force Bolt III
+89,attack,2,1,Force Bolt IV
+90,attack,2,1,Force Bolt V
+91,attack,2,1,Force Bolt VI
+92,attack,1,1,Whirling Blade I
+93,attack,1,1,Whirling Blade II
+94,attack,1,1,Whirling Blade III
+95,attack,1,1,Whirling Blade IV
+96,attack,1,1,Whirling Blade V
+97,attack,1,1,Whirling Blade VI
+99,attack,32,1,Acid Blast III
+100,attack,32,1,Acid Blast IV
+101,attack,32,1,Acid Blast V
+102,attack,32,1,Acid Blast VI
+103,attack,4,1,Shock Blast III
+104,attack,4,1,Shock Blast IV
+105,attack,4,1,Shock Blast V
+106,attack,4,1,Shock Blast VI
+107,attack,8,1,Frost Blast III
+108,attack,8,1,Frost Blast IV
+109,attack,8,1,Frost Blast V
+110,attack,8,1,Frost Blast VI
+111,attack,64,1,Lightning Blast III
+112,attack,64,1,Lightning Blast IV
+113,attack,64,1,Lightning Blast V
+114,attack,64,1,Lightning Blast VI
+115,attack,16,1,Flame Blast III
+116,attack,16,1,Flame Blast IV
+117,attack,16,1,Flame Blast V
+118,attack,16,1,Flame Blast VI
+119,attack,2,1,Force Blast III
+120,attack,2,1,Force Blast IV
+121,attack,2,1,Force Blast V
+122,attack,2,1,Force Blast VI
+123,attack,1,1,Blade Blast III
+124,attack,1,1,Blade Blast IV
+125,attack,1,1,Blade Blast V
+126,attack,1,1,Blade Blast VI
+127,attack,32,1,Acid Volley III
+128,attack,32,1,Acid Volley IV
+129,attack,32,1,Acid Volley V
+130,attack,32,1,Acid Volley VI
+131,attack,4,1,Bludgeoning Volley III
+132,attack,4,1,Bludgeoning Volley IV
+133,attack,4,1,Bludgeoning Volley V
+134,attack,4,1,Bludgeoning Volley VI
+135,attack,8,1,Frost Volley III
+136,attack,8,1,Frost Volley IV
+137,attack,8,1,Frost Volley V
+138,attack,8,1,Frost Volley VI
+139,attack,64,1,Lightning Volley III
+140,attack,64,1,Lightning Volley IV
+141,attack,64,1,Lightning Volley V
+142,attack,64,1,Lightning Volley VI
+143,attack,16,1,Flame Volley III
+144,attack,16,1,Flame Volley IV
+145,attack,16,1,Flame Volley V
+146,attack,16,1,Flame Volley VI
+147,attack,2,1,Force Volley III
+148,attack,2,1,Force Volley IV
+149,attack,2,1,Force Volley V
+150,attack,2,1,Force Volley VI
+151,attack,1,1,Blade Volley III
+152,attack,1,1,Blade Volley IV
+153,attack,1,1,Blade Volley V
+154,attack,1,1,Blade Volley VI
+521,vuln,32,1.1,Acid Vulnerability Other I
+522,vuln,32,1.25,Acid Vulnerability Other II
+523,vuln,32,1.5,Acid Vulnerability Other III
+524,vuln,32,1.75,Acid Vulnerability Other IV
+525,vuln,32,2,Acid Vulnerability Other V
+526,vuln,32,2.5,Acid Vulnerability Other VI
+527,vuln,32,1.1,Acid Vulnerability Self I
+528,vuln,32,1.25,Acid Vulnerability Self II
+529,vuln,32,1.5,Acid Vulnerability Self III
+530,vuln,32,1.75,Acid Vulnerability Self IV
+531,vuln,32,2,Acid Vulnerability Self V
+532,vuln,32,2.5,Acid Vulnerability Self VI
+1042,vuln,4,1.1,Bludgeoning Vulnerability Self I
+1043,vuln,4,1.25,Bludgeoning Vulnerability Self II
+1044,vuln,4,1.5,Bludgeoning Vulnerability Self III
+1045,vuln,4,1.75,Bludgeoning Vulnerability Self IV
+1046,vuln,4,2,Bludgeoning Vulnerability Self V
+1047,vuln,4,2.5,Bludgeoning Vulnerability Self VI
+1048,vuln,4,1.1,Bludgeoning Vulnerability Other I
+1049,vuln,4,1.25,Bludgeoning Vulnerability Other II
+1050,vuln,4,1.5,Bludgeoning Vulnerability Other III
+1051,vuln,4,1.75,Bludgeoning Vulnerability Other IV
+1052,vuln,4,2,Bludgeoning Vulnerability Other V
+1053,vuln,4,2.5,Bludgeoning Vulnerability Other VI
+1054,vuln,8,1.1,Cold Vulnerability Self I
+1055,vuln,8,1.25,Cold Vulnerability Self II
+1056,vuln,8,1.5,Cold Vulnerability Self III
+1057,vuln,8,1.75,Cold Vulnerability Self IV
+1058,vuln,8,2,Cold Vulnerability Self V
+1059,vuln,8,2.5,Cold Vulnerability Self VI
+1060,vuln,8,1.1,Cold Vulnerability Other I
+1061,vuln,8,1.25,Cold Vulnerability Other II
+1062,vuln,8,1.5,Cold Vulnerability Other III
+1063,vuln,8,1.75,Cold Vulnerability Other IV
+1064,vuln,8,2,Cold Vulnerability Other V
+1065,vuln,8,2.5,Cold Vulnerability Other VI
+1078,vuln,64,1.1,Lightning Vulnerability Self I
+1079,vuln,64,1.25,Lightning Vulnerability Self II
+1080,vuln,64,1.5,Lightning Vulnerability Self III
+1081,vuln,64,1.75,Lightning Vulnerability Self IV
+1082,vuln,64,2,Lightning Vulnerability Self V
+1083,vuln,64,2.5,Lightning Vulnerability Self VI
+1084,vuln,64,1.1,Lightning Vulnerability Other I
+1085,vuln,64,1.25,Lightning Vulnerability Other II
+1086,vuln,64,1.5,Lightning Vulnerability Other III
+1087,vuln,64,1.75,Lightning Vulnerability Other IV
+1088,vuln,64,2,Lightning Vulnerability Other V
+1089,vuln,64,2.5,Lightning Vulnerability Other VI
+1097,attack,2,1,Flaming Missile
+1098,vuln,16,1.25,Fire Vulnerability Self II
+1099,vuln,16,1.5,Fire Vulnerability Self III
+1100,vuln,16,1.75,Fire Vulnerability Self IV
+1101,vuln,16,2,Fire Vulnerability Self V
+1102,vuln,16,2.5,Fire Vulnerability Self VI
+1104,vuln,16,1.25,Fire Vulnerability Other II
+1105,vuln,16,1.5,Fire Vulnerability Other III
+1106,vuln,16,1.75,Fire Vulnerability Other IV
+1107,vuln,16,2,Fire Vulnerability Other V
+1108,vuln,16,2.5,Fire Vulnerability Other VI
+1121,vuln,1,1.1,Blade Vulnerability Self I
+1122,vuln,1,1.25,Blade Vulnerability Self II
+1123,vuln,1,1.5,Blade Vulnerability Self III
+1124,vuln,1,1.75,Blade Vulnerability Self IV
+1125,vuln,1,2,Blade Vulnerability Self V
+1126,vuln,1,2.5,Blade Vulnerability Self VI
+1127,vuln,1,1.1,Blade Vulnerability Other I
+1128,vuln,1,1.25,Blade Vulnerability Other II
+1129,vuln,1,1.5,Blade Vulnerability Other III
+1130,vuln,1,1.75,Blade Vulnerability Other IV
+1131,vuln,1,2,Blade Vulnerability Other V
+1132,vuln,1,2.5,Blade Vulnerability Other VI
+1145,vuln,2,1.1,Piercing Vulnerability Self I
+1146,vuln,2,1.25,Piercing Vulnerability Self II
+1147,vuln,2,1.5,Piercing Vulnerability Self III
+1148,vuln,2,1.75,Piercing Vulnerability Self IV
+1149,vuln,2,2,Piercing Vulnerability Self V
+1150,vuln,2,2.5,Piercing Vulnerability Self VI
+1151,vuln,2,1.1,Piercing Vulnerability Other I
+1152,vuln,2,1.25,Piercing Vulnerability Other II
+1153,vuln,2,1.5,Piercing Vulnerability Other III
+1154,vuln,2,1.75,Piercing Vulnerability Other IV
+1155,vuln,2,2,Piercing Vulnerability Other V
+1156,vuln,2,2.5,Piercing Vulnerability Other VI
+1481,attack,2,1,Flaming Missile Volley
+1781,attack,16,1,Exploding Magma
+1783,attack,32,1,Searing Disc
+1784,attack,1,1,Horizon's Blades
+1785,attack,16,1,Cassius' Ring of Fire
+1786,attack,2,1,Nuhmudira's Spines
+1787,attack,8,1,Halo of Frost
+1788,attack,64,1,Eye of the Storm
+1789,attack,4,1,Tectonic Rifts
+1790,attack,32,1,Acid Streak I
+1791,attack,32,1,Acid Streak II
+1792,attack,32,1,Acid Streak III
+1793,attack,32,1,Acid Streak IV
+1794,attack,32,1,Acid Streak V
+1795,attack,32,1,Acid Streak VI
+1796,attack,16,1,Flame Streak I
+1797,attack,16,1,Flame Streak II
+1798,attack,16,1,Flame Streak III
+1799,attack,16,1,Flame Streak IV
+1800,attack,16,1,Flame Streak V
+1801,attack,16,1,Flame Streak VI
+1802,attack,2,1,Force Streak I
+1803,attack,2,1,Force Streak II
+1804,attack,2,1,Force Streak III
+1805,attack,2,1,Force Streak IV
+1806,attack,2,1,Force Streak V
+1807,attack,2,1,Force Streak VI
+1808,attack,8,1,Frost Streak I
+1809,attack,8,1,Frost Streak II
+1810,attack,8,1,Frost Streak III
+1811,attack,8,1,Frost Streak IV
+1812,attack,8,1,Frost Streak V
+1813,attack,8,1,Frost Streak VI
+1814,attack,64,1,Lightning Streak I
+1815,attack,64,1,Lightning Streak II
+1816,attack,64,1,Lightning Streak III
+1817,attack,64,1,Lightning Streak IV
+1818,attack,64,1,Lightning Streak V
+1819,attack,64,1,Lightning Streak VI
+1820,attack,4,1,Shock Wave Streak I
+1821,attack,4,1,Shock Wave Streak II
+1822,attack,4,1,Shock Wave Streak III
+1823,attack,4,1,Shock Wave Streak IV
+1824,attack,4,1,Shock Wave Streak V
+1825,attack,4,1,Shock Wave Streak VI
+1826,attack,1,1,Whirling Blade Streak I
+1827,attack,1,1,Whirling Blade Streak II
+1828,attack,1,1,Whirling Blade Streak III
+1829,attack,1,1,Whirling Blade Streak IV
+1830,attack,1,1,Whirling Blade Streak V
+1831,attack,1,1,Whirling Blade Streak VI
+1832,attack,32,1,Torrential Acid
+1833,attack,1,1,Squall of Swords
+1834,attack,16,1,Firestorm
+1835,attack,2,1,Splinterfall
+1836,attack,8,1,Avalanche
+1837,attack,64,1,Lightning Barrage
+1838,attack,4,1,Stone Fists
+1839,attack,32,1,Blistering Creeper
+1840,attack,1,1,Bed of Blades
+1841,attack,16,1,Slithering Flames
+1842,attack,2,1,Spike Strafe
+1843,attack,8,1,Foon-Ki's Glacial Floe
+1844,attack,64,1,Os' Wall
+1845,attack,4,1,Hammering Crawler
+2019,attack,4,1,The sundering of the crystal
+2030,attack,16,1,Flaming Blaze
+2031,attack,2,1,Steel Thorns
+2032,attack,64,1,Electric Blaze
+2033,attack,32,1,Acidic Spray
+2034,attack,16,1,Exploding Fury
+2035,attack,64,1,Electric Discharge
+2036,attack,32,1,Fuming Acid
+2037,attack,16,1,Flaming Irruption
+2038,attack,8,1,Exploding Ice
+2039,attack,64,1,Sparking Fury
+2042,attack,16,1,Demon's Tongues
+2045,attack,4,1,Demon Fists
+2120,attack,32,1,Dissolving Vortex
+2121,attack,32,1,Corrosive Flash
+2122,attack,32,1,Disintegration
+2123,attack,32,1,Celdiseth's Searing
+2124,attack,1,1,Sau Kolin's Sword
+2125,attack,1,1,Flensing Wings
+2126,attack,4,1,Thousand Fists
+2127,attack,16,1,Silencia's Scorn
+2128,attack,16,1,Ilservian's Flame
+2129,attack,16,1,Sizzling Fury
+2130,attack,16,1,Infernae
+2131,attack,2,1,Stinging Needles
+2132,attack,2,1,The Spike
+2133,attack,2,1,Outlander's Insolence
+2134,attack,2,1,Fusillade
+2135,attack,8,1,Winter's Embrace
+2136,attack,8,1,Icy Torment
+2137,attack,8,1,Sudden Frost
+2138,attack,8,1,Blizzard
+2139,attack,64,1,Luminous Wrath
+2140,attack,64,1,Alset's Coil
+2141,attack,64,1,Lhen's Flare
+2142,attack,64,1,Tempest
+2143,attack,4,1,Pummeling Storm
+2144,attack,4,1,Crushing Shame
+2145,attack,4,1,Cameron's Curse
+2146,attack,1,1,Evisceration
+2147,attack,1,1,Rending Wind
+2162,vuln,32,2.85,Olthoi's Gift
+2163,vuln,32,2.85,Acid Vulnerability Self VII
+2164,vuln,1,2.85,Swordsman's Gift
+2165,vuln,1,2.85,Blade Vulnerability Self VII
+2166,vuln,4,2.85,Tusker's Gift
+2167,vuln,4,2.85,Bludgeoning Vulnerability Self VII
+2168,vuln,8,2.85,Gelidite's Gift
+2169,vuln,8,2.85,Cold Vulnerability Self VII
+2170,vuln,16,2.85,Inferno's Gift
+2171,vuln,16,2.85,Fire Vulnerability Self VII
+2172,vuln,64,2.85,Astyrrian's Gift
+2173,vuln,64,2.85,Lightning Vulnerability Self VII
+2174,vuln,2,2.85,Archer's Gift
+2175,vuln,2,2.85,Piercing Vulnerability Self VII
+2366,attack,4,1,Bovine Intervention
+2370,vuln,32,4,Gift of Rotting Flesh
+2371,vuln,16,4,Curse of Mortal Flesh
+2383,attack,16,1,Dark Flame
+2637,attack,16,1,Invoking Aun Tanua
+2672,attack,4,1,Ring of True Pain
+2673,attack,4,1,Ring of Unspeakable Agony
+2674,attack,2,1,Vicious Rebuke
+2699,attack,64,1,Auroric Whip
+2700,attack,32,1,Corrosive Cloud
+2701,attack,16,1,Elemental Fury
+2702,attack,8,1,Elemental Fury
+2703,attack,32,1,Elemental Fury
+2704,attack,64,1,Elemental Fury
+2710,attack,16,1,Volcanic Blast
+2711,attack,32,1,Acid Arc I
+2712,attack,32,1,Acid Arc II
+2713,attack,32,1,Acid Arc III
+2714,attack,32,1,Acid Arc IV
+2715,attack,32,1,Acid Arc V
+2716,attack,32,1,Acid Arc VI
+2717,attack,32,1,Acid Arc VII
+2718,attack,2,1,Force Arc I
+2719,attack,2,1,Force Arc II
+2720,attack,2,1,Force Arc III
+2721,attack,2,1,Force Arc IV
+2722,attack,2,1,Force Arc V
+2723,attack,2,1,Force Arc VI
+2724,attack,2,1,Force Arc VII
+2725,attack,8,1,Frost Arc I
+2726,attack,8,1,Frost Arc II
+2727,attack,8,1,Frost Arc III
+2728,attack,8,1,Frost Arc IV
+2729,attack,8,1,Frost Arc V
+2730,attack,8,1,Frost Arc VI
+2731,attack,8,1,Frost Arc VII
+2732,attack,64,1,Lightning Arc I
+2733,attack,64,1,Lightning Arc II
+2734,attack,64,1,Lightning Arc III
+2735,attack,64,1,Lightning Arc IV
+2736,attack,64,1,Lightning Arc V
+2737,attack,64,1,Lightning Arc VI
+2738,attack,64,1,Lightning Arc VII
+2739,attack,16,1,Flame Arc I
+2740,attack,16,1,Flame Arc II
+2741,attack,16,1,Flame Arc III
+2742,attack,16,1,Flame Arc IV
+2743,attack,16,1,Flame Arc V
+2744,attack,16,1,Flame Arc VI
+2745,attack,16,1,Flame Arc VII
+2746,attack,4,1,Shock Arc I
+2747,attack,4,1,Shock Arc II
+2748,attack,4,1,Shock Arc III
+2749,attack,4,1,Shock Arc IV
+2750,attack,4,1,Shock Arc V
+2751,attack,4,1,Shock Arc VI
+2752,attack,4,1,Shock Arc VII
+2753,attack,1,1,Blade Arc I
+2754,attack,1,1,Blade Arc II
+2755,attack,1,1,Blade Arc III
+2756,attack,1,1,Blade Arc IV
+2757,attack,1,1,Blade Arc V
+2758,attack,1,1,Blade Arc VI
+2759,attack,1,1,Blade Arc VII
+2760,attack,128,1,Martyr's Hecatomb I
+2761,attack,128,1,Martyr's Hecatomb II
+2762,attack,128,1,Martyr's Hecatomb III
+2763,attack,128,1,Martyr's Hecatomb IV
+2764,attack,128,1,Martyr's Hecatomb V
+2765,attack,128,1,Martyr's Hecatomb VI
+2766,attack,128,1,Martyr's Hecatomb VII
+2767,attack,256,1,Martyr's Tenacity I
+2768,attack,256,1,Martyr's Tenacity II
+2769,attack,256,1,Martyr's Tenacity III
+2770,attack,256,1,Martyr's Tenacity IV
+2771,attack,256,1,Martyr's Tenacity V
+2772,attack,256,1,Martyr's Tenacity VI
+2773,attack,256,1,Martyr's Tenacity VII
+2774,attack,512,1,Martyr's Blight I
+2775,attack,512,1,Martyr's Blight II
+2776,attack,512,1,Martyr's Blight III
+2777,attack,512,1,Martyr's Blight IV
+2778,attack,512,1,Martyr's Blight V
+2779,attack,512,1,Martyr's Blight VI
+2780,attack,512,1,Martyr's Blight VII
+2781,attack,32,1,Lesser Elemental Fury
+2782,attack,16,1,Lesser Elemental Fury
+2783,attack,8,1,Lesser Elemental Fury
+2784,attack,64,1,Lesser Elemental Fury
+2791,attack,32,1,Rolling Death
+2792,attack,16,1,Rolling Death
+2793,attack,8,1,Rolling Death
+2794,attack,64,1,Rolling Death
+2814,attack,2,1,Priest's Curse
+2815,attack,2,1,Boom Black Firework OUT
+2816,attack,2,1,Big Boom Black Firework OUT
+2817,attack,2,1,Shockwave Black Firework OUT
+2818,attack,2,1,Spiral Black Firework OUT
+2819,attack,2,1,Sparkle Black Firework OUT
+2820,attack,2,1,Blossom Black Firework OUT
+2821,attack,2,1,Ring Black Firework OUT
+2822,attack,2,1,Boom Blue Firework OUT
+2823,attack,2,1,Big Boom Blue Firework OUT
+2824,attack,2,1,Shockwave Blue Firework OUT
+2825,attack,2,1,Spiral Blue Firework OUT
+2826,attack,2,1,Sparkle Blue Firework OUT
+2827,attack,2,1,Blossom Blue Firework OUT
+2828,attack,2,1,Ring Blue Firework OUT
+2829,attack,2,1,Boom Green Firework OUT
+2830,attack,2,1,Big Boom Green Firework OUT
+2831,attack,2,1,Shockwave Green Firework OUT
+2832,attack,2,1,Spiral Green Firework OUT
+2833,attack,2,1,Sparkle Green Firework OUT
+2834,attack,2,1,Blossom Green Firework OUT
+2835,attack,2,1,Ring Green Firework OUT
+2836,attack,2,1,Boom Orange Firework OUT
+2837,attack,2,1,Big Boom Orange Firework OUT
+2838,attack,2,1,Shockwave Orange Firework OUT
+2839,attack,2,1,Spiral Orange Firework OUT
+2840,attack,2,1,Sparkle Orange Firework OUT
+2841,attack,2,1,Blossom Orange Firework OUT
+2842,attack,2,1,Ring Orange Firework OUT
+2843,attack,2,1,Boom Purple Firework OUT
+2844,attack,2,1,Big Boom Purple Firework OUT
+2845,attack,2,1,Shockwave Purple Firework OUT
+2846,attack,2,1,Spiral Purple Firework OUT
+2847,attack,2,1,Sparkle Purple Firework OUT
+2848,attack,2,1,Blossom Purple Firework OUT
+2849,attack,2,1,Ring Purple Firework OUT
+2850,attack,2,1,Boom Red Firework OUT
+2851,attack,2,1,Big Boom Red Firework OUT
+2852,attack,2,1,Shockwave Red Firework OUT
+2853,attack,2,1,Spiral Red Firework OUT
+2854,attack,2,1,Sparkle Red Firework OUT
+2855,attack,2,1,Blossom Red Firework OUT
+2856,attack,2,1,Ring Red Firework OUT
+2857,attack,2,1,Boom White Firework OUT
+2858,attack,2,1,Big Boom White Firework OUT
+2859,attack,2,1,Shockwave White Firework OUT
+2860,attack,2,1,Spiral White Firework OUT
+2861,attack,2,1,Sparkle White Firework OUT
+2862,attack,2,1,Blossom White Firework OUT
+2863,attack,2,1,Ring White Firework OUT
+2864,attack,2,1,Boom Yellow Firework OUT
+2865,attack,2,1,Big Boom Yellow Firework OUT
+2866,attack,2,1,Shockwave Yellow Firework OUT
+2867,attack,2,1,Spiral Yellow Firework OUT
+2868,attack,2,1,Sparkle Yellow Firework OUT
+2869,attack,2,1,Blossom Yellow Firework OUT
+2870,attack,2,1,Ring Yellow Firework OUT
+2871,attack,2,1,Boom Black Firework UP
+2872,attack,2,1,Big Boom Black Firework UP
+2873,attack,2,1,Shockwave Black Firework UP
+2874,attack,2,1,Spiral Black Firework UP
+2875,attack,2,1,Sparkle Black Firework UP
+2876,attack,2,1,Blossom Black Firework UP
+2877,attack,2,1,Ring Black Firework UP
+2878,attack,2,1,Boom Blue Firework UP
+2879,attack,2,1,Big Boom Blue Firework UP
+2880,attack,2,1,Shockwave Blue Firework UP
+2881,attack,2,1,Spiral Blue Firework UP
+2882,attack,2,1,Sparkle Blue Firework UP
+2883,attack,2,1,Blossom Blue Firework UP
+2884,attack,2,1,Ring Blue Firework UP
+2885,attack,2,1,Boom Green Firework UP
+2886,attack,2,1,Big Boom Green Firework UP
+2887,attack,2,1,Shockwave Green Firework UP
+2888,attack,2,1,Spiral Green Firework UP
+2889,attack,2,1,Sparkle Green Firework UP
+2890,attack,2,1,Blossom Green Firework UP
+2891,attack,2,1,Ring Green Firework UP
+2892,attack,2,1,Boom Orange Firework UP
+2893,attack,2,1,Big Boom Orange Firework UP
+2894,attack,2,1,Shockwave Orange Firework UP
+2895,attack,2,1,Spiral Orange Firework UP
+2896,attack,2,1,Sparkle Orange Firework UP
+2897,attack,2,1,Blossom Orange Firework UP
+2898,attack,2,1,Ring Orange Firework UP
+2899,attack,2,1,Boom Purple Firework UP
+2900,attack,2,1,Big Boom Purple Firework UP
+2901,attack,2,1,Shockwave Purple Firework UP
+2902,attack,2,1,Spiral Purple Firework UP
+2903,attack,2,1,Sparkle Purple Firework UP
+2904,attack,2,1,Blossom Purple Firework UP
+2905,attack,2,1,Ring Purple Firework UP
+2906,attack,2,1,Boom Red Firework UP
+2907,attack,2,1,Big Boom Red Firework UP
+2908,attack,2,1,Shockwave Red Firework UP
+2909,attack,2,1,Spiral Red Firework UP
+2910,attack,2,1,Sparkle Red Firework UP
+2911,attack,2,1,Blossom Red Firework UP
+2912,attack,2,1,Ring Red Firework UP
+2913,attack,2,1,Boom White Firework UP
+2914,attack,2,1,Big Boom White Firework UP
+2915,attack,2,1,Shockwave White Firework UP
+2916,attack,2,1,Spiral White Firework UP
+2917,attack,2,1,Sparkle White Firework UP
+2918,attack,2,1,Blossom White Firework UP
+2919,attack,2,1,Ring White Firework UP
+2920,attack,2,1,Boom Yellow Firework UP
+2921,attack,2,1,Big Boom Yellow Firework UP
+2922,attack,2,1,Shockwave Yellow Firework UP
+2923,attack,2,1,Spiral Yellow Firework UP
+2924,attack,2,1,Sparkle Yellow Firework UP
+2925,attack,2,1,Blossom Yellow Firework UP
+2926,attack,2,1,Ring Yellow Firework UP
+2934,attack,4,1,Tusker Fists
+2970,attack,1,1,Hunter's Lash
+2976,attack,32,1,Acid Spray
+2998,attack,16,1,Wrath of the Puppeteer
+3025,attack,4,1,Shriek
+3074,vuln,4,2,Bruised Flesh
+3075,vuln,1,2,Flesh of Cloth
+3076,vuln,32,2,Exposed Flesh
+3077,vuln,16,2,Flesh of Flint
+3078,vuln,2,2,Weaken Flesh
+3080,vuln,4,2.9,Bruised Flesh
+3081,vuln,1,2.6,Flesh of Cloth
+3082,vuln,32,2.9,Exposed Flesh
+3083,vuln,16,2.9,Flesh of Flint
+3084,vuln,2,2.9,Weaken Flesh
+3085,vuln,4,2.6,Bruised Flesh
+3086,vuln,1,2.6,Flesh of Cloth
+3087,vuln,32,2.6,Exposed Flesh
+3088,vuln,16,2.6,Flesh of Flint
+3089,vuln,2,2.6,Weaken Flesh
+3107,attack,1,1,Flay Soul
+3108,attack,1,1,Flay Soul
+3109,attack,32,1,Liquefy Flesh
+3110,attack,16,1,Sear Flesh
+3111,attack,4,1,Soul Hammer
+3112,attack,2,1,Soul Spike
+3113,attack,1,1,Flay Soul
+3114,attack,32,1,Liquefy Flesh
+3115,attack,16,1,Sear Flesh
+3116,attack,4,1,Soul Hammer
+3117,attack,2,1,Soul Spike
+3118,attack,32,1,Liquefy Flesh
+3119,attack,16,1,Sear Flesh
+3120,attack,4,1,Soul Hammer
+3121,attack,2,1,Soul Spike
+3122,attack,2,1,Sacrificial Edge
+3123,attack,2,1,Sacrificial Edges
+3241,attack,16,1,Flame Burst
+3426,attack,32,1,Greater Withering
+3427,attack,32,1,Lesser Withering
+3428,attack,32,1,Withering
+3451,attack,4,1,Concussive Belch
+3452,attack,4,1,Concussive Wail
+3453,attack,16,1,Feelun Blight
+3454,attack,16,1,Wrath of the Feelun
+3455,attack,8,1,Koruu Cloud
+3456,attack,8,1,Koruu's Wrath
+3457,attack,8,1,Mana Bolt
+3458,attack,8,1,Mana Purge
+3459,attack,32,1,Mucor Cloud
+3460,attack,32,1,Dissolving Vortex
+3461,vuln,4,3,Batter Flesh
+3462,vuln,32,3,Canker Flesh
+3463,vuln,16,3,Char Flesh
+3464,vuln,8,3,Numb Flesh
+3653,attack,32,1,Acid Blast III
+3654,attack,32,1,Acid Volley I
+3655,attack,32,1,Acid Volley II
+3656,attack,1,1,Blade Blast III
+3657,attack,1,1,Blade Blast IV
+3658,attack,1,1,Blade Volley I
+3659,attack,1,1,Blade Volley II
+3660,attack,4,1,Bludgeoning Volley I
+3661,attack,4,1,Bludgeoning Volley II
+3662,attack,16,1,Flame Blast I
+3663,attack,16,1,Flame Volley III
+3664,attack,16,1,Flame Volley IV
+3665,attack,2,1,Force Blast III
+3666,attack,2,1,Force Blast IV
+3667,attack,2,1,Force Volley III
+3668,attack,2,1,Force Volley IV
+3669,attack,8,1,Frost Blast III
+3670,attack,8,1,Frost Blast IV
+3671,attack,8,1,Frost Volley III
+3672,attack,8,1,Frost Volley IV
+3673,attack,64,1,Lightning Blast III
+3674,attack,64,1,Lightning Blast IV
+3675,attack,64,1,Lightning Volley III
+3676,attack,64,1,Lightning Volley IV
+3677,attack,4,1,Shock Blast III
+3678,attack,4,1,Shock Blast IV
+3805,attack,32,1,Acid Ring
+3806,attack,16,1,Flame Ring
+3807,attack,2,1,Force Ring
+3808,attack,64,1,Lightning Ring
+3818,attack,128,1,Curse of Raven Fury
+3836,attack,8,1,Breath of the Deep
+3857,attack,16,1,Pumpkin Rain
+3858,attack,16,1,Pumpkin Ring
+3859,attack,16,1,Pumpkin Wall
+3875,vuln,32,2.85,Acidic Curse
+3876,vuln,1,2.85,Curse of the Blades
+3877,attack,32,1,Corrosive Strike
+3878,attack,16,1,Incendiary Strike
+3879,attack,8,1,Glacial Strike
+3880,attack,64,1,Galvanic Strike
+3881,attack,32,1,Corrosive Ring
+3882,attack,16,1,Incendiary Ring
+3883,attack,16,1,Pyroclastic Explosion
+3884,attack,8,1,Glacial Ring
+3885,attack,64,1,Galvanic Ring
+3892,attack,16,1,Summon Flame Seekers
+3893,attack,16,1,Summon Burning Haze
+3901,attack,16,1,Egg Bomb
+3902,attack,1,1,Ring around the Rabbit
+3903,attack,4,1,Whirlwind
+3904,attack,32,1,Essence's Fury
+3905,attack,32,1,Essence's Fury
+3906,attack,32,1,Essence's Fury
+3907,attack,32,1,Essence's Fury
+3908,attack,4,1,Mana Blast
+3911,attack,4,1,Spiral of Souls
+3914,attack,128,1,Dark Vortex
+3917,vuln,8,2.85,Numbing Chill
+3918,vuln,16,2.85,Flammable
+3919,vuln,64,2.85,Lightning Rod
+3926,attack,16,1,Harbinger's Fiery Touch
+3927,vuln,64,3,Charge Flesh
+3931,attack,128,1,Dark Vortex
+3933,attack,2,1,Black Spear Strike
+3934,attack,32,1,Heavy Acid Ring
+3935,attack,1,1,Heavy Blade Ring
+3936,attack,16,1,Fire Bomb
+3937,attack,2,1,Heavy Force Ring
+3938,attack,8,1,Heavy Frost Ring
+3939,attack,64,1,Thaumic Bleed
+3940,attack,128,1,Exsanguinating Wave
+3941,attack,64,1,Heavy Lightning Ring
+3942,attack,4,1,Heavy Shock Ring
+3943,attack,16,1,Burning Earth
+3944,attack,2,1,Rain of Spears
+3945,attack,64,1,Raging Storm
+3946,attack,32,1,Acid Wave
+3947,attack,1,1,Blade Wave
+3948,attack,16,1,Flame Wave
+3949,attack,2,1,Force Wave
+3950,attack,8,1,Frost Wave
+3951,attack,64,1,Lightning Wave
+3952,attack,4,1,Shock Waves
+3969,attack,32,1,Acid Bomb
+3970,attack,1,1,Blade Bomb
+3971,attack,16,1,Fire Bomb
+3972,attack,2,1,Force Bomb
+3973,attack,8,1,Frost Bomb
+3974,attack,64,1,Lightning Bomb
+3975,attack,4,1,Shock Bomb
+3986,attack,4,1,Rock Fall
+3987,attack,2,1,Black Spear Strike
+3988,attack,2,1,Black Spear Strike
+3989,attack,64,1,Dark Lightning
+3990,attack,8,1,Heavy Frost Ring
+3991,attack,64,1,Thaumic Bleed
+3992,attack,32,1,Heavy Acid Ring
+3993,attack,1,1,Heavy Blade Ring
+3994,attack,16,1,Fire Bomb
+3995,attack,2,1,Heavy Force Ring
+3996,attack,8,1,Heavy Frost Ring
+3997,attack,64,1,Heavy Lightning Ring
+3998,attack,128,1,Dark Vortex
+3999,attack,128,1,Exsanguinating Wave
+4000,attack,4,1,Heavy Shock Ring
+4001,attack,16,1,Burning Earth
+4002,attack,16,1,Burning Earth
+4003,attack,2,1,Wall of Spears
+4004,attack,2,1,Wall of Spears
+4005,attack,32,1,Acid Wave
+4006,attack,1,1,Blade Wave
+4007,attack,16,1,Flame Wave
+4008,attack,2,1,Force Wave
+4009,attack,8,1,Frost Wave
+4010,attack,64,1,Lightning Wave
+4011,attack,4,1,Shock Waves
+4021,attack,1,1,Flurry of Stars
+4028,attack,8,1,Snowball
+4044,attack,32,1,Acid Ball
+4045,attack,16,1,Flame Ball
+4046,attack,64,1,Lightning Ball
+4067,attack,4,1,Mucor Bolt
+4078,attack,4,1,Egg
+4081,attack,64,1,Eye of the Tempest
+4082,attack,16,1,Big Fire
+4091,attack,2,1,Spear
+4092,attack,16,1,Flame Grenade
+4096,attack,16,1,Flame Chain
+4097,attack,64,1,Violet Rain
+4113,attack,4,1,FoulRing
+4124,attack,1,1,Dark Nanners
+4125,attack,2,1,Dark Nanners
+4126,attack,2,1,Rain of Nanners
+4181,attack,32,1,Essence Bolt
+4182,attack,64,1,Ball Lightning
+4183,attack,32,1,Corrosive Veil
+4184,attack,16,1,Essence Bolt
+4185,attack,8,1,Essence Bolt
+4186,attack,8,1,Hoar Frost
+4187,attack,64,1,Essence Bolt
+4188,attack,16,1,Shadowed Flame
+4201,vuln,8,2,Numbing Chill
+4202,attack,16,1,Trevor's Zombie Strike
+4208,attack,8,1,Spectral Flame
+4216,attack,8,1,Frost Wave
+4239,attack,4,1,Ring of Death
+4246,attack,64,1,MeteorStrike
+4264,attack,2,1,Arcane Death
+4265,attack,2,1,Arcane Pyramid
+4266,attack,128,1,Blood Bolt
+4267,attack,4,1,Cow
+4268,attack,16,1,Fireworks
+4269,attack,1,1,Present
+4270,attack,2,1,Table
+4271,attack,32,1,Acid Whip
+4272,attack,1,1,Razor Whip
+4273,attack,4,1,Spray of Coins
+4274,attack,16,1,Flame Whip
+4275,attack,64,1,Electric Whip
+4282,attack,2,1,Arcane Death
+4283,attack,2,1,Arcane Death
+4375,attack,2,1,Incantation of Blossom Black Firework OUT
+4376,attack,2,1,Incantation of Blossom Blue Firework OUT
+4377,attack,2,1,Incantation of Blossom Green Firework OUT
+4378,attack,2,1,Incantation of Blossom Orange Firework OUT
+4379,attack,2,1,Incantation of Blossom Purple Firework OUT
+4380,attack,2,1,Incantation of Blossom Red Firework OUT
+4381,attack,2,1,Incantation of Blossom White Firework OUT
+4382,attack,2,1,Incantation of Blossom Yellow Firework OUT
+4383,attack,2,1,Incantation of Blossom Black Firework UP
+4384,attack,2,1,Incantation of Blossom Blue Firework UP
+4385,attack,2,1,Incantation of Blossom Green Firework UP
+4386,attack,2,1,Incantation of Blossom Orange Firework UP
+4387,attack,2,1,Incantation of Blossom Purple Firework UP
+4388,attack,2,1,Incantation of Blossom Red Firework UP
+4389,attack,2,1,Incantation of Blossom White Firework UP
+4390,attack,2,1,Incantation of Blossom Yellow Firework UP
+4421,attack,32,1,Incantation of Acid Arc
+4422,attack,1,1,Incantation of Blade Arc
+4423,attack,16,1,Incantation of Flame Arc
+4424,attack,2,1,Incantation of Force Arc
+4425,attack,8,1,Incantation of Frost Arc
+4426,attack,64,1,Incantation of Lightning Arc
+4427,attack,4,1,Incantation of Shock Arc
+4428,attack,128,1,Incantation of Martyr's Hecatomb
+4429,attack,512,1,Incantation of Martyr's Blight
+4430,attack,256,1,Incantation of Martyr's Tenacity
+4431,attack,32,1,Incantation of Acid Blast
+4432,attack,32,1,Incantation of Acid Streak
+4433,attack,32,1,Incantation of Acid Stream
+4434,attack,32,1,Incantation of Acid Volley
+4435,attack,1,1,Incantation of Blade Blast
+4436,attack,1,1,Incantation of Blade Volley
+4437,attack,4,1,Incantation of Bludgeoning Volley
+4438,attack,16,1,Incantation of Flame Blast
+4439,attack,16,1,Incantation of Flame Bolt
+4440,attack,16,1,Incantation of Flame Streak
+4441,attack,16,1,Incantation of Flame Volley
+4442,attack,2,1,Incantation of Force Blast
+4443,attack,2,1,Incantation of Force Bolt
+4444,attack,2,1,Incantation of Force Streak
+4445,attack,2,1,Incantation of Force Volley
+4446,attack,8,1,Incantation of Frost Blast
+4447,attack,8,1,Incantation of Frost Bolt
+4448,attack,8,1,Incantation of Frost Streak
+4449,attack,8,1,Incantation of Frost Volley
+4450,attack,64,1,Incantation of Lightning Blast
+4451,attack,64,1,Incantation of Lightning Bolt
+4452,attack,64,1,Incantation of Lightning Streak
+4453,attack,64,1,Incantation of Lightning Volley
+4454,attack,4,1,Incantation of Shock Blast
+4455,attack,4,1,Incantation of Shock Wave
+4456,attack,4,1,Incantation of Shock Wave Streak
+4457,attack,1,1,Incantation of Whirling Blade
+4458,attack,1,1,Incantation of Whirling Blade Streak
+4473,vuln,32,3.1,Incantation of Acid Vulnerability Other
+4474,vuln,32,3.1,Incantation of Acid Vulnerability Self
+4475,vuln,1,3.1,Incantation of Blade Vulnerability Other
+4476,vuln,1,3.1,Incantation of Blade Vulnerability Self
+4477,vuln,4,3.1,Incantation of Bludgeoning Vulnerability Other
+4478,vuln,4,3.1,Incantation of Bludgeoning Vulnerability Self
+4479,vuln,8,3.1,Incantation of Cold Vulnerability Other
+4480,vuln,8,3.1,Incantation of Cold Vulnerability Self
+4481,vuln,16,3.1,Incantation of Fire Vulnerability Other
+4482,vuln,16,3.1,Incantation of Fire Vulnerability Self
+4483,vuln,64,3.1,Incantation of Lightning Vulnerability Other
+4484,vuln,64,3.1,Incantation of Lightning Vulnerability Self
+4485,vuln,2,3.1,Incantation of Piercing Vulnerability Other
+4486,vuln,2,3.1,Incantation of Piercing Vulnerability Self
+4927,attack,32,1,Incantation of Acid Stream with 300 Spellpower
+4928,attack,32,1,Incantation of Acid Stream with 350 Spellpower
+4930,attack,16,1,Flame Bolt I
+4931,attack,16,1,Mini Fireball
+4932,attack,16,1,Mini Fireball
+4936,attack,16,1,Flame Bolt I
+4937,attack,16,1,Flame Bolt I
+4938,attack,16,1,Flame Bolt I
+4939,attack,16,1,Mini Uber
+4940,attack,2,1,Mini Ring
+4941,attack,2,1,Mini Ring
+4942,attack,2,1,Mini Ring
+4943,attack,16,1,Mini Fireball
+4945,attack,16,1,Flame Bolt I
+4946,attack,2,1,Mini Ring
+4967,attack,16,1,Cleansing Ring of Fire
+4987,attack,32,1,Olthoi Spit
+5166,attack,16,1,Flaming Skull
+5331,attack,64,1,Clouded Soul
+5332,attack,1024,1,Bael'zharon's Nether Streak
+5333,attack,1024,1,Bael'zharon's Nether Arc
+5337,attack,1024,1,Destructive Curse VII
+5338,attack,1024,1,Incantation of Destructive Curse
+5339,attack,1024,1,Destructive Curse I
+5340,attack,1024,1,Destructive Curse II
+5341,attack,1024,1,Destructive Curse III
+5342,attack,1024,1,Destructive Curse IV
+5343,attack,1024,1,Destructive Curse V
+5344,attack,1024,1,Destructive Curse VI
+5345,attack,1024,1,Nether Streak V
+5346,attack,1024,1,Nether Streak VI
+5347,attack,1024,1,Nether Streak VII
+5348,attack,1024,1,Incantation of Nether Streak
+5349,attack,1024,1,Nether Bolt I
+5350,attack,1024,1,Nether Bolt II
+5351,attack,1024,1,Nether Bolt III
+5352,attack,1024,1,Nether Bolt IV
+5353,attack,1024,1,Nether Bolt V
+5354,attack,1024,1,Nether Bolt VI
+5355,attack,1024,1,Nether Bolt VII
+5356,attack,1024,1,Incantation of Nether Bolt
+5357,attack,1024,1,Nether Streak I
+5358,attack,1024,1,Nether Streak II
+5359,attack,1024,1,Nether Streak III
+5360,attack,1024,1,Nether Streak IV
+5361,attack,1024,1,Clouded Soul
+5362,attack,1024,1,Nether Arc II
+5363,attack,1024,1,Nether Arc III
+5364,attack,1024,1,Nether Arc IV
+5365,attack,1024,1,Nether Arc V
+5366,attack,1024,1,Nether Arc VI
+5367,attack,1024,1,Nether Arc VII
+5368,attack,1024,1,Incantation of Nether Arc
+5369,attack,1024,1,Nether Arc I
+5370,attack,1024,1,Incantation of Nether Streak
+5371,attack,1024,1,Festering Curse I
+5372,attack,1024,1,Festering Curse II
+5373,attack,1024,1,Festering Curse III
+5374,attack,1024,1,Festering Curse IV
+5375,attack,1024,1,Festering Curse V
+5376,attack,1024,1,Festering Curse VI
+5377,attack,1024,1,Festering Curse VII
+5378,attack,1024,1,Incantation of Festering Curse
+5379,attack,1024,1,Weakening Curse I
+5380,attack,1024,1,Weakening Curse II
+5381,attack,1024,1,Weakening Curse III
+5382,attack,1024,1,Weakening Curse IV
+5383,attack,1024,1,Weakening Curse V
+5384,attack,1024,1,Weakening Curse VI
+5385,attack,1024,1,Weakening Curse VII
+5386,attack,1024,1,Incantation of Weakening Curse
+5387,attack,1024,1,Corrosion I
+5388,attack,1024,1,Corrosion II
+5389,attack,1024,1,Corrosion III
+5390,attack,1024,1,Corrosion IV
+5391,attack,1024,1,Corrosion V
+5392,attack,1024,1,Corrosion VI
+5393,attack,1024,1,Corrosion VII
+5394,attack,1024,1,Incantation of Corrosion
+5395,attack,1024,1,Corruption I
+5396,attack,1024,1,Corruption II
+5397,attack,1024,1,Corruption III
+5398,attack,1024,1,Corruption IV
+5399,attack,1024,1,Corruption V
+5400,attack,1024,1,Corruption VI
+5401,attack,1024,1,Corruption VII
+5402,attack,1024,1,Incantation of Corruption
+5439,attack,32,1,Acid Spit Streak 1
+5440,attack,32,1,Acid Spit 1
+5441,attack,32,1,Acid Spit 2
+5442,attack,32,1,Acid Spit Arc 1
+5443,attack,32,1,Acid Spit Arc 2
+5444,attack,32,1,Acid Spit Blast 1
+5445,attack,32,1,Acid Spit Blast 2
+5446,attack,32,1,Acid Spit Volley 1
+5447,attack,32,1,Acid Spit Volley 2
+5448,attack,32,1,Acid Spit Streak
+5522,vuln,32,2.85,Acid Spit Vulnerability 1
+5523,vuln,32,3.1,Acid Spit Vulnerability 2
+5524,attack,2,1,Falling stalactite
+5525,attack,128,1,Bloodstone Bolt I
+5526,attack,128,1,Bloodstone Bolt II
+5527,attack,128,1,Bloodstone Bolt III
+5528,attack,128,1,Bloodstone Bolt IV
+5529,attack,128,1,Bloodstone Bolt V
+5530,attack,128,1,Bloodstone Bolt VI
+5531,attack,128,1,Bloodstone Bolt VII
+5532,attack,128,1,Incantation of Bloodstone Bolt
+5535,attack,32,1,Acidic Blood
+5536,attack,32,1,Acidic Blood
+5537,attack,32,1,Acidic Blood
+5544,attack,1024,1,Nether Blast I
+5545,attack,1024,1,Nether Blast II
+5546,attack,1024,1,Nether Blast III
+5547,attack,1024,1,Nether Blast IV
+5548,attack,1024,1,Nether Blast V
+5549,attack,1024,1,Nether Blast VI
+5550,attack,1024,1,Nether Blast VII
+5551,attack,1024,1,Incantation of Nether Blast
+5754,attack,1,1,Shroud of Darkness (Magic)
+5755,attack,1,1,Shroud of Darkness (Melee)
+5756,attack,1,1,Shroud of Darkness (Missile)
+5762,attack,8,1,Rolling Death
+5967,attack,64,1,Galvanic Arc
+5968,attack,64,1,Galvanic Blast
+5969,attack,64,1,Galvanic Strike
+5970,attack,64,1,Galvanic Streak
+5971,attack,64,1,Galvanic Volley
+5972,attack,64,1,Galvanic Bomb
+6151,attack,64,1,Crimson Storm
+6152,attack,4,1,Rocky Shrapnel
+6155,attack,4,1,Earthen Stomp
+6156,attack,4,1,Viridian Ring
+6157,attack,4,1,Withering Ring
+6158,attack,4,1,Poison Breath
+6159,attack,2,1,Thorn Volley
+6160,attack,2,1,Thorns
+6161,attack,32,1,Acidic Thorns
+6162,attack,2,1,Thorn Arc
+6163,attack,2,1,Ring of Thorns
+6164,attack,2,1,Deadly Ring of Thorns
+6165,attack,2,1,Deadly Thorn Volley
+6168,attack,64,1,Deadly Ring of Lightning
+6169,attack,64,1,Deadly Lightning Volley
+6181,attack,16,1,Singeing Flames
+6186,attack,4,1,Deafening Wail
+6187,attack,2,1,Screeching Howl
+6188,attack,4,1,Earthquake
+6189,attack,32,1,Searing Disc II
+6190,attack,1,1,Horizon's Blades II
+6191,attack,16,1,Cassius' Ring of Fire II
+6192,attack,2,1,Nuhmudira's Spines II
+6193,attack,8,1,Halo of Frost II
+6194,attack,64,1,Eye of the Storm II
+6195,attack,1024,1,Clouded Soul II
+6196,attack,4,1,Tectonic Rifts II
+6197,attack,64,1,Eye of the Storm II
+6198,attack,64,1,Incantation of Lightning Bolt
+6199,attack,64,1,Incantation of Lightning Arc
+6320,attack,1024,1,Ring of Skulls II
+6324,vuln,16,2.1,Gauntlet Vulnerability Self

@@ -261,17 +261,25 @@ pub enum Role {
     Vulnerability,
 }
 
-fn parse_spells(text: &str) -> Vec<(u32, Role, Element)> {
+/// A spell's row: id, role, element, and what a vulnerability multiplies by (1 for an attack).
+type SpellRow = (u32, Role, Element, f32);
+
+fn parse_spells(text: &str) -> Vec<SpellRow> {
     let mut out = Vec::with_capacity(900);
     for line in text.lines() {
         if line.starts_with('#') || line.is_empty() {
             continue;
         }
         let mut f = line.split(',');
-        let (Some(id), Some(role), Some(bit)) = (f.next(), f.next(), f.next()) else {
+        let (Some(id), Some(role), Some(bit), Some(m)) = (f.next(), f.next(), f.next(), f.next())
+        else {
             continue;
         };
-        let (Ok(id), Ok(bit)) = (id.trim().parse::<u32>(), bit.trim().parse::<u32>()) else {
+        let (Ok(id), Ok(bit), Ok(m)) = (
+            id.trim().parse::<u32>(),
+            bit.trim().parse::<u32>(),
+            m.trim().parse::<f32>(),
+        ) else {
             continue;
         };
         let role = match role.trim() {
@@ -282,10 +290,10 @@ fn parse_spells(text: &str) -> Vec<(u32, Role, Element)> {
         // Health, stamina and mana drains are not an element anything
         // is weak to, so they are left out.
         if let Some(e) = Element::from_bit(bit) {
-            out.push((id, role, e));
+            out.push((id, role, e, m));
         }
     }
-    out.sort_by_key(|(id, _, _)| *id);
+    out.sort_by_key(|(id, ..)| *id);
     out
 }
 
@@ -300,7 +308,7 @@ fn parse_damage(text: &str) -> Vec<(u32, u32, u32)> {
             out.push((id, min, max));
         }
     }
-    out.sort_by_key(|(id, _, _)| *id);
+    out.sort_by_key(|(id, ..)| *id);
     out
 }
 
@@ -309,8 +317,8 @@ pub fn creatures() -> &'static [Creature] {
     ALL_CREATURES.get_or_init(|| parse_creatures(CREATURES))
 }
 
-fn spells() -> &'static [(u32, Role, Element)] {
-    static ALL_SPELLS: OnceLock<Vec<(u32, Role, Element)>> = OnceLock::new();
+fn spells() -> &'static [SpellRow] {
+    static ALL_SPELLS: OnceLock<Vec<SpellRow>> = OnceLock::new();
     ALL_SPELLS.get_or_init(|| parse_spells(SPELLS))
 }
 
@@ -373,10 +381,22 @@ pub fn spell_damage(spell_id: u32) -> Option<(u32, u32)> {
 
 /// What a spell does about an element, and which.
 pub fn spell_role(spell_id: u32) -> Option<(Role, Element)> {
+    spell_row(spell_id).map(|r| (r.1, r.2))
+}
+
+fn spell_row(spell_id: u32) -> Option<&'static SpellRow> {
     let all = spells();
-    all.binary_search_by_key(&spell_id, |(id, _, _)| *id)
+    all.binary_search_by_key(&spell_id, |(id, ..)| *id)
         .ok()
-        .map(|i| (all[i].1, all[i].2))
+        .map(|i| &all[i])
+}
+
+/// What a vulnerability multiplies its element's damage by on whoever it lands on (2.5 for
+/// level VI); `None` for a spell that is not one.
+pub fn vuln_mod(spell_id: u32) -> Option<f32> {
+    spell_row(spell_id)
+        .filter(|r| r.1 == Role::Vulnerability)
+        .map(|r| r.3)
 }
 
 /// Every spell that makes a target take more of `element`, at every
@@ -385,8 +405,8 @@ pub fn spell_role(spell_id: u32) -> Option<(Role, Element)> {
 pub fn vulnerabilities(element: Element) -> Vec<u32> {
     spells()
         .iter()
-        .filter(|(_, r, e)| *r == Role::Vulnerability && *e == element)
-        .map(|(id, _, _)| *id)
+        .filter(|(_, r, e, _)| *r == Role::Vulnerability && *e == element)
+        .map(|(id, ..)| *id)
         .collect()
 }
 
@@ -464,6 +484,9 @@ mod tests {
         let colds = vulnerabilities(Element::Cold);
         assert!(colds.contains(&1065), "{colds:?}");
         assert!(colds.iter().all(|id| spell_element(*id).is_none()));
+        assert_eq!(vuln_mod(1104), Some(1.25), "Fire Vulnerability Other II");
+        assert_eq!(vuln_mod(1156), Some(2.5), "Piercing Vulnerability Other VI");
+        assert_eq!(vuln_mod(84), None, "Flame Bolt V is an attack");
         assert!(!vulnerabilities(Element::Fire).is_empty());
     }
 

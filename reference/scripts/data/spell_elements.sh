@@ -27,14 +27,14 @@ set -e
 
 # stat_Mod_Key on a resistance enchantment is the PropertyFloat id of the
 # resistance it changes; map those to the damage-type bit.
-SQL='select id, "attack", e_Type, name from spell
+SQL='select id, "attack", e_Type, 1, name from spell
   where e_Type is not null and e_Type > 0
 union all
 select id, "vuln",
   case stat_Mod_Key when 64 then 1 when 65 then 2 when 66 then 4
     when 68 then 8 when 67 then 16 when 69 then 32 when 70 then 64
     when 166 then 1024 else 0 end,
-  name
+  stat_Mod_Val, name
 from spell
   where stat_Mod_Key in (64,65,66,67,68,69,70,166)
     and stat_Mod_Val > 1
@@ -42,12 +42,14 @@ order by 1;'
 
 cat <<'HEADER'
 # Which element each spell is about.
-# spell_id,role,element,name
+# spell_id,role,element,mod,name
 # role is "attack" (deals that element) or "vuln" (makes whoever it is
 # cast on take more of it: the client only uses the ones that take a
 # target, so it never casts one on itself). The element is a DamageType bit: 1 slash, 2 pierce,
 # 4 bludgeon, 8 cold, 16 fire, 32 acid, 64 electric, 128 health,
-# 256 stamina, 512 mana, 1024 nether. The name is there to read by; the
+# 256 stamina, 512 mana, 1024 nether. mod is what a vuln multiplies the
+# target's resistance by (ACE stat_Mod_Val; the top one of its kind on a
+# target counts, EnchantmentManager.cs:925-940), 1 for an attack. The name is there to read by; the
 # client matches on the id.
 # Regenerate with reference/scripts/data/spell_elements.sh (reads the
 # ACE world database, the community's reconstruction of retail's server
@@ -57,8 +59,8 @@ HEADER
 docker exec ace-db sh -c \
   "mysql -uroot -p\"\$MYSQL_ROOT_PASSWORD\" -N --batch ace_world -e '$SQL'" \
   2>/dev/null |
-  awk -F'\t' 'NF == 4 && $3 != 0 {
-    gsub(/,/, ";", $4)
-    printf "%s,%s,%s,%s\n", $1, $2, $3, $4
+  awk -F'\t' 'NF == 5 && $3 != 0 {
+    gsub(/,/, ";", $5)
+    printf "%s,%s,%s,%.4g,%s\n", $1, $2, $3, $4, $5
   }' |
   LC_ALL=C sort -t, -k1,1n
