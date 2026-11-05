@@ -79,7 +79,7 @@ fn the_sight_test_asks_about_the_attack_in_hand() {
     assert!(!archer.missile);
     assert_eq!(archer.combat_stance(), Stance::Missile);
     assert_eq!(
-        archer.attack_kind(Stance::Missile, &[], 0),
+        archer.attack_kind(Stance::Missile, &[], &[], 0),
         Some(How::Missile)
     );
     let mut swordsman = testkit::character_of_level(testkit::no_data(), 20);
@@ -92,7 +92,7 @@ fn the_sight_test_asks_about_the_attack_in_hand() {
     );
     assert_eq!(swordsman.combat_stance(), Stance::Melee);
     assert_eq!(
-        swordsman.attack_kind(Stance::Melee, &[], 0),
+        swordsman.attack_kind(Stance::Melee, &[], &[], 0),
         Some(How::Melee)
     );
 }
@@ -201,7 +201,7 @@ fn a_caster_picks_what_its_arc_gets_over_not_what_a_swing_would_reach() {
     // asked whether the caster could swing at the creature instead.
     assert_eq!(c.combat_stance(), Stance::Magic);
     assert!(!c.missile);
-    let how = c.attack_kind(Stance::Magic, &[FROST_ARC_I], 0);
+    let how = c.attack_kind(Stance::Magic, &[FROST_ARC_I], &[], 0);
     assert_eq!(how, Some(How::Spell(FROST_ARC_I)));
     assert!(matches!(c.shot_for(how.unwrap()), Shot::Arc { .. }));
     assert_eq!(c.shot_for(How::Melee), Shot::Bolt, "a swing's line is not");
@@ -250,9 +250,9 @@ fn the_pick_traces_the_spell_this_creature_will_be_thrown() {
         Some(FLAME_BOLT_I)
     );
     assert_eq!(
-        c.attack_kind(Stance::Magic, &ready, 0),
-        Some(How::Spell(FROST_ARC_I)),
-        "with no creature to ask about, the first ready one"
+        c.attack_kind(Stance::Magic, &ready, &[], 0),
+        Some(How::Spell(FLAME_BOLT_I)),
+        "with no creature to ask about, the one that rolls higher (16-31 to 16-30)"
     );
     let near = ground_at(&c, HILLSIDE, 124.2, 106.3);
     let far = ground_at(&c, HILLSIDE, 96.0, 60.0);
@@ -260,7 +260,7 @@ fn the_pick_traces_the_spell_this_creature_will_be_thrown() {
     ice_golem_at(&mut c, IN_THE_OPEN, far);
     // The sight test asks about the bolt, because the bolt is what
     // this creature is going to be thrown.
-    let how = c.attack_kind(Stance::Magic, &ready, BEHIND_THE_RISE);
+    let how = c.attack_kind(Stance::Magic, &ready, &[], BEHIND_THE_RISE);
     assert_eq!(how, Some(How::Spell(FLAME_BOLT_I)));
     assert_eq!(c.shot_for(how.unwrap()), Shot::Bolt);
     assert!(!c.shot_clears(BEHIND_THE_RISE, how.unwrap()));
@@ -289,7 +289,7 @@ fn a_caster_with_nothing_to_throw_names_no_attack() {
     // attack to test, and a swing is not the answer -- `How::Melee`
     // would hand the fight rules a reach of `dodge::STICKY_REACH`.
     assert!(c.ready_spells(&Fight::default()).is_empty());
-    assert_eq!(c.attack_kind(Stance::Magic, &[], NEAR), None);
+    assert_eq!(c.attack_kind(Stance::Magic, &[], &[], NEAR), None);
     let me = c.my_position().expect("standing somewhere");
     revenant_at(&mut c, FAR, me + glam::vec3(30.0, 0.0, 0.0));
     revenant_at(&mut c, NEAR, me + glam::vec3(10.0, 0.0, 0.0));

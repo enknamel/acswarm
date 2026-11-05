@@ -198,8 +198,8 @@ pub struct Autoplay {
     pub(crate) armed_for: Option<u32>,
     /// Coming back from a death (see `crate::recovery`).
     pub recovery: crate::recovery::Recovery,
-    /// Targets already made vulnerable this fight.
-    vulned: Vec<u32>,
+    /// Targets whose vulnerability is dealt with, and the one cast (element, multiplier) if any.
+    vulned: Vec<(u32, Option<(ac_world::elements::Element, f32)>)>,
     /// Hard targets being softened, and how far along: 0 the
     /// vulnerability still to cast, 1 the imperil.
     softening: Vec<(u32, u8)>,
@@ -218,6 +218,10 @@ pub struct Autoplay {
     /// lasts)`. An item's enchantments are not reported the way the
     /// character's own are, so the cast is remembered instead.
     item_buffs: Vec<(u32, u32, Instant, f32)>,
+    /// When the worn pieces were last appraised for the enchantments on them (`look_at_armour`).
+    armour_looked: Option<Instant>,
+    /// The item buff whose answer is awaited, `(item, category)`: a refusal takes its entry back.
+    item_buff_sent: Option<(u32, u32)>,
     /// The last note logged and when (see `note`).
     /// Notes said lately and when, so that two alternating notes are
     /// each said once per `NOTE_EVERY` rather than every frame.

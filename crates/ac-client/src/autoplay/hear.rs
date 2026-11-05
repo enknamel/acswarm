@@ -171,7 +171,7 @@ impl Client {
         }
         let a = &mut self.autoplay;
         if stage == 0 {
-            a.vulned.retain(|t| *t != g);
+            a.vulned.retain(|(t, _)| *t != g);
         } else {
             a.debuffed.retain(|t| *t != g);
         }

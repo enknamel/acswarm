@@ -29,6 +29,14 @@ pub(crate) struct Learnable {
     pub(crate) read_at: Option<Instant>,
 }
 
+impl Learnable {
+    /// A read sent less than [`READ_TAKES`] ago: the server is busy with it, and turns a cast away.
+    pub(crate) fn is_reading(&self, now: Instant) -> bool {
+        self.read_at
+            .is_some_and(|t| now.duration_since(t) < READ_TAKES)
+    }
+}
+
 /// Whether a spell of `power` can be learned with `skill` in its school, `trained` or better:
 /// ACE `CanReadScroll`, less a school the character cannot cast in at all.
 pub(crate) fn can_learn(power: u32, trained: bool, skill: u32) -> bool {
@@ -95,10 +103,9 @@ impl Client {
             return;
         }
         let st = &self.autoplay.learnable;
-        let busy = st
-            .read_at
-            .is_some_and(|t| now.duration_since(t) < READ_TAKES);
-        // A read keeps the server busy READ_TAKES: a use of a giver or a counter then is dropped.
+        // A read keeps the server busy READ_TAKES: a use of a giver or a counter then is dropped, and
+        // one sent behind a cast is turned away busy (0x1D); `cast_in_flight` counts the read in.
+        let busy = self.autoplay.cast_in_flight(now);
         let quiet = self.attack_target.is_none()
             && self.autoplay.nearest_fight.is_none()
             && !self.traveling()

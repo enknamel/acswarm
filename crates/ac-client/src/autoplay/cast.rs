@@ -36,6 +36,10 @@ impl Autoplay {
         // The clock that remains is a backstop, not the pacing: if the
         // server never answers at all, the character must not wait for
         // ever.
+        // A scroll being read: a cast sent then is turned away busy, 0x1D (Scroll.cs:58-82).
+        if self.learnable.is_reading(now) {
+            return true;
+        }
         match self.cast_sent {
             Some(t) => now.duration_since(t) < CAST_LOST,
             None => false,

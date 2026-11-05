@@ -87,10 +87,19 @@ fn a_scroll_the_character_can_learn_is_kept_and_read_once_nothing_is_fought() {
     assert_eq!(c.last_used, None, "read mid-walk");
     c.going = None;
 
+    // A spell in the air: a read sent behind it is turned away busy.
+    c.autoplay.cast_sent = Some(now);
+    c.autoplay_learn_scrolls(now);
+    assert_eq!(c.last_used, None, "read behind a cast");
+    c.autoplay.cast_sent = None;
+
     // Nothing on: the bolt is read, once, and the heal never.
     c.autoplay_learn_scrolls(now);
     assert_eq!(c.last_used, Some(0x8000_0500));
     c.last_used = None;
+    // Blargerton's login buffs went out in the tick he began reading and were turned away (0x1D).
+    assert!(c.autoplay.cast_in_flight(now), "a cast waits on the read");
+    assert!(!c.autoplay.cast_in_flight(now + READ_TAKES));
     c.autoplay_learn_scrolls(now + READ_TAKES);
     assert_eq!(c.last_used, None, "read again while its answer is awaited");
 

@@ -201,14 +201,17 @@ impl Client {
     /// spell: there is no attack to test, and no `How` says so -- a
     /// `How::Melee` would name a swing it cannot make and a reach it
     /// does not have (`Client::attack_range`).
-    fn attack_kind(&self, stance: Stance, ready: &[u32], guid: u32) -> Option<How> {
+    fn attack_kind(
+        &self,
+        stance: Stance,
+        ready: &[u32],
+        vulns: &[(ac_world::elements::Element, f32, f32)],
+        guid: u32,
+    ) -> Option<How> {
         match stance {
-            Stance::Magic => {
-                let o = self.world.objects.get(&guid);
-                let wcid = o.map_or(0, |o| o.weenie_class_id);
-                let name = o.map_or("", |o| o.name.as_str());
-                ac_world::elements::best_spell(wcid, name, ready).map(|(id, _)| How::Spell(id))
-            }
+            Stance::Magic => self
+                .best_attack(guid, ready, vulns)
+                .map(|(id, _)| How::Spell(id)),
             Stance::Missile => Some(How::Missile),
             Stance::Melee => Some(How::Melee),
         }
@@ -268,12 +271,13 @@ impl Client {
                 .collect(),
             _ => Vec::new(),
         };
+        let vulns = self.vuln_strengths(&ready);
         candidates
             .into_iter()
             .map(|(guid, at)| {
                 // A caster with no spell to name has no flight to test,
                 // and then the nearest is as good an answer as any.
-                let how = self.attack_kind(stance, &ready, guid);
+                let how = self.attack_kind(stance, &ready, &vulns, guid);
                 let seen = how.is_none_or(|how| self.shot_clears(guid, how));
                 // A pursued quest's creature before a nearer namesake: the jaw's Engorged Eater
                 // (28849) shares its name with the common one (28642).

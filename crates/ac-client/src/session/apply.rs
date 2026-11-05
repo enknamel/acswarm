@@ -439,6 +439,7 @@ impl Client {
                                     }
                                     self.use_done = Some((err, now));
                                     self.hear_cast_refused(err, now);
+                                    self.hear_buff_answer(err);
                                     // The server has finished with what
                                     // it was asked to do -- a cast, a
                                     // use, a counter opening. That is

@@ -122,7 +122,7 @@ pub struct Fight {
     /// criticals counted (see `crate::weapons`).
     pub pick_weapon: bool,
     /// With no damage to judge by (health unknown, a spell with no damage row), cast a vulnerability
-    /// on anything with at least this much full health; else when a kill takes over two casts. 0 never does.
+    /// on anything with at least this much full health; else when it saves more casts than its own. 0 never does.
     pub vuln_above_health: u32,
     /// Only attack creatures whose name contains one of these; empty
     /// means anything that can be attacked.

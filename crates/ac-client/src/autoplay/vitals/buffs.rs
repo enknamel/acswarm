@@ -41,6 +41,13 @@ fn buff_within(cfg: &Buffs, urgent: bool, fighting: bool, wand_in_hand: bool) ->
 /// How often each buff pass, urgent and top-up, and the rearm work out what is due.
 pub(crate) const BUFF_CHECK_EVERY: Duration = Duration::from_millis(1000);
 
+/// How often the worn pieces are appraised for the enchantments on them.
+const ARMOUR_LOOKS: Duration = Duration::from_secs(300);
+/// How long the answers to those appraisals are waited for before an item buff counts as due.
+const ARMOUR_ANSWERS: Duration = Duration::from_secs(3);
+/// The bit ACE sets on a spell book entry that is an enchantment on the item (AppraiseInfo.cs:21).
+const ENCHANTMENT_BIT: u32 = 0x8000_0000;
+
 impl Client {
     /// Seconds left on the enchantment of a spell family, if any is up.
     fn buff_left(&self, spell: u32) -> Option<f32> {
@@ -93,17 +100,89 @@ impl Client {
             })
     }
 
-    /// Seconds left on an enchantment we put on an item, by category,
-    /// from when we cast it and how long the spell lasts.
-    fn item_buff_left(&self, item: u32, category: u32, now: Instant) -> Option<f32> {
-        self.autoplay
+    /// Seconds left on an enchantment of `category` at `power` or more on an item: from when we
+    /// cast it and how long the spell lasts, else, put on before this session, as long as an
+    /// appraisal of a worn piece lists it (`look_at_armour` asks again every [`ARMOUR_LOOKS`]).
+    fn item_buff_left(&self, item: u32, category: u32, power: u32, now: Instant) -> Option<f32> {
+        let cast = self
+            .autoplay
             .item_buffs
             .iter()
             .filter(|(g, c, _, _)| *g == item && *c == category)
             .map(|(_, _, when, lasts)| lasts - now.duration_since(*when).as_secs_f32())
             .fold(None, |acc: Option<f32>, left| {
                 Some(acc.map_or(left, |a| a.max(left)))
+            });
+        if cast.is_some() {
+            return cast;
+        }
+        // The answers to a look just sent are still on their way: nothing is due until they land.
+        let answering = self
+            .autoplay
+            .armour_looked
+            .is_some_and(|t| now.duration_since(t) < ARMOUR_ANSWERS);
+        (answering || self.is_worn_with(category, power)).then_some(f32::INFINITY)
+    }
+
+    /// The pieces worn that item buffs cast at the character land on: its armour and clothing
+    /// (`inventory()` is the packs only).
+    fn worn_pieces(&self) -> Vec<u32> {
+        let kinds = ac_world::item_type::ARMOR | ac_world::item_type::CLOTHING;
+        self.world
+            .wielded()
+            .filter(|o| o.item_type & kinds != 0)
+            .map(|o| o.guid)
+            .collect()
+    }
+
+    /// The server's answer `err` to the last cast: a refused item buff (too busy just after login,
+    /// 0x1D) never went on, so it is not remembered as up for its whole duration.
+    pub(crate) fn hear_buff_answer(&mut self, err: u32) {
+        let Some((g, category)) = self.autoplay.item_buff_sent.take() else {
+            return;
+        };
+        if err != 0 {
+            self.autoplay
+                .item_buffs
+                .retain(|(i, c, _, _)| !(*i == g && *c == category));
+        }
+    }
+
+    /// Whether an appraisal of a worn piece lists an enchantment of `category` at `power` or more:
+    /// ACE puts each one on an item in its spell book with the top bit set (AppraiseInfo.cs:494-502).
+    fn is_worn_with(&self, category: u32, power: u32) -> bool {
+        let Ok(table) = self.assets.spell_table() else {
+            return false;
+        };
+        self.worn_pieces().iter().any(|g| {
+            self.appraisals.get(g).is_some_and(|a| {
+                a.spells
+                    .iter()
+                    .filter(|id| *id & ENCHANTMENT_BIT != 0)
+                    .filter_map(|id| table.get(*id & !ENCHANTMENT_BIT))
+                    .any(|sp| sp.category == category && sp.power >= power)
             })
+        })
+    }
+
+    /// Appraise the worn pieces, for the enchantments on them, every [`ARMOUR_LOOKS`]: at login
+    /// those put on before are known only so, and recast they are "surpassed" for nothing.
+    fn look_at_armour(&mut self, now: Instant) {
+        if self
+            .autoplay
+            .armour_looked
+            .is_some_and(|t| now.duration_since(t) < ARMOUR_LOOKS)
+        {
+            return;
+        }
+        let pieces = self.worn_pieces();
+        if pieces.is_empty() {
+            return;
+        }
+        self.autoplay.armour_looked = Some(now);
+        for g in pieces {
+            self.appraise(g);
+        }
     }
 
     /// The buffs this character should be wearing right now, worked out
@@ -212,6 +291,9 @@ impl Client {
         let cfg = self.autoplay.config.buffs.clone();
         if cfg.spells.is_empty() && !cfg.auto {
             return false;
+        }
+        if cfg.auto {
+            self.look_at_armour(now);
         }
         let fighting = self.has_target();
         // At a counter every cast waits, urgent or not, for the reason
@@ -382,6 +464,7 @@ impl Client {
                     .item_buffs
                     .retain(|(i, c, _, _)| !(*i == g && *c == category));
                 self.autoplay.item_buffs.push((g, category, now, lasts));
+                self.autoplay.item_buff_sent = Some((g, category));
                 let on = self.world.name_of(g).unwrap_or_default().to_string();
                 self.autoplay
                     .say(Doing::Buffing, format!("casting {name} on {on}"));
@@ -449,7 +532,7 @@ impl Client {
         for want in wants {
             let left = match want.target {
                 Target::Me => self.category_left(want.category, want.power),
-                Target::Item(g) => self.item_buff_left(g, want.category, now),
+                Target::Item(g) => self.item_buff_left(g, want.category, want.power, now),
             };
             if left.is_some_and(|l| l > top_up) {
                 continue;
@@ -544,7 +627,7 @@ impl Client {
             }
             let left = match want.target {
                 Target::Me => self.category_left(want.category, want.power),
-                Target::Item(g) => self.item_buff_left(g, want.category, now),
+                Target::Item(g) => self.item_buff_left(g, want.category, want.power, now),
             };
             offer(left, want.spell, want.target, want.category);
         }

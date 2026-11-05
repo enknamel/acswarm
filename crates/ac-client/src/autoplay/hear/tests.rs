@@ -87,10 +87,10 @@ fn a_resisted_vulnerability_is_cast_again_up_to_its_tries() {
     let it = crate::testkit::creature(0x8000_0103, "Drudge Skulker");
     c.world.objects.insert(it.guid, it);
     let resisted = |c: &mut Client| {
-        c.autoplay.vulned.push(0x8000_0103);
+        c.autoplay.mark_vulned(0x8000_0103, None);
         c.autoplay.debuff_sent = Some((0x8000_0103, 0));
         c.hear_arrival("Drudge Skulker resists your spell");
-        !c.autoplay.vulned.contains(&0x8000_0103)
+        !c.autoplay.is_vulned(0x8000_0103)
     };
     assert!(resisted(&mut c), "first resist re-arms it");
     assert!(resisted(&mut c), "second resist re-arms it");
@@ -99,13 +99,13 @@ fn a_resisted_vulnerability_is_cast_again_up_to_its_tries() {
     let mut c = crate::testkit::offline_client();
     let it = crate::testkit::creature(0x8000_0103, "Drudge Skulker");
     c.world.objects.insert(it.guid, it);
-    c.autoplay.vulned.push(0x8000_0103);
+    c.autoplay.mark_vulned(0x8000_0103, None);
     c.autoplay.debuff_sent = Some((0x8000_0103, 0));
     c.hear_arrival("Mosswart Shaman resists your spell");
-    assert!(c.autoplay.vulned.contains(&0x8000_0103));
+    assert!(c.autoplay.is_vulned(0x8000_0103));
     c.autoplay.debuff_sent = None;
     c.hear_arrival("Drudge Skulker resists your spell");
-    assert!(c.autoplay.vulned.contains(&0x8000_0103));
+    assert!(c.autoplay.is_vulned(0x8000_0103));
 }
 
 #[test]

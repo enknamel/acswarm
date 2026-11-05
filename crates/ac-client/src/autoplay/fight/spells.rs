@@ -117,15 +117,11 @@ impl Client {
         let table = self.assets.spell_table().ok();
         let ready = self.ready_spells(cfg);
         let ids: Vec<u32> = ready.iter().map(|(id, _)| *id).collect();
-        let wcid = self
-            .world
-            .objects
-            .get(&guid)
-            .map(|o| o.weenie_class_id)
-            .unwrap_or(0);
-        let best = ac_world::elements::best_spell(wcid, &name, &ids);
-        // Something that would take more than two of those is worth softening first: one
-        // vulnerability for the element it is weakest to, then that element for the rest.
+        // Chosen with the vulnerability that would go with it: Fire Vulnerability II and a
+        // Flame Bolt VI took three casts a Tusker Guard that Piercing VI and Force Bolt VI took two.
+        let vulns = self.vuln_strengths(&ids);
+        let best = self.best_attack(guid, &ids, &vulns);
+        // One that saves casts is worth putting on first, then that element for the rest.
         if self.autoplay_make_vulnerable(guid, &name, best.map(|(id, _)| id), now) {
             return true;
         }
@@ -214,7 +210,7 @@ impl Client {
     /// less the ones `can_cast` refuses, in the same order.
     ///
     /// The one to throw is chosen from these against the creature
-    /// (`ac_world::elements::best_spell`), so the target pick reads the
+    /// (`Client::best_attack`), so the target pick reads the
     /// same list and names the same spell (`Client::attack_kind`).
     /// Costly -- `can_cast` walks the packs for components -- so both
     /// callers look once and neither on every tick.
