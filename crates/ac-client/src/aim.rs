@@ -23,8 +23,9 @@
 //!   the two arcs that get there -- and past its reach there is none.
 //!
 //! Each starts beside the shooter, its own radius and the shooter's out
-//! in front, twice over; the stretch from the shooter's middle to there
-//! counts as part of the flight. The path comes back as points no
+//! in front, twice over (once, for a spell at a target in arm's reach);
+//! the stretch from the shooter's middle to there counts as part of the
+//! flight, and it ends where it meets the target's body. The path comes back as points no
 //! further apart than [`PIECE`], so that the collision of the landblocks
 //! under each pair covers the stretch between them and the ground is
 //! looked at every few steps.
@@ -120,7 +121,10 @@ pub fn flight(shot: Shot, from: Body, to: Body) -> Option<Vec<Vec3>> {
     };
     let flat = (to.feet - from.feet).truncate();
     let ahead = flat.try_normalize().unwrap_or(glam::Vec2::Y);
-    let out = 2.0 * (from.radius + PROJECTILE_RADIUS);
+    // A spell at a target nearer than POINT_BLANK spawns once out, not twice
+    // (WorldObject_Magic.cs:1584-1590); an arrow always twice (Creature_Missile.cs:158).
+    let near = !matches!(shot, Shot::Missile { .. }) && cylinder_gap(from, to) < POINT_BLANK;
+    let out = if near { 1.0 } else { 2.0 } * (from.radius + PROJECTILE_RADIUS);
     let origin = from.feet + ahead.extend(0.0) * out + Vec3::Z * (from.height * launch);
     let end = to.feet + Vec3::Z * (to.height * aim);
     let points = match shot {
@@ -159,7 +163,42 @@ pub fn flight(shot: Shot, from: Body, to: Body) -> Option<Vec<Vec3>> {
     // shot beyond it, and does not get to throw through it.
     let mut path = vec![from.feet + Vec3::Z * (from.height * launch)];
     path.extend(points);
+    // It ends where it meets the target's body (its cylinder's box): what lies past that is never
+    // reached. A Tusker Guard's is 1.4 m round, so one in arm's reach is struck at once.
+    let lo = to.feet - Vec3::new(to.radius, to.radius, 0.0);
+    let hi = to.feet + Vec3::new(to.radius, to.radius, to.height);
+    for i in 0..path.len().saturating_sub(1) {
+        if let Some(t) = segment_box(path[i], path[i + 1], lo, hi) {
+            let entry = path[i].lerp(path[i + 1], t);
+            path.truncate(i + 1);
+            path.push(entry);
+            break;
+        }
+    }
     Some(path)
+}
+
+/// The gap between two bodies' cylinders, metres, below which a spell spawns once out, not twice
+/// (ACE `WorldObject_Magic.CalculateProjectileOrigins`).
+pub const POINT_BLANK: f32 = 0.6;
+
+/// How far apart `a` and `b` stand, side to side, or corner to corner when one is above the other
+/// (ACE `Position.CylinderDistance`, Position.cs:100-114); negative when they overlap.
+pub fn cylinder_gap(a: Body, b: Body) -> f32 {
+    let reach = a.feet.distance(b.feet) - (a.radius + b.radius);
+    let rise = if a.feet.z <= b.feet.z {
+        b.feet.z - (a.feet.z + a.height)
+    } else {
+        a.feet.z - (b.feet.z + b.height)
+    };
+    let corner = (rise * rise + reach * reach).sqrt();
+    if rise > 0.0 && reach > 0.0 {
+        corner
+    } else if rise < 0.0 && reach < 0.0 {
+        -corner
+    } else {
+        reach
+    }
 }
 
 /// A straight line from `a` to `b` in pieces no longer than [`PIECE`].
@@ -230,13 +269,18 @@ mod tests {
         Body::new(Vec3::new(x, y, 0.0), 1.8, 0.4)
     }
 
+    /// A person-high target thin enough that a flight runs on to its aim point.
+    fn post(x: f32, y: f32) -> Body {
+        Body::new(Vec3::new(x, y, 0.0), 1.8, 0.02)
+    }
+
     fn close(a: f32, b: f32) -> bool {
         (a - b).abs() < 0.05
     }
 
     #[test]
     fn a_bolt_flies_straight_from_two_thirds_up_to_two_thirds_up() {
-        let path = flight(Shot::Bolt, person(0.0, 0.0), person(0.0, 20.0)).unwrap();
+        let path = flight(Shot::Bolt, person(0.0, 0.0), post(0.0, 20.0)).unwrap();
         let (first, last) = (path[1], *path.last().unwrap());
         // Counted from the caster's middle.
         assert!(
@@ -248,18 +292,40 @@ mod tests {
         // Out in front of the caster, by its radius and the bolt's twice.
         assert!(close(first.y, 1.1), "{first}");
         assert!(close(last.y, 20.0));
+        // A person there is struck at its side, 0.4 m short.
+        let at_one = flight(Shot::Bolt, person(0.0, 0.0), person(0.0, 20.0)).unwrap();
+        assert!(close(at_one.last().unwrap().y, 19.6));
         assert!(path.windows(2).all(|w| w[0].distance(w[1]) <= PIECE + 1e-3));
         assert!(path.iter().all(|p| close(p.z, 1.2) && close(p.x, 0.0)));
     }
 
     #[test]
-    fn an_arc_climbs_and_comes_down_at_five_sixths() {
-        let path = flight(
-            Shot::Arc { speed: 10.0 },
+    fn a_spell_at_a_target_in_reach_of_an_arm_spawns_half_as_far_out() {
+        // Blargerton's bolts at Tusker Guards 1.4 to 1.9 m off: spawned twice out, 1.1 m here,
+        // they started inside or past the guard and our test had them strike the wall behind it.
+        let near = post(0.0, 0.9);
+        assert!(cylinder_gap(person(0.0, 0.0), near) < POINT_BLANK);
+        let bolt = flight(Shot::Bolt, person(0.0, 0.0), near).unwrap();
+        assert!(close(bolt[1].y, 0.55), "{}", bolt[1]);
+        let arrow = flight(
+            Shot::Missile { speed: 60.0 },
             person(0.0, 0.0),
-            person(20.0, 0.0),
+            post(0.0, 3.0),
         )
         .unwrap();
+        assert!(close(arrow[1].y, 1.1), "an arrow twice out: {}", arrow[1]);
+        // Over the gap, twice out.
+        let far = flight(Shot::Bolt, person(0.0, 0.0), post(0.0, 1.5)).unwrap();
+        assert!(close(far[1].y, 1.1), "{}", far[1]);
+        // A Tusker Guard (1.4 m round) in arm's reach is struck where its body begins.
+        let guard = Body::new(Vec3::new(0.0, 1.8, 0.0), 2.0, 1.4);
+        let at = flight(Shot::Bolt, person(0.0, 0.0), guard).unwrap();
+        assert!(close(at.last().unwrap().y, 0.4), "{at:?}");
+    }
+
+    #[test]
+    fn an_arc_climbs_and_comes_down_at_five_sixths() {
+        let path = flight(Shot::Arc { speed: 10.0 }, person(0.0, 0.0), post(20.0, 0.0)).unwrap();
         let last = *path.last().unwrap();
         assert!(close(last.z, 1.5) && close(last.x, 20.0), "{last}");
         assert!(close(path[0].z, 1.8));
@@ -281,7 +347,7 @@ mod tests {
         let path = flight(
             Shot::Missile { speed: 20.0 },
             person(0.0, 0.0),
-            person(0.0, 30.0),
+            post(0.0, 30.0),
         )
         .unwrap();
         let last = *path.last().unwrap();

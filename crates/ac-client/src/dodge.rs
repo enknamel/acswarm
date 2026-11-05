@@ -2290,4 +2290,35 @@ mod tests {
         );
         assert!(c.going.is_none(), "and no walk is left standing");
     }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn a_bolt_at_a_creature_in_arms_reach_strikes_it_before_the_wall_behind() {
+        // Blargerton in Tusker Barracks hit Tusker Guards 1.4 to 1.9 m off with Flame Bolt VI where
+        // our test had 16 of 18 strike a wall: the flight ran on through the guard to its middle.
+        let origin = ac_world::landblock_origin(0x5A48_0000);
+        let here = Vec3::new(17341.02, 13765.18, -6.0) - origin;
+        let mut c = crate::testkit::standing_in_the_field(41, 0x5A48_0159, here);
+        let me = c.my_position().unwrap();
+        let guard = crate::testkit::standing_by(&mut c, 0x8000_0001, "Tusker Guard", 0.0);
+        // North-west, where the wall beside him had our bolt struck 1.3 m out: the guard, 1.4 m
+        // round (setup 0x02000964), is in the way well before that.
+        let a = 157.5f32.to_radians();
+        let at = me + Vec3::new(a.cos(), a.sin(), 0.0) * 1.8;
+        let o = c.world.objects.get_mut(&guard.guid).unwrap();
+        o.setup_id = 0x0200_0964;
+        o.scale = 1.0;
+        o.position = Some(ac_world::object::Position::new_flat(
+            0x5A48_0159,
+            at - origin,
+        ));
+        let (spell, _) = c
+            .assets
+            .spell_table()
+            .unwrap()
+            .find_by_name("Flame Bolt VI")
+            .map(|(id, sp)| (id, sp.clone()))
+            .expect("Flame Bolt VI");
+        assert!(c.shot_clears(guard.guid, How::Spell(spell)));
+    }
 }
