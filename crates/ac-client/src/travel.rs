@@ -1341,6 +1341,11 @@ impl Client {
             self.travel_recall_refused();
             return;
         }
+        // Sent behind a spell still in the air it is turned away busy, and the try waits out the
+        // give-up clock (25 s for `/lifestone`).
+        if self.autoplay.cast_in_flight(now) {
+            return;
+        }
         // `/lifestone` is not a spell: the server has its own action for it and asks for no
         // skill, components or casting at all. It is planned beside the spells and sent quite
         // differently.

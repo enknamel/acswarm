@@ -1290,3 +1290,46 @@ fn lifestone_is_not_sent_again_while_its_first_is_still_under_way() {
     c.step_goal(at(27.0));
     assert_eq!(c.travel.state.recall_casts, 2, "never sent again");
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn lifestone_waits_for_a_spell_in_the_air_rather_than_be_turned_away_busy() {
+    // Blargerton sent /lifestone 0.8 s into a Stamina to Mana cast, was told "You're too busy",
+    // and stood 25 s waiting out the give-up clock before the second try.
+    let mut c = crate::testkit::standing_in_the_field(40, 0x8F68_0014, Vec3::new(50.0, 50.0, 14.0));
+    let exit = Place {
+        at: Vec3::new(32532.0, 34567.0, 94.0),
+        cell: 0xA9B4_0019,
+    };
+    let trip = ac_world::trip::Trip {
+        steps: vec![
+            ac_world::trip::Step::Recall {
+                spell: ac_world::recalls::spell::FREE_LIFESTONE,
+                name: "/lifestone".into(),
+                exit,
+            },
+            ac_world::trip::Step::Walk(exit),
+        ],
+        seconds: 60.0,
+    };
+    let goal = crate::Goal::At {
+        place: exit,
+        within: 5.0,
+    };
+    crate::testkit::set_out_on(&mut c, trip, goal);
+    let t0 = std::time::Instant::now();
+    let at = |s: f32| t0 + std::time::Duration::from_secs_f32(s);
+    c.autoplay.cast_sent = Some(at(0.0));
+    c.step_goal(at(0.0));
+    c.step_goal(at(1.0));
+    assert_eq!(
+        c.travel.state.recall_casts, 0,
+        "sent behind the spell in the air"
+    );
+    c.autoplay.cast_sent = None;
+    c.step_goal(at(1.5));
+    assert_eq!(
+        c.travel.state.recall_casts, 1,
+        "not sent once the spell landed"
+    );
+}
