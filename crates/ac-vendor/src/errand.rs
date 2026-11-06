@@ -1,9 +1,6 @@
 //! The counter's money arithmetic, shared by the sale at the window (`crate::Run`): coin and notes
 //! by the pack slot, and what one armful of a sale may be paid into.
 
-/// Pyreals kept loose to shop with rather than made into notes, which cost to make (guess).
-pub const FLOAT: u32 = 2_000;
-
 /// Pyreals per pack slot (max stack); coin weighs nothing, so slots, not burden, stop a big sale.
 pub const COIN_STACK: u32 = 25_000;
 /// Trade notes per pack slot (max stack): a slot of 250,000 notes holds 62.5 million.

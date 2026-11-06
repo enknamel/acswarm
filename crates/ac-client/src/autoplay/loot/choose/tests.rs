@@ -396,5 +396,5 @@ fn everything_on_our_own_body_is_taken_whatever_the_room_rules_say() {
         at.items
     );
     let at = c.corpse_now(theirs, &[], &profile, now, now);
-    assert_eq!(at.keep_free, c.autoplay.config.team.restock.keep_slots);
+    assert_eq!(at.keep_free, c.autoplay.config.team.restock.money_slots);
 }

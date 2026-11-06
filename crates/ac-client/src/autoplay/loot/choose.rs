@@ -390,7 +390,7 @@ impl Client {
             keep_free: if mine {
                 0
             } else {
-                self.autoplay.config.team.restock.keep_slots
+                self.autoplay.config.team.restock.money_slots
             },
             carry_room: if mine {
                 u32::MAX

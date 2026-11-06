@@ -61,7 +61,6 @@ pub(crate) struct VendorView {
     pub coin: u32,
     pub notes: u32,
     pub slots_free: u32,
-    pub keep_slots: u32,
     pub carried: u32,
     pub ceiling: u32,
     /// Things in the pack, and how many of those are for sale here.
@@ -177,7 +176,6 @@ impl Vendoring {
                 coin: 1_012_400,
                 notes: 14,
                 slots_free: 3,
-                keep_slots: 3,
                 carried: 21_480,
                 ceiling: 24_300,
                 items: 27,
@@ -252,7 +250,6 @@ fn view(c: &mut ac_client::Client, now: std::time::Instant) -> Option<VendorView
         coin: snap.coin,
         notes: snap.notes.values().sum(),
         slots_free: snap.slots_free,
-        keep_slots: snap.rules.keep_slots,
         carried: snap.carried,
         ceiling: snap.capacity.saturating_mul(3),
         items: snap.items.len(),
@@ -385,10 +382,7 @@ impl Plugin for Vendoring {
                     }
                 }
                 ui.separator();
-                ui.label(format!(
-                    "{} slot(s) free, reserve {}",
-                    v.slots_free, v.keep_slots
-                ));
+                ui.label(format!("{} slot(s) free", v.slots_free));
                 ui.label(format!("{} coin, {} note(s)", v.coin, v.notes));
                 ui.label(format!("burden {} of {}", v.carried, v.ceiling));
                 ui.label(format!(

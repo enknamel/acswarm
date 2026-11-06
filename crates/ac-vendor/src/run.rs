@@ -40,7 +40,7 @@ pub enum Phase {
     Walking,
     /// Waiting for the window.
     Opening,
-    /// Compressing, selling and making notes, round after round.
+    /// Compressing, selling and turning the takings into notes, round after round.
     Selling,
     /// Spending what the selling raised.
     Buying,
@@ -204,11 +204,9 @@ impl Run {
             if let Some(next) = self.compress(snap, now) {
                 return next;
             }
-            // 2. Make notes once the pack is low on room.
-            if snap.slots_free <= snap.rules.keep_slots {
-                if let Some(next) = self.make_notes(snap, now) {
-                    return next;
-                }
+            // 2. Turn the takings into notes as they come: coin fills a slot every 25,000.
+            if let Some(next) = self.make_notes(snap, now) {
+                return next;
             }
             // 3. Sell an armful.
             if let Some(next) = self.sell_one(snap, now) {
@@ -219,6 +217,10 @@ impl Run {
 
         if self.phase == Phase::Buying {
             if let Some(next) = self.buy_one(snap, now) {
+                return next;
+            }
+            // What the buying left in coin goes back into notes.
+            if let Some(next) = self.make_notes(snap, now) {
                 return next;
             }
             self.phase = Phase::Done;
@@ -310,8 +312,8 @@ impl Run {
         let each = crate::errand::note_cost(face).max(1);
         // Each new stack needs a slot free before any coin leaves, a carried note stack no help
         // (ItemsToReceive.cs:97-108; Vendor.cs:471-503): with none free, the selling goes first.
-        let count = (snap.coin.saturating_sub(snap.rules.float) / each)
-            .min(snap.slots_free.saturating_mul(crate::errand::NOTE_STACK));
+        let count =
+            (snap.coin / each).min(snap.slots_free.saturating_mul(crate::errand::NOTE_STACK));
         if count == 0 {
             return None;
         }
@@ -408,7 +410,13 @@ impl Run {
                 }
                 continue;
             }
-            let afford = ware.affordable(purse);
+            // A round pays from the coin in hand and the notes that cash into the free slots; a
+            // bill bigger than the pack holds in coin is paid round by round.
+            let afford = ware.affordable(snap.coin.saturating_add(cashable(snap)));
+            if afford == 0 {
+                skip("no room in the pack for the coin a note cashes into".into());
+                continue;
+            }
             // Unknown burden (0) is no reason to refuse: buy, and let the server answer for it.
             let liftable = match ware.burden {
                 0 => u32::MAX,
@@ -441,7 +449,11 @@ impl Run {
                     .find(|(face, n)| **n > 0 && **face >= short)
                     .or_else(|| snap.notes.iter().rev().find(|(_, n)| **n > 0))
                 {
-                    let need = short.div_ceil((*face).max(1)).min(*have);
+                    let room = coin_room(snap);
+                    let need = short
+                        .div_ceil((*face).max(1))
+                        .min(*have)
+                        .min(room / (*face).max(1));
                     if need > 0 {
                         return Some(Next::acting(
                             Act::Cash {
@@ -465,6 +477,27 @@ impl Run {
         }
         None
     }
+}
+
+/// Coin a note may be cashed into before a purchase: the free slots less one for the goods, each
+/// 25,000 (the server finds slots before it pays or takes, `errand::armful_within_slots`).
+fn coin_room(snap: &Snapshot) -> u32 {
+    snap.slots_free
+        .saturating_sub(1)
+        .saturating_mul(crate::errand::COIN_STACK)
+}
+
+/// What the notes held cash into [`coin_room`], largest first.
+fn cashable(snap: &Snapshot) -> u32 {
+    let mut room = coin_room(snap);
+    let mut out = 0u32;
+    for (face, held) in snap.notes.iter().rev() {
+        let face = (*face).max(1);
+        let k = (room / face).min(*held);
+        out = out.saturating_add(k * face);
+        room -= k * face;
+    }
+    out
 }
 
 #[cfg(test)]
@@ -713,11 +746,12 @@ mod tests {
     }
 
     #[test]
-    fn selling_stops_to_make_notes_when_the_pack_is_low_on_room() {
+    fn the_takings_become_notes_as_they_come_in() {
+        // Blargerton carried 798,330 in 32 slots of coin, room to spare, and no note at all.
         let mut run = Run::new();
         let mut s = snap(vec![item(3, "Dagger", 500, 1, 1)]);
         s.coin = 1_000_000;
-        s.slots_free = 3; // at the reserve, not out of slots
+        s.slots_free = 20;
         let next = run.step(&s, Instant::now());
         assert_eq!(
             next.act,
@@ -728,8 +762,8 @@ mod tests {
             "{}",
             next.saying
         );
-        // With room to spare it gets on with the selling instead.
-        s.slots_free = 20;
+        // Under a note's price, it gets on with the selling.
+        s.coin = 137_500;
         assert_eq!(
             run.step(&s, Instant::now()).act,
             Some(Act::Sell { items: vec![3] })
@@ -768,7 +802,7 @@ mod tests {
             next.act,
             Some(Act::Buy {
                 wcid: 2623,
-                count: 173
+                count: 175
             }),
             "{}",
             next.saying
@@ -1172,7 +1206,10 @@ mod tests {
         let mut run = Run::new();
         let mut s = snap(Vec::new());
         s.coin = 10_000_000;
-        s.rules.float = 10_000_000;
+        // A counter that makes no notes, so the coin stays coin.
+        let c = s.counter.as_mut().unwrap();
+        c.note_face = None;
+        c.note_wcid = None;
         // Sixty units of room, and a taper weighs six.
         s.carried = s.capacity * 3 - 60;
         s.wants = vec![Want {
@@ -1225,7 +1262,6 @@ mod tests {
         // Each ingot pays two slots of coin, and only five slots are free.
         let mut s = snap((1..=8).map(|g| item(g, "Ingot", 50_000, 1, 1)).collect());
         s.slots_free = 5;
-        s.rules.keep_slots = 3;
         match run.step(&s, Instant::now()).act {
             Some(Act::Sell { items }) => {
                 assert!(
@@ -1243,7 +1279,6 @@ mod tests {
         let mut run = Run::new();
         let mut s = snap(Vec::new());
         s.coin = 600_000;
-        s.rules.float = 600_000; // nothing spare to turn into notes
         s.wants = vec![Want {
             wcid: NOTE,
             name: "Mayoi Trade Note".into(),
@@ -1284,5 +1319,82 @@ mod tests {
         s.wants[0].wcid = 20631;
         run.step(&s, Instant::now());
         assert_eq!(run.short_with, None);
+    }
+
+    /// A counter with 1,000 tapers at 26 on the shelf, a purse of `notes` MMDs, `free` slots.
+    fn tapers_wanted(notes: u32, free: u32, short: u32) -> Snapshot {
+        let mut s = snap(Vec::new());
+        s.notes.insert(250_000, notes);
+        s.slots_free = free;
+        s.wants = vec![Want {
+            wcid: 20631,
+            name: "Prismatic Taper".into(),
+            short,
+            urgent: false,
+        }];
+        s.counter.as_mut().unwrap().wares.push(Ware {
+            wcid: 20631,
+            name: "Prismatic Taper".into(),
+            price: 26,
+            stock: None,
+            burden: 0,
+            value: 0,
+            sell_rate: 0.0,
+        });
+        s
+    }
+
+    #[test]
+    fn a_bill_bigger_than_the_pack_holds_in_coin_is_paid_round_by_round() {
+        // 40,000 tapers at 26 is 1,040,000; three slots free hold two of coin and one for the goods.
+        let mut s = tapers_wanted(8, 3, 40_000);
+        let next = Run::new().step(&s, Instant::now());
+        assert_eq!(
+            next.act,
+            Some(Act::Close),
+            "two slots of coin cannot take a 250,000 note"
+        );
+        assert!(
+            next.saying.contains("no room in the pack"),
+            "{}",
+            next.saying
+        );
+        // Eleven free: ten of coin take one note, and what it pays for is bought.
+        let mut run = Run::new();
+        s.slots_free = 11;
+        assert_eq!(
+            run.step(&s, Instant::now()).act,
+            Some(Act::Cash {
+                face: 250_000,
+                count: 1
+            })
+        );
+        s.notes.insert(250_000, 7);
+        s.coin = 250_000;
+        s.slots_free = 1;
+        assert_eq!(
+            run.step(&s, Instant::now()).act,
+            Some(Act::Buy {
+                wcid: 20631,
+                count: 9_615
+            }),
+            "what the coin in hand pays for, and the rest next round"
+        );
+    }
+
+    #[test]
+    fn what_the_buying_leaves_in_coin_goes_back_into_notes() {
+        let mut run = Run::new();
+        let mut s = tapers_wanted(0, 20, 0);
+        s.coin = 600_000;
+        assert_eq!(
+            run.step(&s, Instant::now()).act,
+            Some(Act::Buy {
+                wcid: NOTE,
+                count: 2
+            })
+        );
+        s.coin = 25_000;
+        assert_eq!(run.step(&s, Instant::now()).act, Some(Act::Close));
     }
 }

@@ -102,7 +102,7 @@ fn loot_for_a_counter_alone_never_sends_a_roomy_pack_to_town() {
         );
     }
     // The pack running low on room is a reason, and the peas go with it.
-    let keep = c.autoplay.config.team.restock.keep_slots;
+    let keep = c.autoplay.config.team.restock.money_slots;
     with_a_pack(&mut c, 4 + keep);
     assert!(c.pack_low_on_room());
     assert!(
@@ -265,7 +265,7 @@ fn a_due_run_leaves_the_walk_to_a_ground_for_town() {
     let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
     c.world.player_guid = Some(crate::testkit::ME);
     c.world.stats.level = 20;
-    let keep = c.autoplay.config.team.restock.keep_slots;
+    let keep = c.autoplay.config.team.restock.money_slots;
     with_a_pack(&mut c, 2 + keep);
     pea_in_the_pack(&mut c, 0x8000_0010, "Iron Pea", 8328, 2_500);
     pea_in_the_pack(&mut c, 0x8000_0011, "Iron Pea", 8328, 2_500);
@@ -307,7 +307,7 @@ fn a_run_to_sell_goes_to_whoever_buys_however_far() {
     let holtburg = 0xA9B4_0019;
     let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
     c.world.stats.level = 20;
-    let keep = c.autoplay.config.team.restock.keep_slots;
+    let keep = c.autoplay.config.team.restock.money_slots;
     with_a_pack(&mut c, 1 + keep);
     pea_in_the_pack(&mut c, 0x8000_0010, "Lead Pea", 8329, 500);
     with_a_buy_list(&mut c, &[]);

@@ -59,8 +59,6 @@ impl Client {
             ),
             counter,
             rules: Rules {
-                keep_slots: self.autoplay.config.team.restock.keep_slots,
-                float: ac_vendor::errand::FLOAT,
                 floor_value: 0,
                 reach: crate::growth::COUNTER_REACH,
             },
@@ -132,17 +130,14 @@ impl Client {
     fn counter_now(&self) -> Option<Counter> {
         let v = self.world.open_vendor.as_ref()?;
         let name = self.world.name_of(v.vendor).unwrap_or_default().to_string();
-        // Which note this counter deals in: the largest of the trade
-        // notes actually on its shelf, face and weenie together, so
-        // the note is bought by its own weenie and never by price.
+        // The only note bought is the MMD, by its own weenie: a counter without one on its shelf
+        // makes no notes (test: only_the_mmd_is_ever_made_into_notes).
         let note = v
             .items
             .iter()
-            .filter_map(|w| {
-                let wcid = w.desc.weenie_class_id;
-                ac_world::shops::note_face(wcid).map(|face| (face, wcid))
-            })
-            .max();
+            .map(|w| w.desc.weenie_class_id)
+            .find(|wcid| *wcid == ac_world::shops::MMD)
+            .and_then(|wcid| ac_world::shops::note_face(wcid).map(|face| (face, wcid)));
         let away = match (
             self.my_position(),
             self.world

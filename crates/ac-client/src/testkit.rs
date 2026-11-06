@@ -974,7 +974,7 @@ pub fn with_packs(
     );
     // No slots kept back for a counter's money: these are about the
     // packs being full, not low.
-    c.autoplay.config.team.restock.keep_slots = 0;
+    c.autoplay.config.team.restock.money_slots = 0;
     assert!(!c.server_busy(Instant::now()));
     c
 }

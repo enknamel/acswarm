@@ -170,10 +170,6 @@ pub struct Want {
 /// The rules of the trip, as the player set them.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Rules {
-    /// Free slots at which selling stops to make notes; the next handful of coin still needs one.
-    pub keep_slots: u32,
-    /// Coin kept loose rather than turned into notes, so small change needs no note broken.
-    pub float: u32,
     /// Do not bother selling anything worth less than this.
     pub floor_value: u32,
     /// How near the counter must be before it will trade, in metres (as `Counter::away`).
@@ -183,8 +179,6 @@ pub struct Rules {
 impl Default for Rules {
     fn default() -> Self {
         Rules {
-            keep_slots: 3,
-            float: 2_000,
             floor_value: 0,
             reach: 3.0,
         }

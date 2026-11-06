@@ -677,6 +677,21 @@ pub(crate) fn draw(
                 }
                 ui.checkbox(&mut cfg.growth.town_runs, "run to town for supplies")
                     .on_hover_text("Sell the loot, buy what is short, when the pack fills up");
+                ui.horizontal(|ui| {
+                    ui.label("keep free for money");
+                    ui.add(
+                        egui::DragValue::new(&mut cfg.team.restock.money_slots)
+                            .speed(1.0)
+                            .range(0..=60)
+                            .suffix(" slots"),
+                    );
+                })
+                .response
+                .on_hover_text(
+                    "Looting leaves this many pack slots empty, and the pack counts as full \
+                     at it. A counter pays in coin, 25,000 a slot: cashing an MMD takes 10 \
+                     slots and buying one 12.",
+                );
                 caption(
                     ui,
                     "what to buy and how many is the loot profile's buy list, and \

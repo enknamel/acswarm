@@ -349,48 +349,56 @@ fn the_counter_is_stood_at_from_the_use_to_the_window_closing() {
 }
 
 #[test]
-fn the_counter_names_its_note_by_its_own_weenie_off_its_own_shelf() {
-    // Sedor Wystan's shelf holds a basinet at 1,750 ahead of his largest note, the 1,000 at
-    // 1,150: the note is read off the shelf by weenie, and the purchase names that line.
+fn only_the_mmd_is_ever_made_into_notes() {
+    // Blargerton bought 209 X notes (1,000s) at a counter without an MMD: the largest note on a
+    // shelf was taken for the counter's note. Only the MMD is bought, by its own weenie.
     let mut c = crate::testkit::offline_client();
     with_a_pack(&mut c, 20);
     for (n, amount) in [25_000; 8].into_iter().chain([1_307]).enumerate() {
         coin_in_the_pack(&mut c, 0x8000_0100 + n as u32, amount);
     }
+    let cfg = c.autoplay.config.growth.clone();
+    // Sedor Wystan shelves the 100, 500 and 1,000 notes, no MMD: no notes.
     let sedor = 0x7a9b_4026;
     c.world.open_vendor = Some(window_stocked_as(sedor, "Sedor Wystan the Blacksmith"));
-    let cfg = c.autoplay.config.growth.clone();
-    let mut snap = c.vendor_snapshot(&cfg);
+    let snap = c.vendor_snapshot(&cfg);
     let counter = snap.counter.as_ref().expect("no counter");
-    assert_eq!(counter.note_face, Some(1_000));
-    assert_eq!(counter.note_wcid, Some(2623));
-    let first_dear = counter.wares.iter().find(|w| w.price >= 1_000);
-    assert_eq!(
-        first_dear.map(|w| w.wcid),
-        Some(35),
-        "the basinet stands first"
+    assert_eq!((counter.note_face, counter.note_wcid), (None, None));
+    let next = ac_vendor::Run::new().step(&snap, Instant::now());
+    assert!(
+        !matches!(next.act, Some(ac_vendor::Act::Buy { .. })),
+        "{:?} -- {}",
+        next.act,
+        next.saying
     );
-
-    snap.slots_free = 2;
+    // Archmage Cindrue shelves the MMD: 301,307 of takings go into one, and the purchase names
+    // its line.
+    for n in 9..13 {
+        coin_in_the_pack(&mut c, 0x8000_0100 + n, 25_000);
+    }
+    let cindrue = 0x7a9b_4027;
+    c.world.open_vendor = Some(window_stocked_as(cindrue, "Archmage Cindrue"));
+    let snap = c.vendor_snapshot(&cfg);
+    let counter = snap.counter.as_ref().expect("no counter");
+    assert_eq!(counter.note_wcid, Some(ac_world::shops::MMD));
     let next = ac_vendor::Run::new().step(&snap, Instant::now());
     let Some(ac_vendor::Act::Buy { wcid, count }) = next.act else {
-        panic!("no notes made: {:?} -- {}", next.act, next.saying);
+        panic!("no MMD made: {:?} -- {}", next.act, next.saying);
     };
-    assert_eq!((wcid, count), (2623, 173));
+    assert_eq!(wcid, ac_world::shops::MMD);
+    assert_eq!(count, 1, "{}", next.saying);
     let line = c.world.open_vendor.as_ref().and_then(|v| {
         v.items
             .iter()
-            .find(|w| w.desc.weenie_class_id == 2623)
+            .find(|w| w.desc.weenie_class_id == ac_world::shops::MMD)
             .map(|w| w.guid)
     });
-    let sent = c.session.actions_sent();
     assert!(c.do_vendor_act(&ac_vendor::Act::Buy { wcid, count }, &next.saying));
-    assert_eq!(c.session.actions_sent(), sent + 1);
     let (_, msg) = c.session.queued().last().expect("nothing went out");
-    let line = line.expect("no note on the shelf").to_le_bytes();
+    let line = line.expect("no MMD on the shelf").to_le_bytes();
     assert!(
         msg.windows(4).any(|w| w == line),
-        "the purchase did not name the note's line"
+        "the purchase did not name the MMD's line"
     );
 }
 
@@ -405,16 +413,16 @@ fn actions_queued(c: &Client) -> Vec<u32> {
         .collect()
 }
 
-/// A leather cap in the pack, taken to sell.
-fn cap_to_sell(c: &mut Client, guid: u32) {
+/// A scroll in the pack, taken to sell: an archmage buys those.
+fn scroll_to_sell(c: &mut Client, guid: u32) {
     let me = c.world.player_guid.unwrap();
     c.world.objects.insert(
         guid,
         ac_world::WorldObject {
             guid,
-            name: "Leather Cap".into(),
-            weenie_class_id: 118,
-            item_type: item_type::ARMOR,
+            name: "Scroll of Focus Other VI".into(),
+            weenie_class_id: 2678,
+            item_type: item_type::WRITABLE,
             value: 640,
             stack_size: 1,
             max_stack_size: 1,
@@ -426,20 +434,20 @@ fn cap_to_sell(c: &mut Client, guid: u32) {
     c.autoplay.tag(&stats, crate::autoplay::LootAction::Sell);
 }
 
-/// A run selling at Sedor Wystan's open window, the character two slots
-/// short of its reserve with 201,307 in coin and a cap to sell.
-fn selling_at_sedor(now: Instant) -> Client {
+/// A run selling at Archmage Cindrue's open window (she shelves the MMD), two slots free, with
+/// 300,000 in coin and a cap to sell.
+fn selling_at_cindrue(now: Instant) -> Client {
     let here = glam::Vec3::new(84.0, 7.1, 94.0);
     let mut c = standing_at(0xA9B4_0019, here);
-    with_a_pack(&mut c, 12);
-    for (n, amount) in [25_000; 8].into_iter().chain([1_307]).enumerate() {
-        coin_in_the_pack(&mut c, 0x8000_0100 + n as u32, amount);
+    with_a_pack(&mut c, 15);
+    for n in 0..12 {
+        coin_in_the_pack(&mut c, 0x8000_0100 + n, 25_000);
     }
-    cap_to_sell(&mut c, 0x8000_0200);
-    let sedor = 0x7a9b_4026;
-    let name = "Sedor Wystan the Blacksmith";
-    a_counter(&mut c, sedor, name, here);
-    c.world.open_vendor = Some(window_stocked_as(sedor, name));
+    scroll_to_sell(&mut c, 0x8000_0200);
+    let cindrue = 0x7a9b_4027;
+    let name = "Archmage Cindrue";
+    a_counter(&mut c, cindrue, name, here);
+    c.world.open_vendor = Some(window_stocked_as(cindrue, name));
     let me = c.player.as_ref().unwrap().world_position();
     let mut run = run_to(Vec2::new(me.x, me.y), now);
     run.vendor = name.into();
@@ -455,7 +463,7 @@ fn a_purchase_the_counter_refused_is_not_sent_again() {
     // run to ask again of a pack that has not changed: told of the words, the rules go on to
     // the selling instead of sending the same purchase on every answer.
     let now = Instant::now();
-    let mut c = selling_at_sedor(now);
+    let mut c = selling_at_cindrue(now);
     let cfg = c.autoplay.config.growth.clone();
     assert_eq!(c.vendor_snapshot(&cfg).slots_free, 2);
     assert_eq!(c.grow_run_step(now, &cfg), Turn::Acted);
@@ -492,7 +500,7 @@ fn the_selling_at_a_counter_ends_on_its_own_clock() {
     // every answer. The selling's clock runs from its first act, and the acts along the way do
     // not wind it back: once it runs out the run leaves the counter, saying why.
     let now = Instant::now();
-    let mut c = selling_at_sedor(now);
+    let mut c = selling_at_cindrue(now);
     let cfg = c.autoplay.config.growth.clone();
     let soon = now + Duration::from_secs(10);
     assert_eq!(c.grow_run_step(soon, &cfg), Turn::Acted);
