@@ -107,6 +107,14 @@ fn build_cell_mesh(assets: &Assets, cs: &CellStruct, surfaces: &[u32]) -> Result
     Ok(by_surface.finish())
 }
 
+/// Whether indoor cell `cell_id` can be seen from outdoors: a building's room, not a dungeon's
+/// (a landblock can hold both: Tusker Island over the Emporium). `None`: no such cell.
+pub fn seen_outside(assets: &Assets, cell_id: u32) -> Option<bool> {
+    let bytes = assets.cell.read(cell_id).ok()?;
+    let cell = EnvCell::parse(cell_id, &bytes).ok()?;
+    Some(cell.flags & env_cell_flags::SEEN_OUTSIDE != 0)
+}
+
 /// Load all interior cells of a landblock (`0x100 .. 0x100 + num_cells`).
 /// `origin` is the landblock's world transform.
 pub fn load_cells(

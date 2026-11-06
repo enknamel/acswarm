@@ -89,6 +89,8 @@ pub struct Forecast {
     /// many things that is.
     pub takings: u32,
     pub selling: usize,
+    /// The journey there as the planner put it ("2 portals, about 3 min"); empty until planned.
+    pub route: String,
 }
 
 impl Forecast {
@@ -267,6 +269,9 @@ fn ammo_stock(name: &str, kind: u32) -> bool {
 /// long walk, then anywhere at all.
 const VENDOR_RINGS: [f32; 3] = [600.0, 3_000.0, 15_000.0];
 
+/// Journeys one search may plan before it settles for none: each is up to a few milliseconds.
+const ROUTES_TRIED: usize = 8;
+
 /// The distances to search, widening; the last is everywhere, so a character with nothing nearby
 /// still finds a shop rather than standing still.
 fn vendor_rings() -> Vec<f32> {
@@ -349,7 +354,7 @@ impl Client {
     /// is no "any counter will do" when none of them buys any of it
     /// (see [`Errand`]).
     pub(super) fn pick_vendor(
-        &self,
+        &mut self,
         cfg: &Growth,
         needs: &[Need],
         ways: &[(Vec2, String)],
@@ -357,22 +362,22 @@ impl Client {
         now: Instant,
     ) -> Option<(String, Vec2, Forecast)> {
         let Stop { errand, visited } = stop;
-        // How far a shop is: from the nearest way out, not from the
-        // feet.
-        let reach = |at: Vec2| {
-            ways.iter()
-                .map(|(w, _)| at.distance(*w))
-                .fold(f32::MAX, f32::min)
-        };
         // Counters this character can actually trade at. A society's
         // archmage is a very good archmage and no use at all to
         // somebody else's society, and a chapter house behind a quest
         // portal is a journey to a door that will not open.
         let society = self.society();
         let quests = cfg.gates_open.clone();
-        let skip = &self.autoplay.growth.skip_vendors;
+        let skip = self.autoplay.growth.skip_vendors.clone();
         let allowed =
             |at: Vec2| !visited.iter().any(|p| p.distance(at) < 1.0) && !skip.held(&spot(at), now);
+        // Every counter it may trade at, with how far it is from the nearest way out.
+        let shops: Vec<(&'static ac_world::shops::Shop, f32)> = ac_world::shops::all()
+            .iter()
+            .filter(|s| allowed(s.xy()) && s.open_to(society, &quests))
+            .filter_map(|s| Some((s, self.counter_reach(s.cell, s.xy(), ways)?)))
+            .collect();
+        let mut tries = ROUTES_TRIED;
         // Worked out once for the whole search rather than per shop:
         // this walks every counter in range.
         let wants: Vec<(&Need, String)> = needs
@@ -419,25 +424,37 @@ impl Client {
             // to a counter that stocks no components, told the trip was
             // not worth making, and sent there again on every run after.
             // It never bought tapers again.
-            if let Some(found) = ac_world::shops::all()
+            if let Some(&(found, _)) = shops
                 .iter()
-                .filter(|s| s.open_to(society, &quests) && allowed(s.xy()))
-                .find(|s| s.name.eq_ignore_ascii_case(want))
+                .find(|(s, _)| s.name.eq_ignore_ascii_case(want))
             {
                 let f = forecast(found, &wants, purse, &salables);
                 if errand.served_by(&f) {
-                    return Some((found.name.clone(), found.xy(), f));
+                    if let Some(f) =
+                        self.routed(found.name.as_str(), found.place(), f, &mut tries, now)
+                    {
+                        return Some((found.name.clone(), found.xy(), f));
+                    }
                 }
             }
         }
+        // The best in the ring that a journey reaches; one that none does is left out and the
+        // next best asked (Ketnan's counter lies in a dungeon with no known way in).
+        let mut no_way: Vec<Vec2> = Vec::new();
         for ring in vendor_rings() {
-            let counters = ac_world::shops::all()
-                .iter()
-                .filter(|s| allowed(s.xy()) && reach(s.xy()) <= ring)
-                .filter(|s| s.open_to(society, &quests))
-                .map(|s| (s, reach(s.xy())));
-            if let Some((s, f)) = choose_counter(counters, errand, &wants, purse, &salables) {
-                return Some((s.name.clone(), s.xy(), f));
+            while tries > 0 {
+                let counters = shops
+                    .iter()
+                    .filter(|(s, reach)| *reach <= ring && !no_way.contains(&s.xy()))
+                    .map(|(s, reach)| (*s, *reach));
+                let Some((s, f)) = choose_counter(counters, errand, &wants, purse, &salables)
+                else {
+                    break;
+                };
+                match self.routed(&s.name, s.place(), f, &mut tries, now) {
+                    Some(f) => return Some((s.name.clone(), s.xy(), f)),
+                    None => no_way.push(s.xy()),
+                }
             }
         }
         // A trip to sell has nowhere to go: no counter in reach buys any
@@ -452,20 +469,79 @@ impl Client {
         // the case when the trip is to stop in town rather than to buy
         // something. The forecast comes back saying as much, and the
         // caller decides whether that is reason enough to walk.
-        ac_world::landmarks::all()
+        let mut vendors: Vec<(&'static ac_world::landmarks::Landmark, f32)> =
+            ac_world::landmarks::all()
+                .iter()
+                .filter(|l| l.kind == ac_world::landmarks::Kind::Vendor && allowed(l.xy()))
+                .filter_map(|l| Some((l, self.counter_reach(l.cell, l.xy(), ways)?)))
+                .collect();
+        vendors.sort_by(|a, b| a.1.total_cmp(&b.1));
+        for (l, _) in vendors {
+            if tries == 0 {
+                break;
+            }
+            let look = Forecast {
+                shop: l.name.clone(),
+                missing: wants.iter().map(|(n, _)| n.name.clone()).collect(),
+                purse,
+                ..Default::default()
+            };
+            let place = ac_world::Place {
+                at: l.at,
+                cell: l.cell,
+            };
+            if let Some(look) = self.routed(&l.name, place, look, &mut tries, now) {
+                return Some((l.name.clone(), l.xy(), look));
+            }
+        }
+        None
+    }
+
+    /// How far a counter at `cell` (map point `at`) is from the nearest of `ways`. One in a dungeon
+    /// is as far as the mouths of the portals into it: a dungeon cell's position is no place on the
+    /// map (Ketnan's 0xF784039F read as open ground 32 km east). `None`: no known way in.
+    fn counter_reach(&mut self, cell: u32, at: Vec2, ways: &[(Vec2, String)]) -> Option<f32> {
+        let from = |p: Vec2| {
+            ways.iter()
+                .map(|(w, _)| p.distance(*w))
+                .fold(f32::MAX, f32::min)
+        };
+        if self.travel_terrain().is_none() || !self.is_dungeon_cell(cell) {
+            return Some(from(at));
+        }
+        ac_world::portals::all()
             .iter()
-            .filter(|l| l.kind == ac_world::landmarks::Kind::Vendor)
-            .filter(|l| allowed(l.xy()))
-            .min_by(|a, b| reach(a.xy()).total_cmp(&reach(b.xy())))
-            .map(|l| {
-                let look = Forecast {
-                    shop: l.name.clone(),
-                    missing: wants.iter().map(|(n, _)| n.name.clone()).collect(),
-                    purse,
-                    ..Default::default()
-                };
-                (l.name.clone(), l.xy(), look)
-            })
+            .filter(|p| p.works() && p.mouth_outdoors() && p.to_cell >> 16 == cell >> 16)
+            .map(|p| from(p.from_xy()))
+            .reduce(f32::min)
+    }
+
+    /// `look` with its journey, when one can be planned to the counter `name` at `place`; else the
+    /// counter is skipped a while, so the search does not plan to it every run. Spends one of `tries`.
+    fn routed(
+        &mut self,
+        name: &str,
+        place: ac_world::Place,
+        mut look: Forecast,
+        tries: &mut usize,
+        now: Instant,
+    ) -> Option<Forecast> {
+        *tries = tries.saturating_sub(1);
+        match self.plan_trip(place, false) {
+            Some(trip) => {
+                look.route = trip.summary();
+                Some(look)
+            }
+            None => {
+                tracing::info!("town run: no way to {name} from here; another counter");
+                self.autoplay.growth.skip_vendors.note(
+                    spot(place.at.truncate()),
+                    &crate::did::Did::blocked("no way there from here"),
+                    now,
+                );
+                None
+            }
+        }
     }
 
     /// Everywhere the character can get to cheaply, and what takes it

@@ -353,3 +353,35 @@ fn the_counter_named_is_asked_even_with_another_vendor_nearer() {
     // With nobody by that name about, the nearest vendor still answers.
     assert_eq!(c.vendor_object("Gone Missing", at), Some(1));
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_counter_no_journey_reaches_is_passed_over_for_a_while() {
+    // Blargerton, full pack at the bottom of the Tusker Guard dungeon, was sent to Ketnan, whose
+    // counter is under Tusker Island (0xF784039F): 32 km by the map, and no way there at all.
+    let mut c =
+        crate::testkit::standing_in_the_field(43, 0x5A48_013E, glam::Vec3::new(44.4, -78.8, -6.0));
+    let now = Instant::now();
+    let shop = |name: &str| {
+        ac_world::shops::all()
+            .iter()
+            .find(|s| s.name == name)
+            .unwrap_or_else(|| panic!("no {name}"))
+    };
+    let mut tries = 2;
+    let ketnan = shop("Ketnan");
+    let look = Forecast::default();
+    assert_eq!(
+        c.routed("Ketnan", ketnan.place(), look.clone(), &mut tries, now),
+        None
+    );
+    assert!(
+        c.autoplay.growth.skip_vendors.held(&spot(ketnan.xy()), now),
+        "not planned to again on the next run"
+    );
+    // A counter upstairs in a Holtburg building: a recall and a walk, and the journey says so.
+    let cindrue = shop("Archmage Cindrue");
+    let routed = c.routed("Archmage Cindrue", cindrue.place(), look, &mut tries, now);
+    assert!(routed.is_some_and(|f| !f.route.is_empty()));
+    assert_eq!(tries, 0, "each plan spends a try");
+}

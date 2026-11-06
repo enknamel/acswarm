@@ -601,8 +601,9 @@ impl Client {
         // always some mixture of what it stocks and how far off it is.
         self.autoplay.note(
             format!(
-                "{vendor} it is: {}, {:.0} m by {}",
+                "{vendor} it is: {}; {} ({:.0} m from {})",
                 look.why_it_was_picked(),
+                look.route,
                 nearest_way(&ways, at).1,
                 nearest_way(&ways, at).2
             ),

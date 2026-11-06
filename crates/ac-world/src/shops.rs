@@ -98,6 +98,14 @@ impl Shop {
         self.at.truncate()
     }
 
+    /// Where it stands, cell and all, for a journey.
+    pub fn place(&self) -> crate::Place {
+        crate::Place {
+            at: self.at,
+            cell: self.cell,
+        }
+    }
+
     /// Whether it stands outdoors, so a walk can reach it.
     pub fn outdoors(&self) -> bool {
         self.cell & 0xFFFF < 0x100

@@ -20,6 +20,7 @@ use crate::{Client, Goal, Owner};
 use overland::{Corridor, EXIT_REACH};
 
 mod overland;
+mod reaching;
 
 /// A map point, or a portal's mouth stood at, is reached within this (metres, 3D).
 pub const ARRIVE: f32 = 3.0;
@@ -108,6 +109,8 @@ struct StepState {
 #[derive(Default)]
 pub struct Travel {
     grid: Option<Rc<WorldGrid>>,
+    /// Indoor cells by whether they are a dungeon's rooms (`Client::is_dungeon_cell`).
+    dungeon_cells: std::collections::HashMap<u32, bool>,
     region: Option<Rc<Region>>,
     /// The whole journey, portals included, and the step being made.
     trip: Option<Trip>,
@@ -171,7 +174,7 @@ pub struct Travel {
 
 impl Client {
     /// The world grid and region, loaded on first use.
-    fn travel_terrain(&mut self) -> Option<(Rc<WorldGrid>, Rc<Region>)> {
+    pub(crate) fn travel_terrain(&mut self) -> Option<(Rc<WorldGrid>, Rc<Region>)> {
         if self.travel.grid.is_none() {
             let t0 = Instant::now();
             // One copy per process: every session's journey reads the
@@ -306,55 +309,16 @@ impl Client {
             self.travel.about_the_ground = false;
         }
         let level = self.world.stats.level.max(1) as u32;
-        let refused = self.travel.refused.clone();
-        let no_walks = self.travel.refused_walks.clone();
-        let prefs = self.travel.prefs.in_dungeon(underground);
         tracing::info!(
             "travel: planning to {xy:?} in {:#010x} from {cell:#010x}, underground {underground}",
             place.cell
         );
-        // Portal gems in the pack are ways to get somewhere too, and
-        // unlike a recall they need no skill or components: carrying one
-        // is the whole requirement.
-        let gems: Vec<trip::Gem> = self
-            .carried_gems()
-            .into_iter()
-            .filter(|g| !self.travel.refused_gems.contains(&g.guid))
-            .collect();
-        let recalls: Vec<trip::Recall> = if prefs.use_recalls {
-            let out = self.travel.refused_recalls.clone();
-            self.castable_recalls()
-                .into_iter()
-                .filter(|r| !out.contains(&r.spell))
-                .collect()
-        } else {
-            Vec::new()
-        };
-        let quests = self.travel.quests_done.clone();
-        let to = self.planning_place(place);
-        let mut planned = trip::plan_with_recalls_and_gems(
-            from, to, level, &quests, &refused, &no_walks, &recalls, &gems, prefs,
-        );
-        // Nothing within a believable walk or a portal: walk the whole way, as the last resort.
-        // A ground reached by a one-way portal has no way back otherwise, and the character was
-        // left there (a_ground_reached_through_a_one_way_portal_has_a_way_home_on_foot).
-        if planned.is_none() {
-            let far = trip::Prefs {
-                walk_reach: trip::Prefs::far().walk_reach,
-                portal_reach: trip::Prefs::far().portal_reach,
-                ..prefs
-            };
-            planned = trip::plan_with_recalls_and_gems(
-                from, to, level, &quests, &refused, &no_walks, &recalls, &gems, far,
-            );
-            if let Some(t) = &planned {
-                tracing::info!("travel: no shorter way; the long walk, {:.0} s", t.seconds);
-            }
-        }
+        let planned = self.plan_trip(place, true);
         let Some(mut trip) = planned else {
             // Say why. Often there is a way, but not one this character
             // may take yet: every chain to the far continents runs
             // through a portal with a level on it.
+            let to = self.planning_place(place);
             let anyone = trip::plan_with(from, to, 0, &[], &[], trip::Prefs::far());
             let why = match anyone {
                 Some(t) => {
@@ -697,10 +661,7 @@ impl Client {
         if !goal.is_indoors() {
             return goal;
         }
-        let dungeon = self
-            .travel_terrain()
-            .is_none_or(|(grid, _)| grid.is_dungeon_block(goal.cell));
-        if dungeon {
+        if self.is_dungeon_cell(goal.cell) {
             return goal;
         }
         Place {
