@@ -287,7 +287,7 @@ pub fn hunted_by(foes: &[(u32, &str, Vec3)], hand: &Hand) -> Vec<u32> {
 ///
 /// In order: a creature after one of the party is fought by that one,
 /// whatever else the plan says, because that fight is already
-/// happening. Then the rest are shared out: no creature gets more
+/// happening; of several, the one it was on, else the nearest. Then the rest are shared out: no creature gets more
 /// hands than its share (the hands over the creatures, rounded up)
 /// while another has none. A hand already on a creature keeps it while
 /// its share allows, lowest guid first, so as few move as need to; a
@@ -323,12 +323,31 @@ pub fn assign_targets(
         out.insert(hand, foe);
         *on.entry(foe).or_default() += 1;
     }
-    // What is after somebody is that somebody's fight.
-    for f in &foes {
-        for &who in &f.after {
-            if fighters.iter().any(|h| h.guid == who) && !out.contains_key(&who) {
-                put(&mut out, &mut on, who, f.guid);
-            }
+    // What is after somebody is that somebody's fight: the one it was on, else the nearest.
+    for h in &fighters {
+        let after: Vec<&Foe> = foes
+            .iter()
+            .copied()
+            .filter(|f| f.after.contains(&h.guid))
+            .collect();
+        let kept = prior
+            .get(&h.guid)
+            .copied()
+            .filter(|t| after.iter().any(|f| f.guid == *t))
+            .or_else(|| h.target.filter(|t| after.iter().any(|f| f.guid == *t)));
+        let nearest = || {
+            after
+                .iter()
+                .min_by(|a, b| {
+                    a.world
+                        .distance(h.world)
+                        .total_cmp(&b.world.distance(h.world))
+                        .then(a.guid.cmp(&b.guid))
+                })
+                .map(|f| f.guid)
+        };
+        if let Some(t) = kept.or_else(nearest) {
+            put(&mut out, &mut on, h.guid, t);
         }
     }
     // A hand on something keeps it while its share allows: what it was
@@ -598,6 +617,25 @@ mod tests {
         mob.after = vec![1, 2, 3];
         let plan = assign_targets(&hands, &[foe(0x77, 1.0), mob], &BTreeMap::new());
         assert_eq!(on(&plan, 0x79), vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn of_the_creatures_after_a_hand_it_fights_the_nearest_and_then_keeps_it() {
+        // The bug: the lowest guid of them, 38 m off, past the one in its face.
+        let hands = [hand(1, 0.0)];
+        let mut far = foe(0x70, 38.0);
+        let mut near = foe(0x79, 2.0);
+        let mut mid = foe(0x75, 10.0);
+        for f in [&mut far, &mut near, &mut mid] {
+            f.after = vec![1];
+        }
+        let foes = [far, near, mid];
+        let none = BTreeMap::new();
+        let plan = assign_targets(&hands, &foes, &none);
+        assert_eq!(plan[&1], 0x79, "the nearest");
+        // Once on one, it stays on it till it dies, nearer or not.
+        let on_mid = BTreeMap::from([(1, 0x75)]);
+        assert_eq!(assign_targets(&hands, &foes, &on_mid)[&1], 0x75);
     }
 
     #[test]
