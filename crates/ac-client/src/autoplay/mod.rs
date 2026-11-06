@@ -738,10 +738,14 @@ impl Client {
         self.autoplay.nearest_fight
     }
 
-    /// The creature being closed on or attacked: name, cell and world position, for telemetry to
-    /// replay a fight's walk offline.
+    /// The creature being closed on, swung at or cast at: name, cell and world position, for
+    /// telemetry to replay a fight's walk and its shots offline.
     pub fn foe_place(&self) -> Option<(&str, u32, glam::Vec3)> {
-        let guid = self.dodge.approaching.or(self.attack_target)?;
+        let guid = self
+            .dodge
+            .approaching
+            .or(self.attack_target)
+            .or(self.autoplay.casting_at)?;
         let o = self.world.objects.get(&guid)?;
         let p = o.display.or(o.position)?;
         Some((
