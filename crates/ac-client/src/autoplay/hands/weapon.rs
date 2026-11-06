@@ -310,7 +310,18 @@ impl Client {
             known.name,
             pick.why
         );
-        let picked_stats = carried.iter().find(|i| i.guid == pick.guid);
+        self.take_up(pick.guid, &carried, &wielder);
+    }
+
+    /// Put what is in hand away and take up the carried weapon `guid` (from `carried`), its
+    /// shield too when it leaves the off hand free: arming and the fastest kill's wand both do.
+    pub(crate) fn take_up(
+        &mut self,
+        guid: u32,
+        carried: &[crate::items::ItemStats],
+        wielder: &crate::weapons::Wielder,
+    ) {
+        let picked_stats = carried.iter().find(|i| i.guid == guid);
         // A one-handed melee weapon leaves the off hand for a shield,
         // which is put on once the weapon is in hand (see
         // `autoplay_shield`); anything else wants that hand empty.
@@ -318,7 +329,7 @@ impl Client {
         self.autoplay.wanted_shield = if free_offhand {
             None
         } else {
-            crate::weapons::best_shield(&carried, &wielder).map(|s| s.guid)
+            crate::weapons::best_shield(carried, wielder).map(|s| s.guid)
         };
         // The server will not put a second weapon in full hands: the
         // old one goes back in the pack first, the shield too when the
@@ -339,8 +350,8 @@ impl Client {
         // a refusal's wait, or the server has us mid-swing -- becomes an
         // errand rather than being forgotten, so the weapon is taken up
         // on the first free tick instead of being left in the pack.
-        if sent || !self.wield_guid(pick.guid) {
-            self.autoplay.pending_wield = Some(pick.guid);
+        if sent || !self.wield_guid(guid) {
+            self.autoplay.pending_wield = Some(guid);
         }
     }
 

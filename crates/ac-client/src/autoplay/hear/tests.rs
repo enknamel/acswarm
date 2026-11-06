@@ -80,9 +80,10 @@ fn a_resist_or_an_evasion_got_there() {
 }
 
 #[test]
-fn a_resisted_vulnerability_is_cast_again_up_to_its_tries() {
+fn a_resisted_or_fizzled_vulnerability_is_cast_again_however_often() {
     // ACE says only "X resists your spell" (WorldObject_Magic.cs:192): the debuff last sent is
-    // the one it answers, and the fight asks again whether a vulnerability still pays.
+    // the one it answers, and the fight asks again whether a vulnerability still pays. ACE keeps
+    // no count of tries, and nor does this.
     let mut c = crate::testkit::offline_client();
     let it = crate::testkit::creature(0x8000_0103, "Drudge Skulker");
     c.world.objects.insert(it.guid, it);
@@ -92,9 +93,14 @@ fn a_resisted_vulnerability_is_cast_again_up_to_its_tries() {
         c.hear_arrival("Drudge Skulker resists your spell");
         !c.autoplay.is_vulned(0x8000_0103)
     };
-    assert!(resisted(&mut c), "first resist re-arms it");
-    assert!(resisted(&mut c), "second resist re-arms it");
-    assert!(!resisted(&mut c), "the third: fought as it is");
+    for n in 1..=5 {
+        assert!(resisted(&mut c), "resist {n} re-arms it");
+    }
+    // A fizzle (WeenieError 0x0402) too.
+    c.autoplay.mark_vulned(0x8000_0103, None);
+    c.autoplay.debuff_sent = Some((0x8000_0103, 0));
+    c.hear_debuff_error(0x0402);
+    assert!(!c.autoplay.is_vulned(0x8000_0103), "a fizzle re-arms it");
     // Another creature's resist, or one heard after the next cast went out, re-arms nothing.
     let mut c = crate::testkit::offline_client();
     let it = crate::testkit::creature(0x8000_0103, "Drudge Skulker");

@@ -1,7 +1,7 @@
 use std::time::Instant;
 
 use crate::autoplay::{cast_problem, Autoplay, Doing, Fight, Release};
-use crate::{Client, Stance};
+use crate::Client;
 
 /// ACE's `TargetNotAcquired`: the cast's target is nowhere the server looks (`Player_Magic.cs:137`).
 pub(crate) const TARGET_NOT_ACQUIRED: u32 = 0x042C;
@@ -101,11 +101,32 @@ impl Client {
                 .say(Doing::Fighting, format!("fighting {name}"));
             return true;
         }
-        // Behind the throttle, so choosing a wand costs no more than one
-        // look per cast. Wielding takes a moment, so this cast still
-        // goes out with the old one and the next with the new.
-        self.arm_for(guid, Stance::Magic, cfg);
         self.select(Some(guid));
+        // The fastest kill with what is to hand (see `kill`): its wand taken up first, behind the
+        // throttle so the choice costs a look per cast.
+        let kill = self.best_kill(guid, cfg, now);
+        if let Some(wand) = kill
+            .as_ref()
+            .map(|k| k.wand.clone())
+            .filter(|w| !w.held && w.guid != 0)
+        {
+            if self.hands_changing(now) {
+                return true;
+            }
+            if self.mid_attack() {
+                self.wait_for_the_swing();
+                return true;
+            }
+            let (carried, wielder) = (self.item_stats(), self.wielder());
+            tracing::info!("autoplay: taking up {} for {name}", wand.name);
+            self.take_up(wand.guid, &carried, &wielder);
+            *self.autoplay.kill_kept.borrow_mut() = None;
+            self.autoplay.say(
+                Doing::Fighting,
+                format!("taking up {} for {name}", wand.name),
+            );
+            return true;
+        }
         if self.autoplay_plan_hard(guid, &name, now) {
             return true;
         }
@@ -116,15 +137,11 @@ impl Client {
         // difference between a fight and a stalemate.
         let table = self.assets.spell_table().ok();
         let ready = self.ready_spells(cfg);
-        let ids: Vec<u32> = ready.iter().map(|(id, _)| *id).collect();
-        // Chosen with the vulnerability that would go with it: Fire Vulnerability II and a
-        // Flame Bolt VI took three casts a Tusker Guard that Piercing VI and Force Bolt VI took two.
-        let vulns = self.vuln_strengths(&ids);
-        let best = self.best_attack(guid, &ids, &vulns);
-        // One that saves casts is worth putting on first, then that element for the rest.
-        if self.autoplay_make_vulnerable(guid, &name, best.map(|(id, _)| id), now) {
+        // Its vulnerability first, then its attack for the rest.
+        if self.autoplay_make_vulnerable(guid, &name, kill.as_ref(), now) {
             return true;
         }
+        let best = kill.map(|k| (k.attack, k.takes));
         if let Some((spell, worth)) = best {
             let spell_name = ready
                 .iter()
@@ -210,7 +227,7 @@ impl Client {
     /// less the ones `can_cast` refuses, in the same order.
     ///
     /// The one to throw is chosen from these against the creature
-    /// (`Client::best_attack`), so the target pick reads the
+    /// (`Client::best_kill`), so the target pick reads the
     /// same list and names the same spell (`Client::attack_kind`).
     /// Costly -- `can_cast` walks the packs for components -- so both
     /// callers look once and neither on every tick.

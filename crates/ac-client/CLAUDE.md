@@ -157,7 +157,7 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
   `would_fight()` allows inside `cfg.radius`, within the leader's `team.fight_radius` while following
   one (not in the academy) unless it is hitting the character (`hit_lately_by()`), and preferring one
   the attack in hand gets to, then a pursued quest's creature (`pursuit_sought`): `attack_kind()` reads the hands, never `Client::missile`, and names the
-  spell per creature by the cast's own `best_attack()` (damage with the vulnerability that would go with it), so the flight tested is the flight thrown.
+  spell per creature by the cast's own `kill_in_hand()` (the fastest kill, `autoplay/fight/kill.rs`), so the flight tested is the flight thrown.
   Nothing beside the leader, nothing is picked (`follow` fetches it; past `follow_break()` catch up
   outranks the fight). A team proposal outranks the pick only through `can_take_on()` (less the
   vitae's `shy_of()`); `can_keep_target()` holds the fight in hand, wherever the leader is.

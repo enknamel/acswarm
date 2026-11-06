@@ -1,4 +1,5 @@
 pub(crate) mod critter;
+pub(crate) mod kill;
 pub(crate) mod melee;
 pub(crate) mod soften;
 pub(crate) mod spells;

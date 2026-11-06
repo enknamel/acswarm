@@ -325,6 +325,7 @@ impl Client {
                     tracing::info!("weenie error {code:#x}");
                     self.recall_error(code);
                     self.hear_buff_error(code);
+                    self.hear_debuff_error(code);
                     self.portal_quest_error(code);
                     self.portal_too_soon(code, Instant::now());
                     // A counter turns a Use away as too busy while a

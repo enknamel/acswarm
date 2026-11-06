@@ -6,16 +6,16 @@ use crate::autoplay::{Autoplay, Doing};
 use crate::{Client, Stance};
 
 impl Client {
-    /// A hard fight: the creature has at least the team's threshold of
-    /// health. With no team, nothing is hard in this sense (the solo
-    /// rules soften by their own threshold).
+    /// A hard fight, for the team to soften: one whose fastest kill with the wand in hand puts a
+    /// vulnerability on first (see `kill`). With no team, the fight vulns it alone.
     pub(crate) fn is_hard_fight(&self, guid: u32) -> bool {
-        let team = &self.autoplay.config.team;
-        if !team.enabled || team.hard_fight_health == 0 {
+        if !self.autoplay.config.team.enabled {
             return false;
         }
-        self.creature_known(guid)
-            .is_some_and(|c| c.health >= team.hard_fight_health)
+        let cfg = self.autoplay.config.fight.clone();
+        let ready: Vec<u32> = self.ready_spells(&cfg).iter().map(|(id, _)| *id).collect();
+        self.kill_in_hand(guid, &ready)
+            .is_some_and(|k| k.vuln.is_some())
     }
 
     /// The name of whoever should soften a hard target: the one with
@@ -42,7 +42,7 @@ impl Client {
 
     /// Whether anyone on the team, this character included, has
     /// softened `guid`.
-    fn softened_by_anyone(&self, guid: u32) -> bool {
+    pub(crate) fn softened_by_anyone(&self, guid: u32) -> bool {
         self.autoplay.debuffed.contains(&guid)
             || self
                 .autoplay
@@ -238,25 +238,23 @@ impl Client {
         }
     }
 
-    /// The element a vulnerability on `guid` should be for: a caster's, that of the spell it will
-    /// throw ([`Self::best_attack`], as the fight picks it); a weapon's, what the creature is weakest to.
+    /// The element a vulnerability on `guid` should be for: a caster's, that of the fastest kill
+    /// ([`Self::best_kill`]); a weapon's, what the creature is weakest to.
     fn vuln_element(&self, guid: u32) -> Option<Element> {
         let known = self.creature_known(guid);
         if self.hits_with_weapons() {
             return known.and_then(|c| c.weakest_to());
         }
         let cfg = self.autoplay.config.fight.clone();
-        let ids: Vec<u32> = self.ready_spells(&cfg).iter().map(|(id, _)| *id).collect();
-        let vulns = self.vuln_strengths(&ids);
-        let attack = self
-            .best_attack(guid, &ids, &vulns)
-            .and_then(|(id, _)| ac_world::elements::spell_element(id));
-        crate::weapons::vulnerability_for(known, attack, 0)
+        let kill = self.best_kill(guid, &cfg, Instant::now())?;
+        kill.vuln
+            .map(|(e, ..)| e)
+            .or_else(|| ac_world::elements::spell_element(kill.attack))
     }
 
-    /// Of `ids`, the strongest this character knows, can cast, and
+    /// Of `ids`, the strongest this character knows, can cast well, and
     /// that takes a target. Levels come from power, never from names.
-    fn strongest_castable(&self, ids: &[u32]) -> Option<u32> {
+    pub(crate) fn strongest_castable(&self, ids: &[u32]) -> Option<u32> {
         let table = self.assets.spell_table().ok()?;
         let mut known: Vec<(u32, u32)> = ids
             .iter()
@@ -277,124 +275,6 @@ impl Client {
                 crate::magic::CastCheck::Ok | crate::magic::CastCheck::NoCaster
             )
         })
-    }
-
-    /// The strongest vulnerability this character could cast for each element the spells `ready`
-    /// deal: what it multiplies by and its chance to land; an element with none castable is left out.
-    pub(crate) fn vuln_strengths(&self, ready: &[u32]) -> Vec<(Element, f32, f32)> {
-        let mut out: Vec<(Element, f32, f32)> = Vec::new();
-        for e in ready
-            .iter()
-            .filter_map(|id| ac_world::elements::spell_element(*id))
-        {
-            if out.iter().any(|(had, ..)| *had == e) {
-                continue;
-            }
-            let strongest = self.strongest_castable(&ac_world::elements::vulnerabilities(e));
-            if let Some(id) = strongest {
-                if let Some(m) = ac_world::elements::vuln_mod(id) {
-                    out.push((e, m, self.cast_chance(id)));
-                }
-            }
-        }
-        out
-    }
-
-    /// Of the attack spells `ready`, the one expected to take most off `guid` a cast, and what the
-    /// creature takes from its element: the roll there times the chance it lands, times the
-    /// vulnerability for that element put on it or to be ([`Self::vuln_boost`]). A spell with no
-    /// damage row is worth its element's multiplier alone, under any that has one. Ties keep `ready`'s order.
-    pub(crate) fn best_attack(
-        &self,
-        guid: u32,
-        ready: &[u32],
-        vulns: &[(Element, f32, f32)],
-    ) -> Option<(u32, f32)> {
-        let known = self.creature_known(guid);
-        ready
-            .iter()
-            .map(|&id| {
-                let element = ac_world::elements::spell_element(id);
-                let takes = match (known, element) {
-                    (Some(c), Some(e)) => c.takes_from(e),
-                    _ => 1.0,
-                };
-                let roll = self.damage_roll(id, known);
-                let boost = element.map_or(1.0, |e| self.vuln_boost(guid, e, roll, vulns));
-                let per_cast = roll.map(|(lo, hi)| (lo + hi) / 2.0);
-                let worth = per_cast.map_or(takes, |d| d * self.cast_chance(id)) * boost;
-                (id, takes, worth)
-            })
-            .reduce(|best, next| if next.2 > best.2 { next } else { best })
-            .map(|(id, takes, _)| (id, takes))
-    }
-
-    /// What a vulnerability multiplies `element` by on `guid`: the one this character cast there,
-    /// else the strongest in `vulns` when the rules would cast it; 1 when neither.
-    fn vuln_boost(
-        &self,
-        guid: u32,
-        element: Element,
-        roll: Option<(f32, f32)>,
-        vulns: &[(Element, f32, f32)],
-    ) -> f32 {
-        if let Some((_, cast)) = self.autoplay.vulned.iter().find(|(g, _)| *g == guid) {
-            return cast.filter(|(e, _)| *e == element).map_or(1.0, |(_, m)| m);
-        }
-        let Some(&(_, m, chance)) = vulns.iter().find(|(e, ..)| *e == element) else {
-            return 1.0;
-        };
-        if self.would_vuln(guid, roll, m, chance) {
-            m
-        } else {
-            1.0
-        }
-    }
-
-    /// Whether this character would put a vulnerability multiplying by `m` on `guid`, each cast
-    /// each cast of the attack rolling `roll`: as the team's softener of a hard fight, or when it pays.
-    fn would_vuln(&self, guid: u32, roll: Option<(f32, f32)>, m: f32, chance: f32) -> bool {
-        if self.softened_by_anyone(guid) {
-            return false;
-        }
-        let me = self.world.stats.name.clone();
-        if self.is_hard_fight(guid) && self.softener().is_some_and(|who| who == me) {
-            return true;
-        }
-        let least = self.autoplay.config.fight.vuln_above_health;
-        let full = self.creature_known(guid).map_or(0, |c| c.health);
-        least != 0 && is_vuln_worth(self.health_now(guid), roll, m, chance, full, least)
-    }
-
-    /// Why no vulnerability goes on: none for `element` known or likely enough to land, or the one
-    /// `cast` (element, spell, multiplier) not saving casts on `health` with the attack's `roll`.
-    fn why_no_vuln(
-        &self,
-        element: Option<Element>,
-        cast: Option<(Element, u32, f32)>,
-        health: Option<f32>,
-        roll: Option<(f32, f32)>,
-    ) -> String {
-        let table = self.assets.spell_table().ok();
-        let spell = |id: u32| table.as_ref().and_then(|t| t.get(id));
-        let name = |id: u32| spell(id).map(|s| s.name.clone()).unwrap_or_default();
-        let Some(e) = element else {
-            return "the attack has no element it takes".into();
-        };
-        let Some((_, id, m)) = cast else {
-            return self.vuln_standing(e);
-        };
-        let chance = self.cast_chance(id);
-        match (health, roll) {
-            (Some(h), Some((lo, hi))) => format!(
-                "{} (x{m}, lands {:.0}%) takes {:.1} casts with it, {:.1} without",
-                name(id),
-                chance * 100.0,
-                1.0 / chance.max(0.01) + casts_to_kill(h, lo * m, hi * m),
-                casts_to_kill(h, lo, hi)
-            ),
-            _ => format!("{} is not worth it on this one", name(id)),
-        }
     }
 
     /// The strongest vulnerability for `e` known, and whether it can be cast well: its chance and
@@ -424,72 +304,72 @@ impl Client {
         }
     }
 
-    /// Cast a vulnerability for the element of `spell`, the attack the fight would throw next, once
-    /// per target and only when it pays (see [`is_vuln_worth`]). True when a spell went out this tick.
+    /// Say the fastest kill of `guid` when it changes: the chosen way, the next ones, and each
+    /// element's vulnerability as it stands.
+    fn say_kill(
+        &mut self,
+        guid: u32,
+        name: &str,
+        kill: &crate::autoplay::fight::kill::Kill,
+        now: Instant,
+    ) {
+        let key = (
+            guid,
+            kill.wand.guid,
+            kill.attack,
+            kill.vuln.map(|(_, id, ..)| id),
+        );
+        if self.autoplay.kill_said == Some(key) {
+            return;
+        }
+        self.autoplay.kill_said = Some(key);
+        let cfg = self.autoplay.config.fight.clone();
+        let ways = self.kills_said(guid, &cfg, 4);
+        let mut elements: Vec<Element> = Vec::new();
+        for (id, _) in self.ready_spells(&cfg) {
+            if let Some(e) = ac_world::elements::spell_element(id) {
+                if !elements.contains(&e) {
+                    elements.push(e);
+                }
+            }
+        }
+        let standing: Vec<String> = elements
+            .into_iter()
+            .map(|e| format!("{}: {}", e.name(), self.vuln_standing(e)))
+            .collect();
+        let chosen = kill.said(|id| self.spell(id).map(|s| s.name).unwrap_or_default());
+        self.autoplay.note(
+            format!(
+                "fastest kill of {name}: {chosen} (of {ways}); vulnerabilities {}",
+                standing.join("; ")
+            ),
+            now,
+        );
+    }
+
+    /// Cast the vulnerability the fastest kill of `guid` puts on first, if it has one. True when a
+    /// spell went out this tick; a resist or a fizzle has it cast again (`hear_debuff_resisted`).
     pub(super) fn autoplay_make_vulnerable(
         &mut self,
         guid: u32,
         name: &str,
-        spell: Option<u32>,
+        kill: Option<&crate::autoplay::fight::kill::Kill>,
         now: Instant,
     ) -> bool {
-        let least = self.autoplay.config.fight.vuln_above_health;
-        if least == 0 || self.autoplay.is_vulned(guid) || self.softened_by_anyone(guid) {
-            return false;
-        }
-        let known = self.creature_known(guid);
-        let attack = spell.and_then(ac_world::elements::spell_element);
-        // The strongest one we know and can pay for, cast on someone else (the self versions make
-        // us take more). Levels come from the spell's power: level VII has names of its own.
-        let element = crate::weapons::vulnerability_for(known, attack, 0);
-        let cast = element.and_then(|e| {
-            let id = self.strongest_castable(&crate::weapons::vulnerability_spells(e))?;
-            Some((e, id, ac_world::elements::vuln_mod(id)?))
-        });
-        let roll = spell.and_then(|s| self.damage_roll(s, known));
-        let full = known.map_or(0, |c| c.health);
-        let health = self.health_now(guid);
-        let worth = |(_, id, m): &(Element, u32, f32)| {
-            is_vuln_worth(health, roll, *m, self.cast_chance(*id), full, least)
-        };
-        let Some((element, vuln, m)) = cast.filter(worth) else {
-            // Nothing castable, or not worth its cast: say why, and do not ask again for this one.
-            let why = self.why_no_vuln(element, cast, health, roll);
-            // And the other elements on offer, so a choice between them can be read off the note.
-            let cfg = self.autoplay.config.fight.clone();
-            let mut others: Vec<Element> = Vec::new();
-            for (id, _) in self.ready_spells(&cfg) {
-                if let Some(e) = ac_world::elements::spell_element(id) {
-                    if Some(e) != element && !others.contains(&e) {
-                        others.push(e);
-                    }
-                }
-            }
-            let others: Vec<String> = others
-                .into_iter()
-                .map(|e| format!("{}: {}", e.name(), self.vuln_standing(e)))
-                .collect();
-            let also = if others.is_empty() {
-                String::new()
-            } else {
-                format!("; {}", others.join("; "))
-            };
-            self.autoplay
-                .note(format!("no vulnerability on {name}: {why}{also}"), now);
-            self.autoplay.mark_vulned(guid, None);
+        let Some(kill) = kill else {
             return false;
         };
-        let level = self
-            .assets
-            .spell_table()
-            .ok()
-            .and_then(|t| t.get(vuln).map(|sp| sp.level()))
-            .unwrap_or(0);
+        self.say_kill(guid, name, kill, now);
+        let Some((element, vuln, m, _)) = kill.vuln else {
+            return false;
+        };
+        let level = self.spell(vuln).map_or(0, |sp| sp.level());
         if self.cast_paced(vuln, now) {
             self.autoplay.debuff_sent = Some((guid, 0));
         }
         self.autoplay.mark_vulned(guid, Some((element, m)));
         self.autoplay.last_vuln = Some(now);
+        *self.autoplay.kill_kept.borrow_mut() = None;
         let said = format!(
             "making {name} vulnerable to {} (level {level})",
             element.name()
@@ -499,74 +379,9 @@ impl Client {
     }
 }
 
-/// Whether a vulnerability multiplying the attack by `m`, landing `chance` of its casts, pays on a
-/// target with `health` left that each cast takes `roll` (lo, hi) off: when it saves casts on
-/// average, its own tries counted. With either unknown (no health known, no damage row), by `least`,
-/// the floor on its `full` health.
-pub(crate) fn is_vuln_worth(
-    health: Option<f32>,
-    roll: Option<(f32, f32)>,
-    m: f32,
-    chance: f32,
-    full: u32,
-    least: u32,
-) -> bool {
-    match (health, roll) {
-        (Some(h), Some((lo, hi))) if hi > 0.0 => {
-            let tries = 1.0 / chance.max(0.01);
-            casts_to_kill(h, lo, hi) > tries + casts_to_kill(h, lo * m, hi * m)
-        }
-        _ => least > 0 && full >= least,
-    }
-}
-
-/// Casts taken whole, up to which [`casts_to_kill`] sums the chances exactly.
-const EXACT_CASTS: u32 = 12;
-
-/// The casts it takes on average to take `health` off, each rolling evenly from `lo` to `hi`: the
-/// sum over k of the chance k rolls leave it standing (Irwin-Hall); past [`EXACT_CASTS`] casts'
-/// worth, the renewal estimate `h/mean + 1/2 + width²/(24 mean²)`.
-pub(crate) fn casts_to_kill(health: f32, lo: f32, hi: f32) -> f32 {
-    let mean = (lo + hi) / 2.0;
-    if mean <= 0.0 {
-        return f32::INFINITY;
-    }
-    let width = (hi - lo).max(0.0);
-    if health / mean > EXACT_CASTS as f32 {
-        return health / mean + 0.5 + width * width / (24.0 * mean * mean);
-    }
-    if width < 1e-3 {
-        return (health / mean).ceil().max(1.0);
-    }
-    // No cast at all leaves it standing.
-    let mut casts = 1.0;
-    for k in 1..=2 * EXACT_CASTS {
-        let x = (health - k as f32 * lo) / width;
-        if x <= 0.0 {
-            break;
-        }
-        casts += irwin_hall(k, f64::from(x)) as f32;
-    }
-    casts
-}
-
-/// The chance that `n` rolls each even on 0 to 1 sum under `x`.
-fn irwin_hall(n: u32, x: f64) -> f64 {
-    if x >= f64::from(n) {
-        return 1.0;
-    }
-    let (mut sum, mut choose) = (0.0, 1.0);
-    for j in 0..=(x.floor() as u32) {
-        let sign = if j % 2 == 0 { 1.0 } else { -1.0 };
-        sum += sign * choose * (x - f64::from(j)).powi(n as i32);
-        choose *= f64::from(n - j) / f64::from(j + 1);
-    }
-    let factorial: f64 = (1..=n).map(f64::from).product();
-    (sum / factorial).clamp(0.0, 1.0)
-}
-
 impl Autoplay {
-    /// Whether a vulnerability on `guid` is dealt with: cast, or judged not worth it.
+    /// Whether a vulnerability on `guid` is cast and not heard missed.
+    #[cfg(test)]
     pub(crate) fn is_vulned(&self, guid: u32) -> bool {
         self.vulned.iter().any(|(g, _)| *g == guid)
     }
@@ -582,59 +397,7 @@ impl Autoplay {
     }
 }
 
-/// What one cast takes off a target, crits aside (ACE SpellProjectile.cs:528-557), lowest and
-/// highest: a roll from `min` to `max` (both ends, ThreadSafeRandom.cs:28-31), plus `min` times a
-/// thousandth of each point `skill` stands over the spell's `power`, times the wand's bonus and `takes`.
-pub(crate) fn cast_roll(
-    min: u32,
-    max: u32,
-    skill: u32,
-    power: u32,
-    wand: f32,
-    takes: f32,
-) -> (f32, f32) {
-    let bonus = min as f32 * skill.saturating_sub(power) as f32 / 1000.0;
-    let k = wand * takes;
-    ((min as f32 + bonus) * k, (max as f32 + bonus) * k)
-}
-
 impl Client {
-    /// The least and most a cast of `spell` takes off `creature` (see [`cast_roll`]); `None` for
-    /// a spell with no damage row. The wand's bonus counts only on its own element
-    /// (WorldObject_Weapon.cs:382-400); enchantments on it are left out.
-    pub(crate) fn damage_roll(
-        &self,
-        spell: u32,
-        creature: Option<&ac_world::elements::Creature>,
-    ) -> Option<(f32, f32)> {
-        let (min, max) = ac_world::elements::spell_damage(spell)?;
-        let table = self.assets.spell_table().ok();
-        let power = table
-            .as_ref()
-            .and_then(|t| t.get(spell))
-            .map_or(0, |sp| sp.power);
-        let element = ac_world::elements::spell_element(spell);
-        let wand = self
-            .wielded_caster()
-            .and_then(|g| self.stats_of(g))
-            .filter(|w| element.is_some_and(|e| w.damage_type_bits == e as u32))
-            .map(|w| w.elemental_damage)
-            .filter(|m| *m > 0.0)
-            .unwrap_or(1.0);
-        let takes = match (creature, element) {
-            (Some(c), Some(e)) => c.takes_from(e),
-            _ => 1.0,
-        };
-        Some(cast_roll(
-            min,
-            max,
-            self.casting_skill(spell),
-            power,
-            wand,
-            takes,
-        ))
-    }
-
     /// The health `guid` has left: its full health, appraised or from the creature table, times
     /// the fraction the server last sent (full when none has come). `None` with no full health.
     pub(crate) fn health_now(&self, guid: u32) -> Option<f32> {

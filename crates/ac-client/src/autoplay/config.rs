@@ -121,9 +121,6 @@ pub struct Fight {
     /// one whose element it takes most damage from, rending and
     /// criticals counted (see `crate::weapons`).
     pub pick_weapon: bool,
-    /// With no damage to judge by (health unknown, a spell with no damage row), cast a vulnerability
-    /// on anything with at least this much full health; else when it saves more casts than its own. 0 never does.
-    pub vuln_above_health: u32,
     /// Only attack creatures whose name contains one of these; empty
     /// means anything that can be attacked.
     pub only: Vec<String>,
@@ -169,7 +166,6 @@ impl Default for Fight {
             style: Style::Auto,
             spells: Vec::new(),
             pick_weapon: true,
-            vuln_above_health: crate::weapons::LONG_FIGHT_HEALTH,
             craft_ammo: true,
             summon: true,
             area: None,
