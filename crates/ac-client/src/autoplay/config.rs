@@ -285,16 +285,6 @@ pub struct Team {
     pub debuffs: Vec<String>,
     /// Hand a teammate standing next to us what they are short of.
     pub share_supplies: bool,
-    /// A creature with at least this much health is a hard fight, and
-    /// hard fights are planned: the teammate with the highest Life
-    /// Magic softens it with a vulnerability and an imperil, and the
-    /// rest hold their fire until it has. 0 plans nothing.
-    pub hard_fight_health: u32,
-    /// Whether the rest wait for the softening before opening fire on
-    /// a hard target. Off by default: the shots and spells spent before
-    /// the vulnerability lands cost next to nothing, and every second
-    /// the target is not being hit is a second it is hitting someone.
-    pub wait_for_debuff: bool,
     /// This character leads: the others come to it, follow it about and
     /// fly when it flies. The one played by hand, usually. Without one
     /// the leader is whoever's name sorts first, and nobody follows.
@@ -322,8 +312,6 @@ impl Default for Team {
             fellowship_name: "acswarm".into(),
             debuffs: Vec::new(),
             share_supplies: true,
-            hard_fight_health: 400,
-            wait_for_debuff: false,
             lead: false,
             follow: true,
             follow_distance: 4.0,

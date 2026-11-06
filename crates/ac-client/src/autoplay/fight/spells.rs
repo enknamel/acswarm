@@ -127,9 +127,6 @@ impl Client {
             );
             return true;
         }
-        if self.autoplay_plan_hard(guid, &name, now) {
-            return true;
-        }
         // Of the spells that could be thrown this moment, the one this
         // creature is hurt most by. An Ice Golem takes nothing at all
         // from cold and full damage from fire, so the difference between

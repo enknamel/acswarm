@@ -181,7 +181,6 @@ impl Client {
                 crate::plan::Foe {
                     guid: *guid,
                     world: *at,
-                    hard: self.is_hard_fight(*guid),
                     after,
                 }
             })

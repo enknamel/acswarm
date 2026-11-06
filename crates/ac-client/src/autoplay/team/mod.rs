@@ -100,7 +100,7 @@ impl Client {
                 if self.joins_the_team_on(guid, fight) && !self.autoplay.debuffed.contains(&guid) {
                     // A debuff is an attack, waking the creature onto the caster (ACE
                     // Player_Magic.cs:1103, Player_Monster.cs:50): none on one avoided or outside
-                    // the area, but marked, or a `wait_for_debuff` party waits on it for ever.
+                    // the area, but marked, or the debuffer comes back to it every tick.
                     let barred = self.world.objects.get(&guid).is_some_and(|o| {
                         !crate::autoplay::wanted_target(&o.name, fight)
                             || !self.area_allows(o, underground)

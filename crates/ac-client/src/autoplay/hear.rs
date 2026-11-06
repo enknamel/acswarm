@@ -144,7 +144,7 @@ impl Client {
     /// `name` resisted a spell: when it is the debuff last sent, it is cast again whenever the fight
     /// still finds it the fastest way; the server has no cap on tries (WorldObject_Magic.cs:107-112).
     fn hear_debuff_resisted(&mut self, name: &str) {
-        let Some((g, _)) = self.autoplay.debuff_sent else {
+        let Some(g) = self.autoplay.debuff_sent else {
             return;
         };
         if self.world.objects.get(&g).is_none_or(|o| o.name != name) {
@@ -162,21 +162,10 @@ impl Client {
 
     /// The debuff last sent did not go on (`why`): cast again when it is still worth it.
     fn rearm_debuff(&mut self, why: &str) {
-        let Some((g, stage)) = self.autoplay.debuff_sent.take() else {
+        let Some(g) = self.autoplay.debuff_sent.take() else {
             return;
         };
-        let a = &mut self.autoplay;
-        if stage == 0 {
-            a.vulned.retain(|(t, _)| *t != g);
-        } else {
-            a.debuffed.retain(|t| *t != g);
-        }
-        // Softening steps back to the stage missed; a vuln cast on its own has no entry.
-        match a.softening.iter_mut().find(|(t, _)| *t == g) {
-            Some(entry) => entry.1 = stage,
-            None if stage == 1 => a.softening.push((g, 1)),
-            None => {}
-        }
+        self.autoplay.vulned.retain(|(t, _)| *t != g);
         tracing::info!("the debuff on {g:#010x} {why}; casting it again");
     }
 

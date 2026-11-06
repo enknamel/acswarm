@@ -469,29 +469,20 @@ impl Client {
         (1.0 - self.world.stats.vitae()).max(0.0)
     }
 
-    /// Whether the vitae is high enough that the hard fights should
-    /// wait (see `Survive::vitae_wait`).
+    /// Whether the vitae is high enough that its killer should wait (see `Survive::vitae_wait`).
     pub fn vitae_cautious(&self) -> bool {
         let cfg = &self.autoplay.config.survive;
         cfg.vitae_wait && self.vitae_penalty() >= cfg.vitae_above
     }
 
-    /// A creature to leave alone while the vitae is high: the one that
-    /// killed us, or anything with the team's idea of a hard fight's
-    /// health. A character at three quarters strength does not go
-    /// straight back into the fight it just lost.
+    /// A creature to leave alone while the vitae is high: the one that killed us. A character at
+    /// three quarters strength does not go straight back into the fight it just lost.
     pub fn shy_of(&self, o: &ac_world::WorldObject) -> bool {
         if !self.vitae_cautious() {
             return false;
         }
         let killer = self.autoplay.recovery.killer.as_deref();
-        if killer.is_some_and(|k| k.eq_ignore_ascii_case(&o.name)) {
-            return true;
-        }
-        let hard = self.autoplay.config.team.hard_fight_health;
-        hard > 0
-            && ac_world::elements::known(o.weenie_class_id, &o.name)
-                .is_some_and(|c| c.health >= hard)
+        killer.is_some_and(|k| k.eq_ignore_ascii_case(&o.name))
     }
 
     /// Our own corpse in view, nearest the death spot: its guid and how

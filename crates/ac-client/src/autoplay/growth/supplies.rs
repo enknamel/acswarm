@@ -148,8 +148,7 @@ impl Client {
         } else {
             out.extend(by_name(&cfg.fight.spells));
         }
-        // Softening: a vulnerability for each element, and the
-        // imperils (see `autoplay_make_vulnerable`, `autoplay_soften`).
+        // A vulnerability for each element (see `autoplay_make_vulnerable`).
         for element in ac_world::elements::ALL {
             out.extend(
                 crate::weapons::vulnerability_spells(element)
@@ -158,7 +157,6 @@ impl Client {
                     .filter(at_another),
             );
         }
-        out.extend(self.imperil_spells());
         // The team's work: its debuffs by name, and the healer's heal.
         out.extend(by_name(&cfg.team.debuffs));
         if cfg.team.role == crate::autoplay::Role::Healer {

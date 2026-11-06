@@ -183,12 +183,12 @@ impl Client {
         underground: bool,
         now: Instant,
     ) -> bool {
-        // With the vitae high, the hard ones and the killer wait.
+        // With the vitae high, the killer waits.
         self.would_join(o, cfg, underground, now) && !self.shy_of(o)
     }
 
-    /// [`Self::would_fight`] less the vitae (`shy_of`), which is for the fights a character picks: a
-    /// hard fight is the whole party's (`plan.rs`), and its softener is waited for (`soften.rs`).
+    /// [`Self::would_fight`] less the vitae (`shy_of`), which is for the fights a character picks,
+    /// not the ones the party's plan (`plan.rs`) puts it on.
     fn would_join(
         &self,
         o: &ac_world::WorldObject,

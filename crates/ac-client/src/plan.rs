@@ -100,8 +100,6 @@ pub struct Hand {
 pub struct Foe {
     pub guid: u32,
     pub world: Vec3,
-    /// A hard fight (`Team::hard_fight_health`): everyone's.
-    pub hard: bool,
     /// The hands it is after, by player guid: those it has walked at
     /// and those it has hit lately (see [`hunted_by`]).
     pub after: Vec<u32>,
@@ -289,8 +287,7 @@ pub fn hunted_by(foes: &[(u32, &str, Vec3)], hand: &Hand) -> Vec<u32> {
 ///
 /// In order: a creature after one of the party is fought by that one,
 /// whatever else the plan says, because that fight is already
-/// happening. A hard creature is everyone's, the way focus fire has
-/// always had it. Then the rest are shared out: no creature gets more
+/// happening. Then the rest are shared out: no creature gets more
 /// hands than its share (the hands over the creatures, rounded up)
 /// while another has none. A hand already on a creature keeps it while
 /// its share allows, lowest guid first, so as few move as need to; a
@@ -320,18 +317,6 @@ pub fn assign_targets(
     let mut foes: Vec<&Foe> = foes.iter().collect();
     foes.sort_by_key(|f| f.guid);
     let centre = fighters.iter().map(|h| h.world).sum::<Vec3>() / fighters.len() as f32;
-    // A hard fight is everyone's.
-    if let Some(hard) = foes.iter().filter(|f| f.hard).min_by(|a, b| {
-        a.world
-            .distance(centre)
-            .total_cmp(&b.world.distance(centre))
-            .then(a.guid.cmp(&b.guid))
-    }) {
-        for h in &fighters {
-            out.insert(h.guid, hard.guid);
-        }
-        return out;
-    }
     let share = fighters.len().div_ceil(foes.len());
     let mut on: BTreeMap<u32, usize> = foes.iter().map(|f| (f.guid, 0)).collect();
     fn put(out: &mut BTreeMap<u32, u32>, on: &mut BTreeMap<u32, usize>, hand: u32, foe: u32) {
@@ -613,16 +598,6 @@ mod tests {
         mob.after = vec![1, 2, 3];
         let plan = assign_targets(&hands, &[foe(0x77, 1.0), mob], &BTreeMap::new());
         assert_eq!(on(&plan, 0x79), vec![1, 2, 3]);
-    }
-
-    #[test]
-    fn a_hard_creature_is_everyones() {
-        let hands: Vec<Hand> = (1..=4).map(|g| hand(g, g as f32)).collect();
-        let mut boss = foe(0x80, 20.0);
-        boss.hard = true;
-        let foes = [foe(0x77, 1.0), boss, foe(0x78, 2.0)];
-        let plan = assign_targets(&hands, &foes, &BTreeMap::new());
-        assert_eq!(on(&plan, 0x80), vec![1, 2, 3, 4]);
     }
 
     #[test]

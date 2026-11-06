@@ -277,9 +277,8 @@ fn a_creature_given_up_on_is_not_taken_again_off_the_board() {
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
 fn the_vitae_keeps_a_follower_off_what_it_picks_not_off_the_partys_fight() {
-    // `shy_of` holds a character with high vitae off the hard fights and its killer when it picks.
-    // An order or the board is the party's fight (`plan.rs` puts every hand on a hard one), and
-    // asked it too a follower stood and took its killer's blows without swinging back.
+    // `shy_of` holds a character with high vitae off its killer when it picks. An order or the
+    // board is the party's fight, and asked it too a follower stood and took its killer's blows.
     let now = Instant::now();
     let shy = |c: &mut Client| {
         c.autoplay.config.survive.vitae_above = 0.0;
@@ -358,7 +357,7 @@ fn debuffing(c: &mut Client, target: u32) {
 #[test]
 fn a_debuffer_leaves_what_its_rules_bar_marked_so_nobody_waits_on_it() {
     // A hostile cast is an attack: ACE sets the creature on the caster (Player_Monster.cs:50).
-    // Refused, it is still marked debuffed, or `wait_for_debuff` held the party on it for ever.
+    // Refused, it is still marked debuffed, or the debuffer came back to it every tick.
     let now = Instant::now();
     let mut c = beside_the_leader();
     let avoided = crate::testkit::standing_by(&mut c, 0x8000_0001, "Drudge Slinker", 6.0).guid;

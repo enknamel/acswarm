@@ -159,9 +159,6 @@ impl Client {
                 })
                 .filter(|(guid, _)| self.can_take_on(*guid, &cfg, underground, now));
             if let Some((guid, name)) = joined {
-                if self.autoplay_plan_hard(guid, &name, now) {
-                    return true;
-                }
                 self.remember_journey();
                 self.arm_for(guid, stance, &cfg);
                 if self.hands_changing(now) {
@@ -195,9 +192,6 @@ impl Client {
             return false;
         };
         let name = self.world.name_or_hex(guid);
-        if self.autoplay_plan_hard(guid, &name, now) {
-            return true;
-        }
         self.remember_journey();
         self.arm_for(guid, stance, &cfg);
         // The hands are empty between the put and the wield, and a swing

@@ -200,13 +200,10 @@ pub struct Autoplay {
     pub recovery: crate::recovery::Recovery,
     /// Targets whose vulnerability is dealt with, and the one cast (element, multiplier) if any.
     vulned: Vec<(u32, Option<(ac_world::elements::Element, f32)>)>,
-    /// Hard targets being softened, and how far along: 0 the
-    /// vulnerability still to cast, 1 the imperil.
-    softening: Vec<(u32, u8)>,
     last_vuln: Option<Instant>,
-    /// The debuff last sent and still unanswered: its target and its softening stage (0 the
-    /// vulnerability, 1 the imperil). A resist of it re-arms it (`Client::hear_arrival`).
-    debuff_sent: Option<(u32, u8)>,
+    /// The vulnerability last sent and still unanswered, by target. A resist or fizzle re-arms it
+    /// (`Client::hear_arrival`).
+    debuff_sent: Option<u32>,
     /// The fight's fastest kill of its target and when it was worked out (`Client::best_kill`).
     kill_kept:
         std::cell::RefCell<Option<(u32, Instant, Option<crate::autoplay::fight::kill::Kill>)>>,

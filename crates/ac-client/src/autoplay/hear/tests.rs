@@ -89,7 +89,7 @@ fn a_resisted_or_fizzled_vulnerability_is_cast_again_however_often() {
     c.world.objects.insert(it.guid, it);
     let resisted = |c: &mut Client| {
         c.autoplay.mark_vulned(0x8000_0103, None);
-        c.autoplay.debuff_sent = Some((0x8000_0103, 0));
+        c.autoplay.debuff_sent = Some(0x8000_0103);
         c.hear_arrival("Drudge Skulker resists your spell");
         !c.autoplay.is_vulned(0x8000_0103)
     };
@@ -98,7 +98,7 @@ fn a_resisted_or_fizzled_vulnerability_is_cast_again_however_often() {
     }
     // A fizzle (WeenieError 0x0402) too.
     c.autoplay.mark_vulned(0x8000_0103, None);
-    c.autoplay.debuff_sent = Some((0x8000_0103, 0));
+    c.autoplay.debuff_sent = Some(0x8000_0103);
     c.hear_debuff_error(0x0402);
     assert!(!c.autoplay.is_vulned(0x8000_0103), "a fizzle re-arms it");
     // Another creature's resist, or one heard after the next cast went out, re-arms nothing.
@@ -106,27 +106,10 @@ fn a_resisted_or_fizzled_vulnerability_is_cast_again_however_often() {
     let it = crate::testkit::creature(0x8000_0103, "Drudge Skulker");
     c.world.objects.insert(it.guid, it);
     c.autoplay.mark_vulned(0x8000_0103, None);
-    c.autoplay.debuff_sent = Some((0x8000_0103, 0));
+    c.autoplay.debuff_sent = Some(0x8000_0103);
     c.hear_arrival("Mosswart Shaman resists your spell");
     assert!(c.autoplay.is_vulned(0x8000_0103));
     c.autoplay.debuff_sent = None;
     c.hear_arrival("Drudge Skulker resists your spell");
     assert!(c.autoplay.is_vulned(0x8000_0103));
-}
-
-#[test]
-fn a_resisted_imperil_steps_the_softening_back_to_it() {
-    let mut c = crate::testkit::offline_client();
-    let it = crate::testkit::creature(0x8000_0103, "Drudge Skulker");
-    c.world.objects.insert(it.guid, it);
-    // Softened: both cast, the target marked. The imperil was resisted.
-    c.autoplay.debuffed.push(0x8000_0103);
-    c.autoplay.debuff_sent = Some((0x8000_0103, 1));
-    c.hear_arrival("Drudge Skulker resists your spell");
-    assert!(!c.autoplay.debuffed.contains(&0x8000_0103));
-    assert_eq!(c.autoplay.softening, vec![(0x8000_0103, 1)]);
-    // A resisted vulnerability mid-softening goes back to stage 0.
-    c.autoplay.debuff_sent = Some((0x8000_0103, 0));
-    c.hear_arrival("Drudge Skulker resists your spell");
-    assert_eq!(c.autoplay.softening, vec![(0x8000_0103, 0)]);
 }
