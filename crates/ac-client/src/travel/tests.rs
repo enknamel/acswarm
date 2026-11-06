@@ -1333,3 +1333,52 @@ fn lifestone_waits_for_a_spell_in_the_air_rather_than_be_turned_away_busy() {
         "not sent once the spell landed"
     );
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_recall_that_lands_elsewhere_than_planned_has_carried_us_off() {
+    // Blargerton's Portal Recall was planned to the Tusker Guard dungeon from a stale saved
+    // position and landed at the Tusker Barracks door: not "there", it was cast again 11 s later
+    // and written off 15 s after that, and the next portal said "teleported too recently".
+    let mut c = crate::testkit::standing_in_the_field(43, 0xA9B4_0019, Vec3::new(84.0, 7.1, 94.0));
+    let planned = Place {
+        at: ac_world::landblock_origin(0x5A48_01B5) + Vec3::new(40.0, -170.0, -6.0),
+        cell: 0x5A48_01B5,
+    };
+    let trip = ac_world::trip::Trip {
+        steps: vec![
+            ac_world::trip::Step::Recall {
+                spell: ac_world::recalls::spell::FREE_LIFESTONE,
+                name: "Portal Recall".into(),
+                exit: planned,
+            },
+            ac_world::trip::Step::Walk(planned),
+        ],
+        seconds: 60.0,
+    };
+    crate::testkit::set_out_on(
+        &mut c,
+        trip,
+        crate::Goal::At {
+            place: planned,
+            within: 5.0,
+        },
+    );
+    let t0 = std::time::Instant::now();
+    let at = |s: f32| t0 + std::time::Duration::from_secs_f32(s);
+    c.step_goal(at(0.0));
+    c.step_goal(at(1.0));
+    assert_eq!(c.travel.state.recall_casts, 1);
+    // Landed at the Barracks door, kilometres from where it was planned.
+    crate::testkit::stand(&mut c, 0x8A02_0212, Vec3::new(58.6, -89.9, 6.0));
+    c.step_goal(at(4.0));
+    assert!(
+        c.travel.replan_due,
+        "the journey goes on from where it landed"
+    );
+    c.step_goal(at(16.0));
+    assert_eq!(
+        c.travel.state.recall_casts, 1,
+        "cast again from where it landed"
+    );
+}

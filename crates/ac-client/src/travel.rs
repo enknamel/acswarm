@@ -41,6 +41,9 @@ const TRAIL_KEEP: usize = 8;
 /// A recall step waits this long after the step begins before casting,
 /// so the character has come to a stop (moving disrupts the cast).
 const RECALL_SETTLE: Duration = Duration::from_millis(800);
+
+/// Metres a recall cast must have moved us to count as carried off, wherever it landed.
+const RECALL_CARRIES: f32 = 60.0;
 /// A recall that has not carried us off this long after the cast was
 /// sent (the cast takes a few seconds and the server pauses two more
 /// before the teleport) is cast again, and after `RECALL_TRIES` casts
@@ -1087,10 +1090,15 @@ impl Client {
             let step = self.travel_step().cloned();
             let exit = step.as_ref().and_then(|s| s.exit());
             let arrived = match (exit, &step) {
-                // A recall can land in the landblock we are already in,
-                // so only the spot counts, and only once a cast is out.
+                // A recall can land in the landblock we are already in, so the spot counts, or
+                // any jump once a cast is out: the saved position it was planned by can be stale.
                 (Some(exit), Some(Step::Recall { .. })) => {
-                    self.travel.state.recall_casts > 0 && me.distance(exit.at.truncate()) < 30.0
+                    let jumped = self
+                        .travel
+                        .last_seen
+                        .is_some_and(|l| me.distance(l) > RECALL_CARRIES);
+                    self.travel.state.recall_casts > 0
+                        && (me.distance(exit.at.truncate()) < 30.0 || jumped)
                 }
                 (Some(exit), _) => {
                     block == exit.cell & 0xFFFF_0000 || me.distance(exit.at.truncate()) < 30.0
@@ -1108,14 +1116,26 @@ impl Client {
                         if self.travel.state.recall_leave_combat {
                             self.leave_combat();
                         }
+                        // Somewhere else than planned (`recall_landed` learns where): the rest of
+                        // the journey is planned again from here, not recast for 26 s.
+                        if exit.is_some_and(|e| me.distance(e.at.truncate()) >= 30.0) {
+                            tracing::info!(
+                                "travel: {name} landed at {me:?}; planning again from here"
+                            );
+                            self.travel.replan_due = true;
+                            return None;
+                        }
                     }
                     _ => {
                         tracing::info!("travel: through the portal");
                         if let Some((_, mouth)) = self.travel_portal() {
                             self.travel.refused.retain(|r| r.distance(mouth) > 2.0);
-                            // Portal Recall goes back to where the last
-                            // portal led: this one, now.
-                            if let Some(p) = ac_world::portals::near(mouth, 3.0).first() {
+                            // Portal Recall goes back to where the last recallable
+                            // portal led: this one, unless it is marked NoRecall.
+                            if let Some(p) = ac_world::portals::near(mouth, 3.0)
+                                .first()
+                                .filter(|p| p.is_recallable())
+                            {
                                 let local = p.to - ac_world::landblock_origin(p.to_cell);
                                 self.learn_recall_position(
                                     ac_world::recalls::position_type::LAST_PORTAL,

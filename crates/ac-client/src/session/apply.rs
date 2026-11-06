@@ -118,6 +118,13 @@ impl Client {
                                 pl.dirty = true;
                             }
                             self.steering.reset();
+                            if let Some(p) = self.world.player().and_then(|o| o.position) {
+                                tracing::info!(
+                                    "the server put us at {:#010x} {:?}",
+                                    p.cell,
+                                    p.local
+                                );
+                            }
                             self.recall_landed();
                         }
                         ac_world::Applied::PlayerMoveTo | ac_world::Applied::PlayerMotion => {
@@ -297,12 +304,12 @@ impl Client {
                             }
                             self.session
                                 .send_action(ac_net::messages::action::LOGIN_COMPLETE, &[]);
-                            // Where the server put us, against where we were: a mismatch
-                            // after a portal is read from here.
-                            let to = self.world.player().and_then(|o| o.position);
+                            // ACE sends this ahead of the new position (Player_Location.cs:686,
+                            // :694): what is known now is where the teleport began.
+                            let from = self.world.player().and_then(|o| o.position);
                             tracing::info!(
-                                "moved by the server to {:?}; told it we landed",
-                                to.map(|p| (format!("{:#010x}", p.cell), p.local))
+                                "teleport begun from {:?}; told the server we landed",
+                                from.map(|p| (format!("{:#010x}", p.cell), p.local))
                             );
                         }
                         opcode::ACCOUNT_BANNED => {

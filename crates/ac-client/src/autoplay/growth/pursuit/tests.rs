@@ -62,6 +62,7 @@ fn way_in(name: &str, lb: u32, min_level: u32, flag: &str) -> &'static Portal {
         max_level: 0,
         quest: flag.to_string(),
         usable: 32,
+        bitmask: 0,
     })
 }
 

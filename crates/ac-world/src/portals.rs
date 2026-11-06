@@ -33,9 +33,19 @@ pub struct Portal {
     /// all, which is how the ruined ones are marked (and a good many
     /// decorations besides).
     pub usable: u32,
+    /// Its `PortalBitmask` (ACE `PortalBitmask.cs`); 0 when the data does not say.
+    pub bitmask: u32,
 }
 
+/// `PortalBitmask::NoRecall`: going through leaves Portal Recall where it was (`Portal.cs:284`).
+pub const NO_RECALL: u32 = 0x20;
+
 impl Portal {
+    /// Whether Portal Recall remembers this portal once it is used.
+    pub fn is_recallable(&self) -> bool {
+        self.bitmask & NO_RECALL == 0
+    }
+
     pub fn from_xy(&self) -> Vec2 {
         self.from.truncate()
     }
@@ -136,6 +146,7 @@ fn parse(text: &str) -> Vec<Portal> {
             max_level: level(10),
             quest: f.get(11).map(|q| q.trim().to_string()).unwrap_or_default(),
             usable: level(12),
+            bitmask: level(13),
         });
     }
     out
@@ -199,6 +210,20 @@ pub fn named(needle: &str) -> Vec<&'static Portal> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_portal_marked_no_recall_is_not_where_portal_recall_goes() {
+        // The Facility Hub's Tusker Barracks portal (bitmask 49) left Blargerton's Portal Recall at
+        // the Hub, the last recallable portal's exit; the town's portal into the Hub is recallable.
+        let named = |name: &str, cell: u32| {
+            super::all()
+                .iter()
+                .find(|p| p.name == name && p.from_cell == cell)
+                .unwrap_or_else(|| panic!("no {name}"))
+        };
+        assert!(!named("Tusker Barracks", 0x8A02_011E).is_recallable());
+        assert!(named("Portal to Facility Hub", 0x0007_0126).is_recallable());
+    }
+
     use super::*;
 
     #[test]
