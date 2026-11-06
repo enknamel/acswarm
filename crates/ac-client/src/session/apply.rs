@@ -102,6 +102,7 @@ impl Client {
                             // The server ignores our positions until we say we landed.
                             self.session
                                 .send_action(ac_net::messages::action::LOGIN_COMPLETE, &[]);
+                            tracing::info!("placed by the server; told it we landed");
                             continue;
                         }
                         ac_world::Applied::Moved => continue,
@@ -296,6 +297,13 @@ impl Client {
                             }
                             self.session
                                 .send_action(ac_net::messages::action::LOGIN_COMPLETE, &[]);
+                            // Where the server put us, against where we were: a mismatch
+                            // after a portal is read from here.
+                            let to = self.world.player().and_then(|o| o.position);
+                            tracing::info!(
+                                "moved by the server to {:?}; told it we landed",
+                                to.map(|p| (format!("{:#010x}", p.cell), p.local))
+                            );
                         }
                         opcode::ACCOUNT_BANNED => {
                             let (secs, reason) =
@@ -438,6 +446,7 @@ impl Client {
                                         )));
                                     }
                                     self.use_done = Some((err, now));
+                                    self.hear_airborne(err, now);
                                     self.hear_cast_refused(err, now);
                                     self.hear_buff_answer(err);
                                     // The server has finished with what

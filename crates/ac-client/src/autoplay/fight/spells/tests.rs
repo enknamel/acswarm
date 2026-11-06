@@ -106,3 +106,21 @@ fn a_target_the_server_cannot_find_is_forgotten() {
     assert_eq!(c.autoplay.casting_at(), None, "still casting at it");
     assert!(c.autoplay.given_up.since(&ghost.guid).is_some());
 }
+
+#[test]
+fn casts_wait_while_the_server_has_us_in_the_air() {
+    // After a flight Coldeve held Blargerton in the air: Lightning Bane VI went up every 1.5 s for
+    // a minute, 44 times, each "You can't do that while in the air" (0x4eb).
+    let now = Instant::now();
+    let mut c = crate::testkit::offline_client();
+    c.autoplay.cast_sent = Some(now);
+    c.hear_airborne(crate::autoplay::cast::IN_THE_AIR, now);
+    c.autoplay.cast_answered();
+    let later = |s: u64| now + std::time::Duration::from_secs(s);
+    assert!(c.autoplay.cast_in_flight(later(2)), "cast again at once");
+    assert!(!c.autoplay.cast_in_flight(later(11)), "held past the wait");
+    // Only an answer to a cast: a use refused the same way holds nothing.
+    let mut c = crate::testkit::offline_client();
+    c.hear_airborne(crate::autoplay::cast::IN_THE_AIR, now);
+    assert!(!c.autoplay.cast_in_flight(later(1)));
+}

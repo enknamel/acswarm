@@ -8,6 +8,14 @@ use crate::Client;
 /// waiting for ever on one that went astray.
 const CAST_LOST: Duration = Duration::from_secs(6);
 
+/// ACE's `YouCantDoThatWhileInTheAir`: the server's own physics has the character off the floor,
+/// whatever this client sends (`Player.cs:49`, `Player_Magic.cs:105`).
+pub(crate) const IN_THE_AIR: u32 = 0x04EB;
+
+/// How long every cast waits once the server says the character is in the air: asked again at
+/// once, it says so again (test: casts_wait_while_the_server_has_us_in_the_air).
+const IN_THE_AIR_WAIT: Duration = Duration::from_secs(10);
+
 /// Why a cast is refused, in a few words for a status line.
 pub fn cast_problem(check: &crate::magic::CastCheck) -> String {
     use crate::magic::CastCheck;
@@ -40,6 +48,9 @@ impl Autoplay {
         if self.learnable.is_reading(now) {
             return true;
         }
+        if self.in_the_air_until.is_some_and(|t| now < t) {
+            return true;
+        }
         match self.cast_sent {
             Some(t) => now.duration_since(t) < CAST_LOST,
             None => false,
@@ -55,6 +66,23 @@ impl Autoplay {
 }
 
 impl Client {
+    /// The server's answer `err` to what was sent: "in the air" to a cast holds every cast
+    /// [`IN_THE_AIR_WAIT`], said once a hold.
+    pub(crate) fn hear_airborne(&mut self, err: u32, now: Instant) {
+        if err != IN_THE_AIR || self.autoplay.cast_sent.is_none() {
+            return;
+        }
+        let held = self.autoplay.in_the_air_until.is_some_and(|t| now < t);
+        self.autoplay.in_the_air_until = Some(now + IN_THE_AIR_WAIT);
+        if !held {
+            let wait = IN_THE_AIR_WAIT.as_secs();
+            self.autoplay.note(
+                format!("the server has us in the air: no casts for {wait} s"),
+                now,
+            );
+        }
+    }
+
     /// Cast `spell` and hold the next cast until the server answers for
     /// this one (see [`Autoplay::cast_in_flight`]); true when it went
     /// out. Every cast autoplay sends goes through here or sets the same

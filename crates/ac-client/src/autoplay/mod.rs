@@ -185,6 +185,8 @@ pub struct Autoplay {
     /// server has not yet said it is done. Cleared by its answer
     /// (`UseDone`), which is what paces the next one.
     pub(crate) cast_sent: Option<Instant>,
+    /// Casts wait till then: the server said the character was in the air (`cast::IN_THE_AIR`).
+    pub(crate) in_the_air_until: Option<Instant>,
     /// What the fight's own attack spell was thrown at and when, so a
     /// stop can tell it from a heal, a kit or a counter, which set
     /// `cast_sent` too. Cleared by the same answer as `cast_sent`.
