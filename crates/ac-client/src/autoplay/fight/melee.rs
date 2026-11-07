@@ -258,7 +258,7 @@ impl Client {
                         .filter(|(g, _)| *g == guid)
                         .map(|(_, t)| t),
                     now,
-                ) && self.close_in_on(guid)
+                ) && (self.close_in_on(guid) || self.leave_dud_spot(guid, now))
                 {
                     // A new spot to fight from gets its own chance.
                     self.autoplay.engaged = Some((guid, now, health));
@@ -398,6 +398,32 @@ impl Client {
             Instant::now(),
         );
         self.autoplay.closing = Some((guid, cap));
+        true
+    }
+
+    /// Nothing thrown from here has landed on `guid` and there is no nearer stand: this spot is a
+    /// dud, and the approach casts from another (`Client::vantage`). A Tumerok 1.8 m off took
+    /// twenty bolts unhurt, given up and picked again each time it hit us (test:
+    /// a_spot_nothing_lands_from_at_arms_length_is_left_for_another). True when the spot was new.
+    fn leave_dud_spot(&mut self, guid: u32, now: Instant) -> bool {
+        let thrown = self.missile
+            || (self.autoplay.casting_at == Some(guid)
+                && self
+                    .autoplay
+                    .attack_spell
+                    .is_some_and(|s| self.spell_flies(s)));
+        let Some(me) = self.my_position().filter(|_| thrown) else {
+            return false;
+        };
+        if self.is_dud_spot(me) {
+            return false;
+        }
+        let name = self.world.name_or_hex(guid);
+        self.autoplay.note(
+            format!("nothing landing on {name} from this spot; casting from another"),
+            now,
+        );
+        self.mark_dud_spot(me, now);
         true
     }
 

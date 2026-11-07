@@ -462,6 +462,15 @@ impl Client {
         clear && (matches!(how, How::Melee) || self.door_across(path).is_none())
     }
 
+    /// Mark `at` a spot shots from do not land, for [`DUD_KEPT`]: the approach casts from another.
+    pub(crate) fn mark_dud_spot(&mut self, at: Vec3, now: Instant) {
+        self.dodge
+            .dud_spots
+            .retain(|(_, t)| now.duration_since(*t) < DUD_KEPT);
+        self.dodge.dud_spots.push((at, now));
+        self.dodge.vantage = None;
+    }
+
     /// Whether `at` is a spot two of our shots burst at as they left (see `hear_burst`).
     pub(crate) fn is_dud_spot(&self, at: Vec3) -> bool {
         self.dodge

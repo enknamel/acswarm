@@ -39,3 +39,22 @@ fn a_ranged_attacker_closes_in_before_it_gives_up() {
     assert_eq!(closer_stand_off(MIN_STAND_OFF), None);
     assert_eq!(closer_stand_off(MIN_STAND_OFF + 0.5), None);
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_spot_nothing_lands_from_at_arms_length_is_left_for_another() {
+    // Blargerton cast twenty Frost Bolts at a Tumerok Standard Bearer 1.8 m off, none landing,
+    // gave up and picked it again each time it hit him: nowhere nearer to stand, so he never moved.
+    let t0 = Instant::now();
+    let (mut c, ids) = crate::testkit::a_caster_knowing(t0, &["Frost Bolt VI"]);
+    let foe = crate::testkit::standing_by(&mut c, 0x8000_0103, "Tumerok Standard Bearer", 1.8);
+    c.autoplay.casting_at = Some(foe.guid);
+    c.autoplay.attack_spell = Some(ids[0]);
+    c.autoplay.engaged = Some((foe.guid, t0, 1.0));
+    c.autoplay.thrown = Some((foe.guid, t0));
+    let me = c.my_position().unwrap();
+    let now = t0 + CLOSE_IN_AFTER + Duration::from_secs(1);
+    assert!(!c.stalled_on(foe.guid, now), "not given up");
+    assert!(c.is_dud_spot(me), "this spot is left for another");
+    assert_eq!(c.autoplay.casting_at, Some(foe.guid));
+}
