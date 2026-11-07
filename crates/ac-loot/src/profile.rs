@@ -1056,8 +1056,8 @@ pub fn quest_rule() -> Rule {
 }
 
 impl Profile {
-    /// Put [`quest_rule`] first, for a profile saved before there was one; false when a rule
-    /// already asks for quest items, wherever the player put it.
+    /// Put [`quest_rule`] first, for a profile loaded without one ([`Library::reload`]); false
+    /// when a rule already asks for quest items, wherever the player put it.
     pub fn add_quest_rule(&mut self) -> bool {
         if self.rules.iter().any(|r| r.all.contains(&Ask::Quest)) {
             return false;
@@ -2218,6 +2218,26 @@ mod tests {
     }
 
     #[test]
+    fn a_profile_loaded_without_the_quest_rule_gets_it_first_and_written_back() {
+        let dir = std::env::temp_dir().join(format!("acswarm-quest-rule-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut old = quest_then_cheap(Vec::new());
+        old.name = "old".into();
+        old.rules.retain(|r| !r.all.contains(&Ask::Quest));
+        std::fs::create_dir_all(&dir).expect("a shelf");
+        old.save(&dir).expect("saved without it");
+        let library = Library::default();
+        library.open(&dir);
+        let live = library.get("old").expect("loaded");
+        assert_eq!(live.rules[0], quest_rule());
+        assert_eq!(live.rules.len(), 2);
+        library.flush_all();
+        let back = Profile::load(&dir, "old").expect("on disk");
+        assert_eq!(back.rules[0], quest_rule(), "written back with it");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn the_quest_rule_is_added_first_to_a_profile_without_one_and_only_once() {
         let mut old = quest_then_cheap(Vec::new());
         old.rules.retain(|r| !r.all.contains(&Ask::Quest));
@@ -2276,13 +2296,20 @@ impl Library {
     }
 
     /// Read every profile in the directory, replacing what is held; returns how many were read.
-    /// One that will not parse is logged and left out rather than taking the rest down with it.
+    /// One that will not parse is logged and left out; one with no quest rule gets it, written back.
     pub fn reload(&self) -> usize {
         let dir = self.dir();
         let mut found = std::collections::BTreeMap::new();
         for name in Profile::list(&dir) {
             match Profile::load(&dir, &name) {
-                Ok(p) => {
+                Ok(mut p) => {
+                    if p.add_quest_rule() {
+                        self.unwritten
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .entry(p.name.clone())
+                            .or_insert_with(std::time::Instant::now);
+                    }
                     found.insert(p.name.clone(), std::sync::Arc::new(p));
                 }
                 Err(e) => tracing::warn!("loot profile {name}: {e}"),
