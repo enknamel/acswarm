@@ -21,10 +21,16 @@
 # tolerance (PropertyInt 67), the flags saying when the server lets it
 # attack, and level (PropertyInt 25), what it is worth killing.
 #
+# magic_defense is the skill as the server reads it before enchantments
+# (CreatureSkill.cs Current): (Self + Focus) / 7 rounded, the portal's
+# skill table formula for skill 15, plus the skill's init level and
+# ranks. A creature with no row still has the formula: ACE adds the skill
+# as untrained (Creature_Skills.cs:31), and it is usable untrained.
+#
 # Usage: reference/scripts/data/creatures.sh > crates/ac-world/data/creatures.csv
 set -e
 
-SQL='select w.class_Id, s.value, coalesce(max(h.current_Level), 0),
+SQL='SET SESSION max_execution_time=20000; select w.class_Id, s.value, coalesce(max(h.current_Level), 0),
   max(case when f.type=64 then round(f.value,3) end),
   max(case when f.type=65 then round(f.value,3) end),
   max(case when f.type=66 then round(f.value,3) end),
@@ -34,7 +40,13 @@ SQL='select w.class_Id, s.value, coalesce(max(h.current_Level), 0),
   max(case when f.type=70 then round(f.value,3) end),
   max(case when f.type=166 then round(f.value,3) end),
   max(case when i.type=67 then i.value end),
-  max(case when i.type=25 then i.value end)
+  max(case when i.type=25 then i.value end),
+  coalesce((select round(sum(a.init_Level + a.level_From_C_P) / 7)
+    from weenie_properties_attribute a
+    where a.object_Id = w.class_Id and a.type in (5,6)), 0)
+  + coalesce((select k.init_Level + k.level_From_P_P
+    from weenie_properties_skill k
+    where k.object_Id = w.class_Id and k.type = 15), 0)
 from weenie w
 join weenie_properties_string s
   on s.object_Id = w.class_Id and s.type = 1
@@ -52,7 +64,7 @@ cat <<'HEADER'
 # What each kind of creature takes from each element: a damage
 # multiplier, higher meaning it is hurt more. 0 is immune.
 # wcid,name,health,slash,pierce,bludgeon,cold,fire,acid,electric,nether,
-# tolerance,level
+# tolerance,level,magic_defense
 # health is how much it has at full, 0 when not recorded: what tells a
 # thing worth spending a vulnerability on from one that dies first.
 # An empty column means the creature has no figure for that element.
@@ -60,6 +72,8 @@ cat <<'HEADER'
 # it attacks whatever comes near. level is what it is worth killing,
 # empty when it has none. Between them they tell a Rabbit from a
 # Revenant, both of which stand there until they are hit.
+# magic_defense is what a spell's caster rolls against, enchantments
+# left out: (Self + Focus) / 7 plus the skill's own levels.
 # Regenerate with reference/scripts/data/creatures.sh (reads the ACE
 # world database, the community's reconstruction of retail's server
 # data; the client has no copy of its own).
@@ -68,10 +82,10 @@ HEADER
 docker exec ace-db sh -c \
   "mysql -uroot -p\"\$MYSQL_ROOT_PASSWORD\" -N --batch ace_world -e '$SQL'" \
   2>/dev/null |
-  awk -F'\t' 'NF == 13 {
+  awk -F'\t' 'NF == 14 {
     gsub(/,/, ";", $2)
-    for (i = 4; i <= 13; i++) if ($i == "NULL") $i = ""
-    printf "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n",
-      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+    for (i = 4; i <= 14; i++) if ($i == "NULL") $i = ""
+    printf "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n",
+      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
   }' |
   LC_ALL=C sort -t, -k1,1n

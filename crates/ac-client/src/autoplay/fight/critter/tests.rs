@@ -15,6 +15,7 @@ fn row(tolerance: u32, health: u32, level: Option<u32>) -> ac_world::elements::C
         takes: [None; 8],
         tolerance,
         level,
+        magic_defense: None,
     }
 }
 

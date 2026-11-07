@@ -162,6 +162,8 @@ pub struct Creature {
     pub tolerance: u32,
     /// What killing it is worth, `None` when it has no level at all.
     pub level: Option<u32>,
+    /// Magic Defense before enchantments, what a spell's caster rolls against; `None` unrecorded.
+    pub magic_defense: Option<u32>,
 }
 
 /// The flags in a creature's tolerance, which say when the server lets
@@ -233,12 +235,13 @@ fn parse_creatures(text: &str) -> Vec<Creature> {
         for slot in takes.iter_mut() {
             *slot = f.next().and_then(|v| v.trim().parse::<f32>().ok());
         }
-        // Both appended after the eight elements, so a row written
-        // before they existed still reads: no tolerance is a creature
-        // that attacks whatever comes near, and no level is one whose
-        // level nothing here knows.
+        // Appended after the eight elements, so a row written before
+        // they existed still reads: no tolerance is a creature that
+        // attacks whatever comes near, no level or magic defence one
+        // nothing here knows.
         let tolerance = f.next().and_then(|v| v.trim().parse::<u32>().ok());
         let level = f.next().and_then(|v| v.trim().parse::<u32>().ok());
+        let magic_defense = f.next().and_then(|v| v.trim().parse::<u32>().ok());
         out.push(Creature {
             wcid,
             name: name.replace(';', ","),
@@ -246,6 +249,7 @@ fn parse_creatures(text: &str) -> Vec<Creature> {
             takes,
             tolerance: tolerance.unwrap_or(0),
             level,
+            magic_defense,
         });
     }
     out.sort_by_key(|c| c.wcid);
@@ -456,6 +460,13 @@ mod tests {
         );
         // Nothing at all is not an error.
         assert!(creature("Nothing In Particular").is_none());
+    }
+
+    #[test]
+    fn a_creature_knows_the_magic_defence_a_spell_rolls_against() {
+        // Tusker Guard 1629: Self 60 and Focus 70 over 7 (19), and 225 of the skill's own.
+        let guard = creature_by_id(1629).expect("Tusker Guard is in the table");
+        assert_eq!(guard.magic_defense, Some(244));
     }
 
     #[test]
