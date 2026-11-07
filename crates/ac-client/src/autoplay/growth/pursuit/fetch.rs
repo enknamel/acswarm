@@ -1,7 +1,7 @@
-//! A pursued item fetched, not hunted: bought on a town run, picked up off the floor, or taken out
-//! of a chest, a locked one opened with its key first (UseWithTarget: `Key.cs:54-79`,
-//! `Lock.cs:119-193`), then emptied by the loot rules as a corpse is. A refusal of any act drops
-//! that source for [`PURSUIT_RETRY`], and the pursuit works the next.
+//! A pursued item fetched, not hunted: bought on a town run through its buy line in the Quests
+//! section (`section`), picked up off the floor, or taken out of a chest, a locked one opened with
+//! its key first (UseWithTarget: `Key.cs:54-79`, `Lock.cs:119-193`), then emptied by the loot rules
+//! as a corpse is. A refused act drops that source for [`PURSUIT_RETRY`]; the next is worked.
 
 use std::time::{Duration, Instant};
 
@@ -75,7 +75,7 @@ impl Ask<'_> {
                 let step = match s.kind {
                     Yield::Vendor => PursuitStep::Buy {
                         wcid,
-                        name: ware_name(s, wcid),
+                        name: ware_name(s, wcid).unwrap_or_else(|| format!("item {wcid}")),
                         vendor: s.name.clone(),
                         more,
                     },
@@ -109,13 +109,13 @@ impl Ask<'_> {
 }
 
 /// The name the shop `s` sells `wcid` under.
-fn ware_name(s: &Source, wcid: u32) -> String {
+pub(super) fn ware_name(s: &Source, wcid: u32) -> Option<String> {
     let cell = s.landblocks.first().map_or(0, |l| l.0);
     let shop = ac_world::shops::all()
         .iter()
         .find(|p| p.wcid == s.wcid && p.cell == cell);
     let ware = shop.and_then(|p| p.sells.iter().find(|w| w.wcid == wcid));
-    ware.map_or_else(|| format!("item {wcid}"), |w| w.name.clone())
+    ware.map(|w| w.name.clone())
 }
 
 /// The wanted item and the source a fetch step works.
@@ -293,20 +293,5 @@ impl Client {
                 let d = |p: &Place| p.at.distance(place.at);
                 d(&a.1).total_cmp(&d(&b.1))
             })
-    }
-
-    /// Whether the working pursuit buys at a counter: a town run makes it, town runs on or off.
-    pub(crate) fn is_pursued_buy(&self) -> bool {
-        self.pursued_buy().is_some()
-    }
-
-    /// The working pursuit's buy: the ware's name, how many, and the counter's.
-    pub(crate) fn pursued_buy(&self) -> Option<(String, u32, String)> {
-        match &self.pursuit.iter().find(|l| l.working)?.step {
-            PursuitStep::Buy {
-                name, vendor, more, ..
-            } => Some((name.clone(), *more, vendor.clone())),
-            _ => None,
-        }
     }
 }

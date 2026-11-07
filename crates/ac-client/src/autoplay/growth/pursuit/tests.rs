@@ -938,3 +938,217 @@ fn an_item_on_the_floor_beside_the_character_is_picked_up() {
     assert_eq!(c.grow_fetch(&line, Instant::now()), Some(true));
     assert!(c.loot_queue.contains(&NECKLACE), "asked to pick it up");
 }
+
+const NECKLACE_QUEST: &str = "magicitemtraining3";
+
+/// The board `work` works the pursuit out over.
+fn worked_board(facts: &QuestFacts, fake: &dyn Chains) -> Vec<QuestLine> {
+    let holds = |flag: &str| crate::quest_log::holds(facts, flag);
+    let chained = with_chain(&facts.config.pursue, &holds, fake);
+    let mut f = facts.clone();
+    f.config.pursue = chained.iter().map(|c| c.pursuit.clone()).collect();
+    quest_board(considered_rows(&f.config), &f)
+}
+
+/// The necklace sold at Abia's counter, as well as lying in its chest.
+fn necklace_sold() -> Fake {
+    let at = Place {
+        at: Vec3::new(100.0, 100.0, 0.0),
+        cell: 0xA9B4_0019,
+    };
+    Fake {
+        sources: vec![leak(necklace_from(Yield::Vendor, 9678, "Abia", at))],
+        ..necklace()
+    }
+}
+
+/// Fletch, reading a profile of its own: the starter's rules, the quest rule first, then the
+/// player's own rule and another character's quest entry in the Quests section, and a player's
+/// buy line filed there.
+fn fletch_with_a_quests_section() -> Client {
+    use crate::profile::{Ask, Buy, Mine, Rule, QUESTS};
+    let mut c = crate::testkit::offline_client();
+    c.world.stats.name = "Fletch".into();
+    let mut rules = crate::profile::Profile::starter().rules;
+    assert!(rules[0].all.contains(&Ask::Quest), "the quest rule first");
+    let own = Rule {
+        name: "my keys".into(),
+        group: QUESTS.into(),
+        all: vec![Ask::Item(crate::items::Term::Word("Key".into()))],
+        ..Default::default()
+    };
+    let brynns = Rule {
+        name: "Brynn's necklace".into(),
+        group: QUESTS.into(),
+        quest: NECKLACE_QUEST.into(),
+        all: vec![Ask::Me(Mine::Name("Brynn".into()))],
+        ..Default::default()
+    };
+    rules.insert(1, own);
+    rules.insert(2, brynns);
+    crate::testkit::with_a_profile(
+        &mut c,
+        "fletch-quests",
+        rules,
+        &[("Prismatic Taper", 100, 25)],
+    );
+    let mut p = (*c.loot_profile().expect("its profile")).clone();
+    p.buy.push(Buy {
+        what: "Mana Scarab".into(),
+        keep: 5,
+        on: true,
+        group: QUESTS.into(),
+        ..Default::default()
+    });
+    c.profiles.put(p).expect("put");
+    c
+}
+
+/// Work the pursuit out for `c` over `f` and `fake`, and keep the Quests section, as
+/// `refresh_pursuit` does.
+fn pursue(c: &mut Client, f: &QuestFacts, fake: &Fake) {
+    c.pursuit = work(f, fake, None).lines;
+    c.quest_board = worked_board(f, fake);
+    c.keep_quest_section(fake);
+}
+
+fn section(c: &Client) -> crate::profile::Profile {
+    (*c.loot_profile().expect("its profile")).clone()
+}
+
+#[test]
+fn a_pursued_quest_puts_its_items_key_and_buy_into_the_quests_section_marked_with_its_id() {
+    use crate::items::{NumKey, Op, Term};
+    use crate::profile::{Ask, Mine, QUESTS};
+    let mut c = fletch_with_a_quests_section();
+    pursue(
+        &mut c,
+        &facts(30, &[(NECKLACE_QUEST, true)]),
+        &necklace_sold(),
+    );
+    let p = section(&c);
+    let names: Vec<&str> = p.rules.iter().map(|r| r.name.as_str()).collect();
+    let added: Vec<_> = p
+        .rules
+        .iter()
+        .filter(|r| r.is_quest_entry("Fletch"))
+        .collect();
+    let wcids: Vec<(f64, Option<u32>)> = added
+        .iter()
+        .map(|r| {
+            assert_eq!(
+                (r.quest.as_str(), r.group.as_str()),
+                (NECKLACE_QUEST, QUESTS)
+            );
+            assert!(
+                r.all.contains(&Ask::Me(Mine::Name("Fletch".into()))),
+                "{r:?}"
+            );
+            let class = r.all.iter().find_map(|a| match a {
+                Ask::Item(Term::Num(NumKey::Class, Op::Eq, w)) => Some(*w),
+                _ => None,
+            });
+            (class.expect("by weenie class"), r.keep_up_to)
+        })
+        .collect();
+    // The necklace the hand-in takes, and the Smelly Key its chest asks while it is wanted.
+    assert_eq!(wcids, [(27902.0, Some(1)), (27896.0, Some(1))], "{names:?}");
+    // Filed after the section's last rule: the quest rule, the player's, Brynn's, then these.
+    assert_eq!(names[..3], ["quest items", "my keys", "Brynn's necklace"]);
+    assert!(p.rules[3].is_quest_entry("Fletch") && p.rules[4].is_quest_entry("Fletch"));
+    let buys: Vec<_> = p
+        .buy
+        .iter()
+        .filter(|b| b.is_quest_entry("Fletch"))
+        .collect();
+    assert_eq!(buys.len(), 1, "{:?}", p.buy);
+    let b = buys[0];
+    assert_eq!(
+        (b.keep, b.restock_at, b.from.as_deref(), b.quest.as_str()),
+        (1, Some(0), Some("Abia"), NECKLACE_QUEST)
+    );
+    assert_eq!(
+        p.buy.last(),
+        Some(b),
+        "after the player's own line in the section"
+    );
+    // Worked out again with nothing new, nothing is written.
+    let mut again = p.clone();
+    let (rules, buy) =
+        section::quest_entries(&c.pursuit, &c.quest_board, "Fletch", &necklace_sold());
+    assert!(!again.set_quest_entries("Fletch", rules, buy));
+}
+
+#[test]
+fn the_town_runs_needs_hold_a_pursued_quests_buy_line_urgent_at_its_counter() {
+    use super::super::needs::NeedKind;
+    let mut c = fletch_with_a_quests_section();
+    let cfg = c.autoplay.config.growth.clone();
+    let before = c.grow_needs(&cfg);
+    pursue(
+        &mut c,
+        &facts(30, &[(NECKLACE_QUEST, true)]),
+        &necklace_sold(),
+    );
+    let line = section(&c)
+        .buy
+        .into_iter()
+        .find(|b| b.is_quest_entry("Fletch"))
+        .expect("the quest's line");
+    let needs = c.grow_needs(&cfg);
+    let need = needs
+        .iter()
+        .find(|n| n.kind == NeedKind::Named(line.what.clone()))
+        .unwrap_or_else(|| panic!("{:?} not among {needs:?}", line.what));
+    assert_eq!((need.want, need.have, need.urgent), (1, 0, true));
+    assert!(need.may_buy_at("Abia") && !need.may_buy_at("Thimble"));
+    assert_eq!(
+        needs.len(),
+        before.len() + 1,
+        "nothing else is bought: {needs:?}"
+    );
+}
+
+#[test]
+fn a_quest_handed_in_or_dropped_takes_out_only_what_its_pursuit_added() {
+    let mut c = fletch_with_a_quests_section();
+    let start = section(&c);
+    let mut f = facts(30, &[(NECKLACE_QUEST, false)]);
+    pursue(&mut c, &f, &necklace_sold());
+    assert_ne!(section(&c), start);
+    // Handed in since it was asked for: done, and its entries go; the player's and Brynn's stay.
+    let hand_in = ac_world::quests::rows_of(NECKLACE_QUEST)
+        .find(|r| r.kind == Kind::Item)
+        .expect("its hand-in");
+    f.log.note_done(hand_in, NOW - 5);
+    pursue(&mut c, &f, &necklace_sold());
+    assert_eq!(c.pursuit[0].step, PursuitStep::Finished);
+    assert_eq!(section(&c), start);
+    // Pursued again and then dropped: gone again.
+    let f = facts(30, &[(NECKLACE_QUEST, true)]);
+    pursue(&mut c, &f, &necklace_sold());
+    assert_ne!(section(&c), start);
+    c.pursuit.clear();
+    c.keep_quest_section(&necklace_sold());
+    assert_eq!(section(&c), start);
+}
+
+#[test]
+fn the_necklaces_key_leaves_the_section_once_the_necklace_is_carried() {
+    let mut c = fletch_with_a_quests_section();
+    let mut f = facts(30, &[(NECKLACE_QUEST, true)]);
+    f.carried.insert(27902, 1);
+    pursue(&mut c, &f, &necklace());
+    let p = section(&c);
+    let added: Vec<&str> = p
+        .rules
+        .iter()
+        .filter(|r| r.is_quest_entry("Fletch"))
+        .map(|r| r.name.as_str())
+        .collect();
+    assert_eq!(added.len(), 1, "the necklace alone: {added:?}");
+    assert!(
+        !p.buy.iter().any(|b| b.is_quest_entry("Fletch")),
+        "no shop sells it here"
+    );
+}

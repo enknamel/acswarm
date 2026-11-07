@@ -2,6 +2,7 @@
 //! character, worked out with the board; the town run calls on givers, `grow_hunt` hunts sources.
 //! A flag a way on asks is earned first: from an unlock NPC, or by the quest stamping it, worked
 //! ahead of the one that needs it (`with_chain`). An item is fetched before it is hunted (`fetch`).
+//! What a chain needs is kept and bought only through the profile's Quests section (`section`).
 
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
@@ -18,6 +19,7 @@ use crate::quest_log::{Blocked, QuestFacts, QuestLine, QuestState, KEY_DEPTH};
 use crate::Client;
 
 mod fetch;
+mod section;
 pub(crate) use fetch::Fetching;
 
 /// A pursued quest that could not go on is passed over this long before it is tried again (guess).
@@ -41,7 +43,8 @@ pub enum PursuitStep {
         place: String,
         more: u32,
     },
-    /// Buy `name` (weenie class `wcid`) at `vendor`'s counter on a town run, `more` to go.
+    /// Buy `name` (weenie class `wcid`) at `vendor`'s counter, `more` to go: a town run buys it by
+    /// its line in the Quests section, as any line of the buy list.
     Buy {
         wcid: u32,
         name: String,
@@ -572,6 +575,7 @@ impl Client {
             self.pursuit.clear();
             st.pursuit_grounds.clear();
             st.pursuit_sought.clear();
+            self.keep_quest_section(&ChainData);
             return;
         }
         let st = &self.autoplay.growth;
@@ -615,6 +619,7 @@ impl Client {
         let st = &mut self.autoplay.growth;
         st.pursuit_grounds = pursued.grounds;
         st.pursuit_sought = pursued.sought;
+        self.keep_quest_section(&ChainData);
     }
 
     /// The working pursued quest, if one can go on.
