@@ -223,3 +223,34 @@ fn magic_yield_goes_first_only_when_it_saves_casts() {
         .expect("a kill");
     assert_eq!(kill.magic_yield, None, "{kill:?}");
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_lower_vulnerability_that_lands_surer_is_cast_when_it_kills_faster() {
+    let names = [
+        "Flame Bolt VI",
+        "Fire Vulnerability Other V",
+        "Fire Vulnerability Other VI",
+    ];
+    let skilled = |c: &mut crate::Client, life: u32| {
+        crate::testkit::trained_in(c, 33, life);
+        crate::testkit::trained_in(c, 34, 282);
+    };
+    // Life and War Magic 282, as Blargerton's: VI (power 275) casts 62% of the time and is resisted on top,
+    // so V (225), x2 instead of x2.5 but nearly always cast, kills a Tusker Guard sooner.
+    let (mut c, ids) = at_a_tusker_guard(&names);
+    skilled(&mut c, 282);
+    let cfg = c.autoplay.config.fight.clone();
+    let kill = c
+        .best_kill(0x8000_0103, &cfg, Instant::now())
+        .expect("a kill");
+    let ways = c.kills_said(0x8000_0103, &cfg, 8);
+    assert_eq!(kill.vuln.map(|(_, id, ..)| id), Some(ids[1]), "{ways}");
+    // With skill to spare VI casts as surely, and its x2.5 wins.
+    let (mut c, ids) = at_a_tusker_guard(&names);
+    skilled(&mut c, 400);
+    let kill = c
+        .best_kill(0x8000_0103, &cfg, Instant::now())
+        .expect("a kill");
+    assert_eq!(kill.vuln.map(|(_, id, ..)| id), Some(ids[2]), "{kill:?}");
+}

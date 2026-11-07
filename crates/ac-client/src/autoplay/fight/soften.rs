@@ -94,10 +94,12 @@ impl Client {
             .collect()
     }
 
-    /// Of `ids`, the strongest this character knows, can cast well, and
-    /// that takes a target. Levels come from power, never from names.
-    pub(crate) fn strongest_castable(&self, ids: &[u32]) -> Option<u32> {
-        let table = self.assets.spell_table().ok()?;
+    /// Of `ids`, every level this character knows, can cast well and that takes a target, strongest
+    /// first, less those a stronger one casts at least as surely (one school, so one resist roll).
+    pub(crate) fn castable_levels(&self, ids: &[u32]) -> Vec<u32> {
+        let Ok(table) = self.assets.spell_table() else {
+            return Vec::new();
+        };
         let mut known: Vec<(u32, u32)> = ids
             .iter()
             .copied()
@@ -109,19 +111,29 @@ impl Client {
                     .map(|s| (id, s.power))
             })
             .collect();
-        // Strongest first, so the packs are walked for components only until one will do.
         known.sort_by_key(|(_, power)| std::cmp::Reverse(*power));
-        known.into_iter().map(|(id, _)| id).find(|id| {
-            matches!(
-                self.can_cast_well(*id),
+        let mut levels = Vec::new();
+        let mut surest = 0.0f32;
+        for (id, _) in known {
+            let chance = self.cast_chance(id);
+            // Weaker and no surer than one already kept: it never kills faster.
+            if chance <= surest {
+                continue;
+            }
+            if matches!(
+                self.can_cast_well(id),
                 crate::magic::CastCheck::Ok | crate::magic::CastCheck::NoCaster
-            )
-        })
+            ) {
+                levels.push(id);
+                surest = chance;
+            }
+        }
+        levels
     }
 
-    /// The strongest vulnerability for `e` known, and whether it can be cast well: its chance and
-    /// multiplier, or what stops it (`cast_problem`); or that none is known.
-    fn vuln_standing(&self, e: Element) -> String {
+    /// The strongest vulnerability for `e` known, and whether it can be cast well: its chance on
+    /// `guid` (fizzle and resist) and multiplier, or what stops it (`cast_problem`); or none known.
+    fn vuln_standing(&self, e: Element, guid: u32) -> String {
         let table = self.assets.spell_table().ok();
         let spell = |id: u32| table.as_ref().and_then(|t| t.get(id));
         let strongest = crate::weapons::vulnerability_spells(e)
@@ -133,7 +145,12 @@ impl Client {
             return format!("no {} vulnerability known", e.name());
         };
         let name = spell(id).map(|s| s.name.clone()).unwrap_or_default();
-        let chance = self.cast_chance(id) * 100.0;
+        let defence = self
+            .creature_known(guid)
+            .and_then(|c| c.magic_defense)
+            .map(|d| (d as f32 - self.autoplay.yielded_by(guid)).max(0.0));
+        let unresisted = crate::autoplay::fight::kill::unresisted(self.casting_skill(id), defence);
+        let chance = self.cast_chance(id) * unresisted * 100.0;
         match self.can_cast_well(id) {
             crate::magic::CastCheck::Ok => format!(
                 "{name} (x{}, lands {chance:.0}%)",
@@ -178,7 +195,7 @@ impl Client {
         }
         let standing: Vec<String> = elements
             .into_iter()
-            .map(|e| format!("{}: {}", e.name(), self.vuln_standing(e)))
+            .map(|e| format!("{}: {}", e.name(), self.vuln_standing(e, guid)))
             .collect();
         let chosen = kill.said(|id| self.spell(id).map(|s| s.name).unwrap_or_default());
         self.autoplay.note(
