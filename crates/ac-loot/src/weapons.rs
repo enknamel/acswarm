@@ -555,6 +555,7 @@ mod tests {
             tolerance: 0,
             level: None,
             magic_defense: None,
+            tier: 0,
             takes: [
                 Some(0.6),
                 Some(1.0),
@@ -744,6 +745,7 @@ mod tests {
             tolerance: 0,
             level: None,
             magic_defense: None,
+            tier: 0,
             takes: [Some(1.0); 8],
         };
         assert!(score(&crit, Some(&tough), &able()) > score(&plain, Some(&tough), &able()));
@@ -976,6 +978,7 @@ mod tests {
             tolerance: 0,
             level: None,
             magic_defense: None,
+            tier: 0,
             // Weakest to fire.
             takes: [
                 Some(0.5),

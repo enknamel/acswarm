@@ -27,6 +27,10 @@
 # ranks. A creature with no row still has the formula: ACE adds the skill
 # as untrained (Creature_Skills.cs:31), and it is usable untrained.
 #
+# tier is the loot tier of what it drops: its DeathTreasureType (DID 35)
+# looked up in treasure_death. The game's own measure of how hard a kind
+# of creature is, where its level is a number anyone could set.
+#
 # Usage: reference/scripts/data/creatures.sh > crates/ac-world/data/creatures.csv
 set -e
 
@@ -46,7 +50,10 @@ SQL='SET SESSION max_execution_time=20000; select w.class_Id, s.value, coalesce(
     where a.object_Id = w.class_Id and a.type in (5,6)), 0)
   + coalesce((select k.init_Level + k.level_From_P_P
     from weenie_properties_skill k
-    where k.object_Id = w.class_Id and k.type = 15), 0)
+    where k.object_Id = w.class_Id and k.type = 15), 0),
+  coalesce((select max(t.tier) from weenie_properties_d_i_d d
+    join treasure_death t on t.treasure_Type = d.value
+    where d.object_Id = w.class_Id and d.type = 35), 0)
 from weenie w
 join weenie_properties_string s
   on s.object_Id = w.class_Id and s.type = 1
@@ -64,7 +71,7 @@ cat <<'HEADER'
 # What each kind of creature takes from each element: a damage
 # multiplier, higher meaning it is hurt more. 0 is immune.
 # wcid,name,health,slash,pierce,bludgeon,cold,fire,acid,electric,nether,
-# tolerance,level,magic_defense
+# tolerance,level,magic_defense,tier
 # health is how much it has at full, 0 when not recorded: what tells a
 # thing worth spending a vulnerability on from one that dies first.
 # An empty column means the creature has no figure for that element.
@@ -73,7 +80,8 @@ cat <<'HEADER'
 # empty when it has none. Between them they tell a Rabbit from a
 # Revenant, both of which stand there until they are hit.
 # magic_defense is what a spell's caster rolls against, enchantments
-# left out: (Self + Focus) / 7 plus the skill's own levels.
+# left out: (Self + Focus) / 7 plus the skill's own levels. tier is its
+# loot tier (1-8), 0 when it drops no treasure.
 # Regenerate with reference/scripts/data/creatures.sh (reads the ACE
 # world database, the community's reconstruction of retail's server
 # data; the client has no copy of its own).
@@ -82,10 +90,10 @@ HEADER
 docker exec ace-db sh -c \
   "mysql -uroot -p\"\$MYSQL_ROOT_PASSWORD\" -N --batch ace_world -e '$SQL'" \
   2>/dev/null |
-  awk -F'\t' 'NF == 14 {
+  awk -F'\t' 'NF == 15 {
     gsub(/,/, ";", $2)
-    for (i = 4; i <= 14; i++) if ($i == "NULL") $i = ""
-    printf "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n",
-      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+    for (i = 4; i <= 15; i++) if ($i == "NULL") $i = ""
+    printf "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n",
+      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
   }' |
   LC_ALL=C sort -t, -k1,1n

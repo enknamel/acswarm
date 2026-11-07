@@ -164,6 +164,8 @@ pub struct Creature {
     pub level: Option<u32>,
     /// Magic Defense before enchantments, what a spell's caster rolls against; `None` unrecorded.
     pub magic_defense: Option<u32>,
+    /// Loot tier (1-8) of what it drops, the game's measure of how hard it is; 0 for none.
+    pub tier: u32,
 }
 
 /// The flags in a creature's tolerance, which say when the server lets
@@ -242,6 +244,7 @@ fn parse_creatures(text: &str) -> Vec<Creature> {
         let tolerance = f.next().and_then(|v| v.trim().parse::<u32>().ok());
         let level = f.next().and_then(|v| v.trim().parse::<u32>().ok());
         let magic_defense = f.next().and_then(|v| v.trim().parse::<u32>().ok());
+        let tier = f.next().and_then(|v| v.trim().parse::<u32>().ok());
         out.push(Creature {
             wcid,
             name: name.replace(';', ","),
@@ -250,6 +253,7 @@ fn parse_creatures(text: &str) -> Vec<Creature> {
             tolerance: tolerance.unwrap_or(0),
             level,
             magic_defense,
+            tier: tier.unwrap_or(0),
         });
     }
     out.sort_by_key(|c| c.wcid);
@@ -467,6 +471,9 @@ mod tests {
         // Tusker Guard 1629: Self 60 and Focus 70 over 7 (19), and 225 of the skill's own.
         let guard = creature_by_id(1629).expect("Tusker Guard is in the table");
         assert_eq!(guard.magic_defense, Some(244));
+        // DeathTreasureType 448, tier 4; a Tumerok Lieutenant (11895) drops tier 2.
+        assert_eq!(guard.tier, 4);
+        assert_eq!(creature_by_id(11895).map(|c| c.tier), Some(2));
     }
 
     #[test]
