@@ -82,3 +82,32 @@ fn one_not_ready_or_of_unknown_level_waits() {
     let fallback = essence(3, Element::Bludgeon, 50);
     assert_eq!(choose(&[cooling, unknown, fallback], 200, |_| 1.0), Some(3));
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn an_essence_used_holds_the_next_cast_until_it_is_answered() {
+    // Blargerton used a Sandstone Golem Essence and cast a vulnerability 19 ms later: the
+    // essence's UseDone freed the slot, a bolt went up mid-cast, and the vuln's resist was missed.
+    let holtburg = 0xA9B4_0019;
+    let mut c = crate::testkit::standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
+    crate::testkit::with_a_pack(&mut c, 50);
+    crate::testkit::trained_in(&mut c, ac_world::stats::skill::SUMMONING, 400);
+    c.autoplay.config.fight.enabled = true;
+    c.autoplay.config.fight.summon = true;
+    let foe = crate::testkit::standing_by(&mut c, 0x8000_0103, "Tusker Guard", 8.0);
+    c.autoplay.casting_at = Some(foe.guid);
+    crate::testkit::thing_in_the_pack(&mut c, 0x8000_0200, "Sandstone Golem Essence", 1);
+    if let Some(o) = c.world.objects.get_mut(&0x8000_0200) {
+        o.max_structure = 50;
+        o.structure = 50;
+    }
+    let now = Instant::now();
+    assert!(!c.autoplay.cast_in_flight(now));
+    assert!(c.autoplay_summon(now), "{}", c.autoplay.status);
+    assert!(
+        c.autoplay.cast_in_flight(now),
+        "the next cast waits on the essence's answer"
+    );
+    c.autoplay.cast_answered();
+    assert!(!c.autoplay.cast_in_flight(now));
+}

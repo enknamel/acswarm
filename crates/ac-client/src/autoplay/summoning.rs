@@ -345,6 +345,13 @@ impl Client {
         self.interact(guid);
         self.autoplay.summoning.used.mark(key, now);
         self.autoplay.summoning.pending = Some((guid, now));
+        // The use holds the slot a cast would, and its UseDone frees it: a vuln sent 19 ms after
+        // an essence took that answer for its own, a bolt followed mid-cast, and the vuln's resist
+        // went unheard (test: an_essence_used_holds_the_next_cast_until_it_is_answered).
+        self.autoplay.cast_sent = Some(now);
+        // As a cast does (`cast_paced`): a refusal of this use is not a debuff's to re-arm.
+        self.autoplay.debuff_sent = None;
+        self.autoplay.yield_sent = None;
         self.autoplay
             .say(Doing::Fighting, format!("summoning with {name}"));
         true
