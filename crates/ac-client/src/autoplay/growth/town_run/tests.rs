@@ -118,6 +118,29 @@ fn loot_for_a_counter_alone_never_sends_a_roomy_pack_to_town() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
+fn a_pack_full_of_what_it_keeps_is_no_reason_to_go_to_town() {
+    // The user's rule: sell when there is something to sell, buy when something is needed.
+    // Blargerton's pack filled with scrolls and armour the profile keeps; every corpse put it back
+    // under the line and he went to town for one 399-pyreal thing, or for nothing.
+    let holtburg = 0xA9B4_0019;
+    let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
+    c.world.stats.level = 20;
+    let keep = c.autoplay.config.team.restock.money_slots;
+    with_a_pack(&mut c, 4 + keep);
+    for guid in 0x8000_0010..0x8000_0014 {
+        crate::testkit::thing_in_the_pack(&mut c, guid, "Pathwarden Helm", 1);
+    }
+    let cfg = c.autoplay.config.growth.clone();
+    assert!(c.pack_low_on_room());
+    assert!(
+        !c.grow_town_run(Instant::now(), &cfg),
+        "went to town to sell nothing"
+    );
+    assert!(c.autoplay.growth.run.is_none());
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn an_urgent_need_comes_before_the_loot_and_the_loot_is_sold_on_the_way() {
     // An archer out of arrows with an armful of cheap peas. Ranked
     // for the sale first, the run went to the archmage and the

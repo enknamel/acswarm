@@ -441,9 +441,11 @@ impl Client {
         if self.autoplay.growth.next_run.is_some_and(|t| now < t) {
             return self.held_back("waiting to try a vendor again");
         }
+        // Loot for a counter: what a full or laden pack is sold of, and the only reason either is.
+        let salables = self.salables(cfg);
         // Low on room, not out of it: a run that waited for the last slot
-        // arrived with nowhere for the money to go.
-        let full = self.pack_low_on_room();
+        // arrived with nowhere for the money to go. Full of what it keeps, a counter cannot help.
+        let full = self.pack_low_on_room() && !salables.is_empty();
         if self.room_anywhere() == 0 {
             // No counter anywhere can pay out into a pack with no slot, and
             // buying needs one too: walking to one achieves nothing.
@@ -467,10 +469,8 @@ impl Client {
         // limit: a counter cannot lighten that, and counting it sent a
         // character whose own gear filled the limit off to sell with
         // nothing to sell.
-        let laden = self.laden(cfg);
+        let laden = self.laden(cfg) && !salables.is_empty();
         let needs = self.needs_now(now, cfg);
-        // Loot for a counter is sold on a run made for one of those reasons, never a run of its own.
-        let salables = self.salables(cfg);
         // On a team that restocks together, the party's mode decides:
         // one character does not walk off to a vendor while the rest
         // are fighting, and none of them stays behind when the party
