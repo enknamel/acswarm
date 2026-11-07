@@ -376,9 +376,12 @@ impl Client {
     /// Whether a fight is on: something alive being attacked within the
     /// fight radius, or something hitting the character.
     pub(crate) fn in_a_fight(&self) -> bool {
-        if self.under_attack() {
-            return true;
-        }
+        self.under_attack() || self.fight_in_hand()
+    }
+
+    /// Whether the creature being fought is alive within the fight radius: what a due town run
+    /// or quest call waits out. Not what hits us: where spawns outpace kills that never ends.
+    pub(crate) fn fight_in_hand(&self) -> bool {
         let Some(me) = self.my_position() else {
             return false;
         };

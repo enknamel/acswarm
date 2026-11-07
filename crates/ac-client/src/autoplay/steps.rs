@@ -196,7 +196,8 @@ fn worth_town_run(client: &Client, now: Instant) -> f32 {
     if growth.town_run_under_way() {
         return RUN_UNDER_WAY;
     }
-    if client.in_a_fight() {
+    // The creature in hand is finished, then the run goes: what else is hitting us is walked past.
+    if client.fight_in_hand() {
         return 0.0;
     }
     town_run_worth(worth_looting(client, now))

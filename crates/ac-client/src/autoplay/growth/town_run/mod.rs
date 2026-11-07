@@ -395,7 +395,7 @@ impl Client {
         // script's) holds a run back: a walk to a ground is dropped for it (test:
         // a_due_run_leaves_the_walk_to_a_ground_for_town).
         let own_walk = self.autoplay.growth.bound.is_some() || self.travel_about_the_ground();
-        if self.in_a_fight() {
+        if self.fight_in_hand() {
             return self.held_back("in a fight");
         }
         if self.traveling() && !own_walk {

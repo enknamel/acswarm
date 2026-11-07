@@ -278,6 +278,11 @@ fn a_town_run_gives_way_to_a_fight_in_hand() {
     c.attack_target = Some(it.guid);
     assert_eq!(row.worth(&c, now), 0.0, "the fight is finished first");
     c.attack_target = None;
+    // Hit by the next one before the run sets off: where spawns outpace kills that never ends,
+    // and Blargerton stood among the Tusker Guards with the quest done. The run goes.
+    c.autoplay.attacked_by("Tusker Guard", Instant::now());
+    assert!(c.under_attack());
+    assert_eq!(row.worth(&c, now), TOWN_RUN, "what hits us is walked past");
     c.autoplay.config.growth.town_runs = false;
     assert_eq!(row.worth(&c, now), 0.0, "town runs off");
 }

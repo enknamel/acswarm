@@ -448,7 +448,11 @@ fn a_run_under_way_walks_on_while_hit() {
     let row = crate::autoplay::steps::named("town run").expect("row");
     c.autoplay.last_hit_us = Some(now);
     assert!(c.in_a_fight(), "hit");
-    assert_eq!(row.worth(&c, now), 0.0, "no new run in a fight");
+    // Hit with nothing in hand, a run sets off too: spawns can outpace kills.
+    assert!(
+        row.worth(&c, now) > 0.0,
+        "a new run is not held by what hits us"
+    );
     c.autoplay.growth.run = Some(run_to(Vec2::new(32_500.0, 34_500.0), now));
     assert!(row.worth(&c, now) > 0.0, "the run under way walks on");
 }
