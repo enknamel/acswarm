@@ -148,9 +148,9 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
   by drawn polygons. Server-placed objects never stall a walk; `cylinders()` only steers round them.
 - Doors are walked through, never used: `in_the_way()` never counts a door, explore aims past the
   sill (`past_the_door()`), and the Academy uses only a task's key on one.
-- Peas are components in the data (`spell_component_ids()`): never key restock or sale on "is a
-  component". Only the profile's buy list is bought, and a pursued quest's item at its counter
-  (`grow_needs`); the sale keeps what spells burn (`burns()`), a pea tagged Sell sold (`offer_to_vendor()`).
+- Peas are components in the data: `spell_component_ids()` maps trade peas to spell-component ids,
+  so never key restock or sale on "is a component". Only the profile's buy list is bought (`grow_needs`);
+  the sale guard keeps what cast spells burn (`burns()`), and a pea tagged Sell is sold (`offer_to_vendor()`).
 - The loot profile decides: `fate()` puts a tag ahead of every guard (restock, burns, keep names);
   only the server's own refusal overrides it.
 - One target picker. Swing, shot and spell all call `pick_target()`: the nearest of what
