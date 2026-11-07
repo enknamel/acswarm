@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use glam::Vec2;
 
-use super::vendor::{counter_place, spot};
+use super::vendor::{counter_place, shop_place, spot};
 use super::{
     Errand, Phase, Run, Turn, BUSY_ASKS, BUSY_REASK, COUNTER_REACH, DESCRIBED_WITHIN,
     SELLING_TIMEOUT, SETTLE, VENDOR_OPEN_TIMEOUT, VENDOR_REACH,
@@ -278,6 +278,27 @@ impl Client {
                         Turn::Acted
                     }
                     None => {
+                        // The server describes only what the cell stood in sees (ACE
+                        // `ObjectMaint.cs:345`): the counter's own spot is walked to before it is missed.
+                        let listed = shop_place(run.at).filter(|p| {
+                            self.my_position()
+                                .is_some_and(|me3| p.at.distance(me3) > COUNTER_REACH)
+                        });
+                        if let Some(listed) = listed.filter(|_| !self.traveling()) {
+                            let goal = Goal::At {
+                                place: listed,
+                                within: COUNTER_REACH / 2.0,
+                            };
+                            if self.go(self.step_owner(), goal, now).acting() {
+                                run.looked_from = None;
+                                self.autoplay.say(
+                                    Doing::Shopping,
+                                    format!("walking to where {} stands", run.vendor),
+                                );
+                                self.autoplay.growth.run = Some(run);
+                                return Turn::Acted;
+                            }
+                        }
                         // Still on the journey's last walk in, or just out of a portal with the
                         // landing not yet described: looked for again, not given up on.
                         let looked = *run.looked_from.get_or_insert(now);

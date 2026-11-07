@@ -924,3 +924,61 @@ fn a_counter_not_yet_seen_on_arrival_is_waited_for_before_it_is_not_here() {
         .is_none_or(|r| r.vendor != "Archmage Philomon");
     assert!(gone, "waited for ever for a counter that is not there");
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_counter_out_of_sight_is_walked_to_and_no_other_vendor_stands_in() {
+    // Martine's Retreat: the journey stops 35 m from Sialla Jiro, out of the server's sight, with
+    // Ichi Ji described 8 m off behind his own counter. The run walked up to Ichi Ji and gave up.
+    use glam::Vec3;
+    let o = ac_world::landblock_origin(0x5660_0000);
+    let mut c = crate::testkit::standing_in_the_field(
+        50,
+        0x5660_0167,
+        Vec3::new(16_631.414, 18_412.508, 0.0) - o,
+    );
+    let (ichi, sialla) = (0x7566_000D, 0x7566_000E);
+    let vendor = |guid: u32, name: &str, cell: u32, local: Vec3| {
+        let mut v = crate::testkit::creature(guid, name);
+        v.object_desc_flags = ac_world::object_desc_flags::VENDOR;
+        v.position = Some(ac_world::object::Position::new_flat(cell, local));
+        v
+    };
+    let ichi_ji = vendor(ichi, "Ichi Ji", 0x5660_0176, Vec3::new(127.3, -27.5, 0.0));
+    c.world.objects.insert(ichi, ichi_ji);
+    let at = o + Vec3::new(87.2, -32.7, 0.0);
+    let t0 = Instant::now();
+    let mut run = crate::autoplay::growth::tests::run_to(at.truncate(), t0);
+    run.vendor = "Sialla Jiro".into();
+    c.autoplay.growth.run = Some(run);
+    let cfg = crate::autoplay::growth::Growth::default();
+    let dt = 0.05;
+    for frame in 0..(60.0 / dt) as u32 {
+        let now = t0 + Duration::from_secs_f32(frame as f32 * dt);
+        let me = c.my_position().unwrap();
+        // The server describes her once her cell is in sight: here, once near.
+        if me.distance(at) < 15.0 && !c.world.objects.contains_key(&sialla) {
+            let her = vendor(sialla, "Sialla Jiro", 0x5660_0156, at - o);
+            c.world.objects.insert(sialla, her);
+        }
+        if frame % 6 == 0 {
+            c.grow_town_run(now, &cfg);
+        }
+        c.tick_player(crate::player::Input::default(), dt, now);
+        if let Some(used) = c.last_used {
+            assert_eq!(used, sialla, "asked another counter");
+            return;
+        }
+        assert!(
+            c.autoplay.growth.run.is_some(),
+            "the run ended: {}",
+            c.autoplay.status
+        );
+    }
+    let me = c.my_position().unwrap();
+    panic!(
+        "never got to her: {:.1} m off; {}",
+        me.distance(at),
+        c.autoplay.status
+    );
+}

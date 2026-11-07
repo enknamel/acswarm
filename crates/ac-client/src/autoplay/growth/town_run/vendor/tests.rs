@@ -350,8 +350,8 @@ fn the_counter_named_is_asked_even_with_another_vendor_nearer() {
         .insert(2, vendor(2, "Boddry the Chancy", 96.0));
     let at = ac_world::landblock_origin(0xA9B2_0001).truncate() + glam::Vec2::new(90.6, 90.0);
     assert_eq!(c.vendor_object("Boddry the Chancy", at), Some(2));
-    // With nobody by that name about, the nearest vendor still answers.
-    assert_eq!(c.vendor_object("Gone Missing", at), Some(1));
+    // With nobody by that name about, no other vendor stands in.
+    assert_eq!(c.vendor_object("Gone Missing", at), None);
 }
 
 #[test]

@@ -45,10 +45,15 @@ fn gem_ways(gems: &[ac_world::trip::Gem]) -> Vec<(Vec2, String)> {
 
 /// Where the counter at `at` stands: its shop's own place (`shops`), else the map point.
 pub(super) fn counter_place(at: Vec2) -> ac_world::Place {
+    shop_place(at).unwrap_or(ac_world::Place::on_map(at))
+}
+
+/// The place, height and cell, of the shop listed at `at`; `None` when none is.
+pub(super) fn shop_place(at: Vec2) -> Option<ac_world::Place> {
     ac_world::shops::all()
         .iter()
         .find(|s| s.xy().distance(at) < 1.0)
-        .map_or(ac_world::Place::on_map(at), |s| ac_world::Place {
+        .map(|s| ac_world::Place {
             at: s.at,
             cell: s.cell,
         })
@@ -615,33 +620,26 @@ impl Client {
             .unwrap_or(0)
     }
 
-    /// The vendor object nearest `at`, by name when one matches.
+    /// The vendor called `name` nearest `at`; never another vendor in its stead, who may be one
+    /// the server described first and stand behind a counter of its own (`ObjectMaint.cs:345`).
     pub(super) fn vendor_object(&self, name: &str, at: Vec2) -> Option<u32> {
-        let vendors: Vec<(f32, bool, u32)> = self
-            .world
+        self.world
             .objects
             .values()
             .filter(|o| {
-                o.object_desc_flags & object_desc_flags::VENDOR != 0
-                    || (o.item_type & item_type::CREATURE != 0
-                        && o.object_desc_flags & object_desc_flags::ATTACKABLE == 0
-                        && !o.is_player
-                        && o.name == name)
+                o.name == name
+                    && (o.object_desc_flags & object_desc_flags::VENDOR != 0
+                        || (o.item_type & item_type::CREATURE != 0
+                            && o.object_desc_flags & object_desc_flags::ATTACKABLE == 0
+                            && !o.is_player))
             })
             .filter_map(|o| {
                 let p = o.world_pos()?;
                 let d = Vec2::new(p.x, p.y).distance(at);
-                (d <= VENDOR_REACH + 10.0).then_some((d, o.name == name, o.guid))
+                (d <= VENDOR_REACH + 10.0).then_some((d, o.guid))
             })
-            .collect();
-        let nearest = |named_only: bool| {
-            vendors
-                .iter()
-                .filter(|(_, named, _)| *named || !named_only)
-                .min_by(|a, b| a.0.total_cmp(&b.0))
-                .map(|(_, _, g)| *g)
-        };
-        nearest(true).or_else(|| nearest(false))
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+            .map(|(_, g)| g)
     }
 }
 
