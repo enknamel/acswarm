@@ -152,7 +152,7 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
   so never key restock or sale on "is a component". Only the profile's buy list is bought (`grow_needs`);
   the sale guard keeps what cast spells burn (`burns()`), and a pea tagged Sell is sold (`offer_to_vendor()`).
 - The loot profile decides: `fate()` puts a tag ahead of every guard (restock, burns, keep names);
-  only the server's own refusal overrides it.
+  only the server's refusal overrides it. Quests keep and buy via its Quests section (`keep_quest_section()`).
 - One target picker. Swing, shot and spell all call `pick_target()`: the nearest of what
   `would_fight()` allows inside `cfg.radius`, within the leader's `team.fight_radius` while following
   one (not in the academy) unless it is hitting the character (`hit_lately_by()`), and preferring one
