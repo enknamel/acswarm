@@ -14,7 +14,9 @@
 # off, divided by the creature's weakest resistance (health is the
 # Health vital plus half of Endurance, as the vital formula has it),
 # both weighted by how many each generator keeps up (max_Create, the
-# product down a chain of generators).
+# product down a chain of generators). tier is the highest loot tier
+# among them (DeathTreasureType, DID 35, in treasure_death): how hard the
+# worst of what spawns there is, by the game's own measure.
 #
 # An outdoor row ("o") is the open ground of a landblock: x/y are the
 # average spawn point. A dungeon row ("d") is a landblock with nothing
@@ -27,7 +29,7 @@
 # Usage: reference/scripts/data/hunting.sh > crates/ac-world/data/hunting.csv
 set -e
 
-SQL='with recursive spawn(inst, wcid, depth, n) as (
+SQL='SET SESSION max_execution_time=20000; with recursive spawn(inst, wcid, depth, n) as (
   select li.guid, li.weenie_Class_Id, 0, 1 from landblock_instance li
   union all
   select s.inst, g.weenie_Class_Id, s.depth + 1, s.n * greatest(g.max_Create, 1) from spawn s
@@ -66,7 +68,10 @@ worth as (
     / greatest(
         coalesce((select max(value) from weenie_properties_float where object_Id = w.class_Id and type between 64 and 70), 1),
         if((select count(*) from weenie_properties_float where object_Id = w.class_Id and type between 64 and 70) < 7, 1, 0),
-        0.1) hp
+        0.1) hp,
+    coalesce((select max(t.tier) from weenie_properties_d_i_d d
+      join treasure_death t on t.treasure_Type = d.value
+      where d.object_Id = w.class_Id and d.type = 35), 0) tier
   from weenie w where w.class_Id in (select distinct wcid from kept)
 ),
 bynm as (select lb, kind, nm, lv, count(*) n from kept group by lb, kind, nm, lv)
@@ -75,14 +80,14 @@ select hex(m.lb), round(avg(m.x), 0), round(avg(m.y), 0), count(*),
   (select b.lv from bynm b where b.lb = m.lb and b.kind = m.kind order by b.n desc, b.lv, b.nm limit 1),
   (select b.nm from bynm b where b.lb = m.lb and b.kind = m.kind order by b.n desc, b.lv, b.nm limit 1),
   round(sum(w.xp * m.n) / sum(m.n), 0), greatest(round(sum(w.hp * m.n) / sum(m.n), 0), 1),
-  sum(m.n), m.kind
+  sum(m.n), m.kind, max(w.tier)
 from kept m join worth w on w.wcid = m.wcid
 group by m.lb, m.kind
 having m.kind = "o" or (sum(m.n) >= 10 and sum(w.xp * m.n) > 0);'
 
 cat <<'HEADER'
 # Hunting grounds of Dereth: the landblocks where monsters spawn.
-# landblock,x,y,count,min_level,max_level,level,name,xp,health,creatures,kind
+# landblock,x,y,count,min_level,max_level,level,name,xp,health,creatures,kind,tier
 # The landblock is hex; x/y are the average spawn point, local to it.
 # count is the number of spawn entries, min/max the level range among
 # them, and level/name the creature that spawns most often there. xp
@@ -90,6 +95,7 @@ cat <<'HEADER'
 # (over the weakest resistance), creatures how many the generators keep
 # up at once (their max spawns). kind is o for open ground, d for a
 # dungeon (a landblock with nothing outdoors; its way in is a portal).
+# tier is the highest loot tier of anything that spawns there, 0 none.
 # Regenerate with reference/scripts/data/hunting.sh (reads the ACE
 # world database, the community's reconstruction of retail's server
 # data; the client has no copy of its own).
@@ -98,8 +104,8 @@ HEADER
 docker exec ace-db sh -c \
   "mysql -uroot -p\"\$MYSQL_ROOT_PASSWORD\" -N --batch ace_world -e '$SQL'" \
   2>/dev/null |
-  awk -F'\t' 'NF == 12 {
+  awk -F'\t' 'NF == 13 {
     gsub(/,/, ";", $8)
-    printf "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n", $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+    printf "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n", $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
   }' |
   LC_ALL=C sort -t, -k1,1

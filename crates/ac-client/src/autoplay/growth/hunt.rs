@@ -474,12 +474,10 @@ impl Client {
         if self.visiting().is_some() {
             return true;
         }
-        let Some((g, earn)) = self.best_ground(level as u32, cfg.level_margin, &skip, now) else {
+        let Some((g, earn)) = self.best_ground(level as u32, &skip, now) else {
+            let tier = self.proven_tier() + 1;
             self.autoplay.note(
-                format!(
-                    "no hunting ground suits level {level} within {} levels",
-                    cfg.level_margin
-                ),
+                format!("no hunting ground it can kill in, up to loot tier {tier}"),
                 now,
             );
             self.autoplay.growth.quiet_since = Some(now);
@@ -531,12 +529,13 @@ impl Client {
 }
 
 impl Client {
-    /// The best-paying ground for `level` a journey reaches, quests' XP added: a journey is short
-    /// and a stay long, so the time there buys nothing (a_better_ground_further_off_is_chosen).
+    /// The best-paying ground a journey reaches, quests' XP added: a journey is short and a stay
+    /// long, so the time there buys nothing (a_better_ground_further_off_is_chosen). No level
+    /// decides it: survived is up to a loot tier past the highest killed (`proven_tier`), and a
+    /// caster's pay is XP per cast by its own fastest kill there (a_mage_hunts_where_it_kills_fastest).
     fn best_ground(
         &mut self,
         level: u32,
-        margin: u32,
         skip: &[u32],
         now: Instant,
     ) -> Option<(
@@ -550,7 +549,42 @@ impl Client {
             .and_then(|t| t.xp_to_next_level(level))
             .unwrap_or(0);
         let pay = quest_pay(&self.quest_board, &self.quest_wants_left(), level, to_next);
-        let ranked = ac_world::hunting::ranked_with(level, margin, skip, |g| ground_bonus(&pay, g));
+        let survived = self.proven_tier() + 1;
+        let fight = crate::autoplay::Fight {
+            pick_weapon: false,
+            ..self.autoplay.config.fight.clone()
+        };
+        let caster = !self.hits_with_weapons();
+        let ready: Vec<u32> = if caster {
+            self.ready_spells(&fight)
+                .into_iter()
+                .map(|(id, _)| id)
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let wands = self.wands_to_hand(&fight);
+        let worth = |g: &ac_world::hunting::Ground| {
+            if g.tier().is_none_or(|t| t > survived) {
+                return 0.0;
+            }
+            let xp = g.xp as f32 + ground_bonus(&pay, g);
+            if !caster {
+                return g.worth_with(ground_bonus(&pay, g));
+            }
+            ac_world::elements::creature(&g.name)
+                .and_then(|c| self.casts_on_kind(c, &ready, &wands))
+                .filter(|casts| casts.is_finite() && *casts > 0.0)
+                .map_or(0.0, |casts| xp / casts * g.busy())
+        };
+        // Worked out once a ground, before the search asks the journey planner of the best few.
+        let worths: std::collections::HashMap<u32, f32> = ac_world::hunting::all()
+            .iter()
+            .map(|g| (g.landblock, worth(g)))
+            .collect();
+        let worth =
+            |g: &ac_world::hunting::Ground| worths.get(&g.landblock).copied().unwrap_or(0.0);
+        let ranked = ac_world::hunting::ranked_with(level, skip, worth);
         self.autoplay.growth.unlock_tried.expire(now, UNLOCK_RETRY);
         ranked.into_iter().take(CANDIDATES).find_map(|g| {
             let way = self.journey_way(g.place());
@@ -559,7 +593,7 @@ impl Client {
                 "ground: {} {:#06x} worth {:.0} (quests {bonus:.0} XP a kill), journey {:?} s",
                 g.name,
                 g.landblock,
-                g.worth_with(bonus),
+                worth(g),
                 way.map(|w| w.0)
             );
             way.map(|(_, earn)| (g, earn))

@@ -111,6 +111,15 @@ impl Wand {
 
 /// A vulnerability castable well: its spell, multiplier and chance to land.
 type Vuln = (u32, f32, f32);
+
+/// What is already on a target, and whether more may go on: a vulnerability (element and
+/// multiplier), whether one may be cast (nobody else has softened it), the magic defence yielded.
+#[derive(Clone, Copy)]
+struct Softened {
+    on: Option<(Element, f32)>,
+    may_vuln: bool,
+    yielded: f32,
+}
 /// Magic Yield cast first: its spell, the magic defence it takes off, its chance to land.
 pub(crate) type Yield = (u32, f32, f32);
 /// A kill as last said: target, wand, attack, vulnerability, Magic Yield.
@@ -310,17 +319,53 @@ impl Client {
     /// the vulnerability already on and with the strongest castable well for its element first,
     /// each of those with Magic Yield first too when the creature's magic defence is known.
     pub(crate) fn kills(&self, guid: u32, ready: &[u32], wands: &[Wand]) -> Vec<Kill> {
-        let known = self.creature_known(guid);
-        let health = self.health_now(guid);
         let on = self
             .autoplay
             .vulned
             .iter()
             .find(|(g, _)| *g == guid)
             .and_then(|(_, cast)| *cast);
-        let may_vuln = !self.softened_by_anyone(guid);
+        let fight = Softened {
+            on,
+            may_vuln: !self.softened_by_anyone(guid),
+            yielded: self.autoplay.yielded_by(guid),
+        };
+        let known = self.creature_known(guid);
+        self.kills_with(known, self.health_now(guid), fight, ready, wands)
+    }
+
+    /// The fastest way to kill one of kind `known` met fresh, at full health, with the wand in
+    /// hand: the casts a kill takes, for weighing a hunting ground. `None` with no way or no health.
+    pub(crate) fn casts_on_kind(
+        &self,
+        known: &ac_world::elements::Creature,
+        ready: &[u32],
+        wands: &[Wand],
+    ) -> Option<f32> {
+        let health = Some(known.health as f32).filter(|h| *h > 0.0);
+        let fresh = Softened {
+            on: None,
+            may_vuln: true,
+            yielded: 0.0,
+        };
+        fastest(self.kills_with(Some(known), health, fresh, ready, wands))?.casts
+    }
+
+    /// [`Self::kills`] for a creature of kind `known` with `health` left, softened as `fight` says.
+    fn kills_with(
+        &self,
+        known: Option<&ac_world::elements::Creature>,
+        health: Option<f32>,
+        fight: Softened,
+        ready: &[u32],
+        wands: &[Wand],
+    ) -> Vec<Kill> {
+        let Softened {
+            on,
+            may_vuln,
+            yielded,
+        } = fight;
         // Magic defence as it stands, less the yield already on; a stronger yield replaces it.
-        let yielded = self.autoplay.yielded_by(guid);
         let defence = known
             .and_then(|c| c.magic_defense)
             .map(|d| (d as f32 - yielded).max(0.0));

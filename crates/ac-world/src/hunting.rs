@@ -29,6 +29,8 @@ pub struct Ground {
     pub health: u32,
     /// How many creatures the generators keep up at once.
     pub creatures: u32,
+    /// The highest loot tier of anything spawning here, 0 for none known.
+    pub max_tier: u32,
     /// A dungeon's way in; `None` for open ground.
     pub entrance: Option<Entrance>,
 }
@@ -143,23 +145,19 @@ pub fn search(needle: &str, from: Vec2) -> Vec<&'static Ground> {
 }
 
 impl Ground {
-    /// Whether a character of `level` should hunt here, allowing
-    /// `margin` levels either way: what spawns most must be within the
-    /// margin, something there must be no harder than the margin
-    /// allows, and nothing there may be so far above the character
-    /// that a stray of it is a death (twice the margin).
-    pub fn suits(&self, level: u32, margin: u32) -> bool {
-        if self.count < LEAST_SPAWNS {
-            return false;
-        }
-        let low = level.saturating_sub(margin);
-        let high = level + margin;
-        self.level >= low
-            && self.level <= high
-            && self.min_level <= high
-            && self.max_level <= level + 2 * margin
-            // A dungeon's rooms are walked through, not round: nothing in it may pass the margin.
-            && (!self.is_dungeon() || self.max_level <= high)
+    /// The highest loot tier of anything that spawns here, the game's measure of how hard the
+    /// worst of it is: K'nath N'osaj is mostly level 15 and holds tier 5. `None` when none known.
+    pub fn tier(&self) -> Option<u32> {
+        Some(self.max_tier)
+            .filter(|t| *t > 0)
+            .or_else(|| crate::elements::creature(&self.name).map(|c| c.tier))
+            .filter(|t| *t > 0)
+    }
+
+    /// How busy it is, from 0 to 1: one creature at a time is mostly waiting ([`HALF_BUSY`]).
+    pub fn busy(&self) -> f32 {
+        let c = self.creatures as f32;
+        c / (c + HALF_BUSY)
     }
 
     /// Whether this is a dungeon (entered by its portal) rather than open ground.
@@ -199,8 +197,7 @@ impl Ground {
 
     /// [`Ground::worth`] with `extra` XP a kill on top: what an active quest pays per kill here.
     pub fn worth_with(&self, extra: f32) -> f32 {
-        let c = self.creatures as f32;
-        (self.xp as f32 + extra) / self.health.max(1) as f32 * c / (c + HALF_BUSY)
+        (self.xp as f32 + extra) / self.health.max(1) as f32 * self.busy()
     }
 }
 
@@ -213,7 +210,8 @@ fn parse(text: &str) -> Vec<Ground> {
             continue;
         }
         let f: Vec<&str> = line.split(',').collect();
-        if f.len() != 12 {
+        // The tier came after the kind, so a row written before it existed still reads.
+        if f.len() != 12 && f.len() != 13 {
             continue;
         }
         let Ok(landblock) = u32::from_str_radix(f[0], 16) else {
@@ -250,6 +248,7 @@ fn parse(text: &str) -> Vec<Ground> {
             xp,
             health,
             creatures,
+            max_tier: f.get(12).and_then(|t| int(t)).unwrap_or(0),
             entrance,
         });
     }
@@ -292,35 +291,33 @@ pub fn at(landblock: u32) -> Option<&'static Ground> {
     all().iter().find(|g| g.landblock == landblock)
 }
 
-/// The grounds that suit a character of `level` (see [`Ground::suits`]) and that it may enter,
-/// best paying first ([`Ground::worth`]), leaving out the landblocks in `skip`: the one just
-/// hunted out, one it could not reach, one it died on.
-pub fn ranked_for(level: u32, margin: u32, skip: &[u32]) -> Vec<&'static Ground> {
-    ranked_with(level, margin, skip, |_| 0.0)
+/// The grounds a character of `level` may enter, best paying first ([`Ground::worth`]), leaving
+/// out the landblocks in `skip`: the one just hunted out, one it could not reach, one it died on.
+pub fn ranked_for(level: u32, skip: &[u32]) -> Vec<&'static Ground> {
+    ranked_with(level, skip, Ground::worth)
 }
 
-/// [`ranked_for`], each ground's kills worth `bonus(ground)` XP more ([`Ground::worth_with`]).
+/// [`ranked_for`], each ground worth `worth(ground)` to this character; 0 or less is no ground for
+/// it. Only the game's own gate stands ahead of that: the level a dungeon's portal lets in.
 pub fn ranked_with(
     level: u32,
-    margin: u32,
     skip: &[u32],
-    bonus: impl Fn(&Ground) -> f32,
+    worth: impl Fn(&Ground) -> f32,
 ) -> Vec<&'static Ground> {
-    ranked_among(all(), level, margin, skip, bonus)
+    ranked_among(all(), level, skip, worth)
 }
 
 fn ranked_among<'a>(
     grounds: &'a [Ground],
     level: u32,
-    margin: u32,
     skip: &[u32],
-    bonus: impl Fn(&Ground) -> f32,
+    worth: impl Fn(&Ground) -> f32,
 ) -> Vec<&'a Ground> {
     let mut v: Vec<(&Ground, f32)> = grounds
         .iter()
-        .filter(|g| g.suits(level, margin) && g.can_enter(level))
+        .filter(|g| g.count >= LEAST_SPAWNS && g.can_enter(level))
         .filter(|g| !skip.contains(&g.landblock))
-        .map(|g| (g, g.worth_with(bonus(g))))
+        .map(|g| (g, worth(g)))
         .filter(|(_, w)| *w > 0.0)
         .collect();
     v.sort_by(|a, b| b.1.total_cmp(&a.1));
@@ -343,6 +340,7 @@ mod tests {
             xp: 1000,
             health: 100,
             creatures: count,
+            max_tier: 0,
             entrance: None,
         }
     }
@@ -367,30 +365,21 @@ mod tests {
             }
         }
         assert!(all.iter().filter(|g| g.is_dungeon()).count() > 300);
-        // A beginner's ground, and something for the strong too.
-        let g = ranked_for(2, 8, &[]);
-        assert!(g.first().is_some_and(|g| g.level <= 10), "{:?}", g.first());
-        assert!(!ranked_for(150, 20, &[]).is_empty());
+        let g = ranked_for(150, &[]);
+        assert!(!g.is_empty());
         assert!(at(g[0].landblock).is_some());
     }
 
     #[test]
-    fn suitability_is_a_window_on_the_usual_level() {
-        // A level 10 with a margin of 5 hunts levels 5..=15.
-        assert!(ground(1, 0.0, 5, 8, 12, 10).suits(10, 5));
-        assert!(ground(1, 0.0, 5, 5, 5, 5).suits(10, 5));
-        assert!(!ground(1, 0.0, 5, 4, 4, 4).suits(10, 5), "too easy");
-        assert!(!ground(1, 0.0, 5, 16, 16, 16).suits(10, 5), "too hard");
-        // A rare spawn far above the character rules the place out.
-        assert!(!ground(1, 0.0, 5, 8, 40, 10).suits(10, 5));
-        assert!(
-            ground(1, 0.0, 5, 8, 20, 10).suits(10, 5),
-            "twice the margin is allowed"
-        );
-        // A single stray is no hunting ground.
-        assert!(!ground(1, 0.0, 1, 10, 10, 10).suits(10, 5));
-        // A low level's window does not go below zero.
-        assert!(ground(1, 0.0, 5, 1, 3, 2).suits(1, 5));
+    fn a_grounds_tier_is_what_spawns_most_there() {
+        // The Tusker Guards' 5A48: tier 4. The Tumerok Lieutenants' 5643 is mostly tier 2 but holds
+        // tier 3; K'nath N'osaj is mostly level 15 and holds tier 5. A name nobody knows: none.
+        assert_eq!(at(0x5A48).and_then(|g| g.tier()), Some(4));
+        assert_eq!(at(0x5643).and_then(|g| g.tier()), Some(3));
+        assert_eq!(at(0x0193).and_then(|g| g.tier()), Some(5));
+        let mut nobody = ground(1, 0.0, 5, 10, 10, 10);
+        nobody.name = "Nobody In Particular".into();
+        assert_eq!(nobody.tier(), None);
     }
 
     #[test]
@@ -412,13 +401,18 @@ mod tests {
         let ids = |v: Vec<&Ground>| v.iter().map(|g| g.landblock).collect::<Vec<_>>();
         // Half the health for the same XP pays twice as well; a stray and a ground paying no XP
         // are no grounds at all.
-        let none = |_: &Ground| 0.0;
+        let worth = Ground::worth;
         assert_eq!(
-            ids(ranked_among(&grounds, 10, 5, &[], none)),
-            vec![0xB, 0xA]
+            ids(ranked_among(&grounds, 10, &[], worth)),
+            vec![0xB, 0xA, 0xC]
         );
-        assert_eq!(ids(ranked_among(&grounds, 10, 5, &[0xB], none)), vec![0xA]);
-        assert_eq!(ids(ranked_among(&grounds, 50, 5, &[], none)), vec![0xC]);
+        assert_eq!(
+            ids(ranked_among(&grounds, 10, &[0xB], worth)),
+            vec![0xA, 0xC]
+        );
+        // What a ground is worth is the caller's to say: the level is no gate of this one's.
+        let only_c = |g: &Ground| if g.landblock == 0xC { 1.0 } else { 0.0 };
+        assert_eq!(ids(ranked_among(&grounds, 10, &[], only_c)), vec![0xC]);
     }
 
     #[test]
@@ -431,22 +425,22 @@ mod tests {
         let grounds = vec![plain, better];
         let ids = |v: Vec<&Ground>| v.iter().map(|g| g.landblock).collect::<Vec<_>>();
         assert_eq!(
-            ids(ranked_among(&grounds, 10, 5, &[], |_| 0.0)),
+            ids(ranked_among(&grounds, 10, &[], Ground::worth)),
             vec![0xB, 0xA]
         );
-        let on_a = |g: &Ground| if g.landblock == 0xA { 100.0 } else { 0.0 };
-        assert_eq!(
-            ids(ranked_among(&grounds, 10, 5, &[], on_a)),
-            vec![0xA, 0xB]
-        );
+        let on_a = |g: &Ground| g.worth_with(if g.landblock == 0xA { 100.0 } else { 0.0 });
+        assert_eq!(ids(ranked_among(&grounds, 10, &[], on_a)), vec![0xA, 0xB]);
         // A ground paying no XP of its own is one while a quest pays for its kills.
         let bare = Ground {
             xp: 0,
             ..ground(0xE, 0.0, 5, 10, 10, 10)
         };
         let lone = [bare];
-        assert!(ranked_among(&lone, 10, 5, &[], |_| 0.0).is_empty());
-        assert_eq!(ranked_among(&lone, 10, 5, &[], |_| 10.0).len(), 1);
+        assert!(ranked_among(&lone, 10, &[], Ground::worth).is_empty());
+        assert_eq!(
+            ranked_among(&lone, 10, &[], |g| g.worth_with(10.0)).len(),
+            1
+        );
         assert_eq!(lone[0].worth_with(0.0), lone[0].worth());
     }
 
@@ -477,13 +471,6 @@ mod tests {
             ..cave.clone()
         };
         assert!(!barracks.can_enter(35) && barracks.can_enter(40));
-        // A level 35 is sent to a dungeon: the Tusker Cave pays more than any open ground.
-        let best = ranked_for(35, 8, &[]);
-        assert!(
-            best.first().is_some_and(|g| g.is_dungeon()),
-            "{:?}",
-            best.first()
-        );
         assert!(cave.worth() > at(0xA2BD).expect("Freshwater Armoredillos").worth());
     }
 

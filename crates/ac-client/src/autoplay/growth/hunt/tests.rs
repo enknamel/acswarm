@@ -2,26 +2,6 @@ use super::*;
 use crate::testkit::standing_at;
 
 #[test]
-fn a_named_ground_is_not_judged_on_level() {
-    // Hunting a place is about its loot, its money, its trophies.
-    // A ground the player named must not be refused because the
-    // level table disapproves, and `suits` is the only thing that
-    // would refuse it.
-    let ground = ac_world::hunting::all()
-        .iter()
-        .find(|g| g.max_level < 50)
-        .expect("a low-level ground");
-    // Far too low for a level 275 character by the usual rule...
-    assert!(!ground.suits(275, 8));
-    // ...but naming it is a landblock id, and looking one up asks
-    // nothing about levels.
-    assert_eq!(
-        ac_world::hunting::at(ground.landblock).map(|g| g.landblock),
-        Some(ground.landblock)
-    );
-}
-
-#[test]
 #[ignore = "needs AC_DATA_DIR"]
 fn a_quiet_ground_is_read_off_the_world_and_not_off_the_status_line() {
     // The roam clock counted only the frames where the engine had
@@ -458,7 +438,11 @@ fn a_level_35_in_holtburg_sets_off_for_a_dungeon_and_keeps_moving() {
         c.travel_trip().map(|t| t.summary())
     );
     assert!(g.is_dungeon(), "{name} {lb:#06x} is open ground");
-    assert!(g.max_level <= 35 + cfg.level_margin, "{g:?}");
+    let survived = c.proven_tier() + 1;
+    assert!(
+        g.tier().is_some_and(|t| t <= survived),
+        "{g:?} past tier {survived}"
+    );
     // And the journey is walked: never ten seconds in one place on the way to its first portal
     // (offline, nothing takes the character through it).
     let mouth = c
@@ -632,22 +616,14 @@ fn a_better_ground_further_off_is_chosen() {
         0x17B2_0038,
         glam::Vec3::new(4465.6 - 4416.0, 34254.7 - 34176.0, 0.0),
     );
-    let cfg = Growth::default();
-    let ranked = ac_world::hunting::ranked_for(37, cfg.level_margin, &[]);
-    let (best, _) = c
-        .best_ground(37, cfg.level_margin, &[], Instant::now())
-        .expect("a ground");
-    let reachable_better = ranked
-        .iter()
-        .take_while(|g| g.landblock != best.landblock)
-        .map(|g| format!("{} {:#06x}", g.name, g.landblock))
-        .collect::<Vec<_>>();
-    println!(
-        "chose {} {:#06x}; passed over {reachable_better:?}",
-        best.name, best.landblock
-    );
+    // Tusker Guards killed: tier 4 survived, so the Tusker dungeons are in reach.
+    c.autoplay.growth.proven_tier = 4;
+    let (best, _) = c.best_ground(37, &[], Instant::now()).expect("a ground");
+    println!("chose {} {:#06x}", best.name, best.landblock);
     assert_ne!(best.landblock, 0x0286, "the nearer Hea dungeon");
-    assert!(best.worth() >= ranked[1].worth(), "{best:?}");
+    let hea = ac_world::hunting::at(0x0286).expect("the Hea dungeon");
+    assert!(best.worth() >= hea.worth(), "{best:?}");
+    assert!(best.tier().is_some_and(|t| t <= 5), "{best:?}");
 }
 
 #[test]
@@ -659,9 +635,7 @@ fn a_character_beside_a_warden_takes_no_flag_its_ground_does_not_need() {
     let cfg = Growth::default();
     let now = Instant::now();
     c.autoplay.growth.quiet_since = Some(now - std::time::Duration::from_secs(1));
-    let (g, earn) = c
-        .best_ground(20, cfg.level_margin, &[], now)
-        .expect("a ground");
+    let (g, earn) = c.best_ground(20, &[], now).expect("a ground");
     assert!(earn.is_none(), "{} asks for {earn:?}", g.name);
     assert!(c.grow_hunt(now, &cfg));
     assert!(c.visiting().is_none(), "{}", c.autoplay.status);
@@ -680,10 +654,7 @@ fn a_kill_task_taken_up_sends_the_character_to_hunt_its_creature() {
     let shreth = "killtaskbloodshreth";
     let mut c =
         crate::testkit::standing_in_the_field(15, 0xA9B4_0019, glam::Vec3::new(83.3, 14.04, 94.0));
-    let cfg = Growth::default();
-    let (plain, _) = c
-        .best_ground(15, cfg.level_margin, &[], Instant::now())
-        .expect("a ground");
+    let (plain, _) = c.best_ground(15, &[], Instant::now()).expect("a ground");
     let mut off: Vec<String> = ac_world::quests::all()
         .iter()
         .map(|r| r.id.to_string())
@@ -697,9 +668,7 @@ fn a_kill_task_taken_up_sends_the_character_to_hunt_its_creature() {
     };
     c.quest_log.note_kills(shreth, 0);
     c.refresh_quests(Instant::now());
-    let (drawn, _) = c
-        .best_ground(15, cfg.level_margin, &[], Instant::now())
-        .expect("a ground");
+    let (drawn, _) = c.best_ground(15, &[], Instant::now()).expect("a ground");
     let want = ac_world::quests::Want::Kill(shreth.into());
     let spawns_shreth = ac_world::quests::sources_of(&want)
         .any(|s| s.landblocks.iter().any(|&(lb, _)| lb == drawn.landblock));
@@ -822,9 +791,7 @@ fn a_level_40_whose_ground_needs_no_flag_visits_no_warden() {
     let cfg = Growth::default();
     let t0 = Instant::now();
     c.autoplay.growth.quiet_since = Some(t0 - Duration::from_secs(1));
-    let (g, earn) = c
-        .best_ground(40, cfg.level_margin, &[], t0)
-        .expect("a ground");
+    let (g, earn) = c.best_ground(40, &[], t0).expect("a ground");
     assert!(earn.is_none(), "{} asks for {earn:?}", g.name);
     assert!(c.grow_hunt(t0, &cfg), "stood about in town");
     assert_eq!(c.visiting(), None, "off to a Warden for {}", g.name);
@@ -908,4 +875,36 @@ fn a_pursued_ground_left_by_switching_autoplay_off_is_gone_back_to() {
     );
     assert!(c.autoplay_grow(later), "{}", c.autoplay.status);
     assert_eq!(c.autoplay.growth.bound_landblock(), Some(0x0001));
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_mage_hunts_where_it_kills_fastest() {
+    // Blargerton at 50, five hundred Tusker Guards behind him (tier 4), was sent to Tumerok
+    // Lieutenants (tier 2-3) because a level window ruled the guards out. No level decides it:
+    // up to a tier past what he survived, by XP per cast of his own fastest kill.
+    let now = Instant::now();
+    let (mut c, _) = crate::testkit::a_caster_knowing(
+        now,
+        &[
+            "Force Bolt VI",
+            "Flame Bolt VI",
+            "Frost Bolt VI",
+            "Piercing Vulnerability Other VI",
+        ],
+    );
+    for skill in [33, 34] {
+        crate::testkit::trained_in(&mut c, skill, 350);
+    }
+    c.world.stats.level = 50;
+    c.autoplay.growth.proven_tier = 4;
+    let (best, _) = c.best_ground(50, &[], now).expect("a ground");
+    println!(
+        "chose {} {:#06x}, tier {:?}",
+        best.name,
+        best.landblock,
+        best.tier()
+    );
+    assert!(best.tier().is_some_and(|t| t <= 5), "{best:?}");
+    assert_ne!(best.landblock, 0x5643, "the Tumerok Lieutenants");
 }

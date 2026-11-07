@@ -18,13 +18,14 @@ fn frees_the_cast_slot(err: u32) -> bool {
 
 impl Client {
     /// Read back what this character kept between sessions, once its name is known: the ledger,
-    /// recall spots, quest flags and quest log.
+    /// recall spots, quest flags, quest log and the loot tier it has killed.
     pub(crate) fn load_saved(&mut self) {
         self.ledger_loaded = true;
         self.load_ledger();
         self.load_recall_positions();
         self.load_quest_flags();
         self.load_quest_log();
+        self.load_proven_tier();
     }
 
     /// Pump the network, apply the server's messages, run the gameplay

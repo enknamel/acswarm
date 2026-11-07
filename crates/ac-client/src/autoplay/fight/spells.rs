@@ -233,7 +233,7 @@ impl Client {
     /// same list and names the same spell (`Client::attack_kind`).
     /// Costly -- `can_cast` walks the packs for components -- so both
     /// callers look once and neither on every tick.
-    pub(super) fn ready_spells(&self, cfg: &Fight) -> Vec<(u32, String)> {
+    pub(crate) fn ready_spells(&self, cfg: &Fight) -> Vec<(u32, String)> {
         self.offered_spells(cfg)
             .into_iter()
             .filter(|(id, _)| matches!(self.can_cast_well(*id), crate::magic::CastCheck::Ok))

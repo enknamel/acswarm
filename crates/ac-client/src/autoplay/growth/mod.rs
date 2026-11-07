@@ -53,6 +53,7 @@ mod config;
 mod hunt;
 mod needs;
 mod policy;
+mod proven;
 pub mod pursuit;
 mod quest_bonus;
 mod raise;
@@ -88,6 +89,8 @@ fn about(distance: f32) -> String {
 /// The running state of the growth rules.
 #[derive(Default)]
 pub struct State {
+    /// The highest loot tier of creature this character has killed: what it is known to survive.
+    pub(crate) proven_tier: u32,
     /// What the party is doing, as this session last worked it out from
     /// the roster. Every session reaches the same answer, so this is a
     /// cache of a shared decision rather than a vote of its own.

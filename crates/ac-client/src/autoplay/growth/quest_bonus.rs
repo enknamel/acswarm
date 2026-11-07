@@ -192,8 +192,17 @@ mod tests {
     fn a_kill_task_taken_up_draws_the_picker_to_where_its_creature_spawns() {
         let taken = board(SHRETH, |f| f.log.note_kills(SHRETH, 0));
         let pay = pay_of(&taken, 0);
-        let plain = ac_world::hunting::ranked_for(15, 8, &[]);
-        let drawn = ac_world::hunting::ranked_with(15, 8, &[], |g| ground_bonus(&pay, g));
+        // Among the tier 1-2 grounds a new character survives.
+        let easy = |g: &ac_world::hunting::Ground| g.tier().is_some_and(|t| t <= 2);
+        let plain =
+            ac_world::hunting::ranked_with(15, &[], |g| if easy(g) { g.worth() } else { 0.0 });
+        let drawn = ac_world::hunting::ranked_with(15, &[], |g| {
+            if easy(g) {
+                g.worth_with(ground_bonus(&pay, g))
+            } else {
+                0.0
+            }
+        });
         let first = drawn.first().expect("a ground");
         assert!(ground_bonus(&pay, first) > 0.0, "{first:?}");
         assert_ne!(plain.first().map(|g| g.landblock), Some(first.landblock));
