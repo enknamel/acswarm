@@ -142,6 +142,13 @@ fn known() -> Vec<Trial> {
             0x5C49_012A,
             Vec3::new(17_754.0, 13_929.0, 6.0),
         ),
+        named(
+            LEVEL,
+            "5660 Sialla Jiro walk-up from the portal",
+            Vec3::new(16_631.414, 18_412.508, 0.0),
+            0x5660_0167,
+            Vec3::new(16_599.2, 18_399.3, 0.0),
+        ),
     ]
 }
 
