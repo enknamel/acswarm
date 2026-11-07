@@ -113,3 +113,29 @@ fn a_resisted_or_fizzled_vulnerability_is_cast_again_however_often() {
     c.hear_arrival("Drudge Skulker resists your spell");
     assert!(c.autoplay.is_vulned(0x8000_0103));
 }
+
+#[test]
+fn a_vulnerability_the_server_turned_down_is_cast_again() {
+    // Blargerton's vuln came back "You're too busy" (UseDone 0x1D): held as on, it was never cast
+    // again, and six bolts went at a guard with no vulnerability.
+    let mut c = crate::testkit::offline_client();
+    let it = crate::testkit::creature(0x8000_0103, "Tusker Guard");
+    c.world.objects.insert(it.guid, it);
+    c.autoplay.mark_vulned(
+        0x8000_0103,
+        Some((ac_world::elements::Element::Pierce, 2.0)),
+    );
+    c.autoplay.debuff_sent = Some(0x8000_0103);
+    c.hear_cast_refused(0x1D, std::time::Instant::now());
+    assert!(
+        !c.autoplay.is_vulned(0x8000_0103),
+        "turned down: cast it again"
+    );
+    // With nothing of ours unanswered, a refusal re-arms nothing.
+    c.autoplay.mark_vulned(
+        0x8000_0103,
+        Some((ac_world::elements::Element::Pierce, 2.0)),
+    );
+    c.hear_cast_refused(0x1D, std::time::Instant::now());
+    assert!(c.autoplay.is_vulned(0x8000_0103));
+}

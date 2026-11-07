@@ -15,10 +15,15 @@ impl Autoplay {
 }
 
 impl Client {
-    /// The server's answer `err` to the fight's last cast. A target it cannot find, here or in the
-    /// blocks around (`Landblock.cs:1043`), is gone and this client missed the word: cast at, it was
-    /// refused three times a second for up to 17 s (test: a_target_the_server_cannot_find_is_forgotten).
+    /// The server's answer `err` to the fight's last cast. Any refusal (`0x1D` too busy among them)
+    /// means a debuff just sent never went on, so it is cast again
+    /// (test: a_vulnerability_the_server_turned_down_is_cast_again). A target it cannot find, here or
+    /// in the blocks around (`Landblock.cs:1043`), is gone and this client missed the word: cast at,
+    /// it was refused three times a second for up to 17 s (test: a_target_the_server_cannot_find_is_forgotten).
     pub(crate) fn hear_cast_refused(&mut self, err: u32, now: Instant) {
+        if err != 0 {
+            self.rearm_debuff("was turned down");
+        }
         if err != TARGET_NOT_ACQUIRED {
             return;
         }

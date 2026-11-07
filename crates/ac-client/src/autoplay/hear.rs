@@ -161,7 +161,7 @@ impl Client {
     }
 
     /// The debuff last sent did not go on (`why`): cast again when it is still worth it.
-    fn rearm_debuff(&mut self, why: &str) {
+    pub(crate) fn rearm_debuff(&mut self, why: &str) {
         let Some(g) = self.autoplay.debuff_sent.take() else {
             return;
         };
