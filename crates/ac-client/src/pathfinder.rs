@@ -608,6 +608,33 @@ impl Pathfinder {
         walks
     }
 
+    /// For each of `spots`, which of `sides` even directions `ring` metres out the walk test
+    /// carries a body to (bit `k`: `k / sides` of a turn from east); `None` with no region read.
+    pub fn open_sides(
+        &self,
+        spots: &[Place],
+        ring: f32,
+        sides: usize,
+        capsule: Capsule,
+    ) -> Option<Vec<u32>> {
+        let Some(&first) = spots.first() else {
+            return Some(Vec::new());
+        };
+        let region = region_for(first, first, &capsule)?;
+        let area = self.read(&region)?;
+        let out = spots
+            .iter()
+            .map(|&at| {
+                (0..sides).fold(0u32, |open, k| {
+                    let a = std::f32::consts::TAU * k as f32 / sides as f32;
+                    let to = at.at + Vec3::new(a.cos(), a.sin(), 0.0) * ring;
+                    open | (u32::from(routing::can_walk(&area, at, to)) << k)
+                })
+            })
+            .collect();
+        Some(out)
+    }
+
     /// A walk asked waits on the builder.
     pub fn busy(&self) -> bool {
         self.asked.as_ref().is_some_and(|a| a.answer.is_none()) && !self.is_job_done()

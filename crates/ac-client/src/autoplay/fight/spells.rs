@@ -139,6 +139,13 @@ impl Client {
         // difference between a fight and a stalemate.
         let table = self.assets.spell_table().ok();
         let ready = self.ready_spells(cfg);
+        // Two or more swinging at us underground: to a spot the attack still gets out of first.
+        if let Some(spell) = kill.as_ref().map(|k| k.attack) {
+            let how = crate::dodge::How::Spell(spell);
+            if self.autoplay_take_stand(Some(guid), how, now) != crate::did::Did::Done {
+                return true;
+            }
+        }
         // Its vulnerability first, then its attack for the rest.
         if self.autoplay_make_vulnerable(guid, &name, kill.as_ref(), now) {
             return true;

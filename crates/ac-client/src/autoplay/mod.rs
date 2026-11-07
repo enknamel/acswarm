@@ -305,6 +305,8 @@ pub struct Autoplay {
     /// near to fight it from now: a spell or an arrow the sight check
     /// lets through and something on the way stops.
     pub(crate) closing: Option<(u32, f32)>,
+    /// Where to fight from in a dungeon with more than one creature swinging (see `fight::stand`).
+    pub(crate) stands: fight::stand::Stands,
     /// Targets let go, and when, so they are left alone for a while.
     given_up: Recent<u32>,
     /// When ammunition was last made.

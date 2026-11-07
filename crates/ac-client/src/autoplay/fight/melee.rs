@@ -77,6 +77,15 @@ impl Client {
                 self.let_go(Release::Fight);
             }
         }
+        // Two or more swinging at us underground: to a corner, a hallway or a wall first.
+        let how = if stance == Stance::Missile {
+            How::Missile
+        } else {
+            How::Melee
+        };
+        if self.autoplay_take_stand(self.attack_target, how, now) != Did::Done {
+            return true;
+        }
         if let Some(t) = self.attack_target {
             if self.stalled_on(t, now) {
                 return false;
@@ -282,6 +291,11 @@ impl Client {
     /// Walk within a swing of `guid` (`name`) before the swing is sent: `Done` to swing, else the
     /// tick is spent; one no walk reaches is given up (a_swing_is_not_sent_at_a_creature_no_walk_reaches).
     fn close_for_swing(&mut self, guid: u32, name: &str, now: Instant) -> Did {
+        if self.holds_stand_against(guid, now) {
+            self.autoplay
+                .say(Doing::Fighting, format!("holding the stand for {name}"));
+            return Did::Acting;
+        }
         self.interrupt_travel("closing on a target");
         let within = self.attack_range(How::Melee) * WITHIN;
         let did = self.go(self.step_owner(), Goal::Near { guid, within }, now);

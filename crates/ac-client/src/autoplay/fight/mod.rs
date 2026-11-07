@@ -3,6 +3,7 @@ pub(crate) mod kill;
 pub(crate) mod melee;
 pub(crate) mod soften;
 pub(crate) mod spells;
+pub(crate) mod stand;
 pub(crate) mod target;
 
 use std::time::{Duration, Instant};
