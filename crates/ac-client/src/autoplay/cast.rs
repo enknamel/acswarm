@@ -31,9 +31,16 @@ pub fn cast_problem(check: &crate::magic::CastCheck) -> String {
 }
 
 impl Autoplay {
-    /// A spell of any kind went out less than a cast ago, so another
-    /// sent now would queue behind it or be dropped.
+    /// A spell of any kind went out less than a cast ago, or a take is in the air, so a cast sent
+    /// now would queue behind it or be dropped.
     pub(crate) fn cast_in_flight(&self, now: Instant) -> bool {
+        // A take keeps the server busy until it lands, and a cast sent meanwhile is turned away
+        // busy (0x1D) with no answer of its own to free the slot.
+        self.take_in_air.is_some() || self.casting(now)
+    }
+
+    /// A spell of any kind is still going up: what a take or a wield waits on (`server_busy`).
+    pub(crate) fn casting(&self, now: Instant) -> bool {
         // The server says when a cast is finished, so that is what is
         // waited on -- not a guess at how long spells take. A heal sent
         // the moment the last one lands is the difference between

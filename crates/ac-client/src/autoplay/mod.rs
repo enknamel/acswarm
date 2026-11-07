@@ -187,6 +187,8 @@ pub struct Autoplay {
     pub(crate) cast_sent: Option<Instant>,
     /// Casts wait till then: the server said the character was in the air (`cast::IN_THE_AIR`).
     pub(crate) in_the_air_until: Option<Instant>,
+    /// When the take in the air went out (`Client::loot_inflight`), kept by `tick_loot`: casts wait.
+    pub(crate) take_in_air: Option<Instant>,
     /// What the fight's own attack spell was thrown at and when, so a
     /// stop can tell it from a heal, a kit or a counter, which set
     /// `cast_sent` too. Cleared by the same answer as `cast_sent`.

@@ -258,6 +258,7 @@ impl Client {
                 self.loot_inflight = None;
             }
         }
+        self.autoplay.take_in_air = self.loot_inflight.map(|(_, since)| since);
         // What was sent (`loot_sent`, `loot_merge`) is kept past the
         // take's end, until the next goes out: the words that say why
         // a take was refused come as chat, and can come a packet behind
@@ -332,6 +333,7 @@ impl Client {
                     }
                 };
                 self.loot_inflight = Some((guid, now));
+                self.autoplay.take_in_air = Some(now);
                 self.loot_sent = Some(TakeSent {
                     item: guid,
                     into,

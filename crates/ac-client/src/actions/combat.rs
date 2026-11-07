@@ -400,7 +400,7 @@ impl Client {
     /// change hands mid-swing is a different one and is stated where it
     /// belongs (see [`Client::wield_must_wait`]).
     pub fn server_busy(&self, now: Instant) -> bool {
-        self.autoplay.cast_in_flight(now)
+        self.autoplay.casting(now)
     }
 
     /// Whether a wield of `guid` sent now would be wasted: the item is

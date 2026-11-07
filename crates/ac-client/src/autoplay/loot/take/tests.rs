@@ -91,6 +91,24 @@ fn a_take_with_the_main_pack_full_goes_into_the_sack_with_room() {
 }
 
 #[test]
+fn a_take_in_the_air_holds_casts_until_it_lands() {
+    // A heal sent with a take was turned away busy (0x1D), which frees no slot: the next cast and
+    // take waited out the six-second backstop, item after item, while a Tusker Guard hit him.
+    let mut c = with_packs(no_data(), 2, 2, 24, 7);
+    const DAGGER: u32 = 0x8000_0401;
+    on_the_body(&mut c, DAGGER, "Dagger", 21, 0, 1);
+    let now = Instant::now();
+    c.take(DAGGER);
+    c.tick_loot(now);
+    assert!(c.loot_inflight.is_some());
+    assert!(c.autoplay.cast_in_flight(now), "no cast beside a take");
+    c.world.objects.get_mut(&DAGGER).unwrap().container = Some(SACK);
+    let later = now + Duration::from_millis(100);
+    c.tick_loot(later);
+    assert!(!c.autoplay.cast_in_flight(later), "landed, the cast goes");
+}
+
+#[test]
 #[ignore = "needs AC_DATA_DIR"]
 fn the_servers_word_that_a_pack_is_full_sends_the_take_elsewhere_and_then_gives_up() {
     // The count said the main pack had two slots; the server said
