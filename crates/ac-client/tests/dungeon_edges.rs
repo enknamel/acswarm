@@ -106,8 +106,9 @@ impl Ground for Standing<'_> {
         let cap = self.player.capsule();
         self.planner.ask(me, goal, within, cap, now);
     }
-    fn answer(&mut self, goal: Place) -> Option<(Place, Planned)> {
-        self.planner.take(self.player.world_position(), goal.at)
+    fn answer(&mut self, goal: Place, within: f32) -> Option<(Place, Planned)> {
+        self.planner
+            .take(self.player.world_position(), goal.at, within)
     }
     fn can_walk(&mut self, from: Vec3, to: Vec3) -> bool {
         let mine = from.distance(self.player.world_position()) < 1e-3;

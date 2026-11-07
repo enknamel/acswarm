@@ -181,8 +181,9 @@ pub trait Ground {
     fn is_airborne(&self) -> bool;
     /// Have the planner plan the whole walk from where the body stands to within `within` of `goal`.
     fn ask(&mut self, goal: Place, within: f32, now: Instant);
-    /// The planner's answer once it is back: the place it was planned from, and the plan.
-    fn answer(&mut self, goal: Place) -> Option<(Place, Planned)>;
+    /// The planner's answer to the walk to within `within` of `goal` once it is back: the place it
+    /// was planned from, and the plan.
+    fn answer(&mut self, goal: Place, within: f32) -> Option<(Place, Planned)>;
     /// The walk test every edge passed, from `from` to `to`, for this body on the region.
     fn can_walk(&mut self, from: Vec3, to: Vec3) -> bool;
 }
@@ -321,7 +322,7 @@ impl Steering {
         }
         if let Some(why) = self.asking {
             ground.ask(goal, within, now);
-            if let Some((from, planned)) = ground.answer(goal) {
+            if let Some((from, planned)) = ground.answer(goal, within) {
                 if self.answered(why, me, from, goal, within, planned, now) == Aim::NoWay {
                     return Aim::NoWay;
                 }
@@ -668,7 +669,7 @@ mod tests {
         fn ask(&mut self, goal: Place, _within: f32, _now: Instant) {
             self.asks.push((self.at, goal));
         }
-        fn answer(&mut self, _goal: Place) -> Option<(Place, Planned)> {
+        fn answer(&mut self, _goal: Place, _within: f32) -> Option<(Place, Planned)> {
             self.answers.pop_front()
         }
         fn can_walk(&mut self, _from: Vec3, _to: Vec3) -> bool {

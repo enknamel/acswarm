@@ -160,6 +160,8 @@ struct Asked {
     number: u64,
     from: Place,
     goal: Place,
+    /// How near the goal the walk asked ends: one walk's answer is never another's.
+    within: f32,
     answer: Option<Planned>,
 }
 
@@ -178,7 +180,7 @@ pub struct Pathfinder {
     /// The builder could not be started.
     dead: bool,
     /// When the steering last asked, from where, and for what goal.
-    asked_at: Option<(Instant, Vec3, Vec3)>,
+    asked_at: Option<(Instant, Vec3, Vec3, f32)>,
     asked: Option<Asked>,
     /// Offline runs: each plan builds what it needs on the asking thread before it answers.
     builds_itself: bool,
@@ -228,7 +230,19 @@ impl Pathfinder {
     /// what is built now; `Building` when the area or its chunks are not, which are then queued.
     pub fn plan(&mut self, from: Place, goal: Place, within: f32, capsule: Capsule) -> Planned {
         self.plans += 1;
-        self.plan_now(from, goal, within, capsule)
+        let planned = self.plan_now(from, goal, within, capsule);
+        // What was asked, for a refusal that cannot be had again offline (route_harness, 5660).
+        if let Planned::NoWay(why) = &planned {
+            tracing::info!(
+                "pathfinder: no way ({why:?}) from {:?} in {:#010x} to within {within} of {:?} in \
+                 {:#010x}",
+                from.at,
+                from.cell,
+                goal.at,
+                goal.cell
+            );
+        }
+        planned
     }
 
     fn plan_now(&mut self, from: Place, goal: Place, within: f32, capsule: Capsule) -> Planned {
@@ -482,16 +496,17 @@ impl Pathfinder {
     /// Have the builder plan the steering's walk to within `within` of `to`, so no search holds up
     /// a frame; [`take`](Self::take) picks the answer up. A handle that builds for itself answers now.
     pub fn ask(&mut self, from: Place, to: Place, within: f32, capsule: Capsule, now: Instant) {
-        if self.dead || self.is_repeat(from.at, to.at, now) {
+        if self.dead || self.is_repeat(from.at, to.at, within, now) {
             return;
         }
-        self.asked_at = Some((now, from.at, to.at));
+        self.asked_at = Some((now, from.at, to.at, within));
         if self.builds_itself {
             let answer = self.plan_now(from, to, within, capsule);
             self.asked = Some(Asked {
                 number: 0,
                 from,
                 goal: to,
+                within,
                 answer: Some(answer),
             });
             return;
@@ -511,6 +526,7 @@ impl Pathfinder {
                     number: 0,
                     from,
                     goal: to,
+                    within,
                     answer: Some(Planned::NoWay(NoWay::OutOfRegion)),
                 });
                 return;
@@ -520,28 +536,33 @@ impl Pathfinder {
             number,
             from,
             goal: to,
+            within,
             answer: None,
         });
     }
 
     /// Whether a walk asked is the last one again (its start and goal, within [`ASK_EVERY`]) or
-    /// one whose answer, still being planned, will do from here.
-    fn is_repeat(&self, from: Vec3, goal: Vec3, now: Instant) -> bool {
+    /// one whose answer, still being planned, will do from here; either ending as near the goal.
+    fn is_repeat(&self, from: Vec3, goal: Vec3, within: f32, now: Instant) -> bool {
         let pending = self.busy()
             && self.asked.as_ref().is_some_and(|a| {
-                a.goal.at.distance(goal) <= ANSWER_GOAL && a.from.at.distance(from) <= ANSWER_REACH
+                a.within == within
+                    && a.goal.at.distance(goal) <= ANSWER_GOAL
+                    && a.from.at.distance(from) <= ANSWER_REACH
             });
         pending
-            || self.asked_at.is_some_and(|(t, f, g)| {
+            || self.asked_at.is_some_and(|(t, f, g, w)| {
                 now.duration_since(t) < ASK_EVERY
+                    && w == within
                     && g.distance(goal) <= ac_nav::steering::ARRIVE
                     && f.distance(from) <= ac_nav::steering::ARRIVE
             })
     }
 
     /// The answer to the walk asked, once it is back: the place it was planned from, and the plan,
-    /// a no way with its reason. Dropped when planned from too far back, or for a goal moved on.
-    pub fn take(&mut self, me: Vec3, goal: Vec3) -> Option<(Place, Planned)> {
+    /// a no way with its reason. Dropped when planned from too far back, for a goal moved on, or
+    /// for a walk ending elsewhere than `within` of it (a journey's 35 m is not a counter's reach).
+    pub fn take(&mut self, me: Vec3, goal: Vec3, within: f32) -> Option<(Place, Planned)> {
         while let Ok((number, planned)) = self.answers.1.try_recv() {
             if let Some(a) = self.asked.as_mut().filter(|a| a.number == number) {
                 a.answer = Some(planned);
@@ -549,6 +570,10 @@ impl Pathfinder {
         }
         self.asked.as_ref()?.answer.as_ref()?;
         let a = self.asked.take()?;
+        if a.within != within {
+            tracing::debug!("pathfinder: answer for another walk to there");
+            return None;
+        }
         if a.goal.at.distance(goal) > ANSWER_GOAL {
             tracing::debug!("pathfinder: answer for a goal we no longer want");
             return None;
@@ -839,7 +864,7 @@ mod tests {
         let cap = c.player.as_ref().unwrap().capsule();
         let goal = round_them();
         c.pathfinder.ask(me, goal, 0.25, cap, Instant::now());
-        match c.pathfinder.take(me.at, goal.at) {
+        match c.pathfinder.take(me.at, goal.at, 0.25) {
             Some((from, Planned::Route(r))) => {
                 assert_eq!(from, me);
                 assert!(!r.waypoints.is_empty());
@@ -857,15 +882,32 @@ mod tests {
         let t0 = Instant::now();
         let soon = t0 + Duration::from_millis(100);
         c.pathfinder.ask(me, goal, 0.25, cap, t0);
-        assert!(c.pathfinder.take(me.at, goal.at).is_some(), "asked");
+        assert!(c.pathfinder.take(me.at, goal.at, 0.25).is_some(), "asked");
         c.pathfinder.ask(me, goal, 0.25, cap, soon);
-        assert!(c.pathfinder.take(me.at, goal.at).is_none(), "a repeat");
+        assert!(
+            c.pathfinder.take(me.at, goal.at, 0.25).is_none(),
+            "a repeat"
+        );
+        // A journey's 35 m answer is not a counter walk-up's (route_harness, 5660 Sialla Jiro).
+        c.pathfinder.ask(me, goal, 35.0, cap, soon);
+        assert!(
+            c.pathfinder.take(me.at, goal.at, 0.25).is_none(),
+            "another walk's answer"
+        );
+        c.pathfinder.ask(me, goal, 0.25, cap, soon + ASK_EVERY);
+        assert!(
+            c.pathfinder.take(me.at, goal.at, 0.25).is_some(),
+            "its own, asked"
+        );
         c.pathfinder.ask(me, other, 0.25, cap, soon);
-        assert!(c.pathfinder.take(me.at, other.at).is_some(), "another goal");
+        assert!(
+            c.pathfinder.take(me.at, other.at, 0.25).is_some(),
+            "another goal"
+        );
         let nudged = there(Vec3::new(26.0, -50.89, 0.0), DUNGEON);
         c.pathfinder.ask(me, nudged, 0.25, cap, soon);
         assert!(
-            c.pathfinder.take(me.at, nudged.at).is_some(),
+            c.pathfinder.take(me.at, nudged.at, 0.25).is_some(),
             "a goal a metre on is another walk"
         );
         let moved = Place {
@@ -874,12 +916,12 @@ mod tests {
         };
         c.pathfinder.ask(moved, other, 0.25, cap, soon);
         assert!(
-            c.pathfinder.take(moved.at, other.at).is_some(),
+            c.pathfinder.take(moved.at, other.at, 0.25).is_some(),
             "the same goal from elsewhere"
         );
         c.pathfinder.ask(moved, other, 0.25, cap, soon + ASK_EVERY);
         assert!(
-            c.pathfinder.take(moved.at, other.at).is_some(),
+            c.pathfinder.take(moved.at, other.at, 0.25).is_some(),
             "a repeat once the throttle is past"
         );
     }

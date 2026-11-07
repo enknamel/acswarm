@@ -185,7 +185,7 @@ fn main() {
                     continue;
                 }
                 let me = c.player.as_ref().unwrap().world_position();
-                if c.pathfinder.take(me, far).is_some() || !c.pathfinder.busy() {
+                if c.pathfinder.take(me, far, 1.5).is_some() || !c.pathfinder.busy() {
                     answered[i] = true;
                 }
             }
