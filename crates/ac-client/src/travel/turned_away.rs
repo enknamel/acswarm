@@ -23,23 +23,45 @@ const TURNED_AWAY: [u32; 14] = [
 ];
 
 impl Client {
-    /// Weenie error `code` came in: a portal turning us away leaves the journey's portal out. The
-    /// wait at the mouth would too, but a hold resets its clock and never let it run out.
+    /// The portal whose mouth the character stands in: the nearest within [`super::ARRIVE`], in 3D,
+    /// since the Facility Hub stacks its floors. What a portal's refusal is about, whatever the
+    /// journey's step is: logged in standing in a quest portal, each of its refusals was laid on
+    /// the next portal planned, and the Hub's own were left out one by one.
+    pub(crate) fn portal_at_hand(&self) -> Option<&'static ac_world::portals::Portal> {
+        let me = self.my_position()?;
+        ac_world::portals::all()
+            .iter()
+            .filter(|p| p.from.distance(me) <= super::ARRIVE)
+            .min_by(|a, b| a.from.distance(me).total_cmp(&b.from.distance(me)))
+    }
+
+    /// Weenie error `code` came in: the portal at hand turning us away is left out of every plan,
+    /// and a journey that takes it is planned again. The wait at the mouth would too, but a hold
+    /// resets its clock and never let it run out.
     pub(crate) fn portal_turned_away(&mut self, code: u32) {
         if !TURNED_AWAY.contains(&code) {
             return;
         }
-        let Some((name, mouth)) = self.travel_portal() else {
+        let Some(portal) = self.portal_at_hand() else {
             return;
         };
-        if self.travel.refused.iter().any(|r| r.distance(mouth) < 1.0) {
-            return;
+        let mouth = portal.from_xy();
+        if !self.travel.refused.iter().any(|r| r.distance(mouth) < 1.0) {
+            tracing::warn!(
+                "travel: the portal {:?} turned us away ({code:#06x}); going another way",
+                portal.name
+            );
+            self.travel.refused.push(mouth);
         }
-        tracing::warn!(
-            "travel: the portal {name:?} turned us away ({code:#06x}); going another way"
-        );
-        self.travel.refused.push(mouth);
-        self.travel.state.portal_since = None;
-        self.travel.replan_due = true;
+        let taken = self.travel.trip.as_ref().is_some_and(|t| {
+            t.steps.iter().any(|s| {
+                matches!(s, ac_world::trip::Step::Portal { mouth: m, .. }
+                    if m.at.truncate().distance(mouth) < 1.0)
+            })
+        });
+        if taken {
+            self.travel.state.portal_since = None;
+            self.travel.replan_due = true;
+        }
     }
 }

@@ -1205,18 +1205,32 @@ fn a_portal_that_says_too_recently_is_stepped_back_from_and_walked_into_again() 
 fn a_portal_that_turns_us_away_is_left_out() {
     // Blargerton walked into the Castle of Baron Nuvillus portal 1146 times in four minutes:
     // "You must complete quest to use portal" (0x0474), and a stamina cast every ten seconds held
-    // the journey, which reset the wait at the mouth before it could give up.
-    let holtburg = 0xA9B4_0019;
-    let mut c = crate::testkit::standing_at(holtburg, Vec3::new(84.0, 7.1, 94.0));
-    let me = c.my_position().unwrap();
-    let mouth = c.place_at(me);
-    let exit = Place::on_map(Vec2::new(44_170.4, 9_636.1));
+    // the journey, which reset the wait at the mouth before it could give up. Logged in standing
+    // in it, its refusals were laid on the Hub's Tusker portals planned next, one by one.
+    let castle = ac_world::portals::all()
+        .iter()
+        .find(|p| p.name == "Castle of Baron Nuvillus")
+        .expect("the castle portal");
+    let barracks = ac_world::portals::all()
+        .iter()
+        .find(|p| p.name == "Tusker Barracks" && p.from_cell >> 16 == 0x8A02)
+        .expect("the Hub's Tusker Barracks portal");
+    let local = castle.from - ac_world::landblock_origin(castle.from_cell);
+    let mut c = crate::testkit::standing_at(castle.from_cell, local);
+    let step = |p: &ac_world::portals::Portal| Step::Portal {
+        name: p.name.clone(),
+        mouth: Place {
+            at: p.from,
+            cell: p.from_cell,
+        },
+        exit: Place {
+            at: p.to,
+            cell: p.to_cell,
+        },
+    };
+    let exit = Place::on_map(Vec2::new(17_320.0, 13_654.0));
     let trip = Trip {
-        steps: vec![Step::Portal {
-            name: "Castle of Baron Nuvillus".into(),
-            mouth,
-            exit,
-        }],
+        steps: vec![step(barracks)],
         seconds: 10.0,
     };
     crate::testkit::set_out_on(&mut c, trip, within_reach(exit));
@@ -1227,7 +1241,21 @@ fn a_portal_that_turns_us_away_is_left_out() {
         "too recently passes"
     );
     c.portal_turned_away(0x0474);
-    assert_eq!(c.travel.refused, vec![mouth.at.truncate()]);
+    assert_eq!(
+        c.travel.refused,
+        vec![castle.from_xy()],
+        "the castle, not the barracks"
+    );
+    assert!(!c.travel.replan_due, "the journey does not take the castle");
+    // A journey that does take it is planned again without it.
+    let trip = Trip {
+        steps: vec![step(castle)],
+        seconds: 10.0,
+    };
+    crate::testkit::set_out_on(&mut c, trip, within_reach(exit));
+    c.travel.held = true;
+    c.portal_turned_away(0x0474);
+    assert_eq!(c.travel.refused, vec![castle.from_xy()]);
     assert!(c.travel.replan_due, "planned again without it");
     c.portal_turned_away(0x0474);
     assert_eq!(c.travel.refused.len(), 1, "once");

@@ -80,17 +80,15 @@ impl Client {
         if !matches!(code, NO_QUEST_FOR_PORTAL | QUEST_TOO_LONG_AGO) {
             return;
         }
-        let Some((_, mouth)) = self.travel_portal() else {
-            return;
-        };
-        let flags: Vec<String> = ac_world::portals::near(mouth, IS_THE_NPC)
-            .into_iter()
+        // The portal stood in, not the journey's next: that may be anywhere.
+        let Some(flag) = self
+            .portal_at_hand()
             .map(|p| p.quest.clone())
             .filter(|q| !q.is_empty())
-            .collect();
-        for f in flags {
-            self.drop_quest_flag(&f);
-        }
+        else {
+            return;
+        };
+        self.drop_quest_flag(&flag);
     }
 
     /// Whether the character holds `flag`.

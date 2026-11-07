@@ -73,7 +73,12 @@ fn a_flag_held_opens_its_portal_and_a_refusal_closes_it() {
         Some(true),
         "Hunter's Leap is not the first portal"
     );
-    // The portal turns it away for the quest: the flag goes, and is not planned through again.
+    // Turned away by another portal, wherever it stands, the flag stays.
+    c.portal_quest_error(NO_QUEST_FOR_PORTAL);
+    assert!(c.holds_quest_flag(LEAP), "it stands at no portal");
+    // The portal stood in turns it away for the quest: the flag goes, and is not planned through again.
+    let origin = ac_world::landblock_origin(p.from_cell);
+    crate::testkit::stand(&mut c, p.from_cell, p.from - origin);
     c.portal_quest_error(NO_QUEST_FOR_PORTAL);
     assert!(!c.holds_quest_flag(LEAP));
 }
