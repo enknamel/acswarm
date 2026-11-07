@@ -421,6 +421,7 @@ impl ItemStats {
             NumKey::Majors => self.tier_count(Tier::Major),
             NumKey::Epics => self.tier_count(Tier::Epic),
             NumKey::Legendaries => self.tier_count(Tier::Legendary),
+            NumKey::Class => Some(self.wcid as f64),
         }
     }
 
@@ -657,6 +658,8 @@ pub enum NumKey {
     Majors,
     Epics,
     Legendaries,
+    /// The weenie class, which comes with the item: a quest's own rule asks for one exactly.
+    Class,
 }
 
 impl NumKey {
@@ -684,6 +687,7 @@ impl NumKey {
             "majors" => NumKey::Majors,
             "epics" => NumKey::Epics,
             "legendaries" => NumKey::Legendaries,
+            "wcid" | "class" => NumKey::Class,
             _ => return None,
         })
     }
@@ -711,12 +715,16 @@ impl NumKey {
             NumKey::Majors => "major cantrips",
             NumKey::Epics => "epic cantrips",
             NumKey::Legendaries => "legendary cantrips",
+            NumKey::Class => "weenie class",
         }
     }
 
     /// Whether the field only exists once the item is appraised.
     pub fn needs_appraisal(self) -> bool {
-        !matches!(self, NumKey::Value | NumKey::Burden | NumKey::Stack)
+        !matches!(
+            self,
+            NumKey::Value | NumKey::Burden | NumKey::Stack | NumKey::Class
+        )
     }
 }
 

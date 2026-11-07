@@ -340,7 +340,7 @@ impl Ask {
 pub fn needs_id(key: NumKey) -> bool {
     !matches!(
         key,
-        NumKey::Value | NumKey::Burden | NumKey::Workmanship | NumKey::Stack
+        NumKey::Value | NumKey::Burden | NumKey::Workmanship | NumKey::Stack | NumKey::Class
     )
 }
 
@@ -365,6 +365,9 @@ pub struct Rule {
     /// A salvage rule's workmanship bands, "1-7, 8, 9, 10" (`crate::bands`); empty is all together.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub combine: String,
+    /// The quest whose pursuit added it to the [`QUESTS`] section; empty for a player's own rule.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub quest: String,
 }
 
 impl Default for Rule {
@@ -377,6 +380,7 @@ impl Default for Rule {
             all: Vec::new(),
             keep_up_to: None,
             combine: String::new(),
+            quest: String::new(),
         }
     }
 }
@@ -519,6 +523,12 @@ pub struct Buy {
     /// lockpicker. A line that does not hold is neither bought nor kept from sale.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub when: Vec<Mine>,
+    /// An editor heading to file it under, as [`Rule::group`]; the buying ignores it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub group: String,
+    /// The quest whose pursuit added it to the [`QUESTS`] section; empty for a player's own line.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub quest: String,
 }
 
 fn yes() -> bool {
@@ -909,6 +919,7 @@ impl Profile {
             from: None,
             on: true,
             when: vec![trained_in_war.clone()],
+            ..Default::default()
         };
         Profile {
             name: "Starter".into(),
@@ -1015,6 +1026,7 @@ impl Profile {
                     from: None,
                     on: true,
                     when: Vec::new(),
+                    ..Default::default()
                 },
                 Buy {
                     what: "Healing Kit".into(),
@@ -1024,6 +1036,7 @@ impl Profile {
                     from: None,
                     on: true,
                     when: vec![trained_in_healing.clone()],
+                    ..Default::default()
                 },
                 scarab("Lead Scarab", 50, 10),
                 scarab("Iron Scarab", 50, 10),
@@ -1036,6 +1049,7 @@ impl Profile {
                     from: None,
                     on: true,
                     when: vec![trained_in_missile],
+                    ..Default::default()
                 },
             ],
             sell_to: SellTo::Best,
@@ -1044,11 +1058,14 @@ impl Profile {
     }
 }
 
+/// The section the quest rule and the pursuit's own entries are filed under.
+pub const QUESTS: &str = "Quests";
+
 /// The rule that keeps what an active quest wants: an ordinary rule, moved or overruled like any.
 pub fn quest_rule() -> Rule {
     Rule {
         name: "quest items".into(),
-        group: "Quests".into(),
+        group: QUESTS.into(),
         action: LootAction::Keep,
         all: vec![Ask::Quest],
         ..Default::default()
@@ -1064,6 +1081,42 @@ impl Profile {
         }
         self.rules.insert(0, quest_rule());
         true
+    }
+
+    /// Make the pursuit's entries for the character `who` exactly `rules` and `buy`: the rules
+    /// after the section's last rule (else first), the lines after its last line (else last).
+    /// Only `who`'s own entries ([`Rule::is_quest_entry`]) go; false when nothing changed.
+    pub fn set_quest_entries(&mut self, who: &str, rules: Vec<Rule>, buy: Vec<Buy>) -> bool {
+        let old_rules = self.rules.iter().filter(|r| r.is_quest_entry(who));
+        let old_buy = self.buy.iter().filter(|b| b.is_quest_entry(who));
+        if old_rules.eq(rules.iter()) && old_buy.eq(buy.iter()) {
+            return false;
+        }
+        self.rules.retain(|r| !r.is_quest_entry(who));
+        let at = self.rules.iter().rposition(|r| r.group == QUESTS);
+        let at = at.map_or(0, |i| i + 1);
+        self.rules.splice(at..at, rules);
+        self.buy.retain(|b| !b.is_quest_entry(who));
+        let at = self.buy.iter().rposition(|b| b.group == QUESTS);
+        let at = at.map_or(self.buy.len(), |i| i + 1);
+        self.buy.splice(at..at, buy);
+        true
+    }
+}
+
+impl Rule {
+    /// Whether the pursuit added it for `who`: marked with a quest and asking that name exactly.
+    pub fn is_quest_entry(&self, who: &str) -> bool {
+        let named = |a: &Ask| matches!(a, Ask::Me(Mine::Name(n)) if n == who);
+        !self.quest.is_empty() && self.all.iter().any(named)
+    }
+}
+
+impl Buy {
+    /// Whether the pursuit added it for `who`, as [`Rule::is_quest_entry`].
+    pub fn is_quest_entry(&self, who: &str) -> bool {
+        let named = |m: &Mine| matches!(m, Mine::Name(n) if n == who);
+        !self.quest.is_empty() && self.when.iter().any(named)
     }
 }
 
@@ -1130,6 +1183,7 @@ pub fn num_word(k: NumKey) -> &'static str {
         NumKey::Majors => "majors",
         NumKey::Epics => "epics",
         NumKey::Legendaries => "legendaries",
+        NumKey::Class => "weenie class",
     }
 }
 
@@ -1719,6 +1773,7 @@ mod tests {
                 from: None,
                 on: true,
                 when: Vec::new(),
+                ..Default::default()
             },
             Buy {
                 what: "Peerless Healing Kit".into(),
@@ -1727,6 +1782,7 @@ mod tests {
                 from: Some("Fletcher".into()),
                 on: true,
                 when: Vec::new(),
+                ..Default::default()
             },
             Buy {
                 what: "Acid Arrowhead".into(),
@@ -1735,6 +1791,7 @@ mod tests {
                 from: None,
                 on: false,
                 when: Vec::new(),
+                ..Default::default()
             },
         ];
         let held = |what: &str| match what {
@@ -1806,6 +1863,7 @@ mod tests {
             from: None,
             on: true,
             when: Vec::new(),
+            ..Default::default()
         }];
         let at = |have: u32| {
             p.shortfall(|_| have, &anyone(), "Aldric")
@@ -1828,6 +1886,7 @@ mod tests {
             from: None,
             on: true,
             when: Vec::new(),
+            ..Default::default()
         };
         assert_eq!(quarter.low_mark(), 62);
         // Zero is a real answer, not a missing one: only when it is out.
@@ -1850,6 +1909,7 @@ mod tests {
                 from: None,
                 on: true,
                 when: Vec::new(),
+                ..Default::default()
             },
             Buy {
                 what: "Acid Arrowhead".into(),
@@ -1858,6 +1918,7 @@ mod tests {
                 from: Some("Thimrin Woodsetter".into()),
                 on: true,
                 when: Vec::new(),
+                ..Default::default()
             },
         ];
         let short = p.shortfall(|_| 0, &anyone(), "Aldric");
@@ -2246,6 +2307,108 @@ mod tests {
         assert_eq!(old.rules, [quest_rule(), cheap]);
         assert!(!old.add_quest_rule(), "a second time");
         assert_eq!(old.rules.len(), 2);
+    }
+
+    /// The pursuit's rule for `who` keeping one of `wcid`, for `quest`.
+    fn pursued(who: &str, wcid: u32, quest: &str) -> Rule {
+        Rule {
+            name: format!("{quest}: {wcid}"),
+            group: QUESTS.into(),
+            quest: quest.into(),
+            all: vec![
+                Ask::Me(Mine::Name(who.into())),
+                Ask::Item(Term::Num(NumKey::Class, Op::Eq, wcid as f64)),
+            ],
+            keep_up_to: Some(1),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_weenie_class_rule_keeps_only_that_class_and_needs_no_appraisal() {
+        let r = pursued("Fletch", 27902, "magicitemtraining3");
+        assert!(!r.needs_id());
+        let p = Profile {
+            rules: vec![r],
+            ..Default::default()
+        };
+        let necklace = ItemStats {
+            wcid: 27902,
+            ..item("Necklace of Leerargh", item_type::JEWELRY, 50)
+        };
+        let other = ItemStats {
+            wcid: 27903,
+            ..necklace.clone()
+        };
+        let me = Wielder::default();
+        let keep = Verdict::Decided(LootAction::Keep, "magicitemtraining3: 27902".into());
+        assert_eq!(p.judge_test(&necklace, &me, "Fletch", 0), keep);
+        assert_eq!(
+            p.judge_test(&necklace, &me, "Fletch", 1),
+            Verdict::None,
+            "one is enough"
+        );
+        assert_eq!(p.judge_test(&other, &me, "Fletch", 0), Verdict::None);
+        assert_eq!(p.judge_test(&necklace, &me, "Brynn", 0), Verdict::None);
+        assert_eq!(NumKey::parse("wcid"), Some(NumKey::Class));
+    }
+
+    #[test]
+    fn the_pursuits_entries_replace_only_its_own_in_the_quests_section() {
+        let mut p = quest_then_cheap(Vec::new());
+        let own = Rule {
+            group: QUESTS.into(),
+            ..rule("my quest keys", LootAction::Keep, vec![])
+        };
+        p.rules.insert(1, own.clone());
+        let brynns = pursued("Brynn", 1, "a");
+        p.rules.insert(2, brynns.clone());
+        let line = |what: &str, who: &str, quest: &str| Buy {
+            what: what.into(),
+            keep: 1,
+            on: true,
+            group: QUESTS.into(),
+            quest: quest.into(),
+            when: vec![Mine::Name(who.into())],
+            ..Default::default()
+        };
+        p.buy = vec![line("Taper", "", ""), line("Brynn's", "Brynn", "a")];
+        let start = p.clone();
+        let mine = vec![pursued("Fletch", 2, "a"), pursued("Fletch", 3, "b")];
+        assert!(p.set_quest_entries("Fletch", mine.clone(), vec![line("Mine", "Fletch", "a")]));
+        let names: Vec<&str> = p.rules.iter().map(|r| r.name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "quest items",
+                "my quest keys",
+                "a: 1",
+                "a: 2",
+                "b: 3",
+                "nothing cheap"
+            ]
+        );
+        assert_eq!(p.buy.last().map(|b| b.what.as_str()), Some("Mine"));
+        assert!(
+            !p.set_quest_entries("Fletch", mine, vec![line("Mine", "Fletch", "a")]),
+            "unchanged"
+        );
+        assert!(p.set_quest_entries("Fletch", vec![pursued("Fletch", 3, "b")], Vec::new()));
+        assert_eq!(
+            p.rules
+                .iter()
+                .filter(|r| r.is_quest_entry("Fletch"))
+                .count(),
+            1
+        );
+        assert!(p.set_quest_entries("Fletch", Vec::new(), Vec::new()));
+        assert_eq!(p, start, "the player's and Brynn's entries stand");
+        // Read back from a profile saved before the fields, both are empty.
+        let old: Rule = serde_json::from_str(r#"{"name":"x","on":true,"action":"keep","all":[]}"#)
+            .expect("an old rule");
+        assert!(old.quest.is_empty());
+        let old: Buy = serde_json::from_str(r#"{"what":"Taper","keep":5}"#).expect("an old line");
+        assert!(old.quest.is_empty() && old.group.is_empty());
     }
 }
 

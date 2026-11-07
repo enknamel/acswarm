@@ -56,6 +56,7 @@ fn buy_list(library: &crate::profile::Library, lines: &[(&str, u32)]) {
             from: None,
             on: true,
             when: Vec::new(),
+            ..Default::default()
         })
         .collect();
     library.put(p).expect("put");

@@ -55,7 +55,7 @@ const DIM: egui::Color32 = egui::Color32::from_gray(150);
 const OPS: [Op; 5] = [Op::Ge, Op::Gt, Op::Eq, Op::Le, Op::Lt];
 
 /// Every numeric field of an item a rule can name.
-const NUM_KEYS: [NumKey; 21] = [
+const NUM_KEYS: [NumKey; 22] = [
     NumKey::Value,
     NumKey::Burden,
     NumKey::Workmanship,
@@ -77,6 +77,7 @@ const NUM_KEYS: [NumKey; 21] = [
     NumKey::Majors,
     NumKey::Epics,
     NumKey::Legendaries,
+    NumKey::Class,
 ];
 
 /// Where the profiles live when nobody has said otherwise:
