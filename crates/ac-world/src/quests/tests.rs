@@ -161,7 +161,11 @@ fn a_random_reply_is_one_row_listing_every_reward() {
 fn every_line_of_both_files_parses_and_givers_stand_in_the_world() {
     assert_eq!(lines(QUESTS).count(), all().len());
     assert_eq!(lines(GIVERS).count(), givers().places.len());
-    assert_eq!(lines(SOURCES).count(), sources().len());
+    let from_file = sources().iter().filter(|s| s.kind != Yield::Vendor);
+    assert_eq!(lines(SOURCES).count(), from_file.count());
+    for s in sources().iter().filter(|s| !s.kind.is_hunted()) {
+        assert_eq!(s.places.len(), s.landblocks.len(), "{} {}", s.wcid, s.name);
+    }
     for r in all() {
         assert!(!r.places.is_empty(), "{}: nowhere", r.id);
     }
@@ -241,4 +245,51 @@ fn a_chests_guardians_spawn_nowhere() {
         .collect();
     assert!(!at.contains(&0xC6A9), "{at:x?}");
     assert!(at.contains(&0xCE4E), "{at:x?}");
+}
+
+#[test]
+fn the_necklace_of_leerargh_comes_from_a_locked_chest_whose_key_a_scamp_drops() {
+    // magicitemtraining3: Bleeargh takes the necklace (27902), which only chest 27890 holds
+    // (its generator), locked with KeyMosswartNecklaceLeerargh; the Smelly Key (27896) opens it.
+    let hand_in = rows_of("magicitemtraining3").find(|r| r.kind == Kind::Item);
+    assert_eq!(hand_in.map(|r| &r.want), Some(&Want::Item(27902)));
+    let from: Vec<&Source> = sources_of(&Want::Item(27902)).collect();
+    assert_eq!(from.len(), 1, "{from:?}");
+    let chest = from[0];
+    assert_eq!((chest.kind, chest.wcid), (Yield::Container, 27890));
+    assert_eq!(chest.landblocks, [(0x0177_0297, 1)]);
+    let local = chest.places[0].at - crate::landblock_origin(0x0177_0297);
+    assert!(
+        local.distance(Vec3::new(20.37, -271.08, 24.0)) < 0.1,
+        "{local}"
+    );
+    assert_eq!(chest.keys, [(27896, "A Smelly Key".to_string())]);
+    let key: Vec<&Source> = sources_of(&Want::Item(27896)).collect();
+    assert!(
+        key.iter()
+            .any(|s| s.kind == Yield::Drop && s.wcid == 27892 && s.landblocks == [(0x177, 1)]),
+        "{key:?}"
+    );
+    let grounds = crate::quest_chain::source_grounds(&Want::Item(27896));
+    assert!(
+        grounds.first().is_some_and(|g| g.place.is_some()),
+        "{grounds:?}"
+    );
+}
+
+#[test]
+fn a_shop_selling_a_wanted_item_is_a_source_of_it() {
+    let sold = sources()
+        .iter()
+        .find(|s| s.kind == Yield::Vendor)
+        .expect("a shop source");
+    let Want::Item(w) = sold.want else {
+        panic!("{sold:?}")
+    };
+    let shop = crate::shops::all()
+        .iter()
+        .find(|s| s.wcid == sold.wcid)
+        .expect("its shop");
+    assert!(shop.stocks_wcid(w));
+    assert_eq!(sold.places.len(), 1);
 }

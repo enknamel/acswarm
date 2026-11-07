@@ -136,6 +136,20 @@ impl Client {
                 });
             }
         }
+        // The working pursuit's buy, at its counter: the quest asked for it by name.
+        if let Some((name, more, vendor)) = self.pursued_buy() {
+            let have = self.carried_named(&name);
+            needs.push(Need {
+                name: name.clone(),
+                want: more,
+                have,
+                keep: have + more,
+                urgent: true,
+                buyable: true,
+                from: Some(vendor),
+                kind: NeedKind::Named(name),
+            });
+        }
         // Nothing else is bought: the profile's buy list is the whole of what to stock, components
         // and ammunition included (test: only_the_profiles_buy_list_is_shopped_for).
         needs

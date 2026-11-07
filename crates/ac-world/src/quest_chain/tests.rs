@@ -1,5 +1,5 @@
 use super::*;
-use crate::quests::{rows_of, Handing};
+use crate::quests::{rows_of, Handing, Yield};
 
 fn hunts(chain: &[ChainLink]) -> &[SourceGround] {
     chain

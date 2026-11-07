@@ -220,6 +220,10 @@ pub struct State {
     pursuit_grounds: Vec<(u32, ac_world::Place)>,
     /// The working pursued hunt's creatures, by weenie class: picked before a nearer namesake.
     pub(crate) pursuit_sought: Vec<u32>,
+    /// Quest item sources a step at was refused, by wanted item and source class, and since when.
+    pub(crate) sources_dropped: Recent<(u32, u32)>,
+    /// The pursued fetch's act sent, waiting on its answer.
+    pub(crate) fetching: Option<pursuit::Fetching>,
 }
 
 /// A few names, and how many more there are. A caster short of every

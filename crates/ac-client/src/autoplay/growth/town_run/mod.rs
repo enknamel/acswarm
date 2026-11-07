@@ -272,8 +272,11 @@ impl Client {
                 now,
             );
         }
-        // A pursued quest's call on its giver goes with town runs off (`start_quest_call`).
-        let for_quest = self.pursuit_call().is_some() || self.autoplay.growth.is_quest_run();
+        // A pursued quest's call on its giver (`start_quest_call`), or its buy, goes with town
+        // runs off.
+        let for_quest = self.pursuit_call().is_some()
+            || self.is_pursued_buy()
+            || self.autoplay.growth.is_quest_run();
         (cfg.town_runs || for_quest) && self.grow_town_run(now, &cfg)
     }
 

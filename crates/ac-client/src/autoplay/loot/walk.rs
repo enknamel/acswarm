@@ -13,7 +13,7 @@ use crate::{Client, Goal};
 /// Opening one asks the server to walk us there, and that walk is not
 /// instant: a flat six seconds was enough for a corpse at our feet and
 /// not for one across a room, so the far ones were written off unopened.
-pub(super) fn loot_wait(away: f32) -> Duration {
+pub(crate) fn loot_wait(away: f32) -> Duration {
     LOOT_TIMEOUT + Duration::from_secs_f32((away.max(0.0) / LOOT_WALK).min(30.0))
 }
 

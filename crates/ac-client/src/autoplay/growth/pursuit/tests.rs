@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use ac_world::portals::Portal;
 use ac_world::quests::{Kind, Source};
 use glam::Vec3;
+use std::time::{Duration, Instant};
 
 use super::*;
 use crate::quest_log::{considered_rows, quest_board};
@@ -15,6 +16,8 @@ struct Fake {
     chains: BTreeMap<&'static str, Vec<ChainLink>>,
     grounds: Vec<(Want, SourceGround)>,
     givers: BTreeMap<&'static str, Vec<FlagBy>>,
+    /// Sources standing in for the data's: a want listed here has only these.
+    sources: Vec<&'static Source>,
 }
 
 impl Chains for Fake {
@@ -29,6 +32,20 @@ impl Chains for Fake {
 
     fn givers(&self, flag: &str) -> Vec<FlagBy> {
         self.givers.get(flag).cloned().unwrap_or_default()
+    }
+
+    fn sources(&self, want: &Want) -> Vec<&'static Source> {
+        let own: Vec<&'static Source> = self
+            .sources
+            .iter()
+            .copied()
+            .filter(|s| s.want == *want)
+            .collect();
+        if own.is_empty() {
+            ac_world::quests::sources_of(want).collect()
+        } else {
+            own
+        }
     }
 }
 
@@ -46,6 +63,8 @@ fn dropper(want: Want, wcid: u32, name: &str, level: u32) -> &'static Source {
         level,
         chance: 1.0,
         landblocks: Vec::new(),
+        places: Vec::new(),
+        keys: Vec::new(),
     })
 }
 
@@ -114,6 +133,16 @@ fn facts(level: u32, pursue: &[(&str, bool)]) -> QuestFacts {
 
 /// The pursuit list worked out as `refresh_quests` and `refresh_pursuit` do, with `fake`'s chains.
 fn work(facts: &QuestFacts, fake: &dyn Chains, led: Option<&str>) -> Pursued {
+    work_dropping(facts, fake, led, &|_| false)
+}
+
+/// [`work`], with the sources `dropped` says were refused lately left out.
+fn work_dropping(
+    facts: &QuestFacts,
+    fake: &dyn Chains,
+    led: Option<&str>,
+    dropped: &dyn Fn(&Source) -> bool,
+) -> Pursued {
     let holds = |f: &str| crate::quest_log::holds(facts, f);
     let chained = with_chain(&facts.config.pursue, &holds, fake);
     let mut f = facts.clone();
@@ -135,6 +164,7 @@ fn work(facts: &QuestFacts, fake: &dyn Chains, led: Option<&str>) -> Pursued {
         held: &held,
         led,
         chains: fake,
+        dropped,
     };
     pursuit_of(&board, &chained, &ask)
 }
@@ -315,6 +345,7 @@ fn fiun_behind_the_pit() -> Fake {
         chains: BTreeMap::from([("augmentationprovinggroundaccess", vec![flag])]),
         grounds: vec![(Want::Item(28719), ground(0x0096, insatiable, pit))],
         givers: BTreeMap::from([("Eaterpit", vec![FlagBy::Quest(ginazio())])]),
+        ..Fake::default()
     }
 }
 
@@ -635,4 +666,275 @@ fn a_kill_task_is_hunted_on_the_ground_reached_soonest_not_the_one_with_most_spa
     let cfg = c.autoplay.config.growth.clone();
     assert!(c.grow_hunt(now, &cfg));
     assert_eq!(c.autoplay.growth.bound.as_ref().map(|b| b.0), soonest);
+}
+
+/// Bleeargh's Necklace of Leerargh (magicitemtraining3): the data's chest and key, and the key's
+/// Scamp behind an open portal into its dungeon.
+fn necklace() -> Fake {
+    let scamp = dropper(Want::Item(27896), 27892, "Burun Ruuk Scamp", 40);
+    let into = way_in("Mosswart Dungeon", 0x0177, 0, "");
+    Fake {
+        grounds: vec![(Want::Item(27896), ground(0x0177, scamp, into))],
+        ..Fake::default()
+    }
+}
+
+/// A `kind` source of the necklace standing at `at`, with no keys.
+fn necklace_from(kind: Yield, wcid: u32, name: &str, at: Place) -> Source {
+    Source {
+        want: Want::Item(27902),
+        kind,
+        wcid,
+        name: name.to_string(),
+        level: 0,
+        chance: 1.0,
+        landblocks: vec![(at.cell, 1)],
+        places: vec![at],
+        keys: Vec::new(),
+    }
+}
+
+#[test]
+fn the_necklace_is_had_by_hunting_the_key_then_opening_the_chest_then_handing_it_in() {
+    let fake = necklace();
+    let mut f = facts(30, &[("magicitemtraining3", true)]);
+    // No key: the Scamp that drops it is hunted, and the board keeps the key it brings.
+    let p = work(&f, &fake, None);
+    match &p.lines[0].step {
+        PursuitStep::Hunt {
+            landblock,
+            creature,
+            ..
+        } => assert_eq!(
+            (*landblock, creature.as_str()),
+            (0x0177, "Burun Ruuk Scamp")
+        ),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(p.sought, [27892]);
+    // The key carried: the chest, opened with it.
+    f.carried.insert(27896, 1);
+    let p = work(&f, &fake, None);
+    match &p.lines[0].step {
+        PursuitStep::OpenChest { chest, at, key } => {
+            assert_eq!(
+                (chest.wcid, at.cell, *key),
+                (27890, 0x0177_0297, Some(27896))
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+    let words = p.lines[0].words(NOW);
+    assert!(
+        words.contains("open An old Chest with A Smelly Key"),
+        "{words}"
+    );
+    // The necklace carried: handed in to Bleeargh.
+    f.carried.insert(27902, 1);
+    let p = work(&f, &fake, None);
+    match &p.lines[0].step {
+        PursuitStep::HandIn { row, .. } => {
+            assert!(row.giver.starts_with("Bleeargh"), "{}", row.giver)
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn the_necklace_quest_wants_the_key_kept_while_the_necklace_is_wanted() {
+    let f = facts(30, &[("magicitemtraining3", true)]);
+    let board = quest_board(considered_rows(&f.config), &f);
+    let wants = crate::quest_log::quest_wants(&board);
+    let has = |w: u32| wants.iter().any(|q| q.wcid == w);
+    assert!(has(27902) && has(27896), "{wants:?}");
+}
+
+#[test]
+fn a_chest_refused_lately_is_left_out() {
+    let mut f = facts(30, &[("magicitemtraining3", true)]);
+    f.carried.insert(27896, 1);
+    let chest = |s: &Source| s.kind == Yield::Container;
+    let p = work_dropping(&f, &necklace(), None, &chest);
+    assert!(
+        !matches!(p.lines[0].step, PursuitStep::OpenChest { .. }),
+        "{p:?}"
+    );
+}
+
+#[test]
+fn an_item_a_shop_sells_is_bought_on_a_town_run() {
+    let at = Place {
+        at: Vec3::new(100.0, 100.0, 0.0),
+        cell: 0xA9B4_0019,
+    };
+    let fake = Fake {
+        sources: vec![leak(necklace_from(Yield::Vendor, 9678, "Abia", at))],
+        ..necklace()
+    };
+    let p = work(&facts(30, &[("magicitemtraining3", true)]), &fake, None);
+    match &p.lines[0].step {
+        PursuitStep::Buy {
+            wcid, vendor, more, ..
+        } => assert_eq!((*wcid, vendor.as_str(), *more), (27902, "Abia", 1)),
+        other => panic!("{other:?}"),
+    }
+    assert!(p.lines[0].working);
+}
+
+#[test]
+fn an_item_lying_on_the_floor_is_walked_to_and_picked_up() {
+    let at = Place {
+        at: Vec3::new(100.0, 100.0, 0.0),
+        cell: 0x0177_0297,
+    };
+    let floor = necklace_from(Yield::Floor, 27902, "Necklace of Leerargh", at);
+    let fake = Fake {
+        sources: vec![leak(floor)],
+        ..necklace()
+    };
+    let p = work(&facts(30, &[("magicitemtraining3", true)]), &fake, None);
+    assert_eq!(
+        p.lines[0].step,
+        PursuitStep::PickUp {
+            wcid: 27902,
+            name: "Necklace of Leerargh".into(),
+            at
+        }
+    );
+}
+
+const KEY: u32 = 0x8000_0101;
+const CHEST: u32 = 0x7017_7039;
+
+/// A level 30 at Holtburg working `step`'s pursuit, built from the place beside it.
+fn fetching(step: impl Fn(Place) -> PursuitStep) -> (Client, PursuitLine) {
+    let at = Vec3::new(80.0, 10.0, 0.0);
+    let mut c = crate::testkit::standing_in_the_field(30, 0xA9B4_0019, at);
+    let me = c.my_position().expect("standing");
+    let beside = Place {
+        at: me + Vec3::new(1.0, 0.0, 0.0),
+        cell: 0xA9B4_0019,
+    };
+    let line = PursuitLine {
+        id: "magicitemtraining3".into(),
+        title: "Necklace".into(),
+        step: step(beside),
+        working: true,
+        via: None,
+    };
+    c.pursuit = vec![line.clone()];
+    (c, line)
+}
+
+/// Put an object of `wcid` in the world at `at`.
+fn lying(c: &mut Client, guid: u32, wcid: u32, name: &str, at: Place) {
+    c.world.objects.insert(
+        guid,
+        ac_world::WorldObject {
+            guid,
+            weenie_class_id: wcid,
+            name: name.into(),
+            position: crate::testkit::placed(at.cell, at.at),
+            ..Default::default()
+        },
+    );
+}
+
+/// Carry one of `wcid` as `guid`.
+fn carrying(c: &mut Client, guid: u32, wcid: u32, name: &str) {
+    crate::testkit::thing_in_the_pack(c, guid, name, 1);
+    c.world
+        .objects
+        .get_mut(&guid)
+        .expect("packed")
+        .weenie_class_id = wcid;
+}
+
+/// The data's chest, locked with the Smelly Key, standing at `at`.
+fn old_chest(at: Place) -> PursuitStep {
+    let chest = Source {
+        keys: vec![(27896, "A Smelly Key".into())],
+        ..necklace_from(Yield::Container, 27890, "An old Chest", at)
+    };
+    PursuitStep::OpenChest {
+        chest: leak(chest),
+        at,
+        key: Some(27896),
+    }
+}
+
+fn chest_at(line: &PursuitLine) -> Place {
+    match line.step {
+        PursuitStep::OpenChest { at, .. } => at,
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn at_the_chest_the_key_is_used_then_the_chest_opened_and_emptied_by_the_loot_rules() {
+    let (mut c, line) = fetching(old_chest);
+    lying(&mut c, CHEST, 27890, "An old Chest", chest_at(&line));
+    carrying(&mut c, KEY, 27896, "A Smelly Key");
+    let now = Instant::now();
+    assert_eq!(c.grow_fetch(&line, now), Some(true));
+    assert_eq!(c.last_used, Some(CHEST), "the key is used on the chest");
+    let f = c
+        .autoplay
+        .growth
+        .fetching
+        .clone()
+        .expect("waiting on the key");
+    assert_eq!(f.act, fetch::Act::Unlock);
+    // Unlocked (a UseDone with no error, Lock.cs:156-169): the chest is opened for the loot rules.
+    let later = now + Duration::from_millis(300);
+    c.use_done = Some((0, later));
+    assert_eq!(c.grow_fetch(&line, later), Some(true));
+    assert!(
+        c.autoplay.is_at_corpse(CHEST),
+        "the loot rules have the chest"
+    );
+    // Emptied, the necklace in the pack: the board is worked out again for the hand-in.
+    c.autoplay.let_go_of_corpse();
+    carrying(&mut c, 0x8000_0102, 27902, "Necklace of Leerargh");
+    c.quest_board_at = Some(later);
+    assert_eq!(c.grow_fetch(&line, later), Some(true));
+    assert_eq!(c.autoplay.growth.fetching, None);
+    assert_eq!(c.quest_board_at, None);
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_key_that_does_not_fit_drops_the_chest_for_the_pursuit() {
+    let (mut c, line) = fetching(old_chest);
+    lying(&mut c, CHEST, 27890, "An old Chest", chest_at(&line));
+    carrying(&mut c, KEY, 27896, "A Smelly Key");
+    let now = Instant::now();
+    c.grow_fetch(&line, now);
+    // KeyDoesntFitThisLock (Lock.cs:184-186).
+    let later = now + Duration::from_millis(300);
+    c.use_done = Some((0x04B2, later));
+    assert_eq!(c.grow_fetch(&line, later), Some(false));
+    let PursuitStep::OpenChest { chest, .. } = &line.step else {
+        unreachable!()
+    };
+    assert!(c.is_source_dropped(chest, later));
+    assert!(!c.autoplay.is_at_corpse(CHEST));
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn an_item_on_the_floor_beside_the_character_is_picked_up() {
+    const NECKLACE: u32 = 0x8000_0201;
+    let (mut c, line) = fetching(|at| PursuitStep::PickUp {
+        wcid: 27902,
+        name: "Necklace of Leerargh".into(),
+        at,
+    });
+    let PursuitStep::PickUp { at, .. } = line.step else {
+        unreachable!()
+    };
+    lying(&mut c, NECKLACE, 27902, "Necklace of Leerargh", at);
+    assert_eq!(c.grow_fetch(&line, Instant::now()), Some(true));
+    assert!(c.loot_queue.contains(&NECKLACE), "asked to pick it up");
 }

@@ -1,8 +1,7 @@
 //! Every quest a placed NPC holds, XP or not: who gives each and where they stand, what it asks
 //! (kills, an item, a talk), what it does and what the client cannot check, how soon it repeats,
-//! and where what it asks comes from.
-//!
-//! Server data (emote sets), in `data/quests.csv`, `quest_givers.csv` and `quest_sources.csv`
+//! and where what it asks comes from: hunted, given, on the floor, in a chest, or in a shop.
+//! Server data in `data/quests.csv`, `quest_givers.csv` and `quest_sources.csv`
 //! (`reference/scripts/data/quests.sh`); rows sharing an id are alternative ways to one quest.
 
 use std::collections::BTreeMap;
@@ -223,6 +222,19 @@ pub enum Yield {
     Kill,
     /// A placed NPC whose talk gives the item.
     Npc,
+    /// Made on the ground by a generator: walked to and picked up.
+    Floor,
+    /// Held in a chest, opened with one of its `keys` when it is locked.
+    Container,
+    /// A shop sells it (`crate::shops`): bought on a town run.
+    Vendor,
+}
+
+impl Yield {
+    /// Whether the source is hunted: a creature killed where it spawns.
+    pub fn is_hunted(self) -> bool {
+        matches!(self, Yield::Drop | Yield::Kill)
+    }
 }
 
 /// Where what a quest wants comes from.
@@ -236,8 +248,23 @@ pub struct Source {
     pub level: u32,
     /// Per kill; 1 for a kill or an NPC.
     pub chance: f32,
-    /// `(landblock, spawn entries)` as `hunting::Ground::count` counts; an NPC's is `(cell, 1)`.
+    /// `(landblock, spawn entries)` as `hunting::Ground::count` counts; a placed one's `(cell, 1)`.
     pub landblocks: Vec<(u32, u32)>,
+    /// A placed source's spots, one per `landblocks` entry; empty for a hunted one.
+    pub places: Vec<Place>,
+    /// The keys that open a locked container, `(wcid, name)`: each a want with sources of its own.
+    pub keys: Vec<(u32, String)>,
+}
+
+impl Source {
+    /// The spot nearest `me` by straight distance; the first with no position.
+    pub fn nearest(&self, me: Option<Vec3>) -> Option<Place> {
+        let away = |p: &&Place| me.map_or(0.0, |m| p.at.distance(m));
+        self.places
+            .iter()
+            .min_by(|a, b| away(a).total_cmp(&away(b)))
+            .copied()
+    }
 }
 
 const QUESTS: &str = include_str!("../data/quests.csv");
@@ -384,17 +411,54 @@ fn parse_row(line: &'static str) -> Option<Row> {
     })
 }
 
+fn parse_spots(cells: &[(u32, u32)], at: &str) -> Option<Vec<Place>> {
+    if at.is_empty() {
+        return Some(Vec::new());
+    }
+    let spots: Vec<&str> = at.split(';').collect();
+    if spots.len() != cells.len() {
+        return None;
+    }
+    let mut out = Vec::new();
+    for (&(cell, _), spot) in cells.iter().zip(spots) {
+        let xyz: Vec<f32> = spot
+            .split(' ')
+            .map(str::parse)
+            .collect::<Result<_, _>>()
+            .ok()?;
+        let [x, y, z] = xyz[..] else { return None };
+        let at = crate::landblock_origin(cell) + Vec3::new(x, y, z);
+        out.push(Place { at, cell });
+    }
+    Some(out)
+}
+
+fn parse_keys(s: &str) -> Option<Vec<(u32, String)>> {
+    s.split(';')
+        .filter(|w| !w.is_empty())
+        .map(|w| {
+            let (wcid, name) = w.split_once('=')?;
+            Some((wcid.parse().ok()?, name.to_string()))
+        })
+        .collect()
+}
+
+/// One row: the first seven columns, and a placed source's spots and a lock's keys when there.
 fn parse_source(line: &str) -> Option<Source> {
     let f: Vec<&str> = line.split(',').collect();
-    if f.len() != 7 {
+    if f.len() != 7 && f.len() != 9 {
         return None;
     }
     let kind = match f[1] {
         "drop" => Yield::Drop,
         "kill" => Yield::Kill,
         "npc" => Yield::Npc,
+        "floor" => Yield::Floor,
+        "container" => Yield::Container,
         _ => return None,
     };
+    let landblocks = pairs(f[6], 16)?;
+    let (at, keys) = if f.len() == 9 { (f[7], f[8]) } else { ("", "") };
     Some(Source {
         want: if kind == Yield::Kill {
             Want::Kill(f[0].to_string())
@@ -406,8 +470,43 @@ fn parse_source(line: &str) -> Option<Source> {
         name: f[3].to_string(),
         level: f[4].parse().ok()?,
         chance: f[5].parse().ok()?,
-        landblocks: pairs(f[6], 16)?,
+        places: parse_spots(&landblocks, at)?,
+        landblocks,
+        keys: parse_keys(keys)?,
     })
+}
+
+/// Every shop placement selling an item a quest or a key wants, as a source.
+fn vendor_sources(parsed: &[Source]) -> Vec<Source> {
+    let mut wants: std::collections::BTreeSet<u32> = std::collections::BTreeSet::new();
+    for r in all() {
+        if let Want::Item(w) = r.want {
+            wants.insert(w);
+        }
+    }
+    for s in parsed {
+        if let Want::Item(w) = s.want {
+            wants.insert(w);
+        }
+        wants.extend(s.keys.iter().map(|k| k.0));
+    }
+    let mut out = Vec::new();
+    for shop in crate::shops::all() {
+        for w in shop.sells.iter().filter(|w| wants.contains(&w.wcid)) {
+            out.push(Source {
+                want: Want::Item(w.wcid),
+                kind: Yield::Vendor,
+                wcid: shop.wcid,
+                name: shop.name.clone(),
+                level: 0,
+                chance: 1.0,
+                landblocks: vec![(shop.cell, 1)],
+                places: vec![shop.place()],
+                keys: Vec::new(),
+            });
+        }
+    }
+    out
 }
 
 fn lines(text: &'static str) -> impl Iterator<Item = &'static str> {
@@ -425,10 +524,15 @@ pub fn all() -> &'static [Row] {
     })
 }
 
-/// Every source, parsed on first use.
+/// Every source, parsed on first use, the shops selling a wanted item joined after the file's.
 pub fn sources() -> &'static [Source] {
     static SOURCES_PARSED: OnceLock<Vec<Source>> = OnceLock::new();
-    SOURCES_PARSED.get_or_init(|| lines(SOURCES).filter_map(parse_source).collect())
+    SOURCES_PARSED.get_or_init(|| {
+        let mut all: Vec<Source> = lines(SOURCES).filter_map(parse_source).collect();
+        let shops = vendor_sources(&all);
+        all.extend(shops);
+        all
+    })
 }
 
 /// The rows of one quest, its start rows among them.

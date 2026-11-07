@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 use ac_loot::quest_wants::{wanted, QuestWant};
 use ac_world::hunting::Ground;
-use ac_world::quests::{Kind, Want, Yield};
+use ac_world::quests::{Kind, Want};
 
 use crate::quest_log::{QuestLine, QuestState};
 
@@ -38,7 +38,7 @@ pub(super) fn quest_pay(
     let mut pay = BTreeMap::new();
     for (want, xp) in per_unit {
         for s in ac_world::quests::sources_of(want) {
-            if s.kind == Yield::Npc {
+            if !s.kind.is_hunted() {
                 continue;
             }
             for &(landblock, entries) in &s.landblocks {

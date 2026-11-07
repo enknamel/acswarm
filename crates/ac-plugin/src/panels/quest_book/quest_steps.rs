@@ -92,14 +92,18 @@ pub(crate) fn chain_words(links: &[ChainLink], k: &Known) -> Vec<Step> {
             }
             ChainLink::Fetch(source) => {
                 let cell = source.landblocks.first().map_or(0, |l| l.0);
-                steps.push(
-                    Step::default()
-                        .say("Get it from ")
-                        .link(Facet::Creature, &source.name)
-                        .say(" at ")
-                        .link(Facet::At, (k.place)(cell))
-                        .say(" (autoplay can't fetch this yet)"),
-                );
+                let mut step = Step::default()
+                    .say(fetch_verb(source.kind))
+                    .link(Facet::Creature, &source.name)
+                    .say(" at ")
+                    .link(Facet::At, (k.place)(cell));
+                if let Some((_, key)) = source.keys.first() {
+                    step = step.say(format!(", opened with {key}"));
+                }
+                if source.kind == Yield::Npc {
+                    step = step.say(" (autoplay can't fetch this yet)");
+                }
+                steps.push(step);
             }
             ChainLink::HandIn(rows) => {
                 if let Some(step) = hand_in_step(rows, k) {
@@ -157,12 +161,22 @@ pub(crate) fn flag_step(
     step
 }
 
+/// How a fetched source is worked, in words before its name.
+fn fetch_verb(kind: Yield) -> &'static str {
+    match kind {
+        Yield::Floor => "Pick up ",
+        Yield::Container => "Open ",
+        Yield::Vendor => "Buy it from ",
+        Yield::Drop | Yield::Kill | Yield::Npc => "Get it from ",
+    }
+}
+
 pub(crate) fn hunt_step(g: &SourceGround, k: &Known) -> Step {
     let s: &Source = g.source;
     let verb = match s.kind {
         Yield::Drop => "Loot ",
         Yield::Kill => "Kill ",
-        Yield::Npc => "Get it from ",
+        kind => fetch_verb(kind),
     };
     let mut said = format!(" (level {}", s.level);
     if s.kind == Yield::Drop && s.chance > 0.0 && s.chance < 1.0 {
@@ -301,6 +315,15 @@ pub(crate) fn step_words(step: &PursuitStep, now: u64, place: &dyn Fn(u32) -> St
             more,
             ..
         } => format!("hunting {creature} in {at} ({more} to go)"),
+        PursuitStep::Buy {
+            name, vendor, more, ..
+        } => format!("buying {name} from {vendor} ({more} to go)"),
+        PursuitStep::PickUp { name, at, .. } => {
+            format!("picking up {name} at {}", place(at.cell))
+        }
+        PursuitStep::OpenChest { chest, at, .. } => {
+            format!("opening {} at {}", chest.name, place(at.cell))
+        }
         PursuitStep::HandIn { row, at } => {
             format!("handing it in to {} at {}", row.giver, place(at.cell))
         }

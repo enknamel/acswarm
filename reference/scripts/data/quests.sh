@@ -18,8 +18,10 @@
 # or Treasure without Wield: Creature_Death.cs:688-693), names, levels,
 # item types and values, and spawn entries per creature and landblock
 # with hunting.sh's filters (attackable, with a level; a landblock with a
-# surface counts its outdoor spawns only). docs/quests-design.md §1 says
-# what the walk reads and what it leaves out.
+# surface counts its outdoor spawns only); and for each wanted item the
+# generators making it on the ground and the chests holding it, with the
+# keys a locked one needs. docs/quests-design.md §1 says what the
+# walk reads and what it leaves out.
 #
 # This reads the local ACE world database (the community's
 # reconstruction of retail's server data) running in Docker, and is only
@@ -110,7 +112,38 @@ select m.wcid, hex(m.lb), count(*) from mon m
 where m.kind = "o" or m.lb not in (select lb from surface)
 group by m.wcid, m.lb;'
 
-for t in placed emote action quest killq itemq drops names allowgive ints spawns; do
+# What lies about and what makes it: placed objects but creatures and buildings (WeenieType
+# Portal, Door, Vendor, HotSpot, Creature, LifeStone, House, SlumLord, Hook, Storage, BootSpot,
+# HousePortal), every weenie's type, and every generator profile.
+q ground 'select li.weenie_Class_Id, hex(li.obj_Cell_Id), round(li.origin_X, 2),
+  round(li.origin_Y, 2), round(li.origin_Z, 2)
+from landblock_instance li join weenie w on w.class_Id = li.weenie_Class_Id
+where w.type not in (7, 10, 12, 13, 19, 25, 53, 55, 56, 57, 58, 59);'
+
+q wtypes 'select class_Id, type from weenie;'
+
+q gens 'select object_Id, probability, weenie_Class_Id, where_Create, hex(coalesce(obj_Cell_Id, 0)),
+  round(coalesce(origin_X, 0), 2), round(coalesce(origin_Y, 0), 2), round(coalesce(origin_Z, 0), 2)
+from weenie_properties_generator where weenie_Class_Id <> 0 order by object_Id, id;'
+
+# A chest's create list, its lock (Locked, PropertyBool 3; LockCode, PropertyString 12), every
+# key's KeyCode (PropertyString 13) and what is Stuck (PropertyBool 1, never picked up).
+q chestlist 'select cl.object_Id, cl.weenie_Class_Id, cl.destination_Type
+from weenie_properties_create_list cl
+join weenie w on w.class_Id = cl.object_Id and w.type in (20, 21)
+where cl.weenie_Class_Id <> 0;'
+
+q locks 'select b.object_Id, coalesce(s.value, "") from weenie_properties_bool b
+left join weenie_properties_string s on s.object_Id = b.object_Id and s.type = 12
+where b.type = 3 and b.value = 1;'
+
+q keys 'select s.object_Id, s.value from weenie_properties_string s
+join weenie w on w.class_Id = s.object_Id and w.type = 22 where s.type = 13;'
+
+q stuck 'select object_Id from weenie_properties_bool where type = 1 and value = 1;'
+
+for t in placed emote action quest killq itemq drops names allowgive ints spawns ground wtypes \
+  gens chestlist locks keys stuck; do
   [ -s "$TMP/$t.tsv" ] || { echo "quests.sh: the $t query returned nothing" >&2; exit 1; }
 done
 

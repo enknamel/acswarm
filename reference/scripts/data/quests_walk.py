@@ -24,6 +24,12 @@ MAX_LEVEL = 275
 DEPTH = 8
 # A root whose paths pass this many is not a quest anyone wrote by hand.
 MAX_PATHS = 4096
+# WeenieType Chest and Container (ACE.Entity/Enum/WeenieType.cs).
+CHESTS = (20, 21)
+# Generators of generators looked through for where an item lies.
+GEN_DEPTH = 3
+# Keys of keys looked through for what a chest's item needs.
+KEY_DEPTH = 3
 
 
 def rows(dump, name):
@@ -87,6 +93,63 @@ class Data:
         self.spawns = defaultdict(list)
         for wcid, lb, n in rows(dump, "spawns"):
             self.spawns[int(wcid)].append((int(lb, 16), int(n)))
+        # What lies about: placed objects but creatures and buildings, by wcid.
+        self.ground = defaultdict(list)
+        for wcid, cell, x, y, z in rows(dump, "ground"):
+            self.ground[int(wcid)].append((int(cell, 16), x, y, z))
+        self.kind = {int(w): int(t) for w, t in rows(dump, "wtypes")}
+        # Generator profiles by the wcid they make (WorldObject_Generators.cs:108-180).
+        self.made_by = defaultdict(list)
+        last = {}
+        for gen, prob, wcid, where, cell, x, y, z in rows(dump, "gens"):
+            g, p = int(gen), num(prob, 1.0)
+            # -1 always makes; others are cumulative (WorldObject_Generators.cs:159, 184-213).
+            was = last.get(g, 0.0)
+            chance = 1.0 if p < 0 else max(p - (0.0 if was > p else was), 0.0)
+            last[g] = p if p >= 0 else was
+            self.made_by[int(wcid)].append((g, min(chance, 1.0), int(where),
+                                            (int(cell, 16), x, y, z)))
+        self.chest_list = defaultdict(set)
+        for chest, wcid, dest in rows(dump, "chestlist"):
+            if int(dest) & 1:  # DestinationType.Contain
+                self.chest_list[int(wcid)].add(int(chest))
+        self.lock = {int(o): code for o, code in rows(dump, "locks")}
+        self.keys_of = defaultdict(list)
+        for key, code in rows(dump, "keys"):
+            self.keys_of[code.lower()].append(int(key))
+        self.stuck = {int(o) for (o,) in rows(dump, "stuck")}
+
+    def ground_places(self, wcid, depth=0):
+        """Where `wcid` lies or stands in the world: placed, or made on the ground."""
+        return list(self.ground.get(wcid, ())) + self.made_on_ground(wcid, depth)
+
+    def made_on_ground(self, wcid, depth=0):
+        """Where a placed generator makes `wcid` on the ground (a profile with no Contain, Wield,
+        Shop or Treasure bit: RegenLocationType.cs), at its Specific spot or the generator's own.
+        A placed object's guid is static and never picked up (Player_Inventory.cs:831-835)."""
+        out = []
+        if depth >= GEN_DEPTH:
+            return out
+        for gen, _, where, spot in self.made_by.get(wcid, ()):
+            if where & (8 | 16 | 32 | 64):
+                continue
+            if where & 4 and spot[0]:
+                out.append(spot)
+            else:
+                out.extend(self.ground_places(gen, depth + 1))
+        return out
+
+    def chests_holding(self, wcid):
+        """Chests that hold `wcid`, and the chance each fill has it: a Contain profile of
+        theirs (not a treasure table's) or their create list."""
+        found = defaultdict(float)
+        for gen, chance, where, _ in self.made_by.get(wcid, ()):
+            if where & 8 and not where & 64 and self.kind.get(gen) in CHESTS:
+                found[gen] = min(found[gen] + chance, 1.0)
+        for chest in self.chest_list.get(wcid, ()):
+            if self.kind.get(chest) in CHESTS:
+                found[chest] = 1.0
+        return found
 
     def outcome(self, obj, cat, message):
         """The set a branch runs: one, or 'random' when drawn by chance (EmoteManager.cs:1546)."""
@@ -521,7 +584,11 @@ def build(data, never):
                   for w, cell, x, y, z in givers_out]
 
     src = []
-    for want in sorted({r[5] for r in rows_out if r[1] in ("kill", "item")}):
+    wants = sorted({r[5] for r in rows_out if r[1] in ("kill", "item")})
+    seen = set(wants)
+    todo = [(w, 0) for w in wants]
+    while todo:
+        want, depth = todo.pop(0)
         if want.isdigit():
             w = int(want)
             chance = defaultdict(float)
@@ -529,21 +596,46 @@ def build(data, never):
                 chance[c] = min(chance[c] + p, 1.0)
             for c in sorted(chance):
                 if data.spawns.get(c):
-                    src.append((want, "drop", c, chance[c]))
+                    src.append((want, "drop", c, chance[c], ""))
             for n in sorted(npc_gives.get(w, ())):
-                src.append((want, "npc", n, 1.0))
+                src.append((want, "npc", n, 1.0, ""))
+            if w not in data.stuck and data.made_on_ground(w):
+                src.append((want, "floor", w, 1.0, ""))
+            for chest, p in sorted(data.chests_holding(w).items()):
+                if not data.ground_places(chest):
+                    continue
+                keys = []
+                if chest in data.lock:
+                    # A key opens the lock whose LockCode its KeyCode is (Lock.cs:248-280).
+                    keys = sorted(data.keys_of.get(data.lock[chest].lower(), ()))
+                    if not keys:
+                        continue  # a lockpick's lock: nothing autoplay can open
+                src.append((want, "container", chest, p,
+                            ";".join("%d=%s" % (k, data.name.get(k, "").replace("=", "-"))
+                                     for k in keys)))
+                for k in keys:
+                    if str(k) not in seen and depth < KEY_DEPTH:
+                        seen.add(str(k))
+                        todo.append((str(k), depth + 1))
         else:
             for c in sorted(data.counter_of[want]):
                 if data.spawns.get(c):
-                    src.append((want, "kill", c, 1.0))
+                    src.append((want, "kill", c, 1.0, ""))
     src_out = []
-    for want, kind, c, p in src:
-        if kind == "npc":
-            where = ";".join("%08X:1" % cell for cell, _, _, _ in data.placed[c])
+    for want, kind, c, p, keys in src:
+        at = ""
+        if kind in ("npc", "floor", "container"):
+            if kind == "npc":
+                spots = data.placed[c]
+            else:
+                spots = sorted(set(data.made_on_ground(c) if kind == "floor"
+                                   else data.ground_places(c)))
+            where = ";".join("%08X:1" % cell for cell, _, _, _ in spots)
+            at = ";".join("%s %s %s" % (x, y, z) for _, x, y, z in spots)
         else:
             where = ";".join("%X:%d" % lb for lb in sorted(data.spawns[c]))
         src_out.append((want, kind, str(c), data.name.get(c, ""), str(data.level(c)),
-                        "%g" % round(p, 4), where))
+                        "%g" % round(p, 4), where, at, keys))
     return rows_out, givers_out, src_out, reasons
 
 
@@ -671,12 +763,17 @@ GIVERS_HEADER = """\
 """
 
 SOURCES_HEADER = """\
-# Where what a quest wants comes from.
-# want,kind,wcid,name,level,chance,landblocks
-# want: an item wcid or a kill counter, as quests.csv names it. kind: drop (a corpse drop,
-# chance per kill), kill (a creature counting for the counter) or npc (a placed NPC whose talk
-# gives the item). landblocks: hex landblock:spawn entries;... (for an npc, its hex cell:1).
-# Regenerate with reference/scripts/data/quests.sh.
+# Where what a quest wants comes from, and what each source itself needs.
+# want,kind,wcid,name,level,chance,landblocks,at,keys
+# want: an item wcid or a kill counter, as quests.csv names it, or a key a container below
+# needs. kind: drop (a corpse drop, chance per kill), kill (a creature counting for the
+# counter), npc (a placed NPC whose talk gives the item), floor (made on the ground by a
+# generator; wcid is the item's own) or container (a chest that holds it, chance per fill).
+# landblocks: hex landblock:spawn entries;... (for an npc, floor or container, hex cell:1 per
+# placement, with at the matching local "x y z";...). keys: for a locked container, the keys
+# whose KeyCode is its LockCode, wcid=name;..., each a want of its own rows. A shop's stock is
+# vendors.csv's, joined at load (ac_world::quests::sources). Regenerate with
+# reference/scripts/data/quests.sh.
 """
 
 if __name__ == "__main__":

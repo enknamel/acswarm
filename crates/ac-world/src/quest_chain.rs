@@ -8,7 +8,7 @@ use std::sync::OnceLock;
 use glam::{Vec2, Vec3};
 
 use crate::portals::Portal;
-use crate::quests::{Kind, Repeat, Row, Source, Want, Yield};
+use crate::quests::{Kind, Repeat, Row, Source, Want};
 use crate::unlocks::Unlock;
 use crate::Place;
 
@@ -47,7 +47,7 @@ pub enum ChainLink {
     },
     /// Kill or loot it, best place first.
     Hunt(Vec<SourceGround>),
-    /// An NPC hands the item out.
+    /// Fetched, not hunted: an NPC hands it out, it lies on the floor, in a chest or in a shop.
     Fetch(&'static Source),
     /// Hand it in to any of these rows' givers.
     HandIn(Vec<&'static Row>),
@@ -241,7 +241,7 @@ fn source_ground(source: &'static Source, landblock: u32, entries: u32) -> Sourc
 /// Where `want` comes from, best first (spawn entries x chance, then the lower way in).
 pub fn source_grounds(want: &Want) -> Vec<SourceGround> {
     let mut grounds: Vec<SourceGround> = crate::quests::sources_of(want)
-        .filter(|s| s.kind != Yield::Npc)
+        .filter(|s| s.kind.is_hunted())
         .flat_map(|s| {
             s.landblocks
                 .iter()
@@ -355,10 +355,10 @@ pub fn chain_of(id: &str) -> Vec<ChainLink> {
             if let Some(p) = gate {
                 push_flag(&mut links, &p.quest, Some(p));
             }
-            let npc = crate::quests::sources_of(want).find(|s| s.kind == Yield::Npc);
-            match npc {
+            let fetched = crate::quests::sources_of(want).find(|s| !s.kind.is_hunted());
+            match fetched {
                 _ if !grounds.is_empty() => steps.push(ChainLink::Hunt(grounds)),
-                Some(npc) => steps.push(ChainLink::Fetch(npc)),
+                Some(s) => steps.push(ChainLink::Fetch(s)),
                 None => {}
             }
         }
@@ -551,10 +551,10 @@ fn add_sources(f: &mut SourceFacets, want: &Want) {
     }
     for s in crate::quests::sources_of(want) {
         push_new(&mut f.creatures, (s.name.clone(), s.level, s.chance));
-        // An NPC hands it out at no level, as the board's `easiest` counts it.
-        let level = if s.kind == Yield::Npc { 0 } else { s.level };
+        // What is fetched is had at no level, as the board's `easiest` counts it.
+        let level = if s.kind.is_hunted() { s.level } else { 0 };
         f.easiest = Some(f.easiest.map_or(level, |e| e.min(level)));
-        if s.kind == Yield::Npc {
+        if !s.kind.is_hunted() {
             for &(cell, _) in &s.landblocks {
                 push_new(&mut f.places, place_name(cell));
             }

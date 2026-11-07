@@ -107,7 +107,7 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 | summoning | `autoplay_summon`, `autoplay_claim_pet_kills`, `hear_summoning` | `autoplay/summoning.rs`, `autoplay/mod.rs` | `Autoplay.summoning` | summon | autoplay::summoning | summon, pet |
 | refusals | `hear_refusal`, `refused`, `answer` | `refused.rs`, `crates/ac-agent/src/refusals.rs` | the waiting system's own wait, e.g. `Autoplay.shelved` | refus | refused | refusal |
 | server chat | `chat_message`, `hear_arrival`, `hear_spell_attack` | `session/chat.rs`, `autoplay/hear.rs` | `Autoplay.hit_by` | arriv | session::chat | heard |
-| quests | `refresh_quests`, `quest_board`, `quest_wants`, `visit_giver`, `watch_quest_answer`, `refresh_pursuit`, `start_quest_call` | `quest_log.rs`, `crates/ac-world/src/quests.rs`, `autoplay/growth/pursuit.rs`, `autoplay/growth/town_run/calls.rs` | `Client.quest_board`, `Client.quest_log`, `Client.pursuit`, `Autoplay.config.quests` | quest_log | quest_log | quest, pursuit |
+| quests | `refresh_quests`, `quest_board`, `quest_wants`, `visit_giver`, `watch_quest_answer`, `refresh_pursuit`, `start_quest_call` | `quest_log.rs`, `crates/ac-world/src/quests.rs`, `autoplay/growth/pursuit.rs`, `autoplay/growth/pursuit/fetch.rs`, `autoplay/growth/town_run/calls.rs` | `Client.quest_board`, `Client.quest_log`, `Client.pursuit`, `Autoplay.config.quests` | quest_log | quest_log | quest, pursuit |
 
 ## Glossary
 
@@ -148,9 +148,9 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
   by drawn polygons. Server-placed objects never stall a walk; `cylinders()` only steers round them.
 - Doors are walked through, never used: `in_the_way()` never counts a door, explore aims past the
   sill (`past_the_door()`), and the Academy uses only a task's key on one.
-- Peas are components in the data: `spell_component_ids()` maps trade peas to spell-component ids,
-  so never key restock or sale on "is a component". Only the profile's buy list is bought (`grow_needs`);
-  the sale guard keeps what cast spells burn (`burns()`), and a pea tagged Sell is sold (`offer_to_vendor()`).
+- Peas are components in the data (`spell_component_ids()`): never key restock or sale on "is a
+  component". Only the profile's buy list is bought, and a pursued quest's item at its counter
+  (`grow_needs`); the sale keeps what spells burn (`burns()`), a pea tagged Sell sold (`offer_to_vendor()`).
 - The loot profile decides: `fate()` puts a tag ahead of every guard (restock, burns, keep names);
   only the server's own refusal overrides it.
 - One target picker. Swing, shot and spell all call `pick_target()`: the nearest of what

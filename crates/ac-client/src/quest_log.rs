@@ -23,6 +23,8 @@ pub const SHORT_LEG: f32 = 60.0;
 /// Hand-ins of a quest repeated any time kept at once: each takes a slot, and a giver is met
 /// only on a run that passes (guess).
 pub const ANY_HAND_INS: u32 = 5;
+/// Keys of chests holding keys looked through, as `quests_walk.py`'s `KEY_DEPTH`.
+pub const KEY_DEPTH: usize = 3;
 /// A giver's reward is waited for this long after the use or give (design §4.3, guess).
 pub const XP_WATCH: Duration = Duration::from_secs(10);
 
@@ -623,6 +625,7 @@ fn item_state(taken: &[&Row], facts: &QuestFacts) -> QuestState {
 
 /// What the board's item quests want carried, for the loot rule: a quest ready, needing more,
 /// or blocked by a rule (which may be moved) wants each of its items; [`ANY_HAND_INS`] at most.
+/// One needing more wants a key of each chest holding an item, and of each chest holding a key.
 pub fn quest_wants(board: &[QuestLine]) -> Vec<QuestWant> {
     let mut wants: BTreeMap<u32, u32> = BTreeMap::new();
     for line in board {
@@ -639,6 +642,11 @@ pub fn quest_wants(board: &[QuestLine]) -> Vec<QuestWant> {
             let count = of.clone().map(|r| r.count.max(1)).max().unwrap_or(1);
             let any = of.clone().any(|r| r.repeat == Repeat::Any);
             *wants.entry(wcid).or_insert(0) += if any { count * ANY_HAND_INS } else { count };
+            if matches!(line.state, QuestState::Needs { .. }) {
+                for key in keys_to(wcid) {
+                    wants.entry(key).or_insert(1);
+                }
+            }
         }
     }
     wants
@@ -648,6 +656,27 @@ pub fn quest_wants(board: &[QuestLine]) -> Vec<QuestWant> {
             need: Some(need),
         })
         .collect()
+}
+
+/// The keys opening a chest that holds `wcid`, and those opening a chest holding one of them,
+/// [`KEY_DEPTH`] deep.
+pub(crate) fn keys_to(wcid: u32) -> Vec<u32> {
+    let mut keys: Vec<u32> = Vec::new();
+    let mut of = vec![wcid];
+    for _ in 0..KEY_DEPTH {
+        let mut next = Vec::new();
+        for w in of {
+            let want = Want::Item(w);
+            for (key, _) in ac_world::quests::sources_of(&want).flat_map(|s| s.keys.iter()) {
+                if !keys.contains(key) && *key != wcid {
+                    keys.push(*key);
+                    next.push(*key);
+                }
+            }
+        }
+        of = next;
+    }
+    keys
 }
 
 /// The kill task a count is for: counters whose creature's name, less its last letter ("Harpies"),

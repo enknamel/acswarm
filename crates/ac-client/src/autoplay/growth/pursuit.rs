@@ -1,21 +1,24 @@
 //! Quests the player asked for, worked before hunting for XP: each pursued quest's step for this
 //! character, worked out with the board; the town run calls on givers, `grow_hunt` hunts sources.
 //! A flag a way on asks is earned first: from an unlock NPC, or by the quest stamping it, worked
-//! ahead of the one that needs it (`with_chain`).
+//! ahead of the one that needs it (`with_chain`). An item is fetched before it is hunted (`fetch`).
 
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 use ac_world::quest_chain::{ChainLink, FlagBy, SourceGround};
-use ac_world::quests::{Row, Want, Yield};
+use ac_world::quests::{Row, Source, Want, Yield};
 use ac_world::unlocks::Unlock;
 use ac_world::Place;
 
 use super::hunt::{GROUND_REACH, SKIP_GROUND_FOR, UNLOCK_RETRY};
 use super::town_run::calls::Asking;
 use crate::autoplay::{Doing, Pursuit};
-use crate::quest_log::{Blocked, QuestFacts, QuestLine, QuestState};
+use crate::quest_log::{Blocked, QuestFacts, QuestLine, QuestState, KEY_DEPTH};
 use crate::Client;
+
+mod fetch;
+pub(crate) use fetch::Fetching;
 
 /// A pursued quest that could not go on is passed over this long before it is tried again (guess).
 pub const PURSUIT_RETRY: Duration = Duration::from_secs(10 * 60);
@@ -38,6 +41,21 @@ pub enum PursuitStep {
         place: String,
         more: u32,
     },
+    /// Buy `name` (weenie class `wcid`) at `vendor`'s counter on a town run, `more` to go.
+    Buy {
+        wcid: u32,
+        name: String,
+        vendor: String,
+        more: u32,
+    },
+    /// Walk to `at` and pick up `name` (weenie class `wcid`) lying there.
+    PickUp { wcid: u32, name: String, at: Place },
+    /// Walk to `chest` at `at`, unlock it with the carried `key` when it is locked, and empty it.
+    OpenChest {
+        chest: &'static Source,
+        at: Place,
+        key: Option<u32>,
+    },
     /// Hand in to `row`'s giver at `at`.
     HandIn { row: &'static Row, at: Place },
     /// Done; may be done again at this Unix second.
@@ -56,6 +74,9 @@ impl PursuitStep {
             PursuitStep::TakeUp { .. }
                 | PursuitStep::EarnFlag { .. }
                 | PursuitStep::Hunt { .. }
+                | PursuitStep::Buy { .. }
+                | PursuitStep::PickUp { .. }
+                | PursuitStep::OpenChest { .. }
                 | PursuitStep::HandIn { .. }
         )
     }
@@ -73,6 +94,20 @@ impl PursuitStep {
                 more,
                 ..
             } => format!("hunt {creature} in {place} ({more} to go)"),
+            PursuitStep::Buy {
+                name, vendor, more, ..
+            } => format!("buy {name} from {vendor} ({more} to go)"),
+            PursuitStep::PickUp { name, at, .. } => format!(
+                "pick up {name} in {}",
+                ac_world::quest_chain::place_name(at.cell)
+            ),
+            PursuitStep::OpenChest { chest, at, key } => {
+                let with = key
+                    .and_then(|k| chest.keys.iter().find(|c| c.0 == k))
+                    .map_or(String::new(), |k| format!(" with {}", k.1));
+                let place = ac_world::quest_chain::place_name(at.cell);
+                format!("open {}{with} in {place}", chest.name)
+            }
             PursuitStep::HandIn { row, .. } => format!("hand it in to {}", row.giver),
             PursuitStep::Waiting { until } => {
                 let left = until.saturating_sub(now);
@@ -116,6 +151,8 @@ pub(crate) trait Chains {
     fn grounds(&self, want: &Want) -> Vec<SourceGround>;
     /// Who stamps `flag` (`quest_chain::flag_givers`).
     fn givers(&self, flag: &str) -> Vec<FlagBy>;
+    /// Every source of `want` (`quests::sources_of`), the fetched ones read here.
+    fn sources(&self, want: &Want) -> Vec<&'static Source>;
 }
 
 /// The bundled data's chains.
@@ -132,6 +169,10 @@ impl Chains for ChainData {
 
     fn givers(&self, flag: &str) -> Vec<FlagBy> {
         ac_world::quest_chain::flag_givers(flag)
+    }
+
+    fn sources(&self, want: &Want) -> Vec<&'static Source> {
+        ac_world::quests::sources_of(want).collect()
     }
 }
 
@@ -231,6 +272,8 @@ pub(crate) struct Ask<'a> {
     /// The leader a follower goes with: it works nothing of its own.
     pub(crate) led: Option<&'a str>,
     pub(crate) chains: &'a dyn Chains,
+    /// A source a step at it was refused lately ([`Client::drop_source`]): left out.
+    pub(crate) dropped: &'a dyn Fn(&Source) -> bool,
 }
 
 /// Each line's step, worked out with the `board` the chained list's facts gave; the first that
@@ -352,15 +395,54 @@ impl Ask<'_> {
         (step, None)
     }
 
-    /// Hunt the best grounds a way in this character may use reaches; else why not.
+    /// Come by what `line` still needs, `more` of it (`of` in words).
     fn hunt_step(&self, line: &QuestLine, more: u32, of: &str) -> (PursuitStep, Option<Hunting>) {
-        let level = self.facts.level;
         let mut wants: Vec<Want> = Vec::new();
         for r in crate::quest_log::worked_rows(line).filter(|r| r.kind == line.kind) {
             if r.want != Want::Nothing && !wants.contains(&r.want) {
                 wants.push(r.want.clone());
             }
         }
+        let what = if of.is_empty() { line.title.trim() } else { of };
+        self.obtain(&wants, more, what, 0)
+    }
+
+    /// `wants` fetched where nothing is hunted, else hunted where they drop, else the key a chest
+    /// holding one asks obtained first, [`KEY_DEPTH`] deep; else why not.
+    fn obtain(
+        &self,
+        wants: &[Want],
+        more: u32,
+        what: &str,
+        depth: usize,
+    ) -> (PursuitStep, Option<Hunting>) {
+        let mut locked: Vec<(u32, &'static str)> = Vec::new();
+        if let Some(step) = self.fetch_step(wants, more, &mut locked) {
+            return (step, None);
+        }
+        let hunted = self.ground_step(wants, more, what);
+        if !matches!(hunted.0, PursuitStep::Stuck { .. }) || depth >= KEY_DEPTH {
+            return hunted;
+        }
+        let mut first_why = None;
+        for (key, name) in locked {
+            let got = self.obtain(&[Want::Item(key)], 1, name, depth + 1);
+            match got.0 {
+                PursuitStep::Stuck { why } => {
+                    first_why.get_or_insert(why);
+                }
+                _ => return got,
+            }
+        }
+        match first_why {
+            Some(why) => (stuck(format!("{what} lies in a locked chest: {why}")), None),
+            None => hunted,
+        }
+    }
+
+    /// Hunt the best grounds a way in this character may use reaches; else why not.
+    fn ground_step(&self, wants: &[Want], more: u32, what: &str) -> (PursuitStep, Option<Hunting>) {
+        let level = self.facts.level;
         let grounds: Vec<SourceGround> =
             wants.iter().flat_map(|w| self.chains.grounds(w)).collect();
         let holds = |flag: &str| self.facts.held.iter().any(|h| h.eq_ignore_ascii_case(flag));
@@ -387,7 +469,7 @@ impl Ask<'_> {
         if let Some(g) = first {
             let mut sought: Vec<u32> = Vec::new();
             for s in grounds.iter().map(|s| s.source) {
-                if s.kind != Yield::Npc && !sought.contains(&s.wcid) {
+                if s.kind.is_hunted() && !sought.contains(&s.wcid) {
                     sought.push(s.wcid);
                 }
             }
@@ -399,7 +481,6 @@ impl Ask<'_> {
             };
             return (step, Some((open, sought)));
         }
-        let what = if of.is_empty() { line.title.trim() } else { of };
         let shut = grounds
             .iter()
             .filter(|g| g.place.is_some() && level_fits(g));
@@ -419,7 +500,7 @@ impl Ask<'_> {
         }
         let npc = wants
             .iter()
-            .flat_map(ac_world::quests::sources_of)
+            .flat_map(|w| self.chains.sources(w))
             .find(|s| s.kind == Yield::Npc);
         let why = match (npc, grounds.is_empty()) {
             (Some(s), true) => {
@@ -486,6 +567,7 @@ impl Client {
         st.pursuit_held
             .retain(|_, (_, at)| now.duration_since(*at) < PURSUIT_RETRY);
         st.unlock_tried.expire(now, UNLOCK_RETRY);
+        st.sources_dropped.expire(now, PURSUIT_RETRY);
         if chained.is_empty() {
             self.pursuit.clear();
             st.pursuit_grounds.clear();
@@ -518,6 +600,7 @@ impl Client {
             .is_led()
             .then(|| self.followed_leader().map(|m| m.name.clone()))
             .flatten();
+        let dropped = |s: &Source| self.is_source_dropped(s, now);
         let ask = Ask {
             facts,
             asking: &asking,
@@ -525,6 +608,7 @@ impl Client {
             held: &held,
             led: leader.as_deref(),
             chains: &ChainData,
+            dropped: &dropped,
         };
         let pursued = pursuit_of(&self.quest_board, chained, &ask);
         self.pursuit = pursued.lines;
@@ -623,6 +707,9 @@ impl Client {
                 let why = format!("no journey reaches any place {creature} is found");
                 self.hold_pursuit(&line.id, why, now);
                 Some(false)
+            }
+            PursuitStep::PickUp { .. } | PursuitStep::OpenChest { .. } => {
+                self.grow_fetch(&line, now)
             }
             _ => None,
         }
