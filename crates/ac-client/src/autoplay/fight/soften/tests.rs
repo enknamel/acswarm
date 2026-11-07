@@ -40,3 +40,42 @@ fn a_leader_bolts_the_guard_it_made_vulnerable_and_does_not_move_on_to_the_next(
         "Force Bolt VI thrown"
     );
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn magic_yield_goes_on_before_the_vulnerability_and_a_resist_has_it_cast_again() {
+    let now = Instant::now();
+    let (mut c, _) = crate::testkit::a_caster_knowing(
+        now,
+        &[
+            "Force Bolt VI",
+            "Piercing Vulnerability Other VI",
+            "Futility",
+        ],
+    );
+    // Creature Enchantment, Life and War Magic.
+    for skill in [31, 33, 34] {
+        crate::testkit::trained_in(&mut c, skill, 350);
+    }
+    c.autoplay.config.enabled = true;
+    c.autoplay.config.fight.enabled = true;
+    let it = 0x8000_0103;
+    crate::testkit::standing_by(&mut c, it, "Titanium Armoredillo", 6.0);
+    if let Some(o) = c.world.objects.get_mut(&it) {
+        o.weenie_class_id = 7083;
+    }
+    let cfg = c.autoplay.config.fight.clone();
+    c.autoplay_fight_with_spells(now, &cfg);
+    assert_eq!(c.autoplay.yielded_by(it), 40.0, "Futility first");
+    assert!(!c.autoplay.is_vulned(it));
+    // Resisted: cast again.
+    c.hear_arrival("Titanium Armoredillo resists your spell");
+    assert_eq!(c.autoplay.yielded_by(it), 0.0);
+    c.autoplay.cast_sent = None;
+    c.autoplay_fight_with_spells(now, &cfg);
+    assert_eq!(c.autoplay.yielded_by(it), 40.0, "Futility again");
+    // Landed: the vulnerability next.
+    c.autoplay.cast_sent = None;
+    c.autoplay_fight_with_spells(now, &cfg);
+    assert!(c.autoplay.is_vulned(it), "then Piercing Vulnerability");
+}

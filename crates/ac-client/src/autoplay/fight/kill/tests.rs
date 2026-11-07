@@ -86,6 +86,7 @@ fn with_no_health_known_the_most_a_cast_wins_and_no_vuln_is_cast() {
         attack: 1,
         takes: 1.0,
         vuln: vuln.then_some((Element::Fire, 2, 2.5, 1.0)),
+        magic_yield: None,
         casts,
         per_cast,
     };
@@ -156,4 +157,69 @@ fn a_rending_wand_at_the_vulns_strength_makes_its_cast_a_waste() {
     weak.cleave = Some((Element::Pierce as u32, 1.5));
     let kill = fastest(c.kills(0x8000_0103, &ready, &[weak])).expect("a kill");
     assert_eq!(kill.vuln.map(|(_, id, ..)| id), Some(ids[1]), "{kill:?}");
+}
+
+#[test]
+fn a_resist_is_the_servers_roll_of_skill_against_magic_defence() {
+    // GetSkillChance at 0.03 (WorldObject_Magic.cs:107): even at par, 1 / (1 + e^-1.8) 60 over.
+    assert_eq!(unresisted(300, Some(300.0)), 0.5);
+    assert!((unresisted(304, Some(244.0)) - 0.858).abs() < 1e-3);
+    assert_eq!(
+        unresisted(10, None),
+        1.0,
+        "no defence known, no resist reckoned"
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn magic_yield_goes_first_only_when_it_saves_casts() {
+    let names = [
+        "Force Bolt VI",
+        "Piercing Vulnerability Other VI",
+        "Futility",
+    ];
+    let skilled = |c: &mut crate::Client| {
+        // Creature Enchantment, Life and War Magic.
+        for skill in [31, 33, 34] {
+            crate::testkit::trained_in(c, skill, 350);
+        }
+    };
+    // A Tusker Guard (244) dies in two bolts that are seldom resisted: Futility's cast is a waste.
+    let (mut c, ids) = at_a_tusker_guard(&names);
+    skilled(&mut c);
+    let cfg = c.autoplay.config.fight.clone();
+    let kill = c
+        .best_kill(0x8000_0103, &cfg, Instant::now())
+        .expect("a kill");
+    assert_eq!(kill.magic_yield, None, "{kill:?}");
+    assert_eq!(kill.vuln.map(|(_, id, ..)| id), Some(ids[1]), "{kill:?}");
+    // A Titanium Armoredillo (7083: 5000 health, 362) resists more than half the bolts: lowered by
+    // 40 first, every one of thirty-odd bolts lands more often.
+    let (mut c, ids) = at_a_tusker_guard(&names);
+    skilled(&mut c);
+    if let Some(it) = c.world.objects.get_mut(&0x8000_0103) {
+        it.weenie_class_id = 7083;
+        it.name = "Titanium Armoredillo".into();
+    }
+    let kill = c
+        .best_kill(0x8000_0103, &cfg, Instant::now())
+        .expect("a kill");
+    assert_eq!(
+        kill.magic_yield.map(|(id, by, _)| (id, by)),
+        Some((ids[2], 40.0)),
+        "{kill:?}"
+    );
+    assert_eq!(
+        kill.vuln.map(|(_, id, ..)| id),
+        Some(ids[1]),
+        "and its vulnerability after"
+    );
+    // Once on, it is not cast again.
+    c.autoplay.mark_yielded(0x8000_0103, 40.0);
+    *c.autoplay.kill_kept.borrow_mut() = None;
+    let kill = c
+        .best_kill(0x8000_0103, &cfg, Instant::now())
+        .expect("a kill");
+    assert_eq!(kill.magic_yield, None, "{kill:?}");
 }

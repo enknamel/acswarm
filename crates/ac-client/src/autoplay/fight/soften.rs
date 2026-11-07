@@ -5,6 +5,9 @@ use ac_world::elements::Element;
 use crate::autoplay::{Autoplay, Doing};
 use crate::{Client, Stance};
 
+/// The Magic Defense skill id, which Magic Yield lowers.
+const MAGIC_DEFENSE: u32 = 15;
+
 impl Client {
     /// Whether anyone on the team, this character included, has
     /// softened `guid`.
@@ -67,6 +70,25 @@ impl Client {
             .filter(|id| {
                 ac_world::buffs::effect(*id)
                     .is_some_and(|e| e.kind() == ac_world::buffs::kind::BODY_ARMOR && e.value < 0.0)
+            })
+            .filter(|id| table.get(*id).is_some_and(|s| s.needs_target()))
+            .collect()
+    }
+
+    /// The Magic Yields known: spells cast on another that lower its Magic Defense (skill 15),
+    /// found by effect, so Futility and the Incantation count without their names being read.
+    pub(crate) fn magic_yield_spells(&self) -> Vec<u32> {
+        let Ok(table) = self.assets.spell_table() else {
+            return Vec::new();
+        };
+        self.world
+            .stats
+            .spells
+            .iter()
+            .copied()
+            .filter(|id| {
+                ac_world::buffs::effect(*id)
+                    .is_some_and(|e| e.skill() == Some(MAGIC_DEFENSE) && e.value < 0.0)
             })
             .filter(|id| table.get(*id).is_some_and(|s| s.needs_target()))
             .collect()
@@ -138,6 +160,7 @@ impl Client {
             kill.wand.guid,
             kill.attack,
             kill.vuln.map(|(_, id, ..)| id),
+            kill.magic_yield.map(|(id, ..)| id),
         );
         if self.autoplay.kill_said == Some(key) {
             return;
@@ -167,8 +190,9 @@ impl Client {
         );
     }
 
-    /// Cast the vulnerability the fastest kill of `guid` puts on first, if it has one. True when a
-    /// spell went out this tick; a resist or a fizzle has it cast again (`hear_debuff_resisted`).
+    /// Cast the Magic Yield, else the vulnerability, the fastest kill of `guid` puts on first, if
+    /// it has one. True when a spell went out this tick; a resist or a fizzle has it cast again
+    /// (`hear_debuff_resisted`).
     pub(super) fn autoplay_make_vulnerable(
         &mut self,
         guid: u32,
@@ -180,6 +204,18 @@ impl Client {
             return false;
         };
         self.say_kill(guid, name, kill, now);
+        if let Some((spell, by, _)) = kill.magic_yield {
+            let level = self.spell(spell).map_or(0, |sp| sp.level());
+            if self.cast_paced(spell, now) {
+                self.autoplay.yield_sent = Some(guid);
+            }
+            self.autoplay
+                .mark_yielded(guid, by + self.autoplay.yielded_by(guid));
+            *self.autoplay.kill_kept.borrow_mut() = None;
+            let said = format!("lowering {name}'s magic defense by {by:.0} (level {level})");
+            self.autoplay.say(Doing::Debuffing, said);
+            return true;
+        }
         let Some((element, vuln, m, _)) = kill.vuln else {
             return false;
         };
@@ -200,6 +236,23 @@ impl Client {
 }
 
 impl Autoplay {
+    /// How much magic defence the Magic Yield cast on `guid` took off, 0 for none.
+    pub(crate) fn yielded_by(&self, guid: u32) -> f32 {
+        self.yielded
+            .iter()
+            .find(|(g, _)| *g == guid)
+            .map_or(0.0, |(_, by)| *by)
+    }
+
+    /// Note Magic Yield cast on `guid`, taking `by` off its magic defence.
+    pub(crate) fn mark_yielded(&mut self, guid: u32, by: f32) {
+        if self.yielded.len() > 64 {
+            self.yielded.drain(..32);
+        }
+        self.yielded.retain(|(g, _)| *g != guid);
+        self.yielded.push((guid, by));
+    }
+
     /// Whether a vulnerability on `guid` is cast and not heard missed.
     #[cfg(test)]
     pub(crate) fn is_vulned(&self, guid: u32) -> bool {

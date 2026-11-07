@@ -1,8 +1,8 @@
-//! A caster's way to a kill: of the wands to hand, the attack spells ready and, per element, the
-//! strongest vulnerability castable well, the one taking fewest casts on average, every damage step
-//! ACE takes counted (SpellProjectile.cs:494-557): roll, skill bonus, crits, the wand's element
-//! bonus, the creature's resistance times the larger of vulnerability and the wand's rend. Resists
-//! are left out: one roll against magic defence for the bolts and the vuln alike, they cancel.
+//! A caster's way to a kill: of the wands to hand, the attack spells ready, per element the
+//! strongest vulnerability castable well and Magic Yield before it, the one taking fewest casts on
+//! average, every damage step ACE takes counted (SpellProjectile.cs:494-557): roll, skill bonus,
+//! crits, the wand's element bonus, resistance times the larger of vulnerability and rend; and
+//! each spell's resist roll against the creature's magic defence (WorldObject_Magic.cs:104).
 
 use std::time::{Duration, Instant};
 
@@ -22,6 +22,8 @@ const REND_CAP: f32 = 2.5;
 const SWAP_CASTS: f32 = 1.0;
 /// How long the fight's choice for its target is kept before it is worked out again.
 const KILL_KEEPS: Duration = Duration::from_millis(500);
+/// The resist roll's factor: `GetSkillChance`'s 0.03, not casting's 0.07 (WorldObject_Magic.cs:107).
+const RESIST_FACTOR: f32 = 0.03;
 /// PropertyInt ResistanceModifierType and PropertyFloat ResistanceModifier: a quest wand's cleave.
 const CLEAVE_TYPE: u32 = 263;
 const CLEAVE_MOD: u32 = 157;
@@ -109,6 +111,19 @@ impl Wand {
 
 /// A vulnerability castable well: its spell, multiplier and chance to land.
 type Vuln = (u32, f32, f32);
+/// Magic Yield cast first: its spell, the magic defence it takes off, its chance to land.
+pub(crate) type Yield = (u32, f32, f32);
+/// A kill as last said: target, wand, attack, vulnerability, Magic Yield.
+pub(crate) type KillSaid = (u32, u32, u32, Option<u32>, Option<u32>);
+
+/// The chance a spell cast at `skill` is not resisted by `defence` (WorldObject_Magic.cs:104-113);
+/// sure with no defence known.
+pub(crate) fn unresisted(skill: u32, defence: Option<f32>) -> f32 {
+    defence.map_or(1.0, |d| {
+        let x = RESIST_FACTOR * (skill as f32 - d);
+        (1.0 - 1.0 / (1.0 + x.exp())).clamp(0.0, 1.0)
+    })
+}
 
 /// One way to kill a target: the wand, the attack and the vulnerability cast first if any.
 #[derive(Debug, Clone, PartialEq)]
@@ -120,9 +135,11 @@ pub(crate) struct Kill {
     pub takes: f32,
     /// The vulnerability to cast first: element, spell, multiplier, chance to land.
     pub vuln: Option<(Element, u32, f32, f32)>,
+    /// Magic Yield cast before it: spell, magic defence taken off, chance to land.
+    pub magic_yield: Option<Yield>,
     /// Casts it takes on average, the swap and the vuln's tries counted; `None` with no health known.
     pub casts: Option<f32>,
-    /// Damage a cast does on average, fizzles counted.
+    /// Damage a cast does on average, fizzles and resists counted.
     pub per_cast: f32,
 }
 
@@ -132,6 +149,13 @@ impl Kill {
         let mut s = name(self.attack);
         if let Some((_, id, m, chance)) = self.vuln {
             s = format!("{} (x{m}, lands {:.0}%) + {s}", name(id), chance * 100.0);
+        }
+        if let Some((id, by, chance)) = self.magic_yield {
+            s = format!(
+                "{} (-{by:.0}, lands {:.0}%) + {s}",
+                name(id),
+                chance * 100.0
+            );
         }
         if !self.wand.name.is_empty() {
             s = format!("{s} from {}", self.wand.name);
@@ -208,7 +232,7 @@ fn irwin_hall(n: u32, x: f64) -> f64 {
 }
 
 /// Of `kills`, the fastest: fewest casts where the health is known, ties to the earlier (the held
-/// wand and no vuln come first); with no health known, the most a cast with no vulnerability.
+/// wand and no debuff come first); with no health known, the most a cast with no debuff.
 pub(crate) fn fastest(kills: Vec<Kill>) -> Option<Kill> {
     if kills.iter().any(|k| k.casts.is_some()) {
         kills
@@ -218,7 +242,7 @@ pub(crate) fn fastest(kills: Vec<Kill>) -> Option<Kill> {
     } else {
         kills
             .into_iter()
-            .filter(|k| k.vuln.is_none())
+            .filter(|k| k.vuln.is_none() && k.magic_yield.is_none())
             .reduce(|best, next| {
                 if next.per_cast > best.per_cast {
                     next
@@ -283,7 +307,8 @@ impl Client {
     }
 
     /// Every way to kill `guid` from `wands` and the attacks `ready`: each wand, each attack with
-    /// the vulnerability already on, and with the strongest castable well for its element first.
+    /// the vulnerability already on and with the strongest castable well for its element first,
+    /// each of those with Magic Yield first too when the creature's magic defence is known.
     pub(crate) fn kills(&self, guid: u32, ready: &[u32], wands: &[Wand]) -> Vec<Kill> {
         let known = self.creature_known(guid);
         let health = self.health_now(guid);
@@ -294,6 +319,24 @@ impl Client {
             .find(|(g, _)| *g == guid)
             .and_then(|(_, cast)| *cast);
         let may_vuln = !self.softened_by_anyone(guid);
+        // Magic defence as it stands, less the yield already on; a stronger yield replaces it.
+        let yielded = self.autoplay.yielded_by(guid);
+        let defence = known
+            .and_then(|c| c.magic_defense)
+            .map(|d| (d as f32 - yielded).max(0.0));
+        let yields: Vec<(Option<Yield>, Option<f32>)> = {
+            let mut y = vec![(None, defence)];
+            let new = self
+                .strongest_castable(&self.magic_yield_spells())
+                .and_then(|id| Some((id, -ac_world::buffs::effect(id)?.value)))
+                .filter(|(_, by)| *by > yielded && may_vuln);
+            if let (Some((id, by)), Some(d)) = (new, defence) {
+                let chance = self.cast_chance(id) * unresisted(self.casting_skill(id), Some(d));
+                let lowered = (d + yielded - by).max(0.0);
+                y.push((Some((id, by - yielded, chance.max(0.01))), Some(lowered)));
+            }
+            y
+        };
         // Per element, once: the strongest vulnerability castable well, its multiplier and chance.
         let mut vulns: Vec<(Element, Option<Vuln>)> = Vec::new();
         let mut out = Vec::new();
@@ -314,7 +357,7 @@ impl Client {
                 let natural = known.map_or(1.0, |c| c.takes_from(e));
                 let rend = wand.rend_for(e, base);
                 let elemental = wand.elemental_for(e);
-                let landing = self.cast_chance(id).max(0.01);
+                let not_fizzled = self.cast_chance(id);
                 let on_m = on.filter(|(oe, _)| *oe == e).map_or(1.0, |(_, m)| m);
                 let vuln = match vulns.iter().find(|(ve, _)| *ve == e) {
                     Some((_, v)) => *v,
@@ -328,7 +371,12 @@ impl Client {
                         v
                     }
                 };
-                let mut way = |vm: f32, first: Option<(Element, u32, f32, f32)>, tries: f32| {
+                let mut way = |vm: f32,
+                               first: Option<(Element, u32, f32, f32)>,
+                               magic_yield: Option<Yield>,
+                               defence: Option<f32>,
+                               tries: f32| {
+                    let landing = (not_fizzled * unresisted(skill, defence)).max(0.01);
                     let takes = elemental * natural * vm.max(rend);
                     let lo = (min as f32 + bonus_skill) * takes;
                     let hi = (max as f32 + bonus_skill) * takes;
@@ -342,14 +390,21 @@ impl Client {
                         attack: id,
                         takes,
                         vuln: first,
+                        magic_yield,
                         casts,
                         per_cast,
                     });
                 };
-                way(on_m, None, 0.0);
-                if let Some((vid, m, chance)) = vuln.filter(|_| may_vuln) {
-                    if m > on_m {
-                        way(m, Some((e, vid, m, chance)), 1.0 / chance);
+                for &(magic_yield, defence) in &yields {
+                    let first = magic_yield.map_or(0.0, |(_, _, chance)| 1.0 / chance);
+                    way(on_m, None, magic_yield, defence, first);
+                    if let Some((vid, m, vuln_cast)) = vuln.filter(|_| may_vuln) {
+                        if m > on_m {
+                            let chance = (vuln_cast * unresisted(self.casting_skill(vid), defence))
+                                .max(0.01);
+                            let tries = first + 1.0 / chance;
+                            way(m, Some((e, vid, m, chance)), magic_yield, defence, tries);
+                        }
                     }
                 }
             }

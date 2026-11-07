@@ -99,6 +99,7 @@ impl Client {
             self.autoplay.cast_sent = Some(now);
             // A debuff is not a projectile: its resist comes before the next cast goes out.
             self.autoplay.debuff_sent = None;
+            self.autoplay.yield_sent = None;
             return true;
         }
         false

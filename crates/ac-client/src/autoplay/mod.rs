@@ -206,11 +206,15 @@ pub struct Autoplay {
     /// The vulnerability last sent and still unanswered, by target. A resist or fizzle re-arms it
     /// (`Client::hear_arrival`).
     debuff_sent: Option<u32>,
+    /// Targets Magic Yield went on, and how much magic defence it took off.
+    yielded: Vec<(u32, f32)>,
+    /// The Magic Yield last sent and still unanswered, by target; re-armed as `debuff_sent` is.
+    yield_sent: Option<u32>,
     /// The fight's fastest kill of its target and when it was worked out (`Client::best_kill`).
     kill_kept:
         std::cell::RefCell<Option<(u32, Instant, Option<crate::autoplay::fight::kill::Kill>)>>,
-    /// The kill last said for a target, `(target, wand, attack, vuln)`: said again when it changes.
-    kill_said: Option<(u32, u32, u32, Option<u32>)>,
+    /// The kill last said for a target, `(target, wand, attack, vuln, yield)`: said again on a change.
+    kill_said: Option<crate::autoplay::fight::kill::KillSaid>,
     last_buff: Option<Instant>,
     /// The buff pass has said it is waiting for the counter this
     /// visit, so it is not said again every tick (see

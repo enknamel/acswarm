@@ -144,7 +144,7 @@ impl Client {
     /// `name` resisted a spell: when it is the debuff last sent, it is cast again whenever the fight
     /// still finds it the fastest way; the server has no cap on tries (WorldObject_Magic.cs:107-112).
     fn hear_debuff_resisted(&mut self, name: &str) {
-        let Some(g) = self.autoplay.debuff_sent else {
+        let Some(g) = self.autoplay.debuff_sent.or(self.autoplay.yield_sent) else {
             return;
         };
         if self.world.objects.get(&g).is_none_or(|o| o.name != name) {
@@ -155,18 +155,22 @@ impl Client {
 
     /// A weenie error `code`: a fizzle of the debuff last sent re-arms it (Player_Magic.cs:916-918).
     pub(crate) fn hear_debuff_error(&mut self, code: u32) {
-        if code == SPELL_FIZZLED && self.autoplay.debuff_sent.is_some() {
+        let sent = self.autoplay.debuff_sent.or(self.autoplay.yield_sent);
+        if code == SPELL_FIZZLED && sent.is_some() {
             self.rearm_debuff("fizzled");
         }
     }
 
     /// The debuff last sent did not go on (`why`): cast again when it is still worth it.
     pub(crate) fn rearm_debuff(&mut self, why: &str) {
-        let Some(g) = self.autoplay.debuff_sent.take() else {
-            return;
-        };
-        self.autoplay.vulned.retain(|(t, _)| *t != g);
-        tracing::info!("the debuff on {g:#010x} {why}; casting it again");
+        if let Some(g) = self.autoplay.yield_sent.take() {
+            self.autoplay.yielded.retain(|(t, _)| *t != g);
+            tracing::info!("the Magic Yield on {g:#010x} {why}; casting it again");
+        }
+        if let Some(g) = self.autoplay.debuff_sent.take() {
+            self.autoplay.vulned.retain(|(t, _)| *t != g);
+            tracing::info!("the debuff on {g:#010x} {why}; casting it again");
+        }
     }
 
     /// A shot has gone out at `guid`: the clock on it getting there
