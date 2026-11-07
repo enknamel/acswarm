@@ -21,6 +21,7 @@ use overland::{Corridor, EXIT_REACH};
 
 mod overland;
 mod reaching;
+mod turned_away;
 
 /// A map point, or a portal's mouth stood at, is reached within this (metres, 3D).
 pub const ARRIVE: f32 = 3.0;

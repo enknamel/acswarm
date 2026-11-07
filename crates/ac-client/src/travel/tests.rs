@@ -1202,6 +1202,39 @@ fn a_portal_that_says_too_recently_is_stepped_back_from_and_walked_into_again() 
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
+fn a_portal_that_turns_us_away_is_left_out() {
+    // Blargerton walked into the Castle of Baron Nuvillus portal 1146 times in four minutes:
+    // "You must complete quest to use portal" (0x0474), and a stamina cast every ten seconds held
+    // the journey, which reset the wait at the mouth before it could give up.
+    let holtburg = 0xA9B4_0019;
+    let mut c = crate::testkit::standing_at(holtburg, Vec3::new(84.0, 7.1, 94.0));
+    let me = c.my_position().unwrap();
+    let mouth = c.place_at(me);
+    let exit = Place::on_map(Vec2::new(44_170.4, 9_636.1));
+    let trip = Trip {
+        steps: vec![Step::Portal {
+            name: "Castle of Baron Nuvillus".into(),
+            mouth,
+            exit,
+        }],
+        seconds: 10.0,
+    };
+    crate::testkit::set_out_on(&mut c, trip, within_reach(exit));
+    c.travel.held = true;
+    c.portal_turned_away(0x04A7);
+    assert!(
+        c.travel.refused.is_empty() && !c.travel.replan_due,
+        "too recently passes"
+    );
+    c.portal_turned_away(0x0474);
+    assert_eq!(c.travel.refused, vec![mouth.at.truncate()]);
+    assert!(c.travel.replan_due, "planned again without it");
+    c.portal_turned_away(0x0474);
+    assert_eq!(c.travel.refused.len(), 1, "once");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_portal_walked_into_again_after_too_recently_is_not_refused_as_stalled() {
     // Blargerton in the Town Network, off the Holtburg portal and into the Facility Hub's: turned
     // away, it stood in the mouth and the walk back in was refused, the Warden given up.
