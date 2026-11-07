@@ -571,9 +571,9 @@ mod tests {
     fn the_shops_of_dereth_read() {
         let all = all();
         // One row per placement, not per shopkeeper: the same
-        // shopkeeper stands in many towns. One placement fewer than
-        // the world holds: Jeeves is left out (see `data/vendors.sh`).
-        assert_eq!(all.len(), 1_042, "shops");
+        // shopkeeper stands in many towns. Jeeves and the monsters
+        // with a shop list are left out (see `data/vendors.sh`).
+        assert_eq!(all.len(), 1_033, "shops");
         let names: std::collections::BTreeSet<&str> = all.iter().map(|s| s.name.as_str()).collect();
         assert!(
             names.len() < all.len(),
@@ -586,6 +586,19 @@ mod tests {
         // Every shop has a place in the world and a name.
         assert!(all.iter().all(|s| !s.name.is_empty()));
         assert!(all.iter().all(|s| s.cell != 0));
+    }
+
+    #[test]
+    fn a_monster_with_a_shop_list_is_no_counter() {
+        // Attackable unless the weenie says not (WorldObject_Properties.cs:1777): Blargerton walked
+        // into the Liches to buy Gold Scarabs from the Lich Archmage, and killed it.
+        for wcid in [2540, 5765, 5767] {
+            assert!(all().iter().all(|s| s.wcid != wcid), "{wcid} is a counter");
+        }
+        assert!(
+            all().len() > 1000,
+            "and the shopkeepers are all still there"
+        );
     }
 
     #[test]

@@ -23,14 +23,22 @@
 # else in the world. That is a catalogue for testing, not a shop, and a
 # character that plans a trip around it plans a trip to a place no
 # player has ever bought anything.
+#
+# Nor is a vendor weenie the server lets a player attack: Attackable
+# (PropertyBool 19) is true unless the weenie sets it false
+# (WorldObject_Properties.cs:1777), and every shopkeeper does. The three
+# that do not -- Lich Archmage, Snowman, Giant Snowman -- are monsters
+# with a shop list, and a run walked into the Liches to buy from one.
 set -e
 
-SQL='select distinct li.weenie_Class_Id, vn.value, hex(li.obj_Cell_Id),
+SQL='SET SESSION max_execution_time=20000; select distinct li.weenie_Class_Id, vn.value, hex(li.obj_Cell_Id),
   round(li.origin_X,1), round(li.origin_Y,1), round(li.origin_Z,1),
   cl.weenie_Class_Id, itn.value,
   hex(coalesce(it.value, 0) & 4294967295), coalesce(val.value, 0)
 from landblock_instance li
 join weenie v on v.class_Id = li.weenie_Class_Id and v.type = 12 and v.class_Id <> 6826
+join weenie_properties_bool peace
+  on peace.object_Id = v.class_Id and peace.type = 19 and peace.value = 0
 join weenie_properties_string vn
   on vn.object_Id = v.class_Id and vn.type = 1
 join weenie_properties_create_list cl
