@@ -224,6 +224,8 @@ fn a_counter_that_buys_none_of_the_loot_is_walked_past_on_a_run_to_sell() {
     run.vendor = "Rakk the Peddler".into();
     run.phase = Phase::Appraising;
     run.since = now - SETTLE * 3;
+    // Its third counter already: a fourth is made, as runs have no cap on stops.
+    run.stops = 3;
     c.autoplay.growth.run = Some(run);
     c.grow_run_step(now, &cfg);
     assert!(
@@ -256,7 +258,7 @@ fn a_counter_that_buys_none_of_the_loot_is_walked_past_on_a_run_to_sell() {
         .as_ref()
         .expect("walked home with the peas");
     assert_eq!(on.vendor, "Archmage Cindrue");
-    assert_eq!(on.stops, 2);
+    assert_eq!(on.stops, 4);
     assert_eq!(on.errand, Errand::Sell);
     assert!(c.traveling());
 

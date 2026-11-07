@@ -73,9 +73,6 @@ pub(super) const DESCRIBED_WITHIN: Duration = Duration::from_secs(10);
 /// its luck has changed.
 const STOPPED_LOOK_EVERY: Duration = Duration::from_secs(5);
 
-/// Most vendors visited in one run.
-const STOPS_PER_RUN: u32 = 3;
-
 /// What a run to town is for, which decides which counter it goes to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Errand {

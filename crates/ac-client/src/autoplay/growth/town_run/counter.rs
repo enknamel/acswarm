@@ -5,7 +5,7 @@ use glam::Vec2;
 use super::vendor::{counter_place, spot};
 use super::{
     Errand, Phase, Run, Turn, BUSY_ASKS, BUSY_REASK, COUNTER_REACH, DESCRIBED_WITHIN,
-    SELLING_TIMEOUT, SETTLE, STOPS_PER_RUN, VENDOR_OPEN_TIMEOUT, VENDOR_REACH,
+    SELLING_TIMEOUT, SETTLE, VENDOR_OPEN_TIMEOUT, VENDOR_REACH,
 };
 use crate::autoplay::growth::road::{on_the_way, OnTheWay, WALK_ON_EVERY};
 use crate::autoplay::growth::{a_few, about, Growth};
@@ -626,7 +626,8 @@ impl Client {
         let buying = can_pay_more && (needs.iter().any(|n| n.urgent) || more_to_buy);
         // With no slot at all the next counter could not pay out either.
         let wanting = self.room_anywhere() > 0 && (buying || still_full || more_to_sell);
-        if wanting && run.stops < STOPS_PER_RUN {
+        // No cap on stops: each is a counter not yet visited this run that the forecast says helps.
+        if wanting {
             // The next counter is chosen by what is still on the list,
             // not by what is closest -- and only when there is reason to
             // think it can help. A full pack is reason enough on its
