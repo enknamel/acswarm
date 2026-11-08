@@ -182,6 +182,13 @@ impl Client {
         if self.is_led() {
             return false;
         }
+        // Nor while a quest step is worked but a hunt on this ground: the stone for the Vortex
+        // was carried round the Mines (a_quest_step_elsewhere_is_not_taken_exploring).
+        let here = self.player.as_ref().map_or(0, |p| p.cell >> 16);
+        let hunting_here = self.is_pursued_hunt() && self.pursued_place(here).is_some();
+        if self.is_pursuing() && !hunting_here {
+            return false;
+        }
         let assets = self.assets.clone();
         let Some(pl) = self.player.as_mut() else {
             return false;
@@ -507,6 +514,42 @@ mod tests {
         assert!(c.is_pursuing(), "{:?}", c.pursuit);
         let stood = play(&mut c, 60);
         assert_keeps_going(&c, &stood);
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn a_quest_step_elsewhere_is_not_taken_exploring() {
+        // Blargerton in the Mines of Despair with the Focusing Stone for the Vortex: the explorer,
+        // ranked above growing, walked the rooms and the pursuit never set off.
+        let mut c = crate::testkit::standing_in_the_field(
+            51,
+            0x0177_0176,
+            glam::Vec3::new(48.33, -81.29, -2.02),
+        );
+        c.world.player_guid = Some(crate::testkit::ME);
+        c.autoplay.config.enabled = true;
+        let row = ac_world::quests::rows_of("magicitemtraining3")
+            .find(|r| r.kind == ac_world::quests::Kind::Item)
+            .unwrap();
+        assert!(
+            c.autoplay_explore(Instant::now()),
+            "nothing pursued: explored"
+        );
+        c.autoplay.room_bound = None;
+        c.pursuit = vec![crate::autoplay::PursuitLine {
+            id: row.id.into(),
+            title: row.title.into(),
+            step: crate::autoplay::PursuitStep::HandIn {
+                row,
+                at: row.places[0],
+            },
+            working: true,
+            via: None,
+        }];
+        assert!(
+            !c.autoplay_explore(Instant::now()),
+            "explored with a hand-in to make"
+        );
     }
 
     #[test]

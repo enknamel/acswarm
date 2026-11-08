@@ -742,7 +742,7 @@ impl Client {
     }
 
     /// Where a journey to the pursued ground of `lb` ends, when `lb` is one.
-    pub(super) fn pursued_place(&self, lb: u32) -> Option<Place> {
+    pub(crate) fn pursued_place(&self, lb: u32) -> Option<Place> {
         let grounds = &self.autoplay.growth.pursuit_grounds;
         grounds.iter().find(|(l, _)| *l == lb).map(|(_, p)| *p)
     }
