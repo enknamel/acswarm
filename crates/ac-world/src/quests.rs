@@ -228,6 +228,9 @@ pub enum Yield {
     Container,
     /// Made by using one of its `keys`, carried, on this placed object (a recipe's target).
     Use,
+    /// Made by using its first key on its second, both carried: nowhere to go (a town stamp on
+    /// a Lucky Gold Letter).
+    Combine,
     /// A shop sells it (`crate::shops`): bought on a town run.
     Vendor,
 }
@@ -465,6 +468,7 @@ fn parse_source(line: &str) -> Option<Source> {
         "floor" => Yield::Floor,
         "container" => Yield::Container,
         "use" => Yield::Use,
+        "combine" => Yield::Combine,
         _ => return None,
     };
     let landblocks = pairs(f[6], 16)?;

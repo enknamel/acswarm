@@ -65,6 +65,12 @@ pub enum PursuitStep {
         at: Place,
         with: u32,
     },
+    /// Use the carried `with` on the carried `on` (weenie classes), where the character stands.
+    Combine {
+        source: &'static Source,
+        with: u32,
+        on: u32,
+    },
     /// Hand in to `row`'s giver at `at`.
     HandIn { row: &'static Row, at: Place },
     /// Done; may be done again at this Unix second.
@@ -87,6 +93,7 @@ impl PursuitStep {
                 | PursuitStep::PickUp { .. }
                 | PursuitStep::OpenChest { .. }
                 | PursuitStep::UseOn { .. }
+                | PursuitStep::Combine { .. }
                 | PursuitStep::HandIn { .. }
         )
     }
@@ -123,6 +130,15 @@ impl PursuitStep {
                 let used = used.map_or_else(|| format!("item {with}"), |k| k.1.clone());
                 let place = ac_world::quest_chain::place_name(at.cell);
                 format!("use {used} on {} in {place}", source.name)
+            }
+            PursuitStep::Combine { source, with, on } => {
+                let name = |w: &u32| source.keys.iter().find(|k| k.0 == *w).map(|k| k.1.clone());
+                let (used, onto) = (name(with), name(on));
+                format!(
+                    "use {} on {}",
+                    used.unwrap_or_else(|| format!("item {with}")),
+                    onto.unwrap_or_else(|| format!("item {on}"))
+                )
             }
             PursuitStep::HandIn { row, .. } => format!("hand it in to {}", row.giver),
             PursuitStep::Waiting { until } => {
@@ -736,7 +752,8 @@ impl Client {
             }
             PursuitStep::PickUp { .. }
             | PursuitStep::OpenChest { .. }
-            | PursuitStep::UseOn { .. } => self.grow_fetch(&line, now),
+            | PursuitStep::UseOn { .. }
+            | PursuitStep::Combine { .. } => self.grow_fetch(&line, now),
             _ => None,
         }
     }

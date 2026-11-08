@@ -320,3 +320,16 @@ fn a_shop_selling_a_wanted_item_is_a_source_of_it() {
     assert!(shop.stocks_wcid(w));
     assert_eq!(sold.places.len(), 1);
 }
+
+#[test]
+fn the_stamped_rithwic_letter_is_made_by_using_the_town_stamp_on_a_lucky_gold_letter() {
+    // Recipe 1777: the Rithwic Town Stamp (8738) used on a carried Lucky Gold Letter (45875).
+    let from: Vec<&Source> = sources_of(&Want::Item(70307)).collect();
+    let combine = from
+        .iter()
+        .find(|s| s.kind == Yield::Combine)
+        .expect("no combine");
+    let keys: Vec<u32> = combine.keys.iter().map(|k| k.0).collect();
+    assert_eq!(keys, [8738, 45875], "the stamp used on the letter");
+    assert!(combine.landblocks.is_empty());
+}

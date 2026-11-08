@@ -90,6 +90,15 @@ pub(crate) fn chain_words(links: &[ChainLink], k: &Known) -> Vec<Step> {
                     steps.push(step);
                 }
             }
+            ChainLink::Fetch(source) if source.kind == Yield::Combine => {
+                // Two carried items, nowhere to go: "Use Rithwic Town Stamp on Lucky Gold Letter".
+                let used = source.keys.first().map_or("it", |k| k.1.as_str());
+                steps.push(
+                    Step::default()
+                        .say(format!("Use {used} on "))
+                        .link(Facet::Creature, &source.name),
+                );
+            }
             ChainLink::Fetch(source) => {
                 let cell = source.landblocks.first().map_or(0, |l| l.0);
                 let mut step = Step::default()
@@ -172,6 +181,7 @@ fn fetch_verb(kind: Yield) -> &'static str {
         Yield::Floor => "Pick up ",
         Yield::Container => "Open ",
         Yield::Use => "Use it on ",
+        Yield::Combine => "Use on ",
         Yield::Vendor => "Buy it from ",
         Yield::Drop | Yield::Kill | Yield::Npc => "Get it from ",
     }
@@ -334,6 +344,16 @@ pub(crate) fn step_words(step: &PursuitStep, now: u64, place: &dyn Fn(u32) -> St
             let used = source.keys.iter().find(|k| k.0 == *with);
             let used = used.map_or("it", |k| k.1.as_str());
             format!("using {used} on {} at {}", source.name, place(at.cell))
+        }
+        PursuitStep::Combine { source, with, on } => {
+            let name = |w: &u32| {
+                source
+                    .keys
+                    .iter()
+                    .find(|k| k.0 == *w)
+                    .map_or("it", |k| k.1.as_str())
+            };
+            format!("using {} on {}", name(with), name(on))
         }
         PursuitStep::HandIn { row, at } => {
             format!("handing it in to {} at {}", row.giver, place(at.cell))

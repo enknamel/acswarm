@@ -1375,3 +1375,64 @@ fn a_use_on_the_vortex_refused_drops_it_for_the_pursuit() {
     assert!(c.is_source_dropped(source, later));
     assert!(!c.is_unlocking());
 }
+
+#[test]
+fn the_stamped_letter_is_had_by_the_key_then_the_stamp_then_stamping_the_letter() {
+    // The Seasoned Explorer Baton (give:70307:45958): Brentsella's Key from one chest, the
+    // Rithwic Town Stamp from the locked one, then the stamp used on the Lucky Gold Letter.
+    let mut f = facts(80, &[("give:70307:45958", true)]);
+    f.carried.insert(45875, 1);
+    let step = |f: &QuestFacts| work(f, &ChainData, None).lines[0].step.clone();
+    match step(&f) {
+        PursuitStep::OpenChest {
+            chest, key: None, ..
+        } => assert_eq!(chest.wcid, 4790),
+        other => panic!("{other:?}"),
+    }
+    f.carried.insert(4793, 1);
+    match step(&f) {
+        PursuitStep::OpenChest { chest, key, .. } => {
+            assert_eq!((chest.wcid, key), (4791, Some(4793)))
+        }
+        other => panic!("{other:?}"),
+    }
+    f.carried.insert(8738, 1);
+    match step(&f) {
+        PursuitStep::Combine { with, on, .. } => assert_eq!((with, on), (8738, 45875)),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn the_stamp_is_used_on_the_letter_in_the_pack_and_the_stamped_one_is_done() {
+    const STAMP: u32 = 0x8000_0401;
+    const LETTER: u32 = 0x8000_0402;
+    let source = ac_world::quests::sources_of(&ac_world::quests::Want::Item(70307))
+        .find(|s| s.kind == Yield::Combine)
+        .expect("the stamping");
+    let (mut c, line) = fetching(|_| PursuitStep::Combine {
+        source,
+        with: 8738,
+        on: 45875,
+    });
+    carrying(&mut c, STAMP, 8738, "Rithwic Town Stamp");
+    carrying(&mut c, LETTER, 45875, "Lucky Gold Letter");
+    let now = Instant::now();
+    c.combat = false;
+    c.magic = false;
+    assert_eq!(c.grow_fetch(&line, now), Some(true));
+    assert_eq!(c.last_used, Some(LETTER), "the stamp is used on the letter");
+    assert!(c.is_unlocking(), "the unlock reflex holds the tick");
+    c.world.objects.remove(&LETTER);
+    carrying(
+        &mut c,
+        0x8000_0403,
+        70307,
+        "Stamped Rithwic Lucky Gold Letter",
+    );
+    c.quest_board_at = Some(now);
+    assert!(c.autoplay_unlock(now + Duration::from_millis(300)));
+    assert_eq!(c.autoplay.growth.fetching, None);
+    assert_eq!(c.quest_board_at, None, "the board is worked out again");
+}

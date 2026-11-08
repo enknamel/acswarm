@@ -90,7 +90,15 @@ impl Ask<'_> {
                 if s.kind.is_hunted() || s.kind == Yield::Npc || (self.dropped)(s) {
                     continue;
                 }
-                let Some(at) = s.nearest(me) else { continue };
+                // A combine is made where the character stands: no place of its own.
+                let here = Place {
+                    at: me.unwrap_or_default(),
+                    cell: 0,
+                };
+                let combine = (s.kind == Yield::Combine).then_some(here);
+                let Some(at) = s.nearest(me).or(combine) else {
+                    continue;
+                };
                 let step = match s.kind {
                     Yield::Vendor => PursuitStep::Buy {
                         wcid,
@@ -103,6 +111,29 @@ impl Ask<'_> {
                         name: s.name.clone(),
                         at,
                     },
+                    Yield::Combine => {
+                        // Both carried, the first used on the second; a missing one is had first.
+                        let missing: Vec<_> = s
+                            .keys
+                            .iter()
+                            .filter(|k| (self.asking.carried)(k.0) == 0)
+                            .collect();
+                        match (missing.is_empty(), s.keys.as_slice()) {
+                            (true, [with, on, ..]) => PursuitStep::Combine {
+                                source: s,
+                                with: with.0,
+                                on: on.0,
+                            },
+                            _ => {
+                                for (k, name) in missing {
+                                    if !locked.iter().any(|l| l.0 == *k) {
+                                        locked.push((*k, name.as_str()));
+                                    }
+                                }
+                                continue;
+                            }
+                        }
+                    }
                     Yield::Use => {
                         let carried = |k: &u32| (self.asking.carried)(*k) > 0;
                         match s.keys.iter().map(|k| k.0).find(carried) {
@@ -159,12 +190,12 @@ pub(super) fn ware_name(s: &Source, wcid: u32) -> Option<String> {
 fn fetch_key(step: &PursuitStep) -> Option<(u32, u32)> {
     match step {
         PursuitStep::PickUp { wcid, .. } => Some((*wcid, *wcid)),
-        PursuitStep::OpenChest { chest: s, .. } | PursuitStep::UseOn { source: s, .. } => {
-            match s.want {
-                Want::Item(w) => Some((w, s.wcid)),
-                _ => None,
-            }
-        }
+        PursuitStep::OpenChest { chest: s, .. }
+        | PursuitStep::UseOn { source: s, .. }
+        | PursuitStep::Combine { source: s, .. } => match s.want {
+            Want::Item(w) => Some((w, s.wcid)),
+            _ => None,
+        },
         _ => None,
     }
 }
@@ -195,6 +226,14 @@ impl Client {
             PursuitStep::PickUp { wcid, name, at } => (*at, *wcid, name.clone()),
             PursuitStep::OpenChest { chest: s, at, .. }
             | PursuitStep::UseOn { source: s, at, .. } => (*at, s.wcid, s.name.clone()),
+            PursuitStep::Combine { source: s, .. } => {
+                let p = self.player.as_ref()?;
+                let here = Place {
+                    at: p.world_position(),
+                    cell: p.cell,
+                };
+                (here, s.wcid, s.name.clone())
+            }
             _ => return None,
         };
         if let Some(f) = self.autoplay.growth.fetching.clone() {
@@ -228,6 +267,19 @@ impl Client {
                     }
                 }
             }
+        }
+        // Two carried items: the one used on is the target, and there is nowhere to walk.
+        if let PursuitStep::Combine { on, .. } = line.step {
+            let target = self
+                .world
+                .inventory()
+                .find(|o| o.weenie_class_id == on && o.wielder.is_none())?
+                .guid;
+            let act = self.fetch_act(&line.step, target, 0.0, now)?;
+            self.fetch_sent(key, target, act, now);
+            let said = format!("for {}: {}", line.title, line.step.words(0));
+            self.autoplay.say(Doing::Looting, said);
+            return Some(true);
         }
         let me = self.my_position()?;
         let found = self.lying_near(source, place);
@@ -280,7 +332,7 @@ impl Client {
                 self.autoplay.growth.unlock_with = k;
                 self.use_on(held, guid).then_some(Act::Unlock)
             }
-            PursuitStep::UseOn { with, .. } => {
+            PursuitStep::UseOn { with, .. } | PursuitStep::Combine { with, .. } => {
                 if self.combat || self.magic {
                     self.leave_combat();
                     return Some(Act::Peace);
