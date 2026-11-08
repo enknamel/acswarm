@@ -204,7 +204,7 @@ fn parse(sells: &str, buys: &str) -> Vec<Shop> {
             (wcid, cell),
             Shop {
                 wcid,
-                name: f[1].to_string(),
+                name: crate::data_name(f[1]),
                 cell,
                 at: crate::landblock_origin(cell) + Vec3::new(x, y, z),
                 sells: Vec::new(),
@@ -242,7 +242,7 @@ fn parse(sells: &str, buys: &str) -> Vec<Shop> {
         };
         shop.sells.push(Ware {
             wcid,
-            name: f[7].to_string(),
+            name: crate::data_name(f[7]),
             item_type,
             value: int(f[9]).unwrap_or(0),
         });
@@ -456,6 +456,18 @@ pub fn best_for(wanted: &[String], from: Vec2) -> Option<&'static Shop> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_vendor_is_named_with_the_comma_the_server_gives_it() {
+        // The rows write the comma as ';', and Blargerton stood by "Master Sonji Pan, Archmage"
+        // looking for "Master Sonji Pan; Archmage".
+        assert!(all().iter().any(|s| s.name == "Master Sonji Pan, Archmage"));
+        assert!(all().iter().all(|s| !s.name.contains(';')));
+        assert!(all()
+            .iter()
+            .flat_map(|s| &s.sells)
+            .all(|w| !w.name.contains(';')));
+    }
 
     fn holtburg() -> Vec2 {
         crate::towns::find("Holtburg").unwrap().world_xy()

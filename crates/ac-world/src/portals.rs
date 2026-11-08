@@ -137,7 +137,7 @@ fn parse(text: &str) -> Vec<Portal> {
         };
         let level = |i: usize| f.get(i).and_then(|v| v.parse::<u32>().ok()).unwrap_or(0);
         out.push(Portal {
-            name: f[0].to_string(),
+            name: crate::data_name(f[0]),
             from_cell,
             from: crate::landblock_origin(from_cell) + Vec3::new(sx, sy, sz),
             to_cell,

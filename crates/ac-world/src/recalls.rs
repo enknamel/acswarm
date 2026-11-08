@@ -135,7 +135,7 @@ fn parse(text: &str) -> Vec<Recall> {
         };
         out.push(Recall {
             spell_id,
-            name: f[1].to_string(),
+            name: crate::data_name(f[1]),
             cell,
             at: crate::landblock_origin(cell) + Vec3::new(x, y, z),
         });

@@ -86,7 +86,7 @@ fn parse(text: &str) -> Vec<Landmark> {
         };
         out.push(Landmark {
             kind,
-            name: f[1].to_string(),
+            name: crate::data_name(f[1]),
             cell,
             at: crate::landblock_origin(cell) + Vec3::new(x, y, z),
         });

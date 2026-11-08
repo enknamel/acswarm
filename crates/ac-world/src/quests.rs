@@ -296,7 +296,13 @@ fn parse_giver(line: &'static str) -> Option<(u32, &'static str, Place)> {
     let cell = u32::from_str_radix(f[2], 16).ok()?;
     let local = Vec3::new(f[3].parse().ok()?, f[4].parse().ok()?, f[5].parse().ok()?);
     let at = crate::landblock_origin(cell) + local;
-    Some((f[0].parse().ok()?, f[1], Place { at, cell }))
+    // Leaked once into the OnceLock: the 38 names with a comma back (see `crate::data_name`).
+    let name: &'static str = if f[1].contains(';') {
+        Box::leak(crate::data_name(f[1]).into_boxed_str())
+    } else {
+        f[1]
+    };
+    Some((f[0].parse().ok()?, name, Place { at, cell }))
 }
 
 fn givers() -> &'static Givers {
@@ -467,7 +473,7 @@ fn parse_source(line: &str) -> Option<Source> {
         },
         kind,
         wcid: f[2].parse().ok()?,
-        name: f[3].to_string(),
+        name: crate::data_name(f[3]),
         level: f[4].parse().ok()?,
         chance: f[5].parse().ok()?,
         places: parse_spots(&landblocks, at)?,

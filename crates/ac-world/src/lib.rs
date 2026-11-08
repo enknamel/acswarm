@@ -361,6 +361,12 @@ impl WorldObject {
 
 /// Outdoor cell id for a landblock-local point: cells are 24 m, numbered
 /// `x * 8 + y + 1`.
+/// A name as a `data/*.csv` row holds it, with its commas back: the rows write the comma of
+/// "Master Sonji Pan, Archmage" as `;`, and the server's name has the comma.
+pub(crate) fn data_name(s: &str) -> String {
+    s.replace(';', ",")
+}
+
 pub fn outdoor_cell(landblock: u32, local: Vec3) -> u32 {
     let cx = (local.x / 24.0).floor().clamp(0.0, 7.0) as u32;
     let cy = (local.y / 24.0).floor().clamp(0.0, 7.0) as u32;
