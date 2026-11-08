@@ -165,6 +165,7 @@ fn work_dropping(
         led,
         chains: fake,
         dropped,
+        unlocked: &|_| false,
     };
     pursuit_of(&board, &chained, &ask)
 }
@@ -886,10 +887,12 @@ fn at_the_chest_the_key_is_used_then_the_chest_opened_and_emptied_by_the_loot_ru
         .clone()
         .expect("waiting on the key");
     assert_eq!(f.act, fetch::Act::Unlock);
-    // Unlocked (a UseDone with no error, Lock.cs:156-169): the chest is opened for the loot rules.
+    assert!(c.is_unlocking(), "the unlock reflex holds the tick");
+    // Unlocked, the one-use key used up (Lock.cs:69-90): the chest is opened for the loot rules.
     let later = now + Duration::from_millis(300);
     c.use_done = Some((0, later));
-    assert_eq!(c.grow_fetch(&line, later), Some(true));
+    c.world.objects.remove(&KEY);
+    assert!(c.autoplay_unlock(later));
     assert!(
         c.autoplay.is_at_corpse(CHEST),
         "the loot rules have the chest"
@@ -901,6 +904,33 @@ fn at_the_chest_the_key_is_used_then_the_chest_opened_and_emptied_by_the_loot_ru
     assert_eq!(c.grow_fetch(&line, later), Some(true));
     assert_eq!(c.autoplay.growth.fetching, None);
     assert_eq!(c.quest_board_at, None);
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_key_use_cancelled_is_sent_again_not_taken_for_an_unlock() {
+    // Blargerton used the Smelly Key and cast at once: ACE's walk to the chest failed and its
+    // UseDone had no error (Player_Use.cs:157-163), the key still in the pack, the chest locked.
+    let (mut c, line) = fetching(old_chest);
+    lying(&mut c, CHEST, 27890, "An old Chest", chest_at(&line));
+    carrying(&mut c, KEY, 27896, "A Smelly Key");
+    let now = Instant::now();
+    assert!(c.autoplay_unlock(now) || c.grow_fetch(&line, now) == Some(true));
+    let later = now + Duration::from_millis(300);
+    c.use_done = Some((0, later));
+    c.last_used = None;
+    assert!(c.autoplay_unlock(later), "still waiting on the key");
+    assert!(!c.autoplay.is_at_corpse(CHEST), "a locked chest opened");
+    let gone = now + Duration::from_secs(6);
+    assert!(c.autoplay_unlock(gone));
+    assert_eq!(c.last_used, Some(CHEST), "the key is used again");
+    let f = c
+        .autoplay
+        .growth
+        .fetching
+        .clone()
+        .expect("waiting on the key");
+    assert_eq!((f.act, f.tries), (fetch::Act::Unlock, 2));
 }
 
 #[test]

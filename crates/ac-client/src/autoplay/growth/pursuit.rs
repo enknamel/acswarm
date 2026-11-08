@@ -277,6 +277,8 @@ pub(crate) struct Ask<'a> {
     pub(crate) chains: &'a dyn Chains,
     /// A source a step at it was refused lately ([`Client::drop_source`]): left out.
     pub(crate) dropped: &'a dyn Fn(&Source) -> bool,
+    /// A chest this character unlocked within `fetch::UNLOCKED_FOR`: opened with no key.
+    pub(crate) unlocked: &'a dyn Fn(&Source) -> bool,
 }
 
 /// Each line's step, worked out with the `board` the chained list's facts gave; the first that
@@ -605,6 +607,11 @@ impl Client {
             .then(|| self.followed_leader().map(|m| m.name.clone()))
             .flatten();
         let dropped = |s: &Source| self.is_source_dropped(s, now);
+        let unlocked = |s: &Source| {
+            st.chests_unlocked
+                .since(&s.wcid)
+                .is_some_and(|t| now.saturating_duration_since(t) < fetch::UNLOCKED_FOR)
+        };
         let ask = Ask {
             facts,
             asking: &asking,
@@ -613,6 +620,7 @@ impl Client {
             led: leader.as_deref(),
             chains: &ChainData,
             dropped: &dropped,
+            unlocked: &unlocked,
         };
         let pursued = pursuit_of(&self.quest_board, chained, &ask);
         self.pursuit = pursued.lines;

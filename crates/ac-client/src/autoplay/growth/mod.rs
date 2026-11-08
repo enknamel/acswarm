@@ -224,6 +224,11 @@ pub struct State {
     pub(crate) sources_dropped: Recent<(u32, u32)>,
     /// The pursued fetch's act sent, waiting on its answer.
     pub(crate) fetching: Option<pursuit::Fetching>,
+    /// The key class the next unlock uses, and the sends of it so far (`Fetching::tries`).
+    pub(crate) unlock_with: u32,
+    pub(crate) unlock_tries: u32,
+    /// Chests this character unlocked, by weenie class, and when: opened without a key a while.
+    pub(crate) chests_unlocked: Recent<u32>,
 }
 
 /// A few names, and how many more there are. A caster short of every

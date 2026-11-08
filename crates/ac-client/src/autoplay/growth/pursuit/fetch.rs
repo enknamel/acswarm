@@ -20,8 +20,15 @@ const FETCH_REACH: f32 = crate::visit::REACH;
 const FOUND_NEAR: f32 = 20.0;
 /// An act's answer is waited for this long before it counts as refused (guess).
 const ANSWER_WAIT: Duration = Duration::from_secs(5);
+/// A key use the server never answered (another act cancelled its walk, `Player_Use.cs:157-163`)
+/// is sent this many times before the chest is dropped.
+const UNLOCK_TRIES: u32 = 3;
+/// A chest unlocked stays so this long: ACE resets it ResetInterval s on (weenie 27890: 20).
+pub(crate) const UNLOCKED_FOR: Duration = Duration::from_secs(20);
 /// ACE's LockAlreadyUnlocked: the chest opens all the same (`Lock.cs:174-176`).
 const LOCK_ALREADY_UNLOCKED: u32 = 0x04AF;
+/// ACE's YoureTooBusy: the key use turned away for an act of ours (`Player_Use.cs:152-156`).
+const YOURE_TOO_BUSY: u32 = 0x001D;
 
 /// What the pursued fetch last did and when, for its answer.
 #[derive(Clone, Debug, PartialEq)]
@@ -32,6 +39,10 @@ pub(crate) struct Fetching {
     pub(crate) guid: u32,
     pub(crate) act: Act,
     pub(crate) at: Instant,
+    /// The key's weenie class, while unlocking: gone from the pack, it unlocked (`Lock.cs:69-90`).
+    pub(crate) with: u32,
+    /// How many times the key has been sent.
+    pub(crate) tries: u32,
 }
 
 /// One act of a fetch.
@@ -52,6 +63,8 @@ enum Heard {
     Waiting,
     Done,
     Refused(String),
+    /// No answer: sent again.
+    Again,
 }
 
 impl Ask<'_> {
@@ -87,7 +100,7 @@ impl Ask<'_> {
                     _ => {
                         let carried = |k: &u32| (self.asking.carried)(*k) > 0;
                         let key = s.keys.iter().map(|k| k.0).find(carried);
-                        if key.is_none() && !s.keys.is_empty() {
+                        if key.is_none() && !s.keys.is_empty() && !(self.unlocked)(s) {
                             for (k, name) in &s.keys {
                                 if !locked.iter().any(|l| l.0 == *k) {
                                     locked.push((*k, name.as_str()));
@@ -163,6 +176,15 @@ impl Client {
             } else {
                 match self.heard(&f, now) {
                     Heard::Waiting => return Some(true),
+                    Heard::Again if f.tries < UNLOCK_TRIES => {
+                        self.autoplay.growth.fetching = None;
+                        self.autoplay.growth.unlock_tries = f.tries;
+                    }
+                    Heard::Again => {
+                        let why = format!("{label}: no answer to the key");
+                        self.drop_source(key, why, now);
+                        return Some(false);
+                    }
                     Heard::Refused(why) => {
                         self.drop_source(key, format!("{label}: {why}"), now);
                         return Some(false);
@@ -173,7 +195,9 @@ impl Client {
                         self.quest_board_at = None;
                         return Some(true);
                     }
-                    Heard::Done => {}
+                    Heard::Done => {
+                        self.autoplay.growth.chests_unlocked.mark(source, now);
+                    }
                 }
             }
         }
@@ -225,6 +249,7 @@ impl Client {
                     .inventory()
                     .find(|o| o.weenie_class_id == k && o.wielder.is_none())?
                     .guid;
+                self.autoplay.growth.unlock_with = k;
                 self.use_on(held, guid).then_some(Act::Unlock)
             }
             PursuitStep::OpenChest { .. } => {
@@ -240,7 +265,45 @@ impl Client {
     }
 
     fn fetch_sent(&mut self, key: (u32, u32), guid: u32, act: Act, at: Instant) {
-        self.autoplay.growth.fetching = Some(Fetching { key, guid, act, at });
+        let (with, tries) = match (act, &self.autoplay.growth.fetching) {
+            (Act::Unlock, _) => {
+                let tries = std::mem::take(&mut self.autoplay.growth.unlock_tries) + 1;
+                (self.autoplay.growth.unlock_with, tries)
+            }
+            (_, Some(f)) => (f.with, f.tries),
+            _ => (0, 0),
+        };
+        self.autoplay.growth.fetching = Some(Fetching {
+            key,
+            guid,
+            act,
+            at,
+            with,
+            tries,
+        });
+    }
+
+    /// The working fetch's key out on its chest: worked on ahead of every rule but healing,
+    /// dodging and dying, until the chest is open (`is_unlocking`). True while it holds the tick.
+    pub(crate) fn autoplay_unlock(&mut self, now: Instant) -> bool {
+        if !self.is_unlocking() {
+            return false;
+        }
+        let Some(line) = self.pursuit.iter().find(|l| l.working).cloned() else {
+            self.autoplay.growth.fetching = None;
+            return false;
+        };
+        self.grow_fetch(&line, now) == Some(true)
+    }
+
+    /// Whether the working fetch has used its key on a chest not yet opened: nothing else acts
+    /// between, as a cast cancels the server's use and the chest locks again (`UNLOCKED_FOR`).
+    pub(crate) fn is_unlocking(&self) -> bool {
+        self.autoplay
+            .growth
+            .fetching
+            .as_ref()
+            .is_some_and(|f| f.act == Act::Unlock)
     }
 
     /// How the server answered the act `f`: by its `UseDone` for a key, by what the pack holds
@@ -254,14 +317,17 @@ impl Client {
             Act::Take if has_item => Heard::Done,
             Act::Take if waited => Heard::Refused("would not come up".to_string()),
             Act::Take => Heard::Waiting,
+            // A one-use key is used up by the unlock; a UseDone with no error is also what a
+            // cancelled walk to the chest sends (`Player_Use.cs:157-163`), so it is not the answer.
+            Act::Unlock if f.with != 0 && self.carried_count(f.with) == 0 => Heard::Done,
             Act::Unlock => match self.use_done.filter(|(_, at)| *at >= f.at) {
-                Some((0 | LOCK_ALREADY_UNLOCKED, _)) => Heard::Done,
-                Some((err, _)) => {
+                Some((LOCK_ALREADY_UNLOCKED, _)) => Heard::Done,
+                Some((err, _)) if err != 0 && err != YOURE_TOO_BUSY => {
                     let said = crate::weenie_errors::text(err).unwrap_or("refused");
                     Heard::Refused(said.to_string())
                 }
-                None if waited => Heard::Refused("no answer to the key".to_string()),
-                None => Heard::Waiting,
+                _ if waited => Heard::Again,
+                _ => Heard::Waiting,
             },
             Act::Open if self.autoplay.is_at_corpse(f.guid) => Heard::Waiting,
             Act::Open if has_item => Heard::Done,

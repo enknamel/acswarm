@@ -356,6 +356,14 @@ pub const STEPS: &[Step] = &[
         run: claimed!(Client::autoplay_academy),
     },
     Step {
+        name: "unlock",
+        layer: Layer::Reflex,
+        base: 155.0,
+        why: "a quest's key used on its chest is held to until the chest is open: a cast or a step cancels the server's use, and the chest locks again 20 s on with the key gone",
+        worth: by_place,
+        run: claimed!(Client::autoplay_unlock),
+    },
+    Step {
         name: "urgent buffs",
         layer: Layer::Reflex,
         base: 150.0,

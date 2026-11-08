@@ -44,24 +44,24 @@ read. The fixed curves are placed against those numbers: `LOOT_AT_REST` (45) sit
 | 2 | dodge | reflex | - | `autoplay_dodge` |
 | 3 | recover | reflex | - | `autoplay_recover` |
 | 4 | academy | reflex | - | `autoplay_academy` |
-| 5 | urgent buffs | reflex | - | `autoplay_buff` (urgent) |
-| 6 | vitals | reflex | - | `autoplay_vitals` |
-| 7 | loot | goal | `worth_looting` | `autoplay_loot` |
-| 8 | catch up | goal | 120 | `autoplay_follow` (urgent) |
-| 9 | team | goal | 110 | `autoplay_team` |
-| 10 | salvage | goal | 100 | `autoplay_salvage` |
-| 11 | town run | goal | `worth_town_run` | `autoplay_town_run` |
-| 12 | summon | goal | `worth_fighting` | `autoplay_summon` |
-| 13 | fight | goal | `worth_fighting` | `autoplay_fight` |
-| 14 | keep to the area | goal | 70 | `autoplay_keep_to_area` |
-| 15 | buffs | goal | 60 | `autoplay_buff` |
-| 16 | follow | goal | 50 | `autoplay_follow` |
-| 17 | resume the journey | goal | 40 | `autoplay_resume_journey` |
-| 18 | explore | goal | 20 | `autoplay_explore` |
-| 19 | grow | goal | 10 | `autoplay_grow` |
+| 5 | unlock | reflex | - | `autoplay_unlock` |
+| 6 | urgent buffs | reflex | - | `autoplay_buff` (urgent) |
+| 7 | vitals | reflex | - | `autoplay_vitals` |
+| 8 | loot | goal | `worth_looting` | `autoplay_loot` |
+| 9 | catch up | goal | 120 | `autoplay_follow` (urgent) |
+| 10 | team | goal | 110 | `autoplay_team` |
+| 11 | salvage | goal | 100 | `autoplay_salvage` |
+| 12 | town run | goal | `worth_town_run` | `autoplay_town_run` |
+| 13 | summon | goal | `worth_fighting` | `autoplay_summon` |
+| 14 | fight | goal | `worth_fighting` | `autoplay_fight` |
+| 15 | keep to the area | goal | 70 | `autoplay_keep_to_area` |
+| 16 | buffs | goal | 60 | `autoplay_buff` |
+| 17 | follow | goal | 50 | `autoplay_follow` |
+| 18 | resume the journey | goal | 40 | `autoplay_resume_journey` |
+| 19 | explore | goal | 20 | `autoplay_explore` |
+| 20 | grow | goal | 10 | `autoplay_grow` |
 
-Housekeeping, every tick and never claiming it: `autoplay_pending_wield`, `autoplay_shield`,
-`autoplay_rearm`, `autoplay_stock`, `autoplay_claim_pet_kills`, `autoplay_tidy`, `autoplay_learn_scrolls`, `autoplay_spend_xp`.
+Housekeeping, every tick, never claiming it: `autoplay_pending_wield`, `autoplay_shield`, `autoplay_rearm`, `autoplay_stock`, `autoplay_claim_pet_kills`, `autoplay_tidy`, `autoplay_learn_scrolls`, `autoplay_spend_xp`.
 
 ## Systems
 
