@@ -278,6 +278,33 @@ fn the_necklace_of_leerargh_comes_from_a_locked_chest_whose_key_a_scamp_drops() 
 }
 
 #[test]
+fn the_imbued_focusing_stone_is_made_by_using_the_plain_one_on_the_vortex() {
+    // Le-Ai Rea takes the imbued stone (8904); recipe 1838 makes it from the plain Focusing Stone
+    // (8903) used on the Vortex (8907), placed once at 0x02AB010A; a Lich Overseer drops 8903.
+    let hand_in = rows_of("give:8904").find(|r| r.kind == Kind::Item);
+    assert_eq!(hand_in.map(|r| r.giver_wcid), Some(4122));
+    let from: Vec<&Source> = sources_of(&Want::Item(8904)).collect();
+    assert_eq!(from.len(), 1, "{from:?}");
+    let vortex = from[0];
+    assert_eq!((vortex.kind, vortex.wcid), (Yield::Use, 8907));
+    assert_eq!(vortex.name, "Vortex");
+    assert_eq!(vortex.landblocks, [(0x02AB_010A, 1)]);
+    let local = vortex.places[0].at - crate::landblock_origin(0x02AB_010A);
+    assert!(
+        local.distance(Vec3::new(0.0, -180.0, -12.0)) < 0.1,
+        "{local}"
+    );
+    assert_eq!(vortex.keys, [(8903, "Focusing Stone".to_string())]);
+    let stone: Vec<&Source> = sources_of(&Want::Item(8903)).collect();
+    assert!(
+        stone
+            .iter()
+            .any(|s| s.kind == Yield::Drop && s.wcid == 4124 && s.landblocks == [(0x188, 1)]),
+        "{stone:?}"
+    );
+}
+
+#[test]
 fn a_shop_selling_a_wanted_item_is_a_source_of_it() {
     let sold = sources()
         .iter()

@@ -48,7 +48,7 @@ pub(crate) const SWAP_SETTLES: Duration = Duration::from_millis(1500);
 
 /// How long dropping to peace mode takes on the server, which will not
 /// craft in any other stance.
-pub(super) const STANCE_CHANGE: Duration = Duration::from_millis(1000);
+pub(crate) const STANCE_CHANGE: Duration = Duration::from_millis(1000);
 
 impl Autoplay {
     /// Whether this item was asked for a moment ago and the server's

@@ -98,7 +98,12 @@ pub(crate) fn chain_words(links: &[ChainLink], k: &Known) -> Vec<Step> {
                     .say(" at ")
                     .link(Facet::At, (k.place)(cell));
                 if let Some((_, key)) = source.keys.first() {
-                    step = step.say(format!(", opened with {key}"));
+                    let how = if source.kind == Yield::Use {
+                        ""
+                    } else {
+                        "opened "
+                    };
+                    step = step.say(format!(", {how}with {key}"));
                 }
                 if source.kind == Yield::Npc {
                     step = step.say(" (autoplay can't fetch this yet)");
@@ -166,6 +171,7 @@ fn fetch_verb(kind: Yield) -> &'static str {
     match kind {
         Yield::Floor => "Pick up ",
         Yield::Container => "Open ",
+        Yield::Use => "Use it on ",
         Yield::Vendor => "Buy it from ",
         Yield::Drop | Yield::Kill | Yield::Npc => "Get it from ",
     }
@@ -323,6 +329,11 @@ pub(crate) fn step_words(step: &PursuitStep, now: u64, place: &dyn Fn(u32) -> St
         }
         PursuitStep::OpenChest { chest, at, .. } => {
             format!("opening {} at {}", chest.name, place(at.cell))
+        }
+        PursuitStep::UseOn { source, at, with } => {
+            let used = source.keys.iter().find(|k| k.0 == *with);
+            let used = used.map_or("it", |k| k.1.as_str());
+            format!("using {used} on {} at {}", source.name, place(at.cell))
         }
         PursuitStep::HandIn { row, at } => {
             format!("handing it in to {} at {}", row.giver, place(at.cell))

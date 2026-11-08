@@ -1,7 +1,8 @@
 //! A pursued item fetched, not hunted: bought on a town run through its buy line in the Quests
 //! section (`section`), picked up off the floor, or taken out of a chest, a locked one opened with
 //! its key first (UseWithTarget: `Key.cs:54-79`, `Lock.cs:119-193`), then emptied by the loot rules
-//! as a corpse is. A refused act drops that source for [`PURSUIT_RETRY`]; the next is worked.
+//! as a corpse is, or made by using a carried item on a placed object (`RecipeManager.cs:43-145`).
+//! A refused act drops that source for [`PURSUIT_RETRY`]; the next is worked.
 
 use std::time::{Duration, Instant};
 
@@ -9,6 +10,7 @@ use ac_world::quests::{Source, Want, Yield};
 use ac_world::Place;
 
 use super::{Ask, PursuitLine, PursuitStep, PURSUIT_RETRY};
+use crate::autoplay::hands::weapon::STANCE_CHANGE;
 use crate::autoplay::Doing;
 use crate::Client;
 
@@ -20,8 +22,8 @@ const FETCH_REACH: f32 = crate::visit::REACH;
 const FOUND_NEAR: f32 = 20.0;
 /// An act's answer is waited for this long before it counts as refused (guess).
 const ANSWER_WAIT: Duration = Duration::from_secs(5);
-/// A key use the server never answered (another act cancelled its walk, `Player_Use.cs:157-163`)
-/// is sent this many times before the chest is dropped.
+/// A key or item use the server never answered (another act cancelled its walk,
+/// `Player_Use.cs:157-163`) is sent this many times before the source is dropped.
 const UNLOCK_TRIES: u32 = 3;
 /// A chest unlocked stays so this long: ACE resets it ResetInterval s on (weenie 27890: 20).
 pub(crate) const UNLOCKED_FOR: Duration = Duration::from_secs(20);
@@ -39,9 +41,9 @@ pub(crate) struct Fetching {
     pub(crate) guid: u32,
     pub(crate) act: Act,
     pub(crate) at: Instant,
-    /// The key's weenie class, while unlocking: gone from the pack, it unlocked (`Lock.cs:69-90`).
+    /// The key's or used item's weenie class: a key gone from the pack unlocked (`Lock.cs:69-90`).
     pub(crate) with: u32,
-    /// How many times the key has been sent.
+    /// How many times the key or item has been sent.
     pub(crate) tries: u32,
 }
 
@@ -56,6 +58,10 @@ pub(crate) enum Act {
     Unlock,
     /// The chest opened for the loot rules to empty.
     Open,
+    /// Out of combat for a use, refused in any stance but peace (`RecipeManager.cs:51-57`).
+    Peace,
+    /// A carried item used on the object, which makes the wanted item.
+    Use,
 }
 
 /// How an act was answered.
@@ -69,7 +75,7 @@ enum Heard {
 
 impl Ask<'_> {
     /// The nearest fetched source of `wants`: a shop, the floor, a chest open or with its key
-    /// carried. A chest whose keys are all missing puts them in `locked`, to be obtained first.
+    /// carried, an object with its item carried. Missing keys or items go in `locked`, got first.
     pub(super) fn fetch_step(
         &self,
         wants: &[Want],
@@ -97,6 +103,24 @@ impl Ask<'_> {
                         name: s.name.clone(),
                         at,
                     },
+                    Yield::Use => {
+                        let carried = |k: &u32| (self.asking.carried)(*k) > 0;
+                        match s.keys.iter().map(|k| k.0).find(carried) {
+                            Some(with) => PursuitStep::UseOn {
+                                source: s,
+                                at,
+                                with,
+                            },
+                            None => {
+                                for (k, name) in &s.keys {
+                                    if !locked.iter().any(|l| l.0 == *k) {
+                                        locked.push((*k, name.as_str()));
+                                    }
+                                }
+                                continue;
+                            }
+                        }
+                    }
                     _ => {
                         let carried = |k: &u32| (self.asking.carried)(*k) > 0;
                         let key = s.keys.iter().map(|k| k.0).find(carried);
@@ -135,10 +159,12 @@ pub(super) fn ware_name(s: &Source, wcid: u32) -> Option<String> {
 fn fetch_key(step: &PursuitStep) -> Option<(u32, u32)> {
     match step {
         PursuitStep::PickUp { wcid, .. } => Some((*wcid, *wcid)),
-        PursuitStep::OpenChest { chest, .. } => match chest.want {
-            Want::Item(w) => Some((w, chest.wcid)),
-            _ => None,
-        },
+        PursuitStep::OpenChest { chest: s, .. } | PursuitStep::UseOn { source: s, .. } => {
+            match s.want {
+                Want::Item(w) => Some((w, s.wcid)),
+                _ => None,
+            }
+        }
         _ => None,
     }
 }
@@ -167,7 +193,8 @@ impl Client {
         let key = fetch_key(&line.step)?;
         let (place, source, label) = match &line.step {
             PursuitStep::PickUp { wcid, name, at } => (*at, *wcid, name.clone()),
-            PursuitStep::OpenChest { chest, at, .. } => (*at, chest.wcid, chest.name.clone()),
+            PursuitStep::OpenChest { chest: s, at, .. }
+            | PursuitStep::UseOn { source: s, at, .. } => (*at, s.wcid, s.name.clone()),
             _ => return None,
         };
         if let Some(f) = self.autoplay.growth.fetching.clone() {
@@ -181,7 +208,8 @@ impl Client {
                         self.autoplay.growth.unlock_tries = f.tries;
                     }
                     Heard::Again => {
-                        let why = format!("{label}: no answer to the key");
+                        let what = if f.act == Act::Use { "use" } else { "key" };
+                        let why = format!("{label}: no answer to the {what}");
                         self.drop_source(key, why, now);
                         return Some(false);
                     }
@@ -230,7 +258,7 @@ impl Client {
         Some(true)
     }
 
-    /// Do the next act on `guid`, `away` metres off: pick it up, unlock it, or open it.
+    /// Do the next act on `guid`, `away` metres off: pick it up, unlock it, open it, or use on it.
     fn fetch_act(&mut self, step: &PursuitStep, guid: u32, away: f32, now: Instant) -> Option<Act> {
         let unlocked = self
             .autoplay
@@ -252,6 +280,19 @@ impl Client {
                 self.autoplay.growth.unlock_with = k;
                 self.use_on(held, guid).then_some(Act::Unlock)
             }
+            PursuitStep::UseOn { with, .. } => {
+                if self.combat || self.magic {
+                    self.leave_combat();
+                    return Some(Act::Peace);
+                }
+                let held = self
+                    .world
+                    .inventory()
+                    .find(|o| o.weenie_class_id == with && o.wielder.is_none())?
+                    .guid;
+                self.autoplay.growth.unlock_with = with;
+                self.use_on(held, guid).then_some(Act::Use)
+            }
             PursuitStep::OpenChest { .. } => {
                 // Emptied as a corpse is: the loot rules keep what the quest rule asks for.
                 self.remember_journey();
@@ -266,11 +307,13 @@ impl Client {
 
     fn fetch_sent(&mut self, key: (u32, u32), guid: u32, act: Act, at: Instant) {
         let (with, tries) = match (act, &self.autoplay.growth.fetching) {
-            (Act::Unlock, _) => {
+            (Act::Unlock | Act::Use, _) => {
                 let tries = std::mem::take(&mut self.autoplay.growth.unlock_tries) + 1;
                 (self.autoplay.growth.unlock_with, tries)
             }
             (_, Some(f)) => (f.with, f.tries),
+            // Kept for the use that follows: `unlock_tries` is taken by it.
+            (Act::Peace, None) => (0, self.autoplay.growth.unlock_tries),
             _ => (0, 0),
         };
         self.autoplay.growth.fetching = Some(Fetching {
@@ -283,8 +326,8 @@ impl Client {
         });
     }
 
-    /// The working fetch's key out on its chest: worked on ahead of every rule but healing,
-    /// dodging and dying, until the chest is open (`is_unlocking`). True while it holds the tick.
+    /// The working fetch's key out on its chest, or item on its object: worked on ahead of every
+    /// rule but healing, dodging and dying, until answered (`is_unlocking`). True while it holds.
     pub(crate) fn autoplay_unlock(&mut self, now: Instant) -> bool {
         if !self.is_unlocking() {
             return false;
@@ -296,18 +339,18 @@ impl Client {
         self.grow_fetch(&line, now) == Some(true)
     }
 
-    /// Whether the working fetch has used its key on a chest not yet opened: nothing else acts
-    /// between, as a cast cancels the server's use and the chest locks again (`UNLOCKED_FOR`).
+    /// Whether the working fetch has used its key on a chest not yet opened, or is using an item
+    /// on an object: nothing acts between, as a cast cancels the server's use (`UNLOCKED_FOR`).
     pub(crate) fn is_unlocking(&self) -> bool {
         self.autoplay
             .growth
             .fetching
             .as_ref()
-            .is_some_and(|f| f.act == Act::Unlock)
+            .is_some_and(|f| matches!(f.act, Act::Unlock | Act::Peace | Act::Use))
     }
 
     /// How the server answered the act `f`: by its `UseDone` for a key, by what the pack holds
-    /// once a take or the loot rules are done.
+    /// once a take, a use or the loot rules are done.
     fn heard(&self, f: &Fetching, now: Instant) -> Heard {
         let waited = now.duration_since(f.at) >= ANSWER_WAIT;
         let has_item = self.carried_count(f.key.0) > 0;
@@ -322,6 +365,19 @@ impl Client {
             Act::Unlock if f.with != 0 && self.carried_count(f.with) == 0 => Heard::Done,
             Act::Unlock => match self.use_done.filter(|(_, at)| *at >= f.at) {
                 Some((LOCK_ALREADY_UNLOCKED, _)) => Heard::Done,
+                Some((err, _)) if err != 0 && err != YOURE_TOO_BUSY => {
+                    let said = crate::weenie_errors::text(err).unwrap_or("refused");
+                    Heard::Refused(said.to_string())
+                }
+                _ if waited => Heard::Again,
+                _ => Heard::Waiting,
+            },
+            // The stance changed, the use goes out (`autoplay_craft_ammo` waits as long).
+            Act::Peace if now.duration_since(f.at) >= STANCE_CHANGE => Heard::Again,
+            Act::Peace => Heard::Waiting,
+            // The made item comes before the UseDone (`RecipeManager.cs:135-143`).
+            Act::Use if has_item => Heard::Done,
+            Act::Use => match self.use_done.filter(|(_, at)| *at >= f.at) {
                 Some((err, _)) if err != 0 && err != YOURE_TOO_BUSY => {
                     let said = crate::weenie_errors::text(err).unwrap_or("refused");
                     Heard::Refused(said.to_string())

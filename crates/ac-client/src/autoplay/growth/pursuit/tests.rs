@@ -1182,3 +1182,196 @@ fn the_necklaces_key_leaves_the_section_once_the_necklace_is_carried() {
         "no shop sells it here"
     );
 }
+
+const FOCUSING_QUEST: &str = "give:8904";
+
+/// The Focusing Stone quest: the plain stone's Lich Overseer behind an open portal into 0x0188;
+/// the imbued one comes from the data's Vortex.
+fn focusing_stone() -> Fake {
+    let lich = dropper(Want::Item(8903), 4124, "Lich Overseer", 50);
+    let into = way_in("Lich Tower", 0x0188, 0, "");
+    Fake {
+        grounds: vec![(Want::Item(8903), ground(0x0188, lich, into))],
+        ..Fake::default()
+    }
+}
+
+#[test]
+fn the_imbued_focusing_stone_is_had_by_hunting_the_plain_one_then_using_it_on_the_vortex() {
+    let fake = focusing_stone();
+    let mut f = facts(50, &[(FOCUSING_QUEST, true)]);
+    // No plain stone: the Lich Overseer that drops it is hunted.
+    let p = work(&f, &fake, None);
+    match &p.lines[0].step {
+        PursuitStep::Hunt {
+            landblock,
+            creature,
+            ..
+        } => assert_eq!((*landblock, creature.as_str()), (0x0188, "Lich Overseer")),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(p.sought, [4124]);
+    // The plain stone carried: it is used on the Vortex.
+    f.carried.insert(8903, 1);
+    let p = work(&f, &fake, None);
+    match &p.lines[0].step {
+        PursuitStep::UseOn { source, at, with } => {
+            assert_eq!(
+                (source.wcid, source.kind, at.cell, *with),
+                (8907, Yield::Use, 0x02AB_010A, 8903)
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(p.lines[0].working);
+    let words = p.lines[0].words(NOW);
+    assert!(words.contains("use Focusing Stone on Vortex"), "{words}");
+}
+
+#[test]
+fn the_focusing_stone_quest_keeps_the_plain_stone_while_the_imbued_one_is_wanted() {
+    use crate::items::{NumKey, Op, Term};
+    use crate::profile::Ask;
+    let mut c = fletch_with_a_quests_section();
+    pursue(
+        &mut c,
+        &facts(50, &[(FOCUSING_QUEST, true)]),
+        &focusing_stone(),
+    );
+    let classes: Vec<f64> = section(&c)
+        .rules
+        .iter()
+        .filter(|r| r.is_quest_entry("Fletch"))
+        .filter_map(|r| {
+            r.all.iter().find_map(|a| match a {
+                Ask::Item(Term::Num(NumKey::Class, Op::Eq, w)) => Some(*w),
+                _ => None,
+            })
+        })
+        .collect();
+    // The imbued stone the hand-in takes, and the plain one used on the Vortex to make it.
+    assert_eq!(classes, [8904.0, 8903.0]);
+}
+
+const STONE: u32 = 0x8000_0301;
+const VORTEX: u32 = 0x7AB0_1000;
+
+/// The data's Vortex standing at `at`, the plain stone to be used on it.
+fn vortex(at: Place) -> PursuitStep {
+    let source = Source {
+        want: Want::Item(8904),
+        kind: Yield::Use,
+        wcid: 8907,
+        name: "Vortex".into(),
+        level: 0,
+        chance: 1.0,
+        landblocks: vec![(at.cell, 1)],
+        places: vec![at],
+        keys: vec![(8903, "Focusing Stone".into())],
+    };
+    PursuitStep::UseOn {
+        source: leak(source),
+        at,
+        with: 8903,
+    }
+}
+
+/// Beside the Vortex, the Vortex in the world and the plain stone carried.
+fn at_the_vortex() -> (Client, PursuitLine) {
+    let (mut c, line) = fetching(vortex);
+    let PursuitStep::UseOn { at, .. } = line.step else {
+        unreachable!()
+    };
+    lying(&mut c, VORTEX, 8907, "Vortex", at);
+    carrying(&mut c, STONE, 8903, "Focusing Stone");
+    (c, line)
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn at_the_vortex_the_plain_stone_is_used_on_it_and_the_imbued_one_carried_is_done() {
+    let (mut c, line) = at_the_vortex();
+    let now = Instant::now();
+    assert_eq!(c.grow_fetch(&line, now), Some(true));
+    assert_eq!(c.last_used, Some(VORTEX), "the stone is used on the Vortex");
+    let f = c
+        .autoplay
+        .growth
+        .fetching
+        .clone()
+        .expect("waiting on the use");
+    assert_eq!((f.act, f.tries, f.with), (fetch::Act::Use, 1, 8903));
+    assert!(c.is_unlocking(), "the unlock reflex holds the tick");
+    // Waiting: nothing is sent again.
+    c.last_used = None;
+    let soon = now + Duration::from_millis(300);
+    assert!(c.autoplay_unlock(soon));
+    assert_eq!(c.last_used, None);
+    // The plain stone used up, the imbued one in the pack: the board is worked out again.
+    c.world.objects.remove(&STONE);
+    carrying(&mut c, 0x8000_0302, 8904, "Focusing Stone");
+    c.quest_board_at = Some(soon);
+    assert!(c.autoplay_unlock(soon));
+    assert_eq!(c.autoplay.growth.fetching, None);
+    assert_eq!(c.quest_board_at, None);
+    assert!(!c.is_unlocking());
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn an_unanswered_use_on_the_vortex_is_sent_again() {
+    let (mut c, line) = at_the_vortex();
+    let now = Instant::now();
+    assert_eq!(c.grow_fetch(&line, now), Some(true));
+    c.last_used = None;
+    let gone = now + Duration::from_secs(6);
+    assert!(c.autoplay_unlock(gone));
+    assert_eq!(c.last_used, Some(VORTEX), "the stone is used again");
+    let f = c
+        .autoplay
+        .growth
+        .fetching
+        .clone()
+        .expect("waiting on the use");
+    assert_eq!((f.act, f.tries), (fetch::Act::Use, 2));
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_use_on_the_vortex_waits_for_peace_mode_first() {
+    // Crafting is refused in any stance but peace (RecipeManager.cs:51-57).
+    let (mut c, line) = at_the_vortex();
+    c.combat = true;
+    let now = Instant::now();
+    assert_eq!(c.grow_fetch(&line, now), Some(true));
+    assert!(!c.combat, "out of combat");
+    assert_eq!(c.last_used, None, "nothing used in a combat stance");
+    assert!(c.is_unlocking());
+    let changed = now + Duration::from_millis(1100);
+    assert!(c.autoplay_unlock(changed));
+    assert_eq!(c.last_used, Some(VORTEX));
+    let f = c
+        .autoplay
+        .growth
+        .fetching
+        .clone()
+        .expect("waiting on the use");
+    assert_eq!((f.act, f.tries), (fetch::Act::Use, 1));
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_use_on_the_vortex_refused_drops_it_for_the_pursuit() {
+    let (mut c, line) = at_the_vortex();
+    let now = Instant::now();
+    c.grow_fetch(&line, now);
+    // YouDoNotPassCraftingRequirements, 0x0437 (RecipeManager.cs:76-80).
+    let later = now + Duration::from_millis(300);
+    c.use_done = Some((0x0437, later));
+    assert_eq!(c.grow_fetch(&line, later), Some(false));
+    let PursuitStep::UseOn { source, .. } = &line.step else {
+        unreachable!()
+    };
+    assert!(c.is_source_dropped(source, later));
+    assert!(!c.is_unlocking());
+}

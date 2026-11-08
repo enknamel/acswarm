@@ -1,7 +1,8 @@
 //! The loot profile's Quests section, kept by the pursuit: while a quest is pursued, a Keep rule
-//! for each item its chain needs (a key only while its chest's item is wanted) and a buy line for
-//! one a shop sells, which the town run buys as any other; gone once the quest is done or dropped.
-//! Each entry carries its quest and asks for this character's name; nothing else is touched.
+//! for each item its chain needs (a key, or an item used on an object, only while what it opens
+//! to or makes is wanted) and a buy line for one a shop sells, which the town run buys as any
+//! other; gone once the quest is done or dropped. Each entry carries its quest and asks for this
+//! character's name; nothing else is touched.
 
 use ac_world::quests::{Kind, Want, Yield};
 
@@ -67,8 +68,8 @@ pub(crate) fn quest_entries(
     (rules, buy)
 }
 
-/// One quest's entries: its items, then the keys to the chests holding them while one is still
-/// wanted; a buy line for the first of those a shop sells, sized to what the hand-in takes.
+/// One quest's entries: its items, then the keys to the chests holding them and the items used to
+/// make them while one is still wanted; a buy line for the first of those a shop sells, sized to what the hand-in takes.
 fn entries_for(quest: &QuestLine, who: &str, chains: &dyn Chains) -> (Vec<Rule>, Option<Buy>) {
     let rows: Vec<_> = crate::quest_log::worked_rows(quest)
         .filter(|r| r.kind == Kind::Item)

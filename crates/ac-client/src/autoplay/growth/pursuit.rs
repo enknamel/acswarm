@@ -59,6 +59,12 @@ pub enum PursuitStep {
         at: Place,
         key: Option<u32>,
     },
+    /// Walk to `source`'s object at `at` and use the carried `with` (weenie class) on it.
+    UseOn {
+        source: &'static Source,
+        at: Place,
+        with: u32,
+    },
     /// Hand in to `row`'s giver at `at`.
     HandIn { row: &'static Row, at: Place },
     /// Done; may be done again at this Unix second.
@@ -80,6 +86,7 @@ impl PursuitStep {
                 | PursuitStep::Buy { .. }
                 | PursuitStep::PickUp { .. }
                 | PursuitStep::OpenChest { .. }
+                | PursuitStep::UseOn { .. }
                 | PursuitStep::HandIn { .. }
         )
     }
@@ -110,6 +117,12 @@ impl PursuitStep {
                     .map_or(String::new(), |k| format!(" with {}", k.1));
                 let place = ac_world::quest_chain::place_name(at.cell);
                 format!("open {}{with} in {place}", chest.name)
+            }
+            PursuitStep::UseOn { source, at, with } => {
+                let used = source.keys.iter().find(|k| k.0 == *with);
+                let used = used.map_or_else(|| format!("item {with}"), |k| k.1.clone());
+                let place = ac_world::quest_chain::place_name(at.cell);
+                format!("use {used} on {} in {place}", source.name)
             }
             PursuitStep::HandIn { row, .. } => format!("hand it in to {}", row.giver),
             PursuitStep::Waiting { until } => {
@@ -721,9 +734,9 @@ impl Client {
                 self.hold_pursuit(&line.id, why, now);
                 Some(false)
             }
-            PursuitStep::PickUp { .. } | PursuitStep::OpenChest { .. } => {
-                self.grow_fetch(&line, now)
-            }
+            PursuitStep::PickUp { .. }
+            | PursuitStep::OpenChest { .. }
+            | PursuitStep::UseOn { .. } => self.grow_fetch(&line, now),
             _ => None,
         }
     }

@@ -226,6 +226,8 @@ pub enum Yield {
     Floor,
     /// Held in a chest, opened with one of its `keys` when it is locked.
     Container,
+    /// Made by using one of its `keys`, carried, on this placed object (a recipe's target).
+    Use,
     /// A shop sells it (`crate::shops`): bought on a town run.
     Vendor,
 }
@@ -252,7 +254,8 @@ pub struct Source {
     pub landblocks: Vec<(u32, u32)>,
     /// A placed source's spots, one per `landblocks` entry; empty for a hunted one.
     pub places: Vec<Place>,
-    /// The keys that open a locked container, `(wcid, name)`: each a want with sources of its own.
+    /// The keys that open a locked container, or the items used on a use's object, `(wcid, name)`:
+    /// each a want with sources of its own.
     pub keys: Vec<(u32, String)>,
 }
 
@@ -461,6 +464,7 @@ fn parse_source(line: &str) -> Option<Source> {
         "npc" => Yield::Npc,
         "floor" => Yield::Floor,
         "container" => Yield::Container,
+        "use" => Yield::Use,
         _ => return None,
     };
     let landblocks = pairs(f[6], 16)?;

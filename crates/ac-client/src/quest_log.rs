@@ -658,8 +658,8 @@ pub fn quest_wants(board: &[QuestLine]) -> Vec<QuestWant> {
         .collect()
 }
 
-/// The keys opening a chest that holds `wcid`, and those opening a chest holding one of them,
-/// [`KEY_DEPTH`] deep.
+/// The keys opening a chest that holds `wcid` or the items used to make it, and those of each of
+/// them in turn, [`KEY_DEPTH`] deep.
 pub(crate) fn keys_to(wcid: u32) -> Vec<u32> {
     let mut keys: Vec<u32> = Vec::new();
     let mut of = vec![wcid];
