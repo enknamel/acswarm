@@ -246,10 +246,10 @@ fn every_stop_is_chosen_by_one_rule() {
         c.errands_for(&cfg, &[urgent]),
         vec![Errand::Buy, Errand::Sell]
     );
-    // Otherwise the loot pays for the shopping.
+    // Topping up too: the list first, the loot sold where it is bought and on after.
     assert_eq!(
         c.errands_for(&cfg, &[topping_up]),
-        vec![Errand::Sell, Errand::Buy]
+        vec![Errand::Buy, Errand::Sell]
     );
     assert_eq!(c.errands_for(&cfg, &[]), vec![Errand::Sell]);
 }

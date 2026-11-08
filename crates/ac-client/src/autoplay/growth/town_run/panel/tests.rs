@@ -355,8 +355,8 @@ fn a_hand_runs_status_stays_with_autoplay_off() {
 fn the_panel_run_with_a_list_and_a_pea_buys_the_list_on_the_same_run() {
     // The archer has 18 of 25 arrowshafts -- short, not urgent -- and a pea. The button's run
     // sold the pea and ended in town with the arrows unbought: a second stop was held to the
-    // town the first stood in. Every stop is chosen by one rule now, from anywhere: the pea pays
-    // first, and the arrows are bought at the next counter.
+    // town the first stood in. Every stop is chosen by one rule now, from anywhere: the arrows
+    // first, and the pea sold at the next counter that takes it.
     let holtburg = 0xA9B4_0019;
     let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
     c.world.stats.level = 20;
@@ -376,24 +376,24 @@ fn the_panel_run_with_a_list_and_a_pea_buys_the_list_on_the_same_run() {
     );
     c.town_run_by_hand(now).expect("no run");
     let run = c.autoplay.growth.run.take().expect("no run");
-    assert_eq!(run.errand, Errand::Sell);
-    assert_eq!(run.vendor, "Archmage Cindrue");
-    // Sold there; on to the arrows.
-    c.world.objects.remove(&0x8000_0010);
-    c.cancel_travel();
+    assert_eq!(run.errand, Errand::Buy);
     assert!(
-        c.grow_run_next(run, now, &cfg, None),
-        "went home without the arrows"
-    );
-    let on = c.autoplay.growth.run.as_ref().unwrap();
-    assert_eq!(on.errand, Errand::Buy);
-    assert!(
-        shop_named(&on.vendor)
+        shop_named(&run.vendor)
             .stocks("Bundle of Arrowshafts")
             .is_some(),
         "{}",
-        on.vendor
+        run.vendor
     );
+    // Bought there; on to sell the pea.
+    c.world.objects.get_mut(&0x8000_0020).unwrap().stack_size = 25;
+    c.cancel_travel();
+    assert!(
+        c.grow_run_next(run, now, &cfg, None),
+        "went home with the pea"
+    );
+    let on = c.autoplay.growth.run.as_ref().unwrap();
+    assert_eq!(on.errand, Errand::Sell);
+    assert_eq!(on.vendor, "Archmage Cindrue");
 }
 
 #[test]
