@@ -43,6 +43,8 @@ impl Default for Mana {
 pub struct State {
     /// When the worn things were last asked about.
     looked: Option<Instant>,
+    /// The worn things asked about again and not yet answered: their old answers are not read.
+    awaiting: Vec<u32>,
     /// The stone last used and when, until the server answers and it is looked at again.
     sent: Option<(u32, Instant)>,
     /// The stone and the junk of the drain sent, until its answer: junk still there was not taken.
@@ -90,7 +92,25 @@ impl Client {
                 Stone::Empty(_) => None,
             })
             .collect();
-        if let (Some(&stone), Some(low)) = (charged.first(), self.low_on_mana(cfg.recharge_below)) {
+        // Asked about again (after a charge, or a minute on): the old figures say "low" until the
+        // new ones come, and a stone went in every five seconds through "fully charged".
+        let pending = |g: &u32| {
+            self.appraise_queue.contains(g) || self.appraise_inflight.iter().any(|(i, _)| i == g)
+        };
+        let awaiting: Vec<u32> = self
+            .autoplay
+            .mana_stones
+            .awaiting
+            .iter()
+            .copied()
+            .filter(|g| pending(g))
+            .collect();
+        let fresh = awaiting.is_empty();
+        self.autoplay.mana_stones.awaiting = awaiting;
+        let low = fresh
+            .then(|| self.low_on_mana(cfg.recharge_below))
+            .flatten();
+        if let (Some(&stone), Some(low)) = (charged.first(), low) {
             let me = self.world.player_guid.unwrap_or_default();
             self.use_stone(
                 stone,
@@ -161,7 +181,8 @@ impl Client {
             })
             .map(|o| o.guid)
             .collect();
-        self.appraise_again(worn);
+        self.appraise_again(worn.iter().copied());
+        self.autoplay.mana_stones.awaiting = worn;
     }
 
     /// The carried stones whose appraisal is in: charged with mana, or empty.

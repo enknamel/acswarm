@@ -128,3 +128,43 @@ fn a_drain_that_leaves_the_junk_is_not_sent_again() {
     c.autoplay_mana_stones(now + ANSWER_WAIT);
     assert_eq!(c.last_used, None, "the same drain went out again");
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_charge_waits_for_the_worn_things_to_be_read_again() {
+    // "charging what is worn (Pathwarden Plate Leggings is low)" every five seconds, through
+    // "Your items are fully charged": the old figures were read before the new ones came.
+    let mut c = wearing(240);
+    const SECOND: u32 = 0x8000_0304;
+    crate::testkit::thing_in_the_pack(&mut c, SECOND, "Mana Stone", 1);
+    c.world.objects.get_mut(&SECOND).unwrap().item_type = ac_world::item_type::MANA_STONE;
+    c.appraisals.insert(
+        SECOND,
+        ac_net::messages::Appraisal {
+            guid: SECOND,
+            success: true,
+            ints: vec![(107, 3_000)],
+            ..Default::default()
+        },
+    );
+    let me = c.world.player_guid.unwrap();
+    let now = Instant::now();
+    c.autoplay_mana_stones(now);
+    assert_eq!(c.last_used, Some(me));
+    c.autoplay.cast_answered();
+    c.last_used = None;
+    // Answered; the ring is asked about again, its old appraisal still saying 240 of 600.
+    c.autoplay_mana_stones(now + ANSWER_WAIT);
+    assert_ne!(c.last_used, Some(me), "a second stone on the old figures");
+    assert!(
+        c.appraise_queue.contains(&RING),
+        "the ring was not asked about again"
+    );
+    // The fresh answer: full. Nothing more is charged.
+    c.appraise_queue.clear();
+    appraised(&mut c, RING, Some((600, 600)));
+    c.autoplay.cast_answered();
+    c.last_used = None;
+    c.autoplay_mana_stones(now + ANSWER_WAIT * 3);
+    assert_ne!(c.last_used, Some(me), "charged with the ring full");
+}
