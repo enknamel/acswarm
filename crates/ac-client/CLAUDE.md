@@ -61,7 +61,7 @@ read. The fixed curves are placed against those numbers: `LOOT_AT_REST` (45) sit
 | 19 | explore | goal | 20 | `autoplay_explore` |
 | 20 | grow | goal | 10 | `autoplay_grow` |
 
-Housekeeping, every tick, never claiming it: `autoplay_pending_wield`, `autoplay_shield`, `autoplay_rearm`, `autoplay_stock`, `autoplay_claim_pet_kills`, `autoplay_tidy`, `autoplay_learn_scrolls`, `autoplay_spend_xp`.
+Housekeeping, every tick, never claiming it: `autoplay_pending_wield`, `autoplay_shield`, `autoplay_rearm`, `autoplay_stock`, `autoplay_claim_pet_kills`, `autoplay_refill_essences`, `autoplay_tidy`, `autoplay_learn_scrolls`, `autoplay_spend_xp`.
 
 ## Systems
 
@@ -104,7 +104,7 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 | dodge | `autoplay_dodge`, `autoplay_approach`, `sidestep`, `threat` | `dodge.rs`, `aim.rs`, `doorway.rs` | `Client.dodge`, `Client.dodge_to` | dodge | dodge | dodge |
 | recovery | `autoplay_recover`, `recovery_view`, `is_dead` | `recovery.rs` | `Autoplay.recovery` | recovery:: | recovery | recovery |
 | academy | `autoplay_academy` | `academy.rs`, `tests/academy_route.rs` | `Autoplay.academy`, `Autoplay.academy_corpse`, `Autoplay.academy_armed` | academy | academy | academy |
-| summoning | `autoplay_summon`, `autoplay_claim_pet_kills`, `hear_summoning` | `autoplay/summoning.rs`, `autoplay/mod.rs` | `Autoplay.summoning` | summon | autoplay::summoning | summon, pet |
+| summoning | `autoplay_summon`, `autoplay_claim_pet_kills`, `autoplay_refill_essences`, `hear_summoning` | `autoplay/summoning.rs`, `autoplay/mod.rs` | `Autoplay.summoning` | summon | autoplay::summoning | summon, pet |
 | refusals | `hear_refusal`, `refused`, `answer` | `refused.rs`, `crates/ac-agent/src/refusals.rs` | the waiting system's own wait, e.g. `Autoplay.shelved` | refus | refused | refusal |
 | server chat | `chat_message`, `hear_arrival`, `hear_spell_attack` | `session/chat.rs`, `autoplay/hear.rs` | `Autoplay.hit_by` | arriv | session::chat | heard |
 | quests | `refresh_quests`, `quest_board`, `quest_wants`, `visit_giver`, `watch_quest_answer`, `refresh_pursuit`, `keep_quest_section`, `start_quest_call` | `quest_log.rs`, `crates/ac-world/src/quests.rs`, `autoplay/growth/pursuit.rs`, `autoplay/growth/pursuit/fetch.rs`, `autoplay/growth/pursuit/section.rs`, `autoplay/growth/town_run/calls.rs` | `Client.quest_board`, `Client.quest_log`, `Client.pursuit`, `Autoplay.config.quests` | quest_log | quest_log | quest, pursuit |

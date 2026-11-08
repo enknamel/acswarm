@@ -111,3 +111,54 @@ fn an_essence_used_holds_the_next_cast_until_it_is_answered() {
     c.autoplay.cast_answered();
     assert!(!c.autoplay.cast_in_flight(now));
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn an_empty_essence_is_refilled_with_a_spirit_between_fights() {
+    // An Encapsulated Spirit used on an essence fills its uses; it is spent either way, so only
+    // an empty one is refilled, and never in a fight (the refill changes to peace first).
+    let holtburg = 0xA9B4_0019;
+    let mut c = crate::testkit::standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
+    crate::testkit::with_a_pack(&mut c, 50);
+    c.autoplay.config.fight.enabled = true;
+    c.autoplay.config.fight.summon = true;
+    const ESSENCE: u32 = 0x8000_0200;
+    const SPIRIT: u32 = 0x8000_0201;
+    crate::testkit::thing_in_the_pack(&mut c, ESSENCE, "Sandstone Golem Essence", 1);
+    crate::testkit::thing_in_the_pack(&mut c, SPIRIT, "Encapsulated Spirit", 3);
+    c.world.objects.get_mut(&SPIRIT).unwrap().weenie_class_id = ENCAPSULATED_SPIRIT;
+    let essence = c.world.objects.get_mut(&ESSENCE).unwrap();
+    essence.max_structure = 50;
+    essence.structure = 12;
+    let now = Instant::now();
+    c.autoplay_refill_essences(now);
+    assert_eq!(
+        c.last_used, None,
+        "a spirit spent on an essence with uses left"
+    );
+    c.world.objects.get_mut(&ESSENCE).unwrap().structure = 0;
+    let foe = crate::testkit::standing_by(&mut c, 0x8000_0103, "Tusker Guard", 8.0);
+    c.attack_target = Some(foe.guid);
+    if c.in_a_fight() {
+        c.autoplay_refill_essences(now);
+        assert_eq!(c.last_used, None, "refilled mid-fight");
+    }
+    c.attack_target = None;
+    c.world.objects.remove(&foe.guid);
+    assert!(!c.in_a_fight());
+    c.autoplay_refill_essences(now);
+    assert_eq!(
+        c.last_used,
+        Some(ESSENCE),
+        "the empty essence was not refilled"
+    );
+    assert!(
+        c.autoplay.cast_in_flight(now),
+        "the refill holds the next act"
+    );
+    // Asked again before it shows: not sent twice.
+    c.last_used = None;
+    c.autoplay.cast_answered();
+    c.autoplay_refill_essences(now + Duration::from_secs(1));
+    assert_eq!(c.last_used, None, "a second spirit before the first showed");
+}

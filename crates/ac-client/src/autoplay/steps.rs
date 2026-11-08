@@ -551,6 +551,12 @@ pub const HOUSEKEEPING: &[Housekeeping] = &[
         run: Client::autoplay_claim_pet_kills,
     },
     Housekeeping {
+        name: "refill summoning essences",
+        // One use on the spot between fights, as a pour is: as a goal it waited behind every
+        // fight and walk, and the empty essence sat in the pack.
+        run: Client::autoplay_refill_essences,
+    },
+    Housekeeping {
         name: "tidy the pack",
         // A pour of one carried stack into another is made on the spot:
         // no walk, no animation, nothing the server calls being busy.

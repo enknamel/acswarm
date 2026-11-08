@@ -58,6 +58,13 @@ const USE_REQUIRES_SKILL_LEVEL: u32 = 367;
 /// `ItemSkillLevelLimit`), which some essences carry instead.
 const ITEM_SKILL_LEVEL_LIMIT: u32 = 115;
 
+/// The Encapsulated Spirit: used on an essence in the pack it fills its uses to the full, spent
+/// either way, so only an empty one is refilled (PetDevice.cs:508-590, CraftTool.cs:33).
+pub const ENCAPSULATED_SPIRIT: u32 = 49485;
+/// How long a refill is given to show in the essence's uses before it is tried again (guess:
+/// a clap after the change to peace).
+const REFILL_LANDS: Duration = Duration::from_secs(8);
+
 /// The summoning rules' state.
 #[derive(Debug, Default)]
 pub struct State {
@@ -69,6 +76,8 @@ pub struct State {
     /// Essences that brought nothing: how many times in a row, and when
     /// last.
     failed: HashMap<u32, (u32, Instant)>,
+    /// The empty essence a spirit was last used on, and when.
+    refilled: Option<(u32, Instant)>,
 }
 
 /// An essence as the choice sees it.
@@ -355,6 +364,42 @@ impl Client {
         self.autoplay
             .say(Doing::Fighting, format!("summoning with {name}"));
         true
+    }
+
+    /// Between fights, an empty essence refilled with a carried Encapsulated Spirit: the refill
+    /// changes to peace first (PetDevice.cs:544-551), so never mid-fight.
+    pub(crate) fn autoplay_refill_essences(&mut self, now: Instant) {
+        let cfg = &self.autoplay.config.fight;
+        if !cfg.enabled || !cfg.summon || self.in_a_fight() || self.autoplay.cast_in_flight(now) {
+            return;
+        }
+        let waited = |g: u32| {
+            self.autoplay
+                .summoning
+                .refilled
+                .is_some_and(|(r, t)| r == g && now.duration_since(t) < REFILL_LANDS)
+        };
+        let carried = |w: u32| self.world.inventory().find(|o| o.weenie_class_id == w);
+        let Some(spirit) = carried(ENCAPSULATED_SPIRIT).map(|o| o.guid) else {
+            return;
+        };
+        let Some((essence, name)) = self
+            .world
+            .inventory()
+            .filter(|o| is_essence(&o.name, o.max_structure) && o.structure == 0)
+            .find(|o| !waited(o.guid))
+            .map(|o| (o.guid, o.name.clone()))
+        else {
+            return;
+        };
+        if !self.use_on(spirit, essence) {
+            return;
+        }
+        self.autoplay.summoning.refilled = Some((essence, now));
+        // Busy until its UseDone, as a cast is (PetDevice.cs:539: IsBusy through the clap).
+        self.autoplay.cast_sent = Some(now);
+        self.autoplay
+            .note(format!("refilling {name} with an Encapsulated Spirit"), now);
     }
 
     /// The Summoning skill as buffed, when it is trained: what the
