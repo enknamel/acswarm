@@ -528,11 +528,11 @@ impl Client {
         match run.phase.clone() {
             Phase::ToGiver { row, at, tries } => {
                 // No longer due on the board (the server's log says it waits): let it be.
-                let due = self.quest_board.iter().any(|l| {
+                let undue = self.quest_board.iter().any(|l| {
                     l.id == row.id
-                        && matches!(l.state, QuestState::Ready | QuestState::NotTaken { .. })
+                        && !matches!(l.state, QuestState::Ready | QuestState::NotTaken { .. })
                 });
-                if !due {
+                if undue {
                     let why = format!("{} for {} is not due", row.giver, row.title);
                     self.autoplay.note(why, now);
                     return self.giver_done(run, now, cfg);
