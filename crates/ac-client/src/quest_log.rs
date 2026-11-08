@@ -877,21 +877,27 @@ impl Client {
     /// `row`'s giver at `place` was asked: its answer is watched for, and one asked before is
     /// answered now.
     pub(crate) fn ask_giver(&mut self, row: &'static Row, place: Place, now: Instant) {
+        let mut xp_before = self.world.stats.total_xp;
+        let mut carried = match row.want {
+            Want::Item(wcid) => self.carried_count(wcid),
+            _ => 0,
+        };
         if let Some(old) = self.quest_asked.take() {
             let rose = self.world.stats.total_xp > old.xp_before;
             if rose || !std::ptr::eq(old.row, row) {
                 self.quest_answered(&old, rose, now);
+            } else {
+                // Asked again unanswered: what left the pack since the first ask still counts
+                // (a_quest_asked_again_after_its_hand_in_is_done).
+                (xp_before, carried) = (old.xp_before, old.carried);
             }
         }
         self.quest_asked = Some(Asked {
             row,
             place,
             at: now,
-            xp_before: self.world.stats.total_xp,
-            carried: match row.want {
-                Want::Item(wcid) => self.carried_count(wcid),
-                _ => 0,
-            },
+            xp_before,
+            carried,
         });
     }
 

@@ -539,3 +539,29 @@ fn a_kill_task_handed_in_short_and_unpaid_is_not_done_and_starts_no_wait() {
     assert!(c.quest_log.waits.is_empty(), "{:?}", c.quest_log.waits);
     assert_eq!(c.quest_log.kills.get("killtaskbloodshreth"), Some(&0));
 }
+
+#[test]
+fn a_quest_asked_again_after_its_hand_in_is_done() {
+    // Blargerton handed Bleeargh the Necklace of Leerargh and the run used him again 0.3 s on:
+    // that ask, the necklace gone already, replaced the first, and "gave nothing" was heard.
+    let mut c = crate::testkit::character_of_level(crate::testkit::game_data(), 51);
+    let row = ac_world::quests::rows_of("magicitemtraining3")
+        .find(|r| r.kind == ac_world::quests::Kind::Item)
+        .unwrap();
+    crate::testkit::thing_in_the_pack(&mut c, 0x8000_0100, "Necklace of Leerargh", 1);
+    c.world
+        .objects
+        .get_mut(&0x8000_0100)
+        .unwrap()
+        .weenie_class_id = 27902;
+    let t0 = Instant::now();
+    c.ask_giver(row, row.places[0], t0);
+    c.world.objects.remove(&0x8000_0100);
+    c.ask_giver(
+        row,
+        row.places[0],
+        t0 + std::time::Duration::from_millis(300),
+    );
+    c.watch_quest_answer(t0 + XP_WATCH * 2);
+    assert!(c.quest_log.done.contains_key("magicitemtraining3"));
+}
