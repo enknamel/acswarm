@@ -171,7 +171,9 @@ pub(crate) fn verdict_words(v: &Verdict) -> (String, egui::Color32) {
         Verdict::Decided(action, rule) => {
             let colour = match action {
                 LootAction::Keep => GOOD,
-                LootAction::Salvage | LootAction::Sell => egui::Color32::from_rgb(170, 200, 230),
+                LootAction::Salvage | LootAction::Sell | LootAction::Drain => {
+                    egui::Color32::from_rgb(170, 200, 230)
+                }
                 LootAction::Skip => DIM,
             };
             (format!("{} — {rule}", action.label()), colour)
@@ -571,6 +573,9 @@ fn action_box(ui: &mut egui::Ui, salt: &str, action: &mut LootAction) {
                         LootAction::Salvage => "take it for the team's best salvager to salvage",
                         LootAction::Sell => "take it to sell in town",
                         LootAction::Skip => "leave it on the corpse",
+                        LootAction::Drain => {
+                            "take it and drain its mana into an empty mana stone, which destroys it"
+                        }
                     });
             }
         });
@@ -1063,6 +1068,10 @@ fn looting(ui: &mut egui::Ui, p: &mut Profile, drafts: &mut super::autoplay::Dra
             "Take a spell scroll this character does not know and has the skill to learn, \
          ahead of the rules, and read it when no fight or journey is on",
         );
+    ui.checkbox(&mut l.mana_junk, "mana junk").on_hover_text(
+        "After every rule: keep mana stones, and take anything else holding mana to drain \
+         into an empty stone (which destroys it), for charging what is worn",
+    );
     ui.horizontal(|ui| {
         ui.label("carry up to");
         ui.add(

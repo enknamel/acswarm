@@ -23,14 +23,17 @@ pub enum LootAction {
     Sell,
     /// Leave it on the corpse.
     Skip,
+    /// Take it and drain its mana into an empty mana stone, which destroys it; sold if none is.
+    Drain,
 }
 
 impl LootAction {
-    pub const ALL: [LootAction; 4] = [
+    pub const ALL: [LootAction; 5] = [
         LootAction::Keep,
         LootAction::Salvage,
         LootAction::Sell,
         LootAction::Skip,
+        LootAction::Drain,
     ];
 
     pub fn label(self) -> &'static str {
@@ -39,10 +42,11 @@ impl LootAction {
             LootAction::Salvage => "salvage",
             LootAction::Sell => "sell",
             LootAction::Skip => "skip",
+            LootAction::Drain => "drain",
         }
     }
 
-    /// The action a word names ("keep", "salvage", "sell", "skip").
+    /// The action a word names ("keep", "salvage", "sell", "skip", "drain").
     pub fn parse(word: &str) -> Option<LootAction> {
         let w = word.trim().to_lowercase();
         LootAction::ALL.into_iter().find(|a| a.label() == w)
@@ -59,7 +63,7 @@ impl LootAction {
         match self {
             LootAction::Keep => 3,
             LootAction::Salvage => 2,
-            LootAction::Sell => 1,
+            LootAction::Sell | LootAction::Drain => 1,
             // Nothing is held under a skip, so it loses to anything taken.
             LootAction::Skip => 0,
         }
@@ -601,6 +605,8 @@ pub struct Looting {
     pub tidy_pack: bool,
     /// Take and read a spell scroll the character does not know and can learn, ahead of the rules.
     pub learn_scrolls: bool,
+    /// After every rule: keep a mana stone, and drain anything else holding mana (`MANA_JUNK`).
+    pub mana_junk: bool,
     /// Loot to take on before going to sell, in multiples of carrying capacity (150 x Strength).
     /// At 1x comfortable; 2x slow, no Melee or Missile Defense; 3x cannot pick up, merge or move.
     /// Counts only what sell rules hand a counter: no sale takes off worn, wielded or kept things.
@@ -620,9 +626,38 @@ impl Default for Looting {
             hand_off: true,
             tidy_pack: true,
             learn_scrolls: true,
+            mana_junk: true,
             carry_up_to: 1.5,
         }
     }
+}
+
+/// The kinds of thing that can hold mana: what the mana junk rule asks the server about.
+const MANA_HOLDERS: u32 = {
+    use ac_world::item_type as t;
+    t::MELEE_WEAPON | t::ARMOR | t::CLOTHING | t::JEWELRY | t::MISSILE_WEAPON | t::CASTER
+};
+
+/// The name the built-in drain rule goes by, in the ledger and the log.
+pub const MANA_JUNK: &str = "mana junk";
+
+/// [`Looting::mana_junk`]'s two rules: mana stones kept, then anything holding mana drained.
+fn built_in_rules() -> (&'static Rule, &'static Rule) {
+    static RULES: std::sync::OnceLock<(Rule, Rule)> = std::sync::OnceLock::new();
+    let (stones, junk) = RULES.get_or_init(|| {
+        let stones = Rule {
+            name: "mana stones".into(),
+            action: LootAction::Keep,
+            ..Default::default()
+        };
+        let junk = Rule {
+            name: MANA_JUNK.into(),
+            action: LootAction::Drain,
+            ..Default::default()
+        };
+        (stones, junk)
+    });
+    (stones, junk)
 }
 
 /// A named, shareable set of rules.
@@ -705,7 +740,27 @@ impl Profile {
                 return Some((at, rule, false));
             }
         }
-        None
+        self.built_in(item)
+    }
+
+    /// The rules read after the profile's own, numbered after them: a mana stone kept, and a
+    /// thing that can hold mana (its kind first, then an appraisal's figure) drained into one.
+    fn built_in(&self, item: &ItemStats) -> Option<(usize, &'static Rule, bool)> {
+        if !self.looting.mana_junk {
+            return None;
+        }
+        let (stones, junk) = built_in_rules();
+        let after = self.rules.len();
+        if item.item_type & ac_world::item_type::MANA_STONE != 0 {
+            return Some((after, stones, false));
+        }
+        if item.item_type & MANA_HOLDERS == 0 {
+            return None;
+        }
+        if !item.appraised {
+            return Some((after + 1, junk, true));
+        }
+        (item.max_mana > 0).then_some((after + 1, junk, false))
     }
 
     /// Tells whether written answers were reached under these rules; note and name excluded.
@@ -745,7 +800,12 @@ impl Profile {
     /// `None` when two rules share the name, since which one tagged it is not known.
     pub fn rule_named(&self, name: &str) -> Option<&Rule> {
         let mut named = self.rules.iter().filter(|r| r.name == name);
-        let rule = named.next()?;
+        let Some(rule) = named.next() else {
+            let (stones, junk) = built_in_rules();
+            return [stones, junk]
+                .into_iter()
+                .find(|r| self.looting.mana_junk && r.name == name);
+        };
         named.next().is_none().then_some(rule)
     }
 
@@ -1286,6 +1346,11 @@ mod tests {
                     vec![Ask::Item(Term::Kind("gem".into()))],
                 ),
             ],
+            // Its built-in rules aside: they would ask the server about the boots' mana.
+            looting: Looting {
+                mana_junk: false,
+                ..Default::default()
+            },
             ..Default::default()
         };
         let me = me(50, &[]);
@@ -1513,6 +1578,57 @@ mod tests {
             Verdict::NeedsId("armour".into())
         );
         assert_eq!(profile.decided_by(&plate, None, &me, "Bryn", 0), None);
+    }
+
+    #[test]
+    fn what_no_rule_claims_is_drained_for_its_mana_and_a_stone_kept() {
+        // The player wants nothing to think about: anything holding mana that no rule claims
+        // is taken and drained into a stone, and the stones themselves are kept.
+        let mut profile = Profile {
+            name: "test".into(),
+            rules: vec![rule(
+                "gems to sell",
+                LootAction::Sell,
+                vec![Ask::Item(Term::Kind("gem".into()))],
+            )],
+            ..Default::default()
+        };
+        let me = me(50, &[]);
+        let mut ring = item("Silver Ring", item_type::JEWELRY, 900);
+        assert_eq!(
+            profile.judge_test(&ring, &me, "Aldric", 0),
+            Verdict::NeedsId(MANA_JUNK.into()),
+            "its mana is the server's to tell"
+        );
+        ring.appraised = true;
+        assert_eq!(profile.judge_test(&ring, &me, "Aldric", 0), Verdict::None);
+        ring.max_mana = 600;
+        ring.mana = 420;
+        assert_eq!(
+            profile.judge_test(&ring, &me, "Aldric", 0),
+            Verdict::Decided(LootAction::Drain, MANA_JUNK.into())
+        );
+        assert_eq!(
+            profile.rule_named(MANA_JUNK).map(|r| r.action),
+            Some(LootAction::Drain)
+        );
+        let stone = item("Mana Stone", item_type::MANA_STONE, 50);
+        assert_eq!(
+            profile.judge_test(&stone, &me, "Aldric", 0),
+            Verdict::Decided(LootAction::Keep, "mana stones".into())
+        );
+        // A rule of the player's comes first; a kind that never holds mana is never asked about.
+        let ruby = item("Ruby", item_type::GEM, 9_000);
+        assert_eq!(
+            profile.judge_test(&ruby, &me, "Aldric", 0),
+            Verdict::Decided(LootAction::Sell, "gems to sell".into())
+        );
+        let pea = item("Iron Pea", item_type::SPELL_COMPONENTS, 30);
+        assert_eq!(profile.judge_test(&pea, &me, "Aldric", 0), Verdict::None);
+        // Switched off, what no rule claims is left alone again.
+        profile.looting.mana_junk = false;
+        assert_eq!(profile.judge_test(&ring, &me, "Aldric", 0), Verdict::None);
+        assert_eq!(profile.rule_named(MANA_JUNK), None);
     }
 
     #[test]
@@ -2330,6 +2446,10 @@ mod tests {
         assert!(!r.needs_id());
         let p = Profile {
             rules: vec![r],
+            looting: Looting {
+                mana_junk: false,
+                ..Default::default()
+            },
             ..Default::default()
         };
         let necklace = ItemStats {

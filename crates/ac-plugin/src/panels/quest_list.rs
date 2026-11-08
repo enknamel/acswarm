@@ -22,6 +22,7 @@ fn does(action: LootAction) -> &'static str {
         LootAction::Salvage => "salvages",
         LootAction::Sell => "sells",
         LootAction::Skip => "skips",
+        LootAction::Drain => "drains",
     }
 }
 

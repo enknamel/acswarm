@@ -67,7 +67,8 @@ pub enum Fate {
 /// the server's (`refused`, see [`never_sell`]).
 pub fn fate(tagged: Option<LootAction>, refused: bool) -> Fate {
     match tagged {
-        Some(LootAction::Sell) if !refused => Fate::Leaving,
+        // Drained when an empty stone is carried; one still here at a counter is junk all the same.
+        Some(LootAction::Sell | LootAction::Drain) if !refused => Fate::Leaving,
         Some(_) => Fate::Staying,
         None => Fate::Undecided,
     }
