@@ -331,7 +331,65 @@ pub struct Pursuit {
     pub again: bool,
     /// Unix second it was asked for: a hand-in at or after it finishes a pursuit not `again`.
     pub since: u64,
+    /// How it ends, chosen when it was asked for: worked to that end with no more asking.
+    pub outcome: QuestEnd,
 }
+
+/// How a pursued quest ends (`Pursuit.outcome`).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind")]
+pub enum QuestEnd {
+    /// Handed in to whichever giver completes it.
+    #[default]
+    HandIn,
+    /// Handed in only by the rows of giver class `giver_wcid` whose gives column is `gives`.
+    HandInTo { giver_wcid: u32, gives: String },
+    /// The items a hand-in takes are kept: the pursuit ends once they are carried.
+    Keep,
+}
+
+impl QuestEnd {
+    /// The end handing in by `row` alone.
+    pub fn hand_in_to(row: &ac_world::quests::Row) -> QuestEnd {
+        QuestEnd::HandInTo {
+            giver_wcid: row.giver_wcid,
+            gives: row.gives_column.to_string(),
+        }
+    }
+
+    /// Whether `row` may be handed in for this end: a kept quest hands in no item.
+    pub fn can_hand_in(&self, row: &ac_world::quests::Row) -> bool {
+        match self {
+            QuestEnd::HandIn => true,
+            QuestEnd::HandInTo { giver_wcid, gives } => {
+                row.giver_wcid == *giver_wcid && row.gives_column == gives
+            }
+            QuestEnd::Keep => !matches!(row.want, ac_world::quests::Want::Item(_)),
+        }
+    }
+}
+
+/// Every end quest `id` offers, as the Quests window lists them: any giver, each way to complete it
+/// once (by giver and gives), and keeping its item when one is wanted.
+pub fn quest_ends(id: &str) -> Vec<QuestEnd> {
+    use ac_world::quests::{Kind, Want};
+    let mut ends = vec![QuestEnd::HandIn];
+    let mut item = false;
+    for row in ac_world::quests::rows_of(id).filter(|r| r.kind != Kind::Start) {
+        let end = QuestEnd::hand_in_to(row);
+        if !ends.contains(&end) {
+            ends.push(end);
+        }
+        item |= matches!(row.want, Want::Item(_));
+    }
+    if item {
+        ends.push(QuestEnd::Keep);
+    }
+    ends
+}
+
+/// The default end, for a quest not pursued.
+static HAND_IN: QuestEnd = QuestEnd::HandIn;
 
 /// The quests autoplay considers (`crate::quest_log`); off, the quest rule wants nothing.
 /// A quest paying XP is on until switched off; any other is off until switched on by hand.
@@ -383,12 +441,28 @@ impl Quests {
             id: id.to_string(),
             again,
             since: now,
+            outcome: QuestEnd::HandIn,
         };
         if again {
             self.pursue.push(p);
         } else {
             self.pursue.insert(0, p);
         }
+    }
+
+    /// End the pursued quest `id` as `outcome`; false when it is not pursued.
+    pub fn set_outcome(&mut self, id: &str, outcome: QuestEnd) -> bool {
+        let Some(p) = self.pursue.iter_mut().find(|p| p.id == id) else {
+            return false;
+        };
+        p.outcome = outcome;
+        true
+    }
+
+    /// How quest `id` ends: its pursuit's choice, else handed in to any giver.
+    pub fn outcome_of(&self, id: &str) -> &QuestEnd {
+        let p = self.pursue.iter().find(|p| p.id == id);
+        p.map_or(&HAND_IN, |p| &p.outcome)
     }
 
     /// Take `id` off the pursuit list.

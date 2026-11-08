@@ -96,6 +96,9 @@ pub trait Api {
     fn pursue_quest(&mut self, id: &str, again: bool) -> bool;
     /// Take the quest `id` off the pursuit list.
     fn stop_pursuing(&mut self, id: &str);
+    /// How the pursued quest `id` ends: `"keep"` its item, a giver's name to hand in there alone,
+    /// or `""` for any giver. False when it is not pursued or does not offer that end.
+    fn quest_outcome(&mut self, id: &str, end: &str) -> bool;
     /// Each pursued quest's step in words, a line each ("" when nothing is pursued).
     fn quest_pursuit(&mut self) -> String;
     /// The teammates heard from, as maps of `name`, `guid`, `health`,
@@ -551,6 +554,9 @@ pub fn register(engine: &mut Engine) {
     });
     engine.register_fn("stop_pursuing", |id: &str| {
         with_api(|a| a.stop_pursuing(id))
+    });
+    engine.register_fn("quest_outcome", |id: &str, end: &str| {
+        with_api(|a| a.quest_outcome(id, end))
     });
     engine.register_fn("quest_pursuit", || with_api(|a| a.quest_pursuit()));
     engine.register_fn("teammates", || with_api(|a| a.teammates()));

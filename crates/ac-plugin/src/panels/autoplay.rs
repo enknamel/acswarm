@@ -894,11 +894,13 @@ impl Autoplay {
                         id: "augmentationprovinggroundaccess".into(),
                         again: false,
                         since: 0,
+                        ..Default::default()
                     },
                     ac_client::autoplay::Pursuit {
                         id: "engorgedeaterjaw".into(),
                         again: true,
                         since: 0,
+                        ..Default::default()
                     },
                 ],
                 ..Default::default()

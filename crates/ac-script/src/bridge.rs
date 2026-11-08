@@ -439,6 +439,24 @@ impl Api for CtxApi<'_, '_> {
         self.client().autoplay.config.quests.stop_pursuing(id);
     }
 
+    fn quest_outcome(&mut self, id: &str, end: &str) -> bool {
+        use ac_client::autoplay::QuestEnd;
+        let word = end.trim();
+        let by_giver = |e: &QuestEnd| {
+            ac_world::quests::rows_of(id)
+                .any(|r| e.can_hand_in(r) && r.giver.eq_ignore_ascii_case(word))
+        };
+        let found = ac_client::autoplay::quest_ends(id)
+            .into_iter()
+            .find(|e| match e {
+                QuestEnd::HandIn => word.is_empty(),
+                QuestEnd::Keep => word.eq_ignore_ascii_case("keep"),
+                QuestEnd::HandInTo { .. } => by_giver(e),
+            });
+        let quests = &mut self.client().autoplay.config.quests;
+        found.is_some_and(|e| quests.set_outcome(id, e))
+    }
+
     fn quest_pursuit(&mut self) -> String {
         let now = ac_client::holdings::unix_now();
         let lines = self.client().pursuit.iter().map(|l| l.words(now));
@@ -1713,6 +1731,34 @@ mod tests {
         let pursue = &client.autoplay.config.quests.pursue;
         let ids: Vec<(&str, bool)> = pursue.iter().map(|p| (p.id.as_str(), p.again)).collect();
         assert_eq!(ids, [("engorgedeaterjaw", true)]);
+    }
+
+    #[test]
+    fn a_script_keeps_the_focusing_stone_or_hands_it_to_le_ai_rea() {
+        use ac_client::autoplay::QuestEnd;
+        let mut client = ac_client::testkit::offline_client();
+        let mut board = ac_plugin::Blackboard::default();
+        let mut settings = ac_plugin::Settings::new();
+        let mut icons = ac_plugin::IconCache::default();
+        let mut cx = ctx(&mut client, &mut board, &mut settings, &mut icons);
+        let mut api = CtxApi { cx: &mut cx };
+        assert!(!api.quest_outcome("give:8904", "keep"), "not pursued yet");
+        assert!(api.pursue_quest("give:8904", false));
+        assert!(api.quest_outcome("give:8904", "keep"));
+        assert!(!api.quest_outcome("give:8904", "Clemenza"), "not its giver");
+        assert!(!api.quest_outcome("killtaskbloodshreth", "keep"));
+        let end = |c: &ac_client::Client| c.autoplay.config.quests.outcome_of("give:8904").clone();
+        assert_eq!(end(api.client()), QuestEnd::Keep);
+        assert!(api.quest_outcome("give:8904", "le-ai rea"));
+        assert!(matches!(
+            end(api.client()),
+            QuestEnd::HandInTo {
+                giver_wcid: 4122,
+                ..
+            }
+        ));
+        assert!(api.quest_outcome("give:8904", ""));
+        assert_eq!(end(api.client()), QuestEnd::HandIn);
     }
 
     #[test]

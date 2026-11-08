@@ -8,17 +8,18 @@ use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 use ac_world::quest_chain::{ChainLink, FlagBy, SourceGround};
-use ac_world::quests::{Row, Source, Want, Yield};
+use ac_world::quests::{Kind, Row, Source, Want, Yield};
 use ac_world::unlocks::Unlock;
 use ac_world::Place;
 
 use super::hunt::{GROUND_REACH, SKIP_GROUND_FOR, UNLOCK_RETRY};
 use super::town_run::calls::Asking;
-use crate::autoplay::{Doing, Pursuit};
+use crate::autoplay::{Doing, Pursuit, QuestEnd};
 use crate::quest_log::{Blocked, QuestFacts, QuestLine, QuestState, KEY_DEPTH};
 use crate::Client;
 
 mod fetch;
+mod kept;
 mod section;
 pub(crate) use fetch::Fetching;
 
@@ -236,6 +237,7 @@ pub(crate) fn with_chain(
                     id: f.to_string(),
                     again: true,
                     since: 0,
+                    outcome: QuestEnd::HandIn,
                 }),
                 via: Some(p.id.clone()),
             });
@@ -335,7 +337,7 @@ pub(crate) fn pursuit_of(board: &[QuestLine], chained: &[Chained], ask: &Ask) ->
         } else if !c.pursuit.again && done_since {
             PursuitStep::Finished
         } else if let Some(line) = line {
-            let (step, h) = ask.step_of(line);
+            let (step, h) = ask.step_of(line, &c.pursuit.outcome);
             hunt = h;
             step
         } else {
@@ -394,22 +396,32 @@ fn stuck(why: String) -> PursuitStep {
 type Hunting = (Vec<(u32, Place)>, Vec<u32>);
 
 impl Ask<'_> {
-    /// One board line's step, and its grounds when it is a hunt.
-    fn step_of(&self, line: &QuestLine) -> (PursuitStep, Option<Hunting>) {
+    /// One board line's step towards `end`, and its grounds when it is a hunt.
+    fn step_of(&self, line: &QuestLine, end: &QuestEnd) -> (PursuitStep, Option<Hunting>) {
         let level = self.facts.level;
         let step = match &line.state {
             QuestState::Off => stuck("switched off".to_string()),
             QuestState::Done => PursuitStep::Finished,
             QuestState::Waiting { until } => PursuitStep::Waiting { until: *until },
-            QuestState::Ready => match self.asking.hand_in_at(line) {
+            QuestState::Ready => match self.asking.hand_in_at(line, end) {
                 Some((_, row, at)) => PursuitStep::HandIn { row, at },
-                None => stuck(format!("{} cannot be asked now", line.giver)),
+                // Kept: what a hand-in takes is carried, and `finish_kept` ends the pursuit.
+                None if *end == QuestEnd::Keep && line.kind == Kind::Item => PursuitStep::Finished,
+                None => match self.chosen_short(line, end) {
+                    Some((more, of)) => return self.hunt_step(line, more, &of, end),
+                    None => stuck(format!("{} cannot be asked now", line.giver)),
+                },
             },
             QuestState::NotTaken { from, flag } => match self.asking.take_up_at(from, flag) {
                 Some((_, row, at)) => PursuitStep::TakeUp { row, at },
                 None => stuck(format!("{from} cannot be asked now")),
             },
-            QuestState::Needs { more, of } => return self.hunt_step(line, *more, of),
+            QuestState::Needs { more, of } => {
+                let (more, of) = self
+                    .chosen_short(line, end)
+                    .unwrap_or_else(|| (*more, of.clone()));
+                return self.hunt_step(line, more, &of, end);
+            }
             QuestState::WontComplete { rule, does } => stuck(format!(
                 "the loot rule {rule} would {} the item: add the quest rule",
                 format!("{does:?}").to_lowercase()
@@ -429,10 +441,33 @@ impl Ask<'_> {
         (step, None)
     }
 
-    /// Come by what `line` still needs, `more` of it (`of` in words).
-    fn hunt_step(&self, line: &QuestLine, more: u32, of: &str) -> (PursuitStep, Option<Hunting>) {
+    /// For a hand-in to one giver, its item short and how many: the board reads any giver's.
+    fn chosen_short(&self, line: &QuestLine, end: &QuestEnd) -> Option<(u32, String)> {
+        if !matches!(end, QuestEnd::HandInTo { .. }) {
+            return None;
+        }
+        crate::quest_log::worked_rows(line)
+            .filter(|r| r.kind == line.kind && end.can_hand_in(r))
+            .find_map(|r| {
+                let Want::Item(w) = r.want else { return None };
+                let more = r.count.max(1).saturating_sub((self.asking.carried)(w));
+                let name = r.item.as_ref().map_or("", |i| i.name);
+                (more > 0).then(|| (more, name.to_string()))
+            })
+    }
+
+    /// Come by what `line` still needs for `end`, `more` of it (`of` in words).
+    fn hunt_step(
+        &self,
+        line: &QuestLine,
+        more: u32,
+        of: &str,
+        end: &QuestEnd,
+    ) -> (PursuitStep, Option<Hunting>) {
         let mut wants: Vec<Want> = Vec::new();
-        for r in crate::quest_log::worked_rows(line).filter(|r| r.kind == line.kind) {
+        let rows = crate::quest_log::worked_rows(line).filter(|r| r.kind == line.kind);
+        // A kept quest comes by what any hand-in takes; one to a chosen giver by that one's.
+        for r in rows.filter(|r| *end == QuestEnd::Keep || end.can_hand_in(r)) {
             if r.want != Want::Nothing && !wants.contains(&r.want) {
                 wants.push(r.want.clone());
             }

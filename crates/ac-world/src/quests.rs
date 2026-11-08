@@ -120,6 +120,8 @@ pub struct Row {
     pub reward: Reward,
     /// Reward items, `(wcid, count)`; with `random`, every alternative's items.
     pub gives: Vec<(u32, u32)>,
+    /// The gives column as `quests.csv` writes it: with `giver_wcid`, which way to complete it this is.
+    pub gives_column: &'static str,
     /// A random reply: one of its alternatives' items is given, drawn by chance.
     pub random: bool,
     /// Quest flags the reward stamps, lowercased.
@@ -412,6 +414,7 @@ fn parse_row(line: &'static str) -> Option<Row> {
             },
         },
         gives,
+        gives_column: f[14],
         random: f[14].contains('|'),
         stamps: words(f[15]),
         repeat,

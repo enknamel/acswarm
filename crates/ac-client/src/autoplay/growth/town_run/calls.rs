@@ -13,7 +13,7 @@ use glam::Vec2;
 use super::vendor::counter_place;
 use super::{Errand, Phase, Run, Turn, VENDOR_REACH};
 use crate::autoplay::growth::Growth;
-use crate::autoplay::Doing;
+use crate::autoplay::{Doing, QuestEnd};
 use crate::quest_log::{worth_detour, QuestLine, QuestState, SHORT_LEG};
 use crate::Client;
 
@@ -98,10 +98,15 @@ impl Asking<'_> {
             .min_by(|a, b| a.0.total_cmp(&b.0))
     }
 
-    /// The nearest way to hand `line`'s quest in now, its items carried, and how far.
-    pub(crate) fn hand_in_at(&self, line: &QuestLine) -> Option<(f32, &'static Row, Place)> {
+    /// The nearest way to hand `line`'s quest in now that `end` allows, its items carried, and
+    /// how far.
+    pub(crate) fn hand_in_at(
+        &self,
+        line: &QuestLine,
+        end: &QuestEnd,
+    ) -> Option<(f32, &'static Row, Place)> {
         crate::quest_log::worked_rows(line)
-            .filter(|r| r.kind == line.kind && r.fits_level(self.level))
+            .filter(|r| r.kind == line.kind && r.fits_level(self.level) && end.can_hand_in(r))
             .filter(|r| match r.want {
                 Want::Item(w) => (self.carried)(w) >= r.count.max(1),
                 _ => true,
@@ -235,7 +240,8 @@ impl Client {
             if !line.on || line.state != QuestState::Ready || line.kind == Kind::Start {
                 continue;
             }
-            let Some((d, row, at)) = asking.hand_in_at(line) else {
+            let end = self.autoplay.config.quests.outcome_of(&line.id);
+            let Some((d, row, at)) = asking.hand_in_at(line, end) else {
                 continue;
             };
             // A hand-in that repeats any time pays for each one carried (the Collectors).

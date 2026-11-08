@@ -132,6 +132,10 @@ impl Api for Recorder {
     fn stop_pursuing(&mut self, id: &str) {
         self.record(format!("stop_pursuing {id}"));
     }
+    fn quest_outcome(&mut self, id: &str, end: &str) -> bool {
+        self.record(format!("quest_outcome {id} {end}"));
+        true
+    }
     fn quest_pursuit(&mut self) -> String {
         self.record("quest_pursuit");
         String::new()

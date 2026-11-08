@@ -18,10 +18,12 @@ use crate::egui;
 pub(crate) const ID: &str = "quests";
 
 mod quest_filter;
+mod quest_outcome;
 mod quest_samples;
 mod quest_steps;
 
 pub(crate) use quest_filter::*;
+pub(crate) use quest_outcome::{end_choices, end_tag, end_words};
 pub(crate) use quest_samples::{demo, Demo};
 pub(crate) use quest_steps::*;
 
@@ -307,6 +309,10 @@ fn pursued_strip(
             |l| line_words(l, v.now, v.place),
         );
         let again = if p.again { " (again)" } else { "" };
+        let end = match end_tag(&p.outcome, &p.id) {
+            tag if tag.is_empty() => String::new(),
+            tag => format!(" [{tag}]"),
+        };
         ui.horizontal(|ui| {
             if ui
                 .add_enabled(i > 0, egui::Button::new("up").small())
@@ -332,7 +338,8 @@ fn pursued_strip(
             {
                 cfg.stop_pursuing(&p.id);
             }
-            let text = egui::RichText::new(format!("{}. {title}{again} - {said}", i + 1)).small();
+            let text =
+                egui::RichText::new(format!("{}. {title}{again}{end} - {said}", i + 1)).small();
             if ui
                 .add(
                     egui::Label::new(text)
@@ -795,6 +802,8 @@ fn controls(ui: &mut egui::Ui, v: &BookView, cfg: &mut Quests, card: &QuestCard)
             // Taken off after its checkbox drew: the list is one shorter once it goes.
             if stop {
                 cfg.stop_pursuing(id);
+            } else {
+                end_picker(ui, cfg, id);
             }
         }
         None => {
@@ -814,6 +823,30 @@ fn controls(ui: &mut egui::Ui, v: &BookView, cfg: &mut Quests, card: &QuestCard)
             }
         }
     });
+}
+
+/// The pursued quest `id`'s end, picked from what it offers: worked to that end with no more asking.
+fn end_picker(ui: &mut egui::Ui, cfg: &mut Quests, id: &str) {
+    let choices = end_choices(id);
+    if choices.len() < 2 {
+        return;
+    }
+    let mut end = cfg.outcome_of(id).clone();
+    egui::ComboBox::from_id_salt("quests.outcome")
+        .selected_text(end_words(&end, id))
+        .show_ui(ui, |ui| {
+            for (choice, words) in choices {
+                ui.selectable_value(&mut end, choice, words);
+            }
+        })
+        .response
+        .on_hover_text(
+            "How it ends: handed in to any giver, to the one picked, or the item kept (a Keep \
+             rule for it joins your loot rules)",
+        );
+    if end != *cfg.outcome_of(id) {
+        cfg.set_outcome(id, end);
+    }
 }
 
 #[cfg(test)]

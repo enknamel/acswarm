@@ -147,3 +147,54 @@ fn a_pursued_quest_is_on_with_quests_off() {
     q.stop_pursuing(fiun);
     assert!(!q.is_on(fiun));
 }
+
+#[test]
+fn a_pursuit_saved_before_its_outcome_loads_handed_in_to_any_giver() {
+    let old: Quests =
+        serde_json::from_str(r#"{"pursue":[{"id":"give:8904","again":false,"since":5}]}"#).unwrap();
+    assert_eq!(old.pursue[0].outcome, QuestEnd::HandIn);
+    assert_eq!(old.outcome_of("give:8904"), &QuestEnd::HandIn);
+    assert_eq!(old.outcome_of("not pursued"), &QuestEnd::HandIn);
+}
+
+#[test]
+fn an_outcome_is_set_on_a_pursued_quest_and_round_trips_through_json() {
+    let mut q = Quests::default();
+    assert!(!q.set_outcome("give:8904", QuestEnd::Keep), "not pursued");
+    q.pursue_quest("give:8904", false, 5);
+    assert_eq!(
+        q.pursue[0].outcome,
+        QuestEnd::HandIn,
+        "pursued, it hands in"
+    );
+    assert!(q.set_outcome("give:8904", QuestEnd::Keep));
+    let text = serde_json::to_string(&q).unwrap();
+    assert!(text.contains(r#""outcome":{"kind":"Keep"}"#), "{text}");
+    let back: Quests = serde_json::from_str(&text).unwrap();
+    assert_eq!(back, q);
+    let to = QuestEnd::HandInTo {
+        giver_wcid: 4122,
+        gives: String::new(),
+    };
+    q.set_outcome("give:8904", to.clone());
+    let back: Quests = serde_json::from_str(&serde_json::to_string(&q).unwrap()).unwrap();
+    assert_eq!(back.outcome_of("give:8904"), &to);
+}
+
+#[test]
+fn the_focusing_stone_offers_any_giver_le_ai_rea_and_keeping_the_stone() {
+    let row = ac_world::quests::rows_of("give:8904").next().unwrap();
+    assert_eq!(row.giver_wcid, 4122);
+    let to = QuestEnd::hand_in_to(row);
+    assert_eq!(
+        quest_ends("give:8904"),
+        [QuestEnd::HandIn, to.clone(), QuestEnd::Keep]
+    );
+    assert!(
+        !QuestEnd::Keep.can_hand_in(row),
+        "a kept item is never handed in"
+    );
+    assert!(to.can_hand_in(row) && QuestEnd::HandIn.can_hand_in(row));
+    let kill = quest_ends("killtaskbloodshreth");
+    assert!(!kill.contains(&QuestEnd::Keep), "nothing to keep: {kill:?}");
+}

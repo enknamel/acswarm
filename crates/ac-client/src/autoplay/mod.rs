@@ -62,7 +62,9 @@ mod tidy;
 mod vitals;
 
 pub use cast::cast_problem;
-pub use config::{Buffs, Config, Fight, Loot, Pursuit, Quests, Role, Style, Survive, Team};
+pub use config::{
+    quest_ends, Buffs, Config, Fight, Loot, Pursuit, QuestEnd, Quests, Role, Style, Survive, Team,
+};
 #[cfg(any(test, feature = "testkit"))]
 pub(crate) use fight::critter::CREATURE_LEVEL;
 pub use fight::critter::{critter, Critter, Hint, Seen};

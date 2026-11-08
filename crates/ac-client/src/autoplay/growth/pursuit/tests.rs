@@ -121,6 +121,7 @@ fn facts(level: u32, pursue: &[(&str, bool)]) -> QuestFacts {
             id: id.to_string(),
             again,
             since: NOW - 10,
+            ..Default::default()
         });
     }
     QuestFacts {
@@ -461,11 +462,13 @@ fn a_chained_quest_already_pursued_keeps_its_own_terms_ahead_of_the_one_needing_
             id: "augmentationprovinggroundaccess".into(),
             again: true,
             since: 0,
+            ..Default::default()
         },
         Pursuit {
             id: "ginsword".into(),
             again: false,
             since: 7,
+            ..Default::default()
         },
     ];
     let chained = with_chain(&pursue, &|_| false, &fake);
@@ -1251,6 +1254,135 @@ fn the_focusing_stone_quest_keeps_the_plain_stone_while_the_imbued_one_is_wanted
         .collect();
     // The imbued stone the hand-in takes, and the plain one used on the Vortex to make it.
     assert_eq!(classes, [8904.0, 8903.0]);
+}
+
+/// [`facts`] pursuing `id` once, to end as `end`.
+fn facts_ending(level: u32, id: &str, end: QuestEnd) -> QuestFacts {
+    let mut f = facts(level, &[(id, false)]);
+    f.config.pursue[0].outcome = end;
+    f
+}
+
+#[test]
+fn a_kept_focusing_stone_is_hunted_and_made_at_the_vortex_and_never_handed_in() {
+    let fake = focusing_stone();
+    let mut f = facts_ending(50, FOCUSING_QUEST, QuestEnd::Keep);
+    let p = work(&f, &fake, None);
+    assert!(
+        matches!(&p.lines[0].step, PursuitStep::Hunt { creature, .. } if creature == "Lich Overseer"),
+        "{:?}",
+        p.lines[0].step
+    );
+    f.carried.insert(8903, 1);
+    let p = work(&f, &fake, None);
+    assert!(
+        matches!(&p.lines[0].step, PursuitStep::UseOn { with: 8903, .. }),
+        "{:?}",
+        p.lines[0].step
+    );
+    // The imbued stone carried: kept, not handed in, where a hand-in would go to Le-Ai Rea.
+    f.carried.insert(8904, 1);
+    let p = work(&f, &fake, None);
+    assert_eq!(p.lines[0].step, PursuitStep::Finished);
+    assert!(!p.lines[0].working);
+    f.config.pursue[0].outcome = QuestEnd::HandIn;
+    let p = work(&f, &fake, None);
+    match &p.lines[0].step {
+        PursuitStep::HandIn { row, .. } => assert_eq!(row.giver_wcid, 4122),
+        other => panic!("{other:?}"),
+    }
+}
+
+/// [`fletch_with_a_quests_section`] in the world, pursuing the Focusing Stone to keep it.
+fn fletch_keeping_the_stone() -> Client {
+    let mut c = fletch_with_a_quests_section();
+    c.world.player_guid = Some(crate::testkit::ME);
+    c.world.stats.level = 50;
+    c.ledger_loaded = true;
+    let quests = &mut c.autoplay.config.quests;
+    quests.pursue_quest(FOCUSING_QUEST, false, NOW);
+    assert!(quests.set_outcome(FOCUSING_QUEST, QuestEnd::Keep));
+    c
+}
+
+fn kept_rules(c: &Client) -> Vec<crate::profile::Rule> {
+    let rules = section(c).rules.into_iter();
+    rules.filter(|r| r.name.starts_with("Kept: ")).collect()
+}
+
+#[test]
+fn a_kept_focusing_stone_carried_ends_the_pursuit_and_keeps_the_stone_in_the_players_rules() {
+    use crate::items::{NumKey, Op, Term};
+    use crate::profile::{Ask, LootAction, QUESTS};
+    let mut c = fletch_keeping_the_stone();
+    let now = Instant::now();
+    c.refresh_quests(now);
+    assert!(
+        c.autoplay.config.quests.is_pursued(FOCUSING_QUEST),
+        "nothing carried yet"
+    );
+    assert!(kept_rules(&c).is_empty());
+    carrying(&mut c, 0x8000_0302, 8904, "Focusing Stone");
+    c.refresh_quests(now);
+    let quests = &c.autoplay.config.quests;
+    assert!(!quests.is_pursued(FOCUSING_QUEST) && !quests.is_on(FOCUSING_QUEST));
+    assert!(
+        !c.pursuit
+            .iter()
+            .any(|l| matches!(l.step, PursuitStep::HandIn { .. })),
+        "{:?}",
+        c.pursuit
+    );
+    let kept = kept_rules(&c);
+    assert_eq!(kept.len(), 1, "{kept:?}");
+    let r = &kept[0];
+    assert_eq!(
+        (
+            r.name.as_str(),
+            r.action,
+            r.keep_up_to,
+            r.group.as_str(),
+            r.quest.as_str()
+        ),
+        ("Kept: Focusing Stone", LootAction::Keep, Some(1), "", "")
+    );
+    assert_eq!(r.all, [Ask::Item(Term::Num(NumKey::Class, Op::Eq, 8904.0))]);
+    // Filed after the Quests section, ahead of the rules that sell.
+    let rules = section(&c).rules;
+    let at = rules.iter().position(|x| x == r).unwrap();
+    assert_eq!(rules[at - 1].group, QUESTS);
+    assert!(rules[at + 1..].iter().all(|x| x.group != QUESTS));
+    // Kept again: the rule is not written twice.
+    let quests = &mut c.autoplay.config.quests;
+    quests.pursue_quest(FOCUSING_QUEST, false, NOW);
+    quests.set_outcome(FOCUSING_QUEST, QuestEnd::Keep);
+    c.refresh_quests(now);
+    assert!(!c.autoplay.config.quests.is_pursued(FOCUSING_QUEST));
+    assert_eq!(kept_rules(&c).len(), 1);
+}
+
+const GEM_QUEST: &str = "anekshaygemofknowledgecollectedinamonth";
+
+#[test]
+fn a_hand_in_to_one_giver_goes_to_that_giver_alone() {
+    let mut f = facts(275, &[(GEM_QUEST, false)]);
+    f.carried.insert(47156, 1);
+    let ends: Vec<QuestEnd> = crate::autoplay::quest_ends(GEM_QUEST)
+        .into_iter()
+        .filter(|e| matches!(e, QuestEnd::HandInTo { .. }))
+        .collect();
+    assert_eq!(ends.len(), 3, "three givers take the gem: {ends:?}");
+    for end in ends {
+        let QuestEnd::HandInTo { giver_wcid, .. } = end else {
+            unreachable!()
+        };
+        f.config.pursue[0].outcome = end.clone();
+        let p = work(&f, &Fake::default(), None);
+        match &p.lines[0].step {
+            PursuitStep::HandIn { row, .. } => assert_eq!(row.giver_wcid, giver_wcid),
+            other => panic!("{end:?}: {other:?}"),
+        }
+    }
 }
 
 const STONE: u32 = 0x8000_0301;

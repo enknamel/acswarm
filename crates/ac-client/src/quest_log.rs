@@ -856,9 +856,10 @@ impl Client {
         self.refresh_pursuit(&facts, &chained, now);
     }
 
-    /// A pursuit asked for once whose quest the log has done since is taken off the list: else it
-    /// would keep the quest on, every way to it worked, with "do quests" off.
+    /// A pursuit asked for once whose quest the log has done since, or kept with its item carried, is
+    /// taken off the list: else it would keep the quest on, every way to it worked, "do quests" off.
     fn finish_pursuits(&mut self, now: Instant) {
+        self.finish_kept(now);
         let done = &self.quest_log.done;
         let finished: Vec<String> = self
             .autoplay

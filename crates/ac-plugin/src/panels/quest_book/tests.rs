@@ -501,6 +501,7 @@ fn a_frame_of_the_quest_book_draws_and_changes_nothing_unclicked() {
             id: "engorgedeaterjaw".into(),
             again: true,
             since: 0,
+            ..Default::default()
         }],
         ..Default::default()
     };
@@ -537,6 +538,61 @@ fn a_frame_of_the_quest_book_draws_and_changes_nothing_unclicked() {
     assert_eq!(st.listed(&v).len(), demo.cards.len(), "all shown");
     st.filter.search = "giver:clemenza".into();
     assert_eq!(st.listed(&v).len(), 1, "a new search lists again");
+}
+
+#[test]
+fn a_pursued_item_quest_offers_its_giver_and_keeping_the_item_and_a_kill_task_nothing_to_keep() {
+    use ac_client::autoplay::QuestEnd;
+    let words = |id: &str| -> Vec<String> { end_choices(id).into_iter().map(|c| c.1).collect() };
+    assert_eq!(
+        words("give:8904"),
+        [
+            "Hand in",
+            "Hand in to Le-Ai Rea for 35% of a level's XP",
+            "Keep Focusing Stone"
+        ]
+    );
+    let kill = end_choices("killtaskbloodshreth");
+    assert!(
+        kill.iter().all(|(e, _)| *e != QuestEnd::Keep) && kill[0].1 == "Hand in",
+        "{kill:?}"
+    );
+    let talk = end_choices("academeyexittokengiven");
+    assert!(talk.len() > 2, "a choice of givers: {talk:?}");
+    assert!(talk.iter().all(|(e, _)| *e != QuestEnd::Keep), "{talk:?}");
+    // The pursued list tags the end chosen; any giver goes untagged.
+    assert_eq!(end_tag(&QuestEnd::Keep, "give:8904"), "keep Focusing Stone");
+    let to = end_choices("give:8904").swap_remove(1).0;
+    assert_eq!(end_tag(&to, "give:8904"), "to Le-Ai Rea");
+    assert_eq!(end_tag(&QuestEnd::HandIn, "give:8904"), "");
+}
+
+#[test]
+fn the_end_picker_leaves_the_outcome_set_until_another_is_picked() {
+    use ac_client::autoplay::QuestEnd;
+    let mut cfg = Quests::default();
+    cfg.pursue_quest("give:8904", false, 0);
+    let ctx = egui::Context::default();
+    let mut out = ctx.run_ui(Default::default(), |ui| {
+        end_picker(ui, &mut cfg, "give:8904")
+    });
+    out.textures_delta.clear();
+    assert_eq!(
+        cfg.outcome_of("give:8904"),
+        &QuestEnd::HandIn,
+        "nothing picked"
+    );
+    // What a pick does once the combo box hands its choice back.
+    assert!(cfg.set_outcome("give:8904", QuestEnd::Keep));
+    let mut out = ctx.run_ui(Default::default(), |ui| {
+        end_picker(ui, &mut cfg, "give:8904")
+    });
+    out.textures_delta.clear();
+    assert_eq!(
+        cfg.outcome_of("give:8904"),
+        &QuestEnd::Keep,
+        "kept as picked"
+    );
 }
 
 #[test]
