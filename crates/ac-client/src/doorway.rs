@@ -281,7 +281,13 @@ impl Client {
         let mut spots = self
             .standable_near(door.at, DOORWAY_DEPTH + PULL_BAND)
             .unwrap_or_default();
-        spots.retain(|s| door.side(s.at) == theirs && !door.holds(s.at));
+        // Out of it where the walk stops, AT_SPOT_STOP short: a spot 0.29 m off, just past the
+        // frame, was "reached" from inside it and held Blargerton there (a_caster_just_inside_a_shop_door_steps_out).
+        let stops_out = |s: Vec3| {
+            let short = s + (me - s).normalize_or_zero() * AT_SPOT_STOP;
+            s.distance(me) > AT_SPOT_STOP && !door.holds(s) && !door.holds(short)
+        };
+        spots.retain(|s| door.side(s.at) == theirs && stops_out(s.at));
         spots.sort_by(|a, b| a.at.distance(me).total_cmp(&b.at.distance(me)));
         let mine = self.world.player().map_or(0, |o| o.guid);
         let (shot, to) = (self.shot_for(how), self.body_of(target, at));

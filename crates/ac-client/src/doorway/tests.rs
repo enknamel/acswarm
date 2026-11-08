@@ -257,3 +257,57 @@ fn a_caster_in_a_doorway_with_its_target_past_the_walls_is_not_held_at_the_door(
     );
     assert!(flips <= 3, "{flips} changes of mind on the way");
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_caster_just_inside_a_shop_door_steps_out() {
+    // Blargerton at Master Shoyanen Kenchu's door, an Amploth Raider 52 m up the hill: the spot
+    // out was 0.29 m off, "reached" from inside the frame, and he stood two minutes.
+    let mut c =
+        crate::testkit::standing_in_the_field(51, 0xEA30_0032, Vec3::new(154.79, 44.02, 113.0));
+    let door = ac_world::WorldObject {
+        guid: 0x7EA3_0001,
+        name: "Door".into(),
+        setup_id: 0x0200_0310,
+        object_desc_flags: ac_world::object_desc_flags::DOOR,
+        physics_state: 0x10018,
+        position: Some(ac_world::object::Position {
+            cell: 0xEA30_0032,
+            local: Vec3::new(156.0, 43.5247, 113.0),
+            rotation: glam::Quat::IDENTITY,
+        }),
+        scale: 1.0,
+        ..Default::default()
+    };
+    c.world.objects.insert(door.guid, door);
+    let raider = ac_world::WorldObject {
+        guid: 0x8000_0001,
+        name: "Amploth Raider".into(),
+        item_type: ac_world::item_type::CREATURE,
+        position: Some(ac_world::object::Position {
+            cell: 0xEA30_002C,
+            local: Vec3::new(135.97, 87.71, 135.24),
+            rotation: glam::Quat::IDENTITY,
+        }),
+        ..Default::default()
+    };
+    c.world.objects.insert(raider.guid, raider);
+    let spell = c
+        .assets
+        .spell_table()
+        .unwrap()
+        .find_by_name("Shock Wave I")
+        .map(|(id, _)| id)
+        .unwrap();
+    let how = How::Spell(spell);
+    let start = c.my_position().unwrap();
+    let t0 = Instant::now();
+    for i in 0..200 {
+        let now = t0 + Duration::from_millis(50 * i);
+        c.frame_at = now;
+        c.autoplay_approach(0x8000_0001, "Amploth Raider", how);
+        c.tick_player(crate::player::Input::default(), 0.05, now);
+    }
+    let me = c.my_position().unwrap();
+    assert!(me.distance(start) > 1.0, "stood at {me}");
+}
