@@ -181,17 +181,22 @@ impl Client {
             .is_some_and(|pl| pl.is_indoors() && pl.in_dungeon(&assets))
     }
 
+    /// The hunting area the hunt keeps to now: none while a pursued quest is worked, whose
+    /// creatures, grounds and givers lie where they lie (a_quests_dungeon_is_explored_under_a_hunting_area_elsewhere).
+    pub(crate) fn hunting_area(&self) -> Option<&HuntArea> {
+        if self.is_pursuing() {
+            return None;
+        }
+        self.autoplay.config.fight.area.as_ref()
+    }
+
     /// Whether `o` may be fought under the hunting area: it stands inside
     /// the area, or it is what has just swung at the character and is
     /// near. With no area, anything may.
     pub(crate) fn area_allows(&self, o: &ac_world::WorldObject, underground: bool) -> bool {
-        let Some(area) = &self.autoplay.config.fight.area else {
+        let Some(area) = self.hunting_area() else {
             return true;
         };
-        // A pursued quest's creatures are fought where they are found.
-        if self.is_pursuing() {
-            return true;
-        }
         let Some(p) = o.position else {
             return false;
         };
@@ -219,7 +224,7 @@ impl Client {
     /// dungeon through the portal into it; within the dungeon, to the
     /// nearest room picked. True while it does.
     pub(crate) fn autoplay_keep_to_area(&mut self, now: Instant) -> bool {
-        let Some(area) = self.autoplay.config.fight.area.clone() else {
+        let Some(area) = self.hunting_area().cloned() else {
             return false;
         };
         if !self.autoplay.config.fight.enabled {
@@ -244,10 +249,6 @@ impl Client {
         if self.autoplay.growth.town_run_under_way()
             || (self.visiting().is_some() && !self.is_own_visit())
         {
-            return false;
-        }
-        // Nor while a pursued quest is worked: its giver or its source lies where it lies.
-        if self.is_pursuing() {
             return false;
         }
         // Never in the middle of a fight: something hitting the character

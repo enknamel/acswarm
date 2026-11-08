@@ -308,7 +308,7 @@ impl Client {
             }
             return false;
         }
-        let area = self.autoplay.config.fight.area.clone();
+        let area = self.hunting_area().cloned();
         let tactic = ac_world::hunting::tactic_for(cfg.tactic, ac_world::hunting::at(here));
         use ac_world::hunting::Tactic;
         // Patrol and Camp keep walking the ground; only Sweep gives up on it.

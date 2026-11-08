@@ -28,6 +28,9 @@ const STOP: f32 = 1.0;
 /// The least a walk into a room ends within (metres): a steady stop, not an orbit of the spot.
 const STOP_AT_LEAST: f32 = 0.25;
 
+/// The most rooms tried in one tick; the rest wait for the next (the frame is the player's too).
+const ROOMS_PER_TICK: usize = 3;
+
 /// The dungeon's rooms and what opens on to what.
 struct Rooms<'a>(&'a [CellScene]);
 
@@ -203,7 +206,7 @@ impl Client {
         let facing = facing(pl.heading);
         // Outside the area's dungeon, keeping to the area takes it back; inside, a room not the
         // area's own is walked through to one that is (stopping there went back and round again).
-        let elsewhere = match self.autoplay.config.fight.area.as_ref().map(|a| &a.shape) {
+        let elsewhere = match self.hunting_area().map(|a| &a.shape) {
             None => false,
             Some(crate::hunt::Shape::Dungeon { landblock, .. }) => {
                 cell & 0xFFFF_0000 != landblock & 0xFFFF_0000
@@ -241,6 +244,16 @@ impl Client {
                     .say(Doing::Traveling, "looking for something to fight");
                 return true;
             }
+            // At its spot: the room is stood in, whichever of two overlapping cells the body says
+            // (Mossy Cave's 0x0178 over 0x0179, which six rooms open off: shut, it cut them off).
+            let at_spot = self
+                .my_position()
+                .is_some_and(|p| p.distance(at.at) <= within.max(STOP));
+            if matches!(did, Did::Done) && at_spot {
+                self.autoplay.rooms_seen.insert(room);
+                self.autoplay.room_bound = None;
+                return true;
+            }
             // Not a room to keep trying: shut for now, and the way on is planned round it.
             self.autoplay.rooms_shut.insert(room);
             self.autoplay.room_bound = None;
@@ -251,26 +264,28 @@ impl Client {
         let rooms = Rooms(&scene.cells);
         // With a hunting area of chosen rooms, the others are walked
         // through but never gone to: counted as seen already.
-        let outside_area: std::collections::HashSet<u32> =
-            match self.autoplay.config.fight.area.as_ref().map(|a| &a.shape) {
-                Some(crate::hunt::Shape::Dungeon { rooms: picked, .. }) if !picked.is_empty() => {
-                    scene
-                        .cells
-                        .iter()
-                        .map(|c| c.cell_id)
-                        .filter(|id| !picked.contains(id))
-                        .collect()
-                }
-                _ => Default::default(),
-            };
+        let outside_area: std::collections::HashSet<u32> = match self
+            .hunting_area()
+            .map(|a| &a.shape)
+        {
+            Some(crate::hunt::Shape::Dungeon { rooms: picked, .. }) if !picked.is_empty() => scene
+                .cells
+                .iter()
+                .map(|c| c.cell_id)
+                .filter(|id| !picked.contains(id))
+                .collect(),
+            _ => Default::default(),
+        };
         let seen = |s: &std::collections::HashSet<u32>| -> std::collections::HashSet<u32> {
             s.union(&outside_area).copied().collect()
         };
-        // A room no walk gets into is shut and the next chosen in the same tick; each pass shuts
-        // one, so the rooms run out.
-        loop {
+        // A room no walk gets into is shut and the next chosen in the same tick, up to
+        // ROOMS_PER_TICK: each costs a floor build and a plan, and Mossy Cave's ran a frame minutes.
+        // Where the way on is looked for from: this room, or a sliver of one stood in already.
+        let mut from = cell;
+        for _ in 0..ROOMS_PER_TICK {
             let mut next = next_step(
-                cell,
+                from,
                 &rooms,
                 &seen(&self.autoplay.rooms_seen),
                 &self.autoplay.rooms_shut,
@@ -292,7 +307,7 @@ impl Client {
                 self.autoplay.rooms_shut.clear();
                 self.autoplay.rooms_seen.insert(cell);
                 next = next_step(
-                    cell,
+                    from,
                     &rooms,
                     &seen(&self.autoplay.rooms_seen),
                     &self.autoplay.rooms_shut,
@@ -313,6 +328,19 @@ impl Client {
                 return true;
             };
             let Some(at) = spot_in_room(&spots, room, aim, me) else {
+                // Its floor only where we stand, or its floor this room's (two cells over one
+                // floor): stood in already, the way on looked for from it (Mossy Cave's 0x0112
+                // walled 0x011A in, 0x0178 over 0x0179 cut off the six rooms beyond).
+                let shared = |p: &Place| p.cell == cell && p.at.distance(aim) <= STOP;
+                if spots
+                    .iter()
+                    .any(|p| p.cell == room && p.at.distance(me) <= STOP)
+                    || (!spots.iter().any(|p| p.cell == room) && spots.iter().any(shared))
+                {
+                    self.autoplay.rooms_seen.insert(room);
+                    from = room;
+                    continue;
+                }
                 self.autoplay.rooms_shut.insert(room);
                 self.autoplay.note(
                     format!("no floor past the door of {room:#06x}; going round"),
@@ -342,6 +370,10 @@ impl Client {
                 .say(Doing::Traveling, "looking for something to fight");
             return true;
         }
+        // Out of tries this tick: the next room is chosen on the next.
+        self.autoplay
+            .say(Doing::Traveling, "looking for something to fight");
+        true
     }
 
     /// Walk to `place`, in the room past a threshold, to `within` (see [`within_room`]).
@@ -443,6 +475,42 @@ mod tests {
             "explored {seen} rooms, shut {:x?}",
             c.autoplay.rooms_shut
         );
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn a_quests_dungeon_is_explored_under_a_hunting_area_elsewhere() {
+        // Blargerton, hunting Burun Ruuk Scamps in Mossy Cave for the Necklace of Leerargh's key
+        // with the Tusker Barracks as his area: the scamps in sight killed, he stood, the rooms
+        // being outside the area; then walled into 0x011A by its sliver of a doorway, 0x0112.
+        let mut c = crate::testkit::standing_in_the_field(
+            51,
+            0x0177_0176,
+            glam::Vec3::new(48.33, -81.29, -2.02),
+        );
+        c.world.player_guid = Some(crate::testkit::ME);
+        c.autoplay.config.enabled = true;
+        c.autoplay.config.fight.enabled = true;
+        c.autoplay.config.fight.area = Some(crate::hunt::HuntArea {
+            name: "tusker barracks".into(),
+            shape: crate::hunt::Shape::Dungeon {
+                landblock: 0x5A48_0000,
+                rooms: Vec::new(),
+            },
+        });
+        c.autoplay.config.quests.on = true;
+        c.autoplay
+            .config
+            .quests
+            .pursue_quest("magicitemtraining3", true, 0);
+        c.refresh_quests(Instant::now());
+        assert!(c.is_pursuing(), "{:?}", c.pursuit);
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter("info")
+            .with_test_writer()
+            .try_init();
+        let stood = play(&mut c, 60);
+        assert_keeps_going(&c, &stood);
     }
 
     #[test]
