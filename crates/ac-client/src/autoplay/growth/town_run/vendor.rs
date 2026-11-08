@@ -443,6 +443,25 @@ impl Client {
                 }
             }
         }
+        // The whole list at one counter, the cheapest reached at any distance (sell rates run 1.0
+        // to 1.9, scarabs the bill): part of it nearer is a stop more and dearer
+        // (a_run_buys_first_where_the_whole_list_is).
+        if errand == Errand::Buy {
+            let mut whole: Vec<_> = shops
+                .iter()
+                .map(|(s, reach)| (*s, *reach, forecast(s, &wants, purse, &salables)))
+                .filter(|(_, _, f)| f.covers_it())
+                .collect();
+            whole.sort_by(|a, b| a.2.bill.cmp(&b.2.bill).then(a.1.total_cmp(&b.1)));
+            for (s, _, f) in whole {
+                if tries == 0 {
+                    break;
+                }
+                if let Some(f) = self.routed(&s.name, s.place(), f, &mut tries, now) {
+                    return Some((s.name.clone(), s.xy(), f));
+                }
+            }
+        }
         // The best in the ring that a journey reaches; one that none does is left out and the
         // next best asked (Ketnan's counter lies in a dungeon with no known way in).
         let mut no_way: Vec<Vec2> = Vec::new();

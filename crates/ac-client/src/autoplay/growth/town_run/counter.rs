@@ -686,6 +686,14 @@ impl Client {
                         Doing::Shopping,
                         format!("{leaving}on to {vendor} for {what} -- {}", look.tell()),
                     );
+                    // This stop's own reason: the run's named the first counter's wares, which
+                    // this one may not stock (an_urgent_need_comes_before_the_loot_and_the_loot_is_sold_on_the_way).
+                    let stocks: Vec<&str> = look.stocks.iter().map(String::as_str).collect();
+                    let reason = if stocks.is_empty() {
+                        format!("selling {what}")
+                    } else {
+                        format!("short of {}", a_few(&stocks))
+                    };
                     let mut visited = run.visited;
                     visited.push(at);
                     self.autoplay.growth.run = Some(Run {
@@ -697,7 +705,7 @@ impl Client {
                         town: run.town,
                         stops: run.stops + 1,
                         sold: run.sold,
-                        reason: run.reason,
+                        reason,
                         errand,
                         visited,
                         walked_on: None,

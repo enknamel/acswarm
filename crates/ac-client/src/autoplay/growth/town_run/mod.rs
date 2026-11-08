@@ -277,19 +277,18 @@ impl Client {
         (cfg.town_runs || for_quest) && self.grow_town_run(now, &cfg)
     }
 
-    /// The order a stop's counter is looked for in, the first stop and every one after: a supply
-    /// run out first unless the pack is full or laden, then the loot for a counter, then the rest
-    /// of the list. One rule, so no stop is chosen for a different reason from the last.
+    /// The order a stop's counter is looked for in, the first stop and every one after: the buy
+    /// list first unless the pack is full or laden, then the loot: the buying counter takes what
+    /// loot it buys too (a_run_buys_first_where_the_whole_list_is). One rule for every stop.
     pub(super) fn errands_for(&self, cfg: &Growth, needs: &[Need]) -> Vec<Errand> {
-        let urgent = needs.iter().any(|n| n.urgent && n.buyable);
         let to_buy = needs.iter().any(|n| n.want > 0 && n.buyable);
         let to_sell = !self.salables(cfg).is_empty();
         let pressed = self.pack_low_on_room() || self.laden(cfg);
-        match (urgent && !pressed, to_sell, to_buy) {
+        match (to_sell, to_buy && !pressed, to_buy) {
             (true, true, _) => vec![Errand::Buy, Errand::Sell],
-            (false, true, true) => vec![Errand::Sell, Errand::Buy],
-            (false, true, false) => vec![Errand::Sell],
-            (_, false, _) => vec![Errand::Buy],
+            (true, false, true) => vec![Errand::Sell, Errand::Buy],
+            (true, false, false) => vec![Errand::Sell],
+            (false, ..) => vec![Errand::Buy],
         }
     }
 

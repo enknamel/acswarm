@@ -196,6 +196,8 @@ fn an_urgent_need_comes_before_the_loot_and_the_loot_is_sold_on_the_way() {
     assert_eq!(on.vendor, "Archmage Cindrue");
     assert_eq!(on.errand, Errand::Sell);
     assert_eq!(on.stops, 2);
+    // Said for what this stop is for, not the bowyer's arrowshafts.
+    assert!(!on.reason.contains("Arrowshafts"), "{}", on.reason);
 }
 
 /// Every counter within `reach` of the character that would pay for
@@ -458,5 +460,60 @@ fn coin_given_after_a_futile_run_ends_the_wait() {
         c.grow_town_run(later, &cfg),
         "{}",
         c.autoplay.growth.held_back
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_run_buys_first_where_the_whole_list_is() {
+    // Blargerton in Hebian-to, short of tapers and three scarabs with loot to sell: the run sold at
+    // Master Sonji Pan's and Archmage Le-Ai Ren's (tapers, a scarab) and went on to Archmage
+    // Sammam al-Ashiz, who has the whole list at 1.55: one stop, at the cheapest whole list.
+    let mut c = standing_at(0xB470_001D, glam::Vec3::new(88.0, 100.0, 56.0));
+    c.world.stats.level = 51;
+    with_a_pack(&mut c, 50);
+    for i in 0..3 {
+        pea_in_the_pack(&mut c, 0x8000_0010 + i, "Lead Pea", 8329, 100);
+    }
+    for i in 0..8 {
+        coin_in_the_pack(&mut c, 0x8000_0030 + i, 25_000);
+    }
+    with_a_buy_list(
+        &mut c,
+        &[
+            ("Prismatic Taper", 1000, 500),
+            ("Copper Scarab", 50, 25),
+            ("Pyreal Scarab", 10, 5),
+            ("Gold Scarab", 10, 5),
+        ],
+    );
+    let cfg = c.autoplay.config.growth.clone();
+    let needs = c.grow_needs(&cfg);
+    let errands = c.errands_for(&cfg, &needs);
+    assert_eq!(errands, vec![Errand::Buy, Errand::Sell]);
+    let me = c.my_position().unwrap();
+    let ways = c.ways_out(Vec2::new(me.x, me.y));
+    let (errand, vendor, _, look) = c
+        .choose_stop(&cfg, &needs, &ways, &errands, &[], Instant::now())
+        .expect("no stop");
+    assert_eq!(errand, Errand::Buy);
+    let shop = shop_named(&vendor);
+    for want in [
+        "Prismatic Taper",
+        "Copper Scarab",
+        "Pyreal Scarab",
+        "Gold Scarab",
+    ] {
+        assert!(
+            shop.stocks(want).is_some(),
+            "{vendor} has no {want}: {}",
+            look.tell()
+        );
+    }
+    let sammam = shop_named("Archmage Sammam al-Ashiz");
+    assert!(
+        shop.sell_rate < sammam.sell_rate,
+        "{vendor} at {}",
+        shop.sell_rate
     );
 }
