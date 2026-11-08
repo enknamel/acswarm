@@ -380,6 +380,11 @@ impl Client {
         {
             return false;
         }
+        // The character is busy until the server answers what was sent; a cast sent meanwhile is
+        // turned away busy (0x1D) and the one in the air's record lost (regression: the bane loop).
+        if self.autoplay.cast_in_flight(now) {
+            return false;
+        }
         // Each pass looks once a BUFF_CHECK_EVERY on its own clock, so a
         // top-up that holds off cannot stop the urgent one looking. A top-up
         // paced out in a shorter lull waits for a later one, perhaps a fight

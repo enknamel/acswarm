@@ -350,3 +350,55 @@ fn an_item_buff_from_before_login_is_cast_again_and_a_weaker_one_not_under_a_str
         "no answer, so due"
     );
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_second_item_buff_waits_for_the_first_to_be_answered() {
+    // Blargerton sent Lightning Bane while Acid Bane was still going up; the busy answer to it was
+    // taken for Acid Bane's, which landed unrecorded and was cast again and again.
+    let now = Instant::now();
+    let (mut c, ids) =
+        crate::testkit::a_caster_knowing(now, &["Acid Bane III", "Lightning Bane III"]);
+    let me = c.world.player_guid.unwrap();
+    const HELM: u32 = 0x8000_0600;
+    crate::testkit::thing_in_the_pack(&mut c, HELM, "Pathwarden Helm", 1);
+    let helm = c.world.objects.get_mut(&HELM).unwrap();
+    helm.item_type = ac_world::item_type::ARMOR;
+    helm.container = None;
+    helm.wielder = Some(me);
+    let start = now + ARMOUR_ANSWERS;
+    c.autoplay.armour_looked = Some(now);
+    c.autoplay.cast_sent = None;
+    assert!(c.autoplay_buff(start, false), "the first bane is cast");
+    let first = c.autoplay.item_buff_sent.map(|s| s.1);
+    assert!(first.is_some(), "an item buff in the air");
+    // Every clock but the server's answer has run out: nothing more goes up.
+    let mid = start + BUFF_EVERY + BUFF_CHECK_EVERY;
+    assert!(
+        !c.autoplay_buff(mid, false),
+        "a second cast sent over the first"
+    );
+    assert_eq!(c.autoplay.item_buff_sent.map(|s| s.1), first);
+    // It lands: up, and the other is cast next.
+    c.hear_buff_answer(0);
+    c.autoplay.cast_answered();
+    let landed = c
+        .autoplay
+        .item_buffs
+        .iter()
+        .map(|b| b.1)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        landed,
+        vec![first.unwrap()],
+        "the first bane is not kept up"
+    );
+    let next = mid + BUFF_EVERY + BUFF_CHECK_EVERY;
+    assert!(c.autoplay_buff(next, false), "the second bane is cast");
+    let second = c.autoplay.item_buff_sent.map(|s| s.1);
+    assert!(
+        second.is_some() && second != first,
+        "{second:?} after {first:?}"
+    );
+    let _ = ids;
+}
