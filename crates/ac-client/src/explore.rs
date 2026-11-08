@@ -505,10 +505,6 @@ mod tests {
             .pursue_quest("magicitemtraining3", true, 0);
         c.refresh_quests(Instant::now());
         assert!(c.is_pursuing(), "{:?}", c.pursuit);
-        let _ = tracing_subscriber::fmt()
-            .with_env_filter("info")
-            .with_test_writer()
-            .try_init();
         let stood = play(&mut c, 60);
         assert_keeps_going(&c, &stood);
     }
