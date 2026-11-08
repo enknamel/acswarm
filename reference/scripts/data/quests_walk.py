@@ -122,6 +122,10 @@ class Data:
         self.made_on = defaultdict(lambda: defaultdict(set))
         for made, used, on in rows(dump, "recipes"):
             self.made_on[int(made)][int(on)].add(int(used))
+        # What one carried item used on another makes: made -> (item used, item it is used on).
+        self.combined = defaultdict(set)
+        for made, used, on in rows(dump, "combines"):
+            self.combined[int(made)].add((int(used), int(on)))
         # Items a shop sells (vendors.csv, joined at load): a source the walk does not write.
         self.sold = set()
 
@@ -635,6 +639,16 @@ def build(data, never):
                     if str(k) not in seen and depth < KEY_DEPTH:
                         seen.add(str(k))
                         todo.append((str(k), depth + 1))
+            for used, on in sorted(data.combined.get(w, ())):
+                # Two items carried, the first used on the second: both are had first.
+                keys = [used, on]
+                src.append((want, "combine", on, 1.0,
+                            ";".join("%d=%s" % (k, data.name.get(k, "").replace("=", "-"))
+                                     for k in keys)))
+                for k in keys:
+                    if str(k) not in seen and depth < KEY_DEPTH:
+                        seen.add(str(k))
+                        todo.append((str(k), depth + 1))
         else:
             for c in sorted(data.counter_of[want]):
                 if data.spawns.get(c):
@@ -643,7 +657,9 @@ def build(data, never):
     src_out = []
     for want, kind, c, p, keys in src:
         at = ""
-        if kind in ("npc", "floor", "container", "use"):
+        if kind == "combine":
+            where = ""
+        elif kind in ("npc", "floor", "container", "use"):
             if kind == "npc":
                 spots = data.placed[c]
             else:
@@ -663,8 +679,10 @@ def kept_uses(src, wants, sold):
     then wanted by nothing kept."""
     while True:
         had = {r[0] for r in src} | {str(w) for w in sold}
-        keep = [r for r in src if r[1] != "use"
-                or any(k.split("=", 1)[0] in had for k in r[4].split(";"))]
+        items = lambda r: [k.split("=", 1)[0] for k in r[4].split(";")]
+        keep = [r for r in src if r[1] not in ("use", "combine")
+                or (r[1] == "use" and any(k in had for k in items(r)))
+                or (r[1] == "combine" and all(k in had for k in items(r)))]
         asked = set(wants) | {k.split("=", 1)[0] for r in keep for k in r[4].split(";") if k}
         keep = [r for r in keep if r[0] in asked]
         if len(keep) == len(src):
@@ -805,12 +823,13 @@ SOURCES_HEADER = """\
 # want: an item wcid or a kill counter, as quests.csv names it, or a key a container or use
 # below needs. kind: drop (a corpse drop, chance per kill), kill (a creature counting for the
 # counter), npc (a placed NPC whose talk gives the item), floor (made on the ground by a
-# generator; wcid is the item's own), container (a chest that holds it, chance per fill) or
-# use (a placed object a recipe makes it on, from a carried item used on it). landblocks: hex
-# landblock:spawn entries;... (for an npc, floor, container or use, hex cell:1 per placement,
-# with at the matching local "x y z";...). keys: for a locked container, the keys whose
-# KeyCode is its LockCode; for a use, the items used on it; wcid=name;..., each a want of its
-# own rows. A shop's stock is vendors.csv's, joined at load (ac_world::quests::sources).
+# generator; wcid is the item's own), container (a chest that holds it, chance per fill), use
+# (a placed object a recipe makes it on, from a carried item used on it) or combine (a carried
+# item a recipe makes it on; nowhere to go). landblocks: hex landblock:spawn entries;... (for
+# an npc, floor, container or use, hex cell:1 per placement, with at the matching local
+# "x y z";...). keys: for a locked container, the keys whose KeyCode is its LockCode; for a
+# use, the items used on it; for a combine, the item used then the one used on;
+# wcid=name;..., each a want of its own rows. A shop's stock is vendors.csv's, joined at load (ac_world::quests::sources).
 # Regenerate with reference/scripts/data/quests.sh.
 """
 

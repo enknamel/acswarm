@@ -150,8 +150,15 @@ from recipe r join cook_book c on c.recipe_Id = r.id
 where r.success_W_C_I_D <> 0
   and c.target_W_C_I_D in (select weenie_Class_Id from landblock_instance);'
 
+# And what one carried item used on another makes (the same recipes, the target an item carried:
+# a town stamp on a Lucky Gold Letter): the made item, the item used and the item it is used on.
+q combines 'select r.success_W_C_I_D, c.source_W_C_I_D, c.target_W_C_I_D
+from recipe r join cook_book c on c.recipe_Id = r.id
+where r.success_W_C_I_D <> 0
+  and c.target_W_C_I_D not in (select weenie_Class_Id from landblock_instance);'
+
 for t in placed emote action quest killq itemq drops names allowgive ints spawns ground wtypes \
-  gens chestlist locks keys stuck recipes; do
+  gens chestlist locks keys stuck recipes combines; do
   [ -s "$TMP/$t.tsv" ] || { echo "quests.sh: the $t query returned nothing" >&2; exit 1; }
 done
 
