@@ -168,3 +168,24 @@ fn a_charge_waits_for_the_worn_things_to_be_read_again() {
     c.autoplay_mana_stones(now + ANSWER_WAIT * 3);
     assert_ne!(c.last_used, Some(me), "charged with the ring full");
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn mana_junk_is_taken_only_while_a_stone_waits_for_it() {
+    // Thirteen pieces of mana junk taken in forty minutes, no stone to drain them into, filled
+    // the pack, and the town run went every few minutes to sell them.
+    let mut c = wearing(480);
+    // One empty stone, and the bracelet already carried for it: no more.
+    assert!(
+        !c.wants_mana_junk(),
+        "junk taken with every stone spoken for"
+    );
+    c.world.objects.remove(&JUNK);
+    assert!(
+        c.wants_mana_junk(),
+        "an empty stone waits, and nothing to fill it"
+    );
+    // The backup charged: none wanted, empty stones or not.
+    c.autoplay.config.mana.backup = 1;
+    assert!(!c.wants_mana_junk(), "taken with the backup charged");
+}

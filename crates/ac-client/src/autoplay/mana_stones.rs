@@ -185,6 +185,29 @@ impl Client {
         self.autoplay.mana_stones.awaiting = worn;
     }
 
+    /// Whether mana junk is worth taking now: fewer than [`Mana::backup`] stones charged, and an
+    /// empty one left over for it beyond the junk already carried.
+    pub(crate) fn wants_mana_junk(&self) -> bool {
+        let cfg = &self.autoplay.config.mana;
+        if !cfg.on {
+            return false;
+        }
+        let stones = self.stones();
+        let charged = stones
+            .iter()
+            .filter(|s| matches!(s, Stone::Charged(_)))
+            .count() as u32;
+        let empty = stones.len() as u32 - charged;
+        let carried = self
+            .world
+            .inventory()
+            .filter(|o| o.item_type & ac_world::item_type::MANA_STONE == 0)
+            .filter_map(|o| self.stats_of(o.guid))
+            .filter(|s| self.autoplay.ledger.of(s) == Some(LootAction::Drain))
+            .count() as u32;
+        charged < cfg.backup && empty > carried
+    }
+
     /// The carried stones whose appraisal is in: charged with mana, or empty.
     fn stones(&self) -> Vec<Stone> {
         self.world

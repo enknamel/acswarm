@@ -314,6 +314,16 @@ impl Client {
                     &who,
                     held,
                 );
+                // Mana junk only while a stone waits to be filled: taken past that, it filled the
+                // pack, and the town run went every few minutes to sell it.
+                let judged = match judged {
+                    Judged::Decided(ac_loot::profile::LootAction::Drain, rule)
+                        if !mine && !self.wants_mana_junk() =>
+                    {
+                        Judged::Decided(ac_loot::profile::LootAction::Skip, rule)
+                    }
+                    other => other,
+                };
                 let why = match &judged {
                     Judged::Decided(_, rule) => rule.clone(),
                     Judged::NeedsId(_) | Judged::None => String::new(),
