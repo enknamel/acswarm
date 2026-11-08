@@ -426,6 +426,42 @@ pub fn kill_count(text: &str) -> Option<KillCount<'_>> {
     })
 }
 
+/// One line of ACE's `@myquests`: a quest the server keeps for the character, as it keeps it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct QuestRecord<'a> {
+    /// The quest's name, lower case.
+    pub name: &'a str,
+    pub solves: u32,
+    /// When last solved, Unix seconds.
+    pub last: u64,
+    /// The most solves allowed, -1 for no limit.
+    pub max_solves: i64,
+    /// Seconds between solves (scaled as the server scales them).
+    pub min_delta: u64,
+}
+
+/// A line of the server's quest log, `@myquests`: not a refusal, read here so the server's
+/// English is matched in one file.
+pub fn quest_record(text: &str) -> Option<QuestRecord<'_>> {
+    // Command/Handlers/PlayerCommands.cs:66-67
+    //   $"{name} - {NumTimesCompleted} solves ({LastTimeCompleted})" + $"\"{Message}\" {MaxSolves} {minDelta}"
+    let (name, rest) = text.trim().split_once(" - ")?;
+    if name.is_empty() || name.contains(char::is_whitespace) {
+        return None;
+    }
+    let (solves, rest) = rest.split_once(" solves (")?;
+    let (last, rest) = rest.split_once(')')?;
+    let (rest, min_delta) = rest.trim_end().rsplit_once(' ')?;
+    let (_, max_solves) = rest.trim_end().rsplit_once(' ')?;
+    Some(QuestRecord {
+        name,
+        solves: solves.parse().ok()?,
+        last: last.parse().ok()?,
+        max_solves: max_solves.parse().ok()?,
+        min_delta: min_delta.parse().ok()?,
+    })
+}
+
 /// What to do about a refusal, by its kind alone.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Answer {
@@ -852,5 +888,23 @@ mod tests {
             refused("You have killed 7 Blood Shreth! Your task is complete!"),
             None
         );
+    }
+
+    #[test]
+    fn a_line_of_the_servers_quest_log_is_read() {
+        let line =
+            "mosswartexodusnecklace - 1 solves (1794095878)\"Mosswart Exodus Necklace\" -1 72000";
+        assert_eq!(
+            quest_record(line),
+            Some(QuestRecord {
+                name: "mosswartexodusnecklace",
+                solves: 1,
+                last: 1794095878,
+                max_solves: -1,
+                min_delta: 72000
+            })
+        );
+        assert_eq!(quest_record("Quest list is empty."), None);
+        assert_eq!(quest_record("Bleeargh - he says hello"), None);
     }
 }

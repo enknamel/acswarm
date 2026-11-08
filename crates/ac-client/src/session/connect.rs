@@ -125,6 +125,7 @@ impl Client {
             quests_unsuited: Default::default(),
             quest_wants: Vec::new(),
             quest_wants_at: None,
+            server_quests_due: true,
             quest_asked: None,
             pursuit: Vec::new(),
             combat: false,

@@ -578,6 +578,7 @@ impl Client {
         self.tick_retag(now);
         // What the giver asked last answered, then each quest's state; neither sends anything.
         self.watch_quest_answer(now);
+        self.ask_server_quests();
         self.refresh_quests(now);
         // What each item was taken for, written out when it changes.
         // Not on the way out: the thing this is defending against is a

@@ -951,12 +951,14 @@ impl Client {
             self.autoplay.growth.givers_refused.mark(key, now);
             let why = format!("{} gave nothing for {}", row.giver, row.title);
             self.autoplay.note(why, now);
+            self.server_quests_due = true;
             return;
         }
         tracing::info!("quest: {} done at {} (paid: {rose})", row.id, row.giver);
         self.quest_log.note_done(row, crate::holdings::unix_now());
         self.save_quest_log();
         self.hold_quest_flags(&row.stamps);
+        self.server_quests_due = true;
     }
 
     /// The board's wants less what is carried: what a mate may take for this character.
@@ -1013,6 +1015,48 @@ impl Client {
             tracing::info!("quest: {counter} at {} kills", k.done);
             self.quest_log.note_kills(&counter, k.done);
             self.save_quest_log();
+        }
+    }
+
+    /// Ask the server for its quest log once in the world and after each giver's answer
+    /// (ACE's `@myquests`, PlayerCommands.cs:35): its solves and waits are what the log keeps.
+    pub(crate) fn ask_server_quests(&mut self) {
+        let ready = self.player.is_some() && self.world.player_guid.is_some();
+        if !self.server_quests_due || !ready || !self.autoplay.config.quests.on {
+            return;
+        }
+        self.server_quests_due = false;
+        if let Err(e) = self.act(crate::action::Action::ServerCommand("myquests".into())) {
+            tracing::info!("quest: asking the server's quest log: {e}");
+        }
+    }
+
+    /// A line of the server's quest log: a kill task's count, a quest's solves, a timer's wait
+    /// and the flag held, into the log and saved when anything changed.
+    pub(crate) fn hear_server_quest(&mut self, text: &str) {
+        let Some(q) = crate::refusals::quest_record(text) else {
+            return;
+        };
+        let name = q.name.to_ascii_lowercase();
+        let before = self.quest_log.clone();
+        if let Some(counter) = kill_counter(&name) {
+            self.quest_log.note_kills(counter, q.solves);
+        } else if ac_world::quests::rows_of(&name).next().is_some() {
+            let solved = Solved {
+                at: q.last,
+                times: q.solves,
+            };
+            self.quest_log.done.insert(name.clone(), solved);
+        }
+        let until = q.last.saturating_add(q.min_delta);
+        if q.min_delta > 0 && until > crate::holdings::unix_now() {
+            self.quest_log.note_wait(&name, until);
+        }
+        self.hold_quest_flags(std::slice::from_ref(&name));
+        if self.quest_log != before {
+            tracing::info!("quest: the server's log has {name}: {} solves", q.solves);
+            self.save_quest_log();
+            self.quest_board_at = None;
         }
     }
 

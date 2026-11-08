@@ -565,3 +565,26 @@ fn a_quest_asked_again_after_its_hand_in_is_done() {
     c.watch_quest_answer(t0 + XP_WATCH * 2);
     assert!(c.quest_log.done.contains_key("magicitemtraining3"));
 }
+
+#[test]
+fn the_servers_quest_log_says_a_quest_handed_in_is_waiting() {
+    // Blargerton's necklace, handed in under a client that heard "gave nothing": the server's
+    // own log (`@myquests`) has its stamp and its 20 h timer.
+    let mut c = crate::testkit::character_of_level(crate::testkit::no_data(), 51);
+    c.autoplay.config.quests.on = true;
+    let now = crate::holdings::unix_now();
+    c.hear_server_quest(&format!(
+        "magicitemtraining3 - 1 solves ({})\"Learned item enchantment\" -1 0",
+        now - 60
+    ));
+    c.hear_server_quest(&format!(
+        "mosswartexodusnecklace - 1 solves ({})\"Mosswart Exodus Necklace\" -1 72000",
+        now - 60
+    ));
+    assert!(c.quest_log.done.contains_key("magicitemtraining3"));
+    assert_eq!(
+        c.quest_log.wait_until("mosswartexodusnecklace", now),
+        Some(now - 60 + 72000)
+    );
+    assert!(c.holds_quest_flag("magicitemtraining3"));
+}

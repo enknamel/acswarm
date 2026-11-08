@@ -411,8 +411,9 @@ impl Client {
             // in words and nothing else: read once against the table
             // of refusals (see `refused`, and `refusals` for the table).
             self.hear_refusal(&line.text, Instant::now());
-            // And on a kill task's count, read beside the refusals (see `quest_log`).
+            // And on a kill task's count and the server's quest log, read beside the refusals.
             self.hear_kill_count(&line.text);
+            self.hear_server_quest(&line.text);
             // And on a spell cast at the character: a caster attacks with
             // no notification, only this line (see
             // `autoplay::spell_attacker`).
