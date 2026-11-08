@@ -7,7 +7,27 @@
 use crate::portals::{self, Portal};
 use crate::Place;
 use glam::Vec2;
-use std::collections::BinaryHeap;
+use std::collections::{BinaryHeap, HashSet};
+use std::sync::OnceLock;
+
+/// Indoor cells portals stand or land in that are buildings, not dungeons, told once by the
+/// client, which reads the cells (`set_building_cells`): walked to as the ground outside them.
+static BUILDING_CELLS: OnceLock<HashSet<u32>> = OnceLock::new();
+
+/// Tell the planner which indoor portal cells are in buildings (the first telling stands).
+pub fn set_building_cells(cells: HashSet<u32>) {
+    let _ = BUILDING_CELLS.set(cells);
+}
+
+/// Whether the planner has been told the building cells.
+pub fn building_cells_known() -> bool {
+    BUILDING_CELLS.get().is_some()
+}
+
+/// Indoors and not in a building: a dungeon, or the hub, walked only within its own landblock.
+fn shut_in(p: Place) -> bool {
+    p.is_indoors() && !BUILDING_CELLS.get().is_some_and(|s| s.contains(&p.cell))
+}
 
 /// How fast the character covers ground (m/s), for pricing walks.
 pub const WALK_SPEED: f32 = 5.0;
@@ -196,7 +216,9 @@ fn can_walk_plain(a: Place, b: Place, reach: f32) -> bool {
     // A place known by its position alone (`Place::on_map`) is outdoors in the block its
     // position lies in: from inside a shop in that block, the walk out of the door is a walk.
     let same_block = a.cell & 0xFFFF_0000 == b.cell & 0xFFFF_0000;
-    if a.is_indoors() || b.is_indoors() {
+    // A building's door opens on the ground: the Mines of Despair portal stands in one at
+    // 0xC7210100 (the_mines_of_despair_are_reached_through_the_portal_in_a_building).
+    if shut_in(a) || shut_in(b) {
         // Inside, only within the same landblock (the hub, a dungeon).
         return same_block;
     }

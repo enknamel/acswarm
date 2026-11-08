@@ -1485,3 +1485,29 @@ fn a_recall_that_lands_elsewhere_than_planned_has_carried_us_off() {
         "cast again from where it landed"
     );
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn the_mines_of_despair_are_reached_through_the_portal_in_a_building() {
+    // Blargerton, pursuing the Focusing Stone: "no journey reaches any place Lich Overseer is
+    // found". The Mines' only way in stands in a building (0xC7210100), and the planner took
+    // every indoor cell for a dungeon's, walked to only from inside its own landblock.
+    let mut c = crate::testkit::standing_in_the_field(51, 0xA9B4_0019, Vec3::new(84.0, 7.1, 94.0));
+    let to = |cell: u32, l: Vec3| Place {
+        at: ac_world::landblock_origin(cell) + l,
+        cell,
+    };
+    for goal in [
+        to(0x0188_0307, Vec3::new(30.0, -70.0, 0.0)),
+        to(0x02AB_010A, Vec3::new(0.0, -180.0, -11.995)),
+    ] {
+        let trip = c.plan_trip(goal, false).expect("no trip into the Mines");
+        assert!(
+            trip.steps
+                .iter()
+                .any(|s| matches!(s, Step::Portal { name, .. } if name == "Mines of Despair")),
+            "{:?}",
+            trip.steps
+        );
+    }
+}
