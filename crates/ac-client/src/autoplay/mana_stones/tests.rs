@@ -36,7 +36,16 @@ fn wearing(ring: i32) -> Client {
         crate::testkit::thing_in_the_pack(&mut c, g, name, 1);
         c.world.objects.get_mut(&g).unwrap().item_type = ac_world::item_type::MANA_STONE;
     }
-    appraised(&mut c, FULL, Some((3_000, 10_000)));
+    // A charged stone's appraisal holds its ItemCurMana and no ItemMaxMana, as on Coldeve.
+    c.appraisals.insert(
+        FULL,
+        ac_net::messages::Appraisal {
+            guid: FULL,
+            success: true,
+            ints: vec![(107, 3_000)],
+            ..Default::default()
+        },
+    );
     appraised(&mut c, EMPTY, None);
     crate::testkit::thing_in_the_pack(&mut c, JUNK, "Silver Bracelet", 1);
     c.world.objects.get_mut(&JUNK).unwrap().item_type = ac_world::item_type::JEWELRY;
@@ -101,4 +110,21 @@ fn a_stone_not_yet_appraised_is_asked_about_and_not_used() {
     c.autoplay_mana_stones(Instant::now());
     assert_eq!(c.last_used, None, "a stone of unknown charge was used");
     assert!(c.appraise_queue.contains(&FULL) && c.appraise_queue.contains(&EMPTY));
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_drain_that_leaves_the_junk_is_not_sent_again() {
+    // "The Lace Shirt is already full of mana", every five seconds: a stone taken for empty
+    // poured into the shirt instead of draining it, and the same use went out again and again.
+    let mut c = wearing(480);
+    let now = Instant::now();
+    c.autoplay_mana_stones(now);
+    assert_eq!(c.last_used, Some(JUNK));
+    c.autoplay.cast_answered();
+    c.last_used = None;
+    // Answered, the bracelet still in the pack and the stone looked at again, still "empty".
+    appraised(&mut c, EMPTY, None);
+    c.autoplay_mana_stones(now + ANSWER_WAIT);
+    assert_eq!(c.last_used, None, "the same drain went out again");
 }

@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::Client;
 
+/// PropertyInt ItemCurMana: a stone's charge, absent when it is empty (ManaStone.cs:64).
+const ITEM_CUR_MANA: u32 = 107;
 /// How often the worn things' mana is asked for again (guess: a worn item drains over hours).
 const LOOK_EVERY: Duration = Duration::from_secs(60);
 /// How long a stone's use waits for its answer before the next (ManaStone.cs:232 sends UseDone).
@@ -43,6 +45,10 @@ pub struct State {
     looked: Option<Instant>,
     /// The stone last used and when, until the server answers and it is looked at again.
     sent: Option<(u32, Instant)>,
+    /// The stone and the junk of the drain sent, until its answer: junk still there was not taken.
+    draining: Option<(u32, u32)>,
+    /// Stone and junk pairs a drain left as they were: not tried again this session.
+    refused: Vec<(u32, u32)>,
 }
 
 /// A carried stone as the rules see it, once appraised.
@@ -65,6 +71,15 @@ impl Client {
                 return;
             }
             self.autoplay.mana_stones.sent = None;
+        }
+        let st = &mut self.autoplay.mana_stones;
+        if let Some((stone, junk)) = st.draining.take() {
+            if self.world.objects.contains_key(&junk) {
+                st.refused.push((stone, junk));
+                let name = self.world.name_of(junk).unwrap_or_default().to_string();
+                self.autoplay
+                    .note(format!("{name} would not drain into the stone"), now);
+            }
         }
         self.look_at_mana(now);
         let stones = self.stones();
@@ -92,7 +107,8 @@ impl Client {
             Stone::Empty(g) => Some(*g),
             Stone::Charged(_) => None,
         });
-        if let (Some(stone), Some((junk, name))) = (empty, self.mana_junk()) {
+        if let Some((stone, (junk, name))) = empty.and_then(|g| Some((g, self.mana_junk(g)?))) {
+            self.autoplay.mana_stones.draining = Some((stone, junk));
             self.use_stone(
                 stone,
                 junk,
@@ -154,8 +170,10 @@ impl Client {
             .inventory()
             .filter(|o| o.item_type & ac_world::item_type::MANA_STONE != 0)
             .filter_map(|o| {
-                let s = self.stats_of(o.guid).filter(|s| s.appraised)?;
-                Some(if s.mana > 0 {
+                // Its charge alone, ItemCurMana: a stone has no ItemMaxMana, and read through
+                // `ItemStats` (which wants both) a charged one poured into the junk it was to drain.
+                let a = self.appraisals.get(&o.guid).filter(|a| a.success)?;
+                Some(if a.int(ITEM_CUR_MANA).is_some_and(|m| m > 0) {
                     Stone::Charged(o.guid)
                 } else {
                     Stone::Empty(o.guid)
@@ -175,10 +193,12 @@ impl Client {
     }
 
     /// A carried thing the loot rules tagged Drain that holds mana: the stone's filling.
-    fn mana_junk(&self) -> Option<(u32, String)> {
+    fn mana_junk(&self, stone: u32) -> Option<(u32, String)> {
+        let refused = &self.autoplay.mana_stones.refused;
         self.world
             .inventory()
             .filter(|o| o.item_type & ac_world::item_type::MANA_STONE == 0)
+            .filter(|o| !refused.contains(&(stone, o.guid)))
             .find_map(|o| {
                 let s = self
                     .stats_of(o.guid)
