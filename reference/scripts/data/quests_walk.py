@@ -94,9 +94,12 @@ class Data:
         for wcid, lb, n in rows(dump, "spawns"):
             self.spawns[int(wcid)].append((int(lb, 16), int(n)))
         # What lies about: placed objects but creatures and buildings, by wcid.
-        self.ground = defaultdict(list)
-        for wcid, cell, x, y, z in rows(dump, "ground"):
+        # And the placements a generator makes, linked to it: made there with a guid of their own.
+        self.ground, self.linked = defaultdict(list), defaultdict(list)
+        for wcid, cell, x, y, z, link in rows(dump, "ground"):
             self.ground[int(wcid)].append((int(cell, 16), x, y, z))
+            if link == "1":
+                self.linked[int(wcid)].append((int(cell, 16), x, y, z))
         self.kind = {int(w): int(t) for w, t in rows(dump, "wtypes")}
         # Generator profiles by the wcid they make (WorldObject_Generators.cs:108-180).
         self.made_by = defaultdict(list)
@@ -135,9 +138,10 @@ class Data:
 
     def made_on_ground(self, wcid, depth=0):
         """Where a placed generator makes `wcid` on the ground (a profile with no Contain, Wield,
-        Shop or Treasure bit: RegenLocationType.cs), at its Specific spot or the generator's own.
+        Shop or Treasure bit: RegenLocationType.cs), at its Specific spot or the generator's own,
+        or a placement linked to its generator, at that placement.
         A placed object's guid is static and never picked up (Player_Inventory.cs:831-835)."""
-        out = []
+        out = list(self.linked.get(wcid, ()))
         if depth >= GEN_DEPTH:
             return out
         for gen, _, where, spot in self.made_by.get(wcid, ()):

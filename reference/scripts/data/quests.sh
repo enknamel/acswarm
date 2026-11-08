@@ -116,8 +116,11 @@ group by m.wcid, m.lb;'
 # What lies about and what makes it: placed objects but creatures and buildings (WeenieType
 # Portal, Door, Vendor, HotSpot, Creature, LifeStone, House, SlumLord, Hook, Storage, BootSpot,
 # HousePortal), every weenie's type, and every generator profile.
+# A placement linked to a generator (landblock_instance_link) is never put out itself
+# (WorldObjectFactory.cs:280): its generator makes it there (WorldObject_Generators.cs:599-618).
 q ground 'select li.weenie_Class_Id, hex(li.obj_Cell_Id), round(li.origin_X, 2),
-  round(li.origin_Y, 2), round(li.origin_Z, 2)
+  round(li.origin_Y, 2), round(li.origin_Z, 2),
+  exists(select 1 from landblock_instance_link l where l.child_Guid = li.guid)
 from landblock_instance li join weenie w on w.class_Id = li.weenie_Class_Id
 where w.type not in (7, 10, 12, 13, 19, 25, 53, 55, 56, 57, 58, 59);'
 
