@@ -340,6 +340,9 @@ pub(crate) fn step_words(step: &PursuitStep, now: u64, place: &dyn Fn(u32) -> St
         PursuitStep::OpenChest { chest, at, .. } => {
             format!("opening {} at {}", chest.name, place(at.cell))
         }
+        PursuitStep::AskFor { source, at } => {
+            format!("asking {} for it at {}", source.name, place(at.cell))
+        }
         PursuitStep::UseOn { source, at, with } => {
             let used = source.keys.iter().find(|k| k.0 == *with);
             let used = used.map_or("it", |k| k.1.as_str());

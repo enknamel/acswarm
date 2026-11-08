@@ -66,6 +66,8 @@ pub enum PursuitStep {
         at: Place,
         with: u32,
     },
+    /// Walk to `source`'s NPC at `at` and use it: it hands the wanted item over (Shin Ro's key).
+    AskFor { source: &'static Source, at: Place },
     /// Use the carried `with` on the carried `on` (weenie classes), where the character stands.
     Combine {
         source: &'static Source,
@@ -94,6 +96,7 @@ impl PursuitStep {
                 | PursuitStep::PickUp { .. }
                 | PursuitStep::OpenChest { .. }
                 | PursuitStep::UseOn { .. }
+                | PursuitStep::AskFor { .. }
                 | PursuitStep::Combine { .. }
                 | PursuitStep::HandIn { .. }
         )
@@ -131,6 +134,10 @@ impl PursuitStep {
                 let used = used.map_or_else(|| format!("item {with}"), |k| k.1.clone());
                 let place = ac_world::quest_chain::place_name(at.cell);
                 format!("use {used} on {} in {place}", source.name)
+            }
+            PursuitStep::AskFor { source, at } => {
+                let place = ac_world::quest_chain::place_name(at.cell);
+                format!("ask {} for it in {place}", source.name)
             }
             PursuitStep::Combine { source, with, on } => {
                 let name = |w: &u32| source.keys.iter().find(|k| k.0 == *w).map(|k| k.1.clone());
@@ -798,6 +805,7 @@ impl Client {
             PursuitStep::PickUp { .. }
             | PursuitStep::OpenChest { .. }
             | PursuitStep::UseOn { .. }
+            | PursuitStep::AskFor { .. }
             | PursuitStep::Combine { .. } => self.grow_fetch(&line, now),
             _ => None,
         }

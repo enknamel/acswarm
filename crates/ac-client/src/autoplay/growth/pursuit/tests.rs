@@ -1630,3 +1630,78 @@ fn a_take_waits_for_the_walk_to_stop_and_is_sent_again_when_cancelled() {
     }
     assert_eq!(c.grow_fetch(&line, t), Some(false), "tried for ever");
 }
+
+#[test]
+fn the_nanto_letter_is_had_by_asking_shin_ro_for_the_key_then_the_chest_then_stamping() {
+    // The Seasoned Explorer Gauntlets (give:70305:45963): Shin Ro hands the Water Temple key to
+    // anyone who uses him, the key opens the chest holding the Nanto Town Stamp, and the stamp
+    // goes on a Lucky Gold Letter. "Key comes from Shin Ro: autoplay cannot fetch it yet".
+    let mut f = facts(51, &[("give:70305:45963", false)]);
+    f.carried.insert(45875, 1);
+    let step = |f: &QuestFacts| work(f, &ChainData, None).lines[0].step.clone();
+    match step(&f) {
+        PursuitStep::AskFor { source, at } => {
+            assert_eq!((source.wcid, source.name.as_str()), (5121, "Shin Ro"));
+            assert_eq!(at.cell >> 16, 0xE53E);
+        }
+        other => panic!("{other:?}"),
+    }
+    f.carried.insert(5757, 1);
+    match step(&f) {
+        PursuitStep::OpenChest { chest, key, .. } => {
+            assert_eq!((chest.wcid, key), (5756, Some(5757)))
+        }
+        other => panic!("{other:?}"),
+    }
+    f.carried.insert(8737, 1);
+    match step(&f) {
+        PursuitStep::Combine { with, on, .. } => assert_eq!((with, on), (8737, 45875)),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn an_npc_is_used_for_the_item_and_its_arrival_ends_the_step() {
+    let shin_ro = ChainData
+        .sources(&Want::Item(5757))
+        .into_iter()
+        .find(|s| s.kind == Yield::Npc)
+        .expect("Shin Ro gives the key");
+    let (mut c, line) = fetching(|at| PursuitStep::AskFor {
+        source: shin_ro,
+        at,
+    });
+    let PursuitStep::AskFor { at, .. } = line.step else {
+        unreachable!()
+    };
+    const NPC: u32 = 0x7AE5_3E01;
+    lying(&mut c, NPC, 5121, "Shin Ro", at);
+    let now = Instant::now();
+    assert_eq!(c.grow_fetch(&line, now), Some(true));
+    let f = c.autoplay.growth.fetching.clone().expect("nothing asked");
+    assert_eq!(
+        (f.act, f.guid),
+        (fetch::Act::Talk, NPC),
+        "Shin Ro was not used"
+    );
+    // Waiting on him: not used again at once.
+    assert_eq!(
+        c.grow_fetch(&line, now + Duration::from_secs(1)),
+        Some(true)
+    );
+    assert_eq!(
+        c.autoplay.growth.fetching.as_ref().map(|f| f.tries),
+        Some(1)
+    );
+    // The key arrives: the step is done.
+    carrying(&mut c, 0x8000_0500, 5757, "Key");
+    assert_eq!(
+        c.grow_fetch(&line, now + Duration::from_secs(2)),
+        Some(true)
+    );
+    assert!(
+        c.autoplay.growth.fetching.is_none(),
+        "still waiting with the key carried"
+    );
+}

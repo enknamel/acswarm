@@ -58,6 +58,8 @@ pub(crate) enum Act {
     Unlock,
     /// The chest opened for the loot rules to empty.
     Open,
+    /// The NPC used, who hands the item over on a use.
+    Talk,
     /// Out of combat for a use, refused in any stance but peace (`RecipeManager.cs:51-57`).
     Peace,
     /// A carried item used on the object, which makes the wanted item.
@@ -87,7 +89,7 @@ impl Ask<'_> {
         for want in wants {
             let Want::Item(wcid) = *want else { continue };
             for s in self.chains.sources(want) {
-                if s.kind.is_hunted() || s.kind == Yield::Npc || (self.dropped)(s) {
+                if s.kind.is_hunted() || (self.dropped)(s) {
                     continue;
                 }
                 // A combine is made where the character stands: no place of its own.
@@ -111,6 +113,7 @@ impl Ask<'_> {
                         name: s.name.clone(),
                         at,
                     },
+                    Yield::Npc => PursuitStep::AskFor { source: s, at },
                     Yield::Combine => {
                         // Both carried, the first used on the second; a missing one is had first.
                         let missing: Vec<_> = s
@@ -192,6 +195,7 @@ fn fetch_key(step: &PursuitStep) -> Option<(u32, u32)> {
         PursuitStep::PickUp { wcid, .. } => Some((*wcid, *wcid)),
         PursuitStep::OpenChest { chest: s, .. }
         | PursuitStep::UseOn { source: s, .. }
+        | PursuitStep::AskFor { source: s, .. }
         | PursuitStep::Combine { source: s, .. } => match s.want {
             Want::Item(w) => Some((w, s.wcid)),
             _ => None,
@@ -225,7 +229,8 @@ impl Client {
         let (place, source, label) = match &line.step {
             PursuitStep::PickUp { wcid, name, at } => (*at, *wcid, name.clone()),
             PursuitStep::OpenChest { chest: s, at, .. }
-            | PursuitStep::UseOn { source: s, at, .. } => (*at, s.wcid, s.name.clone()),
+            | PursuitStep::UseOn { source: s, at, .. }
+            | PursuitStep::AskFor { source: s, at } => (*at, s.wcid, s.name.clone()),
             PursuitStep::Combine { source: s, .. } => {
                 let p = self.player.as_ref()?;
                 let here = Place {
@@ -249,6 +254,7 @@ impl Client {
                     Heard::Again => {
                         let why = match f.act {
                             Act::Take => format!("{label}: would not come up"),
+                            Act::Talk => format!("{label}: gave nothing"),
                             Act::Use => format!("{label}: no answer to the use"),
                             _ => format!("{label}: no answer to the key"),
                         };
@@ -333,6 +339,10 @@ impl Client {
                 self.take(guid);
                 Some(Act::Take)
             }
+            PursuitStep::AskFor { .. } => {
+                self.interact(guid);
+                Some(Act::Talk)
+            }
             PursuitStep::OpenChest { key: Some(k), .. } if !unlocked => {
                 let held = self
                     .world
@@ -373,7 +383,7 @@ impl Client {
                 let tries = std::mem::take(&mut self.autoplay.growth.unlock_tries) + 1;
                 (self.autoplay.growth.unlock_with, tries)
             }
-            (Act::Take, _) => (
+            (Act::Take | Act::Talk, _) => (
                 0,
                 std::mem::take(&mut self.autoplay.growth.unlock_tries) + 1,
             ),
@@ -428,9 +438,9 @@ impl Client {
         match f.act {
             Act::Look if waited => Heard::Refused("not there".to_string()),
             Act::Look => Heard::Waiting,
-            Act::Take if has_item => Heard::Done,
-            Act::Take if waited => Heard::Again,
-            Act::Take => Heard::Waiting,
+            Act::Take | Act::Talk if has_item => Heard::Done,
+            Act::Take | Act::Talk if waited => Heard::Again,
+            Act::Take | Act::Talk => Heard::Waiting,
             // A one-use key is used up by the unlock; a UseDone with no error is also what a
             // cancelled walk to the chest sends (`Player_Use.cs:157-163`), so it is not the answer.
             Act::Unlock if f.with != 0 && self.carried_count(f.with) == 0 => Heard::Done,
