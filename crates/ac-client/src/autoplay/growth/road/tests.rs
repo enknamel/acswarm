@@ -456,3 +456,70 @@ fn a_run_under_way_walks_on_while_hit() {
     c.autoplay.growth.run = Some(run_to(Vec2::new(32_500.0, 34_500.0), now));
     assert!(row.worth(&c, now) > 0.0, "the run under way walks on");
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn the_walk_up_to_a_counter_past_the_journeys_end_is_still_the_road() {
+    // Blargerton's journey to Master Celdiseth ended in reach of her shop (`VENDOR_REACH`); the
+    // fight row took a creature there, led him up the hill, and the run called her 43 m short.
+    use glam::Vec3;
+    let o = ac_world::landblock_origin(0x9AEB_0000);
+    let mut c = crate::testkit::standing_in_the_field(51, 0x9AEB_0024, Vec3::new(99.7, 84.1, 35.3));
+    c.autoplay.config.enabled = true;
+    c.autoplay.config.fight.enabled = true;
+    c.autoplay.config.growth.town_runs = true;
+    let now = Instant::now();
+    let fight = c.autoplay.config.fight.clone();
+    let mut it = standing_by(&mut c, 0x8000_0001, "Tusker Liberator", 0.0);
+    it.position = Some(ac_world::object::Position::new_flat(
+        0x9AEB_0026,
+        Vec3::new(101.2, 126.2, 19.2),
+    ));
+    c.world.objects.insert(it.guid, it.clone());
+    let celdiseth = 0x79AE_B001;
+    let mut her = crate::testkit::creature(celdiseth, "Master Celdiseth the Archmage");
+    her.object_desc_flags = ac_world::object_desc_flags::VENDOR;
+    her.position = Some(ac_world::object::Position::new_flat(
+        0x9AEB_0102,
+        Vec3::new(86.2, 131.2, 19.2),
+    ));
+    c.world.objects.insert(celdiseth, her);
+    let counter = o.truncate() + Vec2::new(86.2, 131.2);
+    let mut run = run_to(counter, now);
+    run.vendor = "Master Celdiseth the Archmage".into();
+    c.autoplay.growth.run = Some(run);
+    c.autoplay.running = Some("town run");
+    let place = ac_world::Place {
+        at: o + Vec3::new(86.2, 131.2, 19.2),
+        cell: 0x9AEB_0102,
+    };
+    assert!(c.grow_travel(place, VENDOR_REACH), "no way to her");
+    c.autoplay.running = None;
+
+    let dt = 0.05;
+    for frame in 0..(60.0 / dt) as u32 {
+        let t = now + Duration::from_secs_f32(frame as f32 * dt);
+        c.tick_autoplay(t);
+        c.tick_player(crate::player::Input::default(), dt, t);
+        let away = c.my_position().unwrap().truncate().distance(counter);
+        assert_ne!(
+            c.attack_target,
+            Some(it.guid),
+            "fought on the walk up, {away:.0} m from her; {}",
+            c.autoplay.status
+        );
+        if c.last_used == Some(celdiseth) {
+            // At the counter the road is over: what stands about is a fight again.
+            assert!(c.would_fight(&it, &fight, false, t), "still on the road");
+            return;
+        }
+        let run = c.autoplay.growth.run.as_ref();
+        assert!(
+            run.is_some_and(|r| r.vendor == "Master Celdiseth the Archmage"),
+            "the run left her {away:.0} m short: {}",
+            c.autoplay.status
+        );
+    }
+    let away = c.my_position().unwrap().truncate().distance(counter);
+    panic!("never got to her: {away:.1} m off; {}", c.autoplay.status);
+}

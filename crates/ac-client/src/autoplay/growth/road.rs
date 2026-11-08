@@ -51,11 +51,12 @@ fn road_under_way(trip: Option<bool>, resumed: Option<bool>) -> bool {
 
 impl Client {
     /// On its way: an errand's journey under way or broken off (`bound` stays till grow, the last
-    /// goal, looks again), any other road, or a leader followed on its way: a party stops as one.
+    /// goal, looks again), a run's walk to its call, any road, a followed leader's (stop as one).
     pub fn on_its_way(&self) -> bool {
         let st = &self.autoplay.growth;
         let walking = st.has_an_errand() && (self.traveling() || self.journey_broken_off());
         walking
+            || st.is_walking_to_call()
             || road_under_way(
                 self.traveling().then_some(self.travel_about_the_ground()),
                 self.autoplay

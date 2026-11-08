@@ -360,6 +360,14 @@ impl State {
         self.bound.is_some() || self.run.is_some()
     }
 
+    /// Whether the run still walks to its call (counter or giver): the walk up past the journey's
+    /// end is the road too (the_walk_up_to_a_counter_past_the_journeys_end_is_still_the_road).
+    fn is_walking_to_call(&self) -> bool {
+        self.run
+            .as_ref()
+            .is_some_and(|r| matches!(r.phase, Phase::Going | Phase::ToGiver { .. }))
+    }
+
     /// Let go of an errand whose setting has been turned off: a run with
     /// town runs off, a walk to a ground with grounds off and no hunting
     /// area. Nothing carries either on once its rule is no longer called,
