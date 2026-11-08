@@ -38,6 +38,9 @@ pub const PORTAL_SECONDS: f32 = 20.0;
 /// Casting a recall costs this many seconds: coming to a stop, the cast
 /// itself, the server's two-second pause before the teleport, the load.
 pub const RECALL_SECONDS: f32 = 10.0;
+/// What `/lifestone` costs over a cast (s): its recall animation first (Player_Location.cs:180;
+/// 16 s live against a cast's 3), and it halves the mana (:159). Lifestone Sending goes the same way.
+pub const LIFESTONE_COMMAND_EXTRA: f32 = 13.0;
 /// The farthest one walk is believed (metres); longer, and the trip has to find a portal.
 pub const WALK_REACH: f32 = 1200.0;
 /// Portals this far from a spot are candidates for the next hop.
@@ -515,7 +518,10 @@ pub fn plan_with_recalls_and_gems(
         // the same place from anywhere is never better cast later.
         if q.idx == 0 {
             for (ri, r) in recalls.iter().enumerate() {
-                let next = q.cost + prefs.recall_seconds;
+                let mut next = q.cost + prefs.recall_seconds;
+                if r.spell == crate::recalls::spell::FREE_LIFESTONE {
+                    next += LIFESTONE_COMMAND_EXTRA;
+                }
                 if best.map(|(b, _)| next >= b).unwrap_or(false) {
                     continue;
                 }
@@ -821,6 +827,31 @@ mod tests {
             name: name.to_string(),
             exit,
         }
+    }
+
+    #[test]
+    fn lifestone_sending_is_cast_rather_than_the_lifestone_command() {
+        // Both go to the lifestone last used; the command waits out an animation and halves mana.
+        let from = holtburg();
+        let goal = place("Arwic");
+        let stone = walk_by(goal, Vec2::new(40.0, 0.0));
+        let free = crate::recalls::spell::FREE_LIFESTONE;
+        let sending = crate::recalls::spell::LIFESTONE_SENDING;
+        let both = [
+            recall_to("/lifestone", free, stone),
+            recall_to("Lifestone Sending", sending, stone),
+        ];
+        let trip = plan_with_recalls(from, goal, 0, &[], &[], &both, Prefs::quick()).unwrap();
+        assert!(
+            matches!(&trip.steps[0], Step::Recall { spell, .. } if *spell == sending),
+            "{trip:?}"
+        );
+        // Not known: the command still goes.
+        let trip = plan_with_recalls(from, goal, 0, &[], &[], &both[..1], Prefs::quick()).unwrap();
+        assert!(
+            matches!(&trip.steps[0], Step::Recall { spell, .. } if *spell == free),
+            "{trip:?}"
+        );
     }
 
     #[test]
