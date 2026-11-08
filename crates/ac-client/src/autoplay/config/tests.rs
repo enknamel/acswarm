@@ -198,3 +198,27 @@ fn the_focusing_stone_offers_any_giver_le_ai_rea_and_keeping_the_stone() {
     let kill = quest_ends("killtaskbloodshreth");
     assert!(!kill.contains(&QuestEnd::Keep), "nothing to keep: {kill:?}");
 }
+
+#[test]
+fn unchecking_all_leaves_on_only_the_quests_ticked_after() {
+    // Blargerton looted Sharp Tusker Slave Tusks for a quest paying 7,500 XP that was ticked
+    // because it pays XP, one of hundreds; the player wants only what it ticks.
+    let mut q = Quests {
+        on: true,
+        ..Quests::default()
+    };
+    let tusk = "give:19478:2624";
+    assert!(q.is_on(tusk), "an XP quest starts on");
+    q.pursue_quest("tuskergkillcount", false, 100);
+    q.uncheck_all();
+    assert!(!q.is_on(tusk) && !q.is_on("killtaskbloodshreth"));
+    assert!(q.is_on("tuskergkillcount"), "a pursued quest is still done");
+    // Ticked by hand: on, and only it.
+    q.switch_on("killtaskbloodshreth");
+    assert!(q.is_on("killtaskbloodshreth") && !q.is_on(tusk));
+    q.check_all();
+    assert!(q.is_on(tusk), "back to every XP quest");
+    // Saved before the switch: as before, every XP quest on.
+    let old: Config = serde_json::from_str(r#"{"quests":{"on":true}}"#).unwrap();
+    assert!(!old.quests.only_chosen && old.quests.is_on(tusk));
+}

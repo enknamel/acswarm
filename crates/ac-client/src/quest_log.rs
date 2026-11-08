@@ -263,6 +263,7 @@ pub fn unsuited_quests<'r>(
 /// [`Quests`]' switches read once for a board: which quests are on and which rows are worked.
 struct Pick<'f> {
     on: bool,
+    only_chosen: bool,
     off: BTreeSet<&'f str>,
     chosen: BTreeSet<&'f str>,
     pursued: BTreeSet<&'f str>,
@@ -274,6 +275,7 @@ impl<'f> Pick<'f> {
     fn of(cfg: &'f Quests) -> Self {
         Pick {
             on: cfg.on,
+            only_chosen: cfg.only_chosen,
             off: cfg.off.iter().map(String::as_str).collect(),
             chosen: cfg.chosen.iter().map(String::as_str).collect(),
             pursued: cfg.pursue.iter().map(|p| p.id.as_str()).collect(),
@@ -286,7 +288,8 @@ impl<'f> Pick<'f> {
         self.every
             || self.pursued.contains(id)
             || (self.on
-                && (self.chosen.contains(id) || (is_automatic_quest(id) && !self.off.contains(id))))
+                && (self.chosen.contains(id)
+                    || (!self.only_chosen && is_automatic_quest(id) && !self.off.contains(id))))
     }
 
     /// As [`Quests::is_worked`].

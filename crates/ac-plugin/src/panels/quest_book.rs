@@ -234,6 +234,23 @@ pub(crate) fn draw(egui: &egui::Context, v: &BookView, st: &mut BookState) -> Op
                 "Autoplay keeps what the quests switched on want and hands it in; a pursued \
                  quest is done first",
             );
+            if ui
+                .button("Uncheck all")
+                .on_hover_text(
+                    "Switch every quest off: from now on only the ones you tick are on, new \
+                     ones in later data too. Pursued quests are still done",
+                )
+                .clicked()
+            {
+                cfg.uncheck_all();
+            }
+            if ui
+                .button("Check all XP quests")
+                .on_hover_text("Every quest paying XP on again, unless switched off one by one")
+                .clicked()
+            {
+                cfg.check_all();
+            }
             caption(
                 ui,
                 format!(
@@ -779,7 +796,9 @@ fn state_lines(
 fn controls(ui: &mut egui::Ui, v: &BookView, cfg: &mut Quests, card: &QuestCard) {
     let id = card.id.as_str();
     let mut on = is_switched_on(cfg, id);
-    let hover = if ac_client::quest_log::is_automatic_quest(id) {
+    let hover = if cfg.only_chosen {
+        "Only the quests ticked here are on (Uncheck all): tick it to have autoplay do it"
+    } else if ac_client::quest_log::is_automatic_quest(id) {
         "It pays XP with nothing autoplay can't read: on unless switched off here"
     } else {
         "It pays no XP or asks what autoplay can't read: worked only when switched on here"

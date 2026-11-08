@@ -392,7 +392,7 @@ pub fn quest_ends(id: &str) -> Vec<QuestEnd> {
 static HAND_IN: QuestEnd = QuestEnd::HandIn;
 
 /// The quests autoplay considers (`crate::quest_log`); off, the quest rule wants nothing.
-/// A quest paying XP is on until switched off; any other is off until switched on by hand.
+/// A quest paying XP is on until switched off, unless `only_chosen`; any other is off until chosen.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Quests {
@@ -405,17 +405,36 @@ pub struct Quests {
     /// Quests worked before hunting for XP, first first (the Quests window, `pursue_quest`);
     /// every way to complete one is worked, as for one chosen.
     pub pursue: Vec<Pursuit>,
+    /// Only quests switched on by hand are on: none paying XP starts on (the window's Uncheck all).
+    pub only_chosen: bool,
 }
 
 impl Quests {
     /// Whether the quest `id` is one autoplay considers: pursued, quests off or on; else chosen, or
     /// paying XP and not off.
     pub fn is_on(&self, id: &str) -> bool {
-        self.is_pursued(id)
-            || (self.on
-                && (self.is_chosen(id)
-                    || (crate::quest_log::is_automatic_quest(id)
-                        && !self.off.iter().any(|o| o == id))))
+        self.is_pursued(id) || (self.on && (self.is_chosen(id) || self.is_on_by_default(id)))
+    }
+
+    /// Whether `id` is on without being chosen: it pays XP, ticked unless switched off or
+    /// [`Self::only_chosen`].
+    pub fn is_on_by_default(&self, id: &str) -> bool {
+        !self.only_chosen
+            && crate::quest_log::is_automatic_quest(id)
+            && !self.off.iter().any(|o| o == id)
+    }
+
+    /// Untick every quest: from now on only those ticked by hand are on, new ones in the data too.
+    pub fn uncheck_all(&mut self) {
+        self.only_chosen = true;
+        self.chosen.clear();
+        self.off.clear();
+    }
+
+    /// Tick every quest paying XP again, as before [`Self::uncheck_all`]; those chosen stay.
+    pub fn check_all(&mut self) {
+        self.only_chosen = false;
+        self.off.clear();
     }
 
     /// Whether `id` was switched on by hand.

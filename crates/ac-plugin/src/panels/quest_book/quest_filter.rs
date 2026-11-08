@@ -330,15 +330,14 @@ pub(crate) fn is_suited(card: &QuestCard, me: Me) -> bool {
 /// Whether `id` is on for autoplay: chosen by hand, or paying XP with nothing unread and not off.
 /// "do quests" itself is not asked.
 pub(crate) fn is_switched_on(cfg: &Quests, id: &str) -> bool {
-    cfg.is_chosen(id)
-        || (ac_client::quest_log::is_automatic_quest(id) && !cfg.off.iter().any(|o| o == id))
+    cfg.is_chosen(id) || cfg.is_on_by_default(id)
 }
 
 /// Switch `id` on or off: one paying XP on its own is taken off the off list, any other chosen.
 pub(crate) fn set_switch(cfg: &mut Quests, id: &str, on: bool) {
     if !on {
         cfg.switch_off(id);
-    } else if ac_client::quest_log::is_automatic_quest(id) {
+    } else if ac_client::quest_log::is_automatic_quest(id) && !cfg.only_chosen {
         cfg.off.retain(|o| o != id);
     } else {
         cfg.switch_on(id);
