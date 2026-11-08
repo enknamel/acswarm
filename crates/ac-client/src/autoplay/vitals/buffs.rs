@@ -6,6 +6,9 @@ use crate::{Client, Stance};
 
 /// Least time between two casts of the same buff.
 pub(crate) const BUFF_EVERY: Duration = Duration::from_millis(1500);
+/// What one buff costs in seconds, wind-up to recoil: 3.4 s live for a level VI (Acid Bane III
+/// sent 23.23, landed 25.91, its UseDone a second on), rounded up.
+const CAST_EACH: f32 = 4.0;
 
 /// How near to running out a buff must be, in seconds, before this pass
 /// will put it back.
@@ -36,6 +39,21 @@ fn buff_within(cfg: &Buffs, urgent: bool, fighting: bool, wand_in_hand: bool) ->
         return 0.0;
     }
     cfg.never_below
+}
+
+/// The urgent window `base` widened to take in a queue: sorted by seconds left, the `k`th buff
+/// due within `base + k` casts ([`CAST_EACH`]) means the first `k` must start now to all fit.
+fn widened(base: f32, lefts: &[f32]) -> f32 {
+    if base <= 0.0 {
+        return base;
+    }
+    let mut sorted = lefts.to_vec();
+    sorted.sort_by(f32::total_cmp);
+    let queued = (1..=sorted.len())
+        .filter(|&k| sorted[k - 1] <= base + k as f32 * CAST_EACH)
+        .max()
+        .unwrap_or(0);
+    base + queued as f32 * CAST_EACH
 }
 
 /// How often each buff pass, urgent and top-up, and the rearm work out what is due.
@@ -299,7 +317,20 @@ impl Client {
     /// Whether the urgent pass would put a buff back now, by its own `buff_within`: a
     /// weapon put down for one waits on nothing that pass would leave down.
     pub(crate) fn has_urgent_buff_due(&self, now: Instant) -> bool {
-        self.due_buff(self.buff_within_now(true), now).is_some()
+        let wants = self.auto_buffs();
+        let within = self.queue_window(self.buff_within_now(true), &wants, now);
+        self.due_buff_among(&wants, within, now).is_some()
+    }
+
+    /// The urgent window `base`, widened so that the buffs coming due together all go back up
+    /// before the first of them lapses: twenty cast together cannot all be put back in a minute.
+    fn queue_window(&self, base: f32, wants: &[crate::buffs::Want], now: Instant) -> f32 {
+        let lefts: Vec<f32> = self
+            .buff_times(wants, now)
+            .into_iter()
+            .map(|(left, ..)| left)
+            .collect();
+        widened(base, &lefts)
     }
 
     /// The buff pass `urgent` (or the top-up) has looked at `now`; it looks again a
@@ -397,13 +428,23 @@ impl Client {
         if checked.is_some_and(|t| now.duration_since(t) < BUFF_CHECK_EVERY) {
             return false;
         }
-        let within = self.buff_within_now(urgent);
         // Find what is due before touching the hands: a pass with nothing
         // to cast holds no swing back. Worked out once, for the pick and
         // for saying why none is due.
         let wants = self.auto_buffs();
-        let Some((spell, target, category, name, lasts)) = self.due_buff_among(&wants, within, now)
-        else {
+        let mut within = self.buff_within_now(urgent);
+        if urgent {
+            within = self.queue_window(within, &wants, now);
+        }
+        let mut due = self.due_buff_among(&wants, within, now);
+        let mut topping_up = !urgent;
+        // Between fights the urgent pass tops up as well, one at a time, journey or not: the
+        // quiet moment the top-up waits for hardly comes to a character always on the move.
+        if due.is_none() && urgent && !fighting {
+            due = self.due_buff_among(&wants, cfg.top_up_within, now);
+            topping_up = true;
+        }
+        let Some((spell, target, category, name, lasts)) = due else {
             self.stamp_buff_look(urgent, now);
             if !urgent {
                 self.autoplay_explain_buffs(&wants, now);
@@ -426,7 +467,8 @@ impl Client {
         // Mana is kept back for healing and fighting: a top-up waits
         // until there is that much to spare, and even an urgent recast
         // leaves half of it.
-        let reserve = self.vital_max_of(2) as f32 * cfg.keep_mana * if urgent { 0.5 } else { 1.0 };
+        let reserve =
+            self.vital_max_of(2) as f32 * cfg.keep_mana * if topping_up { 1.0 } else { 0.5 };
         let cost = self
             .assets
             .spell_table()
@@ -618,44 +660,57 @@ impl Client {
         now: Instant,
     ) -> Option<(u32, crate::buffs::Target, u32, String, f32)> {
         use crate::buffs::Target;
-        let cfg = &self.autoplay.config.buffs;
         let table = self.assets.spell_table().ok();
         // (rank, left, ...): creature magic goes first. Its buffs raise
         // the skills and attributes the other schools cast from, so a
         // character that buffs them first can land higher levels of
         // everything after.
-        let mut due: Option<(u8, f32, u32, Target, u32, String, f32)> = None;
-        let clock = self.session.server_time().is_some();
+        let mut due: Option<(u8, f32, u32, Target, u32)> = None;
         let creature_first = |spell: u32| -> u8 {
             let school = table.as_ref().and_then(|t| t.get(spell)).map(|s| s.school);
             u8::from(school != Some(ac_formats::spell_table::school::CREATURE))
         };
-        let mut offer = |left: Option<f32>, spell: u32, target: Target, category: u32| {
-            // Not up at all is due now; but until the server's clock is
-            // known nothing can be told apart, so nothing is due.
-            let left = match left {
-                Some(l) => l,
-                None if clock => 0.0,
-                None => return,
-            };
+        for (left, spell, target, category) in self.buff_times(wants, now) {
             if left > within {
-                return;
+                continue;
             }
             // One that cannot be cast must not stand in front of the
             // rest: short of components or mana it is passed over. No
             // wand is different, since wielding one is the cure.
             match self.can_cast_well(spell) {
                 crate::magic::CastCheck::Ok | crate::magic::CastCheck::NoCaster => {}
-                _ => return,
+                _ => continue,
             }
             let rank = creature_first(spell);
             if due.as_ref().is_some_and(|d| (d.0, d.1) <= (rank, left)) {
-                return;
+                continue;
             }
+            due = Some((rank, left, spell, target, category));
+        }
+        due.map(|(_, _, spell, target, category)| {
             let sp = table.as_ref().and_then(|t| t.get(spell));
             let name = sp.map(|s| s.name.clone()).unwrap_or_default();
             let lasts = sp.and_then(|s| s.duration()).unwrap_or(1800.0) as f32;
-            due = Some((rank, left, spell, target, category, name, lasts));
+            (spell, target, category, name, lasts)
+        })
+    }
+
+    /// Every buff wanted, `(seconds left, spell, target, category)`, one surpassed left out. One
+    /// not up is 0 s left; until the server's clock is known nothing can be told apart, so none.
+    fn buff_times(
+        &self,
+        wants: &[crate::buffs::Want],
+        now: Instant,
+    ) -> Vec<(f32, u32, crate::buffs::Target, u32)> {
+        use crate::buffs::Target;
+        let cfg = &self.autoplay.config.buffs;
+        let table = self.assets.spell_table().ok();
+        let clock = self.session.server_time().is_some();
+        let mut out = Vec::new();
+        let mut offer = |left: Option<f32>, spell: u32, target: Target, category: u32| match left {
+            Some(l) => out.push((l, spell, target, category)),
+            None if clock => out.push((0.0, spell, target, category)),
+            None => {}
         };
         for want in wants {
             if want.target == Target::Me && self.is_surpassed(want.category, want.power) {
@@ -680,9 +735,7 @@ impl Client {
             }
             offer(self.buff_left(spell), spell, Target::Me, category);
         }
-        due.map(|(_, _, spell, target, category, name, lasts)| {
-            (spell, target, category, name, lasts)
-        })
+        out
     }
 }
 

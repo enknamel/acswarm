@@ -402,3 +402,17 @@ fn a_second_item_buff_waits_for_the_first_to_be_answered() {
     );
     let _ = ids;
 }
+
+#[test]
+fn buffs_coming_due_together_are_started_soon_enough_to_all_go_back_up() {
+    // Twenty buffs cast together come due together: at 4 s a cast, a two-minute window cannot
+    // put them all back before the first lapses, and the last ones ran out.
+    let twenty = [150.0; 20];
+    assert_eq!(widened(120.0, &twenty), 200.0, "all twenty in, at 4 s each");
+    assert!(150.0 <= widened(120.0, &twenty));
+    // One alone at 150 s is not due yet; one inside the window widens it by its own cast.
+    assert!(widened(120.0, &[150.0]) < 150.0);
+    assert_eq!(widened(120.0, &[10.0, 2_000.0]), 124.0);
+    // Off (a fight with no wand in hand waits for a lapse): left off.
+    assert_eq!(widened(0.0, &twenty), 0.0);
+}

@@ -98,7 +98,7 @@ impl Default for Buffs {
             least_chance: 0.5,
             spells: Vec::new(),
             top_up_within: 300.0,
-            never_below: 60.0,
+            never_below: 120.0,
             out_of_combat_only: true,
             keep_mana: 0.35,
         }
