@@ -281,3 +281,12 @@ fn a_card_lists_every_item_its_quest_takes() {
     assert!(aun.items.iter().any(|i| i == "Aun Pendant"));
     assert_eq!(aun.item.as_ref(), aun.items.first());
 }
+
+#[test]
+fn a_hunted_creature_is_sought_where_it_spawns() {
+    // The plain Focusing Stone's Lich Overseer stands rooms past the Mines of Despair's way in.
+    let g = source_grounds(&Want::Item(8903));
+    let mines = g.iter().find(|g| g.landblock == 0x0188).expect("the Mines");
+    let place = mines.place.expect("a place");
+    assert_eq!(place.cell, 0x0188_010D, "{place:?}");
+}

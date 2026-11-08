@@ -307,6 +307,7 @@ impl Client {
 
     /// Price the legs between the start, `calls` and the ground the run goes back to.
     fn plan_legs(&mut self, calls: &[Place]) -> Option<Legs> {
+        self.tell_building_cells();
         let from = self.start_place()?;
         let calls: Vec<Place> = calls.iter().map(|&p| self.planning_place(p)).collect();
         let end = self

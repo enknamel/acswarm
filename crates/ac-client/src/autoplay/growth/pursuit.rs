@@ -649,7 +649,7 @@ impl Client {
     }
 
     /// Whether the working pursued quest's step is a hunt.
-    pub(super) fn is_pursued_hunt(&self) -> bool {
+    pub(crate) fn is_pursued_hunt(&self) -> bool {
         self.working_pursuit()
             .is_some_and(|l| matches!(l.step, PursuitStep::Hunt { .. }))
     }

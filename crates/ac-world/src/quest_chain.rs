@@ -216,8 +216,19 @@ fn entry_portal(landblock: u32) -> Option<&'static Portal> {
 
 fn source_ground(source: &'static Source, landblock: u32, entries: u32) -> SourceGround {
     let way_in = entry_portal(landblock);
+    // In a dungeon, where the creature itself spawns: the Lich Overseer is rooms past the Mines
+    // of Despair's way in (a_hunted_creature_is_sought_where_it_spawns).
+    let spawn = crate::spawns::in_block(landblock << 16)
+        .iter()
+        .filter(|s| s.indoors() && s.name.eq_ignore_ascii_case(&source.name))
+        .max_by_key(|s| s.count)
+        .map(|s| Place {
+            at: s.at,
+            cell: s.cell,
+        });
     // The way in lands where `Ground::place` would, without its scan of every portal.
     let place = match (way_in, ground_at(landblock)) {
+        _ if spawn.is_some() => spawn,
         (Some(p), _) => Some(Place {
             at: p.to,
             cell: p.to_cell,

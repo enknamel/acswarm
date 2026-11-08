@@ -212,7 +212,12 @@ impl Client {
             // a creature for a moment after it dies (see
             // `steps::worth_fighting`), and a body is no reason to wait.
             let away = at.distance(me);
+            // A pursued creature's room in a dungeon is reached at the room, not the way in.
+            let spawn_room = self.pursued_place(lb).filter(|p| p.is_indoors());
             let there = match ac_world::hunting::at(lb).filter(|g| g.is_dungeon()) {
+                _ if spawn_room.is_some() => {
+                    here == lb && self.underground() && away <= GROUND_REACH
+                }
                 Some(_) => here == lb && self.underground(),
                 None => here == lb || away <= GROUND_REACH,
             };
@@ -648,6 +653,7 @@ impl Client {
         goal: Place,
         quests: &[String],
     ) -> Option<ac_world::trip::Trip> {
+        self.tell_building_cells();
         let pl = self.player.as_ref()?;
         let (me, cell) = (pl.world_position(), pl.cell);
         let underground = self.underground();

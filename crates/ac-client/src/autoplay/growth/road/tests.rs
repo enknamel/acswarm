@@ -523,3 +523,36 @@ fn the_walk_up_to_a_counter_past_the_journeys_end_is_still_the_road() {
     let away = c.my_position().unwrap().truncate().distance(counter);
     panic!("never got to her: {away:.1} m off; {}", c.autoplay.status);
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_quest_hunt_walks_past_all_but_its_creature() {
+    // "It should ignore non-essential fights, get to the boss, kill it, loot it" -- the player,
+    // of Blargerton fighting the Mines of Despair's skeletons on the way to the Lich Overseer.
+    let mut c = standing_at(0xA9B4_0019, glam::Vec3::new(84.0, 7.1, 94.0));
+    c.world.stats.level = 51;
+    let fight = c.autoplay.config.fight.clone();
+    let mut boss = standing_by(&mut c, 0x8000_0001, "Lich Overseer", 5.0);
+    boss.weenie_class_id = 4124;
+    c.world.objects.insert(boss.guid, boss.clone());
+    let skeleton = standing_by(&mut c, 0x8000_0002, "Skeleton Warrior", 4.0);
+    assert!(!c.passing_by(&skeleton, &fight), "nothing pursued: fought");
+    c.pursuit = vec![crate::autoplay::PursuitLine {
+        id: "give:8904".into(),
+        title: "Focusing Stone".into(),
+        step: crate::autoplay::PursuitStep::Hunt {
+            landblock: 0x0188,
+            creature: "Lich Overseer".into(),
+            place: "Mines of Despair".into(),
+            more: 1,
+        },
+        working: true,
+        via: None,
+    }];
+    c.autoplay.growth.pursuit_sought = vec![4124];
+    assert!(
+        c.passing_by(&skeleton, &fight),
+        "a skeleton is no part of it"
+    );
+    assert!(!c.passing_by(&boss, &fight), "the Overseer is the errand");
+}

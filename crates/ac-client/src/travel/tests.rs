@@ -1500,6 +1500,7 @@ fn the_mines_of_despair_are_reached_through_the_portal_in_a_building() {
     for goal in [
         to(0x0188_0307, Vec3::new(30.0, -70.0, 0.0)),
         to(0x02AB_010A, Vec3::new(0.0, -180.0, -11.995)),
+        to(0x0188_010D, Vec3::new(41.1, -95.8, -24.0)),
     ] {
         let trip = c.plan_trip(goal, false).expect("no trip into the Mines");
         assert!(

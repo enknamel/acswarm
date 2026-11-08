@@ -700,18 +700,25 @@ fn pursuing_the_jaw(c: &mut Client, lb: u32, place: Place) {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
-fn a_ground_reached_only_through_a_warden_flag_earns_that_flag_first() {
-    // From Holtburg at 45, the Banderling Blade dungeon (0x018B) is reached only by the Facility
-    // Hub's Dangerous Cave portal, which asks for the Mosswart Warden's flag.
+fn the_banderling_blade_is_walked_into_through_a_cave_with_no_warden_flag() {
+    // From Holtburg at 45, the Banderling Blade dungeon (0x018B): its "A Cave" portal stands in a
+    // cell at 0xB59D0100 reached from the ground outside, so the Facility Hub's Dangerous Cave
+    // portal and its Mosswart Warden's flag are only a shortcut (a flag earned first is
+    // a_flag_a_warden_gives_is_earned_first).
     let mut c =
         crate::testkit::standing_in_the_field(45, 0xA9B4_0019, glam::Vec3::new(84.0, 7.1, 94.0));
     let g = ac_world::hunting::at(0x018B).expect("the Banderling Blade ground");
     let (_, earn) = c.journey_way(g.place()).expect("a way there");
-    let u = earn.expect("no Warden asked for");
-    assert_eq!(u.flag, "fachubdangerouscatacombsportal_flag");
-    c.travel.quests_done.push(u.flag.clone());
-    let (_, earn) = c.journey_way(g.place()).expect("a way there");
-    assert!(earn.is_none(), "{earn:?} asked for with the flag held");
+    assert!(earn.is_none(), "{earn:?} asked for");
+    let held = c.travel.quests_done.clone();
+    let trip = c.journey_plan(g.place(), &held).expect("a trip");
+    assert!(
+        trip.steps
+            .iter()
+            .any(|s| matches!(s, ac_world::trip::Step::Portal { name, .. } if name == "A Cave")),
+        "{:?}",
+        trip.steps
+    );
 }
 
 #[test]
