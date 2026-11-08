@@ -1512,3 +1512,59 @@ fn the_mines_of_despair_are_reached_through_the_portal_in_a_building() {
         );
     }
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_gem_spent_from_a_stack_has_its_portal_used_not_the_gem_again() {
+    // Blargerton used one of ten Celdiseth's Portal Gems: the stack stayed in the pack, so the step
+    // took the gem as not taken, used it twice more ("used this item too recently") and never used
+    // the Gateway in front of him.
+    let mut c = crate::testkit::standing_at(0xA9B4_0019, Vec3::new(84.0, 84.0, 94.0));
+    c.world.player_guid = Some(crate::testkit::ME);
+    const GEM: u32 = 0x80B6_F6BA;
+    const GATEWAY: u32 = 0x80E2_E596;
+    crate::testkit::thing_in_the_pack(&mut c, GEM, "Celdiseth's Portal Gem", 10);
+    let t0 = Instant::now();
+    c.travel.state.gem_used = Some(t0);
+    c.travel.state.gem_uses = 1;
+    c.travel.state.gem_stack = c.gem_stack(GEM);
+    assert_eq!(c.travel.state.gem_stack, 10);
+    // Not yet answered: the stack is whole, so the gem is used again once the retry is due.
+    let _ = c.travel_gem_wait(
+        GEM,
+        "Celdiseth's Portal Gem",
+        true,
+        t0 + Duration::from_secs(4),
+    );
+    assert_eq!(
+        c.travel.state.gem_uses, 2,
+        "an unanswered gem was not used again"
+    );
+    // Answered: one spent, and the Gateway stands three metres ahead.
+    c.world.objects.get_mut(&GEM).unwrap().stack_size = 9;
+    let me = c.my_position().unwrap();
+    c.world.objects.insert(
+        GATEWAY,
+        ac_world::WorldObject {
+            guid: GATEWAY,
+            name: "Gateway".into(),
+            item_type: ac_world::item_type::PORTAL,
+            position: crate::testkit::placed(0xA9B4_0019, me + Vec3::new(3.0, 0.0, 0.0)),
+            ..Default::default()
+        },
+    );
+    let _ = c.travel_gem_wait(
+        GEM,
+        "Celdiseth's Portal Gem",
+        true,
+        t0 + Duration::from_secs(5),
+    );
+    assert_eq!(
+        c.travel.state.gem_uses, 2,
+        "the gem was used again, one already spent"
+    );
+    assert_eq!(
+        c.travel.state.summoned_uses, 1,
+        "the summoned portal was not used"
+    );
+}

@@ -98,6 +98,16 @@ pub(crate) fn gem_next(
     }
 }
 
+impl crate::Client {
+    /// How many of the gem `guid` the pack holds: 0 once the last is spent.
+    pub(crate) fn gem_stack(&self, guid: u32) -> u32 {
+        match self.world.objects.get(&guid) {
+            Some(o) if self.world.is_carried(guid) => o.stack_size.max(1),
+            _ => 0,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

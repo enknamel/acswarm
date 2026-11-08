@@ -95,6 +95,8 @@ struct StepState {
     /// When the gem step's gem was last used, and how many times.
     gem_used: Option<Instant>,
     gem_uses: u32,
+    /// The gem's stack when first used: one fewer is a use taken, the rest still carried.
+    gem_stack: u32,
     /// The open ground walked to before the gem is used, and whether that walk is over.
     gem_spot: Option<Place>,
     faced: bool,
@@ -781,8 +783,10 @@ impl Client {
             .state
             .summoned_used
             .map(|t| now.duration_since(t));
+        // A stack of gems stays carried once one is spent: "not taken" is the stack unchanged.
+        let untaken = self.gem_stack(guid) >= self.travel.state.gem_stack.max(1);
         match gem_next(
-            self.world.is_carried(guid),
+            untaken,
             summons,
             since_use,
             self.travel.state.gem_uses,
@@ -869,6 +873,7 @@ impl Client {
         self.travel.state.gem_spot = None;
         self.travel.state.gem_used = Some(now);
         self.travel.state.gem_uses = 1;
+        self.travel.state.gem_stack = self.gem_stack(guid);
         self.interact(guid);
         None
     }
