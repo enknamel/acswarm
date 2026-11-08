@@ -388,9 +388,11 @@ impl Client {
                 .note("something to spend again: shopping", now);
         }
         // Only a fight in hand or a journey the growth rules did not plan (a leader's, a
-        // script's) holds a run back: a walk to a ground is dropped for it (test:
-        // a_due_run_leaves_the_walk_to_a_ground_for_town).
-        let own_walk = self.autoplay.growth.bound.is_some() || self.travel_about_the_ground();
+        // script's) holds a run back: a walk to a ground or a quest's chest is dropped for it
+        // (a_due_run_leaves_the_walk_to_a_ground_for_town, a_due_run_leaves_a_quests_walk_for_town).
+        let own_walk = self.autoplay.growth.bound.is_some()
+            || self.travel_about_the_ground()
+            || self.journey_row() == Some("grow");
         if self.fight_in_hand() {
             return self.held_back("in a fight");
         }

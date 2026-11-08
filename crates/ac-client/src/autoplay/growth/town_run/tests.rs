@@ -326,6 +326,34 @@ fn a_due_run_leaves_the_walk_to_a_ground_for_town() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
+fn a_due_run_leaves_a_quests_walk_for_town() {
+    // Blargerton, logged back in mid-run, walking to a quest's chest: "no town run: on a journey
+    // growth did not plan", though growing set it off.
+    let holtburg = 0xA9B4_0019;
+    let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
+    c.world.player_guid = Some(crate::testkit::ME);
+    c.world.stats.level = 20;
+    let keep = c.autoplay.config.team.restock.money_slots;
+    with_a_pack(&mut c, 2 + keep);
+    pea_in_the_pack(&mut c, 0x8000_0010, "Iron Pea", 8328, 2_500);
+    pea_in_the_pack(&mut c, 0x8000_0011, "Iron Pea", 8328, 2_500);
+    let cfg = c.autoplay.config.growth.clone();
+    let now = Instant::now();
+    let me = c.player.as_ref().unwrap().world_position();
+    let chest = ac_world::Place::on_map(Vec2::new(me.x + 200.0, me.y));
+    c.autoplay.running = Some("grow");
+    assert!(c.journey_to(chest, 1.5), "no walk to the chest");
+    c.autoplay.running = None;
+    assert!(
+        c.grow_town_run(now, &cfg),
+        "{}",
+        c.autoplay.growth.held_back
+    );
+    assert!(c.autoplay.growth.run.is_some(), "no run");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_run_to_sell_goes_to_whoever_buys_however_far() {
     // A pack low on room, its loot a Lead Pea nobody in the town buys: a recall makes any trip,
     // so the run goes to a counter that does.
