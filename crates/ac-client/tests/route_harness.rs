@@ -149,6 +149,13 @@ fn known() -> Vec<Trial> {
             0x5660_0167,
             Vec3::new(16_599.2, 18_399.3, 0.0),
         ),
+        named(
+            LEVEL,
+            "A260 Sammam al-Ashiz from the road north",
+            Vec3::new(31_485.31, 18_770.55, 18.42),
+            0xA260_0112,
+            Vec3::new(31_287.0, 18_472.1, 17.2),
+        ),
     ]
 }
 

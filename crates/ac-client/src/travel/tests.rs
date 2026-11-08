@@ -766,6 +766,48 @@ fn a_walk_with_no_way_after_a_hop_is_left_out_and_the_journey_planned_again() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
+fn a_walk_refused_after_a_recall_is_not_planned_again_from_its_landing() {
+    // Blargerton, Portal Recall and a walk to Archmage Sammam al-Ashiz: refused 450 m into the
+    // walk, the refusal held only there, and the same recall and walk were planned again for ever.
+    let mut c = Client::offline(crate::testkit::game_data());
+    let (start, ledge) = under_the_01f6_ledge(&mut c);
+    let landed = Place {
+        at: start + Vec3::new(0.0, 100.0, 0.0),
+        cell: ledge.cell,
+    };
+    let trip = Trip {
+        steps: vec![
+            Step::Recall {
+                spell: 2645,
+                name: "Portal Recall".into(),
+                exit: landed,
+            },
+            Step::Walk(ledge),
+        ],
+        seconds: 10.0,
+    };
+    crate::testkit::set_out_on(&mut c, trip, within_reach(ledge));
+    c.travel.step = 1;
+    c.travel.hopped = true;
+    c.frame_at = Instant::now();
+    let first = c.walk_journey(c.frame_at);
+    assert!(
+        matches!(first, Some(crate::did::Did::Blocked(_))),
+        "{first:?}"
+    );
+    let from_landing = c.planning_place(landed);
+    assert!(
+        c.travel
+            .refused_walks
+            .iter()
+            .any(|w| w.from == from_landing),
+        "{:?}",
+        c.travel.refused_walks
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_journey_whose_end_stands_on_no_floor_is_refused_not_planned_again() {
     // A goal its own cell holds no floor under (Ketnan's counter, 0xF784039F, lies two blocks off
     // its block): every way there ends in that one walk, so after a hop it refuses the journey.

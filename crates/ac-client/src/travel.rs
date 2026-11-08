@@ -1004,6 +1004,17 @@ impl Client {
                 );
                 let to = self.planning_place(to);
                 self.travel.refused_walks.push(NoWalk { from, to });
+                // And from where the hop came out, where a plan's walk there starts: refused only
+                // where it stood, Portal Recall and the same walk were planned again for ever
+                // (a_walk_refused_after_a_recall_is_not_planned_again_from_its_landing).
+                let landed = n.checked_sub(1).and_then(|i| {
+                    let trip = self.travel.trip.as_ref()?;
+                    trip.steps.get(i).and_then(Step::exit)
+                });
+                if let Some(landed) = landed {
+                    let from = self.planning_place(landed);
+                    self.travel.refused_walks.push(NoWalk { from, to });
+                }
                 self.travel.replan_due = true;
             }
             _ => self.refuse_journey(why),
