@@ -530,3 +530,34 @@ fn a_quest_call_waits_for_the_servers_quest_log() {
     c.grow_town_run(now + Duration::from_secs(3), &cfg);
     assert!(c.autoplay.growth.run.is_none(), "off to Monroe on cooldown");
 }
+
+#[test]
+fn a_pursued_hand_in_is_made_once_however_many_are_carried() {
+    // "Nooooo it used multiple stamped lucky gold letters! Just do the quest once." -- the player.
+    let now = Instant::now();
+    let (mut c, row) = at_a_collector(2, now);
+    c.pursuit = vec![crate::autoplay::PursuitLine {
+        id: row.id.into(),
+        title: row.title.into(),
+        step: crate::autoplay::PursuitStep::HandIn {
+            row,
+            at: row.places[0],
+        },
+        working: true,
+        via: None,
+    }];
+    let cfg = c.autoplay.config.growth.clone();
+    assert_eq!(
+        c.grow_run_step(now, &cfg),
+        Turn::Acted,
+        "the first is given"
+    );
+    c.world.objects.remove(&0x8000_0100);
+    let sent = c.session.actions_sent();
+    c.grow_run_step(now, &cfg);
+    assert_eq!(c.session.actions_sent(), sent, "the second was given too");
+    assert!(
+        c.world.objects.contains_key(&0x8000_0101),
+        "the second is kept"
+    );
+}

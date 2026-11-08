@@ -664,7 +664,11 @@ impl Client {
                 .quest_log
                 .wait_until(row.timer, crate::holdings::unix_now())
                 .is_some();
-        let more = row.repeat == Repeat::Any || taken == 0;
+        // A pursued quest is done once, a set handed in; only the board's own repeat-any-time
+        // hand-ins (the Collectors) take all carried: three Stamped Rithwic Lucky Gold Letters
+        // went to Dai Ya the Scholar (a_pursued_hand_in_is_made_once_however_many_are_carried).
+        let pursued = self.pursuit.iter().any(|l| l.id == row.id);
+        let more = (row.repeat == Repeat::Any && !pursued) || taken == 0;
         let item = self
             .world
             .inventory()
