@@ -77,6 +77,41 @@ fn a_run_that_could_not_get_there_is_tried_again_once_its_wait_is_up() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
+fn a_full_pack_goes_only_to_a_counter_that_helps() {
+    // Blargerton sold at the archmage and his pack stayed full of what he keeps: the run went on
+    // round the nearest counters, grocer, barkeepers and a Wedding Planner, doing nothing at each.
+    let holtburg = 0xA9B4_0019;
+    let mut c = standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
+    c.world.stats.level = 20;
+    let keep = c.autoplay.config.team.restock.money_slots;
+    with_a_pack(&mut c, 2 + keep);
+    pea_in_the_pack(&mut c, 0x8000_0010, "Iron Pea", 8328, 2_500);
+    crate::testkit::thing_in_the_pack(&mut c, 0x8000_0011, "Keepsake", 1);
+    let cfg = c.autoplay.config.growth.clone();
+    assert!(c.pack_low_on_room());
+    let now = Instant::now();
+    assert!(
+        c.grow_town_run(now, &cfg),
+        "{}",
+        c.autoplay.growth.held_back
+    );
+    // The peas sold; the keepsake keeps the pack full, and there is nothing to sell or buy.
+    c.world.objects.remove(&0x8000_0010);
+    with_a_pack(&mut c, 1 + keep);
+    assert!(c.pack_low_on_room());
+    assert!(c.salables(&cfg).is_empty());
+    let run = c.autoplay.growth.run.take().expect("no run");
+    let first = run.vendor.clone();
+    c.grow_run_next(run, now, &cfg, None);
+    let next = c.autoplay.growth.run.as_ref().map(|r| r.vendor.clone());
+    assert!(
+        next.is_none() || next.as_deref() == Some(first.as_str()),
+        "on to {next:?}, with nothing to sell or buy there"
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn loot_for_a_counter_alone_never_sends_a_roomy_pack_to_town() {
     // The user's rule: a run is for a full pack, too much weight or supplies to buy. Ten
     // thousand pyreals of peas in a roomy pack, nothing short, an hour on: still hunting.

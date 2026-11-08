@@ -546,6 +546,11 @@ impl Client {
                 let next = self.autoplay.growth.shop.step(&snap, now);
                 self.autoplay.growth.last_saying = next.saying.clone();
                 match next.act {
+                    // A purchase not in the pack yet: the window stays, the shopping waits.
+                    None if matches!(next.did, crate::did::Did::Waiting(_)) => {
+                        self.autoplay.growth.run = Some(run);
+                        Turn::Waited
+                    }
                     Some(ac_vendor::Act::Close) | None => {
                         // Said, so a visit that ends with nothing sold says why.
                         if !next.saying.is_empty() {
@@ -650,9 +655,9 @@ impl Client {
         // No cap on stops: each is a counter not yet visited this run that the forecast says helps.
         if wanting {
             // The next counter is chosen by what is still on the list,
-            // not by what is closest -- and only when there is reason to
-            // think it can help. A full pack is reason enough on its
-            // own: that stop is to empty it.
+            // not by what is closest -- and only when its forecast says
+            // it helps: a full pack of what no counter here buys sent
+            // Blargerton round the barkeepers (a_full_pack_goes_only_to_a_counter_that_helps).
             //
             // It is looked for from every way out the character has, the
             // same as the first stop was, and not from the town this one
@@ -671,13 +676,11 @@ impl Client {
             let errands = self.errands_for(cfg, &needs);
             let picked = self.choose_stop(cfg, &needs, &ways, &errands, &run.visited, now);
             if let Some((errand, vendor, at, look)) = picked {
-                if (still_full || look.worth_going())
-                    && self.grow_travel(counter_place(at), VENDOR_REACH)
-                {
-                    let what = if still_full || more_to_sell {
-                        "the rest of the loot"
+                if look.worth_going() && self.grow_travel(counter_place(at), VENDOR_REACH) {
+                    let what = if more_to_sell {
+                        format!("the rest of the loot ({})", self.loot_left(cfg))
                     } else {
-                        "the rest"
+                        "the rest".to_string()
                     };
                     let leaving = left
                         .as_deref()

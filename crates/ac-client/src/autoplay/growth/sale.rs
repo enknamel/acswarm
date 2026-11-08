@@ -244,6 +244,12 @@ impl Client {
             .collect()
     }
 
+    /// What [`Self::salables`] holds, by name, a few at most: for a status line.
+    pub(super) fn loot_left(&self, cfg: &Growth) -> String {
+        let names: Vec<&str> = self.for_sale(cfg).iter().map(|o| o.name.as_str()).collect();
+        super::a_few(&names)
+    }
+
     /// The carried things a counter would be offered, as they lie in the
     /// pack: what the selling rules let go, less what no counter takes.
     fn for_sale(&self, cfg: &Growth) -> Vec<&ac_world::WorldObject> {

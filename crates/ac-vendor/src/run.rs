@@ -1,12 +1,16 @@
 //! One trip to a counter, one decision at a time.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use ac_agent::did::{Did, Patience};
 use ac_agent::pack;
 use ac_agent::refusals::Answer;
 
 use crate::counter::{Item, Snapshot};
+
+/// How long a purchase is waited for in the pack before the shopping goes on (guess). The goods
+/// came 0.3 s after their UseDone live, though ACE sends that last (Player_Commerce.cs:51).
+const PURCHASE_LANDS: Duration = Duration::from_secs(3);
 
 /// The one thing the rules want done next; each is something a player could do by hand.
 /// At most one per turn: the server answers in its own time, and two can sell a stack merged away.
@@ -92,6 +96,9 @@ pub struct Run {
     no_room: bool,
     /// The ware last asked for, until the counter answers: what a refusal in words is about.
     buying: Option<u32>,
+    /// A purchase sent, `(ware, how short before, when)`, until the pack shows it: the counter's
+    /// UseDone can arrive ahead of the goods, and a run asked again bought it all twice.
+    bought: Option<(u32, u32, Instant)>,
     /// Wares the counter would not sell this visit, by weenie.
     wont_sell: Patience<u32>,
     /// Why the first ware still wanted was not bought here, for the visit to say.
@@ -126,6 +133,7 @@ impl Run {
                     .note(*guid, &Did::refused("the stack would not cut"), now);
             }
             Act::Buy { wcid, .. } => {
+                self.bought = None;
                 self.wont_sell
                     .note(*wcid, &Did::refused("the counter would not sell it"), now);
             }
@@ -141,6 +149,7 @@ impl Run {
     /// The counter turned down the purchase in flight, in words (`Refusal::Buy`): that ware is
     /// held as the refusals table answers, and a snapshot the refusal left unchanged moves on.
     pub fn buy_refused(&mut self, answer: Answer, now: Instant) {
+        self.bought = None;
         if let Some(wcid) = self.buying.take() {
             answer.hold(
                 &mut self.wont_sell,
@@ -176,6 +185,23 @@ impl Run {
                 Act::Open { guid: counter.guid },
                 format!("talking to {}", counter.name),
             );
+        }
+
+        // Bought and not yet in the pack: how short it is still says the order is unbought.
+        if let Some((wcid, short, at)) = self.bought {
+            let now_short = snap
+                .wants
+                .iter()
+                .find(|w| w.wcid == wcid)
+                .map_or(0, |w| w.short);
+            if now_short < short || now.saturating_duration_since(at) >= PURCHASE_LANDS {
+                self.bought = None;
+            } else {
+                return Next::nothing(
+                    Did::waiting("the purchase has not arrived yet"),
+                    "waiting for the purchase to arrive",
+                );
+            }
         }
 
         // Offered but still in the pack: the item itself refused; kind and worth were checked.
@@ -467,6 +493,7 @@ impl Run {
                 continue;
             }
             self.buying = Some(want.wcid);
+            self.bought = Some((want.wcid, want.short, now));
             return Some(Next::acting(
                 Act::Buy {
                     wcid: want.wcid,
@@ -560,6 +587,48 @@ mod tests {
             wants: Vec::new(),
             rules: Rules::default(),
         }
+    }
+
+    #[test]
+    fn a_purchase_is_made_once_while_it_is_on_its_way() {
+        // Celdiseth's UseDone came before the 224 tapers did, and the run asked again: 448 bought.
+        let mut run = Run::new();
+        let mut s = snap(Vec::new());
+        s.coin = 100_000;
+        let c = s.counter.as_mut().unwrap();
+        c.wares = vec![Ware {
+            wcid: 20631,
+            name: "Prismatic Taper".into(),
+            price: 34,
+            stock: None,
+            burden: 1,
+            value: 22,
+            sell_rate: 1.55,
+        }];
+        s.wants = vec![Want {
+            wcid: 20631,
+            name: "Prismatic Taper".into(),
+            short: 224,
+            urgent: false,
+        }];
+        let t0 = Instant::now();
+        let buy = Some(Act::Buy {
+            wcid: 20631,
+            count: 224,
+        });
+        assert_eq!(run.step(&s, t0).act, buy);
+        // Answered, the tapers not yet in the pack: no second order.
+        let next = run.step(&s, t0 + Duration::from_millis(120));
+        assert_eq!(next.act, None, "bought again: {}", next.saying);
+        assert!(matches!(next.did, Did::Waiting(_)), "{:?}", next.did);
+        // They arrive: nothing short, so nothing more is bought.
+        s.wants[0].short = 0;
+        assert_ne!(run.step(&s, t0 + Duration::from_millis(300)).act, buy);
+        // One that never shows is asked for again once it has been waited out.
+        let mut lost = Run::new();
+        s.wants[0].short = 224;
+        assert_eq!(lost.step(&s, t0).act, buy);
+        assert_eq!(lost.step(&s, t0 + PURCHASE_LANDS).act, buy);
     }
 
     #[test]

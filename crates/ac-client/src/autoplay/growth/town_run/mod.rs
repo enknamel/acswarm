@@ -535,11 +535,10 @@ impl Client {
         // pay for, is a walk to town and back for its own sake -- and
         // repeated, it is the party pacing between vendors for ever.
         //
-        // Two reasons override it. A full pack is its own errand: that
-        // trip is to empty it, not to buy. And a character with nothing
-        // to spend and nothing to sell goes anyway, because town is
-        // where it stops: see [`Self::stranded`].
-        let go_anyway = full || self.stranded(&needs, cfg);
+        // One reason overrides it: a character with nothing to spend and nothing to sell goes
+        // anyway, because town is where it stops ([`Self::stranded`]). A full pack is not one: a
+        // counter that buys none of it empties nothing (a_full_pack_goes_only_to_a_counter_that_helps).
+        let go_anyway = self.stranded(&needs, cfg);
         let errands = self.errands_for(cfg, &needs);
         match self.start_town_run(now, cfg, needs, reason, &errands, go_anyway) {
             Ok(()) => {
