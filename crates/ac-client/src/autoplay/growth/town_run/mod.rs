@@ -399,8 +399,10 @@ impl Client {
         if self.traveling() && !own_walk {
             return self.held_back("on a journey growth did not plan");
         }
-        // A pursued quest's giver is called on at once, ahead of the waits between runs.
-        if let Some((row, at)) = self.pursuit_call() {
+        // A pursued quest's giver is called on at once, ahead of the waits between runs, once the
+        // server's quest log has had its say: from the board before it, a stipend on cooldown was
+        // set off for at every login (a_quest_call_waits_for_the_servers_quest_log).
+        if let Some((row, at)) = self.pursuit_call().filter(|_| self.quests_synced(now)) {
             if self.start_quest_call(row, at, now) {
                 return true;
             }

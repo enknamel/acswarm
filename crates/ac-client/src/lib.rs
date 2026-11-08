@@ -271,6 +271,10 @@ pub struct Client {
     pub quest_asked: Option<quest_log::Asked>,
     /// The server's quest log (`@myquests`) is to be asked for: in the world, and after an answer.
     pub(crate) server_quests_due: bool,
+    /// The server's quest log has been read this session, or there is no server (offline).
+    pub(crate) server_quests_read: bool,
+    /// When the server's quest log was last asked for.
+    pub(crate) server_quests_asked: Option<Instant>,
     /// The last creature other than a player that spoke to the character, by guid.
     pub(crate) npc_spoke: Option<u32>,
     /// Each pursued quest's step, worked out with the board (`autoplay::growth::pursuit`).

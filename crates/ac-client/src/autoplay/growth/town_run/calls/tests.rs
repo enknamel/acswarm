@@ -496,3 +496,37 @@ fn a_talk_taking_a_quest_up_is_heard_once_made_and_not_made_again_however_soon_i
         .unwrap();
     assert!(!c.is_giver_refused(hand_in, &at, now));
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_quest_call_waits_for_the_servers_quest_log() {
+    // Blargerton at every login: the board, worked out before `@myquests` answered, had the
+    // stipend due, and he was off to Monroe 0.3 s before the server said it waits two days.
+    let mut c =
+        crate::testkit::standing_in_the_field(51, 0xC6A9_001C, glam::Vec3::new(80.0, 90.0, 42.0));
+    c.autoplay.config.quests.on = true;
+    c.autoplay
+        .config
+        .quests
+        .pursue_quest("stipendtimer_0812", true, 0);
+    c.server_quests_read = false;
+    let now = Instant::now();
+    c.server_quests_asked = Some(now);
+    c.refresh_quests(now);
+    assert!(c.pursuit_call().is_some(), "due on the board alone");
+    let cfg = c.autoplay.config.growth.clone();
+    c.grow_town_run(now, &cfg);
+    assert!(
+        c.autoplay.growth.run.is_none(),
+        "set off before the server's log"
+    );
+    let unix = crate::holdings::unix_now();
+    c.hear_server_quest(&format!(
+        "stipendtimer_0812 - 1 solves ({})\"Amount of stipends received.\" -1 518400",
+        unix - 60
+    ));
+    c.refresh_quests(now + Duration::from_secs(3));
+    assert!(c.pursuit_call().is_none(), "{:?}", c.pursuit);
+    c.grow_town_run(now + Duration::from_secs(3), &cfg);
+    assert!(c.autoplay.growth.run.is_none(), "off to Monroe on cooldown");
+}

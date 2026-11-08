@@ -104,11 +104,12 @@ impl Client {
     /// [`Self::on_its_way`]): every one, attacking or not. On the road it runs and heals; a fight
     /// there only made it late or dead (test: a_creature_hitting_the_character_on_the_road_is_run_past).
     pub(crate) fn passing_by(&self, o: &ac_world::WorldObject, cfg: &Fight) -> bool {
-        // A pursued hunt's errand is its creature: the rest are walked past at its ground too
-        // (a_quest_hunt_walks_past_all_but_its_creature).
+        // A pursued quest's errand is its creature, or for any other step nothing: the rest are
+        // walked past, at its ground too (a_quest_hunt_walks_past_all_but_its_creature).
         let sought = &self.autoplay.growth.pursuit_sought;
-        let not_it =
-            self.is_pursued_hunt() && !sought.is_empty() && !sought.contains(&o.weenie_class_id);
+        let not_it = self.is_pursuing()
+            && (!self.is_pursued_hunt()
+                || (!sought.is_empty() && !sought.contains(&o.weenie_class_id)));
         cfg.walk_past_on_the_way && (self.on_its_way() || not_it)
     }
 

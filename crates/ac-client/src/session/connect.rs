@@ -42,6 +42,8 @@ impl Client {
         let nowhere = std::net::SocketAddr::from(([127, 0, 0, 1], 1));
         #[allow(unused_mut)] // mutated only where the testkit is compiled in
         let mut c = Self::start(config, assets, None, nowhere);
+        // No server, no quest log of its own to wait for.
+        c.server_quests_read = true;
         #[cfg(any(test, feature = "testkit"))]
         c.pathfinder.build_when_planning();
         c
@@ -126,6 +128,8 @@ impl Client {
             quest_wants: Vec::new(),
             quest_wants_at: None,
             server_quests_due: true,
+            server_quests_read: false,
+            server_quests_asked: None,
             npc_spoke: None,
             quest_asked: None,
             pursuit: Vec::new(),

@@ -27,6 +27,8 @@ pub const ANY_HAND_INS: u32 = 5;
 pub const KEY_DEPTH: usize = 3;
 /// A giver's reward is waited for this long after the use or give (design §4.3, guess).
 pub const XP_WATCH: Duration = Duration::from_secs(10);
+/// The server's quest log is waited for this long after asking before calls go ahead (guess).
+const SERVER_QUESTS_WAIT: Duration = Duration::from_secs(10);
 
 /// One quest done: when last (Unix seconds) and how many times.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1022,10 +1024,12 @@ impl Client {
     /// (ACE's `@myquests`, PlayerCommands.cs:35): its solves and waits are what the log keeps.
     pub(crate) fn ask_server_quests(&mut self) {
         let ready = self.player.is_some() && self.world.player_guid.is_some();
-        if !self.server_quests_due || !ready || !self.autoplay.config.quests.on {
+        let quests = &self.autoplay.config.quests;
+        if !self.server_quests_due || !ready || (!quests.on && quests.pursue.is_empty()) {
             return;
         }
         self.server_quests_due = false;
+        self.server_quests_asked = Some(self.frame_at.max(Instant::now()));
         if let Err(e) = self.act(crate::action::Action::ServerCommand("myquests".into())) {
             tracing::info!("quest: asking the server's quest log: {e}");
         }
@@ -1037,6 +1041,7 @@ impl Client {
         let Some(q) = crate::refusals::quest_record(text) else {
             return;
         };
+        self.server_quests_read = true;
         let name = q.name.to_ascii_lowercase();
         let before = self.quest_log.clone();
         if let Some(counter) = kill_counter(&name) {
@@ -1058,6 +1063,15 @@ impl Client {
             self.save_quest_log();
             self.quest_board_at = None;
         }
+    }
+
+    /// Whether the server's quest log has had its say this session: read, or asked
+    /// [`SERVER_QUESTS_WAIT`] ago with no answer (a server with `@myquests` off).
+    pub(crate) fn quests_synced(&self, now: Instant) -> bool {
+        self.server_quests_read
+            || self
+                .server_quests_asked
+                .is_some_and(|t| now.saturating_duration_since(t) >= SERVER_QUESTS_WAIT)
     }
 
     /// Read back the quest log of earlier sessions, at login.
