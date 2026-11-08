@@ -593,14 +593,11 @@ pub const RETAIL: &[Command] = &[
     Command {
         names: &["tell", "t", "send", "whisper", "w"],
         action: |args| {
-            // `/tell Name, message`, and `/tell Name message` as well.
-            let (who, text) = match args.split_once(',') {
-                Some((w, t)) => (w.trim(), t.trim()),
-                None => args
-                    .split_once(char::is_whitespace)
-                    .map(|(w, t)| (w.trim(), t.trim()))
-                    .unwrap_or((args, "")),
-            };
+            // `/tell Name, message`: a name may hold spaces and anything but a comma, so the
+            // first comma alone ends it (a_tell_names_end_at_the_first_comma).
+            let (who, text) = args
+                .split_once(',')
+                .map_or(("", ""), |(w, t)| (w.trim(), t.trim()));
             (!who.is_empty() && !text.is_empty()).then(|| Action::Tell {
                 who: who.to_string(),
                 text: text.to_string(),

@@ -291,3 +291,48 @@ fn the_chat_window_commands_are_the_front_ends() {
     assert!(matches!(c.chat_line("/title Tells"), Line::Acted(Err(_))));
     assert_eq!(c.session.actions_sent(), sent, "nothing reached the server");
 }
+
+/// The GameAction (0xF7B1 seq action ...) the session queued last: its action code.
+fn last_action(c: &Client) -> Option<u32> {
+    let (_, m) = c.session.queued().last()?;
+    let word = |at: usize| -> Option<u32> {
+        Some(u32::from_le_bytes(m.get(at..at + 4)?.try_into().ok()?))
+    };
+    (word(0)? == 0xF7B1).then(|| word(8)).flatten()
+}
+
+#[test]
+fn a_tell_names_end_at_the_first_comma() {
+    // "Character names can have spaces and other special characters but not commas."
+    assert_eq!(
+        parsed("t", "Professor of Item Magic, level 6, please"),
+        Some(Action::Tell {
+            who: "Professor of Item Magic".into(),
+            text: "level 6, please".into()
+        })
+    );
+    assert_eq!(parsed("t", "Bob Smith hello"), None, "no comma: the usage");
+}
+
+#[test]
+fn a_tell_to_a_creature_in_view_is_a_talk_to_it() {
+    // ACE's tell by name finds online players alone; the Professor of Item Magic hears only a
+    // talk to his guid, and asks his Yes/No then (GameActionTalkDirect.cs:21-24).
+    let mut c = testkit::offline_client();
+    c.world.objects.insert(
+        0x7C6A_9054,
+        ac_world::WorldObject {
+            guid: 0x7C6A_9054,
+            name: "Professor of Item Magic".into(),
+            item_type: ac_world::item_type::CREATURE,
+            ..Default::default()
+        },
+    );
+    assert_eq!(
+        c.chat_line("/t professor of item magic, level 6"),
+        Line::Acted(Ok(()))
+    );
+    assert_eq!(last_action(&c), Some(ac_net::messages::action::TALK_DIRECT));
+    assert_eq!(c.chat_line("/t Verity, hello"), Line::Acted(Ok(())));
+    assert_eq!(last_action(&c), Some(ac_net::messages::action::TELL));
+}

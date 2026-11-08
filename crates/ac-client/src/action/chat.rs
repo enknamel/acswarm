@@ -23,9 +23,26 @@ pub(super) fn tell(c: &mut Client, who: &str, text: &str) -> Outcome {
     if who.is_empty() || text.is_empty() {
         return Err(Refused::ours("a tell wants a name and something to say"));
     }
+    // A creature in view that is no player hears only a talk to its guid: ACE's tell by name
+    // finds online players alone (GameActionTell.cs:27; GameActionTalkDirect.cs:21-24).
+    let npc = c
+        .world
+        .objects
+        .values()
+        .filter(|o| !o.is_player && o.item_type & ac_world::item_type::CREATURE != 0)
+        .find(|o| o.name.eq_ignore_ascii_case(who))
+        .map(|o| o.guid);
     let mut w = Writer::new();
-    w.string16(text).string16(who);
-    c.session.send_action(action::TELL, &w.finish());
+    match npc {
+        Some(guid) => {
+            w.string16(text).u32(guid);
+            c.session.send_action(action::TALK_DIRECT, &w.finish());
+        }
+        None => {
+            w.string16(text).string16(who);
+            c.session.send_action(action::TELL, &w.finish());
+        }
+    }
     // Only a tell sets whom `/retell` tells again; a reply does not.
     c.last_told = Some(who.to_string());
     Ok(())
