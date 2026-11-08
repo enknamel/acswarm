@@ -1568,3 +1568,65 @@ fn the_stamp_is_used_on_the_letter_in_the_pack_and_the_stamped_one_is_done() {
     assert_eq!(c.autoplay.growth.fetching, None);
     assert_eq!(c.quest_board_at, None, "the board is worked out again");
 }
+
+#[test]
+fn the_samsur_letter_is_had_by_picking_up_the_stamp_then_stamping_the_letter() {
+    // The Seasoned Explorer Boots (give:70309:45975): the Samsur Town Stamp lies in Musansayn's
+    // Vaults, put there by its generator's link; used on the Lucky Gold Letter, it is handed in.
+    let mut f = facts(51, &[("give:70309:45975", false)]);
+    f.carried.insert(45875, 3);
+    let step = |f: &QuestFacts| work(f, &ChainData, None).lines[0].step.clone();
+    match step(&f) {
+        PursuitStep::PickUp { wcid, at, .. } => {
+            assert_eq!(wcid, 8739);
+            assert_eq!(at.cell >> 16, 0x0155);
+        }
+        other => panic!("{other:?}"),
+    }
+    f.carried.insert(8739, 1);
+    match step(&f) {
+        PursuitStep::Combine { with, on, .. } => assert_eq!((with, on), (8739, 45875)),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_take_waits_for_the_walk_to_stop_and_is_sent_again_when_cancelled() {
+    // The Samsur Town Stamp's take went out as the trip there arrived: the stop cancelled the
+    // server's walk to it (ActionCancelled), and the stamp was given up after one try.
+    const STAMP: u32 = 0x8044_B10C;
+    let (mut c, line) = fetching(|at| PursuitStep::PickUp {
+        wcid: 8739,
+        name: "Samsur Town Stamp".into(),
+        at,
+    });
+    let PursuitStep::PickUp { at, .. } = line.step else {
+        unreachable!()
+    };
+    lying(&mut c, STAMP, 8739, "Samsur Town Stamp", at);
+    let now = Instant::now();
+    let me = c.my_position().unwrap();
+    let _ = c.go_to(
+        crate::body::going::Owner::Step("grow"),
+        me + Vec3::new(5.0, 0.0, 0.0),
+        0.5,
+    );
+    assert!(c.is_walking(), "a walk under way");
+    assert_eq!(c.grow_fetch(&line, now), Some(true));
+    assert!(!c.loot_queue.contains(&STAMP), "taken while still walking");
+    assert!(!c.is_walking(), "the walk was not stopped");
+    let mut t = now;
+    for round in 1..=fetch::UNLOCK_TRIES {
+        t += Duration::from_millis(100);
+        assert_eq!(c.grow_fetch(&line, t), Some(true), "round {round}");
+        assert!(
+            c.loot_queue.contains(&STAMP),
+            "round {round}: not asked to pick it up"
+        );
+        c.loot_queue.clear();
+        t += fetch::ANSWER_WAIT;
+        // Cancelled: nothing came up, the stamp still lies there.
+    }
+    assert_eq!(c.grow_fetch(&line, t), Some(false), "tried for ever");
+}

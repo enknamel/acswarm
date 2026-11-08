@@ -130,6 +130,8 @@ impl Client {
             server_quests_due: true,
             server_quests_read: false,
             server_quests_asked: None,
+            server_quests_listed: Default::default(),
+            server_quests_heard: None,
             npc_spoke: None,
             quest_asked: None,
             pursuit: Vec::new(),

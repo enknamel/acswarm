@@ -150,7 +150,7 @@ impl Client {
         }
     }
 
-    fn save_quest_flags(&self) {
+    pub(crate) fn save_quest_flags(&self) {
         let Some(path) = self.quest_flags_path() else {
             return;
         };

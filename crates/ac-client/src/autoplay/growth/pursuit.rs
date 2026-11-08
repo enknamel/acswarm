@@ -498,13 +498,14 @@ impl Ask<'_> {
             let got = self.obtain(&[Want::Item(key)], 1, name, depth + 1);
             match got.0 {
                 PursuitStep::Stuck { why } => {
-                    first_why.get_or_insert(why);
+                    first_why.get_or_insert((name, why));
                 }
                 _ => return got,
             }
         }
+        // What is missing is a chest's key or an item used to make it: named, as either.
         match first_why {
-            Some(why) => (stuck(format!("{what} lies in a locked chest: {why}")), None),
+            Some((name, why)) => (stuck(format!("{what} needs {name} first: {why}")), None),
             None => hunted,
         }
     }
@@ -733,6 +734,15 @@ impl Client {
     /// it has neither or the character stands on its ground, else whether it set off.
     pub(super) fn grow_pursuit(&mut self, now: Instant) -> Option<bool> {
         let line = self.working_pursuit()?.clone();
+        // Handed in and not yet answered: the item gone, the board would have another made.
+        if let Some(giver) = self.quest_asked.as_ref().filter(|a| a.row.id == line.id) {
+            let why = format!(
+                "for {}: waiting for {}'s answer",
+                line.title, giver.row.giver
+            );
+            self.autoplay.say(Doing::Shopping, why);
+            return Some(true);
+        }
         match &line.step {
             PursuitStep::EarnFlag { flag, from } => {
                 self.autoplay.growth.unlock_tried.mark(flag.clone(), now);

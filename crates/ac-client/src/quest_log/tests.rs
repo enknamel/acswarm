@@ -588,3 +588,84 @@ fn the_servers_quest_log_says_a_quest_handed_in_is_waiting() {
     );
     assert!(c.holds_quest_flag("magicitemtraining3"));
 }
+
+#[test]
+fn a_kill_task_the_servers_log_does_not_list_is_taken_up_again() {
+    // Blargerton's log kept the Tusker Guard counter from an earlier session; the server had
+    // erased it, so he hunted guards that counted for nothing instead of taking the task up.
+    let mut c = crate::testkit::character_of_level(crate::testkit::no_data(), 51);
+    c.autoplay.config.quests.on = true;
+    let now = crate::holdings::unix_now();
+    c.quest_log.note_taken("tuskergkillcount");
+    c.quest_log.note_kills("killtaskbloodshreth", 4);
+    c.quest_log.note_wait("tuskerg", now + 600);
+    c.hold_quest_flags(&["tuskergkillcount".to_string(), "tuskerg".to_string()]);
+    let t0 = Instant::now();
+    c.hear_server_quest(&format!(
+        "tuskerg - 1 solves ({})\"Tusker Guard Kill Task Main Flag\" -1 72000",
+        now - 100_000
+    ));
+    c.hear_server_quest(&format!(
+        "killtaskbloodshreth - 4 solves ({})\"Blood Shreth Kill Task\" 10 0",
+        now - 100
+    ));
+    // Mid-listing nothing is dropped: more lines may be on their way.
+    c.settle_server_quests(Instant::now());
+    assert!(c.quest_log.kills.contains_key("tuskergkillcount"));
+    c.settle_server_quests(t0 + LISTING_QUIET + Duration::from_millis(100));
+    assert!(!c.quest_log.kills.contains_key("tuskergkillcount"));
+    assert_eq!(c.quest_log.kills.get("killtaskbloodshreth"), Some(&4));
+    assert!(!c.holds_quest_flag("tuskergkillcount"));
+    assert!(c.holds_quest_flag("tuskerg"));
+    assert_eq!(
+        c.quest_log.wait_until("tuskerg", now),
+        None,
+        "its wait is over"
+    );
+    c.refresh_quests(Instant::now() + Duration::from_secs(5));
+    let line = c.quest_board.iter().find(|l| l.id == "tuskergkillcount");
+    assert!(
+        matches!(line.map(|l| &l.state), Some(QuestState::NotTaken { .. })),
+        "{line:?}"
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_hand_in_paying_an_item_and_no_xp_is_done_once_the_item_comes() {
+    // Blargerton handed Jilsaya bint Dah a Stamped Samsur Lucky Gold Letter for the Seasoned
+    // Explorer Boots: no XP, so "gave nothing" was heard, and another letter was stamped.
+    let mut c = crate::testkit::character_of_level(crate::testkit::game_data(), 51);
+    let row = ac_world::quests::rows_of("give:70309:45975")
+        .find(|r| r.kind == ac_world::quests::Kind::Item)
+        .unwrap();
+    assert!(
+        row.gives.iter().any(|(w, _)| *w == 45975),
+        "{:?}",
+        row.gives
+    );
+    const LETTER: u32 = 0x8000_0100;
+    crate::testkit::thing_in_the_pack(&mut c, LETTER, "Stamped Samsur Lucky Gold Letter", 1);
+    c.world.objects.get_mut(&LETTER).unwrap().weenie_class_id = 70309;
+    let t0 = Instant::now();
+    c.ask_giver(row, row.places[0], t0);
+    c.world.objects.remove(&LETTER);
+    assert!(c.is_awaiting_answer(row.id), "the hand-in is not awaited");
+    c.watch_quest_answer(t0 + Duration::from_millis(500));
+    assert!(
+        c.is_awaiting_answer(row.id),
+        "answered before the boots came"
+    );
+    crate::testkit::thing_in_the_pack(&mut c, 0x8000_0101, "Seasoned Explorer Boots", 1);
+    c.world
+        .objects
+        .get_mut(&0x8000_0101)
+        .unwrap()
+        .weenie_class_id = 45975;
+    c.watch_quest_answer(t0 + Duration::from_millis(1500));
+    assert!(!c.is_awaiting_answer(row.id));
+    assert!(
+        c.quest_log.done.contains_key(row.id),
+        "the boots counted for nothing"
+    );
+}

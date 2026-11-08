@@ -30,6 +30,10 @@ pub const XP_WATCH: Duration = Duration::from_secs(10);
 /// The server's quest log is waited for this long after asking before calls go ahead (guess).
 const SERVER_QUESTS_WAIT: Duration = Duration::from_secs(10);
 
+/// How long after the last line of the server's quest log it counts as all said: ACE sends it
+/// in one burst with no end line (PlayerCommands.cs:52-67).
+const LISTING_QUIET: Duration = Duration::from_secs(1);
+
 /// One quest done: when last (Unix seconds) and how many times.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Solved {
@@ -739,6 +743,8 @@ pub struct Asked {
     pub xp_before: i64,
     /// The wanted item carried when asked, 0 for a talk: fewer after is a give taken.
     pub carried: u32,
+    /// The reward's items held when asked: more after is the reward, as a rise in XP is.
+    pub gifts: u32,
 }
 
 impl Client {
@@ -885,14 +891,15 @@ impl Client {
             Want::Item(wcid) => self.carried_count(wcid),
             _ => 0,
         };
+        let mut gifts = self.gifts_held(row);
         if let Some(old) = self.quest_asked.take() {
-            let rose = self.world.stats.total_xp > old.xp_before;
-            if rose || !std::ptr::eq(old.row, row) {
-                self.quest_answered(&old, rose, now);
+            let paid = self.is_paid(&old);
+            if paid || !std::ptr::eq(old.row, row) {
+                self.quest_answered(&old, paid, now);
             } else {
                 // Asked again unanswered: what left the pack since the first ask still counts
                 // (a_quest_asked_again_after_its_hand_in_is_done).
-                (xp_before, carried) = (old.xp_before, old.carried);
+                (xp_before, carried, gifts) = (old.xp_before, old.carried, old.gifts);
             }
         }
         self.quest_asked = Some(Asked {
@@ -901,6 +908,7 @@ impl Client {
             at: now,
             xp_before,
             carried,
+            gifts,
         });
     }
 
@@ -917,18 +925,40 @@ impl Client {
         let Some(asked) = &self.quest_asked else {
             return;
         };
-        let rose = self.world.stats.total_xp > asked.xp_before;
-        if !rose && now.duration_since(asked.at) < XP_WATCH {
+        let paid = self.is_paid(asked);
+        if !paid && now.duration_since(asked.at) < XP_WATCH {
             return;
         }
         if let Some(asked) = self.quest_asked.take() {
-            self.quest_answered(&asked, rose, now);
+            self.quest_answered(&asked, paid, now);
         }
+    }
+
+    /// Whether the giver `asked` paid: XP rose, or an item of its reward came (the Seasoned
+    /// Explorer Boots pay no XP, and were handed in for twice).
+    fn is_paid(&self, asked: &Asked) -> bool {
+        self.world.stats.total_xp > asked.xp_before || self.gifts_held(asked.row) > asked.gifts
+    }
+
+    /// How many of `row`'s reward items the character holds, packed or worn.
+    fn gifts_held(&self, row: &Row) -> u32 {
+        let gift = |w: u32| row.gives.iter().any(|(g, _)| *g == w);
+        self.world
+            .inventory()
+            .chain(self.world.wielded())
+            .filter(|o| gift(o.weenie_class_id))
+            .map(|o| o.stack_size.max(1))
+            .sum()
+    }
+
+    /// Whether a giver's answer to quest `id` is awaited: nothing more is done for it till then.
+    pub(crate) fn is_awaiting_answer(&self, id: &str) -> bool {
+        self.quest_asked.as_ref().is_some_and(|a| a.row.id == id)
     }
 
     /// Paid, or unpaid with the item taken or the talk heard (the giver's own "done" reply, the
     /// safe side): done, its wait begun and its flags held. Else the giver is let be a while.
-    fn quest_answered(&mut self, asked: &Asked, rose: bool, now: Instant) {
+    fn quest_answered(&mut self, asked: &Asked, paid: bool, now: Instant) {
         let row = asked.row;
         // A talk that takes a quest up pays nothing: heard, its flags are held, the quest begun.
         if row.kind == Kind::Start {
@@ -949,7 +979,7 @@ impl Client {
             Want::Item(wcid) => self.carried_count(wcid) < asked.carried,
             _ => !row.has_unread() && !row.has_xp(),
         };
-        if !rose && (!taken || row.repeat == Repeat::Any) {
+        if !paid && (!taken || row.repeat == Repeat::Any) {
             let key = (row.giver_wcid, asked.place.cell);
             self.autoplay.growth.givers_refused.mark(key, now);
             let why = format!("{} gave nothing for {}", row.giver, row.title);
@@ -957,7 +987,7 @@ impl Client {
             self.server_quests_due = true;
             return;
         }
-        tracing::info!("quest: {} done at {} (paid: {rose})", row.id, row.giver);
+        tracing::info!("quest: {} done at {} (paid: {paid})", row.id, row.giver);
         self.quest_log.note_done(row, crate::holdings::unix_now());
         self.save_quest_log();
         self.hold_quest_flags(&row.stamps);
@@ -1044,6 +1074,8 @@ impl Client {
         };
         self.server_quests_read = true;
         let name = q.name.to_ascii_lowercase();
+        self.server_quests_listed.insert(name.clone());
+        self.server_quests_heard = Some(self.frame_at.max(Instant::now()));
         let before = self.quest_log.clone();
         if let Some(counter) = kill_counter(&name) {
             self.quest_log.note_kills(counter, q.solves);
@@ -1055,12 +1087,52 @@ impl Client {
             self.quest_log.done.insert(name.clone(), solved);
         }
         let until = q.last.saturating_add(q.min_delta);
+        // The server's wait stands over the one kept here, over or not.
         if q.min_delta > 0 && until > crate::holdings::unix_now() {
             self.quest_log.note_wait(&name, until);
+        } else {
+            self.quest_log.waits.remove(&name);
         }
         self.hold_quest_flags(std::slice::from_ref(&name));
         if self.quest_log != before {
             tracing::info!("quest: the server's log has {name}: {} solves", q.solves);
+            self.save_quest_log();
+            self.quest_board_at = None;
+        }
+    }
+
+    /// The server's quest log said in full: a kill counter, flag or wait it did not list is not
+    /// held. ACE lists every quest record the character has (PlayerCommands.cs:44-67).
+    pub(crate) fn settle_server_quests(&mut self, now: Instant) {
+        if !self
+            .server_quests_heard
+            .is_some_and(|t| now.saturating_duration_since(t) >= LISTING_QUIET)
+        {
+            return;
+        }
+        self.server_quests_heard = None;
+        let listed = std::mem::take(&mut self.server_quests_listed);
+        let before = self.quest_log.clone();
+        let is_listed = |k: &String| listed.contains(&k.to_ascii_lowercase());
+        self.quest_log.kills.retain(|c, _| is_listed(c));
+        self.quest_log.waits.retain(|t, _| is_listed(t));
+        let gone: Vec<String> = self
+            .travel
+            .quests_done
+            .iter()
+            .filter(|f| !is_listed(f))
+            .cloned()
+            .collect();
+        if !gone.is_empty() {
+            tracing::info!("quest: the server's log has none of {gone:?}");
+            self.travel.quests_done.retain(|f| is_listed(f));
+            self.save_quest_flags();
+            self.quest_board_at = None;
+        }
+        if self.quest_log != before {
+            tracing::info!(
+                "quest: dropped the kill counters and waits the server's log does not have"
+            );
             self.save_quest_log();
             self.quest_board_at = None;
         }

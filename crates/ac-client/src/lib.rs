@@ -275,6 +275,10 @@ pub struct Client {
     pub(crate) server_quests_read: bool,
     /// When the server's quest log was last asked for.
     pub(crate) server_quests_asked: Option<Instant>,
+    /// The quests the server's log is listing, by name, until it is all said.
+    pub(crate) server_quests_listed: std::collections::BTreeSet<String>,
+    /// When the last line of that listing came.
+    pub(crate) server_quests_heard: Option<Instant>,
     /// The last creature other than a player that spoke to the character, by guid.
     pub(crate) npc_spoke: Option<u32>,
     /// Each pursued quest's step, worked out with the board (`autoplay::growth::pursuit`).

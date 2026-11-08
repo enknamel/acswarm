@@ -21,10 +21,10 @@ const FETCH_REACH: f32 = crate::visit::REACH;
 /// What is fetched stands this near its spot in the data (metres): a generator scatters a little.
 const FOUND_NEAR: f32 = 20.0;
 /// An act's answer is waited for this long before it counts as refused (guess).
-const ANSWER_WAIT: Duration = Duration::from_secs(5);
-/// A key or item use the server never answered (another act cancelled its walk,
-/// `Player_Use.cs:157-163`) is sent this many times before the source is dropped.
-const UNLOCK_TRIES: u32 = 3;
+pub(super) const ANSWER_WAIT: Duration = Duration::from_secs(5);
+/// A take, key or item use the server never carried out (movement cancelled its walk:
+/// `Player_Use.cs:157-163`, `Player_Inventory.cs:1014-1018`) is sent this many times.
+pub(super) const UNLOCK_TRIES: u32 = 3;
 /// A chest unlocked stays so this long: ACE resets it ResetInterval s on (weenie 27890: 20).
 pub(crate) const UNLOCKED_FOR: Duration = Duration::from_secs(20);
 /// ACE's LockAlreadyUnlocked: the chest opens all the same (`Lock.cs:174-176`).
@@ -247,8 +247,11 @@ impl Client {
                         self.autoplay.growth.unlock_tries = f.tries;
                     }
                     Heard::Again => {
-                        let what = if f.act == Act::Use { "use" } else { "key" };
-                        let why = format!("{label}: no answer to the {what}");
+                        let why = match f.act {
+                            Act::Take => format!("{label}: would not come up"),
+                            Act::Use => format!("{label}: no answer to the use"),
+                            _ => format!("{label}: no answer to the key"),
+                        };
                         self.drop_source(key, why, now);
                         return Some(false);
                     }
@@ -303,6 +306,13 @@ impl Client {
                 .say(Doing::Looting, format!("looking for {label}"));
             return Some(true);
         };
+        // The server walks the character to what it takes or uses, and movement of ours ends that
+        // walk cancelled (Player_Inventory.cs:1014-1018): the trip here stops a tick first.
+        if self.traveling() || self.is_walking() {
+            self.interrupt_travel("at the quest's source");
+            self.stop_going(None, "at the quest's source");
+            return Some(true);
+        }
         let act = self.fetch_act(&line.step, guid, me.distance(goal.at), now)?;
         self.fetch_sent(key, guid, act, now);
         self.autoplay
@@ -363,6 +373,10 @@ impl Client {
                 let tries = std::mem::take(&mut self.autoplay.growth.unlock_tries) + 1;
                 (self.autoplay.growth.unlock_with, tries)
             }
+            (Act::Take, _) => (
+                0,
+                std::mem::take(&mut self.autoplay.growth.unlock_tries) + 1,
+            ),
             (_, Some(f)) => (f.with, f.tries),
             // Kept for the use that follows: `unlock_tries` is taken by it.
             (Act::Peace, None) => (0, self.autoplay.growth.unlock_tries),
@@ -384,7 +398,12 @@ impl Client {
         if !self.is_unlocking() {
             return false;
         }
-        let Some(line) = self.pursuit.iter().find(|l| l.working).cloned() else {
+        let Some(line) = self
+            .pursuit
+            .iter()
+            .find(|l| l.working && !self.is_awaiting_answer(&l.id))
+            .cloned()
+        else {
             self.autoplay.growth.fetching = None;
             return false;
         };
@@ -410,7 +429,7 @@ impl Client {
             Act::Look if waited => Heard::Refused("not there".to_string()),
             Act::Look => Heard::Waiting,
             Act::Take if has_item => Heard::Done,
-            Act::Take if waited => Heard::Refused("would not come up".to_string()),
+            Act::Take if waited => Heard::Again,
             Act::Take => Heard::Waiting,
             // A one-use key is used up by the unlock; a UseDone with no error is also what a
             // cancelled walk to the chest sends (`Player_Use.cs:157-163`), so it is not the answer.
