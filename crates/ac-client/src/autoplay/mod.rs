@@ -280,6 +280,8 @@ pub struct Autoplay {
     pub summoning: crate::summoning::State,
     /// The mana stone rules' own state (see `mana_stones`).
     pub(crate) mana_stones: mana_stones::State,
+    /// When a step last waited for the busy slot to send an act: buffs not yet due give way.
+    pub(crate) hands_wanted: Option<Instant>,
     /// Who has attacked the character lately, by name, and when each
     /// last did -- a blow landed or one evaded, since a creature that
     /// misses is attacking all the same, or a spell cast at it, landed

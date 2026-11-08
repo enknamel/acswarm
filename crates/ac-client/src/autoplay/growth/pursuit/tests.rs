@@ -893,7 +893,9 @@ fn at_the_chest_the_key_is_used_then_the_chest_opened_and_emptied_by_the_loot_ru
     assert!(c.is_unlocking(), "the unlock reflex holds the tick");
     // Unlocked, the one-use key used up (Lock.cs:69-90): the chest is opened for the loot rules.
     let later = now + Duration::from_millis(300);
+    // The UseDone, which frees the slot the unlock held (session/apply.rs).
     c.use_done = Some((0, later));
+    c.autoplay.cast_answered();
     c.world.objects.remove(&KEY);
     assert!(c.autoplay_unlock(later));
     assert!(
@@ -1678,7 +1680,21 @@ fn an_npc_is_used_for_the_item_and_its_arrival_ends_the_step() {
     const NPC: u32 = 0x7AE5_3E01;
     lying(&mut c, NPC, 5121, "Shin Ro", at);
     let now = Instant::now();
+    // A bane still in its recoil: the use would be turned away busy, so it waits, and says so.
+    c.autoplay.cast_sent = Some(now);
     assert_eq!(c.grow_fetch(&line, now), Some(true));
+    assert!(
+        c.autoplay.growth.fetching.is_none(),
+        "Shin Ro used mid-cast"
+    );
+    assert_eq!(c.autoplay.hands_wanted, Some(now));
+    c.autoplay.cast_answered();
+    assert_eq!(c.grow_fetch(&line, now), Some(true));
+    assert!(
+        c.autoplay.cast_in_flight(now),
+        "the use does not hold the next cast"
+    );
+    c.autoplay.cast_answered();
     let f = c.autoplay.growth.fetching.clone().expect("nothing asked");
     assert_eq!(
         (f.act, f.guid),
@@ -1703,5 +1719,32 @@ fn an_npc_is_used_for_the_item_and_its_arrival_ends_the_step() {
     assert!(
         c.autoplay.growth.fetching.is_none(),
         "still waiting with the key carried"
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn an_npc_is_not_asked_for_an_item_with_no_room_in_the_pack_for_it() {
+    let shin_ro = ChainData
+        .sources(&Want::Item(5757))
+        .into_iter()
+        .find(|s| s.kind == Yield::Npc)
+        .expect("Shin Ro gives the key");
+    let (mut c, line) = fetching(|at| PursuitStep::AskFor {
+        source: shin_ro,
+        at,
+    });
+    let PursuitStep::AskFor { at, .. } = line.step else {
+        unreachable!()
+    };
+    lying(&mut c, 0x7AE5_3E01, 5121, "Shin Ro", at);
+    // One slot, taken: no room for the key.
+    crate::testkit::with_a_pack(&mut c, 1);
+    carrying(&mut c, 0x8000_0501, 45875, "Lucky Gold Letter");
+    assert_eq!(c.room_anywhere(), 0);
+    assert_eq!(c.grow_fetch(&line, Instant::now()), Some(false));
+    assert!(
+        c.autoplay.growth.fetching.is_none(),
+        "asked with no room for the key"
     );
 }

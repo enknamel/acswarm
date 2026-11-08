@@ -47,6 +47,13 @@ pub(crate) struct Fetching {
     pub(crate) tries: u32,
 }
 
+impl Fetching {
+    /// Whether its act brings an item, still to come: a take, a talk, a key, a use or a chest.
+    pub(crate) fn is_bringing(&self) -> bool {
+        !matches!(self.act, Act::Look | Act::Peace)
+    }
+}
+
 /// One act of a fetch.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Act {
@@ -284,6 +291,9 @@ impl Client {
                 .inventory()
                 .find(|o| o.weenie_class_id == on && o.wielder.is_none())?
                 .guid;
+            if self.hands_busy(now) {
+                return Some(true);
+            }
             let act = self.fetch_act(&line.step, target, 0.0, now)?;
             self.fetch_sent(key, target, act, now);
             let said = format!("for {}: {}", line.title, line.step.words(0));
@@ -319,11 +329,43 @@ impl Client {
             self.stop_going(None, "at the quest's source");
             return Some(true);
         }
+        if self.hands_busy(now) {
+            return Some(true);
+        }
+        if !self.has_room_for(line, now) {
+            return Some(false);
+        }
         let act = self.fetch_act(&line.step, guid, me.distance(goal.at), now)?;
         self.fetch_sent(key, guid, act, now);
         self.autoplay
             .say(Doing::Looting, format!("for {}: {label}", line.title));
         Some(true)
+    }
+
+    /// Whether a cast or use is still being answered: the server turns an act sent now away busy
+    /// (0x1D), and Shin Ro was used in a bane's recoil three times and never asked. The wait is
+    /// marked, so that buffs not yet due give way (`hands_wanted`).
+    fn hands_busy(&mut self, now: Instant) -> bool {
+        if !self.autoplay.cast_in_flight(now) {
+            return false;
+        }
+        self.autoplay.hands_wanted = Some(now);
+        true
+    }
+
+    /// Whether the packs have a slot for what an act at the source brings: one with none would
+    /// see the item go nowhere, so the quest is passed over until something has gone.
+    fn has_room_for(&mut self, line: &PursuitLine, now: Instant) -> bool {
+        let brings = matches!(
+            line.step,
+            PursuitStep::PickUp { .. } | PursuitStep::AskFor { .. } | PursuitStep::OpenChest { .. }
+        );
+        if !brings || self.room_anywhere() > 0 {
+            return true;
+        }
+        let why = format!("no room in the pack for {}", line.step.words(0));
+        self.hold_pursuit(&line.id, why, now);
+        false
     }
 
     /// Do the next act on `guid`, `away` metres off: pick it up, unlock it, open it, or use on it.
@@ -378,6 +420,10 @@ impl Client {
     }
 
     fn fetch_sent(&mut self, key: (u32, u32), guid: u32, act: Act, at: Instant) {
+        // Answered with a UseDone, which frees the slot a cast would wait on (Player_Use.cs).
+        if matches!(act, Act::Talk | Act::Unlock | Act::Use) {
+            self.autoplay.cast_sent = Some(at);
+        }
         let (with, tries) = match (act, &self.autoplay.growth.fetching) {
             (Act::Unlock | Act::Use, _) => {
                 let tries = std::mem::take(&mut self.autoplay.growth.unlock_tries) + 1;

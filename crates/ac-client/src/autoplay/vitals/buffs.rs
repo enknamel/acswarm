@@ -6,6 +6,8 @@ use crate::{Client, Stance};
 
 /// Least time between two casts of the same buff.
 pub(crate) const BUFF_EVERY: Duration = Duration::from_millis(1500);
+/// How long a step's wait for the busy slot holds the top-ups back (guess: a tick or two).
+const HANDS_WANTED_FOR: Duration = Duration::from_secs(3);
 /// What one buff costs in seconds, wind-up to recoil: 3.4 s live for a level VI (Acid Bane III
 /// sent 23.23, landed 25.91, its UseDone a second on), rounded up.
 const CAST_EACH: f32 = 4.0;
@@ -322,6 +324,18 @@ impl Client {
         self.due_buff_among(&wants, within, now).is_some()
     }
 
+    /// Whether an item is on its way to the character: a fetch's act or a giver's answer is
+    /// awaited. A top-up then waits, so the character is not busy as it comes.
+    fn is_expecting_item(&self) -> bool {
+        self.quest_asked.is_some()
+            || self
+                .autoplay
+                .growth
+                .fetching
+                .as_ref()
+                .is_some_and(|f| f.is_bringing())
+    }
+
     /// The urgent window `base`, widened so that the buffs coming due together all go back up
     /// before the first of them lapses: twenty cast together cannot all be put back in a minute.
     fn queue_window(&self, base: f32, wants: &[crate::buffs::Want], now: Instant) -> f32 {
@@ -440,7 +454,17 @@ impl Client {
         let mut topping_up = !urgent;
         // Between fights the urgent pass tops up as well, one at a time, journey or not: the
         // quiet moment the top-up waits for hardly comes to a character always on the move.
-        if due.is_none() && urgent && !fighting {
+        // A step waiting to send an act (a use, a take) goes first: a top-up can wait, and one
+        // cast after another left the slot never free for it.
+        let yielding = self
+            .autoplay
+            .hands_wanted
+            .is_some_and(|t| now.saturating_duration_since(t) < HANDS_WANTED_FOR)
+            || self.is_expecting_item();
+        if yielding && !urgent {
+            return false;
+        }
+        if due.is_none() && urgent && !fighting && !yielding {
             due = self.due_buff_among(&wants, cfg.top_up_within, now);
             topping_up = true;
         }
