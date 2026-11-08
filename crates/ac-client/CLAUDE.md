@@ -61,7 +61,7 @@ read. The fixed curves are placed against those numbers: `LOOT_AT_REST` (45) sit
 | 19 | explore | goal | 20 | `autoplay_explore` |
 | 20 | grow | goal | 10 | `autoplay_grow` |
 
-Housekeeping, every tick, never claiming it: `autoplay_pending_wield`, `autoplay_shield`, `autoplay_rearm`, `autoplay_stock`, `autoplay_claim_pet_kills`, `autoplay_refill_essences`, `autoplay_tidy`, `autoplay_learn_scrolls`, `autoplay_spend_xp`.
+Housekeeping, every tick, never claiming it: `autoplay_pending_wield`, `autoplay_shield`, `autoplay_rearm`, `autoplay_stock`, `autoplay_claim_pet_kills`, `autoplay_mana_stones`, `autoplay_refill_essences`, `autoplay_tidy`, `autoplay_learn_scrolls`, `autoplay_spend_xp`.
 
 ## Systems
 
@@ -86,7 +86,7 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 | weapons | `autoplay_pending_wield`, `arm_for`, `autoplay_shield`, `autoplay_rearm` | `autoplay/hands/weapon.rs`, `crates/ac-loot/src/weapons.rs` | `Autoplay.pending_wield`, `Autoplay.wield_refused`, `Autoplay.armed_for` | wield | autoplay::hands::weapon | wield |
 | ammo | `ready_ammo`, `autoplay_craft_ammo`, `choose_recipe`, `ammo_carried` | `autoplay/hands/ammo.rs` | `Autoplay.crafting`, `Autoplay.wanted_ammo` | arrow | autoplay::hands::ammo | ammo |
 | healing | `autoplay_survive`, `choose_heal`, `self_heals`, `autoplay_vitals` | `autoplay/vitals/heal.rs` | `Autoplay.config.survive`, `Autoplay.last_heal`, `Autoplay.last_vital` | heal | autoplay::vitals::heal | heal, vitals |
-| buffs | `autoplay_buff`, `wanted_buffs`, `due_buff`, `wanted` | `autoplay/vitals/buffs.rs`, `buffs.rs` | `Autoplay.config.buffs`, `Autoplay.last_buff`, `Autoplay.item_buffs` | buff | autoplay::vitals::buffs | buff |
+| buffs | `autoplay_buff`, `wanted_buffs`, `due_buff`, `wanted`, `autoplay_mana_stones` | `autoplay/vitals/buffs.rs`, `buffs.rs`, `autoplay/mana_stones.rs` | `Autoplay.config.buffs`, `Autoplay.last_buff`, `Autoplay.item_buffs`, `Autoplay.mana_stones` | buff | autoplay::vitals::buffs | buff |
 | recruiting | `autoplay_fellowship`, `autoplay_accept_invites`, `next_invitee`, `hear_recruit_refusal` | `autoplay/team/fellowship.rs` | `Autoplay.recruited`, `Autoplay.held_off`, `Team.fellowship` | invit | autoplay::team::fellowship | recruit |
 | team board | `autoplay_team`, `leader_mate`, `worst_hurt`, `rival_leader` | `autoplay/team/mod.rs`, `autoplay/team/view.rs`, `crates/ac-plugin/src/team.rs` | `Autoplay.team` (`TeamView.mates`), `Config.team` | leader | autoplay::team | mate |
 | fellowship planner | `plan_for_team`, `take_orders`, `assign_targets`, `deal_bodies`, `stragglers` | `autoplay/team/orders.rs`, `plan.rs` | `Autoplay.planner`, `Autoplay.orders` | plan:: | autoplay::team::orders | plan, order |

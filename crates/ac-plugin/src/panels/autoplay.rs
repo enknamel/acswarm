@@ -419,6 +419,23 @@ pub(crate) fn draw(
                          to, at the highest level the buffed Summoning skill \
                          allows",
                     );
+                ui.checkbox(&mut cfg.mana.on, "keep worn things charged")
+                    .on_hover_text(
+                        "Use a charged mana stone on the character when any one worn \
+                         thing runs low, and between fights fill empty stones from what \
+                         the loot rules drain (mana junk) until the backup is charged",
+                    );
+                if cfg.mana.on {
+                    ui.add(
+                        egui::Slider::new(&mut cfg.mana.backup, 0..=20).text("charged stones kept"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut cfg.mana.recharge_below, 0.1..=0.95)
+                            .fixed_decimals(2)
+                            .text("recharge below"),
+                    )
+                    .on_hover_text("A share of its mana: any one worn thing under it is recharged");
+                }
                 if matches!(cfg.fight.style, Style::Auto | Style::Magic) {
                     caption(ui, "attack spells, best first");
                     string_list(
@@ -886,6 +903,7 @@ impl Autoplay {
             },
             growth: Default::default(),
             academy: Default::default(),
+            mana: Default::default(),
             quests: ac_client::autoplay::Quests {
                 on: true,
                 off: vec!["killtaskbloodshreth".into()],

@@ -538,6 +538,8 @@ pub struct Config {
     pub academy: crate::academy::Academy,
     /// Quests to do, and which are switched off.
     pub quests: Quests,
+    /// Worn things kept charged with mana stones (see `crate::autoplay::mana_stones`).
+    pub mana: crate::autoplay::mana_stones::Mana,
 }
 
 #[cfg(test)]

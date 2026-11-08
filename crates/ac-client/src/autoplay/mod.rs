@@ -54,6 +54,7 @@ mod hear;
 mod journey;
 mod ledger;
 mod loot;
+pub mod mana_stones;
 mod scrolls;
 pub mod steps;
 pub mod summoning;
@@ -277,6 +278,8 @@ pub struct Autoplay {
     engaged: Option<(u32, Instant, f32)>,
     /// The summoning rules' own state (see `crate::summoning`).
     pub summoning: crate::summoning::State,
+    /// The mana stone rules' own state (see `mana_stones`).
+    pub(crate) mana_stones: mana_stones::State,
     /// Who has attacked the character lately, by name, and when each
     /// last did -- a blow landed or one evaded, since a creature that
     /// misses is attacking all the same, or a spell cast at it, landed

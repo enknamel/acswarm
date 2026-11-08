@@ -551,6 +551,12 @@ pub const HOUSEKEEPING: &[Housekeeping] = &[
         run: Client::autoplay_claim_pet_kills,
     },
     Housekeeping {
+        name: "keep worn things charged",
+        // A stone's use is answered on the spot, fight or none: a worn thing run dry drops its
+        // spells mid-fight. Filling a stone from junk waits for a quiet moment.
+        run: Client::autoplay_mana_stones,
+    },
+    Housekeeping {
         name: "refill summoning essences",
         // One use on the spot between fights, as a pour is: as a goal it waited behind every
         // fight and walk, and the empty essence sat in the pack.

@@ -176,4 +176,16 @@ impl Client {
         }
         n
     }
+
+    /// Ask about `guids` again, keeping what was said until the new answer replaces it: a worn
+    /// thing's mana, which drains while the item buffs read the same appraisal.
+    pub(crate) fn appraise_again(&mut self, guids: impl IntoIterator<Item = u32>) {
+        for g in guids {
+            let pending = self.appraise_queue.contains(&g)
+                || self.appraise_inflight.iter().any(|(i, _)| *i == g);
+            if self.world.objects.contains_key(&g) && !pending {
+                self.appraise_queue.push_back(g);
+            }
+        }
+    }
 }
