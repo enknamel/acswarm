@@ -118,6 +118,12 @@ class Data:
         for key, code in rows(dump, "keys"):
             self.keys_of[code.lower()].append(int(key))
         self.stuck = {int(o) for (o,) in rows(dump, "stuck")}
+        # What an item used on a placed object makes: made -> object -> items used on it.
+        self.made_on = defaultdict(lambda: defaultdict(set))
+        for made, used, on in rows(dump, "recipes"):
+            self.made_on[int(made)][int(on)].add(int(used))
+        # Items a shop sells (vendors.csv, joined at load): a source the walk does not write.
+        self.sold = set()
 
     def ground_places(self, wcid, depth=0):
         """Where `wcid` lies or stands in the world: placed, or made on the ground."""
@@ -617,14 +623,27 @@ def build(data, never):
                     if str(k) not in seen and depth < KEY_DEPTH:
                         seen.add(str(k))
                         todo.append((str(k), depth + 1))
+            for on, used in sorted(data.made_on.get(w, {}).items()):
+                # A world object, never picked up, standing somewhere: the item is used on it.
+                if on not in data.stuck or not data.ground_places(on):
+                    continue
+                keys = sorted(used)
+                src.append((want, "use", on, 1.0,
+                            ";".join("%d=%s" % (k, data.name.get(k, "").replace("=", "-"))
+                                     for k in keys)))
+                for k in keys:
+                    if str(k) not in seen and depth < KEY_DEPTH:
+                        seen.add(str(k))
+                        todo.append((str(k), depth + 1))
         else:
             for c in sorted(data.counter_of[want]):
                 if data.spawns.get(c):
                     src.append((want, "kill", c, 1.0, ""))
+    src = kept_uses(src, wants, data.sold)
     src_out = []
     for want, kind, c, p, keys in src:
         at = ""
-        if kind in ("npc", "floor", "container"):
+        if kind in ("npc", "floor", "container", "use"):
             if kind == "npc":
                 spots = data.placed[c]
             else:
@@ -637,6 +656,20 @@ def build(data, never):
         src_out.append((want, kind, str(c), data.name.get(c, ""), str(data.level(c)),
                         "%g" % round(p, 4), where, at, keys))
     return rows_out, givers_out, src_out, reasons
+
+
+def kept_uses(src, wants, sold):
+    """`src` less each use whose items used on it have no source, and less the rows of an item
+    then wanted by nothing kept."""
+    while True:
+        had = {r[0] for r in src} | {str(w) for w in sold}
+        keep = [r for r in src if r[1] != "use"
+                or any(k.split("=", 1)[0] in had for k in r[4].split(";"))]
+        asked = set(wants) | {k.split("=", 1)[0] for r in keep for k in r[4].split(";") if k}
+        keep = [r for r in keep if r[0] in asked]
+        if len(keep) == len(src):
+            return keep
+        src = keep
 
 
 # Columns of a quests.csv row a random reply's alternatives may differ in and still be one row.
@@ -713,6 +746,10 @@ def split_by_reward(rows_out, data):
 def main():
     dump, out_dir = sys.argv[1], sys.argv[2]
     data = Data(dump)
+    vendors = os.path.join(out_dir, "vendors.csv")
+    if os.path.exists(vendors):
+        with open(vendors, encoding="utf-8") as f:
+            data.sold = {int(r.split(",")[6]) for r in f if r[:1].isdigit()}
     rows_out, _, _, _ = build(data, None)
     stamped = {f for r in rows_out for f in r[15].split(";") if f}
     asked = {qname(a["msg"]) for s in data.sets.values() for a in s["acts"]
@@ -765,15 +802,16 @@ GIVERS_HEADER = """\
 SOURCES_HEADER = """\
 # Where what a quest wants comes from, and what each source itself needs.
 # want,kind,wcid,name,level,chance,landblocks,at,keys
-# want: an item wcid or a kill counter, as quests.csv names it, or a key a container below
-# needs. kind: drop (a corpse drop, chance per kill), kill (a creature counting for the
+# want: an item wcid or a kill counter, as quests.csv names it, or a key a container or use
+# below needs. kind: drop (a corpse drop, chance per kill), kill (a creature counting for the
 # counter), npc (a placed NPC whose talk gives the item), floor (made on the ground by a
-# generator; wcid is the item's own) or container (a chest that holds it, chance per fill).
-# landblocks: hex landblock:spawn entries;... (for an npc, floor or container, hex cell:1 per
-# placement, with at the matching local "x y z";...). keys: for a locked container, the keys
-# whose KeyCode is its LockCode, wcid=name;..., each a want of its own rows. A shop's stock is
-# vendors.csv's, joined at load (ac_world::quests::sources). Regenerate with
-# reference/scripts/data/quests.sh.
+# generator; wcid is the item's own), container (a chest that holds it, chance per fill) or
+# use (a placed object a recipe makes it on, from a carried item used on it). landblocks: hex
+# landblock:spawn entries;... (for an npc, floor, container or use, hex cell:1 per placement,
+# with at the matching local "x y z";...). keys: for a locked container, the keys whose
+# KeyCode is its LockCode; for a use, the items used on it; wcid=name;..., each a want of its
+# own rows. A shop's stock is vendors.csv's, joined at load (ac_world::quests::sources).
+# Regenerate with reference/scripts/data/quests.sh.
 """
 
 if __name__ == "__main__":

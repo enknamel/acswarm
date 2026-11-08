@@ -20,7 +20,8 @@
 # with hunting.sh's filters (attackable, with a level; a landblock with a
 # surface counts its outdoor spawns only); and for each wanted item the
 # generators making it on the ground and the chests holding it, with the
-# keys a locked one needs. docs/quests-design.md §1 says what the
+# keys a locked one needs, and the placed objects a recipe makes it on from
+# an item used on them. docs/quests-design.md §1 says what the
 # walk reads and what it leaves out.
 #
 # This reads the local ACE world database (the community's
@@ -142,8 +143,15 @@ join weenie w on w.class_Id = s.object_Id and w.type = 22 where s.type = 13;'
 
 q stuck 'select object_Id from weenie_properties_bool where type = 1 and value = 1;'
 
+# What a carried item used on a placed object makes (RecipeManager.UseObjectOnTarget,
+# Managers/RecipeManager.cs:43-130): the made item, the item used and the object.
+q recipes 'select r.success_W_C_I_D, c.source_W_C_I_D, c.target_W_C_I_D
+from recipe r join cook_book c on c.recipe_Id = r.id
+where r.success_W_C_I_D <> 0
+  and c.target_W_C_I_D in (select weenie_Class_Id from landblock_instance);'
+
 for t in placed emote action quest killq itemq drops names allowgive ints spawns ground wtypes \
-  gens chestlist locks keys stuck; do
+  gens chestlist locks keys stuck recipes; do
   [ -s "$TMP/$t.tsv" ] || { echo "quests.sh: the $t query returned nothing" >&2; exit 1; }
 done
 
