@@ -29,6 +29,9 @@ const GIVE_PAUSE: Duration = Duration::from_secs(3);
 const GIVE_STALLS: u32 = 3;
 /// Visits begun to one giver on one call before it is given up.
 const GIVER_TRIES: u32 = 3;
+/// A giver used for a talk is waited on this long for a line of its own (guess): left at once,
+/// the journey on cancelled ACE's walk to it and Shoichi never spoke.
+const TALK_WAIT: Duration = Duration::from_secs(5);
 /// A giver this near (metres, 3D) is in reach of a give: the visit's talking reach, with slack.
 const GIVER_REACH: f32 = crate::visit::REACH + 1.0;
 
@@ -536,7 +539,26 @@ impl Client {
                     return Turn::Waited;
                 }
                 if let Some(giver) = self.giver_in_reach(row).filter(|_| self.visits.finished) {
-                    if row.hand == Handing::Talk {
+                    // A talk is over when the giver has said something: else it is waited for, used
+                    // again, and on the last try taken as heard (a_talk_taking_a_quest_up_is_heard_once_made_and_not_made_again_however_soon_it_is_called_for).
+                    let spoke = row.hand != Handing::Talk || self.npc_spoke == Some(giver);
+                    let since = match self.autoplay.growth.talk_wait {
+                        Some((g, t)) if g == giver => t,
+                        _ => {
+                            self.npc_spoke = None;
+                            self.autoplay.growth.talk_wait = Some((giver, now));
+                            now
+                        }
+                    };
+                    if !spoke && now.saturating_duration_since(since) < TALK_WAIT {
+                        let said = format!("waiting for {} to answer", row.giver);
+                        self.autoplay.say(Doing::Shopping, said);
+                        self.autoplay.growth.run = Some(run);
+                        return Turn::Waited;
+                    }
+                    self.autoplay.growth.talk_wait = None;
+                    let again = !spoke && tries < GIVER_TRIES;
+                    if row.hand == Handing::Talk && !again {
                         // The visit's use was the hand-in: kills done, a talk, items it takes.
                         if !self
                             .quest_asked
@@ -554,17 +576,19 @@ impl Client {
                             .note(format!("talked to {} for {}", row.giver, row.title), now);
                         return self.giver_done(run, now, cfg);
                     }
-                    run.phase = Phase::HandingIn {
-                        row,
-                        at,
-                        giver,
-                        taken: 0,
-                        last: None,
-                        stalls: 0,
-                    };
-                    run.since = now;
-                    self.autoplay.growth.run = Some(run);
-                    return Turn::Waited;
+                    if !again {
+                        run.phase = Phase::HandingIn {
+                            row,
+                            at,
+                            giver,
+                            taken: 0,
+                            last: None,
+                            stalls: 0,
+                        };
+                        run.since = now;
+                        self.autoplay.growth.run = Some(run);
+                        return Turn::Waited;
+                    }
                 }
                 // A fight on the way broke the visit off: the run picks it up after.
                 if self.attack_target.is_some() || self.autoplay.casting_at().is_some() {

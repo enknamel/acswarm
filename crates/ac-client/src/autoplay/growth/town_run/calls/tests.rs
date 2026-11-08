@@ -468,11 +468,28 @@ fn a_talk_taking_a_quest_up_is_heard_once_made_and_not_made_again_however_soon_i
     c.visits.finished = true;
     let cfg = c.autoplay.config.growth.clone();
     c.giver_step(run, now, &cfg);
-    // Heard at once: the counter starts, and the talk is let be however soon it is called for.
+    // Not heard until San Ming speaks: Blargerton left Shoichi 18 ms after the use and the quest
+    // was never taken up (a_talk_taking_a_quest_up_is_heard_once_made_and_not_made_again_however_soon_it_is_called_for).
+    assert_eq!(c.quest_log.kills.get("killtaskbloodshreth"), None);
+    assert!(
+        c.autoplay.status.starts_with("waiting for"),
+        "{}",
+        c.autoplay.status
+    );
+    let run = c
+        .autoplay
+        .growth
+        .run
+        .take()
+        .expect("still calling on San Ming");
+    c.npc_spoke = Some(0x8000_0900);
+    c.giver_step(run, now + Duration::from_millis(400), &cfg);
+    // Heard once he spoke: the counter starts, and the talk is let be however soon it is called for.
     assert_eq!(c.quest_log.kills.get("killtaskbloodshreth"), Some(&0));
     assert!(c.quest_asked.is_none());
-    assert!(c.is_giver_refused(start, &at, now + Duration::from_millis(50)));
-    assert!(!c.is_giver_refused(start, &at, now + TALK_AGAIN));
+    let heard = now + Duration::from_millis(400);
+    assert!(c.is_giver_refused(start, &at, heard + Duration::from_millis(50)));
+    assert!(!c.is_giver_refused(start, &at, heard + TALK_AGAIN));
     // The hand-in to the same giver is another talk, not held back by this one.
     let hand_in = ac_world::quests::rows_of("killtaskbloodshreth")
         .find(|r| r.kind == Kind::Kill)

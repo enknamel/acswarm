@@ -214,6 +214,8 @@ pub struct State {
     /// Talks made to quest givers lately: by quest id, giver class, and whether it took the quest
     /// up (the hand-in to the same giver is another talk).
     pub(crate) talked: Recent<(String, u32, bool)>,
+    /// The giver used for a talk, by guid, and when: its answer is waited for (`TALK_WAIT`).
+    pub(crate) talk_wait: Option<(u32, Instant)>,
     /// Pursued quests passed over, by id: why, and since when (`Client::hold_pursuit`).
     pursuit_held: std::collections::BTreeMap<String, (String, Instant)>,
     /// The working pursued hunt's grounds, best first: landblock and where a journey ends.

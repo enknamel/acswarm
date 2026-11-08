@@ -271,6 +271,8 @@ pub struct Client {
     pub quest_asked: Option<quest_log::Asked>,
     /// The server's quest log (`@myquests`) is to be asked for: in the world, and after an answer.
     pub(crate) server_quests_due: bool,
+    /// The last creature other than a player that spoke to the character, by guid.
+    pub(crate) npc_spoke: Option<u32>,
     /// Each pursued quest's step, worked out with the board (`autoplay::growth::pursuit`).
     pub pursuit: Vec<crate::autoplay::PursuitLine>,
     /// Melee combat mode is on.

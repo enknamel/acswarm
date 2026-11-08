@@ -396,6 +396,10 @@ impl Client {
                 return;
             }
         };
+        // Who spoke, when not a player: a giver's answer is its own line (see `giver_step`).
+        if line.sender_id != 0 && !(0x5000_0001..=0x6FFF_FFFF).contains(&line.sender_id) {
+            self.npc_spoke = Some(line.sender_id);
+        }
         // The academy rule listens to what the agents say.
         self.autoplay
             .academy
