@@ -19,6 +19,7 @@ use crate::gem_room::{clear_heading, gem_next, GemNext};
 use crate::{Client, Goal, Owner};
 use overland::{Corridor, EXIT_REACH};
 
+mod flown;
 mod overland;
 mod reaching;
 mod turned_away;
@@ -152,6 +153,8 @@ pub struct Travel {
     /// A recall asked for that goes to a saved position: that position's kind, where we stood and
     /// when. Where it lands is learnt as the position (see `Client::recall_landed`).
     pub(crate) recall_sent: Option<(u32, Vec3, Instant)>,
+    /// The destination (world xy) a journey flies its stretches to: no way left on foot (`flown`).
+    fly_to: Option<Vec2>,
     /// When travel last cast a recall: it lands whatever journey follows (`RECALL_LANDS`).
     pub(crate) recall_cast: Option<Instant>,
     /// Where the journey is bound (always `Goal::At`), to replan around a refusal.
@@ -311,6 +314,7 @@ impl Client {
             self.travel.refused_gems.clear();
             self.travel.refused_walks.clear();
             self.travel.hopped = false;
+            self.travel.fly_to = self.travel.fly_to.filter(|f| f.distance(xy) <= 1.0);
             // A new journey is a road until whoever planned it says
             // otherwise (see `travel_about`).
             self.travel.about_the_ground = false;
@@ -963,8 +967,12 @@ impl Client {
             self.end_trip();
             return Did::blocked("no journey to plan again");
         };
+        let hopping = self.is_hopping();
         self.cancel_travel_keeping_refusals();
-        let did = self.set_off(owner, goal, now);
+        let mut did = self.set_off(owner, goal, now);
+        if matches!(did, Did::Blocked(_)) && hopping {
+            did = self.fly_journey(owner, goal, now);
+        }
         if let (Did::Blocked(why), Some(me), Some(p)) = (&did, self.my_position(), goal.place()) {
             self.refuse(owner, goal, me, p.at, &why.what);
             self.end_trip();
@@ -1217,6 +1225,12 @@ impl Client {
                 ),
             };
             return Some(Goal::At { place, within });
+        }
+        if self.is_journey_flown() {
+            return Some(Goal::At {
+                place: end,
+                within: ARRIVE,
+            });
         }
         self.overland_goal(end.at.truncate())
     }

@@ -148,3 +148,27 @@ fn the_follower_rises_all_the_way_before_crossing_and_lands_before_walking_on() 
     assert_eq!(c.target(w[4], walk), w[5]);
     assert!(!c.is_flying(w[4]));
 }
+
+#[test]
+fn a_walk_with_no_way_on_foot_rises_crosses_above_both_ends_and_lands_on_the_goal() {
+    let from = Place {
+        at: Vec3::new(10.0, 10.0, 180.0),
+        cell: 0xF618_000C,
+    };
+    let goal = Place {
+        at: Vec3::new(-370.0, 0.0, 195.0),
+        cell: 0xF418_000C,
+    };
+    let r = Route::flown_across(from, goal);
+    let w: Vec<_> = r.waypoints.iter().map(|w| (w.place.at, w.kind)).collect();
+    let high = 195.0 + GAP_CLEARANCE;
+    assert_eq!(
+        w,
+        [
+            (Vec3::new(10.0, 10.0, high), EdgeKind::Fly),
+            (Vec3::new(-370.0, 0.0, high), EdgeKind::Fly),
+            (goal.at, EdgeKind::Fly),
+        ]
+    );
+    assert!(r.is_flown());
+}

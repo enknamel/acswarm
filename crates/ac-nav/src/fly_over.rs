@@ -14,6 +14,8 @@ use crate::routing::{Route, Waypoint};
 pub const TRAP_BERTH: f32 = 0.5;
 /// A capsule's floor-to-crown height: a leg this far below a sphere's bottom still touches it.
 const BODY_HEIGHT: f32 = 2.0;
+/// A walk the graph has no way for is flown this far above the higher of its ends (metres).
+pub const GAP_CLEARANCE: f32 = 5.0;
 
 /// One stretch of the route to fly: from `s0` to `s1` metres along it, at least `above` (world z).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -177,6 +179,25 @@ fn rebuilt(route: &Route, ends: &[(Vec3, u32)], stretches: &[Stretch]) -> Route 
 }
 
 impl Route {
+    /// The walk from `from` to `goal` flown whole, where the graph has no way across (a gap, a
+    /// drop it cannot climb back, a portal hung above its floor): straight up to
+    /// [`GAP_CLEARANCE`] above the higher end, level across, and down onto the goal.
+    pub fn flown_across(from: Place, goal: Place) -> Route {
+        let high = from.at.z.max(goal.at.z) + GAP_CLEARANCE;
+        let flown = |at: Vec3, cell: u32| Waypoint {
+            place: Place { at, cell },
+            kind: EdgeKind::Fly,
+            floor: None,
+        };
+        Route {
+            waypoints: vec![
+                flown(Vec3::new(from.at.x, from.at.y, high), from.cell),
+                flown(Vec3::new(goal.at.x, goal.at.y, high), goal.cell),
+                flown(goal.at, goal.cell),
+            ],
+        }
+    }
+
     /// The route walked where it would fly: for a body not allowed to (server-safe movement).
     pub fn walked(self) -> Route {
         let mut out: Vec<Waypoint> = Vec::with_capacity(self.waypoints.len());

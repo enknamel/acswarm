@@ -1642,3 +1642,40 @@ fn a_gem_at_a_dungeon_door_finds_the_floor_in_front_and_is_used() {
         Some(GATEWAY)
     );
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn the_walk_from_the_invitation_landing_into_ithaencs_catacombs_is_flown_across_the_ruins() {
+    // The invitation lands by Ithaenc's cathedral; the Catacombs portal hangs two metres above
+    // the ruins' floor, 380 m west. The terrain's lattice is cliffs there and the walk graph has
+    // no way across the ruins (not even from the catacombs' own exit): it is flown.
+    let o = |cell: u32| ac_world::landblock_origin(cell);
+    let landing = (o(0xF618_000C) + Vec3::new(40.0, 89.0, 182.0), 0xF618_000C);
+    let inside = (o(0x02B7_02F1) + Vec3::new(70.0, -60.0, 0.0), 0x02B7_02F1);
+    let t = crate::walk_trial::journey(60, "invitation landing to the catacombs", landing, inside);
+    let got = crate::walk_trial::run(60, &t);
+    assert!(
+        matches!(got, crate::walk_trial::Outcome::Arrived { .. }),
+        "{got:?}"
+    );
+    // From the catacombs' own exit, 20 m off: the walk to the portal is refused first, in the
+    // region, and that refusal is no bar to the journey flown.
+    let exit = (o(0xF418_000B) + Vec3::new(36.0, 60.0, 191.0), 0xF418_000B);
+    let t = crate::walk_trial::journey(60, "the ruins exit to the catacombs", exit, inside);
+    let got = crate::walk_trial::run(60, &t);
+    assert!(
+        matches!(got, crate::walk_trial::Outcome::Arrived { .. }),
+        "{got:?}"
+    );
+    // Kept to the game's rules, there is no flying: the walk is refused, not pushed at a cliff.
+    let ruins = o(0xF418_000B) + Vec3::new(36.0, 60.0, 191.0);
+    let portal = o(0xF418_000C) + Vec3::new(36.0, 79.3, 195.0);
+    let t = crate::walk_trial::named(60, "ruins to the portal", ruins, 0xF418_000B, portal);
+    let mut c = crate::walk_trial::standing_at(60, &t);
+    c.movement_rules = crate::player::MovementRules::ServerSafe;
+    let got = crate::walk_trial::run_on(&mut c, &t);
+    assert!(
+        matches!(got, crate::walk_trial::Outcome::Refused { .. }),
+        "{got:?}"
+    );
+}

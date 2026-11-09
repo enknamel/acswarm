@@ -297,6 +297,9 @@ pub struct Steering {
     pub grounded: bool,
     /// The body turned flying on for a flown leg, and turns it off once off one.
     pub flying: bool,
+    /// The walk is a journey's stretch with no way left but flying: where the graph has none on
+    /// foot it is flown across (`Route::flown_across`).
+    pub fly_gaps: bool,
     /// When the route left last fell by `PROGRESS` (see [`last_progress`](Self::last_progress)).
     progressed: Option<Instant>,
 }
@@ -328,11 +331,12 @@ impl Steering {
     /// Forget the route, the plan asked, the stalls and the refusal: the goal went away or the user
     /// took over. The next steer asks at once.
     pub fn reset(&mut self) {
-        // What the body may do is the body's, not the walk's.
-        let (grounded, flying) = (self.grounded, self.flying);
+        // What the body may do is the body's, and whether the walk may be flown its asker's.
+        let (grounded, flying, fly_gaps) = (self.grounded, self.flying, self.fly_gaps);
         *self = Steering {
             grounded,
             flying,
+            fly_gaps,
             ..Steering::default()
         };
     }
@@ -442,6 +446,12 @@ impl Steering {
                 self.route = Some(c);
                 self.asking = None;
                 Aim::Go(aim)
+            }
+            // A journey's stretch with no way left but flying: flown across.
+            Planned::NoWay(_) if self.fly_gaps && !self.grounded => {
+                tracing::debug!("route: no way on foot to {:?}; flown across", goal.at);
+                let r = Route::flown_across(from, goal);
+                self.answered(why, me, from, goal, within, Planned::Route(r), now)
             }
             Planned::NoWay(no) => self.refuse(goal, Unreachable::Planner(no)),
             Planned::Building(_) => Aim::Wait,

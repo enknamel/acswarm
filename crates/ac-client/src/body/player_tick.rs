@@ -46,6 +46,8 @@ impl Client {
         let travelling = self.traveling();
         let going = self.going_to();
         let walk_source = self.going.as_ref().map_or("hand", |g| g.owner.label());
+        // A journey's stretch flown, there being no other way (`Travel.fly`).
+        let fly_gaps = self.going.as_ref().is_some_and(|g| g.journey) && self.is_journey_flown();
         // Player movement, camera, and reporting.
         if let Some(pl) = self.player.as_mut() {
             let mut input = input;
@@ -156,6 +158,7 @@ impl Client {
                             cell: goal_cell,
                         };
                         self.steering.grounded = !self.movement_rules.limits().noclip;
+                        self.steering.fly_gaps = fly_gaps;
                         let mut standing = Standing {
                             player: pl,
                             pathfinder: &mut self.pathfinder,

@@ -251,8 +251,15 @@ impl Client {
         if reached(me.at, place.at, within) {
             return Did::Done;
         }
-        // Flown, the body goes straight there (`tick_player`): nothing is planned.
-        let planned = (!self.flies_freely()).then(|| self.plan_walk(place, within));
+        // Flown, the body goes straight there (`tick_player`): nothing is planned. A journey with
+        // no way left but flying flies its stretch across whatever lies between (`Travel.fly`).
+        let fly = journey && self.is_journey_flown();
+        let planned = match fly {
+            true => Some(Planned::Route(ac_nav::routing::Route::flown_across(
+                me, place,
+            ))),
+            false => (!self.flies_freely()).then(|| self.plan_walk(place, within)),
+        };
         if let Some(Planned::NoWay(no)) = planned {
             let why = format!(
                 "no way there: {:?}",
@@ -276,6 +283,8 @@ impl Client {
             refused: None,
             given_up: false,
         });
+        // The follower takes the plan now: told first whether this walk may be flown across.
+        self.steering.fly_gaps = fly;
         // While the server walks, the follower is its; the slot's walk is steered once it is done.
         if let Some(planned) = planned.filter(|_| self.move_to.is_none()) {
             self.steering.adopt(me.at, me, place, within, planned, now);
@@ -475,10 +484,13 @@ impl Client {
     /// (a_walk_left_behind_by_a_recall_is_let_go). Progress is kept from the follower's on the way.
     pub(crate) fn going_to(&mut self) -> Option<(Vec3, f32, u32)> {
         let progress = self.steering.last_progress();
+        let flown = self.is_journey_flown();
         let g = self.going.as_mut().filter(|g| !g.given_up)?;
         g.progressed = progress.map_or(g.progressed, |p| p.max(g.progressed));
         let goal = g.goal;
-        if self.player.is_some() && goal.place().is_some_and(|p| !self.is_in_region(p)) {
+        // A flown journey's stretch is flown past the region on purpose.
+        let kept = flown && g.journey;
+        if !kept && self.player.is_some() && goal.place().is_some_and(|p| !self.is_in_region(p)) {
             self.stop_going(None, "left out of the region");
             return None;
         }
