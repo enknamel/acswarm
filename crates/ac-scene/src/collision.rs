@@ -71,12 +71,14 @@ impl Default for Capsule {
 /// Whether a body can be in `cell`: one with portals that no cell's portal leads into (`entered`)
 /// is an overlay the client's cell-by-cell physics never enters, and its floor lay over the ramp
 /// of the mine at ACB5 and walled it off (test: a_mine_is_walked_down_to_its_floor, in ac-client).
-/// A cell with no portals at all is kept: a teleport or spawn can put a body there.
+/// A cell with no portals at all is kept: a teleport or spawn can put a body there; so is one
+/// opening on the outdoors (portal to 0xFFFF), walked into from there (Ithaenc's 0xF4180115).
 pub(crate) fn is_walked_into(
     cell: &crate::interior::CellScene,
     entered: &std::collections::HashSet<u32>,
 ) -> bool {
-    cell.portal_cells.is_empty() || entered.contains(&cell.cell_id)
+    let outdoors = cell.portal_cells.iter().any(|p| p & 0xFFFF == 0xFFFF);
+    cell.portal_cells.is_empty() || outdoors || entered.contains(&cell.cell_id)
 }
 
 /// Result of one walking step through static geometry.

@@ -1750,3 +1750,24 @@ fn a_portal_not_taken_is_stepped_out_of_and_flown_into_again_level() {
         "never came back into the mouth"
     );
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn the_mistress_chest_is_walked_to_from_the_catacombs_exit() {
+    // The Ancient Key in hand, out of the Catacombs by the Cathedral Ruins Portal: the walk to the
+    // Mistress' Chest was "OffFloor", its room 0xF4180115 having no collision (it opens only on
+    // the outdoors, so no cell's portal leads in), and the chest was dropped as a source.
+    let o = ac_world::landblock_origin(0xF418_0000);
+    let exit = o + Vec3::new(36.0, 60.0, 191.0);
+    let chest = o + Vec3::new(33.87, 18.18, 191.01);
+    let t = crate::walk_trial::named(60, "catacombs exit to the chest", exit, 0xF418_000B, chest);
+    assert_eq!(
+        t.goal_cell, 0xF418_0115,
+        "the chest's floor is not its room's"
+    );
+    let got = crate::walk_trial::run(60, &t);
+    assert!(
+        matches!(got, crate::walk_trial::Outcome::Arrived { .. }),
+        "{got:?}"
+    );
+}
