@@ -54,9 +54,9 @@ pub const RECALL_GIVE_UP: Duration = Duration::from_secs(15);
 /// (Player_Location.cs:180), 15.2 s on Coldeve: sent again at 15 s, a second recall began.
 const LIFESTONE_GIVE_UP: Duration = Duration::from_secs(25);
 const RECALL_TRIES: u32 = 2;
-/// How far off the portal a gem summoned may stand. ACE puts it three
-/// metres in front of whoever used the gem.
-const SUMMONED_REACH: f32 = 8.0;
+/// A recall travel cast lands this long after it is sent: a gem used meanwhile is turned away
+/// busy (the cast, then the server's two-second pause; guess).
+const RECALL_LANDS: Duration = Duration::from_secs(6);
 /// Where the summoned portal stands: this far in front of the character.
 const SUMMON_DISTANCE: f32 = 3.0;
 /// How far ahead must be free of walls for the portal to fit: out to
@@ -100,6 +100,8 @@ struct StepState {
     /// The open ground walked to before the gem is used, and whether that walk is over.
     gem_spot: Option<Place>,
     faced: bool,
+    /// The portals in reach as the gem was used: none of them is the one it summons.
+    portals_before: Vec<u32>,
     /// When the portal the gem summoned was last used, and how many times.
     summoned_used: Option<Instant>,
     summoned_uses: u32,
@@ -153,6 +155,8 @@ pub struct Travel {
     /// A recall asked for that goes to a saved position: that position's kind, where we stood and
     /// when. Where it lands is learnt as the position (see `Client::recall_landed`).
     pub(crate) recall_sent: Option<(u32, Vec3, Instant)>,
+    /// When travel last cast a recall: it lands whatever journey follows (`RECALL_LANDS`).
+    recall_cast: Option<Instant>,
     /// Where the journey is bound (always `Goal::At`), to replan around a refusal.
     goal: Option<Goal>,
     /// Whose journey it is: the STEPS row that set it off or took it over, whose stretches the slot
@@ -775,7 +779,7 @@ impl Client {
         }
         let since_use = now.duration_since(self.travel.state.gem_used.unwrap_or(now));
         let portal = if summons {
-            self.summoned_portal()
+            self.summoned_portal(&self.travel.state.portals_before)
         } else {
             None
         };
@@ -796,7 +800,7 @@ impl Client {
             self.travel.state.summoned_uses,
         ) {
             GemNext::Wait => {}
-            GemNext::UseGem if self.autoplay.cast_in_flight(now) => {}
+            GemNext::UseGem if self.is_gem_held(now) => {}
             GemNext::UseGem => {
                 tracing::info!("travel: {name} was not taken; using it again");
                 self.travel.state.gem_uses += 1;
@@ -865,12 +869,13 @@ impl Client {
             }
             self.travel.state.faced = true;
         }
-        if self.autoplay.cast_in_flight(now) {
+        if self.is_gem_held(now) {
             // A spell is still on its way, and the use would be turned
             // away with the gem kept: wait for the slot.
             return None;
         }
         tracing::info!("travel: using {name}");
+        self.travel.state.portals_before = self.portals_in_reach();
         self.travel.state.gem_spot = None;
         self.travel.state.gem_used = Some(now);
         self.travel.state.gem_uses = 1;
@@ -924,22 +929,15 @@ impl Client {
         self.travel.replan_due = true;
     }
 
-    /// The portal a gem has just put in front of the character: the
-    /// nearest portal in the world within [`SUMMONED_REACH`].
-    fn summoned_portal(&self) -> Option<u32> {
-        let me = self.my_position()?.truncate();
-        self.world
-            .objects
-            .values()
-            .filter(|o| o.item_type & ac_world::item_type::PORTAL != 0)
-            .filter_map(|o| {
-                let p = o.position?;
-                let at = (ac_world::landblock_origin(p.cell) + p.local).truncate();
-                let away = at.distance(me);
-                (away <= SUMMONED_REACH).then_some((o.guid, away))
-            })
-            .min_by(|a, b| a.1.total_cmp(&b.1))
-            .map(|(guid, _)| guid)
+    /// A spell in the air, a recall travel cast not yet landed (even for a journey since put
+    /// down), or the gems' cooldown running: a gem used now is turned away, its try spent.
+    fn is_gem_held(&self, now: Instant) -> bool {
+        self.autoplay.cast_in_flight(now)
+            || self.is_gem_cooling()
+            || self
+                .travel
+                .recall_cast
+                .is_some_and(|t| now.duration_since(t) < RECALL_LANDS)
     }
 
     /// The recall being cast fizzled: cast again as soon as the
@@ -1362,6 +1360,7 @@ impl Client {
                 tracing::info!("travel: casting {name} ({})", casts + 1);
                 self.travel.state.recall_casts = casts + 1;
                 self.travel.state.recall_since = Some(now);
+                self.travel.recall_cast = Some(now);
             }
             why => {
                 tracing::warn!("travel: cannot cast {name}: {why:?}");

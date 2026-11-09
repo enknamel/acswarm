@@ -1582,10 +1582,43 @@ fn a_gem_at_a_dungeon_door_finds_the_floor_in_front_and_is_used() {
     crate::testkit::thing_in_the_pack(&mut c, GEM, "Corcima Castle Copper Ward Portal Gem", 3);
     let mut exit = crate::testkit::creature(EXIT, "Exit Copper Legion Keep");
     exit.item_type = ac_world::item_type::PORTAL;
-    exit.position = crate::testkit::placed(0x0018_01C6, Vec3::new(90.0, -3.0, 0.0));
+    let exit_at = ac_world::landblock_origin(0x0018_01C6) + Vec3::new(90.0, -3.0, 0.0);
+    exit.position = crate::testkit::placed(0x0018_01C6, exit_at);
     c.world.objects.insert(EXIT, exit);
     let now = Instant::now();
     let name = "Corcima Castle Copper Ward Portal Gem";
+    // A recall the hunt cast a moment ago still to land: the gem waits, else it is turned away
+    // busy and the recall carries the character off.
+    c.travel.recall_cast = Some(now);
+    assert_eq!(c.travel_gem_first_use(GEM, name, true, now), None);
+    assert!(c.travel.state.gem_used.is_none(), "used under a recall");
+    c.travel.recall_cast = None;
+    // A gem used a moment ago: every gem shares its 15 s cooldown, and one used inside it is
+    // "used too recently", the tries spent and the gem left out.
+    let clock = ac_net::packet::build(
+        ac_net::packet::Header {
+            flags: ac_net::packet::flags::TIME_SYNC,
+            ..Default::default()
+        },
+        &1000.0f64.to_le_bytes(),
+        &[],
+        0,
+    );
+    c.session.receive(&clock, now);
+    c.world
+        .stats
+        .enchantments
+        .push(ac_world::stats::Enchantment {
+            spell_id: 0x8000 | 1000,
+            start_time: 0.0,
+            duration: 15.0,
+            stat_mod_type: ac_world::stats::enchantment_type::COOLDOWN,
+            received: c.session.server_time(),
+            ..Default::default()
+        });
+    assert_eq!(c.travel_gem_first_use(GEM, name, true, now), None);
+    assert!(c.travel.state.gem_used.is_none(), "used in the cooldown");
+    c.world.stats.enchantments.clear();
     for _ in 0..2 {
         // A pace to face open ground first, perhaps; then the gem.
         if let Some(Goal::At { place, .. }) = c.travel_gem_first_use(GEM, name, true, now) {
@@ -1596,4 +1629,16 @@ fn a_gem_at_a_dungeon_door_finds_the_floor_in_front_and_is_used() {
     }
     assert!(c.travel.refused_gems.is_empty(), "no room at the door");
     assert!(c.travel.state.gem_used.is_some(), "the gem not used");
+    // The keep's exit beside the door is no portal the gem summoned; the Gateway that comes is.
+    assert_eq!(c.summoned_portal(&c.travel.state.portals_before), None);
+    const GATEWAY: u32 = 0x7018_0999;
+    let me = c.my_position().unwrap();
+    let mut gateway = crate::testkit::creature(GATEWAY, "Gateway");
+    gateway.item_type = ac_world::item_type::PORTAL;
+    gateway.position = crate::testkit::placed(0x0018_01C7, me + Vec3::new(0.0, 3.0, 0.0));
+    c.world.objects.insert(GATEWAY, gateway);
+    assert_eq!(
+        c.summoned_portal(&c.travel.state.portals_before),
+        Some(GATEWAY)
+    );
 }

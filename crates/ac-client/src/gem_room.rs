@@ -21,6 +21,12 @@ const GEM_GIVE_UP: Duration = Duration::from_secs(8);
 const SUMMONED_USE_EVERY: Duration = Duration::from_secs(3);
 /// How many times a summoned portal is used before it is given up on.
 const SUMMONED_TRIES: u32 = 4;
+/// The cooldown every portal gem shares, as the enchantment ACE puts on the user: 0x8000 with
+/// CooldownId 1000 (EnchantmentManager.cs:284-306, 1186), 15 s; 483 of `gems.csv`'s 484.
+const GEM_COOLDOWN: u16 = 0x8000 | 1000;
+/// How far off the portal a gem summoned may stand. ACE puts it three metres in front of
+/// whoever used the gem (WorldObject_Magic.cs:1257).
+const SUMMONED_REACH: f32 = 8.0;
 
 /// The way to face to use a gem: the way the character already faces
 /// when that is clear, else the nearest clear heading to it, turning a
@@ -99,6 +105,47 @@ pub(crate) fn gem_next(
 }
 
 impl crate::Client {
+    /// The portals within [`SUMMONED_REACH`], nearest first.
+    pub(crate) fn portals_in_reach(&self) -> Vec<u32> {
+        let Some(me) = self.my_position().map(|p| p.truncate()) else {
+            return Vec::new();
+        };
+        let mut near: Vec<(u32, f32)> = self
+            .world
+            .objects
+            .values()
+            .filter(|o| o.item_type & ac_world::item_type::PORTAL != 0)
+            .filter_map(|o| {
+                let p = o.position?;
+                let at = (ac_world::landblock_origin(p.cell) + p.local).truncate();
+                let away = at.distance(me);
+                (away <= SUMMONED_REACH).then_some((o.guid, away))
+            })
+            .collect();
+        near.sort_by(|a, b| a.1.total_cmp(&b.1));
+        near.into_iter().map(|(guid, _)| guid).collect()
+    }
+
+    /// The portal a gem has just put in front of the character: the nearest in reach that was
+    /// not there, in `before`, as it was used (a dungeon's exit by its door is not it).
+    pub(crate) fn summoned_portal(&self, before: &[u32]) -> Option<u32> {
+        let near = self.portals_in_reach().into_iter();
+        near.into_iter().find(|g| !before.contains(g))
+    }
+
+    /// Whether the gems' shared cooldown still runs: a gem used now is "used too recently"
+    /// (WorldObject_Use.cs:327-336), and the step's tries are spent waiting it out.
+    pub(crate) fn is_gem_cooling(&self) -> bool {
+        let Some(now) = self.session.server_time() else {
+            return false;
+        };
+        let stats = &self.world.stats;
+        stats
+            .enchantments
+            .iter()
+            .any(|e| e.spell_id == GEM_COOLDOWN && e.remaining(now).is_some_and(|l| l > 0.0))
+    }
+
     /// How many of the gem `guid` the pack holds: 0 once the last is spent.
     pub(crate) fn gem_stack(&self, guid: u32) -> u32 {
         match self.world.objects.get(&guid) {
