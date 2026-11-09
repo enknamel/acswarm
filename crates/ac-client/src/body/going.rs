@@ -472,6 +472,16 @@ impl Client {
 
     /// End a step's walk its row did not ask for this tick (end of `tick_autoplay`); a journey's
     /// stretch is the journey's, settled by [`Client::settle_journey`].
+    /// Ask the slot's walk again as it stands, for this tick: false with no walk of a row's own.
+    pub(crate) fn keep_walk(&mut self) -> bool {
+        let tick = self.autoplay.tick;
+        let Some(g) = self.going.as_mut().filter(|g| !g.journey) else {
+            return false;
+        };
+        g.asked = tick;
+        true
+    }
+
     pub(crate) fn settle_going(&mut self) {
         let tick = self.autoplay.tick;
         if let Some(g) = self

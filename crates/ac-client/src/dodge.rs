@@ -863,6 +863,11 @@ impl Client {
         // finds the way) until the shot is clear and in reach.
         // Nor from where two of our shots burst as they left: ACE struck something there that our
         // collision lacks (see `hear_burst`).
+        // Mid-flight over a trap plate the shot is not judged from the air: up there it clears,
+        // the walk was let go, the body came down out of sight and set off again, every second.
+        if self.steering.flying && self.keep_walk() {
+            return Did::Acting;
+        }
         let seen =
             self.shot_clears(target, how) && (matches!(how, How::Melee) || !self.is_dud_spot(me));
         // A doorway either stands in: step out of it, or wait for the target to come out.

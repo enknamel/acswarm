@@ -369,3 +369,51 @@ fn a_swing_is_not_sent_at_a_creature_no_walk_reaches() {
     let moved = c.my_position().expect("standing").distance(me);
     assert!(moved < 0.5, "walked {moved:.1} m");
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_caster_closes_on_its_target_down_a_corridor_of_trap_plates() {
+    // Blargerton, after the Lich Overseer down the Mines of Despair's corridor of plates: stood
+    // inside one plate's berth, every walk flew a 0.1 m crossing, and from the air the shot
+    // cleared, the walk was let go, and he sank out of sight again; 45 s bobbing on the spot.
+    let now0 = std::time::Instant::now();
+    let (mut c, _) = crate::testkit::a_caster_knowing(now0, &["Blade Arc VI"]);
+    crate::testkit::stand(&mut c, 0x0188_0113, glam::Vec3::new(75.0, -100.4, -24.0));
+    c.autoplay.config.enabled = true;
+    c.autoplay.config.fight.enabled = true;
+    c.autoplay.config.fight.radius = 60.0;
+    let lich = 0x8000_0103;
+    c.world.objects.insert(
+        lich,
+        ac_world::WorldObject {
+            guid: lich,
+            weenie_class_id: 8592,
+            name: "Lich Overseer".into(),
+            item_type: ac_world::item_type::CREATURE,
+            object_desc_flags: ac_world::object_desc_flags::ATTACKABLE,
+            health: Some(1.0),
+            position: Some(ac_world::object::Position::new_flat(
+                0x0188_010D,
+                glam::Vec3::new(41.1, -95.8, -24.0),
+            )),
+            ..Default::default()
+        },
+    );
+    let start = c.my_position().unwrap();
+    let plates: Vec<_> = ac_world::traps::in_landblock(0x0188_0000).collect();
+    let mut furthest = 0.0f32;
+    for frame in 0..30 * 20 {
+        let now = now0 + std::time::Duration::from_secs_f32(frame as f32 * 0.05);
+        c.tick_autoplay(now);
+        c.tick_player(crate::player::Input::default(), 0.05, now);
+        c.pathfinder.settle(std::time::Duration::from_secs(5));
+        let me = c.my_position().unwrap();
+        furthest = furthest.max(me.distance(start));
+        for p in &plates {
+            let (centre, r) = p.sphere();
+            let axis = glam::Vec3::new(me.x, me.y, centre.z.clamp(me.z + 0.48, me.z + 1.5));
+            assert!(axis.distance(centre) >= r + 0.48, "on a plate at {me:?}");
+        }
+    }
+    assert!(furthest >= 15.0, "came {furthest:.1} m down the corridor");
+}

@@ -84,7 +84,7 @@ fn near_trap(p: Place, radius: f32, floor: f32) -> bool {
 fn stretches_near(ends: &[(Vec3, u32)], traps: &[&Trap], radius: f32) -> Vec<Stretch> {
     let mut out = Vec::new();
     let mut s = 0.0;
-    for leg in ends.windows(2) {
+    for (i, leg) in ends.windows(2).enumerate() {
         let (a, b) = (leg[0].0, leg[1].0);
         let len = a.distance(b);
         for t in traps {
@@ -94,6 +94,12 @@ fn stretches_near(ends: &[(Vec3, u32)], traps: &[&Trap], radius: f32) -> Vec<Str
                 continue;
             }
             let reach = r + radius + TRAP_BERTH;
+            // The first leg, from where the body stands clear of a plate inside only its berth,
+            // leaving it, never comes nearer: walked, not a crossing of a tenth of a metre.
+            let (fa, d) = ((a - c).truncate(), (b - a).truncate());
+            if i == 0 && fa.length() >= r + radius && fa.dot(d) >= 0.0 {
+                continue;
+            }
             if let Some((t0, t1)) = within_circle(a.truncate(), b.truncate(), c.truncate(), reach) {
                 out.push(Stretch {
                     s0: s + t0 * len,
