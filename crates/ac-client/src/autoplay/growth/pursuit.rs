@@ -828,14 +828,30 @@ impl Client {
                 let here = self.player.as_ref()?.cell >> 16;
                 let mut grounds = self.autoplay.growth.pursuit_grounds.clone();
                 if grounds.iter().any(|(lb, _)| *lb == here) {
-                    let st = &mut self.autoplay.growth;
-                    st.hunting_at = Some(here);
                     // There: the gem that was the way is bought no more.
+                    let st = &mut self.autoplay.growth;
                     let before = st.pursuit_gems.len();
                     st.pursuit_gems.retain(|g| g.quest != line.id);
                     if st.pursuit_gems.len() != before {
                         self.quest_board_at = None;
                     }
+                    // In its dungeon short of the creature's room: walked there, once a visit.
+                    let room = self.pursued_place(here).filter(|p| p.is_indoors());
+                    let me = self.my_position()?.truncate();
+                    let far = room.is_some_and(|p| p.at.truncate().distance(me) > GROUND_REACH);
+                    if let (Some(p), true) =
+                        (room, far && self.autoplay.growth.hunting_at != Some(here))
+                    {
+                        if self.grow_travel(p, super::hunt::ROOM_REACH) {
+                            let st = &mut self.autoplay.growth;
+                            st.bound = Some((here, p.at.truncate(), creature.clone()));
+                            st.quiet_since = None;
+                            let why = format!("for {}: to the {creature}'s room", line.title);
+                            self.autoplay.say(Doing::Traveling, why);
+                            return Some(true);
+                        }
+                    }
+                    self.autoplay.growth.hunting_at = Some(here);
                     return None;
                 }
                 let every = grounds.clone();
@@ -855,7 +871,7 @@ impl Client {
                     if st.skip.since(&lb).is_some() {
                         continue;
                     }
-                    if self.grow_travel(at, GROUND_REACH) {
+                    if self.grow_travel(at, self.ground_reach(lb)) {
                         let st = &mut self.autoplay.growth;
                         st.bound = Some((lb, at.at.truncate(), creature.clone()));
                         st.quiet_since = None;
@@ -920,6 +936,15 @@ impl Client {
     pub(crate) fn pursued_place(&self, lb: u32) -> Option<Place> {
         let grounds = &self.autoplay.growth.pursuit_grounds;
         grounds.iter().find(|(l, _)| *l == lb).map(|(_, p)| *p)
+    }
+
+    /// How near the ground on `lb` a journey there ends: in a pursued creature's own room, else
+    /// within [`GROUND_REACH`].
+    pub(super) fn ground_reach(&self, lb: u32) -> f32 {
+        match self.pursued_place(lb) {
+            Some(p) if p.is_indoors() => super::hunt::ROOM_REACH,
+            _ => GROUND_REACH,
+        }
     }
 }
 

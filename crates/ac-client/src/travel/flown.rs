@@ -35,7 +35,9 @@ impl Client {
         let Some(to) = goal.place().map(|p| p.at.truncate()) else {
             return Did::blocked("no place to fly to");
         };
-        if !self.movement_rules.limits().noclip || self.travel.fly_to.is_some() {
+        // Indoors the walls are the server's: flown through, it puts the body back.
+        let indoors = self.player.as_ref().is_some_and(|p| p.is_indoors());
+        if !self.movement_rules.limits().noclip || self.travel.fly_to.is_some() || indoors {
             return Did::blocked("no way left, and no flying it");
         }
         tracing::info!("travel: no way left on foot; the journey is flown");

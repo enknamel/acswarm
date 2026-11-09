@@ -1942,7 +1942,13 @@ fn a_gem_bought_and_used_between_boards_is_no_errand_once_on_its_ground() {
         hunt,
         "the gem still asked for on its ground"
     );
-    assert!(!c.grow_hunt(now, &cfg), "left its ground");
+    // Walked on to the Moarsman's room at most, never off to another ground.
+    c.grow_hunt(now, &cfg);
+    let bound = c.autoplay.growth.bound_landblock();
+    assert!(
+        bound.is_none_or(|lb| lb == 0x02B7),
+        "left its ground for {bound:x?}"
+    );
     assert!(
         c.autoplay.growth.pursuit_gems.is_empty(),
         "the gem still wanted"

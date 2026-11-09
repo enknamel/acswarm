@@ -916,3 +916,62 @@ fn a_mage_hunts_where_it_kills_fastest() {
     assert!(best.tier().is_some_and(|t| t <= 5), "{best:?}");
     assert_ne!(best.landblock, 0x5643, "the Tumerok Lieutenants");
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_pursued_creatures_room_is_walked_into_from_its_dungeons_landing() {
+    // Blargerton, landed in the Catacombs of Ithaenc for the Putrid Moarsman: the journey ended
+    // 21 m short of its room, explore paced the landing's rooms, and 32 m off the ground was
+    // given up as "could not reach the Putrid Moarsman ground".
+    let lb = 0x02B7;
+    let want = ac_world::quests::Want::Item(25561);
+    let room = ac_world::quest_chain::source_grounds(&want)
+        .into_iter()
+        .find(|g| g.landblock == lb)
+        .and_then(|g| g.place)
+        .expect("the Moarsman's room");
+    assert!(room.is_indoors(), "{room:?}");
+    let mut c =
+        crate::testkit::standing_in_the_field(60, 0x02B7_02F1, glam::Vec3::new(70.0, -60.0, 0.005));
+    c.world.player_guid = Some(crate::testkit::ME);
+    c.autoplay.config.enabled = true;
+    c.autoplay.config.fight.enabled = true;
+    c.pursuit = vec![crate::autoplay::PursuitLine {
+        id: "learn:2023".into(),
+        title: "Recall the Sanctuary".into(),
+        step: crate::autoplay::PursuitStep::Hunt {
+            landblock: lb,
+            creature: "Putrid Moarsman".into(),
+            place: "Catacombs of Ithaenc".into(),
+            more: 1,
+        },
+        working: true,
+        via: None,
+    }];
+    c.autoplay.growth.pursuit_grounds = vec![(lb, room)];
+    c.autoplay.growth.pursuit_sought = vec![4248];
+    let t0 = Instant::now();
+    let dt = 0.05;
+    let mut nearest = f32::MAX;
+    for frame in 0..10 * 20 {
+        let now = t0 + Duration::from_secs_f32(frame as f32 * dt);
+        c.tick_autoplay(now);
+        c.tick_player(crate::player::Input::default(), dt, now);
+        let me = c.my_position().unwrap();
+        nearest = nearest.min(me.truncate().distance(room.at.truncate()));
+    }
+    assert!(
+        nearest <= ROOM_REACH + 0.5,
+        "came within {nearest:.1} m of {room:?}"
+    );
+    assert_eq!(
+        c.autoplay.growth.hunting_at,
+        Some(lb),
+        "{}",
+        c.autoplay.status
+    );
+    assert!(
+        c.autoplay.growth.skip.since(&lb).is_none(),
+        "the ground was given up"
+    );
+}

@@ -14,6 +14,10 @@ use ac_world::Place;
 /// Standing this close to a ground's middle counts as being there.
 pub(super) const GROUND_REACH: f32 = 30.0;
 
+/// A pursued creature's room is walked into, to within this (metres): from 30 m short, behind the
+/// Catacombs of Ithaenc's door frames, the Putrid Moarsman was never seen.
+pub(super) const ROOM_REACH: f32 = 4.0;
+
 /// A ground the character has just left is not gone back to for this
 /// long; one it could not reach, the same.
 pub(super) const SKIP_GROUND_FOR: Duration = Duration::from_secs(20 * 60);
@@ -186,7 +190,7 @@ impl Client {
                 .unwrap_or_else(|| ground_place(lb, at));
             let ground = crate::Goal::At {
                 place,
-                within: GROUND_REACH,
+                within: self.ground_reach(lb),
             };
             if self.is_errand_journey(ground) {
                 // Through portals the metres are to a dungeon's cells, which lie nowhere near it.
@@ -212,11 +216,14 @@ impl Client {
             // a creature for a moment after it dies (see
             // `steps::worth_fighting`), and a body is no reason to wait.
             let away = at.distance(me);
-            // A pursued creature's room in a dungeon is reached at the room, not the way in.
+            // Another row's journey elsewhere is no walk to the ground: this one is walked on.
+            let broken_off = self.journey_broken_off() || self.traveling();
+            // A pursued creature's room in a dungeon is reached at the room, not the way in; a
+            // journey there that ended in its dungeon is there, wherever explore has walked since.
             let spawn_room = self.pursued_place(lb).filter(|p| p.is_indoors());
             let there = match ac_world::hunting::at(lb).filter(|g| g.is_dungeon()) {
                 _ if spawn_room.is_some() => {
-                    here == lb && self.underground() && away <= GROUND_REACH
+                    here == lb && self.underground() && (away <= GROUND_REACH || !broken_off)
                 }
                 Some(_) => here == lb && self.underground(),
                 None => here == lb || away <= GROUND_REACH,
@@ -235,12 +242,10 @@ impl Client {
                 .growth
                 .bound_walked_on
                 .is_some_and(|t| now.duration_since(t) < WALK_ON_EVERY);
-            // Another row's journey elsewhere is no walk to the ground: this one is walked on.
-            let broken_off = self.journey_broken_off() || self.traveling();
             match on_the_way(there, broken_off, busy, lately) {
                 OnTheWay::Wait => return true,
                 OnTheWay::WalkOn => {
-                    if self.grow_travel(place, GROUND_REACH) {
+                    if self.grow_travel(place, self.ground_reach(lb)) {
                         self.autoplay.growth.bound_walked_on = Some(now);
                         self.autoplay.note(
                             format!("on the way to the {name} ground again ({away:.0} m)"),

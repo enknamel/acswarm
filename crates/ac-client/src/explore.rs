@@ -189,6 +189,10 @@ impl Client {
         if self.is_pursuing() && !hunting_here {
             return false;
         }
+        // Nor before the hunted creature's room is reached, which grow walks to first.
+        if hunting_here && self.autoplay.growth.hunting_at != Some(here) {
+            return false;
+        }
         let assets = self.assets.clone();
         let Some(pl) = self.player.as_mut() else {
             return false;
@@ -239,8 +243,10 @@ impl Client {
         }) = self.autoplay.room_bound
         {
             // Arrived: in the room, or in one not walked yet, where the next doorway is chosen; not
-            // in a walked room on the way (exploring_does_not_pace_between_two_rooms).
-            if cell == room || (cell != from && new_here) {
+            // in a walked room on the way (exploring_does_not_pace_between_two_rooms), nor aloft
+            // over a trap plate, which the walk let go would land on.
+            let aloft = self.steering.is_flying_leg(me);
+            if !aloft && (cell == room || (cell != from && new_here)) {
                 self.autoplay.rooms_seen.insert(room);
                 self.autoplay.room_bound = None;
                 return true;
@@ -339,10 +345,20 @@ impl Client {
                 // floor): stood in already, the way on looked for from it (Mossy Cave's 0x0112
                 // walled 0x011A in, 0x0178 over 0x0179 cut off the six rooms beyond).
                 let shared = |p: &Place| p.cell == cell && p.at.distance(aim) <= STOP;
+                // A door frame: no floor of its own, its floor past the sill the next room's
+                // (the Catacombs of Ithaenc's 0x2A7, 0.67 m deep, the way into 0x289).
+                let past: &[u32] = rooms
+                    .0
+                    .iter()
+                    .find(|c| c.cell_id == room)
+                    .map_or(&[], |c| &c.portal_cells);
+                let frame = |p: &Place| p.cell != cell && past.contains(&p.cell);
+                let own = spots.iter().any(|p| p.cell == room);
                 if spots
                     .iter()
                     .any(|p| p.cell == room && p.at.distance(me) <= STOP)
-                    || (!spots.iter().any(|p| p.cell == room) && spots.iter().any(shared))
+                    || (!own && spots.iter().any(shared))
+                    || (!own && spots.iter().any(frame))
                 {
                     self.autoplay.rooms_seen.insert(room);
                     from = room;
@@ -603,6 +619,24 @@ mod tests {
         }
         let stood = play(&mut c, 90);
         assert_keeps_going(&c, &stood);
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn exploring_the_catacombs_of_ithaenc_goes_on_past_its_landing() {
+        // Blargerton, landed by the Catacombs of Ithaenc Portal for the Putrid Moarsman: "no floor
+        // past the door" of 0x2C3, 0x2A7 and 0x2F5, and round 0x2A5, 0x2F0 and 0x2F1 for 5 s.
+        let mut c = crate::testkit::standing_in_the_field(
+            60,
+            0x02B7_02F1,
+            glam::Vec3::new(70.0, -60.0, 0.005),
+        );
+        c.world.player_guid = Some(crate::testkit::ME);
+        c.autoplay.config.enabled = true;
+        c.autoplay.config.fight.enabled = true;
+        let stood = play(&mut c, 15);
+        let past = stood.iter().any(|p| p.distance(stood[0]) > 30.0);
+        assert!(past, "shut {:x?}, stood {stood:?}", c.autoplay.rooms_shut);
     }
 
     #[test]
