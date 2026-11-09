@@ -26,6 +26,9 @@ pub struct Took {
     /// A wait, not a grudge (`docs/agent.md`): it lapses after [`TRY_AGAIN_AFTER`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failed: Option<Failed>,
+    /// Taken off a corpse, not given, bought or carried before: only such a thing is mana junk.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub looted: bool,
 }
 
 /// The salvage that made a bag: the rule whose bands it was salvaged in, and the band.
@@ -136,8 +139,10 @@ impl Ledger {
     }
 
     /// [`remember`](Self::remember), with the rule that decided it.
+    /// Where it came from stays with it: a re-judge does not make a thing looted, nor unmake it.
     pub fn remember_why(&mut self, item: &ItemStats, action: LootAction, rule: Option<&str>) {
         self.changed();
+        let looted = self.is_looted(item);
         self.took.insert(
             item.guid,
             Took {
@@ -146,8 +151,30 @@ impl Ledger {
                 name: item.name.clone(),
                 rule: rule.filter(|r| !r.is_empty()).map(str::to_string),
                 failed: None,
+                looted,
             },
         );
+    }
+
+    /// Write down that `item`, already remembered, came off a corpse.
+    pub fn mark_looted(&mut self, item: &ItemStats) {
+        if let Some(t) = self
+            .took
+            .get_mut(&item.guid)
+            .filter(|t| t.wcid == item.wcid)
+        {
+            if !t.looted {
+                t.looted = true;
+                self.changed();
+            }
+        }
+    }
+
+    /// Whether `item` was taken off a corpse, as [`Ledger::of`] knows it.
+    pub fn is_looted(&self, item: &ItemStats) -> bool {
+        self.took
+            .get(&item.guid)
+            .is_some_and(|t| t.wcid == item.wcid && t.looted)
     }
 
     /// Write down that salvage under `rule`'s bands, in `band`, made `bag`.

@@ -265,6 +265,7 @@ impl Client {
         // What has already been spoken for off this body counts towards
         // a cap (see `ac_loot::Claimed`).
         let mut claimed = ac_loot::corpse::Claimed::default();
+        let mut junk_room = self.junk_room();
         // Listed but not described yet: the server sends the items a
         // pass after the list. Dropped silently, they made a full body
         // read as empty (see `ac_loot::Open::arriving`).
@@ -314,13 +315,22 @@ impl Client {
                     &who,
                     held,
                 );
-                // Mana junk only while a stone waits to be filled: taken past that, it filled the
-                // pack, and the town run went every few minutes to sell it.
+                // Mana junk one piece per stone waiting to be filled: taken past that, it filled
+                // the pack, and the town run went every few minutes to sell it.
                 let judged = match judged {
+                    // Our own body's things are ours: none of it is junk.
                     Judged::Decided(ac_loot::profile::LootAction::Drain, rule)
-                        if !mine && !self.wants_mana_junk() =>
+                        if mine && rule == ac_loot::profile::MANA_JUNK =>
                     {
-                        Judged::Decided(ac_loot::profile::LootAction::Skip, rule)
+                        Judged::None
+                    }
+                    Judged::Decided(ac_loot::profile::LootAction::Drain, rule) if !mine => {
+                        if junk_room == 0 {
+                            Judged::Decided(ac_loot::profile::LootAction::Skip, rule)
+                        } else {
+                            junk_room -= 1;
+                            Judged::Decided(ac_loot::profile::LootAction::Drain, rule)
+                        }
                     }
                     // The same for a stone, past what the backup and one to fill need: fourteen.
                     Judged::Decided(ac_loot::profile::LootAction::Keep, rule)
@@ -675,6 +685,10 @@ impl Client {
                     let why = lying.map(|i| i.why.clone()).unwrap_or_default();
                     if let (Some(action), Some(stats)) = (took, self.stats_of(g)) {
                         self.autoplay.tag_why(&stats, action, Some(&why));
+                        if !self.is_own_corpse(guid) {
+                            self.autoplay.ledger.mark_looted(&stats);
+                            self.autoplay.off_corpses.push((g, action, now));
+                        }
                     }
                     self.take(g);
                     self.autoplay.say(Doing::Looting, next.saying);

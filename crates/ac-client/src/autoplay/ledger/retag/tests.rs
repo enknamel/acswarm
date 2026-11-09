@@ -272,3 +272,73 @@ fn a_pack_is_not_judged_on_a_board_worked_out_before_the_character_was_known() {
     assert_eq!(tags_of(&c)[..10], vec![keep; 10][..]);
     let _ = std::fs::remove_dir_all(c.profiles.dir());
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn mana_junk_is_only_what_came_off_a_corpse() {
+    // The Seasoned Explorer Baton, a quest reward no rule named, was tagged mana junk where it
+    // was carried and drained into a stone: the stone destroys what it drains.
+    let mut c = character_of_level(game_data(), 20);
+    c.world.stats.name = "Bryn".into();
+    c.profiles = std::sync::Arc::new(shelf("looted-junk", vec![]));
+    c.autoplay.config.loot.profile = "test".into();
+    c.autoplay.config.quests.on = false;
+    let me = c.world.player_guid.unwrap();
+    let t0 = Instant::now();
+    c.autoplay_tag_arrivals(t0);
+    let wand = |c: &mut Client, guid: u32| {
+        c.world.objects.insert(
+            guid,
+            ac_world::WorldObject {
+                guid,
+                name: "Baton".into(),
+                weenie_class_id: 5000,
+                item_type: ac_world::item_type::CASTER,
+                value: 500,
+                stack_size: 1,
+                container: Some(me),
+                ..Default::default()
+            },
+        );
+        c.appraisals.insert(
+            guid,
+            ac_net::messages::Appraisal {
+                guid,
+                success: true,
+                ints: vec![(107, 480), (108, 600)],
+                ..Default::default()
+            },
+        );
+    };
+    let (reward, loot) = (0x8000_0011, 0x8000_0012);
+    wand(&mut c, reward);
+    c.autoplay_tag_arrivals(t0);
+    assert_eq!(
+        c.autoplay.ledger.by_guid(reward),
+        None,
+        "a reward made junk"
+    );
+    wand(&mut c, loot);
+    c.autoplay.off_corpses.push((loot, LootAction::Drain, t0));
+    c.autoplay_tag_arrivals(t0);
+    let stats = c.stats_of(loot).unwrap();
+    assert_eq!(c.autoplay.ledger.of(&stats), Some(LootAction::Drain));
+    assert!(
+        c.autoplay.ledger.is_looted(&stats),
+        "where it came from was lost"
+    );
+
+    // A tag written before the flag: the re-judge forgets the reward's, keeps the loot's.
+    let stats = c.stats_of(reward).unwrap();
+    c.autoplay
+        .tag_why(&stats, LootAction::Drain, Some(crate::profile::MANA_JUNK));
+    c.tick_retag(t0);
+    c.tick_retag(t0 + TAG_TIMEOUT);
+    assert_eq!(
+        c.autoplay.ledger.by_guid(reward),
+        None,
+        "the reward still junk"
+    );
+    assert_eq!(c.autoplay.ledger.by_guid(loot), Some(LootAction::Drain));
+    let _ = std::fs::remove_dir_all(c.profiles.dir());
+}

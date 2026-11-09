@@ -16,6 +16,12 @@ pub(crate) const TAG_TIMEOUT: Duration = Duration::from_secs(15);
 /// an appraisal may take is real work for no answer.
 pub(crate) const RETAG_EVERY: Duration = Duration::from_millis(250);
 
+/// How long a take off a corpse may take to land in the pack (guess: the walk to it included).
+const LOOTED_LANDS: Duration = Duration::from_secs(30);
+
+/// What the saved tags mean, in the rules fingerprint: a change re-judges every pack once.
+const TAGS_MEAN: u32 = 1;
+
 /// Each carried thing paired with how many of its kind came before
 /// it, oldest first.
 ///
@@ -66,10 +72,11 @@ pub fn arrival_tag(
     my_name: &str,
     held: u32,
 ) -> Option<LootAction> {
-    arrival_tag_why(stats, id, profile, me, my_name, held).map(|(a, _)| a)
+    arrival_tag_why(stats, id, profile, me, my_name, held, false).map(|(a, _)| a)
 }
 
-/// [`arrival_tag`], with the rule that decided it.
+/// [`arrival_tag`], with the rule that decided it. `looted`: it came off a corpse, the only
+/// way a thing is mana junk; a quest reward the rule drained was destroyed.
 pub(crate) fn arrival_tag_why(
     stats: &crate::items::ItemStats,
     id: Option<&ac_net::messages::Appraisal>,
@@ -77,9 +84,15 @@ pub(crate) fn arrival_tag_why(
     me: &crate::weapons::Wielder,
     my_name: &str,
     held: u32,
+    looted: bool,
 ) -> Option<(LootAction, String)> {
     match judge_loot(stats, id, profile, me, my_name, held) {
         crate::profile::Verdict::Decided(LootAction::Skip, _) => None,
+        crate::profile::Verdict::Decided(LootAction::Drain, rule)
+            if !looted && rule == crate::profile::MANA_JUNK =>
+        {
+            None
+        }
         crate::profile::Verdict::Decided(a, rule) => Some((a, rule)),
         // Not judgeable yet, or nothing claimed it: nothing to write
         // down, and the pack keeps it either way.
@@ -200,6 +213,8 @@ impl Client {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
         profile.map(|p| p.fingerprint()).hash(&mut h);
+        // Bumped when a tag's meaning changes: 1, mana junk only what was looted.
+        TAGS_MEAN.hash(&mut h);
         // Sorted by wcid; none wanted hashes nothing, so a fingerprint from before quests stands.
         for w in &self.quest_wants {
             (w.wcid, w.need).hash(&mut h);
@@ -249,6 +264,7 @@ impl Client {
             let Some(stats) = self.stats_of(guid) else {
                 continue;
             };
+            let looted = self.autoplay.ledger.is_looted(&stats);
             match judge_loot(
                 &stats,
                 self.appraisals.get(&guid),
@@ -257,6 +273,12 @@ impl Client {
                 &who,
                 held,
             ) {
+                crate::profile::Verdict::Decided(LootAction::Drain, rule)
+                    if !looted && rule == crate::profile::MANA_JUNK =>
+                {
+                    // Carried, not looted: never junk, whatever no rule says of it.
+                    self.autoplay.ledger.forget(guid);
+                }
                 crate::profile::Verdict::Decided(LootAction::Skip, _)
                 | crate::profile::Verdict::None => {
                     // Nothing claims it any more. That is not a decision
@@ -304,6 +326,7 @@ impl Client {
             &self.wielder(),
             &self.world.stats.name.clone(),
             self.already_carried(stats.wcid),
+            self.autoplay.ledger.is_looted(&stats),
         )?;
         self.autoplay.tag_why(&stats, action, Some(&rule));
         Some(action)
@@ -336,6 +359,8 @@ impl Client {
         ap.ledger.forget_gone(&carried);
         ap.refused.retain(|g, _| carried.contains(g));
         ap.pending_tags.retain(|(g, _)| carried.contains(g));
+        ap.off_corpses
+            .retain(|(_, _, at)| now.duration_since(*at) < LOOTED_LANDS);
         for g in &carried {
             if ap.seen.insert(*g) && ap.ledger.by_guid(*g).is_none() {
                 ap.pending_tags.push((*g, now));
@@ -362,6 +387,8 @@ impl Client {
             // "keep up to four" was the fourth of four, over the cap,
             // and "the rest, to the counter" had it.
             let held = self.carried_besides(&stats);
+            let looted = self.autoplay.off_corpses.iter().any(|(l, ..)| *l == g);
+            self.autoplay.off_corpses.retain(|(l, ..)| *l != g);
             if let Some((action, rule)) = arrival_tag_why(
                 &stats,
                 self.appraisals.get(&g),
@@ -369,12 +396,16 @@ impl Client {
                 &wielder,
                 &who,
                 held,
+                looted,
             ) {
                 let arrived = format!("{} arrived, tagged {} ({rule})", stats.name, action.label());
                 tracing::info!("autoplay: {arrived}");
                 // Every arrival, in telemetry too: what a purchase or a corpse really put in the pack.
                 self.events.push(crate::Event::Noted(arrived));
                 self.autoplay.tag_why(&stats, action, Some(&rule));
+                if looted {
+                    self.autoplay.ledger.mark_looted(&stats);
+                }
             }
         }
     }

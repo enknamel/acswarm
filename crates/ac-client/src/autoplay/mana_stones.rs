@@ -61,8 +61,8 @@ enum Stone {
 }
 
 impl Client {
-    /// Recharge what is worn when any one thing runs low, and fill empty stones from mana junk
-    /// between fights until [`Mana::backup`] are charged. One use at a time, each answered.
+    /// Recharge what is worn when any one thing runs low, and fill each empty stone from mana junk
+    /// between fights. One use at a time, each answered.
     pub(crate) fn autoplay_mana_stones(&mut self, now: Instant) {
         let cfg = self.autoplay.config.mana.clone();
         if !cfg.on || self.autoplay.cast_in_flight(now) {
@@ -120,7 +120,7 @@ impl Client {
             );
             return;
         }
-        if charged.len() as u32 >= cfg.backup || self.in_a_fight() {
+        if self.in_a_fight() {
             return;
         }
         let empty = stones.iter().find_map(|s| match s {
@@ -185,27 +185,41 @@ impl Client {
         self.autoplay.mana_stones.awaiting = worn;
     }
 
-    /// Whether mana junk is worth taking now: fewer than [`Mana::backup`] stones charged, and an
-    /// empty one left over for it beyond the junk already carried.
-    pub(crate) fn wants_mana_junk(&self) -> bool {
-        let cfg = &self.autoplay.config.mana;
-        if !cfg.on {
-            return false;
+    /// How many more pieces of mana junk are worth taking: one per empty stone, less the junk
+    /// carried or on its way from a corpse.
+    pub(crate) fn junk_room(&self) -> usize {
+        if !self.autoplay.config.mana.on {
+            return 0;
         }
-        let stones = self.stones();
-        let charged = stones
+        let empty = self
+            .stones()
             .iter()
-            .filter(|s| matches!(s, Stone::Charged(_)))
-            .count() as u32;
-        let empty = stones.len() as u32 - charged;
+            .filter(|s| matches!(s, Stone::Empty(_)))
+            .count();
         let carried = self
             .world
             .inventory()
             .filter(|o| o.item_type & ac_world::item_type::MANA_STONE == 0)
             .filter_map(|o| self.stats_of(o.guid))
-            .filter(|s| self.autoplay.ledger.of(s) == Some(LootAction::Drain))
-            .count() as u32;
-        charged < cfg.backup && empty > carried
+            .filter(|s| self.is_mana_junk(s))
+            .count();
+        let coming = self
+            .autoplay
+            .off_corpses
+            .iter()
+            .filter(|(g, action, _)| {
+                *action == LootAction::Drain && !self.world.inventory().any(|o| o.guid == *g)
+            })
+            .count();
+        empty.saturating_sub(carried + coming)
+    }
+
+    /// Whether `item` is to be drained: tagged so, and off a corpse if the built-in rule said it.
+    fn is_mana_junk(&self, item: &ac_loot::items::ItemStats) -> bool {
+        let ledger = &self.autoplay.ledger;
+        ledger.of(item) == Some(LootAction::Drain)
+            && (ledger.why(item.guid) != Some(ac_loot::profile::MANA_JUNK)
+                || ledger.is_looted(item))
     }
 
     /// How many stones are worth carrying: the backup charged, and one more to fill.
@@ -262,8 +276,7 @@ impl Client {
                 let s = self
                     .stats_of(o.guid)
                     .filter(|s| s.appraised && s.mana > 0)?;
-                (self.autoplay.ledger.of(&s) == Some(LootAction::Drain))
-                    .then(|| (o.guid, o.name.clone()))
+                self.is_mana_junk(&s).then(|| (o.guid, o.name.clone()))
             })
     }
 }

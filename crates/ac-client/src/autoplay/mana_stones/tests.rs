@@ -80,17 +80,17 @@ fn a_worn_thing_under_half_its_mana_is_charged_from_a_stone() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
-fn mana_junk_fills_an_empty_stone_until_the_backup_is_charged() {
+fn mana_junk_fills_an_empty_stone_between_fights() {
     let mut c = wearing(480);
     let now = Instant::now();
-    // At 80% nothing is charged; one stone charged of five, so the empty one is filled.
+    // At 80% nothing is charged, so the empty stone is filled.
     c.autoplay_mana_stones(now);
     assert_eq!(c.last_used, Some(JUNK), "the bracelet was not drained");
-    // With the backup full, the junk waits.
+    // The backup charged or not: an empty stone is there to be filled.
     let mut c = wearing(480);
     c.autoplay.config.mana.backup = 1;
     c.autoplay_mana_stones(now);
-    assert_eq!(c.last_used, None, "drained with the backup full");
+    assert_eq!(c.last_used, Some(JUNK), "an empty stone left empty");
     // Nor mid-fight: only a worn thing run low is seen to then.
     let mut c = wearing(480);
     let foe = crate::testkit::standing_by(&mut c, 0x8000_0103, "Tusker Guard", 8.0);
@@ -176,18 +176,31 @@ fn mana_junk_is_taken_only_while_a_stone_waits_for_it() {
     // the pack, and the town run went every few minutes to sell them.
     let mut c = wearing(480);
     // One empty stone, and the bracelet already carried for it: no more.
-    assert!(
-        !c.wants_mana_junk(),
-        "junk taken with every stone spoken for"
-    );
+    assert!(c.junk_room() == 0, "junk taken with every stone spoken for");
     c.world.objects.remove(&JUNK);
     assert!(
-        c.wants_mana_junk(),
+        c.junk_room() > 0,
         "an empty stone waits, and nothing to fill it"
     );
-    // The backup charged: none wanted, empty stones or not.
-    c.autoplay.config.mana.backup = 1;
-    assert!(!c.wants_mana_junk(), "taken with the backup charged");
+    // No empty stone: none wanted.
+    c.world.objects.remove(&EMPTY);
+    assert!(c.junk_room() == 0, "taken with no stone to fill");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn only_looted_mana_junk_is_drained() {
+    // The built-in rule's tag on a thing carried, not looted: a quest reward, never drained.
+    let mut c = wearing(480);
+    let stats = c.stats_of(JUNK).unwrap();
+    c.autoplay
+        .tag_why(&stats, LootAction::Drain, Some(ac_loot::profile::MANA_JUNK));
+    let now = Instant::now();
+    c.autoplay_mana_stones(now);
+    assert_eq!(c.last_used, None, "a carried thing drained");
+    c.autoplay.ledger.mark_looted(&stats);
+    c.autoplay_mana_stones(now);
+    assert_eq!(c.last_used, Some(JUNK), "looted junk left undrained");
 }
 
 #[test]

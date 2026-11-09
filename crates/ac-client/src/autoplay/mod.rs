@@ -421,6 +421,8 @@ pub struct Autoplay {
     /// Arrivals waiting for their appraisal before the rules judge
     /// them, and since when.
     pending_tags: Vec<(u32, Instant)>,
+    /// Things sent for off a corpse, what for and when, until they land: the arrival is looted.
+    pub(crate) off_corpses: Vec<(u32, LootAction, Instant)>,
     /// The profile the ledger's decisions were made under, by identity
     /// (the shelf replaces the whole thing on every edit). `None` before
     /// the first look; `Some(None)` for a character with no profile.
