@@ -57,6 +57,11 @@ impl Client {
             if (self.move_to.is_none() && going.is_none()) || manual {
                 self.steering.reset();
             }
+            // Off a flown leg (landed, or the walk put down): the flying it turned on ends.
+            if self.steering.flying && !self.steering.is_flying_leg(pl.world_position()) {
+                pl.set_noclip(false);
+                self.steering.flying = false;
+            }
             // A sidestep out of a spell's way comes before every other
             // goal, for the moment it lasts; it ends when its time is
             // up, when it is reached, or when the user takes over.
@@ -128,7 +133,7 @@ impl Client {
                     pl.step_cap = None;
                     let d = g - pl.world_position();
                     let flat = glam::Vec2::new(d.x, d.y);
-                    if !manual && pl.noclip {
+                    if !manual && pl.noclip && !self.steering.flying {
                         // Flying: straight there, up or down as needed,
                         // nothing in the way.
                         if flat.length() > stop {
@@ -150,11 +155,19 @@ impl Client {
                             at: g,
                             cell: goal_cell,
                         };
+                        self.steering.grounded = !self.movement_rules.limits().noclip;
                         let mut standing = Standing {
                             player: pl,
                             pathfinder: &mut self.pathfinder,
                         };
                         let aim = self.steering.steer(&mut standing, goal_place, stop, now);
+                        // A flown leg over a trap plate: flying from its rise to its landing.
+                        let fly = self
+                            .steering
+                            .is_flying_leg(standing.player.world_position());
+                        if fly && !standing.player.noclip {
+                            self.steering.flying = standing.player.set_noclip(true);
+                        }
                         tracing::trace!(
                             target: "steer",
                             "at {:?} goal {g:?} aim {aim:?}",
@@ -176,7 +189,7 @@ impl Client {
                             tracing::info!("server move-to let go: no way to it");
                         }
                         let aim = match aim {
-                            ac_nav::Aim::Go(at) => {
+                            ac_nav::Aim::Go(at) if !fly => {
                                 let me = pl.world_position();
                                 let cap = pl.capsule();
                                 let clutter = self
@@ -221,6 +234,7 @@ impl Client {
                         // sets off forward whatever the aim, keeping its old heading.
                         match aim {
                             ac_nav::Aim::NoWay | ac_nav::Aim::Wait => input.forward = 0.0,
+                            ac_nav::Aim::Go(at) if fly && pl.noclip => fly_at(pl, &mut input, at),
                             ac_nav::Aim::Go(at) => {
                                 let d = at - pl.world_position();
                                 let flat = glam::Vec2::new(d.x, d.y);
@@ -316,5 +330,20 @@ impl Client {
             return PlayerFrame { dirty, pose };
         }
         PlayerFrame::default()
+    }
+}
+
+/// Fly at `at`, a flown leg's waypoint: up or down first and level across only at its height, so
+/// no stretch the server sweeps between two reports dips into the plate's reach.
+fn fly_at(pl: &mut player::Player, input: &mut player::Input, at: glam::Vec3) {
+    let d = at - pl.world_position();
+    let flat = glam::Vec2::new(d.x, d.y);
+    // Eased over the last 0.3 m: a long frame at full climb overshoots the height.
+    input.climb = (d.z / 0.3).clamp(-1.0, 1.0);
+    input.forward = 0.0;
+    if flat.length() > 0.05 && d.z.abs() < ac_nav::steering::FLY_ARRIVE.1 {
+        pl.heading = (-flat.x).atan2(flat.y);
+        input.forward = flat.length().clamp(0.2, 1.0);
+        input.run = true;
     }
 }

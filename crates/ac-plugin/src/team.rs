@@ -370,7 +370,7 @@ fn describe_as(client: &ac_client::Client, session: usize, with_supplies: bool) 
         can_soften: client.can_soften(),
         hits_with_weapons: client.hits_with_weapons(),
         leads: cfg.lead,
-        flying: client.noclip(),
+        flying: client.flies_freely(),
         cell: player.cell,
         level: stats.level,
         total_xp: stats.total_xp,

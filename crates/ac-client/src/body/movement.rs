@@ -110,6 +110,12 @@ impl Client {
         self.player.as_ref().is_some_and(|p| p.noclip)
     }
 
+    /// Flying by hand or after a flying leader: straight at the goal, nothing planned. A route's
+    /// own flown leg over a trap plate is not this; the route is followed through it.
+    pub fn flies_freely(&self) -> bool {
+        self.noclip() && !self.steering.flying
+    }
+
     /// Flying was asked for and the movement rules refused it (see
     /// [`player::Player::noclip_refused`]).
     pub fn noclip_refused(&self) -> bool {

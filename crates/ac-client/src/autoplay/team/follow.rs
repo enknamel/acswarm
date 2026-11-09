@@ -84,7 +84,7 @@ impl Client {
         };
         let keep = team.follow_distance.max(1.5);
         // Fly when the leader flies, land when it lands.
-        if leader.flying != self.noclip() {
+        if leader.flying != self.flies_freely() {
             self.set_noclip(leader.flying);
         }
         let flat = glam::Vec2::new(leader.world.x - me.x, leader.world.y - me.y).length();
@@ -133,7 +133,7 @@ impl Client {
                         return false;
                     }
                     // Flown, a walk goes straight there whatever the planner says.
-                    Did::Blocked(why) if !self.noclip() => refused = Some(why.what),
+                    Did::Blocked(why) if !self.flies_freely() => refused = Some(why.what),
                     _ => {
                         // Past the region the slot set off on a journey: following's, for a stop.
                         if self.traveling() {

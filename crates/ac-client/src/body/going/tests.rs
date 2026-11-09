@@ -336,3 +336,84 @@ fn an_arrived_walk_holds_no_journey_back() {
     assert!(leg.as_ref().is_some_and(Did::fine), "{leg:?}");
     assert_eq!(c.going.as_ref().map(|g| g.owner), Some(Owner::Journey));
 }
+
+/// Whether a capsule standing on `feet` touches the sphere `(centre, radius)`.
+fn touches(feet: Vec3, cap: &ac_scene::collision::Capsule, sphere: (Vec3, f32)) -> bool {
+    let (c, r) = sphere;
+    let low = feet.z + cap.radius;
+    let high = feet.z + (cap.height - cap.radius).max(cap.radius);
+    let axis = Vec3::new(feet.x, feet.y, c.z.clamp(low, high));
+    axis.distance(c) < r + cap.radius
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_walk_past_a_buff_stripping_plate_flies_over_it_and_never_touches_it() {
+    // Nullify All Magic Other strips every buff from whoever the server sweeps over its plate;
+    // the walk flies the stretch, its capsule never meeting the sphere, and lands to walk on.
+    let mut tried = 0;
+    let plates = ac_world::traps::all()
+        .iter()
+        .filter(|t| t.spells.contains("Nullify All Magic Other") && t.scale == 1.0);
+    for t in plates {
+        for dir in [Vec3::X, Vec3::Y, -Vec3::X, -Vec3::Y] {
+            let trial = walk_trial::named(
+                40,
+                "past a plate",
+                t.at - dir * 6.0,
+                t.cell,
+                t.at + dir * 6.0,
+            );
+            let floored = |p: Vec3| (p.z - t.at.z).abs() < 0.5;
+            if !floored(trial.start) || !floored(trial.goal) {
+                continue;
+            }
+            let mut c = walk_trial::standing_at(40, &trial);
+            c.world.player_guid = Some(ME);
+            c.movement_rules = crate::player::MovementRules::Unrestricted;
+            let goal = Goal::At {
+                place: Place {
+                    at: trial.goal,
+                    cell: trial.goal_cell,
+                },
+                within: 1.0,
+            };
+            let dt = 0.05;
+            let mut now = Instant::now();
+            if !c.go(Owner::Hand, goal, now).acting() {
+                continue;
+            }
+            tried += 1;
+            let cap = c.player.as_ref().unwrap().capsule();
+            let (mut flew, mut arrived) = (false, false);
+            for frame in 0..600 {
+                if frame % 6 == 0 && c.go(Owner::Hand, goal, now) == Did::Done {
+                    arrived = true;
+                    break;
+                }
+                c.tick_player(crate::player::Input::default(), dt, now);
+                c.pathfinder.settle(Duration::from_secs(5));
+                now += Duration::from_secs_f32(dt);
+                let me = c.my_position().unwrap();
+                flew |= c.noclip();
+                assert!(
+                    !touches(me, &cap, t.sphere()),
+                    "touched the plate at {:?} from {me:?} (frame {frame})",
+                    t.at
+                );
+            }
+            if !arrived {
+                continue;
+            }
+            assert!(flew, "walked past the plate at {:?} without flying", t.at);
+            // There, the walk is let go: the next frame's body lands.
+            c.tick_player(crate::player::Input::default(), dt, now);
+            assert!(!c.noclip(), "still flying at the goal");
+            return;
+        }
+        if tried >= 12 {
+            break;
+        }
+    }
+    panic!("no walk past a Nullify plate arrived ({tried} tried)");
+}

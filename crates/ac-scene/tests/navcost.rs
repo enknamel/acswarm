@@ -43,6 +43,8 @@ fn measure(tag: &str, block: u32, area: &mut Area) {
                 EdgeKind::Walk => walk += 1,
                 EdgeKind::Drop => drop += 1,
                 EdgeKind::Doorway => doorway += 1,
+                // Only a route's own crossing of a trap plate: the graph never holds one.
+                EdgeKind::Fly => unreachable!("a flown edge in the graph"),
             }
         }
     }

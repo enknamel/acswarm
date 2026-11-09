@@ -252,7 +252,7 @@ impl Client {
             return Did::Done;
         }
         // Flown, the body goes straight there (`tick_player`): nothing is planned.
-        let planned = (!self.noclip()).then(|| self.plan_walk(place, within));
+        let planned = (!self.flies_freely()).then(|| self.plan_walk(place, within));
         if let Some(Planned::NoWay(no)) = planned {
             let why = format!(
                 "no way there: {:?}",
@@ -287,7 +287,7 @@ impl Client {
     fn answer_going(&mut self, me: Vec3, place: Place, now: Instant) -> Did {
         let unreachable = self.steering.unreachable(place.at);
         let progress = self.steering.last_progress();
-        let flown = self.noclip();
+        let flown = self.flies_freely();
         let Some(g) = self.going.as_mut() else {
             return Did::Acting;
         };
