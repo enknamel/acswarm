@@ -835,24 +835,21 @@ impl Client {
                     if st.pursuit_gems.len() != before {
                         self.quest_board_at = None;
                     }
-                    // In its dungeon short of the creature's room: walked there, once a visit.
-                    let room = self.pursued_place(here).filter(|p| p.is_indoors());
-                    let me = self.my_position()?.truncate();
-                    let far = room.is_some_and(|p| p.at.truncate().distance(me) > GROUND_REACH);
-                    if let (Some(p), true) =
-                        (room, far && self.autoplay.growth.hunting_at != Some(here))
-                    {
-                        if self.grow_travel(p, super::hunt::ROOM_REACH) {
-                            let st = &mut self.autoplay.growth;
-                            st.bound = Some((here, p.at.truncate(), creature.clone()));
-                            st.quiet_since = None;
-                            let why = format!("for {}: to the {creature}'s room", line.title);
-                            self.autoplay.say(Doing::Traveling, why);
-                            return Some(true);
-                        }
-                    }
+                    // In its dungeon the creature is hunted where it spawns: its rooms gone round,
+                    // nearest first, and the rest of the dungeon never explored.
                     self.autoplay.growth.hunting_at = Some(here);
-                    return None;
+                    let room = self.next_spawn_room(here, creature)?;
+                    if self.grow_travel(room, super::hunt::ROOM_REACH) {
+                        let st = &mut self.autoplay.growth;
+                        st.bound = Some((here, room.at.truncate(), creature.clone()));
+                        st.quiet_since = None;
+                        let why = format!("for {}: to a {creature}'s room", line.title);
+                        self.autoplay.say(Doing::Traveling, why);
+                        return Some(true);
+                    }
+                    // No way into it: passed over this time round.
+                    self.autoplay.growth.spawns_walked.push(room.cell);
+                    return Some(false);
                 }
                 let every = grounds.clone();
                 // The ground reached soonest first: the most spawns may be a 75-minute road away.
@@ -938,6 +935,43 @@ impl Client {
         grounds.iter().find(|(l, _)| *l == lb).map(|(_, p)| *p)
     }
 
+    /// Whether the working pursuit hunts in `lb` a creature that spawns in its rooms.
+    pub(crate) fn hunts_spawn_rooms(&self, lb: u32) -> bool {
+        let Some(PursuitStep::Hunt { creature, .. }) = self.working_pursuit().map(|l| &l.step)
+        else {
+            return false;
+        };
+        self.pursued_place(lb).is_some() && spawn_rooms(lb, creature).next().is_some()
+    }
+
+    /// The nearest of `creature`'s spawn rooms in the dungeon `lb` not gone round yet, the one
+    /// stood in counted; all gone round, the round starts again. `None` with none known.
+    fn next_spawn_room(&mut self, lb: u32, creature: &str) -> Option<Place> {
+        let me = self.my_position()?;
+        let rooms: Vec<Place> = spawn_rooms(lb, creature).collect();
+        let walked = &mut self.autoplay.growth.spawns_walked;
+        walked.retain(|c| *c >> 16 == lb);
+        for r in rooms
+            .iter()
+            .filter(|r| r.at.distance(me) <= super::hunt::ROOM_HELD)
+        {
+            if !walked.contains(&r.cell) {
+                walked.push(r.cell);
+            }
+        }
+        if rooms.iter().all(|r| walked.contains(&r.cell)) {
+            walked.retain(|c| {
+                rooms
+                    .iter()
+                    .any(|r| r.cell == *c && r.at.distance(me) <= super::hunt::ROOM_HELD)
+            });
+        }
+        rooms
+            .into_iter()
+            .filter(|r| !walked.contains(&r.cell))
+            .min_by(|a, b| a.at.distance(me).total_cmp(&b.at.distance(me)))
+    }
+
     /// How near the ground on `lb` a journey there ends: in a pursued creature's own room, else
     /// within [`GROUND_REACH`].
     pub(super) fn ground_reach(&self, lb: u32) -> f32 {
@@ -946,6 +980,17 @@ impl Client {
             _ => GROUND_REACH,
         }
     }
+}
+
+/// The dungeon rooms of `lb` that `creature` spawns in.
+fn spawn_rooms<'a>(lb: u32, creature: &'a str) -> impl Iterator<Item = Place> + 'a {
+    ac_world::spawns::in_block(lb << 16)
+        .iter()
+        .filter(move |s| s.indoors() && s.name.eq_ignore_ascii_case(creature))
+        .map(|s| Place {
+            at: s.at,
+            cell: s.cell,
+        })
 }
 
 #[cfg(test)]

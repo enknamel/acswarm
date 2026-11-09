@@ -189,8 +189,9 @@ impl Client {
         if self.is_pursuing() && !hunting_here {
             return false;
         }
-        // Nor before the hunted creature's room is reached, which grow walks to first.
-        if hunting_here && self.autoplay.growth.hunting_at != Some(here) {
+        // Nor in a hunted creature's dungeon: grow goes round the rooms it spawns in
+        // (a_pursued_creatures_spawn_rooms_are_gone_round_not_the_dungeon).
+        if hunting_here && self.hunts_spawn_rooms(here) {
             return false;
         }
         let assets = self.assets.clone();

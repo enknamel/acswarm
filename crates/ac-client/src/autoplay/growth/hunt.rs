@@ -17,6 +17,8 @@ pub(super) const GROUND_REACH: f32 = 30.0;
 /// A pursued creature's room is walked into, to within this (metres): from 30 m short, behind the
 /// Catacombs of Ithaenc's door frames, the Putrid Moarsman was never seen.
 pub(super) const ROOM_REACH: f32 = 4.0;
+/// Within this (metres, 3D) of a pursued creature's spawn room, it counts as gone round.
+pub(super) const ROOM_HELD: f32 = 2.0 * ROOM_REACH;
 
 /// A ground the character has just left is not gone back to for this
 /// long; one it could not reach, the same.

@@ -917,12 +917,9 @@ fn a_mage_hunts_where_it_kills_fastest() {
     assert_ne!(best.landblock, 0x5643, "the Tumerok Lieutenants");
 }
 
-#[test]
-#[ignore = "needs AC_DATA_DIR"]
-fn a_pursued_creatures_room_is_walked_into_from_its_dungeons_landing() {
-    // Blargerton, landed in the Catacombs of Ithaenc for the Putrid Moarsman: the journey ended
-    // 21 m short of its room, explore paced the landing's rooms, and 32 m off the ground was
-    // given up as "could not reach the Putrid Moarsman ground".
+/// At the Catacombs of Ithaenc's landing, hunting the Putrid Moarsman for Recall the Sanctuary:
+/// the character, and the Moarsman's room.
+fn landed_for_the_moarsman() -> (Client, Place) {
     let lb = 0x02B7;
     let want = ac_world::quests::Want::Item(25561);
     let room = ac_world::quest_chain::source_grounds(&want)
@@ -950,6 +947,17 @@ fn a_pursued_creatures_room_is_walked_into_from_its_dungeons_landing() {
     }];
     c.autoplay.growth.pursuit_grounds = vec![(lb, room)];
     c.autoplay.growth.pursuit_sought = vec![4248];
+    (c, room)
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_pursued_creatures_room_is_walked_into_from_its_dungeons_landing() {
+    // Blargerton, landed in the Catacombs of Ithaenc for the Putrid Moarsman: the journey ended
+    // 21 m short of its room, explore paced the landing's rooms, and 32 m off the ground was
+    // given up as "could not reach the Putrid Moarsman ground".
+    let (mut c, room) = landed_for_the_moarsman();
+    let lb = 0x02B7;
     let t0 = Instant::now();
     let dt = 0.05;
     let mut nearest = f32::MAX;
@@ -973,5 +981,33 @@ fn a_pursued_creatures_room_is_walked_into_from_its_dungeons_landing() {
     assert!(
         c.autoplay.growth.skip.since(&lb).is_none(),
         "the ground was given up"
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_pursued_creatures_spawn_rooms_are_gone_round_not_the_dungeon() {
+    // Once in the Moarsman's room the explorer took the Catacombs and walked them to the bottom:
+    // the hunt goes round the fourteen rooms it spawns in instead, nearest first.
+    let (mut c, _) = landed_for_the_moarsman();
+    c.autoplay.growth.hunting_at = Some(0x02B7);
+    let mut walked = std::collections::BTreeSet::new();
+    let t0 = Instant::now();
+    let dt = 0.05;
+    for frame in 0..90 * 20 {
+        let now = t0 + Duration::from_secs_f32(frame as f32 * dt);
+        c.tick_autoplay(now);
+        c.tick_player(crate::player::Input::default(), dt, now);
+        assert!(
+            c.autoplay.room_bound.is_none(),
+            "exploring: {}",
+            c.autoplay.status
+        );
+        walked.extend(c.autoplay.growth.spawns_walked.iter().copied());
+    }
+    assert!(
+        walked.len() >= 10,
+        "went round {walked:x?}: {}",
+        c.autoplay.status
     );
 }

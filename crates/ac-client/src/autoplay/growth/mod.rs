@@ -167,6 +167,8 @@ pub struct State {
     bound_walked_on: Option<Instant>,
     /// The ground the character hunts on, once it has arrived.
     pub hunting_at: Option<u32>,
+    /// The pursued creature's spawn rooms in its dungeon gone round this time (cells).
+    pub(super) spawns_walked: Vec<u32>,
     /// Grounds not to go to for a while, and since when.
     pub(super) skip: Recent<u32>,
     /// Portal flags whose NPC was lately set off to, by flag: not set off to again for a while.
