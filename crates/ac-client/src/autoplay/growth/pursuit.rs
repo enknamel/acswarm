@@ -769,6 +769,18 @@ impl Client {
         self.pursuit.iter().find(|l| l.working)
     }
 
+    /// Whether `quest` is the working pursuit's hunt and the body is on its way to one of its
+    /// grounds, or there: none of its own buys is an errand then (its gem was just used).
+    pub(super) fn is_on_quest_road(&self, quest: &str) -> bool {
+        let hunting = self
+            .working_pursuit()
+            .is_some_and(|l| l.id == quest && matches!(l.step, PursuitStep::Hunt { .. }));
+        let here = self.player.as_ref().map_or(0, |p| p.cell >> 16);
+        let bound = self.autoplay.growth.bound_landblock();
+        let ground = |lb: u32| self.pursued_place(lb).is_some();
+        hunting && (ground(here) || (self.traveling() && bound.is_some_and(ground)))
+    }
+
     /// Whether the working pursued quest's step is a hunt.
     pub(crate) fn is_pursued_hunt(&self) -> bool {
         self.working_pursuit()

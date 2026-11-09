@@ -2005,3 +2005,33 @@ fn a_gem_wanted_before_a_restart_is_still_bought_after_it() {
     );
     assert_eq!(buys(&c), 1, "the buy line went");
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_gem_just_used_is_no_errand_on_the_way_to_its_ground() {
+    // Through the invitation's portal into Ithaenc's ruins, the gem gone with the use: the town
+    // run was short of it at once, and Lifestone Sending took him home to buy another.
+    let mut c = mage_pursuing("learn:2023", "gem-on-the-road");
+    let now = std::time::Instant::now();
+    c.refresh_quests(now);
+    let cfg = c.autoplay.config.growth.clone();
+    assert!(!c.grow_hunt(now, &cfg));
+    assert!(matches!(again(&mut c, now), PursuitStep::Buy { .. }));
+    let invitation = |c: &Client| {
+        c.grow_needs(&cfg)
+            .iter()
+            .any(|n| n.name.starts_with("Invitation"))
+    };
+    assert!(invitation(&c), "the invitation not wanted at the start");
+    // Bought: the hunt is the step, the trip planner takes the gem.
+    let gem = c.autoplay.growth.pursuit_gems[0].wcid;
+    in_the_pack(&mut c, 0x8000_0700, gem, "Invitation Ithaenc Cathedral", 1);
+    assert!(matches!(again(&mut c, now), PursuitStep::Hunt { .. }));
+    // Used and landed by its portal, the trip on to the Moarsman's room under way, no board yet.
+    in_the_pack(&mut c, 0x8000_0700, gem, "Invitation Ithaenc Cathedral", 0);
+    crate::testkit::stand(&mut c, 0xF618_000C, glam::Vec3::new(40.0, 89.0, 182.005));
+    let room = c.pursued_place(0x02B7).expect("the Moarsman's room");
+    assert!(c.journey_to(room, 4.0), "no journey to the room");
+    c.autoplay.growth.bound = Some((0x02B7, room.at.truncate(), "Putrid Moarsman".into()));
+    assert!(!invitation(&c), "a run home for another invitation");
+}

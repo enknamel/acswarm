@@ -85,6 +85,9 @@ impl Client {
             .map(|p| {
                 p.shortfall(stock, &me, my_name)
                     .into_iter()
+                    // A pursued quest's own buys wait while its hunt is gone to: the Invitation
+                    // just used, a run home to buy another cut the trip to Ithaenc short.
+                    .filter(|s| s.want.quest.is_empty() || !self.is_on_quest_road(&s.want.quest))
                     .map(|s| {
                         (
                             s.want.what.clone(),
