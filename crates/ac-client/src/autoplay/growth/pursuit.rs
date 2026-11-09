@@ -765,7 +765,7 @@ impl Client {
     }
 
     /// The working pursued quest, if one can go on.
-    fn working_pursuit(&self) -> Option<&PursuitLine> {
+    pub(super) fn working_pursuit(&self) -> Option<&PursuitLine> {
         self.pursuit.iter().find(|l| l.working)
     }
 
@@ -818,6 +818,15 @@ impl Client {
     /// Whether a pursued quest is being worked: its step outranks the ground and the area.
     pub fn is_pursuing(&self) -> bool {
         self.working_pursuit().is_some()
+    }
+
+    /// The working pursued quest's buy, its title and the ware's name: a town run's errand.
+    pub(crate) fn pursued_buy(&self) -> Option<(String, String)> {
+        let line = self.working_pursuit()?;
+        match &line.step {
+            PursuitStep::Buy { name, .. } => Some((line.title.clone(), name.clone())),
+            _ => None,
+        }
     }
 
     /// The giver the working pursued quest calls on now, and where: to take it up or hand it in.
@@ -966,6 +975,19 @@ impl Client {
             PursuitStep::Read { name, .. } => {
                 let why = format!("for {}: reading {name}", line.title);
                 self.autoplay.say(Doing::Idle, why);
+                Some(true)
+            }
+            // The town run buys it: stood for while only the run's clock holds it back; held back
+            // for anything else (no coin, no way), the ground is hunted meanwhile.
+            PursuitStep::Buy { name, vendor, .. } => {
+                if self.autoplay.growth.run_waits != Some(now) {
+                    return None;
+                }
+                let why = format!(
+                    "for {}: waiting for the town run to {vendor} for {name}",
+                    line.title
+                );
+                self.autoplay.say(Doing::Shopping, why);
                 Some(true)
             }
             PursuitStep::PickUp { .. }

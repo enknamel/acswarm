@@ -102,12 +102,10 @@ impl Client {
         best.map(|(_, g)| g)
     }
 
-    /// Whether a wanted gem not yet had is carried now: just bought, the board is worked out at
-    /// once, before a journey set off for want of it casts its recall.
-    pub(crate) fn is_wanted_gem_come(&self) -> bool {
+    /// The weenie classes of the gems the pursuit wants, had or not.
+    pub(crate) fn wanted_gems(&self) -> Vec<u32> {
         let gems = &self.autoplay.growth.pursuit_gems;
-        gems.iter()
-            .any(|g| !g.had && self.carried_count(g.wcid) > 0)
+        gems.iter().map(|g| g.wcid).collect()
     }
 
     /// Mark each wanted gem carried as had, and let one had and gone from the pack go: used. A

@@ -138,6 +138,8 @@ pub struct State {
     /// once a frame and the answer is usually the same one; this keeps
     /// the log to the moments it changes.
     held_back: String,
+    /// The frame a run was held back only by a clock: a pursued buy stands for it, no ground.
+    run_waits: Option<Instant>,
     /// The tick `grow_settle` last read the world on: the town-run and grow steps share one reading.
     settled_at: Option<Instant>,
     last_raise: Option<Instant>,
@@ -150,8 +152,8 @@ pub struct State {
     /// Raises the server did not answer in time, and when they were given
     /// up on: refused, or only late.
     sulking: Vec<(Pending, Instant)>,
-    /// What the character was last found short of, and when.
-    needs_seen: Option<(Instant, Vec<Need>)>,
+    /// What the character was last found short of, when, and whether the Quests section counted.
+    needs_seen: Option<(Instant, bool, Vec<Need>)>,
     /// How many times the character has walked about the ground it is
     /// on looking for something to fight.
     roams: u32,

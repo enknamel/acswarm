@@ -14,6 +14,12 @@ use crate::quest_log::{QuestLine, QuestState};
 use crate::Client;
 
 impl Client {
+    /// Whether the section's buy lines count: the board worked out this session and the server's
+    /// quest log heard, so a line saved last session buys nothing at login.
+    pub(crate) fn is_quest_section_counted(&self) -> bool {
+        self.is_board_current() && self.quests_synced(self.frame_at)
+    }
+
     /// Make the profile's Quests section hold what the pursuit asks now, written back through
     /// the profiles store when it changed; from `refresh_pursuit`.
     pub(crate) fn keep_quest_section(&mut self, chains: &dyn Chains) {
@@ -43,6 +49,8 @@ impl Client {
         if !profile.set_quest_entries(&who, rules, buy) {
             return;
         }
+        // The town run's needs are read again this frame, not after their cache's 5 s.
+        self.autoplay.growth.needs_seen = None;
         tracing::info!(
             "pursuit: the Quests section of {} now {r} rules, {b} buys",
             profile.name

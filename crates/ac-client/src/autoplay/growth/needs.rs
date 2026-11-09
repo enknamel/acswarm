@@ -77,6 +77,7 @@ impl Client {
         // and the party read it: `held_stock`). The ammunition line counts the launcher's rounds.
         let stock = |what: &str| self.held_stock(what, &leaving, ammo);
         let (me, my_name) = (self.wielder(), &self.world.stats.name);
+        let quests_counted = self.is_quest_section_counted();
         // The profile's buy list, through the profile's own reckoning of what is short: the whole
         // of what is bought.
         let named: Vec<(String, u32, u32, Option<String>, bool)> = self
@@ -86,8 +87,12 @@ impl Client {
                 p.shortfall(stock, &me, my_name)
                     .into_iter()
                     // A pursued quest's own buys wait while its hunt is gone to: the Invitation
-                    // just used, a run home to buy another cut the trip to Ithaenc short.
-                    .filter(|s| s.want.quest.is_empty() || !self.is_on_quest_road(&s.want.quest))
+                    // just used, a run home to buy another cut the trip to Ithaenc short. At login
+                    // they wait for the board and the server's quest log.
+                    .filter(|s| {
+                        s.want.quest.is_empty()
+                            || (quests_counted && !self.is_on_quest_road(&s.want.quest))
+                    })
                     .map(|s| {
                         (
                             s.want.what.clone(),
@@ -161,7 +166,7 @@ impl Client {
     /// What the town-run rule last found short, and how many seconds ago it looked: telemetry's
     /// record of supplies, and of a rule that never got its turn.
     pub fn supplies_seen(&self, now: Instant) -> Option<(f32, Vec<crate::tally::SupplyLine>)> {
-        let (t, needs) = self.autoplay.growth.needs_seen.as_ref()?;
+        let (t, _, needs) = self.autoplay.growth.needs_seen.as_ref()?;
         let lines = needs
             .iter()
             .map(|n| crate::tally::SupplyLine {
@@ -178,19 +183,21 @@ impl Client {
     /// every [`NEEDS_EVERY`]. Counting the pack is not free and the
     /// answer does not change between frames.
     pub(super) fn needs_now(&mut self, now: Instant, cfg: &Growth) -> Vec<Need> {
+        // Read before the Quests section counted, they are read again once it does.
+        let counted = self.is_quest_section_counted();
         if let Some(n) = self
             .autoplay
             .growth
             .needs_seen
             .as_ref()
-            .filter(|(t, _)| now.duration_since(*t) < NEEDS_EVERY)
-            .map(|(_, n)| n.clone())
+            .filter(|(t, c, _)| now.duration_since(*t) < NEEDS_EVERY && *c == counted)
+            .map(|(_, _, n)| n.clone())
         {
             return n;
         }
         self.look_down_quest_road();
         let n = self.grow_needs(cfg);
-        self.autoplay.growth.needs_seen = Some((now, n.clone()));
+        self.autoplay.growth.needs_seen = Some((now, counted, n.clone()));
         n
     }
 

@@ -333,6 +333,12 @@ impl Client {
         st.futile_purse = purse;
     }
 
+    /// [`Self::held_back`] by a clock only: the frame is marked, and a pursued buy waits for it.
+    fn held_back_awhile(&mut self, why: impl Into<String>, now: Instant) -> bool {
+        self.autoplay.growth.run_waits = Some(now);
+        self.held_back(why)
+    }
+
     fn held_back(&mut self, why: impl Into<String>) -> bool {
         let why = why.into();
         if self.autoplay.growth.held_back != why {
@@ -417,6 +423,11 @@ impl Client {
         if !cfg.town_runs {
             return false;
         }
+        // A pursued quest's buy goes at once, as its giver's call does: no wait between runs.
+        let quest_buy = self.pursued_buy();
+        if quest_buy.is_some() && !self.is_quest_section_counted() {
+            return self.held_back_awhile("a quest's buy waits for the server's quest log", now);
+        }
         // After a run that came back with nothing, a wait: without it a character that cannot buy
         // what it needs walks between counters for ever. More coin than it had then ends the wait.
         if self.autoplay.growth.run_was_futile
@@ -433,13 +444,14 @@ impl Client {
             .autoplay
             .growth
             .last_run
-            .filter(|t| now.duration_since(*t) < wait)
+            .filter(|t| quest_buy.is_none() && now.duration_since(*t) < wait)
         {
             let left = wait.saturating_sub(now.duration_since(t));
-            return self.held_back(format!("{} s to wait since the last run", left.as_secs()));
+            let why = format!("{} s to wait since the last run", left.as_secs());
+            return self.held_back_awhile(why, now);
         }
         if self.autoplay.growth.next_run.is_some_and(|t| now < t) {
-            return self.held_back("waiting to try a vendor again");
+            return self.held_back_awhile("waiting to try a vendor again", now);
         }
         // Loot for a counter: what a full or laden pack is sold of, and the only reason either is.
         let salables = self.salables(cfg);
@@ -510,6 +522,11 @@ impl Client {
             "the pack is full".to_string()
         } else if laden {
             "carrying as much as it means to".to_string()
+        } else if let Some((title, name)) = quest_buy.as_ref().filter(|(_, name)| {
+            let named = |n: &&Need| n.buyable && n.name.eq_ignore_ascii_case(name);
+            urgent.is_empty() && needs.iter().any(|n| named(&n))
+        }) {
+            format!("for {title}: to buy {name}")
         } else if !urgent.is_empty() {
             // A supply run out comes before loot that adds up: the
             // counter with the arrows may stand further from a way out
@@ -545,7 +562,15 @@ impl Client {
                 self.add_hand_ins(now);
                 true
             }
-            Err(why) => self.held_back(why),
+            Err(why) => {
+                // Skipping the waits, a quest's buy would look for a counter every frame: its
+                // pursuit is passed over instead, as a giver's call with no way is.
+                let id = quest_buy.and(self.working_pursuit().map(|l| l.id.clone()));
+                if let Some(id) = id {
+                    self.hold_pursuit(&id, why.clone(), now);
+                }
+                self.held_back(why)
+            }
         }
     }
 

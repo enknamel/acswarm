@@ -1049,6 +1049,19 @@ fn pursue(c: &mut Client, f: &QuestFacts, fake: &Fake) {
     c.keep_quest_section(fake);
 }
 
+/// Mark `c`'s board worked out this session, as `refresh_quests` does, with nothing watched.
+fn board_built(c: &mut Client) {
+    c.quest_board_for = Some(crate::quest_log::BoardFor {
+        quests: c.autoplay.config.quests.clone(),
+        level: c.world.stats.level.max(0) as u32,
+        log: Default::default(),
+        held: Vec::new(),
+        name: c.world.stats.name.trim().to_string(),
+        spells: (0, 0),
+        carried: Vec::new(),
+    });
+}
+
 fn section(c: &Client) -> crate::profile::Profile {
     (*c.loot_profile().expect("its profile")).clone()
 }
@@ -1132,6 +1145,7 @@ fn the_town_runs_needs_hold_a_pursued_quests_buy_line_urgent_at_its_counter() {
         .into_iter()
         .find(|b| b.is_quest_entry("Fletch"))
         .expect("the quest's line");
+    board_built(&mut c);
     let needs = c.grow_needs(&cfg);
     let need = needs
         .iter()
@@ -2099,5 +2113,139 @@ fn a_chest_on_an_island_is_reached_by_its_gem_not_dropped() {
     assert!(
         matches!(again(&mut c, now), PursuitStep::Buy { .. }),
         "the chest dropped, not the gem bought"
+    );
+}
+
+/// `mage_pursuing`'s mage with autoplay on, town runs and grounds on, no buy list of its own, and
+/// `coin` pyreals carried.
+fn mage_playing(quest: &str, profile: &str, coin: u32) -> Client {
+    let mut c = mage_pursuing(quest, profile);
+    c.autoplay.config.enabled = true;
+    c.autoplay.config.growth.town_runs = true;
+    c.autoplay.config.growth.hunt_grounds = true;
+    // Only the quest's buys: the starter's own lines send a caster to its components first.
+    let mut p = (*c.loot_profile().unwrap()).clone();
+    p.buy.clear();
+    c.profiles.put(p).unwrap();
+    if coin > 0 {
+        crate::testkit::coin_in_the_pack(&mut c, 0x8000_0900, coin);
+    }
+    c
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_gem_the_pursuit_buys_sets_the_run_off_that_frame_and_grow_sets_off_nothing() {
+    // The invitation's buy line was written after the town run read its needs: the run waited
+    // out the needs' 5 s cache, and grow recalled to another ground meanwhile.
+    let mut c = mage_playing("learn:2023", "buy-handed-over", 200_000);
+    let now = Instant::now();
+    c.refresh_quests(now);
+    let cfg = c.autoplay.config.growth.clone();
+    // The run's look before the gem was wanted, then grow finding no journey but the gem's.
+    c.needs_now(now, &cfg);
+    assert!(!c.grow_hunt(now, &cfg));
+    assert_eq!(c.autoplay.growth.pursuit_gems.len(), 1);
+    c.tick_rules(now + Duration::from_millis(100));
+    // Set off for the invitation (a giver on the way may be called on first).
+    assert!(
+        c.autoplay.growth.run.is_some(),
+        "held back: {} ({:?})",
+        c.autoplay.growth.held_back,
+        c.pursuit[0].step
+    );
+    let buying: Vec<&str> = c
+        .autoplay
+        .growth
+        .needs
+        .iter()
+        .map(|n| n.name.as_str())
+        .collect();
+    assert_eq!(buying, ["Invitation Ithaenc Cathedral"]);
+    assert_eq!(c.autoplay.growth.bound, None, "grow set off for a ground");
+    assert_eq!(c.journey_row(), Some("town run"));
+    assert!(c.autoplay.growth.pursuit_held.is_empty(), "passed over");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_gem_used_takes_its_buy_line_out_of_the_section_that_frame() {
+    // Through the invitation's portal, the board not due for 2 s: the section still bought the
+    // invitation, and a run home for another went off from the landing.
+    let mut c = mage_playing("learn:2023", "gem-used-section", 0);
+    let now = Instant::now();
+    c.refresh_quests(now);
+    let cfg = c.autoplay.config.growth.clone();
+    assert!(!c.grow_hunt(now, &cfg));
+    assert!(matches!(again(&mut c, now), PursuitStep::Buy { .. }));
+    let gem = c.autoplay.growth.pursuit_gems[0].wcid;
+    in_the_pack(&mut c, 0x8000_0702, gem, "Invitation Ithaenc Cathedral", 1);
+    c.refresh_quests(now + Duration::from_millis(100));
+    assert!(matches!(c.pursuit[0].step, PursuitStep::Hunt { .. }));
+    let buys = |c: &Client| {
+        let p = c.loot_profile().unwrap();
+        let named = |b: &&crate::profile::Buy| b.what.starts_with("Invitation");
+        p.buy.iter().filter(named).count()
+    };
+    assert_eq!(buys(&c), 1, "the had gem's line");
+    in_the_pack(&mut c, 0x8000_0702, gem, "Invitation Ithaenc Cathedral", 0);
+    c.refresh_quests(now + Duration::from_millis(200));
+    assert_eq!(buys(&c), 0, "the used gem still bought");
+    assert!(c.autoplay.growth.pursuit_gems.is_empty(), "still wanted");
+}
+
+#[test]
+fn a_saved_quest_buy_line_waits_for_the_first_board_and_the_servers_quest_log() {
+    // At login the section saved last session bought for a quest the server's log had done: the
+    // town run set off on it before the first board.
+    use super::super::needs::NeedKind;
+    let mut c = fletch_with_a_quests_section();
+    pursue(
+        &mut c,
+        &facts(30, &[(NECKLACE_QUEST, true)]),
+        &necklace_sold(),
+    );
+    // Logged in: the server's quest log asked and not yet heard.
+    c.server_quests_read = false;
+    c.server_quests_asked = Some(Instant::now());
+    let line = section(&c)
+        .buy
+        .into_iter()
+        .find(|b| b.is_quest_entry("Fletch"))
+        .expect("the quest's line");
+    let cfg = c.autoplay.config.growth.clone();
+    let wants = |c: &Client| {
+        c.grow_needs(&cfg)
+            .iter()
+            .any(|n| n.kind == NeedKind::Named(line.what.clone()))
+    };
+    assert!(!wants(&c), "bought before any board");
+    board_built(&mut c);
+    assert!(!wants(&c), "bought before the server's quest log");
+    c.server_quests_read = true;
+    assert!(wants(&c), "not bought once both are in");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_quest_buy_held_back_for_want_of_coin_leaves_grow_to_pick_a_ground() {
+    // The run's waits are its own clock; a counter it cannot pay is no reason to stand about.
+    let mut c = mage_playing("learn:2023", "buy-without-coin", 5);
+    let now = Instant::now();
+    c.refresh_quests(now);
+    let cfg = c.autoplay.config.growth.clone();
+    assert!(!c.grow_hunt(now, &cfg));
+    assert!(matches!(again(&mut c, now), PursuitStep::Buy { .. }));
+    c.tick_rules(now + Duration::from_millis(100));
+    assert!(
+        c.autoplay.growth.run.is_none(),
+        "a run it cannot pay for: {:?}",
+        c.autoplay.status
+    );
+    let grow = c.autoplay.growth.bound.is_some() || c.journey_row() == Some("grow");
+    assert!(
+        grow,
+        "no ground: {} ({:?}, held back: {})",
+        c.autoplay.status, c.autoplay.step, c.autoplay.growth.held_back
     );
 }

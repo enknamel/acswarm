@@ -17,22 +17,23 @@ fn frees_the_cast_slot(err: u32) -> bool {
 }
 
 impl Client {
-    /// The manual-play timers, autoplay, the ledger and the quest board, in frame order: what
+    /// The manual-play timers, the quest board, autoplay and the ledger, in frame order: what
     /// runs once the server's messages are applied.
     pub(crate) fn tick_rules(&mut self, now: Instant) {
         self.tick_combat();
         self.tick_loot(now);
         self.tick_store();
         self.tick_appraise();
+        // What the giver asked last answered, then each quest's state and the Quests section,
+        // before autoplay reads them; none sends anything.
+        self.watch_quest_answer(now);
+        self.settle_server_quests(now);
+        self.refresh_quests(now);
         self.tick_autoplay(now);
         // The rules may have changed under the decisions already made.
         // Before the ledger is written out, not after.
         self.tick_retag(now);
-        // What the giver asked last answered, then each quest's state; neither sends anything.
-        self.watch_quest_answer(now);
-        self.settle_server_quests(now);
         self.ask_server_quests();
-        self.refresh_quests(now);
         // What each item was taken for, written out when it changes.
         // Not on the way out: the thing this is defending against is a
         // client that does not get a way out.

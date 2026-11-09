@@ -162,6 +162,8 @@ pub(crate) struct BoardFor {
     pub(crate) name: String,
     /// Spells known and learnable: a scroll read is done at once.
     pub(crate) spells: (usize, usize),
+    /// Packed counts of the pursued quests' items and the pursuit's gems, by weenie class.
+    pub(crate) carried: Vec<(u32, u32)>,
 }
 
 /// What the board is worked out from, so [`quest_board`] runs with no `Client`.
@@ -857,12 +859,12 @@ impl Client {
                 || f.held != self.travel.quests_done
                 || f.name != name
                 || f.spells != spells
+                || self.packed_counts(f.carried.iter().map(|c| c.0)) != f.carried
         });
         let due = self
             .quest_board_at
             .is_none_or(|at| now.duration_since(at) >= QUEST_BOARD_EVERY);
         let settled = !self.quest_board.is_empty() && !self.quest_board.iter().any(|l| l.on);
-        let changed = changed || self.is_wanted_gem_come();
         let cfg = &self.autoplay.config.quests;
         if !changed && (!due || (!cfg.on && cfg.pursue.is_empty() && settled)) {
             return;
@@ -874,6 +876,7 @@ impl Client {
             held: self.travel.quests_done.clone(),
             name: name.to_string(),
             spells,
+            carried: Vec::new(),
         });
         self.quest_board_at = Some(now);
         let mut facts = self.quest_facts();
@@ -890,6 +893,33 @@ impl Client {
         (self.quest_board, self.quests_unsuited) =
             board_of(considered_rows(&facts.config), &facts, &pick);
         self.refresh_pursuit(&facts, &chained, now);
+        // Watched from here: a pursued quest's item or a wanted gem come or gone works the board
+        // out at once. Pursued only: the quests on would ask a thousand classes a frame.
+        let pursued: Vec<QuestLine> = (self.quest_board.iter())
+            .filter(|l| self.pursuit.iter().any(|p| p.id == l.id))
+            .cloned()
+            .collect();
+        let items = quest_wants(&pursued).into_iter().map(|w| w.wcid);
+        let carried = self.packed_counts(items.chain(self.wanted_gems()));
+        if let Some(f) = self.quest_board_for.as_mut() {
+            f.carried = carried;
+        }
+    }
+
+    /// How many of each of `wcids` the packs hold, as the board counts them, by class, in one pass.
+    fn packed_counts(&self, wcids: impl IntoIterator<Item = u32>) -> Vec<(u32, u32)> {
+        let mut counts: Vec<(u32, u32)> = wcids.into_iter().map(|w| (w, 0)).collect();
+        if counts.is_empty() {
+            return counts;
+        }
+        counts.sort_unstable();
+        counts.dedup();
+        for o in self.world.inventory() {
+            if let Ok(i) = counts.binary_search_by_key(&o.weenie_class_id, |c| c.0) {
+                counts[i].1 += o.stack_size.max(1);
+            }
+        }
+        counts
     }
 
     /// A pursuit asked for once whose quest the log has done since, or kept with its item carried, is
