@@ -1091,6 +1091,34 @@ impl Client {
         false
     }
 
+    /// Whether the body at `me` was carried off since last seen, not to the step's exit: if so
+    /// the journey is planned again from there, before any recall or gem is spent where it landed.
+    fn replan_if_carried_off(&mut self, me: Vec2) -> bool {
+        // A portal takes whoever touches it, so the character can be
+        // carried off mid-walk by one the journey never meant to use.
+        let Some(last) = self.travel.last_seen else {
+            return false;
+        };
+        let jumped = me.distance(last) > 60.0;
+        let expected = self
+            .travel_step()
+            .and_then(|s| s.exit())
+            .is_some_and(|exit| me.distance(exit.at.truncate()) < 60.0);
+        if !jumped || expected {
+            return false;
+        }
+        self.travel.last_seen = Some(me);
+        self.hop_landed();
+        // Whatever swept us up can still be walked into, so it is
+        // not refused: refusing it once shut the way off the
+        // continent. The route already pays to pass near one, and
+        // the plan from here takes the new position as it is.
+        tracing::info!("travel: carried off to {me:?}; planning again from here");
+        self.travel.hopped = true;
+        self.travel.replan_due = true;
+        true
+    }
+
     /// The stretch of the step under way to walk this frame (`walk_journey`): the step's whole walk
     /// when the region holds its end, else the overland leg. Before it, portal, recall and gem
     /// arrivals and clocks; `None` when the step walks nowhere this frame.
@@ -1192,27 +1220,8 @@ impl Client {
                 return self.travel_gem_wait(guid, &name, summons, now);
             }
         }
-        // A portal takes whoever touches it, so the character can be
-        // carried off mid-walk by one the journey never meant to use.
-        // Wherever they have landed, plan again from there.
-        if let Some(last) = self.travel.last_seen {
-            let jumped = me.distance(last) > 60.0;
-            let expected = self
-                .travel_step()
-                .and_then(|s| s.exit())
-                .is_some_and(|exit| me.distance(exit.at.truncate()) < 60.0);
-            if jumped && !expected {
-                self.travel.last_seen = Some(me);
-                self.hop_landed();
-                // Whatever swept us up can still be walked into, so it is
-                // not refused: refusing it once shut the way off the
-                // continent. The route already pays to pass near one, and
-                // the plan from here takes the new position as it is.
-                tracing::info!("travel: carried off to {me:?}; planning again from here");
-                self.travel.hopped = true;
-                self.travel.replan_due = true;
-                return None;
-            }
+        if self.replan_if_carried_off(me) {
+            return None;
         }
         self.travel.last_seen = Some(me);
         let step = self.travel_step()?.clone();
