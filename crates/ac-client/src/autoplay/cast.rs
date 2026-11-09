@@ -96,6 +96,17 @@ impl Client {
         self.autoplay.hop_until = Some(now + lasts);
     }
 
+    /// Whether a cast or use is still being answered: the server turns an act sent now away busy
+    /// (0x1D), and Shin Ro was used in a bane's recoil three times and never asked. The wait is
+    /// marked, so that buffs not yet due give way (`hands_wanted`).
+    pub(crate) fn hands_busy(&mut self, now: Instant) -> bool {
+        if !self.autoplay.cast_in_flight(now) {
+            return false;
+        }
+        self.autoplay.hands_wanted = Some(now);
+        true
+    }
+
     /// The body was carried off, or the hop will not carry it: the next act may go.
     pub(crate) fn hop_landed(&mut self) {
         self.autoplay.hop_until = None;

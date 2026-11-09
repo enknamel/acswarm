@@ -353,17 +353,6 @@ impl Client {
         Some(true)
     }
 
-    /// Whether a cast or use is still being answered: the server turns an act sent now away busy
-    /// (0x1D), and Shin Ro was used in a bane's recoil three times and never asked. The wait is
-    /// marked, so that buffs not yet due give way (`hands_wanted`).
-    fn hands_busy(&mut self, now: Instant) -> bool {
-        if !self.autoplay.cast_in_flight(now) {
-            return false;
-        }
-        self.autoplay.hands_wanted = Some(now);
-        true
-    }
-
     /// Whether the packs have a slot for what an act at the source brings: one with none would
     /// see the item go nowhere, so the quest is passed over until something has gone.
     fn has_room_for(&mut self, line: &PursuitLine, now: Instant) -> bool {
