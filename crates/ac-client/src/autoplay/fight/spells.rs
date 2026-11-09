@@ -146,7 +146,17 @@ impl Client {
                 return true;
             }
         }
-        // Its vulnerability first, then its attack for the rest.
+        // Its vulnerability first, then its attack for the rest; each cast from within its own
+        // reach, or the server turns it down out of range (0x550) and it goes out again unmoved.
+        let debuff = kill
+            .as_ref()
+            .and_then(|k| k.magic_yield.map(|y| y.0).or(k.vuln.map(|v| v.1)));
+        if let Some(spell) = debuff {
+            let how = crate::dodge::How::Spell(spell);
+            if self.autoplay_approach(guid, &name, how) != crate::did::Did::Done {
+                return true;
+            }
+        }
         if self.autoplay_make_vulnerable(guid, &name, kill.as_ref(), now) {
             return true;
         }

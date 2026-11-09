@@ -79,3 +79,31 @@ fn magic_yield_goes_on_before_the_vulnerability_and_a_resist_has_it_cast_again()
     c.autoplay_fight_with_spells(now, &cfg);
     assert!(c.autoplay.is_vulned(it), "then Piercing Vulnerability");
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_vulnerability_is_cast_from_within_its_reach() {
+    // Blargerton, 60 m from a Tusker Slave a storey down, sent Fire Vulnerability Other VI seven
+    // times a second: each came back out of range (0x550), was cast again, and he never moved.
+    let now = Instant::now();
+    let (mut c, _) = crate::testkit::a_caster_knowing(
+        now,
+        &["Force Bolt VI", "Piercing Vulnerability Other VI"],
+    );
+    c.autoplay.config.enabled = true;
+    c.autoplay.config.fight.enabled = true;
+    c.autoplay.config.fight.radius = 100.0;
+    let it = 0x8000_0103;
+    crate::testkit::standing_by(&mut c, it, "Tusker Guard", 60.0);
+    if let Some(o) = c.world.objects.get_mut(&it) {
+        o.weenie_class_id = 1629;
+    }
+    c.autoplay.casting_at = Some(it);
+    let cfg = c.autoplay.config.fight.clone();
+    c.autoplay_fight_with_spells(now, &cfg);
+    assert!(
+        c.autoplay.debuff_sent.is_none() && !c.autoplay.is_vulned(it),
+        "a vulnerability sent from 60 m: {}",
+        c.autoplay.status
+    );
+}
