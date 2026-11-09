@@ -153,6 +153,11 @@ fn query_for<'a>(
     })
 }
 
+/// `route` from `start`, its trap plate crossings flown ([`crate::fly_over`]).
+fn flown(route: Route, start: (Vec3, u32), cap: &Capsule) -> Route {
+    crate::fly_over::over_traps(route, start.0, cap.radius)
+}
+
 /// The route a search found from `start` (the graph's end), each walked leg's floor kept.
 fn route_of(
     ground: &Ground,
@@ -188,7 +193,7 @@ pub fn plan(area: &mut Area, from: Place, goal: Place, within: f32) -> Result<Ro
     let cap = area.capsule();
     area.with_ground(
         |ground, nav| match wayfind::search_building(ground, nav, &q) {
-            Search::Found(path) => Ok(route_of(ground, q.from, &path, &cap)),
+            Search::Found(path) => Ok(flown(route_of(ground, q.from, &path, &cap), q.from, &cap)),
             Search::NoWay(why) => Err(why),
             // Searched building, so nothing is left unbuilt.
             Search::Unbuilt(_) => Err(NoWay::Unreached),
@@ -206,7 +211,9 @@ pub fn plan_built(area: &Area, from: Place, goal: Place, within: f32) -> Planned
     };
     let cap = area.capsule();
     area.read_ground(|ground, nav| match wayfind::search(ground, nav, &q) {
-        Search::Found(path) => Planned::Route(route_of(ground, q.from, &path, &cap)),
+        Search::Found(path) => {
+            Planned::Route(flown(route_of(ground, q.from, &path, &cap), q.from, &cap))
+        }
         Search::NoWay(why) => Planned::NoWay(why),
         Search::Unbuilt(chunks) => Planned::Building(chunks),
     })

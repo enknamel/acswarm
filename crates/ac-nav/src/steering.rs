@@ -16,6 +16,9 @@ use crate::routing::{NoWay, Planned, Route, Waypoint};
 pub const ARRIVE: f32 = 0.7;
 /// Plan again when the goal has moved this far (metres) from the planned one.
 pub const REPLAN_DISTANCE: f32 = 2.0;
+/// A flown waypoint counts as reached within this flat distance and this height (metres): the
+/// crossing must be level above the plate's top, not a slope cut through its reach.
+pub const FLY_ARRIVE: (f32, f32) = (0.3, 0.2);
 /// No progress along the route for this long plans the walk again from where the body stands.
 pub const NO_PROGRESS: Duration = Duration::from_millis(1500);
 /// Less than this (metres, 3D) closed along the route is not progress.
@@ -87,7 +90,9 @@ impl Course {
             OUTDOOR_SPACING
         };
         let on_floor = match w.kind {
-            EdgeKind::Drop => p.z >= a.z.min(b.z) - END_FLOOR && p.z <= a.z.max(b.z) + END_FLOOR,
+            EdgeKind::Drop | EdgeKind::Fly => {
+                p.z >= a.z.min(b.z) - END_FLOOR && p.z <= a.z.max(b.z) + END_FLOOR
+            }
             _ => (p.z - w.floor_at(a, t)).abs() <= END_FLOOR,
         };
         (off <= half && on_floor).then_some(off)
@@ -114,19 +119,43 @@ impl Course {
     /// last; a corner is cut only where `can_walk(me, next)` passes, and never into a drop.
     pub fn target(&mut self, me: Vec3, mut can_walk: impl FnMut(Vec3, Vec3) -> bool) -> Vec3 {
         while self.next + 1 < self.waypoints.len() {
-            let w = self.waypoints[self.next].place.at;
+            let here = self.waypoints[self.next];
+            let w = here.place.at;
             let d = flat(w - me).length();
+            let on = self.waypoints[self.next + 1];
+            if here.kind == EdgeKind::Fly {
+                // Flown: reached on the spot and at the height, or the crossing cuts a corner.
+                if d > FLY_ARRIVE.0 || (w.z - me.z).abs() > FLY_ARRIVE.1 {
+                    break;
+                }
+                self.next += 1;
+                continue;
+            }
             if d > ARRIVE || (w.z - me.z).abs() > END_FLOOR {
                 break;
             }
-            // Held until the walk test's own arrival, the leg out of it is the leg tested.
-            let on = self.waypoints[self.next + 1];
-            if d > BODY_ARRIVE && (on.kind == EdgeKind::Drop || !can_walk(me, on.place.at)) {
+            // Held until the walk test's own arrival, the leg out of it is the leg tested; a
+            // flight starts from where it was planned to, outside the plate's reach.
+            let held = matches!(on.kind, EdgeKind::Drop | EdgeKind::Fly);
+            if d > BODY_ARRIVE && (held || !can_walk(me, on.place.at)) {
                 break;
             }
             self.next += 1;
         }
         self.aim()
+    }
+
+    /// Whether the leg being followed from `me` is flown ([`EdgeKind::Fly`]): not once landed on
+    /// the last waypoint, which is never passed.
+    pub fn is_flying(&self, me: Vec3) -> bool {
+        let Some(w) = self.waypoints.get(self.next) else {
+            return false;
+        };
+        let d = w.place.at - me;
+        let landed = self.next + 1 == self.waypoints.len()
+            && flat(d).length() <= FLY_ARRIVE.0
+            && d.z.abs() <= FLY_ARRIVE.1;
+        w.kind == EdgeKind::Fly && !landed
     }
 
     /// Distance (metres, 3D) still to walk from `me` through the waypoints left.
@@ -264,6 +293,10 @@ pub struct Steering {
     refused: Option<(Vec3, Unreachable)>,
     /// The last steer stood still for the planner.
     waiting: bool,
+    /// The body may not fly (server-safe movement): a route's flown legs are walked.
+    pub grounded: bool,
+    /// The body turned flying on for a flown leg, and turns it off once off one.
+    pub flying: bool,
     /// When the route left last fell by `PROGRESS` (see [`last_progress`](Self::last_progress)).
     progressed: Option<Instant>,
 }
@@ -295,7 +328,13 @@ impl Steering {
     /// Forget the route, the plan asked, the stalls and the refusal: the goal went away or the user
     /// took over. The next steer asks at once.
     pub fn reset(&mut self) {
-        *self = Steering::default();
+        // What the body may do is the body's, not the walk's.
+        let (grounded, flying) = (self.grounded, self.flying);
+        *self = Steering {
+            grounded,
+            flying,
+            ..Steering::default()
+        };
     }
 
     /// Where to head this frame for `goal`, to within `within` (metres, 3D): along the planned route
@@ -329,7 +368,7 @@ impl Steering {
             }
         }
         match self.route.as_mut() {
-            Some(c) if ground.is_airborne() => Aim::Go(c.aim()),
+            Some(c) if ground.is_airborne() && !c.is_flying(me) => Aim::Go(c.aim()),
             Some(c) => Aim::Go(c.target(me, |a, b| ground.can_walk(a, b))),
             None => {
                 self.waiting = true;
@@ -354,6 +393,11 @@ impl Steering {
         self.answered(Replan::Start, me, from, goal, within, planned, now)
     }
 
+    /// Whether the body at `me` is on a flown leg of its route: it flies until the leg lands.
+    pub fn is_flying_leg(&self, me: Vec3) -> bool {
+        self.route.as_ref().is_some_and(|c| c.is_flying(me))
+    }
+
     /// When the route left last fell by `PROGRESS` (0.1 m) on a course to this goal, across replans.
     pub fn last_progress(&self) -> Option<Instant> {
         self.progressed
@@ -374,6 +418,7 @@ impl Steering {
     ) -> Aim {
         match planned {
             Planned::Route(r) => {
+                let r = if self.grounded { r.walked() } else { r };
                 let mut c = Course::new(from, goal, within, r, now);
                 if !c.join(me) {
                     tracing::debug!("route: the plan from {:?} does not pass here", from.at);

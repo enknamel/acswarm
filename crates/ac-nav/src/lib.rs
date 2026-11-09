@@ -5,6 +5,7 @@
 //! another. No socket, no character: [`Ground`] is asked; geometry lives in `ac-scene`.
 
 pub mod explore;
+pub mod fly_over;
 pub mod obstacles;
 pub mod routing;
 pub mod steering;

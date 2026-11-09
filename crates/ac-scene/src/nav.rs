@@ -644,6 +644,8 @@ pub enum EdgeKind {
     Drop,
     /// From one cell into another, walked straight through.
     Doorway,
+    /// Flown, over a trap plate the walk would trip: no floor between (`ac_nav::fly_over`).
+    Fly,
 }
 
 /// An edge out of a node: the node it leads to, and how.

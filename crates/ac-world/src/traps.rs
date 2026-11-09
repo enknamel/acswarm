@@ -19,6 +19,27 @@ pub struct Trap {
     pub spells: String,
 }
 
+/// A plate's collision sphere by Setup, before scale: centre height and radius (metres), read
+/// off the portal DAT with `acdat decode`. Any other is taken as the larger, to be sure.
+const SPHERES: [(u32, f32, f32); 2] = [(0x0200_0450, 1.125, 1.125), (0x0200_025A, 0.5, 0.5)];
+
+impl Trap {
+    /// The sphere the server's sweep must not touch: its centre, world space, and radius.
+    pub fn sphere(&self) -> (Vec3, f32) {
+        let (h, r) = SPHERES
+            .iter()
+            .find(|s| s.0 == self.setup)
+            .map_or((1.125, 1.125), |s| (s.1, s.2));
+        (self.at + Vec3::Z * h * self.scale, r * self.scale)
+    }
+
+    /// The height (world z) of the sphere's top.
+    pub fn top(&self) -> f32 {
+        let (c, r) = self.sphere();
+        c.z + r
+    }
+}
+
 const DATA: &str = include_str!("../data/traps.csv");
 
 fn parse(text: &str) -> Vec<Trap> {
@@ -77,6 +98,8 @@ mod tests {
             .any(|t| t.spells.contains("Nullify All Magic Other")));
         assert!(all.iter().any(|t| t.spells.contains("Mana Blight")));
         assert!(all.iter().all(|t| t.scale > 0.0));
+        // The tall ones are scaled threefold: 6.75 m to the top.
+        assert!(all.iter().any(|t| (t.top() - t.at.z - 6.75).abs() < 0.01));
         let first = &all[0];
         assert!(in_landblock(first.cell).any(|t| t == first));
     }
