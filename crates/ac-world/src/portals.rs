@@ -39,6 +39,22 @@ pub struct Portal {
 
 /// `PortalBitmask::NoRecall`: going through leaves Portal Recall where it was (`Portal.cs:284`).
 pub const NO_RECALL: u32 = 0x20;
+/// `PortalBitmask` bars by who is asking (ACE `PortalBitmask.cs`), refused at `Portal.cs:185-225`.
+pub const UNRESTRICTED: u32 = 0x01;
+pub const NO_PK: u32 = 0x02;
+pub const NO_PK_LITE: u32 = 0x04;
+pub const NO_NPK: u32 = 0x08;
+pub const ONLY_OLTHOI: u32 = 0x40;
+pub const NO_VITAE: u32 = 0x100;
+
+/// The character asking to use a portal, as its bitmask is checked against.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Traveller {
+    /// `PlayerKillerStatus` (`object::pk_status`), 0 unknown: then no PK bar is read into it.
+    pub pk_status: u32,
+    /// Weakened by vitae now.
+    pub vitae: bool,
+}
 
 impl Portal {
     /// Whether Portal Recall remembers this portal once it is used.
@@ -75,6 +91,20 @@ impl Portal {
     /// the hub, and the hub's own portals back out.
     pub fn is_town_network(&self) -> bool {
         self.name.to_lowercase().contains("town network")
+    }
+
+    /// Whether its bitmask lets `who` through (`Portal.cs:185-225`). An explicit 0 is `Undef`,
+    /// "Players may not interact with that portal"; a missing one reads Unrestricted (:10).
+    /// Being a player killer is what the character is, never a way to a route.
+    pub fn admits(&self, who: Traveller) -> bool {
+        use crate::object::pk_status;
+        let barred = |bit: u32, status: u32| self.bitmask & bit != 0 && who.pk_status == status;
+        self.bitmask != 0
+            && self.bitmask & ONLY_OLTHOI == 0
+            && !barred(NO_PK, pk_status::PK)
+            && !barred(NO_PK_LITE, pk_status::PK_LITE)
+            && !barred(NO_NPK, pk_status::NPK)
+            && !(who.vitae && self.bitmask & NO_VITAE != 0)
     }
 
     /// Whether a character of this level may use it. A quest-locked
@@ -146,7 +176,11 @@ fn parse(text: &str) -> Vec<Portal> {
             max_level: level(10),
             quest: f.get(11).map(|q| q.trim().to_string()).unwrap_or_default(),
             usable: level(12),
-            bitmask: level(13),
+            // Missing or NULL reads Unrestricted, as ACE's getter does (Portal_Properties.cs:10).
+            bitmask: f
+                .get(13)
+                .and_then(|v| v.parse::<u32>().ok())
+                .unwrap_or(UNRESTRICTED),
         });
     }
     out
@@ -307,12 +341,48 @@ mod tests {
     }
 
     #[test]
+    fn a_portal_bars_who_its_bitmask_names() {
+        use crate::object::pk_status;
+        let npk = Traveller {
+            pk_status: pk_status::NPK,
+            vitae: false,
+        };
+        let pk = Traveller {
+            pk_status: pk_status::PK,
+            ..npk
+        };
+        // "Non p ks may not use portal": Blargerton went round every Olthoi Tunnel in Dereth.
+        let tunnels: Vec<&Portal> = named("Olthoi Tunnel");
+        assert!(tunnels.iter().any(|p| p.bitmask & NO_NPK != 0));
+        for p in tunnels.iter().filter(|p| p.bitmask & NO_NPK != 0) {
+            assert!(!p.admits(npk), "{p:?} let a non-PK through");
+            assert!(p.admits(pk) || p.bitmask & ONLY_OLTHOI != 0);
+        }
+        let mut p = tunnels[0].clone();
+        p.bitmask = UNRESTRICTED | NO_PK | NO_VITAE;
+        assert!(p.admits(npk) && !p.admits(pk));
+        assert!(
+            !p.admits(Traveller { vitae: true, ..npk }),
+            "through with vitae"
+        );
+        assert!(p.admits(Traveller::default()), "an unknown status barred");
+        p.bitmask = 0;
+        assert!(!p.admits(npk), "Undef: players may not use it");
+        p.bitmask = UNRESTRICTED | ONLY_OLTHOI;
+        assert!(!p.admits(pk), "only Olthoi");
+    }
+
+    #[test]
     fn bad_lines_are_skipped() {
         let v = parse(
             "# comment\n\nbad,line\nName,A9B40019,1.0,2.0,3.0,70145,4.0,5.0,6.0,10,50,Quest,1\n",
         );
         assert_eq!(v.len(), 1);
         assert_eq!(v[0].name, "Name");
+        assert_eq!(
+            v[0].bitmask, UNRESTRICTED,
+            "no bitmask said reads Unrestricted"
+        );
         assert!(!v[0].exit_outdoors());
         assert!(v[0].mouth_outdoors());
         assert_eq!((v[0].min_level, v[0].max_level), (10, 50));

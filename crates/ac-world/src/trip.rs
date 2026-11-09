@@ -284,6 +284,8 @@ pub struct Prefs {
     /// building is not the same thing: you really can walk out of a
     /// shop door, so only a dungeon sets this.
     pub in_dungeon: bool,
+    /// Who travels: a portal whose bitmask bars them is left out (`Portal::admits`).
+    pub who: portals::Traveller,
 }
 
 impl Default for Prefs {
@@ -303,7 +305,13 @@ impl Prefs {
             recall_seconds: RECALL_SECONDS,
             use_recalls: true,
             in_dungeon: false,
+            who: portals::Traveller::default(),
         }
+    }
+
+    /// The same journey for `who`, whose PK status and vitae some portals bar.
+    pub fn for_traveller(self, who: portals::Traveller) -> Self {
+        Prefs { who, ..self }
     }
 
     /// The same journey, knowing the character is underground and
@@ -464,7 +472,7 @@ pub fn plan_with_recalls_and_gems(
     }
     let usable: Vec<&Portal> = portals::all()
         .iter()
-        .filter(|p| p.works())
+        .filter(|p| p.works() && p.admits(prefs.who))
         .filter(|p| level == 0 || p.usable_by(level, quests_done))
         .filter(|p| !avoid.iter().any(|a| a.distance(p.from_xy()) < 2.0))
         .filter(|p| p.exit_outdoors() || has_portal.contains(&(p.to_cell & 0xFFFF_0000)))
@@ -770,6 +778,42 @@ mod tests {
                 !matches!(t.steps.first(), Some(Step::Portal { mouth, .. }) if mouth.at.truncate() == first),
                 "took the refused portal again"
             );
+        }
+    }
+
+    #[test]
+    fn a_non_pk_is_planned_through_no_portal_barring_it() {
+        // To the Copper Legion Castellan: every way went by an Olthoi Tunnel, NoNPK, refused.
+        let from = holtburg();
+        let goal = Place {
+            at: Vec3::new(12180.0, 44443.0, 0.0),
+            cell: 0x3FE7_001C,
+        };
+        let npk = crate::portals::Traveller {
+            pk_status: crate::object::pk_status::NPK,
+            vitae: false,
+        };
+        let through = |t: &Trip, name: &str| {
+            t.steps
+                .iter()
+                .any(|s| matches!(s, Step::Portal { name: n, .. } if n == name))
+        };
+        let unknown = plan_with(from, goal, 51, &[], &[], Prefs::quick());
+        assert!(
+            unknown.is_some_and(|t| through(&t, "Olthoi Tunnel")),
+            "the way that bars a non-PK, with nobody said to travel"
+        );
+        let prefs = Prefs::quick().for_traveller(npk);
+        let trip = plan_with(from, goal, 51, &[], &[], prefs);
+        assert!(!trip.as_ref().is_some_and(|t| through(t, "Olthoi Tunnel")));
+        for step in trip.iter().flat_map(|t| &t.steps) {
+            if let Step::Portal { name, mouth, .. } = step {
+                let p = crate::portals::all()
+                    .iter()
+                    .find(|p| p.name == *name && p.from.distance(mouth.at) < 1.0)
+                    .expect("a portal of the data");
+                assert!(p.admits(npk), "{name} bars a non-PK");
+            }
         }
     }
 

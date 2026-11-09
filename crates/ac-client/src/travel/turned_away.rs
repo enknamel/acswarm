@@ -23,6 +23,40 @@ const TURNED_AWAY: [u32; 14] = [
 ];
 
 impl Client {
+    /// The character as a portal's bitmask reads it, now: a quest that makes it a player killer
+    /// opens those routes at the next plan. Never sought: no route makes one a player killer.
+    pub(crate) fn traveller(&self) -> ac_world::portals::Traveller {
+        ac_world::portals::Traveller {
+            pk_status: self.pk_status(),
+            vitae: self.world.stats.vitae() < 1.0,
+        }
+    }
+
+    /// Our `PlayerKillerStatus`: the last update, else the description flags we came in with
+    /// (ACE sends no update to a character that has always been NPK); 0 before either.
+    pub(crate) fn pk_status(&self) -> u32 {
+        use ac_world::object::pk_status;
+        use ac_world::object_desc_flags as flags;
+        let Some(me) = self.world.player() else {
+            return 0;
+        };
+        if me.pk_status != 0 {
+            return me.pk_status;
+        }
+        let f = me.object_desc_flags;
+        if f & flags::PLAYER_KILLER != 0 {
+            pk_status::PK
+        } else if f & flags::PK_LITE_STATUS != 0 {
+            pk_status::PK_LITE
+        } else if f & flags::FREE_PK_STATUS != 0 {
+            pk_status::FREE
+        } else if f & flags::PLAYER != 0 {
+            pk_status::NPK
+        } else {
+            0
+        }
+    }
+
     /// The portal whose mouth the character stands in: the nearest within [`super::ARRIVE`], in 3D,
     /// since the Facility Hub stacks its floors. What a portal's refusal is about, whatever the
     /// journey's step is: logged in standing in a quest portal, each of its refusals was laid on

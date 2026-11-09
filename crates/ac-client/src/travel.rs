@@ -521,8 +521,9 @@ impl Client {
         self.travel.prefs = prefs;
     }
 
+    /// The saved prefs, for the character as it stands now ([`Client::traveller`]).
     pub fn travel_prefs(&self) -> Prefs {
-        self.travel.prefs
+        self.travel.prefs.for_traveller(self.traveller())
     }
 
     pub fn traveling(&self) -> bool {

@@ -71,7 +71,7 @@ pub(super) fn pkl_arena(c: &mut Client) -> Outcome {
 
 /// Our own `PlayerKillerStatus`, 0 until the server has said which it is.
 fn pk_of(c: &Client) -> u32 {
-    c.world.player().map_or(0, |o| o.pk_status)
+    c.pk_status()
 }
 
 #[cfg(test)]
@@ -94,5 +94,26 @@ mod tests {
         c.world.objects.entry(testkit::ME).or_default().pk_status = pk_status::PK_LITE;
         assert_eq!(pkl_arena(&mut c), Ok(()));
         assert!(pk_arena(&mut c).is_err());
+    }
+
+    #[test]
+    fn a_status_never_updated_is_read_from_the_flags_we_came_in_with() {
+        // An NPK all its life gets no PlayerKillerStatus update: its description says it.
+        use ac_world::object_desc_flags as flags;
+        let mut c = testkit::offline_client();
+        assert_eq!(c.pk_status(), 0, "nothing known yet");
+        c.world.player_guid = Some(testkit::ME);
+        let me = c.world.objects.entry(testkit::ME).or_default();
+        me.object_desc_flags = flags::PLAYER;
+        assert_eq!(c.pk_status(), pk_status::NPK);
+        let me = c.world.objects.entry(testkit::ME).or_default();
+        me.object_desc_flags = flags::PLAYER | flags::PLAYER_KILLER;
+        assert_eq!(c.pk_status(), pk_status::PK);
+        // Made a player killer by a quest: the update is what stands, and the next plan reads it.
+        let me = c.world.objects.entry(testkit::ME).or_default();
+        me.object_desc_flags = flags::PLAYER;
+        me.pk_status = pk_status::PK;
+        assert_eq!(c.traveller().pk_status, pk_status::PK);
+        assert_eq!(c.travel_prefs().who.pk_status, pk_status::PK);
     }
 }

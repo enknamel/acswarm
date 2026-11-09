@@ -38,7 +38,7 @@ impl Client {
         } else {
             Default::default()
         };
-        let prefs = self.travel.prefs.in_dungeon(underground);
+        let prefs = self.travel_prefs().in_dungeon(underground);
         // Portal gems in the pack are ways to get somewhere too, and
         // unlike a recall they need no skill or components: carrying one
         // is the whole requirement.
