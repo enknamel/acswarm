@@ -2034,4 +2034,14 @@ fn a_gem_just_used_is_no_errand_on_the_way_to_its_ground() {
     assert!(c.journey_to(room, 4.0), "no journey to the room");
     c.autoplay.growth.bound = Some((0x02B7, room.at.truncate(), "Putrid Moarsman".into()));
     assert!(!invitation(&c), "a run home for another invitation");
+    // Logged in there, nothing under way yet: the town run's first look found it short, before
+    // the hunt set off. From here a journey reaches the ground as things are.
+    c.cancel_travel();
+    c.autoplay.growth.bound = None;
+    c.autoplay.growth.needs_seen = None;
+    let needs = c.needs_now(now, &cfg);
+    assert!(
+        !needs.iter().any(|n| n.name.starts_with("Invitation")),
+        "short of the invitation where it lands: {needs:?}"
+    );
 }

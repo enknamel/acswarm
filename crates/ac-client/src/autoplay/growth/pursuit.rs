@@ -770,7 +770,8 @@ impl Client {
     }
 
     /// Whether `quest` is the working pursuit's hunt and the body is on its way to one of its
-    /// grounds, or there: none of its own buys is an errand then (its gem was just used).
+    /// grounds, there, or where a journey reaches one as things are: none of its own buys is an
+    /// errand then (its gem was just used, or logged in by the gem's exit).
     pub(super) fn is_on_quest_road(&self, quest: &str) -> bool {
         let hunting = self
             .working_pursuit()
@@ -778,7 +779,34 @@ impl Client {
         let here = self.player.as_ref().map_or(0, |p| p.cell >> 16);
         let bound = self.autoplay.growth.bound_landblock();
         let ground = |lb: u32| self.pursued_place(lb).is_some();
-        hunting && (ground(here) || (self.traveling() && bound.is_some_and(ground)))
+        let reached = matches!(&self.autoplay.growth.quest_road,
+            Some((lb, q, true)) if *lb == here && q == quest);
+        hunting && (ground(here) || reached || (self.traveling() && bound.is_some_and(ground)))
+    }
+
+    /// Plan, once per landblock stood in, whether a journey from here reaches the working
+    /// pursuit's hunting grounds as things are (`State.quest_road`).
+    pub(super) fn look_down_quest_road(&mut self) {
+        let Some(line) = self.working_pursuit().cloned() else {
+            return;
+        };
+        if !matches!(line.step, PursuitStep::Hunt { .. }) {
+            return;
+        }
+        let here = self.player.as_ref().map_or(0, |p| p.cell >> 16);
+        let looked = &self.autoplay.growth.quest_road;
+        if looked
+            .as_ref()
+            .is_some_and(|(lb, q, _)| *lb == here && *q == line.id)
+        {
+            return;
+        }
+        let quests = self.travel.quests_done.clone();
+        let grounds = self.autoplay.growth.pursuit_grounds.clone();
+        let reached = grounds
+            .iter()
+            .any(|(_, at)| self.journey_plan(*at, &quests).is_some());
+        self.autoplay.growth.quest_road = Some((here, line.id, reached));
     }
 
     /// Whether the working pursued quest's step is a hunt.

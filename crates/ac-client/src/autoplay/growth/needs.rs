@@ -188,6 +188,7 @@ impl Client {
         {
             return n;
         }
+        self.look_down_quest_road();
         let n = self.grow_needs(cfg);
         self.autoplay.growth.needs_seen = Some((now, n.clone()));
         n
