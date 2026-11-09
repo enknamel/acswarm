@@ -274,8 +274,8 @@ impl Client {
             return false;
         }
         // Same again: the next draught or cast waits on the server
-        // answering for the last, not on a clock.
-        if self.autoplay.cast_in_flight(now) {
+        // answering for the last, not on a clock; a step waiting on the slot has it first.
+        if self.autoplay.cast_in_flight(now) || self.autoplay.is_slot_wanted(now) {
             return false;
         }
         // A top-up is a cast that can wait, and at a counter it does,

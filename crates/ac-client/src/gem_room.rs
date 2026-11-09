@@ -134,9 +134,9 @@ impl crate::Client {
     }
 
     /// A spell in the air, a hop not yet landed (even for a journey since put down), or the gems'
-    /// cooldown running: a gem used now is turned away, its try spent.
-    pub(crate) fn is_gem_held(&self, now: Instant) -> bool {
-        self.autoplay.cast_in_flight(now) || self.is_gem_cooling()
+    /// cooldown running: a gem used now is turned away, its try spent. A wait on the slot is marked.
+    pub(crate) fn gem_waits(&mut self, now: Instant) -> bool {
+        self.hands_busy(now) || self.is_gem_cooling()
     }
 
     /// Whether the gems' shared cooldown still runs: a gem used now is "used too recently"

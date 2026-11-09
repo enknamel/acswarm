@@ -24,6 +24,9 @@ pub(crate) const HOP_LANDS: Duration = Duration::from_secs(8);
 /// Coldeve (Player_Location.cs:179-183).
 pub(crate) const FREE_HOP_LANDS: Duration = Duration::from_secs(20);
 
+/// How long a step's wait for the busy slot holds back the acts that can wait (guess: a tick or two).
+const HANDS_WANTED_FOR: Duration = Duration::from_secs(3);
+
 /// Why a cast is refused, in a few words for a status line.
 pub fn cast_problem(check: &crate::magic::CastCheck) -> String {
     use crate::magic::CastCheck;
@@ -80,6 +83,13 @@ impl Autoplay {
         self.hop_until.is_some_and(|t| now < t)
     }
 
+    /// A step waited on the busy slot lately (`Client::hands_busy`): top-ups, vitals, stones and
+    /// refills let it have the slot next. Only survive, dodge and a lapsing buff go ahead of it.
+    pub(crate) fn is_slot_wanted(&self, now: Instant) -> bool {
+        self.hands_wanted
+            .is_some_and(|t| now.saturating_duration_since(t) < HANDS_WANTED_FOR)
+    }
+
     /// The server has answered for the cast in the air: the slot is free
     /// and the fight's own cast, if that is what it was, is spent.
     pub(crate) fn cast_answered(&mut self) {
@@ -98,7 +108,7 @@ impl Client {
 
     /// Whether a cast or use is still being answered: the server turns an act sent now away busy
     /// (0x1D), and Shin Ro was used in a bane's recoil three times and never asked. The wait is
-    /// marked, so that buffs not yet due give way (`hands_wanted`).
+    /// marked, so that the acts that can wait give way ([`Autoplay::is_slot_wanted`]).
     pub(crate) fn hands_busy(&mut self, now: Instant) -> bool {
         if !self.autoplay.cast_in_flight(now) {
             return false;

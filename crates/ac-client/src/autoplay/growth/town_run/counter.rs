@@ -101,8 +101,8 @@ impl Client {
     /// server's `UseDone`, which is the same signal for a counter as
     /// for a spell; the clock behind it only stops a run waiting for
     /// ever on an answer that never comes.
-    fn vendor_busy(&self, now: Instant) -> bool {
-        self.autoplay.cast_in_flight(now)
+    fn vendor_busy(&mut self, now: Instant) -> bool {
+        self.hands_busy(now)
     }
 
     /// One turn of the run in progress: what it came to, for the panel's
@@ -252,7 +252,7 @@ impl Client {
                         // away for it (see `on_opening`): a second's
                         // wait here against a re-ask three seconds
                         // later.
-                        if self.autoplay.cast_in_flight(now) {
+                        if self.hands_busy(now) {
                             self.autoplay.say(
                                 Doing::Shopping,
                                 format!(

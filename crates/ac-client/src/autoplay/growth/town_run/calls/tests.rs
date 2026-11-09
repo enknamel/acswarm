@@ -176,6 +176,23 @@ fn a_collector_is_handed_every_tail_one_at_a_time_and_the_run_ends_when_none_is_
 }
 
 #[test]
+fn a_give_waits_for_the_busy_slot_and_has_it_next() {
+    // A give sent over a cast in the air is turned away busy, and the top-ups took every slot
+    // that freed before it.
+    let now = Instant::now();
+    let (mut c, _) = at_a_collector(1, now);
+    let cfg = c.autoplay.config.growth.clone();
+    c.autoplay.cast_sent = Some(now);
+    let sent = c.session.actions_sent();
+    assert_eq!(c.grow_run_step(now, &cfg), Turn::Waited);
+    assert_eq!(c.session.actions_sent(), sent, "given into the busy slot");
+    assert!(c.autoplay.is_slot_wanted(now), "the wait was not marked");
+    c.autoplay.cast_answered();
+    assert_eq!(c.grow_run_step(now, &cfg), Turn::Acted);
+    assert_eq!(c.session.actions_sent(), sent + 1, "the give did not go");
+}
+
+#[test]
 fn a_giver_that_never_takes_the_item_is_not_called_on_again_for_a_while() {
     let now = Instant::now();
     let (mut c, row) = at_a_collector(1, now);

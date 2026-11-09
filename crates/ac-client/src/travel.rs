@@ -814,7 +814,7 @@ impl Client {
             self.travel.state.summoned_uses,
         ) {
             GemNext::Wait => {}
-            GemNext::UseGem if self.is_gem_held(now) => {}
+            GemNext::UseGem if self.gem_waits(now) => {}
             GemNext::UseGem => {
                 tracing::info!("travel: {name} was not taken; using it again");
                 self.travel.state.gem_uses += 1;
@@ -823,7 +823,7 @@ impl Client {
                 self.gem_sent(summons, now);
             }
             // Wait for the slot; the gems' cooldown, begun by this gem's own use, does not hold it.
-            GemNext::UsePortal(_) if self.autoplay.cast_in_flight(now) => {}
+            GemNext::UsePortal(_) if self.hands_busy(now) => {}
             GemNext::UsePortal(portal) => {
                 tracing::info!("travel: using the portal {name} summoned");
                 self.travel.state.summoned_uses += 1;
@@ -887,7 +887,7 @@ impl Client {
             }
             self.travel.state.faced = true;
         }
-        if self.is_gem_held(now) {
+        if self.gem_waits(now) {
             // A spell is still on its way, and the use would be turned
             // away with the gem kept: wait for the slot.
             return None;
@@ -1304,7 +1304,7 @@ impl Client {
         }
         // Sent behind a spell still in the air it is turned away busy, and the try waits out the
         // give-up clock (25 s for `/lifestone`).
-        if self.autoplay.cast_in_flight(now) {
+        if self.hands_busy(now) {
             return;
         }
         // `/lifestone` is not a spell: the server has its own action for it and asks for no

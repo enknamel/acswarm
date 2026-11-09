@@ -691,6 +691,11 @@ impl Client {
             );
             return self.giver_done(run, now, cfg);
         };
+        // A give into the busy slot is turned away (Player_Inventory.cs:3201-3202).
+        if self.hands_busy(now) {
+            self.autoplay.growth.run = Some(run);
+            return Turn::Waited;
+        }
         if !self.give(giver, item, Some(1)) {
             return self.giver_done(run, now, cfg);
         }

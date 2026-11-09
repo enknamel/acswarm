@@ -370,7 +370,8 @@ impl Client {
     /// changes to peace first (PetDevice.cs:544-551), so never mid-fight.
     pub(crate) fn autoplay_refill_essences(&mut self, now: Instant) {
         let cfg = &self.autoplay.config.fight;
-        if !cfg.enabled || !cfg.summon || self.in_a_fight() || self.autoplay.cast_in_flight(now) {
+        let busy = self.autoplay.cast_in_flight(now) || self.autoplay.is_slot_wanted(now);
+        if !cfg.enabled || !cfg.summon || self.in_a_fight() || busy {
             return;
         }
         let waited = |g: u32| {

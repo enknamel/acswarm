@@ -6,8 +6,6 @@ use crate::{Client, Stance};
 
 /// Least time between two casts of the same buff.
 pub(crate) const BUFF_EVERY: Duration = Duration::from_millis(1500);
-/// How long a step's wait for the busy slot holds the top-ups back (guess: a tick or two).
-const HANDS_WANTED_FOR: Duration = Duration::from_secs(3);
 /// What one buff costs in seconds, wind-up to recoil: 3.4 s live for a level VI (Acid Bane III
 /// sent 23.23, landed 25.91, its UseDone a second on), rounded up.
 const CAST_EACH: f32 = 4.0;
@@ -456,11 +454,7 @@ impl Client {
         // quiet moment the top-up waits for hardly comes to a character always on the move.
         // A step waiting to send an act (a use, a take) goes first: a top-up can wait, and one
         // cast after another left the slot never free for it.
-        let yielding = self
-            .autoplay
-            .hands_wanted
-            .is_some_and(|t| now.saturating_duration_since(t) < HANDS_WANTED_FOR)
-            || self.is_expecting_item();
+        let yielding = self.autoplay.is_slot_wanted(now) || self.is_expecting_item();
         if yielding && !urgent {
             return false;
         }

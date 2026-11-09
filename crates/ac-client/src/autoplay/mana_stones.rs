@@ -65,7 +65,7 @@ impl Client {
     /// between fights. One use at a time, each answered.
     pub(crate) fn autoplay_mana_stones(&mut self, now: Instant) {
         let cfg = self.autoplay.config.mana.clone();
-        if !cfg.on || self.autoplay.cast_in_flight(now) {
+        if !cfg.on || self.autoplay.cast_in_flight(now) || self.autoplay.is_slot_wanted(now) {
             return;
         }
         if let Some((stone, at)) = self.autoplay.mana_stones.sent {

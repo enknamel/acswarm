@@ -695,6 +695,50 @@ fn the_use_waits_for_a_cast_on_the_walk_in_to_land() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
+fn the_counter_waiting_on_the_slot_gets_it_before_a_top_up() {
+    // Live the run stood 31-55 s at the counter: each time the slot freed, the urgent pass's
+    // top-up took it first, and the Use waited on that cast.
+    let now = Instant::now();
+    let (mut c, spell) = crate::testkit::a_caster_with_a_buff_due(now);
+    c.autoplay.config.enabled = true;
+    let sp = c.assets.spell_table().unwrap().get(spell).unwrap().clone();
+    // Up with 200 s left: inside top_up_within, past never_below.
+    c.world.stats.enchantments = vec![ac_world::stats::Enchantment {
+        spell_id: spell as u16,
+        category: sp.category as u16,
+        power: sp.power,
+        start_time: 0.0,
+        duration: 200.0,
+        received: Some(1000.0),
+        ..Default::default()
+    }];
+    assert!(c.due_buff(300.0, now).is_some(), "no top-up due");
+    a_run_at_cindrue(&mut c, Phase::Going, now);
+    c.autoplay.cast_sent = Some(now);
+    c.tick_autoplay(now);
+    assert!(matches!(
+        c.autoplay.growth.run.as_ref().unwrap().phase,
+        Phase::Going
+    ));
+    // The cast lands: the counter is asked, and the top-up waits its turn.
+    c.autoplay.cast_answered();
+    let freed = now + Duration::from_millis(200);
+    c.tick_autoplay(freed);
+    let use_ = ac_net::messages::action::USE;
+    assert_eq!(
+        actions_queued(&c).last(),
+        Some(&use_),
+        "the slot went to {:?}",
+        c.autoplay.step
+    );
+    assert!(matches!(
+        c.autoplay.growth.run.as_ref().unwrap().phase,
+        Phase::Opening { .. }
+    ));
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_swing_in_the_air_does_not_hold_the_ask() {
     // ACE is never busy for a swing, and a swing's answer can go
     // missing: read raw, one lost AttackDone parked a busy wait in
