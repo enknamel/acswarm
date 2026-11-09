@@ -862,6 +862,8 @@ impl Client {
             .quest_board_at
             .is_none_or(|at| now.duration_since(at) >= QUEST_BOARD_EVERY);
         let settled = !self.quest_board.is_empty() && !self.quest_board.iter().any(|l| l.on);
+        let changed = changed || self.is_wanted_gem_come();
+        let cfg = &self.autoplay.config.quests;
         if !changed && (!due || (!cfg.on && cfg.pursue.is_empty() && settled)) {
             return;
         }

@@ -2045,3 +2045,24 @@ fn a_gem_just_used_is_no_errand_on_the_way_to_its_ground() {
         "short of the invitation where it lands: {needs:?}"
     );
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_wanted_gem_bought_is_taken_up_at_once() {
+    // The invitation bought, the town run ended before it reached the pack; the hunt went off
+    // to another ground and cast Portal Recall, the board not due again for a while.
+    let mut c = mage_pursuing("learn:2023", "gem-at-once");
+    let now = std::time::Instant::now();
+    c.refresh_quests(now);
+    let cfg = c.autoplay.config.growth.clone();
+    assert!(!c.grow_hunt(now, &cfg));
+    assert!(matches!(again(&mut c, now), PursuitStep::Buy { .. }));
+    let gem = c.autoplay.growth.pursuit_gems[0].wcid;
+    in_the_pack(&mut c, 0x8000_0701, gem, "Invitation Ithaenc Cathedral", 1);
+    c.refresh_quests(now + std::time::Duration::from_millis(500));
+    assert!(
+        matches!(c.pursuit[0].step, PursuitStep::Hunt { .. }),
+        "{:?}",
+        c.pursuit[0].step
+    );
+}
