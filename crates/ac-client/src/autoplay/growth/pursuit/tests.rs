@@ -168,6 +168,7 @@ fn work_dropping(
         dropped,
         unlocked: &|_| false,
         ways: &BTreeMap::new(),
+        gem_grounds: &Default::default(),
         here: None,
     };
     pursuit_of(&board, &chained, &ask)
@@ -1983,6 +1984,20 @@ fn a_quest_whose_ground_the_character_stands_on_is_worked_first() {
     c.refresh_quests(now);
     let working = |c: &Client| c.pursuit.iter().find(|l| l.working).map(|l| l.id.clone());
     assert_eq!(working(&c).as_deref(), Some("copperknightmedallion"));
+    // Reached by the invitation, as only it reaches there: the gem wanted for it earlier.
+    let gem = ac_world::gems::all()
+        .iter()
+        .find(|g| g.name == "Invitation Ithaenc Cathedral")
+        .expect("the invitation");
+    c.autoplay.growth.want_gem(
+        "learn:2023",
+        super::gem_way::GemWanted {
+            quest: String::new(),
+            wcid: gem.wcid,
+            name: gem.name.clone(),
+            had: false,
+        },
+    );
     crate::testkit::stand(&mut c, 0x02B7_02F1, glam::Vec3::new(70.0, -60.0, 0.005));
     again(&mut c, now);
     assert_eq!(
@@ -2248,4 +2263,23 @@ fn a_quest_buy_held_back_for_want_of_coin_leaves_grow_to_pick_a_ground() {
         "no ground: {} ({:?}, held back: {})",
         c.autoplay.status, c.autoplay.step, c.autoplay.growth.held_back
     );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_ground_under_foot_that_no_gem_reaches_waits_its_turn_in_the_list() {
+    // Logged in in the Tusker Barracks, Blargerton hunted Tusker Guards for the kill counter, second
+    // on his list, though the first only wanted the stamp he carried used on the letter he carried.
+    let mut c = mage_pursuing("give:70303:45977", "order-kept");
+    c.autoplay
+        .config
+        .quests
+        .pursue_quest("tuskergkillcount", true, 0);
+    in_the_pack(&mut c, 0x8000_0710, 45875, "Lucky Gold Letter", 1);
+    in_the_pack(&mut c, 0x8000_0711, 8736, "Lytelthorpe Town Stamp", 1);
+    c.quest_log.note_taken("tuskergkillcount");
+    crate::testkit::stand(&mut c, 0x5A48_01C8, glam::Vec3::new(72.0, -123.0, -1.2));
+    c.refresh_quests(std::time::Instant::now());
+    let working = c.pursuit.iter().find(|l| l.working).map(|l| l.id.as_str());
+    assert_eq!(working, Some("give:70303:45977"), "{:?}", c.pursuit);
 }

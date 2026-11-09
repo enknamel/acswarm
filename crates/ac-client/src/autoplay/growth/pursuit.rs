@@ -327,6 +327,8 @@ pub(crate) struct Ask<'a> {
     /// The portal gem each quest, by id, is had for first: no journey reaches its ground but
     /// from the gem's exit. Gone once carried.
     pub(crate) ways: &'a BTreeMap<String, (u32, String)>,
+    /// The quests, by id, whose ground only a gem reaches, carried, used or still wanted.
+    pub(crate) gem_grounds: &'a std::collections::BTreeSet<String>,
     /// The landblock the character stands in, by its cell (a dungeon's rooms run past its square).
     pub(crate) here: Option<u32>,
 }
@@ -395,15 +397,17 @@ pub(crate) fn pursuit_of(board: &[QuestLine], chained: &[Chained], ask: &Ask) ->
             );
         }
     }
-    // A hunt whose ground the character stands on is worked first: leaving a dungeon it is in for
-    // another quest, to come back after, is never the better order (logged in in the catacombs).
-    let on_ground = |h: &Option<Hunting>| {
-        h.as_ref()
-            .is_some_and(|(g, _)| g.iter().any(|(lb, _)| Some(*lb) == ask.here))
+    // A hunt whose ground only a gem reaches is worked first while the character stands on it:
+    // leaving to come back costs another gem (logged in in Ithaenc's catacombs). Any other ground
+    // under foot waits its turn in the player's order (the Tusker Barracks, a letter to stamp).
+    let on_ground = |l: &PursuitLine, h: &Option<Hunting>| {
+        ask.gem_grounds.contains(&l.id)
+            && h.as_ref()
+                .is_some_and(|(g, _)| g.iter().any(|(lb, _)| Some(*lb) == ask.here))
     };
     let first = lines
         .iter()
-        .position(|(l, h)| l.step.can_progress() && on_ground(h));
+        .position(|(l, h)| l.step.can_progress() && on_ground(l, h));
     let mut out = Pursued::default();
     for (i, (mut line, hunt)) in lines.into_iter().enumerate() {
         line.working = match first {
@@ -713,6 +717,8 @@ impl Client {
             .filter(|g| !g.had)
             .map(|g| (g.quest.clone(), (g.wcid, g.name.clone())))
             .collect();
+        let gem_grounds: std::collections::BTreeSet<String> =
+            st.pursuit_gems.iter().map(|g| g.quest.clone()).collect();
         let held: BTreeMap<String, String> = st
             .pursuit_held
             .iter()
@@ -754,6 +760,7 @@ impl Client {
             dropped: &dropped,
             unlocked: &unlocked,
             ways: &ways,
+            gem_grounds: &gem_grounds,
             here: self.player.as_ref().map(|p| p.cell >> 16),
         };
         let pursued = pursuit_of(&self.quest_board, chained, &ask);
