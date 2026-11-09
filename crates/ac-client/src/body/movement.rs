@@ -116,6 +116,18 @@ impl Client {
         self.noclip() && !self.steering.flying
     }
 
+    /// Flying a route's crossing over a trap plate, still above it.
+    pub(crate) fn is_crossing_trap(&self) -> bool {
+        let Some(pl) = self.player.as_ref().filter(|_| self.steering.flying) else {
+            return false;
+        };
+        let at = Place {
+            at: pl.world_position(),
+            cell: pl.cell,
+        };
+        ac_nav::fly_over::is_over_trap(at, pl.capsule().radius)
+    }
+
     /// Flying was asked for and the movement rules refused it (see
     /// [`player::Player::noclip_refused`]).
     pub fn noclip_refused(&self) -> bool {

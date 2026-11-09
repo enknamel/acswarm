@@ -641,6 +641,41 @@ mod tests {
 
     #[test]
     #[ignore = "needs AC_DATA_DIR"]
+    fn exploring_the_catacombs_of_ithaenc_flies_over_its_plate_and_goes_on() {
+        // 0x02B702B6 is a Nullify All Magic Other plate and nothing else: explore aimed at it,
+        // flew the crossing, was let go above it and dropped on; every plan from the air was no way.
+        let mut c = crate::testkit::standing_in_the_field(
+            60,
+            0x02B7_02F1,
+            glam::Vec3::new(70.0, -60.0, 0.005),
+        );
+        c.world.player_guid = Some(crate::testkit::ME);
+        c.autoplay.config.enabled = true;
+        c.autoplay.config.fight.enabled = true;
+        let plate = ac_world::traps::in_landblock(0x02B7_0000)
+            .into_iter()
+            .find(|t| t.cell == 0x02B7_02B6)
+            .expect("the plate");
+        let (centre, r) = plate.sphere();
+        let t0 = Instant::now();
+        for frame in 0..40 * 20 {
+            let now = t0 + std::time::Duration::from_secs_f32(frame as f32 * 0.05);
+            c.tick_autoplay(now);
+            c.tick_player(crate::player::Input::default(), 0.05, now);
+            let me = c.my_position().unwrap();
+            let axis = glam::Vec3::new(me.x, me.y, centre.z.clamp(me.z + 0.48, me.z + 1.5));
+            assert!(axis.distance(centre) >= r + 0.48, "on the plate at {me:?}");
+        }
+        let past = [0x02B7_02B4, 0x02B7_02B5];
+        assert!(
+            past.iter().any(|r| c.autoplay.rooms_seen.contains(r)),
+            "never past the plate; shut {:x?}",
+            c.autoplay.rooms_shut
+        );
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn exploring_climbs_the_stairs() {
         // On the stairs 0x01F602A3, whose sills are 6 m apart in height: an aim at a sill's height
         // past it had no floor, was drawn back onto the sill, and read as no way into either room.

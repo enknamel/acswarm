@@ -218,6 +218,11 @@ impl Client {
         now: Instant,
         journey: bool,
     ) -> Did {
+        // Mid-crossing over a trap plate nothing is planned from the air, which has no way: the
+        // walk is asked again once the crossing has landed (`tick_player`).
+        if self.is_crossing_trap() {
+            return Did::Acting;
+        }
         // A journey's stretch is the planner's to refuse; any other goal past the region is a
         // journey, whose stretch takes the slot.
         if !journey && !self.is_in_region(place) {

@@ -236,17 +236,23 @@ pub fn can_walk(area: &Area, from: Place, to: Vec3) -> bool {
 }
 
 /// Where a character can stand within `radius` (metres, flat) of `around`; once the area is built
-/// whole, only where the body at `from` has a way to. `Err` names the chunks to build first.
+/// whole, only where the body at `from` has a way to, and never on a trap plate (flown over).
+/// `Err` names the chunks to build first.
 pub fn standable_near(
     area: &Area,
     from: Place,
     around: Place,
     radius: f32,
 ) -> Result<Vec<Place>, Vec<(i32, i32)>> {
+    let body = area.capsule().radius;
     area.read_ground(|ground, nav| {
         let start = graph_end(ground, from);
         let spots = wayfind::standable_near(ground, nav, start, around.at, radius)?;
-        Ok(spots.iter().map(place_of).collect())
+        Ok(spots
+            .iter()
+            .map(place_of)
+            .filter(|p| !crate::fly_over::is_on_trap(*p, body))
+            .collect())
     })
 }
 

@@ -59,10 +59,32 @@ impl Client {
             if (self.move_to.is_none() && going.is_none()) || manual {
                 self.steering.reset();
             }
-            // Off a flown leg (landed, or the walk put down): the flying it turned on ends.
-            if self.steering.flying && !self.steering.is_flying_leg(pl.world_position()) {
-                pl.set_noclip(false);
-                self.steering.flying = false;
+            let me = pl.world_position();
+            if self.steering.is_flying_leg(me) {
+                self.steering.landing = self.steering.route.as_ref().and_then(|c| c.landing());
+            }
+            // Off a flown leg (landed, or the walk put down): the flying it turned on ends, but
+            // over a trap plate it flies on to the crossing's landing first, nothing else steered.
+            let mut crossing = None;
+            if self.steering.flying && !self.steering.is_flying_leg(me) {
+                let over = ac_nav::fly_over::is_over_trap(
+                    ac_world::Place {
+                        at: me,
+                        cell: pl.cell,
+                    },
+                    pl.capsule().radius,
+                );
+                let (flat, rise) = ac_nav::steering::FLY_ARRIVE;
+                let landed = |l: &glam::Vec3| {
+                    glam::Vec2::new(l.x - me.x, l.y - me.y).length() <= flat
+                        && (l.z - me.z).abs() <= rise
+                };
+                crossing = self.steering.landing.filter(|l| over && !landed(l));
+                if crossing.is_none() {
+                    pl.set_noclip(false);
+                    self.steering.flying = false;
+                    self.steering.landing = None;
+                }
             }
             // A sidestep out of a spell's way comes before every other
             // goal, for the moment it lasts; it ends when its time is
@@ -129,7 +151,17 @@ impl Client {
                     tracing::debug!("server move-to over: there, and answered");
                     self.move_to = None;
                 }
-                if let Some((g, stop, goal_cell)) = goal {
+                if let Some(land) = crossing {
+                    // Level to above the landing, then down onto it: never straight down here.
+                    let high = glam::Vec3::new(land.x, land.y, land.z.max(me.z));
+                    let flat = glam::Vec2::new(land.x - me.x, land.y - me.y).length();
+                    let aim = if flat > ac_nav::steering::FLY_ARRIVE.0 {
+                        high
+                    } else {
+                        land
+                    };
+                    fly_at(pl, &mut input, aim);
+                } else if let Some((g, stop, goal_cell)) = goal {
                     // Whoever is steering says how far this frame may
                     // carry us; by default nothing does.
                     pl.step_cap = None;

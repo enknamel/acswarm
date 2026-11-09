@@ -158,6 +158,15 @@ impl Course {
         w.kind == EdgeKind::Fly && !landed
     }
 
+    /// Where the flown run from the waypoint being walked at lands: its last flown waypoint.
+    pub fn landing(&self) -> Option<Vec3> {
+        let left = &self.waypoints[self.next.min(self.waypoints.len())..];
+        left.iter()
+            .take_while(|w| w.kind == EdgeKind::Fly)
+            .last()
+            .map(|w| w.place.at)
+    }
+
     /// Distance (metres, 3D) still to walk from `me` through the waypoints left.
     pub fn remaining(&self, me: Vec3) -> f32 {
         let mut from = me;
@@ -297,6 +306,8 @@ pub struct Steering {
     pub grounded: bool,
     /// The body turned flying on for a flown leg, and turns it off once off one.
     pub flying: bool,
+    /// The flown leg's landing: put down over a trap plate, the body flies on to it first.
+    pub landing: Option<Vec3>,
     /// The walk is a journey's stretch with no way left but flying: where the graph has none on
     /// foot it is flown across (`Route::flown_across`).
     pub fly_gaps: bool,
@@ -336,6 +347,7 @@ impl Steering {
         *self = Steering {
             grounded,
             flying,
+            landing: self.landing,
             fly_gaps,
             ..Steering::default()
         };

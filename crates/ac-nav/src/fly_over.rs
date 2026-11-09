@@ -51,6 +51,32 @@ pub fn over_traps(route: Route, start: Vec3, radius: f32) -> Route {
     rebuilt(&route, &ends, &stretches)
 }
 
+/// Whether a body of capsule `radius` at `p` is within a trap plate's reach, kept
+/// [`TRAP_BERTH`] off: standing there, or coming straight down from there, it would touch it.
+pub fn is_over_trap(p: Place, radius: f32) -> bool {
+    near_trap(p, radius, f32::NEG_INFINITY)
+}
+
+/// Whether a body of capsule `radius` standing at `p` would touch a plate's sphere, kept
+/// [`TRAP_BERTH`] off: never a place to stand.
+pub fn is_on_trap(p: Place, radius: f32) -> bool {
+    near_trap(p, radius, p.at.z)
+}
+
+/// A plate within reach of `p` on the flat, its sphere's top above `floor` and its bottom below
+/// the body's crown.
+fn near_trap(p: Place, radius: f32, floor: f32) -> bool {
+    ac_world::traps::in_landblock(p.cell & 0xFFFF_0000)
+        .into_iter()
+        .any(|t| {
+            let (c, r) = t.sphere();
+            let reach = r + radius + TRAP_BERTH;
+            c.z + r >= floor
+                && c.z - r <= p.at.z + BODY_HEIGHT
+                && c.truncate().distance(p.at.truncate()) < reach
+        })
+}
+
 /// Each leg's stretch within reach of a plate whose sphere its body would touch.
 fn stretches_near(ends: &[(Vec3, u32)], traps: &[&Trap], radius: f32) -> Vec<Stretch> {
     let mut out = Vec::new();

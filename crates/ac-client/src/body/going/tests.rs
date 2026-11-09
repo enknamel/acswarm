@@ -364,8 +364,15 @@ fn a_walk_past_a_buff_stripping_plate_flies_over_it_and_never_touches_it() {
                 t.cell,
                 t.at + dir * 6.0,
             );
-            let floored = |p: Vec3| (p.z - t.at.z).abs() < 0.5;
-            if !floored(trial.start) || !floored(trial.goal) {
+            // Each end on its floor and clear of every plate: a row's next plate is no goal.
+            let clear = |p: Vec3| {
+                let at = Place {
+                    at: p,
+                    cell: t.cell,
+                };
+                (p.z - t.at.z).abs() < 0.5 && !ac_nav::fly_over::is_on_trap(at, 0.48)
+            };
+            if !clear(trial.start) || !clear(trial.goal) {
                 continue;
             }
             let mut c = walk_trial::standing_at(40, &trial);
@@ -416,4 +423,89 @@ fn a_walk_past_a_buff_stripping_plate_flies_over_it_and_never_touches_it() {
         }
     }
     panic!("no walk past a Nullify plate arrived ({tried} tried)");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_crossing_put_down_over_a_plate_flies_on_to_its_landing() {
+    // Explore let go of its walk above the Catacombs of Ithaenc's plate and the body dropped on it;
+    // a walk asked meanwhile was planned from the air and refused.
+    for t in ac_world::traps::all()
+        .iter()
+        .filter(|t| t.spells.contains("Nullify All Magic Other") && t.scale == 1.0)
+    {
+        let trial = walk_trial::named(
+            40,
+            "past a plate",
+            t.at - Vec3::X * 6.0,
+            t.cell,
+            t.at + Vec3::X * 6.0,
+        );
+        let clear = |p: Vec3| {
+            let at = Place {
+                at: p,
+                cell: t.cell,
+            };
+            (p.z - t.at.z).abs() < 0.5 && !ac_nav::fly_over::is_on_trap(at, 0.48)
+        };
+        if !clear(trial.start) || !clear(trial.goal) {
+            continue;
+        }
+        let mut c = walk_trial::standing_at(40, &trial);
+        c.world.player_guid = Some(ME);
+        c.movement_rules = crate::player::MovementRules::Unrestricted;
+        let place = |at: Vec3| Place {
+            at,
+            cell: trial.goal_cell,
+        };
+        let goal = Goal::At {
+            place: place(trial.goal),
+            within: 1.0,
+        };
+        let mut now = Instant::now();
+        if !c.go(Owner::Hand, goal, now).acting() {
+            continue;
+        }
+        let cap = c.player.as_ref().unwrap().capsule();
+        let mut put_down = false;
+        for _ in 0..400 {
+            c.tick_player(crate::player::Input::default(), 0.05, now);
+            c.pathfinder.settle(Duration::from_secs(5));
+            now += Duration::from_millis(50);
+            let me = c.my_position().unwrap();
+            assert!(
+                !touches(me, &cap, t.sphere()),
+                "touched the plate at {:?} from {me:?}",
+                t.at
+            );
+            if !put_down && c.is_crossing_trap() {
+                put_down = true;
+                c.stop_going(None, "put down");
+                // Asked from the air, a walk waits for the landing: nothing planned, nothing refused.
+                let plans = c.pathfinder.plans;
+                let back = Goal::At {
+                    place: place(trial.start),
+                    within: 1.0,
+                };
+                assert_eq!(c.go(Owner::Hand, back, now), Did::Acting);
+                assert_eq!(c.pathfinder.plans, plans);
+                assert!(c.refusals.is_empty(), "refused from the air");
+            }
+        }
+        if !put_down {
+            continue;
+        }
+        let me = c.my_position().unwrap();
+        assert!(!c.noclip(), "still flying at {me:?}");
+        let at = Place {
+            at: me,
+            cell: c.player.as_ref().unwrap().cell,
+        };
+        assert!(
+            !ac_nav::fly_over::is_over_trap(at, cap.radius),
+            "landed by the plate at {me:?}"
+        );
+        return;
+    }
+    panic!("no crossing over a Nullify plate was put down");
 }
