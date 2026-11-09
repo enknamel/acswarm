@@ -1960,3 +1960,59 @@ fn a_gem_step_carried_off_elsewhere_plans_again_before_using_the_gem() {
         "not planned again from where it landed"
     );
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_journey_asked_again_where_it_was_refused_is_not_planned_again() {
+    // A refused journey asked every tick was planned every tick: 3583 "travel: cancelled" in two
+    // minutes. Asked again with the body unmoved, its kept refusal answers.
+    use std::sync::{Arc, Mutex};
+    struct Log(Arc<Mutex<Vec<u8>>>);
+    impl std::io::Write for Log {
+        fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(b);
+            Ok(b.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let log = Arc::new(Mutex::new(Vec::new()));
+    let into = log.clone();
+    let subscriber = tracing_subscriber::fmt()
+        .with_writer(move || Log(into.clone()))
+        .with_max_level(tracing::Level::INFO)
+        .finish();
+    let mut c = Client::offline(crate::testkit::game_data());
+    c.movement_rules = crate::player::MovementRules::ServerSafe;
+    let (start, ledge) = under_the_01f6_ledge(&mut c);
+    tracing::subscriber::with_default(subscriber, || {
+        c.frame_at = Instant::now();
+        for tick in 0..60 {
+            c.frame_at += Duration::from_millis(50);
+            assert!(!c.journey_to(ledge, ARRIVE), "set off at tick {tick}");
+        }
+    });
+    let log = String::from_utf8(log.lock().unwrap().clone()).unwrap();
+    assert_eq!(
+        log.matches("travel: planning to").count(),
+        1,
+        "planned again"
+    );
+    assert!(c.my_position().unwrap().distance(start) < 0.01, "moved");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_journey_ended_leaves_no_flight_behind_for_the_next_to_the_same_place() {
+    // A flown journey's marker outlived it: the next journey to the same place, flown or not,
+    // was flown.
+    let mut c = crate::testkit::standing_at(0xA9B4_0019, Vec3::new(84.0, 84.0, 94.0));
+    let goal = Vec2::new(32600.0, 34600.0);
+    assert!(c.travel_to(goal), "no way there");
+    c.travel.fly_to = c.travel_goal_xy();
+    assert!(c.is_journey_flown(), "not flown");
+    c.cancel_travel();
+    assert!(c.travel_to(goal), "no way there the second time");
+    assert!(!c.is_journey_flown(), "flown on the old journey's marker");
+}

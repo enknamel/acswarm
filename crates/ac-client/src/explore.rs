@@ -680,6 +680,44 @@ mod tests {
 
     #[test]
     #[ignore = "needs AC_DATA_DIR"]
+    fn exploring_over_the_plate_plans_and_refuses_nothing_from_the_air() {
+        // Above the Catacombs of Ithaenc's plate every plan was no way: a room asked for from the
+        // air was shut and its refusal kept. While the body is up, autoplay plans nothing.
+        let mut c = crate::testkit::standing_in_the_field(
+            60,
+            0x02B7_02F1,
+            glam::Vec3::new(70.0, -60.0, 0.005),
+        );
+        c.world.player_guid = Some(crate::testkit::ME);
+        c.autoplay.config.enabled = true;
+        c.autoplay.config.fight.enabled = true;
+        let t0 = Instant::now();
+        let mut crossed = 0;
+        for frame in 0..40 * 20 {
+            let now = t0 + std::time::Duration::from_secs_f32(frame as f32 * 0.05);
+            let up = c.is_crossing_trap() || c.player.as_ref().is_some_and(|p| p.is_airborne());
+            let before = (
+                c.pathfinder.plans,
+                c.refusals.len(),
+                c.autoplay.rooms_shut.len(),
+            );
+            c.tick_autoplay(now);
+            if up {
+                crossed += 1;
+                let after = (
+                    c.pathfinder.plans,
+                    c.refusals.len(),
+                    c.autoplay.rooms_shut.len(),
+                );
+                assert_eq!(after, before, "planned, refused or shut from the air");
+            }
+            c.tick_player(crate::player::Input::default(), 0.05, now);
+        }
+        assert!(crossed > 0, "never crossed the plate");
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
     fn exploring_climbs_the_stairs() {
         // On the stairs 0x01F602A3, whose sills are 6 m apart in height: an aim at a sill's height
         // past it had no floor, was drawn back onto the sill, and read as no way into either room.

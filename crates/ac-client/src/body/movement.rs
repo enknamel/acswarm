@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use ac_nav::routing::{NoWay, Planned};
 use ac_world::Place;
 use glam::Vec3;
@@ -126,6 +128,18 @@ impl Client {
             cell: pl.cell,
         };
         ac_nav::fly_over::is_over_trap(at, pl.capsule().radius)
+    }
+
+    /// In the air: falling, jumping, or flying a crossing over a trap plate. Nothing is planned
+    /// from here (docs/movement-plan.md): with no floor under it every plan is no way.
+    pub(crate) fn is_aloft(&self) -> bool {
+        self.player.as_ref().is_some_and(|p| p.is_airborne()) || self.is_crossing_trap()
+    }
+
+    /// Whether the planner must not be asked now: the body aloft, or a hop on its way, which
+    /// would plan from where the hop leaves rather than where it lands.
+    pub(crate) fn is_planning_held(&self, now: Instant) -> bool {
+        self.is_aloft() || self.autoplay.is_hopping(now)
     }
 
     /// Flying was asked for and the movement rules refused it (see

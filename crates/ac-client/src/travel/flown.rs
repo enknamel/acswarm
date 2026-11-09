@@ -12,17 +12,24 @@ use crate::{Client, Goal, Owner};
 
 impl Client {
     /// [`set_off`](Self::set_off), and with no way on foot to a place in the dungeon stood in,
-    /// flown there, through its walls if need be.
+    /// flown there; refused, kept refused for `owner` and answered so till the body moves.
     pub(super) fn set_off_or_fly(&mut self, owner: Owner, goal: Goal, now: Instant) -> Did {
-        let did = self.set_off(owner, goal, now);
+        let ends = self.my_position().zip(goal.place().map(|p| p.at));
+        if let Some(why) = ends.and_then(|e| self.kept_refusal(owner, goal, e, true)) {
+            return Did::blocked(why);
+        }
+        let mut did = self.set_off(owner, goal, now);
         if matches!(did, Did::Blocked(_)) && self.is_in_this_dungeon(goal) {
-            return self.fly_journey(owner, goal, now);
+            did = self.fly_journey(owner, goal, now);
+        }
+        if let (Did::Blocked(why), Some((me, there))) = (&did, ends) {
+            self.refuse(owner, goal, me, there, &why.what);
         }
         did
     }
 
     /// Whether `goal` lies in the dungeon the body stands in.
-    fn is_in_this_dungeon(&mut self, goal: Goal) -> bool {
+    pub(super) fn is_in_this_dungeon(&mut self, goal: Goal) -> bool {
         let here = self.player.as_ref().map_or(0, |pl| pl.cell >> 16);
         let there = goal
             .place()
@@ -57,7 +64,7 @@ impl Client {
                 .is_some_and(|f| to.is_some_and(|g| g.distance(f) <= 1.0))
     }
 
-    /// The journey to `goal` set off flown, its refusals and the slot's forgotten; blocked when
+    /// The journey to `goal` set off flown, `owner`'s refusals forgotten; blocked when
     /// the body may not fly, it is flown already, or the trip planner still has no way. A flight
     /// to the same goal before a hop is no bar: the ruins flown, the catacombs are flown afresh.
     pub(super) fn fly_journey(&mut self, owner: Owner, goal: Goal, now: Instant) -> Did {
@@ -70,8 +77,12 @@ impl Client {
         tracing::info!("travel: no way left on foot; the journey is flown");
         self.cancel_travel();
         self.travel.fly_to = Some(to);
-        // The walks refused on foot are flown now: their refusals no longer stand.
-        self.refusals.clear();
+        // The walks refused on foot are flown now: theirs and the journey's refusals no longer
+        // stand; another owner's still do. A journey of no row walks as `Owner::Journey`.
+        self.forget_refusals(owner);
+        if !matches!(owner, Owner::Step(_)) {
+            self.forget_refusals(Owner::Journey);
+        }
         self.set_off(owner, goal, now)
     }
 }

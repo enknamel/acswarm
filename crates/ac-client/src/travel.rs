@@ -277,9 +277,9 @@ impl Client {
     /// then its first stretch asked of the slot at once, so a first walk with no way refuses it
     /// before a step (a_journey_whose_first_walk_has_no_way_is_refused_at_once).
     pub(crate) fn set_off(&mut self, owner: Owner, goal: Goal, now: Instant) -> Did {
-        // Planned now, the trip would start where the hop leaves, not where it lands.
-        if self.autoplay.is_hopping(now) {
-            return Did::waiting("a hop is in the air");
+        // Planned now, the trip would start in the air or where the hop leaves, not where it lands.
+        if self.is_planning_held(now) {
+            return Did::waiting("in the air");
         }
         let trip = match self.plan_journey(goal) {
             Ok(trip) => trip,
@@ -743,6 +743,8 @@ impl Client {
         self.travel.replan_due = false;
         self.travel.held = false;
         self.travel.row_aside = false;
+        self.travel.fly_to = None;
+        self.travel.about_the_ground = false;
     }
 
     /// The portal the current step is aimed at: its name and its mouth.
@@ -969,15 +971,18 @@ impl Client {
         }
     }
 
-    /// Give up the journey but remember which portals turned us away, so
-    /// the next plan leaves them out.
+    /// Give up the journey but keep what turned it away, so the next plan leaves that out, and
+    /// whether it is flown and about the ground.
     fn cancel_travel_keeping_refusals(&mut self) {
         let refused = std::mem::take(&mut self.travel.refused);
         let refused_recalls = std::mem::take(&mut self.travel.refused_recalls);
         let refused_gems = std::mem::take(&mut self.travel.refused_gems);
         let refused_walks = std::mem::take(&mut self.travel.refused_walks);
         let (goal, owner, hopped) = (self.travel.goal, self.travel.owner, self.travel.hopped);
+        let (fly_to, about) = (self.travel.fly_to, self.travel.about_the_ground);
         self.end_trip();
+        self.travel.fly_to = fly_to;
+        self.travel.about_the_ground = about;
         self.travel.refused = refused;
         self.travel.refused_recalls = refused_recalls;
         self.travel.refused_gems = refused_gems;
@@ -994,14 +999,15 @@ impl Client {
             self.end_trip();
             return Did::blocked("no journey to plan again");
         };
-        if self.autoplay.is_hopping(now) {
+        if self.is_planning_held(now) {
             self.travel.replan_due = true;
-            return Did::waiting("a hop is in the air");
+            return Did::waiting("in the air");
         }
         let hopping = self.is_hopping();
         self.cancel_travel_keeping_refusals();
         let mut did = self.set_off(owner, goal, now);
-        if matches!(did, Did::Blocked(_)) && hopping {
+        // Flown as a first plan is (`set_off_or_fly`): refused here, the flight would never be tried.
+        if matches!(did, Did::Blocked(_)) && (hopping || self.is_in_this_dungeon(goal)) {
             did = self.fly_journey(owner, goal, now);
         }
         if let (Did::Blocked(why), Some(me), Some(p)) = (&did, self.my_position(), goal.place()) {

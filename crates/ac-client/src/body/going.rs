@@ -33,6 +33,8 @@ pub(crate) struct Refusal {
     why: String,
     /// The planner's answer, when it was the planner that refused.
     no_way: Option<NoWay>,
+    /// A journey's refusal: what the trip planner had then (`journey_means`); a walk's has none.
+    means: Option<u64>,
 }
 
 /// Who asked for a walk: a STEPS row, or something outside the step table.
@@ -155,15 +157,8 @@ impl Client {
         let Some(place) = self.goal_place(goal) else {
             return Did::blocked("not in view");
         };
-        // A refusal stands while the body and the goal stand where they were, whatever took the slot.
-        self.refusals
-            .retain(|r| r.from.distance(me.at) <= REPLAN_DISTANCE);
-        if let Some(r) = self.refusals.iter().find(|r| {
-            r.owner == owner
-                && r.goal.is_same(goal)
-                && r.there.distance(place.at) <= REPLAN_DISTANCE
-        }) {
-            return Did::blocked(r.why.clone());
+        if let Some(why) = self.kept_refusal(owner, goal, (me.at, place.at), false) {
+            return Did::blocked(why);
         }
         let tick = self.autoplay.tick;
         if let Some(g) = self.going.as_mut().filter(|g| {
@@ -176,19 +171,65 @@ impl Client {
         self.start_going(owner, goal, (me, place), now, journey)
     }
 
-    /// Keep `owner`'s refusal of `goal` (`Client.refusals`), in place of an older one for it.
-    pub(crate) fn refuse(&mut self, owner: Owner, goal: Goal, from: Vec3, there: Vec3, why: &str) {
-        self.refuse_for(owner, goal, (from, there), why, None);
+    /// Why `owner`'s `goal`, at `there` now, stands refused from `me` (with `journeys`, only a
+    /// journey's refusal): one stands while the body and the goal stand where they were.
+    pub(crate) fn kept_refusal(
+        &mut self,
+        owner: Owner,
+        goal: Goal,
+        (me, there): (Vec3, Vec3),
+        journeys: bool,
+    ) -> Option<String> {
+        self.refusals
+            .retain(|r| r.from.distance(me) <= REPLAN_DISTANCE);
+        let at = self.refusals.iter().position(|r| {
+            r.owner == owner
+                && (r.means.is_some() || !journeys)
+                && r.goal.is_same(goal)
+                && r.there.distance(there) <= REPLAN_DISTANCE
+        })?;
+        // A gem come into the pack, a recall castable again, a level: the journey is planned anew.
+        if self.refusals[at]
+            .means
+            .is_some_and(|m| m != self.journey_means())
+        {
+            self.refusals.remove(at);
+            return None;
+        }
+        Some(self.refusals[at].why.clone())
     }
 
-    /// [`refuse`](Self::refuse), keeping the planner's answer when it was the planner's.
+    /// Forget `owner`'s refusals: its journey is flown now, past what refused it on foot.
+    pub(crate) fn forget_refusals(&mut self, owner: Owner) {
+        self.refusals.retain(|r| r.owner != owner);
+    }
+
+    /// Keep `owner`'s journey to `goal` refused (`Client.refusals`), in place of an older refusal.
+    pub(crate) fn refuse(&mut self, owner: Owner, goal: Goal, from: Vec3, there: Vec3, why: &str) {
+        let means = Some(self.journey_means());
+        self.keep_refusal(owner, goal, (from, there), why, (None, means));
+    }
+
+    /// Keep `owner`'s walk to `goal` refused, with the planner's answer when it was the planner's.
     fn refuse_for(
+        &mut self,
+        owner: Owner,
+        goal: Goal,
+        ends: (Vec3, Vec3),
+        why: &str,
+        no_way: Option<NoWay>,
+    ) {
+        self.keep_refusal(owner, goal, ends, why, (no_way, None));
+    }
+
+    /// Keep a refusal of `owner`'s `goal` from `from` to `there`, a journey's or a walk's.
+    fn keep_refusal(
         &mut self,
         owner: Owner,
         goal: Goal,
         (from, there): (Vec3, Vec3),
         why: &str,
-        no_way: Option<NoWay>,
+        (no_way, means): (Option<NoWay>, Option<u64>),
     ) {
         self.refusals
             .retain(|r| !(r.owner == owner && r.goal.is_same(goal)));
@@ -202,6 +243,7 @@ impl Client {
             there,
             why: why.to_string(),
             no_way,
+            means,
         });
     }
 
@@ -222,10 +264,10 @@ impl Client {
         now: Instant,
         journey: bool,
     ) -> Did {
-        // Mid-crossing over a trap plate nothing is planned from the air, which has no way: the
-        // walk is asked again once the crossing has landed (`tick_player`).
-        if self.is_crossing_trap() {
-            return Did::Acting;
+        // Nothing is planned from the air, which has no way: the walk is asked again once the
+        // body is down (a crossing over a trap plate lands first, `tick_player`).
+        if self.is_aloft() {
+            return Did::waiting("in the air");
         }
         // A journey's stretch is the planner's to refuse; any other goal past the region is a
         // journey, whose stretch takes the slot.
@@ -336,7 +378,7 @@ impl Client {
             let why = "no way there: no progress";
             g.given_up = true;
             g.refused = Some(why.into());
-            self.refuse(owner, goal, me, place.at, why);
+            self.refuse_for(owner, goal, (me, place.at), why, None);
             return Did::blocked(why);
         }
         Did::Acting

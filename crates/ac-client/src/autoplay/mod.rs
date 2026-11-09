@@ -587,7 +587,10 @@ impl Client {
         self.frame_at = now;
         self.fold_ammo_keep();
         self.run_steps(now);
-        self.settle_going();
+        // Aloft, no goal asked (`run_steps`): their walks and journey wait for the landing.
+        if !self.is_aloft() {
+            self.settle_going();
+        }
     }
 
     /// The rules of one tick (see [`tick_autoplay`](Self::tick_autoplay)).
@@ -693,6 +696,11 @@ impl Client {
         if self.hand_on_keys {
             self.autoplay.step = None;
             self.autoplay.say(Doing::Idle, "the player is steering");
+            return;
+        }
+        // Nothing is planned from the air (docs/movement-plan.md), and every no way a goal heard
+        // there would be kept: the goals wait for the landing.
+        if self.is_aloft() {
             return;
         }
         // The goals are weighed. Most say nothing and take their place

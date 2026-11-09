@@ -487,7 +487,7 @@ fn a_crossing_put_down_over_a_plate_flies_on_to_its_landing() {
                     place: place(trial.start),
                     within: 1.0,
                 };
-                assert_eq!(c.go(Owner::Hand, back, now), Did::Acting);
+                assert_eq!(c.go(Owner::Hand, back, now), Did::waiting("in the air"));
                 assert_eq!(c.pathfinder.plans, plans);
                 assert!(c.refusals.is_empty(), "refused from the air");
             }

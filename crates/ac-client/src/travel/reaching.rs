@@ -92,6 +92,24 @@ impl Client {
         planned
     }
 
+    /// What the trip planner may use, as one number: level, quest flags, the gems carried and
+    /// the recalls castable. A journey's refusal stands only while it is the same.
+    pub(crate) fn journey_means(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        self.world.stats.level.hash(&mut h);
+        self.travel.quests_done.hash(&mut h);
+        let mut gems: Vec<u32> = self.carried_gems().iter().map(|g| g.guid).collect();
+        gems.sort_unstable();
+        gems.hash(&mut h);
+        if self.travel_prefs().use_recalls {
+            let mut recalls: Vec<u32> = self.castable_recalls().iter().map(|r| r.spell).collect();
+            recalls.sort_unstable();
+            recalls.hash(&mut h);
+        }
+        h.finish()
+    }
+
     /// Whether indoor `cell` is a dungeon's room, not a building's: in a dungeon's landblock, or
     /// one the outdoors cannot see (Ketnan's, under Tusker Island). Without the grid, as dungeon.
     pub(crate) fn is_dungeon_cell(&mut self, cell: u32) -> bool {

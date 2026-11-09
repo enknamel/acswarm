@@ -1030,3 +1030,56 @@ fn a_pursued_creatures_one_room_is_held_not_the_dungeon_explored() {
         c.autoplay.status
     );
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_body_in_the_air_plans_nothing_and_skips_no_ground() {
+    // Planned from mid-air, every way was no way and every row read that as a ground it could not
+    // reach: nine grounds skipped in 2 s. From the air nothing is planned; landed, it sets off.
+    use ac_world::object::Position;
+    use ac_world::recalls::position_type;
+    let cell = 0x9BE0_0012;
+    let at = glam::Vec3::new(29_808.307, 43_045.4, 145.142);
+    let up = at - ac_world::landblock_origin(cell) + glam::Vec3::Z * 20.0;
+    let mut c = crate::testkit::standing_in_the_field(41, cell, up);
+    let lifestone = Position::new_flat(0xA9B4_0019, glam::Vec3::new(84.0, 7.1, 94.0));
+    c.learn_recall_position(position_type::SANCTUARY, lifestone);
+    c.autoplay.config.enabled = true;
+    let t0 = Instant::now();
+    c.autoplay.growth.quiet_since = Some(t0 - Duration::from_secs(600));
+    let airborne = |c: &Client| c.player.as_ref().is_some_and(|p| p.is_airborne());
+    // Let go 20 m up, as a flight put down drops the body.
+    c.movement_rules = crate::player::MovementRules::Unrestricted;
+    let limits = c.movement_limits();
+    c.player.as_mut().unwrap().set_limits(limits);
+    assert!(c.set_noclip(true) && c.set_noclip(false), "flying refused");
+    assert!(airborne(&c), "not falling");
+    let mut t = t0;
+    let plans = c.pathfinder.plans;
+    let mut fell = 0;
+    for _ in 0..200 {
+        t += Duration::from_millis(50);
+        let aloft = airborne(&c);
+        c.tick_autoplay(t);
+        if aloft {
+            fell += 1;
+            assert!(!c.traveling(), "set off from the air");
+            assert_eq!(c.pathfinder.plans, plans, "planned from the air");
+        } else if c.traveling() {
+            break;
+        }
+        let _ = c.tick_player(crate::player::Input::default(), 0.05, t);
+    }
+    assert!(fell > 5, "fell for {fell} ticks");
+    let skipped: Vec<u32> = c.autoplay.growth.skip.iter().map(|(g, _)| *g).collect();
+    assert!(
+        skipped.is_empty(),
+        "grounds skipped from the air: {skipped:x?}"
+    );
+    assert!(
+        c.refusals.is_empty(),
+        "refused from the air: {:?}",
+        c.refusals
+    );
+    assert!(c.traveling(), "never set off once landed");
+}
