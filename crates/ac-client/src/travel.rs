@@ -54,9 +54,6 @@ pub const RECALL_GIVE_UP: Duration = Duration::from_secs(15);
 /// (Player_Location.cs:180), 15.2 s on Coldeve: sent again at 15 s, a second recall began.
 const LIFESTONE_GIVE_UP: Duration = Duration::from_secs(25);
 const RECALL_TRIES: u32 = 2;
-/// A recall travel cast lands this long after it is sent: a gem used meanwhile is turned away
-/// busy (the cast, then the server's two-second pause; guess).
-const RECALL_LANDS: Duration = Duration::from_secs(6);
 /// Where the summoned portal stands: this far in front of the character.
 const SUMMON_DISTANCE: f32 = 3.0;
 /// How far ahead must be free of walls for the portal to fit: out to
@@ -156,7 +153,7 @@ pub struct Travel {
     /// when. Where it lands is learnt as the position (see `Client::recall_landed`).
     pub(crate) recall_sent: Option<(u32, Vec3, Instant)>,
     /// When travel last cast a recall: it lands whatever journey follows (`RECALL_LANDS`).
-    recall_cast: Option<Instant>,
+    pub(crate) recall_cast: Option<Instant>,
     /// Where the journey is bound (always `Goal::At`), to replan around a refusal.
     goal: Option<Goal>,
     /// Whose journey it is: the STEPS row that set it off or took it over, whose stretches the slot
@@ -927,17 +924,6 @@ impl Client {
         tracing::warn!("travel: {name} {why}; going another way");
         self.travel.refused_gems.push(guid);
         self.travel.replan_due = true;
-    }
-
-    /// A spell in the air, a recall travel cast not yet landed (even for a journey since put
-    /// down), or the gems' cooldown running: a gem used now is turned away, its try spent.
-    fn is_gem_held(&self, now: Instant) -> bool {
-        self.autoplay.cast_in_flight(now)
-            || self.is_gem_cooling()
-            || self
-                .travel
-                .recall_cast
-                .is_some_and(|t| now.duration_since(t) < RECALL_LANDS)
     }
 
     /// The recall being cast fizzled: cast again as soon as the

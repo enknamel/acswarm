@@ -1,7 +1,7 @@
 //! A gem step's two decisions, standing where the gem is used: which way to face for room to
 //! summon, and what to do next from what the pack and the summoned portal show.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use glam::Vec2;
 
@@ -21,6 +21,9 @@ const GEM_GIVE_UP: Duration = Duration::from_secs(8);
 const SUMMONED_USE_EVERY: Duration = Duration::from_secs(3);
 /// How many times a summoned portal is used before it is given up on.
 const SUMMONED_TRIES: u32 = 4;
+/// A recall travel cast lands this long after it is sent: a gem used meanwhile is turned away
+/// busy (the cast, then the server's two-second pause; guess).
+const RECALL_LANDS: Duration = Duration::from_secs(6);
 /// The cooldown every portal gem shares, as the enchantment ACE puts on the user: 0x8000 with
 /// CooldownId 1000 (EnchantmentManager.cs:284-306, 1186), 15 s; 483 of `gems.csv`'s 484.
 const GEM_COOLDOWN: u16 = 0x8000 | 1000;
@@ -131,6 +134,17 @@ impl crate::Client {
     pub(crate) fn summoned_portal(&self, before: &[u32]) -> Option<u32> {
         let near = self.portals_in_reach().into_iter();
         near.into_iter().find(|g| !before.contains(g))
+    }
+
+    /// A spell in the air, a recall travel cast not yet landed (even for a journey since put
+    /// down), or the gems' cooldown running: a gem used now is turned away, its try spent.
+    pub(crate) fn is_gem_held(&self, now: Instant) -> bool {
+        self.autoplay.cast_in_flight(now)
+            || self.is_gem_cooling()
+            || self
+                .travel
+                .recall_cast
+                .is_some_and(|t| now.duration_since(t) < RECALL_LANDS)
     }
 
     /// Whether the gems' shared cooldown still runs: a gem used now is "used too recently"
