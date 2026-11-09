@@ -914,7 +914,14 @@ impl Player {
     /// floor or the terrain, whichever a character walking there would
     /// stand on. Used to lay a drawn route along the ground.
     pub fn ground_height(&mut self, assets: &Assets, x: f32, y: f32, near_z: f32) -> Option<f32> {
-        let block = block_of(Vec3::new(x, y, 0.0));
+        // A dungeon's rooms run past its landblock's square (the Copper Legion Keep's door at
+        // y -8): within one, its own block holds the floor, as `solid_blocks` takes it.
+        let own = self.landblock();
+        let block = if self.collision(assets, own).is_some_and(|c| c.dungeon) {
+            own
+        } else {
+            block_of(Vec3::new(x, y, 0.0))
+        };
         self.collision(assets, block)?;
         let cap = self.capsule;
         let height_table = self.height_table.clone();

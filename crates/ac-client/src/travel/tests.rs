@@ -1568,3 +1568,32 @@ fn a_gem_spent_from_a_stack_has_its_portal_used_not_the_gem_again() {
         "the summoned portal was not used"
     );
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_gem_at_a_dungeon_door_finds_the_floor_in_front_and_is_used() {
+    // Blargerton logged in at the Copper Legion Keep's door with the Copper Ward gem: its room
+    // runs past the landblock's square (y -8), the floor ahead was looked for in the landblock
+    // beside it, no heading had room, and the gem -- the only way to Corcima Castle -- was left out.
+    let mut c = crate::testkit::standing_at(0x0018_01C7, Vec3::new(90.0, -8.0, 0.01));
+    c.world.player_guid = Some(crate::testkit::ME);
+    const GEM: u32 = 0x80B6_F6BB;
+    const EXIT: u32 = 0x7018_01C6;
+    crate::testkit::thing_in_the_pack(&mut c, GEM, "Corcima Castle Copper Ward Portal Gem", 3);
+    let mut exit = crate::testkit::creature(EXIT, "Exit Copper Legion Keep");
+    exit.item_type = ac_world::item_type::PORTAL;
+    exit.position = crate::testkit::placed(0x0018_01C6, Vec3::new(90.0, -3.0, 0.0));
+    c.world.objects.insert(EXIT, exit);
+    let now = Instant::now();
+    let name = "Corcima Castle Copper Ward Portal Gem";
+    for _ in 0..2 {
+        // A pace to face open ground first, perhaps; then the gem.
+        if let Some(Goal::At { place, .. }) = c.travel_gem_first_use(GEM, name, true, now) {
+            let local = place.at - ac_world::landblock_origin(place.cell);
+            crate::testkit::stand(&mut c, place.cell, local);
+            c.stretch_answered(&Did::Done);
+        }
+    }
+    assert!(c.travel.refused_gems.is_empty(), "no room at the door");
+    assert!(c.travel.state.gem_used.is_some(), "the gem not used");
+}
