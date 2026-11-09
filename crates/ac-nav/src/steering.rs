@@ -376,8 +376,19 @@ impl Steering {
             return self.refuse(goal, Unreachable::Stalled);
         }
         if let Some(why) = self.asking {
-            ground.ask(goal, within, now);
-            if let Some((from, planned)) = ground.answer(goal, within) {
+            // A flown journey's stretch is flown again from here, never asked of the walk planner,
+            // which can put a hung portal's mouth on the terrain under it and drop there.
+            let answer = if self.fly_gaps && !self.grounded {
+                let from = Place {
+                    at: me,
+                    cell: goal.cell,
+                };
+                Some((from, Planned::Route(Route::flown_across(from, goal))))
+            } else {
+                ground.ask(goal, within, now);
+                ground.answer(goal, within)
+            };
+            if let Some((from, planned)) = answer {
                 if self.answered(why, me, from, goal, within, planned, now) == Aim::NoWay {
                     return Aim::NoWay;
                 }
@@ -782,6 +793,31 @@ mod tests {
             Aim::Go(corner)
         );
         assert_eq!(g.asks.len(), 1);
+    }
+
+    #[test]
+    fn a_flown_stretch_is_flown_again_never_asked_of_the_walk_planner() {
+        // Flown to the Catacombs of Ithaenc Portal, a replan by the walk planner put its mouth on
+        // the terrain 37 m under the ruins, and the flight sank there and stalled.
+        let t0 = Instant::now();
+        let mut st = Steering {
+            fly_gaps: true,
+            ..Steering::default()
+        };
+        let goal = Vec3::new(20.0, 0.0, 37.0);
+        let mut g = Fake::standing(Vec3::new(10.0, 0.0, 38.0));
+        g.route(&[Vec3::new(20.0, 0.0, 0.0)]);
+        let aim = st.steer(&mut g, place(goal), 0.0, t0);
+        assert!(
+            g.asks.is_empty(),
+            "the walk planner was asked: {:?}",
+            g.asks
+        );
+        let Aim::Go(at) = aim else {
+            panic!("{aim:?}");
+        };
+        assert!(at.z >= goal.z, "aimed under the goal at {at:?}");
+        assert!(st.route.as_ref().is_some_and(|c| c.is_flying(g.at)));
     }
 
     #[test]
