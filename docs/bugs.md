@@ -36,6 +36,10 @@ priority; a live report starts from the telemetry (`tools/telemetry.py`, `--mark
   stood 124 s "getting Black Rabbit in sight", 0.42 m from its route's first waypoint: a corner is
   held until the body stands on it (`Route::target`, ON_THE_SPOT) and it could not. Offline over the
   same static geometry the walk arrives, so something the map lacks was in the way (scn-shots).
+- **Popped 14 m up onto a spot the planner cannot leave.** Scn Mage on the way to an Essa Sclavus
+  ground went from (23746.6 26317.9 157.9) to (23744.3 26326.2 172.3) in 0.4 s at 7B890029, then
+  stood 85 s while every walk out was "Planner(Stranded)" and the journey replanned each second
+  (scenarios 2026-11-09, c0557ba1). The body's collision lift, not the route.
 
 
 ## 2. Plays badly
@@ -74,7 +78,18 @@ priority; a live report starts from the telemetry (`tools/telemetry.py`, `--mark
   0xABB4 through a wall our collision puts 28.1 m out (scn-shots, "shot:" notes): the shot test
   refuses shots the server would let through.
 
+- **Scn Taper never casts again after its tapers come.** Fails "casting again" on 998e841d and
+  c0557ba1 alike (2026-11-09): 13-15 km to Master Celdiseth for the tapers, then 2.5 km to a
+  Merchant to sell loot, and the run is over before it is back at a fight.
+
 ## 3. Tooling
+
+- **Three by-hand follow tests depend on timing.** `the_status_line_of_a_follower_survives_the_tick_that_wrote_it`,
+  `the_status_is_cleared_again_once_the_leader_is_reached` and
+  `no_errand_of_its_own_is_started_while_the_player_plays` run over `no_data()`: the region build
+  fails at once ("Planner(OutOfRegion)") unless the process-wide `REGIONS` or a slow builder thread
+  answers first. Run alone they fail on main as far back as a4de872; in the full suite they mostly
+  pass.
 
 - **"wedged" counts only fully blocked steps.** A step the walls slide back to where it began
   reads as progress, so a body going nowhere for 12 min showed wedged false in every sample; the
