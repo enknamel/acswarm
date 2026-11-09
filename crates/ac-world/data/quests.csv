@@ -1,9 +1,10 @@
 # Every quest a placed NPC holds: each Use, Give or Refuse path that does anything for the
 # character, XP or not, one row per way to complete one (giver and level band); the giver's
-# placements are in quest_givers.csv.
+# placements are in quest_givers.csv. And one per recall spell's scroll, had and read.
 # id,kind,title,giver_wcid,hand,want,count,min_level,max_level,xp,xp_level,xp_min,xp_max,share,gives,stamps,repeat,timer,needs,item,item_type,item_value,does,unread
 # Rows sharing an id are alternatives. kind: kill, item, talk, or start (the talk that takes a
-# quest up: it stamps what the quest's rows need). hand: give (hand the item over) or talk.
+# quest up: it stamps what the quest's rows need). hand: give (hand the item over), talk, or
+# read (a recall spell's scroll read: id learn:SPELL, giver_wcid 0, no giver).
 # want: the item wcid, or the kill counter. count: items one hand-in takes, or kills. Levels 0
 # are open. xp is fixed; xp_level is a share of the XP to the next level, clamped to
 # xp_min/xp_max when not 0. share: all, none or allegiance. gives: wcid:count;..., and for a
@@ -559,7 +560,7 @@ carenziracewins,item,Total Carenzi Race Wins,38993,give,38965,1,0,0,0,0,0,0,none
 carenziracewins,item,Total Carenzi Race Wins,38993,give,38965,1,0,0,0,0,0,0,none,38992:1,carenziracewins;casinovipportalaccess,0,,carenziracebetterr4;carenziracecup,Carenzi Race Ticket Stub,80,0,item;flag;takes,a check of type 51|a random reply|only without carenziracebetterr1|only without carenziracebetterr2|only without carenziracebetterr3
 carenziracewins,item,Total Carenzi Race Wins,38993,give,38965,1,0,0,0,0,0,0,none,38992:1,carenziracewins;casinovipportalaccess,0,,carenziracebetterr4,Carenzi Race Ticket Stub,80,0,item;flag;takes,a check of type 51|a random reply|only without carenziracebetterr1|only without carenziracebetterr2|only without carenziracebetterr3|only without carenziracecup
 celestialhandmember,item,Player is a member of Celestial Hand,38388,give,80306,1,0,0,0,0.2,0,198157237,allegiance,38392:1;38314:1;38397:1,celestialhandmember,0,,,Corrupted Mana Shard,80,0,xp;item;flag;stat;takes,a check of type 103
-championkillquest1,item,Kill Aun Ralirea,10978,give,10960,1,0,0,0,0,0,0,none,10960:1,,72000,championkillquest1,,Clay Figurine,8,15,item;spell;takes,
+championkillquest1,item,Kill Aun Ralirea,10978,give,10960,1,0,0,0,0,0,0,none,10960:1,,72000,championkillquest1,,Clay Figurine,8,15,item;takes,
 championkillquest2,item,Kill Hea Temenua,24052,give,10962,1,0,0,0,0,0,0,none,10962:1,,72000,championkillquest2,,Hea Totem,80,15,item;takes,
 championkillquest2,item,Kill Hea Temenua,24054,give,10962,1,0,0,0,0,0,0,none,10962:1,,72000,championkillquest2,,Hea Totem,80,15,item;takes,
 championkillquest2,item,Kill Hea Temenua,24055,give,10962,1,0,0,0,0,0,0,none,10962:1,,72000,championkillquest2,,Hea Totem,80,15,item;takes,
@@ -1282,11 +1283,11 @@ explorationmarkersfound,talk,Amount of Exploration Markers found.,39844,talk,,0,
 explorationmarkersfound,talk,Amount of Exploration Markers found.,39845,talk,,0,0,0,0,0,0,0,none,,explorationmarkersfound,0,,foundseanthespeedy,,,,flag,a check of type 102|solve-count ranges
 explorationmarkersfound,talk,Amount of Exploration Markers found.,39846,talk,,0,0,0,0,0,0,0,none,,explorationmarkersfound,0,,foundseanthespeedy,,,,flag,a check of type 102|solve-count ranges
 explorationmarkersfound,talk,Amount of Exploration Markers found.,39847,talk,,0,0,0,0,0,0,0,none,,explorationmarkersfound,0,,foundseanthespeedy,,,,flag,a check of type 102|solve-count ranges
-eyekiviklirhaven1,talk,You've used the Eye.,28402,talk,,0,0,0,0,0,0,0,none,,eyekiviklirhaven1,60,eyekiviklirhaven1,,,,,flag;spell,
+eyekiviklirhaven1,talk,You've used the Eye.,28402,talk,,0,0,0,0,0,0,0,none,,eyekiviklirhaven1,60,eyekiviklirhaven1,,,,,flag,
 eyekiviklirhaven2,talk,You've used the Eye.,28403,talk,,0,0,0,0,0,0,0,none,,eyekiviklirhaven2,60,eyekiviklirhaven2,,,,,flag;spell,
 eyekiviklirhaven3,talk,You've used the Eye.,28404,talk,,0,0,0,0,0,0,0,none,,eyekiviklirhaven3,60,eyekiviklirhaven3,,,,,flag;spell,
 eyekiviklirhaven4,talk,You've used the Eye.,28405,talk,,0,0,0,0,0,0,0,none,,eyekiviklirhaven4,60,eyekiviklirhaven4,,,,,flag;spell,
-eyekiviklirtrial1,talk,You've used the Eye.,28406,talk,,0,0,0,0,0,0,0,none,,eyekiviklirtrial1,30,eyekiviklirtrial1,,,,,flag;spell,
+eyekiviklirtrial1,talk,You've used the Eye.,28406,talk,,0,0,0,0,0,0,0,none,,eyekiviklirtrial1,30,eyekiviklirtrial1,,,,,flag,
 eyekiviklirtrial2,talk,You've used the Eye.,28407,talk,,0,0,0,0,0,0,0,none,,eyekiviklirtrial2,30,eyekiviklirtrial2,,,,,flag;spell,
 eyekiviklirtrial3,talk,You've used the Eye.,28408,talk,,0,0,0,0,0,0,0,none,,eyekiviklirtrial3,30,eyekiviklirtrial3,,,,,flag;spell,
 eyekiviklirtrial4,talk,You've used the Eye.,28409,talk,,0,0,0,0,0,0,0,none,,eyekiviklirtrial4,30,eyekiviklirtrial4,,,,,flag;spell,
@@ -2023,15 +2024,15 @@ give:11140,item,Olthoi Egg,35573,give,11140,1,0,0,0,0,0,0,none,,,0,,,Olthoi Egg,
 give:11142,item,Olthoi Pumpkin Pie,35573,give,11142,1,0,0,0,0,0,0,none,,,0,,,Olthoi Pumpkin Pie,20,8000,takes,a random reply
 give:11143,item,Olthoi Toast,35573,give,11143,1,0,0,0,0,0,0,none,,,0,,,Olthoi Toast,20,8000,takes,a random reply
 give:11144:10986,item,Clay Totem for Dryreach House Portal,10978,give,11144,1,0,0,0,0,0,0,none,10986:1,,0,,,Clay Totem,80,0,item;takes,a check of type 20
-give:11144:11144,item,Clay Totem for Clay Totem,10978,give,11144,1,0,0,0,0,0,0,none,11144:1,,0,,,Clay Totem,80,0,item;spell;takes,a check of type 20
+give:11144:11144,item,Clay Totem for Clay Totem,10978,give,11144,1,0,0,0,0,0,0,none,11144:1,,0,,,Clay Totem,80,0,item;takes,a check of type 20
 give:11145:10987,item,Clay Totem for Holtburg House Portal,10978,give,11145,1,0,0,0,0,0,0,none,10987:1,,0,,,Clay Totem,80,0,item;takes,a check of type 20
-give:11145:11145,item,Clay Totem for Clay Totem,10978,give,11145,1,0,0,0,0,0,0,none,11145:1,,0,,,Clay Totem,80,0,item;spell;takes,a check of type 20
+give:11145:11145,item,Clay Totem for Clay Totem,10978,give,11145,1,0,0,0,0,0,0,none,11145:1,,0,,,Clay Totem,80,0,item;takes,a check of type 20
 give:11146:10988,item,Clay Totem for Qalaba'r House Portal,10978,give,11146,1,0,0,0,0,0,0,none,10988:1,,0,,,Clay Totem,80,0,item;takes,a check of type 20
-give:11146:11146,item,Clay Totem for Clay Totem,10978,give,11146,1,0,0,0,0,0,0,none,11146:1,,0,,,Clay Totem,80,0,item;spell;takes,a check of type 20
+give:11146:11146,item,Clay Totem for Clay Totem,10978,give,11146,1,0,0,0,0,0,0,none,11146:1,,0,,,Clay Totem,80,0,item;takes,a check of type 20
 give:11147:10989,item,Clay Totem for Stonehold House Portal,10978,give,11147,1,0,0,0,0,0,0,none,10989:1,,0,,,Clay Totem,80,0,item;takes,a check of type 20
-give:11147:11147,item,Clay Totem for Clay Totem,10978,give,11147,1,0,0,0,0,0,0,none,11147:1,,0,,,Clay Totem,80,0,item;spell;takes,a check of type 20
+give:11147:11147,item,Clay Totem for Clay Totem,10978,give,11147,1,0,0,0,0,0,0,none,11147:1,,0,,,Clay Totem,80,0,item;takes,a check of type 20
 give:11148:10990,item,Clay Totem for Fort Tethana House Portal,10978,give,11148,1,0,0,0,0,0,0,none,10990:1,,0,,,Clay Totem,80,0,item;takes,a check of type 20
-give:11148:11148,item,Clay Totem for Clay Totem,10978,give,11148,1,0,0,0,0,0,0,none,11148:1,,0,,,Clay Totem,80,0,item;spell;takes,a check of type 20
+give:11148:11148,item,Clay Totem for Clay Totem,10978,give,11148,1,0,0,0,0,0,0,none,11148:1,,0,,,Clay Totem,80,0,item;takes,a check of type 20
 give:11149,item,Head of the Olthoi Queen,19127,give,11149,1,0,0,0,0,0,0,none,11149:1,,0,,,Head of the Olthoi Queen,80,0,item;takes,
 give:11150,item,The Queen's Head,19127,give,11150,1,0,0,0,0,0,0,none,11150:1,,0,,,The Queen's Head,80,0,item;takes,
 give:11151,item,Rubble,24052,give,11151,1,0,0,0,0,0,0,none,,,72000,menhirrubbleapickup,,Rubble,80,50,takes,
@@ -2789,10 +2790,6 @@ give:1517,item,Fiery Shield,42143,give,1517,1,0,14,0,0,0,0,none,,,0,,,Fiery Shie
 give:1517,item,Fiery Shield,42143,give,1517,1,15,0,0,0,0,0,none,,,0,,fachubhallsofhelm,Fiery Shield,2,7500,takes,
 give:1518,item,Superior Helmet,42143,give,1518,1,0,14,0,0,0,0,none,,,0,,,Superior Helmet,2,5500,takes,
 give:1518,item,Superior Helmet,42143,give,1518,1,15,0,0,0,0,0,none,,,0,,fachubhallsofhelm,Superior Helmet,2,5500,takes,
-give:15407,item,Bloodhunter Infusion,27160,give,15407,1,0,0,0,0,0,0,none,,,0,,,Bloodhunter Infusion,4000000,10,spell;takes,
-give:15408,item,Bloodhunter Oil,27160,give,15408,1,0,0,0,0,0,0,none,,,0,,,Bloodhunter Oil,4000000,10,spell;takes,
-give:15409,item,Concentrated Bloodhunter Infusion,27160,give,15409,1,0,0,0,0,0,0,none,,,0,,,Concentrated Bloodhunter Infusion,4000000,500,spell;takes,
-give:15410,item,Concentrated Bloodhunter Oil,27160,give,15410,1,0,0,0,0,0,0,none,,,0,,,Concentrated Bloodhunter Oil,4000000,500,spell;takes,
 give:15750,item,Superb Infused Pyreal Ingot,6356,give,15750,1,0,0,0,0,0,0,none,46105:1,,0,,,Superb Infused Pyreal Ingot,80,5000,item;takes,
 give:15760,item,Ruined Amulet of Missile Weapons,15774,give,15760,1,0,0,0,0,0,0,none,15749:1,,0,,,Ruined Amulet of Missile Weapons,80,0,item;takes,
 give:15761,item,Ruined Amulet of Light Weapons,15774,give,15761,1,0,0,0,0,0,0,none,15753:1,,0,,,Ruined Amulet of Light Weapons,80,0,item;takes,
@@ -2816,9 +2813,6 @@ give:15797,item,Miadun hu Okardunai,5694,give,15797,1,0,0,0,0,0,0,none,15798:1,,
 give:15797,item,Miadun hu Okardunai,5695,give,15797,1,0,0,0,0,0,0,none,15798:1,,0,,,Miadun hu Okardunai,2000,0,item;takes,
 give:15854,item,Unreadable Tome,16912,give,15854,1,0,0,0,0,0,0,none,15861:1,,0,,abandonednuhmudira,Unreadable Tome,80,0,item;flag;takes,
 give:15854,item,Unreadable Tome,16912,give,15854,1,0,0,0,0,0,0,none,15861:1,,0,,sacrificednuhmudira,Unreadable Tome,80,0,item;flag;takes,
-give:15856,item,Encrusted Bloodstone Jewel,27160,give,15856,1,0,0,0,0,0,0,none,,,72000,bloodjewelhighpickedup,,Encrusted Bloodstone Jewel,8,2000,spell;takes,
-give:15857,item,Encrusted Bloodstone Jewel,27160,give,15857,1,0,0,0,0,0,0,none,,,72000,bloodjewellowpickedup,,Encrusted Bloodstone Jewel,8,8000,spell;takes,
-give:15858,item,Encrusted Bloodstone Jewel,27160,give,15858,1,0,0,0,0,0,0,none,,,72000,bloodjewelmidpickedup,,Encrusted Bloodstone Jewel,8,8000,spell;takes,
 give:15866:15866,item,Bronze Cragstone's Shield for Bronze Cragstone's Shield,16892,give,15866,1,0,19,0,0,0,0,none,15866:1,,72000,shieldcragstonestatuepickup,,Bronze Cragstone's Shield,2,120,item;takes,
 give:15866:none,item,Bronze Cragstone's Shield for XP,16892,give,15866,1,20,0,25000,0,0,0,none,,,72000,shieldcragstonestatuepickup,,Bronze Cragstone's Shield,2,120,xp;takes,
 give:15867:15867,item,Bronze Large Kite Shield for Bronze Large Kite Shield,16892,give,15867,1,0,29,0,0,0,0,none,15867:1,,72000,shieldkitestatuepickup,,Bronze Large Kite Shield,2,210,item;takes,
@@ -3174,7 +3168,6 @@ give:21040,item,Salvaged Black Opal,24214,give,21040,1,0,0,0,0,0,0,none,,,0,,,Sa
 give:21041,item,Salvaged Bloodstone,24212,give,21041,1,0,0,0,0,0,0,none,,,0,,,Salvaged Bloodstone,40000000,10,takes,
 give:21041,item,Salvaged Bloodstone,24213,give,21041,1,0,0,0,0,0,0,none,,,0,,,Salvaged Bloodstone,40000000,10,flag;takes,solve-count ranges|only without strongholdbuildercomplete
 give:21041,item,Salvaged Bloodstone,24214,give,21041,1,0,0,0,0,0,0,none,,,0,,,Salvaged Bloodstone,40000000,10,takes,
-give:21041,item,Salvaged Bloodstone,27160,give,21041,1,0,0,0,0,0,0,none,,,0,,,Salvaged Bloodstone,40000000,10,spell;takes,
 give:21042,item,Salvaged Brass,24212,give,21042,1,0,0,0,0,0,0,none,,,0,,,Salvaged Brass,40000000,10,flag;takes,solve-count ranges|only without strongholdbuildercomplete
 give:21042,item,Salvaged Brass,24213,give,21042,1,0,0,0,0,0,0,none,,,0,,,Salvaged Brass,40000000,10,takes,
 give:21042,item,Salvaged Brass,24214,give,21042,1,0,0,0,0,0,0,none,,,0,,,Salvaged Brass,40000000,10,takes,
@@ -3517,7 +3510,6 @@ give:22455:none,item,Fabled Tusker Paw for skill and spell,22494,give,22455,1,0,
 give:22455:none,item,Fabled Tusker Paw for skill and spell,22495,give,22455,1,0,0,0,0,0,0,none,,,0,,,Fabled Tusker Paw,80,0,skill;takes,a check of type 45
 give:22455:none,item,Fabled Tusker Paw for skill and spell,22496,give,22455,1,0,0,0,0,0,0,none,,,0,,,Fabled Tusker Paw,80,0,skill;takes,a check of type 45
 give:22455:none,item,Fabled Tusker Paw for skill and spell,22497,give,22455,1,0,0,0,0,0,0,none,,,0,,,Fabled Tusker Paw,80,0,skill;takes,a check of type 45
-give:22455:none,item,Fabled Tusker Paw for skill and spell,22497,give,22455,1,0,0,0,0,0,0,none,,,0,,,Fabled Tusker Paw,80,0,spell;takes,a check of type 45
 give:22455:none,item,Fabled Tusker Paw for skill and spell,22498,give,22455,1,0,0,0,0,0,0,none,,,0,,,Fabled Tusker Paw,80,0,skill;takes,a check of type 45
 give:22455:none,item,Fabled Tusker Paw for skill and spell,45522,give,22455,1,0,0,0,0,0,0,none,,,0,,,Fabled Tusker Paw,80,0,skill;takes,a check of type 45
 give:22455:none-2,item,Fabled Tusker Paw for skill and item,22486,give,22455,1,0,0,0,0,0,0,none,|22557:1,,0,,,Fabled Tusker Paw,80,0,skill;takes;item,a random reply
@@ -3552,7 +3544,7 @@ give:22456:22455,item,Fabled Tusker Paw for Fabled Tusker Paw,22494,give,22456,1
 give:22456:22455,item,Fabled Tusker Paw for Fabled Tusker Paw,22495,give,22456,1,0,0,0,0,0,0,none,22455:1,,0,,,Fabled Tusker Paw,80,0,item;skill;takes,a check of type 45
 give:22456:22455,item,Fabled Tusker Paw for Fabled Tusker Paw,22496,give,22456,1,0,0,0,0,0,0,none,22455:1,,0,,,Fabled Tusker Paw,80,0,item;skill;takes,a check of type 45
 give:22456:22455,item,Fabled Tusker Paw for Fabled Tusker Paw,22497,give,22456,1,0,0,0,0,0,0,none,22455:1,,0,,,Fabled Tusker Paw,80,0,item;skill;takes,a check of type 45
-give:22456:22455,item,Fabled Tusker Paw for Fabled Tusker Paw,22497,give,22456,1,0,0,0,0,0,0,none,22455:1,,0,,,Fabled Tusker Paw,80,0,item;spell;takes,a check of type 45
+give:22456:22455,item,Fabled Tusker Paw for Fabled Tusker Paw,22497,give,22456,1,0,0,0,0,0,0,none,22455:1,,0,,,Fabled Tusker Paw,80,0,item;takes,a check of type 45
 give:22456:22455,item,Fabled Tusker Paw for Fabled Tusker Paw,22498,give,22456,1,0,0,0,0,0,0,none,22455:1,,0,,,Fabled Tusker Paw,80,0,item;skill;takes,a check of type 45
 give:22456:22455,item,Fabled Tusker Paw for Fabled Tusker Paw,45522,give,22456,1,0,0,0,0,0,0,none,22455:1,,0,,,Fabled Tusker Paw,80,0,item;skill;takes,a check of type 45
 give:22456:22455-2,item,Fabled Tusker Paw for Fabled Tusker Paw,22491,give,22456,1,0,0,0,0,0,0,none,22455:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1|22455:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1|22455:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1|22455:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1|22455:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1|22455:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1,,0,,,Fabled Tusker Paw,80,0,item;takes,a random reply
@@ -3620,7 +3612,7 @@ give:22457:22456,item,Fabled Tusker Paw for Fabled Tusker Paw,22494,give,22457,1
 give:22457:22456,item,Fabled Tusker Paw for Fabled Tusker Paw,22495,give,22457,1,0,0,0,0,0,0,none,22456:1,,0,,,Fabled Tusker Paw,80,0,item;skill;takes,a check of type 45
 give:22457:22456,item,Fabled Tusker Paw for Fabled Tusker Paw,22496,give,22457,1,0,0,0,0,0,0,none,22456:1,,0,,,Fabled Tusker Paw,80,0,item;skill;takes,a check of type 45
 give:22457:22456,item,Fabled Tusker Paw for Fabled Tusker Paw,22497,give,22457,1,0,0,0,0,0,0,none,22456:1,,0,,,Fabled Tusker Paw,80,0,item;skill;takes,a check of type 45
-give:22457:22456,item,Fabled Tusker Paw for Fabled Tusker Paw,22497,give,22457,1,0,0,0,0,0,0,none,22456:1,,0,,,Fabled Tusker Paw,80,0,item;spell;takes,a check of type 45
+give:22457:22456,item,Fabled Tusker Paw for Fabled Tusker Paw,22497,give,22457,1,0,0,0,0,0,0,none,22456:1,,0,,,Fabled Tusker Paw,80,0,item;takes,a check of type 45
 give:22457:22456,item,Fabled Tusker Paw for Fabled Tusker Paw,22498,give,22457,1,0,0,0,0,0,0,none,22456:1,,0,,,Fabled Tusker Paw,80,0,item;skill;takes,a check of type 45
 give:22457:22456,item,Fabled Tusker Paw for Fabled Tusker Paw,45522,give,22457,1,0,0,0,0,0,0,none,22456:1,,0,,,Fabled Tusker Paw,80,0,item;skill;takes,a check of type 45
 give:22457:22456-2,item,Fabled Tusker Paw for Fabled Tusker Paw,22491,give,22457,1,0,0,0,0,0,0,none,22456:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1;2621:1|22456:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1;2623:1|22456:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1;2624:1|22456:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1;2625:1|22456:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1;2626:1|22456:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1;2627:1,,0,,,Fabled Tusker Paw,80,0,item;takes,a random reply
@@ -4189,7 +4181,6 @@ give:24259,item,A Note from a Scout,24248,give,24259,1,0,0,4153202,0,0,0,all,,,7
 give:2426,item,Amber ,31974,give,2426,1,0,0,0,0,0,0,none,,,0,,,Amber ,800,50,spell;takes,
 give:24269,item,Small Olthoi Grub,24244,give,24269,1,0,0,0,0,0,0,none,24225:1,,0,,,Small Olthoi Grub,800,10,item;takes,
 give:24269,item,Small Olthoi Grub,24327,give,24269,1,0,0,0,0,0,0,none,24225:1,,0,,,Small Olthoi Grub,800,10,item;takes,
-give:2427,item,Bloodstone,27160,give,2427,1,0,0,0,0,0,0,none,,,0,,,Bloodstone,800,50,spell;takes,
 give:24454,item,Artificer's Gauntlets,12203,give,24454,1,0,0,0,0,0,0,none,24454:1,,0,,,Artificer's Gauntlets,2,5500,item;takes,
 give:24454,item,Artificer's Gauntlets,12204,give,24454,1,0,0,0,0,0,0,none,24454:1,,0,,,Artificer's Gauntlets,2,5500,item;takes,
 give:24454,item,Artificer's Gauntlets,12205,give,24454,1,0,0,0,0,0,0,none,24454:1,,0,,,Artificer's Gauntlets,2,5500,item;takes,
@@ -4280,7 +4271,6 @@ give:2462,item,Mead,6873,give,2462,1,0,0,0,0,0,0,none,,,0,,,Mead,20,30,takes,
 give:2462,item,Mead,23999,give,2462,1,0,0,0,0,0,0,none,,,0,,,Mead,20,30,spell;takes,
 give:2462,item,Mead,26457,give,2462,1,0,0,0,0,0,0,none,,,0,,,Mead,20,30,takes,
 give:2463,item,Milk,4201,give,2463,1,0,0,0,0,0,0,none,,,0,,,Milk,20,4,takes,
-give:2463,item,Milk,4795,give,2463,1,0,0,0,0,0,0,none,,,0,,,Milk,20,4,spell;takes,
 give:2463,item,Milk,6825,give,2463,1,0,0,0,0,0,0,none,,,0,,,Milk,20,4,takes,
 give:2464,item,Orange Juice,4795,give,2464,1,0,0,0,0,0,0,none,,,0,,,Orange Juice,20,20,takes,
 give:24641,item,Olthoi Egg,35573,give,24641,1,0,0,0,0,0,0,none,,,0,,,Olthoi Egg,10,0,takes,a random reply
@@ -4782,14 +4772,11 @@ give:260,item,Cabbage,35573,give,260,1,0,0,0,0,0,0,none,,,0,,,Cabbage,20,12,take
 give:26004,item,Crown of Bone,42110,give,26004,1,0,39,0,0,0,0,none,,,72000,pickedupcrownbaronnuvillus,,Crown of Bone,2,5000,takes,
 give:26004,item,Crown of Bone,42110,give,26004,1,40,0,0,0,0,0,none,,,72000,pickedupcrownbaronnuvillus,fachubcastle,Crown of Bone,2,5000,takes,
 give:261,item,Cheese,35573,give,261,1,0,0,0,0,0,0,none,,,0,,,Cheese,20,15,takes,a random reply
-give:262,item,Chicken,4201,give,262,1,0,0,0,0,0,0,none,,,0,,,Chicken,400000,20,spell;takes,
 give:262,item,Chicken,35573,give,262,1,0,0,0,0,0,0,none,,,0,,,Chicken,400000,20,takes,a random reply
 give:2621:2621,item,Trade Note (100) for Trade Note (100),7402,give,2621,1,0,0,0,0,0,0,none,2621:1,,0,,,Trade Note (100),40000,100,item;takes,
-give:2621:none,item,Trade Note (100) for spell,7403,give,2621,1,0,0,0,0,0,0,none,,,0,,,Trade Note (100),40000,100,spell;takes,
-give:2621:none,item,Trade Note (100) for spell,25712,give,2621,1,0,0,0,0,0,0,none,,,0,,,Trade Note (100),40000,100,takes,
+give:2621:none,item,Trade Note (100) for nothing,25712,give,2621,1,0,0,0,0,0,0,none,,,0,,,Trade Note (100),40000,100,takes,
 give:2622:2622,item,Trade Note (500) for Trade Note (500),7402,give,2622,1,0,0,0,0,0,0,none,2622:1,,0,,,Trade Note (500),40000,500,item;takes,
 give:2622:30046,item,Trade Note (500) for Silyun Portal Gem,30073,give,2622,1,0,0,0,0,0,0,none,30046:1,,0,,,Trade Note (500),40000,500,item;takes,
-give:2622:none,item,Trade Note (500) for spell,7403,give,2622,1,0,0,0,0,0,0,none,,,0,,,Trade Note (500),40000,500,spell;takes,
 give:2623:2623,item,Trade Note (1;000) for Trade Note (1;000),7402,give,2623,1,0,0,0,0,0,0,none,2623:1,,0,,,Trade Note (1;000),40000,1000,item;takes,
 give:2623:none,item,Trade Note (1;000) for nothing,7403,give,2623,1,0,0,0,0,0,0,none,,,0,,,Trade Note (1;000),40000,1000,takes,
 give:2623:none,item,Trade Note (1;000) for nothing,25493,give,2623,1,0,0,0,0,0,0,none,,,0,,,Trade Note (1;000),40000,1000,takes,
@@ -4856,15 +4843,9 @@ give:26512,item,Satchel with Offerings,26567,give,26512,1,0,0,0,0,0,0,none,,,0,,
 give:26513,item,Satchel with Offerings,26567,give,26513,1,0,0,0,0,0,0,none,,,0,,,Satchel with Offerings,800,0,flag;takes,
 give:26514,item,Satchel with Offerings,26567,give,26514,1,0,0,0,0,0,0,none,,,0,,,Satchel with Offerings,800,0,flag;takes,
 give:26515,item,Satchel with Offerings,26567,give,26515,1,0,0,0,0,0,0,none,,,0,,,Satchel with Offerings,800,0,flag;takes,
-give:26630,item,Black Opal,26545,give,26630,1,0,0,0,0,0,0,none,,,3600,templesacredstone,,Black Opal,800,0,spell;takes,
-give:26631,item,Sapphire,26545,give,26631,1,0,0,0,0,0,0,none,,,3600,templesacredstone,,Sapphire,800,0,spell;takes,
-give:26632,item,Serpentine,26545,give,26632,1,0,0,0,0,0,0,none,,,3600,templesacredstone,,Serpentine,800,0,spell;takes,
-give:26633,item,Sunstone,26545,give,26633,1,0,0,0,0,0,0,none,,,3600,templesacredstone,,Sunstone,800,0,spell;takes,
 give:26634,item,Bloodstone,26545,give,26634,1,0,0,0,0,0,0,none,,,3600,templesacredstone,,Bloodstone,800,0,spell;takes;type 66,
-give:26634,item,Bloodstone,27160,give,26634,1,0,0,0,0,0,0,none,,,3600,templesacredstone,,Bloodstone,800,0,spell;takes,
 give:26645,item,Heart of the Temple,26551,give,26645,1,0,0,0,0,0,0,none,,,0,,,Heart of the Temple,800,0,flag;takes,
 give:26645,item,Heart of the Temple,26552,give,26645,1,0,0,0,0,0,0,none,,,0,,,Heart of the Temple,800,0,spell;takes,
-give:26645,item,Heart of the Temple,27160,give,26645,1,0,0,0,0,0,0,none,,,0,,,Heart of the Temple,800,0,spell;takes,
 give:26660:26659,item,Scarred Fleshy Journal for Ibrexi Jikti's Journal,27117,give,26660,1,36,0,0,0,0,0,none,26659:1,,72000,journalibrexipickedup,,Scarred Fleshy Journal,2000,0,item;takes,an empty level band
 give:26660:26659-2,item,Scarred Fleshy Journal for Ibrexi Jikti's Journal,27117,give,26660,1,1,35,0,0,0,0,none,26659:1;27107:1,,72000,journalibrexipickedup,,Scarred Fleshy Journal,2000,0,item;takes,
 give:26660:26659-3,item,Scarred Fleshy Journal for Ibrexi Jikti's Journal,27117,give,26660,1,36,0,0,0,0,0,none,26659:1;27108:1,,72000,journalibrexipickedup,,Scarred Fleshy Journal,2000,0,item;takes,
@@ -5070,19 +5051,16 @@ give:27926,item,A Carved Plate,27965,give,27926,1,0,0,0,0,0,0,none,,,0,,,A Carve
 give:27926,item,A Carved Plate,27966,give,27926,1,0,0,0,0,0,0,none,,,0,,,A Carved Plate,800,0,takes,
 give:27927,item,A Carved Plate,27948,give,27927,1,0,0,0,0,0,0,none,,,0,,,A Carved Plate,800,0,takes,
 give:27927,item,A Carved Plate,27963,give,27927,1,0,59,0,0,0,0,none,,,0,,,A Carved Plate,800,0,takes,
-give:27927,item,A Carved Plate,27963,give,27927,1,60,0,0,0,0,0,none,,,0,,,A Carved Plate,800,0,spell;takes,
 give:27927,item,A Carved Plate,27964,give,27927,1,0,0,0,0,0,0,none,,,0,,,A Carved Plate,800,0,takes,
 give:27927,item,A Carved Plate,27965,give,27927,1,0,0,0,0,0,0,none,,,0,,,A Carved Plate,800,0,takes,
 give:27927,item,A Carved Plate,27966,give,27927,1,0,0,0,0,0,0,none,,,0,,,A Carved Plate,800,0,takes,
 give:27928,item,A Carved Plate,27948,give,27928,1,0,0,0,0,0,0,none,,,0,,,A Carved Plate,800,0,takes,
 give:27928,item,A Carved Plate,27963,give,27928,1,0,59,0,0,0,0,none,,,0,,,A Carved Plate,800,0,takes,
-give:27928,item,A Carved Plate,27963,give,27928,1,60,0,0,0,0,0,none,,,0,,,A Carved Plate,800,0,spell;takes,
 give:27928,item,A Carved Plate,27964,give,27928,1,0,0,0,0,0,0,none,,,0,,,A Carved Plate,800,0,takes,
 give:27928,item,A Carved Plate,27965,give,27928,1,0,0,0,0,0,0,none,,,0,,,A Carved Plate,800,0,takes,
 give:27928,item,A Carved Plate,27966,give,27928,1,0,0,0,0,0,0,none,,,0,,,A Carved Plate,800,0,takes,
 give:27929,item,A Carved Plate,27948,give,27929,1,0,0,0,0,0,0,none,,,0,,,A Carved Plate,800,0,takes,
 give:27929,item,A Carved Plate,27963,give,27929,1,0,59,0,0,0,0,none,,,0,,,A Carved Plate,800,0,takes,
-give:27929,item,A Carved Plate,27963,give,27929,1,60,0,0,0,0,0,none,,,0,,,A Carved Plate,800,0,spell;takes,
 give:27929,item,A Carved Plate,27964,give,27929,1,0,0,0,0,0,0,none,,,0,,,A Carved Plate,800,0,takes,
 give:27929,item,A Carved Plate,27965,give,27929,1,0,0,0,0,0,0,none,,,0,,,A Carved Plate,800,0,takes,
 give:27929,item,A Carved Plate,27966,give,27929,1,0,0,0,0,0,0,none,,,0,,,A Carved Plate,800,0,takes,
@@ -5207,15 +5185,15 @@ give:28344,item,Bloodstone Emblem,28426,give,28344,1,0,0,0,0,0,0,none,,,0,,,Bloo
 give:28344,item,Bloodstone Emblem,28426,give,28344,1,0,0,0,0,0,0,none,,,0,,,Bloodstone Emblem,800,0,flag;spell;takes,a check of type 58
 give:28344,item,Bloodstone Emblem,28426,give,28344,1,0,0,0,0,0,0,none,,,0,,,Bloodstone Emblem,800,0,takes,a check of type 58
 give:28346,item,Emblem of Blackened Blood,28425,give,28346,1,0,0,0,0,0,0,none,,,0,,,Emblem of Blackened Blood,800,0,flag;spell;takes,
-give:28347,item,Emblem of Time's Wrath,28425,give,28347,1,0,0,0,0,0,0,none,,,0,,,Emblem of Time's Wrath,800,0,flag;spell;takes,
-give:28348,item,Emblem of Aged Blood,28425,give,28348,1,0,0,0,0,0,0,none,,,0,,,Emblem of Aged Blood,800,0,flag;spell;takes,
-give:28349,item,Emblem of Blood,28425,give,28349,1,0,0,0,0,0,0,none,,,0,,,Emblem of Blood,800,0,flag;spell;takes,
-give:28350,item,Emblem of the Fiazhat,28425,give,28350,1,0,0,0,0,0,0,none,,,0,,,Emblem of the Fiazhat,800,0,flag;spell;takes,
-give:28351,item,Emblem of Ages Hence,28425,give,28351,1,0,0,0,0,0,0,none,,,0,,,Emblem of Ages Hence,800,0,flag;spell;takes,
-give:28356,item,Emblem of Sclavus Sight,28425,give,28356,1,0,0,0,0,0,0,none,,,0,,,Emblem of Sclavus Sight,800,0,flag;spell;takes,
-give:28357,item,Emblem of Ages Past,28425,give,28357,1,0,0,0,0,0,0,none,,,0,,,Emblem of Ages Past,800,0,flag;spell;takes,
-give:28358,item,Emblem of Serpent's Hold,28425,give,28358,1,0,0,0,0,0,0,none,,,0,,,Emblem of Serpent's Hold,800,0,flag;spell;takes,
-give:28359,item,Emblem of Blackened Weald,28425,give,28359,1,0,0,0,0,0,0,none,,,0,,,Emblem of Blackened Weald,800,0,flag;spell;takes,
+give:28347,item,Emblem of Time's Wrath,28425,give,28347,1,0,0,0,0,0,0,none,,,0,,,Emblem of Time's Wrath,800,0,flag;takes,
+give:28348,item,Emblem of Aged Blood,28425,give,28348,1,0,0,0,0,0,0,none,,,0,,,Emblem of Aged Blood,800,0,flag;takes,
+give:28349,item,Emblem of Blood,28425,give,28349,1,0,0,0,0,0,0,none,,,0,,,Emblem of Blood,800,0,flag;takes,
+give:28350,item,Emblem of the Fiazhat,28425,give,28350,1,0,0,0,0,0,0,none,,,0,,,Emblem of the Fiazhat,800,0,flag;takes,
+give:28351,item,Emblem of Ages Hence,28425,give,28351,1,0,0,0,0,0,0,none,,,0,,,Emblem of Ages Hence,800,0,flag;takes,
+give:28356,item,Emblem of Sclavus Sight,28425,give,28356,1,0,0,0,0,0,0,none,,,0,,,Emblem of Sclavus Sight,800,0,flag;takes,
+give:28357,item,Emblem of Ages Past,28425,give,28357,1,0,0,0,0,0,0,none,,,0,,,Emblem of Ages Past,800,0,flag;takes,
+give:28358,item,Emblem of Serpent's Hold,28425,give,28358,1,0,0,0,0,0,0,none,,,0,,,Emblem of Serpent's Hold,800,0,flag;takes,
+give:28359,item,Emblem of Blackened Weald,28425,give,28359,1,0,0,0,0,0,0,none,,,0,,,Emblem of Blackened Weald,800,0,flag;takes,
 give:28360,item,Satchel,28411,give,28360,1,0,0,0,0,0,0,none,,,0,,,Satchel,800,0,spell;takes,a check of type 58
 give:28360,item,Satchel,28411,give,28360,1,0,0,0,0,0,0,none,,,0,,,Satchel,800,0,flag;takes,a check of type 58
 give:28360,item,Satchel,28411,give,28360,1,0,0,0,0,0,0,none,,,0,,,Satchel,800,0,flag;spell;takes,a check of type 58
@@ -7541,8 +7519,7 @@ give:30987,item,Letter From Home,30991,give,30987,1,0,0,0,0,0,0,none,,,0,,,Lette
 give:30988,item,Letter From Home,30991,give,30988,1,0,0,0,0,0,0,none,,,0,,,Letter From Home,2000,10,takes,
 give:31000,item,Blackmoor's Favor,46776,talk,31000,1,0,0,0,0,0,0,none,31001:1,,0,,,Blackmoor's Favor,800,0,item,a check of stat 26|not carrying Asheron's Benediction
 give:31001,item,Asheron's Benediction,46776,talk,31001,1,0,0,0,0,0,0,none,31000:1,,0,,,Asheron's Benediction,800,0,item,a check of stat 26|not carrying Blackmoor's Favor
-give:31037:31037,item,Ruschk Scalp for Ruschk Scalp,31036,give,31037,1,0,0,0,0,0,0,none,31037:1,,0,,,Ruschk Scalp,80,0,item;takes,only without onquest
-give:31037:none,item,Ruschk Scalp for spell,31035,give,31037,1,0,0,0,0,0,0,none,,,0,,,Ruschk Scalp,80,0,spell;takes,
+give:31037,item,Ruschk Scalp,31036,give,31037,1,0,0,0,0,0,0,none,31037:1,,0,,,Ruschk Scalp,80,0,item;takes,only without onquest
 give:31226,item,Runic Skull,28703,give,31226,1,0,0,0,0,0,0,none,,,0,,,Runic Skull,80,0,takes,
 give:31226,item,Runic Skull,31228,give,31226,1,0,0,0,0,0,0,none,,,0,,,Runic Skull,80,0,takes,
 give:31231:28815,item,Eleonora's Note for Kul'dir,28699,give,31231,1,0,0,7500,0,0,0,none,28815:1,,72000,eleonoranote,,Eleonora's Note,2000,0,xp;item;takes,only without sanamarflagged
@@ -10706,7 +10683,6 @@ give:53071,item,Empowered Amber: Helm of Life,53271,give,53071,1,0,0,0,0,0,0,non
 give:53072,item,Empowered Amber: Pauldrons of Life,53271,give,53072,1,0,0,0,0,0,0,none,52968:1|52968:10|52968:20|52968:30|52968:40|52968:50|52968:60|52968:70|52968:80|52968:90|52968:100,,0,,,Empowered Amber: Pauldrons of Life,800,25,item;takes,a random reply
 give:53073,item,Empowered Amber: Sollerets of Life,53271,give,53073,1,0,0,0,0,0,0,none,52968:1|52968:10|52968:20|52968:30|52968:40|52968:50|52968:60|52968:70|52968:80|52968:90|52968:100,,0,,,Empowered Amber: Sollerets of Life,800,25,item;takes,a random reply
 give:53074,item,Empowered Amber: Tassets of Life,53271,give,53074,1,0,0,0,0,0,0,none,52968:1|52968:10|52968:20|52968:30|52968:40|52968:50|52968:60|52968:70|52968:80|52968:90|52968:100,,0,,,Empowered Amber: Tassets of Life,800,25,item;takes,a random reply
-give:5329,item,Bloodseeker Infusion,27160,give,5329,1,0,0,0,0,0,0,none,,,0,,,Bloodseeker Infusion,4000000,10,spell;takes,
 give:53293,item,Luminous Amber: Bracers of Thunderous Blows,53271,give,53293,1,0,0,0,0,0,0,none,52968:1|52968:10|52968:20|52968:30|52968:40|52968:50|52968:60|52968:70|52968:80|52968:90|52968:100,,0,,,Luminous Amber: Bracers of Thunderous Blows,800,25,item;takes,a random reply
 give:53294,item,Luminous Amber: Pauldrons of Thunderous Blows,53271,give,53294,1,0,0,0,0,0,0,none,52968:1|52968:10|52968:20|52968:30|52968:40|52968:50|52968:60|52968:70|52968:80|52968:90|52968:100,,0,,,Luminous Amber: Pauldrons of Thunderous Blows,800,25,item;takes,a random reply
 give:53295,item,Luminous Amber: Greaves of the Tower,53271,give,53295,1,0,0,0,0,0,0,none,52968:1|52968:10|52968:20|52968:30|52968:40|52968:50|52968:60|52968:70|52968:80|52968:90|52968:100,,0,,,Luminous Amber: Greaves of the Tower,800,25,item;takes,a random reply
@@ -10762,13 +10738,6 @@ give:53364:48746,item,Essence of Night Brier for Aged Legendary Key,53271,give,5
 give:53364:none,item,Essence of Night Brier for nothing,53451,give,53364,1,0,0,0,0,0,0,none,,,14400,pickupnightbrieressence,,Essence of Night Brier,80,0,takes,solve-count ranges
 give:53366:48746,item,Essence of Wind Fury for Aged Legendary Key,53271,give,53366,1,0,0,0,0,0,0,none,48746:1;48746:1;20630:1;52968:40,,14400,pickupwindfuryessence,,Essence of Wind Fury,80,0,item;luminance;takes,
 give:53366:none,item,Essence of Wind Fury for nothing,53451,give,53366,1,0,0,0,0,0,0,none,,,14400,pickupwindfuryessence,,Essence of Wind Fury,80,0,takes,solve-count ranges
-give:5337,item,Bloodseeker Oil,27160,give,5337,1,0,0,0,0,0,0,none,,,0,,,Bloodseeker Oil,4000000,20,spell;takes,
-give:53406,item,Ring Spells Certificate,12050,give,53406,1,0,0,0,0,0,0,none,,,0,,,Ring Spells Certificate,80,4,spell;takes,
-give:53406,item,Ring Spells Certificate,24577,give,53406,1,0,0,0,0,0,0,none,,,0,,,Ring Spells Certificate,80,4,spell;takes,
-give:53406,item,Ring Spells Certificate,49604,give,53406,1,0,0,0,0,0,0,none,,,0,,,Ring Spells Certificate,80,4,spell;takes,
-give:53407,item,Wall Spells Certificate,12050,give,53407,1,0,0,0,0,0,0,none,,,0,,,Wall Spells Certificate,80,4,spell;takes,
-give:53407,item,Wall Spells Certificate,24577,give,53407,1,0,0,0,0,0,0,none,,,0,,,Wall Spells Certificate,80,4,spell;takes,
-give:53407,item,Wall Spells Certificate,49604,give,53407,1,0,0,0,0,0,0,none,,,0,,,Wall Spells Certificate,80,4,spell;takes,
 give:53408,item,Celestial Hand Gauntlet Writ,12050,give,53408,1,0,0,0,0,0,0,none,38544:1,,0,,,Celestial Hand Gauntlet Writ,80,10,item;takes,
 give:53408,item,Celestial Hand Gauntlet Writ,24577,give,53408,1,0,0,0,0,0,0,none,38544:1,,0,,,Celestial Hand Gauntlet Writ,80,10,item;takes,
 give:53408,item,Celestial Hand Gauntlet Writ,49604,give,53408,1,0,0,0,0,0,0,none,38544:1,,0,,,Celestial Hand Gauntlet Writ,80,10,item;takes,
@@ -11300,8 +11269,6 @@ give:72798:none,item,Damaged Yalaini Tome for nothing,46356,give,72798,1,0,0,0,0
 give:72798:none,item,Damaged Yalaini Tome for nothing,46806,give,72798,1,0,0,0,0,0,0,none,,,72000,damagedyalainitomepickup,,Damaged Yalaini Tome,80,0,takes,
 give:72799:48747,item,The Sisters of Light for Legendary Key,46356,give,72799,1,0,0,45000000,0,0,0,none,48747:1,,0,,,The Sisters of Light,80,20,xp;item;luminance;teleport;takes,
 give:72799:none,item,The Sisters of Light for nothing,46356,give,72799,1,0,0,0,0,0,0,none,,,0,,,The Sisters of Light,80,20,takes,not carrying The Sisters of Light
-give:72842,item,Energy Scintilla,43858,give,72842,1,0,0,0,0,0,0,none,,,0,,summoningcavedule,Energy Scintilla,80,0,spell;takes,
-give:72842,item,Energy Scintilla,43861,give,72842,1,0,0,0,0,0,0,none,,,0,,summoningcaverhan,Energy Scintilla,80,0,spell;takes,
 give:72858,item,Recording Device,43860,give,72858,1,0,0,0,0,0,0,none,,,0,,darkrecording1,Recording Device,80,10000,takes,solve-count ranges
 give:72858,item,Recording Device,43860,give,72858,1,0,0,0,0,0,0,none,,,0,,,Recording Device,80,10000,takes,solve-count ranges
 give:72858,item,Recording Device,43861,give,72858,1,0,0,0,0,0,0,none,,,0,,darkrecording1;darkrecording2;darkrecordingfalse,Recording Device,80,10000,takes,
@@ -11334,10 +11301,9 @@ give:72912:none,item,Bottle D for type 83 and type 81,72913,give,72912,1,0,0,0,0
 give:72912:none,item,Bottle D for type 83 and type 81,72913,give,72912,1,0,0,0,0,0,0,none,,,0,,,Bottle D,80,0,takes,a check of type 80
 give:72912:none,item,Bottle D for type 83 and type 81,72913,give,72912,1,0,0,0,0,0,0,none,,,0,,,Bottle D,80,0,takes;type 81,a check of type 80
 give:72938:72944,item,Potion for Potion,72904,give,72938,1,0,0,0,0,0,0,none,72944:1,,0,,,Potion,800,0,item;takes;type 83,a check of type 80
-give:72938:none,item,Potion for type 83 and spell and type 81,72904,give,72938,1,0,0,0,0,0,0,none,,,0,,,Potion,800,0,takes;type 83,a check of type 80
-give:72938:none,item,Potion for type 83 and spell and type 81,72904,give,72938,1,0,0,0,0,0,0,none,,,0,,,Potion,800,0,spell;takes;type 83,a check of type 80
-give:72938:none,item,Potion for type 83 and spell and type 81,72904,give,72938,1,0,0,0,0,0,0,none,,,0,,,Potion,800,0,takes,a check of type 80
-give:72938:none,item,Potion for type 83 and spell and type 81,72904,give,72938,1,0,0,0,0,0,0,none,,,0,,,Potion,800,0,takes;type 81,a check of type 80
+give:72938:none,item,Potion for type 83 and type 81,72904,give,72938,1,0,0,0,0,0,0,none,,,0,,,Potion,800,0,takes;type 83,a check of type 80
+give:72938:none,item,Potion for type 83 and type 81,72904,give,72938,1,0,0,0,0,0,0,none,,,0,,,Potion,800,0,takes,a check of type 80
+give:72938:none,item,Potion for type 83 and type 81,72904,give,72938,1,0,0,0,0,0,0,none,,,0,,,Potion,800,0,takes;type 81,a check of type 80
 give:72939:72944,item,Potion for Potion,72904,give,72939,1,0,0,0,0,0,0,none,72944:1,,0,,,Potion,800,0,item;takes;type 83,a check of type 80
 give:72939:72945,item,Potion for Potion,72904,give,72939,1,0,0,0,0,0,0,none,72945:1,,0,,,Potion,800,0,item;takes;type 83,a check of type 80
 give:72939:none,item,Potion for type 83 and spell and type 81,72904,give,72939,1,0,0,0,0,0,0,none,,,0,,,Potion,800,0,takes;type 83,a check of type 80
@@ -11360,10 +11326,10 @@ give:72942:none,item,Potion for type 83 and type 81,72904,give,72942,1,0,0,0,0,0
 give:72942:none,item,Potion for type 83 and type 81,72904,give,72942,1,0,0,0,0,0,0,none,,,0,,,Potion,800,0,takes;type 81,a check of type 80
 give:72943:72945,item,Potion for Potion,72904,give,72943,1,0,0,0,0,0,0,none,72945:1,,0,,,Potion,800,0,item;takes;type 83,a check of type 80
 give:72943:72947,item,Potion for Potion,72904,give,72943,1,0,0,0,0,0,0,none,72947:1,,0,,,Potion,800,0,item;takes;type 83,a check of type 80
-give:72943:none,item,Potion for spell and type 83 and type 81,72904,give,72943,1,0,0,0,0,0,0,none,,,0,,,Potion,800,0,spell;takes;type 83,a check of type 80
-give:72943:none,item,Potion for spell and type 83 and type 81,72904,give,72943,1,0,0,0,0,0,0,none,,,0,,,Potion,800,0,takes;type 83,a check of type 80
-give:72943:none,item,Potion for spell and type 83 and type 81,72904,give,72943,1,0,0,0,0,0,0,none,,,0,,,Potion,800,0,takes,a check of type 80
-give:72943:none,item,Potion for spell and type 83 and type 81,72904,give,72943,1,0,0,0,0,0,0,none,,,0,,,Potion,800,0,takes;type 81,a check of type 80
+give:72943:none,item,Potion for type 83 and spell and type 81,72904,give,72943,1,0,0,0,0,0,0,none,,,0,,,Potion,800,0,takes;type 83,a check of type 80
+give:72943:none,item,Potion for type 83 and spell and type 81,72904,give,72943,1,0,0,0,0,0,0,none,,,0,,,Potion,800,0,spell;takes;type 83,a check of type 80
+give:72943:none,item,Potion for type 83 and spell and type 81,72904,give,72943,1,0,0,0,0,0,0,none,,,0,,,Potion,800,0,takes,a check of type 80
+give:72943:none,item,Potion for type 83 and spell and type 81,72904,give,72943,1,0,0,0,0,0,0,none,,,0,,,Potion,800,0,takes;type 81,a check of type 80
 give:72945,item,Potion,72918,give,72945,1,0,0,0,0,0,0,none,,,0,,thughideoutcured,Potion,800,0,takes,a check of type 80
 give:72945,item,Potion,72918,give,72945,1,0,0,0,0,0,0,none,,,0,,,Potion,800,0,takes;type 81,a check of type 80
 give:72945,item,Potion,72918,give,72945,1,0,0,0,0,0,0,none,,,0,,,Potion,800,0,takes,a check of type 80
@@ -11526,7 +11492,6 @@ give:7837,item,Ice Cream,35573,give,7837,1,0,0,0,0,0,0,none,,,0,,,Ice Cream,20,1
 give:7843,item,Chocolate Ice Cream,35573,give,7843,1,0,0,0,0,0,0,none,,,0,,,Chocolate Ice Cream,20,150,takes,a random reply
 give:7844,item,Frozen Green Tea,25794,give,7844,1,0,0,0,0,0,0,none,,,0,,,Frozen Green Tea,400000,90,takes,
 give:7845,item,Green Tea Ice Cream,35573,give,7845,1,0,0,0,0,0,0,none,,,0,,,Green Tea Ice Cream,20,140,takes,a random reply
-give:785,item,Powdered Bloodstone,27160,give,785,1,0,0,0,0,0,0,none,,,0,,,Powdered Bloodstone,1000,5,spell;takes,
 give:7858,item,Chocolate Cake,35573,give,7858,1,0,0,0,0,0,0,none,,,0,,,Chocolate Cake,20,50,takes,a random reply
 give:7860,item,Holtburger,35573,give,7860,1,0,0,0,0,0,0,none,,,0,,,Holtburger,20,39,takes,a random reply
 give:7866,item,Applesauce,35573,give,7866,1,0,0,0,0,0,0,none,,,0,,,Applesauce,20,10,takes,a random reply
@@ -11876,7 +11841,6 @@ give:8263:8262,item,Tumideon Obsidian Shard for Translated Tumideon Note,8266,gi
 give:8263:8263,item,Tumideon Obsidian Shard for Tumideon Obsidian Shard,5693,give,8263,1,0,0,0,0,0,0,none,8263:1,,0,,,Tumideon Obsidian Shard,80,20,item;takes,
 give:8263:8263,item,Tumideon Obsidian Shard for Tumideon Obsidian Shard,5694,give,8263,1,0,0,0,0,0,0,none,8263:1,,0,,,Tumideon Obsidian Shard,80,20,item;takes,
 give:8263:8263,item,Tumideon Obsidian Shard for Tumideon Obsidian Shard,5695,give,8263,1,0,0,0,0,0,0,none,8263:1,,0,,,Tumideon Obsidian Shard,80,20,item;takes,
-give:8317,item,Powdered Bloodstone Pea,27160,give,8317,1,0,0,0,0,0,0,none,,,0,,,Powdered Bloodstone Pea,1000,625,spell;takes,
 give:8360,item,A Battered Leather Journal,8362,give,8360,1,0,0,0,0,0,0,none,8360:1,,0,,,A Battered Leather Journal,2000,10,item;takes,
 give:8361,item,A Dry Withered Leather Bound Journal,8362,give,8361,1,0,0,0,0,0,0,none,8361:1,,0,,,A Dry Withered Leather Bound Journal,2000,10,item;takes,
 give:8363,item,Mace of the Explorer,42140,give,8363,1,0,24,0,0,0,0,none,,,0,,,Mace of the Explorer,1,700,takes,
@@ -11927,7 +11891,6 @@ give:8507:8507,item,Heavy Book of Notes for Heavy Book of Notes,5694,give,8507,1
 give:8509:8508,item,Tear-Stained Parchment for Translated Letter,5693,give,8509,1,0,0,0,0,0,0,none,8508:1,,0,,,Tear-Stained Parchment,2000,90,item;takes,
 give:8509:8509,item,Tear-Stained Parchment for Tear-Stained Parchment,5694,give,8509,1,0,0,0,0,0,0,none,8509:1,,0,,,Tear-Stained Parchment,2000,90,item;takes,
 give:8509:8509,item,Tear-Stained Parchment for Tear-Stained Parchment,5695,give,8509,1,0,0,0,0,0,0,none,8509:1,,0,,,Tear-Stained Parchment,2000,90,item;takes,
-give:8552,item,The Healer's Heart,27160,give,8552,1,0,0,0,0,0,0,none,,,0,,,The Healer's Heart,8000,5400,spell;takes,
 give:8581,item,Sir Martine's Journal,8362,give,8581,1,0,0,0,0,0,0,none,8581:1,,0,,,Sir Martine's Journal,2000,10,item;takes,
 give:8636,item,Hoory Mattekar Robe,10866,give,8636,1,0,0,0,0,0,0,none,,,0,,,Hoory Mattekar Robe,2,1,takes,
 give:8641,item,Vial of Lapyan Dye,25827,give,8641,1,0,0,0,0,0,0,none,25815:1,,0,,,Vial of Lapyan Dye,4000000,10,item;takes,
@@ -12346,7 +12309,6 @@ give:88077,item,Giant Blessed Moarsman's Severed Head,39474,give,88077,1,0,0,950
 give:88077,item,Giant Blessed Moarsman's Severed Head,39475,give,88077,1,0,0,95000000,0,0,0,all,38456:1,,0,,,Giant Blessed Moarsman's Severed Head,80,0,xp;item;title;takes,
 give:88077,item,Giant Blessed Moarsman's Severed Head,39476,give,88077,1,0,0,95000000,0,0,0,all,38456:1,,0,,,Giant Blessed Moarsman's Severed Head,80,0,xp;item;title;takes,
 give:8810,item,Geraux's Life Magic Scroll,8266,give,8810,1,0,0,0,0,0,0,none,,,72000,gredalineunnaturalpersistence,,Geraux's Life Magic Scroll,80,1000,spell;takes,
-give:8811,item,Nelamar's War Magic Scroll,8266,give,8811,1,0,0,0,0,0,0,none,,,72000,gredalinedarkflame,,Nelamar's War Magic Scroll,80,1000,spell;takes,
 give:8812,item,Esard's Life Magic Scroll,8266,give,8812,1,0,0,0,0,0,0,none,,,72000,gredalinearcanerestoration,,Esard's Life Magic Scroll,80,1000,spell;takes,
 give:88285,item,Invoking Stone,40247,give,88285,30,0,0,0,0,0,0,none,,,0,,invokingstoneosteth90,Invoking Stone,80,50,takes,
 give:88285,item,Invoking Stone,40247,give,88285,1,0,0,0,0,0,0,none,,,0,,,Invoking Stone,80,50,takes,not carrying Invoking Stone
@@ -12356,7 +12318,6 @@ give:8897,item,Platinum Scarab,9149,give,8897,1,0,0,0,0,0,0,none,,,0,,,Platinum 
 give:8901,item,Bandit Cousins' Letter,5839,give,8901,1,0,0,0,1.33,650000,3000000,allegiance,,,72000,banditblades,,Bandit Cousins' Letter,2000,5,xp;takes,
 give:8903,item,Focusing Stone,4122,give,8903,1,0,0,0,0,0,0,none,,,72000,focusingstone,,Focusing Stone,80,3000,takes,
 give:8904,item,Focusing Stone,4122,give,8904,1,0,0,0,0.35,100000,1845177,allegiance,,,72000,focusingstoneimbued,,Focusing Stone,8000,3000,xp;takes,
-give:8909,item,Blood of the Hopeslayer,27160,give,8909,1,0,0,0,0,0,0,none,,,72000,losthopeinfusion,,Blood of the Hopeslayer,4000000,0,spell;takes,
 give:9010,item,Unreadable Scroll,5695,give,9010,1,0,0,0,0,0,0,none,,,72000,aercyno,,Unreadable Scroll,2000,10,spell;takes,
 give:90113,item,Corrupted Mouryou Blade,46684,give,90113,1,0,0,0,0,0,0,none,46828:1,,0,,,Corrupted Mouryou Blade,80,0,item;takes,
 give:90114,item,Corrupted Mouryou Blade,46684,give,90114,1,0,0,0,0,0,0,none,46831:1,,0,,,Corrupted Mouryou Blade,80,0,item;takes,
@@ -12543,7 +12504,6 @@ give:9319,item,Mnemosynes and the Art of Lockpicking,9308,give,9319,1,0,0,0,0,0,
 give:9319,item,Mnemosynes and the Art of Lockpicking,9309,give,9319,1,0,0,0,0,0,0,none,,,0,,,Mnemosynes and the Art of Lockpicking,2000,100,takes,
 give:9324:273,item,Obsidian Heart for Pyreal,24216,give,9324,1,0,0,5000,0,0,0,all,273:5000,,0,,,Obsidian Heart,80,50,xp;item;takes,
 give:9324:273-2,item,Obsidian Heart for Pyreal,24574,give,9324,1,0,0,5000,0,0,0,all,273:6000,,0,,,Obsidian Heart,80,50,xp;item;takes,
-give:9343,item,Concentrated Bloodseeker Infusion,27160,give,9343,1,0,0,0,0,0,0,none,,,0,,,Concentrated Bloodseeker Infusion,4000000,500,spell;takes,
 give:9385:9384,item,Virindi Envoy's Obsidian Shard for Translated Virindi Envoy's Note,8266,give,9385,1,0,0,0,0,0,0,none,9384:1,,0,,,Virindi Envoy's Obsidian Shard,80,20,item;takes,
 give:9385:9385,item,Virindi Envoy's Obsidian Shard for Virindi Envoy's Obsidian Shard,5693,give,9385,1,0,0,0,0,0,0,none,9385:1,,0,,,Virindi Envoy's Obsidian Shard,80,20,item;takes,
 give:9385:9385,item,Virindi Envoy's Obsidian Shard for Virindi Envoy's Obsidian Shard,5694,give,9385,1,0,0,0,0,0,0,none,9385:1,,0,,,Virindi Envoy's Obsidian Shard,80,20,item;takes,
@@ -12903,7 +12863,6 @@ hizkrientrancefail,item,You've failed the entrance exam to Hizk Ri's temple.,279
 hizkrientrancefail,item,You've failed the entrance exam to Hizk Ri's temple.,27968,give,27924,1,0,0,0,0,0,0,none,,hizkrientrancefail,0,,,A Carved Plate,800,0,flag;takes,
 hizkrientrancefail,item,You've failed the entrance exam to Hizk Ri's temple.,27968,give,27925,1,0,0,0,0,0,0,none,,hizkrientrancefail,0,,,A Carved Plate,800,0,flag;takes,
 hizkrientrancefail,item,You've failed the entrance exam to Hizk Ri's temple.,27968,give,27930,1,0,0,0,0,0,0,none,,hizkrientrancefail,0,,,A Carved Plate,800,0,flag;takes,
-hizkrieye1,talk,You have selected the correct eye in the Gauntlet.,27941,talk,,0,0,0,0,0,0,0,none,,hizkrieye1,0,,,,,,flag;spell,
 hizkrieye2,talk,You have selected the correct eye in the Gauntlet.,27942,talk,,0,0,0,0,0,0,0,none,,hizkrieye2,0,,,,,,flag;spell,
 hizkrieye3,talk,You have selected the correct eye in the Gauntlet.,27943,talk,,0,0,0,0,0,0,0,none,,hizkrieye3,0,,,,,,flag;spell,
 hizkrieye4,talk,You have selected the correct eye in the Gauntlet.,27944,talk,,0,0,0,0,0,0,0,none,,hizkrieye4,0,,,,,,flag;spell,
@@ -13299,6 +13258,12 @@ ladysherathvinecollectioncompleted_0612,talk,Player has completed the collection
 ladysherathvinecollectioncompleted_0612,item,Player has completed the collection of Vines for Lady Sherath,46295,give,46284,10,0,0,10000000,0,0,0,all,23094:1;38920:1,ladysherathvinecollectioncompleted_0612,72000,ladysherathvinecollectioncompleted_0612,,Bloodroot Vine,80,1,xp;item;flag;luminance;title;takes,solve-count ranges
 ladysherathvinecollectioncompleted_0612,item,Player has completed the collection of Vines for Lady Sherath,46295,give,46284,10,0,0,10000000,0,0,0,all,23094:1,ladysherathvinecollectioncompleted_0612,72000,ladysherathvinecollectioncompleted_0612,,Bloodroot Vine,80,1,xp;item;flag;takes,solve-count ranges
 ladysherathvinecollectioncompleted_0612,item,Player has completed the collection of Vines for Lady Sherath,46295,give,46284,1,0,0,0,0,0,0,none,,,72000,ladysherathvinecollectioncompleted_0612,,Bloodroot Vine,80,1,takes,not carrying Bloodroot Vine
+learn:2023,item,Recall the Sanctuary,0,read,8530,1,0,0,0,0,0,0,none,,,-1,,,Scroll of Sanctuary Recall,2000,2500,spell,
+learn:2943,item,Recall to the Singularity Caul,0,read,22932,1,0,0,0,0,0,0,none,,,-1,,,Recall to the Singularity Caul,2000,0,spell,
+learn:4198,item,Paradox-touched Olthoi Infested Area Recall,0,read,36377,1,0,0,0,0,0,0,none,,,-1,,,Scroll of 'Infested Area' Recall,2000,5,spell,
+learn:4213,item,Colosseum Recall,0,read,36537,1,0,0,0,0,0,0,none,,,-1,,,Scroll of Colosseum Recall,2000,5,spell,
+learn:5330,item,Gear Knight Invasion Area Camp Recall,0,read,43143,1,0,0,0,0,0,0,none,,,-1,,,Scroll of Gear Knight Invasion Area Camp Recall,2000,5,spell,
+learn:5541,item,Lost City of Neftet Recall,0,read,44312,1,0,0,0,0,0,0,none,,,-1,,,Scroll of Lost City of Neftet Recall,2000,10,spell,
 leatherhandedin,item,leatherhandedin,31702,give,31698,1,0,0,0,0.4,10000000,40300000,allegiance,20630:1;31693:1,leatherhandedin;icecampquestfinished0805;contractquestcounter_0511,-1,leatherhandedin,metalhandedin,Fine Leather Scraps,80,100,xp;item;flag;takes,asks a flag it stamps itself: leatherhandedin|a check of type 102
 leatherhandedin,item,leatherhandedin,31702,give,31698,1,0,0,0,0,0,0,none,,leatherhandedin,-1,leatherhandedin,,Fine Leather Scraps,80,100,flag;takes,
 legendaryquestcounter_0913,item,Number of Legendary Quests Completed for Contract,34383,give,46022,1,0,0,346775165,0,0,0,none,46023:1,legendaryquestcounter_0913,0,,,Letter from Mouf and Uber P,2000,10,xp;item;flag;luminance;takes,a check of type 102
@@ -13866,7 +13831,6 @@ paragonweapons,item,quest timer,53451,give,53474,1,0,0,0,0,0,0,none,53173:1,para
 paragonweapons,item,quest timer,53451,give,53475,1,0,0,0,0,0,0,none,53186:1,paragonweapons,0,,,Daimyo Nobanuga's Shattered Helm,80,1,item;flag;takes,solve-count ranges
 paragonweapons,item,quest timer,53451,give,53476,1,0,0,0,0,0,0,none,53181:1,paragonweapons,0,,,Daimyo Idah's Tattered Mask,80,1,item;flag;takes,solve-count ranges
 paragonweapons,item,quest timer,53451,give,53479,1,0,0,0,0,0,0,none,,paragonweapons,0,,,Token of the New Paragon,80,1,flag;takes,
-passwordvitriaka,talk,Have Vitriaka's password.,25587,talk,,0,0,0,0,0,0,0,none,,,72000,passwordvitriaka,,,,,spell,
 pathwardencomplete,item,Visited the Pathwarden,33596,give,33613,1,0,0,0,0,0,0,none,33608:1,pathwardencomplete,0,,pathwardenfound1111,Pathwarden Token,80,0,item;flag;takes,
 pathwardencomplete,item,Visited the Pathwarden,33614,give,33613,1,0,0,0,0,0,0,none,33608:1,pathwardencomplete,0,,pathwardenfound1111,Pathwarden Token,80,0,item;flag;takes,
 pathwardencomplete,item,Visited the Pathwarden,33615,give,33613,1,0,0,0,0,0,0,none,33608:1,pathwardencomplete,0,,pathwardenfound1111,Pathwarden Token,80,0,item;flag;takes,
@@ -14375,7 +14339,7 @@ rynthidartifacts3_0813,item,quest timer,51888,give,72128,1,0,0,0,0,0,0,none,,,72
 rynthidartifacts3_0813,item,quest timer,51888,give,72131,1,0,0,25000000,0,0,0,none,51954:1,rynthidartifacts1_0813,72000,rynthidartifacts3_0813,rynthidartifacts2_0813,Crystal Artifact of Torment,80,0,xp;item;flag;luminance;takes,asks a flag it stamps itself: rynthidartifacts1_0813
 rynthidartifacts3_0813,item,quest timer,51888,give,72132,1,0,0,25000000,0,0,0,none,51954:1,rynthidartifacts2_0813,72000,rynthidartifacts3_0813,rynthidartifacts1_0813,Crystal Artifact of Rage,80,0,xp;item;flag;luminance;takes,asks a flag it stamps itself: rynthidartifacts2_0813
 rynthidartifactswait_0813,talk,quest timer,51888,talk,,0,180,0,0,0,0,0,none,,rynthidartifactsstarted_0813,72000,rynthidartifactswait_0813,,,,,flag,
-rynthidtrainingcompleted_1013,talk,Player cooldown for completing Rynthid Training.,52077,talk,,0,180,0,0,0,0,0,none,,,72000,rynthidtrainingcompleted_1013,rynthidtrainingstarted_1013,,,,flag;spell;teleport,
+rynthidtrainingcompleted_1013,talk,Player cooldown for completing Rynthid Training.,52077,talk,,0,180,0,0,0,0,0,none,,,72000,rynthidtrainingcompleted_1013,rynthidtrainingstarted_1013,,,,flag;teleport,
 rynthidtrainingcompleted_1013,talk,Player cooldown for completing Rynthid Training.,52077,talk,,0,180,0,0,0,0,0,none,,rynthidtrainingstarted_1013,72000,rynthidtrainingcompleted_1013,,,,,flag;teleport,
 rynthidtrainingcompleted_1013,talk,Player cooldown for completing Rynthid Training.,52078,talk,,0,0,0,0,1,0,350000000,allegiance,48749:1;20630:10,rynthidtrainingcompleted_1013;legendaryquestcounter_0913,72000,rynthidtrainingcompleted_1013,coloredportalleverpullcompleted,,,,xp;item;flag;luminance;title,a check of type 102
 rythjournalrepeat,item,Repeating Journal Quest,37166,give,37167,1,0,0,0,0.25,0,247696546,allegiance,37186:1,rythjournalrepeat,-1,rythjournalrepeat,,Rytheran's Untranslated Journal,2000,0,xp;item;flag;takes,
@@ -14956,7 +14920,6 @@ talk:25450,talk,Talk to A small pile of rocks,25450,talk,,0,0,0,0,0,0,0,none,254
 talk:25711,talk,Talk to Argyle,25711,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,flag;spell,
 talk:25717,talk,Talk to Guard Chandler Hammett,25717,talk,,0,0,0,0,0,0,0,none,32254:1,,0,,roadsundercoverantius,,,,item;flag;spell,
 talk:25719,talk,Talk to Graven Idol,25719,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,spell,
-talk:26538,talk,Talk to Sarcophagus of High Matriarch; Ixir Zi,26538,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,spell,a check of type 58
 talk:26548,talk,Talk to Arbiter,26548,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,spell,a check of type 58
 talk:26548,talk,Talk to Arbiter,26548,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,flag,a check of type 58
 talk:26558,talk,Talk to Guardian of the Crypt,26558,talk,,0,70,99,0,0,0,0,none,,,0,,,,,,spell,
@@ -15023,6 +14986,7 @@ talk:27267,talk,Talk to Aun Khekierea,27267,talk,,0,0,0,25000000,0,0,0,none,2727
 talk:27267,talk,Talk to Aun Khekierea,27267,talk,,0,0,0,0,0,0,0,none,27258:6,,0,,ongolemplatinumkingslayerquest,,,,item;flag,solve-count ranges
 talk:27513,talk,Talk to A Sycophant's Corpse,27513,talk,,0,0,0,0,0,0,0,none,27315:1,,0,,,,,,item,
 talk:27689,talk,Talk to Royal Guard Gabrielle,27689,talk,,0,0,0,0,0,0,0,none,,,0,,roadsundercoverantius,,,,flag;spell,
+talk:27934,start,Talk to Eye of the Watcher,27941,talk,,0,0,0,0,0,0,0,none,,hizkrieye1,0,,,,,,flag,
 talk:27934,talk,Talk to Strange Device,27934,talk,,0,0,0,0,0,0,0,none,,,0,,hizkrieye1;hizkrieye2;hizkrieye3;hizkrieye4,,,,flag;spell,
 talk:27935,talk,Talk to Strange Device,27935,talk,,0,0,0,0,0,0,0,none,,,0,,hizkrieye1;hizkrieye2;hizkrieye3;hizkrieye4,,,,flag;spell,
 talk:27936,talk,Talk to Strange Device,27936,talk,,0,0,0,0,0,0,0,none,,,0,,hizkrieye1;hizkrieye2;hizkrieye3;hizkrieye4,,,,flag;spell,
@@ -15030,11 +14994,11 @@ talk:27945,talk,Talk to Eye of the Watcher,27945,talk,,0,0,0,0,0,0,0,none,,,0,,,
 talk:27946,talk,Talk to Eye of the Watcher,27946,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,flag;spell,
 talk:27947,talk,Talk to Eye of the Watcher,27947,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,flag;spell,
 talk:27949,start,Talk to Guardian,27949,talk,,0,0,0,0,0,0,0,none,,hizkrientrance,0,,,,,,flag,
-talk:27949,talk,Talk to Guardian,27949,talk,,0,0,0,0,0,0,0,none,,,0,,hizkrientrancefail,,,,flag;spell,
+talk:27949,talk,Talk to Guardian,27949,talk,,0,0,0,0,0,0,0,none,,,0,,hizkrientrancefail,,,,flag,
 talk:27949,talk,Talk to Guardian,27949,talk,,0,0,0,0,0,0,0,none,,,0,,hizkrientrance;hizkrientrance1;hizkrientrance2;hizkrientrance3;hizkrientrance4,,,,flag,only without hizkrientrancefail
-talk:27949,talk,Talk to Guardian,27949,talk,,0,0,0,0,0,0,0,none,,,0,,hizkrientrance;hizkrientrance1;hizkrientrance2;hizkrientrance3,,,,flag;spell,only without hizkrientrancefail|only without hizkrientrance4
-talk:27949,talk,Talk to Guardian,27949,talk,,0,0,0,0,0,0,0,none,,,0,,hizkrientrance;hizkrientrance1;hizkrientrance2,,,,flag;spell,only without hizkrientrancefail|only without hizkrientrance3
-talk:27949,talk,Talk to Guardian,27949,talk,,0,0,0,0,0,0,0,none,,,0,,hizkrientrance;hizkrientrance1,,,,flag;spell,only without hizkrientrancefail|only without hizkrientrance2
+talk:27949,talk,Talk to Guardian,27949,talk,,0,0,0,0,0,0,0,none,,,0,,hizkrientrance;hizkrientrance1;hizkrientrance2;hizkrientrance3,,,,flag,only without hizkrientrancefail|only without hizkrientrance4
+talk:27949,talk,Talk to Guardian,27949,talk,,0,0,0,0,0,0,0,none,,,0,,hizkrientrance;hizkrientrance1;hizkrientrance2,,,,flag,only without hizkrientrancefail|only without hizkrientrance3
+talk:27949,talk,Talk to Guardian,27949,talk,,0,0,0,0,0,0,0,none,,,0,,hizkrientrance;hizkrientrance1,,,,flag,only without hizkrientrancefail|only without hizkrientrance2
 talk:27950,talk,Talk to Guardian,27950,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,spell,two level bands
 talk:27950,talk,Talk to Guardian,27950,talk,,0,60,79,0,0,0,0,none,,,0,,,,,,spell,
 talk:27951,talk,Talk to Guardian,27951,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,spell,two level bands
@@ -15056,7 +15020,7 @@ talk:28422,talk,Talk to Guardian,28422,talk,,0,60,79,0,0,0,0,none,,,0,,,,,,spell
 talk:28423,talk,Talk to Guardian,28423,talk,,0,80,99,0,0,0,0,none,,,0,,,,,,spell,
 talk:28424,talk,Talk to Guardian,28424,talk,,0,100,0,0,0,0,0,none,,,0,,,,,,spell,
 talk:28425,start,Talk to Guardian,28425,talk,,0,0,0,0,0,0,0,none,,statuekiviklirguardianantechamber,0,,,,,,flag,
-talk:28425,talk,Talk to Guardian,28425,talk,,0,0,0,0,0,0,0,none,,,0,,statuekiviklirguardianantechamber,,,,flag;spell,
+talk:28425,talk,Talk to Guardian,28425,talk,,0,0,0,0,0,0,0,none,,,0,,statuekiviklirguardianantechamber,,,,flag,
 talk:28426,talk,Talk to Guardian of the Arena,28426,talk,,0,0,99,0,0,0,0,none,,,0,,,,,,spell,a check of type 58|two level bands
 talk:28426,talk,Talk to Guardian of the Arena,28426,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,flag,a check of type 58
 talk:28426,talk,Talk to Guardian of the Arena,28426,talk,,0,60,79,0,0,0,0,none,,,0,,,,,,spell,a check of type 58
@@ -15073,7 +15037,6 @@ talk:29038,talk,Talk to Guardian,29038,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,spell,
 talk:29039,talk,Talk to Guardian,29039,talk,,0,60,89,0,0,0,0,none,,,0,,,,,,spell,
 talk:29040,talk,Talk to Guardian,29040,talk,,0,80,109,0,0,0,0,none,,,0,,,,,,spell,
 talk:29041,talk,Talk to Guardian,29041,talk,,0,100,0,0,0,0,0,none,,,0,,,,,,spell,
-talk:29043,talk,Talk to Portal Beacon,29043,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,spell,a check of type 51
 talk:29056,talk,Talk to Portal Gateway,29056,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,spell,a check of type 51
 talk:29217,talk,Talk to Guardian,29217,talk,,0,60,0,0,0,0,0,none,,,0,,,,,,spell,
 talk:29321,talk,Talk to Wordsmith,29321,talk,,0,0,0,0,0,0,0,none,29328:1,,0,,,,,,item,
@@ -15202,7 +15165,6 @@ talk:35870,talk,Talk to The Master,35870,talk,,0,0,0,0,0,0,0,none,,,0,,accessbos
 talk:35962,talk,Talk to Havala bint Mylos,35962,talk,,0,0,0,0,0,0,0,none,35963:1,,0,,,,,,item,
 talk:36007,talk,Talk to Statue of Bael'Zharon; the Hopeslayer,36007,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,stat,
 talk:36012,talk,Talk to Statue of Bael'Zharon; the Hopeslayer,36012,talk,,0,0,0,0,0,0,0,none,,,0,,prodigalshadowflag,,,,teleport,
-talk:36608,talk,Talk to Dojiro Sangi,36608,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,spell,
 talk:36692,start,Talk to Pillar of the Mind,36696,talk,,0,0,0,0,0,0,0,none,,trialoftheheart_flag,0,,bucketsbalancedcomplete,,,,flag,
 talk:36692,talk,Talk to Trial of the Heart Portal,36692,talk,,0,0,0,0,0,0,0,none,,,0,,trialoftheheart_flag,,,,spell,a check of type 51
 talk:36695,start,Talk to Painting of the Building of Linvak Tukal,36693,talk,,0,0,0,0,0,0,0,none,,usedpaintingtrialofheart,0,,,,,,flag,
@@ -15255,7 +15217,6 @@ talk:38346,talk,Talk to Coral Hollow,38346,talk,,0,0,0,0,0,0,0,none,,,0,,haslord
 talk:38347,talk,Talk to Coral Hollow,38347,talk,,0,0,0,0,0,0,0,none,,,0,,haslordstatueriddle,,,,flag;spell,only without broodmothersreckblue42
 talk:38370,talk,Talk to Statue of Transport,38370,talk,,0,0,0,0,0,0,0,none,,,0,,onmastertest,,,,spell,
 talk:38387,talk,Talk to Corrupted Mana Shard,38387,talk,,0,0,0,0,0,0,0,none,80306:1,,0,,canpickupcorruptedmanashard,,,,item;flag,
-talk:38387,talk,Talk to Corrupted Mana Shard,38387,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,spell,only without canpickupcorruptedmanashard
 talk:38388,talk,Talk to Kirina of the Celestial Hand,38388,talk,,0,0,0,0,0,0,0,none,38397:1,,0,,,,,,item,a check of type 102|a check of type 103
 talk:38389,talk,Talk to Arturus of the Eldrytch Web,38389,talk,,0,0,0,0,0,0,0,none,38398:1,,0,,,,,,item,a check of type 102|a check of type 103
 talk:38390,talk,Talk to Ayesha of the Radiant Blood,38390,talk,,0,0,0,0,0,0,0,none,38399:1,,0,,,,,,item,a check of type 102|a check of type 103
@@ -15481,7 +15442,6 @@ talk:72974,talk,Talk to Shady,72974,talk,,0,0,0,0,0,0,0,none,72975:1,,0,,,,,,ite
 talk:72976,talk,Talk to Bubba,72976,talk,,0,0,0,0,0,0,0,none,72977:1,,0,,,,,,item;flag,a check of type 80
 talk:72978,talk,Talk to Spot,72978,talk,,0,0,0,0,0,0,0,none,72979:1,,0,,,,,,item;flag,a check of type 80
 talk:73244,talk,Talk to Vat of Olthoi Jelly,73244,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,spell,
-talk:73247,talk,Talk to Well of Blood,73247,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,spell,
 talk:73251,talk,Talk to Pool of Water,73251,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,spell,
 talk:80089,talk,Talk to Empty Plate,80089,talk,,0,0,0,0,0,0,0,none,273:17,,0,,,,,,item;flag,a check of type 102|a check of type 75
 talk:80090,talk,Talk to Empty Plate,80090,talk,,0,0,0,0,0,0,0,none,273:13,,0,,,,,,item;flag,a check of type 102|a check of type 75
@@ -15500,7 +15460,6 @@ talk:87731,talk,Talk to Pile of Stained Papers,87731,talk,,0,0,0,0,0,0,0,none,35
 talk:87733,start,Talk to Visiting Shaman,87730,talk,,0,0,0,0,0,0,0,none,,visitingshaman_flag,0,,aerbaxsprodigalmosswartstarted,,,,flag,
 talk:87733,talk,Talk to Ahumba,87733,talk,,0,0,0,0,0,0,0,none,35615:1,,0,,visitingshaman_flag,,,,item;flag,
 talk:87825,talk,Talk to Large Corrupted Mana Shard,87825,talk,,0,0,0,0,0,0,0,none,87824:1,,0,,canpickuplargecorruptedmanashard,,,,item;flag,
-talk:87825,talk,Talk to Large Corrupted Mana Shard,87825,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,spell,only without canpickuplargecorruptedmanashard
 talk:87827,talk,Talk to Altar of T'thuun,87827,talk,,0,0,0,0,0,0,0,none,,,0,,,,,,spell,
 talk:88210,talk,Talk to Sanctum Guardian Spirit,88210,talk,,0,0,0,0,0,0,0,none,,,0,,sanctumguardiankilltask_completed,,,,teleport,
 talk:88215,start,Talk to Adrenkus,47172,talk,,0,150,0,0,0,0,0,none,,secondsisterstarted_1112,0,,bulbofharvests_flag,,,,flag,
@@ -15728,9 +15687,9 @@ templeliazka,talk,Liazk feeder A has taken a sacrifice.,27157,talk,,0,0,0,0,0,0,
 templeliazkb,talk,Liazk feeder B has taken a sacrifice.,27158,talk,,0,0,0,0,0,0,0,none,,templeliazkb,45,templeliazkb,,,,,flag;spell,a check of type 58
 templeliazkc,talk,Liazk feeder C has taken a sacrifice.,27159,talk,,0,0,0,0,0,0,0,none,,templeliazkc,45,templeliazkc,,,,,flag;spell,a check of type 58
 templenorthwing,item,Flagged to enter the Temple North wing,32493,give,32496,1,0,0,0,0,0,0,none,32497:1,templenorthwing,72000,spearofbaranaith,,Spear of Baranaith,1,0,item;flag;takes,
-templereceivedshirt,talk,Player has obtained the Falatacot shirt,26538,talk,,0,0,0,0,0,0,0,none,26501:1,templereceivedshirt,72000,templereceivedshirt,,,,,item;flag;spell,a check of type 58
-templereceivedshirt,talk,Player has obtained the Falatacot shirt,26538,talk,,0,0,0,0,0,0,0,none,26502:1,templereceivedshirt,72000,templereceivedshirt,,,,,item;flag;spell,a check of type 58
-templereceivedshirt,talk,Player has obtained the Falatacot shirt,26538,talk,,0,0,0,0,0,0,0,none,26503:1,templereceivedshirt,72000,templereceivedshirt,,,,,item;flag;spell,a check of type 58
+templereceivedshirt,talk,Player has obtained the Falatacot shirt,26538,talk,,0,0,0,0,0,0,0,none,26501:1,templereceivedshirt,72000,templereceivedshirt,,,,,item;flag,a check of type 58
+templereceivedshirt,talk,Player has obtained the Falatacot shirt,26538,talk,,0,0,0,0,0,0,0,none,26502:1,templereceivedshirt,72000,templereceivedshirt,,,,,item;flag,a check of type 58
+templereceivedshirt,talk,Player has obtained the Falatacot shirt,26538,talk,,0,0,0,0,0,0,0,none,26503:1,templereceivedshirt,72000,templereceivedshirt,,,,,item;flag,a check of type 58
 templewitchosen,talk,Player has been chosen to solve the Wit puzzle.,26566,talk,,0,0,0,0,0,0,0,none,26511:1,templewitchosen,0,,,,,,item;flag,a check of type 58
 tentaclestthuuncomplete0408,talk,Player has completed Blightfinger,37400,talk,,0,70,0,0,0,0,0,none,,tentaclestthuunstarted0408;contractquestcounter_0511,72000,tentaclestthuuncomplete0408,,,,,flag,a check of type 102
 tentaclestthuuncomplete0408,item,Player has completed Blightfinger,37400,give,87475,1,0,0,20700000,0,0,0,all,37402:1;20630:2,tentaclestthuuncomplete0408,72000,handofblightfinger_pickup,,Hand of Blightfinger,80,0,xp;item;flag;takes,

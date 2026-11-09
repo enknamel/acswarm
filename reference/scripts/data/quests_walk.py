@@ -70,7 +70,15 @@ class Data:
                 continue
             s["acts"].append({"type": int(f[2]), "msg": f[3], "min": f[4], "max": f[5],
                               "amount": f[6], "amount64": f[7], "percent": f[8], "min64": f[9],
-                              "max64": f[10], "stat": f[11], "wcid": f[12], "stack": f[13]})
+                              "max64": f[10], "stat": f[11], "wcid": f[12], "stack": f[13],
+                              "spell": int(num(f[14])) if len(f) > 14 else 0})
+        self.harm = {int(i) for (i,) in rows(dump, "harm")}
+        # The scrolls teaching each spell: spell -> scroll wcids.
+        self.scrolls_of = defaultdict(list)
+        for wcid, spell in rows(dump, "scrolls"):
+            self.scrolls_of[int(spell)].append(int(wcid))
+        # Recall spells by id and name, and portal gems (recalls.csv, gems.csv, read in main).
+        self.recalls, self.gems = {}, []
         self.quest = {}
         for name, delta, solves, message in rows(dump, "quest"):
             self.quest[name.lower()] = (int(delta), int(solves), message)
@@ -404,16 +412,24 @@ def same_pay(q):
 # (EmoteType.cs). A path with any other effect, or one handing an item over, is a quest row.
 COSMETIC = {1, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 23, 24, 25, 26, 52, 64, 65, 68,
             72, 77, 78, 87, 88, 91, 92, 93, 94, 95, 96, 97, 98, 116, 117}
+# Effect types casting a spell on the character (EmoteType.cs: CastSpell, CastSpellInstant...).
+SPELL_TYPES = {14, 19, 27, 73}
 # What a path does, for the `does` column: effect types by word.
 DOES = (("xp", {2, 49, 62}), ("item", {3, 56}), ("flag", {20, 22, 31, 32, 33, 60, 61, 70,
-        106, 107, 108, 109}), ("spell", {14, 19, 27, 73}), ("skill", {28, 29, 47, 50, 110, 111}),
+        106, 107, 108, 109}), ("spell", SPELL_TYPES), ("skill", {28, 29, 47, 50, 110, 111}),
         ("luminance", {112, 113}), ("title", {34}), ("teleport", {99}), ("takes", {74}),
         ("stat", {53, 54, 55, 69, 115, 118, 57, 63, 90, 48}), ("contract", {119, 120}),
         ("enlightenment", {9001}))
 
 
-def does_of(root, effects):
-    types = {a["type"] for a in effects}
+def is_harm(data, a):
+    """Whether effect `a` casts a spell that hurts whoever it lands on."""
+    return a["type"] in SPELL_TYPES and a["spell"] in data.harm
+
+
+def does_of(data, root, effects):
+    """What a path does; a cast that hurts is no reward, so it is left out."""
+    types = {a["type"] for a in effects if not is_harm(data, a)}
     out = [w for w, ts in DOES if types & ts]
     if root["cat"] in (GIVE, REFUSE) and "takes" not in out:
         out.append("takes")
@@ -449,9 +465,13 @@ def build(data, never):
             if len(found) >= MAX_PATHS:
                 reasons["roots past %d paths (the rest unwalked)" % MAX_PATHS] += 1
             for branches, effects in found:
-                does = does_of(root, effects)
+                does = does_of(data, root, effects)
                 if not does:
                     continue  # talk only: no quest
+                if does == ["takes"] and any(is_harm(data, a) for a in effects):
+                    # The gift taken and the giver casting harm: a wrong answer punished.
+                    reasons["a gift punished with harm"] += 1
+                    continue
                 fixed, scaled, share = xp_of(effects)
                 r = read_path(data, root, branches, effects, never)
                 if r.get("waiting"):
@@ -598,7 +618,11 @@ def build(data, never):
                   for w, cell, x, y, z in givers_out]
 
     src = []
-    wants = sorted({r[5] for r in rows_out if r[1] in ("kill", "item")})
+    # Every recall spell's scroll is had and read (a quest row below); every portal gem is had
+    # as a way in. Both are wants whose sources are written.
+    learnt = {w: spell for spell in data.recalls for w in data.scrolls_of.get(spell, ())}
+    wants = sorted({r[5] for r in rows_out if r[1] in ("kill", "item")}
+                   | {str(w) for w in learnt} | {str(w) for w in data.gems})
     seen = set(wants)
     todo = [(w, 0) for w in wants]
     while todo:
@@ -658,6 +682,9 @@ def build(data, never):
                 if data.spawns.get(c):
                     src.append((want, "kill", c, 1.0, ""))
     src = kept_uses(src, wants, data.sold)
+    had = {r[0] for r in src} | {str(w) for w in data.sold}
+    rows_out = rows_out + learn_rows(data, learnt, had)
+    rows_out.sort(key=lambda r: (r[0], kind_order[r[1]], int(r[3]), int(r[7])))
     src_out = []
     for want, kind, c, p, keys in src:
         at = ""
@@ -676,6 +703,21 @@ def build(data, never):
         src_out.append((want, kind, str(c), data.name.get(c, ""), str(data.level(c)),
                         "%g" % round(p, 4), where, at, keys))
     return rows_out, givers_out, src_out, reasons
+
+
+def learn_rows(data, learnt, had):
+    """A quest row per recall spell's scroll something gives: had, then read (hand `read`, no
+    giver), done once the spell is known; its id names the spell (`learn:2023`)."""
+    out = []
+    for wcid, spell in sorted(learnt.items()):
+        if str(wcid) not in had:
+            continue
+        ints = data.ints[wcid]
+        out.append(("learn:%d" % spell, "item", data.recalls[spell].replace(",", ";"), "0",
+                    "read", str(wcid), "1", "0", "0", "0", "0", "0", "0", "none", "", "", "-1",
+                    "", "", data.name.get(wcid, ""), "%X" % (ints.get(1, 0) & 0xFFFFFFFF),
+                    str(ints.get(19, 0)), "spell", ""))
+    return out
 
 
 def kept_uses(src, wants, sold):
@@ -772,6 +814,13 @@ def main():
     if os.path.exists(vendors):
         with open(vendors, encoding="utf-8") as f:
             data.sold = {int(r.split(",")[6]) for r in f if r[:1].isdigit()}
+    with open(os.path.join(out_dir, "recalls.csv"), encoding="utf-8") as f:
+        for r in f:
+            if r[:1].isdigit():
+                c = r.rstrip("\n").split(",")
+                data.recalls[int(c[0])] = c[1]
+    with open(os.path.join(out_dir, "gems.csv"), encoding="utf-8") as f:
+        data.gems = sorted({int(r.split(",")[0]) for r in f if r[:1].isdigit()})
     rows_out, _, _, _ = build(data, None)
     stamped = {f for r in rows_out for f in r[15].split(";") if f}
     asked = {qname(a["msg"]) for s in data.sets.values() for a in s["acts"]
@@ -799,10 +848,11 @@ def main():
 QUESTS_HEADER = """\
 # Every quest a placed NPC holds: each Use, Give or Refuse path that does anything for the
 # character, XP or not, one row per way to complete one (giver and level band); the giver's
-# placements are in quest_givers.csv.
+# placements are in quest_givers.csv. And one per recall spell's scroll, had and read.
 # id,kind,title,giver_wcid,hand,want,count,min_level,max_level,xp,xp_level,xp_min,xp_max,share,gives,stamps,repeat,timer,needs,item,item_type,item_value,does,unread
 # Rows sharing an id are alternatives. kind: kill, item, talk, or start (the talk that takes a
-# quest up: it stamps what the quest's rows need). hand: give (hand the item over) or talk.
+# quest up: it stamps what the quest's rows need). hand: give (hand the item over), talk, or
+# read (a recall spell's scroll read: id learn:SPELL, giver_wcid 0, no giver).
 # want: the item wcid, or the kill counter. count: items one hand-in takes, or kills. Levels 0
 # are open. xp is fixed; xp_level is a share of the XP to the next level, clamped to
 # xp_min/xp_max when not 0. share: all, none or allegiance. gives: wcid:count;..., and for a

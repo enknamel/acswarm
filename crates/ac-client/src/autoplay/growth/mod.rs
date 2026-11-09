@@ -168,7 +168,7 @@ pub struct State {
     /// The ground the character hunts on, once it has arrived.
     pub hunting_at: Option<u32>,
     /// Grounds not to go to for a while, and since when.
-    skip: Recent<u32>,
+    pub(super) skip: Recent<u32>,
     /// Portal flags whose NPC was lately set off to, by flag: not set off to again for a while.
     pub(crate) unlock_tried: Recent<String>,
     run: Option<Run>,

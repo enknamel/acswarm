@@ -21,8 +21,11 @@
 # surface counts its outdoor spawns only); and for each wanted item the
 # generators making it on the ground and the chests holding it, with the
 # keys a locked one needs, and the placed objects a recipe makes it on from
-# an item used on them. docs/quests-design.md §1 says what the
-# walk reads and what it leaves out.
+# an item used on them; and the scroll teaching each recall spell
+# (recalls.csv) and every portal gem (gems.csv) with where each comes
+# from: a scroll read is a quest of its own, and a gem a way in; and the
+# spells that hurt, so a reply casting only those is no reward.
+# docs/quests-design.md §1 says what the walk reads and what it leaves out.
 #
 # This reads the local ACE world database (the community's
 # reconstruction of retail's server data) running in Docker, and is only
@@ -57,11 +60,21 @@ order by object_Id, id;'
 q action 'select a.emote_Id, a.order, a.type, coalesce(a.message, ""), coalesce(a.min, ""),
   coalesce(a.max, ""), coalesce(a.amount, ""), coalesce(a.amount_64, ""),
   coalesce(a.percent, ""), coalesce(a.min_64, ""), coalesce(a.max_64, ""),
-  coalesce(a.stat, ""), coalesce(a.weenie_Class_Id, ""), coalesce(a.stack_Size, "")
+  coalesce(a.stat, ""), coalesce(a.weenie_Class_Id, ""), coalesce(a.stack_Size, ""),
+  coalesce(a.spell_Id, "")
 from weenie_properties_emote_action a
 where a.emote_Id in (select id from weenie_properties_emote
   where object_Id in (select weenie_Class_Id from landblock_instance))
 order by a.emote_Id, a.order;'
+
+# Spells that hurt whoever they land on: a vital lowered (boost), a bolt (base_Intensity) or a
+# statistic lowered. A reply casting only these punishes the gift (Soul Dissolution, 3054).
+q harm 'select id from spell
+where coalesce(boost, 0) < 0 or coalesce(base_Intensity, 0) > 0 or coalesce(stat_Mod_Val, 0) < 0;'
+
+# The spell each scroll teaches (WeenieType Scroll 34, its Spell DID 28).
+q scrolls 'select w.class_Id, d.value from weenie w
+join weenie_properties_d_i_d d on d.object_Id = w.class_Id and d.type = 28 where w.type = 34;'
 
 q quest 'select name, min_Delta, max_Solves, coalesce(message, "") from quest;'
 
@@ -160,7 +173,7 @@ from recipe r join cook_book c on c.recipe_Id = r.id
 where r.success_W_C_I_D <> 0
   and c.target_W_C_I_D not in (select weenie_Class_Id from landblock_instance);'
 
-for t in placed emote action quest killq itemq drops names allowgive ints spawns ground wtypes \
+for t in placed emote action harm scrolls quest killq itemq drops names allowgive ints spawns ground wtypes \
   gens chestlist locks keys stuck recipes combines; do
   [ -s "$TMP/$t.tsv" ] || { echo "quests.sh: the $t query returned nothing" >&2; exit 1; }
 done

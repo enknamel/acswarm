@@ -48,6 +48,7 @@ pub(crate) fn words(state: &QuestState, quests_on: bool, now: u64) -> String {
                 Blocked::Level { min, max } => format!("for levels {min} to {max}"),
                 Blocked::Locked { flag } => format!("its giver is behind a portal asking {flag}"),
                 Blocked::NeedsFirst { title } => format!("do '{title}' first"),
+                Blocked::CantLearn => "its spell is beyond your magic skills".into(),
             }
         ),
         QuestState::Waiting { until } => {

@@ -48,6 +48,7 @@
 10919,container,10892,Olthoi Cistern,0,1,5775012A:1,158.28 -109.73 -18,
 10921,npc,10923,Tekapuapuh,4,1,0DB90000:1,13.88 81.69 0,
 10959,container,10934,Hea Raiders' Cache,0,1,18B50100:1,49.7 108.5 62.81,10968=Karenua's Key
+10974,container,10934,Hea Raiders' Cache,0,1,18B50100:1,49.7 108.5 62.81,10968=Karenua's Key
 11135,combine,11138,Marinated Olthoi Egg,0,1,,,4762=Frying Pan;11138=Marinated Olthoi Egg
 11136,combine,11140,Olthoi Egg,0,1,,,4762=Frying Pan;11140=Olthoi Egg
 11137,combine,11140,Olthoi Egg,0,1,,,4759=Cooking Pot;11140=Olthoi Egg
@@ -347,14 +348,6 @@
 14911,combine,14910,Wedding Cake,0,1,,,14898=Wedding Cake Knife;14910=Wedding Cake
 1517,drop,1465,Guardian of the Helm,30,1,1CC:1,,
 1518,drop,1465,Guardian of the Helm,30,1,1CC:1,,
-15407,combine,761,Stibnite,0,1,,,4747=Alembic;761=Stibnite
-15407,combine,15409,Concentrated Bloodhunter Infusion,0,1,,,9379=Eye Dropper;15409=Concentrated Bloodhunter Infusion
-15408,combine,15410,Concentrated Bloodhunter Oil,0,1,,,9379=Eye Dropper;15410=Concentrated Bloodhunter Oil
-15408,combine,4748,Aqua Incanta,0,1,,,15407=Bloodhunter Infusion;4748=Aqua Incanta
-15408,combine,761,Stibnite,0,1,,,52525=Alembic Incanta;761=Stibnite
-15409,combine,8310,Stibnite Pea,0,1,,,4747=Alembic;8310=Stibnite Pea
-15410,combine,9342,Concentrated Aqua Incanta,0,1,,,15409=Concentrated Bloodhunter Infusion;9342=Concentrated Aqua Incanta
-15410,combine,8310,Stibnite Pea,0,1,,,52524=Concentrated Alembic Incanta;8310=Stibnite Pea
 15750,combine,6331,Quality Pyreal Ingot,0,1,,,41619=Two Handed Weapons Glyph;6331=Quality Pyreal Ingot
 15760,drop,1608,Drudge Lurker,40,0.02,109:10;13D:12;144:5;148:9;14A:3;185:23;192:10;1A6:20;1B2:19;1CF:1;1EF:9;28E:5;296:16;297:13;29B:7;2C9:6;2D5:9;39C:24;614B:14;B89E:2;B89F:2;B99E:1;B99F:2;DF44:1;F45A:1,,
 15761,drop,7085,Banderling Berserker,80,0.02,B0:2;B1:2;B2:2;B3:2;B4:2;10B:5;181:8;1E2:6;2D5:8;6449:1;88AF:4;B131:2,,
@@ -382,9 +375,6 @@
 15804,container,15757,The skeleton of Lania Cartoth,0,1,536A0139:1,230.58 -307.32 -29.9,
 15806,npc,15810,Glysander Cartoth,5,1,BC9F0108:1,18.91 111.62 73,
 15855,floor,15855,Gelidite Dais,0,1,546302A5:1,218.87 -70.05 -5.99,
-15856,container,15843,Locked Rewards Chest,0,1,545D01C3:1,178.9 1.07 0,15859=A Bright Silver Key
-15857,container,15844,Locked Rewards Chest,0,1,545D0102:1,22.09 -273.82 -11.99,15859=A Bright Silver Key
-15858,container,15845,Locked Rewards Chest,0,1,545D018C:1,108.92 -374.19 0,15859=A Bright Silver Key
 16921,drop,16913,Spinning Grievver,85,1,5456:1,,
 19209,drop,19300,Bronze Statue of a Banderling,40,0.05,5459:13,,
 19210,drop,19303,Bronze Statue of Ben Ten,50,0.05,5459:12,,
@@ -676,6 +666,7 @@
 22826,container,22819,Mine Storage Chest,0,1,564B0122:1;564B0122:1;564C0122:1;564C0122:1;564D0122:1;564D0122:1;564E0122:1;564E0122:1;564F0122:1;564F0122:1,176.28 -7.23 -35.99;176.84 -10.11 -35.99;176.28 -7.23 -35.99;176.84 -10.11 -35.99;176.28 -7.23 -35.99;176.84 -10.11 -35.99;176.28 -7.23 -35.99;176.84 -10.11 -35.99;176.57 -10.15 -35.99;176.84 -7.26 -35.99,
 22888,container,22886,An Ancient Chest,0,1,564A016A:1;564A016B:1;564A016C:1;564A016E:1;564A0178:1,89.6 -13.69 0;90.04 -7.01 0;93.7 -19.28 0;89.48 -16.78 0;100.33 -6.72 0,
 22889,npc,22934,Anasha,9,1,C6A901AE:1,21.33 18.68 42.09,
+22932,container,22907,Sanatorium Chest,0,1,604801BB:1;604801BD:1;604801C5:1;604801C8:1;604801C9:1;604801D9:1;604801F3:1;604801F6:1;604801F7:1;60480207:1;60480209:1,83.05 -21.49 -5.99;82.07 -27.4 -5.99;92.87 -12.75 -5.99;87.86 -21.67 -5.99;92.55 -17.18 -5.99;101.34 -12.89 -5.99;108.1 -13 -5.99;108.3 -19.09 -5.99;113.01 -21.76 -5.99;117.46 -21.97 -5.99;117.19 -27.92 -5.99,22923=Asylum Chest Key
 22950,drop,7084,Hoary Armoredillo,80,0.07,ED12:2,,
 22951,drop,7081,Plate Armoredillo,100,0.07,1A0:3;3173:2;ED12:3,,
 23036,container,23033,Mining Storage Chest,0,1,56490100:1;5649010C:1;5649010D:1;56490117:1;56490253:1;56490255:1,0.17 -39.17 0;20.71 -29.16 0;19.04 -34.34 0;16.82 -86.28 0;211.02 -143.87 0;210.52 -150.85 0,
@@ -963,10 +954,6 @@
 26514,combine,26504,Sacrificial Bones,0,1,,,26513=Satchel with Offerings;26504=Sacrificial Bones
 26515,combine,26504,Sacrificial Bones,0,1,,,26514=Satchel with Offerings;26504=Sacrificial Bones
 26515,combine,26504,Sacrificial Bones,0,1,,,26515=Satchel with Offerings;26504=Sacrificial Bones
-26630,floor,26630,Black Opal,0,1,65450319:1,308.28 -179.35 18,
-26631,floor,26631,Sapphire,0,1,65450319:1,310.36 -179.47 18,
-26632,floor,26632,Serpentine,0,1,65450319:1,311.43 -179.53 18,
-26633,floor,26633,Sunstone,0,1,65450319:1,309.24 -179.41 18,
 26634,floor,26634,Bloodstone,0,1,65450319:1,312.43 -179.58 18,
 26645,npc,26550,Guardian of Fury,171,1,6545021B:1;65460312:1;6546031D:1,165.72 -196.93 0;165.72 -276.93 0;185.72 -96.93 0,
 26660,drop,27097,Burun Ruuk Adept,50,0.01,BB64:1,,
@@ -1032,6 +1019,31 @@
 273,container,4790,Chest,0,1,0165011F:1,21.39 -68.27 -12,
 27314,drop,27312,Assault Guard,135,0.25,5849:17,,
 27315,npc,27513,A Sycophant's Corpse,5,1,ED810000:1,80.4 60.13 1.98,
+27386,drop,7111,Faisi Sclavus,80,0.005,E3:30;2B7:6;2BD:3;2BF:4;2018:2;2117:2;2118:3;2119:2;2217:1;2218:3;545C:37;6547:21;6F99:3;6F9A:3;F117:2;F316:2;F416:2;F417:2;F824:6;F921:3,,
+27386,drop,7112,Chomu Sclavus,100,0.005,63:56;E3:26;2B7:3;2C0:4;2018:2;2117:2;2118:3;2119:2;2217:1;2218:3;545C:35;6547:5;6F99:3;F819:3,,
+27388,drop,23089,Shadow Phantom,115,0.005,13:13;45:51;5E:3;2B0:9;408:3;806:6;A0F:1;1A52:2;1F2A:5;594B:3;6045:5;6048:18;6548:2,,
+27388,drop,23090,Shadow Spectre,115,0.005,13:17;45:43;1A52:1;1E29:1;594B:4;6045:2;6046:1;6047:24;6048:13,,
+27388,drop,32501,Shadow Phantom,115,0.005,45:1,,
+27388,drop,32502,Shadow Phantom,115,0.005,45:1,,
+27388,drop,32503,Shadow Phantom,115,0.005,45:1,,
+27388,container,30792,Black Marrow Reliquary,0,0.002,08090000:1,153.06 56.94 31.2,
+27388,container,30793,Black Marrow Reliquary,0,0.002,0D090101:1,11.79 84.83 85.07,
+27388,container,30794,Black Marrow Reliquary,0,0.002,05030103:1,84.13 40.08 225.01,
+27388,container,30797,Black Marrow Reliquary,0,0.002,070F0103:1,133.27 88.25 179.01,
+27388,container,31417,Black Marrow Reliquary,0,0.002,00F1012D:1,90 -152.94 -71.98,
+27388,container,31660,Black Marrow Reliquary,0,0.002,00320141:1,0 -50 6.02,
+27388,container,32026,Black Marrow Reliquary,0,0.002,003B025B:1,112.58 -189.91 -23.98,
+27388,container,32027,Black Marrow Reliquary,0,0.002,003B0278:1,360 -193.62 -23.98,
+27388,container,32028,Black Marrow Reliquary,0,0.002,003B023B:1,16.29 -80.12 -23.98,
+27390,drop,1608,Drudge Lurker,40,0.005,109:10;13D:12;144:5;148:9;14A:3;185:23;192:10;1A6:20;1B2:19;1CF:1;1EF:9;28E:5;296:16;297:13;29B:7;2C9:6;2D5:9;39C:24;614B:14;B89E:2;B89F:2;B99E:1;B99F:2;DF44:1;F45A:1,,
+27390,drop,1609,Drudge Stalker,50,0.005,103:8;104:8;105:8;109:18;13D:11;14A:3;192:17;1A6:13;1B2:8;1CF:2;1E1:38;1EF:1;28E:35;296:20;297:29;298:8;29B:31;2AA:8;2C7:3;2C9:12;2D5:3;254E:6;536E:9;614B:7;B89E:2;B89F:2;B99E:1;B99F:2;DF44:3;F45A:1,,
+27391,drop,27421,Enthralled Idolator,115,0.003,A0:8;B6:2;634A:139,,
+27391,drop,27422,True Believer,100,0.001,634A:33,,
+27391,drop,27423,Enthralled Zealot,135,0.005,A1:8;B6:2;136:52;634A:48,,
+27392,drop,23489,Virindi Consul,135,0.005,13:24;14:21;5E:4;8A:7;9F:3;D6:1;1EE:32;291:7;3A4:5;2D26:1;2D27:1;2E26:1;2E27:1;3331:1;3332:1;3431:1;3432:1;6045:3;6046:6;6048:3;6349:5;6447:14;F173:1,,
+27392,drop,23569,Virindi Adjudicator,115,0.005,13:26;8A:2;D6:3;291:25;2AE:1;2AF:3;6045:13;6046:6;6349:3,,
+27392,drop,27510,Virindi Consul,125,0.005,604B:7,,
+27394,drop,24325,Phantasm,115,0.005,13E:7;1A3:2;3A5:19;1568:1;2A11:1;2A12:2;2B11:1;2B12:2;2C11:1;2C12:2;5D4C:8,,
 27435,floor,27435,Large Golden Coin,0,1,6F990000:1,106.75 131.21 240.01,
 27437,npc,33060,Dark Monolith,0,1,008A0291:1,220 -190 0,
 27438,drop,27431,Homunculus,130,1,634A:1,,
@@ -1501,6 +1513,14 @@
 29335,npc,29326,Jonathan,9,1,7F0301B0:1;7F0401B0:1;800201B0:1;800301B0:1;800401B0:1,22.11 -19.14 0;22.11 -19.14 0;22.11 -19.14 0;22.11 -19.14 0;22.11 -19.14 0,
 29336,drop,29331,Adolescent Olthoi,2,1,7202:1;7203:1;7204:1;7302:1;7303:1;7F03:1;7F04:1;8002:1;8003:1;8004:1;8602:1;8603:1;8604:1;8702:1;8703:1;8C04:1;8D02:1;8D03:1;8D04:1;8E02:1,,
 29394,npc,31692,Jun Sawashima,126,1,49B6000D:1,38.13 113.68 240.01,
+29444,drop,29396,Copper Legion Bodyguard,80,0.5,18:2,,
+29444,drop,29406,Captain Ramelle,100,1,18:1,,
+29445,drop,29397,Gold Legion Bodyguard,115,0.5,19:4,,
+29445,drop,29402,Captain Aurachon,135,1,19:1,,
+29446,drop,29398,Platinum Legion Bodyguard,135,0.5,1A:2,,
+29446,drop,29404,Captain Balanchi,180,1,1A:1,,
+29447,drop,29399,Silver Legion Bodyguard,100,0.5,1B:4,,
+29447,drop,29400,Captain Argenne,115,1,1B:1,,
 29474,container,29470,Prison Warden's Chest,0,1,001E019C:1,445.95 -107.17 -11.99,29480=Prison Warden's Key
 29475,container,29470,Prison Warden's Chest,0,1,001E019C:1,445.95 -107.17 -11.99,29480=Prison Warden's Key
 29476,container,29472,Corpse,0,1,001C02C3:1,270.55 -521.28 30,
@@ -2012,6 +2032,11 @@
 30246,container,87601,Ancient Reliquary,0,0.027,00750479:1;0075047B:1;0075047D:1;0075047F:1,172.02 -160.12 -0.02;179.89 -151.96 -0.02;180.61 -168.4 -0.02;188.09 -159.77 -0.02,87602=Falatacot Chest Key
 30396,floor,30396,Heartfelt Plea,0,1,0003019F:1,121.94 -8.14 0.08,
 30399,floor,30399,Suzuhara Baijin's Care Package,0,1,01A3012E:1,1.81 -18.11 -102,
+30400,drop,23478,Banderling Predator,115,0.005,3:16;C78:7,,
+30400,drop,23479,Banderling Scalper,115,0.005,3:27;C78:6,,
+30400,drop,24276,Banderling Savage,115,0.005,3:16;C78:6,,
+30400,drop,27488,Banderling Predator,125,0.005,604B:4,,
+30400,drop,27489,Banderling Savage,130,0.005,604B:4,,
 30474,drop,30448,Southern Overseer,134,1,5:3,,
 30475,drop,30449,Western Overseer,185,1,6:3,,
 30476,drop,30450,Northern Overseer,104,1,4:3,,
@@ -2126,6 +2151,49 @@
 30803,container,32026,Black Marrow Reliquary,0,0.002,003B025B:1,112.58 -189.91 -23.98,
 30803,container,32027,Black Marrow Reliquary,0,0.002,003B0278:1,360 -193.62 -23.98,
 30803,container,32028,Black Marrow Reliquary,0,0.002,003B023B:1,16.29 -80.12 -23.98,
+30804,container,30792,Black Marrow Reliquary,0,0.002,08090000:1,153.06 56.94 31.2,
+30804,container,30793,Black Marrow Reliquary,0,0.002,0D090101:1,11.79 84.83 85.07,
+30804,container,30794,Black Marrow Reliquary,0,0.002,05030103:1,84.13 40.08 225.01,
+30804,container,30795,Black Marrow Reliquary,0,0.002,0D070101:1,60.22 84.88 43.51,
+30804,container,30796,Black Marrow Reliquary,0,0.05,018A01D0:1;018A01D0:1,139.22 -124.61 -11.99;141.44 -124.44 -11.99,30814=Black Marrow Key
+30804,container,30797,Black Marrow Reliquary,0,0.002,070F0103:1,133.27 88.25 179.01,
+30804,container,31417,Black Marrow Reliquary,0,0.002,00F1012D:1,90 -152.94 -71.98,
+30804,container,31660,Black Marrow Reliquary,0,0.002,00320141:1,0 -50 6.02,
+30804,container,32026,Black Marrow Reliquary,0,0.002,003B025B:1,112.58 -189.91 -23.98,
+30804,container,32027,Black Marrow Reliquary,0,0.002,003B0278:1,360 -193.62 -23.98,
+30804,container,32028,Black Marrow Reliquary,0,0.002,003B023B:1,16.29 -80.12 -23.98,
+30805,container,30792,Black Marrow Reliquary,0,0.002,08090000:1,153.06 56.94 31.2,
+30805,container,30793,Black Marrow Reliquary,0,0.002,0D090101:1,11.79 84.83 85.07,
+30805,container,30794,Black Marrow Reliquary,0,0.002,05030103:1,84.13 40.08 225.01,
+30805,container,30795,Black Marrow Reliquary,0,0.002,0D070101:1,60.22 84.88 43.51,
+30805,container,30797,Black Marrow Reliquary,0,0.002,070F0103:1,133.27 88.25 179.01,
+30805,container,31417,Black Marrow Reliquary,0,0.002,00F1012D:1,90 -152.94 -71.98,
+30805,container,31660,Black Marrow Reliquary,0,0.002,00320141:1,0 -50 6.02,
+30805,container,32026,Black Marrow Reliquary,0,0.002,003B025B:1,112.58 -189.91 -23.98,
+30805,container,32027,Black Marrow Reliquary,0,0.002,003B0278:1,360 -193.62 -23.98,
+30805,container,32028,Black Marrow Reliquary,0,0.002,003B023B:1,16.29 -80.12 -23.98,
+30806,container,30792,Black Marrow Reliquary,0,0.002,08090000:1,153.06 56.94 31.2,
+30806,container,30793,Black Marrow Reliquary,0,0.002,0D090101:1,11.79 84.83 85.07,
+30806,container,30794,Black Marrow Reliquary,0,0.002,05030103:1,84.13 40.08 225.01,
+30806,container,30795,Black Marrow Reliquary,0,0.002,0D070101:1,60.22 84.88 43.51,
+30806,container,30796,Black Marrow Reliquary,0,0.05,018A01D0:1;018A01D0:1,139.22 -124.61 -11.99;141.44 -124.44 -11.99,30814=Black Marrow Key
+30806,container,30797,Black Marrow Reliquary,0,0.002,070F0103:1,133.27 88.25 179.01,
+30806,container,31417,Black Marrow Reliquary,0,0.002,00F1012D:1,90 -152.94 -71.98,
+30806,container,31660,Black Marrow Reliquary,0,0.002,00320141:1,0 -50 6.02,
+30806,container,32026,Black Marrow Reliquary,0,0.002,003B025B:1,112.58 -189.91 -23.98,
+30806,container,32027,Black Marrow Reliquary,0,0.002,003B0278:1,360 -193.62 -23.98,
+30806,container,32028,Black Marrow Reliquary,0,0.002,003B023B:1,16.29 -80.12 -23.98,
+30807,container,30792,Black Marrow Reliquary,0,0.002,08090000:1,153.06 56.94 31.2,
+30807,container,30793,Black Marrow Reliquary,0,0.002,0D090101:1,11.79 84.83 85.07,
+30807,container,30794,Black Marrow Reliquary,0,0.002,05030103:1,84.13 40.08 225.01,
+30807,container,30795,Black Marrow Reliquary,0,0.002,0D070101:1,60.22 84.88 43.51,
+30807,container,30796,Black Marrow Reliquary,0,0.05,018A01D0:1;018A01D0:1,139.22 -124.61 -11.99;141.44 -124.44 -11.99,30814=Black Marrow Key
+30807,container,30797,Black Marrow Reliquary,0,0.002,070F0103:1,133.27 88.25 179.01,
+30807,container,31417,Black Marrow Reliquary,0,0.002,00F1012D:1,90 -152.94 -71.98,
+30807,container,31660,Black Marrow Reliquary,0,0.002,00320141:1,0 -50 6.02,
+30807,container,32026,Black Marrow Reliquary,0,0.002,003B025B:1,112.58 -189.91 -23.98,
+30807,container,32027,Black Marrow Reliquary,0,0.002,003B0278:1,360 -193.62 -23.98,
+30807,container,32028,Black Marrow Reliquary,0,0.002,003B023B:1,16.29 -80.12 -23.98,
 30808,container,30792,Black Marrow Reliquary,0,0.002,08090000:1,153.06 56.94 31.2,
 30808,container,30793,Black Marrow Reliquary,0,0.002,0D090101:1,11.79 84.83 85.07,
 30808,container,30794,Black Marrow Reliquary,0,0.002,05030103:1,84.13 40.08 225.01,
@@ -2241,6 +2309,8 @@
 30823,drop,35990,Penumbral Shadowmage,185,0.05,E6:13;905:1,,
 30823,drop,37604,Blight Rat,135,0.01,482F:3,,
 30823,drop,81088,Weak Mangy Carenzi,125,0.01,8802:6,,
+30831,drop,30836,Shadow Seeker,100,0.05,1A8E:5,,
+30831,drop,30837,Shadow Infiltrator,115,0.05,1A8E:3,,
 30858,drop,30897,Sezzherei,185,1,23:1,,
 30972,npc,30979,Hermit,200,1,49F50100:1,134.9 21.16 94.81,
 31000,npc,46776,Blackmoor's Page,8,1,C6A90024:1,107.6 75.23 42.01,
@@ -2292,6 +2362,7 @@
 31428,floor,31428,Untranslated Song of Grael,0,1,00350119:1,339.16 -229.87 -24,
 31511,drop,25864,Stalking Margul,135,0.018,503:2;806:2;A09:4;C09:6;D09:5;6548:6,,
 31513,container,31512,Iron Chest,0,1,0032022E:1,17.85 -19.24 30,
+31667,drop,70038,Eternal Harvester,135,1,38:1,,
 31686,floor,31686,Yellow Monster Seed,0,1,F45A0032:1,151.08 25.35 88.48,
 31688,floor,31688,Red Monster Seed,0,1,2A110000:1;2A120000:1;2A120000:1;2B110000:1;2B120000:1;2B120000:1;2C110000:1;2C120000:1;2C120000:1,170.79 96.34 9.86;145.56 23.09 12.08;169.56 119.25 12.01;122.5 40.03 22.58;141.28 147.13 19;76.96 155.88 27.29;45.58 168.03 14.4;16.98 115.13 14;46.2 47.52 15.97,
 31698,container,31694,Leatherworking Supplies,0,1,3BE70101:1,44.54 51.2 -0.3,31700=Leatherworking Chest Key
@@ -2301,6 +2372,9 @@
 31723,container,31753,Book Shelf,0,1,4AB50100:1,104.43 14.28 240.07,
 31724,combine,70032,Incomplete Journal - Pages 1-3,0,1,,,31723=Torn Journal Page - Page 4;70032=Incomplete Journal - Pages 1-3
 31725,floor,31725,Insignia Badge,0,1,00330145:1,749.24 -317.73 -35.99,
+31861,drop,28657,Viamontian Man-at-Arms,100,0.05,18:30;1B:13;7D90:3,,
+31861,drop,30294,Viamontian Man-at-Arms,100,0.05,18:5;1B:3;41:9,,
+31861,drop,31292,Viamontian Man-at-Arms,100,1,2986:1,,
 31871,npc,31971,Water Guardian,500,1,1E090007:1,20.03 148 48,
 31872,npc,31970,Shuthoth,53,1,11340033:1,159.28 67.78 38.76,
 31879,drop,32032,Radiant Crystal,160,1,3B:1,,
@@ -2350,8 +2424,27 @@
 32803,combine,32802,Black Ball,0,1,,,8378=Beer Stein;32802=Black Ball
 32847,floor,32847,Lord Marsan's Log Book,0,1,2A940016:1,53.35 132.3 30,
 32848,floor,32848,Lore of the Dark Spiral,0,1,00CF0101:1,147.18 -26.15 -71.93,
+32924,drop,28655,Viamontian Hand,200,0.02,1A:2;5A:6;1E4:7;3FF4:3;43F8:4,,
+32924,drop,28656,Viamontian Lord,160,0.02,1A:22;43:20;44:9;56:14;59:11;5A:14;3FF4:7;43F8:5,,
+32924,drop,31897,Barbaric Mukkir,185,0.05,47:5;4C:47;4F:11;54:8;6E:2;73:2;76:3;CF:7,,
+32924,drop,32295,Royal Inquisitor,185,0.003,1E4:8;3EF4:2;3FF4:6;43F8:4,,
+32924,drop,32322,Portal Keeper,160,0.02,9FA6:1;A2A1:1;A4A7:1,,
+32924,drop,35126,Viamontian Hand,185,0.02,B0:6;B1:6;B2:6;B3:6;B4:6,,
 32925,drop,32923,Barbaric Mukkir Nest-lord,185,1,4C:1,,
+32933,drop,2568,White Rabbit,666,0.5,1246:1,,
 32937,container,32928,Rabbit Hutch,0,0.33,00970101:1,163.54 -120 -48,32934=Rabbit Hutch Key
+32939,drop,23489,Virindi Consul,135,0.05,13:24;14:21;5E:4;8A:7;9F:3;D6:1;1EE:32;291:7;3A4:5;2D26:1;2D27:1;2E26:1;2E27:1;3331:1;3332:1;3431:1;3432:1;6045:3;6046:6;6048:3;6349:5;6447:14;F173:1,,
+32939,drop,23569,Virindi Adjudicator,115,0.05,13:26;8A:2;D6:3;291:25;2AE:1;2AF:3;6045:13;6046:6;6349:3,,
+32939,drop,30447,Virindi Desecrator,135,0.05,6:9;14:22;5E:15;8A:9;9F:3;A1:24;A4:11;C9:28;D6:1;ED:14;1936:2,,
+32939,drop,43083,Apostate Virindi Aggressor,135,0.05,152D:33,,
+32939,drop,73197,Virindi Subjugator,160,0.05,F173:1,,
+32939,drop,88188,Renegade Virindi,115,0.02,CC:70,,
+32940,drop,31400,Raven Conscript,135,0.05,7E:10;83:13;8A:11;F1:20;408:3;806:13;A09:3;A0F:3,,
+32940,drop,31401,Raven Conscript,160,0.05,8A:19,,
+32940,drop,31402,Raven Augur,135,0.05,47:2;7E:6;83:8;8A:3;F1:26;408:4;806:14;A09:3;A0F:6;D2D4:4,,
+32940,drop,31403,Raven Augur,160,0.05,8A:8,,
+32940,drop,31404,Raven Hunter,135,0.05,7E:9;83:4;8A:5;A09:3,,
+32940,drop,31405,Raven Hunter,160,0.05,8A:12;F1:14;408:2;806:7;A09:2;A0F:8,,
 32941,drop,32938,Guardian of the Monolith,165,1,8A:1,,
 32967,floor,32967,Reflective Shard,0,1,B96F0024:1,97.25 91.31 10.06,
 32974,container,24476,Sturdy Steel Chest,0,0.009,003A02D8:1;003A03C2:1;003A04DE:1;003A04EB:1;003B023C:1;003B0240:1;003B03A9:1;003B03AA:1;003D02D8:1;003D03C2:1;003D04DE:1;003D04EB:1;004A010E:1;004A010E:1;004A0250:1;01160147:1;018A01E2:1;018A01E2:1;018A01E2:1;0C6B0000:1;13430000:1;15680143:1;1568046A:1;193F0000:1;1A520100:1;52D90000:1;61470165:1;61480165:1;634C010D:1;634C01B5:1;B6EE0000:1;B6EE0000:1;B6EE0000:1;B6EE0000:1;B6EE0000:1;B6EE0000:1;B6EE0000:1;B6EE0000:1;B6EE0000:1;B6EE0000:1;B6EE0000:1;B6EE0000:1;B6EE0000:1;B6EE0000:1;B6EE0000:1;B6EE0000:1;B6EE0000:1;B6EE0000:1;B6EE0000:1;B6EE0000:1;B6EE0000:1;BCEE0000:1;BCEE0000:1;BCEE0000:1;BCEE0000:1;BCEE0000:1;BCEE0000:1;BCEE0000:1;BCEE0000:1;BCEE0000:1;BCEE0000:1;BCEE0000:1;BCEE0000:1;BCEE0000:1;BCEE0000:1;BCEE0000:1;BCEE0000:1;BCEE0000:1;BCEE0000:1;BCEE0000:1;BCEE0000:1;BCEE0000:1;BCEE0000:1;BCEE0000:1;BCEE0000:1;BCEE0000:1;BDEE0000:1;BDEE0000:1;BDEE0000:1;BDEE0000:1;BDEE0000:1;BDEE0000:1;BDEE0000:1;BDEE0000:1;BDEE0000:1;BDEE0000:1;BDEE0000:1;BDEE0000:1;BDEE0000:1;BDEE0000:1;BDEE0000:1;BDEE0000:1;BDEE0000:1,164.27 -78.26 -18;210 -70 -12;64.42 -171.65 -6;69.97 -116.06 -6;31.22 -59.73 -24;31.17 -100.24 -24;290 -186.81 0;296.81 -180.02 0;164.27 -78.26 -18;210 -70 -12;64.42 -171.65 -6;69.97 -116.06 -6;79.93 -24.3 -6;84.34 -22.15 -6;48.25 -126.09 12;50.37 -147.43 -72;145.49 -118.48 -11.99;145.51 -119.97 -11.99;145.57 -121.6 -11.99;40.32 16.8 -0.09;104.95 182.97 75.21;151.91 2.61 -45.99;183.85 38.27 5.01;39.45 178.08 95.21;36.07 81.66 -6.34;63.32 128.52 41.21;306 -150 0;306 -150 0;94.2 -105.79 -47.99;94.36 -154.37 -35.99;100.57 154.29 189.05;101.06 74.82 170.01;104.63 8.97 192.39;111.35 74.66 170.01;111.73 125.07 171.54;128.07 165.15 190.29;128.58 137.29 171.46;138.96 93.68 168.43;167.25 47.03 183.51;169.32 26.67 184.88;171.83 110.82 186.56;189.5 69.17 198.35;19.37 113.01 172.84;31.67 49.11 177.9;53.15 91.08 170.01;53.59 50.67 173.32;54.7 114.06 172.95;62.57 63.44 171.43;82.17 142.96 185.84;9.42 83.4 176.3;93.57 30.38 179.35;10.38 110.69 173.09;10.41 20.31 176.14;109.09 140.36 183.76;112.02 44.04 176.33;125.43 61.97 174.32;139.59 73.05 176.54;14.47 32.08 170.36;140.38 91.58 175.47;143.94 105.04 178.24;166.71 118.08 187.68;21.73 61.09 165.52;25.58 95.58 164.11;26.49 7.64 177.11;33.36 139.7 166.34;36.8 82.1 167.2;4.37 58.32 177.09;51.21 11.34 180.15;52.63 116.49 165.16;65.03 26.91 173.92;72.77 104.97 170.01;74.16 141.47 175.91;81.51 73.44 170.01;92.53 122.65 172.82;93.87 5.03 197.28;94.77 94.77 170.01;101.22 145.87 243.48;113 158.7 259.16;131.12 132.89 272.67;139.51 176.84 268.73;140.46 167.74 267.46;147.36 148.44 271.82;153.69 177.69 269.62;176.89 166.42 277.24;23.97 78.8 230.33;25.61 122.23 203.76;37.39 108.48 213.19;41.08 84.48 231.3;45.99 151.57 228.61;54.37 113.57 215.88;63.51 134.09 217.52;65.83 159.19 234.67;81.02 137.79 226.98,24477=Sturdy Steel Key
@@ -2933,6 +3026,7 @@
 36495,drop,73184,Orisis,160,1,13E:1,,
 365,floor,365,Parchment,0,1,01110109:1;01A60250:1;01A60250:1;01D401FA:1;01ED01B1:1;01ED01B1:1;01F60224:1;01F6026C:1;01F7010C:1;63440120:1;63440121:1;BA6A0106:1;D4580106:1,13.34 -17.85 0.08;20.58 -47.25 6;22.83 -48.14 6;58.54 -32.46 78;66.87 -102.51 -11.92;67.3 -102.81 -11.92;32.86 -51.64 0;69.21 -51.31 0;17.27 -78.12 -30;27.21 -60.51 0.08;25.31 -99.11 0.08;151.42 7.11 10.4;65.99 85.64 53.01,
 365,container,1314,Book Shelf,0,1,01CF024F:1;01CF0287:1;AFC60134:1,8.86 -63.83 18;27.98 -64.9 24;89.68 58.95 120,
+36500,container,30796,Black Marrow Reliquary,0,0.05,018A01D0:1;018A01D0:1,139.22 -124.61 -11.99;141.44 -124.44 -11.99,30814=Black Marrow Key
 36518,container,38942,Grand Casino Chest,0,0.1,7E640112:1;A9B2011A:1;DB540100:1,108 116.29 15.2;75 82.5 94;105.01 125.04 20,30255=Grand Casino Golden Keyring;30256=Grand Casino Golden Keyring;30257=Grand Casino Golden Keyring;37620=Grand Casino Golden Keyring;37621=Grand Casino Golden Keyring;37622=Grand Casino Golden Keyring;38992=Grand Casino Key
 36518,container,52032,Exquisite Casino Chest,0,0.036,7E640114:1;A9B2001C:1;DB540105:1,107.98 99.65 15.2;73.57 83.25 97.5;103.34 128.28 25.6,52033=Exquisite Casino Key;52034=Casino Exquisite Keyring;52745=Exquisite Casino Key
 36528,drop,36525,Pumpkin King,400,1,AF:1,,
@@ -5552,16 +5646,11 @@
 5323,combine,757,Colcothar,0,1,,,4747=Alembic;757=Colcothar
 5323,combine,9347,Concentrated Frost Infusion,0,1,,,9379=Eye Dropper;9347=Concentrated Frost Infusion
 5324,combine,9351,Concentrated Lightning Infusion,0,1,,,9379=Eye Dropper;9351=Concentrated Lightning Infusion
-5329,combine,759,Quicksilver,0,1,,,4747=Alembic;759=Quicksilver
-5329,combine,9343,Concentrated Bloodseeker Infusion,0,1,,,9379=Eye Dropper;9343=Concentrated Bloodseeker Infusion
 53354,floor,53354,Mutilated Turkey Feather,0,1,596A0106:1,20.3 -15.15 0,
 53360,drop,72002,Zerzelikyr,400,1,B448:5;B449:6;B44B:11;B548:10;B549:9;B54B:11;B54C:4;B648:3;B649:18;B64A:10;B64B:6;B64C:1;B749:4;B74A:7;B74B:1,,
 53362,drop,72001,Norshuntyr,400,1,B448:5;B449:6;B44B:11;B548:10;B549:9;B54B:11;B54C:4;B648:3;B649:18;B64A:10;B64B:6;B64C:1;B749:4;B74A:7;B74B:1,,
 53364,drop,72000,NightBrier,350,1,B448:5;B449:6;B44B:11;B548:10;B549:9;B54B:11;B54C:4;B648:3;B649:18;B64A:10;B64B:6;B64C:1;B749:4;B74A:7;B74B:1,,
 53366,drop,53365,Wind Fury,350,1,B448:5;B449:6;B44B:11;B548:10;B549:9;B54B:11;B54C:4;B648:3;B649:18;B64A:10;B64B:6;B64C:1;B749:4;B74A:7;B74B:1,,
-5337,combine,4748,Aqua Incanta,0,1,,,5329=Bloodseeker Infusion;4748=Aqua Incanta
-5337,combine,9344,Concentrated Bloodseeker Oil,0,1,,,9379=Eye Dropper;9344=Concentrated Bloodseeker Oil
-5337,combine,759,Quicksilver,0,1,,,52525=Alembic Incanta;759=Quicksilver
 5340,combine,4586,Bundle of Arrowheads,0,1,,,5330=Acid Oil;4586=Bundle of Arrowheads
 5340,combine,5344,Bundle of Blunt Arrowheads,0,1,,,5330=Acid Oil;5344=Bundle of Blunt Arrowheads
 5340,combine,5345,Bundle of Broad Arrowheads,0,1,,,5330=Acid Oil;5345=Bundle of Broad Arrowheads
@@ -6519,9 +6608,6 @@
 7832,drop,32205,Pumpkin Buffer,42,0.05,7D64:1;A1A4:1;A9B4:1;DA55:1,,
 7843,combine,7837,Ice Cream,0,1,,,7827=Chocolate Liquor;7837=Ice Cream
 7844,combine,2456,Green Tea,0,1,,,7836=Frozen Cream;2456=Green Tea
-785,floor,785,Powdered Bloodstone,0,1,018301DF:1;01860129:1;01A40131:1;01A40230:1;01C80117:1;01E40132:1;7AC30000:1,87.8 -7.38 0;99.27 -38.43 -12;47.23 -39.59 -36;17.99 -66.35 18;47.19 -12.56 0;29.47 2.07 -6;93.46 70.69 209.59,
-785,combine,2427,Bloodstone,0,1,,,4751=Mortar and Pestle;2427=Bloodstone
-785,combine,8317,Powdered Bloodstone Pea,0,1,,,8283=Splitting Tool;8317=Powdered Bloodstone Pea
 7860,combine,259,Bread,0,1,,,7859=Ground Meat;259=Bread
 7878,combine,7859,Ground Meat,0,1,,,3681=Black Rat Tail;7859=Ground Meat
 7878,combine,7859,Ground Meat,0,1,,,3682=Brown Rat Tail;7859=Ground Meat
@@ -6625,7 +6711,7 @@
 8471,drop,7082,Island Armoredillo,40,0.05,28E:5;F11E:5;F419:2,,
 8505,container,8514,Mistress' Chest,0,1,F4180115:1,33.87 18.18 191.01,8511=Ancient Key;27449=Ancient Key
 8509,container,8514,Mistress' Chest,0,1,F4180115:1,33.87 18.18 191.01,8511=Ancient Key;27449=Ancient Key
-8552,container,8514,Mistress' Chest,0,1,F4180115:1,33.87 18.18 191.01,8511=Ancient Key;27449=Ancient Key
+8530,container,8514,Mistress' Chest,0,1,F4180115:1,33.87 18.18 191.01,8511=Ancient Key;27449=Ancient Key
 8581,floor,8581,Sir Martine's Journal,0,1,02B40117:1,84.54 -90.11 -35.93,
 8665,drop,7994,Dire Ursuin,60,0.03,34:5,,
 8665,drop,70039,Cave Ursuin,100,0.2,34:2,,
@@ -6711,7 +6797,6 @@
 88071,drop,88070,Moarsman Blight-caller,225,1,410B:1,,
 88077,drop,88076,Giant Blessed Moarsman,225,1,F938:1,,
 8810,drop,9382,Geraux the Legate,60,1,29B:1,,
-8811,drop,9383,Nelamar the Legate,60,1,29B:1,,
 8812,drop,9381,Esard the Legate,69,1,29B:1,,
 88229,floor,88229,Alb'arean Ore,0,1,8954010E:1;8954010E:1;89540110:1;89540110:1;89540114:1;89540114:1;89540115:1;89540115:1;89540120:1;89540120:1;89540122:1;89540123:1;89540123:1;89540124:1;89540125:1;8954012F:1;8954012F:1;89540130:1;89540131:1;89540131:1;89540138:1;89540138:1;8954013D:1;8954014B:1;8954014F:1;8954014F:1;89540158:1;89540158:1;8954015D:1;8954015D:1;89540161:1;89540165:1;89540165:1;89540175:1;8954017A:1;895401A6:1;895401A7:1;895401D2:1;89540292:1;89540294:1,-59.12 255.07 -121.6;-60.08 254.11 -121.6;-56.42 235.97 -121.6;-57.72 237.06 -121.6;-56.68 218.09 -121.6;-63.47 215.73 -121.6;-49.51 264.81 -121.6;-50.99 267.31 -121.6;-39.01 245.63 -121.6;-39.05 247.11 -121.6;-36.85 233.1 -121.6;-35.27 231.62 -121.6;-38.84 231.29 -121.6;-42.91 218.5 -121.6;-43.47 217.6 -121.6;-30.63 235.58 -121.6;-31.69 236.74 -121.6;-32.26 230.29 -121.6;-29.01 217.05 -121.6;-31.04 214.14 -121.6;-29.27 197.36 -121.6;-30.51 199.09 -121.6;-21.71 258.96 -121.6;-16.68 207.54 -121.6;-6.51 274.95 -121.6;-7.48 274.25 -121.6;-11.18 234.29 -121.6;-9.13 235.91 -121.6;-9.07 220.02 -121.6;-9.83 217.87 -121.6;2.82 258.07 -121.6;-0.52 248.08 -121.6;-1.35 247.02 -121.6;4.35 269.5 -115.85;5.47 270.83 -115.6;19.39 257.39 -115.6;21.11 260.84 -115.6;28.12 278.69 -115.6;93.39 265.46 -115.6;94.41 266.17 -115.6,
 88285,drop,39137,Moarsman Marauder,220,0.18,CB:8,,
@@ -6742,7 +6827,7 @@
 8897,container,73266,Skeletal Falatacot Reliquary,0,0.2,00CE012C:1,200 -19.98 -23.98,
 8903,drop,4124,Lich Overseer,50,1,188:1,,
 8904,use,8907,Vortex,0,1,02AB010A:1,0 -180 -11.99,8903=Focusing Stone
-8909,container,9000,Remnants of Ilservian,0,1,02B00108:1,129.71 -80.28 -5.99,
+8978,container,23921,Storage,0,1,61430120:1,20.91 -5.88 0.33,23888=Ulgrim's Golden Key
 9010,container,7408,Lady of Aerlinthe's Chest,0,1,01F5016C:1,107 -94 -30,7409=Ashen Key
 9010,container,28047,Lady of Aerlinthe's Ornate Chest,0,1,01F5016C:1,113 -94 -30,28057=Ornate Ashen Key
 9010,container,40930,Lady of Aerlinthe's Embossed Chest,0,1,B5F00111:1,140.13 -96.68 -81.2,40929=Embossed Ashen Key
@@ -6952,7 +7037,6 @@
 9324,drop,23035,Obsidian Excavation Golem,160,0.1,574C:14,,
 9324,drop,24483,Small Obsidian Golem,115,0.1,7109:4;710A:5;7209:3;720A:1,,
 9324,drop,43414,Hardened Obsidian Golem,160,0.1,5649:38;574C:18,,
-9343,combine,8308,Quicksilver Pea,0,1,,,4747=Alembic;8308=Quicksilver Pea
 9344,combine,9342,Concentrated Aqua Incanta,0,1,,,9343=Concentrated Bloodseeker Infusion;9342=Concentrated Aqua Incanta
 9344,combine,8308,Quicksilver Pea,0,1,,,52524=Concentrated Alembic Incanta;8308=Quicksilver Pea
 9348,combine,9342,Concentrated Aqua Incanta,0,1,,,9347=Concentrated Frost Infusion;9342=Concentrated Aqua Incanta
@@ -7656,12 +7740,7 @@ wickedskeletonkillcount,kill,31013,Wicked Skeleton,160,1,2C:34;5652:5;F93B:62,,
 14511,container,14537,Chest,0,1,5274011D:1,2.25 -60 -36,
 7859,combine,4742,Steak,0,1,,,7823=Heavy Grinder;4742=Steak
 14910,combine,620,Cake,0,1,,,14897=Wedding Cake Figures;620=Cake
-761,floor,761,Stibnite,0,1,019F0102:1;01A1013C:1;01A6012F:1;01A6012F:1;01CA0180:1;01E4019C:1;01FD01AD:1;77D90000:1,32.67 -82.27 -12;26.94 -21.13 24;38.59 -107.96 -12;39.9 -108.17 -12;70 -60 -24;21.92 -28.64 6;85.25 -100 -6;7.5 28.29 107.44,
-761,combine,8310,Stibnite Pea,0,1,,,8283=Splitting Tool;8310=Stibnite Pea
-4748,container,4180,Corpse,0,0.1,014B01C7:1;01500161:1;016101B7:1;94D60000:1,41.36 -70.18 -12;54.05 -7.73 -6;80.48 -41.54 -18;9.68 111.02 147.21,
-4748,combine,9342,Concentrated Aqua Incanta,0,1,,,9379=Eye Dropper;9342=Concentrated Aqua Incanta
 15813,npc,15810,Glysander Cartoth,5,1,BC9F0108:1,18.91 111.62 73,
-15859,floor,15859,A Bright Silver Key,0,1,545D0226:1;545D0226:1;545D0227:1;545D0227:1;545D0228:1;545D0228:1;545D0229:1;545D0229:1;545D0229:1;545D0229:1;545D0229:1;545D0229:1;545D022A:1;545D022A:1,260.64 -161.27 0.02;263.41 -164.07 0.02;262.09 -167.04 0.02;262.7 -169.63 0.02;267.78 -162.05 0.02;272.24 -160.94 0.02;265.11 -169.93 0.02;266.86 -169.21 0.02;269 -167.03 0.02;271 -168.73 0.02;274.68 -167.41 0.02;274.95 -165.48 0.02;276.56 -164.28 0.02;277.55 -159.25 0.02,
 19482,floor,19482,Enchanted Decanter,0,1,545B0100:1;545B0100:1;545B0100:1;545B0101:1;545B0101:1;545B0101:1;545B0102:1;545B0102:1;545B0102:1;545B0103:1;545B0103:1;545B0103:1;545B0105:1;545B0105:1;545B0105:1;545B0106:1;545B0106:1;545B0106:1;545B0113:1;545B0113:1;545B0113:1;545B0114:1;545B0114:1;545B0114:1;545B0135:1;545B0135:1;545B0136:1;545B0136:1;545B0136:1;545B0136:1;545B0143:1;545B0143:1;545B0143:1;545B0144:1;545B0144:1;545B0144:1;545B0152:1;545B0152:1;545B0152:1;545B0153:1;545B0153:1;545B0153:1;545B0154:1;545B0154:1;545B0155:1;545B0155:1;545B0155:1;545B0155:1,-2.06 -29.47 0;0 -30 0;1.8 -28.44 0;-1.1 -39.8 0;-1.4 -36.53 0;0.94 -38.63 0;10.49 -28.1 0;10.78 -31.43 0;7.73 -30.65 0;5.42 -42.48 0;7.95 -39.14 0;9.94 -41.46 0;30 0 0;32.57 -1.76 0;34.4 0.07 0;29.21 -6.21 0;29.35 -9.06 0;31.51 -10.62 0;38.79 -1.89 0;39.38 0.02 0;40.42 -2.4 0;37.82 -9.75 0;38.71 -7.91 0;40.57 -8.83 0;70 0 0;70.85 -3.22 0;70.84 -5.8 0;70.84 -9.09 0;71.81 -11.21 0;72.91 -9.09 0;77.23 -2.21 0;79.72 -2.89 0;82.14 1.13 0;79.74 -8.22 0;80.77 -10.31 0;81.87 -6.81 0;100 -28.89 0;100.18 -32.94 0;101.79 -30.76 0;100.61 -39.36 0;102.71 -40.73 0;99.86 -40.73 0;109.41 -33.46 0;110 -30 0;106.47 -41.51 0;108.4 -39.66 0;109.88 -35.87 0;109.88 -43.2 0,
 19515,combine,6331,Quality Pyreal Ingot,0,1,,,19533=Thick Diamond Oil;6331=Quality Pyreal Ingot
 20185,npc,20204,Slithe Tradittor,5,1,B7840102:1,82.83 61.01 29.2,
@@ -7683,6 +7762,7 @@ wickedskeletonkillcount,kill,31013,Wicked Skeleton,160,1,2C:34;5652:5;F93B:62,,
 22771,combine,7837,Ice Cream,0,1,,,22773=Nanner Halves;7837=Ice Cream
 22774,combine,22578,Bunch of Nanners,0,1,,,4757=Carving Knife;22578=Bunch of Nanners
 22770,combine,22578,Bunch of Nanners,0,1,,,7827=Chocolate Liquor;22578=Bunch of Nanners
+22923,drop,22913,The Auditor,135,1,6048:1,,
 22922,drop,22908,The Gatekeeper,135,1,6045:1,,
 23343,container,23520,Chest,0,1,A9530000:1,129.13 106.13 192.28,
 23342,container,23519,Chest,0,1,A9530000:1,39.23 111.65 192.24,
@@ -7956,8 +8036,6 @@ wickedskeletonkillcount,kill,31013,Wicked Skeleton,160,1,2C:34;5652:5;F93B:62,,
 757,combine,8306,Colcothar Pea,0,1,,,8283=Splitting Tool;8306=Colcothar Pea
 9347,combine,8306,Colcothar Pea,0,1,,,4747=Alembic;8306=Colcothar Pea
 9351,combine,8305,Cobalt Pea,0,1,,,4747=Alembic;8305=Cobalt Pea
-759,floor,759,Quicksilver,0,1,019F0102:1;01A1013C:1;01A6012F:1;01A6012F:1;01CA0180:1;01E4019C:1;01FD01AD:1;77D90000:1,32.67 -82.27 -12;26.94 -21.13 24;38.59 -107.96 -12;39.9 -108.17 -12;70 -60 -24;21.92 -28.64 6;85.25 -100 -6;7.5 28.29 107.44,
-759,combine,8308,Quicksilver Pea,0,1,,,8283=Splitting Tool;8308=Quicksilver Pea
 5330,combine,4748,Aqua Incanta,0,1,,,5322=Acid Infusion;4748=Aqua Incanta
 5330,combine,9341,Concentrated Acid Oil,0,1,,,9379=Eye Dropper;9341=Concentrated Acid Oil
 4586,container,4180,Corpse,0,0.1,014B01C7:1;01500161:1;016101B7:1;94D60000:1,41.36 -70.18 -12;54.05 -7.73 -6;80.48 -41.54 -18;9.68 111.02 147.21,
@@ -7996,6 +8074,9 @@ wickedskeletonkillcount,kill,31013,Wicked Skeleton,160,1,2C:34;5652:5;F93B:62,,
 5355,combine,9375,Wrapped Bundle of Greater Frog Crotch Arrowheads,0,1,,,5778=Whittling Knife;9375=Wrapped Bundle of Greater Frog Crotch Arrowheads
 5356,combine,5347,Bundle of Armor Piercing Arrowheads,0,1,,,5337=Bloodseeker Oil;5347=Bundle of Armor Piercing Arrowheads
 5356,combine,9370,Wrapped Bundle of Greater Armor Piercing Arrowheads,0,1,,,5778=Whittling Knife;9370=Wrapped Bundle of Greater Armor Piercing Arrowheads
+5337,combine,4748,Aqua Incanta,0,1,,,5329=Bloodseeker Infusion;4748=Aqua Incanta
+5337,combine,9344,Concentrated Bloodseeker Oil,0,1,,,9379=Eye Dropper;9344=Concentrated Bloodseeker Oil
+5337,combine,759,Quicksilver,0,1,,,52525=Alembic Incanta;759=Quicksilver
 9369,combine,9368,Wrapped Bundle of Greater Arrowheads,0,1,,,9341=Concentrated Acid Oil;9368=Wrapped Bundle of Greater Arrowheads
 9369,combine,9370,Wrapped Bundle of Greater Armor Piercing Arrowheads,0,1,,,9341=Concentrated Acid Oil;9370=Wrapped Bundle of Greater Armor Piercing Arrowheads
 9369,combine,9371,Wrapped Bundle of Greater Blunt Arrowheads,0,1,,,9341=Concentrated Acid Oil;9371=Wrapped Bundle of Greater Blunt Arrowheads
@@ -8111,6 +8192,7 @@ wickedskeletonkillcount,kill,31013,Wicked Skeleton,160,1,2C:34;5652:5;F93B:62,,
 9291,drop,12300,Singular Virindi Servant,50,0.03,3A0:8,,
 23196,combine,3672,Iron Heart,0,1,,,9295=Intricate Carving Tool;3672=Iron Heart
 23197,combine,7338,Diamond Heart,0,1,,,9295=Intricate Carving Tool;7338=Diamond Heart
+9343,combine,8308,Quicksilver Pea,0,1,,,4747=Alembic;8308=Quicksilver Pea
 41,floor,41,Scalemail Breastplate,0,1,01C70126:1,53.12 -28.45 0,
 46,drop,1362,Trusted Tusker,15,0.2,1D7:1,,
 46,drop,1628,Tusker Slave,80,0.1,103:19;104:19;105:19;140:6;1A6:8;39C:1;322D:1;594C:5;5B4A:75;5C44:40;5C4A:36,,
@@ -8329,6 +8411,8 @@ wickedskeletonkillcount,kill,31013,Wicked Skeleton,160,1,2C:34;5652:5;F93B:62,,
 49577,drop,49571,Bak'tshay Keeper,240,1,5865:1,,
 49580,drop,49574,Bak'tshay Keeper,240,1,5865:1,,
 49579,drop,49573,Bak'tshay Keeper,240,1,595E:1,,
+4748,container,4180,Corpse,0,0.1,014B01C7:1;01500161:1;016101B7:1;94D60000:1,41.36 -70.18 -12;54.05 -7.73 -6;80.48 -41.54 -18;9.68 111.02 147.21,
+4748,combine,9342,Concentrated Aqua Incanta,0,1,,,9379=Eye Dropper;9342=Concentrated Aqua Incanta
 9341,combine,9342,Concentrated Aqua Incanta,0,1,,,9340=Concentrated Acid Infusion;9342=Concentrated Aqua Incanta
 9341,combine,8302,Brimstone Pea,0,1,,,52524=Concentrated Alembic Incanta;8302=Brimstone Pea
 9368,combine,9359,Wrapped Bundle of Arrowheads,0,1,,,9344=Concentrated Bloodseeker Oil;9359=Wrapped Bundle of Arrowheads
@@ -8336,6 +8420,10 @@ wickedskeletonkillcount,kill,31013,Wicked Skeleton,160,1,2C:34;5652:5;F93B:62,,
 9372,combine,9363,Wrapped Bundle of Broad Arrowheads,0,1,,,9344=Concentrated Bloodseeker Oil;9363=Wrapped Bundle of Broad Arrowheads
 9375,combine,9366,Wrapped Bundle of Frog Crotch Arrowheads,0,1,,,9344=Concentrated Bloodseeker Oil;9366=Wrapped Bundle of Frog Crotch Arrowheads
 9370,combine,9361,Wrapped Bundle of Armor Piercing Arrowheads,0,1,,,9344=Concentrated Bloodseeker Oil;9361=Wrapped Bundle of Armor Piercing Arrowheads
+5329,combine,759,Quicksilver,0,1,,,4747=Alembic;759=Quicksilver
+5329,combine,9343,Concentrated Bloodseeker Infusion,0,1,,,9379=Eye Dropper;9343=Concentrated Bloodseeker Infusion
+759,floor,759,Quicksilver,0,1,019F0102:1;01A1013C:1;01A6012F:1;01A6012F:1;01CA0180:1;01E4019C:1;01FD01AD:1;77D90000:1,32.67 -82.27 -12;26.94 -21.13 24;38.59 -107.96 -12;39.9 -108.17 -12;70 -60 -24;21.92 -28.64 6;85.25 -100 -6;7.5 28.29 107.44,
+759,combine,8308,Quicksilver Pea,0,1,,,8283=Splitting Tool;8308=Quicksilver Pea
 5794,drop,1625,Mountain Rat,20,0.07,138:3;18B:11;191:12;192:9;1A6:11;1C2:7;1DD:1;64D6:5;81C0:4;9626:1;A0B5:2;A1B5:1;D756:3,,
 4749,container,4381,Corpse,0,0.1,0143019D:1;014C0168:1;01500160:1;F7570000:1,82.58 -22.73 0.03;90.19 -103.1 6;49.21 3.66 -6;174.2 134.88 0,
 4749,combine,762,Turpeth,0,1,,,4747=Alembic;762=Turpeth

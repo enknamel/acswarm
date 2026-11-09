@@ -167,7 +167,11 @@ fn every_line_of_both_files_parses_and_givers_stand_in_the_world() {
         assert_eq!(s.places.len(), s.landblocks.len(), "{} {}", s.wcid, s.name);
     }
     for r in all() {
-        assert!(!r.places.is_empty(), "{}: nowhere", r.id);
+        assert!(
+            !r.places.is_empty() || r.hand == Handing::Read,
+            "{}: nowhere",
+            r.id
+        );
     }
     for p in &givers().places {
         let (x, y) = (p.cell >> 24, (p.cell >> 16) & 0xFF);
@@ -332,4 +336,37 @@ fn the_stamped_rithwic_letter_is_made_by_using_the_town_stamp_on_a_lucky_gold_le
     let keys: Vec<u32> = combine.keys.iter().map(|k| k.0).collect();
     assert_eq!(keys, [8738, 45875], "the stamp used on the letter");
     assert!(combine.landblocks.is_empty());
+}
+
+#[test]
+fn a_gift_punished_with_harm_is_no_quest_and_a_recall_scroll_is_one_to_read() {
+    // The Healer's Heart handed to the temple Guardian is met with Soul Dissolution.
+    assert_eq!(rows_of("give:8552").count(), 0);
+    // What players go for is the scroll beside it in the Mistress' Chest.
+    let learn: Vec<&Row> = rows_of("learn:2023").collect();
+    assert_eq!(learn.len(), 1);
+    let r = learn[0];
+    assert_eq!(
+        (r.hand, &r.want, r.teaches(), r.repeat),
+        (Handing::Read, &Want::Item(8530), Some(2023), Repeat::Once)
+    );
+    assert!(r.places.is_empty() && r.giver.is_empty());
+    let chest = sources_of(&Want::Item(8530)).next().expect("a source");
+    assert_eq!(
+        (chest.kind, chest.name.as_str()),
+        (Yield::Container, "Mistress' Chest")
+    );
+    assert!(chest.keys.iter().any(|k| k.0 == 8511));
+    assert!(
+        sources_of(&Want::Item(8511)).any(|s| s.kind == Yield::Drop && s.name == "Putrid Moarsman")
+    );
+}
+
+#[test]
+fn a_portal_gem_comes_from_its_shop_or_its_drop() {
+    // The invitation to Ithaenc is bought; the Copper Ward gem drops from Captain Ramelle.
+    assert!(sources_of(&Want::Item(14915))
+        .any(|s| s.kind == Yield::Vendor && s.name == "Wedding Planner"));
+    assert!(sources_of(&Want::Item(29444))
+        .any(|s| s.kind == Yield::Drop && s.name == "Captain Ramelle" && s.chance == 1.0));
 }

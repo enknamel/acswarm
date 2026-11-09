@@ -167,6 +167,7 @@ fn work_dropping(
         chains: fake,
         dropped,
         unlocked: &|_| false,
+        ways: &BTreeMap::new(),
     };
     pursuit_of(&board, &chained, &ask)
 }
@@ -1749,34 +1750,173 @@ fn an_npc_is_not_asked_for_an_item_with_no_room_in_the_pack_for_it() {
     );
 }
 
-#[test]
-#[ignore = "needs AC_DATA_DIR"]
-fn a_ground_no_journey_reaches_but_a_gem_for_sale_does_buys_the_gem() {
-    // The Healer's Heart, from Holtburg: the Putrid Moarsman's catacombs are on Ithaenc's island,
-    // no portal goes there, and the Wedding Planner sells the invitation that does.
+/// A level 58 mage in Holtburg's field, named and with a profile of its own, pursuing `quest`.
+fn mage_pursuing(quest: &str, profile: &str) -> Client {
     let holtburg = 0xA9B4_0011;
     let mut c =
         crate::testkit::standing_in_the_field(58, holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
+    c.world.stats.name = "Blarg".into();
+    c.ledger_loaded = true;
+    crate::testkit::a_loot_profile(&mut c, profile);
+    for school in [31, 32, 33, 34] {
+        crate::testkit::trained_in(&mut c, school, 300);
+    }
     c.autoplay.config.quests.on = true;
-    c.autoplay.config.quests.pursue_quest("give:8552", true, 0);
+    c.autoplay.config.quests.pursue_quest(quest, false, 0);
+    c
+}
+
+/// `wcid` put in `c`'s pack as `guid`, or taken out of it with `count` 0.
+fn in_the_pack(c: &mut Client, guid: u32, wcid: u32, name: &str, count: u32) {
+    if count == 0 {
+        c.world.objects.remove(&guid);
+        return;
+    }
+    crate::testkit::thing_in_the_pack(c, guid, name, count);
+    c.world.objects.get_mut(&guid).unwrap().weenie_class_id = wcid;
+}
+
+/// Work the board and the pursuit out again, as the next tick would.
+fn again(c: &mut Client, now: std::time::Instant) -> PursuitStep {
+    c.quest_board_at = None;
+    c.refresh_quests(now);
+    c.pursuit[0].step.clone()
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn recall_the_sanctuary_is_had_by_the_ancient_key_bought_invitation_and_scroll_read() {
+    // The Healer's Heart quest, done for its recall: the Mistress' Chest in Ithaenc's cathedral
+    // holds the scroll, opened with the Putrid Moarsman's Ancient Key; no portal goes to the
+    // island, and the Wedding Planner sells the invitation that does.
+    let mut c = mage_pursuing("learn:2023", "recall-the-sanctuary");
     let now = std::time::Instant::now();
     c.refresh_quests(now);
-    let grounds = c.autoplay.growth.pursuit_grounds.clone();
-    assert!(!grounds.is_empty(), "no Putrid Moarsman ground");
-    let quests = c.travel.quests_done.clone();
+    let hunt = c.pursuit[0].step.clone();
     assert!(
-        grounds
-            .iter()
-            .all(|g| c.journey_plan(g.1, &quests).is_none()),
-        "a way there without the gem"
+        matches!(&hunt, PursuitStep::Hunt { creature, .. } if creature == "Putrid Moarsman"),
+        "{hunt:?}"
     );
     let cfg = c.autoplay.config.growth.clone();
-    c.grow_hunt(now, &cfg);
+    assert!(!c.grow_hunt(now, &cfg), "set off with no journey there");
     let gems = &c.autoplay.growth.pursuit_gems;
-    assert_eq!(
-        gems.iter().map(|g| g.name.as_str()).collect::<Vec<_>>(),
-        ["Invitation Ithaenc Cathedral"],
-        "the gem to buy"
+    let names: Vec<&str> = gems.iter().map(|g| g.name.as_str()).collect();
+    assert_eq!(names, ["Invitation Ithaenc Cathedral"]);
+    assert!(c.autoplay.growth.pursuit_held.is_empty(), "passed over");
+    // The invitation is the step now, and the Quests section buys it: a run goes for it.
+    let step = again(&mut c, now);
+    assert!(
+        matches!(&step, PursuitStep::Buy { vendor, .. } if vendor == "Wedding Planner"),
+        "{step:?}"
     );
-    assert_eq!(gems[0].vendor, "Wedding Planner");
+    let p = (*c.loot_profile().unwrap()).clone();
+    assert!(
+        p.buy
+            .iter()
+            .any(|b| b.is_quest_entry("Blarg") && b.what.starts_with("Invitation")),
+        "{:?}",
+        p.buy
+    );
+    // Bought: the Moarsman again, the planner taking the invitation; used, it is wanted no more.
+    in_the_pack(
+        &mut c,
+        0x5000_0001,
+        14915,
+        "Invitation Ithaenc Cathedral",
+        1,
+    );
+    assert_eq!(again(&mut c, now), hunt);
+    let quests = c.travel.quests_done.clone();
+    let grounds = c.autoplay.growth.pursuit_grounds.clone();
+    let trips: Vec<_> = grounds
+        .iter()
+        .map(|g| c.journey_plan(g.1, &quests))
+        .collect();
+    assert!(
+        trips.iter().any(Option::is_some),
+        "no journey with the invitation: {grounds:?}"
+    );
+    // And from the Wedding Planner's counter, where the run that bought it ends.
+    crate::testkit::stand(&mut c, 0x7D64_014C, glam::Vec3::new(91.4, 35.7, 12.0));
+    let trips: Vec<_> = grounds
+        .iter()
+        .map(|g| c.journey_plan(g.1, &quests))
+        .collect();
+    assert!(
+        trips.iter().any(Option::is_some),
+        "none from the Wedding Planner"
+    );
+    let cfg = c.autoplay.config.growth.clone();
+    assert!(
+        c.grow_hunt(now, &cfg),
+        "{:?}",
+        c.autoplay.growth.pursuit_held
+    );
+    c.cancel_travel();
+    in_the_pack(&mut c, 0x5000_0001, 14915, "", 0);
+    assert_eq!(again(&mut c, now), hunt);
+    assert!(c.autoplay.growth.pursuit_gems.is_empty(), "another bought");
+    // The scroll carried is read where it stands, and the spell known finishes the pursuit.
+    in_the_pack(&mut c, 0x5000_0002, 8530, "Scroll of Sanctuary Recall", 1);
+    let read = again(&mut c, now);
+    assert!(
+        matches!(read, PursuitStep::Read { spell: 2023, .. }),
+        "{read:?}"
+    );
+    assert_eq!(c.grow_pursuit(now), Some(true), "walked off from the read");
+    c.world.stats.spells.push(2023);
+    c.refresh_quests(now);
+    assert!(c.autoplay.config.quests.pursue.is_empty(), "still pursued");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn the_copper_castellan_is_reached_by_the_gem_captain_ramelle_drops() {
+    // Defense of Zaikhal: the Copper Legion Castellan stands in Corcima Castle's Copper Ward,
+    // which only the Copper Ward gem reaches; Captain Ramelle and her bodyguards drop it in the
+    // Copper Legion Keep, whose portal stands by Zaikhal.
+    let mut c = mage_pursuing("copperknightmedallion", "copper-castellan");
+    let now = std::time::Instant::now();
+    c.refresh_quests(now);
+    let hunt = c.pursuit[0].step.clone();
+    assert!(
+        matches!(&hunt, PursuitStep::Hunt { creature, .. } if creature == "Copper Legion Castellan"),
+        "{hunt:?}"
+    );
+    let cfg = c.autoplay.config.growth.clone();
+    assert!(!c.grow_hunt(now, &cfg));
+    let names: Vec<&str> = c
+        .autoplay
+        .growth
+        .pursuit_gems
+        .iter()
+        .map(|g| g.name.as_str())
+        .collect();
+    assert_eq!(names, ["Corcima Castle Copper Ward Portal Gem"]);
+    let step = again(&mut c, now);
+    let PursuitStep::Hunt {
+        landblock,
+        creature,
+        ..
+    } = &step
+    else {
+        panic!("{step:?}")
+    };
+    assert_eq!(*landblock, 0x0018, "{creature}");
+    assert!(c.grow_hunt(now, &cfg), "no way into the Copper Legion Keep");
+    // Looted off her corpse: the Castellan's ground, passed over with no gem, is set off to now.
+    c.cancel_travel();
+    in_the_pack(
+        &mut c,
+        0x5000_0003,
+        29444,
+        "Corcima Castle Copper Ward Portal Gem",
+        3,
+    );
+    assert_eq!(again(&mut c, now), hunt);
+    assert!(
+        c.grow_hunt(now, &cfg),
+        "{:?}",
+        c.autoplay.growth.pursuit_held
+    );
 }

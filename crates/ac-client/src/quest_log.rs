@@ -97,6 +97,8 @@ pub enum Blocked {
     Locked { flag: String },
     /// Another quest, not a start talk, stamps what this one needs.
     NeedsFirst { title: String },
+    /// A scroll whose spell this character cannot learn: its school untrained, or short of skill.
+    CantLearn,
 }
 
 /// Where one quest stands for one character.
@@ -158,6 +160,8 @@ pub(crate) struct BoardFor {
     /// Quest flags held.
     pub(crate) held: Vec<String>,
     pub(crate) name: String,
+    /// Spells known and learnable: a scroll read is done at once.
+    pub(crate) spells: (usize, usize),
 }
 
 /// What the board is worked out from, so [`quest_board`] runs with no `Client`.
@@ -179,6 +183,9 @@ pub struct QuestFacts {
     pub profile: Option<std::sync::Arc<crate::profile::Profile>>,
     pub wielder: crate::weapons::Wielder,
     pub name: String,
+    /// The spellbook, and the spells a scroll would teach now (`Client::learnable_spells`).
+    pub spells: BTreeSet<u32>,
+    pub learnable: std::sync::Arc<BTreeSet<u32>>,
 }
 
 /// Whether autoplay works `row` on its own: a talk that takes a quest up, or a way to complete one
@@ -524,6 +531,15 @@ fn see_first(flag: &str, facts: &QuestFacts, locks: &mut Locks, depth: u32) -> Q
 /// One switched-on quest's state: done or waiting, then what rules it out, then what is left.
 fn state_of(doing: &[&Row], facts: &QuestFacts, locks: &mut Locks) -> QuestState {
     let first = doing[0];
+    // A scroll read: done once the spell is known, never begun while it cannot be learned.
+    if let Some(spell) = first.teaches() {
+        if facts.spells.contains(&spell) {
+            return QuestState::Done;
+        }
+        if !facts.learnable.contains(&spell) {
+            return QuestState::CantYet(Blocked::CantLearn);
+        }
+    }
     if let Some(until) = facts.log.wait_until(first.timer, facts.now) {
         return QuestState::Waiting { until };
     }
@@ -813,6 +829,8 @@ impl Client {
             profile: self.loot_profile(),
             wielder: self.wielder(),
             name: stats.name.clone(),
+            spells: stats.spells.iter().copied().collect(),
+            learnable: self.learnable_spells(),
         }
     }
 
@@ -823,16 +841,22 @@ impl Client {
         if !self.ledger_loaded && !name.is_empty() {
             return;
         }
+        self.refresh_learnable();
         self.finish_pursuits(now);
         let name = self.world.stats.name.trim();
         let cfg = &self.autoplay.config.quests;
         let level = self.world.stats.level.max(0) as u32;
+        let spells = (
+            self.world.stats.spells.len(),
+            self.autoplay.learnable.spells.len(),
+        );
         let changed = self.quest_board_for.as_ref().is_none_or(|f| {
             f.quests != *cfg
                 || f.level != level
                 || f.log != self.quest_log
                 || f.held != self.travel.quests_done
                 || f.name != name
+                || f.spells != spells
         });
         let due = self
             .quest_board_at
@@ -847,6 +871,7 @@ impl Client {
             log: self.quest_log.clone(),
             held: self.travel.quests_done.clone(),
             name: name.to_string(),
+            spells,
         });
         self.quest_board_at = Some(now);
         let mut facts = self.quest_facts();
@@ -878,6 +903,17 @@ impl Client {
             .iter()
             .filter(|p| !p.again && done.get(&p.id).is_some_and(|d| d.at >= p.since))
             .map(|p| p.id.clone())
+            .collect();
+        // A scroll read is done with its spell known: no giver records it in the log.
+        let spells = &self.world.stats.spells;
+        let learnt = self.autoplay.config.quests.pursue.iter().filter(|p| {
+            ac_world::quests::rows_of(&p.id)
+                .find_map(Row::teaches)
+                .is_some_and(|s| spells.contains(&s))
+        });
+        let finished: Vec<String> = finished
+            .into_iter()
+            .chain(learnt.map(|p| p.id.clone()))
             .collect();
         for id in finished {
             tracing::info!("pursuit: {id} finished");

@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 use ac_world::quest_chain::{ChainLink, FlagBy, SourceGround};
-use ac_world::quests::{Kind, Row, Source, Want, Yield};
+use ac_world::quests::{Handing, Kind, Row, Source, Want, Yield};
 use ac_world::unlocks::Unlock;
 use ac_world::Place;
 
@@ -78,6 +78,9 @@ pub enum PursuitStep {
     },
     /// Hand in to `row`'s giver at `at`.
     HandIn { row: &'static Row, at: Place },
+    /// Read the carried scroll `name` (weenie class `wcid`) for `spell`: no giver, the scroll
+    /// reader (`autoplay_learn_scrolls`) reads it while nothing else is on.
+    Read { wcid: u32, name: String, spell: u32 },
     /// Done; may be done again at this Unix second.
     Waiting { until: u64 },
     /// Done since asked for and not to be done again.
@@ -101,6 +104,7 @@ impl PursuitStep {
                 | PursuitStep::AskFor { .. }
                 | PursuitStep::Combine { .. }
                 | PursuitStep::HandIn { .. }
+                | PursuitStep::Read { .. }
         )
     }
 
@@ -151,6 +155,7 @@ impl PursuitStep {
                 )
             }
             PursuitStep::HandIn { row, .. } => format!("hand it in to {}", row.giver),
+            PursuitStep::Read { name, .. } => format!("read {name}"),
             PursuitStep::Waiting { until } => {
                 let left = until.saturating_sub(now);
                 format!("waits {}h {}m", left / 3600, left % 3600 / 60)
@@ -319,6 +324,9 @@ pub(crate) struct Ask<'a> {
     pub(crate) dropped: &'a dyn Fn(&Source) -> bool,
     /// A chest this character unlocked within `fetch::UNLOCKED_FOR`: opened with no key.
     pub(crate) unlocked: &'a dyn Fn(&Source) -> bool,
+    /// The portal gem each quest, by id, is had for first: no journey reaches its ground but
+    /// from the gem's exit. Gone once carried.
+    pub(crate) ways: &'a BTreeMap<String, (u32, String)>,
 }
 
 /// Each line's step, worked out with the `board` the chained list's facts gave; the first that
@@ -401,6 +409,19 @@ fn stuck(why: String) -> PursuitStep {
     PursuitStep::Stuck { why }
 }
 
+/// The scroll `line`'s quest is done by reading, and the spell it teaches: a `learn:` row's.
+fn line_reads(line: &QuestLine) -> Option<(u32, String, u32)> {
+    let row = crate::quest_log::worked_rows(line).find(|r| r.hand == Handing::Read)?;
+    let Want::Item(wcid) = row.want else {
+        return None;
+    };
+    let name = row
+        .item
+        .as_ref()
+        .map_or_else(|| format!("item {wcid}"), |i| i.name.to_string());
+    Some((wcid, name, row.teaches()?))
+}
+
 /// A hunt's grounds and the creatures sought there.
 type Hunting = (Vec<(u32, Place)>, Vec<u32>);
 
@@ -412,11 +433,14 @@ impl Ask<'_> {
             QuestState::Off => stuck("switched off".to_string()),
             QuestState::Done => PursuitStep::Finished,
             QuestState::Waiting { until } => PursuitStep::Waiting { until: *until },
-            QuestState::Ready => match self.asking.hand_in_at(line, end) {
-                Some((_, row, at)) => PursuitStep::HandIn { row, at },
+            QuestState::Ready => match (line_reads(line), self.asking.hand_in_at(line, end)) {
+                (Some((wcid, name, spell)), _) => PursuitStep::Read { wcid, name, spell },
+                (None, Some((_, row, at))) => PursuitStep::HandIn { row, at },
                 // Kept: what a hand-in takes is carried, and `finish_kept` ends the pursuit.
-                None if *end == QuestEnd::Keep && line.kind == Kind::Item => PursuitStep::Finished,
-                None => match self.chosen_short(line, end) {
+                (None, None) if *end == QuestEnd::Keep && line.kind == Kind::Item => {
+                    PursuitStep::Finished
+                }
+                (None, None) => match self.chosen_short(line, end) {
                     Some((more, of)) => return self.hunt_step(line, more, &of, end),
                     None => stuck(format!("{} cannot be asked now", line.giver)),
                 },
@@ -445,6 +469,9 @@ impl Ask<'_> {
             QuestState::CantYet(Blocked::Locked { flag }) => self.flag_step(flag),
             QuestState::CantYet(Blocked::NeedsFirst { title }) => {
                 stuck(format!("{} comes first", title.trim()))
+            }
+            QuestState::CantYet(Blocked::CantLearn) => {
+                stuck("its spell is beyond this character's magic".to_string())
             }
         };
         (step, None)
@@ -480,6 +507,10 @@ impl Ask<'_> {
             if r.want != Want::Nothing && !wants.contains(&r.want) {
                 wants.push(r.want.clone());
             }
+        }
+        // No journey reaches where it comes from but from a gem's exit: the gem is had first.
+        if let Some((gem, name)) = self.ways.get(&line.id) {
+            return self.obtain(&[Want::Item(*gem)], 1, name, 0);
         }
         let what = if of.is_empty() { line.title.trim() } else { of };
         self.obtain(&wants, more, what, 0)
@@ -655,7 +686,15 @@ impl Client {
             self.keep_quest_section(&ChainData);
             return;
         }
+        self.keep_gem_ways();
         let st = &self.autoplay.growth;
+        // A gem carried is the way already: the planner takes it.
+        let ways: BTreeMap<String, (u32, String)> = st
+            .pursuit_gems
+            .iter()
+            .filter(|g| !g.had)
+            .map(|g| (g.quest.clone(), (g.wcid, g.name.clone())))
+            .collect();
         let held: BTreeMap<String, String> = st
             .pursuit_held
             .iter()
@@ -696,6 +735,7 @@ impl Client {
             chains: &ChainData,
             dropped: &dropped,
             unlocked: &unlocked,
+            ways: &ways,
         };
         let pursued = pursuit_of(&self.quest_board, chained, &ask);
         self.pursuit = pursued.lines;
@@ -809,20 +849,44 @@ impl Client {
                     }
                     self.autoplay.growth.skip.mark(lb, now);
                 }
-                // No way but a gem a shop sells: the Quests section buys it, and the next plan
-                // takes it (Ithaenc's island, by the Wedding Planner's invitation).
+                // No way but from a gem's exit: the gem is had first, bought, hunted or fetched
+                // as any wanted item, and the next plan takes it (the Wedding Planner's
+                // invitation to Ithaenc; Captain Ramelle's Copper Ward gem to Corcima Castle).
+                // One gem a quest: the gem's own source out of reach is not looked past again.
+                let wanted = self.autoplay.growth.pursuit_gems.iter();
+                if let Some(g) = wanted.clone().find(|g| g.quest == line.id) {
+                    let why = format!(
+                        "no journey reaches any place {creature} is found, {} wanted",
+                        g.name
+                    );
+                    self.hold_pursuit(&line.id, why, now);
+                    return Some(false);
+                }
                 if let Some(gem) = self.gem_way(&every, &quests) {
                     let why = format!(
-                        "buying {} from {} to reach {creature}",
-                        gem.name, gem.vendor
+                        "for {}: {} first, to reach {creature}",
+                        line.title, gem.name
                     );
-                    self.autoplay.growth.want_gem(&line.id, gem);
-                    self.hold_pursuit(&line.id, why, now);
+                    tracing::info!("pursuit: {}: {why}", line.id);
+                    self.autoplay.note(why, now);
+                    let st = &mut self.autoplay.growth;
+                    st.want_gem(&line.id, gem);
+                    // Passed over for want of a way: with the gem they are tried again.
+                    for (lb, _) in &every {
+                        st.skip.forget(lb);
+                    }
+                    self.quest_board_at = None;
                     return Some(false);
                 }
                 let why = format!("no journey reaches any place {creature} is found");
                 self.hold_pursuit(&line.id, why, now);
                 Some(false)
+            }
+            // Stood still for the scroll reader, which reads only while nothing else is on.
+            PursuitStep::Read { name, .. } => {
+                let why = format!("for {}: reading {name}", line.title);
+                self.autoplay.say(Doing::Idle, why);
+                Some(true)
             }
             PursuitStep::PickUp { .. }
             | PursuitStep::OpenChest { .. }

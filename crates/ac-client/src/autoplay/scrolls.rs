@@ -50,7 +50,7 @@ impl Client {
     }
 
     /// Work [`Self::learnable_spells`] out again when the spellbook or a school's skill changed.
-    fn refresh_learnable(&mut self) {
+    pub(crate) fn refresh_learnable(&mut self) {
         use std::hash::{Hash, Hasher};
         let stats = &self.world.stats;
         let skills = self.assets.skill_table().ok();
@@ -96,10 +96,20 @@ impl Client {
 
     /// Housekeeping: keep the learnable spells current, and read one scroll the pack holds whose
     /// spell is among them while nothing is fought or walked: a read stands the reader still in peace
-    /// mode (Scroll.cs:68-76), and a use breaks a journey off.
+    /// mode (Scroll.cs:68-76), and a use breaks a journey off. With the loot rules' reading off,
+    /// only a pursued quest's scroll is read (a `learn:` quest's `Read` step).
     pub(crate) fn autoplay_learn_scrolls(&mut self, now: Instant) {
         self.refresh_learnable();
-        if !self.loot_profile().is_some_and(|p| p.looting.learn_scrolls) {
+        let every = self.loot_profile().is_some_and(|p| p.looting.learn_scrolls);
+        let asked: Vec<u32> = self
+            .pursuit
+            .iter()
+            .filter_map(|l| match l.step {
+                crate::autoplay::PursuitStep::Read { spell, .. } => Some(spell),
+                _ => None,
+            })
+            .collect();
+        if !every && asked.is_empty() {
             return;
         }
         let st = &self.autoplay.learnable;
@@ -121,6 +131,7 @@ impl Client {
             let s = crate::items::ItemStats::of(o, me);
             s.is_scroll()
                 && st.spells.contains(&s.spell_id)
+                && (every || asked.contains(&s.spell_id))
                 && st
                     .tried
                     .get(&o.guid)

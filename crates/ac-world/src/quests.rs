@@ -21,11 +21,13 @@ pub enum Kind {
     Start,
 }
 
-/// How the giver is approached: handed the item, or used (talked to).
+/// How the giver is approached: handed the item, or used (talked to); or no giver at all, the
+/// wanted scroll read for the recall spell it teaches (a `learn:SPELL` row).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Handing {
     Give,
     Talk,
+    Read,
 }
 
 /// What a row asks for.
@@ -108,7 +110,7 @@ pub struct Row {
     pub title: &'static str,
     pub giver_wcid: u32,
     pub giver: &'static str,
-    /// Every placement of the giver, never empty (`quest_givers.csv`).
+    /// Every placement of the giver (`quest_givers.csv`), empty only for a scroll read.
     pub places: &'static [Place],
     pub hand: Handing,
     pub want: Want,
@@ -147,6 +149,11 @@ impl Row {
     /// Whether the row awards XP, fixed or level-scaled.
     pub fn has_xp(&self) -> bool {
         self.reward.xp > 0 || self.reward.xp_level > 0.0
+    }
+
+    /// The spell a `learn:SPELL` row's scroll teaches: done once the spellbook holds it.
+    pub fn teaches(&self) -> Option<u32> {
+        self.id.strip_prefix("learn:")?.parse().ok()
     }
 
     /// Whether the row asks something the client cannot check (`unread`).
@@ -377,7 +384,17 @@ fn parse_row(line: &'static str) -> Option<Row> {
     };
     let giver_wcid = f[3].parse().ok()?;
     let table = givers();
-    let (giver, range) = table.by_wcid.get(&giver_wcid)?;
+    let hand = match f[4] {
+        "give" => Handing::Give,
+        "read" => Handing::Read,
+        _ => Handing::Talk,
+    };
+    // A scroll read has no giver.
+    let (giver, places): (&'static str, &'static [Place]) = match table.by_wcid.get(&giver_wcid) {
+        Some((giver, range)) => (giver, &table.places[range.clone()]),
+        None if hand == Handing::Read => ("", &[]),
+        None => return None,
+    };
     let mut gives: Vec<(u32, u32)> = Vec::new();
     for alt in f[14].split('|') {
         for g in pairs(alt, 10)? {
@@ -392,12 +409,8 @@ fn parse_row(line: &'static str) -> Option<Row> {
         title: f[2],
         giver_wcid,
         giver,
-        places: &table.places[range.clone()],
-        hand: if f[4] == "give" {
-            Handing::Give
-        } else {
-            Handing::Talk
-        },
+        places,
+        hand,
         want: want_of(kind, f[5])?,
         count: f[6].parse().ok()?,
         min_level: f[7].parse().ok()?,
@@ -493,9 +506,10 @@ fn parse_source(line: &str) -> Option<Source> {
     })
 }
 
-/// Every shop placement selling an item a quest or a key wants, as a source.
+/// Every shop placement selling an item a quest, a key or a way in (a portal gem) wants, as a source.
 fn vendor_sources(parsed: &[Source]) -> Vec<Source> {
-    let mut wants: std::collections::BTreeSet<u32> = std::collections::BTreeSet::new();
+    let mut wants: std::collections::BTreeSet<u32> =
+        crate::gems::all().iter().map(|g| g.wcid).collect();
     for r in all() {
         if let Want::Item(w) = r.want {
             wants.insert(w);

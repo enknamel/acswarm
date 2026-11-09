@@ -151,6 +151,7 @@ fn short_state(state: &QuestState, now: u64) -> String {
         QuestState::CantYet(Blocked::Level { .. }) => "level".into(),
         QuestState::CantYet(Blocked::Locked { .. }) => "locked".into(),
         QuestState::CantYet(Blocked::NeedsFirst { .. }) => "needs another".into(),
+        QuestState::CantYet(Blocked::CantLearn) => "can't learn".into(),
         QuestState::Waiting { until } => format!("in {}", time_left(until.saturating_sub(now))),
         QuestState::Done => "done".into(),
     }

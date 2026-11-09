@@ -109,3 +109,38 @@ fn a_scroll_the_character_can_learn_is_kept_and_read_once_nothing_is_fought() {
     assert!(!c.wielder().learnable.contains(&bolt));
     assert_eq!(c.last_used, None);
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn with_reading_off_only_the_scroll_a_pursued_quest_reads_is_read() {
+    // A recall learned for a quest is read though the loot rules read no scroll: that one alone.
+    let now = Instant::now();
+    let (mut c, _) = crate::testkit::a_caster_knowing(now, &["Flame Bolt I"]);
+    crate::testkit::a_loot_profile(&mut c, "scrolls-off");
+    let mut p = (*c.loot_profile().unwrap()).clone();
+    p.looting.learn_scrolls = false;
+    c.profiles.put(p).unwrap();
+    let table = c.assets.spell_table().unwrap();
+    let id_of = |name: &str| {
+        let s = table.spells.iter().find(|(_, s)| s.name == name);
+        s.map(|(id, _)| *id).unwrap_or_else(|| panic!("{name}"))
+    };
+    let (bolt, other) = (id_of("Flame Bolt II"), id_of("Frost Bolt II"));
+    scroll_in_the_pack(&mut c, 0x8000_0500, other);
+    c.autoplay_learn_scrolls(now);
+    assert_eq!(c.last_used, None, "read with reading off");
+    scroll_in_the_pack(&mut c, 0x8000_0501, bolt);
+    c.pursuit = vec![crate::autoplay::PursuitLine {
+        id: "learn:test".into(),
+        title: "a recall".into(),
+        step: crate::autoplay::PursuitStep::Read {
+            wcid: 0,
+            name: "Scroll".into(),
+            spell: bolt,
+        },
+        working: true,
+        via: None,
+    }];
+    c.autoplay_learn_scrolls(now);
+    assert_eq!(c.last_used, Some(0x8000_0501));
+}

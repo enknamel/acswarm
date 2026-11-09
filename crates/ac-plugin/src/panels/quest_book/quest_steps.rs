@@ -232,6 +232,11 @@ pub(crate) fn hunt_step(g: &SourceGround, k: &Known) -> Step {
 
 pub(crate) fn hand_in_step(rows: &[&Row], k: &Known) -> Option<Step> {
     let row = rows.first()?;
+    if row.hand == Handing::Read {
+        // No giver: the scroll is read for its spell.
+        let item = row.item.as_ref().map_or("the scroll", |i| i.name);
+        return Some(Step::default().say("Read ").link(Facet::Item, item));
+    }
     let step = match (row.kind, row.hand) {
         (Kind::Kill, _) => Step::default().say("Report the kills to "),
         (_, Handing::Give) => {
@@ -244,7 +249,7 @@ pub(crate) fn hand_in_step(rows: &[&Row], k: &Known) -> Option<Step> {
             };
             step.say(" to ")
         }
-        (_, Handing::Talk) => Step::default().say("Talk to "),
+        (_, Handing::Talk | Handing::Read) => Step::default().say("Talk to "),
     };
     let mut step = giver_at(step, row, k);
     let mut others: Vec<&str> = rows.iter().map(|r| r.giver).collect();
@@ -361,6 +366,7 @@ pub(crate) fn step_words(step: &PursuitStep, now: u64, place: &dyn Fn(u32) -> St
         PursuitStep::HandIn { row, at } => {
             format!("handing it in to {} at {}", row.giver, place(at.cell))
         }
+        PursuitStep::Read { name, .. } => format!("reading {name}"),
         PursuitStep::Waiting { until } => {
             format!("waits {}", time_left(until.saturating_sub(now)))
         }

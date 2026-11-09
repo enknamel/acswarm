@@ -25,17 +25,18 @@ impl Client {
             return;
         };
         let (mut rules, mut buy) = quest_entries(&self.pursuit, &self.quest_board, &who, chains);
-        // A gem stays wanted while its quest is pursued and still hunting.
+        // A gem stays wanted while its quest is pursued and not done, passed over or not.
         let pursued = &self.pursuit;
         self.autoplay.growth.pursuit_gems.retain(|g| {
-            pursued
-                .iter()
-                .any(|l| l.id == g.quest && matches!(l.step, PursuitStep::Hunt { .. }))
+            pursued.iter().any(|l| {
+                l.id == g.quest
+                    && !matches!(l.step, PursuitStep::Finished | PursuitStep::Waiting { .. })
+            })
         });
         for gem in &self.autoplay.growth.pursuit_gems {
             let (r, b) = super::gem_way::gem_entries(gem, &who);
             rules.push(r);
-            buy.push(b);
+            buy.extend(b);
         }
         let mut profile = (*profile).clone();
         let (r, b) = (rules.len(), buy.len());
@@ -146,7 +147,7 @@ fn key_name(key: u32) -> String {
 
 /// The line buying `count` of `wcid` when a shop sells it: urgent as soon as one is short, so a
 /// run goes for it; the shop named when only one sells it.
-fn buy_line(wcid: u32, name: &str, count: u32, chains: &dyn Chains) -> Option<Buy> {
+pub(super) fn buy_line(wcid: u32, name: &str, count: u32, chains: &dyn Chains) -> Option<Buy> {
     let shops: Vec<_> = chains
         .sources(&Want::Item(wcid))
         .into_iter()
