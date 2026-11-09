@@ -57,6 +57,12 @@ impl Client {
                 let answer = crate::refusals::answer(&refusal);
                 self.autoplay.growth.shop.buy_refused(answer, now);
             }
+            // A give to someone mid-emote: the hand-in gives again once it is over, no stall
+            // counted (see `Client::hear_give_refusal`).
+            Refusal::Give => {
+                let answer = crate::refusals::answer(&refusal);
+                self.hear_give_refusal(answer, now);
+            }
             // Read, and waited on by nothing here yet. The item stays
             // where it lies and the loot rules pass it over
             // (`Carry`, `PickUpFirst`); a sale is judged by the pack

@@ -39,6 +39,8 @@ pub enum Refusal<'a> {
     Buy { why: BuyRefusal },
     /// It would not summon with the essence used.
     Summon { why: SummonRefusal },
+    /// It would not hand an item to someone mid-emote: given again once the emote is over.
+    Give,
 }
 
 /// Why a container would not open.
@@ -376,6 +378,11 @@ pub fn refused(text: &str) -> Option<Refusal<'_>> {
             why: SummonRefusal::NotForUs,
         });
     }
+    // WorldObjects/Player_Inventory.cs:3421-3426: the target's EmoteManager.IsBusy, sent as
+    //   WeenieErrorWithString.AiRefuseItemDuringEmote (0x04CE), worded by `weenie_errors`
+    if text == "AI refuse item during emote" {
+        return Some(Refusal::Give);
+    }
     // WorldObjects/PetDevice.cs:130, :140; WorldObjects/Pet.cs:133, :162
     //   $"{player.CurrentActivePet.Name} is already active"
     if text.ends_with(" is already active") {
@@ -490,6 +497,9 @@ pub const RECRUIT_HELD_OFF: Duration = Duration::from_secs(10);
 /// stays one while we stand there, and a fight given up on is left this long anyway.
 pub const ATTACK_AGAIN: Duration = Duration::from_secs(90);
 
+/// Give again to someone mid-emote this often: a giver's greeting runs a few lines a second apart.
+pub const GIVE_BUSY_AGAIN: Duration = Duration::from_secs(2);
+
 /// The decision for a refusal of this kind, and the whole of the policy: the systems that act on a
 /// refusal apply it to their own tables, and none of them chooses a wait of its own.
 pub fn answer(refusal: &Refusal) -> Answer {
@@ -526,6 +536,8 @@ pub fn answer(refusal: &Refusal) -> Answer {
             // Ready again the moment the creature out is gone.
             SummonRefusal::OneIsOut => Answer::Soon(Duration::ZERO),
         },
+        // The emote ends by itself; the item was never taken.
+        Refusal::Give => Answer::Soon(GIVE_BUSY_AGAIN),
     }
 }
 
@@ -767,6 +779,13 @@ mod tests {
                 why: BuyRefusal::NoContainerSlots
             })
         );
+    }
+
+    #[test]
+    fn a_give_to_someone_mid_emote_is_given_again_soon() {
+        // Jilsaya bint Dah, greeted as the Stamped Lytelthorpe Lucky Gold Letter went over.
+        assert_eq!(refused("AI refuse item during emote"), Some(Refusal::Give));
+        assert_eq!(answer(&Refusal::Give), Answer::Soon(GIVE_BUSY_AGAIN));
     }
 
     #[test]

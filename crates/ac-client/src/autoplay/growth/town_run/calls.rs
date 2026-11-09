@@ -29,6 +29,8 @@ const GIVE_PAUSE: Duration = Duration::from_secs(3);
 const GIVE_STALLS: u32 = 3;
 /// Visits begun to one giver on one call before it is given up.
 const GIVER_TRIES: u32 = 3;
+/// Gives turned away mid-emote that count for nothing, at most; past that each is a stall.
+const GIVE_BUSY_TRIES: u32 = 10;
 /// A giver used for a talk is waited on this long for a line of its own (guess): left at once,
 /// the journey on cancelled ACE's walk to it and Shoichi never spoke.
 const TALK_WAIT: Duration = Duration::from_secs(5);
@@ -506,7 +508,28 @@ impl Client {
     }
 
     /// Done with a giver: on to the next call, or the run is over.
+    /// A give turned away because the giver was mid-emote (`Refusal::Give`): the hand-in under way
+    /// gives it again after `answer`'s wait with no stall counted, up to [`GIVE_BUSY_TRIES`].
+    pub(crate) fn hear_give_refusal(&mut self, answer: crate::refusals::Answer, now: Instant) {
+        let crate::refusals::Answer::Soon(wait) = answer else {
+            return;
+        };
+        let tries = self.autoplay.growth.giver_busy.map_or(0, |(_, n)| n) + 1;
+        let Some(run) = self.autoplay.growth.run.as_mut() else {
+            return;
+        };
+        let Phase::HandingIn { last, .. } = &mut run.phase else {
+            return;
+        };
+        if tries > GIVE_BUSY_TRIES {
+            return;
+        }
+        *last = None;
+        self.autoplay.growth.giver_busy = Some((now + wait, tries));
+    }
+
     fn giver_done(&mut self, run: Run, now: Instant, cfg: &Growth) -> Turn {
+        self.autoplay.growth.giver_busy = None;
         let Some(run) = self.next_call(run, now) else {
             return Turn::Acted;
         };
@@ -652,11 +675,22 @@ impl Client {
         let Want::Item(wcid) = row.want else {
             return self.giver_done(run, now, cfg);
         };
+        // Turned away mid-emote: given again once the wait is over (`hear_give_refusal`).
+        if self
+            .autoplay
+            .growth
+            .giver_busy
+            .is_some_and(|(until, _)| now < until)
+        {
+            self.autoplay.growth.run = Some(run);
+            return Turn::Waited;
+        }
         let carried = self.carried_count(wcid);
         if let Some((at, before)) = last {
             if carried < before {
                 taken += 1;
                 stalls = 0;
+                self.autoplay.growth.giver_busy = None;
             } else if now.duration_since(at) < GIVE_PAUSE {
                 self.autoplay.growth.run = Some(run);
                 return Turn::Waited;

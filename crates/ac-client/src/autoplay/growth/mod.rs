@@ -176,6 +176,8 @@ pub struct State {
     /// Portal flags whose NPC was lately set off to, by flag: not set off to again for a while.
     pub(crate) unlock_tried: Recent<String>,
     run: Option<Run>,
+    /// The hand-in's giver was mid-emote: given again after this, and how many times so far.
+    giver_busy: Option<(Instant, u32)>,
     /// The run in progress was asked for from the vendoring panel and
     /// is stepped from there, not by autoplay's tick (see
     /// [`Client::town_run_by_hand`]). Autoplay still counts it as the

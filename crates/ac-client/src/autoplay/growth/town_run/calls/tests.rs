@@ -129,6 +129,29 @@ fn at_a_collector(tails: u32, now: Instant) -> (Client, &'static Row) {
 }
 
 #[test]
+fn a_give_turned_away_mid_emote_is_given_again_once_it_is_over() {
+    // Jilsaya bint Dah greeted Blargerton as the Stamped Lytelthorpe Lucky Gold Letter went over:
+    // "AI refuse item during emote" three times in her nine-second greeting, read as three stalls,
+    // and "would not take it" passed the quest over.
+    let t0 = Instant::now();
+    let (mut c, _) = at_a_collector(1, t0);
+    let cfg = c.autoplay.config.growth.clone();
+    let mut now = t0;
+    assert_eq!(c.grow_run_step(now, &cfg), Turn::Acted, "the first give");
+    let gives = c.session.actions_sent();
+    for _ in 0..5 {
+        c.hear_refusal("AI refuse item during emote", now);
+        now += std::time::Duration::from_secs(4);
+        assert_eq!(c.grow_run_step(now, &cfg), Turn::Acted, "not given again");
+    }
+    assert!(c.session.actions_sent() > gives, "no give went out again");
+    assert!(c.autoplay.growth.run.is_some(), "the hand-in was given up");
+    // Over, it takes the tail.
+    c.world.objects.remove(&0x8000_0100);
+    assert_eq!(c.grow_run_step(now, &cfg), Turn::Over);
+}
+
+#[test]
 fn a_collector_is_handed_every_tail_one_at_a_time_and_the_run_ends_when_none_is_left() {
     let now = Instant::now();
     let (mut c, _) = at_a_collector(2, now);
