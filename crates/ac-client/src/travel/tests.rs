@@ -1679,3 +1679,18 @@ fn the_walk_from_the_invitation_landing_into_ithaencs_catacombs_is_flown_across_
         "{got:?}"
     );
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_flown_journey_is_walked_past_its_first_hop() {
+    // Flown through the Catacombs of Ithaenc's walls past the portal, the server put Blargerton
+    // back four times and the hunt was given up: the flight is the ruins', not the dungeon's.
+    let mut c = crate::testkit::standing_at(0xA9B4_0019, Vec3::new(84.0, 84.0, 94.0));
+    let goal = Vec2::new(32600.0, 34600.0);
+    c.travel_to(goal);
+    c.travel.fly_to = Some(c.travel_goal_xy().unwrap_or(goal));
+    c.travel.hopped = false;
+    assert!(c.is_journey_flown(), "not flown to the hop");
+    c.travel.hopped = true;
+    assert!(!c.is_journey_flown(), "flown past the hop");
+}

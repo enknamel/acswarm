@@ -555,4 +555,19 @@ fn a_quest_hunt_walks_past_all_but_its_creature() {
         "a skeleton is no part of it"
     );
     assert!(!c.passing_by(&boss, &fight), "the Overseer is the errand");
+    // On the road to its ground the rest are run past, but the Overseer met there is fought.
+    let far = ac_world::Place {
+        at: c.my_position().unwrap() + glam::Vec3::new(0.0, 900.0, 0.0),
+        cell: 0xA9B8_0001,
+    };
+    c.travel_to(far.at.truncate());
+    assert!(c.on_its_way(), "not on the road");
+    assert!(
+        c.passing_by(&skeleton, &fight),
+        "a skeleton fought on the road"
+    );
+    assert!(
+        !c.passing_by(&boss, &fight),
+        "the Overseer walked past on the road"
+    );
 }

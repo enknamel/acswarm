@@ -107,10 +107,13 @@ impl Client {
         // A pursued quest's errand is its creature, or for any other step nothing: the rest are
         // walked past, at its ground too (a_quest_hunt_walks_past_all_but_its_creature).
         let sought = &self.autoplay.growth.pursuit_sought;
+        let it = self.is_pursued_hunt() && sought.contains(&o.weenie_class_id);
         let not_it = self.is_pursuing()
             && (!self.is_pursued_hunt()
                 || (!sought.is_empty() && !sought.contains(&o.weenie_class_id)));
-        cfg.walk_past_on_the_way && (self.on_its_way() || not_it)
+        // The pursued creature itself is never walked past, on the road to its ground or there
+        // (the Putrid Moarsman met at the catacombs' door, left behind on the road).
+        cfg.walk_past_on_the_way && !it && (self.on_its_way() || not_it)
     }
 
     /// Say what the character is walking past on its way somewhere: the

@@ -1,6 +1,7 @@
 //! A journey flown as the last resort: planned again, a journey that hops (a portal, recall or
-//! gem) has no way left on foot, and the body may fly; each stretch is then flown straight to its
-//! end (`Route::flown_across`) over what the walk graph cannot cross (Ithaenc's ruins).
+//! gem) has no way left on foot, and the body may fly; each stretch to the next hop is then flown
+//! straight to its end (`Route::flown_across`) over what the walk graph cannot cross (Ithaenc's
+//! ruins). Past the hop it is walked: flown through a dungeon's walls, the server puts it back.
 
 use std::time::Instant;
 
@@ -16,10 +17,12 @@ impl Client {
         trip.is_some_and(|t| t.steps.iter().any(|s| !matches!(s, Step::Walk(_))))
     }
 
-    /// Whether the journey under way flies its stretches to its destination.
+    /// Whether the journey under way flies its stretches to its destination: till its first hop,
+    /// the flight set off afresh (`hopped` cleared).
     pub(crate) fn is_journey_flown(&self) -> bool {
         let to = self.travel_goal_xy();
         self.movement_rules.limits().noclip
+            && !self.travel.hopped
             && self
                 .travel
                 .fly_to
