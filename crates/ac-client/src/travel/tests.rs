@@ -1696,3 +1696,57 @@ fn a_flown_journey_is_walked_past_its_first_hop() {
     c.travel.hopped = true;
     assert!(!c.is_journey_flown(), "flown past the hop");
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_portal_not_taken_is_stepped_out_of_and_flown_into_again_level() {
+    // Flown to the Catacombs of Ithaenc Portal, Blargerton sank onto the mouth from 10 m up, stood
+    // under it 1.1 m off, and jumped in place; never taken, the Moarsman's ground was given up.
+    // Offline no portal fires: the flight comes into the mouth level, and steps out and back in.
+    let o = |cell: u32| ac_world::landblock_origin(cell);
+    let mut c =
+        crate::testkit::standing_in_the_field(60, 0xF618_000C, Vec3::new(40.0, 89.0, 182.0));
+    c.world.player_guid = Some(crate::testkit::ME);
+    c.movement_rules = crate::player::MovementRules::Unrestricted;
+    let inside = Place {
+        at: o(0x02B7_02F1) + Vec3::new(70.0, -60.0, 0.0),
+        cell: 0x02B7_02F1,
+    };
+    let mouth = o(0xF418_000C) + Vec3::new(36.0, 79.3, 197.0);
+    let t0 = Instant::now();
+    let dt = 0.05;
+    let mut track: Vec<Vec3> = Vec::new();
+    for frame in 0..90 * 20 {
+        let now = t0 + Duration::from_secs_f32(frame as f32 * dt);
+        if frame % 10 == 0 {
+            c.journey_to(inside, ARRIVE);
+        }
+        c.tick_player(crate::player::Input::default(), dt, now);
+        c.pathfinder.settle(Duration::from_secs(5));
+        track.push(c.my_position().unwrap());
+    }
+    let flat = |p: &Vec3| (*p - mouth).truncate().length();
+    let at_mouth = |p: &Vec3| flat(p) <= 0.6 && (p.z - mouth.z).abs() <= 1.0;
+    let first = track.iter().position(at_mouth).expect("never at the mouth");
+    // The last metres in were flown level at the mouth's height, not sunk onto it: a metre out
+    // it was already at the mouth's height.
+    let out_a_metre = track[..first]
+        .iter()
+        .rev()
+        .find(|p| flat(p) > 1.0)
+        .expect("started at the mouth");
+    assert!(
+        (out_a_metre.z - mouth.z).abs() <= 0.6,
+        "came down onto the mouth, from {out_a_metre:?}"
+    );
+    // Not taken: stepped out of it, and back in.
+    let out = first
+        + track[first..]
+            .iter()
+            .position(|p| flat(p) >= 2.5)
+            .expect("never stepped out of the mouth");
+    assert!(
+        track[out..].iter().any(at_mouth),
+        "never came back into the mouth"
+    );
+}

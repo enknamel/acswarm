@@ -16,6 +16,9 @@ pub const TRAP_BERTH: f32 = 0.5;
 const BODY_HEIGHT: f32 = 2.0;
 /// A walk the graph has no way for is flown this far above the higher of its ends (metres).
 pub const GAP_CLEARANCE: f32 = 5.0;
+/// A flight's last stretch, flown level at its goal's height (metres, flat): a portal fires only
+/// on a move into its mouth (ACE `PhysicsObj.cs:4357`), and one sunk onto from above may not.
+pub const LEVEL_IN: f32 = 4.0;
 
 /// One stretch of the route to fly: from `s0` to `s1` metres along it, at least `above` (world z).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -207,18 +210,27 @@ fn rebuilt(route: &Route, ends: &[(Vec3, u32)], stretches: &[Stretch]) -> Route 
 impl Route {
     /// The walk from `from` to `goal` flown whole, where the graph has no way across (a gap, a
     /// drop it cannot climb back, a portal hung above its floor): straight up to
-    /// [`GAP_CLEARANCE`] above the higher end, level across, and down onto the goal.
+    /// [`GAP_CLEARANCE`] above the higher end, level across, down [`LEVEL_IN`] short of the goal
+    /// and level into it; one that short flown straight at it.
     pub fn flown_across(from: Place, goal: Place) -> Route {
-        let high = from.at.z.max(goal.at.z) + GAP_CLEARANCE;
         let flown = |at: Vec3, cell: u32| Waypoint {
             place: Place { at, cell },
             kind: EdgeKind::Fly,
             floor: None,
         };
+        let flat = (goal.at - from.at).truncate();
+        if flat.length() <= LEVEL_IN {
+            return Route {
+                waypoints: vec![flown(goal.at, goal.cell)],
+            };
+        }
+        let high = from.at.z.max(goal.at.z) + GAP_CLEARANCE;
+        let short = goal.at.truncate() - flat.normalize() * LEVEL_IN;
         Route {
             waypoints: vec![
                 flown(Vec3::new(from.at.x, from.at.y, high), from.cell),
-                flown(Vec3::new(goal.at.x, goal.at.y, high), goal.cell),
+                flown(short.extend(high), goal.cell),
+                flown(short.extend(goal.at.z), goal.cell),
                 flown(goal.at, goal.cell),
             ],
         }

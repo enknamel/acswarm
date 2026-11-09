@@ -150,7 +150,7 @@ fn the_follower_rises_all_the_way_before_crossing_and_lands_before_walking_on() 
 }
 
 #[test]
-fn a_walk_with_no_way_on_foot_rises_crosses_above_both_ends_and_lands_on_the_goal() {
+fn a_walk_with_no_way_on_foot_rises_crosses_above_both_ends_and_comes_in_level() {
     let from = Place {
         at: Vec3::new(10.0, 10.0, 180.0),
         cell: 0xF618_000C,
@@ -162,13 +162,23 @@ fn a_walk_with_no_way_on_foot_rises_crosses_above_both_ends_and_lands_on_the_goa
     let r = Route::flown_across(from, goal);
     let w: Vec<_> = r.waypoints.iter().map(|w| (w.place.at, w.kind)).collect();
     let high = 195.0 + GAP_CLEARANCE;
+    // Down short of the goal, and into it level: a portal's mouth is moved into, never sunk onto.
+    let short = goal.at.truncate() - (goal.at - from.at).truncate().normalize() * LEVEL_IN;
     assert_eq!(
         w,
         [
             (Vec3::new(10.0, 10.0, high), EdgeKind::Fly),
-            (Vec3::new(-370.0, 0.0, high), EdgeKind::Fly),
+            (short.extend(high), EdgeKind::Fly),
+            (short.extend(195.0), EdgeKind::Fly),
             (goal.at, EdgeKind::Fly),
         ]
     );
     assert!(r.is_flown());
+    // A hop that short is flown straight at the goal.
+    let near = Place {
+        at: goal.at + Vec3::new(3.0, 0.0, 0.0),
+        ..goal
+    };
+    let r = Route::flown_across(near, goal);
+    assert_eq!(r.points(), [goal.at]);
 }

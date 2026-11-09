@@ -1,12 +1,16 @@
-//! The portal step at its mouth: waited in, jumped into, and stepped back from when the server
-//! turns the journey away as teleported too recently.
+//! The portal step at its mouth: waited in, jumped into, stepped out of and come into again, and
+//! stepped back from when the server turns the journey away as teleported too recently.
 
 use std::time::{Duration, Instant};
 
+use ac_world::Place;
 use glam::Vec2;
 
 use super::{PORTAL_COOLDOWN, PORTAL_GIVE_UP, PORTAL_STEP_BACK, TELEPORTED_TOO_RECENTLY};
 use crate::Client;
+
+/// Not taken this long at the mouth, the jumps tried, it is stepped out of and come into again.
+const STEP_OUT_AFTER: Duration = Duration::from_secs(8);
 
 impl Client {
     /// A portal turned the journey away as teleported too recently: step back off its mouth, to
@@ -75,6 +79,20 @@ impl Client {
             self.travel.replan_due = true;
             return false;
         }
+        // Still here after the jumps: a portal fires only on a move into it (ACE
+        // `PhysicsObj.cs:4357`), not on one stood or bobbing in it; stepped out of once, come in again.
+        if now.duration_since(since) > STEP_OUT_AFTER && !self.travel.state.stepped_out {
+            if let Some(out) = self.out_of_mouth() {
+                tracing::info!(
+                    "travel: the portal has not taken us; stepping out to come in again"
+                );
+                self.travel.state.stepped_out = true;
+                self.travel.state.too_soon = Some((now + PORTAL_COOLDOWN, out));
+                self.travel.state.portal_since = None;
+                self.walk_afresh();
+                return true;
+            }
+        }
         // A few portals sit above the ground and have to be jumped into; try that while we wait.
         let hop_due = self
             .travel
@@ -87,5 +105,26 @@ impl Client {
             self.jump(1.0);
         }
         true
+    }
+
+    /// [`PORTAL_STEP_BACK`] out of the portal step's mouth, on the side the body stands: at the
+    /// mouth's height while the journey is flown, so the way back in is level; else on the floor.
+    fn out_of_mouth(&mut self) -> Option<Place> {
+        let mouth = self.travel_step()?.walk_end()?.at;
+        let pl = self.player.as_ref()?;
+        let (me, forward) = (pl.world_position(), pl.forward().truncate());
+        let away = (me - mouth)
+            .truncate()
+            .normalize_or(-forward.normalize_or(Vec2::Y));
+        let spot = mouth.truncate() + away * PORTAL_STEP_BACK;
+        let z = if self.is_journey_flown() {
+            mouth.z
+        } else {
+            let assets = self.assets.clone();
+            let pl = self.player.as_mut()?;
+            pl.ground_height(&assets, spot.x, spot.y, mouth.z)
+                .unwrap_or(me.z)
+        };
+        Some(self.place_at(spot.extend(z)))
     }
 }

@@ -82,8 +82,11 @@ struct StepState {
     portal_since: Option<Instant>,
     /// When we last tried jumping into a portal that has not taken us.
     last_hop: Option<Instant>,
-    /// Turned away as teleported too recently: when to walk back in, and where to stand till then.
+    /// Turned away as teleported too recently, or stepped out of the mouth to come in again: when
+    /// to walk back in, and where to stand till then.
     too_soon: Option<(Instant, Place)>,
+    /// Stepped out of the mouth once already (`wait_at_mouth`).
+    stepped_out: bool,
     /// Where the portal step's walk stood, a metre apart, newest last: floor the step back holds.
     trail: Vec<Place>,
     /// When the recall step's spell was last sent (or the step began), and how many times.
