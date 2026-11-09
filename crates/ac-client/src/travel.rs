@@ -521,7 +521,7 @@ impl Client {
         self.travel.prefs = prefs;
     }
 
-    /// The saved prefs, for the character as it stands now ([`Client::traveller`]).
+    /// The saved prefs, for the character as it stands now: PK status and vitae.
     pub fn travel_prefs(&self) -> Prefs {
         self.travel.prefs.for_traveller(self.traveller())
     }
