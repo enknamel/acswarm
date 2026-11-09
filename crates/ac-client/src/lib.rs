@@ -369,6 +369,8 @@ pub struct Client {
     /// corpse of eight things asked one at a time is eight round trips
     /// of standing over it, which is most of what made looting slow.
     pub appraise_inflight: Vec<(u32, Instant)>,
+    /// Queued items asked about again though appraised (`appraise_again`): sent all the same.
+    pub reappraise: std::collections::HashSet<u32>,
     /// An item to put into a world container (chest, hook, storage) once
     /// the server has opened it for us: (item, container, asked at).
     pub pending_store: Option<(u32, u32, Instant)>,

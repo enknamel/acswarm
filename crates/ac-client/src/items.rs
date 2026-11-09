@@ -89,11 +89,10 @@ impl Client {
     /// Send the next queued appraisal once the previous one has answered
     /// (or gone stale).
     pub fn tick_appraise(&mut self) {
-        // Answered, or long enough gone to be lost.
-        let appraisals = &self.appraisals;
-        self.appraise_inflight.retain(|(guid, since)| {
-            !appraisals.contains_key(guid) && since.elapsed() <= APPRAISAL_LOST
-        });
+        // Long enough gone to be lost; an answer takes its own off (`appraisal`), and an old
+        // one standing is no answer to an item asked about again.
+        self.appraise_inflight
+            .retain(|(_, since)| since.elapsed() <= APPRAISAL_LOST);
         // Several in the air at once. The server answers each on its
         // own, so a corpse full of things need not be read one item per
         // round trip -- which is what made standing over a body take
@@ -102,7 +101,9 @@ impl Client {
             let Some(guid) = self.appraise_queue.pop_front() else {
                 break;
             };
-            if self.appraisals.contains_key(&guid) || !self.world.objects.contains_key(&guid) {
+            let again = self.reappraise.remove(&guid);
+            let known = self.appraisals.contains_key(&guid) && !again;
+            if known || !self.world.objects.contains_key(&guid) {
                 continue;
             }
             self.appraise(guid);
@@ -185,6 +186,7 @@ impl Client {
                 || self.appraise_inflight.iter().any(|(i, _)| *i == g);
             if self.world.objects.contains_key(&g) && !pending {
                 self.appraise_queue.push_back(g);
+                self.reappraise.insert(g);
             }
         }
     }

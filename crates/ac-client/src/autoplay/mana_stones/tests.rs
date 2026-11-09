@@ -160,8 +160,18 @@ fn a_charge_waits_for_the_worn_things_to_be_read_again() {
         c.appraise_queue.contains(&RING),
         "the ring was not asked about again"
     );
+    // Sent, though an old appraisal stands, and waited on until answered: the sender dropped
+    // it as appraised, and a stone went in every five seconds all the same.
+    c.tick_appraise();
+    assert!(
+        c.appraise_inflight.iter().any(|(g, _)| *g == RING),
+        "the ring's new appraisal was never sent"
+    );
+    c.autoplay.cast_answered();
+    c.autoplay_mana_stones(now + ANSWER_WAIT * 2);
+    assert_ne!(c.last_used, Some(me), "a stone before the ring's answer");
     // The fresh answer: full. Nothing more is charged.
-    c.appraise_queue.clear();
+    c.appraise_inflight.clear();
     appraised(&mut c, RING, Some((600, 600)));
     c.autoplay.cast_answered();
     c.last_used = None;

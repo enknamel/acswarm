@@ -164,6 +164,7 @@ impl Client {
             fellow_updates: false,
             appraise_queue: Default::default(),
             appraise_inflight: Vec::new(),
+            reappraise: Default::default(),
             pending_store: None,
             selected: None,
             previous_selected: None,
