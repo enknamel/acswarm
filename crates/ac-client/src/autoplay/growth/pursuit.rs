@@ -555,6 +555,10 @@ impl Ask<'_> {
         if !matches!(hunted.0, PursuitStep::Stuck { .. }) || depth >= KEY_DEPTH {
             return hunted;
         }
+        // Another quest's reward: quests chain (a Singularity Scepter handed in for the Bound one).
+        if let Some(got) = self.reward_step(wants, depth) {
+            return got;
+        }
         let mut first_why = None;
         for (key, name) in locked {
             let got = self.obtain(&[Want::Item(key)], 1, name, depth + 1);
@@ -570,6 +574,45 @@ impl Ask<'_> {
             Some((name, why)) => (stuck(format!("{what} needs {name} first: {why}")), None),
             None => hunted,
         }
+    }
+
+    /// `wants` had as another quest's reward: its hand-in made when what it takes is carried, else
+    /// that come by first, [`KEY_DEPTH`] deep; `None` when no quest gives any of them.
+    fn reward_step(&self, wants: &[Want], depth: usize) -> Option<(PursuitStep, Option<Hunting>)> {
+        // A swap of an item for one like it (a Glowing Virindi Cloak for a Glowing Virindi Cloak) is
+        // no way to come by it.
+        let gives = |r: &Row| {
+            r.gives
+                .iter()
+                .any(|(w, _)| wants.contains(&Want::Item(*w)) && r.want != Want::Item(*w))
+        };
+        let mut first_stuck = None;
+        for r in ac_world::quests::all()
+            .iter()
+            .filter(|r| r.kind == Kind::Item && r.hand == Handing::Give && gives(r))
+        {
+            let Want::Item(input) = r.want else {
+                continue;
+            };
+            let Some(at) = r.places.iter().find(|p| !(self.asking.refused)(r, p)) else {
+                continue;
+            };
+            if (self.asking.carried)(input) >= r.count.max(1) {
+                return Some((PursuitStep::HandIn { row: r, at: *at }, None));
+            }
+            let name = r.item.as_ref().map_or("", |i| i.name);
+            let got = self.obtain(
+                std::slice::from_ref(&r.want),
+                r.count.max(1),
+                name,
+                depth + 1,
+            );
+            if !matches!(got.0, PursuitStep::Stuck { .. }) {
+                return Some(got);
+            }
+            first_stuck.get_or_insert(got);
+        }
+        first_stuck
     }
 
     /// Hunt the best grounds a way in this character may use reaches; else why not.

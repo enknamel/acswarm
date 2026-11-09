@@ -2283,3 +2283,43 @@ fn a_ground_under_foot_that_no_gem_reaches_waits_its_turn_in_the_list() {
     let working = c.pursuit.iter().find(|l| l.working).map(|l| l.id.as_str());
     assert_eq!(working, Some("give:70303:45977"), "{:?}", c.pursuit);
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_quests_item_another_quest_rewards_is_had_by_that_hand_in_first() {
+    // The Ultimate Singularity Scepter of War Magic takes the Bound one, which the Virindi Castaway
+    // gives for the Singularity Scepter carried: "nobody known yields Bound Singularity Scepter".
+    let mut c = mage_pursuing("give:27841", "chained-quests");
+    in_the_pack(
+        &mut c,
+        0x8000_0720,
+        27840,
+        "Singularity Scepter of War Magic",
+        1,
+    );
+    let now = std::time::Instant::now();
+    c.refresh_quests(now);
+    match &c.pursuit[0].step {
+        PursuitStep::HandIn { row, .. } => assert_eq!(row.id, "give:27840", "{row:?}"),
+        other => panic!("not the Bound scepter's hand-in: {other:?}"),
+    }
+    // Back with the Bound one: its own hand-in, to the Executor Assistant.
+    in_the_pack(
+        &mut c,
+        0x8000_0720,
+        27840,
+        "Singularity Scepter of War Magic",
+        0,
+    );
+    in_the_pack(
+        &mut c,
+        0x8000_0721,
+        27841,
+        "Bound Singularity Scepter of War Magic",
+        1,
+    );
+    match again(&mut c, now) {
+        PursuitStep::HandIn { row, .. } => assert_eq!(row.id, "give:27841", "{row:?}"),
+        other => panic!("not the Ultimate scepter's hand-in: {other:?}"),
+    }
+}
