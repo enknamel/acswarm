@@ -168,6 +168,7 @@ fn work_dropping(
         dropped,
         unlocked: &|_| false,
         ways: &BTreeMap::new(),
+        here: None,
     };
     pursuit_of(&board, &chained, &ask)
 }
@@ -1918,5 +1919,55 @@ fn the_copper_castellan_is_reached_by_the_gem_captain_ramelle_drops() {
         c.grow_hunt(now, &cfg),
         "{:?}",
         c.autoplay.growth.pursuit_held
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_gem_bought_and_used_between_boards_is_no_errand_once_on_its_ground() {
+    // Blargerton bought the invitation and used it before the board saw it carried: on the
+    // Putrid Moarsman's ground the pursuit still asked for the gem, the ground was no longer its
+    // own, and he left for another hunt and another invitation.
+    let mut c = mage_pursuing("learn:2023", "gem-between-boards");
+    let now = std::time::Instant::now();
+    c.refresh_quests(now);
+    let hunt = c.pursuit[0].step.clone();
+    let cfg = c.autoplay.config.growth.clone();
+    assert!(!c.grow_hunt(now, &cfg));
+    assert!(matches!(again(&mut c, now), PursuitStep::Buy { .. }));
+    // Through the invitation's portal and the catacombs', with no board between.
+    crate::testkit::stand(&mut c, 0x02B7_02F1, glam::Vec3::new(70.0, -60.0, 0.005));
+    assert_eq!(
+        again(&mut c, now),
+        hunt,
+        "the gem still asked for on its ground"
+    );
+    assert!(!c.grow_hunt(now, &cfg), "left its ground");
+    assert!(
+        c.autoplay.growth.pursuit_gems.is_empty(),
+        "the gem still wanted"
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_quest_whose_ground_the_character_stands_on_is_worked_first() {
+    // Logged in in Ithaenc's catacombs, Blargerton recalled out for the quest above it in the
+    // list, then bought another invitation to come back for the Putrid Moarsman.
+    let mut c = mage_pursuing("learn:2023", "worked-where-it-stands");
+    c.autoplay
+        .config
+        .quests
+        .pursue_quest("copperknightmedallion", false, 0);
+    let now = std::time::Instant::now();
+    c.refresh_quests(now);
+    let working = |c: &Client| c.pursuit.iter().find(|l| l.working).map(|l| l.id.clone());
+    assert_eq!(working(&c).as_deref(), Some("copperknightmedallion"));
+    crate::testkit::stand(&mut c, 0x02B7_02F1, glam::Vec3::new(70.0, -60.0, 0.005));
+    again(&mut c, now);
+    assert_eq!(
+        working(&c).as_deref(),
+        Some("learn:2023"),
+        "left for another quest"
     );
 }

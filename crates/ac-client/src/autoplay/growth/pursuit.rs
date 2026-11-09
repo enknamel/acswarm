@@ -327,6 +327,8 @@ pub(crate) struct Ask<'a> {
     /// The portal gem each quest, by id, is had for first: no journey reaches its ground but
     /// from the gem's exit. Gone once carried.
     pub(crate) ways: &'a BTreeMap<String, (u32, String)>,
+    /// The landblock the character stands in, by its cell (a dungeon's rooms run past its square).
+    pub(crate) here: Option<u32>,
 }
 
 /// Each line's step, worked out with the `board` the chained list's facts gave; the first that
@@ -393,9 +395,21 @@ pub(crate) fn pursuit_of(board: &[QuestLine], chained: &[Chained], ask: &Ask) ->
             );
         }
     }
+    // A hunt whose ground the character stands on is worked first: leaving a dungeon it is in for
+    // another quest, to come back after, is never the better order (logged in in the catacombs).
+    let on_ground = |h: &Option<Hunting>| {
+        h.as_ref()
+            .is_some_and(|(g, _)| g.iter().any(|(lb, _)| Some(*lb) == ask.here))
+    };
+    let first = lines
+        .iter()
+        .position(|(l, h)| l.step.can_progress() && on_ground(h));
     let mut out = Pursued::default();
-    for (mut line, hunt) in lines {
-        line.working = line.step.can_progress() && !out.lines.iter().any(|l| l.working);
+    for (i, (mut line, hunt)) in lines.into_iter().enumerate() {
+        line.working = match first {
+            Some(f) => i == f,
+            None => line.step.can_progress() && !out.lines.iter().any(|l| l.working),
+        };
         if let (true, Some((grounds, sought))) = (line.working, hunt) {
             out.grounds = grounds;
             out.sought = sought;
@@ -508,12 +522,16 @@ impl Ask<'_> {
                 wants.push(r.want.clone());
             }
         }
-        // No journey reaches where it comes from but from a gem's exit: the gem is had first.
-        if let Some((gem, name)) = self.ways.get(&line.id) {
+        let what = if of.is_empty() { line.title.trim() } else { of };
+        let step = self.obtain(&wants, more, what, 0);
+        // No journey reaches where it comes from but from a gem's exit: the gem is had first,
+        // unless the character stands on the ground already (bought and used between boards).
+        let there =
+            matches!(step.0, PursuitStep::Hunt { landblock, .. } if Some(landblock) == self.here);
+        if let (Some((gem, name)), false) = (self.ways.get(&line.id), there) {
             return self.obtain(&[Want::Item(*gem)], 1, name, 0);
         }
-        let what = if of.is_empty() { line.title.trim() } else { of };
-        self.obtain(&wants, more, what, 0)
+        step
     }
 
     /// `wants` fetched where nothing is hunted, else hunted where they drop, else the key a chest
@@ -736,6 +754,7 @@ impl Client {
             dropped: &dropped,
             unlocked: &unlocked,
             ways: &ways,
+            here: self.player.as_ref().map(|p| p.cell >> 16),
         };
         let pursued = pursuit_of(&self.quest_board, chained, &ask);
         self.pursuit = pursued.lines;
