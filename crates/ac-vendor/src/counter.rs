@@ -222,6 +222,14 @@ impl Snapshot {
         self.items.iter().find(|i| i.guid == guid)
     }
 
+    /// How many of a weenie are carried and worn, every stack counted.
+    pub fn carried_of(&self, wcid: u32) -> u32 {
+        self.items
+            .iter()
+            .filter(|i| i.wcid == wcid)
+            .fold(0, |n, i| n.saturating_add(i.stack.max(1)))
+    }
+
     /// Whether the counter is offered it: not kept, a kind it buys, worth the floor, not wanted.
     /// The one answer for both the selling and the panel's "for sale here" count.
     pub fn offers(&self, it: &Item) -> bool {

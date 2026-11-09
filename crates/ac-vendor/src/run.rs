@@ -96,8 +96,8 @@ pub struct Run {
     no_room: bool,
     /// The ware last asked for, until the counter answers: what a refusal in words is about.
     buying: Option<u32>,
-    /// A purchase sent, `(ware, how short before, when)`, until the pack shows it: the counter's
-    /// UseDone can arrive ahead of the goods, and a run asked again bought it all twice.
+    /// A purchase sent, `(ware, how many carried before, when)`, until the pack shows more: the
+    /// counter's UseDone can come ahead of the goods, and a want can leave the list before them.
     bought: Option<(u32, u32, Instant)>,
     /// Wares the counter would not sell this visit, by weenie.
     wont_sell: Patience<u32>,
@@ -187,14 +187,10 @@ impl Run {
             );
         }
 
-        // Bought and not yet in the pack: how short it is still says the order is unbought.
-        if let Some((wcid, short, at)) = self.bought {
-            let now_short = snap
-                .wants
-                .iter()
-                .find(|w| w.wcid == wcid)
-                .map_or(0, |w| w.short);
-            if now_short < short || now.saturating_duration_since(at) >= PURCHASE_LANDS {
+        // Bought and not yet in the pack: only more of it carried says the order arrived.
+        if let Some((wcid, before, at)) = self.bought {
+            if snap.carried_of(wcid) > before || now.saturating_duration_since(at) >= PURCHASE_LANDS
+            {
                 self.bought = None;
             } else {
                 return Next::nothing(
@@ -493,7 +489,7 @@ impl Run {
                 continue;
             }
             self.buying = Some(want.wcid);
-            self.bought = Some((want.wcid, want.short, now));
+            self.bought = Some((want.wcid, snap.carried_of(want.wcid), now));
             return Some(Next::acting(
                 Act::Buy {
                     wcid: want.wcid,
@@ -622,13 +618,63 @@ mod tests {
         assert_eq!(next.act, None, "bought again: {}", next.saying);
         assert!(matches!(next.did, Did::Waiting(_)), "{:?}", next.did);
         // They arrive: nothing short, so nothing more is bought.
+        let mut tapers = item(5_000, "Prismatic Taper", 7_000, 224, 5_000);
+        tapers.wcid = 20631;
+        tapers.keep.mine = true;
+        s.items.push(tapers);
         s.wants[0].short = 0;
-        assert_ne!(run.step(&s, t0 + Duration::from_millis(300)).act, buy);
+        assert_eq!(
+            run.step(&s, t0 + Duration::from_millis(300)).act,
+            Some(Act::Close)
+        );
         // One that never shows is asked for again once it has been waited out.
         let mut lost = Run::new();
         s.wants[0].short = 224;
         assert_eq!(lost.step(&s, t0).act, buy);
         assert_eq!(lost.step(&s, t0 + PURCHASE_LANDS).act, buy);
+    }
+
+    #[test]
+    fn a_want_gone_from_the_snapshot_is_not_a_purchase_arrived() {
+        // The Invitation's buy line left the wants before the gem reached the pack, and the run
+        // was done 0.7 s ahead of it.
+        const INVITATION: u32 = 87_001;
+        let mut run = Run::new();
+        let mut s = snap(Vec::new());
+        s.coin = 10_000;
+        s.counter.as_mut().unwrap().wares = vec![Ware {
+            wcid: INVITATION,
+            name: "Invitation".into(),
+            price: 500,
+            stock: None,
+            burden: 5,
+            value: 300,
+            sell_rate: 1.0,
+        }];
+        s.wants = vec![Want {
+            wcid: INVITATION,
+            name: "Invitation".into(),
+            short: 1,
+            urgent: true,
+        }];
+        let t0 = Instant::now();
+        let buy = Some(Act::Buy {
+            wcid: INVITATION,
+            count: 1,
+        });
+        assert_eq!(run.step(&s, t0).act, buy);
+        // The want is gone, the pack holds none yet: still waiting, not done.
+        s.wants.clear();
+        let next = run.step(&s, t0 + Duration::from_millis(300));
+        assert_eq!(next.act, None, "{}: {:?}", next.saying, next.did);
+        assert!(matches!(next.did, Did::Waiting(_)), "{:?}", next.did);
+        // It reaches the pack: the trip goes on to its end.
+        let mut gem = item(5_001, "Invitation", 300, 1, 1);
+        gem.wcid = INVITATION;
+        s.items.push(gem);
+        let next = run.step(&s, t0 + Duration::from_millis(1_000));
+        assert_eq!(next.act, Some(Act::Close), "{}", next.saying);
+        assert_eq!(next.did, Did::Done);
     }
 
     #[test]
