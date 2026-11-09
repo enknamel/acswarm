@@ -2066,3 +2066,38 @@ fn a_wanted_gem_bought_is_taken_up_at_once() {
         c.pursuit[0].step
     );
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_chest_on_an_island_is_reached_by_its_gem_not_dropped() {
+    // The Ancient Key in hand, far from Ithaenc: no journey reached the Mistress' Chest without
+    // the invitation, and the chest was dropped as a source where a hunt's ground buys the gem.
+    let mut c = mage_pursuing("learn:2023", "chest-by-gem");
+    in_the_pack(&mut c, 0x8000_0702, 8511, "Ancient Key", 1);
+    let now = std::time::Instant::now();
+    c.refresh_quests(now);
+    assert!(
+        matches!(c.pursuit[0].step, PursuitStep::OpenChest { .. }),
+        "{:?}",
+        c.pursuit[0].step
+    );
+    let cfg = c.autoplay.config.growth.clone();
+    c.grow_hunt(now, &cfg);
+    let gems: Vec<&str> = c
+        .autoplay
+        .growth
+        .pursuit_gems
+        .iter()
+        .map(|g| g.name.as_str())
+        .collect();
+    assert_eq!(
+        gems,
+        ["Invitation Ithaenc Cathedral"],
+        "{}",
+        c.autoplay.status
+    );
+    assert!(
+        matches!(again(&mut c, now), PursuitStep::Buy { .. }),
+        "the chest dropped, not the gem bought"
+    );
+}

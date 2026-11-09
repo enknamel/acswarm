@@ -311,6 +311,17 @@ impl Client {
                 self.autoplay.say(Doing::Traveling, why);
                 return Some(true);
             }
+            // No way but from a gem's exit (the Mistress' Chest on Ithaenc's island): the gem
+            // first, as for a hunt's ground; dropped only when no gem leads there either.
+            let quests = self.travel.quests_done.clone();
+            if let Some(gem) = self.gem_way(&[(goal.cell >> 16, goal)], &quests) {
+                let why = format!("for {}: {} first, to reach {label}", line.title, gem.name);
+                tracing::info!("pursuit: {}: {why}", line.id);
+                self.autoplay.note(why, now);
+                self.autoplay.growth.want_gem(&line.id, gem);
+                self.quest_board_at = None;
+                return Some(false);
+            }
             self.drop_source(key, format!("no way to {label}"), now);
             return Some(false);
         }
