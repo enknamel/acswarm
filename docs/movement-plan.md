@@ -16,6 +16,11 @@ Nothing moves the character toward anything without a complete route first.
   route is planned once more from where it stands; the same answer again is "no way" to whoever
   asked.
 - There is never a straight line "to see if it works".
+- The planner is asked only from the ground. While the body is in the air (falling, jumping,
+  flying a crossing over a trap plate) or a hop it sent (a recall, a gem, a portal) is on its way,
+  whoever asks is answered a wait: nothing is planned, nothing is refused, and autoplay's goals
+  wait for the landing. A refusal stands for its owner and goal while the body and the goal stay
+  where they were: a journey asked again from there is answered from it, not planned again.
 
 ## Why: what the review found
 
