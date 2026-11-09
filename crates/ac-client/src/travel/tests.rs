@@ -1890,6 +1890,14 @@ fn a_journey_asked_while_a_recall_flies_waits_for_the_landing() {
     let did = c.go(run, counter, at(1.6));
     assert!(matches!(did, Did::Waiting(_)), "walked mid-hop: {did:?}");
     assert!(c.refusals.is_empty(), "a refusal kept from mid-hop");
+    // A goal row asking its journey mid-hop (the town run's grow_travel) is told it goes on, never
+    // that there is no way: read as no way, the counter was skipped and the pursuit passed over.
+    let counter_place = counter.place().unwrap();
+    assert!(
+        c.journey_to(counter_place, 1.0),
+        "a journey mid-hop read as no way"
+    );
+    assert!(c.refusals.is_empty(), "a refusal kept from mid-hop");
     // Grow stands aside, then the town run acts: the recall's step is kept either way.
     c.autoplay.config.enabled = true;
     c.frame_at = at(2.0);
@@ -1914,6 +1922,20 @@ fn a_journey_asked_while_a_recall_flies_waits_for_the_landing() {
         "not planned from the landing: {:?}",
         c.travel.last_seen
     );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn the_players_own_walk_is_not_held_for_a_hop() {
+    // A trip cancelled by hand mid-recall held every walk the player clicked for the backstop.
+    let (mut c, _, at) = recalling();
+    let me = c.my_position().unwrap();
+    let there = Goal::At {
+        place: c.place_at(me + Vec3::new(10.0, 0.0, 0.0)),
+        within: 1.0,
+    };
+    let did = c.go(Owner::Hand, there, at(1.5));
+    assert!(!matches!(did, Did::Waiting(_)), "held for the hop: {did:?}");
 }
 
 #[test]

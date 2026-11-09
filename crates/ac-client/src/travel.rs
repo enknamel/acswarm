@@ -270,7 +270,10 @@ impl Client {
         let owner = self.step_owner();
         // The frame's clock, or the wall's when no frame has run since it was set.
         let now = self.frame_at.max(Instant::now());
-        self.set_off_or_fly(owner, goal, now).fine()
+        // Held for a hop in the air or a body aloft: still going, set off once it lands, and no
+        // row reads the wait as no way (a vendor skipped, a pursuit passed over).
+        let did = self.set_off_or_fly(owner, goal, now);
+        did.fine() || matches!(did, Did::Waiting(_))
     }
 
     /// Plan a journey to `goal` for `owner` and set off on it: the trip from where the body stands,

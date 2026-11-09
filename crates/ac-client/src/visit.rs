@@ -430,8 +430,8 @@ impl Client {
                         self.let_go_of(&v);
                         return;
                     }
-                    // Walked on once the hop in the air has landed.
-                    Did::Waiting(_) if self.autoplay.is_hopping(now) => {}
+                    // Walked on once the hop in the air, or the body aloft, has landed.
+                    Did::Waiting(_) if self.autoplay.is_hopping(now) || self.is_aloft() => {}
                     Did::Waiting(why) => {
                         tracing::info!("visit: {} dropped: {}", v.label, why.what);
                         return;

@@ -701,6 +701,7 @@ impl Client {
         // Nothing is planned from the air (docs/movement-plan.md), and every no way a goal heard
         // there would be kept: the goals wait for the landing.
         if self.is_aloft() {
+            self.autoplay.step = None;
             return;
         }
         // The goals are weighed. Most say nothing and take their place
