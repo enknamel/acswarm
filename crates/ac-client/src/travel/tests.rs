@@ -1870,3 +1870,93 @@ fn a_recall_turned_away_busy_is_cast_again_once_the_slot_is_free() {
         "not cast again till the give-up"
     );
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_journey_asked_while_a_recall_flies_waits_for_the_landing() {
+    // The town run set off on its own journey while grow's recall was in the air: the trip was
+    // planned from the spot the recall left, and the body landed somewhere the new trip never knew.
+    let (mut c, exit, at) = recalling();
+    c.travel.owner = Some(Owner::Step("grow"));
+    let grows = c.journey_goal();
+    let me = c.my_position().unwrap();
+    let counter = Goal::At {
+        place: c.place_at(me + Vec3::new(10.0, 0.0, 0.0)),
+        within: 1.0,
+    };
+    let run = Owner::Step("town run");
+    let did = c.set_off(run, counter, at(1.5));
+    assert!(matches!(did, Did::Waiting(_)), "set off mid-hop: {did:?}");
+    let did = c.go(run, counter, at(1.6));
+    assert!(matches!(did, Did::Waiting(_)), "walked mid-hop: {did:?}");
+    assert!(c.refusals.is_empty(), "a refusal kept from mid-hop");
+    // Grow stands aside, then the town run acts: the recall's step is kept either way.
+    c.autoplay.config.enabled = true;
+    c.frame_at = at(2.0);
+    c.autoplay.step = None;
+    c.settle_journey();
+    c.autoplay.running = Some("grow");
+    c.interrupt_travel("walking to a corpse");
+    assert_eq!(c.journey_goal(), grows, "the journey was replaced mid-hop");
+    assert_eq!(c.travel.state.recall_casts, 1, "the recall's step was lost");
+    c.autoplay.running = None;
+    let local = exit.at - ac_world::landblock_origin(exit.cell);
+    crate::testkit::stand(&mut c, exit.cell, local);
+    c.step_goal(at(5.5));
+    assert!(!c.autoplay.is_hopping(at(5.6)), "still hopping once landed");
+    let did = c.set_off(run, counter, at(5.6));
+    assert!(!matches!(did, Did::Waiting(_)), "still waiting: {did:?}");
+    assert_eq!(c.journey_goal(), Some(counter), "not set off once landed");
+    assert!(
+        c.travel
+            .last_seen
+            .is_some_and(|s| s.distance(exit.at.truncate()) < 5.0),
+        "not planned from the landing: {:?}",
+        c.travel.last_seen
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_gem_step_carried_off_elsewhere_plans_again_before_using_the_gem() {
+    // A recall cast before the gem's journey landed the body far off, and the gem was used from
+    // the recall's landing spot instead of planning the way from there.
+    let mut c = crate::testkit::standing_at(0xA9B4_0019, Vec3::new(84.0, 84.0, 94.0));
+    c.world.player_guid = Some(crate::testkit::ME);
+    const GEM: u32 = 0x80B6_F6BA;
+    crate::testkit::thing_in_the_pack(&mut c, GEM, "Celdiseth's Portal Gem", 10);
+    let cell = 0x8A6C_002B;
+    let far = Place {
+        at: ac_world::landblock_origin(cell) + Vec3::new(124.3, 56.0, 11.0),
+        cell,
+    };
+    let gem_exit = Place {
+        at: ac_world::landblock_origin(0xC98C_0028) + Vec3::new(84.0, 84.0, 20.0),
+        cell: 0xC98C_0028,
+    };
+    let trip = Trip {
+        steps: vec![
+            Step::Gem {
+                guid: GEM,
+                name: "Celdiseth's Portal Gem".into(),
+                exit: gem_exit,
+                summons: true,
+            },
+            Step::Walk(gem_exit),
+        ],
+        seconds: 60.0,
+    };
+    crate::testkit::set_out_on(&mut c, trip, within_reach(gem_exit));
+    let t0 = Instant::now();
+    let local = far.at - ac_world::landblock_origin(far.cell);
+    crate::testkit::stand(&mut c, far.cell, local);
+    c.step_goal(t0);
+    assert_eq!(
+        c.travel.state.gem_uses, 0,
+        "the gem was used where it landed"
+    );
+    assert!(
+        c.travel.replan_due,
+        "not planned again from where it landed"
+    );
+}

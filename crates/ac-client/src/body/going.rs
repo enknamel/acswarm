@@ -141,6 +141,10 @@ impl Client {
         }) else {
             return Did::waiting("not in the world yet");
         };
+        // A walk sent mid-hop is lost to the teleport; only the journey's own stretch goes.
+        if !journey && self.autoplay.is_hopping(now) {
+            return Did::waiting("a hop is in the air");
+        }
         if !journey && !matches!(owner, Owner::Visit | Owner::Journey) {
             self.drop_visit(owner.label());
         }

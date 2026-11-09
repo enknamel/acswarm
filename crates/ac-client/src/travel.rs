@@ -277,6 +277,10 @@ impl Client {
     /// then its first stretch asked of the slot at once, so a first walk with no way refuses it
     /// before a step (a_journey_whose_first_walk_has_no_way_is_refused_at_once).
     pub(crate) fn set_off(&mut self, owner: Owner, goal: Goal, now: Instant) -> Did {
+        // Planned now, the trip would start where the hop leaves, not where it lands.
+        if self.autoplay.is_hopping(now) {
+            return Did::waiting("a hop is in the air");
+        }
         let trip = match self.plan_journey(goal) {
             Ok(trip) => trip,
             Err(why) => return Did::blocked(why),
@@ -551,7 +555,9 @@ impl Client {
             .autoplay
             .running
             .is_some_and(|r| self.journey_row().is_some_and(|j| j != r));
-        if self.traveling() && !theirs {
+        // A hop in the air is kept, so its landing is seen as the step's (`step_goal`).
+        let hopping = self.autoplay.is_hopping(self.frame_at);
+        if self.traveling() && !theirs && !hopping {
             tracing::info!("travel: stopped, {what}");
             self.end_trip();
             self.travel.broken_off = true;
@@ -640,14 +646,19 @@ impl Client {
             return;
         }
         // Put down, not refused: its row reads a journey broken off and walks it on when it acts.
-        let Some(acting) = self.autoplay.step.filter(|_| !aside) else {
+        // A hop in the air is held instead, so its landing is seen as the step's.
+        let acting = self.autoplay.step.filter(|_| !aside);
+        if acting.is_none() && !self.autoplay.is_hopping(self.frame_at) {
             tracing::info!("travel: {row} stood aside; its journey is put down");
             self.end_trip();
             self.travel.broken_off = true;
             return;
-        };
+        }
         if !self.travel.held {
-            tracing::info!("travel: {row}'s journey held while {acting} acts");
+            match acting {
+                Some(acting) => tracing::info!("travel: {row}'s journey held while {acting} acts"),
+                None => tracing::info!("travel: {row} stood aside; its journey held for the hop"),
+            }
         }
         self.travel.held = true;
         // Standing at a mouth while held is not the portal refusing us.
@@ -983,6 +994,10 @@ impl Client {
             self.end_trip();
             return Did::blocked("no journey to plan again");
         };
+        if self.autoplay.is_hopping(now) {
+            self.travel.replan_due = true;
+            return Did::waiting("a hop is in the air");
+        }
         let hopping = self.is_hopping();
         self.cancel_travel_keeping_refusals();
         let mut did = self.set_off(owner, goal, now);
@@ -1204,6 +1219,8 @@ impl Client {
                 if !self.travel_next_step() {
                     return None;
                 }
+            } else if self.replan_if_carried_off(me) {
+                return None;
             } else if let Some(Step::Recall { spell, name, .. }) = step {
                 self.travel_recall_wait(spell, &name, now);
                 // Nothing to walk to: the character stands still for the cast.

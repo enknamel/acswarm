@@ -385,7 +385,6 @@ impl Client {
             Next::OnTheWay => {}
             Next::Journey if !self.is_visit_owner_running(v.owner) => {}
             Next::Journey => {
-                v.journeyed = true;
                 let place = ac_world::Place {
                     at: v.goal,
                     cell: v.cell,
@@ -394,10 +393,15 @@ impl Client {
                     place,
                     within: REACH,
                 };
-                if let Did::Blocked(why) = self.set_off(v.owner, goal, now) {
-                    tracing::warn!("visit: no way to {} from here: {}", v.label, why.what);
-                    self.let_go_of(&v);
-                    return;
+                match self.set_off(v.owner, goal, now) {
+                    Did::Blocked(why) => {
+                        tracing::warn!("visit: no way to {} from here: {}", v.label, why.what);
+                        self.let_go_of(&v);
+                        return;
+                    }
+                    // Set off once the hop in the air has landed.
+                    Did::Waiting(_) => {}
+                    _ => v.journeyed = true,
                 }
             }
             Next::GiveUp => {
@@ -426,6 +430,8 @@ impl Client {
                         self.let_go_of(&v);
                         return;
                     }
+                    // Walked on once the hop in the air has landed.
+                    Did::Waiting(_) if self.autoplay.is_hopping(now) => {}
                     Did::Waiting(why) => {
                         tracing::info!("visit: {} dropped: {}", v.label, why.what);
                         return;
