@@ -1544,6 +1544,7 @@ fn a_gem_spent_from_a_stack_has_its_portal_used_not_the_gem_again() {
     );
     // Answered: one spent, and the Gateway stands three metres ahead.
     c.world.objects.get_mut(&GEM).unwrap().stack_size = 9;
+    c.autoplay.cast_answered();
     let me = c.my_position().unwrap();
     c.world.objects.insert(
         GATEWAY,
@@ -1591,10 +1592,11 @@ fn a_gem_at_a_dungeon_door_finds_the_floor_in_front_and_is_used() {
     let name = "Corcima Castle Copper Ward Portal Gem";
     // A recall the hunt cast a moment ago still to land: the gem waits, else it is turned away
     // busy and the recall carries the character off.
-    c.travel.recall_cast = Some(now);
+    c.hop_sent(now, crate::autoplay::cast::HOP_LANDS);
     assert_eq!(c.travel_gem_first_use(GEM, name, true, now), None);
     assert!(c.travel.state.gem_used.is_none(), "used under a recall");
-    c.travel.recall_cast = None;
+    c.hop_landed();
+    c.autoplay.cast_answered();
     // A gem used a moment ago: every gem shares its 15 s cooldown, and one used inside it is
     // "used too recently", the tries spent and the gem left out.
     let clock = ac_net::packet::build(
@@ -1769,5 +1771,102 @@ fn the_mistress_chest_is_walked_to_from_the_catacombs_exit() {
     assert!(
         matches!(got, crate::walk_trial::Outcome::Arrived { .. }),
         "{got:?}"
+    );
+}
+
+/// A caster in Holtburg with a buff due, set off on Lifestone Sending to an outdoor spot far off,
+/// the cast sent at 1 s; with the spot and the time `s` seconds after the start.
+fn recalling() -> (Client, Place, impl Fn(f32) -> Instant) {
+    let t0 = Instant::now();
+    let (mut c, known) =
+        crate::testkit::a_caster_knowing(t0, &["Blade Protection Self I", "Lifestone Sending"]);
+    c.autoplay.config.buffs.auto = false;
+    c.autoplay.config.buffs.spells = vec!["Blade Protection Self".into()];
+    let cell = 0x8A6C_002B;
+    let exit = Place {
+        at: ac_world::landblock_origin(cell) + Vec3::new(124.3, 56.0, 11.0),
+        cell,
+    };
+    let spell = known[1];
+    let trip = Trip {
+        steps: vec![
+            Step::Recall {
+                spell,
+                name: "Lifestone Sending".into(),
+                exit,
+            },
+            Step::Walk(exit),
+        ],
+        seconds: 60.0,
+    };
+    crate::testkit::set_out_on(&mut c, trip, within_reach(exit));
+    let at = move |s: f32| t0 + Duration::from_secs_f32(s);
+    c.step_goal(at(0.0));
+    c.step_goal(at(1.0));
+    assert_eq!(c.travel.state.recall_casts, 1, "the recall was not cast");
+    (c, exit, at)
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_recall_on_its_way_holds_every_act_until_the_body_lands() {
+    // Impenetrability went up 2.2 s into Lifestone Sending ("too busy") and again at 4.4 s, and
+    // mana stones 1-4 s in: the recall held no slot, and its UseDone comes before the teleport.
+    let (mut c, exit, at) = recalling();
+    const WAND: u32 = 0x8000_0102;
+    let sent = c.session.actions_sent();
+    let held = |c: &mut Client, s: f32| {
+        let now = at(s);
+        assert!(
+            !c.autoplay_buff(now, true),
+            "an urgent buff went up at {s} s"
+        );
+        assert!(!c.autoplay_buff(now, false), "a top-up went up at {s} s");
+        c.autoplay_mana_stones(now);
+        assert!(
+            c.autoplay.cast_in_flight(now),
+            "stones and vitals free at {s} s"
+        );
+        assert!(c.wield_must_wait(WAND, now), "a wield free at {s} s");
+    };
+    held(&mut c, 1.2);
+    // The cast's own answer frees nothing: the teleport is still two seconds off.
+    c.autoplay.cast_answered();
+    held(&mut c, 4.0);
+    assert_eq!(
+        c.session.actions_sent(),
+        sent,
+        "an act went out over the recall"
+    );
+    let local = exit.at - ac_world::landblock_origin(exit.cell);
+    crate::testkit::stand(&mut c, exit.cell, local);
+    c.step_goal(at(5.5));
+    assert!(
+        !c.autoplay.cast_in_flight(at(5.6)),
+        "still held once landed"
+    );
+    assert!(
+        c.autoplay_buff(at(5.6), true),
+        "the buff waits on after the landing"
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_recall_turned_away_busy_is_cast_again_once_the_slot_is_free() {
+    // Portal Recall answered "too busy" (0x1d) stood out the 15 s give-up clock before the next try.
+    let (mut c, _, at) = recalling();
+    c.hear_hop_refused(crate::YOURE_TOO_BUSY, at(1.15));
+    c.step_goal(at(2.0));
+    assert_eq!(
+        c.travel.state.recall_casts, 1,
+        "cast again over the busy act"
+    );
+    // What made the server busy is answered: the slot is free.
+    c.autoplay.cast_answered();
+    c.step_goal(at(2.5));
+    assert_eq!(
+        c.travel.state.recall_casts, 2,
+        "not cast again till the give-up"
     );
 }

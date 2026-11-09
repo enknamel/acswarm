@@ -362,6 +362,10 @@ impl Client {
             0x04A3 | 0x04AD => self.travel_recall_spell().and_then(recalls::dynamic),
             _ => None,
         };
+        // Each of these lands nothing: the acts held for the hop may go.
+        if kind.is_some() || matches!(code, 0x0498 | 0x0402) {
+            self.hop_landed();
+        }
         if let Some(kind) = kind {
             tracing::info!("recall: the server has no position {kind}; forgetting it");
             self.world.stats.clear_recall_position(kind);

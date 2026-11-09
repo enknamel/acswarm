@@ -159,8 +159,6 @@ pub struct Travel {
     pub(crate) recall_sent: Option<(u32, Vec3, Instant)>,
     /// The destination (world xy) a journey flies its stretches to: no way left on foot (`flown`).
     fly_to: Option<Vec2>,
-    /// When travel last cast a recall: it lands whatever journey follows (`RECALL_LANDS`).
-    pub(crate) recall_cast: Option<Instant>,
     /// Where the journey is bound (always `Goal::At`), to replan around a refusal.
     goal: Option<Goal>,
     /// Whose journey it is: the STEPS row that set it off or took it over, whose stretches the slot
@@ -811,7 +809,10 @@ impl Client {
                 self.travel.state.gem_uses += 1;
                 self.travel.state.gem_used = Some(now);
                 self.interact(guid);
+                self.gem_sent(summons, now);
             }
+            // Wait for the slot; the gems' cooldown, begun by this gem's own use, does not hold it.
+            GemNext::UsePortal(_) if self.autoplay.cast_in_flight(now) => {}
             GemNext::UsePortal(portal) => {
                 tracing::info!("travel: using the portal {name} summoned");
                 self.travel.state.summoned_uses += 1;
@@ -822,6 +823,7 @@ impl Client {
                 // *is* the journey.
                 self.session
                     .send_action(ac_net::messages::action::USE, &portal.to_le_bytes());
+                self.hop_sent(now, crate::autoplay::cast::HOP_LANDS);
             }
             GemNext::GiveUp => self.travel_gem_refused(guid, name, "did not take us anywhere"),
         }
@@ -886,7 +888,17 @@ impl Client {
         self.travel.state.gem_uses = 1;
         self.travel.state.gem_stack = self.gem_stack(guid);
         self.interact(guid);
+        self.gem_sent(summons, now);
         None
+    }
+
+    /// A gem use went out: it takes the slot until answered, and one that carries the body off
+    /// itself holds every act until it lands.
+    fn gem_sent(&mut self, summons: bool, now: Instant) {
+        match summons {
+            true => self.autoplay.cast_sent = Some(now),
+            false => self.hop_sent(now, crate::autoplay::cast::HOP_LANDS),
+        }
     }
 
     /// Whether a portal summoned facing `dir` would have room: no wall
@@ -934,8 +946,8 @@ impl Client {
         self.travel.replan_due = true;
     }
 
-    /// The recall being cast fizzled: cast again as soon as the
-    /// character has settled rather than wait out the whole timeout.
+    /// The recall being cast fizzled, or was turned away busy: cast again as soon as the slot is
+    /// free rather than wait out the whole timeout.
     pub(crate) fn travel_recall_fizzled(&mut self) {
         if self.travel_recall_spell().is_some() && self.travel.state.recall_casts > 0 {
             self.travel.state.recall_since = Some(
@@ -1123,6 +1135,7 @@ impl Client {
                 // The jump was the portal's (or the spell's) doing, not
                 // a stray one.
                 self.travel.last_seen = Some(me);
+                self.hop_landed();
                 self.travel.hopped = true;
                 match step {
                     Some(Step::Recall { name, .. }) => {
@@ -1190,6 +1203,7 @@ impl Client {
                 .is_some_and(|exit| me.distance(exit.at.truncate()) < 60.0);
             if jumped && !expected {
                 self.travel.last_seen = Some(me);
+                self.hop_landed();
                 // Whatever swept us up can still be walked into, so it is
                 // not refused: refusing it once shut the way off the
                 // continent. The route already pays to pass near one, and
@@ -1284,7 +1298,11 @@ impl Client {
                 tracing::info!("travel: casting {name} ({})", casts + 1);
                 self.travel.state.recall_casts = casts + 1;
                 self.travel.state.recall_since = Some(now);
-                self.travel.recall_cast = Some(now);
+                let lasts = match ac_world::recalls::spell::is_free(spell) {
+                    true => crate::autoplay::cast::FREE_HOP_LANDS,
+                    false => crate::autoplay::cast::HOP_LANDS,
+                };
+                self.hop_sent(now, lasts);
             }
             why => {
                 tracing::warn!("travel: cannot cast {name}: {why:?}");

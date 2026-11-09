@@ -293,6 +293,7 @@ impl Client {
                             // the new place -- into the dungeon's next room --
                             // went nowhere and was written off.
                             self.move_to = None;
+                            self.hop_landed();
                             // After a server teleport, take the new position and
                             // tell the server we landed.
                             if let (Some(pl), Some(p)) = (
@@ -454,6 +455,7 @@ impl Client {
                                         )));
                                     }
                                     self.use_done = Some((err, now));
+                                    self.hear_hop_refused(err, now);
                                     self.hear_airborne(err, now);
                                     self.hear_cast_refused(err, now);
                                     self.hear_buff_answer(err);

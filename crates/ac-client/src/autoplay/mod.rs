@@ -45,7 +45,7 @@ use crate::Client;
 pub use ac_loot::profile::LootAction;
 
 // Autoplay's own rules, each in its own file below this one.
-mod cast;
+pub(crate) mod cast;
 mod config;
 mod fight;
 pub mod growth;
@@ -190,6 +190,8 @@ pub struct Autoplay {
     pub(crate) cast_sent: Option<Instant>,
     /// Casts wait till then: the server said the character was in the air (`cast::IN_THE_AIR`).
     pub(crate) in_the_air_until: Option<Instant>,
+    /// Every act waits till then, or the landing: a recall, portal or gem is carrying us off.
+    pub(crate) hop_until: Option<Instant>,
     /// When the take in the air went out (`Client::loot_inflight`), kept by `tick_loot`: casts wait.
     pub(crate) take_in_air: Option<Instant>,
     /// What the fight's own attack spell was thrown at and when, so a

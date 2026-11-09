@@ -16,6 +16,14 @@ pub(crate) const IN_THE_AIR: u32 = 0x04EB;
 /// once, it says so again (test: casts_wait_while_the_server_has_us_in_the_air).
 const IN_THE_AIR_WAIT: Duration = Duration::from_secs(10);
 
+/// A recall cast or portal use holds every act till the teleport, seen 3.6-6.0 s on: its UseDone
+/// (Player_Magic.cs:960-965) comes before the 2 s wait for it (WorldObject_Magic.cs:1143, 1169).
+pub(crate) const HOP_LANDS: Duration = Duration::from_secs(8);
+
+/// The same for `/lifestone`: the server is busy through the LifestoneRecall animation, 15.2 s on
+/// Coldeve (Player_Location.cs:179-183).
+pub(crate) const FREE_HOP_LANDS: Duration = Duration::from_secs(20);
+
 /// Why a cast is refused, in a few words for a status line.
 pub fn cast_problem(check: &crate::magic::CastCheck) -> String {
     use crate::magic::CastCheck;
@@ -58,10 +66,18 @@ impl Autoplay {
         if self.in_the_air_until.is_some_and(|t| now < t) {
             return true;
         }
+        if self.is_hopping(now) {
+            return true;
+        }
         match self.cast_sent {
             Some(t) => now.duration_since(t) < CAST_LOST,
             None => false,
         }
+    }
+
+    /// A recall, portal or gem sent to carry the body off has not landed or been refused.
+    pub(crate) fn is_hopping(&self, now: Instant) -> bool {
+        self.hop_until.is_some_and(|t| now < t)
     }
 
     /// The server has answered for the cast in the air: the slot is free
@@ -73,6 +89,30 @@ impl Autoplay {
 }
 
 impl Client {
+    /// A recall, portal or gem that carries the body off went out: it takes the slot, and every
+    /// act waits until the body lands or `lasts` runs out (its UseDone comes before the teleport).
+    pub(crate) fn hop_sent(&mut self, now: Instant, lasts: Duration) {
+        self.autoplay.cast_sent = Some(now);
+        self.autoplay.hop_until = Some(now + lasts);
+    }
+
+    /// The body was carried off, or the hop will not carry it: the next act may go.
+    pub(crate) fn hop_landed(&mut self) {
+        self.autoplay.hop_until = None;
+    }
+
+    /// The server's answer `err` to an act while a hop is up: a refusal lands nothing, and a busy
+    /// one to a recall casts it again once the slot is free, not at the give-up.
+    pub(crate) fn hear_hop_refused(&mut self, err: u32, now: Instant) {
+        if err == 0 || !self.autoplay.is_hopping(now) {
+            return;
+        }
+        self.hop_landed();
+        if err == crate::YOURE_TOO_BUSY {
+            self.travel_recall_fizzled();
+        }
+    }
+
     /// The server's answer `err` to what was sent: "in the air" to a cast holds every cast
     /// [`IN_THE_AIR_WAIT`], said once a hold.
     pub(crate) fn hear_airborne(&mut self, err: u32, now: Instant) {
