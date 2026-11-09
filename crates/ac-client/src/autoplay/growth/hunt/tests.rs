@@ -997,6 +997,12 @@ fn a_pursued_creatures_one_room_is_held_not_the_dungeon_explored() {
     // through, which is flown to and waited in.
     let (mut c, room) = landed_for_the_moarsman();
     c.autoplay.growth.hunting_at = Some(0x02B7);
+    // Through the Catacombs portal after flying the ruins to it, for this same room: that flight
+    // is no bar to the dungeon's (live: "no way left, and no flying it", every tick).
+    c.flown_to_a_hop(crate::Goal::At {
+        place: room,
+        within: ROOM_REACH,
+    });
     let t0 = Instant::now();
     let dt = 0.05;
     for frame in 0..90 * 20 {

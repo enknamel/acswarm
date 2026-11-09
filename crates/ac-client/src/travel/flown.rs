@@ -31,6 +31,14 @@ impl Client {
         there == Some(here) && self.underground()
     }
 
+    /// As after a journey to `goal` flown to its hop and carried through it, still its goal.
+    #[cfg(test)]
+    pub(crate) fn flown_to_a_hop(&mut self, goal: Goal) {
+        self.travel.fly_to = goal.place().map(|p| p.at.truncate());
+        self.travel.goal = Some(goal);
+        self.travel.hopped = true;
+    }
+
     /// Whether the journey takes a portal, recall or gem: places the trip planner joined.
     pub(crate) fn is_hopping(&self) -> bool {
         let trip = self.travel.trip.as_ref();
@@ -50,12 +58,13 @@ impl Client {
     }
 
     /// The journey to `goal` set off flown, its refusals and the slot's forgotten; blocked when
-    /// the body may not fly, it is flown already, or the trip planner still has no way.
+    /// the body may not fly, it is flown already, or the trip planner still has no way. A flight
+    /// to the same goal before a hop is no bar: the ruins flown, the catacombs are flown afresh.
     pub(super) fn fly_journey(&mut self, owner: Owner, goal: Goal, now: Instant) -> Did {
         let Some(to) = goal.place().map(|p| p.at.truncate()) else {
             return Did::blocked("no place to fly to");
         };
-        if !self.movement_rules.limits().noclip || self.travel.fly_to.is_some() {
+        if !self.movement_rules.limits().noclip || self.is_journey_flown() {
             return Did::blocked("no way left, and no flying it");
         }
         tracing::info!("travel: no way left on foot; the journey is flown");
