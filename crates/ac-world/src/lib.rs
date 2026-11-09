@@ -22,6 +22,7 @@ pub mod properties;
 pub mod quest_chain;
 pub mod quests;
 pub mod recalls;
+pub mod traps;
 /// What takes up one of the character's pack slots.
 ///
 /// A character has a number of item slots (102 to start with) and a
