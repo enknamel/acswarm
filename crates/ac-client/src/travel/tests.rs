@@ -667,7 +667,9 @@ fn set_off(c: &mut Client, goal: Goal) -> crate::did::Did {
 #[ignore = "needs AC_DATA_DIR"]
 fn a_journey_whose_first_walk_has_no_way_is_refused_at_once() {
     // From the room to the ledge: the first walk is planned as the journey sets off, and refused.
+    // Flying, the dungeon's ledge is flown to instead (`fly_journey`); by the game's rules, not.
     let mut c = Client::offline(crate::testkit::game_data());
+    c.movement_rules = crate::player::MovementRules::ServerSafe;
     let (start, ledge) = under_the_01f6_ledge(&mut c);
     let did = set_off(&mut c, within_reach(ledge));
     let why = did.because().map(|b| b.what.clone());

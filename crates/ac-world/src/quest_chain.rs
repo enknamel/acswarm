@@ -220,7 +220,7 @@ fn source_ground(source: &'static Source, landblock: u32, entries: u32) -> Sourc
     // of Despair's way in (a_hunted_creature_is_sought_where_it_spawns).
     let spawn = crate::spawns::in_block(landblock << 16)
         .iter()
-        .filter(|s| s.indoors() && s.name.eq_ignore_ascii_case(&source.name))
+        .filter(|s| s.indoors() && s.wcid == source.wcid)
         .max_by_key(|s| s.count)
         .map(|s| Place {
             at: s.at,

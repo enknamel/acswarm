@@ -182,7 +182,7 @@ impl Client {
     }
 
     /// The hunting area the hunt keeps to now: none while a pursued quest is worked, whose
-    /// creatures, grounds and givers lie where they lie (a_quests_dungeon_is_explored_under_a_hunting_area_elsewhere).
+    /// creatures, grounds and givers lie where they lie (a_quests_dungeon_is_hunted_under_a_hunting_area_elsewhere).
     pub(crate) fn hunting_area(&self) -> Option<&HuntArea> {
         if self.is_pursuing() {
             return None;

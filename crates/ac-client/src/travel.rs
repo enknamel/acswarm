@@ -268,7 +268,7 @@ impl Client {
         let owner = self.step_owner();
         // The frame's clock, or the wall's when no frame has run since it was set.
         let now = self.frame_at.max(Instant::now());
-        self.set_off(owner, goal, now).fine()
+        self.set_off_or_fly(owner, goal, now).fine()
     }
 
     /// Plan a journey to `goal` for `owner` and set off on it: the trip from where the body stands,

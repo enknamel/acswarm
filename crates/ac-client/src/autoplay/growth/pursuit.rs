@@ -838,7 +838,15 @@ impl Client {
                     // In its dungeon the creature is hunted where it spawns: its rooms gone round,
                     // nearest first, and the rest of the dungeon never explored.
                     self.autoplay.growth.hunting_at = Some(here);
-                    let room = self.next_spawn_room(here, creature)?;
+                    let Some(room) = self.next_spawn_room(here) else {
+                        // Its one room stood in (the key Putrid Moarsman's): waited in.
+                        if self.hunts_spawn_rooms(here) {
+                            let why = format!("for {}: waiting for the {creature}", line.title);
+                            self.autoplay.say(Doing::Idle, why);
+                            return Some(true);
+                        }
+                        return None;
+                    };
                     if self.grow_travel(room, super::hunt::ROOM_REACH) {
                         let st = &mut self.autoplay.growth;
                         st.bound = Some((here, room.at.truncate(), creature.clone()));
@@ -935,20 +943,34 @@ impl Client {
         grounds.iter().find(|(l, _)| *l == lb).map(|(_, p)| *p)
     }
 
-    /// Whether the working pursuit hunts in `lb` a creature that spawns in its rooms.
+    /// Whether the working pursuit hunts in `lb`, in rooms a creature it seeks spawns in.
     pub(crate) fn hunts_spawn_rooms(&self, lb: u32) -> bool {
-        let Some(PursuitStep::Hunt { creature, .. }) = self.working_pursuit().map(|l| &l.step)
-        else {
-            return false;
-        };
-        self.pursued_place(lb).is_some() && spawn_rooms(lb, creature).next().is_some()
+        let hunting = matches!(
+            self.working_pursuit().map(|l| &l.step),
+            Some(PursuitStep::Hunt { .. })
+        );
+        hunting && self.pursued_place(lb).is_some() && !self.spawn_rooms(lb).is_empty()
     }
 
-    /// The nearest of `creature`'s spawn rooms in the dungeon `lb` not gone round yet, the one
+    /// The dungeon rooms of `lb` that a creature the pursuit seeks spawns in, by class: the key
+    /// Putrid Moarsman (8866) is not its thirteen namesakes (4248).
+    fn spawn_rooms(&self, lb: u32) -> Vec<Place> {
+        let sought = &self.autoplay.growth.pursuit_sought;
+        ac_world::spawns::in_block(lb << 16)
+            .iter()
+            .filter(|s| s.indoors() && sought.contains(&s.wcid))
+            .map(|s| Place {
+                at: s.at,
+                cell: s.cell,
+            })
+            .collect()
+    }
+
+    /// The nearest of the pursuit's spawn rooms in the dungeon `lb` not gone round yet, the one
     /// stood in counted; all gone round, the round starts again. `None` with none known.
-    fn next_spawn_room(&mut self, lb: u32, creature: &str) -> Option<Place> {
+    fn next_spawn_room(&mut self, lb: u32) -> Option<Place> {
         let me = self.my_position()?;
-        let rooms: Vec<Place> = spawn_rooms(lb, creature).collect();
+        let rooms = self.spawn_rooms(lb);
         let walked = &mut self.autoplay.growth.spawns_walked;
         walked.retain(|c| *c >> 16 == lb);
         for r in rooms
@@ -980,17 +1002,6 @@ impl Client {
             _ => GROUND_REACH,
         }
     }
-}
-
-/// The dungeon rooms of `lb` that `creature` spawns in.
-fn spawn_rooms<'a>(lb: u32, creature: &'a str) -> impl Iterator<Item = Place> + 'a {
-    ac_world::spawns::in_block(lb << 16)
-        .iter()
-        .filter(move |s| s.indoors() && s.name.eq_ignore_ascii_case(creature))
-        .map(|s| Place {
-            at: s.at,
-            cell: s.cell,
-        })
 }
 
 #[cfg(test)]

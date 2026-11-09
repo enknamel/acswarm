@@ -1,7 +1,7 @@
-//! A journey flown as the last resort: planned again, a journey that hops (a portal, recall or
-//! gem) has no way left on foot, and the body may fly; each stretch to the next hop is then flown
-//! straight to its end (`Route::flown_across`) over what the walk graph cannot cross (Ithaenc's
-//! ruins). Past the hop it is walked: flown through a dungeon's walls, the server puts it back.
+//! A journey flown as the last resort, when the body may fly: one that hops (a portal, recall or
+//! gem) with no way left on foot, flown to its next hop over what the walk graph cannot cross
+//! (Ithaenc's ruins), then walked; and one within the dungeon stood in, clipped through whatever
+//! wall or shaft the graph has no way past (the Catacombs of Ithaenc's key room).
 
 use std::time::Instant;
 
@@ -11,6 +11,26 @@ use crate::did::Did;
 use crate::{Client, Goal, Owner};
 
 impl Client {
+    /// [`set_off`](Self::set_off), and with no way on foot to a place in the dungeon stood in,
+    /// flown there, through its walls if need be.
+    pub(super) fn set_off_or_fly(&mut self, owner: Owner, goal: Goal, now: Instant) -> Did {
+        let did = self.set_off(owner, goal, now);
+        if matches!(did, Did::Blocked(_)) && self.is_in_this_dungeon(goal) {
+            return self.fly_journey(owner, goal, now);
+        }
+        did
+    }
+
+    /// Whether `goal` lies in the dungeon the body stands in.
+    fn is_in_this_dungeon(&mut self, goal: Goal) -> bool {
+        let here = self.player.as_ref().map_or(0, |pl| pl.cell >> 16);
+        let there = goal
+            .place()
+            .filter(|p| p.is_indoors())
+            .map(|p| p.cell >> 16);
+        there == Some(here) && self.underground()
+    }
+
     /// Whether the journey takes a portal, recall or gem: places the trip planner joined.
     pub(crate) fn is_hopping(&self) -> bool {
         let trip = self.travel.trip.as_ref();
@@ -35,9 +55,7 @@ impl Client {
         let Some(to) = goal.place().map(|p| p.at.truncate()) else {
             return Did::blocked("no place to fly to");
         };
-        // Indoors the walls are the server's: flown through, it puts the body back.
-        let indoors = self.player.as_ref().is_some_and(|p| p.is_indoors());
-        if !self.movement_rules.limits().noclip || self.travel.fly_to.is_some() || indoors {
+        if !self.movement_rules.limits().noclip || self.travel.fly_to.is_some() {
             return Did::blocked("no way left, and no flying it");
         }
         tracing::info!("travel: no way left on foot; the journey is flown");

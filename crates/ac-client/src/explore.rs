@@ -503,10 +503,10 @@ mod tests {
 
     #[test]
     #[ignore = "needs AC_DATA_DIR"]
-    fn a_quests_dungeon_is_explored_under_a_hunting_area_elsewhere() {
+    fn a_quests_dungeon_is_hunted_under_a_hunting_area_elsewhere() {
         // Blargerton, hunting Burun Ruuk Scamps in Mossy Cave for the Necklace of Leerargh's key
         // with the Tusker Barracks as his area: the scamps in sight killed, he stood, the rooms
-        // being outside the area; then walled into 0x011A by its sliver of a doorway, 0x0112.
+        // being outside the area. The quest's own scamps (27892) spawn in 0x024A: gone to.
         let mut c = crate::testkit::standing_in_the_field(
             51,
             0x0177_0176,
@@ -529,8 +529,11 @@ mod tests {
             .pursue_quest("magicitemtraining3", true, 0);
         c.refresh_quests(Instant::now());
         assert!(c.is_pursuing(), "{:?}", c.pursuit);
-        let stood = play(&mut c, 60);
-        assert_keeps_going(&c, &stood);
+        play(&mut c, 30);
+        let room = c.pursued_place(0x0177).expect("the scamps' room");
+        assert_eq!(room.cell, 0x0177_024A);
+        let me = c.my_position().unwrap();
+        assert!(me.distance(room.at) <= 8.0, "{me:?}: {}", c.autoplay.status);
     }
 
     #[test]

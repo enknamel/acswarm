@@ -9,7 +9,7 @@
 //! list (see `reference/scripts/data/spawns.sh`), like the hunting grounds
 //! and the portals.
 //!
-//! One row per cell, creature and level: where the cell's generators for
+//! One row per cell, creature (by class: names repeat) and level: where the cell's generators for
 //! that creature stand on average, and how many generator entries make it.
 //! About a hundred thousand rows, so the table is kept gzipped and read the
 //! first time it is asked for.
@@ -33,6 +33,8 @@ pub struct Spawn {
     /// How many generator entries make it there: a rough measure of how
     /// many of it there are at once.
     pub count: u32,
+    /// Its weenie class: what it is matched by, two kinds sharing a name.
+    pub wcid: u32,
     pub name: String,
 }
 
@@ -73,17 +75,18 @@ pub fn parse(text: &str) -> Vec<Spawn> {
         if line.starts_with('#') || line.is_empty() {
             continue;
         }
-        let f: Vec<&str> = line.splitn(7, ',').collect();
-        if f.len() != 7 {
+        let f: Vec<&str> = line.splitn(8, ',').collect();
+        if f.len() != 8 {
             continue;
         }
-        let (Ok(cell), Ok(x), Ok(y), Ok(z), Ok(level), Ok(count)) = (
+        let (Ok(cell), Ok(x), Ok(y), Ok(z), Ok(level), Ok(count), Ok(wcid)) = (
             u32::from_str_radix(f[0], 16),
             f[1].parse::<f32>(),
             f[2].parse::<f32>(),
             f[3].parse::<f32>(),
             f[4].parse::<u32>(),
             f[5].parse::<u32>(),
+            f[6].parse::<u32>(),
         ) else {
             continue;
         };
@@ -92,7 +95,8 @@ pub fn parse(text: &str) -> Vec<Spawn> {
             at: crate::landblock_origin(cell) + Vec3::new(x, y, z),
             level,
             count,
-            name: f[6].replace(';', ","),
+            wcid,
+            name: f[7].replace(';', ","),
         });
     }
     out
@@ -172,11 +176,11 @@ mod tests {
     #[test]
     fn a_row_is_a_creature_in_a_cell_at_a_world_position() {
         let text = "# comment\n\
-                    A9B40024,100,50,60,12,3,Drudge Skulker\n\
-                    1F6012F,106.7,-207.8,-18,20,1,Lich\n\
-                    1F6012F,111.1,-208.6,-18,8,2,Undead\n\
+                    A9B40024,100,50,60,12,3,7,Drudge Skulker\n\
+                    1F6012F,106.7,-207.8,-18,20,1,9,Lich\n\
+                    1F6012F,111.1,-208.6,-18,8,2,11,Undead\n\
                     not,a,row\n\
-                    A9B40025,1,2,3,5,1,Mosswart; the Elder\n";
+                    A9B40025,1,2,3,5,1,13,Mosswart; the Elder\n";
         let rows = parse(text);
         assert_eq!(rows.len(), 4);
         let skulker = &rows[0];
@@ -185,7 +189,7 @@ mod tests {
             skulker.at,
             crate::landblock_origin(0xA9B4_0024) + Vec3::new(100.0, 50.0, 60.0)
         );
-        assert_eq!((skulker.level, skulker.count), (12, 3));
+        assert_eq!((skulker.level, skulker.count, skulker.wcid), (12, 3, 7));
         assert!(!skulker.indoors());
         // A dungeon's cell, written without its leading zero.
         assert_eq!(rows[1].cell, 0x01F6_012F);

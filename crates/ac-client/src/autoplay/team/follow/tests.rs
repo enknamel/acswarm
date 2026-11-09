@@ -246,8 +246,9 @@ fn a_leader_the_region_holds_is_walked_to_however_far() {
 fn a_follower_with_no_walk_to_its_leader_is_refused_a_journey_too() {
     // The leader up on the Tusker ground's ledge (0x5C49), which no walk reaches: the follower is
     // told so on its first ask, and the journey it tries instead is refused as it sets off, its
-    // first walk planned whole. Nothing walks at the wall.
+    // first walk planned whole. Nothing walks at the wall. (Flying, the ledge is flown to.)
     let (mut c, ledge) = testkit::under_the_ledge(20);
+    c.movement_rules = crate::player::MovementRules::ServerSafe;
     c.autoplay.config.enabled = true;
     let team = &mut c.autoplay.config.team;
     team.enabled = true;
