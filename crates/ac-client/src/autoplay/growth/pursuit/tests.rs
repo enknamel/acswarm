@@ -1971,3 +1971,31 @@ fn a_quest_whose_ground_the_character_stands_on_is_worked_first() {
         "left for another quest"
     );
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_gem_wanted_before_a_restart_is_still_bought_after_it() {
+    // Restarted on the way to the Wedding Planner: the run set off for the invitation, the first
+    // board rewrote the Quests section without it, and at the counter nothing was bought.
+    let mut c = mage_pursuing("learn:2023", "gem-across-restarts");
+    let now = std::time::Instant::now();
+    c.refresh_quests(now);
+    let cfg = c.autoplay.config.growth.clone();
+    assert!(!c.grow_hunt(now, &cfg));
+    assert!(matches!(again(&mut c, now), PursuitStep::Buy { .. }));
+    let buys = |c: &Client| {
+        let p = c.loot_profile().unwrap();
+        p.buy
+            .iter()
+            .filter(|b| b.what.starts_with("Invitation"))
+            .count()
+    };
+    assert_eq!(buys(&c), 1);
+    // A new session: the wanted gems are gone, the saved section is not.
+    c.autoplay.growth.pursuit_gems.clear();
+    assert!(
+        matches!(again(&mut c, now), PursuitStep::Buy { .. }),
+        "no longer bought"
+    );
+    assert_eq!(buys(&c), 1, "the buy line went");
+}

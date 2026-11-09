@@ -105,6 +105,7 @@ impl Client {
     /// Mark each wanted gem carried as had, and let one had and gone from the pack go: used. A
     /// gem come to hand opens ways: every ground passed over for want of one is tried again.
     pub(super) fn keep_gem_ways(&mut self) {
+        self.recall_gem_ways();
         let carried: Vec<bool> = self
             .autoplay
             .growth
@@ -128,6 +129,53 @@ impl Client {
         });
         if came {
             st.skip.retain(|_| false);
+        }
+    }
+}
+
+impl Client {
+    /// The gems the profile's Quests section still keeps for a pursued quest, wanted again: the
+    /// wanted gems are not kept between sessions, the section is, and rewritten without them its
+    /// buy line went from under a run set off for it.
+    fn recall_gem_ways(&mut self) {
+        let who = self.world.stats.name.trim().to_string();
+        let Some(profile) = self.loot_profile() else {
+            return;
+        };
+        let pursued: Vec<String> = self
+            .autoplay
+            .config
+            .quests
+            .pursue
+            .iter()
+            .map(|p| p.id.clone())
+            .collect();
+        for r in profile
+            .rules
+            .iter()
+            .filter(|r| r.is_quest_entry(&who) && pursued.contains(&r.quest))
+        {
+            let class = r.all.iter().find_map(|a| match a {
+                Ask::Item(Term::Num(NumKey::Class, Op::Eq, w)) => Some(*w as u32),
+                _ => None,
+            });
+            let Some(gem) = class.and_then(ac_world::gems::of) else {
+                continue;
+            };
+            let st = &self.autoplay.growth;
+            if r.name != format!("{}: {}", r.quest, gem.name)
+                || st.pursuit_gems.iter().any(|g| g.quest == r.quest)
+            {
+                continue;
+            }
+            let had = self.carried_count(gem.wcid) > 0;
+            tracing::info!("pursuit: {}: {} wanted still", r.quest, gem.name);
+            self.autoplay.growth.pursuit_gems.push(GemWanted {
+                quest: r.quest.clone(),
+                wcid: gem.wcid,
+                name: gem.name.clone(),
+                had,
+            });
         }
     }
 }
