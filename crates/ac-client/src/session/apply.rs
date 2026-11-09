@@ -17,6 +17,28 @@ fn frees_the_cast_slot(err: u32) -> bool {
 }
 
 impl Client {
+    /// The manual-play timers, autoplay, the ledger and the quest board, in frame order: what
+    /// runs once the server's messages are applied.
+    pub(crate) fn tick_rules(&mut self, now: Instant) {
+        self.tick_combat();
+        self.tick_loot(now);
+        self.tick_store();
+        self.tick_appraise();
+        self.tick_autoplay(now);
+        // The rules may have changed under the decisions already made.
+        // Before the ledger is written out, not after.
+        self.tick_retag(now);
+        // What the giver asked last answered, then each quest's state; neither sends anything.
+        self.watch_quest_answer(now);
+        self.settle_server_quests(now);
+        self.ask_server_quests();
+        self.refresh_quests(now);
+        // What each item was taken for, written out when it changes.
+        // Not on the way out: the thing this is defending against is a
+        // client that does not get a way out.
+        self.save_ledger();
+    }
+
     /// Read back what this character kept between sessions, once its name is known: the ledger,
     /// recall spots, quest flags, quest log and the loot tier it has killed.
     pub(crate) fn load_saved(&mut self) {
@@ -570,23 +592,7 @@ impl Client {
         for (op, body) in chat_pending {
             self.chat_message(op, &body);
         }
-        self.tick_combat();
-        self.tick_loot(now);
-        self.tick_store();
-        self.tick_appraise();
-        self.tick_autoplay(now);
-        // The rules may have changed under the decisions already made.
-        // Before the ledger is written out, not after.
-        self.tick_retag(now);
-        // What the giver asked last answered, then each quest's state; neither sends anything.
-        self.watch_quest_answer(now);
-        self.settle_server_quests(now);
-        self.ask_server_quests();
-        self.refresh_quests(now);
-        // What each item was taken for, written out when it changes.
-        // Not on the way out: the thing this is defending against is a
-        // client that does not get a way out.
-        self.save_ledger();
+        self.tick_rules(now);
         // Build the static scene once the player is placed.
         if self.scene_block.is_none() {
             if let Some(p) = self.world.player().and_then(|o| o.position) {
