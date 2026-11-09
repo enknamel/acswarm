@@ -416,3 +416,79 @@ fn buffs_coming_due_together_are_started_soon_enough_to_all_go_back_up() {
     // Off (a fight with no wand in hand waits for a lapse): left off.
     assert_eq!(widened(0.0, &twenty), 0.0);
 }
+
+/// A caster wearing a helm, knowing `banes`, the helm's answer in and nothing on it: every bane
+/// lapsed, and the max mana with `base` 1000.
+fn a_caster_with_banes_lapsed(now: Instant, banes: &[&str]) -> (Client, u32) {
+    let (mut c, _) = crate::testkit::a_caster_knowing(now, banes);
+    let me = c.world.player_guid.unwrap();
+    const HELM: u32 = 0x8000_0600;
+    crate::testkit::thing_in_the_pack(&mut c, HELM, "Pathwarden Helm", 1);
+    let helm = c.world.objects.get_mut(&HELM).unwrap();
+    helm.item_type = ac_world::item_type::ARMOR;
+    helm.container = None;
+    helm.wielder = Some(me);
+    c.autoplay.armour_looked = Some(now - ARMOUR_ANSWERS);
+    c.world.stats.vitals[2].base = 1000;
+    c.autoplay.cast_sent = None;
+    (c, me)
+}
+
+const FOUR_BANES: [&str; 4] = [
+    "Acid Bane III",
+    "Lightning Bane III",
+    "Frost Bane III",
+    "Blade Bane III",
+];
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_fight_at_low_mana_puts_no_bane_back_and_leaves_the_heal_its_mana() {
+    // Under attack at a third of its mana, a caster put four lapsed banes back one after another
+    // on half the reserve, had none left to heal with, and died.
+    let now = Instant::now();
+    let (mut c, _) = a_caster_with_banes_lapsed(now, &FOUR_BANES);
+    let max = c.vital_max_of(2);
+    c.world.stats.vitals[2].current = max * 3 / 10;
+    c.autoplay.last_hit_us = Some(Instant::now());
+    assert!(c.in_a_fight(), "the test needs a fight");
+    assert!(c.has_urgent_buff_due(now), "the test needs a bane due");
+    let sent = c.session.actions_sent();
+    assert!(!c.autoplay_buff(now, true), "a bane went up in the fight");
+    assert_eq!(c.session.actions_sent(), sent, "something went out");
+    // With the whole reserve to spare it goes up, fight or no fight.
+    c.world.stats.vitals[2].current = max * 6 / 10;
+    let later = now + BUFF_CHECK_EVERY;
+    assert!(c.autoplay_buff(later, true), "no bane with mana to spare");
+    assert!(c.session.actions_sent() > sent, "the cast did not go out");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn in_a_fight_the_urgent_window_pulls_no_more_banes_in() {
+    // The queue widening pulled banes with time still on them into a fight, each cast mana the
+    // heal then lacked.
+    let now = Instant::now();
+    let (mut c, me) = a_caster_with_banes_lapsed(now, &FOUR_BANES);
+    c.autoplay.config.buffs.never_below = 5.0;
+    let table = c.assets.spell_table().unwrap();
+    let categories: Vec<u32> = c
+        .world
+        .stats
+        .spells
+        .iter()
+        .map(|id| table.get(*id).unwrap().category)
+        .collect();
+    drop(table);
+    // Four with 20 s left each: past 5 s, but inside 5 s and four casts of 4 s.
+    c.autoplay.item_buffs = categories.iter().map(|&k| (me, k, now, 20.0)).collect();
+    assert!(
+        c.has_urgent_buff_due(now),
+        "out of a fight the queue is pulled in"
+    );
+    c.autoplay.last_hit_us = Some(Instant::now());
+    assert!(
+        !c.has_urgent_buff_due(now),
+        "a bane with time on it pulled into the fight"
+    );
+}

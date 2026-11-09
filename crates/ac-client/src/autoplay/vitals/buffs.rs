@@ -335,8 +335,11 @@ impl Client {
     }
 
     /// The urgent window `base`, widened so that the buffs coming due together all go back up
-    /// before the first of them lapses: twenty cast together cannot all be put back in a minute.
+    /// before the first of them lapses; not in a fight, where each one pulled in is a heal's mana.
     fn queue_window(&self, base: f32, wants: &[crate::buffs::Want], now: Instant) -> f32 {
+        if self.in_a_fight() {
+            return base;
+        }
         let lefts: Vec<f32> = self
             .buff_times(wants, now)
             .into_iter()
@@ -482,11 +485,10 @@ impl Client {
             return false;
         }
         self.stamp_buff_look(urgent, now);
-        // Mana is kept back for healing and fighting: a top-up waits
-        // until there is that much to spare, and even an urgent recast
-        // leaves half of it.
-        let reserve =
-            self.vital_max_of(2) as f32 * cfg.keep_mana * if topping_up { 1.0 } else { 0.5 };
+        // Mana is kept back for healing and fighting: a top-up, or any cast in a fight, waits
+        // until there is that much to spare; an urgent recast out of one leaves half of it.
+        let whole = topping_up || self.in_a_fight();
+        let reserve = self.vital_max_of(2) as f32 * cfg.keep_mana * if whole { 1.0 } else { 0.5 };
         let cost = self
             .assets
             .spell_table()
