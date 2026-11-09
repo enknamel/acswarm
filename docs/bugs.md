@@ -84,12 +84,14 @@ priority; a live report starts from the telemetry (`tools/telemetry.py`, `--mark
 
 ## 3. Tooling
 
-- **Three by-hand follow tests depend on timing.** `the_status_line_of_a_follower_survives_the_tick_that_wrote_it`,
-  `the_status_is_cleared_again_once_the_leader_is_reached` and
-  `no_errand_of_its_own_is_started_while_the_player_plays` run over `no_data()`: the region build
-  fails at once ("Planner(OutOfRegion)") unless the process-wide `REGIONS` or a slow builder thread
-  answers first. Run alone they fail on main as far back as a4de872; in the full suite they mostly
-  pass.
+- **Four follow tests over `no_data()` depend on timing.**
+  `the_status_line_of_a_follower_survives_the_tick_that_wrote_it`,
+  `the_status_is_cleared_again_once_the_leader_is_reached`,
+  `no_errand_of_its_own_is_started_while_the_player_plays` and
+  `a_journey_put_aside_before_following_is_not_taken_up_after_a_stop` run over `no_data()`: the
+  region build fails at once ("Planner(OutOfRegion)") unless the process-wide `REGIONS` or a slow
+  builder thread answers first. Run alone they fail on main as far back as a4de872; in the full
+  suite they mostly pass.
 
 - **"wedged" counts only fully blocked steps.** A step the walls slide back to where it began
   reads as progress, so a body going nowhere for 12 min showed wedged false in every sample; the
