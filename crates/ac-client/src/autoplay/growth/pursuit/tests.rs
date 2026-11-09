@@ -1748,3 +1748,35 @@ fn an_npc_is_not_asked_for_an_item_with_no_room_in_the_pack_for_it() {
         "asked with no room for the key"
     );
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_ground_no_journey_reaches_but_a_gem_for_sale_does_buys_the_gem() {
+    // The Healer's Heart, from Holtburg: the Putrid Moarsman's catacombs are on Ithaenc's island,
+    // no portal goes there, and the Wedding Planner sells the invitation that does.
+    let holtburg = 0xA9B4_0011;
+    let mut c =
+        crate::testkit::standing_in_the_field(58, holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
+    c.autoplay.config.quests.on = true;
+    c.autoplay.config.quests.pursue_quest("give:8552", true, 0);
+    let now = std::time::Instant::now();
+    c.refresh_quests(now);
+    let grounds = c.autoplay.growth.pursuit_grounds.clone();
+    assert!(!grounds.is_empty(), "no Putrid Moarsman ground");
+    let quests = c.travel.quests_done.clone();
+    assert!(
+        grounds
+            .iter()
+            .all(|g| c.journey_plan(g.1, &quests).is_none()),
+        "a way there without the gem"
+    );
+    let cfg = c.autoplay.config.growth.clone();
+    c.grow_hunt(now, &cfg);
+    let gems = &c.autoplay.growth.pursuit_gems;
+    assert_eq!(
+        gems.iter().map(|g| g.name.as_str()).collect::<Vec<_>>(),
+        ["Invitation Ithaenc Cathedral"],
+        "the gem to buy"
+    );
+    assert_eq!(gems[0].vendor, "Wedding Planner");
+}

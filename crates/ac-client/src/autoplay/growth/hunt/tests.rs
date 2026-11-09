@@ -767,14 +767,15 @@ fn on_the_pursued_ground_the_character_stays() {
 
 #[test]
 fn no_way_to_any_source_holds_the_pursuit_with_its_reason() {
-    // Nothing leads into 0x0003 (no portal in `portals.csv`): no journey ends there.
+    // Nothing leads into 0x000B (no portal in `portals.csv`, no gem in `gems.csv`): no journey
+    // ends there. 0x0003 has the Niffis Fighting Pits gem, which a shop sells.
     let mut c = crate::testkit::character_of_level(crate::testkit::no_data(), 85);
     crate::testkit::stand(&mut c, 0xA9B4_0019, glam::Vec3::new(84.0, 84.0, 94.0));
     let nowhere = Place {
-        at: ac_world::landblock_origin(0x0003_0100),
-        cell: 0x0003_0100,
+        at: ac_world::landblock_origin(0x000B_0100),
+        cell: 0x000B_0100,
     };
-    pursuing_the_jaw(&mut c, 0x0003, nowhere);
+    pursuing_the_jaw(&mut c, 0x000B, nowhere);
     let now = Instant::now();
     assert!(!c.grow_hunt(now, &Growth::default()));
     let held = c.autoplay.growth.pursuit_held.get("engorgedeaterjaw");

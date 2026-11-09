@@ -24,7 +24,19 @@ impl Client {
         let Some(profile) = self.loot_profile() else {
             return;
         };
-        let (rules, buy) = quest_entries(&self.pursuit, &self.quest_board, &who, chains);
+        let (mut rules, mut buy) = quest_entries(&self.pursuit, &self.quest_board, &who, chains);
+        // A gem stays wanted while its quest is pursued and still hunting.
+        let pursued = &self.pursuit;
+        self.autoplay.growth.pursuit_gems.retain(|g| {
+            pursued
+                .iter()
+                .any(|l| l.id == g.quest && matches!(l.step, PursuitStep::Hunt { .. }))
+        });
+        for gem in &self.autoplay.growth.pursuit_gems {
+            let (r, b) = super::gem_way::gem_entries(gem, &who);
+            rules.push(r);
+            buy.push(b);
+        }
         let mut profile = (*profile).clone();
         let (r, b) = (rules.len(), buy.len());
         if !profile.set_quest_entries(&who, rules, buy) {

@@ -19,9 +19,11 @@ use crate::quest_log::{Blocked, QuestFacts, QuestLine, QuestState, KEY_DEPTH};
 use crate::Client;
 
 mod fetch;
+mod gem_way;
 mod kept;
 mod section;
 pub(crate) use fetch::Fetching;
+pub(crate) use gem_way::GemWanted;
 
 /// A pursued quest that could not go on is passed over this long before it is tried again (guess).
 pub const PURSUIT_RETRY: Duration = Duration::from_secs(10 * 60);
@@ -648,6 +650,7 @@ impl Client {
         if chained.is_empty() {
             self.pursuit.clear();
             st.pursuit_grounds.clear();
+            st.pursuit_gems.clear();
             st.pursuit_sought.clear();
             self.keep_quest_section(&ChainData);
             return;
@@ -766,9 +769,17 @@ impl Client {
                 let here = self.player.as_ref()?.cell >> 16;
                 let mut grounds = self.autoplay.growth.pursuit_grounds.clone();
                 if grounds.iter().any(|(lb, _)| *lb == here) {
-                    self.autoplay.growth.hunting_at = Some(here);
+                    let st = &mut self.autoplay.growth;
+                    st.hunting_at = Some(here);
+                    // There: the gem that was the way is bought no more.
+                    let before = st.pursuit_gems.len();
+                    st.pursuit_gems.retain(|g| g.quest != line.id);
+                    if st.pursuit_gems.len() != before {
+                        self.quest_board_at = None;
+                    }
                     return None;
                 }
+                let every = grounds.clone();
                 // The ground reached soonest first: the most spawns may be a 75-minute road away.
                 let quests = self.travel.quests_done.clone();
                 let mut secs: Vec<(f32, (u32, Place))> = Vec::new();
@@ -797,6 +808,17 @@ impl Client {
                         return Some(true);
                     }
                     self.autoplay.growth.skip.mark(lb, now);
+                }
+                // No way but a gem a shop sells: the Quests section buys it, and the next plan
+                // takes it (Ithaenc's island, by the Wedding Planner's invitation).
+                if let Some(gem) = self.gem_way(&every, &quests) {
+                    let why = format!(
+                        "buying {} from {} to reach {creature}",
+                        gem.name, gem.vendor
+                    );
+                    self.autoplay.growth.want_gem(&line.id, gem);
+                    self.hold_pursuit(&line.id, why, now);
+                    return Some(false);
                 }
                 let why = format!("no journey reaches any place {creature} is found");
                 self.hold_pursuit(&line.id, why, now);

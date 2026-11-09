@@ -220,6 +220,8 @@ pub struct State {
     pursuit_held: std::collections::BTreeMap<String, (String, Instant)>,
     /// The working pursued hunt's grounds, best first: landblock and where a journey ends.
     pursuit_grounds: Vec<(u32, ac_world::Place)>,
+    /// Gems pursued quests buy, each the only way to its ground (see `pursuit::gem_way`).
+    pursuit_gems: Vec<pursuit::GemWanted>,
     /// The working pursued hunt's creatures, by weenie class: picked before a nearer namesake.
     pub(crate) pursuit_sought: Vec<u32>,
     /// Quest item sources a step at was refused, by wanted item and source class, and since when.
