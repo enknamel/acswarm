@@ -189,3 +189,19 @@ fn mana_junk_is_taken_only_while_a_stone_waits_for_it() {
     c.autoplay.config.mana.backup = 1;
     assert!(!c.wants_mana_junk(), "taken with the backup charged");
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn stones_are_taken_only_up_to_the_backup_and_one_to_fill() {
+    // Fourteen stones carried for a backup of five: past six, one on a corpse is left there.
+    let mut c = wearing(480);
+    assert!(c.wants_mana_stone(), "two carried, six wanted");
+    c.autoplay.config.mana.backup = 1;
+    assert!(
+        !c.wants_mana_stone(),
+        "two carried, two wanted, and a third taken"
+    );
+    c.autoplay.config.mana.on = false;
+    c.autoplay.config.mana.backup = 5;
+    assert!(!c.wants_mana_stone(), "taken with the mana rules off");
+}

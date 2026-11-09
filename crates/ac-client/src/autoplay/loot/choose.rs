@@ -322,6 +322,14 @@ impl Client {
                     {
                         Judged::Decided(ac_loot::profile::LootAction::Skip, rule)
                     }
+                    // The same for a stone, past what the backup and one to fill need: fourteen.
+                    Judged::Decided(ac_loot::profile::LootAction::Keep, rule)
+                        if !mine
+                            && rule == ac_loot::profile::MANA_STONES
+                            && !self.wants_mana_stone() =>
+                    {
+                        Judged::Decided(ac_loot::profile::LootAction::Skip, rule)
+                    }
                     other => other,
                 };
                 let why = match &judged {

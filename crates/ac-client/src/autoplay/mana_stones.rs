@@ -208,6 +208,21 @@ impl Client {
         charged < cfg.backup && empty > carried
     }
 
+    /// How many stones are worth carrying: the backup charged, and one more to fill.
+    fn stones_wanted(&self) -> usize {
+        self.autoplay.config.mana.backup as usize + 1
+    }
+
+    /// Whether a stone on a corpse is worth taking: fewer carried than [`Self::stones_wanted`].
+    pub(crate) fn wants_mana_stone(&self) -> bool {
+        let carried = self
+            .world
+            .inventory()
+            .filter(|o| o.item_type & ac_world::item_type::MANA_STONE != 0)
+            .count();
+        self.autoplay.config.mana.on && carried < self.stones_wanted()
+    }
+
     /// The carried stones whose appraisal is in: charged with mana, or empty.
     fn stones(&self) -> Vec<Stone> {
         self.world

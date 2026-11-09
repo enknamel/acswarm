@@ -640,13 +640,15 @@ const MANA_HOLDERS: u32 = {
 
 /// The name the built-in drain rule goes by, in the ledger and the log.
 pub const MANA_JUNK: &str = "mana junk";
+/// The name the built-in rule keeping mana stones goes by.
+pub const MANA_STONES: &str = "mana stones";
 
 /// [`Looting::mana_junk`]'s two rules: mana stones kept, then anything holding mana drained.
 fn built_in_rules() -> (&'static Rule, &'static Rule) {
     static RULES: std::sync::OnceLock<(Rule, Rule)> = std::sync::OnceLock::new();
     let (stones, junk) = RULES.get_or_init(|| {
         let stones = Rule {
-            name: "mana stones".into(),
+            name: MANA_STONES.into(),
             action: LootAction::Keep,
             ..Default::default()
         };
