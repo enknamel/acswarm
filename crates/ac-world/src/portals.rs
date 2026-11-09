@@ -33,7 +33,7 @@ pub struct Portal {
     /// all, which is how the ruined ones are marked (and a good many
     /// decorations besides).
     pub usable: u32,
-    /// Its `PortalBitmask` (ACE `PortalBitmask.cs`); 0 when the data does not say.
+    /// Its `PortalBitmask` (ACE `PortalBitmask.cs`); Unrestricted when the database has none.
     pub bitmask: u32,
 }
 
@@ -368,6 +368,15 @@ mod tests {
         assert!(p.admits(Traveller::default()), "an unknown status barred");
         p.bitmask = 0;
         assert!(!p.admits(npk), "Undef: players may not use it");
+        // The database leaves most Surface portals' bitmask out, which ACE reads Unrestricted:
+        // exported as 0, they were all shut. Only the Unstable Portal says Undef.
+        let shut: Vec<&str> = all()
+            .iter()
+            .filter(|p| p.works() && !p.admits(npk))
+            .filter(|p| p.bitmask & (NO_NPK | ONLY_OLTHOI) == 0)
+            .map(|p| p.name.as_str())
+            .collect();
+        assert_eq!(shut, ["Unstable Portal"]);
         p.bitmask = UNRESTRICTED | ONLY_OLTHOI;
         assert!(!p.admits(pk), "only Olthoi");
     }

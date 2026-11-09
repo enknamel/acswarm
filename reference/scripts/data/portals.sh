@@ -15,7 +15,7 @@ SQL='SET SESSION max_execution_time=20000; select s.value, hex(li.obj_Cell_Id), 
   round(li.origin_Y,1), round(li.origin_Z,1), hex(p.obj_Cell_Id),
   round(p.origin_X,1), round(p.origin_Y,1), round(p.origin_Z,1),
   coalesce(lo.value, 0), coalesce(hi.value, 0),
-  coalesce(q.value, ""), coalesce(u.value, 0), coalesce(b.value, 0)
+  coalesce(q.value, ""), coalesce(u.value, 0), coalesce(b.value, 1)
 from landblock_instance li
 join weenie_properties_position p
   on p.object_Id = li.weenie_Class_Id and p.position_Type = 2
