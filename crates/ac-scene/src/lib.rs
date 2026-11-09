@@ -15,6 +15,7 @@ pub mod chargen;
 pub mod collision;
 pub mod interior;
 pub mod landblock;
+pub mod landmass;
 pub mod lighting;
 pub mod localmap;
 pub mod mapimage;

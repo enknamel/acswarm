@@ -8,7 +8,14 @@ use crate::Client;
 impl Client {
     /// Tell the planner, once a process, which indoor portal cells are buildings: read off the
     /// cells, which it has no copy of. Not until the world grid is loaded, which tells dungeons.
+    /// The landmasses too, the same once: no walk is planned across the sea.
     pub(crate) fn tell_building_cells(&mut self) {
+        if !trip::landmasses_known() {
+            if let Some((grid, region)) = self.travel_terrain() {
+                let land = ac_scene::landmass::Landmasses::of_world(&grid, &region);
+                trip::set_landmasses(move |at| land.at(at));
+            }
+        }
         if trip::building_cells_known() || self.travel_terrain().is_none() {
             return;
         }

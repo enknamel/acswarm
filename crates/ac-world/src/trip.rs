@@ -24,6 +24,28 @@ pub fn building_cells_known() -> bool {
     BUILDING_CELLS.get().is_some()
 }
 
+/// Which landmass a world xy is on, `None` at sea: told once a process by whoever has the terrain.
+type LandmassOf = Box<dyn Fn(Vec2) -> Option<u32> + Send + Sync>;
+static LANDMASS: OnceLock<LandmassOf> = OnceLock::new();
+
+/// Tell the planner the landmasses: a walk between two never stands (Ithaenc's island).
+pub fn set_landmasses(of: impl Fn(Vec2) -> Option<u32> + Send + Sync + 'static) {
+    let _ = LANDMASS.set(Box::new(of));
+}
+
+/// Whether the planner has been told the landmasses.
+pub fn landmasses_known() -> bool {
+    LANDMASS.get().is_some()
+}
+
+/// Whether the sea parts `a` and `b`, as far as the landmasses are known.
+fn sea_between(a: Place, b: Place) -> bool {
+    let Some(of) = LANDMASS.get() else {
+        return false;
+    };
+    matches!((of(a.at.truncate()), of(b.at.truncate())), (Some(x), Some(y)) if x != y)
+}
+
 /// Indoors and not in a building: a dungeon, or the hub, walked only within its own landblock.
 fn shut_in(p: Place) -> bool {
     p.is_indoors() && !BUILDING_CELLS.get().is_some_and(|s| s.contains(&p.cell))
@@ -225,7 +247,7 @@ fn can_walk_plain(a: Place, b: Place, reach: f32) -> bool {
         // Inside, only within the same landblock (the hub, a dungeon).
         return same_block;
     }
-    a.at.truncate().distance(b.at.truncate()) <= reach
+    a.at.truncate().distance(b.at.truncate()) <= reach && !sea_between(a, b)
 }
 
 #[derive(PartialEq)]
