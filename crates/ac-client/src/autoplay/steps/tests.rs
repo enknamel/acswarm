@@ -288,6 +288,30 @@ fn a_town_run_gives_way_to_a_fight_in_hand() {
 }
 
 #[test]
+fn a_character_being_hit_fights_back_before_any_body_is_looted() {
+    // Blargerton among 21 Tusker Guards tried one corpse after another, none opening, while the
+    // guard beside him took his health: the bodies on the floor outranked the fight.
+    let mut c = in_the_field();
+    let now = Instant::now();
+    let me = c.my_position().unwrap();
+    let cell = c.player.as_ref().unwrap().cell;
+    for i in 0..6u32 {
+        let guid = 0x8000_0000 + i;
+        let near = me + glam::Vec3::new(2.0 + i as f32, 0.0, 0.0);
+        let body = ac_world::WorldObject {
+            position: crate::testkit::placed(cell, near),
+            ..crate::testkit::corpse(guid, "Corpse of Tusker Guard")
+        };
+        c.world.objects.insert(guid, body);
+    }
+    let loot = named("loot").expect("row");
+    assert!(loot.worth(&c, now) > 0.0, "the bodies are worth going to");
+    c.autoplay.attacked_by("Tusker Guard", now);
+    assert!(c.under_attack());
+    assert_eq!(loot.worth(&c, now), 0.0, "looting while hit");
+}
+
+#[test]
 fn a_due_quest_call_is_worth_a_run_with_town_runs_off() {
     let mut c = in_the_field();
     c.autoplay.config.growth.town_runs = false;

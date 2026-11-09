@@ -218,6 +218,12 @@ fn worth_looting(client: &Client, now: Instant) -> f32 {
     let Some(me) = client.my_position() else {
         return 0.0;
     };
+    // Hit lately, nothing is picked up but a body already open: the fight that came first, a pile
+    // of bodies or one about to rot (21 Tusker Guards round corpses that never opened, the
+    // health going). Catching up with a leader still outranks both.
+    if client.under_attack() && client.world.open_container.is_none() {
+        return 0.0;
+    }
     // The body in hand, or the one being walked to: whatever the board
     // says about it now, this character has it open on the server or is
     // most of the way there, and only the looting closes it. Scoring it
