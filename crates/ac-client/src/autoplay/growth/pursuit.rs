@@ -1026,15 +1026,12 @@ impl Client {
         }
     }
 
-    /// The pursued hunt's creature killed: its body stood by, walked back to, till the loot rules
-    /// empty it. The walk on left Martine's cloak behind, and a hit stopped the looting.
-    pub(super) fn stand_by_sought_body(&mut self, now: Instant) -> Option<bool> {
-        use crate::autoplay::loot::choose::{CORPSE_APPEARS, CORPSE_LIFE, LOOT_NEAR};
+    /// The body of the pursued hunt's creature killed, once it lies there (`sought_kill`): opened
+    /// under blows too (a_sought_kill_s_body_is_opened_under_blows).
+    pub(crate) fn sought_body(&self) -> Option<u32> {
         use crate::autoplay::loot::owed::KILL_SPOT;
-        let (at, fell) = self.autoplay.growth.sought_kill?;
-        let since = now.saturating_duration_since(fell);
-        let body = self
-            .world
+        let (at, _) = self.autoplay.growth.sought_kill?;
+        self.world
             .objects
             .values()
             .filter(|o| o.object_desc_flags & ac_world::object_desc_flags::CORPSE != 0)
@@ -1043,7 +1040,16 @@ impl Client {
                     .is_some_and(|p| p.truncate().distance(at.truncate()) <= KILL_SPOT)
             })
             .map(|o| o.guid)
-            .next();
+            .next()
+    }
+
+    /// The pursued hunt's creature killed: its body stood by, walked back to, till the loot rules
+    /// empty it. The walk on left Martine's cloak behind, and a hit stopped the looting.
+    pub(super) fn stand_by_sought_body(&mut self, now: Instant) -> Option<bool> {
+        use crate::autoplay::loot::choose::{CORPSE_APPEARS, CORPSE_LIFE, LOOT_NEAR};
+        let (at, fell) = self.autoplay.growth.sought_kill?;
+        let since = now.saturating_duration_since(fell);
+        let body = self.sought_body();
         let waiting = match body {
             // The body comes a moment after the blow (twice that allowed).
             None => since < CORPSE_APPEARS * 2,

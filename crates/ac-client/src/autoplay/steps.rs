@@ -220,8 +220,11 @@ fn worth_looting(client: &Client, now: Instant) -> f32 {
     };
     // Hit lately, nothing is picked up but a body already open: the fight that came first, a pile
     // of bodies or one about to rot (21 Tusker Guards round corpses that never opened, the
-    // health going). Catching up with a leader still outranks both.
-    if client.under_attack() && client.world.open_container.is_none() {
+    // health going). Catching up with a leader still outranks both. A pursued quest creature's
+    // body is the exception: a room of its kin was killed first, minutes, to open it.
+    let sought = client.sought_body();
+    let hit = client.under_attack() && client.world.open_container.is_none();
+    if hit && sought.is_none() {
         return 0.0;
     }
     // The body in hand, or the one being walked to: whatever the board
@@ -239,6 +242,7 @@ fn worth_looting(client: &Client, now: Instant) -> f32 {
         // one it will go to, and counting those ranked looting above the
         // next fight with nothing for it to do: nine characters stopped
         // fighting for a floor of bodies that were all somebody else's.
+        .filter(|o| !hit || sought == Some(o.guid))
         .filter(|o| in_hand == Some(o.guid) || client.corpse_for_us(o, me, now, room))
         .map(|o| {
             // A corpse we never saw appear is taken as fresh, which is

@@ -2680,9 +2680,9 @@ fn a_sought_kill_s_body_is_stood_by() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
-fn a_sought_kill_s_body_is_opened_after_its_attackers_are_fought() {
-    // By a Cold One's body, a Chomu Sclavus and a golem hit him: walked past as not sought, they
-    // kept the body shut (nothing is opened under blows), and he stood there till it rotted.
+fn a_sought_kill_s_body_is_opened_under_blows() {
+    // By the key Putrid Moarsman's body a room of its namesakes and wisps hit him: fought as
+    // guarding the body (nothing was opened under blows), two minutes, before the body opened.
     let now = std::time::Instant::now();
     let (mut c, _) = at_a_mire_witch_ground(now);
     let me = c.my_position().unwrap();
@@ -2692,22 +2692,21 @@ fn a_sought_kill_s_body_is_opened_after_its_attackers_are_fought() {
     witch.position = crate::testkit::placed(cell, me);
     c.world.objects.insert(witch.guid, witch);
     c.note_sought_kill(me, now);
+    let mut body = crate::testkit::corpse(0x5000_0907, "Corpse of Mosswart Mire-Witch");
+    body.position = crate::testkit::placed(cell, me);
+    c.world.objects.insert(body.guid, body);
+    assert_eq!(c.sought_body(), Some(0x5000_0907));
     let mut chomu = crate::testkit::creature(0x5000_0904, "Chomu Sclavus");
     chomu.weenie_class_id = 1;
     chomu.position = crate::testkit::placed(cell, me + glam::Vec3::new(2.0, 0.0, 0.0));
+    c.world.objects.insert(chomu.guid, chomu.clone());
+    c.autoplay.attacked_by("Chomu Sclavus", now);
     let cfg = c.autoplay.config.fight.clone();
-    assert!(c.passing_by(&chomu, &cfg), "not hitting us: walked past");
-    c.autoplay
-        .hit_by
-        .mark("Chomu Sclavus".into(), std::time::Instant::now());
+    assert!(c.passing_by(&chomu, &cfg), "hitting us by the body: fought");
+    let weighed = crate::steps::weigh(&c, now).ranking();
     assert!(
-        !c.passing_by(&chomu, &cfg),
-        "hitting us by the body: walked past"
-    );
-    c.autoplay.growth.sought_kill = None;
-    assert!(
-        c.passing_by(&chomu, &cfg),
-        "off the body, the quest's walk-past stands"
+        weighed.iter().any(|r| r.0 == "loot"),
+        "the body waits for the blows to stop: {weighed:?}"
     );
 }
 

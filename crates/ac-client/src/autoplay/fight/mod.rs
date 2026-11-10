@@ -131,11 +131,9 @@ impl Client {
         let not_it =
             self.is_pursuing() && (!self.is_pursued_hunt() || (!sought.is_empty() && !worth));
         // The pursued creature itself is never walked past, on the road to its ground or there
-        // (the Putrid Moarsman met at the catacombs' door, left behind on the road).
-        // By a sought kill's body, what hits the character is fought: the body is not opened under
-        // blows (a_sought_kill_s_body_is_opened_after_its_attackers_are_fought).
-        let guarding = self.autoplay.growth.sought_kill.is_some() && self.hit_lately_by(&o.name);
-        cfg.walk_past_on_the_way && !it && !guarding && (self.on_its_way() || not_it)
+        // (the Putrid Moarsman met at the catacombs' door, left behind on the road). By its body
+        // what hits the character is walked past too: the body is opened under blows.
+        cfg.walk_past_on_the_way && !it && (self.on_its_way() || not_it)
     }
 
     /// Say what the character is walking past on its way somewhere: the
