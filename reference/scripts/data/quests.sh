@@ -129,7 +129,7 @@ group by m.wcid, m.lb;'
 
 # And the outdoor generators a landblock puts out from the encounter table, each at a cell corner
 # of the surface (Landblock.cs:269-290): the Mire Witch Martine's camp, on Marae Lassel's shores,
-# is placed by nothing else. The walk below each encounter class once, then per landblock.
+# is placed by nothing else. The walk below each encounter class once, then per cell corner.
 q encounters 'with recursive spawn(root, wcid, depth) as (
   select distinct e.weenie_Class_Id, e.weenie_Class_Id, 0 from encounter e
   union all
@@ -144,8 +144,9 @@ mon as (
   left join weenie_properties_bool b on b.object_Id = c.class_Id and b.type = 19
   where coalesce(b.value, 1) = 1
 )
-select m.wcid, hex(e.landblock), count(*) from encounter e join mon m on m.root = e.weenie_Class_Id
-group by m.wcid, e.landblock;'
+select m.wcid, hex(e.landblock), e.cell_X, e.cell_Y, count(*) from encounter e
+join mon m on m.root = e.weenie_Class_Id
+group by m.wcid, e.landblock, e.cell_X, e.cell_Y;'
 
 # The generators in the world themselves, where a spawn chain starts: placed, or an encounter.
 q roots 'select distinct weenie_Class_Id from landblock_instance

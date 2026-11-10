@@ -226,9 +226,16 @@ fn source_ground(source: &'static Source, landblock: u32, entries: u32) -> Sourc
             at: s.at,
             cell: s.cell,
         });
+    // One the encounter table alone puts out, at its corner there: a landblock's middle can be sea.
+    let met = source
+        .places
+        .iter()
+        .find(|p| p.cell >> 16 == landblock)
+        .copied();
     // The way in lands where `Ground::place` would, without its scan of every portal.
     let place = match (way_in, ground_at(landblock)) {
         _ if spawn.is_some() => spawn,
+        _ if met.is_some() => met,
         (Some(p), _) => Some(Place {
             at: p.to,
             cell: p.to_cell,

@@ -152,7 +152,9 @@ with a surface counts only its outdoor spawns, so a quest's share of a ground (Â
 of like with like (`Ground::count` counts the same entries). A creature nothing placed spawns
 takes its landblocks from the `encounter` table instead (Landblock.cs:269-290), its 64 with the
 most generators: the Mosswart Mire-Witch, whose Tattered Virindi Cloak starts the Singularity
-Scepters, is put out only by Marae Lassel's shore encounters.
+Scepters, is put out only by Marae Lassel's shore encounters. Each landblock's `at` is its busiest
+encounter corner, where she is sought: a landblock's middle can be sea (0x97ED), and a journey to a
+spot at sea is refused before it sets off (8 of her 64 corners are).
 
 ### 1.4 The walk
 

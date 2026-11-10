@@ -290,3 +290,19 @@ fn a_hunted_creature_is_sought_where_it_spawns() {
     let place = mines.place.expect("a place");
     assert_eq!(place.cell, 0x0188_010D, "{place:?}");
 }
+
+#[test]
+fn a_creature_only_the_encounter_table_spawns_is_sought_at_its_corner_there() {
+    // The middle of 0x97ED, one of the Mosswart Mire-Witch's 64 landblocks, is sea: the trip
+    // there was walked at from every portal and recall. Her generator's corner there is shore.
+    let grounds = source_grounds(&Want::Item(9117));
+    let g = grounds
+        .iter()
+        .find(|g| g.source.wcid == 9163 && g.landblock == 0x97ED)
+        .expect("the Mire-Witch at 0x97ED");
+    let at = g.place.expect("a place");
+    assert_eq!(at.cell >> 16, 0x97ED);
+    let local = at.at - crate::landblock_origin(at.cell);
+    assert_eq!((local.x, local.y), (144.0, 120.0), "{at:?}");
+    assert_eq!(at.cell, crate::outdoor_cell(at.cell, local));
+}

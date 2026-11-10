@@ -2345,7 +2345,12 @@ fn a_quests_item_another_quest_rewards_is_had_by_that_hand_in_first() {
 fn at_a_mire_witch_ground(now: std::time::Instant) -> (Client, u32) {
     let mut c = mage_pursuing("give:27841", "chained-quests");
     c.refresh_quests(now);
-    let (lb, at) = c.autoplay.growth.pursuit_grounds[0];
+    // Her first ground on land: 0xB813's corner is sea, where no walk starts.
+    let grounds = c.autoplay.growth.pursuit_grounds.clone();
+    let (lb, at) = *grounds
+        .iter()
+        .find(|(_, p)| !c.is_at_sea(p.at.truncate()))
+        .expect("a ground on land");
     let origin = ac_world::landblock_origin(at.cell);
     crate::testkit::stand(&mut c, at.cell, at.at - origin);
     again(&mut c, now);

@@ -264,7 +264,8 @@ pub struct Source {
     pub chance: f32,
     /// `(landblock, spawn entries)` as `hunting::Ground::count` counts; a placed one's `(cell, 1)`.
     pub landblocks: Vec<(u32, u32)>,
-    /// A placed source's spots, one per `landblocks` entry; empty for a hunted one.
+    /// A placed source's spots, one per `landblocks` entry; a hunted one's only when the encounter
+    /// table alone spawns it (each landblock's busiest encounter corner).
     pub places: Vec<Place>,
     /// The keys that open a locked container, or the items used on a use's object, `(wcid, name)`:
     /// each a want with sources of its own.
@@ -455,7 +456,15 @@ fn parse_spots(cells: &[(u32, u32)], at: &str) -> Option<Vec<Place>> {
             .collect::<Result<_, _>>()
             .ok()?;
         let [x, y, z] = xyz[..] else { return None };
-        let at = crate::landblock_origin(cell) + Vec3::new(x, y, z);
+        // A hunted source's entry is a landblock (`10FC`), a placed one's a cell.
+        let cell = if cell <= 0xFFFF { cell << 16 } else { cell };
+        let local = Vec3::new(x, y, z);
+        let at = crate::landblock_origin(cell) + local;
+        let cell = if cell & 0xFFFF == 0 {
+            crate::outdoor_cell(cell, local)
+        } else {
+            cell
+        };
         out.push(Place { at, cell });
     }
     Some(out)

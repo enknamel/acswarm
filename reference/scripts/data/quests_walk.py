@@ -38,6 +38,13 @@ def rows(dump, name):
             yield line.rstrip("\n").split("\t")
 
 
+def corner(cells):
+    """Of a landblock's encounter `(count, cell_X, cell_Y)`s, the busiest corner (the one nearest
+    the middle of a tie) as metres into the landblock, clamped as ACE does (Landblock.cs:281-282)."""
+    _, x, y = max(cells, key=lambda c: (c[0], -abs(c[1] - 4) - abs(c[2] - 4)))
+    return tuple(min(max(v * 24.0, 0.5), 191.5) for v in (x, y))
+
+
 def num(s, default=0.0):
     try:
         return float(s)
@@ -104,14 +111,20 @@ class Data:
         # The encounter table's, only for a creature nothing placed spawns, and only its
         # ENCOUNTER_BLOCKS landblocks with the most generators: all of a common one's thousands
         # took the table from under 1 MB to 37 MB (a Banished Drudge is on 8,363).
+        # Each landblock's spot is its corner with the most, at 24 m a cell (Landblock.cs:281-282):
+        # a landblock's middle can be sea (the Mire-Witch's 0x97ED).
         placed = set(self.spawns)
-        met = defaultdict(list)
-        for wcid, lb, n in rows(dump, "encounters"):
+        met = defaultdict(lambda: defaultdict(list))
+        for wcid, lb, x, y, n in rows(dump, "encounters"):
             if int(wcid) not in placed:
-                met[int(wcid)].append((int(lb, 16), int(n)))
+                met[int(wcid)][int(lb, 16)].append((int(n), int(x), int(y)))
+        self.met_at = {}
         for wcid, blocks in met.items():
-            blocks.sort(key=lambda b: (-b[1], b[0]))
-            self.spawns[wcid] = sorted(blocks[:ENCOUNTER_BLOCKS])
+            counts = sorted(((sum(c[0] for c in cs), lb) for lb, cs in blocks.items()),
+                            key=lambda b: (-b[0], b[1]))
+            kept = sorted((lb, n) for n, lb in counts[:ENCOUNTER_BLOCKS])
+            self.spawns[wcid] = kept
+            self.met_at[wcid] = [corner(blocks[lb]) for lb, _ in kept]
         # What lies about: placed objects but creatures and buildings, by wcid.
         # And the placements a generator makes, linked to it: made there with a guid of their own.
         self.ground, self.linked = defaultdict(list), defaultdict(list)
@@ -726,6 +739,9 @@ def build(data, never):
             at = ";".join("%s %s %s" % (x, y, z) for _, x, y, z in spots)
         else:
             where = ";".join("%X:%d" % lb for lb in sorted(data.spawns[c]))
+            # A creature the encounter table alone puts out: where on each landblock.
+            if c in data.met_at:
+                at = ";".join("%g %g 0" % xy for xy in data.met_at[c])
         # No chain known (an emote's summons, a linked placement): no figure, not a rare one.
         share = data.spawn_share(c) if kind in ("drop", "kill") else 0.0
         spawn = "%g" % round(share, 4) if share > 0 else ""
@@ -913,7 +929,8 @@ SOURCES_HEADER = """\
 # (a placed object a recipe makes it on, from a carried item used on it) or combine (a carried
 # item a recipe makes it on; nowhere to go). landblocks: hex landblock:spawn entries;... (for
 # an npc, floor, container or use, hex cell:1 per placement, with at the matching local
-# "x y z";...). keys: for a locked container, the keys whose KeyCode is its LockCode; for a
+# "x y z";...; for a drop or kill the encounter table alone spawns, each landblock's busiest
+# encounter corner, "x y 0";...). keys: for a locked container, the keys whose KeyCode is its LockCode; for a
 # use, the items used on it; for a combine, the item used then the one used on;
 # wcid=name;..., each a want of its own rows. A shop's stock is vendors.csv's, joined at load (ac_world::quests::sources).
 # spawn: for a drop or kill, the best share of a generator roll that puts the creature out (1 sure;
