@@ -71,6 +71,8 @@ use crate::autoplay::Doing;
 use crate::did::Did;
 use crate::{Client, Goal};
 
+pub mod rings;
+
 /// A projectile arriving later than this is left for a later tick: it
 /// may yet be for someone else, and there is time.
 pub const HORIZON: f32 = 1.5;
@@ -197,6 +199,8 @@ pub struct State {
     pub pulling: Option<(u32, Instant, Option<Place>)>,
     /// Each door Setup's box in its own frame (see `Client::doors_near`).
     pub door_boxes: HashMap<u32, Option<(Vec3, Vec3)>>,
+    /// Ring casters seen starting a cast, by guid (see `Client::step_out_of_rings`).
+    pub ring_casts: HashMap<u32, rings::RingCast>,
 }
 
 /// A projectile leaving this long after a cast is not taken for it.
@@ -1188,6 +1192,7 @@ impl Client {
                 },
             );
         }
+        self.watch_ring_casts(now);
         // A sidestep under way is kept up, unless its end is itself in the path of something that
         // can hurt us (only that: a fellow's bolt crossing the spot is let land).
         if let Some((goal, _)) = self.dodge_to {
@@ -1201,13 +1206,10 @@ impl Client {
             }
             self.dodge_to = None;
         }
-        if self.dodge.tracks.is_empty() {
-            return false;
-        }
-        // The soonest projectile on its way to us that can hurt us.
+        // The soonest projectile on its way to us that can hurt us; with none, a ring being cast.
         let soonest = self.soonest(now, me);
         let Some((guid, eta)) = soonest else {
-            return false;
+            return self.step_out_of_rings(now, me, cell);
         };
         let track = self.dodge.tracks[&guid];
         let name = self
