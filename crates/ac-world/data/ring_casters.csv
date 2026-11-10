@@ -1,0 +1,861 @@
+# Creatures whose spell book holds a ring spell, one row per creature and ring.
+# wcid,spell_id,range,speed,creature,spell
+# range is the ring's BaseRangeConstant in metres: each projectile bursts once it is that far
+# from where it spawned, round the caster (WorldObject_Tick.cs:351-362). speed is the
+# projectile's MaximumVelocity, m/s. Names are there to read by; the client matches on the ids.
+# Regenerate with reference/scripts/data/ring_casters.sh (the ACE world database and the
+# client's SpellTable).
+8675,1783,4.5,2,Asheron,Searing Disc
+8675,1784,4.5,2,Asheron,Horizon's Blades
+8675,1785,4.5,2,Asheron,Cassius' Ring of Fire
+8675,1786,4.5,2,Asheron,Nuhmudira's Spines
+8675,1788,4.5,2,Asheron,Eye of the Storm
+8675,1789,4.5,2,Asheron,Tectonic Rifts
+8819,1784,4.5,2,Chakron Flux Virindi Master,Horizon's Blades
+8819,1785,4.5,2,Chakron Flux Virindi Master,Cassius' Ring of Fire
+8820,1784,4.5,2,Chakron Flux Virindi Servant,Horizon's Blades
+8820,1785,4.5,2,Chakron Flux Virindi Servant,Cassius' Ring of Fire
+9048,1787,4.5,2,Guardian Golem,Halo of Frost
+9099,1785,4.5,2,Summoned Pulsar Wisp,Cassius' Ring of Fire
+10814,1784,4.5,2,Virindi Inquisitor,Horizon's Blades
+10814,1785,4.5,2,Virindi Inquisitor,Cassius' Ring of Fire
+10815,1784,4.5,2,Virindi Inquisitor,Horizon's Blades
+10815,1785,4.5,2,Virindi Inquisitor,Cassius' Ring of Fire
+10819,1784,4.5,2,Ephor of Unity,Horizon's Blades
+10819,1785,4.5,2,Ephor of Unity,Cassius' Ring of Fire
+12231,1784,4.5,2,Virindi Grand Inquisitor,Horizon's Blades
+12231,1785,4.5,2,Virindi Grand Inquisitor,Cassius' Ring of Fire
+14513,1783,4.5,2,Caustic,Searing Disc
+14514,1783,4.5,2,Miasma,Searing Disc
+14515,1783,4.5,2,Miasma,Searing Disc
+14516,1783,4.5,2,Caustic,Searing Disc
+14876,1783,4.5,2,Maelstrom,Searing Disc
+14876,1788,4.5,2,Maelstrom,Eye of the Storm
+14877,1783,4.5,2,Tsuric,Searing Disc
+14877,1788,4.5,2,Tsuric,Eye of the Storm
+14878,1785,4.5,2,Sirrocco,Cassius' Ring of Fire
+14878,1787,4.5,2,Sirrocco,Halo of Frost
+14879,1785,4.5,2,Sirrocco,Cassius' Ring of Fire
+14879,1787,4.5,2,Sirrocco,Halo of Frost
+14880,1785,4.5,2,Theral,Cassius' Ring of Fire
+14880,1787,4.5,2,Theral,Halo of Frost
+19537,1787,4.5,2,Avalanche,Halo of Frost
+19537,1788,4.5,2,Avalanche,Eye of the Storm
+19538,1787,4.5,2,Blizzard,Halo of Frost
+19538,1788,4.5,2,Blizzard,Eye of the Storm
+19539,1783,4.5,2,Conflagration,Searing Disc
+19539,1785,4.5,2,Conflagration,Cassius' Ring of Fire
+19540,1783,4.5,2,Scoriscant,Searing Disc
+19540,1785,4.5,2,Scoriscant,Cassius' Ring of Fire
+20028,2672,4.5,8,Martine,Ring of True Pain
+20028,2673,4.5,8,Martine,Ring of Unspeakable Agony
+20193,1783,4.5,2,Asheron,Searing Disc
+20193,1784,4.5,2,Asheron,Horizon's Blades
+20193,1785,4.5,2,Asheron,Cassius' Ring of Fire
+20193,1786,4.5,2,Asheron,Nuhmudira's Spines
+20193,1788,4.5,2,Asheron,Eye of the Storm
+20193,1789,4.5,2,Asheron,Tectonic Rifts
+20195,1783,4.5,2,Gaerlan,Searing Disc
+20195,1784,4.5,2,Gaerlan,Horizon's Blades
+20195,1785,4.5,2,Gaerlan,Cassius' Ring of Fire
+20195,1786,4.5,2,Gaerlan,Nuhmudira's Spines
+20195,1788,4.5,2,Gaerlan,Eye of the Storm
+20195,1789,4.5,2,Gaerlan,Tectonic Rifts
+20864,1783,4.5,2,Corrosion,Searing Disc
+20865,1783,4.5,2,Corrosion,Searing Disc
+20866,1783,4.5,2,Corrosion,Searing Disc
+20867,1783,4.5,2,Corrosion,Searing Disc
+20868,1783,4.5,2,Corrosion,Searing Disc
+20869,1783,4.5,2,Corrosion,Searing Disc
+20870,1783,4.5,2,Corrosion,Searing Disc
+20871,1785,4.5,2,Strife,Cassius' Ring of Fire
+20872,1785,4.5,2,Strife,Cassius' Ring of Fire
+20873,1787,4.5,2,Stasis,Halo of Frost
+20874,1787,4.5,2,Stasis,Halo of Frost
+20875,1787,4.5,2,Stasis,Halo of Frost
+20876,1787,4.5,2,Conflagration,Halo of Frost
+20877,1787,4.5,2,Conflagration,Halo of Frost
+20878,1787,4.5,2,Conflagration,Halo of Frost
+20879,1787,4.5,2,Conflagration,Halo of Frost
+20880,1785,4.5,2,Strife,Cassius' Ring of Fire
+20881,1785,4.5,2,Strife,Cassius' Ring of Fire
+20882,1785,4.5,2,Strife,Cassius' Ring of Fire
+20883,1785,4.5,2,Strife,Cassius' Ring of Fire
+20884,1785,4.5,2,Strife,Cassius' Ring of Fire
+20885,1788,4.5,2,Tempest,Eye of the Storm
+20886,1788,4.5,2,Tempest,Eye of the Storm
+20887,1788,4.5,2,Tempest,Eye of the Storm
+20888,1788,4.5,2,Tempest,Eye of the Storm
+20889,1788,4.5,2,Tempest,Eye of the Storm
+20890,1788,4.5,2,Tempest,Eye of the Storm
+20891,1788,4.5,2,Tempest,Eye of the Storm
+21383,1783,4.5,2,Gaerlan,Searing Disc
+21386,1785,4.5,2,Gaerlan,Cassius' Ring of Fire
+21388,1787,4.5,2,Gaerlan,Halo of Frost
+21390,1788,4.5,2,Gaerlan,Eye of the Storm
+22054,1784,4.5,2,Virindi Profatrix,Horizon's Blades
+22054,1785,4.5,2,Virindi Profatrix,Cassius' Ring of Fire
+22905,1783,4.5,2,Lich Oppressor,Searing Disc
+22905,1785,4.5,2,Lich Oppressor,Cassius' Ring of Fire
+22905,1787,4.5,2,Lich Oppressor,Halo of Frost
+22913,1784,4.5,2,The Auditor,Horizon's Blades
+22913,1785,4.5,2,The Auditor,Cassius' Ring of Fire
+22913,1788,4.5,2,The Auditor,Eye of the Storm
+22914,1784,4.5,2,Virindi Profane,Horizon's Blades
+22914,1785,4.5,2,Virindi Profane,Cassius' Ring of Fire
+22914,1788,4.5,2,Virindi Profane,Eye of the Storm
+22915,1784,4.5,2,The Sage,Horizon's Blades
+22915,1785,4.5,2,The Sage,Cassius' Ring of Fire
+22915,1788,4.5,2,The Sage,Eye of the Storm
+23569,1784,4.5,2,Virindi Adjudicator,Horizon's Blades
+23569,1785,4.5,2,Virindi Adjudicator,Cassius' Ring of Fire
+23570,1784,4.5,2,Virindi Paradox,Horizon's Blades
+23570,1785,4.5,2,Virindi Paradox,Cassius' Ring of Fire
+24661,1783,4.5,2,Tumerok Renegade,Searing Disc
+24661,1784,4.5,2,Tumerok Renegade,Horizon's Blades
+24661,1785,4.5,2,Tumerok Renegade,Cassius' Ring of Fire
+24661,1786,4.5,2,Tumerok Renegade,Nuhmudira's Spines
+24661,1788,4.5,2,Tumerok Renegade,Eye of the Storm
+24661,1789,4.5,2,Tumerok Renegade,Tectonic Rifts
+24856,1783,4.5,2,Harbinger,Searing Disc
+24856,1785,4.5,2,Harbinger,Cassius' Ring of Fire
+24856,1787,4.5,2,Harbinger,Halo of Frost
+24856,1788,4.5,2,Harbinger,Eye of the Storm
+24857,1783,4.5,2,Harbinger,Searing Disc
+24857,1785,4.5,2,Harbinger,Cassius' Ring of Fire
+24857,1787,4.5,2,Harbinger,Halo of Frost
+24857,1788,4.5,2,Harbinger,Eye of the Storm
+25349,1784,4.5,2,Virindi Profane,Horizon's Blades
+25349,1785,4.5,2,Virindi Profane,Cassius' Ring of Fire
+25349,1788,4.5,2,Virindi Profane,Eye of the Storm
+25753,1785,4.5,2,Scold,Cassius' Ring of Fire
+27429,1784,4.5,2,Consumed Wraith,Horizon's Blades
+27429,1785,4.5,2,Consumed Wraith,Cassius' Ring of Fire
+27429,1786,4.5,2,Consumed Wraith,Nuhmudira's Spines
+27429,1787,4.5,2,Consumed Wraith,Halo of Frost
+27429,1788,4.5,2,Consumed Wraith,Eye of the Storm
+28039,1784,4.5,2,Martinate Virindi Inquisitor,Horizon's Blades
+28039,1785,4.5,2,Martinate Virindi Inquisitor,Cassius' Ring of Fire
+28055,1788,4.5,2,Spectral Wisp,Eye of the Storm
+28381,3427,0,18,Coglock,Lesser Withering
+28382,3428,0,18,Glogluuk,Withering
+28384,3426,0,18,Plocagruuk,Greater Withering
+28716,1783,4.5,2,Sir Bellas,Searing Disc
+28716,1788,4.5,2,Sir Bellas,Eye of the Storm
+28716,1789,4.5,2,Sir Bellas,Tectonic Rifts
+29007,3426,0,18,Broodu,Greater Withering
+29007,3452,4.5,2,Broodu,Concussive Wail
+29007,3455,4.5,2,Broodu,Koruu Cloud
+29007,3458,4.5,2,Broodu,Mana Purge
+29007,3459,15,2,Broodu,Mucor Cloud
+29008,3426,0,18,Browerk,Greater Withering
+29008,3452,4.5,2,Browerk,Concussive Wail
+29008,3455,4.5,2,Browerk,Koruu Cloud
+29008,3458,4.5,2,Browerk,Mana Purge
+29008,3459,15,2,Browerk,Mucor Cloud
+29009,3426,0,18,Kiree,Greater Withering
+29009,3452,4.5,2,Kiree,Concussive Wail
+29009,3455,4.5,2,Kiree,Koruu Cloud
+29009,3458,4.5,2,Kiree,Mana Purge
+29009,3459,15,2,Kiree,Mucor Cloud
+29010,3426,0,18,Keerik,Greater Withering
+29010,3452,4.5,2,Keerik,Concussive Wail
+29010,3455,4.5,2,Keerik,Koruu Cloud
+29010,3458,4.5,2,Keerik,Mana Purge
+29010,3459,15,2,Keerik,Mucor Cloud
+29011,3426,0,18,Reeshan,Greater Withering
+29011,3452,4.5,2,Reeshan,Concussive Wail
+29011,3455,4.5,2,Reeshan,Koruu Cloud
+29011,3458,4.5,2,Reeshan,Mana Purge
+29011,3459,15,2,Reeshan,Mucor Cloud
+29012,3426,0,18,Rehir,Greater Withering
+29012,3452,4.5,2,Rehir,Concussive Wail
+29012,3455,4.5,2,Rehir,Koruu Cloud
+29012,3458,4.5,2,Rehir,Mana Purge
+29012,3459,15,2,Rehir,Mucor Cloud
+30448,1784,4.5,2,Southern Overseer,Horizon's Blades
+30448,1785,4.5,2,Southern Overseer,Cassius' Ring of Fire
+30449,1784,4.5,2,Western Overseer,Horizon's Blades
+30449,1785,4.5,2,Western Overseer,Cassius' Ring of Fire
+30755,1783,4.5,2,Virulence,Searing Disc
+31827,1785,4.5,2,Incendiary Knight,Cassius' Ring of Fire
+31828,1787,4.5,2,Glacial Knight,Halo of Frost
+31829,1788,4.5,2,Galvanic Knight,Eye of the Storm
+31830,5361,4.5,2,Tenebrous Knight,Clouded Soul
+31832,1783,4.5,2,Caustic Knight,Searing Disc
+31897,1787,4.5,2,Barbaric Mukkir,Halo of Frost
+31898,1787,4.5,2,Umbral Mukkir,Halo of Frost
+31901,1785,4.5,2,Fanatical Mukkir,Cassius' Ring of Fire
+32734,3884,8,2,Essence of Enchantment,Glacial Ring
+32735,3885,8,2,Essence of Artifice,Galvanic Ring
+32736,3881,8,2,Essence of Verdancy,Corrosive Ring
+32737,3882,8,2,Essence of Strife,Incendiary Ring
+32737,3883,8,2,Essence of Strife,Pyroclastic Explosion
+32740,1787,4.5,2,Hand of Enchantment,Halo of Frost
+32932,3902,4.5,4,Son of Pooky,Ring around the Rabbit
+32932,3903,4.5,2,Son of Pooky,Whirlwind
+33037,1783,4.5,2,Vile Mukkir,Searing Disc
+33038,1788,4.5,2,Coruscating Mukkir,Eye of the Storm
+33130,1783,4.5,2,Mukkir,Searing Disc
+33131,1788,4.5,2,Mukkir Laktar,Eye of the Storm
+33132,1785,4.5,2,Mukkir Kartak,Cassius' Ring of Fire
+33133,1783,4.5,2,Mukkir Draktehn,Searing Disc
+33145,1787,4.5,2,Dealith,Halo of Frost
+33163,1784,4.5,2,Captain Faalx,Horizon's Blades
+33163,1785,4.5,2,Captain Faalx,Cassius' Ring of Fire
+33163,1786,4.5,2,Captain Faalx,Nuhmudira's Spines
+33163,1787,4.5,2,Captain Faalx,Halo of Frost
+33163,1788,4.5,2,Captain Faalx,Eye of the Storm
+33165,3914,4.5,1.8,Shadow Cyst,Dark Vortex
+33166,1784,4.5,2,Isin Dule's Lieutenant,Horizon's Blades
+33166,1785,4.5,2,Isin Dule's Lieutenant,Cassius' Ring of Fire
+33166,1786,4.5,2,Isin Dule's Lieutenant,Nuhmudira's Spines
+33166,1787,4.5,2,Isin Dule's Lieutenant,Halo of Frost
+33166,1788,4.5,2,Isin Dule's Lieutenant,Eye of the Storm
+33167,1784,4.5,2,Umbral Soldier,Horizon's Blades
+33167,1785,4.5,2,Umbral Soldier,Cassius' Ring of Fire
+33167,1786,4.5,2,Umbral Soldier,Nuhmudira's Spines
+33167,1787,4.5,2,Umbral Soldier,Halo of Frost
+33167,1788,4.5,2,Umbral Soldier,Eye of the Storm
+33168,1784,4.5,2,Panumbral Soldier,Horizon's Blades
+33168,1785,4.5,2,Panumbral Soldier,Cassius' Ring of Fire
+33168,1786,4.5,2,Panumbral Soldier,Nuhmudira's Spines
+33168,1787,4.5,2,Panumbral Soldier,Halo of Frost
+33168,1788,4.5,2,Panumbral Soldier,Eye of the Storm
+33170,1784,4.5,2,Lieutenant Beraxis,Horizon's Blades
+33170,1785,4.5,2,Lieutenant Beraxis,Cassius' Ring of Fire
+33170,1786,4.5,2,Lieutenant Beraxis,Nuhmudira's Spines
+33170,1787,4.5,2,Lieutenant Beraxis,Halo of Frost
+33170,1788,4.5,2,Lieutenant Beraxis,Eye of the Storm
+33171,1784,4.5,2,Lieutenant Shenza,Horizon's Blades
+33171,1785,4.5,2,Lieutenant Shenza,Cassius' Ring of Fire
+33171,1786,4.5,2,Lieutenant Shenza,Nuhmudira's Spines
+33171,1787,4.5,2,Lieutenant Shenza,Halo of Frost
+33171,1788,4.5,2,Lieutenant Shenza,Eye of the Storm
+33172,1784,4.5,2,Lieutenant Yezusthule,Horizon's Blades
+33172,1785,4.5,2,Lieutenant Yezusthule,Cassius' Ring of Fire
+33172,1786,4.5,2,Lieutenant Yezusthule,Nuhmudira's Spines
+33172,1787,4.5,2,Lieutenant Yezusthule,Halo of Frost
+33172,1788,4.5,2,Lieutenant Yezusthule,Eye of the Storm
+33174,1784,4.5,2,Panumbral Soldier,Horizon's Blades
+33174,1785,4.5,2,Panumbral Soldier,Cassius' Ring of Fire
+33174,1786,4.5,2,Panumbral Soldier,Nuhmudira's Spines
+33174,1787,4.5,2,Panumbral Soldier,Halo of Frost
+33174,1788,4.5,2,Panumbral Soldier,Eye of the Storm
+33175,1784,4.5,2,Umbral Soldier,Horizon's Blades
+33175,1785,4.5,2,Umbral Soldier,Cassius' Ring of Fire
+33175,1786,4.5,2,Umbral Soldier,Nuhmudira's Spines
+33175,1787,4.5,2,Umbral Soldier,Halo of Frost
+33175,1788,4.5,2,Umbral Soldier,Eye of the Storm
+33218,1783,4.5,2,Child of Verdancy,Searing Disc
+33219,3884,8,2,Essence of Enchantment,Glacial Ring
+33220,3885,8,2,Essence of Artifice,Galvanic Ring
+33221,3881,8,2,Essence of Verdancy,Corrosive Ring
+33222,3882,8,2,Essence of Strife,Incendiary Ring
+33222,3883,8,2,Essence of Strife,Pyroclastic Explosion
+33223,1785,4.5,2,Child of Strife,Cassius' Ring of Fire
+33224,1787,4.5,2,Child of Enchantment,Halo of Frost
+33225,1788,4.5,2,Child of Artifice,Eye of the Storm
+33231,1783,4.5,2,Harbinger,Searing Disc
+33231,1785,4.5,2,Harbinger,Cassius' Ring of Fire
+33231,1787,4.5,2,Harbinger,Halo of Frost
+33231,1788,4.5,2,Harbinger,Eye of the Storm
+33458,3914,4.5,1.8,Mukkir Aspect of Grael,Dark Vortex
+33458,3937,15,2,Mukkir Aspect of Grael,Heavy Force Ring
+33458,3938,15,2,Mukkir Aspect of Grael,Heavy Frost Ring
+33458,3947,15,8,Mukkir Aspect of Grael,Blade Wave
+33458,3952,15,8,Mukkir Aspect of Grael,Shock Waves
+33514,1783,4.5,2,Vargol the Scion,Searing Disc
+33538,1785,4.5,2,Fanatical Mukkir Ward Guardian,Cassius' Ring of Fire
+33798,1783,4.5,2,Commander Jared Kurth,Searing Disc
+33798,1788,4.5,2,Commander Jared Kurth,Eye of the Storm
+33798,1789,4.5,2,Commander Jared Kurth,Tectonic Rifts
+33844,1785,4.5,2,Black Flame,Cassius' Ring of Fire
+33898,1788,4.5,2,Mukkir Progenitor,Eye of the Storm
+34046,3937,15,2,Lunnum,Heavy Force Ring
+34046,3990,15,2,Lunnum,Heavy Frost Ring
+34623,1784,4.5,2,Azaxis,Horizon's Blades
+34623,1785,4.5,2,Azaxis,Cassius' Ring of Fire
+34971,3882,8,2,Falatacot Blood Prophetess,Incendiary Ring
+35059,1785,4.5,2,Hatred Wisp,Cassius' Ring of Fire
+35089,3881,8,2,Despair Wisp,Corrosive Ring
+35090,3884,8,2,Sorrow Wisp,Glacial Ring
+35092,1784,4.5,2,Wight Captain,Horizon's Blades
+35093,1786,4.5,2,Wight Blade Sorcerer,Nuhmudira's Spines
+35142,1783,4.5,2,Mukkir Draktehn,Searing Disc
+35143,1785,4.5,2,Mukkir Kartak,Cassius' Ring of Fire
+35144,1788,4.5,2,Mukkir Laktar,Eye of the Storm
+35145,1787,4.5,2,Umbral Mukkir,Halo of Frost
+35164,1784,4.5,2,Virindi Paradox,Horizon's Blades
+35164,1785,4.5,2,Virindi Paradox,Cassius' Ring of Fire
+35174,3882,8,2,High Acolyte of the Blood,Incendiary Ring
+35174,3883,8,2,High Acolyte of the Blood,Pyroclastic Explosion
+35175,3881,8,2,High Acolyte of Sacrifice,Corrosive Ring
+35176,3884,8,2,High Acolyte of the Spirit,Glacial Ring
+35191,3885,8,2,Thunder Chicken,Galvanic Ring
+35191,3941,15,2,Thunder Chicken,Heavy Lightning Ring
+35191,3974,5,2,Thunder Chicken,Lightning Bomb
+35378,3948,15,8,Lord Cynreft Mhoire,Flame Wave
+35393,3884,8,2,Lady Tairla Mhoire,Glacial Ring
+35393,3950,15,8,Lady Tairla Mhoire,Frost Wave
+35400,1787,4.5,2,Corrupted Dread,Halo of Frost
+35481,1784,4.5,2,Watcher in the Warren,Horizon's Blades
+35481,1785,4.5,2,Watcher in the Warren,Cassius' Ring of Fire
+35559,1788,4.5,2,Tempest Shadow,Eye of the Storm
+35560,1784,4.5,2,The Archivist,Horizon's Blades
+35940,3881,8,2,Mudmouth,Corrosive Ring
+35985,3941,15,2,A Shadow of Black Ferah,Heavy Lightning Ring
+35985,3946,15,8,A Shadow of Black Ferah,Acid Wave
+35986,3941,15,2,A Shadow of Ler Rhan,Heavy Lightning Ring
+35986,3946,15,8,A Shadow of Ler Rhan,Acid Wave
+36037,1784,4.5,2,Avarice,Horizon's Blades
+36037,1785,4.5,2,Avarice,Cassius' Ring of Fire
+36038,1784,4.5,2,Change,Horizon's Blades
+36038,1785,4.5,2,Change,Cassius' Ring of Fire
+36039,1784,4.5,2,Chaos,Horizon's Blades
+36041,1784,4.5,2,Individuality,Horizon's Blades
+36041,1785,4.5,2,Individuality,Cassius' Ring of Fire
+36044,3885,8,2,Claude the Dark Archmage,Galvanic Ring
+36044,3974,5,2,Claude the Dark Archmage,Lightning Bomb
+36178,3881,8,2,Harbinger,Corrosive Ring
+36178,3882,8,2,Harbinger,Incendiary Ring
+36178,3883,8,2,Harbinger,Pyroclastic Explosion
+36178,3884,8,2,Harbinger,Glacial Ring
+36178,3885,8,2,Harbinger,Galvanic Ring
+36178,3946,15,8,Harbinger,Acid Wave
+36178,3948,15,8,Harbinger,Flame Wave
+36178,3950,15,8,Harbinger,Frost Wave
+36178,3951,15,8,Harbinger,Lightning Wave
+36216,1784,4.5,2,Artifex of the Elements,Horizon's Blades
+36216,1785,4.5,2,Artifex of the Elements,Cassius' Ring of Fire
+36553,1784,4.5,2,Shadow-touched Virindi Paradox,Horizon's Blades
+36553,1785,4.5,2,Shadow-touched Virindi Paradox,Cassius' Ring of Fire
+36554,1784,4.5,2,Shadow-touched Virindi Quidiox,Horizon's Blades
+36554,1785,4.5,2,Shadow-touched Virindi Quidiox,Cassius' Ring of Fire
+36600,1784,4.5,2,Demerax the Sculptor,Horizon's Blades
+36600,1785,4.5,2,Demerax the Sculptor,Cassius' Ring of Fire
+36601,1784,4.5,2,Lab Guardian,Horizon's Blades
+36601,1785,4.5,2,Lab Guardian,Cassius' Ring of Fire
+36645,3914,4.5,1.8,Abyssal Shadow Lugian,Dark Vortex
+36647,3914,4.5,1.8,Shadow Kresovus,Dark Vortex
+36647,3995,15,2,Shadow Kresovus,Heavy Force Ring
+36647,3997,15,2,Shadow Kresovus,Heavy Lightning Ring
+36647,4010,15,8,Shadow Kresovus,Lightning Wave
+36648,3997,15,2,Shadow Kresovus,Heavy Lightning Ring
+36756,1784,4.5,2,Cleaner,Horizon's Blades
+36756,1785,4.5,2,Cleaner,Cassius' Ring of Fire
+36860,1784,4.5,2,Virindi Adjudicator,Horizon's Blades
+36860,1785,4.5,2,Virindi Adjudicator,Cassius' Ring of Fire
+36864,1784,4.5,2,Virindi Profane,Horizon's Blades
+36864,1785,4.5,2,Virindi Profane,Cassius' Ring of Fire
+36864,1788,4.5,2,Virindi Profane,Eye of the Storm
+36865,1784,4.5,2,Virindi Profatrix,Horizon's Blades
+36865,1785,4.5,2,Virindi Profatrix,Cassius' Ring of Fire
+36928,1783,4.5,2,Shade of Bael'Zharon,Searing Disc
+36928,1784,4.5,2,Shade of Bael'Zharon,Horizon's Blades
+36928,1785,4.5,2,Shade of Bael'Zharon,Cassius' Ring of Fire
+36928,1786,4.5,2,Shade of Bael'Zharon,Nuhmudira's Spines
+36928,1788,4.5,2,Shade of Bael'Zharon,Eye of the Storm
+36928,1789,4.5,2,Shade of Bael'Zharon,Tectonic Rifts
+36951,3881,8,2,Aerbax's Shadow,Corrosive Ring
+36951,3882,8,2,Aerbax's Shadow,Incendiary Ring
+36951,3884,8,2,Aerbax's Shadow,Glacial Ring
+36951,3885,8,2,Aerbax's Shadow,Galvanic Ring
+36951,3914,4.5,1.8,Aerbax's Shadow,Dark Vortex
+36951,3936,15,2,Aerbax's Shadow,Fire Bomb
+36951,3939,10,2,Aerbax's Shadow,Thaumic Bleed
+36951,3946,15,8,Aerbax's Shadow,Acid Wave
+36951,3947,15,8,Aerbax's Shadow,Blade Wave
+36951,3948,15,8,Aerbax's Shadow,Flame Wave
+36951,3949,15,8,Aerbax's Shadow,Force Wave
+36951,3950,15,8,Aerbax's Shadow,Frost Wave
+36951,3951,15,8,Aerbax's Shadow,Lightning Wave
+36951,3952,15,8,Aerbax's Shadow,Shock Waves
+36951,3969,5,2,Aerbax's Shadow,Acid Bomb
+36951,3970,5,2,Aerbax's Shadow,Blade Bomb
+36951,3972,5,2,Aerbax's Shadow,Force Bomb
+36951,3973,5,2,Aerbax's Shadow,Frost Bomb
+36951,3974,5,2,Aerbax's Shadow,Lightning Bomb
+36954,1783,4.5,2,Elemental Protector,Searing Disc
+36968,1784,4.5,2,Virindi Artificer,Horizon's Blades
+36968,1785,4.5,2,Virindi Artificer,Cassius' Ring of Fire
+36969,1784,4.5,2,Virindi Artificer,Horizon's Blades
+36969,1785,4.5,2,Virindi Artificer,Cassius' Ring of Fire
+36970,1784,4.5,2,Virindi Artificer,Horizon's Blades
+36970,1785,4.5,2,Virindi Artificer,Cassius' Ring of Fire
+36972,3970,5,2,Virindi Protector,Blade Bomb
+36972,3974,5,2,Virindi Protector,Lightning Bomb
+36972,5972,5,2,Virindi Protector,Galvanic Bomb
+37377,3881,8,2,Aerbax's Shadow,Corrosive Ring
+37377,3882,8,2,Aerbax's Shadow,Incendiary Ring
+37377,3884,8,2,Aerbax's Shadow,Glacial Ring
+37377,3885,8,2,Aerbax's Shadow,Galvanic Ring
+37377,3914,4.5,1.8,Aerbax's Shadow,Dark Vortex
+37377,3936,15,2,Aerbax's Shadow,Fire Bomb
+37377,3939,10,2,Aerbax's Shadow,Thaumic Bleed
+37377,3946,15,8,Aerbax's Shadow,Acid Wave
+37377,3947,15,8,Aerbax's Shadow,Blade Wave
+37377,3948,15,8,Aerbax's Shadow,Flame Wave
+37377,3949,15,8,Aerbax's Shadow,Force Wave
+37377,3950,15,8,Aerbax's Shadow,Frost Wave
+37377,3951,15,8,Aerbax's Shadow,Lightning Wave
+37377,3952,15,8,Aerbax's Shadow,Shock Waves
+37377,3969,5,2,Aerbax's Shadow,Acid Bomb
+37377,3970,5,2,Aerbax's Shadow,Blade Bomb
+37377,3972,5,2,Aerbax's Shadow,Force Bomb
+37377,3973,5,2,Aerbax's Shadow,Frost Bomb
+37377,3974,5,2,Aerbax's Shadow,Lightning Bomb
+37378,3881,8,2,Aerbax's Shadow,Corrosive Ring
+37378,3882,8,2,Aerbax's Shadow,Incendiary Ring
+37378,3884,8,2,Aerbax's Shadow,Glacial Ring
+37378,3885,8,2,Aerbax's Shadow,Galvanic Ring
+37378,3914,4.5,1.8,Aerbax's Shadow,Dark Vortex
+37378,3936,15,2,Aerbax's Shadow,Fire Bomb
+37378,3939,10,2,Aerbax's Shadow,Thaumic Bleed
+37378,3946,15,8,Aerbax's Shadow,Acid Wave
+37378,3947,15,8,Aerbax's Shadow,Blade Wave
+37378,3948,15,8,Aerbax's Shadow,Flame Wave
+37378,3949,15,8,Aerbax's Shadow,Force Wave
+37378,3950,15,8,Aerbax's Shadow,Frost Wave
+37378,3951,15,8,Aerbax's Shadow,Lightning Wave
+37378,3952,15,8,Aerbax's Shadow,Shock Waves
+37378,3969,5,2,Aerbax's Shadow,Acid Bomb
+37378,3970,5,2,Aerbax's Shadow,Blade Bomb
+37378,3972,5,2,Aerbax's Shadow,Force Bomb
+37378,3973,5,2,Aerbax's Shadow,Frost Bomb
+37378,3974,5,2,Aerbax's Shadow,Lightning Bomb
+37379,3881,8,2,Aerbax's Shadow,Corrosive Ring
+37379,3882,8,2,Aerbax's Shadow,Incendiary Ring
+37379,3884,8,2,Aerbax's Shadow,Glacial Ring
+37379,3885,8,2,Aerbax's Shadow,Galvanic Ring
+37379,3914,4.5,1.8,Aerbax's Shadow,Dark Vortex
+37379,3936,15,2,Aerbax's Shadow,Fire Bomb
+37379,3939,10,2,Aerbax's Shadow,Thaumic Bleed
+37379,3946,15,8,Aerbax's Shadow,Acid Wave
+37379,3947,15,8,Aerbax's Shadow,Blade Wave
+37379,3948,15,8,Aerbax's Shadow,Flame Wave
+37379,3949,15,8,Aerbax's Shadow,Force Wave
+37379,3950,15,8,Aerbax's Shadow,Frost Wave
+37379,3951,15,8,Aerbax's Shadow,Lightning Wave
+37379,3952,15,8,Aerbax's Shadow,Shock Waves
+37379,3969,5,2,Aerbax's Shadow,Acid Bomb
+37379,3970,5,2,Aerbax's Shadow,Blade Bomb
+37379,3972,5,2,Aerbax's Shadow,Force Bomb
+37379,3973,5,2,Aerbax's Shadow,Frost Bomb
+37379,3974,5,2,Aerbax's Shadow,Lightning Bomb
+37380,3881,8,2,Aerbax's Shadow,Corrosive Ring
+37380,3882,8,2,Aerbax's Shadow,Incendiary Ring
+37380,3884,8,2,Aerbax's Shadow,Glacial Ring
+37380,3885,8,2,Aerbax's Shadow,Galvanic Ring
+37380,3914,4.5,1.8,Aerbax's Shadow,Dark Vortex
+37380,3936,15,2,Aerbax's Shadow,Fire Bomb
+37380,3939,10,2,Aerbax's Shadow,Thaumic Bleed
+37380,3946,15,8,Aerbax's Shadow,Acid Wave
+37380,3947,15,8,Aerbax's Shadow,Blade Wave
+37380,3948,15,8,Aerbax's Shadow,Flame Wave
+37380,3949,15,8,Aerbax's Shadow,Force Wave
+37380,3950,15,8,Aerbax's Shadow,Frost Wave
+37380,3951,15,8,Aerbax's Shadow,Lightning Wave
+37380,3952,15,8,Aerbax's Shadow,Shock Waves
+37380,3969,5,2,Aerbax's Shadow,Acid Bomb
+37380,3970,5,2,Aerbax's Shadow,Blade Bomb
+37380,3972,5,2,Aerbax's Shadow,Force Bomb
+37380,3973,5,2,Aerbax's Shadow,Frost Bomb
+37380,3974,5,2,Aerbax's Shadow,Lightning Bomb
+37381,3881,8,2,Aerbax's Shadow,Corrosive Ring
+37381,3882,8,2,Aerbax's Shadow,Incendiary Ring
+37381,3884,8,2,Aerbax's Shadow,Glacial Ring
+37381,3885,8,2,Aerbax's Shadow,Galvanic Ring
+37381,3914,4.5,1.8,Aerbax's Shadow,Dark Vortex
+37381,3936,15,2,Aerbax's Shadow,Fire Bomb
+37381,3939,10,2,Aerbax's Shadow,Thaumic Bleed
+37381,3946,15,8,Aerbax's Shadow,Acid Wave
+37381,3947,15,8,Aerbax's Shadow,Blade Wave
+37381,3948,15,8,Aerbax's Shadow,Flame Wave
+37381,3949,15,8,Aerbax's Shadow,Force Wave
+37381,3950,15,8,Aerbax's Shadow,Frost Wave
+37381,3951,15,8,Aerbax's Shadow,Lightning Wave
+37381,3952,15,8,Aerbax's Shadow,Shock Waves
+37381,3969,5,2,Aerbax's Shadow,Acid Bomb
+37381,3970,5,2,Aerbax's Shadow,Blade Bomb
+37381,3972,5,2,Aerbax's Shadow,Force Bomb
+37381,3973,5,2,Aerbax's Shadow,Frost Bomb
+37381,3974,5,2,Aerbax's Shadow,Lightning Bomb
+37452,1787,4.5,2,Corrupted Dread,Halo of Frost
+37453,1785,4.5,2,Corrupted Maiden,Cassius' Ring of Fire
+37455,3882,8,2,Forge Golem,Incendiary Ring
+37460,1784,4.5,2,Wight Captain,Horizon's Blades
+37461,1786,4.5,2,Wight Blade Sorcerer,Nuhmudira's Spines
+38030,3882,8,2,Falatacot Blood Prophetess,Incendiary Ring
+38594,3882,8,2,Falatacot Blood Prophetess,Incendiary Ring
+38713,1787,4.5,2,Shambling Archivist,Halo of Frost
+38806,3948,15,8,Corrupted Pyre Spark,Flame Wave
+39161,3882,8,2,Falatacot Marauder,Incendiary Ring
+39166,3882,8,2,Falatacot Marauder,Incendiary Ring
+39167,3882,8,2,Falatacot Marauder,Incendiary Ring
+39168,3882,8,2,Falatacot Marauder,Incendiary Ring
+39171,3882,8,2,Falatacot Raider,Incendiary Ring
+39174,3882,8,2,Patriarch's Executioner,Incendiary Ring
+39182,3882,8,2,Patriarch's Executioner,Incendiary Ring
+39193,3882,8,2,Patriarch's Executioner,Incendiary Ring
+39196,3882,8,2,Patriarch's Executioner,Incendiary Ring
+39348,3882,8,2,Kazyk Ri T'thuunixis,Incendiary Ring
+39348,3883,8,2,Kazyk Ri T'thuunixis,Pyroclastic Explosion
+39349,3882,8,2,Kazyk Ri T'thuunixis,Incendiary Ring
+39349,3883,8,2,Kazyk Ri T'thuunixis,Pyroclastic Explosion
+39350,3882,8,2,Minik Ra T'thuunixis,Incendiary Ring
+39350,3883,8,2,Minik Ra T'thuunixis,Pyroclastic Explosion
+39351,3882,8,2,Minik Ra T'thuunixis,Incendiary Ring
+39351,3883,8,2,Minik Ra T'thuunixis,Pyroclastic Explosion
+39352,3882,8,2,Nivinizk T'thuunixis,Incendiary Ring
+39352,3883,8,2,Nivinizk T'thuunixis,Pyroclastic Explosion
+39353,3882,8,2,Nivinizk T'thuunixis,Incendiary Ring
+39353,3883,8,2,Nivinizk T'thuunixis,Pyroclastic Explosion
+39481,3882,8,2,Falatacot Guard,Incendiary Ring
+40132,3881,8,2,Aggregate Crystalline Wisp,Corrosive Ring
+40132,3882,8,2,Aggregate Crystalline Wisp,Incendiary Ring
+40132,3884,8,2,Aggregate Crystalline Wisp,Glacial Ring
+40132,3885,8,2,Aggregate Crystalline Wisp,Galvanic Ring
+40254,3882,8,2,Falatacot Patrol,Incendiary Ring
+40429,3881,8,2,Intense Aggregate Crystalline Wisp,Corrosive Ring
+40429,3882,8,2,Intense Aggregate Crystalline Wisp,Incendiary Ring
+40429,3884,8,2,Intense Aggregate Crystalline Wisp,Glacial Ring
+40429,3885,8,2,Intense Aggregate Crystalline Wisp,Galvanic Ring
+40472,1788,4.5,2,Moarsman Adherent of T'thuun,Eye of the Storm
+40473,1788,4.5,2,Icthis Moarsman,Eye of the Storm
+40477,1788,4.5,2,Shuthis Moarsman,Eye of the Storm
+40484,3881,8,2,Intense Aggregate Crystalline Wisp,Corrosive Ring
+40484,3882,8,2,Intense Aggregate Crystalline Wisp,Incendiary Ring
+40484,3884,8,2,Intense Aggregate Crystalline Wisp,Glacial Ring
+40484,3885,8,2,Intense Aggregate Crystalline Wisp,Galvanic Ring
+40498,1784,4.5,2,Apostate Master,Horizon's Blades
+40498,1785,4.5,2,Apostate Master,Cassius' Ring of Fire
+40499,1784,4.5,2,Apostate Servant,Horizon's Blades
+40499,1785,4.5,2,Apostate Servant,Cassius' Ring of Fire
+40924,1785,4.5,2,Bound Pyre Champion,Cassius' Ring of Fire
+40925,1785,4.5,2,Bound Light Falatacot,Cassius' Ring of Fire
+41190,1784,4.5,2,Apostate Excavation Master,Horizon's Blades
+41190,1785,4.5,2,Apostate Excavation Master,Cassius' Ring of Fire
+41191,1784,4.5,2,Apostate Excavation Foreman,Horizon's Blades
+41191,1785,4.5,2,Apostate Excavation Foreman,Cassius' Ring of Fire
+41229,1784,4.5,2,Apostate Reaving Master,Horizon's Blades
+41229,1785,4.5,2,Apostate Reaving Master,Cassius' Ring of Fire
+41551,3936,15,2,Iron Blade Overseer,Fire Bomb
+41551,3948,15,8,Iron Blade Overseer,Flame Wave
+41935,1784,4.5,2,Lord Hendrel,Horizon's Blades
+41936,3950,15,8,Corrupted Grave Frost,Frost Wave
+41937,1787,4.5,2,Lady Saliane,Halo of Frost
+41961,1787,4.5,2,Corrupted Dread,Halo of Frost
+41967,1786,4.5,2,Wight Blade Sorcerer,Nuhmudira's Spines
+41968,1784,4.5,2,Wight Captain,Horizon's Blades
+41970,1785,4.5,2,Hatred Wisp,Cassius' Ring of Fire
+41971,3884,8,2,Sorrow Wisp,Glacial Ring
+42025,1784,4.5,2,Wight Captain,Horizon's Blades
+42026,1786,4.5,2,Wight Blade Sorcerer,Nuhmudira's Spines
+42727,1784,4.5,2,Wight Kidnapper,Horizon's Blades
+43081,1784,4.5,2,Apostate Virindi Aggressor,Horizon's Blades
+43081,1785,4.5,2,Apostate Virindi Aggressor,Cassius' Ring of Fire
+43162,1784,4.5,2,Zombie Mage,Horizon's Blades
+43251,1785,4.5,2,Armored Guardian,Cassius' Ring of Fire
+43270,3948,15,8,Filinuvekta Hieromancer,Flame Wave
+43271,3881,8,2,Filinuvekta Exarch,Corrosive Ring
+43532,3882,8,2,Battle Lord Gregor,Incendiary Ring
+43689,6190,4.5,2,Frozen Wight Captain,Horizon's Blades II
+43690,1784,4.5,2,Frozen Wight,Horizon's Blades
+43690,1787,4.5,2,Frozen Wight,Halo of Frost
+43691,6193,4.5,2,Frozen Wight Sorcerer,Halo of Frost II
+43781,3946,15,8,Iron Golem,Acid Wave
+43781,3947,15,8,Iron Golem,Blade Wave
+43781,3948,15,8,Iron Golem,Flame Wave
+43781,3949,15,8,Iron Golem,Force Wave
+43781,3951,15,8,Iron Golem,Lightning Wave
+43781,3952,15,8,Iron Golem,Shock Waves
+43781,3969,5,2,Iron Golem,Acid Bomb
+43781,3970,5,2,Iron Golem,Blade Bomb
+43781,3975,5,2,Iron Golem,Shock Bomb
+43821,6190,4.5,2,Frozen Wight Captain,Horizon's Blades II
+43823,6193,4.5,2,Frozen Wight Sorcerer,Halo of Frost II
+43979,1785,4.5,2,Virindi Dreamslayer,Cassius' Ring of Fire
+44021,1785,4.5,2,Bak'tshay,Cassius' Ring of Fire
+44022,1785,4.5,2,Bak'tshay,Cassius' Ring of Fire
+44023,1785,4.5,2,Bak'tshay Guard,Cassius' Ring of Fire
+44024,1785,4.5,2,Bak'tshay Guard,Cassius' Ring of Fire
+44025,1785,4.5,2,Bak'tshay Servant,Cassius' Ring of Fire
+44026,1785,4.5,2,Bak'tshay Servant,Cassius' Ring of Fire
+44027,1785,4.5,2,Bak'tshay Slave,Cassius' Ring of Fire
+44028,1785,4.5,2,Bak'tshay Servant,Cassius' Ring of Fire
+44029,1785,4.5,2,Bak'tshay Soldier,Cassius' Ring of Fire
+44030,1785,4.5,2,Bak'tshay Soldier,Cassius' Ring of Fire
+44031,4007,15,8,Dust Golem,Flame Wave
+44032,4007,15,8,Dust Golem,Flame Wave
+44033,3948,15,8,Burning Sands Golem,Flame Wave
+44034,3948,15,8,Burning Sands Golem,Flame Wave
+44039,3883,8,2,Mu-miyah Lord,Pyroclastic Explosion
+44040,3883,8,2,Mu-miyah Lord,Pyroclastic Explosion
+44045,1786,4.5,2,Mu-miyah Vizier,Nuhmudira's Spines
+44046,1786,4.5,2,Mu-miyah Vizier,Nuhmudira's Spines
+44088,1785,4.5,2,Bak'tshay Soldier,Cassius' Ring of Fire
+44089,1785,4.5,2,Bak'tshay Lady,Cassius' Ring of Fire
+44090,1785,4.5,2,Bak'tshay Guard,Cassius' Ring of Fire
+44091,1785,4.5,2,Bak'tshay Servant,Cassius' Ring of Fire
+44092,1785,4.5,2,Bak'tshay Servant,Cassius' Ring of Fire
+44093,1786,4.5,2,Mu-miyah Vizier,Nuhmudira's Spines
+44096,3883,8,2,Mu-miyah Lord,Pyroclastic Explosion
+44097,6192,4.5,2,Mu-miyah Grand Vizier,Nuhmudira's Spines II
+44098,6192,4.5,2,Mu-miyah Slave Master,Nuhmudira's Spines II
+44319,1785,4.5,2,Bak'tshay Guard,Cassius' Ring of Fire
+44320,1785,4.5,2,Bak'tshay Servant,Cassius' Ring of Fire
+44321,1785,4.5,2,Bak'tshay Slave,Cassius' Ring of Fire
+44322,1785,4.5,2,Bak'tshay Soldier,Cassius' Ring of Fire
+44347,3948,15,8,Filinuvekta Emissary,Flame Wave
+45008,6193,4.5,2,Frozen Wight Sorcerer,Halo of Frost II
+45010,6190,4.5,2,Frozen Wight Captain,Horizon's Blades II
+45012,6193,4.5,2,Frozen Wight Sorcerer,Halo of Frost II
+45014,6190,4.5,2,Frozen Wight Captain,Horizon's Blades II
+45160,1784,4.5,2,Wight Captain,Horizon's Blades
+45161,1786,4.5,2,Wight Blade Sorcerer,Nuhmudira's Spines
+45165,1787,4.5,2,Corrupted Dread,Halo of Frost
+45178,1784,4.5,2,Wight Captain,Horizon's Blades
+45179,1786,4.5,2,Wight Blade Sorcerer,Nuhmudira's Spines
+45182,1787,4.5,2,Corrupted Dread,Halo of Frost
+45183,3884,8,2,Sorrow Wisp,Glacial Ring
+45184,1785,4.5,2,Hatred Wisp,Cassius' Ring of Fire
+45198,5361,4.5,2,Hovoros the Shadowed,Clouded Soul
+45691,1785,4.5,2,Incendiary Guard,Cassius' Ring of Fire
+45692,3882,8,2,Geraine,Incendiary Ring
+45692,3883,8,2,Geraine,Pyroclastic Explosion
+45698,1788,4.5,2,Galvanic Guard,Eye of the Storm
+45699,3881,8,2,Geraine,Corrosive Ring
+45700,1783,4.5,2,Caustic Guard,Searing Disc
+45702,1789,4.5,2,Aqueous Guard,Tectonic Rifts
+45704,5361,4.5,2,Geraine,Clouded Soul
+45706,1787,4.5,2,Glacial Guard,Halo of Frost
+45707,3884,8,2,Geraine,Glacial Ring
+45709,5361,4.5,2,Tenebrous Guard,Clouded Soul
+45802,1785,4.5,2,A'nekshay,Cassius' Ring of Fire
+45803,1785,4.5,2,A'nekshay Temple Guardian,Cassius' Ring of Fire
+45804,1785,4.5,2,A'nekshay Temple Servant,Cassius' Ring of Fire
+45805,1785,4.5,2,A'nekshay Temple Servant,Cassius' Ring of Fire
+45806,1785,4.5,2,A'nekshay Temple Guardian,Cassius' Ring of Fire
+46354,3882,8,2,Falatacot Blood Prophetess,Incendiary Ring
+46428,1787,4.5,2,Ronin Shimakawa,Halo of Frost
+46527,1785,4.5,2,Spectral Minion,Cassius' Ring of Fire
+46534,1783,4.5,2,Spectral Samurai,Searing Disc
+46535,1783,4.5,2,Spectral Samurai,Searing Disc
+46536,1785,4.5,2,Spectral Samurai,Cassius' Ring of Fire
+46537,1785,4.5,2,Spectral Samurai,Cassius' Ring of Fire
+46538,1787,4.5,2,Spectral Samurai,Halo of Frost
+46539,1787,4.5,2,Spectral Samurai,Halo of Frost
+46540,1788,4.5,2,Spectral Samurai,Eye of the Storm
+46541,1788,4.5,2,Spectral Samurai,Eye of the Storm
+46561,1783,4.5,2,Spectral Samurai,Searing Disc
+46564,1788,4.5,2,Spectral Samurai,Eye of the Storm
+46566,1783,4.5,2,Spectral Minion,Searing Disc
+46660,1785,4.5,2,Samurai Gatekeeper,Cassius' Ring of Fire
+46710,1784,4.5,2,Torment Wisp,Horizon's Blades
+46710,1787,4.5,2,Torment Wisp,Halo of Frost
+46710,1789,4.5,2,Torment Wisp,Tectonic Rifts
+46710,3950,15,8,Torment Wisp,Frost Wave
+46815,1786,4.5,2,Wight Blade Sorcerer,Nuhmudira's Spines
+46928,1789,4.5,2,Obsidian Golem Noble,Tectonic Rifts
+46930,3881,8,2,Gaerlan,Corrosive Ring
+46930,3882,8,2,Gaerlan,Incendiary Ring
+46930,3884,8,2,Gaerlan,Glacial Ring
+46930,3885,8,2,Gaerlan,Galvanic Ring
+46931,1789,4.5,2,Ancient Aqueous Knight,Tectonic Rifts
+46933,5361,4.5,2,Ancient Tenebrous Knight,Clouded Soul
+46934,4081,15,2,Ancient Mud Golem,Eye of the Tempest
+46951,3884,8,2,Rage Wisp,Glacial Ring
+47153,4007,15,8,Tainted Dust Golem,Flame Wave
+48755,6193,4.5,2,Wight Frost Mage,Halo of Frost II
+48756,1784,4.5,2,Raging Wight,Horizon's Blades
+48756,1786,4.5,2,Raging Wight,Nuhmudira's Spines
+48804,3948,15,8,Whirlwind Golem,Flame Wave
+48900,3948,15,8,Whirlwind Golem,Flame Wave
+49571,1785,4.5,2,Bak'tshay Keeper,Cassius' Ring of Fire
+49572,1787,4.5,2,Bak'tshay Keeper,Halo of Frost
+49573,1788,4.5,2,Bak'tshay Keeper,Eye of the Storm
+49574,1783,4.5,2,Bak'tshay Keeper,Searing Disc
+49575,1785,4.5,2,Bak'tshay Lackey,Cassius' Ring of Fire
+49576,6190,4.5,2,Mu-miyah Recluse,Horizon's Blades II
+49616,1788,4.5,2,Virindi Signat,Eye of the Storm
+49637,1788,4.5,2,Elemental Protector,Eye of the Storm
+51286,1788,4.5,2,Virindi Sentinel,Eye of the Storm
+51287,1788,4.5,2,Virindi Clandestine,Eye of the Storm
+51360,6190,4.5,2,Frozen Wight Guardian Captain,Horizon's Blades II
+51363,6193,4.5,2,Frozen Wight Guardian Sorcerer,Halo of Frost II
+51399,3885,8,2,Simulacrum Doppelganger,Galvanic Ring
+51555,1788,4.5,2,Virindi Confer,Eye of the Storm
+51609,3997,15,2,Corrupt Slayer,Heavy Lightning Ring
+51610,3997,15,2,Corrupt Rager,Heavy Lightning Ring
+51611,3997,15,2,Corrupt Sorcerer,Heavy Lightning Ring
+51612,3882,8,2,Raging Corrupt Sorcerer,Incendiary Ring
+51613,3997,15,2,Corrupt Bulwark,Heavy Lightning Ring
+51617,3941,15,2,Aspect of Avarice,Heavy Lightning Ring
+51633,3997,15,2,Corrupt Rager,Heavy Lightning Ring
+51634,3997,15,2,Corrupt Slayer,Heavy Lightning Ring
+51635,3997,15,2,Corrupt Sorcerer,Heavy Lightning Ring
+51636,3882,8,2,Raging Corrupt Sorcerer,Incendiary Ring
+51653,3941,15,2,Corrupt Gear Warrior,Heavy Lightning Ring
+51674,3882,8,2,Rynthid Taskmaster,Incendiary Ring
+51713,3997,15,2,Spirit Slayer,Heavy Lightning Ring
+51714,3997,15,2,Spirit Sorcerer,Heavy Lightning Ring
+51727,1785,4.5,2,Rift of Rage,Cassius' Ring of Fire
+51729,1785,4.5,2,Rift of Rage,Cassius' Ring of Fire
+51735,1788,4.5,2,Rift of Torment,Eye of the Storm
+51737,1788,4.5,2,Rift of Torment,Eye of the Storm
+51739,3882,8,2,Aspect of Rage,Incendiary Ring
+51741,3997,15,2,Aspect of Torment,Heavy Lightning Ring
+51743,3882,8,2,Rynthid Berserker,Incendiary Ring
+51751,3941,15,2,Rynthid Rager,Heavy Lightning Ring
+51752,3941,15,2,Rynthid Rager,Heavy Lightning Ring
+51753,3941,15,2,Rynthid Ravager,Heavy Lightning Ring
+51755,3941,15,2,Rynthid Slayer,Heavy Lightning Ring
+51756,3941,15,2,Rynthid Slayer,Heavy Lightning Ring
+51757,3882,8,2,Raging Rynthid Sorcerer,Incendiary Ring
+51758,3882,8,2,Raging Rynthid Sorcerer,Incendiary Ring
+51759,3997,15,2,Rynthid Sorcerer,Heavy Lightning Ring
+51760,3997,15,2,Rynthid Sorcerer,Heavy Lightning Ring
+51806,3881,8,2,Empowered Despair Wisp,Corrosive Ring
+51807,3882,8,2,Empowered Hatred Wisp,Incendiary Ring
+51808,3884,8,2,Empowered Sorrow Wisp,Glacial Ring
+51823,5972,5,2,Lothus Guardian of Torment,Galvanic Bomb
+51826,5972,5,2,Lothus Guardian of Rage,Galvanic Bomb
+51828,5972,5,2,Lothus Guardian of Sorrows,Galvanic Bomb
+51830,5972,5,2,Lothus Guardian of Sorrows,Galvanic Bomb
+51834,3885,8,2,Malicious Spirit,Galvanic Ring
+51895,6152,10,6,Rynthid Stone,Rocky Shrapnel
+51938,3997,15,2,Tormented Sorcerer,Heavy Lightning Ring
+51975,1788,4.5,2,Marionette Knight of Torment,Eye of the Storm
+51976,1788,4.5,2,Tormented Marionette,Eye of the Storm
+51977,1788,4.5,2,Suppression Rift,Eye of the Storm
+51978,1788,4.5,2,Lothus Archmage,Eye of the Storm
+51979,5972,5,2,Lothus Guardian of Torment,Galvanic Bomb
+51980,5972,5,2,Lothus Guardian of Torment,Galvanic Bomb
+51981,5972,5,2,Lothus Guardian of Torment,Galvanic Bomb
+51982,5972,5,2,Lothus Guardian of Torment,Galvanic Bomb
+51983,1788,4.5,2,Lothus Servant,Eye of the Storm
+51984,1788,4.5,2,Lothus Slayer,Eye of the Storm
+51992,5972,5,2,Curator of Torment,Galvanic Bomb
+52027,4081,15,2,Corrupted Shaman,Eye of the Tempest
+52213,1785,4.5,2,Bak'tshay Lackey,Cassius' Ring of Fire
+52240,3948,15,8,Burning Sands Guardian,Flame Wave
+52244,6190,4.5,2,Mu-miyah Magus,Horizon's Blades II
+52278,3997,15,2,Rynthid Sorcerer,Heavy Lightning Ring
+52279,3941,15,2,Rynthid Slayer,Heavy Lightning Ring
+52519,6163,4.5,15,Zefir Thorn Stalker,Ring of Thorns
+52573,6163,4.5,15,Zefir Thorn Poisoner,Ring of Thorns
+52574,6163,4.5,15,Zefir Thorn Ranger,Ring of Thorns
+52575,6163,4.5,15,Zefir Thorn Reaver,Ring of Thorns
+52583,6194,4.5,2,A'nekshen Storm Caller,Eye of the Storm II
+52587,6163,4.5,15,A'nekshen Thorn Dancer,Ring of Thorns
+52627,3881,8,2,Guardian Wisp,Corrosive Ring
+52628,3882,8,2,Corrupted Guardian Wisp,Incendiary Ring
+52711,1784,4.5,2,Wight Sage,Horizon's Blades
+52716,1788,4.5,2,Virindi Rival,Eye of the Storm
+52718,3882,8,2,Tracking Fireball,Incendiary Ring
+52780,1788,4.5,2,Mukkir Predator,Eye of the Storm
+70348,3974,5,2,Turgos the Hunter,Lightning Bomb
+70349,3952,15,8,Gearall the Shield,Shock Waves
+70364,3948,15,8,Lord Kastellar,Flame Wave
+70974,1786,4.5,2,Luminary Knight,Nuhmudira's Spines
+71239,1783,4.5,2,Harbinger,Searing Disc
+71239,1785,4.5,2,Harbinger,Cassius' Ring of Fire
+71239,1787,4.5,2,Harbinger,Halo of Frost
+71239,1788,4.5,2,Harbinger,Eye of the Storm
+71381,1785,4.5,2,Ancient Incendiary Guardian,Cassius' Ring of Fire
+71388,1786,4.5,2,Mu-miyah Vizier,Nuhmudira's Spines
+72002,4010,15,8,Zerzelikyr,Lightning Wave
+72031,3941,15,2,Rynthid Dragoon,Heavy Lightning Ring
+72043,3997,15,2,Tormented Slayer,Heavy Lightning Ring
+72045,1788,4.5,2,Tormented Charge,Eye of the Storm
+72189,6194,4.5,2,A'nekshen Storm Corruptor,Eye of the Storm II
+72195,6163,4.5,15,A'nekshen Thorn Corruptor,Ring of Thorns
+72216,1784,4.5,2,Shade of Lord Rytheran,Horizon's Blades
+72216,3935,15,2,Shade of Lord Rytheran,Heavy Blade Ring
+72216,3947,15,8,Shade of Lord Rytheran,Blade Wave
+72310,6190,4.5,2,Frozen Wight Captain,Horizon's Blades II
+72325,6190,4.5,2,Frozen Wight Captain,Horizon's Blades II
+72331,1784,4.5,2,Frozen Wight,Horizon's Blades
+72331,1787,4.5,2,Frozen Wight,Halo of Frost
+72332,6190,4.5,2,Frozen Wight Captain,Horizon's Blades II
+72333,6193,4.5,2,Frozen Wight Sorcerer,Halo of Frost II
+72354,3885,8,2,Geraine,Galvanic Ring
+72354,3997,15,2,Geraine,Heavy Lightning Ring
+72444,1788,4.5,2,Virindi Guardian,Eye of the Storm
+72453,1788,4.5,2,Virindi Sentinel,Eye of the Storm
+72530,1785,4.5,2,Spectral Samurai Daimyo,Cassius' Ring of Fire
+72531,1787,4.5,2,Spectral Samurai Daimyo,Halo of Frost
+72532,1788,4.5,2,Spectral Samurai Daimyo,Eye of the Storm
+72538,3970,5,2,Exarch Nanjou Shou-jen,Blade Bomb
+72538,3993,15,2,Exarch Nanjou Shou-jen,Heavy Blade Ring
+72565,1785,4.5,2,Spectral Samurai,Cassius' Ring of Fire
+72566,1787,4.5,2,Spectral Samurai,Halo of Frost
+72567,1783,4.5,2,Spectral Samurai,Searing Disc
+72568,1788,4.5,2,Spectral Samurai,Eye of the Storm
+72587,1784,4.5,2,Spectral Nanjou Kaibinn,Horizon's Blades
+72588,1784,4.5,2,Spectral Nanjou Keibi,Horizon's Blades
+72589,4081,15,2,Spectral Minion,Eye of the Tempest
+72590,1783,4.5,2,Spectral Minion,Searing Disc
+72598,1788,4.5,2,Spectral Nanjou Zaikan,Eye of the Storm
+72753,1783,4.5,2,Acid,Searing Disc
+72755,1783,4.5,2,Acid Zenith,Searing Disc
+72756,1785,4.5,2,Fire Zenith,Cassius' Ring of Fire
+72757,1787,4.5,2,Frost Zenith,Halo of Frost
+72758,1788,4.5,2,Electric Zenith,Eye of the Storm
+72805,3884,8,2,Shikken Moriyaki,Glacial Ring
+72917,1785,4.5,2,The Unknown Warrior,Cassius' Ring of Fire
+72917,3883,8,2,The Unknown Warrior,Pyroclastic Explosion
+73011,3881,8,2,Despair Wisp,Corrosive Ring
+73154,1787,4.5,2,Algid Warrior,Halo of Frost
+73156,1784,4.5,2,Isin Dule's Captain,Horizon's Blades
+73156,1785,4.5,2,Isin Dule's Captain,Cassius' Ring of Fire
+73156,1786,4.5,2,Isin Dule's Captain,Nuhmudira's Spines
+73156,1787,4.5,2,Isin Dule's Captain,Halo of Frost
+73156,1788,4.5,2,Isin Dule's Captain,Eye of the Storm
+73179,1783,4.5,2,Lich Oppressor,Searing Disc
+73179,1785,4.5,2,Lich Oppressor,Cassius' Ring of Fire
+73179,1787,4.5,2,Lich Oppressor,Halo of Frost
+73184,3426,0,18,Orisis,Greater Withering
+73184,3950,15,8,Orisis,Frost Wave
+87122,1785,4.5,2,Scold,Cassius' Ring of Fire
+87191,3883,8,2,Lord Winstead,Pyroclastic Explosion
+87192,3883,8,2,Filinuvekta Hieromancer,Pyroclastic Explosion
+87306,3426,0,18,Bosh Bosh,Greater Withering
+87306,3452,4.5,2,Bosh Bosh,Concussive Wail
+87306,3455,4.5,2,Bosh Bosh,Koruu Cloud
+87306,3458,4.5,2,Bosh Bosh,Mana Purge
+87306,3459,15,2,Bosh Bosh,Mucor Cloud
+87516,1787,4.5,2,Faurset,Halo of Frost
+87517,1787,4.5,2,Liantor,Halo of Frost
+87518,1787,4.5,2,Targor,Halo of Frost
+87556,4007,15,8,Dust Guardian,Flame Wave
+87569,3807,4.5,2,Ruschk Aspect of Grael,Force Ring
+87569,3949,15,8,Ruschk Aspect of Grael,Force Wave
+87569,4006,15,8,Ruschk Aspect of Grael,Blade Wave
+87569,4011,15,8,Ruschk Aspect of Grael,Shock Waves
+87589,1786,4.5,2,Mu-miyah Vizier,Nuhmudira's Spines
+87605,3931,10,1.8,Shadow Aspect of Grael,Dark Vortex
+87848,3883,8,2,Mu-miyah Lord,Pyroclastic Explosion
+88070,1788,4.5,2,Moarsman Blight-caller,Eye of the Storm
+88082,1783,4.5,2,Spectral Samurai,Searing Disc
+88085,1788,4.5,2,Tremb'Orh,Eye of the Storm
+88086,1788,4.5,2,Marionette Minion,Eye of the Storm
+88087,1788,4.5,2,Spectral Samurai,Eye of the Storm
+88089,1783,4.5,2,Spectral Minion,Searing Disc
+88233,1783,4.5,2,Spectral Samurai,Searing Disc
+88235,1788,4.5,2,Nature Guardian,Eye of the Storm
+88294,3882,8,2,Falatacot Marauder,Incendiary Ring
+88295,3882,8,2,Falatacot Raider,Incendiary Ring
+88296,3882,8,2,Falatacot Raider,Incendiary Ring
+88297,3882,8,2,Patriarch's Executioner,Incendiary Ring
+88298,3882,8,2,Patriarch's Executioner,Incendiary Ring
+88299,3882,8,2,Patriarch's Champion,Incendiary Ring
+88300,3882,8,2,Patriarch's Champion,Incendiary Ring
+88301,3882,8,2,Patriarch's Champion,Incendiary Ring
+88302,3882,8,2,Patriarch's Elite Raider,Incendiary Ring
+88303,3882,8,2,Patriarch's Elite Raider,Incendiary Ring
+88304,3882,8,2,Patriarch's Elite Raider,Incendiary Ring
+88305,3882,8,2,Patriarch's Inquisitor,Incendiary Ring
+88306,3882,8,2,Patriarch's Inquisitor,Incendiary Ring
+88307,3882,8,2,Patriarch's Inquisitor,Incendiary Ring
