@@ -84,6 +84,11 @@ impl Client {
             self.last_appraisal = Some(a.guid);
             self.appraisal_seq += 1;
         }
+        if a.is_no_such_object() && self.world.player_guid != Some(a.guid) {
+            tracing::info!("appraise {name}: the server has no such object; forgetting it");
+            self.forget_gone(a.guid);
+            return;
+        }
         self.appraisals.insert(a.guid, a);
     }
 
@@ -108,6 +113,11 @@ impl Client {
         else {
             return;
         };
+        self.forget_creature_appraisal(guid);
+    }
+
+    /// A creature's appraisal goes with it (see [`Client::forget_the_departed`]).
+    fn forget_creature_appraisal(&mut self, guid: u32) {
         let creature = self
             .world
             .objects
@@ -115,6 +125,23 @@ impl Client {
             .is_some_and(|o| o.item_type & ac_world::item_type::CREATURE != 0 && !o.is_player);
         if creature {
             self.appraisals.remove(&guid);
+        }
+    }
+
+    /// Drop `guid`, which the server says it does not have, as its delete would have. ACE sends none
+    /// for anything it let go of while out of the character's sight (`ObjectMaint.DestructionTime`).
+    pub(crate) fn forget_gone(&mut self, guid: u32) {
+        self.forget_creature_appraisal(guid);
+        let corpse = ac_world::object_desc_flags::CORPSE;
+        if self
+            .world
+            .objects
+            .get(&guid)
+            .is_some_and(|o| o.object_desc_flags & corpse != 0)
+        {
+            self.forget_corpse(guid);
+        } else {
+            self.world.forget(guid);
         }
     }
 

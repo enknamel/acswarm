@@ -269,26 +269,15 @@ fn the_words_a_body_is_refused_in_say_how_long_to_leave_it() {
     ));
     assert!(!ap.shelved.held(&held, answered + OPEN_IN_USE_AGAIN));
 
-    // The killer's for now: a short wait, because a corpse becomes
-    // everyone's the moment whoever has it closes it and not only
-    // when it half rots.
+    // The killer's for now: left until it opens to everyone, two minutes after it appeared.
     ap.take_up_corpse(locked, t0, LOOT_TIMEOUT);
     assert!(ap.corpse_refused_in_words(&not_ours, name, Some(answered), answered));
     assert_eq!(ap.corpse, None);
-    assert_eq!(ap.shelved.waited(&locked), Some(OPEN_NOT_OURS_AGAIN));
-    assert!(ap.shelved.held(
-        &locked,
-        answered + OPEN_NOT_OURS_AGAIN - Duration::from_millis(1)
-    ));
-    assert!(!ap.shelved.held(&locked, answered + OPEN_NOT_OURS_AGAIN));
+    let open = t0 + CORPSE_OPEN_TO_ALL;
+    assert!(ap.shelved.held(&locked, open - Duration::from_millis(1)));
+    assert!(!ap.shelved.held(&locked, open));
 
-    // A body refused twice, in two different sets of words, waits
-    // longer the second time -- and the wait it is given is a wait
-    // and not a deadline. Handing the shelf an exact "come back in
-    // 117 seconds" doubled the three seconds already on the body
-    // instead: six, then twelve, then twenty-four, five more asks
-    // and five more refusals before it reached the wait that was
-    // meant the first time.
+    // Refused after someone had it open: the same, not the in-use wait doubled.
     let both = 0x8000_1224;
     ap.corpse_seen.mark(both, t0);
     ap.take_up_corpse(both, t0, LOOT_TIMEOUT);
@@ -298,11 +287,17 @@ fn the_words_a_body_is_refused_in_say_how_long_to_leave_it() {
     ap.take_up_corpse(both, again, LOOT_TIMEOUT);
     let told = again + Duration::from_millis(360);
     assert!(ap.corpse_refused_in_words(&not_ours, name, Some(told), told));
-    assert_eq!(
-        ap.shelved.waited(&both),
-        Some(OPEN_IN_USE_AGAIN * 2),
-        "a doubling wait, not a deadline the shelf then doubled"
-    );
+    assert!(ap.shelved.held(&both, open - Duration::from_millis(1)));
+    assert!(!ap.shelved.held(&both, open));
+
+    // Seen long ago and still refused: at least a minute before asking again.
+    let old = 0x8000_1225;
+    let late = t0 + CORPSE_OPEN_TO_ALL * 2;
+    ap.corpse_seen.mark(old, t0);
+    ap.take_up_corpse(old, late, LOOT_TIMEOUT);
+    let told = late + Duration::from_millis(360);
+    assert!(ap.corpse_refused_in_words(&not_ours, name, Some(told), told));
+    assert_eq!(ap.shelved.waited(&old), Some(OPEN_NOT_OURS_AGAIN));
 
     // The killer's for good: not waited on at all.
     ap.take_up_corpse(rare, t0, LOOT_TIMEOUT);

@@ -48,7 +48,7 @@ pub enum Refusal<'a> {
 pub enum OpenRefusal {
     /// Someone has it open: the server hands a container to one viewer at a time, usually done in a moment.
     InUse,
-    /// The killer's for now: a monster's body opens to everyone once the killer closes it or it half rots.
+    /// The killer's for now: a monster's body opens to everyone once the killer closes it or 2 min after it appears.
     NotYetOurs,
     /// The killer's for good: a body that made a rare, or a player killer's doing, is never shared.
     NeverOurs,
@@ -485,9 +485,9 @@ pub enum Answer {
 /// a few seconds.
 pub const OPEN_IN_USE_AGAIN: Duration = Duration::from_secs(3);
 
-/// Wait on a body not ours yet: it is everyone's once anyone closes it, usually seconds after the refusal.
-/// ACE `Corpse.Close` (Corpse.cs:209) sets `IsLooted`, which `HasPermission` (:152) reads before the clock.
-pub const OPEN_NOT_OURS_AGAIN: Duration = Duration::from_secs(5);
+/// Wait at least this long on a body not ours yet. It opens to everyone once its killer has shut it
+/// (`Corpse.Close`, Corpse.cs:209 sets `IsLooted`, read by `HasPermission` :152) or 2 min after it appears.
+pub const OPEN_NOT_OURS_AGAIN: Duration = Duration::from_secs(60);
 
 /// Wait before asking a turned-down invitee again: short, as "busy" passes when a use or a cast ends.
 /// "Already a member" settles within a round: that mate's own board row, and the rightful leader disbanding.
@@ -506,7 +506,7 @@ pub fn answer(refusal: &Refusal) -> Answer {
     match refusal {
         Refusal::Open { why, .. } => match why {
             OpenRefusal::InUse => Answer::Again(OPEN_IN_USE_AGAIN),
-            OpenRefusal::NotYetOurs => Answer::Again(OPEN_NOT_OURS_AGAIN),
+            OpenRefusal::NotYetOurs => Answer::Soon(OPEN_NOT_OURS_AGAIN),
             // Never, not a wait: it still lies there, and each lapsed wait is another walk back to it.
             OpenRefusal::NeverOurs => Answer::Never,
         },

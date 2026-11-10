@@ -96,3 +96,52 @@ fn a_thing_in_a_side_pack_can_be_dropped() {
     assert_eq!(actions_sent(&c), vec![DROP_ITEM]);
     assert!(!c.drop_item(far), "not ours to drop");
 }
+
+#[test]
+fn whatever_the_server_has_no_such_object_of_is_forgotten() {
+    // ACE answers a bare guid only for an object it does not have (Player.cs:267-273); one it let go
+    // of out of sight goes with no delete, and a body like that was asked at again and again.
+    let mut c = crate::testkit::offline_client();
+    let now = std::time::Instant::now();
+    let (gone, drudge, there) = (0x8000_0a01, 0x8000_0a03, 0x8000_0a02);
+    for g in [gone, there] {
+        c.world
+            .objects
+            .insert(g, crate::testkit::corpse(g, "Corpse of Tusker Guard"));
+    }
+    c.world
+        .objects
+        .insert(drudge, crate::testkit::creature(drudge, "Drudge Skulker"));
+    c.autoplay
+        .take_up_corpse(gone, now, std::time::Duration::from_secs(3));
+    let answer = |guid: u32, success: u32, ints: &[(u32, i32)]| {
+        let mut w = ac_net::wire::Writer::new();
+        let flags = if ints.is_empty() {
+            0
+        } else {
+            ac_net::messages::Appraisal::FLAG_INT
+        };
+        w.u32(guid).u32(flags).u32(success);
+        if !ints.is_empty() {
+            w.u16(ints.len() as u16).u16(16);
+            for (k, v) in ints {
+                w.u32(*k).i32(*v);
+            }
+        }
+        w.finish()
+    };
+    c.appraisal(&answer(gone, 0, &[]));
+    c.appraisal(&answer(drudge, 0, &[]));
+    // A failed appraisal of one it has still carries its properties: it stays.
+    c.appraisal(&answer(there, 0, &[(25, 5)]));
+    assert!(
+        !c.world.objects.contains_key(&gone),
+        "the body is gone from the world"
+    );
+    assert!(!c.autoplay.is_at_corpse(gone), "and let go of");
+    assert!(!c.world.objects.contains_key(&drudge), "not only bodies");
+    assert!(
+        c.world.objects.contains_key(&there),
+        "one the server has stays"
+    );
+}

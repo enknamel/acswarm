@@ -83,6 +83,16 @@ pub struct Appraisal {
 }
 
 impl Appraisal {
+    /// ACE's answer for an object it does not have: a guid and nothing else (Player.cs:267-273). A
+    /// failed appraisal of one it has still carries its properties (`AppraiseInfo.BuildProfile`).
+    pub fn is_no_such_object(&self) -> bool {
+        *self
+            == Appraisal {
+                guid: self.guid,
+                ..Default::default()
+            }
+    }
+
     pub const FLAG_INT: u32 = 0x0001;
     pub const FLAG_BOOL: u32 = 0x0002;
     pub const FLAG_FLOAT: u32 = 0x0004;

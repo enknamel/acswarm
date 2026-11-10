@@ -22,9 +22,16 @@ use crate::Client;
 /// what matters is how quickly the second one follows.
 pub(crate) const LOOT_TIMEOUT: Duration = Duration::from_millis(2500);
 
-/// How many times to ask before leaving a corpse alone. Asking is
-/// cheap now that it is asked from arm's length.
-const LOOT_TRIES: u32 = 3;
+/// How many times to ask again before leaving a corpse alone for
+/// [`CORPSE_AGAIN`]: two asks in all.
+const LOOT_TRIES: u32 = 1;
+
+/// A corpse that did not open is not asked at again for at least this long.
+pub(crate) const CORPSE_AGAIN: Duration = Duration::from_secs(60);
+
+/// How long after it appears a monster's body opens to everyone: ACE lets anyone in once fewer than
+/// 180 s of its 300 s rot timer are left (Corpse.cs:188, :206; WorldObject_Decay.cs:18). Counted from first seen.
+pub(crate) const CORPSE_OPEN_TO_ALL: Duration = Duration::from_secs(120);
 
 /// A wait that has doubled this far means the stack has been asked to
 /// come apart half a dozen times and has not. The party gets on
@@ -177,6 +184,15 @@ impl Autoplay {
         // another walk back to it.
         let answer = refusals::answer(&Refusal::Open { name: named, why });
         answer.hold(&mut self.shelved, guid, said, now);
+        // Not ours yet: asked at again no sooner than it opens to everyone.
+        if why == OpenRefusal::NotYetOurs {
+            let open = self.corpse_first_seen(guid, now) + CORPSE_OPEN_TO_ALL;
+            let wait = open.saturating_duration_since(now);
+            if self.shelved.waited(&guid).is_some_and(|w| w < wait) {
+                self.shelved.forget(&guid);
+                self.shelved.hold(guid, wait, now);
+            }
+        }
         match (answer, self.shelved.waited(&guid)) {
             (Answer::Never, _) | (_, None) => {
                 tracing::info!("autoplay: {in_hand} ({guid:#010x}): {said} -- leaving it");
@@ -208,6 +224,19 @@ impl Autoplay {
 }
 
 impl Client {
+    /// Drop the corpse `guid` the server no longer has, as its delete would have: ACE sends none
+    /// for a body it let go of out of sight (`ObjectMaint.DestructionTime`, ObjectMaint.cs:21).
+    pub(crate) fn forget_corpse(&mut self, guid: u32) {
+        if self.autoplay.is_at_corpse(guid) {
+            self.autoplay.let_go_of_corpse();
+            self.stop_walking_to_loot();
+        }
+        self.forget_kill_spot(guid);
+        self.world.forget(guid);
+        self.autoplay.corpse_seen.forget(&guid);
+        self.autoplay.shelved.forget(&guid);
+    }
+
     /// Whether `guid` is this character's own corpse ("Corpse of" its name).
     pub(crate) fn is_own_corpse(&self, guid: u32) -> bool {
         let me = self.world.stats.name.to_lowercase();
@@ -581,9 +610,7 @@ impl Client {
                     tracing::info!(
                         "autoplay: corpse {guid:#010x} is not there any more; forgetting it"
                     );
-                    self.forget_kill_spot(guid);
-                    self.world.forget(guid);
-                    self.autoplay.corpse_seen.forget(&guid);
+                    self.forget_corpse(guid);
                     return false;
                 }
                 // Not "done with": set aside. A corpse belongs to
@@ -594,11 +621,7 @@ impl Client {
                 tracing::info!(
                     "autoplay: corpse {guid:#010x} will not open yet; trying again later"
                 );
-                self.autoplay.shelved.note(
-                    guid,
-                    &crate::did::Did::blocked("it will not open yet"),
-                    now,
-                );
+                self.autoplay.shelved.hold(guid, CORPSE_AGAIN, now);
                 return false;
             }
             let open = self.world.open_container.clone();
