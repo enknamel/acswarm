@@ -16,8 +16,7 @@ use crate::Client;
 pub const WINDUP_LEAST: f32 = 0.2;
 /// The same, most: 3.04 s (0x09000001, stance 0x80000041); 0.87-0.96 s for most combat stances.
 pub const WINDUP_MOST: f32 = 3.1;
-/// Metres a ring reaches past its range: spawned 1.2 x (caster + projectile radius) out
-/// (`WorldObject_Magic.cs:1576-1594`), then their radius and ours; a 1 m caster, 0.5 m projectiles.
+/// Metres a ring reaches past its range: spawned 1.2 x (1 m caster + 0.5 m projectile) out, plus both radii (`WorldObject_Magic.cs:1576-1594`).
 pub const RING_MARGIN: f32 = 3.0;
 /// The slowest run, m/s: run rate 1 (`player::run_rate(0)`) times the 4 m/s run cycle.
 pub const RUN_LEAST: f32 = 4.0;
@@ -49,9 +48,8 @@ pub fn is_cast_motion(forward: u32) -> bool {
     matches!(forward & 0xFFFF, 0xD3 | 0x2B..=0x39 | 0x6F..=0x78 | 0x12B..=0x134)
 }
 
-/// Seconds left, `elapsed` after the cast motion was seen and `d` metres flat from its caster,
-/// before running at [`RUN_LEAST`] no longer clears `ring`: before its projectiles reach us, and
-/// before they would catch us on the way out to its reach.
+/// Seconds left, `elapsed` after the cast motion was seen `d` metres flat off its caster, before a
+/// run at [`RUN_LEAST`] no longer clears `ring`: before it reaches us or catches us on the way out.
 pub fn leave_within(elapsed: f32, d: f32, ring: Ring) -> f32 {
     let launch = WINDUP_LEAST - elapsed;
     let speed = ring.speed.max(0.1);
@@ -61,9 +59,8 @@ pub fn leave_within(elapsed: f32, d: f32, ring: Ring) -> f32 {
     arrives.min(at_reach - (reach - d).max(0.0) / RUN_LEAST) - LEAVE_SLACK
 }
 
-/// Where to stand clear of `rings` (flat centre, reach): of [`DIRECTIONS`] straight runs from
-/// `me` that `clear` passes, the shortest to just past every reach; failing that, the end of a
-/// shortened run deepest out of them, if that gains [`LEAST_GAIN`] on standing still.
+/// Clear of `rings` (flat centre, reach): of [`DIRECTIONS`] runs from `me` that `clear` passes, the
+/// shortest past every reach; else a shortened run's end deepest out, gaining [`LEAST_GAIN`].
 pub fn escape_spot(
     me: Vec3,
     rings: &[(Vec2, f32)],
