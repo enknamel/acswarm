@@ -273,10 +273,11 @@ impl Client {
                 let seen = how.is_none_or(|how| self.shot_clears(guid, how));
                 // A pursued quest's creature before a nearer namesake: the jaw's Engorged Eater
                 // (28849) shares its name with the common one (28642).
-                let sought = self.world.objects.get(&guid).is_some_and(|o| {
-                    let wanted = &self.autoplay.growth.pursuit_sought;
-                    wanted.contains(&o.weenie_class_id)
-                });
+                let sought = self
+                    .world
+                    .objects
+                    .get(&guid)
+                    .is_some_and(|o| self.is_sought(o.weenie_class_id));
                 (((!seen) as u8, (!sought) as u8), at.distance(me), guid)
             })
             .min_by(|a, b| a.0.cmp(&b.0).then(a.1.total_cmp(&b.1)))

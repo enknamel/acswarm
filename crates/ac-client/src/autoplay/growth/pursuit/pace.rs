@@ -115,6 +115,17 @@ impl Ground {
     }
 }
 
+/// Of `droppers` (class, chance a kill, seconds a kill), those not `sought` whose kill met on the
+/// road saves more than it costs: its chance of the plan's `plan` seconds over its kill's. A 2%
+/// Gotrok Tiatus at 25 s is fought only while the plan is over 1250 s away.
+pub(crate) fn road_droppers(droppers: &[(u32, f32, f32)], sought: &[u32], plan: f32) -> Vec<u32> {
+    droppers
+        .iter()
+        .filter(|(w, chance, kill)| !sought.contains(w) && chance * plan > *kill)
+        .map(|d| d.0)
+        .collect()
+}
+
 /// Seconds a kill of each creature takes this character, by class, worked out once each; `None`
 /// for one it cannot kill reliably: past a loot tier above the highest it killed (`proven_tier`),
 /// or a caster's spells cannot hurt it (immune, none ready).
@@ -195,6 +206,17 @@ mod tests {
                 others: 0.0,
             },
         }
+    }
+
+    #[test]
+    fn a_dropper_on_the_road_is_worth_a_fight_only_against_a_long_plan() {
+        let gotrok = [(24497, 0.02, 25.0)];
+        assert!(road_droppers(&gotrok, &[], 1000.0).is_empty());
+        assert_eq!(road_droppers(&gotrok, &[], 1500.0), [24497]);
+        assert!(
+            road_droppers(&gotrok, &[24497], 1500.0).is_empty(),
+            "sought already"
+        );
     }
 
     #[test]

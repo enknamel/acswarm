@@ -2847,3 +2847,32 @@ fn a_ground_left_empty_is_rotated_when_unload_is_sooner_than_respawn() {
         c.autoplay.status
     );
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_dropper_met_on_the_road_is_fought_only_when_its_chance_beats_the_plan() {
+    // The Sturdy Iron Key drops 2% from a Gotrok Tiatus: met on the road to a ground five minutes
+    // off it is walked past; with the plan hours away a kill of it saves more than it costs.
+    let now = std::time::Instant::now();
+    let mut c = blargerton_after_the_key(now);
+    let gotrok = 24497;
+    let kill = c
+        .autoplay
+        .growth
+        .pursuit_droppers
+        .iter()
+        .find(|d| d.0 == gotrok);
+    let &(_, chance, secs) = kill.expect("a Gotrok Tiatus he can kill");
+    let mut tiatus = crate::testkit::creature(0x5000_0904, "Gotrok Tiatus");
+    tiatus.weenie_class_id = gotrok;
+    let cfg = c.autoplay.config.fight.clone();
+    c.autoplay.growth.plan_secs = Some(secs / chance * 0.5);
+    c.keep_road_droppers();
+    assert!(c.passing_by(&tiatus, &cfg), "fought, the plan near");
+    c.autoplay.growth.plan_secs = Some(secs / chance * 2.0);
+    c.keep_road_droppers();
+    assert!(
+        !c.passing_by(&tiatus, &cfg),
+        "walked past with the plan far"
+    );
+}

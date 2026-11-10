@@ -162,11 +162,12 @@ impl Client {
         }
         // A pursued quest's errand is its creature, or for any other step nothing: the rest are
         // walked past, at its ground too (a_quest_hunt_walks_past_all_but_its_creature).
+        // And a dropper met on the road whose kill saves more than it costs (`pursuit_road`).
         let sought = &self.autoplay.growth.pursuit_sought;
-        let it = self.is_pursued_hunt() && sought.contains(&o.weenie_class_id);
+        let it = self.is_pursued_hunt() && self.is_sought(o.weenie_class_id);
         let not_it = self.is_pursuing()
             && (!self.is_pursued_hunt()
-                || (!sought.is_empty() && !sought.contains(&o.weenie_class_id)));
+                || (!sought.is_empty() && !self.is_sought(o.weenie_class_id)));
         // The pursued creature itself is never walked past, on the road to its ground or there
         // (the Putrid Moarsman met at the catacombs' door, left behind on the road).
         // By a sought kill's body, what hits the character is fought: the body is not opened under

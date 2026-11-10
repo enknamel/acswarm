@@ -235,6 +235,13 @@ pub struct State {
     quest_road: Option<(u32, String, bool)>,
     /// The working pursued hunt's creatures, by weenie class: picked before a nearer namesake.
     pub(crate) pursuit_sought: Vec<u32>,
+    /// Every creature the working hunt's item drops from that this character can kill: class,
+    /// chance a kill and seconds a kill.
+    pub(crate) pursuit_droppers: Vec<(u32, f32, f32)>,
+    /// Seconds to the item by the plan set off on: the journey and the time at its ground.
+    pub(crate) plan_secs: Option<f32>,
+    /// Droppers met on the road a fight with saves time: fought like the sought ones.
+    pub(crate) pursuit_road: Vec<u32>,
     /// Quest item sources a step at was refused, by wanted item and source class, and since when.
     pub(crate) sources_dropped: Recent<(u32, u32)>,
     /// The pursued fetch's act sent, waiting on its answer.

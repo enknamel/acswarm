@@ -318,6 +318,9 @@ pub(crate) struct Pursued {
     pub(crate) paces: Vec<pace::Ground>,
     /// The working hunt's creatures, by weenie class: fought before their namesakes.
     pub(crate) sought: Vec<u32>,
+    /// Every creature the hunt's item drops from that this character can kill, wherever: class,
+    /// chance a kill and seconds a kill (`pace::road_droppers` picks those worth a road fight).
+    pub(crate) droppers: Vec<(u32, f32, f32)>,
 }
 
 /// What each line's step is worked out from, besides the board.
@@ -432,6 +435,7 @@ pub(crate) fn pursuit_of(board: &[QuestLine], chained: &[Chained], ask: &Ask) ->
             out.grounds = h.grounds;
             out.paces = h.paces;
             out.sought = h.sought;
+            out.droppers = h.droppers;
         }
         out.lines.push(line);
     }
@@ -461,6 +465,7 @@ pub(crate) struct Hunting {
     grounds: Vec<(u32, Place)>,
     paces: Vec<pace::Ground>,
     sought: Vec<u32>,
+    droppers: Vec<(u32, f32, f32)>,
 }
 
 impl Ask<'_> {
@@ -711,6 +716,7 @@ impl Ask<'_> {
                 grounds: paced.iter().map(|p| (p.0.landblock, p.1)).collect(),
                 paces: paced.iter().map(|p| p.2.clone()).collect(),
                 sought,
+                droppers,
             };
             return (step, Some(hunting));
         }
@@ -813,6 +819,9 @@ impl Client {
             st.pursuit_paces.clear();
             st.pursuit_gems.clear();
             st.pursuit_sought.clear();
+            st.pursuit_droppers.clear();
+            st.pursuit_road.clear();
+            st.plan_secs = None;
             self.keep_quest_section(&ChainData);
             return;
         }
@@ -890,6 +899,8 @@ impl Client {
         st.pursuit_grounds = pursued.grounds;
         st.pursuit_paces = pursued.paces;
         st.pursuit_sought = pursued.sought;
+        st.pursuit_droppers = pursued.droppers;
+        self.keep_road_droppers();
         self.keep_quest_section(&ChainData);
     }
 
@@ -1116,7 +1127,7 @@ impl Client {
                     secs.push((t, g));
                 }
                 secs.sort_by(|a, b| a.0.total_cmp(&b.0));
-                for (lb, at) in secs.into_iter().map(|(_, g)| g) {
+                for (plan, (lb, at)) in secs {
                     let st = &mut self.autoplay.growth;
                     st.skip.expire(now, SKIP_GROUND_FOR);
                     if st.skip.since(&lb).is_some() {
@@ -1126,6 +1137,8 @@ impl Client {
                         let st = &mut self.autoplay.growth;
                         st.bound = Some((lb, at.at.truncate(), creature.clone()));
                         st.quiet_since = None;
+                        st.plan_secs = Some(plan);
+                        self.keep_road_droppers();
                         // The ground taken, which need not be the step's first.
                         let to = ac_world::quest_chain::place_name(at.cell);
                         let why =
@@ -1194,6 +1207,21 @@ impl Client {
             | PursuitStep::Combine { .. } => self.grow_fetch(&line, now),
             _ => None,
         }
+    }
+
+    /// The droppers met on the road worth a fight: those a kill of saves more of the plan's seconds
+    /// than it costs ([`pace::road_droppers`]), into `pursuit_road`.
+    pub(crate) fn keep_road_droppers(&mut self) {
+        let st = &mut self.autoplay.growth;
+        let plan = st.plan_secs.unwrap_or(0.0);
+        st.pursuit_road = pace::road_droppers(&st.pursuit_droppers, &st.pursuit_sought, plan);
+    }
+
+    /// Whether `wcid` is one the working hunt fights: its grounds' creatures, or a dropper met on
+    /// the road worth the fight.
+    pub(crate) fn is_sought(&self, wcid: u32) -> bool {
+        let st = &self.autoplay.growth;
+        st.pursuit_sought.contains(&wcid) || st.pursuit_road.contains(&wcid)
     }
 
     /// How soon the pursued ground of `lb` gives the item there, when `lb` is one.
