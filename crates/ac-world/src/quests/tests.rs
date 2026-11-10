@@ -166,6 +166,9 @@ fn every_line_of_both_files_parses_and_givers_stand_in_the_world() {
     for s in sources().iter().filter(|s| !s.kind.is_hunted()) {
         assert_eq!(s.places.len(), s.landblocks.len(), "{} {}", s.wcid, s.name);
     }
+    for s in sources().iter().filter(|s| s.kind.is_hunted()) {
+        assert_eq!(s.rates.len(), s.landblocks.len(), "{} {}", s.wcid, s.name);
+    }
     for r in all() {
         assert!(
             !r.places.is_empty() || r.hand == Handing::Read,
@@ -379,4 +382,49 @@ fn the_mire_witch_is_a_rare_spawn_and_the_key_moarsman_a_sure_one() {
     assert_eq!(spawn_share(8866), 1.0);
     // A creature the table does not name is taken for a sure one.
     assert_eq!(spawn_share(u32::MAX), 1.0);
+}
+
+#[test]
+fn the_rates_column_is_read_beside_its_landblocks() {
+    let s =
+        parse_source("6876,drop,10815,Virindi Inquisitor,100,0.8,2AE:19;2AF:37,,,1,19:225;37:435")
+            .expect("a row with rates");
+    assert_eq!(s.rates.len(), 2);
+    let inner = s.rate_at(0x02AF);
+    assert_eq!((inner.load, inner.per_hour), (37.0, 435.0));
+    // An empty column is unknown: the entries are taken for the load, and none an hour.
+    let s = parse_source("6876,drop,10815,Virindi Inquisitor,100,0.8,2AE:19;2AF:37,,,1,")
+        .expect("a row with no rates");
+    assert!(s.rates.is_empty());
+    assert_eq!(
+        s.rate_at(0x02AE),
+        SpawnRate {
+            load: 19.0,
+            per_hour: 0.0
+        }
+    );
+    // Rates not one a landblock are no row.
+    assert!(
+        parse_source("6876,drop,10815,Virindi Inquisitor,100,0.8,2AE:19;2AF:37,,,1,19:225")
+            .is_none()
+    );
+}
+
+#[test]
+fn the_chakron_holds_its_inquisitors_at_load() {
+    // The Chakron's linked placements are sure spawns: every Virindi Inquisitor stands there once
+    // the landblock loads, and its slots come back in minutes. A Dark Inferno's open camp is a
+    // rare roll of a region generator: next to none at load.
+    let key = Want::Item(6876);
+    let rate = |wcid: u32, lb: u32| {
+        sources_of(&key)
+            .find(|s| s.wcid == wcid && s.kind == Yield::Drop)
+            .map(|s| s.rate_at(lb))
+            .expect("a key dropper")
+    };
+    let chakron = rate(10815, 0x02AF);
+    assert!(chakron.load >= 30.0, "{chakron:?}");
+    assert!(chakron.per_hour > 100.0, "{chakron:?}");
+    let camp = rate(12023, 0x252D);
+    assert!(camp.load < 1.0 && camp.per_hour < 5.0, "{camp:?}");
 }

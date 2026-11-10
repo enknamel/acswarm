@@ -65,6 +65,7 @@ fn dropper(want: Want, wcid: u32, name: &str, level: u32) -> &'static Source {
         landblocks: Vec::new(),
         places: Vec::new(),
         keys: Vec::new(),
+        rates: Vec::new(),
     })
 }
 
@@ -698,6 +699,7 @@ fn necklace_from(kind: Yield, wcid: u32, name: &str, at: Place) -> Source {
         landblocks: vec![(at.cell, 1)],
         places: vec![at],
         keys: Vec::new(),
+        rates: Vec::new(),
     }
 }
 
@@ -861,6 +863,7 @@ fn carrying(c: &mut Client, guid: u32, wcid: u32, name: &str) {
 fn old_chest(at: Place) -> PursuitStep {
     let chest = Source {
         keys: vec![(27896, "A Smelly Key".into())],
+        rates: Vec::new(),
         ..necklace_from(Yield::Container, 27890, "An old Chest", at)
     };
     PursuitStep::OpenChest {
@@ -1419,6 +1422,7 @@ fn vortex(at: Place) -> PursuitStep {
         landblocks: vec![(at.cell, 1)],
         places: vec![at],
         keys: vec![(8903, "Focusing Stone".into())],
+        rates: Vec::new(),
     };
     PursuitStep::UseOn {
         source: leak(source),

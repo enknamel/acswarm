@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""Walk ACE's emote sets into quests.csv and quest_sources.csv (stdlib only).
+"""Walk ACE's emote sets into quests.csv and quest_sources.csv (stdlib only), and simulate the
+generators for how fast each hunted creature comes (the sources' `rates`, seeded).
 
 Usage: quests_walk.py DUMP_DIR OUT_DIR, DUMP_DIR holding the tables quests.sh reads out.
 docs/quests-design.md §1.4 says what a path is and which branches the client can know.
 ACE citations are under reference/ext/ACE/Source/ACE.Server/.
 """
+import heapq
 import os
+import random
 import sys
 from collections import defaultdict
 
@@ -165,6 +168,7 @@ class Data:
             self.combined[int(made)].add((int(used), int(on)))
         # Items a shop sells (vendors.csv, joined at load): a source the walk does not write.
         self.sold = set()
+        self.spawning = Spawning(dump)
 
     def ground_places(self, wcid, depth=0):
         """Where `wcid` lies or stands in the world: placed, or made on the ground."""
@@ -230,6 +234,280 @@ class Data:
                 continue
             best = max(best, chance * self.spawn_share(gen, depth + 1))
         return best
+
+
+# Spawn rates: a Monte Carlo of ACE's generators (WorldObject_Generators.cs, GeneratorProfile.cs),
+# for the `rates` column: how many of a creature a landblock holds when it loads, and how many it
+# makes an hour while the player kills all its generators make.
+# WeenieType Chest and Container: an emptied one is not destroyed (WorldObject_Generators.cs:571).
+GEN_CONTAINERS = (20, 21)
+# The placeholder wcid a profile never makes (GeneratorProfile.cs:54).
+PLACEHOLDER = 3666
+# Power-ups averaged for the load, and hours of clearing for the rate, per root generator.
+LOAD_RUNS = 60
+CLEAR_HOURS = 2.0
+
+
+class Slot:
+    """One generator profile: what it makes, how often and how many, and what it holds now."""
+    __slots__ = ("prob", "wcid", "delay", "init", "max", "spawned", "avail")
+
+    def __init__(self, p, delay0):
+        self.prob, self.wcid, self.init, self.max = p["prob"], p["wcid"], p["init"], p["max"]
+        # A profile with no delay takes profile[0]'s (GeneratorProfile.cs:106-114).
+        self.delay = p["delay"] if p["delay"] is not None else (delay0 or 0.0)
+        self.spawned = []
+        self.avail = -1e18
+
+
+class Gen:
+    """A generator in the sim: its profiles, and linked placements as profiles of their own with
+    profile[0]'s figures (WorldObject_Generators.cs:589-625)."""
+
+    def __init__(self, sp, wcid, links=(), parent=None):
+        gp = sp.genprops.get(wcid, (1, 0.0, 0, 0, 0))
+        self.wcid, self.parent, self.alive, self.powering = wcid, parent, True, True
+        kind, self.regen, self.init, self.max, self.ad = gp
+        self.container = kind in GEN_CONTAINERS
+        profs = sp.profiles.get(wcid, [])
+        delay0 = profs[0]["delay"] if profs else 0.0
+        # Contain, Wield and Shop put nothing in the world (RegenLocationType.cs:12-16).
+        self.slots = [Slot(p, delay0) for p in profs if not p["where"] & 56]
+        if links and profs:
+            t = profs[0]
+            for w in links:
+                self.slots.append(Slot(dict(t, wcid=w), delay0))
+                if t["prob"] == -1:
+                    self.init += t["init"]
+                    self.max += t["max"]
+        # Max under Init is raised to Init (WorldObject_Generators.cs:61-65).
+        if (self.max <= 0 or self.max < self.init) and self.init > 0:
+            self.max = self.init
+
+    def cur(self):
+        return sum(len(s.spawned) for s in self.slots)
+
+    def maxed(self, s):
+        return s.max != -1 and len(s.spawned) >= s.max
+
+    def stops(self, now):
+        """GenStopSelectProfileConditions (WorldObject_Generators.cs:319-338)."""
+        c = self.cur()
+        if c >= self.max or (self.powering and c >= self.init):
+            return True
+        live = [s for s in self.slots if s.wcid != PLACEHOLDER]
+        return not any(now > s.avail for s in live) or all(self.maxed(s) for s in live)
+
+    def total(self, now):
+        """The share a roll is drawn over: cumulative thresholds of the slots free now, a -1 one
+        always making (WorldObject_Generators.cs:184-214)."""
+        tot, last = 0.0, 0.0
+        for s in self.slots:
+            if s.prob == -1:
+                if not self.maxed(s) and now > s.avail:
+                    return 1.0
+                continue
+            if not self.maxed(s) and now > s.avail:
+                if last > s.prob:
+                    last = 0.0
+                tot += s.prob - last
+            last = s.prob
+        return tot
+
+    def count(self, s):
+        """How many one pick makes, capped by the free room (WorldObject_Generators.cs:281-314)."""
+        n = 1 if (s.init == -1 or s.max == -1) else s.init
+        n = min(n, self.max - self.cur())
+        if s.max != -1:
+            n = min(n, s.max - len(s.spawned))
+        return max(n, 0)
+
+    def select(self, now, rng, out):
+        """SelectProfiles (WorldObject_Generators.cs:108-178, 238-276): the picks of one roll."""
+        if self.stops(now):
+            return
+        roll = rng.uniform(0.0, self.total(now))
+        tot, last = 0.0, 0.0
+        for s in self.slots:
+            free = not self.maxed(s) and now > s.avail and s.wcid != PLACEHOLDER
+            if s.prob != -1:
+                if free:
+                    if last > s.prob:
+                        last = 0.0
+                    tot += s.prob - last
+                last = s.prob
+            if not free:
+                continue
+            if s.prob == -1 or roll < tot:
+                out.extend([s] * self.count(s))
+                if s.prob != -1:
+                    break
+                if self.stops(now):
+                    return
+
+
+class Sim:
+    """One root generator's tree in time; `kills` says whether the player kills a creature at once."""
+
+    def __init__(self, sp, root, links, rng, kills):
+        self.sp, self.rng, self.kills = sp, rng, kills
+        self.heap, self.seq, self.pending = [], 0, []
+        self.made, self.alive = defaultdict(int), defaultdict(int)
+        self.push(0.0, Gen(sp, root, links))
+
+    def push(self, t, g):
+        self.seq += 1
+        heapq.heappush(self.heap, (t, self.seq, g))
+
+    def generate(self, g, now):
+        """Generator_Generate: power-up rolls until Init, then one roll a tick
+        (WorldObject_Generators.cs:652-682)."""
+        if g.powering:
+            n = 0
+            while not g.stops(now) and n < 1000:
+                made = []
+                g.select(now, self.rng, made)
+                self.place(g, made, now)
+                n += 1
+            g.powering = False
+        else:
+            made = []
+            g.select(now, self.rng, made)
+            self.place(g, made, now)
+
+    def place(self, g, made, now):
+        sp = self.sp
+        for s in made:
+            w = s.wcid
+            if w in sp.profiles and w not in sp.attackable:
+                h = Gen(sp, w, parent=(g, s))
+                s.spawned.append(h)
+                self.push(now, h)
+            elif sp.attackable.get(w):
+                tok = ("c", w)
+                s.spawned.append(tok)
+                self.made[w] += 1
+                self.alive[w] += 1
+                if self.kills:
+                    self.pending.append((g, s, tok))
+            else:
+                s.spawned.append(("o", w))  # an item, or a creature nobody kills: holds its slot
+
+    def die(self, g, s, tok, now):
+        """A death frees the slot after its delay (GeneratorProfile.cs:526-564); a generator a
+        generator made goes once all it made is dead (WorldObject_Generators.cs:562-584)."""
+        s.spawned.remove(tok)
+        self.alive[tok[1]] -= 1
+        s.avail = now + s.delay
+        if g.init > 0 and g.cur() == 0 and (g.parent is not None and (not g.container or g.ad)
+                                            or g.parent is None and g.ad):
+            g.alive = False
+            if g.parent is not None:
+                _, ps = g.parent
+                if g in ps.spawned:
+                    ps.spawned.remove(g)
+                ps.avail = now + ps.delay
+
+    def run(self, until):
+        """Regeneration ticks every RegenerationInterval s (WorldObject_Tick.cs:121-136); none at
+        0 (:77-78). The player's kills land after the generator's own work each tick."""
+        while self.heap and self.heap[0][0] <= until:
+            t, _, g = heapq.heappop(self.heap)
+            if not g.alive:
+                continue
+            self.generate(g, t)
+            kills, self.pending = self.pending, []
+            for kg, ks, tok in kills:
+                self.die(kg, ks, tok, t)
+            if g.regen > 0:
+                self.push(t + g.regen, g)
+
+
+class Spawning:
+    """Each landblock's root generators, and per root what it holds at load and makes an hour."""
+
+    def __init__(self, dump):
+        self.profiles = defaultdict(list)
+        for gen, prob, wcid, delay, init, mx, where in rows(dump, "profiles"):
+            self.profiles[int(gen)].append(dict(
+                prob=num(prob), wcid=int(wcid), delay=None if delay == "" else num(delay),
+                init=int(init), max=int(mx), where=int(where)))
+        self.genprops = {}
+        for wcid, kind, regen, init, mx, ad in rows(dump, "genprops"):
+            self.genprops[int(wcid)] = (int(kind), num(regen), int(init), int(mx), int(ad))
+        # Creatures, by whether one can be attacked (PropertyBool 19, default true).
+        self.attackable = {int(w): a != "0" for w, a in rows(dump, "crit")}
+        links, children = defaultdict(list), set()
+        for parent, child, wcid in rows(dump, "links"):
+            links[int(parent)].append(int(wcid))
+            children.add(int(child))
+        # Roots: placed generators and creatures, not a linked placement (WorldObjectFactory.cs:280),
+        # and the encounter table's generators, outdoors on a surface (Landblock.cs:269-290).
+        self.roots = defaultdict(list)
+        for guid, wcid, cell in rows(dump, "inst"):
+            g, w, c = int(guid), int(wcid), int(cell, 16)
+            if g not in children:
+                self.roots[c >> 16].append((w, tuple(sorted(links.get(g, ()))), c & 0xFFFF < 0x100, 1))
+        for lb, wcid, n in rows(dump, "encroots"):
+            self.roots[int(lb, 16)].append((int(wcid), (), True, int(n)))
+        self.surface = {lb for lb, rs in self.roots.items() if any(r[2] for r in rs)}
+        self.reach_of, self.per_root = {}, {}
+
+    def reaches(self, w, depth=0):
+        """Every wcid generator `w` can put in the world, five deep."""
+        if w in self.reach_of:
+            return self.reach_of[w]
+        out = set()
+        if depth < 5:
+            for p in self.profiles.get(w, ()):
+                if p["where"] & 56:
+                    continue
+                out.add(p["wcid"])
+                if p["wcid"] in self.profiles and p["wcid"] not in self.attackable:
+                    out |= self.reaches(p["wcid"], depth + 1)
+        self.reach_of[w] = out
+        return out
+
+    def root_figures(self, w, links):
+        """(load, per hour) by creature of one root, seeded by the root so the file is the same
+        whatever order roots are met in."""
+        key = (w, links)
+        if key not in self.per_root:
+            if w in self.attackable and w not in self.profiles:
+                self.per_root[key] = ({w: 1.0}, {})
+                return self.per_root[key]
+            rng = random.Random("%d:%s" % key)
+            load = defaultdict(float)
+            for _ in range(LOAD_RUNS):
+                s = Sim(self, w, links, rng, False)
+                s.run(0.0)
+                for c, n in s.alive.items():
+                    load[c] += n / LOAD_RUNS
+            s = Sim(self, w, links, rng, True)
+            s.run(0.0)
+            base = dict(s.made)
+            s.run(CLEAR_HOURS * 3600)
+            rate = {c: (n - base.get(c, 0)) / CLEAR_HOURS for c, n in s.made.items()}
+            # A placed creature that is a generator too stands there itself.
+            if self.attackable.get(w):
+                load[w] += 1.0
+            self.per_root[key] = (dict(load), rate)
+        return self.per_root[key]
+
+    def rates(self, wcid, lb):
+        """(load, per hour) of creature `wcid` on landblock `lb`: a surface landblock's outdoor
+        roots only, as the spawns query counts."""
+        load = rate = 0.0
+        for w, links, outdoors, n in self.roots.get(lb, ()):
+            if lb in self.surface and not outdoors:
+                continue
+            if not (w == wcid or wcid in links or wcid in self.reaches(w)
+                    or any(wcid in self.reaches(c) for c in links)):
+                continue
+            ld, rt = self.root_figures(w, links)
+            load += n * ld.get(wcid, 0.0)
+            rate += n * rt.get(wcid, 0.0)
+        return load, rate
 
 
 def walk(data, root):
@@ -745,8 +1023,12 @@ def build(data, never):
         # No chain known (an emote's summons, a linked placement): no figure, not a rare one.
         share = data.spawn_share(c) if kind in ("drop", "kill") else 0.0
         spawn = "%g" % round(share, 4) if share > 0 else ""
+        rates = ""
+        if kind in ("drop", "kill"):
+            figures = (data.spawning.rates(c, lb) for lb, _ in sorted(data.spawns[c]))
+            rates = ";".join("%g:%g" % (round(n, 2), round(h, 1)) for n, h in figures)
         src_out.append((want, kind, str(c), data.name.get(c, ""), str(data.level(c)),
-                        "%g" % round(p, 4), where, at, keys, spawn))
+                        "%g" % round(p, 4), where, at, keys, spawn, rates))
     return rows_out, givers_out, src_out, reasons
 
 
@@ -921,7 +1203,7 @@ GIVERS_HEADER = """\
 
 SOURCES_HEADER = """\
 # Where what a quest wants comes from, and what each source itself needs.
-# want,kind,wcid,name,level,chance,landblocks,at,keys,spawn
+# want,kind,wcid,name,level,chance,landblocks,at,keys,spawn,rates
 # want: an item wcid or a kill counter, as quests.csv names it, or a key a container or use
 # below needs. kind: drop (a corpse drop, chance per kill), kill (a creature counting for the
 # counter), npc (a placed NPC whose talk gives the item), floor (made on the ground by a
@@ -934,7 +1216,9 @@ SOURCES_HEADER = """\
 # use, the items used on it; for a combine, the item used then the one used on;
 # wcid=name;..., each a want of its own rows. A shop's stock is vendors.csv's, joined at load (ac_world::quests::sources).
 # spawn: for a drop or kill, the best share of a generator roll that puts the creature out (1 sure;
-# blank when no generator chain is known).
+# blank when no generator chain is known). rates: for a drop or kill, load:per_hour;... one per
+# landblocks entry: how many stand there once the landblock loads, and how many its generators
+# make an hour while everything they make is killed, from a seeded simulation of ACE's generators.
 # Regenerate with reference/scripts/data/quests.sh.
 """
 

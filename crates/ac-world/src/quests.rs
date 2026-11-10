@@ -251,6 +251,16 @@ impl Yield {
     }
 }
 
+/// How fast a hunted creature comes on one landblock, from a simulation of its generators
+/// (`reference/scripts/data/quests_walk.py`, WorldObject_Generators.cs).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct SpawnRate {
+    /// How many stand there once the landblock loads (Landblock.cs:269-303).
+    pub load: f32,
+    /// How many its generators make an hour while everything they make is killed.
+    pub per_hour: f32,
+}
+
 /// Where what a quest wants comes from.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Source {
@@ -270,9 +280,24 @@ pub struct Source {
     /// The keys that open a locked container, or the items used on a use's object, `(wcid, name)`:
     /// each a want with sources of its own.
     pub keys: Vec<(u32, String)>,
+    /// A hunted source's rate on each `landblocks` entry; empty when the data has none.
+    pub rates: Vec<SpawnRate>,
 }
 
 impl Source {
+    /// How fast it comes on `landblock`: the data's figure, else its spawn entries there taken
+    /// for the load and none an hour.
+    pub fn rate_at(&self, landblock: u32) -> SpawnRate {
+        let i = self.landblocks.iter().position(|&(lb, _)| lb == landblock);
+        match i.and_then(|i| self.rates.get(i).map(|r| (i, *r))) {
+            Some((_, r)) => r,
+            None => SpawnRate {
+                load: i.map_or(0.0, |i| self.landblocks[i].1 as f32),
+                per_hour: 0.0,
+            },
+        }
+    }
+
     /// The spot nearest `me` by straight distance; the first with no position.
     pub fn nearest(&self, me: Option<Vec3>) -> Option<Place> {
         let away = |p: &&Place| me.map_or(0.0, |m| p.at.distance(m));
@@ -480,11 +505,29 @@ fn parse_keys(s: &str) -> Option<Vec<(u32, String)>> {
         .collect()
 }
 
-/// One row: the first seven columns, and a placed source's spots and a lock's keys when there
-/// (the tenth, a creature's spawn share, is read by [`spawn_share`]).
+/// Each `landblocks` entry's `load:per_hour`, `;`-separated; empty for none known.
+fn parse_rates(s: &str, entries: usize) -> Option<Vec<SpawnRate>> {
+    if s.is_empty() {
+        return Some(Vec::new());
+    }
+    let rates: Vec<SpawnRate> = s
+        .split(';')
+        .map(|r| {
+            let (load, per_hour) = r.split_once(':')?;
+            Some(SpawnRate {
+                load: load.parse().ok()?,
+                per_hour: per_hour.parse().ok()?,
+            })
+        })
+        .collect::<Option<_>>()?;
+    (rates.len() == entries).then_some(rates)
+}
+
+/// One row: the first seven columns, a placed source's spots and a lock's keys when there, and a
+/// hunted one's rates (the tenth, a creature's spawn share, is read by [`spawn_share`]).
 fn parse_source(line: &str) -> Option<Source> {
     let f: Vec<&str> = line.split(',').collect();
-    if ![7, 9, 10].contains(&f.len()) {
+    if ![7, 9, 10, 11].contains(&f.len()) {
         return None;
     }
     let kind = match f[1] {
@@ -511,6 +554,7 @@ fn parse_source(line: &str) -> Option<Source> {
         level: f[4].parse().ok()?,
         chance: f[5].parse().ok()?,
         places: parse_spots(&landblocks, at)?,
+        rates: parse_rates(f.get(10).copied().unwrap_or(""), landblocks.len())?,
         landblocks,
         keys: parse_keys(keys)?,
     })
@@ -544,6 +588,7 @@ fn vendor_sources(parsed: &[Source]) -> Vec<Source> {
                 landblocks: vec![(shop.cell, 1)],
                 places: vec![shop.place()],
                 keys: Vec::new(),
+                rates: Vec::new(),
             });
         }
     }
