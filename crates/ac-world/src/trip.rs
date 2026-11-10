@@ -470,6 +470,42 @@ pub fn plan_with_recalls_and_gems(
     gems: &[Gem],
     prefs: Prefs,
 ) -> Option<Trip> {
+    let none = Ways::default();
+    plan_with_ways(
+        from,
+        goal,
+        level,
+        quests_done,
+        avoid,
+        no_walks,
+        recalls,
+        gems,
+        prefs,
+        &none,
+    )
+}
+
+/// What a trip may take besides the fixed portals: portals standing in view for a while (one a
+/// creature's death opened: `portals::Summoned`).
+#[derive(Clone, Debug, Default)]
+pub struct Ways {
+    pub portals: Vec<Portal>,
+}
+
+/// [`plan_with_recalls_and_gems`], the portals of `ways` taken too.
+#[allow(clippy::too_many_arguments)]
+pub fn plan_with_ways(
+    from: Place,
+    goal: Place,
+    level: u32,
+    quests_done: &[String],
+    avoid: &[Vec2],
+    no_walks: &[NoWalk],
+    recalls: &[Recall],
+    gems: &[Gem],
+    prefs: Prefs,
+    ways: &Ways,
+) -> Option<Trip> {
     let recalls: &[Recall] = if prefs.use_recalls { recalls } else { &[] };
     let can_walk = |a: Place, b: Place, stuck: bool| {
         can_walk_from(a, b, prefs.walk_reach, stuck) && !no_walks.iter().any(|n| n.is_walk(a, b))
@@ -496,6 +532,7 @@ pub fn plan_with_recalls_and_gems(
     }
     let usable: Vec<&Portal> = portals::all()
         .iter()
+        .chain(&ways.portals)
         .filter(|p| p.works() && p.admits(prefs.who))
         .filter(|p| level == 0 || p.usable_by(level, quests_done))
         .filter(|p| !avoid.iter().any(|a| a.distance(p.from_xy()) < 2.0))
@@ -1153,5 +1190,44 @@ mod tests {
             .seconds
         };
         assert!(cost(true) > cost(false), "summoning was not dearer");
+    }
+
+    #[test]
+    fn the_keep_is_reached_through_the_portal_the_watchman_s_death_left_standing() {
+        // Aerfalle's Keep (0x01F5) has no fixed way in: the Relic Watchman's death opens one for
+        // a while, where he fell in Relic Town (0xB8EB).
+        let summoned = crate::portals::summoned().iter().find(|s| s.by == 7372);
+        let summoned = summoned.expect("the Watchman's portal");
+        let town = crate::landblock_origin(0xB8EB_0000) + Vec3::new(47.0, 95.0, 36.0);
+        let from = Place {
+            at: town,
+            cell: 0xB8EB_0016,
+        };
+        let ghost = Place {
+            at: crate::landblock_origin(0x01F5_0000) + Vec3::new(77.79, -122.55, 6.01),
+            cell: 0x01F5_028C,
+        };
+        let plan = |ways: &Ways| {
+            let prefs = Prefs::default();
+            plan_with_ways(from, ghost, 150, &[], &[], &[], &[], &[], prefs, ways)
+        };
+        let standing = Ways {
+            portals: vec![summoned.standing_at(0xB8EB_0016, town + Vec3::new(3.0, 0.0, 0.0))],
+        };
+        let trip = plan(&standing).expect("through the Watchman's portal");
+        let first = trip.steps.first();
+        assert!(
+            matches!(first, Some(Step::Portal { name, .. }) if name == "Aerfalle Keep Portal"),
+            "{trip:?}"
+        );
+        let without = plan(&Ways::default());
+        assert!(
+            without
+                .as_ref()
+                .is_none_or(|t| t.steps.iter().all(|s| !matches!(
+                    s, Step::Portal { name, .. } if name == "Aerfalle Keep Portal"
+                ))),
+            "{without:?}"
+        );
     }
 }

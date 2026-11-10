@@ -69,8 +69,9 @@ impl Client {
         };
         let quests = self.travel.quests_done.clone();
         let to = self.planning_place(place);
-        let planned = trip::plan_with_recalls_and_gems(
-            from, to, level, &quests, &refused, &no_walks, &recalls, &gems, prefs,
+        let ways = self.standing_ways();
+        let planned = trip::plan_with_ways(
+            from, to, level, &quests, &refused, &no_walks, &recalls, &gems, prefs, &ways,
         );
         if planned.is_some() {
             return planned;
@@ -83,13 +84,26 @@ impl Client {
             portal_reach: trip::Prefs::far().portal_reach,
             ..prefs
         };
-        let planned = trip::plan_with_recalls_and_gems(
-            from, to, level, &quests, &refused, &no_walks, &recalls, &gems, far,
+        let planned = trip::plan_with_ways(
+            from, to, level, &quests, &refused, &no_walks, &recalls, &gems, far, &ways,
         );
         if let (true, Some(t)) = (refusals, &planned) {
             tracing::info!("travel: no shorter way; the long walk, {:.0} s", t.seconds);
         }
         planned
+    }
+
+    /// The portals standing in view that a creature's death opened (`portals::summoned`): ways a
+    /// trip takes while they stand, as the Relic Watchman's into Aerfalle's Keep.
+    pub(crate) fn standing_ways(&self) -> trip::Ways {
+        let summoned = ac_world::portals::summoned();
+        let portals = self.world.objects.values().filter_map(|o| {
+            let s = summoned.iter().find(|s| s.wcid == o.weenie_class_id)?;
+            Some(s.standing_at(o.position?.cell, o.world_pos()?))
+        });
+        trip::Ways {
+            portals: portals.collect(),
+        }
     }
 
     /// What the trip planner may use, as one number: level, quest flags, the gems carried and
@@ -107,6 +121,14 @@ impl Client {
             recalls.sort_unstable();
             recalls.hash(&mut h);
         }
+        let mut standing: Vec<u32> = self
+            .standing_ways()
+            .portals
+            .iter()
+            .map(|p| p.to_cell)
+            .collect();
+        standing.sort_unstable();
+        standing.hash(&mut h);
         h.finish()
     }
 

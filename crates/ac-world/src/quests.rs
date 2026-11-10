@@ -37,6 +37,8 @@ pub enum Want {
     Item(u32),
     /// Kills counted under this quest counter (a creature's KillQuest string, lowercased).
     Kill(String),
+    /// A server event started (EventManager.cs), lower case: what a source's [`Source::event`] asks.
+    Event(String),
     Nothing,
 }
 
@@ -242,6 +244,8 @@ pub enum Yield {
     Combine,
     /// A shop sells it (`crate::shops`): bought on a town run.
     Vendor,
+    /// An event started by handing one of its `keys` to this NPC.
+    Give,
 }
 
 impl Yield {
@@ -285,6 +289,9 @@ pub struct Source {
     pub keys: Vec<(u32, String)>,
     /// A hunted source's rate on each `landblocks` entry; empty when the data has none.
     pub rates: Vec<SpawnRate>,
+    /// The server event (lower case) whose generator alone puts the creature or NPC out: it comes
+    /// only once that event is started, and its rates are those it then has.
+    pub event: Option<String>,
 }
 
 impl Source {
@@ -568,7 +575,7 @@ fn parse_rates(s: &str, entries: usize) -> Option<Vec<SpawnRate>> {
 /// hunted one's rates (the tenth, a creature's spawn share, is read by [`spawn_share`]).
 fn parse_source(line: &str) -> Option<Source> {
     let f: Vec<&str> = line.split(',').collect();
-    if ![7, 9, 10, 11].contains(&f.len()) {
+    if ![7, 9, 10, 11, 12].contains(&f.len()) {
         return None;
     }
     let kind = match f[1] {
@@ -579,15 +586,16 @@ fn parse_source(line: &str) -> Option<Source> {
         "container" => Yield::Container,
         "use" => Yield::Use,
         "combine" => Yield::Combine,
+        "give" => Yield::Give,
         _ => return None,
     };
     let landblocks = pairs(f[6], 16)?;
     let (at, keys) = if f.len() >= 9 { (f[7], f[8]) } else { ("", "") };
     Some(Source {
-        want: if kind == Yield::Kill {
-            Want::Kill(f[0].to_string())
-        } else {
-            Want::Item(f[0].parse().ok()?)
+        want: match f[0].strip_prefix("event:") {
+            Some(event) => Want::Event(event.to_string()),
+            None if kind == Yield::Kill => Want::Kill(f[0].to_string()),
+            None => Want::Item(f[0].parse().ok()?),
         },
         kind,
         wcid: f[2].parse().ok()?,
@@ -598,6 +606,7 @@ fn parse_source(line: &str) -> Option<Source> {
         rates: parse_rates(f.get(10).copied().unwrap_or(""), landblocks.len())?,
         landblocks,
         keys: parse_keys(keys)?,
+        event: f.get(11).filter(|e| !e.is_empty()).map(|e| e.to_string()),
     })
 }
 
@@ -630,6 +639,7 @@ fn vendor_sources(parsed: &[Source]) -> Vec<Source> {
                 places: vec![shop.place()],
                 keys: Vec::new(),
                 rates: Vec::new(),
+                event: None,
             });
         }
     }

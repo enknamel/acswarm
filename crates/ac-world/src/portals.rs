@@ -233,6 +233,64 @@ pub fn out_of(block: u32) -> impl Iterator<Item = &'static Portal> {
     })
 }
 
+/// A portal a creature's death opens: its death casts a summon of its linked portal, 3 m in front
+/// of it, for the spell's lifetime (`data/summoned_portals.csv`; WorldObject_Magic.cs:1185-1266).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Summoned {
+    /// The creature whose death opens it.
+    pub by: u32,
+    pub by_name: String,
+    /// The portal's weenie class, as it stands in the world once opened.
+    pub wcid: u32,
+    pub name: String,
+    pub to_cell: u32,
+    pub to: Vec3,
+}
+
+impl Summoned {
+    /// The portal standing at `mouth` in `cell`: what a trip takes while it is in view.
+    pub fn standing_at(&self, cell: u32, mouth: Vec3) -> Portal {
+        Portal {
+            name: self.name.clone(),
+            from_cell: cell,
+            from: mouth,
+            to_cell: self.to_cell,
+            to: self.to,
+            min_level: 0,
+            max_level: 0,
+            quest: String::new(),
+            usable: 0,
+            bitmask: UNRESTRICTED,
+        }
+    }
+}
+
+const SUMMONED: &str = include_str!("../data/summoned_portals.csv");
+
+/// Every portal a creature's death opens, parsed on first use.
+pub fn summoned() -> &'static [Summoned] {
+    static PARSED: OnceLock<Vec<Summoned>> = OnceLock::new();
+    PARSED.get_or_init(|| {
+        let row = |line: &str| {
+            let f: Vec<&str> = line.split(',').collect();
+            let num = |i: usize| f.get(i)?.parse::<f32>().ok();
+            let to_cell = u32::from_str_radix(f.get(4)?, 16).ok()?;
+            Some(Summoned {
+                by: f.first()?.parse().ok()?,
+                by_name: crate::data_name(f.get(1)?),
+                wcid: f.get(2)?.parse().ok()?,
+                name: crate::data_name(f.get(3)?),
+                to_cell,
+                to: crate::landblock_origin(to_cell) + Vec3::new(num(5)?, num(6)?, num(7)?),
+            })
+        };
+        let lines = SUMMONED
+            .lines()
+            .filter(|l| !l.starts_with('#') && !l.is_empty());
+        lines.filter_map(row).collect()
+    })
+}
+
 /// The portals whose name contains `needle`, case-insensitively.
 pub fn named(needle: &str) -> Vec<&'static Portal> {
     let needle = needle.to_lowercase();

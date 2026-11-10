@@ -66,6 +66,7 @@ fn dropper(want: Want, wcid: u32, name: &str, level: u32) -> &'static Source {
         places: Vec::new(),
         keys: Vec::new(),
         rates: Vec::new(),
+        event: None,
     })
 }
 
@@ -161,6 +162,18 @@ fn work_killing(
     dropped: &dyn Fn(&Source) -> bool,
     kill_secs: &dyn Fn(u32) -> Option<f32>,
 ) -> Pursued {
+    work_events(facts, fake, led, dropped, kill_secs, &|_| false)
+}
+
+/// [`work_killing`], the server events `event_on` says taken for on.
+fn work_events(
+    facts: &QuestFacts,
+    fake: &dyn Chains,
+    led: Option<&str>,
+    dropped: &dyn Fn(&Source) -> bool,
+    kill_secs: &dyn Fn(u32) -> Option<f32>,
+    event_on: &dyn Fn(&str) -> bool,
+) -> Pursued {
     let holds = |f: &str| crate::quest_log::holds(facts, f);
     let chained = with_chain(&facts.config.pursue, &holds, fake);
     let mut f = facts.clone();
@@ -189,6 +202,7 @@ fn work_killing(
         here: None,
         bound: None,
         kill_secs,
+        event_on,
     };
     pursuit_of(&board, &chained, &ask)
 }
@@ -738,6 +752,7 @@ fn necklace_from(kind: Yield, wcid: u32, name: &str, at: Place) -> Source {
         places: vec![at],
         keys: Vec::new(),
         rates: Vec::new(),
+        event: None,
     }
 }
 
@@ -1461,6 +1476,7 @@ fn vortex(at: Place) -> PursuitStep {
         places: vec![at],
         keys: vec![(8903, "Focusing Stone".into())],
         rates: Vec::new(),
+        event: None,
     };
     PursuitStep::UseOn {
         source: leak(source),
@@ -3151,4 +3167,129 @@ fn a_ground_found_empty_again_on_return_is_not_rotated_to_again() {
     c.grow_pursuit(later);
     assert!(c.autoplay.growth.missed_back.since(&here).is_some());
     assert_eq!(c.autoplay.growth.rotating, None);
+}
+
+/// Aerfalle's Token on the bundled data, `carried` and the events `on` as given: the working step.
+fn aerfalle_step(carried: &[u32], on: &[&str]) -> PursuitStep {
+    let token = "give:40913";
+    let mut f = facts(150, &[(token, true)]);
+    f.carried = carried.iter().map(|&w| (w, 1)).collect();
+    let on = |e: &str| on.contains(&e);
+    let p = work_events(&f, &ChainData, None, &|_| false, &|_| Some(20.0), &on);
+    p.lines[0].step.clone()
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn aerfalles_token_is_worked_down_its_chain_of_server_events_on_the_bundled_data() {
+    // The chest's Ashen Key drops from an Apprentice only the aerfallegen event puts out; the
+    // Ghost of Dylaeral starts it for the Sacrificial Dagger, and so on down to the Sluice Gate
+    // Bar handed to the Repair Golem (Aerlinthe's eruption).
+    let (dagger, bellows, bar) = (28065, 7411, 7412);
+    let name = |s: &PursuitStep| match s {
+        PursuitStep::PickUp { name, .. } => format!("pick up {name}"),
+        PursuitStep::GiveTo { source, .. } => format!("give to {}", source.name),
+        PursuitStep::Hunt { creature, .. } => format!("hunt {creature}"),
+        PursuitStep::OpenChest { chest, .. } => format!("open {}", chest.name),
+        other => format!("{other:?}"),
+    };
+    assert_eq!(name(&aerfalle_step(&[], &[])), "pick up Sacrificial Dagger");
+    assert_eq!(
+        name(&aerfalle_step(&[dagger], &[])),
+        "pick up Pyreal Forge Bellows"
+    );
+    let both = [dagger, bellows];
+    assert_eq!(name(&aerfalle_step(&both, &[])), "pick up Sluice Gate Bar");
+    let all = [dagger, bellows, bar];
+    assert_eq!(name(&aerfalle_step(&all, &[])), "give to Repair Golem");
+    let on = ["forgegolemgen"];
+    assert_eq!(name(&aerfalle_step(&both, &on)), "give to Smithing Golem");
+    let on = ["erupttenkarrdunbossgen"];
+    assert_eq!(
+        name(&aerfalle_step(&[dagger], &on)),
+        "hunt Tenkarrdun Hellfire"
+    );
+    let on = ["eruptportbossgen"];
+    assert_eq!(name(&aerfalle_step(&[dagger], &on)), "hunt Relic Watchman");
+    let on = ["aerfalleubergen"];
+    assert_eq!(
+        name(&aerfalle_step(&[dagger], &on)),
+        "give to Ghost of Dylaeral"
+    );
+    let on = ["aerfallegen"];
+    assert_eq!(
+        name(&aerfalle_step(&[], &on)),
+        "hunt Aerfalle's Weakened Apprentice"
+    );
+    let key = 7409;
+    assert_eq!(
+        name(&aerfalle_step(&[key], &[])),
+        "open Lady of Aerlinthe's Chest"
+    );
+}
+
+const BAR: u32 = 0x8000_0303;
+const REPAIR_GOLEM: u32 = 0x7AB0_1001;
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn at_the_repair_golem_the_bar_is_handed_over_and_its_event_taken_for_on_once_it_is_gone() {
+    let golem = |e: &str| {
+        let want = Want::Event(e.into());
+        let mut gives = ac_world::quests::sources_of(&want).filter(|s| s.kind == Yield::Give);
+        gives
+            .find(|s| s.wcid == 7404)
+            .expect("the Repair Golem starts it")
+    };
+    let source = golem("forgegolemgen");
+    let (mut c, line) = fetching(|at| PursuitStep::GiveTo {
+        source,
+        at,
+        item: 7412,
+    });
+    let PursuitStep::GiveTo { at, .. } = line.step else {
+        unreachable!()
+    };
+    lying(&mut c, REPAIR_GOLEM, 7404, "Repair Golem", at);
+    carrying(&mut c, BAR, 7412, "Sluice Gate Bar");
+    let now = Instant::now();
+    assert_eq!(c.grow_fetch(&line, now), Some(true));
+    let f = c
+        .autoplay
+        .growth
+        .fetching
+        .clone()
+        .expect("waiting on the give");
+    assert_eq!(
+        (f.act, f.guid, f.with),
+        (fetch::Act::Give, REPAIR_GOLEM, 7412)
+    );
+    assert!(
+        !c.is_event_on("forgegolemgen", now),
+        "not before the golem takes it"
+    );
+    // The golem took the bar: the event is on, and the board is worked out again.
+    c.world.objects.remove(&BAR);
+    let soon = now + Duration::from_millis(300);
+    c.quest_board_at = Some(soon);
+    assert_eq!(c.grow_fetch(&line, soon), Some(true));
+    assert!(c.is_event_on("forgegolemgen", soon));
+    assert_eq!(c.autoplay.growth.fetching, None);
+    assert_eq!(c.quest_board_at, None);
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn an_event_is_taken_for_on_twice_its_creatures_spawn_wait_and_one_gating_npcs_till_they_are_missed(
+) {
+    // The Weakened Apprentice comes 10 an hour once aerfallegen is on (the data's rate).
+    assert_eq!(
+        events::belief("aerfallegen"),
+        Some(Duration::from_secs(720))
+    );
+    assert_eq!(
+        events::belief("forgegolemgen"),
+        None,
+        "the Smithing Golem: till missed"
+    );
 }

@@ -71,6 +71,8 @@ pub(crate) enum Act {
     Peace,
     /// A carried item used on the object, which makes the wanted item.
     Use,
+    /// A carried item handed to the NPC, which starts an event (GiveObjectRequest).
+    Give,
 }
 
 /// How an act was answered.
@@ -90,13 +92,29 @@ impl Ask<'_> {
         wants: &[Want],
         more: u32,
         locked: &mut Vec<(u32, &'static str)>,
+        events: &mut Vec<&'static str>,
     ) -> Option<PursuitStep> {
         let me = self.facts.me;
         let mut best: Option<(f32, PursuitStep)> = None;
         for want in wants {
-            let Want::Item(wcid) = *want else { continue };
+            let wcid = match *want {
+                Want::Item(w) => w,
+                Want::Event(_) => 0,
+                _ => continue,
+            };
             for s in self.chains.sources(want) {
                 if s.kind.is_hunted() || (self.dropped)(s) {
+                    continue;
+                }
+                // An NPC only an event puts out is gone to once the event is on; a give's item
+                // is had first, as the event may not last.
+                let off = s.event.as_deref().filter(|e| !(self.event_on)(e));
+                let carried = |k: &u32| (self.asking.carried)(*k) > 0;
+                let has_item = s.kind != Yield::Give || s.keys.iter().any(|k| carried(&k.0));
+                if let Some(e) = off.filter(|_| has_item) {
+                    if !events.contains(&e) {
+                        events.push(e);
+                    }
                     continue;
                 }
                 // A combine is made where the character stands: no place of its own.
@@ -121,6 +139,21 @@ impl Ask<'_> {
                         at,
                     },
                     Yield::Npc => PursuitStep::AskFor { source: s, at },
+                    Yield::Give => match s.keys.iter().map(|k| k.0).find(carried) {
+                        Some(item) => PursuitStep::GiveTo {
+                            source: s,
+                            at,
+                            item,
+                        },
+                        None => {
+                            for (k, name) in &s.keys {
+                                if !locked.iter().any(|l| l.0 == *k) {
+                                    locked.push((*k, name.as_str()));
+                                }
+                            }
+                            continue;
+                        }
+                    },
                     Yield::Combine => {
                         // Both carried, the first used on the second; a missing one is had first.
                         let missing: Vec<_> = s
@@ -144,26 +177,22 @@ impl Ask<'_> {
                             }
                         }
                     }
-                    Yield::Use => {
-                        let carried = |k: &u32| (self.asking.carried)(*k) > 0;
-                        match s.keys.iter().map(|k| k.0).find(carried) {
-                            Some(with) => PursuitStep::UseOn {
-                                source: s,
-                                at,
-                                with,
-                            },
-                            None => {
-                                for (k, name) in &s.keys {
-                                    if !locked.iter().any(|l| l.0 == *k) {
-                                        locked.push((*k, name.as_str()));
-                                    }
+                    Yield::Use => match s.keys.iter().map(|k| k.0).find(carried) {
+                        Some(with) => PursuitStep::UseOn {
+                            source: s,
+                            at,
+                            with,
+                        },
+                        None => {
+                            for (k, name) in &s.keys {
+                                if !locked.iter().any(|l| l.0 == *k) {
+                                    locked.push((*k, name.as_str()));
                                 }
-                                continue;
                             }
+                            continue;
                         }
-                    }
+                    },
                     _ => {
-                        let carried = |k: &u32| (self.asking.carried)(*k) > 0;
                         let key = s.keys.iter().map(|k| k.0).find(carried);
                         if key.is_none() && !s.keys.is_empty() && !(self.unlocked)(s) {
                             for (k, name) in &s.keys {
@@ -186,6 +215,16 @@ impl Ask<'_> {
     }
 }
 
+/// The event the source a fetch step works needs, when it has one.
+fn step_event(step: &PursuitStep) -> Option<&'static str> {
+    match step {
+        PursuitStep::GiveTo { source, .. } | PursuitStep::AskFor { source, .. } => {
+            source.event.as_deref()
+        }
+        _ => None,
+    }
+}
+
 /// The name the shop `s` sells `wcid` under.
 pub(super) fn ware_name(s: &Source, wcid: u32) -> Option<String> {
     let cell = s.landblocks.first().map_or(0, |l| l.0);
@@ -200,6 +239,7 @@ pub(super) fn ware_name(s: &Source, wcid: u32) -> Option<String> {
 fn fetch_key(step: &PursuitStep) -> Option<(u32, u32)> {
     match step {
         PursuitStep::PickUp { wcid, .. } => Some((*wcid, *wcid)),
+        PursuitStep::GiveTo { source, item, .. } => Some((*item, source.wcid)),
         PursuitStep::OpenChest { chest: s, .. }
         | PursuitStep::UseOn { source: s, .. }
         | PursuitStep::AskFor { source: s, .. }
@@ -214,7 +254,12 @@ fn fetch_key(step: &PursuitStep) -> Option<(u32, u32)> {
 impl Client {
     /// Whether a step at source `s` was refused within [`PURSUIT_RETRY`] of `now`.
     pub(crate) fn is_source_dropped(&self, s: &Source, now: Instant) -> bool {
-        let Want::Item(w) = s.want else { return false };
+        // A give is dropped by the item it is handed, as `fetch_key` keys it.
+        let w = match s.want {
+            Want::Item(w) => w,
+            Want::Event(_) => s.keys.first().map_or(0, |k| k.0),
+            _ => return false,
+        };
         let dropped = &self.autoplay.growth.sources_dropped;
         dropped.within(&(w, s.wcid), now, PURSUIT_RETRY)
     }
@@ -237,7 +282,8 @@ impl Client {
             PursuitStep::PickUp { wcid, name, at } => (*at, *wcid, name.clone()),
             PursuitStep::OpenChest { chest: s, at, .. }
             | PursuitStep::UseOn { source: s, at, .. }
-            | PursuitStep::AskFor { source: s, at } => (*at, s.wcid, s.name.clone()),
+            | PursuitStep::AskFor { source: s, at }
+            | PursuitStep::GiveTo { source: s, at, .. } => (*at, s.wcid, s.name.clone()),
             PursuitStep::Combine { source: s, .. } => {
                 let p = self.player.as_ref()?;
                 let here = Place {
@@ -262,6 +308,7 @@ impl Client {
                         let why = match f.act {
                             Act::Take => format!("{label}: would not come up"),
                             Act::Talk => format!("{label}: gave nothing"),
+                            Act::Give => format!("{label}: would not take it"),
                             Act::Use => format!("{label}: no answer to the use"),
                             _ => format!("{label}: no answer to the key"),
                         };
@@ -269,8 +316,20 @@ impl Client {
                         return Some(false);
                     }
                     Heard::Refused(why) => {
+                        // An NPC only an event puts out, not there: the event is over.
+                        if let (Act::Look, Some(e)) = (f.act, step_event(&line.step)) {
+                            self.forget_event(e);
+                        }
                         self.drop_source(key, format!("{label}: {why}"), now);
                         return Some(false);
+                    }
+                    Heard::Done if f.act == Act::Give => {
+                        if let PursuitStep::GiveTo { source, .. } = line.step {
+                            self.note_given(source, now);
+                        }
+                        self.autoplay.growth.fetching = None;
+                        self.quest_board_at = None;
+                        return Some(true);
                     }
                     // Taken or emptied: the board says what is next.
                     Heard::Done if f.act != Act::Unlock => {
@@ -385,6 +444,15 @@ impl Client {
                 self.interact(guid);
                 Some(Act::Talk)
             }
+            PursuitStep::GiveTo { item, .. } => {
+                let held = self
+                    .world
+                    .inventory()
+                    .find(|o| o.weenie_class_id == item && o.wielder.is_none())?
+                    .guid;
+                self.autoplay.growth.unlock_with = item;
+                self.give(guid, held, Some(1)).then_some(Act::Give)
+            }
             PursuitStep::OpenChest { key: Some(k), .. } if !unlocked => {
                 let held = self
                     .world
@@ -425,7 +493,7 @@ impl Client {
             self.autoplay.cast_sent = Some(at);
         }
         let (with, tries) = match (act, &self.autoplay.growth.fetching) {
-            (Act::Unlock | Act::Use, _) => {
+            (Act::Unlock | Act::Use | Act::Give, _) => {
                 let tries = std::mem::take(&mut self.autoplay.growth.unlock_tries) + 1;
                 (self.autoplay.growth.unlock_with, tries)
             }
@@ -512,6 +580,10 @@ impl Client {
                 _ if waited => Heard::Again,
                 _ => Heard::Waiting,
             },
+            // The item leaves the pack once the NPC takes it; a refusal hands it back.
+            Act::Give if self.carried_count(f.with) == 0 => Heard::Done,
+            Act::Give if waited => Heard::Again,
+            Act::Give => Heard::Waiting,
             Act::Open if self.autoplay.is_at_corpse(f.guid) => Heard::Waiting,
             Act::Open if has_item => Heard::Done,
             Act::Open => Heard::Refused("held nothing wanted".to_string()),

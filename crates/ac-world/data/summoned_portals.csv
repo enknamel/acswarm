@@ -1,0 +1,38 @@
+# Portals a creature's death opens: its death emote casts a portal summon (WorldObject_Magic.cs:
+# 1185-1266) of its linked portal, 3 m in front of it, for the spell's lifetime.
+# creature_wcid,creature,portal_wcid,portal,to_cell,to_x,to_y,to_z (local to the cell's landblock)
+# Regenerate with reference/scripts/data/quests.sh.
+7348,Lesser Acolyte,7343,Soul-Fearing Vestry Dungeon (Area 2),02EF0244,160,-150,-6
+7349,Lesser Acolyte,7344,Soul-Fearing Vestry Dungeon (Area 3),02EF0254,180,-110,-6
+7350,High Acolyte,7347,Soul-Fearing Vestry Dungeon (Area 4),02EF028E,30,-70,0
+7372,Relic Watchman,7417,Aerfalle Keep Portal,01F50229,50,-180,0
+10956,Virindi Observer,10983,Habitat Tower Portal,029302B4,80,-59.6,0.1
+21383,Gaerlan,21422,Gaerlan's Inner Sanctum,56540106,10,-20,18
+21386,Gaerlan,21422,Gaerlan's Inner Sanctum,56540106,10,-20,18
+21388,Gaerlan,21422,Gaerlan's Inner Sanctum,56540106,10,-20,18
+21390,Gaerlan,21422,Gaerlan's Inner Sanctum,56540106,10,-20,18
+22001,Coral Golem Viceroy,21403,Citadel Valley,BCC7000C,35,85,95
+22002,Diamond Golem Suzerain,21406,Citadel Valley,BBC80012,60,35,120
+22003,Glacial Golem Margrave,21405,Citadel Valley,BBC60026,105,130,90
+22004,Magma Golem Exarch,21404,Citadel Valley,BAC7001A,76.66,43.87,160
+22598,Mowen Udaun,22705,Antechamber,5E430109,120,-33.23,0
+24856,Harbinger,24861,Surface,B96F0025,118.81,116.08,10.01
+24857,Harbinger,24863,Surface,B96F0025,118.81,116.08,10.01
+27427,Shadow Nightmare Leader,27560,Consumed Wraith's Tower,1F2A0035,151.1,102.9,200
+27428,Shadow Phantom Leader,27559,Second Tower,1F290008,7.5,175.1,148
+30834,Shadow Lugian Portal,30844,Purple Portal Template,1A8E010A,-332.11,-14.92,88.4
+31876,Bur Lizk,70099,Water Island Access,1E090007,1.94,157.72,48.01
+33231,Harbinger,71240,Surface,B96F0025,118.81,116.08,10.01
+33536,Dark Crystal Spire,70110,Dark Isle,C8E9000B,38.07,60.31,0.34
+36178,Harbinger,87777,Surface,B96F0025,118.81,116.08,10.01
+43262,Apostate Nexus Guardian,87499,Gateway,F93B0413,179.05,91.2,-45.99
+46928,Obsidian Golem Noble,21406,Citadel Valley,BBC80012,60,35,120
+46930,Gaerlan,72890,Gaerlan's Inner Sanctum,58540106,10,-20,18
+51700,Apparition of Spite,72098,Gateway,58780158,300.92,-328.69,-59.99
+51701,Apparition of Bloodlust,72095,Gateway,5878029F,130,-350,-17.9
+51702,Apparition of Envy,72097,Gateway,5878014A,170,-240,-59.9
+51703,Apparition of Apathy,72096,Gateway,58780206,290,-20,-35.9
+71239,Harbinger,71240,Surface,B96F0025,118.81,116.08,10.01
+72530,Spectral Samurai Daimyo,72533,Enchanted Mnemosyne Portal 1,654C0677,90,-230,0
+72531,Spectral Samurai Daimyo,72534,Enchanted Mnemosyne Portal 2,654C0677,160,-230,0
+72532,Spectral Samurai Daimyo,72535,Enchanted Mnemosyne Portal 3,654C065D,20,-230,0

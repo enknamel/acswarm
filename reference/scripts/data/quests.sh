@@ -56,7 +56,9 @@ where li.weenie_Class_Id in
 q emote 'select id, object_Id, category, probability, coalesce(weenie_Class_Id, 0),
   coalesce(quest, "")
 from weenie_properties_emote
-where object_Id in (select weenie_Class_Id from landblock_instance)
+where object_Id in (select weenie_Class_Id from landblock_instance) or object_Id in (select ev.object_Id
+  from weenie_properties_emote ev join weenie_properties_emote_action ea on ea.emote_Id = ev.id
+  where ea.type in (23, 24))
 order by object_Id, id;'
 
 q action 'select a.emote_Id, a.order, a.type, coalesce(a.message, ""), coalesce(a.min, ""),
@@ -66,8 +68,27 @@ q action 'select a.emote_Id, a.order, a.type, coalesce(a.message, ""), coalesce(
   coalesce(a.spell_Id, "")
 from weenie_properties_emote_action a
 where a.emote_Id in (select id from weenie_properties_emote
-  where object_Id in (select weenie_Class_Id from landblock_instance))
+  where object_Id in (select weenie_Class_Id from landblock_instance) or object_Id in (select
+    ev.object_Id from weenie_properties_emote ev join weenie_properties_emote_action ea
+    on ea.emote_Id = ev.id where ea.type in (23, 24)))
 order by a.emote_Id, a.order;'
+
+# Server events (Managers/EventManager.cs): each generator's GeneratorEvent (String 34) and each
+# event's state at start (GameEventState: 4 On). A creature only an Off event's generator makes
+# comes once the event is started; what starts it is an emote's StartEvent (EmoteType 23).
+q genevent 'select s.object_Id, s.value, coalesce(e.state, 0) from weenie_properties_string s
+left join event e on e.name = s.value where s.type = 34 and s.value <> "";'
+
+# A creature's portal summon (SpellType.PortalSummon: link 1 its LinkedPortalOne, DataId 31,
+# else LinkedPortalTwo, 48; WorldObject_Magic.cs:1203-1214) and where each portal leads
+# (Destination, PositionType 2).
+q summonspell 'select id, link from spell where name like "Summon % Portal%" and link in (1, 2);'
+
+q linkportal 'select d.object_Id, d.type, d.value, hex(p.obj_Cell_Id), round(p.origin_X, 2),
+  round(p.origin_Y, 2), round(p.origin_Z, 2)
+from weenie_properties_d_i_d d
+join weenie_properties_position p on p.object_Id = d.value and p.position_Type = 2
+where d.type in (31, 48);'
 
 # Spells that hurt whoever they land on: a vital lowered (boost), a bolt (base_Intensity) or a
 # statistic lowered. A reply casting only these punishes the gift (Soul Dissolution, 3054).
@@ -238,7 +259,7 @@ group by landblock, weenie_Class_Id;'
 
 for t in placed emote action harm scrolls quest killq itemq drops names allowgive ints spawns ground wtypes \
   gens chestlist locks keys stuck recipes combines encounters roots profiles genprops crit inst links \
-  encroots; do
+  encroots genevent summonspell linkportal; do
   [ -s "$TMP/$t.tsv" ] || { echo "quests.sh: the $t query returned nothing" >&2; exit 1; }
 done
 

@@ -592,7 +592,8 @@ fn state_of(doing: &[&Row], facts: &QuestFacts, locks: &mut Locks) -> QuestState
             Some(_) => QuestState::Ready,
         },
         Want::Item(_) => item_state(&taken, facts),
-        Want::Nothing => QuestState::Ready,
+        // No quest row asks an event; only a source does.
+        Want::Event(_) | Want::Nothing => QuestState::Ready,
     }
 }
 

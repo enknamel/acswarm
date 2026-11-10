@@ -18,6 +18,7 @@ use crate::autoplay::{Doing, Pursuit, QuestEnd};
 use crate::quest_log::{Blocked, QuestFacts, QuestLine, QuestState};
 use crate::Client;
 
+mod events;
 mod fetch;
 mod gem_way;
 mod kept;
@@ -31,9 +32,9 @@ pub(crate) use gem_way::GemWanted;
 pub const PURSUIT_RETRY: Duration = Duration::from_secs(10 * 60);
 /// Flags looked through for a quest to work first, a quest needing one needing another (guess).
 const CHAIN_DEPTH: u32 = 3;
-/// Links a want is followed through: another quest's reward, a missing item, a chest's key. The
-/// Bound Singularity Scepter's Sturdy Iron Key is the fourth (scepter, cloak, essence, key).
-const OBTAIN_DEPTH: usize = 6;
+/// Links a want is followed through: another quest's reward, a missing item, a chest's key, an
+/// event. Aerfalle's Token's Sluice Gate Bar is the eighth (key, three events, golem, two events).
+const OBTAIN_DEPTH: usize = 10;
 /// Most grounds a rotating hunt sweeps at once, nearest first, or an empty ground weighs leaving
 /// for: each is a plan over every portal.
 const HUNT_GROUNDS: usize = 6;
@@ -82,6 +83,13 @@ pub enum PursuitStep {
     },
     /// Walk to `source`'s NPC at `at` and use it: it hands the wanted item over (Shin Ro's key).
     AskFor { source: &'static Source, at: Place },
+    /// Walk to `source`'s NPC at `at` and hand it the carried `item` (weenie class): that starts
+    /// the event the source is for (the Sluice Gate Bar to the Repair Golem).
+    GiveTo {
+        source: &'static Source,
+        at: Place,
+        item: u32,
+    },
     /// Use the carried `with` on the carried `on` (weenie classes), where the character stands.
     Combine {
         source: &'static Source,
@@ -114,6 +122,7 @@ impl PursuitStep {
                 | PursuitStep::OpenChest { .. }
                 | PursuitStep::UseOn { .. }
                 | PursuitStep::AskFor { .. }
+                | PursuitStep::GiveTo { .. }
                 | PursuitStep::Combine { .. }
                 | PursuitStep::HandIn { .. }
                 | PursuitStep::Read { .. }
@@ -156,6 +165,12 @@ impl PursuitStep {
             PursuitStep::AskFor { source, at } => {
                 let place = ac_world::quest_chain::place_name(at.cell);
                 format!("ask {} for it in {place}", source.name)
+            }
+            PursuitStep::GiveTo { source, at, item } => {
+                let given = source.keys.iter().find(|k| k.0 == *item);
+                let given = given.map_or_else(|| format!("item {item}"), |k| k.1.clone());
+                let place = ac_world::quest_chain::place_name(at.cell);
+                format!("give {given} to {} in {place}", source.name)
             }
             PursuitStep::Combine { source, with, on } => {
                 let name = |w: &u32| source.keys.iter().find(|k| k.0 == *w).map(|k| k.1.clone());
@@ -353,6 +368,8 @@ pub(crate) struct Ask<'a> {
     /// Seconds a kill of a creature takes this character, by class; `None` for one it cannot
     /// kill reliably ([`pace::Killing::secs`]).
     pub(crate) kill_secs: &'a dyn Fn(u32) -> Option<f32>,
+    /// Whether a server event is taken for on (`events::belief`): what it gates is about.
+    pub(crate) event_on: &'a dyn Fn(&str) -> bool,
 }
 
 /// Each line's step, worked out with the `board` the chained list's facts gave; the first that
@@ -596,10 +613,11 @@ impl Ask<'_> {
         }
         let wants = &open[..];
         let mut locked: Vec<(u32, &'static str)> = Vec::new();
-        if let Some(step) = self.fetch_step(wants, more, &mut locked) {
+        let mut events: Vec<&'static str> = Vec::new();
+        if let Some(step) = self.fetch_step(wants, more, &mut locked, &mut events) {
             return (step, None);
         }
-        let hunted = self.ground_step(wants, more, what);
+        let hunted = self.ground_step(wants, more, what, &mut events);
         if !matches!(hunted.0, PursuitStep::Stuck { .. }) || depth >= OBTAIN_DEPTH {
             return hunted;
         }
@@ -610,6 +628,17 @@ impl Ask<'_> {
         let mut first_why = None;
         for (key, name) in locked {
             let got = self.obtain(&[Want::Item(key)], 1, name, depth + 1);
+            match got.0 {
+                PursuitStep::Stuck { why } => {
+                    first_why.get_or_insert((name.to_string(), why));
+                }
+                _ => return got,
+            }
+        }
+        // What only an event puts out: the event started first, as a key is had.
+        for e in events {
+            let name = format!("the {e} event");
+            let got = self.obtain(&[Want::Event(e.to_string())], 1, &name, depth + 1);
             match got.0 {
                 PursuitStep::Stuck { why } => {
                     first_why.get_or_insert((name, why));
@@ -665,7 +694,13 @@ impl Ask<'_> {
 
     /// Hunt the grounds a way in this character may use reaches, soonest to the item at the ground
     /// first ([`pace::ground_pace`]), leaving out what it cannot kill; else why not.
-    fn ground_step(&self, wants: &[Want], more: u32, what: &str) -> (PursuitStep, Option<Hunting>) {
+    fn ground_step(
+        &self,
+        wants: &[Want],
+        more: u32,
+        what: &str,
+        events: &mut Vec<&'static str>,
+    ) -> (PursuitStep, Option<Hunting>) {
         let level = self.facts.level;
         let grounds: Vec<SourceGround> =
             wants.iter().flat_map(|w| self.chains.grounds(w)).collect();
@@ -684,6 +719,13 @@ impl Ask<'_> {
         let mut droppers: Vec<(u32, f32, f32)> = Vec::new();
         let mut unkillable = false;
         for g in grounds.iter().filter(|g| g.source.kind.is_hunted()) {
+            // One only an event puts out is hunted once the event is on.
+            if let Some(e) = g.source.event.as_deref().filter(|e| !(self.event_on)(e)) {
+                if !events.contains(&e) {
+                    events.push(e);
+                }
+                continue;
+            }
             let Some(place) = g.place.filter(|_| level_fits(g) && flag_held(g)) else {
                 continue;
             };
@@ -844,6 +886,7 @@ impl Client {
         chained: &[Chained],
         now: Instant,
     ) {
+        self.see_events(now);
         let st = &mut self.autoplay.growth;
         st.pursuit_held
             .retain(|_, (_, at)| now.duration_since(*at) < PURSUIT_RETRY);
@@ -914,6 +957,7 @@ impl Client {
         };
         let killing = self.killing();
         let kill_secs = |wcid: u32| killing.secs(wcid);
+        let event_on = |e: &str| self.is_event_on(e, now);
         let ask = Ask {
             facts,
             asking: &asking,
@@ -928,6 +972,7 @@ impl Client {
             here: self.player.as_ref().map(|p| p.cell >> 16),
             bound: self.autoplay.growth.bound_landblock(),
             kill_secs: &kill_secs,
+            event_on: &event_on,
         };
         let pursued = pursuit_of(&self.quest_board, chained, &ask);
         drop(killing);
@@ -1040,6 +1085,7 @@ impl Client {
         if it {
             self.autoplay.growth.sought_kill = Some((at, now));
         }
+        self.note_event_kill(at, now);
     }
 
     /// The body of the pursued hunt's creature killed, once it lies there (`sought_kill`): opened

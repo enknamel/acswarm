@@ -251,6 +251,9 @@ pub struct State {
     pub(crate) unlock_tries: u32,
     /// Chests this character unlocked, by weenie class, and when: opened without a key a while.
     pub(crate) chests_unlocked: Recent<u32>,
+    /// Server events taken for on, by name, and when started or last seen at work
+    /// (`pursuit::events`).
+    pub(crate) events_on: Recent<String>,
     /// Pursued grounds left for the next or to unload, and when the character was last in or
     /// beside each (`pursuit::sweep`).
     pub(crate) swept: Recent<u32>,

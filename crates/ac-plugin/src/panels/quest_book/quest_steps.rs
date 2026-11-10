@@ -183,6 +183,7 @@ fn fetch_verb(kind: Yield) -> &'static str {
         Yield::Use => "Use it on ",
         Yield::Combine => "Use on ",
         Yield::Vendor => "Buy it from ",
+        Yield::Give => "Hand it to ",
         Yield::Drop | Yield::Kill | Yield::Npc => "Get it from ",
     }
 }
@@ -352,6 +353,11 @@ pub(crate) fn step_words(step: &PursuitStep, now: u64, place: &dyn Fn(u32) -> St
             let used = source.keys.iter().find(|k| k.0 == *with);
             let used = used.map_or("it", |k| k.1.as_str());
             format!("using {used} on {} at {}", source.name, place(at.cell))
+        }
+        PursuitStep::GiveTo { source, at, item } => {
+            let given = source.keys.iter().find(|k| k.0 == *item);
+            let given = given.map_or("it", |k| k.1.as_str());
+            format!("giving {given} to {} at {}", source.name, place(at.cell))
         }
         PursuitStep::Combine { source, with, on } => {
             let name = |w: &u32| {
