@@ -16,6 +16,11 @@ use crate::Client;
 /// Number of spell bars (tabs) the game keeps per character.
 pub const SPELL_BARS: usize = 8;
 
+/// SpellCategory ArmorValueRaising: the first armour-wide item category (SpellCategory.cs:165).
+const ARMOR_VALUE_RAISING: u32 = 160;
+/// SpellCategory AcidicResistanceLowering: the last armour-wide one (SpellCategory.cs:194).
+const ACIDIC_RESISTANCE_LOWERING: u32 = 189;
+
 /// Prismatic Taper's component id in the SpellComponentsTable.
 pub const PRISMATIC_TAPER: u32 = 188;
 /// Chorizite: kept in the foci formula alongside the scarabs.
@@ -291,18 +296,36 @@ impl Client {
     pub fn mana_cost(&self, sp: &ac_formats::spell_table::Spell) -> u32 {
         use ac_formats::spell_table::flags;
         let stats = &self.world.stats;
+        let base = sp.base_mana + sp.mana_mod * self.armor_pieces_for(sp);
         let trained = stats
             .skill(16)
             .is_some_and(|s| s.advancement >= ac_world::stats::sac::TRAINED);
         if !trained || sp.bitfield & flags::IGNORES_MANA_CONVERSION != 0 {
-            return sp.base_mana;
+            return base;
         }
         let table = self.assets.skill_table().ok();
         let conversion = stats
             .skill(16)
             .map(|s| stats.skill_current(s, table.as_ref().and_then(|t| t.get(16))))
             .unwrap_or(0);
-        expected_mana_cost(sp.base_mana, sp.power, conversion)
+        expected_mana_cost(base, sp.power, conversion)
+    }
+
+    /// The pieces an armour-wide item spell (a bane, an impenetrability) costs extra for: worn
+    /// clothing and shields, each its ManaMod more (Creature_Magic.cs:23-31); 0 for any other.
+    fn armor_pieces_for(&self, sp: &ac_formats::spell_table::Spell) -> u32 {
+        use ac_formats::spell_table::{school, spell_type};
+        let armor_wide = sp.school == school::ITEM
+            && sp.meta_spell_type == spell_type::ENCHANTMENT
+            && (ARMOR_VALUE_RAISING..=ACIDIC_RESISTANCE_LOWERING).contains(&sp.category);
+        if !armor_wide {
+            return 0;
+        }
+        let worn = ac_world::item_type::ARMOR | ac_world::item_type::CLOTHING;
+        self.world
+            .wielded()
+            .filter(|o| o.item_type & worn != 0)
+            .count() as u32
     }
 
     /// The skill a school is cast with: War Magic 34, Life 33, Item 32,
@@ -658,6 +681,43 @@ pub fn missing_components(need: &[u32], have: impl Fn(u32) -> u32) -> Vec<(u32, 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn an_armour_wide_bane_costs_its_extra_for_every_piece_worn() {
+        // Blargerton cast three banes on eleven pieces mid-fight: each cost far over the base the
+        // reserve was judged by, and mana went from 200 to 6.
+        let mut c = Client::offline(crate::testkit::game_data());
+        crate::testkit::stand(&mut c, 0xA9B4_0019, glam::Vec3::new(84.0, 7.1, 94.0));
+        let me = 0x5000_0001;
+        c.world.player_guid = Some(me);
+        let table = c.assets.spell_table().unwrap();
+        let bane = table.get(1516).expect("Bludgeon Bane VI").clone();
+        let heal = table.get(1160).expect("Heal Self V").clone();
+        assert!(bane.mana_mod > 0, "{bane:?}");
+        let bare = c.mana_cost(&bane);
+        assert_eq!(bare, bane.base_mana, "no Mana Conversion, nothing worn");
+        for i in 0..11 {
+            let kind = if i < 9 {
+                ac_world::item_type::ARMOR
+            } else {
+                ac_world::item_type::CLOTHING
+            };
+            let g = 0x8000_0100 + i;
+            c.world.objects.insert(
+                g,
+                ac_world::WorldObject {
+                    guid: g,
+                    item_type: kind,
+                    wielder: Some(me),
+                    ..Default::default()
+                },
+            );
+        }
+        assert_eq!(c.mana_cost(&bane), bane.base_mana + 11 * bane.mana_mod);
+        // A life spell is the base, armour or none.
+        assert_eq!(c.mana_cost(&heal), heal.base_mana);
+    }
 
     #[test]
     fn mana_conversion_cuts_the_cost() {
