@@ -2716,6 +2716,12 @@ fn a_sought_kill_s_body_is_opened_under_blows() {
     body.position = crate::testkit::placed(cell, me);
     c.world.objects.insert(body.guid, body);
     assert_eq!(c.sought_body(), Some(0x5000_0907));
+    // A namesake killed first lies beside it, emptied: the body stood by is still the witch's.
+    let mut kin = crate::testkit::corpse(0x5000_0908, "Corpse of Mosswart Mire-Witch");
+    kin.position = crate::testkit::placed(cell, me);
+    c.world.objects.insert(kin.guid, kin);
+    c.autoplay.looted.push(0x5000_0908, now);
+    assert_eq!(c.sought_body(), Some(0x5000_0907), "the emptied kin's body");
     let mut chomu = crate::testkit::creature(0x5000_0904, "Chomu Sclavus");
     chomu.weenie_class_id = 1;
     chomu.position = crate::testkit::placed(cell, me + glam::Vec3::new(2.0, 0.0, 0.0));

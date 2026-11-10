@@ -1034,10 +1034,8 @@ impl Client {
     /// it has neither or the character stands on its ground, else whether it set off.
     /// A kill at `at`: one of the pursued hunt's creatures is noted, its body to be stood by.
     pub(crate) fn note_sought_kill(&mut self, at: glam::Vec3, now: Instant) {
-        let sought = &self.autoplay.growth.pursuit_sought;
         let it = self.world.objects.values().any(|o| {
-            sought.contains(&o.weenie_class_id)
-                && o.world_pos().is_some_and(|p| p.distance(at) < 1.0)
+            self.is_sought(o.weenie_class_id) && o.world_pos().is_some_and(|p| p.distance(at) < 1.0)
         });
         if it {
             self.autoplay.growth.sought_kill = Some((at, now));
@@ -1049,16 +1047,21 @@ impl Client {
     pub(crate) fn sought_body(&self) -> Option<u32> {
         use crate::autoplay::loot::owed::KILL_SPOT;
         let (at, _) = self.autoplay.growth.sought_kill?;
+        // Kin killed beside it lie there too: the one not yet looted, then the nearest.
+        let looted = &self.autoplay.looted;
         self.world
             .objects
             .values()
             .filter(|o| o.object_desc_flags & ac_world::object_desc_flags::CORPSE != 0)
-            .filter(|o| {
-                o.world_pos()
-                    .is_some_and(|p| p.truncate().distance(at.truncate()) <= KILL_SPOT)
+            .filter_map(|o| Some((o.guid, o.world_pos()?.truncate().distance(at.truncate()))))
+            .filter(|(_, d)| *d <= KILL_SPOT)
+            .min_by(|a, b| {
+                let key = |(g, d): &(u32, f32)| (looted.contains(g), *d);
+                key(a)
+                    .partial_cmp(&key(b))
+                    .unwrap_or(std::cmp::Ordering::Equal)
             })
-            .map(|o| o.guid)
-            .next()
+            .map(|(g, _)| g)
     }
 
     /// The pursued hunt's creature killed: its body stood by, walked back to, till the loot rules
