@@ -1887,6 +1887,41 @@ fn recall_the_sanctuary_is_had_by_the_ancient_key_bought_invitation_and_scroll_r
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
+fn a_chest_whose_key_is_out_is_opened_not_another_key_hunted() {
+    // Blargerton used the Ancient Key on the Mistress' Chest; the key left the pack half a second
+    // before "The Mistress' Chest has been unlocked.", the board asked between, and he went down
+    // the catacombs for another key.
+    let mut c = mage_pursuing("learn:2023", "recall-the-sanctuary");
+    let now = std::time::Instant::now();
+    in_the_pack(&mut c, 0x5000_0003, 8511, "Ancient Key", 1);
+    c.refresh_quests(now);
+    let open = c.pursuit[0].step.clone();
+    let PursuitStep::OpenChest {
+        chest,
+        key: Some(key),
+        ..
+    } = &open
+    else {
+        panic!("not to the chest with its key: {open:?}");
+    };
+    c.autoplay.growth.fetching = Some(super::Fetching {
+        key: (8530, chest.wcid),
+        guid: 0x7F41_8004,
+        act: super::fetch::Act::Unlock,
+        at: now,
+        with: *key,
+        tries: 1,
+    });
+    in_the_pack(&mut c, 0x5000_0003, 8511, "", 0);
+    let step = again(&mut c, now);
+    assert!(
+        matches!(&step, PursuitStep::OpenChest { chest: s, .. } if s.wcid == chest.wcid),
+        "another key hunted with the key out: {step:?}"
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn the_copper_castellan_is_reached_by_the_gem_captain_ramelle_drops() {
     // Defense of Zaikhal: the Copper Legion Castellan stands in Corcima Castle's Copper Ward,
     // which only the Copper Ward gem reaches; Captain Ramelle and her bodyguards drop it in the

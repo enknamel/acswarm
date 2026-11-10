@@ -801,10 +801,19 @@ impl Client {
             .then(|| self.followed_leader().map(|m| m.name.clone()))
             .flatten();
         let dropped = |s: &Source| self.is_source_dropped(s, now);
+        // Or its key sent and the answer not yet in: the key leaves the pack before the server says
+        // it unlocked, and the board, asked between, went for another key (test:
+        // a_chest_whose_key_is_out_is_opened_not_another_key_hunted).
         let unlocked = |s: &Source| {
-            st.chests_unlocked
-                .since(&s.wcid)
-                .is_some_and(|t| now.saturating_duration_since(t) < fetch::UNLOCKED_FOR)
+            let unlocking = st
+                .fetching
+                .as_ref()
+                .is_some_and(|f| f.act == fetch::Act::Unlock && f.key.1 == s.wcid);
+            unlocking
+                || st
+                    .chests_unlocked
+                    .since(&s.wcid)
+                    .is_some_and(|t| now.saturating_duration_since(t) < fetch::UNLOCKED_FOR)
         };
         let ask = Ask {
             facts,
