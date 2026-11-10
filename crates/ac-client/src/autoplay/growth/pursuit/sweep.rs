@@ -86,7 +86,7 @@ impl Client {
 
     /// The hunt's `grounds` sweep: a sought creature in sight chased, the grounds left lately kept
     /// marked while in or beside them, and `grounds` cut to those not left lately (all of them
-    /// when every one was), the nearest [`HUNT_GROUNDS`] when it holds more. `Some` is
+    /// when every one was), a rotating hunt's to the nearest [`HUNT_GROUNDS`]. `Some` is
     /// `grow_pursuit`'s answer while chasing.
     pub(super) fn sweep(
         &mut self,
@@ -127,7 +127,7 @@ impl Client {
         if !left.is_empty() {
             *grounds = left;
         }
-        if grounds.len() > HUNT_GROUNDS {
+        if self.is_rotating_hunt() && grounds.len() > HUNT_GROUNDS {
             let me = self.my_position()?.truncate();
             grounds.sort_by(|a, b| {
                 let away = |p: &Place| p.at.truncate().distance(me);

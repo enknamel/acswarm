@@ -34,9 +34,12 @@ const CHAIN_DEPTH: u32 = 3;
 /// Links a want is followed through: another quest's reward, a missing item, a chest's key. The
 /// Bound Singularity Scepter's Sturdy Iron Key is the fourth (scepter, cloak, essence, key).
 const OBTAIN_DEPTH: usize = 6;
-/// Most grounds a hunt tries a journey to, soonest first at the ground: each is a plan over every
-/// portal.
+/// Most grounds a rotating hunt sweeps at once, nearest first, or an empty ground weighs leaving
+/// for: each is a plan over every portal.
 const HUNT_GROUNDS: usize = 6;
+/// Most grounds a hunt holds, soonest first at the ground: those that cannot beat the best
+/// journey and time there found yet are never planned (see `grow_pursuit`).
+const PACED_GROUNDS: usize = 20;
 /// Most grounds a hunt holds when they come only by rotating (a rare camp's), nearest first: the
 /// data keeps 64 a creature.
 const SWEEP_GROUNDS: usize = 64;
@@ -345,6 +348,8 @@ pub(crate) struct Ask<'a> {
     pub(crate) gem_grounds: &'a std::collections::BTreeSet<String>,
     /// The landblock the character stands in, by its cell (a dungeon's rooms run past its square).
     pub(crate) here: Option<u32>,
+    /// The pursued ground the character set off for, by landblock.
+    pub(crate) bound: Option<u32>,
     /// Seconds a kill of a creature takes this character, by class; `None` for one it cannot
     /// kill reliably ([`pace::Killing::secs`]).
     pub(crate) kill_secs: &'a dyn Fn(u32) -> Option<f32>,
@@ -693,12 +698,25 @@ impl Ask<'_> {
         paced.truncate(if rotating {
             SWEEP_GROUNDS
         } else {
-            HUNT_GROUNDS
+            PACED_GROUNDS
         });
         if let Some(&(g, ..)) = paced.first() {
-            // Only the creatures of the grounds held: the Sturdy Iron Key drops from 398, and a
-            // Gotrok Tiatus at 2% met on the road was fought, never walked past.
-            let held = |g: &&SourceGround| paced.iter().any(|p| p.0.landblock == g.landblock);
+            // Only the creatures of the soonest grounds there, and of the one stood on or set off
+            // for: the Sturdy Iron Key drops from 398, and a Gotrok Tiatus at 2% met on the road
+            // was fought, never walked past.
+            let most = if rotating {
+                SWEEP_GROUNDS
+            } else {
+                HUNT_GROUNDS
+            };
+            let goes = |lb: u32| Some(lb) == self.here || Some(lb) == self.bound;
+            let held = |g: &&SourceGround| {
+                let soon = paced
+                    .iter()
+                    .take(most)
+                    .any(|p| p.0.landblock == g.landblock);
+                soon || (goes(g.landblock) && paced.iter().any(|p| p.0.landblock == g.landblock))
+            };
             let mut sought: Vec<u32> = Vec::new();
             for s in grounds.iter().filter(held).map(|g| g.source) {
                 let can = droppers.iter().any(|d| d.0 == s.wcid);
@@ -890,6 +908,7 @@ impl Client {
             ways: &ways,
             gem_grounds: &gem_grounds,
             here: self.player.as_ref().map(|p| p.cell >> 16),
+            bound: self.autoplay.growth.bound_landblock(),
             kill_secs: &kill_secs,
         };
         let pursued = pursuit_of(&self.quest_board, chained, &ask);
@@ -1132,13 +1151,23 @@ impl Client {
                 let every = grounds.clone();
                 // The item soonest first: the journey there and the seconds there. The most spawns
                 // may be a 75-minute road away, and the far Chakron's 80% is worse than a near 20%.
+                // A ground whose time there alone is past the best total yet is not planned: it
+                // keeps that time, a bound, and is tried only once the better ones have no way.
                 let quests = self.travel.quests_done.clone();
                 let mut secs: Vec<(f32, (u32, Place))> = Vec::new();
+                let mut best = f32::INFINITY;
+                self.autoplay.growth.skip.expire(now, SKIP_GROUND_FOR);
+                grounds.retain(|(lb, _)| self.autoplay.growth.skip.since(lb).is_none());
                 for g in grounds.drain(..) {
                     let there = self.pursued_pace(g.0).map_or(0.0, |p| p.pace.soonest());
+                    if there >= best {
+                        secs.push((there, g));
+                        continue;
+                    }
                     let t = self
                         .journey_plan(g.1, &quests)
                         .map_or(f32::MAX, |t| t.seconds + there);
+                    best = best.min(t);
                     secs.push((t, g));
                 }
                 secs.sort_by(|a, b| a.0.total_cmp(&b.0));
@@ -1153,6 +1182,11 @@ impl Client {
                         st.bound = Some((lb, at.at.truncate(), creature.clone()));
                         st.quiet_since = None;
                         st.plan_secs = Some(plan);
+                        // Past the soonest few there, its creatures are sought once worked out again.
+                        let i = st.pursuit_grounds.iter().position(|g| g.0 == lb);
+                        if i.is_some_and(|i| i >= HUNT_GROUNDS) && !self.is_rotating_hunt() {
+                            self.quest_board_at = None;
+                        }
                         self.keep_road_droppers();
                         // The ground taken, which need not be the step's first.
                         let to = ac_world::quest_chain::place_name(at.cell);

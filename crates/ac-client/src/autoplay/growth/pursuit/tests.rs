@@ -187,6 +187,7 @@ fn work_killing(
         ways: &BTreeMap::new(),
         gem_grounds: &Default::default(),
         here: None,
+        bound: None,
         kill_secs,
     };
     pursuit_of(&board, &chained, &ask)
@@ -2974,4 +2975,66 @@ fn a_sought_creature_in_sight_with_no_way_to_it_is_set_aside() {
     assert!(c.autoplay.given_up.since(&0x5000_0901).is_some());
     let later = now + std::time::Duration::from_secs(1);
     assert_eq!(c.grow_pursuit(later), Some(true), "and on");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn grounds_past_the_six_soonest_there_are_weighed_by_their_journey_too() {
+    // The six soonest at the ground were the only ones planned: a near dungeon ranked seventh
+    // there was never weighed against a far first.
+    let now = std::time::Instant::now();
+    let mut c = blargerton_after_the_key(now);
+    let held = c.autoplay.growth.pursuit_grounds.clone();
+    assert!(held.len() > HUNT_GROUNDS, "{} held", held.len());
+    let quests = c.travel.quests_done.clone();
+    let mut totals: Vec<(f32, u32)> = Vec::new();
+    for (lb, at) in held {
+        let there = c.pursued_pace(lb).expect("a pace").pace.soonest();
+        if let Some(t) = c.journey_plan(at, &quests) {
+            totals.push((t.seconds + there, lb));
+        }
+    }
+    let first = totals
+        .iter()
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .expect("one")
+        .1;
+    let t0 = std::time::Instant::now();
+    assert_eq!(c.grow_pursuit(now), Some(true));
+    println!("chosen in {:?}", t0.elapsed());
+    assert_eq!(c.autoplay.growth.bound_landblock(), Some(first));
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_ground_set_off_for_past_the_soonest_few_has_its_creatures_sought() {
+    // Twenty grounds weighed, the creatures of the six soonest there sought: one further down,
+    // taken for its short road, is hunted for its own creatures once on the way.
+    let now = std::time::Instant::now();
+    let mut c = blargerton_after_the_key(now);
+    let st = &c.autoplay.growth;
+    let on = |lb: u32| -> Vec<u32> {
+        let key = ac_world::quests::Want::Item(6876);
+        let all = ac_world::quest_chain::source_grounds(&key);
+        let here = all
+            .iter()
+            .filter(|g| g.landblock == lb)
+            .map(|g| g.source.wcid);
+        here.filter(|w| st.pursuit_droppers.iter().any(|d| d.0 == *w))
+            .collect()
+    };
+    let (lb, at) = st.pursuit_grounds[HUNT_GROUNDS..]
+        .iter()
+        .copied()
+        .find(|g| on(g.0).iter().all(|w| !st.pursuit_sought.contains(w)))
+        .expect("a ground past the sixth with none of its creatures sought");
+    let mine = on(lb);
+    assert!(c.grow_travel(at, c.ground_reach(lb)));
+    c.autoplay.growth.bound = Some((lb, at.at.truncate(), "it".into()));
+    again(&mut c, now);
+    let sought = &c.autoplay.growth.pursuit_sought;
+    assert!(
+        mine.iter().all(|w| sought.contains(w)),
+        "{mine:?} not in {sought:?}"
+    );
 }
