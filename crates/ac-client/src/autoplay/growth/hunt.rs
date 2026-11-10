@@ -184,6 +184,13 @@ impl Client {
                 self.autoplay.growth.drop_ground_walk();
             }
         }
+        // A rare hunt's creature met on the road to its next ground: grow_pursuit is not asked
+        // while the walk runs (a_rare_spawn_seen_on_the_way_between_grounds_is_gone_to).
+        if self.autoplay.growth.bound.is_some() {
+            if let Some(claimed) = self.chase_rare_on_road(now) {
+                return claimed;
+            }
+        }
         // On the way: keep going, and notice arriving.
         if let Some((lb, at, name)) = self.autoplay.growth.bound.clone() {
             // A pursued quest's ground may be a dungeon no `hunting::Ground` names.

@@ -20,8 +20,16 @@ const LOOK_FOR: Duration = Duration::from_secs(15);
 /// The look is made this near the ground's place, m: a creature is first sent within 112.5 m
 /// (ObjectMaint.cs:421), and a landblock is 192 m across.
 const LOOK_FROM: f32 = 40.0;
-/// A landblock looked over is looked at again after this: twice ACE's 5-minute unload.
+/// A landblock looked over is looked at again this long after the character was last in or beside
+/// it: twice ACE's 5-minute unload (Landblock.cs:118, 548).
 const SWEEP_AGAIN: Duration = Duration::from_secs(10 * 60);
+
+/// Whether landblock `lb` is `here` or one of the eight round it.
+fn is_beside(lb: u32, here: u32) -> bool {
+    let (x, y) = ((lb >> 8) as i32, (lb & 0xFF) as i32);
+    let (hx, hy) = ((here >> 8) as i32, (here & 0xFF) as i32);
+    (x - hx).abs() <= 1 && (y - hy).abs() <= 1
+}
 
 /// Whether creature `wcid` is a rare spawn, swept for.
 pub(crate) fn is_rare_spawn(wcid: u32) -> bool {
@@ -62,8 +70,21 @@ impl Client {
         if let Some(answer) = self.chase_in_sight(title, creature, now) {
             return Some(answer);
         }
-        self.autoplay.growth.swept.expire(now, SWEEP_AGAIN);
         let outdoors = cell & 0xFFFF < 0x100;
+        // Stood in or beside, a landblock stays loaded (Landblock.cs:1111-1123): its wait for a
+        // fresh roll starts once the character is out of reach of it.
+        if outdoors {
+            let swept = &mut self.autoplay.growth.swept;
+            let near: Vec<u32> = swept
+                .iter()
+                .map(|(lb, _)| *lb)
+                .filter(|lb| is_beside(*lb, here))
+                .collect();
+            for lb in near {
+                swept.mark(lb, now);
+            }
+        }
+        self.autoplay.growth.swept.expire(now, SWEEP_AGAIN);
         let stood = grounds.iter().find(|(lb, _)| *lb == here).map(|g| g.1);
         if let (true, Some(at)) = (outdoors, stood) {
             if self.autoplay.growth.swept.since(&here).is_none() {
@@ -92,7 +113,7 @@ impl Client {
 
     /// A sought creature in sight walked to (or fought, `Some(None)`); `None` when none is. A
     /// namesake is noted: the common Mosswart Mire-Witch (7102) is not Martine's (9163).
-    fn chase_in_sight(
+    pub(super) fn chase_in_sight(
         &mut self,
         title: &str,
         creature: &str,

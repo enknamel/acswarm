@@ -907,6 +907,21 @@ impl Client {
 
     /// The working pursued quest's hunt or flag, from `grow_hunt` ahead of any ground: `None` when
     /// it has neither or the character stands on its ground, else whether it set off.
+    /// A rare hunt's creature in sight on the road between its grounds: gone to, the ground walk
+    /// let go; `Some` is the hunt row's answer (false: left to the fight rule, in its reach).
+    pub(super) fn chase_rare_on_road(&mut self, now: Instant) -> Option<bool> {
+        if !self.is_rare_hunt() {
+            return None;
+        }
+        let line = self.working_pursuit()?.clone();
+        let PursuitStep::Hunt { creature, .. } = &line.step else {
+            return None;
+        };
+        let answer = self.chase_in_sight(&line.title, creature, now)?;
+        self.autoplay.growth.bound = None;
+        Some(answer.unwrap_or(false))
+    }
+
     pub(super) fn grow_pursuit(&mut self, now: Instant) -> Option<bool> {
         let line = self.working_pursuit()?.clone();
         // Handed in and not yet answered: the item gone, the board would have another made.

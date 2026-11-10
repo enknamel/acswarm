@@ -2400,11 +2400,14 @@ fn a_rare_spawn_in_sight_is_fought_where_it_stands() {
 #[ignore = "needs AC_DATA_DIR"]
 fn a_rare_spawn_seen_on_the_way_between_grounds_is_gone_to() {
     // Martine's Mire-Witch was looked for only standing on a ground: met past the fight radius on
-    // the road to the next, she was walked by. A common namesake (7102) is only noted.
+    // the road to the next, she was walked by. A common namesake (7102) is only noted. The road
+    // ticks go through grow_hunt, whose walk under way never asked grow_pursuit.
     let now = std::time::Instant::now();
     let (mut c, here) = at_a_mire_witch_ground(now);
     c.autoplay.growth.swept.mark(here, now);
     assert_eq!(c.grow_pursuit(now), Some(true), "on to the next ground");
+    assert!(c.autoplay.growth.bound.is_some(), "a ground walk under way");
+    let cfg = crate::autoplay::growth::config::Growth::default();
     let me = c.my_position().unwrap();
     let cell = c.player.as_ref().unwrap().cell;
     let radius = c.autoplay.config.fight.radius;
@@ -2414,7 +2417,7 @@ fn a_rare_spawn_seen_on_the_way_between_grounds_is_gone_to() {
     common.position = crate::testkit::placed(cell, far);
     c.world.objects.insert(common.guid, common);
     let later = now + std::time::Duration::from_secs(1);
-    assert_eq!(c.grow_pursuit(later), Some(true));
+    assert!(c.grow_hunt(later, &cfg), "the ground walk kept");
     let goal = c.travel_goal_xy().expect("travelling");
     assert!(
         goal.distance(far.truncate()) > radius,
@@ -2428,11 +2431,29 @@ fn a_rare_spawn_seen_on_the_way_between_grounds_is_gone_to() {
     witch.weenie_class_id = 9163;
     witch.position = crate::testkit::placed(cell, far);
     c.world.objects.insert(witch.guid, witch);
-    assert_eq!(c.grow_pursuit(later), Some(true));
+    assert!(c.grow_hunt(later, &cfg), "gone to her");
+    assert!(c.autoplay.growth.bound.is_none(), "the ground walk let go");
     let goal = c.travel_goal_xy().expect("travelling");
     assert!(
         goal.distance(far.truncate()) <= radius,
         "not to her: {goal:?} vs {far:?}"
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_swept_ground_waits_for_its_fresh_roll_from_when_it_was_last_beside() {
+    // A landblock stood in or beside stays loaded (Landblock.cs:1111-1123): counted from its
+    // look-over, a cluster's ground was looked over again with the same roll on it.
+    let now = std::time::Instant::now();
+    let (mut c, here) = at_a_mire_witch_ground(now);
+    c.autoplay.growth.swept.mark(here, now);
+    let mins = |m: u64| now + std::time::Duration::from_secs(m * 60);
+    c.grow_pursuit(mins(9));
+    c.grow_pursuit(mins(15));
+    assert!(
+        c.autoplay.growth.swept.since(&here).is_some(),
+        "looked over again too soon"
     );
 }
 
