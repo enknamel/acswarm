@@ -18,7 +18,7 @@
 //! - of those, the one whose creature does the target most damage a second
 //!   (`ac_world::summons`: element, hits, how often, the essence's ratings):
 //!   an element match beats a higher level only when it does more, and a
-//!   Phyntos wasp loses to all of its level but golems.
+//!   Phyntos wasp's quick, light sting ranks mid-field among its level.
 //!
 //! Past level 50 a character picks a summoning mastery, and an essence
 //! of another mastery is refused. The client is not told which mastery
