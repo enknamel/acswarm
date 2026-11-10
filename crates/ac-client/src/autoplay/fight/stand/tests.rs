@@ -615,6 +615,45 @@ fn a_caster_in_a_dungeon_corner_stays_in_it_and_steps_back_to_it() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_caster_run_out_of_its_corner_walks_back_once_the_ring_is_past() {
+    // Run out of a ring from the corner it held, a caster was left in the open with neither the
+    // corner (still marked reached) nor its back-off (the stand still counted as kept).
+    let (mut c, how, target, corner) = a_caster_in_the_corner();
+    let now = Instant::now();
+    c.frame_at = now;
+    assert_eq!(take_stand(&mut c, Some(target), how, now), Did::Done);
+    let held = c.autoplay.stands.held.expect("the corner held");
+    assert!(held.reached && is_kept(&held));
+    // Out of the corner, five metres off, with a ring still spreading over it: waited out.
+    let off = corner + Vec3::new(-5.0, 0.0, 0.0);
+    let (at, cell) = crate::walk_trial::on_floor(&mut c, off);
+    testkit::stand(&mut c, cell, at - ac_world::landblock_origin(cell));
+    ring_caster_at(&mut c, 0x8000_0009, corner + Vec3::new(1.0, 0.0, 0.0));
+    c.watch_ring_casts(now);
+    assert!(!c.spreading_rings(at).is_empty(), "the ring not noted");
+    assert!(
+        c.stand_kept().is_none(),
+        "the corner kept from five metres off"
+    );
+    let _ = take_stand(&mut c, Some(target), how, now);
+    assert!(c.going.is_none(), "walked back under the ring");
+    // The ring gone: walked back to the corner.
+    c.world.objects.remove(&0x8000_0009);
+    c.watch_ring_casts(now);
+    assert_eq!(take_stand(&mut c, Some(target), how, now), Did::Acting);
+    let goal = c
+        .going
+        .as_ref()
+        .and_then(|g| g.goal.place())
+        .expect("a walk");
+    assert!(
+        goal.at.distance(held.spot.at) < 0.1,
+        "not back to the corner"
+    );
+}
+
+#[test]
 fn a_back_off_and_step_aside_are_let_go_with_the_target() {
     let mut c = crate::Client::offline(testkit::no_data());
     let spot = Place {

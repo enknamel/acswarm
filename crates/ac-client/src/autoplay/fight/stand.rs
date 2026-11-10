@@ -161,6 +161,18 @@ impl Client {
             .held
             .filter(|s| s.against == attackers.len());
         let stand = match held {
+            // Left (run out of a ring): walked back to once no ring spreads over it, else waited out.
+            Some(s) if s.reached && is_kept(&s) && !is_at_stand(&s, me.at) => {
+                if is_in_rings(&self.spreading_rings(me.at), s.spot.at) {
+                    return Did::Done;
+                }
+                let back = Stand {
+                    reached: false,
+                    ..s
+                };
+                self.autoplay.stands.held = Some(back);
+                back
+            }
             Some(s) => s,
             None => {
                 let Some(s) = self.choose_stand(me, &attackers, target, how) else {
@@ -322,6 +334,7 @@ impl Client {
         let leader = self.leader_bound();
         let thrown = !matches!(how, How::Melee);
         let refused = &self.autoplay.stands.refused;
+        let rings = self.spreading_rings(me.at);
         let mut spots: Vec<Place> = places
             .into_iter()
             .filter(|p| {
@@ -333,6 +346,7 @@ impl Client {
                         || off.dot(toward.normalize()) <= toward.length() - RING)
                     && attackers.iter().all(|(_, a)| flat(*a - p.at).length() > RING)
                     && refused.iter().all(|r| r.distance(p.at) > REPLAN_DISTANCE)
+                    && !is_in_rings(&rings, p.at)
                     && leader.is_none_or(|(l, r)| p.at.distance(l) <= r)
             })
             .collect();
@@ -388,10 +402,11 @@ impl Client {
     /// The stand a caster keeps to rather than backing off: walked to, or a corner or wall it stood
     /// at already (fewer than [`SIDES`] open).
     fn stand_kept(&self) -> Option<Stand> {
+        let me = self.my_position()?;
         self.autoplay
             .stands
             .held
-            .filter(|s| s.walked || s.sides < SIDES as u32)
+            .filter(|s| is_kept(s) && is_at_stand(s, me))
     }
 
     /// The back-off and steps aside for `target`, started afresh if they were for another.
@@ -695,6 +710,16 @@ fn clearance(attackers: &[(u32, Vec3)], keeps: &[f32], at: Vec3) -> f32 {
         .zip(keeps)
         .map(|((_, a), k)| a.truncate().distance(at.truncate()) - k)
         .fold(f32::INFINITY, f32::min)
+}
+
+/// Whether `s` is held rather than backed off from: walked to, or a corner or wall stood at.
+fn is_kept(s: &Stand) -> bool {
+    s.walked || s.sides < SIDES as u32
+}
+
+/// Whether `at` is at the stand `s`: within a step aside of its spot (flat).
+fn is_at_stand(s: &Stand, at: Vec3) -> bool {
+    s.spot.at.truncate().distance(at.truncate()) <= JIGGLE + AT_STAND
 }
 
 /// Whether `at` stands inside any of `rings` (flat centre, reach).
