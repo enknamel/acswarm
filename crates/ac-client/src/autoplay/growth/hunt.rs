@@ -184,6 +184,10 @@ impl Client {
                 self.autoplay.growth.drop_ground_walk();
             }
         }
+        // The pursued creature's body before any walk on (test: a_sought_kill_s_body_is_stood_by).
+        if let Some(claimed) = self.stand_by_sought_body(now) {
+            return claimed;
+        }
         // A rare hunt's creature met on the road to its next ground: grow_pursuit is not asked
         // while the walk runs (a_rare_spawn_seen_on_the_way_between_grounds_is_gone_to).
         if self.autoplay.growth.bound.is_some() {

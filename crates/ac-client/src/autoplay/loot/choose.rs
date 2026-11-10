@@ -67,7 +67,7 @@ pub(crate) const LOOT_NEAR: f32 = 20.0;
 
 /// How long after a killing blow its corpse is taken to be on the way.
 /// The server makes the body a moment after the creature dies.
-pub(super) const CORPSE_APPEARS: Duration = Duration::from_secs(3);
+pub(crate) const CORPSE_APPEARS: Duration = Duration::from_secs(3);
 
 /// How long a monster's corpse lasts before it rots away. ACE gives an
 /// unlooted corpse no timer at all until its first heartbeat, when it

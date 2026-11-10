@@ -196,6 +196,7 @@ impl Client {
                             self.autoplay.last_kill = Some(now);
                             if let Some(at) = self.killed_at(&n.name) {
                                 self.autoplay.kill_spots.push((at, now));
+                                self.note_sought_kill(at, now);
                             }
                         }
                     }
@@ -295,6 +296,7 @@ impl Client {
                             self.autoplay.last_kill = Some(now);
                             if let Some(at) = self.killed_in(&t) {
                                 self.autoplay.kill_spots.push((at, now));
+                                self.note_sought_kill(at, now);
                             }
                             self.note_kill_tier(&t);
                         }

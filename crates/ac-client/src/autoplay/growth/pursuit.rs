@@ -907,6 +907,67 @@ impl Client {
 
     /// The working pursued quest's hunt or flag, from `grow_hunt` ahead of any ground: `None` when
     /// it has neither or the character stands on its ground, else whether it set off.
+    /// A kill at `at`: one of the pursued hunt's creatures is noted, its body to be stood by.
+    pub(crate) fn note_sought_kill(&mut self, at: glam::Vec3, now: Instant) {
+        let sought = &self.autoplay.growth.pursuit_sought;
+        let it = self.world.objects.values().any(|o| {
+            sought.contains(&o.weenie_class_id)
+                && o.world_pos().is_some_and(|p| p.distance(at) < 1.0)
+        });
+        if it {
+            self.autoplay.growth.sought_kill = Some((at, now));
+        }
+    }
+
+    /// The pursued hunt's creature killed: its body stood by, walked back to, till the loot rules
+    /// empty it. The walk on left Martine's cloak behind, and a hit stopped the looting.
+    pub(super) fn stand_by_sought_body(&mut self, now: Instant) -> Option<bool> {
+        use crate::autoplay::loot::choose::{CORPSE_APPEARS, CORPSE_LIFE, LOOT_NEAR};
+        use crate::autoplay::loot::owed::KILL_SPOT;
+        let (at, fell) = self.autoplay.growth.sought_kill?;
+        let since = now.saturating_duration_since(fell);
+        let body = self
+            .world
+            .objects
+            .values()
+            .filter(|o| o.object_desc_flags & ac_world::object_desc_flags::CORPSE != 0)
+            .filter(|o| {
+                o.world_pos()
+                    .is_some_and(|p| p.truncate().distance(at.truncate()) <= KILL_SPOT)
+            })
+            .map(|o| o.guid)
+            .next();
+        let waiting = match body {
+            // The body comes a moment after the blow (twice that allowed).
+            None => since < CORPSE_APPEARS * 2,
+            Some(g) => {
+                let ap = &self.autoplay;
+                since < CORPSE_LIFE && !ap.looted.contains(&g) && !ap.shelved.held(&g, now)
+            }
+        };
+        if !waiting {
+            self.autoplay.growth.sought_kill = None;
+            return None;
+        }
+        self.autoplay.growth.drop_ground_walk();
+        let me = self.my_position()?;
+        if me.truncate().distance(at.truncate()) > LOOT_NEAR * 0.5 {
+            if self.grow_travel(self.place_at(at), 2.0) {
+                self.autoplay
+                    .say(Doing::Traveling, "back to the quest creature's body");
+                return Some(true);
+            }
+            self.autoplay.growth.sought_kill = None;
+            return None;
+        }
+        if self.traveling() {
+            self.cancel_travel();
+        }
+        self.autoplay
+            .say(Doing::Idle, "by the quest creature's body");
+        Some(true)
+    }
+
     /// A rare hunt's creature in sight on the road between its grounds: gone to, the ground walk
     /// let go; `Some` is the hunt row's answer (false: left to the fight rule, in its reach).
     pub(super) fn chase_rare_on_road(&mut self, now: Instant) -> Option<bool> {

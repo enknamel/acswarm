@@ -248,6 +248,8 @@ pub struct State {
     pub(crate) looking: Option<(u32, Instant)>,
     /// The pursued ground camped on: everything on it is fought (`Client::is_clearing_ground`).
     pub(crate) clearing: Option<u32>,
+    /// Where and when a pursued hunt's creature fell: its body is stood by till emptied.
+    pub(crate) sought_kill: Option<(glam::Vec3, Instant)>,
 }
 
 /// A few names, and how many more there are. A caster short of every

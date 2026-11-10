@@ -2459,6 +2459,44 @@ fn a_swept_ground_waits_for_its_fresh_roll_from_when_it_was_last_beside() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
+fn a_sought_kill_s_body_is_stood_by() {
+    // Martine fell, the walk to the next ground went on before her body came, and a hit stopped
+    // its looting: the Tattered Virindi Cloak was left. Her body is stood by, walked back to.
+    let now = std::time::Instant::now();
+    let (mut c, here) = at_a_mire_witch_ground(now);
+    c.autoplay.growth.swept.mark(here, now);
+    assert_eq!(c.grow_pursuit(now), Some(true), "on to the next ground");
+    let cfg = crate::autoplay::growth::config::Growth::default();
+    let me = c.my_position().unwrap();
+    let cell = c.player.as_ref().unwrap().cell;
+    let spot = me + glam::Vec3::new(40.0, 0.0, 0.0);
+    let mut witch = crate::testkit::creature(0x5000_0901, "Mosswart Mire-Witch");
+    witch.weenie_class_id = 9163;
+    witch.position = crate::testkit::placed(cell, spot);
+    c.world.objects.insert(witch.guid, witch);
+    c.note_sought_kill(spot, now);
+    c.world.objects.remove(&0x5000_0901);
+    let later = now + std::time::Duration::from_secs(1);
+    assert!(c.grow_hunt(later, &cfg));
+    assert!(c.autoplay.growth.bound.is_none(), "the ground walk kept");
+    let goal = c.travel_goal_xy().expect("walking back");
+    assert!(goal.distance(spot.truncate()) < 5.0, "{goal:?} vs {spot:?}");
+    // Her body, emptied: let go of.
+    let mut body = crate::testkit::corpse(0x5000_0903, "Corpse of Mosswart Mire-Witch");
+    body.position = crate::testkit::placed(cell, spot);
+    c.world.objects.insert(body.guid, body);
+    assert!(c.grow_hunt(later, &cfg), "the body not yet emptied");
+    assert!(c.autoplay.growth.sought_kill.is_some());
+    c.autoplay.looted.push(0x5000_0903, later);
+    c.grow_hunt(later, &cfg);
+    assert!(
+        c.autoplay.growth.sought_kill.is_none(),
+        "stood by an emptied body"
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_camped_ground_is_cleared_of_critters_too() {
     // A hunt that is not rare camps its ground: everything on it is fought, so the generators
     // holding a slot make way (the Tusker Barracks' Tusker Guards).
