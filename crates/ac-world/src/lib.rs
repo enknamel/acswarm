@@ -875,7 +875,12 @@ impl World {
     /// Something set aside (see `arrived_in`, [`World::put_out_of_view`]) is in the world again.
     pub fn bring_back(&mut self, guid: u32) {
         let o = self.left_behind.remove(&guid).map(|(o, _)| o);
-        if let Some(o) = o.or_else(|| self.unseen.remove(&guid)) {
+        let o = o.or_else(|| {
+            let o = self.unseen.remove(&guid)?;
+            tracing::debug!("{guid:#010x} back in view: the server spoke of it");
+            Some(o)
+        });
+        if let Some(o) = o {
             self.objects.insert(guid, o);
             self.generation += 1;
         }
