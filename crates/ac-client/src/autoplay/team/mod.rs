@@ -67,7 +67,8 @@ impl Client {
             if let Some(hurt) = hurt {
                 let spell = self
                     .spell_by_name("Heal Other")
-                    .filter(|s| matches!(self.can_cast_well(*s), crate::magic::CastCheck::Ok));
+                    .filter(|s| matches!(self.can_cast_well(*s), crate::magic::CastCheck::Ok))
+                    .filter(|s| self.can_spare_mana(*s));
                 if let Some(spell) = spell {
                     self.select(Some(hurt.guid));
                     self.cast(spell);
@@ -114,6 +115,11 @@ impl Client {
                             continue;
                         };
                         if !matches!(self.can_cast_well(spell), crate::magic::CastCheck::Ok) {
+                            continue;
+                        }
+                        if !self.can_spare_mana(spell) {
+                            let said = format!("holding {spell_name} for the mana floor");
+                            self.autoplay.note(said, now);
                             continue;
                         }
                         self.select(Some(guid));

@@ -46,20 +46,21 @@ the earlier row; reflexes run in table order, `base` unread. The fixed curves si
 | 5 | unlock | reflex | - | `autoplay_unlock` |
 | 6 | urgent buffs | reflex | - | `autoplay_buff` (urgent) |
 | 7 | vitals | reflex | - | `autoplay_vitals` |
-| 8 | loot | goal | `worth_looting` | `autoplay_loot` |
-| 9 | catch up | goal | 120 | `autoplay_follow` (urgent) |
-| 10 | team | goal | 110 | `autoplay_team` |
-| 11 | salvage | goal | 100 | `autoplay_salvage` |
-| 12 | read scrolls | goal | 97 | `autoplay_read_scrolls` |
-| 13 | town run | goal | `worth_town_run` | `autoplay_town_run` |
-| 14 | summon | goal | `worth_fighting` | `autoplay_summon` |
-| 15 | fight | goal | `worth_fighting` | `autoplay_fight` |
-| 16 | keep to the area | goal | 70 | `autoplay_keep_to_area` |
-| 17 | buffs | goal | 60 | `autoplay_buff` |
-| 18 | follow | goal | 50 | `autoplay_follow` |
-| 19 | resume the journey | goal | 40 | `autoplay_resume_journey` |
-| 20 | explore | goal | 20 | `autoplay_explore` |
-| 21 | grow | goal | 10 | `autoplay_grow` |
+| 8 | fall back | reflex | - | `autoplay_fall_back` |
+| 9 | loot | goal | `worth_looting` | `autoplay_loot` |
+| 10 | catch up | goal | 120 | `autoplay_follow` (urgent) |
+| 11 | team | goal | 110 | `autoplay_team` |
+| 12 | salvage | goal | 100 | `autoplay_salvage` |
+| 13 | read scrolls | goal | 97 | `autoplay_read_scrolls` |
+| 14 | town run | goal | `worth_town_run` | `autoplay_town_run` |
+| 15 | summon | goal | `worth_fighting` | `autoplay_summon` |
+| 16 | fight | goal | `worth_fighting` | `autoplay_fight` |
+| 17 | keep to the area | goal | 70 | `autoplay_keep_to_area` |
+| 18 | buffs | goal | 60 | `autoplay_buff` |
+| 19 | follow | goal | 50 | `autoplay_follow` |
+| 20 | resume the journey | goal | 40 | `autoplay_resume_journey` |
+| 21 | explore | goal | 20 | `autoplay_explore` |
+| 22 | grow | goal | 10 | `autoplay_grow` |
 
 Housekeeping, every tick, never claiming it: `autoplay_pending_wield`, `autoplay_shield`, `autoplay_rearm`, `autoplay_stock`, `autoplay_claim_pet_kills`, `autoplay_mana_stones`, `autoplay_refill_essences`, `autoplay_tidy`, `autoplay_learn_scrolls`, `autoplay_spend_xp`.
 
@@ -85,7 +86,7 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 | pack tidy | `autoplay_tidy`, `settle_pour`, `pour_next`, `compress` | `autoplay/tidy.rs`, `autoplay/growth/mod.rs` | `Autoplay.pour`, `Autoplay.tidy_looked`, `growth::State.wont_merge` | pour | autoplay::tidy | tidy, pour |
 | weapons | `autoplay_pending_wield`, `arm_for`, `autoplay_shield`, `autoplay_rearm` | `autoplay/hands/weapon.rs`, `crates/ac-loot/src/weapons.rs` | `Autoplay.pending_wield`, `Autoplay.wield_refused`, `Autoplay.armed_for` | wield | autoplay::hands::weapon | wield |
 | ammo | `ready_ammo`, `autoplay_craft_ammo`, `choose_recipe`, `ammo_carried` | `autoplay/hands/ammo.rs` | `Autoplay.crafting`, `Autoplay.wanted_ammo` | arrow | autoplay::hands::ammo | ammo |
-| healing | `autoplay_survive`, `choose_heal`, `self_heals`, `autoplay_vitals` | `autoplay/vitals/heal.rs` | `Autoplay.config.survive`, `Autoplay.last_heal`, `Autoplay.last_vital` | heal | autoplay::vitals::heal | heal, vitals |
+| healing | `autoplay_survive`, `choose_heal`, `self_heals`, `autoplay_vitals`, `autoplay_fall_back`, `can_spare_mana` | `autoplay/vitals/heal.rs`, `autoplay/vitals/floors.rs` | `Autoplay.config.survive`, `Autoplay.last_heal`, `Autoplay.last_vital`, `Autoplay.falling_back` | heal, floors | autoplay::vitals::heal | heal, vitals |
 | buffs | `autoplay_buff`, `wanted_buffs`, `due_buff`, `wanted`, `autoplay_mana_stones` | `autoplay/vitals/buffs.rs`, `buffs.rs`, `autoplay/mana_stones.rs` | `Autoplay.config.buffs`, `Autoplay.last_buff`, `Autoplay.item_buffs`, `Autoplay.mana_stones` | buff | autoplay::vitals::buffs | buff |
 | recruiting | `autoplay_fellowship`, `autoplay_accept_invites`, `next_invitee`, `hear_recruit_refusal` | `autoplay/team/fellowship.rs` | `Autoplay.recruited`, `Autoplay.held_off`, `Team.fellowship` | invit | autoplay::team::fellowship | recruit |
 | team board | `autoplay_team`, `leader_mate`, `worst_hurt`, `rival_leader` | `autoplay/team/mod.rs`, `autoplay/team/view.rs`, `crates/ac-plugin/src/team.rs` | `Autoplay.team` (`TeamView.mates`), `Config.team` | leader | autoplay::team | mate |

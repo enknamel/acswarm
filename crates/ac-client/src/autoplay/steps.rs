@@ -120,6 +120,10 @@ fn worth_fighting(client: &Client, _now: Instant) -> f32 {
     if client.my_position().is_none() {
         return UNDECIDED;
     }
+    // A vital under its floor with nothing to restore it picks no fight (`autoplay_fall_back`).
+    if client.is_falling_back() {
+        return 0.0;
+    }
     // Already swinging at something that is still alive: that is a
     // fight in hand whatever the distance, and it is not interrupted.
     //
@@ -390,6 +394,14 @@ pub const STEPS: &[Step] = &[
         why: "mana and stamina are kept up between everything else",
         worth: by_place,
         run: claimed!(Client::autoplay_vitals),
+    },
+    Step {
+        name: "fall back",
+        layer: Layer::Reflex,
+        base: 135.0,
+        why: "a vital under its floor that nothing restores where the character stands breaks the fight off: away from the attackers to rest till it is back, after the restore round and before any fight",
+        worth: by_place,
+        run: claimed!(Client::autoplay_fall_back),
     },
     Step {
         name: "loot",

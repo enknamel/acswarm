@@ -138,7 +138,7 @@ fn biggest_heal<'a>(pool: &[&'a SelfHeal]) -> Option<&'a SelfHeal> {
 
 /// Whether a spell puts health back: a health boost (Harm Self is a
 /// boost below zero and is not one) or a transfer into health.
-fn restores_health(spell: u32) -> bool {
+pub(super) fn restores_health(spell: u32) -> bool {
     use ac_world::vitals::vital;
     ac_world::vitals::boost(spell).is_some_and(|b| b.vital == vital::HEALTH && b.restores())
         || ac_world::vitals::transfer(spell).is_some_and(|t| t.to == vital::HEALTH)
@@ -168,7 +168,7 @@ impl Client {
     /// The known boost of a vital castable right now that gives the most on average, its roll
     /// times its chance to land (Robustification fizzling nine casts in ten loses to Revitalize Self
     /// IV), whatever it is called: the table says Adja's Intervention heals where a name would not.
-    fn best_boost(&self, vital: u32) -> Option<u32> {
+    pub(super) fn best_boost(&self, vital: u32) -> Option<u32> {
         let table = self.assets.spell_table().ok()?;
         ac_world::vitals::boosts_of(vital)
             .into_iter()
@@ -333,9 +333,8 @@ impl Client {
         tracing::info!("heal: self heals in the book: {names}");
     }
 
-    /// Keep mana and stamina up the way a caster does: stamina poured
-    /// into mana when mana runs low, Revitalize when stamina does. True
-    /// when a spell went out.
+    /// Keep mana and stamina up the way a caster does: Revitalize when stamina is under its floor,
+    /// the mana round ([`Self::mana_round`]) when mana is under its own. True when a spell went out.
     pub(crate) fn autoplay_vitals(&mut self, now: Instant) -> bool {
         use ac_world::vitals::vital;
         let cfg = self.autoplay.config.survive.clone();
@@ -376,20 +375,67 @@ impl Client {
                 }
             }
         }
-        if mana < cfg.mana_below && stamina >= cfg.stamina_below.max(0.5) {
-            if let Some(spell) = self.best_transfer(vital::STAMINA, vital::MANA) {
-                if matches!(self.can_cast_well(spell), crate::magic::CastCheck::Ok) {
-                    self.cast_paced(spell, now);
-                    self.autoplay.last_vital = Some(now);
-                    self.autoplay.say(
-                        Doing::Buffing,
-                        format!("pouring stamina into mana at {:.0}%", mana * 100.0),
-                    );
-                    return true;
-                }
-            }
+        if mana < cfg.mana_below {
+            return self.restore_mana(now);
         }
         false
+    }
+
+    /// Cast the mana round's next spell, if it has one ([`Self::mana_round`]). True when it went out.
+    pub(crate) fn restore_mana(&mut self, now: Instant) -> bool {
+        let Some((spell, transfer)) = self.mana_round() else {
+            return false;
+        };
+        if !self.cast_paced(spell, now) {
+            return false;
+        }
+        self.autoplay.last_vital = Some(now);
+        let mana = self.bars()[2] * 100.0;
+        let said = if transfer {
+            format!("pouring stamina into mana at {mana:.0}%")
+        } else {
+            format!("restoring stamina to pour into mana at {mana:.0}%")
+        };
+        self.autoplay.say(Doing::Buffing, said);
+        true
+    }
+
+    /// The cast that gets mana back now, and whether it is the transfer: stamina into mana when the
+    /// stamina it leaves stays at its floor, else Revitalize first while the mana left pays for the
+    /// transfer after it. `None` when neither can go, or `manage_mana` is off.
+    pub(super) fn mana_round(&self) -> Option<(u32, bool)> {
+        use crate::magic::CastCheck;
+        use ac_world::vitals::{self, vital};
+        let cfg = &self.autoplay.config.survive;
+        if !cfg.manage_mana {
+            return None;
+        }
+        let (stamina, most) = self.vital_now(1);
+        let floor = cfg.stamina_below * most as f32;
+        let leaves = |t: &vitals::Transfer, have: u32| have.saturating_sub(t.drain(have)) as f32;
+        let best = self
+            .best_transfer(vital::STAMINA, vital::MANA)
+            .and_then(vitals::transfer)
+            .filter(|t| matches!(self.can_cast_well(t.spell), CastCheck::Ok));
+        if let Some(t) = best {
+            if leaves(&t, stamina) >= floor {
+                return Some((t.spell, true));
+            }
+        }
+        // Revitalize helps only a transfer known that keeps the floor from a full bar, and only
+        // while the mana after it still pays for that transfer.
+        let known = vitals::transfers_between(vital::STAMINA, vital::MANA)
+            .into_iter()
+            .filter(|t| self.world.stats.spells.contains(&t.spell))
+            .filter(|t| leaves(t, most) >= floor)
+            .filter_map(|t| self.spell(t.spell).map(|sp| self.mana_cost(&sp)))
+            .min()?;
+        let boost = self
+            .best_boost(vital::STAMINA)
+            .filter(|s| matches!(self.can_cast_well(*s), CastCheck::Ok))?;
+        let cost = self.spell(boost).map_or(0, |sp| self.mana_cost(&sp));
+        let (mana, _) = self.vital_now(2);
+        (stamina < most && mana.saturating_sub(cost) >= known).then_some((boost, false))
     }
 
     /// Heal, and break off a losing fight. True when it acted.
@@ -418,13 +464,7 @@ impl Client {
         // nothing, so a caster is far better off with Heal Self, and
         // reaching for a kit only wastes the moment it takes.
         if cfg.use_kits && self.heals_with_kits() {
-            let kit = self
-                .world
-                .inventory()
-                .filter(|o| ac_world::usable::on_self(o.usable) && o.name.contains("Healing Kit"))
-                .map(|o| o.guid)
-                .next();
-            if let Some(kit) = kit {
+            if let Some(kit) = self.healing_kit() {
                 let me = self.world.player_guid.unwrap_or(0);
                 self.remember_journey();
                 self.use_on(kit, me);
@@ -459,6 +499,23 @@ impl Client {
                 .note(format!("cannot heal at {:.0}%: {why}", health * 100.0), now);
         }
         false
+    }
+
+    /// A healing kit carried, to use on the character itself.
+    fn healing_kit(&self) -> Option<u32> {
+        self.world
+            .inventory()
+            .find(|o| ac_world::usable::on_self(o.usable) && o.name.contains("Healing Kit"))
+            .map(|o| o.guid)
+    }
+
+    /// Whether anything restores health where the character stands: a kit it heals with, or a
+    /// heal it can cast.
+    pub(super) fn can_heal_here(&self) -> bool {
+        let kit = self.autoplay.config.survive.use_kits
+            && self.heals_with_kits()
+            && self.healing_kit().is_some();
+        kit || !self.self_heals().is_empty()
     }
 
     /// Whether a healing kit is worth using: Healing has to be trained

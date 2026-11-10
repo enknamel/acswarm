@@ -71,6 +71,14 @@ const ITEM_BUFF_ANSWER: Duration = Duration::from_secs(10);
 const SPELL_FIZZLED: u32 = 0x0402;
 
 impl Client {
+    /// Mana points a buff leaves untouched: `keep_mana` for a top-up or a cast in a fight (`whole`),
+    /// half of it for an urgent recast out of one, and never under the mana floor (`mana_below`).
+    pub(crate) fn buff_reserve(&self, whole: bool) -> f32 {
+        let keep = self.autoplay.config.buffs.keep_mana * if whole { 1.0 } else { 0.5 };
+        let floor = self.autoplay.config.survive.mana_below;
+        self.vital_max_of(2) as f32 * keep.max(floor)
+    }
+
     /// Seconds left on the enchantment of a spell family, if any is up.
     fn buff_left(&self, spell: u32) -> Option<f32> {
         let table = self.assets.spell_table().ok();
@@ -485,10 +493,8 @@ impl Client {
             return false;
         }
         self.stamp_buff_look(urgent, now);
-        // Mana is kept back for healing and fighting: a top-up, or any cast in a fight, waits
-        // until there is that much to spare; an urgent recast out of one leaves half of it.
-        let whole = topping_up || self.in_a_fight();
-        let reserve = self.vital_max_of(2) as f32 * cfg.keep_mana * if whole { 1.0 } else { 0.5 };
+        // Mana is kept back for healing and fighting (`buff_reserve`).
+        let reserve = self.buff_reserve(topping_up || self.in_a_fight());
         let cost = self
             .assets
             .spell_table()
