@@ -3,7 +3,7 @@
 //! (`autoplay_vitals`); one nothing restores where the character stands breaks the fight off: walk
 //! away from the attackers and rest till each is back above its floor (`autoplay_fall_back`).
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use ac_world::Place;
 use glam::{Vec2, Vec3};
@@ -24,8 +24,14 @@ const AT_SPOT: f32 = 2.0;
 /// Legs walked with creatures still on the character before it is cornered: four legs pass ACE's
 /// 96 m chase (`MaxChaseRange`, Monster_Navigation.cs:21, :244).
 const LEGS: u32 = 4;
-/// A creature fighting or coming at the character within this is fled (metres).
+/// A creature coming at the character within this is fled (metres); one hitting it, at any range.
 const ATTACKERS_WITHIN: f32 = 30.0;
+/// A creature that attacked within this is still on the character: a few of its rounds, monster
+/// spells going every 3 s and more (`AiUseMagicDelay`, Monster_Combat.cs:63).
+const HIT_LATELY: Duration = Duration::from_secs(10);
+/// A cast that can never leave the mana floor goes from a bar within this fraction of the top,
+/// the restore's own cast leaving it short of full (guess).
+const NEARLY_FULL: f32 = 0.05;
 /// Turns off straight away from the attackers tried for a leg, in degrees.
 const TURNS: [f32; 5] = [0.0, 45.0, -45.0, 90.0, -90.0];
 /// The vitals by their slot, for the log.
@@ -53,6 +59,18 @@ pub(crate) fn short_bar(bars: [f32; 3], cfg: &Survive, mana: bool, margin: f32) 
     (0..3).find(|&i| (i < 2 || mana) && floors[i] > 0.0 && bars[i] < (floors[i] + margin).min(1.0))
 }
 
+/// Mana points a cast of `cost` wants first, of a bar of `most` with its floor at `below`: the
+/// floor's and its own, or a nearly full bar for one that can never leave the floor ([`NEARLY_FULL`]).
+pub(crate) fn mana_wanted(cost: u32, most: u32, below: f32) -> u32 {
+    let floor = (below * most as f32).ceil() as u32;
+    let full = most - (most as f32 * NEARLY_FULL) as u32;
+    if floor + cost <= most {
+        floor + cost
+    } else {
+        full
+    }
+}
+
 /// The flat way from `me` straight away from the attackers' middle (east when stood on it).
 fn away_from(me: Vec3, attackers: &[Vec3]) -> Vec2 {
     let middle = attackers.iter().sum::<Vec3>() / attackers.len().max(1) as f32;
@@ -68,12 +86,19 @@ impl Client {
         })
     }
 
-    /// Whether casting `spell` leaves mana at or above its floor (`Survive::mana_below`).
+    /// Whether casting `spell` leaves mana at or above its floor (`Survive::mana_below`), or one
+    /// that never can goes from a nearly full bar ([`mana_wanted`]).
     pub(crate) fn can_spare_mana(&self, spell: u32) -> bool {
+        let below = self.autoplay.config.survive.mana_below;
         let (have, most) = self.vital_now(2);
+        most == 0 || below <= 0.0 || have >= self.mana_for(spell)
+    }
+
+    /// Mana points the cast `spell` wants first ([`mana_wanted`]).
+    fn mana_for(&self, spell: u32) -> u32 {
         let cost = self.spell(spell).map_or(0, |sp| self.mana_cost(&sp));
-        let floor = self.autoplay.config.survive.mana_below * most as f32;
-        most == 0 || have.saturating_sub(cost) as f32 >= floor
+        let (_, most) = self.vital_now(2);
+        mana_wanted(cost, most, self.autoplay.config.survive.mana_below)
     }
 
     /// Whether the fight's next cast `spell` waits for the mana floor: the mana round goes first
@@ -93,9 +118,7 @@ impl Client {
         }
         let said = format!("holding {name} for the mana floor: nothing restores mana here");
         self.autoplay.note(said, now);
-        let (_, most) = self.vital_now(2);
-        let cost = self.spell(spell).map_or(0, |sp| self.mana_cost(&sp));
-        let mana_for = (self.autoplay.config.survive.mana_below * most as f32) as u32 + cost;
+        let mana_for = self.mana_for(spell);
         let held = self
             .autoplay
             .falling_back
@@ -201,7 +224,7 @@ impl Client {
         }) else {
             return false;
         };
-        let attackers = self.attackers_round(me.at);
+        let attackers = self.attackers_round(me.at, now);
         if attackers.is_empty() {
             if let Some(held) = self.autoplay.falling_back.as_mut() {
                 *held = FallBack {
@@ -289,8 +312,9 @@ impl Client {
         self.let_go(Release::Fight);
     }
 
-    /// Where the creatures fighting or coming at the character stand, within [`ATTACKERS_WITHIN`].
-    fn attackers_round(&self, me: Vec3) -> Vec<Vec3> {
+    /// Where the creatures on the character stand: each that attacked within [`HIT_LATELY`] at any
+    /// range (spells to 75 m, Monster_Magic.cs:117), each fought or coming at it within 30 m.
+    fn attackers_round(&self, me: Vec3, now: Instant) -> Vec<Vec3> {
         use ac_world::{item_type, object_desc_flags};
         let mine = self.world.player_guid;
         let fought = [self.attack_target, self.autoplay.casting_at];
@@ -304,13 +328,13 @@ impl Client {
                     && o.pet_owner == 0
                     && o.alive_or_unknown()
             })
-            .filter(|o| {
-                (mine.is_some() && o.walked_at == mine)
-                    || self.hit_lately_by(&o.name)
-                    || fought.contains(&Some(o.guid))
+            .filter_map(|o| {
+                let at = o.world_pos()?;
+                let hitting = self.hit_lately_from(o.guid, now, HIT_LATELY);
+                let coming = (mine.is_some() && (o.walked_at == mine || o.turned_to == mine))
+                    || fought.contains(&Some(o.guid));
+                (hitting || (coming && at.distance(me) <= ATTACKERS_WITHIN)).then_some(at)
             })
-            .filter_map(|o| o.world_pos())
-            .filter(|at| at.distance(me) <= ATTACKERS_WITHIN)
             .collect()
     }
 

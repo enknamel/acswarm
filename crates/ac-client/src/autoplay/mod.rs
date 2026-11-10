@@ -295,6 +295,9 @@ pub struct Autoplay {
     /// silenced the first, which was then walked past between its
     /// swings (see [`Autoplay::attacked_by`]).
     pub(crate) hit_by: Recent<String>,
+    /// The same by guid: each attack's name put to the creatures of that name after the character
+    /// (`Client::hear_attack`), so one shooting from afar is told from its kin.
+    pub(crate) hit_by_guid: Recent<u32>,
     /// What the leader remembers between plans, when this character
     /// leads: the bodies it has dealt and the turns each of the others
     /// has had (see `crate::plan`).

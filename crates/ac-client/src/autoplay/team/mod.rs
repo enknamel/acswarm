@@ -67,9 +67,13 @@ impl Client {
             if let Some(hurt) = hurt {
                 let spell = self
                     .spell_by_name("Heal Other")
-                    .filter(|s| matches!(self.can_cast_well(*s), crate::magic::CastCheck::Ok))
-                    .filter(|s| self.can_spare_mana(*s));
+                    .filter(|s| matches!(self.can_cast_well(*s), crate::magic::CastCheck::Ok));
                 if let Some(spell) = spell {
+                    // Heals are what the mana floor is kept for: a fellow's goes under it.
+                    if !self.can_spare_mana(spell) {
+                        let said = format!("healing {} under the mana floor", hurt.name);
+                        self.autoplay.note(said, now);
+                    }
                     self.select(Some(hurt.guid));
                     self.cast(spell);
                     self.autoplay.last_heal = Some(now);

@@ -632,6 +632,10 @@ pub fn weigh(client: &Client, now: Instant) -> Weighed {
         if step.layer != Layer::Goal {
             continue;
         }
+        // A fall back lets only a town run under way through (`autoplay_fall_back`).
+        if client.is_falling_back() && step.name != "town run" {
+            continue;
+        }
         let worth = step.worth(client, now);
         if worth > 0.0 {
             order.push((place, worth));

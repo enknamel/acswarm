@@ -3,6 +3,7 @@ use crate::autoplay::vitals::buffs::BUFF_CHECK_EVERY;
 use crate::testkit::{self, ME};
 
 const TUSKER: u32 = 0x8000_1234;
+const KIN: u32 = 0x8000_1235;
 
 /// Health, stamina and mana bars of `most` points each, at these fractions.
 fn bars_at(c: &mut Client, most: u32, health: f32, stamina: f32, mana: f32) {
@@ -25,9 +26,80 @@ fn tusker_on(c: &mut Client) -> Vec3 {
     let mut o = testkit::standing_by(c, TUSKER, "Tusker Guard", 2.0);
     o.walked_at = Some(ME);
     c.world.objects.insert(TUSKER, o.clone());
-    c.autoplay.attacked_by("Tusker Guard", Instant::now());
+    c.hear_attack("Tusker Guard", Instant::now());
     c.take_up_fight(TUSKER);
     o.world_pos().unwrap()
+}
+
+/// A Tusker Guard `metres` east, turned to the character and casting at it from there.
+fn casting_from(c: &mut Client, guid: u32, metres: f32, now: Instant) {
+    let mut o = testkit::standing_by(c, guid, "Tusker Guard", metres);
+    o.turned_to = Some(ME);
+    c.world.objects.insert(guid, o);
+    c.hear_attack("Tusker Guard", now);
+}
+
+/// An offline wand fighter in Holtburg with stamina and mana under their floors.
+fn mage_spent() -> Client {
+    let mut c = testkit::offline_client();
+    c.world.player_guid = Some(ME);
+    testkit::stand(&mut c, 0xA9B4_0019, Vec3::new(84.0, 84.0, 94.0));
+    c.autoplay.config.fight.style = Style::Magic;
+    bars_at(&mut c, 200, 1.0, 0.1, 0.3);
+    c
+}
+
+#[test]
+fn an_attack_is_put_to_the_creature_of_that_name_after_the_character() {
+    let now = Instant::now();
+    let mut c = mage_spent();
+    // Its kin stands nearer, after nobody: the one turned to the character cast.
+    testkit::standing_by(&mut c, KIN, "Tusker Guard", 5.0);
+    casting_from(&mut c, TUSKER, 50.0, now);
+    assert!(c.hit_lately_from(TUSKER, now, HIT_LATELY));
+    assert!(
+        !c.hit_lately_from(KIN, now, HIT_LATELY),
+        "the kin was blamed"
+    );
+    // None of the name after it: the nearest of that name.
+    c.world.objects.get_mut(&TUSKER).unwrap().turned_to = None;
+    c.hear_attack("Tusker Guard", now);
+    assert!(c.hit_lately_from(KIN, now, HIT_LATELY));
+}
+
+#[test]
+fn a_caster_hitting_from_fifty_metres_is_fled_till_the_character_is_cornered() {
+    // Casters hit from 75 m and archers from 80; counted within 30 m only, one rested being shot.
+    let now = Instant::now();
+    let mut c = mage_spent();
+    testkit::standing_by(&mut c, KIN, "Tusker Guard", 20.0);
+    casting_from(&mut c, TUSKER, 50.0, now);
+    let me = c.my_position().unwrap();
+    let round = c.attackers_round(me, now);
+    assert_eq!(round.len(), 1, "{round:?}");
+    assert!((round[0].distance(me) - 50.0).abs() < 0.5, "{round:?}");
+    // Between its casts it is still on the character; ten quiet seconds on, it is not.
+    let between = now + Duration::from_secs(6);
+    assert_eq!(c.attackers_round(me, between).len(), 1);
+    assert!(c.attackers_round(me, now + HIT_LATELY).is_empty());
+    // The legs are kept while it hits: walked them all, cornered, it is fought.
+    c.autoplay.falling_back = Some(FallBack {
+        legs: LEGS,
+        ..FallBack::default()
+    });
+    assert!(!c.autoplay_fall_back(between), "rested while shot");
+    assert!(c.is_cornered());
+    assert!(!c.is_falling_back());
+}
+
+#[test]
+fn a_cast_that_can_never_leave_the_floor_wants_a_nearly_full_bar() {
+    // The 40% floor of 200 is 80: a 50-point cast wants 130, a 120-point one the whole bar.
+    assert_eq!(mana_wanted(50, 200, 0.4), 130);
+    assert_eq!(mana_wanted(120, 200, 0.4), 200);
+    // 150 never leaves 80: the bar within 5% of its top, never past it.
+    assert_eq!(mana_wanted(150, 200, 0.4), 190);
+    assert_eq!(mana_wanted(400, 200, 0.4), 190);
 }
 
 #[test]
@@ -224,5 +296,47 @@ fn the_tick_falls_back_before_the_fight_step_casts() {
     assert!(
         c.autoplay.casting_at().is_none(),
         "still casting at the tusker"
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_cast_dearer_than_the_bar_over_its_floor_goes_from_a_full_bar() {
+    let now = Instant::now();
+    let (mut c, known) = mage_knowing(now, &["Flame Bolt I"]);
+    let bolt = known[0];
+    let cost = c.spell(bolt).map(|sp| c.mana_cost(&sp)).unwrap();
+    assert!(cost > 0);
+    // A bar of `cost` points: the floor and the cast are past its top.
+    bars_at(&mut c, cost, 1.0, 1.0, 1.0);
+    assert!(c.can_spare_mana(bolt), "a full bar held the bolt");
+    assert!(!c.hold_for_mana(bolt, now));
+    // Half the bar and nothing to restore it: rested back to full, then the bolt goes.
+    bars_at(&mut c, cost, 1.0, 1.0, 0.5);
+    assert!(c.hold_for_mana(bolt, now));
+    bars_at(&mut c, cost, 1.0, 1.0, 1.0);
+    assert!(!c.autoplay_fall_back(now), "a full bar rested on");
+    assert!(c.autoplay.falling_back.is_none());
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_healer_heals_a_fellow_under_its_own_mana_floor() {
+    let now = Instant::now();
+    let (mut c, _) = testkit::a_caster_knowing(now, &["Heal Other I"]);
+    bars_at(&mut c, 200, 1.0, 1.0, 0.3);
+    let team = &mut c.autoplay.config.team;
+    team.enabled = true;
+    team.role = crate::autoplay::Role::Healer;
+    team.fellowship = false;
+    team.share_supplies = false;
+    let mut aldric = testkit::mate(0x5000_0002, "Aldric");
+    aldric.health = 0.3;
+    c.autoplay.team.mates.push(aldric);
+    assert!(c.autoplay_team(now), "no heal: {}", c.autoplay.status);
+    assert!(
+        c.autoplay.status.contains("healing Aldric"),
+        "{}",
+        c.autoplay.status
     );
 }

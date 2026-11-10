@@ -72,6 +72,7 @@ impl World {
                     display: oc.position,
                     target: None,
                     walked_at: None,
+                    turned_to: None,
                     velocity: oc.velocity,
                     physics_state: oc.physics_state,
                     locked: previous.as_ref().and_then(|o| o.locked),

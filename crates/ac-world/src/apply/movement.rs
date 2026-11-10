@@ -117,6 +117,9 @@ impl World {
                 if let Some(MoveTarget::Object(at)) = ev.target {
                     o.walked_at = Some(at);
                 }
+                if ev.turn_to.is_some() {
+                    o.turned_to = ev.turn_to;
+                }
                 for &(cmd, seq, speed) in &ev.commands {
                     if o.commands.push(cmd, seq, speed) {
                         tracing::debug!(

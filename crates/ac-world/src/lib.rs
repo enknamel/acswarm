@@ -309,6 +309,9 @@ pub struct WorldObject {
     /// after its target and a pet after its owner walk at an object;
     /// vendors, wanderers and emotes walk to positions.
     pub walked_at: Option<u32>,
+    /// The last object the server turned this one to face (TurnToObject), kept like `walked_at`: a
+    /// ranged or casting monster in reach only turns to its target (Monster_Navigation.cs:89).
+    pub turned_to: Option<u32>,
     /// The velocity the server last sent, in metres a second (world
     /// axes). A spell projectile is created with the one it flies at
     /// and gets no position updates on the way: `position` and this
@@ -1261,6 +1264,7 @@ mod tests {
         assert_eq!(world.apply(&turn), Applied::PlayerMotion);
         let me = world.player().unwrap();
         assert_eq!(me.target, None);
+        assert_eq!(me.turned_to, Some(CORPSE), "what it faces is kept");
         // It still turns the character to the heading it gives.
         assert_eq!(me.position.unwrap().rotation, heading_quat(90.0));
 

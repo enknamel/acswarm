@@ -18,6 +18,8 @@ use crate::Client;
 /// Swung at this recently, the character is in a fight whether or not
 /// it chose one.
 const UNDER_ATTACK: Duration = Duration::from_secs(4);
+/// A guid's last attack is kept this long, past every reader's window (`hit_lately_from`).
+const ATTACK_KEPT: Duration = Duration::from_secs(30);
 
 /// Whether a fight taken on the road is over because the creature has
 /// dropped out of it: the character is on its way somewhere, the
@@ -56,6 +58,55 @@ impl Autoplay {
 }
 
 impl Client {
+    /// Something called `who` attacked the character at `now` ([`Autoplay::attacked_by`]), put to
+    /// a guid as well: the server names the attacker only, in a hit, a miss or a spell line.
+    pub(crate) fn hear_attack(&mut self, who: &str, now: Instant) {
+        self.autoplay.attacked_by(who, now);
+        self.autoplay.hit_by_guid.expire(now, ATTACK_KEPT);
+        for guid in self.attackers_named(who) {
+            self.autoplay.hit_by_guid.mark(guid, now);
+        }
+    }
+
+    /// The creatures called `who` whose attack target is the character (walked at or turned to,
+    /// Monster_Navigation.cs:89-106), else the nearest of that name: the one that attacked.
+    fn attackers_named(&self, who: &str) -> Vec<u32> {
+        let mine = self.world.player_guid;
+        let me = self.my_position();
+        let named: Vec<&ac_world::WorldObject> = self
+            .world
+            .objects
+            .values()
+            .filter(|o| o.name == who && !o.is_player && o.pet_owner == 0)
+            .filter(|o| o.item_type & ac_world::item_type::CREATURE != 0)
+            .filter(|o| o.alive_or_unknown())
+            .collect();
+        let after_me: Vec<u32> = named
+            .iter()
+            .filter(|o| mine.is_some() && (o.walked_at == mine || o.turned_to == mine))
+            .map(|o| o.guid)
+            .collect();
+        if !after_me.is_empty() {
+            return after_me;
+        }
+        let off = |o: &ac_world::WorldObject| match (me, o.world_pos()) {
+            (Some(me), Some(at)) => at.distance(me),
+            _ => f32::MAX,
+        };
+        named
+            .into_iter()
+            .min_by(|a, b| off(a).total_cmp(&off(b)))
+            .map(|o| o.guid)
+            .into_iter()
+            .collect()
+    }
+
+    /// Whether the creature `guid` has attacked the character within `window` of `now`
+    /// ([`Self::hear_attack`]).
+    pub(crate) fn hit_lately_from(&self, guid: u32, now: Instant, window: Duration) -> bool {
+        self.autoplay.hit_by_guid.within(&guid, now, window)
+    }
+
     /// The names of what has attacked this character lately (see
     /// `Autoplay::attacked_by`), in name order, one row a name.
     pub fn attackers_lately(&self) -> Vec<String> {

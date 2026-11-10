@@ -225,7 +225,7 @@ impl Client {
                     self.autoplay.last_hit_us = Some(Instant::now());
                     match ac_net::messages::AttackNotice::parse_defender(rest) {
                         Ok(n) => Ok({
-                            self.autoplay.attacked_by(&n.name, Instant::now());
+                            self.hear_attack(&n.name, Instant::now());
                             self.blows.taken += 1;
                             self.blows.taken_points += u64::from(n.damage);
                             ChatLine {
@@ -270,7 +270,7 @@ impl Client {
                     self.blows.evaded += 1;
                     match ac_net::wire::Reader::new(rest).string16() {
                         Ok(n) => Ok({
-                            self.autoplay.attacked_by(&n, Instant::now());
+                            self.hear_attack(&n, Instant::now());
                             ChatLine {
                                 text: format!("You evade {n}'s attack."),
                                 sender: String::new(),
