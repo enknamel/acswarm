@@ -198,12 +198,20 @@ impl Client {
             .as_ref()
             .map_or(0, |f| f.mana_for);
         let rested = short_bar(self.bars(), cfg, self.has_mana_floor(), RESTED_MARGIN).is_none();
-        rested && self.vital_now(2).0 >= mana_for
+        // Never past a nearly full bar as it is now: vitae or a lapsed buff can lower the top.
+        let (mana, most) = self.vital_now(2);
+        let full = most - (most as f32 * NEARLY_FULL) as u32;
+        rested && mana >= mana_for.min(full)
     }
 
     /// While a floor nothing restores here is down: break the fight off, walk away from the
     /// attackers a leg at a time, and rest till [`Self::is_rested`]. True while it holds the tick.
     pub(crate) fn autoplay_fall_back(&mut self, now: Instant) -> bool {
+        // A death ends it: what it waited for is gone with the fight.
+        if self.is_dead() {
+            self.autoplay.falling_back = None;
+            return false;
+        }
         if self.autoplay.falling_back.is_none() {
             let Some(why) = self.unrestorable_floors() else {
                 return false;
@@ -322,7 +330,9 @@ impl Client {
             .objects
             .values()
             .filter(|o| {
+                // Attackable only: a vendor or NPC turns to a player too (Vendor.cs:246).
                 o.item_type & item_type::CREATURE != 0
+                    && o.object_desc_flags & object_desc_flags::ATTACKABLE != 0
                     && o.object_desc_flags & object_desc_flags::PLAYER == 0
                     && !o.is_player
                     && o.pet_owner == 0

@@ -340,3 +340,43 @@ fn a_healer_heals_a_fellow_under_its_own_mana_floor() {
         c.autoplay.status
     );
 }
+
+#[test]
+fn a_rest_for_a_held_cast_ends_at_a_nearly_full_bar_whatever_the_top_now() {
+    // Vitae or a lapsed buff lowered the top under what the held cast wanted: rested for ever.
+    let now = Instant::now();
+    let mut c = testkit::offline_client();
+    c.world.player_guid = Some(ME);
+    testkit::stand(&mut c, 0xA9B4_0019, Vec3::new(84.0, 84.0, 94.0));
+    bars_at(&mut c, 180, 1.0, 1.0, 1.0);
+    c.autoplay.falling_back = Some(FallBack {
+        mana_for: 190,
+        ..FallBack::default()
+    });
+    assert!(!c.autoplay_fall_back(now), "rested past a full bar");
+    assert!(!c.is_falling_back());
+}
+
+#[test]
+fn a_vendor_turned_to_the_character_is_no_attacker() {
+    // A vendor turns to whoever it serves (Vendor.cs:246): counted, a rest walked off the counter.
+    let now = Instant::now();
+    let mut c = mage_spent();
+    let mut vendor = testkit::standing_by(&mut c, KIN, "Grocer", 3.0);
+    vendor.object_desc_flags = 0;
+    vendor.turned_to = Some(ME);
+    c.world.objects.insert(KIN, vendor);
+    let me = c.my_position().unwrap();
+    assert!(c.attackers_round(me, now).is_empty());
+}
+
+#[test]
+fn a_death_ends_the_fall_back() {
+    let now = Instant::now();
+    let mut c = mage_spent();
+    c.autoplay.falling_back = Some(FallBack::default());
+    c.world.stats.name = "Blargerton".into();
+    c.world.stats.vitals[0].current = 0;
+    assert!(!c.autoplay_fall_back(now));
+    assert!(!c.is_falling_back(), "a dead character still resting");
+}
