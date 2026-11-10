@@ -1,9 +1,8 @@
 # ac-client code map
 
 One `Client` per game session: connection, `World`, body, the manual actions a UI or script calls,
-and autoplay. File names are under `src/`; grep an entry fn for where its system sits in one.
-`tests/code_map.rs` checks the paths, entry fns, steps and modules named here, and that each
-system's entry fns are written in the files its own row names.
+and autoplay; file names are under `src/`, grep an entry fn for its system. `tests/code_map.rs`
+checks the paths, entry fns, steps and modules named here, each system's entry fns in its row's files.
 
 ## Tick path
 
@@ -107,7 +106,7 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 | academy | `autoplay_academy` | `academy.rs`, `tests/academy_route.rs` | `Autoplay.academy`, `Autoplay.academy_corpse`, `Autoplay.academy_armed` | academy | academy | academy |
 | summoning | `autoplay_summon`, `autoplay_claim_pet_kills`, `autoplay_refill_essences`, `hear_summoning` | `autoplay/summoning.rs`, `autoplay/mod.rs` | `Autoplay.summoning` | summon | autoplay::summoning | summon, pet |
 | refusals | `hear_refusal`, `refused`, `answer` | `refused.rs`, `crates/ac-agent/src/refusals.rs` | the waiting system's own wait, e.g. `Autoplay.shelved` | refus | refused | refusal |
-| server chat | `chat_message`, `hear_arrival`, `hear_spell_attack` | `session/chat.rs`, `autoplay/hear.rs` | `Autoplay.hit_by` | arriv | session::chat | heard |
+| server chat | `chat_message`, `hear_arrival`, `hear_spell_attack` | `session/chat.rs`, `autoplay/hear.rs` | `Autoplay.hit_by`, `Autoplay.hit_by_guid` | arriv | session::chat | heard |
 | quests | `refresh_quests`, `quest_board`, `quest_wants`, `visit_giver`, `watch_quest_answer`, `refresh_pursuit`, `keep_quest_section`, `start_quest_call` | `quest_log.rs`, `crates/ac-world/src/quests.rs`, `autoplay/growth/pursuit.rs`, `autoplay/growth/pursuit/fetch.rs`, `autoplay/growth/pursuit/section.rs`, `autoplay/growth/town_run/calls.rs` | `Client.quest_board`, `Client.quest_log`, `Client.pursuit`, `Autoplay.config.quests` | quest_log | quest_log | quest, pursuit |
 
 ## Glossary
