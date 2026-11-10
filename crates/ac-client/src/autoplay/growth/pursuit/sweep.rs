@@ -1,8 +1,8 @@
-//! A rare spawn is swept for: a creature under [`RARE_SPAWN`] of its generators' rolls is looked
-//! for landblock by landblock, the nearest not looked over lately first, never waited for at one
-//! (the Mosswart Mire-Witch, 0.49% of a Marae Lassel shore generator's rolls). A landblock nobody
-//! stands in or beside unloads after 5 minutes and rolls its encounters again when it loads
-//! (Landblock.cs:118, 548; 269-290). Any other hunt camps, and clears all its ground holds.
+//! A pursued hunt's ground with its creature absent: its spawn spots gone round (or, none known,
+//! looked over), then the soonest of waiting there and clearing what holds its generators' slots,
+//! leaving for it to unload and coming back to a fresh load, or the next ground (`pace`). A
+//! landblock nobody stands in, or outdoors beside, unloads after 5 minutes and rolls its
+//! generators afresh when it loads (Landblock.cs:118, 269-303, 1111-1124).
 
 use std::time::{Duration, Instant};
 
@@ -12,17 +12,30 @@ use super::HUNT_GROUNDS;
 use crate::autoplay::Doing;
 use crate::Client;
 
-/// A creature spawning on fewer of its generators' rolls than this is swept for, not camped.
-pub(crate) const RARE_SPAWN: f32 = 0.05;
-/// How long a landblock is looked over from its middle: a generator's heartbeat and the
-/// creature's arrival (guess).
+/// How long a ground with no spawn spot known is looked over from its place: a generator's
+/// heartbeat and the creature's arrival (guess).
 const LOOK_FOR: Duration = Duration::from_secs(15);
 /// The look is made this near the ground's place, m: a creature is first sent within 112.5 m
 /// (ObjectMaint.cs:421), and a landblock is 192 m across.
 const LOOK_FROM: f32 = 40.0;
-/// A landblock looked over is looked at again this long after the character was last in or beside
-/// it: twice ACE's 5-minute unload (Landblock.cs:118, 548).
-const SWEEP_AGAIN: Duration = Duration::from_secs(10 * 60);
+/// A landblock left is gone back to this long after the character was last in or beside it:
+/// ACE's 5-minute unload (Landblock.cs:118) and a minute for its check to come round.
+const SWEEP_AGAIN: Duration = Duration::from_secs(6 * 60);
+/// A choice to wait at a ground is held at least this long before it is weighed again (guess).
+const STAY_LEAST: Duration = Duration::from_secs(60);
+/// And at most this long: a wait that is taking longer is weighed against leaving again.
+const STAY_MOST: Duration = Duration::from_secs(10 * 60);
+
+/// What a ground with its creature absent is left to.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Absent {
+    /// Waited at, everything holding a generator's slot cleared.
+    Stay,
+    /// Left for it to unload, waited out at this spot out of its reach.
+    Rotate(Place),
+    /// Left for the next ground.
+    Move,
+}
 
 /// Whether landblock `lb` is `here` or one of the eight round it.
 fn is_beside(lb: u32, here: u32) -> bool {
@@ -31,20 +44,23 @@ fn is_beside(lb: u32, here: u32) -> bool {
     (x - hx).abs() <= 1 && (y - hy).abs() <= 1
 }
 
-/// Whether creature `wcid` is a rare spawn, swept for.
-pub(crate) fn is_rare_spawn(wcid: u32) -> bool {
-    ac_world::quests::spawn_share(wcid) < RARE_SPAWN
-}
-
 impl Client {
-    /// Whether the working hunt's creatures are all rare spawns.
-    pub(super) fn is_rare_hunt(&self) -> bool {
-        let sought = &self.autoplay.growth.pursuit_sought;
-        !sought.is_empty() && sought.iter().all(|w| is_rare_spawn(*w))
+    /// Whether the working hunt's best ground comes only by rotating (a rare camp's): its grounds
+    /// are swept, nearest first, and its creature chased when seen from the road between them.
+    pub(super) fn is_rotating_hunt(&self) -> bool {
+        let st = &self.autoplay.growth;
+        let best = st.pursuit_paces.first();
+        !st.pursuit_sought.is_empty() && best.is_some_and(|g| g.pace.camp > g.pace.rotate)
     }
 
-    /// Whether `o`'s landblock is a camped pursued ground: everything on it is fought, so the
-    /// generators holding a slot make way for the creature sought.
+    /// Whether `lb` is a pursued ground camping beats rotating on: it is cleared while hunted.
+    pub(super) fn is_camping_ground(&self, lb: u32) -> bool {
+        self.pursued_pace(lb)
+            .is_some_and(|g| g.pace.camp <= g.pace.rotate)
+    }
+
+    /// Whether the landblock stood in is a camped pursued ground: everything on it is fought, so
+    /// the generators holding a slot make way for the creature sought, and what hits the character.
     pub(crate) fn is_clearing_ground(&self) -> bool {
         let Some(here) = self.player.as_ref().map(|p| p.cell >> 16) else {
             return false;
@@ -54,9 +70,10 @@ impl Client {
             && self.pursued_place(here).is_some()
     }
 
-    /// The sweep of a rare hunt's `grounds` for `creature`, `title`'s: the ground stood on looked
-    /// over, then `grounds` cut to the nearest not looked over lately (all of them when every one
-    /// was: then camped). `Some` is `grow_pursuit`'s answer while looking.
+    /// The hunt's `grounds` sweep: a sought creature in sight chased, the grounds left lately kept
+    /// marked while in or beside them, and `grounds` cut to those not left lately (all of them
+    /// when every one was), the nearest [`HUNT_GROUNDS`] when it holds more. `Some` is
+    /// `grow_pursuit`'s answer while chasing.
     pub(super) fn sweep(
         &mut self,
         title: &str,
@@ -67,33 +84,25 @@ impl Client {
         let cell = self.player.as_ref()?.cell;
         let here = cell >> 16;
         // Met anywhere, on a ground or between two: the fight rule only sees its own radius.
-        if let Some(answer) = self.chase_in_sight(title, creature, now) {
-            return Some(answer);
-        }
-        let outdoors = cell & 0xFFFF < 0x100;
-        // Stood in or beside, a landblock stays loaded (Landblock.cs:1111-1123): its wait for a
-        // fresh roll starts once the character is out of reach of it.
-        if outdoors {
-            let swept = &mut self.autoplay.growth.swept;
-            let near: Vec<u32> = swept
-                .iter()
-                .map(|(lb, _)| *lb)
-                .filter(|lb| is_beside(*lb, here))
-                .collect();
-            for lb in near {
-                swept.mark(lb, now);
+        if self.is_rotating_hunt() || grounds.iter().any(|(lb, _)| *lb == here) {
+            if let Some(answer) = self.chase_in_sight(title, creature, now) {
+                return Some(answer);
             }
+        }
+        // Stood in or, outdoors, beside, a landblock stays loaded (Landblock.cs:1111-1123): its
+        // wait for a fresh load starts once the character is out of reach of it. A dungeon keeps
+        // no neighbour (:1116).
+        let outdoors = cell & 0xFFFF < 0x100;
+        let swept = &mut self.autoplay.growth.swept;
+        let near: Vec<u32> = swept
+            .iter()
+            .map(|(lb, _)| *lb)
+            .filter(|lb| *lb == here || (outdoors && is_beside(*lb, here)))
+            .collect();
+        for lb in near {
+            swept.mark(lb, now);
         }
         self.autoplay.growth.swept.expire(now, SWEEP_AGAIN);
-        let stood = grounds.iter().find(|(lb, _)| *lb == here).map(|g| g.1);
-        if let (true, Some(at)) = (outdoors, stood) {
-            if self.autoplay.growth.swept.since(&here).is_none() {
-                if let Some(answer) = self.look_over(here, at, title, creature, now) {
-                    return Some(answer);
-                }
-            }
-        }
-        let me = self.my_position()?.truncate();
         let swept = &self.autoplay.growth.swept;
         let left: Vec<(u32, Place)> = grounds
             .iter()
@@ -103,12 +112,204 @@ impl Client {
         if !left.is_empty() {
             *grounds = left;
         }
-        grounds.sort_by(|a, b| {
-            let away = |p: &Place| p.at.truncate().distance(me);
+        if grounds.len() > HUNT_GROUNDS {
+            let me = self.my_position()?.truncate();
+            grounds.sort_by(|a, b| {
+                let away = |p: &Place| p.at.truncate().distance(me);
+                away(&a.1).total_cmp(&away(&b.1))
+            });
+            grounds.truncate(HUNT_GROUNDS);
+        }
+        None
+    }
+
+    /// Hunt the pursued ground `here` stands on for `creature`: its spawn spots gone round,
+    /// nearest first, or with none known looked over from its place; then, nothing found, the
+    /// soonest way to the item ([`Absent`]). `Some` is `grow_pursuit`'s answer; `None` once the
+    /// ground is left, for the next.
+    pub(super) fn hunt_ground(
+        &mut self,
+        title: &str,
+        creature: &str,
+        here: u32,
+        now: Instant,
+    ) -> Option<Option<bool>> {
+        let place = self.pursued_place(here)?;
+        if let Some(spot) = self.next_spawn_spot(here) {
+            if self.grow_travel(spot, super::super::hunt::ROOM_REACH) {
+                let st = &mut self.autoplay.growth;
+                st.bound = Some((here, spot.at.truncate(), creature.to_string()));
+                st.quiet_since = None;
+                let what = if spot.is_indoors() {
+                    "room"
+                } else {
+                    "spawn spot"
+                };
+                let why = format!("for {title}: to a {creature}'s {what}");
+                self.autoplay.say(Doing::Traveling, why);
+                return Some(Some(true));
+            }
+            // No way to it: passed over this time round.
+            self.autoplay.growth.spawns_walked.push(spot.cell);
+            return Some(Some(false));
+        }
+        let spots = self.hunts_spawn_rooms(here);
+        // A dungeon with no spawn of its creature known is the explorer's to walk.
+        if !spots && place.is_indoors() {
+            return Some(None);
+        }
+        if !spots {
+            if let Some(answer) = self.look_over(here, place, title, creature, now) {
+                return Some(answer);
+            }
+        }
+        let st = &self.autoplay.growth;
+        let staying = st.staying.filter(|(lb, until)| *lb == here && now < *until);
+        let choice = match staying {
+            Some(_) => Absent::Stay,
+            None => self.choose_when_absent(here, place, now),
+        };
+        match choice {
+            Absent::Stay => {
+                self.start_spawn_round(here);
+                let why = format!("for {title}: waiting for the {creature}");
+                self.autoplay.say(Doing::Idle, why);
+                Some(Some(true))
+            }
+            Absent::Rotate(spot) => {
+                self.leave_ground(here, now);
+                self.autoplay.growth.rotating = Some((here, spot));
+                self.wait_out_unload(title)
+            }
+            Absent::Move => {
+                self.leave_ground(here, now);
+                None
+            }
+        }
+    }
+
+    /// Leave the pursued ground `here`: not gone back to till it has unloaded, nothing cleared.
+    fn leave_ground(&mut self, here: u32, now: Instant) {
+        let st = &mut self.autoplay.growth;
+        st.swept.mark(here, now);
+        st.clearing = None;
+        st.staying = None;
+        st.looking = None;
+        st.spawns_walked.clear();
+    }
+
+    /// The soonest way to the item from the pursued ground `here` (at `place`) with its creature
+    /// absent: waiting, its unload waited out of reach, or the best of the nearest few others
+    /// by journey ([`super::pace::Ground::swept_secs`]). A wait is held a while.
+    fn choose_when_absent(&mut self, here: u32, place: Place, now: Instant) -> Absent {
+        // No pace known: hunted till the quest has what it asks.
+        let Some(ground) = self.pursued_pace(here).cloned() else {
+            self.autoplay.growth.staying = Some((here, now + STAY_MOST));
+            return Absent::Stay;
+        };
+        let me = self.my_position().map(|m| m.truncate());
+        let swept = &self.autoplay.growth.swept;
+        let mut others: Vec<(u32, Place)> = self
+            .autoplay
+            .growth
+            .pursuit_grounds
+            .iter()
+            .filter(|(lb, _)| *lb != here && swept.since(lb).is_none())
+            .copied()
+            .collect();
+        others.sort_by(|a, b| {
+            let away = |p: &Place| me.map_or(0.0, |m| p.at.truncate().distance(m));
             away(&a.1).total_cmp(&away(&b.1))
         });
-        grounds.truncate(HUNT_GROUNDS);
-        None
+        others.truncate(HUNT_GROUNDS);
+        let quests = self.travel.quests_done.clone();
+        let mut move_secs = f32::INFINITY;
+        for (lb, at) in others {
+            let Some(t) = self.journey_plan(at, &quests) else {
+                continue;
+            };
+            if let Some(g) = self.pursued_pace(lb) {
+                move_secs = move_secs.min(g.swept_secs(t.seconds));
+            }
+        }
+        let (stay, rotate) = (ground.pace.camp, ground.pace.rotate);
+        let spot = if rotate < stay.min(move_secs) {
+            self.out_of_reach(here, place)
+        } else {
+            None
+        };
+        let to = ac_world::quest_chain::place_name(place.cell);
+        tracing::info!(
+            "pursuit: nothing in {to}: wait {stay:.0} s, unload {rotate:.0} s, next {move_secs:.0} s"
+        );
+        match spot {
+            Some(spot) => Absent::Rotate(spot),
+            None if move_secs < stay => Absent::Move,
+            // Nowhere else and no waiting it out: a wait here is all there is.
+            None => {
+                let hold = Duration::from_secs_f32(stay.clamp(0.0, STAY_MOST.as_secs_f32()));
+                let until = now + hold.max(STAY_LEAST);
+                self.autoplay.growth.staying = Some((here, until));
+                Absent::Stay
+            }
+        }
+    }
+
+    /// A spot out of reach of landblock `lb` (its ground at `place`), so it unloads: a dungeon's
+    /// way in from outdoors, else the nearest landblock two away on land.
+    fn out_of_reach(&mut self, lb: u32, place: Place) -> Option<Place> {
+        if place.is_indoors() {
+            return ac_world::quest_chain::ways_in(lb)
+                .into_iter()
+                .find(|p| p.mouth_outdoors() && p.from_cell >> 16 != lb)
+                .map(|p| Place {
+                    at: p.from,
+                    cell: p.from_cell,
+                });
+        }
+        let me = self.my_position()?.truncate();
+        let (x, y) = ((lb >> 8) as i32, (lb & 0xFF) as i32);
+        let mut ring: Vec<glam::Vec2> = Vec::new();
+        for (dx, dy) in (-2..=2).flat_map(|dx| (-2..=2).map(move |dy| (dx, dy))) {
+            let (bx, by) = (x + dx, y + dy);
+            if dx.abs().max(dy.abs()) != 2 || !(0..0xFF).contains(&bx) || !(0..0xFF).contains(&by) {
+                continue;
+            }
+            let block = (bx as u32) << 8 | by as u32;
+            let middle = ac_world::landblock_origin(block << 16) + glam::Vec3::new(96.0, 96.0, 0.0);
+            ring.push(middle.truncate());
+        }
+        ring.sort_by(|a, b| a.distance(me).total_cmp(&b.distance(me)));
+        let on_land = ring.into_iter().find(|at| !self.is_at_sea(*at))?;
+        Some(Place::on_map(on_land))
+    }
+
+    /// A ground left to unload, waited out at a spot out of its reach till it may be gone back
+    /// to; `None` once it may (or none is being waited out).
+    pub(super) fn wait_out_unload(&mut self, title: &str) -> Option<Option<bool>> {
+        let (lb, spot) = self.autoplay.growth.rotating?;
+        if self.autoplay.growth.swept.since(&lb).is_none() {
+            self.autoplay.growth.rotating = None;
+            return None;
+        }
+        let to = self
+            .pursued_place(lb)
+            .map_or_else(String::new, |p| ac_world::quest_chain::place_name(p.cell));
+        let me = self.my_position()?;
+        if spot.at.truncate().distance(me.truncate()) > super::GROUND_REACH {
+            if self.grow_travel(spot, super::GROUND_REACH * 0.5) {
+                let why = format!("for {title}: out of reach of {to} for it to unload");
+                self.autoplay.say(Doing::Traveling, why);
+                return Some(Some(true));
+            }
+            // No way out of its reach: gone back to at once.
+            self.autoplay.growth.rotating = None;
+            self.autoplay.growth.swept.forget(&lb);
+            return None;
+        }
+        let why = format!("for {title}: waiting for {to} to unload");
+        self.autoplay.say(Doing::Idle, why);
+        Some(Some(true))
     }
 
     /// A sought creature in sight walked to (or fought, `Some(None)`); `None` when none is. A
@@ -139,6 +340,7 @@ impl Client {
         }
         let it = seen?;
         self.autoplay.growth.looking = None;
+        self.autoplay.growth.rotating = None;
         let radius = self.autoplay.config.fight.radius;
         if it.distance(me) > radius * 0.8 && self.grow_travel(self.place_at(it), radius * 0.5) {
             let why = format!("for {title}: to the {creature} in sight");
@@ -148,8 +350,7 @@ impl Client {
         Some(None)
     }
 
-    /// Look ground `here` over from its place `at`: none of its sought creatures in sight (asked
-    /// first, `chase_in_sight`) after [`LOOK_FOR`], it is marked swept and `None` says on.
+    /// Look ground `here` over from its place `at` for [`LOOK_FOR`]; `None` once looked over.
     fn look_over(
         &mut self,
         here: u32,
@@ -160,17 +361,16 @@ impl Client {
     ) -> Option<Option<bool>> {
         let me = self.my_position()?;
         let to = ac_world::quest_chain::place_name(at.cell);
-        if at.at.truncate().distance(me.truncate()) > LOOK_FROM {
-            if self.grow_travel(at, LOOK_FROM * 0.5) {
-                let why = format!("for {title}: to look for {creature} in {to}");
-                self.autoplay.say(Doing::Traveling, why);
-                return Some(Some(true));
-            }
-            self.autoplay.growth.swept.mark(here, now);
-            return None;
-        }
         let since = match self.autoplay.growth.looking {
             Some((lb, t)) if lb == here => t,
+            _ if at.at.truncate().distance(me.truncate()) > LOOK_FROM => {
+                if self.grow_travel(at, LOOK_FROM * 0.5) {
+                    let why = format!("for {title}: to look for {creature} in {to}");
+                    self.autoplay.say(Doing::Traveling, why);
+                    return Some(Some(true));
+                }
+                return None;
+            }
             _ => {
                 self.autoplay.growth.looking = Some((here, now));
                 now
@@ -181,9 +381,6 @@ impl Client {
             self.autoplay.say(Doing::Idle, why);
             return Some(Some(true));
         }
-        tracing::info!("pursuit: no {creature} in {to}: on to the next");
-        self.autoplay.growth.swept.mark(here, now);
-        self.autoplay.growth.looking = None;
         None
     }
 }

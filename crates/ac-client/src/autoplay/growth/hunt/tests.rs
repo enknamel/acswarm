@@ -756,7 +756,9 @@ fn on_the_pursued_ground_the_character_stays() {
     let now = Instant::now();
     c.autoplay.growth.quiet_since = Some(now - Duration::from_secs(3_600));
     c.autoplay.growth.roams = u32::MAX;
-    assert!(!c.grow_hunt(now, &cfg), "{}", c.autoplay.status);
+    // Looked over, then waited at: with no spawn spot known its place is stood at.
+    c.grow_hunt(now, &cfg);
+    c.grow_hunt(now + Duration::from_secs(16), &cfg);
     assert_eq!(c.autoplay.growth.hunting_at, Some(holtburg >> 16));
     assert_eq!(
         c.autoplay.growth.bound_landblock(),

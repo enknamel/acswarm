@@ -6,6 +6,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 
+use ac_world::quest_chain::ROTATE_SECS;
 use ac_world::quests::SpawnRate;
 
 use crate::autoplay::fight::kill::Wand;
@@ -91,6 +92,29 @@ pub(crate) fn ground_pace(droppers: &[Dropper], round: f32) -> Option<Pace> {
     })
 }
 
+/// A pursued hunt's ground: the droppers on it this character can kill, and its pace.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Ground {
+    pub(crate) droppers: Vec<Dropper>,
+    /// With [`ROTATE_SECS`] a round: what the grounds are ranked by.
+    pub(crate) pace: Pace,
+}
+
+impl Ground {
+    /// Its droppers' pace; `None` when none of them comes.
+    pub(crate) fn of(droppers: Vec<Dropper>) -> Option<Ground> {
+        let pace = ground_pace(&droppers, ROTATE_SECS)?;
+        Some(Ground { droppers, pace })
+    }
+
+    /// Seconds to the item come to fresh at the end of a `journey`, swept between it and grounds
+    /// like it whenever camping is slower: the walk to the next is the round, no unload waited out.
+    pub(crate) fn swept_secs(&self, journey: f32) -> f32 {
+        let swept = ground_pace(&self.droppers, journey.max(1.0));
+        journey + swept.map_or(f32::INFINITY, |p| p.camp.min(p.rotate))
+    }
+}
+
 /// Seconds a kill of each creature takes this character, by class, worked out once each; `None`
 /// for one it cannot kill reliably: past a loot tier above the highest it killed (`proven_tier`),
 /// or a caster's spells cannot hurt it (immune, none ready).
@@ -160,7 +184,6 @@ impl Client {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ac_world::quest_chain::ROTATE_SECS;
 
     fn dropper(chance: f32, kill: f32, load: f32, per_hour: f32) -> Dropper {
         Dropper {
@@ -193,6 +216,9 @@ mod tests {
             ground_pace(&[dropper(0.8, 20.0, 0.0, 0.0)], ROTATE_SECS),
             None
         );
+        // Swept with the next a minute off, it comes sooner than waiting out an unload here.
+        let g = Ground::of(vec![dropper(0.8, 20.0, 0.2, 0.0)]).unwrap();
+        assert!(g.swept_secs(60.0) < p.rotate, "{}", g.swept_secs(60.0));
     }
 
     #[test]

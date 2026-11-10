@@ -188,10 +188,10 @@ impl Client {
         if let Some(claimed) = self.stand_by_sought_body(now) {
             return claimed;
         }
-        // A rare hunt's creature met on the road to its next ground: grow_pursuit is not asked
-        // while the walk runs (a_rare_spawn_seen_on_the_way_between_grounds_is_gone_to).
+        // A hunt's creature met on the road to its next ground: grow_pursuit is not asked while
+        // the walk runs (a_rare_spawn_seen_on_the_way_between_grounds_is_gone_to).
         if self.autoplay.growth.bound.is_some() {
-            if let Some(claimed) = self.chase_rare_on_road(now) {
+            if let Some(claimed) = self.chase_sought_on_road(now) {
                 return claimed;
             }
         }

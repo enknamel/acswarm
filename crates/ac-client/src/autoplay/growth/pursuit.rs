@@ -314,8 +314,8 @@ pub(crate) struct Pursued {
     pub(crate) lines: Vec<PursuitLine>,
     /// The working hunt's grounds a journey may end at, best first: landblock and place.
     pub(crate) grounds: Vec<(u32, Place)>,
-    /// How soon each of `grounds` gives the item there, in its order.
-    pub(crate) paces: Vec<pace::Pace>,
+    /// Each of `grounds`' droppers and pace there, in its order.
+    pub(crate) paces: Vec<pace::Ground>,
     /// The working hunt's creatures, by weenie class: fought before their namesakes.
     pub(crate) sought: Vec<u32>,
 }
@@ -459,7 +459,7 @@ fn line_reads(line: &QuestLine) -> Option<(u32, String, u32)> {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct Hunting {
     grounds: Vec<(u32, Place)>,
-    paces: Vec<pace::Pace>,
+    paces: Vec<pace::Ground>,
     sought: Vec<u32>,
 }
 
@@ -676,14 +676,15 @@ impl Ask<'_> {
                 None => blocks.push((g, place, vec![d])),
             }
         }
-        let round = ac_world::quest_chain::ROTATE_SECS;
-        let mut paced: Vec<(&SourceGround, Place, pace::Pace)> = blocks
+        let mut paced: Vec<(&SourceGround, Place, pace::Ground)> = blocks
             .into_iter()
-            .filter_map(|(g, place, ds)| Some((g, place, pace::ground_pace(&ds, round)?)))
+            .filter_map(|(g, place, ds)| Some((g, place, pace::Ground::of(ds)?)))
             .collect();
-        paced.sort_by(|a, b| a.2.best.total_cmp(&b.2.best));
+        paced.sort_by(|a, b| a.2.pace.best.total_cmp(&b.2.pace.best));
         // A hunt whose best ground comes only by rotating holds them all to sweep, nearest first.
-        let rotating = paced.first().is_some_and(|p| p.2.camp > p.2.rotate);
+        let rotating = paced
+            .first()
+            .is_some_and(|p| p.2.pace.camp > p.2.pace.rotate);
         paced.truncate(if rotating {
             SWEEP_GROUNDS
         } else {
@@ -708,7 +709,7 @@ impl Ask<'_> {
             };
             let hunting = Hunting {
                 grounds: paced.iter().map(|p| (p.0.landblock, p.1)).collect(),
-                paces: paced.iter().map(|p| p.2).collect(),
+                paces: paced.iter().map(|p| p.2.clone()).collect(),
                 sought,
             };
             return (step, Some(hunting));
@@ -1039,12 +1040,9 @@ impl Client {
         Some(true)
     }
 
-    /// A rare hunt's creature in sight on the road between its grounds: gone to, the ground walk
+    /// A pursued hunt's creature in sight on the road between its grounds: gone to, the ground walk
     /// let go; `Some` is the hunt row's answer (false: left to the fight rule, in its reach).
-    pub(super) fn chase_rare_on_road(&mut self, now: Instant) -> Option<bool> {
-        if !self.is_rare_hunt() {
-            return None;
-        }
+    pub(super) fn chase_sought_on_road(&mut self, now: Instant) -> Option<bool> {
         let line = self.working_pursuit()?.clone();
         let PursuitStep::Hunt { creature, .. } = &line.step else {
             return None;
@@ -1080,13 +1078,16 @@ impl Client {
             PursuitStep::Hunt { creature, .. } => {
                 let here = self.player.as_ref()?.cell >> 16;
                 let mut grounds = self.autoplay.growth.pursuit_grounds.clone();
-                if self.is_rare_hunt() {
-                    if let Some(answer) = self.sweep(&line.title, creature, &mut grounds, now) {
-                        return answer;
-                    }
+                if let Some(answer) = self.sweep(&line.title, creature, &mut grounds, now) {
+                    return answer;
+                }
+                if let Some(answer) = self.wait_out_unload(&line.title) {
+                    return answer;
                 }
                 let camped = grounds.iter().any(|(lb, _)| *lb == here);
-                self.autoplay.growth.clearing = camped.then_some(here);
+                // Cleared where camping it beats leaving it: what holds its slots makes way.
+                let clears = camped && self.is_camping_ground(here);
+                self.autoplay.growth.clearing = clears.then_some(here);
                 if camped {
                     // There: the gem that was the way is bought no more.
                     let st = &mut self.autoplay.growth;
@@ -1095,29 +1096,12 @@ impl Client {
                     if st.pursuit_gems.len() != before {
                         self.quest_board_at = None;
                     }
-                    // In its dungeon the creature is hunted where it spawns: its rooms gone round,
-                    // nearest first, and the rest of the dungeon never explored.
                     self.autoplay.growth.hunting_at = Some(here);
-                    let Some(room) = self.next_spawn_room(here) else {
-                        // Its one room stood in (the key Putrid Moarsman's): waited in.
-                        if self.hunts_spawn_rooms(here) {
-                            let why = format!("for {}: waiting for the {creature}", line.title);
-                            self.autoplay.say(Doing::Idle, why);
-                            return Some(true);
-                        }
-                        return None;
-                    };
-                    if self.grow_travel(room, super::hunt::ROOM_REACH) {
-                        let st = &mut self.autoplay.growth;
-                        st.bound = Some((here, room.at.truncate(), creature.clone()));
-                        st.quiet_since = None;
-                        let why = format!("for {}: to a {creature}'s room", line.title);
-                        self.autoplay.say(Doing::Traveling, why);
-                        return Some(true);
+                    if let Some(answer) = self.hunt_ground(&line.title, creature, here, now) {
+                        return answer;
                     }
-                    // No way into it: passed over this time round.
-                    self.autoplay.growth.spawns_walked.push(room.cell);
-                    return Some(false);
+                    // Left for the next: it is gone back to once it has unloaded.
+                    grounds.retain(|(lb, _)| *lb != here);
                 }
                 let every = grounds.clone();
                 // The item soonest first: the journey there and the seconds there. The most spawns
@@ -1125,7 +1109,7 @@ impl Client {
                 let quests = self.travel.quests_done.clone();
                 let mut secs: Vec<(f32, (u32, Place))> = Vec::new();
                 for g in grounds.drain(..) {
-                    let there = self.pursued_pace(g.0).map_or(0.0, |p| p.best);
+                    let there = self.pursued_pace(g.0).map_or(0.0, |p| p.pace.best);
                     let t = self
                         .journey_plan(g.1, &quests)
                         .map_or(f32::MAX, |t| t.seconds + there);
@@ -1213,10 +1197,10 @@ impl Client {
     }
 
     /// How soon the pursued ground of `lb` gives the item there, when `lb` is one.
-    pub(crate) fn pursued_pace(&self, lb: u32) -> Option<pace::Pace> {
+    pub(crate) fn pursued_pace(&self, lb: u32) -> Option<&pace::Ground> {
         let st = &self.autoplay.growth;
         let i = st.pursuit_grounds.iter().position(|(l, _)| *l == lb)?;
-        st.pursuit_paces.get(i).copied()
+        st.pursuit_paces.get(i)
     }
 
     /// Where a journey to the pursued ground of `lb` ends, when `lb` is one.
@@ -1248,14 +1232,14 @@ impl Client {
             .collect()
     }
 
-    /// The nearest of the pursuit's spawn rooms in the dungeon `lb` not gone round yet, the one
-    /// stood in counted; all gone round, the round starts again. `None` with none known.
-    fn next_spawn_room(&mut self, lb: u32) -> Option<Place> {
+    /// The nearest of the pursuit's spawn spots in `lb` not gone round yet, the one stood at
+    /// counted; `None` once the round is done, or with none known.
+    pub(super) fn next_spawn_spot(&mut self, lb: u32) -> Option<Place> {
         let me = self.my_position()?;
-        let rooms = self.spawn_rooms(lb);
+        let spots = self.spawn_rooms(lb);
         let walked = &mut self.autoplay.growth.spawns_walked;
         walked.retain(|c| *c >> 16 == lb);
-        for r in rooms
+        for r in spots
             .iter()
             .filter(|r| r.at.distance(me) <= super::hunt::ROOM_HELD)
         {
@@ -1263,17 +1247,27 @@ impl Client {
                 walked.push(r.cell);
             }
         }
-        if rooms.iter().all(|r| walked.contains(&r.cell)) {
-            walked.retain(|c| {
-                rooms
-                    .iter()
-                    .any(|r| r.cell == *c && r.at.distance(me) <= super::hunt::ROOM_HELD)
-            });
-        }
-        rooms
+        spots
             .into_iter()
             .filter(|r| !walked.contains(&r.cell))
             .min_by(|a, b| a.at.distance(me).total_cmp(&b.at.distance(me)))
+    }
+
+    /// Start the round of `lb`'s spawn spots again, the one stood at counted as gone round.
+    pub(super) fn start_spawn_round(&mut self, lb: u32) {
+        let Some(me) = self.my_position() else {
+            return;
+        };
+        let near: Vec<u32> = self
+            .spawn_rooms(lb)
+            .iter()
+            .filter(|r| r.at.distance(me) <= super::hunt::ROOM_HELD)
+            .map(|r| r.cell)
+            .collect();
+        self.autoplay
+            .growth
+            .spawns_walked
+            .retain(|c| near.contains(c));
     }
 
     /// How near the ground on `lb` a journey there ends: in a pursued creature's own room, else

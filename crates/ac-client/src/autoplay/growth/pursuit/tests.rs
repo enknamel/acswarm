@@ -702,7 +702,7 @@ fn a_kill_task_is_hunted_on_the_ground_reached_soonest_not_the_one_with_most_spa
         .clone()
         .into_iter()
         .filter_map(|(lb, at)| {
-            let there = c.pursued_pace(lb)?.best;
+            let there = c.pursued_pace(lb)?.pace.best;
             c.journey_plan(at, &quests).map(|t| (t.seconds + there, lb))
         })
         .min_by(|a, b| a.0.total_cmp(&b.0))
@@ -2506,22 +2506,59 @@ fn at_a_mire_witch_ground(now: std::time::Instant) -> (Client, u32) {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
-fn a_rare_spawn_is_looked_for_a_while_then_the_next_ground_is_swept() {
-    // The Mosswart Mire-Witch's camp is 0.49% of a shore generator's rolls: one landblock waited
-    // in never sees her, so each is looked over and left for the nearest not looked over lately.
+fn a_mire_witch_shore_is_looked_over_then_camped_and_cleared() {
+    // The Mosswart Mire-Witch's camp is 0.49% of a shore generator's rolls, but a shore cleared
+    // rolls it about three times an hour: looked over, then waited at, everything on it fought.
     let now = std::time::Instant::now();
     let (mut c, here) = at_a_mire_witch_ground(now);
-    assert!(c.is_rare_hunt());
-    // Her shore grounds held soonest first at the ground: cleared, a shore rolls her camp about
-    // three times an hour, so the six soonest are held, no longer all 64 to sweep.
-    let held = c.autoplay.growth.pursuit_grounds.clone();
-    assert!(held.len() > 1, "{held:?}");
+    assert!(!c.is_rotating_hunt());
     assert_eq!(c.grow_pursuit(now), Some(true), "looked over");
     assert_eq!(c.autoplay.growth.looking, Some((here, now)));
-    assert!(!c.is_clearing_ground(), "a sweep clears nothing");
+    assert!(
+        c.is_clearing_ground(),
+        "a camp that beats leaving is cleared"
+    );
+    let later = now + std::time::Duration::from_secs(16);
+    assert_eq!(c.grow_pursuit(later), Some(true), "waited at");
+    assert!(c.autoplay.growth.swept.since(&here).is_none(), "left");
+    assert!(c.autoplay.growth.staying.is_some_and(|(lb, _)| lb == here));
+    assert!(
+        c.autoplay.status.contains("waiting for the"),
+        "{}",
+        c.autoplay.status
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn an_empty_shore_ground_is_left_rather_than_camped() {
+    // A shore whose generators never make her, cleared or not, and next to none at load: once
+    // looked over it is left for the next ground, not waited at.
+    let now = std::time::Instant::now();
+    let (mut c, here) = at_a_mire_witch_ground(now);
+    let i = c
+        .autoplay
+        .growth
+        .pursuit_grounds
+        .iter()
+        .position(|g| g.0 == here)
+        .unwrap();
+    let empty = pace::Dropper {
+        chance: 1.0,
+        kill: 10.0,
+        rate: ac_world::quests::SpawnRate {
+            load: 0.01,
+            per_hour: 0.0,
+            others: 0.0,
+        },
+    };
+    c.autoplay.growth.pursuit_paces[i] = pace::Ground::of(vec![empty]).unwrap();
+    assert_eq!(c.grow_pursuit(now), Some(true), "looked over");
+    assert!(!c.is_clearing_ground(), "a ground left is not cleared");
     let later = now + std::time::Duration::from_secs(16);
     assert_eq!(c.grow_pursuit(later), Some(true), "on to the next");
     assert!(c.autoplay.growth.swept.since(&here).is_some());
+    assert!(c.autoplay.growth.staying.is_none());
     let next = c.autoplay.growth.bound_landblock();
     assert!(next.is_some_and(|lb| lb != here), "{next:?}");
 }
@@ -2684,7 +2721,7 @@ fn a_camped_ground_is_cleared_of_critters_too() {
     crate::testkit::stand(&mut c, tusker_barracks, glam::Vec3::new(72.0, -123.0, -1.2));
     let now = std::time::Instant::now();
     again(&mut c, now);
-    assert!(!c.is_rare_hunt());
+    assert!(!c.is_rotating_hunt());
     assert!(!c.is_clearing_ground());
     c.grow_pursuit(now);
     assert!(c.is_clearing_ground());
@@ -2732,7 +2769,7 @@ fn a_near_dungeon_of_low_chance_sure_spawns_beats_a_far_high_chance_ground() {
     let grounds = c.autoplay.growth.pursuit_grounds.clone();
     let mut totals: Vec<(f32, u32)> = Vec::new();
     for (lb, at) in grounds {
-        let there = c.pursued_pace(lb).expect("a pace").best;
+        let there = c.pursued_pace(lb).expect("a pace").pace.best;
         if let Some(t) = c.journey_plan(at, &quests) {
             println!(
                 "{lb:04X}: {:.0} s there + {:.0} s on the road",
@@ -2751,4 +2788,62 @@ fn a_near_dungeon_of_low_chance_sure_spawns_beats_a_far_high_chance_ground() {
     assert!(chakron.is_none_or(|c| c.0 > totals[0].0), "{totals:?}");
     assert_eq!(c.grow_pursuit(now), Some(true));
     assert_eq!(c.autoplay.growth.bound_landblock(), Some(first));
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn an_attacker_at_a_clearing_ground_is_fought() {
+    // At the Tusker Barracks a pursued kill task walked past everything not sought, what hit it
+    // too, so clearing the ground did nothing: there, nothing is walked past.
+    let tusker_barracks = 0x5A48_01C8;
+    let mut c = mage_pursuing("tuskergkillcount", "chained-quests");
+    c.quest_log.note_taken("tuskergkillcount");
+    crate::testkit::stand(&mut c, tusker_barracks, glam::Vec3::new(72.0, -123.0, -1.2));
+    let now = std::time::Instant::now();
+    again(&mut c, now);
+    let mite = crate::testkit::creature(0x5000_0903, "Mite");
+    let cfg = c.autoplay.config.fight.clone();
+    assert!(c.passing_by(&mite, &cfg), "not yet clearing: walked past");
+    c.grow_pursuit(now);
+    assert!(c.is_clearing_ground());
+    c.autoplay.attacked_by("Mite", now);
+    assert!(!c.passing_by(&mite, &cfg), "walked past at the ground");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_ground_left_empty_is_rotated_when_unload_is_sooner_than_respawn() {
+    // A ground whose one dropper stands there at load and never comes back while it is loaded,
+    // the rest left lately: walked out of its reach to unload, and waited out there.
+    let now = std::time::Instant::now();
+    let (mut c, here) = at_a_mire_witch_ground(now);
+    let grounds = c.autoplay.growth.pursuit_grounds.clone();
+    for (lb, _) in grounds.iter().filter(|g| g.0 != here) {
+        c.autoplay.growth.swept.mark(*lb, now);
+    }
+    let i = grounds.iter().position(|g| g.0 == here).unwrap();
+    let at_load = pace::Dropper {
+        chance: 1.0,
+        kill: 10.0,
+        rate: ac_world::quests::SpawnRate {
+            load: 1.0,
+            per_hour: 0.0,
+            others: 0.0,
+        },
+    };
+    c.autoplay.growth.pursuit_paces[i] = pace::Ground::of(vec![at_load]).unwrap();
+    assert_eq!(c.grow_pursuit(now), Some(true), "looked over");
+    let later = now + std::time::Duration::from_secs(16);
+    assert_eq!(c.grow_pursuit(later), Some(true), "out of its reach");
+    let (lb, spot) = c.autoplay.growth.rotating.expect("rotating");
+    assert_eq!(lb, here);
+    let block = |at: glam::Vec3| ((at.x / 192.0).floor() as i32, (at.y / 192.0).floor() as i32);
+    let (sx, sy) = block(spot.at);
+    let (hx, hy) = ((here >> 8) as i32, (here & 0xFF) as i32);
+    assert_eq!((sx - hx).abs().max((sy - hy).abs()), 2, "{spot:?}");
+    assert!(
+        c.autoplay.status.contains("unload"),
+        "{}",
+        c.autoplay.status
+    );
 }

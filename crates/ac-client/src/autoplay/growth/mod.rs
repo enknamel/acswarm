@@ -226,8 +226,8 @@ pub struct State {
     pursuit_held: std::collections::BTreeMap<String, (String, Instant)>,
     /// The working pursued hunt's grounds, best first: landblock and where a journey ends.
     pursuit_grounds: Vec<(u32, ac_world::Place)>,
-    /// How soon each of `pursuit_grounds` gives the item there, in its order.
-    pursuit_paces: Vec<pursuit::pace::Pace>,
+    /// Each of `pursuit_grounds`' droppers and pace there, in its order.
+    pursuit_paces: Vec<pursuit::pace::Ground>,
     /// Gems pursued quests buy, each the only way to its ground (see `pursuit::gem_way`).
     pursuit_gems: Vec<pursuit::GemWanted>,
     /// Whether the working pursuit's ground was reached by a journey from the landblock stood in,
@@ -244,10 +244,15 @@ pub struct State {
     pub(crate) unlock_tries: u32,
     /// Chests this character unlocked, by weenie class, and when: opened without a key a while.
     pub(crate) chests_unlocked: Recent<u32>,
-    /// A rare hunt's landblocks looked over, and when (`pursuit::sweep`).
+    /// Pursued grounds left for the next or to unload, and when the character was last in or
+    /// beside each (`pursuit::sweep`).
     pub(crate) swept: Recent<u32>,
-    /// The rare hunt's landblock being looked over, and since when.
+    /// The pursued ground with no spawn spot known being looked over, and since when.
     pub(crate) looking: Option<(u32, Instant)>,
+    /// The pursued ground waited at with its creature absent, and till when before it is weighed again.
+    pub(crate) staying: Option<(u32, Instant)>,
+    /// The pursued ground left to unload, and the spot out of its reach it is waited out at.
+    pub(crate) rotating: Option<(u32, ac_world::Place)>,
     /// The pursued ground camped on: everything on it is fought (`Client::is_clearing_ground`).
     pub(crate) clearing: Option<u32>,
     /// Where and when a pursued hunt's creature fell: its body is stood by till emptied.
