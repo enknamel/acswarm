@@ -268,13 +268,16 @@ class Gen:
     profile[0]'s figures (WorldObject_Generators.cs:589-625)."""
 
     def __init__(self, sp, wcid, links=(), parent=None):
-        gp = sp.genprops.get(wcid, (1, 0.0, 0, 0, 0, 0))
+        gp = sp.genprops.get(wcid, (1, 0.0, 0, 0, 0, "0"))
         self.wcid, self.parent, self.alive, self.powering = wcid, parent, True, True
         kind, self.regen, self.init, self.max, self.ad, event = gp
         self.container = kind in GEN_CONTAINERS
         # Started with no regeneration, only a container (not a creature) or an event generator
         # fills at once (WorldObject_Generators.cs:487-491); any other waits on a use or an emote.
-        self.fills = self.regen > 0 or self.container or event
+        self.fills = self.regen > 0 or self.container or event == "1"
+        # One whose event the table has and not On is disabled (WorldObject_Generators.cs:398-460).
+        if event == "off":
+            self.regen, self.init, self.max, self.fills = 0.0, 0, 0, False
         profs = sp.profiles.get(wcid, [])
         delay0 = profs[0]["delay"] if profs else 0.0
         # Contain, Wield and Shop put nothing in the world (RegenLocationType.cs:12-16).
@@ -441,7 +444,7 @@ class Spawning:
         self.genprops = {}
         for wcid, kind, regen, init, mx, ad, event in rows(dump, "genprops"):
             self.genprops[int(wcid)] = (int(kind), num(regen), int(init), int(mx), int(ad),
-                                        event == "1")
+                                        event)
         # Creatures, by whether one can be attacked (PropertyBool 19, default true).
         self.attackable = {int(w): a != "0" for w, a in rows(dump, "crit")}
         links, children = defaultdict(list), set()
