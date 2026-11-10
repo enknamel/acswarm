@@ -43,19 +43,12 @@
 //! creature put bolts across each other all afternoon, and a fifth of
 //! one run's dodges were for a teammate's spell.
 //!
-//! Those are demoted rather than dropped, because neither half of the
-//! obvious reading is true. A fellow's bolt cannot hurt us -- ACE
-//! refuses the damage in `Player.CheckPKStatusVsTarget`, where a
-//! non-PK on either side ends it -- but it is not harmless: the
-//! collision is resolved first (`SpellProjectile.OnCollideObject` calls
-//! `ProjectileImpact` before it asks about PK), so standing in a
-//! fellow's line destroys his spell and nobody is any better off.
-//! Stepping aside genuinely saves it. What is wrong is the price: a
-//! dodge takes the legs and the tick with them, ahead of everything
-//! but the healing, and nothing that cannot hurt us is worth an
-//! interrupted cast or a broken swing. So [`can_hurt_us`] is read at
-//! intake and a fellow's bolt is stepped out of the way of only when
-//! the moment is going spare (see `Client::free_to_step_aside`).
+//! Those are never dodged, nor a summoned creature's of ours or a fellow's. A fellow's bolt
+//! cannot hurt us -- ACE refuses the damage in `Player.CheckPKStatusVsTarget`, where a non-PK
+//! on either side ends it -- though standing in its line destroys it (`SpellProjectile.
+//! OnCollideObject` calls `ProjectileImpact` before it asks about PK). A step for it took the
+//! legs from a cast or a swing; Blargerton stepped from his own golem's Flame Bolt. So
+//! [`can_hurt_us`] is read at intake and only what can hurt us is dodged.
 //!
 //! A projectile is dodged whether or not it could reach us: the wire
 //! names its weenie, not its spell, and the DAT spell table carries no
@@ -204,12 +197,6 @@ pub struct State {
     pub pulling: Option<(u32, Instant, Option<Place>)>,
     /// Each door Setup's box in its own frame (see `Client::doors_near`).
     pub door_boxes: HashMap<u32, Option<(Vec3, Vec3)>>,
-    /// The sidestep in hand is a courtesy to a fellow rather than a
-    /// dodge: it saves his spell and nothing of ours, so it is given up
-    /// the moment there is something better to do (see
-    /// `Client::free_to_step_aside`). Read only while `dodge_to` is
-    /// set, and written afresh with every step.
-    pub courtesy: bool,
 }
 
 /// A projectile leaving this long after a cast is not taken for it.
@@ -1201,21 +1188,9 @@ impl Client {
                 },
             );
         }
-        // A sidestep under way is kept up, barring two things.
+        // A sidestep under way is kept up, unless its end is itself in the path of something that
+        // can hurt us (only that: a fellow's bolt crossing the spot is let land).
         if let Some((goal, _)) = self.dodge_to {
-            // It was only a courtesy to a fellow and the moment it was
-            // taken in has stopped being spare: a heal that has come
-            // due, or a cast gone out, must not wait out somebody
-            // else's bolt.
-            if self.dodge.courtesy && !self.free_to_step_aside(now) {
-                self.dodge_to = None;
-                self.dodge.courtesy = false;
-                return false;
-            }
-            // Or its end is itself in the path of something that can
-            // hurt us. Only of something that can: starting again
-            // because a fellow's bolt crosses the spot would be the
-            // same mistake one level down.
             let in_the_way = self.dodge.tracks.values().any(|t| {
                 t.can_hurt
                     && threat(t.at(now), t.velocity, t.gravity, goal, MISS_BY)
@@ -1229,16 +1204,8 @@ impl Client {
         if self.dodge.tracks.is_empty() {
             return false;
         }
-        // The soonest projectile on its way to us that can hurt us --
-        // and only failing that, and only with a moment to spare, the
-        // soonest of a fellow's. A spell that would land on us always
-        // outranks one that would merely die on us, however much
-        // sooner the fellow's arrives.
-        let soonest = self.soonest(now, me, true).or_else(|| {
-            self.free_to_step_aside(now)
-                .then(|| self.soonest(now, me, false))
-                .flatten()
-        });
+        // The soonest projectile on its way to us that can hurt us.
+        let soonest = self.soonest(now, me);
         let Some((guid, eta)) = soonest else {
             return false;
         };
@@ -1309,27 +1276,17 @@ impl Client {
             goal.y
         );
         self.dodge_to = Some((goal, now + LASTS));
-        self.dodge.courtesy = !track.can_hurt;
         self.steering.reset();
-        // Said differently for a fellow's spell, so that a run's log
-        // tells a reflex that kept the character alive from a courtesy
-        // that only saved a teammate's cast.
-        let doing = match (track.can_hurt, caster.as_ref()) {
-            (true, _) => format!("dodging {name}{from}"),
-            (false, Some(c)) => format!("stepping out of {c}'s way"),
-            (false, None) => format!("stepping out of the way of {name}"),
-        };
-        self.autoplay.say(Doing::Dodging, doing);
+        self.autoplay
+            .say(Doing::Dodging, format!("dodging {name}{from}"));
         true
     }
 
-    /// The soonest tracked projectile on its way to `me` within
-    /// [`HORIZON`], among those that `can_hurt` us or (false) among
-    /// those that cannot.
-    fn soonest(&self, now: Instant, me: Vec3, can_hurt: bool) -> Option<(u32, f32)> {
+    /// The soonest tracked projectile that can hurt us on its way to `me` within [`HORIZON`].
+    fn soonest(&self, now: Instant, me: Vec3) -> Option<(u32, f32)> {
         let mut best: Option<(u32, f32)> = None;
         for (g, t) in &self.dodge.tracks {
-            if t.dodged || t.can_hurt != can_hurt {
+            if t.dodged || !t.can_hurt {
                 continue;
             }
             if let Some(eta) = threat(t.at(now), t.velocity, t.gravity, me, MISS_BY) {
@@ -1339,22 +1296,6 @@ impl Client {
             }
         }
         best
-    }
-
-    /// Whether there is a moment going spare for a projectile that
-    /// cannot hurt this character.
-    ///
-    /// A dodge takes the legs for [`LASTS`] and claims the tick, ahead
-    /// of the healing and of everything else the character might do. A
-    /// spell about to land on it is worth that. A fellow's, which can
-    /// only ever cost him his own spell, is worth the step and nothing
-    /// more -- so it waits for a tick with no cast in the air, no swing
-    /// unanswered and no wound waiting on a heal, and otherwise is left
-    /// to land.
-    fn free_to_step_aside(&self, now: Instant) -> bool {
-        !self.autoplay.cast_in_flight(now)
-            && !self.mid_attack()
-            && self.health_fraction() >= self.autoplay.config.survive.heal_below
     }
 
     /// The creature that seems to have fired a projectile that appeared
@@ -1387,11 +1328,20 @@ impl Client {
 
     /// Whether a projectile fired by `caster` could hurt this character
     /// (see [`can_hurt_us`]). One whose caster is not known is taken for
-    /// a threat: the guess is the doubtful part, not the rule.
+    /// a threat: the guess is the doubtful part, not the rule. A creature
+    /// summoned by us or a fellow, or a fellow, is no threat.
     fn can_be_hurt_by(&self, caster: Option<u32>) -> bool {
         let Some(caster) = caster.and_then(|g| self.world.objects.get(&g)) else {
             return true;
         };
+        let ours = |g: u32| {
+            g != 0
+                && (self.world.player_guid == Some(g)
+                    || self.autoplay.team.mates.iter().any(|m| m.guid == g))
+        };
+        if ours(caster.guid) || ours(caster.pet_owner) {
+            return false;
+        }
         let mine = self.world.player().map_or(0, |o| o.object_desc_flags);
         can_hurt_us(caster.object_desc_flags, mine)
     }
@@ -1871,7 +1821,7 @@ mod tests {
 
     #[test]
     #[ignore = "needs AC_DATA_DIR"]
-    fn a_fellows_bolt_is_known_at_intake_and_never_takes_the_tick_from_a_cast() {
+    fn a_fellows_bolt_is_known_at_intake_and_never_dodged() {
         let mut c = in_the_field();
         let me = c.player.as_ref().unwrap().world_position();
         let now = Instant::now();
@@ -1889,33 +1839,29 @@ mod tests {
             ),
         );
         c.world.objects.insert(shot, bolt(shot, stands, me, 15.0));
-
-        // A cast of our own in the air: the bolt is taken up, read for
-        // a fellow's, and left to land. It cannot hurt us, and no spell
-        // that cannot hurt us is worth a cancelled cast.
-        c.autoplay.cast_sent = Some(now);
-        assert!(
-            !c.autoplay_dodge(now),
-            "a fellow's bolt interrupted our own cast"
-        );
+        // It cannot hurt us: left to land, a cast in the air or none.
+        assert!(!c.autoplay_dodge(now), "stepped for a fellow's bolt");
         let track = c.dodge.tracks[&shot];
         assert_eq!(track.from, Some(fellow), "the caster guess");
         assert!(!track.can_hurt);
         assert_eq!(c.dodge_to, None);
+    }
 
-        // The cast answered for, the same bolt is worth the step: it
-        // dies on us otherwise, and the fellow has spent his mana for
-        // nothing.
-        c.autoplay.cast_sent = None;
-        assert!(c.autoplay_dodge(now), "a spare moment is worth the step");
-        assert!(c.dodge_to.is_some());
-        assert!(c.dodge.courtesy, "the step was a courtesy, not a dodge");
-
-        // And it is given back the moment the moment stops being spare:
-        // a step for somebody else's spell must not hold the legs while
-        // a heal comes due.
-        c.autoplay.cast_sent = Some(now);
-        assert!(!c.autoplay_dodge(now), "the courtesy outstayed its moment");
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn our_summoned_creatures_bolt_is_never_dodged() {
+        // Blargerton stepped out of his own Sandstone Golem's Flame Bolt, mid-fight.
+        let mut c = in_the_field();
+        let me = c.player.as_ref().unwrap().world_position();
+        let now = Instant::now();
+        let (golem, shot) = (0x6000_0009, 0x8000_0009);
+        let stands = me + Vec3::new(0.0, -12.0, 0.0);
+        let mut pet = creature(golem, "Blargerton's Golem", 0, stands);
+        pet.pet_owner = ME_GUID;
+        c.world.objects.insert(golem, pet);
+        c.world.objects.insert(shot, bolt(shot, stands, me, 15.0));
+        assert!(!c.autoplay_dodge(now), "stepped for our golem's bolt");
+        assert!(!c.dodge.tracks[&shot].can_hurt);
         assert_eq!(c.dodge_to, None);
     }
 
