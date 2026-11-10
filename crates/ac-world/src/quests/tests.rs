@@ -415,6 +415,25 @@ fn the_rates_column_is_read_beside_its_landblocks() {
 }
 
 #[test]
+fn a_generator_that_fills_only_on_demand_holds_nothing_at_load() {
+    // With no RegenerationInterval only a container or an event generator fills by itself
+    // (WorldObject_Generators.cs:487-491; WorldObject_Tick.cs:77-78): the Mukkir's at 0x0076
+    // and the arena's at 0x00B0 wait on a use, so nothing stands there till then.
+    let rate = |want: u32, wcid: u32, lb: u32| {
+        sources_of(&Want::Item(want))
+            .find(|s| s.wcid == wcid && s.kind == Yield::Drop)
+            .map(|s| s.rate_at(lb))
+            .expect("a dropper")
+    };
+    let mukkir = rate(34277, 31898, 0x0076);
+    assert_eq!((mukkir.load, mukkir.per_hour), (0.0, 0.0), "{mukkir:?}");
+    let annihilator = rate(11692, 35160, 0x00B0);
+    assert_eq!(annihilator.load, 0.0, "{annihilator:?}");
+    // Its other ground fills by itself.
+    assert!(rate(34277, 31898, 0x0098).load > 0.0);
+}
+
+#[test]
 fn the_chakron_holds_its_inquisitors_at_load() {
     // The Chakron's linked placements are sure spawns: every Virindi Inquisitor stands there once
     // the landblock loads, and its slots come back in minutes. A Dark Inferno's open camp is a

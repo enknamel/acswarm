@@ -268,10 +268,13 @@ class Gen:
     profile[0]'s figures (WorldObject_Generators.cs:589-625)."""
 
     def __init__(self, sp, wcid, links=(), parent=None):
-        gp = sp.genprops.get(wcid, (1, 0.0, 0, 0, 0))
+        gp = sp.genprops.get(wcid, (1, 0.0, 0, 0, 0, 0))
         self.wcid, self.parent, self.alive, self.powering = wcid, parent, True, True
-        kind, self.regen, self.init, self.max, self.ad = gp
+        kind, self.regen, self.init, self.max, self.ad, event = gp
         self.container = kind in GEN_CONTAINERS
+        # Started with no regeneration, only a container (not a creature) or an event generator
+        # fills at once (WorldObject_Generators.cs:487-491); any other waits on a use or an emote.
+        self.fills = self.regen > 0 or self.container or event
         profs = sp.profiles.get(wcid, [])
         delay0 = profs[0]["delay"] if profs else 0.0
         # Contain, Wield and Shop put nothing in the world (RegenLocationType.cs:12-16).
@@ -416,7 +419,7 @@ class Sim:
         0 (:77-78). The player's kills land after the generator's own work each tick."""
         while self.heap and self.heap[0][0] <= until:
             t, _, g = heapq.heappop(self.heap)
-            if not g.alive:
+            if not g.alive or not g.fills:
                 continue
             self.generate(g, t)
             kills, self.pending = self.pending, []
@@ -436,8 +439,9 @@ class Spawning:
                 prob=num(prob), wcid=int(wcid), delay=None if delay == "" else num(delay),
                 init=int(init), max=int(mx), where=int(where)))
         self.genprops = {}
-        for wcid, kind, regen, init, mx, ad in rows(dump, "genprops"):
-            self.genprops[int(wcid)] = (int(kind), num(regen), int(init), int(mx), int(ad))
+        for wcid, kind, regen, init, mx, ad, event in rows(dump, "genprops"):
+            self.genprops[int(wcid)] = (int(kind), num(regen), int(init), int(mx), int(ad),
+                                        event == "1")
         # Creatures, by whether one can be attacked (PropertyBool 19, default true).
         self.attackable = {int(w): a != "0" for w, a in rows(dump, "crit")}
         links, children = defaultdict(list), set()

@@ -202,9 +202,10 @@ where r.success_W_C_I_D <> 0
 
 # For the spawn rates: every generator profile in order (its thresholds are cumulative), each
 # generator's RegenerationInterval (PropertyFloat 41), InitGeneratedObjects (Int 82),
-# MaxGeneratedObjects (Int 81) and GeneratorAutomaticDestruction (Bool 74), whether a creature can
-# be attacked (Bool 19), the placed generators and creatures by guid, their linked placements
-# (each a profile of its generator: WorldObject_Generators.cs:589-625), and the encounter roots.
+# MaxGeneratedObjects (Int 81), GeneratorAutomaticDestruction (Bool 74) and GeneratorEvent
+# (String 34, set or not), whether a creature can be attacked (Bool 19), the placed generators
+# and creatures by guid, their linked placements (each a profile of its generator:
+# WorldObject_Generators.cs:589-625), and the encounter roots.
 q profiles 'select object_Id, probability, weenie_Class_Id, coalesce(delay, ""), init_Create,
   max_Create, where_Create
 from weenie_properties_generator order by object_Id, id;'
@@ -213,7 +214,9 @@ q genprops 'select w.class_Id, w.type,
   coalesce((select value from weenie_properties_float f where f.object_Id = w.class_Id and f.type = 41), 0),
   coalesce((select value from weenie_properties_int i where i.object_Id = w.class_Id and i.type = 82), 0),
   coalesce((select value from weenie_properties_int i where i.object_Id = w.class_Id and i.type = 81), 0),
-  coalesce((select value from weenie_properties_bool b where b.object_Id = w.class_Id and b.type = 74), 0)
+  coalesce((select value from weenie_properties_bool b where b.object_Id = w.class_Id and b.type = 74), 0),
+  exists(select 1 from weenie_properties_string s where s.object_Id = w.class_Id and s.type = 34
+    and s.value <> "")
 from weenie w where w.class_Id in (select distinct object_Id from weenie_properties_generator);'
 
 q crit 'select w.class_Id, coalesce(b.value, 1) from weenie w
