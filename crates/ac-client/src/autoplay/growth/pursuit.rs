@@ -652,8 +652,11 @@ impl Ask<'_> {
             }
         }
         if let Some(g) = first {
+            // Only the creatures of the grounds held: the Sturdy Iron Key drops from 398, and a
+            // Gotrok Tiatus at 2% met on the road was fought, never walked past.
+            let held = |g: &&SourceGround| open.iter().any(|(lb, _)| *lb == g.landblock);
             let mut sought: Vec<u32> = Vec::new();
-            for s in grounds.iter().map(|s| s.source) {
+            for s in grounds.iter().filter(held).map(|g| g.source) {
                 if s.kind.is_hunted() && !sought.contains(&s.wcid) {
                     sought.push(s.wcid);
                 }

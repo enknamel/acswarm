@@ -2325,6 +2325,21 @@ fn the_bound_scepter_with_the_cloak_carried_goes_for_the_essence_chest_s_key() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
+fn only_the_creatures_of_the_grounds_hunted_are_sought() {
+    // The Sturdy Iron Key drops from 398 creatures, a Gotrok Tiatus at 2% among them: all were
+    // sought, so one met on the road to the Virindi Inquisitor (80%) was fought, never walked past.
+    let now = std::time::Instant::now();
+    let mut c = mage_pursuing("give:27841", "chained-quests");
+    in_the_pack(&mut c, 0x8000_0721, 9117, "Tattered Virindi Cloak", 1);
+    c.refresh_quests(now);
+    let sought = &c.autoplay.growth.pursuit_sought;
+    assert!(sought.contains(&10815), "not the Inquisitor: {sought:?}");
+    assert!(!sought.contains(&24497), "a Gotrok Tiatus sought");
+    assert!(sought.len() < 20, "{} sought", sought.len());
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_quests_item_another_quest_rewards_is_had_by_that_hand_in_first() {
     // The Ultimate Singularity Scepter of War Magic takes the Bound one, which the Virindi Castaway
     // gives for the Singularity Scepter carried: "nobody known yields Bound Singularity Scepter".
