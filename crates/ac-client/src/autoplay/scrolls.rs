@@ -1,6 +1,6 @@
 //! Spell scrolls: the spells this character could learn from one now, worked out again as its
-//! spellbook and magic skills change, and a scroll the loot rules kept read from the pack while
-//! no fight or journey is on (`Looting::learn_scrolls`).
+//! spellbook and magic skills change; a scroll the loot rules kept is read between fights
+//! (`Looting::learn_scrolls`), and one with nothing left to teach goes to the counter.
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
@@ -17,6 +17,8 @@ const SKILL_MARGIN: u32 = 50;
 const SCROLL_RETRY: Duration = Duration::from_secs(5 * 60);
 /// Reading keeps the character busy this long, stance and motion (Scroll.cs:60-82, guess).
 const READ_TAKES: Duration = Duration::from_secs(5);
+/// The tag reason a scroll taken to learn goes to the counter under, once it has nothing to teach.
+pub(crate) const NOTHING_TO_TEACH: &str = "a scroll with nothing left to teach";
 
 /// The spells to learn, and what they were worked out from.
 #[derive(Clone, Debug, Default)]
@@ -49,8 +51,9 @@ impl Client {
         self.autoplay.learnable.spells.clone()
     }
 
-    /// Work [`Self::learnable_spells`] out again when the spellbook or a school's skill changed.
-    pub(crate) fn refresh_learnable(&mut self) {
+    /// Work [`Self::learnable_spells`] out again when the spellbook or a school's skill changed;
+    /// true when they did.
+    pub(crate) fn refresh_learnable(&mut self) -> bool {
         use std::hash::{Hash, Hasher};
         let stats = &self.world.stats;
         let skills = self.assets.skill_table().ok();
@@ -69,11 +72,12 @@ impl Client {
         let mut h = std::collections::hash_map::DefaultHasher::new();
         (&stats.spells, &schools).hash(&mut h);
         let key = h.finish();
-        if key == self.autoplay.learnable.key && !self.autoplay.learnable.spells.is_empty() {
-            return;
+        let was = self.autoplay.learnable.key;
+        if key == was && !self.autoplay.learnable.spells.is_empty() {
+            return false;
         }
         let Ok(table) = self.assets.spell_table() else {
-            return;
+            return false;
         };
         let known: BTreeSet<u32> = stats.spells.iter().copied().collect();
         let spells: BTreeSet<u32> = table
@@ -92,14 +96,56 @@ impl Client {
             .collect();
         self.autoplay.learnable.key = key;
         self.autoplay.learnable.spells = Arc::new(spells);
+        key != was
     }
 
-    /// Housekeeping: keep the learnable spells current, and read one scroll the pack holds whose
-    /// spell is among them while nothing is fought or walked: a read stands the reader still in peace
-    /// mode (Scroll.cs:68-76), and a use breaks a journey off. With the loot rules' reading off,
-    /// only a pursued quest's scroll is read (a `learn:` quest's `Read` step).
-    pub(crate) fn autoplay_learn_scrolls(&mut self, now: Instant) {
-        self.refresh_learnable();
+    /// Housekeeping: keep the learnable spells current, and when they change judge again each
+    /// scroll taken to learn: one now known, or a second copy, has nothing left to teach.
+    pub(crate) fn autoplay_learn_scrolls(&mut self, _now: Instant) {
+        if self.refresh_learnable() {
+            self.judge_scrolls_again();
+        }
+    }
+
+    /// A carried scroll tagged [`LEARNABLE`] whose spell no longer is (or whose spell an earlier
+    /// copy teaches) takes what the rules say of it, else goes to the counter: it was taken only
+    /// to be read, and kept it is clutter.
+    fn judge_scrolls_again(&mut self) {
+        use crate::autoplay::loot::judge::{judge_loot, LEARNABLE};
+        use crate::autoplay::LootAction;
+        let profile = self.loot_profile();
+        let me = self.wielder();
+        let who = self.world.stats.name.clone();
+        // Oldest first, each told the copies before it: the first is the one read.
+        let mut carried: Vec<(u32, u32, u32)> = self
+            .world
+            .inventory()
+            .map(|o| (o.guid, o.weenie_class_id, o.stack_size.max(1)))
+            .collect();
+        for (guid, before) in crate::autoplay::ledger::retag::in_arrival_order(&mut carried) {
+            let Some(stats) = self.stats_of(guid).filter(|s| s.is_scroll()) else {
+                continue;
+            };
+            if self.autoplay.ledger.why(guid) != Some(LEARNABLE) {
+                continue;
+            }
+            let id = self.appraisals.get(&guid);
+            let (action, rule) = match judge_loot(&stats, id, profile.as_deref(), &me, &who, before)
+            {
+                crate::profile::Verdict::Decided(LootAction::Keep, r) if r == LEARNABLE => continue,
+                crate::profile::Verdict::Decided(a, r) if a.takes() => (a, r),
+                _ => (LootAction::Sell, NOTHING_TO_TEACH.to_string()),
+            };
+            tracing::info!("scroll: {} now {action:?} ({rule})", stats.name);
+            self.autoplay.tag_why(&stats, action, Some(&rule));
+        }
+    }
+
+    /// Goal: read one scroll the pack holds whose spell is learnable, between fights: no live
+    /// target, nothing hitting, no body being emptied. Claiming the tick stands the character still
+    /// while the server reads (Scroll.cs:66-82; it drops to peace mode itself). With the loot rules'
+    /// reading off, only a pursued quest's scroll is read (a `learn:` quest's `Read` step).
+    pub(crate) fn autoplay_read_scrolls(&mut self, now: Instant) -> bool {
         let every = self.loot_profile().is_some_and(|p| p.looting.learn_scrolls);
         let asked: Vec<u32> = self
             .pursuit
@@ -110,22 +156,36 @@ impl Client {
             })
             .collect();
         if !every && asked.is_empty() {
-            return;
+            return false;
         }
-        let st = &self.autoplay.learnable;
-        // A read keeps the server busy READ_TAKES: a use of a giver or a counter then is dropped, and
-        // one sent behind a cast is turned away busy (0x1D); `cast_in_flight` counts the read in.
-        let busy = self.autoplay.cast_in_flight(now);
-        let quiet = self.attack_target.is_none()
-            && self.autoplay.nearest_fight.is_none()
-            && !self.traveling()
-            && self.going.is_none()
+        // A target unknown to the world counts as alive: it is still being fought.
+        let engaged = [self.autoplay.casting_at(), self.attack_target]
+            .into_iter()
+            .flatten()
+            .any(|g| {
+                self.world
+                    .objects
+                    .get(&g)
+                    .is_none_or(|o| o.alive_or_unknown())
+            });
+        // A use of a giver or a counter while the server reads is dropped, so not on those calls.
+        let between_fights = !engaged
+            && !self.under_attack()
+            && self.autoplay.corpse.is_none()
             && self.visits.current.is_none()
             && !self.autoplay.growth.town_run_under_way()
             && !self.is_dead();
-        if busy || !quiet {
-            return;
+        if !between_fights {
+            return false;
         }
+        if self.autoplay.learnable.is_reading(now) {
+            return true;
+        }
+        // One sent behind a cast is turned away busy (0x1D); `cast_in_flight` counts the read in.
+        if self.autoplay.cast_in_flight(now) {
+            return false;
+        }
+        let st = &self.autoplay.learnable;
         let me = self.world.player_guid;
         let scroll = self.world.inventory().find(|o| {
             let s = crate::items::ItemStats::of(o, me);
@@ -138,7 +198,7 @@ impl Client {
                     .is_none_or(|t| now.duration_since(*t) >= SCROLL_RETRY)
         });
         let Some((guid, name)) = scroll.map(|o| (o.guid, o.name.clone())) else {
-            return;
+            return false;
         };
         let st = &mut self.autoplay.learnable;
         st.tried
@@ -148,6 +208,7 @@ impl Client {
         tracing::info!("scroll: reading {name} ({guid:#010x})");
         self.autoplay.note(format!("reading {name}"), now);
         self.use_object(guid);
+        true
     }
 }
 

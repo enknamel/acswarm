@@ -32,11 +32,10 @@ system's entry fns are written in the files its own row names.
 
 ## Steps
 
-`steps::STEPS` (`autoplay/steps.rs`). A goal with no scorer is worth its `base`, written in the
-table, so a row may be added or dropped without re-scoring the rest. `weigh` takes goals only, most
-worth first, ties going to the earlier row; reflexes run in table order and their `base` is not
-read. The fixed curves are placed against those numbers: `LOOT_AT_REST` (45) sits under `follow`
-(50), and `WALK_TO_A_FIGHT` (40) ties `resume the journey`, which the tie rule puts second.
+`steps::STEPS` (`autoplay/steps.rs`). A goal with no scorer is worth its `base`, so a row may be
+added or dropped without re-scoring the rest. `weigh` takes goals only, most worth first, ties to
+the earlier row; reflexes run in table order, `base` unread. The fixed curves sit against those:
+`LOOT_AT_REST` (45) under `follow` (50); `WALK_TO_A_FIGHT` (40) ties `resume the journey`, second.
 
 | # | step | layer | worth | runs |
 |---|---|---|---|---|
@@ -51,15 +50,16 @@ read. The fixed curves are placed against those numbers: `LOOT_AT_REST` (45) sit
 | 9 | catch up | goal | 120 | `autoplay_follow` (urgent) |
 | 10 | team | goal | 110 | `autoplay_team` |
 | 11 | salvage | goal | 100 | `autoplay_salvage` |
-| 12 | town run | goal | `worth_town_run` | `autoplay_town_run` |
-| 13 | summon | goal | `worth_fighting` | `autoplay_summon` |
-| 14 | fight | goal | `worth_fighting` | `autoplay_fight` |
-| 15 | keep to the area | goal | 70 | `autoplay_keep_to_area` |
-| 16 | buffs | goal | 60 | `autoplay_buff` |
-| 17 | follow | goal | 50 | `autoplay_follow` |
-| 18 | resume the journey | goal | 40 | `autoplay_resume_journey` |
-| 19 | explore | goal | 20 | `autoplay_explore` |
-| 20 | grow | goal | 10 | `autoplay_grow` |
+| 12 | read scrolls | goal | 97 | `autoplay_read_scrolls` |
+| 13 | town run | goal | `worth_town_run` | `autoplay_town_run` |
+| 14 | summon | goal | `worth_fighting` | `autoplay_summon` |
+| 15 | fight | goal | `worth_fighting` | `autoplay_fight` |
+| 16 | keep to the area | goal | 70 | `autoplay_keep_to_area` |
+| 17 | buffs | goal | 60 | `autoplay_buff` |
+| 18 | follow | goal | 50 | `autoplay_follow` |
+| 19 | resume the journey | goal | 40 | `autoplay_resume_journey` |
+| 20 | explore | goal | 20 | `autoplay_explore` |
+| 21 | grow | goal | 10 | `autoplay_grow` |
 
 Housekeeping, every tick, never claiming it: `autoplay_pending_wield`, `autoplay_shield`, `autoplay_rearm`, `autoplay_stock`, `autoplay_claim_pet_kills`, `autoplay_mana_stones`, `autoplay_refill_essences`, `autoplay_tidy`, `autoplay_learn_scrolls`, `autoplay_spend_xp`.
 

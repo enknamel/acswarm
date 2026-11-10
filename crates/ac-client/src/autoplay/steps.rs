@@ -430,6 +430,14 @@ pub const STEPS: &[Step] = &[
         run: claimed!(Client::autoplay_salvage),
     },
     Step {
+        name: "read scrolls",
+        layer: Layer::Goal,
+        base: 97.0,
+        why: "a scroll is read between fights, before the next is picked: a read stands the character still a few seconds, and a quiet moment never came in a dungeon (three read in 48 minutes)",
+        worth: by_place,
+        run: claimed!(Client::autoplay_read_scrolls),
+    },
+    Step {
         name: "town run",
         layer: Layer::Goal,
         base: TOWN_RUN,
@@ -580,8 +588,8 @@ pub const HOUSEKEEPING: &[Housekeeping] = &[
     },
     Housekeeping {
         name: "learn spell scrolls",
-        // Keeps the learnable spells the loot rules read current, fight or no fight; a scroll
-        // is read only in a quiet moment.
+        // Keeps the learnable spells the loot rules read current, fight or no fight, and judges
+        // again a scroll that has nothing left to teach; reading is the `read scrolls` row.
         run: Client::autoplay_learn_scrolls,
     },
     Housekeeping {

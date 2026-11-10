@@ -40,7 +40,7 @@ const TAGS_MEAN: u32 = 1;
 /// pass. Nor the count with the item itself in it, which this once
 /// was: told it was the second of two, the second ring was over a cap
 /// of two, and the pass kept one ring fewer than the cap.
-fn in_arrival_order(carried: &mut [(u32, u32, u32)]) -> Vec<(u32, u32)> {
+pub(crate) fn in_arrival_order(carried: &mut [(u32, u32, u32)]) -> Vec<(u32, u32)> {
     carried.sort_unstable();
     let mut seen_of: std::collections::BTreeMap<u32, u32> = std::collections::BTreeMap::new();
     carried

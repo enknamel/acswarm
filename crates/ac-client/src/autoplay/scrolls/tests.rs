@@ -39,6 +39,7 @@ fn a_scroll_the_character_can_learn_is_kept_and_read_once_nothing_is_fought() {
 
     c.attack_target = Some(0x5000_0001);
     c.autoplay_learn_scrolls(now);
+    assert!(!c.autoplay_read_scrolls(now));
     assert_eq!(c.last_used, None, "read mid-fight");
     let me = c.wielder();
     assert!(me.learnable.contains(&bolt) && !me.learnable.contains(&heal));
@@ -71,11 +72,19 @@ fn a_scroll_the_character_can_learn_is_kept_and_read_once_nothing_is_fought() {
         at: glam::Vec3::ZERO,
     };
     c.visits.current = Some(crate::visit::Visit::landmark(&giver));
-    c.autoplay_learn_scrolls(now);
+    c.autoplay_read_scrolls(now);
     assert_eq!(c.last_used, None, "read on the way to a giver");
     c.visits.current = None;
 
-    // Walking into the next room of a dungeon: a read would stand it still on the way.
+    // A spell in the air: a read sent behind it is turned away busy.
+    c.autoplay.cast_sent = Some(now);
+    c.autoplay_read_scrolls(now);
+    assert_eq!(c.last_used, None, "read behind a cast");
+    c.autoplay.cast_sent = None;
+
+    // Between fights in a busy dungeon, walking to the next creature in reach: the read comes
+    // first, claiming the tick (Blargerton read three in 48 minutes waiting for a quiet moment).
+    c.autoplay.nearest_fight = Some(5.0);
     let me_at = c.my_position().unwrap();
     let ahead = crate::Goal::At {
         place: c.place_at(me_at + glam::Vec3::new(10.0, 0.0, 0.0)),
@@ -83,31 +92,108 @@ fn a_scroll_the_character_can_learn_is_kept_and_read_once_nothing_is_fought() {
     };
     c.go(crate::Owner::Script, ahead, now);
     assert!(c.going.is_some(), "no walk set");
-    c.autoplay_learn_scrolls(now);
-    assert_eq!(c.last_used, None, "read mid-walk");
-    c.going = None;
-
-    // A spell in the air: a read sent behind it is turned away busy.
-    c.autoplay.cast_sent = Some(now);
-    c.autoplay_learn_scrolls(now);
-    assert_eq!(c.last_used, None, "read behind a cast");
-    c.autoplay.cast_sent = None;
-
-    // Nothing on: the bolt is read, once, and the heal never.
-    c.autoplay_learn_scrolls(now);
-    assert_eq!(c.last_used, Some(0x8000_0500));
+    assert!(c.autoplay_read_scrolls(now));
+    assert_eq!(
+        c.last_used,
+        Some(0x8000_0500),
+        "the bolt is read, and the heal never"
+    );
     c.last_used = None;
+    c.going = None;
+    // The read lasting, the row holds the tick: the character stands while the server reads.
+    assert!(c.autoplay_read_scrolls(now));
+    assert_eq!(c.last_used, None);
+    // Hit meanwhile, it stands aside for the fight.
+    c.autoplay.last_hit_us = Some(Instant::now());
+    assert!(!c.autoplay_read_scrolls(now));
+    c.autoplay.last_hit_us = None;
     // Blargerton's login buffs went out in the tick he began reading and were turned away (0x1D).
     assert!(c.autoplay.cast_in_flight(now), "a cast waits on the read");
     assert!(!c.autoplay.cast_in_flight(now + READ_TAKES));
-    c.autoplay_learn_scrolls(now + READ_TAKES);
+    c.autoplay_read_scrolls(now + READ_TAKES);
     assert_eq!(c.last_used, None, "read again while its answer is awaited");
 
     // Learned, it is not learnable any more; switched off, nothing is read.
     c.world.stats.spells.push(bolt);
     c.autoplay_learn_scrolls(now + SCROLL_RETRY);
+    c.autoplay_read_scrolls(now + SCROLL_RETRY);
     assert!(!c.wielder().learnable.contains(&bolt));
     assert_eq!(c.last_used, None);
+}
+
+/// The id of the spell called `name`.
+fn spell_called(c: &Client, name: &str) -> u32 {
+    let table = c.assets.spell_table().unwrap();
+    let s = table.spells.iter().find(|(_, s)| s.name == name);
+    s.map(|(id, _)| *id).unwrap_or_else(|| panic!("{name}"))
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_second_copy_of_a_scroll_carried_is_not_taken_to_learn() {
+    // Blargerton carried two Mind Blossoms and two Drain Stamina Other VIs: one is read, the
+    // other has nothing to teach.
+    let now = Instant::now();
+    let (mut c, _) = crate::testkit::a_caster_knowing(now, &["Flame Bolt I"]);
+    crate::testkit::a_loot_profile(&mut c, "scrolls");
+    let bolt = spell_called(&c, "Flame Bolt II");
+    scroll_in_the_pack(&mut c, 0x8000_0500, bolt);
+    c.autoplay_learn_scrolls(now);
+    let me = c.wielder();
+    let profile = c.loot_profile().unwrap();
+    let stats = c.stats_of(0x8000_0500).unwrap();
+    let learn = crate::profile::Verdict::Decided(
+        crate::autoplay::LootAction::Keep,
+        super::super::loot::judge::LEARNABLE.into(),
+    );
+    let judge = |held| {
+        super::super::loot::judge::judge_loot(&stats, None, Some(&profile), &me, "Caster", held)
+    };
+    assert_eq!(judge(0), learn);
+    assert_ne!(judge(1), learn, "a copy carried already");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_scroll_taken_to_learn_goes_to_the_counter_once_it_has_nothing_to_teach() {
+    // Tagged to learn when looted; then one copy read and the spell known, or a second copy
+    // carried: neither is read, and kept they cluttered Blargerton's pack.
+    use super::super::loot::judge::LEARNABLE;
+    use crate::autoplay::LootAction;
+    let now = Instant::now();
+    let (mut c, _) = crate::testkit::a_caster_knowing(now, &["Flame Bolt I"]);
+    crate::testkit::a_loot_profile(&mut c, "scrolls");
+    let (bolt, frost) = (
+        spell_called(&c, "Flame Bolt II"),
+        spell_called(&c, "Frost Bolt II"),
+    );
+    for (guid, spell, wcid) in [
+        (0x8000_0500, bolt, 7001),
+        (0x8000_0501, frost, 7002),
+        (0x8000_0502, frost, 7002),
+    ] {
+        scroll_in_the_pack(&mut c, guid, spell);
+        c.world.objects.get_mut(&guid).unwrap().weenie_class_id = wcid;
+        let stats = c.stats_of(guid).unwrap();
+        c.autoplay
+            .tag_why(&stats, LootAction::Keep, Some(LEARNABLE));
+    }
+    c.world.stats.spells.push(bolt);
+    c.autoplay_learn_scrolls(now);
+    let tag = |c: &Client, g| {
+        (
+            c.autoplay.ledger.of(&c.stats_of(g).unwrap()),
+            c.autoplay.ledger.why(g).map(str::to_string),
+        )
+    };
+    let sell = (Some(LootAction::Sell), Some(NOTHING_TO_TEACH.to_string()));
+    assert_eq!(tag(&c, 0x8000_0500), sell, "known now");
+    assert_eq!(
+        tag(&c, 0x8000_0501),
+        (Some(LootAction::Keep), Some(LEARNABLE.to_string())),
+        "the copy read"
+    );
+    assert_eq!(tag(&c, 0x8000_0502), sell, "a second copy");
 }
 
 #[test]
@@ -128,6 +214,7 @@ fn with_reading_off_only_the_scroll_a_pursued_quest_reads_is_read() {
     let (bolt, other) = (id_of("Flame Bolt II"), id_of("Frost Bolt II"));
     scroll_in_the_pack(&mut c, 0x8000_0500, other);
     c.autoplay_learn_scrolls(now);
+    c.autoplay_read_scrolls(now);
     assert_eq!(c.last_used, None, "read with reading off");
     scroll_in_the_pack(&mut c, 0x8000_0501, bolt);
     c.pursuit = vec![crate::autoplay::PursuitLine {
@@ -142,5 +229,6 @@ fn with_reading_off_only_the_scroll_a_pursued_quest_reads_is_read() {
         via: None,
     }];
     c.autoplay_learn_scrolls(now);
+    c.autoplay_read_scrolls(now);
     assert_eq!(c.last_used, Some(0x8000_0501));
 }
