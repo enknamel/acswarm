@@ -72,11 +72,10 @@ const SPELL_FIZZLED: u32 = 0x0402;
 
 impl Client {
     /// Mana points a buff leaves untouched: `keep_mana` for a top-up or a cast in a fight (`whole`),
-    /// half of it for an urgent recast out of one, and never under the mana floor (`mana_below`).
+    /// half of it for an urgent recast out of one.
     pub(crate) fn buff_reserve(&self, whole: bool) -> f32 {
         let keep = self.autoplay.config.buffs.keep_mana * if whole { 1.0 } else { 0.5 };
-        let floor = self.autoplay.config.survive.mana_below;
-        self.vital_max_of(2) as f32 * keep.max(floor)
+        self.vital_max_of(2) as f32 * keep
     }
 
     /// Seconds left on the enchantment of a spell family, if any is up.
@@ -493,6 +492,12 @@ impl Client {
             return false;
         }
         self.stamp_buff_look(urgent, now);
+        // No buff starts with a bar under its slider (`bar_under_slider`): its restore goes first.
+        if let Some(bar) = self.bar_under_slider() {
+            let said = format!("holding off {name}: {bar} under its slider");
+            self.autoplay.note(said, now);
+            return false;
+        }
         // Mana is kept back for healing and fighting (`buff_reserve`).
         let reserve = self.buff_reserve(topping_up || self.in_a_fight());
         let cost = self

@@ -141,14 +141,8 @@ impl Client {
         // difference between a fight and a stalemate.
         let table = self.assets.spell_table().ok();
         let ready = self.ready_spells(cfg);
-        // The next cast (its debuff, else its attack) never takes mana under its floor.
-        let next = kill.as_ref().map(|k| {
-            k.magic_yield
-                .map(|y| y.0)
-                .or(k.vuln.map(|v| v.1))
-                .unwrap_or(k.attack)
-        });
-        if next.is_some_and(|spell| self.hold_for_mana(spell, now)) {
+        // No cast of the fight starts with a bar under its slider: its restore goes first.
+        if kill.is_some() && self.hold_for_vitals(now) {
             return true;
         }
         // Two or more swinging at us underground: to a spot the attack still gets out of first.

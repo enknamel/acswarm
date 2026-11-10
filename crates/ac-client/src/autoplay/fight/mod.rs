@@ -18,8 +18,6 @@ use crate::Client;
 /// Swung at this recently, the character is in a fight whether or not
 /// it chose one.
 const UNDER_ATTACK: Duration = Duration::from_secs(4);
-/// A guid's last attack is kept this long, past every reader's window (`hit_lately_from`).
-const ATTACK_KEPT: Duration = Duration::from_secs(30);
 
 /// Whether a fight taken on the road is over because the creature has
 /// dropped out of it: the character is on its way somewhere, the
@@ -58,55 +56,6 @@ impl Autoplay {
 }
 
 impl Client {
-    /// Something called `who` attacked the character at `now` ([`Autoplay::attacked_by`]), put to
-    /// a guid as well: the server names the attacker only, in a hit, a miss or a spell line.
-    pub(crate) fn hear_attack(&mut self, who: &str, now: Instant) {
-        self.autoplay.attacked_by(who, now);
-        self.autoplay.hit_by_guid.expire(now, ATTACK_KEPT);
-        for guid in self.attackers_named(who) {
-            self.autoplay.hit_by_guid.mark(guid, now);
-        }
-    }
-
-    /// The creatures called `who` whose attack target is the character (walked at or turned to,
-    /// Monster_Navigation.cs:89-106), else the nearest of that name: the one that attacked.
-    fn attackers_named(&self, who: &str) -> Vec<u32> {
-        let mine = self.world.player_guid;
-        let me = self.my_position();
-        let named: Vec<&ac_world::WorldObject> = self
-            .world
-            .objects
-            .values()
-            .filter(|o| o.name == who && !o.is_player && o.pet_owner == 0)
-            .filter(|o| o.item_type & ac_world::item_type::CREATURE != 0)
-            .filter(|o| o.alive_or_unknown())
-            .collect();
-        let after_me: Vec<u32> = named
-            .iter()
-            .filter(|o| mine.is_some() && (o.walked_at == mine || o.turned_to == mine))
-            .map(|o| o.guid)
-            .collect();
-        if !after_me.is_empty() {
-            return after_me;
-        }
-        let off = |o: &ac_world::WorldObject| match (me, o.world_pos()) {
-            (Some(me), Some(at)) => at.distance(me),
-            _ => f32::MAX,
-        };
-        named
-            .into_iter()
-            .min_by(|a, b| off(a).total_cmp(&off(b)))
-            .map(|o| o.guid)
-            .into_iter()
-            .collect()
-    }
-
-    /// Whether the creature `guid` has attacked the character within `window` of `now`
-    /// ([`Self::hear_attack`]).
-    pub(crate) fn hit_lately_from(&self, guid: u32, now: Instant, window: Duration) -> bool {
-        self.autoplay.hit_by_guid.within(&guid, now, window)
-    }
-
     /// The names of what has attacked this character lately (see
     /// `Autoplay::attacked_by`), in name order, one row a name.
     pub fn attackers_lately(&self) -> Vec<String> {
@@ -162,22 +111,25 @@ impl Client {
         }
         // A pursued quest's errand is its creature, or for any other step nothing: the rest are
         // walked past, at its ground too (a_quest_hunt_walks_past_all_but_its_creature).
-        // And a dropper met on the road whose kill saves more than it costs (`pursuit_road`).
         let sought = &self.autoplay.growth.pursuit_sought;
-        // On the road a dropper with a pace only when worth the plan (`pursuit_road`), one with
-        // none as sought (the Lich Overseer); at the ground all it holds.
+        // A dropper worth the plan (`pursuit_road`) only once on the character: one gone out to
+        // was let go on the road the next tick, and back (the K'nath K'ram, test:
+        // a_dropper_met_on_the_road_is_fought_only_when_its_chance_beats_the_plan). On the road a
+        // paced held ground's creature counts only so; one with no pace (the Lich Overseer) and
+        // at the ground all it holds are sought.
         let st = &self.autoplay.growth;
         let wcid = o.weenie_class_id;
         let paced = st.pursuit_droppers.iter().any(|d| d.0 == wcid);
+        let on_us = self.world.player_guid.is_some() && o.walked_at == self.world.player_guid;
+        let road = st.pursuit_road.contains(&wcid) && (on_us || self.hit_lately_by(&o.name));
         let worth = if self.on_its_way() && paced {
-            st.pursuit_road.contains(&wcid)
+            road
         } else {
-            self.is_sought(wcid)
+            sought.contains(&wcid) || road
         };
         let it = self.is_pursued_hunt() && worth;
-        let not_it = self.is_pursuing()
-            && (!self.is_pursued_hunt()
-                || (!sought.is_empty() && !self.is_sought(o.weenie_class_id)));
+        let not_it =
+            self.is_pursuing() && (!self.is_pursued_hunt() || (!sought.is_empty() && !worth));
         // The pursued creature itself is never walked past, on the road to its ground or there
         // (the Putrid Moarsman met at the catacombs' door, left behind on the road).
         // By a sought kill's body, what hits the character is fought: the body is not opened under

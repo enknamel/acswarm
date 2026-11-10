@@ -120,10 +120,6 @@ fn worth_fighting(client: &Client, _now: Instant) -> f32 {
     if client.my_position().is_none() {
         return UNDECIDED;
     }
-    // A vital under its floor with nothing to restore it picks no fight (`autoplay_fall_back`).
-    if client.is_falling_back() {
-        return 0.0;
-    }
     // Already swinging at something that is still alive: that is a
     // fight in hand whatever the distance, and it is not interrupted.
     //
@@ -396,14 +392,6 @@ pub const STEPS: &[Step] = &[
         run: claimed!(Client::autoplay_vitals),
     },
     Step {
-        name: "fall back",
-        layer: Layer::Reflex,
-        base: 135.0,
-        why: "a vital under its floor that nothing restores where the character stands breaks the fight off: away from the attackers to rest till it is back, after the restore round and before any fight",
-        worth: by_place,
-        run: claimed!(Client::autoplay_fall_back),
-    },
-    Step {
         name: "loot",
         layer: Layer::Goal,
         base: 130.0,
@@ -630,10 +618,6 @@ pub fn weigh(client: &Client, now: Instant) -> Weighed {
     let mut order: Vec<(usize, f32)> = Vec::with_capacity(STEPS.len());
     for (place, step) in STEPS.iter().enumerate() {
         if step.layer != Layer::Goal {
-            continue;
-        }
-        // A fall back lets only a town run under way and a healer's heals through.
-        if client.is_falling_back() && !matches!(step.name, "town run" | "team") {
             continue;
         }
         let worth = step.worth(client, now);

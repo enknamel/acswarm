@@ -29,17 +29,6 @@ fn the_order_says_what_the_character_cares_about() {
     assert!(at("survive") < at("fight"), "heal before fighting");
     assert!(at("survive") < at("loot"), "heal before looting");
     assert!(at("recover") < at("fight"), "deal with the corpse first");
-    // A floor down: the restore round first, then away from the fight if it cannot restore it.
-    assert!(at("survive") < at("fall back"), "heal before falling back");
-    assert!(
-        at("vitals") < at("fall back"),
-        "restore before falling back"
-    );
-    assert!(at("fall back") < at("fight"), "fall back before fighting");
-    assert!(
-        at("fall back") < at("summon"),
-        "fall back before calling a pet"
-    );
 
     // A buff about to lapse goes up before the fight; the rest wait
     // until after it.
@@ -105,7 +94,7 @@ fn every_goal_keeps_the_worth_it_had_when_tidying_moved() {
     // the contract. They are written in the table now, so a row may come
     // or go without moving them.
     let base = |name: &str| STEPS.iter().find(|s| s.name == name).expect(name).base;
-    assert_eq!(STEPS.len(), 22);
+    assert_eq!(STEPS.len(), 21);
     assert_eq!(base("read scrolls"), 97.0);
     assert_eq!(base("town run"), 95.0);
     assert_eq!(base("fight"), 80.0);

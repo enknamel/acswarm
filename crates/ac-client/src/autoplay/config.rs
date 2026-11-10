@@ -7,8 +7,7 @@ use super::critter;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Survive {
-    /// Health's floor, a fraction of its maximum: healed under it, and with nothing to heal it,
-    /// the fight is broken off till it is back (`Client::autoplay_fall_back`).
+    /// Heal when health falls below this fraction of its maximum; no attack, debuff or buff starts under it.
     pub heal_below: f32,
     /// Use a carried healing kit.
     pub use_kits: bool,
@@ -16,9 +15,9 @@ pub struct Survive {
     /// Revitalize, the way a caster does: the transfer gives more mana
     /// than the Revitalize costs, so the round is a gain.
     pub manage_mana: bool,
-    /// Mana's floor: stamina poured into mana under it, and no buff or attack spends under it.
+    /// Pour stamina into mana under this fraction; no attack, debuff or buff starts under it.
     pub mana_below: f32,
-    /// Stamina's floor: Revitalize under it, and no transfer into mana takes it under.
+    /// Revitalize under this fraction, whatever the mana; no transfer, attack, debuff or buff starts under it.
     pub stamina_below: f32,
     /// After a death, go back for the corpse and take the gear off it
     /// (see `crate::recovery`).
@@ -87,7 +86,7 @@ pub struct Buffs {
     /// `buff_within`).
     pub out_of_combat_only: bool,
     /// Keep this fraction of mana back from buffing, for healing and
-    /// fighting, and never less than `Survive::mana_below`. A character that spends its last point
+    /// fighting. A character that spends its last point
     /// on Quickness Self cannot heal, and buffs are the one thing that can wait.
     pub keep_mana: f32,
 }

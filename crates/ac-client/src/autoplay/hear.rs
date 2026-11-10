@@ -113,7 +113,7 @@ impl Client {
         let Some(who) = spell_attacker(text) else {
             return;
         };
-        self.hear_attack(who, now);
+        self.autoplay.attacked_by(who, now);
     }
 
     /// A line saying a shot got to something and did not hurt it (see

@@ -211,22 +211,3 @@ fn a_ground_no_journey_reaches_is_skipped_at_once() {
     assert_eq!(c.autoplay.growth.bound, None, "still bound for it");
     assert!(c.autoplay.growth.skip.since(&lb).is_some(), "not skipped");
 }
-
-#[test]
-fn a_fall_back_lets_only_a_town_run_under_way_through() {
-    // Resting with a run under way, the run walks on; loot, catch up and salvage wait (and a
-    // healer's team row, here with no team, goes on).
-    let mut c = standing_at(0xA9B4_0019, glam::Vec3::new(84.0, 7.1, 94.0));
-    c.world.player_guid = Some(0x5000_0001);
-    let now = Instant::now();
-    c.autoplay.growth.run = Some(run_to(Vec2::new(32_500.0, 34_500.0), now));
-    assert!(crate::steps::weigh(&c, now).ranking().len() > 1);
-    c.autoplay.falling_back = Some(crate::autoplay::vitals::floors::FallBack::default());
-    let weighed = crate::steps::weigh(&c, now).ranking();
-    let rows: Vec<&str> = weighed.into_iter().map(|r| r.0).collect();
-    assert!(rows.contains(&"town run"), "{rows:?}");
-    assert!(
-        rows.iter().all(|r| matches!(*r, "town run" | "team")),
-        "{rows:?}"
-    );
-}

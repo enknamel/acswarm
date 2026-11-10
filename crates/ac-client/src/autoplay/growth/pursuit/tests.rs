@@ -2888,9 +2888,16 @@ fn a_dropper_met_on_the_road_is_fought_only_when_its_chance_beats_the_plan() {
     assert!(c.passing_by(&tiatus, &cfg), "fought, the plan near");
     c.autoplay.growth.plan_secs = Some(secs / chance * 2.0);
     c.keep_road_droppers();
+    // Worth the plan, but minding its own business: run past (the K'nath K'ram gone out to and let
+    // go every tick). On the character, it is fought.
+    assert!(
+        c.passing_by(&tiatus, &cfg),
+        "gone out to, not on the character"
+    );
+    tiatus.walked_at = c.world.player_guid;
     assert!(
         !c.passing_by(&tiatus, &cfg),
-        "walked past with the plan far"
+        "walked past with the plan far and it on the character"
     );
 }
 
@@ -2956,6 +2963,7 @@ fn a_held_grounds_dropper_in_reach_on_the_road_is_fought_only_when_worth_the_pla
     );
     c.autoplay.growth.plan_secs = Some(secs / chance * 2.0);
     c.keep_road_droppers();
+    it.walked_at = c.world.player_guid;
     assert!(!c.passing_by(&it, &cfg), "walked past, worth the plan");
 }
 

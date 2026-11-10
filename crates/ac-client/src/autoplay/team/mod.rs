@@ -69,11 +69,6 @@ impl Client {
                     .spell_by_name("Heal Other")
                     .filter(|s| matches!(self.can_cast_well(*s), crate::magic::CastCheck::Ok));
                 if let Some(spell) = spell {
-                    // Heals are what the mana floor is kept for: a fellow's goes under it.
-                    if !self.can_spare_mana(spell) {
-                        let said = format!("healing {} under the mana floor", hurt.name);
-                        self.autoplay.note(said, now);
-                    }
                     self.select(Some(hurt.guid));
                     self.cast(spell);
                     self.autoplay.last_heal = Some(now);
@@ -121,8 +116,8 @@ impl Client {
                         if !matches!(self.can_cast_well(spell), crate::magic::CastCheck::Ok) {
                             continue;
                         }
-                        if !self.can_spare_mana(spell) {
-                            let said = format!("holding {spell_name} for the mana floor");
+                        if let Some(bar) = self.bar_under_slider() {
+                            let said = format!("holding {spell_name}: {bar} under its slider");
                             self.autoplay.note(said, now);
                             continue;
                         }

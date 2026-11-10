@@ -135,8 +135,6 @@ pub enum Doing {
     Training,
     /// Pouring loose stacks together (see `crate::pack`).
     Tidying,
-    /// Away from a fight with a vital under its floor, till it is back (`autoplay_fall_back`).
-    Resting,
 }
 
 impl Doing {
@@ -157,7 +155,6 @@ impl Doing {
             Doing::Shopping => "in town",
             Doing::Dodging => "dodging",
             Doing::Training => "in the Training Academy",
-            Doing::Resting => "resting",
         }
     }
 }
@@ -295,9 +292,6 @@ pub struct Autoplay {
     /// silenced the first, which was then walked past between its
     /// swings (see [`Autoplay::attacked_by`]).
     pub(crate) hit_by: Recent<String>,
-    /// The same by guid: each attack's name put to the creatures of that name after the character
-    /// (`Client::hear_attack`), so one shooting from afar is told from its kin.
-    pub(crate) hit_by_guid: Recent<u32>,
     /// What the leader remembers between plans, when this character
     /// leads: the bodies it has dealt and the turns each of the others
     /// has had (see `crate::plan`).
@@ -335,8 +329,6 @@ pub struct Autoplay {
     last_vital: Option<Instant>,
     /// The self heals in the spellbook were logged, once a session (`log_self_heals`).
     heals_logged: bool,
-    /// A fight broken off for a vital under its floor, till it is back (`Client::autoplay_fall_back`).
-    pub(crate) falling_back: Option<vitals::floors::FallBack>,
     /// The corpse being looted and when we started.
     /// The corpse being opened: which, since when, how long to allow
     /// (the server walks us to it, so a far one is slower), and how
