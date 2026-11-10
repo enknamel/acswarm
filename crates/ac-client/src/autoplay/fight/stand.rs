@@ -278,6 +278,14 @@ impl Client {
         self.autoplay.stands = Stands::default();
     }
 
+    /// The stand held is no shot at the target: given up and not chosen again in this fight, not
+    /// walked back to (a_stand_walked_off_for_a_shot_is_not_walked_back_to).
+    pub(crate) fn leave_stand(&mut self) {
+        if let Some(s) = self.autoplay.stands.held.take() {
+            self.autoplay.stands.refused.push(s.spot.at);
+        }
+    }
+
     /// The creatures that fight the character by swinging, within [`ATTACKERS_WITHIN`]: coming
     /// at it, hitting it, or fought by it. One wielding a bow never needs a spot beside it
     /// (`Monster_Missile.cs:22`); a caster swings when its spell roll fails (`Monster_Combat.cs:108`).

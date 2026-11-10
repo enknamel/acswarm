@@ -180,6 +180,48 @@ fn a_casters_stand_keeps_its_target_in_sight() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
+fn a_stand_walked_off_for_a_shot_is_not_walked_back_to() {
+    // Blargerton flipped every tick between "taking a stand" and "getting K'nath Ban'ry in sight".
+    let mut c = in_the_bookcase_room();
+    three_round(&mut c);
+    let (spell, _) = c
+        .assets
+        .spell_table()
+        .unwrap()
+        .find_by_name("Frost Bolt III")
+        .expect("Frost Bolt III");
+    let how = How::Spell(spell);
+    let now = Instant::now();
+    c.frame_at = now;
+    let target = 0x8000_0001;
+    let _ = take_stand(&mut c, Some(target), how, now);
+    let stand = c.autoplay.stands.held.expect("a stand chosen");
+    // Stood at it, the target moves off where no shot from it gets (up through the ceiling).
+    let me = here(&c);
+    c.autoplay.stands.held = Some(Stand {
+        spot: me,
+        reached: true,
+        ..stand
+    });
+    let o = c.world.objects.get_mut(&target).unwrap();
+    o.position = Some(ac_world::object::Position::new_flat(
+        me.cell,
+        me.at + Vec3::new(0.0, 0.0, 20.0) - ac_world::landblock_origin(me.cell),
+    ));
+    let _ = c.autoplay_approach(target, "Revenant", how);
+    assert!(c.autoplay.stands.held.is_none(), "the stand still held");
+    assert!(c.autoplay.stands.refused.contains(&me.at));
+    // Asked again where it stands, nothing walks it back: the approach has the legs.
+    assert_eq!(take_stand(&mut c, Some(target), how, now), Did::Done);
+    assert!(c
+        .autoplay
+        .stands
+        .held
+        .is_none_or(|s| s.reached && !s.walked));
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_followers_stand_keeps_by_its_leader() {
     // The leader two metres north-east, its fight radius three: the bookcase corner, five metres
     // off it, is not a follower's to walk to.

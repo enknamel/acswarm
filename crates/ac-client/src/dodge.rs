@@ -861,11 +861,15 @@ impl Client {
         }
         let seen =
             self.shot_clears(target, how) && (matches!(how, How::Melee) || !self.is_dud_spot(me));
+        let stop = if seen { range * WITHIN } else { NO_SIGHT_STOP };
+        // Walked off for a shot, a fight's stand is given up: held, it walked us back every tick.
+        if !(at.distance(me) <= stop && seen) {
+            self.leave_stand();
+        }
         // A doorway either stands in: step out of it, or wait for the target to come out.
         if !seen && !matches!(how, How::Melee) && self.clear_doorway(target, name, at, how) {
             return Did::Acting;
         }
-        let stop = if seen { range * WITHIN } else { NO_SIGHT_STOP };
         if at.distance(me) <= stop && seen {
             self.stop_approaching();
             return Did::Done;
