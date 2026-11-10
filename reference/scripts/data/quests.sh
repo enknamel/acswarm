@@ -18,7 +18,8 @@
 # or Treasure without Wield: Creature_Death.cs:688-693), names, levels,
 # item types and values, and spawn entries per creature and landblock
 # with hunting.sh's filters (attackable, with a level; a landblock with a
-# surface counts its outdoor spawns only); and for each wanted item the
+# surface counts its outdoor spawns only), the encounter table's for a
+# creature nothing placed spawns; and for each wanted item the
 # generators making it on the ground and the chests holding it, with the
 # keys a locked one needs, and the placed objects a recipe makes it on from
 # an item used on them; and the scroll teaching each recall spell
@@ -126,6 +127,26 @@ select m.wcid, hex(m.lb), count(*) from mon m
 where m.kind = "o" or m.lb not in (select lb from surface)
 group by m.wcid, m.lb;'
 
+# And the outdoor generators a landblock puts out from the encounter table, each at a cell corner
+# of the surface (Landblock.cs:269-290): the Mire Witch Martine's camp, on Marae Lassel's shores,
+# is placed by nothing else. The walk below each encounter class once, then per landblock.
+q encounters 'with recursive spawn(root, wcid, depth) as (
+  select distinct e.weenie_Class_Id, e.weenie_Class_Id, 0 from encounter e
+  union all
+  select s.root, g.weenie_Class_Id, s.depth + 1 from spawn s
+  join weenie_properties_generator g on g.object_Id = s.wcid
+  where s.depth < 4 and (g.where_Create & 56) = 0
+),
+mon as (
+  select distinct s.root, s.wcid from spawn s
+  join weenie c on c.class_Id = s.wcid and c.type = 10
+  join weenie_properties_int lv on lv.object_Id = c.class_Id and lv.type = 25
+  left join weenie_properties_bool b on b.object_Id = c.class_Id and b.type = 19
+  where coalesce(b.value, 1) = 1
+)
+select m.wcid, hex(e.landblock), count(*) from encounter e join mon m on m.root = e.weenie_Class_Id
+group by m.wcid, e.landblock;'
+
 # What lies about and what makes it: placed objects but creatures and buildings (WeenieType
 # Portal, Door, Vendor, HotSpot, Creature, LifeStone, House, SlumLord, Hook, Storage, BootSpot,
 # HousePortal), every weenie's type, and every generator profile.
@@ -174,7 +195,7 @@ where r.success_W_C_I_D <> 0
   and c.target_W_C_I_D not in (select weenie_Class_Id from landblock_instance);'
 
 for t in placed emote action harm scrolls quest killq itemq drops names allowgive ints spawns ground wtypes \
-  gens chestlist locks keys stuck recipes combines; do
+  gens chestlist locks keys stuck recipes combines encounters; do
   [ -s "$TMP/$t.tsv" ] || { echo "quests.sh: the $t query returned nothing" >&2; exit 1; }
 done
 

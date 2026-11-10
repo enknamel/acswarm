@@ -149,7 +149,10 @@ group by s.wcid, lb;
 
 The last query must use `hunting.sh`'s attackable and level filters and its rule that a landblock
 with a surface counts only its outdoor spawns, so a quest's share of a ground (§4.1) is a fraction
-of like with like (`Ground::count` counts the same entries).
+of like with like (`Ground::count` counts the same entries). A creature nothing placed spawns
+takes its landblocks from the `encounter` table instead (Landblock.cs:269-290), its 64 with the
+most generators: the Mosswart Mire-Witch, whose Tattered Virindi Cloak starts the Singularity
+Scepters, is put out only by Marae Lassel's shore encounters.
 
 ### 1.4 The walk
 

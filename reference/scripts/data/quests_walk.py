@@ -101,6 +101,17 @@ class Data:
         self.spawns = defaultdict(list)
         for wcid, lb, n in rows(dump, "spawns"):
             self.spawns[int(wcid)].append((int(lb, 16), int(n)))
+        # The encounter table's, only for a creature nothing placed spawns, and only its
+        # ENCOUNTER_BLOCKS landblocks with the most generators: all of a common one's thousands
+        # took the table from under 1 MB to 37 MB (a Banished Drudge is on 8,363).
+        placed = set(self.spawns)
+        met = defaultdict(list)
+        for wcid, lb, n in rows(dump, "encounters"):
+            if int(wcid) not in placed:
+                met[int(wcid)].append((int(lb, 16), int(n)))
+        for wcid, blocks in met.items():
+            blocks.sort(key=lambda b: (-b[1], b[0]))
+            self.spawns[wcid] = sorted(blocks[:ENCOUNTER_BLOCKS])
         # What lies about: placed objects but creatures and buildings, by wcid.
         # And the placements a generator makes, linked to it: made there with a guid of their own.
         self.ground, self.linked = defaultdict(list), defaultdict(list)
@@ -735,6 +746,9 @@ def kept_uses(src, wants, sold):
             return keep
         src = keep
 
+
+# Landblocks kept per creature the encounter table alone spawns: where it is likeliest.
+ENCOUNTER_BLOCKS = 64
 
 # Columns of a quests.csv row a random reply's alternatives may differ in and still be one row.
 COL_GIVES, COL_DOES, COL_UNREAD = 14, 22, 23

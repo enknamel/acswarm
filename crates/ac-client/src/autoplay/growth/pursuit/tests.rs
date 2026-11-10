@@ -2286,6 +2286,22 @@ fn a_ground_under_foot_that_no_gem_reaches_waits_its_turn_in_the_list() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
+fn the_bound_singularity_scepter_with_nothing_carried_starts_at_the_mire_witch() {
+    // Bound <- Singularity Scepter <- Glowing Virindi Cloak <- Virindi Essence on a Tattered
+    // Virindi Cloak, which only the Mosswart Mire-Witch (9163) drops; her camp is put out by
+    // Marae Lassel's shore generators in the encounter table, which the data once left out.
+    let mut c = mage_pursuing("give:27841", "chained-quests");
+    let now = std::time::Instant::now();
+    c.refresh_quests(now);
+    let step = c.pursuit[0].step.clone();
+    assert!(
+        matches!(&step, PursuitStep::Hunt { creature, .. } if creature == "Mosswart Mire-Witch"),
+        "no way to the Bound scepter: {step:?}"
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_quests_item_another_quest_rewards_is_had_by_that_hand_in_first() {
     // The Ultimate Singularity Scepter of War Magic takes the Bound one, which the Virindi Castaway
     // gives for the Singularity Scepter carried: "nobody known yields Bound Singularity Scepter".
