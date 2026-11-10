@@ -199,6 +199,7 @@ fn work_events(
         unlocked: &|_| false,
         ways: &BTreeMap::new(),
         gem_grounds: &Default::default(),
+        flag_ways: &BTreeMap::new(),
         here: None,
         bound: None,
         kill_secs,
@@ -376,6 +377,47 @@ fn a_flag_a_warden_gives_is_earned_first() {
     f.held.push(warden.flag.to_ascii_uppercase());
     let p = work(&f, &fake, None);
     assert!(matches!(p.lines[0].step, PursuitStep::Hunt { .. }), "{p:?}");
+}
+
+#[test]
+fn a_way_in_behind_a_flag_a_kill_stamps_hunts_that_kill_first() {
+    let mut fake = jaws();
+    let pit = way_in("Eater Pit", 0x0001, 40, "Eaterpit");
+    fake.grounds[0].1 = ground(0x0001, fake.grounds[0].1.source, pit);
+    let want = Want::Flag("eaterpit".into());
+    let guardian = leak(Source {
+        want: want.clone(),
+        kind: Yield::Kill,
+        ..dropper(Want::Nothing, 10824, "Guardian of the Singularity", 135).clone()
+    });
+    let hall = way_in("Singularity Bore", 0x0291, 50, "");
+    fake.grounds.push((want, ground(0x0291, guardian, hall)));
+    fake.givers = BTreeMap::from([("Eaterpit", vec![FlagBy::Kill(guardian)])]);
+    let p = work(&facts(140, &[("engorgedeaterjaw", false)]), &fake, None);
+    assert!(
+        matches!(
+            p.lines[0].step,
+            PursuitStep::Hunt {
+                landblock: 0x0291,
+                ..
+            }
+        ),
+        "{p:?}"
+    );
+    // Held, the hunt goes on through the portal.
+    let mut f = facts(140, &[("engorgedeaterjaw", false)]);
+    f.held.push("Eaterpit".into());
+    let p = work(&f, &fake, None);
+    assert!(
+        matches!(
+            p.lines[0].step,
+            PursuitStep::Hunt {
+                landblock: 0x0001,
+                ..
+            }
+        ),
+        "{p:?}"
+    );
 }
 
 /// Sir Ginazio's talk, which stamps the eaterpit flag (quest ginsword).
@@ -2272,6 +2314,68 @@ fn a_chest_on_an_island_is_reached_by_its_gem_not_dropped() {
     assert!(
         matches!(again(&mut c, now), PursuitStep::Buy { .. }),
         "the chest dropped, not the gem bought"
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn the_sanatorium_chest_past_the_island_portal_has_virindiisland_had_first() {
+    // The Asylum Chest Key in hand, no journey reaches the chest: the island's portals ask
+    // VirindiIsland, stamped by the Guardian of the Singularity's death on its killer.
+    let mut c = mage_pursuing("learn:2943", "caul-by-flag");
+    c.world.stats.level = 135;
+    c.autoplay.growth.proven_tier = 8;
+    in_the_pack(&mut c, 0x8000_0702, 22923, "Asylum Chest Key", 1);
+    let now = std::time::Instant::now();
+    c.refresh_quests(now);
+    assert!(
+        matches!(c.pursuit[0].step, PursuitStep::OpenChest { .. }),
+        "{:?}",
+        c.pursuit[0].step
+    );
+    let cfg = c.autoplay.config.growth.clone();
+    c.grow_hunt(now, &cfg);
+    let wanted = c.autoplay.growth.pursuit_flags.get("learn:2943");
+    assert_eq!(
+        wanted.map(String::as_str),
+        Some("VirindiIsland"),
+        "{}",
+        c.autoplay.status
+    );
+    match again(&mut c, now) {
+        PursuitStep::Hunt {
+            landblock,
+            creature,
+            ..
+        } => {
+            assert_eq!(landblock, 0x0291);
+            assert_eq!(creature, "Guardian of the Singularity");
+        }
+        other => panic!("{other:?}"),
+    }
+    // Our killing blow holds the flag, and the chest is gone for again.
+    let me = c.my_position().unwrap();
+    let cell = c.player.as_ref().unwrap().cell;
+    let mut guardian = crate::testkit::creature(0x5000_0901, "Guardian of the Singularity");
+    guardian.weenie_class_id = 10824;
+    guardian.position = crate::testkit::placed(cell, me);
+    c.world.objects.insert(guardian.guid, guardian);
+    c.note_sought_kill(me, now);
+    assert!(c.holds_quest_flag("VirindiIsland"));
+    // Ten portals from Holtburg, past any cap on their number.
+    let chest = ac_world::Place {
+        at: ac_world::landblock_origin(0x6048_01BB) + glam::Vec3::new(83.05, -21.49, -5.99),
+        cell: 0x6048_01BB,
+    };
+    let quests = c.travel.quests_done.clone();
+    let trip = c
+        .journey_plan(chest, &quests)
+        .expect("a journey to the chest");
+    assert!(trip.portals() > 8, "{:?}", trip.steps);
+    assert!(
+        matches!(again(&mut c, now), PursuitStep::OpenChest { .. }),
+        "{:?}",
+        c.pursuit[0].step
     );
 }
 

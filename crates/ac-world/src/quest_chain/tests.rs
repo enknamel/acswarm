@@ -39,7 +39,7 @@ fn quest_stampers(by: &[FlagBy]) -> Vec<(&'static str, &'static str)> {
     by.iter()
         .filter_map(|b| match b {
             FlagBy::Quest(r) => Some((r.id, r.giver)),
-            FlagBy::Unlock(_) => None,
+            _ => None,
         })
         .collect()
 }
@@ -324,4 +324,29 @@ fn an_empty_rare_camp_ranks_below_a_dungeon_of_sure_spawns() {
     assert!(rank(7102, 0x01DB) < camp, "the Moss Chamber");
     let chakron = &grounds[rank(10815, 0x02AF)];
     assert!(chakron.items_per_hour() > 100.0, "{:?}", chakron.rate);
+}
+
+#[test]
+fn aun_ralirea_is_about_at_a_fresh_load_however_rare() {
+    // A peace generator's 0.2% pick: the seeded run never drew it, every rate read 0, and the
+    // Clay Figurine had no ground worth a visit.
+    let grounds = source_grounds(&Want::Item(10960));
+    let best = grounds.first().expect("Aun Ralirea's grounds");
+    assert_eq!(best.source.wcid, 10950);
+    assert!(best.items_per_hour() > 0.05, "{:?}", best.rate);
+}
+
+#[test]
+fn the_virindiisland_flag_is_had_by_killing_the_guardian_of_the_singularity() {
+    // The portals onto the island over the Singularity Caul ask it; only the Guardian's death
+    // stamps it, on its killer, so nobody was known to give it.
+    let by = flag_givers("VirindiIsland");
+    let killed: Vec<u32> = by
+        .iter()
+        .filter_map(|b| match b {
+            FlagBy::Kill(s) => Some(s.wcid),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(killed, [10824], "{by:?}");
 }

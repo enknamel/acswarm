@@ -11,7 +11,8 @@
 # (GetEmoteSet, WorldObjects/Managers/EmoteManager.cs:1512-1556). The
 # walk through those sets is a graph search, done by quests_walk.py
 # (stdlib Python) on tables read out here: placed objects with a Refuse,
-# Give or Use set, their sets and actions, the quest table, kill counters
+# Give or Use set, their sets and actions (and those of anything starting
+# or stopping an event, or stamping a flag as it dies), the quest table, kill counters
 # on creatures (PropertyString 45, 49, 50), a wanted item's pickup limit and
 # the flag its pickup asks (33, 37), who takes a gift (AllowGive,
 # PropertyBool 8: Player_Inventory.cs:3439), corpse create lists (Contain,
@@ -58,7 +59,7 @@ q emote 'select id, object_Id, category, probability, coalesce(weenie_Class_Id, 
 from weenie_properties_emote
 where object_Id in (select weenie_Class_Id from landblock_instance) or object_Id in (select ev.object_Id
   from weenie_properties_emote ev join weenie_properties_emote_action ea on ea.emote_Id = ev.id
-  where ea.type in (23, 24))
+  where ea.type in (23, 24) or (ev.category = 3 and ea.type = 22))
 order by object_Id, id;'
 
 q action 'select a.emote_Id, a.order, a.type, coalesce(a.message, ""), coalesce(a.min, ""),
@@ -70,7 +71,7 @@ from weenie_properties_emote_action a
 where a.emote_Id in (select id from weenie_properties_emote
   where object_Id in (select weenie_Class_Id from landblock_instance) or object_Id in (select
     ev.object_Id from weenie_properties_emote ev join weenie_properties_emote_action ea
-    on ea.emote_Id = ev.id where ea.type in (23, 24)))
+    on ea.emote_Id = ev.id where ea.type in (23, 24) or (ev.category = 3 and ea.type = 22)))
 order by a.emote_Id, a.order;'
 
 # Server events (Managers/EventManager.cs): each generator's GeneratorEvent (String 34) and each

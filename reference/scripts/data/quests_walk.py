@@ -186,7 +186,7 @@ class Data:
         for obj, t, portal, cell, x, y, z in rows(dump, "linkportal"):
             self.link_portal[(int(obj), int(t))] = (int(portal), int(cell, 16), x, y, z)
         self.event_name = {}
-        self.starts, self.summons = event_starts(self)
+        self.starts, self.summons, self.stamps = event_starts(self)
 
     def gate_of(self, wcid, depth=0):
         """(made, event): whether anything puts `wcid` in the world, and when every way that does
@@ -288,6 +288,8 @@ GEN_CONTAINERS = (20, 21)
 PLACEHOLDER = 3666
 # Power-ups averaged for the load, and hours of clearing for the rate, per root generator.
 LOAD_RUNS = 60
+# Power-ups averaged for what a generator a generator makes puts out at once.
+FILL_RUNS = 20
 CLEAR_HOURS = 2.0
 # Killed alone, a creature coming at under this share of its rate cleared needs its slots cleared.
 ALONE_SHARE = 0.9
@@ -375,9 +377,33 @@ class Gen:
 
     def select(self, now, rng, out):
         """SelectProfiles (WorldObject_Generators.cs:108-178, 238-276): the picks of one roll."""
+        if not self.stops(now):
+            self.pick(now, rng.uniform(0.0, self.total(now)), out)
+
+    def ways(self, now):
+        """Each way one roll can go now: a roll inside it, and its share of rolls. The picks change
+        only at a threshold, so a roll between two stands for all between them."""
         if self.stops(now):
-            return
-        roll = rng.uniform(0.0, self.total(now))
+            return []
+        total = self.total(now)
+        if total <= 0.0:
+            return [(0.0, 1.0)]
+        cuts, tot, last = {0.0, total}, 0.0, 0.0
+        for s in self.slots:
+            if s.prob == -1:
+                continue
+            if not self.maxed(s) and now > s.avail:
+                if last > s.prob:
+                    last = 0.0
+                tot += s.prob - last
+                if 0.0 < tot < total:
+                    cuts.add(tot)
+            last = s.prob
+        cuts = sorted(cuts)
+        return [((a + b) / 2, (b - a) / total) for a, b in zip(cuts, cuts[1:])]
+
+    def pick(self, now, roll, out):
+        """The picks of a roll of `roll` (SelectProfiles' loop)."""
         tot, last = 0.0, 0.0
         for s in self.slots:
             # A placeholder's band counts toward the thresholds after it; it is only never made
@@ -399,6 +425,15 @@ class Gen:
                     return
 
 
+def drawn_or_expected(drawn, expected):
+    """Each creature's figure as the runs drew it, or what their rolls make on average where they
+    never drew it: a refill of a camp a rare pick made is counted only once it is drawn, so the
+    average alone reads it low (a Mire-Witch shore's 3 an hour as 0.2)."""
+    out = {c: n for c, n in expected.items() if n > 0}
+    out.update({c: n for c, n in drawn.items() if n > 0})
+    return out
+
+
 class Sim:
     """One root generator's tree in time; `kills(wcid)` says whether the player kills one at once."""
 
@@ -406,6 +441,9 @@ class Sim:
         self.sp, self.rng, self.kills = sp, rng, kills
         self.heap, self.seq, self.pending = [], 0, []
         self.made, self.alive = defaultdict(int), defaultdict(int)
+        # What each roll makes on average, over every way it could go: a 0.2% pick (Aun Ralirea)
+        # counts at its share instead of at 0 in a run that never draws it (`drawn_or_expected`).
+        self.expect = defaultdict(float)
         self.push(0.0, Gen(sp, root, links))
 
     def push(self, t, g):
@@ -418,15 +456,26 @@ class Sim:
         if g.powering:
             n = 0
             while not g.stops(now) and n < 1000:
-                made = []
-                g.select(now, self.rng, made)
-                self.place(g, made, now)
+                self.roll(g, now)
                 n += 1
             g.powering = False
         else:
-            made = []
-            g.select(now, self.rng, made)
-            self.place(g, made, now)
+            self.roll(g, now)
+
+    def roll(self, g, now):
+        """One roll: what it makes on average counted, then one way it goes drawn. A generator a
+        roll makes was counted whole by its parent's roll ([`Spawning.first_fill`]), so its own
+        power-up is not counted again."""
+        if not (g.powering and g.parent is not None):
+            for roll, share in g.ways(now):
+                picks = []
+                g.pick(now, roll, picks)
+                for s in picks:
+                    for c, n in self.sp.yields(s.wcid).items():
+                        self.expect[c] += share * n
+        made = []
+        g.select(now, self.rng, made)
+        self.place(g, made, now)
 
     def place(self, g, made, now):
         sp = self.sp
@@ -515,6 +564,28 @@ class Spawning:
             if int(parent) in guid_wcid:
                 self.link_parent[int(wcid)].add(guid_wcid[int(parent)])
         self.reach_of, self.per_root, self.per_alone = {}, {}, {}
+        self.filled = {}
+
+    def yields(self, w):
+        """What one `w` a roll picks puts in the world on average, by creature: itself, a
+        generator's first fill, or nothing (an item, or a creature nobody can attack)."""
+        if w in self.profiles and w not in self.attackable:
+            return self.first_fill(w)
+        return {w: 1.0} if self.attackable.get(w) else {}
+
+    def first_fill(self, w):
+        """Creatures generator `w` puts out on average as it powers up, once made."""
+        if w not in self.filled:
+            self.filled[w] = {}  # a generator making itself counts nothing more
+            out = defaultdict(float)
+            rng = random.Random("fill:%d" % w)
+            for _ in range(FILL_RUNS):
+                s = Sim(self, w, (), rng, lambda c: False)
+                s.run(0.0)
+                for c, n in s.expect.items():
+                    out[c] += n / FILL_RUNS
+            self.filled[w] = dict(out)
+        return self.filled[w]
 
     def reaches(self, w, depth=0):
         """Every wcid generator `w` can put in the world, five deep."""
@@ -541,16 +612,22 @@ class Spawning:
                 return self.per_root[key]
             rng = random.Random("%d:%s" % key)
             load = defaultdict(float)
+            seen, expect = defaultdict(float), defaultdict(float)
             for _ in range(LOAD_RUNS):
                 s = Sim(self, w, links, rng, lambda c: False)
                 s.run(0.0)
                 for c, n in s.alive.items():
-                    load[c] += n / LOAD_RUNS
+                    seen[c] += n / LOAD_RUNS
+                for c, n in s.expect.items():
+                    expect[c] += n / LOAD_RUNS
+            load.update(drawn_or_expected(seen, expect))
             s = Sim(self, w, links, rng, lambda c: True)
             s.run(0.0)
-            base = dict(s.made)
+            made, expect = dict(s.made), dict(s.expect)
             s.run(CLEAR_HOURS * 3600)
-            rate = {c: (n - base.get(c, 0)) / CLEAR_HOURS for c, n in s.made.items()}
+            rate = drawn_or_expected(
+                {c: (n - made.get(c, 0)) / CLEAR_HOURS for c, n in s.made.items()},
+                {c: (n - expect.get(c, 0)) / CLEAR_HOURS for c, n in s.expect.items()})
             # A placed creature that is a generator too stands there itself.
             if self.attackable.get(w):
                 load[w] += 1.0
@@ -563,9 +640,11 @@ class Spawning:
         if key not in self.per_alone:
             s = Sim(self, w, links, random.Random("%d:%s:%d" % key), lambda c: c == wcid)
             s.run(0.0)
-            base = s.made.get(wcid, 0)
+            made, expect = s.made.get(wcid, 0), s.expect.get(wcid, 0)
             s.run(CLEAR_HOURS * 3600)
-            self.per_alone[key] = (s.made.get(wcid, 0) - base) / CLEAR_HOURS
+            self.per_alone[key] = drawn_or_expected(
+                {wcid: (s.made.get(wcid, 0) - made) / CLEAR_HOURS},
+                {wcid: (s.expect.get(wcid, 0) - expect) / CLEAR_HOURS}).get(wcid, 0.0)
         return self.per_alone[key]
 
     def rates(self, wcid, lb):
@@ -654,12 +733,15 @@ def walk(data, root):
 
 def event_starts(data):
     """What starts each event, {event: {(kind, obj, item)}} (lower case): give (`item` handed to
-    `obj`), kill (`obj`'s death) or use; and what a creature's death summons, {creature: (portal,
-    cell, x, y, z)} (its CastSpellInstant of a portal summon: Relic Watchman's Aerfalle Keep)."""
-    starts, summons = defaultdict(set), {}
+    `obj`), kill (`obj`'s death) or use; what a creature's death summons, {creature: (portal,
+    cell, x, y, z)} (its CastSpellInstant of a portal summon: Relic Watchman's Aerfalle Keep);
+    and whose death stamps each flag on its killer, {flag: {creature}} (lower case: the Guardian
+    of the Singularity's VirindiIsland; EmoteManager.cs:1998-2008 runs it for the last damager)."""
+    starts, summons, stamps = defaultdict(set), {}, defaultdict(set)
     kinds = {GIVE: "give", DEATH: "kill", USE: "use"}
     objs = {s["obj"] for s in data.sets.values()
-            if any(a["type"] in (START_EVENT, CAST_INSTANT) for a in s["acts"])}
+            if any(a["type"] in (START_EVENT, CAST_INSTANT) for a in s["acts"])
+            or s["cat"] == DEATH and any(a["type"] == STAMP for a in s["acts"])}
     for obj in sorted(objs):
         for s in data.by_obj[obj]:
             kind = kinds.get(s["cat"])
@@ -676,7 +758,9 @@ def event_starts(data):
                         did = 31 if data.summon_link[a["spell"]] <= 1 else 48
                         if (obj, did) in data.link_portal:
                             summons[obj] = data.link_portal[(obj, did)]
-    return starts, summons
+                    elif a["type"] == STAMP and kind == "kill" and a["msg"]:
+                        stamps[a["msg"].lower()].add(obj)
+    return starts, summons, stamps
 
 
 def xp_of(effects):
@@ -1043,7 +1127,8 @@ def build(data, never):
     # as a way in. Both are wants whose sources are written.
     learnt = {w: spell for spell in data.recalls for w in data.scrolls_of.get(spell, ())}
     wants = sorted({r[5] for r in rows_out if r[1] in ("kill", "item")}
-                   | {str(w) for w in learnt} | {str(w) for w in data.gems})
+                   | {str(w) for w in learnt} | {str(w) for w in data.gems}
+                   | {"flag:" + f for f in data.stamps})
     seen = set(wants)
     todo = [(w, 0) for w in wants]
     while todo:
@@ -1110,6 +1195,11 @@ def build(data, never):
                         todo.append((str(item), depth + 1))
                 elif kind == "kill" and data.spawns.get(obj):
                     src.append((want, "kill", obj, 1.0, ""))
+        elif want.startswith("flag:"):
+            # Stamped on whoever deals a creature its last blow (EmoteType 22 in its Death set).
+            for c in sorted(data.stamps.get(want[5:], ())):
+                if data.spawns.get(c):
+                    src.append((want, "kill", c, 1.0, ""))
         else:
             for c in sorted(data.counter_of[want]):
                 if data.spawns.get(c):
@@ -1157,13 +1247,19 @@ def build(data, never):
             # One an event gates, as it comes once the event is started.
             spawning = data.spawning_on if ev else data.spawning
             figures = (spawning.rates(c, lb) for lb, _ in sorted(data.spawns[c]))
-            rates = ";".join("%g:%g%s" % (round(n, 2), round(h, 1),
+            rates = ";".join("%s:%s%s" % (figure(n, 2), figure(h, 1),
                                           ":%g" % round(o) if round(o) else "")
                              for n, h, o in figures)
         src_out.append((want, kind, str(c), data.name.get(c, ""), str(data.level(c)),
                         "%g" % round(p, 4), where, at, keys, spawn, rates,
                         ev or ""))
     return rows_out, givers_out, src_out, reasons
+
+
+def figure(x, places):
+    """`x` to `places` decimals, but under 1 to two significant figures: a rare spawn's 0.012 an
+    hour is not 0."""
+    return "%.2g" % x if 0 < x < 1 else "%g" % round(x, places)
 
 
 def learn_rows(data, learnt, had):
@@ -1368,9 +1464,9 @@ SOURCES_HEADER = """\
 # Where what a quest wants comes from, and what each source itself needs.
 # want,kind,wcid,name,level,chance,landblocks,at,keys,spawn,rates,event
 # want: an item wcid or a kill counter, as quests.csv names it, a key a container or use
-# below needs, or event:NAME, a server event a source below needs (lower case). kind: drop (a
-# corpse drop, chance per kill), kill (a creature counting for the counter, or whose death starts
-# the event), give (an NPC handed its keys starts the event), npc (a placed NPC whose talk gives
+# below needs, or event:NAME, a server event a source below needs, or flag:NAME, a flag stamped
+# on a creature's killer (both lower case). kind: drop (a corpse drop, chance per kill), kill (a
+# creature counting for the counter, or whose death starts the event or stamps the flag), give (an NPC handed its keys starts the event), npc (a placed NPC whose talk gives
 # the item), floor (made on the ground by a
 # generator; wcid is the item's own), container (a chest that holds it, chance per fill), use
 # (a placed object a recipe makes it on, from a carried item used on it) or combine (a carried

@@ -1131,8 +1131,9 @@ with `--heritage`, `--gender`, `--template`,
   three seconds after they reached it gets a jump.
 * **How a journey is chosen** is a preference (`ac_world::trip::Prefs`):
   `quick` takes the fastest chain of portals, `steady` reckons a portal
-  at six times the cost and takes at most three, since every hop is a
-  chance to be turned away or land somewhere unexpected. Scripts set it
+  at six times the cost, since every hop is a chance to be turned away or
+  land somewhere unexpected. Neither caps how many: the Singularity Caul's
+  chest is ten from Holtburg. Scripts set it
   with `travel_style("steady")`.
 * **A portal takes whoever walks into it.** A route on the way to
   somewhere else must give every other portal a wide berth, or the

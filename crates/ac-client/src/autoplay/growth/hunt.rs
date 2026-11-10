@@ -671,11 +671,24 @@ impl Client {
         goal: Place,
         quests: &[String],
     ) -> Option<ac_world::trip::Trip> {
+        self.journey_plan_with(goal, quests, None)
+    }
+
+    /// [`Self::journey_plan`], a portal asking a flag not held taken at `flag_seconds` more.
+    pub(super) fn journey_plan_with(
+        &mut self,
+        goal: Place,
+        quests: &[String],
+        flag_seconds: Option<f32>,
+    ) -> Option<ac_world::trip::Trip> {
         self.tell_building_cells();
         let pl = self.player.as_ref()?;
         let (me, cell) = (pl.world_position(), pl.cell);
         let underground = self.underground();
-        let prefs = self.travel_prefs().in_dungeon(underground);
+        let prefs = ac_world::trip::Prefs {
+            flag_seconds,
+            ..self.travel_prefs().in_dungeon(underground)
+        };
         let cell = crate::travel::planning_cell(cell, me, underground);
         let level = self.world.stats.level.max(1) as u32;
         let gems = self.carried_gems();

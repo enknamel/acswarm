@@ -230,6 +230,8 @@ pub struct State {
     pursuit_paces: Vec<pursuit::pace::Ground>,
     /// Gems pursued quests buy, each the only way to its ground (see `pursuit::gem_way`).
     pursuit_gems: Vec<pursuit::GemWanted>,
+    /// The flag each pursued quest, by id, has first, the only way on (see `pursuit::flag_way`).
+    pursuit_flags: std::collections::BTreeMap<String, String>,
     /// Whether the working pursuit's ground was reached by a journey from the landblock stood in,
     /// as things were: `(landblock, quest, reached)`, planned once per landblock.
     quest_road: Option<(u32, String, bool)>,

@@ -1,7 +1,7 @@
 //! Quests the player asked for, worked before hunting for XP: each pursued quest's step for this
 //! character, worked out with the board; the town run calls on givers, `grow_hunt` hunts sources.
-//! A flag a way on asks is earned first: from an unlock NPC, or by the quest stamping it, worked
-//! ahead of the one that needs it (`with_chain`). An item is fetched before it is hunted (`fetch`).
+//! A flag a way on asks is earned first: from an unlock NPC, by a kill (`flag_way`), or by the quest
+//! stamping it, worked ahead of the one that needs it (`with_chain`). An item is fetched before it is hunted (`fetch`).
 //! What a chain needs is kept and bought only through the profile's Quests section (`section`).
 
 use std::collections::BTreeMap;
@@ -20,6 +20,7 @@ use crate::Client;
 
 mod events;
 mod fetch;
+mod flag_way;
 mod gem_way;
 mod kept;
 pub(crate) mod pace;
@@ -361,6 +362,9 @@ pub(crate) struct Ask<'a> {
     pub(crate) ways: &'a BTreeMap<String, (u32, String)>,
     /// The quests, by id, whose ground only a gem reaches, carried, used or still wanted.
     pub(crate) gem_grounds: &'a std::collections::BTreeSet<String>,
+    /// The flag each quest, by id, is had for first: no journey reaches its ground but past a
+    /// portal asking it. Gone once held.
+    pub(crate) flag_ways: &'a BTreeMap<String, String>,
     /// The landblock the character stands in, by its cell (a dungeon's rooms run past its square).
     pub(crate) here: Option<u32>,
     /// The pursued ground the character set off for, by landblock.
@@ -531,7 +535,7 @@ impl Ask<'_> {
                 };
                 stuck(format!("its givers take {band}; this character is {level}"))
             }
-            QuestState::CantYet(Blocked::Locked { flag }) => self.flag_step(flag),
+            QuestState::CantYet(Blocked::Locked { flag }) => return self.flag_step(flag, 0),
             QuestState::CantYet(Blocked::NeedsFirst { title }) => {
                 stuck(format!("{} comes first", title.trim()))
             }
@@ -579,6 +583,9 @@ impl Ask<'_> {
         // unless the character stands on the ground already (bought and used between boards).
         let there =
             matches!(step.0, PursuitStep::Hunt { landblock, .. } if Some(landblock) == self.here);
+        if let (Some(flag), false) = (self.flag_ways.get(&line.id), there) {
+            return self.flag_step(flag, 0);
+        }
         if let (Some((gem, name)), false) = (self.ways.get(&line.id), there) {
             return self.obtain(&[Want::Item(*gem)], 1, name, 0);
         }
@@ -617,7 +624,7 @@ impl Ask<'_> {
         if let Some(step) = self.fetch_step(wants, more, &mut locked, &mut events) {
             return (step, None);
         }
-        let hunted = self.ground_step(wants, more, what, &mut events);
+        let hunted = self.ground_step(wants, more, what, &mut events, depth);
         if !matches!(hunted.0, PursuitStep::Stuck { .. }) || depth >= OBTAIN_DEPTH {
             return hunted;
         }
@@ -700,6 +707,7 @@ impl Ask<'_> {
         more: u32,
         what: &str,
         events: &mut Vec<&'static str>,
+        depth: usize,
     ) -> (PursuitStep, Option<Hunting>) {
         let level = self.facts.level;
         let grounds: Vec<SourceGround> =
@@ -802,7 +810,7 @@ impl Ask<'_> {
             .iter()
             .filter(|g| g.place.is_some() && level_fits(g));
         if let Some(p) = shut.filter_map(|g| g.way_in).find(|p| !p.quest.is_empty()) {
-            return (self.flag_step(&p.quest), None);
+            return self.flag_step(&p.quest, depth);
         }
         let lowest = grounds
             .iter()
@@ -835,44 +843,55 @@ impl Ask<'_> {
         (stuck(why), None)
     }
 
-    /// The step for a flag a way on asks: earned from an unlock NPC the level earns, else why not.
-    fn flag_step(&self, flag: &str) -> PursuitStep {
+    /// The step for a flag a way on asks: earned from an unlock NPC the level earns, else by a
+    /// kill that stamps it ([`OBTAIN_DEPTH`] deep, as a key), else why not.
+    fn flag_step(&self, flag: &str, depth: usize) -> (PursuitStep, Option<Hunting>) {
         let by = self.chains.givers(flag);
         let unlocks = || {
             by.iter().filter_map(|b| match b {
                 FlagBy::Unlock(u) => Some(*u),
-                FlagBy::Quest(_) => None,
+                _ => None,
             })
         };
         if let Some(u) = unlocks().find(|u| u.min_level <= self.facts.level) {
             if (self.tried)(u) {
-                return stuck(format!(
-                    "{} was set off to lately for the {flag} flag",
-                    u.npc
-                ));
+                let why = format!("{} was set off to lately for the {flag} flag", u.npc);
+                return (stuck(why), None);
             }
-            return PursuitStep::EarnFlag {
+            let step = PursuitStep::EarnFlag {
                 flag: u.flag.clone(),
                 from: u,
             };
+            return (step, None);
         }
         if let Some(u) = unlocks().next() {
-            return stuck(format!(
-                "{} gives the {flag} flag from level {}",
-                u.npc, u.min_level
-            ));
+            let why = format!("{} gives the {flag} flag from level {}", u.npc, u.min_level);
+            return (stuck(why), None);
+        }
+        let mut killed = None;
+        if by.iter().any(|b| matches!(b, FlagBy::Kill(_))) && depth < OBTAIN_DEPTH {
+            let want = Want::Flag(flag.to_ascii_lowercase());
+            let got = self.obtain(&[want], 1, &format!("the {flag} flag"), depth + 1);
+            if !matches!(got.0, PursuitStep::Stuck { .. }) {
+                return got;
+            }
+            killed = Some(got);
         }
         let quest = by.iter().find_map(|b| match b {
             FlagBy::Quest(row) => Some(*row),
-            FlagBy::Unlock(_) => None,
+            _ => None,
         });
-        match quest {
-            Some(row) => stuck(format!(
-                "the {flag} flag comes first, from {} ({})",
-                row.giver,
-                row.title.trim()
-            )),
-            None => stuck(format!("nobody known gives the {flag} flag")),
+        match (quest, killed) {
+            (Some(row), _) => {
+                let why = format!(
+                    "the {flag} flag comes first, from {} ({})",
+                    row.giver,
+                    row.title.trim()
+                );
+                (stuck(why), None)
+            }
+            (None, Some(got)) => got,
+            (None, None) => (stuck(format!("nobody known gives the {flag} flag")), None),
         }
     }
 }
@@ -897,6 +916,7 @@ impl Client {
             st.pursuit_grounds.clear();
             st.pursuit_paces.clear();
             st.pursuit_gems.clear();
+            st.pursuit_flags.clear();
             st.pursuit_sought.clear();
             st.pursuit_droppers.clear();
             st.pursuit_road.clear();
@@ -905,6 +925,11 @@ impl Client {
             return;
         }
         self.keep_gem_ways();
+        let held_flags = &facts.held;
+        let st = &mut self.autoplay.growth;
+        st.pursuit_flags
+            .retain(|_, f| !held_flags.iter().any(|h| h.eq_ignore_ascii_case(f)));
+        let flag_ways = st.pursuit_flags.clone();
         let st = &self.autoplay.growth;
         // A gem carried is the way already: the planner takes it.
         let ways: BTreeMap<String, (u32, String)> = st
@@ -969,6 +994,7 @@ impl Client {
             unlocked: &unlocked,
             ways: &ways,
             gem_grounds: &gem_grounds,
+            flag_ways: &flag_ways,
             here: self.player.as_ref().map(|p| p.cell >> 16),
             bound: self.autoplay.growth.bound_landblock(),
             kill_secs: &kill_secs,
@@ -1086,6 +1112,7 @@ impl Client {
             self.autoplay.growth.sought_kill = Some((at, now));
         }
         self.note_event_kill(at, now);
+        self.note_flag_kill(at);
     }
 
     /// The body of the pursued hunt's creature killed, once it lies there (`sought_kill`): opened
@@ -1269,6 +1296,19 @@ impl Client {
                         return Some(true);
                     }
                     self.autoplay.growth.skip.mark(lb, now);
+                }
+                // No way but past a portal asking a flag (VirindiIsland, onto the Singularity Caul's
+                // island): the flag first, ahead of any gem, whose sources may lie past it too.
+                if let Some(flag) = self.flag_way(&every, &quests) {
+                    let why = format!(
+                        "for {}: the {flag} flag first, to reach {creature}",
+                        line.title
+                    );
+                    tracing::info!("pursuit: {}: {why}", line.id);
+                    self.autoplay.note(why, now);
+                    self.autoplay.growth.want_flag(&line.id, flag);
+                    self.quest_board_at = None;
+                    return Some(false);
                 }
                 // No way but from a gem's exit: the gem is had first, bought, hunted or fetched
                 // as any wanted item, and the next plan takes it (the Wedding Planner's

@@ -283,8 +283,6 @@ pub struct Prefs {
     /// What one portal is reckoned to cost, in seconds. Raise it and the
     /// journey takes fewer, longer hops; lower it and it hops more.
     pub portal_seconds: f32,
-    /// Give up on a chain longer than this many portals.
-    pub max_portals: usize,
     /// The farthest a single leg on foot is believed, metres. A player
     /// will walk a long way between towns; too small a figure here and
     /// journeys that plainly exist are reported as impossible.
@@ -310,6 +308,9 @@ pub struct Prefs {
     pub in_dungeon: bool,
     /// Who travels: a portal whose bitmask bars them is left out (`Portal::admits`).
     pub who: portals::Traveller,
+    /// A portal asking a flag not held is taken at this many seconds more; `None` leaves it out.
+    /// A figure past any journey's finds the way that needs the fewest flags.
+    pub flag_seconds: Option<f32>,
 }
 
 impl Default for Prefs {
@@ -323,13 +324,13 @@ impl Prefs {
     pub fn quick() -> Self {
         Prefs {
             portal_seconds: PORTAL_SECONDS,
-            max_portals: 8,
             walk_reach: WALK_REACH,
             portal_reach: PORTAL_REACH,
             recall_seconds: RECALL_SECONDS,
             use_recalls: true,
             in_dungeon: false,
             who: portals::Traveller::default(),
+            flag_seconds: None,
         }
     }
 
@@ -360,7 +361,6 @@ impl Prefs {
     pub fn steady() -> Self {
         Prefs {
             portal_seconds: PORTAL_SECONDS * 6.0,
-            max_portals: 3,
             ..Prefs::quick()
         }
     }
@@ -530,15 +530,26 @@ pub fn plan_with_ways(
     for p in portals::all() {
         has_portal.insert(p.from_cell & 0xFFFF_0000);
     }
+    let flags_held = |p: &&Portal| level == 0 || p.usable_by(level, quests_done);
+    let flag_asked = |p: &&Portal| {
+        prefs.flag_seconds.is_some() && p.usable_by(level, std::slice::from_ref(&p.quest))
+    };
     let usable: Vec<&Portal> = portals::all()
         .iter()
         .chain(&ways.portals)
         .filter(|p| p.works() && p.admits(prefs.who))
-        .filter(|p| level == 0 || p.usable_by(level, quests_done))
+        .filter(|p| flags_held(p) || flag_asked(p))
         .filter(|p| !avoid.iter().any(|a| a.distance(p.from_xy()) < 2.0))
         .filter(|p| p.exit_outdoors() || has_portal.contains(&(p.to_cell & 0xFFFF_0000)))
         .collect();
     let portals = &usable[..];
+    let flag_cost: Vec<f32> = portals
+        .iter()
+        .map(|p| match flags_held(p) {
+            true => 0.0,
+            false => prefs.flag_seconds.unwrap_or(0.0),
+        })
+        .collect();
     let mouth_of = |p: &Portal| Place {
         at: p.from,
         cell: p.from_cell,
@@ -642,7 +653,7 @@ pub fn plan_with_ways(
             if far && !node.is_indoors() {
                 continue;
             }
-            let step_cost = walk_seconds(node, mouth) + prefs.portal_seconds;
+            let step_cost = walk_seconds(node, mouth) + prefs.portal_seconds + flag_cost[pi];
             let next = q.cost + step_cost;
             if best.map(|(b, _)| next >= b).unwrap_or(false) {
                 continue;
@@ -660,19 +671,6 @@ pub fn plan_with_ways(
         }
     }
     let (seconds, end) = best?;
-    // Too long a chain of portals is more chance to go wrong than it is
-    // worth; the caller asked for fewer.
-    let mut hops = 0;
-    let mut at = end;
-    while let Some((prev, how)) = came[at] {
-        if matches!(how, Edge::Portal(_)) {
-            hops += 1;
-        }
-        at = prev;
-    }
-    if hops > prefs.max_portals {
-        return None;
-    }
     // Walk back through the portals taken and the spell cast.
     let mut steps = Vec::new();
     let mut at = end;
@@ -1097,9 +1095,9 @@ mod tests {
             summons: true,
         };
         let far = holtburg();
-        // On foot it is hopeless: half the world away.
-        assert!(plan_with_recalls(far, goal, 275, &[], &[], &[], Prefs::default()).is_none());
-        // With the gem it is one hop and a walk.
+        // Without it, a dozen portals through the Caul's dungeons.
+        let without = plan_with_recalls(far, goal, 275, &[], &[], &[], Prefs::default());
+        // With the gem it is one hop and a walk, and sooner.
         let trip = plan_with_recalls_and_gems(
             far,
             goal,
@@ -1118,6 +1116,10 @@ mod tests {
                 .any(|s| matches!(s, Step::Gem { guid, .. } if *guid == gem.guid)),
             "{:?}",
             trip.steps
+        );
+        assert!(
+            without.as_ref().is_none_or(|t| t.seconds > trip.seconds),
+            "{without:?}"
         );
         // And it ends where we asked, not where the gem dropped us.
         assert_eq!(trip.steps.last().map(|s| s.end()), Some(goal));

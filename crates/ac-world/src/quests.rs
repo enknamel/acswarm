@@ -39,6 +39,9 @@ pub enum Want {
     Kill(String),
     /// A server event started (EventManager.cs), lower case: what a source's [`Source::event`] asks.
     Event(String),
+    /// A flag a creature's death stamps on its killer (EmoteManager.cs:1998-2008), lower case:
+    /// what a portal asks (the Guardian of the Singularity's VirindiIsland).
+    Flag(String),
     Nothing,
 }
 
@@ -592,10 +595,11 @@ fn parse_source(line: &str) -> Option<Source> {
     let landblocks = pairs(f[6], 16)?;
     let (at, keys) = if f.len() >= 9 { (f[7], f[8]) } else { ("", "") };
     Some(Source {
-        want: match f[0].strip_prefix("event:") {
-            Some(event) => Want::Event(event.to_string()),
-            None if kind == Yield::Kill => Want::Kill(f[0].to_string()),
-            None => Want::Item(f[0].parse().ok()?),
+        want: match (f[0].strip_prefix("event:"), f[0].strip_prefix("flag:")) {
+            (Some(event), _) => Want::Event(event.to_string()),
+            (_, Some(flag)) => Want::Flag(flag.to_string()),
+            _ if kind == Yield::Kill => Want::Kill(f[0].to_string()),
+            _ => Want::Item(f[0].parse().ok()?),
         },
         kind,
         wcid: f[2].parse().ok()?,

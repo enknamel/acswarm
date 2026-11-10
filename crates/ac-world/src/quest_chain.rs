@@ -19,6 +19,8 @@ pub enum FlagBy {
     Unlock(&'static Unlock),
     /// A quest row's reward or talk (`crate::quests::stamped_by`).
     Quest(&'static Row),
+    /// A creature whose death stamps it on its killer (a `flag:` source).
+    Kill(&'static Source),
 }
 
 /// One place what a quest wants comes from.
@@ -204,14 +206,17 @@ fn ground_at(landblock: u32) -> Option<&'static crate::hunting::Ground> {
         .copied()
 }
 
-/// Who stamps `flag`: unlock NPCs, then quest rows; empty when nobody known.
+/// Who stamps `flag`: unlock NPCs, then quest rows, then creatures killed; empty when nobody known.
 pub fn flag_givers(flag: &str) -> Vec<FlagBy> {
     let unlocks = crate::unlocks::all()
         .iter()
         .filter(|u| u.flag.eq_ignore_ascii_case(flag))
         .map(FlagBy::Unlock);
+    let want = Want::Flag(flag.to_ascii_lowercase());
+    let kills = crate::quests::sources_of(&want).filter(|s| s.kind == crate::quests::Yield::Kill);
     unlocks
         .chain(crate::quests::stamped_by(flag).map(FlagBy::Quest))
+        .chain(kills.map(FlagBy::Kill))
         .collect()
 }
 

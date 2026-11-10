@@ -161,6 +161,10 @@ pub(crate) fn flag_step(
             .say(" by '")
             .say(row.title.trim())
             .say("'"),
+        Some(FlagBy::Kill(s)) => step
+            .say(" from killing ")
+            .link(Facet::Creature, &s.name)
+            .say(format!(" (level {})", s.level)),
     };
     if by.len() > 1 {
         step = step.say(format!(" (or {} others)", by.len() - 1));
