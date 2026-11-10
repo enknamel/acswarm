@@ -316,6 +316,8 @@ pub struct Autoplay {
     pub(crate) closing: Option<(u32, f32)>,
     /// Where to fight from in a dungeon with more than one creature swinging (see `fight::stand`).
     pub(crate) stands: fight::stand::Stands,
+    /// A caster's back-off from its attackers and its steps aside between casts (see `fight::stand`).
+    pub(crate) keep_off: fight::stand::KeepOff,
     /// Targets let go, and when, so they are left alone for a while.
     given_up: Recent<u32>,
     /// When ammunition was last made.

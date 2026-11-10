@@ -1,6 +1,8 @@
 //! Where to stand in a dungeon fight with more than one creature coming to swing: the spot near
 //! by with the fewest sides open to a melee attacker (a corner, a hallway, a wall at the back),
-//! walked to once and fought from. Entry: `Client::autoplay_take_stand`.
+//! walked to once and fought from. Entry: `Client::autoplay_take_stand`. A caster also backs off
+//! to a few metres from its attackers (`autoplay_keep_off`) and steps aside between its own casts
+//! (`autoplay_jiggle`), so a bolt aimed where it stood at launch lands where it no longer is.
 
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
@@ -31,6 +33,24 @@ const AT_STAND: f32 = 0.5;
 const MATERIAL_SIDES: u32 = 2;
 /// How long a stand is held for one coming creature before the swing closes on it as before.
 const HOLD_FOR: Duration = Duration::from_secs(8);
+/// A caster backs off from an attacker nearer than this (metres): from 1-4 m bolts landed 0-110 ms after seen.
+const STANDOFF_NEAR: f32 = 6.0;
+/// The spot backed off to has its nearest attacker at most this far (metres).
+const STANDOFF_FAR: f32 = 8.0;
+/// Spots looked at for a back-off within this of the character (metres, flat).
+const STANDOFF_LOOK: f32 = 8.0;
+/// Spots asked whether the spell gets to the target from them, nearest first.
+const STANDOFF_LOOKS: usize = 48;
+/// How long a back-off walk is given.
+const STANDOFF_LASTS: Duration = Duration::from_secs(3);
+/// After a back-off, or none found, the next waits this long: a swinging creature follows.
+const STANDOFF_AGAIN: Duration = Duration::from_secs(8);
+/// A step between casts goes this far aside of the spot kept to (metres): `dodge::MISS_BY` off its aim.
+const JIGGLE: f32 = 1.2;
+/// At the step's end within this (metres, 3D); a standing spot this near the ideal one will do.
+const AT_JIGGLE: f32 = 0.4;
+/// How long a step between casts is given before the cast goes out anyway.
+const JIGGLE_LASTS: Duration = Duration::from_millis(900);
 
 /// The stand in a fight and the spots refused, until fewer than two attackers are left.
 #[derive(Debug, Default, Clone)]
@@ -40,6 +60,36 @@ pub(crate) struct Stands {
     pub(crate) refused: Vec<Vec3>,
     /// The creature waited for at the stand, and since when (see [`HOLD_FOR`]).
     pub(crate) waiting: Option<(u32, Instant)>,
+}
+
+/// A caster's back-off walk and its steps aside between casts.
+#[derive(Debug, Clone)]
+pub(crate) struct KeepOff {
+    /// The back-off spot being walked to, and since when.
+    pub(crate) walk: Option<(Place, Instant)>,
+    /// When the last back-off ended or found no spot (see [`STANDOFF_AGAIN`]).
+    pub(crate) last: Option<Instant>,
+    /// A cast went up since the last step aside: one is due before the next cast.
+    pub(crate) due: bool,
+    /// The step aside being walked, and since when.
+    pub(crate) step: Option<(Place, Instant)>,
+    /// The target and the spot the steps aside keep to.
+    pub(crate) anchor: Option<(u32, Vec3)>,
+    /// Which side the next step goes to, 1 or -1 across the line to the target.
+    pub(crate) side: f32,
+}
+
+impl Default for KeepOff {
+    fn default() -> Self {
+        Self {
+            walk: None,
+            last: None,
+            due: false,
+            step: None,
+            anchor: None,
+            side: 1.0,
+        }
+    }
 }
 
 /// A spot to fight from, chosen against `against` melee attackers.
@@ -254,11 +304,7 @@ impl Client {
         let flat = |v: Vec3| v.truncate();
         let middle = attackers.iter().map(|(_, a)| *a).sum::<Vec3>() / n as f32;
         let toward = flat(middle - me.at);
-        let leader_at = self
-            .followed_leader()
-            .filter(|_| !self.autoplay.academy.active)
-            .map(|m| m.world);
-        let fight_radius = self.autoplay.config.team.fight_radius.max(1.0);
+        let leader = self.leader_bound();
         let thrown = !matches!(how, How::Melee);
         let refused = &self.autoplay.stands.refused;
         let mut spots: Vec<Place> = places
@@ -272,7 +318,7 @@ impl Client {
                         || off.dot(toward.normalize()) <= toward.length() - RING)
                     && attackers.iter().all(|(_, a)| flat(*a - p.at).length() > RING)
                     && refused.iter().all(|r| r.distance(p.at) > REPLAN_DISTANCE)
-                    && leader_at.is_none_or(|l| p.at.distance(l) <= fight_radius)
+                    && leader.is_none_or(|(l, r)| p.at.distance(l) <= r)
             })
             .collect();
         if thrown {
@@ -315,6 +361,206 @@ impl Client {
         })
     }
 
+    /// The leader followed and the team's fight radius round it: a spot to fight from keeps inside.
+    fn leader_bound(&self) -> Option<(Vec3, f32)> {
+        let leader_at = self
+            .followed_leader()
+            .filter(|_| !self.autoplay.academy.active)
+            .map(|m| m.world)?;
+        Some((leader_at, self.autoplay.config.team.fight_radius.max(1.0)))
+    }
+
+    /// A caster with an attacker nearer than [`STANDOFF_NEAR`] backs off to a `standoff_spot`:
+    /// `Acting` while walking, else `Done`. A walked stand outranks it; so does no room.
+    pub(crate) fn autoplay_keep_off(&mut self, target: u32, how: How, now: Instant) -> Did {
+        if !matches!(how, How::Spell(_)) || self.autoplay.stands.held.is_some_and(|s| s.walked) {
+            return Did::Done;
+        }
+        if let Some((spot, since)) = self.autoplay.keep_off.walk {
+            let did = if now.saturating_duration_since(since) < STANDOFF_LASTS {
+                let goal = Goal::At {
+                    place: spot,
+                    within: AT_STAND,
+                };
+                self.go(self.step_owner(), goal, now)
+            } else {
+                Did::blocked("took too long")
+            };
+            if matches!(did, Did::Acting | Did::Waiting(_)) {
+                self.autoplay
+                    .say(Doing::Fighting, "backing off to cast from further away");
+                return Did::Acting;
+            }
+            if did != Did::Done {
+                self.stop_going(Some(self.step_owner()), "backing off took too long");
+            }
+            self.autoplay.keep_off.walk = None;
+            self.autoplay.keep_off.last = Some(now);
+            return Did::Done;
+        }
+        let again = self.autoplay.keep_off.last;
+        if again.is_some_and(|t| now.saturating_duration_since(t) < STANDOFF_AGAIN) {
+            return Did::Done;
+        }
+        let Some(me) = self.my_position() else {
+            return Did::Done;
+        };
+        let attackers = self.melee_attackers(me);
+        if nearest_of(&attackers, me) >= STANDOFF_NEAR {
+            return Did::Done;
+        }
+        // Looked round first: that builds the region the walk reads; built next tick.
+        let Some(places) = self.standable_near(me, STANDOFF_LOOK) else {
+            return Did::Done;
+        };
+        let Some(spot) = self.standoff_spot(places, me, &attackers, target, how) else {
+            self.autoplay.keep_off.last = Some(now);
+            return Did::Done;
+        };
+        tracing::info!(
+            "stand: backing off {:.1} m to {:.1} {:.1} {:.1}, {:.1} m from the nearest attacker",
+            spot.at.distance(me),
+            spot.at.x,
+            spot.at.y,
+            spot.at.z,
+            nearest_of(&attackers, spot.at)
+        );
+        self.autoplay.keep_off.walk = Some((spot, now));
+        self.autoplay_keep_off(target, how, now)
+    }
+
+    /// Of `places`, the nearest to `me` on this floor with every attacker [`STANDOFF_NEAR`] off and
+    /// the nearest at most [`STANDOFF_FAR`], by the leader, the spell `how` reaching `target` from it.
+    fn standoff_spot(
+        &mut self,
+        places: Vec<Place>,
+        me: Vec3,
+        attackers: &[(u32, Vec3)],
+        target: u32,
+        how: How,
+    ) -> Option<Place> {
+        let reach = self.reach_at(target, how);
+        let target_at = self.world.objects.get(&target).and_then(|o| o.world_pos());
+        let leader = self.leader_bound();
+        let mut spots: Vec<Place> = places
+            .into_iter()
+            .filter(|p| {
+                let near = nearest_of(attackers, p.at);
+                (p.at.z - me.z).abs() <= SAME_FLOOR
+                    && (STANDOFF_NEAR..=STANDOFF_FAR).contains(&near)
+                    && target_at.is_none_or(|t| p.at.distance(t) <= reach)
+                    && leader.is_none_or(|(l, r)| p.at.distance(l) <= r)
+                    && !self.is_dud_spot(p.at)
+            })
+            .collect();
+        spots.sort_by(|a, b| a.at.distance(me).total_cmp(&b.at.distance(me)));
+        spots.truncate(STANDOFF_LOOKS);
+        spots
+            .into_iter()
+            .find(|p| self.throws_from(p.at, target, how))
+    }
+
+    /// How far off `target` the attack `how` goes out from: its reach, or nearer when nothing
+    /// landed from further, times [`WITHIN`] (see `Client::autoplay_approach`).
+    fn reach_at(&self, target: u32, how: How) -> f32 {
+        let range = self.attack_range(how);
+        let range = self
+            .autoplay
+            .closing_on(target)
+            .map_or(range, |cap| range.min(cap));
+        range * WITHIN
+    }
+
+    /// After each cast a caster steps [`JIGGLE`] aside of the spot it keeps to, the other side each
+    /// time: `Acting` while stepping. Never mid-cast: the caller asks only with the cast slot free.
+    pub(crate) fn autoplay_jiggle(&mut self, target: u32, how: How, now: Instant) -> Did {
+        if !matches!(how, How::Spell(_)) || self.mid_attack() {
+            return Did::Done;
+        }
+        if let Some((spot, since)) = self.autoplay.keep_off.step {
+            let did = if now.saturating_duration_since(since) < JIGGLE_LASTS {
+                let goal = Goal::At {
+                    place: spot,
+                    within: AT_JIGGLE,
+                };
+                self.go(self.step_owner(), goal, now)
+            } else {
+                Did::blocked("took too long")
+            };
+            if matches!(did, Did::Acting | Did::Waiting(_)) {
+                self.autoplay
+                    .say(Doing::Fighting, "stepping aside between casts");
+                return Did::Acting;
+            }
+            if did != Did::Done {
+                self.stop_going(Some(self.step_owner()), "the step aside took too long");
+            }
+            self.autoplay.keep_off.step = None;
+            return Did::Done;
+        }
+        if !std::mem::take(&mut self.autoplay.keep_off.due) {
+            return Did::Done;
+        }
+        let Some(spot) = self.jiggle_spot(target, how) else {
+            return Did::Done;
+        };
+        self.autoplay.keep_off.step = Some((spot, now));
+        self.autoplay_jiggle(target, how, now)
+    }
+
+    /// The next step aside, across the line to `target` from the stand walked to, else the spot kept
+    /// to: walked to straight, the spell still reaching, no nearer the attackers than the band.
+    fn jiggle_spot(&mut self, target: u32, how: How) -> Option<Place> {
+        let (here, cap) = self.player.as_ref().map(|p| {
+            let here = Place {
+                at: p.world_position(),
+                cell: p.cell,
+            };
+            (here, p.capsule())
+        })?;
+        let me = here.at;
+        let at = self
+            .world
+            .objects
+            .get(&target)
+            .and_then(|o| o.world_pos())?;
+        let held = self.autoplay.keep_off.anchor;
+        let anchor = match self.autoplay.stands.held.filter(|s| s.walked && s.reached) {
+            Some(s) => s.spot.at,
+            None => match held {
+                Some((g, a)) if g == target && a.distance(me) <= JIGGLE + AT_STAND => a,
+                _ => me,
+            },
+        };
+        self.autoplay.keep_off.anchor = Some((target, anchor));
+        let across = (at - anchor).truncate().perp().normalize_or_zero();
+        if across == glam::Vec2::ZERO {
+            return None;
+        }
+        let attackers = self.melee_attackers(me);
+        let floor = nearest_of(&attackers, anchor).clamp(RING, STANDOFF_NEAR);
+        let reach = self.reach_at(target, how);
+        let side = self.autoplay.keep_off.side;
+        for s in [side, -side] {
+            let ideal = anchor + (across * JIGGLE * s).extend(0.0);
+            let place = self.place_at(ideal);
+            let Ok(Some(p)) = self.pathfinder.put_on_floor(here, place, cap) else {
+                continue;
+            };
+            let fits = p.at.truncate().distance(ideal.truncate()) <= AT_JIGGLE
+                && (p.at.z - anchor.z).abs() <= SAME_FLOOR
+                && p.at.distance(at) <= reach
+                && nearest_of(&attackers, p.at) >= floor
+                && !self.is_dud_spot(p.at)
+                && self.pathfinder.can_walk(here, p.at, cap);
+            if fits && self.throws_from(p.at, target, how) {
+                self.autoplay.keep_off.side = -s;
+                return Some(p);
+            }
+        }
+        None
+    }
+
     /// Whether the attack `how` thrown from feet at `from` gets to `target` (see `crate::aim`).
     fn throws_from(&mut self, from: Vec3, target: u32, how: How) -> bool {
         let Some(at) = self.world.objects.get(&target).and_then(|o| o.world_pos()) else {
@@ -327,6 +573,14 @@ impl Client {
             None => false,
         }
     }
+}
+
+/// How far the nearest of `attackers` stands from `at` (metres, flat); infinite with none.
+fn nearest_of(attackers: &[(u32, Vec3)], at: Vec3) -> f32 {
+    attackers
+        .iter()
+        .map(|(_, a)| a.truncate().distance(at.truncate()))
+        .fold(f32::INFINITY, f32::min)
 }
 
 #[cfg(test)]

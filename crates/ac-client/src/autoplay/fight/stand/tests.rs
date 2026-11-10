@@ -277,3 +277,189 @@ fn autoplay_and_the_body_take_the_stand_once_and_fight_from_it() {
         c.autoplay.status
     );
 }
+
+/// A war mage in the Holtburg field, Frost Bolt III in hand, a Revenant `off` it coming at it.
+fn a_caster_with_one_coming(off: Vec3) -> (Client, How, u32) {
+    let mut c = testkit::standing_in_the_field(30, 0xA9B4_0019, Vec3::new(84.0, 108.0, 94.0));
+    let at = c.my_position().unwrap();
+    let (at, cell) = crate::walk_trial::on_floor(&mut c, at);
+    testkit::stand(&mut c, cell, at - ac_world::landblock_origin(cell));
+    testkit::trained_in(&mut c, ac_world::stats::skill::WAR_MAGIC, 200);
+    let (spell, _) = c
+        .assets
+        .spell_table()
+        .unwrap()
+        .find_by_name("Frost Bolt III")
+        .expect("Frost Bolt III");
+    let target = 0x8000_0001;
+    coming_at(&mut c, &[(target, off)]);
+    (c, How::Spell(spell), target)
+}
+
+/// Ask for the back-off until the region round it is built, as a live fight asks each tick.
+fn keep_off(c: &mut Client, target: u32, how: How, now: Instant) -> Did {
+    for _ in 0..20 {
+        let did = c.autoplay_keep_off(target, how, now);
+        if did != Did::Done || c.autoplay.keep_off.last.is_some() {
+            return did;
+        }
+    }
+    Did::Done
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_caster_backs_off_from_a_creature_beside_it_to_a_few_metres() {
+    let (mut c, how, target) = a_caster_with_one_coming(Vec3::new(2.0, 0.0, 0.0));
+    let now = Instant::now();
+    c.frame_at = now;
+    assert_eq!(keep_off(&mut c, target, how, now), Did::Acting);
+    let (spot, _) = c.autoplay.keep_off.walk.expect("a spot backed off to");
+    let creature = c.world.objects[&target].world_pos().unwrap();
+    let off = spot.at.distance(creature);
+    assert!(
+        (STANDOFF_NEAR..=STANDOFF_FAR).contains(&off),
+        "{off:.1} m from it"
+    );
+    assert!(
+        c.throws_from(spot.at, target, how),
+        "the bolt still gets there"
+    );
+    assert_eq!(
+        c.going.as_ref().and_then(|g| g.goal.place()),
+        Some(spot),
+        "walked there by the slot"
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_swinging_fighter_and_a_caster_already_off_keep_where_they_are() {
+    let (mut c, _, target) = a_caster_with_one_coming(Vec3::new(2.0, 0.0, 0.0));
+    let now = Instant::now();
+    assert_eq!(keep_off(&mut c, target, How::Melee, now), Did::Done);
+    assert!(c.going.is_none() && c.autoplay.keep_off.walk.is_none());
+    let (mut c, how, target) = a_caster_with_one_coming(Vec3::new(7.0, 0.0, 0.0));
+    assert_eq!(keep_off(&mut c, target, how, now), Did::Done);
+    assert!(c.going.is_none() && c.autoplay.keep_off.walk.is_none());
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_caster_steps_from_side_to_side_between_casts_and_only_then() {
+    // Seven metres off its target, each step aside goes across the line to it and back, within a
+    // step of where it stood: never out of the band, never off its spot.
+    let (mut c, how, target) = a_caster_with_one_coming(Vec3::new(7.0, 0.0, 0.0));
+    let start = c.my_position().unwrap();
+    let creature = c.world.objects[&target].world_pos().unwrap();
+    let t0 = Instant::now();
+    c.frame_at = t0;
+    assert_eq!(c.autoplay_jiggle(target, how, t0), Did::Done, "no cast yet");
+    assert!(c.going.is_none());
+    let dt = 0.05;
+    let mut frame = 0;
+    let mut ends = Vec::new();
+    for _ in 0..3 {
+        // A cast went up and was answered.
+        c.autoplay.keep_off.due = true;
+        let mut stepped = false;
+        for _ in 0..40 {
+            let now = t0 + Duration::from_secs_f32(frame as f32 * dt);
+            c.frame_at = now;
+            c.autoplay.tick += 1;
+            let did = c.autoplay_jiggle(target, how, now);
+            c.settle_going();
+            c.tick_player(crate::player::Input::default(), dt, now);
+            frame += 1;
+            if did == Did::Done && (stepped || !c.autoplay.keep_off.due) {
+                break;
+            }
+            stepped = true;
+        }
+        assert!(stepped, "a step aside");
+        assert!(c.autoplay.keep_off.step.is_none(), "the step ended");
+        ends.push(c.my_position().unwrap());
+    }
+    for (i, at) in ends.iter().enumerate() {
+        assert!(
+            at.truncate().distance(start.truncate()) <= JIGGLE + AT_JIGGLE + 0.3,
+            "step {i} wandered {:.1} m",
+            at.distance(start)
+        );
+        let off = at.distance(creature);
+        assert!((6.5..=7.6).contains(&off), "step {i} {off:.1} m off it");
+    }
+    // Across the line to it, one side and then the other.
+    let across = |at: Vec3| (at - start).y;
+    assert!(across(ends[0]) * across(ends[1]) < 0.0, "{ends:?}");
+    assert!(across(ends[1]) * across(ends[2]) < 0.0, "{ends:?}");
+    assert!(ends[0].distance(ends[1]) >= 1.5, "{ends:?}");
+    // With no cast since, no step.
+    let now = t0 + Duration::from_secs_f32(frame as f32 * dt);
+    assert_eq!(c.autoplay_jiggle(target, how, now), Did::Done);
+    assert!(c.autoplay.keep_off.step.is_none());
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn autoplay_and_the_body_back_off_and_step_aside_between_casts_never_during_one() {
+    // The whole loop offline at 20 Hz, the server's answer to each cast 1.5 s after it went up.
+    let t0 = Instant::now();
+    let (mut c, _) = testkit::a_caster_knowing(t0, &["Frost Bolt III"]);
+    let field = ac_world::landblock_origin(0xA9B4_0000) + Vec3::new(84.0, 108.0, 94.0);
+    let (at, cell) = crate::walk_trial::on_floor(&mut c, field);
+    testkit::stand(&mut c, cell, at - ac_world::landblock_origin(cell));
+    c.autoplay.config.enabled = true;
+    c.autoplay.config.fight.enabled = true;
+    let target = 0x8000_0001;
+    coming_at(&mut c, &[(target, Vec3::new(2.0, 0.0, 0.0))]);
+    let creature = c.world.objects[&target].world_pos().unwrap();
+    let dt = 0.05;
+    let mut casts: Vec<Vec3> = Vec::new();
+    let (mut moved_mid_cast, mut was) = (0.0f32, c.my_position().unwrap());
+    for frame in 0..12 * 20 {
+        let now = t0 + Duration::from_secs_f32(frame as f32 * dt);
+        c.frame_at = now;
+        if c.autoplay
+            .cast_sent
+            .is_some_and(|t| now.duration_since(t) >= Duration::from_millis(1500))
+        {
+            // The bolt landed: offline nothing is hurt, and a target unhurt is closed on.
+            c.autoplay.cast_answered();
+            let o = c.world.objects.get_mut(&target).unwrap();
+            o.health = o.health.map(|h| h - 0.01);
+        }
+        let before = c.autoplay.cast_sent;
+        c.tick_autoplay(now);
+        c.tick_player(crate::player::Input::default(), dt, now);
+        let me = c.my_position().unwrap();
+        if c.autoplay.cast_sent.is_some() && before.is_some() {
+            moved_mid_cast = moved_mid_cast.max(me.distance(was));
+        }
+        if c.autoplay.cast_sent.is_some() && c.autoplay.cast_sent != before {
+            casts.push(me);
+        }
+        was = me;
+    }
+    assert!(
+        casts.len() >= 4,
+        "{} casts: {}",
+        casts.len(),
+        c.autoplay.status
+    );
+    let off: Vec<f32> = casts.iter().map(|m| m.distance(creature)).collect();
+    assert!(
+        off.iter()
+            .all(|d| (STANDOFF_NEAR - 0.5..=STANDOFF_FAR + 0.5).contains(d)),
+        "cast from {off:?} m off it"
+    );
+    let steps: Vec<f32> = casts.windows(2).map(|w| w[0].distance(w[1])).collect();
+    assert!(
+        steps.iter().all(|s| *s >= 1.0),
+        "between casts it moved {steps:?} m"
+    );
+    assert!(
+        moved_mid_cast < 0.2,
+        "moved {moved_mid_cast:.2} m in a frame while casting"
+    );
+}

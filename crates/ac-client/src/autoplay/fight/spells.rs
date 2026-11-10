@@ -102,6 +102,8 @@ impl Client {
         // spell sent over another and drops the next, so an attack
         // thrown on the heels of a buff would be the one dropped.
         if self.autoplay.cast_in_flight(now) {
+            // A step aside is due before the next cast (see `autoplay_jiggle`).
+            self.autoplay.keep_off.due = true;
             self.autoplay
                 .say(Doing::Fighting, format!("fighting {name}"));
             return true;
@@ -143,6 +145,13 @@ impl Client {
         if let Some(spell) = kill.as_ref().map(|k| k.attack) {
             let how = crate::dodge::How::Spell(spell);
             if self.autoplay_take_stand(Some(guid), how, now) != crate::did::Did::Done {
+                return true;
+            }
+            // A few metres off what attacks, and a step aside since the last cast: a bolt
+            // aimed where the caster stood at its launch lands where it no longer is.
+            if self.autoplay_keep_off(guid, how, now) != crate::did::Did::Done
+                || self.autoplay_jiggle(guid, how, now) != crate::did::Did::Done
+            {
                 return true;
             }
         }
