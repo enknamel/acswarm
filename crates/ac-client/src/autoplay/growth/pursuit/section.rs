@@ -89,8 +89,8 @@ pub(crate) fn quest_entries(
     (rules, buy)
 }
 
-/// One quest's entries: its items, then the keys to the chests holding them and the items used to
-/// make them while one is still wanted; a buy line for the first of those a shop sells, sized to what the hand-in takes.
+/// One quest's entries: its items, then all their chains can need (`chain_items`) while one is
+/// still wanted; a buy line for the first of those a shop sells, sized to what the hand-in takes.
 fn entries_for(quest: &QuestLine, who: &str, chains: &dyn Chains) -> (Vec<Rule>, Option<Buy>) {
     let rows: Vec<_> = crate::quest_log::worked_rows(quest)
         .filter(|r| r.kind == Kind::Item)
@@ -109,11 +109,18 @@ fn entries_for(quest: &QuestLine, who: &str, chains: &dyn Chains) -> (Vec<Rule>,
             .map_or_else(|| format!("item {wcid}"), |i| i.name.to_string());
         items.push((wcid, name, r.count.max(1)));
     }
+    // And all its chain can need: a chest's key, an item used to make one, and what a quest
+    // rewarding one takes (the Bound scepter's Virindi Essence, left in its chest unkept).
     if matches!(quest.state, QuestState::Needs { .. }) {
         let wanted: Vec<u32> = items.iter().map(|i| i.0).collect();
-        for key in wanted.into_iter().flat_map(crate::quest_log::keys_to) {
-            if !items.iter().any(|i| i.0 == key) {
-                items.push((key, key_name(key), 1));
+        for (item, name) in wanted.into_iter().flat_map(crate::quest_log::chain_items) {
+            if !items.iter().any(|i| i.0 == item) {
+                let name = if name.is_empty() {
+                    key_name(item)
+                } else {
+                    name
+                };
+                items.push((item, name, 1));
             }
         }
     }

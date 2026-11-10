@@ -25,6 +25,8 @@ pub const SHORT_LEG: f32 = 60.0;
 pub const ANY_HAND_INS: u32 = 5;
 /// Keys of chests holding keys looked through, as `quests_walk.py`'s `KEY_DEPTH`.
 pub const KEY_DEPTH: usize = 3;
+/// Links of a quest item's chain kept for, as the pursuit follows them (its `OBTAIN_DEPTH`).
+pub const CHAIN_ITEMS_DEPTH: usize = 6;
 /// A giver's reward is waited for this long after the use or give (design §4.3, guess).
 pub const XP_WATCH: Duration = Duration::from_secs(10);
 /// The server's quest log is waited for this long after asking before calls go ahead (guess).
@@ -704,6 +706,40 @@ pub(crate) fn keys_to(wcid: u32) -> Vec<u32> {
         of = next;
     }
     keys
+}
+
+/// Every item `wcid`'s chain can need, [`CHAIN_ITEMS_DEPTH`] links deep, with its name: chest keys
+/// and items used to make one (`keys_to`'s), and what a quest giving one as its reward takes.
+pub(crate) fn chain_items(wcid: u32) -> Vec<(u32, String)> {
+    use ac_world::quests::Handing;
+    let mut out: Vec<(u32, String)> = Vec::new();
+    let mut of = vec![wcid];
+    for _ in 0..CHAIN_ITEMS_DEPTH {
+        let mut next = Vec::new();
+        let mut add = |w: u32, name: &str, next: &mut Vec<u32>| {
+            if w != wcid && !out.iter().any(|(o, _)| *o == w) {
+                out.push((w, name.to_string()));
+                next.push(w);
+            }
+        };
+        for w in of {
+            let want = Want::Item(w);
+            for (key, name) in ac_world::quests::sources_of(&want).flat_map(|s| s.keys.iter()) {
+                add(*key, name, &mut next);
+            }
+            let gives = |r: &&ac_world::quests::Row| {
+                r.hand == Handing::Give && r.gives.iter().any(|(g, _)| *g == w) && r.want != want
+            };
+            for r in ac_world::quests::all().iter().filter(gives) {
+                if let Want::Item(input) = r.want {
+                    let name = r.item.as_ref().map_or("", |i| i.name);
+                    add(input, name, &mut next);
+                }
+            }
+        }
+        of = next;
+    }
+    out
 }
 
 /// The kill task a count is for: counters whose creature's name, less its last letter ("Harpies"),

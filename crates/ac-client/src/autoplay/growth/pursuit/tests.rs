@@ -1887,6 +1887,35 @@ fn recall_the_sanctuary_is_had_by_the_ancient_key_bought_invitation_and_scroll_r
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
+fn the_quests_section_keeps_every_item_the_chain_needs() {
+    // The Virindi Essence was looked over in its chest and left: the section kept the hand-in and
+    // chest keys only, not what the scepter's chain of quests and combines takes.
+    let mut c = mage_pursuing("give:27841", "chained-quests");
+    c.refresh_quests(std::time::Instant::now());
+    let (rules, _) = section::quest_entries(&c.pursuit, &c.quest_board, "Blarg", &ChainData);
+    let kept: Vec<f64> = rules
+        .iter()
+        .flat_map(|r| &r.all)
+        .filter_map(|a| match a {
+            crate::profile::Ask::Item(crate::items::Term::Num(
+                crate::items::NumKey::Class,
+                _,
+                v,
+            )) => Some(*v),
+            _ => None,
+        })
+        .collect();
+    for (wcid, name) in [
+        (9125, "Virindi Essence"),
+        (9117, "Tattered Virindi Cloak"),
+        (6876, "Sturdy Iron Key"),
+    ] {
+        assert!(kept.contains(&(wcid as f64)), "{name} not kept: {kept:?}");
+    }
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_chest_whose_key_is_out_is_opened_not_another_key_hunted() {
     // Blargerton used the Ancient Key on the Mistress' Chest; the key left the pack half a second
     // before "The Mistress' Chest has been unlocked.", the board asked between, and he went down
