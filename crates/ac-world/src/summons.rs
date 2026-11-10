@@ -22,6 +22,10 @@ pub struct Summon {
     pub skill: u32,
     /// SummoningMastery: 1 Primalist, 2 Necromancer, 3 Naturalist, 0 any.
     pub mastery: u32,
+    /// The character level it needs (UseRequiresLevel), 0 for none.
+    pub needs_level: u32,
+    /// Whether Summoning must be specialized (UseRequiresSkillSpec).
+    pub specialized: bool,
     /// What it hits with; `None` for a creature that never strikes.
     pub element: Option<Element>,
     /// Damage of one attack on average, before ratings and the target's armour and resistances.
@@ -78,22 +82,21 @@ fn parse(text: &str) -> Vec<Summon> {
             continue;
         }
         let f: Vec<&str> = line.split(',').map(str::trim).collect();
-        if f.len() != 10 {
+        if f.len() != 12 {
             continue;
         }
         let int = |s: &str| s.parse::<u32>().ok();
         let num = |s: &str| s.parse::<f32>().ok();
-        let (Some(essence), Some(pet), Some(level), Some(skill), Some(mastery), Some(bit)) = (
-            int(f[0]),
-            int(f[2]),
-            int(f[3]),
-            int(f[4]),
-            int(f[5]),
-            int(f[6]),
-        ) else {
+        let (Some(essence), Some(pet), Some(level), Some(skill), Some(mastery)) =
+            (int(f[0]), int(f[2]), int(f[3]), int(f[4]), int(f[5]))
+        else {
             continue;
         };
-        let (Some(hit), Some(top), Some(secs)) = (num(f[7]), num(f[8]), num(f[9])) else {
+        let (Some(needs_level), Some(specialized), Some(bit)) = (int(f[6]), int(f[7]), int(f[8]))
+        else {
+            continue;
+        };
+        let (Some(hit), Some(top), Some(secs)) = (num(f[9]), num(f[10]), num(f[11])) else {
             continue;
         };
         out.push(Summon {
@@ -103,6 +106,8 @@ fn parse(text: &str) -> Vec<Summon> {
             level,
             skill,
             mastery,
+            needs_level,
+            specialized: specialized != 0,
             element: Element::from_bit(bit),
             hit,
             top,
@@ -158,6 +163,12 @@ mod tests {
         let grievver = of(FROST_GRIEVVER_50).unwrap();
         assert_eq!(grievver.name, "Frost Grievver Essence (50)");
         assert_eq!((grievver.skill, grievver.mastery), (310, 3));
+        assert_eq!((grievver.needs_level, grievver.specialized), (40, false));
+        let swarm = of(FROST_SWARM).unwrap();
+        assert_eq!(
+            (swarm.skill, swarm.needs_level, swarm.specialized),
+            (570, 185, true)
+        );
         assert_eq!(grievver.element, Some(Element::Cold));
         assert_eq!(of(1), None);
     }

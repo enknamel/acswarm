@@ -211,25 +211,27 @@ def main():
         weapons[int(r[0])] = {"damage": int(r[1]), "type": int(r[2]), "style": int(r[3]),
                               "attack": int(r[4]), "variance": float(r[5])}
     print("# Summoning essences: what each one's creature does in a fight.")
-    print("# essence,name,pet,level,skill,mastery,element,hit,top,secs")
+    print("# essence,name,pet,level,skill,mastery,needs_level,specialized,element,hit,top,secs")
     print("# pet is the creature's wcid and level its level; skill is the Summoning the essence")
     print("# needs and mastery its SummoningMastery (1 Primalist, 2 Necromancer, 3 Naturalist,")
-    print("# 0 any). element is the DamageType bit it hits with. hit is the damage of one attack")
-    print("# on average and top a critical's before its doubling, both before ratings and the")
-    print("# target's armour and resistances; secs is the mean time from one attack to the next,")
-    print("# the tries its motion table cannot play included. A creature that never strikes has")
-    print("# 0 for all three.")
+    print("# 0 any); needs_level is the character level it needs and specialized 1 when")
+    print("# Summoning must be specialized. element is the DamageType bit it hits with. hit is the")
+    print("# damage of one attack on average and top a critical's before its doubling, both before")
+    print("# ratings and the target's armour and resistances; secs is the mean time from one attack")
+    print("# to the next, the tries its motion table cannot play included. A creature that never")
+    print("# strikes has 0 for all three.")
     print("# Regenerate with reference/scripts/data/summons.sh (reads the ACE world database,")
     print("# the community's reconstruction of retail's server data, and client_portal.dat).")
     out = []
     for r in rows(dump, "essences"):
         wcid, name, pet, skill, mastery = int(r[0]), r[1], int(r[2]), int(r[3]), int(r[4])
+        needs, spec = int(r[5]), int(r[6])
         if pet not in pets:
             continue
         got = figures(dat, pets[pet], parts.get(pet, {}), weapons.get(pet))
         element, hit, top, secs = got if got else (0, 0.0, 0.0, 0.0)
-        out.append((wcid, name.replace(",", ";"), pet, pets[pet][1], skill, mastery, element,
-                    "%.1f" % hit, "%.1f" % top, "%.2f" % secs))
+        out.append((wcid, name.replace(",", ";"), pet, pets[pet][1], skill, mastery, needs, spec,
+                    element, "%.1f" % hit, "%.1f" % top, "%.2f" % secs))
     for row in sorted(out):
         print(",".join(str(v) for v in row))
 

@@ -1,270 +1,271 @@
 # Summoning essences: what each one's creature does in a fight.
-# essence,name,pet,level,skill,mastery,element,hit,top,secs
+# essence,name,pet,level,skill,mastery,needs_level,specialized,element,hit,top,secs
 # pet is the creature's wcid and level its level; skill is the Summoning the essence
 # needs and mastery its SummoningMastery (1 Primalist, 2 Necromancer, 3 Naturalist,
-# 0 any). element is the DamageType bit it hits with. hit is the damage of one attack
-# on average and top a critical's before its doubling, both before ratings and the
-# target's armour and resistances; secs is the mean time from one attack to the next,
-# the tries its motion table cannot play included. A creature that never strikes has
-# 0 for all three.
+# 0 any); needs_level is the character level it needs and specialized 1 when
+# Summoning must be specialized. element is the DamageType bit it hits with. hit is the
+# damage of one attack on average and top a critical's before its doubling, both before
+# ratings and the target's armour and resistances; secs is the mean time from one attack
+# to the next, the tries its motion table cannot play included. A creature that never
+# strikes has 0 for all three.
 # Regenerate with reference/scripts/data/summons.sh (reads the ACE world database,
 # the community's reconstruction of retail's server data, and client_portal.dat).
-48878,Copper Golem Essence,48879,50,310,0,4,68.4,91.2,2.30
-48880,Coral Golem Essence,48881,125,430,0,4,233.0,310.6,1.45
-48882,Gold Golem Essence,48883,100,400,0,4,160.4,226.5,2.21
-48884,Iron Golem Essence,48885,150,475,0,4,304.3,405.7,1.45
-48886,Mud Golem Essence,48887,15,50,0,4,16.8,22.4,2.43
-48888,Oak Golem Essence,48889,80,370,0,4,122.7,163.6,2.25
-48890,Sandstone Golem Essence,48891,30,220,0,4,51.4,68.6,2.37
-48942,Fire Skeleton Minion Essence (50),48943,50,310,2,16,92.4,147.8,1.71
-48944,Fire Skeleton Minion Essence (80),48950,80,370,2,16,163.6,261.8,1.68
-48945,Fire Skeleton Minion Essence (100),48951,100,400,2,16,199.6,319.4,1.23
-48946,Fire Skeleton Bushi Essence (125),48952,125,430,2,16,267.1,427.4,1.16
-48947,Fire Skeleton Bushi Essence (150),48953,150,475,2,16,348.3,557.2,1.16
-48948,Fire Skeleton Bushi Essence (180),48949,180,530,2,16,419.3,670.8,1.16
-48956,Fire Skeleton Samurai Essence,48955,200,570,2,16,1394.8,2231.6,1.16
-48957,Incendiary Knight Essence,48958,200,570,1,16,1426.9,2283.0,1.16
-48959,Fire Elemental Essence (50),48960,50,310,1,16,108.4,173.4,2.02
-48961,Fire Elemental Essence (80),48962,80,370,1,16,189.2,302.7,1.97
-48963,Fire Elemental Essence (100),48964,100,400,1,16,229.3,366.9,1.40
-48965,Fire Child Essence (125),48966,125,430,1,16,292.0,467.2,1.31
-48967,Fire Child Essence (150),48968,150,475,1,16,380.4,608.6,1.31
-48969,Fire Child Essence (180),48970,180,530,1,16,456.5,730.4,1.31
-48972,Acid Zombie Essence (50),49000,50,310,2,32,110.9,147.8,2.09
-49212,Frost Skeleton Samurai Essence,49163,200,570,2,8,1394.8,2231.6,1.16
-49213,Acid Skeleton Minion Essence (50),49164,50,310,2,32,92.4,147.8,1.71
-49214,Acid Skeleton Minion Essence (80),49165,80,370,2,32,163.6,261.8,1.68
-49215,Acid Skeleton Minion Essence (100),49166,100,400,2,32,199.6,319.4,1.23
-49216,Acid Skeleton Bushi Essence (125),49167,125,430,2,32,267.1,427.4,1.16
-49217,Acid Skeleton Bushi Essence (150),49168,150,475,2,32,348.3,557.2,1.16
-49218,Acid Skeleton Bushi Essence (180),49169,180,530,2,32,419.3,670.8,1.16
-49219,Acid Skeleton Samurai Essence,49170,200,570,2,32,1394.8,2231.6,1.16
-49220,Lightning Skeleton Minion Essence (50),49171,50,310,2,64,92.4,147.8,1.71
-49221,Lightning Skeleton Minion Essence (80),49172,80,370,2,64,163.6,261.8,1.68
-49222,Lightning Skeleton Minion Essence (100),49173,100,400,2,64,199.6,319.4,1.23
-49223,Lightning Skeleton Bushi Essence (125),49174,125,430,2,64,267.1,427.4,1.16
-49224,Lightning Skeleton Bushi Essence (150),49175,150,475,2,64,348.3,557.2,1.16
-49225,Lightning Skeleton Bushi Essence (180),49176,180,530,2,64,419.3,670.8,1.16
-49226,Lightning Skeleton Samurai Essence,49177,200,570,2,64,1394.8,2231.6,1.16
-49227,Frost Skeleton Minion Essence (50),49178,50,310,2,8,92.4,147.8,1.71
-49228,Frost Skeleton Minion Essence (80),49179,80,370,2,8,163.6,261.8,1.68
-49229,Frost Skeleton Minion Essence (100),49180,100,400,2,8,199.6,319.4,1.23
-49230,Frost Skeleton Bushi Essence (125),49181,125,430,2,8,267.1,427.4,1.16
-49231,Frost Skeleton Bushi Essence (150),49182,150,475,2,8,348.3,557.2,1.16
-49232,Frost Skeleton Bushi Essence (180),49183,180,530,2,8,419.3,670.8,1.16
-49233,Frigid Zombie Essence,49029,200,570,2,8,1673.7,2231.6,1.34
-49234,Acid Zombie Essence (80),49003,80,370,2,32,196.3,261.8,2.04
-49235,Acid Zombie Essence (100),49004,100,400,2,32,239.5,319.4,1.44
-49236,Acid Zombie Essence (125),49005,125,430,2,32,320.6,427.4,1.34
-49237,Acid Zombie Essence (150),49006,150,475,2,32,417.9,557.2,1.34
-49238,Acid Zombie Essence (180),49007,180,530,2,32,503.1,670.8,1.34
-49239,Blistered Zombie Essence,49008,200,570,2,32,1673.7,2231.6,1.34
-49240,Lightning Zombie Essence (50),49009,50,310,2,64,110.9,147.8,2.09
-49241,Lightning Zombie Essence (80),49010,80,370,2,64,196.3,261.8,2.04
-49242,Lightning Zombie Essence (100),49011,100,400,2,64,239.5,319.4,1.44
-49243,Lightning Zombie Essence (125),49012,125,430,2,64,320.6,427.4,1.34
-49244,Lightning Zombie Essence (150),49013,150,475,2,64,415.9,554.5,1.34
-49245,Lightning Zombie Essence (180),49014,180,530,2,64,503.1,670.8,1.34
-49246,Shocked Zombie Essence,49015,200,570,2,64,1673.7,2231.6,1.34
-49247,Fire Zombie Essence (50),49016,50,310,2,16,110.9,147.8,2.09
-49248,Fire Zombie Essence (80),49017,80,370,2,16,196.3,261.8,2.04
-49249,Fire Zombie Essence (100),49018,100,400,2,16,239.5,319.4,1.44
-49250,Fire Zombie Essence (125),49019,125,430,2,16,320.6,427.4,1.34
-49251,Fire Zombie Essence (150),49020,150,475,2,16,417.9,557.2,1.34
-49252,Fire Zombie Essence (180),49021,180,530,2,16,503.1,670.8,1.34
-49253,Charred Zombie Essence,49022,200,570,2,16,1673.7,2231.6,1.34
-49254,Frost Zombie Essence (50),49023,50,310,2,8,110.9,147.8,2.09
-49255,Frost Zombie Essence (80),49024,80,370,2,8,196.3,261.8,2.04
-49256,Frost Zombie Essence (100),49025,100,400,2,8,239.5,319.4,1.44
-49257,Frost Zombie Essence (125),49026,125,430,2,8,320.6,427.4,1.34
-49258,Frost Zombie Essence (150),49027,150,475,2,8,407.8,543.7,1.34
-49259,Frost Zombie Essence (180),49028,180,530,2,8,503.1,670.8,1.34
-49260,Glacial Knight Essence,49030,200,570,1,8,1394.8,2231.6,1.16
-49261,Acid Elemental Essence (50),49031,50,310,1,32,108.4,173.4,2.02
-49262,Acid Elemental Essence (80),49032,80,370,1,32,189.2,302.7,1.97
-49263,Acid Elemental Essence (100),49033,100,400,1,32,229.3,366.9,1.40
-49264,Acid Child Essence (125),49034,125,430,1,32,292.0,467.2,1.31
-49265,Acid Child Essence (150),49035,150,475,1,32,380.4,608.6,1.31
-49266,Acid Child Essence (180),49036,180,530,1,32,456.5,730.4,1.31
-49267,Caustic Knight Essence,49037,200,570,1,32,1394.8,2231.6,1.16
-49268,Lightning Elemental Essence (50),49038,50,310,1,64,108.4,173.4,2.02
-49269,Lightning Elemental Essence (80),49039,80,370,1,64,189.2,302.7,1.97
-49270,Lightning Elemental Essence (100),49040,100,400,1,64,229.3,366.9,1.40
-49271,Lightning Child Essence (125),49041,125,430,1,64,292.0,467.2,1.31
-49272,Lightning Child Essence (150),49042,150,475,1,64,380.4,608.6,1.31
-49273,Lightning Child Essence (180),49043,180,530,1,64,456.5,730.4,1.31
-49274,Galvanic Knight Essence,49044,200,570,1,64,1394.8,2231.6,1.16
-49275,Frost Elemental Essence (50),49045,50,310,1,8,108.4,173.4,2.02
-49276,Frost Elemental Essence (80),49046,80,370,1,8,189.2,302.7,1.97
-49277,Frost Elemental Essence (100),49047,100,400,1,8,229.3,366.9,1.40
-49278,Frost Child Essence (125),49048,125,430,1,8,292.0,467.2,1.31
-49279,Frost Child Essence (150),49049,150,475,1,8,380.4,608.6,1.31
-49280,Frost Child Essence (180),49050,180,530,1,8,456.5,730.4,1.31
-49281,K'nath R'ajed Essence,49079,200,570,1,8,2586.7,3448.9,1.82
-49282,Acid K'nath Essence (50),49080,50,310,1,32,224.9,264.6,3.03
-49283,Acid K'nath Essence (80),49081,80,370,1,32,403.3,474.4,2.95
-49284,Acid K'nath Essence (100),49082,100,400,1,32,458.2,539.1,1.98
-49285,Acid K'nath Essence (125),49083,125,430,1,32,561.9,661.0,1.82
-49286,Acid K'nath Essence (150),49084,150,475,1,32,733.5,862.9,1.82
-49287,Acid K'nath Essence (180),49085,180,530,1,32,878.3,1033.3,1.82
-49288,K'nath Y'nda Essence,49086,200,570,1,32,2931.5,3448.9,1.82
-49289,Lightning K'nath Essence (50),49087,50,310,1,64,224.9,264.6,3.03
-49290,Lightning K'nath Essence (80),49088,80,370,1,64,403.3,474.4,2.95
-49291,Lightning K'nath Essence (100),49089,100,400,1,64,458.2,539.1,1.98
-49292,Lightning K'nath Essence (125),49090,125,430,1,64,561.9,661.0,1.82
-49293,Lightning K'nath Essence (150),49091,150,475,1,64,733.5,862.9,1.82
-49294,Lightning K'nath Essence (180),49092,180,530,1,64,878.3,1033.3,1.82
-49295,K'nath T'soct Essence,49093,200,570,1,64,2931.5,3448.9,1.82
-49296,Fire K'nath Essence (50),49094,50,310,1,16,224.9,264.6,3.03
-49297,Fire K'nath Essence (80),49095,80,370,1,16,403.3,474.4,2.95
-49298,Fire K'nath Essence (100),49096,100,400,1,16,458.2,539.1,1.98
-49299,Fire K'nath Essence (125),49097,125,430,1,16,561.9,661.0,1.82
-49300,Fire K'nath Essence (150),49098,150,475,1,16,733.5,862.9,1.82
-49301,Fire K'nath Essence (180),49099,180,530,1,16,878.3,1033.3,1.82
-49302,K'nath B'orret Essence,49100,200,570,1,16,2931.5,3448.9,1.82
-49303,Frost K'nath Essence (50),49101,50,310,1,8,224.9,264.6,3.03
-49304,Frost K'nath Essence (80),49102,80,370,1,8,403.3,474.4,2.95
-49305,Frost K'nath Essence (100),49103,100,400,1,8,458.2,539.1,1.98
-49306,Frost K'nath Essence (125),49104,125,430,1,8,561.9,661.0,1.82
-49307,Frost K'nath Essence (150),49105,150,475,1,8,733.5,862.9,1.82
-49308,Frost K'nath Essence (180),49106,180,530,1,8,878.3,1033.3,1.82
-49309,Blizzard Wisp Essence,49184,200,570,1,8,1673.7,2434.5,1.31
-49310,Acid Wisp Essence (50),49185,50,310,1,32,132.8,177.0,2.04
-49311,Acid Wisp Essence (80),49186,80,370,1,32,237.7,317.0,2.00
-49312,Acid Wisp Essence (100),49187,100,400,1,32,275.2,366.9,1.42
-49313,Acid Wisp Essence (125),49188,125,430,1,32,369.0,492.0,1.32
-49314,Acid Wisp Essence (150),49189,150,475,1,32,480.8,641.1,1.32
-49315,Acid Wisp Essence (180),49190,180,530,1,32,578.2,770.9,1.32
-49316,Corrosion Wisp Essence,49191,200,570,1,32,1673.7,2434.5,1.31
-49317,Lightning Wisp Essence (50),49192,50,310,1,64,132.8,177.0,2.04
-49318,Lightning Wisp Essence (80),49193,80,370,1,64,237.7,317.0,2.00
-49319,Lightning Wisp Essence (100),49194,100,400,1,64,275.2,366.9,1.42
-49320,Lightning Wisp Essence (125),49195,125,430,1,64,369.0,492.0,1.32
-49321,Lightning Wisp Essence (150),49196,150,475,1,64,480.8,641.1,1.32
-49322,Lightning Wisp Essence (180),49197,180,530,1,64,578.2,770.9,1.32
-49323,Voltaic Wisp Essence,49198,200,570,1,64,1673.7,2434.5,1.31
-49324,Fire Wisp Essence (50),49199,50,310,1,16,132.8,177.0,2.04
-49325,Fire Wisp Essence (80),49200,80,370,1,16,237.7,317.0,2.00
-49326,Fire Wisp Essence (100),49201,100,400,1,16,275.2,366.9,1.42
-49327,Fire Wisp Essence (125),49202,125,430,1,16,369.0,492.0,1.32
-49328,Fire Wisp Essence (150),49203,150,475,1,16,480.8,641.1,1.32
-49329,Fire Wisp Essence (180),49204,180,530,1,16,578.2,770.9,1.32
-49330,Incendiary Wisp Essence,49205,200,570,1,16,1673.7,2434.5,1.31
-49331,Frost Wisp Essence (50),49206,50,310,1,8,132.8,177.0,2.04
-49332,Frost Wisp Essence (80),49207,80,370,1,8,237.7,317.0,2.00
-49333,Frost Wisp Essence (100),49208,100,400,1,8,275.2,366.9,1.42
-49334,Frost Wisp Essence (125),49209,125,430,1,8,369.0,492.0,1.32
-49335,Frost Wisp Essence (150),49210,150,475,1,8,480.8,641.1,1.32
-49336,Frost Wisp Essence (180),49211,180,530,1,8,578.2,770.9,1.32
-49337,Freezing Moar Essence,49107,200,570,3,8,1479.3,2366.9,1.26
-49338,Acid Moar Essence (50),49108,50,310,3,32,104.9,167.9,1.92
-49339,Acid Moar Essence (80),49109,80,370,3,32,184.0,294.5,1.88
-49340,Acid Moar Essence (100),49110,100,400,3,32,223.7,357.9,1.35
-49341,Acid Moar Essence (125),49111,125,430,3,32,282.7,452.3,1.26
-49342,Acid Moar Essence (150),49112,150,475,3,32,370.2,592.4,1.26
-49343,Acid Moar Essence (180),49113,180,530,3,32,442.9,708.7,1.26
-49344,Blistering Moar Essence,49114,200,570,3,32,1479.3,2366.9,1.26
-49345,Lightning Moar Essence (50),49115,50,310,3,64,104.9,167.9,1.92
-49346,Lightning Moar Essence (80),49116,80,370,3,64,184.0,294.5,1.88
-49347,Lightning Moar Essence (100),49117,100,400,3,64,223.7,357.9,1.35
-49348,Lightning Moar Essence (125),49118,125,430,3,64,282.7,452.3,1.26
-49349,Lightning Moar Essence (150),49119,150,475,3,64,370.2,592.4,1.26
-49350,Lightning Moar Essence (180),49120,180,530,3,64,442.9,708.7,1.26
-49351,Electrified Moar Essence,49121,200,570,3,64,1479.3,2366.9,1.26
-49352,Fire Moar Essence (50),49122,50,310,3,16,104.9,167.9,1.92
-49353,Fire Moar Essence (80),49123,80,370,3,16,184.0,294.5,1.88
-49354,Fire Moar Essence (100),49124,100,400,3,16,223.7,357.9,1.35
-49355,Fire Moar Essence (125),49125,125,430,3,16,282.7,452.3,1.26
-49356,Fire Moar Essence (150),49126,150,475,3,16,370.2,592.4,1.26
-49357,Fire Moar Essence (180),49127,180,530,3,16,442.9,708.7,1.26
-49358,Volcanic Moar Essence,49128,200,570,3,16,1479.3,2366.9,1.26
-49359,Frost Moar Essence (50),49129,50,310,3,8,104.9,167.9,1.92
-49360,Frost Moar Essence (80),49130,80,370,3,8,184.0,294.5,1.88
-49361,Frost Moar Essence (100),49131,100,400,3,8,223.7,357.9,1.35
-49362,Frost Moar Essence (125),49132,125,430,3,8,282.7,452.3,1.26
-49363,Frost Moar Essence (150),49133,150,475,3,8,370.2,592.4,1.26
-49364,Frost Moar Essence (180),49134,180,530,3,8,442.9,708.7,1.26
-49365,Arctic Grievver Essence,49051,200,570,3,8,1904.5,2688.8,1.44
-49366,Acid Grievver Essence (50),49052,50,310,3,32,142.2,200.8,2.28
-49367,Acid Grievver Essence (80),49053,80,370,3,32,246.3,347.6,2.22
-49368,Acid Grievver Essence (100),49054,100,400,3,32,285.6,403.2,1.55
-49369,Acid Grievver Essence (125),49055,125,430,3,32,364.4,514.4,1.44
-49370,Acid Grievver Essence (150),49056,150,475,3,32,475.2,670.8,1.44
-49371,Acid Grievver Essence (180),49057,180,530,3,32,571.0,806.1,1.44
-49372,Caustic Grievver Essence,49058,200,570,3,32,1904.5,2688.8,1.44
-49373,Lightning Grievver Essence (50),49059,50,320,3,64,142.2,200.8,2.28
-49374,Lightning Grievver Essence (80),49060,80,370,3,64,246.3,347.6,2.22
-49375,Lightning Grievver Essence (100),49061,100,400,3,64,285.6,403.2,1.55
-49376,Lightning Grievver Essence (125),49062,125,430,3,64,364.4,514.4,1.44
-49377,Lightning Grievver Essence (150),49063,150,475,3,64,475.2,670.8,1.44
-49378,Lightning Grievver Essence (180),49064,180,530,3,64,571.0,806.1,1.44
-49379,Excited Grievver Essence,49065,200,570,3,64,1904.5,2688.8,1.44
-49380,Fire Grievver Essence (50),49066,50,310,3,16,142.2,200.8,2.28
-49381,Fire Grievver Essence (80),49067,80,370,3,16,246.3,347.6,2.22
-49382,Fire Grievver Essence (100),49068,100,400,3,16,285.6,403.2,1.55
-49383,Fire Grievver Essence (125),49069,125,430,3,16,364.4,514.4,1.44
-49384,Fire Grievver Essence (150),49070,150,475,3,16,475.2,670.8,1.44
-49385,Fire Grievver Essence (180),49071,180,530,3,16,571.0,806.1,1.44
-49386,Scorched Grievver Essence,49072,200,570,3,16,1904.5,2688.8,1.44
-49387,Frost Grievver Essence (50),49073,50,310,3,8,142.2,200.8,2.28
-49388,Frost Grievver Essence (80),49074,80,370,3,8,246.3,347.6,2.22
-49389,Frost Grievver Essence (100),49075,100,400,3,8,285.6,403.2,1.55
-49390,Frost Grievver Essence (125),49076,125,430,3,8,364.4,514.4,1.44
-49391,Frost Grievver Essence (150),49077,150,475,3,8,475.2,670.8,1.44
-49392,Frost Grievver Essence (180),49078,180,530,3,8,571.0,806.1,1.44
-49421,Acid Spectre Essence (50),49394,50,320,2,32,131.2,209.9,2.48
-49422,Acid Spectre Essence (80),49395,80,370,2,32,227.5,364.0,2.42
-49423,Acid Spectre Essence (100),49396,100,400,2,32,270.4,432.6,1.66
-49424,Acid Spectre Essence (125),49397,125,430,2,32,340.1,544.2,1.54
-49425,Acid Spectre Essence (150),49398,150,475,2,32,442.9,708.7,1.54
-49426,Acid Spectre Essence (180),49399,180,530,2,32,532.5,852.1,1.54
-49427,Acid Maiden Essence,49400,200,570,2,32,1489.4,2383.1,1.27
-49428,Lightning Spectre Essence (50),49401,50,310,2,64,131.2,209.9,2.48
-49429,Lightning Spectre Essence (80),49402,80,370,2,64,227.5,364.0,2.42
-49430,Lightning Spectre Essence (100),49403,100,400,2,64,270.4,432.6,1.66
-49431,Lightning Spectre Essence (125),49404,125,430,2,64,340.1,544.2,1.54
-49432,Lightning Spectre Essence (150),49405,150,475,2,64,442.9,708.7,1.54
-49433,Lightning Spectre Essence (180),49406,180,530,2,64,532.5,852.1,1.54
-49434,Lightning Maiden Essence,49407,200,570,2,64,1489.4,2383.1,1.27
-49435,Fire Spectre Essence (50),49408,50,310,2,16,131.2,209.9,2.48
-49436,Fire Spectre Essence (80),49409,80,370,2,16,227.5,364.0,2.42
-49437,Fire Spectre Essence (100),49410,100,400,2,16,270.4,432.6,1.66
-49438,Fire Spectre Essence (125),49411,125,430,2,16,340.1,544.2,1.54
-49439,Fire Spectre Essence (150),49412,150,475,2,16,442.9,708.7,1.54
-49440,Fire Spectre Essence (180),49413,180,530,2,16,532.5,852.1,1.54
-49441,Fire Maiden Essence,49414,200,570,2,16,1489.4,2383.1,1.27
-49442,Frost Spectre Essence (50),49415,50,310,2,8,131.2,209.9,2.48
-49443,Frost Spectre Essence (80),49416,80,370,2,8,227.5,364.0,2.42
-49444,Frost Spectre Essence (100),49417,100,400,2,8,270.4,432.6,1.66
-49445,Frost Spectre Essence (125),49418,125,430,2,8,340.1,544.2,1.54
-49446,Frost Spectre Essence (150),49419,150,475,2,8,442.9,708.7,1.54
-49447,Frost Spectre Essence (180),49420,180,530,2,8,532.5,852.1,1.54
-49448,Frost Maiden Essence,49393,200,570,2,8,1489.4,2383.1,1.27
-49524,Acid Phyntos Wasp Essence (50),49136,50,310,3,32,57.0,91.2,1.10
-49525,Acid Phyntos Wasp Essence (80),49137,80,370,3,32,102.2,163.6,1.08
-49526,Acid Phyntos Wasp Essence (100),49138,100,400,3,32,141.6,226.5,0.88
-49527,Acid Phyntos Wasp Essence (125),49139,125,430,3,32,194.1,310.6,0.85
-49528,Acid Phyntos Wasp Essence (150),49140,150,475,3,32,253.6,405.8,0.85
-49529,Acid Phyntos Wasp Essence (180),49141,180,530,3,32,304.3,486.9,0.85
-49530,Acid Phyntos Swarm Essence,49142,200,570,3,32,1014.4,1623.0,0.85
-49531,Fire Phyntos Wasp Essence (50),49150,50,310,3,16,57.0,91.2,1.10
-49532,Fire Phyntos Wasp Essence (80),49151,80,370,3,16,102.2,163.6,1.08
-49533,Fire Phyntos Wasp Essence (100),49152,100,400,3,16,141.6,226.5,0.88
-49534,Fire Phyntos Wasp Essence (125),49153,125,430,3,16,194.1,310.6,0.85
-49535,Fire Phyntos Wasp Essence (150),49154,150,475,3,16,253.6,405.8,0.85
-49536,Fire Phyntos Wasp Essence (180),49155,180,530,3,16,304.3,486.9,0.85
-49537,Fire Phyntos Swarm Essence,49156,200,570,3,16,1014.4,1623.0,0.85
-49538,Frost Phyntos Wasp Essence (50),49157,50,310,3,8,57.0,91.2,1.10
-49539,Frost Phyntos Wasp Essence (80),49158,80,370,3,8,102.2,163.6,1.08
-49540,Frost Phyntos Wasp Essence (100),49159,100,400,3,8,141.6,226.5,0.88
-49541,Frost Phyntos Wasp Essence (125),49160,125,430,3,8,194.1,310.6,0.85
-49542,Frost Phyntos Wasp Essence (150),49161,150,475,3,8,253.6,405.8,0.85
-49543,Frost Phyntos Wasp Essence (180),49162,180,530,3,8,304.3,486.9,0.85
-49544,Frost Phyntos Swarm Essence,49135,200,570,3,8,1014.4,1623.0,0.85
-49545,Lightning Phyntos Wasp Essence (50),49143,50,310,3,64,57.0,91.2,1.10
-49546,Lightning Phyntos Wasp Essence (80),49144,80,370,3,64,102.2,163.6,1.08
-49547,Lightning Phyntos Wasp Essence (100),49145,100,400,3,64,141.6,226.5,0.88
-49548,Lightning Phyntos Wasp Essence (125),49146,125,430,3,64,194.1,310.6,0.85
-49549,Lightning Phyntos Wasp Essence (150),49147,150,475,3,64,253.6,405.8,0.85
-49550,Lightning Phyntos Wasp Essence (180),49148,180,530,3,64,304.3,486.9,0.85
-49551,Lightning Phyntos Swarm Essence,49149,200,570,3,64,1014.4,1623.0,0.85
+48878,Copper Golem Essence,48879,50,310,0,40,0,4,68.4,91.2,2.30
+48880,Coral Golem Essence,48881,125,430,0,115,0,4,233.0,310.6,1.45
+48882,Gold Golem Essence,48883,100,400,0,90,0,4,160.4,226.5,2.21
+48884,Iron Golem Essence,48885,150,475,0,140,0,4,304.3,405.7,1.45
+48886,Mud Golem Essence,48887,15,50,0,0,0,4,16.8,22.4,2.43
+48888,Oak Golem Essence,48889,80,370,0,70,0,4,122.7,163.6,2.25
+48890,Sandstone Golem Essence,48891,30,220,0,20,0,4,51.4,68.6,2.37
+48942,Fire Skeleton Minion Essence (50),48943,50,310,2,40,0,16,92.4,147.8,1.71
+48944,Fire Skeleton Minion Essence (80),48950,80,370,2,70,0,16,163.6,261.8,1.68
+48945,Fire Skeleton Minion Essence (100),48951,100,400,2,90,0,16,199.6,319.4,1.23
+48946,Fire Skeleton Bushi Essence (125),48952,125,430,2,115,0,16,267.1,427.4,1.16
+48947,Fire Skeleton Bushi Essence (150),48953,150,475,2,140,0,16,348.3,557.2,1.16
+48948,Fire Skeleton Bushi Essence (180),48949,180,530,2,170,0,16,419.3,670.8,1.16
+48956,Fire Skeleton Samurai Essence,48955,200,570,2,185,1,16,1394.8,2231.6,1.16
+48957,Incendiary Knight Essence,48958,200,570,1,185,1,16,1426.9,2283.0,1.16
+48959,Fire Elemental Essence (50),48960,50,310,1,40,0,16,108.4,173.4,2.02
+48961,Fire Elemental Essence (80),48962,80,370,1,70,0,16,189.2,302.7,1.97
+48963,Fire Elemental Essence (100),48964,100,400,1,90,0,16,229.3,366.9,1.40
+48965,Fire Child Essence (125),48966,125,430,1,115,0,16,292.0,467.2,1.31
+48967,Fire Child Essence (150),48968,150,475,1,140,0,16,380.4,608.6,1.31
+48969,Fire Child Essence (180),48970,180,530,1,170,0,16,456.5,730.4,1.31
+48972,Acid Zombie Essence (50),49000,50,310,2,40,0,32,110.9,147.8,2.09
+49212,Frost Skeleton Samurai Essence,49163,200,570,2,185,1,8,1394.8,2231.6,1.16
+49213,Acid Skeleton Minion Essence (50),49164,50,310,2,40,0,32,92.4,147.8,1.71
+49214,Acid Skeleton Minion Essence (80),49165,80,370,2,70,0,32,163.6,261.8,1.68
+49215,Acid Skeleton Minion Essence (100),49166,100,400,2,90,0,32,199.6,319.4,1.23
+49216,Acid Skeleton Bushi Essence (125),49167,125,430,2,115,0,32,267.1,427.4,1.16
+49217,Acid Skeleton Bushi Essence (150),49168,150,475,2,140,0,32,348.3,557.2,1.16
+49218,Acid Skeleton Bushi Essence (180),49169,180,530,2,170,0,32,419.3,670.8,1.16
+49219,Acid Skeleton Samurai Essence,49170,200,570,2,185,1,32,1394.8,2231.6,1.16
+49220,Lightning Skeleton Minion Essence (50),49171,50,310,2,40,0,64,92.4,147.8,1.71
+49221,Lightning Skeleton Minion Essence (80),49172,80,370,2,70,0,64,163.6,261.8,1.68
+49222,Lightning Skeleton Minion Essence (100),49173,100,400,2,90,0,64,199.6,319.4,1.23
+49223,Lightning Skeleton Bushi Essence (125),49174,125,430,2,115,0,64,267.1,427.4,1.16
+49224,Lightning Skeleton Bushi Essence (150),49175,150,475,2,140,0,64,348.3,557.2,1.16
+49225,Lightning Skeleton Bushi Essence (180),49176,180,530,2,170,0,64,419.3,670.8,1.16
+49226,Lightning Skeleton Samurai Essence,49177,200,570,2,185,1,64,1394.8,2231.6,1.16
+49227,Frost Skeleton Minion Essence (50),49178,50,310,2,40,0,8,92.4,147.8,1.71
+49228,Frost Skeleton Minion Essence (80),49179,80,370,2,70,0,8,163.6,261.8,1.68
+49229,Frost Skeleton Minion Essence (100),49180,100,400,2,90,0,8,199.6,319.4,1.23
+49230,Frost Skeleton Bushi Essence (125),49181,125,430,2,115,0,8,267.1,427.4,1.16
+49231,Frost Skeleton Bushi Essence (150),49182,150,475,2,140,0,8,348.3,557.2,1.16
+49232,Frost Skeleton Bushi Essence (180),49183,180,530,2,170,0,8,419.3,670.8,1.16
+49233,Frigid Zombie Essence,49029,200,570,2,185,1,8,1673.7,2231.6,1.34
+49234,Acid Zombie Essence (80),49003,80,370,2,70,0,32,196.3,261.8,2.04
+49235,Acid Zombie Essence (100),49004,100,400,2,90,0,32,239.5,319.4,1.44
+49236,Acid Zombie Essence (125),49005,125,430,2,115,0,32,320.6,427.4,1.34
+49237,Acid Zombie Essence (150),49006,150,475,2,140,0,32,417.9,557.2,1.34
+49238,Acid Zombie Essence (180),49007,180,530,2,170,0,32,503.1,670.8,1.34
+49239,Blistered Zombie Essence,49008,200,570,2,185,1,32,1673.7,2231.6,1.34
+49240,Lightning Zombie Essence (50),49009,50,310,2,40,0,64,110.9,147.8,2.09
+49241,Lightning Zombie Essence (80),49010,80,370,2,70,0,64,196.3,261.8,2.04
+49242,Lightning Zombie Essence (100),49011,100,400,2,90,0,64,239.5,319.4,1.44
+49243,Lightning Zombie Essence (125),49012,125,430,2,115,0,64,320.6,427.4,1.34
+49244,Lightning Zombie Essence (150),49013,150,475,2,140,0,64,415.9,554.5,1.34
+49245,Lightning Zombie Essence (180),49014,180,530,2,170,0,64,503.1,670.8,1.34
+49246,Shocked Zombie Essence,49015,200,570,2,185,1,64,1673.7,2231.6,1.34
+49247,Fire Zombie Essence (50),49016,50,310,2,40,0,16,110.9,147.8,2.09
+49248,Fire Zombie Essence (80),49017,80,370,2,70,0,16,196.3,261.8,2.04
+49249,Fire Zombie Essence (100),49018,100,400,2,90,0,16,239.5,319.4,1.44
+49250,Fire Zombie Essence (125),49019,125,430,2,115,0,16,320.6,427.4,1.34
+49251,Fire Zombie Essence (150),49020,150,475,2,140,0,16,417.9,557.2,1.34
+49252,Fire Zombie Essence (180),49021,180,530,2,170,0,16,503.1,670.8,1.34
+49253,Charred Zombie Essence,49022,200,570,2,185,1,16,1673.7,2231.6,1.34
+49254,Frost Zombie Essence (50),49023,50,310,2,40,0,8,110.9,147.8,2.09
+49255,Frost Zombie Essence (80),49024,80,370,2,70,0,8,196.3,261.8,2.04
+49256,Frost Zombie Essence (100),49025,100,400,2,90,0,8,239.5,319.4,1.44
+49257,Frost Zombie Essence (125),49026,125,430,2,115,0,8,320.6,427.4,1.34
+49258,Frost Zombie Essence (150),49027,150,475,2,140,0,8,407.8,543.7,1.34
+49259,Frost Zombie Essence (180),49028,180,530,2,170,0,8,503.1,670.8,1.34
+49260,Glacial Knight Essence,49030,200,570,1,185,1,8,1394.8,2231.6,1.16
+49261,Acid Elemental Essence (50),49031,50,310,1,40,0,32,108.4,173.4,2.02
+49262,Acid Elemental Essence (80),49032,80,370,1,70,0,32,189.2,302.7,1.97
+49263,Acid Elemental Essence (100),49033,100,400,1,90,0,32,229.3,366.9,1.40
+49264,Acid Child Essence (125),49034,125,430,1,115,0,32,292.0,467.2,1.31
+49265,Acid Child Essence (150),49035,150,475,1,140,0,32,380.4,608.6,1.31
+49266,Acid Child Essence (180),49036,180,530,1,170,0,32,456.5,730.4,1.31
+49267,Caustic Knight Essence,49037,200,570,1,185,1,32,1394.8,2231.6,1.16
+49268,Lightning Elemental Essence (50),49038,50,310,1,40,0,64,108.4,173.4,2.02
+49269,Lightning Elemental Essence (80),49039,80,370,1,70,0,64,189.2,302.7,1.97
+49270,Lightning Elemental Essence (100),49040,100,400,1,90,0,64,229.3,366.9,1.40
+49271,Lightning Child Essence (125),49041,125,430,1,115,0,64,292.0,467.2,1.31
+49272,Lightning Child Essence (150),49042,150,475,1,140,0,64,380.4,608.6,1.31
+49273,Lightning Child Essence (180),49043,180,530,1,170,0,64,456.5,730.4,1.31
+49274,Galvanic Knight Essence,49044,200,570,1,185,1,64,1394.8,2231.6,1.16
+49275,Frost Elemental Essence (50),49045,50,310,1,40,0,8,108.4,173.4,2.02
+49276,Frost Elemental Essence (80),49046,80,370,1,70,0,8,189.2,302.7,1.97
+49277,Frost Elemental Essence (100),49047,100,400,1,90,0,8,229.3,366.9,1.40
+49278,Frost Child Essence (125),49048,125,430,1,115,0,8,292.0,467.2,1.31
+49279,Frost Child Essence (150),49049,150,475,1,140,0,8,380.4,608.6,1.31
+49280,Frost Child Essence (180),49050,180,530,1,170,0,8,456.5,730.4,1.31
+49281,K'nath R'ajed Essence,49079,200,570,1,185,1,8,2586.7,3448.9,1.82
+49282,Acid K'nath Essence (50),49080,50,310,1,40,0,32,224.9,264.6,3.03
+49283,Acid K'nath Essence (80),49081,80,370,1,70,0,32,403.3,474.4,2.95
+49284,Acid K'nath Essence (100),49082,100,400,1,90,0,32,458.2,539.1,1.98
+49285,Acid K'nath Essence (125),49083,125,430,1,115,0,32,561.9,661.0,1.82
+49286,Acid K'nath Essence (150),49084,150,475,1,140,0,32,733.5,862.9,1.82
+49287,Acid K'nath Essence (180),49085,180,530,1,170,0,32,878.3,1033.3,1.82
+49288,K'nath Y'nda Essence,49086,200,570,1,185,1,32,2931.5,3448.9,1.82
+49289,Lightning K'nath Essence (50),49087,50,310,1,40,0,64,224.9,264.6,3.03
+49290,Lightning K'nath Essence (80),49088,80,370,1,70,0,64,403.3,474.4,2.95
+49291,Lightning K'nath Essence (100),49089,100,400,1,90,0,64,458.2,539.1,1.98
+49292,Lightning K'nath Essence (125),49090,125,430,1,115,0,64,561.9,661.0,1.82
+49293,Lightning K'nath Essence (150),49091,150,475,1,140,0,64,733.5,862.9,1.82
+49294,Lightning K'nath Essence (180),49092,180,530,1,170,0,64,878.3,1033.3,1.82
+49295,K'nath T'soct Essence,49093,200,570,1,185,1,64,2931.5,3448.9,1.82
+49296,Fire K'nath Essence (50),49094,50,310,1,40,0,16,224.9,264.6,3.03
+49297,Fire K'nath Essence (80),49095,80,370,1,70,0,16,403.3,474.4,2.95
+49298,Fire K'nath Essence (100),49096,100,400,1,90,0,16,458.2,539.1,1.98
+49299,Fire K'nath Essence (125),49097,125,430,1,115,0,16,561.9,661.0,1.82
+49300,Fire K'nath Essence (150),49098,150,475,1,140,0,16,733.5,862.9,1.82
+49301,Fire K'nath Essence (180),49099,180,530,1,170,0,16,878.3,1033.3,1.82
+49302,K'nath B'orret Essence,49100,200,570,1,185,1,16,2931.5,3448.9,1.82
+49303,Frost K'nath Essence (50),49101,50,310,1,40,0,8,224.9,264.6,3.03
+49304,Frost K'nath Essence (80),49102,80,370,1,70,0,8,403.3,474.4,2.95
+49305,Frost K'nath Essence (100),49103,100,400,1,90,0,8,458.2,539.1,1.98
+49306,Frost K'nath Essence (125),49104,125,430,1,115,0,8,561.9,661.0,1.82
+49307,Frost K'nath Essence (150),49105,150,475,1,140,0,8,733.5,862.9,1.82
+49308,Frost K'nath Essence (180),49106,180,530,1,170,0,8,878.3,1033.3,1.82
+49309,Blizzard Wisp Essence,49184,200,570,1,185,1,8,1673.7,2434.5,1.31
+49310,Acid Wisp Essence (50),49185,50,310,1,40,0,32,132.8,177.0,2.04
+49311,Acid Wisp Essence (80),49186,80,370,1,70,0,32,237.7,317.0,2.00
+49312,Acid Wisp Essence (100),49187,100,400,1,90,0,32,275.2,366.9,1.42
+49313,Acid Wisp Essence (125),49188,125,430,1,115,0,32,369.0,492.0,1.32
+49314,Acid Wisp Essence (150),49189,150,475,1,140,0,32,480.8,641.1,1.32
+49315,Acid Wisp Essence (180),49190,180,530,1,170,0,32,578.2,770.9,1.32
+49316,Corrosion Wisp Essence,49191,200,570,1,185,1,32,1673.7,2434.5,1.31
+49317,Lightning Wisp Essence (50),49192,50,310,1,40,0,64,132.8,177.0,2.04
+49318,Lightning Wisp Essence (80),49193,80,370,1,70,0,64,237.7,317.0,2.00
+49319,Lightning Wisp Essence (100),49194,100,400,1,90,0,64,275.2,366.9,1.42
+49320,Lightning Wisp Essence (125),49195,125,430,1,115,0,64,369.0,492.0,1.32
+49321,Lightning Wisp Essence (150),49196,150,475,1,140,0,64,480.8,641.1,1.32
+49322,Lightning Wisp Essence (180),49197,180,530,1,170,0,64,578.2,770.9,1.32
+49323,Voltaic Wisp Essence,49198,200,570,1,185,1,64,1673.7,2434.5,1.31
+49324,Fire Wisp Essence (50),49199,50,310,1,40,0,16,132.8,177.0,2.04
+49325,Fire Wisp Essence (80),49200,80,370,1,70,0,16,237.7,317.0,2.00
+49326,Fire Wisp Essence (100),49201,100,400,1,90,0,16,275.2,366.9,1.42
+49327,Fire Wisp Essence (125),49202,125,430,1,115,0,16,369.0,492.0,1.32
+49328,Fire Wisp Essence (150),49203,150,475,1,140,0,16,480.8,641.1,1.32
+49329,Fire Wisp Essence (180),49204,180,530,1,170,0,16,578.2,770.9,1.32
+49330,Incendiary Wisp Essence,49205,200,570,1,185,1,16,1673.7,2434.5,1.31
+49331,Frost Wisp Essence (50),49206,50,310,1,40,0,8,132.8,177.0,2.04
+49332,Frost Wisp Essence (80),49207,80,370,1,70,0,8,237.7,317.0,2.00
+49333,Frost Wisp Essence (100),49208,100,400,1,90,0,8,275.2,366.9,1.42
+49334,Frost Wisp Essence (125),49209,125,430,1,115,0,8,369.0,492.0,1.32
+49335,Frost Wisp Essence (150),49210,150,475,1,140,0,8,480.8,641.1,1.32
+49336,Frost Wisp Essence (180),49211,180,530,1,170,0,8,578.2,770.9,1.32
+49337,Freezing Moar Essence,49107,200,570,3,185,1,8,1479.3,2366.9,1.26
+49338,Acid Moar Essence (50),49108,50,310,3,40,0,32,104.9,167.9,1.92
+49339,Acid Moar Essence (80),49109,80,370,3,70,0,32,184.0,294.5,1.88
+49340,Acid Moar Essence (100),49110,100,400,3,90,0,32,223.7,357.9,1.35
+49341,Acid Moar Essence (125),49111,125,430,3,115,0,32,282.7,452.3,1.26
+49342,Acid Moar Essence (150),49112,150,475,3,140,0,32,370.2,592.4,1.26
+49343,Acid Moar Essence (180),49113,180,530,3,170,0,32,442.9,708.7,1.26
+49344,Blistering Moar Essence,49114,200,570,3,185,1,32,1479.3,2366.9,1.26
+49345,Lightning Moar Essence (50),49115,50,310,3,40,0,64,104.9,167.9,1.92
+49346,Lightning Moar Essence (80),49116,80,370,3,70,0,64,184.0,294.5,1.88
+49347,Lightning Moar Essence (100),49117,100,400,3,90,0,64,223.7,357.9,1.35
+49348,Lightning Moar Essence (125),49118,125,430,3,115,0,64,282.7,452.3,1.26
+49349,Lightning Moar Essence (150),49119,150,475,3,140,0,64,370.2,592.4,1.26
+49350,Lightning Moar Essence (180),49120,180,530,3,170,0,64,442.9,708.7,1.26
+49351,Electrified Moar Essence,49121,200,570,3,185,1,64,1479.3,2366.9,1.26
+49352,Fire Moar Essence (50),49122,50,310,3,40,0,16,104.9,167.9,1.92
+49353,Fire Moar Essence (80),49123,80,370,3,70,0,16,184.0,294.5,1.88
+49354,Fire Moar Essence (100),49124,100,400,3,90,0,16,223.7,357.9,1.35
+49355,Fire Moar Essence (125),49125,125,430,3,115,0,16,282.7,452.3,1.26
+49356,Fire Moar Essence (150),49126,150,475,3,140,0,16,370.2,592.4,1.26
+49357,Fire Moar Essence (180),49127,180,530,3,170,0,16,442.9,708.7,1.26
+49358,Volcanic Moar Essence,49128,200,570,3,185,1,16,1479.3,2366.9,1.26
+49359,Frost Moar Essence (50),49129,50,310,3,40,0,8,104.9,167.9,1.92
+49360,Frost Moar Essence (80),49130,80,370,3,70,0,8,184.0,294.5,1.88
+49361,Frost Moar Essence (100),49131,100,400,3,90,0,8,223.7,357.9,1.35
+49362,Frost Moar Essence (125),49132,125,430,3,115,0,8,282.7,452.3,1.26
+49363,Frost Moar Essence (150),49133,150,475,3,140,0,8,370.2,592.4,1.26
+49364,Frost Moar Essence (180),49134,180,530,3,170,0,8,442.9,708.7,1.26
+49365,Arctic Grievver Essence,49051,200,570,3,185,1,8,1904.5,2688.8,1.44
+49366,Acid Grievver Essence (50),49052,50,310,3,40,0,32,142.2,200.8,2.28
+49367,Acid Grievver Essence (80),49053,80,370,3,70,0,32,246.3,347.6,2.22
+49368,Acid Grievver Essence (100),49054,100,400,3,90,0,32,285.6,403.2,1.55
+49369,Acid Grievver Essence (125),49055,125,430,3,115,0,32,364.4,514.4,1.44
+49370,Acid Grievver Essence (150),49056,150,475,3,140,0,32,475.2,670.8,1.44
+49371,Acid Grievver Essence (180),49057,180,530,3,170,0,32,571.0,806.1,1.44
+49372,Caustic Grievver Essence,49058,200,570,3,185,1,32,1904.5,2688.8,1.44
+49373,Lightning Grievver Essence (50),49059,50,320,3,40,0,64,142.2,200.8,2.28
+49374,Lightning Grievver Essence (80),49060,80,370,3,70,0,64,246.3,347.6,2.22
+49375,Lightning Grievver Essence (100),49061,100,400,3,90,0,64,285.6,403.2,1.55
+49376,Lightning Grievver Essence (125),49062,125,430,3,115,0,64,364.4,514.4,1.44
+49377,Lightning Grievver Essence (150),49063,150,475,3,140,0,64,475.2,670.8,1.44
+49378,Lightning Grievver Essence (180),49064,180,530,3,170,0,64,571.0,806.1,1.44
+49379,Excited Grievver Essence,49065,200,570,3,185,1,64,1904.5,2688.8,1.44
+49380,Fire Grievver Essence (50),49066,50,310,3,40,0,16,142.2,200.8,2.28
+49381,Fire Grievver Essence (80),49067,80,370,3,70,0,16,246.3,347.6,2.22
+49382,Fire Grievver Essence (100),49068,100,400,3,90,0,16,285.6,403.2,1.55
+49383,Fire Grievver Essence (125),49069,125,430,3,115,0,16,364.4,514.4,1.44
+49384,Fire Grievver Essence (150),49070,150,475,3,140,0,16,475.2,670.8,1.44
+49385,Fire Grievver Essence (180),49071,180,530,3,170,0,16,571.0,806.1,1.44
+49386,Scorched Grievver Essence,49072,200,570,3,185,1,16,1904.5,2688.8,1.44
+49387,Frost Grievver Essence (50),49073,50,310,3,40,0,8,142.2,200.8,2.28
+49388,Frost Grievver Essence (80),49074,80,370,3,70,0,8,246.3,347.6,2.22
+49389,Frost Grievver Essence (100),49075,100,400,3,90,0,8,285.6,403.2,1.55
+49390,Frost Grievver Essence (125),49076,125,430,3,115,0,8,364.4,514.4,1.44
+49391,Frost Grievver Essence (150),49077,150,475,3,140,0,8,475.2,670.8,1.44
+49392,Frost Grievver Essence (180),49078,180,530,3,170,0,8,571.0,806.1,1.44
+49421,Acid Spectre Essence (50),49394,50,320,2,40,0,32,131.2,209.9,2.48
+49422,Acid Spectre Essence (80),49395,80,370,2,70,0,32,227.5,364.0,2.42
+49423,Acid Spectre Essence (100),49396,100,400,2,90,0,32,270.4,432.6,1.66
+49424,Acid Spectre Essence (125),49397,125,430,2,115,0,32,340.1,544.2,1.54
+49425,Acid Spectre Essence (150),49398,150,475,2,140,0,32,442.9,708.7,1.54
+49426,Acid Spectre Essence (180),49399,180,530,2,170,0,32,532.5,852.1,1.54
+49427,Acid Maiden Essence,49400,200,570,2,185,1,32,1489.4,2383.1,1.27
+49428,Lightning Spectre Essence (50),49401,50,310,2,40,0,64,131.2,209.9,2.48
+49429,Lightning Spectre Essence (80),49402,80,370,2,70,0,64,227.5,364.0,2.42
+49430,Lightning Spectre Essence (100),49403,100,400,2,90,0,64,270.4,432.6,1.66
+49431,Lightning Spectre Essence (125),49404,125,430,2,115,0,64,340.1,544.2,1.54
+49432,Lightning Spectre Essence (150),49405,150,475,2,140,0,64,442.9,708.7,1.54
+49433,Lightning Spectre Essence (180),49406,180,530,2,170,0,64,532.5,852.1,1.54
+49434,Lightning Maiden Essence,49407,200,570,2,185,1,64,1489.4,2383.1,1.27
+49435,Fire Spectre Essence (50),49408,50,310,2,40,0,16,131.2,209.9,2.48
+49436,Fire Spectre Essence (80),49409,80,370,2,70,0,16,227.5,364.0,2.42
+49437,Fire Spectre Essence (100),49410,100,400,2,90,0,16,270.4,432.6,1.66
+49438,Fire Spectre Essence (125),49411,125,430,2,115,0,16,340.1,544.2,1.54
+49439,Fire Spectre Essence (150),49412,150,475,2,140,0,16,442.9,708.7,1.54
+49440,Fire Spectre Essence (180),49413,180,530,2,170,0,16,532.5,852.1,1.54
+49441,Fire Maiden Essence,49414,200,570,2,185,1,16,1489.4,2383.1,1.27
+49442,Frost Spectre Essence (50),49415,50,310,2,40,0,8,131.2,209.9,2.48
+49443,Frost Spectre Essence (80),49416,80,370,2,70,0,8,227.5,364.0,2.42
+49444,Frost Spectre Essence (100),49417,100,400,2,90,0,8,270.4,432.6,1.66
+49445,Frost Spectre Essence (125),49418,125,430,2,115,0,8,340.1,544.2,1.54
+49446,Frost Spectre Essence (150),49419,150,475,2,140,0,8,442.9,708.7,1.54
+49447,Frost Spectre Essence (180),49420,180,530,2,170,0,8,532.5,852.1,1.54
+49448,Frost Maiden Essence,49393,200,570,2,185,1,8,1489.4,2383.1,1.27
+49524,Acid Phyntos Wasp Essence (50),49136,50,310,3,40,0,32,57.0,91.2,1.10
+49525,Acid Phyntos Wasp Essence (80),49137,80,370,3,70,0,32,102.2,163.6,1.08
+49526,Acid Phyntos Wasp Essence (100),49138,100,400,3,90,0,32,141.6,226.5,0.88
+49527,Acid Phyntos Wasp Essence (125),49139,125,430,3,115,0,32,194.1,310.6,0.85
+49528,Acid Phyntos Wasp Essence (150),49140,150,475,3,140,0,32,253.6,405.8,0.85
+49529,Acid Phyntos Wasp Essence (180),49141,180,530,3,170,0,32,304.3,486.9,0.85
+49530,Acid Phyntos Swarm Essence,49142,200,570,3,185,1,32,1014.4,1623.0,0.85
+49531,Fire Phyntos Wasp Essence (50),49150,50,310,3,40,0,16,57.0,91.2,1.10
+49532,Fire Phyntos Wasp Essence (80),49151,80,370,3,70,0,16,102.2,163.6,1.08
+49533,Fire Phyntos Wasp Essence (100),49152,100,400,3,90,0,16,141.6,226.5,0.88
+49534,Fire Phyntos Wasp Essence (125),49153,125,430,3,115,0,16,194.1,310.6,0.85
+49535,Fire Phyntos Wasp Essence (150),49154,150,475,3,140,0,16,253.6,405.8,0.85
+49536,Fire Phyntos Wasp Essence (180),49155,180,530,3,170,0,16,304.3,486.9,0.85
+49537,Fire Phyntos Swarm Essence,49156,200,570,3,185,1,16,1014.4,1623.0,0.85
+49538,Frost Phyntos Wasp Essence (50),49157,50,310,3,40,0,8,57.0,91.2,1.10
+49539,Frost Phyntos Wasp Essence (80),49158,80,370,3,70,0,8,102.2,163.6,1.08
+49540,Frost Phyntos Wasp Essence (100),49159,100,400,3,90,0,8,141.6,226.5,0.88
+49541,Frost Phyntos Wasp Essence (125),49160,125,430,3,115,0,8,194.1,310.6,0.85
+49542,Frost Phyntos Wasp Essence (150),49161,150,475,3,140,0,8,253.6,405.8,0.85
+49543,Frost Phyntos Wasp Essence (180),49162,180,530,3,170,0,8,304.3,486.9,0.85
+49544,Frost Phyntos Swarm Essence,49135,200,570,3,185,1,8,1014.4,1623.0,0.85
+49545,Lightning Phyntos Wasp Essence (50),49143,50,310,3,40,0,64,57.0,91.2,1.10
+49546,Lightning Phyntos Wasp Essence (80),49144,80,370,3,70,0,64,102.2,163.6,1.08
+49547,Lightning Phyntos Wasp Essence (100),49145,100,400,3,90,0,64,141.6,226.5,0.88
+49548,Lightning Phyntos Wasp Essence (125),49146,125,430,3,115,0,64,194.1,310.6,0.85
+49549,Lightning Phyntos Wasp Essence (150),49147,150,475,3,140,0,64,253.6,405.8,0.85
+49550,Lightning Phyntos Wasp Essence (180),49148,180,530,3,170,0,64,304.3,486.9,0.85
+49551,Lightning Phyntos Swarm Essence,49149,200,570,3,185,1,64,1014.4,1623.0,0.85

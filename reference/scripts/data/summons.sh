@@ -35,14 +35,19 @@ q() {
 }
 
 # Every essence whose creature fights: wcid, name, creature, the Summoning it needs
-# (UseRequiresSkillLevel 367) and its mastery (SummoningMastery 362).
-q essences 'select e.class_Id, n.value, p.value, coalesce(s.value, 0), coalesce(m.value, 0)
+# (UseRequiresSkillLevel 367), its mastery (SummoningMastery 362), the character level it
+# needs (UseRequiresLevel 369) and whether Summoning must be specialized (UseRequiresSkillSpec
+# 368), all checked on use (WorldObject_Use.cs:232-296, PetDevice.cs:112-117).
+q essences 'select e.class_Id, n.value, p.value, coalesce(s.value, 0), coalesce(m.value, 0),
+  coalesce(ul.value, 0), if(sp.value is null, 0, 1)
 from weenie e
 join weenie_properties_int p on p.object_Id = e.class_Id and p.type = 266
 join weenie c on c.class_Id = p.value and c.type = 71
 join weenie_properties_string n on n.object_Id = e.class_Id and n.type = 1
 left join weenie_properties_int s on s.object_Id = e.class_Id and s.type = 367
 left join weenie_properties_int m on m.object_Id = e.class_Id and m.type = 362
+left join weenie_properties_int ul on ul.object_Id = e.class_Id and ul.type = 369
+left join weenie_properties_int sp on sp.object_Id = e.class_Id and sp.type = 368
 where e.type = 70;'
 
 # Each creature: level (25), Strength (1) and Quickness (3), motion table (DID 2), combat
