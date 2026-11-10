@@ -477,6 +477,10 @@ impl Client {
                 now,
             );
             tracing::info!("autoplay: {name} cannot be had yet; leaving its kind for a while");
+            // A pickup limit's wait: the server's quest log says how long, for the pursuit.
+            if ac_world::quests::pickup_limit(wcid).is_some() {
+                self.server_quests_due = true;
+            }
         }
     }
 

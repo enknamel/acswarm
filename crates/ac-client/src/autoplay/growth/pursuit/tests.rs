@@ -1845,6 +1845,26 @@ fn again(c: &mut Client, now: std::time::Instant) -> PursuitStep {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
+fn an_item_whose_pickup_stamp_waits_is_waited_for_not_hunted() {
+    // Blargerton killed a room of Putrid Moarsmen for the Ancient Key with its pickup stamp
+    // (novquest1) 2.6 h off in his quest log: "You have solved this quest too recently!"
+    let mut c = mage_pursuing("learn:2023", "recall-the-sanctuary");
+    let now = std::time::Instant::now();
+    let limit = ac_world::quests::pickup_limit(8511).expect("the Ancient Key's pickup limit");
+    let until = crate::holdings::unix_now() + 9_000;
+    c.quest_log.note_wait(limit.stamp, until);
+    let step = again(&mut c, now);
+    assert_eq!(step, PursuitStep::Waiting { until }, "{step:?}");
+    c.quest_log.waits.clear();
+    let step = again(&mut c, now);
+    assert!(
+        matches!(&step, PursuitStep::Hunt { creature, .. } if creature == "Putrid Moarsman"),
+        "{step:?}"
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn recall_the_sanctuary_is_had_by_the_ancient_key_bought_invitation_and_scroll_read() {
     // The Healer's Heart quest, done for its recall: the Mistress' Chest in Ithaenc's cathedral
     // holds the scroll, opened with the Putrid Moarsman's Ancient Key; no portal goes to the

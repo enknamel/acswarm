@@ -577,6 +577,24 @@ impl Ask<'_> {
         what: &str,
         depth: usize,
     ) -> (PursuitStep, Option<Hunting>) {
+        // An item whose pickup stamp waits is not gone for: the server turns the pickup down (the
+        // Ancient Key hunted with novquest1 2.6 h off). With every one so, the quest waits.
+        let waits = |w: &Want| match w {
+            Want::Item(i) => ac_world::quests::pickup_limit(*i)
+                .and_then(|p| self.facts.log.wait_until(p.stamp, self.facts.now)),
+            _ => None,
+        };
+        let open: Vec<Want> = wants
+            .iter()
+            .filter(|w| waits(w).is_none())
+            .cloned()
+            .collect();
+        if open.is_empty() {
+            if let Some(until) = wants.iter().filter_map(waits).min() {
+                return (PursuitStep::Waiting { until }, None);
+            }
+        }
+        let wants = &open[..];
         let mut locked: Vec<(u32, &'static str)> = Vec::new();
         if let Some(step) = self.fetch_step(wants, more, &mut locked) {
             return (step, None);
