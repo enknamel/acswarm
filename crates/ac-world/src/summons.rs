@@ -163,20 +163,29 @@ mod tests {
     }
 
     #[test]
-    fn a_phyntos_wasp_does_less_than_all_its_level_but_golems() {
-        // ACE's wasps strike for their level (50 at 50, where a grievver strikes for 110) and
-        // play one in six of the maneuvers rolled for them: below all of their level but golems.
+    fn a_rolled_attack_the_motion_table_lacks_is_played_as_its_first() {
+        // Wasps lack the AttackHigh2, Med2 and Low3 the generic table rolls; ACE plays the High1,
+        // Med1 and Low1 (Monster_Melee.cs:282-308): a 0.5 s sting, then 0.1 + 0.5 s of waiting.
+        let wasp = of(FROST_WASP_50).unwrap();
+        assert!((wasp.secs - 1.1).abs() < 0.01, "{} s", wasp.secs);
+    }
+
+    #[test]
+    fn a_phyntos_wasp_stings_lightly_and_often() {
         let none = Ratings::default();
-        for wasp in all().iter().filter(|s| s.name.contains("Phyntos")) {
+        for wasp in all().iter().filter(|s| s.name.contains("Phyntos Wasp")) {
             let rate = wasp.damage_per_second(none, 1.0);
-            let beaten_by = all()
-                .iter()
-                .filter(|s| s.level == wasp.level && !s.name.contains("Phyntos"))
-                .filter(|s| !s.name.contains("Golem"))
-                .filter(|s| s.damage_per_second(none, 1.0) <= rate)
-                .map(|s| s.name.as_str())
-                .collect::<Vec<_>>();
-            assert!(beaten_by.is_empty(), "{} beats {beaten_by:?}", wasp.name);
+            let peers = all().iter().filter(|s| s.level == wasp.level);
+            for s in peers.filter(|s| !s.name.contains("Phyntos")) {
+                assert!(s.secs > wasp.secs, "{} attacks as often", s.name);
+                let more = s.damage_per_second(none, 1.0) > rate;
+                let kind = ["K'nath", "Wisp", "Grievver"]
+                    .iter()
+                    .any(|k| s.name.contains(k));
+                if kind || s.name.contains("Golem") {
+                    assert_eq!(more, kind, "{} against {}", s.name, wasp.name);
+                }
+            }
         }
         let swarm = of(FROST_SWARM).unwrap().damage_per_second(none, 1.0);
         let wasp = of(FROST_WASP_50).unwrap().damage_per_second(none, 1.0);

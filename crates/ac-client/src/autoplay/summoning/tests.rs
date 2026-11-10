@@ -83,7 +83,8 @@ fn the_most_damage_within_the_skill() {
 #[test]
 fn an_element_match_beats_a_higher_level_only_when_it_does_more() {
     let carried = [essence(2, FROST_GRIEVVER_50), essence(3, ACID_GRIEVVER_80)];
-    // The (80) hits for 217 every 2.7 s, the (50) for 125: half again on cold is not enough...
+    // The (80) hits for 246 every 2.2 s, the (50) for 142 every 2.3 s: half again on cold is
+    // not enough...
     assert_eq!(choose(&carried, 370, weak_to(Element::Cold, 1.5)), Some(3));
     // ...twice is.
     assert_eq!(choose(&carried, 370, weak_to(Element::Cold, 2.0)), Some(2));
@@ -92,13 +93,11 @@ fn an_element_match_beats_a_higher_level_only_when_it_does_more() {
 }
 
 #[test]
-fn a_phyntos_wasp_loses_even_with_the_element() {
-    // ACE's wasps strike for their level (80 at 80, where a grievver strikes for 170) and play
-    // one in six of the maneuvers their combat table rolls.
+fn a_phyntos_wasp_wins_only_with_the_element() {
+    // A wasp (80) stings for 102 every 1.1 s, a grievver (80) hits for 246 every 2.2 s.
     let carried = [essence(2, FROST_WASP_80), essence(3, ACID_GRIEVVER_80)];
-    assert_eq!(choose(&carried, 370, weak_to(Element::Cold, 1.5)), Some(3));
-    // Alone, it is still summoned: it does something.
-    assert_eq!(choose(&carried[..1], 370, |_| 1.0), Some(2));
+    assert_eq!(choose(&carried, 370, |_| 1.0), Some(3));
+    assert_eq!(choose(&carried, 370, weak_to(Element::Cold, 1.5)), Some(2));
 }
 
 #[test]

@@ -9,8 +9,11 @@ An attack, as a CombatPet makes one (Monster_Melee.cs:45-159, 164-314):
   combat table's (1-3, from 2 when the table has not three: Monster_Melee.cs:202-204); the
   attack type is Punch above Low and Kick at Low, or its weapon's (Monster_Melee.cs:222-232);
   of that height's maneuvers of that type one is picked at random (Monster_Melee.cs:267-279);
-- a maneuver its motion table cannot play from Ready ends the try with nothing done, and the
-  next tick rolls again (Monster_Melee.cs:282-308, 64-66; Monster_Combat.cs:248-268);
+- a maneuver its motion table cannot play from Ready is first reduced, a multi-strike to its
+  single strike and a subsequent attack (AttackHigh2-6 ...) to the first of its height, and that
+  is played (Monster_Melee.cs:282-308, MotionCommand.cs:432-534); one still missing ends the try
+  with nothing done, and the next tick rolls again (Monster_Melee.cs:64-66,
+  Monster_Combat.cs:248-268);
 - one it can plays for the animation's length over its speed, 1 / (1 - Quickness/300 + 40/150)
   within 0.5-2 (Creature_Combat.cs:503-522; a monster's weapon speed is always the default 40,
   WorldObject_Weapon.cs:265-274), and strikes once per attack hook in it, every strike with the
@@ -102,6 +105,39 @@ def play(dat, table, stance, motion):
     return secs, hooks
 
 
+# MotionCommand.cs (ACE.Entity/Enum): multi-strikes, Double/Triple Slash/Thrust Low-Med-High,
+# then the Offhand ones; each reduces to its single strike (ReduceMultiStrike).
+SLASH = {"Low": 0x1000005D, "Med": 0x1000005C, "High": 0x1000005B}
+THRUST = {"Low": 0x10000059, "Med": 0x10000058, "High": 0x1000005A}
+MULTI_STRIKES = (0x1000011F, 0x10000179)
+# Subsequent attacks: AttackHigh/Med/Low 2-3 from 0x10000065 and 4-6 from 0x10000186, each
+# reducing to AttackHigh1/Med1/Low1 (ReduceSubsequent).
+FIRST_ATTACKS = (0x10000062, 0x10000063, 0x10000064)
+SUBSEQUENT = ((0x10000065, 6), (0x10000186, 9))
+
+
+def reduced(motion):
+    """What ACE plays in place of a rolled maneuver missing from the motion table, or None."""
+    for start in MULTI_STRIKES:
+        i = motion - start
+        if 0 <= i < 12:
+            kind = SLASH if i < 6 else THRUST
+            return kind[("Low", "Med", "High")[i % 3]]
+    for start, count in SUBSEQUENT:
+        i = motion - start
+        if 0 <= i < count:
+            return FIRST_ATTACKS[i % 3]
+    return None
+
+
+def playable(motion, ready):
+    """The maneuver played for a rolled one (Monster_Melee.cs:282-308), or None for a wasted try."""
+    if motion is None or motion in ready:
+        return motion
+    first = reduced(motion)
+    return first if first in ready else None
+
+
 def picks(cmt, stance, attack_type):
     """[(chance, motion)] of every maneuver a try can roll."""
     own = [r for r in cmt if r[0] == stance]
@@ -137,8 +173,9 @@ def figures(dat, pet, parts, weapon):
     attr = max(1.0 + (strength - 55) * 0.011, 1.0)
     q = hit = top = secs = 0.0
     kinds = set()
-    for chance, motion in picks(cmt, stance, attack_type):
-        if motion is None or motion not in ready:
+    for chance, rolled in picks(cmt, stance, attack_type):
+        motion = playable(rolled, ready)
+        if motion is None:
             continue
         length, hooks = play(dat, table, stance, motion)
         strikes = max(len(hooks), 1)
