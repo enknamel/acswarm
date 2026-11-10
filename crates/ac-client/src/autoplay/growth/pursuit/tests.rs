@@ -2572,6 +2572,39 @@ fn a_sought_kill_s_body_is_stood_by() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
+fn a_sought_kill_s_body_is_opened_after_its_attackers_are_fought() {
+    // By a Cold One's body, a Chomu Sclavus and a golem hit him: walked past as not sought, they
+    // kept the body shut (nothing is opened under blows), and he stood there till it rotted.
+    let now = std::time::Instant::now();
+    let (mut c, _) = at_a_mire_witch_ground(now);
+    let me = c.my_position().unwrap();
+    let cell = c.player.as_ref().unwrap().cell;
+    let mut witch = crate::testkit::creature(0x5000_0901, "Mosswart Mire-Witch");
+    witch.weenie_class_id = 9163;
+    witch.position = crate::testkit::placed(cell, me);
+    c.world.objects.insert(witch.guid, witch);
+    c.note_sought_kill(me, now);
+    let mut chomu = crate::testkit::creature(0x5000_0904, "Chomu Sclavus");
+    chomu.weenie_class_id = 1;
+    chomu.position = crate::testkit::placed(cell, me + glam::Vec3::new(2.0, 0.0, 0.0));
+    let cfg = c.autoplay.config.fight.clone();
+    assert!(c.passing_by(&chomu, &cfg), "not hitting us: walked past");
+    c.autoplay
+        .hit_by
+        .mark("Chomu Sclavus".into(), std::time::Instant::now());
+    assert!(
+        !c.passing_by(&chomu, &cfg),
+        "hitting us by the body: walked past"
+    );
+    c.autoplay.growth.sought_kill = None;
+    assert!(
+        c.passing_by(&chomu, &cfg),
+        "off the body, the quest's walk-past stands"
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_camped_ground_is_cleared_of_critters_too() {
     // A hunt that is not rare camps its ground: everything on it is fought, so the generators
     // holding a slot make way (the Tusker Barracks' Tusker Guards).
