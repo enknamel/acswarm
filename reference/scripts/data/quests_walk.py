@@ -237,8 +237,9 @@ class Data:
 
 
 # Spawn rates: a Monte Carlo of ACE's generators (WorldObject_Generators.cs, GeneratorProfile.cs),
-# for the `rates` column: how many of a creature a landblock holds when it loads, and how many it
-# makes an hour while the player kills all its generators make.
+# for the `rates` column: how many of a creature a landblock holds when it loads, how many it
+# makes an hour while the player kills all its generators make, and how many others that takes
+# killing when killing it alone fills their slots with others.
 # WeenieType Chest and Container: an emptied one is not destroyed (WorldObject_Generators.cs:571).
 GEN_CONTAINERS = (20, 21)
 # The placeholder wcid a profile never makes (GeneratorProfile.cs:54).
@@ -246,6 +247,8 @@ PLACEHOLDER = 3666
 # Power-ups averaged for the load, and hours of clearing for the rate, per root generator.
 LOAD_RUNS = 60
 CLEAR_HOURS = 2.0
+# Killed alone, a creature coming at under this share of its rate cleared needs its slots cleared.
+ALONE_SHARE = 0.9
 
 
 class Slot:
@@ -347,7 +350,7 @@ class Gen:
 
 
 class Sim:
-    """One root generator's tree in time; `kills` says whether the player kills a creature at once."""
+    """One root generator's tree in time; `kills(wcid)` says whether the player kills one at once."""
 
     def __init__(self, sp, root, links, rng, kills):
         self.sp, self.rng, self.kills = sp, rng, kills
@@ -388,7 +391,7 @@ class Sim:
                 s.spawned.append(tok)
                 self.made[w] += 1
                 self.alive[w] += 1
-                if self.kills:
+                if self.kills(w):
                     self.pending.append((g, s, tok))
             else:
                 s.spawned.append(("o", w))  # an item, or a creature nobody kills: holds its slot
@@ -451,7 +454,7 @@ class Spawning:
         for lb, wcid, n in rows(dump, "encroots"):
             self.roots[int(lb, 16)].append((int(wcid), (), True, int(n)))
         self.surface = {lb for lb, rs in self.roots.items() if any(r[2] for r in rs)}
-        self.reach_of, self.per_root = {}, {}
+        self.reach_of, self.per_root, self.per_alone = {}, {}, {}
 
     def reaches(self, w, depth=0):
         """Every wcid generator `w` can put in the world, five deep."""
@@ -479,11 +482,11 @@ class Spawning:
             rng = random.Random("%d:%s" % key)
             load = defaultdict(float)
             for _ in range(LOAD_RUNS):
-                s = Sim(self, w, links, rng, False)
+                s = Sim(self, w, links, rng, lambda c: False)
                 s.run(0.0)
                 for c, n in s.alive.items():
                     load[c] += n / LOAD_RUNS
-            s = Sim(self, w, links, rng, True)
+            s = Sim(self, w, links, rng, lambda c: True)
             s.run(0.0)
             base = dict(s.made)
             s.run(CLEAR_HOURS * 3600)
@@ -494,10 +497,22 @@ class Spawning:
             self.per_root[key] = (dict(load), rate)
         return self.per_root[key]
 
+    def alone(self, w, links, wcid):
+        """Creature `wcid` an hour from one root when the player kills it and nothing else."""
+        key = (w, links, wcid)
+        if key not in self.per_alone:
+            s = Sim(self, w, links, random.Random("%d:%s:%d" % key), lambda c: c == wcid)
+            s.run(0.0)
+            base = s.made.get(wcid, 0)
+            s.run(CLEAR_HOURS * 3600)
+            self.per_alone[key] = (s.made.get(wcid, 0) - base) / CLEAR_HOURS
+        return self.per_alone[key]
+
     def rates(self, wcid, lb):
-        """(load, per hour) of creature `wcid` on landblock `lb`: a surface landblock's outdoor
-        roots only, as the spawns query counts."""
-        load = rate = 0.0
+        """(load, per hour, others an hour) of creature `wcid` on landblock `lb`: a surface
+        landblock's outdoor roots only, as the spawns query counts. Others are what clearing its
+        slots kills, counted from the roots it comes from only so (a share of a region roll)."""
+        load = rate = others = 0.0
         for w, links, outdoors, n in self.roots.get(lb, ()):
             if lb in self.surface and not outdoors:
                 continue
@@ -507,7 +522,9 @@ class Spawning:
             ld, rt = self.root_figures(w, links)
             load += n * ld.get(wcid, 0.0)
             rate += n * rt.get(wcid, 0.0)
-        return load, rate
+            if rt.get(wcid, 0.0) > 0 and self.alone(w, links, wcid) < ALONE_SHARE * rt[wcid]:
+                others += n * (sum(rt.values()) - rt[wcid])
+        return load, rate, others
 
 
 def walk(data, root):
@@ -1026,7 +1043,9 @@ def build(data, never):
         rates = ""
         if kind in ("drop", "kill"):
             figures = (data.spawning.rates(c, lb) for lb, _ in sorted(data.spawns[c]))
-            rates = ";".join("%g:%g" % (round(n, 2), round(h, 1)) for n, h in figures)
+            rates = ";".join("%g:%g%s" % (round(n, 2), round(h, 1),
+                                          ":%g" % round(o) if round(o) else "")
+                             for n, h, o in figures)
         src_out.append((want, kind, str(c), data.name.get(c, ""), str(data.level(c)),
                         "%g" % round(p, 4), where, at, keys, spawn, rates))
     return rows_out, givers_out, src_out, reasons
@@ -1216,9 +1235,11 @@ SOURCES_HEADER = """\
 # use, the items used on it; for a combine, the item used then the one used on;
 # wcid=name;..., each a want of its own rows. A shop's stock is vendors.csv's, joined at load (ac_world::quests::sources).
 # spawn: for a drop or kill, the best share of a generator roll that puts the creature out (1 sure;
-# blank when no generator chain is known). rates: for a drop or kill, load:per_hour;... one per
-# landblocks entry: how many stand there once the landblock loads, and how many its generators
-# make an hour while everything they make is killed, from a seeded simulation of ACE's generators.
+# blank when no generator chain is known). rates: for a drop or kill, load:per_hour[:others];...
+# one per landblocks entry: how many stand there once the landblock loads, how many its
+# generators make an hour while everything they make is killed, and when killing it alone leaves
+# its slots held, the others an hour that clearing kills; from a seeded simulation of ACE's
+# generators.
 # Regenerate with reference/scripts/data/quests.sh.
 """
 

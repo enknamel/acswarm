@@ -513,6 +513,8 @@ mod tests {
             glam::Vec3::new(48.33, -81.29, -2.02),
         );
         c.world.player_guid = Some(crate::testkit::ME);
+        // His Tusker Guards (tier 4) killed: a pursuit hunts up to a tier past them.
+        c.autoplay.growth.proven_tier = 4;
         c.autoplay.config.enabled = true;
         c.autoplay.config.fight.enabled = true;
         c.autoplay.config.fight.area = Some(crate::hunt::HuntArea {

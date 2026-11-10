@@ -306,3 +306,22 @@ fn a_creature_only_the_encounter_table_spawns_is_sought_at_its_corner_there() {
     assert_eq!((local.x, local.y), (144.0, 120.0), "{at:?}");
     assert_eq!(at.cell, crate::outdoor_cell(at.cell, local));
 }
+
+#[test]
+fn an_empty_rare_camp_ranks_below_a_dungeon_of_sure_spawns() {
+    // The Sturdy Iron Key: a Dark Inferno's 80% at 0x252D is a camp next to never there, ranked
+    // first by its spawn entries; the Lost Distillery's K'nath (20%) and the Moss Chamber's
+    // Mire-Witches (2%) stand on sure spawns that come back in minutes.
+    let grounds = source_grounds(&Want::Item(6876));
+    let rank = |wcid: u32, lb: u32| {
+        grounds
+            .iter()
+            .position(|g| g.source.wcid == wcid && g.landblock == lb)
+            .unwrap_or_else(|| panic!("{wcid} at {lb:04X}"))
+    };
+    let camp = rank(12023, 0x252D);
+    assert!(rank(29312, 0x0164) < camp, "the Lost Distillery");
+    assert!(rank(7102, 0x01DB) < camp, "the Moss Chamber");
+    let chakron = &grounds[rank(10815, 0x02AF)];
+    assert!(chakron.items_per_hour() > 100.0, "{:?}", chakron.rate);
+}

@@ -259,6 +259,9 @@ pub struct SpawnRate {
     pub load: f32,
     /// How many its generators make an hour while everything they make is killed.
     pub per_hour: f32,
+    /// The others an hour that clearing kills, when killing it alone leaves its generators'
+    /// slots held (a share of a region roll); 0 when its slots are its own (a linked placement).
+    pub others: f32,
 }
 
 /// Where what a quest wants comes from.
@@ -293,7 +296,7 @@ impl Source {
             Some((_, r)) => r,
             None => SpawnRate {
                 load: i.map_or(0.0, |i| self.landblocks[i].1 as f32),
-                per_hour: 0.0,
+                ..SpawnRate::default()
             },
         }
     }
@@ -505,7 +508,7 @@ fn parse_keys(s: &str) -> Option<Vec<(u32, String)>> {
         .collect()
 }
 
-/// Each `landblocks` entry's `load:per_hour`, `;`-separated; empty for none known.
+/// Each `landblocks` entry's `load:per_hour[:others]`, `;`-separated; empty for none known.
 fn parse_rates(s: &str, entries: usize) -> Option<Vec<SpawnRate>> {
     if s.is_empty() {
         return Some(Vec::new());
@@ -513,11 +516,13 @@ fn parse_rates(s: &str, entries: usize) -> Option<Vec<SpawnRate>> {
     let rates: Vec<SpawnRate> = s
         .split(';')
         .map(|r| {
-            let (load, per_hour) = r.split_once(':')?;
-            Some(SpawnRate {
-                load: load.parse().ok()?,
-                per_hour: per_hour.parse().ok()?,
-            })
+            let mut f = r.split(':').map(str::parse::<f32>);
+            let rate = SpawnRate {
+                load: f.next()?.ok()?,
+                per_hour: f.next()?.ok()?,
+                others: f.next().unwrap_or(Ok(0.0)).ok()?,
+            };
+            f.next().is_none().then_some(rate)
         })
         .collect::<Option<_>>()?;
     (rates.len() == entries).then_some(rates)

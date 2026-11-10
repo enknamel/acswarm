@@ -97,6 +97,11 @@ fn ground(lb: u32, source: &'static Source, portal: &'static Portal) -> SourceGr
             cell: portal.to_cell,
         }),
         way_in: Some(portal),
+        rate: ac_world::quests::SpawnRate {
+            load: 4.0,
+            per_hour: 40.0,
+            others: 0.0,
+        },
     }
 }
 
@@ -145,6 +150,17 @@ fn work_dropping(
     led: Option<&str>,
     dropped: &dyn Fn(&Source) -> bool,
 ) -> Pursued {
+    work_killing(facts, fake, led, dropped, &|_| Some(20.0))
+}
+
+/// [`work_dropping`], each kill taking what `kill_secs` says.
+fn work_killing(
+    facts: &QuestFacts,
+    fake: &dyn Chains,
+    led: Option<&str>,
+    dropped: &dyn Fn(&Source) -> bool,
+    kill_secs: &dyn Fn(u32) -> Option<f32>,
+) -> Pursued {
     let holds = |f: &str| crate::quest_log::holds(facts, f);
     let chained = with_chain(&facts.config.pursue, &holds, fake);
     let mut f = facts.clone();
@@ -171,6 +187,7 @@ fn work_dropping(
         ways: &BTreeMap::new(),
         gem_grounds: &Default::default(),
         here: None,
+        kill_secs,
     };
     pursuit_of(&board, &chained, &ask)
 }
@@ -211,6 +228,21 @@ fn a_jaw_not_carried_is_hunted_where_it_drops() {
     }
     assert_eq!(p.grounds.iter().map(|g| g.0).collect::<Vec<_>>(), [0x0001]);
     assert_eq!(p.sought, [28849], "the jaw's eater, not its namesake 28642");
+}
+
+#[test]
+fn a_creature_it_cannot_kill_is_no_ground() {
+    // Immune to every spell ready, or past a tier above the highest killed: the Engorged Eater's
+    // vault is no ground, and the step says why.
+    let f = facts(50, &[("engorgedeaterjaw", false)]);
+    let none = |w: u32| (w != 28849).then_some(20.0);
+    let p = work_killing(&f, &jaws(), None, &|_| false, &none);
+    assert!(p.grounds.is_empty(), "{:?}", p.grounds);
+    assert!(
+        why(&p.lines[0].step).contains("cannot kill"),
+        "{:?}",
+        p.lines[0]
+    );
 }
 
 #[test]
@@ -651,6 +683,8 @@ fn a_kill_task_is_hunted_on_the_ground_reached_soonest_not_the_one_with_most_spa
     // the Tusker Barracks (49, about 3 minutes) is the soonest.
     let lin = 0xDA3B_0035;
     let mut c = crate::testkit::standing_in_the_field(41, lin, glam::Vec3::new(40.0, 120.0, 20.0));
+    // Tier 3 killed: the Tusker Guards (tier 4) are one past it, as a pursuit may hunt.
+    c.autoplay.growth.proven_tier = 3;
     c.autoplay.config.quests.on = true;
     c.autoplay
         .config
@@ -667,7 +701,10 @@ fn a_kill_task_is_hunted_on_the_ground_reached_soonest_not_the_one_with_most_spa
         .pursuit_grounds
         .clone()
         .into_iter()
-        .filter_map(|(lb, at)| c.journey_plan(at, &quests).map(|t| (t.seconds, lb)))
+        .filter_map(|(lb, at)| {
+            let there = c.pursued_pace(lb)?.best;
+            c.journey_plan(at, &quests).map(|t| (t.seconds + there, lb))
+        })
         .min_by(|a, b| a.0.total_cmp(&b.0))
         .map(|(_, lb)| lb);
     assert_eq!(soonest, Some(0x5A48), "the Tusker Barracks");
@@ -1781,6 +1818,8 @@ fn mage_pursuing(quest: &str, profile: &str) -> Client {
     for school in [31, 32, 33, 34] {
         crate::testkit::trained_in(&mut c, school, 300);
     }
+    // Blargerton's: tier 5 killed, so a pursuit's creatures up to tier 6 are hunted.
+    c.autoplay.growth.proven_tier = 5;
     c.autoplay.config.quests.on = true;
     c.autoplay.config.quests.pursue_quest(quest, false, 0);
     c
@@ -2473,12 +2512,10 @@ fn a_rare_spawn_is_looked_for_a_while_then_the_next_ground_is_swept() {
     let now = std::time::Instant::now();
     let (mut c, here) = at_a_mire_witch_ground(now);
     assert!(c.is_rare_hunt());
+    // Her shore grounds held soonest first at the ground: cleared, a shore rolls her camp about
+    // three times an hour, so the six soonest are held, no longer all 64 to sweep.
     let held = c.autoplay.growth.pursuit_grounds.clone();
-    assert!(
-        held.len() > 6,
-        "all her grounds held to sweep: {}",
-        held.len()
-    );
+    assert!(held.len() > 1, "{held:?}");
     assert_eq!(c.grow_pursuit(now), Some(true), "looked over");
     assert_eq!(c.autoplay.growth.looking, Some((here, now)));
     assert!(!c.is_clearing_ground(), "a sweep clears nothing");
@@ -2657,4 +2694,61 @@ fn a_camped_ground_is_cleared_of_critters_too() {
         c.critter_verdict(&critter, &cfg),
         crate::autoplay::fight::critter::Critter::Fight
     );
+}
+
+/// Blargerton as he hunted the Sturdy Iron Key: a level 60 Lightning War mage at Holtburg, tier 5
+/// killed, the Tattered Virindi Cloak carried for the Bound scepter's chain.
+fn blargerton_after_the_key(now: std::time::Instant) -> Client {
+    let (mut c, _) = crate::testkit::a_caster_knowing(
+        now,
+        &["Lightning Bolt VI", "Lightning Vulnerability Other VI"],
+    );
+    for skill in [33, 34] {
+        crate::testkit::trained_in(&mut c, skill, 400);
+    }
+    c.world.stats.level = 60;
+    c.world.stats.name = "Blarg".into();
+    c.ledger_loaded = true;
+    crate::testkit::a_loot_profile(&mut c, "chained-quests");
+    c.autoplay.growth.proven_tier = 5;
+    c.autoplay.config.quests.on = true;
+    c.autoplay
+        .config
+        .quests
+        .pursue_quest("give:27841", false, 0);
+    in_the_pack(&mut c, 0x8000_0721, 9117, "Tattered Virindi Cloak", 1);
+    c.refresh_quests(now);
+    c
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_near_dungeon_of_low_chance_sure_spawns_beats_a_far_high_chance_ground() {
+    // "A dungeon of guaranteed 2% droppers that die in a cast or two beats a far ground of rare
+    // 80% ones": the Chakron's Virindi Inquisitors (80%) take 6 casts each and a long road.
+    let now = std::time::Instant::now();
+    let mut c = blargerton_after_the_key(now);
+    let quests = c.travel.quests_done.clone();
+    let grounds = c.autoplay.growth.pursuit_grounds.clone();
+    let mut totals: Vec<(f32, u32)> = Vec::new();
+    for (lb, at) in grounds {
+        let there = c.pursued_pace(lb).expect("a pace").best;
+        if let Some(t) = c.journey_plan(at, &quests) {
+            println!(
+                "{lb:04X}: {:.0} s there + {:.0} s on the road",
+                there, t.seconds
+            );
+            totals.push((t.seconds + there, lb));
+        }
+    }
+    totals.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let chakron = totals.iter().find(|t| t.1 == 0x02AE || t.1 == 0x02AF);
+    let first = totals.first().expect("a ground reached").1;
+    assert!(
+        first != 0x02AE && first != 0x02AF,
+        "the Chakron first: {totals:?}"
+    );
+    assert!(chakron.is_none_or(|c| c.0 > totals[0].0), "{totals:?}");
+    assert_eq!(c.grow_pursuit(now), Some(true));
+    assert_eq!(c.autoplay.growth.bound_landblock(), Some(first));
 }

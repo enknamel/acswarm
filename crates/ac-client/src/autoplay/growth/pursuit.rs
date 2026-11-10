@@ -21,6 +21,7 @@ use crate::Client;
 mod fetch;
 mod gem_way;
 mod kept;
+pub(crate) mod pace;
 mod section;
 mod sweep;
 pub(crate) use fetch::Fetching;
@@ -33,9 +34,11 @@ const CHAIN_DEPTH: u32 = 3;
 /// Links a want is followed through: another quest's reward, a missing item, a chest's key. The
 /// Bound Singularity Scepter's Sturdy Iron Key is the fourth (scepter, cloak, essence, key).
 const OBTAIN_DEPTH: usize = 6;
-/// Most grounds a hunt tries a journey to, best first: each is a plan over every portal.
+/// Most grounds a hunt tries a journey to, soonest first at the ground: each is a plan over every
+/// portal.
 const HUNT_GROUNDS: usize = 6;
-/// Most grounds a rare spawn's hunt holds to sweep, nearest first: the data keeps 64 a creature.
+/// Most grounds a hunt holds when they come only by rotating (a rare camp's), nearest first: the
+/// data keeps 64 a creature.
 const SWEEP_GROUNDS: usize = 64;
 
 /// The step a pursued quest is at for this character.
@@ -311,6 +314,8 @@ pub(crate) struct Pursued {
     pub(crate) lines: Vec<PursuitLine>,
     /// The working hunt's grounds a journey may end at, best first: landblock and place.
     pub(crate) grounds: Vec<(u32, Place)>,
+    /// How soon each of `grounds` gives the item there, in its order.
+    pub(crate) paces: Vec<pace::Pace>,
     /// The working hunt's creatures, by weenie class: fought before their namesakes.
     pub(crate) sought: Vec<u32>,
 }
@@ -337,6 +342,9 @@ pub(crate) struct Ask<'a> {
     pub(crate) gem_grounds: &'a std::collections::BTreeSet<String>,
     /// The landblock the character stands in, by its cell (a dungeon's rooms run past its square).
     pub(crate) here: Option<u32>,
+    /// Seconds a kill of a creature takes this character, by class; `None` for one it cannot
+    /// kill reliably ([`pace::Killing::secs`]).
+    pub(crate) kill_secs: &'a dyn Fn(u32) -> Option<f32>,
 }
 
 /// Each line's step, worked out with the `board` the chained list's facts gave; the first that
@@ -409,7 +417,7 @@ pub(crate) fn pursuit_of(board: &[QuestLine], chained: &[Chained], ask: &Ask) ->
     let on_ground = |l: &PursuitLine, h: &Option<Hunting>| {
         ask.gem_grounds.contains(&l.id)
             && h.as_ref()
-                .is_some_and(|(g, _)| g.iter().any(|(lb, _)| Some(*lb) == ask.here))
+                .is_some_and(|h| h.grounds.iter().any(|(lb, _)| Some(*lb) == ask.here))
     };
     let first = lines
         .iter()
@@ -420,9 +428,10 @@ pub(crate) fn pursuit_of(board: &[QuestLine], chained: &[Chained], ask: &Ask) ->
             Some(f) => i == f,
             None => line.step.can_progress() && !out.lines.iter().any(|l| l.working),
         };
-        if let (true, Some((grounds, sought))) = (line.working, hunt) {
-            out.grounds = grounds;
-            out.sought = sought;
+        if let (true, Some(h)) = (line.working, hunt) {
+            out.grounds = h.grounds;
+            out.paces = h.paces;
+            out.sought = h.sought;
         }
         out.lines.push(line);
     }
@@ -446,8 +455,13 @@ fn line_reads(line: &QuestLine) -> Option<(u32, String, u32)> {
     Some((wcid, name, row.teaches()?))
 }
 
-/// A hunt's grounds and the creatures sought there.
-type Hunting = (Vec<(u32, Place)>, Vec<u32>);
+/// A hunt's grounds, soonest first at the ground, and the creatures sought there.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct Hunting {
+    grounds: Vec<(u32, Place)>,
+    paces: Vec<pace::Pace>,
+    sought: Vec<u32>,
+}
 
 impl Ask<'_> {
     /// One board line's step towards `end`, and its grounds when it is a hunt.
@@ -621,7 +635,8 @@ impl Ask<'_> {
         first_stuck
     }
 
-    /// Hunt the best grounds a way in this character may use reaches; else why not.
+    /// Hunt the grounds a way in this character may use reaches, soonest to the item at the ground
+    /// first ([`pace::ground_pace`]), leaving out what it cannot kill; else why not.
     fn ground_step(&self, wants: &[Want], more: u32, what: &str) -> (PursuitStep, Option<Hunting>) {
         let level = self.facts.level;
         let grounds: Vec<SourceGround> =
@@ -636,28 +651,52 @@ impl Ask<'_> {
             g.way_in
                 .is_none_or(|p| p.quest.is_empty() || holds(&p.quest))
         };
-        let mut open: Vec<(u32, Place)> = Vec::new();
-        let mut first: Option<&SourceGround> = None;
-        let hunted = grounds.iter().filter(|g| g.source.kind.is_hunted());
-        let rare = hunted.clone().next().is_some()
-            && hunted.clone().all(|g| sweep::is_rare_spawn(g.source.wcid));
-        let most = if rare { SWEEP_GROUNDS } else { HUNT_GROUNDS };
-        for g in &grounds {
+        // Each open landblock's droppers this character can kill, the data's best one first.
+        let mut blocks: Vec<(&SourceGround, Place, Vec<pace::Dropper>)> = Vec::new();
+        let mut droppers: Vec<(u32, f32, f32)> = Vec::new();
+        let mut unkillable = false;
+        for g in grounds.iter().filter(|g| g.source.kind.is_hunted()) {
             let Some(place) = g.place.filter(|_| level_fits(g) && flag_held(g)) else {
                 continue;
             };
-            if !open.iter().any(|(lb, _)| *lb == g.landblock) && open.len() < most {
-                first.get_or_insert(g);
-                open.push((g.landblock, place));
+            let Some(kill) = (self.kill_secs)(g.source.wcid) else {
+                unkillable = true;
+                continue;
+            };
+            if !droppers.iter().any(|d| d.0 == g.source.wcid) {
+                droppers.push((g.source.wcid, g.source.chance, kill));
+            }
+            let d = pace::Dropper {
+                chance: g.source.chance,
+                kill,
+                rate: g.rate,
+            };
+            match blocks.iter_mut().find(|b| b.0.landblock == g.landblock) {
+                Some(b) => b.2.push(d),
+                None => blocks.push((g, place, vec![d])),
             }
         }
-        if let Some(g) = first {
+        let round = ac_world::quest_chain::ROTATE_SECS;
+        let mut paced: Vec<(&SourceGround, Place, pace::Pace)> = blocks
+            .into_iter()
+            .filter_map(|(g, place, ds)| Some((g, place, pace::ground_pace(&ds, round)?)))
+            .collect();
+        paced.sort_by(|a, b| a.2.best.total_cmp(&b.2.best));
+        // A hunt whose best ground comes only by rotating holds them all to sweep, nearest first.
+        let rotating = paced.first().is_some_and(|p| p.2.camp > p.2.rotate);
+        paced.truncate(if rotating {
+            SWEEP_GROUNDS
+        } else {
+            HUNT_GROUNDS
+        });
+        if let Some(&(g, ..)) = paced.first() {
             // Only the creatures of the grounds held: the Sturdy Iron Key drops from 398, and a
             // Gotrok Tiatus at 2% met on the road was fought, never walked past.
-            let held = |g: &&SourceGround| open.iter().any(|(lb, _)| *lb == g.landblock);
+            let held = |g: &&SourceGround| paced.iter().any(|p| p.0.landblock == g.landblock);
             let mut sought: Vec<u32> = Vec::new();
             for s in grounds.iter().filter(held).map(|g| g.source) {
-                if s.kind.is_hunted() && !sought.contains(&s.wcid) {
+                let can = droppers.iter().any(|d| d.0 == s.wcid);
+                if s.kind.is_hunted() && can && !sought.contains(&s.wcid) {
                     sought.push(s.wcid);
                 }
             }
@@ -667,7 +706,12 @@ impl Ask<'_> {
                 place: ac_world::quest_chain::place_name(g.place.map_or(0, |p| p.cell)),
                 more,
             };
-            return (step, Some((open, sought)));
+            let hunting = Hunting {
+                grounds: paced.iter().map(|p| (p.0.landblock, p.1)).collect(),
+                paces: paced.iter().map(|p| p.2).collect(),
+                sought,
+            };
+            return (step, Some(hunting));
         }
         let shut = grounds
             .iter()
@@ -691,6 +735,12 @@ impl Ask<'_> {
             .flat_map(|w| self.chains.sources(w))
             .find(|s| s.kind == Yield::Npc);
         let why = match (npc, grounds.is_empty()) {
+            (_, false) if !droppers.is_empty() => {
+                format!("where a way in reaches, nothing that drops {what} is ever about")
+            }
+            (_, false) if unkillable => {
+                format!("{what} drops only from creatures this character cannot kill yet")
+            }
             (Some(s), true) => {
                 format!("{what} comes from {}: autoplay cannot fetch it yet", s.name)
             }
@@ -759,6 +809,7 @@ impl Client {
         if chained.is_empty() {
             self.pursuit.clear();
             st.pursuit_grounds.clear();
+            st.pursuit_paces.clear();
             st.pursuit_gems.clear();
             st.pursuit_sought.clear();
             self.keep_quest_section(&ChainData);
@@ -815,6 +866,8 @@ impl Client {
                     .since(&s.wcid)
                     .is_some_and(|t| now.saturating_duration_since(t) < fetch::UNLOCKED_FOR)
         };
+        let killing = self.killing();
+        let kill_secs = |wcid: u32| killing.secs(wcid);
         let ask = Ask {
             facts,
             asking: &asking,
@@ -827,11 +880,14 @@ impl Client {
             ways: &ways,
             gem_grounds: &gem_grounds,
             here: self.player.as_ref().map(|p| p.cell >> 16),
+            kill_secs: &kill_secs,
         };
         let pursued = pursuit_of(&self.quest_board, chained, &ask);
+        drop(killing);
         self.pursuit = pursued.lines;
         let st = &mut self.autoplay.growth;
         st.pursuit_grounds = pursued.grounds;
+        st.pursuit_paces = pursued.paces;
         st.pursuit_sought = pursued.sought;
         self.keep_quest_section(&ChainData);
     }
@@ -1064,13 +1120,15 @@ impl Client {
                     return Some(false);
                 }
                 let every = grounds.clone();
-                // The ground reached soonest first: the most spawns may be a 75-minute road away.
+                // The item soonest first: the journey there and the seconds there. The most spawns
+                // may be a 75-minute road away, and the far Chakron's 80% is worse than a near 20%.
                 let quests = self.travel.quests_done.clone();
                 let mut secs: Vec<(f32, (u32, Place))> = Vec::new();
                 for g in grounds.drain(..) {
+                    let there = self.pursued_pace(g.0).map_or(0.0, |p| p.best);
                     let t = self
                         .journey_plan(g.1, &quests)
-                        .map_or(f32::MAX, |t| t.seconds);
+                        .map_or(f32::MAX, |t| t.seconds + there);
                     secs.push((t, g));
                 }
                 secs.sort_by(|a, b| a.0.total_cmp(&b.0));
@@ -1152,6 +1210,13 @@ impl Client {
             | PursuitStep::Combine { .. } => self.grow_fetch(&line, now),
             _ => None,
         }
+    }
+
+    /// How soon the pursued ground of `lb` gives the item there, when `lb` is one.
+    pub(crate) fn pursued_pace(&self, lb: u32) -> Option<pace::Pace> {
+        let st = &self.autoplay.growth;
+        let i = st.pursuit_grounds.iter().position(|(l, _)| *l == lb)?;
+        st.pursuit_paces.get(i).copied()
     }
 
     /// Where a journey to the pursued ground of `lb` ends, when `lb` is one.

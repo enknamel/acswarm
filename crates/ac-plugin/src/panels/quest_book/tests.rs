@@ -372,6 +372,7 @@ fn the_jaw_chain_reads_in_plain_words() {
             entries: 4,
             place: None,
             way_in: None,
+            rate: Default::default(),
         }]),
         ChainLink::HandIn(rows),
     ];

@@ -400,9 +400,13 @@ fn the_rates_column_is_read_beside_its_landblocks() {
         s.rate_at(0x02AE),
         SpawnRate {
             load: 19.0,
-            per_hour: 0.0
+            ..SpawnRate::default()
         }
     );
+    // A third figure is what clearing kills: a shore's Mire-Witch camp, a share of a region roll.
+    let s = parse_source("9117,drop,9163,Mosswart Mire-Witch,80,1,4497:1,,,0.0049,0:3:84")
+        .expect("a row with a clearing");
+    assert_eq!(s.rate_at(0x4497).others, 84.0);
     // Rates not one a landblock are no row.
     assert!(
         parse_source("6876,drop,10815,Virindi Inquisitor,100,0.8,2AE:19;2AF:37,,,1,19:225")

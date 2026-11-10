@@ -8,7 +8,7 @@ use std::sync::OnceLock;
 use glam::{Vec2, Vec3};
 
 use crate::portals::Portal;
-use crate::quests::{Kind, Repeat, Row, Source, Want};
+use crate::quests::{Kind, Repeat, Row, Source, SpawnRate, Want};
 use crate::unlocks::Unlock;
 use crate::Place;
 
@@ -32,6 +32,26 @@ pub struct SourceGround {
     pub place: Option<Place>,
     /// The portal in, when only a portal reaches it: its level and flag gate the hunt.
     pub way_in: Option<&'static Portal>,
+    /// How fast the source comes there.
+    pub rate: SpawnRate,
+}
+
+/// Seconds to leave a landblock for it to unload and come back to a fresh load: 5 minutes after
+/// nobody is in it or, outdoors, beside it (Landblock.cs:118, 1111-1124), and a walk out and back.
+pub const ROTATE_SECS: f32 = 420.0;
+
+impl SourceGround {
+    /// The source's spawns a second there, killed as they come: camped, or come back to after an
+    /// unload ([`ROTATE_SECS`]), whichever is more.
+    pub fn spawns_per_sec(&self) -> f32 {
+        (self.rate.per_hour / 3600.0).max(self.rate.load / ROTATE_SECS)
+    }
+
+    /// Items an hour its spawns give, before any kill takes time: the chance a kill times
+    /// [`Self::spawns_per_sec`].
+    pub fn items_per_hour(&self) -> f32 {
+        self.source.chance * self.spawns_per_sec() * 3600.0
+    }
 }
 
 /// One link of a quest's chain, in the order a player does them.
@@ -256,10 +276,13 @@ fn source_ground(source: &'static Source, landblock: u32, entries: u32) -> Sourc
         entries,
         place,
         way_in,
+        rate: source.rate_at(landblock),
     }
 }
 
-/// Where `want` comes from, best first (spawn entries x chance, then the lower way in).
+/// Where `want` comes from, best first: the items an hour its spawns give
+/// ([`SourceGround::items_per_hour`]), then the lower way in. A rare camp's 80% drop that is next
+/// to never there ranks below a dungeon of sure spawns at 2%.
 pub fn source_grounds(want: &Want) -> Vec<SourceGround> {
     let mut grounds: Vec<SourceGround> = crate::quests::sources_of(want)
         .filter(|s| s.kind.is_hunted())
@@ -270,10 +293,9 @@ pub fn source_grounds(want: &Want) -> Vec<SourceGround> {
         })
         .collect();
     let level = |g: &SourceGround| g.way_in.map_or(0, |p| p.min_level);
-    let yields = |g: &SourceGround| g.entries as f32 * g.source.chance;
     grounds.sort_by(|a, b| {
         (b.place.is_some().cmp(&a.place.is_some()))
-            .then(yields(b).total_cmp(&yields(a)))
+            .then(b.items_per_hour().total_cmp(&a.items_per_hour()))
             .then(level(a).cmp(&level(b)))
     });
     grounds
