@@ -108,6 +108,29 @@ fn a_ring_caster_starting_a_cast_beside_us_is_run_from_past_its_reach() {
 }
 
 #[test]
+fn a_ring_casters_next_cast_two_and_a_half_seconds_on_is_run_from_too() {
+    // ACE casts again 2-3 s after the last (`Monster_Magic.cs:160-186`), well inside one ring's
+    // span; the Ready between the two casts (`PostCastMotion`) tells them apart.
+    let t0 = Instant::now();
+    let (mut c, guid) = beside(INQUISITOR, 2.0, 0xD3);
+    let set =
+        |c: &mut Client, forward| c.world.objects.get_mut(&guid).unwrap().motion.forward = forward;
+    assert!(c.autoplay_dodge(t0));
+    // Still standing 2 m off when it casts again.
+    c.dodge_to = None;
+    set(&mut c, 0x4100_0003);
+    assert!(!c.autoplay_dodge(t0 + Duration::from_millis(1_000)));
+    set(&mut c, 0xD3);
+    let again = t0 + Duration::from_millis(2_500);
+    assert!(c.autoplay_dodge(again), "the second cast was swallowed");
+    let (spot, _) = c.dodge_to.expect("a step out");
+    assert!(flat_from(&c, guid, spot) >= 4.5 + RING_MARGIN);
+    // Its motion held over the next ticks is still the one cast.
+    c.dodge_to = None;
+    assert!(!c.autoplay_dodge(again + Duration::from_millis(100)));
+}
+
+#[test]
 fn a_ring_caster_walking_or_already_far_enough_off_is_left_alone() {
     let now = Instant::now();
     let (mut c, _) = beside(INQUISITOR, 2.0, 0x07);
@@ -196,6 +219,78 @@ fn autoplay_and_the_body_run_a_fighting_caster_out_of_a_ring_before_it_lands() {
         worst > 0.0,
         "the ring's front came within {:.2} m: {}",
         -worst,
+        c.autoplay.status
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn autoplay_and_the_body_run_a_caster_out_of_two_rings_cast_two_and_a_half_seconds_apart() {
+    // The whole loop at 20 Hz in the Holtburg field: an Inquisitor 2 m off casts at 0.5 s, closes
+    // to 2 m again and casts at 3 s, each ring leaving 0.9 s on at 2 m/s out to 4.5 m.
+    let t0 = Instant::now();
+    let (mut c, _) = crate::testkit::a_caster_knowing(t0, &["Frost Bolt III"]);
+    let field = ac_world::landblock_origin(0xA9B4_0000) + Vec3::new(84.0, 108.0, 94.0);
+    let (at, cell) = crate::walk_trial::on_floor(&mut c, field);
+    crate::testkit::stand(&mut c, cell, at - ac_world::landblock_origin(cell));
+    c.autoplay.config.enabled = true;
+    c.autoplay.config.fight.enabled = true;
+    let guid = 0x8000_0001;
+    let mut o = crate::testkit::standing_by(&mut c, guid, "Virindi Inquisitor", 2.0);
+    o.weenie_class_id = INQUISITOR;
+    o.walked_at = Some(crate::testkit::ME);
+    c.world.objects.insert(guid, o);
+    let dt = 0.05;
+    let casts = [(0.5, 1.4), (3.0, 3.9)];
+    let mut worst = [f32::INFINITY; 2];
+    let mut centre: [Option<glam::Vec2>; 2] = [None; 2];
+    let mut closed = false;
+    for frame in 0..7 * 20 {
+        let t = frame as f32 * dt;
+        let now = t0 + Duration::from_secs_f32(t);
+        c.frame_at = now;
+        if c.autoplay
+            .cast_sent
+            .is_some_and(|s| now.duration_since(s) >= Duration::from_millis(1500))
+        {
+            c.autoplay.cast_answered();
+            let o = c.world.objects.get_mut(&guid).unwrap();
+            o.health = o.health.map(|h| h - 0.01);
+        }
+        if t >= 2.95 && !closed {
+            // It walks up to us again.
+            closed = true;
+            let pl = c.player.as_ref().unwrap();
+            let (cell, me) = (pl.cell, pl.world_position());
+            let o = c.world.objects.get_mut(&guid).unwrap();
+            let from = o.world_pos().unwrap();
+            let to = me + (from - me).with_z(0.0).normalize() * 2.0;
+            o.position = Some(ac_world::object::Position::new_flat(
+                cell,
+                to - ac_world::landblock_origin(cell),
+            ));
+        }
+        let casting = casts.iter().any(|(s, l)| (*s..*l).contains(&t));
+        let forward = if casting { 0xD3 } else { 0x4100_0003 };
+        c.world.objects.get_mut(&guid).unwrap().motion.forward = forward;
+        c.tick_autoplay(now);
+        c.tick_player(crate::player::Input::default(), dt, now);
+        let caster = c.world.objects[&guid].world_pos().unwrap().truncate();
+        let me = c.my_position().unwrap().truncate();
+        for (i, (_, launch)) in casts.iter().enumerate() {
+            // Each ring spreads from where its caster stood at its launch.
+            let flown = (t - launch) * 2.0;
+            let from = *centre[i].get_or_insert(caster);
+            if !(0.0..=4.5).contains(&flown) {
+                centre[i] = None;
+                continue;
+            }
+            worst[i] = worst[i].min(me.distance(from) - (1.8 + 0.9 + flown));
+        }
+    }
+    assert!(
+        worst.iter().all(|w| *w > 0.0),
+        "the rings' fronts came within {worst:?} m: {}",
         c.autoplay.status
     );
 }

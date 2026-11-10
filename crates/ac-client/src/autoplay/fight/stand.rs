@@ -8,11 +8,13 @@ use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
 use ac_nav::steering::REPLAN_DISTANCE;
+use ac_world::ring_casters::widest_ring;
 use ac_world::Place;
-use glam::Vec3;
+use glam::{Vec2, Vec3};
 
 use crate::autoplay::Doing;
 use crate::did::Did;
+use crate::dodge::rings::{ring_reach, PAST};
 use crate::dodge::{How, WITHIN};
 use crate::{aim, Client, Goal, SAME_FLOOR};
 
@@ -62,9 +64,11 @@ pub(crate) struct Stands {
     pub(crate) waiting: Option<(u32, Instant)>,
 }
 
-/// A caster's back-off walk and its steps aside between casts.
+/// A caster's back-off walk and its steps aside between casts, for one target.
 #[derive(Debug, Clone)]
 pub(crate) struct KeepOff {
+    /// The target these are for: another starts afresh.
+    pub(crate) fought: Option<u32>,
     /// The back-off spot being walked to, and since when.
     pub(crate) walk: Option<(Place, Instant)>,
     /// When the last back-off ended or found no spot (see [`STANDOFF_AGAIN`]).
@@ -82,6 +86,7 @@ pub(crate) struct KeepOff {
 impl Default for KeepOff {
     fn default() -> Self {
         Self {
+            fought: None,
             walk: None,
             last: None,
             due: false,
@@ -89,6 +94,15 @@ impl Default for KeepOff {
             anchor: None,
             side: 1.0,
         }
+    }
+}
+
+impl KeepOff {
+    /// Drops the back-off and step aside under way and the spot kept to: the character was moved off them.
+    pub(crate) fn break_off(&mut self) {
+        self.walk = None;
+        self.step = None;
+        self.anchor = None;
     }
 }
 
@@ -180,6 +194,7 @@ impl Client {
         if self.attack_target.is_some() {
             self.cancel_attack();
         }
+        self.autoplay.keep_off.break_off();
         let goal = Goal::At {
             place: stand.spot,
             within: AT_STAND,
@@ -370,14 +385,69 @@ impl Client {
         Some((leader_at, self.autoplay.config.team.fight_radius.max(1.0)))
     }
 
-    /// A caster with an attacker nearer than [`STANDOFF_NEAR`] backs off to a `standoff_spot`:
-    /// `Acting` while walking, else `Done`. A walked stand outranks it; so does no room.
+    /// The stand a caster keeps to rather than backing off: walked to, or a corner or wall it stood
+    /// at already (fewer than [`SIDES`] open).
+    fn stand_kept(&self) -> Option<Stand> {
+        self.autoplay
+            .stands
+            .held
+            .filter(|s| s.walked || s.sides < SIDES as u32)
+    }
+
+    /// The back-off and steps aside for `target`, started afresh if they were for another.
+    fn keep_off_for(&mut self, target: u32) {
+        if self.autoplay.keep_off.fought != Some(target) {
+            self.autoplay.keep_off = KeepOff {
+                fought: Some(target),
+                ..KeepOff::default()
+            };
+        }
+    }
+
+    /// Ends the slot's walk to `spot` if this step holds it: never another row's walk.
+    fn stop_walk_to(&mut self, spot: Place, why: &str) {
+        let owner = self.step_owner();
+        let mine = self
+            .going
+            .as_ref()
+            .is_some_and(|g| g.owner == owner && g.goal.place() == Some(spot));
+        if mine {
+            self.stop_going(Some(owner), why);
+        }
+    }
+
+    /// How near each of `attackers` a caster keeps (metres, flat): [`STANDOFF_NEAR`], or past a
+    /// ring caster's reach by [`PAST`].
+    fn keeps_of(&self, attackers: &[(u32, Vec3)]) -> Vec<f32> {
+        attackers
+            .iter()
+            .map(|(g, _)| {
+                let ring = self
+                    .world
+                    .objects
+                    .get(g)
+                    .and_then(|o| widest_ring(o.weenie_class_id));
+                ring.map_or(STANDOFF_NEAR, |r| STANDOFF_NEAR.max(ring_reach(r) + PAST))
+            })
+            .collect()
+    }
+
+    /// A caster nearer an attacker than it keeps ([`Client::keeps_of`]) backs off to a `standoff_spot`:
+    /// `Acting` while walking, else `Done`. A stand kept outranks it; so does no room.
     pub(crate) fn autoplay_keep_off(&mut self, target: u32, how: How, now: Instant) -> Did {
-        if !matches!(how, How::Spell(_)) || self.autoplay.stands.held.is_some_and(|s| s.walked) {
+        if !matches!(how, How::Spell(_)) || self.stand_kept().is_some() {
             return Did::Done;
         }
+        self.keep_off_for(target);
+        let Some(me) = self.my_position() else {
+            return Did::Done;
+        };
+        let rings = self.spreading_rings(me);
         if let Some((spot, since)) = self.autoplay.keep_off.walk {
-            let did = if now.saturating_duration_since(since) < STANDOFF_LASTS {
+            let ringed = is_in_rings(&rings, spot.at);
+            let did = if ringed {
+                Did::blocked("a ring spreads over the spot")
+            } else if now.saturating_duration_since(since) < STANDOFF_LASTS {
                 let goal = Goal::At {
                     place: spot,
                     within: AT_STAND,
@@ -391,29 +461,37 @@ impl Client {
                     .say(Doing::Fighting, "backing off to cast from further away");
                 return Did::Acting;
             }
-            if did != Did::Done {
-                self.stop_going(Some(self.step_owner()), "backing off took too long");
+            if let Did::Blocked(why) | Did::Refused(why) = &did {
+                let why = format!("backing off: {}", why.what);
+                self.stop_walk_to(spot, &why);
             }
             self.autoplay.keep_off.walk = None;
-            self.autoplay.keep_off.last = Some(now);
+            // Out from under a ring, another spot is looked for at once.
+            if !ringed {
+                self.autoplay.keep_off.last = Some(now);
+            }
             return Did::Done;
         }
         let again = self.autoplay.keep_off.last;
         if again.is_some_and(|t| now.saturating_duration_since(t) < STANDOFF_AGAIN) {
             return Did::Done;
         }
-        let Some(me) = self.my_position() else {
-            return Did::Done;
-        };
         let attackers = self.melee_attackers(me);
-        if nearest_of(&attackers, me) >= STANDOFF_NEAR {
+        let keeps = self.keeps_of(&attackers);
+        if clearance(&attackers, &keeps, me) >= 0.0 {
             return Did::Done;
         }
         // Looked round first: that builds the region the walk reads; built next tick.
-        let Some(places) = self.standable_near(me, STANDOFF_LOOK) else {
+        let wider = keeps.iter().fold(0.0f32, |w, k| w.max(k - STANDOFF_NEAR));
+        let Some(places) = self.standable_near(me, STANDOFF_LOOK + wider) else {
             return Did::Done;
         };
-        let Some(spot) = self.standoff_spot(places, me, &attackers, target, how) else {
+        let around = Around {
+            attackers: &attackers,
+            keeps: &keeps,
+            rings: &rings,
+        };
+        let Some(spot) = self.standoff_spot(places, me, around, target, how) else {
             self.autoplay.keep_off.last = Some(now);
             return Did::Done;
         };
@@ -429,25 +507,26 @@ impl Client {
         self.autoplay_keep_off(target, how, now)
     }
 
-    /// Of `places`, the nearest to `me` on this floor with every attacker [`STANDOFF_NEAR`] off and
-    /// the nearest at most [`STANDOFF_FAR`], by the leader, the spell `how` reaching `target` from it.
+    /// Of `places`, the nearest to `me` on this floor no nearer any attacker than kept and at most
+    /// [`STANDOFF_FAR`] less [`STANDOFF_NEAR`] past that, out of every ring, the spell reaching `target`.
     fn standoff_spot(
         &mut self,
         places: Vec<Place>,
         me: Vec3,
-        attackers: &[(u32, Vec3)],
+        around: Around,
         target: u32,
         how: How,
     ) -> Option<Place> {
         let reach = self.reach_at(target, how);
         let target_at = self.world.objects.get(&target).and_then(|o| o.world_pos());
         let leader = self.leader_bound();
+        let band = 0.0..=STANDOFF_FAR - STANDOFF_NEAR;
         let mut spots: Vec<Place> = places
             .into_iter()
             .filter(|p| {
-                let near = nearest_of(attackers, p.at);
                 (p.at.z - me.z).abs() <= SAME_FLOOR
-                    && (STANDOFF_NEAR..=STANDOFF_FAR).contains(&near)
+                    && band.contains(&clearance(around.attackers, around.keeps, p.at))
+                    && !is_in_rings(around.rings, p.at)
                     && target_at.is_none_or(|t| p.at.distance(t) <= reach)
                     && leader.is_none_or(|(l, r)| p.at.distance(l) <= r)
                     && !self.is_dud_spot(p.at)
@@ -471,14 +550,21 @@ impl Client {
         range * WITHIN
     }
 
-    /// After each cast a caster steps [`JIGGLE`] aside of the spot it keeps to, the other side each
-    /// time: `Acting` while stepping. Never mid-cast: the caller asks only with the cast slot free.
+    /// After each cast a caster steps [`JIGGLE`] aside of the spot it keeps to, or back to it:
+    /// `Acting` while stepping. Never mid-cast: the caller asks only with the cast slot free.
     pub(crate) fn autoplay_jiggle(&mut self, target: u32, how: How, now: Instant) -> Did {
         if !matches!(how, How::Spell(_)) || self.mid_attack() {
             return Did::Done;
         }
+        self.keep_off_for(target);
         if let Some((spot, since)) = self.autoplay.keep_off.step {
-            let did = if now.saturating_duration_since(since) < JIGGLE_LASTS {
+            let rings = self
+                .my_position()
+                .map(|me| self.spreading_rings(me))
+                .unwrap_or_default();
+            let did = if is_in_rings(&rings, spot.at) {
+                Did::blocked("a ring spreads over the step")
+            } else if now.saturating_duration_since(since) < JIGGLE_LASTS {
                 let goal = Goal::At {
                     place: spot,
                     within: AT_JIGGLE,
@@ -492,8 +578,9 @@ impl Client {
                     .say(Doing::Fighting, "stepping aside between casts");
                 return Did::Acting;
             }
-            if did != Did::Done {
-                self.stop_going(Some(self.step_owner()), "the step aside took too long");
+            if let Did::Blocked(why) | Did::Refused(why) = &did {
+                let why = format!("the step aside: {}", why.what);
+                self.stop_walk_to(spot, &why);
             }
             self.autoplay.keep_off.step = None;
             return Did::Done;
@@ -508,8 +595,8 @@ impl Client {
         self.autoplay_jiggle(target, how, now)
     }
 
-    /// The next step aside, across the line to `target` from the stand walked to, else the spot kept
-    /// to: walked to straight, the spell still reaching, no nearer the attackers than the band.
+    /// The next step across the line to `target`: a side of the spot kept to (a stand kept near) not
+    /// stood on, else back to it; walked straight, the spell reaching, no nearer attackers, no ring.
     fn jiggle_spot(&mut self, target: u32, how: How) -> Option<Place> {
         let (here, cap) = self.player.as_ref().map(|p| {
             let here = Place {
@@ -524,25 +611,38 @@ impl Client {
             .objects
             .get(&target)
             .and_then(|o| o.world_pos())?;
-        let held = self.autoplay.keep_off.anchor;
-        let anchor = match self.autoplay.stands.held.filter(|s| s.walked && s.reached) {
-            Some(s) => s.spot.at,
-            None => match held {
-                Some((g, a)) if g == target && a.distance(me) <= JIGGLE + AT_STAND => a,
-                _ => me,
-            },
+        let near = |a: Vec3| a.distance(me) <= JIGGLE + AT_STAND;
+        let stand = self.stand_kept().filter(|s| s.reached && near(s.spot.at));
+        let anchor = match (stand, self.autoplay.keep_off.anchor) {
+            (Some(s), _) => s.spot.at,
+            (None, Some((g, a))) if g == target && near(a) => a,
+            _ => me,
         };
         self.autoplay.keep_off.anchor = Some((target, anchor));
         let across = (at - anchor).truncate().perp().normalize_or_zero();
-        if across == glam::Vec2::ZERO {
+        if across == Vec2::ZERO {
             return None;
         }
         let attackers = self.melee_attackers(me);
         let floor = nearest_of(&attackers, anchor).clamp(RING, STANDOFF_NEAR);
+        // A ring caster's reach the spot kept to is out of, a step aside keeps out of too.
+        let reaches: Vec<(Vec2, f32)> = attackers
+            .iter()
+            .filter_map(|(g, a)| {
+                let ring = widest_ring(self.world.objects.get(g)?.weenie_class_id)?;
+                let off = a.truncate().distance(anchor.truncate());
+                Some((a.truncate(), ring_reach(ring).min(off)))
+            })
+            .collect();
+        let rings = self.spreading_rings(me);
         let reach = self.reach_at(target, how);
         let side = self.autoplay.keep_off.side;
-        for s in [side, -side] {
+        for s in [side, -side, 0.0] {
             let ideal = anchor + (across * JIGGLE * s).extend(0.0);
+            if ideal.truncate().distance(me.truncate()) <= AT_JIGGLE {
+                continue;
+            }
+            let home = s == 0.0;
             let place = self.place_at(ideal);
             let Ok(Some(p)) = self.pathfinder.put_on_floor(here, place, cap) else {
                 continue;
@@ -550,11 +650,15 @@ impl Client {
             let fits = p.at.truncate().distance(ideal.truncate()) <= AT_JIGGLE
                 && (p.at.z - anchor.z).abs() <= SAME_FLOOR
                 && p.at.distance(at) <= reach
-                && nearest_of(&attackers, p.at) >= floor
+                && (home
+                    || (nearest_of(&attackers, p.at) >= floor && !is_in_rings(&reaches, p.at)))
+                && !is_in_rings(&rings, p.at)
                 && !self.is_dud_spot(p.at)
                 && self.pathfinder.can_walk(here, p.at, cap);
             if fits && self.throws_from(p.at, target, how) {
-                self.autoplay.keep_off.side = -s;
+                if !home {
+                    self.autoplay.keep_off.side = -s;
+                }
                 return Some(p);
             }
         }
@@ -573,6 +677,29 @@ impl Client {
             None => false,
         }
     }
+}
+
+/// The attackers round a back-off, how near each a caster keeps, and the rings spreading.
+#[derive(Clone, Copy)]
+struct Around<'a> {
+    attackers: &'a [(u32, Vec3)],
+    keeps: &'a [f32],
+    rings: &'a [(Vec2, f32)],
+}
+
+/// How far `at` stands outside the nearest of the distances `keeps` from `attackers` (metres, flat;
+/// below 0 inside one); infinite with none.
+fn clearance(attackers: &[(u32, Vec3)], keeps: &[f32], at: Vec3) -> f32 {
+    attackers
+        .iter()
+        .zip(keeps)
+        .map(|((_, a), k)| a.truncate().distance(at.truncate()) - k)
+        .fold(f32::INFINITY, f32::min)
+}
+
+/// Whether `at` stands inside any of `rings` (flat centre, reach).
+fn is_in_rings(rings: &[(Vec2, f32)], at: Vec3) -> bool {
+    rings.iter().any(|(c, r)| at.truncate().distance(*c) < *r)
 }
 
 /// How far the nearest of `attackers` stands from `at` (metres, flat); infinite with none.

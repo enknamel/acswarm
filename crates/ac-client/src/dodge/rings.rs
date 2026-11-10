@@ -26,6 +26,8 @@ pub const LEAVE_SLACK: f32 = 0.3;
 pub const OWN_CAST: Duration = Duration::from_secs(2);
 /// Metres past the reach the spot stands.
 pub const PAST: f32 = 0.5;
+/// Metres up or down past which a ring, flying flat from its caster's middle, passes over or under.
+pub const FLOOR_APART: f32 = 4.0;
 /// Metres run at most to get out.
 pub const LONGEST: f32 = 20.0;
 /// Directions tried round the character.
@@ -40,6 +42,13 @@ pub struct RingCast {
     pub seen: Instant,
     /// A step out was taken (or found no room) for this cast: one is enough.
     pub stepped: bool,
+    /// Its cast motion still shows; once it ends (`PostCastMotion`, `Monster_Magic.cs:352`) the next is a new cast.
+    pub casting: bool,
+}
+
+/// Metres from its caster a ring reaches us.
+pub fn ring_reach(ring: Ring) -> f32 {
+    ring.range + RING_MARGIN
 }
 
 /// Whether a forward motion (low 16 bits) is a monster casting: `CastSpell`, the Magic* cast
@@ -54,7 +63,7 @@ pub fn leave_within(elapsed: f32, d: f32, ring: Ring) -> f32 {
     let launch = WINDUP_LEAST - elapsed;
     let speed = ring.speed.max(0.1);
     let arrives = launch + (d - RING_MARGIN).max(0.0) / speed;
-    let reach = ring.range + RING_MARGIN;
+    let reach = ring_reach(ring);
     let at_reach = launch + ring.range / speed;
     arrives.min(at_reach - (reach - d).max(0.0) / RUN_LEAST) - LEAVE_SLACK
 }
@@ -117,7 +126,7 @@ pub fn escape_spot(
 
 impl Client {
     /// Notes each ring caster in view that has started a cast, and forgets one whose ring would
-    /// have burst by now.
+    /// have burst by now. A caster casts again 2-3 s on (`Monster_Magic.cs:160-186`).
     pub(crate) fn watch_ring_casts(&mut self, now: Instant) {
         let casting: Vec<u32> = self
             .world
@@ -127,11 +136,19 @@ impl Client {
             .filter(|o| widest_ring(o.weenie_class_id).is_some())
             .map(|o| o.guid)
             .collect();
+        for (g, cast) in self.dodge.ring_casts.iter_mut() {
+            cast.casting &= casting.contains(g);
+        }
         for g in casting {
-            self.dodge.ring_casts.entry(g).or_insert(RingCast {
+            let fresh = RingCast {
                 seen: now,
                 stepped: false,
-            });
+                casting: true,
+            };
+            let cast = self.dodge.ring_casts.entry(g).or_insert(fresh);
+            if !cast.casting {
+                *cast = fresh;
+            }
         }
         let world = &self.world;
         self.dodge.ring_casts.retain(|g, cast| {
@@ -146,6 +163,22 @@ impl Client {
             let over = WINDUP_MOST + ring.range / ring.speed.max(0.1);
             now.duration_since(cast.seen).as_secs_f32() < over
         });
+    }
+
+    /// Each ring being cast or still spreading that can hurt us at our height at `me`: its
+    /// caster's flat centre and its reach.
+    pub(crate) fn spreading_rings(&self, me: Vec3) -> Vec<(Vec2, f32)> {
+        self.dodge
+            .ring_casts
+            .keys()
+            .filter(|g| self.can_be_hurt_by(Some(**g)))
+            .filter_map(|g| {
+                let o = self.world.objects.get(g)?;
+                Some((o.world_pos()?, widest_ring(o.weenie_class_id)?))
+            })
+            .filter(|(at, _)| (at.z - me.z).abs() <= FLOOR_APART)
+            .map(|(at, ring)| (at.truncate(), ring_reach(ring)))
+            .collect()
     }
 
     /// Out of the reach of every ring being cast that we stand in, by a straight run (the
@@ -165,9 +198,8 @@ impl Client {
                 continue;
             };
             let d = at.truncate().distance(me.truncate());
-            let reach = ring.range + RING_MARGIN;
-            // Rings fly flat from the caster's middle: one a floor away passes over or under.
-            if d >= reach || (at.z - me.z).abs() > 4.0 {
+            let reach = ring_reach(ring);
+            if d >= reach || (at.z - me.z).abs() > FLOOR_APART {
                 continue;
             }
             let elapsed = now.duration_since(cast.seen).as_secs_f32();
@@ -217,6 +249,8 @@ impl Client {
         );
         self.dodge_to = Some((spot, now + Duration::from_secs_f32(run / RUN_LEAST + 0.5)));
         self.steering.reset();
+        // A back-off or step aside half walked would take us back in once out.
+        self.autoplay.keep_off.break_off();
         self.autoplay
             .say(Doing::Dodging, format!("stepping out of {name}'s ring"));
         true

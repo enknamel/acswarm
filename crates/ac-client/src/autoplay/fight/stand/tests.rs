@@ -463,3 +463,263 @@ fn autoplay_and_the_body_back_off_and_step_aside_between_casts_never_during_one(
         "moved {moved_mid_cast:.2} m in a frame while casting"
     );
 }
+
+/// Virindi Inquisitor: Cassius' Ring of Fire, 4.5 m at 2 m/s.
+const INQUISITOR: u32 = 10_814;
+
+/// Put creature `guid` at `at`, a ring caster starting a cast and walking at nobody.
+fn ring_caster_at(c: &mut Client, guid: u32, at: Vec3) {
+    let cell = c.player.as_ref().unwrap().cell;
+    let mut o = testkit::standing_by(c, guid, "Virindi Inquisitor", 0.0);
+    o.weenie_class_id = INQUISITOR;
+    o.position = Some(ac_world::object::Position::new_flat(
+        cell,
+        at - ac_world::landblock_origin(cell),
+    ));
+    o.motion.forward = 0xD3;
+    c.world.objects.insert(guid, o);
+}
+
+/// Flat metres from `a` to `b`.
+fn flat(a: Vec3, b: Vec3) -> f32 {
+    a.truncate().distance(b.truncate())
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_caster_backs_off_from_a_ring_caster_to_past_its_ring() {
+    let (mut c, how, target) = a_caster_with_one_coming(Vec3::new(2.0, 0.0, 0.0));
+    c.world.objects.get_mut(&target).unwrap().weenie_class_id = INQUISITOR;
+    let now = Instant::now();
+    c.frame_at = now;
+    assert_eq!(keep_off(&mut c, target, how, now), Did::Acting);
+    let (spot, _) = c.autoplay.keep_off.walk.expect("a spot backed off to");
+    let off = flat(spot.at, c.world.objects[&target].world_pos().unwrap());
+    let reach = 4.5 + crate::dodge::rings::RING_MARGIN;
+    assert!(
+        (reach..=reach + PAST + STANDOFF_FAR - STANDOFF_NEAR).contains(&off),
+        "{off:.1} m from it, its ring reaching {reach} m"
+    );
+    assert!(c.throws_from(spot.at, target, how));
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn no_back_off_or_step_aside_goes_back_under_a_ring_while_it_spreads() {
+    let (mut c, how, target) = a_caster_with_one_coming(Vec3::new(2.0, 0.0, 0.0));
+    let now = Instant::now();
+    c.frame_at = now;
+    let me = c.my_position().unwrap();
+    assert_eq!(keep_off(&mut c, target, how, now), Did::Acting);
+    let (half_walked, _) = c.autoplay.keep_off.walk.expect("a back-off");
+    // An Inquisitor two metres past the spot starts a ring over it and over the character.
+    let past = half_walked.at + (half_walked.at - me).normalize() * 2.0;
+    let inquisitor = 0x8000_0009;
+    ring_caster_at(&mut c, inquisitor, past);
+    let reach = 4.5 + crate::dodge::rings::RING_MARGIN;
+    assert!(flat(me, past) < reach);
+    assert!(c.autoplay_dodge(now), "out of the ring");
+    let (out, _) = c.dodge_to.expect("a step out");
+    assert!(c.autoplay.keep_off.walk.is_none(), "the back-off is let go");
+    // Out: the back-off and the steps aside while the ring spreads keep out of it.
+    let (at, cell) = crate::walk_trial::on_floor(&mut c, out);
+    testkit::stand(&mut c, cell, at - ac_world::landblock_origin(cell));
+    c.dodge_to = None;
+    let later = now + Duration::from_millis(1_500);
+    c.frame_at = later;
+    let _ = keep_off(&mut c, target, how, later);
+    if let Some((spot, _)) = c.autoplay.keep_off.walk {
+        assert!(flat(spot.at, past) >= reach, "backed off under the ring");
+    }
+    c.autoplay.keep_off.due = true;
+    let _ = c.autoplay_jiggle(target, how, later);
+    if let Some((spot, _)) = c.autoplay.keep_off.step {
+        assert!(flat(spot.at, past) >= reach, "stepped aside under the ring");
+    }
+    if let Some(goal) = c.going.as_ref().and_then(|g| g.goal.place()) {
+        assert!(flat(goal.at, past) >= reach, "walking back under the ring");
+    }
+}
+
+/// A caster in the bookcase corner, two Revenants coming at it, the stand chosen there.
+fn a_caster_in_the_corner() -> (Client, How, u32, Vec3) {
+    let mut c = in_the_bookcase_room();
+    let corner = ac_world::landblock_origin(0x01F6_0000) + Vec3::new(33.02, -46.48, 0.0);
+    let (at, cell) = crate::walk_trial::on_floor(&mut c, corner);
+    testkit::stand(&mut c, cell, at - ac_world::landblock_origin(cell));
+    testkit::trained_in(&mut c, ac_world::stats::skill::WAR_MAGIC, 200);
+    let (spell, _) = c
+        .assets
+        .spell_table()
+        .unwrap()
+        .find_by_name("Frost Bolt III")
+        .expect("Frost Bolt III");
+    let target = 0x8000_0001;
+    coming_at(
+        &mut c,
+        &[
+            (target, Vec3::new(3.0, 3.0, 0.0)),
+            (0x8000_0002, Vec3::new(5.0, 2.0, 0.0)),
+        ],
+    );
+    (c, How::Spell(spell), target, at)
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_caster_in_a_dungeon_corner_stays_in_it_and_steps_back_to_it() {
+    let (mut c, how, target, corner) = a_caster_in_the_corner();
+    let t0 = Instant::now();
+    c.frame_at = t0;
+    assert_eq!(take_stand(&mut c, Some(target), how, t0), Did::Done);
+    let stand = c.autoplay.stands.held.expect("a stand");
+    assert!(
+        stand.reached && !stand.walked,
+        "the corner it stands in: {stand:?}"
+    );
+    assert!(stand.sides < SIDES as u32, "{stand:?}");
+    // Not backed off out of it to the open room.
+    assert_eq!(keep_off(&mut c, target, how, t0), Did::Done);
+    assert!(c.autoplay.keep_off.walk.is_none() && c.going.is_none());
+    // Each step aside comes back: never off the corner for good.
+    let dt = 0.05;
+    let mut frame = 0;
+    let mut ends = Vec::new();
+    for _ in 0..4 {
+        c.autoplay.keep_off.due = true;
+        for _ in 0..40 {
+            let now = t0 + Duration::from_secs_f32(frame as f32 * dt);
+            c.frame_at = now;
+            c.autoplay.tick += 1;
+            let did = c.autoplay_jiggle(target, how, now);
+            c.settle_going();
+            c.tick_player(crate::player::Input::default(), dt, now);
+            frame += 1;
+            if did == Did::Done && !c.autoplay.keep_off.due {
+                break;
+            }
+        }
+        ends.push(c.my_position().unwrap());
+    }
+    let off: Vec<f32> = ends.iter().map(|e| flat(*e, corner)).collect();
+    assert!(
+        off.iter().all(|d| *d <= JIGGLE + AT_JIGGLE + 0.3),
+        "wandered {off:?} m off the corner"
+    );
+    assert!(off.iter().any(|d| *d > 0.6), "never stepped: {off:?}");
+    // Never two steps' ends on the same spot off the corner: out, then back or across.
+    for w in ends.windows(2) {
+        let stuck = flat(w[0], w[1]) < 0.5 && flat(w[1], corner) > AT_JIGGLE + 0.2;
+        assert!(!stuck, "stayed out at {off:?} m off the corner");
+    }
+}
+
+#[test]
+fn a_back_off_and_step_aside_are_let_go_with_the_target() {
+    let mut c = crate::Client::offline(testkit::no_data());
+    let spot = Place {
+        at: Vec3::new(1.0, 2.0, 3.0),
+        cell: 0xA9B4_0019,
+    };
+    let now = Instant::now();
+    let held = KeepOff {
+        fought: Some(0x8000_0001),
+        walk: Some((spot, now)),
+        step: Some((spot, now)),
+        due: true,
+        ..KeepOff::default()
+    };
+    // Another target starts afresh.
+    c.autoplay.keep_off = held.clone();
+    c.keep_off_for(0x8000_0002);
+    assert!(c.autoplay.keep_off.walk.is_none() && c.autoplay.keep_off.step.is_none());
+    assert!(!c.autoplay.keep_off.due);
+    // The same target keeps what it had.
+    c.autoplay.keep_off = held.clone();
+    c.keep_off_for(0x8000_0001);
+    assert!(c.autoplay.keep_off.walk.is_some());
+    // The fight let go, nothing is kept.
+    c.let_go(crate::autoplay::Release::Fight);
+    assert!(c.autoplay.keep_off.fought.is_none() && c.autoplay.keep_off.walk.is_none());
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_stale_back_off_ending_leaves_another_walk_alone() {
+    let (mut c, how, target) = a_caster_with_one_coming(Vec3::new(7.0, 0.0, 0.0));
+    let now = Instant::now();
+    c.frame_at = now;
+    let me = c.my_position().unwrap();
+    let owner = c.step_owner();
+    let _ = c.go_to(owner, me + Vec3::new(0.0, 5.0, 0.0), 0.5);
+    let walk = c
+        .going
+        .as_ref()
+        .and_then(|g| g.goal.place())
+        .expect("a walk");
+    let stale = Place {
+        at: me + Vec3::new(-3.0, 0.0, 0.0),
+        cell: walk.cell,
+    };
+    c.autoplay.keep_off.fought = Some(target);
+    c.autoplay.keep_off.walk = Some((stale, now - Duration::from_secs(30)));
+    assert_eq!(c.autoplay_keep_off(target, how, now), Did::Done);
+    assert!(c.autoplay.keep_off.walk.is_none());
+    assert_eq!(c.going.as_ref().and_then(|g| g.goal.place()), Some(walk));
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn autoplay_and_the_body_keep_a_caster_in_its_corner_through_its_casts() {
+    // The whole loop offline at 20 Hz, the server's answer to each cast 1.5 s after it went up.
+    let t0 = Instant::now();
+    let (mut c, _) = testkit::a_caster_knowing(t0, &["Frost Bolt III"]);
+    testkit::stand(&mut c, 0x01F6_0233, Vec3::new(33.02, -46.48, 0.0));
+    let corner = c.my_position().unwrap();
+    let (corner, cell) = crate::walk_trial::on_floor(&mut c, corner);
+    testkit::stand(&mut c, cell, corner - ac_world::landblock_origin(cell));
+    c.autoplay.config.enabled = true;
+    c.autoplay.config.fight.enabled = true;
+    let target = 0x8000_0001;
+    coming_at(
+        &mut c,
+        &[
+            (target, Vec3::new(3.0, 3.0, 0.0)),
+            (0x8000_0002, Vec3::new(5.0, 2.0, 0.0)),
+        ],
+    );
+    let dt = 0.05;
+    let (mut casts, mut furthest) = (Vec::new(), 0.0f32);
+    for frame in 0..12 * 20 {
+        let now = t0 + Duration::from_secs_f32(frame as f32 * dt);
+        c.frame_at = now;
+        if c.autoplay
+            .cast_sent
+            .is_some_and(|t| now.duration_since(t) >= Duration::from_millis(1500))
+        {
+            c.autoplay.cast_answered();
+            let o = c.world.objects.get_mut(&target).unwrap();
+            o.health = o.health.map(|h| h - 0.01);
+        }
+        let before = c.autoplay.cast_sent;
+        c.tick_autoplay(now);
+        c.tick_player(crate::player::Input::default(), dt, now);
+        let me = c.my_position().unwrap();
+        furthest = furthest.max(flat(me, corner));
+        if c.autoplay.cast_sent.is_some() && c.autoplay.cast_sent != before {
+            casts.push(me);
+        }
+    }
+    let off: Vec<f32> = casts.iter().map(|m| flat(*m, corner)).collect();
+    assert!(off.len() >= 4, "{} casts: {}", off.len(), c.autoplay.status);
+    assert!(
+        furthest <= JIGGLE + AT_JIGGLE + 0.3,
+        "{furthest:.1} m off the corner; cast from {off:?} m off it"
+    );
+    // Out and back between casts, never stuck out on one spot.
+    let steps: Vec<f32> = casts.windows(2).map(|w| flat(w[0], w[1])).collect();
+    assert!(
+        steps.iter().all(|s| *s >= 0.5),
+        "between casts it moved {steps:?} m, cast from {off:?} m off the corner"
+    );
+}

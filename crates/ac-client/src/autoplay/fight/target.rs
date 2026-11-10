@@ -142,6 +142,7 @@ impl Client {
             self.attack_target = None;
         }
         self.autoplay.casting_at = None;
+        self.autoplay.keep_off = Default::default();
         if matches!(how, Release::Fight | Release::Stop | Release::Engagement) {
             self.autoplay.engaged = None;
             self.autoplay.closing = None;
