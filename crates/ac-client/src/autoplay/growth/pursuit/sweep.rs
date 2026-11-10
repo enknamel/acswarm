@@ -98,7 +98,8 @@ impl Client {
         let here = cell >> 16;
         // Met anywhere, on a ground or between two: the fight rule only sees its own radius.
         if self.is_rotating_hunt() || grounds.iter().any(|(lb, _)| *lb == here) {
-            if let Some(answer) = self.chase_in_sight(title, creature, now) {
+            let sought = self.autoplay.growth.pursuit_sought.clone();
+            if let Some(answer) = self.chase_in_sight(title, creature, &sought, now) {
                 return Some(answer);
             }
         }
@@ -325,16 +326,17 @@ impl Client {
         Some(Some(true))
     }
 
-    /// A sought creature in sight walked to (or fought, `Some(None)`); `None` when none is. A
-    /// namesake is noted: the common Mosswart Mire-Witch (7102) is not Martine's (9163).
+    /// A creature of the classes `sought` in sight walked to (or fought, `Some(None)`); `None`
+    /// when none is. A namesake is noted: the common Mosswart Mire-Witch (7102) is not Martine's
+    /// (9163).
     pub(super) fn chase_in_sight(
         &mut self,
         title: &str,
         creature: &str,
+        sought: &[u32],
         now: Instant,
     ) -> Option<Option<bool>> {
         let me = self.my_position()?;
-        let sought = &self.autoplay.growth.pursuit_sought;
         let alive = self.world.objects.values().filter(|o| o.alive_or_unknown());
         let (mut seen, mut namesake): (Option<glam::Vec3>, Option<u32>) = (None, None);
         for o in alive {

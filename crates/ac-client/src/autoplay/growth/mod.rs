@@ -238,7 +238,7 @@ pub struct State {
     /// Every creature the working hunt's item drops from that this character can kill: class,
     /// chance a kill and seconds a kill.
     pub(crate) pursuit_droppers: Vec<(u32, f32, f32)>,
-    /// Seconds to the item by the plan set off on: the journey and the time at its ground.
+    /// Seconds to the item by the plan set off on, journey and ground; none once there.
     pub(crate) plan_secs: Option<f32>,
     /// Droppers met on the road a fight with saves time: fought like the sought ones.
     pub(crate) pursuit_road: Vec<u32>,

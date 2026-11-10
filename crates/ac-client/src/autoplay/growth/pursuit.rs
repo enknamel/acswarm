@@ -896,6 +896,11 @@ impl Client {
         drop(killing);
         self.pursuit = pursued.lines;
         let st = &mut self.autoplay.growth;
+        // Another hunt, or its droppers another: the plan set off on is not its plan.
+        let classes = |d: &[(u32, f32, f32)]| d.iter().map(|d| d.0).collect::<Vec<u32>>();
+        if classes(&st.pursuit_droppers) != classes(&pursued.droppers) {
+            st.plan_secs = None;
+        }
         st.pursuit_grounds = pursued.grounds;
         st.pursuit_paces = pursued.paces;
         st.pursuit_sought = pursued.sought;
@@ -1051,14 +1056,20 @@ impl Client {
         Some(true)
     }
 
-    /// A pursued hunt's creature in sight on the road between its grounds: gone to, the ground walk
-    /// let go; `Some` is the hunt row's answer (false: left to the fight rule, in its reach).
+    /// A pursued hunt's creature in sight on the road between its grounds, a rare camp's or one
+    /// the road rule finds worth its kill ([`pace::road_droppers`]): gone to, the ground walk let
+    /// go; `Some` is the hunt row's answer (false: left to the fight rule, in its reach).
     pub(super) fn chase_sought_on_road(&mut self, now: Instant) -> Option<bool> {
         let line = self.working_pursuit()?.clone();
         let PursuitStep::Hunt { creature, .. } = &line.step else {
             return None;
         };
-        let answer = self.chase_in_sight(&line.title, creature, now)?;
+        let st = &self.autoplay.growth;
+        let mut chased = st.pursuit_sought.clone();
+        if !self.is_rotating_hunt() {
+            chased.retain(|w| st.pursuit_road.contains(w));
+        }
+        let answer = self.chase_in_sight(&line.title, creature, &chased, now)?;
         self.autoplay.growth.bound = None;
         Some(answer.unwrap_or(false))
     }
@@ -1100,7 +1111,11 @@ impl Client {
                 let clears = camped && self.is_cleared_ground(here);
                 self.autoplay.growth.clearing = clears.then_some(here);
                 if camped {
-                    // There: the gem that was the way is bought no more.
+                    // There: the road's plan is done, and the gem that was the way is bought no more.
+                    let st = &mut self.autoplay.growth;
+                    if st.plan_secs.take().is_some() {
+                        self.keep_road_droppers();
+                    }
                     let st = &mut self.autoplay.growth;
                     let before = st.pursuit_gems.len();
                     st.pursuit_gems.retain(|g| g.quest != line.id);
@@ -1214,7 +1229,7 @@ impl Client {
     pub(crate) fn keep_road_droppers(&mut self) {
         let st = &mut self.autoplay.growth;
         let plan = st.plan_secs.unwrap_or(0.0);
-        st.pursuit_road = pace::road_droppers(&st.pursuit_droppers, &st.pursuit_sought, plan);
+        st.pursuit_road = pace::road_droppers(&st.pursuit_droppers, plan);
     }
 
     /// Whether `wcid` is one the working hunt fights: its grounds' creatures, or a dropper met on

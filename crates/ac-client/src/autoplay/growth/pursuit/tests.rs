@@ -2892,3 +2892,57 @@ fn a_dropper_met_on_the_road_is_fought_only_when_its_chance_beats_the_plan() {
         "walked past with the plan far"
     );
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_sought_dropper_seen_from_the_road_is_gone_to_only_when_worth_the_plan() {
+    // Blargerton on his way to a ground: a sought dropper in sight past the fight radius was gone
+    // to whatever its chance, the journey dropped. Only one the road rule finds worth it is.
+    let now = std::time::Instant::now();
+    let mut c = blargerton_after_the_key(now);
+    assert!(!c.is_rotating_hunt());
+    assert_eq!(c.grow_pursuit(now), Some(true), "set off");
+    let st = &c.autoplay.growth;
+    let &(wcid, chance, secs) = st
+        .pursuit_droppers
+        .iter()
+        .filter(|d| st.pursuit_sought.contains(&d.0))
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .expect("a sought dropper");
+    let me = c.my_position().unwrap();
+    let cell = c.player.as_ref().unwrap().cell;
+    let far = me + glam::Vec3::new(c.autoplay.config.fight.radius * 2.0, 0.0, 0.0);
+    let mut it = crate::testkit::creature(0x5000_0905, "Sought Dropper");
+    it.weenie_class_id = wcid;
+    it.position = crate::testkit::placed(cell, far);
+    c.world.objects.insert(it.guid, it);
+    let cfg = crate::autoplay::growth::config::Growth::default();
+    let later = now + std::time::Duration::from_secs(1);
+    c.autoplay.growth.plan_secs = Some(secs / chance * 0.5);
+    c.keep_road_droppers();
+    assert!(c.grow_hunt(later, &cfg));
+    assert!(c.autoplay.growth.bound.is_some(), "gone to, the plan near");
+    c.autoplay.growth.plan_secs = Some(secs / chance * 2.0);
+    c.keep_road_droppers();
+    assert!(c.grow_hunt(later, &cfg));
+    assert!(c.autoplay.growth.bound.is_none(), "walked by, the plan far");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn the_road_plan_ends_at_the_ground_and_with_the_hunt() {
+    // The plan's seconds held after arriving, and after the hunt became another, and the road
+    // rule went on fighting droppers for a journey that was over.
+    let now = std::time::Instant::now();
+    let (mut c, _) = at_a_mire_witch_ground(now);
+    c.autoplay.growth.plan_secs = Some(1e9);
+    c.keep_road_droppers();
+    assert!(!c.autoplay.growth.pursuit_road.is_empty());
+    c.grow_pursuit(now);
+    assert_eq!(c.autoplay.growth.plan_secs, None, "there");
+    assert!(c.autoplay.growth.pursuit_road.is_empty());
+    c.autoplay.growth.plan_secs = Some(1e9);
+    c.autoplay.growth.pursuit_droppers = vec![(1, 0.5, 10.0)];
+    again(&mut c, now);
+    assert_eq!(c.autoplay.growth.plan_secs, None, "another hunt");
+}
