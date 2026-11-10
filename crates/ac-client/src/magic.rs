@@ -26,6 +26,9 @@ pub const PRISMATIC_TAPER: u32 = 188;
 /// Chorizite: kept in the foci formula alongside the scarabs.
 pub const CHORIZITE: u32 = 111;
 
+/// Speed a player's windup and cast gestures play at, from retail pcaps (Player_Magic.cs:603).
+pub const CAST_SPEED: f32 = 2.0;
+
 /// The five Foci, by weenie class. Each takes a pack slot of its own
 /// and each halves the components of its school, so they are equipment
 /// in everything but name: never sold, never handed to a vendor.
@@ -371,6 +374,29 @@ impl Client {
             return 0.0;
         };
         cast_chance(self.casting_skill(spell), sp.power)
+    }
+
+    /// Seconds from sending `sp` to its effect: each scarab's windup gesture, then the last
+    /// component's cast gesture (Player_Magic.cs:1038-1047, SpellFormula.cs:245-262); 0 untabled.
+    pub fn cast_seconds(&self, sp: &Spell) -> f32 {
+        let Ok(table) = self.assets.spell_components() else {
+            return 0.0;
+        };
+        // Timed by the component table's own gesture seconds, played at CAST_SPEED.
+        let gesture = |c: u32| table.get(c).map_or(0.0, |c| c.time);
+        let formula: Vec<u32> = sp.formula().collect();
+        // A FastCast spell has no windup (Player_Magic.cs:605-607).
+        let windup: f32 = if sp.is_fast_cast() {
+            0.0
+        } else {
+            formula
+                .iter()
+                .filter(|c| is_scarab(**c))
+                .map(|c| gesture(*c))
+                .sum()
+        };
+        let cast = formula.last().map_or(0.0, |c| gesture(*c));
+        (windup + cast) / CAST_SPEED
     }
 
     pub fn can_cast(&self, spell: u32) -> CastCheck {

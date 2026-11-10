@@ -9,6 +9,7 @@ fn heal(spell: u32, gain: u32, mana: u32) -> SelfHeal {
         gain,
         mana,
         chance: 0.9,
+        seconds: 2.0,
         leaves: None,
     }
 }
@@ -22,6 +23,7 @@ fn transfer(spell: u32, gain: u32, mana: u32, from: u32, left: f32) -> SelfHeal 
         gain,
         mana,
         chance: 0.9,
+        seconds: 2.0,
         leaves: Some((from, left)),
     }
 }
@@ -60,10 +62,120 @@ fn a_wound_nothing_covers_takes_the_biggest_there_is() {
 #[test]
 fn a_character_about_to_die_reaches_for_the_biggest_at_once() {
     let cfg = Survive::default();
-    // A quarter of the bar left. Even a wound the cheapest heal
-    // would cover gets the biggest: there may not be a second cast.
+    // Under a quarter of the bar and three hundred missing: the most one cast gives, mana or not.
     let health = CRITICAL_HEALTH - 0.05;
-    assert_eq!(choose_heal(&every_level(), 20, health, &cfg), Some(6));
+    assert_eq!(choose_heal(&every_level(), 300, health, &cfg), Some(6));
+}
+
+/// `h` taking `seconds` from the cast to the health.
+fn taking(mut h: SelfHeal, seconds: f32) -> SelfHeal {
+    h.seconds = seconds;
+    h
+}
+
+/// A mage's book as the data has it: Heal Self I and VI, and Stamina to Health Self IV to VI
+/// on `stamina` points of a 400 bar, each timed by its scarab's windup.
+fn mage_book(stamina: u32) -> Vec<SelfHeal> {
+    let left = |drained: u32| (stamina - drained) as f32 / 400.0;
+    let mut book = vec![
+        taking(heal(6, 17, 15), 0.9),
+        taking(heal(1161, 87, 70), 3.12),
+    ];
+    for (spell, mana, seconds) in [(1667, 40, 2.33), (1668, 50, 2.73), (1669, 60, 3.12)] {
+        let t = ac_world::vitals::transfer(spell).expect("in the table");
+        let gain = t.gain(stamina);
+        book.push(taking(
+            transfer(spell, gain, mana, vital::STAMINA, left(t.drain(stamina))),
+            seconds,
+        ));
+    }
+    book
+}
+
+#[test]
+fn at_a_third_of_health_a_full_stamina_bar_closes_the_wound_fastest() {
+    let cfg = Survive::default();
+    // 90 of 300 health and a full stamina bar: Stamina to Health IV (240) closes the 210 missing
+    // in 2.3 s, before V and VI wind up and long before Heal Self VI's 87 lands.
+    assert_eq!(choose_heal(&mage_book(400), 210, 0.3, &cfg), Some(1667));
+    // A wound IV and V leave open takes VI: no small transfer on a near-death wound.
+    assert_eq!(choose_heal(&mage_book(400), 290, 0.27, &cfg), Some(1669));
+}
+
+#[test]
+fn a_scratch_still_takes_the_cheap_heal_self() {
+    let cfg = Survive::default();
+    // A full stamina bar is no reason to pour it into a 15-point scratch.
+    assert_eq!(choose_heal(&mage_book(400), 15, 0.95, &cfg), Some(6));
+}
+
+#[test]
+fn a_near_empty_stamina_bar_leaves_the_emergency_to_heal_self() {
+    let cfg = Survive::default();
+    // Twenty stamina makes fifteen health at best: Heal Self VI gives more.
+    assert_eq!(choose_heal(&mage_book(20), 210, 0.3, &cfg), Some(1161));
+}
+
+#[test]
+fn an_emergency_spends_stamina_under_its_floor() {
+    let cfg = Survive::default();
+    // Half a stamina bar: every transfer leaves a quarter, under the floor, and VI still gives 150.
+    let book = mage_book(200);
+    assert!(book[4]
+        .leaves
+        .is_some_and(|(_, left)| left < cfg.stamina_below));
+    assert_eq!(choose_heal(&book, 210, 0.3, &cfg), Some(1669));
+    // Outside an emergency the floor holds and Heal Self VI covers 70.
+    assert_eq!(choose_heal(&book, 70, 0.5, &cfg), Some(1161));
+}
+
+#[test]
+fn an_emergency_keeps_the_mana_floor_until_critical() {
+    let cfg = Survive::default();
+    let book = vec![
+        taking(heal(1161, 87, 70), 3.12),
+        taking(transfer(1295, 300, 60, vital::MANA, 0.2), 3.12),
+    ];
+    // Mana to Health would leave a fifth of the mana the next heal is cast with.
+    assert_eq!(choose_heal(&book, 210, 0.3, &cfg), Some(1161));
+    assert_eq!(
+        choose_heal(&book, 210, CRITICAL_HEALTH - 0.05, &cfg),
+        Some(1295)
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_mage_hurt_badly_pours_stamina_into_health() {
+    let now = std::time::Instant::now();
+    let book = [
+        "Heal Self VI",
+        "Stamina to Health Self IV",
+        "Stamina to Health Self VI",
+    ];
+    let (mut c, known) = crate::testkit::a_caster_knowing(now, &book);
+    // The windup grows with the scarab: level IV is quicker than VI, and a heal and a transfer
+    // of one level take the same.
+    let secs = |c: &crate::Client, id: u32| c.cast_seconds(&c.spell(id).expect("in the table"));
+    let (heal_vi, sth_iv, sth_vi) = (secs(&c, known[0]), secs(&c, known[1]), secs(&c, known[2]));
+    assert!((heal_vi - sth_vi).abs() < 1e-3, "{heal_vi} {sth_vi}");
+    assert!(
+        sth_iv < sth_vi && (2.0..4.0).contains(&sth_vi),
+        "{sth_iv} {sth_vi}"
+    );
+    assert_eq!(c.self_heal_names(), book.map(String::from).to_vec());
+    // 90 of 300 health, 400 of 400 stamina: IV's 240 closes the 210 missing soonest.
+    c.world.stats.vitals[0].base = 300;
+    c.world.stats.vitals[0].current = 90;
+    c.world.stats.vitals[1].base = 400;
+    c.world.stats.vitals[1].current = 400;
+    let missing = 210;
+    let cfg = Survive::default();
+    let health = c.health_fraction();
+    assert_eq!(
+        choose_heal(&c.self_heals(), missing, health, &cfg),
+        Some(known[1])
+    );
 }
 
 #[test]

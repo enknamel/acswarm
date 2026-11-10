@@ -327,6 +327,8 @@ pub struct Autoplay {
     crafting: Option<(u32, u32, Instant)>,
     /// When stamina was last poured into mana or Revitalize cast.
     last_vital: Option<Instant>,
+    /// The self heals in the spellbook were logged, once a session (`log_self_heals`).
+    heals_logged: bool,
     /// The corpse being looted and when we started.
     /// The corpse being opened: which, since when, how long to allow
     /// (the server walks us to it, so a far one is slower), and how

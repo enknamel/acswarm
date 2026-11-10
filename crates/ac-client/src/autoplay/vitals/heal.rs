@@ -3,9 +3,12 @@ use std::time::Instant;
 use crate::autoplay::{cast_problem, Doing, Survive};
 use crate::Client;
 
-/// Health left below which there is no time to be careful: the biggest
-/// heal goes out at once, whatever it costs and whatever it drains.
+/// Health left below which there is no time to be careful: the mana floor
+/// gives way too, and whatever a cast can give is reached for.
 const CRITICAL_HEALTH: f32 = 0.25;
+
+/// Health fraction at or below which a heal is put back fast, not cheap (guess).
+const EMERGENCY_HEALTH: f32 = 0.4;
 
 /// A heal picked to cover a known wound has to be likely to land. Half
 /// is where the school's skill equals the spell's power; under that the
@@ -29,6 +32,8 @@ pub struct SelfHeal {
     pub mana: u32,
     /// How likely it is to land rather than fizzle.
     pub chance: f32,
+    /// Seconds from the cast to the health ([`Client::cast_seconds`]).
+    pub seconds: f32,
     /// For a transfer, the vital it draws on and the fraction of that
     /// bar left afterwards. `None` for a boost, which draws on nothing.
     pub leaves: Option<(u32, f32)>,
@@ -40,6 +45,11 @@ impl SelfHeal {
     fn worth(&self) -> f32 {
         self.gain as f32 * self.chance
     }
+
+    /// Of `missing` health, what this cast puts back on average: the rest of its gain is spilt.
+    fn fills(&self, missing: u32) -> f32 {
+        self.gain.min(missing) as f32 * self.chance
+    }
 }
 
 /// Which of the heals that can be cast right now to cast, for a
@@ -48,18 +58,12 @@ impl SelfHeal {
 /// A scratch should not be healed with the biggest spell in the book:
 /// the mana that goes into it is the mana the next real wound needs.
 /// So the cheapest heal that covers what is actually missing wins, and
-/// only when nothing covers it -- or there is no time left to be
-/// careful -- does the biggest go out.
+/// only when nothing covers it does the biggest go out. In an
+/// emergency the mana stops counting ([`emergency_heal`]).
 fn choose_heal(heals: &[SelfHeal], missing: u32, health: f32, cfg: &Survive) -> Option<u32> {
     use ac_world::vitals::vital;
-    // Dying beats saving a bar: at a quarter of the bar the next hit is
-    // the last one, so the most health one cast can give goes out --
-    // out of everything castable, floors and all. The floors below are
-    // what the stamina and the mana were being kept for, and a dead
-    // character has no later to keep them for.
-    if health <= CRITICAL_HEALTH {
-        let everything: Vec<&SelfHeal> = heals.iter().collect();
-        return biggest_heal(&everything).map(|h| h.spell);
+    if health <= EMERGENCY_HEALTH {
+        return emergency_heal(heals, missing, health, cfg).map(|h| h.spell);
     }
     // A transfer that empties the bar it draws on is a trade, not a
     // heal: it buys health with the mana the next heal needs or the
@@ -87,6 +91,38 @@ fn choose_heal(heals: &[SelfHeal], missing: u32, health: f32, cfg: &Survive) -> 
         .min_by_key(|h| (h.mana, h.gain, h.spell))
         .or_else(|| biggest_heal(&pool))
         .map(|h| h.spell)
+}
+
+/// The heal that puts most of `missing` back on average, then the quickest, then the cheapest:
+/// the lowest level that closes the wound, else the biggest however slow.
+fn emergency_heal<'a>(
+    heals: &'a [SelfHeal],
+    missing: u32,
+    health: f32,
+    cfg: &Survive,
+) -> Option<&'a SelfHeal> {
+    use ac_world::vitals::vital;
+    // The stamina floor gives way: a caster's stamina is a reserve of health, and a full bar
+    // poured in beats any Heal Self. Mana's holds until critical, the next heal is cast with it.
+    // No rate of incoming damage is kept, so a slower cast's extra hits are not counted.
+    let spares_mana = |h: &&SelfHeal| {
+        health <= CRITICAL_HEALTH
+            || h.leaves
+                .is_none_or(|(v, left)| v != vital::MANA || left >= cfg.mana_below)
+    };
+    let sparing: Vec<&SelfHeal> = heals.iter().filter(spares_mana).collect();
+    let pool: Vec<&SelfHeal> = if sparing.is_empty() {
+        heals.iter().collect()
+    } else {
+        sparing
+    };
+    pool.into_iter().max_by(|a, b| {
+        a.fills(missing)
+            .total_cmp(&b.fills(missing))
+            .then(b.seconds.total_cmp(&a.seconds))
+            .then(b.mana.cmp(&a.mana))
+            .then(b.spell.cmp(&a.spell))
+    })
 }
 
 /// The most health there is to be had from a single cast; ties to the
@@ -238,6 +274,7 @@ impl Client {
             gain,
             mana,
             chance: self.cast_chance(spell),
+            seconds: self.cast_seconds(&sp),
             leaves,
         })
     }
@@ -262,6 +299,38 @@ impl Client {
             "{name} {}",
             cast_problem(&self.can_cast_well(spell))
         ))
+    }
+
+    /// The self heals in the spellbook by name. Not whether each can be cast: on the first tick
+    /// after login the wand and the components may not have arrived yet.
+    fn self_heal_names(&self) -> Vec<String> {
+        let Ok(table) = self.assets.spell_table() else {
+            return Vec::new();
+        };
+        self.world
+            .stats
+            .spells
+            .iter()
+            .filter(|id| restores_health(**id))
+            .filter_map(|id| table.get(*id))
+            .filter(|s| s.is_self_targeted())
+            .map(|s| s.name.clone())
+            .collect()
+    }
+
+    /// Log the self heals in the book once a session, the spellbook being in no other log line.
+    fn log_self_heals(&mut self) {
+        if self.autoplay.heals_logged || self.world.stats.spells.is_empty() {
+            return;
+        }
+        self.autoplay.heals_logged = true;
+        let names = self.self_heal_names();
+        let names = if names.is_empty() {
+            "none".to_string()
+        } else {
+            names.join(", ")
+        };
+        tracing::info!("heal: self heals in the book: {names}");
     }
 
     /// Keep mana and stamina up the way a caster does: stamina poured
@@ -325,6 +394,7 @@ impl Client {
 
     /// Heal, and break off a losing fight. True when it acted.
     pub(crate) fn autoplay_survive(&mut self, now: Instant) -> bool {
+        self.log_self_heals();
         let cfg = self.autoplay.config.survive.clone();
         let health = self.health_fraction();
         if health >= cfg.heal_below || health <= 0.0 {
