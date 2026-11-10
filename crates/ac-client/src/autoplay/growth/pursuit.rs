@@ -1096,8 +1096,8 @@ impl Client {
                     return answer;
                 }
                 let camped = grounds.iter().any(|(lb, _)| *lb == here);
-                // Cleared where camping it beats leaving it: what holds its slots makes way.
-                let clears = camped && self.is_camping_ground(here);
+                // Cleared where camping beats leaving and others hold its slots: they make way.
+                let clears = camped && self.is_cleared_ground(here);
                 self.autoplay.growth.clearing = clears.then_some(here);
                 if camped {
                     // There: the gem that was the way is bought no more.

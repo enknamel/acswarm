@@ -2712,9 +2712,9 @@ fn a_sought_kill_s_body_is_opened_after_its_attackers_are_fought() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
-fn a_camped_ground_is_cleared_of_critters_too() {
-    // A hunt that is not rare camps its ground: everything on it is fought, so the generators
-    // holding a slot make way (the Tusker Barracks' Tusker Guards).
+fn a_ground_of_linked_placements_is_camped_not_cleared() {
+    // The Tusker Barracks' Tusker Guards are linked placements, each slot its own: killing what
+    // else stands there frees none of them, so it is walked past, critters too.
     let tusker_barracks = 0x5A48_01C8;
     let mut c = mage_pursuing("tuskergkillcount", "chained-quests");
     c.quest_log.note_taken("tuskergkillcount");
@@ -2722,7 +2722,23 @@ fn a_camped_ground_is_cleared_of_critters_too() {
     let now = std::time::Instant::now();
     again(&mut c, now);
     assert!(!c.is_rotating_hunt());
+    c.grow_pursuit(now);
     assert!(!c.is_clearing_ground());
+    let mite = crate::testkit::creature(0x5000_0902, "Mite");
+    let cfg = c.autoplay.config.fight.clone();
+    assert!(
+        c.passing_by(&mite, &cfg),
+        "a Mite holds no Tusker Guard's slot"
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_cleared_ground_is_cleared_of_all_it_holds() {
+    // A Mire-Witch shore is a region generator's roll: what else it makes holds her slots, so
+    // all of it is fought, critters too (at the Tusker Barracks what hit him was walked past).
+    let now = std::time::Instant::now();
+    let (mut c, _) = at_a_mire_witch_ground(now);
     c.grow_pursuit(now);
     assert!(c.is_clearing_ground());
     let critter = crate::testkit::creature(0x5000_0902, "Mite");
@@ -2731,6 +2747,26 @@ fn a_camped_ground_is_cleared_of_critters_too() {
         c.critter_verdict(&critter, &cfg),
         crate::autoplay::fight::critter::Critter::Fight
     );
+    assert!(!c.passing_by(&critter, &cfg));
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_cleared_ground_is_not_cleared_on_the_way_out() {
+    // Set to clear, then walking off it for something else (a town run, a supply trip): what
+    // stands there is walked past like any road's.
+    let now = std::time::Instant::now();
+    let (mut c, here) = at_a_mire_witch_ground(now);
+    c.grow_pursuit(now);
+    assert!(c.is_clearing_ground());
+    let me = c.my_position().unwrap();
+    let away = ac_world::Place::on_map(glam::Vec2::new(me.x + 400.0, me.y));
+    assert!(c.grow_travel(away, crate::travel::ARRIVE));
+    c.autoplay.growth.bound = Some((here + 2, away.at.truncate(), "Drudge".into()));
+    assert!(!c.is_clearing_ground(), "on its way elsewhere");
+    let mite = crate::testkit::creature(0x5000_0902, "Mite");
+    let cfg = c.autoplay.config.fight.clone();
+    assert!(c.passing_by(&mite, &cfg));
 }
 
 /// Blargerton as he hunted the Sturdy Iron Key: a level 60 Lightning War mage at Holtburg, tier 5
@@ -2788,26 +2824,6 @@ fn a_near_dungeon_of_low_chance_sure_spawns_beats_a_far_high_chance_ground() {
     assert!(chakron.is_none_or(|c| c.0 > totals[0].0), "{totals:?}");
     assert_eq!(c.grow_pursuit(now), Some(true));
     assert_eq!(c.autoplay.growth.bound_landblock(), Some(first));
-}
-
-#[test]
-#[ignore = "needs AC_DATA_DIR"]
-fn an_attacker_at_a_clearing_ground_is_fought() {
-    // At the Tusker Barracks a pursued kill task walked past everything not sought, what hit it
-    // too, so clearing the ground did nothing: there, nothing is walked past.
-    let tusker_barracks = 0x5A48_01C8;
-    let mut c = mage_pursuing("tuskergkillcount", "chained-quests");
-    c.quest_log.note_taken("tuskergkillcount");
-    crate::testkit::stand(&mut c, tusker_barracks, glam::Vec3::new(72.0, -123.0, -1.2));
-    let now = std::time::Instant::now();
-    again(&mut c, now);
-    let mite = crate::testkit::creature(0x5000_0903, "Mite");
-    let cfg = c.autoplay.config.fight.clone();
-    assert!(c.passing_by(&mite, &cfg), "not yet clearing: walked past");
-    c.grow_pursuit(now);
-    assert!(c.is_clearing_ground());
-    c.autoplay.attacked_by("Mite", now);
-    assert!(!c.passing_by(&mite, &cfg), "walked past at the ground");
 }
 
 #[test]

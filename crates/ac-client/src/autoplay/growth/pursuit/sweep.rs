@@ -53,21 +53,34 @@ impl Client {
         !st.pursuit_sought.is_empty() && best.is_some_and(|g| g.pace.camp > g.pace.rotate)
     }
 
-    /// Whether `lb` is a pursued ground camping beats rotating on: it is cleared while hunted.
-    pub(super) fn is_camping_ground(&self, lb: u32) -> bool {
-        self.pursued_pace(lb)
-            .is_some_and(|g| g.pace.camp <= g.pace.rotate)
+    /// Whether `lb` is a pursued ground cleared while hunted: camping beats rotating there, and
+    /// other creatures hold its droppers' generator slots (a linked placement's are its own).
+    pub(super) fn is_cleared_ground(&self, lb: u32) -> bool {
+        self.pursued_pace(lb).is_some_and(|g| {
+            let held = g.droppers.iter().any(|d| d.rate.others > 0.0);
+            held && g.pace.camp <= g.pace.rotate
+        })
     }
 
-    /// Whether the landblock stood in is a camped pursued ground: everything on it is fought, so
-    /// the generators holding a slot make way for the creature sought, and what hits the character.
-    pub(crate) fn is_clearing_ground(&self) -> bool {
+    /// Whether the character hunts the pursued ground it stands on: not on a town run, nor on
+    /// its way anywhere but round that ground's own spawn spots.
+    fn is_at_pursued_ground(&self) -> bool {
         let Some(here) = self.player.as_ref().map(|p| p.cell >> 16) else {
             return false;
         };
-        self.autoplay.growth.clearing == Some(here)
-            && self.is_pursued_hunt()
+        let st = &self.autoplay.growth;
+        let own_walk = st.bound_landblock() == Some(here);
+        self.is_pursued_hunt()
             && self.pursued_place(here).is_some()
+            && st.run.is_none()
+            && (own_walk || !self.on_its_way())
+    }
+
+    /// Whether the landblock stood in is a cleared pursued ground being hunted: everything on it
+    /// is fought, so the generators holding a slot make way for the creature sought.
+    pub(crate) fn is_clearing_ground(&self) -> bool {
+        let here = self.player.as_ref().map(|p| p.cell >> 16);
+        here.is_some() && self.autoplay.growth.clearing == here && self.is_at_pursued_ground()
     }
 
     /// The hunt's `grounds` sweep: a sought creature in sight chased, the grounds left lately kept

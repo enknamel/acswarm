@@ -154,8 +154,8 @@ impl Client {
     /// Whether `o` is a creature to walk past because the character is on its way somewhere (see
     /// [`Self::on_its_way`]): every one, attacking or not. On the road it runs and heals; a fight
     /// there only made it late or dead (test: a_creature_hitting_the_character_on_the_road_is_run_past).
-    /// On a pursued ground being cleared nothing is: what holds a slot or hits the character there
-    /// is fought (an_attacker_at_a_clearing_ground_is_fought).
+    /// On a pursued ground being cleared nothing is: what holds a slot there is fought
+    /// (a_cleared_ground_is_not_cleared_on_the_way_out).
     pub(crate) fn passing_by(&self, o: &ac_world::WorldObject, cfg: &Fight) -> bool {
         if self.is_clearing_ground() {
             return false;
