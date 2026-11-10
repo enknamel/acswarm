@@ -370,3 +370,13 @@ fn a_portal_gem_comes_from_its_shop_or_its_drop() {
     assert!(sources_of(&Want::Item(29444))
         .any(|s| s.kind == Yield::Drop && s.name == "Captain Ramelle" && s.chance == 1.0));
 }
+
+#[test]
+fn the_mire_witch_is_a_rare_spawn_and_the_key_moarsman_a_sure_one() {
+    // 0.49% of a Marae Lassel shore generator's rolls put out her camp; the Catacombs of Ithaenc's
+    // key-carrying Putrid Moarsman stands on a generator that always makes him.
+    assert!(spawn_share(9163) < 0.05, "{}", spawn_share(9163));
+    assert_eq!(spawn_share(8866), 1.0);
+    // A creature the table does not name is taken for a sure one.
+    assert_eq!(spawn_share(u32::MAX), 1.0);
+}

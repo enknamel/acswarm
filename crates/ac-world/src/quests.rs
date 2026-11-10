@@ -471,10 +471,11 @@ fn parse_keys(s: &str) -> Option<Vec<(u32, String)>> {
         .collect()
 }
 
-/// One row: the first seven columns, and a placed source's spots and a lock's keys when there.
+/// One row: the first seven columns, and a placed source's spots and a lock's keys when there
+/// (the tenth, a creature's spawn share, is read by [`spawn_share`]).
 fn parse_source(line: &str) -> Option<Source> {
     let f: Vec<&str> = line.split(',').collect();
-    if f.len() != 7 && f.len() != 9 {
+    if ![7, 9, 10].contains(&f.len()) {
         return None;
     }
     let kind = match f[1] {
@@ -488,7 +489,7 @@ fn parse_source(line: &str) -> Option<Source> {
         _ => return None,
     };
     let landblocks = pairs(f[6], 16)?;
-    let (at, keys) = if f.len() == 9 { (f[7], f[8]) } else { ("", "") };
+    let (at, keys) = if f.len() >= 9 { (f[7], f[8]) } else { ("", "") };
     Some(Source {
         want: if kind == Yield::Kill {
             Want::Kill(f[0].to_string())
@@ -564,6 +565,27 @@ pub fn sources() -> &'static [Source] {
         all.extend(shops);
         all
     })
+}
+
+/// The best share of a generator roll that puts creature `wcid` in the world, 1 a sure spawn
+/// (WorldObject_Generators.cs:108-213): the Mosswart Mire-Witch's 0.01 is a rare one. 1 when no
+/// generator chain is known.
+pub fn spawn_share(wcid: u32) -> f32 {
+    static SHARES: OnceLock<BTreeMap<u32, f32>> = OnceLock::new();
+    let shares = SHARES.get_or_init(|| {
+        let mut m = BTreeMap::new();
+        for f in lines(SOURCES).map(|l| l.split(',').collect::<Vec<_>>()) {
+            let (Some(Ok(wcid)), Some(Ok(share))) = (
+                f.get(2).map(|w| w.parse::<u32>()),
+                f.get(9).map(|s| s.parse::<f32>()),
+            ) else {
+                continue;
+            };
+            m.insert(wcid, share);
+        }
+        m
+    });
+    shares.get(&wcid).copied().unwrap_or(1.0)
 }
 
 /// The rows of one quest, its start rows among them.

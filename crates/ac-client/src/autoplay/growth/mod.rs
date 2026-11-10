@@ -242,6 +242,12 @@ pub struct State {
     pub(crate) unlock_tries: u32,
     /// Chests this character unlocked, by weenie class, and when: opened without a key a while.
     pub(crate) chests_unlocked: Recent<u32>,
+    /// A rare hunt's landblocks looked over, and when (`pursuit::sweep`).
+    pub(crate) swept: Recent<u32>,
+    /// The rare hunt's landblock being looked over, and since when.
+    pub(crate) looking: Option<(u32, Instant)>,
+    /// The pursued ground camped on: everything on it is fought (`Client::is_clearing_ground`).
+    pub(crate) clearing: Option<u32>,
 }
 
 /// A few names, and how many more there are. A caster short of every

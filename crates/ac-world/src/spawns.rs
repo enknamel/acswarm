@@ -139,6 +139,15 @@ pub fn all() -> &'static [Spawn] {
     &table().spawns
 }
 
+/// Whether creature `wcid` spawns from a placed generator anywhere: one that does not is put
+/// out only by the encounter table, on the surface (Landblock.cs:269-290).
+pub fn is_placed_anywhere(wcid: u32) -> bool {
+    static PLACED: OnceLock<std::collections::BTreeSet<u32>> = OnceLock::new();
+    PLACED
+        .get_or_init(|| all().iter().map(|s| s.wcid).collect())
+        .contains(&wcid)
+}
+
 /// The spawns of one landblock (`xxyy0000`; the low word is ignored),
 /// outdoors and in its dungeon rooms.
 pub fn in_block(landblock: u32) -> &'static [Spawn] {

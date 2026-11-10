@@ -2339,3 +2339,77 @@ fn a_quests_item_another_quest_rewards_is_had_by_that_hand_in_first() {
         other => panic!("not the Ultimate scepter's hand-in: {other:?}"),
     }
 }
+
+/// The Bound scepter's pursuit with `c` stood at the middle of the Mire-Witch's nearest ground;
+/// that ground's landblock.
+fn at_a_mire_witch_ground(now: std::time::Instant) -> (Client, u32) {
+    let mut c = mage_pursuing("give:27841", "chained-quests");
+    c.refresh_quests(now);
+    let (lb, at) = c.autoplay.growth.pursuit_grounds[0];
+    let origin = ac_world::landblock_origin(at.cell);
+    crate::testkit::stand(&mut c, at.cell, at.at - origin);
+    again(&mut c, now);
+    (c, lb)
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_rare_spawn_is_looked_for_a_while_then_the_next_ground_is_swept() {
+    // The Mosswart Mire-Witch's camp is 0.49% of a shore generator's rolls: one landblock waited
+    // in never sees her, so each is looked over and left for the nearest not looked over lately.
+    let now = std::time::Instant::now();
+    let (mut c, here) = at_a_mire_witch_ground(now);
+    assert!(c.is_rare_hunt());
+    let held = c.autoplay.growth.pursuit_grounds.clone();
+    assert!(
+        held.len() > 6,
+        "all her grounds held to sweep: {}",
+        held.len()
+    );
+    assert_eq!(c.grow_pursuit(now), Some(true), "looked over");
+    assert_eq!(c.autoplay.growth.looking, Some((here, now)));
+    assert!(!c.is_clearing_ground(), "a sweep clears nothing");
+    let later = now + std::time::Duration::from_secs(16);
+    assert_eq!(c.grow_pursuit(later), Some(true), "on to the next");
+    assert!(c.autoplay.growth.swept.since(&here).is_some());
+    let next = c.autoplay.growth.bound_landblock();
+    assert!(next.is_some_and(|lb| lb != here), "{next:?}");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_rare_spawn_in_sight_is_fought_where_it_stands() {
+    let now = std::time::Instant::now();
+    let (mut c, _) = at_a_mire_witch_ground(now);
+    let me = c.my_position().unwrap();
+    let cell = c.player.as_ref().unwrap().cell;
+    let mut witch = crate::testkit::creature(0x5000_0901, "Mosswart Mire-Witch");
+    witch.weenie_class_id = 9163;
+    witch.position = crate::testkit::placed(cell, me + glam::Vec3::new(10.0, 0.0, 0.0));
+    c.world.objects.insert(witch.guid, witch);
+    assert_eq!(c.grow_pursuit(now), None, "left to the fight");
+    assert_eq!(c.autoplay.growth.looking, None);
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_camped_ground_is_cleared_of_critters_too() {
+    // A hunt that is not rare camps its ground: everything on it is fought, so the generators
+    // holding a slot make way (the Tusker Barracks' Tusker Guards).
+    let tusker_barracks = 0x5A48_01C8;
+    let mut c = mage_pursuing("tuskergkillcount", "chained-quests");
+    c.quest_log.note_taken("tuskergkillcount");
+    crate::testkit::stand(&mut c, tusker_barracks, glam::Vec3::new(72.0, -123.0, -1.2));
+    let now = std::time::Instant::now();
+    again(&mut c, now);
+    assert!(!c.is_rare_hunt());
+    assert!(!c.is_clearing_ground());
+    c.grow_pursuit(now);
+    assert!(c.is_clearing_ground());
+    let critter = crate::testkit::creature(0x5000_0902, "Mite");
+    let cfg = c.autoplay.config.fight.clone();
+    assert_eq!(
+        c.critter_verdict(&critter, &cfg),
+        crate::autoplay::fight::critter::Critter::Fight
+    );
+}

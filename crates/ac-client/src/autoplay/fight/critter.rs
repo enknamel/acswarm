@@ -239,6 +239,10 @@ impl Client {
     /// last and only of something the rest would have walked past or
     /// asked about.
     pub(crate) fn critter_verdict(&self, o: &ac_world::WorldObject, cfg: &Fight) -> Critter {
+        // A camped pursued ground is cleared: a critter holds a generator slot the sought one wants.
+        if self.is_clearing_ground() {
+            return Critter::Fight;
+        }
         if !cfg.skip_critters || name_matches(&o.name, &cfg.only) {
             return Critter::Fight;
         }

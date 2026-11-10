@@ -234,7 +234,10 @@ fn source_ground(source: &'static Source, landblock: u32, entries: u32) -> Sourc
             cell: p.to_cell,
         }),
         (None, Some(g)) => Some(g.place()),
-        (None, None) if is_surface(landblock) => {
+        // A creature no placed generator makes is the encounter table's: on the surface.
+        (None, None)
+            if is_surface(landblock) || !crate::spawns::is_placed_anywhere(source.wcid) =>
+        {
             let middle = crate::landblock_origin(landblock << 16) + Vec3::new(96.0, 96.0, 0.0);
             Some(Place::on_map(middle.truncate()))
         }

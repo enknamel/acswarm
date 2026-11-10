@@ -131,6 +131,8 @@ class Data:
             last[g] = p if p >= 0 else was
             self.made_by[int(wcid)].append((g, min(chance, 1.0), int(where),
                                             (int(cell, 16), x, y, z)))
+        # Generators put in the world themselves: placed, or a landblock's encounter.
+        self.roots = {int(w) for (w,) in rows(dump, "roots")}
         self.chest_list = defaultdict(set)
         for chest, wcid, dest in rows(dump, "chestlist"):
             if int(dest) & 1:  # DestinationType.Contain
@@ -202,6 +204,19 @@ class Data:
 
     def level(self, wcid):
         return self.ints[wcid].get(25, 0)
+
+    def spawn_share(self, wcid, depth=0):
+        """The best share of a generator roll that puts `wcid` in the world, along its chain from
+        a placed or encounter generator (WorldObject_Generators.cs:108-213): 1 a sure spawn, the
+        Mosswart Mire-Witch's camp 0.005 of a Marae Lassel shore generator's rolls."""
+        best = 1.0 if wcid in self.roots else 0.0
+        if depth >= GEN_DEPTH:
+            return best
+        for gen, chance, where, _ in self.made_by.get(wcid, ()):
+            if where & 56:  # Contain, Wield, Shop: RegenLocationType.cs:12-16
+                continue
+            best = max(best, chance * self.spawn_share(gen, depth + 1))
+        return best
 
 
 def walk(data, root):
@@ -711,8 +726,11 @@ def build(data, never):
             at = ";".join("%s %s %s" % (x, y, z) for _, x, y, z in spots)
         else:
             where = ";".join("%X:%d" % lb for lb in sorted(data.spawns[c]))
+        # No chain known (an emote's summons, a linked placement): no figure, not a rare one.
+        share = data.spawn_share(c) if kind in ("drop", "kill") else 0.0
+        spawn = "%g" % round(share, 4) if share > 0 else ""
         src_out.append((want, kind, str(c), data.name.get(c, ""), str(data.level(c)),
-                        "%g" % round(p, 4), where, at, keys))
+                        "%g" % round(p, 4), where, at, keys, spawn))
     return rows_out, givers_out, src_out, reasons
 
 
@@ -887,7 +905,7 @@ GIVERS_HEADER = """\
 
 SOURCES_HEADER = """\
 # Where what a quest wants comes from, and what each source itself needs.
-# want,kind,wcid,name,level,chance,landblocks,at,keys
+# want,kind,wcid,name,level,chance,landblocks,at,keys,spawn
 # want: an item wcid or a kill counter, as quests.csv names it, or a key a container or use
 # below needs. kind: drop (a corpse drop, chance per kill), kill (a creature counting for the
 # counter), npc (a placed NPC whose talk gives the item), floor (made on the ground by a
@@ -898,6 +916,8 @@ SOURCES_HEADER = """\
 # "x y z";...). keys: for a locked container, the keys whose KeyCode is its LockCode; for a
 # use, the items used on it; for a combine, the item used then the one used on;
 # wcid=name;..., each a want of its own rows. A shop's stock is vendors.csv's, joined at load (ac_world::quests::sources).
+# spawn: for a drop or kill, the best share of a generator roll that puts the creature out (1 sure;
+# blank when no generator chain is known).
 # Regenerate with reference/scripts/data/quests.sh.
 """
 

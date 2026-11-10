@@ -22,6 +22,7 @@ mod fetch;
 mod gem_way;
 mod kept;
 mod section;
+mod sweep;
 pub(crate) use fetch::Fetching;
 pub(crate) use gem_way::GemWanted;
 
@@ -31,6 +32,8 @@ pub const PURSUIT_RETRY: Duration = Duration::from_secs(10 * 60);
 const CHAIN_DEPTH: u32 = 3;
 /// Most grounds a hunt tries a journey to, best first: each is a plan over every portal.
 const HUNT_GROUNDS: usize = 6;
+/// Most grounds a rare spawn's hunt holds to sweep, nearest first: the data keeps 64 a creature.
+const SWEEP_GROUNDS: usize = 64;
 
 /// The step a pursued quest is at for this character.
 #[derive(Clone, Debug, PartialEq)]
@@ -632,11 +635,15 @@ impl Ask<'_> {
         };
         let mut open: Vec<(u32, Place)> = Vec::new();
         let mut first: Option<&SourceGround> = None;
+        let hunted = grounds.iter().filter(|g| g.source.kind.is_hunted());
+        let rare = hunted.clone().next().is_some()
+            && hunted.clone().all(|g| sweep::is_rare_spawn(g.source.wcid));
+        let most = if rare { SWEEP_GROUNDS } else { HUNT_GROUNDS };
         for g in &grounds {
             let Some(place) = g.place.filter(|_| level_fits(g) && flag_held(g)) else {
                 continue;
             };
-            if !open.iter().any(|(lb, _)| *lb == g.landblock) && open.len() < HUNT_GROUNDS {
+            if !open.iter().any(|(lb, _)| *lb == g.landblock) && open.len() < most {
                 first.get_or_insert(g);
                 open.push((g.landblock, place));
             }
@@ -926,7 +933,14 @@ impl Client {
             PursuitStep::Hunt { creature, .. } => {
                 let here = self.player.as_ref()?.cell >> 16;
                 let mut grounds = self.autoplay.growth.pursuit_grounds.clone();
-                if grounds.iter().any(|(lb, _)| *lb == here) {
+                if self.is_rare_hunt() {
+                    if let Some(answer) = self.sweep(&line.title, creature, &mut grounds, now) {
+                        return answer;
+                    }
+                }
+                let camped = grounds.iter().any(|(lb, _)| *lb == here);
+                self.autoplay.growth.clearing = camped.then_some(here);
+                if camped {
                     // There: the gem that was the way is bought no more.
                     let st = &mut self.autoplay.growth;
                     let before = st.pursuit_gems.len();

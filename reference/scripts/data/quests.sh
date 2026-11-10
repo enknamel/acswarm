@@ -147,6 +147,10 @@ mon as (
 select m.wcid, hex(e.landblock), count(*) from encounter e join mon m on m.root = e.weenie_Class_Id
 group by m.wcid, e.landblock;'
 
+# The generators in the world themselves, where a spawn chain starts: placed, or an encounter.
+q roots 'select distinct weenie_Class_Id from landblock_instance
+union select distinct weenie_Class_Id from encounter;'
+
 # What lies about and what makes it: placed objects but creatures and buildings (WeenieType
 # Portal, Door, Vendor, HotSpot, Creature, LifeStone, House, SlumLord, Hook, Storage, BootSpot,
 # HousePortal), every weenie's type, and every generator profile.
@@ -195,7 +199,7 @@ where r.success_W_C_I_D <> 0
   and c.target_W_C_I_D not in (select weenie_Class_Id from landblock_instance);'
 
 for t in placed emote action harm scrolls quest killq itemq drops names allowgive ints spawns ground wtypes \
-  gens chestlist locks keys stuck recipes combines encounters; do
+  gens chestlist locks keys stuck recipes combines encounters roots; do
   [ -s "$TMP/$t.tsv" ] || { echo "quests.sh: the $t query returned nothing" >&2; exit 1; }
 done
 
