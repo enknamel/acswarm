@@ -2946,3 +2946,32 @@ fn the_road_plan_ends_at_the_ground_and_with_the_hunt() {
     again(&mut c, now);
     assert_eq!(c.autoplay.growth.plan_secs, None, "another hunt");
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_sought_creature_in_sight_with_no_way_to_it_is_set_aside() {
+    // Martine seen out at sea: no walk reaches her, and every tick answered "fought where it
+    // stands" for a fight that never came, the hunt held.
+    let now = std::time::Instant::now();
+    let (mut c, _) = at_a_mire_witch_ground(now);
+    let me = c.my_position().unwrap();
+    let radius = c.autoplay.config.fight.radius;
+    // The nearest sea, by steps of 20 m out to half a kilometre, sixteen ways round.
+    let sea = (0..16 * 24)
+        .map(|i| {
+            let a = (i % 16) as f32 * std::f32::consts::TAU / 16.0;
+            let far = radius * 2.0 + (i / 16) as f32 * 20.0;
+            me + glam::Vec3::new(a.cos(), a.sin(), 0.0) * far
+        })
+        .find(|at| c.is_at_sea(at.truncate()))
+        .expect("the sea off her shore");
+    let cell = c.player.as_ref().unwrap().cell;
+    let mut witch = crate::testkit::creature(0x5000_0901, "Mosswart Mire-Witch");
+    witch.weenie_class_id = 9163;
+    witch.position = crate::testkit::placed(cell, sea);
+    c.world.objects.insert(witch.guid, witch);
+    assert_eq!(c.grow_pursuit(now), Some(true), "the ground hunted on");
+    assert!(c.autoplay.given_up.since(&0x5000_0901).is_some());
+    let later = now + std::time::Duration::from_secs(1);
+    assert_eq!(c.grow_pursuit(later), Some(true), "and on");
+}

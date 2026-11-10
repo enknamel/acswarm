@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use ac_world::Place;
 
 use super::HUNT_GROUNDS;
+use crate::autoplay::fight::melee::GIVE_UP_FOR;
 use crate::autoplay::Doing;
 use crate::Client;
 
@@ -327,7 +328,8 @@ impl Client {
     }
 
     /// A creature of the classes `sought` in sight walked to (or fought, `Some(None)`); `None`
-    /// when none is. A namesake is noted: the common Mosswart Mire-Witch (7102) is not Martine's
+    /// when none is. One with no way to it is given up on a while, like the fight's, and the
+    /// hunt goes on. A namesake is noted: the common Mosswart Mire-Witch (7102) is not Martine's
     /// (9163).
     pub(super) fn chase_in_sight(
         &mut self,
@@ -337,13 +339,17 @@ impl Client {
         now: Instant,
     ) -> Option<Option<bool>> {
         let me = self.my_position()?;
+        let given_up = &self.autoplay.given_up;
         let alive = self.world.objects.values().filter(|o| o.alive_or_unknown());
-        let (mut seen, mut namesake): (Option<glam::Vec3>, Option<u32>) = (None, None);
+        let (mut seen, mut namesake): (Option<(u32, glam::Vec3)>, Option<u32>) = (None, None);
         for o in alive {
             let Some(at) = o.world_pos() else { continue };
             if sought.contains(&o.weenie_class_id) {
-                if seen.is_none_or(|s| at.distance(me) < s.distance(me)) {
-                    seen = Some(at);
+                if given_up.within(&o.guid, now, GIVE_UP_FOR) {
+                    continue;
+                }
+                if seen.is_none_or(|(_, s)| at.distance(me) < s.distance(me)) {
+                    seen = Some((o.guid, at));
                 }
             } else if o.name == creature {
                 namesake = Some(o.weenie_class_id);
@@ -353,16 +359,24 @@ impl Client {
             let why = format!("a {creature} ({wcid}) in sight, not the one {title} wants");
             self.autoplay.note(why, now);
         }
-        let it = seen?;
-        self.autoplay.growth.looking = None;
-        self.autoplay.growth.rotating = None;
+        let (guid, it) = seen?;
         let radius = self.autoplay.config.fight.radius;
-        if it.distance(me) > radius * 0.8 && self.grow_travel(self.place_at(it), radius * 0.5) {
+        let near = it.distance(me) <= radius * 0.8;
+        if near || self.grow_travel(self.place_at(it), radius * 0.5) {
+            self.autoplay.growth.looking = None;
+            self.autoplay.growth.rotating = None;
+            if near {
+                return Some(None);
+            }
             let why = format!("for {title}: to the {creature} in sight");
             self.autoplay.say(Doing::Traveling, why);
             return Some(Some(true));
         }
-        Some(None)
+        let why = format!("no way to the {creature} in sight: hunting on");
+        self.autoplay.note(why, now);
+        self.autoplay.given_up.expire(now, GIVE_UP_FOR);
+        self.autoplay.given_up.mark(guid, now);
+        None
     }
 
     /// Look ground `here` over from its place `at` for [`LOOK_FOR`]; `None` once looked over.

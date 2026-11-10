@@ -12,7 +12,7 @@ use crate::{Client, Goal, Stance};
 /// A target that takes no damage for this long is let go.
 const STALL_AFTER: Duration = Duration::from_secs(20);
 /// And left alone for this long afterwards.
-pub(super) const GIVE_UP_FOR: Duration = refusals::ATTACK_AGAIN;
+pub(crate) const GIVE_UP_FOR: Duration = refusals::ATTACK_AGAIN;
 /// How far off a creature that has stopped attacking can stand before a
 /// character on the road lets it go and walks on (see
 /// [`road_fight_over`]): beyond a swing's reach, so one still being hit
