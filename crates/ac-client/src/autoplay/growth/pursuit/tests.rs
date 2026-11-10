@@ -2398,6 +2398,46 @@ fn a_rare_spawn_in_sight_is_fought_where_it_stands() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
+fn a_rare_spawn_seen_on_the_way_between_grounds_is_gone_to() {
+    // Martine's Mire-Witch was looked for only standing on a ground: met past the fight radius on
+    // the road to the next, she was walked by. A common namesake (7102) is only noted.
+    let now = std::time::Instant::now();
+    let (mut c, here) = at_a_mire_witch_ground(now);
+    c.autoplay.growth.swept.mark(here, now);
+    assert_eq!(c.grow_pursuit(now), Some(true), "on to the next ground");
+    let me = c.my_position().unwrap();
+    let cell = c.player.as_ref().unwrap().cell;
+    let radius = c.autoplay.config.fight.radius;
+    let far = me + glam::Vec3::new(radius * 2.0, 0.0, 0.0);
+    let mut common = crate::testkit::creature(0x5000_0902, "Mosswart Mire-Witch");
+    common.weenie_class_id = 7102;
+    common.position = crate::testkit::placed(cell, far);
+    c.world.objects.insert(common.guid, common);
+    let later = now + std::time::Duration::from_secs(1);
+    assert_eq!(c.grow_pursuit(later), Some(true));
+    let goal = c.travel_goal_xy().expect("travelling");
+    assert!(
+        goal.distance(far.truncate()) > radius,
+        "went to the common one"
+    );
+    assert!(
+        c.autoplay.noted.since(&"a Mosswart Mire-Witch (7102) in sight, not the one Bound Singularity Scepter of War Magic wants".to_string()).is_some(),
+        "the namesake not noted"
+    );
+    let mut witch = crate::testkit::creature(0x5000_0901, "Mosswart Mire-Witch");
+    witch.weenie_class_id = 9163;
+    witch.position = crate::testkit::placed(cell, far);
+    c.world.objects.insert(witch.guid, witch);
+    assert_eq!(c.grow_pursuit(later), Some(true));
+    let goal = c.travel_goal_xy().expect("travelling");
+    assert!(
+        goal.distance(far.truncate()) <= radius,
+        "not to her: {goal:?} vs {far:?}"
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_camped_ground_is_cleared_of_critters_too() {
     // A hunt that is not rare camps its ground: everything on it is fought, so the generators
     // holding a slot make way (the Tusker Barracks' Tusker Guards).

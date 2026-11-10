@@ -58,6 +58,10 @@ impl Client {
     ) -> Option<Option<bool>> {
         let cell = self.player.as_ref()?.cell;
         let here = cell >> 16;
+        // Met anywhere, on a ground or between two: the fight rule only sees its own radius.
+        if let Some(answer) = self.chase_in_sight(title, creature, now) {
+            return Some(answer);
+        }
         self.autoplay.growth.swept.expire(now, SWEEP_AGAIN);
         let outdoors = cell & 0xFFFF < 0x100;
         let stood = grounds.iter().find(|(lb, _)| *lb == here).map(|g| g.1);
@@ -86,9 +90,45 @@ impl Client {
         None
     }
 
-    /// Look ground `here` over from its place `at` for a sought creature: one in sight is walked
-    /// to (or fought, `Some(None)`); none after [`LOOK_FOR`], the ground is marked swept and `None`
-    /// says on to the next.
+    /// A sought creature in sight walked to (or fought, `Some(None)`); `None` when none is. A
+    /// namesake is noted: the common Mosswart Mire-Witch (7102) is not Martine's (9163).
+    fn chase_in_sight(
+        &mut self,
+        title: &str,
+        creature: &str,
+        now: Instant,
+    ) -> Option<Option<bool>> {
+        let me = self.my_position()?;
+        let sought = &self.autoplay.growth.pursuit_sought;
+        let alive = self.world.objects.values().filter(|o| o.alive_or_unknown());
+        let (mut seen, mut namesake): (Option<glam::Vec3>, Option<u32>) = (None, None);
+        for o in alive {
+            let Some(at) = o.world_pos() else { continue };
+            if sought.contains(&o.weenie_class_id) {
+                if seen.is_none_or(|s| at.distance(me) < s.distance(me)) {
+                    seen = Some(at);
+                }
+            } else if o.name == creature {
+                namesake = Some(o.weenie_class_id);
+            }
+        }
+        if let (None, Some(wcid)) = (seen, namesake) {
+            let why = format!("a {creature} ({wcid}) in sight, not the one {title} wants");
+            self.autoplay.note(why, now);
+        }
+        let it = seen?;
+        self.autoplay.growth.looking = None;
+        let radius = self.autoplay.config.fight.radius;
+        if it.distance(me) > radius * 0.8 && self.grow_travel(self.place_at(it), radius * 0.5) {
+            let why = format!("for {title}: to the {creature} in sight");
+            self.autoplay.say(Doing::Traveling, why);
+            return Some(Some(true));
+        }
+        Some(None)
+    }
+
+    /// Look ground `here` over from its place `at`: none of its sought creatures in sight (asked
+    /// first, `chase_in_sight`) after [`LOOK_FOR`], it is marked swept and `None` says on.
     fn look_over(
         &mut self,
         here: u32,
@@ -98,24 +138,6 @@ impl Client {
         now: Instant,
     ) -> Option<Option<bool>> {
         let me = self.my_position()?;
-        let sought = &self.autoplay.growth.pursuit_sought;
-        let seen = self
-            .world
-            .objects
-            .values()
-            .filter(|o| sought.contains(&o.weenie_class_id) && o.alive_or_unknown())
-            .filter_map(|o| o.world_pos())
-            .min_by(|a, b| a.distance(me).total_cmp(&b.distance(me)));
-        if let Some(it) = seen {
-            self.autoplay.growth.looking = None;
-            let radius = self.autoplay.config.fight.radius;
-            if it.distance(me) > radius * 0.8 && self.grow_travel(self.place_at(it), radius * 0.5) {
-                let why = format!("for {title}: to the {creature} in sight");
-                self.autoplay.say(Doing::Traveling, why);
-                return Some(Some(true));
-            }
-            return Some(None);
-        }
         let to = ac_world::quest_chain::place_name(at.cell);
         if at.at.truncate().distance(me.truncate()) > LOOK_FROM {
             if self.grow_travel(at, LOOK_FROM * 0.5) {
