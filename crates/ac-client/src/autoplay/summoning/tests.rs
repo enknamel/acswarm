@@ -46,6 +46,9 @@ const ACID_GRIEVVER_80: u32 = 49367;
 const FROST_WASP_80: u32 = 49539;
 const FIRE_MOAR_100: u32 = 49354;
 const ACID_MOAR_150: u32 = 49342;
+const FIRE_KNATH_50: u32 = 49296;
+const FROST_SWARM: u32 = 49544;
+const NATURALIST: u32 = 3;
 
 /// A ready essence of weenie class `wcid`, as the world data has it.
 fn essence(guid: u32, wcid: u32) -> Essence {
@@ -56,7 +59,20 @@ fn essence(guid: u32, wcid: u32) -> Essence {
         ratings: Ratings::default(),
         element: s.element,
         level: Some(s.skill),
+        mastery: s.mastery,
+        needs_level: s.needs_level,
+        specialized: s.specialized,
         ready: true,
+    }
+}
+
+/// A Naturalist of the highest level with `skill` Summoning, trained.
+fn naturalist(skill: u32) -> Summoner {
+    Summoner {
+        skill,
+        specialized: false,
+        mastery: Some(NATURALIST),
+        level: 275,
     }
 }
 
@@ -74,10 +90,10 @@ fn the_most_damage_within_the_skill() {
         essence(5, ACID_MOAR_150),
     ];
     // Skill 400 rules out the moar (150) at 475; nothing known of the target: the moar (100).
-    assert_eq!(choose(&carried, 400, |_| 1.0), Some(4));
+    assert_eq!(choose(&carried, &naturalist(400), |_| 1.0), Some(4));
     // Too little skill for anything but the Mud Golem.
-    assert_eq!(choose(&carried, 200, |_| 1.0), Some(1));
-    assert_eq!(choose(&carried, 40, |_| 1.0), None);
+    assert_eq!(choose(&carried, &naturalist(200), |_| 1.0), Some(1));
+    assert_eq!(choose(&carried, &naturalist(40), |_| 1.0), None);
 }
 
 #[test]
@@ -85,19 +101,31 @@ fn an_element_match_beats_a_higher_level_only_when_it_does_more() {
     let carried = [essence(2, FROST_GRIEVVER_50), essence(3, ACID_GRIEVVER_80)];
     // The (80) hits for 246 every 2.2 s, the (50) for 142 every 2.3 s: half again on cold is
     // not enough...
-    assert_eq!(choose(&carried, 370, weak_to(Element::Cold, 1.5)), Some(3));
+    assert_eq!(
+        choose(&carried, &naturalist(370), weak_to(Element::Cold, 1.5)),
+        Some(3)
+    );
     // ...twice is.
-    assert_eq!(choose(&carried, 370, weak_to(Element::Cold, 2.0)), Some(2));
+    assert_eq!(
+        choose(&carried, &naturalist(370), weak_to(Element::Cold, 2.0)),
+        Some(2)
+    );
     // And a target that takes nothing from acid gets the cold one whatever its level.
-    assert_eq!(choose(&carried, 370, weak_to(Element::Acid, 0.0)), Some(2));
+    assert_eq!(
+        choose(&carried, &naturalist(370), weak_to(Element::Acid, 0.0)),
+        Some(2)
+    );
 }
 
 #[test]
 fn a_phyntos_wasp_wins_only_with_the_element() {
     // A wasp (80) stings for 102 every 1.1 s, a grievver (80) hits for 246 every 2.2 s.
     let carried = [essence(2, FROST_WASP_80), essence(3, ACID_GRIEVVER_80)];
-    assert_eq!(choose(&carried, 370, |_| 1.0), Some(3));
-    assert_eq!(choose(&carried, 370, weak_to(Element::Cold, 1.5)), Some(2));
+    assert_eq!(choose(&carried, &naturalist(370), |_| 1.0), Some(3));
+    assert_eq!(
+        choose(&carried, &naturalist(370), weak_to(Element::Cold, 1.5)),
+        Some(2)
+    );
 }
 
 #[test]
@@ -105,18 +133,18 @@ fn the_essences_own_ratings_count() {
     let plain = essence(2, ACID_GRIEVVER_80);
     let mut rated = essence(3, ACID_GRIEVVER_80);
     rated.ratings.damage = 10;
-    assert_eq!(choose(&[plain, rated], 370, |_| 1.0), Some(3));
+    assert_eq!(choose(&[plain, rated], &naturalist(370), |_| 1.0), Some(3));
     // On a target a fifth weaker to cold, a grievver (50) loses to the (80) bare, and wins with
     // the best an essence drops with (20 each: LootGenerationFactory_PetDevice.cs:33-44).
     let cold = weak_to(Element::Cold, 1.2);
     let mut lucky = essence(4, FROST_GRIEVVER_50);
-    assert_eq!(choose(&[plain, lucky], 370, &cold), Some(2));
+    assert_eq!(choose(&[plain, lucky], &naturalist(370), &cold), Some(2));
     lucky.ratings = Ratings {
         damage: 20,
         crit: 20,
         crit_damage: 20,
     };
-    assert_eq!(choose(&[plain, lucky], 370, &cold), Some(4));
+    assert_eq!(choose(&[plain, lucky], &naturalist(370), &cold), Some(4));
 }
 
 #[test]
@@ -126,7 +154,10 @@ fn one_not_ready_or_of_unknown_level_waits() {
     let mut unknown = essence(2, ACID_GRIEVVER_80);
     unknown.level = None;
     let fallback = essence(3, MUD_GOLEM);
-    assert_eq!(choose(&[cooling, unknown, fallback], 400, |_| 1.0), Some(3));
+    assert_eq!(
+        choose(&[cooling, unknown, fallback], &naturalist(400), |_| 1.0),
+        Some(3)
+    );
 }
 
 #[test]
@@ -138,18 +169,132 @@ fn one_not_in_the_data_comes_last_by_element_then_level() {
         ratings: Ratings::default(),
         element: Some(element),
         level: Some(level),
+        mastery: 0,
+        needs_level: 0,
+        specialized: false,
         ready: true,
     };
     let (acid, fire) = (
         stranger(2, Element::Acid, 310),
         stranger(3, Element::Fire, 370),
     );
-    assert_eq!(choose(&[acid, fire, known], 400, |_| 1.0), Some(1));
     assert_eq!(
-        choose(&[acid, fire], 400, weak_to(Element::Acid, 1.5)),
+        choose(&[acid, fire, known], &naturalist(400), |_| 1.0),
+        Some(1)
+    );
+    assert_eq!(
+        choose(&[acid, fire], &naturalist(400), weak_to(Element::Acid, 1.5)),
         Some(2)
     );
-    assert_eq!(choose(&[acid, fire], 400, |_| 1.0), Some(3));
+    assert_eq!(choose(&[acid, fire], &naturalist(400), |_| 1.0), Some(3));
+}
+
+#[test]
+fn an_essence_is_chosen_only_when_every_rule_of_use_is_met() {
+    let carried = [
+        essence(1, MUD_GOLEM),
+        essence(2, FROST_GRIEVVER_50),
+        essence(3, ACID_GRIEVVER_80),
+        essence(4, FIRE_KNATH_50),
+        essence(5, FROST_SWARM),
+    ];
+    // A Naturalist at level 60: not the K'nath (Primalist), nor the grievver (80) (level 70).
+    let mut who = Summoner {
+        level: 60,
+        ..naturalist(600)
+    };
+    assert_eq!(choose(&carried, &who, |_| 1.0), Some(2));
+    who.level = 70;
+    assert_eq!(choose(&carried, &who, |_| 1.0), Some(3));
+    // The swarm needs level 185 and Summoning specialized.
+    who.level = 275;
+    assert_eq!(choose(&carried, &who, |_| 1.0), Some(3));
+    who.specialized = true;
+    assert_eq!(choose(&carried, &who, |_| 1.0), Some(5));
+    // A Primalist at 60 has the K'nath, one of no mastery only the golem, which has none.
+    let primalist = Summoner {
+        mastery: Some(1),
+        level: 60,
+        ..who
+    };
+    assert_eq!(choose(&carried, &primalist, |_| 1.0), Some(4));
+    let none = Summoner {
+        mastery: None,
+        ..primalist
+    };
+    assert_eq!(choose(&carried, &none, |_| 1.0), Some(1));
+}
+
+#[test]
+fn no_essence_the_server_would_refuse_ever_wins() {
+    // Every essence carried, against every kind of character: what wins passes ACE's checks
+    // (WorldObject_Use.cs:232-296, PetDevice.cs:112-117), and nothing wins only when none would.
+    let data = summons::all();
+    let carried: Vec<Essence> = (0..)
+        .zip(data)
+        .map(|(i, s)| essence(i, s.essence))
+        .collect();
+    let allows = |who: &Summoner, s: &summons::Summon| {
+        who.skill >= s.skill
+            && (s.mastery == 0 || who.mastery == Some(s.mastery))
+            && who.level >= s.needs_level
+            && (who.specialized || !s.specialized)
+    };
+    for skill in (0..=650).step_by(10) {
+        for level in [1, 20, 40, 60, 69, 70, 90, 115, 140, 170, 185, 275] {
+            for mastery in [None, Some(1), Some(2), Some(3)] {
+                for specialized in [false, true] {
+                    let who = Summoner {
+                        skill,
+                        specialized,
+                        mastery,
+                        level,
+                    };
+                    let won = choose(&carried, &who, |_| 1.0).map(|g| &data[g as usize]);
+                    assert!(won.is_none_or(|s| allows(&who, s)), "{who:?}: {won:?}");
+                    assert_eq!(
+                        won.is_none(),
+                        !data.iter().any(|s| allows(&who, s)),
+                        "{who:?}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn the_summoner_is_the_sheets_with_buffs_and_vitae_counted() {
+    use ac_world::stats::{enchantment_type as kind, skill, Enchantment};
+    let holtburg = 0xA9B4_0019;
+    let mut c = crate::testkit::standing_at(holtburg, glam::Vec3::new(84.0, 7.1, 94.0));
+    crate::testkit::trained_in(&mut c, skill::SUMMONING, 300);
+    let bare = c.summoner().expect("Summoning trained");
+    assert_eq!((bare.mastery, bare.specialized), (None, false));
+    let buff = Enchantment {
+        spell_id: 1,
+        category: 1,
+        stat_mod_type: kind::SKILL | kind::ADDITIVE,
+        stat_mod_key: skill::SUMMONING,
+        stat_mod_value: 20.0,
+        ..Default::default()
+    };
+    c.world.stats.enchantments.push(buff);
+    assert_eq!(c.summoner().unwrap().skill, bare.skill + 20);
+    let vitae = Enchantment {
+        spell_id: ac_world::stats::VITAE_SPELL,
+        stat_mod_type: kind::VITAE,
+        stat_mod_value: 0.9,
+        ..Default::default()
+    };
+    c.world.stats.enchantments.push(vitae);
+    assert!(
+        c.summoner().unwrap().skill < bare.skill + 20,
+        "vitae left out"
+    );
+    c.world.stats.ints.push((SUMMONING_MASTERY, 3));
+    assert_eq!(c.summoner().unwrap().mastery, Some(3));
 }
 
 #[test]

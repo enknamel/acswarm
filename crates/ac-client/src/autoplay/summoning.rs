@@ -11,21 +11,22 @@
 //!
 //! Which essence:
 //!
-//! - one the character can use: the Summoning skill it needs (the
-//!   appraisal's, or until that comes the ladder its name stands on -- a
-//!   "(50)" essence needs 310, not 50) no more than the Summoning skill
-//!   **as buffed** -- the server checks the current value, buffs included;
+//! - one the character can use ([`Summoner::can_use`]): the Summoning skill it
+//!   needs (the appraisal's, else `ac_world::summons`, else the ladder its name
+//!   stands on -- a "(50)" essence needs 310, not 50) no more than the Summoning
+//!   skill **as buffed**, buffs and vitae counted, its mastery the character's,
+//!   its character level reached and Summoning specialized when it says so;
 //! - of those, the one whose creature does the target most damage a second
 //!   (`ac_world::summons`: element, hits, how often, the essence's ratings):
 //!   an element match beats a higher level only when it does more, and a
 //!   Phyntos wasp's quick, light sting ranks mid-field among its level.
 //!
 //! Past level 50 a character picks a summoning mastery, and an essence
-//! of another mastery is refused. The client is not told which mastery
-//! the character has. An essence the server turns away outright -- of
-//! another mastery, or needing more skill than there is -- is set aside
-//! at once; one that summons nothing for no reason given is tried again
-//! after its cooldown and set aside for a while after a few failures.
+//! of another mastery is refused; the sheet carries it (PropertyInt 362,
+//! sent on login). An essence the server turns away outright all the same
+//! is set aside at once; one that summons nothing for no reason given is
+//! tried again after its cooldown and set aside for a while after a few
+//! failures.
 //!
 //! A summoned creature arrives named for its owner and carrying the
 //! owner's guid (`WorldObject::pet_owner`): the fight rules never pick
@@ -58,6 +59,12 @@ const USE_REQUIRES_SKILL_LEVEL: u32 = 367;
 /// Appraisal int: the skill level an item needs (ACE
 /// `ItemSkillLevelLimit`), which some essences carry instead.
 const ITEM_SKILL_LEVEL_LIMIT: u32 = 115;
+/// Appraisal int: Summoning must be specialized (ACE `UseRequiresSkillSpec`).
+const USE_REQUIRES_SKILL_SPEC: u32 = 368;
+/// Appraisal int: the character level an item needs (ACE `UseRequiresLevel`).
+const USE_REQUIRES_LEVEL: u32 = 369;
+/// Player int: the character's summoning mastery (ACE `SummoningMastery`, PropertyInt.cs:569-570).
+const SUMMONING_MASTERY: u32 = 362;
 
 /// The Encapsulated Spirit: used on an essence in the pack it fills its uses to the full, spent
 /// either way, so only an empty one is refilled (PetDevice.cs:508-590, CraftTool.cs:33).
@@ -92,8 +99,36 @@ pub struct Essence {
     pub element: Option<Element>,
     /// The Summoning level it needs, once known.
     pub level: Option<u32>,
+    /// SummoningMastery it needs, 0 for none or not known.
+    pub mastery: u32,
+    /// The character level it needs, 0 for none.
+    pub needs_level: u32,
+    /// Whether it needs Summoning specialized.
+    pub specialized: bool,
     /// Off cooldown, with uses left, and not set aside.
     pub ready: bool,
+}
+
+/// What the server holds an essence against (WorldObject_Use.cs:232-296, PetDevice.cs:112-117).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Summoner {
+    /// Summoning as it stands, buffs and vitae counted (CreatureSkill.Current).
+    pub skill: u32,
+    pub specialized: bool,
+    /// SummoningMastery, `None` when the sheet has none: the server then refuses any with one.
+    pub mastery: Option<u32>,
+    /// The character's level.
+    pub level: u32,
+}
+
+impl Summoner {
+    /// Whether the server lets this character use `e`; one of unknown skill waits.
+    pub fn can_use(&self, e: &Essence) -> bool {
+        e.level.is_some_and(|l| l <= self.skill)
+            && (e.mastery == 0 || self.mastery == Some(e.mastery))
+            && e.needs_level <= self.level
+            && (self.specialized || !e.specialized)
+    }
 }
 
 /// Whether an item called `name` with `max_structure` uses is a summoning
@@ -195,10 +230,10 @@ pub fn element_of(name: &str) -> Option<Element> {
         .map(|&(_, e)| e)
 }
 
-/// The essence to use: ready, needing no more than `skill`, and of those the one whose creature
-/// does the most damage a second to a target taking `takes` of each element (1.0 for one not
-/// known). One missing from `ac_world::summons` comes after the rest, by element then level.
-pub fn choose(essences: &[Essence], skill: u32, takes: impl Fn(Element) -> f32) -> Option<u32> {
+/// The essence to use: ready, one `who` can use, and of those the one whose creature does the
+/// most damage a second to a target taking `takes` of each element (1.0 for one not known).
+/// One missing from `ac_world::summons` comes after the rest, by element then level.
+pub fn choose(essences: &[Essence], who: &Summoner, takes: impl Fn(Element) -> f32) -> Option<u32> {
     let rate = |e: &Essence| {
         let s = summons::of(e.wcid)?;
         Some(
@@ -208,7 +243,7 @@ pub fn choose(essences: &[Essence], skill: u32, takes: impl Fn(Element) -> f32) 
     };
     essences
         .iter()
-        .filter(|e| e.ready && e.level.is_some_and(|l| l <= skill))
+        .filter(|e| e.ready && who.can_use(e))
         .map(|e| {
             let known = rate(e);
             let fallback = (e.element.map_or(1.0, &takes), e.level.unwrap_or(0));
@@ -303,7 +338,7 @@ impl Client {
         if self.autoplay.cast_in_flight(now) {
             return false;
         }
-        let Some(skill) = self.summoning_skill() else {
+        let Some(who) = self.summoner() else {
             return false;
         };
         let state = &self.autoplay.summoning;
@@ -313,20 +348,22 @@ impl Client {
             .inventory()
             .filter(|o| is_essence(&o.name, o.max_structure))
             .map(|o| {
-                // The server's own figure once appraised, and until then the
-                // name's (see `required_skill`). Every essence is appraised:
-                // the name's figure is right for all but a few.
+                // The server's own figures once appraised, until then the world data's, and
+                // the name's for an essence missing from it (see `required_skill`).
                 let appraisal = self.appraisals.get(&o.guid);
                 if appraisal.is_none() {
                     unknown.push(o.guid);
                 }
+                let data = summons::of(o.weenie_class_id);
                 let level = appraisal
                     .and_then(|a| {
                         a.int(USE_REQUIRES_SKILL_LEVEL)
                             .or(a.int(ITEM_SKILL_LEVEL_LIMIT))
                     })
                     .map(|l| l.max(0) as u32)
+                    .or(data.map(|s| s.skill))
                     .or_else(|| required_skill(&o.name));
+                let needed = |key| appraisal.and_then(|a| a.int(key)).map(|v| v.max(0) as u32);
                 let key = if o.cooldown_id != 0 {
                     o.cooldown_id
                 } else {
@@ -350,6 +387,13 @@ impl Client {
                 let essence = Essence {
                     guid: o.guid,
                     wcid: o.weenie_class_id,
+                    // Not in the appraisal (not an AssessmentProperty): the world data's.
+                    mastery: data.map_or(0, |s| s.mastery),
+                    needs_level: needed(USE_REQUIRES_LEVEL)
+                        .unwrap_or(0)
+                        .max(data.map_or(0, |s| s.needs_level)),
+                    specialized: needed(USE_REQUIRES_SKILL_SPEC).is_some()
+                        || data.is_some_and(|s| s.specialized),
                     ratings: Ratings {
                         damage: rated(rating::DAMAGE),
                         crit: rated(rating::CRIT),
@@ -371,7 +415,7 @@ impl Client {
             .find_map(|g| self.world.objects.get(&g))
             .and_then(|o| ac_world::elements::known(o.weenie_class_id, &o.name));
         let list: Vec<Essence> = essences.iter().map(|(e, _)| *e).collect();
-        let Some(guid) = choose(&list, skill, |e| target.map_or(1.0, |c| c.takes_from(e))) else {
+        let Some(guid) = choose(&list, &who, |e| target.map_or(1.0, |c| c.takes_from(e))) else {
             return false;
         };
         let Some(o) = self.world.objects.get(&guid) else {
@@ -435,20 +479,23 @@ impl Client {
             .note(format!("refilling {name} with an Encapsulated Spirit"), now);
     }
 
-    /// The Summoning skill as buffed, when it is trained: what the
-    /// server holds an essence's level against.
-    fn summoning_skill(&self) -> Option<u32> {
+    /// What the server holds an essence against, when Summoning is trained.
+    fn summoner(&self) -> Option<Summoner> {
         use ac_world::stats::{sac, skill};
-        let s = self.world.stats.skill(skill::SUMMONING)?;
+        let stats = &self.world.stats;
+        let s = stats.skill(skill::SUMMONING)?;
         if s.advancement < sac::TRAINED {
             return None;
         }
         let table = self.assets.skill_table().ok();
-        Some(
-            self.world
-                .stats
-                .skill_value(s, table.as_ref().and_then(|t| t.get(skill::SUMMONING))),
-        )
+        let base = table.as_ref().and_then(|t| t.get(skill::SUMMONING));
+        let mastery = stats.ints.iter().find(|(k, _)| *k == SUMMONING_MASTERY);
+        Some(Summoner {
+            skill: stats.skill_current(s, base),
+            specialized: s.advancement >= sac::SPECIALIZED,
+            mastery: mastery.map(|(_, v)| *v as u32),
+            level: stats.level.max(0) as u32,
+        })
     }
 
     /// Whether a fight is on: something alive being attacked within the
