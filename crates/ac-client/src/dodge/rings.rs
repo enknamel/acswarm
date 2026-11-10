@@ -225,11 +225,6 @@ impl Client {
                 return false;
             }
         }
-        for r in &rings {
-            if let Some(cast) = self.dodge.ring_casts.get_mut(&r.0) {
-                cast.stepped = true;
-            }
-        }
         let circles: Vec<(Vec2, f32)> = rings.iter().map(|r| (r.1, r.2)).collect();
         let assets = &self.assets;
         let Some(pl) = self.player.as_mut() else {
@@ -241,6 +236,12 @@ impl Client {
                 .note(format!("no room to step out of {name}'s ring"), now);
             return false;
         };
+        // Each cast run from once; one with no room is asked again as the character moves.
+        for r in &rings {
+            if let Some(cast) = self.dodge.ring_casts.get_mut(&r.0) {
+                cast.stepped = true;
+            }
+        }
         let run = spot.truncate().distance(me.truncate());
         tracing::info!(
             "dodge: {name} is casting, its ring reaches us in {leave_in:.2} s; running {run:.1} m to {:.1} {:.1}",

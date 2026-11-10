@@ -209,15 +209,27 @@ fn a_stand_walked_off_for_a_shot_is_not_walked_back_to() {
         me.at + Vec3::new(0.0, 0.0, 20.0) - ac_world::landblock_origin(me.cell),
     ));
     let _ = c.autoplay_approach(target, "Revenant", how);
-    assert!(c.autoplay.stands.held.is_none(), "the stand still held");
-    assert!(c.autoplay.stands.refused.contains(&me.at));
-    // Asked again where it stands, nothing walks it back: the approach has the legs.
-    assert_eq!(take_stand(&mut c, Some(target), how, now), Did::Done);
+    assert!(
+        c.autoplay.stands.held.is_some_and(|s| s.left),
+        "the stand still held"
+    );
+    assert_eq!(c.autoplay.stands.refused, vec![me.at]);
+    // Asked again where it stands, nothing walks it back or is chosen afresh: the approach has
+    // the legs. Each approach tick refused the spot it stood on again, and chose a stand anew.
+    for _ in 0..3 {
+        assert_eq!(take_stand(&mut c, Some(target), how, now), Did::Done);
+        let _ = c.autoplay_approach(target, "Revenant", how);
+    }
     assert!(c
         .autoplay
         .stands
         .held
-        .is_none_or(|s| s.reached && !s.walked));
+        .is_some_and(|s| s.left && s.spot == me));
+    assert_eq!(
+        c.autoplay.stands.refused.len(),
+        1,
+        "refused again each tick"
+    );
 }
 
 #[test]
@@ -503,6 +515,41 @@ fn autoplay_and_the_body_back_off_and_step_aside_between_casts_never_during_one(
     assert!(
         moved_mid_cast < 0.2,
         "moved {moved_mid_cast:.2} m in a frame while casting"
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_held_cast_still_takes_its_stand() {
+    // Mana under its slider and nothing to restore it: the bolt waits, the back-off does not.
+    let t0 = Instant::now();
+    let (mut c, _) = testkit::a_caster_knowing(t0, &["Frost Bolt III"]);
+    let field = ac_world::landblock_origin(0xA9B4_0000) + Vec3::new(84.0, 108.0, 94.0);
+    let (at, cell) = crate::walk_trial::on_floor(&mut c, field);
+    testkit::stand(&mut c, cell, at - ac_world::landblock_origin(cell));
+    c.autoplay.config.enabled = true;
+    c.autoplay.config.fight.enabled = true;
+    c.world.stats.vitals[2].base = 1000;
+    c.world.stats.vitals[2].current = 100;
+    let target = 0x8000_0001;
+    coming_at(&mut c, &[(target, Vec3::new(2.0, 0.0, 0.0))]);
+    let creature = c.world.objects[&target].world_pos().unwrap();
+    let dt = 0.05;
+    for frame in 0..4 * 20 {
+        let now = t0 + Duration::from_secs_f32(frame as f32 * dt);
+        c.frame_at = now;
+        c.tick_autoplay(now);
+        c.tick_player(crate::player::Input::default(), dt, now);
+    }
+    assert!(
+        c.autoplay.cast_sent.is_none(),
+        "a bolt went under the mana slider"
+    );
+    let off = c.my_position().unwrap().distance(creature);
+    assert!(
+        off >= STANDOFF_NEAR - 0.5,
+        "held where it stood, {off:.1} m off: {}",
+        c.autoplay.status
     );
 }
 

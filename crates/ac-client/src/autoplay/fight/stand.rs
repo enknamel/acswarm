@@ -117,6 +117,8 @@ pub(crate) struct Stand {
     pub(crate) reached: bool,
     /// Walked to for fewer sides: only such a stand is held for a creature coming.
     pub(crate) walked: bool,
+    /// Given up for a shot ([`Client::leave_stand`]): kept so it is not chosen again, never walked to.
+    pub(crate) left: bool,
 }
 
 /// How many attackers reach at once from a spot with `open` sides, then the sides: less is better.
@@ -161,6 +163,7 @@ impl Client {
             .held
             .filter(|s| s.against == attackers.len());
         let stand = match held {
+            Some(s) if s.left => return Did::Done,
             // Left (run out of a ring): walked back to once no ring spreads over it, else waited out.
             Some(s) if s.reached && is_kept(&s) && !is_at_stand(&s, me.at) => {
                 if is_in_rings(&self.spreading_rings(me.at), s.spot.at) {
@@ -200,6 +203,10 @@ impl Client {
                     self.cancel_attack();
                 }
             }
+            return Did::Done;
+        }
+        // Not walked into a ring spreading over the spot: the walk waits it out.
+        if is_in_rings(&self.spreading_rings(me.at), stand.spot.at) {
             return Did::Done;
         }
         // Walking, a swing or shot in hand would have the server walk us at its target instead.
@@ -245,7 +252,7 @@ impl Client {
             .autoplay
             .stands
             .held
-            .is_some_and(|s| s.reached && s.walked)
+            .is_some_and(|s| s.reached && s.walked && !s.left)
         {
             return false;
         }
@@ -278,11 +285,16 @@ impl Client {
         self.autoplay.stands = Stands::default();
     }
 
-    /// The stand held is no shot at the target: given up and not chosen again in this fight, not
-    /// walked back to (a_stand_walked_off_for_a_shot_is_not_walked_back_to).
+    /// The stand held is no shot at the target: given up till the attackers change, not walked
+    /// back to, and a walked one not chosen again (a_stand_walked_off_for_a_shot_is_not_walked_back_to).
     pub(crate) fn leave_stand(&mut self) {
-        if let Some(s) = self.autoplay.stands.held.take() {
-            self.autoplay.stands.refused.push(s.spot.at);
+        let st = &mut self.autoplay.stands;
+        let Some(s) = st.held.as_mut().filter(|s| !s.left) else {
+            return;
+        };
+        s.left = true;
+        if s.walked {
+            st.refused.push(s.spot.at);
         }
     }
 
@@ -385,6 +397,7 @@ impl Client {
             sides: here.count_ones(),
             reached: true,
             walked: false,
+            left: false,
         };
         Some(match best {
             Some((spot, o)) if is_material(exposure(o, n), exposure(here, n)) => Stand {
@@ -393,6 +406,7 @@ impl Client {
                 sides: o.count_ones(),
                 reached: false,
                 walked: true,
+                left: false,
             },
             _ => stay,
         })
@@ -414,7 +428,7 @@ impl Client {
         self.autoplay
             .stands
             .held
-            .filter(|s| is_kept(s) && is_at_stand(s, me))
+            .filter(|s| !s.left && is_kept(s) && is_at_stand(s, me))
     }
 
     /// The back-off and steps aside for `target`, started afresh if they were for another.
