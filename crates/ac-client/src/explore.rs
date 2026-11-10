@@ -191,7 +191,7 @@ impl Client {
         }
         // Nor in a hunted creature's dungeon: grow goes round the rooms it spawns in
         // (a_pursued_creatures_spawn_rooms_are_gone_round_not_the_dungeon).
-        if hunting_here && self.hunts_spawn_rooms(here) {
+        if hunting_here && self.hunts_spawn_spots(here) {
             return false;
         }
         let assets = self.assets.clone();

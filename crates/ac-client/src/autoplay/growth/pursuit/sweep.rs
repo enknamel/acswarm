@@ -153,7 +153,7 @@ impl Client {
             self.autoplay.growth.spawns_walked.push(spot.cell);
             return Some(Some(false));
         }
-        let spots = self.hunts_spawn_rooms(here);
+        let spots = self.hunts_spawn_spots(here);
         // A dungeon with no spawn of its creature known is the explorer's to walk.
         if !spots && place.is_indoors() {
             return Some(None);

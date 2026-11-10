@@ -1209,22 +1209,22 @@ impl Client {
         grounds.iter().find(|(l, _)| *l == lb).map(|(_, p)| *p)
     }
 
-    /// Whether the working pursuit hunts in `lb`, in rooms a creature it seeks spawns in.
-    pub(crate) fn hunts_spawn_rooms(&self, lb: u32) -> bool {
+    /// Whether the working pursuit hunts in `lb`, at spots a creature it seeks spawns at.
+    pub(crate) fn hunts_spawn_spots(&self, lb: u32) -> bool {
         let hunting = matches!(
             self.working_pursuit().map(|l| &l.step),
             Some(PursuitStep::Hunt { .. })
         );
-        hunting && self.pursued_place(lb).is_some() && !self.spawn_rooms(lb).is_empty()
+        hunting && self.pursued_place(lb).is_some() && !self.spawn_spots(lb).is_empty()
     }
 
-    /// The dungeon rooms of `lb` that a creature the pursuit seeks spawns in, by class: the key
-    /// Putrid Moarsman (8866) is not its thirteen namesakes (4248).
-    fn spawn_rooms(&self, lb: u32) -> Vec<Place> {
+    /// The spots of `lb` a creature the pursuit seeks spawns at, dungeon rooms and outdoors alike,
+    /// by class: the key Putrid Moarsman (8866) is not its thirteen namesakes (4248).
+    fn spawn_spots(&self, lb: u32) -> Vec<Place> {
         let sought = &self.autoplay.growth.pursuit_sought;
         ac_world::spawns::in_block(lb << 16)
             .iter()
-            .filter(|s| s.indoors() && sought.contains(&s.wcid))
+            .filter(|s| sought.contains(&s.wcid))
             .map(|s| Place {
                 at: s.at,
                 cell: s.cell,
@@ -1236,7 +1236,7 @@ impl Client {
     /// counted; `None` once the round is done, or with none known.
     pub(super) fn next_spawn_spot(&mut self, lb: u32) -> Option<Place> {
         let me = self.my_position()?;
-        let spots = self.spawn_rooms(lb);
+        let spots = self.spawn_spots(lb);
         let walked = &mut self.autoplay.growth.spawns_walked;
         walked.retain(|c| *c >> 16 == lb);
         for r in spots
@@ -1259,7 +1259,7 @@ impl Client {
             return;
         };
         let near: Vec<u32> = self
-            .spawn_rooms(lb)
+            .spawn_spots(lb)
             .iter()
             .filter(|r| r.at.distance(me) <= super::hunt::ROOM_HELD)
             .map(|r| r.cell)

@@ -1085,3 +1085,53 @@ fn a_body_in_the_air_plans_nothing_and_skips_no_ground() {
     );
     assert!(c.traveling(), "never set off once landed");
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn outdoors_the_pursued_creatures_spawn_spots_are_gone_round() {
+    // Outdoors the ground said "nothing in sight; looking about the ground" and roamed: its
+    // creature's own spawn spots are gone to, nearest first, as a dungeon's rooms are.
+    let outdoors = |lb: u32| {
+        ac_world::spawns::in_block(lb << 16)
+            .iter()
+            .filter(|s| !s.indoors())
+            .collect::<Vec<_>>()
+    };
+    let ground = ac_world::hunting::all()
+        .iter()
+        .find(|g| !g.is_dungeon() && outdoors(g.landblock).len() > 1)
+        .expect("an outdoor ground with spawns");
+    let place = ground.place();
+    let origin = ac_world::landblock_origin(place.cell);
+    let mut c = crate::testkit::standing_in_the_field(30, place.cell, place.at - origin);
+    let me = c.my_position().unwrap();
+    let spawn = outdoors(ground.landblock)
+        .into_iter()
+        .filter(|s| s.at.truncate().distance(me.truncate()) > 20.0)
+        .min_by(|a, b| a.at.distance(me).total_cmp(&b.at.distance(me)))
+        .expect("a spawn spot away from the ground's place")
+        .clone();
+    let here = Place {
+        at: me,
+        cell: place.cell,
+    };
+    pursuing_the_jaw(&mut c, place.cell >> 16, here);
+    c.autoplay.growth.pursuit_sought = vec![spawn.wcid];
+    let now = Instant::now();
+    assert_eq!(c.grow_pursuit(now), Some(true), "{}", c.autoplay.status);
+    assert!(
+        c.autoplay.status.contains("spawn spot"),
+        "{}",
+        c.autoplay.status
+    );
+    let goal = c.travel_goal_xy().expect("walking");
+    let nearest = ac_world::spawns::in_block(place.cell & 0xFFFF_0000)
+        .iter()
+        .filter(|s| s.wcid == spawn.wcid && s.at.truncate().distance(me.truncate()) > 8.0)
+        .map(|s| s.at.truncate().distance(me.truncate()))
+        .fold(f32::MAX, f32::min);
+    assert!(
+        (goal.distance(me.truncate()) - nearest).abs() < 5.0,
+        "not the nearest spot: {goal:?}"
+    );
+}
