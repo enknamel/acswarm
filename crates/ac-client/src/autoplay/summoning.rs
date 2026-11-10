@@ -15,10 +15,10 @@
 //!   appraisal's, or until that comes the ladder its name stands on -- a
 //!   "(50)" essence needs 310, not 50) no more than the Summoning skill
 //!   **as buffed** -- the server checks the current value, buffs included;
-//! - of the element the target takes most damage from, when that is
-//!   known -- an Acid Moar for a creature weak to acid -- and otherwise
-//!   any;
-//! - of those, the highest level.
+//! - of those, the one whose creature does the target most damage a second
+//!   (`ac_world::summons`: element, hits, how often, the essence's ratings):
+//!   an element match beats a higher level only when it does more, and a
+//!   Phyntos wasp loses to all of its level but golems.
 //!
 //! Past level 50 a character picks a summoning mastery, and an essence
 //! of another mastery is refused. The client is not told which mastery
@@ -36,6 +36,7 @@ use std::time::{Duration, Instant};
 
 use ac_agent::recent::Recent;
 use ac_world::elements::Element;
+use ac_world::summons::{self, rating, Ratings};
 
 use crate::autoplay::Doing;
 use crate::refusals::SummonRefusal;
@@ -84,6 +85,10 @@ pub struct State {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Essence {
     pub guid: u32,
+    /// Its weenie class, which says what its creature does (`ac_world::summons`).
+    pub wcid: u32,
+    /// The ratings it dropped with, once appraised.
+    pub ratings: Ratings,
     pub element: Option<Element>,
     /// The Summoning level it needs, once known.
     pub level: Option<u32>,
@@ -190,16 +195,32 @@ pub fn element_of(name: &str) -> Option<Element> {
         .map(|&(_, e)| e)
 }
 
-/// The essence to use: ready, needing no more than `skill`, of the
-/// element the target takes most from (`takes`, 1.0 for one not known),
-/// and of those the highest level.
+/// The essence to use: ready, needing no more than `skill`, and of those the one whose creature
+/// does the most damage a second to a target taking `takes` of each element (1.0 for one not
+/// known). One missing from `ac_world::summons` comes after the rest, by element then level.
 pub fn choose(essences: &[Essence], skill: u32, takes: impl Fn(Element) -> f32) -> Option<u32> {
+    let rate = |e: &Essence| {
+        let s = summons::of(e.wcid)?;
+        Some(
+            s.element
+                .map_or(0.0, |el| s.damage_per_second(e.ratings, takes(el))),
+        )
+    };
     essences
         .iter()
         .filter(|e| e.ready && e.level.is_some_and(|l| l <= skill))
-        .map(|e| (e.element.map_or(1.0, &takes), e.level.unwrap_or(0), e.guid))
-        .max_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
-        .map(|(_, _, g)| g)
+        .map(|e| {
+            let known = rate(e);
+            let fallback = (e.element.map_or(1.0, &takes), e.level.unwrap_or(0));
+            (known.is_some(), known.unwrap_or(0.0), fallback, e.guid)
+        })
+        .max_by(|a, b| {
+            a.0.cmp(&b.0)
+                .then(a.1.total_cmp(&b.1))
+                .then(a.2 .0.total_cmp(&b.2 .0))
+                .then(a.2 .1.cmp(&b.2 .1))
+        })
+        .map(|(.., g)| g)
 }
 
 impl Client {
@@ -321,8 +342,19 @@ impl Client {
                     *n >= FAILS_BEFORE_SET_ASIDE && now.duration_since(*t) < SET_ASIDE
                 });
                 let uses = o.structure > 0;
+                let rated = |key| {
+                    appraisal
+                        .and_then(|a| a.int(key))
+                        .map_or(0, |v| v.max(0) as u32)
+                };
                 let essence = Essence {
                     guid: o.guid,
+                    wcid: o.weenie_class_id,
+                    ratings: Ratings {
+                        damage: rated(rating::DAMAGE),
+                        crit: rated(rating::CRIT),
+                        crit_damage: rated(rating::CRIT_DAMAGE),
+                    },
                     element: element_of(&o.name),
                     level,
                     ready: cooled && uses && !set_aside,

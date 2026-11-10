@@ -40,47 +40,117 @@ fn the_element_is_in_the_name() {
     assert_eq!(element_of("Mud Golem Essence"), Some(Element::Bludgeon));
 }
 
-fn essence(guid: u32, element: Element, level: u32) -> Essence {
+const MUD_GOLEM: u32 = 48886;
+const FROST_GRIEVVER_50: u32 = 49387;
+const ACID_GRIEVVER_80: u32 = 49367;
+const FROST_WASP_80: u32 = 49539;
+const FIRE_MOAR_100: u32 = 49354;
+const ACID_MOAR_150: u32 = 49342;
+
+/// A ready essence of weenie class `wcid`, as the world data has it.
+fn essence(guid: u32, wcid: u32) -> Essence {
+    let s = summons::of(wcid).expect("an essence in the data");
     Essence {
         guid,
-        element: Some(element),
-        level: Some(level),
+        wcid,
+        ratings: Ratings::default(),
+        element: s.element,
+        level: Some(s.skill),
         ready: true,
     }
 }
 
+fn weak_to(element: Element, by: f32) -> impl Fn(Element) -> f32 {
+    move |e| if e == element { by } else { 1.0 }
+}
+
 #[test]
-fn the_targets_weakness_first_then_the_highest_level() {
+fn the_most_damage_within_the_skill() {
     let carried = [
-        essence(1, Element::Bludgeon, 50),
-        essence(2, Element::Acid, 310),
-        essence(3, Element::Acid, 370),
-        essence(4, Element::Fire, 400),
-        essence(5, Element::Acid, 475),
+        essence(1, MUD_GOLEM),
+        essence(2, FROST_GRIEVVER_50),
+        essence(3, ACID_GRIEVVER_80),
+        essence(4, FIRE_MOAR_100),
+        essence(5, ACID_MOAR_150),
     ];
-    let weak_to_acid = |e| if e == Element::Acid { 1.5 } else { 1.0 };
-    // Skill 400: the acid (80) at 370, not the fire (100) at 400 or the
-    // acid (150) at 475.
-    assert_eq!(choose(&carried, 400, weak_to_acid), Some(3));
-    // Nothing known about the target: the highest allowed.
+    // Skill 400 rules out the moar (150) at 475; nothing known of the target: the moar (100).
     assert_eq!(choose(&carried, 400, |_| 1.0), Some(4));
     // Too little skill for anything but the Mud Golem.
-    assert_eq!(choose(&carried, 200, weak_to_acid), Some(1));
-    assert_eq!(choose(&carried, 40, weak_to_acid), None);
+    assert_eq!(choose(&carried, 200, |_| 1.0), Some(1));
+    assert_eq!(choose(&carried, 40, |_| 1.0), None);
+}
+
+#[test]
+fn an_element_match_beats_a_higher_level_only_when_it_does_more() {
+    let carried = [essence(2, FROST_GRIEVVER_50), essence(3, ACID_GRIEVVER_80)];
+    // The (80) hits for 217 every 2.7 s, the (50) for 125: half again on cold is not enough...
+    assert_eq!(choose(&carried, 370, weak_to(Element::Cold, 1.5)), Some(3));
+    // ...twice is.
+    assert_eq!(choose(&carried, 370, weak_to(Element::Cold, 2.0)), Some(2));
+    // And a target that takes nothing from acid gets the cold one whatever its level.
+    assert_eq!(choose(&carried, 370, weak_to(Element::Acid, 0.0)), Some(2));
+}
+
+#[test]
+fn a_phyntos_wasp_loses_even_with_the_element() {
+    // ACE's wasps strike for their level (80 at 80, where a grievver strikes for 170) and play
+    // one in six of the maneuvers their combat table rolls.
+    let carried = [essence(2, FROST_WASP_80), essence(3, ACID_GRIEVVER_80)];
+    assert_eq!(choose(&carried, 370, weak_to(Element::Cold, 1.5)), Some(3));
+    // Alone, it is still summoned: it does something.
+    assert_eq!(choose(&carried[..1], 370, |_| 1.0), Some(2));
+}
+
+#[test]
+fn the_essences_own_ratings_count() {
+    let plain = essence(2, ACID_GRIEVVER_80);
+    let mut rated = essence(3, ACID_GRIEVVER_80);
+    rated.ratings.damage = 10;
+    assert_eq!(choose(&[plain, rated], 370, |_| 1.0), Some(3));
+    // On a target a fifth weaker to cold, a grievver (50) loses to the (80) bare, and wins with
+    // the best an essence drops with (20 each: LootGenerationFactory_PetDevice.cs:33-44).
+    let cold = weak_to(Element::Cold, 1.2);
+    let mut lucky = essence(4, FROST_GRIEVVER_50);
+    assert_eq!(choose(&[plain, lucky], 370, &cold), Some(2));
+    lucky.ratings = Ratings {
+        damage: 20,
+        crit: 20,
+        crit_damage: 20,
+    };
+    assert_eq!(choose(&[plain, lucky], 370, &cold), Some(4));
 }
 
 #[test]
 fn one_not_ready_or_of_unknown_level_waits() {
-    let mut cooling = essence(1, Element::Acid, 80);
+    let mut cooling = essence(1, ACID_GRIEVVER_80);
     cooling.ready = false;
-    let unknown = Essence {
-        guid: 2,
-        element: Some(Element::Acid),
-        level: None,
+    let mut unknown = essence(2, ACID_GRIEVVER_80);
+    unknown.level = None;
+    let fallback = essence(3, MUD_GOLEM);
+    assert_eq!(choose(&[cooling, unknown, fallback], 400, |_| 1.0), Some(3));
+}
+
+#[test]
+fn one_not_in_the_data_comes_last_by_element_then_level() {
+    let known = essence(1, MUD_GOLEM);
+    let stranger = |guid, element, level| Essence {
+        guid,
+        wcid: 0,
+        ratings: Ratings::default(),
+        element: Some(element),
+        level: Some(level),
         ready: true,
     };
-    let fallback = essence(3, Element::Bludgeon, 50);
-    assert_eq!(choose(&[cooling, unknown, fallback], 200, |_| 1.0), Some(3));
+    let (acid, fire) = (
+        stranger(2, Element::Acid, 310),
+        stranger(3, Element::Fire, 370),
+    );
+    assert_eq!(choose(&[acid, fire, known], 400, |_| 1.0), Some(1));
+    assert_eq!(
+        choose(&[acid, fire], 400, weak_to(Element::Acid, 1.5)),
+        Some(2)
+    );
+    assert_eq!(choose(&[acid, fire], 400, |_| 1.0), Some(3));
 }
 
 #[test]
