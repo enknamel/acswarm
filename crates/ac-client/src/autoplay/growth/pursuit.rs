@@ -15,7 +15,7 @@ use ac_world::Place;
 use super::hunt::{GROUND_REACH, SKIP_GROUND_FOR, UNLOCK_RETRY};
 use super::town_run::calls::Asking;
 use crate::autoplay::{Doing, Pursuit, QuestEnd};
-use crate::quest_log::{Blocked, QuestFacts, QuestLine, QuestState, KEY_DEPTH};
+use crate::quest_log::{Blocked, QuestFacts, QuestLine, QuestState};
 use crate::Client;
 
 mod fetch;
@@ -30,6 +30,9 @@ pub(crate) use gem_way::GemWanted;
 pub const PURSUIT_RETRY: Duration = Duration::from_secs(10 * 60);
 /// Flags looked through for a quest to work first, a quest needing one needing another (guess).
 const CHAIN_DEPTH: u32 = 3;
+/// Links a want is followed through: another quest's reward, a missing item, a chest's key. The
+/// Bound Singularity Scepter's Sturdy Iron Key is the fourth (scepter, cloak, essence, key).
+const OBTAIN_DEPTH: usize = 6;
 /// Most grounds a hunt tries a journey to, best first: each is a plan over every portal.
 const HUNT_GROUNDS: usize = 6;
 /// Most grounds a rare spawn's hunt holds to sweep, nearest first: the data keeps 64 a creature.
@@ -542,7 +545,7 @@ impl Ask<'_> {
     }
 
     /// `wants` fetched where nothing is hunted, else hunted where they drop, else the key a chest
-    /// holding one asks obtained first, [`KEY_DEPTH`] deep; else why not.
+    /// holding one asks obtained first, [`OBTAIN_DEPTH`] deep; else why not.
     fn obtain(
         &self,
         wants: &[Want],
@@ -555,7 +558,7 @@ impl Ask<'_> {
             return (step, None);
         }
         let hunted = self.ground_step(wants, more, what);
-        if !matches!(hunted.0, PursuitStep::Stuck { .. }) || depth >= KEY_DEPTH {
+        if !matches!(hunted.0, PursuitStep::Stuck { .. }) || depth >= OBTAIN_DEPTH {
             return hunted;
         }
         // Another quest's reward: quests chain (a Singularity Scepter handed in for the Bound one).
@@ -580,7 +583,7 @@ impl Ask<'_> {
     }
 
     /// `wants` had as another quest's reward: its hand-in made when what it takes is carried, else
-    /// that come by first, [`KEY_DEPTH`] deep; `None` when no quest gives any of them.
+    /// that come by first, [`OBTAIN_DEPTH`] deep; `None` when no quest gives any of them.
     fn reward_step(&self, wants: &[Want], depth: usize) -> Option<(PursuitStep, Option<Hunting>)> {
         // A swap of an item for one like it (a Glowing Virindi Cloak for a Glowing Virindi Cloak) is
         // no way to come by it.

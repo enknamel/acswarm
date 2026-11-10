@@ -2286,17 +2286,40 @@ fn a_ground_under_foot_that_no_gem_reaches_waits_its_turn_in_the_list() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
-fn the_bound_singularity_scepter_with_nothing_carried_starts_at_the_mire_witch() {
+fn the_bound_singularity_scepter_with_the_essence_carried_hunts_the_mire_witch() {
     // Bound <- Singularity Scepter <- Glowing Virindi Cloak <- Virindi Essence on a Tattered
     // Virindi Cloak, which only the Mosswart Mire-Witch (9163) drops; her camp is put out by
     // Marae Lassel's shore generators in the encounter table, which the data once left out.
     let mut c = mage_pursuing("give:27841", "chained-quests");
+    in_the_pack(&mut c, 0x8000_0723, 9125, "Virindi Essence", 1);
     let now = std::time::Instant::now();
     c.refresh_quests(now);
     let step = c.pursuit[0].step.clone();
     assert!(
         matches!(&step, PursuitStep::Hunt { creature, .. } if creature == "Mosswart Mire-Witch"),
         "no way to the Bound scepter: {step:?}"
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn the_bound_scepter_with_the_cloak_carried_goes_for_the_essence_chest_s_key() {
+    // The Virindi Essence is only in a locked chest in A Mosswart Hideout, opened with a Sturdy
+    // Iron Key: four links down, past a three-deep search, "nobody known yields Virindi Essence".
+    let now = std::time::Instant::now();
+    let mut c = mage_pursuing("give:27841", "chained-quests");
+    in_the_pack(&mut c, 0x8000_0721, 9117, "Tattered Virindi Cloak", 1);
+    c.refresh_quests(now);
+    let step = c.pursuit[0].step.clone();
+    assert!(
+        !matches!(step, PursuitStep::Stuck { .. }),
+        "stuck on the essence: {step:?}"
+    );
+    in_the_pack(&mut c, 0x8000_0722, 6876, "Sturdy Iron Key", 1);
+    let step = again(&mut c, now);
+    assert!(
+        matches!(&step, PursuitStep::OpenChest { chest, .. } if chest.wcid == 9168),
+        "the key carried, not to the chest: {step:?}"
     );
 }
 
@@ -2344,6 +2367,8 @@ fn a_quests_item_another_quest_rewards_is_had_by_that_hand_in_first() {
 /// that ground's landblock.
 fn at_a_mire_witch_ground(now: std::time::Instant) -> (Client, u32) {
     let mut c = mage_pursuing("give:27841", "chained-quests");
+    // The essence had: else the chest's key is gone for first.
+    in_the_pack(&mut c, 0x8000_0723, 9125, "Virindi Essence", 1);
     c.refresh_quests(now);
     // Her first ground on land: 0xB813's corner is sea, where no walk starts.
     let grounds = c.autoplay.growth.pursuit_grounds.clone();
