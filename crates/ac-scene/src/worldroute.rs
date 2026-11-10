@@ -106,6 +106,19 @@ pub fn find_with(
     find_with_avoid(grid, water, from, to, &[])
 }
 
+/// Whether a route can end at world xy `at`: dry ground within an endpoint's snap. Off it (out
+/// at sea) [`find`] has no route there from anywhere.
+pub fn is_near_land(grid: &WorldGrid, region: &Region, at: Vec2) -> bool {
+    let water: Vec<Water> = (0..32u16).map(|t| water_kind(region, t)).collect();
+    let water = |t: u16| water.get(t as usize).copied().unwrap_or(Water::Sea);
+    let land = Land {
+        grid,
+        water: &water,
+        avoid: &[],
+    };
+    land.nearest_land(at).is_some()
+}
+
 /// [`find_with`] that keeps away from the spots in `avoid`.
 pub fn find_with_avoid(
     grid: &WorldGrid,

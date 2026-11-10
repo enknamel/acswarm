@@ -80,11 +80,13 @@ pub struct NoWalk {
 }
 
 impl NoWalk {
-    /// Whether this refusal rules out walking from `a` to `b`.
+    /// Whether this refusal rules out walking from `a` to `b`. A building's room is the ground
+    /// outside it, as the client refuses from: a recall into one was cast again for ever
+    /// (a_walk_refused_after_a_recall_into_a_building_is_not_planned_again).
     fn is_walk(&self, a: Place, b: Place) -> bool {
         let near = |p: Place, q: Place, metres: f32| {
             p.cell & 0xFFFF_0000 == q.cell & 0xFFFF_0000
-                && p.is_indoors() == q.is_indoors()
+                && shut_in(p) == shut_in(q)
                 && p.at.truncate().distance(q.at.truncate()) <= metres
         };
         near(a, self.from, NO_WALK_NEAR) && near(b, self.to, 2.0)

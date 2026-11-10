@@ -309,6 +309,11 @@ impl Client {
             return Err("not a place".into());
         };
         let xy = place.at.truncate();
+        // Past the region only the terrain reaches it: at sea, every portal and recall was tried.
+        if !place.is_indoors() && !self.is_in_region(place) && self.is_at_sea(xy) {
+            tracing::warn!("travel: {xy:?} in {:#010x} is out at sea", place.cell);
+            return Err("out at sea".into());
+        }
         let Some((from, underground)) = self.planning_from() else {
             tracing::warn!("travel: the character is not in the world");
             return Err("not in the world yet".into());
@@ -1370,6 +1375,12 @@ impl Client {
             Ok(None) => None,
             Err(_) => Some(place),
         }
+    }
+
+    /// Whether world xy `at` is out at sea, where no walk over the terrain ends.
+    pub(crate) fn is_at_sea(&mut self, at: Vec2) -> bool {
+        self.travel_terrain()
+            .is_some_and(|(grid, region)| !ac_scene::worldroute::is_near_land(&grid, &region, at))
     }
 
     /// The corridor stretch toward `target` (world xy) past the region: to where the corridor

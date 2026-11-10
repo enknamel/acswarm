@@ -2038,3 +2038,57 @@ fn a_journey_ended_leaves_no_flight_behind_for_the_next_to_the_same_place() {
     assert!(c.travel_to(goal), "no way there the second time");
     assert!(!c.is_journey_flown(), "flown on the old journey's marker");
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_walk_refused_after_a_recall_into_a_building_is_not_planned_again() {
+    // Blargerton's recall landed in a building (0x93CB0105) and the walk on from it was refused
+    // from the ground outside: planned from the room, the refusal never matched, and the same
+    // Portal Recall was cast for ever, a Prismatic Taper each.
+    let mut c = Client::offline(crate::testkit::game_data());
+    crate::testkit::stand(&mut c, 0xA9B4_0019, Vec3::new(84.0, 7.1, 94.0));
+    let room = ac_world::Position::new_flat(0x93CB_0105, Vec3::new(12.0, 24.0, 101.305));
+    let sanctuary = ac_world::recalls::position_type::SANCTUARY;
+    c.world.stats.positions.push((sanctuary, room));
+    let to = Vec3::new(150.0, 150.0, 0.0);
+    let goal = Place {
+        at: ac_world::landblock_origin(0x93CB_0000) + to,
+        cell: ac_world::outdoor_cell(0x93CB_0000, to),
+    };
+    let trip = c.plan_trip(goal, true).expect("a trip");
+    let landing = trip
+        .steps
+        .iter()
+        .find_map(|s| matches!(s, Step::Recall { .. }).then(|| s.exit()).flatten())
+        .unwrap_or_else(|| panic!("no recall: {trip:?}"));
+    // Refused as `refuse_step` does: from the ground outside the room.
+    let refused = NoWalk {
+        from: c.planning_place(landing),
+        to: c.planning_place(goal),
+    };
+    c.travel.refused_walks.push(refused);
+    let again = c.plan_trip(goal, true);
+    let walks_from_landing = again.iter().any(|t| {
+        t.steps.windows(2).any(|w| {
+            w[0].exit()
+                .is_some_and(|e| e.at.distance(landing.at) < 30.0)
+                && w[1] == Step::Walk(refused.to)
+        })
+    });
+    assert!(!walks_from_landing, "recalled and walked again: {again:?}");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_journey_to_a_spot_out_at_sea_is_refused_before_setting_off() {
+    // The middle of 0x97ED, a Mosswart Mire-Witch landblock off Marae Lassel, is sea: every portal
+    // and recall was taken toward it and each last walk refused, for twenty minutes.
+    let mut c = Client::offline(crate::testkit::game_data());
+    crate::testkit::stand(&mut c, 0xA9B4_0019, Vec3::new(84.0, 7.1, 94.0));
+    let sea = Place::on_map(Vec2::new(29088.0, 45600.0));
+    assert!(!c.journey_to(sea, 10.0), "set off out to sea");
+    assert!(!c.traveling());
+    // Holtburg's lifestone, beside the character, is not.
+    let me = c.my_position().expect("on its feet").truncate();
+    assert!(!c.is_at_sea(me));
+}
