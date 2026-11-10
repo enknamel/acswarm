@@ -191,6 +191,7 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 | `advance.rs` | experience costs and raise messages |
 | `recalls.rs`, `quest_flags.rs`, `quest_log.rs` | recall spells the journey planner can use; the portal quest flags it may plan through, earned by talking to whoever stamps one; each character's quest log |
 | `shopping.rs` | reads the pack into `ac_vendor`'s snapshot and carries out its act |
+| `sight.rs` | what ACE counts as in view (`View`); what is out of it 35 s set aside (`tick_sight`), since the server sends no delete once it has let go, and asked about once back in view |
 | `aim.rs` | whether a projectile clears walls and hills on the way to its target |
 | `logistics.rs` | the party's mode (hunting or restocking) and money sharing, the same on every session |
 | `buffs.rs`, `hunt.rs` | which buffs a character should wear, from its skills and spells; hunting areas drawn on the map |

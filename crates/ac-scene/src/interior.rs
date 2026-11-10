@@ -115,6 +115,17 @@ pub fn seen_outside(assets: &Assets, cell_id: u32) -> Option<bool> {
     Some(cell.flags & env_cell_flags::SEEN_OUTSIDE != 0)
 }
 
+/// The cells visible from indoor cell `cell_id` (low 16 bits, as the data lists them) and whether it is
+/// seen from outdoors: what ACE shows a player standing in it (ObjectMaint.cs:365-388). `None`: no such cell.
+pub fn cell_view(assets: &Assets, cell_id: u32) -> Option<(Vec<u16>, bool)> {
+    let bytes = assets.cell.read(cell_id).ok()?;
+    let cell = EnvCell::parse(cell_id, &bytes).ok()?;
+    Some((
+        cell.visible_cells,
+        cell.flags & env_cell_flags::SEEN_OUTSIDE != 0,
+    ))
+}
+
 /// Load all interior cells of a landblock (`0x100 .. 0x100 + num_cells`).
 /// `origin` is the landblock's world transform.
 pub fn load_cells(

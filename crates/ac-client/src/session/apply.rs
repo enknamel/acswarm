@@ -24,6 +24,8 @@ impl Client {
         self.tick_loot(now);
         self.tick_store();
         self.tick_appraise();
+        // What the server has let go of out of view, set aside before autoplay reads the world.
+        self.tick_sight(now);
         // What the giver asked last answered, then each quest's state and the Quests section,
         // before autoplay reads them; none sends anything.
         self.watch_quest_answer(now);

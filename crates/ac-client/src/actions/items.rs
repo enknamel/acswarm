@@ -89,6 +89,8 @@ impl Client {
             self.forget_gone(a.guid);
             return;
         }
+        // Set aside out of view and the server still has it (see `sight`): it is back.
+        self.world.bring_back(a.guid);
         self.appraisals.insert(a.guid, a);
     }
 

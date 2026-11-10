@@ -580,6 +580,9 @@ pub struct World {
     /// thrown away, the Holtburg Dungeon's portal was gone for good after
     /// a character who died just inside rose at the lifestone next door.
     left_behind: HashMap<u32, (WorldObject, std::time::Instant)>,
+    /// Out of the character's view long enough for ACE to have let go of it (see [`World::put_out_of_view`]),
+    /// until the server speaks of it again or says it has no such thing. Never dropped on a clock.
+    unseen: HashMap<u32, WorldObject>,
     /// Bumped whenever the set of drawable objects or a position changes.
     pub generation: u64,
     /// The player's character sheet.
@@ -869,12 +872,29 @@ impl World {
         }
     }
 
-    /// Something set aside (see `arrived_in`) is in the world again.
-    fn bring_back(&mut self, guid: u32) {
-        if let Some((o, _)) = self.left_behind.remove(&guid) {
+    /// Something set aside (see `arrived_in`, [`World::put_out_of_view`]) is in the world again.
+    pub fn bring_back(&mut self, guid: u32) {
+        let o = self.left_behind.remove(&guid).map(|(o, _)| o);
+        if let Some(o) = o.or_else(|| self.unseen.remove(&guid)) {
             self.objects.insert(guid, o);
             self.generation += 1;
         }
+    }
+
+    /// Set `guid` aside as out of the character's view: ACE stops tracking it for us and sends no
+    /// delete when it goes (ObjectMaint.cs:38-43). Brought back by the server's next word of it.
+    pub fn put_out_of_view(&mut self, guid: u32) -> bool {
+        let Some(o) = self.objects.remove(&guid) else {
+            return false;
+        };
+        self.unseen.insert(guid, o);
+        self.generation += 1;
+        true
+    }
+
+    /// What is set aside as out of view (see [`World::put_out_of_view`]).
+    pub fn out_of_view(&self) -> impl Iterator<Item = &WorldObject> {
+        self.unseen.values()
     }
 
     /// `guid` is gone, and whether it was in the world at all. What the
@@ -885,6 +905,7 @@ impl World {
     pub fn forget(&mut self, guid: u32) -> bool {
         // The server letting go of something set aside: now it is gone.
         self.left_behind.remove(&guid);
+        self.unseen.remove(&guid);
         // Gone from the corpse or chest that is open, too. Autoplay waits
         // for everything a corpse lists to be described before judging
         // it, and a guid left on the list after its delete would hold the

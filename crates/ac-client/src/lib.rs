@@ -72,6 +72,7 @@ mod refused;
 mod session;
 pub(crate) use session::apply::YOURE_TOO_BUSY;
 pub mod shopping;
+mod sight;
 pub mod tally;
 #[cfg(any(test, feature = "testkit"))]
 pub mod testkit;
@@ -369,6 +370,8 @@ pub struct Client {
     /// corpse of eight things asked one at a time is eight round trips
     /// of standing over it, which is most of what made looting slow.
     pub appraise_inflight: Vec<(u32, Instant)>,
+    /// What the server counts as in view, and how long each thing has been out of it (`sight`).
+    pub(crate) sight: sight::Sight,
     /// Queued items asked about again though appraised (`appraise_again`): sent all the same.
     pub reappraise: std::collections::HashSet<u32>,
     /// An item to put into a world container (chest, hook, storage) once
