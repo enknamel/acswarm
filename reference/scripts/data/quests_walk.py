@@ -1193,12 +1193,34 @@ def main():
               newline="") as f:
         f.write(SOURCES_HEADER)
         write_rows(f, src_out)
+    with open(os.path.join(out_dir, "pickups.csv"), "w", encoding="utf-8", newline="") as f:
+        f.write(PICKUPS_HEADER)
+        write_rows(f, pickup_rows(data))
     by_kind = defaultdict(set)
     for r in rows_out:
         by_kind[r[1]].add(r[0])
     print("quests: %d rows, %d giver placements; %s; out: %s" % (
         len(rows_out), len(givers_out), ", ".join("%s %d" % (k, len(v)) for k, v in sorted(by_kind.items())),
         dict(sorted(reasons.items()))), file=sys.stderr)
+
+
+def pickup_rows(data):
+    """Each item with a pickup limit (Quest 33) whose quest is known: wcid, stamp, wait, solves."""
+    out = []
+    for wcid, stamp in sorted(data.pickup.items()):
+        if stamp in data.quest:
+            delta, solves, _ = data.quest[stamp]
+            out.append([str(wcid), stamp, str(delta), str(solves)])
+    return out
+
+
+PICKUPS_HEADER = """\
+# Items whose pickup the server limits (an item's Quest, PropertyString 33): picked up while its
+# stamp waits, "You have solved this quest too recently!" (Player_Inventory.cs:1249-1262).
+# wcid,stamp,wait,solves: the stamp (lower case, as the quest log keys it), seconds between
+# pickups (0 none), and the most pickups ever (-1 no limit). Regenerate with
+# reference/scripts/data/quests.sh.
+"""
 
 
 QUESTS_HEADER = """\

@@ -314,6 +314,42 @@ impl Source {
 const QUESTS: &str = include_str!("../data/quests.csv");
 const GIVERS: &str = include_str!("../data/quest_givers.csv");
 const SOURCES: &str = include_str!("../data/quest_sources.csv");
+const PICKUPS: &str = include_str!("../data/pickups.csv");
+
+/// An item's pickup limit (its Quest, PropertyString 33): picked up while `stamp` waits, the
+/// server says "You have solved this quest too recently!" (Player_Inventory.cs:1249-1262).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Pickup {
+    /// The quest the limit is kept under, lower case as the quest log keys it.
+    pub stamp: &'static str,
+    /// Seconds between pickups, 0 for none.
+    pub wait: u32,
+    /// The most pickups ever, -1 for no limit.
+    pub solves: i32,
+}
+
+/// The pickup limit of item `wcid`, when the server keeps one.
+pub fn pickup_limit(wcid: u32) -> Option<Pickup> {
+    static BY_WCID: OnceLock<BTreeMap<u32, Pickup>> = OnceLock::new();
+    BY_WCID
+        .get_or_init(|| {
+            PICKUPS
+                .lines()
+                .filter(|l| l.starts_with(|c: char| c.is_ascii_digit()))
+                .filter_map(|l| {
+                    let f: Vec<&'static str> = l.split(',').collect();
+                    let limit = Pickup {
+                        stamp: f.get(1)?,
+                        wait: f.get(2)?.parse().ok()?,
+                        solves: f.get(3)?.parse().ok()?,
+                    };
+                    Some((f.first()?.parse().ok()?, limit))
+                })
+                .collect()
+        })
+        .get(&wcid)
+        .copied()
+}
 
 fn words(s: &str) -> Vec<String> {
     s.split(';')

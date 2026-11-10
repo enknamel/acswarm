@@ -242,6 +242,14 @@ fn an_items_own_pickup_limit_and_a_level_ladder_are_read_into_the_rows() {
 }
 
 #[test]
+fn a_keys_pickup_limit_is_known_by_its_stamp() {
+    // The Ancient Key (keyadja) a Putrid Moarsman drops: one a 20 h wait, kept under NovQuest1.
+    let key = pickup_limit(8511).expect("the Ancient Key");
+    assert_eq!((key.stamp, key.wait, key.solves), ("novquest1", 72_000, -1));
+    assert_eq!(pickup_limit(1), None);
+}
+
+#[test]
 fn a_chests_guardians_spawn_nowhere() {
     // Arwic's Legendary Chests (0xC6A9) hold a generator put in them (where_Create Contain): the
     // creatures it lists come only for whoever opens one, so Arwic is no Blood Shreth spawn.
