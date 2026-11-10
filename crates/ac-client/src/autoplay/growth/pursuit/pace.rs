@@ -27,8 +27,13 @@ pub(crate) struct Pace {
     /// Left for it to unload and come back to what stands at load (a round: `round` of
     /// [`ground_pace`]).
     pub(crate) rotate: f32,
-    /// Each dropper the better of the two: the ground's rank.
-    pub(crate) best: f32,
+}
+
+impl Pace {
+    /// The sooner of camping and rotating: a visit does one of them, the ground's rank.
+    pub(crate) fn soonest(&self) -> f32 {
+        self.camp.min(self.rotate)
+    }
 }
 
 /// One dropper on a ground: its chance a kill, seconds a kill, and how fast it comes there.
@@ -39,32 +44,41 @@ pub(crate) struct Dropper {
     pub(crate) rate: SpawnRate,
 }
 
-/// A dropper's spawns a second camped: its generators' rate while all they make is killed, less
-/// what killing the others holding its slots leaves no time for (each a kill like its own).
-fn camped(d: &Dropper) -> f32 {
-    let clearing = d.rate.others / 3600.0 * d.kill;
-    d.rate.per_hour / 3600.0 / clearing.max(1.0)
+/// A dropper camped: its spawns a second while all its generators make is killed, and the
+/// seconds each costs, the others killed to free its slot counted (each a kill like its own).
+fn camped(d: &Dropper) -> (f32, f32) {
+    let per_sec = d.rate.per_hour / 3600.0;
+    if per_sec <= 0.0 {
+        return (0.0, d.kill);
+    }
+    (per_sec, d.kill * (1.0 + d.rate.others / d.rate.per_hour))
 }
 
 /// A dropper's spawns a second come to after each unload, `round` seconds away a time: its load,
-/// killed, every round.
-fn rotated(d: &Dropper, round: f32) -> f32 {
+/// killed, every round; and the seconds each costs.
+fn rotated(d: &Dropper, round: f32) -> (f32, f32) {
     if d.rate.load <= 0.0 {
-        return 0.0;
+        return (0.0, d.kill);
     }
-    d.rate.load / (d.rate.load * d.kill + round)
+    (d.rate.load / (d.rate.load * d.kill + round), d.kill)
 }
 
-/// Items a second from `droppers` coming at `spawn` a second each: one kill at a time, so the
-/// time is shared, best chance a second first.
-fn items_per_sec(droppers: &[Dropper], spawn: impl Fn(&Dropper) -> f32) -> f32 {
-    let mut by_worth = droppers.to_vec();
-    by_worth.sort_by(|a, b| (b.chance / b.kill).total_cmp(&(a.chance / a.kill)));
+/// Items a second from `droppers`, each coming at `spawn`'s rate a second and costing its
+/// seconds: one kill at a time, so the time is shared, best chance a second first.
+fn items_per_sec(droppers: &[Dropper], spawn: impl Fn(&Dropper) -> (f32, f32)) -> f32 {
+    let mut by_worth: Vec<(f32, f32, f32)> = droppers
+        .iter()
+        .map(|d| {
+            let (rate, kill) = spawn(d);
+            (d.chance, rate, kill)
+        })
+        .collect();
+    by_worth.sort_by(|a, b| (b.0 / b.2).total_cmp(&(a.0 / a.2)));
     let (mut budget, mut items) = (1.0_f32, 0.0_f32);
-    for d in &by_worth {
-        let r = spawn(d).min(budget / d.kill);
-        budget -= r * d.kill;
-        items += d.chance * r;
+    for (chance, rate, kill) in by_worth {
+        let r = rate.min(budget / kill);
+        budget -= r * kill;
+        items += chance * r;
         if budget <= 0.0 {
             break;
         }
@@ -82,14 +96,11 @@ pub(crate) fn ground_pace(droppers: &[Dropper], round: f32) -> Option<Pace> {
             f32::INFINITY
         }
     };
-    let camp = items_per_sec(droppers, camped);
-    let rotate = items_per_sec(droppers, |d| rotated(d, round));
-    let best = items_per_sec(droppers, |d| camped(d).max(rotated(d, round)));
-    (best > 0.0).then(|| Pace {
-        camp: secs(camp),
-        rotate: secs(rotate),
-        best: secs(best),
-    })
+    let pace = Pace {
+        camp: secs(items_per_sec(droppers, camped)),
+        rotate: secs(items_per_sec(droppers, |d| rotated(d, round))),
+    };
+    pace.soonest().is_finite().then_some(pace)
 }
 
 /// A pursued hunt's ground: the droppers on it this character can kill, and its pace.
@@ -111,7 +122,7 @@ impl Ground {
     /// like it whenever camping is slower: the walk to the next is the round, no unload waited out.
     pub(crate) fn swept_secs(&self, journey: f32) -> f32 {
         let swept = ground_pace(&self.droppers, journey.max(1.0));
-        journey + swept.map_or(f32::INFINITY, |p| p.camp.min(p.rotate))
+        journey + swept.map_or(f32::INFINITY, |p| p.soonest())
     }
 }
 
@@ -225,7 +236,7 @@ mod tests {
         // an hour than are killed.
         let p = ground_pace(&[dropper(0.2, 10.5, 9.0, 900.0)], ROTATE_SECS).unwrap();
         assert!((p.camp - 52.5).abs() < 0.1, "{p:?}");
-        assert_eq!(p.best, p.camp);
+        assert_eq!(p.soonest(), p.camp);
     }
 
     #[test]
@@ -233,7 +244,7 @@ mod tests {
         // A camp at 0.2 at load and none an hour: never camped, and rotated slowly.
         let p = ground_pace(&[dropper(0.8, 20.0, 0.2, 0.0)], ROTATE_SECS).unwrap();
         assert!(p.camp.is_infinite());
-        assert!(p.rotate > 2000.0 && p.rotate == p.best, "{p:?}");
+        assert!(p.rotate > 2000.0 && p.rotate == p.soonest(), "{p:?}");
         assert_eq!(
             ground_pace(&[dropper(0.8, 20.0, 0.0, 0.0)], ROTATE_SECS),
             None
@@ -257,10 +268,34 @@ mod tests {
 
     #[test]
     fn a_camp_cleared_slower_than_its_others_come_comes_slower() {
-        // 3 an hour while 840 others are killed at 10 s each: 2.3 times the time there is.
+        // 3 an hour while 840 others are killed at 10 s each: 281 kills a spawn, 2810 s an item.
         let mut d = dropper(1.0, 10.0, 0.0, 3.0);
         d.rate.others = 840.0;
         let p = ground_pace(&[d], ROTATE_SECS).unwrap();
-        assert!((p.camp - 2800.0).abs() < 1.0, "{p:?}");
+        assert!((p.camp - 2810.0).abs() < 1.0, "{p:?}");
+    }
+
+    #[test]
+    fn the_time_clearing_takes_is_not_spent_on_the_droppers_too() {
+        // 270 an hour at 10 s a kill takes three quarters of the time; as many others cleared
+        // take a kill each too, so only one a 20 s comes: 40 s an item, not 26.7.
+        let mut d = dropper(0.5, 10.0, 0.0, 270.0);
+        let alone = ground_pace(&[d], ROTATE_SECS).unwrap();
+        d.rate.others = 270.0;
+        let cleared = ground_pace(&[d], ROTATE_SECS).unwrap();
+        assert!((alone.camp - 26.67).abs() < 0.1, "{alone:?}");
+        assert!((cleared.camp - 40.0).abs() < 0.1, "{cleared:?}");
+    }
+
+    #[test]
+    fn a_ground_ranks_by_the_one_way_a_visit_takes_it() {
+        // One dropper only camped (none at load), another only rotated (none an hour): a visit
+        // does one, so the ground is no sooner than the better of the two alone.
+        let camped = dropper(0.5, 10.0, 0.0, 36.0);
+        let rotated = dropper(0.5, 10.0, 4.0, 0.0);
+        let p = ground_pace(&[camped, rotated], ROTATE_SECS).unwrap();
+        let a = ground_pace(&[camped], ROTATE_SECS).unwrap().soonest();
+        let b = ground_pace(&[rotated], ROTATE_SECS).unwrap().soonest();
+        assert_eq!(p.soonest(), a.min(b), "{p:?}");
     }
 }

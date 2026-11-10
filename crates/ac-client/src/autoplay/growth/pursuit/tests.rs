@@ -702,7 +702,7 @@ fn a_kill_task_is_hunted_on_the_ground_reached_soonest_not_the_one_with_most_spa
         .clone()
         .into_iter()
         .filter_map(|(lb, at)| {
-            let there = c.pursued_pace(lb)?.pace.best;
+            let there = c.pursued_pace(lb)?.pace.soonest();
             c.journey_plan(at, &quests).map(|t| (t.seconds + there, lb))
         })
         .min_by(|a, b| a.0.total_cmp(&b.0))
@@ -2769,7 +2769,7 @@ fn a_near_dungeon_of_low_chance_sure_spawns_beats_a_far_high_chance_ground() {
     let grounds = c.autoplay.growth.pursuit_grounds.clone();
     let mut totals: Vec<(f32, u32)> = Vec::new();
     for (lb, at) in grounds {
-        let there = c.pursued_pace(lb).expect("a pace").pace.best;
+        let there = c.pursued_pace(lb).expect("a pace").pace.soonest();
         if let Some(t) = c.journey_plan(at, &quests) {
             println!(
                 "{lb:04X}: {:.0} s there + {:.0} s on the road",

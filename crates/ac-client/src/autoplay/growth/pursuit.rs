@@ -685,7 +685,7 @@ impl Ask<'_> {
             .into_iter()
             .filter_map(|(g, place, ds)| Some((g, place, pace::Ground::of(ds)?)))
             .collect();
-        paced.sort_by(|a, b| a.2.pace.best.total_cmp(&b.2.pace.best));
+        paced.sort_by(|a, b| a.2.pace.soonest().total_cmp(&b.2.pace.soonest()));
         // A hunt whose best ground comes only by rotating holds them all to sweep, nearest first.
         let rotating = paced
             .first()
@@ -1120,7 +1120,7 @@ impl Client {
                 let quests = self.travel.quests_done.clone();
                 let mut secs: Vec<(f32, (u32, Place))> = Vec::new();
                 for g in grounds.drain(..) {
-                    let there = self.pursued_pace(g.0).map_or(0.0, |p| p.pace.best);
+                    let there = self.pursued_pace(g.0).map_or(0.0, |p| p.pace.soonest());
                     let t = self
                         .journey_plan(g.1, &quests)
                         .map_or(f32::MAX, |t| t.seconds + there);
