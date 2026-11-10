@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 
 use ac_world::Place;
 
+use super::pace::{Missed, Pace, MISSED_FOR};
 use super::HUNT_GROUNDS;
 use crate::autoplay::fight::melee::GIVE_UP_FOR;
 use crate::autoplay::Doing;
@@ -56,11 +57,28 @@ impl Client {
 
     /// Whether `lb` is a pursued ground cleared while hunted: camping beats rotating there, and
     /// other creatures hold its droppers' generator slots (a linked placement's are its own).
-    pub(super) fn is_cleared_ground(&self, lb: u32) -> bool {
-        self.pursued_pace(lb).is_some_and(|g| {
-            let held = g.droppers.iter().any(|d| d.rate.others > 0.0);
-            held && g.pace.camp <= g.pace.rotate
-        })
+    pub(super) fn is_cleared_ground(&self, lb: u32, now: Instant) -> bool {
+        let held = self
+            .pursued_pace(lb)
+            .is_some_and(|g| g.droppers.iter().any(|d| d.rate.others > 0.0));
+        held && self
+            .pace_now(lb, now)
+            .is_some_and(|p| p.camp.is_finite() && p.camp <= p.rotate)
+    }
+
+    /// What the pursued ground `lb` came to nothing at within [`MISSED_FOR`].
+    pub(super) fn ground_missed(&self, lb: u32, now: Instant) -> Missed {
+        let st = &self.autoplay.growth;
+        Missed {
+            stay: st.missed_stay.within(&lb, now, MISSED_FOR),
+            back: st.missed_back.within(&lb, now, MISSED_FOR),
+        }
+    }
+
+    /// The pace of the pursued ground `lb` as things stand: its misses counted.
+    pub(super) fn pace_now(&self, lb: u32, now: Instant) -> Option<Pace> {
+        let missed = self.ground_missed(lb, now);
+        self.pursued_pace(lb).map(|g| g.pace.missed(missed))
     }
 
     /// Whether the character hunts the pursued ground it stands on: not on a town run, nor on
@@ -98,9 +116,18 @@ impl Client {
         let cell = self.player.as_ref()?.cell;
         let here = cell >> 16;
         // Met anywhere, on a ground or between two: the fight rule only sees its own radius.
-        if self.is_rotating_hunt() || grounds.iter().any(|(lb, _)| *lb == here) {
+        let on_ground = grounds.iter().any(|(lb, _)| *lb == here);
+        if self.is_rotating_hunt() || on_ground {
             let sought = self.autoplay.growth.pursuit_sought.clone();
             if let Some(answer) = self.chase_in_sight(title, creature, &sought, now) {
+                if on_ground {
+                    // It comes here after all: no miss of this ground stands.
+                    let st = &mut self.autoplay.growth;
+                    st.found_empty.forget(&here);
+                    st.missed_stay.forget(&here);
+                    st.missed_back.forget(&here);
+                    st.staying = None;
+                }
                 return Some(answer);
             }
         }
@@ -178,11 +205,23 @@ impl Client {
                 return Some(answer);
             }
         }
-        let st = &self.autoplay.growth;
-        let staying = st.staying.filter(|(lb, until)| *lb == here && now < *until);
-        let choice = match staying {
-            Some(_) => Absent::Stay,
-            None => self.choose_when_absent(here, place, now),
+        let st = &mut self.autoplay.growth;
+        let choice = match st.staying.filter(|(lb, _)| *lb == here) {
+            Some((_, until)) if now < until => Absent::Stay,
+            // Waited out with nothing come: camping it counts as never coming a while.
+            Some(_) => {
+                st.missed_stay.expire(now, MISSED_FOR);
+                st.missed_stay.mark(here, now);
+                self.choose_when_absent(here, place, now)
+            }
+            // Absent again on coming back: its load counts as none a while.
+            None => {
+                if st.found_empty.within(&here, now, MISSED_FOR) {
+                    st.missed_back.expire(now, MISSED_FOR);
+                    st.missed_back.mark(here, now);
+                }
+                self.choose_when_absent(here, place, now)
+            }
         };
         match choice {
             Absent::Stay => {
@@ -217,8 +256,11 @@ impl Client {
     /// absent: waiting, its unload waited out of reach, or the best of the nearest few others
     /// by journey ([`super::pace::Ground::swept_secs`]). A wait is held a while.
     fn choose_when_absent(&mut self, here: u32, place: Place, now: Instant) -> Absent {
+        let st = &mut self.autoplay.growth;
+        st.found_empty.expire(now, MISSED_FOR);
+        st.found_empty.mark(here, now);
         // No pace known: hunted till the quest has what it asks.
-        let Some(ground) = self.pursued_pace(here).cloned() else {
+        let Some(pace) = self.pace_now(here, now) else {
             self.autoplay.growth.staying = Some((here, now + STAY_MOST));
             return Absent::Stay;
         };
@@ -243,11 +285,12 @@ impl Client {
             let Some(t) = self.journey_plan(at, &quests) else {
                 continue;
             };
+            let missed = self.ground_missed(lb, now);
             if let Some(g) = self.pursued_pace(lb) {
-                move_secs = move_secs.min(g.swept_secs(t.seconds));
+                move_secs = move_secs.min(g.swept_secs(t.seconds, missed));
             }
         }
-        let (stay, rotate) = (ground.pace.camp, ground.pace.rotate);
+        let (stay, rotate) = (pace.camp, pace.rotate);
         let spot = if rotate < stay.min(move_secs) {
             self.out_of_reach(here, place)
         } else {

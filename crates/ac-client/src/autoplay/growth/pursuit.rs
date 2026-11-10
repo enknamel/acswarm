@@ -1127,7 +1127,7 @@ impl Client {
                 }
                 let camped = grounds.iter().any(|(lb, _)| *lb == here);
                 // Cleared where camping beats leaving and others hold its slots: they make way.
-                let clears = camped && self.is_cleared_ground(here);
+                let clears = camped && self.is_cleared_ground(here, now);
                 self.autoplay.growth.clearing = clears.then_some(here);
                 if camped {
                     // There: the road's plan is done, and the gem that was the way is bought no more.
@@ -1159,7 +1159,7 @@ impl Client {
                 self.autoplay.growth.skip.expire(now, SKIP_GROUND_FOR);
                 grounds.retain(|(lb, _)| self.autoplay.growth.skip.since(lb).is_none());
                 for g in grounds.drain(..) {
-                    let there = self.pursued_pace(g.0).map_or(0.0, |p| p.pace.soonest());
+                    let there = self.pace_now(g.0, now).map_or(0.0, |p| p.soonest());
                     if there >= best {
                         secs.push((there, g));
                         continue;

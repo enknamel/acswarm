@@ -34,7 +34,26 @@ impl Pace {
     pub(crate) fn soonest(&self) -> f32 {
         self.camp.min(self.rotate)
     }
+
+    /// With what came to nothing there lately counted as never coming.
+    pub(crate) fn missed(self, m: Missed) -> Pace {
+        Pace {
+            camp: if m.stay { f32::INFINITY } else { self.camp },
+            rotate: if m.back { f32::INFINITY } else { self.rotate },
+        }
+    }
 }
+
+/// What a ground came to nothing at lately: its creature never came while waited for (`stay`),
+/// or was absent again when come back to (`back`, its load counted as none).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct Missed {
+    pub(crate) stay: bool,
+    pub(crate) back: bool,
+}
+
+/// How long a ground's miss stands: the design's hour (guess).
+pub(crate) const MISSED_FOR: std::time::Duration = std::time::Duration::from_secs(3600);
 
 /// One dropper on a ground: its chance a kill, seconds a kill, and how fast it comes there.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -120,9 +139,9 @@ impl Ground {
 
     /// Seconds to the item come to fresh at the end of a `journey`, swept between it and grounds
     /// like it whenever camping is slower: the walk to the next is the round, no unload waited out.
-    pub(crate) fn swept_secs(&self, journey: f32) -> f32 {
+    pub(crate) fn swept_secs(&self, journey: f32, missed: Missed) -> f32 {
         let swept = ground_pace(&self.droppers, journey.max(1.0));
-        journey + swept.map_or(f32::INFINITY, |p| p.soonest())
+        journey + swept.map_or(f32::INFINITY, |p| p.missed(missed).soonest())
     }
 }
 
@@ -247,7 +266,8 @@ mod tests {
         );
         // Swept with the next a minute off, it comes sooner than waiting out an unload here.
         let g = Ground::of(vec![dropper(0.8, 20.0, 0.2, 0.0)]).unwrap();
-        assert!(g.swept_secs(60.0) < p.rotate, "{}", g.swept_secs(60.0));
+        let swept = g.swept_secs(60.0, Missed::default());
+        assert!(swept < p.rotate, "{swept}");
     }
 
     #[test]

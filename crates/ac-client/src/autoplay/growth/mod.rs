@@ -260,6 +260,12 @@ pub struct State {
     pub(crate) staying: Option<(u32, Instant)>,
     /// The pursued ground left to unload, and the spot out of its reach it is waited out at.
     pub(crate) rotating: Option<(u32, ac_world::Place)>,
+    /// Pursued grounds found with their creature absent, and when.
+    pub(crate) found_empty: Recent<u32>,
+    /// Pursued grounds waited at in vain, and when: camped as if it never came (`pace::Missed`).
+    pub(crate) missed_stay: Recent<u32>,
+    /// Pursued grounds absent again when come back to, and when: their load counted as none.
+    pub(crate) missed_back: Recent<u32>,
     /// The pursued ground camped on: everything on it is fought (`Client::is_clearing_ground`).
     pub(crate) clearing: Option<u32>,
     /// Where and when a pursued hunt's creature fell: its body is stood by till emptied.

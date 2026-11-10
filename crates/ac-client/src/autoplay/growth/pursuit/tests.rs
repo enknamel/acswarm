@@ -3038,3 +3038,54 @@ fn a_ground_set_off_for_past_the_soonest_few_has_its_creatures_sought() {
         "{mine:?} not in {sought:?}"
     );
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_ground_waited_at_in_vain_is_not_waited_at_again() {
+    // A shore with no spawn spot known was waited at, nothing came, and the same figures chose
+    // the same wait again for ever: a wait that ends empty counts camping there as never coming.
+    let now = std::time::Instant::now();
+    let (mut c, here) = at_a_mire_witch_ground(now);
+    assert_eq!(c.grow_pursuit(now), Some(true), "looked over");
+    let later = now + std::time::Duration::from_secs(16);
+    assert_eq!(c.grow_pursuit(later), Some(true), "waited at");
+    let (_, until) = c.autoplay.growth.staying.expect("a wait");
+    let after = until + std::time::Duration::from_secs(1);
+    c.grow_pursuit(after);
+    assert!(c.autoplay.growth.missed_stay.since(&here).is_some());
+    assert!(
+        c.autoplay.growth.staying.is_none_or(|(lb, _)| lb != here),
+        "waited at again"
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_ground_found_empty_again_on_return_is_not_rotated_to_again() {
+    // Left to unload and come back to, its one dropper absent again (another player keeping it
+    // loaded): its load counts as none for an hour, so it is not left to unload once more.
+    let now = std::time::Instant::now();
+    let (mut c, here) = at_a_mire_witch_ground(now);
+    let grounds = c.autoplay.growth.pursuit_grounds.clone();
+    for (lb, _) in grounds.iter().filter(|g| g.0 != here) {
+        c.autoplay.growth.swept.mark(*lb, now);
+    }
+    let i = grounds.iter().position(|g| g.0 == here).unwrap();
+    let at_load = pace::Dropper {
+        chance: 1.0,
+        kill: 10.0,
+        rate: ac_world::quests::SpawnRate {
+            load: 1.0,
+            per_hour: 0.0,
+            others: 0.0,
+        },
+    };
+    c.autoplay.growth.pursuit_paces[i] = pace::Ground::of(vec![at_load]).unwrap();
+    let before = now - std::time::Duration::from_secs(8 * 60);
+    c.autoplay.growth.found_empty.mark(here, before);
+    assert_eq!(c.grow_pursuit(now), Some(true), "looked over");
+    let later = now + std::time::Duration::from_secs(16);
+    c.grow_pursuit(later);
+    assert!(c.autoplay.growth.missed_back.since(&here).is_some());
+    assert_eq!(c.autoplay.growth.rotating, None);
+}
