@@ -164,7 +164,17 @@ impl Client {
         // walked past, at its ground too (a_quest_hunt_walks_past_all_but_its_creature).
         // And a dropper met on the road whose kill saves more than it costs (`pursuit_road`).
         let sought = &self.autoplay.growth.pursuit_sought;
-        let it = self.is_pursued_hunt() && self.is_sought(o.weenie_class_id);
+        // On the road a dropper with a pace only when worth the plan (`pursuit_road`), one with
+        // none as sought (the Lich Overseer); at the ground all it holds.
+        let st = &self.autoplay.growth;
+        let wcid = o.weenie_class_id;
+        let paced = st.pursuit_droppers.iter().any(|d| d.0 == wcid);
+        let worth = if self.on_its_way() && paced {
+            st.pursuit_road.contains(&wcid)
+        } else {
+            self.is_sought(wcid)
+        };
+        let it = self.is_pursued_hunt() && worth;
         let not_it = self.is_pursuing()
             && (!self.is_pursued_hunt()
                 || (!sought.is_empty() && !self.is_sought(o.weenie_class_id)));

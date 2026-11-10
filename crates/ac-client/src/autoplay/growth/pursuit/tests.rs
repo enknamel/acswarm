@@ -2931,6 +2931,36 @@ fn a_sought_dropper_seen_from_the_road_is_gone_to_only_when_worth_the_plan() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
+fn a_held_grounds_dropper_in_reach_on_the_road_is_fought_only_when_worth_the_plan() {
+    // The road rule only added fights: a held ground's 2% dropper met in reach on the road was
+    // fought whatever the plan, as one of the sought.
+    let now = std::time::Instant::now();
+    let mut c = blargerton_after_the_key(now);
+    assert_eq!(c.grow_pursuit(now), Some(true), "set off");
+    assert!(c.on_its_way());
+    let st = &c.autoplay.growth;
+    let &(wcid, chance, secs) = st
+        .pursuit_droppers
+        .iter()
+        .filter(|d| st.pursuit_sought.contains(&d.0))
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .expect("a sought dropper");
+    let mut it = crate::testkit::creature(0x5000_0906, "Sought Dropper");
+    it.weenie_class_id = wcid;
+    let cfg = c.autoplay.config.fight.clone();
+    c.autoplay.growth.plan_secs = Some(secs / chance * 0.5);
+    c.keep_road_droppers();
+    assert!(
+        c.passing_by(&it, &cfg),
+        "fought on the road, not worth the plan"
+    );
+    c.autoplay.growth.plan_secs = Some(secs / chance * 2.0);
+    c.keep_road_droppers();
+    assert!(!c.passing_by(&it, &cfg), "walked past, worth the plan");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn the_road_plan_ends_at_the_ground_and_with_the_hunt() {
     // The plan's seconds held after arriving, and after the hunt became another, and the road
     // rule went on fighting droppers for a journey that was over.
