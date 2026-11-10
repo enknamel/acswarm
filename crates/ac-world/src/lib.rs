@@ -23,6 +23,7 @@ pub mod quest_chain;
 pub mod quests;
 pub mod recalls;
 pub mod ring_casters;
+pub mod summons;
 pub mod traps;
 /// What takes up one of the character's pack slots.
 ///
