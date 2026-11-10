@@ -571,23 +571,24 @@ impl Client {
         }
     }
 
-    /// The place at `at` as a walk names it by its block: indoors, the block stood in when `at`
-    /// lies within its cells' bounds (a dungeon's run past its block's square), else the one under it.
+    /// The place at `at` as a walk names it: indoors, the room of the block stood in that holds it,
+    /// else that block when `at` lies within its cells' bounds (a dungeon's run past its block's
+    /// square), else the block under it. A dungeon goal named by block alone reads as outdoors to
+    /// the trip, which walked out the Surface Exit and back (a_spot_in_the_dungeon_is_named_by_its_room).
     pub fn place_at(&self, at: Vec3) -> Place {
         let inside = self
             .player
             .as_ref()
             .filter(|p| p.is_indoors())
             .map(|p| p.landblock());
-        let mine = inside.filter(|&b| {
-            let bounds = self
-                .assets
-                .block_collision(b)
-                .ok()
-                .and_then(|bc| bc.world.bounds());
-            bounds.is_some_and(|(lo, hi)| {
-                (lo.x..=hi.x).contains(&at.x) && (lo.y..=hi.y).contains(&at.y)
-            })
+        let mine = inside.and_then(|b| {
+            let bc = self.assets.block_collision(b).ok()?;
+            if let Some(room) = bc.world.cell_at(at + Vec3::Z * 0.5) {
+                return Some(room);
+            }
+            let (lo, hi) = bc.world.bounds()?;
+            let within = (lo.x..=hi.x).contains(&at.x) && (lo.y..=hi.y).contains(&at.y);
+            within.then_some(b)
         });
         Place {
             at,

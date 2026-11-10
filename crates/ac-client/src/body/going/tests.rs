@@ -509,3 +509,21 @@ fn a_crossing_put_down_over_a_plate_flies_on_to_its_landing() {
     }
     panic!("no crossing over a Nullify plate was put down");
 }
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_spot_in_the_dungeon_is_named_by_its_room() {
+    // Blargerton landed in the Ancient Empyrean Grotto and saw an Olthoi Legionary by the hunt
+    // spot; named by its block alone, the walk to it went out the Surface Exit and back for ever.
+    let mut c = testkit::standing_in_the_field(63, 0x027C_01B0, Vec3::new(40.0, 0.0, 0.105));
+    c.world.player_guid = Some(ME);
+    let legionary = c.place_at(Vec3::new(606.9, 23_635.9, -6.0));
+    assert!(legionary.is_indoors(), "{:#010x}", legionary.cell);
+    assert_eq!(legionary.cell & 0xFFFF_0000, 0x027C_0000);
+    let trip = c.plan_trip(legionary, true).expect("a way");
+    let portals = trip
+        .steps
+        .iter()
+        .filter(|s| matches!(s, ac_world::trip::Step::Portal { .. }));
+    assert_eq!(portals.count(), 0, "{trip:?}");
+}
