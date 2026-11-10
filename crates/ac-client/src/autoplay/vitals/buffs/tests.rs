@@ -452,7 +452,10 @@ fn a_fight_at_low_mana_puts_no_bane_back_and_leaves_the_heal_its_mana() {
     c.world.stats.vitals[2].current = max * 3 / 10;
     c.autoplay.last_hit_us = Some(Instant::now());
     assert!(c.in_a_fight(), "the test needs a fight");
-    assert!(c.has_urgent_buff_due(now), "the test needs a bane due");
+    assert!(
+        !c.has_urgent_buff_due(now),
+        "a weapon waits on a bane held back"
+    );
     let sent = c.session.actions_sent();
     assert!(!c.autoplay_buff(now, true), "a bane went up in the fight");
     assert_eq!(c.session.actions_sent(), sent, "something went out");

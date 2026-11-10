@@ -141,10 +141,6 @@ impl Client {
         // difference between a fight and a stalemate.
         let table = self.assets.spell_table().ok();
         let ready = self.ready_spells(cfg);
-        // No cast of the fight starts with a bar under its slider: its restore goes first.
-        if kill.is_some() && self.hold_for_vitals(now) {
-            return true;
-        }
         // Two or more swinging at us underground: to a spot the attack still gets out of first.
         if let Some(spell) = kill.as_ref().map(|k| k.attack) {
             let how = crate::dodge::How::Spell(spell);
@@ -158,6 +154,11 @@ impl Client {
             {
                 return true;
             }
+        }
+        // No cast of the fight starts with a bar under its slider; the stand and the back-off
+        // still go (a_held_cast_still_takes_its_stand).
+        if kill.is_some() && self.hold_for_vitals(now) {
+            return true;
         }
         // Its vulnerability first, then its attack for the rest; each cast from within its own
         // reach, or the server turns it down out of range (0x550) and it goes out again unmoved.

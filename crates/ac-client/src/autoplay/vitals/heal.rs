@@ -363,16 +363,14 @@ impl Client {
         // Stamina first: it is what mana is made from, and Revitalize is
         // cheap next to what a transfer of a full bar returns.
         if stamina < cfg.stamina_below {
-            if let Some(spell) = self.best_boost(vital::STAMINA) {
-                if matches!(self.can_cast_well(spell), crate::magic::CastCheck::Ok) {
-                    self.cast_paced(spell, now);
-                    self.autoplay.last_vital = Some(now);
-                    self.autoplay.say(
-                        Doing::Buffing,
-                        format!("restoring stamina at {:.0}%", stamina * 100.0),
-                    );
-                    return true;
-                }
+            let boost = self
+                .best_boost(vital::STAMINA)
+                .filter(|s| matches!(self.can_cast_well(*s), crate::magic::CastCheck::Ok));
+            if boost.is_some_and(|s| self.cast_paced(s, now)) {
+                self.autoplay.last_vital = Some(now);
+                let said = format!("restoring stamina at {:.0}%", stamina * 100.0);
+                self.autoplay.say(Doing::Buffing, said);
+                return true;
             }
         }
         if mana < cfg.mana_below {

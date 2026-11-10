@@ -78,6 +78,22 @@ impl Client {
         self.vital_max_of(2) as f32 * keep
     }
 
+    /// Why buff `spell` would not start now, if it would not: a bar under its slider (its restore
+    /// goes first), or the mana [`Self::buff_reserve`] keeps back for healing and fighting.
+    pub(crate) fn buff_held_back(&self, spell: u32, whole: bool) -> Option<String> {
+        if let Some(bar) = self.bar_under_slider() {
+            return Some(format!("{bar} under its slider"));
+        }
+        let cost = self
+            .assets
+            .spell_table()
+            .ok()
+            .and_then(|t| t.get(spell).map(|s| self.mana_cost(s)))
+            .unwrap_or(0) as f32;
+        let have = self.world.stats.vitals[2].current as f32;
+        (have - cost < self.buff_reserve(whole)).then(|| "mana kept back".to_string())
+    }
+
     /// Seconds left on the enchantment of a spell family, if any is up.
     fn buff_left(&self, spell: u32) -> Option<f32> {
         let table = self.assets.spell_table().ok();
@@ -321,12 +337,13 @@ impl Client {
         )
     }
 
-    /// Whether the urgent pass would put a buff back now, by its own `buff_within`: a
-    /// weapon put down for one waits on nothing that pass would leave down.
+    /// Whether the urgent pass would put a buff back now, by its own `buff_within` and
+    /// [`Self::buff_held_back`]: a weapon put down for one waits on nothing that pass would leave down.
     pub(crate) fn has_urgent_buff_due(&self, now: Instant) -> bool {
         let wants = self.auto_buffs();
         let within = self.queue_window(self.buff_within_now(true), &wants, now);
-        self.due_buff_among(&wants, within, now).is_some()
+        let due = self.due_buff_among(&wants, within, now);
+        due.is_some_and(|(spell, ..)| self.buff_held_back(spell, self.in_a_fight()).is_none())
     }
 
     /// Whether an item is on its way to the character: a fetch's act or a giver's answer is
@@ -492,24 +509,9 @@ impl Client {
             return false;
         }
         self.stamp_buff_look(urgent, now);
-        // No buff starts with a bar under its slider (`bar_under_slider`): its restore goes first.
-        if let Some(bar) = self.bar_under_slider() {
-            let said = format!("holding off {name}: {bar} under its slider");
-            self.autoplay.note(said, now);
-            return false;
-        }
-        // Mana is kept back for healing and fighting (`buff_reserve`).
-        let reserve = self.buff_reserve(topping_up || self.in_a_fight());
-        let cost = self
-            .assets
-            .spell_table()
-            .ok()
-            .and_then(|t| t.get(spell).map(|s| self.mana_cost(s)))
-            .unwrap_or(0) as f32;
-        let have = self.world.stats.vitals[2].current as f32;
-        if have - cost < reserve {
+        if let Some(why) = self.buff_held_back(spell, topping_up || self.in_a_fight()) {
             self.autoplay
-                .note(format!("holding off {name} to keep mana back"), now);
+                .note(format!("holding off {name}: {why}"), now);
             return false;
         }
         // A wand is needed to cast. Out of a fight the arming code sorts

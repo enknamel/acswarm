@@ -745,18 +745,9 @@ impl Client {
                 if no_caster && !carries_one {
                     return true;
                 }
-                // Or the buff rule is holding the mana back (its own
-                // gate, mirrored): the walk is not worth waiting on a
-                // mana bar for.
-                let reserve = self.buff_reserve(true);
-                let cost = self
-                    .assets
-                    .spell_table()
-                    .ok()
-                    .and_then(|t| t.get(spell).map(|s| self.mana_cost(s)))
-                    .unwrap_or(0) as f32;
-                let have = self.world.stats.vitals[2].current as f32;
-                have - cost < reserve
+                // Or the buff rule is holding it back (its own gate):
+                // the walk is not worth waiting on a bar for.
+                self.buff_held_back(spell, true).is_some()
             }
         }
     }

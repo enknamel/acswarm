@@ -109,16 +109,17 @@ impl Client {
                         self.autoplay.debuffed.push(guid);
                         return false;
                     }
+                    // No debuff starts with a bar under its slider: its restore goes first.
+                    if let Some(bar) = self.bar_under_slider() {
+                        let said = format!("holding the debuffs on {name}: {bar} under its slider");
+                        self.autoplay.note(said, now);
+                        return false;
+                    }
                     for spell_name in &team.debuffs {
                         let Some(spell) = self.spell_by_name(spell_name) else {
                             continue;
                         };
                         if !matches!(self.can_cast_well(spell), crate::magic::CastCheck::Ok) {
-                            continue;
-                        }
-                        if let Some(bar) = self.bar_under_slider() {
-                            let said = format!("holding {spell_name}: {bar} under its slider");
-                            self.autoplay.note(said, now);
                             continue;
                         }
                         self.select(Some(guid));
