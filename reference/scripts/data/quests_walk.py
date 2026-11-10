@@ -338,14 +338,16 @@ class Gen:
         roll = rng.uniform(0.0, self.total(now))
         tot, last = 0.0, 0.0
         for s in self.slots:
-            free = not self.maxed(s) and now > s.avail and s.wcid != PLACEHOLDER
+            # A placeholder's band counts toward the thresholds after it; it is only never made
+            # (GetAdjustedProbability, :238-276, does not skip it; SelectProfiles :127 does).
+            free = not self.maxed(s) and now > s.avail
             if s.prob != -1:
                 if free:
                     if last > s.prob:
                         last = 0.0
                     tot += s.prob - last
                 last = s.prob
-            if not free:
+            if not free or s.wcid == PLACEHOLDER:
                 continue
             if s.prob == -1 or roll < tot:
                 out.extend([s] * self.count(s))
