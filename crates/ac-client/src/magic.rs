@@ -29,6 +29,18 @@ pub const CHORIZITE: u32 = 111;
 /// Speed a player's windup and cast gestures play at, from retail pcaps (Player_Magic.cs:603).
 pub const CAST_SPEED: f32 = 2.0;
 
+/// Seconds from a spell going off to UseDone, the hands free for the next (Player_Magic.cs:981-986).
+pub const CAST_RECOVERY: f32 = 1.0;
+
+/// Mana a fizzled cast still takes (Player_Magic.cs:571-572).
+pub const FIZZLE_MANA: f32 = 5.0;
+
+/// A player turns this many times its motion table's turn rate (Player_Location.cs:795-803).
+const RUN_FACTOR: f32 = 1.5;
+
+/// The human MotionTable, the server's default for a player (session/apply.rs).
+const HUMAN_MOTION_TABLE: u32 = 0x0900_0001;
+
 /// The five Foci, by weenie class. Each takes a pack slot of its own
 /// and each halves the components of its school, so they are equipment
 /// in everything but name: never sold, never handed to a vendor.
@@ -376,16 +388,22 @@ impl Client {
         cast_chance(self.casting_skill(spell), sp.power)
     }
 
-    /// Seconds from sending `sp` to its effect: each scarab's windup gesture, then the last
-    /// component's cast gesture (Player_Magic.cs:1038-1047, SpellFormula.cs:245-262); 0 untabled.
+    /// Seconds from sending `sp` to its going off: each scarab's windup gesture unless FastCast,
+    /// then the talisman's cast gesture, each as long as the motion table plays it in the Magic
+    /// stance at [`CAST_SPEED`] (Player_Magic.cs:603-686, SpellFormula.cs:245-287); 0 untabled.
     pub fn cast_seconds(&self, sp: &Spell) -> f32 {
         let Ok(table) = self.assets.spell_components() else {
             return 0.0;
         };
-        // Timed by the component table's own gesture seconds, played at CAST_SPEED.
-        let gesture = |c: u32| table.get(c).map_or(0.0, |c| c.time);
+        let motions = self.motion_table_id();
+        let gesture = |c: u32| {
+            table.get(c).map_or(0.0, |c| {
+                let magic = ac_scene::anim::motion::STANCE_MAGIC;
+                self.assets.motion_seconds(motions, magic, c.gesture)
+            })
+        };
         let formula: Vec<u32> = sp.formula().collect();
-        // A FastCast spell has no windup (Player_Magic.cs:605-607).
+        // A FastCast spell has no windup (Player_Magic.cs:605-608).
         let windup: f32 = if sp.is_fast_cast() {
             0.0
         } else {
@@ -397,6 +415,34 @@ impl Client {
         };
         let cast = formula.last().map_or(0.0, |c| gesture(*c));
         (windup + cast) / CAST_SPEED
+    }
+
+    /// Mana a try at `sp` takes on average: its cost when it goes off, [`FIZZLE_MANA`] when it
+    /// fizzles (Player_Magic.cs:566-572).
+    pub(crate) fn mana_per_try(&self, id: u32, sp: &Spell) -> f32 {
+        let lands = self.cast_chance(id);
+        lands * self.mana_cost(sp) as f32 + (1.0 - lands) * FIZZLE_MANA
+    }
+
+    /// Seconds the server takes to turn the character `angle` radians to face a target before a
+    /// cast: the motion table's turn rate times `RUN_FACTOR` (Creature_Navigation.cs:186-192,
+    /// Player_Location.cs:795-803); 0 with no table.
+    pub fn turn_seconds(&self, angle: f32) -> f32 {
+        let rate = self.assets.turn_rate(self.motion_table_id()) * RUN_FACTOR;
+        if rate > 0.0 {
+            angle.abs() / rate
+        } else {
+            0.0
+        }
+    }
+
+    /// The character's MotionTable, the human one until the server names it (session/apply.rs).
+    fn motion_table_id(&self) -> u32 {
+        self.world
+            .player()
+            .map(|o| o.motion_table_id)
+            .filter(|&t| t != 0)
+            .unwrap_or(HUMAN_MOTION_TABLE)
     }
 
     pub fn can_cast(&self, spell: u32) -> CastCheck {
@@ -743,6 +789,37 @@ mod tests {
         assert_eq!(c.mana_cost(&bane), bane.base_mana + 11 * bane.mana_mod);
         // A life spell is the base, armour or none.
         assert_eq!(c.mana_cost(&heal), heal.base_mana);
+    }
+
+    #[test]
+    #[ignore = "needs AC_DATA_DIR"]
+    fn a_cast_is_timed_by_the_motion_table_as_ace_plays_it() {
+        let c = Client::offline(crate::testkit::game_data());
+        let secs = |id: u32| c.cast_seconds(&c.spell(id).expect("in the table"));
+        let near = |a: f32, b: f32| (a - b).abs() < 0.01;
+        // Birch Talisman's gesture: 25 frames at 24 a second, played at twice the speed.
+        let (bolt_i, bolt_v, bolt_vi, streak_vi) = (secs(27), secs(84), secs(85), secs(1801));
+        assert!(
+            near(bolt_i, 25.0 / 24.0 / 2.0),
+            "Lead Scarab: no windup, {bolt_i}"
+        );
+        // Gold's windup, 60 frames at 24 and back at 51; Pyreal's runs past its animation's 60
+        // frames and ACE cuts it there (DatLoader MotionTable.cs:172-177): VI winds up quicker.
+        assert!(
+            near(bolt_v, (60.0 / 24.0 + 60.0 / 51.0 + 25.0 / 24.0) / 2.0),
+            "{bolt_v}"
+        );
+        assert!(
+            near(bolt_vi, (60.0 / 24.0 + 60.0 / 57.0 + 25.0 / 24.0) / 2.0),
+            "{bolt_vi}"
+        );
+        assert!(bolt_vi < bolt_v);
+        assert!(
+            near(streak_vi, bolt_i),
+            "FastCast: the gesture alone, {streak_vi}"
+        );
+        // The human turns at 1.5 rad/s, a player half as fast again: a quarter turn in 0.7 s.
+        assert!(near(c.turn_seconds(std::f32::consts::FRAC_PI_2), 0.698));
     }
 
     #[test]

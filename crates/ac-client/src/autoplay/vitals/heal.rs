@@ -411,6 +411,49 @@ impl Client {
         Some((boost, false))
     }
 
+    /// Seconds the mana round takes to win back a point of mana: a transfer from the stamina on hand
+    /// (or its slider) and the boosts putting it back; regeneration left out. 0 with no such round.
+    pub(crate) fn seconds_per_mana(&self) -> f32 {
+        use ac_world::vitals::vital;
+        let (Some(t), Some(b)) = (
+            self.best_transfer(vital::STAMINA, vital::MANA),
+            self.best_boost(vital::STAMINA),
+        ) else {
+            return 0.0;
+        };
+        let transfer = ac_world::vitals::transfers_between(vital::STAMINA, vital::MANA)
+            .into_iter()
+            .find(|x| x.spell == t);
+        let boost = ac_world::vitals::boosts_of(vital::STAMINA)
+            .into_iter()
+            .find(|x| x.spell == b);
+        let (Some(transfer), Some(boost), Some(ts), Some(bs)) =
+            (transfer, boost, self.spell(t), self.spell(b))
+        else {
+            return 0.0;
+        };
+        let (have, most) = self.vital_now(1);
+        let floor = (self.autoplay.config.survive.stamina_below * most as f32) as u32;
+        let stamina = have.max(floor);
+        // A try's seconds and mana, over the tries a landing takes (self casts: none resisted).
+        let per_landing = |id: u32, sp: &ac_formats::spell_table::Spell| {
+            let lands = self.cast_chance(id).max(0.01);
+            let secs = self.cast_seconds(sp) + crate::magic::CAST_RECOVERY;
+            (secs / lands, self.mana_per_try(id, sp) / lands)
+        };
+        let (t_secs, t_mana) = per_landing(t, &ts);
+        let (b_secs, b_mana) = per_landing(b, &bs);
+        let boosts =
+            transfer.drain(stamina) as f32 / ((boost.low + boost.high) as f32 / 2.0).max(1.0);
+        let secs = t_secs + boosts * b_secs;
+        let made = transfer.gain(stamina) as f32 - t_mana - boosts * b_mana;
+        if made > 0.0 {
+            secs / made
+        } else {
+            0.0
+        }
+    }
+
     /// Heal, and break off a losing fight. True when it acted.
     pub(crate) fn autoplay_survive(&mut self, now: Instant) -> bool {
         self.log_self_heals();

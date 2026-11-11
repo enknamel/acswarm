@@ -81,22 +81,24 @@ fn a_wand_rends_crits_and_adds_as_ace_reckons_it() {
 
 #[test]
 fn with_no_health_known_the_most_a_cast_wins_and_no_vuln_is_cast() {
-    let kill = |casts: Option<f32>, per_cast: f32, vuln: bool| Kill {
+    let kill = |seconds: Option<f32>, per_second: f32, vuln: bool| Kill {
         wand: wand(0),
         attack: 1,
         takes: 1.0,
         vuln: vuln.then_some((Element::Fire, 2, 2.5, 1.0)),
         magic_yield: None,
-        casts,
-        per_cast,
+        casts: seconds,
+        seconds,
+        per_cast: per_second,
+        per_second,
     };
     let best = fastest(vec![kill(None, 100.0, false), kill(None, 250.0, true)]);
-    assert_eq!(best.map(|k| k.per_cast), Some(100.0));
+    assert_eq!(best.map(|k| k.per_second), Some(100.0));
     let best = fastest(vec![
         kill(Some(2.5), 100.0, false),
         kill(Some(2.2), 250.0, true),
     ]);
-    assert!(best.is_some_and(|k| k.vuln.is_some()), "fewest casts");
+    assert!(best.is_some_and(|k| k.vuln.is_some()), "fewest seconds");
 }
 
 /// A caster knowing `names`, facing a Tusker Guard (wcid 1629: 260 health, pierce and fire alike).
@@ -110,9 +112,10 @@ fn at_a_tusker_guard(names: &[&str]) -> (crate::Client, Vec<u32>) {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
-fn piercing_vi_and_force_bolt_vi_kill_a_tusker_guard_fastest() {
+fn a_vulnerability_is_charged_its_own_cast_and_a_tusker_guard_needs_none() {
     // Blargerton threw Frost Bolt VI behind Cold Vulnerability IV at guards resisting cold: the
-    // vulnerability's own cast was never charged, so it looked better than a bolt alone.
+    // vulnerability's own cast was never charged, so it looked better than a bolt alone. Timed,
+    // Piercing VI's 3.7 s try (Ebony's gesture, 72% to land) saves no more than it takes.
     let _ = game_data();
     let names = [
         "Flame Bolt VI",
@@ -127,27 +130,27 @@ fn piercing_vi_and_force_bolt_vi_kill_a_tusker_guard_fastest() {
     let kill = c
         .best_kill(0x8000_0103, &cfg, Instant::now())
         .expect("a kill");
-    assert_eq!(kill.attack, ids[1], "Force Bolt VI: {kill:?}");
-    assert_eq!(
-        kill.vuln.map(|(_, id, ..)| id),
-        Some(ids[4]),
-        "Piercing VI first"
-    );
+    let ways = c.kills_said(0x8000_0103, &cfg, 8);
+    assert_eq!(kill.attack, ids[0], "Flame Bolt VI alone: {ways}");
+    assert_eq!(kill.vuln, None, "{ways}");
 }
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
 fn a_rending_wand_at_the_vulns_strength_makes_its_cast_a_waste() {
     // A Pierce Rending wand at base 360 is a level VI vulnerability built in, and the larger of the
-    // two counts (Creature_Properties.cs:133-134): no vuln for it. Cleaving at 1.5 still wants one.
+    // two counts (Creature_Properties.cs:133-134): no vuln for it. Cleaving at 1.5 still wants one
+    // that lands surely.
     let (mut c, ids) = at_a_tusker_guard(&["Force Bolt VI", "Piercing Vulnerability Other VI"]);
     crate::testkit::trained_in(&mut c, ac_world::stats::skill::WAR_MAGIC, 360);
     let ready = [ids[0]];
     let kill =
         fastest(c.kills(0x8000_0103, &ready, &[wand(imbue::PIERCE_RENDING)])).expect("a kill");
     assert_eq!(kill.vuln, None, "rent to 2.5 already: {kill:?}");
-    // Cleaving at 1.5, with ordinary skill, on a Banished Tusker (575): Piercing VI pays its cast.
+    // Cleaving at 1.5 on a Banished Tusker (575): at Life 300 Piercing VI lands 62% and its tries
+    // cost more than the bolts they save; at 400 it lands nearly always and pays its cast.
     let (mut c, ids) = at_a_tusker_guard(&["Force Bolt VI", "Piercing Vulnerability Other VI"]);
+    crate::testkit::trained_in(&mut c, ac_world::stats::skill::LIFE_MAGIC, 400);
     let ready = [ids[0]];
     if let Some(it) = c.world.objects.get_mut(&0x8000_0103) {
         it.weenie_class_id = 30883;
@@ -155,8 +158,10 @@ fn a_rending_wand_at_the_vulns_strength_makes_its_cast_a_waste() {
     }
     let mut weak = wand(0);
     weak.cleave = Some((Element::Pierce as u32, 1.5));
-    let kill = fastest(c.kills(0x8000_0103, &ready, &[weak])).expect("a kill");
-    assert_eq!(kill.vuln.map(|(_, id, ..)| id), Some(ids[1]), "{kill:?}");
+    let all = c.kills(0x8000_0103, &ready, &[weak]);
+    let said: Vec<String> = all.iter().map(|k| k.said(|id| id.to_string())).collect();
+    let kill = fastest(all).expect("a kill");
+    assert_eq!(kill.vuln.map(|(_, id, ..)| id), Some(ids[1]), "{said:?}");
 }
 
 #[test]
@@ -236,9 +241,17 @@ fn a_lower_vulnerability_that_lands_surer_is_cast_when_it_kills_faster() {
         crate::testkit::trained_in(c, 33, life);
         crate::testkit::trained_in(c, 34, 282);
     };
-    // Life and War Magic 282, as Blargerton's: VI (power 275) casts 62% of the time and is resisted on top,
-    // so V (225), x2 instead of x2.5 but nearly always cast, kills a Tusker Guard sooner.
+    // Life and War Magic 282, as Blargerton's: VI (power 275) casts 62% of the time and is resisted
+    // on top, so V (225), x2 instead of x2.5 but nearly always cast, kills a Banished Tusker (575)
+    // sooner.
+    let banished = |c: &mut crate::Client| {
+        if let Some(it) = c.world.objects.get_mut(&0x8000_0103) {
+            it.weenie_class_id = 30883;
+            it.name = "Banished Tusker".into();
+        }
+    };
     let (mut c, ids) = at_a_tusker_guard(&names);
+    banished(&mut c);
     skilled(&mut c, 282);
     let cfg = c.autoplay.config.fight.clone();
     let kill = c
@@ -248,9 +261,84 @@ fn a_lower_vulnerability_that_lands_surer_is_cast_when_it_kills_faster() {
     assert_eq!(kill.vuln.map(|(_, id, ..)| id), Some(ids[1]), "{ways}");
     // With skill to spare VI casts as surely, and its x2.5 wins.
     let (mut c, ids) = at_a_tusker_guard(&names);
+    banished(&mut c);
     skilled(&mut c, 400);
     let kill = c
         .best_kill(0x8000_0103, &cfg, Instant::now())
         .expect("a kill");
-    assert_eq!(kill.vuln.map(|(_, id, ..)| id), Some(ids[2]), "{kill:?}");
+    let ways = c.kills_said(0x8000_0103, &cfg, 8);
+    assert_eq!(kill.vuln.map(|(_, id, ..)| id), Some(ids[2]), "{ways}");
+}
+
+/// [`at_a_tusker_guard`], the guard `metres` north of the caster with `health` left.
+fn guard_off(names: &[&str], metres: f32, health: f32) -> (crate::Client, Vec<u32>) {
+    let (mut c, ids) = at_a_tusker_guard(names);
+    let me = c.my_position().expect("standing");
+    let cell = c.player.as_ref().map(|p| p.cell).expect("a body");
+    if let Some(it) = c.world.objects.get_mut(&0x8000_0103) {
+        it.position = crate::testkit::placed(cell, me + glam::Vec3::Y * metres);
+        it.health = Some(health / 260.0);
+    }
+    (c, ids)
+}
+
+/// The fastest way at the guard with the spells `ready`, and every way as the log says it.
+fn fastest_at_guard(c: &crate::Client, ready: &[u32]) -> (Kill, String) {
+    let cfg = c.autoplay.config.fight.clone();
+    let all = c.kills(0x8000_0103, ready, &c.wands_to_hand(&cfg));
+    let name = |id: u32| c.spell(id).map(|s| s.name).unwrap_or_default();
+    let said: Vec<String> = all.iter().map(|k| k.said(name)).collect();
+    (fastest(all).expect("a kill"), said.join("; "))
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_streak_with_no_windup_is_thrown_when_it_kills_sooner_than_the_bolt() {
+    // A Tusker Guard 20 m off: Flame Bolt VI kills in fewer casts, but each holds the hands 3.3 s
+    // (Pyreal windup) and flies at 15 m/s; Flame Streak VI is FastCast, 1.5 s a try, 45 m/s.
+    let (c, ids) = guard_off(&["Flame Bolt VI", "Flame Streak VI"], 20.0, 260.0);
+    let (kill, said) = fastest_at_guard(&c, &ids);
+    assert_eq!(kill.attack, ids[1], "{said}");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn the_bolt_is_kept_where_its_damage_kills_sooner_than_streaks() {
+    // A Fire Crystal (45747: 3000 health) beside the caster: no flight to speak of, and Flame Bolt
+    // VI's 126 a try over 3.3 s outpaces the streak's 54 over 1.5 s, cast after cast.
+    let (mut c, ids) = guard_off(&["Flame Bolt VI", "Flame Streak VI"], 2.0, 260.0);
+    if let Some(it) = c.world.objects.get_mut(&0x8000_0103) {
+        it.weenie_class_id = 45747;
+        it.name = "Fire Crystal".into();
+    }
+    let (kill, said) = fastest_at_guard(&c, &ids);
+    assert_eq!(kill.attack, ids[0], "{said}");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_streak_is_passed_over_when_winning_back_its_mana_makes_it_slower() {
+    // The guard of the first test, but mana is kept up by Stamina to Mana and Revitalize: the
+    // streak's 60 mana a try costs the round's casts, twice the bolt's 30.
+    let names = [
+        "Flame Bolt VI",
+        "Flame Streak VI",
+        "Stamina to Mana Self VI",
+        "Revitalize Self VI",
+    ];
+    let (mut c, ids) = guard_off(&names, 20.0, 260.0);
+    c.world.stats.vitals[1].base = 300;
+    c.world.stats.vitals[1].current = 300;
+    assert!(c.seconds_per_mana() > 0.0, "a mana round");
+    let (kill, said) = fastest_at_guard(&c, &ids[..2]);
+    assert_eq!(kill.attack, ids[0], "{said}");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_wounded_creature_is_finished_with_the_spell_that_flies_first() {
+    // 30 health left: Flame Bolt I and VI both kill in one, and Bolt I's Lead Scarab has no windup.
+    let (c, ids) = guard_off(&["Flame Bolt VI", "Flame Bolt I"], 10.0, 30.0);
+    let (kill, said) = fastest_at_guard(&c, &ids);
+    assert_eq!(kill.attack, ids[1], "{said}");
 }

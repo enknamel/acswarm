@@ -1,8 +1,8 @@
 //! A caster's way to a kill: of the wands to hand, the attack spells ready, per element each
-//! vulnerability level castable well and Magic Yield before it, the one taking fewest casts on
-//! average, every damage step ACE takes counted (SpellProjectile.cs:494-557): roll, skill bonus,
-//! crits, the wand's element bonus, resistance times the larger of vulnerability and rend; and
-//! each spell's resist roll against the creature's magic defence (WorldObject_Magic.cs:104).
+//! vulnerability level castable well and Magic Yield before it, the one killing soonest on average.
+//! Casts from every damage step ACE takes (SpellProjectile.cs:494-557) and the resist roll
+//! (WorldObject_Magic.cs:104); seconds from each try's windup, gesture and recovery, the last
+//! bolt's flight, and the mana round's time to win back the mana spent (`seconds_per_mana`).
 
 use std::time::{Duration, Instant};
 
@@ -18,7 +18,7 @@ const IMBUE_SKILL_CAP: u32 = 360;
 /// Rending's divisor and cap: `clamp(base / 144, 1, 2.5)` (WorldObject_Weapon.cs:731, 735).
 const REND_PER: f32 = 144.0;
 const REND_CAP: f32 = 2.5;
-/// A wand changed for costs the hands about a cast's time: put away, taken up (`take_up`).
+/// A wand changed for costs the hands about a cast's time: put away, taken up (`take_up`; guess).
 const SWAP_CASTS: f32 = 1.0;
 /// How long the fight's choice for its target is kept before it is worked out again.
 const KILL_KEEPS: Duration = Duration::from_millis(500);
@@ -148,8 +148,73 @@ pub(crate) struct Kill {
     pub magic_yield: Option<Yield>,
     /// Casts it takes on average, the swap and the vuln's tries counted; `None` with no health known.
     pub casts: Option<f32>,
+    /// Seconds to the kill on average, as [`Timing`] reckons them; `None` with no health known.
+    pub seconds: Option<f32>,
     /// Damage a cast does on average, fizzles and resists counted.
     pub per_cast: f32,
+    /// Damage a second of casting it does, the mana's winning back counted.
+    pub per_second: f32,
+}
+
+/// What a try at a spell costs: seconds from sending it to its going off (`Client::cast_seconds`)
+/// and the mana it takes on average (`Client::mana_per_try`).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(crate) struct Pace {
+    pub launch: f32,
+    pub mana: f32,
+}
+
+impl Pace {
+    /// Seconds a try holds the hands: going off, then ACE's recovery to UseDone.
+    fn cycle(&self) -> f32 {
+        self.launch + crate::magic::CAST_RECOVERY
+    }
+}
+
+/// What times every way to one kill: the turn before the first cast, how far off the target
+/// stands (the last bolt's flight), and a point of mana's cost in the mana round's seconds.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(crate) struct Timing {
+    pub turn: f32,
+    pub distance: Option<f32>,
+    pub per_mana: f32,
+}
+
+/// Casts made before the attack: their tries, seconds and mana, all on average.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+struct Setup {
+    tries: f32,
+    secs: f32,
+    mana: f32,
+}
+
+impl Setup {
+    /// This setup and `tries` more of a spell paced `pace`.
+    fn and(self, tries: f32, pace: Pace) -> Setup {
+        Setup {
+            tries: self.tries + tries,
+            secs: self.secs + tries * pace.cycle(),
+            mana: self.mana + tries * pace.mana,
+        }
+    }
+}
+
+impl Timing {
+    /// Seconds to a kill of `n` tries at `attack` after `setup` and `swap` tries' wand change: each
+    /// held to its UseDone but the last, counted till it flies and then its flight at `speed` m/s.
+    fn seconds(&self, attack: Pace, speed: Option<f32>, setup: Setup, swap: f32, n: f32) -> f32 {
+        // A spell the target takes nothing from never kills; spared the 0 * inf of free mana.
+        if !n.is_finite() {
+            return f32::INFINITY;
+        }
+        let flight = self
+            .distance
+            .zip(speed)
+            .map_or(0.0, |(d, v)| d / v.max(0.1));
+        let casting = (swap + n - 1.0) * attack.cycle() + attack.launch + flight;
+        let mana = setup.mana + n * attack.mana;
+        self.turn + setup.secs + casting + self.per_mana * mana
+    }
 }
 
 impl Kill {
@@ -169,9 +234,9 @@ impl Kill {
         if !self.wand.name.is_empty() {
             s = format!("{s} from {}", self.wand.name);
         }
-        match self.casts {
-            Some(c) => format!("{s}: {c:.1} casts"),
-            None => format!("{s}: {:.0} a cast", self.per_cast),
+        match (self.casts, self.seconds) {
+            (Some(c), Some(t)) => format!("{s}: {c:.1} casts, {t:.1} s"),
+            _ => format!("{s}: {:.0} a second", self.per_second),
         }
     }
 }
@@ -240,20 +305,26 @@ fn irwin_hall(n: u32, x: f64) -> f64 {
     (sum / factorial).clamp(0.0, 1.0)
 }
 
-/// Of `kills`, the fastest: fewest casts where the health is known, ties to the earlier (the held
-/// wand and no debuff come first); with no health known, the most a cast with no debuff.
+/// Of `kills`, the fastest: fewest seconds where the health is known, ties to the earlier (the
+/// held wand and no debuff come first); with no health known, the most a second with no debuff.
 pub(crate) fn fastest(kills: Vec<Kill>) -> Option<Kill> {
-    if kills.iter().any(|k| k.casts.is_some()) {
+    if kills.iter().any(|k| k.seconds.is_some()) {
         kills
             .into_iter()
-            .filter(|k| k.casts.is_some())
-            .reduce(|best, next| if next.casts < best.casts { next } else { best })
+            .filter(|k| k.seconds.is_some())
+            .reduce(|best, next| {
+                if next.seconds < best.seconds {
+                    next
+                } else {
+                    best
+                }
+            })
     } else {
         kills
             .into_iter()
             .filter(|k| k.vuln.is_none() && k.magic_yield.is_none())
             .reduce(|best, next| {
-                if next.per_cast > best.per_cast {
+                if next.per_second > best.per_second {
                     next
                 } else {
                     best
@@ -331,7 +402,45 @@ impl Client {
             yielded: self.autoplay.yielded_by(guid),
         };
         let known = self.creature_known(guid);
-        self.kills_with(known, self.health_now(guid), fight, ready, wands)
+        let timing = self.timing_at(guid);
+        self.kills_with(known, self.health_now(guid), fight, ready, wands, timing)
+    }
+
+    /// How the kills of `guid` are timed from where the character stands: the turn to face it
+    /// and how far off it is; with either unplaced, no turn and no flight.
+    fn timing_at(&self, guid: u32) -> Timing {
+        let me = self
+            .player
+            .as_ref()
+            .map(|p| (p.world_position(), p.heading));
+        let at = self.world.objects.get(&guid).and_then(|o| o.world_pos());
+        let (turn, distance) = match (me, at) {
+            (Some((me, heading)), Some(at)) => {
+                // Headings turn the other way from the maths (`Player::heading`).
+                let facing = glam::Vec2::new(-heading.sin(), heading.cos());
+                let to = (at - me).truncate();
+                let angle = if to.length() > 1e-3 {
+                    facing.angle_to(to).abs()
+                } else {
+                    0.0
+                };
+                (self.turn_seconds(angle), Some(at.distance(me)))
+            }
+            _ => (0.0, None),
+        };
+        Timing {
+            turn,
+            distance,
+            per_mana: self.seconds_per_mana(),
+        }
+    }
+
+    /// What a try at `id` costs in time and mana ([`Pace`]); nothing for a spell not in the table.
+    fn pace(&self, id: u32) -> Pace {
+        self.spell(id).map_or(Pace::default(), |sp| Pace {
+            launch: self.cast_seconds(&sp),
+            mana: self.mana_per_try(id, &sp),
+        })
     }
 
     /// The fastest way to kill one of kind `known` met fresh, at full health, with the wand in
@@ -348,10 +457,15 @@ impl Client {
             may_vuln: true,
             yielded: 0.0,
         };
-        fastest(self.kills_with(Some(known), health, fresh, ready, wands))?.casts
+        let timing = Timing {
+            per_mana: self.seconds_per_mana(),
+            ..Timing::default()
+        };
+        fastest(self.kills_with(Some(known), health, fresh, ready, wands, timing))?.casts
     }
 
-    /// [`Self::kills`] for a creature of kind `known` with `health` left, softened as `fight` says.
+    /// [`Self::kills`] for a creature of kind `known` with `health` left, softened as `fight` says,
+    /// each way timed by `timing`.
     fn kills_with(
         &self,
         known: Option<&ac_world::elements::Creature>,
@@ -359,6 +473,7 @@ impl Client {
         fight: Softened,
         ready: &[u32],
         wands: &[Wand],
+        timing: Timing,
     ) -> Vec<Kill> {
         let Softened {
             on,
@@ -369,8 +484,8 @@ impl Client {
         let defence = known
             .and_then(|c| c.magic_defense)
             .map(|d| (d as f32 - yielded).max(0.0));
-        let yields: Vec<(Option<Yield>, Option<f32>)> = {
-            let mut y = vec![(None, defence)];
+        let yields: Vec<(Option<Yield>, Option<f32>, Setup)> = {
+            let mut y = vec![(None, defence, Setup::default())];
             let levels = self
                 .castable_levels(&self.magic_yield_spells())
                 .into_iter()
@@ -380,7 +495,9 @@ impl Client {
                 let Some(d) = defence else { break };
                 let chance = self.cast_chance(id) * unresisted(self.casting_skill(id), Some(d));
                 let lowered = (d + yielded - by).max(0.0);
-                y.push((Some((id, by - yielded, chance.max(0.01))), Some(lowered)));
+                let chance = chance.max(0.01);
+                let first = Setup::default().and(1.0 / chance, self.pace(id));
+                y.push((Some((id, by - yielded, chance)), Some(lowered), first));
             }
             y
         };
@@ -405,6 +522,8 @@ impl Client {
                 let rend = wand.rend_for(e, base);
                 let elemental = wand.elemental_for(e);
                 let not_fizzled = self.cast_chance(id);
+                let pace = self.pace(id);
+                let speed = ac_world::elements::spell_speed(id);
                 let on_m = on.filter(|(oe, _)| *oe == e).map_or(1.0, |(_, m)| m);
                 let levels = match vulns.iter().find(|(ve, _)| *ve == e) {
                     Some((_, v)) => v.clone(),
@@ -425,35 +544,36 @@ impl Client {
                                first: Option<(Element, u32, f32, f32)>,
                                magic_yield: Option<Yield>,
                                defence: Option<f32>,
-                               tries: f32| {
+                               setup: Setup| {
                     let landing = (not_fizzled * unresisted(skill, defence)).max(0.01);
                     let takes = elemental * natural * vm.max(rend);
                     let lo = (min as f32 + bonus_skill) * takes;
                     let hi = (max as f32 + bonus_skill) * takes;
                     let crit_bonus = 0.5 * max as f32 * crit_mult * takes;
                     let per_cast = ((lo + hi) / 2.0 + crit * crit_bonus) * landing;
-                    let casts = health.map(|h| {
-                        swap + tries + casts_to_kill_crits(h, lo, hi, crit, crit_bonus) / landing
-                    });
+                    let attempts =
+                        health.map(|h| casts_to_kill_crits(h, lo, hi, crit, crit_bonus) / landing);
+                    let per_second = per_cast / (pace.cycle() + timing.per_mana * pace.mana);
                     out.push(Kill {
                         wand: wand.clone(),
                         attack: id,
                         takes,
                         vuln: first,
                         magic_yield,
-                        casts,
+                        casts: attempts.map(|n| swap + setup.tries + n),
+                        seconds: attempts.map(|n| timing.seconds(pace, speed, setup, swap, n)),
                         per_cast,
+                        per_second,
                     });
                 };
-                for &(magic_yield, defence) in &yields {
-                    let first = magic_yield.map_or(0.0, |(_, _, chance)| 1.0 / chance);
+                for &(magic_yield, defence, first) in &yields {
                     way(on_m, None, magic_yield, defence, first);
                     for &(vid, m, vuln_cast) in levels.iter().filter(|_| may_vuln) {
                         if m > on_m {
                             let chance = (vuln_cast * unresisted(self.casting_skill(vid), defence))
                                 .max(0.01);
-                            let tries = first + 1.0 / chance;
-                            way(m, Some((e, vid, m, chance)), magic_yield, defence, tries);
+                            let setup = first.and(1.0 / chance, self.pace(vid));
+                            way(m, Some((e, vid, m, chance)), magic_yield, defence, setup);
                         }
                     }
                 }
@@ -491,10 +611,10 @@ impl Client {
         let ready: Vec<u32> = self.ready_spells(cfg).iter().map(|(id, _)| *id).collect();
         let wands = self.wands_to_hand(cfg);
         let mut all = self.kills(guid, &ready, &wands);
-        all.retain(|k| k.casts.is_some());
+        all.retain(|k| k.seconds.is_some());
         all.sort_by(|a, b| {
-            a.casts
-                .partial_cmp(&b.casts)
+            a.seconds
+                .partial_cmp(&b.seconds)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
         let name = |id: u32| self.spell(id).map(|s| s.name).unwrap_or_default();
