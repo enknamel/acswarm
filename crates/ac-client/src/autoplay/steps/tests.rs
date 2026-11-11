@@ -270,6 +270,21 @@ fn a_run_under_way_keeps_its_old_place() {
 }
 
 #[test]
+fn a_caster_s_fight_in_hand_keeps_its_place_over_follow() {
+    // Only the swing's target was read: a caster's, held in `casting_at` alone, scored as a fight
+    // to walk to (40) beyond reach, and follow (50) took the tick from its casts.
+    let mut c = in_the_field();
+    let now = Instant::now();
+    let it = crate::testkit::standing_by(&mut c, 0x8000_0001, "Drudge Skulker", 60.0);
+    c.autoplay.nearest_fight = None;
+    c.attack_target = None;
+    c.autoplay.casting_at = Some(it.guid);
+    let row = named("fight").expect("row");
+    assert_eq!(row.worth(&c, now), row.base, "a fight in hand");
+    assert!(row.base > named("follow").expect("row").base);
+}
+
+#[test]
 fn a_town_run_gives_way_to_a_fight_in_hand() {
     let mut c = in_the_field();
     c.autoplay.config.growth.town_runs = true;

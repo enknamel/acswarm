@@ -129,11 +129,8 @@ fn worth_fighting(client: &Client, _now: Instant) -> f32 {
     // character off to the next creature every time, past the body it
     // had just made. Which is exactly the complaint: it never loots if
     // there is anything at all nearby.
-    let engaged = client
-        .attack_target
-        .and_then(|t| client.world.objects.get(&t))
-        .is_some_and(|o| o.known_alive());
-    if engaged {
+    // Swung or cast: the fight in sight's own `joined` (a caster's is `casting_at` alone).
+    if client.is_fight_joined() {
         return UNDECIDED;
     }
     // Something is hitting the character: that fight has come to it,

@@ -64,12 +64,15 @@ impl Client {
         // A fight already joined counts wherever it has led. A creature
         // chased past the radius is still a fight, and walking off to
         // look for one in the middle of it is not looking for a fight.
-        let joined = self
-            .attack_target
+        self.is_fight_joined() || nearest.is_some()
+    }
+
+    /// Whether a fight is joined, swung or cast: its target known alive, wherever it has led.
+    pub(crate) fn is_fight_joined(&self) -> bool {
+        self.attack_target
             .or_else(|| self.autoplay.casting_at())
             .and_then(|g| self.world.objects.get(&g))
-            .is_some_and(|o| o.known_alive());
-        joined || nearest.is_some()
+            .is_some_and(|o| o.known_alive())
     }
 
     /// How far off the nearest creature this character would take on is
