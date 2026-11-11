@@ -2985,6 +2985,28 @@ fn a_sought_kill_s_body_the_looting_will_not_open_is_not_stood_by() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
+fn a_wait_for_another_hunts_ground_to_unload_is_not_kept() {
+    // The rotating hold named a landblock and no hunt: taken up by the next quest, it walked out
+    // of reach of a ground that quest never hunts and waited there.
+    let now = std::time::Instant::now();
+    let (mut c, _) = at_a_mire_witch_ground(now);
+    let other = 0x0101;
+    assert!(c.pursued_place(other).is_none());
+    // Stood at its spot out of reach, as the hold had walked it there.
+    let spot = c.place_at(c.my_position().unwrap());
+    c.autoplay.growth.rotating = Some((other, spot));
+    c.autoplay.growth.swept.mark(other, now);
+    assert_eq!(
+        c.wait_out_unload("Mire-Witch"),
+        None,
+        "{}",
+        c.autoplay.status
+    );
+    assert_eq!(c.autoplay.growth.rotating, None);
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_sought_kill_s_body_a_mate_is_opening_is_not_stood_by() {
     // The wait asked only whether the body waited, the looting whose turn it was too: a body a
     // mate was opening was stood by for up to five minutes.

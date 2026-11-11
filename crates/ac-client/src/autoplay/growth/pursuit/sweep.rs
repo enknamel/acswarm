@@ -379,7 +379,9 @@ impl Client {
     /// to; `None` once it may (or none is being waited out).
     pub(super) fn wait_out_unload(&mut self, title: &str) -> Option<Option<bool>> {
         let (lb, spot) = self.autoplay.growth.rotating?;
-        if self.autoplay.growth.swept.since(&lb).is_none() {
+        // Not a ground of the working hunt (another quest's, or its grounds worked out again).
+        let theirs = self.pursued_place(lb).is_none();
+        if theirs || self.autoplay.growth.swept.since(&lb).is_none() {
             self.autoplay.growth.rotating = None;
             return None;
         }
