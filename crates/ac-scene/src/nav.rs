@@ -46,8 +46,9 @@ const TOUCHING: f32 = 0.01;
 pub const DROP_SPEED: f32 = 1.0;
 /// The body's step at [`DROP_SPEED`] (metres), a frame at 20 Hz: where a drop is walked off.
 const DROP_STEP: f32 = DROP_SPEED * FALL_DT;
-/// The deepest drop (metres): ACE hurts a landing over 11.25 + 4.5 m/s (Player_Move.cs:254-259).
-const DROP_MAX: f32 = 12.0;
+/// The deepest drop (metres, about 12.66): the fall to the speed ACE starts to hurt a landing at,
+/// 11.25434 + 4.5 m/s (Player_Move.cs:254-259), under `GRAVITY`.
+const DROP_MAX: f32 = (11.25434 + 4.5) * (11.25434 + 4.5) / (2.0 * crate::collision::GRAVITY);
 /// A fall still in the air this long (seconds) is over nothing: the highest jump's flight.
 const OVER_NOTHING: f32 = 2.8;
 /// The steps a fall is followed in (seconds): a frame at 20 Hz.
