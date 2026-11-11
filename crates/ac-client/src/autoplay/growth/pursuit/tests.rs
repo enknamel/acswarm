@@ -3978,6 +3978,46 @@ fn blargerton_at_67_is_told_the_stone_fists_token_waits_on_the_arena_3_flag() {
 }
 
 #[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn stone_fists_golems_are_hunted_till_eight_of_our_kills_or_the_boss_is_seen() {
+    // Eight is the most golems hunted: other players' kills count to the watcher too, and the
+    // boss coming out ends the golems' turn whatever our count (EmoteManager.cs:1287-1290).
+    let mut c = mage_pursuing("give:34454", "stone-fists");
+    c.world.stats.level = 150;
+    c.autoplay.growth.proven_tier = 8;
+    c.hold_quest_flags(&["AccessBoss3".to_string()]);
+    let now = std::time::Instant::now();
+    let golem_hunt = |s: &PursuitStep| {
+        matches!(s, PursuitStep::Hunt { creature, .. }
+            if creature == "Magma Golem" || creature == "Crystal Golem")
+    };
+    let step = again(&mut c, now);
+    assert!(golem_hunt(&step), "{step:?}");
+    let spot = glam::Vec3::new(30.0, -30.0, -11.8);
+    for i in 0..3u32 {
+        let mut golem = crate::testkit::creature(0x5000_0B00 + i, "Magma Golem");
+        golem.weenie_class_id = 199;
+        golem.position = crate::testkit::placed(0x00B6_010A, spot);
+        let at = golem.world_pos().unwrap();
+        c.world.objects.insert(golem.guid, golem);
+        c.note_event_kill(at, now);
+        c.world.objects.remove(&(0x5000_0B00 + i));
+    }
+    let step = again(&mut c, now);
+    assert!(golem_hunt(&step), "three of eight: {step:?}");
+    let mut boss = crate::testkit::creature(0x5000_0C00, "Stone Fists");
+    boss.weenie_class_id = 34607;
+    boss.position = crate::testkit::placed(0x00B6_010A, spot);
+    c.world.objects.insert(boss.guid, boss);
+    let step = again(&mut c, now);
+    assert!(
+        matches!(&step, PursuitStep::Hunt { creature, .. } if creature == "Stone Fists"),
+        "{step:?}"
+    );
+    assert!(c.autoplay.growth.event_deaths.is_empty());
+}
+
+#[test]
 fn the_stone_fists_watcher_is_taken_for_started_only_after_eight_of_our_golem_kills() {
     // Its watcher stamps a counter per golem death it hears and starts the boss at eight
     // (InqMyQuestSolves StoneFistsCrittersKilled@8-8: EmoteManager.cs:666-676, 1287-1290).

@@ -74,6 +74,8 @@ impl Client {
         {
             tracing::info!("pursuit: the {e} event is on");
         }
+        // Its watcher's count is over: what it put out is about (the boss before our eighth golem).
+        self.autoplay.growth.event_deaths.remove(e);
         self.autoplay.growth.events_on.mark(e.to_string(), now);
     }
 
