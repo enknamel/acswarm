@@ -314,14 +314,36 @@ impl Ui {
                         .auto_shrink([false, false])
                         .max_height(list_h)
                         .min_scrolled_height(list_h)
-                        .show(ui, |ui| {
+                        .show_viewport(ui, |ui, view| {
                             ui.set_min_height(list_h);
                             ui.set_min_width(CHAT_WIDTH - 20.0);
                             ui.spacing_mut().item_spacing.y = 1.0;
+                            // Only the lines in view are laid out; the rest stand at the height
+                            // they last took (a row before): 2000 wrapped lines a frame lagged.
+                            let row = ui.text_style_height(&egui::TextStyle::Body) + 1.0;
+                            let (mut y, mut skipped) = (0.0f32, 0.0f32);
                             for line in self.chat.visible() {
+                                let known = line.height.get();
+                                let h = if known > 0.0 { known } else { row };
+                                if y + h < view.min.y - row || y > view.max.y + row {
+                                    skipped += h;
+                                    y += h;
+                                    continue;
+                                }
+                                if skipped > 0.0 {
+                                    ui.add_space(skipped);
+                                    skipped = 0.0;
+                                }
+                                let top = ui.cursor().top();
                                 if let Some(name) = chat_line(ui, line) {
                                     tell = Some(name);
                                 }
+                                let took = ui.cursor().top() - top;
+                                line.height.set(took);
+                                y += took;
+                            }
+                            if skipped > 0.0 {
+                                ui.add_space(skipped);
                             }
                             if jump {
                                 ui.scroll_to_cursor(Some(egui::Align::BOTTOM));
@@ -530,6 +552,37 @@ mod tests {
             repeat: false,
             modifiers: egui::Modifiers::NONE,
         }
+    }
+
+    #[test]
+    fn a_full_chat_log_lays_out_only_the_lines_in_view() {
+        // 2000 wrapped lines laid out every frame of a fight's chat spam lagged the client.
+        let Ok(gpu) = crate::gpu::Gpu::headless(800, 600) else {
+            eprintln!("no GPU; skipping");
+            return;
+        };
+        let (device, queue) = (gpu.device(), gpu.queue());
+        let mut ui = Ui::new(device, gpu.format(), None, 800, 600);
+        for i in 0..crate::chat::ChatLog::MAX_LINES {
+            ui.chat
+                .push(format!("You evade Silver Tusker's attack. ({i})"), 0);
+        }
+        let frame = |ui: &mut Ui| ui.begin(None, &mut |_| {}, device, queue, 800, 600);
+        for _ in 0..3 {
+            frame(&mut ui);
+        }
+        let drawn = ui
+            .chat
+            .lines
+            .iter()
+            .filter(|l| l.height.get() > 0.0)
+            .count();
+        assert!(drawn > 0, "nothing drawn");
+        assert!(drawn < 100, "{drawn} lines laid out");
+        assert!(
+            ui.chat.lines.last().unwrap().height.get() > 0.0,
+            "the newest not in view"
+        );
     }
 
     /// Enter focuses the box, typed text lands in it, Enter submits it.

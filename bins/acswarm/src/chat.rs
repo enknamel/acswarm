@@ -218,6 +218,8 @@ pub struct ChatLine {
     pub stamp: String,
     /// The clickable sender name within `text`, if any.
     pub name: Option<Range<usize>>,
+    /// Points the line took when last drawn, 0 before: lines out of view are not laid out.
+    pub height: std::cell::Cell<f32>,
 }
 
 pub struct ChatLog {
@@ -278,6 +280,7 @@ impl ChatLog {
             kind,
             stamp,
             name,
+            height: std::cell::Cell::new(0.0),
         });
         if self.lines.len() > Self::MAX_LINES {
             let extra = self.lines.len() - Self::MAX_LINES;
