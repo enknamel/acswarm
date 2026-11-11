@@ -1138,6 +1138,25 @@ fn outdoors_the_pursued_creatures_spawn_spots_are_gone_round() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
+fn a_search_that_found_no_ground_is_made_again_on_the_retry_clock_not_every_tick() {
+    // Off any ground with none to be had, the search (pack walks and up to six journey plans)
+    // ran on every idle tick: its siblings each wait RETRY_AFTER.
+    let mut c = standing_at(0xA9B4_0019, glam::Vec3::new(84.0, 7.1, 94.0));
+    c.world.stats.level = 20;
+    let now = Instant::now();
+    for g in ac_world::hunting::all() {
+        c.autoplay.growth.skip.mark(g.landblock, now);
+    }
+    let cfg = Growth::default();
+    c.autoplay.growth.quiet_since = Some(now - Duration::from_secs(1));
+    assert!(!c.grow_hunt(now, &cfg), "{}", c.autoplay.status);
+    assert!(!c.traveling());
+    let next = c.autoplay.growth.next_hunt;
+    assert!(next.is_some_and(|t| t > now), "searched again next tick");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn a_ground_stood_on_over_its_landblock_s_edge_is_waited_at_not_left() {
     // The Gotrok Obeloths' ground (A911) has its spot 9 m from the landblock east of it: arrived
     // at from there, the quiet wait read the landblock stood in and chose another ground at once.

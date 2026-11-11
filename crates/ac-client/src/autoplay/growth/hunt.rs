@@ -510,7 +510,9 @@ impl Client {
                 format!("no hunting ground it can kill in, up to loot tier {tier}"),
                 now,
             );
+            // Searched again on the clock every failed search keeps, not every idle tick.
             self.autoplay.growth.quiet_since = Some(now);
+            self.autoplay.growth.next_hunt = Some(now + RETRY_AFTER);
             return false;
         };
         let (lb, at, name) = (g.landblock, g.at, g.name.clone());
