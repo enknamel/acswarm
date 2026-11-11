@@ -553,6 +553,43 @@ fn a_held_cast_still_takes_its_stand() {
     );
 }
 
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_held_cast_still_closes_in() {
+    // Mana under its slider and nothing to restore it: the bolt waits, the walk into its reach does not.
+    let t0 = Instant::now();
+    let (mut c, _) = testkit::a_caster_knowing(t0, &["Frost Bolt III"]);
+    let field = ac_world::landblock_origin(0xA9B4_0000) + Vec3::new(84.0, 108.0, 94.0);
+    let (at, cell) = crate::walk_trial::on_floor(&mut c, field);
+    testkit::stand(&mut c, cell, at - ac_world::landblock_origin(cell));
+    c.autoplay.config.enabled = true;
+    c.autoplay.config.fight.enabled = true;
+    c.autoplay.config.fight.radius = 100.0;
+    c.world.stats.vitals[2].base = 1000;
+    c.world.stats.vitals[2].current = 100;
+    let target = 0x8000_0001;
+    coming_at(&mut c, &[(target, Vec3::new(70.0, 0.0, 0.0))]);
+    let creature = c.world.objects[&target].world_pos().unwrap();
+    let before = c.my_position().unwrap().distance(creature);
+    let dt = 0.05;
+    for frame in 0..6 * 20 {
+        let now = t0 + Duration::from_secs_f32(frame as f32 * dt);
+        c.frame_at = now;
+        c.tick_autoplay(now);
+        c.tick_player(crate::player::Input::default(), dt, now);
+    }
+    assert!(
+        c.autoplay.cast_sent.is_none(),
+        "a bolt went under the mana slider"
+    );
+    let off = c.my_position().unwrap().distance(creature);
+    assert!(
+        off < before - 5.0,
+        "held {off:.1} m off from {before:.1} m: {}",
+        c.autoplay.status
+    );
+}
+
 /// Virindi Inquisitor: Cassius' Ring of Fire, 4.5 m at 2 m/s.
 const INQUISITOR: u32 = 10_814;
 

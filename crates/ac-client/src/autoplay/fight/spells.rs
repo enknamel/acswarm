@@ -155,11 +155,6 @@ impl Client {
                 return true;
             }
         }
-        // No cast of the fight starts with a bar under its slider; the stand and the back-off
-        // still go (a_held_cast_still_takes_its_stand).
-        if kill.is_some() && self.hold_for_vitals(now) {
-            return true;
-        }
         // Its vulnerability first, then its attack for the rest; each cast from within its own
         // reach, or the server turns it down out of range (0x550) and it goes out again unmoved.
         let debuff = kill
@@ -170,6 +165,11 @@ impl Client {
             if self.autoplay_approach(guid, &name, how) != crate::did::Did::Done {
                 return true;
             }
+        }
+        // No cast of the fight starts with a bar under its slider; the stand, the back-off and
+        // the closing in still go (a_held_cast_still_takes_its_stand, ..._still_closes_in).
+        if debuff.is_some() && self.hold_for_vitals(now) {
+            return true;
         }
         if self.autoplay_make_vulnerable(guid, &name, kill.as_ref(), now) {
             return true;
@@ -187,6 +187,9 @@ impl Client {
             if self.autoplay_approach(guid, &name, crate::dodge::How::Spell(spell))
                 != crate::did::Did::Done
             {
+                return true;
+            }
+            if self.hold_for_vitals(now) {
                 return true;
             }
             // Only what went out is recorded: a cast the client
