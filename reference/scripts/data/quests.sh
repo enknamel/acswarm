@@ -98,6 +98,25 @@ left join weenie_properties_int hi on hi.object_Id = d.value and hi.type = 87
 left join weenie_properties_string q on q.object_Id = d.value and q.type = 37
 where d.type in (31, 48);'
 
+# A creature's death heard by a watcher: its Death set's LocalSignal (EmoteType 88, sent to whatever
+# hears signals nearby: EmoteManager.cs:854-861, Landblock.cs:985-999), which a watcher's
+# ReceiveLocalSignal set counts towards a StartEvent (the Stone Fists Event Watcher's eight golems).
+q deathsignals 'select distinct e.object_Id, a.message from weenie_properties_emote e
+join weenie_properties_emote_action a on a.emote_Id = e.id
+where e.category = 3 and a.type = 88 and coalesce(a.message, "") <> "";'
+
+# A flag a portal stamps on whoever goes through it: its Portal set's StampQuest (EmoteCategory 4,
+# run once the teleport lands: Portal.cs:287, EmoteManager.cs:1921-1926), and each placement of
+# it (none for one only a generator makes).
+q portalstamps 'select distinct e.object_Id, a.message, coalesce(hex(li.obj_Cell_Id), ""),
+  coalesce(round(li.origin_X, 2), ""), coalesce(round(li.origin_Y, 2), ""),
+  coalesce(round(li.origin_Z, 2), "")
+from weenie_properties_emote e
+join weenie_properties_emote_action a on a.emote_Id = e.id
+join weenie w on w.class_Id = e.object_Id and w.type = 7
+left join landblock_instance li on li.weenie_Class_Id = e.object_Id
+where e.category = 4 and a.type = 22 and coalesce(a.message, "") <> "";'
+
 # Spells that hurt whoever they land on: a vital lowered (boost), a bolt (base_Intensity) or a
 # statistic lowered. A reply casting only these punishes the gift (Soul Dissolution, 3054).
 q harm 'select id from spell
@@ -267,7 +286,7 @@ group by landblock, weenie_Class_Id;'
 
 for t in placed emote action harm scrolls quest killq itemq drops names allowgive ints spawns ground wtypes \
   gens chestlist locks keys stuck recipes combines encounters roots profiles genprops crit inst links \
-  encroots genevent summonspell linkportal; do
+  encroots genevent summonspell linkportal deathsignals portalstamps; do
   [ -s "$TMP/$t.tsv" ] || { echo "quests.sh: the $t query returned nothing" >&2; exit 1; }
 done
 

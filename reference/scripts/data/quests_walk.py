@@ -17,6 +17,9 @@ REFUSE, GIVE, USE = 1, 6, 7
 DEATH = 3
 # StartEvent, and CastSpellInstant (a creature's portal summon at its death).
 START_EVENT, CAST_INSTANT = 23, 19
+# ReceiveLocalSignal (EmoteCategory.cs), and a watcher's own counter: StampMyQuest and
+# InqMyQuestSolves (EmoteType.cs).
+RECEIVE_SIGNAL, STAMP_MY, INQ_MY_SOLVES = 37, 81, 82
 # CastSpell, and TeleportTarget: the one it is run for moved to its position (EmoteType.cs).
 CAST_SPELL, TELEPORT = 14, 99
 # GameEventState.On: an event the server starts with (EventManager.cs:55-57).
@@ -194,6 +197,21 @@ class Data:
                                                     int(lo), int(hi), quest)
         self.event_name = {}
         self.starts, self.summons, self.stamps = event_starts(self)
+        # Who sends each signal as it dies (lower case: a set's key matches it whatever its case,
+        # EmoteManager.cs:1526), the landblocks each placed object stands in, and what hears it.
+        self.death_signals = defaultdict(set)
+        for obj, message in rows(dump, "deathsignals"):
+            self.death_signals[message.lower()].add(int(obj))
+        self.inst_blocks = defaultdict(set)
+        for _, wcid, cell in rows(dump, "inst"):
+            self.inst_blocks[int(wcid)].add(int(cell, 16) >> 16)
+        self.signal_starts = signal_starts(self)
+        # Each flag a portal stamps as it is gone through, and where each such portal stands.
+        self.portal_stamps, self.portal_placed = defaultdict(set), defaultdict(list)
+        for portal, flag, cell, x, y, z in rows(dump, "portalstamps"):
+            self.portal_stamps[qname(flag)].add(int(portal))
+            if cell:
+                self.portal_placed[int(portal)].append((int(cell, 16), x, y, z))
 
     def gate_of(self, wcid, depth=0):
         """(made, event): whether anything puts `wcid` in the world, and when every way that does
@@ -770,6 +788,50 @@ def event_starts(data):
     return starts, summons, stamps
 
 
+def reached(data, obj, s, depth=0):
+    """The actions set `s` runs whatever happens: its own and those of the GotoSet sets its Gotos
+    run, DEPTH deep (a branch's outcome is not followed)."""
+    out = []
+    for a in s["acts"]:
+        out.append(a)
+        if a["type"] == GOTO and depth < DEPTH:
+            nxt = data.outcome(obj, GOTO_SET, a["msg"])
+            if isinstance(nxt, dict):
+                out += reached(data, obj, nxt, depth + 1)
+    return out
+
+
+def signal_starts(data):
+    """Each event a watcher starts on hearing a signal, {event: {(watcher, signal, count)}} (lower
+    case): its ReceiveLocalSignal set (OnLocalSignal, EmoteManager.cs:2055-2058) starts it outright
+    (count 1), or stamps its own counter (StampMyQuest, :1265-1278) and asks InqMyQuestSolves for
+    `count` of it (:666-676), whose QuestSuccess set starts it (StartEvent, :1287-1290): the Stone
+    Fists Event Watcher's eight golems."""
+    out = defaultdict(set)
+
+    def start(obj, s, acts, count):
+        for a in acts:
+            if a["type"] == START_EVENT and a["msg"]:
+                data.event_name.setdefault(a["msg"].lower(), a["msg"])
+                out[a["msg"].lower()].add((obj, s["quest"], count))
+
+    for obj in sorted(data.by_obj):
+        for s in data.by_obj[obj]:
+            if s["cat"] != RECEIVE_SIGNAL or not s["quest"]:
+                continue
+            acts = reached(data, obj, s)
+            start(obj, s, acts, 1)
+            counted = {qname(a["msg"]) for a in acts if a["type"] == STAMP_MY and a["msg"]}
+            for a in acts:
+                if a["type"] != INQ_MY_SOLVES or qname(a["msg"]) not in counted:
+                    continue
+                ok = data.outcome(obj, QUEST_OK, a["msg"])
+                count = int(num(a["min"]))
+                if isinstance(ok, dict) and count >= 1:
+                    start(obj, s, reached(data, obj, ok), count)
+    return out
+
+
 def way_of(data, obj, effects):
     """Where a path's effects send whoever it runs for, and the seconds of its emotes' delays till
     then (each before its action: EmoteManager.cs): a portal its owner summons ((portal, cell, x,
@@ -1187,12 +1249,15 @@ def build(data, never):
                   for w, cell, x, y, z in givers_out]
 
     src = []
+    # A kill heard by an event's watcher: the landblocks it is heard in, and the deaths it needs.
+    heard = {}
     # Every recall spell's scroll is had and read (a quest row below); every portal gem is had
     # as a way in. Both are wants whose sources are written.
     learnt = {w: spell for spell in data.recalls for w in data.scrolls_of.get(spell, ())}
     wants = sorted({r[5] for r in rows_out if r[1] in ("kill", "item")}
                    | {str(w) for w in learnt} | {str(w) for w in data.gems}
-                   | {"flag:" + f for f in data.stamps})
+                   | {"flag:" + f for f in data.stamps}
+                   | {"flag:" + f for f in data.portal_stamps})
     seen = set(wants)
     todo = [(w, 0) for w in wants]
     while todo:
@@ -1259,11 +1324,24 @@ def build(data, never):
                         todo.append((str(item), depth + 1))
                 elif kind == "kill" and data.spawns.get(obj):
                     src.append((want, "kill", obj, 1.0, ""))
+            # Or by a watcher that hears `count` deaths: of what signals it as it dies, where the
+            # watcher stands (a signal is heard nearby only: Landblock.cs:985-999).
+            for watcher, signal, count in sorted(data.signal_starts.get(want[6:], ())):
+                near = data.inst_blocks.get(watcher, set())
+                for c in sorted(data.death_signals.get(signal, ())):
+                    blocks = {lb for lb, _ in data.spawns.get(c, ()) if lb in near}
+                    if blocks and (want, c) not in heard:
+                        src.append((want, "kill", c, 1.0, ""))
+                        heard[(want, c)] = (blocks, count)
         elif want.startswith("flag:"):
             # Stamped on whoever deals a creature its last blow (EmoteType 22 in its Death set).
             for c in sorted(data.stamps.get(want[5:], ())):
                 if data.spawns.get(c):
                     src.append((want, "kill", c, 1.0, ""))
+            # Or on whoever goes through a portal (its Portal set), where it stands or is made.
+            for p in sorted(data.portal_stamps.get(want[5:], ())):
+                if portal_places(data, p):
+                    src.append((want, "portal", p, 1.0, ""))
         else:
             for c in sorted(data.counter_of[want]):
                 if data.spawns.get(c):
@@ -1284,24 +1362,30 @@ def build(data, never):
     rows_out.sort(key=lambda r: (r[0], kind_order[r[1]], int(r[3]), int(r[7])))
     src_out = []
     for want, kind, c, p, keys in src:
-        at = ""
+        at, blocks, count = "", [], 1
         if kind == "combine":
             where = ""
-        elif kind in ("npc", "floor", "container", "use", "give"):
+        elif kind in ("npc", "floor", "container", "use", "give", "portal"):
             if kind == "npc" or (kind == "give" and data.placed.get(c)):
                 spots = data.placed.get(c, [])
             elif kind == "give":
                 spots = sorted(set(data.made_on_ground(c)))
+            elif kind == "portal":
+                spots = portal_places(data, c)
             else:
                 spots = sorted(set(data.made_on_ground(c) if kind == "floor"
                                    else data.ground_places(c)))
             where = ";".join("%08X:1" % cell for cell, _, _, _ in spots)
             at = ";".join("%s %s %s" % (x, y, z) for _, x, y, z in spots)
         else:
-            where = ";".join("%X:%d" % lb for lb in sorted(data.spawns[c]))
+            # A kill a watcher hears counts only where the watcher stands.
+            near, count = heard.get((want, c), (None, 1))
+            blocks = [b for b in sorted(data.spawns[c]) if near is None or b[0] in near]
+            where = ";".join("%X:%d" % lb for lb in blocks)
             # A creature the encounter table alone puts out: where on each landblock.
             if c in data.met_at:
-                at = ";".join("%g %g 0" % xy for xy in data.met_at[c])
+                kept = [xy for b, xy in zip(sorted(data.spawns[c]), data.met_at[c]) if b in blocks]
+                at = ";".join("%g %g 0" % xy for xy in kept)
         # No chain known (an emote's summons, a linked placement): no figure, not a rare one.
         share = data.spawn_share(c) if kind in ("drop", "kill") else 0.0
         spawn = "%g" % round(share, 4) if share > 0 else ""
@@ -1310,15 +1394,23 @@ def build(data, never):
         if kind in ("drop", "kill"):
             # One an event gates, as it comes once the event is started.
             spawning = data.spawning_on if ev else data.spawning
-            figures = (spawning.rates(c, lb) for lb, _ in sorted(data.spawns[c]))
+            figures = (spawning.rates(c, lb) for lb, _ in blocks)
             rates = ";".join("%s:%s%s" % (figure(n, 2), figure(h, 1),
                                           ":%g" % round(o) if round(o) else "")
                              for n, h, o in figures)
         back = respawn_of(data, c) if kind == "floor" else None
-        src_out.append((want, kind, str(c), data.name.get(c, ""), str(data.level(c)),
-                        "%g" % round(p, 4), where, at, keys, spawn, rates,
-                        ev or "", "" if back is None else "%g" % round(back)))
+        row = (want, kind, str(c), data.name.get(c, ""), str(data.level(c)),
+               "%g" % round(p, 4), where, at, keys, spawn, rates,
+               ev or "", "" if back is None else "%g" % round(back))
+        # The deaths a watcher must hear, only where more than one: no other row has the column.
+        src_out.append(row + (str(count),) if count > 1 else row)
     return rows_out, givers_out, src_out, reasons
+
+
+def portal_places(data, portal):
+    """Where `portal` stands: placed, or made by a generator (where that generator stands, as a
+    floor item's)."""
+    return sorted(set(data.portal_placed.get(portal, ())) | set(data.made_on_ground(portal)))
 
 
 def respawn_of(data, wcid):
@@ -1555,16 +1647,18 @@ GIVERS_HEADER = """\
 
 SOURCES_HEADER = """\
 # Where what a quest wants comes from, and what each source itself needs.
-# want,kind,wcid,name,level,chance,landblocks,at,keys,spawn,rates,event,respawn
+# want,kind,wcid,name,level,chance,landblocks,at,keys,spawn,rates,event,respawn[,count]
 # want: an item wcid or a kill counter, as quests.csv names it, a key a container or use
 # below needs, or event:NAME, a server event a source below needs, or flag:NAME, a flag stamped
-# on a creature's killer (both lower case). kind: drop (a corpse drop, chance per kill), kill (a
-# creature counting for the counter, or whose death starts the event or stamps the flag), give (an NPC handed its keys starts the event), npc (a placed NPC whose talk gives
+# on a creature's killer or a portal's user (both lower case). kind: drop (a corpse drop, chance
+# per kill), kill (a creature counting for the counter, or whose death starts the event, itself
+# or heard by a watcher there, or stamps the flag), give (an NPC handed its keys starts the
+# event), portal (going through it stamps the flag), npc (a placed NPC whose talk gives
 # the item), floor (made on the ground by a
 # generator; wcid is the item's own), container (a chest that holds it, chance per fill), use
 # (a placed object a recipe makes it on, from a carried item used on it) or combine (a carried
 # item a recipe makes it on; nowhere to go). landblocks: hex landblock:spawn entries;... (for
-# an npc, give, floor, container or use, hex cell:1 per placement, with at the matching local
+# an npc, give, portal, floor, container or use, hex cell:1 per placement, with at the matching local
 # "x y z";...; for a drop or kill the encounter table alone spawns, each landblock's busiest
 # encounter corner, "x y 0";...). keys: for a locked container, the keys whose KeyCode is its LockCode; for a give, the item handed; for a
 # use, the items used on it; for a combine, the item used then the one used on;
@@ -1577,7 +1671,8 @@ SOURCES_HEADER = """\
 # generators, with its event on when it has one. event: the Off event (EventManager.cs) whose
 # generator alone puts the creature or NPC out: it comes only once that event is started.
 # respawn: for a floor item, seconds its generator takes to put it back once taken (profile delay
-# and a regeneration interval); blank when unknown.
+# and a regeneration interval); blank when unknown. count: for a kill a watcher hears, the deaths
+# it must hear before it starts the event (only written when more than 1).
 # Regenerate with reference/scripts/data/quests.sh.
 """
 
