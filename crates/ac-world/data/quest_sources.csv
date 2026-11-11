@@ -5,12 +5,13 @@
 # on a creature's killer or a portal's user (both lower case). kind: drop (a corpse drop, chance
 # per kill), kill (a creature counting for the counter, or whose death starts the event, itself
 # or heard by a watcher there, or stamps the flag), give (an NPC handed its keys starts the
-# event), portal (going through it stamps the flag), npc (a placed NPC whose talk gives
+# event), portal (going through it stamps the flag), revealed (as portal, made by a generator
+# once something reveals it: the Colosseum's, arenas.csv), npc (a placed NPC whose talk gives
 # the item), floor (made on the ground by a
 # generator; wcid is the item's own), container (a chest that holds it, chance per fill), use
 # (a placed object a recipe makes it on, from a carried item used on it) or combine (a carried
 # item a recipe makes it on; nowhere to go). landblocks: hex landblock:spawn entries;... (for
-# an npc, give, portal, floor, container or use, hex cell:1 per placement, with at the matching local
+# an npc, give, portal, revealed, floor, container or use, hex cell:1 per placement, with at the matching local
 # "x y z";...; for a drop or kill the encounter table alone spawns, each landblock's busiest
 # encounter corner, "x y 0";...). keys: for a locked container, the keys whose KeyCode is its LockCode; for a give, the item handed; for a
 # use, the items used on it; for a combine, the item used then the one used on;
@@ -7732,11 +7733,11 @@ deathcapthrunguskillcount,kill,28673,Deathcap Thrungus,50,1,77:6;D2:36,,,1,6:45;
 desertcactuskillcount,kill,52290,Desert Cactus,1,1,8764:6;8765:8;8766:9;8864:5;8866:7;8964:6;8965:5;8966:6,,,0.038,1.25:8:427;1.29:7.5:402;1.34:8:427;1.22:8:427;1.28:8:427;1.25:8:427;1.22:8:427;1.2:8:410,,
 diremattekarkillcount,kill,9400,Dire Mattekar,40,1,6248:1;A112:2,,,1,1:15;2:30,,
 ebongromniekills,kill,11526,Ebon Gromnie,80,1,36:17;1E6:19;3A7:1,,,1,17:204;19:285;1:15,,
-flag:accessboss18,portal,34534,Return to the Hall of Champions,0,1,00B00169:1;00B10169:1;00B20169:1;00B30169:1;00B40169:1,30 -1546 0;30 -1546 0;30 -1546 0;30 -1546 0;30 -1546 0,,,,,
-flag:accessboss3,portal,34518,Arena 3,0,1,00B00169:1;00B10169:1;00B20169:1;00B30169:1;00B40169:1,30 -1546 0;30 -1546 0;30 -1546 0;30 -1546 0;30 -1546 0,,,,,
-flag:accessboss5,portal,34520,Arena 5,0,1,00B00169:1;00B10169:1;00B20169:1;00B30169:1;00B40169:1,30 -1546 0;30 -1546 0;30 -1546 0;30 -1546 0;30 -1546 0,,,,,
-flag:accessboss7,portal,34522,Arena 7,0,1,00B00169:1;00B10169:1;00B20169:1;00B30169:1;00B40169:1,30 -1546 0;30 -1546 0;30 -1546 0;30 -1546 0;30 -1546 0,,,,,
-flag:accessboss8,portal,34523,Arena 8,0,1,00B00169:1;00B10169:1;00B20169:1;00B30169:1;00B40169:1,30 -1546 0;30 -1546 0;30 -1546 0;30 -1546 0;30 -1546 0,,,,,
+flag:accessboss18,revealed,34534,Return to the Hall of Champions,0,1,00B00169:1;00B10169:1;00B20169:1;00B30169:1;00B40169:1,30 -16 0;30 -16 0;30 -16 0;30 -16 0;30 -16 0,,,,,
+flag:accessboss3,revealed,34518,Arena 3,0,1,00B00169:1;00B10169:1;00B20169:1;00B30169:1;00B40169:1,30 -1456 0;30 -1456 0;30 -1456 0;30 -1456 0;30 -1456 0,,,,,
+flag:accessboss5,revealed,34520,Arena 5,0,1,00B00169:1;00B10169:1;00B20169:1;00B30169:1;00B40169:1,30 -1276 0;30 -1276 0;30 -1276 0;30 -1276 0;30 -1276 0,,,,,
+flag:accessboss7,revealed,34522,Arena 7,0,1,00B00169:1;00B10169:1;00B20169:1;00B30169:1;00B40169:1,30 -1096 0;30 -1096 0;30 -1096 0;30 -1096 0;30 -1096 0,,,,,
+flag:accessboss8,revealed,34523,Arena 8,0,1,00B00169:1;00B10169:1;00B20169:1;00B30169:1;00B40169:1,30 -1006 0;30 -1006 0;30 -1006 0;30 -1006 0;30 -1006 0,,,,,
 flag:acidzenithdead,kill,72755,Acid Zenith,185,1,8903:1,,,1,0:0,,
 flag:assaultvaultaccessgranted0105,kill,30710,Poltergeist,115,1,9:4,,,1,4:240,,
 flag:assaultvaultaccessgranted0105,kill,30711,Restless Spirit,135,1,A:4;51:17,,,1,4:240;17:204,,
@@ -7751,16 +7752,16 @@ flag:championkillquest1,kill,10950,Aun Ralirea,80,1,18B5:3;18B7:3;18BB:3;18BC:4;
 flag:championkillquest2,kill,10951,Hea Temenua,80,1,18B5:3;18B7:3;18BB:3;18BC:4;19B5:3;19B6:5;19B7:4;19B8:4;19B9:8;19BA:10;19BB:4;19BC:4;1AB8:5;1AB9:6;1ABA:5;1ABC:5;1ABD:6;1BB5:5;1BB6:8;1BBB:5;1BBC:4;1BBD:5;1BBE:4;1CB8:6;1CBA:5;1CBB:5;1CBD:4;1CBE:4;1CBF:9;1DBF:6;1EBB:4;1FB6:5;1FB7:5;1FB8:5;1FB9:6;1FBE:4;20B5:5;20B6:9;20B7:6;20B8:5;20BA:4;20BB:4;20BC:4;21B5:6;21B6:5;21B7:6;21B9:7;21BB:4;21BC:4;22B4:5;22B7:8;22B8:4;22B9:5;22BA:4;22BC:4;22BE:4;23B8:4;23B9:4;23BA:4;24B6:4;24B8:5;24B9:4;24BB:4;25B8:5,96 72 0;24 72 0;96 72 0;72 72 0;168 96 0;168 96 0;72 96 0;96 72 0;120 120 0;48 96 0;72 24 0;120 120 0;96 72 0;48 96 0;24 96 0;96 72 0;48 72 0;144 96 0;72 96 0;120 120 0;96 96 0;48 72 0;144 96 0;96 72 0;72 96 0;96 48 0;24 96 0;48 96 0;120 96 0;96 96 0;120 96 0;96 96 0;168 96 0;96 144 0;96 120 0;24 96 0;96 96 0;96 120 0;144 72 0;96 96 0;96 96 0;96 144 0;72 96 0;144 96 0;48 120 0;96 48 0;48 96 0;24 120 0;120 120 0;96 120 0;96 96 0;144 96 0;120 96 0;144 120 0;48 72 0;72 96 0;96 168 0;72 96 0;0.5 120 0;96 96 0;96 48 0;24 96 0;72 48 0;96 96 0,,0.002,0.006:0.0063:25;0.006:0.0063:25;0.006:0;0.008:0;0.006:0.0063:25;0.01:0.011:42;0.008:0.0084:34;0.008:0.0084:34;0.016:0.017:67;0.02:0.0021:8;0.008:0;0.008:0;0.01:0.011:42;0.012:0.013:50;0.01:0;0.01:0;0.012:0;0.01:0.011:42;0.016:0.017:67;0.01:0.0021:8;0.008:0;0.01:0.0021:8;0.008:0;0.012:0.013:50;0.01:0;0.01:0.0021:8;0.008:0;0.008:0;0.018:0;0.012:0;0.008:0.014:23;0.01:0.017:29;0.01:0.017:29;0.01:0.017:29;0.012:0.02:35;0.008:0;0.01:0.017:29;0.018:0.03:52;0.012:0.02:35;0.01:0.017:29;0.008:0.014:23;0.008:0.01:17;0.008:0;0.012:0.02:35;0.01:0.014:23;0.012:0.02:35;0.014:0.024:40;0.008:0;0.008:0;0.01:0.017:29;0.016:0.027:46;0.008:0.0034:6;0.01:0;0.008:0;0.008:0;0.008:0;0.008:0;0.008:0;0.008:0;0.008:0;0.01:0;0.008:0;0.008:0;0.01:0,,
 flag:coloredportal,portal,52049,Orange Portal,0,1,59530116:1;59530240:1;5953031F:1;59530335:1,20 -60 0.05;192.35 -75.82 12.06;120 -80 30.06;260 -40 30.06,,,,,
 flag:coloredportal,portal,52051,Yellow Portal,0,1,587A0177:1,328.7 -180 0.05,,,,,
-flag:coloredportal,portal,52055,Orange Portal,0,1,587A0100:1;587A013E:1;587A01FE:1;587A0252:1,-0 -90 0.05;170.23 -160.08 0.05;510 -120 0.05;629.79 -19.97 0.05,,,,,
+flag:coloredportal,portal,52055,Orange Portal,0,1,587A0100:1;587A013E:1;587A01FE:1;587A0252:1,0 -90 0.05;170.23 -160.08 0.05;510 -120 0.05;629.79 -19.97 0.05,,,,,
 flag:coloredportal,portal,52056,White Portal,0,1,587A0177:1,328.7 -180 0.05,,,,,
-flag:coloredportal,portal,52062,White Portal,0,1,587A0100:1;587A013E:1;587A01FE:1;587A0252:1,-0 -90 0.05;170.23 -160.08 0.05;510 -120 0.05;629.79 -19.97 0.05,,,,,
+flag:coloredportal,portal,52062,White Portal,0,1,587A0100:1;587A013E:1;587A01FE:1;587A0252:1,0 -90 0.05;170.23 -160.08 0.05;510 -120 0.05;629.79 -19.97 0.05,,,,,
 flag:coloredportal,portal,52070,Red Portal,0,1,587A0159:1;587A0179:1;587A019A:1;587A01E3:1,220.07 -230.18 0.05;330.27 -310 0.05;429.92 -159.96 0.05;500 -230 0.05,,,,,
 flag:coloredportal,portal,88101,Yellow Portal,0,1,587A0159:1;587A0179:1;587A019A:1;587A01E3:1,220.07 -230.18 0.05;330.27 -310 0.05;429.92 -159.96 0.05;500 -230 0.05,,,,,
 flag:coloredportal,portal,88102,Blue Portal,0,1,587A0159:1;587A0179:1;587A019A:1;587A01E3:1,220.07 -230.18 0.05;330.27 -310 0.05;429.92 -159.96 0.05;500 -230 0.05,,,,,
 flag:coloredportal,portal,88103,Blue Portal,0,1,59530116:1;59530240:1;5953031F:1;59530335:1,20 -60 0.05;192.35 -75.82 12.06;120 -80 30.06;260 -40 30.06,,,,,
 flag:coloredportal,portal,88104,Green Portal,0,1,587A0159:1;587A0179:1;587A019A:1;587A01E3:1,220.07 -230.18 0.05;330.27 -310 0.05;429.92 -159.96 0.05;500 -230 0.05,,,,,
-flag:coloredportal,portal,88105,Green Portal,0,1,587A0100:1;587A013E:1;587A01FE:1;587A0252:1,-0 -90 0.05;170.23 -160.08 0.05;510 -120 0.05;629.79 -19.97 0.05,,,,,
-flag:coloredportal,portal,88117,Yellow Portal,0,1,587A0100:1;587A013E:1;587A01FE:1;587A0252:1,-0 -90 0.05;170.23 -160.08 0.05;510 -120 0.05;629.79 -19.97 0.05,,,,,
+flag:coloredportal,portal,88105,Green Portal,0,1,587A0100:1;587A013E:1;587A01FE:1;587A0252:1,0 -90 0.05;170.23 -160.08 0.05;510 -120 0.05;629.79 -19.97 0.05,,,,,
+flag:coloredportal,portal,88117,Yellow Portal,0,1,587A0100:1;587A013E:1;587A01FE:1;587A0252:1,0 -90 0.05;170.23 -160.08 0.05;510 -120 0.05;629.79 -19.97 0.05,,,,,
 flag:coloredportal,portal,88118,Orange Portal,0,1,587A0177:1,328.7 -180 0.05,,,,,
 flag:coloredportal,portal,88119,Blue Portal,0,1,587A0177:1,328.7 -180 0.05,,,,,
 flag:coloredportal,portal,88120,White Portal,0,1,59530116:1;59530240:1;5953031F:1;59530335:1,20 -60 0.05;192.35 -75.82 12.06;120 -80 30.06;260 -40 30.06,,,,,
@@ -7787,12 +7788,12 @@ flag:gaerlankiller,kill,21388,Gaerlan,300,1,5745:1,,,1,1:2.5,,
 flag:gaerlankiller,kill,21390,Gaerlan,750,1,5A45:1,,,1,1:2.5,,
 flag:gaerlankiller,kill,46930,Gaerlan,750,1,5853:1,,,1,1:2.5,,
 flag:gatewatcherdefeated,kill,38351,Gate Watcher,200,1,DE:1,,,1,1:4,blindkeeperdead,
-flag:gauntletbossholcha_flag,portal,52926,Gauntlet Stage 11,0,1,59640114:1;59650114:1,80 -45.24 0.01;80 -45.24 0.01,,,,,
-flag:gauntletbossholcha_flag,portal,87960,Gauntlet Stage 11,0,1,59600114:1;59610114:1,80 -45.24 0.01;80 -45.24 0.01,,,,,
-flag:gauntletbossholcha_flag,portal,88020,Gauntlet Stage 11,0,1,59620114:1;59630114:1,80 -45.24 0.01;80 -45.24 0.01,,,,,
-flag:gauntletbosstremborh_flag,portal,52924,Gauntlet Stage 9,0,1,59640114:1;59650114:1,80 -45.24 0.01;80 -45.24 0.01,,,,,
-flag:gauntletbosstremborh_flag,portal,87958,Gauntlet Stage 9,0,1,59600114:1;59610114:1,80 -45.24 0.01;80 -45.24 0.01,,,,,
-flag:gauntletbosstremborh_flag,portal,88018,Gauntlet Stage 9,0,1,59620114:1;59630114:1,80 -45.24 0.01;80 -45.24 0.01,,,,,
+flag:gauntletbossholcha_flag,revealed,52926,Gauntlet Stage 11,0,1,59640114:1;59650114:1,80 -45.24 0.01;80 -45.24 0.01,,,,,
+flag:gauntletbossholcha_flag,revealed,87960,Gauntlet Stage 11,0,1,59600114:1;59610114:1,80 -45.24 0.01;80 -45.24 0.01,,,,,
+flag:gauntletbossholcha_flag,revealed,88020,Gauntlet Stage 11,0,1,59620114:1;59630114:1,80 -45.24 0.01;80 -45.24 0.01,,,,,
+flag:gauntletbosstremborh_flag,revealed,52924,Gauntlet Stage 9,0,1,59640114:1;59650114:1,80 -45.24 0.01;80 -45.24 0.01,,,,,
+flag:gauntletbosstremborh_flag,revealed,87958,Gauntlet Stage 9,0,1,59600114:1;59610114:1,80 -45.24 0.01;80 -45.24 0.01,,,,,
+flag:gauntletbosstremborh_flag,revealed,88018,Gauntlet Stage 9,0,1,59620114:1;59630114:1,80 -45.24 0.01;80 -45.24 0.01,,,,,
 flag:glendeninvadersblockadee,kill,32328,Blockade Guard,80,1,A4A3:6,,,1,6:90,,
 flag:glendeninvadersblockaden,kill,32327,Blockade Guard,100,1,A2A7:6,,,1,6:90,,
 flag:glendeninvadersblockadew,kill,32333,Blockade Guard,115,1,9FA5:6,,,1,6:90,,
