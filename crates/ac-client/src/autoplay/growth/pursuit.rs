@@ -1418,6 +1418,21 @@ impl Client {
         grounds.iter().find(|(l, _)| *l == lb).map(|(_, p)| *p)
     }
 
+    /// The landblock of the ground of `grounds` stood on: `here`'s, or outdoors one whose place
+    /// is within the [`GROUND_REACH`] its walk ends at, which may lie over a landblock's edge.
+    fn ground_stood_on(&self, grounds: &[(u32, Place)], here: u32) -> Option<u32> {
+        if grounds.iter().any(|(lb, _)| *lb == here) {
+            return Some(here);
+        }
+        let cell = self.player.as_ref()?.cell;
+        let me = self.my_position()?.truncate();
+        grounds
+            .iter()
+            .filter(|(_, p)| cell & 0xFFFF < 0x100 && !p.is_indoors())
+            .find(|(_, p)| p.at.truncate().distance(me) <= GROUND_REACH)
+            .map(|(lb, _)| *lb)
+    }
+
     /// Whether the working pursuit hunts in `lb`, at spots a creature it seeks spawns at.
     pub(crate) fn hunts_spawn_spots(&self, lb: u32) -> bool {
         let hunting = matches!(
@@ -1477,21 +1492,6 @@ impl Client {
             .growth
             .spawns_walked
             .retain(|c| near.contains(c));
-    }
-
-    /// The landblock of the ground of `grounds` stood on: `here`'s, or outdoors one whose place
-    /// is within the [`GROUND_REACH`] its walk ends at, which may lie over a landblock's edge.
-    fn ground_stood_on(&self, grounds: &[(u32, Place)], here: u32) -> Option<u32> {
-        if grounds.iter().any(|(lb, _)| *lb == here) {
-            return Some(here);
-        }
-        let cell = self.player.as_ref()?.cell;
-        let me = self.my_position()?.truncate();
-        grounds
-            .iter()
-            .filter(|(_, p)| cell & 0xFFFF < 0x100 && !p.is_indoors())
-            .find(|(_, p)| p.at.truncate().distance(me) <= GROUND_REACH)
-            .map(|(lb, _)| *lb)
     }
 
     /// How near the ground on `lb` a journey there ends: in a pursued creature's own room, else
