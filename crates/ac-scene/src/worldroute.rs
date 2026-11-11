@@ -130,8 +130,8 @@ pub fn find_with(
     find_with_avoid(grid, water, from, to, &[])
 }
 
-/// Whether a route can end at world xy `at`: dry ground within an endpoint's snap. Off it (out
-/// at sea) [`find`] has no route there from anywhere.
+/// Whether a route can end at world xy `at`: walkable ground, waded water too, within an
+/// endpoint's snap. Off it (out at sea) [`find`] has no route there from anywhere.
 pub fn is_near_land(grid: &WorldGrid, region: &Region, at: Vec2) -> bool {
     let water: Vec<Water> = (0..32u16).map(|t| water_kind(region, t)).collect();
     let water = |t: u16| water.get(t as usize).copied().unwrap_or(Water::Sea);
@@ -209,7 +209,7 @@ impl Land<'_> {
         }
     }
 
-    /// A vertex a route may start or end on: dry land.
+    /// A vertex on dry land, not water: wading costs [`FRESH_WATER_FACTOR`] more.
     fn dry(&self, gx: usize, gy: usize) -> bool {
         self.at(gx, gy) == Some(Water::Land)
     }
@@ -274,7 +274,8 @@ impl Land<'_> {
         Some(cost)
     }
 
-    /// The dry vertex nearest a world xy within [`SNAP_RADIUS`].
+    /// The walkable vertex nearest a world xy within [`SNAP_RADIUS`]: [`Self::passable`], the
+    /// server's rule for a walk (LandCell.cs:55), so water a walk wades may start or end one.
     fn nearest_land(&self, world: Vec2) -> Option<(usize, usize)> {
         let (cx, cy) = WorldGrid::nearest_vertex(world);
         let mut best: Option<((usize, usize), f32)> = None;
@@ -285,7 +286,7 @@ impl Land<'_> {
                     continue;
                 }
                 let (x, y) = (x as usize, y as usize);
-                if !self.dry(x, y) {
+                if !self.passable(x, y) {
                     continue;
                 }
                 let d = WorldGrid::vertex_world(x, y).distance_squared(world);
@@ -611,6 +612,23 @@ mod tests {
         assert!(t0.elapsed().as_millis() < 500);
         // Out in the walled block there is no shore to move to.
         assert!(find_with(&g, kind, from, WorldGrid::vertex_world(12, 4)).is_none());
+    }
+
+    #[test]
+    fn a_goal_in_wadeable_water_far_from_land_is_reached() {
+        // The ends snapped to dry land only, within three vertices: a goal waded to more than
+        // 72 m out read as out at sea, though the server walks a block not all water (LandCell.cs:55).
+        let mut g = flat(4);
+        for x in 8..=32 {
+            for y in 8..=32 {
+                set_type(&mut g, x, y, 1);
+            }
+        }
+        // One vertex of land keeps block (1, 1) wadeable; its neighbours inside are all sea.
+        set_type(&mut g, 9, 9, 0);
+        let from = WorldGrid::vertex_world(2, 2);
+        let to = WorldGrid::vertex_world(15, 15);
+        assert!(find_with(&g, kind, from, to).is_some());
     }
 
     #[test]
