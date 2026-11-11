@@ -31,6 +31,8 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+mod receiver;
+
 use super::{caption, title, title_bar, window, Source};
 use crate::{egui, Client, Ctx, Plugin, Settings};
 use ac_client::autoplay::LootAction;
@@ -171,7 +173,7 @@ pub(crate) fn verdict_words(v: &Verdict) -> (String, egui::Color32) {
         Verdict::Decided(action, rule) => {
             let colour = match action {
                 LootAction::Keep => GOOD,
-                LootAction::Salvage | LootAction::Sell | LootAction::Drain => {
+                LootAction::Salvage | LootAction::Sell | LootAction::Drain | LootAction::Give => {
                     egui::Color32::from_rgb(170, 200, 230)
                 }
                 LootAction::Skip => DIM,
@@ -576,6 +578,7 @@ fn action_box(ui: &mut egui::Ui, salt: &str, action: &mut LootAction) {
                         LootAction::Drain => {
                             "take it and drain its mana into an empty mana stone, which destroys it"
                         }
+                        LootAction::Give => "take it and hand it to the receiver named below",
                     });
             }
         });
@@ -852,6 +855,7 @@ fn rule_editor(ui: &mut egui::Ui, salt: &str, rule: &mut Rule, editor: &mut Edit
             ui.weak("e.g. 1-7, 8, 9, 10; empty is all together");
         });
     }
+    receiver::row(ui, salt, rule);
     caption(ui, "every one of these must hold");
     let mut drop = None;
     for i in 0..rule.all.len() {

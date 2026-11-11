@@ -25,15 +25,18 @@ pub enum LootAction {
     Skip,
     /// Take it and drain its mana into an empty mana stone, which destroys it; sold if none is.
     Drain,
+    /// Take it and hand it to the rule's [`Rule::give_to`]; carried, never sold, until given.
+    Give,
 }
 
 impl LootAction {
-    pub const ALL: [LootAction; 5] = [
+    pub const ALL: [LootAction; 6] = [
         LootAction::Keep,
         LootAction::Salvage,
         LootAction::Sell,
         LootAction::Skip,
         LootAction::Drain,
+        LootAction::Give,
     ];
 
     pub fn label(self) -> &'static str {
@@ -43,10 +46,11 @@ impl LootAction {
             LootAction::Sell => "sell",
             LootAction::Skip => "skip",
             LootAction::Drain => "drain",
+            LootAction::Give => "give",
         }
     }
 
-    /// The action a word names ("keep", "salvage", "sell", "skip", "drain").
+    /// The action a word names ("keep", "salvage", "sell", "skip", "drain", "give").
     pub fn parse(word: &str) -> Option<LootAction> {
         let w = word.trim().to_lowercase();
         LootAction::ALL.into_iter().find(|a| a.label() == w)
@@ -63,7 +67,7 @@ impl LootAction {
         match self {
             LootAction::Keep => 3,
             LootAction::Salvage => 2,
-            LootAction::Sell | LootAction::Drain => 1,
+            LootAction::Sell | LootAction::Drain | LootAction::Give => 1,
             // Nothing is held under a skip, so it loses to anything taken.
             LootAction::Skip => 0,
         }
@@ -372,6 +376,31 @@ pub struct Rule {
     /// The quest whose pursuit added it to the [`QUESTS`] section; empty for a player's own rule.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub quest: String,
+    /// A give rule's receiver; read only with [`LootAction::Give`], none gives nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub give_to: Option<GiveTo>,
+}
+
+/// Whom a give rule hands its items to: `"taker"`, `{"npc": "Terese"}`, `{"player": "Mule"}`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GiveTo {
+    /// The nearest NPC that takes anything (`ac_world::takers`), on a town run.
+    Taker,
+    /// An NPC by its name, on a town run.
+    Npc(String),
+    /// A player character by name (a mule), only when in view and in reach.
+    Player(String),
+}
+
+impl GiveTo {
+    /// The receiver in words, for the log and the editor.
+    pub fn tell(&self) -> String {
+        match self {
+            GiveTo::Taker => "the nearest taker".to_string(),
+            GiveTo::Npc(n) | GiveTo::Player(n) => n.clone(),
+        }
+    }
 }
 
 impl Default for Rule {
@@ -385,6 +414,7 @@ impl Default for Rule {
             keep_up_to: None,
             combine: String::new(),
             quest: String::new(),
+            give_to: None,
         }
     }
 }
@@ -772,12 +802,14 @@ impl Profile {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
         // A salvage rule's bands decide how it salvages, not what it takes: edited, they re-judge
-        // nothing, and an empty one is skipped, so every older fingerprint stands.
+        // nothing, and an empty one is skipped, so every older fingerprint stands. A give rule's
+        // receiver is the same: where it goes, not what is taken.
         let rules: Vec<Rule> = self
             .rules
             .iter()
             .map(|r| Rule {
                 combine: String::new(),
+                give_to: None,
                 ..r.clone()
             })
             .collect();
@@ -2531,6 +2563,46 @@ mod tests {
         assert!(old.quest.is_empty());
         let old: Buy = serde_json::from_str(r#"{"what":"Taper","keep":5}"#).expect("an old line");
         assert!(old.quest.is_empty() && old.group.is_empty());
+    }
+
+    #[test]
+    fn a_give_rule_names_its_receiver_and_old_rules_load_with_none() {
+        let old: Rule = serde_json::from_str(r#"{"name":"x","on":true,"action":"keep","all":[]}"#)
+            .expect("an old rule");
+        assert_eq!(old.give_to, None);
+        assert!(!serde_json::to_string(&old).unwrap().contains("give_to"));
+        let to_mule =
+            r#"{"name":"armour to the mule","action":"give","give_to":{"player":"Mule"}}"#;
+        let mule: Rule = serde_json::from_str(to_mule).unwrap();
+        assert_eq!(mule.action, LootAction::Give);
+        assert_eq!(mule.give_to, Some(GiveTo::Player("Mule".into())));
+        let junk: Rule =
+            serde_json::from_str(r#"{"name":"junk","action":"give","give_to":"taker"}"#).unwrap();
+        assert_eq!(junk.give_to, Some(GiveTo::Taker));
+        let seeds: Rule =
+            serde_json::from_str(r#"{"name":"s","action":"give","give_to":{"npc":"Terese"}}"#)
+                .unwrap();
+        assert_eq!(seeds.give_to, Some(GiveTo::Npc("Terese".into())));
+        let back: Rule = serde_json::from_str(&serde_json::to_string(&mule).unwrap()).unwrap();
+        assert_eq!(back, mule);
+        // Giving is cautious as selling is: a kept half of a poured stack stays kept.
+        assert_eq!(
+            LootAction::Give.safer_of(LootAction::Keep),
+            LootAction::Keep
+        );
+        assert_eq!(LootAction::parse("give"), Some(LootAction::Give));
+        // Where it goes is not what is taken: the receiver leaves the fingerprint alone.
+        let with = |give_to| Profile {
+            rules: vec![Rule {
+                give_to,
+                ..mule.clone()
+            }],
+            ..Default::default()
+        };
+        assert_eq!(
+            with(None).fingerprint(),
+            with(Some(GiveTo::Taker)).fingerprint()
+        );
     }
 }
 

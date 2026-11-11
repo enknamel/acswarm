@@ -354,7 +354,13 @@ mod tests {
             Fate::Staying,
             "sell, but the server will not take it"
         );
-        for kept in [LootAction::Keep, LootAction::Salvage, LootAction::Skip] {
+        // A give rule's items go to its receiver, never over a counter.
+        for kept in [
+            LootAction::Keep,
+            LootAction::Salvage,
+            LootAction::Skip,
+            LootAction::Give,
+        ] {
             assert_eq!(fate(Some(kept), false), Fate::Staying, "{}", kept.label());
         }
         assert_eq!(fate(None, false), Fate::Undecided);
