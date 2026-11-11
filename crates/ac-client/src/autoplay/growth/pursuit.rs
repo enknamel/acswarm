@@ -604,8 +604,7 @@ impl Ask<'_> {
         // An item whose pickup stamp waits is not gone for: the server turns the pickup down (the
         // Ancient Key hunted with novquest1 2.6 h off). With every one so, the quest waits.
         let waits = |w: &Want| match w {
-            Want::Item(i) => ac_world::quests::pickup_limit(*i)
-                .and_then(|p| self.facts.log.wait_until(p.stamp, self.facts.now)),
+            Want::Item(i) => self.facts.log.pickup_wait(*i, self.facts.now),
             _ => None,
         };
         let open: Vec<Want> = wants

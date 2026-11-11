@@ -2672,6 +2672,35 @@ fn the_bound_scepter_with_the_cloak_carried_goes_for_the_essence_chest_s_key() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
+fn a_gem_whose_pickup_stamp_waits_is_not_wanted_as_a_way() {
+    // The Adjanite Gem (27772) the only way to the Essence chest, picked up 51000 s of its 72000
+    // before: wanted, then dropped by the board's obtain, which waits on it, every 3 s.
+    let mut c = mage_pursuing("give:27841", "chained-quests");
+    // A goal where the gem lands: no other gem's way is shorter.
+    let adjanite = 27772;
+    let landing = ac_world::gems::all()
+        .iter()
+        .find(|g| g.wcid == adjanite)
+        .map(|g| Place {
+            at: g.at,
+            cell: g.cell,
+        })
+        .expect("the Adjanite Gem");
+    let goal = [(landing.cell >> 16, landing)];
+    let gem = c.gem_way(&goal, &[]);
+    assert_eq!(gem.map(|g| g.wcid), Some(adjanite));
+    let limit = ac_world::quests::pickup_limit(adjanite).expect("its pickup stamp");
+    c.quest_log
+        .note_wait(limit.stamp, crate::holdings::unix_now() + 21_000);
+    let other = c.gem_way(&goal, &[]);
+    assert!(
+        other.as_ref().is_none_or(|g| g.wcid != adjanite),
+        "{other:?}"
+    );
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
 fn only_the_creatures_of_the_grounds_hunted_are_sought() {
     // The Sturdy Iron Key drops from 398 creatures, a Gotrok Tiatus at 2% among them: all were
     // sought, so one met on the road to the Virindi Inquisitor (80%) was fought, never walked past.

@@ -88,6 +88,12 @@ impl QuestLog {
     pub fn wait_until(&self, timer: &str, now: u64) -> Option<u64> {
         self.waits.get(timer).copied().filter(|&t| t > now)
     }
+
+    /// When an item of class `wcid` may be picked up again, if its pickup stamp waits past `now`:
+    /// the server turns the pickup down till then.
+    pub fn pickup_wait(&self, wcid: u32, now: u64) -> Option<u64> {
+        ac_world::quests::pickup_limit(wcid).and_then(|p| self.wait_until(p.stamp, now))
+    }
 }
 
 /// Why a quest can't be done yet.

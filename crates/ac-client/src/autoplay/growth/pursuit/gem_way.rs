@@ -74,8 +74,11 @@ impl Client {
         }
         // (hunted or fetched, seconds on from the exit), the item
         let mut best: Option<((bool, f32), GemWanted)> = None;
+        let unix = crate::holdings::unix_now();
         for (wcid, name, exit, first) in ways {
-            if self.carried_count(wcid) > 0 {
+            // One whose pickup stamp waits is not wanted: the board's obtain waits on it, which
+            // dropped the want and had it wanted again every board (the Adjanite Gem, 72000 s).
+            if self.carried_count(wcid) > 0 || self.quest_log.pickup_wait(wcid, unix).is_some() {
                 continue;
             }
             let want = Want::Item(wcid);
