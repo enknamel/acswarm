@@ -320,6 +320,7 @@ impl Client {
                             // went nowhere and was written off.
                             self.move_to = None;
                             self.hop_landed();
+                            self.teleported_at = Some(now);
                             // After a server teleport, take the new position and
                             // tell the server we landed.
                             if let (Some(pl), Some(p)) = (

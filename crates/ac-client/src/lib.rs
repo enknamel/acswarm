@@ -233,6 +233,8 @@ pub struct Client {
     /// A use of something the server no longer has is answered with that
     /// and nothing more (see `autoplay::answered_with_nothing`).
     pub(crate) use_done: Option<(u32, Instant)>,
+    /// The tick the server last teleported our character (PlayerTeleport): a portal gone through.
+    pub(crate) teleported_at: Option<Instant>,
     /// The tick the server last put something in words: a transient
     /// string or a weenie error. "You do not yet have the right to loot"
     /// is one, and it is what tells a corpse that is locked from one that

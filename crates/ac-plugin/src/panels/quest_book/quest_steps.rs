@@ -385,6 +385,13 @@ pub(crate) fn step_words(step: &PursuitStep, now: u64, place: &dyn Fn(u32) -> St
             format!("handing it in to {} at {}", row.giver, place(at.cell))
         }
         PursuitStep::Read { name, .. } => format!("reading {name}"),
+        PursuitStep::GoThrough { name, at, flag, .. } => {
+            format!(
+                "going through {name} at {} for the {flag} flag",
+                place(at.cell)
+            )
+        }
+        PursuitStep::Arena { flag, step } => step.words(flag),
         PursuitStep::Waiting { until } => {
             format!("waits {}", time_left(until.saturating_sub(now)))
         }

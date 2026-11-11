@@ -259,6 +259,12 @@ pub struct State {
     pub(crate) events_on: Recent<String>,
     /// Kills of ours an event's watcher heard while it was not taken for on, by event.
     pub(crate) event_deaths: std::collections::BTreeMap<String, u32>,
+    /// The arena deed awaiting its answer (`pursuit::arena`).
+    pub(crate) arena_deeding: Option<pursuit::arena::Deeding>,
+    /// When this character's ticket was taken: its fellowship's arena access since.
+    pub(crate) arena_access: Option<Instant>,
+    /// The arena bells this character rang where it stands; none once out of every arena.
+    pub(crate) arena_rung: Vec<u32>,
     /// Pursued grounds left for the next or to unload, and when the character was last in or
     /// beside each (`pursuit::sweep`).
     pub(crate) swept: Recent<u32>,

@@ -18,6 +18,7 @@ use crate::autoplay::{Doing, Pursuit, QuestEnd};
 use crate::quest_log::{Blocked, QuestFacts, QuestLine, QuestState};
 use crate::Client;
 
+pub(crate) mod arena;
 mod events;
 mod fetch;
 mod flag_way;
@@ -99,6 +100,16 @@ pub enum PursuitStep {
     },
     /// Hand in to `row`'s giver at `at`.
     HandIn { row: &'static Row, at: Place },
+    /// Walk to the portal `name` (weenie class `wcid`) at `at` and go through it: that stamps
+    /// `flag` (its Portal emote set, Portal.cs:287).
+    GoThrough {
+        wcid: u32,
+        name: String,
+        at: Place,
+        flag: String,
+    },
+    /// A step of the arena run for `flag` (`arena`).
+    Arena { flag: String, step: arena::Stage },
     /// Read the carried scroll `name` (weenie class `wcid`) for `spell`: no giver, the scroll
     /// reader (`autoplay_learn_scrolls`) reads it while nothing else is on.
     Read { wcid: u32, name: String, spell: u32 },
@@ -127,6 +138,8 @@ impl PursuitStep {
                 | PursuitStep::Combine { .. }
                 | PursuitStep::HandIn { .. }
                 | PursuitStep::Read { .. }
+                | PursuitStep::GoThrough { .. }
+                | PursuitStep::Arena { .. }
         )
     }
 
@@ -183,6 +196,11 @@ impl PursuitStep {
                 )
             }
             PursuitStep::HandIn { row, .. } => format!("hand it in to {}", row.giver),
+            PursuitStep::GoThrough { name, at, flag, .. } => {
+                let place = ac_world::quest_chain::place_name(at.cell);
+                format!("go through {name} in {place} for the {flag} flag")
+            }
+            PursuitStep::Arena { flag, step } => step.words(flag),
             PursuitStep::Read { name, .. } => format!("read {name}"),
             PursuitStep::Waiting { until } => {
                 let left = until.saturating_sub(now);
@@ -374,6 +392,8 @@ pub(crate) struct Ask<'a> {
     pub(crate) kill_secs: &'a dyn Fn(u32) -> Option<f32>,
     /// Whether a server event is taken for on (`events::belief`): what it gates is about.
     pub(crate) event_on: &'a dyn Fn(&str) -> bool,
+    /// What an arena run's stage is read from (`arena`).
+    pub(crate) arena: &'a arena::ArenaView,
 }
 
 /// Each line's step, worked out with the `board` the chained list's facts gave; the first that
@@ -882,6 +902,7 @@ impl Client {
             return;
         }
         self.keep_gem_ways();
+        let arena = self.arena_view(now);
         let held_flags = &facts.held;
         let st = &mut self.autoplay.growth;
         st.pursuit_flags
@@ -941,6 +962,7 @@ impl Client {
         let kill_secs = |wcid: u32| killing.secs(wcid);
         let event_on = |e: &str| self.is_event_on(e, now);
         let ask = Ask {
+            arena: &arena,
             facts,
             asking: &asking,
             tried: &tried,
@@ -1317,6 +1339,9 @@ impl Client {
             | PursuitStep::UseOn { .. }
             | PursuitStep::AskFor { .. }
             | PursuitStep::Combine { .. } => self.grow_fetch(&line, now),
+            PursuitStep::GoThrough { .. } | PursuitStep::Arena { .. } => {
+                self.grow_arena(&line, now)
+            }
             _ => None,
         }
     }

@@ -175,6 +175,20 @@ fn work_events(
     kill_secs: &dyn Fn(u32) -> Option<f32>,
     event_on: &dyn Fn(&str) -> bool,
 ) -> Pursued {
+    let arena = arena::ArenaView::default();
+    work_in(facts, fake, led, dropped, kill_secs, event_on, &arena)
+}
+
+/// [`work_events`], the arena run's stages read from `arena`.
+fn work_in(
+    facts: &QuestFacts,
+    fake: &dyn Chains,
+    led: Option<&str>,
+    dropped: &dyn Fn(&Source) -> bool,
+    kill_secs: &dyn Fn(u32) -> Option<f32>,
+    event_on: &dyn Fn(&str) -> bool,
+    arena: &arena::ArenaView,
+) -> Pursued {
     let holds = |f: &str| crate::quest_log::holds(facts, f);
     let chained = with_chain(&facts.config.pursue, &holds, fake);
     let mut f = facts.clone();
@@ -205,6 +219,7 @@ fn work_events(
         bound: None,
         kill_secs,
         event_on,
+        arena,
     };
     pursuit_of(&board, &chained, &ask)
 }
@@ -3889,17 +3904,235 @@ fn stone_fists_a_character_who_cannot_kill_the_boss_is_told_so_and_not_sent_for_
 }
 
 #[test]
-fn stone_fists_the_arena_flag_is_named_with_the_portal_that_stamps_it() {
-    // AccessBoss3 is stamped only by going through the Colosseum's Arena 3 portal (its Portal
-    // emote set, Portal.cs:287): no NPC, kill or quest gives it, so nobody was known to.
-    let PursuitStep::Stuck { why } = stone_fists_step(&[], &[], &|_| true) else {
-        panic!("not stuck");
+fn a_flag_a_standing_portal_stamps_is_had_by_going_through_it() {
+    // HarbingerEssenceless is stamped going through Harbinger's Lair (its Portal emote set,
+    // Portal.cs:287), which stands from its landblock's load.
+    let f = facts(150, &[]);
+    let carried = |_| 0;
+    let asking = Asking {
+        level: f.level,
+        held: &f.held,
+        carried: &carried,
+        refused: &|_, _| false,
+        away: &|_| 0.0,
     };
-    assert_eq!(
-        why,
-        "Stone Fists Token needs the stonefistsbossstart event first: the AccessBoss3 flag is \
-         stamped going through Arena 3 in dungeon 00B0: autoplay does not go there for it yet"
+    let held = BTreeMap::new();
+    let arena = arena::ArenaView::default();
+    let ask = Ask {
+        facts: &f,
+        asking: &asking,
+        tried: &|_: &Unlock| false,
+        held: &held,
+        led: None,
+        chains: &ChainData,
+        dropped: &|_| false,
+        unlocked: &|_| false,
+        ways: &BTreeMap::new(),
+        gem_grounds: &Default::default(),
+        flag_ways: &BTreeMap::new(),
+        here: None,
+        bound: None,
+        kill_secs: &|_| Some(20.0),
+        event_on: &|_| false,
+        arena: &arena,
+    };
+    match ask.flag_step("HarbingerEssenceless", 0).0 {
+        PursuitStep::GoThrough {
+            wcid, name, flag, ..
+        } => assert_eq!(
+            (wcid, name.as_str(), flag.as_str()),
+            (81000, "Harbinger's Lair", "HarbingerEssenceless")
+        ),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_portal_is_gone_through_and_its_flag_held_once_the_teleport_comes() {
+    let (mut c, line) = fetching(|at| PursuitStep::GoThrough {
+        wcid: 81000,
+        name: "Harbinger's Lair".into(),
+        at,
+        flag: "HarbingerEssenceless".into(),
+    });
+    let PursuitStep::GoThrough { at, .. } = line.step else {
+        unreachable!()
+    };
+    lying(&mut c, 0x7AB0_2001, 81000, "Harbinger's Lair", at);
+    let now = Instant::now();
+    assert_eq!(c.grow_arena(&line, now), Some(true));
+    let sent = c.autoplay.growth.arena_deeding.expect("used");
+    assert_eq!((sent.deed, sent.wcid), (arena::Deed::Enter, 81000));
+    assert!(!c.holds_quest_flag("HarbingerEssenceless"));
+    let soon = now + Duration::from_millis(500);
+    c.teleported_at = Some(soon);
+    assert_eq!(c.grow_arena(&line, soon), Some(true));
+    assert!(c.holds_quest_flag("HarbingerEssenceless"));
+    assert_eq!(c.autoplay.growth.arena_deeding, None);
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn an_arena_bell_is_rung_and_a_ticket_handed_back_passes_the_quest_over() {
+    let ring = |at| PursuitStep::Arena {
+        flag: "accessboss3".into(),
+        step: arena::Stage::Ring {
+            room: 1,
+            wcid: 34604,
+            at,
+        },
+    };
+    let (mut c, line) = fetching(ring);
+    let PursuitStep::Arena {
+        step: arena::Stage::Ring { at, .. },
+        ..
+    } = line.step
+    else {
+        unreachable!()
+    };
+    lying(&mut c, 0x7AB0_2002, 34604, "Arena Bell", at);
+    let now = Instant::now();
+    assert_eq!(c.grow_arena(&line, now), Some(true));
+    let soon = now + Duration::from_millis(300);
+    c.use_done = Some((0, soon));
+    assert_eq!(c.grow_arena(&line, soon), Some(true));
+    assert_eq!(c.autoplay.growth.arena_rung, [34604]);
+    // The Master Arbitrator hands a ticket back with no arena free (EmoteManager.cs:500-517).
+    let hand = |at| PursuitStep::Arena {
+        flag: "accessboss3".into(),
+        step: arena::Stage::HandTicket {
+            giver: "Master Arbitrator".into(),
+            wcid: 34441,
+            item: 34449,
+            at,
+        },
+    };
+    let (mut c, line) = fetching(hand);
+    let PursuitStep::Arena {
+        step: arena::Stage::HandTicket { at, .. },
+        ..
+    } = line.step
+    else {
+        unreachable!()
+    };
+    lying(&mut c, 0x7AB0_2003, 34441, "Master Arbitrator", at);
+    carrying(&mut c, 0x8000_0901, 34449, "Colosseum Ticket");
+    assert_eq!(c.grow_arena(&line, now), Some(true));
+    let sent = c.autoplay.growth.arena_deeding.expect("given");
+    assert_eq!(sent.deed, arena::Deed::Give(34449));
+    let later = now + fetch::ANSWER_WAIT;
+    assert_eq!(c.grow_arena(&line, later), Some(false));
+    assert!(c.autoplay.growth.pursuit_held.contains_key(&line.id));
+    assert_eq!(c.autoplay.growth.arena_access, None);
+}
+
+/// The Stone Fists Token's working step at level 150, carrying `carried`, the arena seen as `v`.
+fn arena_step_with(carried: &[u32], v: &arena::ArenaView) -> PursuitStep {
+    let mut f = facts(150, &[("give:34454", true)]);
+    f.carried = carried.iter().map(|&w| (w, 1)).collect();
+    let p = work_in(
+        &f,
+        &ChainData,
+        None,
+        &|_| false,
+        &|_| Some(20.0),
+        &|_| false,
+        v,
     );
+    p.lines[0].step.clone()
+}
+
+#[test]
+fn stone_fists_the_arena_flag_is_had_by_running_the_colosseum_s_rooms_one_to_two() {
+    // AccessBoss3 is stamped only going through Arena 3, which room 2's waves passed reveal; room
+    // 2 is reached through room 1's Arena 2; the arena by the Colosseum Arena's teleport for a
+    // fellowship the Master Arbitrator let in for a ticket (arenas.csv, EmoteManager.cs:500-517).
+    let stage = |s: &PursuitStep| match s {
+        PursuitStep::Arena { step, .. } => Some(step.clone()),
+        _ => None,
+    };
+    let mut v = arena::ArenaView::default();
+    assert_eq!(
+        stage(&arena_step_with(&[], &v)),
+        Some(arena::Stage::Fellowship)
+    );
+    v.team_unfellowed = true;
+    assert!(matches!(
+        arena_step_with(&[], &v),
+        PursuitStep::Stuck { .. }
+    ));
+    v.team_unfellowed = false;
+    v.fellowship = true;
+    let note = 20630;
+    // The note itself, had from wherever is nearest (a shop, the Hermit's talk).
+    match arena_step_with(&[], &v) {
+        PursuitStep::Buy { wcid, .. } => assert_eq!(wcid, note),
+        PursuitStep::AskFor { source, .. } => assert_eq!(source.want, Want::Item(note)),
+        other => panic!("the ticket's trade note: {other:?}"),
+    }
+    match arena_step_with(&[note], &v) {
+        PursuitStep::HandIn { row, .. } => assert_eq!(row.giver, "Colosseum Ticket Vendor"),
+        other => panic!("the note handed for the ticket: {other:?}"),
+    }
+    let ticket = 34449;
+    assert!(matches!(
+        stage(&arena_step_with(&[ticket], &v)),
+        Some(arena::Stage::HandTicket { wcid: 34441, .. })
+    ));
+    v.access = true;
+    assert!(matches!(
+        stage(&arena_step_with(&[], &v)),
+        Some(arena::Stage::Enter { wcid: 34727, .. })
+    ));
+    // In arena One's room 1, where the teleport lands, then room 2, 90 m north.
+    let origin = ac_world::landblock_origin(0x00B0_016B);
+    v.at = Some((0xB0, origin + glam::Vec3::new(30.0, -1573.0, 0.0)));
+    assert!(matches!(
+        stage(&arena_step_with(&[], &v)),
+        Some(arena::Stage::Ring {
+            room: 1,
+            wcid: 34604,
+            ..
+        })
+    ));
+    v.rung = vec![34604];
+    assert!(matches!(
+        stage(&arena_step_with(&[], &v)),
+        Some(arena::Stage::Clear { room: 1, .. })
+    ));
+    let spot = |y: f32| ac_world::Place {
+        at: origin + glam::Vec3::new(30.0, y, 0.0),
+        cell: 0x00B0_0169,
+    };
+    v.portals = vec![(34517, spot(-1546.0))];
+    assert!(matches!(
+        stage(&arena_step_with(&[], &v)),
+        Some(arena::Stage::Leave {
+            room: 1,
+            wcid: 34517,
+            ..
+        })
+    ));
+    v.at = Some((0xB0, origin + glam::Vec3::new(30.0, -1483.0, 0.0)));
+    v.portals.clear();
+    assert!(matches!(
+        stage(&arena_step_with(&[], &v)),
+        Some(arena::Stage::Ring {
+            room: 2,
+            wcid: 34718,
+            ..
+        })
+    ));
+    v.portals = vec![(34518, spot(-1456.0))];
+    assert!(matches!(
+        stage(&arena_step_with(&[], &v)),
+        Some(arena::Stage::Leave {
+            room: 2,
+            wcid: 34518,
+            ..
+        })
+    ));
 }
 
 #[test]
@@ -3958,9 +4191,10 @@ fn played_at_the_silver_tuskers_rooms_the_wait_is_stood_till_it_ends() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
-fn blargerton_at_67_is_told_the_stone_fists_token_waits_on_the_arena_3_flag() {
+fn blargerton_at_67_founds_a_fellowship_to_run_the_arena_for_the_stone_fists_token() {
     // He pursued give:34454 and stood "nobody known yields the stonefistsbossstart event": the
-    // golems its watcher counts and the portal stamping the arena's flag were not in the data.
+    // golems its watcher counts and the arena revealing its flag were not in the data. Alone, he
+    // founds a fellowship of his own: the Master Arbitrator takes a ticket only from a fellow.
     let mut c = mage_pursuing("give:34454", "stone-fists");
     c.world.stats.level = 67;
     let now = std::time::Instant::now();
@@ -3971,10 +4205,10 @@ fn blargerton_at_67_is_told_the_stone_fists_token_waits_on_the_arena_3_flag() {
     );
     assert_eq!(
         c.pursuit[0].words(0),
-        "Stone Fists Token: passed over: Stone Fists Token needs the stonefistsbossstart event \
-         first: the AccessBoss3 flag is stamped going through Arena 3 in dungeon 00B0: autoplay \
-         does not go there for it yet"
+        "Stone Fists Token: working: found a fellowship for the arena (the AccessBoss3 flag)"
     );
+    assert_eq!(c.grow_pursuit(now), Some(true));
+    assert_eq!(c.autoplay.founded, Some(now));
 }
 
 #[test]
@@ -4037,4 +4271,46 @@ fn the_stone_fists_watcher_is_taken_for_started_only_after_eight_of_our_golem_ki
         c.world.objects.remove(&(0x5000_0A00 + i));
     }
     assert!(c.is_event_on("stonefistsbossstart", now));
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn a_follower_goes_into_the_arena_and_through_a_room_after_its_leader() {
+    // The leader's fellowship holds the arena's access quest, so the Colosseum Arena sends its
+    // fellows in too (InqFellowQuest, EmoteManager.cs:500-517); its rooms are left by portals.
+    let hall = 0x00AF_010F;
+    let origin = ac_world::landblock_origin(hall);
+    let mut c = crate::testkit::standing_in_the_field(80, hall, Vec3::new(31.5, 4.5, 0.0));
+    let npc = ac_world::Place {
+        at: origin + Vec3::new(30.81, 4.51, 0.0),
+        cell: hall,
+    };
+    lying(&mut c, 0x7AB0_3001, 34727, "Colosseum Arena", npc);
+    let arena = ac_world::landblock_origin(0x00B0_016B);
+    let mut leader = crate::testkit::mate(0x5000_0001, "Lead");
+    leader.leads = true;
+    leader.cell = 0x00B0_0167;
+    leader.world = arena + Vec3::new(30.0, -1470.0, 0.0);
+    let now = Instant::now();
+    assert_eq!(c.follow_arena(&leader, now), Some(true));
+    let sent = c.autoplay.growth.arena_deeding.expect("used");
+    assert_eq!((sent.deed, sent.wcid), (arena::Deed::Enter, 34727));
+    // Sent into room 1 beside its portal, with the leader a room on.
+    let soon = now + Duration::from_millis(500);
+    c.teleported_at = Some(soon);
+    assert_eq!(c.follow_arena(&leader, soon), Some(true));
+    crate::testkit::stand(&mut c, 0x00B0_0169, Vec3::new(30.0, -1547.5, 0.0));
+    let portal = ac_world::Place {
+        at: arena + Vec3::new(30.0, -1546.0, 0.0),
+        cell: 0x00B0_0169,
+    };
+    lying(&mut c, 0x7AB0_3002, 34517, "Arena 2", portal);
+    let later = soon + Duration::from_secs(1);
+    assert_eq!(c.follow_arena(&leader, later), Some(true));
+    let sent = c.autoplay.growth.arena_deeding.expect("used");
+    assert_eq!((sent.deed, sent.wcid), (arena::Deed::Enter, 34517));
+    // Beside the leader in its room: ordinary following.
+    leader.world = arena + Vec3::new(30.0, -1547.0, 0.0);
+    c.autoplay.growth.arena_deeding = None;
+    assert_eq!(c.follow_arena(&leader, later), None);
 }

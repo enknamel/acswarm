@@ -122,6 +122,13 @@ impl Ask<'_> {
             FlagBy::Portal(s) => Some(*s),
             _ => None,
         });
+        // A portal stamping it is gone through, or the arena revealing it run.
+        if let Some(s) = portal.filter(|_| killed.is_none()) {
+            let got = self.portal_step(flag, s, depth);
+            if !matches!(got.0, PursuitStep::Stuck { .. }) || quest.is_none() {
+                return got;
+            }
+        }
         match (quest, killed, portal) {
             (Some(row), _, _) => {
                 let why = format!(
@@ -132,18 +139,7 @@ impl Ask<'_> {
                 (stuck(why), None)
             }
             (None, Some(got), _) => got,
-            // Going through a portal for its stamp is no step autoplay takes (the Colosseum's
-            // Arena 3 opens only once a fellowship has cleared two arena rooms).
-            (None, None, Some(s)) => {
-                let place = s.places.first().map_or(0, |p| p.cell);
-                let why = format!(
-                    "the {flag} flag is stamped going through {} in {}: autoplay does not go there for it yet",
-                    s.name,
-                    ac_world::quest_chain::place_name(place)
-                );
-                (stuck(why), None)
-            }
-            (None, None, None) => (stuck(format!("nobody known gives the {flag} flag")), None),
+            (None, None, _) => (stuck(format!("nobody known gives the {flag} flag")), None),
         }
     }
 }

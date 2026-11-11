@@ -625,7 +625,7 @@ impl Client {
 
     /// The nearest object of weenie class `wcid` lying in the world within [`FOUND_NEAR`] of
     /// `place`, and where it stands.
-    fn lying_near(&self, wcid: u32, place: Place) -> Option<(u32, Place)> {
+    pub(super) fn lying_near(&self, wcid: u32, place: Place) -> Option<(u32, Place)> {
         let me = self.world.player_guid;
         self.world
             .objects

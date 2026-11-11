@@ -112,6 +112,7 @@ impl Client {
             hand_on_keys: false,
             move_refused: std::collections::HashMap::new(),
             use_done: None,
+            teleported_at: None,
             told: None,
             steering: route::Steering::default(),
             clutter: Default::default(),

@@ -83,6 +83,14 @@ impl Client {
             return false;
         };
         let keep = team.follow_distance.max(1.5);
+        // Into an arena and through its rooms the way the leader went: a teleport and portals.
+        if let Some(on) = self.follow_arena(&leader, now) {
+            if on {
+                self.autoplay
+                    .say(Doing::Following, format!("following {}", leader.name));
+            }
+            return on;
+        }
         // Fly when the leader flies, land when it lands.
         if leader.flying != self.flies_freely() {
             self.set_noclip(leader.flying);
