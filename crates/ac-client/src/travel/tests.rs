@@ -2081,12 +2081,25 @@ fn a_walk_refused_after_a_recall_into_a_building_is_not_planned_again() {
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
 fn a_journey_to_a_spot_out_at_sea_is_refused_before_setting_off() {
-    // The middle of 0x97ED, a Mosswart Mire-Witch landblock off Marae Lassel, is sea: every portal
-    // and recall was taken toward it and each last walk refused, for twenty minutes.
+    // Off Marae Lassel every portal and recall was taken toward a spot at sea and each last walk
+    // refused, for twenty minutes. Sea is a landblock all water (LandCell.cs:55): the middle of
+    // 0x97ED, a Mosswart Mire-Witch landblock with land in it, is waded to.
     let mut c = Client::offline(crate::testkit::game_data());
     crate::testkit::stand(&mut c, 0xA9B4_0019, Vec3::new(84.0, 7.1, 94.0));
-    let sea = Place::on_map(Vec2::new(29088.0, 45600.0));
-    assert!(!c.journey_to(sea, 10.0), "set off out to sea");
+    let wade = Vec2::new(29088.0, 45600.0);
+    assert!(!c.is_at_sea(wade), "its landblock has land");
+    // The nearest sea, a landblock at a time, eight ways round.
+    let sea = (0..8 * 12)
+        .map(|i| {
+            let a = (i % 8) as f32 * std::f32::consts::TAU / 8.0;
+            wade + Vec2::new(a.cos(), a.sin()) * 192.0 * (1 + i / 8) as f32
+        })
+        .find(|at| c.is_at_sea(*at))
+        .expect("the sea off Marae Lassel");
+    assert!(
+        !c.journey_to(Place::on_map(sea), 10.0),
+        "set off out to sea"
+    );
     assert!(!c.traveling());
     // Holtburg's lifestone, beside the character, is not.
     let me = c.my_position().expect("on its feet").truncate();
