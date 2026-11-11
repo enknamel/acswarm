@@ -1924,12 +1924,29 @@ fn an_item_whose_pickup_stamp_waits_is_waited_for_not_hunted() {
     );
 }
 
+/// The Wedding Planner's invitation wanted for `learn:2023`, as `gem_way` wants it once the walk
+/// over Ithaenc's shallows from the Freehold portal is refused live.
+fn invitation_wanted(c: &mut Client) {
+    let gem = ac_world::gems::all()
+        .iter()
+        .find(|g| g.name == "Invitation Ithaenc Cathedral")
+        .expect("the invitation");
+    let wanted = super::gem_way::GemWanted {
+        quest: String::new(),
+        wcid: gem.wcid,
+        name: gem.name.clone(),
+        had: false,
+    };
+    c.autoplay.growth.want_gem("learn:2023", wanted);
+    c.quest_board_at = None;
+}
+
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
 fn recall_the_sanctuary_is_had_by_the_ancient_key_bought_invitation_and_scroll_read() {
     // The Healer's Heart quest, done for its recall: the Mistress' Chest in Ithaenc's cathedral
-    // holds the scroll, opened with the Putrid Moarsman's Ancient Key; no portal goes to the
-    // island, and the Wedding Planner sells the invitation that does.
+    // holds the scroll, opened with the Putrid Moarsman's Ancient Key. The island is waded to
+    // from the Freehold portal; that walk refused, the Wedding Planner sells the invitation.
     let mut c = mage_pursuing("learn:2023", "recall-the-sanctuary");
     let now = std::time::Instant::now();
     c.refresh_quests(now);
@@ -1938,11 +1955,11 @@ fn recall_the_sanctuary_is_had_by_the_ancient_key_bought_invitation_and_scroll_r
         matches!(&hunt, PursuitStep::Hunt { creature, .. } if creature == "Putrid Moarsman"),
         "{hunt:?}"
     );
-    let cfg = c.autoplay.config.growth.clone();
-    assert!(!c.grow_hunt(now, &cfg), "set off with no journey there");
-    let gems = &c.autoplay.growth.pursuit_gems;
-    let names: Vec<&str> = gems.iter().map(|g| g.name.as_str()).collect();
-    assert_eq!(names, ["Invitation Ithaenc Cathedral"]);
+    let quests = c.travel.quests_done.clone();
+    let grounds = c.autoplay.growth.pursuit_grounds.clone();
+    let walks = grounds.iter().filter_map(|g| c.journey_plan(g.1, &quests));
+    assert!(walks.count() > 0, "no walk over the shallows");
+    invitation_wanted(&mut c);
     assert!(c.autoplay.growth.pursuit_held.is_empty(), "passed over");
     // The invitation is the step now, and the Quests section buys it: a run goes for it.
     let step = again(&mut c, now);
@@ -2078,8 +2095,8 @@ fn a_chest_whose_key_is_out_is_opened_not_another_key_hunted() {
 #[ignore = "needs AC_DATA_DIR"]
 fn the_copper_castellan_is_reached_by_the_gem_captain_ramelle_drops() {
     // Defense of Zaikhal: the Copper Legion Castellan stands in Corcima Castle's Copper Ward,
-    // which only the Copper Ward gem reaches; Captain Ramelle and her bodyguards drop it in the
-    // Copper Legion Keep, whose portal stands by Zaikhal.
+    // walked to from an Olthoi Tunnel's exit; that walk refused, the Copper Ward gem reaches it,
+    // which Captain Ramelle and her bodyguards drop in the Copper Legion Keep by Zaikhal.
     let mut c = mage_pursuing("copperknightmedallion", "copper-castellan");
     let now = std::time::Instant::now();
     c.refresh_quests(now);
@@ -2089,15 +2106,19 @@ fn the_copper_castellan_is_reached_by_the_gem_captain_ramelle_drops() {
         "{hunt:?}"
     );
     let cfg = c.autoplay.config.growth.clone();
-    assert!(!c.grow_hunt(now, &cfg));
-    let names: Vec<&str> = c
-        .autoplay
-        .growth
-        .pursuit_gems
+    assert!(c.grow_hunt(now, &cfg), "no walk to the Copper Ward");
+    c.cancel_travel();
+    let gem = ac_world::gems::all()
         .iter()
-        .map(|g| g.name.as_str())
-        .collect();
-    assert_eq!(names, ["Corcima Castle Copper Ward Portal Gem"]);
+        .find(|g| g.name == "Corcima Castle Copper Ward Portal Gem")
+        .expect("the Copper Ward gem");
+    let wanted = super::gem_way::GemWanted {
+        quest: String::new(),
+        wcid: gem.wcid,
+        name: gem.name.clone(),
+        had: false,
+    };
+    c.autoplay.growth.want_gem("copperknightmedallion", wanted);
     let step = again(&mut c, now);
     let PursuitStep::Hunt {
         landblock,
@@ -2137,7 +2158,7 @@ fn a_gem_bought_and_used_between_boards_is_no_errand_once_on_its_ground() {
     c.refresh_quests(now);
     let hunt = c.pursuit[0].step.clone();
     let cfg = c.autoplay.config.growth.clone();
-    assert!(!c.grow_hunt(now, &cfg));
+    invitation_wanted(&mut c);
     assert!(matches!(again(&mut c, now), PursuitStep::Buy { .. }));
     // Through the invitation's portal and the catacombs', with no board between.
     crate::testkit::stand(&mut c, 0x02B7_02F1, glam::Vec3::new(70.0, -60.0, 0.005));
@@ -2204,8 +2225,7 @@ fn a_gem_wanted_before_a_restart_is_still_bought_after_it() {
     let mut c = mage_pursuing("learn:2023", "gem-across-restarts");
     let now = std::time::Instant::now();
     c.refresh_quests(now);
-    let cfg = c.autoplay.config.growth.clone();
-    assert!(!c.grow_hunt(now, &cfg));
+    invitation_wanted(&mut c);
     assert!(matches!(again(&mut c, now), PursuitStep::Buy { .. }));
     let buys = |c: &Client| {
         let p = c.loot_profile().unwrap();
@@ -2233,7 +2253,7 @@ fn a_gem_just_used_is_no_errand_on_the_way_to_its_ground() {
     let now = std::time::Instant::now();
     c.refresh_quests(now);
     let cfg = c.autoplay.config.growth.clone();
-    assert!(!c.grow_hunt(now, &cfg));
+    invitation_wanted(&mut c);
     assert!(matches!(again(&mut c, now), PursuitStep::Buy { .. }));
     let invitation = |c: &Client| {
         c.grow_needs(&cfg)
@@ -2272,8 +2292,7 @@ fn a_wanted_gem_bought_is_taken_up_at_once() {
     let mut c = mage_pursuing("learn:2023", "gem-at-once");
     let now = std::time::Instant::now();
     c.refresh_quests(now);
-    let cfg = c.autoplay.config.growth.clone();
-    assert!(!c.grow_hunt(now, &cfg));
+    invitation_wanted(&mut c);
     assert!(matches!(again(&mut c, now), PursuitStep::Buy { .. }));
     let gem = c.autoplay.growth.pursuit_gems[0].wcid;
     in_the_pack(&mut c, 0x8000_0701, gem, "Invitation Ithaenc Cathedral", 1);
@@ -2287,9 +2306,9 @@ fn a_wanted_gem_bought_is_taken_up_at_once() {
 
 #[test]
 #[ignore = "needs AC_DATA_DIR"]
-fn a_chest_on_an_island_is_reached_by_its_gem_not_dropped() {
-    // The Ancient Key in hand, far from Ithaenc: no journey reached the Mistress' Chest without
-    // the invitation, and the chest was dropped as a source where a hunt's ground buys the gem.
+fn a_chest_on_an_island_is_walked_to_over_its_shallows_not_dropped() {
+    // The Ancient Key in hand, far from Ithaenc: the Mistress' Chest is waded to from the
+    // Freehold portal (ACE walls off only a block all water), never dropped as a source.
     let mut c = mage_pursuing("learn:2023", "chest-by-gem");
     in_the_pack(&mut c, 0x8000_0702, 8511, "Ancient Key", 1);
     let now = std::time::Instant::now();
@@ -2300,23 +2319,15 @@ fn a_chest_on_an_island_is_reached_by_its_gem_not_dropped() {
         c.pursuit[0].step
     );
     let cfg = c.autoplay.config.growth.clone();
-    c.grow_hunt(now, &cfg);
-    let gems: Vec<&str> = c
-        .autoplay
-        .growth
-        .pursuit_gems
-        .iter()
-        .map(|g| g.name.as_str())
-        .collect();
-    assert_eq!(
-        gems,
-        ["Invitation Ithaenc Cathedral"],
+    assert!(c.grow_hunt(now, &cfg), "{}", c.autoplay.status);
+    assert!(
+        c.autoplay.status.contains("on the way to Mistress' Chest"),
         "{}",
         c.autoplay.status
     );
     assert!(
-        matches!(again(&mut c, now), PursuitStep::Buy { .. }),
-        "the chest dropped, not the gem bought"
+        matches!(again(&mut c, now), PursuitStep::OpenChest { .. }),
+        "the chest dropped"
     );
 }
 
@@ -2495,9 +2506,9 @@ fn a_gem_the_pursuit_buys_sets_the_run_off_that_frame_and_grow_sets_off_nothing(
     let now = Instant::now();
     c.refresh_quests(now);
     let cfg = c.autoplay.config.growth.clone();
-    // The run's look before the gem was wanted, then grow finding no journey but the gem's.
+    // The run's look before the gem was wanted, then the walk over the shallows refused.
     c.needs_now(now, &cfg);
-    assert!(!c.grow_hunt(now, &cfg));
+    invitation_wanted(&mut c);
     assert_eq!(c.autoplay.growth.pursuit_gems.len(), 1);
     c.tick_rules(now + Duration::from_millis(100));
     // Set off for the invitation (a giver on the way may be called on first).
@@ -2528,8 +2539,7 @@ fn a_gem_used_takes_its_buy_line_out_of_the_section_that_frame() {
     let mut c = mage_playing("learn:2023", "gem-used-section", 0);
     let now = Instant::now();
     c.refresh_quests(now);
-    let cfg = c.autoplay.config.growth.clone();
-    assert!(!c.grow_hunt(now, &cfg));
+    invitation_wanted(&mut c);
     assert!(matches!(again(&mut c, now), PursuitStep::Buy { .. }));
     let gem = c.autoplay.growth.pursuit_gems[0].wcid;
     in_the_pack(&mut c, 0x8000_0702, gem, "Invitation Ithaenc Cathedral", 1);
@@ -2586,8 +2596,7 @@ fn a_quest_buy_held_back_for_want_of_coin_leaves_grow_to_pick_a_ground() {
     let mut c = mage_playing("learn:2023", "buy-without-coin", 5);
     let now = Instant::now();
     c.refresh_quests(now);
-    let cfg = c.autoplay.config.growth.clone();
-    assert!(!c.grow_hunt(now, &cfg));
+    invitation_wanted(&mut c);
     assert!(matches!(again(&mut c, now), PursuitStep::Buy { .. }));
     c.tick_rules(now + Duration::from_millis(100));
     assert!(

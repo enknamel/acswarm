@@ -11,7 +11,7 @@ use glam::{Vec2, Vec3};
 use crate::collision::{Capsule, CollisionWorld};
 use crate::nav::{Ground, NavGraph, INDOOR_SPACING, OUTDOOR_SPACING};
 use crate::terrain::TerrainMesh;
-use crate::worldroute::{water_kind, Water};
+use crate::worldroute::{is_water_block, water_types};
 use crate::{lbid, Assets, Result, BLOCK_SIZE};
 
 /// Most blocks on a side of an area. Nine blocks is about 600 m across,
@@ -69,13 +69,9 @@ pub struct Area {
     pub nav: NavGraph,
     /// A dungeon area: no terrain under it, fine lattice.
     pub dungeon: bool,
-    /// Which of the region's terrain types are open sea, by index. A
-    /// character cannot walk into the ocean -- the server refuses the
-    /// move and it stops dead against nothing, which is what an
-    /// invisible wall in the water is -- so no route may cross one.
-    /// Empty when the region could not be read, which costs us only
-    /// routes planned into the sea.
-    sea_types: Vec<bool>,
+    /// Which of the region's terrain types are water, by index: a block water at every vertex
+    /// is the invisible wall in the sea ([`is_water_block`]). Empty when the region is unread.
+    water_types: Vec<bool>,
 }
 
 impl Area {
@@ -148,12 +144,7 @@ impl Area {
             OUTDOOR_SPACING
         };
         let nav = NavGraph::new(lo, hi, spacing, cap);
-        let sea_types = match assets.region() {
-            Ok(r) => (0..32u16)
-                .map(|t| water_kind(&r, t) == Water::Sea)
-                .collect(),
-            Err(_) => Vec::new(),
-        };
+        let water_types = assets.region().map(|r| water_types(&r)).unwrap_or_default();
         Ok(Area {
             blocks,
             collision,
@@ -161,15 +152,13 @@ impl Area {
             doorways,
             nav,
             dungeon,
-            sea_types,
+            water_types,
         })
     }
 
-    /// Open sea at a world `(x, y)`: every corner of the terrain cell it
-    /// falls in is a sea type. A cell with a corner ashore is the beach,
-    /// which can be waded, so only water all the way round counts.
+    /// Open sea at a world `(x, y)`: its landblock is water at every vertex ([`is_water_block`]).
     pub fn is_sea(&self, x: f32, y: f32) -> bool {
-        !self.dungeon && seas(&self.terrain, &self.sea_types)(x, y)
+        !self.dungeon && seas(&self.terrain, &self.water_types)(x, y)
     }
 
     /// Run something against the area's ground: its merged collision,
@@ -183,10 +172,10 @@ impl Area {
             doorways,
             nav,
             dungeon,
-            sea_types,
+            water_types,
             ..
         } = self;
-        let (height, sea) = (heights(terrain), seas(terrain, sea_types));
+        let (height, sea) = (heights(terrain), seas(terrain, water_types));
         let ground = Ground {
             collision,
             terrain: (!*dungeon).then_some(&height),
@@ -198,7 +187,10 @@ impl Area {
 
     /// [`with_ground`](Self::with_ground) with the graph only read, for an area shared.
     pub fn read_ground<R>(&self, f: impl FnOnce(&Ground, &NavGraph) -> R) -> R {
-        let (height, sea) = (heights(&self.terrain), seas(&self.terrain, &self.sea_types));
+        let (height, sea) = (
+            heights(&self.terrain),
+            seas(&self.terrain, &self.water_types),
+        );
         let ground = Ground {
             collision: &self.collision,
             terrain: (!self.dungeon).then_some(&height),
@@ -240,38 +232,19 @@ fn heights(terrain: &HashMap<u32, TerrainMesh>) -> impl Fn(f32, f32) -> Option<f
     }
 }
 
-/// Whether a world `(x, y)` is open sea, by [`sea_at`]; never when the sea types are unknown.
+/// Whether a world `(x, y)` is open sea: its block's terrain is water at every vertex
+/// ([`is_water_block`]); never when the water types are unknown.
 fn seas<'a>(
     terrain: &'a HashMap<u32, TerrainMesh>,
-    sea_types: &'a [bool],
+    water_types: &'a [bool],
 ) -> impl Fn(f32, f32) -> bool + 'a {
     move |x, y| {
         let id = block_at(Vec3::new(x, y, 0.0));
-        !sea_types.is_empty()
-            && terrain
-                .get(&id)
-                .is_some_and(|t| sea_at(t, sea_types, x, y, id))
-    }
-}
-
-/// Whether every corner of the terrain cell holding world `(x, y)` is a
-/// sea type. The mesh keeps a terrain type per lattice vertex, nine to a
-/// side, so a cell's four corners are the four vertices around it.
-fn sea_at(mesh: &crate::terrain::TerrainMesh, sea_types: &[bool], x: f32, y: f32, id: u32) -> bool {
-    let o = lbid::world_origin(id);
-    let n = crate::VERTS_PER_SIDE;
-    let last = (crate::CELLS_PER_BLOCK - 1) as f32;
-    let cx = ((x - o.x) / crate::CELL_SIZE).floor().clamp(0.0, last) as usize;
-    let cy = ((y - o.y) / crate::CELL_SIZE).floor().clamp(0.0, last) as usize;
-    [(cx, cy), (cx + 1, cy), (cx, cy + 1), (cx + 1, cy + 1)]
-        .into_iter()
-        .all(|(vx, vy)| {
-            mesh.vertices
-                .get(vx * n + vy)
-                .and_then(|v| sea_types.get(v.terrain_type as usize))
-                .copied()
-                .unwrap_or(false)
+        terrain.get(&id).is_some_and(|t| {
+            let types = t.vertices.iter().map(|v| v.terrain_type);
+            is_water_block(types, water_types)
         })
+    }
 }
 
 #[cfg(test)]

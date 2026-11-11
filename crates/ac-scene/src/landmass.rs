@@ -1,4 +1,4 @@
-//! Dereth's landmasses: the [`WorldGrid`] lattice's walkable vertices (land and fresh water, as
+//! Dereth's landmasses: the [`WorldGrid`] lattice's walkable vertices (all but blocks all water, as
 //! [`worldroute`](crate::worldroute) walks them) labelled by the piece of land they join, so a
 //! trip planner never takes a walk from the mainland to an island the sea cuts off.
 
@@ -6,7 +6,7 @@ use ac_formats::region::Region;
 use glam::Vec2;
 
 use crate::worldgrid::{WorldGrid, SIDE};
-use crate::worldroute::{water_kind, Water};
+use crate::worldroute::{is_sunk_block, water_kind, Water};
 
 /// How far (vertices) a spot in the sea looks for the land it stands off: a portal on a jetty.
 const SNAP_RADIUS: i32 = 3;
@@ -22,12 +22,14 @@ impl Landmasses {
     /// corner are apart, the side `worldroute`'s diagonal rule takes too.
     pub fn of_world(grid: &WorldGrid, region: &Region) -> Landmasses {
         let water: Vec<Water> = (0..32u16).map(|t| water_kind(region, t)).collect();
+        let kind = |t: u16| water.get(t as usize).copied().unwrap_or(Water::Sea);
+        let mut sunk = vec![false; 255 * 255];
+        for (i, s) in sunk.iter_mut().enumerate() {
+            *s = is_sunk_block(grid, &kind, i / 255, i % 255);
+        }
         let walkable = |gx: usize, gy: usize| {
-            grid.has_block((gx / 8).min(254), (gy / 8).min(254))
-                && !matches!(
-                    water.get(grid.terrain_type(gx, gy) as usize),
-                    Some(Water::Sea) | None
-                )
+            let b = ((gx / 8).min(254), (gy / 8).min(254));
+            grid.has_block(b.0, b.1) && !sunk[b.0 * 255 + b.1]
         };
         let mut labels = vec![0u32; SIDE * SIDE];
         let mut next = 0;

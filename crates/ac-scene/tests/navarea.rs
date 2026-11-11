@@ -183,9 +183,9 @@ fn a_route_goes_round_the_ocean_rather_than_across_it() {
     let dir = ac_dat::test_data_dir();
     let assets = Assets::open(dir).unwrap();
     let cap = capsule();
-    // Sanamar is a port: about six per cent of its neighbourhood is
-    // open sea, so there are bays to walk round.
-    let block = lbid::from_xy(0x33, 0xD9);
+    // South-east of Sanamar four of 0x34D7's neighbours are water at every vertex: the sea the
+    // server walls off (ACE LandCell.cs:55), with a coast to walk round it.
+    let block = lbid::from_xy(0x34, 0xD7);
     let centre = lbid::world_origin(block) + Vec3::new(96.0, 96.0, 0.0);
     let mut area = Area::build(&assets, &blocks_for(centre, centre), &cap, block).unwrap();
     let lo = lbid::world_origin(*area.blocks.first().unwrap());
@@ -200,7 +200,7 @@ fn a_route_goes_round_the_ocean_rather_than_across_it() {
             area.is_sea(x, y)
         })
         .count();
-    assert!(sea > 500, "Sanamar should have open water: {sea} points");
+    assert!(sea > 500, "the sea off Sanamar: {sea} points");
 
     // Points on the shore, and pairs of them with water between.
     let shore: Vec<(f32, f32)> = (0..side)
@@ -328,4 +328,29 @@ fn a_hillside_steeper_than_a_stair_is_joined_on_the_outdoor_lattice() {
         let end = *path.last().unwrap();
         assert!(end.distance(goal) <= 1.5 + 0.6, "ends at {end} for {goal}");
     }
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn hea_arantah_s_town_is_walked_to_across_the_shallows() {
+    // The water round his town lies in blocks with land in them, which the server lets a walk
+    // wade: "No way there from here" sent Blargerton off with the Clay Figurine still on him.
+    let dir = ac_dat::test_data_dir();
+    let assets = Assets::open(dir).unwrap();
+    let cap = capsule();
+    let from = lbid::world_origin(lbid::from_xy(0x0F, 0xB9)) + Vec3::new(39.6, 7.5, 0.0);
+    let to = lbid::world_origin(lbid::from_xy(0x0E, 0xBA)) + Vec3::new(105.17, 67.75, 2.0);
+    let block = lbid::from_xy(0x0E, 0xB9);
+    let mut area = Area::build(&assets, &blocks_for(from, to), &cap, block).unwrap();
+    let (Some(za), Some(zb)) = (area.terrain_at(from.x, from.y), area.terrain_at(to.x, to.y))
+    else {
+        panic!("no terrain under the ends");
+    };
+    let (pa, pb) = (Vec3::new(from.x, from.y, za), Vec3::new(to.x, to.y, zb));
+    assert!(
+        !area.is_sea(2814.3, 35544.9),
+        "the shallows he walked are walled off"
+    );
+    let path = area.with_ground(|ground, nav| route(ground, nav, pa, pb, 2.0));
+    assert!(path.is_some(), "no way across the shallows");
 }

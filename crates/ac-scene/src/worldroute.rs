@@ -1,11 +1,13 @@
 //! An overland walk's corridor over Dereth: A* over the [`WorldGrid`] lattice (24 m, 8-connected),
 //! terrain only (buildings, fences and portals are the region planner's). An edge costs its length,
-//! more on a slope, less on a road; shut past [`MAX_GRADE`], at sea, in a block the archive lacks.
+//! more on a slope, less on a road; shut past [`MAX_GRADE`], in a block all water, in one the
+//! archive lacks.
 //! Rivers cut the continent, and bridges and fords are statics no grid sees: fresh water is crossed
 //! at its shortest span, never followed. A window round the ends keeps any route under a second.
 
+use std::cell::RefCell;
 use std::cmp::Ordering;
-use std::collections::BinaryHeap;
+use std::collections::{BinaryHeap, HashMap};
 
 use ac_formats::region::Region;
 use glam::Vec2;
@@ -63,6 +65,28 @@ pub fn water_kind(region: &Region, terrain_type: u16) -> Water {
     }
 }
 
+/// Which of the region's terrain types are water, by index: its `Water...` types, 0x10-0x14
+/// (ACE LandDefs.cs:67-71, LandblockStruct.cs:62-67).
+pub fn water_types(region: &Region) -> Vec<bool> {
+    (0..32u16).map(|t| is_water(region, t)).collect()
+}
+
+/// Whether a landblock whose vertices have `terrain_types` is water at every one: the only terrain
+/// the server stops a walk on (ACE LandCell.cs:55, LandblockStruct.cs:147-179). Water in a block
+/// with any land in it is waded, the sea round Hea Arantah's town included.
+pub fn is_water_block(terrain_types: impl IntoIterator<Item = u16>, water: &[bool]) -> bool {
+    !water.is_empty()
+        && terrain_types
+            .into_iter()
+            .all(|t| water.get(t as usize).copied().unwrap_or(false))
+}
+
+/// Whether lattice block `(bx, by)` is water at all its 9x9 vertices ([`is_water_block`]).
+pub fn is_sunk_block(grid: &WorldGrid, water: &dyn Fn(u16) -> Water, bx: usize, by: usize) -> bool {
+    let mut types = (0..9).flat_map(|x| (0..9).map(move |y| (bx * 8 + x, by * 8 + y)));
+    types.all(|(gx, gy)| (water)(grid.terrain_type(gx, gy)) != Water::Land)
+}
+
 /// The route from `from` to `to` (world xy) as waypoints from `from` to
 /// `to` inclusive, runs of collinear vertices collapsed; `None` when no
 /// walkable path exists inside the search window.
@@ -115,6 +139,7 @@ pub fn is_near_land(grid: &WorldGrid, region: &Region, at: Vec2) -> bool {
         grid,
         water: &water,
         avoid: &[],
+        sunk: RefCell::default(),
     };
     land.nearest_land(at).is_some()
 }
@@ -131,6 +156,7 @@ pub fn find_with_avoid(
         grid,
         water: &water,
         avoid,
+        sunk: RefCell::default(),
     };
     let start = land.nearest_land(from)?;
     let goal = land.nearest_land(to)?;
@@ -150,6 +176,8 @@ struct Land<'a> {
     /// Spots to keep away from where the route can (portal mouths it is
     /// not meant to walk into).
     avoid: &'a [Vec2],
+    /// Each block asked about so far, and whether it is all water ([`is_sunk_block`]).
+    sunk: RefCell<HashMap<(usize, usize), bool>>,
 }
 
 impl Land<'_> {
@@ -166,9 +194,19 @@ impl Land<'_> {
         Some((self.water)(self.grid.terrain_type(gx, gy)))
     }
 
-    /// A vertex a character can walk over: on the map and not sea.
+    /// A vertex a character can walk over: on the map and not in a block all water.
     fn passable(&self, gx: usize, gy: usize) -> bool {
-        matches!(self.at(gx, gy), Some(Water::Land | Water::Fresh))
+        match self.at(gx, gy) {
+            None => false,
+            Some(Water::Land) => true,
+            Some(_) => {
+                let b = ((gx / 8).min(254), (gy / 8).min(254));
+                let mut sunk = self.sunk.borrow_mut();
+                !*sunk
+                    .entry(b)
+                    .or_insert_with(|| is_sunk_block(self.grid, self.water, b.0, b.1))
+            }
+        }
     }
 
     /// A vertex a route may start or end on: dry land.
@@ -541,40 +579,38 @@ mod tests {
     }
 
     #[test]
-    fn water_is_walked_around_and_the_sea_is_unreachable() {
+    fn a_block_all_water_is_walked_round_and_water_beside_land_is_waded() {
+        // ACE stops a walk only on a landblock water at every vertex (LandCell.cs:55): block
+        // (1, 0) all sea is a wall, block (1, 1) all sea but one vertex is waded.
         let mut g = flat(4);
-        // An inlet of sea along gx = 10 from gy 0..=20, with a spit at gy 12.
-        for gy in 0..=20 {
-            if gy != 12 {
-                set_type(&mut g, 10, gy, 1);
+        let flood = |g: &mut WorldGrid, bx: usize, by: usize| {
+            for x in 0..=8 {
+                for y in 0..=8 {
+                    set_type(g, bx * 8 + x, by * 8 + y, 1);
+                }
             }
-        }
+        };
+        flood(&mut g, 1, 0);
+        flood(&mut g, 1, 1);
+        set_type(&mut g, 12, 12, 0);
         let from = WorldGrid::vertex_world(2, 2);
-        let to = WorldGrid::vertex_world(18, 2);
+        let to = WorldGrid::vertex_world(20, 2);
         let path = find_with(&g, kind, from, to).unwrap();
-        assert!(path.iter().all(|p| {
-            let (x, y) = WorldGrid::nearest_vertex(*p);
-            g.terrain_type(x, y) != 1
-        }));
-        // Through the ford: the route goes up to gy 12 and back.
-        assert!(passes(&path, (10, 12)), "{path:?}");
-        assert!(length(&path) > 2.0 * 10.0 * SPACING);
+        let in_the_wall = |v: (usize, usize)| v.0 / 8 == 1 && v.1 / 8 == 0;
+        assert!(
+            !path
+                .iter()
+                .any(|p| in_the_wall(WorldGrid::nearest_vertex(*p))),
+            "{path:?}"
+        );
+        // Sea beside land is waded to: a goal in it is reached.
+        assert!(find_with(&g, kind, from, WorldGrid::vertex_world(12, 11)).is_some());
         // Nothing but sea past the present blocks.
         let t0 = std::time::Instant::now();
         assert!(find_with(&g, kind, from, WorldGrid::vertex_world(200, 200)).is_none());
         assert!(t0.elapsed().as_millis() < 500);
-        // A goal standing in the sea is moved to the shore.
-        let wet = WorldGrid::vertex_world(10, 4);
-        let path = find_with(&g, kind, from, wet).unwrap();
-        assert_eq!(*path.last().unwrap(), wet);
-        assert!(path.len() >= 2);
-        // Far out in the sea there is no shore to move to.
-        for gx in 20..32 {
-            for gy in 20..32 {
-                set_type(&mut g, gx, gy, 1);
-            }
-        }
-        assert!(find_with(&g, kind, from, WorldGrid::vertex_world(26, 26)).is_none());
+        // Out in the walled block there is no shore to move to.
+        assert!(find_with(&g, kind, from, WorldGrid::vertex_world(12, 4)).is_none());
     }
 
     #[test]

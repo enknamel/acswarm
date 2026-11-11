@@ -124,9 +124,8 @@ pub struct Player {
     pub step_cap: Option<f32>,
     /// The fastest the steering lets the body go (m/s): a drop is stepped off at its graph's pace.
     pub pace_cap: Option<f32>,
-    /// Terrain types that are open sea, read from the region on first
-    /// use (see `sea_types`).
-    sea_types: Option<Vec<bool>>,
+    /// Terrain types that are water, read from the region on first use (see `water_types`).
+    water_types: Option<Vec<bool>>,
     /// Vertical speed while airborne (m/s, up positive).
     vz: f32,
     airborne: bool,
@@ -421,7 +420,7 @@ impl Player {
             wedged_for: 0,
             step_cap: None,
             pace_cap: None,
-            sea_types: None,
+            water_types: None,
             vz: 0.0,
             airborne: false,
             air_velocity: Vec3::ZERO,
@@ -950,22 +949,16 @@ impl Player {
             .map(|(z, _)| z)
     }
 
-    /// Which of the region's terrain types are open sea, read once. A
-    /// character cannot walk into the ocean: the server refuses the
-    /// move and it stops dead against nothing, so no route may cross
-    /// one.
-    fn sea_types(&mut self, assets: &Assets) -> &[bool] {
-        if self.sea_types.is_none() {
-            self.sea_types = Some(match assets.region() {
-                Ok(r) => (0..32u16)
-                    .map(|t| {
-                        ac_scene::worldroute::water_kind(&r, t) == ac_scene::worldroute::Water::Sea
-                    })
-                    .collect(),
-                Err(_) => Vec::new(),
-            });
+    /// Which of the region's terrain types are water, read once: a block water at every vertex
+    /// is the sea no route may cross (`ac_scene::worldroute::is_water_block`).
+    fn water_types(&mut self, assets: &Assets) -> &[bool] {
+        if self.water_types.is_none() {
+            let types = assets
+                .region()
+                .map(|r| ac_scene::worldroute::water_types(&r));
+            self.water_types = Some(types.unwrap_or_default());
         }
-        self.sea_types.as_deref().unwrap_or(&[])
+        self.water_types.as_deref().unwrap_or(&[])
     }
 
     /// Pressed against geometry for `WEDGED_STEPS` steps while still asking to move (telemetry's
@@ -1099,14 +1092,17 @@ impl Player {
         self.collision(assets, block)?;
         let cap = self.capsule;
         let height_table = self.height_table.clone();
-        let sea_types = self.sea_types(assets).to_vec();
+        let water_types = self.water_types(assets).to_vec();
         let b = self.blocks.get(&block)?;
         let collision = &b.collision.as_ref()?.world;
         let sampler = TerrainSampler::new(&b.lb, &height_table);
         let origin = ac_world::landblock_origin(block);
         let terrain =
             |x: f32, y: f32| sampler.height_in_square(Vec3::new(x - origin.x, y - origin.y, 0.0));
-        let sea = |x: f32, y: f32| sea_at(&b.lb, &sea_types, x - origin.x, y - origin.y);
+        let types = b.lb.terrain.iter();
+        let types = types.map(|&t| ac_formats::landblock::terrain::terrain_type(t));
+        let sunk = ac_scene::worldroute::is_water_block(types, &water_types);
+        let sea = |_: f32, _: f32| sunk;
         let ground = Ground {
             collision,
             terrain: (!b.dungeon).then_some(&terrain),
@@ -1756,26 +1752,6 @@ impl Underfoot for BodyFloor<'_> {
                 .is_none_or(|cz| cz - at.z >= cap.height)
         })
     }
-}
-
-fn sea_at(lb: &CellLandblock, sea_types: &[bool], x: f32, y: f32) -> bool {
-    if sea_types.is_empty() {
-        return false;
-    }
-    let last = (ac_scene::CELLS_PER_BLOCK - 1) as f32;
-    let cx = (x / ac_scene::CELL_SIZE).floor().clamp(0.0, last) as usize;
-    let cy = (y / ac_scene::CELL_SIZE).floor().clamp(0.0, last) as usize;
-    let n = ac_scene::VERTS_PER_SIDE;
-    [(cx, cy), (cx + 1, cy), (cx, cy + 1), (cx + 1, cy + 1)]
-        .into_iter()
-        .all(|(vx, vy)| {
-            lb.terrain
-                .get(vx * n + vy)
-                .map(|&t| ac_formats::landblock::terrain::terrain_type(t))
-                .and_then(|t| sea_types.get(t as usize))
-                .copied()
-                .unwrap_or(false)
-        })
 }
 
 #[cfg(test)]
