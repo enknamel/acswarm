@@ -3789,3 +3789,109 @@ fn a_chase_from_the_road_is_asked_again_not_the_ground_s_plan_every_other_tick()
         "the ground's walk let go"
     );
 }
+
+/// Each change of status in `trace`, with its second, for a failing trace test to show.
+fn said(trace: &[crate::walk_trial::Frame]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut last = "";
+    for f in trace {
+        if f.status != last {
+            out.push(format!("{:.1} {:?} {}", f.secs, f.step, f.status));
+            last = &f.status;
+        }
+    }
+    out
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn played_by_the_tusker_barracks_portal_the_chase_walks_on_till_in_reach() {
+    // Live, the chase and the ground's plan replaced each other every 4.5 s for 29 minutes. Once
+    // set off, the chase is walked, not re-planned against the ground's walk, till in reach.
+    let now = Instant::now();
+    let guid = 0x5000_0907;
+    let mut c = at_the_tusker_barracks_portal(now, guid);
+    c.autoplay.config.enabled = true;
+    c.autoplay.config.growth.town_runs = false;
+    let guard = Vec3::new(46303.4, 24330.3, 2.8);
+    let radius = c.autoplay.config.fight.radius;
+    let trace = crate::walk_trial::play(&mut c, now, 6.0);
+    let shown = said(&trace).join("\n");
+    let in_reach =
+        |f: &crate::walk_trial::Frame| f.at.is_some_and(|at| at.distance(guard) <= radius * 0.8);
+    let walked: Vec<_> = trace.iter().take_while(|f| !in_reach(f)).collect();
+    assert!(walked.len() >= 40, "in reach at once:\n{shown}");
+    for f in &walked {
+        let to_guard = f
+            .goal
+            .is_some_and(|g| g.distance(guard.truncate()) <= radius);
+        assert!(to_guard, "at {:.2} s to {:?}:\n{shown}", f.secs, f.goal);
+    }
+    let start = trace[0].at.unwrap().distance(guard);
+    let end = walked.last().and_then(|f| f.at).unwrap().distance(guard);
+    assert!(end < start - 5.0, "no nearer: {start:.1} -> {end:.1} m");
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn played_over_an_aun_ralirea_ground_s_edge_the_ground_is_swept_not_walked_to() {
+    // Stood in 0x1AB6 within reach of the 0x19B6 ground: planned and "arrived" every tick.
+    let now = Instant::now();
+    let mut c = mage_pursuing("championkillquest1", "aun-ralirea");
+    c.world.stats.level = 120;
+    c.autoplay.growth.proven_tier = 8;
+    c.autoplay.config.enabled = true;
+    c.autoplay.config.growth.town_runs = false;
+    crate::testkit::stand(&mut c, 0x1AB6_0004, Vec3::new(4.6, 87.8, 76.0));
+    let ground = 0x19B6;
+    let trace = crate::walk_trial::play(&mut c, now, 4.0);
+    let shown = said(&trace).join("\n");
+    let place = c.pursued_place(ground).expect("its ground");
+    assert!(
+        c.autoplay.growth.swept.since(&ground).is_some(),
+        "not swept:\n{shown}"
+    );
+    for f in &trace {
+        let to_it = f
+            .goal
+            .is_some_and(|g| g.distance(place.at.truncate()) <= GROUND_REACH);
+        assert!(
+            f.bound != Some(ground) && !to_it,
+            "walked to at {:.2} s:\n{shown}",
+            f.secs
+        );
+    }
+}
+
+#[test]
+#[ignore = "needs AC_DATA_DIR"]
+fn played_at_the_silver_tuskers_rooms_the_wait_is_stood_till_it_ends() {
+    // The Tusker Pits' four Silver Tusker rooms, 7-18 m apart: the 90 s wait lasted a tick and a
+    // round of the rooms was walked every 1.7 s. Gone round, the wait is stood: no walk, no step.
+    let now = Instant::now();
+    let mut c = mage_pursuing("give:22431", "silver-tusk");
+    c.world.stats.level = 66;
+    c.autoplay.config.enabled = true;
+    c.autoplay.config.growth.town_runs = false;
+    crate::testkit::stand(&mut c, 0x5A4A_01A0, Vec3::new(107.3, -86.5, -42.0));
+    again(&mut c, now);
+    c.autoplay.growth.spawns_walked = vec![0x5A4A_019A, 0x5A4A_019C, 0x5A4A_019E, 0x5A4A_01A0];
+    let trace = crate::walk_trial::play(&mut c, now, 6.0);
+    let shown = said(&trace).join("\n");
+    let (_, until) = c.autoplay.growth.staying.expect("a wait held");
+    assert!(until > now + Duration::from_secs(6), "{shown}");
+    let start = trace[0].at.unwrap();
+    for f in &trace[1..] {
+        assert!(f.goal.is_none(), "walked at {:.2} s:\n{shown}", f.secs);
+        assert!(
+            f.status.contains("waiting for the Silver Tusker"),
+            "{shown}"
+        );
+        let moved = f.at.unwrap().distance(start);
+        assert!(
+            moved < 1.0,
+            "moved {moved:.1} m by {:.2} s:\n{shown}",
+            f.secs
+        );
+    }
+}

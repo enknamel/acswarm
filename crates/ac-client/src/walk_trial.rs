@@ -203,6 +203,50 @@ fn walk(c: &mut Client, t: &Trial, waits: &mut u32) -> Outcome {
     }
 }
 
+/// One frame of [`play`]: the row that acted, what it said, and where the body and its walks were.
+#[derive(Clone, Debug)]
+pub struct Frame {
+    pub secs: f32,
+    pub step: Option<&'static str>,
+    pub status: String,
+    /// The body's world position.
+    pub at: Option<Vec3>,
+    /// The journey's goal (world xy), while one is under way.
+    pub goal: Option<glam::Vec2>,
+    /// The ground walked to (`growth::State.bound`), by landblock.
+    pub bound: Option<u32>,
+    /// The region planner's plans so far (`Pathfinder.plans`).
+    pub plans: u32,
+}
+
+/// The whole offline `c` ticked at [`HZ`] for `secs` simulated seconds from `t0`, a frame as the
+/// headless loop runs one: the rules, the world, then the body, portals carried as [`walk`] does.
+pub fn play(c: &mut Client, t0: Instant, secs: f32) -> Vec<Frame> {
+    let dt = 1.0 / HZ;
+    let frames = (secs * HZ) as u32;
+    let mut trace = Vec::with_capacity(frames as usize);
+    for frame in 0..frames {
+        let secs = frame as f32 * dt;
+        let now = t0 + Duration::from_secs_f32(secs);
+        c.frame_at = now;
+        c.tick_rules(now);
+        c.world.tick(dt);
+        c.tick_player(crate::player::Input::default(), dt, now);
+        carry_through_portal(c);
+        c.pathfinder.settle(PLANNER_WAIT);
+        trace.push(Frame {
+            secs,
+            step: c.autoplay.step,
+            status: c.autoplay.status.clone(),
+            at: c.my_position(),
+            goal: c.travel_goal_xy(),
+            bound: c.autoplay.growth.bound_landblock(),
+            plans: c.pathfinder.plans,
+        });
+    }
+    trace
+}
+
 /// Set the body down at the exit of the portal the journey walks into once it touches the mouth
 /// ([`PORTAL_TOUCH`]), as the server would; offline nothing else carries it.
 fn carry_through_portal(c: &mut Client) {

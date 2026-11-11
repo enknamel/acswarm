@@ -195,6 +195,6 @@ target covers its submodules, and a rule's own status line (`note`, `say`) comes
 | `sight.rs` | what ACE counts as in view (`View`); what is out of it 35 s set aside (`tick_sight`), since the server sends no delete once it has let go, and asked about once back in view |
 | `logistics.rs` | the party's mode (hunting or restocking) and money sharing, the same on every session |
 | `buffs.rs`, `hunt.rs` | which buffs a character should wear, from its skills and spells; hunting areas drawn on the map |
-| `testkit.rs`, `walk_trial.rs` | test-only: `Client::offline` sessions over `no_data()` or `game_data()`, `standing_at()`, `creature()`, `corpse()`, `mate()` builders; the route harness (`walk_trial::run`, `tests/route_harness.rs`) |
+| `testkit.rs`, `walk_trial.rs` | test-only: `Client::offline` sessions over `no_data()` or `game_data()`, `standing_at()`, `creature()`, `corpse()`, `mate()` builders; the route harness (`walk_trial::run`, `tests/route_harness.rs`); `walk_trial::play`, the whole client at 20 Hz, a `Frame` a tick |
 
 Unit tests sit in each file's `mod tests`; those reading the archives are ignored (`cargo test-data`).
