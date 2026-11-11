@@ -841,58 +841,6 @@ impl Ask<'_> {
         };
         (stuck(why), None)
     }
-
-    /// The step for a flag a way on asks: earned from an unlock NPC the level earns, else by a
-    /// kill that stamps it ([`OBTAIN_DEPTH`] deep, as a key), else why not.
-    fn flag_step(&self, flag: &str, depth: usize) -> (PursuitStep, Option<Hunting>) {
-        let by = self.chains.givers(flag);
-        let unlocks = || {
-            by.iter().filter_map(|b| match b {
-                FlagBy::Unlock(u) => Some(*u),
-                _ => None,
-            })
-        };
-        if let Some(u) = unlocks().find(|u| u.min_level <= self.facts.level) {
-            if (self.tried)(u) {
-                let why = format!("{} was set off to lately for the {flag} flag", u.npc);
-                return (stuck(why), None);
-            }
-            let step = PursuitStep::EarnFlag {
-                flag: u.flag.clone(),
-                from: u,
-            };
-            return (step, None);
-        }
-        if let Some(u) = unlocks().next() {
-            let why = format!("{} gives the {flag} flag from level {}", u.npc, u.min_level);
-            return (stuck(why), None);
-        }
-        let mut killed = None;
-        if by.iter().any(|b| matches!(b, FlagBy::Kill(_))) && depth < OBTAIN_DEPTH {
-            let want = Want::Flag(flag.to_ascii_lowercase());
-            let got = self.obtain(&[want], 1, &format!("the {flag} flag"), depth + 1);
-            if !matches!(got.0, PursuitStep::Stuck { .. }) {
-                return got;
-            }
-            killed = Some(got);
-        }
-        let quest = by.iter().find_map(|b| match b {
-            FlagBy::Quest(row) => Some(*row),
-            _ => None,
-        });
-        match (quest, killed) {
-            (Some(row), _) => {
-                let why = format!(
-                    "the {flag} flag comes first, from {} ({})",
-                    row.giver,
-                    row.title.trim()
-                );
-                (stuck(why), None)
-            }
-            (None, Some(got)) => got,
-            (None, None) => (stuck(format!("nobody known gives the {flag} flag")), None),
-        }
-    }
 }
 
 impl Client {
